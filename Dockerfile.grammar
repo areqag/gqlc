@@ -1,0 +1,11 @@
+FROM eclipse-temurin:17-jdk-jammy
+
+RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /antlr
+RUN wget https://www.antlr.org/download/antlr-4.13.1-complete.jar -O antlr.jar
+
+WORKDIR /work
+
+ENTRYPOINT ["java", "-jar", "/antlr/antlr.jar", "-Dlanguage=Go"]
+CMD ["-o", "internal/grammar", "internal/grammar/GQL.g4"]
