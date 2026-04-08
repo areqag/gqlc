@@ -1,1 +1,2 @@
 internal/grammar/gen/** linguist-generated
+internal/grammar/GQL.g4 linguist-vendor
