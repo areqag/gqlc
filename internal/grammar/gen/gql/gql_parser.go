@@ -3714,6 +3714,16 @@ func (s *GqlProgramContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *GqlProgramContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGqlProgram(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -3891,6 +3901,16 @@ func (s *ProgramActivityContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *ProgramActivityContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitProgramActivity(s)
+	}
+}
+
+func (s *ProgramActivityContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitProgramActivity(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -4093,6 +4113,16 @@ func (s *SessionActivityContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *SessionActivityContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSessionActivity(s)
+	}
+}
+
+func (s *SessionActivityContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSessionActivity(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -4340,6 +4370,16 @@ func (s *TransactionActivityContext) ExitRule(listener antlr.ParseTreeListener) 
 	}
 }
 
+func (s *TransactionActivityContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTransactionActivity(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -4545,6 +4585,16 @@ func (s *EndTransactionCommandContext) ExitRule(listener antlr.ParseTreeListener
 	}
 }
 
+func (s *EndTransactionCommandContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEndTransactionCommand(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -4739,6 +4789,16 @@ func (s *SessionSetCommandContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *SessionSetCommandContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSessionSetCommand(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -4904,6 +4964,16 @@ func (s *SessionSetSchemaClauseContext) ExitRule(listener antlr.ParseTreeListene
 	}
 }
 
+func (s *SessionSetSchemaClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSessionSetSchemaClause(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -5030,6 +5100,16 @@ func (s *SessionSetGraphClauseContext) EnterRule(listener antlr.ParseTreeListene
 func (s *SessionSetGraphClauseContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSessionSetGraphClause(s)
+	}
+}
+
+func (s *SessionSetGraphClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSessionSetGraphClause(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -5183,6 +5263,16 @@ func (s *SessionSetTimeZoneClauseContext) ExitRule(listener antlr.ParseTreeListe
 	}
 }
 
+func (s *SessionSetTimeZoneClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSessionSetTimeZoneClause(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -5307,6 +5397,16 @@ func (s *SetTimeZoneValueContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *SetTimeZoneValueContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSetTimeZoneValue(s)
+	}
+}
+
+func (s *SetTimeZoneValueContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSetTimeZoneValue(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -5452,6 +5552,16 @@ func (s *SessionSetParameterClauseContext) EnterRule(listener antlr.ParseTreeLis
 func (s *SessionSetParameterClauseContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSessionSetParameterClause(s)
+	}
+}
+
+func (s *SessionSetParameterClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSessionSetParameterClause(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -5620,6 +5730,16 @@ func (s *SessionSetGraphParameterClauseContext) EnterRule(listener antlr.ParseTr
 func (s *SessionSetGraphParameterClauseContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSessionSetGraphParameterClause(s)
+	}
+}
+
+func (s *SessionSetGraphParameterClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSessionSetGraphParameterClause(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -5794,6 +5914,16 @@ func (s *SessionSetBindingTableParameterClauseContext) ExitRule(listener antlr.P
 	}
 }
 
+func (s *SessionSetBindingTableParameterClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSessionSetBindingTableParameterClause(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -5960,6 +6090,16 @@ func (s *SessionSetValueParameterClauseContext) ExitRule(listener antlr.ParseTre
 	}
 }
 
+func (s *SessionSetValueParameterClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSessionSetValueParameterClause(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -6095,6 +6235,16 @@ func (s *SessionSetParameterNameContext) EnterRule(listener antlr.ParseTreeListe
 func (s *SessionSetParameterNameContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSessionSetParameterName(s)
+	}
+}
+
+func (s *SessionSetParameterNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSessionSetParameterName(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -6253,6 +6403,16 @@ func (s *SessionResetCommandContext) EnterRule(listener antlr.ParseTreeListener)
 func (s *SessionResetCommandContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSessionResetCommand(s)
+	}
+}
+
+func (s *SessionResetCommandContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSessionResetCommand(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -6438,6 +6598,16 @@ func (s *SessionResetArgumentsContext) EnterRule(listener antlr.ParseTreeListene
 func (s *SessionResetArgumentsContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSessionResetArguments(s)
+	}
+}
+
+func (s *SessionResetArgumentsContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSessionResetArguments(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -6677,6 +6847,16 @@ func (s *SessionCloseCommandContext) ExitRule(listener antlr.ParseTreeListener) 
 	}
 }
 
+func (s *SessionCloseCommandContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSessionCloseCommand(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -6785,6 +6965,16 @@ func (s *SessionParameterSpecificationContext) EnterRule(listener antlr.ParseTre
 func (s *SessionParameterSpecificationContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSessionParameterSpecification(s)
+	}
+}
+
+func (s *SessionParameterSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSessionParameterSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -6910,6 +7100,16 @@ func (s *StartTransactionCommandContext) EnterRule(listener antlr.ParseTreeListe
 func (s *StartTransactionCommandContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitStartTransactionCommand(s)
+	}
+}
+
+func (s *StartTransactionCommandContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitStartTransactionCommand(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -7089,6 +7289,16 @@ func (s *TransactionCharacteristicsContext) ExitRule(listener antlr.ParseTreeLis
 	}
 }
 
+func (s *TransactionCharacteristicsContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTransactionCharacteristics(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -7232,6 +7442,16 @@ func (s *TransactionModeContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *TransactionModeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTransactionMode(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -7338,6 +7558,16 @@ func (s *TransactionAccessModeContext) EnterRule(listener antlr.ParseTreeListene
 func (s *TransactionAccessModeContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitTransactionAccessMode(s)
+	}
+}
+
+func (s *TransactionAccessModeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTransactionAccessMode(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -7483,6 +7713,16 @@ func (s *RollbackCommandContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *RollbackCommandContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitRollbackCommand(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -7583,6 +7823,16 @@ func (s *CommitCommandContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *CommitCommandContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCommitCommand(s)
+	}
+}
+
+func (s *CommitCommandContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCommitCommand(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -7708,6 +7958,16 @@ func (s *NestedProcedureSpecificationContext) EnterRule(listener antlr.ParseTree
 func (s *NestedProcedureSpecificationContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNestedProcedureSpecification(s)
+	}
+}
+
+func (s *NestedProcedureSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNestedProcedureSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -7838,6 +8098,16 @@ func (s *ProcedureSpecificationContext) ExitRule(listener antlr.ParseTreeListene
 	}
 }
 
+func (s *ProcedureSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitProcedureSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -7956,6 +8226,16 @@ func (s *NestedDataModifyingProcedureSpecificationContext) EnterRule(listener an
 func (s *NestedDataModifyingProcedureSpecificationContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNestedDataModifyingProcedureSpecification(s)
+	}
+}
+
+func (s *NestedDataModifyingProcedureSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNestedDataModifyingProcedureSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -8093,6 +8373,16 @@ func (s *NestedQuerySpecificationContext) EnterRule(listener antlr.ParseTreeList
 func (s *NestedQuerySpecificationContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNestedQuerySpecification(s)
+	}
+}
+
+func (s *NestedQuerySpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNestedQuerySpecification(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -8254,6 +8544,16 @@ func (s *ProcedureBodyContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *ProcedureBodyContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitProcedureBody(s)
+	}
+}
+
+func (s *ProcedureBodyContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitProcedureBody(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -8426,6 +8726,16 @@ func (s *BindingVariableDefinitionBlockContext) ExitRule(listener antlr.ParseTre
 	}
 }
 
+func (s *BindingVariableDefinitionBlockContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitBindingVariableDefinitionBlock(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -8588,6 +8898,16 @@ func (s *BindingVariableDefinitionContext) EnterRule(listener antlr.ParseTreeLis
 func (s *BindingVariableDefinitionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitBindingVariableDefinition(s)
+	}
+}
+
+func (s *BindingVariableDefinitionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitBindingVariableDefinition(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -8775,6 +9095,16 @@ func (s *StatementBlockContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *StatementBlockContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitStatementBlock(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -8944,6 +9274,16 @@ func (s *StatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *StatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitStatement(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -9101,6 +9441,16 @@ func (s *NextStatementContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *NextStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNextStatement(s)
+	}
+}
+
+func (s *NextStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNextStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -9264,6 +9614,16 @@ func (s *GraphVariableDefinitionContext) EnterRule(listener antlr.ParseTreeListe
 func (s *GraphVariableDefinitionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitGraphVariableDefinition(s)
+	}
+}
+
+func (s *GraphVariableDefinitionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGraphVariableDefinition(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -9445,6 +9805,16 @@ func (s *OptTypedGraphInitializerContext) ExitRule(listener antlr.ParseTreeListe
 	}
 }
 
+func (s *OptTypedGraphInitializerContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitOptTypedGraphInitializer(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -9593,6 +9963,16 @@ func (s *GraphInitializerContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *GraphInitializerContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGraphInitializer(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -9736,6 +10116,16 @@ func (s *BindingTableVariableDefinitionContext) EnterRule(listener antlr.ParseTr
 func (s *BindingTableVariableDefinitionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitBindingTableVariableDefinition(s)
+	}
+}
+
+func (s *BindingTableVariableDefinitionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitBindingTableVariableDefinition(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -9917,6 +10307,16 @@ func (s *OptTypedBindingTableInitializerContext) ExitRule(listener antlr.ParseTr
 	}
 }
 
+func (s *OptTypedBindingTableInitializerContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitOptTypedBindingTableInitializer(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -10065,6 +10465,16 @@ func (s *BindingTableInitializerContext) ExitRule(listener antlr.ParseTreeListen
 	}
 }
 
+func (s *BindingTableInitializerContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitBindingTableInitializer(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -10203,6 +10613,16 @@ func (s *ValueVariableDefinitionContext) EnterRule(listener antlr.ParseTreeListe
 func (s *ValueVariableDefinitionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitValueVariableDefinition(s)
+	}
+}
+
+func (s *ValueVariableDefinitionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitValueVariableDefinition(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -10363,6 +10783,16 @@ func (s *OptTypedValueInitializerContext) ExitRule(listener antlr.ParseTreeListe
 	}
 }
 
+func (s *OptTypedValueInitializerContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitOptTypedValueInitializer(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -10508,6 +10938,16 @@ func (s *ValueInitializerContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *ValueInitializerContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitValueInitializer(s)
+	}
+}
+
+func (s *ValueInitializerContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitValueInitializer(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -10681,6 +11121,16 @@ func (s *GraphExpressionContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *GraphExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGraphExpression(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -10817,6 +11267,16 @@ func (s *CurrentGraphContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *CurrentGraphContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCurrentGraph(s)
+	}
+}
+
+func (s *CurrentGraphContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCurrentGraph(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -10991,6 +11451,16 @@ func (s *BindingTableExpressionContext) ExitRule(listener antlr.ParseTreeListene
 	}
 }
 
+func (s *BindingTableExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitBindingTableExpression(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -11134,6 +11604,16 @@ func (s *NestedBindingTableQuerySpecificationContext) EnterRule(listener antlr.P
 func (s *NestedBindingTableQuerySpecificationContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNestedBindingTableQuerySpecification(s)
+	}
+}
+
+func (s *NestedBindingTableQuerySpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNestedBindingTableQuerySpecification(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -11284,6 +11764,16 @@ func (s *ObjectExpressionPrimaryContext) EnterRule(listener antlr.ParseTreeListe
 func (s *ObjectExpressionPrimaryContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitObjectExpressionPrimary(s)
+	}
+}
+
+func (s *ObjectExpressionPrimaryContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitObjectExpressionPrimary(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -11459,6 +11949,16 @@ func (s *LinearCatalogModifyingStatementContext) ExitRule(listener antlr.ParseTr
 	}
 }
 
+func (s *LinearCatalogModifyingStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLinearCatalogModifyingStatement(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -11604,6 +12104,16 @@ func (s *SimpleCatalogModifyingStatementContext) EnterRule(listener antlr.ParseT
 func (s *SimpleCatalogModifyingStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSimpleCatalogModifyingStatement(s)
+	}
+}
+
+func (s *SimpleCatalogModifyingStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimpleCatalogModifyingStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -11825,6 +12335,16 @@ func (s *PrimitiveCatalogModifyingStatementContext) ExitRule(listener antlr.Pars
 	}
 }
 
+func (s *PrimitiveCatalogModifyingStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPrimitiveCatalogModifyingStatement(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -12012,6 +12532,16 @@ func (s *CreateSchemaStatementContext) ExitRule(listener antlr.ParseTreeListener
 	}
 }
 
+func (s *CreateSchemaStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCreateSchemaStatement(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -12193,6 +12723,16 @@ func (s *DropSchemaStatementContext) EnterRule(listener antlr.ParseTreeListener)
 func (s *DropSchemaStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitDropSchemaStatement(s)
+	}
+}
+
+func (s *DropSchemaStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDropSchemaStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -12440,6 +12980,16 @@ func (s *CreateGraphStatementContext) EnterRule(listener antlr.ParseTreeListener
 func (s *CreateGraphStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCreateGraphStatement(s)
+	}
+}
+
+func (s *CreateGraphStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCreateGraphStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -12740,6 +13290,16 @@ func (s *OpenGraphTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *OpenGraphTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitOpenGraphType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -12971,6 +13531,16 @@ func (s *OfGraphTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *OfGraphTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitOfGraphType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -13184,6 +13754,16 @@ func (s *GraphTypeLikeGraphContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *GraphTypeLikeGraphContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGraphTypeLikeGraph(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -13315,6 +13895,16 @@ func (s *GraphSourceContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *GraphSourceContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitGraphSource(s)
+	}
+}
+
+func (s *GraphSourceContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGraphSource(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -13475,6 +14065,16 @@ func (s *DropGraphStatementContext) EnterRule(listener antlr.ParseTreeListener) 
 func (s *DropGraphStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitDropGraphStatement(s)
+	}
+}
+
+func (s *DropGraphStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDropGraphStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -13712,6 +14312,16 @@ func (s *CreateGraphTypeStatementContext) EnterRule(listener antlr.ParseTreeList
 func (s *CreateGraphTypeStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCreateGraphTypeStatement(s)
+	}
+}
+
+func (s *CreateGraphTypeStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCreateGraphTypeStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -14018,6 +14628,16 @@ func (s *GraphTypeSourceContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *GraphTypeSourceContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGraphTypeSource(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -14206,6 +14826,16 @@ func (s *CopyOfGraphTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *CopyOfGraphTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCopyOfGraphType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -14360,6 +14990,16 @@ func (s *DropGraphTypeStatementContext) EnterRule(listener antlr.ParseTreeListen
 func (s *DropGraphTypeStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitDropGraphTypeStatement(s)
+	}
+}
+
+func (s *DropGraphTypeStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDropGraphTypeStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -14546,6 +15186,16 @@ func (s *CallCatalogModifyingProcedureStatementContext) ExitRule(listener antlr.
 	}
 }
 
+func (s *CallCatalogModifyingProcedureStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCallCatalogModifyingProcedureStatement(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -14671,6 +15321,16 @@ func (s *LinearDataModifyingStatementContext) EnterRule(listener antlr.ParseTree
 func (s *LinearDataModifyingStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitLinearDataModifyingStatement(s)
+	}
+}
+
+func (s *LinearDataModifyingStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLinearDataModifyingStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -14821,6 +15481,16 @@ func (s *FocusedLinearDataModifyingStatementContext) EnterRule(listener antlr.Pa
 func (s *FocusedLinearDataModifyingStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitFocusedLinearDataModifyingStatement(s)
+	}
+}
+
+func (s *FocusedLinearDataModifyingStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFocusedLinearDataModifyingStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -14988,6 +15658,16 @@ func (s *FocusedLinearDataModifyingStatementBodyContext) ExitRule(listener antlr
 	}
 }
 
+func (s *FocusedLinearDataModifyingStatementBodyContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFocusedLinearDataModifyingStatementBody(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -15137,6 +15817,16 @@ func (s *FocusedNestedDataModifyingProcedureSpecificationContext) ExitRule(liste
 	}
 }
 
+func (s *FocusedNestedDataModifyingProcedureSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFocusedNestedDataModifyingProcedureSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -15266,6 +15956,16 @@ func (s *AmbientLinearDataModifyingStatementContext) EnterRule(listener antlr.Pa
 func (s *AmbientLinearDataModifyingStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitAmbientLinearDataModifyingStatement(s)
+	}
+}
+
+func (s *AmbientLinearDataModifyingStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitAmbientLinearDataModifyingStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -15416,6 +16116,16 @@ func (s *AmbientLinearDataModifyingStatementBodyContext) EnterRule(listener antl
 func (s *AmbientLinearDataModifyingStatementBodyContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitAmbientLinearDataModifyingStatementBody(s)
+	}
+}
+
+func (s *AmbientLinearDataModifyingStatementBodyContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitAmbientLinearDataModifyingStatementBody(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -15573,6 +16283,16 @@ func (s *SimpleLinearDataAccessingStatementContext) ExitRule(listener antlr.Pars
 	}
 }
 
+func (s *SimpleLinearDataAccessingStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimpleLinearDataAccessingStatement(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -15721,6 +16441,16 @@ func (s *SimpleDataAccessingStatementContext) ExitRule(listener antlr.ParseTreeL
 	}
 }
 
+func (s *SimpleDataAccessingStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimpleDataAccessingStatement(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -15865,6 +16595,16 @@ func (s *SimpleDataModifyingStatementContext) EnterRule(listener antlr.ParseTree
 func (s *SimpleDataModifyingStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSimpleDataModifyingStatement(s)
+	}
+}
+
+func (s *SimpleDataModifyingStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimpleDataModifyingStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -16052,6 +16792,16 @@ func (s *PrimitiveDataModifyingStatementContext) ExitRule(listener antlr.ParseTr
 	}
 }
 
+func (s *PrimitiveDataModifyingStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPrimitiveDataModifyingStatement(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -16206,6 +16956,16 @@ func (s *InsertStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *InsertStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitInsertStatement(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -16327,6 +17087,16 @@ func (s *SetStatementContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *SetStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSetStatement(s)
+	}
+}
+
+func (s *SetStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSetStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -16482,6 +17252,16 @@ func (s *SetItemListContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *SetItemListContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSetItemList(s)
+	}
+}
+
+func (s *SetItemListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSetItemList(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -16659,6 +17439,16 @@ func (s *SetItemContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *SetItemContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSetItem(s)
+	}
+}
+
+func (s *SetItemContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSetItem(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -16844,6 +17634,16 @@ func (s *SetPropertyItemContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *SetPropertyItemContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSetPropertyItem(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -17008,6 +17808,16 @@ func (s *SetAllPropertiesItemContext) EnterRule(listener antlr.ParseTreeListener
 func (s *SetAllPropertiesItemContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSetAllPropertiesItem(s)
+	}
+}
+
+func (s *SetAllPropertiesItemContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSetAllPropertiesItem(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -17197,6 +18007,16 @@ func (s *SetLabelItemContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *SetLabelItemContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSetLabelItem(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -17318,6 +18138,16 @@ func (s *RemoveStatementContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *RemoveStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitRemoveStatement(s)
+	}
+}
+
+func (s *RemoveStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitRemoveStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -17473,6 +18303,16 @@ func (s *RemoveItemListContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *RemoveItemListContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitRemoveItemList(s)
+	}
+}
+
+func (s *RemoveItemListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitRemoveItemList(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -17636,6 +18476,16 @@ func (s *RemoveItemContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *RemoveItemContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitRemoveItem(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -17785,6 +18635,16 @@ func (s *RemovePropertyItemContext) EnterRule(listener antlr.ParseTreeListener) 
 func (s *RemovePropertyItemContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitRemovePropertyItem(s)
+	}
+}
+
+func (s *RemovePropertyItemContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitRemovePropertyItem(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -17945,6 +18805,16 @@ func (s *RemoveLabelItemContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *RemoveLabelItemContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitRemoveLabelItem(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -18076,6 +18946,16 @@ func (s *DeleteStatementContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *DeleteStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitDeleteStatement(s)
+	}
+}
+
+func (s *DeleteStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDeleteStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -18258,6 +19138,16 @@ func (s *DeleteItemListContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *DeleteItemListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDeleteItemList(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -18401,6 +19291,16 @@ func (s *DeleteItemContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *DeleteItemContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDeleteItem(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -18512,6 +19412,16 @@ func (s *CallDataModifyingProcedureStatementContext) ExitRule(listener antlr.Par
 	}
 }
 
+func (s *CallDataModifyingProcedureStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCallDataModifyingProcedureStatement(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -18620,6 +19530,16 @@ func (s *CompositeQueryStatementContext) EnterRule(listener antlr.ParseTreeListe
 func (s *CompositeQueryStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCompositeQueryStatement(s)
+	}
+}
+
+func (s *CompositeQueryStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCompositeQueryStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -18765,6 +19685,16 @@ func (s *CompositeQueryExpressionContext) EnterRule(listener antlr.ParseTreeList
 func (s *CompositeQueryExpressionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCompositeQueryExpression(s)
+	}
+}
+
+func (s *CompositeQueryExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCompositeQueryExpression(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -18943,6 +19873,16 @@ func (s *QueryConjunctionContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *QueryConjunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitQueryConjunction(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -19092,6 +20032,16 @@ func (s *SetOperatorContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *SetOperatorContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSetOperator(s)
+	}
+}
+
+func (s *SetOperatorContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSetOperator(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -19295,6 +20245,16 @@ func (s *CompositeQueryPrimaryContext) ExitRule(listener antlr.ParseTreeListener
 	}
 }
 
+func (s *CompositeQueryPrimaryContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCompositeQueryPrimary(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -19420,6 +20380,16 @@ func (s *LinearQueryStatementContext) EnterRule(listener antlr.ParseTreeListener
 func (s *LinearQueryStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitLinearQueryStatement(s)
+	}
+}
+
+func (s *LinearQueryStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLinearQueryStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -19650,6 +20620,16 @@ func (s *FocusedLinearQueryStatementContext) ExitRule(listener antlr.ParseTreeLi
 	}
 }
 
+func (s *FocusedLinearQueryStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFocusedLinearQueryStatement(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -19843,6 +20823,16 @@ func (s *FocusedLinearQueryStatementPartContext) ExitRule(listener antlr.ParseTr
 	}
 }
 
+func (s *FocusedLinearQueryStatementPartContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFocusedLinearQueryStatementPart(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -19992,6 +20982,16 @@ func (s *FocusedLinearQueryAndPrimitiveResultStatementPartContext) ExitRule(list
 	}
 }
 
+func (s *FocusedLinearQueryAndPrimitiveResultStatementPartContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFocusedLinearQueryAndPrimitiveResultStatementPart(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -20128,6 +21128,16 @@ func (s *FocusedPrimitiveResultStatementContext) ExitRule(listener antlr.ParseTr
 	}
 }
 
+func (s *FocusedPrimitiveResultStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFocusedPrimitiveResultStatement(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -20257,6 +21267,16 @@ func (s *FocusedNestedQuerySpecificationContext) EnterRule(listener antlr.ParseT
 func (s *FocusedNestedQuerySpecificationContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitFocusedNestedQuerySpecification(s)
+	}
+}
+
+func (s *FocusedNestedQuerySpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFocusedNestedQuerySpecification(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -20406,6 +21426,16 @@ func (s *AmbientLinearQueryStatementContext) EnterRule(listener antlr.ParseTreeL
 func (s *AmbientLinearQueryStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitAmbientLinearQueryStatement(s)
+	}
+}
+
+func (s *AmbientLinearQueryStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitAmbientLinearQueryStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -20585,6 +21615,16 @@ func (s *SimpleLinearQueryStatementContext) ExitRule(listener antlr.ParseTreeLis
 	}
 }
 
+func (s *SimpleLinearQueryStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimpleLinearQueryStatement(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -20730,6 +21770,16 @@ func (s *SimpleQueryStatementContext) EnterRule(listener antlr.ParseTreeListener
 func (s *SimpleQueryStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSimpleQueryStatement(s)
+	}
+}
+
+func (s *SimpleQueryStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimpleQueryStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -20931,6 +21981,16 @@ func (s *PrimitiveQueryStatementContext) ExitRule(listener antlr.ParseTreeListen
 	}
 }
 
+func (s *PrimitiveQueryStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPrimitiveQueryStatement(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -21105,6 +22165,16 @@ func (s *MatchStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *MatchStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitMatchStatement(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -21243,6 +22313,16 @@ func (s *SimpleMatchStatementContext) ExitRule(listener antlr.ParseTreeListener)
 	}
 }
 
+func (s *SimpleMatchStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimpleMatchStatement(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -21364,6 +22444,16 @@ func (s *OptionalMatchStatementContext) EnterRule(listener antlr.ParseTreeListen
 func (s *OptionalMatchStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitOptionalMatchStatement(s)
+	}
+}
+
+func (s *OptionalMatchStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitOptionalMatchStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -21520,6 +22610,16 @@ func (s *OptionalOperandContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *OptionalOperandContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitOptionalOperand(s)
+	}
+}
+
+func (s *OptionalOperandContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitOptionalOperand(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -21722,6 +22822,16 @@ func (s *MatchStatementBlockContext) ExitRule(listener antlr.ParseTreeListener) 
 	}
 }
 
+func (s *MatchStatementBlockContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitMatchStatementBlock(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -21850,6 +22960,16 @@ func (s *CallQueryStatementContext) EnterRule(listener antlr.ParseTreeListener) 
 func (s *CallQueryStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCallQueryStatement(s)
+	}
+}
+
+func (s *CallQueryStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCallQueryStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -21983,6 +23103,16 @@ func (s *FilterStatementContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *FilterStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitFilterStatement(s)
+	}
+}
+
+func (s *FilterStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFilterStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -22129,6 +23259,16 @@ func (s *LetStatementContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *LetStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitLetStatement(s)
+	}
+}
+
+func (s *LetStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLetStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -22284,6 +23424,16 @@ func (s *LetVariableDefinitionListContext) EnterRule(listener antlr.ParseTreeLis
 func (s *LetVariableDefinitionListContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitLetVariableDefinitionList(s)
+	}
+}
+
+func (s *LetVariableDefinitionListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLetVariableDefinitionList(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -22469,6 +23619,16 @@ func (s *LetVariableDefinitionContext) ExitRule(listener antlr.ParseTreeListener
 	}
 }
 
+func (s *LetVariableDefinitionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLetVariableDefinition(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -22636,6 +23796,16 @@ func (s *ForStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ForStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitForStatement(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -22789,6 +23959,16 @@ func (s *ForItemContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ForItemContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitForItem(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -22909,6 +24089,16 @@ func (s *ForItemAliasContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ForItemAliasContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitForItemAlias(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -23025,6 +24215,16 @@ func (s *ForItemSourceContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *ForItemSourceContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitForItemSource(s)
+	}
+}
+
+func (s *ForItemSourceContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitForItemSource(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -23151,6 +24351,16 @@ func (s *ForOrdinalityOrOffsetContext) EnterRule(listener antlr.ParseTreeListene
 func (s *ForOrdinalityOrOffsetContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitForOrdinalityOrOffset(s)
+	}
+}
+
+func (s *ForOrdinalityOrOffsetContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitForOrdinalityOrOffset(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -23317,6 +24527,16 @@ func (s *OrderByAndPageStatementContext) EnterRule(listener antlr.ParseTreeListe
 func (s *OrderByAndPageStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitOrderByAndPageStatement(s)
+	}
+}
+
+func (s *OrderByAndPageStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitOrderByAndPageStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -23522,6 +24742,16 @@ func (s *PrimitiveResultStatementContext) ExitRule(listener antlr.ParseTreeListe
 	}
 }
 
+func (s *PrimitiveResultStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPrimitiveResultStatement(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -23674,6 +24904,16 @@ func (s *ReturnStatementContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *ReturnStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitReturnStatement(s)
+	}
+}
+
+func (s *ReturnStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitReturnStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -23832,6 +25072,16 @@ func (s *ReturnStatementBodyContext) EnterRule(listener antlr.ParseTreeListener)
 func (s *ReturnStatementBodyContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitReturnStatementBody(s)
+	}
+}
+
+func (s *ReturnStatementBodyContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitReturnStatementBody(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -24038,6 +25288,16 @@ func (s *ReturnItemListContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ReturnItemListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitReturnItemList(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -24204,6 +25464,16 @@ func (s *ReturnItemContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ReturnItemContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitReturnItem(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -24330,6 +25600,16 @@ func (s *ReturnItemAliasContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *ReturnItemAliasContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitReturnItemAlias(s)
+	}
+}
+
+func (s *ReturnItemAliasContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitReturnItemAlias(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -24595,6 +25875,16 @@ func (s *SelectStatementContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *SelectStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSelectStatement(s)
+	}
+}
+
+func (s *SelectStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSelectStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -24887,6 +26177,16 @@ func (s *SelectItemListContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *SelectItemListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSelectItemList(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -25053,6 +26353,16 @@ func (s *SelectItemContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *SelectItemContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSelectItem(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -25182,6 +26492,16 @@ func (s *SelectItemAliasContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *SelectItemAliasContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSelectItemAlias(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -25303,6 +26623,16 @@ func (s *HavingClauseContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *HavingClauseContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitHavingClause(s)
+	}
+}
+
+func (s *HavingClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitHavingClause(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -25444,6 +26774,16 @@ func (s *SelectStatementBodyContext) EnterRule(listener antlr.ParseTreeListener)
 func (s *SelectStatementBodyContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSelectStatementBody(s)
+	}
+}
+
+func (s *SelectStatementBodyContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSelectStatementBody(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -25621,6 +26961,16 @@ func (s *SelectGraphMatchListContext) ExitRule(listener antlr.ParseTreeListener)
 	}
 }
 
+func (s *SelectGraphMatchListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSelectGraphMatchList(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -25787,6 +27137,16 @@ func (s *SelectGraphMatchContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *SelectGraphMatchContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSelectGraphMatch(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -25916,6 +27276,16 @@ func (s *SelectQuerySpecificationContext) EnterRule(listener antlr.ParseTreeList
 func (s *SelectQuerySpecificationContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSelectQuerySpecification(s)
+	}
+}
+
+func (s *SelectQuerySpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSelectQuerySpecification(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -26060,6 +27430,16 @@ func (s *CallProcedureStatementContext) EnterRule(listener antlr.ParseTreeListen
 func (s *CallProcedureStatementContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCallProcedureStatement(s)
+	}
+}
+
+func (s *CallProcedureStatementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCallProcedureStatement(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -26220,6 +27600,16 @@ func (s *ProcedureCallContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ProcedureCallContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitProcedureCall(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -26370,6 +27760,16 @@ func (s *InlineProcedureCallContext) ExitRule(listener antlr.ParseTreeListener) 
 	}
 }
 
+func (s *InlineProcedureCallContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitInlineProcedureCall(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -26505,6 +27905,16 @@ func (s *VariableScopeClauseContext) EnterRule(listener antlr.ParseTreeListener)
 func (s *VariableScopeClauseContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitVariableScopeClause(s)
+	}
+}
+
+func (s *VariableScopeClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitVariableScopeClause(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -26681,6 +28091,16 @@ func (s *BindingVariableReferenceListContext) EnterRule(listener antlr.ParseTree
 func (s *BindingVariableReferenceListContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitBindingVariableReferenceList(s)
+	}
+}
+
+func (s *BindingVariableReferenceListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitBindingVariableReferenceList(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -26868,6 +28288,16 @@ func (s *NamedProcedureCallContext) EnterRule(listener antlr.ParseTreeListener) 
 func (s *NamedProcedureCallContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNamedProcedureCall(s)
+	}
+}
+
+func (s *NamedProcedureCallContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNamedProcedureCall(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -27066,6 +28496,16 @@ func (s *ProcedureArgumentListContext) ExitRule(listener antlr.ParseTreeListener
 	}
 }
 
+func (s *ProcedureArgumentListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitProcedureArgumentList(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -27209,6 +28649,16 @@ func (s *ProcedureArgumentContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ProcedureArgumentContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitProcedureArgument(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -27322,6 +28772,16 @@ func (s *AtSchemaClauseContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *AtSchemaClauseContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitAtSchemaClause(s)
+	}
+}
+
+func (s *AtSchemaClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitAtSchemaClause(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -27446,6 +28906,16 @@ func (s *UseGraphClauseContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *UseGraphClauseContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitUseGraphClause(s)
+	}
+}
+
+func (s *UseGraphClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitUseGraphClause(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -27585,6 +29055,16 @@ func (s *GraphPatternBindingTableContext) ExitRule(listener antlr.ParseTreeListe
 	}
 }
 
+func (s *GraphPatternBindingTableContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGraphPatternBindingTable(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -27711,6 +29191,16 @@ func (s *GraphPatternYieldClauseContext) EnterRule(listener antlr.ParseTreeListe
 func (s *GraphPatternYieldClauseContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitGraphPatternYieldClause(s)
+	}
+}
+
+func (s *GraphPatternYieldClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGraphPatternYieldClause(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -27869,6 +29359,16 @@ func (s *GraphPatternYieldItemListContext) ExitRule(listener antlr.ParseTreeList
 	}
 }
 
+func (s *GraphPatternYieldItemListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGraphPatternYieldItemList(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -28015,6 +29515,16 @@ func (s *GraphPatternYieldItemContext) EnterRule(listener antlr.ParseTreeListene
 func (s *GraphPatternYieldItemContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitGraphPatternYieldItem(s)
+	}
+}
+
+func (s *GraphPatternYieldItemContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGraphPatternYieldItem(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -28177,6 +29687,16 @@ func (s *GraphPatternContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *GraphPatternContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitGraphPattern(s)
+	}
+}
+
+func (s *GraphPatternContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGraphPattern(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -28347,6 +29867,16 @@ func (s *MatchModeContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *MatchModeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitMatchMode(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -28485,6 +30015,16 @@ func (s *RepeatableElementsMatchModeContext) ExitRule(listener antlr.ParseTreeLi
 	}
 }
 
+func (s *RepeatableElementsMatchModeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitRepeatableElementsMatchMode(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -28609,6 +30149,16 @@ func (s *DifferentEdgesMatchModeContext) ExitRule(listener antlr.ParseTreeListen
 	}
 }
 
+func (s *DifferentEdgesMatchModeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDifferentEdgesMatchMode(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -28723,6 +30273,16 @@ func (s *ElementBindingsOrElementsContext) EnterRule(listener antlr.ParseTreeLis
 func (s *ElementBindingsOrElementsContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitElementBindingsOrElements(s)
+	}
+}
+
+func (s *ElementBindingsOrElementsContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitElementBindingsOrElements(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -28903,6 +30463,16 @@ func (s *EdgeBindingsOrEdgesContext) EnterRule(listener antlr.ParseTreeListener)
 func (s *EdgeBindingsOrEdgesContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitEdgeBindingsOrEdges(s)
+	}
+}
+
+func (s *EdgeBindingsOrEdgesContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEdgeBindingsOrEdges(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -29092,6 +30662,16 @@ func (s *PathPatternListContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *PathPatternListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPathPatternList(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -29275,6 +30855,16 @@ func (s *PathPatternContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *PathPatternContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPathPattern(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -29421,6 +31011,16 @@ func (s *PathVariableDeclarationContext) ExitRule(listener antlr.ParseTreeListen
 	}
 }
 
+func (s *PathVariableDeclarationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPathVariableDeclaration(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -29542,6 +31142,16 @@ func (s *KeepClauseContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *KeepClauseContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitKeepClause(s)
+	}
+}
+
+func (s *KeepClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitKeepClause(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -29669,6 +31279,16 @@ func (s *GraphPatternWhereClauseContext) ExitRule(listener antlr.ParseTreeListen
 	}
 }
 
+func (s *GraphPatternWhereClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGraphPatternWhereClause(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -29785,6 +31405,16 @@ func (s *InsertGraphPatternContext) EnterRule(listener antlr.ParseTreeListener) 
 func (s *InsertGraphPatternContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitInsertGraphPattern(s)
+	}
+}
+
+func (s *InsertGraphPatternContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitInsertGraphPattern(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -29932,6 +31562,16 @@ func (s *InsertPathPatternListContext) EnterRule(listener antlr.ParseTreeListene
 func (s *InsertPathPatternListContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitInsertPathPatternList(s)
+	}
+}
+
+func (s *InsertPathPatternListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitInsertPathPatternList(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -30147,6 +31787,16 @@ func (s *InsertPathPatternContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *InsertPathPatternContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitInsertPathPattern(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -30293,6 +31943,16 @@ func (s *InsertNodePatternContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *InsertNodePatternContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitInsertNodePattern(s)
+	}
+}
+
+func (s *InsertNodePatternContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitInsertNodePattern(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -30470,6 +32130,16 @@ func (s *InsertEdgePatternContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *InsertEdgePatternContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitInsertEdgePattern(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -30618,6 +32288,16 @@ func (s *InsertEdgePointingLeftContext) EnterRule(listener antlr.ParseTreeListen
 func (s *InsertEdgePointingLeftContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitInsertEdgePointingLeft(s)
+	}
+}
+
+func (s *InsertEdgePointingLeftContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitInsertEdgePointingLeft(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -30771,6 +32451,16 @@ func (s *InsertEdgePointingRightContext) ExitRule(listener antlr.ParseTreeListen
 	}
 }
 
+func (s *InsertEdgePointingRightContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitInsertEdgePointingRight(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -30918,6 +32608,16 @@ func (s *InsertEdgeUndirectedContext) EnterRule(listener antlr.ParseTreeListener
 func (s *InsertEdgeUndirectedContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitInsertEdgeUndirected(s)
+	}
+}
+
+func (s *InsertEdgeUndirectedContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitInsertEdgeUndirected(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -31075,6 +32775,16 @@ func (s *InsertElementPatternFillerContext) EnterRule(listener antlr.ParseTreeLi
 func (s *InsertElementPatternFillerContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitInsertElementPatternFiller(s)
+	}
+}
+
+func (s *InsertElementPatternFillerContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitInsertElementPatternFiller(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -31274,6 +32984,16 @@ func (s *LabelAndPropertySetSpecificationContext) ExitRule(listener antlr.ParseT
 	}
 }
 
+func (s *LabelAndPropertySetSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLabelAndPropertySetSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -31461,6 +33181,16 @@ func (s *PathPatternPrefixContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *PathPatternPrefixContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPathPatternPrefix(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -31611,6 +33341,16 @@ func (s *PathModePrefixContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *PathModePrefixContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPathModePrefix(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -31735,6 +33475,16 @@ func (s *PathModeContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *PathModeContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitPathMode(s)
+	}
+}
+
+func (s *PathModeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPathMode(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -31889,6 +33639,16 @@ func (s *PathSearchPrefixContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *PathSearchPrefixContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitPathSearchPrefix(s)
+	}
+}
+
+func (s *PathSearchPrefixContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPathSearchPrefix(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -32052,6 +33812,16 @@ func (s *AllPathSearchContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *AllPathSearchContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitAllPathSearch(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -32183,6 +33953,16 @@ func (s *PathOrPathsContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *PathOrPathsContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitPathOrPaths(s)
+	}
+}
+
+func (s *PathOrPathsContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPathOrPaths(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -32345,6 +34125,16 @@ func (s *AnyPathSearchContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *AnyPathSearchContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitAnyPathSearch(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -32496,6 +34286,16 @@ func (s *NumberOfPathsContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *NumberOfPathsContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNumberOfPaths(s)
+	}
+}
+
+func (s *NumberOfPathsContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNumberOfPaths(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -32658,6 +34458,16 @@ func (s *ShortestPathSearchContext) EnterRule(listener antlr.ParseTreeListener) 
 func (s *ShortestPathSearchContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitShortestPathSearch(s)
+	}
+}
+
+func (s *ShortestPathSearchContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitShortestPathSearch(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -32834,6 +34644,16 @@ func (s *AllShortestPathSearchContext) ExitRule(listener antlr.ParseTreeListener
 	}
 }
 
+func (s *AllShortestPathSearchContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitAllShortestPathSearch(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -33007,6 +34827,16 @@ func (s *AnyShortestPathSearchContext) EnterRule(listener antlr.ParseTreeListene
 func (s *AnyShortestPathSearchContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitAnyShortestPathSearch(s)
+	}
+}
+
+func (s *AnyShortestPathSearchContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitAnyShortestPathSearch(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -33195,6 +35025,16 @@ func (s *CountedShortestPathSearchContext) EnterRule(listener antlr.ParseTreeLis
 func (s *CountedShortestPathSearchContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCountedShortestPathSearch(s)
+	}
+}
+
+func (s *CountedShortestPathSearchContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCountedShortestPathSearch(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -33392,6 +35232,16 @@ func (s *CountedShortestGroupSearchContext) ExitRule(listener antlr.ParseTreeLis
 	}
 }
 
+func (s *CountedShortestGroupSearchContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCountedShortestGroupSearch(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -33565,6 +35415,16 @@ func (s *NumberOfGroupsContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *NumberOfGroupsContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNumberOfGroups(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -33730,6 +35590,16 @@ func (s *PpePatternUnionContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *PpePatternUnionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPpePatternUnion(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type PpePathTermContext struct {
 	PathPatternExpressionContext
@@ -33775,6 +35645,16 @@ func (s *PpePathTermContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *PpePathTermContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitPpePathTerm(s)
+	}
+}
+
+func (s *PpePathTermContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPpePathTerm(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -33856,6 +35736,16 @@ func (s *PpeMultisetAlternationContext) EnterRule(listener antlr.ParseTreeListen
 func (s *PpeMultisetAlternationContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitPpeMultisetAlternation(s)
+	}
+}
+
+func (s *PpeMultisetAlternationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPpeMultisetAlternation(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -34101,6 +35991,16 @@ func (s *PathTermContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *PathTermContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPathTerm(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -34276,6 +36176,16 @@ func (s *PfQuantifiedPathPrimaryContext) ExitRule(listener antlr.ParseTreeListen
 	}
 }
 
+func (s *PfQuantifiedPathPrimaryContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPfQuantifiedPathPrimary(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type PfQuestionedPathPrimaryContext struct {
 	PathFactorContext
@@ -34328,6 +36238,16 @@ func (s *PfQuestionedPathPrimaryContext) ExitRule(listener antlr.ParseTreeListen
 	}
 }
 
+func (s *PfQuestionedPathPrimaryContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPfQuestionedPathPrimary(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type PfPathPrimaryContext struct {
 	PathFactorContext
@@ -34373,6 +36293,16 @@ func (s *PfPathPrimaryContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *PfPathPrimaryContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitPfPathPrimary(s)
+	}
+}
+
+func (s *PfPathPrimaryContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPfPathPrimary(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -34549,6 +36479,16 @@ func (s *PpParenthesizedPathPatternExpressionContext) ExitRule(listener antlr.Pa
 	}
 }
 
+func (s *PpParenthesizedPathPatternExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPpParenthesizedPathPatternExpression(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type PpElementPatternContext struct {
 	PathPrimaryContext
@@ -34597,6 +36537,16 @@ func (s *PpElementPatternContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *PpElementPatternContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPpElementPattern(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type PpSimplifiedPathPatternExpressionContext struct {
 	PathPrimaryContext
@@ -34642,6 +36592,16 @@ func (s *PpSimplifiedPathPatternExpressionContext) EnterRule(listener antlr.Pars
 func (s *PpSimplifiedPathPatternExpressionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitPpSimplifiedPathPatternExpression(s)
+	}
+}
+
+func (s *PpSimplifiedPathPatternExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPpSimplifiedPathPatternExpression(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -34802,6 +36762,16 @@ func (s *ElementPatternContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ElementPatternContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitElementPattern(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -34942,6 +36912,16 @@ func (s *NodePatternContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *NodePatternContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNodePattern(s)
+	}
+}
+
+func (s *NodePatternContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNodePattern(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -35106,6 +37086,16 @@ func (s *ElementPatternFillerContext) ExitRule(listener antlr.ParseTreeListener)
 	}
 }
 
+func (s *ElementPatternFillerContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitElementPatternFiller(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -35260,6 +37250,16 @@ func (s *ElementVariableDeclarationContext) ExitRule(listener antlr.ParseTreeLis
 	}
 }
 
+func (s *ElementVariableDeclarationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitElementVariableDeclaration(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -35388,6 +37388,16 @@ func (s *IsLabelExpressionContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *IsLabelExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitIsLabelExpression(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -35493,6 +37503,16 @@ func (s *IsOrColonContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *IsOrColonContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitIsOrColon(s)
+	}
+}
+
+func (s *IsOrColonContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitIsOrColon(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -35630,6 +37650,16 @@ func (s *ElementPatternPredicateContext) EnterRule(listener antlr.ParseTreeListe
 func (s *ElementPatternPredicateContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitElementPatternPredicate(s)
+	}
+}
+
+func (s *ElementPatternPredicateContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitElementPatternPredicate(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -35771,6 +37801,16 @@ func (s *ElementPatternWhereClauseContext) ExitRule(listener antlr.ParseTreeList
 	}
 }
 
+func (s *ElementPatternWhereClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitElementPatternWhereClause(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -35897,6 +37937,16 @@ func (s *ElementPropertySpecificationContext) EnterRule(listener antlr.ParseTree
 func (s *ElementPropertySpecificationContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitElementPropertySpecification(s)
+	}
+}
+
+func (s *ElementPropertySpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitElementPropertySpecification(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -36060,6 +38110,16 @@ func (s *PropertyKeyValuePairListContext) EnterRule(listener antlr.ParseTreeList
 func (s *PropertyKeyValuePairListContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitPropertyKeyValuePairList(s)
+	}
+}
+
+func (s *PropertyKeyValuePairListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPropertyKeyValuePairList(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -36228,6 +38288,16 @@ func (s *PropertyKeyValuePairContext) ExitRule(listener antlr.ParseTreeListener)
 	}
 }
 
+func (s *PropertyKeyValuePairContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPropertyKeyValuePair(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -36365,6 +38435,16 @@ func (s *EdgePatternContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *EdgePatternContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitEdgePattern(s)
+	}
+}
+
+func (s *EdgePatternContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEdgePattern(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -36603,6 +38683,16 @@ func (s *FullEdgePatternContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *FullEdgePatternContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFullEdgePattern(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -36783,6 +38873,16 @@ func (s *FullEdgePointingLeftContext) ExitRule(listener antlr.ParseTreeListener)
 	}
 }
 
+func (s *FullEdgePointingLeftContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFullEdgePointingLeft(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -36917,6 +39017,16 @@ func (s *FullEdgeUndirectedContext) EnterRule(listener antlr.ParseTreeListener) 
 func (s *FullEdgeUndirectedContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitFullEdgeUndirected(s)
+	}
+}
+
+func (s *FullEdgeUndirectedContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFullEdgeUndirected(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -37057,6 +39167,16 @@ func (s *FullEdgePointingRightContext) ExitRule(listener antlr.ParseTreeListener
 	}
 }
 
+func (s *FullEdgePointingRightContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFullEdgePointingRight(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -37191,6 +39311,16 @@ func (s *FullEdgeLeftOrUndirectedContext) EnterRule(listener antlr.ParseTreeList
 func (s *FullEdgeLeftOrUndirectedContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitFullEdgeLeftOrUndirected(s)
+	}
+}
+
+func (s *FullEdgeLeftOrUndirectedContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFullEdgeLeftOrUndirected(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -37331,6 +39461,16 @@ func (s *FullEdgeUndirectedOrRightContext) ExitRule(listener antlr.ParseTreeList
 	}
 }
 
+func (s *FullEdgeUndirectedOrRightContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFullEdgeUndirectedOrRight(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -37468,6 +39608,16 @@ func (s *FullEdgeLeftOrRightContext) ExitRule(listener antlr.ParseTreeListener) 
 	}
 }
 
+func (s *FullEdgeLeftOrRightContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFullEdgeLeftOrRight(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -37602,6 +39752,16 @@ func (s *FullEdgeAnyDirectionContext) EnterRule(listener antlr.ParseTreeListener
 func (s *FullEdgeAnyDirectionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitFullEdgeAnyDirection(s)
+	}
+}
+
+func (s *FullEdgeAnyDirectionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFullEdgeAnyDirection(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -37747,6 +39907,16 @@ func (s *AbbreviatedEdgePatternContext) EnterRule(listener antlr.ParseTreeListen
 func (s *AbbreviatedEdgePatternContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitAbbreviatedEdgePattern(s)
+	}
+}
+
+func (s *AbbreviatedEdgePatternContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitAbbreviatedEdgePattern(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -37931,6 +40101,16 @@ func (s *ParenthesizedPathPatternExpressionContext) ExitRule(listener antlr.Pars
 	}
 }
 
+func (s *ParenthesizedPathPatternExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitParenthesizedPathPatternExpression(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -38108,6 +40288,16 @@ func (s *SubpathVariableDeclarationContext) ExitRule(listener antlr.ParseTreeLis
 	}
 }
 
+func (s *SubpathVariableDeclarationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSubpathVariableDeclaration(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -38229,6 +40419,16 @@ func (s *ParenthesizedPathPatternWhereClauseContext) EnterRule(listener antlr.Pa
 func (s *ParenthesizedPathPatternWhereClauseContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitParenthesizedPathPatternWhereClause(s)
+	}
+}
+
+func (s *ParenthesizedPathPatternWhereClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitParenthesizedPathPatternWhereClause(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -38377,6 +40577,16 @@ func (s *LabelExpressionNegationContext) ExitRule(listener antlr.ParseTreeListen
 	}
 }
 
+func (s *LabelExpressionNegationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLabelExpressionNegation(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type LabelExpressionDisjunctionContext struct {
 	LabelExpressionContext
@@ -38454,6 +40664,16 @@ func (s *LabelExpressionDisjunctionContext) ExitRule(listener antlr.ParseTreeLis
 	}
 }
 
+func (s *LabelExpressionDisjunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLabelExpressionDisjunction(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type LabelExpressionParenthesizedContext struct {
 	LabelExpressionContext
@@ -38510,6 +40730,16 @@ func (s *LabelExpressionParenthesizedContext) ExitRule(listener antlr.ParseTreeL
 	}
 }
 
+func (s *LabelExpressionParenthesizedContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLabelExpressionParenthesized(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type LabelExpressionWildcardContext struct {
 	LabelExpressionContext
@@ -38543,6 +40773,16 @@ func (s *LabelExpressionWildcardContext) EnterRule(listener antlr.ParseTreeListe
 func (s *LabelExpressionWildcardContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitLabelExpressionWildcard(s)
+	}
+}
+
+func (s *LabelExpressionWildcardContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLabelExpressionWildcard(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -38623,6 +40863,16 @@ func (s *LabelExpressionConjunctionContext) ExitRule(listener antlr.ParseTreeLis
 	}
 }
 
+func (s *LabelExpressionConjunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLabelExpressionConjunction(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type LabelExpressionNameContext struct {
 	LabelExpressionContext
@@ -38668,6 +40918,16 @@ func (s *LabelExpressionNameContext) EnterRule(listener antlr.ParseTreeListener)
 func (s *LabelExpressionNameContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitLabelExpressionName(s)
+	}
+}
+
+func (s *LabelExpressionNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLabelExpressionName(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -38953,6 +41213,16 @@ func (s *PathVariableReferenceContext) ExitRule(listener antlr.ParseTreeListener
 	}
 }
 
+func (s *PathVariableReferenceContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPathVariableReference(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -39061,6 +41331,16 @@ func (s *ElementVariableReferenceContext) EnterRule(listener antlr.ParseTreeList
 func (s *ElementVariableReferenceContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitElementVariableReference(s)
+	}
+}
+
+func (s *ElementVariableReferenceContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitElementVariableReference(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -39199,6 +41479,16 @@ func (s *GraphPatternQuantifierContext) EnterRule(listener antlr.ParseTreeListen
 func (s *GraphPatternQuantifierContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitGraphPatternQuantifier(s)
+	}
+}
+
+func (s *GraphPatternQuantifierContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGraphPatternQuantifier(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -39366,6 +41656,16 @@ func (s *FixedQuantifierContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *FixedQuantifierContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFixedQuantifier(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -39522,6 +41822,16 @@ func (s *GeneralQuantifierContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *GeneralQuantifierContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitGeneralQuantifier(s)
+	}
+}
+
+func (s *GeneralQuantifierContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGeneralQuantifier(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -39688,6 +41998,16 @@ func (s *LowerBoundContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *LowerBoundContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLowerBound(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -39796,6 +42116,16 @@ func (s *UpperBoundContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *UpperBoundContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitUpperBound(s)
+	}
+}
+
+func (s *UpperBoundContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitUpperBound(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -40012,6 +42342,16 @@ func (s *SimplifiedPathPatternExpressionContext) ExitRule(listener antlr.ParseTr
 	}
 }
 
+func (s *SimplifiedPathPatternExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedPathPatternExpression(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -40192,6 +42532,16 @@ func (s *SimplifiedDefaultingLeftContext) ExitRule(listener antlr.ParseTreeListe
 	}
 }
 
+func (s *SimplifiedDefaultingLeftContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedDefaultingLeft(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -40326,6 +42676,16 @@ func (s *SimplifiedDefaultingUndirectedContext) EnterRule(listener antlr.ParseTr
 func (s *SimplifiedDefaultingUndirectedContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSimplifiedDefaultingUndirected(s)
+	}
+}
+
+func (s *SimplifiedDefaultingUndirectedContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedDefaultingUndirected(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -40466,6 +42826,16 @@ func (s *SimplifiedDefaultingRightContext) ExitRule(listener antlr.ParseTreeList
 	}
 }
 
+func (s *SimplifiedDefaultingRightContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedDefaultingRight(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -40600,6 +42970,16 @@ func (s *SimplifiedDefaultingLeftOrUndirectedContext) EnterRule(listener antlr.P
 func (s *SimplifiedDefaultingLeftOrUndirectedContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSimplifiedDefaultingLeftOrUndirected(s)
+	}
+}
+
+func (s *SimplifiedDefaultingLeftOrUndirectedContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedDefaultingLeftOrUndirected(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -40740,6 +43120,16 @@ func (s *SimplifiedDefaultingUndirectedOrRightContext) ExitRule(listener antlr.P
 	}
 }
 
+func (s *SimplifiedDefaultingUndirectedOrRightContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedDefaultingUndirectedOrRight(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -40877,6 +43267,16 @@ func (s *SimplifiedDefaultingLeftOrRightContext) ExitRule(listener antlr.ParseTr
 	}
 }
 
+func (s *SimplifiedDefaultingLeftOrRightContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedDefaultingLeftOrRight(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -41011,6 +43411,16 @@ func (s *SimplifiedDefaultingAnyDirectionContext) EnterRule(listener antlr.Parse
 func (s *SimplifiedDefaultingAnyDirectionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSimplifiedDefaultingAnyDirection(s)
+	}
+}
+
+func (s *SimplifiedDefaultingAnyDirectionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedDefaultingAnyDirection(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -41172,6 +43582,16 @@ func (s *SimplifiedContentsContext) EnterRule(listener antlr.ParseTreeListener) 
 func (s *SimplifiedContentsContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSimplifiedContents(s)
+	}
+}
+
+func (s *SimplifiedContentsContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedContents(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -41346,6 +43766,16 @@ func (s *SimplifiedPathUnionContext) EnterRule(listener antlr.ParseTreeListener)
 func (s *SimplifiedPathUnionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSimplifiedPathUnion(s)
+	}
+}
+
+func (s *SimplifiedPathUnionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedPathUnion(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -41540,6 +43970,16 @@ func (s *SimplifiedMultisetAlternationContext) ExitRule(listener antlr.ParseTree
 	}
 }
 
+func (s *SimplifiedMultisetAlternationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedMultisetAlternation(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -41717,6 +44157,16 @@ func (s *SimplifiedFactorLowLabelContext) ExitRule(listener antlr.ParseTreeListe
 	}
 }
 
+func (s *SimplifiedFactorLowLabelContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedFactorLowLabel(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type SimplifiedConcatenationLabelContext struct {
 	SimplifiedTermContext
@@ -41778,6 +44228,16 @@ func (s *SimplifiedConcatenationLabelContext) EnterRule(listener antlr.ParseTree
 func (s *SimplifiedConcatenationLabelContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSimplifiedConcatenationLabel(s)
+	}
+}
+
+func (s *SimplifiedConcatenationLabelContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedConcatenationLabel(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -41991,6 +44451,16 @@ func (s *SimplifiedConjunctionLabelContext) ExitRule(listener antlr.ParseTreeLis
 	}
 }
 
+func (s *SimplifiedConjunctionLabelContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedConjunctionLabel(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type SimplifiedFactorHighLabelContext struct {
 	SimplifiedFactorLowContext
@@ -42036,6 +44506,16 @@ func (s *SimplifiedFactorHighLabelContext) EnterRule(listener antlr.ParseTreeLis
 func (s *SimplifiedFactorHighLabelContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSimplifiedFactorHighLabel(s)
+	}
+}
+
+func (s *SimplifiedFactorHighLabelContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedFactorHighLabel(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -42249,6 +44729,16 @@ func (s *SimplifiedFactorHighContext) ExitRule(listener antlr.ParseTreeListener)
 	}
 }
 
+func (s *SimplifiedFactorHighContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedFactorHigh(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -42404,6 +44894,16 @@ func (s *SimplifiedQuantifiedContext) ExitRule(listener antlr.ParseTreeListener)
 	}
 }
 
+func (s *SimplifiedQuantifiedContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedQuantified(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -42521,6 +45021,16 @@ func (s *SimplifiedQuestionedContext) EnterRule(listener antlr.ParseTreeListener
 func (s *SimplifiedQuestionedContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSimplifiedQuestioned(s)
+	}
+}
+
+func (s *SimplifiedQuestionedContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedQuestioned(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -42657,6 +45167,16 @@ func (s *SimplifiedTertiaryContext) EnterRule(listener antlr.ParseTreeListener) 
 func (s *SimplifiedTertiaryContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSimplifiedTertiary(s)
+	}
+}
+
+func (s *SimplifiedTertiaryContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedTertiary(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -42892,6 +45412,16 @@ func (s *SimplifiedDirectionOverrideContext) ExitRule(listener antlr.ParseTreeLi
 	}
 }
 
+func (s *SimplifiedDirectionOverrideContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedDirectionOverride(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -43067,6 +45597,16 @@ func (s *SimplifiedOverrideLeftContext) ExitRule(listener antlr.ParseTreeListene
 	}
 }
 
+func (s *SimplifiedOverrideLeftContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedOverrideLeft(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -43188,6 +45728,16 @@ func (s *SimplifiedOverrideUndirectedContext) EnterRule(listener antlr.ParseTree
 func (s *SimplifiedOverrideUndirectedContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSimplifiedOverrideUndirected(s)
+	}
+}
+
+func (s *SimplifiedOverrideUndirectedContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedOverrideUndirected(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -43315,6 +45865,16 @@ func (s *SimplifiedOverrideRightContext) ExitRule(listener antlr.ParseTreeListen
 	}
 }
 
+func (s *SimplifiedOverrideRightContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedOverrideRight(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -43436,6 +45996,16 @@ func (s *SimplifiedOverrideLeftOrUndirectedContext) EnterRule(listener antlr.Par
 func (s *SimplifiedOverrideLeftOrUndirectedContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSimplifiedOverrideLeftOrUndirected(s)
+	}
+}
+
+func (s *SimplifiedOverrideLeftOrUndirectedContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedOverrideLeftOrUndirected(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -43565,6 +46135,16 @@ func (s *SimplifiedOverrideUndirectedOrRightContext) EnterRule(listener antlr.Pa
 func (s *SimplifiedOverrideUndirectedOrRightContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSimplifiedOverrideUndirectedOrRight(s)
+	}
+}
+
+func (s *SimplifiedOverrideUndirectedOrRightContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedOverrideUndirectedOrRight(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -43705,6 +46285,16 @@ func (s *SimplifiedOverrideLeftOrRightContext) ExitRule(listener antlr.ParseTree
 	}
 }
 
+func (s *SimplifiedOverrideLeftOrRightContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedOverrideLeftOrRight(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -43834,6 +46424,16 @@ func (s *SimplifiedOverrideAnyDirectionContext) EnterRule(listener antlr.ParseTr
 func (s *SimplifiedOverrideAnyDirectionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSimplifiedOverrideAnyDirection(s)
+	}
+}
+
+func (s *SimplifiedOverrideAnyDirectionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedOverrideAnyDirection(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -43973,6 +46573,16 @@ func (s *SimplifiedSecondaryContext) ExitRule(listener antlr.ParseTreeListener) 
 	}
 }
 
+func (s *SimplifiedSecondaryContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedSecondary(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -44108,6 +46718,16 @@ func (s *SimplifiedNegationContext) EnterRule(listener antlr.ParseTreeListener) 
 func (s *SimplifiedNegationContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSimplifiedNegation(s)
+	}
+}
+
+func (s *SimplifiedNegationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedNegation(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -44254,6 +46874,16 @@ func (s *SimplifiedPrimaryContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *SimplifiedPrimaryContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSimplifiedPrimary(s)
+	}
+}
+
+func (s *SimplifiedPrimaryContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimplifiedPrimary(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -44411,6 +47041,16 @@ func (s *WhereClauseContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *WhereClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitWhereClause(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -44532,6 +47172,16 @@ func (s *YieldClauseContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *YieldClauseContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitYieldClause(s)
+	}
+}
+
+func (s *YieldClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitYieldClause(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -44687,6 +47337,16 @@ func (s *YieldItemListContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *YieldItemListContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitYieldItemList(s)
+	}
+}
+
+func (s *YieldItemListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitYieldItemList(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -44850,6 +47510,16 @@ func (s *YieldItemContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *YieldItemContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitYieldItem(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -44979,6 +47649,16 @@ func (s *YieldItemNameContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *YieldItemNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitYieldItemName(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -45092,6 +47772,16 @@ func (s *YieldItemAliasContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *YieldItemAliasContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitYieldItemAlias(s)
+	}
+}
+
+func (s *YieldItemAliasContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitYieldItemAlias(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -45221,6 +47911,16 @@ func (s *GroupByClauseContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *GroupByClauseContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitGroupByClause(s)
+	}
+}
+
+func (s *GroupByClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGroupByClause(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -45404,6 +48104,16 @@ func (s *GroupingElementListContext) ExitRule(listener antlr.ParseTreeListener) 
 	}
 }
 
+func (s *GroupingElementListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGroupingElementList(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -45575,6 +48285,16 @@ func (s *GroupingElementContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *GroupingElementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGroupingElement(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -45676,6 +48396,16 @@ func (s *EmptyGroupingSetContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *EmptyGroupingSetContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitEmptyGroupingSet(s)
+	}
+}
+
+func (s *EmptyGroupingSetContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEmptyGroupingSet(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -45809,6 +48539,16 @@ func (s *OrderByClauseContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *OrderByClauseContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitOrderByClause(s)
+	}
+}
+
+func (s *OrderByClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitOrderByClause(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -45972,6 +48712,16 @@ func (s *SortSpecificationListContext) EnterRule(listener antlr.ParseTreeListene
 func (s *SortSpecificationListContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSortSpecificationList(s)
+	}
+}
+
+func (s *SortSpecificationListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSortSpecificationList(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -46158,6 +48908,16 @@ func (s *SortSpecificationContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *SortSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSortSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -46295,6 +49055,16 @@ func (s *SortKeyContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *SortKeyContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSortKey(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -46406,6 +49176,16 @@ func (s *OrderingSpecificationContext) EnterRule(listener antlr.ParseTreeListene
 func (s *OrderingSpecificationContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitOrderingSpecification(s)
+	}
+}
+
+func (s *OrderingSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitOrderingSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -46524,6 +49304,16 @@ func (s *NullOrderingContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *NullOrderingContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNullOrdering(s)
+	}
+}
+
+func (s *NullOrderingContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNullOrdering(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -46686,6 +49476,16 @@ func (s *LimitClauseContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *LimitClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLimitClause(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -46822,6 +49622,16 @@ func (s *OffsetClauseContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *OffsetClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitOffsetClause(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -46927,6 +49737,16 @@ func (s *OffsetSynonymContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *OffsetSynonymContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitOffsetSynonym(s)
+	}
+}
+
+func (s *OffsetSynonymContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitOffsetSynonym(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -47081,6 +49901,16 @@ func (s *SchemaReferenceContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *SchemaReferenceContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSchemaReference(s)
+	}
+}
+
+func (s *SchemaReferenceContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSchemaReference(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -47247,6 +50077,16 @@ func (s *AbsoluteCatalogSchemaReferenceContext) ExitRule(listener antlr.ParseTre
 	}
 }
 
+func (s *AbsoluteCatalogSchemaReferenceContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitAbsoluteCatalogSchemaReference(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -47402,6 +50242,16 @@ func (s *CatalogSchemaParentAndNameContext) ExitRule(listener antlr.ParseTreeLis
 	}
 }
 
+func (s *CatalogSchemaParentAndNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCatalogSchemaParentAndName(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -47551,6 +50401,16 @@ func (s *RelativeCatalogSchemaReferenceContext) ExitRule(listener antlr.ParseTre
 	}
 }
 
+func (s *RelativeCatalogSchemaReferenceContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitRelativeCatalogSchemaReference(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -47686,6 +50546,16 @@ func (s *PredefinedSchemaReferenceContext) ExitRule(listener antlr.ParseTreeList
 	}
 }
 
+func (s *PredefinedSchemaReferenceContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPredefinedSchemaReference(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -47808,6 +50678,16 @@ func (s *AbsoluteDirectoryPathContext) EnterRule(listener antlr.ParseTreeListene
 func (s *AbsoluteDirectoryPathContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitAbsoluteDirectoryPath(s)
+	}
+}
+
+func (s *AbsoluteDirectoryPathContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitAbsoluteDirectoryPath(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -47956,6 +50836,16 @@ func (s *RelativeDirectoryPathContext) EnterRule(listener antlr.ParseTreeListene
 func (s *RelativeDirectoryPathContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitRelativeDirectoryPath(s)
+	}
+}
+
+func (s *RelativeDirectoryPathContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitRelativeDirectoryPath(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -48173,6 +51063,16 @@ func (s *SimpleDirectoryPathContext) ExitRule(listener antlr.ParseTreeListener) 
 	}
 }
 
+func (s *SimpleDirectoryPathContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimpleDirectoryPath(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -48387,6 +51287,16 @@ func (s *GraphReferenceContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *GraphReferenceContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGraphReference(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -48554,6 +51464,16 @@ func (s *CatalogGraphParentAndNameContext) ExitRule(listener antlr.ParseTreeList
 	}
 }
 
+func (s *CatalogGraphParentAndNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCatalogGraphParentAndName(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -48668,6 +51588,16 @@ func (s *HomeGraphContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *HomeGraphContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitHomeGraph(s)
+	}
+}
+
+func (s *HomeGraphContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitHomeGraph(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -48805,6 +51735,16 @@ func (s *GraphTypeReferenceContext) EnterRule(listener antlr.ParseTreeListener) 
 func (s *GraphTypeReferenceContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitGraphTypeReference(s)
+	}
+}
+
+func (s *GraphTypeReferenceContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGraphTypeReference(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -48952,6 +51892,16 @@ func (s *CatalogGraphTypeParentAndNameContext) EnterRule(listener antlr.ParseTre
 func (s *CatalogGraphTypeParentAndNameContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCatalogGraphTypeParentAndName(s)
+	}
+}
+
+func (s *CatalogGraphTypeParentAndNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCatalogGraphTypeParentAndName(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -49130,6 +52080,16 @@ func (s *BindingTableReferenceContext) ExitRule(listener antlr.ParseTreeListener
 	}
 }
 
+func (s *BindingTableReferenceContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitBindingTableReference(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -49289,6 +52249,16 @@ func (s *ProcedureReferenceContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ProcedureReferenceContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitProcedureReference(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -49433,6 +52403,16 @@ func (s *CatalogProcedureParentAndNameContext) EnterRule(listener antlr.ParseTre
 func (s *CatalogProcedureParentAndNameContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCatalogProcedureParentAndName(s)
+	}
+}
+
+func (s *CatalogProcedureParentAndNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCatalogProcedureParentAndName(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -49615,6 +52595,16 @@ func (s *CatalogObjectParentReferenceContext) EnterRule(listener antlr.ParseTree
 func (s *CatalogObjectParentReferenceContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCatalogObjectParentReference(s)
+	}
+}
+
+func (s *CatalogObjectParentReferenceContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCatalogObjectParentReference(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -49831,6 +52821,16 @@ func (s *ReferenceParameterSpecificationContext) ExitRule(listener antlr.ParseTr
 	}
 }
 
+func (s *ReferenceParameterSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitReferenceParameterSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -49953,6 +52953,16 @@ func (s *NestedGraphTypeSpecificationContext) EnterRule(listener antlr.ParseTree
 func (s *NestedGraphTypeSpecificationContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNestedGraphTypeSpecification(s)
+	}
+}
+
+func (s *NestedGraphTypeSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNestedGraphTypeSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -50080,6 +53090,16 @@ func (s *GraphTypeSpecificationBodyContext) EnterRule(listener antlr.ParseTreeLi
 func (s *GraphTypeSpecificationBodyContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitGraphTypeSpecificationBody(s)
+	}
+}
+
+func (s *GraphTypeSpecificationBodyContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGraphTypeSpecificationBody(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -50227,6 +53247,16 @@ func (s *ElementTypeListContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *ElementTypeListContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitElementTypeList(s)
+	}
+}
+
+func (s *ElementTypeListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitElementTypeList(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -50390,6 +53420,16 @@ func (s *ElementTypeSpecificationContext) ExitRule(listener antlr.ParseTreeListe
 	}
 }
 
+func (s *ElementTypeSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitElementTypeSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -50534,6 +53574,16 @@ func (s *NodeTypeSpecificationContext) EnterRule(listener antlr.ParseTreeListene
 func (s *NodeTypeSpecificationContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNodeTypeSpecification(s)
+	}
+}
+
+func (s *NodeTypeSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNodeTypeSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -50730,6 +53780,16 @@ func (s *NodeTypePatternContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *NodeTypePatternContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNodeTypePattern(s)
+	}
+}
+
+func (s *NodeTypePatternContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNodeTypePattern(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -50966,6 +54026,16 @@ func (s *NodeTypePhraseContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *NodeTypePhraseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNodeTypePhrase(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -51136,6 +54206,16 @@ func (s *NodeTypePhraseFillerContext) ExitRule(listener antlr.ParseTreeListener)
 	}
 }
 
+func (s *NodeTypePhraseFillerContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNodeTypePhraseFiller(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -51296,6 +54376,16 @@ func (s *NodeTypeFillerContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *NodeTypeFillerContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNodeTypeFiller(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -51439,6 +54529,16 @@ func (s *LocalNodeTypeAliasContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *LocalNodeTypeAliasContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLocalNodeTypeAlias(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -51564,6 +54664,16 @@ func (s *NodeTypeImpliedContentContext) EnterRule(listener antlr.ParseTreeListen
 func (s *NodeTypeImpliedContentContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNodeTypeImpliedContent(s)
+	}
+}
+
+func (s *NodeTypeImpliedContentContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNodeTypeImpliedContent(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -51714,6 +54824,16 @@ func (s *NodeTypeKeyLabelSetContext) ExitRule(listener antlr.ParseTreeListener) 
 	}
 }
 
+func (s *NodeTypeKeyLabelSetContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNodeTypeKeyLabelSet(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -51846,6 +54966,16 @@ func (s *NodeTypeLabelSetContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *NodeTypeLabelSetContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNodeTypeLabelSet(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -51954,6 +55084,16 @@ func (s *NodeTypePropertyTypesContext) EnterRule(listener antlr.ParseTreeListene
 func (s *NodeTypePropertyTypesContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNodeTypePropertyTypes(s)
+	}
+}
+
+func (s *NodeTypePropertyTypesContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNodeTypePropertyTypes(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -52082,6 +55222,16 @@ func (s *EdgeTypeSpecificationContext) EnterRule(listener antlr.ParseTreeListene
 func (s *EdgeTypeSpecificationContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitEdgeTypeSpecification(s)
+	}
+}
+
+func (s *EdgeTypeSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEdgeTypeSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -52285,6 +55435,16 @@ func (s *EdgeTypePatternContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *EdgeTypePatternContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitEdgeTypePattern(s)
+	}
+}
+
+func (s *EdgeTypePatternContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEdgeTypePattern(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -52527,6 +55687,16 @@ func (s *EdgeTypePhraseContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *EdgeTypePhraseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEdgeTypePhrase(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -52681,6 +55851,16 @@ func (s *EdgeTypePhraseFillerContext) EnterRule(listener antlr.ParseTreeListener
 func (s *EdgeTypePhraseFillerContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitEdgeTypePhraseFiller(s)
+	}
+}
+
+func (s *EdgeTypePhraseFillerContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEdgeTypePhraseFiller(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -52848,6 +56028,16 @@ func (s *EdgeTypeFillerContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *EdgeTypeFillerContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEdgeTypeFiller(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -53012,6 +56202,16 @@ func (s *EdgeTypeImpliedContentContext) ExitRule(listener antlr.ParseTreeListene
 	}
 }
 
+func (s *EdgeTypeImpliedContentContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEdgeTypeImpliedContent(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -53159,6 +56359,16 @@ func (s *EdgeTypeKeyLabelSetContext) ExitRule(listener antlr.ParseTreeListener) 
 	}
 }
 
+func (s *EdgeTypeKeyLabelSetContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEdgeTypeKeyLabelSet(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -53291,6 +56501,16 @@ func (s *EdgeTypeLabelSetContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *EdgeTypeLabelSetContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEdgeTypeLabelSet(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -53399,6 +56619,16 @@ func (s *EdgeTypePropertyTypesContext) EnterRule(listener antlr.ParseTreeListene
 func (s *EdgeTypePropertyTypesContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitEdgeTypePropertyTypes(s)
+	}
+}
+
+func (s *EdgeTypePropertyTypesContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEdgeTypePropertyTypes(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -53527,6 +56757,16 @@ func (s *EdgeTypePatternDirectedContext) EnterRule(listener antlr.ParseTreeListe
 func (s *EdgeTypePatternDirectedContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitEdgeTypePatternDirected(s)
+	}
+}
+
+func (s *EdgeTypePatternDirectedContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEdgeTypePatternDirected(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -53694,6 +56934,16 @@ func (s *EdgeTypePatternPointingRightContext) ExitRule(listener antlr.ParseTreeL
 	}
 }
 
+func (s *EdgeTypePatternPointingRightContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEdgeTypePatternPointingRight(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -53844,6 +57094,16 @@ func (s *EdgeTypePatternPointingLeftContext) EnterRule(listener antlr.ParseTreeL
 func (s *EdgeTypePatternPointingLeftContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitEdgeTypePatternPointingLeft(s)
+	}
+}
+
+func (s *EdgeTypePatternPointingLeftContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEdgeTypePatternPointingLeft(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -54000,6 +57260,16 @@ func (s *EdgeTypePatternUndirectedContext) ExitRule(listener antlr.ParseTreeList
 	}
 }
 
+func (s *EdgeTypePatternUndirectedContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEdgeTypePatternUndirected(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -54126,6 +57396,16 @@ func (s *ArcTypePointingRightContext) EnterRule(listener antlr.ParseTreeListener
 func (s *ArcTypePointingRightContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitArcTypePointingRight(s)
+	}
+}
+
+func (s *ArcTypePointingRightContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitArcTypePointingRight(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -54266,6 +57546,16 @@ func (s *ArcTypePointingLeftContext) ExitRule(listener antlr.ParseTreeListener) 
 	}
 }
 
+func (s *ArcTypePointingLeftContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitArcTypePointingLeft(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -54400,6 +57690,16 @@ func (s *ArcTypeUndirectedContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *ArcTypeUndirectedContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitArcTypeUndirected(s)
+	}
+}
+
+func (s *ArcTypeUndirectedContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitArcTypeUndirected(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -54554,6 +57854,16 @@ func (s *SourceNodeTypeReferenceContext) EnterRule(listener antlr.ParseTreeListe
 func (s *SourceNodeTypeReferenceContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSourceNodeTypeReference(s)
+	}
+}
+
+func (s *SourceNodeTypeReferenceContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSourceNodeTypeReference(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -54759,6 +58069,16 @@ func (s *DestinationNodeTypeReferenceContext) ExitRule(listener antlr.ParseTreeL
 	}
 }
 
+func (s *DestinationNodeTypeReferenceContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDestinationNodeTypeReference(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -54927,6 +58247,16 @@ func (s *EdgeKindContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *EdgeKindContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEdgeKind(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -55049,6 +58379,16 @@ func (s *EndpointPairPhraseContext) EnterRule(listener antlr.ParseTreeListener) 
 func (s *EndpointPairPhraseContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitEndpointPairPhrase(s)
+	}
+}
+
+func (s *EndpointPairPhraseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEndpointPairPhrase(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -55185,6 +58525,16 @@ func (s *EndpointPairContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *EndpointPairContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitEndpointPair(s)
+	}
+}
+
+func (s *EndpointPairContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEndpointPair(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -55332,6 +58682,16 @@ func (s *EndpointPairDirectedContext) EnterRule(listener antlr.ParseTreeListener
 func (s *EndpointPairDirectedContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitEndpointPairDirected(s)
+	}
+}
+
+func (s *EndpointPairDirectedContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEndpointPairDirected(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -55509,6 +58869,16 @@ func (s *EndpointPairPointingRightContext) ExitRule(listener antlr.ParseTreeList
 	}
 }
 
+func (s *EndpointPairPointingRightContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEndpointPairPointingRight(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -55673,6 +59043,16 @@ func (s *EndpointPairPointingLeftContext) EnterRule(listener antlr.ParseTreeList
 func (s *EndpointPairPointingLeftContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitEndpointPairPointingLeft(s)
+	}
+}
+
+func (s *EndpointPairPointingLeftContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEndpointPairPointingLeft(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -55859,6 +59239,16 @@ func (s *EndpointPairUndirectedContext) ExitRule(listener antlr.ParseTreeListene
 	}
 }
 
+func (s *EndpointPairUndirectedContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEndpointPairUndirected(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -55987,6 +59377,16 @@ func (s *ConnectorPointingRightContext) ExitRule(listener antlr.ParseTreeListene
 	}
 }
 
+func (s *ConnectorPointingRightContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitConnectorPointingRight(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -56097,6 +59497,16 @@ func (s *ConnectorUndirectedContext) EnterRule(listener antlr.ParseTreeListener)
 func (s *ConnectorUndirectedContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitConnectorUndirected(s)
+	}
+}
+
+func (s *ConnectorUndirectedContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitConnectorUndirected(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -56220,6 +59630,16 @@ func (s *SourceNodeTypeAliasContext) ExitRule(listener antlr.ParseTreeListener) 
 	}
 }
 
+func (s *SourceNodeTypeAliasContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSourceNodeTypeAlias(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -56328,6 +59748,16 @@ func (s *DestinationNodeTypeAliasContext) EnterRule(listener antlr.ParseTreeList
 func (s *DestinationNodeTypeAliasContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitDestinationNodeTypeAlias(s)
+	}
+}
+
+func (s *DestinationNodeTypeAliasContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDestinationNodeTypeAlias(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -56483,6 +59913,16 @@ func (s *LabelSetPhraseContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *LabelSetPhraseContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitLabelSetPhrase(s)
+	}
+}
+
+func (s *LabelSetPhraseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLabelSetPhrase(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -56683,6 +60123,16 @@ func (s *LabelSetSpecificationContext) ExitRule(listener antlr.ParseTreeListener
 	}
 }
 
+func (s *LabelSetSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLabelSetSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -56839,6 +60289,16 @@ func (s *PropertyTypesSpecificationContext) EnterRule(listener antlr.ParseTreeLi
 func (s *PropertyTypesSpecificationContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitPropertyTypesSpecification(s)
+	}
+}
+
+func (s *PropertyTypesSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPropertyTypesSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -57015,6 +60475,16 @@ func (s *PropertyTypeListContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *PropertyTypeListContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitPropertyTypeList(s)
+	}
+}
+
+func (s *PropertyTypeListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPropertyTypeList(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -57195,6 +60665,16 @@ func (s *PropertyTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *PropertyTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPropertyType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -57327,6 +60807,16 @@ func (s *PropertyValueTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *PropertyValueTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPropertyValueType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -57445,6 +60935,16 @@ func (s *BindingTableTypeContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *BindingTableTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitBindingTableType(s)
+	}
+}
+
+func (s *BindingTableTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitBindingTableType(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -57622,6 +61122,16 @@ func (s *DynamicPropertyValueTypeLabelContext) ExitRule(listener antlr.ParseTree
 	}
 }
 
+func (s *DynamicPropertyValueTypeLabelContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDynamicPropertyValueTypeLabel(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type ClosedDynamicUnionTypeAtl1Context struct {
 	ValueTypeContext
@@ -57719,6 +61229,16 @@ func (s *ClosedDynamicUnionTypeAtl1Context) ExitRule(listener antlr.ParseTreeLis
 	}
 }
 
+func (s *ClosedDynamicUnionTypeAtl1Context) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitClosedDynamicUnionTypeAtl1(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type ClosedDynamicUnionTypeAtl2Context struct {
 	ValueTypeContext
@@ -57796,6 +61316,16 @@ func (s *ClosedDynamicUnionTypeAtl2Context) ExitRule(listener antlr.ParseTreeLis
 	}
 }
 
+func (s *ClosedDynamicUnionTypeAtl2Context) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitClosedDynamicUnionTypeAtl2(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type PathValueTypeLabelContext struct {
 	ValueTypeContext
@@ -57841,6 +61371,16 @@ func (s *PathValueTypeLabelContext) EnterRule(listener antlr.ParseTreeListener) 
 func (s *PathValueTypeLabelContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitPathValueTypeLabel(s)
+	}
+}
+
+func (s *PathValueTypeLabelContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPathValueTypeLabel(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -57929,6 +61469,16 @@ func (s *ListValueTypeAlt3Context) EnterRule(listener antlr.ParseTreeListener) {
 func (s *ListValueTypeAlt3Context) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitListValueTypeAlt3(s)
+	}
+}
+
+func (s *ListValueTypeAlt3Context) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitListValueTypeAlt3(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -58033,6 +61583,16 @@ func (s *ListValueTypeAlt2Context) EnterRule(listener antlr.ParseTreeListener) {
 func (s *ListValueTypeAlt2Context) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitListValueTypeAlt2(s)
+	}
+}
+
+func (s *ListValueTypeAlt2Context) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitListValueTypeAlt2(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -58148,6 +61708,16 @@ func (s *ListValueTypeAlt1Context) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ListValueTypeAlt1Context) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitListValueTypeAlt1(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type PredefinedTypeLabelContext struct {
 	ValueTypeContext
@@ -58196,6 +61766,16 @@ func (s *PredefinedTypeLabelContext) ExitRule(listener antlr.ParseTreeListener) 
 	}
 }
 
+func (s *PredefinedTypeLabelContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPredefinedTypeLabel(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type RecordTypeLabelContext struct {
 	ValueTypeContext
@@ -58241,6 +61821,16 @@ func (s *RecordTypeLabelContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *RecordTypeLabelContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitRecordTypeLabel(s)
+	}
+}
+
+func (s *RecordTypeLabelContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitRecordTypeLabel(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -58297,6 +61887,16 @@ func (s *OpenDynamicUnionTypeLabelContext) EnterRule(listener antlr.ParseTreeLis
 func (s *OpenDynamicUnionTypeLabelContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitOpenDynamicUnionTypeLabel(s)
+	}
+}
+
+func (s *OpenDynamicUnionTypeLabelContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitOpenDynamicUnionTypeLabel(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -58875,6 +62475,16 @@ func (s *TypedContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *TypedContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTyped(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -59097,6 +62707,16 @@ func (s *PredefinedTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *PredefinedTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPredefinedType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -59277,6 +62897,16 @@ func (s *BooleanTypeContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *BooleanTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitBooleanType(s)
+	}
+}
+
+func (s *BooleanTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitBooleanType(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -59491,6 +63121,16 @@ func (s *CharacterStringTypeContext) EnterRule(listener antlr.ParseTreeListener)
 func (s *CharacterStringTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCharacterStringType(s)
+	}
+}
+
+func (s *CharacterStringTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCharacterStringType(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -59875,6 +63515,16 @@ func (s *ByteStringTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ByteStringTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitByteStringType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -60175,6 +63825,16 @@ func (s *MinLengthContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *MinLengthContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitMinLength(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -60286,6 +63946,16 @@ func (s *MaxLengthContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *MaxLengthContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitMaxLength(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -60394,6 +64064,16 @@ func (s *FixedLengthContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *FixedLengthContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitFixedLength(s)
+	}
+}
+
+func (s *FixedLengthContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFixedLength(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -60522,6 +64202,16 @@ func (s *NumericTypeContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *NumericTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNumericType(s)
+	}
+}
+
+func (s *NumericTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNumericType(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -60675,6 +64365,16 @@ func (s *ExactNumericTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ExactNumericTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitExactNumericType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -60822,6 +64522,16 @@ func (s *BinaryExactNumericTypeContext) EnterRule(listener antlr.ParseTreeListen
 func (s *BinaryExactNumericTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitBinaryExactNumericType(s)
+	}
+}
+
+func (s *BinaryExactNumericTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitBinaryExactNumericType(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -61049,6 +64759,16 @@ func (s *SignedBinaryExactNumericTypeContext) EnterRule(listener antlr.ParseTree
 func (s *SignedBinaryExactNumericTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSignedBinaryExactNumericType(s)
+	}
+}
+
+func (s *SignedBinaryExactNumericTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSignedBinaryExactNumericType(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -61546,6 +65266,16 @@ func (s *UnsignedBinaryExactNumericTypeContext) ExitRule(listener antlr.ParseTre
 	}
 }
 
+func (s *UnsignedBinaryExactNumericTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitUnsignedBinaryExactNumericType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -62005,6 +65735,16 @@ func (s *VerboseBinaryExactNumericTypeContext) ExitRule(listener antlr.ParseTree
 	}
 }
 
+func (s *VerboseBinaryExactNumericTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitVerboseBinaryExactNumericType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -62451,6 +66191,16 @@ func (s *DecimalExactNumericTypeContext) ExitRule(listener antlr.ParseTreeListen
 	}
 }
 
+func (s *DecimalExactNumericTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDecimalExactNumericType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -62636,6 +66386,16 @@ func (s *PrecisionContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *PrecisionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPrecision(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -62744,6 +66504,16 @@ func (s *ScaleContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *ScaleContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitScale(s)
+	}
+}
+
+func (s *ScaleContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitScale(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -62949,6 +66719,16 @@ func (s *ApproximateNumericTypeContext) EnterRule(listener antlr.ParseTreeListen
 func (s *ApproximateNumericTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitApproximateNumericType(s)
+	}
+}
+
+func (s *ApproximateNumericTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitApproximateNumericType(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -63357,6 +67137,16 @@ func (s *TemporalTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *TemporalTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTemporalType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -63558,6 +67348,16 @@ func (s *TemporalInstantTypeContext) ExitRule(listener antlr.ParseTreeListener) 
 	}
 }
 
+func (s *TemporalInstantTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTemporalInstantType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -63739,6 +67539,16 @@ func (s *DatetimeTypeContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *DatetimeTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitDatetimeType(s)
+	}
+}
+
+func (s *DatetimeTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDatetimeType(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -63971,6 +67781,16 @@ func (s *LocaldatetimeTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *LocaldatetimeTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLocaldatetimeType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -64184,6 +68004,16 @@ func (s *DateTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *DateTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDateType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -64334,6 +68164,16 @@ func (s *TimeTypeContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *TimeTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitTimeType(s)
+	}
+}
+
+func (s *TimeTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTimeType(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -64558,6 +68398,16 @@ func (s *LocaltimeTypeContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *LocaltimeTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitLocaltimeType(s)
+	}
+}
+
+func (s *LocaltimeTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLocaltimeType(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -64792,6 +68642,16 @@ func (s *TemporalDurationTypeContext) ExitRule(listener antlr.ParseTreeListener)
 	}
 }
 
+func (s *TemporalDurationTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTemporalDurationType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -64945,6 +68805,16 @@ func (s *TemporalDurationQualifierContext) EnterRule(listener antlr.ParseTreeLis
 func (s *TemporalDurationQualifierContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitTemporalDurationQualifier(s)
+	}
+}
+
+func (s *TemporalDurationQualifierContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTemporalDurationQualifier(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -65172,6 +69042,16 @@ func (s *ReferenceValueTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ReferenceValueTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitReferenceValueType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -65335,6 +69215,16 @@ func (s *ImmaterialValueTypeContext) ExitRule(listener antlr.ParseTreeListener) 
 	}
 }
 
+func (s *ImmaterialValueTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitImmaterialValueType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -65450,6 +69340,16 @@ func (s *NullTypeContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *NullTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNullType(s)
+	}
+}
+
+func (s *NullTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNullType(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -65575,6 +69475,16 @@ func (s *EmptyTypeContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *EmptyTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitEmptyType(s)
+	}
+}
+
+func (s *EmptyTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEmptyType(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -65740,6 +69650,16 @@ func (s *GraphReferenceValueTypeContext) ExitRule(listener antlr.ParseTreeListen
 	}
 }
 
+func (s *GraphReferenceValueTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGraphReferenceValueType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -65897,6 +69817,16 @@ func (s *ClosedGraphReferenceValueTypeContext) EnterRule(listener antlr.ParseTre
 func (s *ClosedGraphReferenceValueTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitClosedGraphReferenceValueType(s)
+	}
+}
+
+func (s *ClosedGraphReferenceValueTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitClosedGraphReferenceValueType(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -66065,6 +69995,16 @@ func (s *OpenGraphReferenceValueTypeContext) EnterRule(listener antlr.ParseTreeL
 func (s *OpenGraphReferenceValueTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitOpenGraphReferenceValueType(s)
+	}
+}
+
+func (s *OpenGraphReferenceValueTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitOpenGraphReferenceValueType(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -66242,6 +70182,16 @@ func (s *BindingTableReferenceValueTypeContext) ExitRule(listener antlr.ParseTre
 	}
 }
 
+func (s *BindingTableReferenceValueTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitBindingTableReferenceValueType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -66380,6 +70330,16 @@ func (s *NodeReferenceValueTypeContext) EnterRule(listener antlr.ParseTreeListen
 func (s *NodeReferenceValueTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNodeReferenceValueType(s)
+	}
+}
+
+func (s *NodeReferenceValueTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNodeReferenceValueType(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -66530,6 +70490,16 @@ func (s *ClosedNodeReferenceValueTypeContext) ExitRule(listener antlr.ParseTreeL
 	}
 }
 
+func (s *ClosedNodeReferenceValueTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitClosedNodeReferenceValueType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -66673,6 +70643,16 @@ func (s *OpenNodeReferenceValueTypeContext) EnterRule(listener antlr.ParseTreeLi
 func (s *OpenNodeReferenceValueTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitOpenNodeReferenceValueType(s)
+	}
+}
+
+func (s *OpenNodeReferenceValueTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitOpenNodeReferenceValueType(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -66838,6 +70818,16 @@ func (s *EdgeReferenceValueTypeContext) ExitRule(listener antlr.ParseTreeListene
 	}
 }
 
+func (s *EdgeReferenceValueTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEdgeReferenceValueType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -66985,6 +70975,16 @@ func (s *ClosedEdgeReferenceValueTypeContext) ExitRule(listener antlr.ParseTreeL
 	}
 }
 
+func (s *ClosedEdgeReferenceValueTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitClosedEdgeReferenceValueType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -67128,6 +71128,16 @@ func (s *OpenEdgeReferenceValueTypeContext) EnterRule(listener antlr.ParseTreeLi
 func (s *OpenEdgeReferenceValueTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitOpenEdgeReferenceValueType(s)
+	}
+}
+
+func (s *OpenEdgeReferenceValueTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitOpenEdgeReferenceValueType(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -67281,6 +71291,16 @@ func (s *PathValueTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *PathValueTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPathValueType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -67409,6 +71429,16 @@ func (s *ListValueTypeNameContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ListValueTypeNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitListValueTypeName(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -67510,6 +71540,16 @@ func (s *ListValueTypeNameSynonymContext) EnterRule(listener antlr.ParseTreeList
 func (s *ListValueTypeNameSynonymContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitListValueTypeNameSynonym(s)
+	}
+}
+
+func (s *ListValueTypeNameSynonymContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitListValueTypeNameSynonym(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -67657,6 +71697,16 @@ func (s *RecordTypeContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *RecordTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitRecordType(s)
+	}
+}
+
+func (s *RecordTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitRecordType(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -67870,6 +71920,16 @@ func (s *FieldTypesSpecificationContext) ExitRule(listener antlr.ParseTreeListen
 	}
 }
 
+func (s *FieldTypesSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFieldTypesSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -68046,6 +72106,16 @@ func (s *FieldTypeListContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *FieldTypeListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFieldTypeList(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -68179,6 +72249,16 @@ func (s *NotNullContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *NotNullContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNotNull(s)
+	}
+}
+
+func (s *NotNullContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNotNull(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -68339,6 +72419,16 @@ func (s *FieldTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *FieldTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFieldType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -68468,6 +72558,16 @@ func (s *SearchConditionContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *SearchConditionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSearchCondition(s)
+	}
+}
+
+func (s *SearchConditionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSearchCondition(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -68718,6 +72818,16 @@ func (s *PredicateContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *PredicateContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPredicate(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -68917,6 +73027,16 @@ func (s *CompOpContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *CompOpContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCompOp(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -69093,6 +73213,16 @@ func (s *ExistsPredicateContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *ExistsPredicateContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitExistsPredicate(s)
+	}
+}
+
+func (s *ExistsPredicateContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitExistsPredicate(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -69336,6 +73466,16 @@ func (s *NullPredicateContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *NullPredicateContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNullPredicate(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -69446,6 +73586,16 @@ func (s *NullPredicatePart2Context) EnterRule(listener antlr.ParseTreeListener) 
 func (s *NullPredicatePart2Context) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNullPredicatePart2(s)
+	}
+}
+
+func (s *NullPredicatePart2Context) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNullPredicatePart2(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -69610,6 +73760,16 @@ func (s *ValueTypePredicateContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ValueTypePredicateContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitValueTypePredicate(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -69749,6 +73909,16 @@ func (s *ValueTypePredicatePart2Context) EnterRule(listener antlr.ParseTreeListe
 func (s *ValueTypePredicatePart2Context) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitValueTypePredicatePart2(s)
+	}
+}
+
+func (s *ValueTypePredicatePart2Context) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitValueTypePredicatePart2(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -69908,6 +74078,16 @@ func (s *NormalizedPredicatePart2Context) EnterRule(listener antlr.ParseTreeList
 func (s *NormalizedPredicatePart2Context) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNormalizedPredicatePart2(s)
+	}
+}
+
+func (s *NormalizedPredicatePart2Context) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNormalizedPredicatePart2(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -70087,6 +74267,16 @@ func (s *DirectedPredicateContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *DirectedPredicateContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDirectedPredicate(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -70197,6 +74387,16 @@ func (s *DirectedPredicatePart2Context) EnterRule(listener antlr.ParseTreeListen
 func (s *DirectedPredicatePart2Context) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitDirectedPredicatePart2(s)
+	}
+}
+
+func (s *DirectedPredicatePart2Context) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDirectedPredicatePart2(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -70361,6 +74561,16 @@ func (s *LabeledPredicateContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *LabeledPredicateContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLabeledPredicate(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -70493,6 +74703,16 @@ func (s *LabeledPredicatePart2Context) ExitRule(listener antlr.ParseTreeListener
 	}
 }
 
+func (s *LabeledPredicatePart2Context) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLabeledPredicatePart2(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -70608,6 +74828,16 @@ func (s *IsLabeledOrColonContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *IsLabeledOrColonContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitIsLabeledOrColon(s)
+	}
+}
+
+func (s *IsLabeledOrColonContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitIsLabeledOrColon(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -70815,6 +75045,16 @@ func (s *SourceDestinationPredicateContext) ExitRule(listener antlr.ParseTreeLis
 	}
 }
 
+func (s *SourceDestinationPredicateContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSourceDestinationPredicate(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -70953,6 +75193,16 @@ func (s *NodeReferenceContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *NodeReferenceContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNodeReference(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -71081,6 +75331,16 @@ func (s *SourcePredicatePart2Context) EnterRule(listener antlr.ParseTreeListener
 func (s *SourcePredicatePart2Context) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSourcePredicatePart2(s)
+	}
+}
+
+func (s *SourcePredicatePart2Context) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSourcePredicatePart2(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -71260,6 +75520,16 @@ func (s *DestinationPredicatePart2Context) ExitRule(listener antlr.ParseTreeList
 	}
 }
 
+func (s *DestinationPredicatePart2Context) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDestinationPredicatePart2(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -71413,6 +75683,16 @@ func (s *EdgeReferenceContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *EdgeReferenceContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitEdgeReference(s)
+	}
+}
+
+func (s *EdgeReferenceContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEdgeReference(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -71575,6 +75855,16 @@ func (s *All_differentPredicateContext) EnterRule(listener antlr.ParseTreeListen
 func (s *All_differentPredicateContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitAll_differentPredicate(s)
+	}
+}
+
+func (s *All_differentPredicateContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitAll_differentPredicate(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -71808,6 +76098,16 @@ func (s *SamePredicateContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *SamePredicateContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSamePredicate(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -72024,6 +76324,16 @@ func (s *Property_existsPredicateContext) ExitRule(listener antlr.ParseTreeListe
 	}
 }
 
+func (s *Property_existsPredicateContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitProperty_existsPredicate(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -72222,6 +76532,16 @@ func (s *ConjunctiveExprAltContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ConjunctiveExprAltContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitConjunctiveExprAlt(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type PropertyGraphExprAltContext struct {
 	ValueExpressionContext
@@ -72275,6 +76595,16 @@ func (s *PropertyGraphExprAltContext) EnterRule(listener antlr.ParseTreeListener
 func (s *PropertyGraphExprAltContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitPropertyGraphExprAlt(s)
+	}
+}
+
+func (s *PropertyGraphExprAltContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPropertyGraphExprAlt(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -72366,6 +76696,16 @@ func (s *MultDivExprAltContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *MultDivExprAltContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitMultDivExprAlt(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type BindingTableExprAltContext struct {
 	ValueExpressionContext
@@ -72419,6 +76759,16 @@ func (s *BindingTableExprAltContext) EnterRule(listener antlr.ParseTreeListener)
 func (s *BindingTableExprAltContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitBindingTableExprAlt(s)
+	}
+}
+
+func (s *BindingTableExprAltContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitBindingTableExprAlt(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -72482,6 +76832,16 @@ func (s *SignedExprAltContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *SignedExprAltContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSignedExprAlt(s)
+	}
+}
+
+func (s *SignedExprAltContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSignedExprAlt(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -72557,6 +76917,16 @@ func (s *IsNotExprAltContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *IsNotExprAltContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitIsNotExprAlt(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type NormalizedPredicateExprAltContext struct {
 	ValueExpressionContext
@@ -72621,6 +76991,16 @@ func (s *NormalizedPredicateExprAltContext) ExitRule(listener antlr.ParseTreeLis
 	}
 }
 
+func (s *NormalizedPredicateExprAltContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNormalizedPredicateExprAlt(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type NotExprAltContext struct {
 	ValueExpressionContext
@@ -72673,6 +77053,16 @@ func (s *NotExprAltContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *NotExprAltContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNotExprAlt(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type ValueFunctionExprAltContext struct {
 	ValueExpressionContext
@@ -72718,6 +77108,16 @@ func (s *ValueFunctionExprAltContext) EnterRule(listener antlr.ParseTreeListener
 func (s *ValueFunctionExprAltContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitValueFunctionExprAlt(s)
+	}
+}
+
+func (s *ValueFunctionExprAltContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitValueFunctionExprAlt(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -72795,6 +77195,16 @@ func (s *ConcatenationExprAltContext) EnterRule(listener antlr.ParseTreeListener
 func (s *ConcatenationExprAltContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitConcatenationExprAlt(s)
+	}
+}
+
+func (s *ConcatenationExprAltContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitConcatenationExprAlt(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -72883,6 +77293,16 @@ func (s *DisjunctiveExprAltContext) EnterRule(listener antlr.ParseTreeListener) 
 func (s *DisjunctiveExprAltContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitDisjunctiveExprAlt(s)
+	}
+}
+
+func (s *DisjunctiveExprAltContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDisjunctiveExprAlt(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -72975,6 +77395,16 @@ func (s *ComparisonExprAltContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ComparisonExprAltContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitComparisonExprAlt(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type PrimaryExprAltContext struct {
 	ValueExpressionContext
@@ -73020,6 +77450,16 @@ func (s *PrimaryExprAltContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *PrimaryExprAltContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitPrimaryExprAlt(s)
+	}
+}
+
+func (s *PrimaryExprAltContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPrimaryExprAlt(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -73111,6 +77551,16 @@ func (s *AddSubtractExprAltContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *AddSubtractExprAltContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitAddSubtractExprAlt(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 type PredicateExprAltContext struct {
 	ValueExpressionContext
@@ -73156,6 +77606,16 @@ func (s *PredicateExprAltContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *PredicateExprAltContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitPredicateExprAlt(s)
+	}
+}
+
+func (s *PredicateExprAltContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPredicateExprAlt(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -73782,6 +78242,16 @@ func (s *ValueFunctionContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ValueFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitValueFunction(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -73941,6 +78411,16 @@ func (s *BooleanValueExpressionContext) EnterRule(listener antlr.ParseTreeListen
 func (s *BooleanValueExpressionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitBooleanValueExpression(s)
+	}
+}
+
+func (s *BooleanValueExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitBooleanValueExpression(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -74120,6 +78600,16 @@ func (s *CharacterOrByteStringFunctionContext) EnterRule(listener antlr.ParseTre
 func (s *CharacterOrByteStringFunctionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCharacterOrByteStringFunction(s)
+	}
+}
+
+func (s *CharacterOrByteStringFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCharacterOrByteStringFunction(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -74322,6 +78812,16 @@ func (s *SubCharacterOrByteStringContext) ExitRule(listener antlr.ParseTreeListe
 	}
 }
 
+func (s *SubCharacterOrByteStringContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSubCharacterOrByteString(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -74489,6 +78989,16 @@ func (s *TrimSingleCharacterOrByteStringContext) ExitRule(listener antlr.ParseTr
 	}
 }
 
+func (s *TrimSingleCharacterOrByteStringContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTrimSingleCharacterOrByteString(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -74641,6 +79151,16 @@ func (s *FoldCharacterStringContext) EnterRule(listener antlr.ParseTreeListener)
 func (s *FoldCharacterStringContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitFoldCharacterString(s)
+	}
+}
+
+func (s *FoldCharacterStringContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFoldCharacterString(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -74837,6 +79357,16 @@ func (s *TrimMultiCharacterCharacterStringContext) EnterRule(listener antlr.Pars
 func (s *TrimMultiCharacterCharacterStringContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitTrimMultiCharacterCharacterString(s)
+	}
+}
+
+func (s *TrimMultiCharacterCharacterStringContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTrimMultiCharacterCharacterString(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -75040,6 +79570,16 @@ func (s *NormalizeCharacterStringContext) ExitRule(listener antlr.ParseTreeListe
 	}
 }
 
+func (s *NormalizeCharacterStringContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNormalizeCharacterString(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -75200,6 +79740,16 @@ func (s *NodeReferenceValueExpressionContext) ExitRule(listener antlr.ParseTreeL
 	}
 }
 
+func (s *NodeReferenceValueExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNodeReferenceValueExpression(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -75311,6 +79861,16 @@ func (s *EdgeReferenceValueExpressionContext) ExitRule(listener antlr.ParseTreeL
 	}
 }
 
+func (s *EdgeReferenceValueExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEdgeReferenceValueExpression(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -75419,6 +79979,16 @@ func (s *AggregatingValueExpressionContext) EnterRule(listener antlr.ParseTreeLi
 func (s *AggregatingValueExpressionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitAggregatingValueExpression(s)
+	}
+}
+
+func (s *AggregatingValueExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitAggregatingValueExpression(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -75725,6 +80295,16 @@ func (s *ValueExpressionPrimaryContext) ExitRule(listener antlr.ParseTreeListene
 	}
 }
 
+func (s *ValueExpressionPrimaryContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitValueExpressionPrimary(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -75986,6 +80566,16 @@ func (s *ParenthesizedValueExpressionContext) ExitRule(listener antlr.ParseTreeL
 	}
 }
 
+func (s *ParenthesizedValueExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitParenthesizedValueExpression(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -76127,6 +80717,16 @@ func (s *NonParenthesizedValueExpressionPrimaryContext) EnterRule(listener antlr
 func (s *NonParenthesizedValueExpressionPrimaryContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNonParenthesizedValueExpressionPrimary(s)
+	}
+}
+
+func (s *NonParenthesizedValueExpressionPrimaryContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNonParenthesizedValueExpressionPrimary(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -76418,6 +81018,16 @@ func (s *NonParenthesizedValueExpressionPrimarySpecialCaseContext) ExitRule(list
 	}
 }
 
+func (s *NonParenthesizedValueExpressionPrimarySpecialCaseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNonParenthesizedValueExpressionPrimarySpecialCase(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -76633,6 +81243,16 @@ func (s *UnsignedValueSpecificationContext) ExitRule(listener antlr.ParseTreeLis
 	}
 }
 
+func (s *UnsignedValueSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitUnsignedValueSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -76783,6 +81403,16 @@ func (s *NonNegativeIntegerSpecificationContext) ExitRule(listener antlr.ParseTr
 	}
 }
 
+func (s *NonNegativeIntegerSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNonNegativeIntegerSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -76921,6 +81551,16 @@ func (s *GeneralValueSpecificationContext) ExitRule(listener antlr.ParseTreeList
 	}
 }
 
+func (s *GeneralValueSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGeneralValueSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -77043,6 +81683,16 @@ func (s *DynamicParameterSpecificationContext) EnterRule(listener antlr.ParseTre
 func (s *DynamicParameterSpecificationContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitDynamicParameterSpecification(s)
+	}
+}
+
+func (s *DynamicParameterSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDynamicParameterSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -77193,6 +81843,16 @@ func (s *LetValueExpressionContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *LetValueExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLetValueExpression(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -77337,6 +81997,16 @@ func (s *ValueQueryExpressionContext) ExitRule(listener antlr.ParseTreeListener)
 	}
 }
 
+func (s *ValueQueryExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitValueQueryExpression(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -77470,6 +82140,16 @@ func (s *CaseExpressionContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *CaseExpressionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCaseExpression(s)
+	}
+}
+
+func (s *CaseExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCaseExpression(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -77659,6 +82339,16 @@ func (s *CaseAbbreviationContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *CaseAbbreviationContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCaseAbbreviation(s)
+	}
+}
+
+func (s *CaseAbbreviationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCaseAbbreviation(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -77904,6 +82594,16 @@ func (s *CaseSpecificationContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *CaseSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCaseSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -78101,6 +82801,16 @@ func (s *SimpleCaseContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *SimpleCaseContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSimpleCase(s)
+	}
+}
+
+func (s *SimpleCaseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimpleCase(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -78323,6 +83033,16 @@ func (s *SearchedCaseContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *SearchedCaseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSearchedCase(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -78512,6 +83232,16 @@ func (s *SimpleWhenClauseContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *SimpleWhenClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSimpleWhenClause(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -78670,6 +83400,16 @@ func (s *SearchedWhenClauseContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *SearchedWhenClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSearchedWhenClause(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -78806,6 +83546,16 @@ func (s *ElseClauseContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ElseClauseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitElseClause(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -78939,6 +83689,16 @@ func (s *CaseOperandContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *CaseOperandContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCaseOperand(s)
+	}
+}
+
+func (s *CaseOperandContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCaseOperand(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -79105,6 +83865,16 @@ func (s *WhenOperandListContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *WhenOperandListContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitWhenOperandList(s)
+	}
+}
+
+func (s *WhenOperandListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitWhenOperandList(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -79404,6 +84174,16 @@ func (s *WhenOperandContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *WhenOperandContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitWhenOperand(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -79611,6 +84391,16 @@ func (s *ResultContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ResultContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitResult(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -79738,6 +84528,16 @@ func (s *ResultExpressionContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *ResultExpressionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitResultExpression(s)
+	}
+}
+
+func (s *ResultExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitResultExpression(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -79886,6 +84686,16 @@ func (s *CastSpecificationContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *CastSpecificationContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCastSpecification(s)
+	}
+}
+
+func (s *CastSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCastSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -80053,6 +84863,16 @@ func (s *CastOperandContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *CastOperandContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCastOperand(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -80180,6 +85000,16 @@ func (s *CastTargetContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *CastTargetContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCastTarget(s)
+	}
+}
+
+func (s *CastTargetContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCastTarget(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -80328,6 +85158,16 @@ func (s *AggregateFunctionContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *AggregateFunctionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitAggregateFunction(s)
+	}
+}
+
+func (s *AggregateFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitAggregateFunction(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -80541,6 +85381,16 @@ func (s *GeneralSetFunctionContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *GeneralSetFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGeneralSetFunction(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -80738,6 +85588,16 @@ func (s *BinarySetFunctionContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *BinarySetFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitBinarySetFunction(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -80904,6 +85764,16 @@ func (s *GeneralSetFunctionTypeContext) ExitRule(listener antlr.ParseTreeListene
 	}
 }
 
+func (s *GeneralSetFunctionTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGeneralSetFunctionType(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -81017,6 +85887,16 @@ func (s *SetQuantifierContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *SetQuantifierContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSetQuantifier(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -81127,6 +86007,16 @@ func (s *BinarySetFunctionTypeContext) EnterRule(listener antlr.ParseTreeListene
 func (s *BinarySetFunctionTypeContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitBinarySetFunctionType(s)
+	}
+}
+
+func (s *BinarySetFunctionTypeContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitBinarySetFunctionType(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -81267,6 +86157,16 @@ func (s *DependentValueExpressionContext) ExitRule(listener antlr.ParseTreeListe
 	}
 }
 
+func (s *DependentValueExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDependentValueExpression(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -81395,6 +86295,16 @@ func (s *IndependentValueExpressionContext) ExitRule(listener antlr.ParseTreeLis
 	}
 }
 
+func (s *IndependentValueExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitIndependentValueExpression(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -81518,6 +86428,16 @@ func (s *Element_idFunctionContext) EnterRule(listener antlr.ParseTreeListener) 
 func (s *Element_idFunctionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitElement_idFunction(s)
+	}
+}
+
+func (s *Element_idFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitElement_idFunction(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -81656,6 +86576,16 @@ func (s *BindingVariableReferenceContext) ExitRule(listener antlr.ParseTreeListe
 	}
 }
 
+func (s *BindingVariableReferenceContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitBindingVariableReference(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -81767,6 +86697,16 @@ func (s *PathValueExpressionContext) ExitRule(listener antlr.ParseTreeListener) 
 	}
 }
 
+func (s *PathValueExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPathValueExpression(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -81875,6 +86815,16 @@ func (s *PathValueConstructorContext) EnterRule(listener antlr.ParseTreeListener
 func (s *PathValueConstructorContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitPathValueConstructor(s)
+	}
+}
+
+func (s *PathValueConstructorContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPathValueConstructor(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -82001,6 +86951,16 @@ func (s *PathValueConstructorByEnumerationContext) EnterRule(listener antlr.Pars
 func (s *PathValueConstructorByEnumerationContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitPathValueConstructorByEnumeration(s)
+	}
+}
+
+func (s *PathValueConstructorByEnumerationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPathValueConstructorByEnumeration(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -82182,6 +87142,16 @@ func (s *PathElementListContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *PathElementListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPathElementList(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -82314,6 +87284,16 @@ func (s *PathElementListStartContext) EnterRule(listener antlr.ParseTreeListener
 func (s *PathElementListStartContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitPathElementListStart(s)
+	}
+}
+
+func (s *PathElementListStartContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPathElementListStart(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -82455,6 +87435,16 @@ func (s *PathElementListStepContext) ExitRule(listener antlr.ParseTreeListener) 
 	}
 }
 
+func (s *PathElementListStepContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPathElementListStep(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -82586,6 +87576,16 @@ func (s *ListValueExpressionContext) ExitRule(listener antlr.ParseTreeListener) 
 	}
 }
 
+func (s *ListValueExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitListValueExpression(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -82711,6 +87711,16 @@ func (s *ListValueFunctionContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *ListValueFunctionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitListValueFunction(s)
+	}
+}
+
+func (s *ListValueFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitListValueFunction(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -82884,6 +87894,16 @@ func (s *TrimListFunctionContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *TrimListFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTrimListFunction(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -83046,6 +88066,16 @@ func (s *ElementsFunctionContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ElementsFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitElementsFunction(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -83178,6 +88208,16 @@ func (s *ListValueConstructorContext) EnterRule(listener antlr.ParseTreeListener
 func (s *ListValueConstructorContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitListValueConstructor(s)
+	}
+}
+
+func (s *ListValueConstructorContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitListValueConstructor(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -83316,6 +88356,16 @@ func (s *ListValueConstructorByEnumerationContext) EnterRule(listener antlr.Pars
 func (s *ListValueConstructorByEnumerationContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitListValueConstructorByEnumeration(s)
+	}
+}
+
+func (s *ListValueConstructorByEnumerationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitListValueConstructorByEnumeration(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -83510,6 +88560,16 @@ func (s *ListElementListContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ListElementListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitListElementList(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -83653,6 +88713,16 @@ func (s *ListElementContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ListElementContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitListElement(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -83766,6 +88836,16 @@ func (s *RecordConstructorContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *RecordConstructorContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitRecordConstructor(s)
+	}
+}
+
+func (s *RecordConstructorContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitRecordConstructor(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -83908,6 +88988,16 @@ func (s *FieldsSpecificationContext) EnterRule(listener antlr.ParseTreeListener)
 func (s *FieldsSpecificationContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitFieldsSpecification(s)
+	}
+}
+
+func (s *FieldsSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFieldsSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -84087,6 +89177,16 @@ func (s *FieldListContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *FieldListContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFieldList(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -84252,6 +89352,16 @@ func (s *FieldContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *FieldContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitField(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -84360,6 +89470,16 @@ func (s *TruthValueContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *TruthValueContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitTruthValue(s)
+	}
+}
+
+func (s *TruthValueContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTruthValue(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -84581,6 +89701,16 @@ func (s *NumericValueExpressionContext) EnterRule(listener antlr.ParseTreeListen
 func (s *NumericValueExpressionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNumericValueExpression(s)
+	}
+}
+
+func (s *NumericValueExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNumericValueExpression(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -85064,6 +90194,16 @@ func (s *NumericValueFunctionContext) ExitRule(listener antlr.ParseTreeListener)
 	}
 }
 
+func (s *NumericValueFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNumericValueFunction(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -85319,6 +90459,16 @@ func (s *LengthExpressionContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *LengthExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLengthExpression(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -85494,6 +90644,16 @@ func (s *CardinalityExpressionContext) EnterRule(listener antlr.ParseTreeListene
 func (s *CardinalityExpressionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCardinalityExpression(s)
+	}
+}
+
+func (s *CardinalityExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCardinalityExpression(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -85678,6 +90838,16 @@ func (s *CardinalityExpressionArgumentContext) ExitRule(listener antlr.ParseTree
 	}
 }
 
+func (s *CardinalityExpressionArgumentContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCardinalityExpressionArgument(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -85806,6 +90976,16 @@ func (s *CharLengthExpressionContext) EnterRule(listener antlr.ParseTreeListener
 func (s *CharLengthExpressionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCharLengthExpression(s)
+	}
+}
+
+func (s *CharLengthExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCharLengthExpression(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -85969,6 +91149,16 @@ func (s *ByteLengthExpressionContext) ExitRule(listener antlr.ParseTreeListener)
 	}
 }
 
+func (s *ByteLengthExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitByteLengthExpression(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -86124,6 +91314,16 @@ func (s *PathLengthExpressionContext) ExitRule(listener antlr.ParseTreeListener)
 	}
 }
 
+func (s *PathLengthExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPathLengthExpression(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -86271,6 +91471,16 @@ func (s *AbsoluteValueExpressionContext) EnterRule(listener antlr.ParseTreeListe
 func (s *AbsoluteValueExpressionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitAbsoluteValueExpression(s)
+	}
+}
+
+func (s *AbsoluteValueExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitAbsoluteValueExpression(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -86446,6 +91656,16 @@ func (s *ModulusExpressionContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ModulusExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitModulusExpression(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -86593,6 +91813,16 @@ func (s *NumericValueExpressionDividendContext) ExitRule(listener antlr.ParseTre
 	}
 }
 
+func (s *NumericValueExpressionDividendContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNumericValueExpressionDividend(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -86701,6 +91931,16 @@ func (s *NumericValueExpressionDivisorContext) EnterRule(listener antlr.ParseTre
 func (s *NumericValueExpressionDivisorContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNumericValueExpressionDivisor(s)
+	}
+}
+
+func (s *NumericValueExpressionDivisorContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNumericValueExpressionDivisor(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -86839,6 +92079,16 @@ func (s *TrigonometricFunctionContext) EnterRule(listener antlr.ParseTreeListene
 func (s *TrigonometricFunctionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitTrigonometricFunction(s)
+	}
+}
+
+func (s *TrigonometricFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTrigonometricFunction(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -87016,6 +92266,16 @@ func (s *TrigonometricFunctionNameContext) ExitRule(listener antlr.ParseTreeList
 	}
 }
 
+func (s *TrigonometricFunctionNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTrigonometricFunctionName(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -87173,6 +92433,16 @@ func (s *GeneralLogarithmFunctionContext) ExitRule(listener antlr.ParseTreeListe
 	}
 }
 
+func (s *GeneralLogarithmFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGeneralLogarithmFunction(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -87320,6 +92590,16 @@ func (s *GeneralLogarithmBaseContext) ExitRule(listener antlr.ParseTreeListener)
 	}
 }
 
+func (s *GeneralLogarithmBaseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGeneralLogarithmBase(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -87428,6 +92708,16 @@ func (s *GeneralLogarithmArgumentContext) EnterRule(listener antlr.ParseTreeList
 func (s *GeneralLogarithmArgumentContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitGeneralLogarithmArgument(s)
+	}
+}
+
+func (s *GeneralLogarithmArgumentContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGeneralLogarithmArgument(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -87554,6 +92844,16 @@ func (s *CommonLogarithmContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *CommonLogarithmContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCommonLogarithm(s)
+	}
+}
+
+func (s *CommonLogarithmContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCommonLogarithm(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -87707,6 +93007,16 @@ func (s *NaturalLogarithmContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *NaturalLogarithmContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNaturalLogarithm(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -87854,6 +93164,16 @@ func (s *ExponentialFunctionContext) EnterRule(listener antlr.ParseTreeListener)
 func (s *ExponentialFunctionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitExponentialFunction(s)
+	}
+}
+
+func (s *ExponentialFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitExponentialFunction(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -88029,6 +93349,16 @@ func (s *PowerFunctionContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *PowerFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPowerFunction(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -88176,6 +93506,16 @@ func (s *NumericValueExpressionBaseContext) ExitRule(listener antlr.ParseTreeLis
 	}
 }
 
+func (s *NumericValueExpressionBaseContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNumericValueExpressionBase(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -88284,6 +93624,16 @@ func (s *NumericValueExpressionExponentContext) EnterRule(listener antlr.ParseTr
 func (s *NumericValueExpressionExponentContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNumericValueExpressionExponent(s)
+	}
+}
+
+func (s *NumericValueExpressionExponentContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNumericValueExpressionExponent(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -88410,6 +93760,16 @@ func (s *SquareRootContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *SquareRootContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSquareRoot(s)
+	}
+}
+
+func (s *SquareRootContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSquareRoot(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -88560,6 +93920,16 @@ func (s *FloorFunctionContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *FloorFunctionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitFloorFunction(s)
+	}
+}
+
+func (s *FloorFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFloorFunction(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -88718,6 +94088,16 @@ func (s *CeilingFunctionContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *CeilingFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCeilingFunction(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -88858,6 +94238,16 @@ func (s *CharacterStringValueExpressionContext) ExitRule(listener antlr.ParseTre
 	}
 }
 
+func (s *CharacterStringValueExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCharacterStringValueExpression(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -88966,6 +94356,16 @@ func (s *ByteStringValueExpressionContext) EnterRule(listener antlr.ParseTreeLis
 func (s *ByteStringValueExpressionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitByteStringValueExpression(s)
+	}
+}
+
+func (s *ByteStringValueExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitByteStringValueExpression(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -89116,6 +94516,16 @@ func (s *TrimOperandsContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *TrimOperandsContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitTrimOperands(s)
+	}
+}
+
+func (s *TrimOperandsContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTrimOperands(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -89279,6 +94689,16 @@ func (s *TrimCharacterOrByteStringSourceContext) ExitRule(listener antlr.ParseTr
 	}
 }
 
+func (s *TrimCharacterOrByteStringSourceContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTrimCharacterOrByteStringSource(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -89385,6 +94805,16 @@ func (s *TrimSpecificationContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *TrimSpecificationContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitTrimSpecification(s)
+	}
+}
+
+func (s *TrimSpecificationContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTrimSpecification(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -89508,6 +94938,16 @@ func (s *TrimCharacterOrByteStringContext) ExitRule(listener antlr.ParseTreeList
 	}
 }
 
+func (s *TrimCharacterOrByteStringContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTrimCharacterOrByteString(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -89619,6 +95059,16 @@ func (s *NormalFormContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *NormalFormContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNormalForm(s)
+	}
+}
+
+func (s *NormalFormContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNormalForm(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -89742,6 +95192,16 @@ func (s *StringLengthContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *StringLengthContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitStringLength(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -89850,6 +95310,16 @@ func (s *DatetimeValueExpressionContext) EnterRule(listener antlr.ParseTreeListe
 func (s *DatetimeValueExpressionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitDatetimeValueExpression(s)
+	}
+}
+
+func (s *DatetimeValueExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDatetimeValueExpression(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -90032,6 +95502,16 @@ func (s *DatetimeValueFunctionContext) ExitRule(listener antlr.ParseTreeListener
 	}
 }
 
+func (s *DatetimeValueFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDatetimeValueFunction(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -90206,6 +95686,16 @@ func (s *DateFunctionContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *DateFunctionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitDateFunction(s)
+	}
+}
+
+func (s *DateFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDateFunction(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -90403,6 +95893,16 @@ func (s *TimeFunctionContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *TimeFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTimeFunction(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -90592,6 +96092,16 @@ func (s *LocaltimeFunctionContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *LocaltimeFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLocaltimeFunction(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -90766,6 +96276,16 @@ func (s *DatetimeFunctionContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *DatetimeFunctionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitDatetimeFunction(s)
+	}
+}
+
+func (s *DatetimeFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDatetimeFunction(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -90963,6 +96483,16 @@ func (s *LocaldatetimeFunctionContext) ExitRule(listener antlr.ParseTreeListener
 	}
 }
 
+func (s *LocaldatetimeFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLocaldatetimeFunction(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -91154,6 +96684,16 @@ func (s *DateFunctionParametersContext) ExitRule(listener antlr.ParseTreeListene
 	}
 }
 
+func (s *DateFunctionParametersContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDateFunctionParameters(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -91301,6 +96841,16 @@ func (s *TimeFunctionParametersContext) EnterRule(listener antlr.ParseTreeListen
 func (s *TimeFunctionParametersContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitTimeFunctionParameters(s)
+	}
+}
+
+func (s *TimeFunctionParametersContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTimeFunctionParameters(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -91454,6 +97004,16 @@ func (s *DatetimeFunctionParametersContext) ExitRule(listener antlr.ParseTreeLis
 	}
 }
 
+func (s *DatetimeFunctionParametersContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDatetimeFunctionParameters(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -91584,6 +97144,16 @@ func (s *DurationValueExpressionContext) EnterRule(listener antlr.ParseTreeListe
 func (s *DurationValueExpressionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitDurationValueExpression(s)
+	}
+}
+
+func (s *DurationValueExpressionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDurationValueExpression(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -91727,6 +97297,16 @@ func (s *DatetimeSubtractionContext) EnterRule(listener antlr.ParseTreeListener)
 func (s *DatetimeSubtractionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitDatetimeSubtraction(s)
+	}
+}
+
+func (s *DatetimeSubtractionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDatetimeSubtraction(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -91900,6 +97480,16 @@ func (s *DatetimeSubtractionParametersContext) ExitRule(listener antlr.ParseTree
 	}
 }
 
+func (s *DatetimeSubtractionParametersContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDatetimeSubtractionParameters(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -92023,6 +97613,16 @@ func (s *DatetimeValueExpression1Context) ExitRule(listener antlr.ParseTreeListe
 	}
 }
 
+func (s *DatetimeValueExpression1Context) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDatetimeValueExpression1(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -92131,6 +97731,16 @@ func (s *DatetimeValueExpression2Context) EnterRule(listener antlr.ParseTreeList
 func (s *DatetimeValueExpression2Context) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitDatetimeValueExpression2(s)
+	}
+}
+
+func (s *DatetimeValueExpression2Context) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDatetimeValueExpression2(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -92259,6 +97869,16 @@ func (s *DurationValueFunctionContext) EnterRule(listener antlr.ParseTreeListene
 func (s *DurationValueFunctionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitDurationValueFunction(s)
+	}
+}
+
+func (s *DurationValueFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDurationValueFunction(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -92407,6 +98027,16 @@ func (s *DurationFunctionContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *DurationFunctionContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitDurationFunction(s)
+	}
+}
+
+func (s *DurationFunctionContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDurationFunction(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -92562,6 +98192,16 @@ func (s *DurationFunctionParametersContext) ExitRule(listener antlr.ParseTreeLis
 	}
 }
 
+func (s *DurationFunctionParametersContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDurationFunctionParameters(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -92695,6 +98335,16 @@ func (s *ObjectNameContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ObjectNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitObjectName(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -92803,6 +98453,16 @@ func (s *ObjectNameOrBindingVariableContext) EnterRule(listener antlr.ParseTreeL
 func (s *ObjectNameOrBindingVariableContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitObjectNameOrBindingVariable(s)
+	}
+}
+
+func (s *ObjectNameOrBindingVariableContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitObjectNameOrBindingVariable(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -92917,6 +98577,16 @@ func (s *DirectoryNameContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *DirectoryNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDirectoryName(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -93025,6 +98695,16 @@ func (s *SchemaNameContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *SchemaNameContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitSchemaName(s)
+	}
+}
+
+func (s *SchemaNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSchemaName(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -93156,6 +98836,16 @@ func (s *GraphNameContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *GraphNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGraphName(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -93282,6 +98972,16 @@ func (s *DelimitedGraphNameContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *DelimitedGraphNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDelimitedGraphName(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -93402,6 +99102,16 @@ func (s *GraphTypeNameContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *GraphTypeNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGraphTypeName(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -93513,6 +99223,16 @@ func (s *NodeTypeNameContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *NodeTypeNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNodeTypeName(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -93621,6 +99341,16 @@ func (s *EdgeTypeNameContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *EdgeTypeNameContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitEdgeTypeName(s)
+	}
+}
+
+func (s *EdgeTypeNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEdgeTypeName(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -93752,6 +99482,16 @@ func (s *BindingTableNameContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *BindingTableNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitBindingTableName(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -93878,6 +99618,16 @@ func (s *DelimitedBindingTableNameContext) ExitRule(listener antlr.ParseTreeList
 	}
 }
 
+func (s *DelimitedBindingTableNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDelimitedBindingTableName(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -93998,6 +99748,16 @@ func (s *ProcedureNameContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ProcedureNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitProcedureName(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -94106,6 +99866,16 @@ func (s *LabelNameContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *LabelNameContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitLabelName(s)
+	}
+}
+
+func (s *LabelNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitLabelName(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -94220,6 +99990,16 @@ func (s *PropertyNameContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *PropertyNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPropertyName(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -94328,6 +100108,16 @@ func (s *FieldNameContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *FieldNameContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitFieldName(s)
+	}
+}
+
+func (s *FieldNameContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitFieldName(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -94442,6 +100232,16 @@ func (s *ElementVariableContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ElementVariableContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitElementVariable(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -94550,6 +100350,16 @@ func (s *PathVariableContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *PathVariableContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitPathVariable(s)
+	}
+}
+
+func (s *PathVariableContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitPathVariable(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -94664,6 +100474,16 @@ func (s *SubpathVariableContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *SubpathVariableContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitSubpathVariable(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -94772,6 +100592,16 @@ func (s *BindingVariableContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *BindingVariableContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitBindingVariable(s)
+	}
+}
+
+func (s *BindingVariableContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitBindingVariable(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -94900,6 +100730,16 @@ func (s *UnsignedLiteralContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *UnsignedLiteralContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitUnsignedLiteral(s)
+	}
+}
+
+func (s *UnsignedLiteralContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitUnsignedLiteral(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -95131,6 +100971,16 @@ func (s *GeneralLiteralContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *GeneralLiteralContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitGeneralLiteral(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -95354,6 +101204,16 @@ func (s *TemporalLiteralContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *TemporalLiteralContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTemporalLiteral(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -95500,6 +101360,16 @@ func (s *DateLiteralContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *DateLiteralContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDateLiteral(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -95621,6 +101491,16 @@ func (s *TimeLiteralContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *TimeLiteralContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitTimeLiteral(s)
+	}
+}
+
+func (s *TimeLiteralContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTimeLiteral(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -95753,6 +101633,16 @@ func (s *DatetimeLiteralContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *DatetimeLiteralContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDatetimeLiteral(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -95877,6 +101767,16 @@ func (s *ListLiteralContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *ListLiteralContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitListLiteral(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -95985,6 +101885,16 @@ func (s *RecordLiteralContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *RecordLiteralContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitRecordLiteral(s)
+	}
+}
+
+func (s *RecordLiteralContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitRecordLiteral(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -96106,6 +102016,16 @@ func (s *IdentifierContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *IdentifierContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitIdentifier(s)
+	}
+}
+
+func (s *IdentifierContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitIdentifier(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -96263,6 +102183,16 @@ func (s *RegularIdentifierContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *RegularIdentifierContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitRegularIdentifier(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -96400,6 +102330,16 @@ func (s *TimeZoneStringContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *TimeZoneStringContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTimeZoneString(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -96501,6 +102441,16 @@ func (s *CharacterStringLiteralContext) EnterRule(listener antlr.ParseTreeListen
 func (s *CharacterStringLiteralContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitCharacterStringLiteral(s)
+	}
+}
+
+func (s *CharacterStringLiteralContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitCharacterStringLiteral(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -96638,6 +102588,16 @@ func (s *UnsignedNumericLiteralContext) EnterRule(listener antlr.ParseTreeListen
 func (s *UnsignedNumericLiteralContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitUnsignedNumericLiteral(s)
+	}
+}
+
+func (s *UnsignedNumericLiteralContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitUnsignedNumericLiteral(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -96791,6 +102751,16 @@ func (s *ExactNumericLiteralContext) EnterRule(listener antlr.ParseTreeListener)
 func (s *ExactNumericLiteralContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitExactNumericLiteral(s)
+	}
+}
+
+func (s *ExactNumericLiteralContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitExactNumericLiteral(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -96970,6 +102940,16 @@ func (s *ApproximateNumericLiteralContext) ExitRule(listener antlr.ParseTreeList
 	}
 }
 
+func (s *ApproximateNumericLiteralContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitApproximateNumericLiteral(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -97093,6 +103073,16 @@ func (s *UnsignedIntegerContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *UnsignedIntegerContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitUnsignedInteger(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -97201,6 +103191,16 @@ func (s *UnsignedDecimalIntegerContext) ExitRule(listener antlr.ParseTreeListene
 	}
 }
 
+func (s *UnsignedDecimalIntegerContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitUnsignedDecimalInteger(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -97301,6 +103301,16 @@ func (s *NullLiteralContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *NullLiteralContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNullLiteral(s)
+	}
+}
+
+func (s *NullLiteralContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNullLiteral(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -97419,6 +103429,16 @@ func (s *DateStringContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *DateStringContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDateString(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -97530,6 +103550,16 @@ func (s *TimeStringContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *TimeStringContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitTimeString(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -97638,6 +103668,16 @@ func (s *DatetimeStringContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *DatetimeStringContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitDatetimeString(s)
+	}
+}
+
+func (s *DatetimeStringContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDatetimeString(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -97754,6 +103794,16 @@ func (s *DurationLiteralContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *DurationLiteralContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitDurationLiteral(s)
+	}
+}
+
+func (s *DurationLiteralContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDurationLiteral(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -97876,6 +103926,16 @@ func (s *DurationStringContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *DurationStringContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitDurationString(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -97977,6 +104037,16 @@ func (s *NodeSynonymContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *NodeSynonymContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNodeSynonym(s)
+	}
+}
+
+func (s *NodeSynonymContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNodeSynonym(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -98093,6 +104163,16 @@ func (s *EdgesSynonymContext) ExitRule(listener antlr.ParseTreeListener) {
 	}
 }
 
+func (s *EdgesSynonymContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEdgesSynonym(s)
+
+	default:
+		return t.VisitChildren(s)
+	}
+}
+
 
 
 
@@ -98203,6 +104283,16 @@ func (s *EdgeSynonymContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *EdgeSynonymContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitEdgeSynonym(s)
+	}
+}
+
+func (s *EdgeSynonymContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitEdgeSynonym(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
@@ -98541,6 +104631,16 @@ func (s *NonReservedWordsContext) EnterRule(listener antlr.ParseTreeListener) {
 func (s *NonReservedWordsContext) ExitRule(listener antlr.ParseTreeListener) {
 	if listenerT, ok := listener.(GQLListener); ok {
 		listenerT.ExitNonReservedWords(s)
+	}
+}
+
+func (s *NonReservedWordsContext) Accept(visitor antlr.ParseTreeVisitor) interface{} {
+	switch t := visitor.(type) {
+	case GQLVisitor:
+		return t.VisitNonReservedWords(s)
+
+	default:
+		return t.VisitChildren(s)
 	}
 }
 
