@@ -8,4 +8,4 @@ RUN wget https://www.antlr.org/download/antlr-4.13.1-complete.jar -O antlr.jar
 ENTRYPOINT ["java", "-jar", "/antlr/antlr.jar", "-Dlanguage=Go"]
 
 WORKDIR /work/internal/grammar
-CMD ["-package", "gql", "-visitor", "-o", "gen/gql", "GQL.g4"]
+CMD ["-package", "gen", "-visitor", "-o", "gql/gen", "gql/GQL.g4"]
