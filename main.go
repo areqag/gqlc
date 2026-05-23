@@ -20,7 +20,7 @@ func main() {
 		slog.DebugContext(ctx, "execution complete", "duration_ms", finish.Sub(start).Milliseconds())
 	}()
 
-	f, err := os.Open("./test/data/sample_schema.gql")
+	f, err := os.Open("./test/data/schema/gql/sample_schema.gql")
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to open schema", "err", err)
 		return
