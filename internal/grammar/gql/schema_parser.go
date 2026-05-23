@@ -18,6 +18,36 @@ func NewSchemaVisitor(fileSchema string) *visitorSchema {
 	return &visitorSchema{fileSchema: fileSchema}
 }
 
+func (v *visitorSchema) Visit(tree antlr.ParseTree) any {
+	switch t := tree.(type) {
+	case *gen.PropertyTypeContext:
+		return v.VisitPropertyType(t)
+	case antlr.TerminalNode:
+		return nil
+	case antlr.RuleNode:
+		return v.VisitChildren(t)
+	default:
+		return nil
+	}
+}
+
+func (v *visitorSchema) VisitPropertyType(ctx *gen.PropertyTypeContext) any {
+	fmt.Printf("ctx.PropertyName().GetText(): %v\n", ctx.PropertyName().GetText())
+	fmt.Printf("ctx.PropertyValueType().GetText(): %v\n", ctx.PropertyValueType().GetText())
+	return nil
+}
+
+func (v *visitorSchema) VisitChildren(tree antlr.RuleNode) any {
+	for _, child := range tree.GetChildren() {
+		pt, ok := child.(antlr.ParseTree)
+		if !ok {
+			continue
+		}
+		v.Visit(pt)
+	}
+	return nil
+}
+
 func (v *visitorSchema) Parse() (err error) {
 	fs, err := antlr.NewFileStream(v.fileSchema)
 	if err != nil {
