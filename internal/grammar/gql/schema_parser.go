@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/antlr4-go/antlr/v4"
-	gen "github.com/antranig-yeretzian/gqlc/internal/grammar/gql/gen/gql"
+	"github.com/antranig-yeretzian/gqlc/internal/grammar/gql/gen"
 )
 
 type visitorSchema struct {
