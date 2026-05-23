@@ -1,12 +1,20 @@
 package gql
 
 import (
+	"errors"
 	"fmt"
 	"io"
 
 	"github.com/antlr4-go/antlr/v4"
 	"github.com/antranig-yeretzian/gqlc/internal/grammar/gql/gen"
 	"github.com/antranig-yeretzian/gqlc/internal/schema"
+)
+
+// Errors returned by Parse for valid GQL that uses constructs this parser does
+// not yet support. They are sentinels so callers can branch with errors.Is.
+var (
+	ErrLabelImplication = errors.New(`label implication ("=>") is not supported`)
+	ErrUndirectedEdge   = errors.New("undirected edges are not supported")
 )
 
 type parser struct {
@@ -46,6 +54,10 @@ func (p parser) Parse(r io.Reader) (schema.Schema, error) {
 		}()
 		p.v.Visit(tree)
 	}()
+
+	if visitorErr == nil {
+		visitorErr = p.v.err
+	}
 
 	return schema.Schema{}, visitorErr
 }
