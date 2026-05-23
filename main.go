@@ -4,12 +4,21 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"time"
 
+	"github.com/antranig-yeretzian/gqlc/internal/logger"
 	schema_parser_gql "github.com/antranig-yeretzian/gqlc/internal/schema/gql"
 )
 
 func main() {
 	ctx := context.Background()
+	logger.Init(slog.LevelDebug)
+
+	start := time.Now()
+	defer func() {
+		finish := time.Now()
+		slog.DebugContext(ctx, "execution complete", "duration_ms", finish.Sub(start).Milliseconds())
+	}()
 
 	f, err := os.Open("./test/data/sample_schema.gql")
 	if err != nil {
