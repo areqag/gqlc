@@ -1,4 +1,4 @@
-// Code generated from gql/GQL.g4 by ANTLR 4.13.1. DO NOT EDIT.
+// Code generated from GQL.g4 by ANTLR 4.13.1. DO NOT EDIT.
 
 package gen // GQL
 import "github.com/antlr4-go/antlr/v4"
