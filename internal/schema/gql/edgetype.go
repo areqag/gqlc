@@ -2,6 +2,7 @@ package gql
 
 import (
 	"github.com/antranig-yeretzian/gqlc/internal/grammar/gql/gen"
+	"github.com/antranig-yeretzian/gqlc/internal/graph"
 	"github.com/antranig-yeretzian/gqlc/internal/schema"
 )
 
@@ -14,7 +15,7 @@ import (
 // source->target order — the grammar normalises a left-pointing arc, exposing the
 // arrow's tail as the source.
 type rawEdge struct {
-	labels schema.LabelSet
+	labels graph.LabelSet
 	name   string
 	props  map[string]schema.Property
 	source rawEndpoint
@@ -28,7 +29,7 @@ type rawEdge struct {
 // fields on rawEdge, so source and target each read as a single endpoint.
 type rawEndpoint struct {
 	alias  string
-	labels schema.LabelSet
+	labels graph.LabelSet
 }
 
 // sourceRef and destRef read an edge endpoint in either form the grammar allows:
@@ -59,7 +60,7 @@ func destRef(r gen.IDestinationNodeTypeReferenceContext) rawEndpoint {
 // that case is legitimately reachable and already handled: nil labels yield the
 // empty label-set key, which matches no declared node type and surfaces as
 // ErrUnknownEndpoint during resolution.
-func fillerLabels(f gen.INodeTypeFillerContext) schema.LabelSet {
+func fillerLabels(f gen.INodeTypeFillerContext) graph.LabelSet {
 	if f == nil {
 		return nil
 	}

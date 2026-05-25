@@ -17,6 +17,12 @@ is noise; delete it.
 - Explain *why*, not *what*. The code already says what.
 - No comments that paraphrase the function name or the next line.
 - No narration of changes, TODO dumps, or LLM scaffolding left in place.
+- No abstraction leaks. Describe what a thing *is* and its contract — never
+  justify it by contrasting rejected designs ("deliberately not an AST",
+  "rather than collapsing to X") or by appealing to other layers ("so codegen
+  can…", "which is why the resolver…"). That rationale lives in an ADR; a comment
+  may *cite* one ("(ADR 0003)") but must not restate it. The code should read the
+  same whether or not the reader knows which alternatives were rejected.
 - Prefer a clearer name over a comment that explains a bad one.
 
 ## Tests

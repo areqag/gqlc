@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/antranig-yeretzian/gqlc/internal/graph"
 	"github.com/antranig-yeretzian/gqlc/internal/schema"
 )
 
@@ -17,10 +18,10 @@ import (
 func TestMarshalJSONIsDeterministic(t *testing.T) {
 	s := schema.Schema{
 		Name: "G",
-		Nodes: map[schema.LabelSetKey]schema.NodeType{
+		Nodes: map[graph.LabelSetKey]schema.NodeType{
 			"B": {Labels: "B", Properties: map[string]schema.Property{
-				"y": {Name: "y", Type: schema.TypeInt, Nullable: true},
-				"x": {Name: "x", Type: schema.TypeString},
+				"y": {Name: "y", Type: graph.TypeInt, Nullable: true},
+				"x": {Name: "x", Type: graph.TypeString},
 			}},
 			"A": {Labels: "A"},
 		},

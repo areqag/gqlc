@@ -6,6 +6,7 @@ import (
 	"github.com/antlr4-go/antlr/v4"
 
 	"github.com/antranig-yeretzian/gqlc/internal/grammar/gql/gen"
+	"github.com/antranig-yeretzian/gqlc/internal/graph"
 	"github.com/antranig-yeretzian/gqlc/internal/schema"
 )
 
@@ -193,7 +194,7 @@ func (l *listener) EnterEdgeTypePattern(c *gen.EdgeTypePatternContext) {
 // nodeContent reads the label set and property types carried by a node type
 // filler — the `:Label { ... }` after an optional alias. A node with no filler or
 // no implied content contributes neither labels nor properties.
-func (l *listener) nodeContent(f gen.INodeTypeFillerContext) (schema.LabelSet, map[string]schema.Property, error) {
+func (l *listener) nodeContent(f gen.INodeTypeFillerContext) (graph.LabelSet, map[string]schema.Property, error) {
 	if f == nil {
 		return nil, nil, nil
 	}
@@ -202,7 +203,7 @@ func (l *listener) nodeContent(f gen.INodeTypeFillerContext) (schema.LabelSet, m
 		return nil, nil, nil
 	}
 
-	var labels schema.LabelSet
+	var labels graph.LabelSet
 	if ls := ic.NodeTypeLabelSet(); ls != nil {
 		labels = labelSet(ls.LabelSetPhrase())
 	}
@@ -217,7 +218,7 @@ func (l *listener) nodeContent(f gen.INodeTypeFillerContext) (schema.LabelSet, m
 // edgeContent is the edge-type counterpart of nodeContent: it reads the label set
 // and property types from an edge type filler. The two cannot share one helper
 // because the grammar gives node and edge fillers distinct generated types.
-func (l *listener) edgeContent(f gen.IEdgeTypeFillerContext) (schema.LabelSet, map[string]schema.Property, error) {
+func (l *listener) edgeContent(f gen.IEdgeTypeFillerContext) (graph.LabelSet, map[string]schema.Property, error) {
 	if f == nil {
 		return nil, nil, nil
 	}
@@ -226,7 +227,7 @@ func (l *listener) edgeContent(f gen.IEdgeTypeFillerContext) (schema.LabelSet, m
 		return nil, nil, nil
 	}
 
-	var labels schema.LabelSet
+	var labels graph.LabelSet
 	if ls := ic.EdgeTypeLabelSet(); ls != nil {
 		labels = labelSet(ls.LabelSetPhrase())
 	}

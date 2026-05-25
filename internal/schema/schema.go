@@ -4,18 +4,19 @@ import (
 	"cmp"
 	"encoding/json"
 	"slices"
-	"strings"
+
+	"github.com/antranig-yeretzian/gqlc/internal/graph"
 )
 
 // Schema is the parsed representation of a directed, property graph type.
 type Schema struct {
 	Name  string // graph type name
-	Nodes map[LabelSetKey]NodeType
+	Nodes map[graph.LabelSetKey]NodeType
 	Edges map[EdgeKey]EdgeType
 }
 
 type NodeType struct {
-	Labels     LabelSetKey         `json:"labels"` // canonical identity; also the Nodes map key
+	Labels     graph.LabelSetKey   `json:"labels"` // canonical identity; also the Nodes map key
 	Name       string              `json:"name"`
 	Properties map[string]Property `json:"properties"`
 }
@@ -29,16 +30,16 @@ type EdgeType struct {
 // EdgeKey identifies an edge type. The same labels may connect different
 // endpoint pairs, so identity is the triple, not the edge labels alone.
 type EdgeKey struct {
-	Source LabelSetKey `json:"source"`
-	Label  LabelSetKey `json:"label"`
-	Target LabelSetKey `json:"target"`
+	Source graph.LabelSetKey `json:"source"`
+	Label  graph.LabelSetKey `json:"label"`
+	Target graph.LabelSetKey `json:"target"`
 }
 
 // Property is a single typed attribute on an entity in the graph.
 type Property struct {
-	Name     string       `json:"name"`
-	Type     PropertyType `json:"type"`
-	Nullable bool         `json:"nullable"`
+	Name     string             `json:"name"`
+	Type     graph.PropertyType `json:"type"`
+	Nullable bool               `json:"nullable"`
 }
 
 // MarshalJSON renders the schema in a deterministic, stable form so every
@@ -75,67 +76,4 @@ func (s Schema) MarshalJSON() ([]byte, error) {
 		Nodes []NodeType `json:"nodes"`
 		Edges []EdgeType `json:"edges"`
 	}{Name: s.Name, Nodes: nodes, Edges: edges})
-}
-
-// PropertyType is the normalised value type of a property. Numeric types keep
-// their bit width rather than collapsing to a single Int/Float, so codegen can
-// preserve the signedness and width the schema author stated (ADR 0002).
-type PropertyType string
-
-const (
-	TypeString    PropertyType = "STRING"
-	TypeBool      PropertyType = "BOOL"
-	TypeDate      PropertyType = "DATE"
-	TypeTimestamp PropertyType = "TIMESTAMP"
-
-	TypeInt    PropertyType = "INT"
-	TypeInt8   PropertyType = "INT8"
-	TypeInt16  PropertyType = "INT16"
-	TypeInt32  PropertyType = "INT32"
-	TypeInt64  PropertyType = "INT64"
-	TypeInt128 PropertyType = "INT128"
-	TypeInt256 PropertyType = "INT256"
-
-	TypeUint    PropertyType = "UINT"
-	TypeUint8   PropertyType = "UINT8"
-	TypeUint16  PropertyType = "UINT16"
-	TypeUint32  PropertyType = "UINT32"
-	TypeUint64  PropertyType = "UINT64"
-	TypeUint128 PropertyType = "UINT128"
-	TypeUint256 PropertyType = "UINT256"
-
-	TypeFloat    PropertyType = "FLOAT"
-	TypeFloat16  PropertyType = "FLOAT16"
-	TypeFloat32  PropertyType = "FLOAT32"
-	TypeFloat64  PropertyType = "FLOAT64"
-	TypeFloat128 PropertyType = "FLOAT128"
-	TypeFloat256 PropertyType = "FLOAT256"
-
-	TypeDecimal PropertyType = "DECIMAL"
-)
-
-// LabelSet is a set of labels in source form. It is the input used to build
-// a LabelSetKey; the parsed model stores identity as the key, not the slice.
-type LabelSet []string
-
-// LabelSetKey is the canonical, comparable form of a LabelSet, usable as a
-// map key: labels sorted, deduplicated, and joined with "&".
-type LabelSetKey string
-
-// Key canonicalises the set into its map key. The original slice is left
-// unmodified.
-func (ls LabelSet) Key() LabelSetKey {
-	sorted := slices.Clone(ls)
-	slices.Sort(sorted)
-	sorted = slices.Compact(sorted)
-	return LabelSetKey(strings.Join(sorted, "&"))
-}
-
-// Split returns the individual labels encoded in the key. It is the inverse
-// of LabelSet.Key. The empty key yields no labels.
-func (k LabelSetKey) Split() LabelSet {
-	if k == "" {
-		return nil
-	}
-	return strings.Split(string(k), "&")
 }
