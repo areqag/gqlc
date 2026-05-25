@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/antranig-yeretzian/gqlc/internal/graph"
 	"github.com/antranig-yeretzian/gqlc/internal/schema"
 )
 
@@ -100,13 +101,13 @@ func (s *ParserSuite) TestNodeTypeAssembly() {
 	s.Require().NoError(err)
 	s.Require().Len(got.Nodes, 1)
 
-	n, ok := got.Nodes[schema.LabelSet{"Person"}.Key()]
+	n, ok := got.Nodes[graph.LabelSet{"Person"}.Key()]
 	s.Require().True(ok, "node keyed by canonical label set")
-	s.Equal(schema.LabelSet{"Person"}.Key(), n.Labels)
+	s.Equal(graph.LabelSet{"Person"}.Key(), n.Labels)
 	s.Empty(n.Name)
 	s.Equal(map[string]schema.Property{
-		"id":   {Name: "id", Type: schema.TypeInt, Nullable: false},
-		"name": {Name: "name", Type: schema.TypeString, Nullable: true},
+		"id":   {Name: "id", Type: graph.TypeInt, Nullable: false},
+		"name": {Name: "name", Type: graph.TypeString, Nullable: true},
 	}, n.Properties)
 }
 
@@ -118,7 +119,7 @@ func (s *ParserSuite) TestNodeTypeName() {
 	got, err := New().Parse(strings.NewReader(src))
 	s.Require().NoError(err)
 
-	n, ok := got.Nodes[schema.LabelSet{"Person"}.Key()]
+	n, ok := got.Nodes[graph.LabelSet{"Person"}.Key()]
 	s.Require().True(ok)
 	s.Equal("PersonType", n.Name)
 }
@@ -131,7 +132,7 @@ func (s *ParserSuite) TestNodeMultiLabelIdentity() {
 	got, err := New().Parse(strings.NewReader(src))
 	s.Require().NoError(err)
 
-	_, ok := got.Nodes[schema.LabelSet{"Person", "Employee"}.Key()]
+	_, ok := got.Nodes[graph.LabelSet{"Person", "Employee"}.Key()]
 	s.True(ok, "keyed by canonical (sorted) label set regardless of source order")
 }
 
@@ -150,16 +151,16 @@ func (s *ParserSuite) TestEdgeTypeAssembly() {
 	s.Require().Len(got.Edges, 1)
 
 	key := schema.EdgeKey{
-		Source: schema.LabelSet{"Person"}.Key(),
-		Label:  schema.LabelSet{"AUTHORED"}.Key(),
-		Target: schema.LabelSet{"Post"}.Key(),
+		Source: graph.LabelSet{"Person"}.Key(),
+		Label:  graph.LabelSet{"AUTHORED"}.Key(),
+		Target: graph.LabelSet{"Post"}.Key(),
 	}
 	e, ok := got.Edges[key]
 	s.Require().True(ok, "edge keyed by (source, label, target) triple")
 	s.Equal(key, e.EdgeKey)
 	s.Empty(e.Name)
 	s.Equal(map[string]schema.Property{
-		"publishedAt": {Name: "publishedAt", Type: schema.TypeTimestamp, Nullable: true},
+		"publishedAt": {Name: "publishedAt", Type: graph.TypeTimestamp, Nullable: true},
 	}, e.Properties)
 }
 
@@ -176,9 +177,9 @@ func (s *ParserSuite) TestEdgeInlineEndpoints() {
 	s.Require().NoError(err)
 
 	key := schema.EdgeKey{
-		Source: schema.LabelSet{"Person"}.Key(),
-		Label:  schema.LabelSet{"KNOWS"}.Key(),
-		Target: schema.LabelSet{"Person"}.Key(),
+		Source: graph.LabelSet{"Person"}.Key(),
+		Label:  graph.LabelSet{"KNOWS"}.Key(),
+		Target: graph.LabelSet{"Person"}.Key(),
 	}
 	_, ok := got.Edges[key]
 	s.True(ok, "inline filler endpoints resolve to the declared node type")
@@ -198,9 +199,9 @@ func (s *ParserSuite) TestEdgeLeftPointingCanonicalised() {
 	s.Require().NoError(err)
 
 	key := schema.EdgeKey{
-		Source: schema.LabelSet{"Post"}.Key(),
-		Label:  schema.LabelSet{"WRITTEN_BY"}.Key(),
-		Target: schema.LabelSet{"Person"}.Key(),
+		Source: graph.LabelSet{"Post"}.Key(),
+		Label:  graph.LabelSet{"WRITTEN_BY"}.Key(),
+		Target: graph.LabelSet{"Person"}.Key(),
 	}
 	_, ok := got.Edges[key]
 	s.True(ok, "left-pointing arc canonicalised so source is the arrow's tail (Post)")
@@ -218,9 +219,9 @@ func (s *ParserSuite) TestEdgeTypeName() {
 	s.Require().NoError(err)
 
 	key := schema.EdgeKey{
-		Source: schema.LabelSet{"Person"}.Key(),
-		Label:  schema.LabelSet{"AUTHORED"}.Key(),
-		Target: schema.LabelSet{"Post"}.Key(),
+		Source: graph.LabelSet{"Person"}.Key(),
+		Label:  graph.LabelSet{"AUTHORED"}.Key(),
+		Target: graph.LabelSet{"Post"}.Key(),
 	}
 	e, ok := got.Edges[key]
 	s.Require().True(ok)
