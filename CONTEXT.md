@@ -50,7 +50,7 @@ inline node-type filler, and resolved to the referenced node type's label set.
 An endpoint that resolves to a node type that was never declared is an error.
 
 **Direction**:
-Edge types are directed. A left-pointing edge `(a) <-[:X]- (b)` is canonicalized
+Edge types are directed. A left-pointing edge `(a) <-[:X]- (b)` is canonicalised
 to its source→target form (`b` → `a`), so an edge type's stored identity is
 independent of the direction it was written in. Undirected edges are not
 supported.

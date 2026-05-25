@@ -11,7 +11,7 @@ import (
 
 // listener is the single error sink and collector for a parse: it captures the
 // first lexer/parser syntax error (SyntaxError) and collects the parse tree into
-// a rawSchema as the ParseTreeWalker descends, both funneling into l.err. The walk
+// a rawSchema as the ParseTreeWalker descends, both funnelling into l.err. The walk
 // cannot be stopped mid-traversal (ADR 0001), but it needs no per-rule error
 // guard: fail() keeps the first error, and Parse discards the result — never
 // calling resolve — once an error is set. So an Enter* that runs after the first

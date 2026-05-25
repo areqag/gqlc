@@ -103,7 +103,7 @@ func TestPropertyTypeMapping(t *testing.T) {
 }
 
 // TestPropertyLengthQualifiersDropped covers the length/precision parenthetical
-// being stripped before normalization (ADR 0002).
+// being stripped before normalisation (ADR 0002).
 func TestPropertyLengthQualifiersDropped(t *testing.T) {
 	cases := []struct {
 		spelling string

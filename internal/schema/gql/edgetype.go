@@ -11,7 +11,7 @@ import (
 // because a GQL graph type is an order-independent set: an endpoint may name a
 // node type declared later in the body, so it can't be resolved until every node
 // type is known (see resolve.go). source and target are already in canonical
-// source->target order — the grammar normalizes a left-pointing arc, exposing the
+// source->target order — the grammar normalises a left-pointing arc, exposing the
 // arrow's tail as the source.
 type rawEdge struct {
 	labels schema.LabelSet

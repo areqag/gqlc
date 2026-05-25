@@ -90,7 +90,7 @@ func (s *ParserSuite) TestGraphTypeName() {
 
 // TestNodeTypeAssembly covers building NodeType from a node type pattern: the
 // canonical label-set identity, the optional explicit type name, and the
-// normalized properties.
+// normalised properties.
 func (s *ParserSuite) TestNodeTypeAssembly() {
 	src := `CREATE PROPERTY GRAPH TYPE T AS {
 		(:Person { id :: INT NOT NULL, name :: STRING })
@@ -137,7 +137,7 @@ func (s *ParserSuite) TestNodeMultiLabelIdentity() {
 
 // TestEdgeTypeAssembly covers building EdgeType from an alias edge: endpoints
 // resolved through the node alias table, the (Source, Label, Target) identity,
-// and the normalized edge properties.
+// and the normalised edge properties.
 func (s *ParserSuite) TestEdgeTypeAssembly() {
 	src := `CREATE PROPERTY GRAPH TYPE T AS {
 		(a :Person { id :: INT }),
@@ -184,10 +184,10 @@ func (s *ParserSuite) TestEdgeInlineEndpoints() {
 	s.True(ok, "inline filler endpoints resolve to the declared node type")
 }
 
-// TestEdgeLeftPointingCanonicalized covers a left-pointing arc being normalized
+// TestEdgeLeftPointingCanonicalised covers a left-pointing arc being normalised
 // to source->target: `(a) <-[:R]- (b)` is the edge b -> a, so its identity is
 // independent of the direction it was written in.
-func (s *ParserSuite) TestEdgeLeftPointingCanonicalized() {
+func (s *ParserSuite) TestEdgeLeftPointingCanonicalised() {
 	src := `CREATE PROPERTY GRAPH TYPE T AS {
 		(a :Person { id :: INT }),
 		(b :Post { id :: INT }),
@@ -203,7 +203,7 @@ func (s *ParserSuite) TestEdgeLeftPointingCanonicalized() {
 		Target: schema.LabelSet{"Person"}.Key(),
 	}
 	_, ok := got.Edges[key]
-	s.True(ok, "left-pointing arc canonicalized so source is the arrow's tail (Post)")
+	s.True(ok, "left-pointing arc canonicalised so source is the arrow's tail (Post)")
 }
 
 // TestEdgeTypeName covers the explicit edgeTypeName landing on EdgeType.Name.

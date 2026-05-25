@@ -1,6 +1,7 @@
 package gql
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/antlr4-go/antlr/v4"
@@ -10,12 +11,12 @@ import (
 )
 
 // property lowers a propertyType context into a schema.Property: name, the
-// normalized value type, and nullability. It returns ErrUnsupportedType for a
+// normalised value type, and nullability. It returns ErrUnsupportedType for a
 // grammar-valid value type outside the families this model maps (ADR 0002).
 func property(ctx gen.IPropertyTypeContext, ts *antlr.CommonTokenStream) (schema.Property, error) {
 	vt := ctx.PropertyValueType().ValueType()
 
-	pt, ok := normalizeType(spelling(vt, ts))
+	pt, ok := normaliseType(spelling(vt, ts))
 	if !ok {
 		return schema.Property{}, ErrUnsupportedType
 	}
@@ -40,15 +41,10 @@ func hasNotNull(t antlr.Tree) bool {
 	if _, ok := t.(*gen.NotNullContext); ok {
 		return true
 	}
-	for _, c := range t.GetChildren() {
-		if hasNotNull(c) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(t.GetChildren(), hasNotNull)
 }
 
-// typeSpellings maps a canonicalized GQL value-type spelling to its normalized
+// typeSpellings maps a canonicalised GQL value-type spelling to its normalised
 // PropertyType. Only grammar-reachable spellings appear: e.g. SIGNED, UNSIGNED,
 // NUMERIC, CHARACTER, bare DATETIME/LOCALDATETIME are listed in some references
 // but the GQL grammar does not accept them, so they cannot occur. Length and
@@ -110,7 +106,7 @@ var typeSpellings = map[string]schema.PropertyType{
 	"DEC":     schema.TypeDecimal,
 }
 
-func normalizeType(spelling string) (schema.PropertyType, bool) {
+func normaliseType(spelling string) (schema.PropertyType, bool) {
 	pt, ok := typeSpellings[canonicalSpelling(spelling)]
 	return pt, ok
 }

@@ -28,7 +28,7 @@ is noise; delete it.
   that duplicate each other's coverage. A reader should see what each case
   proves at a glance.
 - **Golden files** for parsed results: a `.golden.json` beside each `.gql`
-  fixture, regenerated with `go test -update`. The serialization is the domain
+  fixture, regenerated with `go test -update`. The serialisation is the domain
   model's own deterministic `schema.Schema.MarshalJSON` (maps sorted into stable
   slices), so one canonical form serves golden tests today and generated output
   later — calls to the tool stay idempotent.

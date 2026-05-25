@@ -43,7 +43,7 @@ type Property struct {
 
 // MarshalJSON renders the schema in a deterministic, stable form so every
 // consumer — golden tests today, generated output later — is idempotent
-// regardless of Go's randomized map iteration order. Its only job is to turn the
+// regardless of Go's randomised map iteration order. Its only job is to turn the
 // node and edge maps into slices sorted by identity (node label set; edge
 // source/label/target); the elements are the real NodeType/EdgeType, so there's
 // no parallel JSON model to keep in sync. A custom marshal is needed because
@@ -77,7 +77,7 @@ func (s Schema) MarshalJSON() ([]byte, error) {
 	}{Name: s.Name, Nodes: nodes, Edges: edges})
 }
 
-// PropertyType is the normalized value type of a property. Numeric types keep
+// PropertyType is the normalised value type of a property. Numeric types keep
 // their bit width rather than collapsing to a single Int/Float, so codegen can
 // preserve the signedness and width the schema author stated (ADR 0002).
 type PropertyType string
@@ -122,7 +122,7 @@ type LabelSet []string
 // map key: labels sorted, deduplicated, and joined with "&".
 type LabelSetKey string
 
-// Key canonicalizes the set into its map key. The original slice is left
+// Key canonicalises the set into its map key. The original slice is left
 // unmodified.
 func (ls LabelSet) Key() LabelSetKey {
 	sorted := slices.Clone(ls)

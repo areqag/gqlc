@@ -13,7 +13,7 @@ We rejected that: gqlc generates Go code, and GQL distinguishes `UINT*` from
 codegen to emit `int`/`uint` everywhere and discard information the schema
 author explicitly stated.
 
-GQL type spellings are normalized into this enum (e.g. `SMALLINT≈Int16`,
+GQL type spellings are normalised into this enum (e.g. `SMALLINT≈Int16`,
 `BIGINT≈Int64`, `UBIGINT≈Uint64`, `REAL≈Float32`, `DOUBLE≈Float64`); length and
 precision qualifiers (`VARCHAR(255)`, `DECIMAL(p,s)`) are dropped. Value types
 outside the supported families (reference, list, record, path, time-only,
@@ -23,6 +23,6 @@ duration) are rejected with `ErrUnsupportedType`.
 
 `Int128/Int256/Uint128/Uint256` and `Decimal` have no native Go type. The parser
 records them faithfully; choosing a Go representation (e.g. `math/big`) is left
-to the codegen stage. The enum is correspondingly large, and the normalization
+to the codegen stage. The enum is correspondingly large, and the normalisation
 table from grammar spellings to enum constants must be kept in sync with the
 grammar.
