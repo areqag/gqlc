@@ -1,0 +1,6 @@
+-- Label implication "=>" on an edge type filler.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Person { id :: INT }),
+    (:Post { id :: INT }),
+    (:Person) -[:AUTHORED => { ts :: TIMESTAMP }]-> (:Post)
+}

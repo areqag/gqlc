@@ -1,0 +1,7 @@
+-- Undirected edge. Edge types are directed; an undirected arc has no
+-- canonical source -> target identity.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (a :Person { id :: INT }),
+    (b :Person { id :: INT }),
+    (a) ~[:KNOWS]~ (b)
+}

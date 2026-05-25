@@ -1,0 +1,64 @@
+{
+  "name": "PeopleAndOrgs",
+  "nodes": [
+    {
+      "labels": "Company",
+      "name": "CompanyType",
+      "properties": {
+        "id": {
+          "name": "id",
+          "type": "UINT64",
+          "nullable": false
+        },
+        "name": {
+          "name": "name",
+          "type": "STRING",
+          "nullable": true
+        }
+      }
+    },
+    {
+      "labels": "Employee\u0026Person",
+      "name": "",
+      "properties": {
+        "employeeId": {
+          "name": "employeeId",
+          "type": "UINT64",
+          "nullable": false
+        },
+        "title": {
+          "name": "title",
+          "type": "STRING",
+          "nullable": true
+        }
+      }
+    },
+    {
+      "labels": "Person",
+      "name": "",
+      "properties": {
+        "email": {
+          "name": "email",
+          "type": "STRING",
+          "nullable": true
+        },
+        "id": {
+          "name": "id",
+          "type": "UINT64",
+          "nullable": false
+        },
+        "name": {
+          "name": "name",
+          "type": "STRING",
+          "nullable": true
+        }
+      }
+    },
+    {
+      "labels": "Tag",
+      "name": "",
+      "properties": null
+    }
+  ],
+  "edges": []
+}

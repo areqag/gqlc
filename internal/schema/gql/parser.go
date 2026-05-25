@@ -1,8 +1,6 @@
 package gql
 
 import (
-	"errors"
-	"fmt"
 	"io"
 
 	"github.com/antlr4-go/antlr/v4"
@@ -10,54 +8,31 @@ import (
 	"github.com/antranig-yeretzian/gqlc/internal/schema"
 )
 
-// Errors returned by Parse for valid GQL that uses constructs this parser does
-// not yet support. They are sentinels so callers can branch with errors.Is.
-var (
-	ErrLabelImplication = errors.New(`label implication ("=>") is not supported`)
-	ErrUndirectedEdge   = errors.New("undirected edges are not supported")
-)
+type parser struct{}
 
-type parser struct {
-	v visitor
+func New() schema.Parser {
+	return parser{}
 }
 
-var _ schema.Parser = parser{}
-
-func New() parser {
-	return parser{v: visitor{}}
-}
-
-func (p parser) Parse(r io.Reader) (schema.Schema, error) {
-	input := antlr.NewIoStream(r)
-
-	// TODO: add custom error listener here
-	lex := gen.NewGQLLexer(input)
-
+func (parser) Parse(r io.Reader) (schema.Schema, error) {
+	lex := gen.NewGQLLexer(antlr.NewIoStream(r))
 	ts := antlr.NewCommonTokenStream(lex, antlr.TokenDefaultChannel)
-	ts.Fill() // NOTE: forces a full lex of the source to find errors
-
-	// TODO: add custom error listener here
 	gp := gen.NewGQLParser(ts)
+
+	// The listener is the single error sink: it captures lexer/parser syntax
+	// errors (SyntaxError) and the collection errors raised during the walk, all
+	// on l.err. walk then surfaces the first of them — including "no graph type"
+	// via ExitGqlProgram — and resolution runs only on a clean walk.
+	l := &listener{ts: ts}
+	lex.RemoveErrorListeners()
+	lex.AddErrorListener(l)
+	gp.RemoveErrorListeners()
+	gp.AddErrorListener(l)
+
 	tree := gp.GqlProgram()
-
-	var visitorErr error
-	func() {
-		// NOTE: ANTLR visit panics when the source is invalid
-		defer func() {
-			if rec := recover(); rec != nil {
-				if e, ok := rec.(error); ok {
-					visitorErr = e
-					return
-				}
-				visitorErr = fmt.Errorf("%v", rec)
-			}
-		}()
-		p.v.Visit(tree)
-	}()
-
-	if visitorErr == nil {
-		visitorErr = p.v.err
+	if err := l.walk(tree); err != nil {
+		return schema.Schema{}, err
 	}
 
-	return schema.Schema{}, visitorErr
+	return l.raw.resolve()
 }

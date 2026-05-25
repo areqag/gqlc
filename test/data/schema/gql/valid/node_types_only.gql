@@ -1,0 +1,28 @@
+-- ============================================================
+-- Node types only: no edges. Exercises node assembly end to end —
+-- a colon-labelled node, an explicit NODE TYPE name, a multi-label
+-- node, a property-less node, and NOT NULL vs nullable-by-default —
+-- so the golden file pins the node half of the model.
+-- ============================================================
+
+CREATE PROPERTY GRAPH TYPE PeopleAndOrgs AS {
+
+    (:Person {
+        id    :: UINT64 NOT NULL,
+        name  :: STRING,
+        email :: VARCHAR(320)
+    }),
+
+    NODE TYPE CompanyType (:Company {
+        id   :: UINT64 NOT NULL,
+        name :: STRING
+    }),
+
+    (:Person&Employee {
+        employeeId :: UINT64 NOT NULL,
+        title      :: STRING
+    }),
+
+    (:Tag)
+
+}

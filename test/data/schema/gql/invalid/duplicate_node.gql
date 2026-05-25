@@ -1,0 +1,5 @@
+-- Two node types with the same label set collide on identity.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Person { id :: INT }),
+    (:Person { name :: STRING })
+}

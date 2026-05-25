@@ -1,0 +1,131 @@
+{
+  "name": "SocialNetworkType",
+  "nodes": [
+    {
+      "labels": "Person",
+      "name": "",
+      "properties": {
+        "active": {
+          "name": "active",
+          "type": "BOOL",
+          "nullable": false
+        },
+        "birthDate": {
+          "name": "birthDate",
+          "type": "DATE",
+          "nullable": true
+        },
+        "email": {
+          "name": "email",
+          "type": "STRING",
+          "nullable": true
+        },
+        "id": {
+          "name": "id",
+          "type": "INT",
+          "nullable": false
+        },
+        "name": {
+          "name": "name",
+          "type": "STRING",
+          "nullable": false
+        }
+      }
+    },
+    {
+      "labels": "Post",
+      "name": "",
+      "properties": {
+        "content": {
+          "name": "content",
+          "type": "STRING",
+          "nullable": true
+        },
+        "createdAt": {
+          "name": "createdAt",
+          "type": "TIMESTAMP",
+          "nullable": true
+        },
+        "id": {
+          "name": "id",
+          "type": "INT",
+          "nullable": false
+        },
+        "likes": {
+          "name": "likes",
+          "type": "INT",
+          "nullable": true
+        },
+        "title": {
+          "name": "title",
+          "type": "STRING",
+          "nullable": false
+        }
+      }
+    },
+    {
+      "labels": "Tag",
+      "name": "",
+      "properties": {
+        "id": {
+          "name": "id",
+          "type": "INT",
+          "nullable": false
+        },
+        "name": {
+          "name": "name",
+          "type": "STRING",
+          "nullable": false
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "Person",
+      "label": "AUTHORED",
+      "target": "Post",
+      "name": "",
+      "properties": {
+        "publishedAt": {
+          "name": "publishedAt",
+          "type": "TIMESTAMP",
+          "nullable": false
+        }
+      }
+    },
+    {
+      "source": "Person",
+      "label": "KNOWS",
+      "target": "Person",
+      "name": "",
+      "properties": {
+        "since": {
+          "name": "since",
+          "type": "DATE",
+          "nullable": true
+        }
+      }
+    },
+    {
+      "source": "Person",
+      "label": "LIKED",
+      "target": "Post",
+      "name": "",
+      "properties": {
+        "likedAt": {
+          "name": "likedAt",
+          "type": "TIMESTAMP",
+          "nullable": true
+        }
+      }
+    },
+    {
+      "source": "Post",
+      "label": "TAGGED_WITH",
+      "target": "Tag",
+      "name": "",
+      "properties": null
+    }
+  ]
+}

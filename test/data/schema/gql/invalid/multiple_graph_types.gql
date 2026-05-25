@@ -1,0 +1,3 @@
+-- More than one CREATE PROPERTY GRAPH TYPE; the input scope is exactly one.
+CREATE PROPERTY GRAPH TYPE T AS { (:Person { id :: INT }) }
+CREATE PROPERTY GRAPH TYPE U AS { (:Post { id :: INT }) }

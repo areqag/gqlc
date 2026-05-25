@@ -1,0 +1,2 @@
+-- No CREATE PROPERTY GRAPH TYPE statement at all.
+RETURN 1

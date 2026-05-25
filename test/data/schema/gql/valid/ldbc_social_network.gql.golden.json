@@ -1,0 +1,313 @@
+{
+  "name": "SocialNetwork",
+  "nodes": [
+    {
+      "labels": "Comment",
+      "name": "",
+      "properties": {
+        "content": {
+          "name": "content",
+          "type": "STRING",
+          "nullable": true
+        },
+        "creationDate": {
+          "name": "creationDate",
+          "type": "TIMESTAMP",
+          "nullable": true
+        },
+        "id": {
+          "name": "id",
+          "type": "UINT64",
+          "nullable": false
+        },
+        "length": {
+          "name": "length",
+          "type": "UINT64",
+          "nullable": true
+        }
+      }
+    },
+    {
+      "labels": "Company",
+      "name": "",
+      "properties": {
+        "id": {
+          "name": "id",
+          "type": "UINT64",
+          "nullable": false
+        },
+        "name": {
+          "name": "name",
+          "type": "STRING",
+          "nullable": true
+        },
+        "url": {
+          "name": "url",
+          "type": "STRING",
+          "nullable": true
+        }
+      }
+    },
+    {
+      "labels": "Forum",
+      "name": "",
+      "properties": {
+        "creationDate": {
+          "name": "creationDate",
+          "type": "TIMESTAMP",
+          "nullable": true
+        },
+        "id": {
+          "name": "id",
+          "type": "UINT64",
+          "nullable": false
+        },
+        "title": {
+          "name": "title",
+          "type": "STRING",
+          "nullable": true
+        }
+      }
+    },
+    {
+      "labels": "Person",
+      "name": "",
+      "properties": {
+        "birthday": {
+          "name": "birthday",
+          "type": "UINT64",
+          "nullable": true
+        },
+        "browserUsed": {
+          "name": "browserUsed",
+          "type": "STRING",
+          "nullable": true
+        },
+        "creationDate": {
+          "name": "creationDate",
+          "type": "TIMESTAMP",
+          "nullable": true
+        },
+        "firstName": {
+          "name": "firstName",
+          "type": "STRING",
+          "nullable": true
+        },
+        "gender": {
+          "name": "gender",
+          "type": "STRING",
+          "nullable": true
+        },
+        "id": {
+          "name": "id",
+          "type": "UINT64",
+          "nullable": false
+        },
+        "lastName": {
+          "name": "lastName",
+          "type": "STRING",
+          "nullable": true
+        },
+        "locationIP": {
+          "name": "locationIP",
+          "type": "STRING",
+          "nullable": true
+        }
+      }
+    },
+    {
+      "labels": "Post",
+      "name": "",
+      "properties": {
+        "content": {
+          "name": "content",
+          "type": "STRING",
+          "nullable": true
+        },
+        "creationDate": {
+          "name": "creationDate",
+          "type": "TIMESTAMP",
+          "nullable": true
+        },
+        "id": {
+          "name": "id",
+          "type": "UINT64",
+          "nullable": false
+        },
+        "imageFile": {
+          "name": "imageFile",
+          "type": "STRING",
+          "nullable": true
+        },
+        "language": {
+          "name": "language",
+          "type": "STRING",
+          "nullable": true
+        },
+        "length": {
+          "name": "length",
+          "type": "UINT64",
+          "nullable": true
+        }
+      }
+    },
+    {
+      "labels": "Tag",
+      "name": "",
+      "properties": {
+        "id": {
+          "name": "id",
+          "type": "UINT64",
+          "nullable": false
+        },
+        "name": {
+          "name": "name",
+          "type": "STRING",
+          "nullable": true
+        },
+        "url": {
+          "name": "url",
+          "type": "STRING",
+          "nullable": true
+        }
+      }
+    },
+    {
+      "labels": "University",
+      "name": "",
+      "properties": {
+        "id": {
+          "name": "id",
+          "type": "UINT64",
+          "nullable": false
+        },
+        "name": {
+          "name": "name",
+          "type": "STRING",
+          "nullable": true
+        },
+        "url": {
+          "name": "url",
+          "type": "STRING",
+          "nullable": true
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "Comment",
+      "label": "hasCreator",
+      "target": "Person",
+      "name": "",
+      "properties": null
+    },
+    {
+      "source": "Comment",
+      "label": "hasReply",
+      "target": "Post",
+      "name": "",
+      "properties": null
+    },
+    {
+      "source": "Comment",
+      "label": "replyOf",
+      "target": "Post",
+      "name": "",
+      "properties": null
+    },
+    {
+      "source": "Forum",
+      "label": "containerOf",
+      "target": "Post",
+      "name": "",
+      "properties": null
+    },
+    {
+      "source": "Forum",
+      "label": "hasMember",
+      "target": "Person",
+      "name": "",
+      "properties": {
+        "joinDate": {
+          "name": "joinDate",
+          "type": "UINT64",
+          "nullable": true
+        }
+      }
+    },
+    {
+      "source": "Forum",
+      "label": "hasTag",
+      "target": "Tag",
+      "name": "",
+      "properties": null
+    },
+    {
+      "source": "Person",
+      "label": "hasInterest",
+      "target": "Tag",
+      "name": "",
+      "properties": null
+    },
+    {
+      "source": "Person",
+      "label": "knows",
+      "target": "Person",
+      "name": "",
+      "properties": {
+        "creationDate": {
+          "name": "creationDate",
+          "type": "TIMESTAMP",
+          "nullable": true
+        }
+      }
+    },
+    {
+      "source": "Person",
+      "label": "likes",
+      "target": "Post",
+      "name": "",
+      "properties": {
+        "creationDate": {
+          "name": "creationDate",
+          "type": "TIMESTAMP",
+          "nullable": true
+        }
+      }
+    },
+    {
+      "source": "Person",
+      "label": "studyAt",
+      "target": "University",
+      "name": "",
+      "properties": {
+        "classYear": {
+          "name": "classYear",
+          "type": "UINT64",
+          "nullable": true
+        }
+      }
+    },
+    {
+      "source": "Person",
+      "label": "workAt",
+      "target": "Company",
+      "name": "",
+      "properties": {
+        "workFrom": {
+          "name": "workFrom",
+          "type": "UINT64",
+          "nullable": true
+        }
+      }
+    },
+    {
+      "source": "Post",
+      "label": "hasCreator",
+      "target": "Person",
+      "name": "",
+      "properties": null
+    }
+  ]
+}

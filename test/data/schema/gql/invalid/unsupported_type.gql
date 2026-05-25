@@ -1,0 +1,5 @@
+-- Time-only value type. Outside the supported scalar/numeric/temporal
+-- families this model maps (see ADR 0002).
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Event { occurredAt :: TIME WITH TIME ZONE })
+}
