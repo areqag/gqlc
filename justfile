@@ -2,4 +2,6 @@
 build-grammar:
     sudo docker build -q -t antlr-tool -f Dockerfile.grammar .
     @echo "Generating Go files from GQL.g4..."
-    sudo docker run --rm -v {{invocation_directory()}}:/work antlr-tool
+    sudo docker run --rm -v {{invocation_directory()}}:/work -w /work/internal/grammar/gql antlr-tool -package gen -visitor -o gen GQL.g4
+    @echo "Generating Go files from Cypher.g4..."
+    sudo docker run --rm -v {{invocation_directory()}}:/work -w /work/internal/grammar/cypher antlr-tool -package gen -visitor -o gen Cypher.g4
