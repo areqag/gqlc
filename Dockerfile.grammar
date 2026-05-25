@@ -7,5 +7,5 @@ RUN wget https://www.antlr.org/download/antlr-4.13.1-complete.jar -O antlr.jar
 
 ENTRYPOINT ["java", "-jar", "/antlr/antlr.jar", "-Dlanguage=Go"]
 
-WORKDIR /work/internal/grammar/gql
-CMD ["-package", "gen", "-visitor", "-o", "gen", "GQL.g4"]
+# Per-grammar working dir and args are supplied at `docker run` time (see justfile).
+WORKDIR /work
