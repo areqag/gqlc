@@ -1,0 +1,41 @@
+-- ============================================================
+-- Value-type coverage: exercises the spelling -> PropertyType
+-- normalization across the integer, unsigned, float, and
+-- temporal/scalar families, plus nullability (NOT NULL vs the
+-- nullable-by-default), a catalog-qualified graph type name, and
+-- a left-pointing alias edge.
+-- ============================================================
+
+CREATE PROPERTY GRAPH TYPE store.metrics.Measurements AS {
+
+    (m :Sample {
+        s   :: STRING,
+        c   :: CHAR(8),
+        v   :: VARCHAR(64),
+        i   :: INT NOT NULL,
+        i8  :: INT8,
+        i16 :: SMALLINT,
+        i32 :: INT32,
+        i64 :: BIGINT,
+        u   :: UINT,
+        u16 :: USMALLINT,
+        u64 :: UBIGINT,
+        f   :: FLOAT,
+        f32 :: REAL,
+        f64 :: DOUBLE,
+        d   :: DECIMAL(10, 2),
+        b   :: BOOL,
+        dt  :: DATE,
+        ts  :: TIMESTAMP
+    }),
+
+    (g :Gauge {
+        id  :: UINT64 NOT NULL,
+        val :: FLOAT64
+    }),
+
+    (m) -[:CALIBRATES { recordedAt :: ZONED DATETIME }]-> (g),
+
+    (g) <-[:FEEDS]- (m)
+
+}

@@ -1,0 +1,5 @@
+-- Node type with no label. A node type is identified by its label set
+-- and must carry at least one label.
+CREATE PROPERTY GRAPH TYPE T AS {
+    ( { id :: INT } )
+}

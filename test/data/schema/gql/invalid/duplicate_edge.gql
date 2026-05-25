@@ -1,0 +1,7 @@
+-- Two edge types with the same source/label/target collide on identity.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Person { id :: INT }),
+    (:Post { id :: INT }),
+    (:Person) -[:AUTHORED]-> (:Post),
+    (:Person) -[:AUTHORED]-> (:Post)
+}

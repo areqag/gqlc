@@ -1,0 +1,40 @@
+-- ============================================================
+-- Sample GQL Schema: Social Network Graph
+-- Validates against the GQL ANTLR grammar (GQL.g4).
+-- Exercises aliased node types, alias-referenced edges (including a
+-- self-referential edge on a single node type), and a spread of
+-- property value-type spellings.
+-- ============================================================
+
+CREATE PROPERTY GRAPH TYPE SocialNetworkType AS {
+
+    (p :Person {
+        id        :: INT NOT NULL,
+        name      :: STRING NOT NULL,
+        email     :: VARCHAR(255),
+        birthDate :: DATE,
+        active    :: BOOL NOT NULL
+    }),
+
+    (post :Post {
+        id        :: INT NOT NULL,
+        title     :: STRING NOT NULL,
+        content   :: STRING,
+        createdAt :: TIMESTAMP,
+        likes     :: INT
+    }),
+
+    (t :Tag {
+        id   :: INT NOT NULL,
+        name :: STRING NOT NULL
+    }),
+
+    (p) -[:KNOWS { since :: DATE }]-> (p),
+
+    (p) -[:AUTHORED { publishedAt :: TIMESTAMP NOT NULL }]-> (post),
+
+    (post) -[:TAGGED_WITH]-> (t),
+
+    (p) -[:LIKED { likedAt :: TIMESTAMP }]-> (post)
+
+}
