@@ -1,0 +1,5 @@
+-- Edge endpoint references a node type that was never declared.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Person { id :: INT }),
+    (:Person) -[:KNOWS]-> (:Ghost)
+}

@@ -1,0 +1,6 @@
+-- Edge type with no label. An edge type must carry at least one label.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Person { id :: INT }),
+    (:Post { id :: INT }),
+    (:Person) -[{ ts :: TIMESTAMP }]-> (:Post)
+}

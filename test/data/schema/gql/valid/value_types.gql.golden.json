@@ -1,0 +1,139 @@
+{
+  "name": "Measurements",
+  "nodes": [
+    {
+      "labels": "Gauge",
+      "name": "",
+      "properties": {
+        "id": {
+          "name": "id",
+          "type": "UINT64",
+          "nullable": false
+        },
+        "val": {
+          "name": "val",
+          "type": "FLOAT64",
+          "nullable": true
+        }
+      }
+    },
+    {
+      "labels": "Sample",
+      "name": "",
+      "properties": {
+        "b": {
+          "name": "b",
+          "type": "BOOL",
+          "nullable": true
+        },
+        "c": {
+          "name": "c",
+          "type": "STRING",
+          "nullable": true
+        },
+        "d": {
+          "name": "d",
+          "type": "DECIMAL",
+          "nullable": true
+        },
+        "dt": {
+          "name": "dt",
+          "type": "DATE",
+          "nullable": true
+        },
+        "f": {
+          "name": "f",
+          "type": "FLOAT",
+          "nullable": true
+        },
+        "f32": {
+          "name": "f32",
+          "type": "FLOAT32",
+          "nullable": true
+        },
+        "f64": {
+          "name": "f64",
+          "type": "FLOAT64",
+          "nullable": true
+        },
+        "i": {
+          "name": "i",
+          "type": "INT",
+          "nullable": false
+        },
+        "i16": {
+          "name": "i16",
+          "type": "INT16",
+          "nullable": true
+        },
+        "i32": {
+          "name": "i32",
+          "type": "INT32",
+          "nullable": true
+        },
+        "i64": {
+          "name": "i64",
+          "type": "INT64",
+          "nullable": true
+        },
+        "i8": {
+          "name": "i8",
+          "type": "INT8",
+          "nullable": true
+        },
+        "s": {
+          "name": "s",
+          "type": "STRING",
+          "nullable": true
+        },
+        "ts": {
+          "name": "ts",
+          "type": "TIMESTAMP",
+          "nullable": true
+        },
+        "u": {
+          "name": "u",
+          "type": "UINT",
+          "nullable": true
+        },
+        "u16": {
+          "name": "u16",
+          "type": "UINT16",
+          "nullable": true
+        },
+        "u64": {
+          "name": "u64",
+          "type": "UINT64",
+          "nullable": true
+        },
+        "v": {
+          "name": "v",
+          "type": "STRING",
+          "nullable": true
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "Sample",
+      "label": "CALIBRATES",
+      "target": "Gauge",
+      "name": "",
+      "properties": {
+        "recordedAt": {
+          "name": "recordedAt",
+          "type": "TIMESTAMP",
+          "nullable": true
+        }
+      }
+    },
+    {
+      "source": "Sample",
+      "label": "FEEDS",
+      "target": "Gauge",
+      "name": "",
+      "properties": null
+    }
+  ]
+}

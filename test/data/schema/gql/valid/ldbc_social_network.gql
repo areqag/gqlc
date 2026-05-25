@@ -1,0 +1,84 @@
+-- ============================================================
+-- LDBC Social Network Benchmark (SNB), reduced to a grammar-valid
+-- GQL graph type.
+--
+-- Derived from the Microsoft Fabric "GQL Schema Example - Social
+-- Network" (itself derived from the LDBC SNB). Adapted to the
+-- subset this parser supports:
+--   * label implication "=>" rewritten to the colon label form
+--   * CONSTRAINT / ABSTRACT / inheritance / "+=" dropped
+--   * endpoints written as inline node-type fillers matching a
+--     declared node type
+--   * wrapped in CREATE PROPERTY GRAPH TYPE ... AS { ... }
+-- ============================================================
+
+CREATE PROPERTY GRAPH TYPE SocialNetwork AS {
+
+    (:Tag {
+        id   :: UINT64 NOT NULL,
+        name :: STRING,
+        url  :: STRING
+    }),
+
+    (:Person {
+        id           :: UINT64 NOT NULL,
+        creationDate :: ZONED DATETIME,
+        firstName    :: STRING,
+        lastName     :: STRING,
+        gender       :: STRING,
+        birthday     :: UINT64,
+        browserUsed  :: STRING,
+        locationIP   :: STRING
+    }),
+
+    (:University {
+        id   :: UINT64 NOT NULL,
+        name :: STRING,
+        url  :: STRING
+    }),
+
+    (:Company {
+        id   :: UINT64 NOT NULL,
+        name :: STRING,
+        url  :: STRING
+    }),
+
+    (:Forum {
+        id           :: UINT64 NOT NULL,
+        creationDate :: ZONED DATETIME,
+        title        :: STRING
+    }),
+
+    (:Post {
+        id           :: UINT64 NOT NULL,
+        creationDate :: ZONED DATETIME,
+        content      :: STRING,
+        length       :: UINT64,
+        language     :: STRING,
+        imageFile    :: STRING
+    }),
+
+    (:Comment {
+        id           :: UINT64 NOT NULL,
+        creationDate :: ZONED DATETIME,
+        content      :: STRING,
+        length       :: UINT64
+    }),
+
+    (:Person)-[:hasInterest]->(:Tag),
+    (:Person)-[:studyAt { classYear :: UINT64 }]->(:University),
+    (:Person)-[:workAt { workFrom :: UINT64 }]->(:Company),
+    (:Person)-[:knows { creationDate :: ZONED DATETIME }]->(:Person),
+
+    (:Forum)-[:hasTag]->(:Tag),
+    (:Forum)-[:hasMember { joinDate :: UINT64 }]->(:Person),
+    (:Forum)-[:containerOf]->(:Post),
+
+    (:Person)-[:likes { creationDate :: ZONED DATETIME }]->(:Post),
+    (:Post)-[:hasCreator]->(:Person),
+
+    (:Comment)-[:replyOf]->(:Post),
+    (:Comment)-[:hasCreator]->(:Person),
+    (:Post)<-[:hasReply]-(:Comment)
+
+}
