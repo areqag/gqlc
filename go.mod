@@ -5,6 +5,7 @@ go 1.26.2
 require (
 	github.com/antlr4-go/antlr/v4 v4.13.1
 	github.com/stretchr/testify v1.11.1
+	pgregory.net/rapid v1.3.0
 )
 
 require (
