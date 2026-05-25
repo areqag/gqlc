@@ -7,6 +7,7 @@ import (
 	"github.com/antlr4-go/antlr/v4"
 
 	"github.com/antranig-yeretzian/gqlc/internal/grammar/gql/gen"
+	"github.com/antranig-yeretzian/gqlc/internal/graph"
 	"github.com/antranig-yeretzian/gqlc/internal/schema"
 )
 
@@ -49,64 +50,64 @@ func hasNotNull(t antlr.Tree) bool {
 // NUMERIC, CHARACTER, bare DATETIME/LOCALDATETIME are listed in some references
 // but the GQL grammar does not accept them, so they cannot occur. Length and
 // precision qualifiers and a trailing NOT NULL are stripped before lookup.
-var typeSpellings = map[string]schema.PropertyType{
-	"STRING":    schema.TypeString,
-	"CHAR":      schema.TypeString,
-	"VARCHAR":   schema.TypeString,
-	"BOOL":      schema.TypeBool,
-	"BOOLEAN":   schema.TypeBool,
-	"DATE":      schema.TypeDate,
-	"TIMESTAMP": schema.TypeTimestamp,
+var typeSpellings = map[string]graph.PropertyType{
+	"STRING":    graph.TypeString,
+	"CHAR":      graph.TypeString,
+	"VARCHAR":   graph.TypeString,
+	"BOOL":      graph.TypeBool,
+	"BOOLEAN":   graph.TypeBool,
+	"DATE":      graph.TypeDate,
+	"TIMESTAMP": graph.TypeTimestamp,
 
-	"ZONED DATETIME":              schema.TypeTimestamp,
-	"LOCAL DATETIME":              schema.TypeTimestamp,
-	"TIMESTAMP WITH TIME ZONE":    schema.TypeTimestamp,
-	"TIMESTAMP WITHOUT TIME ZONE": schema.TypeTimestamp,
+	"ZONED DATETIME":              graph.TypeTimestamp,
+	"LOCAL DATETIME":              graph.TypeTimestamp,
+	"TIMESTAMP WITH TIME ZONE":    graph.TypeTimestamp,
+	"TIMESTAMP WITHOUT TIME ZONE": graph.TypeTimestamp,
 
-	"INT":           schema.TypeInt,
-	"INTEGER":       schema.TypeInt,
-	"SMALLINT":      schema.TypeInt16,
-	"SMALL INTEGER": schema.TypeInt16,
-	"BIGINT":        schema.TypeInt64,
-	"BIG INTEGER":   schema.TypeInt64,
-	"INT8":          schema.TypeInt8,
-	"INTEGER8":      schema.TypeInt8,
-	"INT16":         schema.TypeInt16,
-	"INTEGER16":     schema.TypeInt16,
-	"INT32":         schema.TypeInt32,
-	"INTEGER32":     schema.TypeInt32,
-	"INT64":         schema.TypeInt64,
-	"INTEGER64":     schema.TypeInt64,
-	"INT128":        schema.TypeInt128,
-	"INTEGER128":    schema.TypeInt128,
-	"INT256":        schema.TypeInt256,
-	"INTEGER256":    schema.TypeInt256,
+	"INT":           graph.TypeInt,
+	"INTEGER":       graph.TypeInt,
+	"SMALLINT":      graph.TypeInt16,
+	"SMALL INTEGER": graph.TypeInt16,
+	"BIGINT":        graph.TypeInt64,
+	"BIG INTEGER":   graph.TypeInt64,
+	"INT8":          graph.TypeInt8,
+	"INTEGER8":      graph.TypeInt8,
+	"INT16":         graph.TypeInt16,
+	"INTEGER16":     graph.TypeInt16,
+	"INT32":         graph.TypeInt32,
+	"INTEGER32":     graph.TypeInt32,
+	"INT64":         graph.TypeInt64,
+	"INTEGER64":     graph.TypeInt64,
+	"INT128":        graph.TypeInt128,
+	"INTEGER128":    graph.TypeInt128,
+	"INT256":        graph.TypeInt256,
+	"INTEGER256":    graph.TypeInt256,
 
-	"UINT":      schema.TypeUint,
-	"USMALLINT": schema.TypeUint16,
-	"UBIGINT":   schema.TypeUint64,
-	"UINT8":     schema.TypeUint8,
-	"UINT16":    schema.TypeUint16,
-	"UINT32":    schema.TypeUint32,
-	"UINT64":    schema.TypeUint64,
-	"UINT128":   schema.TypeUint128,
-	"UINT256":   schema.TypeUint256,
+	"UINT":      graph.TypeUint,
+	"USMALLINT": graph.TypeUint16,
+	"UBIGINT":   graph.TypeUint64,
+	"UINT8":     graph.TypeUint8,
+	"UINT16":    graph.TypeUint16,
+	"UINT32":    graph.TypeUint32,
+	"UINT64":    graph.TypeUint64,
+	"UINT128":   graph.TypeUint128,
+	"UINT256":   graph.TypeUint256,
 
-	"FLOAT":            schema.TypeFloat,
-	"REAL":             schema.TypeFloat32,
-	"DOUBLE":           schema.TypeFloat64,
-	"DOUBLE PRECISION": schema.TypeFloat64,
-	"FLOAT16":          schema.TypeFloat16,
-	"FLOAT32":          schema.TypeFloat32,
-	"FLOAT64":          schema.TypeFloat64,
-	"FLOAT128":         schema.TypeFloat128,
-	"FLOAT256":         schema.TypeFloat256,
+	"FLOAT":            graph.TypeFloat,
+	"REAL":             graph.TypeFloat32,
+	"DOUBLE":           graph.TypeFloat64,
+	"DOUBLE PRECISION": graph.TypeFloat64,
+	"FLOAT16":          graph.TypeFloat16,
+	"FLOAT32":          graph.TypeFloat32,
+	"FLOAT64":          graph.TypeFloat64,
+	"FLOAT128":         graph.TypeFloat128,
+	"FLOAT256":         graph.TypeFloat256,
 
-	"DECIMAL": schema.TypeDecimal,
-	"DEC":     schema.TypeDecimal,
+	"DECIMAL": graph.TypeDecimal,
+	"DEC":     graph.TypeDecimal,
 }
 
-func normaliseType(spelling string) (schema.PropertyType, bool) {
+func normaliseType(spelling string) (graph.PropertyType, bool) {
 	pt, ok := typeSpellings[canonicalSpelling(spelling)]
 	return pt, ok
 }

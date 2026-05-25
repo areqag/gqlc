@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/antranig-yeretzian/gqlc/internal/grammar/gql/gen"
+	"github.com/antranig-yeretzian/gqlc/internal/graph"
 	"github.com/antranig-yeretzian/gqlc/internal/schema"
 )
 
@@ -49,46 +50,46 @@ func (c *propertyCollector) EnterPropertyType(ctx *gen.PropertyTypeContext) {
 func TestPropertyTypeMapping(t *testing.T) {
 	cases := []struct {
 		spelling string
-		want     schema.PropertyType
+		want     graph.PropertyType
 	}{
-		{"STRING", schema.TypeString},
-		{"CHAR", schema.TypeString},
-		{"VARCHAR", schema.TypeString},
-		{"BOOL", schema.TypeBool},
-		{"BOOLEAN", schema.TypeBool},
-		{"DATE", schema.TypeDate},
+		{"STRING", graph.TypeString},
+		{"CHAR", graph.TypeString},
+		{"VARCHAR", graph.TypeString},
+		{"BOOL", graph.TypeBool},
+		{"BOOLEAN", graph.TypeBool},
+		{"DATE", graph.TypeDate},
 
-		{"TIMESTAMP", schema.TypeTimestamp},
-		{"ZONED DATETIME", schema.TypeTimestamp},
-		{"LOCAL DATETIME", schema.TypeTimestamp},
-		{"TIMESTAMP WITH TIME ZONE", schema.TypeTimestamp},
-		{"TIMESTAMP WITHOUT TIME ZONE", schema.TypeTimestamp},
+		{"TIMESTAMP", graph.TypeTimestamp},
+		{"ZONED DATETIME", graph.TypeTimestamp},
+		{"LOCAL DATETIME", graph.TypeTimestamp},
+		{"TIMESTAMP WITH TIME ZONE", graph.TypeTimestamp},
+		{"TIMESTAMP WITHOUT TIME ZONE", graph.TypeTimestamp},
 
-		{"INT", schema.TypeInt},
-		{"INTEGER", schema.TypeInt},
-		{"SMALLINT", schema.TypeInt16},
-		{"SMALL INTEGER", schema.TypeInt16},
-		{"BIGINT", schema.TypeInt64},
-		{"BIG INTEGER", schema.TypeInt64},
-		{"INT8", schema.TypeInt8},
-		{"INTEGER8", schema.TypeInt8},
-		{"INT256", schema.TypeInt256},
+		{"INT", graph.TypeInt},
+		{"INTEGER", graph.TypeInt},
+		{"SMALLINT", graph.TypeInt16},
+		{"SMALL INTEGER", graph.TypeInt16},
+		{"BIGINT", graph.TypeInt64},
+		{"BIG INTEGER", graph.TypeInt64},
+		{"INT8", graph.TypeInt8},
+		{"INTEGER8", graph.TypeInt8},
+		{"INT256", graph.TypeInt256},
 
-		{"UINT", schema.TypeUint},
-		{"USMALLINT", schema.TypeUint16},
-		{"UBIGINT", schema.TypeUint64},
-		{"UINT8", schema.TypeUint8},
-		{"UINT256", schema.TypeUint256},
+		{"UINT", graph.TypeUint},
+		{"USMALLINT", graph.TypeUint16},
+		{"UBIGINT", graph.TypeUint64},
+		{"UINT8", graph.TypeUint8},
+		{"UINT256", graph.TypeUint256},
 
-		{"FLOAT", schema.TypeFloat},
-		{"REAL", schema.TypeFloat32},
-		{"DOUBLE", schema.TypeFloat64},
-		{"DOUBLE PRECISION", schema.TypeFloat64},
-		{"FLOAT16", schema.TypeFloat16},
-		{"FLOAT256", schema.TypeFloat256},
+		{"FLOAT", graph.TypeFloat},
+		{"REAL", graph.TypeFloat32},
+		{"DOUBLE", graph.TypeFloat64},
+		{"DOUBLE PRECISION", graph.TypeFloat64},
+		{"FLOAT16", graph.TypeFloat16},
+		{"FLOAT256", graph.TypeFloat256},
 
-		{"DECIMAL", schema.TypeDecimal},
-		{"DEC", schema.TypeDecimal},
+		{"DECIMAL", graph.TypeDecimal},
+		{"DEC", graph.TypeDecimal},
 	}
 
 	for _, tt := range cases {
@@ -107,13 +108,13 @@ func TestPropertyTypeMapping(t *testing.T) {
 func TestPropertyLengthQualifiersDropped(t *testing.T) {
 	cases := []struct {
 		spelling string
-		want     schema.PropertyType
+		want     graph.PropertyType
 	}{
-		{"VARCHAR(255)", schema.TypeString},
-		{"CHAR(8)", schema.TypeString},
-		{"STRING(100)", schema.TypeString},
-		{"DECIMAL(10, 2)", schema.TypeDecimal},
-		{"FLOAT(10)", schema.TypeFloat},
+		{"VARCHAR(255)", graph.TypeString},
+		{"CHAR(8)", graph.TypeString},
+		{"STRING(100)", graph.TypeString},
+		{"DECIMAL(10, 2)", graph.TypeDecimal},
+		{"FLOAT(10)", graph.TypeFloat},
 	}
 
 	for _, tt := range cases {
@@ -135,7 +136,7 @@ func TestPropertyNullability(t *testing.T) {
 	notNull, err := parseFirstProperty(t, "INT NOT NULL")
 	require.NoError(t, err)
 	require.False(t, notNull.Nullable)
-	require.Equal(t, schema.TypeInt, notNull.Type, "NOT NULL must not corrupt the type")
+	require.Equal(t, graph.TypeInt, notNull.Type, "NOT NULL must not corrupt the type")
 }
 
 // TestPropertyUnsupportedType covers grammar-valid value types outside the

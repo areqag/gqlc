@@ -1,6 +1,7 @@
 package gql
 
 import (
+	"github.com/antranig-yeretzian/gqlc/internal/graph"
 	"github.com/antranig-yeretzian/gqlc/internal/schema"
 )
 
@@ -25,11 +26,11 @@ type rawSchema struct {
 func (r rawSchema) resolve() (schema.Schema, error) {
 	s := schema.Schema{
 		Name:  r.name,
-		Nodes: make(map[schema.LabelSetKey]schema.NodeType),
+		Nodes: make(map[graph.LabelSetKey]schema.NodeType),
 		Edges: make(map[schema.EdgeKey]schema.EdgeType),
 	}
 
-	aliases := make(map[string]schema.LabelSetKey)
+	aliases := make(map[string]graph.LabelSetKey)
 	for _, n := range r.nodes {
 		if len(n.labels) == 0 {
 			return schema.Schema{}, ErrUnnamedNodeType
@@ -78,8 +79,8 @@ func (r rawSchema) resolve() (schema.Schema, error) {
 // resolve maps an edge endpoint to the canonical key of the declared node type it
 // names: an alias via the alias table, or an inline filler via its own label set.
 // Either way the resolved type must have been declared.
-func (ref rawEndpoint) resolve(aliases map[string]schema.LabelSetKey, nodes map[schema.LabelSetKey]schema.NodeType) (schema.LabelSetKey, error) {
-	var key schema.LabelSetKey
+func (ref rawEndpoint) resolve(aliases map[string]graph.LabelSetKey, nodes map[graph.LabelSetKey]schema.NodeType) (graph.LabelSetKey, error) {
+	var key graph.LabelSetKey
 	if ref.alias != "" {
 		k, ok := aliases[ref.alias]
 		if !ok {
