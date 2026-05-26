@@ -1,0 +1,98 @@
+{
+  "Bindings": [
+    {
+      "kind": "node",
+      "variable": "advertiser",
+      "labels": null
+    },
+    {
+      "kind": "edge",
+      "variable": "",
+      "labels": [
+        "ADV_HAS_PRODUCT"
+      ],
+      "source": {
+        "kind": "var",
+        "variable": "advertiser"
+      },
+      "target": {
+        "kind": "var",
+        "variable": "out"
+      }
+    },
+    {
+      "kind": "node",
+      "variable": "out",
+      "labels": null
+    },
+    {
+      "kind": "edge",
+      "variable": "",
+      "labels": [
+        "AP_HAS_VALUE"
+      ],
+      "source": {
+        "kind": "var",
+        "variable": "out"
+      },
+      "target": {
+        "kind": "var",
+        "variable": "red"
+      }
+    },
+    {
+      "kind": "node",
+      "variable": "red",
+      "labels": null
+    },
+    {
+      "kind": "edge",
+      "variable": "",
+      "labels": [
+        "AA_HAS_VALUE"
+      ],
+      "source": {
+        "kind": "var",
+        "variable": "a"
+      },
+      "target": {
+        "kind": "var",
+        "variable": "red"
+      }
+    },
+    {
+      "kind": "node",
+      "variable": "a",
+      "labels": null
+    }
+  ],
+  "Parameters": [
+    {
+      "Name": "1",
+      "Uses": [
+        {
+          "Variable": "advertiser",
+          "Property": "id"
+        }
+      ]
+    },
+    {
+      "Name": "2",
+      "Uses": [
+        {
+          "Variable": "a",
+          "Property": "id"
+        }
+      ]
+    }
+  ],
+  "Returns": [
+    {
+      "Name": "out.name",
+      "Ref": {
+        "Variable": "out",
+        "Property": "name"
+      }
+    }
+  ]
+}
