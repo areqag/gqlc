@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
 
+	"github.com/antranig-yeretzian/gqlc/internal/graph"
 	"github.com/antranig-yeretzian/gqlc/internal/query"
 	"github.com/antranig-yeretzian/gqlc/internal/query/cypher"
 )
@@ -15,37 +16,230 @@ import (
 //
 // Every query below is copied VERBATIM from a vendored read-core .feature file;
 // the comment names its source. We never author Cypher — we select and label
-// corpus queries.
+// corpus queries. The expected query.Query in mustParse is hand-built from the
+// Stage-0 spec (Clusters C/D/E), not copied from the parser's current output;
+// it is the regression layer the golden snapshots — which -update silently
+// rebaselines — cannot give us.
 
-// mustParse pairs read-core queries Stage 0 accepts with their source. They must
-// parse without error; in run A they fail (errNotImplemented), which is the
-// genuine implementation-gap signal.
-var mustParse = map[string]string{
-	// Match1 [1] Match non-existent nodes returns empty
-	"node": "MATCH (n)\nRETURN n",
-	// Match1 [3] Matching nodes using multiple labels
-	"node multi-label": "MATCH (a:A:B)\nRETURN a",
-	// Match1 [4] Simple node inline property predicate
-	"node inline property": "MATCH (n {name: 'bar'})\nRETURN n",
-	// Match1 [5] Use multiple MATCH clauses to do a Cartesian product
-	"comma pattern with aliases": "MATCH (n), (m)\nRETURN n.num AS n, m.num AS m",
-	// Match2 [1] Match non-existent relationships returns empty (anonymous edge, inline endpoints)
-	"anonymous edge": "MATCH ()-[r]->()\nRETURN r",
-	// Match2 [2] label predicate on both sides (inline-labelled endpoints)
-	"edge inline-labelled endpoints": "MATCH (:A)-[r]->(:B)\nRETURN r",
-	// Match3 [1] Get neighbours (typed edge, named endpoints)
-	"typed edge named endpoints": "MATCH (n1)-[rel:KNOWS]->(n2)\nRETURN n1, n2",
-	// Match3 [2] Directed match of a simple relationship (whole-entity returns)
-	"directed edge whole entities": "MATCH (a)-[r]->(b)\nRETURN a, r, b",
-	// MatchWhere1 [6] parameter in a property predicate
-	"where property parameter": "MATCH (a)-[r]->(b)\nWHERE b.name = $param\nRETURN r",
+// mustParse pairs each read-core query with the exact query.Query Stage 0 must
+// produce for it, built via the branch-1 model constructors. The test asserts
+// deep equality, so a parser change that shifts the shape must update this
+// hand-built expectation deliberately — there is no -update escape hatch.
+
+// Cluster rules NOT exact-shape asserted here, because the openCypher TCK at the
+// pinned tag (justfile: tck_tag) contains no verbatim read-core query that
+// exercises them — every candidate uses constructs Stage 0 rejects (WITH,
+// CREATE/MERGE, variable-length, etc.) — and the no-authoring-Cypher rule means
+// we add a case only when the corpus supplies one:
+//   - C2: label union across multiple occurrences of the same variable
+//   - D2: a parameter token used in two value positions (dedup with multiple Uses)
+//   - D1b: an inline property map whose value is a $param ((a {id: $id}))
+//
+// Revisit on every TCK bump: a new feature file may close one of these gaps.
+var mustParse = map[string]struct {
+	src  string
+	want query.Query
+}{
+	// Match1 [1] Match non-existent nodes returns empty: one node binding,
+	// bare-variable return → Ref{n,""}, column name "n".
+	"node": {
+		src: "MATCH (n)\nRETURN n",
+		want: query.Query{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("n", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "n", Ref: query.Ref{Variable: "n"}},
+			},
+		},
+	},
+	// Match1 [3] Matching nodes using multiple labels: C2 conjunctive labels in
+	// source order, A then B.
+	"node multi-label": {
+		src: "MATCH (a:A:B)\nRETURN a",
+		want: query.Query{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("a", graph.LabelSet{"A", "B"})),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "a", Ref: query.Ref{Variable: "a"}},
+			},
+		},
+	},
+	// Match1 [4] Simple node inline property predicate: the inline map value is a
+	// literal (not a $param), so no parameter use is mined (D1b).
+	"node inline property": {
+		src: "MATCH (n {name: 'bar'})\nRETURN n",
+		want: query.Query{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("n", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "n", Ref: query.Ref{Variable: "n"}},
+			},
+		},
+	},
+	// Match1 [5] Use multiple MATCH clauses to do a Cartesian product: two nodes
+	// in textual order [n, m]; explicit AS aliases (E1) become the column names.
+	"comma pattern with aliases": {
+		src: "MATCH (n), (m)\nRETURN n.num AS n, m.num AS m",
+		want: query.Query{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("n", nil)),
+				must(query.NewNodeBinding("m", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "n", Ref: query.Ref{Variable: "n", Property: "num"}},
+				{Name: "m", Ref: query.Ref{Variable: "m", Property: "num"}},
+			},
+		},
+	},
+	// Match2 [1] Match non-existent relationships returns empty: C1 anonymous edge
+	// is its own binding; C4 both endpoints are inline-empty (the () case).
+	"anonymous edge": {
+		src: "MATCH ()-[r]->()\nRETURN r",
+		want: query.Query{
+			Bindings: []query.Binding{
+				must(query.NewEdgeBinding("r", nil,
+					query.NewInlineEndpoint(nil),
+					query.NewInlineEndpoint(nil),
+				)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "r", Ref: query.Ref{Variable: "r"}},
+			},
+		},
+	},
+	// Match2 [2] label predicate on both sides: C4 anonymous endpoints carry
+	// inline labels — [A] on the source, [B] on the target.
+	"edge inline-labelled endpoints": {
+		src: "MATCH (:A)-[r]->(:B)\nRETURN r",
+		want: query.Query{
+			Bindings: []query.Binding{
+				must(query.NewEdgeBinding("r", nil,
+					query.NewInlineEndpoint(graph.LabelSet{"A"}),
+					query.NewInlineEndpoint(graph.LabelSet{"B"}),
+				)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "r", Ref: query.Ref{Variable: "r"}},
+			},
+		},
+	},
+	// Match3 [1] Get neighbours: textual first-appearance order [n1, rel, n2];
+	// var endpoints for named nodes (C4 — labels live on their bindings).
+	"typed edge named endpoints": {
+		src: "MATCH (n1)-[rel:KNOWS]->(n2)\nRETURN n1, n2",
+		want: query.Query{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("n1", nil)),
+				must(query.NewEdgeBinding("rel", graph.LabelSet{"KNOWS"},
+					must(query.NewVarEndpoint("n1")),
+					must(query.NewVarEndpoint("n2")),
+				)),
+				must(query.NewNodeBinding("n2", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "n1", Ref: query.Ref{Variable: "n1"}},
+				{Name: "n2", Ref: query.Ref{Variable: "n2"}},
+			},
+		},
+	},
+	// Match3 [2] Directed match of a simple relationship: E3 whole-entity returns
+	// → Ref{var, ""} for each; textual order [a, r, b].
+	"directed edge whole entities": {
+		src: "MATCH (a)-[r]->(b)\nRETURN a, r, b",
+		want: query.Query{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("a", nil)),
+				must(query.NewEdgeBinding("r", nil,
+					must(query.NewVarEndpoint("a")),
+					must(query.NewVarEndpoint("b")),
+				)),
+				must(query.NewNodeBinding("b", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "a", Ref: query.Ref{Variable: "a"}},
+				{Name: "r", Ref: query.Ref{Variable: "r"}},
+				{Name: "b", Ref: query.Ref{Variable: "b"}},
+			},
+		},
+	},
+	// MatchWhere1 [6] parameter in a property predicate: D1a pairs $param with
+	// b.name → one Parameter with Use Ref{b, name}.
+	"where property parameter": {
+		src: "MATCH (a)-[r]->(b)\nWHERE b.name = $param\nRETURN r",
+		want: query.Query{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("a", nil)),
+				must(query.NewEdgeBinding("r", nil,
+					must(query.NewVarEndpoint("a")),
+					must(query.NewVarEndpoint("b")),
+				)),
+				must(query.NewNodeBinding("b", nil)),
+			},
+			Parameters: []query.Parameter{
+				{Name: "param", Uses: []query.Ref{{Variable: "b", Property: "name"}}},
+			},
+			Returns: []query.ReturnItem{
+				{Name: "r", Ref: query.Ref{Variable: "r"}},
+			},
+		},
+	},
+	// Create2 [4] control query: a left-pointing arc. C-Direction: the canonical
+	// edge is source=b, target=a (the arrow's tail is the source) — independent of
+	// how it was written. The relationship has no variable (anonymous edge, C1).
+	// (TCK uses "When executing control query:" here, not "When executing query:",
+	// so this scenario is outside our godog suite; the verbatim query is still
+	// fair Layer-2 material.)
+	"edge left-pointing canonical": {
+		src: "MATCH (a:A)<-[:R]-(b:B)\nRETURN a, b",
+		want: query.Query{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("a", graph.LabelSet{"A"})),
+				must(query.NewEdgeBinding("", graph.LabelSet{"R"},
+					must(query.NewVarEndpoint("b")),
+					must(query.NewVarEndpoint("a")),
+				)),
+				must(query.NewNodeBinding("b", graph.LabelSet{"B"})),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "a", Ref: query.Ref{Variable: "a"}},
+				{Name: "b", Ref: query.Ref{Variable: "b"}},
+			},
+		},
+	},
+	// Temporal4 [1] property return with no alias: E1 derives the column name from
+	// the verbatim expression text — "n.created", not "created".
+	"property return no alias": {
+		src: "MATCH (n)\nRETURN n.created",
+		want: query.Query{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("n", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "n.created", Ref: query.Ref{Variable: "n", Property: "created"}},
+			},
+		},
+	},
+}
+
+// must lifts a fallible model constructor into an expression usable in a struct
+// literal: it panics if err is non-nil. The mustParse inputs are hard-coded valid
+// values, so any error here is a programmer error and panic is the honest signal.
+func must[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
 }
 
 func TestMustParse(t *testing.T) {
-	for name, q := range mustParse {
+	for name, c := range mustParse {
 		t.Run(name, func(t *testing.T) {
-			_, err := cypher.New().Parse(strings.NewReader(q))
-			require.NoError(t, err, "read-core query must parse: %q", q)
+			got, err := cypher.New().Parse(strings.NewReader(c.src))
+			require.NoError(t, err, "read-core query must parse: %q", c.src)
+			require.Equal(t, c.want, got)
 		})
 	}
 }
@@ -167,13 +361,13 @@ func corpusQueries(t *testing.T) []string {
 // to keep the property tests honest implementation-gap failures rather than
 // vacuous passes, each first requires that the must-parse corpus actually parses.
 
-// TestPropertyReadCoreParses is the precondition guard: the curated read-core
-// queries must parse. It fails in run A and turns green in run B. The richer
-// invariant properties below depend on a parsed model, so this is the gate.
+// TestPropertyReadCoreParses is the precondition guard for the richer invariant
+// properties below: every curated read-core query must parse. If it ever fails,
+// the property tests below would pass vacuously, so this is the gate.
 func TestPropertyReadCoreParses(t *testing.T) {
 	queries := make([]string, 0, len(mustParse))
-	for _, q := range mustParse {
-		queries = append(queries, q)
+	for _, c := range mustParse {
+		queries = append(queries, c.src)
 	}
 	rapid.Check(t, func(rt *rapid.T) {
 		q := rapid.SampledFrom(queries).Draw(rt, "query")
