@@ -113,7 +113,10 @@ sentinel-reachability sweep (as in `internal/schema/gql`) guards the set.
 - **C2 — label merge.** Repeated occurrences of a variable union their labels
   (`(a:Person) … (a:Employee)` → `[Employee, Person]`) — openCypher treats them as
   additional conjunctive constraints. Merge as an **ordered union** (first
-  appearance), never via a map, for deterministic golden output.
+  appearance), never via a map, for deterministic golden output. (Stage 1 note:
+  the conjunctive interpretation is faithful to openCypher's semantics, not a
+  parser limitation; checking whether a label-union resolves against the
+  schema is the resolver's responsibility per ADR 0003.)
 - **C3 — anonymous nodes are not bindings.** Only anonymous *edges* become
   bindings. An anonymous node inside a relationship contributes its labels inline
   on the edge endpoint; a standalone anonymous node (`MATCH (:Person)`) is a pure
