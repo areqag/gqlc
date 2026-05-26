@@ -82,9 +82,9 @@ accepted-and-ignored safely.
 | syntax error / more than one statement | *(nil — syntax)* | — |
 | `OPTIONAL MATCH` / `WITH` / `UNION` / `CREATE`·`MERGE`·`SET`·`DELETE`·`REMOVE` / `UNWIND` / `CALL` | `ErrUnsupportedClause` | 2 / 4 / 4 / never / never |
 | `RETURN *`; aggregations, function calls, arithmetic, literals, `CASE`, comprehensions as return items | `ErrUnsupportedProjection` | 3 |
-| `SKIP $p` / `LIMIT $p`; a parameter not bindable to a property (arithmetic, bare `$x`, `IN $x`) | `ErrUnsupportedParameter` | 1 / 3 |
+| `SKIP $p` / `LIMIT $p` / `ORDER BY …$p…`; a parameter not bindable to a property (arithmetic, bare `$x`, `IN $x`) | `ErrUnsupportedParameter` | 1 / 3 |
 | multi-type rel `[:A\|B]`, variable-length `[*..]`, named path `p = (…)`, **undirected** `(a)-[r]-(b)` | `ErrUnsupportedPattern` | later / never / 5 |
-| unbound variable | `ErrUnboundVariable` | — |
+| unbound variable referenced by a return item, a parameter use, or an edge endpoint (not a variable that appears only inside an ignored `WHERE` predicate) | `ErrUnboundVariable` | — |
 | variable used as both node and edge | `ErrVariableKindConflict` | — |
 
 ### B3 — sentinels (six, category-grained)
@@ -232,7 +232,7 @@ targets a full engine). We are a parser. So:
 
 - **Layer 1 — godog over the TCK.** Runs verbatim TCK scenarios. **Scope is the
   progress meter:** Stage 0 points godog at the read-core feature dirs
-  (`clauses/match`, `clauses/return`, `clauses/where`); a **skiplist** excludes
+  (`clauses/match`, `clauses/return`, `clauses/match-where`); a **skiplist** excludes
   valid-but-out-of-scope scenarios inside them. Each later stage includes more
   dirs and shrinks the skiplist. Selection and skiplist live in
   `acceptance_test.go` — the corpus data is never edited.

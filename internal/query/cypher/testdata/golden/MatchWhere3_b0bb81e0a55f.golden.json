@@ -1,0 +1,35 @@
+{
+  "Bindings": [
+    {
+      "kind": "node",
+      "variable": "a",
+      "labels": [
+        "A"
+      ]
+    },
+    {
+      "kind": "node",
+      "variable": "b",
+      "labels": [
+        "B"
+      ]
+    }
+  ],
+  "Parameters": null,
+  "Returns": [
+    {
+      "Name": "a",
+      "Ref": {
+        "Variable": "a",
+        "Property": ""
+      }
+    },
+    {
+      "Name": "b",
+      "Ref": {
+        "Variable": "b",
+        "Property": ""
+      }
+    }
+  ]
+}

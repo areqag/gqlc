@@ -1,0 +1,36 @@
+{
+  "Bindings": [
+    {
+      "kind": "edge",
+      "variable": "",
+      "labels": null,
+      "source": {
+        "kind": "inline",
+        "labels": [
+          "Root"
+        ]
+      },
+      "target": {
+        "kind": "var",
+        "variable": "i"
+      }
+    },
+    {
+      "kind": "node",
+      "variable": "i",
+      "labels": [
+        "TextNode"
+      ]
+    }
+  ],
+  "Parameters": null,
+  "Returns": [
+    {
+      "Name": "i",
+      "Ref": {
+        "Variable": "i",
+        "Property": ""
+      }
+    }
+  ]
+}
