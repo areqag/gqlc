@@ -215,9 +215,14 @@ targets a full engine). We are a parser. So:
 
 - positive `Then …` (`result should be`, `no side effects`) → assert the query
   **parsed**, and snapshot the resulting `query.Query` to a golden (structural
-  check; `-update` to regenerate, human-reviewed). `query.Query` needs **no custom
-  `MarshalJSON`** — it is all slices/strings/pointers, deterministic given
-  first-appearance ordering and ordered label-union (C2).
+  check; `-update` to regenerate, human-reviewed). `query.Query` itself needs no
+  custom `MarshalJSON` — its members are order-preserving slices/strings,
+  deterministic given first-appearance ordering and ordered label-union (C2). Its
+  `Binding`/`Endpoint` sum types, however, each carry a deterministic tagged-union
+  `MarshalJSON` (a `"kind"` discriminator): the model was restructured to sum
+  types to make illegal states unrepresentable — same capability, type-safe
+  encoding — and `encoding/json` cannot render an interface as a tagged union on
+  its own.
 - negative `Then a SyntaxError/SemanticError should be raised` → assert the parser
   **rejected** (some error).
 - setup steps (`Given an empty graph`, `having executed: …`) → no-ops (we hold no
@@ -259,5 +264,9 @@ selected subset executes (Layer 1 selection).
    scenarios have reviewed golden `query.Query` snapshots.
 5. Layer 2 targeted sentinel + reachability tests are green.
 6. `just test` runs the whole suite green.
-7. `query.Query` is unchanged from its current shape (no model evolution in
-   Stage 0).
+7. `query.Query` gains no new capability in Stage 0. Its encoding is restructured
+   for type-safety — `Binding` and `Endpoint` are sealed sum types built only
+   through smart constructors, so illegal states are unrepresentable — which
+   requires a deterministic tagged-union `MarshalJSON` on each variant. This is a
+   type-safety refactor, not model evolution; the represented information is the
+   same.
