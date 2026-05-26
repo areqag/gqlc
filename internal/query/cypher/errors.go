@@ -10,8 +10,8 @@ import "errors"
 // errors.Is while reading a concrete message. A sentinel-reachability sweep
 // (parser_test.go) guards the set.
 var (
-	// ErrUnsupportedClause rejects clauses outside the read core: OPTIONAL MATCH,
-	// WITH, UNION, the write clauses (CREATE/MERGE/SET/DELETE/REMOVE), UNWIND, CALL.
+	// ErrUnsupportedClause rejects clauses outside the read core: WITH, UNION,
+	// the write clauses (CREATE/MERGE/SET/DELETE/REMOVE), UNWIND, CALL.
 	ErrUnsupportedClause = errors.New("unsupported clause")
 
 	// ErrUnsupportedProjection rejects a RETURN item that is not a bare variable or
