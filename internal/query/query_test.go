@@ -174,7 +174,9 @@ func representativeQuery(t *testing.T) query.Query {
 	return query.Query{
 		Bindings: []query.Binding{a, b, edge},
 		Parameters: []query.Parameter{
-			{Name: "id", Uses: []query.Ref{{Variable: "a", Property: "id"}}},
+			{Name: "id", Uses: []query.Use{
+				query.NewPropertyUse(query.Ref{Variable: "a", Property: "id"}),
+			}},
 		},
 		Returns: []query.ReturnItem{
 			{Name: "a", Ref: query.Ref{Variable: "a"}},

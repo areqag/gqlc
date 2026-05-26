@@ -49,10 +49,10 @@ func (l *listener) collectProjection(body gen.IOC_ProjectionBodyContext) {
 		}
 	}
 	if s := body.OC_Skip(); s != nil {
-		l.rejectClauseParameter(s.OC_Expression(), "SKIP")
+		l.mineClauseSlotParameter(s.OC_Expression(), query.ClauseSlotSkip)
 	}
 	if lim := body.OC_Limit(); lim != nil {
-		l.rejectClauseParameter(lim.OC_Expression(), "LIMIT")
+		l.mineClauseSlotParameter(lim.OC_Expression(), query.ClauseSlotLimit)
 	}
 }
 
@@ -75,16 +75,34 @@ func (l *listener) collectReturnItem(item gen.IOC_ProjectionItemContext) {
 	l.returns = append(l.returns, query.ReturnItem{Name: name, Ref: ref})
 }
 
-// rejectClauseParameter fails if an accept-and-ignored clause expression (ORDER
-// BY / SKIP / LIMIT) contains a parameter: the parameter would be dropped from
-// the model rather than bound to a binding property, so it is unsupported (D,
-// stage 1).
+// rejectClauseParameter fails if the ORDER BY expression contains a parameter:
+// the parameter would be dropped from the model rather than bound to a slot,
+// so it is unsupported (Cluster D). SKIP and LIMIT have their own miner
+// (mineClauseSlotParameter) that accepts a bare $p as a ClauseSlotUse.
 func (l *listener) rejectClauseParameter(e gen.IOC_ExpressionContext, clause string) {
 	if e == nil {
 		return
 	}
 	if len(findParameters(e)) > 0 {
 		l.fail(fmt.Errorf("%w: %s $param", ErrUnsupportedParameter, clause))
+	}
+}
+
+// mineClauseSlotParameter mines a bare $p atom from a SKIP or LIMIT expression,
+// recording it as a ClauseSlotUse on the named parameter. Any non-bare $p in
+// the expression (e.g. SKIP $p + 1, LIMIT f($p)) is unsupported and surfaces
+// as ErrUnsupportedParameter, mirroring rejectClauseParameter's discipline for
+// non-bare cases on the remaining accept-and-ignored clause (ORDER BY).
+func (l *listener) mineClauseSlotParameter(e gen.IOC_ExpressionContext, slot query.ClauseSlot) {
+	if e == nil {
+		return
+	}
+	if name, node, ok := parameterFromExpr(e); ok {
+		l.addParameterUse(name, node, query.NewClauseSlotUse(slot))
+		return
+	}
+	if len(findParameters(e)) > 0 {
+		l.fail(fmt.Errorf("%w: %s $param", ErrUnsupportedParameter, slot.ClauseName()))
 	}
 }
 
@@ -150,32 +168,32 @@ func (l *listener) pairOperands(a, b gen.IOC_StringListNullPredicateExpressionCo
 }
 
 // pairAddSub records a use if one operand is a single-level var.prop on a bound
-// variable and the other is a parameter $name: it adds Ref{var, prop} to that
-// parameter's uses and approves the parameter node.
+// variable and the other is a parameter $name: it adds a PropertyUse{Ref{var,
+// prop}} to that parameter's uses and approves the parameter node.
 func (l *listener) pairAddSub(a, b gen.IOC_AddOrSubtractExpressionContext) {
 	if a == nil || b == nil {
 		return
 	}
 	if ref, ok := propertyRefFromAddSub(a); ok {
 		if param, node, ok := parameterFromAddSub(b); ok {
-			l.addParameterUse(param, node, query.Ref{Variable: ref.Variable, Property: ref.Property})
+			l.addParameterUse(param, node, query.NewPropertyUse(query.Ref{Variable: ref.Variable, Property: ref.Property}))
 			l.refs = append(l.refs, varRef{name: ref.Variable})
 		}
 		return
 	}
 	if ref, ok := propertyRefFromAddSub(b); ok {
 		if param, node, ok := parameterFromAddSub(a); ok {
-			l.addParameterUse(param, node, query.Ref{Variable: ref.Variable, Property: ref.Property})
+			l.addParameterUse(param, node, query.NewPropertyUse(query.Ref{Variable: ref.Variable, Property: ref.Property}))
 			l.refs = append(l.refs, varRef{name: ref.Variable})
 		}
 	}
 }
 
 // mineInlineMap mines parameter uses from an inline property map on a pattern
-// element bound to variable (D1b): each key whose value is a $param yields
-// Use=Ref{variable, key}. A parameter standing for the whole map ((a {$p})) is
-// unsupported, as is a $param in the map of an anonymous element (no variable to
-// bind the property to) — both surface as ErrUnsupportedParameter.
+// element bound to variable (D1b): each key whose value is a $param yields a
+// PropertyUse{Ref{variable, key}}. A parameter standing for the whole map
+// ((a {$p})) is unsupported, as is a $param in the map of an anonymous element
+// (no variable to bind the property to) — both surface as ErrUnsupportedParameter.
 func (l *listener) mineInlineMap(variable string, p gen.IOC_PropertiesContext) {
 	if p == nil {
 		return
@@ -199,7 +217,7 @@ func (l *listener) mineInlineMap(variable string, p gen.IOC_PropertiesContext) {
 			l.fail(fmt.Errorf("%w: %s in an anonymous pattern element", ErrUnsupportedParameter, param))
 			return
 		}
-		l.addParameterUse(param, node, query.Ref{Variable: variable, Property: keys[i].GetText()})
+		l.addParameterUse(param, node, query.NewPropertyUse(query.Ref{Variable: variable, Property: keys[i].GetText()}))
 	}
 	// Any parameter under this map that was not a direct key value (e.g. nested in
 	// a list) is unsupported.
@@ -218,15 +236,19 @@ func (l *listener) requireAllParametersApproved(e antlr.Tree) {
 	}
 }
 
-// addParameterUse appends a use to the named parameter (creating it in
-// first-appearance order on first sight) and marks the parameter node approved.
-func (l *listener) addParameterUse(name string, node antlr.Tree, ref query.Ref) {
+// addParameterUse appends a Use to the named parameter — creating it in
+// first-appearance order on first sight — and marks the parameter node
+// approved. The single chokepoint for parameter dedup-by-Name across both
+// Use variants: every caller (a property predicate, an inline property map,
+// a SKIP/LIMIT clause slot) flows through here so the dedup-and-order
+// discipline lives in exactly one place.
+func (l *listener) addParameterUse(name string, node antlr.Tree, use query.Use) {
 	idx, ok := l.byParam[name]
 	if !ok {
 		idx = len(l.params)
 		l.byParam[name] = idx
 		l.params = append(l.params, &query.Parameter{Name: name})
 	}
-	l.params[idx].Uses = append(l.params[idx].Uses, ref)
+	l.params[idx].Uses = append(l.params[idx].Uses, use)
 	l.approved[node] = true
 }
