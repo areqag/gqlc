@@ -1,5 +1,9 @@
 # A curated, dialect-agnostic query model, resolved separately from the schema
 
+> _Note (ADR 0004): the "stable contract" framing below holds once the query
+> parser is feature-complete. Until then the query model is provisional and
+> evolves slice by slice; no consumer is built against it before the freeze._
+
 The query parser lowers one query into `query.Query` — a curated, gqlc-owned
 domain model (the entities a query binds, its parameters, its return items), not
 a parser AST. Parsing is schema-agnostic: it records what a query says. A
