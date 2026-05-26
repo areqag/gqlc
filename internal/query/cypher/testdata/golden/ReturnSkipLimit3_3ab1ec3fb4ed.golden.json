@@ -1,0 +1,38 @@
+{
+  "Bindings": [
+    {
+      "kind": "node",
+      "variable": "n",
+      "labels": null
+    }
+  ],
+  "Parameters": [
+    {
+      "Name": "s",
+      "Uses": [
+        {
+          "kind": "clause-slot",
+          "slot": "skip"
+        }
+      ]
+    },
+    {
+      "Name": "l",
+      "Uses": [
+        {
+          "kind": "clause-slot",
+          "slot": "limit"
+        }
+      ]
+    }
+  ],
+  "Returns": [
+    {
+      "Name": "n",
+      "Ref": {
+        "Variable": "n",
+        "Property": ""
+      }
+    }
+  ]
+}
