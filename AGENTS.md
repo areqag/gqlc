@@ -53,3 +53,23 @@ is noise; delete it.
   error.
 - **Generated code:** never edit `internal/grammar/**/gen`. Regenerate it with
   `just build-grammar` after changing a `.g4` grammar.
+- **Make illegal states unrepresentable.** Encode invariants in types so
+  invalid combinations cannot be constructed at all; prefer a shape the
+  compiler enforces over a runtime check or a comment warning the next reader.
+  Go techniques:
+  - **Closed sum types** — an interface with an unexported marker method
+    makes the sum exhaustive: only types in the same package can implement it,
+    so callers cannot smuggle in a third variant and the compiler sees every
+    case.
+  - **Unexported fields + a `New*` constructor** — when an invariant cannot
+    live in the types alone (a string that must be non-empty, fields that
+    must both be set), hide the fields so the constructor is the only way to
+    obtain a non-zero value, and validate the remaining invariants once
+    there.
+  - **A type per variant, not flags on one struct** — split shapes that
+    share fields rather than carrying optional fields and a runtime
+    discriminator the compiler cannot see.
+  - **A shape that excludes the bad case** — pick the representation that
+    makes the invalid value unwriteable (a scalar instead of a slice when
+    only one is meaningful; canonicalising on construction so a
+    non-canonical form cannot exist; enums over free strings).
