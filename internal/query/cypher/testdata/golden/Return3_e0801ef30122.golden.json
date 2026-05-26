@@ -1,0 +1,33 @@
+{
+  "Bindings": [
+    {
+      "kind": "node",
+      "variable": "a",
+      "labels": null
+    }
+  ],
+  "Parameters": null,
+  "Returns": [
+    {
+      "Name": "a.name",
+      "Ref": {
+        "Variable": "a",
+        "Property": "name"
+      }
+    },
+    {
+      "Name": "a.age",
+      "Ref": {
+        "Variable": "a",
+        "Property": "age"
+      }
+    },
+    {
+      "Name": "a.seasons",
+      "Ref": {
+        "Variable": "a",
+        "Property": "seasons"
+      }
+    }
+  ]
+}

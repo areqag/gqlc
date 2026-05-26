@@ -1,0 +1,21 @@
+{
+  "Bindings": [
+    {
+      "kind": "node",
+      "variable": "p",
+      "labels": [
+        "TheLabel"
+      ]
+    }
+  ],
+  "Parameters": null,
+  "Returns": [
+    {
+      "Name": "p.id",
+      "Ref": {
+        "Variable": "p",
+        "Property": "id"
+      }
+    }
+  ]
+}
