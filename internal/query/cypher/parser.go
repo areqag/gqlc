@@ -18,22 +18,20 @@ func New() query.Parser {
 }
 
 // Parse wires the ANTLR lexer, parser and a single syntax-error sink (mirroring
-// gql), walks the tree, and lowers it into query.Query. A syntax error (or more
-// than one statement) surfaces as a non-nil error with a zero Query.
-//
-// Run A stub: collection/build logic is not implemented yet, so any
-// syntactically-valid input returns errNotImplemented. Real syntax errors are
-// still caught by the listener and returned, so the harness fails on genuine
-// implementation gaps, not on infrastructure.
+// gql), walks the tree to collect the read core, and lowers it into query.Query
+// via build(). A syntax error, an unsupported construct, or an inconsistency
+// (unbound variable / kind conflict) surfaces as a non-nil error with a zero
+// Query. The executed query stays the original text (ADR 0005); this model is the
+// type interface only.
 func (parser) Parse(r io.Reader) (query.Query, error) {
 	lex := gen.NewCypherLexer(antlr.NewIoStream(r))
 	ts := antlr.NewCommonTokenStream(lex, antlr.TokenDefaultChannel)
 	cp := gen.NewCypherParser(ts)
 
 	// The listener is the single error sink: it captures lexer/parser syntax
-	// errors and (in run B) the collection errors raised during the walk, all on
-	// l.err. walk surfaces the first of them.
-	l := &listener{ts: ts}
+	// errors and the collection errors raised during the walk, all on l.err. walk
+	// surfaces the first of them.
+	l := newListener(ts)
 	lex.RemoveErrorListeners()
 	lex.AddErrorListener(l)
 	cp.RemoveErrorListeners()
@@ -44,6 +42,5 @@ func (parser) Parse(r io.Reader) (query.Query, error) {
 		return query.Query{}, err
 	}
 
-	// The walk found no syntax error, but the lowering is not built yet.
-	return query.Query{}, errNotImplemented
+	return l.build()
 }

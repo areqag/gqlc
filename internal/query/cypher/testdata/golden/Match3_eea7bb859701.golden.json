@@ -1,0 +1,81 @@
+{
+  "Bindings": [
+    {
+      "kind": "node",
+      "variable": "a",
+      "labels": null
+    },
+    {
+      "kind": "edge",
+      "variable": "",
+      "labels": null,
+      "source": {
+        "kind": "var",
+        "variable": "a"
+      },
+      "target": {
+        "kind": "var",
+        "variable": "b"
+      }
+    },
+    {
+      "kind": "node",
+      "variable": "b",
+      "labels": null
+    },
+    {
+      "kind": "node",
+      "variable": "c",
+      "labels": null
+    },
+    {
+      "kind": "edge",
+      "variable": "",
+      "labels": null,
+      "source": {
+        "kind": "var",
+        "variable": "c"
+      },
+      "target": {
+        "kind": "var",
+        "variable": "d"
+      }
+    },
+    {
+      "kind": "node",
+      "variable": "d",
+      "labels": null
+    }
+  ],
+  "Parameters": null,
+  "Returns": [
+    {
+      "Name": "a",
+      "Ref": {
+        "Variable": "a",
+        "Property": ""
+      }
+    },
+    {
+      "Name": "b",
+      "Ref": {
+        "Variable": "b",
+        "Property": ""
+      }
+    },
+    {
+      "Name": "c",
+      "Ref": {
+        "Variable": "c",
+        "Property": ""
+      }
+    },
+    {
+      "Name": "d",
+      "Ref": {
+        "Variable": "d",
+        "Property": ""
+      }
+    }
+  ]
+}

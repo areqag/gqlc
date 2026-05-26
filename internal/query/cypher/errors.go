@@ -29,18 +29,14 @@ var (
 	// param-vs-param/literal, IN $p, and params nested in lists or maps.
 	ErrUnsupportedParameter = errors.New("unsupported parameter")
 
-	// ErrUnboundVariable rejects a variable referenced (in a RETURN, a property
-	// lookup, or an edge endpoint) without a binding in any MATCH.
+	// ErrUnboundVariable rejects a variable that reaches the model — a return item,
+	// a parameter use, or an edge endpoint — without a binding in any MATCH. It
+	// does not cover a variable that appears only inside an ignored WHERE predicate
+	// (e.g. b in WHERE a.x = b.y with no parameter): predicate structure is not
+	// modelled (B1), so such a variable is never tracked.
 	ErrUnboundVariable = errors.New("unbound variable")
 
 	// ErrVariableKindConflict rejects a variable bound once as a node and once as
 	// an edge.
 	ErrVariableKindConflict = errors.New("variable used as both node and edge")
 )
-
-// errNotImplemented is the stub's sentinel for syntactically-valid input the
-// parser does not yet lower. It is deliberately NOT one of the six public
-// sentinels: it marks the unbuilt run-B implementation, so the harness can tell
-// "valid Cypher we don't support yet" (a public ErrUnsupported* — the progress
-// meter) apart from "not built yet" (this).
-var errNotImplemented = errors.New("cypher parser: not implemented")

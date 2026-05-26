@@ -76,6 +76,23 @@ var mustReject = map[string]struct {
 		query: "MATCH ()-[r]-()\nRETURN r",
 		want:  cypher.ErrUnsupportedPattern,
 	},
+	// Return1 [2] returning an undefined variable -> ErrUnboundVariable
+	"unbound variable": {
+		query: "MATCH ()\nRETURN foo",
+		want:  cypher.ErrUnboundVariable,
+	},
+	// Match1 [9] same variable as a relationship and a node in one pattern
+	// (directed, so the kind conflict is what fires) -> ErrVariableKindConflict
+	"variable kind conflict": {
+		query: "MATCH ()-[r]->(r)\nRETURN r",
+		want:  cypher.ErrVariableKindConflict,
+	},
+	// Match1 [6] parameter used as a whole node property map (not bindable to a
+	// single property) -> ErrUnsupportedParameter
+	"unsupported parameter": {
+		query: "MATCH (n $param)\nRETURN n",
+		want:  cypher.ErrUnsupportedParameter,
+	},
 }
 
 func TestMustReject(t *testing.T) {

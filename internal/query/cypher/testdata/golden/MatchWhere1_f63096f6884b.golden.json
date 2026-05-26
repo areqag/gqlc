@@ -1,0 +1,39 @@
+{
+  "Bindings": [
+    {
+      "kind": "node",
+      "variable": "node",
+      "labels": null
+    },
+    {
+      "kind": "edge",
+      "variable": "r",
+      "labels": [
+        "KNOWS"
+      ],
+      "source": {
+        "kind": "var",
+        "variable": "node"
+      },
+      "target": {
+        "kind": "var",
+        "variable": "a"
+      }
+    },
+    {
+      "kind": "node",
+      "variable": "a",
+      "labels": null
+    }
+  ],
+  "Parameters": null,
+  "Returns": [
+    {
+      "Name": "a",
+      "Ref": {
+        "Variable": "a",
+        "Property": ""
+      }
+    }
+  ]
+}
