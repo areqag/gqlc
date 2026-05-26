@@ -3,12 +3,14 @@
     {
       "kind": "node",
       "variable": "a",
-      "labels": null
+      "labels": null,
+      "nullable": false
     },
     {
       "kind": "node",
       "variable": "c",
-      "labels": null
+      "labels": null,
+      "nullable": false
     },
     {
       "kind": "edge",
@@ -21,12 +23,14 @@
       "target": {
         "kind": "var",
         "variable": "b"
-      }
+      },
+      "nullable": false
     },
     {
       "kind": "node",
       "variable": "b",
-      "labels": null
+      "labels": null,
+      "nullable": false
     }
   ],
   "Parameters": null,

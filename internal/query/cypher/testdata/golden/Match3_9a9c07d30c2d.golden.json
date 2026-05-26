@@ -17,7 +17,8 @@
         "K",
         "L",
         "M"
-      ]
+      ],
+      "nullable": false
     },
     {
       "kind": "edge",
@@ -32,7 +33,8 @@
       "target": {
         "kind": "var",
         "variable": "m"
-      }
+      },
+      "nullable": false
     },
     {
       "kind": "node",
@@ -44,7 +46,8 @@
         "W",
         "V",
         "U"
-      ]
+      ],
+      "nullable": false
     }
   ],
   "Parameters": null,
