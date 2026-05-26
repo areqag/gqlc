@@ -14,12 +14,30 @@ import (
 
 // --- Layer 2: targeted sentinel checks (the TCK doesn't encode our taxonomy) ---
 //
-// Every query below is copied VERBATIM from a vendored read-core .feature file;
-// the comment names its source. We never author Cypher — we select and label
-// corpus queries. The expected query.Query in mustParse is hand-built from the
-// Stage-0 spec (Clusters C/D/E), not copied from the parser's current output;
-// it is the regression layer the golden snapshots — which -update silently
-// rebaselines — cannot give us.
+// Layer-2 rule:
+//
+// ACCEPT-PATH cases (mustParse) come VERBATIM from the corpus. The hand-built
+// query.Query in each entry is the regression layer the golden snapshots —
+// which -update silently rebaselines — cannot give us, but the SHAPE we pin
+// against must come from a committee-authored input — otherwise we would be
+// asserting the shape we want the parser to produce against the input we chose
+// to produce it (evidentiary circularity). We add a mustParse case only when
+// the corpus supplies one.
+//
+// REJECT-PATH cases (mustReject) come VERBATIM from the corpus where the
+// corpus exercises the fail-site; otherwise they are AUTHORED with an inline
+// `// AUTHORED:` marker naming the fail-site by domain. The sentinel taxonomy
+// is ours (the TCK doesn't encode it), and the only assertion is ABSENCE of a
+// model — no shape to outsource — so the accept-path's circularity concern
+// does not apply on this side.
+//
+// Authored mustReject cases are bounded: at most one per fail-site (the same
+// way the corpus provides at most one per scenario), and only when no verbatim
+// corpus query exercises that fail-site at the pinned TCK tag.
+//
+// Both rules carry the revisit-on-TCK-bump obligation: when a bump adds a
+// corpus query for an authored case's fail-site, the corpus entry replaces the
+// authored one (the corpus is always preferred when available).
 
 // mustParse pairs each read-core query with the exact query.Query Stage 0 must
 // produce for it, built via the branch-1 model constructors. The test asserts
@@ -328,6 +346,17 @@ var mustReject = map[string]struct {
 	// single property) -> ErrUnsupportedParameter
 	"unsupported parameter": {
 		query: "MATCH (n $param)\nRETURN n",
+		want:  cypher.ErrUnsupportedParameter,
+	},
+	// AUTHORED: non-bare $p in SKIP/LIMIT — fail-site is
+	// mineClauseSlotParameter's findParameters>0 branch (the Stage 1
+	// fail-site cycles 1/2 introduced for the bare-vs-non-bare accept
+	// rule). The cycle-3 audit of return-skip-limit/ verified every $p
+	// in that dir is a bare atom, so no verbatim TCK query exercises
+	// this shape at the pinned tag. Replace with the corpus entry when
+	// a TCK bump adds one.
+	"skip non-bare param": {
+		query: "MATCH (n)\nRETURN n\nSKIP $p + 1",
 		want:  cypher.ErrUnsupportedParameter,
 	},
 }
