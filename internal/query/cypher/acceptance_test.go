@@ -35,18 +35,30 @@ var readCoreDirs = []string{
 	"../../../test/data/query/cypher/tck/features/clauses/match",
 	"../../../test/data/query/cypher/tck/features/clauses/return",
 	"../../../test/data/query/cypher/tck/features/clauses/match-where",
+	"../../../test/data/query/cypher/tck/features/clauses/return-skip-limit",
 }
 
 const goldenDir = "testdata/golden"
 
-// skiplist excludes by name the negative TCK scenarios that Stage 0 deliberately
-// accepts: valid openCypher whose error lives at a layer this parser does not
-// model, so it is accept-and-ignored and caught at execution via the original
-// text (ADR 0005, principle B1). Each entry is a TCK error our type-interface
-// model cannot and need not raise; later stages never need to remove them (these
-// are not "unsupported features"). A skipped scenario is reported and counted,
-// never deleted from the corpus.
+// skiplist excludes by name the negative TCK scenarios that this parser
+// deliberately accepts: valid openCypher whose error lives on the other side of
+// the type-interface boundary, so it is accept-and-ignored and caught at
+// execution via the original text (ADR 0005, principle B1). Each entry is a
+// TCK error this parser cannot and need not raise; later stages never need to
+// remove them (they aren't "unsupported features"). A skipped scenario is
+// reported and counted, never deleted from the corpus.
+//
+// The Stage 1 audit of clauses/return-skip-limit/ classified its 31 scenarios
+// as 11 parse-green (snapshotted goldens), 4 PENDING via existing
+// ErrUnsupportedClause/ErrUnsupportedProjection sentinels (WITH/UNWIND/
+// aggregation in RETURN), 0 true parse-rejection, and 16 accept-then-runtime-
+// or-compile-time-value-error scenarios listed below in two groups.
+//
+// Heterogeneous reasons-to-skip live together here; each entry is pinned to
+// its actual cause rather than collapsed to a single rationale.
 var skiplist = map[string]bool{
+	// --- pattern semantics that live below the type-interface boundary ---
+	//
 	// MATCH (a)-[r]->()-[r]->(a): reusing a relationship variable is a runtime
 	// uniqueness rule, not a type-interface concern. Spec Cluster C: relationship
 	// reuse is not special-cased — first occurrence defines endpoints, later
@@ -56,6 +68,41 @@ var skiplist = map[string]bool{
 	// for parameters and ignores predicate structure; aggregation is rejected only
 	// as a RETURN item (ErrUnsupportedProjection), not in a predicate.
 	"[15] Fail on aggregation in WHERE": true,
+
+	// --- SKIP/LIMIT with a literal the TCK rejects as compile-time
+	//     NonConstantExpression / NegativeIntegerArgument / InvalidArgumentType ---
+	//
+	// The value lives below the type-interface boundary (B1 — execution validates
+	// the literal via the original text per ADR 0005), so this parser
+	// accept-and-ignores. The TCK names these "compile time SyntaxError" but the
+	// rejection is a value-constraint check, not a parse-shape check; an engine
+	// reading our generated method body still sees the original SKIP -1 / LIMIT
+	// 1.5 / SKIP n.count text and raises the same error.
+	"[5] SKIP with an expression that depends on variables should fail": true,
+	"[7] Negative SKIP should fail":                  true,
+	"[9] Floating point SKIP should fail":            true,
+	"[10] Fail when using non-constants in SKIP":     true,
+	"[11] Fail when using negative value in SKIP":    true,
+	"[9] Fail when using non-constants in LIMIT":     true,
+	"[12] Fail when using negative value in LIMIT 1": true,
+	"[13] Fail when using negative value in LIMIT 2": true,
+	"[16] Fail when using floating point in LIMIT 1": true,
+	"[17] Fail when using floating point in LIMIT 2": true,
+
+	// --- SKIP/LIMIT with a parameter whose runtime value the TCK rejects as
+	//     NegativeIntegerArgument / InvalidArgumentType ---
+	//
+	// The parameter's name is what the model carries (a ClauseSlotUse on the
+	// Parameter); the runtime-bound argument value lives below the type-interface
+	// boundary (B1), so this parser accept-and-ignores. An engine reading the
+	// generated method body sees the original SKIP $_skip / LIMIT $_limit text
+	// and binds the caller's value, raising the same error.
+	"[6] Negative parameter for SKIP should fail":                       true,
+	"[8] Floating point parameter for SKIP should fail":                 true,
+	"[10] Negative parameter for LIMIT should fail":                     true,
+	"[11] Negative parameter for LIMIT with ORDER BY should fail":       true,
+	"[14] Floating point parameter for LIMIT should fail":               true,
+	"[15] Floating point parameter for LIMIT with ORDER BY should fail": true,
 }
 
 // the six public sentinels — the "valid Cypher we don't support yet" set. A
@@ -140,6 +187,41 @@ func TestNoUndefinedSteps(t *testing.T) {
 	}.Run()
 	if undefinedStepsRe.MatchString(buf.String()) {
 		t.Fatalf("undefined steps in the read-core corpus:\n%s", buf.String())
+	}
+}
+
+// TestSkiplistOrphans guards against a stale skiplist entry: every key must
+// match at least one scenario in the in-suite corpus. A TCK rename or reindex
+// would orphan a key silently otherwise — the skiplist is consulted by name
+// (acceptance_test.go's Before hook does `skiplist[sc.Name]`), so an unmatched
+// key has no effect and the scenario it used to cover would surface as a
+// regression. Mirrors TestNoUndefinedSteps's role as a harness-gap guard.
+func TestSkiplistOrphans(t *testing.T) {
+	seen := make(map[string]bool)
+	for _, dir := range readCoreDirs {
+		files, err := filepath.Glob(filepath.Join(dir, "*.feature"))
+		if err != nil {
+			t.Fatalf("glob %s: %v", dir, err)
+		}
+		for _, path := range files {
+			f, err := os.Open(path)
+			if err != nil {
+				t.Fatalf("open %s: %v", path, err)
+			}
+			doc, err := gherkin.ParseGherkinDocument(f, func() string { return "" })
+			f.Close()
+			if err != nil {
+				t.Fatalf("parse %s: %v", path, err)
+			}
+			for _, p := range gherkin.Pickles(*doc, path, newIDGen()) {
+				seen[p.Name] = true
+			}
+		}
+	}
+	for name := range skiplist {
+		if !seen[name] {
+			t.Errorf("skiplist entry %q matched no scenario — TCK rename or stale entry?", name)
+		}
 	}
 }
 

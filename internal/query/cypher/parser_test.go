@@ -14,12 +14,30 @@ import (
 
 // --- Layer 2: targeted sentinel checks (the TCK doesn't encode our taxonomy) ---
 //
-// Every query below is copied VERBATIM from a vendored read-core .feature file;
-// the comment names its source. We never author Cypher — we select and label
-// corpus queries. The expected query.Query in mustParse is hand-built from the
-// Stage-0 spec (Clusters C/D/E), not copied from the parser's current output;
-// it is the regression layer the golden snapshots — which -update silently
-// rebaselines — cannot give us.
+// Layer-2 rule:
+//
+// ACCEPT-PATH cases (mustParse) come VERBATIM from the corpus. The hand-built
+// query.Query in each entry is the regression layer the golden snapshots —
+// which -update silently rebaselines — cannot give us, but the SHAPE we pin
+// against must come from a committee-authored input — otherwise we would be
+// asserting the shape we want the parser to produce against the input we chose
+// to produce it (evidentiary circularity). We add a mustParse case only when
+// the corpus supplies one.
+//
+// REJECT-PATH cases (mustReject) come VERBATIM from the corpus where the
+// corpus exercises the fail-site; otherwise they are AUTHORED with an inline
+// `// AUTHORED:` marker naming the fail-site by domain. The sentinel taxonomy
+// is ours (the TCK doesn't encode it), and the only assertion is ABSENCE of a
+// model — no shape to outsource — so the accept-path's circularity concern
+// does not apply on this side.
+//
+// Authored mustReject cases are bounded: at most one per fail-site (the same
+// way the corpus provides at most one per scenario), and only when no verbatim
+// corpus query exercises that fail-site at the pinned TCK tag.
+//
+// Both rules carry the revisit-on-TCK-bump obligation: when a bump adds a
+// corpus query for an authored case's fail-site, the corpus entry replaces the
+// authored one (the corpus is always preferred when available).
 
 // mustParse pairs each read-core query with the exact query.Query Stage 0 must
 // produce for it, built via the branch-1 model constructors. The test asserts
@@ -166,7 +184,7 @@ var mustParse = map[string]struct {
 		},
 	},
 	// MatchWhere1 [6] parameter in a property predicate: D1a pairs $param with
-	// b.name → one Parameter with Use Ref{b, name}.
+	// b.name → one Parameter with Use PropertyUse{Ref{b, name}}.
 	"where property parameter": {
 		src: "MATCH (a)-[r]->(b)\nWHERE b.name = $param\nRETURN r",
 		want: query.Query{
@@ -179,10 +197,53 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("b", nil)),
 			},
 			Parameters: []query.Parameter{
-				{Name: "param", Uses: []query.Ref{{Variable: "b", Property: "name"}}},
+				{Name: "param", Uses: []query.Use{
+					query.NewPropertyUse(query.Ref{Variable: "b", Property: "name"}),
+				}},
 			},
 			Returns: []query.ReturnItem{
 				{Name: "r", Ref: query.Ref{Variable: "r"}},
+			},
+		},
+	},
+	// ReturnSkipLimit1 [2] "Start the result from second row by param" —
+	// verbatim TCK query. Stage 1: SKIP $p is a clause-slot-typed parameter
+	// use; the parameter carries one Use = ClauseSlotUse{Skip}, not a
+	// property Ref. ORDER BY a bare var.prop is accept-and-ignored (E4).
+	"skip parameter": {
+		src: "MATCH (n)\nRETURN n\nORDER BY n.name ASC\nSKIP $skipAmount",
+		want: query.Query{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("n", nil)),
+			},
+			Parameters: []query.Parameter{
+				{Name: "skipAmount", Uses: []query.Use{
+					query.NewClauseSlotUse(query.ClauseSlotSkip),
+				}},
+			},
+			Returns: []query.ReturnItem{
+				{Name: "n", Ref: query.Ref{Variable: "n"}},
+			},
+		},
+	},
+	// ReturnSkipLimit2 [10] "Negative parameter for LIMIT should fail" —
+	// verbatim TCK query. The TCK asserts a runtime NegativeIntegerArgument
+	// (parameter _limit = -1), which is out of scope for a parser; the query
+	// parses fine and that's what we pin: LIMIT $p is a clause-slot-typed
+	// parameter use carrying one Use = ClauseSlotUse{Limit}.
+	"limit parameter": {
+		src: "MATCH (p:Person)\nRETURN p.name AS name\nLIMIT $_limit",
+		want: query.Query{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("p", graph.LabelSet{"Person"})),
+			},
+			Parameters: []query.Parameter{
+				{Name: "_limit", Uses: []query.Use{
+					query.NewClauseSlotUse(query.ClauseSlotLimit),
+				}},
+			},
+			Returns: []query.ReturnItem{
+				{Name: "name", Ref: query.Ref{Variable: "p", Property: "name"}},
 			},
 		},
 	},
@@ -285,6 +346,17 @@ var mustReject = map[string]struct {
 	// single property) -> ErrUnsupportedParameter
 	"unsupported parameter": {
 		query: "MATCH (n $param)\nRETURN n",
+		want:  cypher.ErrUnsupportedParameter,
+	},
+	// AUTHORED: non-bare $p in SKIP/LIMIT — fail-site is
+	// mineClauseSlotParameter's findParameters>0 branch (the Stage 1
+	// fail-site cycles 1/2 introduced for the bare-vs-non-bare accept
+	// rule). The cycle-3 audit of return-skip-limit/ verified every $p
+	// in that dir is a bare atom, so no verbatim TCK query exercises
+	// this shape at the pinned tag. Replace with the corpus entry when
+	// a TCK bump adds one.
+	"skip non-bare param": {
+		query: "MATCH (n)\nRETURN n\nSKIP $p + 1",
 		want:  cypher.ErrUnsupportedParameter,
 	},
 }
@@ -422,8 +494,15 @@ func assertReferentialIntegrity(rt *rapid.T, q query.Query, src string) {
 	}
 	for _, p := range q.Parameters {
 		for _, u := range p.Uses {
-			if !resolves(u.Variable) {
-				rt.Fatalf("parameter %q use ref %q has no binding in %q", p.Name, u.Variable, src)
+			switch use := u.(type) {
+			case query.PropertyUse:
+				if !resolves(use.Ref().Variable) {
+					rt.Fatalf("parameter %q use ref %q has no binding in %q", p.Name, use.Ref().Variable, src)
+				}
+			case query.ClauseSlotUse:
+				// A clause-slot use has no Variable — referential check is N/A.
+			default:
+				rt.Fatalf("parameter %q has unknown Use variant %T in %q", p.Name, u, src)
 			}
 		}
 	}

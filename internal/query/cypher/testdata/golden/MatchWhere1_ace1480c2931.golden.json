@@ -29,8 +29,9 @@
       "Name": "param",
       "Uses": [
         {
-          "Variable": "b",
-          "Property": "name"
+          "kind": "property",
+          "variable": "b",
+          "property": "name"
         }
       ]
     }
