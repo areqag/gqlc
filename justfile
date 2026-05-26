@@ -1,3 +1,9 @@
+# Configures local git settings required after a fresh clone.
+# Idempotent: safe to run multiple times.
+init:
+    git config core.hooksPath .githooks
+    @echo "git hooks activated (core.hooksPath = .githooks)"
+
 # pinned openCypher release tag the TCK is vendored from; never "master" so the
 # corpus is reproducible. Bump deliberately, then re-run fetch-tck and commit.
 tck_tag := "2024.3"
