@@ -1,3 +1,8 @@
 # rapid writes per-failure reproduction files under testdata/rapid; they are
 # time/seed-specific and regenerated on demand, so they are never committed.
 **/testdata/rapid/
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
