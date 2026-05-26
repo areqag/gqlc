@@ -79,6 +79,15 @@ schema's element types).
 The bare name a query author writes for a binding (the `p` in `(p:Person)`). A
 binding is a variable plus the entity it is bound to.
 
+**Nullable**:
+A flag on a binding signalling that it may have no match on a given row — the
+binding, and every return item that traces back to it, may be absent. Set on
+bindings first introduced inside an `OPTIONAL MATCH` clause; the surface
+keyword is `OPTIONAL`, the lowered attribute is **nullable**, mirroring the
+schema side's type-system posture. Codegen emits the corresponding result as
+a pointer or option type post-freeze.
+_Avoid_: optional (reserve for the Cypher keyword `OPTIONAL MATCH`).
+
 **Endpoint**:
 The source or target of an edge binding, written as a reference to a named node
 binding or as inline labels for an anonymous node, and canonicalised to
