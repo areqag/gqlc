@@ -181,17 +181,118 @@ type ReturnItem struct {
 }
 
 // Parameter is a query input. Uses are the value-positions where the parameter
-// appears — each a Ref to the binding property it sits against — so a parameter
-// written in N places collapses to one Parameter with N uses. For example, in
+// appears — each a Use describing the slot it sits in — so a parameter written
+// in N places collapses to one Parameter with N uses. A Use is exactly one of
+// PropertyUse (the parameter is bound to a binding property, e.g. the $threshold
+// in WHERE a.age > $threshold) or ClauseSlotUse (the parameter occupies a
+// SKIP/LIMIT clause slot whose type comes from the slot, not from a binding).
+// For example, in
 //
 //	WHERE a.age > $threshold AND b.age > $threshold
 //
-// $threshold has two uses: {Variable: "a", Property: "age"} and
-// {Variable: "b", Property: "age"}.
+// $threshold has two PropertyUses: Ref{Variable: "a", Property: "age"} and
+// Ref{Variable: "b", Property: "age"}. In SKIP $page, $page has one
+// ClauseSlotUse{ClauseSlotSkip}. The resolver judges type unification across
+// uses post-freeze (the parser stays schema-agnostic per ADR 0003); mixed-kind
+// uses on one Parameter are not a parser-level conflict.
 type Parameter struct {
 	Name string
-	Uses []Ref
+	Uses []Use
 }
+
+// Use is one position where a parameter appears. It is a closed sum of
+// PropertyUse and ClauseSlotUse — no other type can implement it — so a use is
+// exactly one of the two and a parameter use that is neither bound to a binding
+// property nor sat in a clause slot is unrepresentable. Both variants hold
+// their data in unexported fields, so NewPropertyUse / NewClauseSlotUse are the
+// only way to construct a non-zero value: the invariants the types alone cannot
+// express hold for every value that exists.
+type Use interface {
+	isUse()
+}
+
+// PropertyUse is a parameter use bound to a binding property: the $threshold in
+// WHERE a.age > $threshold sits against Ref{Variable: "a", Property: "age"}.
+// The Ref is always a single-level property reference (parser invariant D1);
+// multi-level access (a.b.c) is unrepresentable, because Ref itself only carries
+// one Property name.
+type PropertyUse struct {
+	ref Ref // the binding property the parameter sits against
+}
+
+// NewPropertyUse builds a PropertyUse. Total: a parameter use carries a Ref
+// the listener has already validated (parameter mining only fires after the
+// expression shape gates accept a bound variable + property), so no
+// constructor error is possible at the call site. Mirrors NewInlineEndpoint's
+// total posture.
+func NewPropertyUse(r Ref) PropertyUse {
+	return PropertyUse{ref: r}
+}
+
+// Ref is the binding property the parameter sits against.
+func (u PropertyUse) Ref() Ref { return u.ref }
+
+func (PropertyUse) isUse() {}
+
+// ClauseSlot identifies a clause whose value slot can hold a parameter:
+// currently SKIP or LIMIT. Int-backed with a stringer — mirrors
+// graph.EntityKind's discipline — so the JSON discriminator derives from one
+// source and cannot drift.
+type ClauseSlot int
+
+const (
+	// ClauseSlotSkip is the SKIP clause's integer slot.
+	ClauseSlotSkip ClauseSlot = iota
+	// ClauseSlotLimit is the LIMIT clause's integer slot.
+	ClauseSlotLimit
+)
+
+// String is the lowercase name of the slot ("skip" / "limit"). It is the
+// single source the JSON discriminator's "slot" field derives from.
+func (s ClauseSlot) String() string {
+	switch s {
+	case ClauseSlotLimit:
+		return "limit"
+	default:
+		return "skip"
+	}
+}
+
+// ClauseName is the uppercase clause name for use in an error message
+// ("SKIP" / "LIMIT"). Derived from String so the two names share one source.
+func (s ClauseSlot) ClauseName() string {
+	switch s {
+	case ClauseSlotLimit:
+		return "LIMIT"
+	default:
+		return "SKIP"
+	}
+}
+
+// ClauseSlotUse is a parameter use that occupies a SKIP/LIMIT clause slot. The
+// parameter's type comes from the slot (an integer) rather than from a binding
+// property, so this variant carries no Ref.
+type ClauseSlotUse struct {
+	slot ClauseSlot
+}
+
+// NewClauseSlotUse builds a ClauseSlotUse. Total: ClauseSlot is a closed enum
+// (currently SKIP or LIMIT) so every value is valid.
+func NewClauseSlotUse(s ClauseSlot) ClauseSlotUse {
+	return ClauseSlotUse{slot: s}
+}
+
+// Slot is the clause whose slot the parameter occupies.
+func (u ClauseSlotUse) Slot() ClauseSlot { return u.slot }
+
+func (ClauseSlotUse) isUse() {}
+
+// The Use discriminators have no graph-vocabulary counterpart (the distinction
+// is query-side only), so they are named here, the one place they are emitted.
+const (
+	useKindProperty   = "property"
+	useKindClauseSlot = "clause-slot"
+)
 
 // The "var" and "inline" endpoint discriminators have no graph-vocabulary
 // counterpart (the distinction is query-side only), so they are named here, the
@@ -243,4 +344,25 @@ func (e InlineEndpoint) MarshalJSON() ([]byte, error) {
 		Kind   string         `json:"kind"`
 		Labels graph.LabelSet `json:"labels"`
 	}{Kind: endpointKindInline, Labels: e.labels})
+}
+
+// MarshalJSON renders a PropertyUse as a tagged union member discriminated by
+// "kind", flattening its Ref into sibling "variable" and "property" fields so
+// the use's shape stays one level deep — same posture as the Binding sum.
+func (u PropertyUse) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind     string `json:"kind"`
+		Variable string `json:"variable"`
+		Property string `json:"property"`
+	}{Kind: useKindProperty, Variable: u.ref.Variable, Property: u.ref.Property})
+}
+
+// MarshalJSON renders a ClauseSlotUse as a tagged union member discriminated by
+// "kind". The "slot" tag derives from ClauseSlot.String, so the serialised slot
+// can never drift from Slot().
+func (u ClauseSlotUse) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind string `json:"kind"`
+		Slot string `json:"slot"`
+	}{Kind: useKindClauseSlot, Slot: u.slot.String()})
 }

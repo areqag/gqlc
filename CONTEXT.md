@@ -86,9 +86,20 @@ source→target order so it forms a `schema.EdgeKey`. An edge is not identified 
 its label alone — the same label may connect different endpoint pairs — which is
 why an edge binding carries its endpoints.
 
+**Use**:
+One position where a parameter appears in a query. A closed sum of
+PropertyUse and ClauseSlotUse: a property use binds the parameter to a
+binding property (the `$threshold` in `WHERE a.age > $threshold`); a
+clause-slot use places the parameter in a SKIP or LIMIT clause whose type
+is fixed by the clause (an integer) rather than inferred from a binding.
+Every parameter carries a list of uses in first-appearance order, which
+the resolver unifies into a single type post-freeze.
+_Avoid_: site (overloaded with the spec's "fail-site"), occurrence.
+
 **Parameter**:
 A query input (openCypher `$name`), deduplicated across the query in
-first-appearance order. Carries the value-positions it is used in so the resolver
+first-appearance order. Carries its **uses** — value-positions it appears
+in, each either a property reference or a clause slot — so the resolver
 can infer its type. Becomes a generated method argument.
 _Avoid_: argument (reserve for the generated code).
 

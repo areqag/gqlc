@@ -1,0 +1,29 @@
+{
+  "Bindings": [
+    {
+      "kind": "node",
+      "variable": "n",
+      "labels": null
+    }
+  ],
+  "Parameters": [
+    {
+      "Name": "skipAmount",
+      "Uses": [
+        {
+          "kind": "clause-slot",
+          "slot": "skip"
+        }
+      ]
+    }
+  ],
+  "Returns": [
+    {
+      "Name": "n",
+      "Ref": {
+        "Variable": "n",
+        "Property": ""
+      }
+    }
+  ]
+}

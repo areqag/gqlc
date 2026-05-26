@@ -71,8 +71,9 @@
       "Name": "1",
       "Uses": [
         {
-          "Variable": "advertiser",
-          "Property": "id"
+          "kind": "property",
+          "variable": "advertiser",
+          "property": "id"
         }
       ]
     },
@@ -80,8 +81,9 @@
       "Name": "2",
       "Uses": [
         {
-          "Variable": "a",
-          "Property": "id"
+          "kind": "property",
+          "variable": "a",
+          "property": "id"
         }
       ]
     }
