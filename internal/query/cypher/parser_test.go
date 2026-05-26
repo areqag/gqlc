@@ -208,6 +208,27 @@ var mustParse = map[string]struct {
 			},
 		},
 	},
+	// ReturnSkipLimit2 [10] "Negative parameter for LIMIT should fail" —
+	// verbatim TCK query. The TCK asserts a runtime NegativeIntegerArgument
+	// (parameter _limit = -1), which is out of scope for a parser; the query
+	// parses fine and that's what we pin: LIMIT $p is a clause-slot-typed
+	// parameter use carrying one Use = ClauseSlotUse{Limit}.
+	"limit parameter": {
+		src: "MATCH (p:Person)\nRETURN p.name AS name\nLIMIT $_limit",
+		want: query.Query{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("p", graph.LabelSet{"Person"})),
+			},
+			Parameters: []query.Parameter{
+				{Name: "_limit", Uses: []query.Use{
+					query.NewClauseSlotUse(query.ClauseSlotLimit),
+				}},
+			},
+			Returns: []query.ReturnItem{
+				{Name: "name", Ref: query.Ref{Variable: "p", Property: "name"}},
+			},
+		},
+	},
 	// Create2 [4] control query: a left-pointing arc. C-Direction: the canonical
 	// edge is source=b, target=a (the arrow's tail is the source) — independent of
 	// how it was written. The relationship has no variable (anonymous edge, C1).

@@ -52,7 +52,7 @@ func (l *listener) collectProjection(body gen.IOC_ProjectionBodyContext) {
 		l.mineClauseSlotParameter(s.OC_Expression(), query.ClauseSlotSkip)
 	}
 	if lim := body.OC_Limit(); lim != nil {
-		l.rejectClauseParameter(lim.OC_Expression(), "LIMIT")
+		l.mineClauseSlotParameter(lim.OC_Expression(), query.ClauseSlotLimit)
 	}
 }
 
@@ -75,11 +75,10 @@ func (l *listener) collectReturnItem(item gen.IOC_ProjectionItemContext) {
 	l.returns = append(l.returns, query.ReturnItem{Name: name, Ref: ref})
 }
 
-// rejectClauseParameter fails if an accept-and-ignored clause expression
-// (currently ORDER BY and LIMIT for Stage 1) contains a parameter: it would
-// be dropped from the model rather than bound to a slot, so it is unsupported
-// (Cluster D). SKIP has its own miner (mineClauseSlotParameter) that accepts
-// a bare $p as a ClauseSlotUse.
+// rejectClauseParameter fails if the ORDER BY expression contains a parameter:
+// the parameter would be dropped from the model rather than bound to a slot,
+// so it is unsupported (Cluster D). SKIP and LIMIT have their own miner
+// (mineClauseSlotParameter) that accepts a bare $p as a ClauseSlotUse.
 func (l *listener) rejectClauseParameter(e gen.IOC_ExpressionContext, clause string) {
 	if e == nil {
 		return
@@ -89,11 +88,11 @@ func (l *listener) rejectClauseParameter(e gen.IOC_ExpressionContext, clause str
 	}
 }
 
-// mineClauseSlotParameter mines a bare $p atom from a SKIP (or LIMIT, when
-// cycle 2 wires it) expression, recording it as a ClauseSlotUse on the named
-// parameter. Any non-bare $p in the expression (e.g. SKIP $p + 1, SKIP f($p))
-// is unsupported and surfaces as ErrUnsupportedParameter, mirroring the
-// previous rejectClauseParameter discipline for non-bare cases.
+// mineClauseSlotParameter mines a bare $p atom from a SKIP or LIMIT expression,
+// recording it as a ClauseSlotUse on the named parameter. Any non-bare $p in
+// the expression (e.g. SKIP $p + 1, LIMIT f($p)) is unsupported and surfaces
+// as ErrUnsupportedParameter, mirroring rejectClauseParameter's discipline for
+// non-bare cases on the remaining accept-and-ignored clause (ORDER BY).
 func (l *listener) mineClauseSlotParameter(e gen.IOC_ExpressionContext, slot query.ClauseSlot) {
 	if e == nil {
 		return
