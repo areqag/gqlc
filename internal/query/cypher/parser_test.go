@@ -166,7 +166,7 @@ var mustParse = map[string]struct {
 		},
 	},
 	// MatchWhere1 [6] parameter in a property predicate: D1a pairs $param with
-	// b.name → one Parameter with Use Ref{b, name}.
+	// b.name → one Parameter with Use PropertyUse{Ref{b, name}}.
 	"where property parameter": {
 		src: "MATCH (a)-[r]->(b)\nWHERE b.name = $param\nRETURN r",
 		want: query.Query{
@@ -179,10 +179,32 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("b", nil)),
 			},
 			Parameters: []query.Parameter{
-				{Name: "param", Uses: []query.Ref{{Variable: "b", Property: "name"}}},
+				{Name: "param", Uses: []query.Use{
+					query.NewPropertyUse(query.Ref{Variable: "b", Property: "name"}),
+				}},
 			},
 			Returns: []query.ReturnItem{
 				{Name: "r", Ref: query.Ref{Variable: "r"}},
+			},
+		},
+	},
+	// ReturnSkipLimit1 [2] "Start the result from second row by param" —
+	// verbatim TCK query. Stage 1: SKIP $p is a clause-slot-typed parameter
+	// use; the parameter carries one Use = ClauseSlotUse{Skip}, not a
+	// property Ref. ORDER BY a bare var.prop is accept-and-ignored (E4).
+	"skip parameter": {
+		src: "MATCH (n)\nRETURN n\nORDER BY n.name ASC\nSKIP $skipAmount",
+		want: query.Query{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("n", nil)),
+			},
+			Parameters: []query.Parameter{
+				{Name: "skipAmount", Uses: []query.Use{
+					query.NewClauseSlotUse(query.ClauseSlotSkip),
+				}},
+			},
+			Returns: []query.ReturnItem{
+				{Name: "n", Ref: query.Ref{Variable: "n"}},
 			},
 		},
 	},
@@ -422,8 +444,15 @@ func assertReferentialIntegrity(rt *rapid.T, q query.Query, src string) {
 	}
 	for _, p := range q.Parameters {
 		for _, u := range p.Uses {
-			if !resolves(u.Variable) {
-				rt.Fatalf("parameter %q use ref %q has no binding in %q", p.Name, u.Variable, src)
+			switch use := u.(type) {
+			case query.PropertyUse:
+				if !resolves(use.Ref().Variable) {
+					rt.Fatalf("parameter %q use ref %q has no binding in %q", p.Name, use.Ref().Variable, src)
+				}
+			case query.ClauseSlotUse:
+				// A clause-slot use has no Variable — referential check is N/A.
+			default:
+				rt.Fatalf("parameter %q has unknown Use variant %T in %q", p.Name, u, src)
 			}
 		}
 	}
