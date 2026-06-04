@@ -319,6 +319,36 @@ var mustParse = map[string]struct {
 			},
 		},
 	},
+	// Stage 3 — canonical aggregate. count(*) is the degenerate aggregate: the
+	// count-star atom, AggCount with no referenced bindings (it counts rows, not a
+	// binding). Column name is the verbatim text "count(*)". The aggregate kind is
+	// carried because it changes result cardinality (spec §4); the function's
+	// identity below the boundary is not.
+	"count star aggregate": {
+		src: "MATCH (n)\nRETURN count(*)",
+		want: query.Query{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("n", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "count(*)", Value: query.NewAggregateProjection(query.AggCount, nil)},
+			},
+		},
+	},
+	// Stage 3 — RETURN *. The query-level wildcard over in-scope bindings: the
+	// honest schema-agnostic representation is ReturnsAll, with Returns empty (the
+	// two are mutually exclusive at Stage 3, spec §3). The resolver expands * to
+	// the in-scope bindings post-freeze; the parser records "every in-scope
+	// binding" without guessing the column list.
+	"return all": {
+		src: "MATCH (n)\nRETURN *",
+		want: query.Query{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("n", nil)),
+			},
+			ReturnsAll: true,
+		},
+	},
 }
 
 // must lifts a fallible model constructor into an expression usable in a struct
@@ -355,9 +385,15 @@ var mustReject = map[string]struct {
 		query: "OPTIONAL MATCH (a)\nWITH a\nMATCH (a)-->(b)\nRETURN b",
 		want:  cypher.ErrUnsupportedClause,
 	},
-	// Return7 [2] RETURN * -> ErrUnsupportedProjection
-	"return star": {
-		query: "MATCH ()\nRETURN *",
+	// AUTHORED: arithmetic over a projection (RETURN n.num + 1) is the residual
+	// fail-site for ErrUnsupportedProjection after Stage 3 widens RETURN to
+	// var/var.prop/literal/func/aggregate/RETURN *. No clean verbatim corpus query
+	// exercises the residual without a disqualifying clause (the TCK's
+	// arithmetic-in-RETURN scenarios all also carry WITH or a literal-only RETURN),
+	// so an authored case preserves sentinel reachability. Replace with a corpus
+	// entry if a TCK bump adds a bare one.
+	"arithmetic over projection": {
+		query: "MATCH (n)\nRETURN n.num + 1",
 		want:  cypher.ErrUnsupportedProjection,
 	},
 	// Match2 [6] multi-type relationship [:A|B] -> ErrUnsupportedPattern

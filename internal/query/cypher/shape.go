@@ -1,6 +1,8 @@
 package cypher
 
 import (
+	"strings"
+
 	"github.com/antlr4-go/antlr/v4"
 
 	"github.com/antranig-yeretzian/gqlc/internal/grammar/cypher/gen"
@@ -14,15 +16,7 @@ import (
 // the bottom rule. Anything with an operator at any level fails the "bare value"
 // test and is rejected (a projection, parameter, etc.) per the spec.
 
-// propertyRef returns the Ref for an expression that is a bare variable or a
-// single-level property lookup (var / var.prop), the only return-item shapes
-// Stage 0 supports (E2). ok is false for anything richer.
-func propertyRef(e gen.IOC_ExpressionContext) (query.Ref, bool) {
-	nae := nonArithmetic(e)
-	return refFromNonArithmetic(nae)
-}
-
-// propertyRefFromAddSub is propertyRef for an operand already unwrapped to an
+// propertyRefFromAddSub reads var / var.prop from an operand already unwrapped to an
 // add-or-subtract expression (the operand level of a comparison).
 func propertyRefFromAddSub(a gen.IOC_AddOrSubtractExpressionContext) (query.Ref, bool) {
 	return refFromNonArithmetic(nonArithmeticFromAddSub(a))
@@ -51,6 +45,96 @@ func refFromNonArithmetic(nae gen.IOC_NonArithmeticOperatorExpressionContext) (q
 	default:
 		return query.Ref{}, false
 	}
+}
+
+// nonArithmeticAtom collapses an expression's precedence tower and returns the
+// bottom non-arithmetic operator expression only when it carries no node labels
+// and no list operators — the gate every projection classifier shares. It is nil
+// when an operator is present at any level (the expression is not a bare value)
+// or a label/list operator is attached.
+func nonArithmeticAtom(e gen.IOC_ExpressionContext) gen.IOC_NonArithmeticOperatorExpressionContext {
+	nae := nonArithmetic(e)
+	if nae == nil || nae.OC_NodeLabels() != nil || len(nae.AllOC_ListOperatorExpression()) > 0 {
+		return nil
+	}
+	return nae
+}
+
+// isScalarLiteral reports whether a literal is a scalar (number, string, boolean
+// or NULL) rather than a list or map literal. A scalar literal projects as a
+// LiteralProjection; a list/map literal is residual (spec §1).
+func isScalarLiteral(lit gen.IOC_LiteralContext) bool {
+	return lit != nil && lit.OC_ListLiteral() == nil && lit.OC_MapLiteral() == nil
+}
+
+// functionName reads the bare function name of an invocation, lowercased for the
+// case-insensitive aggregate match (the TCK writes cOuNt, aVg). A namespaced name
+// (foo.bar) has no bare name, so ok is false — it is not in the aggregate set and
+// classifies as a FuncProjection regardless.
+func functionName(fi gen.IOC_FunctionInvocationContext) (string, bool) {
+	name := fi.OC_FunctionName()
+	if name == nil || (name.OC_Namespace() != nil && len(name.OC_Namespace().AllOC_SymbolicName()) > 0) {
+		return "", false
+	}
+	sn := name.OC_SymbolicName()
+	if sn == nil {
+		return "", false
+	}
+	return strings.ToLower(sn.GetText()), true
+}
+
+// aggregateFunc maps a lowercased function name to its AggregateFunc, reporting
+// whether the name is an aggregate at all (§4: the openCypher aggregating
+// functions are a closed set). stdev/stdevp and percentilecont/percentiledisc
+// collapse to one enum each (the model carries the cardinality kind, not the
+// variant).
+func aggregateFunc(name string) (query.AggregateFunc, bool) {
+	switch name {
+	case "count":
+		return query.AggCount, true
+	case "sum":
+		return query.AggSum, true
+	case "collect":
+		return query.AggCollect, true
+	case "min":
+		return query.AggMin, true
+	case "max":
+		return query.AggMax, true
+	case "avg":
+		return query.AggAvg, true
+	case "stdev", "stdevp":
+		return query.AggStdev, true
+	case "percentilecont", "percentiledisc":
+		return query.AggPercentile, true
+	default:
+		return 0, false
+	}
+}
+
+// functionArgRefs mines the bindings a function/aggregate call references: each
+// argument must be either a bare var/var.prop (yielding a Ref) or a scalar
+// literal (yielding no Ref). ok is false if any argument is something else
+// (arithmetic, nested call, list/map literal, parameter, CASE, comprehension,
+// '*') — the "no expression tree, no nested aggregates" discipline (spec §4/§9).
+func functionArgRefs(fi gen.IOC_FunctionInvocationContext) ([]query.Ref, bool) {
+	var refs []query.Ref
+	for _, arg := range fi.AllOC_Expression() {
+		nae := nonArithmeticAtom(arg)
+		if nae == nil {
+			return nil, false
+		}
+		if ref, ok := refFromNonArithmetic(nae); ok {
+			refs = append(refs, ref)
+			continue
+		}
+		atom := nae.OC_Atom()
+		if atom != nil && len(nae.AllOC_PropertyLookup()) == 0 &&
+			atom.OC_Literal() != nil && isScalarLiteral(atom.OC_Literal()) {
+			continue
+		}
+		return nil, false
+	}
+	return refs, true
 }
 
 // parameterFromAddSub returns the parameter name and node for an operand that is
