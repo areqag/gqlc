@@ -24,7 +24,8 @@
                 "kind": "inline",
                 "labels": null
               },
-              "nullable": true
+              "nullable": true,
+              "directed": true
             },
             {
               "kind": "edge",
@@ -40,7 +41,8 @@
                 "kind": "var",
                 "variable": "foo"
               },
-              "nullable": true
+              "nullable": true,
+              "directed": true
             },
             {
               "kind": "node",

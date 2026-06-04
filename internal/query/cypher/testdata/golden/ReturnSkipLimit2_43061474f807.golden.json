@@ -24,7 +24,8 @@
                 "kind": "var",
                 "variable": "n"
               },
-              "nullable": false
+              "nullable": false,
+              "directed": true
             },
             {
               "kind": "node",
@@ -44,7 +45,8 @@
                 "kind": "var",
                 "variable": "m"
               },
-              "nullable": false
+              "nullable": false,
+              "directed": true
             },
             {
               "kind": "node",

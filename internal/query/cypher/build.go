@@ -128,10 +128,12 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Query
 // nullable flag picks the OPTIONAL-introduced variant (ADR 0006).
 func (rb *rawBinding) toBinding() (query.Binding, error) {
 	if rb.kind == graph.Edge {
+		// Stage 5: directed-only until the unlock commit — every edge reaching here
+		// is directed, so pass the literal true (becomes !rb.undirected at unlock).
 		if rb.nullable {
-			return query.NewNullableEdgeBinding(rb.variable, rb.labels, rb.source, rb.target)
+			return query.NewNullableEdgeBinding(rb.variable, rb.labels, rb.source, rb.target, true)
 		}
-		return query.NewEdgeBinding(rb.variable, rb.labels, rb.source, rb.target)
+		return query.NewEdgeBinding(rb.variable, rb.labels, rb.source, rb.target, true)
 	}
 	if rb.nullable {
 		return query.NewNullableNodeBinding(rb.variable, rb.labels)
