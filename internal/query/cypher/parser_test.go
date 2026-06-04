@@ -67,7 +67,7 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("n", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n", Ref: query.Ref{Variable: "n"}},
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
 			},
 		},
 	},
@@ -80,7 +80,7 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("a", graph.LabelSet{"A", "B"})),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "a", Ref: query.Ref{Variable: "a"}},
+				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
 			},
 		},
 	},
@@ -93,7 +93,7 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("n", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n", Ref: query.Ref{Variable: "n"}},
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
 			},
 		},
 	},
@@ -107,8 +107,8 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("m", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n", Ref: query.Ref{Variable: "n", Property: "num"}},
-				{Name: "m", Ref: query.Ref{Variable: "m", Property: "num"}},
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n", Property: "num"})},
+				{Name: "m", Value: query.NewRefProjection(query.Ref{Variable: "m", Property: "num"})},
 			},
 		},
 	},
@@ -124,7 +124,7 @@ var mustParse = map[string]struct {
 				)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "r", Ref: query.Ref{Variable: "r"}},
+				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"})},
 			},
 		},
 	},
@@ -140,7 +140,7 @@ var mustParse = map[string]struct {
 				)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "r", Ref: query.Ref{Variable: "r"}},
+				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"})},
 			},
 		},
 	},
@@ -158,8 +158,8 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("n2", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n1", Ref: query.Ref{Variable: "n1"}},
-				{Name: "n2", Ref: query.Ref{Variable: "n2"}},
+				{Name: "n1", Value: query.NewRefProjection(query.Ref{Variable: "n1"})},
+				{Name: "n2", Value: query.NewRefProjection(query.Ref{Variable: "n2"})},
 			},
 		},
 	},
@@ -177,9 +177,9 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("b", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "a", Ref: query.Ref{Variable: "a"}},
-				{Name: "r", Ref: query.Ref{Variable: "r"}},
-				{Name: "b", Ref: query.Ref{Variable: "b"}},
+				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
+				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"})},
+				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"})},
 			},
 		},
 	},
@@ -202,7 +202,7 @@ var mustParse = map[string]struct {
 				}},
 			},
 			Returns: []query.ReturnItem{
-				{Name: "r", Ref: query.Ref{Variable: "r"}},
+				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"})},
 			},
 		},
 	},
@@ -222,7 +222,7 @@ var mustParse = map[string]struct {
 				}},
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n", Ref: query.Ref{Variable: "n"}},
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
 			},
 		},
 	},
@@ -243,7 +243,7 @@ var mustParse = map[string]struct {
 				}},
 			},
 			Returns: []query.ReturnItem{
-				{Name: "name", Ref: query.Ref{Variable: "p", Property: "name"}},
+				{Name: "name", Value: query.NewRefProjection(query.Ref{Variable: "p", Property: "name"})},
 			},
 		},
 	},
@@ -265,8 +265,8 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("b", graph.LabelSet{"B"})),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "a", Ref: query.Ref{Variable: "a"}},
-				{Name: "b", Ref: query.Ref{Variable: "b"}},
+				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
+				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"})},
 			},
 		},
 	},
@@ -280,7 +280,7 @@ var mustParse = map[string]struct {
 				must(query.NewNullableNodeBinding("n", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n", Ref: query.Ref{Variable: "n"}},
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
 			},
 		},
 	},
@@ -301,8 +301,8 @@ var mustParse = map[string]struct {
 				must(query.NewNullableNodeBinding("x", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n", Ref: query.Ref{Variable: "n"}},
-				{Name: "x", Ref: query.Ref{Variable: "x"}},
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
+				{Name: "x", Value: query.NewRefProjection(query.Ref{Variable: "x"})},
 			},
 		},
 	},
@@ -315,7 +315,7 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("n", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n.created", Ref: query.Ref{Variable: "n", Property: "created"}},
+				{Name: "n.created", Value: query.NewRefProjection(query.Ref{Variable: "n", Property: "created"})},
 			},
 		},
 	},
@@ -527,8 +527,27 @@ func assertReferentialIntegrity(rt *rapid.T, q query.Query, src string) {
 		}
 	}
 	for _, r := range q.Returns {
-		if !resolves(r.Ref.Variable) {
-			rt.Fatalf("return ref %q has no binding in %q", r.Ref.Variable, src)
+		switch v := r.Value.(type) {
+		case query.RefProjection:
+			if !resolves(v.Ref().Variable) {
+				rt.Fatalf("return ref %q has no binding in %q", v.Ref().Variable, src)
+			}
+		case query.LiteralProjection:
+			// A literal traces back to no binding — referential check is N/A.
+		case query.FuncProjection:
+			for _, ref := range v.Refs() {
+				if !resolves(ref.Variable) {
+					rt.Fatalf("func projection ref %q has no binding in %q", ref.Variable, src)
+				}
+			}
+		case query.AggregateProjection:
+			for _, ref := range v.Refs() {
+				if !resolves(ref.Variable) {
+					rt.Fatalf("aggregate projection ref %q has no binding in %q", ref.Variable, src)
+				}
+			}
+		default:
+			rt.Fatalf("return item has unknown Projection variant %T in %q", r.Value, src)
 		}
 	}
 	for _, p := range q.Parameters {

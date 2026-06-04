@@ -72,7 +72,7 @@ func (l *listener) collectReturnItem(item gen.IOC_ProjectionItemContext) {
 	}
 
 	l.refs = append(l.refs, varRef{name: ref.Variable})
-	l.returns = append(l.returns, query.ReturnItem{Name: name, Ref: ref})
+	l.returns = append(l.returns, query.ReturnItem{Name: name, Value: query.NewRefProjection(ref)})
 }
 
 // rejectClauseParameter fails if the ORDER BY expression contains a parameter:

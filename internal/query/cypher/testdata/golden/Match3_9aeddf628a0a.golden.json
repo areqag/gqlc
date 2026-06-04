@@ -42,11 +42,13 @@
   "Parameters": null,
   "Returns": [
     {
-      "Name": "a.name",
-      "Ref": {
-        "Variable": "a",
-        "Property": "name"
+      "name": "a.name",
+      "value": {
+        "kind": "ref",
+        "variable": "a",
+        "property": "name"
       }
     }
-  ]
+  ],
+  "returnsAll": false
 }
