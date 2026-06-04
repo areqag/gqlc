@@ -46,9 +46,13 @@ func (l *listener) build() (query.Query, error) {
 		params = append(params, *p)
 	}
 
-	q := query.Query{Returns: l.returns, ReturnsAll: l.returnsAll}
+	part := query.QueryPart{Returns: l.returns, ReturnsAll: l.returnsAll}
 	if len(bindings) > 0 {
-		q.Bindings = bindings
+		part.Bindings = bindings
+	}
+
+	q := query.Query{
+		Branches: []query.QueryBranch{{Parts: []query.QueryPart{part}}},
 	}
 	if len(params) > 0 {
 		q.Parameters = params

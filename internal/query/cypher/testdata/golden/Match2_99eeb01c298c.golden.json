@@ -1,34 +1,43 @@
 {
-  "Bindings": [
+  "branches": [
     {
-      "kind": "edge",
-      "variable": "r",
-      "labels": null,
-      "source": {
-        "kind": "inline",
-        "labels": null
-      },
-      "target": {
-        "kind": "inline",
-        "labels": null
-      },
-      "nullable": false
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "edge",
+              "variable": "r",
+              "labels": null,
+              "source": {
+                "kind": "inline",
+                "labels": null
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "r",
+              "value": {
+                "kind": "func",
+                "refs": [
+                  {
+                    "variable": "r",
+                    "property": ""
+                  }
+                ]
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
     }
   ],
-  "Parameters": null,
-  "Returns": [
-    {
-      "name": "r",
-      "value": {
-        "kind": "func",
-        "refs": [
-          {
-            "variable": "r",
-            "property": ""
-          }
-        ]
-      }
-    }
-  ],
-  "returnsAll": false
+  "combinators": null,
+  "parameters": null
 }

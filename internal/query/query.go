@@ -7,37 +7,107 @@ import (
 	"github.com/antranig-yeretzian/gqlc/internal/graph"
 )
 
-// Query is the model of a single parsed query: the entities it binds, the
-// parameters it takes, and the values it returns. It is schema-agnostic — it
-// records what the query says, not whether any schema supports it; resolving it
-// against a schema.Schema is a separate stage (ADR 0003).
+// Query is the model of a single parsed query: its UNION-joined branches and the
+// parameters it takes. It is schema-agnostic — it records what the query says,
+// not whether any schema supports it; resolving it against a schema.Schema is a
+// separate stage (ADR 0003).
+//
+// The branch/part nesting mirrors the grammar (oC_RegularQuery → oC_SingleQuery
+// → oC_SinglePartQuery/oC_MultiPartQuery), so the structure is always present:
+// the common case MATCH (n) RETURN n is one branch of one part. The resolver
+// never special-cases "flat vs nested" (Stage-4 spec §3).
 //
 // Query needs no custom MarshalJSON: its members are order-preserving slices of
-// strings and sum-type values, so its serialisation is deterministic by
-// construction (the sum types carry the determinism discipline themselves).
+// products and sum-type values, so its serialisation is deterministic by
+// construction (the sum types carry the determinism discipline themselves). The
+// lowercase json tags fix the wire key names; UnionKind marshals via its
+// stringer.
 type Query struct {
-	// Bindings are the entities the query binds, a NodeBinding or an EdgeBinding
-	// each. Among named bindings the variable is unique; Returns, Parameters and
-	// edge endpoints reference them by it. Only an edge may be anonymous (an empty
-	// variable), e.g. the relationship in (a)-->(b).
-	Bindings []Binding
+	// Branches are the query's UNION-joined result arms, one per oC_SingleQuery,
+	// in source order. A query without UNION is one branch; N UNIONs make N+1
+	// branches combined left to right. Always at least one branch.
+	Branches []QueryBranch `json:"branches"`
+
+	// Combinators records how each branch after the first was joined to its
+	// predecessor: the i-th entry is how branch i+1 joins branch i (UNION distinct
+	// vs UNION ALL). It has len(Branches)-1 entries — nil (one branch). Always
+	// emitted in JSON (null when one branch), matching the always-emit convention.
+	Combinators []UnionKind `json:"combinators"`
 
 	// Parameters are the query's inputs, deduplicated by name in first-appearance
-	// order.
-	Parameters []Parameter
+	// order. They stay at Query level: a parameter used in any part of any branch
+	// is one generated method argument, deduplicated query-wide (Stage-4 spec §2).
+	Parameters []Parameter `json:"parameters"`
+}
 
-	// Returns are the query's result columns, in source order with duplicates
-	// kept: RETURN a, b is a different shape from RETURN b, a. Empty when
-	// ReturnsAll is true (RETURN * does not mix with explicit items at Stage 3).
-	Returns []ReturnItem
+// QueryBranch is one UNION-joined arm of a query — one oC_SingleQuery — an
+// ordered chain of one or more QueryParts. Non-final parts each end in a WITH;
+// the final part ends in a RETURN (positional — no per-part terminal flag). It
+// is a product type: exported fields, the builder maintains the invariant (at
+// least one part), no smart constructor — mirroring Query (Stage-4 spec §3).
+type QueryBranch struct {
+	// Parts are the branch's WITH-bounded scope segments, in source order. At
+	// least one (the final RETURN part).
+	Parts []QueryPart `json:"parts"`
+}
+
+// QueryPart is one WITH-bounded scope segment of a branch — the Stage-0..3 flat
+// scope, now scoped to one part. A non-final part's Returns/ReturnsAll carry its
+// WITH projection (a WITH item is a RETURN item — same oC_ProjectionBody, same
+// Stage-3 Projection sum); the final part's carry the branch's result columns.
+// It is a product type: exported fields, the builder maintains its invariants (a
+// part's Returns is empty iff ReturnsAll), no smart constructor — mirroring Query.
+type QueryPart struct {
+	// Bindings are the entities this part's own MATCH clauses introduce, a
+	// NodeBinding or an EdgeBinding each. Among a part's named bindings the
+	// variable is unique; Returns and edge endpoints reference them by it (or a
+	// name the prior part's WITH carried forward). Only an edge may be anonymous.
+	Bindings []Binding `json:"bindings"`
+
+	// Returns are the part's result columns, in source order with duplicates kept:
+	// RETURN a, b is a different shape from RETURN b, a. Empty when ReturnsAll is
+	// true (WITH * / RETURN * does not mix with explicit items).
+	Returns []ReturnItem `json:"returns"`
 
 	// ReturnsAll is true iff the projection body was the '*' alternative
-	// (RETURN *). It is a query-level wildcard over the in-scope bindings, not a
-	// return item: without a schema the parser cannot enumerate the columns '*'
-	// expands to, and the resolver owns expansion (Stage-3 spec §3). When true,
-	// Returns is empty. Always emitted in JSON (matching the always-emit
-	// convention the sum tags follow).
+	// (WITH * / RETURN *). A query-level wildcard over the part's in-scope
+	// bindings, not a return item; the resolver owns expansion. When true, Returns
+	// is empty. Always emitted in JSON (matching the always-emit convention).
 	ReturnsAll bool `json:"returnsAll"`
+}
+
+// UnionKind is which UNION combinator joins two branches: distinct (collapses
+// duplicate result rows) or ALL (keeps duplicates). The distinction changes
+// result cardinality, which the generated code models — the branch-level
+// analogue of the aggregate kind. It is an int-backed enum with a stringer,
+// mirroring AggregateFunc / ClauseSlot; the JSON value derives from String, the
+// single source, so it cannot drift.
+type UnionKind int
+
+const (
+	// UnionDistinct is plain UNION: it collapses duplicate result rows.
+	UnionDistinct UnionKind = iota
+	// UnionAll is UNION ALL: it keeps duplicate result rows.
+	UnionAll
+)
+
+// String is the canonical wire name of the combinator ("union" / "unionAll").
+// It is the single source the JSON value derives from, so the serialised name
+// can never drift from the enum. The default arm is UnionDistinct (plain UNION).
+func (k UnionKind) String() string {
+	switch k {
+	case UnionAll:
+		return "unionAll"
+	default:
+		return "union"
+	}
+}
+
+// MarshalJSON renders a UnionKind as its wire string (derived from String, the
+// single source), so the combinator serialises to a stable scalar matching the
+// always-emit convention the other enums follow.
+func (k UnionKind) MarshalJSON() ([]byte, error) {
+	return json.Marshal(k.String())
 }
 
 // Binding is a query variable bound to a graph entity, carrying its labels as
