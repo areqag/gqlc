@@ -36,6 +36,8 @@ var readCoreDirs = []string{
 	"../../../test/data/query/cypher/tck/features/clauses/return",
 	"../../../test/data/query/cypher/tck/features/clauses/match-where",
 	"../../../test/data/query/cypher/tck/features/clauses/return-skip-limit",
+	"../../../test/data/query/cypher/tck/features/clauses/union",
+	"../../../test/data/query/cypher/tck/features/clauses/with",
 }
 
 const goldenDir = "testdata/golden"
@@ -123,6 +125,37 @@ var skiplist = map[string]bool{
 	// check (ColumnNameConflict); Returns is duplicate-preserving (Stage-0 rule),
 	// so two LiteralProjections both named "a" parse-accept.
 	"[10] Fail when returning multiple columns with same name": true,
+
+	// --- WITH/UNION value & result-shape errors below the boundary (Stage 4) ---
+	//
+	// Stage 4 adds WITH chaining (per-part scopes) and UNION (parallel branches),
+	// so these negatives now parse-accept; each error is a value- or result-shape
+	// rule the type-interface model does not carry (B1, ADR 0003), raised by the
+	// re-executed original text (ADR 0005).
+	//
+	// WITH <literal> AS n / MATCH (n): n imports a name into the next part and is
+	// re-bound there as a node; the conflict is that the WITH expression's value is
+	// not a node (VariableTypeConflict). We model n's binding kind, not the type of
+	// the projected expression, so the two reconcile structurally. (Scenario Outline
+	// with 3 examples — true/123/123.4 — each pickle carries the same name.)
+	"[11] Fail when matching a node variable bound to a value": true,
+	// RETURN 1 AS a UNION RETURN 2 AS b: the two branches expose different column
+	// names (DifferentColumnsInUnion). Column compatibility across branches is not
+	// modelled (ADR 0003); we record each branch's Returns verbatim.
+	"[5] Failing when UNION has different columns":     true,
+	"[5] Failing when UNION ALL has different columns": true,
+	// Mixing UNION with UNION ALL in one query (InvalidClauseComposition): we record
+	// the combinator sequence faithfully ([union, unionAll]); the no-mixing rule is a
+	// clause-composition constraint, not a parse-shape one.
+	"[1] Failing when mixing UNION and UNION ALL": true,
+	"[2] Failing when mixing UNION ALL and UNION": true,
+	// WITH 1 AS a, 2 AS a: duplicate forwarded column names (ColumnNameConflict),
+	// the WITH analogue of the RETURN entry above; Returns is duplicate-preserving.
+	"[4] Fail when forwarding multiple aliases with the same name": true,
+	// WITH a, count(*): a non-aliased expression in WITH (NoExpressionAlias). We
+	// synthesise a Name from the item's source text (here "count(*)"), so every WITH
+	// item carries a name and the must-alias rule has nothing to check against.
+	"[5] Fail when not aliasing expressions in WITH": true,
 }
 
 // the six public sentinels — the "valid Cypher we don't support yet" set. A

@@ -351,6 +351,97 @@ var mustParse = map[string]struct {
 			ReturnsAll: true,
 		}),
 	},
+	// Stage 4 — canonical WITH chain carrying a whole entity. Two parts in one
+	// branch: part 1 binds a and its WITH projects the bare variable a (a
+	// whole-entity RefProjection, empty Property — the resolver chases it back to
+	// the binding); part 2 has no bindings of its own and RETURNs a, which
+	// resolves against the name part 1 exported. The bare-variable WITH item's
+	// name is the variable itself ("a").
+	"with chain whole entity": {
+		src: "MATCH (a)\nWITH a\nRETURN a",
+		want: query.Query{
+			Branches: []query.QueryBranch{{Parts: []query.QueryPart{
+				{
+					Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
+					Returns: []query.ReturnItem{
+						{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
+					},
+				},
+				{
+					Returns: []query.ReturnItem{
+						{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
+					},
+				},
+			}}},
+		},
+	},
+	// Stage 4 — canonical value-projecting WITH chain. WITH a.name AS n exports
+	// the scalar name n (a RefProjection with a non-empty Property); part 2 RETURNs
+	// n, resolving against the exported alias. The item's name is the AS alias.
+	"with chain value projection": {
+		src: "MATCH (a)\nWITH a.name AS n\nRETURN n",
+		want: query.Query{
+			Branches: []query.QueryBranch{{Parts: []query.QueryPart{
+				{
+					Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
+					Returns: []query.ReturnItem{
+						{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "a", Property: "name"})},
+					},
+				},
+				{
+					Returns: []query.ReturnItem{
+						{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
+					},
+				},
+			}}},
+		},
+	},
+	// Stage 4 — canonical two-branch UNION (distinct). Each branch is one part
+	// with its own binding; Combinators has one entry, UnionDistinct. The branches
+	// are recorded verbatim in source order — the parser does not pre-pick branch 0
+	// as the result-naming branch (that is the resolver's rule, spec §3).
+	"union two branches": {
+		src: "MATCH (a)\nRETURN a\nUNION\nMATCH (b)\nRETURN b",
+		want: query.Query{
+			Branches: []query.QueryBranch{
+				{Parts: []query.QueryPart{{
+					Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
+					Returns: []query.ReturnItem{
+						{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
+					},
+				}}},
+				{Parts: []query.QueryPart{{
+					Bindings: []query.Binding{must(query.NewNodeBinding("b", nil))},
+					Returns: []query.ReturnItem{
+						{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"})},
+					},
+				}}},
+			},
+			Combinators: []query.UnionKind{query.UnionDistinct},
+		},
+	},
+	// Stage 4 — UNION ALL variant. Same two-branch shape; the combinator is
+	// UnionAll (the ALL token is present), the cardinality-preserving join.
+	"union all two branches": {
+		src: "MATCH (a)\nRETURN a\nUNION ALL\nMATCH (b)\nRETURN b",
+		want: query.Query{
+			Branches: []query.QueryBranch{
+				{Parts: []query.QueryPart{{
+					Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
+					Returns: []query.ReturnItem{
+						{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
+					},
+				}}},
+				{Parts: []query.QueryPart{{
+					Bindings: []query.Binding{must(query.NewNodeBinding("b", nil))},
+					Returns: []query.ReturnItem{
+						{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"})},
+					},
+				}}},
+			},
+			Combinators: []query.UnionKind{query.UnionAll},
+		},
+	},
 }
 
 // must lifts a fallible model constructor into an expression usable in a struct
@@ -379,12 +470,13 @@ var mustReject = map[string]struct {
 	query string
 	want  error
 }{
-	// Match3 [27] "Matching from null nodes" — verbatim TCK query. Stage 2
-	// accepts OPTIONAL MATCH, so the rejection now fires on the WITH clause
-	// (still out of scope; Stage 4). The query still exercises
-	// ErrUnsupportedClause, just via a different fail-site.
-	"with clause": {
-		query: "OPTIONAL MATCH (a)\nWITH a\nMATCH (a)-->(b)\nRETURN b",
+	// AUTHORED: a write clause (CREATE) is out of scope throughout (ADR 0004) and
+	// the fail-site for ErrUnsupportedClause. Stage 4 supports WITH/UNION, so the
+	// prior `with clause` reject (which pinned this sentinel) now parses; this
+	// preserves ErrUnsupportedClause reachability via a surviving rejected clause.
+	// Replace with a verbatim corpus query if a clean one appears at the pinned tag.
+	"write clause": {
+		query: "CREATE (n)\nRETURN n",
 		want:  cypher.ErrUnsupportedClause,
 	},
 	// AUTHORED: arithmetic over a projection (RETURN n.num + 1) is the residual
@@ -411,6 +503,15 @@ var mustReject = map[string]struct {
 	// Return1 [2] returning an undefined variable -> ErrUnboundVariable
 	"unbound variable": {
 		query: "MATCH ()\nRETURN foo",
+		want:  cypher.ErrUnboundVariable,
+	},
+	// AUTHORED: per-part scope (spec §4). WITH a.x AS n exports only the scalar
+	// name "n" into the next part, so the final RETURN a references a name dropped
+	// by the WITH — out of scope downstream -> ErrUnboundVariable. The fail-site is
+	// build()'s per-part scope check (Stage 4). No verbatim corpus query exercises
+	// the dropped-binding case cleanly at the pinned tag.
+	"out of scope after with": {
+		query: "MATCH (a)\nWITH a.x AS n\nRETURN a",
 		want:  cypher.ErrUnboundVariable,
 	},
 	// Match1 [9] same variable as a relationship and a node in one pattern
