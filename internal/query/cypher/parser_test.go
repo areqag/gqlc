@@ -198,6 +198,29 @@ var mustParse = map[string]struct {
 			},
 		}),
 	},
+	// Match3 [3] "Undirected match on simple relationship graph" — verbatim corpus
+	// query (RETURN a, r, b), the undirected twin of "directed edge whole entities"
+	// (Match3 [2]). Stage 5: directed=false (the trailing false), endpoints in
+	// textual order [a, r, b] with no canonical flip (the resolver tries both).
+	"undirected edge whole entities": {
+		src: "MATCH (a)-[r]-(b)\nRETURN a, r, b",
+		want: oneBranch(query.QueryPart{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("a", nil)),
+				must(query.NewEdgeBinding("r", nil,
+					must(query.NewVarEndpoint("a")),
+					must(query.NewVarEndpoint("b")),
+					false,
+				)),
+				must(query.NewNodeBinding("b", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
+				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"})},
+				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"})},
+			},
+		}),
+	},
 	// MatchWhere1 [6] parameter in a property predicate: D1a pairs $param with
 	// b.name → one Parameter with Use PropertyUse{Ref{b, name}}.
 	"where property parameter": {
@@ -500,11 +523,6 @@ var mustReject = map[string]struct {
 	// Match2 [6] multi-type relationship [:A|B] -> ErrUnsupportedPattern
 	"multi-type relationship": {
 		query: "MATCH (n)-[r:KNOWS|HATES]->(x)\nRETURN r",
-		want:  cypher.ErrUnsupportedPattern,
-	},
-	// Match2 [3] undirected relationship -> ErrUnsupportedPattern
-	"undirected relationship": {
-		query: "MATCH ()-[r]-()\nRETURN r",
 		want:  cypher.ErrUnsupportedPattern,
 	},
 	// Return1 [2] returning an undefined variable -> ErrUnboundVariable
