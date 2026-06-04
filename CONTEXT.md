@@ -54,7 +54,9 @@ An endpoint that resolves to a node type that was never declared is an error.
 Edge types are directed. A left-pointing edge `(a) <-[:X]- (b)` is canonicalised
 to its source→target form (`b` → `a`), so an edge type's stored identity is
 independent of the direction it was written in. Undirected edges are not
-supported.
+supported. (The query-side **Direction** differs: a query may write an undirected
+pattern, which the parser lowers as a marker and the resolver tries both ways
+against this directed schema — see the query-language **Direction** entry.)
 
 ## Query language
 
@@ -114,7 +116,12 @@ carried by a `WITH` is out of scope downstream). Re-`MATCH`ing a carried name in
 a later part is a fresh binding in that part, distinct from the original — which
 is the per-part structure the resolver uses to flow-type nullability across a
 `WITH` (ADR 0006). Labels may be empty: an unlabelled binding's type is inferred
-from the edges that touch it.
+from the edges that touch it. An edge binding also carries a **direction** marker:
+a directed edge stores its endpoints canonically (source→target), an undirected
+edge stores them in textual order with the resolver trying both orientations (see
+**Direction**, query side). The marker is the only direction datum — the model
+records neither which arrow spelling produced an undirected edge nor any
+orientation preference.
 _Avoid_: match (reserve for the MATCH clause); node/edge type (reserve for the
 schema's element types).
 
@@ -138,10 +145,34 @@ _Avoid_: optional (reserve for the Cypher keyword `OPTIONAL MATCH`).
 
 **Endpoint**:
 The source or target of an edge binding, written as a reference to a named node
-binding or as inline labels for an anonymous node, and canonicalised to
-source→target order so it forms a `schema.EdgeKey`. An edge is not identified by
-its label alone — the same label may connect different endpoint pairs — which is
-why an edge binding carries its endpoints.
+binding or as inline labels for an anonymous node. For a **directed** edge the
+endpoints are canonicalised to source→target order (a left arrow flips), so the
+pair forms a single `schema.EdgeKey`. For an **undirected** edge there is no
+canonical order to pick: the endpoints are recorded in **textual order** and the
+edge's `directed` marker tells the resolver that order is not authoritative — it
+forms *two* candidate keys (both orientations) and accepts the edge if either
+resolves. An edge is not identified by its label alone — the same label may
+connect different endpoint pairs — which is why an edge binding carries its
+endpoints.
+_Avoid_: the schema-side **endpoint** sense (always resolved to a label set; the
+query side may carry an unresolved inline anonymous endpoint).
+
+**Direction**:
+Whether an edge binding has an authoritative orientation. Carried as a marker
+(`directed`): a one-arrow pattern (`-->` / `<--`) is **directed** — its left/right
+orientation is discharged at lowering into a canonical source→target endpoint
+pair; a no-arrow (`--`) **or** both-arrow (`<-->`) pattern is **undirected** —
+openCypher treats both spellings as undirected, so they collapse to one marker
+state, and the endpoints stay in textual order for the resolver to try both ways.
+Distinct from the schema-side **Direction**: the schema is directed-only (left
+arrows canonicalise, undirected is unsupported, every edge type is one
+`schema.EdgeKey`), whereas the query side *admits* undirected patterns and lowers
+them as a deferred-orientation marker — orientation against the directed schema is
+a resolver concern, not the parser's. The marker is binary; the model carries no
+left-vs-right distinction (the canonical flip erases it) and no `--`-vs-`<-->`
+distinction (no read-surface semantics depend on the spelling).
+_Avoid_: orientation (use for the resolver's per-match source→target choice, which
+the model does not carry); the schema-side directed-only **Direction** sense.
 
 **Use**:
 One position where a parameter appears in a query. A closed sum of
