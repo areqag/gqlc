@@ -705,6 +705,236 @@ func TestMarshalJSONDeterministicOverRandomQueries(t *testing.T) {
 	})
 }
 
+// --- Stage 8: BindingKind, PathBinding, EdgeHops, EdgeBinding.Hops ---
+
+// TestBindingKindString pins the wire tags the JSON "kind" discriminator
+// derives from — "node", "edge", "path". Two of the three tags overlap with
+// graph.EntityKind (wire-compat); "path" is new at Stage 8.
+func TestBindingKindString(t *testing.T) {
+	require.Equal(t, "node", query.BindingNode.String())
+	require.Equal(t, "edge", query.BindingEdge.String())
+	require.Equal(t, "path", query.BindingPath.String())
+}
+
+// TestNodeBindingKindReturnsBindingNode pins the Stage-8 interface widening:
+// Binding.Kind() returns a BindingKind, not graph.EntityKind. Existing entity
+// bindings project onto their matching BindingKind value; a node projects
+// onto BindingNode.
+func TestNodeBindingKindReturnsBindingNode(t *testing.T) {
+	b, err := query.NewNodeBinding("n", nil)
+	require.NoError(t, err)
+	require.Equal(t, query.BindingNode, b.Kind())
+	require.Equal(t, graph.Node, b.EntityKind())
+}
+
+// TestEdgeBindingKindReturnsBindingEdge pins the edge side: an edge binding's
+// Kind() is BindingEdge; its EntityKind() (only on entity bindings, not on
+// PathBinding) is graph.Edge for schema-key formation post-freeze.
+func TestEdgeBindingKindReturnsBindingEdge(t *testing.T) {
+	src := must(query.NewVarEndpoint("a"))
+	tgt := must(query.NewVarEndpoint("b"))
+	b, err := query.NewEdgeBinding("r", nil, src, tgt, true)
+	require.NoError(t, err)
+	require.Equal(t, query.BindingEdge, b.Kind())
+	require.Equal(t, graph.Edge, b.EntityKind())
+}
+
+// TestNewPathBinding pins the Stage-8 PathBinding variant: a path variable
+// name plus the ordered list of member binding names. A single-node path
+// (MATCH p = (a)) is legal — one member.
+func TestNewPathBinding(t *testing.T) {
+	b, err := query.NewPathBinding("p", []string{"a", "r", "b"})
+	require.NoError(t, err)
+	require.Equal(t, "p", b.Variable())
+	require.Equal(t, []string{"a", "r", "b"}, b.Members())
+	require.Equal(t, query.BindingPath, b.Kind())
+	require.False(t, b.Nullable())
+	var _ query.Binding = b
+}
+
+// TestNewPathBindingRejectsEmptyVariable pins the invariant: a path with no
+// name is not a binding — the parser emits no PathBinding for an unnamed
+// pattern. Empty variable is unrepresentable.
+func TestNewPathBindingRejectsEmptyVariable(t *testing.T) {
+	_, err := query.NewPathBinding("", []string{"a"})
+	require.Error(t, err)
+}
+
+// TestNewPathBindingRejectsEmptyMembers pins the "at least one member"
+// invariant: a pattern element grammatically has at least one node, so
+// a path binding always references at least one member.
+func TestNewPathBindingRejectsEmptyMembers(t *testing.T) {
+	_, err := query.NewPathBinding("p", nil)
+	require.Error(t, err)
+	_, err = query.NewPathBinding("p", []string{})
+	require.Error(t, err)
+}
+
+// TestNewPathBindingRejectsEmptyMemberName pins the "every member has a name"
+// invariant: an anonymous edge inside a named path gets a synthetic name
+// at collection time, so no member is empty at construction time.
+func TestNewPathBindingRejectsEmptyMemberName(t *testing.T) {
+	_, err := query.NewPathBinding("p", []string{"a", ""})
+	require.Error(t, err)
+}
+
+// TestPathBindingMarshalJSON pins the wire shape: kind="path", the variable,
+// the members array, and the always-emitted nullable flag (false at Stage 8).
+func TestPathBindingMarshalJSON(t *testing.T) {
+	b := must(query.NewPathBinding("p", []string{"a", "r", "b"}))
+	out, err := json.Marshal(b)
+	require.NoError(t, err)
+	require.JSONEq(t,
+		`{"kind":"path","variable":"p","members":["a","r","b"],"nullable":false}`,
+		string(out))
+}
+
+// TestNewEdgeHopsUnbounded pins the [*] case: both bounds nil.
+func TestNewEdgeHopsUnbounded(t *testing.T) {
+	h, err := query.NewEdgeHops(nil, nil)
+	require.NoError(t, err)
+	require.Nil(t, h.Min())
+	require.Nil(t, h.Max())
+}
+
+// TestNewEdgeHopsBounded pins the [*1..3] case: min and max both set.
+func TestNewEdgeHopsBounded(t *testing.T) {
+	one, three := 1, 3
+	h, err := query.NewEdgeHops(&one, &three)
+	require.NoError(t, err)
+	require.Equal(t, 1, *h.Min())
+	require.Equal(t, 3, *h.Max())
+}
+
+// TestNewEdgeHopsLowerOnly pins the [*3..] case: only min set (max unbounded).
+func TestNewEdgeHopsLowerOnly(t *testing.T) {
+	three := 3
+	h, err := query.NewEdgeHops(&three, nil)
+	require.NoError(t, err)
+	require.Equal(t, 3, *h.Min())
+	require.Nil(t, h.Max())
+}
+
+// TestNewEdgeHopsUpperOnly pins the [*..5] case: only max set (min unbounded).
+func TestNewEdgeHopsUpperOnly(t *testing.T) {
+	five := 5
+	h, err := query.NewEdgeHops(nil, &five)
+	require.NoError(t, err)
+	require.Nil(t, h.Min())
+	require.Equal(t, 5, *h.Max())
+}
+
+// TestNewEdgeHopsRejectsNegative pins the constructor invariant: a negative
+// bound is grammatically impossible (openCypher integer literals are
+// non-negative), and would misrepresent the "empty range" case.
+func TestNewEdgeHopsRejectsNegative(t *testing.T) {
+	minusOne := -1
+	one := 1
+	_, err := query.NewEdgeHops(&minusOne, &one)
+	require.Error(t, err)
+	_, err = query.NewEdgeHops(&one, &minusOne)
+	require.Error(t, err)
+}
+
+// TestNewEdgeHopsRejectsMaxLessThanMin pins the invariant: a bounded range
+// whose upper bound is below its lower bound is empty (no valid hop count
+// satisfies it); the constructor is the only writer and rejects it.
+func TestNewEdgeHopsRejectsMaxLessThanMin(t *testing.T) {
+	three, one := 3, 1
+	_, err := query.NewEdgeHops(&three, &one)
+	require.Error(t, err)
+}
+
+// TestNewEdgeHopsAllowsEqualBounds pins the [*3] case (which grammatically
+// parses as [*3..3]): min == max is a fixed hop count.
+func TestNewEdgeHopsAllowsEqualBounds(t *testing.T) {
+	three := 3
+	h, err := query.NewEdgeHops(&three, &three)
+	require.NoError(t, err)
+	require.Equal(t, 3, *h.Min())
+	require.Equal(t, 3, *h.Max())
+}
+
+// TestNewVarLengthEdgeBinding pins the Stage-8 var-length constructor: an
+// edge binding carrying a non-nil Hops. Hops() reads back the range.
+func TestNewVarLengthEdgeBinding(t *testing.T) {
+	src := must(query.NewVarEndpoint("a"))
+	tgt := must(query.NewVarEndpoint("b"))
+	hops := must(query.NewEdgeHops(nil, nil))
+	b, err := query.NewVarLengthEdgeBinding("r", nil, src, tgt, true, hops)
+	require.NoError(t, err)
+	require.Equal(t, "r", b.Variable())
+	require.NotNil(t, b.Hops())
+	require.Nil(t, b.Hops().Min())
+	require.Nil(t, b.Hops().Max())
+}
+
+// TestEdgeBindingHopsNilForSingleHop pins the Stages 0..7 case: a
+// single-hop edge binding has Hops() == nil. The wire encoding "hops":null
+// preserves wire compatibility for the pre-Stage-8 shape.
+func TestEdgeBindingHopsNilForSingleHop(t *testing.T) {
+	src := must(query.NewVarEndpoint("a"))
+	tgt := must(query.NewVarEndpoint("b"))
+	b, err := query.NewEdgeBinding("r", nil, src, tgt, true)
+	require.NoError(t, err)
+	require.Nil(t, b.Hops())
+}
+
+// TestNewNullableVarLengthEdgeBinding pins the OPTIONAL-introduced variant:
+// same var-length invariants as NewVarLengthEdgeBinding, with Nullable set.
+func TestNewNullableVarLengthEdgeBinding(t *testing.T) {
+	src := must(query.NewVarEndpoint("a"))
+	tgt := must(query.NewVarEndpoint("b"))
+	one, three := 1, 3
+	hops := must(query.NewEdgeHops(&one, &three))
+	b, err := query.NewNullableVarLengthEdgeBinding("r", nil, src, tgt, true, hops)
+	require.NoError(t, err)
+	require.True(t, b.Nullable())
+	require.NotNil(t, b.Hops())
+	require.Equal(t, 1, *b.Hops().Min())
+	require.Equal(t, 3, *b.Hops().Max())
+}
+
+// TestVarLengthEdgeBindingMarshalJSON pins the wire shape: the same fields
+// as a single-hop edge plus a "hops" object carrying "min"/"max" (null for
+// unbounded).
+func TestVarLengthEdgeBindingMarshalJSON(t *testing.T) {
+	src := must(query.NewVarEndpoint("a"))
+	tgt := must(query.NewVarEndpoint("b"))
+	one, three := 1, 3
+	hops := must(query.NewEdgeHops(&one, &three))
+	b := must(query.NewVarLengthEdgeBinding("r", nil, src, tgt, true, hops))
+	out, err := json.Marshal(b)
+	require.NoError(t, err)
+	// The hops field is a nested object with min/max.
+	require.Contains(t, string(out), `"hops":{"min":1,"max":3}`)
+	require.Contains(t, string(out), `"kind":"edge"`)
+}
+
+// TestVarLengthEdgeBindingMarshalJSONUnbounded pins the [*] case wire shape:
+// hops object with both members explicit null.
+func TestVarLengthEdgeBindingMarshalJSONUnbounded(t *testing.T) {
+	src := must(query.NewVarEndpoint("a"))
+	tgt := must(query.NewVarEndpoint("b"))
+	hops := must(query.NewEdgeHops(nil, nil))
+	b := must(query.NewVarLengthEdgeBinding("r", nil, src, tgt, true, hops))
+	out, err := json.Marshal(b)
+	require.NoError(t, err)
+	require.Contains(t, string(out), `"hops":{"min":null,"max":null}`)
+}
+
+// TestEdgeBindingMarshalJSONHopsNullForSingleHop pins the wire back-compat
+// for single-hop edges: "hops":null, so pre-Stage-8 goldens still match
+// under the always-emit convention (nullable/directed/returnsAll).
+func TestEdgeBindingMarshalJSONHopsNullForSingleHop(t *testing.T) {
+	src := must(query.NewVarEndpoint("a"))
+	tgt := must(query.NewVarEndpoint("b"))
+	b := must(query.NewEdgeBinding("r", nil, src, tgt, true))
+	out, err := json.Marshal(b)
+	require.NoError(t, err)
+	require.Contains(t, string(out), `"hops":null`)
+}
+
 // TestConstructorsRejectEmptyVariable is the property-based guard for the
 // type-alone-can't-express invariant: NodeBinding and VarEndpoint always reject
 // the empty variable and always accept a non-empty one.
