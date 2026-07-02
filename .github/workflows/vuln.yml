@@ -1,27 +1,45 @@
-# Vulnerabilities arrive with dependency changes, not parser code, so this
-# runs only when go.mod/go.sum change plus a weekly sweep on master for newly
-# published advisories. Deliberately NOT a required check: a path-filtered
-# workflow that does not run would hang a required-status merge forever.
+# Vulnerabilities arrive with dependency changes, not parser code, so the real
+# scan runs only when go.mod/go.sum change, plus a weekly sweep on master for
+# newly published advisories. govulncheck is a required check, and required
+# checks are matched by name with no conditional primitive — so the job runs on
+# every PR and decides in-job: no dependency changes means instant success
+# without scanning.
 name: vuln
 
 on:
   pull_request:
-    paths:
-      - go.mod
-      - go.sum
   schedule:
     - cron: "23 6 * * 1"
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
 jobs:
   govulncheck:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: detect dependency changes
+        id: deps
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          if git diff --name-only "$BASE_SHA" HEAD -- go.mod go.sum | grep -q .; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-go@v5
+        if: github.event_name == 'schedule' || steps.deps.outputs.changed == 'true'
         with:
           go-version-file: go.mod
       - uses: ./.github/actions/setup-just
+        if: github.event_name == 'schedule' || steps.deps.outputs.changed == 'true'
       - run: just vuln
+        if: github.event_name == 'schedule' || steps.deps.outputs.changed == 'true'
