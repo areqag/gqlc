@@ -12,8 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/antranig-yeretzian/gqlc/internal/graph"
-	"github.com/antranig-yeretzian/gqlc/internal/schema"
+	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/schema"
 )
 
 var update = flag.Bool("update", false, "regenerate .golden.json files from parser output")

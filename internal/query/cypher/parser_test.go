@@ -7,9 +7,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
 
-	"github.com/antranig-yeretzian/gqlc/internal/graph"
-	"github.com/antranig-yeretzian/gqlc/internal/query"
-	"github.com/antranig-yeretzian/gqlc/internal/query/cypher"
+	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/query"
+	"github.com/areqag/gqlc/internal/query/cypher"
 )
 
 // --- Layer 2: targeted sentinel checks (the TCK doesn't encode our taxonomy) ---

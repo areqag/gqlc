@@ -1,4 +1,4 @@
-module github.com/antranig-yeretzian/gqlc
+module github.com/areqag/gqlc
 
 go 1.26.2
 

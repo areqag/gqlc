@@ -5,9 +5,9 @@ import (
 
 	"github.com/antlr4-go/antlr/v4"
 
-	"github.com/antranig-yeretzian/gqlc/internal/grammar/cypher/gen"
-	"github.com/antranig-yeretzian/gqlc/internal/graph"
-	"github.com/antranig-yeretzian/gqlc/internal/query"
+	"github.com/areqag/gqlc/internal/grammar/cypher/gen"
+	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/query"
 )
 
 // listener is the single error sink and collector for a parse: it captures the
