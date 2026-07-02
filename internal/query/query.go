@@ -128,18 +128,27 @@ const (
 	// graph.EntityKind counterpart (a path is not a graph entity, it is a
 	// query-level composition of them).
 	BindingPath
+	// BindingUnwind is an UNWIND-introduced binding — a Stage-9 construct
+	// with no graph.EntityKind counterpart (a scalar drawn from a list is
+	// not a graph entity). The binding carries the source expression's
+	// element type as recorded by the Stage-6 typer.
+	BindingUnwind
 )
 
-// String is the canonical lowercase name of the kind ("node" / "edge" / "path").
-// It is the single source the JSON discriminator derives from; two of the three
-// tags match graph.EntityKind.String() by construction, so pre-Stage-8 wire
-// shapes for node/edge bindings are preserved verbatim.
+// String is the canonical lowercase name of the kind ("node" / "edge" /
+// "path" / "unwind"). It is the single source the JSON discriminator
+// derives from; two of the four tags match graph.EntityKind.String() by
+// construction, so pre-Stage-8 wire shapes for node/edge bindings are
+// preserved verbatim. "path" (Stage 8) and "unwind" (Stage 9) are
+// query-side only.
 func (k BindingKind) String() string {
 	switch k {
 	case BindingEdge:
 		return "edge"
 	case BindingPath:
 		return "path"
+	case BindingUnwind:
+		return "unwind"
 	default:
 		return "node"
 	}
@@ -616,6 +625,68 @@ func (b PathBinding) MarshalJSON() ([]byte, error) {
 		Members  []PathMember `json:"members"`
 		Nullable bool         `json:"nullable"`
 	}{Kind: b.Kind().String(), Variable: b.variable, Members: b.members, Nullable: b.Nullable()})
+}
+
+// UnwindBinding is a query variable bound to the current value drawn from an
+// UNWIND clause's source list (Stage 9 spec §1.1): the x in
+// `UNWIND [1,2,3] AS x`. It carries the AS variable name and the Stage-6
+// element type of the source expression (TypeInt for `[1,2,3]`, TypeUnknown
+// for `range(1,3)` or `null` or a bare `$param` — the parser records the
+// honest "cannot tell" instead of guessing, and the resolver upgrades from
+// the schema post-freeze). UNWIND is a reading clause distinct from MATCH,
+// so an UnwindBinding is not a graph entity — it has no labels, no
+// endpoints, no EntityKind(). Never nullable at Stage 9: an empty or null
+// source list yields zero rows at runtime, a row-cardinality fact below
+// the type-interface boundary (ADR 0005).
+type UnwindBinding struct {
+	variable string // the AS name; always non-empty
+	elemType Type   // the source list's Stage-6 element type; TypeUnknown when the parser cannot commit
+}
+
+// NewUnwindBinding builds an UnwindBinding, rejecting the empty variable
+// (an UNWIND without `AS name` is a grammatical error, so the parser
+// never emits an anonymous UnwindBinding). A nil elemType is normalised
+// to TypeUnknown — the "cannot tell" case is never a nil Type on the
+// wire, mirroring NewTypeList's convention.
+func NewUnwindBinding(variable string, elemType Type) (UnwindBinding, error) {
+	if variable == "" {
+		return UnwindBinding{}, errors.New("query: unwind binding requires a non-empty variable")
+	}
+	if elemType == nil {
+		elemType = TypeUnknown{}
+	}
+	return UnwindBinding{variable: variable, elemType: elemType}, nil
+}
+
+// Variable is the AS name; always non-empty.
+func (b UnwindBinding) Variable() string { return b.variable }
+
+// ElementType is the source list's Stage-6 element type; a bare-ref
+// projection on the binding types as this value.
+func (b UnwindBinding) ElementType() Type { return b.elemType }
+
+// Kind reports that an UnwindBinding is an unwind binding.
+func (UnwindBinding) Kind() BindingKind { return BindingUnwind }
+
+// Nullable is always false at Stage 9: an empty or null source list is a
+// row-cardinality fact below the type-interface boundary (ADR 0005),
+// not a per-binding static nullability.
+func (UnwindBinding) Nullable() bool { return false }
+
+func (UnwindBinding) isBinding() {}
+
+// MarshalJSON renders an UnwindBinding as a tagged union member
+// discriminated by "kind" (derived from BindingKind, the single source),
+// carrying its variable and its always-emitted element type. The always-
+// emit nullable field (false, per Stage 9 spec §1.4) matches the entity
+// and path bindings' shape.
+func (b UnwindBinding) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind     string `json:"kind"`
+		Variable string `json:"variable"`
+		ElemType Type   `json:"elemType"`
+		Nullable bool   `json:"nullable"`
+	}{Kind: b.Kind().String(), Variable: b.variable, ElemType: b.elemType, Nullable: b.Nullable()})
 }
 
 // Endpoint is one end of an edge. It is a closed sum of VarEndpoint and
