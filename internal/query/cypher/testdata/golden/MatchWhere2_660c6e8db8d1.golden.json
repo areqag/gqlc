@@ -3,7 +3,8 @@
     {
       "kind": "node",
       "variable": "advertiser",
-      "labels": null
+      "labels": null,
+      "nullable": false
     },
     {
       "kind": "edge",
@@ -18,12 +19,14 @@
       "target": {
         "kind": "var",
         "variable": "out"
-      }
+      },
+      "nullable": false
     },
     {
       "kind": "node",
       "variable": "out",
-      "labels": null
+      "labels": null,
+      "nullable": false
     },
     {
       "kind": "edge",
@@ -38,12 +41,14 @@
       "target": {
         "kind": "var",
         "variable": "red"
-      }
+      },
+      "nullable": false
     },
     {
       "kind": "node",
       "variable": "red",
-      "labels": null
+      "labels": null,
+      "nullable": false
     },
     {
       "kind": "edge",
@@ -58,12 +63,14 @@
       "target": {
         "kind": "var",
         "variable": "red"
-      }
+      },
+      "nullable": false
     },
     {
       "kind": "node",
       "variable": "a",
-      "labels": null
+      "labels": null,
+      "nullable": false
     }
   ],
   "Parameters": [

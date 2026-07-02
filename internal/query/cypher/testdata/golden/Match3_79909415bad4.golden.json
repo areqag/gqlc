@@ -13,12 +13,14 @@
       "target": {
         "kind": "var",
         "variable": "x"
-      }
+      },
+      "nullable": false
     },
     {
       "kind": "node",
       "variable": "x",
-      "labels": null
+      "labels": null,
+      "nullable": false
     }
   ],
   "Parameters": null,

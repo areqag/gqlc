@@ -5,7 +5,8 @@
       "variable": "n",
       "labels": [
         "Person"
-      ]
+      ],
+      "nullable": false
     },
     {
       "kind": "edge",
@@ -18,7 +19,8 @@
       "target": {
         "kind": "inline",
         "labels": null
-      }
+      },
+      "nullable": false
     }
   ],
   "Parameters": null,

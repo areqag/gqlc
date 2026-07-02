@@ -5,14 +5,16 @@
       "variable": "a",
       "labels": [
         "A"
-      ]
+      ],
+      "nullable": false
     },
     {
       "kind": "node",
       "variable": "b",
       "labels": [
         "B"
-      ]
+      ],
+      "nullable": false
     }
   ],
   "Parameters": null,

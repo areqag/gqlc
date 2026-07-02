@@ -15,7 +15,8 @@
         "labels": [
           "B"
         ]
-      }
+      },
+      "nullable": false
     }
   ],
   "Parameters": null,
