@@ -18,7 +18,8 @@ func TestNewNodeBinding(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "p", b.Variable())
 	require.Equal(t, graph.LabelSet{"Person"}, b.Labels())
-	require.Equal(t, graph.Node, b.Kind())
+	require.Equal(t, query.BindingNode, b.Kind())
+	require.Equal(t, graph.Node, b.EntityKind())
 }
 
 func TestNewNodeBindingAllowsEmptyLabels(t *testing.T) {
@@ -50,7 +51,7 @@ func TestNewNullableNodeBinding(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "p", b.Variable())
 	require.Equal(t, graph.LabelSet{"Person"}, b.Labels())
-	require.Equal(t, graph.Node, b.Kind())
+	require.Equal(t, query.BindingNode, b.Kind())
 	require.True(t, b.Nullable())
 }
 
@@ -73,7 +74,8 @@ func TestNewEdgeBinding(t *testing.T) {
 	require.Equal(t, graph.LabelSet{"KNOWS"}, b.Labels())
 	require.Equal(t, src, b.Source())
 	require.Equal(t, tgt, b.Target())
-	require.Equal(t, graph.Edge, b.Kind())
+	require.Equal(t, query.BindingEdge, b.Kind())
+	require.Equal(t, graph.Edge, b.EntityKind())
 }
 
 func TestNewEdgeBindingAllowsAnonymousVariableAndUntyped(t *testing.T) {
