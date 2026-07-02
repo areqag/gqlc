@@ -50,6 +50,67 @@ func TestRefProjectionType(t *testing.T) {
 	require.Equal(t, query.TypeNode{}, p.Type())
 }
 
+// --- ExprUse (Stage 6 spec §4) ---
+
+// TestNewExprUse pins the new Use variant: a $param inside a rich expression
+// records its enclosing projection's result type and the expression position
+// (a projection column vs a predicate). Its own type is inferred by the
+// resolver from the enclosing expression, post-freeze.
+func TestNewExprUse(t *testing.T) {
+	u := query.NewExprUse(query.TypeInt{}, query.ExprInProjection)
+	require.Equal(t, query.TypeInt{}, u.EnclosingType())
+	require.Equal(t, query.ExprInProjection, u.Position())
+	var _ query.Use = u
+}
+
+// TestExprPositionString pins the wire tags for ExprPosition.
+func TestExprPositionString(t *testing.T) {
+	require.Equal(t, "projection", query.ExprInProjection.String())
+	require.Equal(t, "predicate", query.ExprInPredicate.String())
+}
+
+// TestExprUseMarshalJSON pins the wire encoding: kind=expr with the enclosing
+// type and position emitted alongside.
+func TestExprUseMarshalJSON(t *testing.T) {
+	out, err := json.Marshal(query.NewExprUse(query.TypeInt{}, query.ExprInProjection))
+	require.NoError(t, err)
+	require.JSONEq(t,
+		`{"kind":"expr","enclosingType":"int","position":"projection"}`,
+		string(out))
+}
+
+// TestNewExprProjection pins the new Stage-6 variant: ExprProjection is a rich
+// scalar-expression projection carrying its result type and the []Ref every
+// binding the expression touches. It joins the Projection sum through the
+// same sealed interface.
+func TestNewExprProjection(t *testing.T) {
+	refs := []query.Ref{{Variable: "n", Property: "num"}}
+	p := query.NewExprProjection(refs, query.TypeInt{})
+	require.Equal(t, refs, p.Refs())
+	require.Equal(t, query.TypeInt{}, p.Type())
+	var _ query.Projection = p
+}
+
+// TestNewExprProjectionAllowsNoRefs pins the degenerate case: a rich literal
+// expression like RETURN 1 + 2 references no bindings but is still an
+// ExprProjection carrying its computed type (here, TypeInt).
+func TestNewExprProjectionAllowsNoRefs(t *testing.T) {
+	p := query.NewExprProjection(nil, query.TypeInt{})
+	require.Empty(t, p.Refs())
+	require.Equal(t, query.TypeInt{}, p.Type())
+}
+
+// TestExprProjectionMarshalJSON pins the wire encoding: kind=expr, refs array,
+// always-emitted type — same posture as FuncProjection with an extra type key.
+func TestExprProjectionMarshalJSON(t *testing.T) {
+	out, err := json.Marshal(query.NewExprProjection(
+		[]query.Ref{{Variable: "a", Property: "n"}}, query.TypeInt{}))
+	require.NoError(t, err)
+	require.JSONEq(t,
+		`{"kind":"expr","refs":[{"variable":"a","property":"n"}],"type":"int"}`,
+		string(out))
+}
+
 // TestFuncProjectionType pins the Stage-6 accessor: FuncProjection carries its
 // result type. Function identity is below the boundary (ADR 0005), so the
 // listener passes TypeUnknown for any function whose return type it cannot

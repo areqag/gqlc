@@ -455,6 +455,79 @@ var mustParse = map[string]struct {
 			Combinators: []query.UnionKind{query.UnionDistinct},
 		},
 	},
+	// Stage 6 — canonical arithmetic-in-RETURN. "Arithmetic precedence test"
+	// (Mathematical8 [1] verbatim). All operands are integer literals, so the
+	// parser types the result as TypeInt. The projection is an ExprProjection
+	// (no bindings touched, so refs are nil). The item's name is the verbatim
+	// expression text.
+	"arithmetic in return": {
+		src: "RETURN 12 / 4 * 3 - 2 * 4",
+		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+			Returns: []query.ReturnItem{
+				{Name: "12 / 4 * 3 - 2 * 4", Value: query.NewExprProjection(nil, query.TypeInt{})},
+			},
+		}}}}},
+	},
+	// Stage 6 — canonical IS NULL predicate. "Property null check on non-null
+	// node" (Null1 [1] verbatim). n.missing IS NULL is a predicate: result type
+	// TypeBool; the sub-expression touches n via the property lookup, so the
+	// ExprProjection carries one Ref. The literal-null lookup and property lookup
+	// on the same expression yields a single Ref to n.
+	"is null in return": {
+		src: "MATCH (n)\nRETURN n.missing IS NULL",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n.missing IS NULL", Value: query.NewExprProjection(
+					[]query.Ref{{Variable: "n", Property: "missing"}},
+					query.TypeBool{},
+				)},
+			},
+		}),
+	},
+	// Stage 6 — arithmetic over a projection: RETURN n.num + 1. Reclassified
+	// from a mustReject (former ErrUnsupportedProjection fail-site pre-Stage-6).
+	// The addition of an unknown-typed property lookup and an int literal
+	// collapses to TypeUnknown under promoteArith (unknown propagates), and
+	// the ref to n.num is mined for referential integrity.
+	"arithmetic over projection": {
+		src: "MATCH (n)\nRETURN n.num + 1",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n.num + 1", Value: query.NewExprProjection(
+					[]query.Ref{{Variable: "n", Property: "num"}},
+					query.TypeUnknown{},
+				)},
+			},
+		}),
+	},
+	// Stage 6 — unary-signed projection: RETURN -n.num. Reclassified from a
+	// mustReject. A leading sign does not change the operand's arithmetic type;
+	// but n.num types as TypeUnknown (property lookup), so the result is
+	// TypeUnknown. The ref carries the property.
+	"unary-signed projection": {
+		src: "MATCH (n)\nRETURN -n.num",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "-n.num", Value: query.NewExprProjection(
+					[]query.Ref{{Variable: "n", Property: "num"}},
+					query.TypeUnknown{},
+				)},
+			},
+		}),
+	},
+	// Stage 6 — canonical list literal. A list of integer literals types as
+	// TypeList(TypeInt); no bindings are touched.
+	"list literal in return": {
+		src: "RETURN [1, 2, 3]",
+		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+			Returns: []query.ReturnItem{
+				{Name: "[1, 2, 3]", Value: query.NewExprProjection(nil, query.NewTypeList(query.TypeInt{}))},
+			},
+		}}}}},
+	},
 	// Stage 4 — UNION ALL variant. Same two-branch shape; the combinator is
 	// UnionAll (the ALL token is present), the cardinality-preserving join.
 	"union all two branches": {
@@ -514,26 +587,11 @@ var mustReject = map[string]struct {
 		query: "CREATE (n)\nRETURN n",
 		want:  cypher.ErrUnsupportedClause,
 	},
-	// AUTHORED: arithmetic over a projection (RETURN n.num + 1) is the residual
-	// fail-site for ErrUnsupportedProjection after Stage 3 widens RETURN to
-	// var/var.prop/literal/func/aggregate/RETURN *. No clean verbatim corpus query
-	// exercises the residual without a disqualifying clause (the TCK's
-	// arithmetic-in-RETURN scenarios all also carry WITH or a literal-only RETURN),
-	// so an authored case preserves sentinel reachability. Replace with a corpus
-	// entry if a TCK bump adds a bare one.
-	"arithmetic over projection": {
-		query: "MATCH (n)\nRETURN n.num + 1",
-		want:  cypher.ErrUnsupportedProjection,
-	},
-	// AUTHORED: a unary sign is arithmetic (ADR 0003/0005: no expression trees), so
-	// a signed operand (RETURN -n.num) is residual — fail-site is
-	// nonArithmeticFromAddSub's unary level. No verbatim corpus query exercises a
-	// unary-signed operand at the pinned tag. Replace with a corpus entry if a TCK
-	// bump adds one.
-	"unary-signed projection": {
-		query: "MATCH (n)\nRETURN -n.num",
-		want:  cypher.ErrUnsupportedProjection,
-	},
+	// (Stage 6: the two ErrUnsupportedProjection pins from Stages 3-5 —
+	// "arithmetic over projection" and "unary-signed projection" — are RETIRED.
+	// Their queries now parse as ExprProjection, and the sentinel is deleted;
+	// see the mustParse cases "arithmetic over projection" and "unary-signed
+	// projection" for the accept-path.)
 	// Match2 [6] multi-type relationship [:A|B] -> ErrUnsupportedPattern
 	"multi-type relationship": {
 		query: "MATCH (n)-[r:KNOWS|HATES]->(x)\nRETURN r",
@@ -589,14 +647,15 @@ func TestMustReject(t *testing.T) {
 	}
 }
 
-// allSentinels is the canonical list of the six Parse sentinels — the single
+// allSentinels is the canonical list of the five Parse sentinels — the single
 // source of truth TestSentinelReachability checks against. A new sentinel must be
 // added here (and exercised by a mustReject case); a removed one must be dropped.
 // errNotImplemented is deliberately absent: it is the run-A stub, not a contract
-// sentinel.
+// sentinel. Stage 6 retired ErrUnsupportedProjection: the projection classifier
+// now accepts every scalar expression at RETURN / WITH position, so the sentinel
+// has no fail-site left to guard.
 var allSentinels = []error{
 	cypher.ErrUnsupportedClause,
-	cypher.ErrUnsupportedProjection,
 	cypher.ErrUnsupportedPattern,
 	cypher.ErrUnsupportedParameter,
 	cypher.ErrUnboundVariable,
@@ -744,6 +803,16 @@ func assertReferentialIntegrity(rt *rapid.T, q query.Query, src string) {
 					for _, ref := range v.Refs() {
 						if !resolves(ref.Variable) {
 							rt.Fatalf("aggregate projection ref %q has no binding in %q", ref.Variable, src)
+						}
+					}
+				case query.ExprProjection:
+					// Stage 6: a rich scalar expression's refs are the union of
+					// every var/var.prop atom the typer walked into. Every one
+					// must resolve — the referential-integrity invariant is
+					// unchanged; the variant is new.
+					for _, ref := range v.Refs() {
+						if !resolves(ref.Variable) {
+							rt.Fatalf("expr projection ref %q has no binding in %q", ref.Variable, src)
 						}
 					}
 				default:

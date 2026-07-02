@@ -61,15 +61,17 @@ func (l *listener) collectProjection(body gen.IOC_ProjectionBodyContext) {
 }
 
 // collectReturnItem lowers one projection item by classifying its expression
-// into a Projection variant (var/var.prop, scalar literal, function call or
-// aggregate); residual rich shapes are rejected (ErrUnsupportedProjection). The
-// column name is the explicit AS alias if present, else the verbatim source text
-// of the expression (E1).
+// into a Projection variant: the bare-atom classifier handles var/var.prop,
+// scalar literal, function call, aggregate, and count(*); anything else
+// (arithmetic, comparisons, string predicates, IS NULL, list/map literals,
+// CASE, list indexing/slicing, chained comparisons, parenthesised composites)
+// falls through to the Stage-6 rich-expression classifier, which types the
+// sub-tree and mines its refs. The column name is the explicit AS alias if
+// present, else the verbatim source text of the expression (E1).
 func (l *listener) collectReturnItem(item gen.IOC_ProjectionItemContext) {
 	value, ok := l.classifyProjection(item.OC_Expression())
 	if !ok {
-		l.fail(fmt.Errorf("%w: %s", ErrUnsupportedProjection, originalText(l.ts, item.OC_Expression())))
-		return
+		value = l.classifyRichExpression(item.OC_Expression())
 	}
 
 	name := originalText(l.ts, item.OC_Expression())

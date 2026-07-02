@@ -316,12 +316,19 @@ func TestProjectionZeroValuesCarryNoData(t *testing.T) {
 	require.Equal(t, query.AggCount, agg.Func()) // the iota-zero aggregate
 	require.Empty(t, agg.Refs())
 
-	// The sealed interface closes the sum: only the four package-defined variants
+	// Stage 6: ExprProjection joins the sum with the same inert-zero-value
+	// discipline — Refs is nil, Type() returns nil interface (marshal falls
+	// back to TypeUnknown via projectionType).
+	var expr query.ExprProjection
+	require.Empty(t, expr.Refs())
+
+	// The sealed interface closes the sum: only the five package-defined variants
 	// satisfy it, so a projection is always exactly one known shape.
 	var _ query.Projection = query.RefProjection{}
 	var _ query.Projection = query.LiteralProjection{}
 	var _ query.Projection = query.FuncProjection{}
 	var _ query.Projection = query.AggregateProjection{}
+	var _ query.Projection = query.ExprProjection{}
 }
 
 // TestAggregateFuncString pins the lowercase names the JSON "func" discriminator

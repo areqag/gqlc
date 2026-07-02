@@ -1,0 +1,74 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "me",
+              "labels": [
+                "Person"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": null,
+              "source": {
+                "kind": "var",
+                "variable": "me"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "you"
+              },
+              "nullable": false,
+              "directed": false
+            },
+            {
+              "kind": "node",
+              "variable": "you",
+              "labels": [
+                "Person"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "me.age",
+              "value": {
+                "kind": "ref",
+                "variable": "me",
+                "property": "age",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "me.age + count(you.age)",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "me",
+                    "property": "age"
+                  },
+                  {
+                    "variable": "you",
+                    "property": "age"
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

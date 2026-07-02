@@ -1,0 +1,221 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "me",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "r1",
+              "labels": [
+                "ATE"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "me"
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false,
+              "directed": true
+            },
+            {
+              "kind": "edge",
+              "variable": "r2",
+              "labels": [
+                "ATE"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "you"
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false,
+              "directed": true
+            },
+            {
+              "kind": "node",
+              "variable": "you",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "me",
+              "value": {
+                "kind": "ref",
+                "variable": "me",
+                "property": "",
+                "type": "node"
+              }
+            },
+            {
+              "name": "H1",
+              "value": {
+                "kind": "aggregate",
+                "func": "count",
+                "refs": [
+                  {
+                    "variable": "r1",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "H2",
+              "value": {
+                "kind": "aggregate",
+                "func": "count",
+                "refs": [
+                  {
+                    "variable": "r2",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "you",
+              "value": {
+                "kind": "ref",
+                "variable": "you",
+                "property": "",
+                "type": "node"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "me",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "r1",
+              "labels": [
+                "ATE"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "me"
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false,
+              "directed": true
+            },
+            {
+              "kind": "edge",
+              "variable": "r2",
+              "labels": [
+                "ATE"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "you"
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false,
+              "directed": true
+            },
+            {
+              "kind": "node",
+              "variable": "you",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "me",
+              "value": {
+                "kind": "ref",
+                "variable": "me",
+                "property": "",
+                "type": "node"
+              }
+            },
+            {
+              "name": "you",
+              "value": {
+                "kind": "ref",
+                "variable": "you",
+                "property": "",
+                "type": "node"
+              }
+            },
+            {
+              "name": "sum",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "r1",
+                    "property": "times"
+                  },
+                  {
+                    "variable": "H1",
+                    "property": ""
+                  },
+                  {
+                    "variable": "r2",
+                    "property": "times"
+                  },
+                  {
+                    "variable": "H2",
+                    "property": ""
+                  },
+                  {
+                    "variable": "r1",
+                    "property": "times"
+                  },
+                  {
+                    "variable": "r2",
+                    "property": "times"
+                  },
+                  {
+                    "variable": "H1",
+                    "property": ""
+                  },
+                  {
+                    "variable": "H2",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

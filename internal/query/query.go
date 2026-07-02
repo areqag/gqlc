@@ -319,16 +319,18 @@ func (i ReturnItem) MarshalJSON() ([]byte, error) {
 }
 
 // Projection is what one ReturnItem projects. It is a closed sum of
-// RefProjection, LiteralProjection, FuncProjection and AggregateProjection — no
-// other type can implement it — so a projection is exactly one of the four. Each
-// variant holds its data in unexported fields, so the smart constructors
-// (NewRefProjection / NewLiteralProjection / NewFuncProjection /
-// NewAggregateProjection) are the only way to construct a non-zero value,
-// mirroring the Use sum (internal/query/query.go).
+// RefProjection, LiteralProjection, FuncProjection, AggregateProjection, and
+// (Stage 6) ExprProjection — no other type can implement it — so a projection
+// is exactly one of the five. Each variant holds its data in unexported
+// fields, so the smart constructors (NewRefProjection / NewLiteralProjection /
+// NewFuncProjection / NewAggregateProjection / NewExprProjection) are the only
+// way to construct a non-zero value, mirroring the Use sum
+// (internal/query/query.go).
 //
 // A projection carries exactly what the resolver needs to reach a schema type
-// (the referenced bindings as Refs) and the one cardinality-bearing distinction
-// (aggregate vs not), and nothing of the expression tree (ADR 0003).
+// (the referenced bindings as Refs), its Stage-6 result type, and the one
+// cardinality-bearing distinction (aggregate vs not); nothing of the
+// expression tree (ADR 0003).
 type Projection interface {
 	isProjection()
 }
@@ -445,6 +447,49 @@ func (p AggregateProjection) Type() Type { return p.resultType }
 
 func (AggregateProjection) isProjection() {}
 
+// ExprProjection is a rich scalar expression at a RETURN or WITH position
+// (Stage 6): arithmetic, string/list/null predicates, list or map literals,
+// list indexing/slicing/concatenation, CASE, chained comparisons, and
+// parenthesised composites. It carries only the result type the parser
+// computed and the []Ref every binding the sub-expression touched — no
+// expression tree, per ADR 0003 (the tree is re-executed from the original
+// text, ADR 0005). A rich expression whose type the parser cannot compute
+// (property-participating arithmetic, NULL propagation, unknown function
+// return types) types as TypeUnknown; the resolver upgrades from the schema.
+type ExprProjection struct {
+	refs       []Ref // the var/var.prop bindings the expression touches
+	resultType Type  // the parser-computed result type; TypeUnknown when it cannot commit
+}
+
+// NewExprProjection builds an ExprProjection carrying its result type and
+// touched refs. Total: the listener supplies Refs it has already mined from
+// the sub-expression and a Type value.
+func NewExprProjection(refs []Ref, t Type) ExprProjection {
+	return ExprProjection{refs: refs, resultType: t}
+}
+
+// Refs are the var/var.prop bindings the expression touches, so the
+// referential-integrity sweep covers every ref inside a rich projection.
+func (p ExprProjection) Refs() []Ref { return p.refs }
+
+// Type is the projection's Stage-6 result type — the whole point of the
+// variant. TypeUnknown when the parser cannot commit (property-participating
+// arithmetic, NULL propagation, unknown function return types).
+func (p ExprProjection) Type() Type { return p.resultType }
+
+func (ExprProjection) isProjection() {}
+
+// MarshalJSON renders an ExprProjection as a tagged union member discriminated
+// by "kind", carrying its refs and always-emitted result type — same posture
+// as FuncProjection with an added type field.
+func (p ExprProjection) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind string    `json:"kind"`
+		Refs []flatRef `json:"refs"`
+		Type Type      `json:"type"`
+	}{Kind: projectionKindExpr, Refs: flattenRefs(p.refs), Type: projectionType(p.resultType)})
+}
+
 // AggregateFunc identifies one of the openCypher aggregating functions. The set
 // is closed and known (§4), so it is an int-backed enum with a stringer —
 // mirroring graph.EntityKind / ClauseSlot — and the JSON "func" tag derives from
@@ -516,12 +561,13 @@ type Parameter struct {
 }
 
 // Use is one position where a parameter appears. It is a closed sum of
-// PropertyUse and ClauseSlotUse — no other type can implement it — so a use is
-// exactly one of the two and a parameter use that is neither bound to a binding
-// property nor sat in a clause slot is unrepresentable. Both variants hold
-// their data in unexported fields, so NewPropertyUse / NewClauseSlotUse are the
-// only way to construct a non-zero value: the invariants the types alone cannot
-// express hold for every value that exists.
+// PropertyUse, ClauseSlotUse, and (Stage 6) ExprUse — no other type can
+// implement it — so a use is exactly one of the three: bound to a binding
+// property, sat in a clause slot, or embedded inside a rich scalar expression
+// whose result type is what the model records. Every variant holds its data
+// in unexported fields, so NewPropertyUse / NewClauseSlotUse / NewExprUse are
+// the only ways to construct a non-zero value: the invariants the types alone
+// cannot express hold for every value that exists.
 type Use interface {
 	isUse()
 }
@@ -584,6 +630,72 @@ func (s ClauseSlot) ClauseName() string {
 	}
 }
 
+// ExprPosition names where a rich-expression parameter use appears (Stage 6):
+// inside a projection column vs inside a predicate. It is int-backed with a
+// stringer — mirrors AggregateFunc / ClauseSlot — so the JSON discriminator
+// derives from one source and cannot drift.
+type ExprPosition int
+
+const (
+	// ExprInProjection is a rich-expression parameter use at a RETURN or WITH
+	// projection column.
+	ExprInProjection ExprPosition = iota
+	// ExprInPredicate is a rich-expression parameter use inside a WHERE
+	// predicate or a comparable predicate position.
+	ExprInPredicate
+)
+
+// String is the lowercase wire tag ("projection" / "predicate"). The single
+// source the JSON discriminator's "position" field derives from.
+func (p ExprPosition) String() string {
+	switch p {
+	case ExprInPredicate:
+		return "predicate"
+	default:
+		return "projection"
+	}
+}
+
+// ExprUse is a parameter use that appears inside a rich scalar expression
+// (Stage 6). Its own type is not directly bindable to a single property or a
+// clause slot — the expression's result type is what the model carries, and
+// the resolver unifies the parameter's type from the enclosing expression
+// post-freeze. The variant carries the enclosing expression's Stage-6 result
+// type and a position discriminator (a projection column vs a predicate) so
+// the resolver can distinguish uses that participate in aggregation grouping
+// from uses that participate in filtering.
+type ExprUse struct {
+	enclosingType Type         // the result type of the enclosing rich expression
+	position      ExprPosition // where the enclosing expression sits (projection / predicate)
+}
+
+// NewExprUse builds an ExprUse carrying the enclosing rich expression's result
+// type and position. Total: the listener supplies both values it has already
+// computed at the use site.
+func NewExprUse(enclosing Type, position ExprPosition) ExprUse {
+	return ExprUse{enclosingType: enclosing, position: position}
+}
+
+// EnclosingType is the result type of the enclosing rich expression at the
+// parameter's position. The resolver reads it to infer the parameter's type.
+func (u ExprUse) EnclosingType() Type { return u.enclosingType }
+
+// Position is where the enclosing expression sits (projection column / predicate).
+func (u ExprUse) Position() ExprPosition { return u.position }
+
+func (ExprUse) isUse() {}
+
+// MarshalJSON renders an ExprUse as a tagged union member discriminated by
+// "kind", carrying the enclosing type and position — same convention as the
+// other Use variants.
+func (u ExprUse) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind          string `json:"kind"`
+		EnclosingType Type   `json:"enclosingType"`
+		Position      string `json:"position"`
+	}{Kind: useKindExpr, EnclosingType: projectionType(u.enclosingType), Position: u.position.String()})
+}
+
 // ClauseSlotUse is a parameter use that occupies a SKIP/LIMIT clause slot. The
 // parameter's type comes from the slot (an integer) rather than from a binding
 // property, so this variant carries no Ref.
@@ -607,6 +719,7 @@ func (ClauseSlotUse) isUse() {}
 const (
 	useKindProperty   = "property"
 	useKindClauseSlot = "clause-slot"
+	useKindExpr       = "expr"
 )
 
 // The "var" and "inline" endpoint discriminators have no graph-vocabulary
@@ -625,6 +738,7 @@ const (
 	projectionKindLiteral   = "literal"
 	projectionKindFunc      = "func"
 	projectionKindAggregate = "aggregate"
+	projectionKindExpr      = "expr"
 )
 
 // MarshalJSON renders a NodeBinding as a tagged union member discriminated by

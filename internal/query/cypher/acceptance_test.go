@@ -163,14 +163,46 @@ var skiplist = map[string]bool{
 	// synthesise a Name from the item's source text (here "count(*)"), so every WITH
 	// item carries a name and the must-alias rule has nothing to check against.
 	"[5] Fail when not aliasing expressions in WITH": true,
+
+	// --- expressions value/semantics below the type-interface boundary (Stage 6) ---
+	//
+	// Stage 6 widens RETURN / WITH projections to any scalar expression and types
+	// the result, so these AmbiguousAggregationExpression negatives now parse-accept
+	// as ExprProjection over the whole expression. Grouping-key correctness — the
+	// rule "every non-aggregate sub-expression inside an aggregate expression must
+	// be a projected variable" — is a semantic constraint the type interface does
+	// not carry (ADR 0003), so it is a bucket-3 runtime concern (ADR 0007). An
+	// engine re-executing the original text raises the same error.
+	"[8] Fail if not projected variables are used inside an expression which contains an aggregation expression":                   true,
+	"[9] Fail if more complex expression, even if projected, are used inside expression which contains an aggregation expression":  true,
+	"[20] Fail if not returned variables are used inside an expression which contains an aggregation expression":                   true,
+	"[21] Fail if more complex expressions, even if returned, are used inside expression which contains an aggregation expression": true,
+	// count(count(*)) — nested aggregation is a NestedAggregation semantic rule.
+	// Stage 6 accepts the outer count() as an AggregateProjection and the inner
+	// count(*) as its argument (surfaced as a ref-free func-arg walk). The rule
+	// against nesting an aggregate inside another aggregate is a resolver /
+	// engine concern below the type-interface boundary.
+	"[14] Aggregates in aggregates": true,
+	// count(rand()) — the impurity of rand() prevents grouping-key aggregation
+	// semantics; a value-level engine rule below the boundary.
+	"[15] Using `rand()` in aggregations": true,
+	// MATCH (n) WITH [n] AS users MATCH (users)-->() — reusing an alias bound to
+	// a list-of-nodes as a node pattern variable is a VariableTypeConflict
+	// (value-level rule). Stage 6 accepts the WITH [n] AS users projection as
+	// an ExprProjection of TypeList<TypeNode>; the downstream re-binding of
+	// users as a node is a schema-agnostic parse-accept (predicate structure
+	// stays below the boundary).
+	"[30] Fail when using a list or nodes as a node": true,
 }
 
-// the six public sentinels — the "valid Cypher we don't support yet" set. A
-// positive scenario that fails with one of these is the progress meter (PENDING),
-// not a test failure. Mirrors the spec's category-grained taxonomy.
+// the four public sentinels for scenarios the parser cannot faithfully
+// represent yet — the "valid Cypher we don't support yet" set. A positive
+// scenario that fails with one of these is the progress meter (PENDING), not a
+// test failure. Mirrors the spec's category-grained taxonomy. Stage 6 retired
+// ErrUnsupportedProjection: rich scalar expressions at RETURN / WITH position
+// now parse to an ExprProjection.
 var unsupportedSentinels = []error{
 	cypher.ErrUnsupportedClause,
-	cypher.ErrUnsupportedProjection,
 	cypher.ErrUnsupportedPattern,
 	cypher.ErrUnsupportedParameter,
 }
