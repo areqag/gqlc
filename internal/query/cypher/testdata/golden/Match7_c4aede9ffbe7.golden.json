@@ -25,7 +25,8 @@
                 "variable": "a"
               },
               "nullable": true,
-              "directed": false
+              "directed": false,
+              "hops": null
             }
           ],
           "returns": [

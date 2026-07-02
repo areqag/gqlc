@@ -106,24 +106,61 @@ _Avoid_: join (reserve for graph edge traversal / SQL vocabulary), merge
 (reserve for the `MERGE` write clause).
 
 **Binding**:
-A query variable bound to a graph entity — a node or an edge — within a single
-**query part**, carrying its labels as written and, for an edge, its endpoints.
-The query-side analogue of the schema's **alias**, and the anchor a return item
-or parameter traces back to so the resolver can reach a schema type. A binding
-is scoped to the part whose `MATCH` introduced it; it reaches a later part only
-if that part's preceding `WITH` carries its variable forward (a binding not
-carried by a `WITH` is out of scope downstream). Re-`MATCH`ing a carried name in
-a later part is a fresh binding in that part, distinct from the original — which
-is the per-part structure the resolver uses to flow-type nullability across a
-`WITH` (ADR 0006). Labels may be empty: an unlabelled binding's type is inferred
-from the edges that touch it. An edge binding also carries a **direction** marker:
-a directed edge stores its endpoints canonically (source→target), an undirected
-edge stores them in textual order with the resolver trying both orientations (see
-**Direction**, query side). The marker is the only direction datum — the model
-records neither which arrow spelling produced an undirected edge nor any
-orientation preference.
+A query variable bound to a graph entity — a node or an edge — or (Stage 8)
+to a **named path** — within a single **query part**, carrying its labels as
+written and, for an edge, its endpoints. The query-side analogue of the
+schema's **alias**, and the anchor a return item or parameter traces back to
+so the resolver can reach a schema type. A binding is scoped to the part
+whose `MATCH` introduced it; it reaches a later part only if that part's
+preceding `WITH` carries its variable forward (a binding not carried by a
+`WITH` is out of scope downstream). Re-`MATCH`ing a carried name in a later
+part is a fresh binding in that part, distinct from the original — which is
+the per-part structure the resolver uses to flow-type nullability across a
+`WITH` (ADR 0006). Labels may be empty: an unlabelled binding's type is
+inferred from the edges that touch it. An edge binding also carries a
+**direction** marker (a directed edge stores its endpoints canonically
+source→target; an undirected edge stores them in textual order with the
+resolver trying both orientations, see **Direction**, query side) and an
+**edge cardinality** axis (see **Hop range**) distinguishing single-hop
+edges from variable-length edges.
 _Avoid_: match (reserve for the MATCH clause); node/edge type (reserve for the
 schema's element types).
+
+**Named path**:
+A query variable bound to the path a pattern element composes (the `p` in
+`MATCH p = (a)-[r]->(b) RETURN p`). Modelled as a **path binding** —
+kind `path` — holding the path variable and the shape-faithful, tagged-sum
+ordered list of its members: named nodes and edges reference the part's own
+entity bindings by variable (so a path binding does not co-own them); an
+anonymous edge inside a named path surfaces as an anonymous-edge slot with
+no name (so it never competes with a user-chosen variable in the part's
+`byVar` namespace, unlike a synthetic-string scheme), and an anonymous
+intermediate node inside a named path surfaces as an anonymous-node slot
+so the members list is shape-faithful (codegen can reconstruct the whole
+path shape from the members alone). A path binding's projected result type
+is the `path` variant of **type** — the Stage-8 addition to the type sum.
+Never nullable at the binding level: `OPTIONAL MATCH p = ...` flows
+nullability through the member bindings themselves, not the path binding.
+_Avoid_: `p` (a variable-name colloquialism); named-path variable (use "path
+binding" for the modelled entity, "named path" for the source-level clause).
+
+**Hop range**:
+An **edge binding**'s optional variable-length hop range — the `hops` axis
+on an edge — recording the `min..max` bounds of a variable-length
+relationship (`-[r*1..3]->`, `-[r*]-`). Absent (nil) for a single-hop edge —
+the pre-Stage-8 case, where an edge binding refers to one graph edge; present
+for a variable-length edge, where the binding refers to a **list of graph
+edges** and its projected result type is `list<edge>` rather than `edge`.
+Either bound may be absent (unbounded); a fixed hop count (`-[r*3]->`) sets
+`min = max`; a negative bound is unrepresentable (the constructor rejects
+it — the only invariant the type alone cannot express). Compose freely with
+the edge's direction axis and label set: a var-length undirected multi-type
+edge is one binding carrying all three facts. Post-freeze codegen reads
+`Hops()` to emit list-typed method results for var-length edges without
+adding a distinct binding variant — the cardinality axis mirrors the
+direction axis in that respect.
+_Avoid_: length (colloquial; reserve for "path length", a separate concept);
+range (ambiguous with SKIP/LIMIT paging).
 
 **Variable**:
 The bare name a query author writes for a binding (the `p` in `(p:Person)`). A
@@ -220,17 +257,19 @@ the curated subset the model carries).
 The result type of a **projection**: a closed sum of `bool`, `int`, `float`,
 `string`, `null`, `list<T>` (parameterised over an element type), `map`,
 `node`, `edge`, the six **temporal types** (`date`, `time`, `localtime`,
-`datetime`, `localdatetime`, `duration`), and a distinguished `unknown`
-for types the parser cannot compute schema-free. It is the freeze-locked
-type vocabulary the resolver reads from a parsed query: a `RefProjection`
-on a whole entity types as `node` or `edge`; a scalar literal types as
-its literal kind; a rich expression carries the result of the parser's
-constant folding over the scalar-expression grammar. `unknown` is the
-parser's honest posture on the type-interface boundary (ADR 0005) for
-property lookups, function calls, aggregates, and any expression
-touching a property or `null` — the resolver upgrades these from the
-schema. Incremental: Stage 7 added the six temporal types, Stage 8 adds
-`path`; the freeze ADR locks the sum.
+`datetime`, `localdatetime`, `duration`), `path`, and a distinguished
+`unknown` for types the parser cannot compute schema-free. It is the
+freeze-locked type vocabulary the resolver reads from a parsed query: a
+`RefProjection` on a whole entity types as `node` or `edge`; on a
+**named path** as `path`; on a variable-length edge (see **Hop range**)
+as `list<edge>`; a scalar literal types as its literal kind; a rich
+expression carries the result of the parser's constant folding over the
+scalar-expression grammar. `unknown` is the parser's honest posture on
+the type-interface boundary (ADR 0005) for property lookups, function
+calls, aggregates, and any expression touching a property or `null` —
+the resolver upgrades these from the schema. Incremental: Stage 7 added
+the six temporal types, Stage 8 added `path`; the freeze ADR locks the
+sum.
 _Avoid_: `any` (use `unknown` — the parser's "I cannot tell"); property
 type (reserve for the schema-side scalar type `PropertyType`).
 

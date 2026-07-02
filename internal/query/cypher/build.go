@@ -80,6 +80,19 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Part,
 			scope[b.variable] = true
 		}
 	}
+	// Stage 8: path variables introduced in this part enter the scope the
+	// same way entity variables do — a RETURN p on a named path resolves
+	// against the path binding, and its type is TypePath (via refType).
+	// A path variable that clashes with an entity binding of the same name
+	// (a preceding MATCH bound r as a node, and this MATCH used r = (...))
+	// is a kind conflict — three-way (node/edge/path), extending the
+	// Stage 0..7 two-way check (§1.6).
+	for _, pb := range rp.pathBindings {
+		if _, ok := rp.byVar[pb.Variable()]; ok {
+			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, pb.Variable())
+		}
+		scope[pb.Variable()] = true
+	}
 
 	for _, ref := range rp.refs {
 		if !scope[ref.name] {
@@ -96,13 +109,20 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Part,
 		}
 	}
 
-	bindings := make([]query.Binding, 0, len(rp.bindings))
+	bindings := make([]query.Binding, 0, len(rp.bindings)+len(rp.pathBindings))
 	for _, rb := range rp.bindings {
 		b, err := rb.toBinding()
 		if err != nil {
 			return query.Part{}, nil, err
 		}
 		bindings = append(bindings, b)
+	}
+	// Path bindings appear after every entity binding they capture (Stage 8):
+	// build() appends them in the order collectPattern recorded, so the wire
+	// shape is deterministic and the path member list references bindings
+	// already present earlier in the slice.
+	for _, pb := range rp.pathBindings {
+		bindings = append(bindings, pb)
 	}
 
 	part := query.Part{Returns: rp.returns, ReturnsAll: rp.returnsAll}
@@ -128,13 +148,22 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Part,
 
 // toBinding builds the model binding from a raw binding via the smart
 // constructors, so the model's invariants are enforced at assembly. The
-// nullable flag picks the OPTIONAL-introduced variant (ADR 0006).
+// nullable flag picks the OPTIONAL-introduced variant (ADR 0006). Stage 8:
+// hops picks the variable-length variant (list-of-edge cardinality) — the
+// four-way choice (nullable × var-length) routes through the four
+// constructors.
 func (rb *rawBinding) toBinding() (query.Binding, error) {
 	if rb.kind == graph.Edge {
 		// The single polarity flip from the listener's zero-value-safe inverted
 		// rawBinding.undirected to the model's positive directed field lives here
 		// (Stage 5 §4): directed = !undirected.
 		directed := !rb.undirected
+		if rb.hops != nil {
+			if rb.nullable {
+				return query.NewNullableVarLengthEdgeBinding(rb.variable, rb.labels, rb.source, rb.target, directed, *rb.hops)
+			}
+			return query.NewVarLengthEdgeBinding(rb.variable, rb.labels, rb.source, rb.target, directed, *rb.hops)
+		}
 		if rb.nullable {
 			return query.NewNullableEdgeBinding(rb.variable, rb.labels, rb.source, rb.target, directed)
 		}

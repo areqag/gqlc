@@ -3,6 +3,7 @@ package query
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/areqag/gqlc/internal/graph"
 )
@@ -110,17 +111,52 @@ func (k UnionKind) MarshalJSON() ([]byte, error) {
 	return json.Marshal(k.String())
 }
 
-// Binding is a query variable bound to a graph entity, carrying its labels as
-// written. It is a closed sum of NodeBinding and EdgeBinding — no other type can
-// implement it — so a binding is exactly one of the two and a node can never
-// carry endpoints nor an edge omit them. Both variants hold their data in
-// unexported fields, so NewNodeBinding / NewEdgeBinding are the only way to
-// construct a non-zero value: the invariants the types alone cannot express
-// (a non-empty node variable, both edge endpoints present) hold for every value
-// that exists.
+// BindingKind is which kind of query-level binding a value is (Stage 8 spec §3.1):
+// a node, an edge, or a path. Two of the three tags overlap with graph.EntityKind's
+// stringer output ("node"/"edge"), so the wire-encoded discriminator stays
+// stable for NodeBinding / EdgeBinding across the Stage-8 widening; "path" is new
+// for PathBinding. Int-backed with a stringer — mirrors AggregateFunc / UnionKind —
+// so the JSON discriminator derives from one source and cannot drift.
+type BindingKind int
+
+const (
+	// BindingNode is a node binding — the query-level projection of graph.Node.
+	BindingNode BindingKind = iota
+	// BindingEdge is an edge binding — the query-level projection of graph.Edge.
+	BindingEdge
+	// BindingPath is a named-path binding — a Stage-8 construct with no
+	// graph.EntityKind counterpart (a path is not a graph entity, it is a
+	// query-level composition of them).
+	BindingPath
+)
+
+// String is the canonical lowercase name of the kind ("node" / "edge" / "path").
+// It is the single source the JSON discriminator derives from; two of the three
+// tags match graph.EntityKind.String() by construction, so pre-Stage-8 wire
+// shapes for node/edge bindings are preserved verbatim.
+func (k BindingKind) String() string {
+	switch k {
+	case BindingEdge:
+		return "edge"
+	case BindingPath:
+		return "path"
+	default:
+		return "node"
+	}
+}
+
+// Binding is a query variable bound to a graph entity or to a named path,
+// carrying its labels (for entity bindings) or its member names (for a path).
+// It is a closed sum of NodeBinding, EdgeBinding, and (Stage 8) PathBinding —
+// no other type can implement it — so a binding is exactly one of the three.
+// Every variant holds its data in unexported fields, so the smart constructors
+// are the only way to construct a non-zero value: the invariants the types
+// alone cannot express (a non-empty node variable, both edge endpoints
+// present, a non-empty path variable with at least one member) hold for every
+// value that exists.
 type Binding interface {
-	// Kind reports whether the binding is a node or an edge.
-	Kind() graph.EntityKind
+	// Kind reports whether the binding is a node, an edge, or a path.
+	Kind() BindingKind
 	// Nullable reports whether the binding was first introduced inside an
 	// OPTIONAL MATCH clause (ADR 0006). The flag is a static, local fact set
 	// by the parser; flow-typing across clauses lives in the resolver.
@@ -166,7 +202,13 @@ func (b NodeBinding) Variable() string { return b.variable }
 func (b NodeBinding) Labels() graph.LabelSet { return b.labels }
 
 // Kind reports that a NodeBinding is a node.
-func (NodeBinding) Kind() graph.EntityKind { return graph.Node }
+func (NodeBinding) Kind() BindingKind { return BindingNode }
+
+// EntityKind returns the graph-vocabulary kind of the entity this binding
+// refers to (graph.Node). Only entity bindings (NodeBinding, EdgeBinding)
+// expose EntityKind — a path is not a graph entity, so PathBinding has no
+// equivalent method. The resolver reads EntityKind to form the schema key.
+func (NodeBinding) EntityKind() graph.EntityKind { return graph.Node }
 
 // Nullable reports whether the binding was first introduced inside an OPTIONAL
 // MATCH clause (ADR 0006).
@@ -175,26 +217,33 @@ func (b NodeBinding) Nullable() bool { return b.nullable }
 func (NodeBinding) isBinding() {}
 
 // EdgeBinding is a query variable bound to an edge, carrying its labels as
-// written, both endpoints, and a direction marker. For a directed edge the
-// endpoints are in canonical source->target order (a left-pointing edge is
+// written, both endpoints, a direction marker, and (Stage 8) an optional hop
+// range for variable-length relationships. For a directed edge the endpoints
+// are in canonical source->target order (a left-pointing edge is
 // canonicalised); for an undirected edge (directed=false) the endpoints are in
 // textual order, with no authoritative orientation (the resolver tries both).
-// Labels may be empty for an untyped edge (C7). The variable may be empty: unlike
-// a node, an anonymous edge is its own binding (the relationship in (a)-->(b)).
-// Source and Target are always present (NewEdgeBinding).
+// Labels may be empty for an untyped edge (C7) or carry more than one entry
+// for a multi-type edge ([r:A|B]). The variable may be empty: unlike a node,
+// an anonymous edge is its own binding (the relationship in (a)-->(b)).
+// Source and Target are always present (NewEdgeBinding). hops is nil for a
+// single-hop edge (Stages 0..7) and non-nil for a variable-length edge (Stage 8);
+// a var-length edge binding projects as list<edge>, a single-hop as edge.
 type EdgeBinding struct {
 	variable string         // the name as written: the r in [r:KNOWS]; empty if anonymous
-	labels   graph.LabelSet // labels as written; may be empty
+	labels   graph.LabelSet // labels as written; may be empty; may carry multiple types (Stage 8)
 	source   Endpoint       // the source endpoint; always set
 	target   Endpoint       // the target endpoint; always set
 	nullable bool           // set when first introduced in OPTIONAL MATCH (ADR 0006)
 	directed bool           // true for a one-arrow edge; false for an undirected edge (Stage 5)
+	hops     *EdgeHops      // Stage 8: nil for single-hop; non-nil for variable-length
 }
 
-// NewEdgeBinding builds an EdgeBinding, rejecting a missing endpoint: an edge
-// always has both a source and a target. Variable may be empty (an anonymous
-// edge) and Labels may be empty (an untyped edge, C7). directed marks a one-arrow
-// edge (true) versus an undirected edge (false).
+// NewEdgeBinding builds a single-hop EdgeBinding, rejecting a missing endpoint:
+// an edge always has both a source and a target. Variable may be empty (an
+// anonymous edge) and Labels may be empty (an untyped edge, C7). directed marks
+// a one-arrow edge (true) versus an undirected edge (false). Stage 8: this
+// constructor produces a single-hop binding (Hops() == nil); use
+// NewVarLengthEdgeBinding for the variable-length shape.
 func NewEdgeBinding(variable string, labels graph.LabelSet, source, target Endpoint, directed bool) (EdgeBinding, error) {
 	if source == nil || target == nil {
 		return EdgeBinding{}, errors.New("query: edge binding requires both a source and a target endpoint")
@@ -202,12 +251,37 @@ func NewEdgeBinding(variable string, labels graph.LabelSet, source, target Endpo
 	return EdgeBinding{variable: variable, labels: labels, source: source, target: target, directed: directed}, nil
 }
 
-// NewNullableEdgeBinding builds the OPTIONAL-introduced variant (ADR 0006):
-// same invariants as NewEdgeBinding, with the Nullable flag set. The flag is
-// applied uniformly to every binding the OPTIONAL clause introduces, including
-// the anonymous-edge case where no Ref will ever read it.
+// NewNullableEdgeBinding builds the OPTIONAL-introduced single-hop variant
+// (ADR 0006): same invariants as NewEdgeBinding, with the Nullable flag set.
+// The flag is applied uniformly to every binding the OPTIONAL clause
+// introduces, including the anonymous-edge case where no Ref will ever read it.
 func NewNullableEdgeBinding(variable string, labels graph.LabelSet, source, target Endpoint, directed bool) (EdgeBinding, error) {
 	b, err := NewEdgeBinding(variable, labels, source, target, directed)
+	if err != nil {
+		return EdgeBinding{}, err
+	}
+	b.nullable = true
+	return b, nil
+}
+
+// NewVarLengthEdgeBinding builds a variable-length EdgeBinding (Stage 8 spec §3.4):
+// the same fields as a single-hop edge, plus an EdgeHops range value. hops is
+// stored by pointer so a nil Hops() distinguishes the single-hop case (the
+// zero-value of *EdgeHops) from a var-length case whose bounds are both
+// unbounded (a non-nil pointer to an EdgeHops{nil, nil}).
+func NewVarLengthEdgeBinding(variable string, labels graph.LabelSet, source, target Endpoint, directed bool, hops EdgeHops) (EdgeBinding, error) {
+	b, err := NewEdgeBinding(variable, labels, source, target, directed)
+	if err != nil {
+		return EdgeBinding{}, err
+	}
+	b.hops = &hops
+	return b, nil
+}
+
+// NewNullableVarLengthEdgeBinding builds the OPTIONAL-introduced variable-length
+// variant. The nullable flag applies to the whole binding uniformly per ADR 0006.
+func NewNullableVarLengthEdgeBinding(variable string, labels graph.LabelSet, source, target Endpoint, directed bool, hops EdgeHops) (EdgeBinding, error) {
+	b, err := NewVarLengthEdgeBinding(variable, labels, source, target, directed, hops)
 	if err != nil {
 		return EdgeBinding{}, err
 	}
@@ -231,14 +305,318 @@ func (b EdgeBinding) Target() Endpoint { return b.target }
 // an undirected pattern (false, the resolver tries both orientations).
 func (b EdgeBinding) Directed() bool { return b.directed }
 
+// Hops reports the variable-length hop range, or nil for a single-hop edge
+// (Stages 0..7). A non-nil Hops means the binding projects as list<edge>;
+// the resolver reads the min/max to form its endpoint-plus-range lookup.
+func (b EdgeBinding) Hops() *EdgeHops { return b.hops }
+
 // Kind reports that an EdgeBinding is an edge.
-func (EdgeBinding) Kind() graph.EntityKind { return graph.Edge }
+func (EdgeBinding) Kind() BindingKind { return BindingEdge }
+
+// EntityKind returns the graph-vocabulary kind of the entity this binding
+// refers to (graph.Edge). The resolver reads EntityKind to form the schema
+// EdgeKey (source label, edge label, target label triple).
+func (EdgeBinding) EntityKind() graph.EntityKind { return graph.Edge }
 
 // Nullable reports whether the binding was first introduced inside an OPTIONAL
 // MATCH clause (ADR 0006).
 func (b EdgeBinding) Nullable() bool { return b.nullable }
 
 func (EdgeBinding) isBinding() {}
+
+// EdgeHops is the hop range of a variable-length relationship (Stage 8 spec §3.3):
+// [r*], [r*3], [r*1..3], [r*3..], [r*..5]. Both bounds are optional (nil for
+// unbounded), and the constructor rejects illegal ranges (negative bounds, an
+// upper bound below the lower bound). Its data fields are unexported so
+// NewEdgeHops is the only writer, and the invariants — the ones the type alone
+// cannot express — hold for every value that exists.
+type EdgeHops struct {
+	min *int
+	max *int
+}
+
+// NewEdgeHops builds an EdgeHops from optional min and max bounds. Rejects a
+// negative bound (openCypher integer literals are non-negative, so a negative
+// value could never come from a well-formed range literal — this is the sole
+// invariant the type alone cannot express).
+//
+// An empty range (max < min, e.g. `[*2..1]`) is accepted: the openCypher TCK
+// includes it as a positive scenario returning zero rows, so the runtime rule
+// "no valid hop count satisfies the range" sits below the type-interface
+// boundary (ADR 0005). The parser records the range as written; the engine
+// interprets the empty result. A zero lower bound (`*0..N`) is likewise
+// accepted for the same reason.
+func NewEdgeHops(minHops, maxHops *int) (EdgeHops, error) {
+	if minHops != nil && *minHops < 0 {
+		return EdgeHops{}, errors.New("query: edge hop range requires a non-negative lower bound")
+	}
+	if maxHops != nil && *maxHops < 0 {
+		return EdgeHops{}, errors.New("query: edge hop range requires a non-negative upper bound")
+	}
+	return EdgeHops{min: minHops, max: maxHops}, nil
+}
+
+// Min is the lower bound of the hop range; nil for unbounded.
+func (h EdgeHops) Min() *int { return h.min }
+
+// Max is the upper bound of the hop range; nil for unbounded.
+func (h EdgeHops) Max() *int { return h.max }
+
+// MarshalJSON renders an EdgeHops as an object with always-emitted min/max
+// keys, both possibly null. The always-emit convention matches nullable /
+// returnsAll / directed on the surrounding EdgeBinding.
+func (h EdgeHops) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Min *int `json:"min"`
+		Max *int `json:"max"`
+	}{Min: h.min, Max: h.max})
+}
+
+// PathMember is one element of a named path's members list (Stage 8 spec
+// §1.2, §3.2). It is a closed sum of NamedNodeMember, NamedEdgeMember,
+// AnonEdgeMember, and AnonNodeMember — no other type can implement it — so
+// a member is exactly one of four things: a named node, a named edge, an
+// anonymous edge slot, or an anonymous node slot. The named variants
+// reference a binding by variable; the anonymous variants carry no name,
+// so an anonymous slot in a path never competes with a user-chosen
+// variable in the part's byVar namespace (an earlier design used a
+// synthetic-name string that collided with legal oC_SymbolicName inputs
+// like `__anon_edge_0`; the tagged sum makes that unrepresentable).
+type PathMember interface {
+	// Kind reports whether the member is a node position or an edge
+	// position (BindingNode / BindingEdge). A path member is never a path.
+	Kind() BindingKind
+	// Variable is the named binding this member references; empty for the
+	// two anonymous variants.
+	Variable() string
+	// Anonymous reports whether this member carries no name (the two
+	// AnonXMember variants).
+	Anonymous() bool
+	isPathMember()
+}
+
+// NamedNodeMember is a path member that references a named node binding by
+// variable — the a and b in `MATCH p = (a)-[r]->(b)`. The variable is
+// always non-empty (NewNamedNodeMember).
+type NamedNodeMember struct {
+	variable string
+}
+
+// NewNamedNodeMember builds a NamedNodeMember, rejecting the empty variable:
+// a named member always names a binding, and the anonymous case is
+// AnonNodeMember.
+func NewNamedNodeMember(variable string) (NamedNodeMember, error) {
+	if variable == "" {
+		return NamedNodeMember{}, errors.New("query: named-node path member requires a non-empty variable")
+	}
+	return NamedNodeMember{variable: variable}, nil
+}
+
+// Variable is the named binding this member references; always non-empty.
+func (m NamedNodeMember) Variable() string { return m.variable }
+
+// Kind reports that a NamedNodeMember occupies a node position.
+func (NamedNodeMember) Kind() BindingKind { return BindingNode }
+
+// Anonymous reports false — this member names a binding.
+func (NamedNodeMember) Anonymous() bool { return false }
+
+func (NamedNodeMember) isPathMember() {}
+
+// NamedEdgeMember is a path member that references a named edge binding by
+// variable — the r in `MATCH p = (a)-[r]->(b)`. The variable is always
+// non-empty (NewNamedEdgeMember).
+type NamedEdgeMember struct {
+	variable string
+}
+
+// NewNamedEdgeMember builds a NamedEdgeMember, rejecting the empty variable:
+// an anonymous edge inside a named path is AnonEdgeMember, not a
+// NamedEdgeMember with an empty variable.
+func NewNamedEdgeMember(variable string) (NamedEdgeMember, error) {
+	if variable == "" {
+		return NamedEdgeMember{}, errors.New("query: named-edge path member requires a non-empty variable")
+	}
+	return NamedEdgeMember{variable: variable}, nil
+}
+
+// Variable is the named binding this member references; always non-empty.
+func (m NamedEdgeMember) Variable() string { return m.variable }
+
+// Kind reports that a NamedEdgeMember occupies an edge position.
+func (NamedEdgeMember) Kind() BindingKind { return BindingEdge }
+
+// Anonymous reports false — this member names a binding.
+func (NamedEdgeMember) Anonymous() bool { return false }
+
+func (NamedEdgeMember) isPathMember() {}
+
+// AnonEdgeMember is a path member for an anonymous edge slot — the
+// `-[]-` link inside `p = (a)-[]-(b)`. It carries no name (the anonymous
+// edge is still its own binding in the part's Bindings slice, but the path
+// member does not name it — a name would risk collision with a user
+// variable in the byVar namespace). Empty struct: no state.
+type AnonEdgeMember struct{}
+
+// Variable is always empty for an AnonEdgeMember (the anonymous variant
+// carries no name).
+func (AnonEdgeMember) Variable() string { return "" }
+
+// Kind reports that an AnonEdgeMember occupies an edge position.
+func (AnonEdgeMember) Kind() BindingKind { return BindingEdge }
+
+// Anonymous reports true — this member has no name.
+func (AnonEdgeMember) Anonymous() bool { return true }
+
+func (AnonEdgeMember) isPathMember() {}
+
+// AnonNodeMember is a path member for an anonymous intermediate node — the
+// `()` inside `p = (a)-[]-()-[]-(b)`. An anonymous node is not itself a
+// binding (§C3, the node is a pure filter and does not appear in
+// Part.Bindings), but the path's shape requires a placeholder at the node
+// position so codegen can reconstruct the path shape from Members() alone.
+// Empty struct: no state.
+type AnonNodeMember struct{}
+
+// Variable is always empty for an AnonNodeMember (the anonymous variant
+// carries no name).
+func (AnonNodeMember) Variable() string { return "" }
+
+// Kind reports that an AnonNodeMember occupies a node position.
+func (AnonNodeMember) Kind() BindingKind { return BindingNode }
+
+// Anonymous reports true — this member has no name.
+func (AnonNodeMember) Anonymous() bool { return true }
+
+func (AnonNodeMember) isPathMember() {}
+
+// PathBinding is a query variable bound to a named path (Stage 8 spec §1.2):
+// the p in MATCH p = (a)-[r]->(b) RETURN p. It carries the path variable name
+// and the shape-faithful ordered list of members the path composes, as a
+// tagged sum (PathMember). Named members reference the part's own entity
+// bindings by variable (the path binding does not co-own them); anonymous
+// members are positional slots that carry no name, so an anonymous slot in
+// a path never competes with a user-chosen variable in the byVar namespace.
+// PathBinding never has a Nullable flag at Stage 8: the OPTIONAL-introduced
+// case flows through the member bindings themselves.
+type PathBinding struct {
+	variable string       // the path variable name; always non-empty
+	members  []PathMember // the members in shape-faithful textual order; always non-empty, no nil entries
+}
+
+// NewPathBinding builds a PathBinding. Rejects an empty variable (a path
+// with no name is not a binding — the parser emits no PathBinding for an
+// unnamed pattern), an empty members slice (a pattern element always has
+// at least one node so a path always has at least one member), a nil
+// member entry (every member is one of the four tagged-sum variants),
+// and a kind-inconsistent repeat of a named member: openCypher lets the
+// same variable appear multiple times in a pattern (`(n)-->(k)<--(n)`),
+// so repeats of a *same-kind* named member are legal, but two named
+// members that share a variable and disagree on Kind() would collide
+// with the part's byVar (a kind conflict at the pattern level, which
+// mergeBinding also catches). The anonymous variants may repeat freely.
+func NewPathBinding(variable string, members []PathMember) (PathBinding, error) {
+	if variable == "" {
+		return PathBinding{}, errors.New("query: path binding requires a non-empty variable")
+	}
+	if len(members) == 0 {
+		return PathBinding{}, errors.New("query: path binding requires at least one member")
+	}
+	kindByName := map[string]BindingKind{}
+	for i, m := range members {
+		if m == nil {
+			return PathBinding{}, fmt.Errorf("query: path binding member %d is nil", i)
+		}
+		if m.Anonymous() {
+			continue
+		}
+		v := m.Variable()
+		if prior, ok := kindByName[v]; ok && prior != m.Kind() {
+			return PathBinding{}, fmt.Errorf("query: path binding member %q appears with conflicting kinds (%s vs %s)", v, prior.String(), m.Kind().String())
+		}
+		kindByName[v] = m.Kind()
+	}
+	// Copy so the caller cannot mutate the binding's members after construction.
+	membersCopy := make([]PathMember, len(members))
+	copy(membersCopy, members)
+	return PathBinding{variable: variable, members: membersCopy}, nil
+}
+
+// Variable is the path variable name; always non-empty.
+func (b PathBinding) Variable() string { return b.variable }
+
+// Members are the members in shape-faithful textual order; always non-empty,
+// no nil entries. Codegen reads Members() to reconstruct the path's shape
+// (node, edge, node, edge, …, node) and to identify the named members
+// against the part's bindings.
+func (b PathBinding) Members() []PathMember { return b.members }
+
+// Kind reports that a PathBinding is a path.
+func (PathBinding) Kind() BindingKind { return BindingPath }
+
+// Nullable is always false at Stage 8: the OPTIONAL-introduced case flows
+// through the member bindings themselves (Stage 8 spec §1.2).
+func (PathBinding) Nullable() bool { return false }
+
+func (PathBinding) isBinding() {}
+
+// The PathMember discriminators name the wire tag for each variant. The
+// named variants share their tag with graph.EntityKind ("node"/"edge") for
+// wire continuity with NodeBinding / EdgeBinding; the anonymous variants
+// use distinct tags so a consumer never confuses an anonymous slot with a
+// named member of an empty variable.
+const (
+	pathMemberKindNamedNode = "node"
+	pathMemberKindNamedEdge = "edge"
+	pathMemberKindAnonEdge  = "anon-edge"
+	pathMemberKindAnonNode  = "anon-node"
+)
+
+// MarshalJSON on the named variants emits `{"kind","variable"}`; the
+// anonymous variants emit `{"kind"}` alone. Same one-level-deep posture as
+// the other tagged unions in the model.
+func (m NamedNodeMember) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind     string `json:"kind"`
+		Variable string `json:"variable"`
+	}{Kind: pathMemberKindNamedNode, Variable: m.variable})
+}
+
+// MarshalJSON on NamedEdgeMember mirrors NamedNodeMember's shape.
+func (m NamedEdgeMember) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind     string `json:"kind"`
+		Variable string `json:"variable"`
+	}{Kind: pathMemberKindNamedEdge, Variable: m.variable})
+}
+
+// MarshalJSON on AnonEdgeMember emits only the "kind" discriminator.
+func (AnonEdgeMember) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind string `json:"kind"`
+	}{Kind: pathMemberKindAnonEdge})
+}
+
+// MarshalJSON on AnonNodeMember emits only the "kind" discriminator.
+func (AnonNodeMember) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind string `json:"kind"`
+	}{Kind: pathMemberKindAnonNode})
+}
+
+// MarshalJSON renders a PathBinding as a tagged union member discriminated by
+// "kind" (derived from BindingKind, the single source), carrying its variable
+// and members. Members serialise as an array of tagged-sum PathMember values
+// (§3.2), one object per member. The always-emit nullable field (false, per
+// Stage 8 spec §1.2) matches the entity bindings' shape.
+func (b PathBinding) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind     string       `json:"kind"`
+		Variable string       `json:"variable"`
+		Members  []PathMember `json:"members"`
+		Nullable bool         `json:"nullable"`
+	}{Kind: b.Kind().String(), Variable: b.variable, Members: b.members, Nullable: b.Nullable()})
+}
 
 // Endpoint is one end of an edge. It is a closed sum of VarEndpoint and
 // InlineEndpoint — no other type can implement it — so an endpoint either names a
@@ -765,8 +1143,10 @@ func (b NodeBinding) MarshalJSON() ([]byte, error) {
 }
 
 // MarshalJSON renders an EdgeBinding as a tagged union member discriminated by
-// "kind" (derived from graph.EntityKind). Source and Target are themselves
-// tagged-union endpoints.
+// "kind" (derived from BindingKind). Source and Target are themselves
+// tagged-union endpoints. Stage 8: hops is always emitted — null for a
+// single-hop edge (Stages 0..7), a {"min", "max"} object for a variable-length
+// edge — matching the always-emit convention nullable / directed / returnsAll follow.
 func (b EdgeBinding) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Kind     string         `json:"kind"`
@@ -776,7 +1156,8 @@ func (b EdgeBinding) MarshalJSON() ([]byte, error) {
 		Target   Endpoint       `json:"target"`
 		Nullable bool           `json:"nullable"`
 		Directed bool           `json:"directed"`
-	}{Kind: b.Kind().String(), Variable: b.variable, Labels: b.labels, Source: b.source, Target: b.target, Nullable: b.nullable, Directed: b.directed})
+		Hops     *EdgeHops      `json:"hops"`
+	}{Kind: b.Kind().String(), Variable: b.variable, Labels: b.labels, Source: b.source, Target: b.target, Nullable: b.nullable, Directed: b.directed, Hops: b.hops})
 }
 
 // MarshalJSON renders a VarEndpoint as a tagged union member discriminated by

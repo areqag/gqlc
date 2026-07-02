@@ -76,14 +76,20 @@ type rawBranch struct {
 // part's scope. byVar is per-part: a name re-MATCHed in a later part is a fresh
 // binding there (spec §3). imported records the exported name → Stage-6 result
 // type from the prior part's WITH; classifyProjection consults it when a ref
-// resolves against an alias rather than a binding.
+// resolves against an alias rather than a binding. Stage 8 adds pathBindings
+// (the PathBinding values collected from named-path patterns in this part —
+// appended to bindings at build time) and pathMemberSink, a scratch pointer
+// collectNode / collectEdge push shape-faithful PathMember entries onto while
+// walking a named-path pattern part (nil outside a named path).
 type rawPart struct {
-	bindings   []*rawBinding
-	byVar      map[string]int
-	returns    []query.ReturnItem
-	returnsAll bool
-	refs       []varRef
-	imported   map[string]query.Type
+	bindings       []*rawBinding
+	byVar          map[string]int
+	returns        []query.ReturnItem
+	returnsAll     bool
+	refs           []varRef
+	imported       map[string]query.Type
+	pathBindings   []query.PathBinding
+	pathMemberSink *[]query.PathMember
 }
 
 func newRawPart() *rawPart {
@@ -95,7 +101,8 @@ func newRawPart() *rawPart {
 // nullable records the static, parser-time fact that the binding was first
 // introduced inside an OPTIONAL MATCH clause (ADR 0006). Once set, later
 // re-uses of the same variable in non-OPTIONAL clauses never demote it; that
-// is the resolver's job (see gqlc-lqm).
+// is the resolver's job (see gqlc-lqm). Stage 8: hops carries the var-length
+// hop range (nil for single-hop; a var-length edge projects as list<edge>).
 type rawBinding struct {
 	variable   string
 	labels     graph.LabelSet
@@ -104,7 +111,8 @@ type rawBinding struct {
 	source     query.Endpoint
 	target     query.Endpoint
 	nullable   bool
-	undirected bool // zero value false == directed; set true only on the undirected branch (inverted to keep existing literals zero-value-safe, see §4)
+	undirected bool            // zero value false == directed; set true only on the undirected branch (inverted to keep existing literals zero-value-safe, see §4)
+	hops       *query.EdgeHops // Stage 8: non-nil for a variable-length edge
 }
 
 // varRef is a use of a variable name that build() must resolve to a binding. An
@@ -218,9 +226,11 @@ func (l *listener) EnterOC_With(c *gen.OC_WithContext) {
 
 // exportedTypes computes the name → Stage-6 result type map the closed part
 // exports into the next part's scope. WITH * (returnsAll) forwards every
-// in-scope name — bindings by their node/edge kind and any prior imports
-// verbatim — because the resolver expands * downstream (Stage 4 §4). Explicit
-// items export each return item's Name against its Value.Type().
+// in-scope name — entity bindings by their node/edge kind (with a
+// var-length edge exporting as list<edge>, Stage 8), path bindings by
+// TypePath, and any prior imports verbatim — because the resolver expands *
+// downstream (Stage 4 §4). Explicit items export each return item's Name
+// against its Value.Type().
 func exportedTypes(closed *rawPart) map[string]query.Type {
 	out := map[string]query.Type{}
 	if closed.returnsAll {
@@ -235,8 +245,15 @@ func exportedTypes(closed *rawPart) map[string]query.Type {
 			case graph.Node:
 				out[rb.variable] = query.TypeNode{}
 			case graph.Edge:
-				out[rb.variable] = query.TypeEdge{}
+				if rb.hops != nil {
+					out[rb.variable] = query.NewTypeList(query.TypeEdge{})
+				} else {
+					out[rb.variable] = query.TypeEdge{}
+				}
 			}
+		}
+		for _, pb := range closed.pathBindings {
+			out[pb.Variable()] = query.TypePath{}
 		}
 		return out
 	}
@@ -280,12 +297,6 @@ func (l *listener) EnterOC_InQueryCall(*gen.OC_InQueryCallContext) {
 
 func (l *listener) EnterOC_StandaloneCall(*gen.OC_StandaloneCallContext) {
 	l.fail(fmt.Errorf("%w: CALL", ErrUnsupportedClause))
-}
-
-// EnterOC_RangeLiteral rejects a variable-length relationship ([*..]); the range
-// literal appears only inside a relationship detail.
-func (l *listener) EnterOC_RangeLiteral(*gen.OC_RangeLiteralContext) {
-	l.fail(fmt.Errorf("%w: variable-length relationship", ErrUnsupportedPattern))
 }
 
 // EnterOC_Return collects the result columns into the current (final) part of

@@ -147,20 +147,33 @@ func (l *listener) classifyProjection(e gen.IOC_ExpressionContext) (query.Projec
 
 // refType computes the Stage-6 result type of a RefProjection: TypeNode /
 // TypeEdge when the ref names a whole entity binding in the current part,
-// TypeUnknown for a property lookup (property typing is a schema concern per
-// ADR 0003), and the imported alias's type when the name comes from a prior
-// part's WITH. The lookup is per-part: the current part's own bindings first,
-// then the imported map WITH exported into this part.
+// TypeList(TypeEdge) for a variable-length edge binding (Stage 8; the
+// projected value is a list of edges rather than a single edge), TypePath
+// when the ref names a path binding (Stage 8), TypeUnknown for a property
+// lookup (property typing is a schema concern per ADR 0003), and the imported
+// alias's type when the name comes from a prior part's WITH. The lookup is
+// per-part: the current part's own entity bindings first, then path bindings
+// (identified by name in the part's pathBindings slice), then the imported
+// map WITH exported into this part.
 func (l *listener) refType(r query.Ref) query.Type {
 	if r.Property != "" {
 		return query.TypeUnknown{}
 	}
 	if idx, ok := l.curPart.byVar[r.Variable]; ok {
-		switch l.curPart.bindings[idx].kind {
+		rb := l.curPart.bindings[idx]
+		switch rb.kind {
 		case graph.Node:
 			return query.TypeNode{}
 		case graph.Edge:
+			if rb.hops != nil {
+				return query.NewTypeList(query.TypeEdge{})
+			}
 			return query.TypeEdge{}
+		}
+	}
+	for _, pb := range l.curPart.pathBindings {
+		if pb.Variable() == r.Variable {
+			return query.TypePath{}
 		}
 	}
 	if t, ok := l.curPart.imported[r.Variable]; ok {

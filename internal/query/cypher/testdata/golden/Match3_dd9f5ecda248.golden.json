@@ -23,7 +23,8 @@
                 "variable": "y"
               },
               "nullable": false,
-              "directed": false
+              "directed": false,
+              "hops": null
             },
             {
               "kind": "node",
@@ -44,7 +45,8 @@
                 "variable": "z"
               },
               "nullable": false,
-              "directed": false
+              "directed": false,
+              "hops": null
             },
             {
               "kind": "node",

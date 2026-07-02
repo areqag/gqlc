@@ -782,7 +782,250 @@ var mustParse = map[string]struct {
 			},
 		}}}}},
 	},
+	// Stage 8 — named path projected. `MATCH p = (a)-[r]->(b) RETURN p`: the
+	// pattern element is collected as three bindings (a, r, b) in textual
+	// order; the named path adds a PathBinding whose members list the three
+	// variable names in order. The RETURN item's type is TypePath — the
+	// resolver reads the path variable's members via the binding.
+	"named path projected": {
+		src: "MATCH p = (a)-[r]->(b)\nRETURN p",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("a", nil)),
+				must(query.NewEdgeBinding("r", nil,
+					must(query.NewVarEndpoint("a")),
+					must(query.NewVarEndpoint("b")),
+					true,
+				)),
+				must(query.NewNodeBinding("b", nil)),
+				must(query.NewPathBinding("p", []query.PathMember{
+					must(query.NewNamedNodeMember("a")),
+					must(query.NewNamedEdgeMember("r")),
+					must(query.NewNamedNodeMember("b")),
+				})),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "p", Value: query.NewRefProjection(query.Ref{Variable: "p"}, query.TypePath{})},
+			},
+		}),
+	},
+	// Stage 8 — named path over an anonymous edge. `MATCH p = (a)-[]-(b)`:
+	// the anonymous edge is a binding of its own (C1) but has no user-given
+	// name, so it surfaces on the PathBinding as an AnonEdgeMember — no
+	// name, no byVar collision (§1.2).
+	"named path over anonymous edge": {
+		src: "MATCH p = (a)-[]-(b)\nRETURN p",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("a", nil)),
+				must(query.NewEdgeBinding("", nil,
+					must(query.NewVarEndpoint("a")),
+					must(query.NewVarEndpoint("b")),
+					false,
+				)),
+				must(query.NewNodeBinding("b", nil)),
+				must(query.NewPathBinding("p", []query.PathMember{
+					must(query.NewNamedNodeMember("a")),
+					query.AnonEdgeMember{},
+					must(query.NewNamedNodeMember("b")),
+				})),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "p", Value: query.NewRefProjection(query.Ref{Variable: "p"}, query.TypePath{})},
+			},
+		}),
+	},
+	// Stage 8 (fix round) — the B1 collision case: a user pattern binds a
+	// node named literally `__anon_edge_0` (a legal oC_SymbolicName) and the
+	// path also contains anonymous edges. Under the pre-fix string-only
+	// members, the user's node name and the synthetic edge name both
+	// occupied the byVar namespace on the members list; the tagged sum
+	// makes the collision unrepresentable — the user's node is a
+	// NamedNodeMember(__anon_edge_0), the anonymous edges are
+	// AnonEdgeMember{} slots, and byVar lookup on either is unambiguous.
+	"named path with user variable named __anon_edge_0": {
+		src: "MATCH p = (__anon_edge_0)-[]-(b)-[]-(c)\nRETURN p",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("__anon_edge_0", nil)),
+				must(query.NewEdgeBinding("", nil,
+					must(query.NewVarEndpoint("__anon_edge_0")),
+					must(query.NewVarEndpoint("b")),
+					false,
+				)),
+				must(query.NewNodeBinding("b", nil)),
+				must(query.NewEdgeBinding("", nil,
+					must(query.NewVarEndpoint("b")),
+					must(query.NewVarEndpoint("c")),
+					false,
+				)),
+				must(query.NewNodeBinding("c", nil)),
+				must(query.NewPathBinding("p", []query.PathMember{
+					must(query.NewNamedNodeMember("__anon_edge_0")),
+					query.AnonEdgeMember{},
+					must(query.NewNamedNodeMember("b")),
+					query.AnonEdgeMember{},
+					must(query.NewNamedNodeMember("c")),
+				})),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "p", Value: query.NewRefProjection(query.Ref{Variable: "p"}, query.TypePath{})},
+			},
+		}),
+	},
+	// Stage 8 (fix round) — the SF1 shape-faithful case: a chain with an
+	// anonymous intermediate node `-()- ` inside a named path records an
+	// AnonNodeMember{} at its position, so the members slice has five
+	// entries for a 5-element chain instead of silently dropping the
+	// middle node to 4. Every binding the pattern emits is still there
+	// (a, edge, edge, b), but the path shape is now reconstructable from
+	// the members list alone (§1.2).
+	"named path with anonymous intermediate node": {
+		src: "MATCH p = (a)-[]-()-[]-(b)\nRETURN p",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("a", nil)),
+				must(query.NewEdgeBinding("", nil,
+					must(query.NewVarEndpoint("a")),
+					query.NewInlineEndpoint(nil),
+					false,
+				)),
+				must(query.NewEdgeBinding("", nil,
+					query.NewInlineEndpoint(nil),
+					must(query.NewVarEndpoint("b")),
+					false,
+				)),
+				must(query.NewNodeBinding("b", nil)),
+				must(query.NewPathBinding("p", []query.PathMember{
+					must(query.NewNamedNodeMember("a")),
+					query.AnonEdgeMember{},
+					query.AnonNodeMember{},
+					query.AnonEdgeMember{},
+					must(query.NewNamedNodeMember("b")),
+				})),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "p", Value: query.NewRefProjection(query.Ref{Variable: "p"}, query.TypePath{})},
+			},
+		}),
+	},
+	// Stage 8 — variable-length edge, bare `[*]`. The edge binding carries a
+	// non-nil Hops with both bounds nil; the RETURN item's type is
+	// list<edge>, computed by refType when the ref names a var-length edge.
+	"var-length edge unbounded": {
+		src: "MATCH (a)-[r*]->(b)\nRETURN r",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("a", nil)),
+				must(query.NewVarLengthEdgeBinding("r", nil,
+					must(query.NewVarEndpoint("a")),
+					must(query.NewVarEndpoint("b")),
+					true,
+					must(query.NewEdgeHops(nil, nil)),
+				)),
+				must(query.NewNodeBinding("b", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"}, query.NewTypeList(query.TypeEdge{}))},
+			},
+		}),
+	},
+	// Stage 8 — variable-length edge, bounded `[*1..3]`.
+	"var-length edge bounded": {
+		src: "MATCH (a)-[r*1..3]->(b)\nRETURN r",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("a", nil)),
+				must(query.NewVarLengthEdgeBinding("r", nil,
+					must(query.NewVarEndpoint("a")),
+					must(query.NewVarEndpoint("b")),
+					true,
+					must(query.NewEdgeHops(intPtr(1), intPtr(3))),
+				)),
+				must(query.NewNodeBinding("b", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"}, query.NewTypeList(query.TypeEdge{}))},
+			},
+		}),
+	},
+	// Stage 8 — variable-length undirected edge `-[*]-`. Pins the
+	// composition of the Stage-5 direction axis and the Stage-8 hop axis:
+	// both are recorded independently on the binding.
+	"var-length edge undirected": {
+		src: "MATCH (a)-[r*]-(b)\nRETURN r",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("a", nil)),
+				must(query.NewVarLengthEdgeBinding("r", nil,
+					must(query.NewVarEndpoint("a")),
+					must(query.NewVarEndpoint("b")),
+					false,
+					must(query.NewEdgeHops(nil, nil)),
+				)),
+				must(query.NewNodeBinding("b", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"}, query.NewTypeList(query.TypeEdge{}))},
+			},
+		}),
+	},
+	// Stage 8 — multi-type relationship `[r:A|B]`. The two types are recorded
+	// on the binding's LabelSet in textual first-appearance order; the
+	// resolver forms one candidate EdgeKey per type post-freeze. The RETURN
+	// item still types as TypeEdge (a multi-type edge is still a single-hop
+	// edge from the type-interface's perspective; the label-set carries the
+	// widened admissible type set).
+	"multi-type edge": {
+		src: "MATCH (a)-[r:KNOWS|LOVES]->(b)\nRETURN r",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("a", nil)),
+				must(query.NewEdgeBinding("r", graph.LabelSet{"KNOWS", "LOVES"},
+					must(query.NewVarEndpoint("a")),
+					must(query.NewVarEndpoint("b")),
+					true,
+				)),
+				must(query.NewNodeBinding("b", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"}, query.TypeEdge{})},
+			},
+		}),
+	},
+	// Stage 8 — named path over a var-length anonymous edge. Combines every
+	// axis: the path binds three members (a, anonymous edge, b), the middle
+	// member is a var-length anonymous edge with bounded hops, and the
+	// RETURN item's type is TypePath.
+	"named path over var-length anonymous edge": {
+		src: "MATCH p = (a)-[*1..3]->(b)\nRETURN p",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("a", nil)),
+				must(query.NewVarLengthEdgeBinding("", nil,
+					must(query.NewVarEndpoint("a")),
+					must(query.NewVarEndpoint("b")),
+					true,
+					must(query.NewEdgeHops(intPtr(1), intPtr(3))),
+				)),
+				must(query.NewNodeBinding("b", nil)),
+				must(query.NewPathBinding("p", []query.PathMember{
+					must(query.NewNamedNodeMember("a")),
+					query.AnonEdgeMember{},
+					must(query.NewNamedNodeMember("b")),
+				})),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "p", Value: query.NewRefProjection(query.Ref{Variable: "p"}, query.TypePath{})},
+			},
+		}),
+	},
 }
+
+// intPtr is a small helper to take the address of an int literal so
+// NewEdgeHops (which takes *int for optional bounds) can be called cleanly
+// from the mustParse table. Extracted here so the pin table stays terse.
+func intPtr(i int) *int { return &i }
 
 // must lifts a fallible model constructor into an expression usable in a struct
 // literal: it panics if err is non-nil. The mustParse inputs are hard-coded valid
@@ -824,11 +1067,13 @@ var mustReject = map[string]struct {
 	// Their queries now parse as ExprProjection, and the sentinel is deleted;
 	// see the mustParse cases "arithmetic over projection" and "unary-signed
 	// projection" for the accept-path.)
-	// Match2 [6] multi-type relationship [:A|B] -> ErrUnsupportedPattern
-	"multi-type relationship": {
-		query: "MATCH (n)-[r:KNOWS|HATES]->(x)\nRETURN r",
-		want:  cypher.ErrUnsupportedPattern,
-	},
+	// (Stage 8: the "multi-type relationship" pin from Stages 0-7 — the
+	// former ErrUnsupportedPattern fail-site — is RETIRED. The three
+	// pattern shapes (named paths, variable-length, multi-type) now parse
+	// under Stage 8's widened model; see the "multi-type edge" and its
+	// siblings in mustParse for the accept-path. ErrUnsupportedPattern is
+	// deleted from the sentinel set entirely — its last remaining fail-site
+	// is retired.)
 	// Return1 [2] returning an undefined variable -> ErrUnboundVariable
 	"unbound variable": {
 		query: "MATCH ()\nRETURN foo",
@@ -879,16 +1124,17 @@ func TestMustReject(t *testing.T) {
 	}
 }
 
-// allSentinels is the canonical list of the five Parse sentinels — the single
+// allSentinels is the canonical list of the four Parse sentinels — the single
 // source of truth TestSentinelReachability checks against. A new sentinel must be
 // added here (and exercised by a mustReject case); a removed one must be dropped.
 // errNotImplemented is deliberately absent: it is the run-A stub, not a contract
 // sentinel. Stage 6 retired ErrUnsupportedProjection: the projection classifier
 // now accepts every scalar expression at RETURN / WITH position, so the sentinel
-// has no fail-site left to guard.
+// has no fail-site left to guard. Stage 8 retired ErrUnsupportedPattern: the
+// three pattern shapes it flagged (named paths, variable-length, multi-type)
+// all parse under the widened model, so the sentinel has no fail-site left.
 var allSentinels = []error{
 	cypher.ErrUnsupportedClause,
-	cypher.ErrUnsupportedPattern,
 	cypher.ErrUnsupportedParameter,
 	cypher.ErrUnboundVariable,
 	cypher.ErrVariableKindConflict,
@@ -1007,13 +1253,26 @@ func assertReferentialIntegrity(rt *rapid.T, q query.Query, src string) {
 			resolves := func(v string) bool { return v != "" && named[v] }
 
 			for _, b := range part.Bindings {
-				eb, ok := b.(query.EdgeBinding)
-				if !ok {
-					continue
-				}
-				for _, ep := range []query.Endpoint{eb.Source(), eb.Target()} {
-					if ve, ok := ep.(query.VarEndpoint); ok && !resolves(ve.Variable()) {
-						rt.Fatalf("endpoint variable %q has no binding in %q", ve.Variable(), src)
+				switch bb := b.(type) {
+				case query.EdgeBinding:
+					for _, ep := range []query.Endpoint{bb.Source(), bb.Target()} {
+						if ve, ok := ep.(query.VarEndpoint); ok && !resolves(ve.Variable()) {
+							rt.Fatalf("endpoint variable %q has no binding in %q", ve.Variable(), src)
+						}
+					}
+				case query.PathBinding:
+					// Stage 8 (fix round, B1): every named member must resolve
+					// to a binding of the matching kind in the same part.
+					// Anonymous members carry no name, so no lookup is done.
+					for i, m := range bb.Members() {
+						if m.Anonymous() {
+							continue
+						}
+						v := m.Variable()
+						if !resolves(v) {
+							rt.Fatalf("path %q member %d %q has no binding in %q", bb.Variable(), i, v, src)
+						}
+						assertPathMemberKindAgrees(rt, part, bb, i, m, src)
 					}
 				}
 			}
@@ -1122,14 +1381,44 @@ func assertParametersDeduped(rt *rapid.T, q query.Query, src string) {
 	}
 }
 
-// bindingVariable reads the variable of either binding variant via its accessor.
+// bindingVariable reads the variable of any binding variant via its accessor.
+// Stage 8: PathBinding joins the sum with an always-non-empty variable.
 func bindingVariable(b query.Binding) string {
 	switch v := b.(type) {
 	case query.NodeBinding:
 		return v.Variable()
 	case query.EdgeBinding:
 		return v.Variable()
+	case query.PathBinding:
+		return v.Variable()
 	default:
 		return ""
+	}
+}
+
+// assertPathMemberKindAgrees checks a named path member's kind matches the
+// resolved binding's kind in the same part: a NamedNodeMember must resolve
+// to a NodeBinding, a NamedEdgeMember to an EdgeBinding. This is the
+// referential-integrity guard the string-only members representation
+// could not offer — under the tagged sum, a mismatch is a parser bug.
+func assertPathMemberKindAgrees(rt *rapid.T, part query.Part, pb query.PathBinding, i int, m query.PathMember, src string) {
+	name := m.Variable()
+	for _, b := range part.Bindings {
+		if bindingVariable(b) != name {
+			continue
+		}
+		switch b.(type) {
+		case query.NodeBinding:
+			if m.Kind() != query.BindingNode {
+				rt.Fatalf("path %q member %d (%q) is %s in the path but the part binds it as node in %q",
+					pb.Variable(), i, name, m.Kind().String(), src)
+			}
+		case query.EdgeBinding:
+			if m.Kind() != query.BindingEdge {
+				rt.Fatalf("path %q member %d (%q) is %s in the path but the part binds it as edge in %q",
+					pb.Variable(), i, name, m.Kind().String(), src)
+			}
+		}
+		return
 	}
 }
