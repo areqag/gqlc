@@ -147,14 +147,11 @@ func (l TypeList) Element() Type { return l.element }
 
 // String composes the wire tag as "list<" + element.String() + ">", so nested
 // lists compose ("list<list<int>>") and an untyped element reads
-// "list<unknown>". Falls back to "unknown" element when the zero value slips
-// through (defence-in-depth against a caller who bypasses the constructor).
+// "list<unknown>". NewTypeList normalises a nil element to TypeUnknown, so a
+// TypeList value that exists always has a non-nil element and the stringer
+// reads it directly.
 func (l TypeList) String() string {
-	elem := "unknown"
-	if l.element != nil {
-		elem = l.element.String()
-	}
-	return "list<" + elem + ">"
+	return "list<" + l.element.String() + ">"
 }
 
 // MarshalJSON renders TypeList as its wire tag, quoted. The element type

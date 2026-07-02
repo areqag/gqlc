@@ -331,7 +331,16 @@ func (i ReturnItem) MarshalJSON() ([]byte, error) {
 // (the referenced bindings as Refs), its Stage-6 result type, and the one
 // cardinality-bearing distinction (aggregate vs not); nothing of the
 // expression tree (ADR 0003).
+//
+// Every variant carries Type() Type — the whole point of Stage 6 is that every
+// projected column carries a result type. Promoting the accessor onto the
+// interface removes the structural-typing shim listeners once needed to read
+// it and keeps the sum's exhaustiveness honest.
 type Projection interface {
+	// Type is the projection's Stage-6 result type; TypeUnknown when the parser
+	// cannot commit schema-free (property lookups, function results, aggregate
+	// results, NULL propagation).
+	Type() Type
 	isProjection()
 }
 
