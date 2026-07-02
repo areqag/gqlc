@@ -270,6 +270,42 @@ var mustParse = map[string]struct {
 			},
 		},
 	},
+	// Match7 [1] "Simple OPTIONAL MATCH on empty graph" — verbatim TCK query.
+	// The single node binding is introduced in OPTIONAL MATCH, so its nullable
+	// flag is true (ADR 0006). The RETURN item traces back to it via Ref{n,""}.
+	"optional match simple": {
+		src: "OPTIONAL MATCH (n)\nRETURN n",
+		want: query.Query{
+			Bindings: []query.Binding{
+				must(query.NewNullableNodeBinding("n", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "n", Ref: query.Ref{Variable: "n"}},
+			},
+		},
+	},
+	// Match7 [2] "OPTIONAL MATCH with previously bound nodes" — verbatim TCK
+	// query. Pins the reuse rule (ADR 0006): n is first introduced in the
+	// required MATCH (non-nullable); the anonymous :NOT_EXIST edge and x are
+	// first introduced in OPTIONAL MATCH (both nullable). The anonymous edge
+	// carries the nullable flag uniformly even though no Ref reads it.
+	"optional match reuses prior binding": {
+		src: "MATCH (n)\nOPTIONAL MATCH (n)-[:NOT_EXIST]->(x)\nRETURN n, x",
+		want: query.Query{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("n", nil)),
+				must(query.NewNullableEdgeBinding("", graph.LabelSet{"NOT_EXIST"},
+					must(query.NewVarEndpoint("n")),
+					must(query.NewVarEndpoint("x")),
+				)),
+				must(query.NewNullableNodeBinding("x", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "n", Ref: query.Ref{Variable: "n"}},
+				{Name: "x", Ref: query.Ref{Variable: "x"}},
+			},
+		},
+	},
 	// Temporal4 [1] property return with no alias: E1 derives the column name from
 	// the verbatim expression text — "n.created", not "created".
 	"property return no alias": {
@@ -311,8 +347,11 @@ var mustReject = map[string]struct {
 	query string
 	want  error
 }{
-	// Match3 [27] OPTIONAL MATCH -> ErrUnsupportedClause
-	"optional match": {
+	// Match3 [27] "Matching from null nodes" — verbatim TCK query. Stage 2
+	// accepts OPTIONAL MATCH, so the rejection now fires on the WITH clause
+	// (still out of scope; Stage 4). The query still exercises
+	// ErrUnsupportedClause, just via a different fail-site.
+	"with clause": {
 		query: "OPTIONAL MATCH (a)\nWITH a\nMATCH (a)-->(b)\nRETURN b",
 		want:  cypher.ErrUnsupportedClause,
 	},

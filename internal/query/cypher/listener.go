@@ -52,6 +52,10 @@ type listener struct {
 
 // rawBinding is a binding under construction: its variable, accumulated labels
 // (ordered union, first appearance), kind, and — for an edge — its endpoints.
+// nullable records the static, parser-time fact that the binding was first
+// introduced inside an OPTIONAL MATCH clause (ADR 0006). Once set, later
+// re-uses of the same variable in non-OPTIONAL clauses never demote it; that
+// is the resolver's job (see gqlc-lqm).
 type rawBinding struct {
 	variable string
 	labels   graph.LabelSet
@@ -59,6 +63,7 @@ type rawBinding struct {
 	kind     graph.EntityKind
 	source   query.Endpoint
 	target   query.Endpoint
+	nullable bool
 }
 
 // varRef is a use of a variable name that build() must resolve to a binding. An
@@ -112,15 +117,15 @@ func (l *listener) walk(tree antlr.Tree) error {
 
 // --- clause rejections (spec §3, category-grained sentinels) ---
 
-// EnterOC_Match rejects OPTIONAL MATCH (stage 2) and otherwise collects the
-// clause's pattern and WHERE. Collection runs here, in walk order, so first
-// appearance of a variable/parameter is the source order across all MATCHes.
+// EnterOC_Match collects one MATCH or OPTIONAL MATCH clause's pattern and
+// WHERE. Bindings first introduced inside an OPTIONAL clause are marked
+// nullable (ADR 0006); the WHERE itself does not introduce bindings, so it
+// reads parameters the same way in either case. Collection runs here, in
+// walk order, so first appearance of a variable/parameter is the source
+// order across all MATCHes.
 func (l *listener) EnterOC_Match(c *gen.OC_MatchContext) {
-	if c.OPTIONAL() != nil {
-		l.fail(fmt.Errorf("%w: OPTIONAL MATCH", ErrUnsupportedClause))
-		return
-	}
-	l.collectPattern(c.OC_Pattern())
+	optional := c.OPTIONAL() != nil
+	l.collectPattern(c.OC_Pattern(), optional)
 	if w := c.OC_Where(); w != nil {
 		l.mineWhere(w)
 	}
