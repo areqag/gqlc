@@ -41,6 +41,20 @@ func TestTypeListElement(t *testing.T) {
 	require.Equal(t, query.TypeInt{}, l.Element())
 }
 
+// TestTypeListNilElementInvariant pins the "invariant lives in one place" fix:
+// NewTypeList is the sole writer of the element field, so a nil element passed
+// in must be normalised to TypeUnknown before the value escapes. String() and
+// MarshalJSON() then read the element directly with no fallback of their own —
+// there is no other TypeList value that can exist.
+func TestTypeListNilElementInvariant(t *testing.T) {
+	l := query.NewTypeList(nil)
+	require.Equal(t, query.TypeUnknown{}, l.Element())
+	require.Equal(t, "list<unknown>", l.String())
+	b, err := json.Marshal(l)
+	require.NoError(t, err)
+	require.JSONEq(t, `"list<unknown>"`, string(b))
+}
+
 // TestRefProjectionType pins the Stage-6 accessor: RefProjection carries its
 // result type as the fourth exported datum (after variable, property, and the
 // Ref shape it already had). A whole-entity node ref types as TypeNode; the

@@ -618,6 +618,20 @@ var mustParse = map[string]struct {
 			},
 		},
 	},
+	// Stage 6 — CASE WHEN … THEN … ELSE … END. Pins that WHEN predicates
+	// contribute refs only, never arm-type: the boolean WHEN is walked but
+	// its type is not unified with the value-producing arms. THEN 'a' and
+	// ELSE 'b' both type as TypeString, so the CASE types as TypeString
+	// (not TypeUnknown, which is what happens if a boolean WHEN sneaks
+	// into arm-type unification).
+	"case when-then-else types by arms only": {
+		src: "RETURN CASE WHEN true THEN 'a' ELSE 'b' END",
+		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+			Returns: []query.ReturnItem{
+				{Name: "CASE WHEN true THEN 'a' ELSE 'b' END", Value: query.NewExprProjection(nil, query.TypeString{})},
+			},
+		}}}}},
+	},
 	// Stage 4 — UNION ALL variant. Same two-branch shape; the combinator is
 	// UnionAll (the ALL token is present), the cardinality-preserving join.
 	"union all two branches": {
