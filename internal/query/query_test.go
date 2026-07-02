@@ -101,16 +101,16 @@ func TestNewEdgeBindingRejectsMissingEndpoint(t *testing.T) {
 }
 
 func TestNewEdgeBindingDefaultsToNonNullable(t *testing.T) {
-	src, _ := query.NewVarEndpoint("a")
-	tgt, _ := query.NewVarEndpoint("b")
+	src := must(query.NewVarEndpoint("a"))
+	tgt := must(query.NewVarEndpoint("b"))
 	b, err := query.NewEdgeBinding("r", nil, src, tgt, true)
 	require.NoError(t, err)
 	require.False(t, b.Nullable())
 }
 
 func TestNewNullableEdgeBinding(t *testing.T) {
-	src, _ := query.NewVarEndpoint("a")
-	tgt, _ := query.NewVarEndpoint("b")
+	src := must(query.NewVarEndpoint("a"))
+	tgt := must(query.NewVarEndpoint("b"))
 	b, err := query.NewNullableEdgeBinding("r", graph.LabelSet{"KNOWS"}, src, tgt, true)
 	require.NoError(t, err)
 	require.Equal(t, "r", b.Variable())
@@ -133,7 +133,7 @@ func TestNewNullableEdgeBindingAllowsAnonymousVariableAndUntyped(t *testing.T) {
 }
 
 func TestNewNullableEdgeBindingRejectsMissingEndpoint(t *testing.T) {
-	tgt, _ := query.NewVarEndpoint("b")
+	tgt := must(query.NewVarEndpoint("b"))
 	_, err := query.NewNullableEdgeBinding("r", nil, nil, tgt, true)
 	require.Error(t, err)
 	_, err = query.NewNullableEdgeBinding("r", nil, tgt, nil, true)
@@ -143,8 +143,8 @@ func TestNewNullableEdgeBindingRejectsMissingEndpoint(t *testing.T) {
 func TestEdgeBindingDirected(t *testing.T) {
 	// The direction marker (Stage 5): true for a one-arrow edge, false for an
 	// undirected edge. It is a constructor parameter and is always emitted in JSON.
-	src, _ := query.NewVarEndpoint("a")
-	tgt, _ := query.NewVarEndpoint("b")
+	src := must(query.NewVarEndpoint("a"))
+	tgt := must(query.NewVarEndpoint("b"))
 
 	directed, err := query.NewEdgeBinding("r", nil, src, tgt, true)
 	require.NoError(t, err)
@@ -550,14 +550,14 @@ func TestMarshalJSONEmitsNullable(t *testing.T) {
 	require.NoError(t, err)
 	b, err := query.NewNullableNodeBinding("b", nil)
 	require.NoError(t, err)
-	src, _ := query.NewVarEndpoint("a")
-	tgt, _ := query.NewVarEndpoint("b")
+	src := must(query.NewVarEndpoint("a"))
+	tgt := must(query.NewVarEndpoint("b"))
 	e, err := query.NewNullableEdgeBinding("r", nil, src, tgt, true)
 	require.NoError(t, err)
 
-	outA, _ := json.Marshal(a)
-	outB, _ := json.Marshal(b)
-	outE, _ := json.Marshal(e)
+	outA := must(json.Marshal(a))
+	outB := must(json.Marshal(b))
+	outE := must(json.Marshal(e))
 	require.Contains(t, string(outA), `"nullable":false`)
 	require.Contains(t, string(outB), `"nullable":true`)
 	require.Contains(t, string(outE), `"nullable":true`)
@@ -569,8 +569,8 @@ func TestMarshalJSONEmitsNullable(t *testing.T) {
 func TestBindingDiscriminatorTracksEntityKind(t *testing.T) {
 	node, err := query.NewNodeBinding("p", nil)
 	require.NoError(t, err)
-	src, _ := query.NewVarEndpoint("a")
-	tgt, _ := query.NewVarEndpoint("b")
+	src := must(query.NewVarEndpoint("a"))
+	tgt := must(query.NewVarEndpoint("b"))
 	edge, err := query.NewEdgeBinding("r", nil, src, tgt, true)
 	require.NoError(t, err)
 

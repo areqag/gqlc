@@ -17,11 +17,14 @@ linters:
     - unused
     - predeclared
     - gocritic
+    - noctx
+    - contextcheck
     # codebase-specific invariants
     - exhaustive
     - depguard
     - musttag
     - forbidigo
+    - ireturn
     # tests
     - testifylint
     - thelper
@@ -55,6 +58,11 @@ linters:
               desc: grammar packages are importable only by internal/query/cypher and internal/schema/gql
             - pkg: github.com/antlr4-go/antlr
               desc: the ANTLR runtime is importable only by the parser packages
+    errcheck:
+      # the default mode lets `_ = f()` discard errors silently; strict mode
+      # makes every discard a visible, justified decision
+      check-blank: true
+      check-type-assertions: true
     exhaustive:
       default-signifies-exhaustive: true
     forbidigo:
@@ -63,6 +71,24 @@ linters:
           msg: use log/slog via internal/logger; direct printing bypasses structured logging
         - pattern: ^log\.(Print|Fatal|Panic)
           msg: use log/slog via internal/logger, not the legacy log package
+    ireturn:
+      # return structs, not interfaces — with two deliberate exceptions: the
+      # closed sums of the query model (Binding, Endpoint, Projection, Use are
+      # either/or types; there is no concrete type to return) and the Parser
+      # factories (returning the unexported struct would trip unexported-return)
+      allow:
+        - anon
+        - error
+        - empty
+        - stdlib
+        - generic
+        - github.com/areqag/gqlc/internal/query\.(Parser|Binding|Endpoint|Projection|Use)$
+        - github.com/areqag/gqlc/internal/schema\.Parser$
+        # ANTLR's Go target generates every grammar-rule context as an
+        # interface, so tree-walking helpers have no concrete type to return.
+        # depguard already restricts who may import these packages at all.
+        - github.com/areqag/gqlc/internal/grammar/
+        - github.com/antlr4-go/antlr/
     misspell:
       # the codebase is written in British English (see CONTEXT.md: canonicalised,
       # modelled, serialise); UK locale enforces that consistently

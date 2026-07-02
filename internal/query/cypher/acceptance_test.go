@@ -199,7 +199,10 @@ type scenarioState struct {
 type stateKey struct{}
 
 func stateFrom(ctx context.Context) *scenarioState {
-	st, _ := ctx.Value(stateKey{}).(*scenarioState)
+	st, ok := ctx.Value(stateKey{}).(*scenarioState)
+	if !ok {
+		return nil
+	}
 	return st
 }
 
@@ -269,7 +272,9 @@ func TestSkiplistOrphans(t *testing.T) {
 				t.Fatalf("open %s: %v", path, err)
 			}
 			doc, err := gherkin.ParseGherkinDocument(f, func() string { return "" })
-			_ = f.Close()
+			if cerr := f.Close(); cerr != nil {
+				t.Fatalf("close %s: %v", path, cerr)
+			}
 			if err != nil {
 				t.Fatalf("parse %s: %v", path, err)
 			}
@@ -438,7 +443,9 @@ func harvestExecutingQueries(t *testing.T, dirs []string) []string {
 				t.Fatalf("open %s: %v", path, err)
 			}
 			doc, err := gherkin.ParseGherkinDocument(f, func() string { return "" })
-			_ = f.Close()
+			if cerr := f.Close(); cerr != nil {
+				t.Fatalf("close %s: %v", path, cerr)
+			}
 			if err != nil {
 				t.Fatalf("parse %s: %v", path, err)
 			}

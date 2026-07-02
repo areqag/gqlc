@@ -28,7 +28,11 @@ func main() {
 		slog.ErrorContext(ctx, "failed to open schema", "err", err)
 		return
 	}
-	defer func() { _ = f.Close() }()
+	defer func() {
+		if err := f.Close(); err != nil {
+			slog.WarnContext(ctx, "failed to close schema file", "err", err)
+		}
+	}()
 
 	p := schema_parser_gql.New()
 	if _, err := p.Parse(f); err != nil {
