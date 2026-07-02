@@ -97,11 +97,13 @@
   ],
   "Returns": [
     {
-      "Name": "out.name",
-      "Ref": {
-        "Variable": "out",
-        "Property": "name"
+      "name": "out.name",
+      "value": {
+        "kind": "ref",
+        "variable": "out",
+        "property": "name"
       }
     }
-  ]
+  ],
+  "returnsAll": false
 }

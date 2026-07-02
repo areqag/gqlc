@@ -1,0 +1,22 @@
+{
+  "Bindings": [
+    {
+      "kind": "node",
+      "variable": "n",
+      "labels": null,
+      "nullable": false
+    }
+  ],
+  "Parameters": null,
+  "Returns": [
+    {
+      "name": "cOuNt( * )",
+      "value": {
+        "kind": "aggregate",
+        "func": "count",
+        "refs": null
+      }
+    }
+  ],
+  "returnsAll": false
+}

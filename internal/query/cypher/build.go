@@ -46,7 +46,7 @@ func (l *listener) build() (query.Query, error) {
 		params = append(params, *p)
 	}
 
-	q := query.Query{Returns: l.returns}
+	q := query.Query{Returns: l.returns, ReturnsAll: l.returnsAll}
 	if len(bindings) > 0 {
 		q.Bindings = bindings
 	}

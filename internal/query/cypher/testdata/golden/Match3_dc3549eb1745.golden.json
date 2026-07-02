@@ -30,25 +30,29 @@
   "Parameters": null,
   "Returns": [
     {
-      "Name": "a",
-      "Ref": {
-        "Variable": "a",
-        "Property": ""
+      "name": "a",
+      "value": {
+        "kind": "ref",
+        "variable": "a",
+        "property": ""
       }
     },
     {
-      "Name": "r",
-      "Ref": {
-        "Variable": "r",
-        "Property": ""
+      "name": "r",
+      "value": {
+        "kind": "ref",
+        "variable": "r",
+        "property": ""
       }
     },
     {
-      "Name": "b",
-      "Ref": {
-        "Variable": "b",
-        "Property": ""
+      "name": "b",
+      "value": {
+        "kind": "ref",
+        "variable": "b",
+        "property": ""
       }
     }
-  ]
+  ],
+  "returnsAll": false
 }

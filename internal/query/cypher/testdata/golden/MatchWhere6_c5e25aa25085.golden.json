@@ -50,11 +50,13 @@
   "Parameters": null,
   "Returns": [
     {
-      "Name": "x0.name",
-      "Ref": {
-        "Variable": "x0",
-        "Property": "name"
+      "name": "x0.name",
+      "value": {
+        "kind": "ref",
+        "variable": "x0",
+        "property": "name"
       }
     }
-  ]
+  ],
+  "returnsAll": false
 }

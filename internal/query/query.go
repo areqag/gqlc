@@ -27,8 +27,17 @@ type Query struct {
 	Parameters []Parameter
 
 	// Returns are the query's result columns, in source order with duplicates
-	// kept: RETURN a, b is a different shape from RETURN b, a.
+	// kept: RETURN a, b is a different shape from RETURN b, a. Empty when
+	// ReturnsAll is true (RETURN * does not mix with explicit items at Stage 3).
 	Returns []ReturnItem
+
+	// ReturnsAll is true iff the projection body was the '*' alternative
+	// (RETURN *). It is a query-level wildcard over the in-scope bindings, not a
+	// return item: without a schema the parser cannot enumerate the columns '*'
+	// expands to, and the resolver owns expansion (Stage-3 spec §3). When true,
+	// Returns is empty. Always emitted in JSON (matching the always-emit
+	// convention the sum tags follow).
+	ReturnsAll bool `json:"returnsAll"`
 }
 
 // Binding is a query variable bound to a graph entity, carrying its labels as
@@ -212,10 +221,165 @@ type Ref struct {
 }
 
 // ReturnItem is one result column: its name (an explicit alias, or derived from
-// the source) and the Ref tracing what it projects.
+// the source) and the Value describing what it projects — a Projection sum.
 type ReturnItem struct {
-	Name string
-	Ref  Ref
+	Name  string
+	Value Projection
+}
+
+// MarshalJSON renders a ReturnItem with its Value as a tagged-union member one
+// level deep, matching the Binding/Use convention: lowercase "name" and "value"
+// keys, the projection carrying its own "kind" discriminator. (The pre-Stage-3
+// shape used PascalCase "Name"/"Ref"; the move to a sum makes the value a
+// tagged union, so the item joins the sum-marshalling convention.)
+func (i ReturnItem) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Name  string     `json:"name"`
+		Value Projection `json:"value"`
+	}{Name: i.Name, Value: i.Value})
+}
+
+// Projection is what one ReturnItem projects. It is a closed sum of
+// RefProjection, LiteralProjection, FuncProjection and AggregateProjection — no
+// other type can implement it — so a projection is exactly one of the four. Each
+// variant holds its data in unexported fields, so the smart constructors
+// (NewRefProjection / NewLiteralProjection / NewFuncProjection /
+// NewAggregateProjection) are the only way to construct a non-zero value,
+// mirroring the Use sum (internal/query/query.go).
+//
+// A projection carries exactly what the resolver needs to reach a schema type
+// (the referenced bindings as Refs) and the one cardinality-bearing distinction
+// (aggregate vs not), and nothing of the expression tree (ADR 0003).
+type Projection interface {
+	isProjection()
+}
+
+// RefProjection wraps a Ref — the Stage-0/1/2 var / var.prop case verbatim. The
+// listener only builds it after the shape gates accept a bare variable or a
+// single-level property lookup.
+type RefProjection struct {
+	ref Ref // the binding or binding property this column projects
+}
+
+// NewRefProjection builds a RefProjection. Total: the listener supplies a Ref it
+// has already validated against the projection shape gates, so no constructor
+// error is possible — mirrors NewPropertyUse's posture.
+func NewRefProjection(r Ref) RefProjection {
+	return RefProjection{ref: r}
+}
+
+// Ref is the binding or binding property this column projects.
+func (p RefProjection) Ref() Ref { return p.ref }
+
+func (RefProjection) isProjection() {}
+
+// LiteralProjection carries no structured value — only the surface text is the
+// column name (already on ReturnItem.Name). A literal's value lives below the
+// type-interface boundary (ADR 0005, B1): re-executed from the original text,
+// never reconstructed. The variant exists so the column is counted and named; it
+// carries no Ref because a literal traces back to no binding.
+type LiteralProjection struct{}
+
+// NewLiteralProjection builds a LiteralProjection. Total: it carries no data.
+func NewLiteralProjection() LiteralProjection {
+	return LiteralProjection{}
+}
+
+func (LiteralProjection) isProjection() {}
+
+// FuncProjection is a non-aggregate function call. It carries the function's
+// referenced bindings as []Ref (the var/var.prop arguments the resolver must
+// trace) and nothing about the function itself — not its name, arity or return
+// type. The function's identity and signature are a resolver/engine concern
+// below the type-interface boundary (ADR 0005); the model carries only "this
+// column depends on these bindings" so referential integrity holds.
+type FuncProjection struct {
+	refs []Ref // the var/var.prop arguments the function touches
+}
+
+// NewFuncProjection builds a FuncProjection over the bindings the call
+// references. Total: the listener supplies Refs it has already mined.
+func NewFuncProjection(refs []Ref) FuncProjection {
+	return FuncProjection{refs: refs}
+}
+
+// Refs are the var/var.prop arguments the function touches.
+func (p FuncProjection) Refs() []Ref { return p.refs }
+
+func (FuncProjection) isProjection() {}
+
+// AggregateProjection is an aggregate function call. It carries an AggregateFunc
+// (the cardinality-bearing distinction §4: an aggregate collapses rows, a fact
+// the generated code models differently) and the referenced bindings as []Ref.
+// count(*) is the degenerate case — AggCount with an empty []Ref. As with
+// FuncProjection, no function name beyond the aggregate kind is carried.
+type AggregateProjection struct {
+	fn   AggregateFunc // which aggregate this is (the cardinality signal)
+	refs []Ref         // the var/var.prop arguments the aggregate touches
+}
+
+// NewAggregateProjection builds an AggregateProjection. Total: the listener
+// supplies an AggregateFunc from the closed enum and Refs it has already mined.
+func NewAggregateProjection(fn AggregateFunc, refs []Ref) AggregateProjection {
+	return AggregateProjection{fn: fn, refs: refs}
+}
+
+// Func is which aggregate this is — the cardinality-bearing distinction (§4).
+func (p AggregateProjection) Func() AggregateFunc { return p.fn }
+
+// Refs are the var/var.prop arguments the aggregate touches.
+func (p AggregateProjection) Refs() []Ref { return p.refs }
+
+func (AggregateProjection) isProjection() {}
+
+// AggregateFunc identifies one of the openCypher aggregating functions. The set
+// is closed and known (§4), so it is an int-backed enum with a stringer —
+// mirroring graph.EntityKind / ClauseSlot — and the JSON "func" tag derives from
+// the one source (String), so it cannot drift.
+type AggregateFunc int
+
+const (
+	// AggCount is the count(...) aggregate (count(*) is its degenerate case).
+	AggCount AggregateFunc = iota
+	// AggSum is the sum(...) aggregate.
+	AggSum
+	// AggCollect is the collect(...) aggregate.
+	AggCollect
+	// AggMin is the min(...) aggregate.
+	AggMin
+	// AggMax is the max(...) aggregate.
+	AggMax
+	// AggAvg is the avg(...) aggregate.
+	AggAvg
+	// AggStdev is the stDev/stDevP aggregate.
+	AggStdev
+	// AggPercentile is the percentileCont/percentileDisc aggregate.
+	AggPercentile
+)
+
+// String is the canonical lowercase name of the aggregate. It is the single
+// source the JSON "func" discriminator derives from, so the serialised name can
+// never drift from the enum. The default arm is AggCount, the degenerate
+// count(*) case.
+func (f AggregateFunc) String() string {
+	switch f {
+	case AggSum:
+		return "sum"
+	case AggCollect:
+		return "collect"
+	case AggMin:
+		return "min"
+	case AggMax:
+		return "max"
+	case AggAvg:
+		return "avg"
+	case AggStdev:
+		return "stdev"
+	case AggPercentile:
+		return "percentile"
+	default:
+		return "count"
+	}
 }
 
 // Parameter is a query input. Uses are the value-positions where the parameter
@@ -340,6 +504,16 @@ const (
 	endpointKindInline = "inline"
 )
 
+// The Projection discriminators have no graph-vocabulary counterpart (the
+// distinction is query-side only), so they are named here, the one place they
+// are emitted. They sit next to the other kind constants per the Stage-3 spec §5.
+const (
+	projectionKindRef       = "ref"
+	projectionKindLiteral   = "literal"
+	projectionKindFunc      = "func"
+	projectionKindAggregate = "aggregate"
+)
+
 // MarshalJSON renders a NodeBinding as a tagged union member discriminated by
 // "kind", so the Binding sum marshals to a stable, self-describing shape across
 // both variants. The tag derives from graph.EntityKind, so it cannot drift from
@@ -405,4 +579,66 @@ func (u ClauseSlotUse) MarshalJSON() ([]byte, error) {
 		Kind string `json:"kind"`
 		Slot string `json:"slot"`
 	}{Kind: useKindClauseSlot, Slot: u.slot.String()})
+}
+
+// flatRef is the one-level-deep shape a Ref takes inside a projection's "refs"
+// array: sibling lowercase "variable"/"property" fields, matching the
+// PropertyUse convention (Ref has no json tags of its own, so flattening here
+// keeps the wire shape lowercase and stable).
+type flatRef struct {
+	Variable string `json:"variable"`
+	Property string `json:"property"`
+}
+
+// flattenRefs maps Refs onto their wire shape, preserving order. A nil input
+// marshals as a JSON null, matching the always-emit posture of the other sums.
+func flattenRefs(refs []Ref) []flatRef {
+	if refs == nil {
+		return nil
+	}
+	out := make([]flatRef, len(refs))
+	for i, r := range refs {
+		out[i] = flatRef{Variable: r.Variable, Property: r.Property}
+	}
+	return out
+}
+
+// MarshalJSON renders a RefProjection as a tagged union member discriminated by
+// "kind", flattening its Ref into sibling "variable"/"property" fields so the
+// projection stays one level deep — same posture as PropertyUse.
+func (p RefProjection) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind     string `json:"kind"`
+		Variable string `json:"variable"`
+		Property string `json:"property"`
+	}{Kind: projectionKindRef, Variable: p.ref.Variable, Property: p.ref.Property})
+}
+
+// MarshalJSON renders a LiteralProjection as a tagged union member discriminated
+// by "kind". It carries no structured value (§2), so "kind" is its only field.
+func (p LiteralProjection) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind string `json:"kind"`
+	}{Kind: projectionKindLiteral})
+}
+
+// MarshalJSON renders a FuncProjection as a tagged union member discriminated by
+// "kind", carrying its referenced bindings as "refs" and nothing of the function
+// itself (§2).
+func (p FuncProjection) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind string    `json:"kind"`
+		Refs []flatRef `json:"refs"`
+	}{Kind: projectionKindFunc, Refs: flattenRefs(p.refs)})
+}
+
+// MarshalJSON renders an AggregateProjection as a tagged union member
+// discriminated by "kind", emitting the aggregate kind as "func" (derived from
+// AggregateFunc.String, the single source) and its referenced bindings as "refs".
+func (p AggregateProjection) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind string    `json:"kind"`
+		Func string    `json:"func"`
+		Refs []flatRef `json:"refs"`
+	}{Kind: projectionKindAggregate, Func: p.fn.String(), Refs: flattenRefs(p.refs)})
 }

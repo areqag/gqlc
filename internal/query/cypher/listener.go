@@ -39,8 +39,13 @@ type listener struct {
 	byParam  map[string]int
 	approved map[antlr.Tree]bool // oC_Parameter nodes mined into a Use
 
-	// returns are the collected result columns in source order.
+	// returns are the collected result columns in source order. Empty when
+	// returnsAll is set (RETURN * does not mix with explicit items at Stage 3).
 	returns []query.ReturnItem
+
+	// returnsAll records that the projection body was the '*' alternative
+	// (RETURN *), a query-level wildcard over the in-scope bindings (spec §3).
+	returnsAll bool
 
 	// refs are every variable reference build() must check against a binding:
 	// return items, parameter uses, and edge endpoints. Collected with their kind

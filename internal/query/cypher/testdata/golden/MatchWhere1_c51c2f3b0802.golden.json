@@ -78,11 +78,13 @@
   "Parameters": null,
   "Returns": [
     {
-      "Name": "c",
-      "Ref": {
-        "Variable": "c",
-        "Property": ""
+      "name": "c",
+      "value": {
+        "kind": "ref",
+        "variable": "c",
+        "property": ""
       }
     }
-  ]
+  ],
+  "returnsAll": false
 }

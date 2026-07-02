@@ -41,11 +41,13 @@
   ],
   "Returns": [
     {
-      "Name": "b",
-      "Ref": {
-        "Variable": "b",
-        "Property": ""
+      "name": "b",
+      "value": {
+        "kind": "ref",
+        "variable": "b",
+        "property": ""
       }
     }
-  ]
+  ],
+  "returnsAll": false
 }

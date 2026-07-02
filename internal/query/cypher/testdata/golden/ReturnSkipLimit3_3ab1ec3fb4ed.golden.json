@@ -29,11 +29,13 @@
   ],
   "Returns": [
     {
-      "Name": "n",
-      "Ref": {
-        "Variable": "n",
-        "Property": ""
+      "name": "n",
+      "value": {
+        "kind": "ref",
+        "variable": "n",
+        "property": ""
       }
     }
-  ]
+  ],
+  "returnsAll": false
 }

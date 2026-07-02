@@ -10,11 +10,13 @@
   "Parameters": null,
   "Returns": [
     {
-      "Name": "x",
-      "Ref": {
-        "Variable": "foo",
-        "Property": "num"
+      "name": "x",
+      "value": {
+        "kind": "ref",
+        "variable": "foo",
+        "property": "num"
       }
     }
-  ]
+  ],
+  "returnsAll": false
 }

@@ -10,11 +10,13 @@
   "Parameters": null,
   "Returns": [
     {
-      "Name": "a.count",
-      "Ref": {
-        "Variable": "a",
-        "Property": "count"
+      "name": "a.count",
+      "value": {
+        "kind": "ref",
+        "variable": "a",
+        "property": "count"
       }
     }
-  ]
+  ],
+  "returnsAll": false
 }
