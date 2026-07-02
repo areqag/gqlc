@@ -114,9 +114,9 @@ via three of the four `ErrUnsupported*` sentinels and their skiplist entries
 (the current pending set — 170 of 550 read-core scenarios — is dominated by
 these). All four exclusions are now in scope:
 
-- **Named paths** (`p = (a)-[r]->(b)`) — `ErrUnsupportedPattern`, the
-  largest single category. Requires `PATH` in the type vocabulary and a path
-  binding kind alongside node and edge. Lands in Stage 8.
+- **Named paths** (`p = (a)-[r]->(b)`) — `ErrUnsupportedPattern`. Requires
+  `PATH` in the type vocabulary and a path binding kind alongside node and
+  edge. Lands in Stage 8.
 - **Variable-length relationships** (`-[*1..3]->`) —
   `ErrUnsupportedPattern`. Changes the edge binding's cardinality axis and
   the resolver's `EdgeKey` lookup (an endpoint pair with a hop range, not a
@@ -124,11 +124,11 @@ these). All four exclusions are now in scope:
 - **Multi-type relationships** (`-[:R1|R2]->`) —
   `ErrUnsupportedPattern`. Widens `LabelSet` on the edge binding; the
   resolver forms one candidate `EdgeKey` per type. Lands in Stage 8.
-- **Rich `RETURN`/`WITH` expressions** — `ErrUnsupportedProjection`, the
-  second-largest category. Arithmetic over a projection, list/map literals,
-  `CASE`, comprehensions, label predicates, nested aggregates, non-trivial
-  function arguments. Requires the typed expression surface. Lands in Stage 6
-  (result typing) and Stage 10 (aggregations).
+- **Rich `RETURN`/`WITH` expressions** — `ErrUnsupportedProjection`.
+  Arithmetic over a projection, list/map literals, `CASE`, comprehensions,
+  label predicates, nested aggregates, non-trivial function arguments.
+  Requires the typed expression surface. Lands in Stage 6 (result typing) and
+  Stage 10 (aggregations).
 - **Write clauses** — `ErrUnsupportedClause`. Requires the statement-kind
   split and modelled effects. Lands in Stages 12–13.
 
@@ -148,7 +148,7 @@ untypeable without knowing the procedure's argument and result types: neither
 the parameter list nor the projection can be typed from the query text alone.
 The TCK acknowledges this by declaring signatures as background: the step
 `there exists a procedure test.my.proc(in :: NUMBER?) :: (out :: STRING?)`
-appears verbatim in `clauses/call/Call1.feature` and its neighbours.
+appears verbatim in `clauses/call/Call3.feature` and its neighbours.
 
 `CALL` therefore takes a **procedure registry** as a second compile-time
 input alongside the schema. The registry is a set of typed signatures
