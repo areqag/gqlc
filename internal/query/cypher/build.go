@@ -23,7 +23,7 @@ func (l *listener) build() (query.Query, error) {
 		return query.Query{}, l.err
 	}
 
-	branches := make([]query.QueryBranch, 0, len(l.branches))
+	branches := make([]query.Branch, 0, len(l.branches))
 	for _, rb := range l.branches {
 		branch, err := l.buildBranch(rb)
 		if err != nil {
@@ -51,26 +51,26 @@ func (l *listener) build() (query.Query, error) {
 // exported-name set left to right: part K resolves its refs against {its own
 // bindings} ∪ {names part K−1 exported via WITH}, and computes what it exports
 // into part K+1 (spec §4).
-func (l *listener) buildBranch(rb *rawBranch) (query.QueryBranch, error) {
-	parts := make([]query.QueryPart, 0, len(rb.parts))
+func (l *listener) buildBranch(rb *rawBranch) (query.Branch, error) {
+	parts := make([]query.Part, 0, len(rb.parts))
 	imported := map[string]bool{} // names the previous part's WITH carried in
 	for _, rp := range rb.parts {
 		part, exported, err := l.buildPart(rp, imported)
 		if err != nil {
-			return query.QueryBranch{}, err
+			return query.Branch{}, err
 		}
 		parts = append(parts, part)
 		imported = exported
 	}
-	return query.QueryBranch{Parts: parts}, nil
+	return query.Branch{Parts: parts}, nil
 }
 
 // buildPart validates one part against its scope ({its own named bindings} ∪
-// imported) and returns the assembled query.QueryPart plus the set of names it
+// imported) and returns the assembled query.Part plus the set of names it
 // exports into the next part. Endpoint refs must resolve to a NODE binding within
 // the part's own bindings (an imported name carries no kind to check, and an edge
 // endpoint always names a node in the same MATCH).
-func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.QueryPart, map[string]bool, error) {
+func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Part, map[string]bool, error) {
 	scope := map[string]bool{}
 	for k := range imported {
 		scope[k] = true
@@ -83,7 +83,7 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Query
 
 	for _, ref := range rp.refs {
 		if !scope[ref.name] {
-			return query.QueryPart{}, nil, fmt.Errorf("%w: %s", ErrUnboundVariable, ref.name)
+			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrUnboundVariable, ref.name)
 		}
 		// An endpoint must reference a node binding; it always names a node in the
 		// same MATCH, so its kind is checked against this part's own bindings. A
@@ -91,7 +91,7 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Query
 		if ref.endpointRef {
 			idx, ok := rp.byVar[ref.name]
 			if ok && rp.bindings[idx].kind != graph.Node {
-				return query.QueryPart{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, ref.name)
+				return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, ref.name)
 			}
 		}
 	}
@@ -100,12 +100,12 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Query
 	for _, rb := range rp.bindings {
 		b, err := rb.toBinding()
 		if err != nil {
-			return query.QueryPart{}, nil, err
+			return query.Part{}, nil, err
 		}
 		bindings = append(bindings, b)
 	}
 
-	part := query.QueryPart{Returns: rp.returns, ReturnsAll: rp.returnsAll}
+	part := query.Part{Returns: rp.returns, ReturnsAll: rp.returnsAll}
 	if len(bindings) > 0 {
 		part.Bindings = bindings
 	}

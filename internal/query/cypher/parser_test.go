@@ -57,8 +57,8 @@ import (
 // oneBranch wraps a single part (and query-wide parameters) into the
 // one-branch/one-part Query shape the read-core (WITH-free, UNION-free) queries
 // lower to. The Stage-4 nesting is always present even for the flat common case.
-func oneBranch(part query.QueryPart, params ...query.Parameter) query.Query {
-	q := query.Query{Branches: []query.QueryBranch{{Parts: []query.QueryPart{part}}}}
+func oneBranch(part query.Part, params ...query.Parameter) query.Query {
+	q := query.Query{Branches: []query.Branch{{Parts: []query.Part{part}}}}
 	if len(params) > 0 {
 		q.Parameters = params
 	}
@@ -73,7 +73,7 @@ var mustParse = map[string]struct {
 	// bare-variable return → Ref{n,""}, column name "n".
 	"node": {
 		src: "MATCH (n)\nRETURN n",
-		want: oneBranch(query.QueryPart{
+		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("n", nil)),
 			},
@@ -86,7 +86,7 @@ var mustParse = map[string]struct {
 	// source order, A then B.
 	"node multi-label": {
 		src: "MATCH (a:A:B)\nRETURN a",
-		want: oneBranch(query.QueryPart{
+		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("a", graph.LabelSet{"A", "B"})),
 			},
@@ -99,7 +99,7 @@ var mustParse = map[string]struct {
 	// literal (not a $param), so no parameter use is mined (D1b).
 	"node inline property": {
 		src: "MATCH (n {name: 'bar'})\nRETURN n",
-		want: oneBranch(query.QueryPart{
+		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("n", nil)),
 			},
@@ -112,7 +112,7 @@ var mustParse = map[string]struct {
 	// in textual order [n, m]; explicit AS aliases (E1) become the column names.
 	"comma pattern with aliases": {
 		src: "MATCH (n), (m)\nRETURN n.num AS n, m.num AS m",
-		want: oneBranch(query.QueryPart{
+		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("n", nil)),
 				must(query.NewNodeBinding("m", nil)),
@@ -127,7 +127,7 @@ var mustParse = map[string]struct {
 	// is its own binding; C4 both endpoints are inline-empty (the () case).
 	"anonymous edge": {
 		src: "MATCH ()-[r]->()\nRETURN r",
-		want: oneBranch(query.QueryPart{
+		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
 				must(query.NewEdgeBinding("r", nil,
 					query.NewInlineEndpoint(nil),
@@ -144,7 +144,7 @@ var mustParse = map[string]struct {
 	// inline labels — [A] on the source, [B] on the target.
 	"edge inline-labelled endpoints": {
 		src: "MATCH (:A)-[r]->(:B)\nRETURN r",
-		want: oneBranch(query.QueryPart{
+		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
 				must(query.NewEdgeBinding("r", nil,
 					query.NewInlineEndpoint(graph.LabelSet{"A"}),
@@ -161,7 +161,7 @@ var mustParse = map[string]struct {
 	// var endpoints for named nodes (C4 — labels live on their bindings).
 	"typed edge named endpoints": {
 		src: "MATCH (n1)-[rel:KNOWS]->(n2)\nRETURN n1, n2",
-		want: oneBranch(query.QueryPart{
+		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("n1", nil)),
 				must(query.NewEdgeBinding("rel", graph.LabelSet{"KNOWS"},
@@ -181,7 +181,7 @@ var mustParse = map[string]struct {
 	// → Ref{var, ""} for each; textual order [a, r, b].
 	"directed edge whole entities": {
 		src: "MATCH (a)-[r]->(b)\nRETURN a, r, b",
-		want: oneBranch(query.QueryPart{
+		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("a", nil)),
 				must(query.NewEdgeBinding("r", nil,
@@ -204,7 +204,7 @@ var mustParse = map[string]struct {
 	// textual order [a, r, b] with no canonical flip (the resolver tries both).
 	"undirected edge whole entities": {
 		src: "MATCH (a)-[r]-(b)\nRETURN a, r, b",
-		want: oneBranch(query.QueryPart{
+		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("a", nil)),
 				must(query.NewEdgeBinding("r", nil,
@@ -225,7 +225,7 @@ var mustParse = map[string]struct {
 	// b.name → one Parameter with Use PropertyUse{Ref{b, name}}.
 	"where property parameter": {
 		src: "MATCH (a)-[r]->(b)\nWHERE b.name = $param\nRETURN r",
-		want: oneBranch(query.QueryPart{
+		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("a", nil)),
 				must(query.NewEdgeBinding("r", nil,
@@ -248,7 +248,7 @@ var mustParse = map[string]struct {
 	// property Ref. ORDER BY a bare var.prop is accept-and-ignored (E4).
 	"skip parameter": {
 		src: "MATCH (n)\nRETURN n\nORDER BY n.name ASC\nSKIP $skipAmount",
-		want: oneBranch(query.QueryPart{
+		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("n", nil)),
 			},
@@ -266,7 +266,7 @@ var mustParse = map[string]struct {
 	// parameter use carrying one Use = ClauseSlotUse{Limit}.
 	"limit parameter": {
 		src: "MATCH (p:Person)\nRETURN p.name AS name\nLIMIT $_limit",
-		want: oneBranch(query.QueryPart{
+		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("p", graph.LabelSet{"Person"})),
 			},
@@ -285,7 +285,7 @@ var mustParse = map[string]struct {
 	// fair Layer-2 material.)
 	"edge left-pointing canonical": {
 		src: "MATCH (a:A)<-[:R]-(b:B)\nRETURN a, b",
-		want: oneBranch(query.QueryPart{
+		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("a", graph.LabelSet{"A"})),
 				must(query.NewEdgeBinding("", graph.LabelSet{"R"},
@@ -306,7 +306,7 @@ var mustParse = map[string]struct {
 	// flag is true (ADR 0006). The RETURN item traces back to it via Ref{n,""}.
 	"optional match simple": {
 		src: "OPTIONAL MATCH (n)\nRETURN n",
-		want: oneBranch(query.QueryPart{
+		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
 				must(query.NewNullableNodeBinding("n", nil)),
 			},
@@ -322,7 +322,7 @@ var mustParse = map[string]struct {
 	// carries the nullable flag uniformly even though no Ref reads it.
 	"optional match reuses prior binding": {
 		src: "MATCH (n)\nOPTIONAL MATCH (n)-[:NOT_EXIST]->(x)\nRETURN n, x",
-		want: oneBranch(query.QueryPart{
+		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("n", nil)),
 				must(query.NewNullableEdgeBinding("", graph.LabelSet{"NOT_EXIST"},
@@ -342,7 +342,7 @@ var mustParse = map[string]struct {
 	// the verbatim expression text — "n.created", not "created".
 	"property return no alias": {
 		src: "MATCH (n)\nRETURN n.created",
-		want: oneBranch(query.QueryPart{
+		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("n", nil)),
 			},
@@ -358,7 +358,7 @@ var mustParse = map[string]struct {
 	// identity below the boundary is not.
 	"count star aggregate": {
 		src: "MATCH (n)\nRETURN count(*)",
-		want: oneBranch(query.QueryPart{
+		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("n", nil)),
 			},
@@ -374,7 +374,7 @@ var mustParse = map[string]struct {
 	// binding" without guessing the column list.
 	"return all": {
 		src: "MATCH (n)\nRETURN *",
-		want: oneBranch(query.QueryPart{
+		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("n", nil)),
 			},
@@ -390,7 +390,7 @@ var mustParse = map[string]struct {
 	"with chain whole entity": {
 		src: "MATCH (a)\nWITH a\nRETURN a",
 		want: query.Query{
-			Branches: []query.QueryBranch{{Parts: []query.QueryPart{
+			Branches: []query.Branch{{Parts: []query.Part{
 				{
 					Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
 					Returns: []query.ReturnItem{
@@ -411,7 +411,7 @@ var mustParse = map[string]struct {
 	"with chain value projection": {
 		src: "MATCH (a)\nWITH a.name AS n\nRETURN n",
 		want: query.Query{
-			Branches: []query.QueryBranch{{Parts: []query.QueryPart{
+			Branches: []query.Branch{{Parts: []query.Part{
 				{
 					Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
 					Returns: []query.ReturnItem{
@@ -433,14 +433,14 @@ var mustParse = map[string]struct {
 	"union two branches": {
 		src: "MATCH (a)\nRETURN a\nUNION\nMATCH (b)\nRETURN b",
 		want: query.Query{
-			Branches: []query.QueryBranch{
-				{Parts: []query.QueryPart{{
+			Branches: []query.Branch{
+				{Parts: []query.Part{{
 					Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
 					Returns: []query.ReturnItem{
 						{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
 					},
 				}}},
-				{Parts: []query.QueryPart{{
+				{Parts: []query.Part{{
 					Bindings: []query.Binding{must(query.NewNodeBinding("b", nil))},
 					Returns: []query.ReturnItem{
 						{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"})},
@@ -455,14 +455,14 @@ var mustParse = map[string]struct {
 	"union all two branches": {
 		src: "MATCH (a)\nRETURN a\nUNION ALL\nMATCH (b)\nRETURN b",
 		want: query.Query{
-			Branches: []query.QueryBranch{
-				{Parts: []query.QueryPart{{
+			Branches: []query.Branch{
+				{Parts: []query.Part{{
 					Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
 					Returns: []query.ReturnItem{
 						{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
 					},
 				}}},
-				{Parts: []query.QueryPart{{
+				{Parts: []query.Part{{
 					Bindings: []query.Binding{must(query.NewNodeBinding("b", nil))},
 					Returns: []query.ReturnItem{
 						{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"})},
