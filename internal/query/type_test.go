@@ -228,7 +228,7 @@ func TestScalarAndEntityTypeString(t *testing.T) {
 // TestTemporalTypesSealed pins that each Stage-7 temporal variant satisfies
 // the sealed Type interface — the private isType() marker must be reachable,
 // so a foreign package cannot add a variant.
-func TestTemporalTypesSealed(t *testing.T) {
+func TestTemporalTypesSealed(_ *testing.T) {
 	var _ query.Type = query.TypeDate{}
 	var _ query.Type = query.TypeTime{}
 	var _ query.Type = query.TypeLocalTime{}

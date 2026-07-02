@@ -1,0 +1,60 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "d",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "time"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "ts",
+              "value": {
+                "kind": "func",
+                "refs": [
+                  {
+                    "variable": "d",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "b",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "d",
+                    "property": ""
+                  },
+                  {
+                    "variable": "d",
+                    "property": ""
+                  }
+                ],
+                "type": "bool"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}
