@@ -175,3 +175,89 @@ func (TypeUnknown) String() string { return "unknown" }
 func (t TypeUnknown) MarshalJSON() ([]byte, error) { return marshalType(t) }
 
 func (TypeUnknown) isType() {}
+
+// The six openCypher temporal types (Stage 7 spec §3). Each is an empty
+// struct following the scalar-variant pattern exactly: a stringer that is
+// the single source of the wire tag, a MarshalJSON that routes through
+// marshalType, and the private isType() marker so the sum stays sealed.
+// The zoned / non-zoned distinction (TypeTime vs. TypeLocalTime,
+// TypeDateTime vs. TypeLocalDateTime) is carried at the type level because
+// codegen post-freeze emits distinct method signatures for each — collapsing
+// them would reintroduce the lossy representation the freeze forbids.
+
+// TypeDate is the openCypher DATE: a calendar date with no time-of-day or
+// timezone. Reached from the date(...) constructor and from temporal
+// arithmetic of the form "date + duration" / "date - duration".
+type TypeDate struct{}
+
+// String is the wire tag "date".
+func (TypeDate) String() string { return "date" }
+
+// MarshalJSON renders TypeDate as its wire tag, quoted.
+func (t TypeDate) MarshalJSON() ([]byte, error) { return marshalType(t) }
+
+func (TypeDate) isType() {}
+
+// TypeTime is the openCypher TIME: a time-of-day with a timezone offset.
+// Reached from the time(...) constructor and from temporal arithmetic of
+// the form "time + duration" / "time - duration".
+type TypeTime struct{}
+
+// String is the wire tag "time".
+func (TypeTime) String() string { return "time" }
+
+// MarshalJSON renders TypeTime as its wire tag, quoted.
+func (t TypeTime) MarshalJSON() ([]byte, error) { return marshalType(t) }
+
+func (TypeTime) isType() {}
+
+// TypeLocalTime is the openCypher LOCAL_TIME: a time-of-day with no timezone.
+// Reached from the localtime(...) constructor and from "localtime + duration".
+type TypeLocalTime struct{}
+
+// String is the wire tag "localtime".
+func (TypeLocalTime) String() string { return "localtime" }
+
+// MarshalJSON renders TypeLocalTime as its wire tag, quoted.
+func (t TypeLocalTime) MarshalJSON() ([]byte, error) { return marshalType(t) }
+
+func (TypeLocalTime) isType() {}
+
+// TypeDateTime is the openCypher DATETIME: a date + time-of-day + timezone.
+// Reached from the datetime(...) constructor and from "datetime + duration".
+type TypeDateTime struct{}
+
+// String is the wire tag "datetime".
+func (TypeDateTime) String() string { return "datetime" }
+
+// MarshalJSON renders TypeDateTime as its wire tag, quoted.
+func (t TypeDateTime) MarshalJSON() ([]byte, error) { return marshalType(t) }
+
+func (TypeDateTime) isType() {}
+
+// TypeLocalDateTime is the openCypher LOCAL_DATETIME: a date + time-of-day
+// with no timezone. Reached from the localdatetime(...) constructor and from
+// "localdatetime + duration".
+type TypeLocalDateTime struct{}
+
+// String is the wire tag "localdatetime".
+func (TypeLocalDateTime) String() string { return "localdatetime" }
+
+// MarshalJSON renders TypeLocalDateTime as its wire tag, quoted.
+func (t TypeLocalDateTime) MarshalJSON() ([]byte, error) { return marshalType(t) }
+
+func (TypeLocalDateTime) isType() {}
+
+// TypeDuration is the openCypher DURATION: a length of time with month, day,
+// second and sub-second components. Reached from the duration(...) and
+// duration.between(...) constructors and from "duration ± duration" /
+// "duration × number" / "duration / number".
+type TypeDuration struct{}
+
+// String is the wire tag "duration".
+func (TypeDuration) String() string { return "duration" }
+
+// MarshalJSON renders TypeDuration as its wire tag, quoted.
+func (t TypeDuration) MarshalJSON() ([]byte, error) { return marshalType(t) }
+
+func (TypeDuration) isType() {}
