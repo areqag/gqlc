@@ -1,0 +1,84 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "operands",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "list\u003cunknown\u003e"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": [
+            {
+              "kind": "unwind",
+              "variable": "op1",
+              "elemType": "unknown",
+              "nullable": false
+            },
+            {
+              "kind": "unwind",
+              "variable": "op2",
+              "elemType": "unknown",
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "v",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "op1",
+                    "property": ""
+                  },
+                  {
+                    "variable": "op2",
+                    "property": ""
+                  }
+                ],
+                "type": "bool"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "v",
+              "value": {
+                "kind": "ref",
+                "variable": "v",
+                "property": "",
+                "type": "bool"
+              }
+            },
+            {
+              "name": "count(*)",
+              "value": {
+                "kind": "aggregate",
+                "func": "count",
+                "refs": null,
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

@@ -1,0 +1,46 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "n.division",
+              "value": {
+                "kind": "ref",
+                "variable": "n",
+                "property": "division",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "max(n.age)",
+              "value": {
+                "kind": "aggregate",
+                "func": "max",
+                "refs": [
+                  {
+                    "variable": "n",
+                    "property": "age"
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

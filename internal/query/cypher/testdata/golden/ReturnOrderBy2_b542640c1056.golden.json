@@ -1,0 +1,22 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": null,
+          "returnsAll": true
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

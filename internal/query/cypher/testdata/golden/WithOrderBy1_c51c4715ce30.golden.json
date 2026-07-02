@@ -1,0 +1,47 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "unwind",
+              "variable": "localtimes",
+              "elemType": "localtime",
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "localtimes",
+              "value": {
+                "kind": "ref",
+                "variable": "localtimes",
+                "property": "",
+                "type": "localtime"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "localtimes",
+              "value": {
+                "kind": "ref",
+                "variable": "localtimes",
+                "property": "",
+                "type": "localtime"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

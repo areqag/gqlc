@@ -1,0 +1,79 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": [
+                "A"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "mod",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "a",
+                    "property": "num2"
+                  }
+                ],
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "sum",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "a",
+                    "property": "num"
+                  },
+                  {
+                    "variable": "a",
+                    "property": "num2"
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "mod",
+              "value": {
+                "kind": "ref",
+                "variable": "mod",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "sum",
+              "value": {
+                "kind": "ref",
+                "variable": "sum",
+                "property": "",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

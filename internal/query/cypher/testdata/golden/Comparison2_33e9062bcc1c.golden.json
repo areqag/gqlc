@@ -1,0 +1,188 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "r",
+              "labels": null,
+              "source": {
+                "kind": "var",
+                "variable": "n"
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            },
+            {
+              "kind": "path",
+              "variable": "p",
+              "members": [
+                {
+                  "kind": "node",
+                  "variable": "n"
+                },
+                {
+                  "kind": "edge",
+                  "variable": "r"
+                },
+                {
+                  "kind": "anon-node"
+                }
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "types",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "n",
+                    "property": ""
+                  },
+                  {
+                    "variable": "r",
+                    "property": ""
+                  },
+                  {
+                    "variable": "p",
+                    "property": ""
+                  }
+                ],
+                "type": "list\u003cunknown\u003e"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": [
+            {
+              "kind": "unwind",
+              "variable": "i",
+              "elemType": "unknown",
+              "nullable": false
+            },
+            {
+              "kind": "unwind",
+              "variable": "j",
+              "elemType": "unknown",
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "lhs",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "types",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "rhs",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "types",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "lhs",
+              "value": {
+                "kind": "ref",
+                "variable": "lhs",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "rhs",
+              "value": {
+                "kind": "ref",
+                "variable": "rhs",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "result",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "lhs",
+                    "property": ""
+                  },
+                  {
+                    "variable": "rhs",
+                    "property": ""
+                  }
+                ],
+                "type": "bool"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "lhs",
+              "value": {
+                "kind": "ref",
+                "variable": "lhs",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "rhs",
+              "value": {
+                "kind": "ref",
+                "variable": "rhs",
+                "property": "",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

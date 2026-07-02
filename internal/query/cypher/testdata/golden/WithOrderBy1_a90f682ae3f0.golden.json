@@ -1,0 +1,47 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "unwind",
+              "variable": "times",
+              "elemType": "time",
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "times",
+              "value": {
+                "kind": "ref",
+                "variable": "times",
+                "property": "",
+                "type": "time"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "times",
+              "value": {
+                "kind": "ref",
+                "variable": "times",
+                "property": "",
+                "type": "time"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}
