@@ -1,0 +1,34 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "p",
+              "labels": [
+                "Person"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "name",
+              "value": {
+                "kind": "ref",
+                "variable": "p",
+                "property": "name",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

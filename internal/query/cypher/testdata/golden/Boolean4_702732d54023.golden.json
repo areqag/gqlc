@@ -1,0 +1,40 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "nt",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "nf",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "nn",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

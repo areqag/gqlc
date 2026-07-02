@@ -62,9 +62,32 @@ func nonArithmeticAtom(e gen.IOC_ExpressionContext) gen.IOC_NonArithmeticOperato
 
 // isScalarLiteral reports whether a literal is a scalar (number, string, boolean
 // or NULL) rather than a list or map literal. A scalar literal projects as a
-// LiteralProjection; a list/map literal is residual (spec §1).
+// LiteralProjection; a list/map literal is Stage 6 material.
 func isScalarLiteral(lit gen.IOC_LiteralContext) bool {
 	return lit != nil && lit.OC_ListLiteral() == nil && lit.OC_MapLiteral() == nil
+}
+
+// literalType returns the Stage-6 result type of a scalar literal: a boolean
+// literal is TypeBool, an integer TypeInt, a float TypeFloat, a string
+// TypeString, and NULL TypeNull. The caller only passes literals isScalarLiteral
+// has approved, so a list/map literal cannot reach here.
+func literalType(lit gen.IOC_LiteralContext) query.Type {
+	switch {
+	case lit.OC_BooleanLiteral() != nil:
+		return query.TypeBool{}
+	case lit.NULL() != nil:
+		return query.TypeNull{}
+	case lit.StringLiteral() != nil:
+		return query.TypeString{}
+	case lit.OC_NumberLiteral() != nil:
+		nl := lit.OC_NumberLiteral()
+		if nl.OC_DoubleLiteral() != nil {
+			return query.TypeFloat{}
+		}
+		return query.TypeInt{}
+	default:
+		return query.TypeUnknown{}
+	}
 }
 
 // functionName reads the bare function name of an invocation, lowercased for the

@@ -1,0 +1,32 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "isEqual",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "isNotEqual",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

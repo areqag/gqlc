@@ -1,0 +1,24 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "literal",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "list\u003cint\u003e"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

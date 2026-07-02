@@ -1,0 +1,48 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "count",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "n",
+                    "property": "list"
+                  },
+                  {
+                    "variable": "n",
+                    "property": "list"
+                  },
+                  {
+                    "variable": "n",
+                    "property": "list"
+                  },
+                  {
+                    "variable": "n",
+                    "property": "list"
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

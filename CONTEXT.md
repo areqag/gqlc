@@ -176,12 +176,16 @@ the model does not carry); the schema-side directed-only **Direction** sense.
 
 **Use**:
 One position where a parameter appears in a query. A closed sum of
-PropertyUse and ClauseSlotUse: a property use binds the parameter to a
-binding property (the `$threshold` in `WHERE a.age > $threshold`); a
-clause-slot use places the parameter in a SKIP or LIMIT clause whose type
-is fixed by the clause (an integer) rather than inferred from a binding.
-Every parameter carries a list of uses in first-appearance order, which
-the resolver unifies into a single type post-freeze.
+PropertyUse, ClauseSlotUse, and ExprUse: a property use binds the
+parameter to a binding property (the `$threshold` in
+`WHERE a.age > $threshold`); a clause-slot use places the parameter in a
+SKIP or LIMIT clause whose type is fixed by the clause (an integer)
+rather than inferred from a binding; an expression use records that the
+parameter appears inside a rich scalar expression whose enclosing result
+**type** the model carries — the parameter's own type is inferred by the
+resolver from the expression it participates in, post-freeze. Every
+parameter carries a list of uses in first-appearance order, which the
+resolver unifies into a single type.
 _Avoid_: site (overloaded with the spec's "fail-site"), occurrence.
 
 **Parameter**:
@@ -194,21 +198,51 @@ _Avoid_: argument (reserve for the generated code).
 **Return item**:
 One column of a query's result, named by an explicit alias or derived from its
 source text. It carries a **projection** describing what it projects — a binding
-reference, a scalar literal, a function call, or an aggregate. A query's result is
-an ordered, duplicate-preserving list of return items, or the `RETURN *` wildcard
-over all in-scope bindings; it becomes a generated result.
+reference, a scalar literal, a non-aggregate function call, an aggregate, or a
+rich scalar expression — plus, via the projection, its **result type**. A query's
+result is an ordered, duplicate-preserving list of return items, or the `RETURN *`
+wildcard over all in-scope bindings; it becomes a generated result.
 
 **Projection**:
 What a return item projects: a closed sum of a binding reference (`var` /
-`var.prop`), a scalar literal, a non-aggregate function call, or an aggregate. It
-carries only the bindings the resolver must trace (the `var` / `var.prop` refs)
-and, for an aggregate, the cardinality-bearing kind — never the expression tree
+`var.prop`), a scalar literal, a non-aggregate function call, an aggregate, or a
+rich scalar expression. It carries only the bindings the resolver must trace (the
+`var` / `var.prop` refs), the projection's **result type**, and — for an
+aggregate — the cardinality-bearing kind. It never carries the expression tree
 (ADR 0003) nor a non-aggregate function's identity, which live below the
 type-interface boundary (ADR 0005) and are re-executed from the original query
 text. A `RETURN *` is not a projection but a query-level wildcard (see **Return
 item**).
 _Avoid_: expression (reserve for the grammar's `oC_Expression`; a projection is
 the curated subset the model carries).
+
+**Type**:
+The result type of a **projection**: a closed sum of `bool`, `int`, `float`,
+`string`, `null`, `list<T>` (parameterised over an element type), `map`,
+`node`, `edge`, and a distinguished `unknown` for types the parser cannot
+compute schema-free. It is the freeze-locked type vocabulary the resolver
+reads from a parsed query: a `RefProjection` on a whole entity types as
+`node` or `edge`; a scalar literal types as its literal kind; a rich
+expression carries the result of the parser's constant folding over the
+scalar-expression grammar. `unknown` is the parser's honest posture on the
+type-interface boundary (ADR 0005) for property lookups, function calls,
+aggregates, and any expression touching a property or `null` — the
+resolver upgrades these from the schema. Incremental: Stage 7 adds
+temporal types (`date`, `time`, …), Stage 8 adds `path`; the freeze ADR
+locks the sum.
+_Avoid_: `any` (use `unknown` — the parser's "I cannot tell"); property
+type (reserve for the schema-side scalar type `PropertyType`).
+
+**Result type**:
+The **type** a return item's **projection** commits to for the column that
+becomes a generated method result field. Distinct from the schema-side
+**property type**: a property type describes a stored scalar; a result type
+describes a projected column, which may be a whole entity (`node`/`edge`),
+a scalar (`bool`/`int`/…), a collection (`list<T>`/`map`), or `unknown`.
+The result type is what codegen emits — not what the query author wrote,
+which is the projection's structural discriminator instead.
+_Avoid_: column type (colloquial; use "result type"); return type (used
+generally for a method's return, ambiguous with the whole result row).
 
 **Aggregate**:
 A projection over an aggregating function (`count`, `sum`, `collect`, `min`,

@@ -1,0 +1,62 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "foo_string",
+              "value": {
+                "kind": "literal",
+                "type": "string"
+              }
+            },
+            {
+              "name": "empty_string",
+              "value": {
+                "kind": "literal",
+                "type": "string"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "foo",
+              "value": {
+                "kind": "func",
+                "refs": [
+                  {
+                    "variable": "foo_string",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "empty",
+              "value": {
+                "kind": "func",
+                "refs": [
+                  {
+                    "variable": "empty_string",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

@@ -1,0 +1,107 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "david",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": null,
+              "source": {
+                "kind": "var",
+                "variable": "david"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "otherPerson"
+              },
+              "nullable": false,
+              "directed": false
+            },
+            {
+              "kind": "node",
+              "variable": "otherPerson",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": null,
+              "source": {
+                "kind": "var",
+                "variable": "otherPerson"
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false,
+              "directed": true
+            }
+          ],
+          "returns": [
+            {
+              "name": "otherPerson",
+              "value": {
+                "kind": "ref",
+                "variable": "otherPerson",
+                "property": "",
+                "type": "node"
+              }
+            },
+            {
+              "name": "foaf",
+              "value": {
+                "kind": "aggregate",
+                "func": "count",
+                "refs": null,
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "otherPerson",
+              "value": {
+                "kind": "ref",
+                "variable": "otherPerson",
+                "property": "",
+                "type": "node"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "count(*)",
+              "value": {
+                "kind": "aggregate",
+                "func": "count",
+                "refs": null,
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

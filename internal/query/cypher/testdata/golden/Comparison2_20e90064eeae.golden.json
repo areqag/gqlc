@@ -1,0 +1,48 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "gt",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "gtE",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "lt",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "ltE",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

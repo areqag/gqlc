@@ -65,3 +65,20 @@ and the full expression tree are deliberately outside the initial model.
 > marker is the one bit the resolver branches on — form one candidate key or two —
 > and nothing of the arrow spelling or the expression tree. The no-expression-tree
 > line holds._
+>
+> _Note (Stage 6, ADR 0004/0007): the curated subset now includes a closed
+> **`Type` sum** for projection result types (`bool`, `int`, `float`, `string`,
+> `null`, `list<T>`, `map`, `node`, `edge`, plus a distinguished `unknown` for
+> types the parser cannot compute schema-free) and an **`ExprProjection`**
+> variant on the `Projection` sum, carrying the result type of a rich
+> projection expression and the bindings it touches — **but not the
+> expression tree itself**. A property lookup, a function call, an aggregate,
+> and any NULL-participating or property-participating arithmetic type as
+> `unknown`; the resolver upgrades these from the schema, and the runtime
+> re-executes the original text (ADR 0005). `TypeAny` is deliberately absent
+> — the parser's honest "I cannot tell" is `TypeUnknown`, and adding two
+> names for the same posture would confuse the boundary. The `Type` sum is
+> incremental: Stage 7 adds temporal types, Stage 8 adds `PATH`; the freeze
+> ADR locks the sum. `Use` gains an **`ExprUse`** variant so a `$param`
+> inside a rich expression is recorded (its type comes from the enclosing
+> expression, not from a binding). The no-expression-tree line holds._

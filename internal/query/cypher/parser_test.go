@@ -78,7 +78,7 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("n", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
 			},
 		}),
 	},
@@ -91,7 +91,7 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("a", graph.LabelSet{"A", "B"})),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
+				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
 			},
 		}),
 	},
@@ -104,7 +104,7 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("n", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
 			},
 		}),
 	},
@@ -118,8 +118,8 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("m", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n", Property: "num"})},
-				{Name: "m", Value: query.NewRefProjection(query.Ref{Variable: "m", Property: "num"})},
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n", Property: "num"}, query.TypeUnknown{})},
+				{Name: "m", Value: query.NewRefProjection(query.Ref{Variable: "m", Property: "num"}, query.TypeUnknown{})},
 			},
 		}),
 	},
@@ -136,7 +136,7 @@ var mustParse = map[string]struct {
 				)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"})},
+				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"}, query.TypeEdge{})},
 			},
 		}),
 	},
@@ -153,7 +153,7 @@ var mustParse = map[string]struct {
 				)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"})},
+				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"}, query.TypeEdge{})},
 			},
 		}),
 	},
@@ -172,8 +172,8 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("n2", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n1", Value: query.NewRefProjection(query.Ref{Variable: "n1"})},
-				{Name: "n2", Value: query.NewRefProjection(query.Ref{Variable: "n2"})},
+				{Name: "n1", Value: query.NewRefProjection(query.Ref{Variable: "n1"}, query.TypeNode{})},
+				{Name: "n2", Value: query.NewRefProjection(query.Ref{Variable: "n2"}, query.TypeNode{})},
 			},
 		}),
 	},
@@ -192,9 +192,9 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("b", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
-				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"})},
-				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"})},
+				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
+				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"}, query.TypeEdge{})},
+				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"}, query.TypeNode{})},
 			},
 		}),
 	},
@@ -215,9 +215,9 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("b", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
-				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"})},
-				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"})},
+				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
+				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"}, query.TypeEdge{})},
+				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"}, query.TypeNode{})},
 			},
 		}),
 	},
@@ -236,7 +236,7 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("b", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"})},
+				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"}, query.TypeEdge{})},
 			},
 		}, query.Parameter{Name: "param", Uses: []query.Use{
 			query.NewPropertyUse(query.Ref{Variable: "b", Property: "name"}),
@@ -253,7 +253,7 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("n", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
 			},
 		}, query.Parameter{Name: "skipAmount", Uses: []query.Use{
 			query.NewClauseSlotUse(query.ClauseSlotSkip),
@@ -271,7 +271,7 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("p", graph.LabelSet{"Person"})),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "name", Value: query.NewRefProjection(query.Ref{Variable: "p", Property: "name"})},
+				{Name: "name", Value: query.NewRefProjection(query.Ref{Variable: "p", Property: "name"}, query.TypeUnknown{})},
 			},
 		}, query.Parameter{Name: "_limit", Uses: []query.Use{
 			query.NewClauseSlotUse(query.ClauseSlotLimit),
@@ -296,8 +296,8 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("b", graph.LabelSet{"B"})),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
-				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"})},
+				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
+				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"}, query.TypeNode{})},
 			},
 		}),
 	},
@@ -311,7 +311,7 @@ var mustParse = map[string]struct {
 				must(query.NewNullableNodeBinding("n", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
 			},
 		}),
 	},
@@ -333,8 +333,8 @@ var mustParse = map[string]struct {
 				must(query.NewNullableNodeBinding("x", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
-				{Name: "x", Value: query.NewRefProjection(query.Ref{Variable: "x"})},
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+				{Name: "x", Value: query.NewRefProjection(query.Ref{Variable: "x"}, query.TypeNode{})},
 			},
 		}),
 	},
@@ -347,7 +347,7 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("n", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n.created", Value: query.NewRefProjection(query.Ref{Variable: "n", Property: "created"})},
+				{Name: "n.created", Value: query.NewRefProjection(query.Ref{Variable: "n", Property: "created"}, query.TypeUnknown{})},
 			},
 		}),
 	},
@@ -363,7 +363,7 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("n", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "count(*)", Value: query.NewAggregateProjection(query.AggCount, nil)},
+				{Name: "count(*)", Value: query.NewAggregateProjection(query.AggCount, nil, query.TypeUnknown{})},
 			},
 		}),
 	},
@@ -394,12 +394,12 @@ var mustParse = map[string]struct {
 				{
 					Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
 					Returns: []query.ReturnItem{
-						{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
+						{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
 					},
 				},
 				{
 					Returns: []query.ReturnItem{
-						{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
+						{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
 					},
 				},
 			}}},
@@ -415,12 +415,17 @@ var mustParse = map[string]struct {
 				{
 					Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
 					Returns: []query.ReturnItem{
-						{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "a", Property: "name"})},
+						{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "a", Property: "name"}, query.TypeUnknown{})},
 					},
 				},
 				{
 					Returns: []query.ReturnItem{
-						{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
+						// n is imported from part 1's WITH a.name AS n — a scalar
+						// property lookup, so its Stage-6 result type is TypeUnknown
+						// (the schema owns property typing, ADR 0003). The listener
+						// looks up the imported name's type from part 1's exported
+						// projection map.
+						{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeUnknown{})},
 					},
 				},
 			}}},
@@ -437,18 +442,195 @@ var mustParse = map[string]struct {
 				{Parts: []query.Part{{
 					Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
 					Returns: []query.ReturnItem{
-						{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
+						{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
 					},
 				}}},
 				{Parts: []query.Part{{
 					Bindings: []query.Binding{must(query.NewNodeBinding("b", nil))},
 					Returns: []query.ReturnItem{
-						{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"})},
+						{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"}, query.TypeNode{})},
 					},
 				}}},
 			},
 			Combinators: []query.UnionKind{query.UnionDistinct},
 		},
+	},
+	// Stage 6 — canonical arithmetic-in-RETURN. "Arithmetic precedence test"
+	// (Mathematical8 [1] verbatim). All operands are integer literals, so the
+	// parser types the result as TypeInt. The projection is an ExprProjection
+	// (no bindings touched, so refs are nil). The item's name is the verbatim
+	// expression text.
+	"arithmetic in return": {
+		src: "RETURN 12 / 4 * 3 - 2 * 4",
+		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+			Returns: []query.ReturnItem{
+				{Name: "12 / 4 * 3 - 2 * 4", Value: query.NewExprProjection(nil, query.TypeInt{})},
+			},
+		}}}}},
+	},
+	// Stage 6 — canonical IS NULL predicate. "Property null check on non-null
+	// node" (Null1 [1] verbatim). n.missing IS NULL is a predicate: result type
+	// TypeBool; the sub-expression touches n via the property lookup, so the
+	// ExprProjection carries one Ref. The literal-null lookup and property lookup
+	// on the same expression yields a single Ref to n.
+	"is null in return": {
+		src: "MATCH (n)\nRETURN n.missing IS NULL",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n.missing IS NULL", Value: query.NewExprProjection(
+					[]query.Ref{{Variable: "n", Property: "missing"}},
+					query.TypeBool{},
+				)},
+			},
+		}),
+	},
+	// Stage 6 — arithmetic over a projection: RETURN n.num + 1. Reclassified
+	// from a mustReject (former ErrUnsupportedProjection fail-site pre-Stage-6).
+	// The addition of an unknown-typed property lookup and an int literal
+	// collapses to TypeUnknown under promoteArith (unknown propagates), and
+	// the ref to n.num is mined for referential integrity.
+	"arithmetic over projection": {
+		src: "MATCH (n)\nRETURN n.num + 1",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n.num + 1", Value: query.NewExprProjection(
+					[]query.Ref{{Variable: "n", Property: "num"}},
+					query.TypeUnknown{},
+				)},
+			},
+		}),
+	},
+	// Stage 6 — unary-signed projection: RETURN -n.num. Reclassified from a
+	// mustReject. A leading sign does not change the operand's arithmetic type;
+	// but n.num types as TypeUnknown (property lookup), so the result is
+	// TypeUnknown. The ref carries the property.
+	"unary-signed projection": {
+		src: "MATCH (n)\nRETURN -n.num",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "-n.num", Value: query.NewExprProjection(
+					[]query.Ref{{Variable: "n", Property: "num"}},
+					query.TypeUnknown{},
+				)},
+			},
+		}),
+	},
+	// Stage 6 — canonical list literal. A list of integer literals types as
+	// TypeList(TypeInt); no bindings are touched.
+	"list literal in return": {
+		src: "RETURN [1, 2, 3]",
+		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+			Returns: []query.ReturnItem{
+				{Name: "[1, 2, 3]", Value: query.NewExprProjection(nil, query.NewTypeList(query.TypeInt{}))},
+			},
+		}}}}},
+	},
+	// Stage 6 — parameter inside a rich projection: RETURN $x. Authored to
+	// pin the spec §4 "no parameter is silently dropped" rule at projection
+	// position. A bare-$p RETURN is a rich shape (the projection classifier
+	// falls through to the rich typer), so $x is recorded as an ExprUse on
+	// the parameter — enclosingType is TypeUnknown (parameter's own type is
+	// below the boundary at parse time) and position is projection.
+	"return bare param": {
+		src: "RETURN $x",
+		want: query.Query{
+			Branches: []query.Branch{{Parts: []query.Part{{
+				Returns: []query.ReturnItem{
+					{Name: "$x", Value: query.NewExprProjection(nil, query.TypeUnknown{})},
+				},
+			}}}},
+			Parameters: []query.Parameter{
+				{Name: "x", Uses: []query.Use{
+					query.NewExprUse(query.TypeUnknown{}, query.ExprInProjection),
+				}},
+			},
+		},
+	},
+	// Stage 6 — parameter inside a rich arithmetic projection: RETURN a.n + $delta.
+	// mineComparisons doesn't fire (no comparison; RETURN never runs
+	// mineWhere), so the pair miner does not touch $delta. The rich typer
+	// records $delta as an ExprUse{enclosingType=TypeUnknown (a.n propagates
+	// unknown), ExprInProjection}. The ref a.n is mined for referential
+	// integrity.
+	"return rich param": {
+		src: "MATCH (a)\nRETURN a.n + $delta",
+		want: query.Query{
+			Branches: []query.Branch{{Parts: []query.Part{{
+				Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
+				Returns: []query.ReturnItem{
+					{Name: "a.n + $delta", Value: query.NewExprProjection(
+						[]query.Ref{{Variable: "a", Property: "n"}},
+						query.TypeUnknown{},
+					)},
+				},
+			}}}},
+			Parameters: []query.Parameter{
+				{Name: "delta", Uses: []query.Use{
+					query.NewExprUse(query.TypeUnknown{}, query.ExprInProjection),
+				}},
+			},
+		},
+	},
+	// Stage 6 — parameter inside a rich WHERE predicate: a.n + $x > 5. The
+	// pair miner catches neither `a.n + $x` (arithmetic, not bare) nor `5`
+	// (literal) as a var.prop-vs-$p pair, so $x falls through to the rich
+	// typer and records an ExprUse{enclosingType=TypeBool (the > predicate),
+	// ExprInPredicate}. The reviewer flagged this as a should-fix: spec §4
+	// commits to WHERE-side ExprUse.
+	"where rich param": {
+		src: "MATCH (a)\nWHERE a.n + $x > 5\nRETURN a",
+		want: query.Query{
+			Branches: []query.Branch{{Parts: []query.Part{{
+				Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
+				Returns: []query.ReturnItem{
+					{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
+				},
+			}}}},
+			Parameters: []query.Parameter{
+				{Name: "x", Uses: []query.Use{
+					query.NewExprUse(query.TypeBool{}, query.ExprInPredicate),
+				}},
+			},
+		},
+	},
+	// Stage 6 — parameter directly inside a list literal in RETURN:
+	// RETURN [1, $x, 3]. The rich typer walks each element expression via
+	// listLiteralType, so $x is visited under typeAtom and mined into
+	// exprParams. Element types diverge (int, unknown from param, int) →
+	// list<unknown>. The parameter records an ExprUse against that list
+	// type at ExprInProjection.
+	"return list literal with param": {
+		src: "RETURN [1, $x, 3]",
+		want: query.Query{
+			Branches: []query.Branch{{Parts: []query.Part{{
+				Returns: []query.ReturnItem{
+					{Name: "[1, $x, 3]", Value: query.NewExprProjection(nil,
+						query.NewTypeList(query.TypeUnknown{}))},
+				},
+			}}}},
+			Parameters: []query.Parameter{
+				{Name: "x", Uses: []query.Use{
+					query.NewExprUse(query.NewTypeList(query.TypeUnknown{}), query.ExprInProjection),
+				}},
+			},
+		},
+	},
+	// Stage 6 — CASE WHEN … THEN … ELSE … END. Pins that WHEN predicates
+	// contribute refs only, never arm-type: the boolean WHEN is walked but
+	// its type is not unified with the value-producing arms. THEN 'a' and
+	// ELSE 'b' both type as TypeString, so the CASE types as TypeString
+	// (not TypeUnknown, which is what happens if a boolean WHEN sneaks
+	// into arm-type unification).
+	"case when-then-else types by arms only": {
+		src: "RETURN CASE WHEN true THEN 'a' ELSE 'b' END",
+		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+			Returns: []query.ReturnItem{
+				{Name: "CASE WHEN true THEN 'a' ELSE 'b' END", Value: query.NewExprProjection(nil, query.TypeString{})},
+			},
+		}}}}},
 	},
 	// Stage 4 — UNION ALL variant. Same two-branch shape; the combinator is
 	// UnionAll (the ALL token is present), the cardinality-preserving join.
@@ -459,13 +641,13 @@ var mustParse = map[string]struct {
 				{Parts: []query.Part{{
 					Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
 					Returns: []query.ReturnItem{
-						{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
+						{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
 					},
 				}}},
 				{Parts: []query.Part{{
 					Bindings: []query.Binding{must(query.NewNodeBinding("b", nil))},
 					Returns: []query.ReturnItem{
-						{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"})},
+						{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"}, query.TypeNode{})},
 					},
 				}}},
 			},
@@ -509,26 +691,11 @@ var mustReject = map[string]struct {
 		query: "CREATE (n)\nRETURN n",
 		want:  cypher.ErrUnsupportedClause,
 	},
-	// AUTHORED: arithmetic over a projection (RETURN n.num + 1) is the residual
-	// fail-site for ErrUnsupportedProjection after Stage 3 widens RETURN to
-	// var/var.prop/literal/func/aggregate/RETURN *. No clean verbatim corpus query
-	// exercises the residual without a disqualifying clause (the TCK's
-	// arithmetic-in-RETURN scenarios all also carry WITH or a literal-only RETURN),
-	// so an authored case preserves sentinel reachability. Replace with a corpus
-	// entry if a TCK bump adds a bare one.
-	"arithmetic over projection": {
-		query: "MATCH (n)\nRETURN n.num + 1",
-		want:  cypher.ErrUnsupportedProjection,
-	},
-	// AUTHORED: a unary sign is arithmetic (ADR 0003/0005: no expression trees), so
-	// a signed operand (RETURN -n.num) is residual — fail-site is
-	// nonArithmeticFromAddSub's unary level. No verbatim corpus query exercises a
-	// unary-signed operand at the pinned tag. Replace with a corpus entry if a TCK
-	// bump adds one.
-	"unary-signed projection": {
-		query: "MATCH (n)\nRETURN -n.num",
-		want:  cypher.ErrUnsupportedProjection,
-	},
+	// (Stage 6: the two ErrUnsupportedProjection pins from Stages 3-5 —
+	// "arithmetic over projection" and "unary-signed projection" — are RETIRED.
+	// Their queries now parse as ExprProjection, and the sentinel is deleted;
+	// see the mustParse cases "arithmetic over projection" and "unary-signed
+	// projection" for the accept-path.)
 	// Match2 [6] multi-type relationship [:A|B] -> ErrUnsupportedPattern
 	"multi-type relationship": {
 		query: "MATCH (n)-[r:KNOWS|HATES]->(x)\nRETURN r",
@@ -584,14 +751,15 @@ func TestMustReject(t *testing.T) {
 	}
 }
 
-// allSentinels is the canonical list of the six Parse sentinels — the single
+// allSentinels is the canonical list of the five Parse sentinels — the single
 // source of truth TestSentinelReachability checks against. A new sentinel must be
 // added here (and exercised by a mustReject case); a removed one must be dropped.
 // errNotImplemented is deliberately absent: it is the run-A stub, not a contract
-// sentinel.
+// sentinel. Stage 6 retired ErrUnsupportedProjection: the projection classifier
+// now accepts every scalar expression at RETURN / WITH position, so the sentinel
+// has no fail-site left to guard.
 var allSentinels = []error{
 	cypher.ErrUnsupportedClause,
-	cypher.ErrUnsupportedProjection,
 	cypher.ErrUnsupportedPattern,
 	cypher.ErrUnsupportedParameter,
 	cypher.ErrUnboundVariable,
@@ -741,6 +909,16 @@ func assertReferentialIntegrity(rt *rapid.T, q query.Query, src string) {
 							rt.Fatalf("aggregate projection ref %q has no binding in %q", ref.Variable, src)
 						}
 					}
+				case query.ExprProjection:
+					// Stage 6: a rich scalar expression's refs are the union of
+					// every var/var.prop atom the typer walked into. Every one
+					// must resolve — the referential-integrity invariant is
+					// unchanged; the variant is new.
+					for _, ref := range v.Refs() {
+						if !resolves(ref.Variable) {
+							rt.Fatalf("expr projection ref %q has no binding in %q", ref.Variable, src)
+						}
+					}
 				default:
 					rt.Fatalf("return item has unknown Projection variant %T in %q", r.Value, src)
 				}
@@ -771,6 +949,10 @@ func assertReferentialIntegrity(rt *rapid.T, q query.Query, src string) {
 				}
 			case query.ClauseSlotUse:
 				// A clause-slot use has no Variable — referential check is N/A.
+			case query.ExprUse:
+				// Stage 6 §4: an ExprUse carries the enclosing expression's
+				// result type and a projection/predicate discriminator; no Ref
+				// to check. The parameter's own type is inferred post-freeze.
 			default:
 				rt.Fatalf("parameter %q has unknown Use variant %T in %q", p.Name, u, src)
 			}

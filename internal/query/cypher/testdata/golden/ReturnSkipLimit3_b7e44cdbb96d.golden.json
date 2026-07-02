@@ -1,0 +1,51 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "n",
+              "value": {
+                "kind": "ref",
+                "variable": "n",
+                "property": "",
+                "type": "node"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": [
+    {
+      "name": "s",
+      "uses": [
+        {
+          "kind": "clause-slot",
+          "slot": "skip"
+        }
+      ]
+    },
+    {
+      "name": "l",
+      "uses": [
+        {
+          "kind": "clause-slot",
+          "slot": "limit"
+        }
+      ]
+    }
+  ]
+}

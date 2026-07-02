@@ -1,0 +1,50 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "a.name",
+              "value": {
+                "kind": "ref",
+                "variable": "a",
+                "property": "name",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "a.age",
+              "value": {
+                "kind": "ref",
+                "variable": "a",
+                "property": "age",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "a.seasons",
+              "value": {
+                "kind": "ref",
+                "variable": "a",
+                "property": "seasons",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

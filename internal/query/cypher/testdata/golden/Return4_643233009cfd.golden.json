@@ -1,0 +1,72 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": [
+                "A"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "b",
+              "labels": [
+                "B"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "foo",
+              "value": {
+                "kind": "func",
+                "refs": [
+                  {
+                    "variable": "a",
+                    "property": "num"
+                  },
+                  {
+                    "variable": "b",
+                    "property": "num"
+                  }
+                ],
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "bar",
+              "value": {
+                "kind": "ref",
+                "variable": "b",
+                "property": "num",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "baz",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "b",
+                    "property": ""
+                  }
+                ],
+                "type": "map"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

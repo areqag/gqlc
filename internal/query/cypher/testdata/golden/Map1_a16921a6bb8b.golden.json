@@ -1,0 +1,57 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "m",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "map"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "m.missing",
+              "value": {
+                "kind": "ref",
+                "variable": "m",
+                "property": "missing",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "m.notMissing",
+              "value": {
+                "kind": "ref",
+                "variable": "m",
+                "property": "notMissing",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "m.existing",
+              "value": {
+                "kind": "ref",
+                "variable": "m",
+                "property": "existing",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

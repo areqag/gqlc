@@ -1,0 +1,139 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "person",
+              "labels": [
+                "Person"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": null,
+              "source": {
+                "kind": "var",
+                "variable": "message"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "person"
+              },
+              "nullable": false,
+              "directed": true
+            },
+            {
+              "kind": "node",
+              "variable": "message",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "like",
+              "labels": null,
+              "source": {
+                "kind": "inline",
+                "labels": [
+                  "Person"
+                ]
+              },
+              "target": {
+                "kind": "var",
+                "variable": "message"
+              },
+              "nullable": false,
+              "directed": true
+            }
+          ],
+          "returns": [
+            {
+              "name": "likeTime",
+              "value": {
+                "kind": "ref",
+                "variable": "like",
+                "property": "creationDate",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "person",
+              "value": {
+                "kind": "ref",
+                "variable": "person",
+                "property": "",
+                "type": "node"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "latestLike",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "likeTime",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "person",
+              "value": {
+                "kind": "ref",
+                "variable": "person",
+                "property": "",
+                "type": "node"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "likeTime",
+              "value": {
+                "kind": "ref",
+                "variable": "latestLike",
+                "property": "likeTime",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "likeTime",
+              "value": {
+                "kind": "ref",
+                "variable": "likeTime",
+                "property": "",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}
