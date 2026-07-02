@@ -17,7 +17,8 @@
                 "labels": null
               },
               "nullable": false,
-              "directed": true
+              "directed": true,
+              "hops": null
             }
           ],
           "returns": [
@@ -54,7 +55,8 @@
                 "variable": "b2"
               },
               "nullable": true,
-              "directed": true
+              "directed": true,
+              "hops": null
             },
             {
               "kind": "node",

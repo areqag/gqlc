@@ -27,7 +27,8 @@
                 "variable": "team"
               },
               "nullable": false,
-              "directed": true
+              "directed": true,
+              "hops": null
             },
             {
               "kind": "node",
@@ -52,7 +53,8 @@
                 "variable": "team"
               },
               "nullable": true,
-              "directed": true
+              "directed": true,
+              "hops": null
             }
           ],
           "returns": [

@@ -1,0 +1,133 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": [
+                "T"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "R"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "a"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "other"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": {
+                "min": null,
+                "max": null
+              }
+            },
+            {
+              "kind": "node",
+              "variable": "other",
+              "labels": [
+                "T"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "path",
+              "variable": "p",
+              "members": [
+                "a",
+                "__anon_edge_0",
+                "other"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "a",
+              "value": {
+                "kind": "ref",
+                "variable": "a",
+                "property": "",
+                "type": "node"
+              }
+            },
+            {
+              "name": "other",
+              "value": {
+                "kind": "ref",
+                "variable": "other",
+                "property": "",
+                "type": "node"
+              }
+            },
+            {
+              "name": "len",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "p",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "name",
+              "value": {
+                "kind": "ref",
+                "variable": "a",
+                "property": "name",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "others",
+              "value": {
+                "kind": "aggregate",
+                "func": "collect",
+                "refs": [
+                  {
+                    "variable": "other",
+                    "property": "name"
+                  }
+                ],
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "len",
+              "value": {
+                "kind": "ref",
+                "variable": "len",
+                "property": "",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

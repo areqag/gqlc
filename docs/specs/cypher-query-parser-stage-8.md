@@ -127,14 +127,17 @@ Two changes to `EdgeBinding` for the variable-length and multi-type shapes:
   ```
 
   Constructor `NewEdgeHops(min, max *int) (EdgeHops, error)` rejects:
-  a negative `min` or `max` (openCypher hop counts are non-negative;
-  though the TCK is unclear whether `*0` should parse — since the openCypher
-  grammar admits any integer literal, we accept zero as the honest reflection
-  of what the grammar accepts; the runtime engine enforces the "at least one
-  hop" rule where applicable), and `max < min` when both are non-nil
-  (a range with an upper bound below the lower bound is empty). A zero
-  min is allowed (openCypher accepts `*0..3` per its grammar; the runtime
-  engine chooses how to interpret zero hops).
+  a negative `min` or `max` (openCypher integer literals are non-negative,
+  so a negative value could never come from a well-formed range literal —
+  this is the sole invariant the type alone cannot express).
+
+  An empty range (`max < min`, e.g. `[*2..1]`) is **accepted**: the openCypher
+  TCK includes it as a positive scenario returning zero rows
+  (`clauses/match/Match5.feature` [11], [12]), so the runtime rule "no
+  valid hop count satisfies the range" sits below the type-interface
+  boundary (ADR 0005). The parser records the range as written; the engine
+  interprets the empty result. A zero lower bound (`*0..N`) is likewise
+  accepted for the same reason.
 
 - **Var-length edges' binding cardinality changes.** A var-length edge
   variable binds to a **list of edges** at runtime, not a single edge —

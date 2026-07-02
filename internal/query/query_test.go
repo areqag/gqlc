@@ -838,13 +838,16 @@ func TestNewEdgeHopsRejectsNegative(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestNewEdgeHopsRejectsMaxLessThanMin pins the invariant: a bounded range
-// whose upper bound is below its lower bound is empty (no valid hop count
-// satisfies it); the constructor is the only writer and rejects it.
-func TestNewEdgeHopsRejectsMaxLessThanMin(t *testing.T) {
+// TestNewEdgeHopsAllowsEmptyRange pins that a max<min range parses: openCypher
+// admits `[*2..1]` grammatically and the TCK's positive scenarios treat it as
+// zero-row-yielding at runtime (ADR 0005). The parser records the range as
+// written; the engine interprets the empty result.
+func TestNewEdgeHopsAllowsEmptyRange(t *testing.T) {
 	three, one := 3, 1
-	_, err := query.NewEdgeHops(&three, &one)
-	require.Error(t, err)
+	h, err := query.NewEdgeHops(&three, &one)
+	require.NoError(t, err)
+	require.Equal(t, 3, *h.Min())
+	require.Equal(t, 1, *h.Max())
 }
 
 // TestNewEdgeHopsAllowsEqualBounds pins the [*3] case (which grammatically

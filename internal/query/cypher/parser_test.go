@@ -1283,12 +1283,15 @@ func assertParametersDeduped(rt *rapid.T, q query.Query, src string) {
 	}
 }
 
-// bindingVariable reads the variable of either binding variant via its accessor.
+// bindingVariable reads the variable of any binding variant via its accessor.
+// Stage 8: PathBinding joins the sum with an always-non-empty variable.
 func bindingVariable(b query.Binding) string {
 	switch v := b.(type) {
 	case query.NodeBinding:
 		return v.Variable()
 	case query.EdgeBinding:
+		return v.Variable()
+	case query.PathBinding:
 		return v.Variable()
 	default:
 		return ""

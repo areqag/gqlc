@@ -1,0 +1,78 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "CONNECTED_TO"
+              ],
+              "source": {
+                "kind": "inline",
+                "labels": null
+              },
+              "target": {
+                "kind": "inline",
+                "labels": [
+                  "Start"
+                ]
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "CONNECTED_TO"
+              ],
+              "source": {
+                "kind": "inline",
+                "labels": null
+              },
+              "target": {
+                "kind": "inline",
+                "labels": [
+                  "End"
+                ]
+              },
+              "nullable": false,
+              "directed": false,
+              "hops": {
+                "min": 3,
+                "max": 3
+              }
+            },
+            {
+              "kind": "path",
+              "variable": "topRoute",
+              "members": [
+                "__anon_edge_0",
+                "__anon_edge_1"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "topRoute",
+              "value": {
+                "kind": "ref",
+                "variable": "topRoute",
+                "property": "",
+                "type": "path"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

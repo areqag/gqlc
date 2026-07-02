@@ -23,7 +23,8 @@
                 "variable": "b"
               },
               "nullable": false,
-              "directed": false
+              "directed": false,
+              "hops": null
             },
             {
               "kind": "node",
@@ -44,7 +45,8 @@
                 "variable": "c"
               },
               "nullable": false,
-              "directed": false
+              "directed": false,
+              "hops": null
             },
             {
               "kind": "node",
@@ -65,7 +67,8 @@
                 "variable": "d"
               },
               "nullable": false,
-              "directed": false
+              "directed": false,
+              "hops": null
             },
             {
               "kind": "node",
@@ -86,7 +89,8 @@
                 "variable": "a"
               },
               "nullable": false,
-              "directed": false
+              "directed": false,
+              "hops": null
             },
             {
               "kind": "edge",
@@ -101,7 +105,8 @@
                 "variable": "d"
               },
               "nullable": false,
-              "directed": false
+              "directed": false,
+              "hops": null
             }
           ],
           "returns": [

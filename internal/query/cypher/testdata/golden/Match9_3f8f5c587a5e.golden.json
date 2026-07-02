@@ -1,0 +1,152 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "r1",
+              "labels": null,
+              "source": {
+                "kind": "var",
+                "variable": "a"
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            },
+            {
+              "kind": "edge",
+              "variable": "r2",
+              "labels": null,
+              "source": {
+                "kind": "inline",
+                "labels": null
+              },
+              "target": {
+                "kind": "var",
+                "variable": "b"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            },
+            {
+              "kind": "node",
+              "variable": "b",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "rs",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "r1",
+                    "property": ""
+                  },
+                  {
+                    "variable": "r2",
+                    "property": ""
+                  }
+                ],
+                "type": "list\u003cedge\u003e"
+              }
+            },
+            {
+              "name": "second",
+              "value": {
+                "kind": "ref",
+                "variable": "a",
+                "property": "",
+                "type": "node"
+              }
+            },
+            {
+              "name": "first",
+              "value": {
+                "kind": "ref",
+                "variable": "b",
+                "property": "",
+                "type": "node"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "first",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "rs",
+              "labels": null,
+              "source": {
+                "kind": "var",
+                "variable": "first"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "second"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": {
+                "min": null,
+                "max": null
+              }
+            },
+            {
+              "kind": "node",
+              "variable": "second",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "first",
+              "value": {
+                "kind": "ref",
+                "variable": "first",
+                "property": "",
+                "type": "node"
+              }
+            },
+            {
+              "name": "second",
+              "value": {
+                "kind": "ref",
+                "variable": "second",
+                "property": "",
+                "type": "node"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

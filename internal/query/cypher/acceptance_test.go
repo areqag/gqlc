@@ -34,10 +34,13 @@ var updateGolden = flag.Bool("update", false, "regenerate golden snapshots from 
 // string, null, precedence, typeConversion, list, map, conditional — every
 // one exercises a scalar expression the widened projection sum now types.
 // Stage 7 adds expressions/temporal — the constructor + arithmetic surface
-// the six new temporal Type variants unlock. Aggregation,
-// existentialSubqueries, graph, path, pattern, and quantifier stay out until
-// Stages 8-11 land. The corpus is never edited; each stage widens the dir
-// list and shrinks the skiplist.
+// the six new temporal Type variants unlock. Stage 8 adds expressions/path,
+// expressions/pattern, expressions/graph — the pattern surface widening
+// (named paths, variable-length relationships, multi-type) reaches every
+// scenario exercising graph functions over paths. Aggregation,
+// existentialSubqueries, and quantifier stay out until Stages 10-11.
+// The corpus is never edited; each stage widens the dir list and shrinks the
+// skiplist.
 var readCoreDirs = []string{
 	"../../../test/data/query/cypher/tck/features/clauses/match",
 	"../../../test/data/query/cypher/tck/features/clauses/return",
@@ -57,6 +60,9 @@ var readCoreDirs = []string{
 	"../../../test/data/query/cypher/tck/features/expressions/map",
 	"../../../test/data/query/cypher/tck/features/expressions/conditional",
 	"../../../test/data/query/cypher/tck/features/expressions/temporal",
+	"../../../test/data/query/cypher/tck/features/expressions/path",
+	"../../../test/data/query/cypher/tck/features/expressions/pattern",
+	"../../../test/data/query/cypher/tck/features/expressions/graph",
 }
 
 const goldenDir = "testdata/golden"
@@ -223,6 +229,42 @@ var skiplist = map[string]bool{
 	// pattern-predicate arguments is downstream signature-checking work
 	// (procedure/function registry, ADR 0007), out of Stage 6's scope.
 	"[6] Fail for `size()` on pattern predicates": true,
+
+	// --- pattern semantics (Stage 8) ---
+	//
+	// Stage 8 widens the pattern model to admit named paths, variable-length
+	// relationships, and multi-type relationships. Three of the negative
+	// scenarios exercise semantic rules the type-interface model does not
+	// carry, so they now parse-accept; each error sits below the boundary
+	// per ADR 0005 and rides bucket 3 (ADR 0007).
+	//
+	// WITH <invalid> AS p / MATCH p = ()-[]-(): binding a path variable to a
+	// value is a VariableAlreadyBound semantic rule (the WITH exports p as a
+	// non-path expression's alias; the MATCH re-binds it as a path). The
+	// model records p's kind (path) and the WITH's alias-and-type separately,
+	// so the two reconcile structurally; the engine raises. Scenario Outline
+	// with several examples, all sharing the same name.
+	"[25] Fail when matching a path variable bound to a value": true,
+
+	// MATCH r = (n)-[*]->() / WHERE r.name = 'apa' / RETURN r: a property
+	// lookup on a path variable is an InvalidArgumentType semantic rule
+	// (paths have no properties). The parser accepts the property-lookup
+	// shape (Stage 6 records TypeUnknown for any property lookup, ADR 0003);
+	// the engine's type-check against the resolved r:path rejects it.
+	"[14] Fail when filtering path with property predicate": true,
+
+	// MATCH (n) RETURN (n)-[]->(): a pattern predicate used at RETURN /
+	// WITH projection position. The TCK cites SyntaxError:UnexpectedSyntax
+	// but the rule is semantic (pattern predicates are only legal in WHERE
+	// / EXISTS positions, not as scalar expressions). Stage 6's typeAtom
+	// accepts OC_PatternPredicate as an OC_Atom of TypeUnknown for its
+	// role inside a WHERE, so the same atom in projection position also
+	// parses. Detecting the position-specific misuse is downstream
+	// context-sensitive work (Stage 11's predicate expressions bead). The
+	// engine's grammar rejects the shape at parse time on the original
+	// text (ADR 0005).
+	"[22] Fail on using pattern in RETURN projection": true,
+	"[23] Fail on using pattern in WITH projection":   true,
 }
 
 // the public sentinels for scenarios the parser cannot faithfully represent

@@ -335,19 +335,22 @@ type EdgeHops struct {
 }
 
 // NewEdgeHops builds an EdgeHops from optional min and max bounds. Rejects a
-// negative bound (openCypher hop counts are non-negative) and max<min when both
-// are non-nil (a range with an upper bound below the lower bound is empty).
-// A zero lower bound (`*0..N`) is accepted — the grammar admits it, and the
-// runtime engine handles zero-hop semantics per ADR 0005.
+// negative bound (openCypher integer literals are non-negative, so a negative
+// value could never come from a well-formed range literal — this is the sole
+// invariant the type alone cannot express).
+//
+// An empty range (max < min, e.g. `[*2..1]`) is accepted: the openCypher TCK
+// includes it as a positive scenario returning zero rows, so the runtime rule
+// "no valid hop count satisfies the range" sits below the type-interface
+// boundary (ADR 0005). The parser records the range as written; the engine
+// interprets the empty result. A zero lower bound (`*0..N`) is likewise
+// accepted for the same reason.
 func NewEdgeHops(minHops, maxHops *int) (EdgeHops, error) {
 	if minHops != nil && *minHops < 0 {
 		return EdgeHops{}, errors.New("query: edge hop range requires a non-negative lower bound")
 	}
 	if maxHops != nil && *maxHops < 0 {
 		return EdgeHops{}, errors.New("query: edge hop range requires a non-negative upper bound")
-	}
-	if minHops != nil && maxHops != nil && *maxHops < *minHops {
-		return EdgeHops{}, errors.New("query: edge hop range requires max >= min")
 	}
 	return EdgeHops{min: minHops, max: maxHops}, nil
 }

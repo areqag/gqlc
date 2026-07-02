@@ -1,0 +1,86 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": null,
+              "source": {
+                "kind": "inline",
+                "labels": [
+                  "A"
+                ]
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": null,
+              "source": {
+                "kind": "inline",
+                "labels": null
+              },
+              "target": {
+                "kind": "inline",
+                "labels": [
+                  "A"
+                ]
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            },
+            {
+              "kind": "path",
+              "variable": "p1",
+              "members": [
+                "__anon_edge_0"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "path",
+              "variable": "p2",
+              "members": [
+                "__anon_edge_1"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "p1 = p2",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "p1",
+                    "property": ""
+                  },
+                  {
+                    "variable": "p2",
+                    "property": ""
+                  }
+                ],
+                "type": "bool"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

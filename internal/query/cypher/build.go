@@ -83,7 +83,14 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Part,
 	// Stage 8: path variables introduced in this part enter the scope the
 	// same way entity variables do — a RETURN p on a named path resolves
 	// against the path binding, and its type is TypePath (via refType).
+	// A path variable that clashes with an entity binding of the same name
+	// (a preceding MATCH bound r as a node, and this MATCH used r = (...))
+	// is a kind conflict — three-way (node/edge/path), extending the
+	// Stage 0..7 two-way check (§1.6).
 	for _, pb := range rp.pathBindings {
+		if _, ok := rp.byVar[pb.Variable()]; ok {
+			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, pb.Variable())
+		}
 		scope[pb.Variable()] = true
 	}
 

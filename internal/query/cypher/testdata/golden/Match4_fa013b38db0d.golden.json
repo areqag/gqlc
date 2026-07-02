@@ -1,0 +1,53 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": [
+                "Artist"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "WORKED_WITH"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "a"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "b"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": {
+                "min": null,
+                "max": null
+              }
+            },
+            {
+              "kind": "node",
+              "variable": "b",
+              "labels": [
+                "Artist"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": null,
+          "returnsAll": true
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}
