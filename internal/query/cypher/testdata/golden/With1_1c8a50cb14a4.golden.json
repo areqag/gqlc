@@ -18,7 +18,8 @@
                   "X"
                 ]
               },
-              "nullable": false
+              "nullable": false,
+              "directed": true
             }
           ],
           "returns": [
@@ -47,7 +48,8 @@
                 "kind": "inline",
                 "labels": null
               },
-              "nullable": false
+              "nullable": false,
+              "directed": true
             }
           ],
           "returns": [

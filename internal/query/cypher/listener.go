@@ -86,13 +86,14 @@ func newRawPart() *rawPart {
 // re-uses of the same variable in non-OPTIONAL clauses never demote it; that
 // is the resolver's job (see gqlc-lqm).
 type rawBinding struct {
-	variable string
-	labels   graph.LabelSet
-	seen     map[string]bool // labels already merged, for the ordered union
-	kind     graph.EntityKind
-	source   query.Endpoint
-	target   query.Endpoint
-	nullable bool
+	variable   string
+	labels     graph.LabelSet
+	seen       map[string]bool // labels already merged, for the ordered union
+	kind       graph.EntityKind
+	source     query.Endpoint
+	target     query.Endpoint
+	nullable   bool
+	undirected bool // zero value false == directed; set true only on the undirected branch (inverted to keep existing literals zero-value-safe, see §4)
 }
 
 // varRef is a use of a variable name that build() must resolve to a binding. An

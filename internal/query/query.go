@@ -175,34 +175,39 @@ func (b NodeBinding) Nullable() bool { return b.nullable }
 func (NodeBinding) isBinding() {}
 
 // EdgeBinding is a query variable bound to an edge, carrying its labels as
-// written and both endpoints, in canonical source->target order (a left-pointing
-// edge is canonicalised). Labels may be empty for an untyped edge (C7). The
-// variable may be empty: unlike a node, an anonymous edge is its own binding (the
-// relationship in (a)-->(b)). Source and Target are always present (NewEdgeBinding).
+// written, both endpoints, and a direction marker. For a directed edge the
+// endpoints are in canonical source->target order (a left-pointing edge is
+// canonicalised); for an undirected edge (directed=false) the endpoints are in
+// textual order, with no authoritative orientation (the resolver tries both).
+// Labels may be empty for an untyped edge (C7). The variable may be empty: unlike
+// a node, an anonymous edge is its own binding (the relationship in (a)-->(b)).
+// Source and Target are always present (NewEdgeBinding).
 type EdgeBinding struct {
 	variable string         // the name as written: the r in [r:KNOWS]; empty if anonymous
 	labels   graph.LabelSet // labels as written; may be empty
 	source   Endpoint       // the source endpoint; always set
 	target   Endpoint       // the target endpoint; always set
 	nullable bool           // set when first introduced in OPTIONAL MATCH (ADR 0006)
+	directed bool           // true for a one-arrow edge; false for an undirected edge (Stage 5)
 }
 
 // NewEdgeBinding builds an EdgeBinding, rejecting a missing endpoint: an edge
 // always has both a source and a target. Variable may be empty (an anonymous
-// edge) and Labels may be empty (an untyped edge, C7).
-func NewEdgeBinding(variable string, labels graph.LabelSet, source, target Endpoint) (EdgeBinding, error) {
+// edge) and Labels may be empty (an untyped edge, C7). directed marks a one-arrow
+// edge (true) versus an undirected edge (false).
+func NewEdgeBinding(variable string, labels graph.LabelSet, source, target Endpoint, directed bool) (EdgeBinding, error) {
 	if source == nil || target == nil {
 		return EdgeBinding{}, errors.New("query: edge binding requires both a source and a target endpoint")
 	}
-	return EdgeBinding{variable: variable, labels: labels, source: source, target: target}, nil
+	return EdgeBinding{variable: variable, labels: labels, source: source, target: target, directed: directed}, nil
 }
 
 // NewNullableEdgeBinding builds the OPTIONAL-introduced variant (ADR 0006):
 // same invariants as NewEdgeBinding, with the Nullable flag set. The flag is
 // applied uniformly to every binding the OPTIONAL clause introduces, including
 // the anonymous-edge case where no Ref will ever read it.
-func NewNullableEdgeBinding(variable string, labels graph.LabelSet, source, target Endpoint) (EdgeBinding, error) {
-	b, err := NewEdgeBinding(variable, labels, source, target)
+func NewNullableEdgeBinding(variable string, labels graph.LabelSet, source, target Endpoint, directed bool) (EdgeBinding, error) {
+	b, err := NewEdgeBinding(variable, labels, source, target, directed)
 	if err != nil {
 		return EdgeBinding{}, err
 	}
@@ -221,6 +226,10 @@ func (b EdgeBinding) Source() Endpoint { return b.source }
 
 // Target is the target endpoint; always set.
 func (b EdgeBinding) Target() Endpoint { return b.target }
+
+// Directed reports whether the edge was written with a single arrow (true) or as
+// an undirected pattern (false, the resolver tries both orientations).
+func (b EdgeBinding) Directed() bool { return b.directed }
 
 // Kind reports that an EdgeBinding is an edge.
 func (EdgeBinding) Kind() graph.EntityKind { return graph.Edge }
@@ -609,7 +618,8 @@ func (b EdgeBinding) MarshalJSON() ([]byte, error) {
 		Source   Endpoint       `json:"source"`
 		Target   Endpoint       `json:"target"`
 		Nullable bool           `json:"nullable"`
-	}{Kind: b.Kind().String(), Variable: b.variable, Labels: b.labels, Source: b.source, Target: b.target, Nullable: b.nullable})
+		Directed bool           `json:"directed"`
+	}{Kind: b.Kind().String(), Variable: b.variable, Labels: b.labels, Source: b.source, Target: b.target, Nullable: b.nullable, Directed: b.directed})
 }
 
 // MarshalJSON renders a VarEndpoint as a tagged union member discriminated by
