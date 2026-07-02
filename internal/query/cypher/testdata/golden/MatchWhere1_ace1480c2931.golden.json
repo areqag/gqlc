@@ -50,8 +50,8 @@
   "combinators": null,
   "parameters": [
     {
-      "Name": "param",
-      "Uses": [
+      "name": "param",
+      "uses": [
         {
           "kind": "property",
           "variable": "b",

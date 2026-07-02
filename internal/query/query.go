@@ -45,7 +45,7 @@ type Query struct {
 // the final part ends in a RETURN (positional — no per-part terminal flag). It
 // is a product type: exported fields, the builder maintains the invariant (at
 // least one part), no smart constructor — mirroring Query (Stage-4 spec §3).
-type QueryBranch struct {
+type QueryBranch struct { //nolint:revive // the stutter-fixing rename to query.Branch is a model API change deferred to the freeze (gqlc-cta)
 	// Parts are the branch's WITH-bounded scope segments, in source order. At
 	// least one (the final RETURN part).
 	Parts []QueryPart `json:"parts"`
@@ -57,7 +57,7 @@ type QueryBranch struct {
 // Stage-3 Projection sum); the final part's carry the branch's result columns.
 // It is a product type: exported fields, the builder maintains its invariants (a
 // part's Returns is empty iff ReturnsAll), no smart constructor — mirroring Query.
-type QueryPart struct {
+type QueryPart struct { //nolint:revive // the stutter-fixing rename to query.Part is a model API change deferred to the freeze (gqlc-cta)
 	// Bindings are the entities this part's own MATCH clauses introduce, a
 	// NodeBinding or an EdgeBinding each. Among a part's named bindings the
 	// variable is unique; Returns and edge endpoints reference them by it (or a
@@ -477,8 +477,8 @@ func (f AggregateFunc) String() string {
 // uses post-freeze (the parser stays schema-agnostic per ADR 0003); mixed-kind
 // uses on one Parameter are not a parser-level conflict.
 type Parameter struct {
-	Name string
-	Uses []Use
+	Name string `json:"name"`
+	Uses []Use  `json:"uses"`
 }
 
 // Use is one position where a parameter appears. It is a closed sum of
@@ -678,7 +678,7 @@ func flattenRefs(refs []Ref) []flatRef {
 	}
 	out := make([]flatRef, len(refs))
 	for i, r := range refs {
-		out[i] = flatRef{Variable: r.Variable, Property: r.Property}
+		out[i] = flatRef(r)
 	}
 	return out
 }

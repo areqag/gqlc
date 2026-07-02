@@ -4,6 +4,7 @@ package graph
 // or an edge.
 type EntityKind int
 
+// The two entity kinds; the query model's binding sum mirrors this split.
 const (
 	Node EntityKind = iota
 	Edge

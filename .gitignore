@@ -2,6 +2,9 @@
 # time/seed-specific and regenerated on demand, so they are never committed.
 **/testdata/rapid/
 
+# project-local tool binaries, self-provisioned by just recipes (ensure-golangci)
+.bin/
+
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db

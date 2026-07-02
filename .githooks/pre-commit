@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Pre-commit hook: block direct commits to master/main, then gate formatting.
+# Budget: sub-second — tests and full lint belong to pre-push and CI.
+# Activated by: git config core.hooksPath .githooks
+# (run `just init` after cloning)
+
+# Allow test harness to override the branch name for testing
+if [ -n "${BRANCH_OVERRIDE:-}" ]; then
+  BRANCH="$BRANCH_OVERRIDE"
+else
+  BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+fi
+
+if [ "$BRANCH" = "master" ] || [ "$BRANCH" = "main" ]; then
+  echo "ERROR: Direct commits to $BRANCH are blocked." >&2
+  echo "Create a feature branch with: git switch -c <branch>" >&2
+  exit 1
+fi
+
+# Formatting gate (gofumpt + gci via the pinned golangci-lint). Repo-wide on
+# purpose: simpler than staged-file plumbing, and `just fmt` fixes everything
+# it complains about. ensure-golangci self-heals the pinned binary in .bin/
+# (~30ms when healthy); it only fails when a needed download is impossible
+# (e.g. offline), and then we degrade to a warning rather than block commits.
+if just ensure-golangci >/dev/null 2>&1; then
+  if ! just fmt-check >/dev/null 2>&1; then
+    echo "ERROR: unformatted Go files. Run: just fmt" >&2
+    exit 1
+  fi
+else
+  echo "WARN: could not provision golangci-lint (offline?); skipping format check" >&2
+fi
+
+exit 0
