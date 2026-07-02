@@ -4,8 +4,8 @@ import (
 	"io"
 
 	"github.com/antlr4-go/antlr/v4"
-	"github.com/antranig-yeretzian/gqlc/internal/grammar/gql/gen"
-	"github.com/antranig-yeretzian/gqlc/internal/schema"
+	"github.com/areqag/gqlc/internal/grammar/gql/gen"
+	"github.com/areqag/gqlc/internal/schema"
 )
 
 type parser struct{}

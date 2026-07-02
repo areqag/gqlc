@@ -3,9 +3,9 @@ package cypher
 import (
 	"fmt"
 
-	"github.com/antranig-yeretzian/gqlc/internal/grammar/cypher/gen"
-	"github.com/antranig-yeretzian/gqlc/internal/graph"
-	"github.com/antranig-yeretzian/gqlc/internal/query"
+	"github.com/areqag/gqlc/internal/grammar/cypher/gen"
+	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/query"
 )
 
 // collectPattern lowers one MATCH clause's comma-separated pattern parts into

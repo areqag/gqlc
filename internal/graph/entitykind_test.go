@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/antranig-yeretzian/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/graph"
 )
 
 // TestEntityKindString pins the lowercase names the query model's JSON

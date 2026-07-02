@@ -6,9 +6,9 @@ import (
 	"github.com/antlr4-go/antlr/v4"
 	"github.com/stretchr/testify/require"
 
-	"github.com/antranig-yeretzian/gqlc/internal/grammar/gql/gen"
-	"github.com/antranig-yeretzian/gqlc/internal/graph"
-	"github.com/antranig-yeretzian/gqlc/internal/schema"
+	"github.com/areqag/gqlc/internal/grammar/gql/gen"
+	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/schema"
 )
 
 // parseFirstProperty drives the real grammar to the first propertyType context

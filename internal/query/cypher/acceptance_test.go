@@ -19,8 +19,8 @@ import (
 	"github.com/cucumber/godog"
 	messages "github.com/cucumber/messages/go/v21"
 
-	"github.com/antranig-yeretzian/gqlc/internal/query"
-	"github.com/antranig-yeretzian/gqlc/internal/query/cypher"
+	"github.com/areqag/gqlc/internal/query"
+	"github.com/areqag/gqlc/internal/query/cypher"
 )
 
 // updateGolden regenerates the .golden.json snapshots from parser output. It is

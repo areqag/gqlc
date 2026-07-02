@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/antranig-yeretzian/gqlc/internal/logger"
-	schema_parser_gql "github.com/antranig-yeretzian/gqlc/internal/schema/gql"
+	"github.com/areqag/gqlc/internal/logger"
+	schema_parser_gql "github.com/areqag/gqlc/internal/schema/gql"
 )
 
 func main() {

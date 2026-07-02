@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"pgregory.net/rapid"
 
-	"github.com/antranig-yeretzian/gqlc/internal/graph"
-	"github.com/antranig-yeretzian/gqlc/internal/query"
+	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/query"
 )
 
 // --- constructor invariants (illegal states rejected by constructor) ---

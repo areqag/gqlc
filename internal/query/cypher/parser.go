@@ -5,8 +5,8 @@ import (
 
 	"github.com/antlr4-go/antlr/v4"
 
-	"github.com/antranig-yeretzian/gqlc/internal/grammar/cypher/gen"
-	"github.com/antranig-yeretzian/gqlc/internal/query"
+	"github.com/areqag/gqlc/internal/grammar/cypher/gen"
+	"github.com/areqag/gqlc/internal/query"
 )
 
 type parser struct{}
