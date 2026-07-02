@@ -54,7 +54,7 @@
                     "property": ""
                   }
                 ],
-                "type": "unknown"
+                "type": "list\u003cbool\u003e"
               }
             },
             {
@@ -87,7 +87,7 @@
                     "property": ""
                   }
                 ],
-                "type": "unknown"
+                "type": "list\u003cbool\u003e"
               }
             }
           ],

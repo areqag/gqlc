@@ -41,7 +41,8 @@
                     "property": ""
                   }
                 ],
-                "type": "unknown"
+                "distinct": false,
+                "type": "int"
               }
             }
           ],
@@ -65,7 +66,7 @@
                 "kind": "ref",
                 "variable": "c",
                 "property": "",
-                "type": "unknown"
+                "type": "int"
               }
             }
           ],

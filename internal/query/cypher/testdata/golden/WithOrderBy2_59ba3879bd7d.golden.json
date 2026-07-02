@@ -27,7 +27,8 @@
                 "kind": "aggregate",
                 "func": "count",
                 "refs": null,
-                "type": "unknown"
+                "distinct": false,
+                "type": "int"
               }
             }
           ],
@@ -51,7 +52,7 @@
                 "kind": "ref",
                 "variable": "cnt",
                 "property": "",
-                "type": "unknown"
+                "type": "int"
               }
             }
           ],

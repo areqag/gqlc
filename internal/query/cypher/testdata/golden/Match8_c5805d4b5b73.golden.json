@@ -79,6 +79,7 @@
                     "property": "times"
                   }
                 ],
+                "distinct": false,
                 "type": "unknown"
               }
             }

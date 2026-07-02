@@ -23,7 +23,8 @@
                     "property": ""
                   }
                 ],
-                "type": "unknown"
+                "distinct": false,
+                "type": "list\u003cnode\u003e"
               }
             }
           ],
@@ -34,7 +35,7 @@
             {
               "kind": "unwind",
               "variable": "node",
-              "elemType": "unknown",
+              "elemType": "node",
               "nullable": false
             }
           ],

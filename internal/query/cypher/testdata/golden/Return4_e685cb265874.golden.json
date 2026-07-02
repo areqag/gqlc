@@ -63,7 +63,8 @@
                     "property": ""
                   }
                 ],
-                "type": "unknown"
+                "distinct": true,
+                "type": "int"
               }
             }
           ],
