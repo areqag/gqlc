@@ -440,6 +440,15 @@ func initScenario(ctx *godog.ScenarioContext) {
 	// (Temporal4). At the parse level "empty" is the same guard as
 	// "should be": the query must have parsed (or be a known-unsupported /
 	// skipped scenario). noSideEffects's semantics fit exactly.
+	//
+	// Assumption: write clauses fail at parse today (ErrUnsupportedClause),
+	// so a scenario reaching "the result should be empty" pairs with a
+	// parse-time reject and noSideEffects returns ErrPending via the
+	// isUnsupported path. Once a future stage parses writes, the paired
+	// executing-query step will succeed and this step must snapshot the
+	// resulting model — silent-drop this and a Stage-12 write scenario
+	// would type-check clean with no assertion. Guarded by
+	// TestGoldenOrphans keying every executing-query step to a golden.
 	ctx.Step(`^the result should be empty$`, noSideEffects)
 	ctx.Step(`^no side effects$`, noSideEffects)
 	ctx.Step(`^the side effects should be:$`, noopTable)
@@ -680,9 +689,19 @@ func harvestExecutingQueries(t *testing.T, dirs []string) []string {
 	return out
 }
 
+// isExecutingQueryStep identifies the docstring-bearing "when" step whose
+// content is the query the scenario executes. The two accepted spellings
+// mirror the two Step registrations in initScenario ("executing query" and
+// the Temporal4 write-plus-readback "executing control query"). Exact match
+// on the two known spellings — not a substring test — so a future TCK
+// step like "before executing query, do X" cannot silently key a golden.
+// Stage-12 write-storage goldens would orphan silently under a substring
+// match once CREATE parses.
 func isExecutingQueryStep(step *messages.PickleStep) bool {
-	return strings.Contains(step.Text, "executing query") &&
-		step.Argument != nil && step.Argument.DocString != nil
+	if step.Argument == nil || step.Argument.DocString == nil {
+		return false
+	}
+	return step.Text == "executing query:" || step.Text == "executing control query:"
 }
 
 // newIDGen returns a fresh incrementing id generator, required by Pickles.
