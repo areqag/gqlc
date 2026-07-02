@@ -30,5 +30,5 @@ version bump in the justfile propagates to every machine automatically.
 The hooks split the same checks by budget: pre-commit blocks master commits and
 gates formatting (sub-second); pre-push runs the suite and diff-scoped lint
 (seconds); CI is the authoritative gate (`lint`, `test`, `tidy`, `actionlint`
-and `govulncheck` are required to merge — the real vulnerability scan runs when
-go.mod/go.sum change, a same-named no-op satisfies the check otherwise).
+and `govulncheck` are required to merge — the vulnerability job reports on
+every PR but only scans when go.mod/go.sum changed).
