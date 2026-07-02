@@ -32,18 +32,21 @@
   "Parameters": null,
   "Returns": [
     {
-      "Name": "n1",
-      "Ref": {
-        "Variable": "n1",
-        "Property": ""
+      "name": "n1",
+      "value": {
+        "kind": "ref",
+        "variable": "n1",
+        "property": ""
       }
     },
     {
-      "Name": "n2",
-      "Ref": {
-        "Variable": "n2",
-        "Property": ""
+      "name": "n2",
+      "value": {
+        "kind": "ref",
+        "variable": "n2",
+        "property": ""
       }
     }
-  ]
+  ],
+  "returnsAll": false
 }

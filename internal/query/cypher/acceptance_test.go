@@ -103,6 +103,26 @@ var skiplist = map[string]bool{
 	"[11] Negative parameter for LIMIT with ORDER BY should fail":       true,
 	"[14] Floating point parameter for LIMIT should fail":               true,
 	"[15] Floating point parameter for LIMIT with ORDER BY should fail": true,
+
+	// --- projection value/semantics below the type-interface boundary (Stage 3) ---
+	//
+	// Stage 3 widens RETURN to a projection sum (var/var.prop, scalar literal,
+	// function, aggregate, RETURN *), so these negatives now parse-accept; their
+	// error lives below the boundary and the re-executed original text raises it
+	// (ADR 0005, B1).
+	//
+	// RETURN * with nothing in scope expands to zero columns: a scope/value error
+	// (NoVariablesInScope), not a parse-shape one. We record ReturnsAll and the
+	// resolver expands * post-freeze (spec §3).
+	"[2] Fail when using RETURN * without variables in scope": true,
+	// RETURN foo(a): the parser carries no function name (FuncProjection holds only
+	// the referenced bindings, §2), so a non-existent function (UnknownFunction) is
+	// not a distinction it can make — the engine re-executing foo(a) raises it.
+	"[18] Fail on projecting a non-existent function": true,
+	// RETURN 1 AS a, 2 AS a: duplicate column names are a value-level result-shape
+	// check (ColumnNameConflict); Returns is duplicate-preserving (Stage-0 rule),
+	// so two LiteralProjections both named "a" parse-accept.
+	"[10] Fail when returning multiple columns with same name": true,
 }
 
 // the six public sentinels — the "valid Cypher we don't support yet" set. A

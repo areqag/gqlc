@@ -14,9 +14,11 @@ var (
 	// the write clauses (CREATE/MERGE/SET/DELETE/REMOVE), UNWIND, CALL.
 	ErrUnsupportedClause = errors.New("unsupported clause")
 
-	// ErrUnsupportedProjection rejects a RETURN item that is not a bare variable or
-	// a single-level property lookup: RETURN *, aggregations, function calls,
-	// arithmetic, literals, CASE, comprehensions.
+	// ErrUnsupportedProjection rejects a RETURN item outside the projection sum
+	// (var/var.prop, scalar literal, function call, aggregate, RETURN *): the
+	// residual rich shapes are arithmetic over a projection, list/map literals,
+	// CASE, comprehensions, label predicates, nested aggregates, and function
+	// arguments that are not a bare var/var.prop or scalar literal.
 	ErrUnsupportedProjection = errors.New("unsupported projection")
 
 	// ErrUnsupportedPattern rejects pattern shapes the model cannot carry yet:

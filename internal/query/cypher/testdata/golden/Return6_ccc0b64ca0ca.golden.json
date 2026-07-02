@@ -1,0 +1,40 @@
+{
+  "Bindings": [
+    {
+      "kind": "node",
+      "variable": "n",
+      "labels": null,
+      "nullable": false
+    }
+  ],
+  "Parameters": null,
+  "Returns": [
+    {
+      "name": "count(n)",
+      "value": {
+        "kind": "aggregate",
+        "func": "count",
+        "refs": [
+          {
+            "variable": "n",
+            "property": ""
+          }
+        ]
+      }
+    },
+    {
+      "name": "collect(n)",
+      "value": {
+        "kind": "aggregate",
+        "func": "collect",
+        "refs": [
+          {
+            "variable": "n",
+            "property": ""
+          }
+        ]
+      }
+    }
+  ],
+  "returnsAll": false
+}

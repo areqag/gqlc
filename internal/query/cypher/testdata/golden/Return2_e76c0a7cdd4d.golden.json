@@ -18,11 +18,13 @@
   "Parameters": null,
   "Returns": [
     {
-      "Name": "r.name2",
-      "Ref": {
-        "Variable": "r",
-        "Property": "name2"
+      "name": "r.name2",
+      "value": {
+        "kind": "ref",
+        "variable": "r",
+        "property": "name2"
       }
     }
-  ]
+  ],
+  "returnsAll": false
 }

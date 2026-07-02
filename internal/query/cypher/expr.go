@@ -14,16 +14,19 @@ import (
 // collectProjection lowers a RETURN's projection body into result columns. The
 // cosmetic parts (DISTINCT, ORDER BY, SKIP/LIMIT) are accept-and-ignored, except
 // that a parameter in any of them is rejected: a dropped $param is a missing
-// generated argument, i.e. a type-interface change (B1). RETURN * and any item
-// richer than var / var.prop are rejected (ErrUnsupportedProjection).
+// generated argument, i.e. a type-interface change (B1). Each item is classified
+// into a Projection variant (var/var.prop, scalar literal, function or
+// aggregate); residual rich shapes are rejected (ErrUnsupportedProjection). The
+// '*' alternative sets ReturnsAll.
 func (l *listener) collectProjection(body gen.IOC_ProjectionBodyContext) {
 	if body == nil {
 		return
 	}
 	items := body.OC_ProjectionItems()
 	if items == nil || len(items.AllOC_ProjectionItem()) == 0 {
-		// The '*' alternative carries no projection items.
-		l.fail(fmt.Errorf("%w: RETURN *", ErrUnsupportedProjection))
+		// The '*' alternative carries no projection items: a query-level wildcard
+		// over the in-scope bindings (spec §3), recorded as ReturnsAll.
+		l.returnsAll = true
 		return
 	}
 
@@ -56,11 +59,13 @@ func (l *listener) collectProjection(body gen.IOC_ProjectionBodyContext) {
 	}
 }
 
-// collectReturnItem lowers one projection item. Its expression must be a bare
-// variable or a single-level property lookup; the column name is the explicit AS
-// alias if present, else the verbatim source text of the expression (E1).
+// collectReturnItem lowers one projection item by classifying its expression
+// into a Projection variant (var/var.prop, scalar literal, function call or
+// aggregate); residual rich shapes are rejected (ErrUnsupportedProjection). The
+// column name is the explicit AS alias if present, else the verbatim source text
+// of the expression (E1).
 func (l *listener) collectReturnItem(item gen.IOC_ProjectionItemContext) {
-	ref, ok := propertyRef(item.OC_Expression())
+	value, ok := l.classifyProjection(item.OC_Expression())
 	if !ok {
 		l.fail(fmt.Errorf("%w: %s", ErrUnsupportedProjection, originalText(l.ts, item.OC_Expression())))
 		return
@@ -71,8 +76,79 @@ func (l *listener) collectReturnItem(item gen.IOC_ProjectionItemContext) {
 		name = alias.GetText()
 	}
 
-	l.refs = append(l.refs, varRef{name: ref.Variable})
-	l.returns = append(l.returns, query.ReturnItem{Name: name, Ref: ref})
+	l.returns = append(l.returns, query.ReturnItem{Name: name, Value: value})
+}
+
+// classifyProjection maps a RETURN-item expression to its Projection variant,
+// appending a varRef for every binding the projection references so build()'s
+// referential-integrity sweep covers them. ok is false for a residual shape
+// (arithmetic over a projection, a list/map literal, a label predicate, a
+// function argument that is not a bare var/var.prop or scalar literal, CASE,
+// comprehensions, parameters): the caller raises ErrUnsupportedProjection.
+func (l *listener) classifyProjection(e gen.IOC_ExpressionContext) (query.Projection, bool) {
+	nae := nonArithmeticAtom(e)
+	if nae == nil {
+		return nil, false
+	}
+	atom := nae.OC_Atom()
+	if atom == nil {
+		return nil, false
+	}
+	lookups := len(nae.AllOC_PropertyLookup())
+
+	switch {
+	case atom.OC_Variable() != nil:
+		ref, ok := refFromNonArithmetic(nae)
+		if !ok {
+			return nil, false
+		}
+		l.refs = append(l.refs, varRef{name: ref.Variable})
+		return query.NewRefProjection(ref), true
+
+	case atom.COUNT() != nil:
+		// The count-star atom count(*): the degenerate aggregate, AggCount with no
+		// referenced binding. A property lookup on it (count(*).x) is residual.
+		if lookups > 0 {
+			return nil, false
+		}
+		return query.NewAggregateProjection(query.AggCount, nil), true
+
+	case atom.OC_Literal() != nil:
+		if lookups > 0 || !isScalarLiteral(atom.OC_Literal()) {
+			return nil, false
+		}
+		return query.NewLiteralProjection(), true
+
+	case atom.OC_FunctionInvocation() != nil:
+		if lookups > 0 {
+			return nil, false
+		}
+		return l.classifyFunction(atom.OC_FunctionInvocation())
+
+	default:
+		return nil, false
+	}
+}
+
+// classifyFunction maps a function invocation to a FuncProjection or, when its
+// name matches the closed aggregate set (case-insensitively, §4), an
+// AggregateProjection. Either way it mines the call's referenced bindings; any
+// argument that is not a bare var/var.prop or scalar literal makes it residual
+// (no expression tree, no nested aggregates, spec §4/§9).
+func (l *listener) classifyFunction(fi gen.IOC_FunctionInvocationContext) (query.Projection, bool) {
+	refs, ok := functionArgRefs(fi)
+	if !ok {
+		return nil, false
+	}
+	for _, ref := range refs {
+		l.refs = append(l.refs, varRef{name: ref.Variable})
+	}
+	if name, ok := functionName(fi); ok {
+		if fn, ok := aggregateFunc(name); ok {
+			return query.NewAggregateProjection(fn, refs), true
+		}
+	}
+	return query.NewFuncProjection(refs), true
 }
 
 // rejectClauseParameter fails if the ORDER BY expression contains a parameter:

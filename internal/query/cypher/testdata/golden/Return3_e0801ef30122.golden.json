@@ -10,25 +10,29 @@
   "Parameters": null,
   "Returns": [
     {
-      "Name": "a.name",
-      "Ref": {
-        "Variable": "a",
-        "Property": "name"
+      "name": "a.name",
+      "value": {
+        "kind": "ref",
+        "variable": "a",
+        "property": "name"
       }
     },
     {
-      "Name": "a.age",
-      "Ref": {
-        "Variable": "a",
-        "Property": "age"
+      "name": "a.age",
+      "value": {
+        "kind": "ref",
+        "variable": "a",
+        "property": "age"
       }
     },
     {
-      "Name": "a.seasons",
-      "Ref": {
-        "Variable": "a",
-        "Property": "seasons"
+      "name": "a.seasons",
+      "value": {
+        "kind": "ref",
+        "variable": "a",
+        "property": "seasons"
       }
     }
-  ]
+  ],
+  "returnsAll": false
 }
