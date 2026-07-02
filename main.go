@@ -14,19 +14,25 @@ import (
 )
 
 func main() {
-	ctx := context.Background()
 	logger.Init(slog.LevelDebug)
+	if err := run(context.Background()); err != nil {
+		os.Exit(1)
+	}
+}
 
+// run owns all the defers; main holds the only os.Exit, so they always fire.
+// Failures are logged here at the site that has the context, and returned
+// only to set the exit code.
+func run(ctx context.Context) error {
 	start := time.Now()
 	defer func() {
-		finish := time.Now()
-		slog.DebugContext(ctx, "execution complete", "duration_ms", finish.Sub(start).Milliseconds())
+		slog.DebugContext(ctx, "execution complete", "duration_ms", time.Since(start).Milliseconds())
 	}()
 
 	f, err := os.Open("./test/data/schema/gql/valid/sample_schema.gql")
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to open schema", "err", err)
-		return
+		return err
 	}
 	defer func() {
 		if err := f.Close(); err != nil {
@@ -37,5 +43,7 @@ func main() {
 	p := schema_parser_gql.New()
 	if _, err := p.Parse(f); err != nil {
 		slog.ErrorContext(ctx, "failed to parse schema", "err", err)
+		return err
 	}
+	return nil
 }
