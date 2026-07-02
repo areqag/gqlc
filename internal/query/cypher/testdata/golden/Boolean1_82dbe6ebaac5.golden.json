@@ -1,0 +1,112 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "t",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "tsf",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "tsn",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "f",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "fst",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "fsn",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "n",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "nst",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "nsf",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "m1",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "m2",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "m3",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

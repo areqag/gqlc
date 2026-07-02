@@ -1,0 +1,77 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "edge",
+              "variable": "a",
+              "labels": null,
+              "source": {
+                "kind": "inline",
+                "labels": null
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false,
+              "directed": true
+            }
+          ],
+          "returns": [
+            {
+              "name": "a",
+              "value": {
+                "kind": "ref",
+                "variable": "a",
+                "property": "",
+                "type": "edge"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": [
+            {
+              "kind": "edge",
+              "variable": "b",
+              "labels": null,
+              "source": {
+                "kind": "inline",
+                "labels": null
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false,
+              "directed": true
+            }
+          ],
+          "returns": [
+            {
+              "name": "count(b)",
+              "value": {
+                "kind": "aggregate",
+                "func": "count",
+                "refs": [
+                  {
+                    "variable": "b",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

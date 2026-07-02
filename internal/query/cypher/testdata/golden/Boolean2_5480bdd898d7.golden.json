@@ -1,0 +1,232 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "ttt",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "ttf",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "ttn",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "tft",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "tff",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "tfn",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "tnt",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "tnf",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "tnn",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "ftt",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "ftf",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "ftn",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "fft",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "fff",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "ffn",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "fnt",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "fnf",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "fnn",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "ntt",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "ntf",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "ntn",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "nft",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "nff",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "nfn",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "nnt",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "nnf",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            },
+            {
+              "name": "nnn",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "bool"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

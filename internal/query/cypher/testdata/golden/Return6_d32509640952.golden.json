@@ -1,0 +1,25 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "count(*)",
+              "value": {
+                "kind": "aggregate",
+                "func": "count",
+                "refs": null,
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

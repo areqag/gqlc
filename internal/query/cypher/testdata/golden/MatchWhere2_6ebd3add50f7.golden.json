@@ -1,0 +1,122 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "advertiser",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "ADV_HAS_PRODUCT"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "advertiser"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "out"
+              },
+              "nullable": false,
+              "directed": true
+            },
+            {
+              "kind": "node",
+              "variable": "out",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "AP_HAS_VALUE"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "out"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "red"
+              },
+              "nullable": false,
+              "directed": true
+            },
+            {
+              "kind": "node",
+              "variable": "red",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "AA_HAS_VALUE"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "a"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "red"
+              },
+              "nullable": false,
+              "directed": true
+            },
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "out.name",
+              "value": {
+                "kind": "ref",
+                "variable": "out",
+                "property": "name",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": [
+    {
+      "name": "1",
+      "uses": [
+        {
+          "kind": "property",
+          "variable": "advertiser",
+          "property": "id"
+        }
+      ]
+    },
+    {
+      "name": "2",
+      "uses": [
+        {
+          "kind": "property",
+          "variable": "a",
+          "property": "id"
+        }
+      ]
+    }
+  ]
+}

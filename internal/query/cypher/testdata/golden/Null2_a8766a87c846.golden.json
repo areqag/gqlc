@@ -1,0 +1,49 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": true
+            }
+          ],
+          "returns": [
+            {
+              "name": "n.missing IS NOT NULL",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "n",
+                    "property": "missing"
+                  }
+                ],
+                "type": "bool"
+              }
+            },
+            {
+              "name": "n.exists IS NOT NULL",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "n",
+                    "property": "exists"
+                  }
+                ],
+                "type": "bool"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

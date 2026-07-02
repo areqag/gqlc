@@ -1,0 +1,52 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "person",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "agg",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "person",
+                    "property": "age"
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": null,
+          "returnsAll": true
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": [
+    {
+      "name": "age",
+      "uses": [
+        {
+          "kind": "expr",
+          "enclosingType": "unknown",
+          "position": "projection"
+        }
+      ]
+    }
+  ]
+}

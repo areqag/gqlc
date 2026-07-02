@@ -1,0 +1,50 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "expr",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "map"
+              }
+            },
+            {
+              "name": "idx",
+              "value": {
+                "kind": "literal",
+                "type": "null"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "value",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "expr",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

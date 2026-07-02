@@ -1,0 +1,36 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": true
+            }
+          ],
+          "returns": [
+            {
+              "name": "n.missing IS NULL",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "n",
+                    "property": "missing"
+                  }
+                ],
+                "type": "bool"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}
