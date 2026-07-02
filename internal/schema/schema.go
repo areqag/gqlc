@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/antranig-yeretzian/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/graph"
 )
 
 // Schema is the parsed representation of a directed, property graph type.

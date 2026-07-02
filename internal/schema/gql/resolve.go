@@ -1,8 +1,8 @@
 package gql
 
 import (
-	"github.com/antranig-yeretzian/gqlc/internal/graph"
-	"github.com/antranig-yeretzian/gqlc/internal/schema"
+	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/schema"
 )
 
 // rawSchema is the complete unresolved intermediate form produced by the walk:

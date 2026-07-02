@@ -3,8 +3,8 @@ package cypher
 import (
 	"fmt"
 
-	"github.com/antranig-yeretzian/gqlc/internal/graph"
-	"github.com/antranig-yeretzian/gqlc/internal/query"
+	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/query"
 )
 
 // build assembles the collected branches, parts, parameters and return items into
