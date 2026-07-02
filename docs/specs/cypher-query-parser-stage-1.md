@@ -200,8 +200,10 @@ TCK tag. Both rules carry the revisit-on-TCK-bump obligation.
 
 `ErrUnsupportedParameter` is reachable by five distinct fail-sites in the
 listener. Stage 1 pins the cycle-introduced one via an AUTHORED case
-(`"skip non-bare param"` in `mustReject`); the remaining three have no
-verbatim corpus query at the pinned TCK tag and remain uncovered:
+(`"skip non-bare param"` in `mustReject`). The whole-property-map
+fail-site is covered verbatim by Match1 [6] (`"unsupported parameter"`
+in `mustReject`). The remaining three have no verbatim corpus query at
+the pinned TCK tag and remain uncovered:
 
 - `$p` inside an `ORDER BY` expression
 - `$p` as a value in an anonymous pattern element's inline map
