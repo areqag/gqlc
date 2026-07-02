@@ -220,6 +220,12 @@ func nonArithmeticFromAddSub(a gen.IOC_AddOrSubtractExpressionContext) gen.IOC_N
 		return nil
 	}
 	unary := pw.OC_UnaryAddOrSubtractExpression(0)
+	// The sign tokens are anonymous grammar literals with no named getter, so a
+	// leading '+'/'-' is detected structurally: a signless operand is the rule's
+	// only child.
+	if unary.GetChildCount() != 1 {
+		return nil
+	}
 	return unary.OC_NonArithmeticOperatorExpression()
 }
 
