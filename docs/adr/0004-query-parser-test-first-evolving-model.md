@@ -88,6 +88,17 @@ Out of scope throughout: write clauses (`CREATE`/`MERGE`/`SET`/`DELETE`/
 `REMOVE`), variable-length paths, and the full predicate tree beyond what
 parameter and edge-endpoint extraction need (ADR 0003).
 
+> _Note (ADR 0007): the feature-complete target expands from the read core
+> (Stages 0–5, now complete) to the full openCypher surface. Nine further
+> stages 6–14 extend the model — expressions and result types, temporals, the
+> full pattern surface, remaining read clauses, aggregations, quantifier and
+> existential predicates, writes, `MERGE`, and `CALL` with a procedure
+> registry — and the freeze gate moves to the end of that list. The
+> "out of scope throughout" paragraph above no longer applies; every
+> construct it names is now in scope for the freeze. Build discipline
+> (test-first, one capability per slice, model unlocked until
+> feature-complete) is unchanged._
+
 ## Consequences
 
 The query model changes shape across several commits; reviewers and any early
