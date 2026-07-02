@@ -13,14 +13,16 @@
       "target": {
         "kind": "var",
         "variable": "i"
-      }
+      },
+      "nullable": false
     },
     {
       "kind": "node",
       "variable": "i",
       "labels": [
         "TextNode"
-      ]
+      ],
+      "nullable": false
     }
   ],
   "Parameters": null,

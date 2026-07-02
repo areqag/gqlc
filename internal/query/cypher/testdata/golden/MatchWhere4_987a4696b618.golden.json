@@ -3,12 +3,14 @@
     {
       "kind": "node",
       "variable": "a",
-      "labels": null
+      "labels": null,
+      "nullable": false
     },
     {
       "kind": "node",
       "variable": "b",
-      "labels": null
+      "labels": null,
+      "nullable": false
     }
   ],
   "Parameters": null,

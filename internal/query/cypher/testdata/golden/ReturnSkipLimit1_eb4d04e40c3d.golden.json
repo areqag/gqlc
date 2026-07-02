@@ -3,7 +3,8 @@
     {
       "kind": "node",
       "variable": "n",
-      "labels": null
+      "labels": null,
+      "nullable": false
     }
   ],
   "Parameters": [

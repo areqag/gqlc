@@ -11,7 +11,8 @@
       "target": {
         "kind": "inline",
         "labels": null
-      }
+      },
+      "nullable": false
     }
   ],
   "Parameters": null,

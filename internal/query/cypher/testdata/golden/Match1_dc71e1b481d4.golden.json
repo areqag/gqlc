@@ -6,7 +6,8 @@
       "labels": [
         "A",
         "B"
-      ]
+      ],
+      "nullable": false
     }
   ],
   "Parameters": null,

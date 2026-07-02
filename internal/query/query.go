@@ -42,6 +42,10 @@ type Query struct {
 type Binding interface {
 	// Kind reports whether the binding is a node or an edge.
 	Kind() graph.EntityKind
+	// Nullable reports whether the binding was first introduced inside an
+	// OPTIONAL MATCH clause (ADR 0006). The flag is a static, local fact set
+	// by the parser; flow-typing across clauses lives in the resolver.
+	Nullable() bool
 	isBinding()
 }
 
@@ -53,6 +57,7 @@ type Binding interface {
 type NodeBinding struct {
 	variable string         // the name as written: the p in (p:Person)
 	labels   graph.LabelSet // labels as written; may be empty
+	nullable bool           // set when first introduced in OPTIONAL MATCH (ADR 0006)
 }
 
 // NewNodeBinding builds a NodeBinding, rejecting the empty variable: an anonymous
@@ -64,6 +69,17 @@ func NewNodeBinding(variable string, labels graph.LabelSet) (NodeBinding, error)
 	return NodeBinding{variable: variable, labels: labels}, nil
 }
 
+// NewNullableNodeBinding builds the OPTIONAL-introduced variant (ADR 0006): same
+// invariants as NewNodeBinding, with the Nullable flag set.
+func NewNullableNodeBinding(variable string, labels graph.LabelSet) (NodeBinding, error) {
+	b, err := NewNodeBinding(variable, labels)
+	if err != nil {
+		return NodeBinding{}, err
+	}
+	b.nullable = true
+	return b, nil
+}
+
 // Variable is the name as written: the p in (p:Person). Always non-empty.
 func (b NodeBinding) Variable() string { return b.variable }
 
@@ -72,6 +88,10 @@ func (b NodeBinding) Labels() graph.LabelSet { return b.labels }
 
 // Kind reports that a NodeBinding is a node.
 func (NodeBinding) Kind() graph.EntityKind { return graph.Node }
+
+// Nullable reports whether the binding was first introduced inside an OPTIONAL
+// MATCH clause (ADR 0006).
+func (b NodeBinding) Nullable() bool { return b.nullable }
 
 func (NodeBinding) isBinding() {}
 
@@ -85,6 +105,7 @@ type EdgeBinding struct {
 	labels   graph.LabelSet // labels as written; may be empty
 	source   Endpoint       // the source endpoint; always set
 	target   Endpoint       // the target endpoint; always set
+	nullable bool           // set when first introduced in OPTIONAL MATCH (ADR 0006)
 }
 
 // NewEdgeBinding builds an EdgeBinding, rejecting a missing endpoint: an edge
@@ -95,6 +116,19 @@ func NewEdgeBinding(variable string, labels graph.LabelSet, source, target Endpo
 		return EdgeBinding{}, errors.New("query: edge binding requires both a source and a target endpoint")
 	}
 	return EdgeBinding{variable: variable, labels: labels, source: source, target: target}, nil
+}
+
+// NewNullableEdgeBinding builds the OPTIONAL-introduced variant (ADR 0006):
+// same invariants as NewEdgeBinding, with the Nullable flag set. The flag is
+// applied uniformly to every binding the OPTIONAL clause introduces, including
+// the anonymous-edge case where no Ref will ever read it.
+func NewNullableEdgeBinding(variable string, labels graph.LabelSet, source, target Endpoint) (EdgeBinding, error) {
+	b, err := NewEdgeBinding(variable, labels, source, target)
+	if err != nil {
+		return EdgeBinding{}, err
+	}
+	b.nullable = true
+	return b, nil
 }
 
 // Variable is the name as written: the r in [r:KNOWS]; empty for an anonymous edge.
@@ -111,6 +145,10 @@ func (b EdgeBinding) Target() Endpoint { return b.target }
 
 // Kind reports that an EdgeBinding is an edge.
 func (EdgeBinding) Kind() graph.EntityKind { return graph.Edge }
+
+// Nullable reports whether the binding was first introduced inside an OPTIONAL
+// MATCH clause (ADR 0006).
+func (b EdgeBinding) Nullable() bool { return b.nullable }
 
 func (EdgeBinding) isBinding() {}
 
@@ -312,7 +350,8 @@ func (b NodeBinding) MarshalJSON() ([]byte, error) {
 		Kind     string         `json:"kind"`
 		Variable string         `json:"variable"`
 		Labels   graph.LabelSet `json:"labels"`
-	}{Kind: b.Kind().String(), Variable: b.variable, Labels: b.labels})
+		Nullable bool           `json:"nullable"`
+	}{Kind: b.Kind().String(), Variable: b.variable, Labels: b.labels, Nullable: b.nullable})
 }
 
 // MarshalJSON renders an EdgeBinding as a tagged union member discriminated by
@@ -325,7 +364,8 @@ func (b EdgeBinding) MarshalJSON() ([]byte, error) {
 		Labels   graph.LabelSet `json:"labels"`
 		Source   Endpoint       `json:"source"`
 		Target   Endpoint       `json:"target"`
-	}{Kind: b.Kind().String(), Variable: b.variable, Labels: b.labels, Source: b.source, Target: b.target})
+		Nullable bool           `json:"nullable"`
+	}{Kind: b.Kind().String(), Variable: b.variable, Labels: b.labels, Source: b.source, Target: b.target, Nullable: b.nullable})
 }
 
 // MarshalJSON renders a VarEndpoint as a tagged union member discriminated by

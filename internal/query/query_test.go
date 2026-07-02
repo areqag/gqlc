@@ -35,6 +35,32 @@ func TestNewNodeBindingRejectsEmptyVariable(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestNewNodeBindingDefaultsToNonNullable(t *testing.T) {
+	// The non-nullable constructor produces a binding the resolver may treat as
+	// always-present; nullability is opt-in via NewNullableNodeBinding (ADR 0006).
+	b, err := query.NewNodeBinding("p", graph.LabelSet{"Person"})
+	require.NoError(t, err)
+	require.False(t, b.Nullable())
+}
+
+func TestNewNullableNodeBinding(t *testing.T) {
+	// A nullable node binding carries the same data as the non-nullable variant
+	// plus the Nullable flag — the OPTIONAL-introduced case (ADR 0006).
+	b, err := query.NewNullableNodeBinding("p", graph.LabelSet{"Person"})
+	require.NoError(t, err)
+	require.Equal(t, "p", b.Variable())
+	require.Equal(t, graph.LabelSet{"Person"}, b.Labels())
+	require.Equal(t, graph.Node, b.Kind())
+	require.True(t, b.Nullable())
+}
+
+func TestNewNullableNodeBindingRejectsEmptyVariable(t *testing.T) {
+	// The empty-variable invariant holds across both constructors: an anonymous
+	// node is never a binding regardless of nullability (C3).
+	_, err := query.NewNullableNodeBinding("", nil)
+	require.Error(t, err)
+}
+
 func TestNewEdgeBinding(t *testing.T) {
 	src, err := query.NewVarEndpoint("a")
 	require.NoError(t, err)
@@ -71,6 +97,46 @@ func TestNewEdgeBindingRejectsMissingEndpoint(t *testing.T) {
 
 	// A nil target endpoint is illegal.
 	_, err = query.NewEdgeBinding("r", nil, tgt, nil)
+	require.Error(t, err)
+}
+
+func TestNewEdgeBindingDefaultsToNonNullable(t *testing.T) {
+	src, _ := query.NewVarEndpoint("a")
+	tgt, _ := query.NewVarEndpoint("b")
+	b, err := query.NewEdgeBinding("r", nil, src, tgt)
+	require.NoError(t, err)
+	require.False(t, b.Nullable())
+}
+
+func TestNewNullableEdgeBinding(t *testing.T) {
+	src, _ := query.NewVarEndpoint("a")
+	tgt, _ := query.NewVarEndpoint("b")
+	b, err := query.NewNullableEdgeBinding("r", graph.LabelSet{"KNOWS"}, src, tgt)
+	require.NoError(t, err)
+	require.Equal(t, "r", b.Variable())
+	require.Equal(t, graph.LabelSet{"KNOWS"}, b.Labels())
+	require.Equal(t, src, b.Source())
+	require.Equal(t, tgt, b.Target())
+	require.True(t, b.Nullable())
+}
+
+func TestNewNullableEdgeBindingAllowsAnonymousVariableAndUntyped(t *testing.T) {
+	// An anonymous edge introduced in OPTIONAL MATCH still carries the Nullable
+	// flag even though no Ref can reference it — the flag is on every binding
+	// the clause introduces (ADR 0006).
+	src := query.NewInlineEndpoint(graph.LabelSet{"Person"})
+	tgt := query.NewInlineEndpoint(nil)
+	b, err := query.NewNullableEdgeBinding("", nil, src, tgt)
+	require.NoError(t, err)
+	require.Empty(t, b.Variable())
+	require.True(t, b.Nullable())
+}
+
+func TestNewNullableEdgeBindingRejectsMissingEndpoint(t *testing.T) {
+	tgt, _ := query.NewVarEndpoint("b")
+	_, err := query.NewNullableEdgeBinding("r", nil, nil, tgt)
+	require.Error(t, err)
+	_, err = query.NewNullableEdgeBinding("r", nil, tgt, nil)
 	require.Error(t, err)
 }
 
@@ -207,6 +273,27 @@ func TestMarshalJSONDiscriminators(t *testing.T) {
 	require.Contains(t, s, `"kind":"edge"`)
 	require.Contains(t, s, `"kind":"var"`)
 	require.Contains(t, s, `"kind":"inline"`)
+}
+
+func TestMarshalJSONEmitsNullable(t *testing.T) {
+	// The nullable flag is always emitted (no omitempty), mirroring the
+	// existing convention of always-emit for `labels: null` and `variable: ""`.
+	// Bindings from the non-nullable constructors serialise as false.
+	a, err := query.NewNodeBinding("a", nil)
+	require.NoError(t, err)
+	b, err := query.NewNullableNodeBinding("b", nil)
+	require.NoError(t, err)
+	src, _ := query.NewVarEndpoint("a")
+	tgt, _ := query.NewVarEndpoint("b")
+	e, err := query.NewNullableEdgeBinding("r", nil, src, tgt)
+	require.NoError(t, err)
+
+	outA, _ := json.Marshal(a)
+	outB, _ := json.Marshal(b)
+	outE, _ := json.Marshal(e)
+	require.Contains(t, string(outA), `"nullable":false`)
+	require.Contains(t, string(outB), `"nullable":true`)
+	require.Contains(t, string(outE), `"nullable":true`)
 }
 
 // TestBindingDiscriminatorTracksEntityKind pins the binding "kind" tag to
