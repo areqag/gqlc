@@ -528,6 +528,96 @@ var mustParse = map[string]struct {
 			},
 		}}}}},
 	},
+	// Stage 6 — parameter inside a rich projection: RETURN $x. Authored to
+	// pin the spec §4 "no parameter is silently dropped" rule at projection
+	// position. A bare-$p RETURN is a rich shape (the projection classifier
+	// falls through to the rich typer), so $x is recorded as an ExprUse on
+	// the parameter — enclosingType is TypeUnknown (parameter's own type is
+	// below the boundary at parse time) and position is projection.
+	"return bare param": {
+		src: "RETURN $x",
+		want: query.Query{
+			Branches: []query.Branch{{Parts: []query.Part{{
+				Returns: []query.ReturnItem{
+					{Name: "$x", Value: query.NewExprProjection(nil, query.TypeUnknown{})},
+				},
+			}}}},
+			Parameters: []query.Parameter{
+				{Name: "x", Uses: []query.Use{
+					query.NewExprUse(query.TypeUnknown{}, query.ExprInProjection),
+				}},
+			},
+		},
+	},
+	// Stage 6 — parameter inside a rich arithmetic projection: RETURN a.n + $delta.
+	// mineComparisons doesn't fire (no comparison; RETURN never runs
+	// mineWhere), so the pair miner does not touch $delta. The rich typer
+	// records $delta as an ExprUse{enclosingType=TypeUnknown (a.n propagates
+	// unknown), ExprInProjection}. The ref a.n is mined for referential
+	// integrity.
+	"return rich param": {
+		src: "MATCH (a)\nRETURN a.n + $delta",
+		want: query.Query{
+			Branches: []query.Branch{{Parts: []query.Part{{
+				Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
+				Returns: []query.ReturnItem{
+					{Name: "a.n + $delta", Value: query.NewExprProjection(
+						[]query.Ref{{Variable: "a", Property: "n"}},
+						query.TypeUnknown{},
+					)},
+				},
+			}}}},
+			Parameters: []query.Parameter{
+				{Name: "delta", Uses: []query.Use{
+					query.NewExprUse(query.TypeUnknown{}, query.ExprInProjection),
+				}},
+			},
+		},
+	},
+	// Stage 6 — parameter inside a rich WHERE predicate: a.n + $x > 5. The
+	// pair miner catches neither `a.n + $x` (arithmetic, not bare) nor `5`
+	// (literal) as a var.prop-vs-$p pair, so $x falls through to the rich
+	// typer and records an ExprUse{enclosingType=TypeBool (the > predicate),
+	// ExprInPredicate}. The reviewer flagged this as a should-fix: spec §4
+	// commits to WHERE-side ExprUse.
+	"where rich param": {
+		src: "MATCH (a)\nWHERE a.n + $x > 5\nRETURN a",
+		want: query.Query{
+			Branches: []query.Branch{{Parts: []query.Part{{
+				Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
+				Returns: []query.ReturnItem{
+					{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
+				},
+			}}}},
+			Parameters: []query.Parameter{
+				{Name: "x", Uses: []query.Use{
+					query.NewExprUse(query.TypeBool{}, query.ExprInPredicate),
+				}},
+			},
+		},
+	},
+	// Stage 6 — parameter directly inside a list literal in RETURN:
+	// RETURN [1, $x, 3]. The rich typer walks each element expression via
+	// listLiteralType, so $x is visited under typeAtom and mined into
+	// exprParams. Element types diverge (int, unknown from param, int) →
+	// list<unknown>. The parameter records an ExprUse against that list
+	// type at ExprInProjection.
+	"return list literal with param": {
+		src: "RETURN [1, $x, 3]",
+		want: query.Query{
+			Branches: []query.Branch{{Parts: []query.Part{{
+				Returns: []query.ReturnItem{
+					{Name: "[1, $x, 3]", Value: query.NewExprProjection(nil,
+						query.NewTypeList(query.TypeUnknown{}))},
+				},
+			}}}},
+			Parameters: []query.Parameter{
+				{Name: "x", Uses: []query.Use{
+					query.NewExprUse(query.NewTypeList(query.TypeUnknown{}), query.ExprInProjection),
+				}},
+			},
+		},
+	},
 	// Stage 4 — UNION ALL variant. Same two-branch shape; the combinator is
 	// UnionAll (the ALL token is present), the cardinality-preserving join.
 	"union all two branches": {
@@ -845,6 +935,10 @@ func assertReferentialIntegrity(rt *rapid.T, q query.Query, src string) {
 				}
 			case query.ClauseSlotUse:
 				// A clause-slot use has no Variable — referential check is N/A.
+			case query.ExprUse:
+				// Stage 6 §4: an ExprUse carries the enclosing expression's
+				// result type and a projection/predicate discriminator; no Ref
+				// to check. The parameter's own type is inferred post-freeze.
 			default:
 				rt.Fatalf("parameter %q has unknown Use variant %T in %q", p.Name, u, src)
 			}
