@@ -1,6 +1,6 @@
-# The merge-blocking checks: lint / test / tidy, all parallel, all invoking
-# just recipes so CI runs exactly what a developer runs locally. The linter
-# binary version is pinned once, in the justfile.
+# The always-run merge-blocking checks: lint / test / tidy / actionlint, all
+# parallel, all invoking just recipes so CI runs exactly what a developer runs
+# locally. Tool versions are pinned once, in the justfile.
 name: ci
 
 on:
@@ -59,3 +59,13 @@ jobs:
           go-version-file: go.mod
       - uses: ./.github/actions/setup-just
       - run: just tidy-check
+
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: ./.github/actions/setup-just
+      - run: just actionlint

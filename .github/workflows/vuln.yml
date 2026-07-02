@@ -1,7 +1,9 @@
-# Vulnerabilities arrive with dependency changes, not parser code, so this
-# runs only when go.mod/go.sum change plus a weekly sweep on master for newly
-# published advisories. Deliberately NOT a required check: a path-filtered
-# workflow that does not run would hang a required-status merge forever.
+# Vulnerabilities arrive with dependency changes, not parser code, so the real
+# scan runs only when go.mod/go.sum change, plus a weekly sweep on master for
+# newly published advisories. govulncheck IS a required check; PRs that leave
+# the dependency files untouched satisfy it via the same-named no-op job in
+# vuln-skip.yml, because a path-filtered required check that never reports
+# would hang the merge forever.
 name: vuln
 
 on:
