@@ -1,62 +1,71 @@
 {
-  "Bindings": [
+  "branches": [
     {
-      "kind": "node",
-      "variable": "n",
-      "labels": null,
-      "nullable": false
-    },
-    {
-      "kind": "edge",
-      "variable": "",
-      "labels": null,
-      "source": {
-        "kind": "var",
-        "variable": "n"
-      },
-      "target": {
-        "kind": "var",
-        "variable": "x0"
-      },
-      "nullable": false
-    },
-    {
-      "kind": "node",
-      "variable": "x0",
-      "labels": null,
-      "nullable": false
-    },
-    {
-      "kind": "edge",
-      "variable": "",
-      "labels": null,
-      "source": {
-        "kind": "var",
-        "variable": "x0"
-      },
-      "target": {
-        "kind": "var",
-        "variable": "x1"
-      },
-      "nullable": true
-    },
-    {
-      "kind": "node",
-      "variable": "x1",
-      "labels": null,
-      "nullable": true
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": null,
+              "source": {
+                "kind": "var",
+                "variable": "n"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "x0"
+              },
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "x0",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": null,
+              "source": {
+                "kind": "var",
+                "variable": "x0"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "x1"
+              },
+              "nullable": true
+            },
+            {
+              "kind": "node",
+              "variable": "x1",
+              "labels": null,
+              "nullable": true
+            }
+          ],
+          "returns": [
+            {
+              "name": "x0.name",
+              "value": {
+                "kind": "ref",
+                "variable": "x0",
+                "property": "name"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
     }
   ],
-  "Parameters": null,
-  "Returns": [
-    {
-      "name": "x0.name",
-      "value": {
-        "kind": "ref",
-        "variable": "x0",
-        "property": "name"
-      }
-    }
-  ],
-  "returnsAll": false
+  "combinators": null,
+  "parameters": null
 }

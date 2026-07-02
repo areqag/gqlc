@@ -1,52 +1,61 @@
 {
-  "Bindings": [
+  "branches": [
     {
-      "kind": "node",
-      "variable": "a",
-      "labels": [
-        "L"
-      ],
-      "nullable": false
-    },
-    {
-      "kind": "edge",
-      "variable": "rel",
-      "labels": null,
-      "source": {
-        "kind": "var",
-        "variable": "a"
-      },
-      "target": {
-        "kind": "var",
-        "variable": "b"
-      },
-      "nullable": false
-    },
-    {
-      "kind": "node",
-      "variable": "b",
-      "labels": null,
-      "nullable": false
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": [
+                "L"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "rel",
+              "labels": null,
+              "source": {
+                "kind": "var",
+                "variable": "a"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "b"
+              },
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "b",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "a",
+              "value": {
+                "kind": "ref",
+                "variable": "a",
+                "property": ""
+              }
+            },
+            {
+              "name": "count(*)",
+              "value": {
+                "kind": "aggregate",
+                "func": "count",
+                "refs": null
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
     }
   ],
-  "Parameters": null,
-  "Returns": [
-    {
-      "name": "a",
-      "value": {
-        "kind": "ref",
-        "variable": "a",
-        "property": ""
-      }
-    },
-    {
-      "name": "count(*)",
-      "value": {
-        "kind": "aggregate",
-        "func": "count",
-        "refs": null
-      }
-    }
-  ],
-  "returnsAll": false
+  "combinators": null,
+  "parameters": null
 }

@@ -1,79 +1,99 @@
 {
-  "Bindings": [
+  "branches": [
     {
-      "kind": "node",
-      "variable": "advertiser",
-      "labels": null,
-      "nullable": false
-    },
-    {
-      "kind": "edge",
-      "variable": "",
-      "labels": [
-        "ADV_HAS_PRODUCT"
-      ],
-      "source": {
-        "kind": "var",
-        "variable": "advertiser"
-      },
-      "target": {
-        "kind": "var",
-        "variable": "out"
-      },
-      "nullable": false
-    },
-    {
-      "kind": "node",
-      "variable": "out",
-      "labels": null,
-      "nullable": false
-    },
-    {
-      "kind": "edge",
-      "variable": "",
-      "labels": [
-        "AP_HAS_VALUE"
-      ],
-      "source": {
-        "kind": "var",
-        "variable": "out"
-      },
-      "target": {
-        "kind": "var",
-        "variable": "red"
-      },
-      "nullable": false
-    },
-    {
-      "kind": "node",
-      "variable": "red",
-      "labels": null,
-      "nullable": false
-    },
-    {
-      "kind": "edge",
-      "variable": "",
-      "labels": [
-        "AA_HAS_VALUE"
-      ],
-      "source": {
-        "kind": "var",
-        "variable": "a"
-      },
-      "target": {
-        "kind": "var",
-        "variable": "red"
-      },
-      "nullable": false
-    },
-    {
-      "kind": "node",
-      "variable": "a",
-      "labels": null,
-      "nullable": false
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "advertiser",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "ADV_HAS_PRODUCT"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "advertiser"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "out"
+              },
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "out",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "AP_HAS_VALUE"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "out"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "red"
+              },
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "red",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "AA_HAS_VALUE"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "a"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "red"
+              },
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "out.name",
+              "value": {
+                "kind": "ref",
+                "variable": "out",
+                "property": "name"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
     }
   ],
-  "Parameters": [
+  "combinators": null,
+  "parameters": [
     {
       "Name": "1",
       "Uses": [
@@ -94,16 +114,5 @@
         }
       ]
     }
-  ],
-  "Returns": [
-    {
-      "name": "out.name",
-      "value": {
-        "kind": "ref",
-        "variable": "out",
-        "property": "name"
-      }
-    }
-  ],
-  "returnsAll": false
+  ]
 }

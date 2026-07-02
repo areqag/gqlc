@@ -24,9 +24,9 @@ func (l *listener) collectProjection(body gen.IOC_ProjectionBodyContext) {
 	}
 	items := body.OC_ProjectionItems()
 	if items == nil || len(items.AllOC_ProjectionItem()) == 0 {
-		// The '*' alternative carries no projection items: a query-level wildcard
-		// over the in-scope bindings (spec §3), recorded as ReturnsAll.
-		l.returnsAll = true
+		// The '*' alternative carries no projection items: a wildcard over the
+		// part's in-scope bindings (spec §3), recorded as ReturnsAll on the part.
+		l.curPart.returnsAll = true
 		return
 	}
 
@@ -76,7 +76,7 @@ func (l *listener) collectReturnItem(item gen.IOC_ProjectionItemContext) {
 		name = alias.GetText()
 	}
 
-	l.returns = append(l.returns, query.ReturnItem{Name: name, Value: value})
+	l.curPart.returns = append(l.curPart.returns, query.ReturnItem{Name: name, Value: value})
 }
 
 // classifyProjection maps a RETURN-item expression to its Projection variant,
@@ -102,7 +102,7 @@ func (l *listener) classifyProjection(e gen.IOC_ExpressionContext) (query.Projec
 		if !ok {
 			return nil, false
 		}
-		l.refs = append(l.refs, varRef{name: ref.Variable})
+		l.curPart.refs = append(l.curPart.refs, varRef{name: ref.Variable})
 		return query.NewRefProjection(ref), true
 
 	case atom.COUNT() != nil:
@@ -141,7 +141,7 @@ func (l *listener) classifyFunction(fi gen.IOC_FunctionInvocationContext) (query
 		return nil, false
 	}
 	for _, ref := range refs {
-		l.refs = append(l.refs, varRef{name: ref.Variable})
+		l.curPart.refs = append(l.curPart.refs, varRef{name: ref.Variable})
 	}
 	if name, ok := functionName(fi); ok {
 		if fn, ok := aggregateFunc(name); ok {
@@ -253,14 +253,14 @@ func (l *listener) pairAddSub(a, b gen.IOC_AddOrSubtractExpressionContext) {
 	if ref, ok := propertyRefFromAddSub(a); ok {
 		if param, node, ok := parameterFromAddSub(b); ok {
 			l.addParameterUse(param, node, query.NewPropertyUse(query.Ref{Variable: ref.Variable, Property: ref.Property}))
-			l.refs = append(l.refs, varRef{name: ref.Variable})
+			l.curPart.refs = append(l.curPart.refs, varRef{name: ref.Variable})
 		}
 		return
 	}
 	if ref, ok := propertyRefFromAddSub(b); ok {
 		if param, node, ok := parameterFromAddSub(a); ok {
 			l.addParameterUse(param, node, query.NewPropertyUse(query.Ref{Variable: ref.Variable, Property: ref.Property}))
-			l.refs = append(l.refs, varRef{name: ref.Variable})
+			l.curPart.refs = append(l.curPart.refs, varRef{name: ref.Variable})
 		}
 	}
 }
