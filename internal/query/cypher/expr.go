@@ -173,9 +173,11 @@ func (l *listener) refType(r query.Ref) query.Type {
 // name matches the closed aggregate set (case-insensitively, §4), an
 // AggregateProjection. Either way it mines the call's referenced bindings; any
 // argument that is not a bare var/var.prop or scalar literal makes it residual
-// (no expression tree, no nested aggregates, spec §4/§9). Stage 6: both
-// variants carry TypeUnknown — function identity and aggregate return type
-// live below the type-interface boundary (ADR 0005).
+// (no expression tree, no nested aggregates, spec §4/§9). Stage 6: aggregate
+// results carry TypeUnknown; Stage 7 widens a plain FuncProjection's result
+// type when the call's full name matches the seven-name temporal constructor
+// set (spec §4). Every other function call keeps TypeUnknown — function
+// identity is below the type-interface boundary (ADR 0005).
 func (l *listener) classifyFunction(fi gen.IOC_FunctionInvocationContext) (query.Projection, bool) {
 	refs, ok := functionArgRefs(fi)
 	if !ok {
@@ -189,7 +191,11 @@ func (l *listener) classifyFunction(fi gen.IOC_FunctionInvocationContext) (query
 			return query.NewAggregateProjection(fn, refs, query.TypeUnknown{}), true
 		}
 	}
-	return query.NewFuncProjection(refs, query.TypeUnknown{}), true
+	resultType := query.Type(query.TypeUnknown{})
+	if t, ok := temporalConstructorType(fullFunctionName(fi)); ok {
+		resultType = t
+	}
+	return query.NewFuncProjection(refs, resultType), true
 }
 
 // rejectClauseParameter fails if the ORDER BY expression contains a parameter:

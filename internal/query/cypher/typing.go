@@ -158,8 +158,9 @@ func (l *listener) typeStringListNull(s gen.IOC_StringListNullPredicateExpressio
 
 // typeAddSub types an addition/subtraction chain: numeric arithmetic on
 // integers yields TypeInt, mixing with float yields TypeFloat, string
-// concatenation yields TypeString. Any operand of TypeUnknown or TypeNull, or
-// any mixed-kind pairing the parser does not recognise, yields TypeUnknown.
+// concatenation yields TypeString, temporal + duration yields the temporal
+// (Stage 7 spec §1). Any operand of TypeUnknown or TypeNull, or any mixed-kind
+// pairing the parser does not recognise, yields TypeUnknown.
 func (l *listener) typeAddSub(a gen.IOC_AddOrSubtractExpressionContext, refs *[]query.Ref) query.Type {
 	if a == nil {
 		return query.TypeUnknown{}
@@ -172,18 +173,20 @@ func (l *listener) typeAddSub(a gen.IOC_AddOrSubtractExpressionContext, refs *[]
 		return l.typeMulDiv(ms[0], refs)
 	}
 	// Chained + / -. The parser walks left-to-right, joining the running result
-	// type with each next operand under promoteArith (integer + integer = int,
-	// integer + float = float, string + string = string, else unknown).
+	// type with each next operand under promoteAddSub (integer + integer = int,
+	// integer + float = float, string + string = string, date + duration =
+	// date and the other temporal-arithmetic rules of spec §1, else unknown).
 	acc := l.typeMulDiv(ms[0], refs)
 	for i := 1; i < len(ms); i++ {
-		acc = promoteArith(acc, l.typeMulDiv(ms[i], refs))
+		acc = promoteAddSub(acc, l.typeMulDiv(ms[i], refs))
 	}
 	return acc
 }
 
 // typeMulDiv types a multiplication/division/modulo chain: numeric arithmetic
-// on integers yields TypeInt; mixing with float yields TypeFloat; anything
-// else yields TypeUnknown.
+// on integers yields TypeInt; mixing with float yields TypeFloat; duration
+// scaled by a number stays a duration (Stage 7 spec §1); anything else
+// yields TypeUnknown.
 func (l *listener) typeMulDiv(m gen.IOC_MultiplyDivideModuloExpressionContext, refs *[]query.Ref) query.Type {
 	if m == nil {
 		return query.TypeUnknown{}
@@ -197,7 +200,7 @@ func (l *listener) typeMulDiv(m gen.IOC_MultiplyDivideModuloExpressionContext, r
 	}
 	acc := l.typePower(ps[0], refs)
 	for i := 1; i < len(ps); i++ {
-		acc = promoteArith(acc, l.typePower(ps[i], refs))
+		acc = promoteMulDiv(acc, l.typePower(ps[i], refs))
 	}
 	return acc
 }
@@ -306,7 +309,11 @@ func (l *listener) typeAtom(a gen.IOC_AtomContext, refs *[]query.Ref) query.Type
 	case a.COUNT() != nil:
 		return query.TypeUnknown{}
 	case a.OC_FunctionInvocation() != nil:
-		l.mineFunctionArgs(a.OC_FunctionInvocation(), refs)
+		fi := a.OC_FunctionInvocation()
+		l.mineFunctionArgs(fi, refs)
+		if t, ok := temporalConstructorType(fullFunctionName(fi)); ok {
+			return t
+		}
 		return query.TypeUnknown{}
 	case a.OC_ParenthesizedExpression() != nil:
 		t, inner := l.typeExpression(a.OC_ParenthesizedExpression().OC_Expression())
@@ -459,43 +466,101 @@ func commonType(ts []query.Type) query.Type {
 	return first
 }
 
-// promoteArith joins two arithmetic operand types under the openCypher promotion
+// promoteAddSub joins two operand types under the openCypher +/- promotion
 // rules the parser can commit to schema-free: int+int=int, int+float=float,
-// float+float=float, string+string=string (concatenation via +), anything
-// touching TypeUnknown or TypeNull collapses to TypeUnknown.
-func promoteArith(a, b query.Type) query.Type {
-	if _, ok := a.(query.TypeUnknown); ok {
-		return query.TypeUnknown{}
+// float+float=float, string+string=string (concatenation via +), and the
+// Stage 7 temporal rules — <temporal> + duration → <temporal> and
+// duration + duration = duration (spec §1). Anything touching TypeUnknown or
+// TypeNull collapses to TypeUnknown.
+func promoteAddSub(a, b query.Type) query.Type {
+	if t, ok := promoteBase(a, b); ok {
+		return t
 	}
-	if _, ok := b.(query.TypeUnknown); ok {
-		return query.TypeUnknown{}
-	}
-	if _, ok := a.(query.TypeNull); ok {
-		return query.TypeUnknown{}
-	}
-	if _, ok := b.(query.TypeNull); ok {
-		return query.TypeUnknown{}
-	}
-	if isNumeric(a) && isNumeric(b) {
-		if _, ok := a.(query.TypeFloat); ok {
-			return query.TypeFloat{}
+	if isTemporalPoint(a) {
+		if _, ok := b.(query.TypeDuration); ok {
+			return a
 		}
-		if _, ok := b.(query.TypeFloat); ok {
-			return query.TypeFloat{}
-		}
-		return query.TypeInt{}
 	}
-	if _, ok := a.(query.TypeString); ok {
-		if _, ok := b.(query.TypeString); ok {
-			return query.TypeString{}
+	if _, ok := a.(query.TypeDuration); ok {
+		if isTemporalPoint(b) {
+			return b
+		}
+		if _, ok := b.(query.TypeDuration); ok {
+			return query.TypeDuration{}
 		}
 	}
 	return query.TypeUnknown{}
 }
 
+// promoteMulDiv joins two operand types under the openCypher */÷ promotion
+// rules the parser can commit to schema-free: numeric int/float promotion as
+// above, and Stage 7 duration × number = duration (spec §1, commutative;
+// division of a duration by a number likewise stays a duration). Anything
+// touching TypeUnknown or TypeNull collapses to TypeUnknown.
+func promoteMulDiv(a, b query.Type) query.Type {
+	if t, ok := promoteBase(a, b); ok {
+		return t
+	}
+	if _, ok := a.(query.TypeDuration); ok && isNumeric(b) {
+		return query.TypeDuration{}
+	}
+	if _, ok := b.(query.TypeDuration); ok && isNumeric(a) {
+		return query.TypeDuration{}
+	}
+	return query.TypeUnknown{}
+}
+
+// promoteBase handles the shared numeric / string / null-or-unknown rules
+// both +/- and */÷ obey. The bool return is false when neither side is
+// numeric-or-string-or-null-or-unknown, so the operator-specific fallthrough
+// can attempt the temporal rules.
+func promoteBase(a, b query.Type) (query.Type, bool) {
+	if _, ok := a.(query.TypeUnknown); ok {
+		return query.TypeUnknown{}, true
+	}
+	if _, ok := b.(query.TypeUnknown); ok {
+		return query.TypeUnknown{}, true
+	}
+	if _, ok := a.(query.TypeNull); ok {
+		return query.TypeUnknown{}, true
+	}
+	if _, ok := b.(query.TypeNull); ok {
+		return query.TypeUnknown{}, true
+	}
+	if isNumeric(a) && isNumeric(b) {
+		if _, ok := a.(query.TypeFloat); ok {
+			return query.TypeFloat{}, true
+		}
+		if _, ok := b.(query.TypeFloat); ok {
+			return query.TypeFloat{}, true
+		}
+		return query.TypeInt{}, true
+	}
+	if _, ok := a.(query.TypeString); ok {
+		if _, ok := b.(query.TypeString); ok {
+			return query.TypeString{}, true
+		}
+	}
+	return nil, false
+}
+
 func isNumeric(t query.Type) bool {
 	switch t.(type) {
 	case query.TypeInt, query.TypeFloat:
+		return true
+	default:
+		return false
+	}
+}
+
+// isTemporalPoint reports whether t is a point-in-time temporal type — one of
+// TypeDate, TypeTime, TypeLocalTime, TypeDateTime, TypeLocalDateTime.
+// Duration is deliberately excluded — it is the additive companion, not a
+// point-in-time — so promoteAddSub can special-case "temporal + duration"
+// without treating duration as its own left operand.
+func isTemporalPoint(t query.Type) bool {
+	switch t.(type) {
+	case query.TypeDate, query.TypeTime, query.TypeLocalTime, query.TypeDateTime, query.TypeLocalDateTime:
 		return true
 	default:
 		return false
