@@ -16,43 +16,67 @@ import (
 // fail() keeps the first error and Parse discards the result once one is set, so
 // an Enter* that runs after the first error is harmless. Mirrors schema/gql.
 //
-// One collection pass + build(): the Enter* handlers collect into ordered slices
-// plus a variable lookup map, and build() assembles query.Query at end of walk.
-// There is no schema-style resolve() second pass — endpoints record a variable
-// name and labels live on the binding, so there is no parse-time endpoint->type
-// lookup. build() does a self-consistency validation, not a resolution.
+// One collection pass + build(): the Enter* handlers collect into a nested
+// branch/part structure plus a query-wide parameter table, and build() assembles
+// query.Query at end of walk. There is no schema-style resolve() second pass —
+// endpoints record a variable name and labels live on the binding, so there is no
+// parse-time endpoint->type lookup. build() does a self-consistency validation,
+// not a resolution.
+//
+// Stage 4 makes collection two-axis (spec §2): EnterOC_SingleQuery opens a new
+// branch (the first, and one per UNION), EnterOC_With closes the current part and
+// opens the next within a branch, and EnterOC_Union records the combinator. Each
+// part accumulates its own bindings/returns/refs; parameters stay query-wide.
 type listener struct {
 	*gen.BaseCypherListener
 	*antlr.DefaultErrorListener
 
 	ts *antlr.CommonTokenStream
 
-	// bindings are the collected bindings in first-appearance order. A named
-	// binding has an index in byVar so repeat occurrences merge into it; an
-	// anonymous edge has no entry and is appended directly.
-	bindings []*rawBinding
-	byVar    map[string]int
+	// branches are the collected branches in source order. The current branch and
+	// current part (the collection targets EnterOC_Match/With/Return write into)
+	// are tracked by curBranch/curPart, set when a branch or part opens.
+	branches  []*rawBranch
+	curBranch *rawBranch
+	curPart   *rawPart
+
+	// combinators records how each branch after the first joins its predecessor;
+	// it has len(branches)-1 entries (spec §2). EnterOC_Union appends one before
+	// the joined branch's EnterOC_SingleQuery fires.
+	combinators []query.UnionKind
 
 	// params are the collected parameters in first-appearance order, indexed by
-	// name in byParam so repeat uses accumulate onto one Parameter.
+	// name in byParam so repeat uses accumulate onto one Parameter. They are
+	// query-wide (deduped across all parts/branches), unaffected by scope
+	// boundaries (spec §4).
 	params   []*query.Parameter
 	byParam  map[string]int
 	approved map[antlr.Tree]bool // oC_Parameter nodes mined into a Use
 
-	// returns are the collected result columns in source order. Empty when
-	// returnsAll is set (RETURN * does not mix with explicit items at Stage 3).
-	returns []query.ReturnItem
-
-	// returnsAll records that the projection body was the '*' alternative
-	// (RETURN *), a query-level wildcard over the in-scope bindings (spec §3).
-	returnsAll bool
-
-	// refs are every variable reference build() must check against a binding:
-	// return items, parameter uses, and edge endpoints. Collected with their kind
-	// so build() can raise ErrUnboundVariable / ErrVariableKindConflict.
-	refs []varRef
-
 	err error
+}
+
+// rawBranch is a branch under construction: its ordered parts. One per
+// oC_SingleQuery.
+type rawBranch struct {
+	parts []*rawPart
+}
+
+// rawPart is one WITH-bounded scope segment under construction: its bindings (in
+// first-appearance order, with byVar indexing named ones for merge), its return
+// items / wildcard flag, and the variable refs build() must resolve against this
+// part's scope. byVar is per-part: a name re-MATCHed in a later part is a fresh
+// binding there (spec §3).
+type rawPart struct {
+	bindings   []*rawBinding
+	byVar      map[string]int
+	returns    []query.ReturnItem
+	returnsAll bool
+	refs       []varRef
+}
+
+func newRawPart() *rawPart {
+	return &rawPart{byVar: map[string]int{}}
 }
 
 // rawBinding is a binding under construction: its variable, accumulated labels
@@ -73,7 +97,7 @@ type rawBinding struct {
 
 // varRef is a use of a variable name that build() must resolve to a binding. An
 // endpointRef must resolve to a node binding (an edge endpoint only references a
-// node); any other ref (a return item or parameter use) accepts either kind.
+// node); any other ref (a return item) accepts either kind.
 type varRef struct {
 	name        string
 	endpointRef bool
@@ -82,7 +106,6 @@ type varRef struct {
 func newListener(ts *antlr.CommonTokenStream) *listener {
 	return &listener{
 		ts:       ts,
-		byVar:    map[string]int{},
 		byParam:  map[string]int{},
 		approved: map[antlr.Tree]bool{},
 	}
@@ -120,14 +143,38 @@ func (l *listener) walk(tree antlr.Tree) error {
 	return l.err
 }
 
-// --- clause rejections (spec §3, category-grained sentinels) ---
+// --- branch/part structure (spec §2) ---
 
-// EnterOC_Match collects one MATCH or OPTIONAL MATCH clause's pattern and
-// WHERE. Bindings first introduced inside an OPTIONAL clause are marked
-// nullable (ADR 0006); the WHERE itself does not introduce bindings, so it
-// reads parameters the same way in either case. Collection runs here, in
-// walk order, so first appearance of a variable/parameter is the source
-// order across all MATCHes.
+// EnterOC_SingleQuery opens a new branch with one initial empty part and makes
+// both current. It fires once per branch: the first branch, and each post-UNION
+// branch (EnterOC_Union runs first and has already recorded the combinator).
+func (l *listener) EnterOC_SingleQuery(*gen.OC_SingleQueryContext) {
+	part := newRawPart()
+	br := &rawBranch{parts: []*rawPart{part}}
+	l.branches = append(l.branches, br)
+	l.curBranch = br
+	l.curPart = part
+}
+
+// EnterOC_Union records the combinator joining the branch about to open to the
+// current one: UnionAll if the ALL token is present, else UnionDistinct. It fires
+// before the joined branch's EnterOC_SingleQuery, so the combinator precedes its
+// branch and the i-th entry joins branch i+1 to branch i (spec §2).
+func (l *listener) EnterOC_Union(c *gen.OC_UnionContext) {
+	kind := query.UnionDistinct
+	if c.ALL() != nil {
+		kind = query.UnionAll
+	}
+	l.combinators = append(l.combinators, kind)
+}
+
+// --- clause collection / rejections (spec §2/§3, category-grained sentinels) ---
+
+// EnterOC_Match collects one MATCH or OPTIONAL MATCH clause's pattern and WHERE
+// into the current part. Bindings first introduced inside an OPTIONAL clause are
+// marked nullable (ADR 0006); the WHERE itself does not introduce bindings, so it
+// reads parameters the same way in either case. Collection runs here, in walk
+// order, so first appearance of a variable is the source order within the part.
 func (l *listener) EnterOC_Match(c *gen.OC_MatchContext) {
 	optional := c.OPTIONAL() != nil
 	l.collectPattern(c.OC_Pattern(), optional)
@@ -136,12 +183,22 @@ func (l *listener) EnterOC_Match(c *gen.OC_MatchContext) {
 	}
 }
 
-func (l *listener) EnterOC_With(*gen.OC_WithContext) {
-	l.fail(fmt.Errorf("%w: WITH", ErrUnsupportedClause))
-}
-
-func (l *listener) EnterOC_Union(*gen.OC_UnionContext) {
-	l.fail(fmt.Errorf("%w: UNION", ErrUnsupportedClause))
+// EnterOC_With collects its projection into the current part (a WITH item is a
+// RETURN item — they share oC_ProjectionBody), mines its optional WHERE for
+// parameters, then CLOSES the current part and OPENS a fresh empty part in the
+// current branch. The closed part's returns are the names it exports into the
+// next part's scope (spec §4).
+func (l *listener) EnterOC_With(c *gen.OC_WithContext) {
+	l.collectProjection(c.OC_ProjectionBody())
+	if w := c.OC_Where(); w != nil {
+		l.mineWhere(w)
+	}
+	if l.err != nil {
+		return
+	}
+	part := newRawPart()
+	l.curBranch.parts = append(l.curBranch.parts, part)
+	l.curPart = part
 }
 
 func (l *listener) EnterOC_Create(*gen.OC_CreateContext) {
@@ -182,8 +239,9 @@ func (l *listener) EnterOC_RangeLiteral(*gen.OC_RangeLiteralContext) {
 	l.fail(fmt.Errorf("%w: variable-length relationship", ErrUnsupportedPattern))
 }
 
-// EnterOC_Return collects the result columns. RETURN is the read core's single
-// projection; WITH (the other projection) is already rejected.
+// EnterOC_Return collects the result columns into the current (final) part of
+// the current branch. RETURN terminates a branch; WITH terminates an
+// intermediate part (both share oC_ProjectionBody via collectProjection).
 func (l *listener) EnterOC_Return(c *gen.OC_ReturnContext) {
 	l.collectProjection(c.OC_ProjectionBody())
 }

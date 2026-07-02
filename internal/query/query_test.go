@@ -361,25 +361,104 @@ func TestReturnItemMarshalJSON(t *testing.T) {
 		string(out))
 }
 
-func TestQueryMarshalJSONEmitsReturnsAll(t *testing.T) {
-	// "returnsAll" is always emitted (no omitempty), matching the always-emit
-	// convention. A plain query (no RETURN *) serialises it as false.
-	q := representativeQuery(t)
-	out, err := json.Marshal(q)
+func TestQueryPartMarshalJSONEmitsReturnsAll(t *testing.T) {
+	// "returnsAll" is always emitted (no omitempty) on a part, matching the
+	// always-emit convention. A plain part (no RETURN *) serialises it as false.
+	part := query.QueryPart{
+		Returns: []query.ReturnItem{
+			{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
+		},
+	}
+	out, err := json.Marshal(part)
 	require.NoError(t, err)
 	require.Contains(t, string(out), `"returnsAll":false`)
 
-	q.ReturnsAll = true
-	q.Returns = nil // RETURN * does not mix with explicit items (§3)
-	out, err = json.Marshal(q)
+	part.ReturnsAll = true
+	part.Returns = nil // RETURN * / WITH * does not mix with explicit items (§3)
+	out, err = json.Marshal(part)
 	require.NoError(t, err)
 	require.Contains(t, string(out), `"returnsAll":true`)
 }
 
+// --- branch/part structure and UnionKind (Stage 4) ---
+
+// TestUnionKindString pins the wire names the JSON value derives from, so the
+// serialised combinator can never drift from the enum.
+func TestUnionKindString(t *testing.T) {
+	require.Equal(t, "union", query.UnionDistinct.String())
+	require.Equal(t, "unionAll", query.UnionAll.String())
+}
+
+func TestUnionKindMarshalJSON(t *testing.T) {
+	out, err := json.Marshal(query.UnionDistinct)
+	require.NoError(t, err)
+	require.JSONEq(t, `"union"`, string(out))
+
+	out, err = json.Marshal(query.UnionAll)
+	require.NoError(t, err)
+	require.JSONEq(t, `"unionAll"`, string(out))
+}
+
+func TestQueryMarshalJSONShape(t *testing.T) {
+	// The new top-level shape: lowercase "branches"/"combinators"/"parameters";
+	// each branch a {"parts": [...]}; each part {"bindings","returns","returnsAll"}.
+	q := representativeQuery(t)
+	out, err := json.Marshal(q)
+	require.NoError(t, err)
+	s := string(out)
+	require.Contains(t, s, `"branches"`)
+	require.Contains(t, s, `"combinators"`)
+	require.Contains(t, s, `"parameters"`)
+	require.Contains(t, s, `"parts"`)
+	require.Contains(t, s, `"bindings"`)
+	require.Contains(t, s, `"returns"`)
+}
+
+func TestQueryMarshalJSONEmitsCombinatorsNullForOneBranch(t *testing.T) {
+	// Combinators is always emitted; with one branch it is null (nil slice),
+	// matching the always-emit convention.
+	q := representativeQuery(t)
+	require.Nil(t, q.Combinators)
+	out, err := json.Marshal(q)
+	require.NoError(t, err)
+	require.Contains(t, string(out), `"combinators":null`)
+}
+
+func TestQueryMarshalJSONEmitsCombinatorsForUnion(t *testing.T) {
+	// Two branches joined by UNION ALL: Combinators has one entry, marshalled via
+	// the stringer.
+	q := query.Query{
+		Branches: []query.QueryBranch{
+			{Parts: []query.QueryPart{{
+				Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
+				Returns:  []query.ReturnItem{{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})}},
+			}}},
+			{Parts: []query.QueryPart{{
+				Bindings: []query.Binding{must(query.NewNodeBinding("b", nil))},
+				Returns:  []query.ReturnItem{{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"})}},
+			}}},
+		},
+		Combinators: []query.UnionKind{query.UnionAll},
+	}
+	out, err := json.Marshal(q)
+	require.NoError(t, err)
+	require.Contains(t, string(out), `"combinators":["unionAll"]`)
+}
+
 // --- deterministic JSON marshalling ---
 
+// must lifts a fallible model constructor into an expression usable in a struct
+// literal: it panics if err is non-nil. The hand-built test values are hard-coded
+// valid, so any error here is a programmer error and panic is the honest signal.
+func must[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
+}
+
 // representativeQuery exercises both binding variants and both endpoint variants,
-// plus refs, return items and parameters.
+// plus refs, return items and parameters — now in the one-branch/one-part shape.
 func representativeQuery(t *testing.T) query.Query {
 	t.Helper()
 
@@ -395,15 +474,19 @@ func representativeQuery(t *testing.T) query.Query {
 	require.NoError(t, err)
 
 	return query.Query{
-		Bindings: []query.Binding{a, b, edge},
+		Branches: []query.QueryBranch{
+			{Parts: []query.QueryPart{{
+				Bindings: []query.Binding{a, b, edge},
+				Returns: []query.ReturnItem{
+					{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
+					{Name: "a.name", Value: query.NewRefProjection(query.Ref{Variable: "a", Property: "name"})},
+				},
+			}}},
+		},
 		Parameters: []query.Parameter{
 			{Name: "id", Uses: []query.Use{
 				query.NewPropertyUse(query.Ref{Variable: "a", Property: "id"}),
 			}},
-		},
-		Returns: []query.ReturnItem{
-			{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
-			{Name: "a.name", Value: query.NewRefProjection(query.Ref{Variable: "a", Property: "name"})},
 		},
 	}
 }
@@ -529,7 +612,11 @@ func genBinding() *rapid.Generator[query.Binding] {
 func genQuery() *rapid.Generator[query.Query] {
 	return rapid.Custom(func(t *rapid.T) query.Query {
 		return query.Query{
-			Bindings: rapid.SliceOf(genBinding()).Draw(t, "bindings"),
+			Branches: []query.QueryBranch{
+				{Parts: []query.QueryPart{{
+					Bindings: rapid.SliceOf(genBinding()).Draw(t, "bindings"),
+				}}},
+			},
 		}
 	})
 }

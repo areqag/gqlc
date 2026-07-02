@@ -1,38 +1,47 @@
 {
-  "Bindings": [
+  "branches": [
     {
-      "kind": "node",
-      "variable": "a",
-      "labels": null,
-      "nullable": false
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "a.name",
+              "value": {
+                "kind": "ref",
+                "variable": "a",
+                "property": "name"
+              }
+            },
+            {
+              "name": "a.age",
+              "value": {
+                "kind": "ref",
+                "variable": "a",
+                "property": "age"
+              }
+            },
+            {
+              "name": "a.seasons",
+              "value": {
+                "kind": "ref",
+                "variable": "a",
+                "property": "seasons"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
     }
   ],
-  "Parameters": null,
-  "Returns": [
-    {
-      "name": "a.name",
-      "value": {
-        "kind": "ref",
-        "variable": "a",
-        "property": "name"
-      }
-    },
-    {
-      "name": "a.age",
-      "value": {
-        "kind": "ref",
-        "variable": "a",
-        "property": "age"
-      }
-    },
-    {
-      "name": "a.seasons",
-      "value": {
-        "kind": "ref",
-        "variable": "a",
-        "property": "seasons"
-      }
-    }
-  ],
-  "returnsAll": false
+  "combinators": null,
+  "parameters": null
 }

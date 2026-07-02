@@ -1,60 +1,69 @@
 {
-  "Bindings": [
+  "branches": [
     {
-      "kind": "node",
-      "variable": "a",
-      "labels": null,
-      "nullable": false
-    },
-    {
-      "kind": "edge",
-      "variable": "",
-      "labels": [
-        "A"
-      ],
-      "source": {
-        "kind": "var",
-        "variable": "a"
-      },
-      "target": {
-        "kind": "var",
-        "variable": "b"
-      },
-      "nullable": false
-    },
-    {
-      "kind": "node",
-      "variable": "b",
-      "labels": null,
-      "nullable": false
-    },
-    {
-      "kind": "edge",
-      "variable": "",
-      "labels": [
-        "B"
-      ],
-      "source": {
-        "kind": "var",
-        "variable": "b"
-      },
-      "target": {
-        "kind": "var",
-        "variable": "a"
-      },
-      "nullable": false
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "A"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "a"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "b"
+              },
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "b",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "B"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "b"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "a"
+              },
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "a.name",
+              "value": {
+                "kind": "ref",
+                "variable": "a",
+                "property": "name"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
     }
   ],
-  "Parameters": null,
-  "Returns": [
-    {
-      "name": "a.name",
-      "value": {
-        "kind": "ref",
-        "variable": "a",
-        "property": "name"
-      }
-    }
-  ],
-  "returnsAll": false
+  "combinators": null,
+  "parameters": null
 }

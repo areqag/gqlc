@@ -1,0 +1,57 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "x",
+              "value": {
+                "kind": "literal"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    },
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "x",
+              "value": {
+                "kind": "literal"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    },
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "x",
+              "value": {
+                "kind": "literal"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": [
+    "unionAll",
+    "unionAll"
+  ],
+  "parameters": null
+}

@@ -1,88 +1,97 @@
 {
-  "Bindings": [
+  "branches": [
     {
-      "kind": "node",
-      "variable": "x",
-      "labels": [
-        "X"
-      ],
-      "nullable": false
-    },
-    {
-      "kind": "edge",
-      "variable": "",
-      "labels": [
-        "E1"
-      ],
-      "source": {
-        "kind": "var",
-        "variable": "x"
-      },
-      "target": {
-        "kind": "var",
-        "variable": "y"
-      },
-      "nullable": true
-    },
-    {
-      "kind": "node",
-      "variable": "y",
-      "labels": [
-        "Y"
-      ],
-      "nullable": true
-    },
-    {
-      "kind": "edge",
-      "variable": "",
-      "labels": [
-        "E2"
-      ],
-      "source": {
-        "kind": "var",
-        "variable": "y"
-      },
-      "target": {
-        "kind": "var",
-        "variable": "z"
-      },
-      "nullable": true
-    },
-    {
-      "kind": "node",
-      "variable": "z",
-      "labels": [
-        "Z"
-      ],
-      "nullable": true
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "x",
+              "labels": [
+                "X"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "E1"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "x"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "y"
+              },
+              "nullable": true
+            },
+            {
+              "kind": "node",
+              "variable": "y",
+              "labels": [
+                "Y"
+              ],
+              "nullable": true
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "E2"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "y"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "z"
+              },
+              "nullable": true
+            },
+            {
+              "kind": "node",
+              "variable": "z",
+              "labels": [
+                "Z"
+              ],
+              "nullable": true
+            }
+          ],
+          "returns": [
+            {
+              "name": "x",
+              "value": {
+                "kind": "ref",
+                "variable": "x",
+                "property": ""
+              }
+            },
+            {
+              "name": "y",
+              "value": {
+                "kind": "ref",
+                "variable": "y",
+                "property": ""
+              }
+            },
+            {
+              "name": "z",
+              "value": {
+                "kind": "ref",
+                "variable": "z",
+                "property": ""
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
     }
   ],
-  "Parameters": null,
-  "Returns": [
-    {
-      "name": "x",
-      "value": {
-        "kind": "ref",
-        "variable": "x",
-        "property": ""
-      }
-    },
-    {
-      "name": "y",
-      "value": {
-        "kind": "ref",
-        "variable": "y",
-        "property": ""
-      }
-    },
-    {
-      "name": "z",
-      "value": {
-        "kind": "ref",
-        "variable": "z",
-        "property": ""
-      }
-    }
-  ],
-  "returnsAll": false
+  "combinators": null,
+  "parameters": null
 }

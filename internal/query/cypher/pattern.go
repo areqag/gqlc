@@ -133,7 +133,7 @@ func (l *listener) collectEdge(r gen.IOC_RelationshipPatternContext, prev, next 
 		// (ADR 0006) even though no Ref will ever observe it.
 		rb := &rawBinding{variable: "", kind: graph.Edge, source: source, target: target, nullable: optional}
 		rb.mergeLabels(labels)
-		l.bindings = append(l.bindings, rb)
+		l.curPart.bindings = append(l.curPart.bindings, rb)
 		return
 	}
 	l.mergeBinding(variable, graph.Edge, labels, source, target, optional)
@@ -155,33 +155,36 @@ func (l *listener) endpoint(n gen.IOC_NodePatternContext) query.Endpoint {
 }
 
 // recordEndpointRefs notes each named endpoint as a reference build() must
-// resolve to a node binding.
+// resolve to a node binding, scoped to the current part.
 func (l *listener) recordEndpointRefs(eps ...query.Endpoint) {
 	for _, ep := range eps {
 		if ve, ok := ep.(query.VarEndpoint); ok {
-			l.refs = append(l.refs, varRef{name: ve.Variable(), endpointRef: true})
+			l.curPart.refs = append(l.curPart.refs, varRef{name: ve.Variable(), endpointRef: true})
 		}
 	}
 }
 
-// mergeBinding records a binding for variable, deduping named bindings by
-// variable in first-appearance order and unioning their labels (ordered, first
-// appearance, C2). A variable seen as both a node and an edge is a kind conflict
-// (recorded for build()). For an edge's first occurrence the endpoints are set;
-// later occurrences merge labels only. optional is honoured only on first
-// introduction (ADR 0006): a binding's nullability is a static fact about its
-// *introducing* clause; a later non-OPTIONAL occurrence neither sets nor
-// clears the flag — that demotion is the resolver's job (gqlc-lqm).
+// mergeBinding records a binding for variable in the current part, deduping the
+// part's named bindings by variable in first-appearance order and unioning their
+// labels (ordered, first appearance, C2). Dedup is per-part: a name re-MATCHed in
+// a later part is a fresh binding there (spec §3). A variable seen as both a node
+// and an edge within a part is a kind conflict (recorded for build()). For an
+// edge's first occurrence the endpoints are set; later occurrences merge labels
+// only. optional is honoured only on first introduction (ADR 0006): a binding's
+// nullability is a static fact about its *introducing* clause; a later
+// non-OPTIONAL occurrence neither sets nor clears the flag — that demotion is the
+// resolver's job (gqlc-lqm).
 func (l *listener) mergeBinding(variable string, kind graph.EntityKind, labels graph.LabelSet, source, target query.Endpoint, optional bool) {
-	idx, ok := l.byVar[variable]
+	part := l.curPart
+	idx, ok := part.byVar[variable]
 	if !ok {
 		rb := &rawBinding{variable: variable, kind: kind, seen: map[string]bool{}, source: source, target: target, nullable: optional}
 		rb.mergeLabels(labels)
-		l.byVar[variable] = len(l.bindings)
-		l.bindings = append(l.bindings, rb)
+		part.byVar[variable] = len(part.bindings)
+		part.bindings = append(part.bindings, rb)
 		return
 	}
-	rb := l.bindings[idx]
+	rb := part.bindings[idx]
 	if rb.kind != kind {
 		l.fail(fmt.Errorf("%w: %q", ErrVariableKindConflict, variable))
 		return

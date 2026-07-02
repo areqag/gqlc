@@ -1,36 +1,45 @@
 {
-  "Bindings": [
+  "branches": [
     {
-      "kind": "node",
-      "variable": "n",
-      "labels": null,
-      "nullable": false
-    },
-    {
-      "kind": "node",
-      "variable": "m",
-      "labels": null,
-      "nullable": false
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "m",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "n",
+              "value": {
+                "kind": "ref",
+                "variable": "n",
+                "property": "num"
+              }
+            },
+            {
+              "name": "m",
+              "value": {
+                "kind": "ref",
+                "variable": "m",
+                "property": "num"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
     }
   ],
-  "Parameters": null,
-  "Returns": [
-    {
-      "name": "n",
-      "value": {
-        "kind": "ref",
-        "variable": "n",
-        "property": "num"
-      }
-    },
-    {
-      "name": "m",
-      "value": {
-        "kind": "ref",
-        "variable": "m",
-        "property": "num"
-      }
-    }
-  ],
-  "returnsAll": false
+  "combinators": null,
+  "parameters": null
 }

@@ -1,13 +1,33 @@
 {
-  "Bindings": [
+  "branches": [
     {
-      "kind": "node",
-      "variable": "n",
-      "labels": null,
-      "nullable": false
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "n",
+              "value": {
+                "kind": "ref",
+                "variable": "n",
+                "property": ""
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
     }
   ],
-  "Parameters": [
+  "combinators": null,
+  "parameters": [
     {
       "Name": "skipAmount",
       "Uses": [
@@ -17,16 +37,5 @@
         }
       ]
     }
-  ],
-  "Returns": [
-    {
-      "name": "n",
-      "value": {
-        "kind": "ref",
-        "variable": "n",
-        "property": ""
-      }
-    }
-  ],
-  "returnsAll": false
+  ]
 }

@@ -1,52 +1,61 @@
 {
-  "Bindings": [
+  "branches": [
     {
-      "kind": "node",
-      "variable": "n1",
-      "labels": null,
-      "nullable": false
-    },
-    {
-      "kind": "edge",
-      "variable": "rel",
-      "labels": [
-        "KNOWS"
-      ],
-      "source": {
-        "kind": "var",
-        "variable": "n1"
-      },
-      "target": {
-        "kind": "var",
-        "variable": "n2"
-      },
-      "nullable": false
-    },
-    {
-      "kind": "node",
-      "variable": "n2",
-      "labels": null,
-      "nullable": false
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n1",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "rel",
+              "labels": [
+                "KNOWS"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "n1"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "n2"
+              },
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "n2",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "n1",
+              "value": {
+                "kind": "ref",
+                "variable": "n1",
+                "property": ""
+              }
+            },
+            {
+              "name": "n2",
+              "value": {
+                "kind": "ref",
+                "variable": "n2",
+                "property": ""
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
     }
   ],
-  "Parameters": null,
-  "Returns": [
-    {
-      "name": "n1",
-      "value": {
-        "kind": "ref",
-        "variable": "n1",
-        "property": ""
-      }
-    },
-    {
-      "name": "n2",
-      "value": {
-        "kind": "ref",
-        "variable": "n2",
-        "property": ""
-      }
-    }
-  ],
-  "returnsAll": false
+  "combinators": null,
+  "parameters": null
 }

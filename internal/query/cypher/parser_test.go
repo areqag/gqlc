@@ -54,6 +54,17 @@ import (
 //   - D1b: an inline property map whose value is a $param ((a {id: $id}))
 //
 // Revisit on every TCK bump: a new feature file may close one of these gaps.
+// oneBranch wraps a single part (and query-wide parameters) into the
+// one-branch/one-part Query shape the read-core (WITH-free, UNION-free) queries
+// lower to. The Stage-4 nesting is always present even for the flat common case.
+func oneBranch(part query.QueryPart, params ...query.Parameter) query.Query {
+	q := query.Query{Branches: []query.QueryBranch{{Parts: []query.QueryPart{part}}}}
+	if len(params) > 0 {
+		q.Parameters = params
+	}
+	return q
+}
+
 var mustParse = map[string]struct {
 	src  string
 	want query.Query
@@ -62,46 +73,46 @@ var mustParse = map[string]struct {
 	// bare-variable return → Ref{n,""}, column name "n".
 	"node": {
 		src: "MATCH (n)\nRETURN n",
-		want: query.Query{
+		want: oneBranch(query.QueryPart{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("n", nil)),
 			},
 			Returns: []query.ReturnItem{
 				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
 			},
-		},
+		}),
 	},
 	// Match1 [3] Matching nodes using multiple labels: C2 conjunctive labels in
 	// source order, A then B.
 	"node multi-label": {
 		src: "MATCH (a:A:B)\nRETURN a",
-		want: query.Query{
+		want: oneBranch(query.QueryPart{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("a", graph.LabelSet{"A", "B"})),
 			},
 			Returns: []query.ReturnItem{
 				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
 			},
-		},
+		}),
 	},
 	// Match1 [4] Simple node inline property predicate: the inline map value is a
 	// literal (not a $param), so no parameter use is mined (D1b).
 	"node inline property": {
 		src: "MATCH (n {name: 'bar'})\nRETURN n",
-		want: query.Query{
+		want: oneBranch(query.QueryPart{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("n", nil)),
 			},
 			Returns: []query.ReturnItem{
 				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
 			},
-		},
+		}),
 	},
 	// Match1 [5] Use multiple MATCH clauses to do a Cartesian product: two nodes
 	// in textual order [n, m]; explicit AS aliases (E1) become the column names.
 	"comma pattern with aliases": {
 		src: "MATCH (n), (m)\nRETURN n.num AS n, m.num AS m",
-		want: query.Query{
+		want: oneBranch(query.QueryPart{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("n", nil)),
 				must(query.NewNodeBinding("m", nil)),
@@ -110,13 +121,13 @@ var mustParse = map[string]struct {
 				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n", Property: "num"})},
 				{Name: "m", Value: query.NewRefProjection(query.Ref{Variable: "m", Property: "num"})},
 			},
-		},
+		}),
 	},
 	// Match2 [1] Match non-existent relationships returns empty: C1 anonymous edge
 	// is its own binding; C4 both endpoints are inline-empty (the () case).
 	"anonymous edge": {
 		src: "MATCH ()-[r]->()\nRETURN r",
-		want: query.Query{
+		want: oneBranch(query.QueryPart{
 			Bindings: []query.Binding{
 				must(query.NewEdgeBinding("r", nil,
 					query.NewInlineEndpoint(nil),
@@ -126,13 +137,13 @@ var mustParse = map[string]struct {
 			Returns: []query.ReturnItem{
 				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"})},
 			},
-		},
+		}),
 	},
 	// Match2 [2] label predicate on both sides: C4 anonymous endpoints carry
 	// inline labels — [A] on the source, [B] on the target.
 	"edge inline-labelled endpoints": {
 		src: "MATCH (:A)-[r]->(:B)\nRETURN r",
-		want: query.Query{
+		want: oneBranch(query.QueryPart{
 			Bindings: []query.Binding{
 				must(query.NewEdgeBinding("r", nil,
 					query.NewInlineEndpoint(graph.LabelSet{"A"}),
@@ -142,13 +153,13 @@ var mustParse = map[string]struct {
 			Returns: []query.ReturnItem{
 				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"})},
 			},
-		},
+		}),
 	},
 	// Match3 [1] Get neighbours: textual first-appearance order [n1, rel, n2];
 	// var endpoints for named nodes (C4 — labels live on their bindings).
 	"typed edge named endpoints": {
 		src: "MATCH (n1)-[rel:KNOWS]->(n2)\nRETURN n1, n2",
-		want: query.Query{
+		want: oneBranch(query.QueryPart{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("n1", nil)),
 				must(query.NewEdgeBinding("rel", graph.LabelSet{"KNOWS"},
@@ -161,13 +172,13 @@ var mustParse = map[string]struct {
 				{Name: "n1", Value: query.NewRefProjection(query.Ref{Variable: "n1"})},
 				{Name: "n2", Value: query.NewRefProjection(query.Ref{Variable: "n2"})},
 			},
-		},
+		}),
 	},
 	// Match3 [2] Directed match of a simple relationship: E3 whole-entity returns
 	// → Ref{var, ""} for each; textual order [a, r, b].
 	"directed edge whole entities": {
 		src: "MATCH (a)-[r]->(b)\nRETURN a, r, b",
-		want: query.Query{
+		want: oneBranch(query.QueryPart{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("a", nil)),
 				must(query.NewEdgeBinding("r", nil,
@@ -181,13 +192,13 @@ var mustParse = map[string]struct {
 				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"})},
 				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"})},
 			},
-		},
+		}),
 	},
 	// MatchWhere1 [6] parameter in a property predicate: D1a pairs $param with
 	// b.name → one Parameter with Use PropertyUse{Ref{b, name}}.
 	"where property parameter": {
 		src: "MATCH (a)-[r]->(b)\nWHERE b.name = $param\nRETURN r",
-		want: query.Query{
+		want: oneBranch(query.QueryPart{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("a", nil)),
 				must(query.NewEdgeBinding("r", nil,
@@ -196,15 +207,12 @@ var mustParse = map[string]struct {
 				)),
 				must(query.NewNodeBinding("b", nil)),
 			},
-			Parameters: []query.Parameter{
-				{Name: "param", Uses: []query.Use{
-					query.NewPropertyUse(query.Ref{Variable: "b", Property: "name"}),
-				}},
-			},
 			Returns: []query.ReturnItem{
 				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"})},
 			},
-		},
+		}, query.Parameter{Name: "param", Uses: []query.Use{
+			query.NewPropertyUse(query.Ref{Variable: "b", Property: "name"}),
+		}}),
 	},
 	// ReturnSkipLimit1 [2] "Start the result from second row by param" —
 	// verbatim TCK query. Stage 1: SKIP $p is a clause-slot-typed parameter
@@ -212,19 +220,16 @@ var mustParse = map[string]struct {
 	// property Ref. ORDER BY a bare var.prop is accept-and-ignored (E4).
 	"skip parameter": {
 		src: "MATCH (n)\nRETURN n\nORDER BY n.name ASC\nSKIP $skipAmount",
-		want: query.Query{
+		want: oneBranch(query.QueryPart{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("n", nil)),
-			},
-			Parameters: []query.Parameter{
-				{Name: "skipAmount", Uses: []query.Use{
-					query.NewClauseSlotUse(query.ClauseSlotSkip),
-				}},
 			},
 			Returns: []query.ReturnItem{
 				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
 			},
-		},
+		}, query.Parameter{Name: "skipAmount", Uses: []query.Use{
+			query.NewClauseSlotUse(query.ClauseSlotSkip),
+		}}),
 	},
 	// ReturnSkipLimit2 [10] "Negative parameter for LIMIT should fail" —
 	// verbatim TCK query. The TCK asserts a runtime NegativeIntegerArgument
@@ -233,19 +238,16 @@ var mustParse = map[string]struct {
 	// parameter use carrying one Use = ClauseSlotUse{Limit}.
 	"limit parameter": {
 		src: "MATCH (p:Person)\nRETURN p.name AS name\nLIMIT $_limit",
-		want: query.Query{
+		want: oneBranch(query.QueryPart{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("p", graph.LabelSet{"Person"})),
-			},
-			Parameters: []query.Parameter{
-				{Name: "_limit", Uses: []query.Use{
-					query.NewClauseSlotUse(query.ClauseSlotLimit),
-				}},
 			},
 			Returns: []query.ReturnItem{
 				{Name: "name", Value: query.NewRefProjection(query.Ref{Variable: "p", Property: "name"})},
 			},
-		},
+		}, query.Parameter{Name: "_limit", Uses: []query.Use{
+			query.NewClauseSlotUse(query.ClauseSlotLimit),
+		}}),
 	},
 	// Create2 [4] control query: a left-pointing arc. C-Direction: the canonical
 	// edge is source=b, target=a (the arrow's tail is the source) — independent of
@@ -255,7 +257,7 @@ var mustParse = map[string]struct {
 	// fair Layer-2 material.)
 	"edge left-pointing canonical": {
 		src: "MATCH (a:A)<-[:R]-(b:B)\nRETURN a, b",
-		want: query.Query{
+		want: oneBranch(query.QueryPart{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("a", graph.LabelSet{"A"})),
 				must(query.NewEdgeBinding("", graph.LabelSet{"R"},
@@ -268,21 +270,21 @@ var mustParse = map[string]struct {
 				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
 				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"})},
 			},
-		},
+		}),
 	},
 	// Match7 [1] "Simple OPTIONAL MATCH on empty graph" — verbatim TCK query.
 	// The single node binding is introduced in OPTIONAL MATCH, so its nullable
 	// flag is true (ADR 0006). The RETURN item traces back to it via Ref{n,""}.
 	"optional match simple": {
 		src: "OPTIONAL MATCH (n)\nRETURN n",
-		want: query.Query{
+		want: oneBranch(query.QueryPart{
 			Bindings: []query.Binding{
 				must(query.NewNullableNodeBinding("n", nil)),
 			},
 			Returns: []query.ReturnItem{
 				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
 			},
-		},
+		}),
 	},
 	// Match7 [2] "OPTIONAL MATCH with previously bound nodes" — verbatim TCK
 	// query. Pins the reuse rule (ADR 0006): n is first introduced in the
@@ -291,7 +293,7 @@ var mustParse = map[string]struct {
 	// carries the nullable flag uniformly even though no Ref reads it.
 	"optional match reuses prior binding": {
 		src: "MATCH (n)\nOPTIONAL MATCH (n)-[:NOT_EXIST]->(x)\nRETURN n, x",
-		want: query.Query{
+		want: oneBranch(query.QueryPart{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("n", nil)),
 				must(query.NewNullableEdgeBinding("", graph.LabelSet{"NOT_EXIST"},
@@ -304,20 +306,20 @@ var mustParse = map[string]struct {
 				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
 				{Name: "x", Value: query.NewRefProjection(query.Ref{Variable: "x"})},
 			},
-		},
+		}),
 	},
 	// Temporal4 [1] property return with no alias: E1 derives the column name from
 	// the verbatim expression text — "n.created", not "created".
 	"property return no alias": {
 		src: "MATCH (n)\nRETURN n.created",
-		want: query.Query{
+		want: oneBranch(query.QueryPart{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("n", nil)),
 			},
 			Returns: []query.ReturnItem{
 				{Name: "n.created", Value: query.NewRefProjection(query.Ref{Variable: "n", Property: "created"})},
 			},
-		},
+		}),
 	},
 	// Stage 3 — canonical aggregate. count(*) is the degenerate aggregate: the
 	// count-star atom, AggCount with no referenced bindings (it counts rows, not a
@@ -326,14 +328,14 @@ var mustParse = map[string]struct {
 	// identity below the boundary is not.
 	"count star aggregate": {
 		src: "MATCH (n)\nRETURN count(*)",
-		want: query.Query{
+		want: oneBranch(query.QueryPart{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("n", nil)),
 			},
 			Returns: []query.ReturnItem{
 				{Name: "count(*)", Value: query.NewAggregateProjection(query.AggCount, nil)},
 			},
-		},
+		}),
 	},
 	// Stage 3 — RETURN *. The query-level wildcard over in-scope bindings: the
 	// honest schema-agnostic representation is ReturnsAll, with Returns empty (the
@@ -342,11 +344,102 @@ var mustParse = map[string]struct {
 	// binding" without guessing the column list.
 	"return all": {
 		src: "MATCH (n)\nRETURN *",
-		want: query.Query{
+		want: oneBranch(query.QueryPart{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("n", nil)),
 			},
 			ReturnsAll: true,
+		}),
+	},
+	// Stage 4 — canonical WITH chain carrying a whole entity. Two parts in one
+	// branch: part 1 binds a and its WITH projects the bare variable a (a
+	// whole-entity RefProjection, empty Property — the resolver chases it back to
+	// the binding); part 2 has no bindings of its own and RETURNs a, which
+	// resolves against the name part 1 exported. The bare-variable WITH item's
+	// name is the variable itself ("a").
+	"with chain whole entity": {
+		src: "MATCH (a)\nWITH a\nRETURN a",
+		want: query.Query{
+			Branches: []query.QueryBranch{{Parts: []query.QueryPart{
+				{
+					Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
+					Returns: []query.ReturnItem{
+						{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
+					},
+				},
+				{
+					Returns: []query.ReturnItem{
+						{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
+					},
+				},
+			}}},
+		},
+	},
+	// Stage 4 — canonical value-projecting WITH chain. WITH a.name AS n exports
+	// the scalar name n (a RefProjection with a non-empty Property); part 2 RETURNs
+	// n, resolving against the exported alias. The item's name is the AS alias.
+	"with chain value projection": {
+		src: "MATCH (a)\nWITH a.name AS n\nRETURN n",
+		want: query.Query{
+			Branches: []query.QueryBranch{{Parts: []query.QueryPart{
+				{
+					Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
+					Returns: []query.ReturnItem{
+						{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "a", Property: "name"})},
+					},
+				},
+				{
+					Returns: []query.ReturnItem{
+						{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
+					},
+				},
+			}}},
+		},
+	},
+	// Stage 4 — canonical two-branch UNION (distinct). Each branch is one part
+	// with its own binding; Combinators has one entry, UnionDistinct. The branches
+	// are recorded verbatim in source order — the parser does not pre-pick branch 0
+	// as the result-naming branch (that is the resolver's rule, spec §3).
+	"union two branches": {
+		src: "MATCH (a)\nRETURN a\nUNION\nMATCH (b)\nRETURN b",
+		want: query.Query{
+			Branches: []query.QueryBranch{
+				{Parts: []query.QueryPart{{
+					Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
+					Returns: []query.ReturnItem{
+						{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
+					},
+				}}},
+				{Parts: []query.QueryPart{{
+					Bindings: []query.Binding{must(query.NewNodeBinding("b", nil))},
+					Returns: []query.ReturnItem{
+						{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"})},
+					},
+				}}},
+			},
+			Combinators: []query.UnionKind{query.UnionDistinct},
+		},
+	},
+	// Stage 4 — UNION ALL variant. Same two-branch shape; the combinator is
+	// UnionAll (the ALL token is present), the cardinality-preserving join.
+	"union all two branches": {
+		src: "MATCH (a)\nRETURN a\nUNION ALL\nMATCH (b)\nRETURN b",
+		want: query.Query{
+			Branches: []query.QueryBranch{
+				{Parts: []query.QueryPart{{
+					Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
+					Returns: []query.ReturnItem{
+						{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
+					},
+				}}},
+				{Parts: []query.QueryPart{{
+					Bindings: []query.Binding{must(query.NewNodeBinding("b", nil))},
+					Returns: []query.ReturnItem{
+						{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"})},
+					},
+				}}},
+			},
+			Combinators: []query.UnionKind{query.UnionAll},
 		},
 	},
 }
@@ -377,12 +470,13 @@ var mustReject = map[string]struct {
 	query string
 	want  error
 }{
-	// Match3 [27] "Matching from null nodes" — verbatim TCK query. Stage 2
-	// accepts OPTIONAL MATCH, so the rejection now fires on the WITH clause
-	// (still out of scope; Stage 4). The query still exercises
-	// ErrUnsupportedClause, just via a different fail-site.
-	"with clause": {
-		query: "OPTIONAL MATCH (a)\nWITH a\nMATCH (a)-->(b)\nRETURN b",
+	// AUTHORED: a write clause (CREATE) is out of scope throughout (ADR 0004) and
+	// the fail-site for ErrUnsupportedClause. Stage 4 supports WITH/UNION, so the
+	// prior `with clause` reject (which pinned this sentinel) now parses; this
+	// preserves ErrUnsupportedClause reachability via a surviving rejected clause.
+	// Replace with a verbatim corpus query if a clean one appears at the pinned tag.
+	"write clause": {
+		query: "CREATE (n)\nRETURN n",
 		want:  cypher.ErrUnsupportedClause,
 	},
 	// AUTHORED: arithmetic over a projection (RETURN n.num + 1) is the residual
@@ -409,6 +503,15 @@ var mustReject = map[string]struct {
 	// Return1 [2] returning an undefined variable -> ErrUnboundVariable
 	"unbound variable": {
 		query: "MATCH ()\nRETURN foo",
+		want:  cypher.ErrUnboundVariable,
+	},
+	// AUTHORED: per-part scope (spec §4). WITH a.x AS n exports only the scalar
+	// name "n" into the next part, so the final RETURN a references a name dropped
+	// by the WITH — out of scope downstream -> ErrUnboundVariable. The fail-site is
+	// build()'s per-part scope check (Stage 4). No verbatim corpus query exercises
+	// the dropped-binding case cleanly at the pinned tag.
+	"out of scope after with": {
+		query: "MATCH (a)\nWITH a.x AS n\nRETURN a",
 		want:  cypher.ErrUnboundVariable,
 	},
 	// Match1 [9] same variable as a relationship and a node in one pattern
@@ -542,55 +645,94 @@ func TestPropertyReferentialIntegrity(t *testing.T) {
 	})
 }
 
+// assertReferentialIntegrity checks each part's refs (return-item refs and edge
+// endpoints) resolve against that part's bindings OR a name the prior part's WITH
+// exported into it (the per-part scope §4). It threads the exported-name set left
+// to right across parts within each branch; parameters are query-wide and must
+// resolve against the union of every part's bindings.
 func assertReferentialIntegrity(rt *rapid.T, q query.Query, src string) {
-	named := make(map[string]bool)
-	for _, b := range q.Bindings {
-		if v := bindingVariable(b); v != "" {
-			named[v] = true
+	allNamed := make(map[string]bool)
+	for _, br := range q.Branches {
+		for _, part := range br.Parts {
+			for _, b := range part.Bindings {
+				if v := bindingVariable(b); v != "" {
+					allNamed[v] = true
+				}
+			}
 		}
 	}
-	resolves := func(v string) bool { return v != "" && named[v] }
 
-	for _, b := range q.Bindings {
-		eb, ok := b.(query.EdgeBinding)
-		if !ok {
-			continue
-		}
-		for _, ep := range []query.Endpoint{eb.Source(), eb.Target()} {
-			if ve, ok := ep.(query.VarEndpoint); ok && !resolves(ve.Variable()) {
-				rt.Fatalf("endpoint variable %q has no binding in %q", ve.Variable(), src)
+	for _, br := range q.Branches {
+		imported := make(map[string]bool) // names the prior part exported into this one
+		for _, part := range br.Parts {
+			named := make(map[string]bool)
+			for k := range imported {
+				named[k] = true
 			}
-		}
-	}
-	for _, r := range q.Returns {
-		switch v := r.Value.(type) {
-		case query.RefProjection:
-			if !resolves(v.Ref().Variable) {
-				rt.Fatalf("return ref %q has no binding in %q", v.Ref().Variable, src)
-			}
-		case query.LiteralProjection:
-			// A literal traces back to no binding — referential check is N/A.
-		case query.FuncProjection:
-			for _, ref := range v.Refs() {
-				if !resolves(ref.Variable) {
-					rt.Fatalf("func projection ref %q has no binding in %q", ref.Variable, src)
+			for _, b := range part.Bindings {
+				if v := bindingVariable(b); v != "" {
+					named[v] = true
 				}
 			}
-		case query.AggregateProjection:
-			for _, ref := range v.Refs() {
-				if !resolves(ref.Variable) {
-					rt.Fatalf("aggregate projection ref %q has no binding in %q", ref.Variable, src)
+			resolves := func(v string) bool { return v != "" && named[v] }
+
+			for _, b := range part.Bindings {
+				eb, ok := b.(query.EdgeBinding)
+				if !ok {
+					continue
+				}
+				for _, ep := range []query.Endpoint{eb.Source(), eb.Target()} {
+					if ve, ok := ep.(query.VarEndpoint); ok && !resolves(ve.Variable()) {
+						rt.Fatalf("endpoint variable %q has no binding in %q", ve.Variable(), src)
+					}
 				}
 			}
-		default:
-			rt.Fatalf("return item has unknown Projection variant %T in %q", r.Value, src)
+			for _, r := range part.Returns {
+				switch v := r.Value.(type) {
+				case query.RefProjection:
+					if !resolves(v.Ref().Variable) {
+						rt.Fatalf("return ref %q has no binding in %q", v.Ref().Variable, src)
+					}
+				case query.LiteralProjection:
+					// A literal traces back to no binding — referential check is N/A.
+				case query.FuncProjection:
+					for _, ref := range v.Refs() {
+						if !resolves(ref.Variable) {
+							rt.Fatalf("func projection ref %q has no binding in %q", ref.Variable, src)
+						}
+					}
+				case query.AggregateProjection:
+					for _, ref := range v.Refs() {
+						if !resolves(ref.Variable) {
+							rt.Fatalf("aggregate projection ref %q has no binding in %q", ref.Variable, src)
+						}
+					}
+				default:
+					rt.Fatalf("return item has unknown Projection variant %T in %q", r.Value, src)
+				}
+			}
+
+			// Compute the set this part exports into the next: under WITH *, the
+			// whole in-scope set carries forward; otherwise each return item's Name.
+			next := make(map[string]bool)
+			if part.ReturnsAll {
+				for k := range named {
+					next[k] = true
+				}
+			} else {
+				for _, r := range part.Returns {
+					next[r.Name] = true
+				}
+			}
+			imported = next
 		}
 	}
+
 	for _, p := range q.Parameters {
 		for _, u := range p.Uses {
 			switch use := u.(type) {
 			case query.PropertyUse:
-				if !resolves(use.Ref().Variable) {
+				if !allNamed[use.Ref().Variable] {
 					rt.Fatalf("parameter %q use ref %q has no binding in %q", p.Name, use.Ref().Variable, src)
 				}
 			case query.ClauseSlotUse:
@@ -602,17 +744,24 @@ func assertReferentialIntegrity(rt *rapid.T, q query.Query, src string) {
 	}
 }
 
+// assertNamedBindingsUnique checks named bindings are unique within each part
+// (uniqueness is per-part scope, not query-wide — a name re-MATCHed in a later
+// part is a fresh binding there).
 func assertNamedBindingsUnique(rt *rapid.T, q query.Query, src string) {
-	seen := make(map[string]bool)
-	for _, b := range q.Bindings {
-		v := bindingVariable(b)
-		if v == "" {
-			continue // anonymous edges are each their own binding
+	for _, br := range q.Branches {
+		for _, part := range br.Parts {
+			seen := make(map[string]bool)
+			for _, b := range part.Bindings {
+				v := bindingVariable(b)
+				if v == "" {
+					continue // anonymous edges are each their own binding
+				}
+				if seen[v] {
+					rt.Fatalf("named binding %q appears more than once in a part in %q", v, src)
+				}
+				seen[v] = true
+			}
 		}
-		if seen[v] {
-			rt.Fatalf("named binding %q appears more than once in %q", v, src)
-		}
-		seen[v] = true
 	}
 }
 

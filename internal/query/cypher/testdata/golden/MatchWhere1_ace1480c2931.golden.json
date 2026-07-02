@@ -1,33 +1,53 @@
 {
-  "Bindings": [
+  "branches": [
     {
-      "kind": "node",
-      "variable": "a",
-      "labels": null,
-      "nullable": false
-    },
-    {
-      "kind": "edge",
-      "variable": "r",
-      "labels": null,
-      "source": {
-        "kind": "var",
-        "variable": "a"
-      },
-      "target": {
-        "kind": "var",
-        "variable": "b"
-      },
-      "nullable": false
-    },
-    {
-      "kind": "node",
-      "variable": "b",
-      "labels": null,
-      "nullable": false
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "r",
+              "labels": null,
+              "source": {
+                "kind": "var",
+                "variable": "a"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "b"
+              },
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "b",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "r",
+              "value": {
+                "kind": "ref",
+                "variable": "r",
+                "property": ""
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
     }
   ],
-  "Parameters": [
+  "combinators": null,
+  "parameters": [
     {
       "Name": "param",
       "Uses": [
@@ -38,16 +58,5 @@
         }
       ]
     }
-  ],
-  "Returns": [
-    {
-      "name": "r",
-      "value": {
-        "kind": "ref",
-        "variable": "r",
-        "property": ""
-      }
-    }
-  ],
-  "returnsAll": false
+  ]
 }
