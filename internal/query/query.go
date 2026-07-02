@@ -26,7 +26,7 @@ type Query struct {
 	// Branches are the query's UNION-joined result arms, one per oC_SingleQuery,
 	// in source order. A query without UNION is one branch; N UNIONs make N+1
 	// branches combined left to right. Always at least one branch.
-	Branches []QueryBranch `json:"branches"`
+	Branches []Branch `json:"branches"`
 
 	// Combinators records how each branch after the first was joined to its
 	// predecessor: the i-th entry is how branch i+1 joins branch i (UNION distinct
@@ -40,24 +40,24 @@ type Query struct {
 	Parameters []Parameter `json:"parameters"`
 }
 
-// QueryBranch is one UNION-joined arm of a query — one oC_SingleQuery — an
-// ordered chain of one or more QueryParts. Non-final parts each end in a WITH;
+// Branch is one UNION-joined arm of a query — one oC_SingleQuery — an
+// ordered chain of one or more Parts. Non-final parts each end in a WITH;
 // the final part ends in a RETURN (positional — no per-part terminal flag). It
 // is a product type: exported fields, the builder maintains the invariant (at
 // least one part), no smart constructor — mirroring Query (Stage-4 spec §3).
-type QueryBranch struct { //nolint:revive // the stutter-fixing rename to query.Branch is a model API change deferred to the freeze (gqlc-cta)
+type Branch struct {
 	// Parts are the branch's WITH-bounded scope segments, in source order. At
 	// least one (the final RETURN part).
-	Parts []QueryPart `json:"parts"`
+	Parts []Part `json:"parts"`
 }
 
-// QueryPart is one WITH-bounded scope segment of a branch — the Stage-0..3 flat
+// Part is one WITH-bounded scope segment of a branch — the Stage-0..3 flat
 // scope, now scoped to one part. A non-final part's Returns/ReturnsAll carry its
 // WITH projection (a WITH item is a RETURN item — same oC_ProjectionBody, same
 // Stage-3 Projection sum); the final part's carry the branch's result columns.
 // It is a product type: exported fields, the builder maintains its invariants (a
 // part's Returns is empty iff ReturnsAll), no smart constructor — mirroring Query.
-type QueryPart struct { //nolint:revive // the stutter-fixing rename to query.Part is a model API change deferred to the freeze (gqlc-cta)
+type Part struct {
 	// Bindings are the entities this part's own MATCH clauses introduce, a
 	// NodeBinding or an EdgeBinding each. Among a part's named bindings the
 	// variable is unique; Returns and edge endpoints reference them by it (or a
