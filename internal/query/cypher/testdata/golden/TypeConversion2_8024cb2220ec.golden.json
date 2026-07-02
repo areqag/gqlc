@@ -1,0 +1,50 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "p",
+              "labels": [
+                "Person"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": null,
+          "returnsAll": true
+        },
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "name",
+              "value": {
+                "kind": "func",
+                "refs": [
+                  {
+                    "variable": "n",
+                    "property": "name"
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

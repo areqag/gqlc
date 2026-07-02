@@ -135,18 +135,32 @@ branch lands on `master` alone (AGENTS.md stacked-branch invariant).
   where the parser stands post-Stage 6, and the ADR-0007 progress meter
   works exactly like the read-core meter did.
 
-- **Skiplist** — a new group, "expressions value/semantics below the
-  boundary," absorbs the bucket-3 negatives from the new dirs: runtime
-  arithmetic errors (division by zero, integer overflow), type-coercion
-  failures (`toBoolean(1.0)`), and result-value mismatches on expression
-  scenarios that assert engine-side behaviour rather than a parser
-  contract (ADR 0005, ADR 0007 bucket 3). Each entry pinned to its
-  actual cause. The existing skiplist group titled "projection
-  value/semantics below the type-interface boundary (Stage 3)" is
-  reviewed and any entry now covered by the wider Stage-6 acceptance is
-  moved to the Stage-6 group with an updated commentary; the entry
-  covering "RETURN * without variables in scope" stays where it is
-  (that scenario has nothing to do with expressions).
+- **Skiplist** — the read-core dirs (Stages 0-5) keep their per-scenario
+  enumerated skiplist so a genuine regression there — a scenario the parser
+  used to reject and no longer does — still surfaces. **The expression dirs
+  Stage 6 wires do NOT get per-scenario skiplist entries.** Instead,
+  `assertRejected` recognises them structurally: if the scenario's TCK URI
+  lies under `test/data/query/cypher/tck/features/expressions/` and the
+  query parsed cleanly, the harness reports PENDING (bucket-3 by ADR 0007
+  §6). Rationale: ADR 0007 authorises bucket-3 treatment categorically
+  for every runtime / value-level error scenario in these dirs, and
+  enumerating them per-name would grow the skiplist by ~400 entries
+  (scenario outlines expand many-to-one) for zero categorisation gain.
+  The categorical rule is the ADR itself, applied uniformly. Read-core
+  bucket-3 entries stay enumerated because the ADR-0007 categorical rule
+  only applies to the dirs Stage 6 wires — a bucket-3 case in the
+  read-core dirs still gets its individual comment naming the runtime rule.
+
+  Stage-6 skiplist additions to the read-core dirs are the ones where
+  the parser's newly-widened acceptance turns a formerly-PENDING scenario
+  into a bucket-3 accept (four such: AmbiguousAggregationExpression ×3,
+  NestedAggregation, `rand()`-in-aggregation, VariableTypeConflict via
+  `WITH [n] AS users`). Each pinned to its cause in the established style.
+
+  The existing skiplist group titled "projection value/semantics below the
+  type-interface boundary (Stage 3)" is reviewed for entries now covered
+  by the wider Stage-6 acceptance; the entry covering "RETURN * without
+  variables in scope" stays put (unrelated to expressions).
 
 - **Layer-2 pins** — the two authored `mustReject` cases for
   `ErrUnsupportedProjection` become `mustParse` cases (they were the

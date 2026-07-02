@@ -1,0 +1,43 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "list",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "list\u003cint\u003e"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "r",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "list",
+                    "property": ""
+                  }
+                ],
+                "type": "list\u003cint\u003e"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

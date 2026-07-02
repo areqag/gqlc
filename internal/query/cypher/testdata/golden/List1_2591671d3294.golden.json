@@ -1,0 +1,43 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "expr",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "list\u003cstring\u003e"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "value",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "expr",
+                    "property": ""
+                  }
+                ],
+                "type": "string"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}
