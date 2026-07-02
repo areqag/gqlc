@@ -47,5 +47,26 @@
     }
   ],
   "combinators": null,
-  "parameters": null
+  "parameters": [
+    {
+      "name": "expr",
+      "uses": [
+        {
+          "kind": "expr",
+          "enclosingType": "unknown",
+          "position": "projection"
+        }
+      ]
+    },
+    {
+      "name": "idx",
+      "uses": [
+        {
+          "kind": "expr",
+          "enclosingType": "unknown",
+          "position": "projection"
+        }
+      ]
+    }
+  ]
 }

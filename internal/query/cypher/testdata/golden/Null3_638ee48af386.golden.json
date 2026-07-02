@@ -20,5 +20,26 @@
     }
   ],
   "combinators": null,
-  "parameters": null
+  "parameters": [
+    {
+      "name": "elt",
+      "uses": [
+        {
+          "kind": "expr",
+          "enclosingType": "bool",
+          "position": "projection"
+        }
+      ]
+    },
+    {
+      "name": "coll",
+      "uses": [
+        {
+          "kind": "expr",
+          "enclosingType": "bool",
+          "position": "projection"
+        }
+      ]
+    }
+  ]
 }

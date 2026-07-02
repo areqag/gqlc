@@ -37,5 +37,16 @@
     }
   ],
   "combinators": null,
-  "parameters": null
+  "parameters": [
+    {
+      "name": "age",
+      "uses": [
+        {
+          "kind": "expr",
+          "enclosingType": "unknown",
+          "position": "projection"
+        }
+      ]
+    }
+  ]
 }
