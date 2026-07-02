@@ -148,7 +148,16 @@ func (l *listener) collectPatternElement(e gen.IOC_PatternElementContext, option
 // merged); an anonymous node is not a binding (C3) — its labels live inline on
 // the edge endpoint, and a standalone anonymous node is a pure filter, ignored.
 // Inside a named path (pathMemberSink is non-nil), the node also contributes
-// a member entry so the path's Members list is shape-faithful.
+// a member entry so the path's Members list is shape-faithful. Stage 9: when
+// the variable is already bound in the current part as an UNWIND binding, the
+// MATCH occurrence is a constraint on that existing name (the UNWIND element
+// type may itself be a node — a `list<node>` unwound yields node-typed values,
+// so MATCH-reuse is legitimate) — the parser does not emit a fresh NodeBinding;
+// the endpoint / path-member is recorded against the existing binding via the
+// shared name. A path binding deliberately does NOT trigger the skip: a named
+// path reused as a node/edge pattern is a compile-time kind conflict per
+// openCypher (a path is never a node/edge), so the existing buildPart
+// pathBindings-vs-byVar collision check must fire.
 func (l *listener) collectNode(n gen.IOC_NodePatternContext, optional bool) {
 	if n == nil {
 		return
@@ -158,10 +167,32 @@ func (l *listener) collectNode(n gen.IOC_NodePatternContext, optional bool) {
 		variable = v.GetText()
 	}
 	l.mineInlineMap(variable, n.OC_Properties())
-	if variable != "" {
+	if variable != "" && !l.nameBoundAsUnwind(variable) {
 		l.mergeBinding(variable, graph.Node, nodeLabels(n.OC_NodeLabels()), nil, nil, optional, false, nil)
 	}
 	l.recordPathNode(variable)
+}
+
+// nameBoundAsUnwind reports whether a variable is already bound in the
+// current part as an UNWIND binding. Reuse of such a name inside a MATCH
+// pattern is a constraint on the existing binding — the UNWIND element
+// type may itself be a node (e.g. `WITH collect(n) AS ns UNWIND ns AS
+// m`), so MATCH's pattern-position use is a legitimate constraint the
+// parser accepts; a kind mismatch at runtime (an UNWIND'd scalar used
+// as a node pattern) is a value-level rule below the boundary
+// (ADR 0005), raised by the engine on the original text.
+//
+// Path bindings deliberately do NOT trigger this skip: a named-path
+// variable reused as a node/edge pattern is a **compile-time** kind
+// conflict per openCypher (a path is never a node/edge), so the
+// existing buildPart pathBindings-vs-byVar collision check must fire.
+func (l *listener) nameBoundAsUnwind(variable string) bool {
+	for _, ub := range l.curPart.unwindBindings {
+		if ub.Variable() == variable {
+			return true
+		}
+	}
+	return false
 }
 
 // collectEdge records a relationship between prev and next as an edge binding.
@@ -224,7 +255,9 @@ func (l *listener) collectEdge(r gen.IOC_RelationshipPatternContext, prev, next 
 		l.recordPathEdge("")
 		return
 	}
-	l.mergeBinding(variable, graph.Edge, labels, source, target, optional, !directed, hops)
+	if !l.nameBoundAsUnwind(variable) {
+		l.mergeBinding(variable, graph.Edge, labels, source, target, optional, !directed, hops)
+	}
 	l.recordPathEdge(variable)
 }
 

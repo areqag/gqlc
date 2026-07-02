@@ -1,0 +1,64 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "xs",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "list\u003cint\u003e"
+              }
+            },
+            {
+              "name": "ys",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "list\u003cint\u003e"
+              }
+            },
+            {
+              "name": "zs",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "list\u003cint\u003e"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": [
+            {
+              "kind": "unwind",
+              "variable": "x",
+              "elemType": "int",
+              "nullable": false
+            },
+            {
+              "kind": "unwind",
+              "variable": "y",
+              "elemType": "int",
+              "nullable": false
+            },
+            {
+              "kind": "unwind",
+              "variable": "z",
+              "elemType": "int",
+              "nullable": false
+            }
+          ],
+          "returns": null,
+          "returnsAll": true
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

@@ -1,0 +1,47 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "unwind",
+              "variable": "strings",
+              "elemType": "string",
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "strings",
+              "value": {
+                "kind": "ref",
+                "variable": "strings",
+                "property": "",
+                "type": "string"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "strings",
+              "value": {
+                "kind": "ref",
+                "variable": "strings",
+                "property": "",
+                "type": "string"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

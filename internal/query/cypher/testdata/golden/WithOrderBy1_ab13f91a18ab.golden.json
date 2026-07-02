@@ -1,0 +1,47 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "unwind",
+              "variable": "localdatetimes",
+              "elemType": "localdatetime",
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "localdatetimes",
+              "value": {
+                "kind": "ref",
+                "variable": "localdatetimes",
+                "property": "",
+                "type": "localdatetime"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "localdatetimes",
+              "value": {
+                "kind": "ref",
+                "variable": "localdatetimes",
+                "property": "",
+                "type": "localdatetime"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}
