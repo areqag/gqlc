@@ -42,15 +42,17 @@ func (l *listener) collectProjection(body gen.IOC_ProjectionBodyContext) {
 		}
 	}
 
-	// ORDER BY / SKIP / LIMIT are accept-and-ignored, but a parameter in any of
-	// them would be silently dropped from the model — a type-interface change — so
-	// it is rejected. (No verbatim TCK read-core query reaches the ORDER BY case:
-	// the TCK's ORDER-BY-parameter queries all reject earlier on an aggregation
-	// projection or a WITH clause. The guard is correct-by-construction, just not
-	// corpus-exercised at Stage 0.)
+	// ORDER BY is accept-and-ignored at the clause-structure level (its sort
+	// keys do not enter the model — sort-key structure is below the
+	// type-interface boundary, ADR 0003), but a parameter under a sort key
+	// would be silently dropped if we did not record its use — a type-interface
+	// change. Stage 9 registers every ORDER BY parameter as an
+	// ExprUse{TypeUnknown, ExprInProjection} via the Stage-6 typer so no
+	// parameter is silently dropped. savedRefs is snapshotted around the walk
+	// so the sort key's touched bindings do not enter the part's ref list.
 	if o := body.OC_Order(); o != nil {
 		for _, item := range o.AllOC_SortItem() {
-			l.rejectClauseParameter(item.OC_Expression(), "ORDER BY")
+			l.mineSortItemParameters(item.OC_Expression())
 			if l.err != nil {
 				return
 			}
@@ -61,6 +63,90 @@ func (l *listener) collectProjection(body gen.IOC_ProjectionBodyContext) {
 	}
 	if lim := body.OC_Limit(); lim != nil {
 		l.mineClauseSlotParameter(lim.OC_Expression(), query.ClauseSlotLimit)
+	}
+}
+
+// collectUnwind lowers an UNWIND clause into the current part as an
+// UnwindBinding (Stage 9 spec §1.3, §4.1). The AS variable enters the
+// part's scope; the source expression is typed via the Stage-6 typer,
+// and its element type (list<T>.Element(), else TypeUnknown) becomes
+// the binding's ElementType. Every parameter under the source expression
+// records an ExprUse{sourceType, ExprInProjection} so no parameter is
+// silently dropped. The source expression's touched refs enter the
+// part's refs list so build()'s referential-integrity sweep covers them.
+// A same-name entity binding in the same part is a kind conflict
+// (byVar collision).
+func (l *listener) collectUnwind(c gen.IOC_UnwindContext) {
+	if c == nil {
+		return
+	}
+	variable := ""
+	if v := c.OC_Variable(); v != nil {
+		variable = v.GetText()
+	}
+	// Grammatical guarantee: an UNWIND without `AS name` never lexes, so
+	// variable is always non-empty here. Guard defensively.
+	if variable == "" {
+		return
+	}
+	if _, clash := l.curPart.byVar[variable]; clash {
+		l.fail(fmt.Errorf("%w: %q", ErrVariableKindConflict, variable))
+		return
+	}
+	sourceType, refs, params := l.typeExpressionMining(c.OC_Expression())
+	for _, ref := range refs {
+		l.curPart.refs = append(l.curPart.refs, varRef{name: ref.Variable})
+	}
+	for _, p := range params {
+		name := parameterName(p)
+		if name == "" {
+			continue
+		}
+		l.addParameterUse(name, p, query.NewExprUse(sourceType, query.ExprInProjection))
+	}
+	elemType := unwindElementType(sourceType)
+	ub, err := query.NewUnwindBinding(variable, elemType)
+	if err != nil {
+		l.fail(err)
+		return
+	}
+	l.curPart.unwindBindings = append(l.curPart.unwindBindings, ub)
+}
+
+// unwindElementType extracts the element type from an UNWIND source
+// expression's Stage-6 result type: a list<T> yields T; every other
+// shape yields TypeUnknown. A wrong concrete element type would be
+// strictly worse than an honest TypeUnknown the resolver can upgrade
+// from the schema — the Stage-6 posture (spec §1.3, §8).
+func unwindElementType(sourceType query.Type) query.Type {
+	if list, ok := sourceType.(query.TypeList); ok {
+		return list.Element()
+	}
+	return query.TypeUnknown{}
+}
+
+// mineSortItemParameters walks an ORDER BY sort key via the Stage-6
+// rich-expression typer and records every parameter it touches as an
+// ExprUse{TypeUnknown, ExprInProjection}. The enclosing type is
+// TypeUnknown because the parameter's role is a sort-key contributor,
+// not a computed value — recording the sort key's computed type would
+// be incidental to the parameter's role; TypeUnknown is honest and
+// the resolver upgrades from the schema post-freeze (Stage 9 spec
+// §4.2). savedRefs is snapshotted so the sort key's touched bindings
+// stay out of the part's refs list.
+func (l *listener) mineSortItemParameters(e gen.IOC_ExpressionContext) {
+	if e == nil {
+		return
+	}
+	savedRefs := l.curPart.refs
+	_, _, params := l.typeExpressionMining(e)
+	l.curPart.refs = savedRefs
+	for _, p := range params {
+		name := parameterName(p)
+		if name == "" {
+			continue
+		}
+		l.addParameterUse(name, p, query.NewExprUse(query.TypeUnknown{}, query.ExprInProjection))
 	}
 }
 
@@ -149,12 +235,14 @@ func (l *listener) classifyProjection(e gen.IOC_ExpressionContext) (query.Projec
 // TypeEdge when the ref names a whole entity binding in the current part,
 // TypeList(TypeEdge) for a variable-length edge binding (Stage 8; the
 // projected value is a list of edges rather than a single edge), TypePath
-// when the ref names a path binding (Stage 8), TypeUnknown for a property
-// lookup (property typing is a schema concern per ADR 0003), and the imported
-// alias's type when the name comes from a prior part's WITH. The lookup is
-// per-part: the current part's own entity bindings first, then path bindings
-// (identified by name in the part's pathBindings slice), then the imported
-// map WITH exported into this part.
+// when the ref names a path binding (Stage 8), the recorded element type
+// when the ref names an UnwindBinding (Stage 9; the projected value is
+// one element of the source list), TypeUnknown for a property lookup
+// (property typing is a schema concern per ADR 0003), and the imported
+// alias's type when the name comes from a prior part's WITH. The lookup
+// is per-part: the current part's own entity bindings first, then path
+// bindings, then unwind bindings, then the imported map WITH exported
+// into this part.
 func (l *listener) refType(r query.Ref) query.Type {
 	if r.Property != "" {
 		return query.TypeUnknown{}
@@ -174,6 +262,11 @@ func (l *listener) refType(r query.Ref) query.Type {
 	for _, pb := range l.curPart.pathBindings {
 		if pb.Variable() == r.Variable {
 			return query.TypePath{}
+		}
+	}
+	for _, ub := range l.curPart.unwindBindings {
+		if ub.Variable() == r.Variable {
+			return ub.ElementType()
 		}
 	}
 	if t, ok := l.curPart.imported[r.Variable]; ok {
@@ -209,19 +302,6 @@ func (l *listener) classifyFunction(fi gen.IOC_FunctionInvocationContext) (query
 		resultType = t
 	}
 	return query.NewFuncProjection(refs, resultType), true
-}
-
-// rejectClauseParameter fails if the ORDER BY expression contains a parameter:
-// the parameter would be dropped from the model rather than bound to a slot,
-// so it is unsupported (Cluster D). SKIP and LIMIT have their own miner
-// (mineClauseSlotParameter) that accepts a bare $p as a ClauseSlotUse.
-func (l *listener) rejectClauseParameter(e gen.IOC_ExpressionContext, clause string) {
-	if e == nil {
-		return
-	}
-	if len(findParameters(e)) > 0 {
-		l.fail(fmt.Errorf("%w: %s $param", ErrUnsupportedParameter, clause))
-	}
 }
 
 // mineClauseSlotParameter mines a bare $p atom from a SKIP or LIMIT expression,

@@ -1020,6 +1020,115 @@ var mustParse = map[string]struct {
 			},
 		}),
 	},
+	// Stage 9 — canonical UNWIND of a scalar list. Unwind1 [1] verbatim.
+	// The UnwindBinding carries element type TypeInt (the source list is
+	// list<int>); the RETURN item's type is TypeInt (refType reads the
+	// UnwindBinding's ElementType).
+	"unwind scalar list": {
+		src: "UNWIND [1, 2, 3] AS x\nRETURN x",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewUnwindBinding("x", query.TypeInt{})),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "x", Value: query.NewRefProjection(query.Ref{Variable: "x"}, query.TypeInt{})},
+			},
+		}),
+	},
+	// Stage 9 — UNWIND of a range() function. Unwind1 [2] verbatim.
+	// range() is a bare function call: FuncProjection with TypeUnknown
+	// return type at Stage 6 (function identity below the boundary,
+	// ADR 0005). The source expression types as TypeUnknown, so the
+	// element type collapses to TypeUnknown — the honest posture the
+	// resolver upgrades from the schema.
+	"unwind range function": {
+		src: "UNWIND range(1, 3) AS x\nRETURN x",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewUnwindBinding("x", query.TypeUnknown{})),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "x", Value: query.NewRefProjection(query.Ref{Variable: "x"}, query.TypeUnknown{})},
+			},
+		}),
+	},
+	// Stage 9 — UNWIND of an empty list. Unwind1 [8] verbatim. Empty
+	// list literal types as list<unknown> at Stage 6 (mixed / empty
+	// element unification), so the element type is TypeUnknown. Runtime
+	// yields zero rows — a cardinality fact below the boundary.
+	"unwind empty list": {
+		src: "UNWIND [] AS empty\nRETURN empty",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewUnwindBinding("empty", query.TypeUnknown{})),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "empty", Value: query.NewRefProjection(query.Ref{Variable: "empty"}, query.TypeUnknown{})},
+			},
+		}),
+	},
+	// Stage 9 — UNWIND of the null literal. Unwind1 [9] verbatim. null is
+	// not a list; the element type collapses to TypeUnknown (wrong
+	// concrete type would be strictly worse). Runtime yields zero rows.
+	"unwind null": {
+		src: "UNWIND null AS nil\nRETURN nil",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewUnwindBinding("nil", query.TypeUnknown{})),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "nil", Value: query.NewRefProjection(query.Ref{Variable: "nil"}, query.TypeUnknown{})},
+			},
+		}),
+	},
+	// Stage 9 — UNWIND of a list of lists (double unwind, Unwind1 [7]'s
+	// first UNWIND). WITH exports `lol` as list<list<int>>, so the
+	// UnwindBinding for `x` records element type list<int>. Nested
+	// element types compose through TypeList.
+	"unwind list of lists": {
+		src: "WITH [[1, 2, 3], [4, 5, 6]] AS lol\nUNWIND lol AS x\nRETURN x",
+		want: query.Query{
+			Branches: []query.Branch{{Parts: []query.Part{
+				{
+					Returns: []query.ReturnItem{
+						{Name: "lol", Value: query.NewExprProjection(nil, query.NewTypeList(query.NewTypeList(query.TypeInt{})))},
+					},
+				},
+				{
+					Bindings: []query.Binding{
+						must(query.NewUnwindBinding("x", query.NewTypeList(query.TypeInt{}))),
+					},
+					Returns: []query.ReturnItem{
+						{Name: "x", Value: query.NewRefProjection(query.Ref{Variable: "x"}, query.NewTypeList(query.TypeInt{}))},
+					},
+				},
+			}}},
+		},
+	},
+	// Stage 9 — RETURN ... ORDER BY $p. Retires the last
+	// rejectClauseParameter fail-site (an ORDER BY parameter was
+	// rejected under Stages 0–8). Under Stage 9 the parameter is
+	// recorded as an ExprUse against a TypeUnknown enclosing type
+	// (a sort-key contributor's role does not commit to a computed
+	// type; the resolver upgrades from the schema post-freeze) with
+	// ExprInProjection position (ORDER BY sits over a projection
+	// column). The RETURN item itself is a bare RefProjection.
+	"return order by param": {
+		src: "MATCH (n)\nRETURN n\nORDER BY $p",
+		want: query.Query{
+			Branches: []query.Branch{{Parts: []query.Part{{
+				Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+				Returns: []query.ReturnItem{
+					{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+				},
+			}}}},
+			Parameters: []query.Parameter{
+				{Name: "p", Uses: []query.Use{
+					query.NewExprUse(query.TypeUnknown{}, query.ExprInProjection),
+				}},
+			},
+		},
+	},
 }
 
 // intPtr is a small helper to take the address of an int literal so
