@@ -254,15 +254,18 @@ var skiplist = map[string]bool{
 	"[14] Fail when filtering path with property predicate": true,
 
 	// MATCH (n) RETURN (n)-[]->(): a pattern predicate used at RETURN /
-	// WITH projection position. The TCK cites SyntaxError:UnexpectedSyntax
-	// but the rule is semantic (pattern predicates are only legal in WHERE
-	// / EXISTS positions, not as scalar expressions). Stage 6's typeAtom
-	// accepts OC_PatternPredicate as an OC_Atom of TypeUnknown for its
-	// role inside a WHERE, so the same atom in projection position also
-	// parses. Detecting the position-specific misuse is downstream
-	// context-sensitive work (Stage 11's predicate expressions bead). The
-	// engine's grammar rejects the shape at parse time on the original
-	// text (ADR 0005).
+	// WITH projection position. The TCK cites SyntaxError:UnexpectedSyntax,
+	// but per ADR 0007 §7 this is a **bucket-1 deferral**, not a bucket-3
+	// runtime rule: the misuse is a context-sensitive parse rule (a
+	// pattern-predicate atom is legal inside WHERE / EXISTS but not as a
+	// scalar projection). isBucketThreeError deliberately excludes
+	// UnexpectedSyntax, so the acceptance harness would otherwise fail
+	// these two scenarios; the skiplist entry defers them to the
+	// Stage 11 projection-position pattern-predicates work
+	// (follow-up bead: projection-position pattern predicates, Stage 11 scope).
+	// Stage 6's typeAtom already accepts OC_PatternPredicate for its role
+	// inside a WHERE, so the same atom in projection position also parses;
+	// the position-specific misuse check is what Stage 11 will add.
 	"[22] Fail on using pattern in RETURN projection": true,
 	"[23] Fail on using pattern in WITH projection":   true,
 }

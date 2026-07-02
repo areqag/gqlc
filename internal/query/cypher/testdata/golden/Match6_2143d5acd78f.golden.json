@@ -14,7 +14,10 @@
               "kind": "path",
               "variable": "p",
               "members": [
-                "a"
+                {
+                  "kind": "node",
+                  "variable": "a"
+                }
               ],
               "nullable": false
             }

@@ -76,10 +76,30 @@
               "kind": "path",
               "variable": "p",
               "members": [
-                "n",
-                "__anon_edge_0",
-                "__anon_edge_1",
-                "m"
+                {
+                  "kind": "node",
+                  "variable": "n"
+                },
+                {
+                  "kind": "anon-edge"
+                },
+                {
+                  "kind": "anon-node"
+                },
+                {
+                  "kind": "edge",
+                  "variable": "r"
+                },
+                {
+                  "kind": "anon-node"
+                },
+                {
+                  "kind": "anon-edge"
+                },
+                {
+                  "kind": "node",
+                  "variable": "m"
+                }
               ],
               "nullable": false
             }

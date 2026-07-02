@@ -58,11 +58,26 @@
               "kind": "path",
               "variable": "p",
               "members": [
-                "a",
-                "rel1",
-                "b",
-                "rel2",
-                "c"
+                {
+                  "kind": "node",
+                  "variable": "a"
+                },
+                {
+                  "kind": "edge",
+                  "variable": "rel1"
+                },
+                {
+                  "kind": "node",
+                  "variable": "b"
+                },
+                {
+                  "kind": "edge",
+                  "variable": "rel2"
+                },
+                {
+                  "kind": "node",
+                  "variable": "c"
+                }
               ],
               "nullable": false
             }

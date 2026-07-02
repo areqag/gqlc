@@ -36,7 +36,17 @@
               "kind": "path",
               "variable": "p",
               "members": [
-                "__anon_edge_0"
+                {
+                  "kind": "node",
+                  "variable": "a"
+                },
+                {
+                  "kind": "anon-edge"
+                },
+                {
+                  "kind": "node",
+                  "variable": "x"
+                }
               ],
               "nullable": false
             }
