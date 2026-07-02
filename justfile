@@ -1,7 +1,9 @@
-# single source of truth for the linter toolchain version; CI reads it via
-# `just --evaluate golangci_version`, so local and CI can never drift. Bump
-# deliberately, then run `just install-golangci && just lint`.
+# single source of truth for the linter toolchain version. Every lint/fmt
+# recipe self-heals: it verifies the pinned version in .bin/ and reinstalls on
+# mismatch, so a version bump here is a one-line change and nobody ever
+# installs or upgrades the linter by hand.
 golangci_version := "v2.12.2"
+golangci := justfile_directory() + "/.bin/golangci-lint"
 actionlint_version := "v1.7.7"
 
 # Configures local git settings required after a fresh clone.
@@ -10,27 +12,38 @@ init:
     git config core.hooksPath .githooks
     @echo "git hooks activated (core.hooksPath = .githooks)"
 
-# installs the pinned golangci-lint binary into GOPATH/bin (~3s; official
-# install script, release binary — not built from source)
-install-golangci:
-    curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh \
-        | sh -s -- -b "$(go env GOPATH)/bin" {{golangci_version}}
+# provisions the pinned golangci-lint into the gitignored .bin/ when missing
+# or version-mismatched (~3s; official release binary — golangci-lint does not
+# support builds from source). The happy path is a ~30ms version check, cheap
+# enough to run before every lint/fmt invocation, in hooks included.
+[private]
+ensure-golangci:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    want="{{golangci_version}}"
+    if [ "$({{quote(golangci)}} version --short 2>/dev/null || true)" = "${want#v}" ]; then
+        exit 0
+    fi
+    echo "provisioning golangci-lint $want into .bin/" >&2
+    curl --proto '=https' --tlsv1.2 -sSfL \
+        "https://raw.githubusercontent.com/golangci/golangci-lint/$want/install.sh" \
+        | sh -s -- -b {{quote(justfile_directory() + "/.bin")}} "$want"
 
 # full static analysis (.golangci.yml): linters + formatter diffs as issues
-lint:
-    golangci-lint run
+lint: ensure-golangci
+    {{golangci}} run
 
 # lints only lines changed since the given rev — the fast pre-push variant
-lint-new rev="origin/master":
-    golangci-lint run --new-from-rev {{rev}}
+lint-new rev="origin/master": ensure-golangci
+    {{golangci}} run --new-from-rev {{rev}}
 
 # rewrites formatting in place (gofumpt + gci, both bundled in golangci-lint)
-fmt:
-    golangci-lint fmt
+fmt: ensure-golangci
+    {{golangci}} fmt
 
 # formatting check without writing; fails with a diff when unformatted
-fmt-check:
-    golangci-lint fmt --diff
+fmt-check: ensure-golangci
+    {{golangci}} fmt --diff
 
 # runs the whole suite (unit, golden snapshots, godog) in one shot. Independent
 # of fetch-tck: the TCK is vendored, so there is no network at test time.

@@ -8,8 +8,10 @@ set -euo pipefail
 
 just test
 
-if command -v golangci-lint >/dev/null 2>&1; then
+# ensure-golangci self-heals the pinned binary in .bin/; it only fails when a
+# needed download is impossible (e.g. offline) — degrade to a warning then.
+if just ensure-golangci >/dev/null 2>&1; then
   just lint-new
 else
-  echo "WARN: golangci-lint not installed; skipping lint. Run: just install-golangci" >&2
+  echo "WARN: could not provision golangci-lint (offline?); skipping lint" >&2
 fi

@@ -19,14 +19,16 @@ fi
 
 # Formatting gate (gofumpt + gci via the pinned golangci-lint). Repo-wide on
 # purpose: simpler than staged-file plumbing, and `just fmt` fixes everything
-# it complains about. Degrades to a warning when the binary is missing.
-if command -v golangci-lint >/dev/null 2>&1; then
-  if ! golangci-lint fmt --diff >/dev/null 2>&1; then
+# it complains about. ensure-golangci self-heals the pinned binary in .bin/
+# (~30ms when healthy); it only fails when a needed download is impossible
+# (e.g. offline), and then we degrade to a warning rather than block commits.
+if just ensure-golangci >/dev/null 2>&1; then
+  if ! just fmt-check >/dev/null 2>&1; then
     echo "ERROR: unformatted Go files. Run: just fmt" >&2
     exit 1
   fi
 else
-  echo "WARN: golangci-lint not installed; skipping format check. Run: just install-golangci" >&2
+  echo "WARN: could not provision golangci-lint (offline?); skipping format check" >&2
 fi
 
 exit 0

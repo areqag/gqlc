@@ -13,13 +13,13 @@ The same guard is wired into Claude Code as a `PreToolUse` hook so AI agents are
 blocked at the conversation level too. The recipe is idempotent — running it
 multiple times is safe.
 
-Then run `just install-golangci` to install the pinned linter binary the hooks
-and CI both use.
-
 ## Development
 
 Everything runs through `just`, locally and in CI — same recipes, same pinned
-tool versions (see the `justfile`):
+tool versions (see the `justfile`). There is nothing else to install or keep
+up to date: every lint/fmt recipe first verifies the pinned golangci-lint in
+the gitignored `.bin/` and re-provisions it on any mismatch (~3s), so a
+version bump in the justfile propagates to every machine automatically.
 
 - `just test` — build + full suite (unit, golden snapshots, godog TCK)
 - `just lint` / `just lint-new` — full static analysis / only the diff vs master
