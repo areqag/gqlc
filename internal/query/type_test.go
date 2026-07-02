@@ -163,7 +163,8 @@ func TestLiteralProjectionType(t *testing.T) {
 
 // TestTypeMarshalJSON pins the wire encoding: every Type marshals as its
 // stringer value, quoted as a JSON string. The stringer is the single source
-// so drift is impossible.
+// so drift is impossible. Stage 7 extends the coverage to the six temporal
+// variants.
 func TestTypeMarshalJSON(t *testing.T) {
 	for _, tc := range []struct {
 		t    query.Type
@@ -178,8 +179,16 @@ func TestTypeMarshalJSON(t *testing.T) {
 		{query.TypeNode{}, `"node"`},
 		{query.TypeEdge{}, `"edge"`},
 		{query.TypeUnknown{}, `"unknown"`},
+		{query.TypeDate{}, `"date"`},
+		{query.TypeTime{}, `"time"`},
+		{query.TypeLocalTime{}, `"localtime"`},
+		{query.TypeDateTime{}, `"datetime"`},
+		{query.TypeLocalDateTime{}, `"localdatetime"`},
+		{query.TypeDuration{}, `"duration"`},
 		{query.NewTypeList(query.TypeInt{}), `"list<int>"`},
 		{query.NewTypeList(query.NewTypeList(query.TypeString{})), `"list<list<string>>"`},
+		{query.NewTypeList(query.TypeDate{}), `"list<date>"`},
+		{query.NewTypeList(query.TypeDuration{}), `"list<duration>"`},
 	} {
 		out, err := json.Marshal(tc.t)
 		require.NoError(t, err)
@@ -190,7 +199,7 @@ func TestTypeMarshalJSON(t *testing.T) {
 // TestScalarAndEntityTypeString pins the lowercase wire name for every
 // non-parameterised Type variant. String is the single source the JSON
 // discriminator derives from, so the serialised name can never drift from the
-// Go type.
+// Go type. Stage 7 extends the coverage to the six temporal variants.
 func TestScalarAndEntityTypeString(t *testing.T) {
 	for _, tc := range []struct {
 		t    query.Type
@@ -205,7 +214,25 @@ func TestScalarAndEntityTypeString(t *testing.T) {
 		{query.TypeNode{}, "node"},
 		{query.TypeEdge{}, "edge"},
 		{query.TypeUnknown{}, "unknown"},
+		{query.TypeDate{}, "date"},
+		{query.TypeTime{}, "time"},
+		{query.TypeLocalTime{}, "localtime"},
+		{query.TypeDateTime{}, "datetime"},
+		{query.TypeLocalDateTime{}, "localdatetime"},
+		{query.TypeDuration{}, "duration"},
 	} {
 		require.Equal(t, tc.want, tc.t.String())
 	}
+}
+
+// TestTemporalTypesSealed pins that each Stage-7 temporal variant satisfies
+// the sealed Type interface — the private isType() marker must be reachable,
+// so a foreign package cannot add a variant.
+func TestTemporalTypesSealed(t *testing.T) {
+	var _ query.Type = query.TypeDate{}
+	var _ query.Type = query.TypeTime{}
+	var _ query.Type = query.TypeLocalTime{}
+	var _ query.Type = query.TypeDateTime{}
+	var _ query.Type = query.TypeLocalDateTime{}
+	var _ query.Type = query.TypeDuration{}
 }
