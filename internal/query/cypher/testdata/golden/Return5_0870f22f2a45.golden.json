@@ -26,7 +26,7 @@
                     "property": "list"
                   }
                 ],
-                "type": "unknown"
+                "type": "int"
               }
             }
           ],

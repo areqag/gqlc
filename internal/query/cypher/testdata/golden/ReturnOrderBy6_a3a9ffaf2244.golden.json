@@ -23,6 +23,7 @@
                     "property": "age"
                   }
                 ],
+                "distinct": false,
                 "type": "unknown"
               }
             }

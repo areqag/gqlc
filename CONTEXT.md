@@ -329,7 +329,21 @@ A projection over an aggregating function (`count`, `sum`, `collect`, `min`,
 from an ordinary function call because it collapses matched rows into groups,
 changing result cardinality — the one function distinction the model carries
 pre-freeze. `count(*)` is the degenerate case: a count over rows that references
-no binding. Grouping-key semantics — which non-aggregate columns form the group —
+no binding. Also carries a **DISTINCT axis** (`count(DISTINCT x)`,
+`collect(DISTINCT y)`, …) as a single-bit annotation: DISTINCT deduplicates
+the aggregate's input before aggregation, so `count(DISTINCT a)` and
+`count(a)` are observably-different queries and the model preserves the
+distinction — a wire-emitted `distinct` field on `AggregateProjection`,
+analogous to `EdgeBinding.directed`. Result type follows a per-aggregate
+table computed against the operand's Stage-6 type: `count` types as `int`
+unconditionally; `collect(T)` types as `list<T>` (never bare `unknown` —
+the aggregate always yields a list, and `list<unknown>` is the honest
+posture when the element type is unknown); `sum` and `min`/`max` commit
+to a concrete numeric or scalar type when the operand's type commits,
+else `unknown`; `avg`, `stDev`/`stDevP`, and `percentile*` stay
+`unknown` (engine-dependent — a wrong concrete type is strictly worse
+than an honest `unknown` the resolver upgrades from the schema).
+Grouping-key semantics — which non-aggregate columns form the group —
 are a resolver concern, entangled with `WITH`, and out of scope until then.
 
 **Resolver**:
