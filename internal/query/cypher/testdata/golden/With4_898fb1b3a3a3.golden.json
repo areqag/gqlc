@@ -26,7 +26,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "r1",
-                "property": ""
+                "property": "",
+                "type": "edge"
               }
             }
           ],
@@ -40,7 +41,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "r2",
-                "property": ""
+                "property": "",
+                "type": "edge"
               }
             }
           ],

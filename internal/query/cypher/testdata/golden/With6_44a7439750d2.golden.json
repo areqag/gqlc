@@ -28,7 +28,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "r1",
-                "property": ""
+                "property": "",
+                "type": "edge"
               }
             },
             {
@@ -36,7 +37,8 @@
               "value": {
                 "kind": "aggregate",
                 "func": "count",
-                "refs": null
+                "refs": null,
+                "type": "unknown"
               }
             }
           ],
@@ -66,7 +68,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "r2",
-                "property": ""
+                "property": "",
+                "type": "edge"
               }
             }
           ],

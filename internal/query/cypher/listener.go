@@ -66,17 +66,20 @@ type rawBranch struct {
 // first-appearance order, with byVar indexing named ones for merge), its return
 // items / wildcard flag, and the variable refs build() must resolve against this
 // part's scope. byVar is per-part: a name re-MATCHed in a later part is a fresh
-// binding there (spec §3).
+// binding there (spec §3). imported records the exported name → Stage-6 result
+// type from the prior part's WITH; classifyProjection consults it when a ref
+// resolves against an alias rather than a binding.
 type rawPart struct {
 	bindings   []*rawBinding
 	byVar      map[string]int
 	returns    []query.ReturnItem
 	returnsAll bool
 	refs       []varRef
+	imported   map[string]query.Type
 }
 
 func newRawPart() *rawPart {
-	return &rawPart{byVar: map[string]int{}}
+	return &rawPart{byVar: map[string]int{}, imported: map[string]query.Type{}}
 }
 
 // rawBinding is a binding under construction: its variable, accumulated labels
@@ -188,7 +191,8 @@ func (l *listener) EnterOC_Match(c *gen.OC_MatchContext) {
 // RETURN item — they share oC_ProjectionBody), mines its optional WHERE for
 // parameters, then CLOSES the current part and OPENS a fresh empty part in the
 // current branch. The closed part's returns are the names it exports into the
-// next part's scope (spec §4).
+// next part's scope (spec §4); Stage 6 also carries their result types so the
+// next part's classifier can type a bare-alias RefProjection.
 func (l *listener) EnterOC_With(c *gen.OC_WithContext) {
 	l.collectProjection(c.OC_ProjectionBody())
 	if w := c.OC_Where(); w != nil {
@@ -197,9 +201,54 @@ func (l *listener) EnterOC_With(c *gen.OC_WithContext) {
 	if l.err != nil {
 		return
 	}
+	closed := l.curPart
 	part := newRawPart()
+	part.imported = exportedTypes(closed)
 	l.curBranch.parts = append(l.curBranch.parts, part)
 	l.curPart = part
+}
+
+// exportedTypes computes the name → Stage-6 result type map the closed part
+// exports into the next part's scope. WITH * (returnsAll) forwards every
+// in-scope name — bindings by their node/edge kind and any prior imports
+// verbatim — because the resolver expands * downstream (Stage 4 §4). Explicit
+// items export each return item's Name against its Value.Type().
+func exportedTypes(closed *rawPart) map[string]query.Type {
+	out := map[string]query.Type{}
+	if closed.returnsAll {
+		for name, t := range closed.imported {
+			out[name] = t
+		}
+		for _, rb := range closed.bindings {
+			if rb.variable == "" {
+				continue
+			}
+			switch rb.kind {
+			case graph.Node:
+				out[rb.variable] = query.TypeNode{}
+			case graph.Edge:
+				out[rb.variable] = query.TypeEdge{}
+			}
+		}
+		return out
+	}
+	for _, r := range closed.returns {
+		out[r.Name] = projectionType(r.Value)
+	}
+	return out
+}
+
+// projectionType reads a Projection's Stage-6 result type via the accessor each
+// variant now carries; a nil interface value (not reachable from a listener-built
+// projection) falls back to TypeUnknown.
+func projectionType(p query.Projection) query.Type {
+	type typed interface{ Type() query.Type }
+	if t, ok := p.(typed); ok {
+		if got := t.Type(); got != nil {
+			return got
+		}
+	}
+	return query.TypeUnknown{}
 }
 
 func (l *listener) EnterOC_Create(*gen.OC_CreateContext) {

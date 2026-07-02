@@ -6,6 +6,7 @@ import (
 	"github.com/antlr4-go/antlr/v4"
 
 	"github.com/areqag/gqlc/internal/grammar/cypher/gen"
+	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/query"
 )
 
@@ -103,21 +104,24 @@ func (l *listener) classifyProjection(e gen.IOC_ExpressionContext) (query.Projec
 			return nil, false
 		}
 		l.curPart.refs = append(l.curPart.refs, varRef{name: ref.Variable})
-		return query.NewRefProjection(ref), true
+		return query.NewRefProjection(ref, l.refType(ref)), true
 
 	case atom.COUNT() != nil:
 		// The count-star atom count(*): the degenerate aggregate, AggCount with no
 		// referenced binding. A property lookup on it (count(*).x) is residual.
+		// Stage 6: TypeUnknown — aggregate return types are below the boundary
+		// (ADR 0005); a real engine yields int, the resolver upgrades from the
+		// schema.
 		if lookups > 0 {
 			return nil, false
 		}
-		return query.NewAggregateProjection(query.AggCount, nil), true
+		return query.NewAggregateProjection(query.AggCount, nil, query.TypeUnknown{}), true
 
 	case atom.OC_Literal() != nil:
 		if lookups > 0 || !isScalarLiteral(atom.OC_Literal()) {
 			return nil, false
 		}
-		return query.NewLiteralProjection(), true
+		return query.NewLiteralProjection(literalType(atom.OC_Literal())), true
 
 	case atom.OC_FunctionInvocation() != nil:
 		if lookups > 0 {
@@ -130,11 +134,37 @@ func (l *listener) classifyProjection(e gen.IOC_ExpressionContext) (query.Projec
 	}
 }
 
+// refType computes the Stage-6 result type of a RefProjection: TypeNode /
+// TypeEdge when the ref names a whole entity binding in the current part,
+// TypeUnknown for a property lookup (property typing is a schema concern per
+// ADR 0003), and the imported alias's type when the name comes from a prior
+// part's WITH. The lookup is per-part: the current part's own bindings first,
+// then the imported map WITH exported into this part.
+func (l *listener) refType(r query.Ref) query.Type {
+	if r.Property != "" {
+		return query.TypeUnknown{}
+	}
+	if idx, ok := l.curPart.byVar[r.Variable]; ok {
+		switch l.curPart.bindings[idx].kind {
+		case graph.Node:
+			return query.TypeNode{}
+		case graph.Edge:
+			return query.TypeEdge{}
+		}
+	}
+	if t, ok := l.curPart.imported[r.Variable]; ok {
+		return t
+	}
+	return query.TypeUnknown{}
+}
+
 // classifyFunction maps a function invocation to a FuncProjection or, when its
 // name matches the closed aggregate set (case-insensitively, §4), an
 // AggregateProjection. Either way it mines the call's referenced bindings; any
 // argument that is not a bare var/var.prop or scalar literal makes it residual
-// (no expression tree, no nested aggregates, spec §4/§9).
+// (no expression tree, no nested aggregates, spec §4/§9). Stage 6: both
+// variants carry TypeUnknown — function identity and aggregate return type
+// live below the type-interface boundary (ADR 0005).
 func (l *listener) classifyFunction(fi gen.IOC_FunctionInvocationContext) (query.Projection, bool) {
 	refs, ok := functionArgRefs(fi)
 	if !ok {
@@ -145,10 +175,10 @@ func (l *listener) classifyFunction(fi gen.IOC_FunctionInvocationContext) (query
 	}
 	if name, ok := functionName(fi); ok {
 		if fn, ok := aggregateFunc(name); ok {
-			return query.NewAggregateProjection(fn, refs), true
+			return query.NewAggregateProjection(fn, refs, query.TypeUnknown{}), true
 		}
 	}
-	return query.NewFuncProjection(refs), true
+	return query.NewFuncProjection(refs, query.TypeUnknown{}), true
 }
 
 // rejectClauseParameter fails if the ORDER BY expression contains a parameter:

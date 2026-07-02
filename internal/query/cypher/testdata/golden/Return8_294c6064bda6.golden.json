@@ -17,7 +17,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "n",
-                "property": ""
+                "property": "",
+                "type": "node"
               }
             }
           ],
@@ -31,7 +32,8 @@
               "value": {
                 "kind": "aggregate",
                 "func": "count",
-                "refs": null
+                "refs": null,
+                "type": "unknown"
               }
             }
           ],

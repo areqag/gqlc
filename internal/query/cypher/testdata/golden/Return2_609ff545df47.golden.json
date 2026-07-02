@@ -26,7 +26,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "r",
-                "property": "num"
+                "property": "num",
+                "type": "unknown"
               }
             }
           ],

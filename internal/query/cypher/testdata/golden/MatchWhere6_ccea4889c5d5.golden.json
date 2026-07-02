@@ -44,7 +44,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "x",
-                "property": ""
+                "property": "",
+                "type": "node"
               }
             },
             {
@@ -52,7 +53,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "y",
-                "property": ""
+                "property": "",
+                "type": "node"
               }
             }
           ],

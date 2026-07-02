@@ -34,7 +34,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "i",
-                "property": ""
+                "property": "",
+                "type": "node"
               }
             }
           ],

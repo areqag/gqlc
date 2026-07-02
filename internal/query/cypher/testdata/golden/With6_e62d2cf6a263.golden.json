@@ -17,7 +17,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "a",
-                "property": "name"
+                "property": "name",
+                "type": "unknown"
               }
             },
             {
@@ -25,7 +26,8 @@
               "value": {
                 "kind": "aggregate",
                 "func": "count",
-                "refs": null
+                "refs": null,
+                "type": "unknown"
               }
             }
           ],
@@ -39,7 +41,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "name",
-                "property": ""
+                "property": "",
+                "type": "unknown"
               }
             },
             {
@@ -47,7 +50,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "relCount",
-                "property": ""
+                "property": "",
+                "type": "unknown"
               }
             }
           ],

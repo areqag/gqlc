@@ -61,7 +61,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "n",
-                "property": "num"
+                "property": "num",
+                "type": "unknown"
               }
             },
             {
@@ -69,7 +70,8 @@
               "value": {
                 "kind": "aggregate",
                 "func": "count",
-                "refs": null
+                "refs": null,
+                "type": "unknown"
               }
             }
           ],

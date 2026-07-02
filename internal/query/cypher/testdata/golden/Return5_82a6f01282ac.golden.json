@@ -17,7 +17,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "a",
-                "property": "color"
+                "property": "color",
+                "type": "unknown"
               }
             },
             {
@@ -25,7 +26,8 @@
               "value": {
                 "kind": "aggregate",
                 "func": "count",
-                "refs": null
+                "refs": null,
+                "type": "unknown"
               }
             }
           ],

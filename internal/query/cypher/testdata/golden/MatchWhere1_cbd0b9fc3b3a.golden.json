@@ -40,7 +40,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "a",
-                "property": "id"
+                "property": "id",
+                "type": "unknown"
               }
             },
             {
@@ -48,7 +49,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "b",
-                "property": "id"
+                "property": "id",
+                "type": "unknown"
               }
             }
           ],

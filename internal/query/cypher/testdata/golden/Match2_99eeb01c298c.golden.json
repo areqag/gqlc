@@ -30,7 +30,8 @@
                     "variable": "r",
                     "property": ""
                   }
-                ]
+                ],
+                "type": "unknown"
               }
             }
           ],

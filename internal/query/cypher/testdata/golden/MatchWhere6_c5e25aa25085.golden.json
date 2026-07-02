@@ -59,7 +59,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "x0",
-                "property": "name"
+                "property": "name",
+                "type": "unknown"
               }
             }
           ],

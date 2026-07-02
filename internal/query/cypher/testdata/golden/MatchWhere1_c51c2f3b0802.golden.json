@@ -89,7 +89,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "c",
-                "property": ""
+                "property": "",
+                "type": "node"
               }
             }
           ],

@@ -23,7 +23,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "n",
-                "property": "num"
+                "property": "num",
+                "type": "unknown"
               }
             },
             {
@@ -31,7 +32,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "m",
-                "property": "num"
+                "property": "num",
+                "type": "unknown"
               }
             }
           ],

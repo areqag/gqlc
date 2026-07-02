@@ -40,7 +40,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "m",
-                "property": ""
+                "property": "",
+                "type": "node"
               }
             }
           ],

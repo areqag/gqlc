@@ -61,7 +61,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "x",
-                "property": ""
+                "property": "",
+                "type": "node"
               }
             },
             {
@@ -69,7 +70,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "r1",
-                "property": ""
+                "property": "",
+                "type": "edge"
               }
             },
             {
@@ -77,7 +79,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "y",
-                "property": ""
+                "property": "",
+                "type": "node"
               }
             },
             {
@@ -85,7 +88,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "r2",
-                "property": ""
+                "property": "",
+                "type": "edge"
               }
             },
             {
@@ -93,7 +97,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "z",
-                "property": ""
+                "property": "",
+                "type": "node"
               }
             }
           ],

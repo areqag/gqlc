@@ -19,7 +19,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "p",
-                "property": "id"
+                "property": "id",
+                "type": "unknown"
               }
             }
           ],

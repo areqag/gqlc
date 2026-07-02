@@ -61,7 +61,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "n",
-                "property": ""
+                "property": "",
+                "type": "node"
               }
             },
             {
@@ -69,7 +70,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "m",
-                "property": ""
+                "property": "",
+                "type": "node"
               }
             }
           ],

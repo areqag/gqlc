@@ -17,7 +17,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "a",
-                "property": "name"
+                "property": "name",
+                "type": "unknown"
               }
             },
             {
@@ -25,7 +26,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "a",
-                "property": "age"
+                "property": "age",
+                "type": "unknown"
               }
             },
             {
@@ -33,7 +35,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "a",
-                "property": "seasons"
+                "property": "seasons",
+                "type": "unknown"
               }
             }
           ],

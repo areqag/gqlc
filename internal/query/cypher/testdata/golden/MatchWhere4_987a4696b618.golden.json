@@ -23,7 +23,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "a",
-                "property": ""
+                "property": "",
+                "type": "node"
               }
             },
             {
@@ -31,7 +32,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "b",
-                "property": ""
+                "property": "",
+                "type": "node"
               }
             }
           ],

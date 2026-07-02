@@ -17,7 +17,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "a",
-                "property": "name"
+                "property": "name",
+                "type": "unknown"
               }
             }
           ],
@@ -31,7 +32,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "a",
-                "property": ""
+                "property": "",
+                "type": "unknown"
               }
             }
           ],

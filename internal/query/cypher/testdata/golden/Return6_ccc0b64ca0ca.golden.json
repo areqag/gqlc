@@ -22,7 +22,8 @@
                     "variable": "n",
                     "property": ""
                   }
-                ]
+                ],
+                "type": "unknown"
               }
             },
             {
@@ -35,7 +36,8 @@
                     "variable": "n",
                     "property": ""
                   }
-                ]
+                ],
+                "type": "unknown"
               }
             }
           ],

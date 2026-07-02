@@ -17,7 +17,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "foo",
-                "property": "num"
+                "property": "num",
+                "type": "unknown"
               }
             }
           ],

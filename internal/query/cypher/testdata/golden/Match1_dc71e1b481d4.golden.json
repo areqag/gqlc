@@ -20,7 +20,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "a",
-                "property": ""
+                "property": "",
+                "type": "node"
               }
             }
           ],

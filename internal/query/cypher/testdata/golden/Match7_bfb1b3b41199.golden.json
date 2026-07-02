@@ -42,7 +42,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "r",
-                "property": ""
+                "property": "",
+                "type": "edge"
               }
             }
           ],

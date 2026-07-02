@@ -24,7 +24,8 @@
             {
               "name": "x",
               "value": {
-                "kind": "literal"
+                "kind": "literal",
+                "type": "int"
               }
             }
           ],
@@ -74,7 +75,8 @@
                     "variable": "r1",
                     "property": "times"
                   }
-                ]
+                ],
+                "type": "unknown"
               }
             }
           ],

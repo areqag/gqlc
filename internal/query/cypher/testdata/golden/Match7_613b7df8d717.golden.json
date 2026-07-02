@@ -73,7 +73,8 @@
                     "variable": "c",
                     "property": ""
                   }
-                ]
+                ],
+                "type": "unknown"
               }
             }
           ],
@@ -115,7 +116,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "d",
-                "property": ""
+                "property": "",
+                "type": "node"
               }
             }
           ],

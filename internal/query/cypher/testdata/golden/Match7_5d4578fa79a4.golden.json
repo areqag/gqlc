@@ -63,7 +63,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "x",
-                "property": ""
+                "property": "",
+                "type": "node"
               }
             },
             {
@@ -71,7 +72,8 @@
               "value": {
                 "kind": "ref",
                 "variable": "r",
-                "property": ""
+                "property": "",
+                "type": "edge"
               }
             }
           ],
