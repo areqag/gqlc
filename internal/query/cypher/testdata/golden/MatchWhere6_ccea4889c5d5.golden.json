@@ -1,0 +1,53 @@
+{
+  "Bindings": [
+    {
+      "kind": "node",
+      "variable": "x",
+      "labels": [
+        "X"
+      ],
+      "nullable": false
+    },
+    {
+      "kind": "edge",
+      "variable": "",
+      "labels": [
+        "E1"
+      ],
+      "source": {
+        "kind": "var",
+        "variable": "x"
+      },
+      "target": {
+        "kind": "var",
+        "variable": "y"
+      },
+      "nullable": true
+    },
+    {
+      "kind": "node",
+      "variable": "y",
+      "labels": [
+        "Y"
+      ],
+      "nullable": true
+    }
+  ],
+  "Parameters": null,
+  "Returns": [
+    {
+      "Name": "x",
+      "Ref": {
+        "Variable": "x",
+        "Property": ""
+      }
+    },
+    {
+      "Name": "y",
+      "Ref": {
+        "Variable": "y",
+        "Property": ""
+      }
+    }
+  ]
+}

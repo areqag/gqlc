@@ -11,7 +11,9 @@ import (
 // collectPattern lowers one MATCH clause's comma-separated pattern parts into
 // bindings. Each part is a chain of node patterns joined by relationship
 // patterns; a named path (p = ...) is rejected (ErrUnsupportedPattern).
-func (l *listener) collectPattern(p gen.IOC_PatternContext) {
+// optional flags an OPTIONAL MATCH clause: any binding first introduced here
+// is marked nullable (ADR 0006).
+func (l *listener) collectPattern(p gen.IOC_PatternContext, optional bool) {
 	if p == nil || l.err != nil {
 		return
 	}
@@ -20,7 +22,7 @@ func (l *listener) collectPattern(p gen.IOC_PatternContext) {
 			l.fail(fmt.Errorf("%w: named path", ErrUnsupportedPattern))
 			return
 		}
-		l.collectPatternElement(part.OC_AnonymousPatternPart().OC_PatternElement())
+		l.collectPatternElement(part.OC_AnonymousPatternPart().OC_PatternElement(), optional)
 		if l.err != nil {
 			return
 		}
@@ -30,8 +32,9 @@ func (l *listener) collectPattern(p gen.IOC_PatternContext) {
 // collectPatternElement lowers a single pattern element: a head node followed by
 // zero or more (relationship, node) chain links. A parenthesised element
 // ('(' patternElement ')') is unwrapped. Each chain link becomes an edge binding
-// whose endpoints are the node on either side.
-func (l *listener) collectPatternElement(e gen.IOC_PatternElementContext) {
+// whose endpoints are the node on either side. optional flows through so any
+// binding first introduced here is marked nullable.
+func (l *listener) collectPatternElement(e gen.IOC_PatternElementContext, optional bool) {
 	for e != nil && e.OC_NodePattern() == nil {
 		e = e.OC_PatternElement() // unwrap '(' patternElement ')'
 	}
@@ -40,7 +43,7 @@ func (l *listener) collectPatternElement(e gen.IOC_PatternElementContext) {
 	}
 
 	prev := e.OC_NodePattern()
-	l.collectNode(prev)
+	l.collectNode(prev, optional)
 	if l.err != nil {
 		return
 	}
@@ -50,11 +53,11 @@ func (l *listener) collectPatternElement(e gen.IOC_PatternElementContext) {
 		// Record in textual first-appearance order: the relationship variable is
 		// written before the node that follows it. collectEdge reads next only to
 		// form the target endpoint; it does not need next's binding recorded first.
-		l.collectEdge(link.OC_RelationshipPattern(), prev, next)
+		l.collectEdge(link.OC_RelationshipPattern(), prev, next, optional)
 		if l.err != nil {
 			return
 		}
-		l.collectNode(next)
+		l.collectNode(next, optional)
 		if l.err != nil {
 			return
 		}
@@ -65,7 +68,7 @@ func (l *listener) collectPatternElement(e gen.IOC_PatternElementContext) {
 // collectNode records a node pattern. A named node is a binding (deduped, labels
 // merged); an anonymous node is not a binding (C3) — its labels live inline on
 // the edge endpoint, and a standalone anonymous node is a pure filter, ignored.
-func (l *listener) collectNode(n gen.IOC_NodePatternContext) {
+func (l *listener) collectNode(n gen.IOC_NodePatternContext, optional bool) {
 	if n == nil {
 		return
 	}
@@ -75,15 +78,16 @@ func (l *listener) collectNode(n gen.IOC_NodePatternContext) {
 	}
 	l.mineInlineMap(variable, n.OC_Properties())
 	if variable != "" {
-		l.mergeBinding(variable, graph.Node, nodeLabels(n.OC_NodeLabels()), nil, nil)
+		l.mergeBinding(variable, graph.Node, nodeLabels(n.OC_NodeLabels()), nil, nil, optional)
 	}
 }
 
 // collectEdge records a relationship between prev and next as an edge binding.
 // It rejects undirected and multi-type relationships, canonicalises a
 // left-pointing arc to source->target, and forms each endpoint from its node
-// (a VarEndpoint for a named node, an InlineEndpoint otherwise).
-func (l *listener) collectEdge(r gen.IOC_RelationshipPatternContext, prev, next gen.IOC_NodePatternContext) {
+// (a VarEndpoint for a named node, an InlineEndpoint otherwise). optional
+// marks any edge binding (named or anonymous) introduced here as nullable.
+func (l *listener) collectEdge(r gen.IOC_RelationshipPatternContext, prev, next gen.IOC_NodePatternContext, optional bool) {
 	left := r.OC_LeftArrowHead() != nil
 	right := r.OC_RightArrowHead() != nil
 	if left == right {
@@ -124,13 +128,15 @@ func (l *listener) collectEdge(r gen.IOC_RelationshipPatternContext, prev, next 
 	if variable == "" {
 		// An anonymous edge is its own binding (C1): append the raw binding and let
 		// build() construct it once, exactly as the named path does — no early
-		// construct just to read back the (unchanged) labels.
-		rb := &rawBinding{variable: "", kind: graph.Edge, source: source, target: target}
+		// construct just to read back the (unchanged) labels. Anonymous edges
+		// introduced inside OPTIONAL MATCH carry the nullable flag uniformly
+		// (ADR 0006) even though no Ref will ever observe it.
+		rb := &rawBinding{variable: "", kind: graph.Edge, source: source, target: target, nullable: optional}
 		rb.mergeLabels(labels)
 		l.bindings = append(l.bindings, rb)
 		return
 	}
-	l.mergeBinding(variable, graph.Edge, labels, source, target)
+	l.mergeBinding(variable, graph.Edge, labels, source, target, optional)
 }
 
 // endpoint forms an edge endpoint from a node pattern: a VarEndpoint for a named
@@ -162,11 +168,14 @@ func (l *listener) recordEndpointRefs(eps ...query.Endpoint) {
 // variable in first-appearance order and unioning their labels (ordered, first
 // appearance, C2). A variable seen as both a node and an edge is a kind conflict
 // (recorded for build()). For an edge's first occurrence the endpoints are set;
-// later occurrences merge labels only.
-func (l *listener) mergeBinding(variable string, kind graph.EntityKind, labels graph.LabelSet, source, target query.Endpoint) {
+// later occurrences merge labels only. optional is honoured only on first
+// introduction (ADR 0006): a binding's nullability is a static fact about its
+// *introducing* clause; a later non-OPTIONAL occurrence neither sets nor
+// clears the flag — that demotion is the resolver's job (gqlc-lqm).
+func (l *listener) mergeBinding(variable string, kind graph.EntityKind, labels graph.LabelSet, source, target query.Endpoint, optional bool) {
 	idx, ok := l.byVar[variable]
 	if !ok {
-		rb := &rawBinding{variable: variable, kind: kind, seen: map[string]bool{}, source: source, target: target}
+		rb := &rawBinding{variable: variable, kind: kind, seen: map[string]bool{}, source: source, target: target, nullable: optional}
 		rb.mergeLabels(labels)
 		l.byVar[variable] = len(l.bindings)
 		l.bindings = append(l.bindings, rb)

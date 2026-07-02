@@ -57,10 +57,17 @@ func (l *listener) build() (query.Query, error) {
 }
 
 // toBinding builds the model binding from a raw binding via the branch-1 smart
-// constructors, so the model's invariants are enforced at assembly.
+// constructors, so the model's invariants are enforced at assembly. The
+// nullable flag picks the OPTIONAL-introduced variant (ADR 0006).
 func (rb *rawBinding) toBinding() (query.Binding, error) {
 	if rb.kind == graph.Edge {
+		if rb.nullable {
+			return query.NewNullableEdgeBinding(rb.variable, rb.labels, rb.source, rb.target)
+		}
 		return query.NewEdgeBinding(rb.variable, rb.labels, rb.source, rb.target)
+	}
+	if rb.nullable {
+		return query.NewNullableNodeBinding(rb.variable, rb.labels)
 	}
 	return query.NewNodeBinding(rb.variable, rb.labels)
 }
