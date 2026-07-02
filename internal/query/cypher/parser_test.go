@@ -726,6 +726,62 @@ var mustParse = map[string]struct {
 			},
 		}}}}},
 	},
+	// Stage 7 — temporal-point minus duration → temporal-point. Spec §1's
+	// subtraction rule is one-way (temporal - duration is legal; the
+	// commutation is not). Rich classifier route, ExprProjection.
+	"return date minus duration": {
+		src: "RETURN date() - duration('P1D') AS d",
+		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+			Returns: []query.ReturnItem{
+				{Name: "d", Value: query.NewExprProjection(nil, query.TypeDate{})},
+			},
+		}}}}},
+	},
+	// Stage 7 — duration minus duration → duration. Spec §1 rule table
+	// commits the same-kind subtraction as duration-producing.
+	"return duration minus duration": {
+		src: "RETURN duration('P1D') - duration('PT1H') AS d",
+		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+			Returns: []query.ReturnItem{
+				{Name: "d", Value: query.NewExprProjection(nil, query.TypeDuration{})},
+			},
+		}}}}},
+	},
+	// Stage 7 — duration divided by a scalar → duration. Spec §1 commits
+	// division only with duration on the left; the reverse is TypeUnknown
+	// (see the reject pin below).
+	"return duration divided by scalar": {
+		src: "RETURN duration('P1D') / 3 AS d",
+		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+			Returns: []query.ReturnItem{
+				{Name: "d", Value: query.NewExprProjection(nil, query.TypeDuration{})},
+			},
+		}}}}},
+	},
+	// Stage 7 — duration - <temporal-point> is out of scope of the spec's
+	// rule table (subtraction is one-way; there is no "duration - date"
+	// legal in openCypher, and inventing a concrete type here would be
+	// strictly worse than the honest TypeUnknown a schema-driven resolver
+	// can upgrade). Rich classifier route, TypeUnknown result.
+	"return duration minus date is unknown": {
+		src: "RETURN duration('P1D') - date() AS d",
+		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+			Returns: []query.ReturnItem{
+				{Name: "d", Value: query.NewExprProjection(nil, query.TypeUnknown{})},
+			},
+		}}}}},
+	},
+	// Stage 7 — scalar divided by a duration is out of scope of the spec's
+	// rule table (division is one-way; number / duration has no committed
+	// result type and is left honestly TypeUnknown).
+	"return scalar divided by duration is unknown": {
+		src: "RETURN 3 / duration('P1D') AS d",
+		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+			Returns: []query.ReturnItem{
+				{Name: "d", Value: query.NewExprProjection(nil, query.TypeUnknown{})},
+			},
+		}}}}},
+	},
 }
 
 // must lifts a fallible model constructor into an expression usable in a struct
