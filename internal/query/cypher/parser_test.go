@@ -520,6 +520,15 @@ var mustReject = map[string]struct {
 		query: "MATCH (n)\nRETURN n.num + 1",
 		want:  cypher.ErrUnsupportedProjection,
 	},
+	// AUTHORED: a unary sign is arithmetic (ADR 0003/0005: no expression trees), so
+	// a signed operand (RETURN -n.num) is residual — fail-site is
+	// nonArithmeticFromAddSub's unary level. No verbatim corpus query exercises a
+	// unary-signed operand at the pinned tag. Replace with a corpus entry if a TCK
+	// bump adds one.
+	"unary-signed projection": {
+		query: "MATCH (n)\nRETURN -n.num",
+		want:  cypher.ErrUnsupportedProjection,
+	},
 	// Match2 [6] multi-type relationship [:A|B] -> ErrUnsupportedPattern
 	"multi-type relationship": {
 		query: "MATCH (n)-[r:KNOWS|HATES]->(x)\nRETURN r",
