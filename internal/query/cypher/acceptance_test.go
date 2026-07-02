@@ -41,8 +41,10 @@ var updateGolden = flag.Bool("update", false, "regenerate golden snapshots from 
 // remaining read-clause dirs: return-orderby, with-orderBy, with-skip-limit,
 // with-where, unwind — closing out the read-clause surface (UNWIND parses
 // under the widened Binding sum, WITH...WHERE and WITH...ORDER BY / SKIP /
-// LIMIT wire through existing hooks). Aggregation, existentialSubqueries,
-// and quantifier stay out until Stages 10-11.
+// LIMIT wire through existing hooks). Stage 10 adds expressions/aggregation
+// — the aggregate surface (count/sum/collect/min/max/avg/stDev/percentile*)
+// with DISTINCT propagation and per-aggregate result typing. Existential
+// subqueries and quantifiers stay out until Stage 11.
 // The corpus is never edited; each stage widens the dir list and shrinks the
 // skiplist.
 var readCoreDirs = []string{
@@ -72,6 +74,7 @@ var readCoreDirs = []string{
 	"../../../test/data/query/cypher/tck/features/expressions/path",
 	"../../../test/data/query/cypher/tck/features/expressions/pattern",
 	"../../../test/data/query/cypher/tck/features/expressions/graph",
+	"../../../test/data/query/cypher/tck/features/expressions/aggregation",
 }
 
 const goldenDir = "testdata/golden"
