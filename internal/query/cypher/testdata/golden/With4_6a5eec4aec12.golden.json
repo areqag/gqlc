@@ -25,7 +25,8 @@
                 "variable": "person"
               },
               "nullable": false,
-              "directed": true
+              "directed": true,
+              "hops": null
             },
             {
               "kind": "node",
@@ -48,7 +49,8 @@
                 "variable": "message"
               },
               "nullable": false,
-              "directed": true
+              "directed": true,
+              "hops": null
             }
           ],
           "returns": [

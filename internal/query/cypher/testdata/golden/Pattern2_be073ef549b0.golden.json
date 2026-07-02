@@ -1,0 +1,79 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": [
+                "A"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "b",
+              "labels": [
+                "B"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "paths",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "c",
+              "value": {
+                "kind": "aggregate",
+                "func": "count",
+                "refs": [
+                  {
+                    "variable": "a",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "paths",
+              "value": {
+                "kind": "ref",
+                "variable": "paths",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "c",
+              "value": {
+                "kind": "ref",
+                "variable": "c",
+                "property": "",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

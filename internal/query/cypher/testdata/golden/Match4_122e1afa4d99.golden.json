@@ -1,0 +1,53 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": [
+                "A"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "r",
+              "labels": null,
+              "source": {
+                "kind": "var",
+                "variable": "a"
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": {
+                "min": 2,
+                "max": 2
+              }
+            }
+          ],
+          "returns": [
+            {
+              "name": "r",
+              "value": {
+                "kind": "ref",
+                "variable": "r",
+                "property": "",
+                "type": "list\u003cedge\u003e"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

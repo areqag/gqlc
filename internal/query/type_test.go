@@ -236,3 +236,28 @@ func TestTemporalTypesSealed(_ *testing.T) {
 	var _ query.Type = query.TypeLocalDateTime{}
 	var _ query.Type = query.TypeDuration{}
 }
+
+// --- Stage 8: TypePath ---
+
+// TestTypePathString pins the Stage-8 TypePath variant's stringer to "path".
+// It joins the closed sum through the same isType() marker as the other
+// variants; its wire tag is the single source the JSON encoding derives from.
+func TestTypePathString(t *testing.T) {
+	require.Equal(t, "path", query.TypePath{}.String())
+	var _ query.Type = query.TypePath{}
+}
+
+// TestTypePathMarshalJSON pins the wire encoding of TypePath: its stringer
+// value quoted as a JSON string, matching every other Type variant's
+// marshalType routing.
+func TestTypePathMarshalJSON(t *testing.T) {
+	out, err := json.Marshal(query.TypePath{})
+	require.NoError(t, err)
+	require.JSONEq(t, `"path"`, string(out))
+}
+
+// TestTypeListOfPath pins that TypeList composes over TypePath: a
+// list-of-path types as list<path> on the wire, with no special-casing.
+func TestTypeListOfPath(t *testing.T) {
+	require.Equal(t, "list<path>", query.NewTypeList(query.TypePath{}).String())
+}

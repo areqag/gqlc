@@ -21,7 +21,8 @@
                 ]
               },
               "nullable": false,
-              "directed": true
+              "directed": true,
+              "hops": null
             }
           ],
           "returns": [

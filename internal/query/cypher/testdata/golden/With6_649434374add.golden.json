@@ -1,0 +1,89 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": null,
+              "source": {
+                "kind": "inline",
+                "labels": null
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": {
+                "min": null,
+                "max": null
+              }
+            },
+            {
+              "kind": "path",
+              "variable": "p",
+              "members": [
+                {
+                  "kind": "anon-node"
+                },
+                {
+                  "kind": "anon-edge"
+                },
+                {
+                  "kind": "anon-node"
+                }
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "count",
+              "value": {
+                "kind": "aggregate",
+                "func": "count",
+                "refs": null,
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "p",
+              "value": {
+                "kind": "ref",
+                "variable": "p",
+                "property": "",
+                "type": "path"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "nodes",
+              "value": {
+                "kind": "func",
+                "refs": [
+                  {
+                    "variable": "p",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

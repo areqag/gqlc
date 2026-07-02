@@ -100,3 +100,21 @@ and the full expression tree are deliberately outside the initial model.
 > the schema. The no-expression-tree line holds; temporal semantics
 > (calendar arithmetic, timezone normalisation) stay below the boundary
 > (ADR 0005), executed from the original text._
+>
+> _Note (Stage 8, ADR 0004/0007): the curated `Type` sum now carries
+> `TypePath`, and the `Binding` sum grows a `PathBinding` variant so a
+> named path binds like a node or edge does — a query-level binding with
+> its own kind and its own projected result type. `PathBinding.Members()`
+> is a tagged sum of `NamedNodeMember` / `NamedEdgeMember` /
+> `AnonEdgeMember` / `AnonNodeMember`, so the members list is
+> shape-faithful (an anonymous intermediate node is a slot, not a dropped
+> element) and anonymous slots never compete with user variables in the
+> part's byVar namespace. `EdgeBinding` gains an `EdgeHops` cardinality
+> axis (nil for single-hop, non-nil for variable-length) — a var-length
+> edge binding projects as `list<edge>` rather than `edge`, so codegen
+> emits a list-typed result without adding a distinct binding variant.
+> `EdgeBinding.Labels()` admits a multi-type set (`[r:A|B]` produces
+> `["A","B"]`; the resolver forms one candidate EdgeKey per type). The
+> no-expression-tree line holds; the resolver's cross-product logic for
+> multi-type and orientation-trial for undirected/var-length edges stays
+> below the type-interface boundary (ADR 0005)._

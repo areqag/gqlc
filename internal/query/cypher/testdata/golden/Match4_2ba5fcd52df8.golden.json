@@ -1,0 +1,130 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "edge",
+              "variable": "r",
+              "labels": [
+                "EDGE"
+              ],
+              "source": {
+                "kind": "inline",
+                "labels": null
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false,
+              "directed": false,
+              "hops": null
+            },
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": null,
+              "source": {
+                "kind": "var",
+                "variable": "n"
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false,
+              "directed": false,
+              "hops": {
+                "min": 0,
+                "max": 1
+              }
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": null,
+              "source": {
+                "kind": "inline",
+                "labels": null
+              },
+              "target": {
+                "kind": "var",
+                "variable": "m"
+              },
+              "nullable": false,
+              "directed": false,
+              "hops": {
+                "min": 0,
+                "max": 1
+              }
+            },
+            {
+              "kind": "node",
+              "variable": "m",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "path",
+              "variable": "p",
+              "members": [
+                {
+                  "kind": "node",
+                  "variable": "n"
+                },
+                {
+                  "kind": "anon-edge"
+                },
+                {
+                  "kind": "anon-node"
+                },
+                {
+                  "kind": "edge",
+                  "variable": "r"
+                },
+                {
+                  "kind": "anon-node"
+                },
+                {
+                  "kind": "anon-edge"
+                },
+                {
+                  "kind": "node",
+                  "variable": "m"
+                }
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "c",
+              "value": {
+                "kind": "aggregate",
+                "func": "count",
+                "refs": [
+                  {
+                    "variable": "p",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

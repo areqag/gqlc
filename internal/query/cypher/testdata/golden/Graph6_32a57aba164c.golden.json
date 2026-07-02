@@ -1,0 +1,50 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "n.missing",
+              "value": {
+                "kind": "ref",
+                "variable": "n",
+                "property": "missing",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "n.missingToo",
+              "value": {
+                "kind": "ref",
+                "variable": "n",
+                "property": "missingToo",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "n.existing",
+              "value": {
+                "kind": "ref",
+                "variable": "n",
+                "property": "existing",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

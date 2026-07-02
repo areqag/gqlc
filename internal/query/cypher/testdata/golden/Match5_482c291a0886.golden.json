@@ -1,0 +1,61 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": [
+                "A"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "LIKES"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "a"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "c"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": {
+                "min": 2,
+                "max": 1
+              }
+            },
+            {
+              "kind": "node",
+              "variable": "c",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "c.name",
+              "value": {
+                "kind": "ref",
+                "variable": "c",
+                "property": "name",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

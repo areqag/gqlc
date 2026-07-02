@@ -17,7 +17,8 @@
                 "labels": null
               },
               "nullable": false,
-              "directed": true
+              "directed": true,
+              "hops": null
             }
           ],
           "returns": [
@@ -46,7 +47,8 @@
                 "labels": null
               },
               "nullable": false,
-              "directed": true
+              "directed": true,
+              "hops": null
             },
             {
               "kind": "edge",
@@ -61,7 +63,8 @@
                 "labels": null
               },
               "nullable": false,
-              "directed": true
+              "directed": true,
+              "hops": null
             }
           ],
           "returns": [

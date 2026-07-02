@@ -25,7 +25,8 @@
                 "variable": "a"
               },
               "nullable": false,
-              "directed": true
+              "directed": true,
+              "hops": null
             },
             {
               "kind": "node",

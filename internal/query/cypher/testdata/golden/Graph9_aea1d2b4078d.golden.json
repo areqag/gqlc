@@ -1,0 +1,77 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": [
+                "DoesNotExist"
+              ],
+              "nullable": true
+            },
+            {
+              "kind": "edge",
+              "variable": "r",
+              "labels": [
+                "NOT_THERE"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "n"
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": true,
+              "directed": true,
+              "hops": null
+            }
+          ],
+          "returns": [
+            {
+              "name": "properties(n)",
+              "value": {
+                "kind": "func",
+                "refs": [
+                  {
+                    "variable": "n",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "properties(r)",
+              "value": {
+                "kind": "func",
+                "refs": [
+                  {
+                    "variable": "r",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "properties(null)",
+              "value": {
+                "kind": "func",
+                "refs": null,
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

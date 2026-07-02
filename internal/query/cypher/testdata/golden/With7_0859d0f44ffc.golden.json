@@ -23,7 +23,8 @@
                 "variable": "otherPerson"
               },
               "nullable": false,
-              "directed": false
+              "directed": false,
+              "hops": null
             },
             {
               "kind": "node",
@@ -44,7 +45,8 @@
                 "labels": null
               },
               "nullable": false,
-              "directed": true
+              "directed": true,
+              "hops": null
             }
           ],
           "returns": [

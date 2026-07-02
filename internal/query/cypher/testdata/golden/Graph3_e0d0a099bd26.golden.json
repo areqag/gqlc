@@ -1,0 +1,55 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "list",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "a",
+                    "property": ""
+                  }
+                ],
+                "type": "list\u003cunknown\u003e"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "l",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "list",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

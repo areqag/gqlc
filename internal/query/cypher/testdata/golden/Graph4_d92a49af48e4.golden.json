@@ -1,0 +1,75 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "edge",
+              "variable": "r1",
+              "labels": null,
+              "source": {
+                "kind": "inline",
+                "labels": null
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            },
+            {
+              "kind": "edge",
+              "variable": "r2",
+              "labels": null,
+              "source": {
+                "kind": "inline",
+                "labels": null
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            }
+          ],
+          "returns": [
+            {
+              "name": "type(r1)",
+              "value": {
+                "kind": "func",
+                "refs": [
+                  {
+                    "variable": "r1",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "type(r2)",
+              "value": {
+                "kind": "func",
+                "refs": [
+                  {
+                    "variable": "r2",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}
