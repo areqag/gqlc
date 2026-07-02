@@ -15,12 +15,16 @@ type Schema struct {
 	Edges map[EdgeKey]EdgeType
 }
 
+// NodeType is a kind of vertex in the graph type: a label set (its canonical
+// identity) plus a set of properties.
 type NodeType struct {
 	Labels     graph.LabelSetKey   `json:"labels"` // canonical identity; also the Nodes map key
 	Name       string              `json:"name"`
 	Properties map[string]Property `json:"properties"`
 }
 
+// EdgeType is a kind of directed relationship between two node types: its
+// EdgeKey identity (source, label, target) plus a set of properties.
 type EdgeType struct {
 	EdgeKey                        // Source, Label, Target; also the Edges map key. Promoted inline in JSON.
 	Name       string              `json:"name"`

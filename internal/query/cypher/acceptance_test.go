@@ -81,15 +81,15 @@ var skiplist = map[string]bool{
 	// reading our generated method body still sees the original SKIP -1 / LIMIT
 	// 1.5 / SKIP n.count text and raises the same error.
 	"[5] SKIP with an expression that depends on variables should fail": true,
-	"[7] Negative SKIP should fail":                  true,
-	"[9] Floating point SKIP should fail":            true,
-	"[10] Fail when using non-constants in SKIP":     true,
-	"[11] Fail when using negative value in SKIP":    true,
-	"[9] Fail when using non-constants in LIMIT":     true,
-	"[12] Fail when using negative value in LIMIT 1": true,
-	"[13] Fail when using negative value in LIMIT 2": true,
-	"[16] Fail when using floating point in LIMIT 1": true,
-	"[17] Fail when using floating point in LIMIT 2": true,
+	"[7] Negative SKIP should fail":                                     true,
+	"[9] Floating point SKIP should fail":                               true,
+	"[10] Fail when using non-constants in SKIP":                        true,
+	"[11] Fail when using negative value in SKIP":                       true,
+	"[9] Fail when using non-constants in LIMIT":                        true,
+	"[12] Fail when using negative value in LIMIT 1":                    true,
+	"[13] Fail when using negative value in LIMIT 2":                    true,
+	"[16] Fail when using floating point in LIMIT 1":                    true,
+	"[17] Fail when using floating point in LIMIT 2":                    true,
 
 	// --- SKIP/LIMIT with a parameter whose runtime value the TCK rejects as
 	//     NegativeIntegerArgument / InvalidArgumentType ---
@@ -199,7 +199,10 @@ type scenarioState struct {
 type stateKey struct{}
 
 func stateFrom(ctx context.Context) *scenarioState {
-	st, _ := ctx.Value(stateKey{}).(*scenarioState)
+	st, ok := ctx.Value(stateKey{}).(*scenarioState)
+	if !ok {
+		return nil
+	}
 	return st
 }
 
@@ -269,7 +272,9 @@ func TestSkiplistOrphans(t *testing.T) {
 				t.Fatalf("open %s: %v", path, err)
 			}
 			doc, err := gherkin.ParseGherkinDocument(f, func() string { return "" })
-			f.Close()
+			if cerr := f.Close(); cerr != nil {
+				t.Fatalf("close %s: %v", path, cerr)
+			}
 			if err != nil {
 				t.Fatalf("parse %s: %v", path, err)
 			}
@@ -315,9 +320,9 @@ func initScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^a (\w+) should be raised at (compile time|runtime)$`, shouldBeRejectedNoDetail)
 }
 
-func noop(ctx context.Context) error                        { return nil }
-func noopDoc(ctx context.Context, _ *godog.DocString) error { return nil }
-func noopTable(ctx context.Context, _ *godog.Table) error   { return nil }
+func noop(_ context.Context) error                        { return nil }
+func noopDoc(_ context.Context, _ *godog.DocString) error { return nil }
+func noopTable(_ context.Context, _ *godog.Table) error   { return nil }
 
 // executingQuery runs Parse and stashes the outcome for the Then steps.
 func executingQuery(ctx context.Context, doc *godog.DocString) error {
@@ -438,7 +443,9 @@ func harvestExecutingQueries(t *testing.T, dirs []string) []string {
 				t.Fatalf("open %s: %v", path, err)
 			}
 			doc, err := gherkin.ParseGherkinDocument(f, func() string { return "" })
-			f.Close()
+			if cerr := f.Close(); cerr != nil {
+				t.Fatalf("close %s: %v", path, cerr)
+			}
 			if err != nil {
 				t.Fatalf("parse %s: %v", path, err)
 			}

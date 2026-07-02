@@ -1,0 +1,14 @@
+# Installs the pinned just binary; every job runs its checks through just
+# recipes, so this is the one installer every workflow shares.
+name: setup-just
+description: install the pinned just binary and add it to PATH
+runs:
+  using: composite
+  steps:
+    - name: install just
+      shell: bash
+      run: |
+        mkdir -p "$HOME/.local/bin"
+        curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh \
+          | bash -s -- --tag 1.55.1 --to "$HOME/.local/bin"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"

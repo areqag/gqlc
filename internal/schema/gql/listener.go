@@ -97,7 +97,7 @@ func (l *listener) EnterCreateGraphTypeStatement(c *gen.CreateGraphTypeStatement
 // Enter* — only here, at the program root, once everything has been seen. Doing
 // it in the listener keeps the whole input-scope check on the l.err channel
 // instead of a separate return in Parse.
-func (l *listener) ExitGqlProgram(c *gen.GqlProgramContext) {
+func (l *listener) ExitGqlProgram(_ *gen.GqlProgramContext) {
 	if !l.seenGraphType {
 		l.fail(ErrNoGraphType)
 	}
@@ -147,7 +147,7 @@ func (l *listener) rejectLabelImplication(implies antlr.TerminalNode) {
 	}
 }
 
-func (l *listener) EnterEdgeTypePatternUndirected(c *gen.EdgeTypePatternUndirectedContext) {
+func (l *listener) EnterEdgeTypePatternUndirected(_ *gen.EdgeTypePatternUndirectedContext) {
 	l.fail(ErrUndirectedEdge)
 }
 

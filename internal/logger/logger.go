@@ -1,3 +1,5 @@
+// Package logger initialises the process-wide slog logger; all output goes
+// through it (fmt/log printing is forbidden by lint).
 package logger
 
 import (

@@ -1,3 +1,6 @@
+// Package cypher implements query.Parser for openCypher: an ANTLR
+// listener-driven lowering of query source into the curated query model,
+// grown test-first against the openCypher TCK (ADR 0004).
 package cypher
 
 import (

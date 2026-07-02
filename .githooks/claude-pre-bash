@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Claude Code PreToolUse hook for the Bash tool.
+# Blocks `git commit` invocations when on master/main.
+#
+# Hook contract: receives JSON on stdin with shape:
+#   { "tool_name": "Bash", "tool_input": { "command": "...", ... }, ... }
+# On block: exit 0 with JSON { hookSpecificOutput: { permissionDecision: "deny", ... } }
+# On allow: exit 0 with no output
+
+# Read stdin once
+INPUT="$(cat)"
+
+# Extract the command field using python3 (avoids jq dependency)
+COMMAND="$(printf '%s' "$INPUT" | python3 -c "
+import sys, json
+try:
+    data = json.load(sys.stdin)
+    print(data.get('tool_input', {}).get('command', ''))
+except Exception:
+    pass
+")"
+
+# Detect `git commit` but NOT `git commit-tree` or similar substrings.
+# Regex: "git" followed by whitespace then "commit" at end of string or followed by whitespace.
+if printf '%s' "$COMMAND" | grep -qE '(^|[^A-Za-z-])git[[:space:]]+commit($|[[:space:]])'; then
+
+  # Allow test harness to override the branch name for testing
+  if [ -n "${BRANCH_OVERRIDE:-}" ]; then
+    BRANCH="$BRANCH_OVERRIDE"
+  else
+    BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
+  fi
+
+  if [ "$BRANCH" = "master" ] || [ "$BRANCH" = "main" ]; then
+    REASON="Direct commits to ${BRANCH} are blocked. Create a feature branch with: git switch -c <branch>"
+    printf 'ERROR: %s\n' "$REASON" >&2
+    python3 -c "
+import json, sys
+msg = sys.argv[1]
+print(json.dumps({
+    'hookSpecificOutput': {
+        'hookEventName': 'PreToolUse',
+        'permissionDecision': 'deny',
+        'permissionDecisionReason': msg
+    }
+}))
+" "$REASON"
+    exit 0
+  fi
+fi
+
+exit 0

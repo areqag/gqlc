@@ -29,8 +29,8 @@
   "combinators": null,
   "parameters": [
     {
-      "Name": "s",
-      "Uses": [
+      "name": "s",
+      "uses": [
         {
           "kind": "clause-slot",
           "slot": "skip"
@@ -38,8 +38,8 @@
       ]
     },
     {
-      "Name": "l",
-      "Uses": [
+      "name": "l",
+      "uses": [
         {
           "kind": "clause-slot",
           "slot": "limit"

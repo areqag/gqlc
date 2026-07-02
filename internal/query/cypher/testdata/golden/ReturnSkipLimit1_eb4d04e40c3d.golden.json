@@ -29,8 +29,8 @@
   "combinators": null,
   "parameters": [
     {
-      "Name": "skipAmount",
-      "Uses": [
+      "name": "skipAmount",
+      "uses": [
         {
           "kind": "clause-slot",
           "slot": "skip"
