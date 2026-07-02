@@ -118,3 +118,20 @@ and the full expression tree are deliberately outside the initial model.
 > no-expression-tree line holds; the resolver's cross-product logic for
 > multi-type and orientation-trial for undirected/var-length edges stays
 > below the type-interface boundary (ADR 0005)._
+>
+> _Note (Stage 9, ADR 0004/0007): the curated `Binding` sum grows a
+> fourth variant `UnwindBinding` — a query variable bound to the current
+> value drawn from an UNWIND expression's source list, carrying its
+> Stage-6 result type as the recorded element type. UNWIND is a reading
+> clause (not a pattern), so `UnwindBinding` is not a graph entity — it
+> carries no labels, no endpoints, no `EntityKind()` — but it lives in
+> the same `Part.Bindings` slice so consumers walk one canonical list of
+> in-scope names. Its type surfaces at `refType()`: a bare-ref to the
+> UNWIND variable projects as the recorded element type (`TypeInt` for
+> `UNWIND [1,2,3]`, `TypeUnknown` for `UNWIND range(1,3)` — the honest
+> posture the resolver upgrades). `WITH ... WHERE`,
+> `WITH ... ORDER BY / SKIP / LIMIT`, and `RETURN ... ORDER BY $param`
+> are accepted at their existing grammar hooks; sort-key structure stays
+> below the type-interface boundary and every parameter in a sort key
+> records an `ExprUse` so no parameter is silently dropped. The
+> no-expression-tree line holds._
