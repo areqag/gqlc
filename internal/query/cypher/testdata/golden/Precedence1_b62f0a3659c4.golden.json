@@ -40,7 +40,7 @@
                     "property": ""
                   }
                 ],
-                "type": "unknown"
+                "type": "list\u003cbool\u003e"
               }
             }
           ],

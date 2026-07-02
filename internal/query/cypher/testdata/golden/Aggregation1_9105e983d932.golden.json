@@ -1,0 +1,47 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "n.name",
+              "value": {
+                "kind": "ref",
+                "variable": "n",
+                "property": "name",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "count(n.num)",
+              "value": {
+                "kind": "aggregate",
+                "func": "count",
+                "refs": [
+                  {
+                    "variable": "n",
+                    "property": "num"
+                  }
+                ],
+                "distinct": false,
+                "type": "int"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

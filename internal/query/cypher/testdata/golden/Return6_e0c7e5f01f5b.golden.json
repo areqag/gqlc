@@ -118,7 +118,8 @@
                     "property": "name"
                   }
                 ],
-                "type": "unknown"
+                "distinct": false,
+                "type": "list\u003cunknown\u003e"
               }
             },
             {

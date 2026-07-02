@@ -23,7 +23,8 @@
                     "property": ""
                   }
                 ],
-                "type": "unknown"
+                "distinct": false,
+                "type": "int"
               }
             },
             {
@@ -37,7 +38,8 @@
                     "property": ""
                   }
                 ],
-                "type": "unknown"
+                "distinct": false,
+                "type": "list\u003cnode\u003e"
               }
             }
           ],

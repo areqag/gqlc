@@ -878,22 +878,25 @@ func (FuncProjection) isProjection() {}
 
 // AggregateProjection is an aggregate function call. It carries an AggregateFunc
 // (the cardinality-bearing distinction §4: an aggregate collapses rows, a fact
-// the generated code models differently), the referenced bindings as []Ref, and
-// its Stage-6 result type. count(*) is the degenerate case — AggCount with an
-// empty []Ref. As with FuncProjection, an aggregate's return type depends on
-// the argument type (below the type-interface boundary, ADR 0005), so the
-// listener records TypeUnknown; the resolver upgrades it from the schema.
+// the generated code models differently), the referenced bindings as []Ref, a
+// Stage-10 DISTINCT axis (single-bit annotation — `count(DISTINCT x)` and
+// `count(x)` are observably-different queries, so the model preserves the axis),
+// and its Stage-10 result type (per-aggregate table against the operand's
+// Stage-6 type, spec §1.2). count(*) is the degenerate case — AggCount with an
+// empty []Ref and a TypeInt result.
 type AggregateProjection struct {
 	fn         AggregateFunc // which aggregate this is (the cardinality signal)
 	refs       []Ref         // the var/var.prop arguments the aggregate touches
-	resultType Type          // Stage 6: TypeUnknown — the aggregate's return type is below the boundary
+	distinct   bool          // Stage 10: DISTINCT dedup axis; changes result semantics
+	resultType Type          // Stage 10: per-aggregate result type; TypeUnknown when the parser cannot commit
 }
 
 // NewAggregateProjection builds an AggregateProjection. Total: the listener
 // supplies an AggregateFunc from the closed enum, Refs it has already mined,
-// and a result type (TypeUnknown today).
-func NewAggregateProjection(fn AggregateFunc, refs []Ref, t Type) AggregateProjection {
-	return AggregateProjection{fn: fn, refs: refs, resultType: t}
+// the DISTINCT flag (read from the OC_FunctionInvocation grammar node), and
+// the Stage-10 result type it computed via aggregateResultType.
+func NewAggregateProjection(fn AggregateFunc, refs []Ref, distinct bool, t Type) AggregateProjection {
+	return AggregateProjection{fn: fn, refs: refs, distinct: distinct, resultType: t}
 }
 
 // Func is which aggregate this is — the cardinality-bearing distinction (§4).
@@ -902,8 +905,17 @@ func (p AggregateProjection) Func() AggregateFunc { return p.fn }
 // Refs are the var/var.prop arguments the aggregate touches.
 func (p AggregateProjection) Refs() []Ref { return p.refs }
 
-// Type is the aggregate's result type (Stage 6): TypeUnknown, because the
-// return type depends on the argument type — a schema concern per ADR 0003.
+// Distinct reports whether the aggregate was written with a DISTINCT
+// deduplication prefix (Stage 10). `count(DISTINCT x)` returns true;
+// `count(x)`, `count(*)`, and every aggregate without the keyword return
+// false. The axis changes result semantics, so the model carries it.
+func (p AggregateProjection) Distinct() bool { return p.distinct }
+
+// Type is the aggregate's result type (Stage 10, spec §1.2): TypeInt for
+// count; list<T> for collect; sum/min/max commit to a concrete type when the
+// operand's type commits, else TypeUnknown; avg / stDev / percentile* stay
+// TypeUnknown (engine-dependent). A wrong concrete type would be strictly
+// worse than an honest TypeUnknown the resolver can upgrade from the schema.
 func (p AggregateProjection) Type() Type { return p.resultType }
 
 func (AggregateProjection) isProjection() {}
@@ -1342,12 +1354,15 @@ func (p FuncProjection) MarshalJSON() ([]byte, error) {
 // MarshalJSON renders an AggregateProjection as a tagged union member
 // discriminated by "kind", emitting the aggregate kind as "func" (derived from
 // AggregateFunc.String, the single source), its referenced bindings as "refs",
-// and its Stage-6 result type as "type".
+// the Stage-10 DISTINCT axis as "distinct" (always emitted, matching the
+// always-emit convention nullable / directed / hops / returnsAll follow),
+// and its Stage-10 result type as "type".
 func (p AggregateProjection) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Kind string    `json:"kind"`
-		Func string    `json:"func"`
-		Refs []flatRef `json:"refs"`
-		Type Type      `json:"type"`
-	}{Kind: projectionKindAggregate, Func: p.fn.String(), Refs: flattenRefs(p.refs), Type: projectionType(p.resultType)})
+		Kind     string    `json:"kind"`
+		Func     string    `json:"func"`
+		Refs     []flatRef `json:"refs"`
+		Distinct bool      `json:"distinct"`
+		Type     Type      `json:"type"`
+	}{Kind: projectionKindAggregate, Func: p.fn.String(), Refs: flattenRefs(p.refs), Distinct: p.distinct, Type: projectionType(p.resultType)})
 }

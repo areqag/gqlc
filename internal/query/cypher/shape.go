@@ -194,6 +194,64 @@ func aggregateFunc(name string) (query.AggregateFunc, bool) {
 	}
 }
 
+// aggregateResultType returns the Stage-10 result type of an aggregate call
+// given its AggregateFunc and its operand's Stage-6 result type (spec §1.2).
+// A nil operand means the count(*) degenerate case; the caller passes nil for
+// count(*) and the Stage-6 typed argument otherwise. The rules follow the
+// per-aggregate table: count is TypeInt unconditionally; collect(T) is
+// list<T> (never bare TypeUnknown — the aggregate always yields a list, so
+// list<unknown> is the honest posture when the element is unknown); sum/min/
+// max commit to a concrete type when the operand's type commits; avg /
+// stDev / percentile* stay TypeUnknown (engine-dependent — a wrong concrete
+// would be strictly worse than the honest TypeUnknown the resolver upgrades).
+//
+// Same table applied at two sites (classifyFunction for a RETURN/WITH
+// projection, typeAtom for an aggregate inside a rich expression) so a
+// call cannot type differently across positions.
+func aggregateResultType(fn query.AggregateFunc, operand query.Type) query.Type {
+	switch fn {
+	case query.AggCount:
+		return query.TypeInt{}
+	case query.AggCollect:
+		if operand == nil {
+			return query.NewTypeList(query.TypeUnknown{})
+		}
+		return query.NewTypeList(operand)
+	case query.AggSum:
+		switch operand.(type) {
+		case query.TypeInt:
+			return query.TypeInt{}
+		case query.TypeFloat:
+			return query.TypeFloat{}
+		case query.TypeDuration:
+			return query.TypeDuration{}
+		default:
+			return query.TypeUnknown{}
+		}
+	case query.AggMin, query.AggMax:
+		switch operand.(type) {
+		case query.TypeInt, query.TypeFloat, query.TypeString, query.TypeBool,
+			query.TypeDate, query.TypeTime, query.TypeLocalTime,
+			query.TypeDateTime, query.TypeLocalDateTime, query.TypeDuration:
+			return operand
+		default:
+			return query.TypeUnknown{}
+		}
+	case query.AggAvg:
+		// avg(duration) is the only spec-committed numeric case; every other
+		// operand (int/float, mixed, property) is engine-dependent (int vs
+		// float rounding). Honest posture: TypeUnknown for numerics.
+		if _, ok := operand.(query.TypeDuration); ok {
+			return query.TypeDuration{}
+		}
+		return query.TypeUnknown{}
+	case query.AggStdev, query.AggPercentile:
+		return query.TypeUnknown{}
+	default:
+		return query.TypeUnknown{}
+	}
+}
+
 // functionArgRefs mines the bindings a function/aggregate call references: each
 // argument must be either a bare var/var.prop (yielding a Ref) or a scalar
 // literal (yielding no Ref). ok is false if any argument is something else

@@ -1,0 +1,71 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "NOT_EXIST"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "n"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "x"
+              },
+              "nullable": true,
+              "directed": true,
+              "hops": null
+            },
+            {
+              "kind": "node",
+              "variable": "x",
+              "labels": null,
+              "nullable": true
+            }
+          ],
+          "returns": [
+            {
+              "name": "n",
+              "value": {
+                "kind": "ref",
+                "variable": "n",
+                "property": "",
+                "type": "node"
+              }
+            },
+            {
+              "name": "collect(x)",
+              "value": {
+                "kind": "aggregate",
+                "func": "collect",
+                "refs": [
+                  {
+                    "variable": "x",
+                    "property": ""
+                  }
+                ],
+                "distinct": false,
+                "type": "list\u003cnode\u003e"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

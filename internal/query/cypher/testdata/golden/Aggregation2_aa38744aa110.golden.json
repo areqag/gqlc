@@ -1,0 +1,38 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "unwind",
+              "variable": "x",
+              "elemType": "list\u003cint\u003e",
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "max(x)",
+              "value": {
+                "kind": "aggregate",
+                "func": "max",
+                "refs": [
+                  {
+                    "variable": "x",
+                    "property": ""
+                  }
+                ],
+                "distinct": false,
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

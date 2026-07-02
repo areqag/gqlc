@@ -10,7 +10,7 @@
               "value": {
                 "kind": "expr",
                 "refs": null,
-                "type": "unknown"
+                "type": "list\u003clist\u003cunknown\u003e\u003e"
               }
             }
           ],
@@ -21,7 +21,7 @@
             {
               "kind": "unwind",
               "variable": "arr",
-              "elemType": "unknown",
+              "elemType": "list\u003cunknown\u003e",
               "nullable": false
             }
           ],

@@ -1,0 +1,47 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "p",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "n",
+                    "property": "price"
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": [
+    {
+      "name": "percentile",
+      "uses": [
+        {
+          "kind": "expr",
+          "enclosingType": "unknown",
+          "position": "projection"
+        }
+      ]
+    }
+  ]
+}

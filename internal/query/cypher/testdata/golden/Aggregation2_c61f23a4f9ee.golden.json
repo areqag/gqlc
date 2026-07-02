@@ -1,0 +1,38 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "unwind",
+              "variable": "i",
+              "elemType": "unknown",
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "min(i)",
+              "value": {
+                "kind": "aggregate",
+                "func": "min",
+                "refs": [
+                  {
+                    "variable": "i",
+                    "property": ""
+                  }
+                ],
+                "distinct": false,
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

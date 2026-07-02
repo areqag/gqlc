@@ -308,10 +308,12 @@ func (l *listener) typeNonArithmetic(n gen.IOC_NonArithmeticOperatorExpressionCo
 // typeAtom types an atom and mines any ref it contains: a variable atom yields
 // TypeNode/TypeEdge (or TypeUnknown for an imported alias whose kind is a
 // scalar), a literal yields its scalar-or-list-or-map kind, a parameter is
-// approved and yields TypeUnknown, a function invocation yields TypeUnknown,
-// a parenthesised expression falls through, a CASE expression yields the
-// common type of its alternatives (TypeUnknown when they diverge), and a
-// count(*) yields TypeUnknown (aggregate return types are below the boundary).
+// approved and yields TypeUnknown, a function invocation yields its
+// Stage-7 temporal-constructor type or its Stage-10 aggregate-result type
+// when the name matches (spec §1.3), else TypeUnknown, a parenthesised
+// expression falls through, a CASE expression yields the common type of its
+// alternatives (TypeUnknown when they diverge), and a count(*) star-atom
+// yields TypeInt via the aggregate table (Stage 10).
 func (l *listener) typeAtom(a gen.IOC_AtomContext, refs *[]query.Ref) query.Type {
 	if a == nil {
 		return query.TypeUnknown{}
@@ -336,12 +338,31 @@ func (l *listener) typeAtom(a gen.IOC_AtomContext, refs *[]query.Ref) query.Type
 		}
 		return query.TypeUnknown{}
 	case a.COUNT() != nil:
-		return query.TypeUnknown{}
+		// Stage 10: a count(*) star-atom inside a rich expression (e.g.
+		// count(*) + 1) types as TypeInt via the aggregate table, matching
+		// what classifyProjection returns for a bare count(*) at RETURN
+		// position. The atom is grammatical-only — no refs to mine.
+		return aggregateResultType(query.AggCount, nil)
 	case a.OC_FunctionInvocation() != nil:
 		fi := a.OC_FunctionInvocation()
 		l.mineFunctionArgs(fi, refs)
 		if t, ok := temporalConstructorType(fullFunctionName(fi)); ok {
 			return t
+		}
+		// Stage 10: an aggregate inside a rich expression types via the same
+		// per-aggregate table classifyFunction uses at RETURN/WITH position, so
+		// the two positions cannot disagree on the same call's result type. A
+		// bare count() atom is handled via a.COUNT() (the star-atom
+		// alternative); every other aggregate is a normal function-invocation
+		// atom whose name matches the closed set.
+		if name, ok := functionName(fi); ok {
+			if fn, ok := aggregateFunc(name); ok {
+				var operand query.Type
+				if args := fi.AllOC_Expression(); len(args) > 0 {
+					operand, _ = l.typeExpression(args[0])
+				}
+				return aggregateResultType(fn, operand)
+			}
 		}
 		return query.TypeUnknown{}
 	case a.OC_ParenthesizedExpression() != nil:

@@ -134,11 +134,11 @@ func TestFuncProjectionType(t *testing.T) {
 	require.Equal(t, query.TypeUnknown{}, p.Type())
 }
 
-// TestAggregateProjectionType pins the accessor: AggregateProjection also
-// carries a result type, TypeUnknown because the aggregate's return type
-// depends on the argument type (below the boundary).
+// TestAggregateProjectionType pins the accessor: AggregateProjection carries
+// its Stage-10 per-aggregate result type — sum over an unknown-typed operand
+// stays TypeUnknown (property-typed operands are engine-side per ADR 0003).
 func TestAggregateProjectionType(t *testing.T) {
-	p := query.NewAggregateProjection(query.AggSum, []query.Ref{{Variable: "n", Property: "num"}}, query.TypeUnknown{})
+	p := query.NewAggregateProjection(query.AggSum, []query.Ref{{Variable: "n", Property: "num"}}, false, query.TypeUnknown{})
 	require.Equal(t, query.TypeUnknown{}, p.Type())
 }
 

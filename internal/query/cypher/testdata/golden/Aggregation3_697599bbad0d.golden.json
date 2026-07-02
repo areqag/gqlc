@@ -1,0 +1,53 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "unwind",
+              "variable": "i",
+              "elemType": "unknown",
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "i",
+              "value": {
+                "kind": "ref",
+                "variable": "i",
+                "property": "",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "sum(i)",
+              "value": {
+                "kind": "aggregate",
+                "func": "sum",
+                "refs": [
+                  {
+                    "variable": "i",
+                    "property": ""
+                  }
+                ],
+                "distinct": false,
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

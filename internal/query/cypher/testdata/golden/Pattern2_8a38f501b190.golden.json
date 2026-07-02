@@ -19,7 +19,7 @@
               "value": {
                 "kind": "expr",
                 "refs": null,
-                "type": "unknown"
+                "type": "int"
               }
             }
           ],

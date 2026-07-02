@@ -58,7 +58,8 @@
                     "property": "age"
                   }
                 ],
-                "type": "unknown"
+                "distinct": false,
+                "type": "int"
               }
             }
           ],

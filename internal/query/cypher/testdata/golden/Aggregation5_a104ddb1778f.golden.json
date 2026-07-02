@@ -1,0 +1,63 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "f",
+              "labels": [
+                "DoesExist"
+              ],
+              "nullable": true
+            },
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": [
+                "DoesNotExist"
+              ],
+              "nullable": true
+            }
+          ],
+          "returns": [
+            {
+              "name": "a",
+              "value": {
+                "kind": "aggregate",
+                "func": "collect",
+                "refs": [
+                  {
+                    "variable": "n",
+                    "property": "num"
+                  }
+                ],
+                "distinct": true,
+                "type": "list\u003cunknown\u003e"
+              }
+            },
+            {
+              "name": "b",
+              "value": {
+                "kind": "aggregate",
+                "func": "collect",
+                "refs": [
+                  {
+                    "variable": "f",
+                    "property": "num"
+                  }
+                ],
+                "distinct": true,
+                "type": "list\u003cunknown\u003e"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

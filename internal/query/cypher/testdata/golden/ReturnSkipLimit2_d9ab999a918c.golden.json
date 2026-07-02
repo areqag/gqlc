@@ -73,7 +73,8 @@
                 "kind": "aggregate",
                 "func": "count",
                 "refs": null,
-                "type": "unknown"
+                "distinct": false,
+                "type": "int"
               }
             }
           ],
