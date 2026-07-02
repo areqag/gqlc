@@ -1,0 +1,24 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "duration",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

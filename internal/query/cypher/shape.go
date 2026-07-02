@@ -106,6 +106,66 @@ func functionName(fi gen.IOC_FunctionInvocationContext) (string, bool) {
 	return strings.ToLower(sn.GetText()), true
 }
 
+// fullFunctionName reads the fully-qualified function name of an invocation
+// as dot-joined lowercase segments — "date" for a bare call, "duration.between"
+// for a namespaced one. Empty string when the invocation has no readable name.
+// Stage 7 uses this to match the seven-name temporal constructor set (spec §1,
+// §4): every constructor except the namespaced duration.* set has an empty
+// namespace, so functionName covers the six bare ones; the namespaced set
+// needs the full-name form. Both classify against the same lookup, so drift
+// between call sites is impossible.
+func fullFunctionName(fi gen.IOC_FunctionInvocationContext) string {
+	name := fi.OC_FunctionName()
+	if name == nil {
+		return ""
+	}
+	sn := name.OC_SymbolicName()
+	if sn == nil {
+		return ""
+	}
+	bare := strings.ToLower(sn.GetText())
+	ns := name.OC_Namespace()
+	if ns == nil {
+		return bare
+	}
+	parts := ns.AllOC_SymbolicName()
+	if len(parts) == 0 {
+		return bare
+	}
+	var b strings.Builder
+	for _, p := range parts {
+		b.WriteString(strings.ToLower(p.GetText()))
+		b.WriteByte('.')
+	}
+	b.WriteString(bare)
+	return b.String()
+}
+
+// temporalConstructorType maps a fully-qualified openCypher temporal
+// constructor name to its Stage-7 result type (spec §1). Every match is a
+// standard openCypher constructor whose return type is settled at the grammar
+// level — schema-independent, exactly the posture Stage-3 aggregates take.
+// An unmatched name returns TypeUnknown, so callers can chain the lookup with
+// the existing "function identity is below the boundary" default without
+// branching.
+func temporalConstructorType(name string) (query.Type, bool) {
+	switch name {
+	case "date":
+		return query.TypeDate{}, true
+	case "time":
+		return query.TypeTime{}, true
+	case "localtime":
+		return query.TypeLocalTime{}, true
+	case "datetime":
+		return query.TypeDateTime{}, true
+	case "localdatetime":
+		return query.TypeLocalDateTime{}, true
+	case "duration", "duration.between":
+		return query.TypeDuration{}, true
+	}
+	return nil, false
+}
+
 // aggregateFunc maps a lowercased function name to its AggregateFunc, reporting
 // whether the name is an aggregate at all (§4: the openCypher aggregating
 // functions are a closed set). stdev/stdevp and percentilecont/percentiledisc
