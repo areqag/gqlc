@@ -28,7 +28,7 @@
                 "func": "count",
                 "refs": null,
                 "distinct": false,
-                "type": "unknown"
+                "type": "int"
               }
             }
           ],
@@ -52,7 +52,7 @@
                 "kind": "ref",
                 "variable": "cnt",
                 "property": "",
-                "type": "unknown"
+                "type": "int"
               }
             }
           ],

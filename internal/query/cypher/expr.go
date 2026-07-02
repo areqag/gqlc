@@ -224,13 +224,13 @@ func (l *listener) classifyProjection(e gen.IOC_ExpressionContext) (query.Projec
 	case atom.COUNT() != nil:
 		// The count-star atom count(*): the degenerate aggregate, AggCount with no
 		// referenced binding. A property lookup on it (count(*).x) is residual.
-		// Stage 6: TypeUnknown — aggregate return types are below the boundary
-		// (ADR 0005); a real engine yields int, the resolver upgrades from the
-		// schema.
+		// Stage 10: count(*) types as TypeInt unconditionally — openCypher's count
+		// returns an integer by specification, so the schema-agnostic parser can
+		// commit here without ever being wrong (spec §1.2).
 		if lookups > 0 {
 			return nil, false
 		}
-		return query.NewAggregateProjection(query.AggCount, nil, false, query.TypeUnknown{}), true
+		return query.NewAggregateProjection(query.AggCount, nil, false, aggregateResultType(query.AggCount, nil)), true
 
 	case atom.OC_Literal() != nil:
 		if lookups > 0 || !isScalarLiteral(atom.OC_Literal()) {
@@ -297,8 +297,11 @@ func (l *listener) refType(r query.Ref) query.Type {
 // name matches the closed aggregate set (case-insensitively, §4), an
 // AggregateProjection. Either way it mines the call's referenced bindings; any
 // argument that is not a bare var/var.prop or scalar literal makes it residual
-// (no expression tree, no nested aggregates, spec §4/§9). Stage 6: aggregate
-// results carry TypeUnknown; Stage 7 widens a plain FuncProjection's result
+// (no expression tree, no nested aggregates, spec §4/§9). Stage 10: aggregate
+// results carry the per-aggregate Stage-10 result type computed from the
+// single expression argument's Stage-6 result type via aggregateResultType,
+// and the DISTINCT keyword (fi.DISTINCT() non-nil) enters the model as the
+// aggregate's Distinct axis. Stage 7 widens a plain FuncProjection's result
 // type when the call's full name matches the seven-name temporal constructor
 // set (spec §4). Every other function call keeps TypeUnknown — function
 // identity is below the type-interface boundary (ADR 0005).
@@ -312,7 +315,18 @@ func (l *listener) classifyFunction(fi gen.IOC_FunctionInvocationContext) (query
 	}
 	if name, ok := functionName(fi); ok {
 		if fn, ok := aggregateFunc(name); ok {
-			return query.NewAggregateProjection(fn, refs, false, query.TypeUnknown{}), true
+			// The aggregate's operand type is the Stage-6 type of its single
+			// expression argument. Multi-argument aggregates (percentile*, whose
+			// second argument is the percentile) type as TypeUnknown regardless:
+			// the argument list is walked only for the first operand's type,
+			// and aggregateResultType(AggPercentile, _) returns TypeUnknown
+			// anyway, so no special-case is needed.
+			var operand query.Type
+			if args := fi.AllOC_Expression(); len(args) > 0 {
+				operand, _ = l.typeExpression(args[0])
+			}
+			distinct := fi.DISTINCT() != nil
+			return query.NewAggregateProjection(fn, refs, distinct, aggregateResultType(fn, operand)), true
 		}
 	}
 	resultType := query.Type(query.TypeUnknown{})

@@ -355,7 +355,8 @@ var mustParse = map[string]struct {
 	// count-star atom, AggCount with no referenced bindings (it counts rows, not a
 	// binding). Column name is the verbatim text "count(*)". The aggregate kind is
 	// carried because it changes result cardinality (spec §4); the function's
-	// identity below the boundary is not.
+	// identity below the boundary is not. Stage 10 upgrades the result type from
+	// TypeUnknown to TypeInt — count returns an integer by openCypher spec.
 	"count star aggregate": {
 		src: "MATCH (n)\nRETURN count(*)",
 		want: oneBranch(query.Part{
@@ -363,7 +364,7 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("n", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "count(*)", Value: query.NewAggregateProjection(query.AggCount, nil, false, query.TypeUnknown{})},
+				{Name: "count(*)", Value: query.NewAggregateProjection(query.AggCount, nil, false, query.TypeInt{})},
 			},
 		}),
 	},
@@ -1131,14 +1132,15 @@ var mustParse = map[string]struct {
 	},
 	// Stage 9 — MATCH-after-UNWIND with a list-of-nodes source: the
 	// legitimate reuse path (a WITH collect(n) AS ns yields a
-	// list<node> whose element type is TypeNode; the subsequent MATCH
-	// (m) is a constraint on the already-bound m, not a fresh binding).
-	// nameBoundAsUnwind must fire only when the UNWIND element type is
-	// node / edge / unknown — a scalar elemType falls through to a
-	// byVar collision → ErrVariableKindConflict (see the six mustReject
-	// entries below). The Stage-6 typer collapses collect(n) to
-	// TypeUnknown (aggregate identity below the boundary, ADR 0005),
-	// so the UnwindBinding here records elemType TypeUnknown.
+	// list<node>; the subsequent MATCH (m) is a constraint on the
+	// already-bound m, not a fresh binding). nameBoundAsUnwind must fire
+	// only when the UNWIND element type is node / edge / unknown — a
+	// scalar elemType falls through to a byVar collision →
+	// ErrVariableKindConflict (see the six mustReject entries below).
+	// Stage 10 upgrades the aggregate result: collect(TypeNode) →
+	// list<node>, so the UnwindBinding here records elemType TypeNode
+	// and the downstream RefProjection on m types as TypeNode — a
+	// strict typing improvement end-to-end.
 	"unwind of list-of-nodes reused as node match": {
 		src: "MATCH (n)\nWITH collect(n) AS ns\nUNWIND ns AS m\nMATCH (m)\nRETURN m",
 		want: query.Query{
@@ -1146,19 +1148,107 @@ var mustParse = map[string]struct {
 				{
 					Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
 					Returns: []query.ReturnItem{
-						{Name: "ns", Value: query.NewAggregateProjection(query.AggCollect, []query.Ref{{Variable: "n"}}, false, query.TypeUnknown{})},
+						{Name: "ns", Value: query.NewAggregateProjection(query.AggCollect, []query.Ref{{Variable: "n"}}, false, query.NewTypeList(query.TypeNode{}))},
 					},
 				},
 				{
 					Bindings: []query.Binding{
-						must(query.NewUnwindBinding("m", query.TypeUnknown{})),
+						must(query.NewUnwindBinding("m", query.TypeNode{})),
 					},
 					Returns: []query.ReturnItem{
-						{Name: "m", Value: query.NewRefProjection(query.Ref{Variable: "m"}, query.TypeUnknown{})},
+						{Name: "m", Value: query.NewRefProjection(query.Ref{Variable: "m"}, query.TypeNode{})},
 					},
 				},
 			}}},
 		},
+	},
+	// Stage 10 — DISTINCT enters the model as a scalar axis. count(DISTINCT a)
+	// deduplicates its input before counting, so the model preserves the axis;
+	// count still types as TypeInt unconditionally.
+	"count distinct": {
+		src: "OPTIONAL MATCH (a)\nRETURN count(DISTINCT a)",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNullableNodeBinding("a", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "count(DISTINCT a)", Value: query.NewAggregateProjection(query.AggCount, []query.Ref{{Variable: "a"}}, true, query.TypeInt{})},
+			},
+		}),
+	},
+	// Stage 10 — collect(TypeNode) → list<node>. The aggregate always yields a
+	// list; the element type composes with Stage-6 typing (a bare node ref
+	// types as TypeNode).
+	"collect node": {
+		src: "MATCH (n)\nRETURN collect(n)",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "collect(n)", Value: query.NewAggregateProjection(query.AggCollect, []query.Ref{{Variable: "n"}}, false, query.NewTypeList(query.TypeNode{}))},
+			},
+		}),
+	},
+	// Stage 10 — collect over a property lookup: the element is TypeUnknown
+	// (property typing is a schema concern per ADR 0003), so the aggregate
+	// types as list<unknown> — never bare TypeUnknown at the outer level,
+	// per the "collect always yields a list" invariant (spec §1.2).
+	"collect property": {
+		src: "MATCH (n)\nRETURN collect(n.name)",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "collect(n.name)", Value: query.NewAggregateProjection(query.AggCollect, []query.Ref{{Variable: "n", Property: "name"}}, false, query.NewTypeList(query.TypeUnknown{}))},
+			},
+		}),
+	},
+	// Stage 10 — sum over a Stage-6 int-typed operand commits: sum(TypeInt)
+	// → TypeInt. UNWIND [1,2,3] AS x binds x with elemType TypeInt (Stage 6
+	// list typing + Stage 9 UNWIND element extraction).
+	"sum over unwind int": {
+		src: "UNWIND [1, 2, 3] AS x\nRETURN sum(x)",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewUnwindBinding("x", query.TypeInt{}))},
+			Returns: []query.ReturnItem{
+				{Name: "sum(x)", Value: query.NewAggregateProjection(query.AggSum, []query.Ref{{Variable: "x"}}, false, query.TypeInt{})},
+			},
+		}),
+	},
+	// Stage 10 — avg stays honest-Unknown for numeric operands (engine-
+	// dependent whether it returns int or float; the resolver upgrades from
+	// the schema post-freeze).
+	"avg over unwind int": {
+		src: "UNWIND [1, 2, 3] AS x\nRETURN avg(x)",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewUnwindBinding("x", query.TypeInt{}))},
+			Returns: []query.ReturnItem{
+				{Name: "avg(x)", Value: query.NewAggregateProjection(query.AggAvg, []query.Ref{{Variable: "x"}}, false, query.TypeUnknown{})},
+			},
+		}),
+	},
+	// Stage 10 — min over a Stage-6 string-typed operand commits to the
+	// operand type (min/max are order-preserving; if the operand is a
+	// scalar comparable, the aggregate's result IS the operand type).
+	"min over unwind string": {
+		src: "UNWIND ['a', 'b'] AS x\nRETURN min(x)",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewUnwindBinding("x", query.TypeString{}))},
+			Returns: []query.ReturnItem{
+				{Name: "min(x)", Value: query.NewAggregateProjection(query.AggMin, []query.Ref{{Variable: "x"}}, false, query.TypeString{})},
+			},
+		}),
+	},
+	// Stage 10 — an aggregate inside a rich expression types via the
+	// same table: count(n) types as TypeInt, so count(n) + 1 types as
+	// TypeInt via promoteAdd(TypeInt, TypeInt). The ExprProjection carries
+	// the aggregate's touched ref and the promoted result type.
+	"count in arithmetic": {
+		src: "MATCH (n)\nRETURN count(n) + 1",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "count(n) + 1", Value: query.NewExprProjection([]query.Ref{{Variable: "n"}}, query.TypeInt{})},
+			},
+		}),
 	},
 }
 

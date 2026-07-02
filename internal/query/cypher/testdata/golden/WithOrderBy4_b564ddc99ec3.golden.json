@@ -70,7 +70,7 @@
                 "func": "count",
                 "refs": null,
                 "distinct": false,
-                "type": "unknown"
+                "type": "int"
               }
             }
           ],

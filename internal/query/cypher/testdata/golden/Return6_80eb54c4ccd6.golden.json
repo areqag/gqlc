@@ -24,7 +24,7 @@
                   }
                 ],
                 "distinct": false,
-                "type": "unknown"
+                "type": "int"
               }
             },
             {
@@ -39,7 +39,7 @@
                   }
                 ],
                 "distinct": false,
-                "type": "unknown"
+                "type": "list\u003cnode\u003e"
               }
             }
           ],

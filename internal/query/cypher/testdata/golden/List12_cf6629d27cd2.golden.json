@@ -67,7 +67,7 @@
                   }
                 ],
                 "distinct": false,
-                "type": "unknown"
+                "type": "int"
               }
             }
           ],
@@ -91,7 +91,7 @@
                 "kind": "ref",
                 "variable": "c",
                 "property": "",
-                "type": "unknown"
+                "type": "int"
               }
             }
           ],

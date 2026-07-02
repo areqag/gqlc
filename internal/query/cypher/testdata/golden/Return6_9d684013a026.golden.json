@@ -74,8 +74,8 @@
                     "property": ""
                   }
                 ],
-                "distinct": false,
-                "type": "unknown"
+                "distinct": true,
+                "type": "int"
               }
             },
             {
@@ -89,8 +89,8 @@
                     "property": ""
                   }
                 ],
-                "distinct": false,
-                "type": "unknown"
+                "distinct": true,
+                "type": "int"
               }
             },
             {

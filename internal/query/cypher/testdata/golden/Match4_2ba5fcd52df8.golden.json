@@ -117,7 +117,7 @@
                   }
                 ],
                 "distinct": false,
-                "type": "unknown"
+                "type": "int"
               }
             }
           ],

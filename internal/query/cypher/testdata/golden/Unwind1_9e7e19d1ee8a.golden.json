@@ -59,7 +59,7 @@
                   }
                 ],
                 "distinct": false,
-                "type": "unknown"
+                "type": "list\u003cnode\u003e"
               }
             }
           ],
@@ -94,7 +94,7 @@
             {
               "kind": "unwind",
               "variable": "b2",
-              "elemType": "unknown",
+              "elemType": "node",
               "nullable": false
             }
           ],
@@ -114,7 +114,7 @@
                 "kind": "ref",
                 "variable": "b2",
                 "property": "",
-                "type": "unknown"
+                "type": "node"
               }
             }
           ],
