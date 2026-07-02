@@ -82,3 +82,21 @@ and the full expression tree are deliberately outside the initial model.
 > ADR locks the sum. `Use` gains an **`ExprUse`** variant so a `$param`
 > inside a rich expression is recorded (its type comes from the enclosing
 > expression, not from a binding). The no-expression-tree line holds._
+>
+> _Note (Stage 7, ADR 0004/0007): the curated `Type` sum now carries the
+> six openCypher temporal scalars — `TypeDate`, `TypeTime`, `TypeLocalTime`,
+> `TypeDateTime`, `TypeLocalDateTime`, `TypeDuration` — added as empty-struct
+> variants alongside the Stage-6 scalars. The rich-expression typer commits
+> to a small closed rule set: a **temporal constructor** call (`date(...)`,
+> `duration.between(...)`, and the seven other names in the closed lookup)
+> types to its concrete temporal result; **temporal arithmetic** types
+> under an operator-aware, direction-restricted table
+> (`<temporal-point> ± duration → <temporal-point>`,
+> `duration ± duration → duration`, `duration × number → duration`
+> commutative, `duration ÷ number → duration` one-way). Every other
+> combination — a duration minus a temporal-point, a number divided by a
+> duration, a duration divided by a duration, a temporal accessor like
+> `d.year` — types as `TypeUnknown`, which the resolver upgrades from
+> the schema. The no-expression-tree line holds; temporal semantics
+> (calendar arithmetic, timezone normalisation) stay below the boundary
+> (ADR 0005), executed from the original text._

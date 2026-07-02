@@ -1,0 +1,73 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "x",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "time"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "d",
+              "labels": [
+                "Duration"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "sum",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "x",
+                    "property": ""
+                  },
+                  {
+                    "variable": "d",
+                    "property": "dur"
+                  }
+                ],
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "diff",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "x",
+                    "property": ""
+                  },
+                  {
+                    "variable": "d",
+                    "property": "dur"
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

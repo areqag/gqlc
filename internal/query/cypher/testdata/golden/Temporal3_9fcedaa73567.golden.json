@@ -1,0 +1,43 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "other",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "localtime"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "result",
+              "value": {
+                "kind": "func",
+                "refs": [
+                  {
+                    "variable": "other",
+                    "property": ""
+                  }
+                ],
+                "type": "time"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

@@ -1,0 +1,220 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "v",
+              "labels": [
+                "Val"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "d",
+              "value": {
+                "kind": "ref",
+                "variable": "v",
+                "property": "date",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "d.years",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "years",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.quarters",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "quarters",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.months",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "months",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.weeks",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "weeks",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.days",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "days",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.hours",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "hours",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.minutes",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "minutes",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.seconds",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "seconds",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.milliseconds",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "milliseconds",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.microseconds",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "microseconds",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.nanoseconds",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "nanoseconds",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.quartersOfYear",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "quartersOfYear",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.monthsOfQuarter",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "monthsOfQuarter",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.monthsOfYear",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "monthsOfYear",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.daysOfWeek",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "daysOfWeek",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.minutesOfHour",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "minutesOfHour",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.secondsOfMinute",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "secondsOfMinute",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.millisecondsOfSecond",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "millisecondsOfSecond",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.microsecondsOfSecond",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "microsecondsOfSecond",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.nanosecondsOfSecond",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "nanosecondsOfSecond",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

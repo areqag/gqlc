@@ -1,0 +1,123 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "x",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "localdatetime"
+              }
+            },
+            {
+              "name": "d",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "localdatetime"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "x \u003e d",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "x",
+                    "property": ""
+                  },
+                  {
+                    "variable": "d",
+                    "property": ""
+                  }
+                ],
+                "type": "bool"
+              }
+            },
+            {
+              "name": "x \u003c d",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "x",
+                    "property": ""
+                  },
+                  {
+                    "variable": "d",
+                    "property": ""
+                  }
+                ],
+                "type": "bool"
+              }
+            },
+            {
+              "name": "x \u003e= d",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "x",
+                    "property": ""
+                  },
+                  {
+                    "variable": "d",
+                    "property": ""
+                  }
+                ],
+                "type": "bool"
+              }
+            },
+            {
+              "name": "x \u003c= d",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "x",
+                    "property": ""
+                  },
+                  {
+                    "variable": "d",
+                    "property": ""
+                  }
+                ],
+                "type": "bool"
+              }
+            },
+            {
+              "name": "x = d",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "x",
+                    "property": ""
+                  },
+                  {
+                    "variable": "d",
+                    "property": ""
+                  }
+                ],
+                "type": "bool"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

@@ -1,0 +1,130 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "v",
+              "labels": [
+                "Val"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "d",
+              "value": {
+                "kind": "ref",
+                "variable": "v",
+                "property": "date",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "d.hour",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "hour",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.minute",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "minute",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.second",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "second",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.millisecond",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "millisecond",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.microsecond",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "microsecond",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.nanosecond",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "nanosecond",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.timezone",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "timezone",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.offset",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "offset",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.offsetMinutes",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "offsetMinutes",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.offsetSeconds",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "offsetSeconds",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

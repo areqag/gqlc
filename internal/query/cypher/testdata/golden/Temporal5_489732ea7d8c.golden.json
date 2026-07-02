@@ -1,0 +1,229 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "v",
+              "labels": [
+                "Val"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "d",
+              "value": {
+                "kind": "ref",
+                "variable": "v",
+                "property": "date",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "d.year",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "year",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.quarter",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "quarter",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.month",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "month",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.week",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "week",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.weekYear",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "weekYear",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.day",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "day",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.ordinalDay",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "ordinalDay",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.weekDay",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "weekDay",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.dayOfQuarter",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "dayOfQuarter",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.hour",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "hour",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.minute",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "minute",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.second",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "second",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.millisecond",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "millisecond",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.microsecond",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "microsecond",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.nanosecond",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "nanosecond",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.timezone",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "timezone",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.offset",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "offset",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.offsetMinutes",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "offsetMinutes",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.offsetSeconds",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "offsetSeconds",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.epochSeconds",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "epochSeconds",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "d.epochMillis",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "epochMillis",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

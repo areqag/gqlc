@@ -33,9 +33,11 @@ var updateGolden = flag.Bool("update", false, "regenerate golden snapshots from 
 // adds the expression dirs: literals, boolean, comparison, mathematical,
 // string, null, precedence, typeConversion, list, map, conditional — every
 // one exercises a scalar expression the widened projection sum now types.
-// Aggregation, existentialSubqueries, graph, path, pattern, quantifier, and
-// temporal stay out until Stages 7-11 land. The corpus is never edited; each
-// stage widens the dir list and shrinks the skiplist.
+// Stage 7 adds expressions/temporal — the constructor + arithmetic surface
+// the six new temporal Type variants unlock. Aggregation,
+// existentialSubqueries, graph, path, pattern, and quantifier stay out until
+// Stages 8-11 land. The corpus is never edited; each stage widens the dir
+// list and shrinks the skiplist.
 var readCoreDirs = []string{
 	"../../../test/data/query/cypher/tck/features/clauses/match",
 	"../../../test/data/query/cypher/tck/features/clauses/return",
@@ -54,6 +56,7 @@ var readCoreDirs = []string{
 	"../../../test/data/query/cypher/tck/features/expressions/list",
 	"../../../test/data/query/cypher/tck/features/expressions/map",
 	"../../../test/data/query/cypher/tck/features/expressions/conditional",
+	"../../../test/data/query/cypher/tck/features/expressions/temporal",
 }
 
 const goldenDir = "testdata/golden"
@@ -420,11 +423,33 @@ func initScenario(ctx *godog.ScenarioContext) {
 
 	// The query under test.
 	ctx.Step(`^executing query:$`, executingQuery)
+	// The Stage-7 temporal storage scenarios (Temporal4) pair a write query
+	// with a follow-up "executing control query" that reads back what was
+	// written. We are a parser and the first executing-query already
+	// exercised the parser's disposition (a write clause rejects, an
+	// expression parses); the control query re-exercises the same rules
+	// against a read query, so we route it through the same parser call
+	// and let the following Then steps carry the assertion.
+	ctx.Step(`^executing control query:$`, executingQuery)
 
 	// Positive outcomes: the scenario expected a result, so the query must parse.
 	// The order qualifier is a non-capturing group: we don't bind it, and a
 	// capturing group would force a string argument onto the step function.
 	ctx.Step(`^the result should be(?:, in any order| \(ignoring element order for lists\)|, in order)?:$`, resultShouldBe)
+	// Storage scenarios expect an empty result from the write query
+	// (Temporal4). At the parse level "empty" is the same guard as
+	// "should be": the query must have parsed (or be a known-unsupported /
+	// skipped scenario). noSideEffects's semantics fit exactly.
+	//
+	// Assumption: write clauses fail at parse today (ErrUnsupportedClause),
+	// so a scenario reaching "the result should be empty" pairs with a
+	// parse-time reject and noSideEffects returns ErrPending via the
+	// isUnsupported path. Once a future stage parses writes, the paired
+	// executing-query step will succeed and this step must snapshot the
+	// resulting model — silent-drop this and a Stage-12 write scenario
+	// would type-check clean with no assertion. Guarded by
+	// TestGoldenOrphans keying every executing-query step to a golden.
+	ctx.Step(`^the result should be empty$`, noSideEffects)
 	ctx.Step(`^no side effects$`, noSideEffects)
 	ctx.Step(`^the side effects should be:$`, noopTable)
 
@@ -664,9 +689,19 @@ func harvestExecutingQueries(t *testing.T, dirs []string) []string {
 	return out
 }
 
+// isExecutingQueryStep identifies the docstring-bearing "when" step whose
+// content is the query the scenario executes. The two accepted spellings
+// mirror the two Step registrations in initScenario ("executing query" and
+// the Temporal4 write-plus-readback "executing control query"). Exact match
+// on the two known spellings — not a substring test — so a future TCK
+// step like "before executing query, do X" cannot silently key a golden.
+// Stage-12 write-storage goldens would orphan silently under a substring
+// match once CREATE parses.
 func isExecutingQueryStep(step *messages.PickleStep) bool {
-	return strings.Contains(step.Text, "executing query") &&
-		step.Argument != nil && step.Argument.DocString != nil
+	if step.Argument == nil || step.Argument.DocString == nil {
+		return false
+	}
+	return step.Text == "executing query:" || step.Text == "executing control query:"
 }
 
 // newIDGen returns a fresh incrementing id generator, required by Pickles.
