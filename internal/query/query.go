@@ -477,8 +477,8 @@ func (f AggregateFunc) String() string {
 // uses post-freeze (the parser stays schema-agnostic per ADR 0003); mixed-kind
 // uses on one Parameter are not a parser-level conflict.
 type Parameter struct {
-	Name string
-	Uses []Use
+	Name string `json:"name"`
+	Uses []Use  `json:"uses"`
 }
 
 // Use is one position where a parameter appears. It is a closed sum of
