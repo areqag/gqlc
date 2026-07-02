@@ -26,9 +26,14 @@ func isDotDotToken(tree antlr.Tree) bool {
 // collectPattern lowers one MATCH clause's comma-separated pattern parts into
 // bindings. Each part is a chain of node patterns joined by relationship
 // patterns. A named path (p = ...) contributes its member bindings the same
-// way plus a PathBinding capturing the path variable and every member's name
-// in textual order (Stage 8 spec §1.5). optional flags an OPTIONAL MATCH
-// clause: any binding first introduced here is marked nullable (ADR 0006).
+// way plus a PathBinding whose Members list is the shape-faithful, tagged-sum
+// sequence of the path's elements in textual order (Stage 8 spec §1.2, §1.5):
+// named nodes/edges surface as NamedNodeMember / NamedEdgeMember, and
+// anonymous edges and anonymous intermediate nodes surface as
+// AnonEdgeMember / AnonNodeMember slots (the anonymous slots carry no name,
+// so they never collide with a user variable in the byVar namespace).
+// optional flags an OPTIONAL MATCH clause: any binding first introduced here
+// is marked nullable (ADR 0006).
 func (l *listener) collectPattern(p gen.IOC_PatternContext, optional bool) {
 	if p == nil || l.err != nil {
 		return
@@ -38,14 +43,21 @@ func (l *listener) collectPattern(p gen.IOC_PatternContext, optional bool) {
 		if v := part.OC_Variable(); v != nil {
 			pathVar = v.GetText()
 		}
-		before := len(l.curPart.bindings)
+		var pathMembers []query.PathMember
+		if pathVar != "" {
+			// Only accumulate the members list when the pattern part is a
+			// named path — collectPatternElement records to this slice
+			// alongside the part's raw bindings when non-nil.
+			pathMembers = make([]query.PathMember, 0, 8)
+			l.curPart.pathMemberSink = &pathMembers
+		}
 		l.collectPatternElement(part.OC_AnonymousPatternPart().OC_PatternElement(), optional)
+		l.curPart.pathMemberSink = nil
 		if l.err != nil {
 			return
 		}
 		if pathVar != "" {
-			members := l.pathMemberNames(l.curPart.bindings[before:])
-			pb, err := query.NewPathBinding(pathVar, members)
+			pb, err := query.NewPathBinding(pathVar, pathMembers)
 			if err != nil {
 				l.fail(err)
 				return
@@ -55,29 +67,45 @@ func (l *listener) collectPattern(p gen.IOC_PatternContext, optional bool) {
 	}
 }
 
-// pathMemberNames reads the ordered member names of a named path from the
-// raw bindings the pattern element just added. Named members contribute their
-// variable directly; an anonymous edge inside a named path is given a
-// synthetic name (Stage 8 spec §1.2, §8) so every member on the path binding
-// carries a name — the synthetic name is scoped per part (l.curPart.anonEdges
-// counts anonymous edges seen inside named paths in the current part).
-func (l *listener) pathMemberNames(added []*rawBinding) []string {
-	out := make([]string, 0, len(added))
-	for _, rb := range added {
-		if rb.variable != "" {
-			out = append(out, rb.variable)
-			continue
-		}
-		// Anonymous edge inside a named path: mint a synthetic name and
-		// record it back on the raw binding so build() keeps the (anonymous)
-		// wire shape (variable stays "") but the path member list carries a
-		// stable identifier the resolver can trace.
-		name := "__anon_edge_" + strconv.Itoa(l.curPart.anonEdges)
-		l.curPart.anonEdges++
-		rb.pathMemberName = name
-		out = append(out, name)
+// recordPathNode appends a node member for the current pattern position onto
+// the current named-path member sink (a no-op outside a named path). A named
+// node contributes its NamedNodeMember; an anonymous node contributes an
+// AnonNodeMember placeholder so the members list is shape-faithful.
+func (l *listener) recordPathNode(variable string) {
+	if l.curPart.pathMemberSink == nil {
+		return
 	}
-	return out
+	if variable == "" {
+		*l.curPart.pathMemberSink = append(*l.curPart.pathMemberSink, query.AnonNodeMember{})
+		return
+	}
+	m, err := query.NewNamedNodeMember(variable)
+	if err != nil {
+		l.fail(err)
+		return
+	}
+	*l.curPart.pathMemberSink = append(*l.curPart.pathMemberSink, m)
+}
+
+// recordPathEdge appends an edge member for the current pattern position onto
+// the current named-path member sink (a no-op outside a named path). A named
+// edge contributes its NamedEdgeMember; an anonymous edge contributes an
+// AnonEdgeMember slot (no name, so it never competes with a user variable
+// in the byVar namespace — the fix for the pre-fix synthetic-name collision).
+func (l *listener) recordPathEdge(variable string) {
+	if l.curPart.pathMemberSink == nil {
+		return
+	}
+	if variable == "" {
+		*l.curPart.pathMemberSink = append(*l.curPart.pathMemberSink, query.AnonEdgeMember{})
+		return
+	}
+	m, err := query.NewNamedEdgeMember(variable)
+	if err != nil {
+		l.fail(err)
+		return
+	}
+	*l.curPart.pathMemberSink = append(*l.curPart.pathMemberSink, m)
 }
 
 // collectPatternElement lowers a single pattern element: a head node followed by
@@ -119,6 +147,8 @@ func (l *listener) collectPatternElement(e gen.IOC_PatternElementContext, option
 // collectNode records a node pattern. A named node is a binding (deduped, labels
 // merged); an anonymous node is not a binding (C3) — its labels live inline on
 // the edge endpoint, and a standalone anonymous node is a pure filter, ignored.
+// Inside a named path (pathMemberSink is non-nil), the node also contributes
+// a member entry so the path's Members list is shape-faithful.
 func (l *listener) collectNode(n gen.IOC_NodePatternContext, optional bool) {
 	if n == nil {
 		return
@@ -131,6 +161,7 @@ func (l *listener) collectNode(n gen.IOC_NodePatternContext, optional bool) {
 	if variable != "" {
 		l.mergeBinding(variable, graph.Node, nodeLabels(n.OC_NodeLabels()), nil, nil, optional, false, nil)
 	}
+	l.recordPathNode(variable)
 }
 
 // collectEdge records a relationship between prev and next as an edge binding.
@@ -190,9 +221,11 @@ func (l *listener) collectEdge(r gen.IOC_RelationshipPatternContext, prev, next 
 		rb := &rawBinding{variable: "", kind: graph.Edge, source: source, target: target, nullable: optional, undirected: !directed, hops: hops}
 		rb.mergeLabels(labels)
 		l.curPart.bindings = append(l.curPart.bindings, rb)
+		l.recordPathEdge("")
 		return
 	}
 	l.mergeBinding(variable, graph.Edge, labels, source, target, optional, !directed, hops)
+	l.recordPathEdge(variable)
 }
 
 // edgeHopsFromRangeLiteral reads a variable-length relationship's hop range

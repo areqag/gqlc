@@ -78,17 +78,18 @@ type rawBranch struct {
 // type from the prior part's WITH; classifyProjection consults it when a ref
 // resolves against an alias rather than a binding. Stage 8 adds pathBindings
 // (the PathBinding values collected from named-path patterns in this part —
-// appended to bindings at build time) and anonEdges (a per-part counter for
-// naming anonymous edges inside a named path).
+// appended to bindings at build time) and pathMemberSink, a scratch pointer
+// collectNode / collectEdge push shape-faithful PathMember entries onto while
+// walking a named-path pattern part (nil outside a named path).
 type rawPart struct {
-	bindings     []*rawBinding
-	byVar        map[string]int
-	returns      []query.ReturnItem
-	returnsAll   bool
-	refs         []varRef
-	imported     map[string]query.Type
-	pathBindings []query.PathBinding
-	anonEdges    int
+	bindings       []*rawBinding
+	byVar          map[string]int
+	returns        []query.ReturnItem
+	returnsAll     bool
+	refs           []varRef
+	imported       map[string]query.Type
+	pathBindings   []query.PathBinding
+	pathMemberSink *[]query.PathMember
 }
 
 func newRawPart() *rawPart {
@@ -101,21 +102,17 @@ func newRawPart() *rawPart {
 // introduced inside an OPTIONAL MATCH clause (ADR 0006). Once set, later
 // re-uses of the same variable in non-OPTIONAL clauses never demote it; that
 // is the resolver's job (see gqlc-lqm). Stage 8: hops carries the var-length
-// hop range (nil for single-hop; a var-length edge projects as list<edge>);
-// pathMemberName carries the synthetic name minted for an anonymous edge
-// inside a named path (empty otherwise — the wire "variable" stays empty
-// for anonymous edges regardless).
+// hop range (nil for single-hop; a var-length edge projects as list<edge>).
 type rawBinding struct {
-	variable       string
-	labels         graph.LabelSet
-	seen           map[string]bool // labels already merged, for the ordered union
-	kind           graph.EntityKind
-	source         query.Endpoint
-	target         query.Endpoint
-	nullable       bool
-	undirected     bool            // zero value false == directed; set true only on the undirected branch (inverted to keep existing literals zero-value-safe, see §4)
-	hops           *query.EdgeHops // Stage 8: non-nil for a variable-length edge
-	pathMemberName string          // Stage 8: synthetic name for an anonymous edge captured in a named path
+	variable   string
+	labels     graph.LabelSet
+	seen       map[string]bool // labels already merged, for the ordered union
+	kind       graph.EntityKind
+	source     query.Endpoint
+	target     query.Endpoint
+	nullable   bool
+	undirected bool            // zero value false == directed; set true only on the undirected branch (inverted to keep existing literals zero-value-safe, see §4)
+	hops       *query.EdgeHops // Stage 8: non-nil for a variable-length edge
 }
 
 // varRef is a use of a variable name that build() must resolve to a binding. An
