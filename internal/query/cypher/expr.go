@@ -14,11 +14,15 @@ import (
 
 // collectProjection lowers a RETURN's projection body into result columns. The
 // cosmetic parts (DISTINCT, ORDER BY, SKIP/LIMIT) are accept-and-ignored, except
-// that a parameter in any of them is rejected: a dropped $param is a missing
-// generated argument, i.e. a type-interface change (B1). Each item is classified
-// into a Projection variant (var/var.prop, scalar literal, function or
-// aggregate); residual rich shapes are rejected (ErrUnsupportedProjection). The
-// '*' alternative sets ReturnsAll.
+// that a parameter in any of them is rejected or bound to a clause slot: a
+// dropped $param is a missing generated argument, i.e. a type-interface change
+// (B1). Each item is classified into a Projection variant: the bare-atom
+// classifier (var/var.prop, scalar literal, function, aggregate, count(*))
+// handles the shapes each carries as their dedicated variant; rich shapes
+// (arithmetic, string/list/null predicates, list/map literals, list indexing/
+// slicing, CASE, chained comparisons, parenthesised composites) fall through
+// to the Stage-6 rich-expression classifier and produce an ExprProjection with
+// a computed result type. The '*' alternative sets ReturnsAll.
 func (l *listener) collectProjection(body gen.IOC_ProjectionBodyContext) {
 	if body == nil {
 		return
@@ -82,12 +86,17 @@ func (l *listener) collectReturnItem(item gen.IOC_ProjectionItemContext) {
 	l.curPart.returns = append(l.curPart.returns, query.ReturnItem{Name: name, Value: value})
 }
 
-// classifyProjection maps a RETURN-item expression to its Projection variant,
-// appending a varRef for every binding the projection references so build()'s
-// referential-integrity sweep covers them. ok is false for a residual shape
-// (arithmetic over a projection, a list/map literal, a label predicate, a
-// function argument that is not a bare var/var.prop or scalar literal, CASE,
-// comprehensions, parameters): the caller raises ErrUnsupportedProjection.
+// classifyProjection maps a RETURN-item expression to a bare-atom Projection
+// variant — the shapes that have a dedicated Projection: var/var.prop
+// (RefProjection), scalar literal (LiteralProjection), function invocation
+// (FuncProjection or AggregateProjection), and count(*) (the degenerate
+// AggregateProjection). ok is false for every richer shape (arithmetic, list/
+// map literals, IS NULL, list indexing, CASE, comprehensions, parenthesised
+// expressions, chained comparisons, a $param, a label predicate); the caller
+// falls through to classifyRichExpression, which produces an ExprProjection
+// with the whole sub-tree's computed result type. Every accepted variant
+// appends a varRef for the bindings it references so build()'s referential-
+// integrity sweep covers them.
 func (l *listener) classifyProjection(e gen.IOC_ExpressionContext) (query.Projection, bool) {
 	nae := nonArithmeticAtom(e)
 	if nae == nil {
@@ -216,14 +225,37 @@ func (l *listener) mineClauseSlotParameter(e gen.IOC_ExpressionContext, slot que
 
 // --- parameters (Cluster D) ---
 
-// mineWhere mines parameter uses from a WHERE predicate (D1a) and then verifies
-// every parameter in the predicate was mined: any other occurrence is unsupported.
+// mineWhere mines parameter uses from a WHERE predicate. Two layers: (i) the
+// comparison-pair miner records a PropertyUse on every var.prop-vs-$p pair
+// it recognises (D1a — the honest, resolvable case); (ii) any residual $p the
+// pair miner did not approve is recorded as an ExprUse{ enclosingType,
+// ExprInPredicate } via the rich-expression typer (Stage 6 §4). The
+// enclosingType is the WHERE predicate's result type — TypeBool for a normal
+// predicate, TypeUnknown for a shape the typer cannot commit to.
+//
+// Only parameter mining runs here; the WHERE's refs are NOT recorded on the
+// current part (predicate structure is intentionally not modelled — B1,
+// ADR 0003). The rich-typer sweep would otherwise append every variable in
+// the predicate as a curPart ref and force it into scope, breaking WHERE
+// occurrences of names bound by an intermediate WITH's aggregation alias.
+// The listener's refs slice is snapshotted around the mining call so any
+// varRefs the typer appended for its own recursion are discarded.
 func (l *listener) mineWhere(w gen.IOC_WhereContext) {
 	if w == nil {
 		return
 	}
 	l.mineComparisons(w.OC_Expression())
-	l.requireAllParametersApproved(w.OC_Expression())
+	e := w.OC_Expression()
+	savedRefs := l.curPart.refs
+	t, _, params := l.typeExpressionMining(e)
+	l.curPart.refs = savedRefs
+	for _, p := range params {
+		name := parameterName(p)
+		if name == "" {
+			continue
+		}
+		l.addParameterUse(name, p, query.NewExprUse(t, query.ExprInPredicate))
+	}
 }
 
 // mineComparisons walks the predicate's comparison expressions, recording a

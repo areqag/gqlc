@@ -1,6 +1,8 @@
 package cypher
 
 import (
+	"github.com/antlr4-go/antlr/v4"
+
 	"github.com/areqag/gqlc/internal/grammar/cypher/gen"
 	"github.com/areqag/gqlc/internal/query"
 )
@@ -18,6 +20,8 @@ import (
 
 // typeExpression is the entry point: it types an oC_Expression and returns the
 // result type plus the refs it touched. Nil expressions type as TypeUnknown.
+// Parameter mining is separate: use typeExpressionMining when the caller must
+// register ExprUse for every $param the walk saw.
 func (l *listener) typeExpression(e gen.IOC_ExpressionContext) (query.Type, []query.Ref) {
 	if e == nil {
 		return query.TypeUnknown{}, nil
@@ -25,6 +29,26 @@ func (l *listener) typeExpression(e gen.IOC_ExpressionContext) (query.Type, []qu
 	var refs []query.Ref
 	t := l.typeOr(e.OC_OrExpression(), &refs)
 	return t, refs
+}
+
+// typeExpressionMining walks the expression like typeExpression but also
+// collects every oC_Parameter node the walk touched — the caller registers
+// each as an ExprUse against the enclosing rich expression's result type once
+// that type is known. Approving the parameter (l.approved[node] = true)
+// happens in typeAtom regardless, so a param appearing inside a rich
+// expression is never counted as "not approved" by
+// requireAllParametersApproved.
+func (l *listener) typeExpressionMining(e gen.IOC_ExpressionContext) (query.Type, []query.Ref, []antlr.Tree) {
+	if e == nil {
+		return query.TypeUnknown{}, nil, nil
+	}
+	saved := l.exprParams
+	l.exprParams = nil
+	var refs []query.Ref
+	t := l.typeOr(e.OC_OrExpression(), &refs)
+	params := l.exprParams
+	l.exprParams = saved
+	return t, refs, params
 }
 
 // typeOr types an OR expression: if the rule has multiple alternates joined by
@@ -269,7 +293,15 @@ func (l *listener) typeAtom(a gen.IOC_AtomContext, refs *[]query.Ref) query.Type
 	case a.OC_Literal() != nil:
 		return literalOrCollectionType(a.OC_Literal(), l, refs)
 	case a.OC_Parameter() != nil:
-		l.approved[a.OC_Parameter()] = true
+		p := a.OC_Parameter()
+		// A parameter already approved by an earlier miner (a WHERE var.prop=$p
+		// pair caught by mineComparisons) keeps that PropertyUse and is not
+		// re-recorded here. Every other occurrence is queued for an ExprUse
+		// against the enclosing rich expression's result type (Stage 6 §4).
+		if !l.approved[p] {
+			l.approved[p] = true
+			l.exprParams = append(l.exprParams, p)
+		}
 		return query.TypeUnknown{}
 	case a.COUNT() != nil:
 		return query.TypeUnknown{}
@@ -291,35 +323,52 @@ func (l *listener) typeAtom(a gen.IOC_AtomContext, refs *[]query.Ref) query.Type
 }
 
 // typeCase types a CASE expression: the result is the common type of the
-// THEN and ELSE arms (all arms of the same type ⇒ that type; else TypeUnknown).
-// The WHEN expressions are boolean predicates but do not contribute to the
-// result type; their refs are still mined.
+// value-producing arms — the THEN of every alternative and the ELSE if
+// present. WHEN predicates and the optional case-subject (`CASE n WHEN 1 …`)
+// are typed for ref mining but their types do not contribute to the arm-type
+// unification (a boolean WHEN paired with a string THEN otherwise collapses
+// every CASE to TypeUnknown).
+//
+// The grammar puts the optional subject and the optional ELSE expression as
+// top-level OC_Expression children of the CaseExpression, and each
+// OC_CaseAlternative carries exactly two OC_Expression children in order:
+// WHEN then THEN. When ELSE is present, the last top-level OC_Expression is
+// the ELSE arm; any preceding top-level OC_Expression is the subject.
 func (l *listener) typeCase(c gen.IOC_CaseExpressionContext, refs *[]query.Ref) query.Type {
 	if c == nil {
 		return query.TypeUnknown{}
 	}
-	// A CASE has an optional test expression, alternatives, and an optional
-	// ELSE. The grammar's CASE production groups these under a single rule; we
-	// walk every Expression child recursively to mine refs and read the arm
-	// types via a scan for THEN/ELSE positions.
+	topExprs := c.AllOC_Expression()
+	var elseExpr gen.IOC_ExpressionContext
+	if c.ELSE() != nil && len(topExprs) > 0 {
+		elseExpr = topExprs[len(topExprs)-1]
+		topExprs = topExprs[:len(topExprs)-1]
+	}
+	// Whatever remains is the optional case-subject: walk for refs only.
+	for _, e := range topExprs {
+		_, inner := l.typeExpression(e)
+		*refs = append(*refs, inner...)
+	}
+
 	var armTypes []query.Type
-	for _, e := range c.AllOC_Expression() {
-		t, inner := l.typeExpression(e)
+	for _, alt := range c.AllOC_CaseAlternative() {
+		altExprs := alt.AllOC_Expression()
+		// A well-formed alternative has [WHEN, THEN]; if the grammar produced
+		// fewer we walk what we have for refs and skip THEN typing for the
+		// missing element.
+		for i, e := range altExprs {
+			t, inner := l.typeExpression(e)
+			*refs = append(*refs, inner...)
+			if i == 1 { // THEN position — the arm's produced value
+				armTypes = append(armTypes, t)
+			}
+		}
+	}
+	if elseExpr != nil {
+		t, inner := l.typeExpression(elseExpr)
 		*refs = append(*refs, inner...)
 		armTypes = append(armTypes, t)
 	}
-	for _, alt := range c.AllOC_CaseAlternative() {
-		for _, e := range alt.AllOC_Expression() {
-			t, inner := l.typeExpression(e)
-			*refs = append(*refs, inner...)
-			armTypes = append(armTypes, t)
-		}
-	}
-	// Result type: the common type across all arm expressions the walk saw. The
-	// grammar's Expression collection under a CASE conflates the WHEN and THEN
-	// arms, so a mixed set is honestly TypeUnknown at this stage — the resolver
-	// walks the CASE structure and computes a tighter type post-freeze if
-	// needed.
 	if len(armTypes) == 0 {
 		return query.TypeUnknown{}
 	}
@@ -458,8 +507,18 @@ func isNumeric(t query.Type) bool {
 // literal, function call, or aggregate) we type the whole sub-tree and return
 // an ExprProjection. The typer never fails; a truly opaque expression yields
 // TypeUnknown. Refs are mined for every var/var.prop atom the walk touches so
-// build()'s referential-integrity sweep covers them.
+// build()'s referential-integrity sweep covers them. Any $param the walk
+// encountered is registered as an ExprUse against the rich expression's
+// result type and ExprInProjection — Stage 6 spec §4: no parameter is
+// silently dropped.
 func (l *listener) classifyRichExpression(e gen.IOC_ExpressionContext) query.Projection {
-	t, refs := l.typeExpression(e)
+	t, refs, params := l.typeExpressionMining(e)
+	for _, p := range params {
+		name := parameterName(p)
+		if name == "" {
+			continue
+		}
+		l.addParameterUse(name, p, query.NewExprUse(t, query.ExprInProjection))
+	}
 	return query.NewExprProjection(refs, t)
 }

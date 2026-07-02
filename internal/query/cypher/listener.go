@@ -53,6 +53,14 @@ type listener struct {
 	byParam  map[string]int
 	approved map[antlr.Tree]bool // oC_Parameter nodes mined into a Use
 
+	// exprParams collects the oC_Parameter nodes the current rich-expression
+	// typing pass has walked, so the caller can register an ExprUse for each
+	// once the enclosing expression's result type is known (Stage 6 §4). Nil
+	// outside a rich-expression typing call (typeExpressionMining); populated
+	// on entry to that call and restored on return, so nested calls do not
+	// leak parameters into an enclosing expression's use list.
+	exprParams []antlr.Tree
+
 	err error
 }
 
@@ -233,22 +241,13 @@ func exportedTypes(closed *rawPart) map[string]query.Type {
 		return out
 	}
 	for _, r := range closed.returns {
-		out[r.Name] = projectionType(r.Value)
+		t := r.Value.Type()
+		if t == nil {
+			t = query.TypeUnknown{}
+		}
+		out[r.Name] = t
 	}
 	return out
-}
-
-// projectionType reads a Projection's Stage-6 result type via the accessor each
-// variant now carries; a nil interface value (not reachable from a listener-built
-// projection) falls back to TypeUnknown.
-func projectionType(p query.Projection) query.Type {
-	type typed interface{ Type() query.Type }
-	if t, ok := p.(typed); ok {
-		if got := t.Type(); got != nil {
-			return got
-		}
-	}
-	return query.TypeUnknown{}
 }
 
 func (l *listener) EnterOC_Create(*gen.OC_CreateContext) {
