@@ -53,3 +53,15 @@ and the full expression tree are deliberately outside the initial model.
 > none of the expression tree. The per-part bindings are also the per-clause
 > structure ADR 0006 names for cross-`WITH` nullable flow-typing. The
 > no-expression-tree line holds._
+>
+> _Note (Stage 5, ADR 0004): the curated subset now includes the edge
+> **direction marker** — a binary `directed` flag on the edge binding (true for a
+> one-arrow `-->`/`<--`; false for an undirected `--` or `<-->`). It carries the
+> structural fact that an undirected edge has **no authoritative orientation**, so
+> its endpoints are recorded in textual order rather than canonicalised to one
+> source→target `EdgeKey`. It does **not** carry the orientation-trial policy
+> (try both orientations against the directed schema, and what a multi-match
+> means): that is the resolver's, exactly as the unknown-edge-type lookup is. The
+> marker is the one bit the resolver branches on — form one candidate key or two —
+> and nothing of the arrow spelling or the expression tree. The no-expression-tree
+> line holds._
