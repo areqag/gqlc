@@ -1,0 +1,51 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "d",
+              "labels": [
+                "Duration"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "prod",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "d",
+                    "property": "date"
+                  }
+                ],
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "div",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "d",
+                    "property": "date"
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

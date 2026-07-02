@@ -1,0 +1,66 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "dur",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "duration"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "dur",
+              "value": {
+                "kind": "ref",
+                "variable": "dur",
+                "property": "",
+                "type": "duration"
+              }
+            },
+            {
+              "name": "dur.days",
+              "value": {
+                "kind": "ref",
+                "variable": "dur",
+                "property": "days",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "dur.seconds",
+              "value": {
+                "kind": "ref",
+                "variable": "dur",
+                "property": "seconds",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "dur.nanosecondsOfSecond",
+              "value": {
+                "kind": "ref",
+                "variable": "dur",
+                "property": "nanosecondsOfSecond",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

@@ -1,0 +1,55 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "otherDate",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "date"
+              }
+            },
+            {
+              "name": "otherTime",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "localdatetime"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "result",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "otherDate",
+                    "property": ""
+                  },
+                  {
+                    "variable": "otherTime",
+                    "property": ""
+                  }
+                ],
+                "type": "datetime"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

@@ -1,0 +1,55 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "x",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "duration"
+              }
+            },
+            {
+              "name": "d",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "date"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "x = d",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "x",
+                    "property": ""
+                  },
+                  {
+                    "variable": "d",
+                    "property": ""
+                  }
+                ],
+                "type": "bool"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}
