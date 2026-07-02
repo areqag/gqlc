@@ -654,6 +654,78 @@ var mustParse = map[string]struct {
 			Combinators: []query.UnionKind{query.UnionAll},
 		},
 	},
+	// Stage 7 — bare temporal constructor at RETURN. date('2024-01-01') is a
+	// bare-atom function invocation, so the projection is a FuncProjection
+	// (no ExprProjection promotion); Stage 7's constructor lookup widens the
+	// FuncProjection's Type() to TypeDate (Stage 7 spec §4).
+	"return date constructor": {
+		src: "RETURN date('2024-01-01') AS d",
+		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+			Returns: []query.ReturnItem{
+				{Name: "d", Value: query.NewFuncProjection(nil, query.TypeDate{})},
+			},
+		}}}}},
+	},
+	// Stage 7 — bare duration constructor. Same shape as the date pin above;
+	// the duration name maps to TypeDuration.
+	"return duration constructor": {
+		src: "RETURN duration('P1D') AS d",
+		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+			Returns: []query.ReturnItem{
+				{Name: "d", Value: query.NewFuncProjection(nil, query.TypeDuration{})},
+			},
+		}}}}},
+	},
+	// Stage 7 — temporal arithmetic: date + duration → date. Not a bare
+	// atom (arithmetic), so falls through to the rich classifier's
+	// ExprProjection. The rich typer types the LHS via the constructor
+	// lookup (TypeDate), the RHS likewise (TypeDuration), and promoteAddSub
+	// yields TypeDate. Both function invocations mine no refs (literal args
+	// only).
+	"return date plus duration": {
+		src: "RETURN date() + duration('P1D') AS d",
+		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+			Returns: []query.ReturnItem{
+				{Name: "d", Value: query.NewExprProjection(nil, query.TypeDate{})},
+			},
+		}}}}},
+	},
+	// Stage 7 — duration times a scalar: duration * int → duration. Rich
+	// classifier route; promoteMulDiv yields TypeDuration.
+	"return duration times scalar": {
+		src: "RETURN duration('P1D') * 3 AS d",
+		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+			Returns: []query.ReturnItem{
+				{Name: "d", Value: query.NewExprProjection(nil, query.TypeDuration{})},
+			},
+		}}}}},
+	},
+	// Stage 7 — property lookup on a temporally-typed atom. The
+	// typeNonArithmetic property-lookup arm collapses to TypeUnknown
+	// (accessor result type is schema-owned; Stage 7 spec §3), matching
+	// the Stage-6 posture for property lookups. Not a bare-atom shape
+	// (a property lookup on a function call), so the projection is an
+	// ExprProjection. No bindings, no refs.
+	"return temporal accessor": {
+		src: "RETURN date().year AS y",
+		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+			Returns: []query.ReturnItem{
+				{Name: "y", Value: query.NewExprProjection(nil, query.TypeUnknown{})},
+			},
+		}}}}},
+	},
+	// Stage 7 — namespaced constructor: duration.between(t1, t2) yields
+	// TypeDuration. Bare-atom shape (a single function invocation atom),
+	// so it is a FuncProjection carrying the temporal type. Every argument
+	// is a bare literal, so no refs are mined.
+	"return duration between": {
+		src: "RETURN duration.between('P1D', 'P2D') AS d",
+		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+			Returns: []query.ReturnItem{
+				{Name: "d", Value: query.NewFuncProjection(nil, query.TypeDuration{})},
+			},
+		}}}}},
+	},
 }
 
 // must lifts a fallible model constructor into an expression usable in a struct
