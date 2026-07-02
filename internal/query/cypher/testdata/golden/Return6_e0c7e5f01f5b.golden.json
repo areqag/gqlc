@@ -118,6 +118,7 @@
                     "property": "name"
                   }
                 ],
+                "distinct": false,
                 "type": "unknown"
               }
             },

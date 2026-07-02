@@ -65,6 +65,7 @@
                 "kind": "aggregate",
                 "func": "count",
                 "refs": null,
+                "distinct": false,
                 "type": "unknown"
               }
             }
@@ -95,6 +96,7 @@
                 "kind": "aggregate",
                 "func": "count",
                 "refs": null,
+                "distinct": false,
                 "type": "unknown"
               }
             }

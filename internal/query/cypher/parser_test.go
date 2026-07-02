@@ -363,7 +363,7 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("n", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "count(*)", Value: query.NewAggregateProjection(query.AggCount, nil, query.TypeUnknown{})},
+				{Name: "count(*)", Value: query.NewAggregateProjection(query.AggCount, nil, false, query.TypeUnknown{})},
 			},
 		}),
 	},
@@ -1146,7 +1146,7 @@ var mustParse = map[string]struct {
 				{
 					Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
 					Returns: []query.ReturnItem{
-						{Name: "ns", Value: query.NewAggregateProjection(query.AggCollect, []query.Ref{{Variable: "n"}}, query.TypeUnknown{})},
+						{Name: "ns", Value: query.NewAggregateProjection(query.AggCollect, []query.Ref{{Variable: "n"}}, false, query.TypeUnknown{})},
 					},
 				},
 				{

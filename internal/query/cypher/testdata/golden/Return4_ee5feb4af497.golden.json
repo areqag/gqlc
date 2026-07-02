@@ -63,6 +63,7 @@
                     "property": "aGe"
                   }
                 ],
+                "distinct": false,
                 "type": "unknown"
               }
             }

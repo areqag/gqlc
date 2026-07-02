@@ -285,23 +285,37 @@ func TestNewFuncProjectionAllowsNoRefs(t *testing.T) {
 }
 
 func TestNewAggregateProjection(t *testing.T) {
-	// Stage 6: AggregateProjection carries a result type — TypeUnknown, because
-	// the aggregate's return type depends on the argument type (below the boundary).
+	// Stage 10: AggregateProjection carries a result type (sum(int) → int per
+	// spec §1.2) and a DISTINCT axis (false when not written). The refs list
+	// records the var/var.prop arguments the aggregate touches.
 	refs := []query.Ref{{Variable: "n", Property: "num"}}
-	p := query.NewAggregateProjection(query.AggSum, refs, query.TypeUnknown{})
+	p := query.NewAggregateProjection(query.AggSum, refs, false, query.TypeInt{})
 	require.Equal(t, query.AggSum, p.Func())
 	require.Equal(t, refs, p.Refs())
-	require.Equal(t, query.TypeUnknown{}, p.Type())
+	require.False(t, p.Distinct())
+	require.Equal(t, query.TypeInt{}, p.Type())
 	var _ query.Projection = p
 }
 
 func TestNewAggregateProjectionCountStar(t *testing.T) {
-	// count(*) is the degenerate case — AggCount with an empty []Ref (§2). Its
-	// result type is TypeInt on real engines but is TypeUnknown in the model
-	// (the same "function identity below the boundary" rule).
-	p := query.NewAggregateProjection(query.AggCount, nil, query.TypeUnknown{})
+	// Stage 10: count(*) is the degenerate AggCount case — no operand refs. Its
+	// result type is TypeInt unconditionally (spec §1.2 rationale: openCypher's
+	// count returns an integer by specification).
+	p := query.NewAggregateProjection(query.AggCount, nil, false, query.TypeInt{})
 	require.Equal(t, query.AggCount, p.Func())
 	require.Empty(t, p.Refs())
+	require.False(t, p.Distinct())
+	require.Equal(t, query.TypeInt{}, p.Type())
+}
+
+func TestNewAggregateProjectionDistinct(t *testing.T) {
+	// Stage 10: DISTINCT enters the model as a scalar axis. count(DISTINCT a)
+	// and count(a) are observably-different queries; the model preserves the
+	// distinction so the generated code re-executes the original text against
+	// a faithful type interface (spec §1.1).
+	p := query.NewAggregateProjection(query.AggCount, []query.Ref{{Variable: "a"}}, true, query.TypeInt{})
+	require.True(t, p.Distinct())
+	require.Equal(t, query.AggCount, p.Func())
 }
 
 // TestProjectionZeroValuesCarryNoData mirrors the binding/endpoint discipline:
@@ -393,22 +407,36 @@ func TestFuncProjectionMarshalJSON(t *testing.T) {
 }
 
 func TestAggregateProjectionMarshalJSON(t *testing.T) {
+	// Stage 10: AggregateProjection emits its DISTINCT axis and its per-aggregate
+	// result type (sum over an unknown-typed operand stays TypeUnknown).
 	out, err := json.Marshal(query.NewAggregateProjection(query.AggSum, []query.Ref{
 		{Variable: "n", Property: "num"},
-	}, query.TypeUnknown{}))
+	}, false, query.TypeUnknown{}))
 	require.NoError(t, err)
 	require.JSONEq(t,
-		`{"kind":"aggregate","func":"sum","refs":[{"variable":"n","property":"num"}],"type":"unknown"}`,
+		`{"kind":"aggregate","func":"sum","refs":[{"variable":"n","property":"num"}],"distinct":false,"type":"unknown"}`,
 		string(out))
 }
 
 func TestAggregateProjectionMarshalJSONCountStar(t *testing.T) {
-	// count(*) marshals AggCount with an empty refs array (null, the always-emit
-	// posture the other sums follow for nil slices), and its Stage-6 type is
-	// TypeUnknown.
-	out, err := json.Marshal(query.NewAggregateProjection(query.AggCount, nil, query.TypeUnknown{}))
+	// Stage 10: count(*) marshals AggCount with a null refs array (the always-emit
+	// posture the other sums follow for nil slices) and TypeInt as its
+	// unconditional result type.
+	out, err := json.Marshal(query.NewAggregateProjection(query.AggCount, nil, false, query.TypeInt{}))
 	require.NoError(t, err)
-	require.JSONEq(t, `{"kind":"aggregate","func":"count","refs":null,"type":"unknown"}`, string(out))
+	require.JSONEq(t, `{"kind":"aggregate","func":"count","refs":null,"distinct":false,"type":"int"}`, string(out))
+}
+
+func TestAggregateProjectionMarshalJSONDistinct(t *testing.T) {
+	// Stage 10: the DISTINCT axis is always emitted, so it is present as
+	// "distinct":true here (and false in every other test).
+	out, err := json.Marshal(query.NewAggregateProjection(query.AggCollect, []query.Ref{
+		{Variable: "n", Property: "name"},
+	}, true, query.NewTypeList(query.TypeUnknown{})))
+	require.NoError(t, err)
+	require.JSONEq(t,
+		`{"kind":"aggregate","func":"collect","refs":[{"variable":"n","property":"name"}],"distinct":true,"type":"list<unknown>"}`,
+		string(out))
 }
 
 func TestReturnItemMarshalJSON(t *testing.T) {

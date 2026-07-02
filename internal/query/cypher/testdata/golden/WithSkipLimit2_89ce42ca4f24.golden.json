@@ -48,6 +48,7 @@
                     "property": "num"
                   }
                 ],
+                "distinct": false,
                 "type": "unknown"
               }
             }

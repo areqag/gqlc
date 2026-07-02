@@ -52,6 +52,7 @@
                     "property": ""
                   }
                 ],
+                "distinct": false,
                 "type": "unknown"
               }
             }

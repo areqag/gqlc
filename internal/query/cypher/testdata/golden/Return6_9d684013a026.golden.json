@@ -74,6 +74,7 @@
                     "property": ""
                   }
                 ],
+                "distinct": false,
                 "type": "unknown"
               }
             },
@@ -88,6 +89,7 @@
                     "property": ""
                   }
                 ],
+                "distinct": false,
                 "type": "unknown"
               }
             },

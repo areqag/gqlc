@@ -230,7 +230,7 @@ func (l *listener) classifyProjection(e gen.IOC_ExpressionContext) (query.Projec
 		if lookups > 0 {
 			return nil, false
 		}
-		return query.NewAggregateProjection(query.AggCount, nil, query.TypeUnknown{}), true
+		return query.NewAggregateProjection(query.AggCount, nil, false, query.TypeUnknown{}), true
 
 	case atom.OC_Literal() != nil:
 		if lookups > 0 || !isScalarLiteral(atom.OC_Literal()) {
@@ -312,7 +312,7 @@ func (l *listener) classifyFunction(fi gen.IOC_FunctionInvocationContext) (query
 	}
 	if name, ok := functionName(fi); ok {
 		if fn, ok := aggregateFunc(name); ok {
-			return query.NewAggregateProjection(fn, refs, query.TypeUnknown{}), true
+			return query.NewAggregateProjection(fn, refs, false, query.TypeUnknown{}), true
 		}
 	}
 	resultType := query.Type(query.TypeUnknown{})

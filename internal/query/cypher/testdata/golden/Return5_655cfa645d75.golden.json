@@ -27,6 +27,7 @@
                 "kind": "aggregate",
                 "func": "count",
                 "refs": null,
+                "distinct": false,
                 "type": "unknown"
               }
             }
