@@ -67,7 +67,7 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("n", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n", Ref: query.Ref{Variable: "n"}},
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
 			},
 		},
 	},
@@ -80,7 +80,7 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("a", graph.LabelSet{"A", "B"})),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "a", Ref: query.Ref{Variable: "a"}},
+				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
 			},
 		},
 	},
@@ -93,7 +93,7 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("n", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n", Ref: query.Ref{Variable: "n"}},
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
 			},
 		},
 	},
@@ -107,8 +107,8 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("m", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n", Ref: query.Ref{Variable: "n", Property: "num"}},
-				{Name: "m", Ref: query.Ref{Variable: "m", Property: "num"}},
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n", Property: "num"})},
+				{Name: "m", Value: query.NewRefProjection(query.Ref{Variable: "m", Property: "num"})},
 			},
 		},
 	},
@@ -124,7 +124,7 @@ var mustParse = map[string]struct {
 				)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "r", Ref: query.Ref{Variable: "r"}},
+				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"})},
 			},
 		},
 	},
@@ -140,7 +140,7 @@ var mustParse = map[string]struct {
 				)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "r", Ref: query.Ref{Variable: "r"}},
+				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"})},
 			},
 		},
 	},
@@ -158,8 +158,8 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("n2", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n1", Ref: query.Ref{Variable: "n1"}},
-				{Name: "n2", Ref: query.Ref{Variable: "n2"}},
+				{Name: "n1", Value: query.NewRefProjection(query.Ref{Variable: "n1"})},
+				{Name: "n2", Value: query.NewRefProjection(query.Ref{Variable: "n2"})},
 			},
 		},
 	},
@@ -177,9 +177,9 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("b", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "a", Ref: query.Ref{Variable: "a"}},
-				{Name: "r", Ref: query.Ref{Variable: "r"}},
-				{Name: "b", Ref: query.Ref{Variable: "b"}},
+				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
+				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"})},
+				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"})},
 			},
 		},
 	},
@@ -202,7 +202,7 @@ var mustParse = map[string]struct {
 				}},
 			},
 			Returns: []query.ReturnItem{
-				{Name: "r", Ref: query.Ref{Variable: "r"}},
+				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"})},
 			},
 		},
 	},
@@ -222,7 +222,7 @@ var mustParse = map[string]struct {
 				}},
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n", Ref: query.Ref{Variable: "n"}},
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
 			},
 		},
 	},
@@ -243,7 +243,7 @@ var mustParse = map[string]struct {
 				}},
 			},
 			Returns: []query.ReturnItem{
-				{Name: "name", Ref: query.Ref{Variable: "p", Property: "name"}},
+				{Name: "name", Value: query.NewRefProjection(query.Ref{Variable: "p", Property: "name"})},
 			},
 		},
 	},
@@ -265,8 +265,8 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("b", graph.LabelSet{"B"})),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "a", Ref: query.Ref{Variable: "a"}},
-				{Name: "b", Ref: query.Ref{Variable: "b"}},
+				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
+				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"})},
 			},
 		},
 	},
@@ -280,7 +280,7 @@ var mustParse = map[string]struct {
 				must(query.NewNullableNodeBinding("n", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n", Ref: query.Ref{Variable: "n"}},
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
 			},
 		},
 	},
@@ -301,8 +301,8 @@ var mustParse = map[string]struct {
 				must(query.NewNullableNodeBinding("x", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n", Ref: query.Ref{Variable: "n"}},
-				{Name: "x", Ref: query.Ref{Variable: "x"}},
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
+				{Name: "x", Value: query.NewRefProjection(query.Ref{Variable: "x"})},
 			},
 		},
 	},
@@ -315,8 +315,38 @@ var mustParse = map[string]struct {
 				must(query.NewNodeBinding("n", nil)),
 			},
 			Returns: []query.ReturnItem{
-				{Name: "n.created", Ref: query.Ref{Variable: "n", Property: "created"}},
+				{Name: "n.created", Value: query.NewRefProjection(query.Ref{Variable: "n", Property: "created"})},
 			},
+		},
+	},
+	// Stage 3 — canonical aggregate. count(*) is the degenerate aggregate: the
+	// count-star atom, AggCount with no referenced bindings (it counts rows, not a
+	// binding). Column name is the verbatim text "count(*)". The aggregate kind is
+	// carried because it changes result cardinality (spec §4); the function's
+	// identity below the boundary is not.
+	"count star aggregate": {
+		src: "MATCH (n)\nRETURN count(*)",
+		want: query.Query{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("n", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "count(*)", Value: query.NewAggregateProjection(query.AggCount, nil)},
+			},
+		},
+	},
+	// Stage 3 — RETURN *. The query-level wildcard over in-scope bindings: the
+	// honest schema-agnostic representation is ReturnsAll, with Returns empty (the
+	// two are mutually exclusive at Stage 3, spec §3). The resolver expands * to
+	// the in-scope bindings post-freeze; the parser records "every in-scope
+	// binding" without guessing the column list.
+	"return all": {
+		src: "MATCH (n)\nRETURN *",
+		want: query.Query{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("n", nil)),
+			},
+			ReturnsAll: true,
 		},
 	},
 }
@@ -355,9 +385,15 @@ var mustReject = map[string]struct {
 		query: "OPTIONAL MATCH (a)\nWITH a\nMATCH (a)-->(b)\nRETURN b",
 		want:  cypher.ErrUnsupportedClause,
 	},
-	// Return7 [2] RETURN * -> ErrUnsupportedProjection
-	"return star": {
-		query: "MATCH ()\nRETURN *",
+	// AUTHORED: arithmetic over a projection (RETURN n.num + 1) is the residual
+	// fail-site for ErrUnsupportedProjection after Stage 3 widens RETURN to
+	// var/var.prop/literal/func/aggregate/RETURN *. No clean verbatim corpus query
+	// exercises the residual without a disqualifying clause (the TCK's
+	// arithmetic-in-RETURN scenarios all also carry WITH or a literal-only RETURN),
+	// so an authored case preserves sentinel reachability. Replace with a corpus
+	// entry if a TCK bump adds a bare one.
+	"arithmetic over projection": {
+		query: "MATCH (n)\nRETURN n.num + 1",
 		want:  cypher.ErrUnsupportedProjection,
 	},
 	// Match2 [6] multi-type relationship [:A|B] -> ErrUnsupportedPattern
@@ -527,8 +563,27 @@ func assertReferentialIntegrity(rt *rapid.T, q query.Query, src string) {
 		}
 	}
 	for _, r := range q.Returns {
-		if !resolves(r.Ref.Variable) {
-			rt.Fatalf("return ref %q has no binding in %q", r.Ref.Variable, src)
+		switch v := r.Value.(type) {
+		case query.RefProjection:
+			if !resolves(v.Ref().Variable) {
+				rt.Fatalf("return ref %q has no binding in %q", v.Ref().Variable, src)
+			}
+		case query.LiteralProjection:
+			// A literal traces back to no binding — referential check is N/A.
+		case query.FuncProjection:
+			for _, ref := range v.Refs() {
+				if !resolves(ref.Variable) {
+					rt.Fatalf("func projection ref %q has no binding in %q", ref.Variable, src)
+				}
+			}
+		case query.AggregateProjection:
+			for _, ref := range v.Refs() {
+				if !resolves(ref.Variable) {
+					rt.Fatalf("aggregate projection ref %q has no binding in %q", ref.Variable, src)
+				}
+			}
+		default:
+			rt.Fatalf("return item has unknown Projection variant %T in %q", r.Value, src)
 		}
 	}
 	for _, p := range q.Parameters {

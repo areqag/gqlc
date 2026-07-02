@@ -34,3 +34,11 @@ parameters carry `Ref`s back to their bindings so the resolver can reach a schem
 type. Curation means deciding what to keep; getting it wrong means revisiting the
 model. Pattern topology beyond edge endpoints (variable-length paths, predicates)
 and the full expression tree are deliberately outside the initial model.
+
+> _Note (Stage 3, ADR 0004): the curated subset now includes a closed
+> **projection** sum for return items — a binding reference, a scalar literal, a
+> function call, or an aggregate — plus a query-level `RETURN *` wildcard. It
+> carries only the `Ref`s the resolver must trace and, for an aggregate, the
+> cardinality-bearing kind; the expression tree and a non-aggregate function's
+> identity stay below the type-interface boundary (ADR 0005), holding the line
+> this ADR draws._

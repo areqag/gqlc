@@ -10,11 +10,19 @@
   "Parameters": null,
   "Returns": [
     {
-      "name": "a.count",
+      "name": "a.color",
       "value": {
         "kind": "ref",
         "variable": "a",
-        "property": "count"
+        "property": "color"
+      }
+    },
+    {
+      "name": "count(*)",
+      "value": {
+        "kind": "aggregate",
+        "func": "count",
+        "refs": null
       }
     }
   ],

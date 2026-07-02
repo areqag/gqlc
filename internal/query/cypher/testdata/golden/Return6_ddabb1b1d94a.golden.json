@@ -1,0 +1,15 @@
+{
+  "Bindings": null,
+  "Parameters": null,
+  "Returns": [
+    {
+      "name": "count(*)",
+      "value": {
+        "kind": "aggregate",
+        "func": "count",
+        "refs": null
+      }
+    }
+  ],
+  "returnsAll": false
+}

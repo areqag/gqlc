@@ -10,11 +10,24 @@
   "Parameters": null,
   "Returns": [
     {
-      "name": "n.name",
+      "name": "n",
       "value": {
         "kind": "ref",
         "variable": "n",
-        "property": "name"
+        "property": "num"
+      }
+    },
+    {
+      "name": "count",
+      "value": {
+        "kind": "aggregate",
+        "func": "count",
+        "refs": [
+          {
+            "variable": "n",
+            "property": ""
+          }
+        ]
       }
     }
   ],

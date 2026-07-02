@@ -2,53 +2,49 @@
   "Bindings": [
     {
       "kind": "node",
-      "variable": "x",
+      "variable": "a",
       "labels": [
-        "X"
+        "L"
       ],
       "nullable": false
     },
     {
       "kind": "edge",
-      "variable": "",
-      "labels": [
-        "E1"
-      ],
+      "variable": "rel",
+      "labels": null,
       "source": {
         "kind": "var",
-        "variable": "x"
+        "variable": "a"
       },
       "target": {
         "kind": "var",
-        "variable": "y"
+        "variable": "b"
       },
-      "nullable": true
+      "nullable": false
     },
     {
       "kind": "node",
-      "variable": "y",
-      "labels": [
-        "Y"
-      ],
-      "nullable": true
+      "variable": "b",
+      "labels": null,
+      "nullable": false
     }
   ],
   "Parameters": null,
   "Returns": [
     {
-      "name": "x",
+      "name": "a",
       "value": {
         "kind": "ref",
-        "variable": "x",
+        "variable": "a",
         "property": ""
       }
     },
     {
-      "name": "y",
+      "name": "count(*)",
       "value": {
-        "kind": "ref",
-        "variable": "y",
-        "property": ""
+        "kind": "aggregate",
+        "func": "count",
+        "refs": null
       }
     }
   ],

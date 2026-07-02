@@ -114,9 +114,31 @@ _Avoid_: argument (reserve for the generated code).
 
 **Return item**:
 One column of a query's result, named by an explicit alias or derived from its
-source, tracing back through a binding to the value it projects. A query's result
-is an ordered, duplicate-preserving list of return items; it becomes a generated
-result.
+source text. It carries a **projection** describing what it projects — a binding
+reference, a scalar literal, a function call, or an aggregate. A query's result is
+an ordered, duplicate-preserving list of return items, or the `RETURN *` wildcard
+over all in-scope bindings; it becomes a generated result.
+
+**Projection**:
+What a return item projects: a closed sum of a binding reference (`var` /
+`var.prop`), a scalar literal, a non-aggregate function call, or an aggregate. It
+carries only the bindings the resolver must trace (the `var` / `var.prop` refs)
+and, for an aggregate, the cardinality-bearing kind — never the expression tree
+(ADR 0003) nor a non-aggregate function's identity, which live below the
+type-interface boundary (ADR 0005) and are re-executed from the original query
+text. A `RETURN *` is not a projection but a query-level wildcard (see **Return
+item**).
+_Avoid_: expression (reserve for the grammar's `oC_Expression`; a projection is
+the curated subset the model carries).
+
+**Aggregate**:
+A projection over an aggregating function (`count`, `sum`, `collect`, `min`,
+`max`, `avg`, `stDev`/`stDevP`, `percentileCont`/`percentileDisc`). Distinguished
+from an ordinary function call because it collapses matched rows into groups,
+changing result cardinality — the one function distinction the model carries
+pre-freeze. `count(*)` is the degenerate case: a count over rows that references
+no binding. Grouping-key semantics — which non-aggregate columns form the group —
+are a resolver concern, entangled with `WITH`, and out of scope until then.
 
 **Resolver**:
 The stage that resolves a parsed query against the model, typing each return item

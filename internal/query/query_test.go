@@ -219,6 +219,163 @@ func TestConstructorsAreSoleSourceOfData(t *testing.T) {
 	var _ query.Endpoint = tgt
 }
 
+// --- projection sum: constructors and the AggregateFunc stringer ---
+
+func TestNewRefProjection(t *testing.T) {
+	p := query.NewRefProjection(query.Ref{Variable: "n", Property: "name"})
+	require.Equal(t, query.Ref{Variable: "n", Property: "name"}, p.Ref())
+	var _ query.Projection = p
+}
+
+func TestNewLiteralProjection(t *testing.T) {
+	// A literal carries no structured value (§2): the variant exists only so the
+	// column is counted and named. It satisfies the sum and carries no Ref.
+	p := query.NewLiteralProjection()
+	var _ query.Projection = p
+}
+
+func TestNewFuncProjection(t *testing.T) {
+	refs := []query.Ref{{Variable: "a", Property: "num"}, {Variable: "b", Property: "num"}}
+	p := query.NewFuncProjection(refs)
+	require.Equal(t, refs, p.Refs())
+	var _ query.Projection = p
+}
+
+func TestNewFuncProjectionAllowsNoRefs(t *testing.T) {
+	// A zero-arg function (or one over no bound variables) carries no Refs.
+	p := query.NewFuncProjection(nil)
+	require.Empty(t, p.Refs())
+}
+
+func TestNewAggregateProjection(t *testing.T) {
+	refs := []query.Ref{{Variable: "n", Property: "num"}}
+	p := query.NewAggregateProjection(query.AggSum, refs)
+	require.Equal(t, query.AggSum, p.Func())
+	require.Equal(t, refs, p.Refs())
+	var _ query.Projection = p
+}
+
+func TestNewAggregateProjectionCountStar(t *testing.T) {
+	// count(*) is the degenerate case — AggCount with an empty []Ref (§2).
+	p := query.NewAggregateProjection(query.AggCount, nil)
+	require.Equal(t, query.AggCount, p.Func())
+	require.Empty(t, p.Refs())
+}
+
+// TestProjectionZeroValuesCarryNoData mirrors the binding/endpoint discipline:
+// the exported zero value of each variant is the only struct literal a foreign
+// package can write (data fields are unexported), and it is inert.
+func TestProjectionZeroValuesCarryNoData(t *testing.T) {
+	var ref query.RefProjection
+	require.Equal(t, query.Ref{}, ref.Ref())
+
+	var fn query.FuncProjection
+	require.Empty(t, fn.Refs())
+
+	var agg query.AggregateProjection
+	require.Equal(t, query.AggCount, agg.Func()) // the iota-zero aggregate
+	require.Empty(t, agg.Refs())
+
+	// The sealed interface closes the sum: only the four package-defined variants
+	// satisfy it, so a projection is always exactly one known shape.
+	var _ query.Projection = query.RefProjection{}
+	var _ query.Projection = query.LiteralProjection{}
+	var _ query.Projection = query.FuncProjection{}
+	var _ query.Projection = query.AggregateProjection{}
+}
+
+// TestAggregateFuncString pins the lowercase names the JSON "func" discriminator
+// derives from, so the serialised name can never drift from the enum.
+func TestAggregateFuncString(t *testing.T) {
+	for _, tc := range []struct {
+		fn   query.AggregateFunc
+		want string
+	}{
+		{query.AggCount, "count"},
+		{query.AggSum, "sum"},
+		{query.AggCollect, "collect"},
+		{query.AggMin, "min"},
+		{query.AggMax, "max"},
+		{query.AggAvg, "avg"},
+		{query.AggStdev, "stdev"},
+		{query.AggPercentile, "percentile"},
+	} {
+		require.Equal(t, tc.want, tc.fn.String())
+	}
+}
+
+// --- projection sum: JSON shapes (§5) ---
+
+func TestRefProjectionMarshalJSON(t *testing.T) {
+	out, err := json.Marshal(query.NewRefProjection(query.Ref{Variable: "n", Property: "name"}))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"kind":"ref","variable":"n","property":"name"}`, string(out))
+}
+
+func TestLiteralProjectionMarshalJSON(t *testing.T) {
+	out, err := json.Marshal(query.NewLiteralProjection())
+	require.NoError(t, err)
+	require.JSONEq(t, `{"kind":"literal"}`, string(out))
+}
+
+func TestFuncProjectionMarshalJSON(t *testing.T) {
+	out, err := json.Marshal(query.NewFuncProjection([]query.Ref{
+		{Variable: "a", Property: "num"},
+		{Variable: "b"},
+	}))
+	require.NoError(t, err)
+	require.JSONEq(t,
+		`{"kind":"func","refs":[{"variable":"a","property":"num"},{"variable":"b","property":""}]}`,
+		string(out))
+}
+
+func TestAggregateProjectionMarshalJSON(t *testing.T) {
+	out, err := json.Marshal(query.NewAggregateProjection(query.AggSum, []query.Ref{
+		{Variable: "n", Property: "num"},
+	}))
+	require.NoError(t, err)
+	require.JSONEq(t,
+		`{"kind":"aggregate","func":"sum","refs":[{"variable":"n","property":"num"}]}`,
+		string(out))
+}
+
+func TestAggregateProjectionMarshalJSONCountStar(t *testing.T) {
+	// count(*) marshals AggCount with an empty refs array (null, the always-emit
+	// posture the other sums follow for nil slices).
+	out, err := json.Marshal(query.NewAggregateProjection(query.AggCount, nil))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"kind":"aggregate","func":"count","refs":null}`, string(out))
+}
+
+func TestReturnItemMarshalJSON(t *testing.T) {
+	// A ReturnItem marshals one level deep: lowercase "name" and "value", the
+	// value carrying its own "kind" discriminator (§5).
+	item := query.ReturnItem{
+		Name:  "name",
+		Value: query.NewRefProjection(query.Ref{Variable: "p", Property: "name"}),
+	}
+	out, err := json.Marshal(item)
+	require.NoError(t, err)
+	require.JSONEq(t,
+		`{"name":"name","value":{"kind":"ref","variable":"p","property":"name"}}`,
+		string(out))
+}
+
+func TestQueryMarshalJSONEmitsReturnsAll(t *testing.T) {
+	// "returnsAll" is always emitted (no omitempty), matching the always-emit
+	// convention. A plain query (no RETURN *) serialises it as false.
+	q := representativeQuery(t)
+	out, err := json.Marshal(q)
+	require.NoError(t, err)
+	require.Contains(t, string(out), `"returnsAll":false`)
+
+	q.ReturnsAll = true
+	q.Returns = nil // RETURN * does not mix with explicit items (§3)
+	out, err = json.Marshal(q)
+	require.NoError(t, err)
+	require.Contains(t, string(out), `"returnsAll":true`)
+}
+
 // --- deterministic JSON marshalling ---
 
 // representativeQuery exercises both binding variants and both endpoint variants,
@@ -245,8 +402,8 @@ func representativeQuery(t *testing.T) query.Query {
 			}},
 		},
 		Returns: []query.ReturnItem{
-			{Name: "a", Ref: query.Ref{Variable: "a"}},
-			{Name: "a.name", Ref: query.Ref{Variable: "a", Property: "name"}},
+			{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
+			{Name: "a.name", Value: query.NewRefProjection(query.Ref{Variable: "a", Property: "name"})},
 		},
 	}
 }

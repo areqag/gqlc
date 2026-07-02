@@ -3,7 +3,9 @@
     {
       "kind": "node",
       "variable": "a",
-      "labels": null,
+      "labels": [
+        "A"
+      ],
       "nullable": false
     },
     {
@@ -11,32 +13,18 @@
       "variable": "",
       "labels": null,
       "source": {
-        "kind": "inline",
-        "labels": null
-      },
-      "target": {
         "kind": "var",
         "variable": "a"
       },
-      "nullable": false
-    },
-    {
-      "kind": "edge",
-      "variable": "",
-      "labels": null,
-      "source": {
-        "kind": "var",
-        "variable": "b"
-      },
       "target": {
-        "kind": "inline",
-        "labels": null
+        "kind": "var",
+        "variable": "n"
       },
       "nullable": false
     },
     {
       "kind": "node",
-      "variable": "b",
+      "variable": "n",
       "labels": null,
       "nullable": false
     },
@@ -46,31 +34,17 @@
       "labels": null,
       "source": {
         "kind": "var",
-        "variable": "b"
-      },
-      "target": {
-        "kind": "inline",
-        "labels": null
-      },
-      "nullable": false
-    },
-    {
-      "kind": "edge",
-      "variable": "",
-      "labels": null,
-      "source": {
-        "kind": "inline",
-        "labels": null
+        "variable": "n"
       },
       "target": {
         "kind": "var",
-        "variable": "c"
+        "variable": "m"
       },
       "nullable": false
     },
     {
       "kind": "node",
-      "variable": "c",
+      "variable": "m",
       "labels": null,
       "nullable": false
     }
@@ -78,11 +52,19 @@
   "Parameters": null,
   "Returns": [
     {
-      "name": "c",
+      "name": "n.num",
       "value": {
         "kind": "ref",
-        "variable": "c",
-        "property": ""
+        "variable": "n",
+        "property": "num"
+      }
+    },
+    {
+      "name": "count(*)",
+      "value": {
+        "kind": "aggregate",
+        "func": "count",
+        "refs": null
       }
     }
   ],

@@ -10,11 +10,11 @@
   "Parameters": null,
   "Returns": [
     {
-      "name": "n.name",
+      "name": "cOuNt( * )",
       "value": {
-        "kind": "ref",
-        "variable": "n",
-        "property": "name"
+        "kind": "aggregate",
+        "func": "count",
+        "refs": null
       }
     }
   ],
