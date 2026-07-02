@@ -2,7 +2,7 @@ package cypher
 
 import "errors"
 
-// The five sentinels Parse returns for valid openCypher that affects the type
+// The four sentinels Parse returns for valid openCypher that affects the type
 // interface but the current model cannot faithfully represent (spec §3/B3).
 // They are category-grained, not per-construct: when a later stage supports a
 // construct we delete one Enter* handler, never rename a sentinel. Each is
@@ -10,16 +10,15 @@ import "errors"
 // callers branch with errors.Is while reading a concrete message. A
 // sentinel-reachability sweep (parser_test.go) guards the set. Stage 6 retired
 // ErrUnsupportedProjection: rich scalar expressions at RETURN / WITH position
-// now parse to an ExprProjection, so the sentinel has no fail-site.
+// now parse to an ExprProjection, so the sentinel has no fail-site. Stage 8
+// retired ErrUnsupportedPattern: the three pattern shapes it flagged (named
+// paths, variable-length relationships, multi-type relationships) all parse
+// under the widened Stage-8 model.
 var (
 	// ErrUnsupportedClause rejects clauses outside the read core: the write
 	// clauses (CREATE/MERGE/SET/DELETE/REMOVE), UNWIND, CALL. (WITH and UNION are
 	// supported as of Stage 4.)
 	ErrUnsupportedClause = errors.New("unsupported clause")
-
-	// ErrUnsupportedPattern rejects pattern shapes the model cannot carry yet:
-	// multi-type relationships, variable-length paths, and named paths.
-	ErrUnsupportedPattern = errors.New("unsupported pattern")
 
 	// ErrUnsupportedParameter rejects a parameter that cannot be bound to a
 	// binding property or a clause slot: SKIP/LIMIT $n non-bare, bare-predicate
@@ -37,6 +36,7 @@ var (
 	ErrUnboundVariable = errors.New("unbound variable")
 
 	// ErrVariableKindConflict rejects a variable bound once as a node and once as
-	// an edge.
+	// an edge (or as a path). Stage 8 extends the check to the three-way kind
+	// space (node/edge/path).
 	ErrVariableKindConflict = errors.New("variable used as both node and edge")
 )

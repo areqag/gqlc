@@ -225,15 +225,16 @@ var skiplist = map[string]bool{
 	"[6] Fail for `size()` on pattern predicates": true,
 }
 
-// the four public sentinels for scenarios the parser cannot faithfully
-// represent yet — the "valid Cypher we don't support yet" set. A positive
-// scenario that fails with one of these is the progress meter (PENDING), not a
-// test failure. Mirrors the spec's category-grained taxonomy. Stage 6 retired
-// ErrUnsupportedProjection: rich scalar expressions at RETURN / WITH position
-// now parse to an ExprProjection.
+// the public sentinels for scenarios the parser cannot faithfully represent
+// yet — the "valid Cypher we don't support yet" set. A positive scenario that
+// fails with one of these is the progress meter (PENDING), not a test
+// failure. Mirrors the spec's category-grained taxonomy. Stage 6 retired
+// ErrUnsupportedProjection (rich scalar expressions at RETURN / WITH position
+// now parse to an ExprProjection). Stage 8 retired ErrUnsupportedPattern (the
+// three pattern shapes it flagged — named paths, variable-length,
+// multi-type — all parse under the widened model).
 var unsupportedSentinels = []error{
 	cypher.ErrUnsupportedClause,
-	cypher.ErrUnsupportedPattern,
 	cypher.ErrUnsupportedParameter,
 }
 
