@@ -1,9 +1,9 @@
 package gql
 
 import (
-	"github.com/antranig-yeretzian/gqlc/internal/grammar/gql/gen"
-	"github.com/antranig-yeretzian/gqlc/internal/graph"
-	"github.com/antranig-yeretzian/gqlc/internal/schema"
+	"github.com/areqag/gqlc/internal/grammar/gql/gen"
+	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/schema"
 )
 
 // rawEdge is an edge type collected during the walk, before resolution — one of

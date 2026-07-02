@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/antranig-yeretzian/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/graph"
 )
 
 // Query is the model of a single parsed query: its UNION-joined branches and the
