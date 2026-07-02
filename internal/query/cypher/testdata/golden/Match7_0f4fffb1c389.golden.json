@@ -1,0 +1,89 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "p",
+              "labels": [
+                "Player"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "PLAYS_FOR"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "p"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "team"
+              },
+              "nullable": false,
+              "directed": true
+            },
+            {
+              "kind": "node",
+              "variable": "team",
+              "labels": [
+                "Team"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "s",
+              "labels": [
+                "SUPPORTS"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "p"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "team"
+              },
+              "nullable": true,
+              "directed": true
+            }
+          ],
+          "returns": [
+            {
+              "name": "matches",
+              "value": {
+                "kind": "aggregate",
+                "func": "count",
+                "refs": null,
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "optMatch",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "s",
+                    "property": ""
+                  }
+                ],
+                "type": "bool"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

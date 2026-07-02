@@ -319,88 +319,129 @@ func (i ReturnItem) MarshalJSON() ([]byte, error) {
 }
 
 // Projection is what one ReturnItem projects. It is a closed sum of
-// RefProjection, LiteralProjection, FuncProjection and AggregateProjection — no
-// other type can implement it — so a projection is exactly one of the four. Each
-// variant holds its data in unexported fields, so the smart constructors
-// (NewRefProjection / NewLiteralProjection / NewFuncProjection /
-// NewAggregateProjection) are the only way to construct a non-zero value,
-// mirroring the Use sum (internal/query/query.go).
+// RefProjection, LiteralProjection, FuncProjection, AggregateProjection, and
+// (Stage 6) ExprProjection — no other type can implement it — so a projection
+// is exactly one of the five. Each variant holds its data in unexported
+// fields, so the smart constructors (NewRefProjection / NewLiteralProjection /
+// NewFuncProjection / NewAggregateProjection / NewExprProjection) are the only
+// way to construct a non-zero value, mirroring the Use sum
+// (internal/query/query.go).
 //
 // A projection carries exactly what the resolver needs to reach a schema type
-// (the referenced bindings as Refs) and the one cardinality-bearing distinction
-// (aggregate vs not), and nothing of the expression tree (ADR 0003).
+// (the referenced bindings as Refs), its Stage-6 result type, and the one
+// cardinality-bearing distinction (aggregate vs not); nothing of the
+// expression tree (ADR 0003).
+//
+// Every variant carries Type() Type — the whole point of Stage 6 is that every
+// projected column carries a result type. Promoting the accessor onto the
+// interface removes the structural-typing shim listeners once needed to read
+// it and keeps the sum's exhaustiveness honest.
 type Projection interface {
+	// Type is the projection's Stage-6 result type; TypeUnknown when the parser
+	// cannot commit schema-free (property lookups, function results, aggregate
+	// results, NULL propagation).
+	Type() Type
 	isProjection()
 }
 
-// RefProjection wraps a Ref — the Stage-0/1/2 var / var.prop case verbatim. The
-// listener only builds it after the shape gates accept a bare variable or a
-// single-level property lookup.
+// RefProjection wraps a Ref — the Stage-0/1/2 var / var.prop case verbatim, now
+// carrying its result type (Stage 6). The listener only builds it after the
+// shape gates accept a bare variable or a single-level property lookup; the
+// type it passes is TypeNode / TypeEdge for a whole-entity ref and TypeUnknown
+// for a property lookup (the schema owns property typing per ADR 0003).
 type RefProjection struct {
-	ref Ref // the binding or binding property this column projects
+	ref        Ref  // the binding or binding property this column projects
+	resultType Type // the projection's result type; TypeUnknown for a property lookup
 }
 
-// NewRefProjection builds a RefProjection. Total: the listener supplies a Ref it
-// has already validated against the projection shape gates, so no constructor
-// error is possible — mirrors NewPropertyUse's posture.
-func NewRefProjection(r Ref) RefProjection {
-	return RefProjection{ref: r}
+// NewRefProjection builds a RefProjection carrying its result type. Total: the
+// listener supplies a Ref it has already validated against the projection shape
+// gates and a Type it computed from the referenced binding's kind (Stage 6 §1);
+// no constructor error is possible.
+func NewRefProjection(r Ref, t Type) RefProjection {
+	return RefProjection{ref: r, resultType: t}
 }
 
 // Ref is the binding or binding property this column projects.
 func (p RefProjection) Ref() Ref { return p.ref }
 
+// Type is the projection's result type (Stage 6): TypeNode / TypeEdge for a
+// whole-entity ref and TypeUnknown for a property lookup — the schema owns
+// property typing.
+func (p RefProjection) Type() Type { return p.resultType }
+
 func (RefProjection) isProjection() {}
 
-// LiteralProjection carries no structured value — only the surface text is the
-// column name (already on ReturnItem.Name). A literal's value lives below the
-// type-interface boundary (ADR 0005, B1): re-executed from the original text,
-// never reconstructed. The variant exists so the column is counted and named; it
-// carries no Ref because a literal traces back to no binding.
-type LiteralProjection struct{}
-
-// NewLiteralProjection builds a LiteralProjection. Total: it carries no data.
-func NewLiteralProjection() LiteralProjection {
-	return LiteralProjection{}
+// LiteralProjection carries the scalar literal's kind as its only exported
+// datum: a boolean literal is TypeBool, an integer literal is TypeInt, a list
+// literal is TypeList (parameterised by its element type), and so on. The
+// literal's *value* still lives below the type-interface boundary (ADR 0005,
+// B1) — re-executed from the original text, never reconstructed — but the type
+// enters the model because it becomes the projected column's typed result
+// (Stage 6). It carries no Ref because a literal traces back to no binding.
+type LiteralProjection struct {
+	resultType Type // the literal's scalar / list / map kind (Stage 6)
 }
+
+// NewLiteralProjection builds a LiteralProjection carrying its scalar-literal
+// kind. Total: the listener computes the type at classification time from the
+// grammar node; the constructor is the sole writer.
+func NewLiteralProjection(t Type) LiteralProjection {
+	return LiteralProjection{resultType: t}
+}
+
+// Type is the literal's result type (Stage 6).
+func (p LiteralProjection) Type() Type { return p.resultType }
 
 func (LiteralProjection) isProjection() {}
 
 // FuncProjection is a non-aggregate function call. It carries the function's
 // referenced bindings as []Ref (the var/var.prop arguments the resolver must
-// trace) and nothing about the function itself — not its name, arity or return
-// type. The function's identity and signature are a resolver/engine concern
-// below the type-interface boundary (ADR 0005); the model carries only "this
-// column depends on these bindings" so referential integrity holds.
+// trace) and its Stage-6 result type; nothing about the function itself — not
+// its name, arity, or signature. The function's identity is a resolver/engine
+// concern below the type-interface boundary (ADR 0005), so the parser records
+// TypeUnknown for every function call. The model carries "this column depends
+// on these bindings" so referential integrity holds, plus the honest "cannot
+// tell" for its result type.
 type FuncProjection struct {
-	refs []Ref // the var/var.prop arguments the function touches
+	refs       []Ref // the var/var.prop arguments the function touches
+	resultType Type  // Stage 6: TypeUnknown — function identity is below the boundary
 }
 
 // NewFuncProjection builds a FuncProjection over the bindings the call
-// references. Total: the listener supplies Refs it has already mined.
-func NewFuncProjection(refs []Ref) FuncProjection {
-	return FuncProjection{refs: refs}
+// references and the result type the listener computes (TypeUnknown today).
+// Total: the listener supplies Refs it has already mined and a Type value.
+func NewFuncProjection(refs []Ref, t Type) FuncProjection {
+	return FuncProjection{refs: refs, resultType: t}
 }
 
 // Refs are the var/var.prop arguments the function touches.
 func (p FuncProjection) Refs() []Ref { return p.refs }
 
+// Type is the function's result type (Stage 6): TypeUnknown, because a
+// non-aggregate function's identity lives below the type-interface boundary.
+func (p FuncProjection) Type() Type { return p.resultType }
+
 func (FuncProjection) isProjection() {}
 
 // AggregateProjection is an aggregate function call. It carries an AggregateFunc
 // (the cardinality-bearing distinction §4: an aggregate collapses rows, a fact
-// the generated code models differently) and the referenced bindings as []Ref.
-// count(*) is the degenerate case — AggCount with an empty []Ref. As with
-// FuncProjection, no function name beyond the aggregate kind is carried.
+// the generated code models differently), the referenced bindings as []Ref, and
+// its Stage-6 result type. count(*) is the degenerate case — AggCount with an
+// empty []Ref. As with FuncProjection, an aggregate's return type depends on
+// the argument type (below the type-interface boundary, ADR 0005), so the
+// listener records TypeUnknown; the resolver upgrades it from the schema.
 type AggregateProjection struct {
-	fn   AggregateFunc // which aggregate this is (the cardinality signal)
-	refs []Ref         // the var/var.prop arguments the aggregate touches
+	fn         AggregateFunc // which aggregate this is (the cardinality signal)
+	refs       []Ref         // the var/var.prop arguments the aggregate touches
+	resultType Type          // Stage 6: TypeUnknown — the aggregate's return type is below the boundary
 }
 
 // NewAggregateProjection builds an AggregateProjection. Total: the listener
-// supplies an AggregateFunc from the closed enum and Refs it has already mined.
-func NewAggregateProjection(fn AggregateFunc, refs []Ref) AggregateProjection {
-	return AggregateProjection{fn: fn, refs: refs}
+// supplies an AggregateFunc from the closed enum, Refs it has already mined,
+// and a result type (TypeUnknown today).
+func NewAggregateProjection(fn AggregateFunc, refs []Ref, t Type) AggregateProjection {
+	return AggregateProjection{fn: fn, refs: refs, resultType: t}
 }
 
 // Func is which aggregate this is — the cardinality-bearing distinction (§4).
@@ -409,7 +450,54 @@ func (p AggregateProjection) Func() AggregateFunc { return p.fn }
 // Refs are the var/var.prop arguments the aggregate touches.
 func (p AggregateProjection) Refs() []Ref { return p.refs }
 
+// Type is the aggregate's result type (Stage 6): TypeUnknown, because the
+// return type depends on the argument type — a schema concern per ADR 0003.
+func (p AggregateProjection) Type() Type { return p.resultType }
+
 func (AggregateProjection) isProjection() {}
+
+// ExprProjection is a rich scalar expression at a RETURN or WITH position
+// (Stage 6): arithmetic, string/list/null predicates, list or map literals,
+// list indexing/slicing/concatenation, CASE, chained comparisons, and
+// parenthesised composites. It carries only the result type the parser
+// computed and the []Ref every binding the sub-expression touched — no
+// expression tree, per ADR 0003 (the tree is re-executed from the original
+// text, ADR 0005). A rich expression whose type the parser cannot compute
+// (property-participating arithmetic, NULL propagation, unknown function
+// return types) types as TypeUnknown; the resolver upgrades from the schema.
+type ExprProjection struct {
+	refs       []Ref // the var/var.prop bindings the expression touches
+	resultType Type  // the parser-computed result type; TypeUnknown when it cannot commit
+}
+
+// NewExprProjection builds an ExprProjection carrying its result type and
+// touched refs. Total: the listener supplies Refs it has already mined from
+// the sub-expression and a Type value.
+func NewExprProjection(refs []Ref, t Type) ExprProjection {
+	return ExprProjection{refs: refs, resultType: t}
+}
+
+// Refs are the var/var.prop bindings the expression touches, so the
+// referential-integrity sweep covers every ref inside a rich projection.
+func (p ExprProjection) Refs() []Ref { return p.refs }
+
+// Type is the projection's Stage-6 result type — the whole point of the
+// variant. TypeUnknown when the parser cannot commit (property-participating
+// arithmetic, NULL propagation, unknown function return types).
+func (p ExprProjection) Type() Type { return p.resultType }
+
+func (ExprProjection) isProjection() {}
+
+// MarshalJSON renders an ExprProjection as a tagged union member discriminated
+// by "kind", carrying its refs and always-emitted result type — same posture
+// as FuncProjection with an added type field.
+func (p ExprProjection) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind string    `json:"kind"`
+		Refs []flatRef `json:"refs"`
+		Type Type      `json:"type"`
+	}{Kind: projectionKindExpr, Refs: flattenRefs(p.refs), Type: projectionType(p.resultType)})
+}
 
 // AggregateFunc identifies one of the openCypher aggregating functions. The set
 // is closed and known (§4), so it is an int-backed enum with a stringer —
@@ -482,12 +570,13 @@ type Parameter struct {
 }
 
 // Use is one position where a parameter appears. It is a closed sum of
-// PropertyUse and ClauseSlotUse — no other type can implement it — so a use is
-// exactly one of the two and a parameter use that is neither bound to a binding
-// property nor sat in a clause slot is unrepresentable. Both variants hold
-// their data in unexported fields, so NewPropertyUse / NewClauseSlotUse are the
-// only way to construct a non-zero value: the invariants the types alone cannot
-// express hold for every value that exists.
+// PropertyUse, ClauseSlotUse, and (Stage 6) ExprUse — no other type can
+// implement it — so a use is exactly one of the three: bound to a binding
+// property, sat in a clause slot, or embedded inside a rich scalar expression
+// whose result type is what the model records. Every variant holds its data
+// in unexported fields, so NewPropertyUse / NewClauseSlotUse / NewExprUse are
+// the only ways to construct a non-zero value: the invariants the types alone
+// cannot express hold for every value that exists.
 type Use interface {
 	isUse()
 }
@@ -550,6 +639,72 @@ func (s ClauseSlot) ClauseName() string {
 	}
 }
 
+// ExprPosition names where a rich-expression parameter use appears (Stage 6):
+// inside a projection column vs inside a predicate. It is int-backed with a
+// stringer — mirrors AggregateFunc / ClauseSlot — so the JSON discriminator
+// derives from one source and cannot drift.
+type ExprPosition int
+
+const (
+	// ExprInProjection is a rich-expression parameter use at a RETURN or WITH
+	// projection column.
+	ExprInProjection ExprPosition = iota
+	// ExprInPredicate is a rich-expression parameter use inside a WHERE
+	// predicate or a comparable predicate position.
+	ExprInPredicate
+)
+
+// String is the lowercase wire tag ("projection" / "predicate"). The single
+// source the JSON discriminator's "position" field derives from.
+func (p ExprPosition) String() string {
+	switch p {
+	case ExprInPredicate:
+		return "predicate"
+	default:
+		return "projection"
+	}
+}
+
+// ExprUse is a parameter use that appears inside a rich scalar expression
+// (Stage 6). Its own type is not directly bindable to a single property or a
+// clause slot — the expression's result type is what the model carries, and
+// the resolver unifies the parameter's type from the enclosing expression
+// post-freeze. The variant carries the enclosing expression's Stage-6 result
+// type and a position discriminator (a projection column vs a predicate) so
+// the resolver can distinguish uses that participate in aggregation grouping
+// from uses that participate in filtering.
+type ExprUse struct {
+	enclosingType Type         // the result type of the enclosing rich expression
+	position      ExprPosition // where the enclosing expression sits (projection / predicate)
+}
+
+// NewExprUse builds an ExprUse carrying the enclosing rich expression's result
+// type and position. Total: the listener supplies both values it has already
+// computed at the use site.
+func NewExprUse(enclosing Type, position ExprPosition) ExprUse {
+	return ExprUse{enclosingType: enclosing, position: position}
+}
+
+// EnclosingType is the result type of the enclosing rich expression at the
+// parameter's position. The resolver reads it to infer the parameter's type.
+func (u ExprUse) EnclosingType() Type { return u.enclosingType }
+
+// Position is where the enclosing expression sits (projection column / predicate).
+func (u ExprUse) Position() ExprPosition { return u.position }
+
+func (ExprUse) isUse() {}
+
+// MarshalJSON renders an ExprUse as a tagged union member discriminated by
+// "kind", carrying the enclosing type and position — same convention as the
+// other Use variants.
+func (u ExprUse) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind          string `json:"kind"`
+		EnclosingType Type   `json:"enclosingType"`
+		Position      string `json:"position"`
+	}{Kind: useKindExpr, EnclosingType: projectionType(u.enclosingType), Position: u.position.String()})
+}
+
 // ClauseSlotUse is a parameter use that occupies a SKIP/LIMIT clause slot. The
 // parameter's type comes from the slot (an integer) rather than from a binding
 // property, so this variant carries no Ref.
@@ -573,6 +728,7 @@ func (ClauseSlotUse) isUse() {}
 const (
 	useKindProperty   = "property"
 	useKindClauseSlot = "clause-slot"
+	useKindExpr       = "expr"
 )
 
 // The "var" and "inline" endpoint discriminators have no graph-vocabulary
@@ -591,6 +747,7 @@ const (
 	projectionKindLiteral   = "literal"
 	projectionKindFunc      = "func"
 	projectionKindAggregate = "aggregate"
+	projectionKindExpr      = "expr"
 )
 
 // MarshalJSON renders a NodeBinding as a tagged union member discriminated by
@@ -683,42 +840,59 @@ func flattenRefs(refs []Ref) []flatRef {
 	return out
 }
 
+// projectionType returns the projection's result type or, when it is nil (the
+// zero-value case), TypeUnknown — so every projection marshals a concrete type
+// tag even when constructed via a struct literal that bypassed the smart
+// constructor. The always-emit convention matches nullable / returnsAll.
+func projectionType(t Type) Type {
+	if t == nil {
+		return TypeUnknown{}
+	}
+	return t
+}
+
 // MarshalJSON renders a RefProjection as a tagged union member discriminated by
 // "kind", flattening its Ref into sibling "variable"/"property" fields so the
-// projection stays one level deep — same posture as PropertyUse.
+// projection stays one level deep — same posture as PropertyUse. Stage 6: the
+// result type is always emitted.
 func (p RefProjection) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Kind     string `json:"kind"`
 		Variable string `json:"variable"`
 		Property string `json:"property"`
-	}{Kind: projectionKindRef, Variable: p.ref.Variable, Property: p.ref.Property})
+		Type     Type   `json:"type"`
+	}{Kind: projectionKindRef, Variable: p.ref.Variable, Property: p.ref.Property, Type: projectionType(p.resultType)})
 }
 
 // MarshalJSON renders a LiteralProjection as a tagged union member discriminated
-// by "kind". It carries no structured value (§2), so "kind" is its only field.
+// by "kind". Stage 6: the literal's scalar-kind is emitted as "type".
 func (p LiteralProjection) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Kind string `json:"kind"`
-	}{Kind: projectionKindLiteral})
+		Type Type   `json:"type"`
+	}{Kind: projectionKindLiteral, Type: projectionType(p.resultType)})
 }
 
 // MarshalJSON renders a FuncProjection as a tagged union member discriminated by
 // "kind", carrying its referenced bindings as "refs" and nothing of the function
-// itself (§2).
+// itself (§2). Stage 6: the result type is emitted as "type".
 func (p FuncProjection) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Kind string    `json:"kind"`
 		Refs []flatRef `json:"refs"`
-	}{Kind: projectionKindFunc, Refs: flattenRefs(p.refs)})
+		Type Type      `json:"type"`
+	}{Kind: projectionKindFunc, Refs: flattenRefs(p.refs), Type: projectionType(p.resultType)})
 }
 
 // MarshalJSON renders an AggregateProjection as a tagged union member
 // discriminated by "kind", emitting the aggregate kind as "func" (derived from
-// AggregateFunc.String, the single source) and its referenced bindings as "refs".
+// AggregateFunc.String, the single source), its referenced bindings as "refs",
+// and its Stage-6 result type as "type".
 func (p AggregateProjection) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Kind string    `json:"kind"`
 		Func string    `json:"func"`
 		Refs []flatRef `json:"refs"`
-	}{Kind: projectionKindAggregate, Func: p.fn.String(), Refs: flattenRefs(p.refs)})
+		Type Type      `json:"type"`
+	}{Kind: projectionKindAggregate, Func: p.fn.String(), Refs: flattenRefs(p.refs), Type: projectionType(p.resultType)})
 }

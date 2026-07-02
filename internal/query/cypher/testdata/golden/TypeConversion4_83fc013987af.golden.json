@@ -1,0 +1,38 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "m",
+              "labels": [
+                "Movie"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "toString(m.watched)",
+              "value": {
+                "kind": "func",
+                "refs": [
+                  {
+                    "variable": "m",
+                    "property": "watched"
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

@@ -1,0 +1,24 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "literal",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "list\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003clist\u003cunknown\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e\u003e"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

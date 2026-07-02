@@ -1,0 +1,50 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "m",
+              "labels": [
+                "Movie"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": null,
+          "returnsAll": true
+        },
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "float",
+              "value": {
+                "kind": "func",
+                "refs": [
+                  {
+                    "variable": "n",
+                    "property": "rating"
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

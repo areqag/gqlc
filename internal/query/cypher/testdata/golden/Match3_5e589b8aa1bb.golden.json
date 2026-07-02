@@ -1,0 +1,112 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "x",
+              "labels": [
+                "A"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "r1",
+              "labels": null,
+              "source": {
+                "kind": "var",
+                "variable": "x"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "y"
+              },
+              "nullable": false,
+              "directed": true
+            },
+            {
+              "kind": "node",
+              "variable": "y",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "r2",
+              "labels": null,
+              "source": {
+                "kind": "var",
+                "variable": "y"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "z"
+              },
+              "nullable": false,
+              "directed": false
+            },
+            {
+              "kind": "node",
+              "variable": "z",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "x",
+              "value": {
+                "kind": "ref",
+                "variable": "x",
+                "property": "",
+                "type": "node"
+              }
+            },
+            {
+              "name": "r1",
+              "value": {
+                "kind": "ref",
+                "variable": "r1",
+                "property": "",
+                "type": "edge"
+              }
+            },
+            {
+              "name": "y",
+              "value": {
+                "kind": "ref",
+                "variable": "y",
+                "property": "",
+                "type": "node"
+              }
+            },
+            {
+              "name": "r2",
+              "value": {
+                "kind": "ref",
+                "variable": "r2",
+                "property": "",
+                "type": "edge"
+              }
+            },
+            {
+              "name": "z",
+              "value": {
+                "kind": "ref",
+                "variable": "z",
+                "property": "",
+                "type": "node"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

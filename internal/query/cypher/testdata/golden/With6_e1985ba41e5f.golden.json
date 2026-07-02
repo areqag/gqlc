@@ -1,0 +1,65 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "name",
+              "value": {
+                "kind": "ref",
+                "variable": "a",
+                "property": "name",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "relCount",
+              "value": {
+                "kind": "aggregate",
+                "func": "count",
+                "refs": null,
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "name",
+              "value": {
+                "kind": "ref",
+                "variable": "name",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "relCount",
+              "value": {
+                "kind": "ref",
+                "variable": "relCount",
+                "property": "",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

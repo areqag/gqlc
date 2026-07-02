@@ -249,42 +249,55 @@ func TestConstructorsAreSoleSourceOfData(t *testing.T) {
 // --- projection sum: constructors and the AggregateFunc stringer ---
 
 func TestNewRefProjection(t *testing.T) {
-	p := query.NewRefProjection(query.Ref{Variable: "n", Property: "name"})
+	// A property lookup types as TypeUnknown (Stage 6): the schema owns property
+	// typing per ADR 0003, so the parser records "cannot tell" honestly.
+	p := query.NewRefProjection(query.Ref{Variable: "n", Property: "name"}, query.TypeUnknown{})
 	require.Equal(t, query.Ref{Variable: "n", Property: "name"}, p.Ref())
+	require.Equal(t, query.TypeUnknown{}, p.Type())
 	var _ query.Projection = p
 }
 
-func TestNewLiteralProjection(_ *testing.T) {
-	// A literal carries no structured value (§2): the variant exists only so the
-	// column is counted and named. It satisfies the sum and carries no Ref.
-	p := query.NewLiteralProjection()
+func TestNewLiteralProjection(t *testing.T) {
+	// Stage 6: LiteralProjection carries its scalar-literal kind. The listener
+	// computes the kind from the grammar node; the value stays below the
+	// type-interface boundary (ADR 0005). It satisfies the sum and carries no Ref.
+	p := query.NewLiteralProjection(query.TypeInt{})
+	require.Equal(t, query.TypeInt{}, p.Type())
 	var _ query.Projection = p
 }
 
 func TestNewFuncProjection(t *testing.T) {
+	// Stage 6: FuncProjection carries a result type — TypeUnknown, because
+	// function identity is below the boundary (ADR 0005).
 	refs := []query.Ref{{Variable: "a", Property: "num"}, {Variable: "b", Property: "num"}}
-	p := query.NewFuncProjection(refs)
+	p := query.NewFuncProjection(refs, query.TypeUnknown{})
 	require.Equal(t, refs, p.Refs())
+	require.Equal(t, query.TypeUnknown{}, p.Type())
 	var _ query.Projection = p
 }
 
 func TestNewFuncProjectionAllowsNoRefs(t *testing.T) {
 	// A zero-arg function (or one over no bound variables) carries no Refs.
-	p := query.NewFuncProjection(nil)
+	p := query.NewFuncProjection(nil, query.TypeUnknown{})
 	require.Empty(t, p.Refs())
 }
 
 func TestNewAggregateProjection(t *testing.T) {
+	// Stage 6: AggregateProjection carries a result type — TypeUnknown, because
+	// the aggregate's return type depends on the argument type (below the boundary).
 	refs := []query.Ref{{Variable: "n", Property: "num"}}
-	p := query.NewAggregateProjection(query.AggSum, refs)
+	p := query.NewAggregateProjection(query.AggSum, refs, query.TypeUnknown{})
 	require.Equal(t, query.AggSum, p.Func())
 	require.Equal(t, refs, p.Refs())
+	require.Equal(t, query.TypeUnknown{}, p.Type())
 	var _ query.Projection = p
 }
 
 func TestNewAggregateProjectionCountStar(t *testing.T) {
-	// count(*) is the degenerate case — AggCount with an empty []Ref (§2).
-	p := query.NewAggregateProjection(query.AggCount, nil)
+	// count(*) is the degenerate case — AggCount with an empty []Ref (§2). Its
+	// result type is TypeInt on real engines but is TypeUnknown in the model
+	// (the same "function identity below the boundary" rule).
+	p := query.NewAggregateProjection(query.AggCount, nil, query.TypeUnknown{})
 	require.Equal(t, query.AggCount, p.Func())
 	require.Empty(t, p.Refs())
 }
@@ -303,12 +316,19 @@ func TestProjectionZeroValuesCarryNoData(t *testing.T) {
 	require.Equal(t, query.AggCount, agg.Func()) // the iota-zero aggregate
 	require.Empty(t, agg.Refs())
 
-	// The sealed interface closes the sum: only the four package-defined variants
+	// Stage 6: ExprProjection joins the sum with the same inert-zero-value
+	// discipline — Refs is nil, Type() returns nil interface (marshal falls
+	// back to TypeUnknown via projectionType).
+	var expr query.ExprProjection
+	require.Empty(t, expr.Refs())
+
+	// The sealed interface closes the sum: only the five package-defined variants
 	// satisfy it, so a projection is always exactly one known shape.
 	var _ query.Projection = query.RefProjection{}
 	var _ query.Projection = query.LiteralProjection{}
 	var _ query.Projection = query.FuncProjection{}
 	var _ query.Projection = query.AggregateProjection{}
+	var _ query.Projection = query.ExprProjection{}
 }
 
 // TestAggregateFuncString pins the lowercase names the JSON "func" discriminator
@@ -334,57 +354,73 @@ func TestAggregateFuncString(t *testing.T) {
 // --- projection sum: JSON shapes (§5) ---
 
 func TestRefProjectionMarshalJSON(t *testing.T) {
-	out, err := json.Marshal(query.NewRefProjection(query.Ref{Variable: "n", Property: "name"}))
+	// Stage 6: RefProjection carries a "type" field (always emitted). A property
+	// lookup types as TypeUnknown — the schema owns property typing.
+	out, err := json.Marshal(query.NewRefProjection(query.Ref{Variable: "n", Property: "name"}, query.TypeUnknown{}))
 	require.NoError(t, err)
-	require.JSONEq(t, `{"kind":"ref","variable":"n","property":"name"}`, string(out))
+	require.JSONEq(t, `{"kind":"ref","variable":"n","property":"name","type":"unknown"}`, string(out))
+}
+
+// TestRefProjectionMarshalJSONWholeEntity pins the whole-entity case: a bare
+// RETURN n on a node binding types as TypeNode and marshals with "type":"node".
+func TestRefProjectionMarshalJSONWholeEntity(t *testing.T) {
+	out, err := json.Marshal(query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{}))
+	require.NoError(t, err)
+	require.JSONEq(t, `{"kind":"ref","variable":"n","property":"","type":"node"}`, string(out))
 }
 
 func TestLiteralProjectionMarshalJSON(t *testing.T) {
-	out, err := json.Marshal(query.NewLiteralProjection())
+	// Stage 6: LiteralProjection emits its scalar-literal kind as "type" —
+	// always emitted, matching the always-emit convention.
+	out, err := json.Marshal(query.NewLiteralProjection(query.TypeInt{}))
 	require.NoError(t, err)
-	require.JSONEq(t, `{"kind":"literal"}`, string(out))
+	require.JSONEq(t, `{"kind":"literal","type":"int"}`, string(out))
 }
 
 func TestFuncProjectionMarshalJSON(t *testing.T) {
+	// Stage 6: FuncProjection emits its result type as "type" — TypeUnknown for
+	// today, always emitted.
 	out, err := json.Marshal(query.NewFuncProjection([]query.Ref{
 		{Variable: "a", Property: "num"},
 		{Variable: "b"},
-	}))
+	}, query.TypeUnknown{}))
 	require.NoError(t, err)
 	require.JSONEq(t,
-		`{"kind":"func","refs":[{"variable":"a","property":"num"},{"variable":"b","property":""}]}`,
+		`{"kind":"func","refs":[{"variable":"a","property":"num"},{"variable":"b","property":""}],"type":"unknown"}`,
 		string(out))
 }
 
 func TestAggregateProjectionMarshalJSON(t *testing.T) {
 	out, err := json.Marshal(query.NewAggregateProjection(query.AggSum, []query.Ref{
 		{Variable: "n", Property: "num"},
-	}))
+	}, query.TypeUnknown{}))
 	require.NoError(t, err)
 	require.JSONEq(t,
-		`{"kind":"aggregate","func":"sum","refs":[{"variable":"n","property":"num"}]}`,
+		`{"kind":"aggregate","func":"sum","refs":[{"variable":"n","property":"num"}],"type":"unknown"}`,
 		string(out))
 }
 
 func TestAggregateProjectionMarshalJSONCountStar(t *testing.T) {
 	// count(*) marshals AggCount with an empty refs array (null, the always-emit
-	// posture the other sums follow for nil slices).
-	out, err := json.Marshal(query.NewAggregateProjection(query.AggCount, nil))
+	// posture the other sums follow for nil slices), and its Stage-6 type is
+	// TypeUnknown.
+	out, err := json.Marshal(query.NewAggregateProjection(query.AggCount, nil, query.TypeUnknown{}))
 	require.NoError(t, err)
-	require.JSONEq(t, `{"kind":"aggregate","func":"count","refs":null}`, string(out))
+	require.JSONEq(t, `{"kind":"aggregate","func":"count","refs":null,"type":"unknown"}`, string(out))
 }
 
 func TestReturnItemMarshalJSON(t *testing.T) {
 	// A ReturnItem marshals one level deep: lowercase "name" and "value", the
-	// value carrying its own "kind" discriminator (§5).
+	// value carrying its own "kind" discriminator (§5). Stage 6: the projection
+	// now emits its result type as "type" — always emitted.
 	item := query.ReturnItem{
 		Name:  "name",
-		Value: query.NewRefProjection(query.Ref{Variable: "p", Property: "name"}),
+		Value: query.NewRefProjection(query.Ref{Variable: "p", Property: "name"}, query.TypeUnknown{}),
 	}
 	out, err := json.Marshal(item)
 	require.NoError(t, err)
 	require.JSONEq(t,
-		`{"name":"name","value":{"kind":"ref","variable":"p","property":"name"}}`,
+		`{"name":"name","value":{"kind":"ref","variable":"p","property":"name","type":"unknown"}}`,
 		string(out))
 }
 
@@ -393,7 +429,7 @@ func TestPartMarshalJSONEmitsReturnsAll(t *testing.T) {
 	// always-emit convention. A plain part (no RETURN *) serialises it as false.
 	part := query.Part{
 		Returns: []query.ReturnItem{
-			{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
+			{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
 		},
 	}
 	out, err := json.Marshal(part)
@@ -458,11 +494,11 @@ func TestQueryMarshalJSONEmitsCombinatorsForUnion(t *testing.T) {
 		Branches: []query.Branch{
 			{Parts: []query.Part{{
 				Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
-				Returns:  []query.ReturnItem{{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})}},
+				Returns:  []query.ReturnItem{{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})}},
 			}}},
 			{Parts: []query.Part{{
 				Bindings: []query.Binding{must(query.NewNodeBinding("b", nil))},
-				Returns:  []query.ReturnItem{{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"})}},
+				Returns:  []query.ReturnItem{{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"}, query.TypeNode{})}},
 			}}},
 		},
 		Combinators: []query.UnionKind{query.UnionAll},
@@ -505,8 +541,8 @@ func representativeQuery(t *testing.T) query.Query {
 			{Parts: []query.Part{{
 				Bindings: []query.Binding{a, b, edge},
 				Returns: []query.ReturnItem{
-					{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
-					{Name: "a.name", Value: query.NewRefProjection(query.Ref{Variable: "a", Property: "name"})},
+					{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
+					{Name: "a.name", Value: query.NewRefProjection(query.Ref{Variable: "a", Property: "name"}, query.TypeUnknown{})},
 				},
 			}}},
 		},
