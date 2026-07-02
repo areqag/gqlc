@@ -1,0 +1,125 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    # correctness
+    - staticcheck
+    - govet
+    - errcheck
+    - errorlint
+    - nilerr
+    - copyloopvar
+    - ineffassign
+    - wastedassign
+    - unconvert
+    - unparam
+    - unused
+    - predeclared
+    - gocritic
+    # codebase-specific invariants
+    - exhaustive
+    - depguard
+    - musttag
+    - forbidigo
+    # tests
+    - testifylint
+    - thelper
+    # hygiene
+    - misspell
+    - nolintlint
+    - revive
+  settings:
+    depguard:
+      rules:
+        # ADR 0003: the curated query model is dialect-agnostic — nothing from
+        # the grammar layer may leak above the parser boundary.
+        query-model-dialect-agnostic:
+          files:
+            - "**/internal/query/*.go"
+          deny:
+            - pkg: github.com/areqag/gqlc/internal/grammar
+              desc: the query model is dialect-agnostic (ADR 0003); grammar types stay inside the parser packages
+            - pkg: github.com/antlr4-go/antlr
+              desc: the ANTLR runtime must not leak into the query model (ADR 0003)
+        # Generated grammar packages are an implementation detail of exactly
+        # two consumers: the Cypher query parser and the GQL schema parser.
+        grammar-isolation:
+          files:
+            - $all
+            - "!**/internal/query/cypher/**"
+            - "!**/internal/schema/gql/**"
+            - "!**/internal/grammar/**"
+          deny:
+            - pkg: github.com/areqag/gqlc/internal/grammar
+              desc: grammar packages are importable only by internal/query/cypher and internal/schema/gql
+            - pkg: github.com/antlr4-go/antlr
+              desc: the ANTLR runtime is importable only by the parser packages
+    exhaustive:
+      default-signifies-exhaustive: true
+    forbidigo:
+      forbid:
+        - pattern: ^(fmt\.Print(|f|ln)|print|println)$
+          msg: use log/slog via internal/logger; direct printing bypasses structured logging
+        - pattern: ^log\.(Print|Fatal|Panic)
+          msg: use log/slog via internal/logger, not the legacy log package
+    misspell:
+      # the codebase is written in British English (see CONTEXT.md: canonicalised,
+      # modelled, serialise); UK locale enforces that consistently
+      locale: UK
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    revive:
+      # the golint-heritage default set, explicit so `exported` can be configured
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: empty-block
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: exported
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: time-naming
+        - name: unexported-return
+        - name: unreachable-code
+        - name: unused-parameter
+        - name: var-declaration
+        - name: var-naming
+  exclusions:
+    generated: lax
+    paths:
+      - internal/grammar/cypher/gen
+      - internal/grammar/gql/gen
+    rules:
+      # (Enter|Exit)OC_* implement the ANTLR-generated Cypher listener interface;
+      # the underscored names are fixed by the generated code and cannot change
+      - path: internal/query/cypher/
+        text: "method (Enter|Exit)OC_"
+        linters:
+          - revive
+
+formatters:
+  enable:
+    - gofumpt
+    - gci
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - localmodule
+  exclusions:
+    paths:
+      - internal/grammar/cypher/gen
+      - internal/grammar/gql/gen

@@ -4,12 +4,14 @@ import (
 	"io"
 
 	"github.com/antlr4-go/antlr/v4"
+
 	"github.com/areqag/gqlc/internal/grammar/gql/gen"
 	"github.com/areqag/gqlc/internal/schema"
 )
 
 type parser struct{}
 
+// New returns the ANTLR listener-driven GQL schema parser.
 func New() schema.Parser {
 	return parser{}
 }

@@ -12,7 +12,7 @@ import (
 
 // TestMarshalJSONIsDeterministic guards the property that makes Schema safe to
 // serialise: marshalling the same model twice yields byte-identical output, so a
-// regenerated artifact (a .golden.json today, generated code later) never diffs
+// regenerated artefact (a .golden.json today, generated code later) never diffs
 // from Go's randomised map iteration order alone. The fixture deliberately uses
 // out-of-order map entries so a naive marshal would flap.
 func TestMarshalJSONIsDeterministic(t *testing.T) {

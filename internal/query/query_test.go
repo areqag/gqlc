@@ -254,7 +254,7 @@ func TestNewRefProjection(t *testing.T) {
 	var _ query.Projection = p
 }
 
-func TestNewLiteralProjection(t *testing.T) {
+func TestNewLiteralProjection(_ *testing.T) {
 	// A literal carries no structured value (§2): the variant exists only so the
 	// column is counted and named. It satisfies the sum and carries no Ref.
 	p := query.NewLiteralProjection()

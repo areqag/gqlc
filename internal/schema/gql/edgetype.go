@@ -1,3 +1,6 @@
+// Package gql implements schema.Parser for GQL graph types: an ANTLR
+// listener-driven walk collects raw element types, and a post-walk pass
+// resolves edge endpoints (forward references are legal in a graph type body).
 package gql
 
 import (

@@ -1,3 +1,6 @@
+// gqlc is an sqlc analogue for graph query languages: it parses GQL graph
+// schemas and openCypher queries and will generate type-safe code from them.
+// The current entrypoint is a development driver that parses the sample schema.
 package main
 
 import (
@@ -25,7 +28,7 @@ func main() {
 		slog.ErrorContext(ctx, "failed to open schema", "err", err)
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	p := schema_parser_gql.New()
 	if _, err := p.Parse(f); err != nil {

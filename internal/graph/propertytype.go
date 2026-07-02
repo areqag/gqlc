@@ -4,6 +4,8 @@ package graph
 // their bit width (ADR 0002).
 type PropertyType string
 
+// The normalised property types: scalars first, then the numeric families,
+// each width-preserving variant its own type (ADR 0002).
 const (
 	TypeString    PropertyType = "STRING"
 	TypeBool      PropertyType = "BOOL"
