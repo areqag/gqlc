@@ -3,6 +3,7 @@ package query
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/areqag/gqlc/internal/graph"
 )
@@ -371,40 +372,172 @@ func (h EdgeHops) MarshalJSON() ([]byte, error) {
 	}{Min: h.min, Max: h.max})
 }
 
-// PathBinding is a query variable bound to a named path (Stage 8 spec §1.2):
-// the p in MATCH p = (a)-[r]->(b) RETURN p. It carries the path variable name
-// and the ordered list of member binding names (variable names, not values,
-// so the path binding does not co-own the member bindings — those live in the
-// part's own Bindings slice). An anonymous edge inside a named path gets a
-// synthetic member name (__anon_edge_<index>) at collection time so every
-// member has a name (Stage 8 spec §1.2, §8). PathBinding never has a Nullable
-// flag at Stage 8: the OPTIONAL-introduced case flows through the member
-// bindings themselves.
-type PathBinding struct {
-	variable string   // the path variable name; always non-empty
-	members  []string // the member binding names in textual order; always non-empty, no empty entries
+// PathMember is one element of a named path's members list (Stage 8 spec
+// §1.2, §3.2). It is a closed sum of NamedNodeMember, NamedEdgeMember,
+// AnonEdgeMember, and AnonNodeMember — no other type can implement it — so
+// a member is exactly one of four things: a named node, a named edge, an
+// anonymous edge slot, or an anonymous node slot. The named variants
+// reference a binding by variable; the anonymous variants carry no name,
+// so an anonymous slot in a path never competes with a user-chosen
+// variable in the part's byVar namespace (an earlier design used a
+// synthetic-name string that collided with legal oC_SymbolicName inputs
+// like `__anon_edge_0`; the tagged sum makes that unrepresentable).
+type PathMember interface {
+	// Kind reports whether the member is a node position or an edge
+	// position (BindingNode / BindingEdge). A path member is never a path.
+	Kind() BindingKind
+	// Variable is the named binding this member references; empty for the
+	// two anonymous variants.
+	Variable() string
+	// Anonymous reports whether this member carries no name (the two
+	// AnonXMember variants).
+	Anonymous() bool
+	isPathMember()
 }
 
-// NewPathBinding builds a PathBinding. Rejects an empty variable (a path with
-// no name is not a binding — the parser emits no PathBinding for an unnamed
-// pattern), an empty members slice (a pattern element always has at least one
-// node so a path always has at least one member), and any empty member name
-// (an anonymous edge inside a named path is given a synthetic name at
-// collection time).
-func NewPathBinding(variable string, members []string) (PathBinding, error) {
+// NamedNodeMember is a path member that references a named node binding by
+// variable — the a and b in `MATCH p = (a)-[r]->(b)`. The variable is
+// always non-empty (NewNamedNodeMember).
+type NamedNodeMember struct {
+	variable string
+}
+
+// NewNamedNodeMember builds a NamedNodeMember, rejecting the empty variable:
+// a named member always names a binding, and the anonymous case is
+// AnonNodeMember.
+func NewNamedNodeMember(variable string) (NamedNodeMember, error) {
+	if variable == "" {
+		return NamedNodeMember{}, errors.New("query: named-node path member requires a non-empty variable")
+	}
+	return NamedNodeMember{variable: variable}, nil
+}
+
+// Variable is the named binding this member references; always non-empty.
+func (m NamedNodeMember) Variable() string { return m.variable }
+
+// Kind reports that a NamedNodeMember occupies a node position.
+func (NamedNodeMember) Kind() BindingKind { return BindingNode }
+
+// Anonymous reports false — this member names a binding.
+func (NamedNodeMember) Anonymous() bool { return false }
+
+func (NamedNodeMember) isPathMember() {}
+
+// NamedEdgeMember is a path member that references a named edge binding by
+// variable — the r in `MATCH p = (a)-[r]->(b)`. The variable is always
+// non-empty (NewNamedEdgeMember).
+type NamedEdgeMember struct {
+	variable string
+}
+
+// NewNamedEdgeMember builds a NamedEdgeMember, rejecting the empty variable:
+// an anonymous edge inside a named path is AnonEdgeMember, not a
+// NamedEdgeMember with an empty variable.
+func NewNamedEdgeMember(variable string) (NamedEdgeMember, error) {
+	if variable == "" {
+		return NamedEdgeMember{}, errors.New("query: named-edge path member requires a non-empty variable")
+	}
+	return NamedEdgeMember{variable: variable}, nil
+}
+
+// Variable is the named binding this member references; always non-empty.
+func (m NamedEdgeMember) Variable() string { return m.variable }
+
+// Kind reports that a NamedEdgeMember occupies an edge position.
+func (NamedEdgeMember) Kind() BindingKind { return BindingEdge }
+
+// Anonymous reports false — this member names a binding.
+func (NamedEdgeMember) Anonymous() bool { return false }
+
+func (NamedEdgeMember) isPathMember() {}
+
+// AnonEdgeMember is a path member for an anonymous edge slot — the
+// `-[]-` link inside `p = (a)-[]-(b)`. It carries no name (the anonymous
+// edge is still its own binding in the part's Bindings slice, but the path
+// member does not name it — a name would risk collision with a user
+// variable in the byVar namespace). Empty struct: no state.
+type AnonEdgeMember struct{}
+
+// Variable is always empty for an AnonEdgeMember (the anonymous variant
+// carries no name).
+func (AnonEdgeMember) Variable() string { return "" }
+
+// Kind reports that an AnonEdgeMember occupies an edge position.
+func (AnonEdgeMember) Kind() BindingKind { return BindingEdge }
+
+// Anonymous reports true — this member has no name.
+func (AnonEdgeMember) Anonymous() bool { return true }
+
+func (AnonEdgeMember) isPathMember() {}
+
+// AnonNodeMember is a path member for an anonymous intermediate node — the
+// `()` inside `p = (a)-[]-()-[]-(b)`. An anonymous node is not itself a
+// binding (§C3, the node is a pure filter and does not appear in
+// Part.Bindings), but the path's shape requires a placeholder at the node
+// position so codegen can reconstruct the path shape from Members() alone.
+// Empty struct: no state.
+type AnonNodeMember struct{}
+
+// Variable is always empty for an AnonNodeMember (the anonymous variant
+// carries no name).
+func (AnonNodeMember) Variable() string { return "" }
+
+// Kind reports that an AnonNodeMember occupies a node position.
+func (AnonNodeMember) Kind() BindingKind { return BindingNode }
+
+// Anonymous reports true — this member has no name.
+func (AnonNodeMember) Anonymous() bool { return true }
+
+func (AnonNodeMember) isPathMember() {}
+
+// PathBinding is a query variable bound to a named path (Stage 8 spec §1.2):
+// the p in MATCH p = (a)-[r]->(b) RETURN p. It carries the path variable name
+// and the shape-faithful ordered list of members the path composes, as a
+// tagged sum (PathMember). Named members reference the part's own entity
+// bindings by variable (the path binding does not co-own them); anonymous
+// members are positional slots that carry no name, so an anonymous slot in
+// a path never competes with a user-chosen variable in the byVar namespace.
+// PathBinding never has a Nullable flag at Stage 8: the OPTIONAL-introduced
+// case flows through the member bindings themselves.
+type PathBinding struct {
+	variable string       // the path variable name; always non-empty
+	members  []PathMember // the members in shape-faithful textual order; always non-empty, no nil entries
+}
+
+// NewPathBinding builds a PathBinding. Rejects an empty variable (a path
+// with no name is not a binding — the parser emits no PathBinding for an
+// unnamed pattern), an empty members slice (a pattern element always has
+// at least one node so a path always has at least one member), a nil
+// member entry (every member is one of the four tagged-sum variants),
+// and a kind-inconsistent repeat of a named member: openCypher lets the
+// same variable appear multiple times in a pattern (`(n)-->(k)<--(n)`),
+// so repeats of a *same-kind* named member are legal, but two named
+// members that share a variable and disagree on Kind() would collide
+// with the part's byVar (a kind conflict at the pattern level, which
+// mergeBinding also catches). The anonymous variants may repeat freely.
+func NewPathBinding(variable string, members []PathMember) (PathBinding, error) {
 	if variable == "" {
 		return PathBinding{}, errors.New("query: path binding requires a non-empty variable")
 	}
 	if len(members) == 0 {
 		return PathBinding{}, errors.New("query: path binding requires at least one member")
 	}
-	for _, m := range members {
-		if m == "" {
-			return PathBinding{}, errors.New("query: path binding requires every member to have a name")
+	kindByName := map[string]BindingKind{}
+	for i, m := range members {
+		if m == nil {
+			return PathBinding{}, fmt.Errorf("query: path binding member %d is nil", i)
 		}
+		if m.Anonymous() {
+			continue
+		}
+		v := m.Variable()
+		if prior, ok := kindByName[v]; ok && prior != m.Kind() {
+			return PathBinding{}, fmt.Errorf("query: path binding member %q appears with conflicting kinds (%s vs %s)", v, prior.String(), m.Kind().String())
+		}
+		kindByName[v] = m.Kind()
 	}
 	// Copy so the caller cannot mutate the binding's members after construction.
-	membersCopy := make([]string, len(members))
+	membersCopy := make([]PathMember, len(members))
 	copy(membersCopy, members)
 	return PathBinding{variable: variable, members: membersCopy}, nil
 }
@@ -412,8 +545,11 @@ func NewPathBinding(variable string, members []string) (PathBinding, error) {
 // Variable is the path variable name; always non-empty.
 func (b PathBinding) Variable() string { return b.variable }
 
-// Members are the member binding names in textual order; always non-empty.
-func (b PathBinding) Members() []string { return b.members }
+// Members are the members in shape-faithful textual order; always non-empty,
+// no nil entries. Codegen reads Members() to reconstruct the path's shape
+// (node, edge, node, edge, …, node) and to identify the named members
+// against the part's bindings.
+func (b PathBinding) Members() []PathMember { return b.members }
 
 // Kind reports that a PathBinding is a path.
 func (PathBinding) Kind() BindingKind { return BindingPath }
@@ -424,16 +560,61 @@ func (PathBinding) Nullable() bool { return false }
 
 func (PathBinding) isBinding() {}
 
+// The PathMember discriminators name the wire tag for each variant. The
+// named variants share their tag with graph.EntityKind ("node"/"edge") for
+// wire continuity with NodeBinding / EdgeBinding; the anonymous variants
+// use distinct tags so a consumer never confuses an anonymous slot with a
+// named member of an empty variable.
+const (
+	pathMemberKindNamedNode = "node"
+	pathMemberKindNamedEdge = "edge"
+	pathMemberKindAnonEdge  = "anon-edge"
+	pathMemberKindAnonNode  = "anon-node"
+)
+
+// MarshalJSON on the named variants emits `{"kind","variable"}`; the
+// anonymous variants emit `{"kind"}` alone. Same one-level-deep posture as
+// the other tagged unions in the model.
+func (m NamedNodeMember) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind     string `json:"kind"`
+		Variable string `json:"variable"`
+	}{Kind: pathMemberKindNamedNode, Variable: m.variable})
+}
+
+// MarshalJSON on NamedEdgeMember mirrors NamedNodeMember's shape.
+func (m NamedEdgeMember) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind     string `json:"kind"`
+		Variable string `json:"variable"`
+	}{Kind: pathMemberKindNamedEdge, Variable: m.variable})
+}
+
+// MarshalJSON on AnonEdgeMember emits only the "kind" discriminator.
+func (AnonEdgeMember) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind string `json:"kind"`
+	}{Kind: pathMemberKindAnonEdge})
+}
+
+// MarshalJSON on AnonNodeMember emits only the "kind" discriminator.
+func (AnonNodeMember) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind string `json:"kind"`
+	}{Kind: pathMemberKindAnonNode})
+}
+
 // MarshalJSON renders a PathBinding as a tagged union member discriminated by
 // "kind" (derived from BindingKind, the single source), carrying its variable
-// and members in a shape one level deep. The always-emit nullable field
-// (false, per Stage 8 spec §1.2) matches the entity bindings' shape.
+// and members. Members serialise as an array of tagged-sum PathMember values
+// (§3.2), one object per member. The always-emit nullable field (false, per
+// Stage 8 spec §1.2) matches the entity bindings' shape.
 func (b PathBinding) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Kind     string   `json:"kind"`
-		Variable string   `json:"variable"`
-		Members  []string `json:"members"`
-		Nullable bool     `json:"nullable"`
+		Kind     string       `json:"kind"`
+		Variable string       `json:"variable"`
+		Members  []PathMember `json:"members"`
+		Nullable bool         `json:"nullable"`
 	}{Kind: b.Kind().String(), Variable: b.variable, Members: b.members, Nullable: b.Nullable()})
 }
 
