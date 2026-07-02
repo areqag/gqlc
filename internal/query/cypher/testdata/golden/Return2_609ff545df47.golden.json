@@ -16,7 +16,8 @@
                 "kind": "inline",
                 "labels": null
               },
-              "nullable": false
+              "nullable": false,
+              "directed": true
             }
           ],
           "returns": [

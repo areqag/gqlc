@@ -78,29 +78,28 @@ func (l *listener) collectNode(n gen.IOC_NodePatternContext, optional bool) {
 	}
 	l.mineInlineMap(variable, n.OC_Properties())
 	if variable != "" {
-		l.mergeBinding(variable, graph.Node, nodeLabels(n.OC_NodeLabels()), nil, nil, optional)
+		l.mergeBinding(variable, graph.Node, nodeLabels(n.OC_NodeLabels()), nil, nil, optional, false)
 	}
 }
 
 // collectEdge records a relationship between prev and next as an edge binding.
-// It rejects undirected and multi-type relationships, canonicalises a
-// left-pointing arc to source->target, and forms each endpoint from its node
-// (a VarEndpoint for a named node, an InlineEndpoint otherwise). optional
-// marks any edge binding (named or anonymous) introduced here as nullable.
+// It rejects multi-type relationships; a directed left-arc is canonicalised to
+// source->target, while an undirected edge keeps textual order with the
+// undirected flag set (Stage 5). Each endpoint is formed from its node (a
+// VarEndpoint for a named node, an InlineEndpoint otherwise). optional marks any
+// edge binding (named or anonymous) introduced here as nullable.
 func (l *listener) collectEdge(r gen.IOC_RelationshipPatternContext, prev, next gen.IOC_NodePatternContext, optional bool) {
 	left := r.OC_LeftArrowHead() != nil
 	right := r.OC_RightArrowHead() != nil
-	if left == right {
-		// Both heads (<-[]->) or neither (-[]-) is undirected; the schema is
-		// directed-only (C5).
-		l.fail(fmt.Errorf("%w: undirected relationship", ErrUnsupportedPattern))
-		return
-	}
+	// One arrow (left != right) is directed; both heads (<-[]->) or neither (-[]-)
+	// is undirected — openCypher treats both spellings the same (Stage 5).
+	directed := left != right
 
-	// Canonicalise: a right-pointing arc keeps prev->next; a left-pointing arc is
-	// the edge next->prev (mirrors the schema side).
+	// Canonicalise only a directed left-pointing arc to next->prev (mirrors the
+	// schema side). An undirected edge keeps textual order prev->next — note <-->
+	// has left==true, so the directed guard is required to avoid flipping it.
 	srcNode, tgtNode := prev, next
-	if left {
+	if directed && left {
 		srcNode, tgtNode = next, prev
 	}
 	source := l.endpoint(srcNode)
@@ -131,12 +130,12 @@ func (l *listener) collectEdge(r gen.IOC_RelationshipPatternContext, prev, next 
 		// construct just to read back the (unchanged) labels. Anonymous edges
 		// introduced inside OPTIONAL MATCH carry the nullable flag uniformly
 		// (ADR 0006) even though no Ref will ever observe it.
-		rb := &rawBinding{variable: "", kind: graph.Edge, source: source, target: target, nullable: optional}
+		rb := &rawBinding{variable: "", kind: graph.Edge, source: source, target: target, nullable: optional, undirected: !directed}
 		rb.mergeLabels(labels)
 		l.curPart.bindings = append(l.curPart.bindings, rb)
 		return
 	}
-	l.mergeBinding(variable, graph.Edge, labels, source, target, optional)
+	l.mergeBinding(variable, graph.Edge, labels, source, target, optional, !directed)
 }
 
 // endpoint forms an edge endpoint from a node pattern: a VarEndpoint for a named
@@ -174,11 +173,11 @@ func (l *listener) recordEndpointRefs(eps ...query.Endpoint) {
 // nullability is a static fact about its *introducing* clause; a later
 // non-OPTIONAL occurrence neither sets nor clears the flag — that demotion is the
 // resolver's job (gqlc-lqm).
-func (l *listener) mergeBinding(variable string, kind graph.EntityKind, labels graph.LabelSet, source, target query.Endpoint, optional bool) {
+func (l *listener) mergeBinding(variable string, kind graph.EntityKind, labels graph.LabelSet, source, target query.Endpoint, optional, undirected bool) {
 	part := l.curPart
 	idx, ok := part.byVar[variable]
 	if !ok {
-		rb := &rawBinding{variable: variable, kind: kind, seen: map[string]bool{}, source: source, target: target, nullable: optional}
+		rb := &rawBinding{variable: variable, kind: kind, seen: map[string]bool{}, source: source, target: target, nullable: optional, undirected: undirected}
 		rb.mergeLabels(labels)
 		part.byVar[variable] = len(part.bindings)
 		part.bindings = append(part.bindings, rb)

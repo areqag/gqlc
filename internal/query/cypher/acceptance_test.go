@@ -139,6 +139,13 @@ var skiplist = map[string]bool{
 	// the projected expression, so the two reconcile structurally. (Scenario Outline
 	// with 3 examples — true/123/123.4 — each pickle carries the same name.)
 	"[11] Fail when matching a node variable bound to a value": true,
+	// WITH <invalid> AS r / MATCH ()-[r]-(): the edge analogue of the node entry
+	// above — r imports a name and is re-bound as a relationship; the conflict is
+	// that the WITH expression's value is not a relationship (VariableTypeConflict).
+	// We model r's binding kind, not the projected expression's type. Reachable only
+	// at Stage 5 because the pattern is undirected (()-[r]-()); the error is the same
+	// value-level rule below the type-interface boundary (B1, ADR 0003/0005).
+	"[13] Fail when matching a relationship variable bound to a value": true,
 	// RETURN 1 AS a UNION RETURN 2 AS b: the two branches expose different column
 	// names (DifferentColumnsInUnion). Column compatibility across branches is not
 	// modelled (ADR 0003); we record each branch's Returns verbatim.

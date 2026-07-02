@@ -132,6 +132,7 @@ var mustParse = map[string]struct {
 				must(query.NewEdgeBinding("r", nil,
 					query.NewInlineEndpoint(nil),
 					query.NewInlineEndpoint(nil),
+					true,
 				)),
 			},
 			Returns: []query.ReturnItem{
@@ -148,6 +149,7 @@ var mustParse = map[string]struct {
 				must(query.NewEdgeBinding("r", nil,
 					query.NewInlineEndpoint(graph.LabelSet{"A"}),
 					query.NewInlineEndpoint(graph.LabelSet{"B"}),
+					true,
 				)),
 			},
 			Returns: []query.ReturnItem{
@@ -165,6 +167,7 @@ var mustParse = map[string]struct {
 				must(query.NewEdgeBinding("rel", graph.LabelSet{"KNOWS"},
 					must(query.NewVarEndpoint("n1")),
 					must(query.NewVarEndpoint("n2")),
+					true,
 				)),
 				must(query.NewNodeBinding("n2", nil)),
 			},
@@ -184,6 +187,30 @@ var mustParse = map[string]struct {
 				must(query.NewEdgeBinding("r", nil,
 					must(query.NewVarEndpoint("a")),
 					must(query.NewVarEndpoint("b")),
+					true,
+				)),
+				must(query.NewNodeBinding("b", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
+				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"})},
+				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"})},
+			},
+		}),
+	},
+	// Match3 [3] "Undirected match on simple relationship graph" — verbatim corpus
+	// query (RETURN a, r, b), the undirected twin of "directed edge whole entities"
+	// (Match3 [2]). Stage 5: directed=false (the trailing false), endpoints in
+	// textual order [a, r, b] with no canonical flip (the resolver tries both).
+	"undirected edge whole entities": {
+		src: "MATCH (a)-[r]-(b)\nRETURN a, r, b",
+		want: oneBranch(query.QueryPart{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("a", nil)),
+				must(query.NewEdgeBinding("r", nil,
+					must(query.NewVarEndpoint("a")),
+					must(query.NewVarEndpoint("b")),
+					false,
 				)),
 				must(query.NewNodeBinding("b", nil)),
 			},
@@ -204,6 +231,7 @@ var mustParse = map[string]struct {
 				must(query.NewEdgeBinding("r", nil,
 					must(query.NewVarEndpoint("a")),
 					must(query.NewVarEndpoint("b")),
+					true,
 				)),
 				must(query.NewNodeBinding("b", nil)),
 			},
@@ -263,6 +291,7 @@ var mustParse = map[string]struct {
 				must(query.NewEdgeBinding("", graph.LabelSet{"R"},
 					must(query.NewVarEndpoint("b")),
 					must(query.NewVarEndpoint("a")),
+					true,
 				)),
 				must(query.NewNodeBinding("b", graph.LabelSet{"B"})),
 			},
@@ -299,6 +328,7 @@ var mustParse = map[string]struct {
 				must(query.NewNullableEdgeBinding("", graph.LabelSet{"NOT_EXIST"},
 					must(query.NewVarEndpoint("n")),
 					must(query.NewVarEndpoint("x")),
+					true,
 				)),
 				must(query.NewNullableNodeBinding("x", nil)),
 			},
@@ -493,11 +523,6 @@ var mustReject = map[string]struct {
 	// Match2 [6] multi-type relationship [:A|B] -> ErrUnsupportedPattern
 	"multi-type relationship": {
 		query: "MATCH (n)-[r:KNOWS|HATES]->(x)\nRETURN r",
-		want:  cypher.ErrUnsupportedPattern,
-	},
-	// Match2 [3] undirected relationship -> ErrUnsupportedPattern
-	"undirected relationship": {
-		query: "MATCH ()-[r]-()\nRETURN r",
 		want:  cypher.ErrUnsupportedPattern,
 	},
 	// Return1 [2] returning an undefined variable -> ErrUnboundVariable

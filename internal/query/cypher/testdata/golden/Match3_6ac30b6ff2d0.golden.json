@@ -34,7 +34,8 @@
                 "kind": "var",
                 "variable": "x"
               },
-              "nullable": false
+              "nullable": false,
+              "directed": true
             },
             {
               "kind": "node",
@@ -54,7 +55,8 @@
                 "kind": "var",
                 "variable": "x"
               },
-              "nullable": false
+              "nullable": false,
+              "directed": true
             },
             {
               "kind": "edge",
@@ -68,7 +70,8 @@
                 "kind": "var",
                 "variable": "x"
               },
-              "nullable": false
+              "nullable": false,
+              "directed": true
             }
           ],
           "returns": [

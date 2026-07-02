@@ -23,8 +23,7 @@ var (
 	ErrUnsupportedProjection = errors.New("unsupported projection")
 
 	// ErrUnsupportedPattern rejects pattern shapes the model cannot carry yet:
-	// multi-type relationships, variable-length paths, named paths, and undirected
-	// relationships.
+	// multi-type relationships, variable-length paths, and named paths.
 	ErrUnsupportedPattern = errors.New("unsupported pattern")
 
 	// ErrUnsupportedParameter rejects a parameter that cannot be bound to a binding

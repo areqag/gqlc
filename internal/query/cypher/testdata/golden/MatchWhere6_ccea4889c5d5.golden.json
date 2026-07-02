@@ -26,7 +26,8 @@
                 "kind": "var",
                 "variable": "y"
               },
-              "nullable": true
+              "nullable": true,
+              "directed": true
             },
             {
               "kind": "node",

@@ -18,7 +18,8 @@
                 "kind": "var",
                 "variable": "x"
               },
-              "nullable": false
+              "nullable": false,
+              "directed": true
             },
             {
               "kind": "node",

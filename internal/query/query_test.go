@@ -67,7 +67,7 @@ func TestNewEdgeBinding(t *testing.T) {
 	tgt, err := query.NewVarEndpoint("b")
 	require.NoError(t, err)
 
-	b, err := query.NewEdgeBinding("r", graph.LabelSet{"KNOWS"}, src, tgt)
+	b, err := query.NewEdgeBinding("r", graph.LabelSet{"KNOWS"}, src, tgt, true)
 	require.NoError(t, err)
 	require.Equal(t, "r", b.Variable())
 	require.Equal(t, graph.LabelSet{"KNOWS"}, b.Labels())
@@ -81,7 +81,7 @@ func TestNewEdgeBindingAllowsAnonymousVariableAndUntyped(t *testing.T) {
 	src := query.NewInlineEndpoint(graph.LabelSet{"Person"})
 	tgt := query.NewInlineEndpoint(nil) // the fully-anonymous () endpoint
 
-	b, err := query.NewEdgeBinding("", nil, src, tgt)
+	b, err := query.NewEdgeBinding("", nil, src, tgt, true)
 	require.NoError(t, err)
 	require.Empty(t, b.Variable())
 	require.Empty(t, b.Labels())
@@ -92,18 +92,18 @@ func TestNewEdgeBindingRejectsMissingEndpoint(t *testing.T) {
 	require.NoError(t, err)
 
 	// A nil source endpoint (the interface zero value) is illegal.
-	_, err = query.NewEdgeBinding("r", nil, nil, tgt)
+	_, err = query.NewEdgeBinding("r", nil, nil, tgt, true)
 	require.Error(t, err)
 
 	// A nil target endpoint is illegal.
-	_, err = query.NewEdgeBinding("r", nil, tgt, nil)
+	_, err = query.NewEdgeBinding("r", nil, tgt, nil, true)
 	require.Error(t, err)
 }
 
 func TestNewEdgeBindingDefaultsToNonNullable(t *testing.T) {
 	src, _ := query.NewVarEndpoint("a")
 	tgt, _ := query.NewVarEndpoint("b")
-	b, err := query.NewEdgeBinding("r", nil, src, tgt)
+	b, err := query.NewEdgeBinding("r", nil, src, tgt, true)
 	require.NoError(t, err)
 	require.False(t, b.Nullable())
 }
@@ -111,7 +111,7 @@ func TestNewEdgeBindingDefaultsToNonNullable(t *testing.T) {
 func TestNewNullableEdgeBinding(t *testing.T) {
 	src, _ := query.NewVarEndpoint("a")
 	tgt, _ := query.NewVarEndpoint("b")
-	b, err := query.NewNullableEdgeBinding("r", graph.LabelSet{"KNOWS"}, src, tgt)
+	b, err := query.NewNullableEdgeBinding("r", graph.LabelSet{"KNOWS"}, src, tgt, true)
 	require.NoError(t, err)
 	require.Equal(t, "r", b.Variable())
 	require.Equal(t, graph.LabelSet{"KNOWS"}, b.Labels())
@@ -126,7 +126,7 @@ func TestNewNullableEdgeBindingAllowsAnonymousVariableAndUntyped(t *testing.T) {
 	// the clause introduces (ADR 0006).
 	src := query.NewInlineEndpoint(graph.LabelSet{"Person"})
 	tgt := query.NewInlineEndpoint(nil)
-	b, err := query.NewNullableEdgeBinding("", nil, src, tgt)
+	b, err := query.NewNullableEdgeBinding("", nil, src, tgt, true)
 	require.NoError(t, err)
 	require.Empty(t, b.Variable())
 	require.True(t, b.Nullable())
@@ -134,10 +134,37 @@ func TestNewNullableEdgeBindingAllowsAnonymousVariableAndUntyped(t *testing.T) {
 
 func TestNewNullableEdgeBindingRejectsMissingEndpoint(t *testing.T) {
 	tgt, _ := query.NewVarEndpoint("b")
-	_, err := query.NewNullableEdgeBinding("r", nil, nil, tgt)
+	_, err := query.NewNullableEdgeBinding("r", nil, nil, tgt, true)
 	require.Error(t, err)
-	_, err = query.NewNullableEdgeBinding("r", nil, tgt, nil)
+	_, err = query.NewNullableEdgeBinding("r", nil, tgt, nil, true)
 	require.Error(t, err)
+}
+
+func TestEdgeBindingDirected(t *testing.T) {
+	// The direction marker (Stage 5): true for a one-arrow edge, false for an
+	// undirected edge. It is a constructor parameter and is always emitted in JSON.
+	src, _ := query.NewVarEndpoint("a")
+	tgt, _ := query.NewVarEndpoint("b")
+
+	directed, err := query.NewEdgeBinding("r", nil, src, tgt, true)
+	require.NoError(t, err)
+	require.True(t, directed.Directed())
+	outD, err := json.Marshal(directed)
+	require.NoError(t, err)
+	require.Contains(t, string(outD), `"directed":true`)
+
+	undirected, err := query.NewEdgeBinding("r", nil, src, tgt, false)
+	require.NoError(t, err)
+	require.False(t, undirected.Directed())
+	outU, err := json.Marshal(undirected)
+	require.NoError(t, err)
+	require.Contains(t, string(outU), `"directed":false`)
+
+	// The nullable variant forwards the directed marker.
+	nullableUndirected, err := query.NewNullableEdgeBinding("r", nil, src, tgt, false)
+	require.NoError(t, err)
+	require.False(t, nullableUndirected.Directed())
+	require.True(t, nullableUndirected.Nullable())
 }
 
 func TestNewVarEndpoint(t *testing.T) {
@@ -206,7 +233,7 @@ func TestConstructorsAreSoleSourceOfData(t *testing.T) {
 	require.NotEmpty(t, src.Variable())
 
 	tgt := query.NewInlineEndpoint(graph.LabelSet{"Company"})
-	edge, err := query.NewEdgeBinding("r", nil, src, tgt)
+	edge, err := query.NewEdgeBinding("r", nil, src, tgt, true)
 	require.NoError(t, err)
 	require.NotNil(t, edge.Source())
 	require.NotNil(t, edge.Target())
@@ -470,7 +497,7 @@ func representativeQuery(t *testing.T) query.Query {
 	srcVar, err := query.NewVarEndpoint("a")
 	require.NoError(t, err)
 	tgtInline := query.NewInlineEndpoint(graph.LabelSet{"Company"})
-	edge, err := query.NewEdgeBinding("r", graph.LabelSet{"WORKS_AT"}, srcVar, tgtInline)
+	edge, err := query.NewEdgeBinding("r", graph.LabelSet{"WORKS_AT"}, srcVar, tgtInline, true)
 	require.NoError(t, err)
 
 	return query.Query{
@@ -525,7 +552,7 @@ func TestMarshalJSONEmitsNullable(t *testing.T) {
 	require.NoError(t, err)
 	src, _ := query.NewVarEndpoint("a")
 	tgt, _ := query.NewVarEndpoint("b")
-	e, err := query.NewNullableEdgeBinding("r", nil, src, tgt)
+	e, err := query.NewNullableEdgeBinding("r", nil, src, tgt, true)
 	require.NoError(t, err)
 
 	outA, _ := json.Marshal(a)
@@ -544,7 +571,7 @@ func TestBindingDiscriminatorTracksEntityKind(t *testing.T) {
 	require.NoError(t, err)
 	src, _ := query.NewVarEndpoint("a")
 	tgt, _ := query.NewVarEndpoint("b")
-	edge, err := query.NewEdgeBinding("r", nil, src, tgt)
+	edge, err := query.NewEdgeBinding("r", nil, src, tgt, true)
 	require.NoError(t, err)
 
 	for _, b := range []query.Binding{node, edge} {
@@ -601,6 +628,7 @@ func genBinding() *rapid.Generator[query.Binding] {
 			genLabelSet().Draw(t, "labels"),
 			genEndpoint().Draw(t, "source"),
 			genEndpoint().Draw(t, "target"),
+			rapid.Bool().Draw(t, "directed"),
 		)
 		if err != nil {
 			t.Fatalf("NewEdgeBinding rejected a valid edge: %v", err)

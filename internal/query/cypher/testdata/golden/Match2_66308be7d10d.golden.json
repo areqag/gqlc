@@ -20,7 +20,8 @@
                   "B"
                 ]
               },
-              "nullable": false
+              "nullable": false,
+              "directed": true
             }
           ],
           "returns": [

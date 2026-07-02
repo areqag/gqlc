@@ -22,7 +22,8 @@
                 "kind": "inline",
                 "labels": null
               },
-              "nullable": false
+              "nullable": false,
+              "directed": true
             }
           ],
           "returns": [
@@ -67,7 +68,8 @@
                 "kind": "var",
                 "variable": "b2"
               },
-              "nullable": false
+              "nullable": false,
+              "directed": true
             },
             {
               "kind": "node",
