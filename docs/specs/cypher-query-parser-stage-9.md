@@ -474,12 +474,40 @@ the part's `scope` for referential-integrity checks. No new endpoint or
 ref-kind check applies (an UNWIND-var is never an edge endpoint, so
 the `endpointRef` kind check is skipped by construction).
 
-The kind-conflict check extends to UnwindBinding: a same-name entity
-or path binding preceding an UnwindBinding in the same part is a kind
-conflict — via `mergeBinding`'s `byVar` collision detection at
-listener time. (In practice this rarely arises: UNWIND is a distinct
-reading clause; grammatically the variable comes from `AS name` and
-does not participate in patterns.)
+The kind-conflict check extends to UnwindBinding across **all three**
+same-part collisions: entity vs unwind, path vs unwind, and
+unwind vs unwind (the same-name second UNWIND in the same part).
+Every one raises `ErrVariableKindConflict`. The listener catches each
+at first chance so the fail-site stays local to the offending clause:
+
+- `collectUnwind` (`expr.go`) scans `byVar`, `pathBindings`, and
+  `unwindBindings` before appending the new UnwindBinding. This is
+  the fail-site for entity-vs-unwind (byVar), path-vs-unwind
+  (`MATCH p=(a)-->(b)` preceding `UNWIND [1] AS p`), and
+  unwind-vs-unwind (`UNWIND … AS x` preceding `UNWIND … AS x` again).
+- `collectPattern` (`pattern.go`) scans `unwindBindings` before
+  appending a new `pathBinding`, so a `MATCH p=(...)` after
+  `UNWIND [1] AS p` fails at the MATCH.
+- `buildPart` (`build.go`) re-scans the three-way collision matrix
+  as a belt-and-braces backstop — a fresh listener path that appends
+  an UnwindBinding without going through `collectUnwind` cannot slip
+  a duplicate through.
+
+The pattern-position reuse skip (`nameBoundAsUnwind` in
+`pattern.go`) is a **narrower** rule that only applies to MATCH-reuse
+of an UNWIND-bound name inside a node or edge pattern. It fires only
+when the UNWIND element type is `TypeNode`, `TypeEdge`, or
+`TypeUnknown` — the three cases where the source list could
+plausibly yield an entity value (a concrete list-of-nodes /
+list-of-edges, or an aggregate whose element type is not pinned at
+parse time). Any other concrete element type (int, string, bool,
+list, temporal, …) falls through to `mergeBinding` → byVar
+collision → `ErrVariableKindConflict`; a scalar-typed UNWIND is
+never a legitimate node or edge source at the type-interface
+boundary. Edge-position reuse follows the same allowlist: a
+`MATCH (a)-[r]->(b)` after `UNWIND xs AS r` is accepted when `xs`'s
+element type is edge or unknown, and rejected as a kind conflict for
+every scalar element type (per the six fix-round `mustReject` pins).
 
 ---
 

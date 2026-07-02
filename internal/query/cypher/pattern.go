@@ -57,6 +57,18 @@ func (l *listener) collectPattern(p gen.IOC_PatternContext, optional bool) {
 			return
 		}
 		if pathVar != "" {
+			// Three-way collision sweep: an existing UnwindBinding with the same
+			// name is a kind conflict (path vs unwind), symmetric with the
+			// pathBindings-vs-byVar check in buildPart. byVar and byVar-vs-path
+			// are handled elsewhere; this catches the path-vs-unwind direction
+			// at listener time so the fail-site stays local to the offending
+			// clause (spec §4.3 amend).
+			for _, ub := range l.curPart.unwindBindings {
+				if ub.Variable() == pathVar {
+					l.fail(fmt.Errorf("%w: %s", ErrVariableKindConflict, pathVar))
+					return
+				}
+			}
 			pb, err := query.NewPathBinding(pathVar, pathMembers)
 			if err != nil {
 				l.fail(err)
@@ -174,13 +186,27 @@ func (l *listener) collectNode(n gen.IOC_NodePatternContext, optional bool) {
 }
 
 // nameBoundAsUnwind reports whether a variable is already bound in the
-// current part as an UNWIND binding. Reuse of such a name inside a MATCH
-// pattern is a constraint on the existing binding — the UNWIND element
-// type may itself be a node (e.g. `WITH collect(n) AS ns UNWIND ns AS
-// m`), so MATCH's pattern-position use is a legitimate constraint the
-// parser accepts; a kind mismatch at runtime (an UNWIND'd scalar used
-// as a node pattern) is a value-level rule below the boundary
-// (ADR 0005), raised by the engine on the original text.
+// current part as an UNWIND binding whose element type could plausibly
+// stand in for the pattern position (node or edge). The three-way gate
+// — TypeNode, TypeEdge, TypeUnknown — is the correctness fix (Stage 9
+// fix round, B2): a scalar-elemType UNWIND is not a legitimate
+// pattern-position source, so the skip must not fire and the reuse must
+// fall through to mergeBinding → byVar collision → ErrVariableKindConflict.
+// Without the gate, a MATCH after `UNWIND [1,2] AS x` silently discarded
+// the node/edge binding (label constraints included), and the resolver
+// saw an unrelated a and b as if the edge did not exist.
+//
+// TypeNode / TypeEdge / TypeUnknown are the safe passes:
+//   - TypeNode / TypeEdge: the concrete list-of-entity case
+//     (`WITH collect(n) AS ns UNWIND ns AS m MATCH (m)`);
+//   - TypeUnknown: the honest posture the Stage-6 typer records when
+//     the source expression's element type cannot be pinned (aggregate
+//     identity below the boundary, ADR 0005), and the resolver upgrades
+//     from the schema post-freeze.
+//
+// Any other concrete elemType (int, string, bool, list<…>, temporal, …)
+// is definitely not a node or an edge, and the parser rejects at
+// compile time — the byVar collision is the fail-site.
 //
 // Path bindings deliberately do NOT trigger this skip: a named-path
 // variable reused as a node/edge pattern is a **compile-time** kind
@@ -188,9 +214,14 @@ func (l *listener) collectNode(n gen.IOC_NodePatternContext, optional bool) {
 // existing buildPart pathBindings-vs-byVar collision check must fire.
 func (l *listener) nameBoundAsUnwind(variable string) bool {
 	for _, ub := range l.curPart.unwindBindings {
-		if ub.Variable() == variable {
+		if ub.Variable() != variable {
+			continue
+		}
+		switch ub.ElementType().(type) {
+		case query.TypeNode, query.TypeEdge, query.TypeUnknown:
 			return true
 		}
+		return false
 	}
 	return false
 }

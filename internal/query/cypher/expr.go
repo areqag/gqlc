@@ -89,9 +89,27 @@ func (l *listener) collectUnwind(c gen.IOC_UnwindContext) {
 	if variable == "" {
 		return
 	}
+	// The three-way collision sweep (entity / path / unwind): the byVar map
+	// only covers entity bindings, so path and unwind names have to be checked
+	// against their own slices before this UnwindBinding is appended.
+	// Spec §4.3 amend: same-name path or same-name earlier UNWIND in the same
+	// part is a kind conflict, symmetric with the Stage 8 pathBindings-vs-byVar
+	// check in buildPart.
 	if _, clash := l.curPart.byVar[variable]; clash {
 		l.fail(fmt.Errorf("%w: %q", ErrVariableKindConflict, variable))
 		return
+	}
+	for _, pb := range l.curPart.pathBindings {
+		if pb.Variable() == variable {
+			l.fail(fmt.Errorf("%w: %q", ErrVariableKindConflict, variable))
+			return
+		}
+	}
+	for _, ub := range l.curPart.unwindBindings {
+		if ub.Variable() == variable {
+			l.fail(fmt.Errorf("%w: %q", ErrVariableKindConflict, variable))
+			return
+		}
 	}
 	sourceType, refs, params := l.typeExpressionMining(c.OC_Expression())
 	for _, ref := range refs {

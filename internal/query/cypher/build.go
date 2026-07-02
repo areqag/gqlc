@@ -96,14 +96,27 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Part,
 	// Stage 9: UNWIND-introduced variables enter the scope alongside entity
 	// and path variables. A RETURN x on `UNWIND … AS x` resolves against
 	// the unwind binding, and its type is the recorded element type
-	// (via refType). A same-name entity or path binding preceding it in
-	// the same part is a kind conflict — collectUnwind catches the byVar
-	// case at listener time; the pathBindings-vs-unwindBindings collision
-	// is caught here defensively.
+	// (via refType). A same-name entity, path, or earlier unwind binding
+	// preceding it in the same part is a kind conflict — collectUnwind
+	// catches the byVar and unwind-vs-unwind and path-vs-unwind cases at
+	// listener time; the three sweeps here are the belt-and-braces
+	// symmetric backstop (spec §4.3 amend).
+	pathByVar := make(map[string]bool, len(rp.pathBindings))
+	for _, pb := range rp.pathBindings {
+		pathByVar[pb.Variable()] = true
+	}
+	unwindByVar := make(map[string]bool, len(rp.unwindBindings))
 	for _, ub := range rp.unwindBindings {
 		if _, ok := rp.byVar[ub.Variable()]; ok {
 			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, ub.Variable())
 		}
+		if pathByVar[ub.Variable()] {
+			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, ub.Variable())
+		}
+		if unwindByVar[ub.Variable()] {
+			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, ub.Variable())
+		}
+		unwindByVar[ub.Variable()] = true
 		scope[ub.Variable()] = true
 	}
 

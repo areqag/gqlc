@@ -154,17 +154,20 @@ func (k BindingKind) String() string {
 	}
 }
 
-// Binding is a query variable bound to a graph entity or to a named path,
-// carrying its labels (for entity bindings) or its member names (for a path).
-// It is a closed sum of NodeBinding, EdgeBinding, and (Stage 8) PathBinding —
-// no other type can implement it — so a binding is exactly one of the three.
-// Every variant holds its data in unexported fields, so the smart constructors
-// are the only way to construct a non-zero value: the invariants the types
-// alone cannot express (a non-empty node variable, both edge endpoints
-// present, a non-empty path variable with at least one member) hold for every
-// value that exists.
+// Binding is a query variable bound to a graph entity, a named path, or an
+// UNWIND source's per-row element. Entity bindings carry labels; a path
+// binding carries member names; an unwind binding carries the source list's
+// element type. It is a closed sum of NodeBinding, EdgeBinding, (Stage 8)
+// PathBinding, and (Stage 9) UnwindBinding — no other type can implement
+// it — so a binding is exactly one of the four. Every variant holds its
+// data in unexported fields, so the smart constructors are the only way
+// to construct a non-zero value: the invariants the types alone cannot
+// express (a non-empty node variable, both edge endpoints present, a
+// non-empty path variable with at least one member, a non-empty UNWIND
+// variable) hold for every value that exists.
 type Binding interface {
-	// Kind reports whether the binding is a node, an edge, or a path.
+	// Kind reports whether the binding is a node, an edge, a path, or an
+	// UNWIND-introduced per-row element.
 	Kind() BindingKind
 	// Nullable reports whether the binding was first introduced inside an
 	// OPTIONAL MATCH clause (ADR 0006). The flag is a static, local fact set

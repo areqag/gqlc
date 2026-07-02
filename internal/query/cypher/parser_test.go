@@ -1129,6 +1129,37 @@ var mustParse = map[string]struct {
 			},
 		},
 	},
+	// Stage 9 — MATCH-after-UNWIND with a list-of-nodes source: the
+	// legitimate reuse path (a WITH collect(n) AS ns yields a
+	// list<node> whose element type is TypeNode; the subsequent MATCH
+	// (m) is a constraint on the already-bound m, not a fresh binding).
+	// nameBoundAsUnwind must fire only when the UNWIND element type is
+	// node / edge / unknown — a scalar elemType falls through to a
+	// byVar collision → ErrVariableKindConflict (see the six mustReject
+	// entries below). The Stage-6 typer collapses collect(n) to
+	// TypeUnknown (aggregate identity below the boundary, ADR 0005),
+	// so the UnwindBinding here records elemType TypeUnknown.
+	"unwind of list-of-nodes reused as node match": {
+		src: "MATCH (n)\nWITH collect(n) AS ns\nUNWIND ns AS m\nMATCH (m)\nRETURN m",
+		want: query.Query{
+			Branches: []query.Branch{{Parts: []query.Part{
+				{
+					Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+					Returns: []query.ReturnItem{
+						{Name: "ns", Value: query.NewAggregateProjection(query.AggCollect, []query.Ref{{Variable: "n"}}, query.TypeUnknown{})},
+					},
+				},
+				{
+					Bindings: []query.Binding{
+						must(query.NewUnwindBinding("m", query.TypeUnknown{})),
+					},
+					Returns: []query.ReturnItem{
+						{Name: "m", Value: query.NewRefProjection(query.Ref{Variable: "m"}, query.TypeUnknown{})},
+					},
+				},
+			}}},
+		},
+	},
 }
 
 // intPtr is a small helper to take the address of an int literal so
@@ -1219,6 +1250,62 @@ var mustReject = map[string]struct {
 	"skip non-bare param": {
 		query: "MATCH (n)\nRETURN n\nSKIP $p + 1",
 		want:  cypher.ErrUnsupportedParameter,
+	},
+	// AUTHORED (Stage 9 fix round B1a): a named path (p = (a)-->(b))
+	// followed by UNWIND [...] AS p in the same part is a three-way
+	// kind clash — path vs unwind — the same class as the Stage-8
+	// path-vs-entity check. Fail-site: collectUnwind scans
+	// pathBindings for the same name and raises
+	// ErrVariableKindConflict at listener time.
+	"unwind name clashes with prior named path": {
+		query: "MATCH p=(a)-->(b)\nUNWIND [1] AS p\nRETURN p",
+		want:  cypher.ErrVariableKindConflict,
+	},
+	// AUTHORED (Stage 9 fix round B1b): the reversed order — UNWIND
+	// binds p first, then MATCH p = (...) tries to introduce the same
+	// name as a named-path binding. Fail-site: collectPattern scans
+	// unwindBindings before appending the pathBinding.
+	"named path clashes with prior unwind": {
+		query: "UNWIND [1] AS p\nMATCH p=(a)-->(b)\nRETURN p",
+		want:  cypher.ErrVariableKindConflict,
+	},
+	// AUTHORED (Stage 9 fix round B1c): two UNWINDs in the same part
+	// binding the same variable — a self-collision the byVar check
+	// alone missed (an UnwindBinding does not enter byVar). Fail-site:
+	// collectUnwind also scans the existing unwindBindings.
+	"unwind name reused within a part": {
+		query: "UNWIND [1] AS x\nUNWIND [2] AS x\nRETURN x",
+		want:  cypher.ErrVariableKindConflict,
+	},
+	// AUTHORED (Stage 9 fix round B2a): UNWIND [1,2] AS x binds x to a
+	// scalar (int); the following MATCH (x) reuses the name in a
+	// node-pattern position. Under Stage 9's initial (over-eager)
+	// nameBoundAsUnwind skip, the node binding was silently discarded.
+	// The rule: MATCH-reuse is legitimate only when the UNWIND element
+	// type is node / edge / unknown; scalar elemType falls through to
+	// mergeBinding → byVar collision → ErrVariableKindConflict.
+	"unwind scalar reused as node match": {
+		query: "UNWIND [1,2] AS x\nMATCH (x)\nRETURN x",
+		want:  cypher.ErrVariableKindConflict,
+	},
+	// AUTHORED (Stage 9 fix round B2b): UNWIND [1,2] AS r binds r to a
+	// scalar (int); the following MATCH (a)-[r]->(b) reuses r in an
+	// edge-pattern position. Same rule as B2a: scalar elemType blocks
+	// the skip and yields a byVar collision at MATCH time. Without the
+	// gate, the edge binding was silently erased (a would be unrelated
+	// to b to any downstream consumer).
+	"unwind scalar reused as edge match": {
+		query: "UNWIND [1,2] AS r\nMATCH (a)-[r]->(b)\nRETURN a,b,r",
+		want:  cypher.ErrVariableKindConflict,
+	},
+	// AUTHORED (Stage 9 fix round B2c): UNWIND [1,2] AS b2 binds b2 to
+	// a scalar (int); the following MATCH (b2:Label) reuses it in a
+	// node-pattern position, this time with a label constraint. Same
+	// rule as B2a: without the gate, the label constraint was silently
+	// dropped alongside the node binding.
+	"unwind scalar reused as labelled node match": {
+		query: "UNWIND [1,2] AS b2\nMATCH (b2:Label)\nRETURN b2",
+		want:  cypher.ErrVariableKindConflict,
 	},
 }
 
