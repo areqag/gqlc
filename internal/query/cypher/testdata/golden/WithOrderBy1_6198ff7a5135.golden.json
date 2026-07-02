@@ -1,0 +1,143 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "values",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "list\u003clocaltime\u003e"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "values",
+              "value": {
+                "kind": "ref",
+                "variable": "values",
+                "property": "",
+                "type": "list\u003clocaltime\u003e"
+              }
+            },
+            {
+              "name": "numOfValues",
+              "value": {
+                "kind": "func",
+                "refs": [
+                  {
+                    "variable": "values",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": [
+            {
+              "kind": "unwind",
+              "variable": "value",
+              "elemType": "localtime",
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "x",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "value",
+              "value": {
+                "kind": "ref",
+                "variable": "value",
+                "property": "",
+                "type": "localtime"
+              }
+            },
+            {
+              "name": "numOfValues",
+              "value": {
+                "kind": "ref",
+                "variable": "numOfValues",
+                "property": "",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "numOfValues",
+              "value": {
+                "kind": "ref",
+                "variable": "numOfValues",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "orderedX",
+              "value": {
+                "kind": "aggregate",
+                "func": "collect",
+                "refs": [
+                  {
+                    "variable": "x",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "equal",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "orderedX",
+                    "property": ""
+                  },
+                  {
+                    "variable": "numOfValues",
+                    "property": ""
+                  }
+                ],
+                "type": "bool"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

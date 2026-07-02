@@ -57,6 +57,18 @@ func (l *listener) collectPattern(p gen.IOC_PatternContext, optional bool) {
 			return
 		}
 		if pathVar != "" {
+			// Three-way collision sweep: an existing UnwindBinding with the same
+			// name is a kind conflict (path vs unwind), symmetric with the
+			// pathBindings-vs-byVar check in buildPart. byVar and byVar-vs-path
+			// are handled elsewhere; this catches the path-vs-unwind direction
+			// at listener time so the fail-site stays local to the offending
+			// clause (spec §4.3 amend).
+			for _, ub := range l.curPart.unwindBindings {
+				if ub.Variable() == pathVar {
+					l.fail(fmt.Errorf("%w: %s", ErrVariableKindConflict, pathVar))
+					return
+				}
+			}
 			pb, err := query.NewPathBinding(pathVar, pathMembers)
 			if err != nil {
 				l.fail(err)
@@ -148,7 +160,16 @@ func (l *listener) collectPatternElement(e gen.IOC_PatternElementContext, option
 // merged); an anonymous node is not a binding (C3) — its labels live inline on
 // the edge endpoint, and a standalone anonymous node is a pure filter, ignored.
 // Inside a named path (pathMemberSink is non-nil), the node also contributes
-// a member entry so the path's Members list is shape-faithful.
+// a member entry so the path's Members list is shape-faithful. Stage 9: when
+// the variable is already bound in the current part as an UNWIND binding, the
+// MATCH occurrence is a constraint on that existing name (the UNWIND element
+// type may itself be a node — a `list<node>` unwound yields node-typed values,
+// so MATCH-reuse is legitimate) — the parser does not emit a fresh NodeBinding;
+// the endpoint / path-member is recorded against the existing binding via the
+// shared name. A path binding deliberately does NOT trigger the skip: a named
+// path reused as a node/edge pattern is a compile-time kind conflict per
+// openCypher (a path is never a node/edge), so the existing buildPart
+// pathBindings-vs-byVar collision check must fire.
 func (l *listener) collectNode(n gen.IOC_NodePatternContext, optional bool) {
 	if n == nil {
 		return
@@ -158,10 +179,51 @@ func (l *listener) collectNode(n gen.IOC_NodePatternContext, optional bool) {
 		variable = v.GetText()
 	}
 	l.mineInlineMap(variable, n.OC_Properties())
-	if variable != "" {
+	if variable != "" && !l.nameBoundAsUnwind(variable) {
 		l.mergeBinding(variable, graph.Node, nodeLabels(n.OC_NodeLabels()), nil, nil, optional, false, nil)
 	}
 	l.recordPathNode(variable)
+}
+
+// nameBoundAsUnwind reports whether a variable is already bound in the
+// current part as an UNWIND binding whose element type could plausibly
+// stand in for the pattern position (node or edge). The three-way gate
+// — TypeNode, TypeEdge, TypeUnknown — is the correctness fix (Stage 9
+// fix round, B2): a scalar-elemType UNWIND is not a legitimate
+// pattern-position source, so the skip must not fire and the reuse must
+// fall through to mergeBinding → byVar collision → ErrVariableKindConflict.
+// Without the gate, a MATCH after `UNWIND [1,2] AS x` silently discarded
+// the node/edge binding (label constraints included), and the resolver
+// saw an unrelated a and b as if the edge did not exist.
+//
+// TypeNode / TypeEdge / TypeUnknown are the safe passes:
+//   - TypeNode / TypeEdge: the concrete list-of-entity case
+//     (`WITH collect(n) AS ns UNWIND ns AS m MATCH (m)`);
+//   - TypeUnknown: the honest posture the Stage-6 typer records when
+//     the source expression's element type cannot be pinned (aggregate
+//     identity below the boundary, ADR 0005), and the resolver upgrades
+//     from the schema post-freeze.
+//
+// Any other concrete elemType (int, string, bool, list<…>, temporal, …)
+// is definitely not a node or an edge, and the parser rejects at
+// compile time — the byVar collision is the fail-site.
+//
+// Path bindings deliberately do NOT trigger this skip: a named-path
+// variable reused as a node/edge pattern is a **compile-time** kind
+// conflict per openCypher (a path is never a node/edge), so the
+// existing buildPart pathBindings-vs-byVar collision check must fire.
+func (l *listener) nameBoundAsUnwind(variable string) bool {
+	for _, ub := range l.curPart.unwindBindings {
+		if ub.Variable() != variable {
+			continue
+		}
+		switch ub.ElementType().(type) {
+		case query.TypeNode, query.TypeEdge, query.TypeUnknown:
+			return true
+		}
+		return false
+	}
+	return false
 }
 
 // collectEdge records a relationship between prev and next as an edge binding.
@@ -224,7 +286,9 @@ func (l *listener) collectEdge(r gen.IOC_RelationshipPatternContext, prev, next 
 		l.recordPathEdge("")
 		return
 	}
-	l.mergeBinding(variable, graph.Edge, labels, source, target, optional, !directed, hops)
+	if !l.nameBoundAsUnwind(variable) {
+		l.mergeBinding(variable, graph.Edge, labels, source, target, optional, !directed, hops)
+	}
 	l.recordPathEdge(variable)
 }
 

@@ -107,22 +107,23 @@ _Avoid_: join (reserve for graph edge traversal / SQL vocabulary), merge
 
 **Binding**:
 A query variable bound to a graph entity — a node or an edge — or (Stage 8)
-to a **named path** — within a single **query part**, carrying its labels as
+to a **named path**, or (Stage 9) to the current value of an **UNWIND**
+source list — within a single **query part**, carrying its labels as
 written and, for an edge, its endpoints. The query-side analogue of the
 schema's **alias**, and the anchor a return item or parameter traces back to
 so the resolver can reach a schema type. A binding is scoped to the part
-whose `MATCH` introduced it; it reaches a later part only if that part's
-preceding `WITH` carries its variable forward (a binding not carried by a
-`WITH` is out of scope downstream). Re-`MATCH`ing a carried name in a later
-part is a fresh binding in that part, distinct from the original — which is
-the per-part structure the resolver uses to flow-type nullability across a
-`WITH` (ADR 0006). Labels may be empty: an unlabelled binding's type is
-inferred from the edges that touch it. An edge binding also carries a
-**direction** marker (a directed edge stores its endpoints canonically
-source→target; an undirected edge stores them in textual order with the
-resolver trying both orientations, see **Direction**, query side) and an
-**edge cardinality** axis (see **Hop range**) distinguishing single-hop
-edges from variable-length edges.
+whose `MATCH` (or `UNWIND`) introduced it; it reaches a later part only if
+that part's preceding `WITH` carries its variable forward (a binding not
+carried by a `WITH` is out of scope downstream). Re-`MATCH`ing a carried
+name in a later part is a fresh binding in that part, distinct from the
+original — which is the per-part structure the resolver uses to flow-type
+nullability across a `WITH` (ADR 0006). Labels may be empty: an unlabelled
+binding's type is inferred from the edges that touch it. An edge binding
+also carries a **direction** marker (a directed edge stores its endpoints
+canonically source→target; an undirected edge stores them in textual order
+with the resolver trying both orientations, see **Direction**, query side)
+and an **edge cardinality** axis (see **Hop range**) distinguishing
+single-hop edges from variable-length edges.
 _Avoid_: match (reserve for the MATCH clause); node/edge type (reserve for the
 schema's element types).
 
@@ -161,6 +162,22 @@ adding a distinct binding variant — the cardinality axis mirrors the
 direction axis in that respect.
 _Avoid_: length (colloquial; reserve for "path length", a separate concept);
 range (ambiguous with SKIP/LIMIT paging).
+
+**Unwind binding**:
+A query variable bound to the current value drawn from an **`UNWIND`** clause's
+source list (the `x` in `UNWIND [1, 2, 3] AS x`). Modelled as an **unwind
+binding** — kind `unwind` — carrying the AS variable and the source
+expression's **element type** (`TypeInt` for `[1, 2, 3]`, `TypeUnknown` for
+`range(1, 3)` or `null` or a `$param` — the parser records the honest
+"cannot tell" instead of guessing, and the resolver upgrades post-freeze).
+An UNWIND is a reading clause distinct from `MATCH`, so an unwind binding is
+not a graph entity: it has no labels, no endpoints, no `EntityKind()` — and
+the resolver never forms a schema key from it. Never nullable at Stage 9:
+an empty or null source list yields zero rows at runtime, a row-cardinality
+fact below the type-interface boundary (ADR 0005) rather than a per-binding
+static nullability.
+_Avoid_: unwind variable (use "unwind binding" for the modelled entity,
+"UNWIND source" for the list expression the clause draws from).
 
 **Variable**:
 The bare name a query author writes for a binding (the `p` in `(p:Person)`). A

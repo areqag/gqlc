@@ -1,0 +1,47 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "unwind",
+              "variable": "dates",
+              "elemType": "date",
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "dates",
+              "value": {
+                "kind": "ref",
+                "variable": "dates",
+                "property": "",
+                "type": "date"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "dates",
+              "value": {
+                "kind": "ref",
+                "variable": "dates",
+                "property": "",
+                "type": "date"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

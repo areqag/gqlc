@@ -1084,3 +1084,102 @@ func TestConstructorsRejectEmptyVariable(t *testing.T) {
 		}
 	})
 }
+
+// --- Stage 9: BindingUnwind, UnwindBinding ---
+
+// TestBindingKindStringUnwind pins the Stage-9 wire tag: "unwind" joins
+// the discriminator vocabulary alongside "node"/"edge"/"path". The other
+// three tags are unchanged.
+func TestBindingKindStringUnwind(t *testing.T) {
+	require.Equal(t, "unwind", query.BindingUnwind.String())
+}
+
+// TestNewUnwindBinding pins the Stage-9 constructor: a non-empty variable
+// and a computed element type. The element type is the Stage-6 result of
+// the source expression's list element.
+func TestNewUnwindBinding(t *testing.T) {
+	b, err := query.NewUnwindBinding("x", query.TypeInt{})
+	require.NoError(t, err)
+	require.Equal(t, "x", b.Variable())
+	require.Equal(t, query.TypeInt{}, b.ElementType())
+	require.Equal(t, query.BindingUnwind, b.Kind())
+	require.False(t, b.Nullable())
+	var _ query.Binding = b
+}
+
+// TestNewUnwindBindingRejectsEmptyVariable pins the invariant: UNWIND
+// grammatically requires an `AS name`, so an anonymous UnwindBinding is
+// unrepresentable — the constructor rejects the empty variable, mirroring
+// NodeBinding / PathBinding.
+func TestNewUnwindBindingRejectsEmptyVariable(t *testing.T) {
+	_, err := query.NewUnwindBinding("", query.TypeInt{})
+	require.Error(t, err)
+}
+
+// TestNewUnwindBindingNormalisesNilTypeToUnknown pins the "cannot tell"
+// posture: a nil ElementType at construction is normalised to TypeUnknown
+// (the "cannot tell" case is never a nil Type on the wire). Mirrors
+// NewTypeList's convention.
+func TestNewUnwindBindingNormalisesNilTypeToUnknown(t *testing.T) {
+	b, err := query.NewUnwindBinding("x", nil)
+	require.NoError(t, err)
+	require.Equal(t, query.TypeUnknown{}, b.ElementType())
+}
+
+// TestUnwindBindingElementTypeUnknown pins the honest-posture case: an
+// UNWIND source whose Stage-6 type collapses to TypeUnknown (e.g. a
+// `range(1, 3)` bare function call, whose result type is TypeUnknown
+// since function identity is below the boundary) yields an element
+// type of TypeUnknown — the resolver upgrades from the schema.
+func TestUnwindBindingElementTypeUnknown(t *testing.T) {
+	b, err := query.NewUnwindBinding("x", query.TypeUnknown{})
+	require.NoError(t, err)
+	require.Equal(t, query.TypeUnknown{}, b.ElementType())
+}
+
+// TestUnwindBindingElementTypeList pins that an UNWIND'd list of lists
+// (`UNWIND [[1,2],[3,4]] AS x`) yields an element type of `list<int>` —
+// the element type is a Type in its own right, so it can nest through
+// TypeList. Mirrors the Stage-6 list-typing posture.
+func TestUnwindBindingElementTypeList(t *testing.T) {
+	b, err := query.NewUnwindBinding("x", query.NewTypeList(query.TypeInt{}))
+	require.NoError(t, err)
+	require.Equal(t, query.NewTypeList(query.TypeInt{}), b.ElementType())
+}
+
+// TestUnwindBindingMarshalJSON pins the wire shape: kind="unwind", the
+// variable, the element type as the canonical wire tag, and the
+// always-emitted nullable flag (false at Stage 9, matching the discipline
+// nullable / directed / hops / returnsAll follow).
+func TestUnwindBindingMarshalJSON(t *testing.T) {
+	b := must(query.NewUnwindBinding("x", query.TypeInt{}))
+	out, err := json.Marshal(b)
+	require.NoError(t, err)
+	require.JSONEq(t,
+		`{"kind":"unwind","variable":"x","elemType":"int","nullable":false}`,
+		string(out))
+}
+
+// TestUnwindBindingMarshalJSONUnknownType pins the honest-posture wire
+// shape: an UnwindBinding whose element type is TypeUnknown emits
+// "elemType":"unknown" — no null, no missing key, just the honest tag.
+func TestUnwindBindingMarshalJSONUnknownType(t *testing.T) {
+	b := must(query.NewUnwindBinding("x", query.TypeUnknown{}))
+	out, err := json.Marshal(b)
+	require.NoError(t, err)
+	require.JSONEq(t,
+		`{"kind":"unwind","variable":"x","elemType":"unknown","nullable":false}`,
+		string(out))
+}
+
+// TestUnwindBindingMarshalJSONNestedListType pins the nested-type wire
+// shape: an UNWIND of a list-of-lists yields "elemType":"list<int>",
+// composing through the Type sum's stringer.
+func TestUnwindBindingMarshalJSONNestedListType(t *testing.T) {
+	b := must(query.NewUnwindBinding("x", query.NewTypeList(query.TypeInt{})))
+	out, err := json.Marshal(b)
+	require.NoError(t, err)
+	require.JSONEq(t,
+		`{"kind":"unwind","variable":"x","elemType":"list<int>","nullable":false}`,
+		string(out))
+}

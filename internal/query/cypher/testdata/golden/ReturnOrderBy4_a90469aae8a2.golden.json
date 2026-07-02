@@ -1,0 +1,89 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "prows",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "list\u003cint\u003e"
+              }
+            },
+            {
+              "name": "qrows",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "list\u003clist\u003cint\u003e\u003e"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": [
+            {
+              "kind": "unwind",
+              "variable": "p",
+              "elemType": "int",
+              "nullable": false
+            },
+            {
+              "kind": "unwind",
+              "variable": "q",
+              "elemType": "int",
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "p",
+              "value": {
+                "kind": "ref",
+                "variable": "p",
+                "property": "",
+                "type": "int"
+              }
+            },
+            {
+              "name": "rng",
+              "value": {
+                "kind": "aggregate",
+                "func": "count",
+                "refs": [
+                  {
+                    "variable": "q",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "p",
+              "value": {
+                "kind": "ref",
+                "variable": "p",
+                "property": "",
+                "type": "int"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

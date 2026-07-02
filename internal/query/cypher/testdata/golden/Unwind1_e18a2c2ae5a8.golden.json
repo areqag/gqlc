@@ -1,0 +1,36 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "list",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "list\u003cint\u003e"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": [
+            {
+              "kind": "unwind",
+              "variable": "x",
+              "elemType": "int",
+              "nullable": false
+            }
+          ],
+          "returns": null,
+          "returnsAll": true
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

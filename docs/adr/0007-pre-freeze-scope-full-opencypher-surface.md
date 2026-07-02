@@ -136,8 +136,11 @@ Skiplist entries pinned to *value-level* rules the type interface does not
 carry (ADR 0005, principle B1) — `NoVariablesInScope`, `UnknownFunction`,
 `ColumnNameConflict`, `VariableTypeConflict`, `DifferentColumnsInUnion`,
 `InvalidClauseComposition`, `NoExpressionAlias`, `NonConstantExpression`,
-`NegativeIntegerArgument`, `InvalidArgumentType` — are **not** reversed. They
-remain accept-and-ignore, because generation-time acceptance plus runtime
+`NegativeIntegerArgument`, `InvalidArgumentType`, and `UndefinedVariable`
+inside `ORDER BY` (the sort-key structure is snapshotted around a
+parameter-only walk, so a sort-key name not present in the projected scope
+never triggers `ErrUnboundVariable`) — are **not** reversed. They remain
+accept-and-ignore, because generation-time acceptance plus runtime
 rejection on the original text is still the correct treatment. Bucket 3
 above is the same posture applied to the wider corpus.
 

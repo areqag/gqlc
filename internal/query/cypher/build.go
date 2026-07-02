@@ -93,6 +93,32 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Part,
 		}
 		scope[pb.Variable()] = true
 	}
+	// Stage 9: UNWIND-introduced variables enter the scope alongside entity
+	// and path variables. A RETURN x on `UNWIND … AS x` resolves against
+	// the unwind binding, and its type is the recorded element type
+	// (via refType). A same-name entity, path, or earlier unwind binding
+	// preceding it in the same part is a kind conflict — collectUnwind
+	// catches the byVar and unwind-vs-unwind and path-vs-unwind cases at
+	// listener time; the three sweeps here are the belt-and-braces
+	// symmetric backstop (spec §4.3 amend).
+	pathByVar := make(map[string]bool, len(rp.pathBindings))
+	for _, pb := range rp.pathBindings {
+		pathByVar[pb.Variable()] = true
+	}
+	unwindByVar := make(map[string]bool, len(rp.unwindBindings))
+	for _, ub := range rp.unwindBindings {
+		if _, ok := rp.byVar[ub.Variable()]; ok {
+			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, ub.Variable())
+		}
+		if pathByVar[ub.Variable()] {
+			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, ub.Variable())
+		}
+		if unwindByVar[ub.Variable()] {
+			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, ub.Variable())
+		}
+		unwindByVar[ub.Variable()] = true
+		scope[ub.Variable()] = true
+	}
 
 	for _, ref := range rp.refs {
 		if !scope[ref.name] {
@@ -109,7 +135,7 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Part,
 		}
 	}
 
-	bindings := make([]query.Binding, 0, len(rp.bindings)+len(rp.pathBindings))
+	bindings := make([]query.Binding, 0, len(rp.bindings)+len(rp.pathBindings)+len(rp.unwindBindings))
 	for _, rb := range rp.bindings {
 		b, err := rb.toBinding()
 		if err != nil {
@@ -123,6 +149,12 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Part,
 	// already present earlier in the slice.
 	for _, pb := range rp.pathBindings {
 		bindings = append(bindings, pb)
+	}
+	// Unwind bindings appear after path bindings (Stage 9): the ordering is
+	// arbitrary but deterministic — collectUnwind records in walk order, and
+	// no downstream shape depends on the position within the slice.
+	for _, ub := range rp.unwindBindings {
+		bindings = append(bindings, ub)
 	}
 
 	part := query.Part{Returns: rp.returns, ReturnsAll: rp.returnsAll}

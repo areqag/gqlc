@@ -1,0 +1,56 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "c",
+              "labels": [
+                "Crew"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "c",
+              "value": {
+                "kind": "ref",
+                "variable": "c",
+                "property": "",
+                "type": "node"
+              }
+            },
+            {
+              "name": "relevance",
+              "value": {
+                "kind": "literal",
+                "type": "int"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "rank",
+              "value": {
+                "kind": "ref",
+                "variable": "c",
+                "property": "rank",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

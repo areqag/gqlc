@@ -1,0 +1,132 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "unwind",
+              "variable": "a",
+              "elemType": "unknown",
+              "nullable": false
+            },
+            {
+              "kind": "unwind",
+              "variable": "b",
+              "elemType": "unknown",
+              "nullable": false
+            },
+            {
+              "kind": "unwind",
+              "variable": "c",
+              "elemType": "unknown",
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "a",
+              "value": {
+                "kind": "ref",
+                "variable": "a",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "b",
+              "value": {
+                "kind": "ref",
+                "variable": "b",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "c",
+              "value": {
+                "kind": "ref",
+                "variable": "c",
+                "property": "",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "a",
+              "value": {
+                "kind": "ref",
+                "variable": "a",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "b",
+              "value": {
+                "kind": "ref",
+                "variable": "b",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "c",
+              "value": {
+                "kind": "ref",
+                "variable": "c",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "result",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "a",
+                    "property": ""
+                  },
+                  {
+                    "variable": "b",
+                    "property": ""
+                  },
+                  {
+                    "variable": "c",
+                    "property": ""
+                  },
+                  {
+                    "variable": "a",
+                    "property": ""
+                  },
+                  {
+                    "variable": "b",
+                    "property": ""
+                  },
+                  {
+                    "variable": "a",
+                    "property": ""
+                  },
+                  {
+                    "variable": "c",
+                    "property": ""
+                  }
+                ],
+                "type": "bool"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

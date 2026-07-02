@@ -1,0 +1,183 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "start",
+              "value": {
+                "kind": "literal",
+                "type": "int"
+              }
+            },
+            {
+              "name": "stopList",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "list\u003cint\u003e"
+              }
+            },
+            {
+              "name": "stepList",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "list\u003cint\u003e"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": [
+            {
+              "kind": "unwind",
+              "variable": "stop",
+              "elemType": "int",
+              "nullable": false
+            },
+            {
+              "kind": "unwind",
+              "variable": "step",
+              "elemType": "int",
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "start",
+              "value": {
+                "kind": "ref",
+                "variable": "start",
+                "property": "",
+                "type": "int"
+              }
+            },
+            {
+              "name": "stop",
+              "value": {
+                "kind": "ref",
+                "variable": "stop",
+                "property": "",
+                "type": "int"
+              }
+            },
+            {
+              "name": "step",
+              "value": {
+                "kind": "ref",
+                "variable": "step",
+                "property": "",
+                "type": "int"
+              }
+            },
+            {
+              "name": "list",
+              "value": {
+                "kind": "func",
+                "refs": [
+                  {
+                    "variable": "start",
+                    "property": ""
+                  },
+                  {
+                    "variable": "stop",
+                    "property": ""
+                  },
+                  {
+                    "variable": "step",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "start",
+              "value": {
+                "kind": "ref",
+                "variable": "start",
+                "property": "",
+                "type": "int"
+              }
+            },
+            {
+              "name": "stop",
+              "value": {
+                "kind": "ref",
+                "variable": "stop",
+                "property": "",
+                "type": "int"
+              }
+            },
+            {
+              "name": "step",
+              "value": {
+                "kind": "ref",
+                "variable": "step",
+                "property": "",
+                "type": "int"
+              }
+            },
+            {
+              "name": "list",
+              "value": {
+                "kind": "ref",
+                "variable": "list",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "empty",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "stop",
+                    "property": ""
+                  },
+                  {
+                    "variable": "start",
+                    "property": ""
+                  },
+                  {
+                    "variable": "step",
+                    "property": ""
+                  }
+                ],
+                "type": "bool"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "okay",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

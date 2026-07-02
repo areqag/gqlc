@@ -37,8 +37,12 @@ var updateGolden = flag.Bool("update", false, "regenerate golden snapshots from 
 // the six new temporal Type variants unlock. Stage 8 adds expressions/path,
 // expressions/pattern, expressions/graph — the pattern surface widening
 // (named paths, variable-length relationships, multi-type) reaches every
-// scenario exercising graph functions over paths. Aggregation,
-// existentialSubqueries, and quantifier stay out until Stages 10-11.
+// scenario exercising graph functions over paths. Stage 9 adds the
+// remaining read-clause dirs: return-orderby, with-orderBy, with-skip-limit,
+// with-where, unwind — closing out the read-clause surface (UNWIND parses
+// under the widened Binding sum, WITH...WHERE and WITH...ORDER BY / SKIP /
+// LIMIT wire through existing hooks). Aggregation, existentialSubqueries,
+// and quantifier stay out until Stages 10-11.
 // The corpus is never edited; each stage widens the dir list and shrinks the
 // skiplist.
 var readCoreDirs = []string{
@@ -48,6 +52,11 @@ var readCoreDirs = []string{
 	"../../../test/data/query/cypher/tck/features/clauses/return-skip-limit",
 	"../../../test/data/query/cypher/tck/features/clauses/union",
 	"../../../test/data/query/cypher/tck/features/clauses/with",
+	"../../../test/data/query/cypher/tck/features/clauses/return-orderby",
+	"../../../test/data/query/cypher/tck/features/clauses/with-orderBy",
+	"../../../test/data/query/cypher/tck/features/clauses/with-skip-limit",
+	"../../../test/data/query/cypher/tck/features/clauses/with-where",
+	"../../../test/data/query/cypher/tck/features/clauses/unwind",
 	"../../../test/data/query/cypher/tck/features/expressions/literals",
 	"../../../test/data/query/cypher/tck/features/expressions/boolean",
 	"../../../test/data/query/cypher/tck/features/expressions/comparison",
@@ -268,6 +277,50 @@ var skiplist = map[string]bool{
 	// the position-specific misuse check is what Stage 11 will add.
 	"[22] Fail on using pattern in RETURN projection": true,
 	"[23] Fail on using pattern in WITH projection":   true,
+
+	// --- ORDER BY value/semantics below the type-interface boundary (Stage 9) ---
+	//
+	// Stage 9 wires clauses/return-orderby and clauses/with-orderBy. ORDER BY's
+	// sort-key structure is not modelled (ADR 0003) — the sort keys are walked
+	// only for parameter mining (§4.2), so undefined-variable, aggregation-
+	// misuse, DISTINCT-scope, and non-projected-aggregation scenarios all
+	// parse-accept. Each error is a value-level result-shape or grouping-key
+	// rule the type interface does not carry (B1), raised by the re-executed
+	// original text (ADR 0005). Bucket 3 per ADR 0007 §6 — enumerated here
+	// because the clause dirs are not under isBucketThreeDir.
+	//
+	// WITH a ORDER BY undefined_var: an ORDER BY variable that is not in the
+	// WITH's projected set (SyntaxError:UndefinedVariable). The parser does
+	// not carry ORDER BY refs (they are snapshotted around the sort-item walk),
+	// so an undefined-in-sort-key name never triggers ErrUnboundVariable.
+	// The outline has three example groups (out of scope / never defined /
+	// mixed); each pickle carries a distinct name via the `#Example: ...`
+	// suffix, so all three are listed.
+	"[8] Fail on sorting by any number of undefined variables in any position #Example: out of scope":  true,
+	"[8] Fail on sorting by any number of undefined variables in any position #Example: never defined": true,
+	"[8] Fail on sorting by any number of undefined variables in any position #Example: mixed":         true,
+	"[46] Fail on sorting by an undefined variable #Example: out of scope":                             true,
+	"[46] Fail on sorting by an undefined variable #Example: never defined":                            true,
+	// WITH a WITH DISTINCT b ORDER BY a: a sort key naming a variable removed
+	// by DISTINCT (SyntaxError:UndefinedVariable). Same rationale as above:
+	// ORDER BY structure is below the boundary.
+	"[13] Fail when sorting on variable removed by DISTINCT": true,
+	// ORDER BY count(...) at RETURN or WITH position without a corresponding
+	// projected aggregate (SyntaxError:InvalidAggregation). The parser walks
+	// the sort key for parameters only; nested aggregate structure is not
+	// modelled. Grouping-key correctness is a resolver concern.
+	"[14] Fail on aggregation in ORDER BY after RETURN":                    true,
+	"[25] Fail on sorting by an aggregation":                               true,
+	"[13] Fail on sorting by a non-projected aggregation on a variable":    true,
+	"[14] Fail on sorting by a non-projected aggregation on an expression": true,
+	// ORDER BY containing an aggregation whose non-aggregate sub-expressions
+	// are not projected variables (SyntaxError:AmbiguousAggregationExpression).
+	// Same grouping-key rule as the Stage-6 return-orderby entries — sort-key
+	// structure is below the boundary.
+	"[4] Fail if not returned variables are used inside an order by item which contains an aggregation expression":                        true,
+	"[5] Fail if more complex expressions, even if returned, are used inside an order by item which contains an aggregation expression":   true,
+	"[19] Fail if not projected variables are used inside an order by item which contains an aggregation expression":                      true,
+	"[20] Fail if more complex expressions, even if projected, are used inside an order by item which contains an aggregation expression": true,
 }
 
 // the public sentinels for scenarios the parser cannot faithfully represent
@@ -481,7 +534,9 @@ func initScenario(ctx *godog.ScenarioContext) {
 	// Positive outcomes: the scenario expected a result, so the query must parse.
 	// The order qualifier is a non-capturing group: we don't bind it, and a
 	// capturing group would force a string argument onto the step function.
-	ctx.Step(`^the result should be(?:, in any order| \(ignoring element order for lists\)|, in order)?:$`, resultShouldBe)
+	// Stage 9's return-orderby corpus adds `, in order (ignoring element order
+	// for lists)` — the combined qualifier — so the alternation covers it.
+	ctx.Step(`^the result should be(?:, in any order| \(ignoring element order for lists\)|, in order(?: \(ignoring element order for lists\))?)?:$`, resultShouldBe)
 	// Storage scenarios expect an empty result from the write query
 	// (Temporal4). At the parse level "empty" is the same guard as
 	// "should be": the query must have parsed (or be a known-unsupported /

@@ -80,7 +80,9 @@ type rawBranch struct {
 // (the PathBinding values collected from named-path patterns in this part —
 // appended to bindings at build time) and pathMemberSink, a scratch pointer
 // collectNode / collectEdge push shape-faithful PathMember entries onto while
-// walking a named-path pattern part (nil outside a named path).
+// walking a named-path pattern part (nil outside a named path). Stage 9 adds
+// unwindBindings (the UnwindBinding values collected from UNWIND clauses in
+// this part — appended to bindings at build time, mirroring pathBindings).
 type rawPart struct {
 	bindings       []*rawBinding
 	byVar          map[string]int
@@ -90,6 +92,7 @@ type rawPart struct {
 	imported       map[string]query.Type
 	pathBindings   []query.PathBinding
 	pathMemberSink *[]query.PathMember
+	unwindBindings []query.UnwindBinding
 }
 
 func newRawPart() *rawPart {
@@ -228,7 +231,8 @@ func (l *listener) EnterOC_With(c *gen.OC_WithContext) {
 // exports into the next part's scope. WITH * (returnsAll) forwards every
 // in-scope name — entity bindings by their node/edge kind (with a
 // var-length edge exporting as list<edge>, Stage 8), path bindings by
-// TypePath, and any prior imports verbatim — because the resolver expands *
+// TypePath, UNWIND bindings by their recorded element type (Stage 9),
+// and any prior imports verbatim — because the resolver expands *
 // downstream (Stage 4 §4). Explicit items export each return item's Name
 // against its Value.Type().
 func exportedTypes(closed *rawPart) map[string]query.Type {
@@ -254,6 +258,9 @@ func exportedTypes(closed *rawPart) map[string]query.Type {
 		}
 		for _, pb := range closed.pathBindings {
 			out[pb.Variable()] = query.TypePath{}
+		}
+		for _, ub := range closed.unwindBindings {
+			out[ub.Variable()] = ub.ElementType()
 		}
 		return out
 	}
@@ -287,8 +294,15 @@ func (l *listener) EnterOC_Remove(*gen.OC_RemoveContext) {
 	l.fail(fmt.Errorf("%w: REMOVE", ErrUnsupportedClause))
 }
 
-func (l *listener) EnterOC_Unwind(*gen.OC_UnwindContext) {
-	l.fail(fmt.Errorf("%w: UNWIND", ErrUnsupportedClause))
+// EnterOC_Unwind collects the UNWIND clause into the current part as an
+// UnwindBinding (Stage 9 spec §1.3). The AS variable enters the part's
+// scope; the source expression is typed via the Stage-6 rich typer, and
+// its element type (list<T>.Element(), else TypeUnknown) becomes the
+// binding's ElementType. Every parameter under the source expression
+// records an ExprUse{sourceType, ExprInProjection}, so no parameter is
+// silently dropped.
+func (l *listener) EnterOC_Unwind(c *gen.OC_UnwindContext) {
+	l.collectUnwind(c)
 }
 
 func (l *listener) EnterOC_InQueryCall(*gen.OC_InQueryCallContext) {
