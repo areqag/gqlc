@@ -1,0 +1,96 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "edge",
+              "variable": "r",
+              "labels": null,
+              "source": {
+                "kind": "inline",
+                "labels": null
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "r",
+              "value": {
+                "kind": "ref",
+                "variable": "r",
+                "property": ""
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a2",
+              "labels": null,
+              "nullable": true
+            },
+            {
+              "kind": "edge",
+              "variable": "r",
+              "labels": null,
+              "source": {
+                "kind": "var",
+                "variable": "a2"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "b2"
+              },
+              "nullable": true
+            },
+            {
+              "kind": "node",
+              "variable": "b2",
+              "labels": null,
+              "nullable": true
+            }
+          ],
+          "returns": [
+            {
+              "name": "a2",
+              "value": {
+                "kind": "ref",
+                "variable": "a2",
+                "property": ""
+              }
+            },
+            {
+              "name": "r",
+              "value": {
+                "kind": "ref",
+                "variable": "r",
+                "property": ""
+              }
+            },
+            {
+              "name": "b2",
+              "value": {
+                "kind": "ref",
+                "variable": "b2",
+                "property": ""
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

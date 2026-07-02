@@ -61,23 +61,71 @@ supported.
 **Query**:
 A single openCypher query — the unit the parser consumes and lowers into the
 structural model. Exactly one query per parse call; a `UNION` of single queries
-is still one query. A source file may hold many queries, but splitting a file
-into individual queries (and naming them) is an orchestration concern, outside
-the parser.
+is still one query, modelled as several **branches** under that one query. A
+query is one or more branches (combined by `UNION`), each an ordered chain of
+one or more **query parts** (split by `WITH`); the query also carries its
+**parameters**, which are query-wide and not scoped to a part. A source file may
+hold many queries, but splitting a file into individual queries (and naming
+them) is an orchestration concern, outside the parser.
 _Avoid_: statement (reserve for the grammar's `oC_Statement`).
+
+**Branch**:
+One of the parallel result-producing arms of a query (`oC_SingleQuery`), as
+joined by `UNION`. A query without `UNION` is one branch; *N* `UNION`s make
+*N+1* branches, combined left to right. All branches of a query produce
+union-compatible result columns; the first branch names the result columns (an
+openCypher rule the resolver enforces — the parser records each branch's columns
+verbatim and does not merge them). A branch is itself an ordered chain of one or
+more **query parts**.
+_Avoid_: arm, leg; alternative (reserve for grammar alternatives). Distinct from
+the schema-side **endpoint**/**alias** vocabulary — a branch is a query-level
+structure only.
+
+**Query part**:
+One scope segment of a branch, bounded by `WITH`. A branch is a sequence of
+parts: every non-final part ends in a `WITH` (an intermediate projection that is
+also a scope boundary), and the final part ends in a `RETURN`. Each part carries
+its **own** bindings (the entities its own `MATCH` clauses introduce), its return
+items, and its `RETURN *`/`WITH *` wildcard flag — the flat single-scope shape,
+now scoped to one part. A `Ref` in a part resolves against that part's bindings
+or a name the previous part's `WITH` carried forward; a name not carried by a
+`WITH` is out of scope in later parts.
+_Avoid_: segment, stage (reserve **stage** for the staged build plan, ADR 0004);
+scope (use "the part's scope" descriptively, but the noun is **query part**).
+
+**Union**:
+The combinator that joins two **branches** into one query. Carried as a kind —
+`UNION` (distinct: collapses duplicate result rows) versus `UNION ALL` (keeps
+duplicates) — because that distinction changes result cardinality, which the
+generated code models; it is the branch-level analogue of the **aggregate**
+kind. Column union-compatibility across branches is a value-level result-shape
+check below the type-interface boundary, not carried by the model.
+_Avoid_: join (reserve for graph edge traversal / SQL vocabulary), merge
+(reserve for the `MERGE` write clause).
 
 **Binding**:
 A query variable bound to a graph entity — a node or an edge — within a single
-query, carrying its labels as written and, for an edge, its endpoints. The
-query-side analogue of the schema's **alias**, and the anchor a return item or
-parameter traces back to so the resolver can reach a schema type. Labels may be
-empty: an unlabelled binding's type is inferred from the edges that touch it.
+**query part**, carrying its labels as written and, for an edge, its endpoints.
+The query-side analogue of the schema's **alias**, and the anchor a return item
+or parameter traces back to so the resolver can reach a schema type. A binding
+is scoped to the part whose `MATCH` introduced it; it reaches a later part only
+if that part's preceding `WITH` carries its variable forward (a binding not
+carried by a `WITH` is out of scope downstream). Re-`MATCH`ing a carried name in
+a later part is a fresh binding in that part, distinct from the original — which
+is the per-part structure the resolver uses to flow-type nullability across a
+`WITH` (ADR 0006). Labels may be empty: an unlabelled binding's type is inferred
+from the edges that touch it.
 _Avoid_: match (reserve for the MATCH clause); node/edge type (reserve for the
 schema's element types).
 
 **Variable**:
 The bare name a query author writes for a binding (the `p` in `(p:Person)`). A
-binding is a variable plus the entity it is bound to.
+binding is a variable plus the entity it is bound to. A `WITH` may also introduce
+a name that is not a binding: `WITH a.x AS n` carries the scalar `n` into the
+next part (a projected name, not an entity), whereas `WITH a` carries the
+*binding* `a` forward by its variable. The next part's in-scope names are exactly
+those a `WITH` carries — bindings and projected names alike — which is why a name
+the `WITH` drops is unbound downstream.
 
 **Nullable**:
 A flag on a binding signalling that it may have no match on a given row — the

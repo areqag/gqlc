@@ -1,15 +1,24 @@
 {
-  "Bindings": null,
-  "Parameters": null,
-  "Returns": [
+  "branches": [
     {
-      "name": "columnName",
-      "value": {
-        "kind": "aggregate",
-        "func": "count",
-        "refs": null
-      }
+      "parts": [
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "columnName",
+              "value": {
+                "kind": "aggregate",
+                "func": "count",
+                "refs": null
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
     }
   ],
-  "returnsAll": false
+  "combinators": null,
+  "parameters": null
 }

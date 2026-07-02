@@ -42,3 +42,14 @@ and the full expression tree are deliberately outside the initial model.
 > cardinality-bearing kind; the expression tree and a non-aggregate function's
 > identity stay below the type-interface boundary (ADR 0005), holding the line
 > this ADR draws._
+>
+> _Note (Stage 4, ADR 0004): the curated subset now includes the query's
+> **branch/part structure** — a `Query` is a list of `UNION`-joined branches,
+> each an ordered chain of `WITH`-bounded parts, each part holding its own
+> bindings and projection. It carries the two structural axes the resolver needs
+> — sequential scope chaining (`WITH`) and parallel branches with their join kind
+> (`UnionKind`, the cardinality-bearing distinction, like the aggregate kind) —
+> and nothing more: not grouping keys, not column union-compatibility, and still
+> none of the expression tree. The per-part bindings are also the per-clause
+> structure ADR 0006 names for cross-`WITH` nullable flow-typing. The
+> no-expression-tree line holds._

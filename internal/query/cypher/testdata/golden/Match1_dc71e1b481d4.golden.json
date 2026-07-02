@@ -1,25 +1,34 @@
 {
-  "Bindings": [
+  "branches": [
     {
-      "kind": "node",
-      "variable": "a",
-      "labels": [
-        "A",
-        "B"
-      ],
-      "nullable": false
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": [
+                "A",
+                "B"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "a",
+              "value": {
+                "kind": "ref",
+                "variable": "a",
+                "property": ""
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
     }
   ],
-  "Parameters": null,
-  "Returns": [
-    {
-      "name": "a",
-      "value": {
-        "kind": "ref",
-        "variable": "a",
-        "property": ""
-      }
-    }
-  ],
-  "returnsAll": false
+  "combinators": null,
+  "parameters": null
 }

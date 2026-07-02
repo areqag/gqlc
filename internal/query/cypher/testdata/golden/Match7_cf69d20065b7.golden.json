@@ -1,52 +1,61 @@
 {
-  "Bindings": [
+  "branches": [
     {
-      "kind": "node",
-      "variable": "a",
-      "labels": [
-        "A"
-      ],
-      "nullable": false
-    },
-    {
-      "kind": "node",
-      "variable": "b",
-      "labels": [
-        "C"
-      ],
-      "nullable": false
-    },
-    {
-      "kind": "node",
-      "variable": "x",
-      "labels": null,
-      "nullable": true
-    },
-    {
-      "kind": "edge",
-      "variable": "",
-      "labels": null,
-      "source": {
-        "kind": "var",
-        "variable": "x"
-      },
-      "target": {
-        "kind": "var",
-        "variable": "b"
-      },
-      "nullable": true
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": [
+                "A"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "b",
+              "labels": [
+                "C"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "x",
+              "labels": null,
+              "nullable": true
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": null,
+              "source": {
+                "kind": "var",
+                "variable": "x"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "b"
+              },
+              "nullable": true
+            }
+          ],
+          "returns": [
+            {
+              "name": "x",
+              "value": {
+                "kind": "ref",
+                "variable": "x",
+                "property": ""
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
     }
   ],
-  "Parameters": null,
-  "Returns": [
-    {
-      "name": "x",
-      "value": {
-        "kind": "ref",
-        "variable": "x",
-        "property": ""
-      }
-    }
-  ],
-  "returnsAll": false
+  "combinators": null,
+  "parameters": null
 }
