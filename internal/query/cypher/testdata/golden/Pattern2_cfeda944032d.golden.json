@@ -1,0 +1,41 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": [
+                "A"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "b",
+              "labels": [
+                "B"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "list",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

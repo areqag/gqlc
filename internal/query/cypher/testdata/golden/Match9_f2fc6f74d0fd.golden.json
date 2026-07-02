@@ -1,0 +1,66 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": [
+                "Blue"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "r",
+              "labels": null,
+              "source": {
+                "kind": "var",
+                "variable": "a"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "b"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": {
+                "min": null,
+                "max": null
+              }
+            },
+            {
+              "kind": "node",
+              "variable": "b",
+              "labels": [
+                "Green"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "count(r)",
+              "value": {
+                "kind": "aggregate",
+                "func": "count",
+                "refs": [
+                  {
+                    "variable": "r",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

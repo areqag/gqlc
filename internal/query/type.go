@@ -261,3 +261,19 @@ func (TypeDuration) String() string { return "duration" }
 func (t TypeDuration) MarshalJSON() ([]byte, error) { return marshalType(t) }
 
 func (TypeDuration) isType() {}
+
+// TypePath is the openCypher PATH: a sequence of alternating nodes and
+// edges (Stage 8 spec §1.1). Reached from a RefProjection whose Ref names
+// a PathBinding — i.e. the `p` in `MATCH p = (a)-[r]->(b) RETURN p`. The
+// value semantics of the path (its members, its length, its component
+// nodes/edges) live below the type-interface boundary (ADR 0005); the
+// parser records only that the projected column is of type path.
+type TypePath struct{}
+
+// String is the wire tag "path".
+func (TypePath) String() string { return "path" }
+
+// MarshalJSON renders TypePath as its wire tag, quoted.
+func (t TypePath) MarshalJSON() ([]byte, error) { return marshalType(t) }
+
+func (TypePath) isType() {}

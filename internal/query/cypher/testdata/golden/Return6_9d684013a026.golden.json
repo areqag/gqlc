@@ -25,7 +25,8 @@
                 "labels": null
               },
               "nullable": false,
-              "directed": true
+              "directed": true,
+              "hops": null
             },
             {
               "kind": "edge",
@@ -42,7 +43,8 @@
                 "labels": null
               },
               "nullable": false,
-              "directed": true
+              "directed": true,
+              "hops": null
             },
             {
               "kind": "node",
@@ -124,7 +126,8 @@
                 "labels": null
               },
               "nullable": false,
-              "directed": true
+              "directed": true,
+              "hops": null
             },
             {
               "kind": "edge",
@@ -141,7 +144,8 @@
                 "labels": null
               },
               "nullable": false,
-              "directed": true
+              "directed": true,
+              "hops": null
             },
             {
               "kind": "node",

@@ -25,7 +25,8 @@
                 "labels": null
               },
               "nullable": false,
-              "directed": true
+              "directed": true,
+              "hops": null
             },
             {
               "kind": "edge",
@@ -42,7 +43,8 @@
                 "variable": "a"
               },
               "nullable": false,
-              "directed": true
+              "directed": true,
+              "hops": null
             }
           ],
           "returns": [

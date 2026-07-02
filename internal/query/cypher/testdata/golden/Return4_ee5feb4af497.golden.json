@@ -1,0 +1,77 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": null,
+              "source": {
+                "kind": "var",
+                "variable": "n"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "b"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            },
+            {
+              "kind": "node",
+              "variable": "b",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "path",
+              "variable": "p",
+              "members": [
+                {
+                  "kind": "node",
+                  "variable": "n"
+                },
+                {
+                  "kind": "anon-edge"
+                },
+                {
+                  "kind": "node",
+                  "variable": "b"
+                }
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "aVg(    n.aGe     )",
+              "value": {
+                "kind": "aggregate",
+                "func": "avg",
+                "refs": [
+                  {
+                    "variable": "n",
+                    "property": "aGe"
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

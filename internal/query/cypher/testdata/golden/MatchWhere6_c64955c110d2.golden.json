@@ -23,7 +23,8 @@
                 "variable": "x0"
               },
               "nullable": false,
-              "directed": true
+              "directed": true,
+              "hops": null
             },
             {
               "kind": "node",
@@ -44,7 +45,8 @@
                 "variable": "x1"
               },
               "nullable": true,
-              "directed": true
+              "directed": true,
+              "hops": null
             },
             {
               "kind": "node",
