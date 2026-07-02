@@ -262,7 +262,7 @@ var skiplist = map[string]bool{
 	// UnexpectedSyntax, so the acceptance harness would otherwise fail
 	// these two scenarios; the skiplist entry defers them to the
 	// Stage 11 projection-position pattern-predicates work
-	// (follow-up bead: projection-position pattern predicates, Stage 11 scope).
+	// (follow-up bead: gqlc-3r0).
 	// Stage 6's typeAtom already accepts OC_PatternPredicate for its role
 	// inside a WHERE, so the same atom in projection position also parses;
 	// the position-specific misuse check is what Stage 11 will add.
