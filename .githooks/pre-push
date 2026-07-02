@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Pre-push hook: run the full test suite (<1s — the TCK is vendored, no
+# network) and lint only the lines that differ from origin/master. The full
+# repo-wide lint is CI's job; this catches what the push is about to break.
+# Activated by: git config core.hooksPath .githooks
+# (run `just init` after cloning)
+set -euo pipefail
+
+just test
+
+# ensure-golangci self-heals the pinned binary in .bin/; it only fails when a
+# needed download is impossible (e.g. offline) — degrade to a warning then.
+if just ensure-golangci >/dev/null 2>&1; then
+  just lint-new
+else
+  echo "WARN: could not provision golangci-lint (offline?); skipping lint" >&2
+fi

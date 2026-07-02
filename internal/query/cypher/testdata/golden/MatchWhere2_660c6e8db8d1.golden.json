@@ -98,8 +98,8 @@
   "combinators": null,
   "parameters": [
     {
-      "Name": "1",
-      "Uses": [
+      "name": "1",
+      "uses": [
         {
           "kind": "property",
           "variable": "advertiser",
@@ -108,8 +108,8 @@
       ]
     },
     {
-      "Name": "2",
-      "Uses": [
+      "name": "2",
+      "uses": [
         {
           "kind": "property",
           "variable": "a",
