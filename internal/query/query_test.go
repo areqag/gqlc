@@ -388,10 +388,10 @@ func TestReturnItemMarshalJSON(t *testing.T) {
 		string(out))
 }
 
-func TestQueryPartMarshalJSONEmitsReturnsAll(t *testing.T) {
+func TestPartMarshalJSONEmitsReturnsAll(t *testing.T) {
 	// "returnsAll" is always emitted (no omitempty) on a part, matching the
 	// always-emit convention. A plain part (no RETURN *) serialises it as false.
-	part := query.QueryPart{
+	part := query.Part{
 		Returns: []query.ReturnItem{
 			{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"})},
 		},
@@ -455,12 +455,12 @@ func TestQueryMarshalJSONEmitsCombinatorsForUnion(t *testing.T) {
 	// Two branches joined by UNION ALL: Combinators has one entry, marshalled via
 	// the stringer.
 	q := query.Query{
-		Branches: []query.QueryBranch{
-			{Parts: []query.QueryPart{{
+		Branches: []query.Branch{
+			{Parts: []query.Part{{
 				Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
 				Returns:  []query.ReturnItem{{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})}},
 			}}},
-			{Parts: []query.QueryPart{{
+			{Parts: []query.Part{{
 				Bindings: []query.Binding{must(query.NewNodeBinding("b", nil))},
 				Returns:  []query.ReturnItem{{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"})}},
 			}}},
@@ -501,8 +501,8 @@ func representativeQuery(t *testing.T) query.Query {
 	require.NoError(t, err)
 
 	return query.Query{
-		Branches: []query.QueryBranch{
-			{Parts: []query.QueryPart{{
+		Branches: []query.Branch{
+			{Parts: []query.Part{{
 				Bindings: []query.Binding{a, b, edge},
 				Returns: []query.ReturnItem{
 					{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"})},
@@ -640,8 +640,8 @@ func genBinding() *rapid.Generator[query.Binding] {
 func genQuery() *rapid.Generator[query.Query] {
 	return rapid.Custom(func(t *rapid.T) query.Query {
 		return query.Query{
-			Branches: []query.QueryBranch{
-				{Parts: []query.QueryPart{{
+			Branches: []query.Branch{
+				{Parts: []query.Part{{
 					Bindings: rapid.SliceOf(genBinding()).Draw(t, "bindings"),
 				}}},
 			},
