@@ -219,19 +219,42 @@ the curated subset the model carries).
 **Type**:
 The result type of a **projection**: a closed sum of `bool`, `int`, `float`,
 `string`, `null`, `list<T>` (parameterised over an element type), `map`,
-`node`, `edge`, and a distinguished `unknown` for types the parser cannot
-compute schema-free. It is the freeze-locked type vocabulary the resolver
-reads from a parsed query: a `RefProjection` on a whole entity types as
-`node` or `edge`; a scalar literal types as its literal kind; a rich
-expression carries the result of the parser's constant folding over the
-scalar-expression grammar. `unknown` is the parser's honest posture on the
-type-interface boundary (ADR 0005) for property lookups, function calls,
-aggregates, and any expression touching a property or `null` — the
-resolver upgrades these from the schema. Incremental: Stage 7 adds
-temporal types (`date`, `time`, …), Stage 8 adds `path`; the freeze ADR
-locks the sum.
+`node`, `edge`, the six **temporal types** (`date`, `time`, `localtime`,
+`datetime`, `localdatetime`, `duration`), and a distinguished `unknown`
+for types the parser cannot compute schema-free. It is the freeze-locked
+type vocabulary the resolver reads from a parsed query: a `RefProjection`
+on a whole entity types as `node` or `edge`; a scalar literal types as
+its literal kind; a rich expression carries the result of the parser's
+constant folding over the scalar-expression grammar. `unknown` is the
+parser's honest posture on the type-interface boundary (ADR 0005) for
+property lookups, function calls, aggregates, and any expression
+touching a property or `null` — the resolver upgrades these from the
+schema. Incremental: Stage 7 added the six temporal types, Stage 8 adds
+`path`; the freeze ADR locks the sum.
 _Avoid_: `any` (use `unknown` — the parser's "I cannot tell"); property
 type (reserve for the schema-side scalar type `PropertyType`).
+
+**Temporal type**:
+One of the six openCypher temporal types the parser carries in the
+**type** sum: `date`, `time`, `localtime`, `datetime`, `localdatetime`,
+`duration`. The `time`/`localtime` and `datetime`/`localdatetime` pairs
+are the **zoned vs. non-zoned** distinction the type interface preserves
+so codegen post-freeze can emit distinct Go binding signatures. The
+parser types a **temporal constructor** call (`date(...)`, `time(...)`,
+`duration.between(...)`, etc.) to its concrete temporal result type via
+a closed name-based lookup; it also types **temporal arithmetic** under
+a small closed rule table: `<temporal-point> ± duration → <temporal-point>`,
+`duration ± duration → duration`, `duration × number → duration`
+(commutative), `duration ÷ number → duration`. The reverse directions
+(`duration - <temporal-point>`, `number ÷ duration`, `duration ÷ duration`)
+are not committed and type as `unknown` — the honest posture the resolver
+can upgrade. Temporal accessors (`d.year`, `d.timezone`, …) type as
+`unknown` for the same reason: the accessor set is large and per-kind,
+so the resolver types them from the schema.
+_Avoid_: "datetime type" (colloquial for the whole family; the family is
+"temporal type"); "duration accessor" (duration accessors like
+`duration.between` are constructor calls in the type interface — the
+namespaced function returns a `duration` — not property lookups).
 
 **Result type**:
 The **type** a return item's **projection** commits to for the column that

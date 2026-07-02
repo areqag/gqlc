@@ -83,10 +83,20 @@ invariant).
   `typeMulDiv` under the same posture (`duration × int → duration`,
   `duration × float → duration`, `duration / int → duration`,
   `duration / float → duration`; the reverse `number × duration` is also
-  `duration` — the operator is commutative). Division of a duration by
-  another duration is not committed at the parser level (dialect-specific;
-  Neo4j returns a float but the openCypher TCK does not require it) and
-  types as `TypeUnknown`.
+  `duration` — the operator is commutative). Division is direction-
+  restricted: `number / duration` has no committed result type and stays
+  `TypeUnknown`. Division of a duration by another duration is not
+  committed at the parser level (dialect-specific; Neo4j returns a float
+  but the openCypher TCK does not require it) and types as `TypeUnknown`.
+
+  Subtraction is likewise direction-restricted: `duration - <temporal-point>`
+  is out of scope of the extended arith table and types as `TypeUnknown`
+  (there is no legal openCypher shape for "a duration minus a point-in-time";
+  the query author asking for a duration between two temporals uses
+  `duration.between`, which types correctly via the constructor lookup
+  above). Inventing a concrete result type for the reverse direction
+  would be strictly worse than `TypeUnknown`, which the resolver can
+  upgrade from the schema.
 
   Every other combination the parser cannot commit to schema-free — a
   temporal *comparison* still yields `TypeBool` via `typeComparison`; a
