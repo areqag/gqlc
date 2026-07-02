@@ -1,0 +1,32 @@
+# Vulnerabilities arrive with dependency changes, not parser code, so this
+# runs only when go.mod/go.sum change plus a weekly sweep on master for newly
+# published advisories. Deliberately NOT a required check: a path-filtered
+# workflow that does not run would hang a required-status merge forever.
+name: vuln
+
+on:
+  pull_request:
+    paths:
+      - go.mod
+      - go.sum
+  schedule:
+    - cron: "23 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: install just
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh \
+            | bash -s -- --to "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - run: just vuln
