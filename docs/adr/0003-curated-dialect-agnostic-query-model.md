@@ -135,3 +135,41 @@ and the full expression tree are deliberately outside the initial model.
 > below the type-interface boundary and every parameter in a sort key
 > records an `ExprUse` so no parameter is silently dropped. The
 > no-expression-tree line holds._
+>
+> _Note (Stage 10, ADR 0004/0007): the curated `Projection` sum's
+> `AggregateProjection` variant grows a **`Distinct` axis** — a
+> single-bit annotation on the aggregate, always emitted on the wire
+> as `"distinct"`. DISTINCT deduplicates the aggregate's input before
+> aggregation, so `count(DISTINCT a)` and `count(a)` are
+> observably-different queries and the model preserves the axis (the
+> exact analogue of `EdgeBinding.directed` at Stage 5 — a scalar
+> value-affecting axis on one variant, not a tree fragment). The
+> aggregate's `Type()` upgrades from unconditional `TypeUnknown` to a
+> per-aggregate table computed against the operand's Stage-6 type:
+> `count` types as `TypeInt` unconditionally; `collect(T)` types as
+> `TypeList(T)` (never bare `TypeUnknown` — the aggregate always
+> yields a list, so `TypeList(TypeUnknown)` is the honest posture
+> when the element type is unknown); `sum` and `min`/`max` commit to
+> a concrete result when the operand's type commits (`sum(TypeInt) →
+> TypeInt`, `min(TypeString) → TypeString`, …) and stay
+> `TypeUnknown` for property-typed / unknown / mixed operands;
+> `avg`, `stDev/stDevP`, and `percentile*` stay `TypeUnknown`
+> unconditionally (engine-dependent result-type tables — a wrong
+> concrete would be strictly worse than the honest `TypeUnknown` the
+> resolver upgrades from the schema). Aggregates inside rich
+> expressions (a `count(n) + 1` at RETURN, a `count(n) > 3` in
+> WHERE) share the same typing table via `typeAtom`'s function-
+> invocation arm, so the two positions do not disagree on the same
+> call's result type. Grouping-key semantics — the implicit rule that
+> every non-aggregate projection column is a grouping key — stays a
+> resolver concern (bead `gqlc-gyw`); the parser records per-column
+> types and the aggregate-vs-not kind, and does not derive grouping
+> keys structurally (per-column derivation duplicates information
+> already in the projection list, and encoding the rule at parse time
+> conflates a semantic transformation with a type-interface).
+> Aggregate-position rules — `WHERE count(...)`, `ORDER BY count(...)`
+> — parse-accept and defer to bucket 3 (ADR 0007 §II): the type
+> interface does not carry per-position aggregate-legality, and the
+> engine re-executing the original text raises the same
+> `InvalidAggregation` / `AmbiguousAggregationExpression` the
+> compile-time check would raise. The no-expression-tree line holds._
