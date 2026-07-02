@@ -155,11 +155,17 @@ The rules are keyed off the operand's **Stage-6 computed type** — the
 same type the rich-expression typer computes for any expression. This
 composes: `sum(n.age + 1)` where `n.age` is honest-Unknown yields
 `TypeUnknown` for the operand (Stage 6 `promoteAdd(Unknown, Int) =
-Unknown`), so `sum` yields `TypeUnknown` — the honest posture end-to-end.
-`sum(range(1, 3))` yields `TypeUnknown` because `range()` (a bare
-function call, function identity below the boundary) types as
-`TypeUnknown`. `collect(n)` where `n` is a `NodeBinding` yields
-`list<node>`.
+Unknown`), so the aggregate arm returns `TypeUnknown` — the honest
+posture end-to-end. On the wire that shape lands as
+`ExprProjection{refs:[n.age], type:unknown}`, not
+`AggregateProjection`, because a non-bare argument declines the
+bare-atom classifier (§8 non-bare-aggregate-argument entry).
+`sum(range(1, 3))` lands the same way: `range()` (a bare function
+call, function identity below the boundary) types as `TypeUnknown`,
+so `aggregateResultType(AggSum, TypeUnknown) = TypeUnknown` and
+the wire shape is `ExprProjection{refs:null, type:unknown}`.
+`collect(n)` where `n` is a `NodeBinding` yields `list<node>` — the
+argument IS bare, so this one classifies as `AggregateProjection`.
 
 ### 1.3 Aggregates inside rich expressions
 
@@ -232,10 +238,19 @@ Stage-10 change.
 **Aggregate inside a projected aggregate (`count(count(*))`).** The
 Stage-6 test suite already treats this as bucket 3 via the existing
 skiplist entry `[14] Aggregates in aggregates`. Stage 10 preserves
-the treatment: the outer aggregate types via §1.2 (`count(anything)
-→ TypeInt`), the inner is walked for refs but its position-legality
+the treatment. On the wire it types as `ExprProjection{refs:null,
+type:int}`, not `AggregateProjection`: the outer `count`'s argument
+(`count(*)`) is not a bare var / var.prop / scalar literal, so the
+bare-atom classifier declines and `classifyRichExpression` runs.
+That routes the whole call through `typeAtom`, which finds the
+outer aggregate name, computes the inner arm's type via
+`aggregateResultType(AggCount, nil) = TypeInt`, then
+`aggregateResultType(AggCount, TypeInt) = TypeInt` — a strict type
+improvement over Stage-3's `TypeUnknown`. The `AggregateFunc` kind
+is not preserved (falls under the §8 non-bare-aggregate-argument
+entry; resolver-side follow-up **gqlc-33k.1**), and position-legality
 is a grouping-semantic rule below the boundary. No new skiplist
-entry, no code change.
+entry, no code change, no parser widening.
 
 ### 1.5 Grouping semantics
 
@@ -592,6 +607,34 @@ observable float-vs-int result, the rule migrates then; the two-line
 table entry is where the change lands.
 
 The lesser risks, recorded for completeness:
+
+- **Aggregates with non-bare arguments drop their `AggregateFunc` kind.**
+  `sum(x + 1)`, `count(n.age + 1)`, `collect(a OR b)`, `min([1, 2, 3])`,
+  `sum(range(1, 3))`, and `count(count(*))` all classify as
+  `ExprProjection` rather than `AggregateProjection` — Stage 6's
+  `functionArgRefs` discipline (each argument must be a bare
+  var/var.prop or a scalar literal, no expression tree, no nested
+  calls) declines the bare-atom classifier, so
+  `classifyRichExpression` runs. The Stage-10 aggregate arm in
+  `typeAtom` still computes the honest per-aggregate result type
+  (§1.3), so the projection's `Type()` is *right* — but the outer
+  node is `ExprProjection{refs, type}`, and the
+  `AggregateFunc`-kind signal is not preserved on the wire. A
+  resolver reading the model cannot distinguish `sum(x + 1)` from a
+  plain scalar expression of the same result type, so it cannot know
+  the column collapses rows (and it cannot see DISTINCT either — the
+  DISTINCT bit lives on `AggregateProjection`, not `ExprProjection`).
+  Inherited from Stage 6 and made starker by Stage 10's own DISTINCT
+  rationale: this is exactly the "two observably-different queries
+  lower to indistinguishable models" hazard §1.1 warns against, one
+  turn further down the tree. The honest posture is to record it
+  here rather than widen the bare-atom classifier: expanding it to
+  cover arithmetic operands would drag the expression tree into the
+  model (ADR 0003), so the follow-up is scoped past the parser
+  boundary — the resolver's grouping-key computation (bead
+  **gqlc-33k.1**) is where the aggregate-vs-not signal has to be
+  re-derived from the projection list anyway, and it can walk the
+  original text (ADR 0005) to recognise the outer aggregate name.
 
 - **`DISTINCT` on a non-aggregate function call is silently ignored.**
   The grammar accepts `toInteger(DISTINCT x)`; the parser classifies

@@ -103,9 +103,13 @@ var skiplist = map[string]bool{
 	// reuse is not special-cased — first occurrence defines endpoints, later
 	// occurrences merge labels.
 	"[29] Fail when re-using a relationship in the same pattern": true,
-	// WHERE count(a) > 10: an aggregation inside WHERE. The model mines WHERE only
-	// for parameters and ignores predicate structure; aggregation is rejected only
-	// as a RETURN item (ErrUnsupportedProjection), not in a predicate.
+	// WHERE count(a) > 10: an aggregation inside WHERE. Bucket 3 per ADR 0007 —
+	// the parser accepts and types the predicate (Stage 10: count(n) > 3 types as
+	// TypeBool via the aggregate-arm in typeAtom), then re-executes the original
+	// text so the engine raises the aggregate-in-WHERE grouping/binding-scope
+	// error (ADR 0005). Per-position aggregate legality is a semantic rule the
+	// type-interface boundary does not carry — same family as
+	// AmbiguousAggregationExpression / InvalidAggregation.
 	"[15] Fail on aggregation in WHERE": true,
 
 	// --- SKIP/LIMIT with a literal the TCK rejects as compile-time
