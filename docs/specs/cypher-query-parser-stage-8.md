@@ -64,27 +64,50 @@ composed of them). Stage 8 introduces:
   never uses it). `PathBinding` has no `EntityKind` — a path is not a graph
   entity, so the schema-key formation does not apply.
 
-The **path binding shape**: a named path variable and the ordered list of
-member bindings the path composes. Example: `MATCH p = (a)-[r]->(b)` yields
-`PathBinding{variable: "p", members: [a, r, b]}` — the same three
-node/edge bindings that would have been collected without the `p =` prefix,
-plus a `PathBinding` capturing their names in textual order. The members
-are stored as `[]string` (variable names) not `[]Binding` (values) so the
-path binding does not co-own the entity bindings — those live in the part's
-`Bindings` slice as always, and the path binding references them by name.
-An anonymous edge inside a named path (a `-[]-` in `p = (a)-[]-(b)`) gets a
-**synthetic name** minted at collection time (`__anon_edge_<index>`) so the
-path binding can reference every element it captures.
+The **path binding shape**: a named path variable and the ordered, shape-
+faithful list of the members the path composes. Example: `MATCH p = (a)-[r]->(b)`
+yields `PathBinding{variable: "p", members: [<node a>, <edge r>, <node b>]}` —
+the same three node/edge bindings that would have been collected without the
+`p =` prefix, plus a `PathBinding` capturing them in textual order. The
+members are a **tagged sum** (`PathMember`), not a `[]string`: four variants
+—  `NamedNodeMember{variable}`, `NamedEdgeMember{variable}`, `AnonEdgeMember{}`,
+`AnonNodeMember{}` — so the anonymous slots never compete with any user-
+chosen variable in the `byVar` namespace (a user pattern element may bind
+a node named literally `__anon_edge_0`, and the collision would be silent
+under a string-only member list). The list is **shape-faithful**: every
+element the pattern chain composes appears in order (node, edge, node, edge,
+… , node), so codegen post-freeze can reconstruct the path shape from
+`Members()` alone without walking the pattern chain a second time.
+
+Named members reference the part's entity bindings by variable — the path
+binding does not co-own them (their bindings live in the part's `Bindings`
+slice as always). Anonymous edges and anonymous intermediate nodes do not
+name any binding: an anonymous edge is still its own binding in the part's
+`Bindings` slice, but the path member carries only the fact "an anonymous
+edge sits at this position"; an anonymous node inside a chain (e.g. the
+`()` in `p = (a)-[]-()-[]-(b)`) is a pure filter (no binding is emitted for
+it — §C3 stands) but the path member for it records "an anonymous node
+sits at this position" so the shape is preserved.
 
 Constructor invariants (illegal states unrepresentable):
 
-- `NewPathBinding(variable string, members []string)` rejects an empty
+- `NewPathBinding(variable string, members []PathMember)` rejects an empty
   `variable` (a path binding is never anonymous — a path with no name is
   just a pattern, no path binding is emitted). Rejects a `members` slice
   with fewer than one element (a path with no members is grammatically
   impossible: a pattern element always has at least one node pattern).
-  Rejects a `members` entry with an empty string (every captured
-  member has a variable, real or synthetic per above).
+  Rejects a `nil` member entry (every member is one of the four variants
+  above). Rejects a named member with an empty variable (`NewNamedNodeMember`
+  / `NewNamedEdgeMember` themselves reject the empty case). Rejects a
+  **same-name kind conflict**: openCypher lets the same variable appear
+  multiple times in a pattern (`MATCH p = (n)-->(k)<--(n)` is legal — the
+  triangle revisits `n`), so a same-kind repeat of a named member is
+  legal, but two named members that share a variable and disagree on
+  `Kind()` (one `NamedNodeMember{"x"}` and one `NamedEdgeMember{"x"}`)
+  would collide with the part's byVar — `mergeBinding` catches this at
+  the pattern level, and the constructor enforces it defensively so the
+  illegal state is unrepresentable at the model boundary too. The
+  anonymous variants may repeat freely (they carry no name).
 - No `Nullable` on a path binding at Stage 8: the two `MATCH p = (a)`
   scenarios inside `OPTIONAL MATCH` (Path1 [1], Match7 [23..25]) parse
   green because the path binding's kind is `TypePath` — the resolver
@@ -281,11 +304,22 @@ New `mustParse` cases for the Stage-8 shapes:
 
 - **Named path — projected as PATH**: `MATCH p = (a)-[r]->(b) RETURN p` →
   the part carries three bindings (a NodeBinding a, an EdgeBinding r, a
-  NodeBinding b) **plus** a PathBinding p; the return item is a
+  NodeBinding b) **plus** a PathBinding p whose members are the tagged
+  sum `[NamedNode(a), NamedEdge(r), NamedNode(b)]`; the return item is a
   RefProjection carrying `Ref{Variable: "p"}` and `Type: TypePath{}`.
 - **Named path — anonymous edge**: `MATCH p = (a)-[]-(b) RETURN p` →
-  the anonymous edge gets a synthetic member name (see §1.2). Pins the
-  synthetic-name posture.
+  the anonymous edge surfaces as an `AnonEdgeMember{}` in the members
+  slice, not as a named member with any synthetic string (see §1.2).
+- **Named path — anonymous intermediate node**:
+  `MATCH p = (a)-[]-()-[]-(b) RETURN p` → the anonymous middle node
+  surfaces as an `AnonNodeMember{}`, so the members slice has five
+  entries `[NamedNode(a), AnonEdge, AnonNode, AnonEdge, NamedNode(b)]`
+  — shape-faithful.
+- **Named path — user pattern with a `__anon_edge_0` identifier**:
+  `MATCH p = (__anon_edge_0)-[]-(b) RETURN p` → the user's node binding
+  `__anon_edge_0` occupies the byVar namespace normally; the anonymous
+  edge member sits alongside it as an `AnonEdgeMember{}`, and the two
+  never collide. Pins the collision resistance the tagged sum buys.
 - **Var-length edge — bare `[*]`**: `MATCH (a)-[r*]->(b) RETURN r` →
   the edge binding carries `hops: {nil, nil}`; the return item's type is
   `TypeList(TypeEdge)`.
@@ -372,25 +406,54 @@ Wire encoding for NodeBinding / EdgeBinding is preserved: `BindingKind.String()`
 matches `graph.EntityKind.String()` for the two shared values. PathBinding
 adds `"path"` to the discriminator vocabulary.
 
-### 3.2 PathBinding
+### 3.2 PathBinding and PathMember
 
 ```
-type PathBinding struct {
-    variable string    // the path variable name (non-empty)
-    members  []string  // the member binding names in textual order
+type PathMember interface {
+    Kind() BindingKind  // BindingNode / BindingEdge — a path member is one or the other
+    Variable() string   // the named-member variable; empty for the anonymous variants
+    Anonymous() bool    // true iff this is an AnonEdgeMember / AnonNodeMember
+    isPathMember()
 }
 
-func NewPathBinding(variable string, members []string) (PathBinding, error)
+type NamedNodeMember struct { variable string }  // non-empty by constructor
+type NamedEdgeMember struct { variable string }  // non-empty by constructor
+type AnonEdgeMember  struct {}                   // positional slot only
+type AnonNodeMember  struct {}                   // positional slot only
+
+func NewNamedNodeMember(variable string) (NamedNodeMember, error)
+func NewNamedEdgeMember(variable string) (NamedEdgeMember, error)
+// AnonEdgeMember / AnonNodeMember are empty structs — no constructor.
+
+type PathBinding struct {
+    variable string        // the path variable name (non-empty)
+    members  []PathMember  // the members in shape-faithful textual order
+}
+
+func NewPathBinding(variable string, members []PathMember) (PathBinding, error)
 func (b PathBinding) Variable() string
-func (b PathBinding) Members() []string
+func (b PathBinding) Members() []PathMember
 func (b PathBinding) Kind() BindingKind
 func (b PathBinding) Nullable() bool  // always false at Stage 8
 ```
 
-Wire encoding:
+Wire encoding for a PathBinding:
 
 ```
-{"kind":"path","variable":"p","members":["a","r","b"],"nullable":false}
+{"kind":"path","variable":"p","members":[
+  {"kind":"node","variable":"a"},
+  {"kind":"edge","variable":"r"},
+  {"kind":"node","variable":"b"}
+],"nullable":false}
+```
+
+Wire encoding for the anonymous variants uses distinct discriminators so a
+consumer never confuses an anonymous slot with a named member of an empty
+variable — the two shapes are:
+
+```
+{"kind":"anon-edge"}
+{"kind":"anon-node"}
 ```
 
 ### 3.3 EdgeHops
@@ -411,7 +474,13 @@ Rejects negative bounds and `max < min` when both non-nil. Both nil is the
 
 Wire encoding on an EdgeBinding: `"hops":{"min":1,"max":3}` for a bounded
 range; `"hops":{"min":null,"max":null}` for `[*]`; `"hops":null` for a
-single-hop edge (the Stages 0..7 case, wire-compat).
+single-hop edge (the Stages 0..7 case). Every EdgeBinding gains a `hops`
+key regardless of variant, per the always-emit convention `nullable` /
+`directed` / `returnsAll` follow: this is a **wire-shape change** — the
+key is always present, so every pre-Stage-8 golden gains `"hops":null` at
+regeneration. It is not a keyed-back-compat change (no consumer that
+reads the pre-Stage-8 shape sees the same JSON keys); recorded honestly
+here rather than described as "wire-compat".
 
 ### 3.4 EdgeBinding widening
 
@@ -438,7 +507,14 @@ nullable info. The `must` test helper masks the verbosity in tests.
 
 No representation change. `Labels()` is already `graph.LabelSet` (ordered
 slice); a multi-type edge carries every type in textual first-appearance
-order. `relTypes()` in the listener stops rejecting the >1 case.
+order. `relTypes()` in the listener stops rejecting the >1 case. The
+grammar's legacy alternation form `[r:A|:B]` (an obsolete-but-accepted
+spelling of `[r:A|B]`) resolves the same way — every `oC_RelTypeName`
+child contributes its name to the ordered set, so `A|:B` and `A|B`
+produce the same `LabelSet ["A","B"]`. A repeated type in the source
+(`[r:A|A]`) dedups via `rawBinding.mergeLabels`'s ordered union, so the
+LabelSet is `["A"]`; the source spelling is not preserved (the model
+records the admissible type set, not the textual alternation form).
 
 ---
 
@@ -536,24 +612,33 @@ until the unlock commit.
 **Two weakest points, both recorded.**
 
 **Path member representation.** The choice to store `PathBinding.members`
-as `[]string` (variable names) rather than `[]Binding` (values) makes the
-path binding a **name-based projection** into the part's binding list.
-Resolving a path member goes through the same `byVar` map the resolver
-already uses. The trade-off: `PathBinding` cannot be resolved standalone
-(you need the part to look up members). But the alternatives are worse:
+as a tagged sum (`[]PathMember` with named-node / named-edge / anon-edge /
+anon-node variants) rather than `[]Binding` (values) makes the path
+binding a **shape + name projection** into the part's binding list.
+Resolving a named path member goes through the same `byVar` map the
+resolver already uses; anonymous members carry no name at all, so the
+`byVar` namespace cannot be silently invaded by a synthetic anonymous
+identifier (an earlier design that used strings including a
+`__anon_edge_<index>` prefix collided with the openCypher symbolic-name
+grammar — `oC_SymbolicName` accepts `[A-Za-z_][A-Za-z0-9_]*`, so
+`__anon_edge_0` is a legal bare identifier a user could write; the
+tagged sum makes the collision unrepresentable).
+
+The trade-off: `PathBinding` cannot be resolved standalone (you need
+the part to look up named members). But the alternatives are worse:
 `[]Binding` would co-own the members (two owners of the same binding,
 freeze-time concern); `[]int` (indices into `Part.Bindings`) would couple
-the path to a slice position that reordering a printer might change.
-Names are the stable identity the rest of the model uses.
+the path to a slice position that reordering a printer might change; a
+flat `[]string` would collide as described. The tagged sum is the
+minimal representation that carries what codegen needs (shape + named
+identity for the resolver-visible members).
 
-Anonymous edges inside a named path get a synthetic name
-(`__anon_edge_<index>`) so every member has a name. The synthetic name
-prefix is chosen to be grammatically impossible as a user variable
-(a leading underscore + two-underscore separator is not part of the
-Cypher identifier alphabet as written by users). The alternative
-(dropping anonymous edges from the members slice) would make the path
-binding's members skip elements the resolver later has to reconstruct
-from the pattern chain; keeping them present-by-name is honest.
+Shape-faithfulness: the members slice is emitted for every element the
+pattern chain composes, in textual order. An anonymous intermediate
+node (`p = (a)-[]-()-[]-(b)`) surfaces as `AnonNodeMember{}` at its
+position, not as a dropped element. Codegen reading `Members()` can
+reconstruct the whole path shape (5 members for the example above)
+without walking the pattern chain a second time.
 
 **Var-length edge is one binding with a cardinality axis.** The choice
 to fold the "single edge vs list-of-edges" distinction into
