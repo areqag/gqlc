@@ -42,6 +42,51 @@ is noise; delete it.
   validated against the grammar; supplement with hand-authored files. Negative
   fixtures pair a `.gql` with the sentinel error it must produce.
 
+## Workflow: stacked branches
+
+- **Never commit to `master` directly.** Every change goes through a feature
+  branch. Use `gt` (graphite) to create and manage stacks **locally**:
+  `gt create <name>` cuts a new branch stacked on the current tip; `gt log`
+  shows the stack; `gt modify` amends the current branch in-place. **Do not
+  use `gt submit`** — this repo is on the unauthorised tier of graphite, so
+  the stack is a local review aid only.
+
+- **One PR per branch in the stack, pointed at its parent — not master.**
+  Each branch becomes its own GitHub PR, opened manually with
+  `gh pr create --base <parent-branch>`. The `--base` argument is the
+  branch directly below this one in the stack. **Only the bottom-of-stack
+  PR has `--base master`.** This keeps each PR's diff scoped to that
+  cycle's changes alone; without it, every PR re-shows the work from the
+  branches below and review becomes impossible. As parent PRs merge to
+  master, GitHub auto-retargets the children's bases.
+
+  Example for a three-branch stack `A → B → C` cut off master:
+
+  ```
+  gh pr create --base master --head A --title "..." --body "..."
+  gh pr create --base A      --head B --title "..." --body "..."
+  gh pr create --base B      --head C --title "..." --body "..."
+  ```
+
+- **Each branch in a stack must be independently mergeable.** Apply this
+  test to every proposed cycle/branch: *"if only this PR landed on `master` —
+  with the branches above and below it deferred — would `just test` still
+  pass?"* If the answer is no, the split is wrong: the change is incohesive
+  with its tests, its skiplist, its pin updates, or its corpus integration,
+  and it must be combined with the dependent piece into one branch. Run this
+  check **before** proposing the cycle breakdown, not after.
+
+- **Common failure mode.** Separating a behavior change from the test-suite
+  updates that follow from it. Examples: dropping a parser rejection without
+  simultaneously updating the godog skiplist + deleting the corresponding
+  `mustReject` pin; adding a new sentinel without adding its `mustReject`
+  coverage; changing the JSON wire format without regenerating goldens.
+  These changes must travel together in one branch.
+
+- **A cohesive cycle includes:** the code change + unit tests + any skiplist
+  / golden / Layer-2 pin updates the change implies. If you find yourself
+  thinking "the next PR will fix the tests" — combine them.
+
 ## Conventions
 
 - **Parse-tree walking:** use the ANTLR **listener** (`ParseTreeWalker` +
