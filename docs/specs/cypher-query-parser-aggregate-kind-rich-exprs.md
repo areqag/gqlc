@@ -82,7 +82,7 @@ lowering today.
 
 | Source                          | Current lowering                                          | Target lowering                                                                          |
 |---------------------------------|-----------------------------------------------------------|------------------------------------------------------------------------------------------|
-| `sum(x + 1)` (x:int)            | `ExprProjection{refs:[x], type:int}`                      | `AggregateProjection{fn:AggSum, refs:[x], distinct:false, type:int}`                     |
+| `sum(x + 1)` (x:int — from UNWIND/WITH-alias binding, not exercised in the current corpus) | `ExprProjection{refs:[x], type:int}` | `AggregateProjection{fn:AggSum, refs:[x], distinct:false, type:int}` |
 | `count(n.age + 1)`              | `ExprProjection{refs:[n.age], type:int}`                  | `AggregateProjection{fn:AggCount, refs:[n.age], distinct:false, type:int}`               |
 | `collect(a OR b)` (a,b bindings)| `ExprProjection{refs:[a,b], type:list<bool>}`             | `AggregateProjection{fn:AggCollect, refs:[a,b], distinct:false, type:list<bool>}`        |
 | `min([1, 2, 3])`                | `ExprProjection{refs:null, type:unknown}`                 | `AggregateProjection{fn:AggMin, refs:null, distinct:false, type:unknown}`                |
@@ -388,11 +388,28 @@ golden's `"refs"` and `"type"` values are unchanged bit-for-bit. The
 only changes are the `"kind"` value flipping and the `"func"` +
 `"distinct"` keys appearing. §4.3 formalises the check.
 
-**Estimated size.** Under 20 goldens touched. This is not a broad
-rebaseline like [[cypher-query-parser-part-distinct-axis]]'s field-
-addition-on-every-part; it is a targeted shape swap on exactly the
-projection items that press a rich aggregate. The scripted audit in
-§4.4 is the pre-RED verification.
+**Actual size (post-GREEN).** 75 goldens touched, across nine feature
+families: Precedence1 ×59 (its scenarios [14]–[35] alias every
+`collect(...)` projection as `AS eq` / `AS neq`), Return5 ×3, Return6
+×3, Comparison1 ×3, Aggregation6 ×2 (percentileCont/percentileDisc),
+WithOrderBy4 ×2, Pattern2 ×1, Remove1 ×1, ReturnOrderBy2 ×1. The
+category — aggregate over rich argument — is exactly what the change
+targets; the count is 3-4x the pre-RED estimate because §4.4's audit
+script had a false-negative bug (fixed in that section). This is not
+a broad rebaseline like [[cypher-query-parser-part-distinct-axis]]'s
+field-addition-on-every-part; it is a targeted shape swap on exactly
+the projection items that press a rich aggregate.
+
+**Pre-RED estimate (retained for archaeology).** The pre-RED estimate
+was "under 20 goldens". It undercounted because §4.4's audit grep
+matched the return-item `"name"` field on disk, which carries the `AS
+alias` when the projection is aliased. Precedence1's `WITH
+collect((a OR b XOR c) = (a OR (b XOR c))) AS eq, collect(...) AS
+neq` scenarios have `"name": "eq"` / `"name": "neq"` in every touched
+golden — the aggregate name never appears where the audit looked.
+§4.4 below now grep`s the TCK feature files directly for the aggregate
+keyword followed by an open paren, so the next spec that reuses the
+audit template does not inherit the bug.
 
 ### 1.8 Sentinel status
 
@@ -702,38 +719,68 @@ invariant; §5 elevates it to a hard precondition.
 Before RED, run:
 
 ```bash
-grep -l '"kind": "expr"' internal/query/cypher/testdata/golden/*.golden.json > /tmp/expr-goldens.txt
-# For each candidate, check whether the return-item name (which is the
-# verbatim source text of the projection expression) starts with an
-# aggregate name and has an open paren immediately after:
-while read f; do
-    if grep -E '"name":\s*"(count|sum|collect|min|max|avg|stdev|stdevp|percentilecont|percentiledisc)\s*\(' "$f" > /dev/null; then
-        echo "$f"
-    fi
-done < /tmp/expr-goldens.txt > /tmp/target-goldens.txt
-wc -l /tmp/target-goldens.txt
+# Grep the TCK feature files (RETURN / WITH bodies) for an aggregate
+# name followed by an open paren whose argument is anything other than
+# a bare var/var.prop or scalar literal. This catches aliased
+# projections (RETURN collect(a OR b) AS eq) that the golden's "name"
+# field cannot — that field carries the AS alias when present, so
+# grepping the on-disk goldens for `"name": "collect(..."` silently
+# misses every aliased case (which turns out to be the majority).
+grep -REn '^\s*(RETURN|WITH|\s+)\s+.*(count|sum|collect|min|max|avg|stdev|stdevp|percentilecont|percentiledisc)\s*\(' \
+    test/data/query/cypher/tck/features/ \
+    | grep -Ev '(count|sum|collect|min|max|avg|stdev|stdevp|percentilecont|percentiledisc)\s*\(\s*(DISTINCT\s+)?[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)?\s*\)' \
+    | grep -Ev '(count|sum|collect|min|max|avg|stdev|stdevp|percentilecont|percentiledisc)\s*\(\s*\*\s*\)' \
+    | tee /tmp/rich-aggregate-lines.txt
+wc -l /tmp/rich-aggregate-lines.txt
 ```
 
-The `wc -l` output is the upper bound on touched goldens.
+The first `grep` finds every RETURN/WITH line calling an aggregate;
+the two `grep -v`s filter out the bare-arg cases (`count(n)`,
+`sum(n.age)`, `count(*)`) that the pre-widening path already lowers
+as `AggregateProjection`. What remains is the rich-argument set — the
+lines that press the widening.
 
-**Confirmed candidates from a spot-check:**
+Then map each surviving line to its golden by scenario:
 
-- `Return6_9d684013a026.golden.json` — Return6[16], `sum(...)` over
-  a seven-term arithmetic expression. Return item `name: "sum"`;
-  the value expression's aliased name aliases the aggregate, so
-  the grep above uses the *expression* text mined from the pre-alias
-  source. The audit's grep is on the field the classifier populates
-  before an `AS` alias overrides it.
+```bash
+# For each line, note the feature file + line number; grep back to the
+# nearest `Scenario:` header to name the scenario. The golden's hash
+# suffix comes from goldenPath()'s deterministic input (the scenario
+# query text), so `find internal/query/cypher/testdata/golden/ -name
+# '<Feature>_*.golden.json'` bounds the feature's contribution.
+```
 
-The pre-RED phase must produce the full enumeration; the spec commits
-that the audit's output — plus any WITH-scoped analogues found under
-the same grep — is the exhaustive set. Every RED pin (§4.5) names a
-subset; every GREEN rebaseline is bounded to this set.
+**Confirmed families from the GREEN diff:**
 
-The audit's grep is deliberately loose (matches any function-name
-prefix followed by paren); a false positive is a return item whose
-alias contains an aggregate keyword but whose expression is not an
-aggregate — the RED phase's fine-grained pin distinguishes these.
+- **Precedence1** ×59 goldens — scenarios [14]–[35] every write
+  `WITH collect((<boolean composite>) = (<boolean composite>)) AS eq,
+  collect((<boolean composite>) <> (<boolean composite>)) AS neq`.
+  Two aliased `collect(...)` projections per scenario, each over a
+  boolean comparison expression (OR / XOR / AND / NOT / NULL predicate
+  / list predicate). The `AS eq` / `AS neq` alias is what made the
+  original name-based audit miss these.
+- **Aggregation6** ×2 — percentileCont / percentileDisc scenarios,
+  each with a percentile call over a projection whose first argument
+  is (per Aggregation6.feature) a bare property or a rich expression.
+- **Comparison1** ×3, **Return5** ×3, **Return6** ×3 — mix of the
+  Return6[16] `sum((1 - abs(r1.times/H1 - r2.times/H2)) * ...)`
+  seven-term arithmetic already called out in §1.7, plus other
+  aggregate-over-rich shapes.
+- **WithOrderBy4** ×2, **Pattern2** ×1 (aggregate on a pattern
+  comprehension), **Remove1** ×1, **ReturnOrderBy2** ×1 — trailing
+  rebase surface.
+
+Total: **75 goldens** — see §1.7 for the empirical breakdown that
+matches this audit's output line-for-line.
+
+The audit is deliberately loose (matches any aggregate name followed
+by any non-bare argument shape); a false positive is a comment line
+or a string-literal query fragment that mentions an aggregate but
+does not exercise one. The RED phase's fine-grained pin
+(`aggregate_sum_on_bare_property_arg_(regression)`, pin #10) plus the
+GREEN rebaseline's purity check (§4.3) distinguish false positives:
+a golden whose refs/type would drift under the widening is not a
+rich-aggregate case.
 
 ### 4.5 RED pins
 
