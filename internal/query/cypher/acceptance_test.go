@@ -698,7 +698,7 @@ func initScenario(ctx *godog.ScenarioContext) {
 	// script is a runtime graph the parser does not execute (ADR 0005 — the
 	// generated driver re-executes the ORIGINAL query text; the fixture is the
 	// engine's job). Treated as a no-op like the other setup steps.
-	ctx.Step(`^the binary-tree-\d+ graph$`, noop)
+	ctx.Step(`^the (binary-tree-1|binary-tree-2) graph$`, noop)
 
 	// Stage 14 (clauses/call): the TCK declares procedure signatures
 	// via a background step of the form

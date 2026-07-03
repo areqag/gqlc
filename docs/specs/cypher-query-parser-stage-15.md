@@ -493,7 +493,7 @@ to the actual rule.
 
 | Entry | TCK triple | Cause |
 | ----- | ---------- | ----- |
-| `[15] Fail on aggregation in WHERE` | SyntaxError / compile-time / (unspecified) | Aggregate in predicate position — engine grouping rule. |
+| `[15] Fail on aggregation in WHERE` | SyntaxError / compile-time / InvalidAggregation | Aggregate in predicate position — engine grouping rule. |
 | `[8] Fail if not projected variables are used inside an expression which contains an aggregation expression` | SyntaxError / compile-time / AmbiguousAggregationExpression | Grouping-key correctness (return context). |
 | `[9] Fail if more complex expression, even if projected, are used inside expression which contains an aggregation expression` | SyntaxError / compile-time / AmbiguousAggregationExpression | Grouping-key correctness (complex expr). |
 | `[20] Fail if not returned variables are used inside an expression which contains an aggregation expression` | SyntaxError / compile-time / AmbiguousAggregationExpression | Grouping-key correctness (with context). |
