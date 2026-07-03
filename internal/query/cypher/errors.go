@@ -51,4 +51,16 @@ var (
 	// is freeze-durable — pattern predicates never become legal projection
 	// atoms.
 	ErrPatternInProjection = errors.New("pattern predicate in projection position")
+
+	// ErrNestedPropertyTarget rejects a SET or REMOVE whose propertyExpression
+	// target is nested (n.a.b instead of n.a). The write model's Ref carries a
+	// single Property, so a nested LHS has no honest single-Ref shape — accept-
+	// and-truncate would claim SET target n.a when the query says n.a.b. Real
+	// engines reject this at parse ("only directly attached properties can be
+	// set"), so the fail-site aligns parser semantics with runtime semantics.
+	// The pinned-tag TCK exercises zero such shapes (grep on
+	// SET .*\.\w+\.\w+ / REMOVE .*\.\w+\.\w+ returned nothing), so the
+	// rejection is a bucket-1 posture with zero corpus fallout. Fail-sites are
+	// EnterOC_Set / EnterOC_Remove via propertyExpressionRef.
+	ErrNestedPropertyTarget = errors.New("nested property target")
 )

@@ -1570,8 +1570,11 @@ var mustParse = map[string]struct {
 	// arithmetic that would pin a concrete type, so the value expression
 	// types as TypeUnknown at the parser boundary — an honest posture the
 	// resolver upgrades from n.age via the schema post-freeze. The Use
-	// records ExprUse{TypeUnknown, ExprInProjection}. Replaces with a
-	// verbatim corpus entry if a future TCK bump supplies one.
+	// records ExprUse{TypeUnknown, ExprInSetValue} — the SET value is a
+	// producer position (value written to the graph), semantically opposite
+	// to a projection column's consumer role, so the position discriminator
+	// stays honest across the write set. Replaces with a verbatim corpus
+	// entry if a future TCK bump supplies one.
 	"set property with bare param": {
 		src: "MATCH (n)\nSET n.age = $newAge\nRETURN n",
 		want: oneWriteBranch(query.Part{
@@ -1583,7 +1586,30 @@ var mustParse = map[string]struct {
 				must(query.NewSetPropertyEffect(query.Ref{Variable: "n", Property: "age"}, query.TypeUnknown{}, nil)),
 			},
 		}, query.Parameter{Name: "newAge", Uses: []query.Use{
-			query.NewExprUse(query.TypeUnknown{}, query.ExprInProjection),
+			query.NewExprUse(query.TypeUnknown{}, query.ExprInSetValue),
+		}}),
+	},
+
+	// AUTHORED (Stage 12 amend §4.2): DELETE with a rich-shape target
+	// (an index expression, DELETE friends[$idx]). The pinned-tag TCK
+	// does not exercise a $param inside a DELETE rich expression
+	// (grep confirmed zero). The DeleteEffect carries no resolved Target
+	// (the rich shape has no honest single-Ref view; the value's entity
+	// kind is a resolver-time lookup below the parser boundary per
+	// ADR 0005) and records the touched refs. The $idx records
+	// ExprUse{TypeUnknown, ExprInDeleteTarget} — the DELETE target is a
+	// consumer position whose runtime entity kind determines whether the
+	// delete is legal, semantically distinct from a SET value's producer
+	// role and from a projection column's return-side role.
+	"delete rich expression with param": {
+		src: "MATCH (n)\nDELETE n.friends[$idx]",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Effects: []query.Effect{
+				query.NewDeleteEffect(nil, []query.Ref{{Variable: "n", Property: "friends"}}, false),
+			},
+		}, query.Parameter{Name: "idx", Uses: []query.Use{
+			query.NewExprUse(query.TypeUnknown{}, query.ExprInDeleteTarget),
 		}}),
 	},
 }
@@ -1627,6 +1653,27 @@ var mustReject = map[string]struct {
 	"write clause": {
 		query: "MERGE (n)\nRETURN n",
 		want:  cypher.ErrUnsupportedClause,
+	},
+	// AUTHORED (Stage 12 amend §1.5): SET with a nested propertyExpression
+	// target (n.a.b). The model's Ref carries a single Property, so a nested
+	// LHS has no honest single-Ref shape — accept-and-truncate would claim
+	// SET target n.a when the query says n.a.b, a wrong concrete claim about
+	// the very field repository codegen consumes. The pinned-tag TCK
+	// exercises zero such shapes (grep confirmed), so parse-reject is a
+	// bucket-1 posture with zero corpus fallout. Real engines reject nested
+	// SET anyway ("only directly attached properties can be set"), so the
+	// fail-site aligns parser semantics with runtime semantics.
+	"nested SET target": {
+		query: "MATCH (n)\nSET n.a.b = 1\nRETURN n",
+		want:  cypher.ErrNestedPropertyTarget,
+	},
+	// AUTHORED (Stage 12 amend §1.6): REMOVE with a nested propertyExpression
+	// target (n.a.b). Same shape rule as nested SET — the Ref cannot
+	// represent a multi-lookup target, and the pinned-tag TCK exercises zero
+	// such shapes. Bucket-1 reject.
+	"nested REMOVE target": {
+		query: "MATCH (n)\nREMOVE n.a.b\nRETURN n",
+		want:  cypher.ErrNestedPropertyTarget,
 	},
 	// (Stage 6: the two ErrUnsupportedProjection pins from Stages 3-5 —
 	// "arithmetic over projection" and "unary-signed projection" — are RETIRED.

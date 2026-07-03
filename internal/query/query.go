@@ -69,8 +69,15 @@ type Branch struct {
 // Stage 12: Effects carries the part's write clauses in walk order; a part with
 // non-empty Effects and empty Returns / ReturnsAll=false is a projection-less
 // write, a legal complete shape whose result is zero columns.
-// It is a product type: exported fields, the builder maintains its invariants (a
-// part's Returns is empty iff ReturnsAll), no smart constructor — mirroring Query.
+// It is a product type with exported fields, but Stage 12 introduces the
+// NewPart smart constructor to enforce the "at least one of bindings, effects,
+// or projection" invariant — an all-empty Part is unrepresentable at
+// construction. The listener routes through NewPart (build.go's buildPart) so
+// any parse path that would yield an empty Part fails at build time. Direct
+// struct-literal construction (mustParse fixtures) bypasses the guard; those
+// callers are trusted to supply a well-formed shape, and the sweep-time test
+// TestNewPartRejectsEmpty exercises the adversarial construction against the
+// constructor.
 type Part struct {
 	// Bindings are the entities this part's own MATCH or CREATE clauses
 	// introduce, a NodeBinding, EdgeBinding, PathBinding, or UnwindBinding each.
@@ -102,6 +109,40 @@ type Part struct {
 	// effect per SetItem; a REMOVE contributes one effect per RemoveItem. A part
 	// with no Effects is read-only. Always emitted in JSON.
 	Effects []Effect `json:"effects"`
+}
+
+// ErrEmptyPart rejects a Part whose bindings, projection, and effects are all
+// empty — a shape the grammar rules out (oC_ReadingClause / oC_UpdatingClause /
+// oC_ProjectionBody each guarantee at least one non-empty field in the parsed
+// Part) but the model constructor still refuses, per Stage 12 §3.2 / §4.6.
+// Illegal states unrepresentable at construction: no parse path can reach this
+// sentinel, so it is a model-invariant guard, not a user-facing rejection.
+// It is deliberately NOT in cypher's sentinel-reachability sweep — the sweep
+// checks user-reachable sentinels, and this one is exercised only by the
+// adversarial constructor test TestNewPartRejectsEmpty in query_test.go.
+var ErrEmptyPart = errors.New("query: part must carry at least one binding, projection, or effect")
+
+// NewPart is the smart constructor for a Part (Stage 12). It enforces the
+// "at least one of bindings, projection, or effect" invariant that the flat-
+// struct field-level types cannot express alone. Callers pass the fields in
+// walk order; NewPart rejects the all-empty shape with ErrEmptyPart, and any
+// well-formed part passes through unchanged.
+//
+// buildPart in the cypher listener routes through NewPart so a parse path that
+// would yield an empty Part (which the grammar rules out anyway) fails at
+// build time rather than emitting a wire-shape violation. Direct struct-literal
+// construction in tests (mustParse fixtures) bypasses this guard by design —
+// those callers are trusted to hand-write a well-formed shape.
+func NewPart(bindings []Binding, returns []ReturnItem, returnsAll bool, effects []Effect) (Part, error) {
+	if len(bindings) == 0 && len(returns) == 0 && !returnsAll && len(effects) == 0 {
+		return Part{}, ErrEmptyPart
+	}
+	return Part{
+		Bindings:   bindings,
+		Returns:    returns,
+		ReturnsAll: returnsAll,
+		Effects:    effects,
+	}, nil
 }
 
 // UnionKind is which UNION combinator joins two branches: distinct (collapses
@@ -1166,10 +1207,11 @@ func (s ClauseSlot) ClauseName() string {
 	}
 }
 
-// ExprPosition names where a rich-expression parameter use appears (Stage 6):
-// inside a projection column vs inside a predicate. It is int-backed with a
-// stringer — mirrors AggregateFunc / ClauseSlot — so the JSON discriminator
-// derives from one source and cannot drift.
+// ExprPosition names where a rich-expression parameter use appears (Stage 6,
+// widened in Stage 12): inside a projection column, a predicate, a SET value,
+// or a DELETE target. It is int-backed with a stringer — mirrors
+// AggregateFunc / ClauseSlot — so the JSON discriminator derives from one
+// source and cannot drift.
 type ExprPosition int
 
 const (
@@ -1179,14 +1221,35 @@ const (
 	// ExprInPredicate is a rich-expression parameter use inside a WHERE
 	// predicate or a comparable predicate position.
 	ExprInPredicate
+	// ExprInSetValue is a rich-expression parameter use inside a SET value
+	// expression — the RHS of SET n.prop = <expr> or SET n = <expr> /
+	// SET n += <expr>. Distinct from Projection (Stage 12): a SET value is a
+	// producer of a value written to the graph, semantically opposite to a
+	// RETURN column's consumer role. The write-side distinction lets the
+	// resolver key on the target property's type for a schema-cross-check
+	// that a projection use would not carry.
+	ExprInSetValue
+	// ExprInDeleteTarget is a rich-expression parameter use inside a DELETE
+	// target expression — anything that isn't a bare var or var.prop
+	// (DELETE friends[$idx], DELETE nodes(p)[0]). Distinct from Projection
+	// (Stage 12): a DELETE target is a resolver-side lookup whose runtime
+	// entity kind determines whether the delete is legal (only node/edge
+	// values can be deleted). The position keeps the axis honest across the
+	// write set.
+	ExprInDeleteTarget
 )
 
-// String is the lowercase wire tag ("projection" / "predicate"). The single
-// source the JSON discriminator's "position" field derives from.
+// String is the lowercase wire tag ("projection" / "predicate" / "setValue" /
+// "deleteTarget"). The single source the JSON discriminator's "position" field
+// derives from.
 func (p ExprPosition) String() string {
 	switch p {
 	case ExprInPredicate:
 		return "predicate"
+	case ExprInSetValue:
+		return "setValue"
+	case ExprInDeleteTarget:
+		return "deleteTarget"
 	default:
 		return "projection"
 	}
