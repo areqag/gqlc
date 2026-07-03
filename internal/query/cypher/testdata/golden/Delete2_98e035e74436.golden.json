@@ -1,0 +1,65 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "edge",
+              "variable": "r",
+              "labels": [
+                "T"
+              ],
+              "source": {
+                "kind": "inline",
+                "labels": null
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false,
+              "directed": false,
+              "hops": null
+            },
+            {
+              "kind": "path",
+              "variable": "p",
+              "members": [
+                {
+                  "kind": "anon-node"
+                },
+                {
+                  "kind": "edge",
+                  "variable": "r"
+                },
+                {
+                  "kind": "anon-node"
+                }
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": null,
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "delete",
+              "targets": [
+                {
+                  "variable": "r",
+                  "property": ""
+                }
+              ],
+              "refs": null,
+              "detach": false
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

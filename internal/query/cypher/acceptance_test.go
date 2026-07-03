@@ -620,21 +620,20 @@ func TestGoldenOrphans(t *testing.T) {
 				t.Fatalf("parse %s: %v", path, err)
 			}
 			for _, p := range gherkin.Pickles(*doc, path, newIDGen()) {
-				var query string
-				// Take the LAST executing-query step, matching the runtime
-				// posture: executingQuery overwrites st.query on each When step
-				// so at Then-time (when checkGolden runs) st.query is the last
-				// executed query. A Temporal4 storage scenario with a CREATE
-				// followed by a MATCH-control-query keys its golden against
-				// the MATCH text, not the CREATE text — Stage 12 exposed the
-				// previously-latent asymmetry here (the CREATE now parses, so
-				// both When steps run and the LAST-wins rule is observable).
+				// Key an expected golden by EVERY executing-query step, matching
+				// the runtime posture: executingQuery overwrites st.query on each
+				// When step, and checkGolden fires both at the final Then
+				// (resultShouldBe) and at intermediate "no side effects" steps
+				// for write statements — each snapshotting whatever st.query
+				// holds at that moment. A Temporal4 storage scenario with a
+				// CREATE followed by a MATCH-control-query mints one golden
+				// keyed by the CREATE text and one keyed by the MATCH text.
 				for _, step := range p.Steps {
 					if isExecutingQueryStep(step) {
-						query = step.Argument.DocString.Content
+						q := step.Argument.DocString.Content
+						expected[goldenPath(&scenarioState{name: p.Name, uri: p.Uri, query: q})] = true
 					}
 				}
-				expected[goldenPath(&scenarioState{name: p.Name, uri: p.Uri, query: query})] = true
 			}
 		}
 	}
@@ -740,9 +739,11 @@ func resultShouldBe(ctx context.Context, _ *godog.Table) error {
 	return checkGolden(st)
 }
 
-// noSideEffects is a positive corroborating step. It only needs the query to have
-// parsed (or be a known-unsupported / skipped scenario); resultShouldBe carries
-// the snapshot assertion, so here we just guard the outcome.
+// noSideEffects is a positive corroborating step. For read statements it only
+// guards the outcome — resultShouldBe carries the snapshot assertion. For write
+// statements it must carry the assertion itself: many write-dir scenarios have
+// no result table, so without the checkGolden call here their Effects shape
+// would never be snapshot-verified (spec §1.9 promises 100% write coverage).
 func noSideEffects(ctx context.Context) error {
 	st := stateFrom(ctx)
 	if st.skipped {
@@ -753,6 +754,9 @@ func noSideEffects(ctx context.Context) error {
 			return godog.ErrPending
 		}
 		return fmt.Errorf("expected a parsed query, got error: %w", st.err)
+	}
+	if st.got.StatementKind == query.StatementWrite {
+		return checkGolden(st)
 	}
 	return nil
 }
