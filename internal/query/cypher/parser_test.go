@@ -1368,6 +1368,9 @@ var mustParse = map[string]struct {
 		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{
 			{
 				Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+				Returns: []query.ReturnItem{
+					{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+				},
 			},
 			{
 				Returns: []query.ReturnItem{

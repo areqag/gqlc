@@ -837,7 +837,16 @@ The lesser risks, recorded for completeness:
   cheap. Choosing the two-pass form over threading refs through
   `typeExpressionMining` avoids widening the mining signature —
   fine at Stage 11's cost model, but if Stage 12's writes press
-  the hot path we would consolidate.
+  the hot path we would consolidate. A second consequence of the
+  two-pass form: at RETURN / WITH projection position, every source
+  ref (`n` in `RETURN all(x IN n.tags WHERE x > 0)`) is appended to
+  `curPart.refs` twice — once by each pass. `buildPart`'s dedupe
+  step collapses them into one entry today, so the observable model
+  is unchanged, but a downstream consumer that counts refs (a code
+  generator emitting one bind per ref) would see the double-write
+  without dedupe. Pinned by ADR 0005 (the resolver runs the
+  original text, not model refs), but noted here so a Stage-12
+  refs-widening does not build on the double-write invariant.
 - **Pattern predicates inside a quantifier's filter body are
   double-nested.** A predicate like `all(x IN xs WHERE (x)-->())`
   types the WHERE as `TypeBool` (matches the pattern predicate
@@ -847,18 +856,36 @@ The lesser risks, recorded for completeness:
   recorded — correctly. The property test would flag a leak if
   one occurred. No corpus scenario at the pinned tag exercises
   this composition; the pin set covers each piece separately.
-- **Pattern predicates in `WITH` projection position that hide
-  behind arithmetic** are not rejected. A projection like
-  `WITH (n)-->() = true AS x` is a comparison of a pattern
-  predicate to a boolean — grammatically not a bare
-  pattern-predicate atom. `isPatternPredicateAtom` returns false,
-  `classifyRichExpression` runs, and the atom types as `TypeBool`
-  via §4.5. The corpus does not currently exercise this shape;
-  if it does at a later TCK tag, the rejection would want to
-  climb one level of expression parenthesisation. The current
-  narrow shape is what `Pattern1 [22]/[23]` exercises and what
-  gqlc-3r0's charter names ("Pattern1 [22]/[23]") — widening
-  the rejection would be a scope creep beyond the fold.
+- **Pattern predicates in `WITH` / `RETURN` projection position
+  that hide one level up from a bare atom** are not rejected. The
+  `isPatternPredicateAtom` check runs against the expression's
+  non-arithmetic atom via `nonArithmetic` — a pattern predicate
+  wrapped in another shape climbs above the check. Four confirmed
+  hole shapes at Stage 11:
+    - `WITH (n)-->() = true AS x` — a comparison of a pattern
+      predicate to a boolean. The comparison expression is not a
+      bare atom; `classifyRichExpression` runs and produces an
+      `ExprProjection{refs:[], TypeBool}` — the inner pattern's
+      `n` is silently dropped from refs (§4.5 arm).
+    - `WITH NOT (n)-[]->() AS x` — a unary-NOT over a pattern
+      predicate. Same result: `ExprProjection{refs:[], TypeBool}`,
+      `n` silently dropped.
+    - `WITH ((n)-[]->()) AS x` — a parenthesised pattern predicate.
+      `nonArithmetic` unwraps the paren once, so this shape is
+      caught by `isPatternPredicateAtom` today (verify against the
+      corpus if it appears); if a future ANTLR update reshuffles
+      the atom-vs-parenthesised distinction, this could regress.
+    - `WITH [(n)-[]->()] AS x` — a pattern predicate inside a list
+      literal. Not a bare atom; `classifyRichExpression` runs and
+      the list types as `TypeUnknown`, again dropping `n` from
+      refs.
+  The current narrow shape is what `Pattern1 [22]/[23]` exercises
+  and what gqlc-3r0's charter names ("Pattern1 [22]/[23]") —
+  widening the rejection to climb the precedence tower would be a
+  scope creep beyond the fold, but the shapes are recorded here so
+  a future TCK tag or downstream consumer press does not surprise
+  a reviewer. The corpus does not currently exercise any of the
+  four at the pinned tag.
 - **The `expressions/quantifier` and `existentialSubqueries` dirs
   join `expressions/*` for bucket-3 categorical negatives.** If a
   future TCK tag adds a *positive* runtime-error scenario in those

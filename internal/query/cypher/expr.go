@@ -404,8 +404,23 @@ func (l *listener) mineWhere(w gen.IOC_WhereContext) {
 // parameter use when a comparison or string predicate pairs a single-level
 // var.prop with a $param (D1a). It does not interpret predicate structure beyond
 // finding these pairs; everything else is left for the approval sweep.
+//
+// Stage 11 §1.2 / §1.5: the walk stops at an EXISTS { ... } or list-quantifier
+// (ALL / ANY / NONE / SINGLE) subtree boundary. Comparisons inside a predicate
+// subquery / a quantifier filter body live in a nested scope — an inner
+// var.prop = $p pair inside them would (a) mint the wrong Use variant on the
+// outer parameter (a PropertyUse against an inner var, silently dropping the
+// spec §1.5 ExprUse{TypeBool, ExprInPredicate}), and (b) leak the inner
+// variable into curPart.refs via pairAddSub, breaking legal queries with
+// ErrUnboundVariable at build's referential-integrity sweep. Parameters inside
+// these subtrees are mined by their own hooks: EnterOC_ExistentialSubquery for
+// EXISTS { ... }, typeQuantifier for the four quantifiers.
 func (l *listener) mineComparisons(e antlr.Tree) {
 	if e == nil {
+		return
+	}
+	switch e.(type) {
+	case gen.IOC_ExistentialSubqueryContext, gen.IOC_QuantifierContext:
 		return
 	}
 	if cmp, ok := e.(gen.IOC_ComparisonExpressionContext); ok {
