@@ -15,13 +15,15 @@
             {
               "name": "p",
               "value": {
-                "kind": "expr",
+                "kind": "aggregate",
+                "func": "percentile",
                 "refs": [
                   {
                     "variable": "n",
                     "property": "price"
                   }
                 ],
+                "distinct": false,
                 "type": "unknown"
               }
             }
