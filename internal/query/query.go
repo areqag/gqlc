@@ -237,14 +237,22 @@ const (
 	// not a graph entity). The binding carries the source expression's
 	// element type as recorded by the Stage-6 typer.
 	BindingUnwind
+	// BindingCall is a CALL YIELD binding — a Stage-14 construct: one
+	// binding per YIELD result column, each carrying the fully-qualified
+	// procedure name, the signature-declared source column, and the
+	// bridged Stage-6 result type. No graph.EntityKind counterpart (a
+	// procedure result column is a scalar per row, not a graph entity).
+	// CALL is a Read clause, so a CallBinding does not flip
+	// Query.StatementKind.
+	BindingCall
 )
 
 // String is the canonical lowercase name of the kind ("node" / "edge" /
-// "path" / "unwind"). It is the single source the JSON discriminator
-// derives from; two of the four tags match graph.EntityKind.String() by
-// construction, so pre-Stage-8 wire shapes for node/edge bindings are
-// preserved verbatim. "path" (Stage 8) and "unwind" (Stage 9) are
-// query-side only.
+// "path" / "unwind" / "call"). It is the single source the JSON
+// discriminator derives from; two of the five tags match
+// graph.EntityKind.String() by construction, so pre-Stage-8 wire shapes
+// for node/edge bindings are preserved verbatim. "path" (Stage 8),
+// "unwind" (Stage 9), and "call" (Stage 14) are query-side only.
 func (k BindingKind) String() string {
 	switch k {
 	case BindingEdge:
@@ -253,6 +261,8 @@ func (k BindingKind) String() string {
 		return "path"
 	case BindingUnwind:
 		return "unwind"
+	case BindingCall:
+		return "call"
 	default:
 		return "node"
 	}
@@ -794,6 +804,116 @@ func (b UnwindBinding) MarshalJSON() ([]byte, error) {
 		ElemType Type   `json:"elemType"`
 		Nullable bool   `json:"nullable"`
 	}{Kind: b.Kind().String(), Variable: b.variable, ElemType: b.elemType, Nullable: b.Nullable()})
+}
+
+// CallBinding is a query variable bound to one YIELD result column of a
+// CALL clause (Stage 14 spec §1.2 / §3.2). Each YIELD item mints one
+// CallBinding, mirroring UnwindBinding's "one variable per binding"
+// shape: the variable is the AS-alias (or the bare source-field name
+// when no AS is present); the procedure is the fully-qualified name
+// looked up in the procedure registry (procsig.Registry); sourceField
+// is the signature-declared result column this binding draws from
+// (kept even when it equals the variable, so a YIELD out AS x is
+// unambiguous at codegen). The resultType is the bridged Stage-6
+// type (TypeInt / TypeFloat / TypeString / TypeUnknown — the last for
+// a NUMBER signature token, whose runtime column type post-freeze
+// codegen reads from the registry directly). Nullable mirrors the
+// signature's trailing `?` verbatim.
+//
+// CALL is a Read clause: a CallBinding does not flip
+// Query.StatementKind. It participates in the Stage-6 refType
+// classifier the same way UnwindBinding does — a bare RETURN on a
+// call-yielded variable types as ResultType() (see cypher's
+// internal refType in typing.go).
+type CallBinding struct {
+	variable    string // always non-empty
+	procedure   string // fully-qualified name; always non-empty
+	sourceField string // signature-declared result column; always non-empty
+	resultType  Type   // bridged Stage-6 result type; TypeUnknown for NUMBER
+	nullable    bool   // signature's trailing '?'
+}
+
+// NewCallBinding builds a CallBinding, rejecting the empty variable /
+// procedure / sourceField (the CALL grammar rules out each empty case,
+// so the parser never reaches these — the constructor is the model-
+// invariant guard). A nil resultType is normalised to TypeUnknown, the
+// same "cannot tell" fallback NewUnwindBinding and NewRefProjection
+// use.
+func NewCallBinding(variable, procedure, sourceField string, resultType Type, nullable bool) (CallBinding, error) {
+	if variable == "" {
+		return CallBinding{}, errors.New("query: call binding requires a non-empty variable")
+	}
+	if procedure == "" {
+		return CallBinding{}, errors.New("query: call binding requires a non-empty procedure name")
+	}
+	if sourceField == "" {
+		return CallBinding{}, errors.New("query: call binding requires a non-empty source field")
+	}
+	if resultType == nil {
+		resultType = TypeUnknown{}
+	}
+	return CallBinding{
+		variable:    variable,
+		procedure:   procedure,
+		sourceField: sourceField,
+		resultType:  resultType,
+		nullable:    nullable,
+	}, nil
+}
+
+// Variable is the YIELD-item variable this column exposes into scope —
+// the AS-alias for `YIELD out AS x`, or the bare source-field name for
+// `YIELD out`. Always non-empty.
+func (b CallBinding) Variable() string { return b.variable }
+
+// Procedure is the fully-qualified procedure name this CALL invoked
+// (e.g. "test.my.proc"). Always non-empty.
+func (b CallBinding) Procedure() string { return b.procedure }
+
+// SourceField is the signature-declared result column this binding
+// draws from. It equals Variable for a bare `YIELD out`; it differs
+// for `YIELD out AS x`. Always non-empty. Codegen post-freeze reads
+// SourceField to name the driver-visible column and Variable to name
+// the caller-visible one.
+func (b CallBinding) SourceField() string { return b.sourceField }
+
+// ResultType is the CallBinding's Stage-6 result type: the bridged
+// query.Type for the signature's declared token (INTEGER → TypeInt,
+// FLOAT → TypeFloat, STRING → TypeString, NUMBER → TypeUnknown — the
+// wire type; the registry stays the source of truth for NUMBER's
+// assignable-from semantics).
+func (b CallBinding) ResultType() Type { return b.resultType }
+
+// Kind reports that a CallBinding is a call binding.
+func (CallBinding) Kind() BindingKind { return BindingCall }
+
+// Nullable mirrors the signature's trailing `?` on the source result
+// field verbatim — a static parser-time fact set at construction.
+func (b CallBinding) Nullable() bool { return b.nullable }
+
+func (CallBinding) isBinding() {}
+
+// MarshalJSON renders a CallBinding as a tagged union member
+// discriminated by "kind" (derived from BindingKind, the single
+// source), carrying every field always-emitted. sourceField is
+// always emitted (even when equal to variable) so a rename
+// (`YIELD out AS x`) is unambiguous at the wire.
+func (b CallBinding) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind        string `json:"kind"`
+		Variable    string `json:"variable"`
+		Procedure   string `json:"procedure"`
+		SourceField string `json:"sourceField"`
+		ResultType  Type   `json:"resultType"`
+		Nullable    bool   `json:"nullable"`
+	}{
+		Kind:        b.Kind().String(),
+		Variable:    b.variable,
+		Procedure:   b.procedure,
+		SourceField: b.sourceField,
+		ResultType:  b.resultType,
+		Nullable:    b.nullable,
+	})
 }
 
 // Endpoint is one end of an edge. It is a closed sum of VarEndpoint and

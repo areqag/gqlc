@@ -298,6 +298,15 @@ func (l *listener) refType(r query.Ref) query.Type {
 			return ub.ElementType()
 		}
 	}
+	// Stage 14: a bare RETURN on a CALL YIELD variable types as the
+	// CallBinding's ResultType — mirrors UnwindBinding's ElementType
+	// participation above. A property lookup on the CallBinding falls
+	// through to TypeUnknown at the top of the function.
+	for _, cb := range l.curPart.callBindings {
+		if cb.Variable() == r.Variable {
+			return cb.ResultType()
+		}
+	}
 	if t, ok := l.curPart.imported[r.Variable]; ok {
 		return t
 	}

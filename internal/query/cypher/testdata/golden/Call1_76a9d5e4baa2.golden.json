@@ -1,0 +1,36 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "call",
+              "variable": "label",
+              "procedure": "test.labels",
+              "sourceField": "label",
+              "resultType": "string",
+              "nullable": true
+            }
+          ],
+          "returns": [
+            {
+              "name": "label",
+              "value": {
+                "kind": "ref",
+                "variable": "label",
+                "property": "",
+                "type": "string"
+              }
+            }
+          ],
+          "returnsAll": true,
+          "effects": null
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "read"
+}
