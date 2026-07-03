@@ -107,29 +107,52 @@ sub-expression's kind does not enter the model at that node.
 
 Position and rationale:
 
-- **The type is honest end-to-end.** Stage-6 `typeAtom`'s aggregate arm
-  (typing.go:358) already runs `aggregateResultType` when it sees an
-  aggregate-named function invocation inside a rich expression, so
+- **The Type axis already distinguishes many inner-aggregate cases,
+  and where it does not the residual is bounded.** Stage-6 `typeAtom`'s
+  aggregate arm (typing.go:358 for named aggregates; typing.go:346 for
+  the `count(*)` star-atom) already runs `aggregateResultType` when it
+  sees an aggregate invocation inside a rich expression. So
   `count(n) + 1` types as `TypeInt` (via `promoteAdd(TypeInt, TypeInt)`)
-  today. The rich expression's Stage-10 result type is what the
-  resolver sees; committed by Stage 10 §1.3 and unchanged by this
-  change.
+  and lowers as `ExprProjection{[Ref{"n"}], TypeInt}`, while `n + 1`
+  where `n` is a `TypeNode` binding types as `promoteAdd(TypeNode,
+  TypeInt) = TypeUnknown` and lowers as `ExprProjection{[Ref{"n"}],
+  TypeUnknown}` — the two are already distinguishable on `Type()`
+  alone. This spec's residual is exactly the intersection where the
+  operand's aggregate result type coincides with the same expression's
+  non-aggregate result type — a strictly smaller set than "every
+  aggregate inside a rich expression". Stage 10 §1.3 committed the
+  typing table (this spec does not extend or repeat it); §7 records
+  the residual honestly (a strict intersection, not the full class).
+
+- **The resolver-side contract for the intersection residual is
+  recorded on bead `gqlc-gyw`.** From `bd show gqlc-gyw` (notes,
+  dated 2026-07-03): grouping-key computation must treat "does this
+  `ExprProjection` contain an aggregate?" as a **resolver-side
+  discovery over the projection's original text span** (e.g. reusing
+  the cypher package's expression walker); the model will not answer
+  it. If that re-parse proves impractical, the **sanctioned escape
+  hatch is a post-freeze additive axis on `ExprProjection`
+  (`ContainsAggregate bool`) via the ADR 0008 revision protocol** —
+  and even then, it is not inferred from `Type` (because
+  `count(n) + 1` and `x + 1` can both type `TypeUnknown` under
+  operand types the current corpus doesn't press but future dialect
+  extensions could). This spec therefore closes the door at the
+  outermost projection node (the SF-3 fix) and, per the recorded
+  contract on `gqlc-gyw`, does **not** open a `ContainsAggregate`
+  axis pre-freeze. The escape hatch remains — additive, gated on the
+  revision protocol, invoked only if the resolver's re-parse is
+  impractical.
 
 - **The kind belongs to the outermost projection node.** ADR 0003 §4
   is explicit: the model carries one cardinality-bearing distinction
   per projection node (`AggregateFunc` for `AggregateProjection`), not
-  a sub-projection tree. Adding a `Contains` or `Inner` axis on
-  `ExprProjection` would either (a) drag a partial expression tree into
-  the model (violating the rule this axis is meant to protect), or
-  (b) collapse to a boolean signal ("some aggregate lurks in here")
-  that is strictly weaker than what the resolver already gets from
-  re-executing the original text against a driver that raises
-  `AmbiguousAggregationExpression` / `InvalidAggregation` when the
-  aggregate's position is illegal, and yields the aggregate's value
-  when it is legal. ADR 0005 makes this concrete: the generated code
-  re-executes the original text, so the aggregate's kind at an inner
-  position is already legible to whoever needs it — the driver, not
-  the parser-side type interface.
+  a sub-projection tree. Adding an inner-projection axis on
+  `ExprProjection` pre-freeze would either (a) drag a partial
+  expression tree into the model (violating the rule this axis is
+  meant to protect) or (b) collapse to a boolean signal ("some
+  aggregate lurks in here") that pre-empts the `gqlc-gyw` contract
+  above and forecloses the re-parse path before it has been proved
+  impractical.
 
 - **The precedent is dense.** Stage 10 already accepts the *reciprocal*
   half of this asymmetry — the `AggregateFunc` kind belongs to the
@@ -154,7 +177,8 @@ Position and rationale:
   `count(*)` is invisible), and the engine still raises
   `NestedAggregation` at compile time. The bucket-3 disposition is
   preserved verbatim — the parser doesn't own aggregate-position
-  rules; the engine does. No skiplist churn.
+  rules; the engine does. No skiplist churn. §4.7 pins this
+  outcome at the classifier boundary.
 
 - **The `Refs()` list still covers referential integrity.** Every
   `var/var.prop` inside a rich expression flows into `curPart.refs`
@@ -166,82 +190,129 @@ Position and rationale:
 
 The commitment: **the model records the outermost projection's
 aggregate kind and nothing else**. An inner aggregate's kind is a
-sub-projection fact the model does not encode, matching ADR 0003 §4.
-The resolver's grouping-key computation (bead `gqlc-gyw`) re-derives
-inner-aggregate presence from the projection list by walking the
-original text (ADR 0005), which is where the inverse case (Stage 10
-§8's residual gap) already routes.
+sub-projection fact the model does not encode, matching ADR 0003 §4
+and the `gqlc-gyw` contract. The resolver's grouping-key computation
+re-derives inner-aggregate presence from the projection list by
+walking the original text (ADR 0005). The sanctioned escape hatch —
+a post-freeze additive `ContainsAggregate` axis via the ADR 0008
+revision protocol, never inferred from `Type` — remains available
+if the re-parse proves impractical.
 
 This closes the door explicitly: the change fixes the *outermost*-
 aggregate-kind-dropped bug and does not open a new one for inner
 aggregates. Silent dropping at the outer position (the SF-3 bug) is
 fixed; deferral at the inner position (a different question, with a
-different answer) is documented here as the model's committed posture.
+different answer) is documented here as the model's committed posture,
+matching what `bd show gqlc-gyw` records.
 
 ### 1.4 Refs-mining semantics for rich aggregate arguments
 
 The bare-argument aggregate path calls `functionArgRefs` (shape.go:260),
 which walks each argument as a `nonArithmeticAtom` and records a `Ref`
-for every `var/var.prop` atom, refusing (returning `ok=false`) the
-moment it sees a shape it cannot classify without an expression tree.
+for every `var/var.prop` atom via `refFromNonArithmetic` (shape.go:29-48),
+refusing (returning `ok=false`) the moment it sees a shape it cannot
+classify without an expression tree. Its doc-comment enumerates the
+rejection set explicitly: "arithmetic, nested call, list/map literal,
+parameter, CASE, comprehension, '*'". A `$p` is therefore refused —
+this is load-bearing for §7's parameter-mining note.
+
 The rich-argument path this change adds cannot use `functionArgRefs`
 by construction — every rich shape fails it — so it uses the same
 walker Stage 6 uses for a rich expression body:
-`typeExpression(arg)` returns `(operand-type, refs)`, where `refs`
-is the sequence of `Ref{Variable, Property}` values every `var/var.prop`
-atom in the sub-tree touched, in first-occurrence order. The
+`typeExpressionMining(arg)` returns `(operand-type, refs, params)`,
+where `refs` is the sequence of `Ref{Variable, Property}` values every
+`var/var.prop` atom in the sub-tree touched, in **depth-first,
+left-to-right traversal order; duplicates preserved**. The
 aggregate's `Refs()` list is exactly that sequence.
 
-The two paths' semantics for a bare argument are equivalent: for
-`sum(x)`, `functionArgRefs` and `typeExpression`'s walker both mine
-one `Ref{Variable:"x"}` and no others. The rich-argument path is
-therefore a strict superset — anything `functionArgRefs` would accept,
-`typeExpression`'s walker mines identically. The reason `classifyFunction`
-still calls `functionArgRefs` first is `functionArgRefs`'s residual
-role (§1.4 corollary): it acts as a *strict* signal that the call is
-bare, so `classifyFunction`'s bare-argument path (which builds
-`FuncProjection` for a non-aggregate call whose arguments are all bare)
-retains its shape. Only the aggregate-name branch of `classifyFunction`
-takes the rich fallback; a non-aggregate function with a rich argument
-(`abs(n.age + 1)`) still returns `(nil, false)` and falls through to
-`classifyRichExpression`, because function identity is below the
-type-interface boundary (ADR 0005 §5) and `FuncProjection`'s existence
-is a pass-through the parser does not extend.
+**Bit-identity of refs on a bare argument, traced (Blocker 3(b)).**
+The claim "for a bare `var/var.prop` argument the two paths mine
+identical refs" is verifiable at three call sites:
+
+- **Bare variable atom (`sum(x)`).** `functionArgRefs` calls
+  `refFromNonArithmetic` (shape.go:29), which for zero property lookups
+  returns `Ref{Variable: variable}` (shape.go:41-42). The walker's
+  `typeAtom.OC_Variable()` arm (typing.go:322-326) appends
+  `query.Ref{Variable: name}` to the local refs slice. Same shape:
+  `Ref{Variable:"x", Property:""}`.
+
+- **Bare property lookup (`sum(n.age)`).** `functionArgRefs` calls
+  `refFromNonArithmetic` (shape.go:29), which for one property lookup
+  returns `Ref{Variable: variable, Property: lookups[0].
+  OC_PropertyKeyName().GetText()}` (shape.go:43-44). The walker's
+  path is two-step: `typeAtom.OC_Variable()` appends
+  `Ref{Variable: name}` (typing.go:322-326), then
+  `typeNonArithmetic`'s single-lookup upgrade at typing.go:292-300
+  rewrites the just-appended ref in-place to
+  `Ref{Variable: (*refs)[preAtomRefLen].Variable, Property:
+  lookups[0].OC_PropertyKeyName().GetText()}`. The `preAtomRefLen`
+  bookmark ensures exactly the ref this call appended is upgraded,
+  not an earlier one. Same shape: `Ref{Variable:"n", Property:"age"}`.
+
+- **Scalar literal argument (`sum(1)`).** `functionArgRefs` (shape.go:271-274)
+  approves a scalar literal with `continue` — no ref appended. The
+  walker's `typeAtom.OC_Literal()` arm returns via
+  `literalOrCollectionType`, which walks list/map inner refs but not
+  scalar-literal refs (there are none). No ref appended by either
+  path. Same: no ref.
+
+The RED phase pins bit-identity with the `sum(n.age)` regression pin
+(§4.5 pin #8): the projection's `Refs()` sequence pre- and post-
+widening is `[Ref{Variable:"n", Property:"age"}]`, and the pin
+carries a comment naming shape.go:29-48 and typing.go:292-300 as the
+two sites that must agree.
+
+**Path residual for the widening.** The rich-argument path is a
+strict superset of the bare-argument path for refs mining: anything
+`functionArgRefs` would accept, `typeExpressionMining`'s walker
+mines identically (traced above). Only the aggregate-name branch of
+`classifyFunction` takes the rich fallback; a non-aggregate function
+with a rich argument (`abs(n.age + 1)`) still returns `(nil, false)`
+and falls through to `classifyRichExpression`, because function
+identity is below the type-interface boundary (ADR 0005 §5) and
+`FuncProjection`'s existence is a pass-through the parser does not
+extend.
 
 Concretely, the mining rules for a rich aggregate argument:
 
 - **A single positional argument.** `sum`, `count`, `collect`, `avg`,
-  `min`, `max`, `stDev*` take one argument. The walker walks that
-  one and mines its refs.
+  `min`, `max`, `stDev*` take one argument. `typeExpressionMining`
+  walks that one and mines its refs and parameters.
 - **Two arguments — percentileCont/percentileDisc.** The second
   argument is the percentile (a scalar), which the current
   bare-argument path types via `typeExpression(args[0])` for the
   operand type — matching what `classifyFunction` (expr.go:353) does
   today. Under the rich fallback, the walker walks *every* argument
-  (both operand and percentile), mining refs from both; the operand's
-  type still comes from `args[0]`. The percentile's refs are usually
-  empty (it is a scalar literal), but a variable-parameterised
-  percentile (`percentileCont(n.score, p)` where `p` is an in-scope
-  binding) contributes its own refs — matching the "referential
-  integrity covers every ref inside the projection" invariant. This
-  case is not exercised by any TCK scenario in the current corpus,
-  but the mechanical rule falls out of the walker's uniform behaviour.
+  (both operand and percentile), mining refs and parameters from
+  both; the operand's type still comes from `args[0]`. The percentile's
+  refs are usually empty (it is a scalar literal), but a
+  variable-parameterised percentile (`percentileCont(n.score, p)`
+  where `p` is an in-scope binding) contributes its own refs. Not
+  exercised by any TCK scenario in the current corpus; the mechanical
+  rule falls out of the walker's uniform behaviour.
 - **`count(*)` remains the degenerate case.** The star atom is handled
   by the `atom.COUNT()` arm of `classifyProjection` (expr.go:243) with
   its own no-refs contract. This change does not touch that arm.
 - **Duplicates in the refs list are preserved.** Stage 6's mining
-  does not dedupe: `sum(x + x)` produces `Refs()` of `[x, x]`, matching
-  what `typeAtom` records for the same expression under
-  `classifyRichExpression`. The bare-argument path's `functionArgRefs`
-  also does not dedupe (each argument's ref is appended in argument
-  order). No behaviour change; both paths agree on the shape.
+  does not dedupe: `sum(x + x)` produces `Refs()` of `[x, x]` in
+  depth-first, left-to-right order, matching what `typeAtom` records
+  for the same expression under `classifyRichExpression`. The
+  bare-argument path's `functionArgRefs` also does not dedupe (each
+  argument's ref is appended in argument order — a degenerate case of
+  the same rule). Both paths agree on order and duplicates.
 - **Parameter mining is inherited from the walker.** A `$p` inside a
-  rich aggregate argument records the parameter as an `ExprUse{operand-
-  type, ExprInProjection}` — the same treatment `classifyRichExpression`
-  would have given it if the aggregate had fallen through. The rich-
-  aggregate path routes through `typeExpressionMining` so the parameter
-  mining fires exactly once per call; the previous fall-through path
-  already routed through the same helper.
+  rich aggregate argument records the parameter as
+  `ExprUse{aggregateResultType(fn, operand), ExprInProjection}` via
+  `l.addParameterUse` — matching what `classifyRichExpression` would
+  have registered if the aggregate had fallen through (see §7's
+  parameter-mining note for the corrected account of current
+  behaviour). The rich-aggregate path routes through
+  `typeExpressionMining` so the walker collects the parameter nodes,
+  and `classifyAggregateCall` iterates them and calls
+  `l.addParameterUse(name, node, NewExprUse(t, ExprInProjection))`
+  with `t = aggregateResultType(fn, operand)` — the aggregate call's
+  own result type, the analogue of the "enclosing rich expression's
+  type" `classifyRichExpression` uses at typing.go:867-874.
 
 ### 1.5 DISTINCT interaction
 
@@ -365,7 +436,11 @@ is preserved bit-for-bit.
 Nothing downstream of the parser is built (no resolver, no codegen)
 — ADR 0004. The resolver's grouping-key computation is bead
 `gqlc-gyw`; this change strictly widens the signal it consumes at
-the outer projection.
+the outer projection, and defers the intersection-residual (§7)
+according to the contract recorded on `gqlc-gyw` (2026-07-03 notes):
+resolver-side re-parse first; post-freeze additive `ContainsAggregate`
+axis via the ADR 0008 revision protocol only if the re-parse proves
+impractical; never inferred from `Type`.
 
 ### 1.11 What this change does not do
 
@@ -375,10 +450,21 @@ the outer projection.
   10 committed).
 - Does not read DISTINCT from any new grammar site (still
   `fi.DISTINCT()` on `oC_FunctionInvocation`, unchanged from Stage 10).
+- Does not add a `ContainsAggregate` (or any inner-projection) axis
+  to `ExprProjection` pre-freeze. The sanctioned escape hatch remains
+  post-freeze, additive, via the ADR 0008 revision protocol —
+  recorded on bead `gqlc-gyw`, invoked only if the resolver-side
+  re-parse proves impractical.
 - Does not touch `classifyRichExpression`, `typeAtom`, or Stage 6's
   rich-expression walk (they still see the same subtree they see today
   when a rich-argument aggregate is inside a larger rich expression;
   the classifier only *precedes* those calls at the outer projection).
+- Does not change Stage 6 §4's "no parameter is silently dropped"
+  discipline: `classifyAggregateCall` routes through
+  `typeExpressionMining` and registers `ExprUse{aggregateResultType(
+  fn, operand), ExprInProjection}` for every parameter, matching
+  what `classifyRichExpression` records today at fall-through
+  (§4.1 code shape; §7 parameter-mining note).
 - Does not touch the parser's WHERE / ORDER BY / SKIP / LIMIT
   aggregate-position handling (bucket 3 per ADR 0007; the engine
   raises).
@@ -434,8 +520,12 @@ for the aggregate's result type. `aggregateResultType(fn, operand)`
 runs at two sites already (classifyFunction for bare-arg aggregates,
 typeAtom for aggregates inside a rich expression); this change adds
 a third caller — the same function, no rule change. The operand type
-is `typeExpression(args[0])`, matching what `classifyFunction` does
-today at expr.go:353-355.
+is `typeExpressionMining(args[0])`'s first return value, matching
+what `typeAtom`'s aggregate arm does today at typing.go:358-364 and
+what `classifyFunction`'s bare path does at expr.go:353-355 up to
+the choice of walker entry point (Blocker 1: the widening upgrades
+`typeExpression` to `typeExpressionMining` to preserve Stage 6 §4's
+parameter-mining discipline).
 
 ---
 
@@ -477,60 +567,90 @@ func (l *listener) classifyFunction(fi gen.IOC_FunctionInvocationContext) (query
 func (l *listener) classifyAggregateCall(fi gen.IOC_FunctionInvocationContext, fn query.AggregateFunc) query.Projection {
     var operand query.Type
     var refs []query.Ref
+    var params []antlr.Tree
     args := fi.AllOC_Expression()
     if len(args) > 0 {
         var opRefs []query.Ref
-        operand, opRefs = l.typeExpression(args[0])
+        var opParams []antlr.Tree
+        operand, opRefs, opParams = l.typeExpressionMining(args[0])
         refs = append(refs, opRefs...)
+        params = append(params, opParams...)
     }
     for _, arg := range args[1:] {
-        _, more := l.typeExpression(arg)
+        _, more, moreParams := l.typeExpressionMining(arg)
         refs = append(refs, more...)
+        params = append(params, moreParams...)
+    }
+    resultType := aggregateResultType(fn, operand)
+    for _, p := range params {
+        name := parameterName(p)
+        if name == "" {
+            continue
+        }
+        l.addParameterUse(name, p, query.NewExprUse(resultType, query.ExprInProjection))
     }
     distinct := fi.DISTINCT() != nil
-    return query.NewAggregateProjection(fn, refs, distinct, aggregateResultType(fn, operand))
+    return query.NewAggregateProjection(fn, refs, distinct, resultType)
 }
 ```
 
 Structural notes on the code shape:
 
-- **Refs flow onto `curPart.refs` via `typeExpression`'s `typeAtom`
-  arm.** The walker (typing.go:322-326) appends every `var/var.prop`
-  atom to `l.curPart.refs` as it walks. So the aggregate call's refs
-  land on the current part exactly the way a bare-argument aggregate's
-  do today, via `functionArgRefs`'s loop at classifyFunction:341-343.
-  The two paths converge on the same `curPart.refs` shape.
-- **Parameter mining rides `typeExpression`, not
-  `typeExpressionMining`.** `classifyFunction` at RETURN position is
-  reached from `collectReturnItem` (expr.go:199), which does not run
-  the mining wrapper — it dispatches through `classifyProjection`.
-  Under this change, `classifyAggregateCall` uses `typeExpression`
-  (not `Mining`) so parameter mining continues to run via `typeAtom`'s
-  parameter arm (typing.go:329-339) — which approves the node and
-  records it on `l.exprParams`, but the outer caller's mining sweep
-  drives the `ExprUse` registration. Wait — this is a subtlety worth
-  pinning: `classifyRichExpression` (typing.go:867) calls
-  `typeExpressionMining` and records `ExprUse{TypeInProjection}` for
-  every parameter. The bare-argument aggregate path today
-  (classifyFunction expr.go:353) calls plain `typeExpression`, which
-  approves the parameter node in `typeAtom` but does NOT register a
-  `Use` for it. So `RETURN sum($p)` today mines the parameter's node
-  as approved (no unbound-parameter error) but records no `Use` on
-  the aggregate call — a Stage-10 shape the goldens have baked in.
-  This change preserves the same discipline: `classifyAggregateCall`
-  uses `typeExpression`, not `Mining`; a `$p` inside a rich aggregate
-  argument is approved but not recorded as a `Use`. The pre-RED
-  audit (§4.4) verifies this against the corpus: no scenario in the
-  corpus writes `RETURN sum($p + 1)`. If one exists, the audit adds a
-  pin for it and the spec's behaviour matches the bare-argument
-  precedent (approve, don't record) — the alternative (running
-  `Mining`) would be a behaviour widening beyond this change's scope.
+- **Refs flow onto `curPart.refs` via `typeExpressionMining`'s
+  `typeAtom` arm.** The walker (typing.go:322-326) appends every
+  `var/var.prop` atom to `l.curPart.refs` as it walks. So the
+  aggregate call's refs land on the current part exactly the way a
+  bare-argument aggregate's do today, via `functionArgRefs`'s loop at
+  classifyFunction:341-343. The two paths converge on the same
+  `curPart.refs` shape (bit-identity traced in §1.4).
+
+- **Parameter mining routes through `typeExpressionMining` and
+  registers `ExprUse`.** Correcting the previous spec draft's factual
+  error: `functionArgRefs` (shape.go:260, doc-comment) rejects
+  parameters, so `sum($p)` today falls through to
+  `classifyRichExpression`, which registers
+  `ExprUse{TypeUnknown, ExprInProjection}` for the parameter via
+  `typeExpressionMining` (typing.go:867-874) — `TypeUnknown` because
+  `aggregateResultType(AggSum, TypeUnknown) = TypeUnknown`;
+  `count($p)` today records `ExprUse{TypeInt, ExprInProjection}`
+  because `aggregateResultType(AggCount, _) = TypeInt`
+  unconditionally. The Stage-6 discipline
+  is explicit: "no parameter is silently dropped" (Stage 6 spec §4;
+  `typeExpressionMining` doc-comment). This change preserves that
+  discipline verbatim by routing through `typeExpressionMining`
+  (not `typeExpression`) and calling
+  `l.addParameterUse(name, node, NewExprUse(resultType,
+  ExprInProjection))` for every parameter the walker touches. The
+  `enclosingType` is the aggregate call's own result type
+  (`aggregateResultType(fn, operand)`) — the analogue of the
+  "enclosing rich expression's type" `classifyRichExpression` uses,
+  and different from the individual operand's type (which is what
+  seeds `aggregateResultType` and would be wrong for `count($p)`
+  where operand is `TypeUnknown` but the aggregate result is
+  `TypeInt`). The parameter mining fires exactly once per call site:
+  `classifyAggregateCall` is the sole caller under this arm, and it
+  drives the `Use` registration itself — the walker's `typeAtom`
+  parameter arm (typing.go:329-339) only approves the node and
+  collects it onto `l.exprParams`; `Use` registration is the caller's
+  responsibility, matching `classifyRichExpression`'s posture.
+
 - **`functionArgRefs`'s residual role.** After the widening,
   `functionArgRefs` is only consulted on the FuncProjection path
   (non-aggregate name). This preserves the "no expression tree, no
   nested calls" discipline for `FuncProjection` — function identity
   is below the boundary (ADR 0005), so widening `FuncProjection` to
   carry rich arguments is out of scope.
+
+- **`classifyRichExpression` no longer runs on aggregate-named
+  projection items.** After the widening, `collectReturnItem`'s
+  fall-through path (expr.go:199-202) still fires for non-aggregate
+  rich shapes (`n.age + 1`, `[1, 2, 3]`, `n IS NULL`, etc.). Only the
+  outermost-aggregate case is diverted to `classifyAggregateCall`,
+  and it does its own parameter-Use registration — no double-
+  registration is possible because the walker's `l.exprParams` is
+  drained by `typeExpressionMining` and the outer `collectReturnItem`
+  path (which would otherwise call `classifyRichExpression`) never
+  fires for that item.
 
 ### 4.2 `classifyProjection` unchanged
 
@@ -617,105 +737,163 @@ aggregate — the RED phase's fine-grained pin distinguishes these.
 
 ### 4.5 RED pins
 
-Six parser pins in `internal/query/cypher/parser_test.go`, one for
-each shape category:
+Ten parser pins in `internal/query/cypher/parser_test.go`. Each pin's
+expected value asserts one shape category from §1.2, §1.3, or the
+bare-arg regression / parameter-mining coverage §7 requires. The
+`type` value on each pin is the value Stage 10's `aggregateResultType`
+table actually returns for the operand type the parser will compute
+schema-free (property lookups → `TypeUnknown`; scalar literals →
+their concrete type; entity vars → `TypeNode`/`TypeEdge`; other
+functions → `TypeUnknown` unless temporal-constructor).
 
-1. `aggregate sum on arithmetic arg` — `MATCH (n) RETURN sum(n.age + 1)`
-   lowers to one part with `Returns[0].Value =
-   AggregateProjection{AggSum, [Ref{"n","age"}], false, TypeInt}` (n
-   is a node, n.age's type is `TypeUnknown`, but the RED pin uses
-   a scenario where the outer promoteAdd commits to `TypeInt` — the
-   spec's target-lowering-table row is preserved verbatim).
+The six rich-arg shape pins:
 
-   Wait — a subtle point: `n.age` is `TypeUnknown` because the parser
-   does not have schema info (Stage 6 §1.3). So `n.age + 1` types
-   as `promoteAdd(TypeUnknown, TypeInt) = TypeUnknown`, and
-   `aggregateResultType(AggSum, TypeUnknown) = TypeUnknown`. The
-   correct RED expectation for `sum(n.age + 1)` is `AggregateProjection
-   {AggSum, [Ref{"n","age"}], false, TypeUnknown}`. The target
-   lowering table's row for `count(n.age + 1)` has `type:int` because
-   count always types as int regardless of operand; the row for
-   `sum(n.age + 1)` where the operand's own type is `TypeUnknown`
-   (n.age → unknown) actually resolves to `type:unknown`. The spec
-   corrects this: the target-lowering-table row values are what the
-   parser will actually compute per Stage 10's table; the RED pin
-   uses `TypeUnknown` for `sum(n.age + 1)` where n.age is a property
-   lookup, and `TypeInt` for `sum(x + 1)` where x is a bound variable
-   with a known integer type (rare in the current corpus — most
-   bindings type as `TypeNode` / `TypeEdge`, not `TypeInt`).
+1. `aggregate count on arithmetic property arg` — `MATCH (n) RETURN
+   count(n.age + 1)`. `n.age` types as `TypeUnknown` (property);
+   `n.age + 1` types as `promoteAdd(TypeUnknown, TypeInt) = TypeUnknown`.
+   `aggregateResultType(AggCount, TypeUnknown) = TypeInt` (count is
+   unconditional). Expect
+   `AggregateProjection{AggCount, [Ref{"n","age"}], false, TypeInt}`.
+   Also asserts `Part.Distinct=false` (structural coverage of
+   [[cypher-query-parser-part-distinct-axis]] §1.5 independence).
 
-   RED pin picks the shape whose behaviour is unambiguous: `RETURN
-   count(n.age + 1)` — `count` always types as `TypeInt`, so the pin
-   asserts `AggregateProjection{AggCount, [Ref{"n","age"}], false,
-   TypeInt}`. The other RED pins pick similarly unambiguous shapes.
-
-2. `aggregate count on arithmetic property arg` — `MATCH (n) RETURN
-   count(n.age + 1)` — `AggregateProjection{AggCount, [Ref{"n","age"}],
-   false, TypeInt}`.
+2. `aggregate sum on arithmetic property arg` — `MATCH (n) RETURN
+   sum(n.age + 1)`. Same operand typing as #1; `aggregateResultType(
+   AggSum, TypeUnknown) = TypeUnknown`. Expect
+   `AggregateProjection{AggSum, [Ref{"n","age"}], false, TypeUnknown}`.
 
 3. `aggregate collect on boolean composite` — `MATCH (a), (b) RETURN
-   collect(a.p OR b.p)` — a.p and b.p are unknown, so the OR types
-   as `TypeBool`, and `aggregateResultType(AggCollect, TypeBool) =
-   list<bool>`. Expect `AggregateProjection{AggCollect,
-   [Ref{"a","p"}, Ref{"b","p"}], false, list<bool>}`.
+   collect(a.name = b.name)`. `a.name` and `b.name` type `TypeUnknown`;
+   the comparison types as `TypeBool`; `aggregateResultType(AggCollect,
+   TypeBool) = list<bool>`. Expect
+   `AggregateProjection{AggCollect, [Ref{"a","name"}, Ref{"b","name"}],
+   false, list<bool>}`. Also asserts depth-first left-to-right refs
+   order.
 
-4. `aggregate min on list literal arg` — `RETURN min([1, 2, 3])` — no
-   binding needed; the list-literal argument has `TypeList(TypeInt)`
-   as its Stage-6 type; `aggregateResultType(AggMin, TypeList{...}) =
-   TypeUnknown` (min over list is engine-inconsistent, Stage 10 §8).
-   Expect `AggregateProjection{AggMin, nil, false, TypeUnknown}`.
+4. `aggregate min on list literal arg` — `RETURN min([1, 2, 3])`. The
+   list-literal argument has `TypeList(TypeInt)` as its Stage-6 type;
+   `aggregateResultType(AggMin, TypeList{...}) = TypeUnknown` (min
+   over list is engine-inconsistent, Stage 10 §8). Expect
+   `AggregateProjection{AggMin, nil, false, TypeUnknown}`.
 
-5. `aggregate sum on nested function call` — `RETURN sum(range(1, 3))`
-   — `range(1, 3)` types as `TypeUnknown` (function identity below
-   the boundary); `aggregateResultType(AggSum, TypeUnknown) = TypeUnknown`.
+5. `aggregate sum on nested function call` — `RETURN sum(range(1, 3))`.
+   `range(1, 3)` types as `TypeUnknown` (function identity below the
+   boundary); `aggregateResultType(AggSum, TypeUnknown) = TypeUnknown`.
    Expect `AggregateProjection{AggSum, nil, false, TypeUnknown}`.
 
 6. `aggregate sum distinct on arithmetic arg` — `MATCH (n) RETURN
-   sum(DISTINCT n.age + 1)` — `AggregateProjection{AggSum,
-   [Ref{"n","age"}], true, TypeUnknown}` (n.age is unknown → sum result
-   is unknown; DISTINCT is preserved).
+   sum(DISTINCT n.age + 1)`. Same shape as #2 with `distinct:true`.
+   Expect `AggregateProjection{AggSum, [Ref{"n","age"}], true,
+   TypeUnknown}`. Verifies §1.5's DISTINCT interaction and the
+   independence from `Part.Distinct` ([[cypher-query-parser-part-distinct-axis]]
+   §1.5).
+
+The negative deferral pin (Blocker 2 lock):
+
+7. `nested aggregate inside rich projection` — `MATCH (n) RETURN
+   count(n) + 1`. The outer expression is not an aggregate call; per
+   §1.3 the model does not lift an inner aggregate through a
+   rich-expression wrapper. `typeAtom`'s aggregate arm
+   (typing.go:358-366) types `count(n)` as `TypeInt`; `promoteAdd(
+   TypeInt, TypeInt) = TypeInt`. Expect
+   `ExprProjection{[Ref{"n"}], TypeInt}`. This pin locks §1.3's
+   deferral in place: if a future change silently introduces an inner-
+   aggregate axis on `ExprProjection`, the pin breaks structurally.
+
+The parameter pins (Blocker 1):
+
+8. `aggregate sum on arithmetic parameter arg` — `MATCH (n) RETURN
+   sum($p + 1)`. `$p` types `TypeUnknown`, `$p + 1` types
+   `promoteAdd(TypeUnknown, TypeInt) = TypeUnknown`,
+   `aggregateResultType(AggSum, TypeUnknown) = TypeUnknown`. Expect
+   `AggregateProjection{AggSum, nil, false, TypeUnknown}` AND
+   `parameters["p"].Uses = [ExprUse{TypeUnknown, ExprInProjection}]`.
+   Preserves Stage 6 §4's "no parameter is silently dropped" verbatim.
+
+9. `aggregate count on bare parameter arg` — `RETURN count($p)`. `$p`
+   types `TypeUnknown`; `aggregateResultType(AggCount, TypeUnknown) =
+   TypeInt` (count is unconditional). Expect
+   `AggregateProjection{AggCount, nil, false, TypeInt}` AND
+   `parameters["p"].Uses = [ExprUse{TypeInt, ExprInProjection}]`. The
+   `enclosingType` is the aggregate call's result type (`TypeInt`),
+   not the operand's type (`TypeUnknown`) — this is the corrected
+   Blocker-1 posture: the `Use`'s `enclosingType` matches what
+   `classifyRichExpression` records today for the same shape at
+   fall-through.
+
+The bare-arg regression pin (Blocker 3(a)):
+
+10. `aggregate sum on bare property arg (regression)` — `MATCH (n)
+    RETURN sum(n.age)`. `n.age` types as `TypeUnknown` (property);
+    `aggregateResultType(AggSum, TypeUnknown) = TypeUnknown`. Expect
+    `AggregateProjection{AggSum, [Ref{"n","age"}], false, TypeUnknown}`.
+    Pre- and post-widening the parser must emit the *same*
+    `Refs()` sequence, `Distinct` flag, and `Type()` value. The pin
+    comment names the two agreeing sites — `refFromNonArithmetic`
+    (shape.go:29-48) for `functionArgRefs`, and `typeAtom`+
+    `typeNonArithmetic` (typing.go:322-326 + typing.go:292-300) for
+    the walker. Bit-identity of refs on a bare argument is a hard
+    precondition of the widening; this pin surfaces any drift as a
+    structural break.
+
+The `count(count(*))` unit-level pin (Blocker 4):
+
+11. `nested count of count star` — `RETURN count(count(*))`. Under
+    this change the outer `count` classifies as
+    `AggregateProjection{AggCount, nil, false, TypeInt}` — the inner
+    `count(*)` is a rich subexpression that lands via
+    `typeExpressionMining` with `typeAtom`'s COUNT arm
+    (typing.go:340-345), which mines no refs and yields `TypeInt`.
+    Outer `aggregateResultType(AggCount, TypeInt) = TypeInt` (count
+    is unconditional). The engine still raises `NestedAggregation`
+    at compile time; parser disposition is unchanged. Expect
+    `AggregateProjection{AggCount, nil, false, TypeInt}`. Also
+    verifies the `acceptance_test.go:289` bucket-3 catalogue entry
+    stays green (godog scenario continues to pend as
+    NestedAggregation-semantic).
 
 Each pin's expected shape asserts:
-- `AggregateProjection` variant (not `ExprProjection`) — the SF-3 fix.
+- `AggregateProjection` variant (not `ExprProjection`) — the SF-3
+  fix. Except #7, which asserts `ExprProjection` (the §1.3 deferral
+  lock).
 - Correct `AggregateFunc` — the outer aggregate name enters.
-- Correct `Refs()` sequence — every var/var.prop atom in order.
+- Correct `Refs()` sequence — every var/var.prop atom in depth-first,
+  left-to-right traversal order, duplicates preserved.
 - Correct `Distinct` flag — DISTINCT preserved via `fi.DISTINCT()`.
 - Correct `Type()` — Stage 10's table, unchanged.
+- Correct parameter `Uses` (pins #8, #9) — `ExprUse{aggregate-result-
+  type, ExprInProjection}` for every `$param` under the rich arg.
 
-RED failure mode: each pin's expected value is an `AggregateProjection`;
-the parser's current output is an `ExprProjection`; go-cmp's `Diff`
-prints a type-name mismatch at the top of the assertion — the sixfold
-red is the RED evidence.
+RED failure mode: each shape pin (#1–#6, #8, #9, #11) has an expected
+`AggregateProjection` value; the parser's current output is an
+`ExprProjection` (or, for #7, agrees — that pin is a positive-lock
+regression pin and stays green pre- and post-widening). The
+parameter pins (#8, #9) additionally assert on the `Parameters`
+slice's `Uses` shape — the widening is done when both the projection
+shape and the parameter Use shape land. Pin #10 (the bare-arg
+regression) is green pre-widening and must stay green post-widening
+— it is the bit-identity guard for the refs mining path §1.4 traces.
 
-### 4.6 Negative pin — the nested case is documented deferral
+### 4.6 Negative pin roll-up
 
-One additional pin, `nested aggregate inside rich projection`, is the
-§1.3 commitment made testable. `MATCH (n) RETURN count(n) + 1`
-continues to lower as `ExprProjection{[Ref{"n"}], TypeInt}` — the
-outer expression is not an aggregate call, and per §1.3 the model
-does not lift an inner aggregate through a rich-expression wrapper.
-
-The pin's failure mode: if a future change introduces an axis on
+Pin #7 above is the sole negative pin; §1.3's commitment made
+testable. Its failure mode: if a future change introduces an axis on
 `ExprProjection` for "contains an inner aggregate", the pin's
-`ExprProjection` shape will no longer match — a structural break
-that surfaces the widening at review time. The pin exists to lock
-§1.3's deferral in place; deleting it silently would let the door
-re-open.
+expected `ExprProjection{[Ref{"n"}], TypeInt}` shape will no longer
+match — a structural break that surfaces the widening at review time.
+The pin exists to lock §1.3's deferral in place; deleting it silently
+would let the door re-open.
 
-### 4.7 The `count(count(*))` scenario
+### 4.7 Godog-corpus coverage of Return6[14]
 
-The pin `nested count of count star` covers the bucket-3 scenario
-Return6[14]: `RETURN count(count(*))` continues to lower as
-`AggregateProjection{AggCount, nil, false, TypeInt}` — the outer
-`count`'s aggregate name enters the model (this change's fix), the
-inner `count(*)` is a rich subexpression under §1.3 (deferred), and
-the engine still raises `NestedAggregation` at compile time (bucket
-3, unchanged).
-
-The pin asserts the parser-level shape (the model the parser produces),
-not the engine's outcome (which is under acceptance_test's skiplist).
-The bucket-3 disposition catalogued at acceptance_test.go:289 stays
-verbatim.
+The `[14] Aggregates in aggregates` scenario in Return6.feature
+(bucket 3, catalogued at acceptance_test.go:289) is not touched by
+this spec's parser widening — the scenario's *engine outcome* stays
+the same (raises `NestedAggregation`), and the *scenario disposition*
+stays the same (skiplist entry `catGroupingKeySemantic`). The
+change is purely in the parser-side lowering shape, pinned at
+unit level by RED pin #11. No skiplist churn; no acceptance_test
+edit; no godog summary drift.
 
 ### 4.8 Guard quartet
 
@@ -731,10 +909,15 @@ enumeration, and the goldens it rebaselines are already in the corpus
 
 1. Spec commit lands (`docs(spec): aggregate-kind preservation on rich
    arguments`).
-2. RED commit lands (seven pins §4.5–§4.7; the exact failure text
-   recorded in the RED verification output).
-3. GREEN commit lands (classifier widening §4.1; goldens rebaselined
-   per §4.3 purity check).
+2. RED commit lands (eleven pins §4.5: six rich-arg shape pins #1–#6,
+   the §1.3 deferral-lock negative pin #7, two parameter pins #8–#9
+   preserving Stage 6 §4 discipline, the bare-arg regression pin #10,
+   and the `count(count(*))` unit-level pin #11). Pin #10 is green
+   both pre- and post-widening (bit-identity guard); pins #1–#6, #8,
+   #9, #11 are red pre-widening and green post-widening; pin #7 is
+   green both pre- and post-widening (locks §1.3 deferral). The RED
+   verification records the exact failure text of the eight failing
+   pins.
 4. `just test` green.
 5. `just lint` green.
 6. `just fmt-check` green.
@@ -753,7 +936,7 @@ enumeration, and the goldens it rebaselines are already in the corpus
 | Commit | Scope |
 |--------|-------|
 | spec   | this spec |
-| RED    | Seven failing parser pins for the aggregate-kind swap and the §1.3 negative-pin deferral |
+| RED    | Eleven parser pins per §4.5 (nine RED, two positive-lock regression) covering the aggregate-kind swap, the §1.3 deferral lock, Stage 6 §4 parameter discipline, bare-arg refs bit-identity, and the `count(count(*))` unit-level shape |
 | GREEN  | `classifyFunction` widening + `classifyAggregateCall` helper + goldens rebaselined |
 | gates  | `just test` / `just lint` / `just fmt-check` verification pass (recorded in report) |
 
@@ -767,27 +950,32 @@ target-golden set in one atomic step.
 
 ## 7. Weakest point (recorded honestly per ADR 0004)
 
-**The nested case's deferral means the model still cannot distinguish
-`count(n) + 1` from a plain `n + 1` on the wire when both would
-produce `TypeInt`.** §1.3 argues this is the honest posture — the
-resolver walks the original text (ADR 0005), the driver raises
-`AmbiguousAggregationExpression` / `InvalidAggregation` when the
-position is illegal, and the outermost projection's kind is what
-the model commits to. But it is a real residual: two observably-
-different queries (one collapses rows, one does not) still lower
-to the same `ExprProjection` when the aggregate sits inside a
-larger rich expression.
+**The nested case's deferral leaves a strict-intersection residual:
+where an aggregate inside a rich expression happens to type
+identically to the same expression without the aggregate, the model
+does not distinguish the two on `Type()` alone.** The set is
+strictly smaller than "every aggregate inside a rich expression"
+because the Type axis already discriminates many cases (Stage-6
+`typeAtom` typing.go:346 for `count(*)`, typing.go:358 for named
+aggregates, run `aggregateResultType` in-line): `count(n) + 1`
+types `TypeInt` and `n + 1` where `n` is a `TypeNode` binding types
+`TypeUnknown` — already distinguishable. The residual is exactly
+the case where operand types coincide (e.g. both sides `TypeUnknown`
+because `n.age + 1` also types unknown for a property-lookup case).
 
 The alternatives, considered and declined:
 
-- **A `ContainsAggregate` boolean on `ExprProjection`.** Cheapest
-  widening: one bit says "some aggregate lurks inside this rich
-  expression". Declined because a boolean is strictly weaker than
-  what the resolver already gets from re-execution (which yields
-  the *value*, not just the presence) and it opens the door to
-  further axes (`ContainsInnerCount`, `AggregateCount`, etc.) that
-  would collectively re-derive the expression tree ADR 0003 §4
-  removed from the model.
+- **A `ContainsAggregate` boolean on `ExprProjection` pre-freeze.**
+  Declined per the recorded contract on bead `gqlc-gyw` (see
+  `bd show gqlc-gyw`, notes dated 2026-07-03): grouping-key
+  discovery for `ExprProjection` residuals is a resolver-side
+  re-parse of the projection's original text span; the sanctioned
+  escape hatch for a `ContainsAggregate` axis is **post-freeze,
+  additive, via the ADR 0008 revision protocol**, invoked only if
+  the re-parse proves impractical. Pre-freeze introduction would
+  foreclose the re-parse path before it has been proved impractical
+  and pre-empt the sanctioned escape hatch. The bead is the source
+  of truth for this decision; this spec defers to it.
 
 - **A sub-projection axis (`InnerAggregate AggregateProjection`)
   on `ExprProjection`.** Structurally rejected: this IS the
@@ -797,55 +985,64 @@ The alternatives, considered and declined:
 - **Widen `Refs()` to record which refs are aggregate operands.**
   Would break the invariant that `Refs()` is a flat sequence of
   bindings the projection touches. The resolver's referential-
-  integrity sweep would need re-work. Declined; the ADR 0005 path
-  is cleaner.
+  integrity sweep would need re-work. Declined; the resolver-side
+  re-parse recorded on `gqlc-gyw` is cleaner.
+
+- **Infer `ContainsAggregate` from `Type`.** Explicitly rejected on
+  `gqlc-gyw`: `count(n) + 1` and `x + 1` can both type `TypeUnknown`
+  under operand types the current corpus doesn't press but future
+  dialect extensions could. Any inference would fail exactly on the
+  intersection residual it was meant to fix.
 
 The residual is bounded: it applies only to aggregates *not* at the
-outermost projection node. Every RETURN or WITH item whose *whole*
-value is an aggregate call is now correctly modelled as
-`AggregateProjection`, which is the vast majority of the TCK corpus's
-aggregate usage. The §1.3 deferral is the model's honest position on
-the remaining fraction, not silence.
+outermost projection node, *and* only where the aggregate's result
+type coincides with the same expression's non-aggregate type. Every
+RETURN or WITH item whose *whole* value is an aggregate call is now
+correctly modelled as `AggregateProjection`, which is the vast
+majority of the TCK corpus's aggregate usage. The §1.3 deferral is
+the model's honest position on the remaining strict-intersection
+fraction, not silence.
 
 The lesser risks, recorded for completeness:
 
-- **`sum($p)` — a bare-parameter aggregate argument — is not
-  registered as a Use.** The bare-argument path (`functionArgRefs`)
-  refuses parameters (it accepts only var/var.prop and scalar
-  literals), so today `sum($p)` falls through to
-  `classifyRichExpression`, which registers the parameter as
-  `ExprUse{TypeUnknown, ExprInProjection}`. Under this change,
-  `sum($p)` will hit the new aggregate arm (name matches, arg is
-  rich), and `classifyAggregateCall` uses `typeExpression` (not
-  `Mining`) — the parameter is approved but no `Use` is recorded.
-  This is a **behaviour change** from today for the specific shape
-  `sum($p)` / `count($p)` / etc., and the RED phase must decide:
-  either (a) accept the change and let the parameter show up
-  unused-but-approved, matching how bare-argument aggregates handle
-  scalar literals (approve, no Use because there's no ref), or (b)
-  route through `typeExpressionMining` and register the ExprUse.
-  Position: (a) — the bare-argument aggregate precedent
-  (approve-but-no-Use for a scalar literal) covers this shape.
-  A parameter is a scalar-like operand for aggregate purposes; the
-  same treatment applies. If any TCK scenario writes `sum($p)`, the
-  audit surfaces it and the pin nails down (a). This is called out
-  here so the reviewer can push back if (b) is the right call.
+- **Parameter-mining behaviour is preserved verbatim (not changed).**
+  Correcting a factual error in the previous draft of this section:
+  `functionArgRefs` (shape.go:260) rejects parameters — its doc
+  comment enumerates the rejection set explicitly ("arithmetic,
+  nested call, list/map literal, parameter, CASE, comprehension,
+  '*'"). So `sum($p)` today falls through to
+  `classifyRichExpression`, which registers
+  `ExprUse{aggregateResultType(AggSum, TypeUnknown),
+  ExprInProjection} = ExprUse{TypeUnknown, ExprInProjection}` via
+  `typeExpressionMining`. The Stage 6 §4 discipline is explicit:
+  "no parameter is silently dropped" (echoed in the
+  `typeExpressionMining` doc-comment). Under this change,
+  `classifyAggregateCall` routes through `typeExpressionMining` and
+  registers `ExprUse{aggregateResultType(fn, operand),
+  ExprInProjection}` — same discipline, same `enclosingType`
+  (matching what `classifyRichExpression` would have recorded for
+  the whole aggregate call as a rich expression). RED pins #8 and
+  #9 (§4.5) fix this at test level for `sum($p + 1)` and
+  `count($p)`. Any behaviour drift here is a Stage-6 discipline
+  violation.
 
 - **The percentile* aggregates' second argument is walked without a
-  dedicated slot.** `percentileCont(n.score, 0.5)` under this change
-  routes through `classifyAggregateCall`, which walks *all*
-  arguments and mines refs from each. The operand type comes from
-  `args[0]`; the percentile's own type is not recorded. This
-  matches the bare-argument aggregate path at expr.go:353
-  (`operand, _ = l.typeExpression(args[0])`) — the second argument's
-  type is discarded there too. No behaviour change; the shape is
-  preserved. No TCK scenario in the current corpus writes
-  `percentileCont` with a rich second argument.
+  dedicated slot.** `percentileCont(n.score, 0.5)` under this
+  change routes through `classifyAggregateCall`, which walks *all*
+  arguments and mines refs and parameters from each. The operand
+  type comes from `args[0]`; the percentile's own type is not
+  recorded. This matches the bare-argument aggregate path at
+  expr.go:353 (`operand, _ = l.typeExpression(args[0])`) — the
+  second argument's type is discarded there too. No behaviour
+  change; the shape is preserved. No TCK scenario in the current
+  corpus writes `percentileCont` with a rich second argument.
 
 - **`ExprProjection`'s `Refs()` list order is preserved by the
   walker.** For a rich expression like `sum((r1.times + r2.times) /
   (H1 + H2))`, the mined refs sequence is `[r1.times, r2.times, H1,
-  H2]` — depth-first, left-to-right. This is the same order Stage 6
-  produces today, so the golden refs sequences under `AggregateProjection`
-  match the current `ExprProjection`'s refs sequences bit-for-bit
-  (§1.6). Any drift here is a purity-check regression.
+  H2]` — **depth-first, left-to-right; duplicates preserved**
+  (unified terminology, matching §1.4). This is the same order
+  Stage 6 produces today, so the golden refs sequences under
+  `AggregateProjection` match the current `ExprProjection`'s refs
+  sequences bit-for-bit (§1.6). Any drift here is a purity-check
+  regression.
