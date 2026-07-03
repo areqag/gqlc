@@ -196,3 +196,30 @@ and the full expression tree are deliberately outside the initial model.
 > at parse (TCK `Pattern1 [22]/[23]`,
 > `SyntaxError:UnexpectedSyntax`). The no-expression-tree line
 > holds._
+>
+> _Note (Stage 12, ADR 0004/0007): the curated model gains a
+> **statement-kind axis** on `Query` (`StatementRead` / `StatementWrite`,
+> binary — the driver's transaction mode is a query-wide fact) and
+> a per-`Part` **`Effects []Effect`** slice recording that part's
+> write clauses in walk order. `Effect` is a closed sum of seven
+> variants covering `CREATE`, `DELETE` / `DETACH DELETE`, and the
+> four `SET` shapes and two `REMOVE` shapes — `CreateEffect`,
+> `DeleteEffect`, `SetPropertyEffect`, `SetEntityEffect` (with a
+> `SetOp` axis for `=` vs `+=`), `SetLabelsEffect`,
+> `RemovePropertyEffect`, `RemoveLabelsEffect`. `CREATE` reuses
+> `MATCH`'s pattern collection, so a CREATE-introduced binding
+> enters the part's `Bindings` slice exactly like a MATCH-bound
+> one; the `CreateEffect` records which named bindings this clause
+> introduced. `SET` value expressions are typed via the Stage-6
+> rich typer, so a parameter under a SET value records
+> `ExprUse{valueType, ExprInProjection}` — the typed-write contract
+> that lets the resolver infer a write parameter's type from the
+> expression's Stage-6 result type. The `Type` sum is **unchanged**;
+> the `Projection` sum is **unchanged**; no new sentinel is added
+> (`ErrUnsupportedClause` retires for the write set but stays for
+> `MERGE` and `CALL`). The invariant "every part ends in a
+> projection" relaxes to "every part has a projection or at least
+> one effect": a projection-less write is a valid complete part,
+> and a branch whose final part is projection-less produces zero
+> result columns (codegen emits a no-result method). `MERGE` is
+> Stage 13; `CALL` is Stage 14. The no-expression-tree line holds._
