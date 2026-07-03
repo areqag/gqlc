@@ -7,6 +7,7 @@ import (
 
 	"github.com/areqag/gqlc/internal/grammar/cypher/gen"
 	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/procsig"
 	"github.com/areqag/gqlc/internal/query"
 )
 
@@ -82,6 +83,12 @@ type listener struct {
 	// ErrUnsupportedClause.
 	writeSeen bool
 
+	// registry is the per-parse procedure signature registry (Stage 14).
+	// The zero value is a valid empty registry — every lookup misses, so
+	// a CALL raises ErrUnknownProcedure at the fail-site. Populated by
+	// newListener from parser.cfg.registry.
+	registry procsig.Registry
+
 	err error
 }
 
@@ -148,11 +155,12 @@ type varRef struct {
 	endpointRef bool
 }
 
-func newListener(ts *antlr.CommonTokenStream) *listener {
+func newListener(ts *antlr.CommonTokenStream, registry procsig.Registry) *listener {
 	return &listener{
 		ts:       ts,
 		byParam:  map[string]int{},
 		approved: map[antlr.Tree]bool{},
+		registry: registry,
 	}
 }
 
