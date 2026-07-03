@@ -41,6 +41,7 @@
             }
           ],
           "returnsAll": false,
+          "distinct": false,
           "effects": [
             {
               "kind": "setProperty",

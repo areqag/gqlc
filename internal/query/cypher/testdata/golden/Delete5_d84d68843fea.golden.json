@@ -43,12 +43,14 @@
             }
           ],
           "returnsAll": false,
+          "distinct": false,
           "effects": null
         },
         {
           "bindings": null,
           "returns": null,
           "returnsAll": false,
+          "distinct": false,
           "effects": [
             {
               "kind": "delete",

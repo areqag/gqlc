@@ -135,6 +135,12 @@ type rawPart struct {
 	// CallBindings and set ReturnsAll (spec §4.3). In-query CALLs
 	// leave this flag alone.
 	callStandalone bool
+
+	// distinct is true iff the part's projection body carried the
+	// DISTINCT keyword (RETURN DISTINCT … or WITH DISTINCT …). Set by
+	// collectProjection on entry; buildPart forwards it to Part.Distinct.
+	// (part-distinct-axis spec §3.2.)
+	distinct bool
 }
 
 func newRawPart() *rawPart {
