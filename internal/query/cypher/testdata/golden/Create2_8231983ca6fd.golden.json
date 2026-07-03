@@ -1,0 +1,55 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "root",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "LINK"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "root"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "root"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            }
+          ],
+          "returns": null,
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "create",
+              "variables": [
+                "root"
+              ]
+            },
+            {
+              "kind": "create",
+              "variables": [
+                ""
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

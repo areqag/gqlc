@@ -24,7 +24,8 @@
               }
             }
           ],
-          "returnsAll": false
+          "returnsAll": false,
+          "effects": null
         }
       ]
     },
@@ -52,7 +53,8 @@
               }
             }
           ],
-          "returnsAll": false
+          "returnsAll": false,
+          "effects": null
         }
       ]
     }
@@ -60,5 +62,6 @@
   "combinators": [
     "union"
   ],
-  "parameters": null
+  "parameters": null,
+  "statementKind": "read"
 }

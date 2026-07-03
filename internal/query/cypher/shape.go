@@ -441,3 +441,77 @@ func originalText(ts *antlr.CommonTokenStream, ctx antlr.ParserRuleContext) stri
 	}
 	return ts.GetTextFromInterval(ctx.GetSourceInterval())
 }
+
+// propertyExpressionRef reads a Ref{Variable, Property} from a single-level
+// propertyExpression on the LHS of a SET or REMOVE item (Stage 12 spec §4.3,
+// §4.4). It accepts a bare-variable atom or a parenthesised bare-variable
+// atom (`(n).name` — semantically identical to `n.name`; the openCypher TCK
+// exercises both shapes). ok is false when the propertyExpression carries
+// zero or more-than-one lookup, when the atom (after unwrapping parens)
+// is not a bare variable, or when any list operator suffix is attached
+// beyond the parenthesised path. A nested LHS (n.a.b) yields ok=false; the
+// caller rejects with ErrNestedPropertyTarget (Stage 12 amend §1.5 / §1.6) —
+// accept-and-truncate would claim the wrong concrete target field, which
+// repository codegen consumes as the property to write.
+func propertyExpressionRef(pe gen.IOC_PropertyExpressionContext) (query.Ref, bool) {
+	if pe == nil {
+		return query.Ref{}, false
+	}
+	lookups := pe.AllOC_PropertyLookup()
+	if len(lookups) != 1 {
+		return query.Ref{}, false
+	}
+	variable, ok := bareVariableFromAtom(pe.OC_Atom())
+	if !ok {
+		return query.Ref{}, false
+	}
+	return query.Ref{Variable: variable, Property: lookups[0].OC_PropertyKeyName().GetText()}, true
+}
+
+// bareVariableFromAtom unwraps an atom to its underlying variable name, if the
+// atom is a bare variable — either directly (n) or through a parenthesised
+// expression that itself collapses to a bare variable ((n), ((n))). Returns
+// ("", false) for any other atom shape (a literal, a function invocation, a
+// list operator, a parenthesised expression whose body is not a bare
+// variable). Used by propertyExpressionRef to accept the parenthesised-atom
+// SET/REMOVE LHS shape the openCypher TCK exercises.
+func bareVariableFromAtom(a gen.IOC_AtomContext) (string, bool) {
+	if a == nil {
+		return "", false
+	}
+	if v := a.OC_Variable(); v != nil {
+		return v.GetText(), true
+	}
+	pe := a.OC_ParenthesizedExpression()
+	if pe == nil {
+		return "", false
+	}
+	nae := nonArithmetic(pe.OC_Expression())
+	if nae == nil || nae.OC_NodeLabels() != nil ||
+		len(nae.AllOC_ListOperatorExpression()) > 0 ||
+		len(nae.AllOC_PropertyLookup()) > 0 {
+		return "", false
+	}
+	return bareVariableFromAtom(nae.OC_Atom())
+}
+
+// setItemOp reads the SET-item's `=` vs `+=` alternative by inspecting the
+// direct-child terminal tokens (T__2 is `=`, T__3 is `+=`). The grammar
+// guarantees one of the two is present when the item's shape is variable +
+// expression (SetItem alternatives 2 and 3); the default (SetOpReplace) is
+// defensive.
+func setItemOp(item gen.IOC_SetItemContext) query.SetOp {
+	for i := 0; i < item.GetChildCount(); i++ {
+		tn, ok := item.GetChild(i).(antlr.TerminalNode)
+		if !ok {
+			continue
+		}
+		switch tn.GetSymbol().GetTokenType() {
+		case gen.CypherParserT__2: // '='
+			return query.SetOpReplace
+		case gen.CypherParserT__3: // '+='
+			return query.SetOpMerge
+		}
+	}
+	return query.SetOpReplace
+}

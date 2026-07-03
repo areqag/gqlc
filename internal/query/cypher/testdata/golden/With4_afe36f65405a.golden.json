@@ -1,0 +1,81 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "m",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "m",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "m",
+                    "property": "id"
+                  }
+                ],
+                "type": "map"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "create",
+              "variables": [
+                "m"
+              ]
+            }
+          ]
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "m",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "m",
+                    "property": "first"
+                  }
+                ],
+                "type": "map"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": null
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "m.second",
+              "value": {
+                "kind": "ref",
+                "variable": "m",
+                "property": "second",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": null
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

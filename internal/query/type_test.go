@@ -77,10 +77,15 @@ func TestNewExprUse(t *testing.T) {
 	var _ query.Use = u
 }
 
-// TestExprPositionString pins the wire tags for ExprPosition.
+// TestExprPositionString pins the wire tags for ExprPosition. Stage 12 adds
+// setValue (SET RHS, a producer position) and deleteTarget (DELETE rich
+// target, a consumer position); the four-way split keeps the position axis
+// honest across the write set.
 func TestExprPositionString(t *testing.T) {
 	require.Equal(t, "projection", query.ExprInProjection.String())
 	require.Equal(t, "predicate", query.ExprInPredicate.String())
+	require.Equal(t, "setValue", query.ExprInSetValue.String())
+	require.Equal(t, "deleteTarget", query.ExprInDeleteTarget.String())
 }
 
 // TestExprUseMarshalJSON pins the wire encoding: kind=expr with the enclosing

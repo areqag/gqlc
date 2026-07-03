@@ -1,0 +1,100 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "edge",
+              "variable": "r1",
+              "labels": [
+                "R1"
+              ],
+              "source": {
+                "kind": "inline",
+                "labels": null
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            },
+            {
+              "kind": "edge",
+              "variable": "r2",
+              "labels": [
+                "R2"
+              ],
+              "source": {
+                "kind": "inline",
+                "labels": null
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            },
+            {
+              "kind": "edge",
+              "variable": "r3",
+              "labels": [
+                "R3"
+              ],
+              "source": {
+                "kind": "inline",
+                "labels": null
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            }
+          ],
+          "returns": [
+            {
+              "name": "r1",
+              "value": {
+                "kind": "ref",
+                "variable": "r1",
+                "property": "",
+                "type": "edge"
+              }
+            },
+            {
+              "name": "r2",
+              "value": {
+                "kind": "ref",
+                "variable": "r2",
+                "property": "",
+                "type": "edge"
+              }
+            },
+            {
+              "name": "r3",
+              "value": {
+                "kind": "ref",
+                "variable": "r3",
+                "property": "",
+                "type": "edge"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": null
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "read"
+}
