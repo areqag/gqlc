@@ -549,3 +549,111 @@ func (l *listener) addParameterUse(name string, node antlr.Tree, use query.Use) 
 	l.params[idx].Uses = append(l.params[idx].Uses, use)
 	l.approved[node] = true
 }
+
+// --- write clauses (Stage 12) ---
+
+// collectSetItem dispatches one SET item into the appropriate Effect variant
+// (Stage 12 spec §4.3). The four grammar alternatives are:
+//
+//  1. propertyExpression = expression → SetPropertyEffect
+//  2. variable = expression           → SetEntityEffect{op: Replace}
+//  3. variable += expression          → SetEntityEffect{op: Merge}
+//  4. variable :Labels                → SetLabelsEffect
+//
+// Cases 1 and (2/3) both carry a value expression; both mine parameters via
+// the Stage-6 rich typer against the value's Stage-6 result type. Value
+// parameters record ExprInSetValue — SET values are producers of values the
+// engine writes to the graph, semantically opposite to a projection column's
+// consumer role, so the position discriminator distinguishes the roles the
+// resolver may key on (spec §1.5 amend). Case 1 rejects a nested LHS
+// (n.a.b) via ErrNestedPropertyTarget: the model's Ref carries a single
+// Property, so a nested LHS has no honest single-Ref shape.
+func (l *listener) collectSetItem(item gen.IOC_SetItemContext) {
+	switch {
+	case item.OC_PropertyExpression() != nil && item.OC_Expression() != nil:
+		target, ok := propertyExpressionRef(item.OC_PropertyExpression())
+		if !ok {
+			l.fail(fmt.Errorf("%w: SET %s", ErrNestedPropertyTarget, item.OC_PropertyExpression().GetText()))
+			return
+		}
+		l.curPart.refs = append(l.curPart.refs, varRef{name: target.Variable})
+		valueType, refs, params := l.typeExpressionMining(item.OC_Expression())
+		for _, p := range params {
+			name := parameterName(p)
+			if name == "" {
+				continue
+			}
+			l.addParameterUse(name, p, query.NewExprUse(valueType, query.ExprInSetValue))
+		}
+		eff, err := query.NewSetPropertyEffect(target, valueType, refs)
+		if err != nil {
+			l.fail(err)
+			return
+		}
+		l.curPart.effects = append(l.curPart.effects, eff)
+
+	case item.OC_Variable() != nil && item.OC_NodeLabels() != nil:
+		variable := item.OC_Variable().GetText()
+		l.curPart.refs = append(l.curPart.refs, varRef{name: variable})
+		labels := nodeLabels(item.OC_NodeLabels())
+		eff, err := query.NewSetLabelsEffect(variable, labels)
+		if err != nil {
+			l.fail(err)
+			return
+		}
+		l.curPart.effects = append(l.curPart.effects, eff)
+
+	case item.OC_Variable() != nil && item.OC_Expression() != nil:
+		variable := item.OC_Variable().GetText()
+		l.curPart.refs = append(l.curPart.refs, varRef{name: variable})
+		op := setItemOp(item)
+		valueType, refs, params := l.typeExpressionMining(item.OC_Expression())
+		for _, p := range params {
+			name := parameterName(p)
+			if name == "" {
+				continue
+			}
+			l.addParameterUse(name, p, query.NewExprUse(valueType, query.ExprInSetValue))
+		}
+		eff, err := query.NewSetEntityEffect(variable, op, valueType, refs)
+		if err != nil {
+			l.fail(err)
+			return
+		}
+		l.curPart.effects = append(l.curPart.effects, eff)
+	}
+}
+
+// collectRemoveItem dispatches one REMOVE item (Stage 12 spec §4.4). Two
+// grammar alternatives: variable :Labels → RemoveLabelsEffect,
+// propertyExpression → RemovePropertyEffect. A nested propertyExpression
+// (n.a.b) rejects via ErrNestedPropertyTarget — same shape rule as SET
+// (spec §1.6 amend).
+func (l *listener) collectRemoveItem(item gen.IOC_RemoveItemContext) {
+	if item.OC_Variable() != nil && item.OC_NodeLabels() != nil {
+		variable := item.OC_Variable().GetText()
+		l.curPart.refs = append(l.curPart.refs, varRef{name: variable})
+		labels := nodeLabels(item.OC_NodeLabels())
+		eff, err := query.NewRemoveLabelsEffect(variable, labels)
+		if err != nil {
+			l.fail(err)
+			return
+		}
+		l.curPart.effects = append(l.curPart.effects, eff)
+		return
+	}
+	if pe := item.OC_PropertyExpression(); pe != nil {
+		target, ok := propertyExpressionRef(pe)
+		if !ok {
+			l.fail(fmt.Errorf("%w: REMOVE %s", ErrNestedPropertyTarget, pe.GetText()))
+			return
+		}
+		l.curPart.refs = append(l.curPart.refs, varRef{name: target.Variable})
+		eff, err := query.NewRemovePropertyEffect(target)
+		if err != nil {
+			l.fail(err)
+			return
+		}
+		l.curPart.effects = append(l.curPart.effects, eff)
+	}
+}

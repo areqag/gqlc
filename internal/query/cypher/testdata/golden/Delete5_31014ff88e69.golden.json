@@ -1,0 +1,91 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "edge",
+              "variable": "r",
+              "labels": null,
+              "source": {
+                "kind": "inline",
+                "labels": [
+                  "User"
+                ]
+              },
+              "target": {
+                "kind": "inline",
+                "labels": [
+                  "User"
+                ]
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            },
+            {
+              "kind": "path",
+              "variable": "p",
+              "members": [
+                {
+                  "kind": "anon-node"
+                },
+                {
+                  "kind": "edge",
+                  "variable": "r"
+                },
+                {
+                  "kind": "anon-node"
+                }
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "pathColls",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "p",
+                    "property": ""
+                  }
+                ],
+                "type": "map"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": null
+        },
+        {
+          "bindings": null,
+          "returns": null,
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "delete",
+              "targets": null,
+              "refs": [
+                {
+                  "variable": "pathColls",
+                  "property": "key"
+                },
+                {
+                  "variable": "pathColls",
+                  "property": "key"
+                }
+              ],
+              "detach": false
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

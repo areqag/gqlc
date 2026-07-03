@@ -22,7 +22,8 @@
               }
             }
           ],
-          "returnsAll": false
+          "returnsAll": false,
+          "effects": null
         },
         {
           "bindings": null,
@@ -41,7 +42,8 @@
               }
             }
           ],
-          "returnsAll": false
+          "returnsAll": false,
+          "effects": null
         }
       ]
     }
@@ -68,5 +70,6 @@
         }
       ]
     }
-  ]
+  ],
+  "statementKind": "read"
 }

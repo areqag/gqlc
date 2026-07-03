@@ -1,0 +1,70 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "edge",
+              "variable": "r",
+              "labels": null,
+              "source": {
+                "kind": "inline",
+                "labels": [
+                  "User"
+                ]
+              },
+              "target": {
+                "kind": "inline",
+                "labels": [
+                  "User"
+                ]
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            }
+          ],
+          "returns": [
+            {
+              "name": "rels",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "r",
+                    "property": ""
+                  }
+                ],
+                "type": "map"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": null
+        },
+        {
+          "bindings": null,
+          "returns": null,
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "delete",
+              "targets": null,
+              "refs": [
+                {
+                  "variable": "rels",
+                  "property": ""
+                }
+              ],
+              "detach": false
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

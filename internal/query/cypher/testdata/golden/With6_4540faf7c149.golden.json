@@ -26,12 +26,14 @@
               }
             }
           ],
-          "returnsAll": false
+          "returnsAll": false,
+          "effects": null
         },
         {
           "bindings": null,
           "returns": null,
-          "returnsAll": true
+          "returnsAll": true,
+          "effects": null
         }
       ]
     }
@@ -48,5 +50,6 @@
         }
       ]
     }
-  ]
+  ],
+  "statementKind": "read"
 }

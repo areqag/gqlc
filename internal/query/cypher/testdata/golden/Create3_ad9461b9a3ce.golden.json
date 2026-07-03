@@ -1,0 +1,179 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "m",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "a",
+              "value": {
+                "kind": "ref",
+                "variable": "n",
+                "property": "",
+                "type": "node"
+              }
+            },
+            {
+              "name": "b",
+              "value": {
+                "kind": "ref",
+                "variable": "m",
+                "property": "",
+                "type": "node"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": null
+        },
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "T"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "a"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "b"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            },
+            {
+              "kind": "node",
+              "variable": "b",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "x",
+              "value": {
+                "kind": "ref",
+                "variable": "a",
+                "property": "",
+                "type": "node"
+              }
+            },
+            {
+              "name": "y",
+              "value": {
+                "kind": "ref",
+                "variable": "b",
+                "property": "",
+                "type": "node"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "create",
+              "variables": [
+                "a",
+                "",
+                "b"
+              ]
+            }
+          ]
+        },
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "x",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "T"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "x"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "y"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            },
+            {
+              "kind": "node",
+              "variable": "y",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "x",
+              "value": {
+                "kind": "ref",
+                "variable": "x",
+                "property": "",
+                "type": "node"
+              }
+            },
+            {
+              "name": "y",
+              "value": {
+                "kind": "ref",
+                "variable": "y",
+                "property": "",
+                "type": "node"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "create",
+              "variables": [
+                "x",
+                "",
+                "y"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

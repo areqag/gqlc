@@ -1,0 +1,42 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": [
+                "N"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "num",
+              "value": {
+                "kind": "ref",
+                "variable": "n",
+                "property": "num",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "removeProperty",
+              "variable": "n",
+              "property": "name"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

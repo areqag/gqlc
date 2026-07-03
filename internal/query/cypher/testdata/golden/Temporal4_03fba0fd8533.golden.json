@@ -1,0 +1,34 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "n.dates",
+              "value": {
+                "kind": "ref",
+                "variable": "n",
+                "property": "dates",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": null
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "read"
+}

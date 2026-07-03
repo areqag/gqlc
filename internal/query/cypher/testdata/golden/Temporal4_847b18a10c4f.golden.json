@@ -1,0 +1,22 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": null,
+          "returns": null,
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "create",
+              "variables": null
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

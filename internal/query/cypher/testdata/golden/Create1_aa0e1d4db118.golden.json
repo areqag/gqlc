@@ -1,0 +1,41 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "p",
+              "value": {
+                "kind": "ref",
+                "variable": "n",
+                "property": "name",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "create",
+              "variables": [
+                "n"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

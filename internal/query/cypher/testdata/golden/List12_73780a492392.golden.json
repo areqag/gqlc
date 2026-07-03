@@ -1,0 +1,110 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": [
+                "Label1"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "nodes",
+              "value": {
+                "kind": "aggregate",
+                "func": "collect",
+                "refs": [
+                  {
+                    "variable": "a",
+                    "property": ""
+                  }
+                ],
+                "distinct": false,
+                "type": "list\u003cnode\u003e"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": null
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "nodes",
+              "value": {
+                "kind": "ref",
+                "variable": "nodes",
+                "property": "",
+                "type": "list\u003cnode\u003e"
+              }
+            },
+            {
+              "name": "noopFiltered",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": null
+        },
+        {
+          "bindings": [
+            {
+              "kind": "unwind",
+              "variable": "n",
+              "elemType": "node",
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "n.name",
+              "value": {
+                "kind": "ref",
+                "variable": "n",
+                "property": "name",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "size(noopFiltered)",
+              "value": {
+                "kind": "func",
+                "refs": [
+                  {
+                    "variable": "noopFiltered",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "setProperty",
+              "variable": "n",
+              "property": "name",
+              "type": "string",
+              "refs": null
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

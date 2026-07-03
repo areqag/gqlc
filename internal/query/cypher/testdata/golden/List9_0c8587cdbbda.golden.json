@@ -1,0 +1,48 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": [
+                "TheLabel"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "tail(tail(n.array))",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "n",
+                    "property": "array"
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "setProperty",
+              "variable": "n",
+              "property": "array",
+              "type": "list\u003cint\u003e",
+              "refs": null
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

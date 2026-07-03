@@ -44,6 +44,9 @@ func (l *listener) build() (query.Query, error) {
 	if len(params) > 0 {
 		q.Parameters = params
 	}
+	if l.writeSeen {
+		q.StatementKind = query.StatementWrite
+	}
 	return q, nil
 }
 
@@ -157,9 +160,25 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Part,
 		bindings = append(bindings, ub)
 	}
 
-	part := query.Part{Returns: rp.returns, ReturnsAll: rp.returnsAll}
+	var (
+		partBindings []query.Binding
+		partEffects  []query.Effect
+	)
 	if len(bindings) > 0 {
-		part.Bindings = bindings
+		partBindings = bindings
+	}
+	if len(rp.effects) > 0 {
+		partEffects = rp.effects
+	}
+	// Route through NewPart so the model's "at least one of bindings /
+	// projection / effects" invariant is enforced at the type-interface
+	// boundary (Stage 12 §3.2 amend). The grammar rules out the all-empty
+	// shape, so ErrEmptyPart is unreachable via parse — but the belt-and-
+	// braces guard keeps illegal states unrepresentable if a future grammar
+	// widening slips.
+	part, err := query.NewPart(partBindings, rp.returns, rp.returnsAll, partEffects)
+	if err != nil {
+		return query.Part{}, nil, err
 	}
 
 	// The names this part exports into the next: under WITH * the whole in-scope

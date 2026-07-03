@@ -1,0 +1,95 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": [
+                "N"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "n",
+              "value": {
+                "kind": "ref",
+                "variable": "n",
+                "property": "",
+                "type": "node"
+              }
+            },
+            {
+              "name": "num",
+              "value": {
+                "kind": "ref",
+                "variable": "n",
+                "property": "num",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": null
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "sum",
+              "value": {
+                "kind": "aggregate",
+                "func": "sum",
+                "refs": [
+                  {
+                    "variable": "num",
+                    "property": ""
+                  }
+                ],
+                "distinct": false,
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "delete",
+              "targets": [
+                {
+                  "variable": "n",
+                  "property": ""
+                }
+              ],
+              "refs": null,
+              "detach": false
+            }
+          ]
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "sum",
+              "value": {
+                "kind": "ref",
+                "variable": "sum",
+                "property": "",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": null
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

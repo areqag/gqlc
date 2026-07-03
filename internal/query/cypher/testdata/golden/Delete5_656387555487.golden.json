@@ -1,0 +1,58 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "u",
+              "labels": [
+                "User"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "nodeMap",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "u",
+                    "property": ""
+                  }
+                ],
+                "type": "map"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": null
+        },
+        {
+          "bindings": null,
+          "returns": null,
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "delete",
+              "targets": null,
+              "refs": [
+                {
+                  "variable": "nodeMap",
+                  "property": "key"
+                }
+              ],
+              "detach": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

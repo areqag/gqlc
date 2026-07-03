@@ -39,6 +39,16 @@ type Query struct {
 	// order. They stay at Query level: a parameter used in any part of any branch
 	// is one generated method argument, deduplicated query-wide (Stage-4 spec §2).
 	Parameters []Parameter `json:"parameters"`
+
+	// StatementKind is the read/write axis the driver's transaction mode is
+	// chosen from (Stage 12): StatementWrite iff the query contains at least one
+	// write clause at outer scope of any branch/part (a write suppressed inside
+	// an EXISTS { ... } subquery does not flip the axis — the outer query does
+	// not modify the graph). Binary, not three-state: a write followed by RETURN
+	// is still a write, so the driver picks writeTx unambiguously. Zero value is
+	// StatementRead, so a pre-Stage-12 query wire shape is a strict additive
+	// extension.
+	StatementKind StatementKind `json:"statementKind"`
 }
 
 // Branch is one UNION-joined arm of a query — one oC_SingleQuery — an
@@ -56,18 +66,34 @@ type Branch struct {
 // scope, now scoped to one part. A non-final part's Returns/ReturnsAll carry its
 // WITH projection (a WITH item is a RETURN item — same oC_ProjectionBody, same
 // Stage-3 Projection sum); the final part's carry the branch's result columns.
-// It is a product type: exported fields, the builder maintains its invariants (a
-// part's Returns is empty iff ReturnsAll), no smart constructor — mirroring Query.
+// Stage 12: Effects carries the part's write clauses in walk order; a part with
+// non-empty Effects and empty Returns / ReturnsAll=false is a projection-less
+// write, a legal complete shape whose result is zero columns.
+// It is a product type with exported fields, but Stage 12 introduces the
+// NewPart smart constructor to enforce the "at least one of bindings, effects,
+// or projection" invariant — an all-empty Part is unrepresentable at
+// construction. The listener routes through NewPart (build.go's buildPart) so
+// any parse path that would yield an empty Part fails at build time. Direct
+// struct-literal construction (mustParse fixtures) bypasses the guard; those
+// callers are trusted to supply a well-formed shape, and the sweep-time test
+// TestNewPartRejectsEmpty exercises the adversarial construction against the
+// constructor.
 type Part struct {
-	// Bindings are the entities this part's own MATCH clauses introduce, a
-	// NodeBinding or an EdgeBinding each. Among a part's named bindings the
-	// variable is unique; Returns and edge endpoints reference them by it (or a
-	// name the prior part's WITH carried forward). Only an edge may be anonymous.
+	// Bindings are the entities this part's own MATCH or CREATE clauses
+	// introduce, a NodeBinding, EdgeBinding, PathBinding, or UnwindBinding each.
+	// Among a part's named bindings the variable is unique; Returns and edge
+	// endpoints reference them by it (or a name the prior part's WITH carried
+	// forward). Only an edge may be anonymous. Stage 12: CREATE-introduced
+	// bindings enter this slice via the same collectPattern path MATCH uses; the
+	// CreateEffect on Effects records which bindings this specific clause
+	// introduced.
 	Bindings []Binding `json:"bindings"`
 
 	// Returns are the part's result columns, in source order with duplicates kept:
 	// RETURN a, b is a different shape from RETURN b, a. Empty when ReturnsAll is
-	// true (WITH * / RETURN * does not mix with explicit items).
+	// true (WITH * / RETURN * does not mix with explicit items). Stage 12: may
+	// also be empty for a projection-less write (a part whose only clauses are
+	// writes and that ends the branch — codegen emits a no-result method).
 	Returns []ReturnItem `json:"returns"`
 
 	// ReturnsAll is true iff the projection body was the '*' alternative
@@ -75,6 +101,48 @@ type Part struct {
 	// bindings, not a return item; the resolver owns expansion. When true, Returns
 	// is empty. Always emitted in JSON (matching the always-emit convention).
 	ReturnsAll bool `json:"returnsAll"`
+
+	// Effects are the write clauses in this part, in walk order — the per-part
+	// analogue of Returns for the write side (Stage 12). Each write clause
+	// contributes one or more Effects: a CREATE clause contributes one
+	// CreateEffect; a DELETE contributes one DeleteEffect; a SET contributes one
+	// effect per SetItem; a REMOVE contributes one effect per RemoveItem. A part
+	// with no Effects is read-only. Always emitted in JSON.
+	Effects []Effect `json:"effects"`
+}
+
+// ErrEmptyPart rejects a Part whose bindings, projection, and effects are all
+// empty — a shape the grammar rules out (oC_ReadingClause / oC_UpdatingClause /
+// oC_ProjectionBody each guarantee at least one non-empty field in the parsed
+// Part) but the model constructor still refuses, per Stage 12 §3.2 / §4.6.
+// Illegal states unrepresentable at construction: no parse path can reach this
+// sentinel, so it is a model-invariant guard, not a user-facing rejection.
+// It is deliberately NOT in cypher's sentinel-reachability sweep — the sweep
+// checks user-reachable sentinels, and this one is exercised only by the
+// adversarial constructor test TestNewPartRejectsEmpty in query_test.go.
+var ErrEmptyPart = errors.New("query: part must carry at least one binding, projection, or effect")
+
+// NewPart is the smart constructor for a Part (Stage 12). It enforces the
+// "at least one of bindings, projection, or effect" invariant that the flat-
+// struct field-level types cannot express alone. Callers pass the fields in
+// walk order; NewPart rejects the all-empty shape with ErrEmptyPart, and any
+// well-formed part passes through unchanged.
+//
+// buildPart in the cypher listener routes through NewPart so a parse path that
+// would yield an empty Part (which the grammar rules out anyway) fails at
+// build time rather than emitting a wire-shape violation. Direct struct-literal
+// construction in tests (mustParse fixtures) bypasses this guard by design —
+// those callers are trusted to hand-write a well-formed shape.
+func NewPart(bindings []Binding, returns []ReturnItem, returnsAll bool, effects []Effect) (Part, error) {
+	if len(bindings) == 0 && len(returns) == 0 && !returnsAll && len(effects) == 0 {
+		return Part{}, ErrEmptyPart
+	}
+	return Part{
+		Bindings:   bindings,
+		Returns:    returns,
+		ReturnsAll: returnsAll,
+		Effects:    effects,
+	}, nil
 }
 
 // UnionKind is which UNION combinator joins two branches: distinct (collapses
@@ -108,6 +176,42 @@ func (k UnionKind) String() string {
 // single source), so the combinator serialises to a stable scalar matching the
 // always-emit convention the other enums follow.
 func (k UnionKind) MarshalJSON() ([]byte, error) {
+	return json.Marshal(k.String())
+}
+
+// StatementKind is the query-wide read/write axis (Stage 12): the driver
+// chooses its transaction mode from this scalar — a readTx cannot execute a
+// CREATE, and a writeTx executes both reads and writes, so the axis is binary.
+// Int-backed with a stringer, mirroring UnionKind / AggregateFunc / ClauseSlot;
+// the JSON value derives from String, the single source, so it cannot drift.
+type StatementKind int
+
+const (
+	// StatementRead is a query composed only of reading clauses (MATCH, WITH,
+	// UNION, UNWIND, RETURN, …). The zero-value default, so a pre-Stage-12
+	// query wire shape is a strict additive extension.
+	StatementRead StatementKind = iota
+	// StatementWrite is a query that contains at least one write clause
+	// (CREATE, DELETE, SET, REMOVE, and (Stage 13) MERGE) at outer scope. A
+	// write followed by RETURN is still a write — the driver's tx mode is
+	// binary. Writes suppressed inside an EXISTS { ... } subquery do not
+	// flip the axis; the outer query does not modify the graph.
+	StatementWrite
+)
+
+// String is the canonical wire name of the kind ("read" / "write"). It is the
+// single source the JSON value derives from, so the serialised name can never
+// drift from the enum. The default arm is StatementRead.
+func (k StatementKind) String() string {
+	if k == StatementWrite {
+		return "write"
+	}
+	return "read"
+}
+
+// MarshalJSON renders a StatementKind as its wire string (derived from String,
+// the single source), matching the always-emit convention.
+func (k StatementKind) MarshalJSON() ([]byte, error) {
 	return json.Marshal(k.String())
 }
 
@@ -1103,10 +1207,11 @@ func (s ClauseSlot) ClauseName() string {
 	}
 }
 
-// ExprPosition names where a rich-expression parameter use appears (Stage 6):
-// inside a projection column vs inside a predicate. It is int-backed with a
-// stringer — mirrors AggregateFunc / ClauseSlot — so the JSON discriminator
-// derives from one source and cannot drift.
+// ExprPosition names where a rich-expression parameter use appears (Stage 6,
+// widened in Stage 12): inside a projection column, a predicate, a SET value,
+// or a DELETE target. It is int-backed with a stringer — mirrors
+// AggregateFunc / ClauseSlot — so the JSON discriminator derives from one
+// source and cannot drift.
 type ExprPosition int
 
 const (
@@ -1116,14 +1221,35 @@ const (
 	// ExprInPredicate is a rich-expression parameter use inside a WHERE
 	// predicate or a comparable predicate position.
 	ExprInPredicate
+	// ExprInSetValue is a rich-expression parameter use inside a SET value
+	// expression — the RHS of SET n.prop = <expr> or SET n = <expr> /
+	// SET n += <expr>. Distinct from Projection (Stage 12): a SET value is a
+	// producer of a value written to the graph, semantically opposite to a
+	// RETURN column's consumer role. The write-side distinction lets the
+	// resolver key on the target property's type for a schema-cross-check
+	// that a projection use would not carry.
+	ExprInSetValue
+	// ExprInDeleteTarget is a rich-expression parameter use inside a DELETE
+	// target expression — anything that isn't a bare var or var.prop
+	// (DELETE friends[$idx], DELETE nodes(p)[0]). Distinct from Projection
+	// (Stage 12): a DELETE target is a resolver-side lookup whose runtime
+	// entity kind determines whether the delete is legal (only node/edge
+	// values can be deleted). The position keeps the axis honest across the
+	// write set.
+	ExprInDeleteTarget
 )
 
-// String is the lowercase wire tag ("projection" / "predicate"). The single
-// source the JSON discriminator's "position" field derives from.
+// String is the lowercase wire tag ("projection" / "predicate" / "setValue" /
+// "deleteTarget"). The single source the JSON discriminator's "position" field
+// derives from.
 func (p ExprPosition) String() string {
 	switch p {
 	case ExprInPredicate:
 		return "predicate"
+	case ExprInSetValue:
+		return "setValue"
+	case ExprInDeleteTarget:
+		return "deleteTarget"
 	default:
 		return "projection"
 	}
@@ -1366,3 +1492,395 @@ func (p AggregateProjection) MarshalJSON() ([]byte, error) {
 		Type     Type      `json:"type"`
 	}{Kind: projectionKindAggregate, Func: p.fn.String(), Refs: flattenRefs(p.refs), Distinct: p.distinct, Type: projectionType(p.resultType)})
 }
+
+// Effect is one write operation the query performs at a specific query part
+// (Stage 12): the per-part analogue of a return item for the write side. It
+// is a closed sum of CreateEffect, DeleteEffect, SetPropertyEffect,
+// SetEntityEffect, SetLabelsEffect, RemovePropertyEffect, and
+// RemoveLabelsEffect — no other type can implement it — so an effect is
+// exactly one of the seven. Each variant holds its data in unexported fields;
+// smart constructors are the only way to build a non-zero value, so the
+// invariants the types alone cannot express (non-empty target variables for
+// the SET / REMOVE variants that carry one) hold for every value that exists.
+//
+// The Effect sum does not carry the value expression's tree (ADR 0003); the
+// SET / DELETE value's structure lives below the type-interface boundary
+// (ADR 0005), while its result type and the bindings it touches enter the
+// model. Executing the query re-executes the original text with parameters
+// bound, so the driver never needs the tree back — only the type interface
+// codegen emits.
+type Effect interface {
+	isEffect()
+}
+
+// CreateEffect records one CREATE clause: the ordered list of binding
+// variables the clause introduced (named or anonymous — an empty string
+// records an anonymous position, matching the raw binding slice's
+// discipline). The bindings themselves live in the enclosing Part's
+// Bindings slice (Stage 12: CREATE reuses collectPattern, so a
+// CREATE-introduced binding enters the part's Bindings the same way a
+// MATCH-introduced one does). This variant is a marker: the CreateEffect
+// carries no value expression and no property Refs, only the variable-name
+// index that tells a caller "these bindings came from this clause."
+type CreateEffect struct {
+	variables []string
+}
+
+// NewCreateEffect builds a CreateEffect. Total: variables is what the
+// collectPattern walk observed (possibly empty for a CREATE that produced
+// no bindings the caller cares to record); the smart constructor exists for
+// the always-copy-on-construct discipline the other sums follow.
+func NewCreateEffect(variables []string) CreateEffect {
+	if len(variables) == 0 {
+		return CreateEffect{}
+	}
+	cp := make([]string, len(variables))
+	copy(cp, variables)
+	return CreateEffect{variables: cp}
+}
+
+// Variables are the binding variable names the CREATE clause introduced, in
+// walk order. May carry empty strings for anonymous positions (an anonymous
+// edge is its own binding, C1). May be empty when the CREATE composed no
+// bindings a caller cares to record.
+func (e CreateEffect) Variables() []string { return e.variables }
+
+func (CreateEffect) isEffect() {}
+
+// MarshalJSON renders a CreateEffect as a tagged union member discriminated
+// by "kind", carrying its variables list.
+func (e CreateEffect) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind      string   `json:"kind"`
+		Variables []string `json:"variables"`
+	}{Kind: effectKindCreate, Variables: e.variables})
+}
+
+// DeleteEffect records one DELETE or DETACH DELETE clause: the Refs the
+// clause names as deletion targets (bare var / var.prop shapes each), the
+// Refs a rich-expression target touched (for a target like
+// friends[$friendIndex] whose structure is below the type-interface
+// boundary), and a Detach flag distinguishing DETACH DELETE (delete the
+// entity plus every edge that touches it) from DELETE (require the entity's
+// edges gone first). The Targets / Refs split preserves the type-interface
+// information codegen needs — the bare shapes enter Targets so the
+// resolver can trace each to a schema entity kind, and the rich shapes
+// enter Refs so referential integrity still holds.
+type DeleteEffect struct {
+	targets []Ref
+	refs    []Ref
+	detach  bool
+}
+
+// NewDeleteEffect builds a DeleteEffect. Total: targets and refs are the
+// walk's observations (both may be nil); detach comes from the DETACH token
+// on the clause.
+func NewDeleteEffect(targets, refs []Ref, detach bool) DeleteEffect {
+	var t, r []Ref
+	if len(targets) > 0 {
+		t = make([]Ref, len(targets))
+		copy(t, targets)
+	}
+	if len(refs) > 0 {
+		r = make([]Ref, len(refs))
+		copy(r, refs)
+	}
+	return DeleteEffect{targets: t, refs: r, detach: detach}
+}
+
+// Targets are the bare var / var.prop shapes the DELETE names as targets,
+// in walk order.
+func (e DeleteEffect) Targets() []Ref { return e.targets }
+
+// Refs are the var / var.prop atoms a rich-expression DELETE target
+// touched (nil for pure bare-target DELETEs). Referential-integrity
+// coverage: every Ref here must resolve, exactly as a projection's Refs
+// must.
+func (e DeleteEffect) Refs() []Ref { return e.refs }
+
+// Detach reports whether the clause was DETACH DELETE (true) or plain
+// DELETE (false). The engine's semantic distinction (cascade edges vs
+// require them absent) is a runtime rule; the axis is preserved on the
+// model for codegen.
+func (e DeleteEffect) Detach() bool { return e.detach }
+
+func (DeleteEffect) isEffect() {}
+
+// MarshalJSON renders a DeleteEffect as a tagged union member discriminated
+// by "kind", carrying its targets, refs, and always-emitted detach flag.
+func (e DeleteEffect) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind    string    `json:"kind"`
+		Targets []flatRef `json:"targets"`
+		Refs    []flatRef `json:"refs"`
+		Detach  bool      `json:"detach"`
+	}{Kind: effectKindDelete, Targets: flattenRefs(e.targets), Refs: flattenRefs(e.refs), Detach: e.detach})
+}
+
+// SetOp is which SET-item alternative one SetEntityEffect represents (Stage
+// 12): SetOpReplace for `SET var = expression` (whole-entity replace),
+// SetOpMerge for `SET var += expression` (map-merge onto the existing
+// entity). The distinction changes result semantics — replace clears
+// properties not in the RHS map; merge keeps them — so the model preserves
+// the axis. Int-backed with a stringer, mirroring UnionKind / AggregateFunc.
+type SetOp int
+
+const (
+	// SetOpReplace is `SET var = expression`: replace the entity's
+	// properties with the RHS map.
+	SetOpReplace SetOp = iota
+	// SetOpMerge is `SET var += expression`: merge the RHS map onto the
+	// entity, keeping properties not in the RHS.
+	SetOpMerge
+)
+
+// String is the canonical wire name of the op ("replace" / "merge").
+func (o SetOp) String() string {
+	if o == SetOpMerge {
+		return "merge"
+	}
+	return "replace"
+}
+
+// MarshalJSON renders a SetOp as its wire string.
+func (o SetOp) MarshalJSON() ([]byte, error) {
+	return json.Marshal(o.String())
+}
+
+// SetPropertyEffect records one SET item of the shape `n.prop = value` — a
+// single property assignment. It carries the property target (a Ref{Variable,
+// Property} pair, single-level: the model does not carry multi-level lookups
+// like n.a.b.c at Stage 12; a multi-level LHS rejects at parse with
+// ErrNestedPropertyTarget, a bucket-1 sentinel — see the Stage-12 spec §1.5
+// and §8 "Nested SET/REMOVE LHS is a hard reject"). The value expression is
+// typed via the Stage-6 rich typer, and its result type enters the effect
+// (the typed-write contract that lets the resolver infer parameter types).
+// Refs are the var / var.prop atoms the value expression touched, so
+// referential integrity covers them.
+type SetPropertyEffect struct {
+	target    Ref
+	valueType Type
+	refs      []Ref
+}
+
+// NewSetPropertyEffect builds a SetPropertyEffect. Rejects an empty target
+// variable (a SET without a variable is a parser bug).
+func NewSetPropertyEffect(target Ref, valueType Type, refs []Ref) (SetPropertyEffect, error) {
+	if target.Variable == "" {
+		return SetPropertyEffect{}, errors.New("query: SetPropertyEffect requires a non-empty target variable")
+	}
+	if valueType == nil {
+		valueType = TypeUnknown{}
+	}
+	var cp []Ref
+	if len(refs) > 0 {
+		cp = make([]Ref, len(refs))
+		copy(cp, refs)
+	}
+	return SetPropertyEffect{target: target, valueType: valueType, refs: cp}, nil
+}
+
+// Target is the property being assigned: Ref{Variable, Property}, single-
+// level.
+func (e SetPropertyEffect) Target() Ref { return e.target }
+
+// ValueType is the Stage-6 result type of the value expression on the RHS.
+// TypeUnknown when the parser cannot commit.
+func (e SetPropertyEffect) ValueType() Type { return e.valueType }
+
+// Refs are the var / var.prop atoms the value expression touched.
+func (e SetPropertyEffect) Refs() []Ref { return e.refs }
+
+func (SetPropertyEffect) isEffect() {}
+
+// MarshalJSON renders a SetPropertyEffect as a tagged union member
+// discriminated by "kind", flattening the target Ref into sibling
+// "variable"/"property" fields (matching the PropertyUse posture) and
+// always-emitting the value type.
+func (e SetPropertyEffect) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind     string    `json:"kind"`
+		Variable string    `json:"variable"`
+		Property string    `json:"property"`
+		Type     Type      `json:"type"`
+		Refs     []flatRef `json:"refs"`
+	}{Kind: effectKindSetProperty, Variable: e.target.Variable, Property: e.target.Property, Type: projectionType(e.valueType), Refs: flattenRefs(e.refs)})
+}
+
+// SetEntityEffect records one SET item of the shape `var = value` or
+// `var += value` — a whole-entity replace / map-merge. The op axis
+// distinguishes the two alternatives (SetOpReplace / SetOpMerge). The
+// value's Stage-6 type and its touched refs enter the effect for the same
+// reasons as SetPropertyEffect.
+type SetEntityEffect struct {
+	targetVar string
+	op        SetOp
+	valueType Type
+	refs      []Ref
+}
+
+// NewSetEntityEffect builds a SetEntityEffect. Rejects an empty target
+// variable.
+func NewSetEntityEffect(targetVar string, op SetOp, valueType Type, refs []Ref) (SetEntityEffect, error) {
+	if targetVar == "" {
+		return SetEntityEffect{}, errors.New("query: SetEntityEffect requires a non-empty target variable")
+	}
+	if valueType == nil {
+		valueType = TypeUnknown{}
+	}
+	var cp []Ref
+	if len(refs) > 0 {
+		cp = make([]Ref, len(refs))
+		copy(cp, refs)
+	}
+	return SetEntityEffect{targetVar: targetVar, op: op, valueType: valueType, refs: cp}, nil
+}
+
+// TargetVariable is the variable being assigned to.
+func (e SetEntityEffect) TargetVariable() string { return e.targetVar }
+
+// Op is the assignment alternative (replace / merge).
+func (e SetEntityEffect) Op() SetOp { return e.op }
+
+// ValueType is the Stage-6 result type of the value expression.
+func (e SetEntityEffect) ValueType() Type { return e.valueType }
+
+// Refs are the var / var.prop atoms the value expression touched.
+func (e SetEntityEffect) Refs() []Ref { return e.refs }
+
+func (SetEntityEffect) isEffect() {}
+
+// MarshalJSON renders a SetEntityEffect as a tagged union member
+// discriminated by "kind", always-emitting the op axis.
+func (e SetEntityEffect) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind     string    `json:"kind"`
+		Variable string    `json:"variable"`
+		Op       string    `json:"op"`
+		Type     Type      `json:"type"`
+		Refs     []flatRef `json:"refs"`
+	}{Kind: effectKindSetEntity, Variable: e.targetVar, Op: e.op.String(), Type: projectionType(e.valueType), Refs: flattenRefs(e.refs)})
+}
+
+// SetLabelsEffect records one SET item of the shape `var :Labels` — add a
+// label set to an existing entity. Carries the target variable name and the
+// labels as written.
+type SetLabelsEffect struct {
+	targetVar string
+	labels    graph.LabelSet
+}
+
+// NewSetLabelsEffect builds a SetLabelsEffect. Rejects an empty target
+// variable or an empty label set (a `SET var:` with no label is a
+// grammatical error).
+func NewSetLabelsEffect(targetVar string, labels graph.LabelSet) (SetLabelsEffect, error) {
+	if targetVar == "" {
+		return SetLabelsEffect{}, errors.New("query: SetLabelsEffect requires a non-empty target variable")
+	}
+	if len(labels) == 0 {
+		return SetLabelsEffect{}, errors.New("query: SetLabelsEffect requires at least one label")
+	}
+	return SetLabelsEffect{targetVar: targetVar, labels: labels}, nil
+}
+
+// TargetVariable is the variable whose labels are being augmented.
+func (e SetLabelsEffect) TargetVariable() string { return e.targetVar }
+
+// Labels are the labels being added.
+func (e SetLabelsEffect) Labels() graph.LabelSet { return e.labels }
+
+func (SetLabelsEffect) isEffect() {}
+
+// MarshalJSON renders a SetLabelsEffect as a tagged union member
+// discriminated by "kind".
+func (e SetLabelsEffect) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind     string         `json:"kind"`
+		Variable string         `json:"variable"`
+		Labels   graph.LabelSet `json:"labels"`
+	}{Kind: effectKindSetLabels, Variable: e.targetVar, Labels: e.labels})
+}
+
+// RemovePropertyEffect records one REMOVE item of shape `var.prop` — remove
+// one property from an existing entity. Same single-level Ref discipline as
+// SetPropertyEffect.
+type RemovePropertyEffect struct {
+	target Ref
+}
+
+// NewRemovePropertyEffect builds a RemovePropertyEffect. Rejects an empty
+// target variable or property.
+func NewRemovePropertyEffect(target Ref) (RemovePropertyEffect, error) {
+	if target.Variable == "" {
+		return RemovePropertyEffect{}, errors.New("query: RemovePropertyEffect requires a non-empty target variable")
+	}
+	if target.Property == "" {
+		return RemovePropertyEffect{}, errors.New("query: RemovePropertyEffect requires a non-empty target property")
+	}
+	return RemovePropertyEffect{target: target}, nil
+}
+
+// Target is the property being removed.
+func (e RemovePropertyEffect) Target() Ref { return e.target }
+
+func (RemovePropertyEffect) isEffect() {}
+
+// MarshalJSON renders a RemovePropertyEffect as a tagged union member
+// discriminated by "kind", flattening the target Ref into sibling fields.
+func (e RemovePropertyEffect) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind     string `json:"kind"`
+		Variable string `json:"variable"`
+		Property string `json:"property"`
+	}{Kind: effectKindRemoveProperty, Variable: e.target.Variable, Property: e.target.Property})
+}
+
+// RemoveLabelsEffect records one REMOVE item of shape `var :Labels`.
+type RemoveLabelsEffect struct {
+	targetVar string
+	labels    graph.LabelSet
+}
+
+// NewRemoveLabelsEffect builds a RemoveLabelsEffect. Rejects an empty
+// target variable or label set.
+func NewRemoveLabelsEffect(targetVar string, labels graph.LabelSet) (RemoveLabelsEffect, error) {
+	if targetVar == "" {
+		return RemoveLabelsEffect{}, errors.New("query: RemoveLabelsEffect requires a non-empty target variable")
+	}
+	if len(labels) == 0 {
+		return RemoveLabelsEffect{}, errors.New("query: RemoveLabelsEffect requires at least one label")
+	}
+	return RemoveLabelsEffect{targetVar: targetVar, labels: labels}, nil
+}
+
+// TargetVariable is the variable whose labels are being removed.
+func (e RemoveLabelsEffect) TargetVariable() string { return e.targetVar }
+
+// Labels are the labels being removed.
+func (e RemoveLabelsEffect) Labels() graph.LabelSet { return e.labels }
+
+func (RemoveLabelsEffect) isEffect() {}
+
+// MarshalJSON renders a RemoveLabelsEffect as a tagged union member
+// discriminated by "kind".
+func (e RemoveLabelsEffect) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind     string         `json:"kind"`
+		Variable string         `json:"variable"`
+		Labels   graph.LabelSet `json:"labels"`
+	}{Kind: effectKindRemoveLabels, Variable: e.targetVar, Labels: e.labels})
+}
+
+// The Effect discriminators have no graph-vocabulary counterpart (the
+// distinction is query-side only), so they are named here, the one place
+// they are emitted. They sit next to the other kind constants per the
+// Stage-3 spec §5 convention.
+const (
+	effectKindCreate         = "create"
+	effectKindDelete         = "delete"
+	effectKindSetProperty    = "setProperty"
+	effectKindSetEntity      = "setEntity"
+	effectKindSetLabels      = "setLabels"
+	effectKindRemoveProperty = "removeProperty"
+	effectKindRemoveLabels   = "removeLabels"
+)

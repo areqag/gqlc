@@ -1,0 +1,36 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": true
+            }
+          ],
+          "returns": null,
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "delete",
+              "targets": [
+                {
+                  "variable": "n",
+                  "property": ""
+                }
+              ],
+              "refs": null,
+              "detach": false
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

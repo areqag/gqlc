@@ -1,0 +1,72 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "edge",
+              "variable": "r",
+              "labels": [
+                "FRIEND"
+              ],
+              "source": {
+                "kind": "inline",
+                "labels": [
+                  "User"
+                ]
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            }
+          ],
+          "returns": [
+            {
+              "name": "friendships",
+              "value": {
+                "kind": "aggregate",
+                "func": "collect",
+                "refs": [
+                  {
+                    "variable": "r",
+                    "property": ""
+                  }
+                ],
+                "distinct": false,
+                "type": "list\u003cedge\u003e"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": null
+        },
+        {
+          "bindings": null,
+          "returns": null,
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "delete",
+              "targets": null,
+              "refs": [
+                {
+                  "variable": "friendships",
+                  "property": ""
+                }
+              ],
+              "detach": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

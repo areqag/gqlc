@@ -192,6 +192,47 @@ func TestNewInlineEndpointAllowsEmptyLabels(t *testing.T) {
 	require.Empty(t, e.Labels())
 }
 
+// --- NewPart invariant (Stage 12 §3.2 / §4.6) ---
+
+func TestNewPartAcceptsWellFormedShapes(t *testing.T) {
+	// A part with only bindings, only a projection, only ReturnsAll=true, or
+	// only effects — each is a legal complete shape. NewPart passes any of
+	// them through unchanged.
+	node, err := query.NewNodeBinding("n", nil)
+	require.NoError(t, err)
+
+	pBindings, err := query.NewPart([]query.Binding{node}, nil, false, nil)
+	require.NoError(t, err)
+	require.Len(t, pBindings.Bindings, 1)
+
+	pReturns, err := query.NewPart(nil, []query.ReturnItem{
+		{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+	}, false, nil)
+	require.NoError(t, err)
+	require.Len(t, pReturns.Returns, 1)
+
+	pReturnsAll, err := query.NewPart(nil, nil, true, nil)
+	require.NoError(t, err)
+	require.True(t, pReturnsAll.ReturnsAll)
+
+	pEffects, err := query.NewPart(nil, nil, false, []query.Effect{
+		query.NewCreateEffect([]string{"m"}),
+	})
+	require.NoError(t, err)
+	require.Len(t, pEffects.Effects, 1)
+}
+
+func TestNewPartRejectsEmpty(t *testing.T) {
+	// The all-empty Part is unrepresentable at construction (Stage 12): no
+	// parse path can reach the shape (the grammar rules it out), but the
+	// model constructor still refuses it, so illegal states are unrepresentable
+	// even under adversarial hand-construction. This is the point of the
+	// smart constructor: field-level types cannot express the invariant
+	// alone.
+	_, err := query.NewPart(nil, nil, false, nil)
+	require.ErrorIs(t, err, query.ErrEmptyPart)
+}
+
 // --- the constructors are the only entry point (illegal zero values
 // unconstructible outside the package) ---
 //

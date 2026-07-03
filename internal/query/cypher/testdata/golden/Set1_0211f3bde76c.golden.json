@@ -1,0 +1,53 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "a.numbers",
+              "value": {
+                "kind": "ref",
+                "variable": "a",
+                "property": "numbers",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "create",
+              "variables": [
+                "a"
+              ]
+            },
+            {
+              "kind": "setProperty",
+              "variable": "a",
+              "property": "numbers",
+              "type": "unknown",
+              "refs": [
+                {
+                  "variable": "a",
+                  "property": "numbers"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

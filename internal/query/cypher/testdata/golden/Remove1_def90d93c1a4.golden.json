@@ -1,0 +1,54 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "edge",
+              "variable": "r",
+              "labels": null,
+              "source": {
+                "kind": "inline",
+                "labels": null
+              },
+              "target": {
+                "kind": "inline",
+                "labels": null
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            }
+          ],
+          "returns": [
+            {
+              "name": "still_there",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "r",
+                    "property": "num"
+                  }
+                ],
+                "type": "bool"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "removeProperty",
+              "variable": "r",
+              "property": "num"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

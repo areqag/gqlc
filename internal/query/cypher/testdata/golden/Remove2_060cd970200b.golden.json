@@ -1,0 +1,46 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "labels(n)",
+              "value": {
+                "kind": "func",
+                "refs": [
+                  {
+                    "variable": "n",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "removeLabels",
+              "variable": "n",
+              "labels": [
+                "Bar"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

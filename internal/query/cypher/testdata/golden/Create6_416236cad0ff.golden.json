@@ -1,0 +1,55 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": [
+                "N"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "unwind",
+              "variable": "x",
+              "elemType": "int",
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "sum",
+              "value": {
+                "kind": "aggregate",
+                "func": "sum",
+                "refs": [
+                  {
+                    "variable": "n",
+                    "property": "num"
+                  }
+                ],
+                "distinct": false,
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "create",
+              "variables": [
+                "n"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}
