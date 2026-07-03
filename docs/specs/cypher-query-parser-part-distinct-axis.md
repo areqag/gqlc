@@ -280,7 +280,9 @@ the field with value `false`.
 
 ### 1.9 Test coverage
 
-Six test cases, in the two test surfaces:
+Five test surfaces across the two packages — three model unit tests
+and two parser `mustParse` pins — plus one amended existing pin that
+carries the aggregate-vs-part independence invariant:
 
 **Model unit tests** (`internal/query/query_test.go`):
 
@@ -306,14 +308,21 @@ Six test cases, in the two test surfaces:
    lowers to two parts, the first with `Distinct=true` and one
    `RefProjection{Ref{"a"}, TypeNode{}}`, the second with
    `Distinct=false`.
-6. `aggregate distinct without part distinct` — negative pin (§1.5):
-   `RETURN count(DISTINCT n)` has `Part.Distinct=false` even though
-   the aggregate is DISTINCT. Cross-contamination between the two
-   grammar sites is ruled out by construction.
-
-The existing `count distinct` pin (parser_test.go:1184) is unchanged
-in intent; it now covers the composed case (part=false, aggregate=true)
-in the same shape it did before.
+6. Negative-pin coverage lives on the **existing** `count distinct`
+   mustParse pin (parser_test.go:1188), not a new test. That pin
+   exercises `RETURN count(DISTINCT a)` and asserts
+   `AggregateProjection.Distinct=true`; because it uses a bare
+   `query.Part{Bindings: …, Returns: …}` struct literal (no `Distinct`
+   field set), it also asserts `Part.Distinct=false` by the go-cmp
+   deep-equal at the zero value — the same shape it did before this
+   change. Cross-contamination between the two grammar sites
+   (`oC_ProjectionBody.DISTINCT()` vs.
+   `oC_FunctionInvocation.DISTINCT()`) would flip `Part.Distinct` to
+   `true` and break this equality. The pin's comment is amended to
+   name the invariant so a future reader sees why the pin now covers
+   two axes (aggregate DISTINCT true, part DISTINCT false). No
+   dedicated new test is added: adding one would duplicate the
+   coverage already earned by the existing pin's shape.
 
 ### 1.10 Sentinel status
 
@@ -491,16 +500,17 @@ grammar sites are read independently, matching §1.5.
 
 ### 4.4 Negative pin — aggregate DISTINCT does not set part DISTINCT
 
-The parser test `count distinct` (parser_test.go:1184) continues to
+The parser test `count distinct` (parser_test.go:1188) continues to
 exercise `RETURN count(DISTINCT a)` and expects
-`AggregateProjection.Distinct=true`. This change extends the expected
-shape: `Part.Distinct=false`. If the two grammar sites were ever
-cross-wired (both set `l.curPart.distinct`, or both consulted the
-same rawPart flag), this pin would break — a structural guarantee at
-the test level.
-
-A dedicated test `aggregate distinct without part distinct` in the
-RED phase pins this explicitly. See §1.9 #6.
+`AggregateProjection.Distinct=true`. Because the pin builds its
+expectation with a bare `query.Part{Bindings: …, Returns: …}` struct
+literal — no `Distinct:` field set — the deep-equal check also
+asserts `Part.Distinct=false` at the zero value. If the two grammar
+sites were ever cross-wired (both set `l.curPart.distinct`, or both
+consulted the same rawPart flag), the parser would flip
+`Part.Distinct` to `true` and the equality would break — a structural
+guarantee at the test level, no dedicated new test required. See
+§1.9 #6 for the amended pin's comment and rationale.
 
 ### 4.5 Golden purity check
 
