@@ -1,0 +1,26 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "call",
+              "variable": "out",
+              "procedure": "test.my.proc",
+              "sourceField": "out",
+              "resultType": "string",
+              "nullable": true
+            }
+          ],
+          "returns": null,
+          "returnsAll": true,
+          "effects": null
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "read"
+}

@@ -1,0 +1,52 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "call",
+              "variable": "label",
+              "procedure": "test.labels",
+              "sourceField": "label",
+              "resultType": "string",
+              "nullable": true
+            }
+          ],
+          "returns": [
+            {
+              "name": "c",
+              "value": {
+                "kind": "aggregate",
+                "func": "count",
+                "refs": null,
+                "distinct": false,
+                "type": "int"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": null
+        },
+        {
+          "bindings": [
+            {
+              "kind": "call",
+              "variable": "label",
+              "procedure": "test.labels",
+              "sourceField": "label",
+              "resultType": "string",
+              "nullable": true
+            }
+          ],
+          "returns": null,
+          "returnsAll": true,
+          "effects": null
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "read"
+}
