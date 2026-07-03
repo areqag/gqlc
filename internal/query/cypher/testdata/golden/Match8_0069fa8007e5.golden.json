@@ -19,6 +19,7 @@
           ],
           "returns": null,
           "returnsAll": true,
+          "distinct": false,
           "effects": [
             {
               "kind": "merge",
@@ -74,6 +75,7 @@
             }
           ],
           "returnsAll": false,
+          "distinct": false,
           "effects": null
         }
       ]
