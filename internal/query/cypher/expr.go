@@ -13,10 +13,15 @@ import (
 // --- return items (Cluster E) ---
 
 // collectProjection lowers a RETURN's projection body into result columns. The
-// cosmetic parts (DISTINCT, ORDER BY, SKIP/LIMIT) are accept-and-ignored, except
-// that a parameter in any of them is rejected or bound to a clause slot: a
-// dropped $param is a missing generated argument, i.e. a type-interface change
-// (B1). Each item is classified into a Projection variant: the bare-atom
+// cosmetic parts (ORDER BY, SKIP/LIMIT) are accept-and-ignored, except that a
+// parameter in any of them is rejected or bound to a clause slot: a dropped
+// $param is a missing generated argument, i.e. a type-interface change (B1).
+// DISTINCT (part-distinct-axis spec §4.1) is lifted onto the part's Distinct
+// axis: the two grammar sites for DISTINCT (oC_ProjectionBody here vs.
+// oC_FunctionInvocation on an aggregate) are read independently, so a
+// projection-body DISTINCT sets the part axis without touching any aggregate,
+// and an aggregate DISTINCT sets that aggregate's axis without touching the
+// part. Each item is classified into a Projection variant: the bare-atom
 // classifier (var/var.prop, scalar literal, function, aggregate, count(*))
 // handles the shapes each carries as their dedicated variant; rich shapes
 // (arithmetic, string/list/null predicates, list/map literals, list indexing/
@@ -26,6 +31,9 @@ import (
 func (l *listener) collectProjection(body gen.IOC_ProjectionBodyContext) {
 	if body == nil {
 		return
+	}
+	if body.DISTINCT() != nil {
+		l.curPart.distinct = true
 	}
 	items := body.OC_ProjectionItems()
 	if items == nil || len(items.AllOC_ProjectionItem()) == 0 {

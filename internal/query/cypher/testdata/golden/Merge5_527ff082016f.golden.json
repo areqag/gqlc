@@ -23,6 +23,7 @@
             }
           ],
           "returnsAll": false,
+          "distinct": false,
           "effects": null
         },
         {
@@ -70,6 +71,7 @@
             }
           ],
           "returnsAll": false,
+          "distinct": false,
           "effects": [
             {
               "kind": "merge",
@@ -135,6 +137,7 @@
             }
           ],
           "returnsAll": false,
+          "distinct": false,
           "effects": [
             {
               "kind": "merge",
