@@ -53,6 +53,14 @@ var updateGolden = flag.Bool("update", false, "regenerate golden snapshots from 
 // surface: Query gains a StatementKind axis (read vs. write), Part gains
 // an Effects slice (per-part write clauses in walk order), and a
 // projection-less part (writes with no RETURN) is a first-class shape.
+// Stage 13 adds clauses/merge — MERGE joins the write-clause set with a
+// dedicated MergeEffect (match-or-create axis) and a sealed SetEffect
+// sub-sum for the ON MATCH / ON CREATE payloads. The mineInlineMap
+// widening lands with it: inline-map values that reference variables now
+// flow onto curPart.refs, so `CREATE (b {name: missing})`-shaped
+// undefined-variable scenarios (Create1[20], Create2[24]) reject via
+// ErrUnboundVariable at the buildPart referential-integrity sweep — they
+// come OFF the skiplist here.
 // The corpus is never edited; each stage widens the dir list and shrinks the
 // skiplist.
 var readCoreDirs = []string{
@@ -71,6 +79,7 @@ var readCoreDirs = []string{
 	"../../../test/data/query/cypher/tck/features/clauses/delete",
 	"../../../test/data/query/cypher/tck/features/clauses/set",
 	"../../../test/data/query/cypher/tck/features/clauses/remove",
+	"../../../test/data/query/cypher/tck/features/clauses/merge",
 	"../../../test/data/query/cypher/tck/features/expressions/literals",
 	"../../../test/data/query/cypher/tck/features/expressions/boolean",
 	"../../../test/data/query/cypher/tck/features/expressions/comparison",
@@ -353,15 +362,14 @@ var skiplist = map[string]bool{
 	//      write-clause semantic rule. Codegen post-freeze reads
 	//      StatementKind and could enforce these at generation time; today
 	//      the engine raises them.
-	//   3. UndefinedVariable (Create1 [20], Create2 [24]) — CREATE-side
-	//      scope rule when a pattern references a variable not in scope.
-	//      The parser records the ref onto curPart.refs; buildPart's
-	//      referential-integrity sweep would catch it against MATCH-only
-	//      scenarios (ErrUnboundVariable), but the CREATE case's specific
-	//      shape (`CREATE (a)-[:T]->(missing)` where `missing` is not bound)
-	//      lands inside the CREATE's own pattern where the endpoint
-	//      references the anonymous position rather than an outer binding.
-	//      Bucket 3 accept-and-defer.
+	//   3. UndefinedVariable (Create1 [20], Create2 [24]) — Stage 13
+	//      retires these skiplist entries. The mineInlineMap widening
+	//      (Stage 13 §4.3) now records inline-map value refs onto
+	//      curPart.refs uniformly, so `CREATE (b {name: missing})` and
+	//      `CREATE (a)-[:KNOWS]->(b {name: missing})` reach
+	//      ErrUnboundVariable at the buildPart referential-integrity
+	//      sweep. Layer-2 counterpart: the unbound inline-map ref
+	//      kill-probe mustReject pin. See spec §5 skiplist removals.
 	//   4. InvalidDelete (Delete1 [8], Delete2 [5]) — DELETE target is
 	//      a labelled variable (`DELETE r:T`). The label predicate types
 	//      as TypeBool via typeAtom's node-labels branch; the whole
@@ -386,19 +394,51 @@ var skiplist = map[string]bool{
 	"[17] Fail when adding new label predicate on a node that is already bound 3":   true,
 	"[18] Fail when adding new label predicate on a node that is already bound 4":   true,
 	"[19] Fail when adding new label predicate on a node that is already bound 5":   true,
-	"[20] Fail when creating a node using undefined variable in pattern":            true,
-	"[18] Fail when creating a relationship without a type":                         true,
-	"[19] Fail when creating a relationship without a direction":                    true,
-	"[20] Fail when creating a relationship with two directions":                    true,
-	"[21] Fail when creating a relationship with more than one type":                true,
-	"[22] Fail when creating a variable-length relationship":                        true,
-	"[23] Fail when creating a relationship that is already bound":                  true,
-	"[24] Fail when creating a relationship using undefined variable in pattern":    true,
-	"[7] Failing when deleting connected nodes":                                     true,
-	"[8] Failing when deleting a label":                                             true,
-	"[5] Failing when deleting a relationship type":                                 true,
-	"[9] Failing when deleting an integer expression":                               true,
-	"[10] Failing when setting a list of maps as a property":                        true,
+	// [20] Fail when creating a node using undefined variable in pattern:
+	// retired by Stage 13's mineInlineMap widening (see case 3 above).
+	"[18] Fail when creating a relationship without a type":          true,
+	"[19] Fail when creating a relationship without a direction":     true,
+	"[20] Fail when creating a relationship with two directions":     true,
+	"[21] Fail when creating a relationship with more than one type": true,
+	"[22] Fail when creating a variable-length relationship":         true,
+	"[23] Fail when creating a relationship that is already bound":   true,
+	// [24] Fail when creating a relationship using undefined variable in
+	// pattern: retired by Stage 13's mineInlineMap widening.
+	"[7] Failing when deleting connected nodes":              true,
+	"[8] Failing when deleting a label":                      true,
+	"[5] Failing when deleting a relationship type":          true,
+	"[9] Failing when deleting an integer expression":        true,
+	"[10] Failing when setting a list of maps as a property": true,
+
+	// --- MERGE-dir negatives (Stage 13, bucket-3 per ADR 0007) ---
+	//
+	// clauses/merge negatives cluster into the same rule families the Stage-12
+	// CREATE negatives do — the write-clause semantic rules that live below
+	// the type-interface boundary (ADR 0005). Each entry pairs with its
+	// Stage-12 CREATE analogue by kind:
+	//
+	//   VariableAlreadyBound (Merge1 [15], Merge5 [22]/[26]) — parallels case
+	//     1 above (Create1 [13]-[19]); the write-clause re-binding rule turns
+	//     on clause order + labels, which the type interface does not carry.
+	//   MergeReadOwnWrites (Merge1 [17], Merge5 [29]) — a null property value
+	//     in a MERGE pattern is a runtime "match uses this pattern; a null
+	//     property would match nothing" cardinality rule. TypeError sits below
+	//     the boundary; explicit entries because the dir is not under
+	//     expressions/*.
+	//   NoSingleRelationshipType (Merge5 [23]/[24]/[25]) — parallels case 2
+	//     above (Create2 [18]-[21]); the MERGE relationship shape must be a
+	//     single directed type, a write-clause semantic rule.
+	//   CreatingVarLength (Merge5 [28]) — parallels Create2 [22]; a MERGE
+	//     relationship cannot carry a hop range.
+	"[15] Fail when merge a node that is already bound":                          true,
+	"[17] Fail on merging node with null property":                               true,
+	"[22] Fail when imposing new predicates on a variable that is already bound": true,
+	"[23] Fail when merging relationship without type":                           true,
+	"[24] Fail when merging relationship without type, no colon":                 true,
+	"[25] Fail when merging relationship with more than one type":                true,
+	"[26] Fail when merging relationship that is already bound":                  true,
+	"[28] Fail when using variable length relationship in MERGE":                 true,
+	"[29] Fail on merging relationship with null property":                       true,
 
 	// --- EXISTS with an inner write clause (Stage 11) ---
 	//

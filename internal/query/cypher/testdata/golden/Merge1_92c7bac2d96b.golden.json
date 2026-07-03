@@ -1,0 +1,64 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": [
+                "A"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "a2",
+              "labels": [
+                "A"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "a2.num",
+              "value": {
+                "kind": "ref",
+                "variable": "a2",
+                "property": "num",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "delete",
+              "targets": [
+                {
+                  "variable": "a",
+                  "property": ""
+                }
+              ],
+              "refs": null,
+              "detach": false
+            },
+            {
+              "kind": "merge",
+              "variables": [
+                "a2"
+              ],
+              "onMatch": null,
+              "onCreate": null
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}
