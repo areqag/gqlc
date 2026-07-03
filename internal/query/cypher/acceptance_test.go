@@ -282,6 +282,39 @@ var skiplist = map[string]bool{
 	// "pattern predicate in return projection" mustReject case for the
 	// fail-site.)
 
+	// MATCH (n) SET n.prop = head(nodes(head((n)-[:REL]->()))).foo — a pattern
+	// predicate buried inside the RHS of a SET item's value expression
+	// (SyntaxError:UnexpectedSyntax). Stage 12 exposes this newly: before
+	// Stage 12 the SET clause rejected via ErrUnsupportedClause, so the
+	// scenario passed on the negative outcome; after Stage 12 the SET
+	// clause parses, and the buried pattern predicate types as TypeBool
+	// via typeAtom's Stage-11 pattern-predicate arm, so the whole SET
+	// value parses. Stage 11 §8 documents this class of hole
+	// ("pattern predicate inside another expression" — the enclosing
+	// shape is not a bare atom, so the isPatternPredicateAtom check does
+	// not catch it). Widening the rejection to climb the precedence
+	// tower is Stage-11 scope creep; Stage 12 records the shape as
+	// bucket-1 accept-and-defer and lets the engine raise the
+	// UnexpectedSyntax rule on the original text (ADR 0005). A future
+	// stage that revisits pattern-predicate scope-checking would remove
+	// this entry.
+	"[24] Fail on using pattern in right-hand side of SET": true,
+
+	// --- deleted-entity access at RETURN (Stage 12 newly-exposed) ---
+	//
+	// MATCH (n) DELETE n RETURN n.num (Return2 [15]/[16]/[17]) —
+	// EntityNotFound:DeletedEntityAccess at runtime. Not a SyntaxError,
+	// not under expressions/*, so neither isBucketThreeDir nor
+	// isBucketThreeError's SyntaxError-detail gate catches it — but
+	// EntityNotFound IS a runtime rule below the type-interface boundary
+	// (ADR 0005): the parser accepts, the engine detects deleted-entity
+	// access at execution. Before Stage 12 these scenarios PENDING'd via
+	// ErrUnsupportedClause on DELETE; after Stage 12 DELETE parses, so
+	// the shapes are enumerated here as bucket-3 accept-and-defer.
+	"[15] Fail when returning properties of deleted nodes":         true,
+	"[16] Fail when returning labels of deleted nodes":             true,
+	"[17] Fail when returning properties of deleted relationships": true,
+
 	// --- EXISTS with an inner write clause (Stage 11) ---
 	//
 	// MATCH (n) WHERE exists { MATCH (n)-->(m) SET m.prop='fail' } RETURN n:
@@ -503,10 +536,17 @@ func TestGoldenOrphans(t *testing.T) {
 			}
 			for _, p := range gherkin.Pickles(*doc, path, newIDGen()) {
 				var query string
+				// Take the LAST executing-query step, matching the runtime
+				// posture: executingQuery overwrites st.query on each When step
+				// so at Then-time (when checkGolden runs) st.query is the last
+				// executed query. A Temporal4 storage scenario with a CREATE
+				// followed by a MATCH-control-query keys its golden against
+				// the MATCH text, not the CREATE text — Stage 12 exposed the
+				// previously-latent asymmetry here (the CREATE now parses, so
+				// both When steps run and the LAST-wins rule is observable).
 				for _, step := range p.Steps {
 					if isExecutingQueryStep(step) {
 						query = step.Argument.DocString.Content
-						break
 					}
 				}
 				expected[goldenPath(&scenarioState{name: p.Name, uri: p.Uri, query: query})] = true

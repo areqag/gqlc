@@ -549,3 +549,113 @@ func (l *listener) addParameterUse(name string, node antlr.Tree, use query.Use) 
 	l.params[idx].Uses = append(l.params[idx].Uses, use)
 	l.approved[node] = true
 }
+
+// --- write clauses (Stage 12) ---
+
+// collectSetItem dispatches one SET item into the appropriate Effect variant
+// (Stage 12 spec §4.3). The four grammar alternatives are:
+//
+//  1. propertyExpression = expression → SetPropertyEffect
+//  2. variable = expression           → SetEntityEffect{op: Replace}
+//  3. variable += expression          → SetEntityEffect{op: Merge}
+//  4. variable :Labels                → SetLabelsEffect
+//
+// Cases 1 and (2/3) both carry a value expression; both mine parameters via
+// the Stage-6 rich typer against the value's Stage-6 result type
+// (ExprInProjection — SET values are producers of values the engine writes,
+// closer to a RETURN item's role than to a WHERE predicate's).
+func (l *listener) collectSetItem(item gen.IOC_SetItemContext) {
+	switch {
+	case item.OC_PropertyExpression() != nil && item.OC_Expression() != nil:
+		target, ok := propertyExpressionRef(item.OC_PropertyExpression())
+		if !ok {
+			// Multi-level LHS (n.a.b) or an unrecognised shape — accept-and-defer
+			// to the first-level Ref (spec §1.5, §8): the engine re-executing
+			// the original text raises the multi-level failure (ADR 0005).
+			target = leftmostRef(item.OC_PropertyExpression())
+			if target.Variable == "" {
+				return
+			}
+		}
+		l.curPart.refs = append(l.curPart.refs, varRef{name: target.Variable})
+		valueType, refs, params := l.typeExpressionMining(item.OC_Expression())
+		for _, p := range params {
+			name := parameterName(p)
+			if name == "" {
+				continue
+			}
+			l.addParameterUse(name, p, query.NewExprUse(valueType, query.ExprInProjection))
+		}
+		eff, err := query.NewSetPropertyEffect(target, valueType, refs)
+		if err != nil {
+			l.fail(err)
+			return
+		}
+		l.curPart.effects = append(l.curPart.effects, eff)
+
+	case item.OC_Variable() != nil && item.OC_NodeLabels() != nil:
+		variable := item.OC_Variable().GetText()
+		l.curPart.refs = append(l.curPart.refs, varRef{name: variable})
+		labels := nodeLabels(item.OC_NodeLabels())
+		eff, err := query.NewSetLabelsEffect(variable, labels)
+		if err != nil {
+			l.fail(err)
+			return
+		}
+		l.curPart.effects = append(l.curPart.effects, eff)
+
+	case item.OC_Variable() != nil && item.OC_Expression() != nil:
+		variable := item.OC_Variable().GetText()
+		l.curPart.refs = append(l.curPart.refs, varRef{name: variable})
+		op := setItemOp(item)
+		valueType, refs, params := l.typeExpressionMining(item.OC_Expression())
+		for _, p := range params {
+			name := parameterName(p)
+			if name == "" {
+				continue
+			}
+			l.addParameterUse(name, p, query.NewExprUse(valueType, query.ExprInProjection))
+		}
+		eff, err := query.NewSetEntityEffect(variable, op, valueType, refs)
+		if err != nil {
+			l.fail(err)
+			return
+		}
+		l.curPart.effects = append(l.curPart.effects, eff)
+	}
+}
+
+// collectRemoveItem dispatches one REMOVE item (Stage 12 spec §4.4). Two
+// grammar alternatives: variable :Labels → RemoveLabelsEffect,
+// propertyExpression → RemovePropertyEffect. Multi-level propertyExpression
+// truncates to the first-level Ref (spec §1.6, §8).
+func (l *listener) collectRemoveItem(item gen.IOC_RemoveItemContext) {
+	if item.OC_Variable() != nil && item.OC_NodeLabels() != nil {
+		variable := item.OC_Variable().GetText()
+		l.curPart.refs = append(l.curPart.refs, varRef{name: variable})
+		labels := nodeLabels(item.OC_NodeLabels())
+		eff, err := query.NewRemoveLabelsEffect(variable, labels)
+		if err != nil {
+			l.fail(err)
+			return
+		}
+		l.curPart.effects = append(l.curPart.effects, eff)
+		return
+	}
+	if pe := item.OC_PropertyExpression(); pe != nil {
+		target, ok := propertyExpressionRef(pe)
+		if !ok {
+			target = leftmostRef(pe)
+			if target.Variable == "" || target.Property == "" {
+				return
+			}
+		}
+		l.curPart.refs = append(l.curPart.refs, varRef{name: target.Variable})
+		eff, err := query.NewRemovePropertyEffect(target)
+		if err != nil {
+			l.fail(err)
+			return
+		}
+		l.curPart.effects = append(l.curPart.effects, eff)
+	}
+}

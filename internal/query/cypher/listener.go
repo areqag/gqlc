@@ -73,6 +73,15 @@ type listener struct {
 	// collection.
 	subqueryDepth int
 
+	// writeSeen is the Stage-12 query-wide flag build() reads to populate
+	// Query.StatementKind. Set true by every outer-scope Enter handler for
+	// a write clause (Create / Delete / Set / Remove). A write suppressed
+	// inside an EXISTS { ... } subquery does not flip the flag — the outer
+	// query does not modify the graph. Stage 13 will also flip it on
+	// EnterOC_Merge once MERGE lands; today MERGE stays behind
+	// ErrUnsupportedClause.
+	writeSeen bool
+
 	err error
 }
 
@@ -105,6 +114,7 @@ type rawPart struct {
 	pathBindings   []query.PathBinding
 	pathMemberSink *[]query.PathMember
 	unwindBindings []query.UnwindBinding
+	effects        []query.Effect // Stage 12: per-part write clauses in walk order
 }
 
 func newRawPart() *rawPart {
@@ -303,11 +313,31 @@ func exportedTypes(closed *rawPart) map[string]query.Type {
 	return out
 }
 
-func (l *listener) EnterOC_Create(*gen.OC_CreateContext) {
+// EnterOC_Create collects the CREATE clause's pattern into the current part
+// via the same collectPattern path MATCH uses (Stage 12 spec §4.1). Every
+// binding the pattern introduces enters curPart.bindings verbatim; the delta
+// [before..len(bindings)] captures which bindings this specific clause
+// introduced, so the CreateEffect can record them for post-freeze codegen
+// (which needs the create/match distinction per clause, not per binding).
+// A named binding contributes its variable; an anonymous edge contributes an
+// empty string. An anonymous node is not a binding (C3) and thus does not
+// enter the CreateEffect's variables list — matching the read-side discipline.
+// nullable is unconditionally false: openCypher has no OPTIONAL CREATE.
+func (l *listener) EnterOC_Create(c *gen.OC_CreateContext) {
 	if l.subqueryDepth > 0 {
 		return // Stage 11 §1.6: writes inside EXISTS { ... } parse-accept; bucket-3 engine-side.
 	}
-	l.fail(fmt.Errorf("%w: CREATE", ErrUnsupportedClause))
+	before := len(l.curPart.bindings)
+	l.collectPattern(c.OC_Pattern(), false)
+	if l.err != nil {
+		return
+	}
+	var vars []string
+	for i := before; i < len(l.curPart.bindings); i++ {
+		vars = append(vars, l.curPart.bindings[i].variable)
+	}
+	l.curPart.effects = append(l.curPart.effects, query.NewCreateEffect(vars))
+	l.writeSeen = true
 }
 
 func (l *listener) EnterOC_Merge(*gen.OC_MergeContext) {
@@ -317,25 +347,77 @@ func (l *listener) EnterOC_Merge(*gen.OC_MergeContext) {
 	l.fail(fmt.Errorf("%w: MERGE", ErrUnsupportedClause))
 }
 
-func (l *listener) EnterOC_Delete(*gen.OC_DeleteContext) {
+// EnterOC_Delete collects DELETE / DETACH DELETE targets (Stage 12 spec §4.2).
+// Each expression in the target list is inspected: bare var / var.prop shapes
+// enter DeleteEffect.Targets so the resolver can trace each to a schema entity
+// kind; every other shape (list index, arithmetic, function call) is a rich
+// target whose refs enter DeleteEffect.Refs and whose parameters record
+// ExprUse{TypeUnknown, ExprInProjection} — TypeUnknown is the honest posture
+// (the parameter's role is a delete target whose entity kind the parser
+// cannot commit to schema-free). The Detach axis mirrors the DETACH token
+// verbatim.
+func (l *listener) EnterOC_Delete(c *gen.OC_DeleteContext) {
 	if l.subqueryDepth > 0 {
 		return
 	}
-	l.fail(fmt.Errorf("%w: DELETE", ErrUnsupportedClause))
+	detach := c.DETACH() != nil
+	var targets, refs []query.Ref
+	for _, e := range c.AllOC_Expression() {
+		if nae := nonArithmeticAtom(e); nae != nil {
+			if ref, ok := refFromNonArithmetic(nae); ok {
+				targets = append(targets, ref)
+				l.curPart.refs = append(l.curPart.refs, varRef{name: ref.Variable})
+				continue
+			}
+		}
+		_, expRefs, params := l.typeExpressionMining(e)
+		refs = append(refs, expRefs...)
+		for _, p := range params {
+			name := parameterName(p)
+			if name == "" {
+				continue
+			}
+			l.addParameterUse(name, p, query.NewExprUse(query.TypeUnknown{}, query.ExprInProjection))
+		}
+	}
+	l.curPart.effects = append(l.curPart.effects, query.NewDeleteEffect(targets, refs, detach))
+	l.writeSeen = true
 }
 
-func (l *listener) EnterOC_Set(*gen.OC_SetContext) {
+// EnterOC_Set collects one SET clause: one Effect per SetItem, dispatched by
+// the item's grammar shape (Stage 12 spec §4.3). The four alternatives are
+// propExpr = expr / var = expr / var += expr / var :Labels — the first three
+// share a value expression that rides typeExpressionMining, so its Stage-6
+// result type becomes the Effect's ValueType and its parameters record
+// ExprUse{valueType, ExprInProjection} — the typed-write contract.
+func (l *listener) EnterOC_Set(c *gen.OC_SetContext) {
 	if l.subqueryDepth > 0 {
 		return
 	}
-	l.fail(fmt.Errorf("%w: SET", ErrUnsupportedClause))
+	for _, item := range c.AllOC_SetItem() {
+		l.collectSetItem(item)
+		if l.err != nil {
+			return
+		}
+	}
+	l.writeSeen = true
 }
 
-func (l *listener) EnterOC_Remove(*gen.OC_RemoveContext) {
+// EnterOC_Remove collects one REMOVE clause: one Effect per RemoveItem
+// (Stage 12 spec §4.4). Two alternatives: var :Labels → RemoveLabelsEffect,
+// propertyExpression → RemovePropertyEffect. REMOVE takes no value expression,
+// so no parameter mining runs.
+func (l *listener) EnterOC_Remove(c *gen.OC_RemoveContext) {
 	if l.subqueryDepth > 0 {
 		return
 	}
-	l.fail(fmt.Errorf("%w: REMOVE", ErrUnsupportedClause))
+	for _, item := range c.AllOC_RemoveItem() {
+		l.collectRemoveItem(item)
+		if l.err != nil {
+			return
+		}
+	}
+	l.writeSeen = true
 }
 
 // EnterOC_Unwind collects the UNWIND clause into the current part as an

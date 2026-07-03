@@ -441,3 +441,68 @@ func originalText(ts *antlr.CommonTokenStream, ctx antlr.ParserRuleContext) stri
 	}
 	return ts.GetTextFromInterval(ctx.GetSourceInterval())
 }
+
+// propertyExpressionRef reads a Ref{Variable, Property} from a single-level
+// propertyExpression on the LHS of a SET or REMOVE item (Stage 12 spec §4.3,
+// §4.4). ok is false when the atom is not a bare variable, when the
+// propertyExpression carries zero or more-than-one lookup, or when any list
+// operator suffix is attached. Multi-level (n.a.b) yields ok=false; the
+// caller narrows to the leftmost Ref via leftmostRef, an accept-and-defer
+// against the runtime.
+func propertyExpressionRef(pe gen.IOC_PropertyExpressionContext) (query.Ref, bool) {
+	if pe == nil {
+		return query.Ref{}, false
+	}
+	atom := pe.OC_Atom()
+	if atom == nil || atom.OC_Variable() == nil {
+		return query.Ref{}, false
+	}
+	variable := atom.OC_Variable().GetText()
+	lookups := pe.AllOC_PropertyLookup()
+	if len(lookups) != 1 {
+		return query.Ref{}, false
+	}
+	return query.Ref{Variable: variable, Property: lookups[0].OC_PropertyKeyName().GetText()}, true
+}
+
+// leftmostRef narrows a propertyExpression to the leftmost Ref: the atom's
+// variable name and the first property lookup (if any). Used only as the
+// bucket-3 fallback when propertyExpressionRef reports ok=false (a
+// multi-level LHS like n.a.b.c narrows to {n, a}; a non-variable atom
+// yields the zero Ref, which the caller treats as "nothing to record").
+func leftmostRef(pe gen.IOC_PropertyExpressionContext) query.Ref {
+	if pe == nil {
+		return query.Ref{}
+	}
+	atom := pe.OC_Atom()
+	if atom == nil || atom.OC_Variable() == nil {
+		return query.Ref{}
+	}
+	variable := atom.OC_Variable().GetText()
+	lookups := pe.AllOC_PropertyLookup()
+	if len(lookups) == 0 {
+		return query.Ref{Variable: variable}
+	}
+	return query.Ref{Variable: variable, Property: lookups[0].OC_PropertyKeyName().GetText()}
+}
+
+// setItemOp reads the SET-item's `=` vs `+=` alternative by inspecting the
+// direct-child terminal tokens (T__2 is `=`, T__3 is `+=`). The grammar
+// guarantees one of the two is present when the item's shape is variable +
+// expression (SetItem alternatives 2 and 3); the default (SetOpReplace) is
+// defensive.
+func setItemOp(item gen.IOC_SetItemContext) query.SetOp {
+	for i := 0; i < item.GetChildCount(); i++ {
+		tn, ok := item.GetChild(i).(antlr.TerminalNode)
+		if !ok {
+			continue
+		}
+		switch tn.GetSymbol().GetTokenType() {
+		case gen.CypherParserT__2: // '='
+			return query.SetOpReplace
+		case gen.CypherParserT__3: // '+='
+			return query.SetOpMerge
+		}
+	}
+	return query.SetOpReplace
+}

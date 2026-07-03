@@ -44,6 +44,9 @@ func (l *listener) build() (query.Query, error) {
 	if len(params) > 0 {
 		q.Parameters = params
 	}
+	if l.writeSeen {
+		q.StatementKind = query.StatementWrite
+	}
 	return q, nil
 }
 
@@ -160,6 +163,9 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Part,
 	part := query.Part{Returns: rp.returns, ReturnsAll: rp.returnsAll}
 	if len(bindings) > 0 {
 		part.Bindings = bindings
+	}
+	if len(rp.effects) > 0 {
+		part.Effects = rp.effects
 	}
 
 	// The names this part exports into the next: under WITH * the whole in-scope
