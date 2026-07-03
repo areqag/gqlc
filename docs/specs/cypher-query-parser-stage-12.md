@@ -154,12 +154,18 @@ on the `CreateEffect` recording which bindings this clause introduced.
 reuses the MATCH-bound `n`, per openCypher (the pattern is anchored
 to the matched name and creates nothing under it — a semantic detail
 the type interface honours by simply routing through `mergeBinding`).
-The CreateEffect records `n` in its variables list either way, so a
-downstream consumer can distinguish "created here" from "matched
-earlier" by cross-checking the ordered clause list — a coarser signal
-than a per-binding annotation, and closer to what codegen actually
-needs (per-clause is enough for the driver to know "this SET happens
-after this CREATE").
+The CreateEffect records only the **newly-created** bindings this
+clause introduced: it walks `[before..len(bindings)]` after
+`collectPattern`, and `mergeBinding` dedupes an already-bound variable
+without growing the slice, so a variable already bound by an earlier
+clause does not appear in the CreateEffect's variables list. This is
+a coarser signal than a per-binding "matched vs. created" annotation,
+and matches what codegen needs: distinguishing "created here" from
+"matched earlier" is a walk over the ordered clause list, not a
+per-binding property. (A future stage that presses richer per-effect
+binding information — e.g. distinguishing "this CREATE re-anchored an
+existing var" from "this CREATE introduced nothing new" — would need
+to widen CreateEffect; Stage 12 does not.)
 
 **Anonymous CREATE bindings.** `CREATE ()-->()` creates two nodes and
 one edge; the two anonymous nodes are pure filters on the read side
@@ -1227,3 +1233,26 @@ The lesser risks, recorded for completeness:
   `-update` pass is mechanical; the reviewer verifies via
   `TestGoldenOrphans` that every regenerated file corresponds to a
   live scenario.
+- **LAST-wins re-keying of Temporal storage goldens (disclosure).**
+  Temporal4 storage scenarios pair a write `executing query:` with a
+  read `executing control query:` — `executingQuery` overwrites
+  `st.query` on each `When` step, so at Then-time (when `checkGolden`
+  runs) `st.query` is the LAST executed text (the READ). Pre-Stage-12
+  the write `executing query:` raised `ErrUnsupportedClause`, so its
+  Then-step returned PENDING and no golden was keyed against the read
+  text at all for these scenarios. Post-Stage-12 the write parses,
+  the LAST-wins rule kicks in, and the read text becomes the golden
+  key — some Temporal4 goldens re-key from their pre-Stage-12 hashes
+  to new LAST-wins hashes and appear as ADDs in the diff.
+  `TestGoldenOrphans` uses the identical LAST-wins rule (it takes the
+  LAST executing-query step per pickle when computing expected keys),
+  so the pre-hash files correctly appear as unreachable — the
+  reviewer verifies via `TestGoldenOrphans` that every regenerated
+  file corresponds to a live scenario, and any pre-Stage-12 file with
+  the old hash is either genuinely stale (a scenario the corpus
+  removed) or its scenario has re-keyed — the meta-test does not
+  silently break. The UNLOCK commit's ~136 additions and the amend
+  commit's ~24 re-keyed adds sum to the ~160 new goldens (not 137);
+  the earlier "137 golden generation" phrasing in the "meta-test
+  behavior change" bullet above referred to the write-dir generation
+  only and did not account for the Temporal4 re-key delta.

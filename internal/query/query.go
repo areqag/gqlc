@@ -1650,8 +1650,9 @@ func (o SetOp) MarshalJSON() ([]byte, error) {
 // SetPropertyEffect records one SET item of the shape `n.prop = value` — a
 // single property assignment. It carries the property target (a Ref{Variable,
 // Property} pair, single-level: the model does not carry multi-level lookups
-// like n.a.b.c at Stage 12; a multi-level LHS narrows to the first-level
-// Ref, an accept-and-defer against the runtime). The value expression is
+// like n.a.b.c at Stage 12; a multi-level LHS rejects at parse with
+// ErrNestedPropertyTarget, a bucket-1 sentinel — see the Stage-12 spec §1.5
+// and §8 "Nested SET/REMOVE LHS is a hard reject"). The value expression is
 // typed via the Stage-6 rich typer, and its result type enters the effect
 // (the typed-write contract that lets the resolver infer parameter types).
 // Refs are the var / var.prop atoms the value expression touched, so

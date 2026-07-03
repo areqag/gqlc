@@ -212,7 +212,7 @@ and the full expression tree are deliberately outside the initial model.
 > one; the `CreateEffect` records which named bindings this clause
 > introduced. `SET` value expressions are typed via the Stage-6
 > rich typer, so a parameter under a SET value records
-> `ExprUse{valueType, ExprInProjection}` — the typed-write contract
+> `ExprUse{valueType, ExprInSetValue}` — the typed-write contract
 > that lets the resolver infer a write parameter's type from the
 > expression's Stage-6 result type. The `Type` sum is **unchanged**;
 > the `Projection` sum is **unchanged**; no new sentinel is added
