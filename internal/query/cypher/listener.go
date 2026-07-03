@@ -61,6 +61,18 @@ type listener struct {
 	// leak parameters into an enclosing expression's use list.
 	exprParams []antlr.Tree
 
+	// subqueryDepth is the Stage-11 suppression counter for EXISTS { ... }.
+	// EnterOC_ExistentialSubquery increments it; every clause-collecting
+	// Enter* handler (Match, With, Return, Unwind, Create, Merge, Delete,
+	// Set, Remove, InQueryCall, StandaloneCall) early-returns while it is
+	// positive, so inner bindings, refs, projections, and per-clause
+	// rejections never touch the outer part's state. The counter is
+	// depth-counting (not a flag) so nested EXISTS suppress at every level.
+	// Parameters inside the subquery are mined once, at EnterOC_ExistentialSubquery,
+	// via findParameters — the subquery body itself is not walked for
+	// collection.
+	subqueryDepth int
+
 	err error
 }
 
@@ -171,7 +183,13 @@ func (l *listener) walk(tree antlr.Tree) error {
 // EnterOC_SingleQuery opens a new branch with one initial empty part and makes
 // both current. It fires once per branch: the first branch, and each post-UNION
 // branch (EnterOC_Union runs first and has already recorded the combinator).
+// Stage 11 §1.2: inside EXISTS { oC_RegularQuery } the ANTLR walker fires
+// EnterOC_SingleQuery for the subquery — we skip it so the outer branch/part
+// pointers stay stable and no phantom branch enters l.branches.
 func (l *listener) EnterOC_SingleQuery(*gen.OC_SingleQueryContext) {
+	if l.subqueryDepth > 0 {
+		return
+	}
 	part := newRawPart()
 	br := &rawBranch{parts: []*rawPart{part}}
 	l.branches = append(l.branches, br)
@@ -182,8 +200,13 @@ func (l *listener) EnterOC_SingleQuery(*gen.OC_SingleQueryContext) {
 // EnterOC_Union records the combinator joining the branch about to open to the
 // current one: UnionAll if the ALL token is present, else UnionDistinct. It fires
 // before the joined branch's EnterOC_SingleQuery, so the combinator precedes its
-// branch and the i-th entry joins branch i+1 to branch i (spec §2).
+// branch and the i-th entry joins branch i+1 to branch i (spec §2). Stage 11
+// §1.2: a UNION inside an EXISTS subquery is likewise suppressed so no phantom
+// combinator enters the outer query's list.
 func (l *listener) EnterOC_Union(c *gen.OC_UnionContext) {
+	if l.subqueryDepth > 0 {
+		return
+	}
 	kind := query.UnionDistinct
 	if c.ALL() != nil {
 		kind = query.UnionAll
@@ -199,6 +222,9 @@ func (l *listener) EnterOC_Union(c *gen.OC_UnionContext) {
 // reads parameters the same way in either case. Collection runs here, in walk
 // order, so first appearance of a variable is the source order within the part.
 func (l *listener) EnterOC_Match(c *gen.OC_MatchContext) {
+	if l.subqueryDepth > 0 {
+		return // Stage 11 §1.2: EXISTS { ... } suppresses inner clause collection.
+	}
 	optional := c.OPTIONAL() != nil
 	l.collectPattern(c.OC_Pattern(), optional)
 	if w := c.OC_Where(); w != nil {
@@ -213,6 +239,9 @@ func (l *listener) EnterOC_Match(c *gen.OC_MatchContext) {
 // next part's scope (spec §4); Stage 6 also carries their result types so the
 // next part's classifier can type a bare-alias RefProjection.
 func (l *listener) EnterOC_With(c *gen.OC_WithContext) {
+	if l.subqueryDepth > 0 {
+		return // Stage 11 §1.2: EXISTS { ... } suppresses inner clause collection.
+	}
 	l.collectProjection(c.OC_ProjectionBody())
 	if w := c.OC_Where(); w != nil {
 		l.mineWhere(w)
@@ -275,22 +304,37 @@ func exportedTypes(closed *rawPart) map[string]query.Type {
 }
 
 func (l *listener) EnterOC_Create(*gen.OC_CreateContext) {
+	if l.subqueryDepth > 0 {
+		return // Stage 11 §1.6: writes inside EXISTS { ... } parse-accept; bucket-3 engine-side.
+	}
 	l.fail(fmt.Errorf("%w: CREATE", ErrUnsupportedClause))
 }
 
 func (l *listener) EnterOC_Merge(*gen.OC_MergeContext) {
+	if l.subqueryDepth > 0 {
+		return
+	}
 	l.fail(fmt.Errorf("%w: MERGE", ErrUnsupportedClause))
 }
 
 func (l *listener) EnterOC_Delete(*gen.OC_DeleteContext) {
+	if l.subqueryDepth > 0 {
+		return
+	}
 	l.fail(fmt.Errorf("%w: DELETE", ErrUnsupportedClause))
 }
 
 func (l *listener) EnterOC_Set(*gen.OC_SetContext) {
+	if l.subqueryDepth > 0 {
+		return
+	}
 	l.fail(fmt.Errorf("%w: SET", ErrUnsupportedClause))
 }
 
 func (l *listener) EnterOC_Remove(*gen.OC_RemoveContext) {
+	if l.subqueryDepth > 0 {
+		return
+	}
 	l.fail(fmt.Errorf("%w: REMOVE", ErrUnsupportedClause))
 }
 
@@ -302,14 +346,23 @@ func (l *listener) EnterOC_Remove(*gen.OC_RemoveContext) {
 // records an ExprUse{sourceType, ExprInProjection}, so no parameter is
 // silently dropped.
 func (l *listener) EnterOC_Unwind(c *gen.OC_UnwindContext) {
+	if l.subqueryDepth > 0 {
+		return
+	}
 	l.collectUnwind(c)
 }
 
 func (l *listener) EnterOC_InQueryCall(*gen.OC_InQueryCallContext) {
+	if l.subqueryDepth > 0 {
+		return
+	}
 	l.fail(fmt.Errorf("%w: CALL", ErrUnsupportedClause))
 }
 
 func (l *listener) EnterOC_StandaloneCall(*gen.OC_StandaloneCallContext) {
+	if l.subqueryDepth > 0 {
+		return
+	}
 	l.fail(fmt.Errorf("%w: CALL", ErrUnsupportedClause))
 }
 
@@ -317,5 +370,43 @@ func (l *listener) EnterOC_StandaloneCall(*gen.OC_StandaloneCallContext) {
 // the current branch. RETURN terminates a branch; WITH terminates an
 // intermediate part (both share oC_ProjectionBody via collectProjection).
 func (l *listener) EnterOC_Return(c *gen.OC_ReturnContext) {
+	if l.subqueryDepth > 0 {
+		return
+	}
 	l.collectProjection(c.OC_ProjectionBody())
+}
+
+// EnterOC_ExistentialSubquery opens a nested boolean-typed scope: outer
+// variables remain visible inside (correlated references — the engine
+// re-executing the original text honours them, ADR 0005) but inner
+// bindings — the node/edge/path/unwind bindings any inner clause would
+// otherwise write to l.curPart — must not leak into the outer part.
+// The suppression counter is the enforcer (§1.2): every clause-collecting
+// Enter* handler early-returns while it is positive, so no inner
+// collection touches curPart's state.
+//
+// Parameter mining still runs at Stage 11 — the subquery body's clauses
+// do not, so a $param inside EXISTS { MATCH (n) WHERE $threshold ... }
+// would be silently dropped without this sweep. findParameters walks the
+// whole subtree once at entry and records ExprUse{TypeBool,
+// ExprInPredicate} against every $param, matching how mineWhere handles
+// parameters at the WHERE level.
+func (l *listener) EnterOC_ExistentialSubquery(c *gen.OC_ExistentialSubqueryContext) {
+	l.subqueryDepth++
+	for _, p := range findParameters(c) {
+		if l.approved[p] {
+			continue
+		}
+		name := parameterName(p)
+		if name == "" {
+			continue
+		}
+		l.addParameterUse(name, p, query.NewExprUse(query.TypeBool{}, query.ExprInPredicate))
+	}
+}
+
+func (l *listener) ExitOC_ExistentialSubquery(*gen.OC_ExistentialSubqueryContext) {
+	if l.subqueryDepth > 0 {
+		l.subqueryDepth--
+	}
 }

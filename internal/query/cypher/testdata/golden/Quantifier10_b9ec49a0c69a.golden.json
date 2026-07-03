@@ -1,0 +1,403 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "unwind",
+              "variable": "input",
+              "elemType": "map",
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "fixedList",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "input",
+                    "property": "fixed"
+                  },
+                  {
+                    "variable": "input",
+                    "property": "list"
+                  }
+                ],
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "inputList",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "input",
+                    "property": "fixed"
+                  },
+                  {
+                    "variable": "input",
+                    "property": "list"
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": [
+            {
+              "kind": "unwind",
+              "variable": "x",
+              "elemType": "unknown",
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "fixedList",
+              "value": {
+                "kind": "ref",
+                "variable": "fixedList",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "inputList",
+              "value": {
+                "kind": "ref",
+                "variable": "inputList",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "x",
+              "value": {
+                "kind": "ref",
+                "variable": "x",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "list",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "fixedList",
+              "value": {
+                "kind": "ref",
+                "variable": "fixedList",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "inputList",
+              "value": {
+                "kind": "ref",
+                "variable": "inputList",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "list",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "list",
+                    "property": ""
+                  },
+                  {
+                    "variable": "list",
+                    "property": ""
+                  },
+                  {
+                    "variable": "x",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": [
+            {
+              "kind": "unwind",
+              "variable": "x",
+              "elemType": "unknown",
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "fixedList",
+              "value": {
+                "kind": "ref",
+                "variable": "fixedList",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "inputList",
+              "value": {
+                "kind": "ref",
+                "variable": "inputList",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "x",
+              "value": {
+                "kind": "ref",
+                "variable": "x",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "list",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "fixedList",
+              "value": {
+                "kind": "ref",
+                "variable": "fixedList",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "inputList",
+              "value": {
+                "kind": "ref",
+                "variable": "inputList",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "list",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "list",
+                    "property": ""
+                  },
+                  {
+                    "variable": "list",
+                    "property": ""
+                  },
+                  {
+                    "variable": "x",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": [
+            {
+              "kind": "unwind",
+              "variable": "x",
+              "elemType": "unknown",
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "fixedList",
+              "value": {
+                "kind": "ref",
+                "variable": "fixedList",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "inputList",
+              "value": {
+                "kind": "ref",
+                "variable": "inputList",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "x",
+              "value": {
+                "kind": "ref",
+                "variable": "x",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "list",
+              "value": {
+                "kind": "expr",
+                "refs": null,
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "fixedList",
+              "value": {
+                "kind": "ref",
+                "variable": "fixedList",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "inputList",
+              "value": {
+                "kind": "ref",
+                "variable": "inputList",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "list",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "list",
+                    "property": ""
+                  },
+                  {
+                    "variable": "list",
+                    "property": ""
+                  },
+                  {
+                    "variable": "x",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "list",
+              "value": {
+                "kind": "func",
+                "refs": [
+                  {
+                    "variable": "fixedList",
+                    "property": ""
+                  },
+                  {
+                    "variable": "list",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "result",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "list",
+                    "property": ""
+                  }
+                ],
+                "type": "bool"
+              }
+            },
+            {
+              "name": "cnt",
+              "value": {
+                "kind": "aggregate",
+                "func": "count",
+                "refs": null,
+                "distinct": false,
+                "type": "int"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "result",
+              "value": {
+                "kind": "ref",
+                "variable": "result",
+                "property": "",
+                "type": "bool"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

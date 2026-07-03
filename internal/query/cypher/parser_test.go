@@ -1250,6 +1250,156 @@ var mustParse = map[string]struct {
 			},
 		}),
 	},
+	// Stage 11 — ALL quantifier at projection position. Quantifier4 [1]:
+	// the source list is an empty literal, the filter body's iteration
+	// variable never leaks. Every arm types as TypeBool via typeAtom's
+	// Stage-11 quantifier arm. The three columns are three separate
+	// ExprProjection items (source-list refs are nil, filter refs are
+	// discarded per spec §1.1).
+	"all quantifier empty list": {
+		src: "RETURN all(x IN [] WHERE true) AS a, all(x IN [] WHERE false) AS b, all(x IN [] WHERE x) AS c",
+		want: oneBranch(query.Part{
+			Returns: []query.ReturnItem{
+				{Name: "a", Value: query.NewExprProjection(nil, query.TypeBool{})},
+				{Name: "b", Value: query.NewExprProjection(nil, query.TypeBool{})},
+				{Name: "c", Value: query.NewExprProjection(nil, query.TypeBool{})},
+			},
+		}),
+	},
+	// Stage 11 — NONE quantifier at projection position. Quantifier1 [1]:
+	// same shape as ALL — three empty-list quantifiers over a truthy /
+	// falsy / iteration-var predicate, each TypeBool.
+	"none quantifier empty list": {
+		src: "RETURN none(x IN [] WHERE true) AS a, none(x IN [] WHERE false) AS b, none(x IN [] WHERE x) AS c",
+		want: oneBranch(query.Part{
+			Returns: []query.ReturnItem{
+				{Name: "a", Value: query.NewExprProjection(nil, query.TypeBool{})},
+				{Name: "b", Value: query.NewExprProjection(nil, query.TypeBool{})},
+				{Name: "c", Value: query.NewExprProjection(nil, query.TypeBool{})},
+			},
+		}),
+	},
+	// Stage 11 — EXISTS inline-pattern form inside WHERE (ExistentialSubquery1
+	// [1]). The subquery's inner NodeBinding (the anonymous target of `(n)-->()`)
+	// must NOT leak into the outer part's Bindings: after Stage 11 the outer
+	// part has only NodeBinding{n}. The EXISTS itself types as TypeBool inside
+	// the WHERE predicate; predicate structure stays below the boundary
+	// (ADR 0003), so the RETURN item is a bare RefProjection on n.
+	"exists inline pattern in where": {
+		src: "MATCH (n) WHERE exists { (n)-->() }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
+	// Stage 11 — EXISTS subquery form (ExistentialSubquery2 [1]).
+	// The inner MATCH inside EXISTS { ... } uses the outer name n
+	// (correlated) plus introduces an anonymous target; every inner
+	// binding is suppressed by the subqueryDepth counter, so the outer
+	// part still binds only n.
+	"exists subquery form in where": {
+		src: "MATCH (n) WHERE exists { MATCH (n)-->() RETURN true }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
+	// Stage 11 — nested EXISTS (ExistentialSubquery3 [1] shape). Two
+	// levels of subqueryDepth push/pop; every inner binding (m, l, the
+	// anonymous target of the inner pattern) is suppressed at every
+	// depth. The outer part still binds only n.
+	"exists nested": {
+		src: "MATCH (n) WHERE exists { MATCH (m) WHERE exists { (n)-[]->(m) WHERE n.prop = m.prop } RETURN true }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
+	// Stage 11 §1.5 — a $param inside an EXISTS subquery body, paired with an
+	// OUTER-scope var.prop (n.age > $threshold where n is bound outside). The
+	// outer WHERE is exists {...} — its expression tree contains the inner
+	// comparison. mineWhere's mineComparisons walk must NOT descend into the
+	// EXISTS subtree (§1.2 boundary) and record a PropertyUse{Ref{n, age}} on
+	// $threshold, because the enclosing predicate for the parameter is the
+	// EXISTS body's WHERE (boolean), not the outer WHERE. The parameter's Use
+	// is the honest ExprUse{TypeBool, ExprInPredicate} minted by
+	// EnterOC_ExistentialSubquery's parameter sweep.
+	"exists body param paired with outer prop": {
+		src: "MATCH (n) WHERE exists { MATCH (m)-->() WHERE n.age > $threshold RETURN true }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}, query.Parameter{Name: "threshold", Uses: []query.Use{
+			query.NewExprUse(query.TypeBool{}, query.ExprInPredicate),
+		}}),
+	},
+	// Stage 11 §1.5 — a $param inside an EXISTS body paired with an INNER-scope
+	// var.prop (m.age > $threshold where m is bound only inside the EXISTS).
+	// Without a boundary guard, mineComparisons would descend and append the
+	// INNER varRef `m` onto the outer part's refs list — build()'s referential-
+	// integrity sweep would then reject the legal query with ErrUnboundVariable.
+	// The correct behaviour: parse OK, outer bindings hold only n, $threshold
+	// records the honest ExprUse{TypeBool, ExprInPredicate}.
+	"exists body param paired with inner prop": {
+		src: "MATCH (n) WHERE exists { (n)-->(m) WHERE m.age > $threshold }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}, query.Parameter{Name: "threshold", Uses: []query.Use{
+			query.NewExprUse(query.TypeBool{}, query.ExprInPredicate),
+		}}),
+	},
+	// Stage 11 §1.5 — the WITH-WHERE variant of the same shape: listener.go's
+	// EnterOC_With calls mineWhere too, so the boundary guard must cover both
+	// entry points. Structurally the same as the MATCH-WHERE case above; the
+	// pin catches a regression that fixes one call site but not the other.
+	"exists body param via with-where": {
+		src: "MATCH (n)\nWITH n WHERE exists { (n)-->(m) WHERE m.age > $threshold }\nRETURN n",
+		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{
+			{
+				Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+				Returns: []query.ReturnItem{
+					{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+				},
+			},
+			{
+				Returns: []query.ReturnItem{
+					{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+				},
+			},
+		}}}, Parameters: []query.Parameter{{Name: "threshold", Uses: []query.Use{
+			query.NewExprUse(query.TypeBool{}, query.ExprInPredicate),
+		}}}},
+	},
+	// Stage 11 §1.1 — a $param inside a quantifier's filter WHERE body, paired
+	// with the ITERATION variable x. typeQuantifier's savedOuter restore rolls
+	// back curPart.refs after the rich typer walks the filter body — but a
+	// pairAddSub in mineComparisons (called from mineWhere BEFORE typeQuantifier
+	// runs) has already leaked `x` onto curPart.refs. The boundary guard on
+	// mineComparisons is what stops that leak: parse OK, outer refs contain n
+	// only (x never appears), and $needle records ExprUse{TypeBool,
+	// ExprInPredicate} once via typeQuantifier's own parameter mining.
+	"quantifier body param paired with iteration var": {
+		src: "MATCH (n) WHERE any(x IN n.tags WHERE x = $needle)\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}, query.Parameter{Name: "needle", Uses: []query.Use{
+			query.NewExprUse(query.TypeBool{}, query.ExprInPredicate),
+		}}),
+	},
 }
 
 // intPtr is a small helper to take the address of an int literal so
@@ -1397,6 +1547,16 @@ var mustReject = map[string]struct {
 		query: "UNWIND [1,2] AS b2\nMATCH (b2:Label)\nRETURN b2",
 		want:  cypher.ErrVariableKindConflict,
 	},
+	// Stage 11 (gqlc-3r0 fold) — Pattern1 [22]: a pattern predicate used
+	// as a scalar RETURN column. Verbatim corpus query — the TCK cites
+	// SyntaxError:UnexpectedSyntax, a bucket-1 parse-shape rejection
+	// (ADR 0007 §I). The fail-site is collectReturnItem's Stage-11
+	// isPatternPredicateAtom check; retiring the two Pattern1 [22]/[23]
+	// skiplist entries pushes both scenarios onto this fail-site.
+	"pattern predicate in return projection": {
+		query: "MATCH (n) RETURN (n)-[]->()",
+		want:  cypher.ErrPatternInProjection,
+	},
 }
 
 func TestMustReject(t *testing.T) {
@@ -1410,7 +1570,7 @@ func TestMustReject(t *testing.T) {
 	}
 }
 
-// allSentinels is the canonical list of the four Parse sentinels — the single
+// allSentinels is the canonical list of the five Parse sentinels — the single
 // source of truth TestSentinelReachability checks against. A new sentinel must be
 // added here (and exercised by a mustReject case); a removed one must be dropped.
 // errNotImplemented is deliberately absent: it is the run-A stub, not a contract
@@ -1419,11 +1579,14 @@ func TestMustReject(t *testing.T) {
 // has no fail-site left to guard. Stage 8 retired ErrUnsupportedPattern: the
 // three pattern shapes it flagged (named paths, variable-length, multi-type)
 // all parse under the widened model, so the sentinel has no fail-site left.
+// Stage 11 adds ErrPatternInProjection: a pattern predicate used as a scalar
+// RETURN / WITH column is a bucket-1 parse-shape rejection (Pattern1 [22]/[23]).
 var allSentinels = []error{
 	cypher.ErrUnsupportedClause,
 	cypher.ErrUnsupportedParameter,
 	cypher.ErrUnboundVariable,
 	cypher.ErrVariableKindConflict,
+	cypher.ErrPatternInProjection,
 }
 
 // TestSentinelReachability is the bidirectional sweep (mirroring schema/gql): the

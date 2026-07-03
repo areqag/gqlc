@@ -1,0 +1,112 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": null,
+              "source": {
+                "kind": "inline",
+                "labels": [
+                  "SRelationships"
+                ]
+              },
+              "target": {
+                "kind": "var",
+                "variable": "x"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": {
+                "min": 0,
+                "max": 4
+              }
+            },
+            {
+              "kind": "node",
+              "variable": "x",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "path",
+              "variable": "p",
+              "members": [
+                {
+                  "kind": "anon-node"
+                },
+                {
+                  "kind": "anon-edge"
+                },
+                {
+                  "kind": "node",
+                  "variable": "x"
+                }
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "relationships",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "p",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "c",
+              "value": {
+                "kind": "aggregate",
+                "func": "count",
+                "refs": null,
+                "distinct": false,
+                "type": "int"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "relationships",
+              "value": {
+                "kind": "ref",
+                "variable": "relationships",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "result",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "relationships",
+                    "property": ""
+                  }
+                ],
+                "type": "bool"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}

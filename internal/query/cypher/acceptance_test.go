@@ -43,8 +43,12 @@ var updateGolden = flag.Bool("update", false, "regenerate golden snapshots from 
 // under the widened Binding sum, WITH...WHERE and WITH...ORDER BY / SKIP /
 // LIMIT wire through existing hooks). Stage 10 adds expressions/aggregation
 // — the aggregate surface (count/sum/collect/min/max/avg/stDev/percentile*)
-// with DISTINCT propagation and per-aggregate result typing. Existential
-// subqueries and quantifiers stay out until Stage 11.
+// with DISTINCT propagation and per-aggregate result typing. Stage 11 adds
+// expressions/quantifier and expressions/existentialSubqueries — the four
+// list quantifiers (ALL/ANY/NONE/SINGLE) type as TypeBool with iteration-
+// variable scoping enforced structurally, and EXISTS { ... } types as
+// TypeBool with a suppression counter that stops inner bindings from
+// leaking into the outer part.
 // The corpus is never edited; each stage widens the dir list and shrinks the
 // skiplist.
 var readCoreDirs = []string{
@@ -75,6 +79,8 @@ var readCoreDirs = []string{
 	"../../../test/data/query/cypher/tck/features/expressions/pattern",
 	"../../../test/data/query/cypher/tck/features/expressions/graph",
 	"../../../test/data/query/cypher/tck/features/expressions/aggregation",
+	"../../../test/data/query/cypher/tck/features/expressions/quantifier",
+	"../../../test/data/query/cypher/tck/features/expressions/existentialSubqueries",
 }
 
 const goldenDir = "testdata/golden"
@@ -269,21 +275,27 @@ var skiplist = map[string]bool{
 	// the engine's type-check against the resolved r:path rejects it.
 	"[14] Fail when filtering path with property predicate": true,
 
-	// MATCH (n) RETURN (n)-[]->(): a pattern predicate used at RETURN /
-	// WITH projection position. The TCK cites SyntaxError:UnexpectedSyntax,
-	// but per ADR 0007 §7 this is a **bucket-1 deferral**, not a bucket-3
-	// runtime rule: the misuse is a context-sensitive parse rule (a
-	// pattern-predicate atom is legal inside WHERE / EXISTS but not as a
-	// scalar projection). isBucketThreeError deliberately excludes
-	// UnexpectedSyntax, so the acceptance harness would otherwise fail
-	// these two scenarios; the skiplist entry defers them to the
-	// Stage 11 projection-position pattern-predicates work
-	// (follow-up bead: gqlc-3r0).
-	// Stage 6's typeAtom already accepts OC_PatternPredicate for its role
-	// inside a WHERE, so the same atom in projection position also parses;
-	// the position-specific misuse check is what Stage 11 will add.
-	"[22] Fail on using pattern in RETURN projection": true,
-	"[23] Fail on using pattern in WITH projection":   true,
+	// (Stage 11, gqlc-3r0 fold: the two Pattern1 [22]/[23] deferrals — a
+	// pattern predicate at RETURN / WITH projection position — are
+	// RETIRED. collectReturnItem now rejects the shape with the new
+	// ErrPatternInProjection sentinel via isPatternPredicateAtom; see the
+	// "pattern predicate in return projection" mustReject case for the
+	// fail-site.)
+
+	// --- EXISTS with an inner write clause (Stage 11) ---
+	//
+	// MATCH (n) WHERE exists { MATCH (n)-->(m) SET m.prop='fail' } RETURN n:
+	// a SET inside EXISTS { ... } — SyntaxError:InvalidClauseComposition per
+	// the TCK. Stage 11 §1.6 accept-and-defer: the outer EnterOC_Set handler
+	// suppresses inside EXISTS { ... } (subqueryDepth > 0), so the query
+	// parses; the InvalidClauseComposition rule is a position-shape semantic
+	// rule the type interface does not carry (writes-in-subqueries is a
+	// bucket-3 case the engine raises when re-executing the original text,
+	// ADR 0005). isBucketThreeError does not include InvalidClauseComposition
+	// (it's a genuine parse-shape kind elsewhere — mixing UNION with UNION
+	// ALL is enumerated similarly under clauses/union), so this needs an
+	// enumerated entry rather than a categorical accept.
+	"[3] Full existential subquery with update clause should fail": true,
 
 	// --- ORDER BY value/semantics below the type-interface boundary (Stage 9) ---
 	//

@@ -173,3 +173,26 @@ and the full expression tree are deliberately outside the initial model.
 > engine re-executing the original text raises the same
 > `InvalidAggregation` / `AmbiguousAggregationExpression` the
 > compile-time check would raise. The no-expression-tree line holds._
+>
+> _Note (Stage 11, ADR 0004/0007): the curated `Type` sum and the
+> `Projection` sum are **unchanged**. The four list quantifiers
+> (`ALL` / `ANY` / `NONE` / `SINGLE`), the existential subquery
+> (`EXISTS { ... }`), and the pattern predicate all type as
+> `TypeBool` at the parser boundary — every predicate expression
+> is a boolean atom whose *structure* the model does not carry
+> (ADR 0003, no-expression-tree). Quantifier and `EXISTS {}`
+> scoping is a parser invariant, not a model surface: the
+> iteration variable of a quantifier is bound to its filter body
+> only, and every inner entity binding, path binding, and unwind
+> binding introduced inside `EXISTS { ... }` is suppressed from
+> the outer query part's `Bindings`, `byVar`, `pathBindings`,
+> and `unwindBindings` — a leak would make an inner name appear
+> in the outer part's referential-integrity model (a phantom
+> binding) and the resolver would try to type it with the wrong
+> scope. A fifth true-rejection sentinel
+> `ErrPatternInProjection` enforces the bucket-1 rule "a pattern
+> predicate is legal only inside a boolean position": using
+> `(n)-->()` as a scalar projection at `RETURN` / `WITH` rejects
+> at parse (TCK `Pattern1 [22]/[23]`,
+> `SyntaxError:UnexpectedSyntax`). The no-expression-tree line
+> holds._
