@@ -1252,3 +1252,104 @@ func TestUnwindBindingMarshalJSONNestedListType(t *testing.T) {
 		`{"kind":"unwind","variable":"x","elemType":"list<int>","nullable":false}`,
 		string(out))
 }
+
+// TestNewCallBinding pins the Stage-14 constructor: a well-formed
+// CallBinding round-trips its variable, procedure, sourceField,
+// resultType, and nullable flag verbatim, and reports BindingCall as
+// its kind.
+func TestNewCallBinding(t *testing.T) {
+	b, err := query.NewCallBinding("out", "test.my.proc", "out", query.TypeString{}, true)
+	require.NoError(t, err)
+	require.Equal(t, "out", b.Variable())
+	require.Equal(t, "test.my.proc", b.Procedure())
+	require.Equal(t, "out", b.SourceField())
+	require.Equal(t, query.TypeString{}, b.ResultType())
+	require.True(t, b.Nullable())
+	require.Equal(t, query.BindingCall, b.Kind())
+	var _ query.Binding = b
+}
+
+// TestNewCallBindingRejectsEmptyVariable pins the invariant: an
+// anonymous YIELD item is grammatically impossible (oC_YieldItem
+// requires oC_Variable), so an empty variable is unrepresentable at
+// the model boundary.
+func TestNewCallBindingRejectsEmptyVariable(t *testing.T) {
+	_, err := query.NewCallBinding("", "test.my.proc", "out", query.TypeString{}, false)
+	require.Error(t, err)
+}
+
+// TestNewCallBindingRejectsEmptyProcedure pins the invariant: the
+// procedure name is the registry lookup key, so a CallBinding without
+// a procedure is meaningless at codegen.
+func TestNewCallBindingRejectsEmptyProcedure(t *testing.T) {
+	_, err := query.NewCallBinding("out", "", "out", query.TypeString{}, false)
+	require.Error(t, err)
+}
+
+// TestNewCallBindingRejectsEmptySourceField pins the invariant: the
+// source field is the driver-visible column name; a rename
+// (`YIELD out AS x`) still carries a source field, so an empty one
+// is unrepresentable.
+func TestNewCallBindingRejectsEmptySourceField(t *testing.T) {
+	_, err := query.NewCallBinding("x", "test.my.proc", "", query.TypeString{}, false)
+	require.Error(t, err)
+}
+
+// TestNewCallBindingNormalisesNilTypeToUnknown pins the "cannot tell"
+// posture: a nil resultType at construction is normalised to
+// TypeUnknown, matching NewUnwindBinding's convention. The bridge
+// from procsig.TokenNumber flows through this path (§3.2 of the
+// stage-14 spec).
+func TestNewCallBindingNormalisesNilTypeToUnknown(t *testing.T) {
+	b, err := query.NewCallBinding("out", "test.my.proc", "out", nil, false)
+	require.NoError(t, err)
+	require.Equal(t, query.TypeUnknown{}, b.ResultType())
+}
+
+// TestCallBindingMarshalJSON pins the wire shape: kind="call", every
+// field emitted (including sourceField even when equal to variable),
+// resultType via the canonical Type wire tag, nullable always-
+// emitted. Matches the always-emit discipline other binding variants
+// follow.
+func TestCallBindingMarshalJSON(t *testing.T) {
+	b := must(query.NewCallBinding("out", "test.my.proc", "out", query.TypeString{}, true))
+	out, err := json.Marshal(b)
+	require.NoError(t, err)
+	require.JSONEq(t,
+		`{"kind":"call","variable":"out","procedure":"test.my.proc","sourceField":"out","resultType":"string","nullable":true}`,
+		string(out))
+}
+
+// TestCallBindingMarshalJSONAlias pins that a YIELD-AS rename keeps
+// sourceField distinct from variable on the wire — codegen post-
+// freeze needs both names to route the driver-visible column into
+// the caller-visible one.
+func TestCallBindingMarshalJSONAlias(t *testing.T) {
+	b := must(query.NewCallBinding("x", "test.my.proc", "out", query.TypeInt{}, false))
+	out, err := json.Marshal(b)
+	require.NoError(t, err)
+	require.JSONEq(t,
+		`{"kind":"call","variable":"x","procedure":"test.my.proc","sourceField":"out","resultType":"int","nullable":false}`,
+		string(out))
+}
+
+// TestCallBindingMarshalJSONNumberBridgesToUnknown pins the bridge:
+// a signature-time NUMBER token maps to TypeUnknown on the wire
+// (spec §3.2 / Q3 ruling), so no NUMBER identity leaks into
+// query.Type's freeze surface. The registry stays the source of
+// truth for NUMBER's assignable-from semantics post-freeze.
+func TestCallBindingMarshalJSONNumberBridgesToUnknown(t *testing.T) {
+	b := must(query.NewCallBinding("out", "test.my.proc", "out", query.TypeUnknown{}, true))
+	out, err := json.Marshal(b)
+	require.NoError(t, err)
+	require.JSONEq(t,
+		`{"kind":"call","variable":"out","procedure":"test.my.proc","sourceField":"out","resultType":"unknown","nullable":true}`,
+		string(out))
+}
+
+// TestBindingCallKindString pins the wire discriminator: "call". The
+// stringer is the single source the JSON kind field derives from, so
+// this test locks the discriminator against silent renames.
+func TestBindingCallKindString(t *testing.T) {
+	require.Equal(t, "call", query.BindingCall.String())
+}

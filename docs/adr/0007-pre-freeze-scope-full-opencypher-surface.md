@@ -163,6 +163,23 @@ concrete on-disk format and package placement are Stage-14's job (spec
 `docs/specs/cypher-query-parser-stage-14.md`); this ADR commits only to the
 registry being a **compile-time input**, not runtime discovery.
 
+> _Note (Stage 14, ADR 0004): the registry lives in a new package,
+> `internal/procsig`, dependency-independent of both `internal/query`
+> and `internal/schema`. Its `TypeToken` sum
+> (`INTEGER`, `FLOAT`, `STRING`, `NUMBER`) is decoupled from
+> `query.Type` — sizing to the TCK corpus census (INTEGER?×47,
+> STRING?×30, NUMBER?×4, FLOAT?×2, zero BOOLEAN — no gold-plating).
+> `NUMBER` stays a signature-only marker (assignable-from
+> `INTEGER`-or-`FLOAT` at the argument site); the cypher-package
+> bridge maps it to `TypeUnknown` on the wire so no signature-time
+> vocabulary leaks into the freeze surface. `cypher.New` widens to
+> `func New(opts ...Option) query.Parser` with a `WithRegistry`
+> option — `Parse`'s signature is untouched. The on-disk format
+> (YAML / JSON / `.procsig`) is intentionally deferred out of
+> Stage 14: codegen consumes `procsig.Registry` values directly, so
+> the freeze cut proceeds on the in-memory API alone; a follow-up
+> bead tracks the file surface for the CLI consumer._
+
 ### Stages 6–14, ordered by dependency
 
 Each stage is a TDD slice per ADR 0004, with a spec in `docs/specs/` written

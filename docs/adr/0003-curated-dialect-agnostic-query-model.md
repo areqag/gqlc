@@ -223,3 +223,26 @@ and the full expression tree are deliberately outside the initial model.
 > and a branch whose final part is projection-less produces zero
 > result columns (codegen emits a no-result method). `MERGE` is
 > Stage 13; `CALL` is Stage 14. The no-expression-tree line holds._
+
+> _Note (Stage 14, ADR 0004/0007): the curated `Binding` sum grows a
+> fifth variant, `CallBinding`, for CALL YIELD result columns. Each
+> YIELD item mints one `CallBinding` carrying the fully-qualified
+> procedure name, the signature-declared source column (preserved
+> even under a `YIELD x AS y` rename so codegen can name both the
+> driver-visible column and the caller-visible one), the bridged
+> Stage-6 result type, and the signature's trailing `?` as
+> `Nullable`. `BindingKind` gains a `BindingCall` tag; the wire
+> discriminator `"call"` is the single-source stringer.
+> `Query.StatementKind` stays on the Stage-12 axis — CALL is a Read
+> clause (a CallBinding does not flip StatementWrite). The `Type`
+> sum is **unchanged** (a signature-time NUMBER bridges to
+> `TypeUnknown` on the wire — the registry stays the source of
+> truth for NUMBER's assignable-from semantics post-freeze). The
+> `Effect` sum is **unchanged** (no `CallEffect` — CALL YIELD is
+> not a write). `ErrUnsupportedClause` retires entirely; the last
+> fail-site (CALL) is now covered by two new bucket-1 sentinels,
+> `ErrUnknownProcedure` (procedure name miss or unknown YIELD
+> result field — one sentinel covers both sub-categories, the
+> wrapped message disambiguates) and `ErrProcedureArity`
+> (statically-wrong argument count on explicit invocation). The
+> no-expression-tree line holds._

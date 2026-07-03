@@ -19,6 +19,7 @@ import (
 	"github.com/cucumber/godog"
 	messages "github.com/cucumber/messages/go/v21"
 
+	"github.com/areqag/gqlc/internal/procsig"
 	"github.com/areqag/gqlc/internal/query"
 	"github.com/areqag/gqlc/internal/query/cypher"
 )
@@ -80,6 +81,7 @@ var readCoreDirs = []string{
 	"../../../test/data/query/cypher/tck/features/clauses/set",
 	"../../../test/data/query/cypher/tck/features/clauses/remove",
 	"../../../test/data/query/cypher/tck/features/clauses/merge",
+	"../../../test/data/query/cypher/tck/features/clauses/call",
 	"../../../test/data/query/cypher/tck/features/expressions/literals",
 	"../../../test/data/query/cypher/tck/features/expressions/boolean",
 	"../../../test/data/query/cypher/tck/features/expressions/comparison",
@@ -498,18 +500,50 @@ var skiplist = map[string]bool{
 	"[5] Fail if more complex expressions, even if returned, are used inside an order by item which contains an aggregation expression":   true,
 	"[19] Fail if not projected variables are used inside an order by item which contains an aggregation expression":                      true,
 	"[20] Fail if more complex expressions, even if projected, are used inside an order by item which contains an aggregation expression": true,
+
+	// --- Stage 14 (clauses/call) bucket-3 skiplist ---
+	//
+	// The Stage-14 spec §5 enumerates exactly four scenarios whose
+	// negative outcome the parser accepts categorically per ADR 0007's
+	// bucket-3 discipline: the wire model does not carry the fact
+	// needed to raise them at parse time, and the engine on the
+	// re-executed original text raises the same error (ADR 0005).
+
+	// SyntaxError:InvalidArgumentType (Call2 [5]/[6]) — wrong argument
+	// type against the signature's declared param. Stage 14 does not
+	// check argument types against the registry (spec §4.5): the mined
+	// argument type at parse time is best-effort (a $param mines to
+	// TypeUnknown; a n.prop mines to TypeUnknown), so a parser-time
+	// reject would either over-reject a $param the engine would accept
+	// or fire only on literals (a half-check that gives false
+	// confidence).
+	"[5] Standalone call to procedure should fail if input type is wrong": true,
+	"[6] In-query call to procedure should fail if input type is wrong":   true,
+	// ParameterMissing:MissingParameter (Call1 [11]) — implicit
+	// invocation binds args from `$name` parameters at runtime; the
+	// parser has no static way to detect a missing named parameter
+	// (there is no `$name` in the query text — the binding is
+	// implicit-by-signature-name). Bucket-3 accept-and-defer.
+	"[11] Standalone call to procedure should fail if implicit argument is missing": true,
+	// SyntaxError:InvalidAggregation (Call1 [16]) — aggregate in
+	// argument position. Same family as `[15] Fail on aggregation in
+	// WHERE` (already skiplisted): per-position aggregate legality is
+	// a semantic rule the type-interface boundary does not carry
+	// (ADR 0007).
+	"[16] In-query procedure call should fail if one of the argument expressions uses an aggregation function": true,
 }
 
 // the public sentinels for scenarios the parser cannot faithfully represent
 // yet — the "valid Cypher we don't support yet" set. A positive scenario that
 // fails with one of these is the progress meter (PENDING), not a test
 // failure. Mirrors the spec's category-grained taxonomy. Stage 6 retired
-// ErrUnsupportedProjection (rich scalar expressions at RETURN / WITH position
-// now parse to an ExprProjection). Stage 8 retired ErrUnsupportedPattern (the
-// three pattern shapes it flagged — named paths, variable-length,
-// multi-type — all parse under the widened model).
+// ErrUnsupportedProjection. Stage 8 retired ErrUnsupportedPattern. Stage 14
+// retires ErrUnsupportedClause (CALL was the last fail-site; CALL is
+// supported after Stage 14 — an unknown procedure surfaces as the new
+// ErrUnknownProcedure sentinel, which is a bucket-1 bounded rejection, not
+// a "we cannot represent this shape" case). Stage 14 leaves only
+// ErrUnsupportedParameter in the progress-meter set.
 var unsupportedSentinels = []error{
-	cypher.ErrUnsupportedClause,
 	cypher.ErrUnsupportedParameter,
 }
 
@@ -532,6 +566,12 @@ type scenarioState struct {
 	got     query.Query
 	err     error
 	skipped bool
+	// sigs is the Stage-14 per-scenario procedure signature list,
+	// populated by the "there exists a procedure" step. Multiple
+	// procedure declarations in one scenario accumulate here in
+	// declaration order; executingQuery constructs a procsig.Registry
+	// from the slice before parsing.
+	sigs []procsig.Signature
 }
 
 type stateKey struct{}
@@ -703,6 +743,19 @@ func initScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^having executed:$`, noopDoc)
 	ctx.Step(`^parameters are:$`, noopTable)
 
+	// Stage 14 (clauses/call): the TCK declares procedure signatures
+	// via a background step of the form
+	//   `And there exists a procedure test.my.proc(in :: INTEGER?) :: (out :: STRING?):`
+	// followed by an example-data DataTable the parser does not consume
+	// (the table is runtime example data, not part of the type
+	// interface). Two grammar variants appear in the corpus:
+	//   * trailing colon adjacent to the closing paren: `):`
+	//   * trailing colon with a space: `) :` (Call5[3])
+	// The step parses the signature text into a procsig.Signature and
+	// accumulates it on scenarioState.sigs for executingQuery to
+	// consume. The trailing table is consumed silently via noopTable.
+	ctx.Step(`^there exists a procedure (.+?)\s*:$`, thereExistsAProcedure)
+
 	// The query under test.
 	ctx.Step(`^executing query:$`, executingQuery)
 	// The Stage-7 temporal storage scenarios (Temporal4) pair a write query
@@ -750,14 +803,134 @@ func noop(_ context.Context) error                        { return nil }
 func noopDoc(_ context.Context, _ *godog.DocString) error { return nil }
 func noopTable(_ context.Context, _ *godog.Table) error   { return nil }
 
+// thereExistsAProcedure parses a TCK background procedure declaration
+// of the shape `test.my.proc(in :: INTEGER?) :: (out :: STRING?)` and
+// records the resulting procsig.Signature on the scenario state. The
+// attached DataTable is example data (runtime rows the parser does not
+// consume, per spec §7) — silently ignored.
+func thereExistsAProcedure(ctx context.Context, sigText string, _ *godog.Table) error {
+	st := stateFrom(ctx)
+	if st == nil {
+		return errors.New("scenario state missing")
+	}
+	sig, err := parseProcedureSignature(sigText)
+	if err != nil {
+		return fmt.Errorf("parse procedure signature %q: %w", sigText, err)
+	}
+	st.sigs = append(st.sigs, sig)
+	return nil
+}
+
+// signatureRE matches a full procedure declaration in the shape
+// `name(params) :: (results)`. The name is the dotted fully-qualified
+// form; params and results are comma-separated `field :: TOKEN?`
+// declarations (`?` is optional).
+var signatureRE = regexp.MustCompile(`^\s*(?P<name>[A-Za-z_][A-Za-z0-9_.]*)\s*\(\s*(?P<params>[^)]*)\)\s*::\s*\(\s*(?P<results>[^)]*)\)\s*$`)
+
+// columnRE matches one signature column: `name :: TOKEN` or
+// `name :: TOKEN?`. Whitespace tolerant.
+var columnRE = regexp.MustCompile(`^\s*(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*::\s*(?P<token>[A-Za-z]+)(?P<nullable>\??)\s*$`)
+
+// parseProcedureSignature lifts the TCK step's signature text into a
+// procsig.Signature. Returns an error if the shape does not match the
+// declaration grammar or if any column names a token outside the
+// procsig.TypeToken sum.
+func parseProcedureSignature(text string) (procsig.Signature, error) {
+	m := signatureRE.FindStringSubmatch(text)
+	if m == nil {
+		return procsig.Signature{}, fmt.Errorf("signature does not match `name(params) :: (results)` shape")
+	}
+	name := m[signatureRE.SubexpIndex("name")]
+	params, err := parseColumnList(m[signatureRE.SubexpIndex("params")])
+	if err != nil {
+		return procsig.Signature{}, fmt.Errorf("params: %w", err)
+	}
+	results, err := parseColumnList(m[signatureRE.SubexpIndex("results")])
+	if err != nil {
+		return procsig.Signature{}, fmt.Errorf("results: %w", err)
+	}
+	sig := procsig.Signature{Name: name}
+	for _, c := range params {
+		sig.Params = append(sig.Params, procsig.Param{Name: c.name, Token: c.token, Nullable: c.nullable})
+	}
+	for _, c := range results {
+		sig.Results = append(sig.Results, procsig.Result{Name: c.name, Token: c.token, Nullable: c.nullable})
+	}
+	return sig, nil
+}
+
+type signatureColumn struct {
+	name     string
+	token    procsig.TypeToken
+	nullable bool
+}
+
+// parseColumnList splits a comma-separated column list (`name :: TOKEN
+// [?], name2 :: TOKEN2 [?], ...`) into a slice of columns. Empty input
+// yields the empty slice — a signature with no params or no results is
+// valid (e.g. `test.doNothing() :: ()`).
+func parseColumnList(text string) ([]signatureColumn, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil, nil
+	}
+	parts := strings.Split(text, ",")
+	out := make([]signatureColumn, 0, len(parts))
+	for _, p := range parts {
+		m := columnRE.FindStringSubmatch(p)
+		if m == nil {
+			return nil, fmt.Errorf("column %q does not match `name :: TOKEN[?]` shape", p)
+		}
+		tok, err := parseTypeToken(m[columnRE.SubexpIndex("token")])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, signatureColumn{
+			name:     m[columnRE.SubexpIndex("name")],
+			token:    tok,
+			nullable: m[columnRE.SubexpIndex("nullable")] == "?",
+		})
+	}
+	return out, nil
+}
+
+// parseTypeToken maps the TCK's uppercase token name to a
+// procsig.TypeToken. Any token outside the sum returns an error —
+// which surfaces as a step failure and reveals a corpus token the
+// registry does not yet declare.
+func parseTypeToken(name string) (procsig.TypeToken, error) {
+	switch name {
+	case "INTEGER":
+		return procsig.TokenInteger, nil
+	case "FLOAT":
+		return procsig.TokenFloat, nil
+	case "STRING":
+		return procsig.TokenString, nil
+	case "NUMBER":
+		return procsig.TokenNumber, nil
+	default:
+		return 0, fmt.Errorf("unknown TypeToken %q (extend procsig.TypeToken to admit it)", name)
+	}
+}
+
 // executingQuery runs Parse and stashes the outcome for the Then steps.
+// Stage 14: the parser is constructed with the per-scenario procedure
+// registry accumulated by the "there exists a procedure" step. A
+// scenario with no such steps gets the empty registry (every CALL
+// lookup misses, ErrUnknownProcedure fires at the fail-site — which is
+// exactly the shape Call1[13]/[14] test).
 func executingQuery(ctx context.Context, doc *godog.DocString) error {
 	st := stateFrom(ctx)
 	if st == nil {
 		return errors.New("scenario state missing")
 	}
 	st.query = doc.Content
-	st.got, st.err = cypher.New().Parse(strings.NewReader(doc.Content))
+	reg, regErr := procsig.NewRegistry(st.sigs)
+	if regErr != nil {
+		st.err = fmt.Errorf("test-side registry construction failed: %w", regErr)
+		return nil
+	}
+	st.got, st.err = cypher.New(cypher.WithRegistry(reg)).Parse(strings.NewReader(doc.Content))
 	return nil
 }
 
