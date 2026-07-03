@@ -1309,12 +1309,273 @@ var mustParse = map[string]struct {
 	// same table: count(n) types as TypeInt, so count(n) + 1 types as
 	// TypeInt via promoteAdd(TypeInt, TypeInt). The ExprProjection carries
 	// the aggregate's touched ref and the promoted result type.
+	//
+	// aggregate-kind-rich-exprs spec §4.5 pin #7 — the deferral lock: the
+	// outer expression is not an aggregate call, so per §1.3 the model does
+	// NOT lift the inner count(n) kind through a rich-expression wrapper.
+	// This pin stays GREEN both pre- and post-widening; a future change
+	// that silently introduces an inner-aggregate axis on ExprProjection
+	// breaks the pin structurally.
 	"count in arithmetic": {
 		src: "MATCH (n)\nRETURN count(n) + 1",
 		want: oneBranch(query.Part{
 			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
 			Returns: []query.ReturnItem{
 				{Name: "count(n) + 1", Value: query.NewExprProjection([]query.Ref{{Variable: "n"}}, query.TypeInt{})},
+			},
+		}),
+	},
+	// aggregate-kind-rich-exprs spec §4.5 pin #1 — count over an
+	// arithmetic property arg. Today's parser falls through to
+	// classifyRichExpression (functionArgRefs rejects arithmetic),
+	// yielding ExprProjection{[Ref{n,age}], TypeInt}. Under the
+	// widening the aggregate arm of classifyFunction fires first,
+	// routes through classifyAggregateCall, and lowers as
+	// AggregateProjection{AggCount, [Ref{n,age}], false, TypeInt} —
+	// the outer aggregate's kind enters the model. TypeInt because
+	// aggregateResultType(AggCount, _) = TypeInt unconditionally.
+	// Also asserts the Part.Distinct=false zero value alongside
+	// AggregateProjection.Distinct=false — structural coverage of
+	// the [[cypher-query-parser-part-distinct-axis]] §1.5
+	// independence between the two DISTINCT sites.
+	"aggregate count on arithmetic property arg": {
+		src: "MATCH (n)\nRETURN count(n.age + 1)",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "count(n.age + 1)", Value: query.NewAggregateProjection(
+					query.AggCount,
+					[]query.Ref{{Variable: "n", Property: "age"}},
+					false,
+					query.TypeInt{},
+				)},
+			},
+		}),
+	},
+	// aggregate-kind-rich-exprs spec §4.5 pin #2 — sum over an
+	// arithmetic property arg. Today: ExprProjection{[Ref{n,age}],
+	// TypeUnknown} (n.age types unknown, promoteAdd(unknown, int) =
+	// unknown, aggregateResultType(AggSum, unknown) = unknown).
+	// Target: AggregateProjection{AggSum, [Ref{n,age}], false,
+	// TypeUnknown} — refs and type preserved bit-for-bit; only the
+	// projection kind and the AggregateFunc / Distinct fields change.
+	"aggregate sum on arithmetic property arg": {
+		src: "MATCH (n)\nRETURN sum(n.age + 1)",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "sum(n.age + 1)", Value: query.NewAggregateProjection(
+					query.AggSum,
+					[]query.Ref{{Variable: "n", Property: "age"}},
+					false,
+					query.TypeUnknown{},
+				)},
+			},
+		}),
+	},
+	// aggregate-kind-rich-exprs spec §4.5 pin #3 — collect over a
+	// boolean composite. Two node bindings feed a comparison whose
+	// result types TypeBool; aggregateResultType(AggCollect, TypeBool)
+	// = list<bool>. The refs list preserves depth-first, left-to-right
+	// traversal order: a.name appears before b.name because the left
+	// operand of the comparison is walked first (spec §1.4 mining rule,
+	// terminology unified across §1.4 and §7).
+	"aggregate collect on boolean composite": {
+		src: "MATCH (a), (b)\nRETURN collect(a.name = b.name)",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("a", nil)),
+				must(query.NewNodeBinding("b", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "collect(a.name = b.name)", Value: query.NewAggregateProjection(
+					query.AggCollect,
+					[]query.Ref{
+						{Variable: "a", Property: "name"},
+						{Variable: "b", Property: "name"},
+					},
+					false,
+					query.NewTypeList(query.TypeBool{}),
+				)},
+			},
+		}),
+	},
+	// aggregate-kind-rich-exprs spec §4.5 pin #4 — min over a list
+	// literal. The list-literal argument types TypeList(TypeInt) via
+	// listLiteralType; aggregateResultType(AggMin, TypeList{...}) =
+	// TypeUnknown (min over list is engine-inconsistent, Stage 10 §8).
+	// No refs mined — the list is scalar literals only. Target:
+	// AggregateProjection{AggMin, nil, false, TypeUnknown}.
+	"aggregate min on list literal arg": {
+		src: "RETURN min([1, 2, 3])",
+		want: oneBranch(query.Part{
+			Returns: []query.ReturnItem{
+				{Name: "min([1, 2, 3])", Value: query.NewAggregateProjection(
+					query.AggMin,
+					nil,
+					false,
+					query.TypeUnknown{},
+				)},
+			},
+		}),
+	},
+	// aggregate-kind-rich-exprs spec §4.5 pin #5 — sum over a nested
+	// non-aggregate function call. range(1, 3) types as TypeUnknown
+	// (function identity is below the type-interface boundary, ADR
+	// 0005 §5); aggregateResultType(AggSum, TypeUnknown) = TypeUnknown.
+	// No refs. Target: AggregateProjection{AggSum, nil, false,
+	// TypeUnknown}. This pin exercises the "aggregate-with-nested-
+	// non-aggregate-call" branch (spec §1.1: every other function-
+	// name path — namespaced, non-aggregate bare, or aggregate-with-
+	// nested-aggregate — keeps its current behaviour bit-for-bit).
+	"aggregate sum on nested function call": {
+		src: "RETURN sum(range(1, 3))",
+		want: oneBranch(query.Part{
+			Returns: []query.ReturnItem{
+				{Name: "sum(range(1, 3))", Value: query.NewAggregateProjection(
+					query.AggSum,
+					nil,
+					false,
+					query.TypeUnknown{},
+				)},
+			},
+		}),
+	},
+	// aggregate-kind-rich-exprs spec §4.5 pin #6 — DISTINCT
+	// interaction with a rich argument. sum(DISTINCT n.age + 1)
+	// reads DISTINCT via fi.DISTINCT() on oC_FunctionInvocation
+	// (§1.5) and sets AggregateProjection.Distinct=true; the
+	// [[cypher-query-parser-part-distinct-axis]] §1.5 independence
+	// invariant holds — Part.Distinct stays zero-valued (no
+	// projection-body DISTINCT).
+	"aggregate sum distinct on arithmetic arg": {
+		src: "MATCH (n)\nRETURN sum(DISTINCT n.age + 1)",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "sum(DISTINCT n.age + 1)", Value: query.NewAggregateProjection(
+					query.AggSum,
+					[]query.Ref{{Variable: "n", Property: "age"}},
+					true,
+					query.TypeUnknown{},
+				)},
+			},
+		}),
+	},
+	// aggregate-kind-rich-exprs spec §4.5 pin #8 — parameter under a
+	// rich aggregate argument (Blocker 1). Today: functionArgRefs
+	// rejects arithmetic → fall through → classifyRichExpression
+	// registers ExprUse{TypeUnknown, ExprInProjection} for $p (the
+	// enclosing rich expression sum($p+1) types unknown). Under the
+	// widening, classifyAggregateCall routes through
+	// typeExpressionMining and registers the same
+	// ExprUse{aggregateResultType(AggSum, TypeUnknown)=TypeUnknown,
+	// ExprInProjection} — Stage 6 §4 "no parameter is silently
+	// dropped" preserved verbatim. The parameter-Uses assertion is
+	// stable across the widening; the RED failure is entirely on the
+	// projection-kind axis.
+	"aggregate sum on arithmetic parameter arg": {
+		src: "MATCH (n)\nRETURN sum($p + 1)",
+		want: query.Query{
+			Branches: []query.Branch{{Parts: []query.Part{{
+				Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+				Returns: []query.ReturnItem{
+					{Name: "sum($p + 1)", Value: query.NewAggregateProjection(
+						query.AggSum,
+						nil,
+						false,
+						query.TypeUnknown{},
+					)},
+				},
+			}}}},
+			Parameters: []query.Parameter{
+				{Name: "p", Uses: []query.Use{
+					query.NewExprUse(query.TypeUnknown{}, query.ExprInProjection),
+				}},
+			},
+		},
+	},
+	// aggregate-kind-rich-exprs spec §4.5 pin #9 — bare parameter as
+	// aggregate argument (Blocker 1). Today: functionArgRefs rejects
+	// parameter → fall through → classifyRichExpression registers
+	// ExprUse{TypeInt, ExprInProjection} for $p (count($p) types int,
+	// so the enclosing rich expression is TypeInt). Under the
+	// widening, classifyAggregateCall computes
+	// resultType=aggregateResultType(AggCount, TypeUnknown)=TypeInt
+	// as the enclosingType — same TypeInt. The enclosingType is the
+	// aggregate call's result type, NOT the operand's type — critical
+	// for count($p) where operand=TypeUnknown but the aggregate result
+	// is TypeInt unconditionally (spec §4.1 code shape, Blocker-1
+	// posture). Parameter Uses stable across widening; RED failure is
+	// on projection-kind only.
+	"aggregate count on bare parameter arg": {
+		src: "RETURN count($p)",
+		want: query.Query{
+			Branches: []query.Branch{{Parts: []query.Part{{
+				Returns: []query.ReturnItem{
+					{Name: "count($p)", Value: query.NewAggregateProjection(
+						query.AggCount,
+						nil,
+						false,
+						query.TypeInt{},
+					)},
+				},
+			}}}},
+			Parameters: []query.Parameter{
+				{Name: "p", Uses: []query.Use{
+					query.NewExprUse(query.TypeInt{}, query.ExprInProjection),
+				}},
+			},
+		},
+	},
+	// aggregate-kind-rich-exprs spec §4.5 pin #10 — bare-arg
+	// regression / bit-identity guard (Blocker 3(b)). Today's bare
+	// path via functionArgRefs → refFromNonArithmetic (shape.go:29-48)
+	// yields Ref{n, age}; post-widening the rich path via
+	// typeExpressionMining → typeAtom (typing.go:322-326) +
+	// typeNonArithmetic's single-lookup property upgrade
+	// (typing.go:292-300) yields the same Ref{n, age}. This pin is
+	// GREEN both pre- and post-widening: any drift in refs mining
+	// between the two paths surfaces as a structural break here.
+	// The two agreeing sites are named above; keep them synchronised.
+	"aggregate sum on bare property arg (regression)": {
+		src: "MATCH (n)\nRETURN sum(n.age)",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "sum(n.age)", Value: query.NewAggregateProjection(
+					query.AggSum,
+					[]query.Ref{{Variable: "n", Property: "age"}},
+					false,
+					query.TypeUnknown{},
+				)},
+			},
+		}),
+	},
+	// aggregate-kind-rich-exprs spec §4.5 pin #11 — count(count(*))
+	// at unit level (Blocker 4). Today: functionArgRefs rejects the
+	// count(*) argument (star atom is not var/var.prop and not a
+	// scalar literal) → fall through → classifyRichExpression yields
+	// ExprProjection{nil, TypeInt} (inner count(*) types TypeInt via
+	// typeAtom.COUNT arm, outer aggregateResultType(AggCount, TypeInt)
+	// = TypeInt). Target: AggregateProjection{AggCount, nil, false,
+	// TypeInt} — the outer count's kind enters the model; the inner
+	// count(*) stays a rich sub-expression the model does NOT expose
+	// (spec §1.3 asymmetry: outer aggregate visible, inner aggregate
+	// invisible). Parser disposition preserved bit-for-bit: the engine
+	// still raises NestedAggregation at compile time (bucket 3 per
+	// ADR 0007). Godog-corpus scenario [14] Aggregates in aggregates
+	// remains skiplist-pending under catGroupingKeySemantic (§4.7).
+	"aggregate count of count star": {
+		src: "RETURN count(count(*))",
+		want: oneBranch(query.Part{
+			Returns: []query.ReturnItem{
+				{Name: "count(count(*))", Value: query.NewAggregateProjection(
+					query.AggCount,
+					nil,
+					false,
+					query.TypeInt{},
+				)},
 			},
 		}),
 	},

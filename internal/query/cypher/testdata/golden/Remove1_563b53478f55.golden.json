@@ -15,13 +15,15 @@
             {
               "name": "totalNumberOfProps",
               "value": {
-                "kind": "expr",
+                "kind": "aggregate",
+                "func": "sum",
                 "refs": [
                   {
                     "variable": "n",
                     "property": ""
                   }
                 ],
+                "distinct": false,
                 "type": "unknown"
               }
             }

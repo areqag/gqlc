@@ -334,6 +334,20 @@ func (l *listener) refType(r query.Ref) query.Type {
 // set (spec §4). Every other function call keeps TypeUnknown — function
 // identity is below the type-interface boundary (ADR 0005).
 func (l *listener) classifyFunction(fi gen.IOC_FunctionInvocationContext) (query.Projection, bool) {
+	// aggregate-kind-rich-exprs spec §4.1: the aggregate-name check runs
+	// BEFORE functionArgRefs so an aggregate call with a rich argument
+	// (sum(x+1), count(n.age+1), collect(a OR b), min([1,2,3]),
+	// sum(range(1,3)), count(count(*))) lowers as an AggregateProjection
+	// with refs mined through the Stage-6 walker, instead of type-erasing
+	// through classifyRichExpression's ExprProjection fallback. Non-
+	// aggregate function calls keep the strict functionArgRefs path
+	// (§1.11: FuncProjection identity is below the type-interface
+	// boundary — widening it to carry rich arguments is out of scope).
+	if name, ok := functionName(fi); ok {
+		if fn, ok := aggregateFunc(name); ok {
+			return l.classifyAggregateCall(fi, fn), true
+		}
+	}
 	refs, ok := functionArgRefs(fi)
 	if !ok {
 		return nil, false
@@ -341,27 +355,55 @@ func (l *listener) classifyFunction(fi gen.IOC_FunctionInvocationContext) (query
 	for _, ref := range refs {
 		l.curPart.refs = append(l.curPart.refs, varRef{name: ref.Variable})
 	}
-	if name, ok := functionName(fi); ok {
-		if fn, ok := aggregateFunc(name); ok {
-			// The aggregate's operand type is the Stage-6 type of its single
-			// expression argument. Multi-argument aggregates (percentile*, whose
-			// second argument is the percentile) type as TypeUnknown regardless:
-			// the argument list is walked only for the first operand's type,
-			// and aggregateResultType(AggPercentile, _) returns TypeUnknown
-			// anyway, so no special-case is needed.
-			var operand query.Type
-			if args := fi.AllOC_Expression(); len(args) > 0 {
-				operand, _ = l.typeExpression(args[0])
-			}
-			distinct := fi.DISTINCT() != nil
-			return query.NewAggregateProjection(fn, refs, distinct, aggregateResultType(fn, operand)), true
-		}
-	}
 	resultType := query.Type(query.TypeUnknown{})
 	if t, ok := temporalConstructorType(fullFunctionName(fi)); ok {
 		resultType = t
 	}
 	return query.NewFuncProjection(refs, resultType), true
+}
+
+// classifyAggregateCall lowers an aggregate function invocation, whether its
+// arguments are bare (var/var.prop/scalar-literal) or rich (arithmetic,
+// nested calls, list/map literals, parameters, CASE, comprehensions,
+// count(*)). Refs are mined via typeExpressionMining — the same Stage-6
+// walker classifyRichExpression uses — so a bare argument mines the same
+// Ref{Variable, Property} the old functionArgRefs path produced (spec §1.4,
+// bit-identity traced at shape.go:29-48 vs. typing.go:322-326 +
+// typing.go:292-300), while a rich argument mines every var/var.prop atom in
+// depth-first, left-to-right traversal order with duplicates preserved.
+// Parameters encountered under the argument sub-tree are registered as
+// ExprUse{aggregateResultType(fn, operand), ExprInProjection} — Stage 6 §4
+// "no parameter is silently dropped" preserved verbatim, with the aggregate
+// call's own result type as the enclosingType (the analogue of
+// classifyRichExpression's whole-expression type; critical for count($p)
+// where operand=TypeUnknown but the aggregate result is TypeInt).
+func (l *listener) classifyAggregateCall(fi gen.IOC_FunctionInvocationContext, fn query.AggregateFunc) query.Projection {
+	var operand query.Type
+	var refs []query.Ref
+	var params []antlr.Tree
+	args := fi.AllOC_Expression()
+	if len(args) > 0 {
+		var opRefs []query.Ref
+		var opParams []antlr.Tree
+		operand, opRefs, opParams = l.typeExpressionMining(args[0])
+		refs = append(refs, opRefs...)
+		params = append(params, opParams...)
+	}
+	for _, arg := range args[1:] {
+		_, more, moreParams := l.typeExpressionMining(arg)
+		refs = append(refs, more...)
+		params = append(params, moreParams...)
+	}
+	resultType := aggregateResultType(fn, operand)
+	for _, p := range params {
+		name := parameterName(p)
+		if name == "" {
+			continue
+		}
+		l.addParameterUse(name, p, query.NewExprUse(resultType, query.ExprInProjection))
+	}
+	distinct := fi.DISTINCT() != nil
+	return query.NewAggregateProjection(fn, refs, distinct, resultType)
 }
 
 // mineClauseSlotParameter mines a bare $p atom from a SKIP or LIMIT expression,

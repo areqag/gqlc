@@ -8,8 +8,10 @@
             {
               "name": "things",
               "value": {
-                "kind": "expr",
+                "kind": "aggregate",
+                "func": "collect",
                 "refs": null,
+                "distinct": false,
                 "type": "list\u003clist\u003cunknown\u003e\u003e"
               }
             }

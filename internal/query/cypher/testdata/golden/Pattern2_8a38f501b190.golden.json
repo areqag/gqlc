@@ -17,8 +17,10 @@
             {
               "name": "c",
               "value": {
-                "kind": "expr",
+                "kind": "aggregate",
+                "func": "count",
                 "refs": null,
+                "distinct": false,
                 "type": "int"
               }
             }

@@ -15,7 +15,8 @@
             {
               "name": "count",
               "value": {
-                "kind": "expr",
+                "kind": "aggregate",
+                "func": "count",
                 "refs": [
                   {
                     "variable": "n",
@@ -34,6 +35,7 @@
                     "property": "list"
                   }
                 ],
+                "distinct": true,
                 "type": "int"
               }
             }

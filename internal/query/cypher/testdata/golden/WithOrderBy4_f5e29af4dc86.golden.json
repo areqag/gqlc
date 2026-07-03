@@ -30,7 +30,8 @@
             {
               "name": "sum",
               "value": {
-                "kind": "expr",
+                "kind": "aggregate",
+                "func": "sum",
                 "refs": [
                   {
                     "variable": "a",
@@ -41,6 +42,7 @@
                     "property": "num2"
                   }
                 ],
+                "distinct": false,
                 "type": "unknown"
               }
             }

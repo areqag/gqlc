@@ -27,7 +27,8 @@
             {
               "name": "eq",
               "value": {
-                "kind": "expr",
+                "kind": "aggregate",
+                "func": "collect",
                 "refs": [
                   {
                     "variable": "a",
@@ -54,6 +55,7 @@
                     "property": ""
                   }
                 ],
+                "distinct": false,
                 "type": "list\u003cbool\u003e"
               }
             }
