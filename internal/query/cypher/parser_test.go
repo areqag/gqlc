@@ -1180,7 +1180,11 @@ var mustParse = map[string]struct {
 	},
 	// Stage 10 — DISTINCT enters the model as a scalar axis. count(DISTINCT a)
 	// deduplicates its input before counting, so the model preserves the axis;
-	// count still types as TypeInt unconditionally.
+	// count still types as TypeInt unconditionally. The aggregate-level DISTINCT
+	// does NOT flip the enclosing part's Distinct axis (part-distinct-axis
+	// spec §1.5): the two grammar sites (oC_FunctionInvocation DISTINCT vs.
+	// oC_ProjectionBody DISTINCT) are read independently, so Part.Distinct
+	// stays false here (zero-valued, elided).
 	"count distinct": {
 		src: "OPTIONAL MATCH (a)\nRETURN count(DISTINCT a)",
 		want: oneBranch(query.Part{
@@ -1191,6 +1195,54 @@ var mustParse = map[string]struct {
 				{Name: "count(DISTINCT a)", Value: query.NewAggregateProjection(query.AggCount, []query.Ref{{Variable: "a"}}, true, query.TypeInt{})},
 			},
 		}),
+	},
+	// part-distinct-axis spec §1.9 #4 — RETURN DISTINCT n lifts the projection-
+	// body DISTINCT keyword onto Part.Distinct. The projection itself is an
+	// ordinary whole-entity RefProjection: DISTINCT deduplicates the row set
+	// AFTER projection, so the individual return item is unchanged.
+	"return distinct": {
+		src: "MATCH (n)\nRETURN DISTINCT n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+			Distinct: true,
+		}),
+	},
+	// part-distinct-axis spec §1.9 #5 — WITH DISTINCT flags the intermediate
+	// part it terminates, not the following part. Two parts in one branch:
+	// part 1 with Distinct=true and one RefProjection over `a`; part 2 with
+	// Distinct=false (zero-valued), an edge binding, and a RefProjection
+	// over `b`. Independence of siblings' Distinct axes is the point
+	// (spec §1.3).
+	"with distinct": {
+		src: "MATCH (a)\nWITH DISTINCT a\nMATCH (a)-->(b)\nRETURN b",
+		want: query.Query{
+			Branches: []query.Branch{{Parts: []query.Part{
+				{
+					Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
+					Returns: []query.ReturnItem{
+						{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
+					},
+					Distinct: true,
+				},
+				{
+					Bindings: []query.Binding{
+						must(query.NewNodeBinding("a", nil)),
+						must(query.NewEdgeBinding("", nil,
+							must(query.NewVarEndpoint("a")),
+							must(query.NewVarEndpoint("b")),
+							true,
+						)),
+						must(query.NewNodeBinding("b", nil)),
+					},
+					Returns: []query.ReturnItem{
+						{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"}, query.TypeNode{})},
+					},
+				},
+			}}},
+		},
 	},
 	// Stage 10 — collect(TypeNode) → list<node>. The aggregate always yields a
 	// list; the element type composes with Stage-6 typing (a bare node ref
