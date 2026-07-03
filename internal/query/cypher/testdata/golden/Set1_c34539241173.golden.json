@@ -25,7 +25,15 @@
             }
           ],
           "returnsAll": false,
-          "effects": null
+          "effects": [
+            {
+              "kind": "setProperty",
+              "variable": "n",
+              "property": "name",
+              "type": "string",
+              "refs": null
+            }
+          ]
         }
       ]
     }

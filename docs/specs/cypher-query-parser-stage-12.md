@@ -191,13 +191,31 @@ two categories:
   runs for this shape (a bare-atom expression has no parameter to
   mine).
 - **Rich expression.** Anything else — a list index
-  (`friends[$friendIndex]`), a function call, arithmetic. The
-  expression's refs enter the Effect's `Refs` slice (also the part's
-  ref list), and parameters record
-  `ExprUse{TypeUnknown, ExprInProjection}` — the parameter's role
-  is a delete target whose entity kind the parser cannot commit to
-  schema-free, so `TypeUnknown` is the honest posture the resolver
-  upgrades post-freeze.
+  (`friends[$friendIndex]`), a function call (`nodes($p)`),
+  arithmetic. The expression's refs enter the Effect's `Refs` slice
+  (also the part's ref list), and parameters record
+  `ExprUse{TypeUnknown, ExprInDeleteTarget}` (Stage 12 amend). The
+  DELETE target position is a **consumer** — its runtime entity
+  kind determines whether the delete is legal (only node/edge values
+  can be deleted) — semantically distinct from a SET value's
+  producer role and from a projection column's return-side role.
+  Wire tag: `"deleteTarget"`. `TypeUnknown` is the honest posture:
+  the parameter's role is a delete target whose entity kind the
+  parser cannot commit to schema-free; the resolver upgrades post-
+  freeze from the schema-known entity the value ultimately references.
+
+**Field contract on `DeleteEffect{Targets, Refs}`.** Every DELETE
+expression the query names appears in EXACTLY ONE of the Effect's
+slices — never both, never neither. `Targets` holds the resolved
+Ref when the expression is a bare `var` or `var.prop`; `Refs` holds
+the refs the rich expression touches otherwise. Bare cases go to
+Targets ONLY; rich cases go to Refs ONLY. No delete the query
+performs is silently absent from Effects. A rich-expression DELETE
+(`DELETE nodes(p)`) records the refs it touches but no resolved
+Target — the value's runtime entity kind is a resolver-time lookup
+below the parser boundary per ADR 0005, and a Target field would
+be a wrong concrete claim about a name the value expression does
+not directly name.
 
 The `Detach` flag mirrors the grammar's `DETACH` token: true for
 `DETACH DELETE`, false for `DELETE`. openCypher's semantic
@@ -214,19 +232,25 @@ produces one Effect:
 
 1. `propertyExpression = expression` → `SetPropertyEffect`. The
    propertyExpression must have exactly ONE property lookup (`n.age`,
-   not `n.a.b`); a multi-level propertyExpression on the left-hand
-   side is accepted-and-defer (bucket 3): the Ref records the
-   variable and the **first** lookup name only, an honest single-level
-   posture the resolver can distinguish from a valid single-level
-   SET by cross-checking the original text. The pinned-tag TCK
-   corpus does not exercise multi-level SET propertyExpression, so
-   the accept-with-first-level-only posture is safe today; a future
-   TCK bump that adds a multi-level case would need to revisit
-   (recorded in §8).
+   not `n.a.b`). A **nested** propertyExpression LHS (n.a.b) rejects
+   with `ErrNestedPropertyTarget` (Stage 12 amend, bucket 1). The
+   model's Ref carries a single Property, so a nested LHS has no
+   honest single-Ref shape — accept-and-truncate would claim SET
+   target `n.a` when the query says `n.a.b`, a wrong concrete claim
+   about the field repository codegen consumes. Real engines reject
+   nested SET at parse time ("only directly attached properties can
+   be set"), so the parse-reject aligns parser semantics with runtime
+   semantics. The pinned-tag TCK exercises zero nested SET LHS
+   (grep on `SET .*\.\w+\.\w+` returned nothing), so the rejection
+   has zero corpus fallout. `propertyExpressionRef` (shape.go)
+   accepts a parenthesised bare-variable atom (`(n).name` —
+   semantically identical to `n.name`, exercised by the openCypher
+   TCK) via `bareVariableFromAtom`'s paren unwrap; the openCypher
+   TCK scenarios Set1[3] and Set1[4] both use this shape.
 2. `variable = expression` → `SetEntityEffect{op: SetOpReplace}`.
    The value expression is typed via `typeExpressionMining`; every
    parameter under it records
-   `ExprUse{valueType, ExprInProjection}`.
+   `ExprUse{valueType, ExprInSetValue}`.
 3. `variable += expression` → `SetEntityEffect{op: SetOpMerge}`.
    Same typing as `SetOpReplace`; the operator distinction changes
    result semantics (replace vs. merge), which the model preserves.
@@ -234,15 +258,16 @@ produces one Effect:
    existing `nodeLabels` helper (verbatim the reader-side path).
 
 **Parameter typing under SET.** Every `$param` in a SET value
-expression records `ExprUse{ enclosingType, ExprInProjection }` —
-`ExprInProjection` because the SET value is a **producer** of a
-value the engine writes to the graph, semantically closer to a
-RETURN item's role than to a WHERE predicate's role. A future
-refinement could split "projection" into "projection" and "write
-value" for clarity, but the two roles collapse to the same
-resolver logic (unify the parameter's type against the enclosing
-expression's type), so the finer distinction adds no observable
-information.
+expression records `ExprUse{ enclosingType, ExprInSetValue }`.
+`ExprInSetValue` (Stage 12 amend) names the SET-value position
+honestly: a SET value is a **producer** of a value the engine writes
+to the graph, semantically opposite to a RETURN column's consumer
+role. The write-side distinction lets the resolver key on the target
+property's type for a schema-cross-check that a projection use would
+not carry (the resolver reads the enclosing `SetPropertyEffect`'s
+target Ref and `ValueType` alongside the parameter's Use, and the
+producer-vs-consumer axis marks which side of the unification the
+value participates in). Wire tag: `"setValue"` (query.go §ExprPosition).
 
 **References inside SET value expressions.** Rich SET values may
 touch other bindings (`SET a.numbers = a.numbers + [4, 5]`). The
@@ -257,8 +282,11 @@ is one of two alternatives:
 
 1. `variable :Labels` → `RemoveLabelsEffect`. Labels via `nodeLabels`.
 2. `propertyExpression` → `RemovePropertyEffect{Ref{var, prop}}`.
-   Same single-level narrowing as SET §1.5 case 1: multi-level
-   propertyExpression records the first lookup only.
+   Same shape rule as SET §1.5 case 1: nested propertyExpression
+   (n.a.b) rejects with `ErrNestedPropertyTarget` (Stage 12 amend,
+   bucket 1); a parenthesised bare-variable atom (`(n).name`)
+   accepts via the shared `bareVariableFromAtom` unwrap. The
+   pinned-tag TCK exercises zero nested REMOVE LHS.
 
 REMOVE takes no value expression, so there is no parameter mining
 under it beyond the variable's own ref (recorded onto `curPart.refs`
@@ -286,12 +314,30 @@ sentinel's reachability.
 ### 1.8 Sentinel status
 
 `ErrUnsupportedClause` stays; the write set's fail-sites move onto
-the parse-green path. No new sentinel is added. The four other
-sentinels (`ErrUnsupportedParameter`, `ErrUnboundVariable`,
+the parse-green path. Stage 12 (amend) adds one **user-facing**
+sentinel: `ErrNestedPropertyTarget` for nested SET/REMOVE
+propertyExpression LHS (spec §1.5 case 1, §1.6 case 2 — the
+bucket-1 reject that replaces the earlier accept-and-truncate
+posture). Fail-sites are `EnterOC_Set` (via `collectSetItem`) and
+`EnterOC_Remove` (via `collectRemoveItem`), both routing through
+`propertyExpressionRef`. The other four sentinels
+(`ErrUnsupportedParameter`, `ErrUnboundVariable`,
 `ErrVariableKindConflict`, `ErrPatternInProjection`) are unchanged
-in meaning and reach. `TestSentinelReachability` continues to run
-against the five-sentinel set; the `mustReject` pin that reaches
+in meaning and reach. `TestSentinelReachability` runs against the
+**six**-sentinel set; the `mustReject` pin that reaches
 `ErrUnsupportedClause` moves from CREATE to MERGE.
+
+Stage 12 (amend) also adds one **internal model-invariant**
+sentinel: `query.ErrEmptyPart` (on the query package, not cypher).
+It is unreachable via any parse input — the grammar rules out the
+zero-projection zero-binding zero-effect Part shape — but the
+`query.NewPart` smart constructor still refuses it, so illegal
+states are unrepresentable at model construction. Because
+`ErrEmptyPart` has no user-reachable fail-site, it is deliberately
+NOT in `cypher.allSentinels`; adding it would make
+`TestSentinelReachability` fail (a sentinel with no `mustReject`
+coverage). It is exercised only by the adversarial
+`TestNewPartRejectsEmpty` in `query_test.go`.
 
 ### 1.9 Corpus wiring
 
@@ -582,15 +628,24 @@ type Part struct {
 Effects is always emitted (an empty slice, `null`, or the effect
 array — matches the always-emit convention).
 
-**Invariant relaxed.** buildPart's implicit assumption "every part
-has some projection" (the read-core rule) relaxes to: a part is valid
-iff it carries at least one binding OR at least one effect OR a
+**Invariant relaxed AND made explicit at construction (Stage 12
+amend).** buildPart's implicit assumption "every part has some
+projection" (the read-core rule) relaxes to: a part is valid iff
+it carries at least one binding OR at least one effect OR a
 projection (Returns non-empty or ReturnsAll). A part with only
-Effects (no bindings, no returns) is a legal shape — e.g. a part in
-a chain where WITH exports names into the next part, then the next
-part is a pure `SET n.x = ...` write. The zero-projection zero-binding
-zero-effect Part is still invalid (it would parse only from a truly
-empty query fragment, which the grammar rejects).
+Effects (no bindings, no returns) is a legal shape — e.g. a part
+in a chain where WITH exports names into the next part, then the
+next part is a pure `SET n.x = ...` write. The zero-projection
+zero-binding zero-effect Part is unrepresentable at construction:
+`query.NewPart` (Stage 12 amend) is the smart constructor that
+rejects the all-empty shape with `query.ErrEmptyPart`. `buildPart`
+routes through `NewPart`, so any parse path that would yield an
+empty Part fails at build time. No parse path currently reaches
+`ErrEmptyPart` (the grammar rules the shape out), but the
+belt-and-braces guard keeps illegal states unrepresentable if a
+future grammar widening slips. Direct struct-literal construction
+in tests (mustParse fixtures) bypasses the guard by design — those
+callers hand-write a well-formed shape.
 
 ### 3.3 Effect wire encoding
 
@@ -703,7 +758,7 @@ func (l *listener) EnterOC_Delete(c *gen.OC_DeleteContext) {
             if name == "" {
                 continue
             }
-            l.addParameterUse(name, p, query.NewExprUse(query.TypeUnknown{}, query.ExprInProjection))
+            l.addParameterUse(name, p, query.NewExprUse(query.TypeUnknown{}, query.ExprInDeleteTarget))
         }
     }
     eff, err := query.NewDeleteEffect(targets, refs, detach)
@@ -719,6 +774,12 @@ func (l *listener) EnterOC_Delete(c *gen.OC_DeleteContext) {
 `typeExpressionMining` already pushes rich-expression refs onto
 `curPart.refs`, so no separate ref-append pass is needed for the
 rich case; the local `expRefs` copy is what the Effect records.
+`ExprInDeleteTarget` (Stage 12 amend) names the position of a
+`$param` under a DELETE rich target honestly: a consumer whose
+runtime kind determines whether the delete is legal, wire-tagged
+`"deleteTarget"`. See §1.4 for the full DeleteEffect field contract
+(every DELETE expression names appears in EXACTLY ONE of Targets/
+Refs — no silent absence).
 
 ### 4.3 EnterOC_Set
 
@@ -742,11 +803,12 @@ func (l *listener) collectSetItem(item gen.IOC_SetItemContext) {
         // propertyExpression = expression
         target, ok := propertyExpressionRef(item.OC_PropertyExpression())
         if !ok {
-            // multi-level or unrecognised shape — bucket-3 accept-and-defer:
-            // record the leftmost single-level view (the atom's variable, no
-            // property) so referential integrity holds against the variable;
-            // the runtime raises against the multi-level shape (ADR 0005).
-            target = leftmostRef(item.OC_PropertyExpression())
+            // Nested LHS (n.a.b) — bucket-1 reject. Accept-and-truncate
+            // would claim a wrong concrete target; real engines reject
+            // nested SET at parse. Zero corpus hits at the pinned tag.
+            l.fail(fmt.Errorf("%w: SET %s", ErrNestedPropertyTarget,
+                item.OC_PropertyExpression().GetText()))
+            return
         }
         l.curPart.refs = append(l.curPart.refs, varRef{name: target.Variable})
         valueType, refs, params := l.typeExpressionMining(item.OC_Expression())
@@ -755,7 +817,7 @@ func (l *listener) collectSetItem(item gen.IOC_SetItemContext) {
             if name == "" {
                 continue
             }
-            l.addParameterUse(name, p, query.NewExprUse(valueType, query.ExprInProjection))
+            l.addParameterUse(name, p, query.NewExprUse(valueType, query.ExprInSetValue))
         }
         eff, err := query.NewSetPropertyEffect(target, valueType, refs)
         if err != nil {
@@ -790,7 +852,7 @@ func (l *listener) collectSetItem(item gen.IOC_SetItemContext) {
             if name == "" {
                 continue
             }
-            l.addParameterUse(name, p, query.NewExprUse(valueType, query.ExprInProjection))
+            l.addParameterUse(name, p, query.NewExprUse(valueType, query.ExprInSetValue))
         }
         eff, err := query.NewSetEntityEffect(variable, op, valueType, refs)
         if err != nil {
@@ -802,13 +864,22 @@ func (l *listener) collectSetItem(item gen.IOC_SetItemContext) {
 }
 ```
 
-`propertyExpressionRef` is a new helper in `shape.go`: it reads a
+`propertyExpressionRef` is a helper in `shape.go`: it reads a
 propertyExpression that has exactly one lookup and returns the
-`Ref{Variable, Property}`; ok is false for any other shape
-(multi-level, missing variable, atom that isn't a variable).
+`Ref{Variable, Property}`. ok is false for any other shape
+(multi-lookup, missing variable, atom that isn't a variable —
+directly OR after unwrapping a parenthesised bare-variable atom
+via `bareVariableFromAtom`). Callers reject `!ok` with
+`ErrNestedPropertyTarget`.
 
-`leftmostRef` extracts the atom's variable as a bare Ref
-(Property empty); used only in the multi-level bucket-3 fallback.
+`bareVariableFromAtom` (Stage 12 amend) walks the atom to find a
+bare variable, unwrapping any number of parenthesised expressions
+(`n`, `(n)`, `((n))`). It rejects an atom whose parenthesised body
+carries property lookups, list operators, or node labels — those
+are richer shapes than the propertyExpression LHS admits.
+Motivated by TCK Set1[3] and Set1[4] which use `SET (n).name = ...`
+and `SET (r).name = ...` — semantically identical to bare-atom
+targets.
 
 `setItemOp` walks the SetItem's direct children and returns
 `SetOpReplace` for a `=` terminal (T__2), `SetOpMerge` for `+=`
@@ -847,7 +918,8 @@ func (l *listener) collectRemoveItem(item gen.IOC_RemoveItemContext) {
     if pe := item.OC_PropertyExpression(); pe != nil {
         target, ok := propertyExpressionRef(pe)
         if !ok {
-            target = leftmostRef(pe)
+            l.fail(fmt.Errorf("%w: REMOVE %s", ErrNestedPropertyTarget, pe.GetText()))
+            return
         }
         l.curPart.refs = append(l.curPart.refs, varRef{name: target.Variable})
         eff, err := query.NewRemovePropertyEffect(target)
@@ -881,6 +953,18 @@ downstream ref — so the only new admitted shape is "at least one
 Effect and no projection." Formally: no test in `buildPart` is
 removed; the new admission is a consequence of the field being
 optional.
+
+**Stage 12 amend — routing through NewPart.** `buildPart` no
+longer builds a `query.Part{...}` struct literal; instead it calls
+`query.NewPart(bindings, returns, returnsAll, effects)`. The
+smart constructor rejects the all-empty shape with
+`query.ErrEmptyPart`, enforcing "illegal states unrepresentable at
+model construction." No parse path reaches the fail-site (the
+grammar rules the empty shape out), so `ErrEmptyPart` is NOT in
+the cypher package's sentinel-reachability sweep — it is exercised
+only by the adversarial `TestNewPartRejectsEmpty` in
+`query_test.go`. The belt-and-braces guard keeps illegal states
+unrepresentable if a future grammar widening slips.
 
 The exported-names set (`buildBranch`'s left-to-right threading)
 falls through unchanged: a projection-less part exports the same
@@ -990,29 +1074,60 @@ The `mustReject` `write clause` pin moves from CREATE to MERGE:
 | parser (red) | Failing `mustParse` pins for the Stage-12 shapes (CREATE binds, DETACH DELETE, SET prop-and-param, SET labels, REMOVE prop/labels, plus two authored parameter-typed pins); `mustReject` pin swapped CREATE→MERGE. `query.StatementKind`, `query.Effect` sum, `query.Part.Effects` added but Enter handlers still emit ErrUnsupportedClause, so the pins fail |
 | parser (green) | Enter handlers for Create/Delete/Set/Remove parse into effects; `SetItem` alternatives dispatched; `RemoveItem` alternatives dispatched; `writeSeen` bool populates `StatementKind`; `buildPart` invariant relaxation; goldens regenerated for scenarios newly parse-green |
 | unlock (dirs + skiplist) | `readCoreDirs` gains `clauses/{create,delete,set,remove}`; skiplist entries per bucket-3 negative with ADR 0007 rationale; goldens audited; acceptance-suite step `the result should be empty` transitions from PENDING-on-write to golden-check |
+| amend RED (Q2 + Flag 1/2/3 rulings) | Adds `ExprInSetValue`, `ExprInDeleteTarget` positions (declarations only), `ErrNestedPropertyTarget` sentinel (declaration only), `ErrEmptyPart` + `NewPart` on the query package. Adds 2 new `mustReject` pins (nested SET / nested REMOVE), 1 new `mustParse` pin (DELETE rich expression with param), retargets the SET-param authored pin from `ExprInProjection` → `ExprInSetValue`. Model surface is present but code does not yet route to it — the 4 pins fail |
+| amend FIX (rulings implementation) | Routes `collectSetItem` / `collectRemoveItem` to fail with `ErrNestedPropertyTarget` on nested LHS (drops `leftmostRef` — dead code); `bareVariableFromAtom` unwraps parenthesised bare-variable atoms (`(n).name`) so Set1[3]/[4] TCK scenarios still accept; SET value params record `ExprInSetValue`, DELETE rich params record `ExprInDeleteTarget`; `buildPart` routes through `NewPart`; `allSentinels` gains `ErrNestedPropertyTarget`; 2 Set1 goldens regenerated (Set1[3]/[4] previously silently dropped the SET effect via truncation; the paren-unwrap fix records the honest `SetPropertyEffect`); spec + CONTEXT.md mirror the code |
 
 Each commit is green in isolation of the ones after it — the parser
 red commit adds the model surface and pins that fail; the parser
-green commit adds the handlers; the unlock commit wires the dirs.
+green commit adds the handlers; the unlock commit wires the dirs;
+the amend RED / FIX pair layers the rulings correction with the
+RED-then-GREEN discipline preserved.
 
 ---
 
 ## 8. Weakest points recorded honestly (per ADR 0004)
 
-**The most fragile part of Stage 12 is the multi-level
-propertyExpression on the LHS of SET / REMOVE.** The grammar admits
-`n.a.b.c` as a propertyExpression; the model's Ref carries a single
-Property name, so a multi-level LHS silently truncates to the first
-lookup (n.a). The pinned-tag TCK exercises zero multi-level SET LHS
-(a full grep on `SET .*\.\w+\.\w+` returned nothing), so the
-truncation is unobservable today. A future TCK bump that adds a
-multi-level case would need a real fix: widening Ref to hold a []Property
-path (cascading through PropertyUse, RefProjection, and every consumer
-of Ref) or a Stage-12-time rejection (a new sentinel, breaking the
-"Stage 12 adds no new sentinel" clean line). Either is a bigger
-model surgery than the value-level rule warrants at Stage 12; the
-choice belongs to whichever stage the corpus first presses the
-shape.
+**The most fragile part of Stage 12 (post-amend) is the paren-
+unwrap rule for SET/REMOVE LHS.** `bareVariableFromAtom` recurses
+through parenthesised expressions until it finds a bare variable
+(or a non-variable atom, which fails). The pinned-tag TCK exercises
+only two shapes — `(n).name` and `(r).name` — both of which are
+one paren layer around a bare variable, and the recursion handles
+them cleanly. But the unwrap admits an unbounded number of paren
+layers (`((n)).name`) and a parenthesised expression whose body
+happens to be a bare-variable atom carrying a suppressed suffix
+(the recursion rejects lookups, list operators, and node labels
+inside the parens, so `(n.x).y` correctly falls through to
+`ErrNestedPropertyTarget`). Fragility: a future grammar extension
+that introduces a new atom-level suffix would need
+`bareVariableFromAtom` to also reject it, or the unwrap would
+silently truncate again. The recursion's rejection list is a
+closed set today (property lookups, list operators, node labels);
+adding a new atom-suffix would flag a bead against this file.
+
+**Nested SET/REMOVE LHS is a hard reject, not a truncation
+(Stage 12 amend).** Historic entry: earlier drafts of this spec
+proposed accept-and-truncate for `n.a.b` — the truncation was
+called out as the "most fragile part of Stage 12," and the
+rulings fold-in replaced it with `ErrNestedPropertyTarget`
+(bucket 1). The grep-zero corpus finding held: no pinned scenario
+exercises a nested LHS. The rejection is now permanent; a future
+TCK bump that adds a positive nested-SET scenario would need to
+widen `Ref` to hold a `[]Property` path (cascading through
+PropertyUse, RefProjection, every Ref consumer) — a bigger model
+surgery whose scope belongs to whichever stage the corpus first
+presses the shape.
+
+**The `ExprInSetValue` / `ExprInDeleteTarget` split anticipates a
+resolver that keys on the producer-vs-consumer axis.** No known
+consumer needs the four-way position discriminator today; a future
+consolidation that collapses it back to a two-way (producer /
+consumer) or one-way (any-rich-expression) split would lose no
+information beyond the position tag itself. The split is chosen
+because it keeps the axis honest across the write set and because
+the cost of over-splitting now is cheaper than the cost of
+under-splitting Stage 13 / 14 (MERGE / CALL) later, which will
+want their own positions if this axis stays binary.
 
 **The next-most fragile part is CREATE's anonymous-binding
 capture.** CREATE reuses `collectPattern`, which appends every raw
@@ -1059,30 +1174,51 @@ The lesser risks, recorded for completeness:
 - **The `mustParse` authored pins for parameter-typed writes lean
   on the resolver upgrading a bare `$name` from a schema-known
   property type.** The parser records `PropertyUse{Ref{p, name}}`
-  for the CREATE inline-map case and `ExprUse{TypeUnknown,
-  ExprInProjection}` for the bare-`$newAge` SET case. The
-  RESOLVER's job is to unify these into a concrete parameter type
-  post-freeze; the PARSER's contract is only "no parameter is
-  silently dropped, and every use carries enough for the resolver
-  to unify from the schema." A downstream consumer that reads the
-  parameter's Uses list before the freeze would see TypeUnknown
-  on the bare-SET case and rightly conclude "the parser cannot
-  tell" — which is the honest posture (ADR 0005).
-- **The `the result should be empty` acceptance-suite step
-  transitions in-place.** Its current code checks for
-  `ErrUnsupported*` PENDING and only otherwise routes through
-  `noSideEffects`; Stage 12 makes it route through `checkGolden`
-  for any parsed write. A scenario relying on the old PENDING
-  behaviour (a write scenario that has NOT been snapshotted) would
-  fail loudly on the first Stage 12 run rather than silently
-  passing — which is what `TestGoldenOrphans` and the
-  `-update` pass catch. The transition is safe; the risk is that
-  a Stage-13 (MERGE) or Stage-14 (CALL) scenario with `the result
-  should be empty` and no golden would fail Stage 12's harness. A
-  narrow fix would gate the `checkGolden` path on the parse
-  succeeding AND `q.StatementKind == StatementWrite` — otherwise
-  fall back to the current PENDING behaviour. §7's parser-green
-  commit implements this gate.
+  for the CREATE inline-map case, `ExprUse{TypeUnknown,
+  ExprInSetValue}` for the bare-`$newAge` SET case, and
+  `ExprUse{TypeUnknown, ExprInDeleteTarget}` for the `nodes($p)`
+  DELETE case. The RESOLVER's job is to unify these into a concrete
+  parameter type post-freeze; the PARSER's contract is only "no
+  parameter is silently dropped, and every use carries enough for
+  the resolver to unify from the schema." A downstream consumer
+  that reads the parameter's Uses list before the freeze would see
+  TypeUnknown on the bare-SET and DELETE cases and rightly conclude
+  "the parser cannot tell" — which is the honest posture (ADR 0005).
+- **Meta-test behavior change — `the result should be empty` gate
+  transition (disclosure for Reviewer parity).** Pre-Stage-12, the
+  `the result should be empty` acceptance step silently PASSED any
+  scenario whose parse returned an `ErrUnsupported*` sentinel — the
+  sentinel gate short-circuited before `checkGolden` was reached.
+  Post-Stage-12, that gate stops firing for CREATE / DELETE / SET /
+  REMOVE (they parse-accept), so `checkGolden` runs against a real
+  wire shape. A write scenario without a snapshotted golden fails
+  loudly on the first Stage-12 run rather than silently passing —
+  which is what the UNLOCK commit's 137 golden generation covers.
+  Reviewer parity expectation: zero silent-PENDING scenarios in the
+  four write dirs (clauses/create, clauses/delete, clauses/set,
+  clauses/remove). A future Stage-13 (MERGE) or Stage-14 (CALL)
+  scenario with `the result should be empty` and no golden would
+  fail Stage 12's harness — a narrow fix gates the `checkGolden`
+  path on the parse succeeding AND `q.StatementKind ==
+  StatementWrite`, otherwise falls back to PENDING (parser-green
+  commit implements this gate).
+- **The Stage 12 amend fold-in exposed a pre-existing silent-drop
+  bug in the paren-atom LHS path (disclosure).** Set1 TCK
+  scenarios [3] and [4] use `SET (n).name = 'neo4j'` and `SET
+  (r).name = 'neo4j'` — parenthesised bare-variable atoms. The
+  pre-amend code path (accept-and-truncate via `leftmostRef`)
+  returned `Ref{Variable: "", Property: ""}` because `leftmostRef`
+  read `atom.OC_Variable()` directly and got nil for a
+  parenthesised atom; the empty-Variable check then bailed out
+  without appending any Effect. Consequence: the two goldens
+  recorded `"effects": null` — the SET was silently ABSENT from
+  the model. The amend's `bareVariableFromAtom` unwrap accepts the
+  paren shape and records the honest `SetPropertyEffect`; the two
+  goldens are regenerated to reflect the correct wire shape. The
+  regenerated goldens are strictly more information than the
+  pre-amend snapshots (they gain the missing Effect), matching the
+  "no delete/write the query performs is silently absent" contract
+  §1.4 documents for DELETE.
 - **`Effects` is always emitted, even when nil.** A pre-Stage-12
   golden's wire shape gains `"effects": null` after a `-update`
   pass. This is a strictly additive change — no consumer can be

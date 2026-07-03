@@ -352,10 +352,13 @@ func (l *listener) EnterOC_Merge(*gen.OC_MergeContext) {
 // enter DeleteEffect.Targets so the resolver can trace each to a schema entity
 // kind; every other shape (list index, arithmetic, function call) is a rich
 // target whose refs enter DeleteEffect.Refs and whose parameters record
-// ExprUse{TypeUnknown, ExprInProjection} — TypeUnknown is the honest posture
+// ExprUse{TypeUnknown, ExprInDeleteTarget} — TypeUnknown is the honest posture
 // (the parameter's role is a delete target whose entity kind the parser
-// cannot commit to schema-free). The Detach axis mirrors the DETACH token
-// verbatim.
+// cannot commit to schema-free); ExprInDeleteTarget names the position honestly
+// as a consumer role distinct from a projection column (spec §4.2 amend).
+// The Detach axis mirrors the DETACH token verbatim. Every DELETE expression
+// the query names appears in EXACTLY ONE of Targets / Refs — never both, never
+// neither — so no delete the query performs is silently absent from Effects.
 func (l *listener) EnterOC_Delete(c *gen.OC_DeleteContext) {
 	if l.subqueryDepth > 0 {
 		return
@@ -377,7 +380,7 @@ func (l *listener) EnterOC_Delete(c *gen.OC_DeleteContext) {
 			if name == "" {
 				continue
 			}
-			l.addParameterUse(name, p, query.NewExprUse(query.TypeUnknown{}, query.ExprInProjection))
+			l.addParameterUse(name, p, query.NewExprUse(query.TypeUnknown{}, query.ExprInDeleteTarget))
 		}
 	}
 	l.curPart.effects = append(l.curPart.effects, query.NewDeleteEffect(targets, refs, detach))
@@ -389,7 +392,10 @@ func (l *listener) EnterOC_Delete(c *gen.OC_DeleteContext) {
 // propExpr = expr / var = expr / var += expr / var :Labels — the first three
 // share a value expression that rides typeExpressionMining, so its Stage-6
 // result type becomes the Effect's ValueType and its parameters record
-// ExprUse{valueType, ExprInProjection} — the typed-write contract.
+// ExprUse{valueType, ExprInSetValue} — the typed-write contract, with the
+// producer-side position distinct from a projection column (spec §1.5 amend).
+// A nested propertyExpression LHS (n.a.b) rejects with
+// ErrNestedPropertyTarget via collectSetItem.
 func (l *listener) EnterOC_Set(c *gen.OC_SetContext) {
 	if l.subqueryDepth > 0 {
 		return

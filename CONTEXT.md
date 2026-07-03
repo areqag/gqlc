@@ -253,9 +253,12 @@ first-appearance order. Carries its **uses** — value-positions it appears
 in, each either a property reference, a clause slot, or an expression use
 (including value expressions on the right-hand side of a **write clause**,
 Stage 12: a `$param` under a `SET n.age = $param` records an `ExprUse`
-against the value expression's Stage-6 type, the typed-write contract that
-lets the resolver infer a write parameter's type from the expression's
-result type). Becomes a generated method argument.
+against the value expression's Stage-6 type, position `ExprInSetValue`
+— the producer-side write-value axis distinct from a projection column's
+consumer role; a `$param` under a rich DELETE target records
+`ExprInDeleteTarget`, and the resolver keys on the producer/consumer axis
+alongside the enclosing expression's type). Becomes a generated method
+argument.
 _Avoid_: argument (reserve for the generated code).
 
 **Statement kind**:
@@ -278,9 +281,13 @@ One write operation the query performs at a specific **query part** — the
 per-part analogue of a **return item**. A closed sum of `CreateEffect`
 (one `CREATE` clause, carrying the ordered list of binding variables the
 clause introduced), `DeleteEffect` (one `DELETE` / `DETACH DELETE`,
-carrying the targeted Refs, the rich-expression refs, and a `Detach`
-flag), `SetPropertyEffect` (one `SET n.prop = value` item, carrying the
-property target Ref, the value's Stage-6 type, and its touched refs),
+carrying the targeted Refs (bare `var` / `var.prop` targets), the
+rich-expression refs (everything else — the two slices partition the
+DELETE expressions, never both, never neither, so no delete is silently
+absent), and a `Detach` flag), `SetPropertyEffect` (one `SET n.prop = value`
+item, carrying the property target Ref, the value's Stage-6 type, and its
+touched refs; a nested LHS `n.a.b` rejects with `ErrNestedPropertyTarget`
+rather than truncating),
 `SetEntityEffect` (one `SET var = value` or `SET var += value` item,
 carrying the target variable, a `SetOp` axis for `=` vs `+=`, the value's
 Stage-6 type, and its refs — one variant, one axis, mirroring

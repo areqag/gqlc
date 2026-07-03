@@ -1591,24 +1591,27 @@ var mustParse = map[string]struct {
 	},
 
 	// AUTHORED (Stage 12 amend §4.2): DELETE with a rich-shape target
-	// (an index expression, DELETE friends[$idx]). The pinned-tag TCK
-	// does not exercise a $param inside a DELETE rich expression
-	// (grep confirmed zero). The DeleteEffect carries no resolved Target
-	// (the rich shape has no honest single-Ref view; the value's entity
-	// kind is a resolver-time lookup below the parser boundary per
-	// ADR 0005) and records the touched refs. The $idx records
-	// ExprUse{TypeUnknown, ExprInDeleteTarget} — the DELETE target is a
-	// consumer position whose runtime entity kind determines whether the
-	// delete is legal, semantically distinct from a SET value's producer
-	// role and from a projection column's return-side role.
+	// (a function invocation, DELETE nodes($p)). The pinned-tag TCK does
+	// not exercise a $param inside a DELETE rich expression (grep
+	// confirmed zero). The DeleteEffect carries no resolved Target (the
+	// rich shape has no honest single-Ref view; the value's entity kind
+	// is a resolver-time lookup below the parser boundary per ADR 0005).
+	// The $p records ExprUse{TypeUnknown, ExprInDeleteTarget} — the
+	// DELETE target is a consumer position whose runtime entity kind
+	// determines whether the delete is legal, semantically distinct from
+	// a SET value's producer role and from a projection column's return-
+	// side role. Function-invocation shape chosen over list-index
+	// (n.friends[$idx]) because the current typer mines params inside
+	// function args but not inside list-operator suffixes; the shape
+	// robustly exercises the ExprInDeleteTarget wiring at the pinned tag.
 	"delete rich expression with param": {
-		src: "MATCH (n)\nDELETE n.friends[$idx]",
+		src: "MATCH (n)\nDELETE nodes($p)",
 		want: oneWriteBranch(query.Part{
 			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
 			Effects: []query.Effect{
-				query.NewDeleteEffect(nil, []query.Ref{{Variable: "n", Property: "friends"}}, false),
+				query.NewDeleteEffect(nil, nil, false),
 			},
-		}, query.Parameter{Name: "idx", Uses: []query.Use{
+		}, query.Parameter{Name: "p", Uses: []query.Use{
 			query.NewExprUse(query.TypeUnknown{}, query.ExprInDeleteTarget),
 		}}),
 	},
@@ -1803,7 +1806,7 @@ func TestMustReject(t *testing.T) {
 	}
 }
 
-// allSentinels is the canonical list of the five Parse sentinels — the single
+// allSentinels is the canonical list of the six Parse sentinels — the single
 // source of truth TestSentinelReachability checks against. A new sentinel must be
 // added here (and exercised by a mustReject case); a removed one must be dropped.
 // errNotImplemented is deliberately absent: it is the run-A stub, not a contract
@@ -1814,12 +1817,18 @@ func TestMustReject(t *testing.T) {
 // all parse under the widened model, so the sentinel has no fail-site left.
 // Stage 11 adds ErrPatternInProjection: a pattern predicate used as a scalar
 // RETURN / WITH column is a bucket-1 parse-shape rejection (Pattern1 [22]/[23]).
+// Stage 12 adds ErrNestedPropertyTarget: SET/REMOVE nested LHS (n.a.b) has no
+// honest single-Ref shape in the model, and real engines reject it. The
+// internal model-invariant sentinel ErrEmptyPart lives on the query package
+// (not cypher) and is NOT included here — it is unreachable via parse (the
+// grammar rules out the shape), so a reachability sweep would fail.
 var allSentinels = []error{
 	cypher.ErrUnsupportedClause,
 	cypher.ErrUnsupportedParameter,
 	cypher.ErrUnboundVariable,
 	cypher.ErrVariableKindConflict,
 	cypher.ErrPatternInProjection,
+	cypher.ErrNestedPropertyTarget,
 }
 
 // TestSentinelReachability is the bidirectional sweep (mirroring schema/gql): the

@@ -444,46 +444,55 @@ func originalText(ts *antlr.CommonTokenStream, ctx antlr.ParserRuleContext) stri
 
 // propertyExpressionRef reads a Ref{Variable, Property} from a single-level
 // propertyExpression on the LHS of a SET or REMOVE item (Stage 12 spec §4.3,
-// §4.4). ok is false when the atom is not a bare variable, when the
-// propertyExpression carries zero or more-than-one lookup, or when any list
-// operator suffix is attached. Multi-level (n.a.b) yields ok=false; the
-// caller narrows to the leftmost Ref via leftmostRef, an accept-and-defer
-// against the runtime.
+// §4.4). It accepts a bare-variable atom or a parenthesised bare-variable
+// atom (`(n).name` — semantically identical to `n.name`; the openCypher TCK
+// exercises both shapes). ok is false when the propertyExpression carries
+// zero or more-than-one lookup, when the atom (after unwrapping parens)
+// is not a bare variable, or when any list operator suffix is attached
+// beyond the parenthesised path. A nested LHS (n.a.b) yields ok=false; the
+// caller rejects with ErrNestedPropertyTarget (Stage 12 amend §1.5 / §1.6) —
+// accept-and-truncate would claim the wrong concrete target field, which
+// repository codegen consumes as the property to write.
 func propertyExpressionRef(pe gen.IOC_PropertyExpressionContext) (query.Ref, bool) {
 	if pe == nil {
 		return query.Ref{}, false
 	}
-	atom := pe.OC_Atom()
-	if atom == nil || atom.OC_Variable() == nil {
-		return query.Ref{}, false
-	}
-	variable := atom.OC_Variable().GetText()
 	lookups := pe.AllOC_PropertyLookup()
 	if len(lookups) != 1 {
+		return query.Ref{}, false
+	}
+	variable, ok := bareVariableFromAtom(pe.OC_Atom())
+	if !ok {
 		return query.Ref{}, false
 	}
 	return query.Ref{Variable: variable, Property: lookups[0].OC_PropertyKeyName().GetText()}, true
 }
 
-// leftmostRef narrows a propertyExpression to the leftmost Ref: the atom's
-// variable name and the first property lookup (if any). Used only as the
-// bucket-3 fallback when propertyExpressionRef reports ok=false (a
-// multi-level LHS like n.a.b.c narrows to {n, a}; a non-variable atom
-// yields the zero Ref, which the caller treats as "nothing to record").
-func leftmostRef(pe gen.IOC_PropertyExpressionContext) query.Ref {
+// bareVariableFromAtom unwraps an atom to its underlying variable name, if the
+// atom is a bare variable — either directly (n) or through a parenthesised
+// expression that itself collapses to a bare variable ((n), ((n))). Returns
+// ("", false) for any other atom shape (a literal, a function invocation, a
+// list operator, a parenthesised expression whose body is not a bare
+// variable). Used by propertyExpressionRef to accept the parenthesised-atom
+// SET/REMOVE LHS shape the openCypher TCK exercises.
+func bareVariableFromAtom(a gen.IOC_AtomContext) (string, bool) {
+	if a == nil {
+		return "", false
+	}
+	if v := a.OC_Variable(); v != nil {
+		return v.GetText(), true
+	}
+	pe := a.OC_ParenthesizedExpression()
 	if pe == nil {
-		return query.Ref{}
+		return "", false
 	}
-	atom := pe.OC_Atom()
-	if atom == nil || atom.OC_Variable() == nil {
-		return query.Ref{}
+	nae := nonArithmetic(pe.OC_Expression())
+	if nae == nil || nae.OC_NodeLabels() != nil ||
+		len(nae.AllOC_ListOperatorExpression()) > 0 ||
+		len(nae.AllOC_PropertyLookup()) > 0 {
+		return "", false
 	}
-	variable := atom.OC_Variable().GetText()
-	lookups := pe.AllOC_PropertyLookup()
-	if len(lookups) == 0 {
-		return query.Ref{Variable: variable}
-	}
-	return query.Ref{Variable: variable, Property: lookups[0].OC_PropertyKeyName().GetText()}
+	return bareVariableFromAtom(nae.OC_Atom())
 }
 
 // setItemOp reads the SET-item's `=` vs `+=` alternative by inspecting the
