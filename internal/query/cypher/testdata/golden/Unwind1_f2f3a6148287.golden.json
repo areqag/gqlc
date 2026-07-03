@@ -1,0 +1,83 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "p",
+              "labels": [
+                "Person"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "unwind",
+              "variable": "prop",
+              "elemType": "unknown",
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "p.name",
+              "value": {
+                "kind": "ref",
+                "variable": "p",
+                "property": "name",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "p.login",
+              "value": {
+                "kind": "ref",
+                "variable": "p",
+                "property": "login",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "merge",
+              "variables": [
+                "p"
+              ],
+              "onMatch": null,
+              "onCreate": null
+            },
+            {
+              "kind": "setProperty",
+              "variable": "p",
+              "property": "name",
+              "type": "unknown",
+              "refs": [
+                {
+                  "variable": "prop",
+                  "property": "name"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": [
+    {
+      "name": "props",
+      "uses": [
+        {
+          "kind": "expr",
+          "enclosingType": "unknown",
+          "position": "projection"
+        }
+      ]
+    }
+  ],
+  "statementKind": "write"
+}

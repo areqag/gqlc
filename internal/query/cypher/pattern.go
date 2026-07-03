@@ -39,43 +39,57 @@ func (l *listener) collectPattern(p gen.IOC_PatternContext, optional bool) {
 		return
 	}
 	for _, part := range p.AllOC_PatternPart() {
-		var pathVar string
-		if v := part.OC_Variable(); v != nil {
-			pathVar = v.GetText()
-		}
-		var pathMembers []query.PathMember
-		if pathVar != "" {
-			// Only accumulate the members list when the pattern part is a
-			// named path — collectPatternElement records to this slice
-			// alongside the part's raw bindings when non-nil.
-			pathMembers = make([]query.PathMember, 0, 8)
-			l.curPart.pathMemberSink = &pathMembers
-		}
-		l.collectPatternElement(part.OC_AnonymousPatternPart().OC_PatternElement(), optional)
-		l.curPart.pathMemberSink = nil
+		l.collectPatternPart(part, optional)
 		if l.err != nil {
 			return
 		}
-		if pathVar != "" {
-			// Three-way collision sweep: an existing UnwindBinding with the same
-			// name is a kind conflict (path vs unwind), symmetric with the
-			// pathBindings-vs-byVar check in buildPart. byVar and byVar-vs-path
-			// are handled elsewhere; this catches the path-vs-unwind direction
-			// at listener time so the fail-site stays local to the offending
-			// clause (spec §4.3 amend).
-			for _, ub := range l.curPart.unwindBindings {
-				if ub.Variable() == pathVar {
-					l.fail(fmt.Errorf("%w: %s", ErrVariableKindConflict, pathVar))
-					return
-				}
-			}
-			pb, err := query.NewPathBinding(pathVar, pathMembers)
-			if err != nil {
-				l.fail(err)
+	}
+}
+
+// collectPatternPart lowers a single oC_PatternPart. Factored out of
+// collectPattern so MERGE (which admits exactly one oC_PatternPart per the
+// grammar — Cypher.g4 §oC_Merge) can share the code path without the outer
+// comma-list loop.
+func (l *listener) collectPatternPart(part gen.IOC_PatternPartContext, optional bool) {
+	if part == nil {
+		return
+	}
+	var pathVar string
+	if v := part.OC_Variable(); v != nil {
+		pathVar = v.GetText()
+	}
+	var pathMembers []query.PathMember
+	if pathVar != "" {
+		// Only accumulate the members list when the pattern part is a
+		// named path — collectPatternElement records to this slice
+		// alongside the part's raw bindings when non-nil.
+		pathMembers = make([]query.PathMember, 0, 8)
+		l.curPart.pathMemberSink = &pathMembers
+	}
+	l.collectPatternElement(part.OC_AnonymousPatternPart().OC_PatternElement(), optional)
+	l.curPart.pathMemberSink = nil
+	if l.err != nil {
+		return
+	}
+	if pathVar != "" {
+		// Three-way collision sweep: an existing UnwindBinding with the same
+		// name is a kind conflict (path vs unwind), symmetric with the
+		// pathBindings-vs-byVar check in buildPart. byVar and byVar-vs-path
+		// are handled elsewhere; this catches the path-vs-unwind direction
+		// at listener time so the fail-site stays local to the offending
+		// clause (spec §4.3 amend).
+		for _, ub := range l.curPart.unwindBindings {
+			if ub.Variable() == pathVar {
+				l.fail(fmt.Errorf("%w: %s", ErrVariableKindConflict, pathVar))
 				return
 			}
-			l.curPart.pathBindings = append(l.curPart.pathBindings, pb)
 		}
+		pb, err := query.NewPathBinding(pathVar, pathMembers)
+		if err != nil {
+			l.fail(err)
+			return
+		}
+		l.curPart.pathBindings = append(l.curPart.pathBindings, pb)
 	}
 }
 

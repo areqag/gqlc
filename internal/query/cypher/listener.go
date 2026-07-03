@@ -340,11 +340,100 @@ func (l *listener) EnterOC_Create(c *gen.OC_CreateContext) {
 	l.writeSeen = true
 }
 
-func (l *listener) EnterOC_Merge(*gen.OC_MergeContext) {
+// EnterOC_Merge collects the MERGE clause: the pattern's single oC_PatternPart
+// via collectPatternPart (the grammar admits exactly one part — spec §4.1),
+// then each ON MATCH / ON CREATE action's SetEffects via collectMergeAction.
+// Variables mirrors CreateEffect.Variables: the [before..len(bindings)] delta
+// captures the bindings THIS clause introduced. writeSeen flips at outer
+// scope so the query's StatementKind lands StatementWrite; a MERGE inside
+// EXISTS { ... } early-returns at the subqueryDepth guard, so the outer
+// query keeps its read/write kind untouched (Stage 11 §1.6).
+func (l *listener) EnterOC_Merge(c *gen.OC_MergeContext) {
 	if l.subqueryDepth > 0 {
+		return // Stage 11 §1.6: writes inside EXISTS { ... } are suppressed.
+	}
+	before := len(l.curPart.bindings)
+	l.collectPatternPart(c.OC_PatternPart(), false)
+	if l.err != nil {
 		return
 	}
-	l.fail(fmt.Errorf("%w: MERGE", ErrUnsupportedClause))
+	var vars []string
+	for i := before; i < len(l.curPart.bindings); i++ {
+		vars = append(vars, l.curPart.bindings[i].variable)
+	}
+	var onMatch, onCreate []query.SetEffect
+	for _, action := range c.AllOC_MergeAction() {
+		eff, kind := l.collectMergeAction(action)
+		if l.err != nil {
+			return
+		}
+		switch kind {
+		case mergeActionOnMatch:
+			onMatch = append(onMatch, eff...)
+		case mergeActionOnCreate:
+			onCreate = append(onCreate, eff...)
+		}
+	}
+	eff, err := query.NewMergeEffect(vars, onMatch, onCreate)
+	if err != nil {
+		l.fail(err)
+		return
+	}
+	l.curPart.effects = append(l.curPart.effects, eff)
+	l.writeSeen = true
+}
+
+type mergeActionKind int
+
+const (
+	mergeActionOnMatch mergeActionKind = iota
+	mergeActionOnCreate
+)
+
+// collectMergeAction walks one oC_MergeAction (ON MATCH SET ... or ON CREATE
+// SET ...): reads the axis from the MATCH()/CREATE() terminal, then routes
+// each SetItem through collectSetItem. The SET items append into a LOCAL
+// slice, NOT curPart.effects — they are payloads on the parent MergeEffect,
+// not siblings in the part. curPart.effects is saved/restored around the
+// inner walk to intercept the SetEffects (§4.2). The refs inside each SET's
+// value expression still flow into curPart.refs via typeExpressionMining
+// (which is unaffected by the save/restore), so buildPart's referential-
+// integrity sweep covers ON-branch refs.
+func (l *listener) collectMergeAction(action gen.IOC_MergeActionContext) ([]query.SetEffect, mergeActionKind) {
+	kind := mergeActionOnCreate
+	if action.MATCH() != nil {
+		kind = mergeActionOnMatch
+	}
+	saved := l.curPart.effects
+	l.curPart.effects = nil
+	set := action.OC_Set()
+	if set == nil {
+		l.curPart.effects = saved
+		return nil, kind
+	}
+	for _, item := range set.AllOC_SetItem() {
+		l.collectSetItem(item)
+		if l.err != nil {
+			l.curPart.effects = saved
+			return nil, kind
+		}
+	}
+	collected := l.curPart.effects
+	l.curPart.effects = saved
+
+	out := make([]query.SetEffect, 0, len(collected))
+	for _, e := range collected {
+		se, ok := e.(query.SetEffect)
+		if !ok {
+			// Grammar rules this out (oC_MergeAction admits only oC_Set), but a
+			// belt-and-braces guard flags a future grammar widening rather than
+			// silently dropping the effect on the interface conversion.
+			l.fail(fmt.Errorf("internal: MERGE ON action produced non-Set effect %T", e))
+			return nil, kind
+		}
+		out = append(out, se)
+	}
+	return out, kind
 }
 
 // EnterOC_Delete collects DELETE / DETACH DELETE targets (Stage 12 spec §4.2).
@@ -398,6 +487,14 @@ func (l *listener) EnterOC_Delete(c *gen.OC_DeleteContext) {
 // ErrNestedPropertyTarget via collectSetItem.
 func (l *listener) EnterOC_Set(c *gen.OC_SetContext) {
 	if l.subqueryDepth > 0 {
+		return
+	}
+	// A SET clause nested inside a MERGE ON action (ON MATCH SET .. / ON
+	// CREATE SET ..) is walked by collectMergeAction, which routes each item
+	// into the parent MergeEffect's OnMatch/OnCreate slot rather than the
+	// part's top-level effects. Skip here so the ANTLR walker's descent into
+	// oC_MergeAction → oC_Set does not double-record the SetEffect.
+	if _, ok := c.GetParent().(*gen.OC_MergeActionContext); ok {
 		return
 	}
 	for _, item := range c.AllOC_SetItem() {
