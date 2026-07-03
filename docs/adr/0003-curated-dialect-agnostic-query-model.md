@@ -1,8 +1,10 @@
 # A curated, dialect-agnostic query model, resolved separately from the schema
 
-> _Note (ADR 0004): the "stable contract" framing below holds once the query
-> parser is feature-complete. Until then the query model is provisional and
-> evolves slice by slice; no consumer is built against it before the freeze._
+> _Note (ADR 0008): `query.Query` is **frozen** as of 2026-07-03 — the parser
+> is feature-complete over the TCK corpus and the "stable contract" framing
+> below now holds. ADR 0008 records the frozen shape, pins the resolver API,
+> and defines the additive-only revision protocol. The stage notes throughout
+> this ADR are the build diary and remain as history._
 
 The query parser lowers one query into `query.Query` — a curated, gqlc-owned
 domain model (the entities a query binds, its parameters, its return items), not

@@ -352,8 +352,8 @@ scalar-expression grammar. `unknown` is the parser's honest posture on
 the type-interface boundary (ADR 0005) for property lookups, function
 calls, aggregates, and any expression touching a property or `null` —
 the resolver upgrades these from the schema. Incremental: Stage 7 added
-the six temporal types, Stage 8 added `path`; the freeze ADR locks the
-sum.
+the six temporal types, Stage 8 added `path`; ADR 0008 locks the sum at
+seventeen.
 _Avoid_: `any` (use `unknown` — the parser's "I cannot tell"); property
 type (reserve for the schema-side scalar type `PropertyType`).
 
@@ -394,8 +394,8 @@ generally for a method's return, ambiguous with the whole result row).
 A projection over an aggregating function (`count`, `sum`, `collect`, `min`,
 `max`, `avg`, `stDev`/`stDevP`, `percentileCont`/`percentileDisc`). Distinguished
 from an ordinary function call because it collapses matched rows into groups,
-changing result cardinality — the one function distinction the model carries
-pre-freeze. `count(*)` is the degenerate case: a count over rows that references
+changing result cardinality — the one function distinction the frozen model
+carries. `count(*)` is the degenerate case: a count over rows that references
 no binding. Also carries a **DISTINCT axis** (`count(DISTINCT x)`,
 `collect(DISTINCT y)`, …) as a single-bit annotation: DISTINCT deduplicates
 the aggregate's input before aggregation, so `count(DISTINCT a)` and
@@ -439,13 +439,20 @@ list-yielding shape, not a predicate); "existential quantifier"
 
 **Resolver**:
 The stage that resolves a parsed query against the model, typing each return item
-and parameter — a pure function of `(query.Query, schema.Schema)`. Resolution
-that completes without error is what makes a query a **validated query**; a query
-it cannot resolve is rejected.
+and parameter — a pure function of `(query.Query, schema.Schema[, procsig.Registry])`.
+Lives in `internal/resolver` (a sibling of `query` and `schema`, importing both
+plus `procsig`; none import it back). API pinned by ADR 0008:
+`resolver.New(s schema.Schema, opts ...Option)` with `WithRegistry(procsig.Registry)`
+binds the compile-time inputs; `(*Resolver).Resolve(q query.Query)
+(ValidatedQuery, error)` resolves one query — no I/O, no state mutation.
+Resolution that completes without error is what makes a query a
+**validated query**; a query it cannot resolve is rejected.
 
 **Validated query**:
 A query the resolver has resolved against the model (`schema.Schema`) without
-error — the trustworthy, schema-checked invariant. Resolution is a distinct stage
+error — the trustworthy, schema-checked invariant. Materialised as the
+`ValidatedQuery` type in `internal/resolver` (the resolver's output vocabulary,
+not the parser's — ADR 0008). Resolution is a distinct stage
 that runs after parsing; the parser is schema-agnostic and never produces a
 validated query on its own. Once it passes, every query in the application is
 valid or the application halts.
