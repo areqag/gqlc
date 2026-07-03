@@ -52,6 +52,7 @@
             }
           ],
           "returnsAll": false,
+          "distinct": false,
           "effects": [
             {
               "kind": "merge",

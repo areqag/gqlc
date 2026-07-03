@@ -102,6 +102,17 @@ type Part struct {
 	// is empty. Always emitted in JSON (matching the always-emit convention).
 	ReturnsAll bool `json:"returnsAll"`
 
+	// Distinct is true iff the part's projection body carried the DISTINCT
+	// keyword (RETURN DISTINCT … or WITH DISTINCT …). Composes freely with
+	// ReturnsAll — RETURN DISTINCT * and WITH DISTINCT * are legal openCypher
+	// shapes and lower with both flags set. Independent of the two other
+	// DISTINCT axes in the model: AggregateProjection.Distinct (an aggregate
+	// deduplicates its input rows before aggregation) and UnionKind (UNION
+	// DISTINCT vs. UNION ALL deduplicates across two branches' output rows).
+	// Each axis is on a distinct model surface and captures a different
+	// cardinality-affecting decision. Always emitted in JSON.
+	Distinct bool `json:"distinct"`
+
 	// Effects are the write clauses in this part, in walk order — the per-part
 	// analogue of Returns for the write side (Stage 12). Each write clause
 	// contributes one or more Effects: a CREATE clause contributes one
@@ -126,14 +137,17 @@ var ErrEmptyPart = errors.New("query: part must carry at least one binding, proj
 // "at least one of bindings, projection, or effect" invariant that the flat-
 // struct field-level types cannot express alone. Callers pass the fields in
 // walk order; NewPart rejects the all-empty shape with ErrEmptyPart, and any
-// well-formed part passes through unchanged.
+// well-formed part passes through unchanged. The distinct axis (part-distinct-
+// axis spec §1) does not satisfy the invariant on its own: DISTINCT is a
+// modifier on a projection that must exist, so distinct=true with every
+// other axis empty is still ErrEmptyPart.
 //
 // buildPart in the cypher listener routes through NewPart so a parse path that
 // would yield an empty Part (which the grammar rules out anyway) fails at
 // build time rather than emitting a wire-shape violation. Direct struct-literal
 // construction in tests (mustParse fixtures) bypasses this guard by design —
 // those callers are trusted to hand-write a well-formed shape.
-func NewPart(bindings []Binding, returns []ReturnItem, returnsAll bool, effects []Effect) (Part, error) {
+func NewPart(bindings []Binding, returns []ReturnItem, returnsAll bool, distinct bool, effects []Effect) (Part, error) {
 	if len(bindings) == 0 && len(returns) == 0 && !returnsAll && len(effects) == 0 {
 		return Part{}, ErrEmptyPart
 	}
@@ -141,6 +155,7 @@ func NewPart(bindings []Binding, returns []ReturnItem, returnsAll bool, effects 
 		Bindings:   bindings,
 		Returns:    returns,
 		ReturnsAll: returnsAll,
+		Distinct:   distinct,
 		Effects:    effects,
 	}, nil
 }

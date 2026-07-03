@@ -201,21 +201,21 @@ func TestNewPartAcceptsWellFormedShapes(t *testing.T) {
 	node, err := query.NewNodeBinding("n", nil)
 	require.NoError(t, err)
 
-	pBindings, err := query.NewPart([]query.Binding{node}, nil, false, nil)
+	pBindings, err := query.NewPart([]query.Binding{node}, nil, false, false, nil)
 	require.NoError(t, err)
 	require.Len(t, pBindings.Bindings, 1)
 
 	pReturns, err := query.NewPart(nil, []query.ReturnItem{
 		{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
-	}, false, nil)
+	}, false, false, nil)
 	require.NoError(t, err)
 	require.Len(t, pReturns.Returns, 1)
 
-	pReturnsAll, err := query.NewPart(nil, nil, true, nil)
+	pReturnsAll, err := query.NewPart(nil, nil, true, false, nil)
 	require.NoError(t, err)
 	require.True(t, pReturnsAll.ReturnsAll)
 
-	pEffects, err := query.NewPart(nil, nil, false, []query.Effect{
+	pEffects, err := query.NewPart(nil, nil, false, false, []query.Effect{
 		query.NewCreateEffect([]string{"m"}),
 	})
 	require.NoError(t, err)
@@ -228,9 +228,61 @@ func TestNewPartRejectsEmpty(t *testing.T) {
 	// model constructor still refuses it, so illegal states are unrepresentable
 	// even under adversarial hand-construction. This is the point of the
 	// smart constructor: field-level types cannot express the invariant
-	// alone.
-	_, err := query.NewPart(nil, nil, false, nil)
+	// alone. The Distinct axis (part-distinct-axis spec §3.3) does not
+	// satisfy the invariant on its own: DISTINCT is a modifier on a
+	// projection that must exist, so distinct=true with every other axis
+	// empty is still ErrEmptyPart.
+	_, err := query.NewPart(nil, nil, false, false, nil)
 	require.ErrorIs(t, err, query.ErrEmptyPart)
+
+	_, err = query.NewPart(nil, nil, false, true, nil)
+	require.ErrorIs(t, err, query.ErrEmptyPart)
+}
+
+// --- Part.Distinct axis (part-distinct-axis spec §1) ---
+
+func TestNewPartCarriesDistinct(t *testing.T) {
+	// The Distinct axis is the fifth axis on Part alongside Bindings /
+	// Returns / ReturnsAll / Effects. Constructor threads it through;
+	// the field is readable on the returned Part. A returnsAll part
+	// with distinct=true is the RETURN DISTINCT * / WITH DISTINCT *
+	// composition (spec §1.3 — the two axes compose freely).
+	p, err := query.NewPart(nil, []query.ReturnItem{
+		{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+	}, false, true, nil)
+	require.NoError(t, err)
+	require.True(t, p.Distinct)
+
+	pWildcard, err := query.NewPart(nil, nil, true, true, nil)
+	require.NoError(t, err)
+	require.True(t, pWildcard.Distinct)
+	require.True(t, pWildcard.ReturnsAll)
+
+	pNotDistinct, err := query.NewPart(nil, nil, true, false, nil)
+	require.NoError(t, err)
+	require.False(t, pNotDistinct.Distinct)
+}
+
+func TestPartDistinctAlwaysEmitted(t *testing.T) {
+	// The "distinct" key is emitted on every part, matching the always-
+	// emit convention (nullable, directed, returnsAll, aggregate distinct).
+	// A Distinct=false part's JSON must contain "distinct":false alongside
+	// the four existing keys; a Distinct=true part must contain
+	// "distinct":true. Existing keys (bindings, returns, returnsAll,
+	// effects) stay verbatim: the change is field-addition-only on the
+	// wire (spec §1.6, §1.8).
+	pFalse, err := query.NewPart(nil, nil, true, false, nil)
+	require.NoError(t, err)
+	outFalse, err := json.Marshal(pFalse)
+	require.NoError(t, err)
+	require.Contains(t, string(outFalse), `"distinct":false`)
+	require.Contains(t, string(outFalse), `"returnsAll":true`)
+
+	pTrue, err := query.NewPart(nil, nil, true, true, nil)
+	require.NoError(t, err)
+	outTrue, err := json.Marshal(pTrue)
+	require.NoError(t, err)
+	require.Contains(t, string(outTrue), `"distinct":true`)
 }
 
 // --- the constructors are the only entry point (illegal zero values

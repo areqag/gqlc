@@ -35,6 +35,7 @@
             }
           ],
           "returnsAll": false,
+          "distinct": false,
           "effects": [
             {
               "kind": "setProperty",
@@ -64,6 +65,7 @@
             }
           ],
           "returnsAll": false,
+          "distinct": false,
           "effects": null
         }
       ]

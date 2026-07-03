@@ -89,6 +89,7 @@
             }
           ],
           "returnsAll": false,
+          "distinct": false,
           "effects": null
         },
         {
@@ -105,6 +106,7 @@
             }
           ],
           "returnsAll": false,
+          "distinct": false,
           "effects": null
         }
       ]

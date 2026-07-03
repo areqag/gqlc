@@ -25,6 +25,7 @@
             }
           ],
           "returnsAll": false,
+          "distinct": false,
           "effects": null
         },
         {
@@ -70,6 +71,7 @@
           ],
           "returns": null,
           "returnsAll": true,
+          "distinct": false,
           "effects": null
         }
       ]

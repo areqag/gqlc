@@ -23,12 +23,14 @@
             }
           ],
           "returnsAll": false,
+          "distinct": true,
           "effects": null
         },
         {
           "bindings": null,
           "returns": null,
           "returnsAll": true,
+          "distinct": false,
           "effects": null
         }
       ]

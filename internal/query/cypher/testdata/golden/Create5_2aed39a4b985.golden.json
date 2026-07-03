@@ -67,6 +67,7 @@
           ],
           "returns": null,
           "returnsAll": true,
+          "distinct": false,
           "effects": null
         }
       ]

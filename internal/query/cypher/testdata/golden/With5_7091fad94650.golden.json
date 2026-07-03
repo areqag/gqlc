@@ -27,6 +27,7 @@
             }
           ],
           "returnsAll": false,
+          "distinct": true,
           "effects": null
         },
         {
@@ -44,6 +45,7 @@
             }
           ],
           "returnsAll": false,
+          "distinct": false,
           "effects": null
         }
       ]

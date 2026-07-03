@@ -58,6 +58,7 @@
             }
           ],
           "returnsAll": false,
+          "distinct": false,
           "effects": null
         },
         {
@@ -91,12 +92,14 @@
             }
           ],
           "returnsAll": false,
+          "distinct": false,
           "effects": null
         },
         {
           "bindings": null,
           "returns": null,
           "returnsAll": true,
+          "distinct": false,
           "effects": null
         }
       ]

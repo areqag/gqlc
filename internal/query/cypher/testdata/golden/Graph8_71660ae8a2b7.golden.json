@@ -53,6 +53,7 @@
             }
           ],
           "returnsAll": false,
+          "distinct": false,
           "effects": null
         }
       ]

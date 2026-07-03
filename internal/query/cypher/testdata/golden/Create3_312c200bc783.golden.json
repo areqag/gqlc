@@ -6,6 +6,7 @@
           "bindings": null,
           "returns": null,
           "returnsAll": true,
+          "distinct": false,
           "effects": [
             {
               "kind": "create",
@@ -17,6 +18,7 @@
           "bindings": null,
           "returns": null,
           "returnsAll": false,
+          "distinct": false,
           "effects": [
             {
               "kind": "create",

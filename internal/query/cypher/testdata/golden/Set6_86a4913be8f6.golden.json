@@ -25,6 +25,7 @@
             }
           ],
           "returnsAll": false,
+          "distinct": false,
           "effects": [
             {
               "kind": "setLabels",
@@ -49,6 +50,7 @@
             }
           ],
           "returnsAll": false,
+          "distinct": false,
           "effects": null
         }
       ]

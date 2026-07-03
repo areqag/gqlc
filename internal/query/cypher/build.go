@@ -233,7 +233,7 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Part,
 	// shape, so ErrEmptyPart is unreachable via parse — but the belt-and-
 	// braces guard keeps illegal states unrepresentable if a future grammar
 	// widening slips.
-	part, err := query.NewPart(partBindings, rp.returns, rp.returnsAll, partEffects)
+	part, err := query.NewPart(partBindings, rp.returns, rp.returnsAll, rp.distinct, partEffects)
 	if err != nil {
 		return query.Part{}, nil, err
 	}
