@@ -1321,6 +1321,82 @@ var mustParse = map[string]struct {
 			},
 		}),
 	},
+	// Stage 11 §1.5 — a $param inside an EXISTS subquery body, paired with an
+	// OUTER-scope var.prop (n.age > $threshold where n is bound outside). The
+	// outer WHERE is exists {...} — its expression tree contains the inner
+	// comparison. mineWhere's mineComparisons walk must NOT descend into the
+	// EXISTS subtree (§1.2 boundary) and record a PropertyUse{Ref{n, age}} on
+	// $threshold, because the enclosing predicate for the parameter is the
+	// EXISTS body's WHERE (boolean), not the outer WHERE. The parameter's Use
+	// is the honest ExprUse{TypeBool, ExprInPredicate} minted by
+	// EnterOC_ExistentialSubquery's parameter sweep.
+	"exists body param paired with outer prop": {
+		src: "MATCH (n) WHERE exists { MATCH (m)-->() WHERE n.age > $threshold RETURN true }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}, query.Parameter{Name: "threshold", Uses: []query.Use{
+			query.NewExprUse(query.TypeBool{}, query.ExprInPredicate),
+		}}),
+	},
+	// Stage 11 §1.5 — a $param inside an EXISTS body paired with an INNER-scope
+	// var.prop (m.age > $threshold where m is bound only inside the EXISTS).
+	// Without a boundary guard, mineComparisons would descend and append the
+	// INNER varRef `m` onto the outer part's refs list — build()'s referential-
+	// integrity sweep would then reject the legal query with ErrUnboundVariable.
+	// The correct behaviour: parse OK, outer bindings hold only n, $threshold
+	// records the honest ExprUse{TypeBool, ExprInPredicate}.
+	"exists body param paired with inner prop": {
+		src: "MATCH (n) WHERE exists { (n)-->(m) WHERE m.age > $threshold }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}, query.Parameter{Name: "threshold", Uses: []query.Use{
+			query.NewExprUse(query.TypeBool{}, query.ExprInPredicate),
+		}}),
+	},
+	// Stage 11 §1.5 — the WITH-WHERE variant of the same shape: listener.go's
+	// EnterOC_With calls mineWhere too, so the boundary guard must cover both
+	// entry points. Structurally the same as the MATCH-WHERE case above; the
+	// pin catches a regression that fixes one call site but not the other.
+	"exists body param via with-where": {
+		src: "MATCH (n)\nWITH n WHERE exists { (n)-->(m) WHERE m.age > $threshold }\nRETURN n",
+		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{
+			{
+				Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			},
+			{
+				Returns: []query.ReturnItem{
+					{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+				},
+			},
+		}}}, Parameters: []query.Parameter{{Name: "threshold", Uses: []query.Use{
+			query.NewExprUse(query.TypeBool{}, query.ExprInPredicate),
+		}}}},
+	},
+	// Stage 11 §1.1 — a $param inside a quantifier's filter WHERE body, paired
+	// with the ITERATION variable x. typeQuantifier's savedOuter restore rolls
+	// back curPart.refs after the rich typer walks the filter body — but a
+	// pairAddSub in mineComparisons (called from mineWhere BEFORE typeQuantifier
+	// runs) has already leaked `x` onto curPart.refs. The boundary guard on
+	// mineComparisons is what stops that leak: parse OK, outer refs contain n
+	// only (x never appears), and $needle records ExprUse{TypeBool,
+	// ExprInPredicate} once via typeQuantifier's own parameter mining.
+	"quantifier body param paired with iteration var": {
+		src: "MATCH (n) WHERE any(x IN n.tags WHERE x = $needle)\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}, query.Parameter{Name: "needle", Uses: []query.Use{
+			query.NewExprUse(query.TypeBool{}, query.ExprInPredicate),
+		}}),
+	},
 }
 
 // intPtr is a small helper to take the address of an int literal so
