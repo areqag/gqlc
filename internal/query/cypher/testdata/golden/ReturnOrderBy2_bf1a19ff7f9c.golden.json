@@ -58,13 +58,15 @@
             {
               "name": "paths",
               "value": {
-                "kind": "expr",
+                "kind": "aggregate",
+                "func": "collect",
                 "refs": [
                   {
                     "variable": "p",
                     "property": ""
                   }
                 ],
+                "distinct": false,
                 "type": "list\u003cunknown\u003e"
               }
             },

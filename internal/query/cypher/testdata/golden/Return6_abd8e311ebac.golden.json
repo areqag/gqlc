@@ -69,13 +69,15 @@
             {
               "name": "avg(length(p))",
               "value": {
-                "kind": "expr",
+                "kind": "aggregate",
+                "func": "avg",
                 "refs": [
                   {
                     "variable": "p",
                     "property": ""
                   }
                 ],
+                "distinct": false,
                 "type": "unknown"
               }
             }
