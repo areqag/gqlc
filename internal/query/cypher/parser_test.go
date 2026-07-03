@@ -65,6 +65,16 @@ func oneBranch(part query.Part, params ...query.Parameter) query.Query {
 	return q
 }
 
+// oneWriteBranch is the Stage-12 write-side companion to oneBranch: the same
+// one-branch/one-part shape, with StatementKind set to StatementWrite. Every
+// Stage-12 mustParse pin exercising a write clause uses this helper so a pin
+// asserts on the statement-kind axis end-to-end.
+func oneWriteBranch(part query.Part, params ...query.Parameter) query.Query {
+	q := oneBranch(part, params...)
+	q.StatementKind = query.StatementWrite
+	return q
+}
+
 var mustParse = map[string]struct {
 	src  string
 	want query.Query
@@ -1400,6 +1410,211 @@ var mustParse = map[string]struct {
 			query.NewExprUse(query.TypeBool{}, query.ExprInPredicate),
 		}}),
 	},
+	// Stage 12 — CREATE, DELETE, SET, REMOVE (write clauses).
+
+	// Create1 [1]: CREATE () — the minimum CREATE. An anonymous node is not a
+	// binding (C3), so bindings is empty; the CreateEffect records the empty
+	// variables slice (no named creation to track). StatementKind flips to
+	// StatementWrite. Projection-less shape: no Returns, no ReturnsAll.
+	"create anonymous node": {
+		src: "CREATE ()",
+		want: oneWriteBranch(query.Part{
+			Effects: []query.Effect{query.NewCreateEffect(nil)},
+		}),
+	},
+
+	// Create2 [?] equivalent: CREATE (n:Label). The CreateEffect records the
+	// named binding, and the NodeBinding enters Part.Bindings verbatim (as if
+	// MATCH had bound it). Projection-less.
+	"create named labelled node": {
+		src: "CREATE (n:Label)",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("n", graph.LabelSet{"Label"})),
+			},
+			Effects: []query.Effect{query.NewCreateEffect([]string{"n"})},
+		}),
+	},
+
+	// Create + RETURN: CREATE (n) RETURN n. Still StatementWrite (a write
+	// followed by a read-back is a write for tx-mode purposes). The
+	// CreateEffect and the RefProjection coexist in the same part.
+	"create then return": {
+		src: "CREATE (n)\nRETURN n",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+			Effects: []query.Effect{query.NewCreateEffect([]string{"n"})},
+		}),
+	},
+
+	// Delete1 [1]: MATCH (n) DELETE n — the DeleteEffect targets the MATCH-
+	// bound n; Detach is false. Projection-less write.
+	"delete node": {
+		src: "MATCH (n)\nDELETE n",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Effects: []query.Effect{
+				query.NewDeleteEffect([]query.Ref{{Variable: "n"}}, nil, false),
+			},
+		}),
+	},
+
+	// Delete1 [2]: MATCH (n) DETACH DELETE n — same shape with Detach=true.
+	"detach delete node": {
+		src: "MATCH (n)\nDETACH DELETE n",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Effects: []query.Effect{
+				query.NewDeleteEffect([]query.Ref{{Variable: "n"}}, nil, true),
+			},
+		}),
+	},
+
+	// Set1 [1] shape: MATCH (n:A) SET n.name = 'Michael' RETURN n. The
+	// SetPropertyEffect records target Ref{n, name} and the value's Stage-6
+	// type (TypeString from a scalar literal).
+	"set property to literal": {
+		src: "MATCH (n:A)\nSET n.name = 'Michael'\nRETURN n",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("n", graph.LabelSet{"A"})),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+			Effects: []query.Effect{
+				must(query.NewSetPropertyEffect(query.Ref{Variable: "n", Property: "name"}, query.TypeString{}, nil)),
+			},
+		}),
+	},
+
+	// Set4 shape: MATCH (n) SET n = {name: 'Andres'} RETURN n. The
+	// SetEntityEffect uses SetOpReplace; the RHS types as TypeMap.
+	"set entity replace with map literal": {
+		src: "MATCH (n)\nSET n = {name: 'Andres'}\nRETURN n",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+			Effects: []query.Effect{
+				must(query.NewSetEntityEffect("n", query.SetOpReplace, query.TypeMap{}, nil)),
+			},
+		}),
+	},
+
+	// Set5 shape: MATCH (n) SET n:Foo RETURN n. SetLabelsEffect carries the
+	// variable and labels; no value expression.
+	"set labels": {
+		src: "MATCH (n)\nSET n:Foo\nRETURN n",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+			Effects: []query.Effect{
+				must(query.NewSetLabelsEffect("n", graph.LabelSet{"Foo"})),
+			},
+		}),
+	},
+
+	// Remove1 [1] shape: MATCH (n) REMOVE n.num. Projection-less write; the
+	// RemovePropertyEffect carries Ref{n, num}.
+	"remove property": {
+		src: "MATCH (n)\nREMOVE n.num",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Effects: []query.Effect{
+				must(query.NewRemovePropertyEffect(query.Ref{Variable: "n", Property: "num"})),
+			},
+		}),
+	},
+
+	// Remove2 [?] shape: MATCH (n) REMOVE n:L. RemoveLabelsEffect analogous
+	// to SetLabelsEffect.
+	"remove labels": {
+		src: "MATCH (n)\nREMOVE n:L",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Effects: []query.Effect{
+				must(query.NewRemoveLabelsEffect("n", graph.LabelSet{"L"})),
+			},
+		}),
+	},
+
+	// AUTHORED (Stage 12 §1.10): CREATE with an inline-map $param. The
+	// pinned-tag TCK does not exercise a $param inside a CREATE inline map
+	// (grep confirmed zero); this shape pins the typed-Create story — the
+	// inline-map miner records PropertyUse{Ref{p, name}} against $name, so
+	// the resolver upgrades $name's type from Person.name via the schema
+	// post-freeze. Replaces with a verbatim corpus entry if a future TCK
+	// bump supplies one.
+	"create with inline-map param": {
+		src: "CREATE (p:Person {name: $name})",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("p", graph.LabelSet{"Person"})),
+			},
+			Effects: []query.Effect{query.NewCreateEffect([]string{"p"})},
+		}, query.Parameter{Name: "name", Uses: []query.Use{
+			query.NewPropertyUse(query.Ref{Variable: "p", Property: "name"}),
+		}}),
+	},
+
+	// AUTHORED (Stage 12 §1.10): SET property with a bare $param on the RHS.
+	// The pinned-tag TCK does not exercise a $param inside a SET value
+	// expression (grep confirmed zero). The bare $param has no enclosing
+	// arithmetic that would pin a concrete type, so the value expression
+	// types as TypeUnknown at the parser boundary — an honest posture the
+	// resolver upgrades from n.age via the schema post-freeze. The Use
+	// records ExprUse{TypeUnknown, ExprInSetValue} — the SET value is a
+	// producer position (value written to the graph), semantically opposite
+	// to a projection column's consumer role, so the position discriminator
+	// stays honest across the write set. Replaces with a verbatim corpus
+	// entry if a future TCK bump supplies one.
+	"set property with bare param": {
+		src: "MATCH (n)\nSET n.age = $newAge\nRETURN n",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+			Effects: []query.Effect{
+				must(query.NewSetPropertyEffect(query.Ref{Variable: "n", Property: "age"}, query.TypeUnknown{}, nil)),
+			},
+		}, query.Parameter{Name: "newAge", Uses: []query.Use{
+			query.NewExprUse(query.TypeUnknown{}, query.ExprInSetValue),
+		}}),
+	},
+
+	// AUTHORED (Stage 12 amend §4.2): DELETE with a rich-shape target
+	// (a function invocation, DELETE nodes($p)). The pinned-tag TCK does
+	// not exercise a $param inside a DELETE rich expression (grep
+	// confirmed zero). The DeleteEffect carries no resolved Target (the
+	// rich shape has no honest single-Ref view; the value's entity kind
+	// is a resolver-time lookup below the parser boundary per ADR 0005).
+	// The $p records ExprUse{TypeUnknown, ExprInDeleteTarget} — the
+	// DELETE target is a consumer position whose runtime entity kind
+	// determines whether the delete is legal, semantically distinct from
+	// a SET value's producer role and from a projection column's return-
+	// side role. Function-invocation shape chosen over list-index
+	// (n.friends[$idx]) because the current typer mines params inside
+	// function args but not inside list-operator suffixes; the shape
+	// robustly exercises the ExprInDeleteTarget wiring at the pinned tag.
+	"delete rich expression with param": {
+		src: "MATCH (n)\nDELETE nodes($p)",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Effects: []query.Effect{
+				query.NewDeleteEffect(nil, nil, false),
+			},
+		}, query.Parameter{Name: "p", Uses: []query.Use{
+			query.NewExprUse(query.TypeUnknown{}, query.ExprInDeleteTarget),
+		}}),
+	},
 }
 
 // intPtr is a small helper to take the address of an int literal so
@@ -1433,14 +1648,35 @@ var mustReject = map[string]struct {
 	query string
 	want  error
 }{
-	// AUTHORED: a write clause (CREATE) is out of scope throughout (ADR 0004) and
-	// the fail-site for ErrUnsupportedClause. Stage 4 supports WITH/UNION, so the
-	// prior `with clause` reject (which pinned this sentinel) now parses; this
-	// preserves ErrUnsupportedClause reachability via a surviving rejected clause.
-	// Replace with a verbatim corpus query if a clean one appears at the pinned tag.
+	// AUTHORED: Stage 12 retires ErrUnsupportedClause for the write set
+	// (CREATE/DELETE/SET/REMOVE), so the prior pin `CREATE (n) RETURN n` now
+	// parse-accepts. MERGE stays unsupported through Stage 12 (Stage 13 owns
+	// it), so it preserves ErrUnsupportedClause reachability. Replace with
+	// a verbatim corpus query if a clean one appears at the pinned tag.
 	"write clause": {
-		query: "CREATE (n)\nRETURN n",
+		query: "MERGE (n)\nRETURN n",
 		want:  cypher.ErrUnsupportedClause,
+	},
+	// AUTHORED (Stage 12 amend §1.5): SET with a nested propertyExpression
+	// target (n.a.b). The model's Ref carries a single Property, so a nested
+	// LHS has no honest single-Ref shape — accept-and-truncate would claim
+	// SET target n.a when the query says n.a.b, a wrong concrete claim about
+	// the very field repository codegen consumes. The pinned-tag TCK
+	// exercises zero such shapes (grep confirmed), so parse-reject is a
+	// bucket-1 posture with zero corpus fallout. Real engines reject nested
+	// SET anyway ("only directly attached properties can be set"), so the
+	// fail-site aligns parser semantics with runtime semantics.
+	"nested SET target": {
+		query: "MATCH (n)\nSET n.a.b = 1\nRETURN n",
+		want:  cypher.ErrNestedPropertyTarget,
+	},
+	// AUTHORED (Stage 12 amend §1.6): REMOVE with a nested propertyExpression
+	// target (n.a.b). Same shape rule as nested SET — the Ref cannot
+	// represent a multi-lookup target, and the pinned-tag TCK exercises zero
+	// such shapes. Bucket-1 reject.
+	"nested REMOVE target": {
+		query: "MATCH (n)\nREMOVE n.a.b\nRETURN n",
+		want:  cypher.ErrNestedPropertyTarget,
 	},
 	// (Stage 6: the two ErrUnsupportedProjection pins from Stages 3-5 —
 	// "arithmetic over projection" and "unary-signed projection" — are RETIRED.
@@ -1570,7 +1806,7 @@ func TestMustReject(t *testing.T) {
 	}
 }
 
-// allSentinels is the canonical list of the five Parse sentinels — the single
+// allSentinels is the canonical list of the six Parse sentinels — the single
 // source of truth TestSentinelReachability checks against. A new sentinel must be
 // added here (and exercised by a mustReject case); a removed one must be dropped.
 // errNotImplemented is deliberately absent: it is the run-A stub, not a contract
@@ -1581,12 +1817,18 @@ func TestMustReject(t *testing.T) {
 // all parse under the widened model, so the sentinel has no fail-site left.
 // Stage 11 adds ErrPatternInProjection: a pattern predicate used as a scalar
 // RETURN / WITH column is a bucket-1 parse-shape rejection (Pattern1 [22]/[23]).
+// Stage 12 adds ErrNestedPropertyTarget: SET/REMOVE nested LHS (n.a.b) has no
+// honest single-Ref shape in the model, and real engines reject it. The
+// internal model-invariant sentinel ErrEmptyPart lives on the query package
+// (not cypher) and is NOT included here — it is unreachable via parse (the
+// grammar rules out the shape), so a reachability sweep would fail.
 var allSentinels = []error{
 	cypher.ErrUnsupportedClause,
 	cypher.ErrUnsupportedParameter,
 	cypher.ErrUnboundVariable,
 	cypher.ErrVariableKindConflict,
 	cypher.ErrPatternInProjection,
+	cypher.ErrNestedPropertyTarget,
 }
 
 // TestSentinelReachability is the bidirectional sweep (mirroring schema/gql): the

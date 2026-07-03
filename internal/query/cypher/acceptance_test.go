@@ -48,7 +48,11 @@ var updateGolden = flag.Bool("update", false, "regenerate golden snapshots from 
 // list quantifiers (ALL/ANY/NONE/SINGLE) type as TypeBool with iteration-
 // variable scoping enforced structurally, and EXISTS { ... } types as
 // TypeBool with a suppression counter that stops inner bindings from
-// leaking into the outer part.
+// leaking into the outer part. Stage 12 adds clauses/create,
+// clauses/delete, clauses/set, and clauses/remove — the write clause
+// surface: Query gains a StatementKind axis (read vs. write), Part gains
+// an Effects slice (per-part write clauses in walk order), and a
+// projection-less part (writes with no RETURN) is a first-class shape.
 // The corpus is never edited; each stage widens the dir list and shrinks the
 // skiplist.
 var readCoreDirs = []string{
@@ -63,6 +67,10 @@ var readCoreDirs = []string{
 	"../../../test/data/query/cypher/tck/features/clauses/with-skip-limit",
 	"../../../test/data/query/cypher/tck/features/clauses/with-where",
 	"../../../test/data/query/cypher/tck/features/clauses/unwind",
+	"../../../test/data/query/cypher/tck/features/clauses/create",
+	"../../../test/data/query/cypher/tck/features/clauses/delete",
+	"../../../test/data/query/cypher/tck/features/clauses/set",
+	"../../../test/data/query/cypher/tck/features/clauses/remove",
 	"../../../test/data/query/cypher/tck/features/expressions/literals",
 	"../../../test/data/query/cypher/tck/features/expressions/boolean",
 	"../../../test/data/query/cypher/tck/features/expressions/comparison",
@@ -281,6 +289,116 @@ var skiplist = map[string]bool{
 	// ErrPatternInProjection sentinel via isPatternPredicateAtom; see the
 	// "pattern predicate in return projection" mustReject case for the
 	// fail-site.)
+
+	// MATCH (n) SET n.prop = head(nodes(head((n)-[:REL]->()))).foo — a pattern
+	// predicate buried inside the RHS of a SET item's value expression
+	// (SyntaxError:UnexpectedSyntax). Stage 12 exposes this newly: before
+	// Stage 12 the SET clause rejected via ErrUnsupportedClause, so the
+	// scenario passed on the negative outcome; after Stage 12 the SET
+	// clause parses, and the buried pattern predicate types as TypeBool
+	// via typeAtom's Stage-11 pattern-predicate arm, so the whole SET
+	// value parses. Stage 11 §8 documents this class of hole
+	// ("pattern predicate inside another expression" — the enclosing
+	// shape is not a bare atom, so the isPatternPredicateAtom check does
+	// not catch it). Widening the rejection to climb the precedence
+	// tower is Stage-11 scope creep; Stage 12 records the shape as
+	// bucket-1 accept-and-defer and lets the engine raise the
+	// UnexpectedSyntax rule on the original text (ADR 0005). A future
+	// stage that revisits pattern-predicate scope-checking would remove
+	// this entry.
+	"[24] Fail on using pattern in right-hand side of SET": true,
+
+	// --- deleted-entity access at RETURN (Stage 12 newly-exposed) ---
+	//
+	// MATCH (n) DELETE n RETURN n.num (Return2 [15]/[16]/[17]) —
+	// EntityNotFound:DeletedEntityAccess at runtime. Not a SyntaxError,
+	// not under expressions/*, so neither isBucketThreeDir nor
+	// isBucketThreeError's SyntaxError-detail gate catches it — but
+	// EntityNotFound IS a runtime rule below the type-interface boundary
+	// (ADR 0005): the parser accepts, the engine detects deleted-entity
+	// access at execution. Before Stage 12 these scenarios PENDING'd via
+	// ErrUnsupportedClause on DELETE; after Stage 12 DELETE parses, so
+	// the shapes are enumerated here as bucket-3 accept-and-defer.
+	"[15] Fail when returning properties of deleted nodes":         true,
+	"[16] Fail when returning labels of deleted nodes":             true,
+	"[17] Fail when returning properties of deleted relationships": true,
+
+	// --- write-side semantic rules the type interface does not carry
+	//     (Stage 12: clauses/{create,delete,set,remove} newly wired) ---
+	//
+	// The write-clause dirs are NOT under expressions/*, so isBucketThreeDir
+	// does not categorically accept their negatives. Each entry below is a
+	// SyntaxError or TypeError whose rule sits below the type-interface
+	// boundary (ADR 0005): the parser accepts the shape at the shape gates
+	// it already applies (pattern collection, expression typing), and the
+	// engine re-executing the original text raises the specific rule. The
+	// three semantic-rule families:
+	//
+	//   1. VariableAlreadyBound (Create1 [13]-[19], Create2 [23]) —
+	//      CREATE re-binding a name a prior clause already bound. openCypher
+	//      forbids re-binding at compile time (a CREATE (a) after MATCH (a)
+	//      is legal only if the pattern is unlabelled; a CREATE (a:Label)
+	//      after MATCH (a) is VariableAlreadyBound). The rule turns on the
+	//      *combination* of clause order, labels, and inline properties —
+	//      a semantic-composition rule the type interface's per-clause
+	//      binding shape does not carry. Stage 12 records the binding under
+	//      the existing mergeBinding path (labels merge, kind-conflict
+	//      still fires); the compile-time rule is engine-side.
+	//   2. NoSingleRelationshipType / RequiresDirectedRelationship /
+	//      CreatingVarLength (Create2 [18]-[22]) — CREATE-side pattern
+	//      constraints: an edge must have exactly one type, an unambiguous
+	//      direction, and no hop range. The type-interface carries the
+	//      shape (LabelSet, directed flag, EdgeHops) verbatim — the
+	//      constraint that CREATE requires specific shape values is a
+	//      write-clause semantic rule. Codegen post-freeze reads
+	//      StatementKind and could enforce these at generation time; today
+	//      the engine raises them.
+	//   3. UndefinedVariable (Create1 [20], Create2 [24]) — CREATE-side
+	//      scope rule when a pattern references a variable not in scope.
+	//      The parser records the ref onto curPart.refs; buildPart's
+	//      referential-integrity sweep would catch it against MATCH-only
+	//      scenarios (ErrUnboundVariable), but the CREATE case's specific
+	//      shape (`CREATE (a)-[:T]->(missing)` where `missing` is not bound)
+	//      lands inside the CREATE's own pattern where the endpoint
+	//      references the anonymous position rather than an outer binding.
+	//      Bucket 3 accept-and-defer.
+	//   4. InvalidDelete (Delete1 [8], Delete2 [5]) — DELETE target is
+	//      a labelled variable (`DELETE r:T`). The label predicate types
+	//      as TypeBool via typeAtom's node-labels branch; the whole
+	//      expression parses as a rich shape. The engine's rule "DELETE
+	//      target must be a node or edge value" is a runtime type check
+	//      below the boundary.
+	//   5. InvalidArgumentType (Delete5 [9]) — DELETE target is an integer
+	//      expression (`DELETE 1 + 1`). Already handled by
+	//      isBucketThreeError's SyntaxError-detail gate; explicit entry
+	//      here because clauses/delete is not under expressions/*.
+	//   6. Cardinality / value rules (Delete1 [7]) — deleting a node with
+	//      connected edges without DETACH; a runtime cardinality rule.
+	//   7. TypeError:InvalidPropertyType (Set1 [10]) — SET a property to a
+	//      list-of-maps, which the property model does not admit at
+	//      runtime. TypeError is not SyntaxError, so bucket-3-eligible via
+	//      the top-level kind gate; explicit entry because the dir is not
+	//      under expressions/*.
+	"[13] Fail when creating a node that is already bound":                          true,
+	"[14] Fail when creating a node with properties that is already bound":          true,
+	"[15] Fail when adding a new label predicate on a node that is already bound 1": true,
+	"[16] Fail when adding new label predicate on a node that is already bound 2":   true,
+	"[17] Fail when adding new label predicate on a node that is already bound 3":   true,
+	"[18] Fail when adding new label predicate on a node that is already bound 4":   true,
+	"[19] Fail when adding new label predicate on a node that is already bound 5":   true,
+	"[20] Fail when creating a node using undefined variable in pattern":            true,
+	"[18] Fail when creating a relationship without a type":                         true,
+	"[19] Fail when creating a relationship without a direction":                    true,
+	"[20] Fail when creating a relationship with two directions":                    true,
+	"[21] Fail when creating a relationship with more than one type":                true,
+	"[22] Fail when creating a variable-length relationship":                        true,
+	"[23] Fail when creating a relationship that is already bound":                  true,
+	"[24] Fail when creating a relationship using undefined variable in pattern":    true,
+	"[7] Failing when deleting connected nodes":                                     true,
+	"[8] Failing when deleting a label":                                             true,
+	"[5] Failing when deleting a relationship type":                                 true,
+	"[9] Failing when deleting an integer expression":                               true,
+	"[10] Failing when setting a list of maps as a property":                        true,
 
 	// --- EXISTS with an inner write clause (Stage 11) ---
 	//
@@ -502,14 +620,20 @@ func TestGoldenOrphans(t *testing.T) {
 				t.Fatalf("parse %s: %v", path, err)
 			}
 			for _, p := range gherkin.Pickles(*doc, path, newIDGen()) {
-				var query string
+				// Key an expected golden by EVERY executing-query step, matching
+				// the runtime posture: executingQuery overwrites st.query on each
+				// When step, and checkGolden fires both at the final Then
+				// (resultShouldBe) and at intermediate "no side effects" steps
+				// for write statements — each snapshotting whatever st.query
+				// holds at that moment. A Temporal4 storage scenario with a
+				// CREATE followed by a MATCH-control-query mints one golden
+				// keyed by the CREATE text and one keyed by the MATCH text.
 				for _, step := range p.Steps {
 					if isExecutingQueryStep(step) {
-						query = step.Argument.DocString.Content
-						break
+						q := step.Argument.DocString.Content
+						expected[goldenPath(&scenarioState{name: p.Name, uri: p.Uri, query: q})] = true
 					}
 				}
-				expected[goldenPath(&scenarioState{name: p.Name, uri: p.Uri, query: query})] = true
 			}
 		}
 	}
@@ -615,9 +739,11 @@ func resultShouldBe(ctx context.Context, _ *godog.Table) error {
 	return checkGolden(st)
 }
 
-// noSideEffects is a positive corroborating step. It only needs the query to have
-// parsed (or be a known-unsupported / skipped scenario); resultShouldBe carries
-// the snapshot assertion, so here we just guard the outcome.
+// noSideEffects is a positive corroborating step. For read statements it only
+// guards the outcome — resultShouldBe carries the snapshot assertion. For write
+// statements it must carry the assertion itself: many write-dir scenarios have
+// no result table, so without the checkGolden call here their Effects shape
+// would never be snapshot-verified (spec §1.9 promises 100% write coverage).
 func noSideEffects(ctx context.Context) error {
 	st := stateFrom(ctx)
 	if st.skipped {
@@ -628,6 +754,9 @@ func noSideEffects(ctx context.Context) error {
 			return godog.ErrPending
 		}
 		return fmt.Errorf("expected a parsed query, got error: %w", st.err)
+	}
+	if st.got.StatementKind == query.StatementWrite {
+		return checkGolden(st)
 	}
 	return nil
 }

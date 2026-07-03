@@ -66,9 +66,11 @@ structural model. Exactly one query per parse call; a `UNION` of single queries
 is still one query, modelled as several **branches** under that one query. A
 query is one or more branches (combined by `UNION`), each an ordered chain of
 one or more **query parts** (split by `WITH`); the query also carries its
-**parameters**, which are query-wide and not scoped to a part. A source file may
-hold many queries, but splitting a file into individual queries (and naming
-them) is an orchestration concern, outside the parser.
+**parameters**, which are query-wide and not scoped to a part, and its
+**statement kind** — read vs. write — the binary axis the driver's transaction
+mode is chosen from (Stage 12). A source file may hold many queries, but
+splitting a file into individual queries (and naming them) is an orchestration
+concern, outside the parser.
 _Avoid_: statement (reserve for the grammar's `oC_Statement`).
 
 **Branch**:
@@ -86,10 +88,13 @@ structure only.
 **Query part**:
 One scope segment of a branch, bounded by `WITH`. A branch is a sequence of
 parts: every non-final part ends in a `WITH` (an intermediate projection that is
-also a scope boundary), and the final part ends in a `RETURN`. Each part carries
-its **own** bindings (the entities its own `MATCH` clauses introduce), its return
-items, and its `RETURN *`/`WITH *` wildcard flag — the flat single-scope shape,
-now scoped to one part. A `Ref` in a part resolves against that part's bindings
+also a scope boundary), and the final part ends in a `RETURN` — **or**, since
+Stage 12, in one or more write clauses with no `RETURN` (a projection-less part
+whose result is zero columns). Each part carries its **own** bindings (the
+entities its own `MATCH` or `CREATE` clauses introduce), its return items,
+its `RETURN *`/`WITH *` wildcard flag — the flat single-scope shape,
+now scoped to one part — and its **effects** (the write clauses of that part in
+walk order, Stage 12). A `Ref` in a part resolves against that part's bindings
 or a name the previous part's `WITH` carried forward; a name not carried by a
 `WITH` is out of scope in later parts.
 _Avoid_: segment, stage (reserve **stage** for the staged build plan, ADR 0004);
@@ -245,9 +250,71 @@ _Avoid_: site (overloaded with the spec's "fail-site"), occurrence.
 **Parameter**:
 A query input (openCypher `$name`), deduplicated across the query in
 first-appearance order. Carries its **uses** — value-positions it appears
-in, each either a property reference or a clause slot — so the resolver
-can infer its type. Becomes a generated method argument.
+in, each either a property reference, a clause slot, or an expression use
+(including value expressions on the right-hand side of a **write clause**,
+Stage 12: a `$param` under a `SET n.age = $param` records an `ExprUse`
+against the value expression's Stage-6 type, position `ExprInSetValue`
+— the producer-side write-value axis distinct from a projection column's
+consumer role; a `$param` under a rich DELETE target records
+`ExprInDeleteTarget`, and the resolver keys on the producer/consumer axis
+alongside the enclosing expression's type). Becomes a generated method
+argument.
 _Avoid_: argument (reserve for the generated code).
+
+**Statement kind**:
+A query-wide binary axis distinguishing a read query (`StatementRead`) from
+a query that modifies the graph (`StatementWrite`) — the axis a driver
+branches on to pick a transaction mode. Set to `StatementWrite` iff the
+query contains at least one **write clause** at any part of any branch
+(a write clause suppressed inside an `EXISTS { ... }` subquery does NOT
+flip the axis — the outer query does not modify the graph, and openCypher
+rejects that composition anyway). Introduced in Stage 12 alongside the
+write-clause surface; before Stage 12 every query was implicitly a read,
+and the axis is a strictly additive `Query` field with `read` as the
+zero-value default.
+_Avoid_: read-write (three-state axes conflate two distinct decisions —
+the driver's tx mode is binary); statement (the grammar's `oC_Statement`
+sense; the axis is on the parsed `Query`).
+
+**Effect**:
+One write operation the query performs at a specific **query part** — the
+per-part analogue of a **return item**. A closed sum of `CreateEffect`
+(one `CREATE` clause, carrying the ordered list of binding variables the
+clause introduced), `DeleteEffect` (one `DELETE` / `DETACH DELETE`,
+carrying the targeted Refs (bare `var` / `var.prop` targets), the
+rich-expression refs (everything else — the two slices partition the
+DELETE expressions, never both, never neither, so no delete is silently
+absent), and a `Detach` flag), `SetPropertyEffect` (one `SET n.prop = value`
+item, carrying the property target Ref, the value's Stage-6 type, and its
+touched refs; a nested LHS `n.a.b` rejects with `ErrNestedPropertyTarget`
+rather than truncating),
+`SetEntityEffect` (one `SET var = value` or `SET var += value` item,
+carrying the target variable, a `SetOp` axis for `=` vs `+=`, the value's
+Stage-6 type, and its refs — one variant, one axis, mirroring
+`EdgeBinding.directed`), `SetLabelsEffect` (one `SET var:Labels` item,
+carrying the variable and the label set), `RemovePropertyEffect` (one
+`REMOVE var.prop` item, carrying the property target Ref), and
+`RemoveLabelsEffect` (one `REMOVE var:Labels` item, carrying the variable
+and the labels). Each part's `Effects` slice preserves textual walk
+order — a driver replaying the query executes them in that order — and
+carries no expression tree (ADR 0003): a rich SET value's `structure`
+lives below the type-interface boundary (ADR 0005), while its
+`result type` and the bindings it touches enter the model.
+_Avoid_: mutation (colloquial), side effect (the TCK's runtime-assertion
+term for row-count deltas — reserve for that specific TCK vocabulary).
+
+**Write clause**:
+A clause that produces one or more **effects** rather than a projection —
+one of `CREATE`, `DELETE` / `DETACH DELETE`, `SET`, `REMOVE`, and (Stage 13)
+`MERGE`. `CREATE` alone introduces bindings (its pattern reuses `MATCH`'s
+grammar and enters the same per-part `Bindings` slice); the others operate
+against already-bound entities. A **query part** with at least one write
+clause is projection-legal — a `RETURN` after `SET` is a read-back of the
+mutated bindings — and also **projection-less-legal**: a part whose only
+clauses are writes (no `RETURN`, no `WITH`) produces zero result columns
+and is the shape codegen emits a no-result method for.
+_Avoid_: updating clause (the grammar's `oC_UpdatingClause`, which
+subsumes `MERGE` — reserve for the grammar); mutating clause (colloquial).
 
 **Return item**:
 One column of a query's result, named by an explicit alias or derived from its

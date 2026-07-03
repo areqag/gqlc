@@ -1,0 +1,47 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "R"
+              ],
+              "source": {
+                "kind": "inline",
+                "labels": [
+                  "B"
+                ]
+              },
+              "target": {
+                "kind": "inline",
+                "labels": [
+                  "A"
+                ]
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            }
+          ],
+          "returns": null,
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "create",
+              "variables": [
+                ""
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

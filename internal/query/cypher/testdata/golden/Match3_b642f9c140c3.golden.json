@@ -50,7 +50,8 @@
               }
             }
           ],
-          "returnsAll": false
+          "returnsAll": false,
+          "effects": null
         },
         {
           "bindings": [
@@ -114,11 +115,13 @@
               }
             }
           ],
-          "returnsAll": false
+          "returnsAll": false,
+          "effects": null
         }
       ]
     }
   ],
   "combinators": null,
-  "parameters": null
+  "parameters": null,
+  "statementKind": "read"
 }
