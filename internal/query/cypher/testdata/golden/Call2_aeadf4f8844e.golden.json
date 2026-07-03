@@ -1,0 +1,53 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "call",
+              "variable": "city",
+              "procedure": "test.my.proc",
+              "sourceField": "city",
+              "resultType": "string",
+              "nullable": true
+            },
+            {
+              "kind": "call",
+              "variable": "country_code",
+              "procedure": "test.my.proc",
+              "sourceField": "country_code",
+              "resultType": "int",
+              "nullable": true
+            }
+          ],
+          "returns": [
+            {
+              "name": "city",
+              "value": {
+                "kind": "ref",
+                "variable": "city",
+                "property": "",
+                "type": "string"
+              }
+            },
+            {
+              "name": "country_code",
+              "value": {
+                "kind": "ref",
+                "variable": "country_code",
+                "property": "",
+                "type": "int"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": null
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "read"
+}

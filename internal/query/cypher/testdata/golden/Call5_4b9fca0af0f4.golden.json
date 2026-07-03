@@ -1,0 +1,53 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "call",
+              "variable": "a",
+              "procedure": "test.my.proc",
+              "sourceField": "a",
+              "resultType": "int",
+              "nullable": true
+            },
+            {
+              "kind": "call",
+              "variable": "d",
+              "procedure": "test.my.proc",
+              "sourceField": "b",
+              "resultType": "int",
+              "nullable": true
+            }
+          ],
+          "returns": [
+            {
+              "name": "a",
+              "value": {
+                "kind": "ref",
+                "variable": "a",
+                "property": "",
+                "type": "int"
+              }
+            },
+            {
+              "name": "d",
+              "value": {
+                "kind": "ref",
+                "variable": "d",
+                "property": "",
+                "type": "int"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": null
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "read"
+}
