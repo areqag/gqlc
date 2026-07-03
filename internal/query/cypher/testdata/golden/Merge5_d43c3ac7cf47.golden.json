@@ -1,0 +1,165 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": [
+                "Foo"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "b",
+              "labels": [
+                "Bar"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "a",
+              "value": {
+                "kind": "ref",
+                "variable": "a",
+                "property": "",
+                "type": "node"
+              }
+            },
+            {
+              "name": "b",
+              "value": {
+                "kind": "ref",
+                "variable": "b",
+                "property": "",
+                "type": "node"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "create",
+              "variables": [
+                "a",
+                "b"
+              ]
+            }
+          ]
+        },
+        {
+          "bindings": [
+            {
+              "kind": "unwind",
+              "variable": "str",
+              "elemType": "string",
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "a",
+              "value": {
+                "kind": "ref",
+                "variable": "a",
+                "property": "",
+                "type": "node"
+              }
+            },
+            {
+              "name": "b",
+              "value": {
+                "kind": "ref",
+                "variable": "b",
+                "property": "",
+                "type": "node"
+              }
+            },
+            {
+              "name": "roles",
+              "value": {
+                "kind": "func",
+                "refs": [
+                  {
+                    "variable": "str",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": null
+        },
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "r",
+              "labels": [
+                "FB"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "a"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "b"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            },
+            {
+              "kind": "node",
+              "variable": "b",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "count(*)",
+              "value": {
+                "kind": "aggregate",
+                "func": "count",
+                "refs": null,
+                "distinct": false,
+                "type": "int"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "merge",
+              "variables": [
+                "a",
+                "r",
+                "b"
+              ],
+              "onMatch": null,
+              "onCreate": null
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

@@ -1,0 +1,112 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": [
+                "A"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "b",
+              "labels": [
+                "B"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "KNOWS"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "a"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "b"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "KNOWS"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "b"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "c"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            },
+            {
+              "kind": "node",
+              "variable": "c",
+              "labels": [
+                "C"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "count(*)",
+              "value": {
+                "kind": "aggregate",
+                "func": "count",
+                "refs": null,
+                "distinct": false,
+                "type": "int"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "create",
+              "variables": [
+                "a",
+                "b"
+              ]
+            },
+            {
+              "kind": "merge",
+              "variables": [
+                ""
+              ],
+              "onMatch": null,
+              "onCreate": null
+            },
+            {
+              "kind": "create",
+              "variables": [
+                "",
+                "c"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}
