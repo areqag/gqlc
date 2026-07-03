@@ -65,6 +65,16 @@ func oneBranch(part query.Part, params ...query.Parameter) query.Query {
 	return q
 }
 
+// oneWriteBranch is the Stage-12 write-side companion to oneBranch: the same
+// one-branch/one-part shape, with StatementKind set to StatementWrite. Every
+// Stage-12 mustParse pin exercising a write clause uses this helper so a pin
+// asserts on the statement-kind axis end-to-end.
+func oneWriteBranch(part query.Part, params ...query.Parameter) query.Query {
+	q := oneBranch(part, params...)
+	q.StatementKind = query.StatementWrite
+	return q
+}
+
 var mustParse = map[string]struct {
 	src  string
 	want query.Query
@@ -1400,6 +1410,182 @@ var mustParse = map[string]struct {
 			query.NewExprUse(query.TypeBool{}, query.ExprInPredicate),
 		}}),
 	},
+	// Stage 12 — CREATE, DELETE, SET, REMOVE (write clauses).
+
+	// Create1 [1]: CREATE () — the minimum CREATE. An anonymous node is not a
+	// binding (C3), so bindings is empty; the CreateEffect records the empty
+	// variables slice (no named creation to track). StatementKind flips to
+	// StatementWrite. Projection-less shape: no Returns, no ReturnsAll.
+	"create anonymous node": {
+		src: "CREATE ()",
+		want: oneWriteBranch(query.Part{
+			Effects: []query.Effect{query.NewCreateEffect(nil)},
+		}),
+	},
+
+	// Create2 [?] equivalent: CREATE (n:Label). The CreateEffect records the
+	// named binding, and the NodeBinding enters Part.Bindings verbatim (as if
+	// MATCH had bound it). Projection-less.
+	"create named labelled node": {
+		src: "CREATE (n:Label)",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("n", graph.LabelSet{"Label"})),
+			},
+			Effects: []query.Effect{query.NewCreateEffect([]string{"n"})},
+		}),
+	},
+
+	// Create + RETURN: CREATE (n) RETURN n. Still StatementWrite (a write
+	// followed by a read-back is a write for tx-mode purposes). The
+	// CreateEffect and the RefProjection coexist in the same part.
+	"create then return": {
+		src: "CREATE (n)\nRETURN n",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+			Effects: []query.Effect{query.NewCreateEffect([]string{"n"})},
+		}),
+	},
+
+	// Delete1 [1]: MATCH (n) DELETE n — the DeleteEffect targets the MATCH-
+	// bound n; Detach is false. Projection-less write.
+	"delete node": {
+		src: "MATCH (n)\nDELETE n",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Effects: []query.Effect{
+				query.NewDeleteEffect([]query.Ref{{Variable: "n"}}, nil, false),
+			},
+		}),
+	},
+
+	// Delete1 [2]: MATCH (n) DETACH DELETE n — same shape with Detach=true.
+	"detach delete node": {
+		src: "MATCH (n)\nDETACH DELETE n",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Effects: []query.Effect{
+				query.NewDeleteEffect([]query.Ref{{Variable: "n"}}, nil, true),
+			},
+		}),
+	},
+
+	// Set1 [1] shape: MATCH (n:A) SET n.name = 'Michael' RETURN n. The
+	// SetPropertyEffect records target Ref{n, name} and the value's Stage-6
+	// type (TypeString from a scalar literal).
+	"set property to literal": {
+		src: "MATCH (n:A)\nSET n.name = 'Michael'\nRETURN n",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("n", graph.LabelSet{"A"})),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+			Effects: []query.Effect{
+				must(query.NewSetPropertyEffect(query.Ref{Variable: "n", Property: "name"}, query.TypeString{}, nil)),
+			},
+		}),
+	},
+
+	// Set4 shape: MATCH (n) SET n = {name: 'Andres'} RETURN n. The
+	// SetEntityEffect uses SetOpReplace; the RHS types as TypeMap.
+	"set entity replace with map literal": {
+		src: "MATCH (n)\nSET n = {name: 'Andres'}\nRETURN n",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+			Effects: []query.Effect{
+				must(query.NewSetEntityEffect("n", query.SetOpReplace, query.TypeMap{}, nil)),
+			},
+		}),
+	},
+
+	// Set5 shape: MATCH (n) SET n:Foo RETURN n. SetLabelsEffect carries the
+	// variable and labels; no value expression.
+	"set labels": {
+		src: "MATCH (n)\nSET n:Foo\nRETURN n",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+			Effects: []query.Effect{
+				must(query.NewSetLabelsEffect("n", graph.LabelSet{"Foo"})),
+			},
+		}),
+	},
+
+	// Remove1 [1] shape: MATCH (n) REMOVE n.num. Projection-less write; the
+	// RemovePropertyEffect carries Ref{n, num}.
+	"remove property": {
+		src: "MATCH (n)\nREMOVE n.num",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Effects: []query.Effect{
+				must(query.NewRemovePropertyEffect(query.Ref{Variable: "n", Property: "num"})),
+			},
+		}),
+	},
+
+	// Remove2 [?] shape: MATCH (n) REMOVE n:L. RemoveLabelsEffect analogous
+	// to SetLabelsEffect.
+	"remove labels": {
+		src: "MATCH (n)\nREMOVE n:L",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Effects: []query.Effect{
+				must(query.NewRemoveLabelsEffect("n", graph.LabelSet{"L"})),
+			},
+		}),
+	},
+
+	// AUTHORED (Stage 12 §1.10): CREATE with an inline-map $param. The
+	// pinned-tag TCK does not exercise a $param inside a CREATE inline map
+	// (grep confirmed zero); this shape pins the typed-Create story — the
+	// inline-map miner records PropertyUse{Ref{p, name}} against $name, so
+	// the resolver upgrades $name's type from Person.name via the schema
+	// post-freeze. Replaces with a verbatim corpus entry if a future TCK
+	// bump supplies one.
+	"create with inline-map param": {
+		src: "CREATE (p:Person {name: $name})",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("p", graph.LabelSet{"Person"})),
+			},
+			Effects: []query.Effect{query.NewCreateEffect([]string{"p"})},
+		}, query.Parameter{Name: "name", Uses: []query.Use{
+			query.NewPropertyUse(query.Ref{Variable: "p", Property: "name"}),
+		}}),
+	},
+
+	// AUTHORED (Stage 12 §1.10): SET property with a bare $param on the RHS.
+	// The pinned-tag TCK does not exercise a $param inside a SET value
+	// expression (grep confirmed zero). The bare $param has no enclosing
+	// arithmetic that would pin a concrete type, so the value expression
+	// types as TypeUnknown at the parser boundary — an honest posture the
+	// resolver upgrades from n.age via the schema post-freeze. The Use
+	// records ExprUse{TypeUnknown, ExprInProjection}. Replaces with a
+	// verbatim corpus entry if a future TCK bump supplies one.
+	"set property with bare param": {
+		src: "MATCH (n)\nSET n.age = $newAge\nRETURN n",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+			Effects: []query.Effect{
+				must(query.NewSetPropertyEffect(query.Ref{Variable: "n", Property: "age"}, query.TypeUnknown{}, nil)),
+			},
+		}, query.Parameter{Name: "newAge", Uses: []query.Use{
+			query.NewExprUse(query.TypeUnknown{}, query.ExprInProjection),
+		}}),
+	},
 }
 
 // intPtr is a small helper to take the address of an int literal so
@@ -1433,13 +1619,13 @@ var mustReject = map[string]struct {
 	query string
 	want  error
 }{
-	// AUTHORED: a write clause (CREATE) is out of scope throughout (ADR 0004) and
-	// the fail-site for ErrUnsupportedClause. Stage 4 supports WITH/UNION, so the
-	// prior `with clause` reject (which pinned this sentinel) now parses; this
-	// preserves ErrUnsupportedClause reachability via a surviving rejected clause.
-	// Replace with a verbatim corpus query if a clean one appears at the pinned tag.
+	// AUTHORED: Stage 12 retires ErrUnsupportedClause for the write set
+	// (CREATE/DELETE/SET/REMOVE), so the prior pin `CREATE (n) RETURN n` now
+	// parse-accepts. MERGE stays unsupported through Stage 12 (Stage 13 owns
+	// it), so it preserves ErrUnsupportedClause reachability. Replace with
+	// a verbatim corpus query if a clean one appears at the pinned tag.
 	"write clause": {
-		query: "CREATE (n)\nRETURN n",
+		query: "MERGE (n)\nRETURN n",
 		want:  cypher.ErrUnsupportedClause,
 	},
 	// (Stage 6: the two ErrUnsupportedProjection pins from Stages 3-5 —

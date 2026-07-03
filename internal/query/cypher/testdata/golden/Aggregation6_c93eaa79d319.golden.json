@@ -26,7 +26,8 @@
               }
             }
           ],
-          "returnsAll": false
+          "returnsAll": false,
+          "effects": null
         }
       ]
     }
@@ -43,5 +44,6 @@
         }
       ]
     }
-  ]
+  ],
+  "statementKind": "read"
 }
