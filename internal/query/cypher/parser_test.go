@@ -2107,6 +2107,42 @@ var mustParse = map[string]struct {
 			},
 		}},
 	},
+	// Call6 [1] Two CALLs across WITH. Two parts:
+	//  - Part 1: one CallBinding `label`; Returns is `count(*) AS c`
+	//    (aggregate on the empty-args count).
+	//  - Part 2: fresh CallBinding `label` (this part's own CALL);
+	//    Returns is RETURN * over the in-scope set {c, label}.
+	// Pins the "CallBinding does NOT leak past a WITH's explicit
+	// export" rule: part 2 introduces its own `label` binding, and
+	// buildPart's imported map (from part 1's WITH) carries `c`
+	// only.
+	"CALL then WITH then CALL (Call6[1])": {
+		src: "CALL test.labels() YIELD label\nWITH count(*) AS c\nCALL test.labels() YIELD label\nRETURN *",
+		want: query.Query{
+			Branches: []query.Branch{{Parts: []query.Part{
+				{
+					Bindings: []query.Binding{
+						must(query.NewCallBinding("label", "test.labels", "label", query.TypeString{}, true)),
+					},
+					Returns: []query.ReturnItem{
+						{Name: "c", Value: query.NewAggregateProjection(query.AggCount, nil, false, query.TypeInt{})},
+					},
+				},
+				{
+					Bindings: []query.Binding{
+						must(query.NewCallBinding("label", "test.labels", "label", query.TypeString{}, true)),
+					},
+					ReturnsAll: true,
+				},
+			}}},
+		},
+		sigs: []procsig.Signature{{
+			Name: "test.labels",
+			Results: []procsig.Result{
+				{Name: "label", Token: procsig.TokenString, Nullable: true},
+			},
+		}},
+	},
 	// AUTHORED (Stage 14 §1.8 pin d): YIELD…WHERE arg-mining probe.
 	// The grammar admits `oC_YieldItems → … ( SP? oC_Where )?`;
 	// the corpus is silent. Pin verifies the WHERE is walked for
