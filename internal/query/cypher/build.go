@@ -122,6 +122,35 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Part,
 		unwindByVar[ub.Variable()] = true
 		scope[ub.Variable()] = true
 	}
+	// Stage 14: CALL YIELD bindings enter the scope alongside entity,
+	// path, and unwind bindings. Five-way collision sweep (entity /
+	// path / unwind / prior call / imported) — imported catches
+	// Call1[15]'s `WITH 'Hi' AS label CALL test.labels() YIELD label`
+	// pattern, where the CallBinding's variable collides with a name
+	// exported by the preceding WITH. Intra-YIELD collisions are
+	// caught in collectCall (spec §4.2 step 6); the sweeps here are
+	// the belt-and-braces symmetric backstop.
+	callByVar := make(map[string]bool, len(rp.callBindings))
+	for _, cb := range rp.callBindings {
+		v := cb.Variable()
+		if _, ok := rp.byVar[v]; ok {
+			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, v)
+		}
+		if pathByVar[v] {
+			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, v)
+		}
+		if unwindByVar[v] {
+			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, v)
+		}
+		if callByVar[v] {
+			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, v)
+		}
+		if imported[v] {
+			return query.Part{}, nil, fmt.Errorf("%w: %s", ErrVariableKindConflict, v)
+		}
+		callByVar[v] = true
+		scope[v] = true
+	}
 
 	for _, ref := range rp.refs {
 		if !scope[ref.name] {
@@ -138,7 +167,7 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Part,
 		}
 	}
 
-	bindings := make([]query.Binding, 0, len(rp.bindings)+len(rp.pathBindings)+len(rp.unwindBindings))
+	bindings := make([]query.Binding, 0, len(rp.bindings)+len(rp.pathBindings)+len(rp.unwindBindings)+len(rp.callBindings))
 	for _, rb := range rp.bindings {
 		b, err := rb.toBinding()
 		if err != nil {
@@ -158,6 +187,34 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Part,
 	// no downstream shape depends on the position within the slice.
 	for _, ub := range rp.unwindBindings {
 		bindings = append(bindings, ub)
+	}
+	// Stage 14: CallBindings appear after unwind bindings, in
+	// collectCall walk order (which for standalone YIELD * and
+	// no-YIELD is signature declaration order). No downstream shape
+	// depends on the position within the slice; the discipline is
+	// deterministic ordering.
+	for _, cb := range rp.callBindings {
+		bindings = append(bindings, cb)
+	}
+
+	// Stage 14: standalone CALL without a downstream RETURN populates
+	// Part.Returns from the CallBindings (spec §4.3). The listener
+	// sets callStandalone when the standalone path fires and no
+	// explicit RETURN populated rp.returns; this branch mints one
+	// RefProjection per CallBinding in walk order (signature-
+	// declaration order) and sets returnsAll to mirror the
+	// grammar's `YIELD *` / no-YIELD implicit-all posture.
+	if rp.callStandalone && len(rp.returns) == 0 && !rp.returnsAll {
+		for _, cb := range rp.callBindings {
+			rp.returns = append(rp.returns, query.ReturnItem{
+				Name: cb.Variable(),
+				Value: query.NewRefProjection(
+					query.Ref{Variable: cb.Variable()},
+					cb.ResultType(),
+				),
+			})
+		}
+		rp.returnsAll = true
 	}
 
 	var (

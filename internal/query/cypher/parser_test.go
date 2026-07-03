@@ -8,6 +8,7 @@ import (
 	"pgregory.net/rapid"
 
 	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/procsig"
 	"github.com/areqag/gqlc/internal/query"
 	"github.com/areqag/gqlc/internal/query/cypher"
 )
@@ -78,6 +79,11 @@ func oneWriteBranch(part query.Part, params ...query.Parameter) query.Query {
 var mustParse = map[string]struct {
 	src  string
 	want query.Query
+	// sigs is Stage 14: per-pin procedure signatures the parser needs to
+	// resolve CALL clauses in `src`. Empty (nil) for every pre-Stage-14
+	// pin — the parser is constructed with no options, matching the
+	// pre-Stage-14 behaviour for queries without CALL.
+	sigs []procsig.Signature
 }{
 	// Match1 [1] Match non-existent nodes returns empty: one node binding,
 	// bare-variable return → Ref{n,""}, column name "n".
@@ -1832,6 +1838,304 @@ var mustParse = map[string]struct {
 			Effects: []query.Effect{query.NewCreateEffect([]string{"a"})},
 		}),
 	},
+	// --- Stage 14 (CALL + procsig registry) mustParse pins ---
+	// Verbatim + AUTHORED per spec §1.8. Every CALL-carrying pin ships
+	// its per-scenario procedure signature slice; the parser is
+	// constructed with cypher.WithRegistry(NewRegistry(sigs)) per pin.
+
+	// Call1 [1] Standalone CALL, no args, no yields, no results in
+	// signature. StatementRead (CALL is Read), zero CallBindings,
+	// projection-less part — the Stage-14 shape most similar to a
+	// projection-less write.
+	"CALL standalone no-args no-yields empty-results (Call1[1])": {
+		src: "CALL test.doNothing()",
+		want: oneBranch(query.Part{
+			ReturnsAll: true,
+		}),
+		sigs: []procsig.Signature{{Name: "test.doNothing"}},
+	},
+	// Call1 [2] Standalone CALL implicit invocation (no parens).
+	// Same shape as [1]; implicit-vs-explicit is a runtime
+	// distinction (implicit args come from parameters at runtime),
+	// invisible at the type-interface boundary.
+	"CALL standalone implicit no-args empty-results (Call1[2])": {
+		src: "CALL test.doNothing",
+		want: oneBranch(query.Part{
+			ReturnsAll: true,
+		}),
+		sigs: []procsig.Signature{{Name: "test.doNothing"}},
+	},
+	// Call1 [3] In-query CALL with no YIELD followed by RETURN n.
+	// MATCH binds n; CALL introduces no CallBinding (in-query no-YIELD
+	// posture, spec §4.2 step 9); RETURN n resolves via the MATCH
+	// binding.
+	"CALL in-query no-YIELD RETURN prior-match (Call1[3])": {
+		src: "MATCH (n)\nCALL test.doNothing()\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("n", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+		sigs: []procsig.Signature{{Name: "test.doNothing"}},
+	},
+	// Call1 [5] Standalone CALL with no args + implicit YIELD * from
+	// the one-result signature. One CallBinding `label` (STRING?);
+	// Part.Returns is one RefProjection on `label` at TypeString;
+	// ReturnsAll true.
+	"CALL standalone no-args implicit-YIELD (Call1[5])": {
+		src: "CALL test.labels()",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewCallBinding("label", "test.labels", "label", query.TypeString{}, true)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "label", Value: query.NewRefProjection(query.Ref{Variable: "label"}, query.TypeString{})},
+			},
+			ReturnsAll: true,
+		}),
+		sigs: []procsig.Signature{{
+			Name: "test.labels",
+			Results: []procsig.Result{
+				{Name: "label", Token: procsig.TokenString, Nullable: true},
+			},
+		}},
+	},
+	// Call1 [6] In-query CALL YIELD followed by RETURN. One
+	// CallBinding `label`; Returns is the RETURN clause's
+	// RefProjection on `label`, ReturnsAll false (no `*`).
+	"CALL in-query YIELD RETURN (Call1[6])": {
+		src: "CALL test.labels() YIELD label\nRETURN label",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewCallBinding("label", "test.labels", "label", query.TypeString{}, true)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "label", Value: query.NewRefProjection(query.Ref{Variable: "label"}, query.TypeString{})},
+			},
+		}),
+		sigs: []procsig.Signature{{
+			Name: "test.labels",
+			Results: []procsig.Result{
+				{Name: "label", Token: procsig.TokenString, Nullable: true},
+			},
+		}},
+	},
+	// Call2 [1] In-query CALL with explicit args + YIELD + RETURN.
+	// Two CallBindings (city, country_code); two args are literals
+	// (no refs), so no ExprUses. RETURN drives the returns slice.
+	"CALL in-query explicit args YIELD RETURN (Call2[1])": {
+		src: "CALL test.my.proc('Stefan', 1) YIELD city, country_code\nRETURN city, country_code",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewCallBinding("city", "test.my.proc", "city", query.TypeString{}, true)),
+				must(query.NewCallBinding("country_code", "test.my.proc", "country_code", query.TypeInt{}, true)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "city", Value: query.NewRefProjection(query.Ref{Variable: "city"}, query.TypeString{})},
+				{Name: "country_code", Value: query.NewRefProjection(query.Ref{Variable: "country_code"}, query.TypeInt{})},
+			},
+		}),
+		sigs: []procsig.Signature{{
+			Name: "test.my.proc",
+			Params: []procsig.Param{
+				{Name: "name", Token: procsig.TokenString, Nullable: true},
+				{Name: "id", Token: procsig.TokenInteger, Nullable: true},
+			},
+			Results: []procsig.Result{
+				{Name: "city", Token: procsig.TokenString, Nullable: true},
+				{Name: "country_code", Token: procsig.TokenInteger, Nullable: true},
+			},
+		}},
+	},
+	// Call2 [2] Standalone CALL with explicit args (implicit YIELD).
+	// Two CallBindings (signature order), Part.Returns synthesised
+	// from CallBindings, ReturnsAll true.
+	"CALL standalone explicit args implicit-YIELD (Call2[2])": {
+		src: "CALL test.my.proc('Stefan', 1)",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewCallBinding("city", "test.my.proc", "city", query.TypeString{}, true)),
+				must(query.NewCallBinding("country_code", "test.my.proc", "country_code", query.TypeInt{}, true)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "city", Value: query.NewRefProjection(query.Ref{Variable: "city"}, query.TypeString{})},
+				{Name: "country_code", Value: query.NewRefProjection(query.Ref{Variable: "country_code"}, query.TypeInt{})},
+			},
+			ReturnsAll: true,
+		}),
+		sigs: []procsig.Signature{{
+			Name: "test.my.proc",
+			Params: []procsig.Param{
+				{Name: "name", Token: procsig.TokenString, Nullable: true},
+				{Name: "id", Token: procsig.TokenInteger, Nullable: true},
+			},
+			Results: []procsig.Result{
+				{Name: "city", Token: procsig.TokenString, Nullable: true},
+				{Name: "country_code", Token: procsig.TokenInteger, Nullable: true},
+			},
+		}},
+	},
+	// Call5 [8] Standalone CALL with args + YIELD *. Same expansion
+	// as Call2 [2] (implicit YIELD == YIELD * for the standalone
+	// path).
+	"CALL standalone explicit args YIELD * (Call5[8])": {
+		src: "CALL test.my.proc('Stefan', 1) YIELD *",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewCallBinding("city", "test.my.proc", "city", query.TypeString{}, true)),
+				must(query.NewCallBinding("country_code", "test.my.proc", "country_code", query.TypeInt{}, true)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "city", Value: query.NewRefProjection(query.Ref{Variable: "city"}, query.TypeString{})},
+				{Name: "country_code", Value: query.NewRefProjection(query.Ref{Variable: "country_code"}, query.TypeInt{})},
+			},
+			ReturnsAll: true,
+		}),
+		sigs: []procsig.Signature{{
+			Name: "test.my.proc",
+			Params: []procsig.Param{
+				{Name: "name", Token: procsig.TokenString, Nullable: true},
+				{Name: "id", Token: procsig.TokenInteger, Nullable: true},
+			},
+			Results: []procsig.Result{
+				{Name: "city", Token: procsig.TokenString, Nullable: true},
+				{Name: "country_code", Token: procsig.TokenInteger, Nullable: true},
+			},
+		}},
+	},
+	// Call3 [1] NUMBER accepts INTEGER — the arg-type check is
+	// bucket-3, so the pin exercises the accept-path structurally
+	// (one CallBinding `out` at TypeString, nullable true). The
+	// argument 42 is a literal, so no refs.
+	"CALL NUMBER accepts INTEGER standalone (Call3[1])": {
+		src: "CALL test.my.proc(42)",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewCallBinding("out", "test.my.proc", "out", query.TypeString{}, true)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "out", Value: query.NewRefProjection(query.Ref{Variable: "out"}, query.TypeString{})},
+			},
+			ReturnsAll: true,
+		}),
+		sigs: []procsig.Signature{{
+			Name: "test.my.proc",
+			Params: []procsig.Param{
+				{Name: "in", Token: procsig.TokenNumber, Nullable: true},
+			},
+			Results: []procsig.Result{
+				{Name: "out", Token: procsig.TokenString, Nullable: true},
+			},
+		}},
+	},
+	// AUTHORED (Stage 14 §1.8 pin a): CALL inside EXISTS does not
+	// populate an outer CallBinding. The subqueryDepth counter
+	// suppresses the inner CALL; the outer query stays a plain
+	// MATCH ... RETURN with no CallBinding leaks.
+	"authored CALL inside EXISTS suppression": {
+		src: "MATCH (n)\nWHERE exists { CALL test.labels() YIELD label RETURN label }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("n", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+		sigs: []procsig.Signature{{
+			Name: "test.labels",
+			Results: []procsig.Result{
+				{Name: "label", Token: procsig.TokenString, Nullable: true},
+			},
+		}},
+	},
+	// AUTHORED (Stage 14 §1.8 pin b): bound-var CALL argument
+	// regression lock. MATCH binds n; CALL uses n.name — the
+	// property expression records `n` on curPart.refs via arg-side
+	// typeExpressionMining. Matched-pair counterpart of the mustReject
+	// pin `authored CALL unbound var argument kill probe`. Passes as
+	// an accept-path regression lock.
+	"authored CALL bound-var argument regression lock": {
+		src: "MATCH (n)\nCALL test.labels(n.name) YIELD label\nRETURN label",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("n", nil)),
+				must(query.NewCallBinding("label", "test.labels", "label", query.TypeString{}, true)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "label", Value: query.NewRefProjection(query.Ref{Variable: "label"}, query.TypeString{})},
+			},
+		}),
+		sigs: []procsig.Signature{{
+			Name: "test.labels",
+			Params: []procsig.Param{
+				{Name: "in", Token: procsig.TokenString, Nullable: true},
+			},
+			Results: []procsig.Result{
+				{Name: "label", Token: procsig.TokenString, Nullable: true},
+			},
+		}},
+	},
+	// AUTHORED (Stage 14 §1.8 pin c): standalone-CALL Returns
+	// expansion is deterministic signature-declaration order. Two
+	// results (a: INTEGER, b: STRING); the CALL has no YIELD, so the
+	// expansion follows sig.Results order.
+	"authored CALL standalone Returns signature-declaration-order": {
+		src: "CALL test.my.proc(42)",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewCallBinding("a", "test.my.proc", "a", query.TypeInt{}, true)),
+				must(query.NewCallBinding("b", "test.my.proc", "b", query.TypeString{}, true)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeInt{})},
+				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"}, query.TypeString{})},
+			},
+			ReturnsAll: true,
+		}),
+		sigs: []procsig.Signature{{
+			Name: "test.my.proc",
+			Params: []procsig.Param{
+				{Name: "in", Token: procsig.TokenNumber, Nullable: true},
+			},
+			Results: []procsig.Result{
+				{Name: "a", Token: procsig.TokenInteger, Nullable: true},
+				{Name: "b", Token: procsig.TokenString, Nullable: true},
+			},
+		}},
+	},
+	// AUTHORED (Stage 14 §1.8 pin d): YIELD…WHERE arg-mining probe.
+	// The grammar admits `oC_YieldItems → … ( SP? oC_Where )?`;
+	// the corpus is silent. Pin verifies the WHERE is walked for
+	// parameter uses ($needle enters query.Parameters) without
+	// disrupting the CallBinding shape.
+	"authored CALL YIELD trailing WHERE parameter-mining probe": {
+		src: "CALL test.labels() YIELD label WHERE label = $needle\nRETURN label",
+		want: func() query.Query {
+			q := oneBranch(query.Part{
+				Bindings: []query.Binding{
+					must(query.NewCallBinding("label", "test.labels", "label", query.TypeString{}, true)),
+				},
+				Returns: []query.ReturnItem{
+					{Name: "label", Value: query.NewRefProjection(query.Ref{Variable: "label"}, query.TypeString{})},
+				},
+			})
+			q.Parameters = []query.Parameter{{
+				Name: "needle",
+				Uses: []query.Use{query.NewExprUse(query.TypeBool{}, query.ExprInPredicate)},
+			}}
+			return q
+		}(),
+		sigs: []procsig.Signature{{
+			Name: "test.labels",
+			Results: []procsig.Result{
+				{Name: "label", Token: procsig.TokenString, Nullable: true},
+			},
+		}},
+	},
 }
 
 // must lifts a fallible model constructor into an expression usable in a struct
@@ -1847,11 +2151,28 @@ func must[T any](v T, err error) T {
 func TestMustParse(t *testing.T) {
 	for name, c := range mustParse {
 		t.Run(name, func(t *testing.T) {
-			got, err := cypher.New().Parse(strings.NewReader(c.src))
+			p := newParserFor(t, c.sigs)
+			got, err := p.Parse(strings.NewReader(c.src))
 			require.NoError(t, err, "read-core query must parse: %q", c.src)
 			require.Equal(t, c.want, got)
 		})
 	}
+}
+
+// newParserFor builds a cypher parser wired with a procedure signature
+// registry populated from the given slice (or the empty registry if the
+// slice is empty). Stage 14 pins targeting CALL supply signatures; pins
+// that do not touch CALL leave sigs nil. Every registry construction is
+// asserted valid at the test boundary — a malformed pin sig is a
+// programmer error, not a runtime concern.
+func newParserFor(t *testing.T, sigs []procsig.Signature) query.Parser {
+	t.Helper()
+	if len(sigs) == 0 {
+		return cypher.New()
+	}
+	reg, err := procsig.NewRegistry(sigs)
+	require.NoError(t, err, "test-side registry must be valid")
+	return cypher.New(cypher.WithRegistry(reg))
 }
 
 // mustReject pairs out-of-scope/invalid read-core queries with the sentinel they
@@ -1859,22 +2180,177 @@ func TestMustParse(t *testing.T) {
 var mustReject = map[string]struct {
 	query string
 	want  error
+	// sigs is Stage 14: per-pin procedure signatures the parser needs to
+	// resolve CALL clauses in `query`. Empty for every pre-Stage-14 pin.
+	sigs []procsig.Signature
 }{
-	// Stage 13 (Q5/Q6 fold-in): CALL (both standalone and in-query) is the
-	// last remaining fail-site of ErrUnsupportedClause after MERGE lands.
-	// Stage 12 pivoted "write clause" from CREATE (retired) to MERGE
-	// (temporary); Stage 13 pivots it again from MERGE (retired) to CALL,
-	// exercising BOTH CALL fail-sites — EnterOC_StandaloneCall for the
-	// bare `CALL proc(args)` shape, EnterOC_InQueryCall for the
-	// `CALL proc(args) YIELD out RETURN out` shape. Both are verbatim from
-	// clauses/call/Call3.feature [1]. Stage 14 retires both.
-	"write clause (standalone CALL)": {
-		query: "CALL test.my.proc(42)",
-		want:  cypher.ErrUnsupportedClause,
+	// Stage 14 (Call1 [13]): standalone CALL against an unknown procedure.
+	// The parser holds an empty (or non-covering) procedure registry, so
+	// the collectCall lookup misses and raises ErrUnknownProcedure.
+	// Verbatim from clauses/call/Call1.feature [13]; TCK error class
+	// ProcedureError:ProcedureNotFound.
+	"CALL unknown procedure standalone": {
+		query: "CALL test.my.proc",
+		want:  cypher.ErrUnknownProcedure,
 	},
-	"write clause (in-query CALL)": {
-		query: "CALL test.my.proc(42) YIELD out\nRETURN out",
-		want:  cypher.ErrUnsupportedClause,
+	// Stage 14 (Call1 [14]): in-query CALL against an unknown procedure.
+	// Same fail-site as the standalone twin above — the two share
+	// collectCall's registry-lookup step (spec §4.2 step 2). Verbatim
+	// from clauses/call/Call1.feature [14].
+	"CALL unknown procedure in-query": {
+		query: "CALL test.my.proc() YIELD out\nRETURN out",
+		want:  cypher.ErrUnknownProcedure,
+	},
+	// Stage 14 (Call1 [7]): standalone CALL with too few explicit
+	// arguments. Signature declares two params; call passes one.
+	// Statically provable from the registry, so bucket-1 reject via
+	// ErrProcedureArity (spec §4.2 step 4). Verbatim from
+	// clauses/call/Call1.feature [7]; TCK error class
+	// SyntaxError:InvalidNumberOfArguments.
+	"CALL too few explicit args (standalone)": {
+		query: "CALL test.my.proc('Dobby')",
+		want:  cypher.ErrProcedureArity,
+		sigs: []procsig.Signature{{
+			Name: "test.my.proc",
+			Params: []procsig.Param{
+				{Name: "name", Token: procsig.TokenString, Nullable: true},
+				{Name: "in", Token: procsig.TokenInteger, Nullable: true},
+			},
+			Results: []procsig.Result{
+				{Name: "out", Token: procsig.TokenInteger, Nullable: true},
+			},
+		}},
+	},
+	// Stage 14 (Call1 [9]): standalone CALL with too many explicit
+	// arguments. Signature declares one param; call passes four. Same
+	// fail-site as the too-few twin above. Verbatim from
+	// clauses/call/Call1.feature [9].
+	"CALL too many explicit args (standalone)": {
+		query: "CALL test.my.proc(1, 2, 3, 4)",
+		want:  cypher.ErrProcedureArity,
+		sigs: []procsig.Signature{{
+			Name: "test.my.proc",
+			Params: []procsig.Param{
+				{Name: "in", Token: procsig.TokenInteger, Nullable: true},
+			},
+			Results: []procsig.Result{
+				{Name: "out", Token: procsig.TokenInteger, Nullable: true},
+			},
+		}},
+	},
+	// Stage 14 (Call1 [15]): YIELD binds a name already in imported
+	// scope from a preceding WITH. Fail-site: buildPart's Stage-14
+	// four-way sweep (spec §4.7) — the CallBinding `label` collides
+	// with the imported name `label` from the WITH's export. Verbatim
+	// from clauses/call/Call1.feature [15]; TCK error class
+	// SyntaxError:VariableAlreadyBound. Reuses ErrVariableKindConflict
+	// per the Stage-9 unwind-vs-unwind precedent (Q4 ruling).
+	"CALL YIELD shadows imported name": {
+		query: "WITH 'Hi' AS label\nCALL test.labels() YIELD label\nRETURN *",
+		want:  cypher.ErrVariableKindConflict,
+		sigs: []procsig.Signature{{
+			Name: "test.labels",
+			Results: []procsig.Result{
+				{Name: "label", Token: procsig.TokenString, Nullable: true},
+			},
+		}},
+	},
+	// Stage 14 (Call5 [5]): YIELD intra-list rename collision — `YIELD
+	// a, b AS a` — the second item's AS-alias equals the first item's
+	// bare name. Fail-site: collectCall's intra-YIELD collision check
+	// (spec §4.2 step 6). Verbatim from clauses/call/Call5.feature [5];
+	// TCK error class SyntaxError:VariableAlreadyBound.
+	"CALL YIELD intra rename collision (b AS a)": {
+		query: "CALL test.my.proc(null) YIELD a, b AS a\nRETURN a",
+		want:  cypher.ErrVariableKindConflict,
+		sigs: []procsig.Signature{{
+			Name: "test.my.proc",
+			Params: []procsig.Param{
+				{Name: "in", Token: procsig.TokenInteger, Nullable: true},
+			},
+			Results: []procsig.Result{
+				{Name: "a", Token: procsig.TokenInteger, Nullable: true},
+				{Name: "b", Token: procsig.TokenInteger, Nullable: true},
+			},
+		}},
+	},
+	// Stage 14 (Call5 [6]): YIELD intra-list rename collision — `YIELD
+	// a AS c, b AS c` — two items rename to the same target. Same
+	// fail-site as the Call5 [5] twin. Verbatim from
+	// clauses/call/Call5.feature [6].
+	"CALL YIELD intra rename collision (both to c)": {
+		query: "CALL test.my.proc(null) YIELD a AS c, b AS c\nRETURN c",
+		want:  cypher.ErrVariableKindConflict,
+		sigs: []procsig.Signature{{
+			Name: "test.my.proc",
+			Params: []procsig.Param{
+				{Name: "in", Token: procsig.TokenInteger, Nullable: true},
+			},
+			Results: []procsig.Result{
+				{Name: "a", Token: procsig.TokenInteger, Nullable: true},
+				{Name: "b", Token: procsig.TokenInteger, Nullable: true},
+			},
+		}},
+	},
+	// Stage 14 (Call1 [12]): in-query CALL with no YIELD followed by
+	// RETURN referencing a would-be result column. In-query CALL
+	// introduces NO CallBinding without a YIELD (spec §4.2 step 9), so
+	// `RETURN out` names nothing in scope — falls out of the existing
+	// buildPart refs-vs-scope sweep as ErrUnboundVariable. Verbatim
+	// from clauses/call/Call1.feature [12]; TCK error class
+	// SyntaxError:UndefinedVariable.
+	"in-query CALL no YIELD RETURN references dropped result": {
+		query: "CALL test.my.proc(1)\nRETURN out",
+		want:  cypher.ErrUnboundVariable,
+		sigs: []procsig.Signature{{
+			Name: "test.my.proc",
+			Params: []procsig.Param{
+				{Name: "in", Token: procsig.TokenInteger, Nullable: true},
+			},
+			Results: []procsig.Result{
+				{Name: "out", Token: procsig.TokenInteger, Nullable: true},
+			},
+		}},
+	},
+	// AUTHORED (Stage 14 §1.8 matched pair): a CALL argument references
+	// an unbound variable. No preceding MATCH binds `m`, so the arg-
+	// mining path records `m` on curPart.refs (spec §4.2 step 3), and
+	// buildPart's referential-integrity sweep raises ErrUnboundVariable.
+	// Matched-pair counterpart of the mustParse pin "authored CALL
+	// bound-var argument regression lock" — that pin exercises the
+	// accept-path with a bound `n`; this one exercises the reject-path
+	// with an unbound `m`. Corpus is silent on this shape at the
+	// clauses/call pinned tag.
+	"authored CALL unbound var argument kill probe": {
+		query: "CALL test.labels(m.name) YIELD label\nRETURN label",
+		want:  cypher.ErrUnboundVariable,
+		sigs: []procsig.Signature{{
+			Name: "test.labels",
+			Params: []procsig.Param{
+				{Name: "in", Token: procsig.TokenString, Nullable: true},
+			},
+			Results: []procsig.Result{
+				{Name: "label", Token: procsig.TokenString, Nullable: true},
+			},
+		}},
+	},
+	// AUTHORED (Stage 14 §1.8 Q1 fold-in): YIELD references a result
+	// field the signature does not declare. Fail-site: collectCall's
+	// YIELD-item enumeration (spec §4.2 step 6, first sub-item). Pins
+	// the one-sentinel-covers-both ruling (Q1): registry-miss and
+	// unknown-YIELD-field-miss share ErrUnknownProcedure, with the
+	// wrapped message doing the sub-category disambiguation ("unknown
+	// procedure result field: nofield on test.labels"). Corpus is
+	// silent on this shape.
+	"authored CALL YIELD unknown result field kill probe": {
+		query: "CALL test.labels() YIELD nofield\nRETURN nofield",
+		want:  cypher.ErrUnknownProcedure,
+		sigs: []procsig.Signature{{
+			Name: "test.labels",
+			Results: []procsig.Result{
+				{Name: "label", Token: procsig.TokenString, Nullable: true},
+			},
+		}},
 	},
 	// AUTHORED (Stage 12 amend §1.5): SET with a nested propertyExpression
 	// target (n.a.b). The model's Ref carries a single Property, so a nested
@@ -2034,7 +2510,8 @@ var mustReject = map[string]struct {
 func TestMustReject(t *testing.T) {
 	for name, tc := range mustReject {
 		t.Run(name, func(t *testing.T) {
-			got, err := cypher.New().Parse(strings.NewReader(tc.query))
+			p := newParserFor(t, tc.sigs)
+			got, err := p.Parse(strings.NewReader(tc.query))
 			require.Error(t, err, "out-of-scope query must be rejected: %q", tc.query)
 			require.Equal(t, query.Query{}, got, "model must be the zero value on error")
 			require.ErrorIs(t, err, tc.want)
@@ -2050,6 +2527,12 @@ func TestMustReject(t *testing.T) {
 // map because there is no domain sentinel to reach (Stage 13 §4.4, A1).
 var mustRejectGrammar = map[string]struct {
 	query string
+	// sigs is Stage 14: some grammar-reject pins carry corpus-verbatim
+	// signatures alongside their queries. The ANTLR grammar rejects
+	// before the listener consults the registry, so signatures are
+	// documentation-only here — they mirror the TCK background step
+	// intent verbatim.
+	sigs []procsig.Signature
 }{
 	// Stage 13 (A1 fold-in): MERGE grammar admits exactly ONE oC_PatternPart
 	// (Cypher.g4 §oC_Merge : MERGE SP? oC_PatternPart ( SP oC_MergeAction )*).
@@ -2058,41 +2541,79 @@ var mustRejectGrammar = map[string]struct {
 	"merge multiple pattern parts": {
 		query: "MERGE (a), (b)",
 	},
+	// Stage 14: in-query CALL disallows implicit invocation. The grammar
+	// (Cypher.g4 §oC_InQueryCall) requires oC_ExplicitProcedureInvocation
+	// (parens), so `CALL test.my.proc YIELD out` fails at ANTLR before
+	// the listener runs. Verbatim from clauses/call/Call2.feature [4],
+	// which carries the @skipGrammarCheck tag in the TCK for exactly
+	// this posture.
+	"in-query CALL with implicit invocation": {
+		query: "CALL test.my.proc YIELD out\nRETURN out",
+		sigs: []procsig.Signature{{
+			Name: "test.my.proc",
+			Params: []procsig.Param{
+				{Name: "in", Token: procsig.TokenInteger, Nullable: true},
+			},
+			Results: []procsig.Result{
+				{Name: "out", Token: procsig.TokenInteger, Nullable: true},
+			},
+		}},
+	},
+	// Stage 14: in-query CALL disallows YIELD *. The grammar
+	// (Cypher.g4 §oC_InQueryCall) permits YIELD only over an
+	// oC_YieldItems list — the '*' alternative is on
+	// oC_StandaloneCall exclusively. Verbatim from clauses/call/
+	// Call5.feature [7], which carries the @skipGrammarCheck tag in
+	// the TCK for exactly this posture.
+	"in-query CALL with YIELD *": {
+		query: "CALL test.my.proc('Stefan', 1) YIELD *\nRETURN city, country_code",
+		sigs: []procsig.Signature{{
+			Name: "test.my.proc",
+			Params: []procsig.Param{
+				{Name: "name", Token: procsig.TokenString, Nullable: true},
+				{Name: "id", Token: procsig.TokenInteger, Nullable: true},
+			},
+			Results: []procsig.Result{
+				{Name: "city", Token: procsig.TokenString, Nullable: true},
+				{Name: "country_code", Token: procsig.TokenInteger, Nullable: true},
+			},
+		}},
+	},
 }
 
 func TestMustRejectGrammar(t *testing.T) {
 	for name, tc := range mustRejectGrammar {
 		t.Run(name, func(t *testing.T) {
-			got, err := cypher.New().Parse(strings.NewReader(tc.query))
+			p := newParserFor(t, tc.sigs)
+			got, err := p.Parse(strings.NewReader(tc.query))
 			require.Error(t, err, "grammar-invalid query must be rejected: %q", tc.query)
 			require.Equal(t, query.Query{}, got, "model must be the zero value on error")
 		})
 	}
 }
 
-// allSentinels is the canonical list of the six Parse sentinels — the single
-// source of truth TestSentinelReachability checks against. A new sentinel must be
-// added here (and exercised by a mustReject case); a removed one must be dropped.
-// errNotImplemented is deliberately absent: it is the run-A stub, not a contract
-// sentinel. Stage 6 retired ErrUnsupportedProjection: the projection classifier
-// now accepts every scalar expression at RETURN / WITH position, so the sentinel
-// has no fail-site left to guard. Stage 8 retired ErrUnsupportedPattern: the
-// three pattern shapes it flagged (named paths, variable-length, multi-type)
-// all parse under the widened model, so the sentinel has no fail-site left.
-// Stage 11 adds ErrPatternInProjection: a pattern predicate used as a scalar
-// RETURN / WITH column is a bucket-1 parse-shape rejection (Pattern1 [22]/[23]).
-// Stage 12 adds ErrNestedPropertyTarget: SET/REMOVE nested LHS (n.a.b) has no
-// honest single-Ref shape in the model, and real engines reject it. The
-// internal model-invariant sentinel ErrEmptyPart lives on the query package
-// (not cypher) and is NOT included here — it is unreachable via parse (the
-// grammar rules out the shape), so a reachability sweep would fail.
+// allSentinels is the canonical list of the seven Parse sentinels — the
+// single source of truth TestSentinelReachability checks against. A new
+// sentinel must be added here (and exercised by a mustReject case); a
+// removed one must be dropped. errNotImplemented is deliberately absent:
+// it is the run-A stub, not a contract sentinel. Stage 6 retired
+// ErrUnsupportedProjection: the projection classifier now accepts every
+// scalar expression at RETURN / WITH position. Stage 8 retired
+// ErrUnsupportedPattern. Stage 11 added ErrPatternInProjection. Stage 12
+// added ErrNestedPropertyTarget. Stage 14 retires ErrUnsupportedClause
+// entirely (its last fail-site was CALL, which is supported after
+// Stage 14) and adds ErrUnknownProcedure and ErrProcedureArity.
+// The internal model-invariant sentinel ErrEmptyPart lives on the query
+// package (not cypher) and is NOT included here — it is unreachable via
+// parse, so a reachability sweep would fail.
 var allSentinels = []error{
-	cypher.ErrUnsupportedClause,
 	cypher.ErrUnsupportedParameter,
 	cypher.ErrUnboundVariable,
 	cypher.ErrVariableKindConflict,
 	cypher.ErrPatternInProjection,
 	cypher.ErrNestedPropertyTarget,
+	cypher.ErrUnknownProcedure,
+	cypher.ErrProcedureArity,
 }
 
 // TestSentinelReachability is the bidirectional sweep (mirroring schema/gql): the
@@ -2144,16 +2665,24 @@ func corpusQueries(t *testing.T) []string {
 
 // TestPropertyReadCoreParses is the precondition guard for the richer invariant
 // properties below: every curated read-core query must parse. If it ever fails,
-// the property tests below would pass vacuously, so this is the gate.
+// the property tests below would pass vacuously, so this is the gate. Stage 14:
+// each pin's per-scenario signature slice is carried through
+// newParserFor so CALL pins parse with the same registry TestMustParse
+// constructs.
 func TestPropertyReadCoreParses(t *testing.T) {
-	queries := make([]string, 0, len(mustParse))
+	type pin struct {
+		src  string
+		sigs []procsig.Signature
+	}
+	pins := make([]pin, 0, len(mustParse))
 	for _, c := range mustParse {
-		queries = append(queries, c.src)
+		pins = append(pins, pin{src: c.src, sigs: c.sigs})
 	}
 	rapid.Check(t, func(rt *rapid.T) {
-		q := rapid.SampledFrom(queries).Draw(rt, "query")
-		if _, err := cypher.New().Parse(strings.NewReader(q)); err != nil {
-			rt.Fatalf("read-core query did not parse: %q: %v", q, err)
+		p := rapid.SampledFrom(pins).Draw(rt, "pin")
+		parser := newParserFor(t, p.sigs)
+		if _, err := parser.Parse(strings.NewReader(p.src)); err != nil {
+			rt.Fatalf("read-core query did not parse: %q: %v", p.src, err)
 		}
 	})
 }

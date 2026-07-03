@@ -122,6 +122,19 @@ type rawPart struct {
 	pathMemberSink *[]query.PathMember
 	unwindBindings []query.UnwindBinding
 	effects        []query.Effect // Stage 12: per-part write clauses in walk order
+
+	// Stage 14: CALL YIELD bindings collected in this part, in walk
+	// order (which for standalone YIELD * and no-YIELD is signature
+	// declaration order per collectCall §4.2 steps 7/8). Appended to
+	// the model's Bindings slice at build time, mirroring the
+	// pathBindings and unwindBindings pattern.
+	callBindings []query.CallBinding
+	// callStandalone is true iff at least one standalone CALL in this
+	// part expanded implicitly (no downstream RETURN) — build() reads
+	// it to populate Part.Returns as RefProjections over the
+	// CallBindings and set ReturnsAll (spec §4.3). In-query CALLs
+	// leave this flag alone.
+	callStandalone bool
 }
 
 func newRawPart() *rawPart {
@@ -545,18 +558,39 @@ func (l *listener) EnterOC_Unwind(c *gen.OC_UnwindContext) {
 	l.collectUnwind(c)
 }
 
-func (l *listener) EnterOC_InQueryCall(*gen.OC_InQueryCallContext) {
+// EnterOC_InQueryCall collects one in-query CALL clause. In-query CALLs
+// are grammar-restricted to explicit invocation (parens present) and to
+// oC_YieldItems (no YIELD *); both restrictions surface as mustReject
+// grammar-level parse errors before this handler runs. Stage 14 §4.1 /
+// §4.2. Suppressed under EXISTS { ... } like every other collecting
+// handler.
+func (l *listener) EnterOC_InQueryCall(c *gen.OC_InQueryCallContext) {
 	if l.subqueryDepth > 0 {
 		return
 	}
-	l.fail(fmt.Errorf("%w: CALL", ErrUnsupportedClause))
+	l.enterInQueryCall(c)
 }
 
-func (l *listener) EnterOC_StandaloneCall(*gen.OC_StandaloneCallContext) {
+// EnterOC_StandaloneCall collects one standalone CALL clause. Stage 14
+// §4.1 / §4.2. Suppressed under EXISTS { ... } like every other
+// collecting handler. Grammar quirk: a pure standalone CALL parses via
+// `oC_Query → oC_StandaloneCall` (see Cypher.g4 §oC_Query), which
+// SKIPS `oC_RegularQuery → oC_SingleQuery`, so EnterOC_SingleQuery
+// never fires and curBranch/curPart stay nil. This handler primes them
+// itself before calling enterStandaloneCall, mirroring what
+// EnterOC_SingleQuery does for the regular-query path.
+func (l *listener) EnterOC_StandaloneCall(c *gen.OC_StandaloneCallContext) {
 	if l.subqueryDepth > 0 {
 		return
 	}
-	l.fail(fmt.Errorf("%w: CALL", ErrUnsupportedClause))
+	if l.curPart == nil {
+		part := newRawPart()
+		br := &rawBranch{parts: []*rawPart{part}}
+		l.branches = append(l.branches, br)
+		l.curBranch = br
+		l.curPart = part
+	}
+	l.enterStandaloneCall(c)
 }
 
 // EnterOC_Return collects the result columns into the current (final) part of
