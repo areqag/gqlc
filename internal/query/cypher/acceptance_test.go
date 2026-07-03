@@ -62,6 +62,13 @@ var updateGolden = flag.Bool("update", false, "regenerate golden snapshots from 
 // undefined-variable scenarios (Create1[20], Create2[24]) reject via
 // ErrUnboundVariable at the buildPart referential-integrity sweep — they
 // come OFF the skiplist here.
+// Stage 15 adds useCases/{countingSubgraphMatches,triadicSelection} —
+// composition corpus over the Stages 0-14 surface; no model widening, no new
+// skiplist entries, all 30 scenarios parse-green at wiring time. Stage 15
+// completes the TCK-corpus audit: every feature dir is now wired; every
+// skiplist entry carries a typed policy category (see the skipCategory sum
+// below). The pending count is a true progress meter — a pending scenario is
+// a documented bucket-3 accept-and-defer, not opaque.
 // The corpus is never edited; each stage widens the dir list and shrinks the
 // skiplist.
 var readCoreDirs = []string{
@@ -100,9 +107,42 @@ var readCoreDirs = []string{
 	"../../../test/data/query/cypher/tck/features/expressions/aggregation",
 	"../../../test/data/query/cypher/tck/features/expressions/quantifier",
 	"../../../test/data/query/cypher/tck/features/expressions/existentialSubqueries",
+	"../../../test/data/query/cypher/tck/features/useCases/countingSubgraphMatches",
+	"../../../test/data/query/cypher/tck/features/useCases/triadicSelection",
 }
 
 const goldenDir = "testdata/golden"
+
+// skipCategory names a policy family for each skiplist entry. Categories are
+// the eight TCK-rule families the parser deliberately accepts because the rule
+// lives below the type-interface boundary (ADR 0005). The zero value is not a
+// valid category — an entry without an explicit category fails
+// TestSkiplistCategoryPolicy.
+type skipCategory int
+
+const (
+	catRuntimeError skipCategory = iota + 1
+	catResultAssertionOnly
+	catValueBelowBoundary
+	catGroupingKeySemantic
+	catBindingKindConflict
+	catWriteShapeConstraint
+	catClauseComposition
+	catSignatureArgCheck
+)
+
+// skipCategories is the exhaustive taxonomy — TestSkiplistCategoryPolicy
+// asserts every entry uses one of these and no category is dead.
+var skipCategories = []skipCategory{
+	catRuntimeError,
+	catResultAssertionOnly,
+	catValueBelowBoundary,
+	catGroupingKeySemantic,
+	catBindingKindConflict,
+	catWriteShapeConstraint,
+	catClauseComposition,
+	catSignatureArgCheck,
+}
 
 // skiplist excludes by name the negative TCK scenarios that this parser
 // deliberately accepts: valid openCypher whose error lives on the other side of
@@ -112,215 +152,17 @@ const goldenDir = "testdata/golden"
 // remove them (they aren't "unsupported features"). A skipped scenario is
 // reported and counted, never deleted from the corpus.
 //
-// The Stage 1 audit of clauses/return-skip-limit/ classified its 31 scenarios
-// as 11 parse-green (snapshotted goldens), 4 PENDING via existing
-// ErrUnsupportedClause/ErrUnsupportedProjection sentinels (WITH/UNWIND/
-// aggregation in RETURN), 0 true parse-rejection, and 16 accept-then-runtime-
-// or-compile-time-value-error scenarios listed below in two groups.
-//
-// Heterogeneous reasons-to-skip live together here; each entry is pinned to
-// its actual cause rather than collapsed to a single rationale.
-var skiplist = map[string]bool{
-	// --- pattern semantics that live below the type-interface boundary ---
-	//
-	// MATCH (a)-[r]->()-[r]->(a): reusing a relationship variable is a runtime
-	// uniqueness rule, not a type-interface concern. Spec Cluster C: relationship
-	// reuse is not special-cased — first occurrence defines endpoints, later
-	// occurrences merge labels.
-	"[29] Fail when re-using a relationship in the same pattern": true,
-	// WHERE count(a) > 10: an aggregation inside WHERE. Bucket 3 per ADR 0007 —
-	// the parser accepts and types the predicate (Stage 10: count(n) > 3 types as
-	// TypeBool via the aggregate-arm in typeAtom), then re-executes the original
-	// text so the engine raises the aggregate-in-WHERE grouping/binding-scope
-	// error (ADR 0005). Per-position aggregate legality is a semantic rule the
-	// type-interface boundary does not carry — same family as
-	// AmbiguousAggregationExpression / InvalidAggregation.
-	"[15] Fail on aggregation in WHERE": true,
+// Stage 15 groups entries by policy category (see skipCategory above). Every
+// entry within a section explicitly carries its category as the map value; the
+// section header is for humans, the map value is what
+// TestSkiplistCategoryPolicy checks. Prior stages' per-entry rationale comments
+// are preserved verbatim.
+var skiplist = map[string]skipCategory{
+	// --- catRuntimeError (7): TCK's negative outcome is a runtime rule the
+	//     engine detects at execution (entity-not-found on deleted node,
+	//     constraint verification, TypeError on stored property, MergeReadOwnWrites).
+	//     Not a parse-shape concern.
 
-	// --- SKIP/LIMIT with a literal the TCK rejects as compile-time
-	//     NonConstantExpression / NegativeIntegerArgument / InvalidArgumentType ---
-	//
-	// The value lives below the type-interface boundary (B1 — execution validates
-	// the literal via the original text per ADR 0005), so this parser
-	// accept-and-ignores. The TCK names these "compile time SyntaxError" but the
-	// rejection is a value-constraint check, not a parse-shape check; an engine
-	// reading our generated method body still sees the original SKIP -1 / LIMIT
-	// 1.5 / SKIP n.count text and raises the same error.
-	"[5] SKIP with an expression that depends on variables should fail": true,
-	"[7] Negative SKIP should fail":                                     true,
-	"[9] Floating point SKIP should fail":                               true,
-	"[10] Fail when using non-constants in SKIP":                        true,
-	"[11] Fail when using negative value in SKIP":                       true,
-	"[9] Fail when using non-constants in LIMIT":                        true,
-	"[12] Fail when using negative value in LIMIT 1":                    true,
-	"[13] Fail when using negative value in LIMIT 2":                    true,
-	"[16] Fail when using floating point in LIMIT 1":                    true,
-	"[17] Fail when using floating point in LIMIT 2":                    true,
-
-	// --- SKIP/LIMIT with a parameter whose runtime value the TCK rejects as
-	//     NegativeIntegerArgument / InvalidArgumentType ---
-	//
-	// The parameter's name is what the model carries (a ClauseSlotUse on the
-	// Parameter); the runtime-bound argument value lives below the type-interface
-	// boundary (B1), so this parser accept-and-ignores. An engine reading the
-	// generated method body sees the original SKIP $_skip / LIMIT $_limit text
-	// and binds the caller's value, raising the same error.
-	"[6] Negative parameter for SKIP should fail":                       true,
-	"[8] Floating point parameter for SKIP should fail":                 true,
-	"[10] Negative parameter for LIMIT should fail":                     true,
-	"[11] Negative parameter for LIMIT with ORDER BY should fail":       true,
-	"[14] Floating point parameter for LIMIT should fail":               true,
-	"[15] Floating point parameter for LIMIT with ORDER BY should fail": true,
-
-	// --- projection value/semantics below the type-interface boundary (Stage 3) ---
-	//
-	// Stage 3 widens RETURN to a projection sum (var/var.prop, scalar literal,
-	// function, aggregate, RETURN *), so these negatives now parse-accept; their
-	// error lives below the boundary and the re-executed original text raises it
-	// (ADR 0005, B1).
-	//
-	// RETURN * with nothing in scope expands to zero columns: a scope/value error
-	// (NoVariablesInScope), not a parse-shape one. We record ReturnsAll and the
-	// resolver expands * post-freeze (spec §3).
-	"[2] Fail when using RETURN * without variables in scope": true,
-	// RETURN foo(a): the parser carries no function name (FuncProjection holds only
-	// the referenced bindings, §2), so a non-existent function (UnknownFunction) is
-	// not a distinction it can make — the engine re-executing foo(a) raises it.
-	"[18] Fail on projecting a non-existent function": true,
-	// RETURN 1 AS a, 2 AS a: duplicate column names are a value-level result-shape
-	// check (ColumnNameConflict); Returns is duplicate-preserving (Stage-0 rule),
-	// so two LiteralProjections both named "a" parse-accept.
-	"[10] Fail when returning multiple columns with same name": true,
-
-	// --- WITH/UNION value & result-shape errors below the boundary (Stage 4) ---
-	//
-	// Stage 4 adds WITH chaining (per-part scopes) and UNION (parallel branches),
-	// so these negatives now parse-accept; each error is a value- or result-shape
-	// rule the type-interface model does not carry (B1, ADR 0003), raised by the
-	// re-executed original text (ADR 0005).
-	//
-	// WITH <literal> AS n / MATCH (n): n imports a name into the next part and is
-	// re-bound there as a node; the conflict is that the WITH expression's value is
-	// not a node (VariableTypeConflict). We model n's binding kind, not the type of
-	// the projected expression, so the two reconcile structurally. (Scenario Outline
-	// with 3 examples — true/123/123.4 — each pickle carries the same name.)
-	"[11] Fail when matching a node variable bound to a value": true,
-	// WITH <invalid> AS r / MATCH ()-[r]-(): the edge analogue of the node entry
-	// above — r imports a name and is re-bound as a relationship; the conflict is
-	// that the WITH expression's value is not a relationship (VariableTypeConflict).
-	// We model r's binding kind, not the projected expression's type. Reachable only
-	// at Stage 5 because the pattern is undirected (()-[r]-()); the error is the same
-	// value-level rule below the type-interface boundary (B1, ADR 0003/0005).
-	"[13] Fail when matching a relationship variable bound to a value": true,
-	// RETURN 1 AS a UNION RETURN 2 AS b: the two branches expose different column
-	// names (DifferentColumnsInUnion). Column compatibility across branches is not
-	// modelled (ADR 0003); we record each branch's Returns verbatim.
-	"[5] Failing when UNION has different columns":     true,
-	"[5] Failing when UNION ALL has different columns": true,
-	// Mixing UNION with UNION ALL in one query (InvalidClauseComposition): we record
-	// the combinator sequence faithfully ([union, unionAll]); the no-mixing rule is a
-	// clause-composition constraint, not a parse-shape one.
-	"[1] Failing when mixing UNION and UNION ALL": true,
-	"[2] Failing when mixing UNION ALL and UNION": true,
-	// WITH 1 AS a, 2 AS a: duplicate forwarded column names (ColumnNameConflict),
-	// the WITH analogue of the RETURN entry above; Returns is duplicate-preserving.
-	"[4] Fail when forwarding multiple aliases with the same name": true,
-	// WITH a, count(*): a non-aliased expression in WITH (NoExpressionAlias). We
-	// synthesise a Name from the item's source text (here "count(*)"), so every WITH
-	// item carries a name and the must-alias rule has nothing to check against.
-	"[5] Fail when not aliasing expressions in WITH": true,
-
-	// --- expressions value/semantics below the type-interface boundary (Stage 6) ---
-	//
-	// Stage 6 widens RETURN / WITH projections to any scalar expression and types
-	// the result, so these AmbiguousAggregationExpression negatives now parse-accept
-	// as ExprProjection over the whole expression. Grouping-key correctness — the
-	// rule "every non-aggregate sub-expression inside an aggregate expression must
-	// be a projected variable" — is a semantic constraint the type interface does
-	// not carry (ADR 0003), so it is a bucket-3 runtime concern (ADR 0007). An
-	// engine re-executing the original text raises the same error.
-	"[8] Fail if not projected variables are used inside an expression which contains an aggregation expression":                   true,
-	"[9] Fail if more complex expression, even if projected, are used inside expression which contains an aggregation expression":  true,
-	"[20] Fail if not returned variables are used inside an expression which contains an aggregation expression":                   true,
-	"[21] Fail if more complex expressions, even if returned, are used inside expression which contains an aggregation expression": true,
-	// count(count(*)) — nested aggregation is a NestedAggregation semantic rule.
-	// Stage 6 accepts the outer count() as an AggregateProjection and the inner
-	// count(*) as its argument (surfaced as a ref-free func-arg walk). The rule
-	// against nesting an aggregate inside another aggregate is a resolver /
-	// engine concern below the type-interface boundary.
-	"[14] Aggregates in aggregates": true,
-	// count(rand()) — the impurity of rand() prevents grouping-key aggregation
-	// semantics; a value-level engine rule below the boundary.
-	"[15] Using `rand()` in aggregations": true,
-	// MATCH (n) WITH [n] AS users MATCH (users)-->() — reusing an alias bound to
-	// a list-of-nodes as a node pattern variable is a VariableTypeConflict
-	// (value-level rule). Stage 6 accepts the WITH [n] AS users projection as
-	// an ExprProjection of TypeList<TypeNode>; the downstream re-binding of
-	// users as a node is a schema-agnostic parse-accept (predicate structure
-	// stays below the boundary).
-	"[30] Fail when using a list or nodes as a node": true,
-
-	// size(<pattern-predicate>) — a pattern predicate as a function argument.
-	// The TCK names this SyntaxError:UnexpectedSyntax (a genuine parse-shape
-	// class) but the fail-site rule is really "pattern predicates are not
-	// bindable arguments to size()," a semantic check tied to size()'s
-	// signature. The parser accepts the pattern-predicate atom as an unknown-
-	// typed opaque (typing.go's typeAtom leaves OC_PatternPredicate as
-	// TypeUnknown without mining refs), so the query parses. Rejection of
-	// pattern-predicate arguments is downstream signature-checking work
-	// (procedure/function registry, ADR 0007), out of Stage 6's scope.
-	"[6] Fail for `size()` on pattern predicates": true,
-
-	// --- pattern semantics (Stage 8) ---
-	//
-	// Stage 8 widens the pattern model to admit named paths, variable-length
-	// relationships, and multi-type relationships. Three of the negative
-	// scenarios exercise semantic rules the type-interface model does not
-	// carry, so they now parse-accept; each error sits below the boundary
-	// per ADR 0005 and rides bucket 3 (ADR 0007).
-	//
-	// WITH <invalid> AS p / MATCH p = ()-[]-(): binding a path variable to a
-	// value is a VariableAlreadyBound semantic rule (the WITH exports p as a
-	// non-path expression's alias; the MATCH re-binds it as a path). The
-	// model records p's kind (path) and the WITH's alias-and-type separately,
-	// so the two reconcile structurally; the engine raises. Scenario Outline
-	// with several examples, all sharing the same name.
-	"[25] Fail when matching a path variable bound to a value": true,
-
-	// MATCH r = (n)-[*]->() / WHERE r.name = 'apa' / RETURN r: a property
-	// lookup on a path variable is an InvalidArgumentType semantic rule
-	// (paths have no properties). The parser accepts the property-lookup
-	// shape (Stage 6 records TypeUnknown for any property lookup, ADR 0003);
-	// the engine's type-check against the resolved r:path rejects it.
-	"[14] Fail when filtering path with property predicate": true,
-
-	// (Stage 11, gqlc-3r0 fold: the two Pattern1 [22]/[23] deferrals — a
-	// pattern predicate at RETURN / WITH projection position — are
-	// RETIRED. collectReturnItem now rejects the shape with the new
-	// ErrPatternInProjection sentinel via isPatternPredicateAtom; see the
-	// "pattern predicate in return projection" mustReject case for the
-	// fail-site.)
-
-	// MATCH (n) SET n.prop = head(nodes(head((n)-[:REL]->()))).foo — a pattern
-	// predicate buried inside the RHS of a SET item's value expression
-	// (SyntaxError:UnexpectedSyntax). Stage 12 exposes this newly: before
-	// Stage 12 the SET clause rejected via ErrUnsupportedClause, so the
-	// scenario passed on the negative outcome; after Stage 12 the SET
-	// clause parses, and the buried pattern predicate types as TypeBool
-	// via typeAtom's Stage-11 pattern-predicate arm, so the whole SET
-	// value parses. Stage 11 §8 documents this class of hole
-	// ("pattern predicate inside another expression" — the enclosing
-	// shape is not a bare atom, so the isPatternPredicateAtom check does
-	// not catch it). Widening the rejection to climb the precedence
-	// tower is Stage-11 scope creep; Stage 12 records the shape as
-	// bucket-1 accept-and-defer and lets the engine raise the
-	// UnexpectedSyntax rule on the original text (ADR 0005). A future
-	// stage that revisits pattern-predicate scope-checking would remove
-	// this entry.
-	"[24] Fail on using pattern in right-hand side of SET": true,
-
-	// --- deleted-entity access at RETURN (Stage 12 newly-exposed) ---
-	//
 	// MATCH (n) DELETE n RETURN n.num (Return2 [15]/[16]/[17]) —
 	// EntityNotFound:DeletedEntityAccess at runtime. Not a SyntaxError,
 	// not under expressions/*, so neither isBucketThreeDir nor
@@ -330,207 +172,291 @@ var skiplist = map[string]bool{
 	// access at execution. Before Stage 12 these scenarios PENDING'd via
 	// ErrUnsupportedClause on DELETE; after Stage 12 DELETE parses, so
 	// the shapes are enumerated here as bucket-3 accept-and-defer.
-	"[15] Fail when returning properties of deleted nodes":         true,
-	"[16] Fail when returning labels of deleted nodes":             true,
-	"[17] Fail when returning properties of deleted relationships": true,
+	"[15] Fail when returning properties of deleted nodes":         catRuntimeError,
+	"[16] Fail when returning labels of deleted nodes":             catRuntimeError,
+	"[17] Fail when returning properties of deleted relationships": catRuntimeError,
+	// ConstraintVerificationFailed:DeleteConnectedNode (Delete1 [7]) — deleting a
+	// node with connected edges without DETACH; a runtime cardinality rule.
+	"[7] Failing when deleting connected nodes": catRuntimeError,
+	// TypeError:InvalidPropertyType (Set1 [10]) — SET a property to a list-of-maps,
+	// which the property model does not admit at runtime. TypeError is not
+	// SyntaxError, so bucket-3-eligible via the top-level kind gate; explicit
+	// entry because the dir is not under expressions/*.
+	"[10] Failing when setting a list of maps as a property": catRuntimeError,
+	// SemanticError:MergeReadOwnWrites (Merge1 [17], Merge5 [29]) — a null property
+	// value in a MERGE pattern is a runtime "match uses this pattern; a null
+	// property would match nothing" cardinality rule. Explicit entries because
+	// the dir is not under expressions/*.
+	"[17] Fail on merging node with null property":         catRuntimeError,
+	"[29] Fail on merging relationship with null property": catRuntimeError,
 
-	// --- write-side semantic rules the type interface does not carry
-	//     (Stage 12: clauses/{create,delete,set,remove} newly wired) ---
-	//
-	// The write-clause dirs are NOT under expressions/*, so isBucketThreeDir
-	// does not categorically accept their negatives. Each entry below is a
-	// SyntaxError or TypeError whose rule sits below the type-interface
-	// boundary (ADR 0005): the parser accepts the shape at the shape gates
-	// it already applies (pattern collection, expression typing), and the
-	// engine re-executing the original text raises the specific rule. The
-	// three semantic-rule families:
-	//
-	//   1. VariableAlreadyBound (Create1 [13]-[19], Create2 [23]) —
-	//      CREATE re-binding a name a prior clause already bound. openCypher
-	//      forbids re-binding at compile time (a CREATE (a) after MATCH (a)
-	//      is legal only if the pattern is unlabelled; a CREATE (a:Label)
-	//      after MATCH (a) is VariableAlreadyBound). The rule turns on the
-	//      *combination* of clause order, labels, and inline properties —
-	//      a semantic-composition rule the type interface's per-clause
-	//      binding shape does not carry. Stage 12 records the binding under
-	//      the existing mergeBinding path (labels merge, kind-conflict
-	//      still fires); the compile-time rule is engine-side.
-	//   2. NoSingleRelationshipType / RequiresDirectedRelationship /
-	//      CreatingVarLength (Create2 [18]-[22]) — CREATE-side pattern
-	//      constraints: an edge must have exactly one type, an unambiguous
-	//      direction, and no hop range. The type-interface carries the
-	//      shape (LabelSet, directed flag, EdgeHops) verbatim — the
-	//      constraint that CREATE requires specific shape values is a
-	//      write-clause semantic rule. Codegen post-freeze reads
-	//      StatementKind and could enforce these at generation time; today
-	//      the engine raises them.
-	//   3. UndefinedVariable (Create1 [20], Create2 [24]) — Stage 13
-	//      retires these skiplist entries. The mineInlineMap widening
-	//      (Stage 13 §4.3) now records inline-map value refs onto
-	//      curPart.refs uniformly, so `CREATE (b {name: missing})` and
-	//      `CREATE (a)-[:KNOWS]->(b {name: missing})` reach
-	//      ErrUnboundVariable at the buildPart referential-integrity
-	//      sweep. Layer-2 counterpart: the unbound inline-map ref
-	//      kill-probe mustReject pin. See spec §5 skiplist removals.
-	//   4. InvalidDelete (Delete1 [8], Delete2 [5]) — DELETE target is
-	//      a labelled variable (`DELETE r:T`). The label predicate types
-	//      as TypeBool via typeAtom's node-labels branch; the whole
-	//      expression parses as a rich shape. The engine's rule "DELETE
-	//      target must be a node or edge value" is a runtime type check
-	//      below the boundary.
-	//   5. InvalidArgumentType (Delete5 [9]) — DELETE target is an integer
-	//      expression (`DELETE 1 + 1`). Already handled by
-	//      isBucketThreeError's SyntaxError-detail gate; explicit entry
-	//      here because clauses/delete is not under expressions/*.
-	//   6. Cardinality / value rules (Delete1 [7]) — deleting a node with
-	//      connected edges without DETACH; a runtime cardinality rule.
-	//   7. TypeError:InvalidPropertyType (Set1 [10]) — SET a property to a
-	//      list-of-maps, which the property model does not admit at
-	//      runtime. TypeError is not SyntaxError, so bucket-3-eligible via
-	//      the top-level kind gate; explicit entry because the dir is not
-	//      under expressions/*.
-	"[13] Fail when creating a node that is already bound":                          true,
-	"[14] Fail when creating a node with properties that is already bound":          true,
-	"[15] Fail when adding a new label predicate on a node that is already bound 1": true,
-	"[16] Fail when adding new label predicate on a node that is already bound 2":   true,
-	"[17] Fail when adding new label predicate on a node that is already bound 3":   true,
-	"[18] Fail when adding new label predicate on a node that is already bound 4":   true,
-	"[19] Fail when adding new label predicate on a node that is already bound 5":   true,
-	// [20] Fail when creating a node using undefined variable in pattern:
-	// retired by Stage 13's mineInlineMap widening (see case 3 above).
-	"[18] Fail when creating a relationship without a type":          true,
-	"[19] Fail when creating a relationship without a direction":     true,
-	"[20] Fail when creating a relationship with two directions":     true,
-	"[21] Fail when creating a relationship with more than one type": true,
-	"[22] Fail when creating a variable-length relationship":         true,
-	"[23] Fail when creating a relationship that is already bound":   true,
-	// [24] Fail when creating a relationship using undefined variable in
-	// pattern: retired by Stage 13's mineInlineMap widening.
-	"[7] Failing when deleting connected nodes":              true,
-	"[8] Failing when deleting a label":                      true,
-	"[5] Failing when deleting a relationship type":          true,
-	"[9] Failing when deleting an integer expression":        true,
-	"[10] Failing when setting a list of maps as a property": true,
+	// --- catResultAssertionOnly (12): result-shape / column-set /
+	//     scope-of-projection rules visible only at the produced result set.
+	//     The type-interface model does not carry column identity or sort-key
+	//     referential integrity (ADR 0003).
 
-	// --- MERGE-dir negatives (Stage 13, bucket-3 per ADR 0007) ---
-	//
-	// clauses/merge negatives cluster into the same rule families the Stage-12
-	// CREATE negatives do — the write-clause semantic rules that live below
-	// the type-interface boundary (ADR 0005). Each entry pairs with its
-	// Stage-12 CREATE analogue by kind:
-	//
-	//   VariableAlreadyBound (Merge1 [15], Merge5 [22]/[26]) — parallels case
-	//     1 above (Create1 [13]-[19]); the write-clause re-binding rule turns
-	//     on clause order + labels, which the type interface does not carry.
-	//   MergeReadOwnWrites (Merge1 [17], Merge5 [29]) — a null property value
-	//     in a MERGE pattern is a runtime "match uses this pattern; a null
-	//     property would match nothing" cardinality rule. TypeError sits below
-	//     the boundary; explicit entries because the dir is not under
-	//     expressions/*.
-	//   NoSingleRelationshipType (Merge5 [23]/[24]/[25]) — parallels case 2
-	//     above (Create2 [18]-[21]); the MERGE relationship shape must be a
-	//     single directed type, a write-clause semantic rule.
-	//   CreatingVarLength (Merge5 [28]) — parallels Create2 [22]; a MERGE
-	//     relationship cannot carry a hop range.
-	"[15] Fail when merge a node that is already bound":                          true,
-	"[17] Fail on merging node with null property":                               true,
-	"[22] Fail when imposing new predicates on a variable that is already bound": true,
-	"[23] Fail when merging relationship without type":                           true,
-	"[24] Fail when merging relationship without type, no colon":                 true,
-	"[25] Fail when merging relationship with more than one type":                true,
-	"[26] Fail when merging relationship that is already bound":                  true,
-	"[28] Fail when using variable length relationship in MERGE":                 true,
-	"[29] Fail on merging relationship with null property":                       true,
-
-	// --- EXISTS with an inner write clause (Stage 11) ---
-	//
-	// MATCH (n) WHERE exists { MATCH (n)-->(m) SET m.prop='fail' } RETURN n:
-	// a SET inside EXISTS { ... } — SyntaxError:InvalidClauseComposition per
-	// the TCK. Stage 11 §1.6 accept-and-defer: the outer EnterOC_Set handler
-	// suppresses inside EXISTS { ... } (subqueryDepth > 0), so the query
-	// parses; the InvalidClauseComposition rule is a position-shape semantic
-	// rule the type interface does not carry (writes-in-subqueries is a
-	// bucket-3 case the engine raises when re-executing the original text,
-	// ADR 0005). isBucketThreeError does not include InvalidClauseComposition
-	// (it's a genuine parse-shape kind elsewhere — mixing UNION with UNION
-	// ALL is enumerated similarly under clauses/union), so this needs an
-	// enumerated entry rather than a categorical accept.
-	"[3] Full existential subquery with update clause should fail": true,
-
-	// --- ORDER BY value/semantics below the type-interface boundary (Stage 9) ---
-	//
-	// Stage 9 wires clauses/return-orderby and clauses/with-orderBy. ORDER BY's
-	// sort-key structure is not modelled (ADR 0003) — the sort keys are walked
-	// only for parameter mining (§4.2), so undefined-variable, aggregation-
-	// misuse, DISTINCT-scope, and non-projected-aggregation scenarios all
-	// parse-accept. Each error is a value-level result-shape or grouping-key
-	// rule the type interface does not carry (B1), raised by the re-executed
-	// original text (ADR 0005). Bucket 3 per ADR 0007 §6 — enumerated here
-	// because the clause dirs are not under isBucketThreeDir.
-	//
+	// RETURN * with nothing in scope expands to zero columns: a scope/value error
+	// (NoVariablesInScope), not a parse-shape one. We record ReturnsAll and the
+	// resolver expands * post-freeze.
+	"[2] Fail when using RETURN * without variables in scope": catResultAssertionOnly,
+	// RETURN 1 AS a, 2 AS a: duplicate column names are a value-level result-shape
+	// check (ColumnNameConflict); Returns is duplicate-preserving (Stage-0 rule),
+	// so two LiteralProjections both named "a" parse-accept.
+	"[10] Fail when returning multiple columns with same name": catResultAssertionOnly,
+	// RETURN 1 AS a UNION RETURN 2 AS b: the two branches expose different column
+	// names (DifferentColumnsInUnion). Column compatibility across branches is not
+	// modelled (ADR 0003); we record each branch's Returns verbatim.
+	"[5] Failing when UNION has different columns":     catResultAssertionOnly,
+	"[5] Failing when UNION ALL has different columns": catResultAssertionOnly,
+	// WITH 1 AS a, 2 AS a: duplicate forwarded column names (ColumnNameConflict),
+	// the WITH analogue of the RETURN entry above; Returns is duplicate-preserving.
+	"[4] Fail when forwarding multiple aliases with the same name": catResultAssertionOnly,
+	// WITH a, count(*): a non-aliased expression in WITH (NoExpressionAlias). We
+	// synthesise a Name from the item's source text (here "count(*)"), so every
+	// WITH item carries a name and the must-alias rule has nothing to check against.
+	"[5] Fail when not aliasing expressions in WITH": catResultAssertionOnly,
 	// WITH a ORDER BY undefined_var: an ORDER BY variable that is not in the
-	// WITH's projected set (SyntaxError:UndefinedVariable). The parser does
-	// not carry ORDER BY refs (they are snapshotted around the sort-item walk),
-	// so an undefined-in-sort-key name never triggers ErrUnboundVariable.
-	// The outline has three example groups (out of scope / never defined /
-	// mixed); each pickle carries a distinct name via the `#Example: ...`
-	// suffix, so all three are listed.
-	"[8] Fail on sorting by any number of undefined variables in any position #Example: out of scope":  true,
-	"[8] Fail on sorting by any number of undefined variables in any position #Example: never defined": true,
-	"[8] Fail on sorting by any number of undefined variables in any position #Example: mixed":         true,
-	"[46] Fail on sorting by an undefined variable #Example: out of scope":                             true,
-	"[46] Fail on sorting by an undefined variable #Example: never defined":                            true,
+	// WITH's projected set (SyntaxError:UndefinedVariable). The parser does not
+	// carry ORDER BY refs (they are snapshotted around the sort-item walk), so an
+	// undefined-in-sort-key name never triggers ErrUnboundVariable. The outline
+	// has three example groups (out of scope / never defined / mixed); each pickle
+	// carries a distinct name via the `#Example: ...` suffix, so all three are
+	// listed. The [46] pair is the with-orderBy variant of the same rule.
+	"[8] Fail on sorting by any number of undefined variables in any position #Example: out of scope":  catResultAssertionOnly,
+	"[8] Fail on sorting by any number of undefined variables in any position #Example: never defined": catResultAssertionOnly,
+	"[8] Fail on sorting by any number of undefined variables in any position #Example: mixed":         catResultAssertionOnly,
+	"[46] Fail on sorting by an undefined variable #Example: out of scope":                             catResultAssertionOnly,
+	"[46] Fail on sorting by an undefined variable #Example: never defined":                            catResultAssertionOnly,
 	// WITH a WITH DISTINCT b ORDER BY a: a sort key naming a variable removed
-	// by DISTINCT (SyntaxError:UndefinedVariable). Same rationale as above:
-	// ORDER BY structure is below the boundary.
-	"[13] Fail when sorting on variable removed by DISTINCT": true,
+	// by DISTINCT (SyntaxError:UndefinedVariable). Same rationale: ORDER BY
+	// structure is below the boundary.
+	"[13] Fail when sorting on variable removed by DISTINCT": catResultAssertionOnly,
+
+	// --- catValueBelowBoundary (16): compile-time-named check whose rule fires
+	//     on the LITERAL VALUE or the RUNTIME-BOUND PARAMETER VALUE, not on
+	//     the shape. SKIP/LIMIT constant/parameter negatives live here — the
+	//     parser records the parameter's name and lets the engine validate the
+	//     value on the original text (ADR 0005, B1).
+
+	// SKIP/LIMIT with a literal the TCK rejects as compile-time
+	// NonConstantExpression / NegativeIntegerArgument / InvalidArgumentType.
+	// The rejection is a value-constraint check, not a parse-shape check; an
+	// engine reading our generated method body still sees the original SKIP -1 /
+	// LIMIT 1.5 / SKIP n.count text and raises the same error.
+	"[5] SKIP with an expression that depends on variables should fail": catValueBelowBoundary,
+	"[7] Negative SKIP should fail":                                     catValueBelowBoundary,
+	"[9] Floating point SKIP should fail":                               catValueBelowBoundary,
+	"[10] Fail when using non-constants in SKIP":                        catValueBelowBoundary,
+	"[11] Fail when using negative value in SKIP":                       catValueBelowBoundary,
+	"[9] Fail when using non-constants in LIMIT":                        catValueBelowBoundary,
+	"[12] Fail when using negative value in LIMIT 1":                    catValueBelowBoundary,
+	"[13] Fail when using negative value in LIMIT 2":                    catValueBelowBoundary,
+	"[16] Fail when using floating point in LIMIT 1":                    catValueBelowBoundary,
+	"[17] Fail when using floating point in LIMIT 2":                    catValueBelowBoundary,
+	// SKIP/LIMIT with a parameter whose runtime value the TCK rejects as
+	// NegativeIntegerArgument / InvalidArgumentType. The parameter's name is what
+	// the model carries (a ClauseSlotUse on the Parameter); the runtime-bound
+	// argument value lives below the type-interface boundary. An engine reading
+	// the generated method body sees the original SKIP $_skip / LIMIT $_limit text
+	// and binds the caller's value, raising the same error.
+	"[6] Negative parameter for SKIP should fail":                       catValueBelowBoundary,
+	"[8] Floating point parameter for SKIP should fail":                 catValueBelowBoundary,
+	"[10] Negative parameter for LIMIT should fail":                     catValueBelowBoundary,
+	"[11] Negative parameter for LIMIT with ORDER BY should fail":       catValueBelowBoundary,
+	"[14] Floating point parameter for LIMIT should fail":               catValueBelowBoundary,
+	"[15] Floating point parameter for LIMIT with ORDER BY should fail": catValueBelowBoundary,
+
+	// --- catGroupingKeySemantic (16): aggregate-position rules and
+	//     grouping-key correctness. Aggregates in WHERE, nested aggregates,
+	//     AmbiguousAggregationExpression at RETURN/WITH/ORDER BY/procedure-call
+	//     argument, aggregates in ORDER BY of non-projected columns, rand()
+	//     inside count(...). All ride the same semantic rule the type interface
+	//     does not carry.
+
+	// WHERE count(a) > 10: an aggregation inside WHERE. Per-position aggregate
+	// legality is a semantic rule the type-interface boundary does not carry —
+	// same family as AmbiguousAggregationExpression / InvalidAggregation.
+	"[15] Fail on aggregation in WHERE": catGroupingKeySemantic,
+	// AmbiguousAggregationExpression at RETURN — the "every non-aggregate
+	// sub-expression inside an aggregate expression must be a projected variable"
+	// rule. Bucket 3 per ADR 0007.
+	"[8] Fail if not projected variables are used inside an expression which contains an aggregation expression":                   catGroupingKeySemantic,
+	"[9] Fail if more complex expression, even if projected, are used inside expression which contains an aggregation expression":  catGroupingKeySemantic,
+	"[20] Fail if not returned variables are used inside an expression which contains an aggregation expression":                   catGroupingKeySemantic,
+	"[21] Fail if more complex expressions, even if returned, are used inside expression which contains an aggregation expression": catGroupingKeySemantic,
+	// count(count(*)) — nested aggregation is a NestedAggregation semantic rule
+	// below the type-interface boundary.
+	"[14] Aggregates in aggregates": catGroupingKeySemantic,
+	// count(rand()) — the impurity of rand() prevents grouping-key aggregation
+	// semantics; a value-level engine rule below the boundary.
+	"[15] Using `rand()` in aggregations": catGroupingKeySemantic,
 	// ORDER BY count(...) at RETURN or WITH position without a corresponding
-	// projected aggregate (SyntaxError:InvalidAggregation). The parser walks
-	// the sort key for parameters only; nested aggregate structure is not
-	// modelled. Grouping-key correctness is a resolver concern.
-	"[14] Fail on aggregation in ORDER BY after RETURN":                    true,
-	"[25] Fail on sorting by an aggregation":                               true,
-	"[13] Fail on sorting by a non-projected aggregation on a variable":    true,
-	"[14] Fail on sorting by a non-projected aggregation on an expression": true,
+	// projected aggregate (SyntaxError:InvalidAggregation).
+	"[14] Fail on aggregation in ORDER BY after RETURN":                    catGroupingKeySemantic,
+	"[25] Fail on sorting by an aggregation":                               catGroupingKeySemantic,
+	"[13] Fail on sorting by a non-projected aggregation on a variable":    catGroupingKeySemantic,
+	"[14] Fail on sorting by a non-projected aggregation on an expression": catGroupingKeySemantic,
 	// ORDER BY containing an aggregation whose non-aggregate sub-expressions
 	// are not projected variables (SyntaxError:AmbiguousAggregationExpression).
-	// Same grouping-key rule as the Stage-6 return-orderby entries — sort-key
-	// structure is below the boundary.
-	"[4] Fail if not returned variables are used inside an order by item which contains an aggregation expression":                        true,
-	"[5] Fail if more complex expressions, even if returned, are used inside an order by item which contains an aggregation expression":   true,
-	"[19] Fail if not projected variables are used inside an order by item which contains an aggregation expression":                      true,
-	"[20] Fail if more complex expressions, even if projected, are used inside an order by item which contains an aggregation expression": true,
+	// Same grouping-key rule as the return-orderby entries above.
+	"[4] Fail if not returned variables are used inside an order by item which contains an aggregation expression":                        catGroupingKeySemantic,
+	"[5] Fail if more complex expressions, even if returned, are used inside an order by item which contains an aggregation expression":   catGroupingKeySemantic,
+	"[19] Fail if not projected variables are used inside an order by item which contains an aggregation expression":                      catGroupingKeySemantic,
+	"[20] Fail if more complex expressions, even if projected, are used inside an order by item which contains an aggregation expression": catGroupingKeySemantic,
+	// SyntaxError:InvalidAggregation (Call1 [16]) — aggregate in argument position.
+	// Same family as [15] Fail on aggregation in WHERE.
+	"[16] In-query procedure call should fail if one of the argument expressions uses an aggregation function": catGroupingKeySemantic,
 
-	// --- Stage 14 (clauses/call) bucket-3 skiplist ---
+	// --- catBindingKindConflict (16): VariableTypeConflict and
+	//     VariableAlreadyBound rules that turn on binding kind (node vs edge
+	//     vs path vs value) or on the combination of clause order, labels,
+	//     and inline properties. Includes relationship-uniqueness (reusing a
+	//     relationship variable in the same pattern).
+
+	// MATCH (a)-[r]->()-[r]->(a): reusing a relationship variable is a runtime
+	// uniqueness rule (RelationshipUniquenessViolation), not a type-interface
+	// concern. Spec Cluster C: relationship reuse is not special-cased — first
+	// occurrence defines endpoints, later occurrences merge labels.
+	"[29] Fail when re-using a relationship in the same pattern": catBindingKindConflict,
+	// WITH <literal> AS n / MATCH (n): n imports a name into the next part and is
+	// re-bound there as a node; the conflict is that the WITH expression's value
+	// is not a node (VariableTypeConflict). Scenario Outline with 3 examples
+	// (true/123/123.4), each pickle same name.
+	"[11] Fail when matching a node variable bound to a value": catBindingKindConflict,
+	// Edge analogue of [11]: WITH <invalid> AS r / MATCH ()-[r]-() — r imports a
+	// name and is re-bound as a relationship; VariableTypeConflict.
+	"[13] Fail when matching a relationship variable bound to a value": catBindingKindConflict,
+	// MATCH (n) WITH [n] AS users MATCH (users)-->() — a list-of-nodes alias re-
+	// bound as a node pattern variable (VariableTypeConflict). Value-level rule.
+	"[30] Fail when using a list or nodes as a node": catBindingKindConflict,
+	// WITH <invalid> AS p / MATCH p = ()-[]-(): binding a path variable to a value
+	// is a VariableAlreadyBound semantic rule. Scenario Outline with several
+	// examples, all sharing the same name.
+	"[25] Fail when matching a path variable bound to a value": catBindingKindConflict,
+	// CREATE re-binding a name a prior clause already bound (VariableAlreadyBound).
+	// The rule turns on the combination of clause order, labels, and inline
+	// properties. Stage 12 records the binding under the existing mergeBinding
+	// path (labels merge, kind-conflict still fires); the compile-time rule is
+	// engine-side.
+	"[13] Fail when creating a node that is already bound":                          catBindingKindConflict,
+	"[14] Fail when creating a node with properties that is already bound":          catBindingKindConflict,
+	"[15] Fail when adding a new label predicate on a node that is already bound 1": catBindingKindConflict,
+	"[16] Fail when adding new label predicate on a node that is already bound 2":   catBindingKindConflict,
+	"[17] Fail when adding new label predicate on a node that is already bound 3":   catBindingKindConflict,
+	"[18] Fail when adding new label predicate on a node that is already bound 4":   catBindingKindConflict,
+	"[19] Fail when adding new label predicate on a node that is already bound 5":   catBindingKindConflict,
+	"[23] Fail when creating a relationship that is already bound":                  catBindingKindConflict,
+	// MERGE analogues of the CREATE re-binding rule (Merge1 [15], Merge5 [22]/[26]).
+	"[15] Fail when merge a node that is already bound":                          catBindingKindConflict,
+	"[22] Fail when imposing new predicates on a variable that is already bound": catBindingKindConflict,
+	"[26] Fail when merging relationship that is already bound":                  catBindingKindConflict,
+
+	// --- catWriteShapeConstraint (12): CREATE and MERGE pattern-shape
+	//     constraints the type-interface carries verbatim but the write-clause
+	//     semantic rule reads more narrowly (NoSingleRelationshipType,
+	//     RequiresDirectedRelationship, CreatingVarLength); plus DELETE
+	//     target-shape rules (InvalidDelete on labelled/relationship-type
+	//     targets, InvalidArgumentType on an integer-expression delete target).
+
+	// CREATE-side pattern constraints (Create2 [18]-[22]): an edge must have
+	// exactly one type, an unambiguous direction, and no hop range. Codegen
+	// post-freeze reads StatementKind and could enforce these at generation
+	// time; today the engine raises them.
+	"[18] Fail when creating a relationship without a type":          catWriteShapeConstraint,
+	"[19] Fail when creating a relationship without a direction":     catWriteShapeConstraint,
+	"[20] Fail when creating a relationship with two directions":     catWriteShapeConstraint,
+	"[21] Fail when creating a relationship with more than one type": catWriteShapeConstraint,
+	"[22] Fail when creating a variable-length relationship":         catWriteShapeConstraint,
+	// InvalidDelete (Delete1 [8], Delete2 [5]) — DELETE target is a labelled
+	// variable or a rel-type predicate; the whole expression parses as a rich
+	// shape. The engine's rule "DELETE target must be a node or edge value" is
+	// a runtime type check below the boundary.
+	"[8] Failing when deleting a label":             catWriteShapeConstraint,
+	"[5] Failing when deleting a relationship type": catWriteShapeConstraint,
+	// InvalidArgumentType (Delete5 [9]) — DELETE target is an integer expression
+	// (`DELETE 1 + 1`). Handled by isBucketThreeError's SyntaxError-detail gate
+	// categorically; explicit entry here because clauses/delete is not under
+	// expressions/*.
+	"[9] Failing when deleting an integer expression": catWriteShapeConstraint,
+	// MERGE variants of the CREATE-edge shape constraints (Merge5 [23]/[24]/[25]/[28]):
+	// the MERGE relationship shape must be a single directed type, no hop range.
+	"[23] Fail when merging relationship without type":            catWriteShapeConstraint,
+	"[24] Fail when merging relationship without type, no colon":  catWriteShapeConstraint,
+	"[25] Fail when merging relationship with more than one type": catWriteShapeConstraint,
+	"[28] Fail when using variable length relationship in MERGE":  catWriteShapeConstraint,
+
+	// --- catClauseComposition (7): cross-clause and cross-position composition
+	//     rules the type-interface does not enforce: mixing UNION with UNION ALL,
+	//     EXISTS-containing-write, pattern predicate as function argument
+	//     (`size(...)`), path.property in WHERE, pattern buried in the RHS of
+	//     a SET item, UnknownFunction (the parser carries no function name so
+	//     cannot distinguish it from a known function).
+
+	// RETURN foo(a): the parser carries no function name in FuncProjection (§2),
+	// so a non-existent function (UnknownFunction) is not a distinction it can
+	// make — the engine re-executing foo(a) raises it.
+	"[18] Fail on projecting a non-existent function": catClauseComposition,
+	// Mixing UNION with UNION ALL in one query (InvalidClauseComposition): we
+	// record the combinator sequence faithfully ([union, unionAll]); the
+	// no-mixing rule is a clause-composition constraint, not a parse-shape one.
+	"[1] Failing when mixing UNION and UNION ALL": catClauseComposition,
+	"[2] Failing when mixing UNION ALL and UNION": catClauseComposition,
+	// size(<pattern-predicate>) — a pattern predicate as a function argument.
+	// The TCK names this SyntaxError:UnexpectedSyntax but the fail-site rule is
+	// really "pattern predicates are not bindable arguments to size()," a
+	// semantic check tied to size()'s signature. Rejection of pattern-predicate
+	// arguments is downstream signature-checking work (procedure/function
+	// registry, ADR 0007).
+	"[6] Fail for `size()` on pattern predicates": catClauseComposition,
+	// MATCH r = (n)-[*]->() / WHERE r.name = 'apa' / RETURN r: a property lookup
+	// on a path variable is an InvalidArgumentType semantic rule (paths have no
+	// properties). The engine's type-check against the resolved r:path rejects it.
+	"[14] Fail when filtering path with property predicate": catClauseComposition,
+	// MATCH (n) SET n.prop = head(nodes(head((n)-[:REL]->()))).foo — a pattern
+	// predicate buried inside the RHS of a SET item's value expression
+	// (SyntaxError:UnexpectedSyntax). Stage 11 §8 documents this class of hole:
+	// the enclosing shape is not a bare atom so isPatternPredicateAtom does not
+	// catch it; widening the rejection to climb the precedence tower is
+	// Stage-11 scope creep. A future stage revisiting pattern-predicate
+	// scope-checking would remove this entry.
+	"[24] Fail on using pattern in right-hand side of SET": catClauseComposition,
+	// MATCH (n) WHERE exists { MATCH (n)-->(m) SET m.prop='fail' } RETURN n: a
+	// SET inside EXISTS { ... } — SyntaxError:InvalidClauseComposition per the
+	// TCK. The outer EnterOC_Set handler suppresses inside EXISTS { ... }
+	// (subqueryDepth > 0), so the query parses. isBucketThreeError does not
+	// include InvalidClauseComposition (it's a genuine parse-shape kind
+	// elsewhere), so this needs an enumerated entry.
+	"[3] Full existential subquery with update clause should fail": catClauseComposition,
+
+	// --- catSignatureArgCheck (3): Stage-14-specific argument-vs-signature
+	//     checks the parser defers per Stage-14 §4.5: InvalidArgumentType,
+	//     MissingParameter on implicit invocation.
+
+	// SyntaxError:InvalidArgumentType (Call2 [5]/[6]) — wrong argument type
+	// against the signature's declared param. Stage 14 does not check argument
+	// types against the registry (spec §4.5): the mined argument type at parse
+	// time is best-effort (a $param mines to TypeUnknown; a n.prop mines to
+	// TypeUnknown), so a parser-time reject would either over-reject a $param
+	// the engine would accept or fire only on literals (a half-check that gives
+	// false confidence).
+	"[5] Standalone call to procedure should fail if input type is wrong": catSignatureArgCheck,
+	"[6] In-query call to procedure should fail if input type is wrong":   catSignatureArgCheck,
+	// ParameterMissing:MissingParameter (Call1 [11]) — implicit invocation binds
+	// args from $name parameters at runtime; the parser has no static way to
+	// detect a missing named parameter (there is no $name in the query text —
+	// the binding is implicit-by-signature-name). Bucket-3 accept-and-defer.
+	"[11] Standalone call to procedure should fail if implicit argument is missing": catSignatureArgCheck,
+
+	// --- Retirements (documentary, not entries) ---
 	//
-	// The Stage-14 spec §5 enumerates exactly four scenarios whose
-	// negative outcome the parser accepts categorically per ADR 0007's
-	// bucket-3 discipline: the wire model does not carry the fact
-	// needed to raise them at parse time, and the engine on the
-	// re-executed original text raises the same error (ADR 0005).
-
-	// SyntaxError:InvalidArgumentType (Call2 [5]/[6]) — wrong argument
-	// type against the signature's declared param. Stage 14 does not
-	// check argument types against the registry (spec §4.5): the mined
-	// argument type at parse time is best-effort (a $param mines to
-	// TypeUnknown; a n.prop mines to TypeUnknown), so a parser-time
-	// reject would either over-reject a $param the engine would accept
-	// or fire only on literals (a half-check that gives false
-	// confidence).
-	"[5] Standalone call to procedure should fail if input type is wrong": true,
-	"[6] In-query call to procedure should fail if input type is wrong":   true,
-	// ParameterMissing:MissingParameter (Call1 [11]) — implicit
-	// invocation binds args from `$name` parameters at runtime; the
-	// parser has no static way to detect a missing named parameter
-	// (there is no `$name` in the query text — the binding is
-	// implicit-by-signature-name). Bucket-3 accept-and-defer.
-	"[11] Standalone call to procedure should fail if implicit argument is missing": true,
-	// SyntaxError:InvalidAggregation (Call1 [16]) — aggregate in
-	// argument position. Same family as `[15] Fail on aggregation in
-	// WHERE` (already skiplisted): per-position aggregate legality is
-	// a semantic rule the type-interface boundary does not carry
-	// (ADR 0007).
-	"[16] In-query procedure call should fail if one of the argument expressions uses an aggregation function": true,
+	// Stage 11 (gqlc-3r0 fold): Pattern1 [22]/[23] — pattern predicate at RETURN
+	// / WITH projection position — RETIRED. collectReturnItem now rejects the
+	// shape with ErrPatternInProjection via isPatternPredicateAtom.
+	//
+	// Stage 13 (mineInlineMap widening §4.3): Create1 [20] / Create2 [24] —
+	// CREATE with undefined variable in inline map — RETIRED. Inline-map value
+	// refs now flow onto curPart.refs uniformly, so `CREATE (b {name: missing})`
+	// reaches ErrUnboundVariable at buildPart's referential-integrity sweep.
 }
 
 // the public sentinels for scenarios the parser cannot faithfully represent
@@ -728,10 +654,34 @@ func TestGoldenOrphans(t *testing.T) {
 	}
 }
 
+// TestSkiplistCategoryPolicy enforces the Stage-15 skipCategory taxonomy: every
+// skiplist entry is one of the declared categories (zero value is invalid, so
+// an unassigned category fails) and every declared category has at least one
+// entry (no dead policy slot).
+func TestSkiplistCategoryPolicy(t *testing.T) {
+	valid := make(map[skipCategory]bool, len(skipCategories))
+	for _, c := range skipCategories {
+		valid[c] = true
+	}
+	counts := make(map[skipCategory]int, len(skipCategories))
+	for name, cat := range skiplist {
+		if !valid[cat] {
+			t.Errorf("skiplist entry %q has category %d, not one of the eight declared skipCategory constants", name, cat)
+			continue
+		}
+		counts[cat]++
+	}
+	for _, c := range skipCategories {
+		if counts[c] == 0 {
+			t.Errorf("skipCategory %d is declared but has zero entries — dead policy slot", c)
+		}
+	}
+}
+
 func initScenario(ctx *godog.ScenarioContext) {
 	ctx.Before(func(c context.Context, sc *godog.Scenario) (context.Context, error) {
 		st := &scenarioState{name: sc.Name, uri: sc.Uri}
-		if skiplist[sc.Name] {
+		if _, ok := skiplist[sc.Name]; ok {
 			st.skipped = true
 		}
 		return context.WithValue(c, stateKey{}, st), nil
@@ -742,6 +692,13 @@ func initScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^any graph$`, noop)
 	ctx.Step(`^having executed:$`, noopDoc)
 	ctx.Step(`^parameters are:$`, noopTable)
+	// Stage 15 (useCases/{countingSubgraphMatches,triadicSelection}): the two
+	// files precede the query with `Given the binary-tree-N graph`, a reference
+	// to a CREATE-clause fixture script under tck/graphs/binary-tree-{1,2}/. The
+	// script is a runtime graph the parser does not execute (ADR 0005 — the
+	// generated driver re-executes the ORIGINAL query text; the fixture is the
+	// engine's job). Treated as a no-op like the other setup steps.
+	ctx.Step(`^the binary-tree-\d+ graph$`, noop)
 
 	// Stage 14 (clauses/call): the TCK declares procedure signatures
 	// via a background step of the form
