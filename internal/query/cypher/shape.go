@@ -416,6 +416,21 @@ func findParameters(tree antlr.Tree) []antlr.Tree {
 	return out
 }
 
+// isPatternPredicateAtom reports whether the expression is a bare
+// pattern-predicate atom in projection position — the shape Pattern1
+// [22]/[23] rejects. The precedence tower is collapsed via nonArithmetic;
+// a pattern predicate at any operator-attached level (arithmetic,
+// comparison, list operator) is not "bare" and falls through to the
+// classifiers, matching the narrow charter of gqlc-3r0. Stage 11.
+func isPatternPredicateAtom(e gen.IOC_ExpressionContext) bool {
+	nae := nonArithmetic(e)
+	if nae == nil {
+		return false
+	}
+	a := nae.OC_Atom()
+	return a != nil && a.OC_PatternPredicate() != nil
+}
+
 // originalText returns the verbatim source slice spanning a rule context, the
 // exact text the author wrote (so a column name like "p.name" is "p.name", not
 // the token-joined "pname"). It reads the token interval from the stream,
