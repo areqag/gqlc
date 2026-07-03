@@ -491,6 +491,23 @@ func (l *listener) pairAddSub(a, b gen.IOC_AddOrSubtractExpressionContext) {
 // PropertyUse{Ref{variable, key}}. A parameter standing for the whole map
 // ((a {$p})) is unsupported, as is a $param in the map of an anonymous element
 // (no variable to bind the property to) — both surface as ErrUnsupportedParameter.
+// mineInlineMap records refs and parameter uses that an inline property map
+// carries. The fast path (Stage 12) handles bare-$param values — each records
+// a PropertyUse{Ref{variable, key}} and does not push a ref to curPart.refs
+// (a parameter is not a binding). The widening (Stage 13 §4.3): every other
+// value shape (bare variable, var.prop, rich expression) routes through the
+// Stage-6 rich typer so its var/var.prop atoms flow onto curPart.refs via
+// typeAtom, and any nested parameters record PropertyUse{Ref{variable, key}}
+// — the same shape the fast path uses, because the inline-map key gives the
+// parser a concrete property target the SET-value case does not have.
+//
+// Motivated by MERGE (Merge1[11]: `MERGE (city:City {name: person.bornIn})`
+// — without the widening, `person` is silently absent from curPart.refs and
+// buildPart's referential-integrity sweep does not press). Applies uniformly
+// to MATCH / CREATE / MERGE because the same mining function services all
+// three, so the widening is consistent-recording, not a MERGE-specific
+// carve-out. Also converts `CREATE (a {name: b.c})` (b unbound) from a
+// silent parse to an ErrUnboundVariable rejection at the buildPart sweep.
 func (l *listener) mineInlineMap(variable string, p gen.IOC_PropertiesContext) {
 	if p == nil {
 		return
@@ -506,15 +523,30 @@ func (l *listener) mineInlineMap(variable string, p gen.IOC_PropertiesContext) {
 	keys := m.AllOC_PropertyKeyName()
 	exprs := m.AllOC_Expression()
 	for i := range keys {
-		param, node, ok := parameterFromExpr(exprs[i])
-		if !ok {
+		// Fast path: value is a bare $param → PropertyUse{Ref{var, key}}.
+		if param, node, ok := parameterFromExpr(exprs[i]); ok {
+			if variable == "" {
+				l.fail(fmt.Errorf("%w: %s in an anonymous pattern element", ErrUnsupportedParameter, param))
+				return
+			}
+			l.addParameterUse(param, node, query.NewPropertyUse(query.Ref{Variable: variable, Property: keys[i].GetText()}))
 			continue
 		}
-		if variable == "" {
-			l.fail(fmt.Errorf("%w: %s in an anonymous pattern element", ErrUnsupportedParameter, param))
-			return
+		// Widening (§4.3): route the value expression through the rich typer so
+		// var / var.prop atoms flow onto curPart.refs, and any nested parameters
+		// record PropertyUse{Ref{var, key}} — the same shape the fast path uses.
+		_, _, params := l.typeExpressionMining(exprs[i])
+		for _, node := range params {
+			name := parameterName(node)
+			if name == "" {
+				continue
+			}
+			if variable == "" {
+				l.fail(fmt.Errorf("%w: %s in an anonymous pattern element", ErrUnsupportedParameter, name))
+				return
+			}
+			l.addParameterUse(name, node, query.NewPropertyUse(query.Ref{Variable: variable, Property: keys[i].GetText()}))
 		}
-		l.addParameterUse(param, node, query.NewPropertyUse(query.Ref{Variable: variable, Property: keys[i].GetText()}))
 	}
 	// Any parameter under this map that was not a direct key value (e.g. nested in
 	// a list) is unsupported.

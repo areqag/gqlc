@@ -1,0 +1,51 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": [
+                "L"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": null,
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "merge",
+              "variables": [
+                "a"
+              ],
+              "onMatch": [
+                {
+                  "kind": "setLabels",
+                  "variable": "a",
+                  "labels": [
+                    "M1"
+                  ]
+                }
+              ],
+              "onCreate": [
+                {
+                  "kind": "setLabels",
+                  "variable": "a",
+                  "labels": [
+                    "M2"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

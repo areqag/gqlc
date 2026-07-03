@@ -951,7 +951,7 @@ var mustParse = map[string]struct {
 					must(query.NewVarEndpoint("a")),
 					must(query.NewVarEndpoint("b")),
 					true,
-					must(query.NewEdgeHops(intPtr(1), intPtr(3))),
+					must(query.NewEdgeHops(new(1), new(3))),
 				)),
 				must(query.NewNodeBinding("b", nil)),
 			},
@@ -1017,7 +1017,7 @@ var mustParse = map[string]struct {
 					must(query.NewVarEndpoint("a")),
 					must(query.NewVarEndpoint("b")),
 					true,
-					must(query.NewEdgeHops(intPtr(1), intPtr(3))),
+					must(query.NewEdgeHops(new(1), new(3))),
 				)),
 				must(query.NewNodeBinding("b", nil)),
 				must(query.NewPathBinding("p", []query.PathMember{
@@ -1615,12 +1615,224 @@ var mustParse = map[string]struct {
 			query.NewExprUse(query.TypeUnknown{}, query.ExprInDeleteTarget),
 		}}),
 	},
-}
 
-// intPtr is a small helper to take the address of an int literal so
-// NewEdgeHops (which takes *int for optional bounds) can be called cleanly
-// from the mustParse table. Extracted here so the pin table stays terse.
-func intPtr(i int) *int { return &i }
+	// Stage 13 — MERGE. Seven verbatim corpus shapes plus three authored
+	// pins (StatementKind non-flip inside EXISTS, branch-leak kill-probe,
+	// CREATE-side var-PROP inline-map widening).
+
+	// Merge1 [1] Merge node when no nodes exist: MERGE (a) — the minimum
+	// MERGE. One NodeBinding for the named pattern element, one MergeEffect
+	// with Variables ["a"] and empty ON branches, projection-less write.
+	"merge bare named node": {
+		src: "MERGE (a)",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
+			Effects: []query.Effect{
+				must(query.NewMergeEffect([]string{"a"}, nil, nil)),
+			},
+		}),
+	},
+
+	// Merge1 [3] Merge node with label when it exists: MERGE (a:TheLabel)
+	// RETURN a.id — a labelled MERGE feeding a property projection. Still
+	// StatementWrite (a write followed by a read-back is a write for
+	// tx-mode purposes).
+	"merge labelled node returning property": {
+		src: "MERGE (a:TheLabel)\nRETURN a.id",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("a", graph.LabelSet{"TheLabel"})),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "a.id", Value: query.NewRefProjection(query.Ref{Variable: "a", Property: "id"}, query.TypeUnknown{})},
+			},
+			Effects: []query.Effect{
+				must(query.NewMergeEffect([]string{"a"}, nil, nil)),
+			},
+		}),
+	},
+
+	// Merge1 [11] Merge should be able to merge using property of bound node:
+	// MATCH (person:Person) MERGE (city:City {name: person.bornIn}). Pins
+	// the mineInlineMap value-side widening — the MERGE part's refs list
+	// carries `person` (from person.bornIn), and MergeEffect.Variables is
+	// ["city"] (only the newly-introduced binding). Projection-less write.
+	"merge with inline map referencing bound var": {
+		src: "MATCH (person:Person)\nMERGE (city:City {name: person.bornIn})",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("person", graph.LabelSet{"Person"})),
+				must(query.NewNodeBinding("city", graph.LabelSet{"City"})),
+			},
+			Effects: []query.Effect{
+				must(query.NewMergeEffect([]string{"city"}, nil, nil)),
+			},
+		}),
+	},
+
+	// Merge3 [1] Merge should be able to set labels on match: MERGE (a) ON
+	// MATCH SET a:L. One MergeEffect with an OnMatch slice of one
+	// SetLabelsEffect{"a", ["L"]} and empty OnCreate.
+	"merge with on match set labels": {
+		src: "MERGE (a)\n  ON MATCH SET a:L",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
+			Effects: []query.Effect{
+				must(query.NewMergeEffect(
+					[]string{"a"},
+					[]query.SetEffect{must(query.NewSetLabelsEffect("a", graph.LabelSet{"L"}))},
+					nil,
+				)),
+			},
+		}),
+	},
+
+	// Merge2 [2] ON CREATE on created nodes: MERGE (b) ON CREATE SET
+	// b.created = 1. Pins the ON CREATE path with a SetPropertyEffect
+	// payload — one MergeEffect with Variables ["b"], empty OnMatch, and
+	// OnCreate carrying a SetPropertyEffect{Ref{b, created}, TypeInt}.
+	// Projection-less write.
+	"merge with on create set property": {
+		src: "MERGE (b)\n  ON CREATE SET b.created = 1",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("b", nil))},
+			Effects: []query.Effect{
+				must(query.NewMergeEffect(
+					[]string{"b"},
+					nil,
+					[]query.SetEffect{must(query.NewSetPropertyEffect(query.Ref{Variable: "b", Property: "created"}, query.TypeInt{}, nil))},
+				)),
+			},
+		}),
+	},
+
+	// Merge4 [1] Merge should be able to set labels on match and on create:
+	// MATCH () MERGE (a:L) ON MATCH SET a:M1 ON CREATE SET a:M2. Both ON
+	// branches populated with distinct SetEffect payloads. MATCH () introduces
+	// no binding (anonymous nodes are pure filters on the read side, C3); the
+	// MERGE introduces `a` as a NodeBinding, and the MergeEffect carries
+	// Variables ["a"] with OnMatch and OnCreate each carrying one
+	// SetLabelsEffect.
+	"merge with both on branches": {
+		src: "MATCH ()\nMERGE (a:L)\n  ON MATCH SET a:M1\n  ON CREATE SET a:M2",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("a", graph.LabelSet{"L"})),
+			},
+			Effects: []query.Effect{
+				must(query.NewMergeEffect(
+					[]string{"a"},
+					[]query.SetEffect{must(query.NewSetLabelsEffect("a", graph.LabelSet{"M1"}))},
+					[]query.SetEffect{must(query.NewSetLabelsEffect("a", graph.LabelSet{"M2"}))},
+				)),
+			},
+		}),
+	},
+
+	// Merge1 [8] Merge should handle argument properly: WITH 42 AS var
+	// MERGE (c:N {var: var}). Two-part query: the WITH exports `var`, the
+	// second part MERGES on a pattern using `var` as an inline-map value.
+	// Pins the inline-map value-side widening on the MERGE side for a
+	// bare-variable value — the MERGE part's refs list carries `var`.
+	"merge argument handling across with": {
+		src: "WITH 42 AS var\nMERGE (c:N {var: var})",
+		want: func() query.Query {
+			q := query.Query{
+				Branches: []query.Branch{{
+					Parts: []query.Part{
+						{
+							Returns: []query.ReturnItem{
+								{Name: "var", Value: query.NewLiteralProjection(query.TypeInt{})},
+							},
+						},
+						{
+							Bindings: []query.Binding{
+								must(query.NewNodeBinding("c", graph.LabelSet{"N"})),
+							},
+							Effects: []query.Effect{
+								must(query.NewMergeEffect([]string{"c"}, nil, nil)),
+							},
+						},
+					},
+				}},
+			}
+			q.StatementKind = query.StatementWrite
+			return q
+		}(),
+	},
+
+	// AUTHORED (Stage 13 §1.8): MERGE inside EXISTS does not flip
+	// StatementKind. The outer EnterOC_Merge early-returns under
+	// subqueryDepth > 0 before markWrite/writeSeen fires, so a query with a
+	// MERGE only inside an EXISTS { ... } subquery stays StatementRead.
+	// No MergeEffect appears anywhere in the model (Stage 11 §1.6: the
+	// inner subquery body is not walked for collection). Pins the
+	// walk-time semantic explicitly for the newest write shape.
+	"authored merge in exists does not flip statement kind": {
+		src: "MATCH (n)\nWHERE exists { MERGE (m)\nRETURN true }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
+
+	// AUTHORED (Stage 13 §1.8): branch-leak kill-probe for the two-level
+	// effects slot. MERGE (n) ON CREATE SET n.a = 1 SET n.b = 2 — the first
+	// SET is inside ON CREATE's inner scope, the second SET is a top-level
+	// SET clause on the outer part. Pins the save/restore around
+	// curPart.effects in collectMergeAction (§4.2): the ON CREATE
+	// SetPropertyEffect{Ref{n, a}, TypeInt} lives inside
+	// MergeEffect.OnCreate; the outer SetPropertyEffect{Ref{n, b}, TypeInt}
+	// is a peer of the MergeEffect on Part.Effects. A missing save/restore
+	// would either leak the ON CREATE effect to the outer part (double-
+	// recording n.a) or capture the outer SET into OnCreate (silently
+	// dropping the top-level SET into the branch). Merge4[1] pins the
+	// branch-populated shape but not this adjacency; corpus has no such
+	// shape at the pinned tag.
+	"authored merge branch-leak kill probe": {
+		src: "MERGE (n)\n  ON CREATE SET n.a = 1\nSET n.b = 2",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Effects: []query.Effect{
+				must(query.NewMergeEffect(
+					[]string{"n"},
+					nil,
+					[]query.SetEffect{must(query.NewSetPropertyEffect(query.Ref{Variable: "n", Property: "a"}, query.TypeInt{}, nil))},
+				)),
+				must(query.NewSetPropertyEffect(query.Ref{Variable: "n", Property: "b"}, query.TypeInt{}, nil)),
+			},
+		}),
+	},
+
+	// AUTHORED (Stage 13 §1.8, ruling Q3(b) bound-guard): CREATE-side
+	// var-PROP inline-map bound-ref guard. MATCH (b) CREATE (a {name: b.c})
+	// RETURN a — `b` is bound from the preceding MATCH, so the widened refs
+	// list on the CREATE part carries `b` (from the value expression b.c via
+	// typeExpressionMining on the inline-map value); CreateEffect Variables
+	// ["a"], one RefProjection for a. This pin PASSES in RED and must keep
+	// passing after GREEN — it is a regression lock against over-rejection
+	// by the widening (a future stage that splits mineInlineMap into
+	// per-clause helpers and accidentally rejects bound refs would fail
+	// here). The unbound-ref kill-probe on the other side of the pair lives
+	// in mustReject as `authored create unbound inline map ref kill probe`.
+	// Create6 exercises the shared fix at Layer 1 via bare-var {num: x};
+	// this pin locks the var-PROP shape Create6 does not exercise.
+	"authored create inline map var prop bound guard": {
+		src: "MATCH (b)\nCREATE (a {name: b.c})\nRETURN a",
+		want: oneWriteBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("b", nil)),
+				must(query.NewNodeBinding("a", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
+			},
+			Effects: []query.Effect{query.NewCreateEffect([]string{"a"})},
+		}),
+	},
+}
 
 // must lifts a fallible model constructor into an expression usable in a struct
 // literal: it panics if err is non-nil. The mustParse inputs are hard-coded valid
@@ -1648,13 +1860,20 @@ var mustReject = map[string]struct {
 	query string
 	want  error
 }{
-	// AUTHORED: Stage 12 retires ErrUnsupportedClause for the write set
-	// (CREATE/DELETE/SET/REMOVE), so the prior pin `CREATE (n) RETURN n` now
-	// parse-accepts. MERGE stays unsupported through Stage 12 (Stage 13 owns
-	// it), so it preserves ErrUnsupportedClause reachability. Replace with
-	// a verbatim corpus query if a clean one appears at the pinned tag.
-	"write clause": {
-		query: "MERGE (n)\nRETURN n",
+	// Stage 13 (Q5/Q6 fold-in): CALL (both standalone and in-query) is the
+	// last remaining fail-site of ErrUnsupportedClause after MERGE lands.
+	// Stage 12 pivoted "write clause" from CREATE (retired) to MERGE
+	// (temporary); Stage 13 pivots it again from MERGE (retired) to CALL,
+	// exercising BOTH CALL fail-sites — EnterOC_StandaloneCall for the
+	// bare `CALL proc(args)` shape, EnterOC_InQueryCall for the
+	// `CALL proc(args) YIELD out RETURN out` shape. Both are verbatim from
+	// clauses/call/Call3.feature [1]. Stage 14 retires both.
+	"write clause (standalone CALL)": {
+		query: "CALL test.my.proc(42)",
+		want:  cypher.ErrUnsupportedClause,
+	},
+	"write clause (in-query CALL)": {
+		query: "CALL test.my.proc(42) YIELD out\nRETURN out",
 		want:  cypher.ErrUnsupportedClause,
 	},
 	// AUTHORED (Stage 12 amend §1.5): SET with a nested propertyExpression
@@ -1793,6 +2012,23 @@ var mustReject = map[string]struct {
 		query: "MATCH (n) RETURN (n)-[]->()",
 		want:  cypher.ErrPatternInProjection,
 	},
+	// AUTHORED (Stage 13 §1.8, ruling Q3(b) kill-probe): unbound inline-
+	// map ref via var-PROP. CREATE (a {name: b.c}) — `b` is not bound by
+	// any preceding clause. Today's mineInlineMap walks OC_MapLiteral
+	// values only for PARAMETER uses, never records `b`, so buildPart's
+	// referential-integrity sweep sees no unbound ref and the query
+	// parses silently — that is exactly the "silent info drop where
+	// parser could reject" blocker the widening fixes. After GREEN,
+	// mineInlineMap records `b` on curPart.refs and the sweep raises
+	// ErrUnboundVariable. Textbook RED→GREEN pin, no wire delta.
+	// Layer-1 counterpart: Create1[20] + Create2[24] come off the
+	// skiplist (spec §5). Archetype: Create1[20]'s bare-var shape
+	// (CREATE (b {name: missing})) — this pin uses var-PROP (b.c) to
+	// lock the shape Create1[20] does not exercise.
+	"authored create unbound inline map ref kill probe": {
+		query: "CREATE (a {name: b.c})",
+		want:  cypher.ErrUnboundVariable,
+	},
 }
 
 func TestMustReject(t *testing.T) {
@@ -1802,6 +2038,34 @@ func TestMustReject(t *testing.T) {
 			require.Error(t, err, "out-of-scope query must be rejected: %q", tc.query)
 			require.Equal(t, query.Query{}, got, "model must be the zero value on error")
 			require.ErrorIs(t, err, tc.want)
+		})
+	}
+}
+
+// mustRejectGrammar pairs each verbatim/authored query with the grammar-level
+// parse failure it must produce — i.e. an ANTLR-level syntax error, not one
+// of the six domain sentinels. The pin still asserts (a) non-nil error and
+// (b) zero-value Query, so a future grammar widening that silently accepts
+// the shape fails loudly. TestSentinelReachability is NOT run against this
+// map because there is no domain sentinel to reach (Stage 13 §4.4, A1).
+var mustRejectGrammar = map[string]struct {
+	query string
+}{
+	// Stage 13 (A1 fold-in): MERGE grammar admits exactly ONE oC_PatternPart
+	// (Cypher.g4 §oC_Merge : MERGE SP? oC_PatternPart ( SP oC_MergeAction )*).
+	// A comma-separated second pattern part fails at the ANTLR-generated
+	// parser before the listener runs — no domain sentinel raised.
+	"merge multiple pattern parts": {
+		query: "MERGE (a), (b)",
+	},
+}
+
+func TestMustRejectGrammar(t *testing.T) {
+	for name, tc := range mustRejectGrammar {
+		t.Run(name, func(t *testing.T) {
+			got, err := cypher.New().Parse(strings.NewReader(tc.query))
+			require.Error(t, err, "grammar-invalid query must be rejected: %q", tc.query)
+			require.Equal(t, query.Query{}, got, "model must be the zero value on error")
 		})
 	}
 }

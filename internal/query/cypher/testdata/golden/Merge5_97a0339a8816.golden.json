@@ -1,0 +1,182 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": [
+                "A"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "ab",
+              "labels": null,
+              "source": {
+                "kind": "var",
+                "variable": "a"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "b"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            },
+            {
+              "kind": "node",
+              "variable": "b",
+              "labels": [
+                "B"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "bc",
+              "labels": null,
+              "source": {
+                "kind": "var",
+                "variable": "b"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "c"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            },
+            {
+              "kind": "node",
+              "variable": "c",
+              "labels": [
+                "C"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "newB",
+              "labels": [
+                "B"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "REL"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "a"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "newB"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            },
+            {
+              "kind": "node",
+              "variable": "newC",
+              "labels": [
+                "C"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "REL"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "newB"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "newC"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            }
+          ],
+          "returns": null,
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "delete",
+              "targets": [
+                {
+                  "variable": "ab",
+                  "property": ""
+                },
+                {
+                  "variable": "bc",
+                  "property": ""
+                },
+                {
+                  "variable": "b",
+                  "property": ""
+                },
+                {
+                  "variable": "c",
+                  "property": ""
+                }
+              ],
+              "refs": null,
+              "detach": false
+            },
+            {
+              "kind": "merge",
+              "variables": [
+                "newB"
+              ],
+              "onMatch": null,
+              "onCreate": null
+            },
+            {
+              "kind": "merge",
+              "variables": [
+                ""
+              ],
+              "onMatch": null,
+              "onCreate": null
+            },
+            {
+              "kind": "merge",
+              "variables": [
+                "newC"
+              ],
+              "onMatch": null,
+              "onCreate": null
+            },
+            {
+              "kind": "merge",
+              "variables": [
+                ""
+              ],
+              "onMatch": null,
+              "onCreate": null
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}
