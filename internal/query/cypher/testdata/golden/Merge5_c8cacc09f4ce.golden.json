@@ -1,0 +1,101 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "b",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "R"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "a"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "b"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            },
+            {
+              "kind": "path",
+              "variable": "p",
+              "members": [
+                {
+                  "kind": "node",
+                  "variable": "a"
+                },
+                {
+                  "kind": "anon-edge"
+                },
+                {
+                  "kind": "node",
+                  "variable": "b"
+                }
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "p",
+              "value": {
+                "kind": "ref",
+                "variable": "p",
+                "property": "",
+                "type": "path"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "merge",
+              "variables": [
+                "a"
+              ],
+              "onMatch": null,
+              "onCreate": null
+            },
+            {
+              "kind": "merge",
+              "variables": [
+                "b"
+              ],
+              "onMatch": null,
+              "onCreate": null
+            },
+            {
+              "kind": "merge",
+              "variables": [
+                ""
+              ],
+              "onMatch": null,
+              "onCreate": null
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

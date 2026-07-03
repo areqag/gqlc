@@ -1,0 +1,70 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "b",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "r",
+              "labels": [
+                "TYPE"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "a"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "b"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            }
+          ],
+          "returns": null,
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "merge",
+              "variables": [
+                "r"
+              ],
+              "onMatch": [
+                {
+                  "kind": "setEntity",
+                  "variable": "r",
+                  "op": "replace",
+                  "type": "node",
+                  "refs": [
+                    {
+                      "variable": "a",
+                      "property": ""
+                    }
+                  ]
+                }
+              ],
+              "onCreate": null
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

@@ -1,0 +1,66 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "person",
+              "labels": [
+                "Person"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "city",
+              "labels": [
+                "City"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "person.bornIn",
+              "value": {
+                "kind": "ref",
+                "variable": "person",
+                "property": "bornIn",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "merge",
+              "variables": [
+                "city"
+              ],
+              "onMatch": [
+                {
+                  "kind": "setProperty",
+                  "variable": "city",
+                  "property": "name",
+                  "type": "unknown",
+                  "refs": [
+                    {
+                      "variable": "person",
+                      "property": "bornIn"
+                    }
+                  ]
+                }
+              ],
+              "onCreate": null
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

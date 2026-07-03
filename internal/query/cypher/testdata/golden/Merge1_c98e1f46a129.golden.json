@@ -1,0 +1,87 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "foo",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "x",
+              "value": {
+                "kind": "ref",
+                "variable": "foo",
+                "property": "x",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "y",
+              "value": {
+                "kind": "ref",
+                "variable": "foo",
+                "property": "y",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": null
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "x",
+              "value": {
+                "kind": "ref",
+                "variable": "x",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "y",
+              "value": {
+                "kind": "ref",
+                "variable": "y",
+                "property": "",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "merge",
+              "variables": null,
+              "onMatch": null,
+              "onCreate": null
+            },
+            {
+              "kind": "merge",
+              "variables": null,
+              "onMatch": null,
+              "onCreate": null
+            },
+            {
+              "kind": "merge",
+              "variables": null,
+              "onMatch": null,
+              "onCreate": null
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

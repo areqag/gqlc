@@ -1513,6 +1513,18 @@ type Effect interface {
 	isEffect()
 }
 
+// SetEffect is the sealed sub-sum of Effect implemented by exactly the three
+// SET-family effect variants (SetPropertyEffect, SetEntityEffect,
+// SetLabelsEffect). MergeEffect.OnMatch and MergeEffect.OnCreate carry
+// []SetEffect (not []Effect), so the type system rejects a CreateEffect /
+// DeleteEffect / MergeEffect / RemovePropertyEffect / RemoveLabelsEffect
+// inside an ON action slot — matching the grammar's oC_MergeAction rule,
+// which admits only oC_Set (Cypher.g4 §oC_MergeAction).
+type SetEffect interface {
+	Effect
+	isSetEffect()
+}
+
 // CreateEffect records one CREATE clause: the ordered list of binding
 // variables the clause introduced (named or anonymous — an empty string
 // records an anonymous position, matching the raw binding slice's
@@ -1691,7 +1703,8 @@ func (e SetPropertyEffect) ValueType() Type { return e.valueType }
 // Refs are the var / var.prop atoms the value expression touched.
 func (e SetPropertyEffect) Refs() []Ref { return e.refs }
 
-func (SetPropertyEffect) isEffect() {}
+func (SetPropertyEffect) isEffect()    {}
+func (SetPropertyEffect) isSetEffect() {}
 
 // MarshalJSON renders a SetPropertyEffect as a tagged union member
 // discriminated by "kind", flattening the target Ref into sibling
@@ -1748,7 +1761,8 @@ func (e SetEntityEffect) ValueType() Type { return e.valueType }
 // Refs are the var / var.prop atoms the value expression touched.
 func (e SetEntityEffect) Refs() []Ref { return e.refs }
 
-func (SetEntityEffect) isEffect() {}
+func (SetEntityEffect) isEffect()    {}
+func (SetEntityEffect) isSetEffect() {}
 
 // MarshalJSON renders a SetEntityEffect as a tagged union member
 // discriminated by "kind", always-emitting the op axis.
@@ -1789,7 +1803,8 @@ func (e SetLabelsEffect) TargetVariable() string { return e.targetVar }
 // Labels are the labels being added.
 func (e SetLabelsEffect) Labels() graph.LabelSet { return e.labels }
 
-func (SetLabelsEffect) isEffect() {}
+func (SetLabelsEffect) isEffect()    {}
+func (SetLabelsEffect) isSetEffect() {}
 
 // MarshalJSON renders a SetLabelsEffect as a tagged union member
 // discriminated by "kind".
@@ -1871,6 +1886,100 @@ func (e RemoveLabelsEffect) MarshalJSON() ([]byte, error) {
 	}{Kind: effectKindRemoveLabels, Variable: e.targetVar, Labels: e.labels})
 }
 
+// MergeEffect records one MERGE clause: the ordered list of binding variables
+// the clause introduced (identical semantics to CreateEffect.Variables — the
+// delta over the enclosing Part's Bindings after collectPattern runs) plus
+// the two optional ON action branches. OnMatch holds the SetEffects the
+// ON MATCH SET action produced (empty if no ON MATCH clause); OnCreate holds
+// the SetEffects the ON CREATE SET action produced (empty if no ON CREATE
+// clause). Each ON slot is []SetEffect (the sealed sub-sum of Effect) so
+// only Set-family effects can appear inside — matching the grammar's
+// oC_MergeAction rule (Cypher.g4 §oC_MergeAction admits only oC_Set).
+//
+// A MERGE clause is semantically a match-or-create alternation: the engine
+// attempts match first, and creates only on miss. Representing this as
+// CreateEffect would erase the "match this if you can" half — a wrong
+// concrete representation. The dedicated variant preserves the axis a caller
+// walking Part.Effects needs to distinguish "definitely creates" from
+// "creates iff no match" (spec §1.1).
+//
+// No aggregate Refs on MergeEffect: nested SetEffect.Refs cover the ON
+// branches' value expressions, and the enclosing Part.refs (walked by
+// buildPart's referential-integrity sweep) covers pattern refs and the
+// ON-branch refs the SetEffect handlers already push into curPart.refs.
+// An aggregate would duplicate and can drift (spec §3.1 / Q4).
+type MergeEffect struct {
+	variables []string
+	onMatch   []SetEffect
+	onCreate  []SetEffect
+}
+
+// NewMergeEffect builds a MergeEffect. Total: variables is what the
+// collectPattern walk observed (possibly empty for a MERGE whose pattern
+// composed no new bindings); onMatch and onCreate are the ordered SetEffects
+// each ON action produced (both may be nil for a MERGE with no ON branch).
+// Each entry in onMatch / onCreate must be non-nil — a nil interface value
+// would surface as {"kind": ""} on the wire, so the constructor rejects it
+// with a domain error. Same discipline the other Effect constructors follow.
+func NewMergeEffect(variables []string, onMatch, onCreate []SetEffect) (MergeEffect, error) {
+	var vs []string
+	if len(variables) > 0 {
+		vs = make([]string, len(variables))
+		copy(vs, variables)
+	}
+	var om, oc []SetEffect
+	if len(onMatch) > 0 {
+		om = make([]SetEffect, len(onMatch))
+		for i, e := range onMatch {
+			if e == nil {
+				return MergeEffect{}, errors.New("query: MergeEffect OnMatch contains a nil SetEffect")
+			}
+			om[i] = e
+		}
+	}
+	if len(onCreate) > 0 {
+		oc = make([]SetEffect, len(onCreate))
+		for i, e := range onCreate {
+			if e == nil {
+				return MergeEffect{}, errors.New("query: MergeEffect OnCreate contains a nil SetEffect")
+			}
+			oc[i] = e
+		}
+	}
+	return MergeEffect{variables: vs, onMatch: om, onCreate: oc}, nil
+}
+
+// Variables are the binding variable names the MERGE clause introduced, in
+// walk order. Same semantics as CreateEffect.Variables: may carry empty
+// strings for anonymous positions, may be empty when the MERGE composed no
+// bindings a caller cares to record.
+func (e MergeEffect) Variables() []string { return e.variables }
+
+// OnMatch are the SetEffects the ON MATCH SET action produced, in walk
+// order. Nil if the MERGE has no ON MATCH clause.
+func (e MergeEffect) OnMatch() []SetEffect { return e.onMatch }
+
+// OnCreate are the SetEffects the ON CREATE SET action produced, in walk
+// order. Nil if the MERGE has no ON CREATE clause.
+func (e MergeEffect) OnCreate() []SetEffect { return e.onCreate }
+
+func (MergeEffect) isEffect() {}
+
+// MarshalJSON renders a MergeEffect as a tagged union member discriminated
+// by "kind", carrying its variables list and the two ON branches. Each
+// element of onMatch / onCreate marshals through its concrete SetEffect
+// variant's MarshalJSON, preserving the "kind" discriminator inside.
+// Empty slices marshal as null — matching CreateEffect.Variables /
+// DeleteEffect.Targets / DeleteEffect.Refs (spec §1.3 / A2 fold-in).
+func (e MergeEffect) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind      string      `json:"kind"`
+		Variables []string    `json:"variables"`
+		OnMatch   []SetEffect `json:"onMatch"`
+		OnCreate  []SetEffect `json:"onCreate"`
+	}{Kind: effectKindMerge, Variables: e.variables, OnMatch: e.onMatch, OnCreate: e.onCreate})
+}
+
 // The Effect discriminators have no graph-vocabulary counterpart (the
 // distinction is query-side only), so they are named here, the one place
 // they are emitted. They sit next to the other kind constants per the
@@ -1883,4 +1992,5 @@ const (
 	effectKindSetLabels      = "setLabels"
 	effectKindRemoveProperty = "removeProperty"
 	effectKindRemoveLabels   = "removeLabels"
+	effectKindMerge          = "merge"
 )

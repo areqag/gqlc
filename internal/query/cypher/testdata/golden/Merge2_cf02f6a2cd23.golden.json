@@ -1,0 +1,41 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "b",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": null,
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "merge",
+              "variables": [
+                "b"
+              ],
+              "onMatch": null,
+              "onCreate": [
+                {
+                  "kind": "setProperty",
+                  "variable": "b",
+                  "property": "created",
+                  "type": "int",
+                  "refs": null
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

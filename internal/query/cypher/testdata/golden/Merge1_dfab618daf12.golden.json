@@ -1,0 +1,43 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "person",
+              "labels": [
+                "Person"
+              ],
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "city",
+              "labels": [
+                "City"
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": null,
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "merge",
+              "variables": [
+                "city"
+              ],
+              "onMatch": null,
+              "onCreate": null
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}

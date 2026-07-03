@@ -1,0 +1,164 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "n",
+              "labels": null,
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "a",
+              "value": {
+                "kind": "ref",
+                "variable": "n",
+                "property": "",
+                "type": "node"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": null
+        },
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "c",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "a",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "T"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "a"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "c"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            }
+          ],
+          "returns": [
+            {
+              "name": "x",
+              "value": {
+                "kind": "ref",
+                "variable": "a",
+                "property": "",
+                "type": "node"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "merge",
+              "variables": [
+                "c"
+              ],
+              "onMatch": null,
+              "onCreate": null
+            },
+            {
+              "kind": "merge",
+              "variables": [
+                "a",
+                ""
+              ],
+              "onMatch": null,
+              "onCreate": null
+            }
+          ]
+        },
+        {
+          "bindings": [
+            {
+              "kind": "node",
+              "variable": "c",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "node",
+              "variable": "x",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": [
+                "T"
+              ],
+              "source": {
+                "kind": "var",
+                "variable": "x"
+              },
+              "target": {
+                "kind": "var",
+                "variable": "c"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": null
+            }
+          ],
+          "returns": [
+            {
+              "name": "x",
+              "value": {
+                "kind": "ref",
+                "variable": "x",
+                "property": "id",
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false,
+          "effects": [
+            {
+              "kind": "merge",
+              "variables": [
+                "c"
+              ],
+              "onMatch": null,
+              "onCreate": null
+            },
+            {
+              "kind": "merge",
+              "variables": [
+                "x",
+                ""
+              ],
+              "onMatch": null,
+              "onCreate": null
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null,
+  "statementKind": "write"
+}
