@@ -188,6 +188,21 @@ because the MERGE wire-up cannot ship a golden that silently drops
 the `person` ref for Merge1[11]. Q3 fold-in: verified probe (§8) and
 widening committed.
 
+**Layer-2 observability of the widening on the CREATE side (ruling
+Q3(b)).** The widening's failure mode is symmetric — it must both
+(a) accept-and-record for bound refs, and (b) reject unbound
+refs. No wire-surface widening is needed to observe it: the
+buildPart referential-integrity sweep already raises
+`ErrUnboundVariable` on the widened refs list. So the CREATE-side
+Layer-2 lock is a matched pair: a mustReject kill-probe on the
+unbound path (`CREATE (a {name: b.c})` — parses silently today,
+rejects with `ErrUnboundVariable` after the widening) and a
+mustParse guard on the bound path (`MATCH (b) CREATE (a {name:
+b.c}) RETURN a` — passes today via MATCH-side mining, must keep
+passing after GREEN). See §1.8 for the exact pins; §5 for the
+Layer-1 corpus counterpart (Create1[20], Create2[24] off the
+skiplist).
+
 **Existing goldens re-key (disclosure).** The widening flips every
 pinned-corpus scenario whose CREATE/MATCH/MERGE pattern contains an
 inline map with a variable-referencing VALUE. The audit was run
@@ -227,17 +242,22 @@ do not exist; Create6 has 14 scenarios total.)
 
 **Fresh-golden delta (no prior green golden, mints honestly at
 Stage 13).** Every audit hit outside Create6 is currently either
-(a) skiplisted as a bucket-3 negative (Create1[20], Create2[24] —
-`missing`-var scenarios), (b) currently PENDING via
-`ErrUnsupportedClause` on MERGE (all Merge* scenarios AND both
-Unwind1 scenarios that call MERGE inline), or (c) newly-wired at
-Stage 13 (the whole `clauses/merge` dir). Full enumeration:
+(a) skiplisted as a bucket-3 negative and **comes OFF the skiplist
+at Stage 13** because the widening now rejects them correctly via
+`ErrUnboundVariable` (Create1[20], Create2[24] — bare-var unbound
+scenarios), (b) currently PENDING via `ErrUnsupportedClause` on
+MERGE (all Merge* scenarios AND both Unwind1 scenarios that call
+MERGE inline), or (c) newly-wired at Stage 13 (the whole
+`clauses/merge` dir). Full enumeration:
 
-Skiplisted-negative (unchanged posture — no golden, no gain):
+Un-skiplisted (posture flip: skip → pass; no golden minted because
+these are negatives that raise `ErrUnboundVariable` — the
+acceptance suite verifies the parse-fail):
 - `clauses/create/Create1.feature [20] Fail when creating a node using
-  undefined variable in pattern`
+  undefined variable in pattern` (`CREATE (b {name: missing})`)
 - `clauses/create/Create2.feature [24] Fail when creating a relationship
-  using undefined variable in pattern`
+  using undefined variable in pattern` (`MATCH (a) CREATE
+  (a)-[:KNOWS]->(b {name: missing})`)
 
 Currently PENDING (parse-rejected today by MERGE's
 `ErrUnsupportedClause`; parse-accepts at Stage 13 and mints a golden
@@ -304,7 +324,7 @@ is suppressed at the parser boundary per Stage 11 §1.6, so
 composition rule that rejects the write-in-subquery text is bucket 3
 per the existing `[3] Full existential subquery with update clause
 should fail` skiplist entry). Stage 13 amend: the writeSeen non-flip
-for MERGE-in-EXISTS is pinned (§1.10 pin list) and disclosed under
+for MERGE-in-EXISTS is pinned (§1.8 pin list) and disclosed under
 §8 weakest-points as a deliberate walk-time semantic that a query-
 wide static analyzer would need a second axis to see.
 
@@ -323,7 +343,7 @@ Post-Stage-13, the sentinel roster:
 Stage 12 established. The `mustReject` "write clause" pin (currently
 `MERGE (n) RETURN n`, per Stage 12 §7's swap) pivots to CALL —
 verbatim from `clauses/call/Call3.feature [1]` if a clean shape
-exists at the pinned tag, else authored (Q5 fold-in). §1.10 lists
+exists at the pinned tag, else authored (Q5 fold-in). §1.8 lists
 both the standalone and the in-query CALL pins (Q6 fold-in) — each
 fail-site is exercised separately.
 
@@ -349,7 +369,7 @@ The negative scenarios cluster into (survey pass):
   `MERGE (n $param)` — a parameter as the whole predicate map,
   same `ErrUnsupportedParameter` rejection the MATCH side already
   produces. Merge1[16] is the archetype. No new skiplist entry;
-  parse-rejects, `mustReject` optionally pins the shape (§1.10).
+  parse-rejects, `mustReject` optionally pins the shape (§1.8).
 - **Undefined variable in ON MATCH / ON CREATE (bucket 3).**
   Merge3[5], Merge3[8]-ish shapes: `MERGE (n) ON MATCH SET x.num = 1`
   where `x` is not bound. `SyntaxError:UndefinedVariable`; parses
@@ -437,28 +457,49 @@ parser_test.go layer-2 rule.
   query, and the corpus contains no such shape at the pinned tag.
   This is a Layer-2 pin, not a review-time hope: the kill-probe
   goes in as pinned truth.
-- **AUTHORED: CREATE-side shared inline-map ref widening**
+- **AUTHORED: CREATE-side bound inline-map var-PROP guard**
   — `MATCH (b) CREATE (a {name: b.c}) RETURN a`. Pins the shared
   `mineInlineMap` fix on the CREATE side at Layer 2 for the
-  var-PROP shape (ruling Q3(b) explicit): the create part's refs
-  list carries `b` (from the value expression `b.c` via
-  `typeExpressionMining` on the inline-map value), one
-  CreateEffect with `Variables: ["a"]`, one RefProjection for `a`,
-  StatementWrite. The Create6 re-keyed goldens exercise the
-  shared fix at Layer 1 via bare-var shapes (`{num: x}`); this
-  Layer-2 pin locks the shared fix at the var-PROP shape (which
-  Create6 does not exercise) — a future regression of the
-  widening on CREATE (e.g., a subsequent stage that splits
-  `mineInlineMap` into per-clause helpers) fails at `TestMustParse`
-  before touching goldens. `b` is bound from the preceding MATCH,
-  so the widened refs list on the CREATE part carries `b` and the
-  buildPart referential-integrity sweep is satisfied without any
-  sentinel — the pin asserts the accept-and-record shape directly.
+  var-PROP shape when the referenced var IS bound (from the
+  preceding MATCH): the create part's refs list carries `b` (from
+  the value expression `b.c` via `typeExpressionMining` on the
+  inline-map value), one CreateEffect with `Variables: ["a"]`, one
+  RefProjection for `a`, StatementWrite. **This pin passes in RED
+  and must keep passing after GREEN** — it is a regression lock
+  against over-rejection by the widening, not a kill-probe. The
+  Create6 re-keyed goldens exercise the shared fix at Layer 1 via
+  bare-var shapes (`{num: x}`); this Layer-2 pin locks the shared
+  fix at the var-PROP shape (which Create6 does not exercise) —
+  a future regression that widens `mineInlineMap` into rejecting
+  bound refs by mistake fails at `TestMustParse` before touching
+  goldens. `b` is bound from the preceding MATCH, so the widened
+  refs list on the CREATE part carries `b` and the buildPart
+  referential-integrity sweep is satisfied without any sentinel —
+  the pin asserts the accept-and-record shape directly.
 
-Exact count: 7 verbatim + 3 authored = 10 new mustParse pins. No
-optional/ceiling posture — the spec commits to this list. If RED
-turns up a red-lit shape that argues for an addition or a swap,
-the spec is amended before RED lands.
+Exact count: 7 verbatim + 3 authored = 10 new mustParse pins
+(EXISTS-suppression StatementKind non-flip, branch-leak kill-probe,
+CREATE-side bound var-PROP guard). No optional/ceiling posture —
+the spec commits to this list. If RED turns up a red-lit shape
+that argues for an addition or a swap, the spec is amended before
+RED lands.
+
+RED-phase posture, per pin:
+- 7 verbatim MERGE pins + branch-leak kill-probe → **FAIL in RED**
+  with `unsupported clause: MERGE` (8 mustParse failures total),
+  since `EnterOC_Merge` still raises `ErrUnsupportedClause`
+  outside `EXISTS { ... }`.
+- EXISTS-suppression pin → **passes in RED** as a guard: the
+  outer MATCH parses; `EnterOC_ExistentialSubquery` opens
+  `subqueryDepth`; the inner MERGE's `subqueryDepth > 0`
+  early-return short-circuits BEFORE `l.fail`, so no sentinel is
+  raised; `writeSeen` stays false and the outer query stays
+  `StatementRead`. This is the same suppression path Stage 11
+  §1.6 relies on for MATCH-in-EXISTS — no suppression bug, just
+  the honest Stage-11 posture exercised on the newest write
+  shape.
+- CREATE-side bound var-PROP guard → **passes in RED** as a
+  regression lock (documented above).
 
 New `mustReject` pins (Stage 13):
 
@@ -484,18 +525,50 @@ New `mustReject` pins (Stage 13):
   - **in-query CALL**: `CALL test.my.proc(42) YIELD out RETURN out`
     — verbatim from `clauses/call/Call3.feature` (in-query shape).
     Fail-site: `EnterOC_InQueryCall`, `ErrUnsupportedClause`.
+- **AUTHORED: unbound inline-map ref kill-probe** (ruling Q3(b)
+  replacement) — `CREATE (a {name: b.c})` (no preceding MATCH; `b`
+  is unbound). Verbatim archetype of `clauses/create/Create1.feature
+  [20] Fail when creating a node using undefined variable in
+  pattern` (which reads `CREATE (b {name: missing}) RETURN b`);
+  the pinned query strips the RETURN and switches the var to
+  `b.c` (var-PROP shape) to lock the var-PROP variant that
+  Create1[20]'s bare-var shape does not cover. Fail-site:
+  `mineInlineMap`'s value-side widening records `b` on
+  `curPart.refs`; the buildPart referential-integrity sweep then
+  raises `ErrUnboundVariable` because `b` is not in scope.
+  **FAILS in RED**: today's `mineInlineMap` walks OC_MapLiteral
+  values only for PARAMETER uses, never records `b`, and the
+  buildPart sweep sees no unbound ref — the query parses
+  silently. That is exactly the "silent info drop where parser
+  could reject" blocker the widening fixes. **Passes after
+  GREEN** as a textbook RED→GREEN pin. This kill-probe is the
+  Q3(b) observable — no wire-surface widening is needed to
+  observe the widening's effect, and the Layer-1 corpus gains
+  Create1[20] + Create2[24] off the skiplist (§5) as the
+  corpus-level counterpart.
 
 `count`s update summary:
 
 - `mustParse`: 88 → 98 (exactly +10; 7 verbatim + 3 authored per
   §1.8's list — the three authored pins are the EXISTS-suppression
   StatementKind non-flip, the branch-leak kill-probe, and the
-  CREATE-side var-PROP inline-map widening).
-- `mustReject`: 15 → 17 (net +2). Breakdown: retire 1 pin (the
+  CREATE-side bound var-PROP guard).
+- `mustReject`: 15 → 18 (net +3). Breakdown: retire 1 pin (the
   current "write clause" MERGE pin), add 2 pins (standalone CALL,
-  in-query CALL), add 1 pin (grammar-reject `MERGE (a), (b)`) →
-  15 − 1 + 2 + 1 = 17.
-- Sentinels: 6 → 6 (no additions, no retirements).
+  in-query CALL), add 1 pin (grammar-reject `MERGE (a), (b)`),
+  add 1 pin (unbound inline-map ref kill-probe) →
+  15 − 1 + 2 + 1 + 1 = 18.
+- Sentinels: 6 → 6 (no additions, no retirements — the unbound
+  kill-probe reuses `ErrUnboundVariable` at the buildPart sweep).
+
+**RED-phase expectation, exact**: `TestMustParse` fails on
+exactly 8 pins (7 verbatim MERGE shapes + branch-leak kill-probe,
+all with `unsupported clause: MERGE`). `TestMustReject` fails on
+exactly 1 pin (the unbound inline-map kill-probe — parses
+silently today because `mineInlineMap` does not walk value-side
+refs). The remaining new pins pass in RED as guards:
+EXISTS-suppression, CREATE-side bound var-PROP guard, standalone
+CALL, in-query CALL, grammar-reject `MERGE (a), (b)`.
 
 ### 1.9 Docs inline
 
@@ -902,6 +975,26 @@ the sentinel that would have fired (or the absence thereof), and
 the TCK error class. Exhaustive enumeration lands with the
 parser-green / unlock commit after a red-lit survey pass.
 
+**Skiplist removals (§1.4 fold-in).** The `mineInlineMap` value-side
+widening (§4.3) makes two currently-skiplisted Create-dir negatives
+reject correctly, so they come OFF the skiplist in the widening
+commit:
+
+- `[20] Fail when creating a node using undefined variable in pattern`
+- `[24] Fail when creating a relationship using undefined variable in pattern`
+
+Both are `SyntaxError:UndefinedVariable` scenarios whose query
+mints an inline-map value reference to a name that is not bound
+by any preceding clause. After the widening, `mineInlineMap`
+records the unbound name on the create part's refs list; the
+buildPart referential-integrity sweep then raises
+`ErrUnboundVariable`, satisfying the acceptance-suite parse-fail
+step. Suite-count delta from these two removals: **skip −2,
+pass +2**. Their bucket-3 rationale in the current skiplist is
+retired at the same commit that lands the widening — the
+rationale is superseded because the parser now honestly rejects
+the shape rather than accepting and deferring.
+
 The `mustReject` `write clause` pin moves from MERGE to CALL:
 
 ```go
@@ -933,8 +1026,11 @@ Stage 14 will retire both.
    / reachability suites, property tests.
 3. `just lint` green: zero issues.
 4. `just fmt-check` green: zero diffs.
-5. Layer-1 godog count rises by `clauses/merge`'s ~75 scenarios,
-   less the bucket-3 skiplist negatives. Zero FAIL is mandatory.
+5. Layer-1 godog count rises by `clauses/merge`'s ~75 scenarios
+   (less the bucket-3 skiplist negatives) plus **2** create-dir
+   scenarios flipping skip → pass (Create1[20], Create2[24] — off
+   the skiplist per §5 / §1.4 skiplist-removals). Zero FAIL is
+   mandatory.
 6. Documentation: this spec; CONTEXT.md **Merge** entry; ADR 0003
    amendment note; the **Effect** entry's variant-count note.
 7. Beads: `gqlc-xxx` closed.
@@ -946,10 +1042,10 @@ Stage 14 will retire both.
 | Commit | Scope |
 |--------|-------|
 | prep / spec | this spec + ADR 0003 note + CONTEXT.md entries (docs land in the branch, matching the DoD) |
-| parser (red) | 10 failing `mustParse` pins for the Stage-13 shapes (7 verbatim: MERGE bare, MERGE with label, MERGE inline-map with bound var, MERGE ON MATCH labels, MERGE ON CREATE labels, MERGE with both ON branches, MERGE + RETURN; 3 authored: MERGE-in-EXISTS StatementKind non-flip, branch-leak kill-probe `MERGE (n) ON CREATE SET n.a=1 SET n.b=2`, CREATE-side var-PROP inline-map widening `MATCH (b) CREATE (a {name: b.c}) RETURN a`). `mustReject`: retire MERGE pin, add 2 CALL pins (standalone + in-query) and 1 grammar-reject pin (`MERGE (a), (b)`) — 15 → 17. `query.MergeEffect` + `query.SetEffect` sub-sum + Stage-12 marker methods added, but `EnterOC_Merge` still emits `ErrUnsupportedClause`, so the 10 mustParse pins fail as intended |
+| parser (red) | **8** failing `mustParse` pins for the Stage-13 shapes (7 verbatim: MERGE bare, MERGE with label, MERGE inline-map with bound var, MERGE ON MATCH labels, MERGE ON CREATE labels, MERGE with both ON branches, MERGE + RETURN; 1 authored: branch-leak kill-probe `MERGE (n) ON CREATE SET n.a=1 SET n.b=2`) — all 8 fail with `unsupported clause: MERGE`. **2** additional mustParse pins pass in RED as guards: MERGE-in-EXISTS StatementKind non-flip (suppressed by `subqueryDepth > 0`), CREATE-side bound var-PROP guard `MATCH (b) CREATE (a {name: b.c}) RETURN a` (widened refs list satisfies referential-integrity today via MATCH-side mining; explicit lock against future over-rejection by the widening). Net mustParse: 88 → 98 (+10). **1** failing `mustReject` pin: unbound inline-map ref kill-probe `CREATE (a {name: b.c})` (parses silently today; widening makes it reject via `ErrUnboundVariable`). `mustReject` also: retire MERGE pin, add 2 CALL pins (standalone + in-query, both pass in RED as guards) and 1 grammar-reject pin `MERGE (a), (b)` (passes in RED as guard, ANTLR-level parse fail) — 15 → 18. `query.MergeEffect` + `query.SetEffect` sub-sum + Stage-12 marker methods added, but `EnterOC_Merge` still emits `ErrUnsupportedClause`, so the 8 MERGE mustParse pins fail as intended; `mineInlineMap` value-side widening not yet in, so the unbound kill-probe fails as intended |
 | parser (green) | `EnterOC_Merge` collects the pattern via `collectPatternPart`; `collectMergeAction` walks ON actions with a save/restore around `curPart.effects`; `writeSeen` flipped at outer scope; goldens regenerated for `clauses/merge` scenarios newly parse-green (∼60 scenarios out of 75, less skiplisted negatives) |
 | unlock (dirs + skiplist) | `readCoreDirs` gains `clauses/merge`; skiplist entries per bucket-3 negative with ADR 0007 rationale; acceptance-suite step behavior for the merge dir mirrors Stage 12's transitions (the `write clause` pin swap has already happened in the red commit) |
-| widening (mineInlineMap + fallout) | `mineInlineMap` widens per §4.3 to record value-side refs into `curPart.refs` and mint `PropertyUse{Ref{var, key}}` for parameters nested in rich value expressions. **10 existing Create6 goldens re-key** ([3], [4], [5], [6], [7], [10], [11], [12], [13], [14] per the audit in §1.4) to include the `x` ref on their `create` part's refs list — 10 files listed by name in the commit message. Every other audit hit (2 Unwind1, 8 Merge, 2 skiplisted Create1/Create2 negatives) is either fresh-mint on this branch (no re-key: Unwind1 is currently PENDING via MERGE's `ErrUnsupportedClause`; the Merge dir is Stage-13 newly-wired) or unchanged (skiplisted negatives own no golden). Spec + CONTEXT.md mirror the code |
+| widening (mineInlineMap + fallout) | `mineInlineMap` widens per §4.3 to record value-side refs into `curPart.refs` and mint `PropertyUse{Ref{var, key}}` for parameters nested in rich value expressions. **10 existing Create6 goldens re-key** ([3], [4], [5], [6], [7], [10], [11], [12], [13], [14] per the audit in §1.4) to include the `x` ref on their `create` part's refs list — 10 files listed by name in the commit message. Every other audit hit (2 Unwind1, 8 Merge) is fresh-mint on this branch (no re-key: Unwind1 is currently PENDING via MERGE's `ErrUnsupportedClause`; the Merge dir is Stage-13 newly-wired). **Skiplist delta**: `Create1[20]` (bare-var unbound: `CREATE (b {name: missing})`) and `Create2[24]` (bare-var unbound in relationship RHS: `CREATE (a)-[:KNOWS]->(b {name: missing})`) come OFF the skiplist — both are unbound-inline-map scenarios that reject correctly via `ErrUnboundVariable` after the widening (the widening records `missing` on the create part's refs list; buildPart's referential-integrity sweep raises `ErrUnboundVariable` because `missing` is not in scope). Suite-count delta from the skiplist removals: **skip −2, pass +2** (both scenarios are `Then a SyntaxError should be raised at compile time: UndefinedVariable`, which the acceptance suite verifies via the standard "then" step for parse failures). The mustReject pin (§1.8 kill-probe) is the Layer-2 counterpart to the same Layer-1 gain. Spec + CONTEXT.md mirror the code |
 
 Each commit is green in isolation of the ones after it — the parser
 red commit adds the model surface and pins that fail; the parser
@@ -1077,13 +1173,15 @@ The lesser risks, recorded for completeness:
   fix widens `mineInlineMap` for MATCH / CREATE / MERGE
   uniformly. The executing-query audit (§1.4) enumerated exactly
   which pinned-corpus scenarios re-key: 10 Create6 goldens gain
-  the `x` ref, and every other affected scenario (2 Unwind1,
-  8 Merge, 2 skiplisted Create1/Create2 negatives) either mints
-  fresh on this branch or does not own a golden today. Each
-  re-keyed golden is listed by scenario name in the widening
-  commit message; the change is strictly-more-information
-  (existing consumers, if any, get a richer refs list, not a
-  different one). The Stage 12 spec's
+  the `x` ref, 2 Unwind1 and 8 Merge scenarios mint fresh on this
+  branch (no re-key), and 2 create-dir negatives (Create1[20],
+  Create2[24]) come OFF the skiplist because the widening makes
+  them reject correctly via `ErrUnboundVariable` — a Layer-1
+  posture flip (skip → pass) that mirrors the Layer-2 mustReject
+  kill-probe (§1.8). Each re-keyed golden is listed by scenario
+  name in the widening commit message; the change is
+  strictly-more-information (existing consumers, if any, get a
+  richer refs list, not a different one). The Stage 12 spec's
   §weakest-points disclosure of parameter-mining posture
   (`"parameter mining rides an existing path"`) implicitly
   covered the drop but did not explicitly name the value-side
