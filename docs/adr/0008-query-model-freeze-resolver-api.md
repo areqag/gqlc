@@ -18,8 +18,18 @@ The progress meter at the freeze: godog over the entire vendored TCK reports
 scenario is skiplist-pinned to bucket 3 of ADR 0007 — runtime semantics below
 the type-interface boundary (ADR 0005), where the parser accepts and the
 driver raises on the original text. No scenario is pending for "not supported
-yet": the `ErrUnsupported*` sentinels that carried that meaning through
-Stages 0–14 are retired.
+yet". Of the four `ErrUnsupported*` sentinels that carried that meaning,
+three are retired — `ErrUnsupportedProjection` (Stage 6),
+`ErrUnsupportedPattern` (Stage 8), `ErrUnsupportedClause` (Stage 14).
+`ErrUnsupportedParameter` remains exported, with fail-sites for the parameter
+shapes the model deliberately does not carry (a `$param` occupying a clause
+slot's expression, a whole-property-map parameter, a parameter on an
+anonymous pattern element); at the freeze every corpus occurrence of those
+shapes is a negative (`Fail when …`) scenario, where the rejection is the
+asserted behaviour — zero pending scenarios route through it. It stays in
+the acceptance harness's progress-meter set deliberately: a future corpus
+shape that reaches it from a positive scenario surfaces as PENDING rather
+than as a silent mis-model.
 
 Two model fixes were pulled ahead of the freeze because they are
 cardinality-critical for the resolver's grouping-key work, where an aggregate
@@ -65,7 +75,7 @@ axis). `Branch` = `Parts []Part` (WITH-bounded scope segments). `Part` =
 | `PathMember` ×4 | `NamedNodeMember`, `NamedEdgeMember`, `AnonNodeMember`, `AnonEdgeMember` |
 | `Endpoint` ×2 | `VarEndpoint`, `InlineEndpoint` |
 | `Projection` ×5 | `RefProjection`, `LiteralProjection`, `FuncProjection`, `AggregateProjection`, `ExprProjection` |
-| `Type` ×17 | `bool`, `int`, `float`, `string`, `null`, `map`, `node`, `edge`, `list<T>` (parameterised over an element `Type`), `unknown`, `date`, `time`, `localtime`, `datetime`, `localdatetime`, `duration`, `path` |
+| `Type` ×17 | `bool`, `int`, `float`, `string`, `null`, `map`, `node`, `edge`, `list<T>` (parameterised over an element `Type`; the wire emits the instantiation — `list<int>`, `list<edge>`, …), `unknown`, `date`, `time`, `localtime`, `datetime`, `localdatetime`, `duration`, `path` |
 | `Use` ×3 | `PropertyUse`, `ExprUse`, `ClauseSlotUse` |
 | `Effect` ×8 | `CreateEffect`, `DeleteEffect`, `SetPropertyEffect`, `SetEntityEffect`, `SetLabelsEffect`, `RemovePropertyEffect`, `RemoveLabelsEffect`, `MergeEffect` |
 | `SetEffect` ×3 | the three `Set*Effect`s — the sub-sum `MergeEffect`'s `ON MATCH` / `ON CREATE` branches carry |
@@ -84,7 +94,8 @@ axis). `Branch` = `Parts []Part` (WITH-bounded scope segments). `Part` =
   (cross-branch); each is a different cardinality decision on a different
   model surface.
 - `AggregateFunc` ×8 — `count`, `sum`, `collect`, `min`, `max`, `avg`,
-  `stdev`, `percentile`.
+  `stdev` (covering `stDev` / `stDevP`), `percentile` (covering
+  `percentileCont` / `percentileDisc`).
 - `ClauseSlot` ×2 — `skip`, `limit`.
 - `ExprPosition` ×4 — `projection`, `predicate`, `setValue`, `deleteTarget`
   (the producer/consumer axis on `ExprUse`).
