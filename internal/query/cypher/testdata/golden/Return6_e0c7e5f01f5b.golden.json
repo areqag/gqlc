@@ -82,13 +82,15 @@
             {
               "name": "len",
               "value": {
-                "kind": "expr",
+                "kind": "aggregate",
+                "func": "min",
                 "refs": [
                   {
                     "variable": "p",
                     "property": ""
                   }
                 ],
+                "distinct": false,
                 "type": "unknown"
               }
             }

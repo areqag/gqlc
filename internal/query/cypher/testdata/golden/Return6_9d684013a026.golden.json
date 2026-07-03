@@ -180,7 +180,8 @@
             {
               "name": "sum",
               "value": {
-                "kind": "expr",
+                "kind": "aggregate",
+                "func": "sum",
                 "refs": [
                   {
                     "variable": "r1",
@@ -215,6 +216,7 @@
                     "property": ""
                   }
                 ],
+                "distinct": false,
                 "type": "unknown"
               }
             }
