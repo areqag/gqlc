@@ -371,12 +371,94 @@ func (l *listener) typeAtom(a gen.IOC_AtomContext, refs *[]query.Ref) query.Type
 		return t
 	case a.OC_CaseExpression() != nil:
 		return l.typeCase(a.OC_CaseExpression(), refs)
-	case a.OC_ListComprehension() != nil, a.OC_PatternComprehension() != nil,
-		a.OC_PatternPredicate() != nil, a.OC_ExistentialSubquery() != nil:
+	case a.OC_Quantifier() != nil:
+		// Stage 11 §1.1: the four list quantifiers (ALL/ANY/NONE/SINGLE)
+		// return a boolean. Refs from the source list flow to the caller's
+		// slice (outer scope), refs from the filter body are discarded
+		// (iteration-variable scoping), and parameters are mined on both
+		// sides so a $param anywhere under the quantifier records an
+		// ExprUse against the enclosing rich expression's result type.
+		return l.typeQuantifier(a.OC_Quantifier(), refs)
+	case a.OC_ExistentialSubquery() != nil:
+		// Stage 11 §1.2: EXISTS { ... } returns a boolean. Parameters
+		// inside the subquery are mined at EnterOC_ExistentialSubquery
+		// (listener.go); inner clauses are suppressed by the
+		// subqueryDepth counter and never enter the outer part's state,
+		// so no refs walk the subquery body here.
+		return query.TypeBool{}
+	case a.OC_PatternPredicate() != nil:
+		// Stage 11 §1.3: a pattern predicate at WHERE / rich-expression
+		// predicate position is boolean. The atom's inner refs (n / m /
+		// endpoints) are runtime-scope and do not enter the outer refs
+		// slice — the model does not carry pattern-predicate structure
+		// (ADR 0003). A pattern predicate at RETURN / WITH projection
+		// position is rejected earlier via ErrPatternInProjection
+		// (collectReturnItem), so this arm never runs in that context.
+		return query.TypeBool{}
+	case a.OC_ListComprehension() != nil, a.OC_PatternComprehension() != nil:
+		// Comprehensions carry a list result whose element type depends
+		// on the projection sub-tree; a wrong concrete would be strictly
+		// worse than an honest TypeUnknown (the Stage-6 posture, ADR
+		// 0005). Stage 11 does not tighten this.
 		return query.TypeUnknown{}
 	default:
 		return query.TypeUnknown{}
 	}
+}
+
+// typeQuantifier types a Stage-11 quantifier atom (ALL / ANY / NONE /
+// SINGLE) as TypeBool while enforcing the iteration-variable scoping
+// invariant (§1.1). Two sub-expressions matter:
+//
+//   - The source list (`x IN xs`): outer-scope refs, so its typer walks
+//     into the caller's refs slice; parameters record an ExprUse against
+//     the source list's Stage-6 type (a $xs source types as TypeUnknown
+//     and the ExprUse honours that).
+//   - The filter WHERE (`WHERE p(x)`): the iteration variable and any
+//     x.prop it touches must not enter the outer refs slice, so refs the
+//     typer accumulated on curPart.refs are rolled back after the walk
+//     (the same idiom mineWhere / mineSortItemParameters use). Every
+//     $param records an ExprUse{TypeBool, ExprInPredicate} — the filter
+//     WHERE is boolean by definition.
+//
+// The caller's refs slice receives source-list refs only. The quantifier
+// itself types as TypeBool unconditionally.
+func (l *listener) typeQuantifier(q gen.IOC_QuantifierContext, refs *[]query.Ref) query.Type {
+	filter := q.OC_FilterExpression()
+	if filter == nil {
+		return query.TypeBool{}
+	}
+	if idInColl := filter.OC_IdInColl(); idInColl != nil {
+		if src := idInColl.OC_Expression(); src != nil {
+			sourceType, _, params := l.typeExpressionMining(src)
+			// Type the source once more against the caller's refs slice
+			// so source-list refs (an outer var / var.prop the source
+			// expression names) enter the outer part. typeExpressionMining
+			// pushes refs onto a local slice and onto curPart.refs; the
+			// second walk is what threads them into the caller's slice.
+			_ = l.typeOr(src.OC_OrExpression(), refs)
+			for _, p := range params {
+				name := parameterName(p)
+				if name == "" {
+					continue
+				}
+				l.addParameterUse(name, p, query.NewExprUse(sourceType, query.ExprInPredicate))
+			}
+		}
+	}
+	if w := filter.OC_Where(); w != nil {
+		savedOuter := l.curPart.refs
+		_, _, params := l.typeExpressionMining(w.OC_Expression())
+		l.curPart.refs = savedOuter // discard filter-body refs (iteration-variable scoping)
+		for _, p := range params {
+			name := parameterName(p)
+			if name == "" {
+				continue
+			}
+			l.addParameterUse(name, p, query.NewExprUse(query.TypeBool{}, query.ExprInPredicate))
+		}
+	}
+	return query.TypeBool{}
 }
 
 // typeCase types a CASE expression: the result is the common type of the

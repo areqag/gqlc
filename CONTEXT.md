@@ -346,6 +346,30 @@ than an honest `unknown` the resolver upgrades from the schema).
 Grouping-key semantics — which non-aggregate columns form the group —
 are a resolver concern, entangled with `WITH`, and out of scope until then.
 
+**Predicate expression**:
+A boolean atom the openCypher grammar admits inside `WHERE` and the
+right-hand side of any expression — the four list **quantifiers**
+(`all(x IN xs WHERE p)`, `any`, `none`, `single`), the **existential
+subquery** (`exists { ... }`), and the **pattern predicate**
+(`(n)-->(m)` used as a boolean). Every predicate expression types as
+`bool`; none introduces a new **type** or **projection** variant. The
+model records only its result type — never its structure — so the
+iteration variable of a quantifier (`x`) and every inner binding of an
+`exists {}` are **scoped locally** to the predicate expression and do
+not enter the enclosing **query part**'s bindings, refs, or
+`byVar` / `pathBindings` / `unwindBindings`. The parser enforces the
+scope structurally (a suppression counter around `exists {}`; a
+discarded refs sink around a quantifier's filter body), not as a
+name-collision rule, so a shadowing iteration variable is
+accept-and-defer. Pattern predicates are legal only inside a boolean
+position; using one as a scalar projection (`RETURN (n)-->()`) is a
+bucket-1 parse-shape rejection via `ErrPatternInProjection`.
+_Avoid_: "pattern comprehension" (that's the `[(n)-->() | n.name]`
+list-yielding shape, not a predicate); "existential quantifier"
+(reserve for the mathematical sense; openCypher's `exists {}` is
+"existential subquery" and the four list quantifiers are the
+"quantifier" family).
+
 **Resolver**:
 The stage that resolves a parsed query against the model, typing each return item
 and parameter — a pure function of `(query.Query, schema.Schema)`. Resolution

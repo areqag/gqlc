@@ -67,8 +67,13 @@
               "name": "result",
               "value": {
                 "kind": "expr",
-                "refs": null,
-                "type": "unknown"
+                "refs": [
+                  {
+                    "variable": "eq",
+                    "property": ""
+                  }
+                ],
+                "type": "bool"
               }
             }
           ],

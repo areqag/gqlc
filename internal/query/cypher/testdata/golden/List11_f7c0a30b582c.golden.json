@@ -168,8 +168,17 @@
               "name": "okay",
               "value": {
                 "kind": "expr",
-                "refs": null,
-                "type": "unknown"
+                "refs": [
+                  {
+                    "variable": "list",
+                    "property": ""
+                  },
+                  {
+                    "variable": "empty",
+                    "property": ""
+                  }
+                ],
+                "type": "bool"
               }
             }
           ],

@@ -175,14 +175,25 @@ func (l *listener) mineSortItemParameters(e gen.IOC_ExpressionContext) {
 // CASE, list indexing/slicing, chained comparisons, parenthesised composites)
 // falls through to the Stage-6 rich-expression classifier, which types the
 // sub-tree and mines its refs. The column name is the explicit AS alias if
-// present, else the verbatim source text of the expression (E1).
+// present, else the verbatim source text of the expression (E1). Stage 11
+// (§1.4, gqlc-3r0 fold): a pattern predicate at projection position is a
+// bucket-1 parse-shape rejection — Pattern1 [22]/[23] cite
+// SyntaxError:UnexpectedSyntax, which the parser owns. The
+// isPatternPredicateAtom check fires before the bare-atom classifier so
+// the rejection reaches ErrPatternInProjection rather than a silent
+// ExprProjection{TypeBool}.
 func (l *listener) collectReturnItem(item gen.IOC_ProjectionItemContext) {
-	value, ok := l.classifyProjection(item.OC_Expression())
+	e := item.OC_Expression()
+	if isPatternPredicateAtom(e) {
+		l.fail(fmt.Errorf("%w: %s", ErrPatternInProjection, originalText(l.ts, e)))
+		return
+	}
+	value, ok := l.classifyProjection(e)
 	if !ok {
-		value = l.classifyRichExpression(item.OC_Expression())
+		value = l.classifyRichExpression(e)
 	}
 
-	name := originalText(l.ts, item.OC_Expression())
+	name := originalText(l.ts, e)
 	if alias := item.OC_Variable(); alias != nil {
 		name = alias.GetText()
 	}
@@ -393,8 +404,23 @@ func (l *listener) mineWhere(w gen.IOC_WhereContext) {
 // parameter use when a comparison or string predicate pairs a single-level
 // var.prop with a $param (D1a). It does not interpret predicate structure beyond
 // finding these pairs; everything else is left for the approval sweep.
+//
+// Stage 11 §1.2 / §1.5: the walk stops at an EXISTS { ... } or list-quantifier
+// (ALL / ANY / NONE / SINGLE) subtree boundary. Comparisons inside a predicate
+// subquery / a quantifier filter body live in a nested scope — an inner
+// var.prop = $p pair inside them would (a) mint the wrong Use variant on the
+// outer parameter (a PropertyUse against an inner var, silently dropping the
+// spec §1.5 ExprUse{TypeBool, ExprInPredicate}), and (b) leak the inner
+// variable into curPart.refs via pairAddSub, breaking legal queries with
+// ErrUnboundVariable at build's referential-integrity sweep. Parameters inside
+// these subtrees are mined by their own hooks: EnterOC_ExistentialSubquery for
+// EXISTS { ... }, typeQuantifier for the four quantifiers.
 func (l *listener) mineComparisons(e antlr.Tree) {
 	if e == nil {
+		return
+	}
+	switch e.(type) {
+	case gen.IOC_ExistentialSubqueryContext, gen.IOC_QuantifierContext:
 		return
 	}
 	if cmp, ok := e.(gen.IOC_ComparisonExpressionContext); ok {

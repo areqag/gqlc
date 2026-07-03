@@ -2,9 +2,10 @@ package cypher
 
 import "errors"
 
-// The four sentinels Parse returns for valid openCypher that affects the type
-// interface but the current model cannot faithfully represent (spec §3/B3).
-// They are category-grained, not per-construct: when a later stage supports a
+// The five sentinels Parse returns for valid openCypher that affects the type
+// interface but the current model cannot faithfully represent (spec §3/B3), or
+// for a bucket-1 parse-shape rejection the type-interface boundary owns. They
+// are category-grained, not per-construct: when a later stage supports a
 // construct we delete one Enter* handler, never rename a sentinel. Each is
 // wrapped with text naming the offending construct at the failing site, so
 // callers branch with errors.Is while reading a concrete message. A
@@ -13,7 +14,8 @@ import "errors"
 // now parse to an ExprProjection, so the sentinel has no fail-site. Stage 8
 // retired ErrUnsupportedPattern: the three pattern shapes it flagged (named
 // paths, variable-length relationships, multi-type relationships) all parse
-// under the widened Stage-8 model.
+// under the widened Stage-8 model. Stage 11 adds ErrPatternInProjection for
+// pattern predicates at projection position — a freeze-durable true-rejection.
 var (
 	// ErrUnsupportedClause rejects clauses outside the read core: the write
 	// clauses (CREATE/MERGE/SET/DELETE/REMOVE), UNWIND, CALL. (WITH and UNION are
@@ -39,4 +41,14 @@ var (
 	// an edge (or as a path). Stage 8 extends the check to the three-way kind
 	// space (node/edge/path).
 	ErrVariableKindConflict = errors.New("variable used as both node and edge")
+
+	// ErrPatternInProjection rejects a pattern predicate at RETURN or WITH
+	// projection position — a bucket-1 parse-shape rule (ADR 0007 §I). Pattern
+	// predicates are legal openCypher only inside a boolean position
+	// (WHERE / EXISTS / rich-expression predicate); using one as a scalar
+	// column (MATCH (n) RETURN (n)-[]->()) is SyntaxError:UnexpectedSyntax per
+	// the TCK (Pattern1 [22]/[23]). Stage 11 adds the fail-site; the sentinel
+	// is freeze-durable — pattern predicates never become legal projection
+	// atoms.
+	ErrPatternInProjection = errors.New("pattern predicate in projection position")
 )

@@ -100,7 +100,16 @@
               "name": "result",
               "value": {
                 "kind": "expr",
-                "refs": null,
+                "refs": [
+                  {
+                    "variable": "eq",
+                    "property": ""
+                  },
+                  {
+                    "variable": "neq",
+                    "property": ""
+                  }
+                ],
                 "type": "bool"
               }
             }

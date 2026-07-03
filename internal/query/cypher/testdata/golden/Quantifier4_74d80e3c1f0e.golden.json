@@ -1,0 +1,102 @@
+{
+  "branches": [
+    {
+      "parts": [
+        {
+          "bindings": [
+            {
+              "kind": "edge",
+              "variable": "",
+              "labels": null,
+              "source": {
+                "kind": "inline",
+                "labels": [
+                  "SNodes"
+                ]
+              },
+              "target": {
+                "kind": "var",
+                "variable": "x"
+              },
+              "nullable": false,
+              "directed": true,
+              "hops": {
+                "min": 0,
+                "max": 3
+              }
+            },
+            {
+              "kind": "node",
+              "variable": "x",
+              "labels": null,
+              "nullable": false
+            },
+            {
+              "kind": "path",
+              "variable": "p",
+              "members": [
+                {
+                  "kind": "anon-node"
+                },
+                {
+                  "kind": "anon-edge"
+                },
+                {
+                  "kind": "node",
+                  "variable": "x"
+                }
+              ],
+              "nullable": false
+            }
+          ],
+          "returns": [
+            {
+              "name": "nodes",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "p",
+                    "property": ""
+                  }
+                ],
+                "type": "unknown"
+              }
+            }
+          ],
+          "returnsAll": false
+        },
+        {
+          "bindings": null,
+          "returns": [
+            {
+              "name": "nodes",
+              "value": {
+                "kind": "ref",
+                "variable": "nodes",
+                "property": "",
+                "type": "unknown"
+              }
+            },
+            {
+              "name": "result",
+              "value": {
+                "kind": "expr",
+                "refs": [
+                  {
+                    "variable": "nodes",
+                    "property": ""
+                  }
+                ],
+                "type": "bool"
+              }
+            }
+          ],
+          "returnsAll": false
+        }
+      ]
+    }
+  ],
+  "combinators": null,
+  "parameters": null
+}
