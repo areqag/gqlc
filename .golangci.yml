@@ -73,9 +73,10 @@ linters:
           msg: use log/slog via internal/logger, not the legacy log package
     ireturn:
       # return structs, not interfaces — with two deliberate exceptions: the
-      # closed sums of the query model (Binding, Endpoint, Projection, Type, Use
-      # are either/or types; there is no concrete type to return) and the Parser
-      # factories (returning the unexported struct would trip unexported-return)
+      # closed sums of the query model (Binding, Endpoint, Projection, Type, Use)
+      # and the resolver's ResolvedType are either/or types; there is no concrete
+      # type to return; and the Parser factories (returning the unexported struct
+      # would trip unexported-return).
       allow:
         - anon
         - error
@@ -83,6 +84,7 @@ linters:
         - stdlib
         - generic
         - github.com/areqag/gqlc/internal/query\.(Parser|Binding|Endpoint|Projection|Type|Use)$
+        - github.com/areqag/gqlc/internal/resolver\.ResolvedType$
         - github.com/areqag/gqlc/internal/schema\.Parser$
         # ANTLR's Go target generates every grammar-rule context as an
         # interface, so tree-walking helpers have no concrete type to return.
