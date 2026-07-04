@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/areqag/gqlc/internal/graph"
+	"github.com/areqag/gqlc/internal/schema"
 )
 
 // ValidatedQuery is the resolver's output: resolved result columns, resolved
@@ -119,3 +120,24 @@ func (p ResolvedProperty) MarshalJSON() ([]byte, error) {
 }
 
 func (ResolvedProperty) isResolvedType() {}
+
+// ResolvedEdge is a whole-entity edge projection: the schema's canonical
+// (source, label, target) triple. R1 produces this variant for a RefProjection
+// whose Ref names an EdgeBinding and whose Property is empty. Multi-hop
+// (list<edge>) is R3's business.
+type ResolvedEdge struct {
+	EdgeKey schema.EdgeKey `json:"edgeKey"`
+}
+
+// String is the wire tag "edge".
+func (ResolvedEdge) String() string { return "edge" }
+
+// MarshalJSON emits a tagged-union object with a "kind" discriminator.
+func (e ResolvedEdge) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind    string         `json:"kind"`
+		EdgeKey schema.EdgeKey `json:"edgeKey"`
+	}{Kind: e.String(), EdgeKey: e.EdgeKey})
+}
+
+func (ResolvedEdge) isResolvedType() {}

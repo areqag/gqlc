@@ -1,9 +1,16 @@
 {
     "unknown_label.cypher": "social.gql",
     "unknown_property.cypher": "social.gql",
-    "edge_binding.cypher": "social.gql",
     "with_clause.cypher": "social.gql",
     "aggregate_projection.cypher": "social.gql",
     "return_distinct.cypher": "social.gql",
-    "returns_all.cypher": "social.gql"
+    "returns_all.cypher": "social.gql",
+    "unknown_edge.cypher": "social.gql",
+    "unknown_edge_property.cypher": "social.gql",
+    "ambiguous_unlabelled_binding.cypher": "social_ambiguous.gql",
+    "unlabelled_binding_no_edge.cypher": "social.gql",
+    "empty_inline_endpoint.cypher": "social.gql",
+    "undirected_edge.cypher": "social.gql",
+    "var_length_edge.cypher": "social.gql",
+    "multi_type_edge.cypher": "social.gql"
 }

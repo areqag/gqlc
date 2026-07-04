@@ -21,17 +21,24 @@ var update = flag.Bool("update", false, "regenerate resolver .validated.golden.j
 
 const fixtureDir = "../../test/data/resolver"
 
-// invalidFixtures pairs each negative fixture with the R0 sentinel it must
+// invalidFixtures pairs each negative fixture with the sentinel it must
 // produce. Totality against invalid/*.cypher is asserted in TestInvalid so a
 // stray fixture or missing map entry fails the suite.
 var invalidFixtures = map[string]error{
-	"unknown_label.cypher":        ErrUnknownLabel,
-	"unknown_property.cypher":     ErrUnknownProperty,
-	"edge_binding.cypher":         ErrOutOfR0Scope,
-	"with_clause.cypher":          ErrOutOfR0Scope,
-	"aggregate_projection.cypher": ErrOutOfR0Scope,
-	"return_distinct.cypher":      ErrOutOfR0Scope,
-	"returns_all.cypher":          ErrOutOfR0Scope,
+	"unknown_label.cypher":                ErrUnknownLabel,
+	"unknown_property.cypher":             ErrUnknownProperty,
+	"with_clause.cypher":                  ErrOutOfR0Scope,
+	"aggregate_projection.cypher":         ErrOutOfR0Scope,
+	"return_distinct.cypher":              ErrOutOfR0Scope,
+	"returns_all.cypher":                  ErrOutOfR0Scope,
+	"unknown_edge.cypher":                 ErrUnknownEdge,
+	"unknown_edge_property.cypher":        ErrUnknownProperty,
+	"ambiguous_unlabelled_binding.cypher": ErrAmbiguousBinding,
+	"unlabelled_binding_no_edge.cypher":   ErrUnknownLabel,
+	"empty_inline_endpoint.cypher":        ErrUnknownLabel,
+	"undirected_edge.cypher":              ErrOutOfR0Scope,
+	"var_length_edge.cypher":              ErrOutOfR0Scope,
+	"multi_type_edge.cypher":              ErrOutOfR0Scope,
 }
 
 type ResolverSuite struct {

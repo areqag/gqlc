@@ -1,0 +1,23 @@
+{
+  "columns": [
+    {
+      "name": "p.name",
+      "type": {
+        "kind": "property",
+        "type": "STRING",
+        "nullable": false
+      }
+    }
+  ],
+  "parameters": [
+    {
+      "name": "pubTime",
+      "type": {
+        "kind": "property",
+        "type": "TIMESTAMP",
+        "nullable": true
+      }
+    }
+  ],
+  "statement": "read"
+}

@@ -1,0 +1,27 @@
+{
+  "columns": [
+    {
+      "name": "p",
+      "type": {
+        "kind": "node",
+        "labels": "Person"
+      }
+    },
+    {
+      "name": "post",
+      "type": {
+        "kind": "node",
+        "labels": "Post"
+      }
+    },
+    {
+      "name": "p2",
+      "type": {
+        "kind": "node",
+        "labels": "Person"
+      }
+    }
+  ],
+  "parameters": [],
+  "statement": "read"
+}

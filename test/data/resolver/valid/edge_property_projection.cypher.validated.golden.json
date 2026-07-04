@@ -1,0 +1,14 @@
+{
+  "columns": [
+    {
+      "name": "r.publishedAt",
+      "type": {
+        "kind": "property",
+        "type": "TIMESTAMP",
+        "nullable": true
+      }
+    }
+  ],
+  "parameters": [],
+  "statement": "read"
+}
