@@ -1,0 +1,14 @@
+CREATE PROPERTY GRAPH TYPE SocialR1 AS {
+    (:Person {
+        id      :: INT NOT NULL,
+        name    :: STRING NOT NULL,
+        age     :: INT
+    }),
+    (:Post {
+        id      :: INT NOT NULL,
+        title   :: STRING NOT NULL,
+        body    :: STRING
+    }),
+    (:Person) -[:AUTHORED { publishedAt :: TIMESTAMP }]-> (:Post),
+    (:Person) -[:LIKES]-> (:Post)
+}

@@ -1,0 +1,7 @@
+CREATE PROPERTY GRAPH TYPE SocialAmbiguous AS {
+    (:Author { id :: INT NOT NULL }),
+    (:Publisher { id :: INT NOT NULL }),
+    (:Post { id :: INT NOT NULL }),
+    (:Author) -[:AUTHORED]-> (:Post),
+    (:Publisher) -[:AUTHORED]-> (:Post)
+}

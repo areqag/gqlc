@@ -349,10 +349,17 @@ from the edges that touch it:
     `resolvedNodeType[n.Variable]` with the canonical key. Any
     Phase A2 edge whose endpoint pointed at `n` is now Phase C's
     business (§4.4).
-  - `>1` → `ErrAmbiguousBinding` (fail-message: "cannot uniquely
-    infer type of unlabelled binding %q — candidate types: %s"). The
-    fail-message names the binding and the candidate keys sorted
-    ascending (for determinism).
+  - `>1` → **defer to the next pass.** A neighbour resolving on this
+    pass may commit a definite type that narrows this binding's
+    candidate set on the next iteration (the source-side key or
+    target-side key an intersecting-edge contribution reads becomes
+    concrete). Ambiguity is only pronounced on a zero-commit pass with
+    pending bindings remaining (see **Fixed-point pass** below), which
+    is when the candidate set is provably minimal — no future pass can
+    narrow it further. Deferring here is a strict consequence of the
+    fixed-point framing in §2.3: only the "exit with no progress"
+    branch (path c) raises `ErrAmbiguousBinding`; a per-pass
+    multi-candidate verdict is not itself terminal.
 
 **Fixed-point pass.** Phase B iterates. Each pass computes the
 candidate set for every pending binding against the current
@@ -609,10 +616,20 @@ CREATE PROPERTY GRAPH TYPE SocialR1 AS {
         title   :: STRING NOT NULL,
         body    :: STRING
     }),
-    (:Person) -[:AUTHORED { at :: TIMESTAMP }]-> (:Post),
+    (:Person) -[:AUTHORED { publishedAt :: TIMESTAMP }]-> (:Post),
     (:Person) -[:LIKES]-> (:Post)
 }
 ```
+
+**Property-name erratum.** The originally-drafted property name `at`
+and the parameter name `$when` in §6.3 below are both reserved lexer
+tokens: `AT` is a GQL keyword (`internal/grammar/gql/GQL.g4:3288`) and
+`WHEN` is a Cypher keyword (`internal/grammar/cypher/Cypher.g4:390`),
+so the ANTLR-generated parsers reject them before any resolver code
+runs. Fixtures use `publishedAt` and `$pubTime` instead. Semantically
+identical — the property still has type `TIMESTAMP` and nullability
+`true` from the schema; the parameter still unifies at
+`ResolvedProperty{TIMESTAMP, Nullable=true}`.
 
 `test/data/resolver/invalid/schemas/social_ambiguous.gql`:
 
@@ -637,8 +654,8 @@ Added under `test/data/resolver/valid/`:
 | Fixture | Shape | Schema |
 |---|---|---|
 | `edge_labelled_both_endpoints.cypher` | `MATCH (p:Person)-[r:AUTHORED]->(post:Post) RETURN p, r, post` | social_r1 |
-| `edge_property_projection.cypher` | `MATCH (p:Person)-[r:AUTHORED]->(post:Post) RETURN r.at` | social_r1 |
-| `edge_property_parameter.cypher` | `MATCH (p:Person)-[r:AUTHORED { at: $when }]->(post:Post) RETURN p.name` | social_r1 |
+| `edge_property_projection.cypher` | `MATCH (p:Person)-[r:AUTHORED]->(post:Post) RETURN r.publishedAt` | social_r1 |
+| `edge_property_parameter.cypher` | `MATCH (p:Person)-[r:AUTHORED { publishedAt: $pubTime }]->(post:Post) RETURN p.name` | social_r1 |
 | `inline_endpoint_source.cypher` | `MATCH (:Person)-[r:AUTHORED]->(post:Post) RETURN post, r` | social_r1 |
 | `inline_endpoint_target.cypher` | `MATCH (p:Person)-[r:AUTHORED]->(:Post) RETURN p, r` | social_r1 |
 | `unlabelled_binding_from_edge.cypher` | `MATCH (a)-[r:AUTHORED]->(p:Post) RETURN a, r, p` | social_r1 |
@@ -658,7 +675,7 @@ Each fixture is one Cypher file; each has one paired
 - `edge_property_projection`: exercises §4.5's edge-property lookup
   (`ResolvedProperty{TIMESTAMP, Nullable=true}`).
 - `edge_property_parameter`: exercises §4.6's edge-parameter typing
-  (`ResolvedParameter{Name: "when", Type:
+  (`ResolvedParameter{Name: "pubTime", Type:
   ResolvedProperty{TIMESTAMP, Nullable=true}}`).
 - `inline_endpoint_source` / `inline_endpoint_target`: exercises
   `InlineEndpoint` labelling (the endpoint's own labels).
