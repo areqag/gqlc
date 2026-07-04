@@ -1,0 +1,9 @@
+{
+    "unknown_label.cypher": "social.gql",
+    "unknown_property.cypher": "social.gql",
+    "edge_binding.cypher": "social.gql",
+    "with_clause.cypher": "social.gql",
+    "aggregate_projection.cypher": "social.gql",
+    "return_distinct.cypher": "social.gql",
+    "returns_all.cypher": "social.gql"
+}
