@@ -3,5 +3,13 @@
     "node_property_string.cypher": "social.gql",
     "node_property_nullable_int.cypher": "social.gql",
     "node_mixed_projection.cypher": "social.gql",
-    "node_property_with_parameter.cypher": "social.gql"
+    "node_property_with_parameter.cypher": "social.gql",
+    "edge_labelled_both_endpoints.cypher": "social_r1.gql",
+    "edge_property_projection.cypher": "social_r1.gql",
+    "edge_property_parameter.cypher": "social_r1.gql",
+    "inline_endpoint_source.cypher": "social_r1.gql",
+    "inline_endpoint_target.cypher": "social_r1.gql",
+    "unlabelled_binding_from_edge.cypher": "social_r1.gql",
+    "unlabelled_binding_target_inferred.cypher": "social_r1.gql",
+    "two_edges_shared_binding.cypher": "social_r1.gql"
 }
