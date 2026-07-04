@@ -72,30 +72,39 @@ function; no new exported types except the new `ResolvedType` variant
 ### 2.1 The R1 kernel structure
 
 The kernel remains one linear pass with early returns. R1 replaces R0's
-single-binding walk (R0 §4.7 step 3) with a two-phase binding walk:
+single-binding walk (R0 §4.7 step 3) with a three-phase binding walk:
 
-- **Phase A — schema-witness collection.** Walk `Part.Bindings` once,
-  collecting for each entity binding (NodeBinding or EdgeBinding) the
-  set of *candidate* schema types (a `map[schema.EdgeKey]schema.EdgeType`
-  view for edges; a `map[graph.LabelSetKey]schema.NodeType` view for
-  nodes). Labelled node bindings and labelled directed single-hop edge
-  bindings resolve their candidate set directly against the schema.
-  Unlabelled node bindings enter Phase A with an empty candidate set
-  that Phase B fills.
-- **Phase B — unlabelled-node inference.** For each unlabelled
-  `NodeBinding` in the part, walk the part's `EdgeBinding`s that touch
-  it (§4.2). Each touching edge contributes the set of schema node
-  types compatible with that edge's position (source or target) —
-  intersected across all touching edges. The result is checked for
-  the three outcomes §4.3 names: **no candidate**
-  (`ErrUnknownLabel`), **single candidate** (bound, resolution
-  continues), **multiple candidates** (`ErrAmbiguousBinding`).
+- **Phase A — labelled-binding resolution** (§4.2). Two sweeps in
+  order: A1 resolves every labelled `NodeBinding` against
+  `schema.Schema.Nodes`, then A2 forms a candidate `EdgeKey` for every
+  labelled directed single-hop `EdgeBinding` — reading endpoint labels
+  from A1's committed node table (`VarEndpoint`) or the pattern
+  (`InlineEndpoint`). Edges whose endpoint is a still-unlabelled
+  `VarEndpoint` or an empty-labels `InlineEndpoint` are set aside for
+  Phase C.
+- **Phase B — unlabelled-node inference** (§4.3). For each unlabelled
+  `NodeBinding`, walk the part's directed single-hop labelled
+  `EdgeBinding`s that touch it. Each touching edge contributes the set
+  of schema node types compatible with that edge's position (source or
+  target) — intersected across all touching edges. Iterate to a fixed
+  point (§2.3). Each pending binding produces one of three outcomes:
+  **no candidate** (`ErrUnknownLabel`), **single candidate** (bound,
+  resolution continues), **multiple candidates** or an
+  unbreakable-cycle pending set (`ErrAmbiguousBinding`).
+- **Phase C — deferred edge closure** (§4.4). Single pass over the
+  edges Phase A2 set aside: re-form each candidate `EdgeKey` against
+  the now-complete node table and look it up in `schema.Schema.Edges`.
+  On miss, `ErrUnknownEdge`; a still-unresolved endpoint (an anonymous
+  inline endpoint) fails `ErrUnknownLabel`.
 
-Phase B runs after Phase A so labelled bindings' candidates are already
-committed before inference reads them. Phase A alone never fails on an
-unlabelled node binding: the candidate set is deferred to Phase B; a
-labelled binding with no schema witness fails Phase A immediately
-(`ErrUnknownLabel` for a node; `ErrUnknownEdge` for a labelled edge, §5).
+Phase B runs after Phase A because labelled bindings' resolutions must
+be committed before inference reads them; Phase C runs after Phase B
+so every Phase-B-resolvable binding is committed before the deferred
+edges are closed. Phase A alone never fails on an unlabelled node
+binding — the resolution is deferred, not attempted. A labelled node
+binding with no schema witness fails A1 (`ErrUnknownLabel`); a
+labelled edge with fully-committed endpoints and no matching schema
+`EdgeKey` fails A2 (`ErrUnknownEdge`, §5).
 
 The projection/parameter walk (R0 §4.7 steps 4–5) is unchanged in
 shape; the resolver looks up the projection's `Ref.Variable` in the
@@ -124,19 +133,23 @@ sentinel. `resolved` is the Phase A table `map[Variable] →
 LabelSetKey`; an entry present with an empty key means the binding is
 unlabelled and pending Phase B (the Phase A callers loop again).
 
-### 2.3 Two-phase termination — the fixed-point argument
+### 2.3 Phase B termination — the fixed-point argument
 
-Phase B's inference is iterative but finite: the domain is the finite
-set of unlabelled node bindings in the part, and each iteration either
-(a) resolves at least one unlabelled binding to a single candidate, or
-(b) exits with `ErrUnknownLabel` (a binding no edge can constrain), or
-(c) exits with `ErrAmbiguousBinding` (a binding whose intersection has
-more than one candidate). The loop terminates in at most N iterations
-where N is the number of unlabelled node bindings in the part; each
-iteration reduces the pending set by one, or halts. The R0 capability
-scope's "at most one binding" invariant is discharged at R1: the R1
-capability scope admits N nodes and M edges, so the two-phase kernel
-sizes O(N + M) with a single fixed-point pass.
+Phase B's inference is iterative but finite. The pending set is the
+finite subset of unlabelled node bindings in the part; each pass either
+(a) commits at least one pending binding to a single candidate (any
+number of commits per pass, up to all of them), (b) exits with
+`ErrUnknownLabel` (a pending binding whose candidate set is empty), or
+(c) exits with `ErrAmbiguousBinding` (a pending binding whose candidate
+set has more than one element, or a zero-commit pass with pending
+bindings remaining — the cycle case, §4.3). Because path (a) strictly
+shrinks the pending set and paths (b)/(c) halt, the loop terminates in
+at most N passes where N is the initial pending-set size — the upper
+bound corresponds to the pathological case where each pass commits
+exactly one binding. The R0 capability scope's "at most one binding"
+invariant is discharged at R1: the R1 capability scope admits N nodes
+and M edges, so the kernel is O(N·(N + M)) in the worst case (each of
+up to N passes reads M edges to compute per-binding candidate sets).
 
 **Why not fold Phase A + Phase B into one recursive descent?** The
 recursive form couples the walk order to the pattern's textual order,
@@ -240,32 +253,44 @@ CALL. `Part.Distinct` / `Part.ReturnsAll` still route to
 
 ### 4.2 Step 3 (replaced) — Phase A: labelled-binding resolution
 
-Walk `Part.Bindings` linearly, partitioning into two piles:
+Phase A is a two-sweep walk over `Part.Bindings`. The split is
+mandatory, not stylistic: the edge sweep reads the node table the node
+sweep just committed (via `endpointLabels` on a `VarEndpoint`), so
+folding the two into a single interleaved pass would make an
+edge-before-its-endpoint-node ordering silently produce
+`ok == false` for a labelled endpoint that will resolve one iteration
+later — a false deferral to Phase B for a shape Phase A can already
+close. Two sweeps, in this order, keep the read strictly after the
+write.
 
-- **Labelled node bindings.** For each `NodeBinding` with non-empty
-  `Labels()`, take `Labels().Key()`, look up `schema.Schema.Nodes[key]`;
-  on miss, return `ErrUnknownLabel` (§5). On hit, record the resolved
-  key in the per-binding table (`resolvedNodeType map[string]NodeType`).
-- **Directed single-hop labelled edge bindings.** For each
-  `EdgeBinding` with `Directed() == true`, `Hops() == nil`, and
-  `len(Labels()) == 1`, form the candidate `EdgeKey`:
+**Phase A1 — labelled node bindings.** Walk `Part.Bindings` once. For
+each `NodeBinding` with non-empty `Labels()`, take `Labels().Key()`,
+look up `schema.Schema.Nodes[key]`; on miss, return `ErrUnknownLabel`
+(§5). On hit, record the resolved key in the per-binding table
+(`resolvedNodeType map[string]NodeType`). Unlabelled node bindings are
+left pending — the table has no entry for their variable until Phase B
+adds one. Non-`NodeBinding` bindings are skipped in A1.
+
+**Phase A2 — labelled directed single-hop edge bindings.** Walk
+`Part.Bindings` again. For each `EdgeBinding` with `Directed() ==
+true`, `Hops() == nil`, and `len(Labels()) == 1`, form the candidate
+`EdgeKey`:
   - Read `Source()` and `Target()` (both `Endpoint`) and derive their
     label sets via `endpointLabels`:
     - `VarEndpoint` with a labelled binding → the binding's canonical
-      key (from the Phase A node table just built).
+      key (from the Phase A1 node table).
     - `VarEndpoint` with an unlabelled binding → `ok == false`; the
-      edge is deferred to a post-Phase-B pass (see below).
-    - `InlineEndpoint` → the inline `Labels().Key()`. An empty
-      `LabelSetKey` (the fully anonymous `()` endpoint) means the
-      endpoint has no label constraint — for R1's directed-only,
-      single-type scope, this is an unresolved key that fails EdgeKey
-      lookup unless Phase B pins it. R1 treats an inline endpoint with
-      no labels the same as an unlabelled `VarEndpoint`: deferred to
-      the post-Phase-B pass, but the deferred pass fails with
-      `ErrUnknownLabel` because there is no binding to infer against.
-      (Rationale: an unlabelled inline endpoint has no name for Phase
-      B to resolve into. Labelled inline endpoints, e.g.
-      `-[:AUTHORED]->(:Post)`, are the intended R1 shape.)
+      edge is deferred to Phase C (§4.4).
+    - `InlineEndpoint` with non-empty `Labels()` → the inline
+      `Labels().Key()`. This is the intended R1 endpoint shape for a
+      labelled inline (e.g. `-[:AUTHORED]->(:Post)`).
+    - `InlineEndpoint` with empty `Labels()` (the fully anonymous
+      `()` endpoint) → `ok == false`; the edge is deferred to Phase C,
+      but Phase C fails with `ErrUnknownLabel` for the anonymous case
+      because the endpoint has no name Phase B could resolve into.
+      Rationale: an unlabelled inline endpoint carries no label
+      constraint and no binding — nothing in the pattern can commit
+      it to a schema node type.
   - With both endpoint keys and the single edge label key, form
     `schema.EdgeKey{Source, Label: Labels().Key(), Target}` and look
     up `schema.Schema.Edges[key]`; on miss, `ErrUnknownEdge` (§5). On
@@ -275,9 +300,17 @@ Walk `Part.Bindings` linearly, partitioning into two piles:
 - **Everything else in `Part.Bindings`** — `PathBinding`,
   `UnwindBinding`, `CallBinding`, undirected `EdgeBinding`
   (`Directed() == false`), variable-length `EdgeBinding` (`Hops() !=
-  nil`), multi-type `EdgeBinding` (`len(Labels()) > 1`), anonymous
-  edge with empty variable — routes to `ErrOutOfR0Scope` (§5) with a
-  fail-message specifying which construct.
+  nil`), multi-type `EdgeBinding` (`len(Labels()) > 1`), untyped
+  `EdgeBinding` (`len(Labels()) == 0`) — routes to `ErrOutOfR0Scope`
+  (§5) with a fail-message specifying which construct. Anonymous
+  edges (empty `Variable()`) whose predicate matches the R1 admission
+  criteria (directed, single-hop, single-type) are NOT rejected here:
+  Phase A forms their EdgeKey identically to a named edge (§7 lines
+  admitting anonymous edges). Anonymous edges cannot be projected as
+  a column (a `ReturnItem.Value` is a `RefProjection` whose `Ref.
+  Variable` is non-empty by parser invariant), so the projection walk
+  in §4.5 cannot reach one; the anonymous-edge rejection surface is
+  the projection walk, not Phase A admission.
 
 The order of iteration over `Part.Bindings` is the parser's
 first-appearance order (guaranteed by `internal/query/query.go:81-94`,
@@ -313,20 +346,21 @@ from the edges that touch it:
     unlabelled binding %q — no edge in the pattern reaches a
     compatible schema node type"). The fail-message names the binding.
   - `1` → bind `n` to the single candidate: update
-    `resolvedNodeType[n.Variable]` with the canonical key. Recompute
-    any pending EdgeKey whose deferred endpoint pointed at `n` (the
-    "post-Phase-B pass" §4.2 mentions), applying the same
-    `ErrUnknownEdge` on miss.
+    `resolvedNodeType[n.Variable]` with the canonical key. Any
+    Phase A2 edge whose endpoint pointed at `n` is now Phase C's
+    business (§4.4).
   - `>1` → `ErrAmbiguousBinding` (fail-message: "cannot uniquely
     infer type of unlabelled binding %q — candidate types: %s"). The
     fail-message names the binding and the candidate keys sorted
     ascending (for determinism).
 
-**Fixed-point pass.** Phase B iterates: each pass resolves any
-unlabelled binding whose intersection is a singleton, then re-runs.
-Termination in §2.3.
+**Fixed-point pass.** Phase B iterates. Each pass computes the
+candidate set for every pending binding against the current
+`resolvedNodeType` table; each singleton verdict commits its binding
+(a single pass may commit any number of pending bindings, including
+all of them). The pass then re-runs. Termination in §2.3.
 
-- **A pass that resolves zero bindings but has pending unresolved
+- **A pass that commits zero bindings but has pending unresolved
   ones** means the remaining bindings can only be resolved with each
   other's help — a cycle. R1's decision: return
   `ErrAmbiguousBinding` on the *first* pending binding (deterministic:
@@ -342,7 +376,36 @@ Termination in §2.3.
   than a distinct sentinel keeps R1's sentinel set closed; the
   fail-message disambiguates the sub-case.
 
-### 4.4 Step 4 (extended) — projection resolution over N bindings
+### 4.4 Step 3¾ (new) — Phase C: deferred edge closure
+
+After Phase B, every unlabelled node binding that could resolve now
+has an entry in `resolvedNodeType`. Phase C re-forms the EdgeKey for
+every edge Phase A2 deferred (edges whose `endpointLabels` call
+returned `ok == false` on one or both endpoints because a `VarEndpoint`
+named a still-unlabelled node). For each such edge:
+
+- Read `Source()` and `Target()` again via `endpointLabels` against
+  the now-committed `resolvedNodeType` table.
+- If either endpoint still returns `ok == false` — this can only
+  happen for an empty-labels `InlineEndpoint` (the anonymous `()`
+  case §4.2 flags), because every unlabelled `VarEndpoint` was either
+  bound by Phase B or already failed with `ErrUnknownLabel` /
+  `ErrAmbiguousBinding` — return `ErrUnknownLabel` on the edge's
+  variable (or, for an anonymous edge, on the endpoint's textual
+  position in the pattern; fail-message: "cannot infer type of
+  anonymous inline endpoint …").
+- With both endpoint keys committed, form
+  `schema.EdgeKey{Source, Label, Target}` and look up
+  `schema.Schema.Edges[key]`; on miss, `ErrUnknownEdge`. On hit,
+  record `resolvedEdgeType[e.Variable]` / `resolvedEdgeKey[e.Variable]`
+  (anonymous edges get no entry — nothing projects them, §4.5).
+
+Phase C is a single non-iterative pass over the Phase-A2 defer list:
+Phase B's fixed-point has already committed every node binding it
+could, so no further node-inference iteration would change any
+endpoint answer.
+
+### 4.5 Step 4 (extended) — projection resolution over N bindings
 
 Iterate `Part.Returns`; each `ReturnItem.Value` is still required to be
 a `RefProjection` at R1 (non-`RefProjection` items are R2's business
@@ -373,7 +436,7 @@ it via `ErrOutOfR0Scope`. A `ref.Variable` naming a binding not present
 in the part is impossible: the parser rejects unbound variables at
 build time (R0 §5 records this).
 
-### 4.5 Step 5 (extended) — parameter resolution over N bindings
+### 4.6 Step 5 (extended) — parameter resolution over N bindings
 
 Iterate `Query.Parameters`; each `Parameter` is still required to have
 exactly one `Use`, and that `Use` is still required to be a
@@ -391,7 +454,7 @@ Miss → `ErrUnknownProperty`. Hit → `ResolvedParameter{Name, Type:
 ResolvedProperty{Type, Nullable}}`. Behaviour and sentinel unchanged
 from R0; the schema-witness source widens to include edges.
 
-### 4.6 Step 6 (unchanged) — statement kind
+### 4.7 Step 6 (unchanged) — statement kind
 
 Copy `Query.StatementKind` into `ValidatedQuery.Statement`
 (R1 capability scope is read-only; the field is present for wire
@@ -592,9 +655,9 @@ Each fixture is one Cypher file; each has one paired
   formation happy path (both endpoints labelled `VarEndpoint`); the
   golden columns are `ResolvedNode(Person)`, `ResolvedEdge(EdgeKey{
   Person, AUTHORED, Post })`, `ResolvedNode(Post)`.
-- `edge_property_projection`: exercises §4.4's edge-property lookup
+- `edge_property_projection`: exercises §4.5's edge-property lookup
   (`ResolvedProperty{TIMESTAMP, Nullable=true}`).
-- `edge_property_parameter`: exercises §4.5's edge-parameter typing
+- `edge_property_parameter`: exercises §4.6's edge-parameter typing
   (`ResolvedParameter{Name: "when", Type:
   ResolvedProperty{TIMESTAMP, Nullable=true}}`).
 - `inline_endpoint_source` / `inline_endpoint_target`: exercises
@@ -631,6 +694,7 @@ var invalidFixtures = map[string]error{
     "unknown_edge_property.cypher":     ErrUnknownProperty,
     "ambiguous_unlabelled_binding.cypher": ErrAmbiguousBinding,
     "unlabelled_binding_no_edge.cypher": ErrUnknownLabel,
+    "empty_inline_endpoint.cypher":     ErrUnknownLabel,
     "undirected_edge.cypher":           ErrOutOfR0Scope,
     "var_length_edge.cypher":           ErrOutOfR0Scope,
     "multi_type_edge.cypher":           ErrOutOfR0Scope,
@@ -650,6 +714,12 @@ var invalidFixtures = map[string]error{
 - `unlabelled_binding_no_edge.cypher`: `MATCH (n) RETURN n` — no
   labels, no touching edges; Phase B's candidate set is empty →
   `ErrUnknownLabel` per §4.3.
+- `empty_inline_endpoint.cypher`: `MATCH (p:Person)-[r:AUTHORED]->()
+  RETURN r` — exercises Phase A2's empty-labels `InlineEndpoint`
+  branch (§4.2 lines admitting inline endpoints) and its Phase C
+  closure (§4.4): the anonymous target has no name for Phase B to
+  resolve into, so Phase C fails with `ErrUnknownLabel` naming the
+  endpoint's textual position.
 - `undirected_edge.cypher`: `MATCH (p:Person)-[r:AUTHORED]-(q:Post)
   RETURN r` — undirected; R3's business.
 - `var_length_edge.cypher`: `MATCH (p:Person)-[r:AUTHORED*1..3]->
@@ -743,7 +813,7 @@ R0's §6.6 invariants stand. R1 adds:
 | Undirected edge (`Directed() == false`)                | `ErrOutOfR0Scope`    | R3            |
 | Multi-type edge (`len(Labels()) > 1`)                  | `ErrOutOfR0Scope`    | R3            |
 | Variable-length edge (`Hops() != nil`)                 | `ErrOutOfR0Scope`    | R3            |
-| Untyped edge (`len(Labels()) == 0`)                    | `ErrOutOfR0Scope`    | R3            |
+| Untyped edge (`len(Labels()) == 0`)                    | `ErrOutOfR0Scope`    | R-later†      |
 | Path binding                                           | `ErrOutOfR0Scope`    | R5            |
 | Unwind binding                                         | `ErrOutOfR0Scope`    | R5 or later   |
 | Call binding                                           | `ErrOutOfR0Scope`    | R7            |
@@ -761,6 +831,18 @@ R0's §6.6 invariants stand. R1 adds:
 | Labelled node with no matching schema NodeType         | `ErrUnknownLabel`    | (R2 widens)   |
 | Unlabelled node with an empty candidate set from edges | `ErrUnknownLabel`    | —             |
 | Unlabelled node with a multi-candidate set             | `ErrAmbiguousBinding`| —             |
+
+† Untyped edges (`(a)-->(b)` with no `[:LABEL]`) are not explicitly
+named in ADR 0009's R3 line, which enumerates only "undirected
+two-orientation trial", "multi-type edges", and "var-length hop-range
+lookups". An untyped edge candidate set is `{k ∈ Schema.Edges |
+k.Source == …, k.Target == …}` — the resolver walks every schema edge
+whose endpoints match, with no label filter. That surface has the
+same "multi-candidate outcome, no unique EdgeKey" shape as multi-type
+edges and the same "resolver-side surface" character as undirected —
+R3 is the only stage plausibly close to it, but naming it R3 without
+an ADR citation would overspecify. Marked R-later; the stage that
+takes it up defends the placement in its own spec cycle.
 
 **Silently accepted (not routed anywhere):**
 
