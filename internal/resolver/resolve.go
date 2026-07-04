@@ -193,6 +193,8 @@ func endpointLabels(e query.Endpoint, resolved map[string]schema.NodeType) (grap
 		}
 		return ls.Key(), true
 	default:
+		// Unreachable: Endpoint is a sealed sum of VarEndpoint and
+		// InlineEndpoint (internal/query/query.go:939-941).
 		return "", false
 	}
 }
