@@ -1,0 +1,12 @@
+CREATE PROPERTY GRAPH TYPE SocialR0 AS {
+    (:Person {
+        id      :: INT NOT NULL,
+        name    :: STRING NOT NULL,
+        age     :: INT
+    }),
+    (:Post {
+        id      :: INT NOT NULL,
+        title   :: STRING NOT NULL
+    }),
+    (:Person) -[:AUTHORED]-> (:Post)
+}
