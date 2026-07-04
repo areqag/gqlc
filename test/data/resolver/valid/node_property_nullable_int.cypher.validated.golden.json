@@ -1,0 +1,14 @@
+{
+  "columns": [
+    {
+      "name": "p.age",
+      "type": {
+        "kind": "property",
+        "type": "INT",
+        "nullable": true
+      }
+    }
+  ],
+  "parameters": [],
+  "statement": "read"
+}

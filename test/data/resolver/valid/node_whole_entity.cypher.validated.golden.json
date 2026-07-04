@@ -1,0 +1,13 @@
+{
+  "columns": [
+    {
+      "name": "p",
+      "type": {
+        "kind": "node",
+        "labels": "Person"
+      }
+    }
+  ],
+  "parameters": [],
+  "statement": "read"
+}

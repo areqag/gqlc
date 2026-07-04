@@ -1,0 +1,7 @@
+{
+    "node_whole_entity.cypher": "social.gql",
+    "node_property_string.cypher": "social.gql",
+    "node_property_nullable_int.cypher": "social.gql",
+    "node_mixed_projection.cypher": "social.gql",
+    "node_property_with_parameter.cypher": "social.gql"
+}
