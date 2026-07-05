@@ -10,9 +10,11 @@
           "target": "Post"
         },
         "nullable": true
-      }
+      },
+      "groupingKey": false
     }
   ],
   "parameters": [],
-  "statement": "read"
+  "statement": "read",
+  "distinct": false
 }

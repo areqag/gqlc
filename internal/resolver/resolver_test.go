@@ -27,10 +27,6 @@ const fixtureDir = "../../test/data/resolver"
 var invalidFixtures = map[string]error{
 	"unknown_label.cypher":                                 ErrUnknownLabel,
 	"unknown_property.cypher":                              ErrUnknownProperty,
-	"with_clause.cypher":                                   ErrOutOfR0Scope,
-	"aggregate_projection.cypher":                          ErrOutOfR0Scope,
-	"return_distinct.cypher":                               ErrOutOfR0Scope,
-	"returns_all.cypher":                                   ErrOutOfR0Scope,
 	"unknown_edge.cypher":                                  ErrUnknownEdge,
 	"unknown_edge_property.cypher":                         ErrUnknownProperty,
 	"ambiguous_unlabelled_binding.cypher":                  ErrAmbiguousBinding,
@@ -51,7 +47,14 @@ var invalidFixtures = map[string]error{
 	"unknown_property_union_type_differs.cypher":           ErrUnknownProperty,
 	"untyped_edge.cypher":                                  ErrOutOfR0Scope,
 	"var_length_edge_property_projection.cypher":           ErrOutOfR0Scope,
-	"optional_match_with_clause.cypher":                    ErrOutOfR0Scope,
+	// R5 additions:
+	"union_column_count_mismatch.cypher":       ErrUnionColumnMismatch,
+	"union_column_name_mismatch.cypher":        ErrUnionColumnMismatch,
+	"union_column_type_mismatch.cypher":        ErrUnionColumnMismatch,
+	"union_column_nullability_mismatch.cypher": ErrUnionColumnMismatch,
+	"union_unknown_label_branch.cypher":        ErrUnknownLabel,
+	"part_binding_type_conflict.cypher":        ErrPartBindingTypeConflict,
+	"part_binding_type_conflict_edge.cypher":   ErrPartBindingTypeConflict,
 }
 
 type ResolverSuite struct {

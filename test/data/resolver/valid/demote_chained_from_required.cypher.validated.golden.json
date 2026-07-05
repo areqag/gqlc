@@ -6,7 +6,8 @@
         "kind": "node",
         "labels": "Person",
         "nullable": true
-      }
+      },
+      "groupingKey": false
     },
     {
       "name": "r1",
@@ -18,7 +19,8 @@
           "target": "Post"
         },
         "nullable": true
-      }
+      },
+      "groupingKey": false
     },
     {
       "name": "post",
@@ -26,7 +28,8 @@
         "kind": "node",
         "labels": "Post",
         "nullable": false
-      }
+      },
+      "groupingKey": false
     },
     {
       "name": "r2",
@@ -38,7 +41,8 @@
           "target": "Person"
         },
         "nullable": false
-      }
+      },
+      "groupingKey": false
     },
     {
       "name": "author",
@@ -46,9 +50,11 @@
         "kind": "node",
         "labels": "Person",
         "nullable": false
-      }
+      },
+      "groupingKey": false
     }
   ],
   "parameters": [],
-  "statement": "read"
+  "statement": "read",
+  "distinct": false
 }
