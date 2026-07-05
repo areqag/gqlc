@@ -1,0 +1,16 @@
+{
+  "columns": [
+    {
+      "name": "a",
+      "type": {
+        "kind": "node",
+        "labels": "Person",
+        "nullable": true
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "read",
+  "distinct": false
+}
