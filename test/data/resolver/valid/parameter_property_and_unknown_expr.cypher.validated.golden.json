@@ -1,0 +1,21 @@
+{
+  "columns": [
+    {
+      "name": "bumped",
+      "type": {
+        "kind": "unknown"
+      }
+    }
+  ],
+  "parameters": [
+    {
+      "name": "x",
+      "type": {
+        "kind": "property",
+        "type": "INT",
+        "nullable": true
+      }
+    }
+  ],
+  "statement": "read"
+}

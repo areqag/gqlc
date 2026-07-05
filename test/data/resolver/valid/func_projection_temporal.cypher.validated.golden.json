@@ -1,0 +1,13 @@
+{
+  "columns": [
+    {
+      "name": "d",
+      "type": {
+        "kind": "temporal",
+        "temporal": "date"
+      }
+    }
+  ],
+  "parameters": [],
+  "statement": "read"
+}

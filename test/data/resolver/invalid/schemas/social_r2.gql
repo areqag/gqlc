@@ -1,0 +1,16 @@
+CREATE PROPERTY GRAPH TYPE SocialR2 AS {
+    (:Person {
+        id       :: INT NOT NULL,
+        name     :: STRING NOT NULL,
+        age      :: INT,
+        nickname :: STRING,
+        score    :: FLOAT NOT NULL
+    }),
+    (:Post {
+        id       :: INT NOT NULL,
+        title    :: STRING NOT NULL,
+        body     :: STRING
+    }),
+    (:Person) -[:AUTHORED { publishedAt :: TIMESTAMP, views :: INT NOT NULL }]-> (:Post),
+    (:Person) -[:LIKES]-> (:Post)
+}

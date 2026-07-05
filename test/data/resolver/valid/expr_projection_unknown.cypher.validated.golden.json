@@ -1,0 +1,12 @@
+{
+  "columns": [
+    {
+      "name": "bumped",
+      "type": {
+        "kind": "unknown"
+      }
+    }
+  ],
+  "parameters": [],
+  "statement": "read"
+}

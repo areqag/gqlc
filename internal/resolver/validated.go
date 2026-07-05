@@ -26,9 +26,9 @@ type Column struct {
 }
 
 // ResolvedParameter is one query parameter in query-wide first-appearance
-// order: its name and its resolved type. R0's capability scope guarantees
-// exactly one Use per parameter (a PropertyUse on a node inline map), so no
-// unification across uses runs at R0 (R2's business).
+// order: its name and its resolved type. R2 unifies the type across the
+// parameter's Uses per §4.6/§4.8 of the R2 spec; a conflict short-circuits
+// with ErrParameterTypeConflict.
 type ResolvedParameter struct {
 	Name string       `json:"name"`
 	Type ResolvedType `json:"type"`
@@ -65,10 +65,10 @@ func (k StatementKind) MarshalJSON() ([]byte, error) {
 
 // ResolvedType is the sealed sum of resolved types. Each variant carries a
 // String() wire tag and a MarshalJSON that emits a tagged-union object with a
-// "kind" discriminator, so the golden encoding is stable and readable. The R0
-// resolver produces only ResolvedNode (whole-entity projections) and
-// ResolvedProperty (property projections and inline-map parameter uses);
-// later stages add variants (ResolvedEdge at R1, ResolvedList at R2/R3, etc.).
+// "kind" discriminator, so the golden encoding is stable and readable. R0
+// contributes ResolvedNode and ResolvedProperty; R1 adds ResolvedEdge; R2
+// adds ResolvedScalar, ResolvedTemporal, ResolvedList, and ResolvedUnknown
+// (§3 of the R2 spec).
 type ResolvedType interface {
 	String() string
 	isResolvedType()
@@ -141,3 +141,174 @@ func (e ResolvedEdge) MarshalJSON() ([]byte, error) {
 }
 
 func (ResolvedEdge) isResolvedType() {}
+
+// ResolvedScalar carries a parser-coarse scalar kind: an openCypher literal
+// or an integer clause slot (SKIP / LIMIT). Distinct from ResolvedProperty,
+// which carries a bit-width family from the schema (ADR 0002). Introduced at
+// R2 (§3.1).
+type ResolvedScalar struct {
+	Kind Scalar `json:"scalar"`
+}
+
+// Scalar is the closed enum of parser-coarse scalar kinds. Mirrors
+// query.Type's scalar sub-sum (bool, int, float, string, null, map). The int
+// clause-slot witness (ClauseSlotUse -> ScalarInt) is a producer, not a new
+// variant.
+type Scalar int
+
+const (
+	// ScalarBool is the openCypher boolean literal / predicate result.
+	ScalarBool Scalar = iota
+	// ScalarInt is an integer literal or a SKIP/LIMIT clause slot.
+	ScalarInt
+	// ScalarFloat is a floating-point literal.
+	ScalarFloat
+	// ScalarString is a string literal.
+	ScalarString
+	// ScalarNull is the openCypher NULL literal.
+	ScalarNull
+	// ScalarMap is a map literal.
+	ScalarMap
+)
+
+// String is the wire tag ("bool" / "int" / "float" / "string" / "null" /
+// "map"). Single source the JSON encoding derives from.
+func (s Scalar) String() string {
+	switch s {
+	case ScalarInt:
+		return "int"
+	case ScalarFloat:
+		return "float"
+	case ScalarString:
+		return "string"
+	case ScalarNull:
+		return "null"
+	case ScalarMap:
+		return "map"
+	default:
+		return "bool"
+	}
+}
+
+// MarshalJSON renders a Scalar as its wire string.
+func (s Scalar) MarshalJSON() ([]byte, error) { return json.Marshal(s.String()) }
+
+// String is the wire tag "scalar".
+func (ResolvedScalar) String() string { return "scalar" }
+
+// MarshalJSON emits a tagged-union object with a "kind" discriminator plus the
+// scalar kind.
+func (r ResolvedScalar) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind   string `json:"kind"`
+		Scalar Scalar `json:"scalar"`
+	}{Kind: r.String(), Scalar: r.Kind})
+}
+
+func (ResolvedScalar) isResolvedType() {}
+
+// ResolvedTemporal carries an openCypher temporal kind — the full temporal
+// set (date, time, localtime, datetime, localdatetime, duration), distinct
+// from ResolvedProperty's DATE / TIMESTAMP bit-width families (ADR 0002).
+// R2 draws the storage-vs-expression line (§3.2).
+type ResolvedTemporal struct {
+	Kind Temporal `json:"temporal"`
+}
+
+// Temporal is the closed enum of openCypher temporals.
+type Temporal int
+
+const (
+	// TemporalDate is the openCypher DATE.
+	TemporalDate Temporal = iota
+	// TemporalTime is the openCypher TIME (zoned).
+	TemporalTime
+	// TemporalLocalTime is the openCypher LOCAL TIME.
+	TemporalLocalTime
+	// TemporalDateTime is the openCypher DATETIME (zoned).
+	TemporalDateTime
+	// TemporalLocalDateTime is the openCypher LOCAL DATETIME.
+	TemporalLocalDateTime
+	// TemporalDuration is the openCypher DURATION.
+	TemporalDuration
+)
+
+// String is the wire tag ("date" / "time" / "localtime" / "datetime" /
+// "localdatetime" / "duration"). Single source the JSON encoding derives
+// from.
+func (t Temporal) String() string {
+	switch t {
+	case TemporalTime:
+		return "time"
+	case TemporalLocalTime:
+		return "localtime"
+	case TemporalDateTime:
+		return "datetime"
+	case TemporalLocalDateTime:
+		return "localdatetime"
+	case TemporalDuration:
+		return "duration"
+	default:
+		return "date"
+	}
+}
+
+// MarshalJSON renders a Temporal as its wire string.
+func (t Temporal) MarshalJSON() ([]byte, error) { return json.Marshal(t.String()) }
+
+// String is the wire tag "temporal".
+func (ResolvedTemporal) String() string { return "temporal" }
+
+// MarshalJSON emits a tagged-union object with a "kind" discriminator plus the
+// temporal kind.
+func (r ResolvedTemporal) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind     string   `json:"kind"`
+		Temporal Temporal `json:"temporal"`
+	}{Kind: r.String(), Temporal: r.Kind})
+}
+
+func (ResolvedTemporal) isResolvedType() {}
+
+// ResolvedList is a list of elements. Element is the recursive resolved type
+// of the list's element position. Introduced at R2 (§3.3); R3 widens the
+// element vocabulary when the schema gains list-typed columns.
+type ResolvedList struct {
+	Element ResolvedType `json:"element"`
+}
+
+// String is the wire tag "list".
+func (ResolvedList) String() string { return "list" }
+
+// MarshalJSON emits a tagged-union object with a "kind" discriminator plus
+// the element type (itself tagged-union).
+func (r ResolvedList) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind    string       `json:"kind"`
+		Element ResolvedType `json:"element"`
+	}{Kind: r.String(), Element: r.Element})
+}
+
+func (ResolvedList) isResolvedType() {}
+
+// ResolvedUnknown is the resolver's honest posture when the parser was
+// already TypeUnknown and no schema witness commits: a rich expression whose
+// result type the parser could not compute (property-participating
+// arithmetic, NULL propagation), a non-aggregate function call's result
+// (function identity below the type-interface boundary, ADR 0005), a list
+// literal whose element type the parser did not commit. Introduced at R2
+// (§3.4).
+type ResolvedUnknown struct{}
+
+// String is the wire tag "unknown".
+func (ResolvedUnknown) String() string { return "unknown" }
+
+// MarshalJSON emits a tagged-union object with a "kind" discriminator; no
+// extra fields.
+func (r ResolvedUnknown) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind string `json:"kind"`
+	}{Kind: r.String()})
+}
+
+func (ResolvedUnknown) isResolvedType() {}
