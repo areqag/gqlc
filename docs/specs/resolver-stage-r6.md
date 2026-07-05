@@ -628,10 +628,14 @@ EdgeBinding, carriedResolvedTypes map[string]ResolvedType) error`.
 Algorithm:
 
 1. For each variable name `v` in `e.Variables()`:
-   - If `v == ""` (anonymous binding — Stage 12 §1.3 pinned by
-     parser_test.go line 1741 for `CREATE ()`): skip. Anonymous
-     bindings are legitimately anonymous; nothing to verify by
-     name.
+   - If `v == ""` (anonymous edge — Stage 12 §1.3; the empty
+     string enters `CreateEffect.Variables` from an anonymous
+     edge binding at `internal/query/cypher/listener.go:349-350`
+     ("A named binding contributes its variable; an anonymous edge
+     contributes an empty string"). An anonymous node contributes
+     no binding at all, so does not fire this arm.): skip.
+     Anonymous bindings are legitimately anonymous; nothing to
+     verify by name.
    - Else, verify `v` is present in `nodeTypes` OR `edgeBindings`
      of the current Part. If it is not, that is a resolver-internal
      invariant breach (Phase A1/A2 must have committed every named
@@ -737,7 +741,10 @@ map[string]query.EdgeBinding, carriedResolvedTypes map[string]
 ResolvedType, s schema.Schema) error`.
 
 Algorithm — resolve `e.Target()` (a `Ref{Variable, Property}` — both
-non-empty per the parser's smart constructor `query.go:1815-1818`):
+non-empty; the constructor `query.go:1815-1818` enforces non-empty
+`Variable`, and non-empty `Property` is grammar-guaranteed by the
+parser's `propertyExpressionRef` at `internal/query/cypher/shape.go:
+456-469` (empty lookup rejected at build time). §8 pins both.):
 
 1. Let `v := e.Target().Variable`, `p := e.Target().Property`.
 2. If `v` is in `nodeTypes`:
@@ -1115,6 +1122,23 @@ case query.ExprInProjection, query.ExprInPredicate,
 The `default` arm at `resolve.go:713-715` stays (defensive tripwire
 for a future `ExprPosition` variant that lands under ADR 0008's
 additive protocol without an R6 refresh).
+
+**Acknowledgment — enclosing-type panic surface.** The consolidated
+arm calls `resolveType(uu.EnclosingType())` on the parser-supplied
+enclosing `graph.Type`. Under today's parser mining, the enclosing
+type of an `ExprInSetValue` Use is always a scalar / map / list /
+`TypeUnknown` (Stage 12 §1.5 / §1.10 — SET RHS is a value-tree, and
+per ADR 0005 the value-tree lives below the type-interface
+boundary). `TypeNode` / `TypeEdge` / `TypePath` are NOT emitted as
+the enclosing type of a SET-RHS ExprUse today; the same holds for
+`ExprInDeleteTarget` (always `TypeUnknown`, per Stage 12 §1.4). The
+same latent hazard already exists at R5 for `ExprInProjection` and
+`ExprInPredicate` — a resolver-side entity-kind widening in the
+parser could reach either arm. R6 does NOT add a defensive filter
+in code (see the R5 arm at `resolve.go:703-708` which does not
+filter either); the hazard is called out here so that if a future
+parser stage widens the enclosing-type surface, the consolidated
+arm gets a filter alongside its R5 twin.
 
 **Judgment call — `TypeUnknown` for `ExprInDeleteTarget` is honest.**
 The Use records `ExprUse{TypeUnknown, ExprInDeleteTarget}` because
@@ -2159,7 +2183,7 @@ citations below name the file:line the claim rests on.
   `docs/adr/0008-query-model-freeze-resolver-api.md:110-142`.
   §1 and §2.1 respect.
 - **ADR 0009 R6 line** —
-  `docs/adr/0009-resolver-test-first-staged-build.md:133-135`.
+  `docs/adr/0009-resolver-test-first-staged-build.md:132-136`.
 - **ADR 0009 Test strategy — resolver output for codegen** —
   `docs/adr/0009-resolver-test-first-staged-build.md:59-97`.
   §3.5 §7.1.1 read.
