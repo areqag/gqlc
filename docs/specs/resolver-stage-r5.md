@@ -406,24 +406,33 @@ through `exportedResolvedTypes` (§4.2.2) — that carried scope
 `Query.Query` source of truth if it needs it; the resolver does not
 surface intermediate-Part grouping decisions.
 
-### 3.3 R0–R4 golden rebaseline plan — one field added
+### 3.3 R0–R4 golden rebaseline plan — two fields added
 
-**Every existing R0–R4 golden rebaselines** on the addition of the
-`"distinct": false` field to `ValidatedQuery`. This is a shape change
-to the provisional-through-R7 shape; the R5 code cycle regenerates them
-with `-update` at the same commit that introduces the field. The
-regenerated JSON differs from the R4 version only by the added
-`"distinct": false` at the top level; no wire-tag renames, no field
-reorderings, no discriminator changes.
+**Every existing R0–R4 golden rebaselines** on the addition of two
+fields: `"distinct": false` at the top level of `ValidatedQuery`
+(per this section) and `"groupingKey": false` on every `Column` (per
+§3.2.1). Both are shape changes to the provisional-through-R7 shape;
+the R5 code cycle regenerates goldens with `-update` at the same
+commit that introduces the fields. The regenerated JSON differs from
+the R4 version only by these two added lines per golden (one
+`"distinct"` at top level plus one `"groupingKey"` per column); no
+wire-tag renames, no field reorderings, no discriminator changes.
 
 The affected fixtures are **every** R0–R4 valid golden — identifiable
 by `ls test/data/resolver/valid/*.validated.golden.json`. The
-rebaseline is universal: every top-level ValidatedQuery has a
-`Distinct` axis. Fixtures with `Part.Distinct == true` or a
-UNION-DISTINCT combinator do not exist at R4 (R4 rejects both), so at
-the rebaseline every existing golden's `Distinct` is `false`. The
-first golden to carry `"distinct": true` is a new R5 fixture (§6.3
-`distinct_projection.cypher` and `union_matched_columns.cypher`).
+rebaseline is universal along both axes. Every top-level
+ValidatedQuery has a `Distinct` axis; fixtures with
+`Part.Distinct == true` or a UNION-DISTINCT combinator do not exist at
+R4 (R4 rejects both), so at the rebaseline every existing golden's
+`Distinct` is `false`. Every `Column` has a `GroupingKey` axis; no
+R0–R4 valid fixture contains an `AggregateProjection` (R4's
+`AggregateProjection` handler is scoped-out), so at the rebaseline
+every column's `GroupingKey` is `false`. The first golden to carry
+`"distinct": true` is a new R5 fixture (§6.3
+`distinct_projection.cypher` and `union_matched_columns.cypher`); the
+earliest §6.3 fixture whose golden carries at least one
+`"groupingKey": true` column is `aggregate_with_grouping.cypher`
+(`RETURN a.name, count(*) AS n` — `Columns[0].GroupingKey == true`).
 
 **Explicit rebaseline enumeration** (from `ls
 test/data/resolver/valid/*.validated.golden.json | sed 's|.*/||;
@@ -1085,7 +1094,7 @@ computeGroupingKeys(part query.Part) []GroupingKey =
         case RefProjection, LiteralProjection, FuncProjection:
             keys = append(keys, GroupingKeyFromRef(item))
         case ExprProjection:
-            skip                    // §4.5.3 over-group fallback:
+            skip                    // §4.5.3 uniform-exclude posture:
                                     // ExprProjection is ALWAYS treated
                                     // as an aggregate-residual candidate
                                     // (never a grouping key) at R5,
@@ -1099,7 +1108,7 @@ keys.** The parser's Stage-6 residual classifier `classifyRichExpression`
 {refs, resultType}` for any expression that is not a bare atom / literal
 / function call / aggregate call; the aggregate structure of a nested
 aggregate (`count(n) + 1`) is dropped at construction. The parser test
-`"aggregate call in arithmetic"` at parser_test.go:1320-1324 pins this
+`"count in arithmetic"` at parser_test.go:1320-1324 pins this
 concretely: `RETURN count(n) + 1` produces
 `ExprProjection{[Ref{n}], TypeInt}` — refs and result type only, no
 aggregate visibility. Because a resolver cannot distinguish
@@ -1124,7 +1133,7 @@ exactly one `distinct` line per golden plus one `groupingKey` line per
 column, and nothing else. Any golden whose diff shows additional
 changes is a bug in the R5 implementation.
 
-#### 4.5.3 `ExprProjection` residuals with nested aggregates — the R5 over-group posture
+#### 4.5.3 `ExprProjection` residuals with nested aggregates — the R5 uniform-exclude posture
 
 Per parser aggregate-kind-rich-exprs §1.3 and gqlc-gyw's notes: an
 `ExprProjection` whose expression contains a nested aggregate
@@ -1141,7 +1150,7 @@ expression that is not a bare atom / scalar literal / function call /
 aggregate call. There is no branch that inspects the sub-tree for a
 nested aggregate call; the whole rich expression is collapsed to
 `ExprProjection{refs, resultType}`. Direct source witness — parser test
-`"aggregate call in arithmetic"` (`parser_test.go:1320-1324`):
+`"count in arithmetic"` (`parser_test.go:1320-1324`):
 
 ```go
 src: "MATCH (n)\nRETURN count(n) + 1",
@@ -1170,7 +1179,7 @@ change** that emits either an explicit `AggregateProjection` for
 nested-aggregate residuals or an additive `ContainsAggregate` bit
 (Shape B). Neither exists at R5 freeze; both are follow-up beads.
 
-**§4.5.3.2 The R5 posture: uniform over-group for every
+**§4.5.3.2 The R5 posture: uniform-exclude for every
 `ExprProjection` residual.**
 
 R5 uniformly treats every `ExprProjection` as a non-grouping-key
@@ -1180,8 +1189,8 @@ underlying expression contained a nested aggregate. The
 every `ExprProjection` item — no re-parse mechanic, no alias-based
 branching, no P1/P2 mechanic dependency.
 
-**Preserved-vs-violated split for the R5 posture.** The uniform
-over-group posture has a clean split of guarantees:
+**Preserved-vs-violated split for the R5 posture.** The
+uniform-exclude posture has a clean split of guarantees:
 
 - **PRESERVED — monotonicity of the grouping-decision lattice element.**
   The grouping-decision element is the set of columns marked
@@ -1203,13 +1212,17 @@ over-group posture has a clean split of guarantees:
   Fewer output rows than openCypher semantics dictate.
   This is a semantically observable error, not just a coarser plan.
 
-Note the reversal versus round 1: the R5 posture UNDER-groups the
-key set (fewer keys than openCypher), not over-groups. The
-"grouping-decision lattice" naming holds — the resolver's key-set
-element is a strict subset of the correct one — but the direction of
-error at the result-set level flips, because the failure now bites the
-non-aggregate residual (excluded when it should be a key), not the
-aggregate residual (correctly excluded).
+Note the reversal versus round 1: at the result-set level the R5
+posture UNDER-groups (fewer keys than openCypher, so rows collapse
+that openCypher would keep separate); round 1's spec described this
+as "over-group", inverting the sign. The grouping-decision lattice
+naming still holds — the resolver's key-set element is a strict
+subset of the correct one — but at the result-set level the error
+bites the non-aggregate residual (excluded when it should be a key),
+not the aggregate residual (correctly excluded). This spec uses
+"uniform-exclude" everywhere for the resolver's action ("exclude
+every ExprProjection from the key set"), and "under-group" for the
+result-set-level effect; "over-group" is not used.
 
 **Blast radius of the R5 posture.** The residual-under-group case
 fires exactly when ALL of the following hold for a Part K's `Returns`:
@@ -1307,7 +1320,7 @@ that `classifyRichExpression` dropped at classification.
 
 **R5 disposition.**
 
-- **Uniformly over-group at R5** for every `ExprProjection` residual
+- **Uniformly exclude at R5** for every `ExprProjection` residual
   (per §4.5.2 and §4.5.3.2). This is the R5 code-cycle mechanic:
   simple, deterministic, no re-parse. Preserved-vs-violated split as
   §4.5.3.2 pins.
@@ -1325,7 +1338,7 @@ that `classifyRichExpression` dropped at classification.
   R5 grouping-key refinement PR.
 
 - **Do not contort R5 around the gap.** R5 ships as scoped with the
-  uniform-over-group posture; the follow-up bead is filed alongside
+  uniform-exclude posture; the follow-up bead is filed alongside
   the R5 code-cycle close-out (per the R4 §7.5.5 template).
 
 **§4.5.3.4 Why R5 does not attempt a resolver-side re-parse.**
@@ -1349,7 +1362,7 @@ independent reasons:
   `typing.go:857-877` unconditionally returns
   `NewExprProjection(refs, t)`. The `AggregateFunc` sub-tree is not
   preserved; the walker step of any P1/P2 mechanic has nothing to
-  find. Parser test `"aggregate call in arithmetic"` at
+  find. Parser test `"count in arithmetic"` at
   `parser_test.go:1320-1324` pins the shape: `RETURN count(n) + 1` →
   `ExprProjection{[Ref{n}], TypeInt}`, aggregate kind not recorded.
 
@@ -1367,7 +1380,7 @@ skips every `ExprProjection` uniformly.
 
 The R5 fixture set (§6.3) deliberately does not include a Part that
 mixes `AggregateProjection` with `ExprProjection`. Under the
-uniform-over-group posture, such a fixture would encode the R5 gap
+uniform-exclude posture, such a fixture would encode the R5 gap
 directly (non-aggregate `ExprProjection` gets `GroupingKey == false`
 when openCypher demands `true`). Two consequences:
 
@@ -1380,9 +1393,10 @@ when openCypher demands `true`). Two consequences:
   documents the R5 posture; it does not test discrimination, because
   no discrimination is implemented at R5.
 
-- A discriminating fixture cannot exist at R5. Under uniform
-  over-group, every fixture that would discriminate residual kinds
-  gets the same answer regardless of underlying residual structure.
+- A discriminating fixture cannot exist at R5. Under the
+  uniform-exclude posture, every fixture that would discriminate
+  residual kinds gets the same answer regardless of underlying
+  residual structure.
   The discriminating fixture arrives on the follow-up bead's widening
   PR, alongside the parser-side Shape B change.
 
@@ -1397,7 +1411,7 @@ set):
   (`Columns[0].GroupingKey == true`); the `AggregateProjection` for
   `count(n)` is skipped (`Columns[1].GroupingKey == false`). At R5
   today, this fixture would fail (both would be `false` under the
-  uniform-over-group posture, WRONG for `Columns[0]`) — which is why
+  uniform-exclude posture, WRONG for `Columns[0]`) — which is why
   it is excluded from §6.3.
 
 #### 4.5.4 Carried-alias projection — the `RefProjection` bypass
@@ -2120,7 +2134,7 @@ escape hatch." R5 as this spec scopes it:
   against the frozen model — `classifyRichExpression` (typing.go:
   857-877) drops aggregate structure at classification, so no
   resolver-side re-parse recovers it, regardless of P1/P2/text-span
-  mechanic. R5 ships with uniform over-group of every `ExprProjection`
+  mechanic. R5 ships with uniform-exclude of every `ExprProjection`
   residual (§4.5.2, §4.5.3.2). One follow-up bead (§7.1.5) files the
   parser-side discrimination bit (Shape B — `ExprProjection.
   ContainsAggregate`, populated by the parser during the same walk
@@ -2232,7 +2246,7 @@ recommendation, not a menu — per the R4 §7.5.5 precedent.
 code-cycle close-out, on the model of R4 §7.5.5 beads 1+2.**
 
 Rationale:
-- The uniform over-group posture is deterministic and simple:
+- The uniform-exclude posture is deterministic and simple:
   every `ExprProjection` residual gets `GroupingKey == false`, no
   re-parse, no alias branching, no unbound-ref problem.
 - The failure mode is bounded and characterisable: any Part whose
@@ -2324,7 +2338,7 @@ citations below name the file:line the claim rests on.
   `NewExprProjection(refs, t)` for every non-atom expression; there
   is no branch that inspects the sub-tree for a nested aggregate).
   §4.5.3.1 and §4.5.3.4 rely on this fact.
-- **Parser test `"aggregate call in arithmetic"` pins the classifier
+- **Parser test `"count in arithmetic"` pins the classifier
   output for a nested-aggregate residual** —
   `internal/query/cypher/parser_test.go:1320-1324`: `RETURN count(n)
   + 1` → `ExprProjection{[Ref{n}], TypeInt}`, aggregate function
@@ -2446,7 +2460,7 @@ of scope of this document. The spec is done when:
    compatibility rule (§4.3), the `ReturnsAll` expansion (§4.4), the
    `AggregateProjection` handler with grouping-key discovery
    (§4.5.1-§4.5.2), the honest R5 posture on `ExprProjection`
-   residuals — uniform over-group with parser-side discrimination
+   residuals — uniform-exclude with parser-side discrimination
    deferred to a follow-up bead (§4.5.3), the cross-WITH nullability
    extension (§4.6), and the Distinct fold (§4.7).
 4. §5 records the one new sentinel `ErrUnionColumnMismatch`, revises
