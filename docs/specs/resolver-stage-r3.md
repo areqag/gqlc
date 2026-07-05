@@ -247,9 +247,11 @@ the zero-candidate case fails `ErrUnknownEdge`, the ambiguous-single-
 type-undirected case fails `ErrAmbiguousEdgeOrientation` — see §4.6's
 verdict table).
 
-**Ordering.** `EdgeKeys` is emitted in **§4.4's canonical order**:
-lexicographic ascending on `(Label, Source, Target)`. Determinism is a
-golden-file precondition; schema-map iteration order is not.
+**Ordering.** `EdgeKeys` is emitted in **§4.4's canonical order**: outer
+loop iterates `e.Labels()` in first-appearance order (parser Stage 8's
+LabelSet slice); inner loop fixes orientation (`(src,tgt)` before
+`(tgt,src)` when both apply). Determinism is a golden-file
+precondition; schema-map iteration order is not.
 
 **Rejected alternative: always use a list.** R1's `ResolvedEdge{EdgeKey}`
 would collapse to `ResolvedEdge{EdgeKeys: []EdgeKey{one}}` — every R1
@@ -284,8 +286,8 @@ element via the schema witness. Property projection on a var-length
 edge binding (`r.publishedAt` where `r` is var-length) is *not*
 admitted at R3 (§7 out-of-scope table); it routes to
 `ErrOutOfR0Scope` because the semantics of "one property from a list
-of edges" is a list-element operation (R5 grouping / UNWIND) rather
-than a schema witness.
+of edges" is a list-element operation (R5 grouping / UNWIND in R5 or
+later) rather than a schema witness.
 
 ### 3.4 `ResolvedProperty` — extended reuse
 
@@ -392,11 +394,12 @@ Signature and semantics:
 // edgeCandidates enumerates the closed candidate set for one edge
 // binding whose endpoint keys are already committed. It iterates the
 // binding's Labels() in first-appearance order (parser guarantees this
-// via LabelSet's slice representation, LabelSet.All()); for each label
-// it emits one candidate EdgeKey per orientation admitted by the
-// binding's Directed() marker (one for a directed edge, two for an
-// undirected edge). Each candidate is retained iff the schema declares
-// it (present in s.Edges). The return slice is deterministically
+// via LabelSet's slice-backed representation — iterate with a plain
+// `for _, L := range e.Labels()`); for each label it emits one
+// candidate EdgeKey per orientation admitted by the binding's
+// Directed() marker (one for a directed edge, two for an undirected
+// edge). Each candidate is retained iff the schema declares it
+// (present in s.Edges). The return slice is deterministically
 // ordered: outer loop label-first-appearance, inner loop orientation
 // (source->target before target->source when both apply). Duplicate
 // EdgeKeys are impossible by construction — the same (label,
@@ -416,7 +419,7 @@ for each label L in e.Labels():        # first-appearance order
     if !e.Directed():
         tryOrientations = [(src, tgt), (tgt, src)]
     for each (S, T) in tryOrientations:
-        k := schema.EdgeKey{Source: S, Label: L.Key(), Target: T}
+        k := schema.EdgeKey{Source: S, Label: graph.LabelSet{L}.Key(), Target: T}
         if _, ok := s.Edges[k]; ok:
             append k to result
 ```
@@ -434,8 +437,8 @@ for each label L in e.Labels():        # first-appearance order
 generated at most once because the outer loop iterates each label once
 and the inner loop attempts each orientation once per label.
 
-**Determinism.** `LabelSet.All()` iterates in first-appearance order
-(the LabelSet's underlying slice, populated in textual order per
+**Determinism.** Ranging `e.Labels()` iterates in first-appearance
+order (the underlying `[]string` slice, populated in textual order per
 `internal/graph/labelset.go` and parser Stage 8). The orientation
 inner loop is fixed at `(src, tgt)` then `(tgt, src)`. Both orders
 are stable across runs; the return slice is deterministic.
@@ -468,7 +471,9 @@ and a touching edge `e`:
   union of {source-side keys} and {target-side keys} against the
   edge's other side, which is `n` itself — meaning the label-side
   cross-product is trivially `{k.Source, k.Target} ∈ s.Edges` with
-  `k.Label ∈ e.Labels().Key()`. R3 admits self-loops iff the schema
+  `k.Label ∈ { graph.LabelSet{L}.Key() | L ∈ e.Labels() }` (the set
+  of single-label keys derived from the edge binding's labels).
+  R3 admits self-loops iff the schema
   has a self-loop edge type; the candidate collection is uniform
   with the non-self-loop case (see the self-loop fixture in §6.3).
 - Read the other endpoint's key via `endpointLabels`; skip the edge
@@ -501,6 +506,13 @@ on the other side of BOTH an A edge AND a B edge") would model the
 author's edge annotation as a conjunction, which contradicts
 Cypher semantics. Undirected × multi-type further widens the
 per-edge union across the two-orientation trial — same rationale.
+
+Phase B commits a node label from an orientation union before
+Phase C decides the edge's verdict; when Phase C later returns
+`ErrAmbiguousEdgeOrientation` on that edge (§4.6 case C), the
+node commit is discarded with the query — the phase ordering
+(§2.1) makes this safe: no persistent state escapes a failed
+resolve.
 
 ### 4.6 Phase C (revised) — verdict on the closed candidate set
 
@@ -609,11 +621,12 @@ For a `RefProjection` whose `Ref.Variable` names an edge binding:
     uniform-property rule.
   - If the binding is variable-length: return `ErrOutOfR0Scope`
     with fail-message `"property projection on variable-length
-    edge binding: reach list elements via UNWIND — R5"` (§7's
-    scope statement records this). Rationale: a var-length edge
-    projects as `list<edge>`, and `r.publishedAt` on a list has no
-    scalar type — the semantics requires list-element access
-    (`[i]`, UNWIND) that R5's grouping / carry-forward work owns.
+    edge binding: reach list elements via list-element access
+    (UNWIND in R5 or later)"` (§7's scope statement records this).
+    Rationale: a var-length edge projects as `list<edge>`, and
+    `r.publishedAt` on a list has no scalar type — the semantics
+    requires list-element access (`[i]`, UNWIND) that R5's
+    grouping / carry-forward work owns.
 
 ### 4.8 Property lookup on a multi-candidate edge
 
@@ -769,8 +782,8 @@ does not confuse two similar names.
   retirements (undirected, multi-type, and var-length edges no
   longer route here — they are R3 valid inputs) and the R3 addition:
   - `"property projection on variable-length edge binding: reach
-    list elements via UNWIND — R5"` — the property-on-list-of-edges
-    case (§4.7).
+    list elements via list-element access (UNWIND in R5 or later)"`
+    — the property-on-list-of-edges case (§4.7).
   Untyped edges (`len(e.Labels()) == 0`) still route here at R3
   (R-later takes them up; §4.2's admissibility gate).
 
@@ -868,8 +881,8 @@ CREATE PROPERTY GRAPH TYPE SocialR3 AS {
         title    :: STRING NOT NULL,
         body     :: STRING
     }),
-    (:Person) -[:AUTHORED { publishedAt :: TIMESTAMP, views :: INT NOT NULL }]-> (:Post),
-    (:Person) -[:LIKES]-> (:Post),
+    (:Person) -[:AUTHORED { publishedAt :: TIMESTAMP, views :: INT NOT NULL, likedAt :: TIMESTAMP }]-> (:Post),
+    (:Person) -[:LIKES { likedAt :: TIMESTAMP }]-> (:Post),
     (:Post)   -[:AUTHORED { authoredBy :: STRING NOT NULL }]-> (:Person),
     (:Person) -[:KNOWS { since :: DATE }]-> (:Person)
 }
@@ -889,7 +902,7 @@ file; each has one paired `.validated.golden.json` regenerated by
 |---|---|---|
 | `undirected_single_match.cypher` | `MATCH (p:Person)-[r:LIKES]-(post:Post) RETURN r` | undirected × single-type × single-match → `ResolvedEdge{Person→LIKES→Post}` (case B) |
 | `undirected_single_match_reverse.cypher` | `MATCH (post:Post)-[r:LIKES]-(p:Person) RETURN r` | undirected × single-type × single-match, textual order reversed → same committed `EdgeKey` as above (verifies orientation-commit is schema-driven, not textual) |
-| `multi_type_directed_single_match.cypher` | `MATCH (p:Person)-[r:AUTHORED\|LIKES]->(post:Post) RETURN r` | directed × multi-type × 2-match → `ResolvedEdgeUnion{[Person→AUTHORED→Post, Person→LIKES→Post]}` (case D) |
+| `multi_type_directed_union.cypher` | `MATCH (p:Person)-[r:AUTHORED\|LIKES]->(post:Post) RETURN r` | directed × multi-type × 2-match → `ResolvedEdgeUnion{[Person→AUTHORED→Post, Person→LIKES→Post]}` (case D) |
 | `multi_type_undirected.cypher` | `MATCH (p:Person)-[r:AUTHORED\|LIKES]-(post:Post) RETURN r` | undirected × multi-type; matches: `Person→AUTHORED→Post`, `Person→LIKES→Post`, `Post→AUTHORED→Person` (three matches) → `ResolvedEdgeUnion` |
 | `var_length_directed.cypher` | `MATCH (p:Person)-[r:KNOWS*1..3]->(q:Person) RETURN r` | directed × single-type × var-length → `ResolvedList{Element: ResolvedEdge{Person→KNOWS→Person}}` |
 | `var_length_undirected_single_match.cypher` | `MATCH (p:Person)-[r:LIKES*1..2]-(post:Post) RETURN r` | undirected × single-type × var-length × single-match → `ResolvedList{Element: ResolvedEdge{Person→LIKES→Post}}` |
@@ -897,25 +910,23 @@ file; each has one paired `.validated.golden.json` regenerated by
 | `self_loop_directed.cypher` | `MATCH (p:Person)-[r:KNOWS]->(q:Person) RETURN r` | self-loop admits normally (both endpoints Person, edge Person→KNOWS→Person) — §4.5.2 self-loop witness |
 | `unlabelled_via_undirected.cypher` | `MATCH (a)-[r:LIKES]-(post:Post) RETURN a, r` | Phase B inference through an undirected edge: `a` inferred to `Person` from the *source-side* match of `Person→LIKES→Post` (the reverse orientation `Post→LIKES→Person` is not in the schema, so `a`'s candidate set is `{Person}` — singleton) |
 | `unlabelled_via_multi_type.cypher` | `MATCH (a)-[r:AUTHORED\|LIKES]->(post:Post) RETURN a` | Phase B inference through a multi-type edge: `a`'s candidate set is `union({Person from AUTHORED→Post}, {Person from LIKES→Post}) = {Person}` — singleton (§4.5.4) |
-| `edge_property_union_agree.cypher` | `MATCH (p:Person)-[r:AUTHORED\|LIKES]->(post:Post) RETURN r.publishedAt` (schema-authored so `LIKES` has `publishedAt :: TIMESTAMP` matching `AUTHORED.publishedAt`) | ⚠ requires schema addition — see note below; deferred to spec fix if kept |
+| `edge_property_union_agree.cypher` | `MATCH (p:Person)-[r:AUTHORED\|LIKES]->(post:Post) RETURN r.likedAt` (schema declares `likedAt :: TIMESTAMP` on both `AUTHORED` and `LIKES` — see §6.2) | multi-candidate property lookup with all members agreeing on type/nullability → §4.8 emits `ResolvedProperty{Type: TIMESTAMP, Nullable: true}` |
 | `undirected_var_length_multi_type_property.cypher` | `MATCH (p:Person)-[r:AUTHORED\|LIKES*1..2]-(post:Post) RETURN r` | undirected × multi-type × var-length whole-entity → `ResolvedList{Element: ResolvedEdgeUnion}` (element carries all matching (label, orientation) pairs) |
 
-**Note on `edge_property_union_agree.cypher`:** the `social_r3.gql`
-schema as written above does **not** give `LIKES` a `publishedAt`
-property — the fixture as stated would fail with `ErrUnknownProperty`
-(missing on union member `Person→LIKES→Post`). Two ways to keep the
-happy-path property-on-union fixture: (i) add `publishedAt ::
-TIMESTAMP NOT NULL` to `LIKES` in `social_r3.gql`, breaking wire
-parity with R2's `LIKES` (property-free) — cheap because R3 does not
-repoint R2 fixtures at `social_r3.gql`; (ii) author a dedicated
-`social_r3_union.gql` schema with two edges sharing a common
-property. **This spec chooses (i)**: `social_r3.gql` gains one
-property on `LIKES` (`likedAt :: TIMESTAMP`) and one on `AUTHORED`
-(also `likedAt :: TIMESTAMP` alongside its existing properties),
-so the union projects `likedAt` cleanly. The fixture becomes
-`RETURN r.likedAt`. Schema text updated in §6.2 above at
-implementation time; the code cycle rewrites the schema before the
-golden regenerates.
+**Note on `edge_property_union_agree.cypher`:** the shared union
+property is declared inline in §6.2's schema — `likedAt :: TIMESTAMP`
+appears on **both** `Person→AUTHORED→Post` (alongside its existing
+`publishedAt` / `views`) and `Person→LIKES→Post`. The fixture projects
+`r.likedAt`, so §4.8's property-lookup pass finds a hit on every union
+member with matching `(Type, Nullable) = (TIMESTAMP, true)` and emits
+`ResolvedProperty{Type: TIMESTAMP, Nullable: true}` without an
+`ErrUnknownProperty`. Wire parity with R2's `LIKES` (property-free) is
+intentionally broken — R3 does not repoint R2 fixtures at
+`social_r3.gql`, so R2's goldens are untouched. This spec chose
+option (i) of the two we considered (inline shared property on
+`social_r3.gql`) over option (ii) (a dedicated `social_r3_union.gql`)
+because the schema fixture stays single-file per stage and no new
+mapping row is needed for the union-property fixture.
 
 **Coverage sketch (per row, keyed to the algorithm):**
 
@@ -924,7 +935,7 @@ golden regenerates.
   reverse-textual-order variant proves the committed `EdgeKey` is
   schema-driven, not textual (both fixtures' goldens carry the same
   `EdgeKey` in `ResolvedEdge`).
-- `multi_type_directed_single_match` — exercises §4.4's multi-type
+- `multi_type_directed_union` — exercises §4.4's multi-type
   cross-product (case D verdict); the golden's
   `ResolvedEdgeUnion.EdgeKeys` is ordered by
   first-appearance-of-label (`AUTHORED` before `LIKES`).
@@ -991,7 +1002,7 @@ var invalidFixtures = map[string]error{
     // R2 rows RETIRED at R3 (moved to valid/):
     //   "undirected_edge.cypher":                          ErrOutOfR0Scope,  -> valid/undirected_single_match.cypher
     //   "var_length_edge.cypher":                          ErrOutOfR0Scope,  -> valid/var_length_directed.cypher
-    //   "multi_type_edge.cypher":                          ErrOutOfR0Scope,  -> valid/multi_type_directed_single_match.cypher
+    //   "multi_type_edge.cypher":                          ErrOutOfR0Scope,  -> valid/multi_type_directed_union.cypher
 
     // R3 new rows
     "ambiguous_edge_orientation.cypher":                    ErrAmbiguousEdgeOrientation,
@@ -1052,7 +1063,8 @@ var invalidFixtures = map[string]error{
   `MATCH (p:Person)-[r:KNOWS*1..3]->(q:Person) RETURN r.since` — the
   §4.7 var-length property projection reject → `ErrOutOfR0Scope`
   (fail-message: "property projection on variable-length edge
-  binding: reach list elements via UNWIND — R5").
+  binding: reach list elements via list-element access (UNWIND
+  in R5 or later)").
 
 Each fixture is paired to its schema via `invalid/schema.mapping.json`,
 extended to include the new fixtures. The `social_r3_typediff.gql`
@@ -1229,8 +1241,10 @@ describes still holds.
 - **`EdgeBinding.Source()` / `Target()`** —
   `internal/query/query.go:439-443`; both always set.
 - **Directed left-arrow canonicalises to source→target** —
-  `internal/query/cypher/pattern.go:261-263`; a `<--` edge is
-  stored source→target. Undirected keeps textual order (line 259).
+  `internal/query/cypher/pattern.go:262-263`; a `<--` edge is
+  stored source→target. Undirected keeps textual order (line 261's
+  `srcNode, tgtNode := prev, next`; the guard at 262 gates the swap
+  on `directed && left`).
 - **Endpoint sum ×2 (`VarEndpoint`, `InlineEndpoint`)** —
   `internal/query/query.go:934-980`; sealed; both hold data in
   unexported fields.
@@ -1278,13 +1292,13 @@ describes still holds.
   of bare entity variables (an `ExprProjection`'s type), which is
   a distinct producer from a var-length edge's `RefProjection`
   (see §4.11).
-- **`graph.LabelSet` slice ordering** —
-  `internal/graph/labelset.go` (the LabelSet's slice-backed
-  representation preserves textual insertion order; the parser
-  Stage 8 note in ADR 0003 records this).
-- **`graph.LabelSetKey`** — `internal/graph/labelset.go`
-  (`LabelSet.Key()` returns the canonical key used as map keys in
-  `schema.Nodes` and `schema.EdgeKey` fields).
+- **`graph.LabelSet` is `[]string`** —
+  `internal/graph/labelset.go:13`; the slice preserves textual
+  insertion order (parser Stage 8 note in ADR 0003 records this).
+- **`graph.LabelSet.Key()`** — `internal/graph/labelset.go:21-26`;
+  returns the canonical `LabelSetKey` used as map keys in
+  `schema.Nodes` and `schema.EdgeKey` fields (labels sorted,
+  deduped, joined by "&").
 - **ADR 0002 bit-width preservation** — `docs/adr/0002-...` — the
   `ResolvedProperty` uniform-typing rule in §4.8 preserves the
   schema's declared width.
