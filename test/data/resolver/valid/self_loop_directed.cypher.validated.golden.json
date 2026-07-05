@@ -1,0 +1,17 @@
+{
+  "columns": [
+    {
+      "name": "r",
+      "type": {
+        "kind": "edge",
+        "edgeKey": {
+          "source": "Person",
+          "label": "KNOWS",
+          "target": "Person"
+        }
+      }
+    }
+  ],
+  "parameters": [],
+  "statement": "read"
+}

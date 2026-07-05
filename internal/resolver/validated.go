@@ -142,6 +142,33 @@ func (e ResolvedEdge) MarshalJSON() ([]byte, error) {
 
 func (ResolvedEdge) isResolvedType() {}
 
+// ResolvedEdgeUnion is a multi-candidate edge whole-entity projection: the
+// closed set of schema EdgeKeys the resolver committed for a multi-type edge
+// binding whose labels (or the label × orientation cross-product for an
+// undirected multi-type edge) resolve to more than one edge in the schema.
+// Produced by R3 for a RefProjection whose Ref names an EdgeBinding with a
+// multi-candidate committed set. The single-candidate case stays ResolvedEdge.
+// EdgeKeys is deterministic (canonical order per R3 spec §4.4) and non-empty
+// with len >= 2; the empty case is ErrUnknownEdge, the single case is
+// ResolvedEdge.
+type ResolvedEdgeUnion struct {
+	EdgeKeys []schema.EdgeKey `json:"edgeKeys"`
+}
+
+// String is the wire tag "edgeUnion".
+func (ResolvedEdgeUnion) String() string { return "edgeUnion" }
+
+// MarshalJSON emits a tagged-union object with a "kind" discriminator plus
+// the ordered candidate slice.
+func (u ResolvedEdgeUnion) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Kind     string           `json:"kind"`
+		EdgeKeys []schema.EdgeKey `json:"edgeKeys"`
+	}{Kind: u.String(), EdgeKeys: u.EdgeKeys})
+}
+
+func (ResolvedEdgeUnion) isResolvedType() {}
+
 // ResolvedScalar carries a parser-coarse scalar kind: an openCypher literal
 // or an integer clause slot (SKIP / LIMIT). Distinct from ResolvedProperty,
 // which carries a bit-width family from the schema (ADR 0002). Introduced at

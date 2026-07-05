@@ -10,9 +10,6 @@
     "ambiguous_unlabelled_binding.cypher": "social_ambiguous.gql",
     "unlabelled_binding_no_edge.cypher": "social.gql",
     "empty_inline_endpoint.cypher": "social.gql",
-    "undirected_edge.cypher": "social.gql",
-    "var_length_edge.cypher": "social.gql",
-    "multi_type_edge.cypher": "social.gql",
     "parameter_type_conflict_two_properties.cypher": "social.gql",
     "parameter_type_conflict_clause_slot_vs_string.cypher": "social.gql",
     "parameter_type_conflict_property_vs_expr_bool.cypher": "social.gql",
@@ -20,5 +17,12 @@
     "unknown_property_via_expr_use.cypher": "social.gql",
     "expr_use_set_value.cypher": "social_r2.gql",
     "list_of_nodes_projection.cypher": "social.gql",
-    "list_of_edges_projection.cypher": "social.gql"
+    "list_of_edges_projection.cypher": "social.gql",
+    "ambiguous_edge_orientation.cypher": "social_r3.gql",
+    "unknown_edge_undirected.cypher": "social_r3.gql",
+    "unknown_edge_multi_type_all_miss.cypher": "social.gql",
+    "unknown_property_union_missing.cypher": "social_r3.gql",
+    "unknown_property_union_type_differs.cypher": "social_r3_typediff.gql",
+    "untyped_edge.cypher": "social_r3.gql",
+    "var_length_edge_property_projection.cypher": "social_r3.gql"
 }
