@@ -4,7 +4,8 @@
       "name": "a",
       "type": {
         "kind": "node",
-        "labels": "Person"
+        "labels": "Person",
+        "nullable": false
       }
     },
     {
@@ -15,14 +16,16 @@
           "source": "Person",
           "label": "AUTHORED",
           "target": "Post"
-        }
+        },
+        "nullable": false
       }
     },
     {
       "name": "p",
       "type": {
         "kind": "node",
-        "labels": "Post"
+        "labels": "Post",
+        "nullable": false
       }
     }
   ],

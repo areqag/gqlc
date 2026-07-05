@@ -5,7 +5,7 @@
       "type": {
         "kind": "node",
         "labels": "Person",
-        "nullable": false
+        "nullable": true
       }
     }
   ],

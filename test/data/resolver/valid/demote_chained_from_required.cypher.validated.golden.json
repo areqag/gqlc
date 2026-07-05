@@ -5,11 +5,11 @@
       "type": {
         "kind": "node",
         "labels": "Person",
-        "nullable": false
+        "nullable": true
       }
     },
     {
-      "name": "r",
+      "name": "r1",
       "type": {
         "kind": "edge",
         "edgeKey": {
@@ -17,7 +17,7 @@
           "label": "AUTHORED",
           "target": "Post"
         },
-        "nullable": false
+        "nullable": true
       }
     },
     {
@@ -25,6 +25,26 @@
       "type": {
         "kind": "node",
         "labels": "Post",
+        "nullable": false
+      }
+    },
+    {
+      "name": "r2",
+      "type": {
+        "kind": "edge",
+        "edgeKey": {
+          "source": "Post",
+          "label": "AUTHORED",
+          "target": "Person"
+        },
+        "nullable": false
+      }
+    },
+    {
+      "name": "author",
+      "type": {
+        "kind": "node",
+        "labels": "Person",
         "nullable": false
       }
     }

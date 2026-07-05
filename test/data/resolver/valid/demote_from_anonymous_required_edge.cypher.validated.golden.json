@@ -1,7 +1,7 @@
 {
   "columns": [
     {
-      "name": "p",
+      "name": "a",
       "type": {
         "kind": "node",
         "labels": "Person",
@@ -9,18 +9,18 @@
       }
     },
     {
-      "name": "p.id",
+      "name": "b",
       "type": {
-        "kind": "property",
-        "type": "INT",
-        "nullable": false
+        "kind": "node",
+        "labels": "Post",
+        "nullable": true
       }
     },
     {
-      "name": "p.name",
+      "name": "c",
       "type": {
-        "kind": "property",
-        "type": "STRING",
+        "kind": "node",
+        "labels": "Post",
         "nullable": false
       }
     }

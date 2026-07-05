@@ -1,11 +1,11 @@
 {
   "columns": [
     {
-      "name": "p",
+      "name": "r.views",
       "type": {
-        "kind": "node",
-        "labels": "Person",
-        "nullable": false
+        "kind": "property",
+        "type": "INT",
+        "nullable": true
       }
     }
   ],

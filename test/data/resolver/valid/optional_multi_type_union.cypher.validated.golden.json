@@ -11,17 +11,12 @@
             "target": "Post"
           },
           {
-            "source": "Post",
-            "label": "AUTHORED",
-            "target": "Person"
-          },
-          {
             "source": "Person",
             "label": "LIKES",
             "target": "Post"
           }
         ],
-        "nullable": false
+        "nullable": true
       }
     }
   ],
