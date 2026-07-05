@@ -481,7 +481,7 @@ and a touching edge `e`:
   endpoints contributes nothing to either — cannot constrain).
 - For each label `L` in `e.Labels()` (first-appearance order):
   - For each orientation admitted by `e.Directed()`:
-    - Query `s.Edges` for keys with matching `Label == L.Key()` and
+    - Query `s.Edges` for keys with matching `Label == graph.LabelSet{L}.Key()` and
       the *other* endpoint on the appropriate side; the candidate
       for `n` is `k.Source` (n on source side) or `k.Target` (n on
       target side).
