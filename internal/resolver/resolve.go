@@ -113,11 +113,7 @@ func resolve(q query.Query, s schema.Schema, _ procsig.Registry) (ValidatedQuery
 
 	columns := make([]Column, 0, len(part.Returns))
 	for _, item := range part.Returns {
-		ref, err := r0RefProjection(item.Value)
-		if err != nil {
-			return ValidatedQuery{}, err
-		}
-		colType, err := r1ColumnType(ref, nodeTypes, edgeTypes, edgeKeys)
+		colType, err := projectionType(item.Value, nodeTypes, edgeTypes, edgeKeys)
 		if err != nil {
 			return ValidatedQuery{}, err
 		}
@@ -126,22 +122,23 @@ func resolve(q query.Query, s schema.Schema, _ procsig.Registry) (ValidatedQuery
 
 	params := make([]ResolvedParameter, 0, len(q.Parameters))
 	for _, p := range q.Parameters {
-		if len(p.Uses) != 1 {
-			return ValidatedQuery{}, fmt.Errorf("%w: parameter %q has %d uses (R2 unifies)", ErrOutOfR0Scope, p.Name, len(p.Uses))
+		var unified ResolvedType
+		for i, u := range p.Uses {
+			w, err := useWitness(u, nodeTypes, edgeTypes)
+			if err != nil {
+				return ValidatedQuery{}, err
+			}
+			if i == 0 {
+				unified = w
+				continue
+			}
+			merged, ok := unify(unified, w)
+			if !ok {
+				return ValidatedQuery{}, fmt.Errorf("%w: parameter %q: %s vs %s", ErrParameterTypeConflict, p.Name, unified.String(), w.String())
+			}
+			unified = merged
 		}
-		use, ok := p.Uses[0].(query.PropertyUse)
-		if !ok {
-			return ValidatedQuery{}, fmt.Errorf("%w: parameter %q uses a %T", ErrOutOfR0Scope, p.Name, p.Uses[0])
-		}
-		useRef := use.Ref()
-		prop, err := r1PropertyLookup(useRef, nodeTypes, edgeTypes)
-		if err != nil {
-			return ValidatedQuery{}, err
-		}
-		params = append(params, ResolvedParameter{
-			Name: p.Name,
-			Type: ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable},
-		})
+		params = append(params, ResolvedParameter{Name: p.Name, Type: unified})
 	}
 
 	return ValidatedQuery{
@@ -343,25 +340,35 @@ func joinCandidates(c map[graph.LabelSetKey]struct{}) string {
 	return out
 }
 
-// r0RefProjection extracts the Ref from a projection, rejecting anything but
-// a RefProjection at R0/R1.
-func r0RefProjection(p query.Projection) (query.Ref, error) {
-	rp, ok := p.(query.RefProjection)
-	if !ok {
-		return query.Ref{}, fmt.Errorf("%w: non-Ref projection (%T)", ErrOutOfR0Scope, p)
+// projectionType dispatches a Projection to its handler and returns the
+// column's resolved type. R2 admits RefProjection, LiteralProjection,
+// FuncProjection, and ExprProjection; AggregateProjection routes to
+// ErrOutOfR0Scope (R5 owns grouping). §4.5.
+func projectionType(p query.Projection, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey) (ResolvedType, error) {
+	switch pp := p.(type) {
+	case query.RefProjection:
+		return refProjectionType(pp.Ref(), nodeTypes, edgeTypes, edgeKeys)
+	case query.LiteralProjection:
+		return resolveType(pp.Type())
+	case query.FuncProjection:
+		return resolveType(pp.Type())
+	case query.ExprProjection:
+		return resolveType(pp.Type())
+	case query.AggregateProjection:
+		return nil, fmt.Errorf("%w: aggregate projection (R5 owns grouping)", ErrOutOfR0Scope)
+	default:
+		return nil, fmt.Errorf("%w: unknown projection variant (%T)", ErrOutOfR0Scope, p)
 	}
-	return rp.Ref(), nil
 }
 
-// r1ColumnType dispatches a RefProjection's Ref against the resolved node and
-// edge binding tables. Whole-entity (Property == "") emits ResolvedNode or
-// ResolvedEdge; property lookup emits ResolvedProperty via the schema
-// witness. A ref naming no known binding at R1 is impossible under the
-// parser's build-time unbound-variable rejection — but Phase A rejected
-// unsupported binding kinds, so a ref may name a variable that no longer has
-// an entry (path, unwind, call). That case reads as "unknown binding at this
-// stage" and cannot occur in R1's admitted shape.
-func r1ColumnType(ref query.Ref, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey) (ResolvedType, error) {
+// refProjectionType dispatches a RefProjection's Ref against the resolved
+// node and edge binding tables. Whole-entity (Property == "") emits
+// ResolvedNode or ResolvedEdge; property lookup emits ResolvedProperty via
+// the schema witness. A ref naming no known binding at R2 is architecturally
+// possible only for a variable pointing at an as-yet-unsupported binding
+// kind (path, unwind, call) — those are rejected in Phase A with
+// ErrOutOfR0Scope.
+func refProjectionType(ref query.Ref, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey) (ResolvedType, error) {
 	if nt, ok := nodeTypes[ref.Variable]; ok {
 		if ref.Property == "" {
 			return ResolvedNode{Labels: nt.Labels}, nil
@@ -385,23 +392,162 @@ func r1ColumnType(ref query.Ref, nodeTypes map[string]schema.NodeType, edgeTypes
 	return nil, fmt.Errorf("%w: %s", ErrOutOfR0Scope, ref.Variable)
 }
 
-// r1PropertyLookup finds a schema.Property against either a node or an edge
-// binding table. Returns ErrUnknownProperty on miss and ErrOutOfR0Scope when
-// the ref names no admitted binding.
-func r1PropertyLookup(ref query.Ref, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType) (schema.Property, error) {
+// resolveType maps a parser Type into its resolver ResolvedType per the R0
+// §4 mapping table (R2 revision — §4.7). Deterministic and pure. Returns
+// ErrOutOfR0Scope for TypeList{TypeNode|TypeEdge} — a list literal of bare
+// entity variables that would forfeit the schema witness by collapsing to
+// ResolvedNode{} / ResolvedEdge{}; deferred to R5. Panics on bare TypeNode /
+// TypeEdge / TypePath — those are unreachable at R2 (RefProjection bypasses
+// resolveType; path bindings are gated out).
+func resolveType(t query.Type) (ResolvedType, error) {
+	switch tt := t.(type) {
+	case query.TypeBool:
+		return ResolvedScalar{Kind: ScalarBool}, nil
+	case query.TypeInt:
+		return ResolvedScalar{Kind: ScalarInt}, nil
+	case query.TypeFloat:
+		return ResolvedScalar{Kind: ScalarFloat}, nil
+	case query.TypeString:
+		return ResolvedScalar{Kind: ScalarString}, nil
+	case query.TypeNull:
+		return ResolvedScalar{Kind: ScalarNull}, nil
+	case query.TypeMap:
+		return ResolvedScalar{Kind: ScalarMap}, nil
+	case query.TypeDate:
+		return ResolvedTemporal{Kind: TemporalDate}, nil
+	case query.TypeTime:
+		return ResolvedTemporal{Kind: TemporalTime}, nil
+	case query.TypeLocalTime:
+		return ResolvedTemporal{Kind: TemporalLocalTime}, nil
+	case query.TypeDateTime:
+		return ResolvedTemporal{Kind: TemporalDateTime}, nil
+	case query.TypeLocalDateTime:
+		return ResolvedTemporal{Kind: TemporalLocalDateTime}, nil
+	case query.TypeDuration:
+		return ResolvedTemporal{Kind: TemporalDuration}, nil
+	case query.TypeList:
+		switch tt.Element().(type) {
+		case query.TypeNode:
+			return nil, fmt.Errorf("%w: list-of-nodes projection", ErrOutOfR0Scope)
+		case query.TypeEdge:
+			return nil, fmt.Errorf("%w: list-of-edges projection", ErrOutOfR0Scope)
+		}
+		el, err := resolveType(tt.Element())
+		if err != nil {
+			return nil, err
+		}
+		return ResolvedList{Element: el}, nil
+	case query.TypeUnknown:
+		return ResolvedUnknown{}, nil
+	case query.TypeNode:
+		panic("resolver bug: resolveType reached bare TypeNode (RefProjection bypasses this mapper)")
+	case query.TypeEdge:
+		panic("resolver bug: resolveType reached bare TypeEdge (RefProjection bypasses this mapper)")
+	case query.TypePath:
+		panic("resolver bug: resolveType reached TypePath (R2 does not admit path bindings)")
+	default:
+		panic(fmt.Sprintf("resolver bug: resolveType reached unhandled query.Type %T", t))
+	}
+}
+
+// useWitness computes the ResolvedType witness for one parameter Use.
+// §4.6. Dispatches on the sealed Use sum. Write-side ExprUses
+// (ExprInSetValue / ExprInDeleteTarget) route to ErrOutOfR0Scope.
+func useWitness(u query.Use, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType) (ResolvedType, error) {
+	switch uu := u.(type) {
+	case query.PropertyUse:
+		return propertyUseWitness(uu.Ref(), nodeTypes, edgeTypes)
+	case query.ClauseSlotUse:
+		return ResolvedScalar{Kind: ScalarInt}, nil
+	case query.ExprUse:
+		switch uu.Position() {
+		case query.ExprInProjection, query.ExprInPredicate:
+			return resolveType(uu.EnclosingType())
+		case query.ExprInSetValue:
+			return nil, fmt.Errorf("%w: parameter used in SET value", ErrOutOfR0Scope)
+		case query.ExprInDeleteTarget:
+			return nil, fmt.Errorf("%w: parameter used in DELETE target", ErrOutOfR0Scope)
+		default:
+			return nil, fmt.Errorf("%w: unknown ExprUse position", ErrOutOfR0Scope)
+		}
+	default:
+		return nil, fmt.Errorf("%w: unknown Use variant (%T)", ErrOutOfR0Scope, u)
+	}
+}
+
+// propertyUseWitness looks up the schema property named by a PropertyUse's
+// Ref. Miss -> ErrUnknownProperty. §4.6.
+func propertyUseWitness(ref query.Ref, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType) (ResolvedType, error) {
 	if nt, ok := nodeTypes[ref.Variable]; ok {
 		prop, ok := nt.Properties[ref.Property]
 		if !ok {
-			return schema.Property{}, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
+			return nil, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
 		}
-		return prop, nil
+		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable}, nil
 	}
 	if et, ok := edgeTypes[ref.Variable]; ok {
 		prop, ok := et.Properties[ref.Property]
 		if !ok {
-			return schema.Property{}, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
+			return nil, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
 		}
-		return prop, nil
+		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable}, nil
 	}
-	return schema.Property{}, fmt.Errorf("%w: %s", ErrOutOfR0Scope, ref.Variable)
+	return nil, fmt.Errorf("%w: %s", ErrOutOfR0Scope, ref.Variable)
+}
+
+// unify agrees two ResolvedTypes iff they are structurally equal or one side
+// is ResolvedUnknown (the resolver's honest bottom — any concrete witness
+// dominates it). Returns the agreed type and true on success, (nil, false)
+// on conflict. §4.8.
+func unify(a, b ResolvedType) (ResolvedType, bool) {
+	if _, ok := a.(ResolvedUnknown); ok {
+		return b, true
+	}
+	if _, ok := b.(ResolvedUnknown); ok {
+		return a, true
+	}
+	switch aa := a.(type) {
+	case ResolvedProperty:
+		bb, ok := b.(ResolvedProperty)
+		if !ok || bb.Type != aa.Type || bb.Nullable != aa.Nullable {
+			return nil, false
+		}
+		return aa, true
+	case ResolvedScalar:
+		bb, ok := b.(ResolvedScalar)
+		if !ok || bb.Kind != aa.Kind {
+			return nil, false
+		}
+		return aa, true
+	case ResolvedTemporal:
+		bb, ok := b.(ResolvedTemporal)
+		if !ok || bb.Kind != aa.Kind {
+			return nil, false
+		}
+		return aa, true
+	case ResolvedList:
+		bb, ok := b.(ResolvedList)
+		if !ok {
+			return nil, false
+		}
+		el, ok := unify(aa.Element, bb.Element)
+		if !ok {
+			return nil, false
+		}
+		return ResolvedList{Element: el}, true
+	case ResolvedNode:
+		bb, ok := b.(ResolvedNode)
+		if !ok || bb.Labels != aa.Labels {
+			return nil, false
+		}
+		return aa, true
+	case ResolvedEdge:
+		bb, ok := b.(ResolvedEdge)
+		if !ok || bb.EdgeKey != aa.EdgeKey {
+			return nil, false
+		}
+		return aa, true
+	default:
+		return nil, false
+	}
 }
