@@ -41,11 +41,14 @@ sibling under-approximation (gap tracked on gqlc-ay9) is also unchanged
 at R5. Neither class is closable without a model unfreeze (owner
 decision pending); R5 does not contort the resolver around either.
 
-R5 introduces **one new sentinel** (§5.1), **`ErrUnionColumnMismatch`**,
-covering the two column-incompatibility shapes UNION branches can exhibit
-(disagreeing column count / disagreeing column names / disagreeing
-column types). Zero other new sentinels; the R4 closed set is otherwise
-preserved.
+R5 introduces **two new sentinels**: **`ErrUnionColumnMismatch`**
+(§5.1), covering the column-incompatibility shapes UNION branches can
+exhibit (disagreeing column count / disagreeing column names /
+disagreeing column types / disagreeing nullability), and
+**`ErrPartBindingTypeConflict`** (§5.1.1), covering the §6.4-discovery
+case where a Part K > 0 re-declares a carried variable with a labelled
+binding whose schema-typed identity differs from the carried type. The
+R4 closed set is otherwise preserved.
 
 R5's wire delta on `ValidatedQuery` is additive under the ADR 0009
 provisional-through-R7 posture (§3): a `Branches []Column` axis is not
@@ -70,8 +73,9 @@ does not need to carry each branch's column list separately.
   The `ValidatedQuery.Columns` field's *meaning* widens (§3.1): at R5 it
   is populated from **the final Part of branch 0** (expanded per §4.4 for
   `ReturnsAll`); UNION branch compatibility is certified against it.
-- `internal/resolver/errors.go` — one new sentinel,
-  **`ErrUnionColumnMismatch`** (§5.1), and revised prose on
+- `internal/resolver/errors.go` — two new sentinels,
+  **`ErrUnionColumnMismatch`** (§5.1) and
+  **`ErrPartBindingTypeConflict`** (§5.1.1), and revised prose on
   `ErrOutOfR0Scope` reflecting the R5-retired sub-cases (§5.2). R4
   sentinel identities are preserved; wrapped-message sets widen only
   where recorded.
@@ -1672,9 +1676,10 @@ No other rows change.
 
 R4's closed sentinel set is `ErrUnknownLabel`, `ErrUnknownProperty`,
 `ErrOutOfR0Scope`, `ErrUnknownEdge`, `ErrAmbiguousBinding`,
-`ErrParameterTypeConflict`, `ErrAmbiguousEdgeOrientation`. R5 adds one
-sentinel, keeps the others, and revises `ErrOutOfR0Scope`'s message set
-to reflect retirements.
+`ErrParameterTypeConflict`, `ErrAmbiguousEdgeOrientation`. R5 adds two
+sentinels — `ErrUnionColumnMismatch` (§5.1) and
+`ErrPartBindingTypeConflict` (§5.1.1) — keeps the others, and revises
+`ErrOutOfR0Scope`'s message set to reflect retirements.
 
 ### 5.1 New sentinel — `ErrUnionColumnMismatch`
 
@@ -1701,6 +1706,36 @@ different class of error from either. Reusing `ErrParameterTypeConflict`
 would be a category mistake (a UNION column disagreement is not a
 parameter conflict); reusing `ErrUnknownProperty` similarly (not a
 schema-lookup problem).
+
+### 5.1.1 New sentinel — `ErrPartBindingTypeConflict`
+
+```go
+// ErrPartBindingTypeConflict is returned when a Part K > 0 re-declares
+// a carried variable with a labelled binding whose schema-typed
+// identity disagrees with the carried type. Concretely: at Part K a
+// labelled NodeBinding for name `v` resolves to a schema.NodeType
+// whose LabelSetKey differs from the carry-seed's LabelSetKey for `v`.
+// Same key = trivial re-binding, admitted. Different key =
+// irreconcilable, rejected. Introduced at R5. See R5 spec §6.4.
+ErrPartBindingTypeConflict = errors.New("part binding type conflict")
+```
+
+Added to `allSentinels`. Reachability sweep: one invalid fixture,
+`part_binding_type_conflict.cypher` (§6.4).
+
+**Why this sentinel is distinct from the others.** The parser accepts
+`MATCH (a:Person) WITH a MATCH (a:Post) RETURN a` and emits two Parts
+with independent labelled `NodeBinding`s for `a` — the parser does not
+reason across a WITH boundary about label conflict (parser observation
+recorded in §6.4). The disagreement is between the carried
+schema-typed identity and the local labelled re-binding — a
+cross-Part, resolver-only class of error. `ErrAmbiguousBinding`
+(R4) is about unlabelled bindings whose candidate set from touching
+edges is not unique — same-Part, no carry involvement.
+`ErrParameterTypeConflict` (R2) is about parameter-Use unification —
+about parameter Uses, not variable declarations. `ErrUnknownLabel`
+does not fit: both labels resolve. Reusing any of them would be a
+category mistake.
 
 ### 5.2 Revised `ErrOutOfR0Scope` message set — retirements
 
@@ -1753,11 +1788,12 @@ var allSentinels = []error{
     ErrAmbiguousBinding,
     ErrParameterTypeConflict,
     ErrAmbiguousEdgeOrientation,
-    ErrUnionColumnMismatch,      // R5 addition
+    ErrUnionColumnMismatch,       // R5 addition
+    ErrPartBindingTypeConflict,   // R5 addition (§6.4 discovery outcome)
 }
 ```
 
-Eight sentinels total. The reachability sweep in `TestSentinelReachability`
+Nine sentinels total. The reachability sweep in `TestSentinelReachability`
 verifies every sentinel above has at least one invalid fixture pinning
 it (§6.4) and every invalid fixture maps to a sentinel in this list.
 
@@ -1858,7 +1894,17 @@ json`, generated with `-update`.
 - `aggregate_count_star.cypher` — `MATCH (a:Person) RETURN count(*) AS
   n`. One column, `ScalarInt`. `GroupingKey == false` (empty group).
 - `aggregate_sum_property.cypher` — `MATCH (a:Person) RETURN sum(a.age)
-  AS s`. Aggregate over INT; result type per parser (INT).
+  AS s`. Aggregate over a bare property argument; result type is
+  `ResolvedUnknown{}` per the parser's bare-property AggregateProjection
+  typing (parser_test.go pin `"aggregate sum on bare property arg
+  (regression)"` at parser_test.go:1541 emits `AggregateProjection{AggSum,
+  [{n, age}], false, TypeUnknown{}}`). The resolver's AggregateProjection
+  arm at §4.5.1 is a straight `resolveType(pp.Type())` pass-through
+  (resolve.go:958-959), so the schema-declared `Person.age :: INT` does
+  not enrich the aggregate's result type — the aggregate stays Unknown,
+  and the golden pins `"kind": "unknown"`. This is the honest witness of
+  today's parser+resolver contract; schema-side enrichment of aggregate
+  operand types is a design axis for a later stage (out of R5 scope).
 - `aggregate_with_grouping.cypher` — `MATCH (a:Person) RETURN a.name,
   count(*) AS n`. Two columns; `Columns[0].GroupingKey == true`,
   `Columns[1].GroupingKey == false`.
@@ -1962,11 +2008,24 @@ json`, generated with `-update`.
   a.name UNION MATCH (b:NotDeclared) RETURN b.name`. Second branch
   fails resolution independently. → `ErrUnknownLabel` (from branch 1).
 - `part_binding_type_conflict.cypher` — `MATCH (a:Person) WITH a
-  MATCH (a:Post) RETURN a`. Part 1 attempts to re-declare `a` with a
-  conflicting label. Verify the parser's actual behaviour: does the
-  parser accept `MATCH (a:Post)` when `a` is already an in-scope
-  Person? If yes, R5 must reject with a sentinel. If no, this fixture
-  is unreachable and dropped. (Discovery task for R5 code cycle.)
+  MATCH (a:Post) RETURN a`. Part 1 re-declares `a` with a conflicting
+  label. **Discovery outcome (R5 code cycle):** the parser ACCEPTS this
+  input and emits two Parts with independent labelled `NodeBinding`s
+  for `a` — Part 0 `NodeBinding{a, {Person}}`, Part 1
+  `NodeBinding{a, {Post}}`. The parser does not reason across a WITH
+  boundary about label conflict; per-Part fresh re-binding pins hold
+  (see parser_test.go:1219-1246 for the unlabelled analogue). Same-Part
+  duplicates like `MATCH (a:Person), (a:Post) RETURN a` collapse to a
+  single `NodeBinding{a, {Person, Post}}` in the parser (within-Part
+  conjunctive labels), so the WITH-boundary shape is the ONLY input
+  that reaches the resolver as two labelled bindings for the same name
+  with disjoint schema types. R5 rejects with `ErrPartBindingTypeConflict`
+  at Phase A1 of `resolvePart` (resolve.go, in the labelled-node arm):
+  when the carry seed at §4.2.3 has already populated `nodeTypes[v]`
+  with a `schema.NodeType` whose `Labels` (LabelSetKey) differs from
+  the local binding's, the re-binding is genuinely irreconcilable and
+  fails. Same `LabelSetKey` = trivial re-binding, admitted (preserves
+  the non-breaking posture on happy-path multi-part queries).
 
 Updated `invalidFixtures` map:
 
@@ -2001,6 +2060,7 @@ var invalidFixtures = map[string]error{
     "union_column_type_mismatch.cypher":                    ErrUnionColumnMismatch,
     "union_column_nullability_mismatch.cypher":             ErrUnionColumnMismatch,
     "union_unknown_label_branch.cypher":                    ErrUnknownLabel,
+    "part_binding_type_conflict.cypher":                    ErrPartBindingTypeConflict,
 }
 
 // Removed at R5 (moved to valid/):
@@ -2463,9 +2523,10 @@ of scope of this document. The spec is done when:
    residuals — uniform-exclude with parser-side discrimination
    deferred to a follow-up bead (§4.5.3), the cross-WITH nullability
    extension (§4.6), and the Distinct fold (§4.7).
-4. §5 records the one new sentinel `ErrUnionColumnMismatch`, revises
-   `ErrOutOfR0Scope`'s message-set list for retirements, and preserves
-   the R4 sentinels' identity.
+4. §5 records the two new sentinels `ErrUnionColumnMismatch` and
+   `ErrPartBindingTypeConflict`, revises `ErrOutOfR0Scope`'s
+   message-set list for retirements, and preserves the R4 sentinels'
+   identity.
 5. §6 designs the fixture set: the R5 valid schema `social_r5.gql`
    (§6.2), the R5 valid fixture list (20 fixtures), the R5 invalid
    fixture list (5 additions + 5 retirements), the revised
