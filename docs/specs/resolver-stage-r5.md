@@ -89,10 +89,12 @@ does not need to carry each branch's column list separately.
     list from the Part's in-scope binding set when
     `Part.ReturnsAll == true`;
   - an **`AggregateProjection` handler** (§4.5) that emits the aggregate
-    kind's result type and — for the branch's final Part — computes the
-    implicit grouping-key set by inspecting every non-aggregate projection
-    (§4.5.2), with the `gqlc-gyw` re-parse mechanic for `ExprProjection`
-    residuals (§4.5.3);
+    kind's result type and — for branch 0's final Part — computes the
+    implicit grouping-key set from non-aggregate `RefProjection` /
+    `LiteralProjection` / `FuncProjection` items (§4.5.2). At R5
+    every `ExprProjection` residual is uniformly excluded from the
+    grouping key (§4.5.3); the parser-side discrimination fix (Shape B
+    `ContainsAggregate`) is a filed follow-up bead;
   - a **cross-WITH nullability extension** (§4.6) that carries R4's
     `nullableBinding` table across the WITH boundary — R4's demoteNullable
     is re-run on each Part's own bindings, seeded from the previous
@@ -395,14 +397,14 @@ codegen filters `Columns` by `GroupingKey == true` to emit the GROUP
 BY. §4.5.2 details the computation; the axis is declared here so it
 sits alongside the other per-column facts.
 
-**Non-final WITH grouping keys.** Grouping-key computation runs per
-Part (§4.5.2), but `ValidatedQuery.Columns` reflects only branch 0's
-**final Part**. Intermediate WITH-level grouping keys are consumed by
-the resolver internally (they drive the type-of-the-carried-scope
-computation for the next Part) but do not have a wire representation
-on `ValidatedQuery`; the codegen bead R-later reaches Part-K grouping
-via the `Query.Query` source of truth for the aggregate structure,
-not through a per-Part axis on `ValidatedQuery`.
+**Non-final WITH grouping keys.** Grouping-key computation runs only
+for branch 0's final Part; `ValidatedQuery.Columns` reflects only that
+Part. Non-final Parts fold and re-project into the carried scope
+through `exportedResolvedTypes` (§4.2.2) — that carried scope
+(§4.2.1 `branchState`) has no grouping-key axis at R5. Codegen
+(R-later) reaches non-final-Part aggregate structure via the
+`Query.Query` source of truth if it needs it; the resolver does not
+surface intermediate-Part grouping decisions.
 
 ### 3.3 R0–R4 golden rebaseline plan — one field added
 
@@ -989,13 +991,15 @@ the expanded order matches the source-declared order — swapping
 `AggregateProjection` is the fifth `Projection` sum variant, admitted at
 R5. The R4 dispatcher's reject arm (`resolve.go:459-460`) is removed;
 the new `aggregateProjectionType` handler emits the aggregate's result
-type per §4.5.1. Grouping keys are computed for every Part that mixes
-an aggregate with non-aggregate projections; the per-column
-`GroupingKey` bit is surfaced on `ValidatedQuery.Columns` (§3.2.1)
-only for branch 0's final Part, since that is the Part whose columns
-populate `ValidatedQuery.Columns` (§3.1). Non-final Part grouping
-computation runs internally to seed the next Part's carried scope but
-has no wire representation.
+type per §4.5.1. Grouping keys are computed only for **branch 0's
+final Part** — the Part whose columns populate `ValidatedQuery.Columns`
+(§3.1) — because the per-column `GroupingKey` bit lives on
+`ValidatedQuery.Columns` (§3.2.1) and no other consumer reads it.
+Non-final Parts fold and re-project into the carried scope through
+`exportedResolvedTypes` (§4.2.2); their per-item grouping-key
+computation is not carried forward because the resolver's carried
+scope (§4.2.1 `branchState`) has no grouping-key axis and R5's
+consumers do not need one on intermediate Parts.
 
 #### 4.5.1 Aggregate result-type table
 
@@ -1061,9 +1065,18 @@ The grouping-key algorithm at R5:
 
 ```
 computeGroupingKeys(part query.Part) []GroupingKey =
-    if no ReturnItem in part.Returns is an AggregateProjection or
-       an ExprProjection containing an aggregate (§4.5.3):
+    // Grouping applies iff at least one ReturnItem is an
+    // AggregateProjection. ExprProjection cannot signal aggregate
+    // presence in the frozen model (§4.5.3.1), so it is not a
+    // grouping trigger at R5.
+    hasAggregate := false
+    for each item in part.Returns:
+        if item.Value is AggregateProjection:
+            hasAggregate = true
+            break
+    if !hasAggregate:
         return nil  // no grouping applies
+
     keys := []GroupingKey{}
     for each item in part.Returns:
         switch item.Value.(type):
@@ -1072,13 +1085,28 @@ computeGroupingKeys(part query.Part) []GroupingKey =
         case RefProjection, LiteralProjection, FuncProjection:
             keys = append(keys, GroupingKeyFromRef(item))
         case ExprProjection:
-            if containsAggregateResolverSideReparse(item):
-                skip                // aggregate-residual is not a
-                                    // grouping key (§4.5.3)
-            else:
-                keys = append(keys, GroupingKeyFromRef(item))
+            skip                    // §4.5.3 over-group fallback:
+                                    // ExprProjection is ALWAYS treated
+                                    // as an aggregate-residual candidate
+                                    // (never a grouping key) at R5,
+                                    // regardless of alias status.
     return keys
 ```
+
+**Judgment call — ExprProjection is uniformly excluded from grouping
+keys.** The parser's Stage-6 residual classifier `classifyRichExpression`
+(typing.go:857-877) unconditionally produces an opaque `ExprProjection
+{refs, resultType}` for any expression that is not a bare atom / literal
+/ function call / aggregate call; the aggregate structure of a nested
+aggregate (`count(n) + 1`) is dropped at construction. The parser test
+`"aggregate call in arithmetic"` at parser_test.go:1320-1324 pins this
+concretely: `RETURN count(n) + 1` produces
+`ExprProjection{[Ref{n}], TypeInt}` — refs and result type only, no
+aggregate visibility. Because a resolver cannot distinguish
+aggregate-carrying from aggregate-free ExprProjection using the frozen
+model alone, R5 uniformly treats every `ExprProjection` as a
+non-grouping-key column. See §4.5.3 for the blast-radius argument and
+the follow-up beads that close this.
 
 The `GroupingKey` computation returns a per-column boolean — true iff
 the column participates in the openCypher implicit-grouping key set for
@@ -1096,7 +1124,7 @@ exactly one `distinct` line per golden plus one `groupingKey` line per
 column, and nothing else. Any golden whose diff shows additional
 changes is a bug in the R5 implementation.
 
-#### 4.5.3 `ExprProjection` residuals with nested aggregates — the `gqlc-gyw` re-parse contract
+#### 4.5.3 `ExprProjection` residuals with nested aggregates — the R5 over-group posture
 
 Per parser aggregate-kind-rich-exprs §1.3 and gqlc-gyw's notes: an
 `ExprProjection` whose expression contains a nested aggregate
@@ -1105,320 +1133,272 @@ Per parser aggregate-kind-rich-exprs §1.3 and gqlc-gyw's notes: an
 the projection as `ExprProjection{refs, type}` with the aggregate kind
 invisible on the wire.
 
-The contract on gqlc-gyw is:
-- Grouping-key discovery for this residual class is a **resolver-side
-  re-parse of the projection's original text span**.
-- The `ContainsAggregate` axis on `ExprProjection` is **only** the ADR
-  0008 escape hatch, invoked only if re-parse proves impractical, and
-  is **never inferred from `Type`** (because `count(n) + 1` and `x + 1`
-  under some operand-type combinations both type as `TypeUnknown`, and
-  `Type`-based inference would silently miss the aggregate).
+**§4.5.3.1 What the frozen model records for a rich residual — the
+classifier is unconditional.** The parser's Stage-6 residual classifier
+`classifyRichExpression` (`internal/query/cypher/typing.go:857-877`)
+unconditionally returns `NewExprProjection(refs, t)` for every
+expression that is not a bare atom / scalar literal / function call /
+aggregate call. There is no branch that inspects the sub-tree for a
+nested aggregate call; the whole rich expression is collapsed to
+`ExprProjection{refs, resultType}`. Direct source witness — parser test
+`"aggregate call in arithmetic"` (`parser_test.go:1320-1324`):
 
-**§4.5.3.1 What "original text span" means in the frozen model.** The
-frozen model does not carry a first-class original-text-span accessor
-on `ExprProjection`. What it does carry is `ReturnItem.Name`, which per
-parser `expr.go:204` is populated from `originalText(l.ts, e)` — the
-verbatim source slice of the expression — **when no explicit AS alias
-is given**. If an AS alias is present (`RETURN x + 1 AS s`),
-`ReturnItem.Name == "s"` and the verbatim text is lost.
+```go
+src: "MATCH (n)\nRETURN count(n) + 1",
+want: {Name: "count(n) + 1",
+        Value: query.NewExprProjection(
+            []query.Ref{{Variable: "n"}}, query.TypeInt{})},
+```
 
-Two paths follow:
+Refs = `[Ref{n}]`, Type = INT, aggregate function kind DROPPED. A
+resolver holding this `ExprProjection` sees only `Refs()` and `Type()`;
+the aggregate structure is invisible to the wire regardless of whether
+the projection has an AS alias.
 
-- **Un-aliased `ExprProjection`** — `ReturnItem.Name` IS the verbatim
-  text span. The resolver re-parses this string as a Cypher expression
-  and walks the tree for aggregate calls. This is the common case
-  gqlc-gyw's notes assume.
-- **Aliased `ExprProjection`** — `ReturnItem.Name` is the AS alias, not
-  the text span. **This is a genuine frozen-model gap for the resolver
-  contract** because the original text is not recoverable from
-  `ExprProjection` alone.
+**Corollary: the gqlc-gyw re-parse strategy is not implementable
+against the frozen model at R5.** Any re-parse of the residual text —
+whether via a synthesised `RETURN <text>` (Option P2), a direct
+`ParseExpression` API (Option P1), or reading the residual off a
+future `ExprProjection.OriginalText` axis (Shape A) — feeds the same
+listener through the same `classifyRichExpression` code path, so the
+re-parse produces the same opaque `ExprProjection{refs, type}` back.
+The walk step (`walk parsed tree for AggregateFunc calls`) has nothing
+to find: the aggregate is dropped at classification, not deferred to
+the walker. This is orthogonal to alias status and to text-span
+recovery — the discrimination capability requires a **parser-side
+change** that emits either an explicit `AggregateProjection` for
+nested-aggregate residuals or an additive `ContainsAggregate` bit
+(Shape B). Neither exists at R5 freeze; both are follow-up beads.
 
-**§4.5.3.2 The aliased-ExprProjection gap, stated honestly.**
+**§4.5.3.2 The R5 posture: uniform over-group for every
+`ExprProjection` residual.**
 
-The gqlc-gyw notes committed the resolver to "re-parse the original
-text span". The frozen model preserves that text span on
-`ReturnItem.Name` ONLY when the projection has no AS alias — the parser
-overwrites `Name` with the alias at `expr.go:206`, and `ExprProjection`
-(query.go:1171-1174 — `refs`, `resultType` only) carries no text field.
-For `RETURN 1 + count(n) AS c`, `ReturnItem.Name == "c"` and the
-resolver cannot recover the source text of `1 + count(n)` from
-`ExprProjection` alone. The `Refs()` list carries `[Ref{Variable:"n"}]`
-but does not distinguish this from `RETURN n.age AS c`
-(`Refs()` also carries `[Ref{Variable:"n", Property:"age"}]`, of a
-different shape but not distinguishable at the shape-of-refs level from
-an aggregate-of-n).
+R5 uniformly treats every `ExprProjection` as a non-grouping-key
+column, regardless of alias status and regardless of whether the
+underlying expression contained a nested aggregate. The
+`computeGroupingKeys` algorithm (§4.5.2) implements this by skipping
+every `ExprProjection` item — no re-parse mechanic, no alias-based
+branching, no P1/P2 mechanic dependency.
 
-This is a **frozen-model gap** distinct from the two R4-recorded gaps
-(gqlc-ay9 / gqlc-5xg). Following the R4 §7.5 template:
-
-**openCypher semantics.** For `RETURN 1 + count(n) AS c`, the query is
-implicitly grouped (an aggregate is present); the grouping key set is
-whatever non-aggregate projections exist in the same Part (in this case,
-none — so the group key is empty, and the query folds to a single row).
-The `c` column is `TypeInt`. The parser correctly types the projection
-as `ExprProjection{[Ref{n}], TypeInt}` and correctly records the
-projection name as `c`.
-
-**Frozen-model gap.** The parser threw away the original text on
-alias-application, keeping only the resolver-uninterpretable alias `c`.
-The `ExprProjection.Refs()` list carries the touched refs but not the
-tree structure that would distinguish aggregate-touch from non-aggregate-
-touch. The `ExprProjection.Type()` may be `TypeUnknown` for various
-non-aggregate expressions too (`n + 1` on a property-participating
-arithmetic, when the operand's property type is `TypeUnknown`).
-
-**Preserved-vs-violated split for the R5 over-group fallback.** The
-resolver-side re-parse mechanic (§4.5.3.4) closes detection for
-UN-ALIASED residuals — `ReturnItem.Name` IS the verbatim source text
-(parser expr.go:204), so re-parse walks the tree and finds any nested
-aggregate. For ALIASED residuals the re-parse mechanic cannot execute
-(verbatim text is unrecoverable), and R5 falls back to over-grouping
-every aliased `ExprProjection`. The properties of that fallback split
-cleanly:
+**Preserved-vs-violated split for the R5 posture.** The uniform
+over-group posture has a clean split of guarantees:
 
 - **PRESERVED — monotonicity of the grouping-decision lattice element.**
   The grouping-decision element is the set of columns marked
-  `GroupingKey == true`. Over-grouping moves down the lattice
-  (strict superset of the correct key set), producing a finer output
-  partition than openCypher semantics dictate. Consumers whose result
-  contract is "aggregate-per-group" observe rows partitioned more
-  finely than needed but never coarser. The resolver never claims a
-  group boundary that is not present.
+  `GroupingKey == true`. Excluding an `ExprProjection` from the key
+  set produces a KEY-SET STRICT SUBSET of the correct one when the
+  residual would have been a key (non-aggregate expression), and the
+  EXACT key set when the residual would not have been a key
+  (aggregate-carrying expression). Either way the resolver's declared
+  keys are a subset of openCypher's implicit keys. The resolver never
+  claims a group boundary that is not present.
 
-- **VIOLATED — result-set semantics for aliased-aggregate residuals.**
-  When the aliased ExprProjection's expression contains a nested
-  aggregate, over-grouping treats the alias as a grouping key, which
-  causes the aggregate function to fold over a group of one row per
-  input row (an aggregate of a singleton is a trivial identity for
-  `count`, `sum`, `min`, `max`, `collect`) instead of the intended fold
-  across all rows. Downstream consumers get an aggregation whose
-  cardinality does not match openCypher's implicit-grouping semantics:
-  they see per-row aggregate values, not the collapsed group's value.
-  This is a semantically observable error, not just a slower plan.
+- **VIOLATED — result-set semantics for non-aggregate ExprProjection
+  residuals in an aggregate-containing Part.** When a non-aggregate
+  `ExprProjection` (e.g. `1 + n.age`) appears alongside an
+  `AggregateProjection` (e.g. `count(n)`), openCypher would treat the
+  arithmetic residual as a grouping key and partition rows by its
+  value; R5 excludes it from the key set, so consumers observe
+  aggregate rollup across rows that openCypher would keep separate.
+  Fewer output rows than openCypher semantics dictate.
+  This is a semantically observable error, not just a coarser plan.
 
-**Blast radius of the R5 fallback.** The fallback fires exactly when
-ALL of the following hold: (i) the projection is an `ExprProjection`
-(not a plain `RefProjection` / `LiteralProjection` / `FuncProjection` /
-`AggregateProjection`); (ii) the projection is AS-aliased (alias
-provided by the query author); (iii) the expression body contains a
-nested aggregate. Empirically this is a strict sub-class of §4.5's
-`ExprProjection` residuals: parser corpus surveys (parser_test.go
-§Stage 6 rich-expression tests) show most residuals are un-aliased
-arithmetic (`n.num + 1`), CASE, or list projections — the aliased-
-aggregate-residual shape is rare in the openCypher TCK and typically
-appears only when a projected expression is passed to a later WITH by
-alias. No R5 fixture (§6.3) uses this shape; the aliased-aggregate
-carry-forward path is not exercised until the follow-up bead
-resolves.
+Note the reversal versus round 1: the R5 posture UNDER-groups the
+key set (fewer keys than openCypher), not over-groups. The
+"grouping-decision lattice" naming holds — the resolver's key-set
+element is a strict subset of the correct one — but the direction of
+error at the result-set level flips, because the failure now bites the
+non-aggregate residual (excluded when it should be a key), not the
+aggregate residual (correctly excluded).
 
-The un-aliased case (which §4.5.3.4's re-parse handles) covers every
-R5 fixture in §6.3 that mixes aggregates with expression residuals.
+**Blast radius of the R5 posture.** The residual-under-group case
+fires exactly when ALL of the following hold for a Part K's `Returns`:
 
-**§4.5.3.3 The unfreeze option — three shapes ranked, one recommendation.**
+(i) at least one `AggregateProjection` present (so grouping mode is
+    active — §4.5.2 `hasAggregate` predicate);
+(ii) at least one `ExprProjection` present whose expression body is
+     NOT itself an aggregate call.
+
+Empirically this covers most rich-projection-and-aggregate Parts.
+Fully bounded and characterisable: R5 knows which Parts are affected
+by inspection alone (any Part whose `Returns` mixes at least one
+`AggregateProjection` with at least one `ExprProjection`).
+
+- **No R5 fixture in §6.3 exercises this shape.** The R5 fixture set
+  deliberately does not carry a Part that mixes an `AggregateProjection`
+  with an `ExprProjection`. The two aggregate fixtures
+  `aggregate_with_grouping.cypher` (mixes with a plain `RefProjection`,
+  which IS correctly identified as a grouping key) and
+  `aggregate_with_expr_residual.cypher` (mixes with an `ExprProjection`
+  RESIDUAL that contains an aggregate — the openCypher-correct
+  grouping key is empty; R5 emits empty; agrees by accident) do not
+  exercise the failure shape. See NIT-4-fix: the fixture set
+  deliberately DOES NOT include a mixed-shape residual because R5
+  cannot resolve it correctly.
+- The follow-up beads (§4.5.3.3) close the gap: once the parser emits
+  a discriminating signal on `ExprProjection`, R5's algorithm gains a
+  branch that treats non-aggregate residuals as grouping keys and
+  aggregate residuals as skipped. The uniform-skip posture is R5's
+  admitted under-approximation, filed as an outstanding refinement
+  bead, not as a permanent posture.
+
+**§4.5.3.3 The unfreeze options — parser-side discrimination is
+required.**
 
 Per ADR 0008 post-freeze revision protocol, additive axes are
-in-protocol. Three axis shapes could close this gap. Following the R4
-§7.5.5 template, this spec commits to a ranking; owner still holds the
-merge decision but reviews a stated recommendation, not a menu.
+in-protocol. Two shape families could close the gap; both live at the
+parser boundary because that is where classification happens. Shape C
+(text-on-`ReturnItem`) is retired: this round's B7 finding shows that
+text alone does not help — re-parsing the text feeds the SAME
+`classifyRichExpression` and produces the same opaque `ExprProjection`
+back. The discriminator must be produced BY the parser, not
+reconstructed by the resolver.
 
-**Shape A — `ExprProjection.OriginalText string` axis** (model
-axis on `ExprProjection`). The parser threads `originalText(l.ts, e)`
-into `NewExprProjection` at construction time, regardless of AS alias.
-The resolver re-parses this string via the same P2 mechanic
-(§4.5.3.4) that handles un-aliased residuals today, unifying the
-mechanic across aliased and un-aliased shapes. Additive, zero-value-
-safe (default `""`; empty means "text was not preserved", triggers
-over-group fallback — matches R5's current fallback exactly).
-**Pros:** literal implementation of gqlc-gyw's committed re-parse
-strategy; smallest axis on the correct model surface (the projection
-carries its own residual text); independent of `Type`; one mechanic
-(re-parse) works for both aliased and un-aliased. **Cons:** the parser
-now carries expression text as data on the model — a data duplication
-(the `Query.Query` wire keeps the parsed model AND the verbatim text).
-Consumers holding an `ExprProjection` value hold a sub-string of the
-source that was already the wire's origin. ADR 0003 argued against
-carrying the expression tree; text-as-string is not a tree, but the
-duplication concern is real.
+**Shape B — `ExprProjection.ContainsAggregate bool` axis** (parser-side
+discrimination bit; the gqlc-gyw-documented escape hatch, elevated to
+the R5-recommended fix). `classifyRichExpression` is amended to walk
+the ANTLR sub-tree for aggregate-function invocations before
+constructing the projection: if any `oC_FunctionInvocation` in the
+sub-tree resolves to a known `AggregateFunc` (`aggregateFunc` at
+`expr.go:347`), set `ContainsAggregate = true` on the emitted
+`ExprProjection`. Additive, zero-value-safe (default `false`;
+wire-safe). **Pros:** direct signal at the point of classification;
+the resolver reads `exprProj.ContainsAggregate()` and skips iff true;
+no re-parse, no text, no unbound-ref problem. Independent of `Type`
+and of AS alias. **Cons:** this is the axis gqlc-gyw's notes labelled
+"the escape hatch"; adopting it accepts that the "re-parse the text
+span" strategy was based on a mistaken assumption about what the
+frozen model preserves. Given B7 (parser drops aggregate structure at
+classification, so no re-parse recovers it), the escape hatch is the
+correctly-scoped fix, not a retreat — it directly addresses the
+information the frozen model does not carry.
 
-**Shape B — `ExprProjection.ContainsAggregate bool` axis** (model
-axis on `ExprProjection`; the gqlc-gyw-documented escape hatch). The
-parser sets this at construction time (visible in the parser's
-classifyRichExpression walk when it encounters a nested aggregate).
-Additive, zero-value-safe (default `false`; wire-safe). **Pros:** the
-smallest possible signal — one bit — with a clear semantic. Independent
-of `Type`. Consumers hold no expression sub-string. **Cons:** this is
-the exact axis gqlc-gyw's notes called the "sanctioned escape hatch,
-invoked only if the resolver's re-parse proves impractical". Adopting
-Shape B is a **retreat from the committed re-parse strategy** — the
-resolver would stop re-parsing entirely and read the pre-computed bit,
-which shifts detection responsibility from resolver to parser. That is
-architecturally coherent but reverses the gqlc-gyw decision.
-
-**Shape C — `ReturnItem.TextSpan string` axis** (model axis on
-`ReturnItem`). Preserve `ReturnItem.Name` as the AS alias AND add a
-separate `ReturnItem.TextSpan string` axis that holds the verbatim text
-regardless of alias. Additive on `ReturnItem`, not on `ExprProjection`.
-Zero-value-safe (default `""`). **Pros:** preserves gqlc-gyw's re-parse
-strategy exactly while retaining the AS alias as the column name;
-solves the gap fully; the axis's meaning ("the source text of this
-return item's expression, regardless of alias") is precise. **Cons:**
-adds an axis to a shape (`ReturnItem`) that is currently two fields
-(`Name`, `Value`), disproportionate widening for a case that only
-matters when `Value` is `ExprProjection`. The text belongs on the
-projection, not on the wrapping item.
+**Shape A/A′ — parser refines the classifier to emit
+`AggregateProjection` for nested-aggregate residuals** (parser-side
+model refinement). Rather than mark a bit, the classifier promotes a
+rich expression whose sub-tree contains at least one aggregate to an
+`AggregateProjection` (populated with the aggregate's kind, refs, and
+`Type`), pushing the outer arithmetic into an ExprInProjection use
+against the aggregate's result. **Pros:** no new axis; the existing
+sum discriminates. **Cons:** significant parser refactor —
+`AggregateProjection`'s semantics change from "the projection is
+literally an aggregate call" to "the projection contains at least one
+aggregate", which is a semantic widening of an existing sum variant;
+all downstream consumers must be audited. This is a heavier lift than
+Shape B and blurs the aggregate-vs-residual boundary. Ranked below
+Shape B.
 
 **Ranking recommendation.**
 
-1. **Shape A** — recommended. Puts the residual text on the same model
-   node that carries the residual, keeps one re-parse mechanic across
-   aliased and un-aliased cases, and honours gqlc-gyw's re-parse
-   commitment. P1 (§4.5.3.4 — `cypher.ParseExpression` parser API
-   addition) is **not** a prerequisite: P2 (synthesise `RETURN <text>`)
-   works against `OriginalText` too. P1 remains a performance
-   optimisation for either shape.
-2. **Shape C** — second choice. Correct but on the wrong surface;
-   accept if the model owner prefers to keep `ExprProjection` minimal.
-3. **Shape B** — last resort. Correct but a retreat from the re-parse
-   strategy; accept only if the model owner rules out carrying text on
-   the wire for wire-size or duplication reasons.
+1. **Shape B** — recommended. Small (one bit), sits at the exact site
+   the discrimination is needed, no downstream semantic widening.
+   Adopts the gqlc-gyw-documented escape hatch honestly: B7 evidence
+   proves the re-parse strategy is not implementable against the
+   frozen model, so the "escape hatch" characterisation was itself
+   under-specified — the bit is the correctly-scoped fix, not a
+   retreat from a working strategy.
+2. **Shape A/A′** — second choice. Correct but a semantic widening of
+   `AggregateProjection`; heavier refactor for the same signal.
+
+Shape C (`ReturnItem.TextSpan`) and Shape A (`ExprProjection.
+OriginalText`) as previously specified are retired at R5 — B7 shows
+that text-based recovery cannot re-materialise the aggregate structure
+that `classifyRichExpression` dropped at classification.
 
 **R5 disposition.**
 
-- **Over-group at R5** for aliased `ExprProjection` residuals (the
-  §4.5.3.2 fallback). This preserves the un-aliased-residual
-  correctness the re-parse mechanic already covers, and it exhibits the
-  preserved-vs-violated split §4.5.3.2 pins: monotonic on the grouping-
-  decision lattice, incorrect on result-set semantics for the
-  aliased-aggregate sub-class.
+- **Uniformly over-group at R5** for every `ExprProjection` residual
+  (per §4.5.2 and §4.5.3.2). This is the R5 code-cycle mechanic:
+  simple, deterministic, no re-parse. Preserved-vs-violated split as
+  §4.5.3.2 pins.
 
-- **File a follow-up unfreeze bead** — "Model: add `ExprProjection.
-  OriginalText string` (Shape A) closing resolver-stage-r5 §4.5.3.3
-  aliased-ExprProjection gap; secondary choices Shape C
-  (`ReturnItem.TextSpan`) or Shape B (`ExprProjection.
-  ContainsAggregate`, escape hatch)". Owner picks the shape; R5 spec
-  commits to Shape A as the recommendation. Dependency: gqlc-0mx.7 at
-  close; blocks the resolver R5 grouping-key refinement PR.
+- **File a follow-up model unfreeze bead** — "Model: add
+  `ExprProjection.ContainsAggregate bool` (Shape B per
+  resolver-stage-r5 §4.5.3.3), populated by the parser's
+  `classifyRichExpression` walk of the ANTLR sub-tree for aggregate-
+  function invocations. Closes the R5 residual-under-group gap: the
+  resolver reads the bit and skips residuals that are true, treats
+  residuals that are false as grouping-key candidates. Secondary
+  option: Shape A/A′ (classifier promotes nested-aggregate residuals
+  to `AggregateProjection`)." Independent of gqlc-ay9 / gqlc-5xg.
+  Dependency: gqlc-0mx.7 (R5 code cycle) at close; blocks the resolver
+  R5 grouping-key refinement PR.
 
-- **Do not contort R5 around the gap.** The three shapes are
-  ADR-0008-in-protocol and gated on the owner's unfreeze decision. R5
-  ships as scoped with the Shape A recommendation on file; the follow-
-  up bead is filed alongside the R5 code-cycle close-out (per the
-  R4 §7.5.5 template).
+- **Do not contort R5 around the gap.** R5 ships as scoped with the
+  uniform-over-group posture; the follow-up bead is filed alongside
+  the R5 code-cycle close-out (per the R4 §7.5.5 template).
 
-**§4.5.3.4 The R5 re-parse mechanic — Option P2 (synthesise-and-parse).**
+**§4.5.3.4 Why R5 does not attempt a resolver-side re-parse.**
 
-The R5 code cycle commits to **Option P2**: the resolver's re-parse
-uses the existing parser API by wrapping the residual text in a full
-Cypher query (`RETURN <text>`) and parsing that. This works today
-against the frozen parser surface with no new exported function. The
-alternative, Option P1 (an additive `cypher.ParseExpression(text
-string) (Expr, error)` parser entry point that visits the
-`oC_Expression` rule directly), is a **performance-only** optimisation
-that saves parser allocation per residual and is deferred to a
-separate follow-up bead. R5 code ships on P2; if P1 lands later, the
-mechanic switches without visible resolver-behaviour change.
+The gqlc-gyw notes committed to "resolver-side re-parse of the
+projection's original text span". This round-2 review discovered that
+the strategy is not implementable against the frozen model, for two
+independent reasons:
 
-**Mechanic — un-aliased `ExprProjection` case.**
+- **B7a — synthesise-and-parse (Option P2) breaks on unbound refs.**
+  Any residual carrying a `Ref{Variable: "n"}` re-parses as `RETURN
+  <text>` with no MATCH — the parser's referential-integrity sweep
+  at `internal/query/cypher/build.go:155-158` (pinned by parser_test
+  `"unbound variable"`) rejects unbound `n` with `ErrUnboundVariable`
+  before the classifier runs. Scaffolding the ref via an anonymous
+  `MATCH (n)` would work AT the parse level, but see B7b.
 
-```
-containsAggregateResolverSideReparse(item query.ReturnItem) bool =
-    // Only ExprProjection carries this question.
-    exprProj, ok := item.Value.(query.ExprProjection)
-    if !ok:
-        return false
+- **B7b — `classifyRichExpression` drops the aggregate structure at
+  classification.** Even if the re-parse succeeds (bare-atom shape,
+  or scaffolded refs), `classifyRichExpression` at
+  `typing.go:857-877` unconditionally returns
+  `NewExprProjection(refs, t)`. The `AggregateFunc` sub-tree is not
+  preserved; the walker step of any P1/P2 mechanic has nothing to
+  find. Parser test `"aggregate call in arithmetic"` at
+  `parser_test.go:1320-1324` pins the shape: `RETURN count(n) + 1` →
+  `ExprProjection{[Ref{n}], TypeInt}`, aggregate kind not recorded.
 
-    // The parser's ReturnItem.Name IS the verbatim source text for
-    // UN-ALIASED items (parser expr.go:204). If the projection was
-    // AS-aliased, Name is the alias (expr.go:206 overwrite) and the
-    // verbatim text is unrecoverable from the frozen model — the
-    // §4.5.3.3 over-group fallback fires.
+Both problems are parser-side. The resolver cannot solve them; a
+parser-side change (Shape B, `ContainsAggregate` bit set by
+`classifyRichExpression` during its own tree walk) is the right
+level. Deferred to the follow-up bead §4.5.3.3.
 
-    // P2 re-parse: synthesise a Cypher query "RETURN <item.Name>",
-    // parse it via the existing parser API. If the parse succeeds,
-    // walk the resulting projection tree for AggregateProjection.
-    q, parseErr := cypher.New().Parse(strings.NewReader(
-        "RETURN " + item.Name))
-    if parseErr != nil:
-        // item.Name was an AS alias whose text does not parse as a
-        // Cypher expression (or a legitimately malformed span).
-        // §4.5.3.3 over-group fallback kicks in — assume aggregate
-        // residual so the alias is EXCLUDED from grouping keys.
-        return true      // conservative over-approximation
+The R5 code cycle SHIPS with no re-parse mechanic. The
+`containsAggregateResolverSideReparse` pseudocode of round 1's spec
+is retracted; no such helper is implemented; the algorithm in §4.5.2
+skips every `ExprProjection` uniformly.
 
-    // Walk the parsed query's projection for any AggregateProjection
-    // or nested AggregateFunc call.
-    return queryContainsAggregate(q)
-```
+**§4.5.3.5 Fixture posture — no discriminating fixture at R5.**
 
-**Judgment call — parse-failure means AS-aliased.** For an un-aliased
-`ExprProjection`, `ReturnItem.Name` is a verbatim Cypher expression;
-`RETURN <expression>` parses. If the synthesised parse fails, the name
-is almost certainly an AS alias (Cypher identifier, may or may not
-parse as `RETURN <ident>` — a bare identifier `RETURN y` parses to a
-`RefProjection` when `y` is in scope, but the resolver's synthesised
-query has no MATCH scope, so `y` reads as a raw parameter-free
-identifier). The over-group fallback treats every parse-failure as
-aggregate-residual — the safe direction per §4.5.3.3.
+The R5 fixture set (§6.3) deliberately does not include a Part that
+mixes `AggregateProjection` with `ExprProjection`. Under the
+uniform-over-group posture, such a fixture would encode the R5 gap
+directly (non-aggregate `ExprProjection` gets `GroupingKey == false`
+when openCypher demands `true`). Two consequences:
 
-An alias that happens to be a bare identifier (`RETURN x + 1 AS y`;
-Name == `y`) parses as a valid single-column `RETURN y`, and `y` on
-its own contains no aggregate call, so `queryContainsAggregate`
-returns `false`, and the projection is treated as a grouping-key
-candidate — correct for the alias case, and correct for the un-aliased
-`RETURN y` case (both are non-aggregate refs).
+- The `aggregate_with_expr_residual.cypher` fixture (`MATCH
+  (n:Person) RETURN 1 + count(n)`) at §6.3 is retained. Its
+  `ExprProjection` residual is aggregate-carrying; openCypher's
+  correct answer is empty grouping key (aggregate present, no
+  non-aggregate columns); R5 emits empty grouping key (aggregate
+  present, `ExprProjection` skipped); the results agree. The fixture
+  documents the R5 posture; it does not test discrimination, because
+  no discrimination is implemented at R5.
 
-The tricky sub-case is `RETURN 1 + count(n) AS x`: `item.Name == "x"`,
-`RETURN x` parses to `RefProjection{Ref{Variable:"x"}}`, contains no
-aggregate, so treated as grouping-key — the WRONG answer per openCypher
-semantics. This is the §4.5.3.2 gap materialising. Recommendation
-§4.5.3.3 stands: **file the Shape A unfreeze bead**; do not contort
-R5 further.
+- A discriminating fixture cannot exist at R5. Under uniform
+  over-group, every fixture that would discriminate residual kinds
+  gets the same answer regardless of underlying residual structure.
+  The discriminating fixture arrives on the follow-up bead's widening
+  PR, alongside the parser-side Shape B change.
 
-**Why P2 and not P1 for the code cycle.**
+**Post-follow-up target discriminating fixture** (documented here for
+the follow-up bead's design intent, NOT included in the R5 fixture
+set):
 
-- **P2 works today** against the frozen parser surface (`cypher.New().
-  Parse`). No new exported API; no parser code change; no risk of an
-  unreviewed public surface addition.
-- **P2 is correct** for both aliased and un-aliased cases in exactly
-  the same way P1 would be — both mechanics classify by walking the
-  parsed tree; the difference is per-invocation cost, not correctness.
-- **P1's cost saving is not blocking** at R5. Fixture parse cost is
-  ~sub-millisecond on modern hardware; the resolver runs once per
-  query at codegen time, not per row.
-- **P1 remains a filed follow-up bead** — "Parser: add
-  `cypher.ParseExpression(text string) (Expr, error)` for resolver-
-  side text-span re-parse (per gqlc-gyw contract; R5 §4.5.3.4 Option
-  P1)". Additive parser API surface, not a model change — orthogonal
-  to ADR 0008's freeze. Consumed by R5 code cycle only as a
-  performance upgrade; the semantics stay P2.
-
-**§4.5.3.5 Discriminating fixture.** `aggregate_with_expr_residual.cypher`
-= `MATCH (n:Person) RETURN 1 + count(n)` — no AS alias, so
-`ReturnItem.Name == "1 + count(n)"` (the verbatim text). Under P2, the
-resolver synthesises `RETURN 1 + count(n)`, parses it, and walks the
-projection tree — the parser lowers the `count(n)` call as an
-`AggregateProjection` inside an `ExprProjection`, so
-`queryContainsAggregate` returns true. Grouping key is empty (only one
-projection, an ExprProjection-residual). `Columns[0].GroupingKey ==
-false`. The `Distinct` is not affected. If instead a fixture has
-`RETURN n.name, 1 + count(n)`, the grouping key includes `n.name`
-(index 0), and the ExprProjection-residual at index 1 is not a key
-(`Columns[0].GroupingKey == true`, `Columns[1].GroupingKey == false`).
-
-The discriminating question: swap the fixture to `RETURN n.name, 1 +
-n.name` (no aggregate). Under P2, the resolver synthesises `RETURN 1 +
-n.name`, parses it, and walks the projection tree — no `count`,
-`sum`, `min`, `max`, `collect`, `avg`, `stdev`, or `percentile` call is
-encountered, so `queryContainsAggregate` returns false. Both
-projections are treated as grouping keys: `Columns[0].GroupingKey ==
-true, Columns[1].GroupingKey == true`. This outcome pins that the P2
-re-parse mechanic distinguishes aggregate-carrying from
-aggregate-free residual expressions, without requiring the P1 parser
-API addition.
-
-Both discriminating outcomes hold under P2 with no parser changes and
-no model changes — the R5 code cycle exercises this exact mechanic
-against the frozen parser surface.
+- `aggregate_with_expr_grouping_key.cypher` — `MATCH (n:Person)
+  RETURN 1 + n.age, count(n)`. After Shape B lands: the
+  `ExprProjection` for `1 + n.age` has `ContainsAggregate == false`,
+  so R5's refined algorithm marks it as a grouping key
+  (`Columns[0].GroupingKey == true`); the `AggregateProjection` for
+  `count(n)` is skipped (`Columns[1].GroupingKey == false`). At R5
+  today, this fixture would fail (both would be `false` under the
+  uniform-over-group posture, WRONG for `Columns[0]`) — which is why
+  it is excluded from §6.3.
 
 #### 4.5.4 Carried-alias projection — the `RefProjection` bypass
 
@@ -1869,9 +1849,17 @@ json`, generated with `-update`.
   count(*) AS n`. Two columns; `Columns[0].GroupingKey == true`,
   `Columns[1].GroupingKey == false`.
 - `aggregate_with_expr_residual.cypher` — `MATCH (n:Person) RETURN 1 +
-  count(n)`. One column; the un-aliased ExprProjection's Name is the
-  verbatim source text; §4.5.3 re-parse detects aggregate; group key
-  is empty. `Columns[0].GroupingKey == false`.
+  count(n)`. One column, an `ExprProjection` residual. Grouping mode
+  is active (an `AggregateProjection` — the `count(n)` — sits INSIDE
+  the residual, but the parser collapses the whole rich expression to
+  `ExprProjection{[Ref{n}], TypeInt}` per §4.5.3.1 and
+  parser_test.go:1320-1324, so R5 sees no top-level
+  `AggregateProjection` at all — `hasAggregate` in §4.5.2 evaluates
+  false and grouping does not fire; the single residual gets
+  `GroupingKey == false`. `Columns[0].GroupingKey == false`. This
+  fixture documents the R5 posture: agrees with openCypher's empty
+  grouping key by construction, does NOT discriminate the residual's
+  aggregate content (§4.5.3.5).
 - `aggregate_at_with.cypher` — `MATCH (a:Person) WITH count(a) AS n
   RETURN n`. Aggregate at non-final Part carries through as a scalar
   column.
@@ -2096,7 +2084,7 @@ R4's out-of-scope table survives with revisions:
 | UNION branches disagree on column count, names, types, or nullability | `ErrUnionColumnMismatch` | **R5 (this stage)** |
 | Nullability upgrades (regime (b), same-Part re-MATCH — Class B: missing-witness model gap) | silently under-demoted | gqlc-5xg (model unfreeze) |
 | Nullability upgrades (OPTIONAL-clause-sibling — Class A: missing-group-membership model gap) | silently under-demoted | gqlc-ay9 (model unfreeze) |
-| Aliased `ExprProjection` with nested aggregate — grouping-key discovery gap | silently over-grouped | §4.5.3.3 follow-up bead (model or parser API) |
+| `ExprProjection` residual mixed with `AggregateProjection` in the same Part's Returns — grouping-key discrimination gap | silently under-grouped (uniform-exclude posture) | §4.5.3.3 follow-up bead (Shape B `ContainsAggregate` parser-side bit) |
 
 **Silently accepted (not routed anywhere):**
 
@@ -2127,20 +2115,21 @@ escape hatch." R5 as this spec scopes it:
   owned virtual-ReturnItem construction over the in-scope binding set.
 - **Implicit grouping keys:** implemented in §4.5.2 via a per-Part
   algorithm.
-- **`gqlc-gyw` re-parse contract:** implemented in §4.5.3.4 (P2
-  synthesise-and-parse mechanic) for un-aliased `ExprProjection`. The
-  aliased case (§4.5.3.2) is a discovered frozen-model gap, addressed
-  by a model unfreeze (§4.5.3.3 recommends **Shape A —
-  `ExprProjection.OriginalText`**; secondary options Shape C then
-  Shape B). §4.5.3.4 Option P1 is a separate parser-API optimisation,
-  not a prerequisite. R5 ships with the P2 mechanic on un-aliased
-  residuals and the over-group fallback on aliased residuals, and
-  files two follow-up beads (model Shape A; parser P1).
-- **`ContainsAggregate` axis as escape hatch, never inferred from
-  Type:** honoured in §4.5.3.3 (Shape B is the third-ranked option and
-  characterised explicitly as the escape hatch — a retreat from the
-  re-parse strategy; accepted only if the model owner rules out
-  carrying text on the wire).
+- **`gqlc-gyw` re-parse contract:** NOT implemented at R5. Round-2
+  evidence (§4.5.3.4) shows the re-parse strategy is not implementable
+  against the frozen model — `classifyRichExpression` (typing.go:
+  857-877) drops aggregate structure at classification, so no
+  resolver-side re-parse recovers it, regardless of P1/P2/text-span
+  mechanic. R5 ships with uniform over-group of every `ExprProjection`
+  residual (§4.5.2, §4.5.3.2). One follow-up bead (§7.1.5) files the
+  parser-side discrimination bit (Shape B — `ExprProjection.
+  ContainsAggregate`, populated by the parser during the same walk
+  that types the sub-tree).
+- **`ContainsAggregate` axis re-characterised.** Round 1 treated it
+  as a retreat from re-parse; round 2 promotes it to the R5-
+  recommended parser-side fix, because B7 evidence shows the re-parse
+  strategy was never workable and the bit is the correctly-scoped
+  fix.
 
 ### 7.1 Under-approximation vs the bead's canonical example (R4 template applied to R5)
 
@@ -2154,9 +2143,21 @@ row survives Part 1's required MATCH (b), so `b` is non-NULL. Ideal
 flow-typing demotes `b`. Same for `MATCH (b)-[:S]->(c)` — both `b` and
 `c` are non-NULL.
 
-Grouping-key semantics for aliased-ExprProjection-with-nested-aggregate:
-`RETURN 1 + count(n) AS c`. The query is implicitly grouped; the empty
-non-aggregate set means one result row. `c` is INT (the sum's result).
+Grouping-key semantics for `ExprProjection`-residuals mixed with
+`AggregateProjection`: e.g. `MATCH (n:Person) RETURN n.age + 1,
+count(n)`. openCypher's implicit grouping rule (openCypher §3.4.5)
+partitions rows by every non-aggregate projection; here the arithmetic
+residual `n.age + 1` (an `ExprProjection` on Refs=[{n,age}]) is a
+grouping key and `count(n)` aggregates within each partition. R5's
+uniform-exclude posture (§4.5.3.2) treats the residual as
+`GroupingKey == false`, so rows with different `n.age + 1` values are
+folded together — fewer output rows than openCypher.
+The complementary case `RETURN 1 + count(n)` (nested aggregate in the
+residual) has no non-aggregate projection, so openCypher's implicit
+grouping key is empty; R5 also emits empty grouping key (no
+top-level aggregate, `hasAggregate` false — the residual is opaque);
+the results agree by construction (see
+`aggregate_with_expr_residual.cypher` at §6.3).
 
 #### 7.1.2 The frozen-model gap, stated honestly
 
@@ -2169,13 +2170,17 @@ distinct from both:
   Part 1 re-records `a` as a fresh non-nullable NodeBinding, so the
   local seed override closes the demotion path). R4 §7.4 item 1's
   hand-off statement is directly evidenced by source.
-- **Aliased `ExprProjection` original-text preservation** (§4.5.3.2):
-  `ReturnItem.Name` holds the AS alias, not the verbatim text, so
-  gqlc-gyw's re-parse strategy cannot execute on aliased residuals.
-  Distinct from gqlc-ay9 (missing group membership on `Binding`) and
-  gqlc-5xg (missing witness on `Binding` after mergeBinding). This gap
-  is on a different model surface: `ReturnItem` or `ExprProjection`
-  (three shape candidates per §4.5.3.3).
+- **`ExprProjection` residual aggregate-content discrimination**
+  (§4.5.3.2): `classifyRichExpression` (typing.go:857-877) collapses
+  every rich expression to opaque `ExprProjection{refs, resultType}`
+  regardless of whether the sub-tree contains a nested aggregate;
+  parser_test.go:1320-1324 pins the shape. Consequence: no
+  resolver-side re-parse can distinguish `count(n) + 1` from `n.age
+  + 1`; gqlc-gyw's re-parse strategy is not implementable against
+  the frozen model (§4.5.3.4). Distinct from gqlc-ay9 (missing group
+  membership on `Binding`) and gqlc-5xg (missing witness on `Binding`
+  after mergeBinding). This gap sits at the parser's classification
+  boundary and is closed by a parser-side change (Shape B, §4.5.3.3).
 
 #### 7.1.3 What R5-as-scoped loses, quantified
 
@@ -2184,80 +2189,87 @@ distinct from both:
   confirms Part K+1 re-records same-named MATCHes as fresh Bindings,
   so R5's per-Part local-seed override sees the required MATCH and
   demotes.
-- **Aliased-ExprProjection grouping:** R5 conservatively over-groups
-  every aliased-ExprProjection (§4.5.3.3 recommendation). Consumers
-  running a query with an aliased ExprProjection containing a nested
-  aggregate will see a result row-set partitioned more finely than
-  openCypher dictates. Not a lattice-safe result-set under-
-  approximation, but a lattice-safe grouping-decision over-
-  approximation.
+- **`ExprProjection` residual grouping-key discrimination:** R5
+  uniformly excludes every `ExprProjection` residual from the
+  grouping-key set (§4.5.2, §4.5.3.2). Consumers running a query that
+  mixes an `AggregateProjection` with a non-aggregate `ExprProjection`
+  observe aggregate rollup across rows that openCypher would partition
+  by the residual's value — fewer output rows than openCypher
+  semantics dictate. The R5 code cycle KNOWS which Parts are affected:
+  any Part whose `Returns` mixes at least one `AggregateProjection`
+  with at least one `ExprProjection`. The blast radius is fully
+  characterisable by inspection; consumers can be warned. No R5
+  fixture exercises the failure shape (§6.3 deliberately excludes
+  mixed-shape residuals; §4.5.3.5).
 
 #### 7.1.4 The unfreeze options (following §4.5.3.3)
 
-Three shape candidates for the aliased-ExprProjection gap, ranked:
+Two shape candidates for the residual-discrimination gap, ranked:
 
-1. **Shape A** — `ExprProjection.OriginalText string` axis. Preferred:
-   puts residual text on the same model node that carries the residual,
-   keeps one re-parse mechanic across aliased/un-aliased, honours the
-   gqlc-gyw re-parse commitment. P1 is not a prerequisite (P2 works
-   against `OriginalText` too).
-2. **Shape C** — `ReturnItem.TextSpan string` axis. Correct but on the
-   wrong surface (widens the two-field `ReturnItem` for a case that
-   only matters when `Value` is `ExprProjection`).
-3. **Shape B** — `ExprProjection.ContainsAggregate bool` axis. Last
-   resort. Correct but a retreat from the committed re-parse strategy;
-   accept only if the model owner rules out carrying text on the wire
-   for size or duplication reasons.
+1. **Shape B** — `ExprProjection.ContainsAggregate bool` axis.
+   Recommended. Parser-side discrimination bit set by
+   `classifyRichExpression` during the same ANTLR walk that types the
+   sub-tree. Zero-value-safe; smallest possible signal at the exact
+   site the information becomes available; resolver consumes with one
+   accessor call, no re-parse.
+2. **Shape A/A′** — parser refines the classifier to promote
+   nested-aggregate residuals to `AggregateProjection`. Correct but
+   heavier: semantic widening of an existing sum variant; downstream
+   audit required.
 
-R5 spec commits to the Shape A recommendation on file. Owner still
-holds merge authority for the unfreeze PR, but reviews a specific
+Shape A (`ExprProjection.OriginalText`) and Shape C (`ReturnItem.
+TextSpan`) as previously proposed are retired at R5 — B7 shows that
+text-based recovery cannot re-materialise the aggregate structure
+dropped by `classifyRichExpression` at classification.
+
+R5 spec commits to Shape B as the recommendation. Owner still holds
+merge authority for the unfreeze PR, but reviews a specific
 recommendation, not a menu — per the R4 §7.5.5 precedent.
 
 #### 7.1.5 Recommendation
 
-**R5 proceeds as scoped; two follow-up beads are filed alongside the R5
+**R5 proceeds as scoped; one follow-up bead is filed alongside the R5
 code-cycle close-out, on the model of R4 §7.5.5 beads 1+2.**
 
 Rationale:
-- The over-group fallback is safe on the preserved axis (monotonic on
-  the grouping-decision lattice — §4.5.3.2 PRESERVED clause) and
-  observably wrong on the violated axis (result-set semantics for
-  aliased-aggregate residuals — §4.5.3.2 VIOLATED clause). The gap
-  fires on a bounded and characterisable sub-class: aliased
-  `ExprProjection` whose expression body contains a nested aggregate.
-- No R5-fixture-level correctness gap: every R5 fixture in §6.3 that
-  mixes aggregates with expression residuals uses the UN-ALIASED shape
-  (`aggregate_with_expr_residual.cypher`), which the §4.5.3.4 P2
-  mechanic handles correctly. The aliased-aggregate-residual fixture
-  is deliberately deferred — it arrives on the widening PR that lands
-  the chosen unfreeze shape.
-- Shape A is ADR-0008 in-protocol; the Shape A follow-up is a normal
-  escalation, not an ADR supersedure. P1 is a parser-package addition,
-  orthogonal to the model freeze.
+- The uniform over-group posture is deterministic and simple:
+  every `ExprProjection` residual gets `GroupingKey == false`, no
+  re-parse, no alias branching, no unbound-ref problem.
+- The failure mode is bounded and characterisable: any Part whose
+  `Returns` mixes at least one `AggregateProjection` with at least one
+  `ExprProjection` mis-groups the residual. R5 knows these Parts
+  syntactically; consumers can be warned at code-generation time.
+- No R5-fixture-level correctness gap that goes undetected: §6.3
+  deliberately does not include a fixture with the failure shape;
+  §4.5.3.5 documents the excluded post-follow-up target fixture
+  (`aggregate_with_expr_grouping_key.cypher`).
+- Shape B is ADR-0008 in-protocol (an additive bool on
+  `ExprProjection`); the follow-up is a normal escalation, not an
+  ADR supersedure. No parser-API follow-up (P1) is needed under
+  fix 4 — the resolver does not re-parse at R5, and under Shape B it
+  does not re-parse post-unfreeze either; the discrimination bit is
+  read directly. The round-1 P1 follow-up bead is RETIRED.
 
-**Follow-up bead #1 — model unfreeze (aliased-ExprProjection gap):**
+**Follow-up bead — parser-side discrimination (Shape B):**
 
-- "Model: add `ExprProjection.OriginalText string` (Shape A per
-  resolver-stage-r5 §4.5.3.3) closing the R5 aliased-ExprProjection
-  grouping-key gap. Parser threads verbatim projection text into
-  `NewExprProjection` regardless of AS alias; resolver R5 §4.5.3.4 P2
-  mechanic then works uniformly across aliased and un-aliased shapes.
-  Secondary options if Shape A is rejected: Shape C (`ReturnItem.
-  TextSpan`), Shape B (`ExprProjection.ContainsAggregate`, escape
-  hatch)." Independent of gqlc-ay9 / gqlc-5xg. Dependency: gqlc-0mx.7
-  (R5 code cycle) at close; blocks the resolver R5 grouping-key
-  refinement PR.
+- "Model: add `ExprProjection.ContainsAggregate bool` (Shape B per
+  resolver-stage-r5 §4.5.3.3), populated by the parser's
+  `classifyRichExpression` walk of the ANTLR sub-tree for aggregate-
+  function invocations. Closes the R5 `ExprProjection`-residual
+  grouping-key gap: the resolver reads `exprProj.ContainsAggregate()`
+  and treats residuals with `false` as grouping-key candidates,
+  `true` as skipped. Secondary option if Shape B is rejected:
+  Shape A/A′ (classifier promotes nested-aggregate residuals to
+  `AggregateProjection`, semantic widening of the sum variant)."
+  Independent of gqlc-ay9 / gqlc-5xg. Dependency: gqlc-0mx.7 (R5 code
+  cycle) at close; blocks the resolver R5 grouping-key refinement PR.
 
-**Follow-up bead #2 — parser API optimisation (P1, independent):**
-
-- "Parser: add `cypher.ParseExpression(text string) (Expr, error)` for
-  resolver-side text-span re-parse (per gqlc-gyw contract; R5 §4.5.3.4
-  Option P1). Additive parser API surface, not a model change —
-  orthogonal to ADR 0008's freeze. Enables §4.5.3.4's re-parse
-  mechanic to skip the `RETURN <text>` synthesis wrapper, saving one
-  full parse per residual. Semantics identical to P2." Not a
-  prerequisite for follow-up bead #1; may be filed and consumed
-  independently.
+**No parser-API bead (P1) — retired.** Round 1 proposed
+`cypher.ParseExpression` as a follow-up parser API for resolver-side
+re-parse. B7 evidence shows the re-parse strategy is not implementable
+against the frozen model; the parser API alone would not close the
+gap. Shape B (a parser-side discrimination bit) closes it directly;
+`ParseExpression` is not needed at R5 or after Shape B lands.
 
 **No cross-WITH assumption verification bead needed.** Parser test
 `"with distinct"` at `parser_test.go:1218-1246` pins the cross-WITH
@@ -2303,8 +2315,28 @@ citations below name the file:line the claim rests on.
   `internal/query/query.go:1209-1234`; parser Stage 3 §4 pins the eight
   values.
 - **`ExprProjection` struct with `refs` and `resultType` fields only**
-  — `internal/query/query.go:1171-1174`. No original-text axis at
-  freeze — §4.5.3.2's gap.
+  — `internal/query/query.go:1171-1174`. No original-text axis and no
+  aggregate-content bit at freeze — the boundary that produces
+  §4.5.3.2's gap.
+- **`classifyRichExpression` drops aggregate structure at
+  classification** — `internal/query/cypher/typing.go:857-877` (the
+  Stage-6 residual classifier unconditionally returns
+  `NewExprProjection(refs, t)` for every non-atom expression; there
+  is no branch that inspects the sub-tree for a nested aggregate).
+  §4.5.3.1 and §4.5.3.4 rely on this fact.
+- **Parser test `"aggregate call in arithmetic"` pins the classifier
+  output for a nested-aggregate residual** —
+  `internal/query/cypher/parser_test.go:1320-1324`: `RETURN count(n)
+  + 1` → `ExprProjection{[Ref{n}], TypeInt}`, aggregate function
+  kind not recorded. Direct evidence for the round-2 B7 finding.
+- **Parser referential-integrity sweep rejects unbound refs at parse
+  time** — `internal/query/cypher/build.go:155-158` (`if !scope
+  [ref.name] { ErrUnboundVariable }`). §4.5.3.4 relies on this: any
+  resolver-side `RETURN " + item.Name"` synthesise-and-parse fails
+  the sweep as soon as the residual carries a Ref, so P2 is
+  unimplementable against the frozen surface without ref
+  scaffolding (and even with scaffolding, `classifyRichExpression`
+  drops the aggregate — see the two prior bullets).
 - **`ExprProjection.Refs()`, `ExprProjection.Type()`** —
   `internal/query/query.go:1185-1192`.
 - **`UnionKind` enum: `UnionDistinct`, `UnionAll`** —
@@ -2413,40 +2445,42 @@ of scope of this document. The spec is done when:
    the carried-scope construction (§4.2), the UNION column
    compatibility rule (§4.3), the `ReturnsAll` expansion (§4.4), the
    `AggregateProjection` handler with grouping-key discovery
-   (§4.5.1-§4.5.2), the gqlc-gyw re-parse mechanic for un-aliased
-   `ExprProjection` residuals and the honest gap-record for aliased
-   residuals (§4.5.3), the cross-WITH nullability extension (§4.6),
-   and the Distinct fold (§4.7).
+   (§4.5.1-§4.5.2), the honest R5 posture on `ExprProjection`
+   residuals — uniform over-group with parser-side discrimination
+   deferred to a follow-up bead (§4.5.3), the cross-WITH nullability
+   extension (§4.6), and the Distinct fold (§4.7).
 4. §5 records the one new sentinel `ErrUnionColumnMismatch`, revises
    `ErrOutOfR0Scope`'s message-set list for retirements, and preserves
    the R4 sentinels' identity.
 5. §6 designs the fixture set: the R5 valid schema `social_r5.gql`
-   (§6.2), the R5 valid fixture list (~19 fixtures), the R5 invalid
+   (§6.2), the R5 valid fixture list (20 fixtures), the R5 invalid
    fixture list (5 additions + 5 retirements), the revised
    `invalidFixtures` map (§6.4), the golden-rebaseline plan (§3.3
-   refined by §4.5.2 — two added lines per golden), and the R5 harness
+   refined by §3.2.1 — two added lines per golden: `"distinct"` at
+   top level, `"groupingKey"` per column), and the R5 harness
    invariants (§6.6).
 6. §7 states the R5 capability scope in shape terms and lists its
    out-of-scope complement with the sentinel or under-demote posture
-   for each construct. §7.1 walks the honest state on the three
-   discovered gap classes: cross-WITH regime (b) closes (contingent on
-   parser assumption); aliased-ExprProjection grouping-key gap
-   over-approximates; Class A + Class B under-approximations from R4
-   persist unchanged.
+   for each construct. §7.1 walks the honest state on the discovered
+   gap classes: cross-WITH regime (b) closes (contingent on parser
+   assumption); `ExprProjection` residual grouping-key discrimination
+   uniformly under-groups pending Shape B follow-up; Class A + Class B
+   under-approximations from R4 persist unchanged.
 7. §8 cross-checks every factual claim against source file:line.
 8. `just test` is untouched-green — this cycle is docs-only.
 9. **At R5 code-cycle close-out** (Cycle 2, not this Cycle 1):
-   - The follow-up unfreeze bead for the aliased-ExprProjection gap is
-     filed (§7.1.5): "Resolver R5 — grouping-key discovery for aliased
-     `ExprProjection` …". Owner picks between Shape A / Shape B / Shape
-     C.
-   - The parser-API follow-up bead is filed (§7.1.5): "Parser: add
-     `cypher.ParseExpression(text string) (Expr, error)`". Independent
-     of the model.
+   - The parser-side discrimination bead is filed (§7.1.5): "Model:
+     add `ExprProjection.ContainsAggregate bool` (Shape B) closing
+     the R5 `ExprProjection`-residual grouping-key gap". Owner picks
+     between Shape B (recommended) and Shape A/A′ (classifier
+     promotion).
+   - The round-1 parser-API bead (`cypher.ParseExpression`) is
+     RETIRED — the resolver does not re-parse at R5 and does not
+     re-parse under Shape B either.
    - gqlc-ay9 and gqlc-5xg remain OPEN; R5 does not close them.
-   - gqlc-gyw closes (R5 admits AggregateProjection and implements the
-     re-parse contract for un-aliased residuals; the aliased-residual
-     gap is scoped to the new follow-up bead above, not gqlc-gyw).
+   - gqlc-gyw closes (R5 admits AggregateProjection; the residual-
+     discrimination question is scoped to the new Shape B follow-up
+     bead above, not gqlc-gyw).
 
 The spec is a review artefact for Linus (adversarial reviewer); every
 blocker he raises is fixed on this same branch before the branch
