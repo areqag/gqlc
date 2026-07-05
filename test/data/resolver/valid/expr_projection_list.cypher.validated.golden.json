@@ -1,0 +1,16 @@
+{
+  "columns": [
+    {
+      "name": "xs",
+      "type": {
+        "kind": "list",
+        "element": {
+          "kind": "scalar",
+          "scalar": "int"
+        }
+      }
+    }
+  ],
+  "parameters": [],
+  "statement": "read"
+}

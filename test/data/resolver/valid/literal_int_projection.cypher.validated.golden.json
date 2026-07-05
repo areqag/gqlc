@@ -1,0 +1,13 @@
+{
+  "columns": [
+    {
+      "name": "answer",
+      "type": {
+        "kind": "scalar",
+        "scalar": "int"
+      }
+    }
+  ],
+  "parameters": [],
+  "statement": "read"
+}

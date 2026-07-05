@@ -15,17 +15,19 @@ var (
 	ErrUnknownLabel = errors.New("unknown label")
 
 	// ErrUnknownProperty is returned when a property reference — a property
-	// projection or an inline-map parameter use — names a property the
-	// resolved node or edge type does not declare.
+	// projection, an inline-map parameter use, or a rich-expression /
+	// predicate PropertyUse — names a property the resolved node or edge
+	// type does not declare. Message-set widened at R2 to include
+	// PropertyUse witnesses from ExprInProjection / ExprInPredicate slots.
 	ErrUnknownProperty = errors.New("unknown property")
 
 	// ErrOutOfR0Scope is returned when the query contains a construct the
 	// current capability scope does not support (multi-part, multi-branch,
-	// non-Ref projections, WITH, UNION, writes, CALL, RETURN DISTINCT,
+	// AggregateProjection, WITH, UNION, writes, CALL, RETURN DISTINCT,
 	// RETURN *, undirected / var-length / multi-type / untyped edges, path /
-	// unwind / call bindings, parameters with more than one Use, non-Property
-	// uses). Its fail-sites retire stage by stage as R2..R7 introduce the
-	// constructs.
+	// unwind / call bindings, write-side ExprUses (SET / DELETE),
+	// ExprProjection typed as list-of-entities). Its fail-sites retire
+	// stage by stage as R2..R7 introduce the constructs.
 	ErrOutOfR0Scope = errors.New("query construct not supported at resolver stage R0")
 
 	// ErrUnknownEdge is returned when a directed single-hop edge binding's
@@ -40,6 +42,14 @@ var (
 	// or the pattern's unlabelled bindings form a cycle no single edge can
 	// break. Introduced at R1.
 	ErrAmbiguousBinding = errors.New("ambiguous binding")
+
+	// ErrParameterTypeConflict is returned when a parameter's Uses carry
+	// witnesses that do not unify: two PropertyUses whose properties differ
+	// in type or nullability, a mixed PropertyUse × ClauseSlotUse against a
+	// non-integer property, or an ExprUse whose enclosing type disagrees
+	// with a co-occurring PropertyUse. Introduced at R2. See §4.8 for the
+	// unification lattice.
+	ErrParameterTypeConflict = errors.New("parameter type conflict")
 )
 
 // allSentinels is the canonical closed set of sentinels the resolver may
@@ -52,4 +62,5 @@ var allSentinels = []error{
 	ErrOutOfR0Scope,
 	ErrUnknownEdge,
 	ErrAmbiguousBinding,
+	ErrParameterTypeConflict,
 }
