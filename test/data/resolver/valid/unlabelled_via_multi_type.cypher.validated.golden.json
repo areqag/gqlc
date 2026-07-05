@@ -4,7 +4,8 @@
       "name": "a",
       "type": {
         "kind": "node",
-        "labels": "Person"
+        "labels": "Person",
+        "nullable": false
       }
     }
   ],

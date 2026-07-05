@@ -22,7 +22,8 @@
               "label": "LIKES",
               "target": "Post"
             }
-          ]
+          ],
+          "nullable": false
         }
       }
     }

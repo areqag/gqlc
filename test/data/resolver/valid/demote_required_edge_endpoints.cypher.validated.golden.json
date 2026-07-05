@@ -1,0 +1,34 @@
+{
+  "columns": [
+    {
+      "name": "p",
+      "type": {
+        "kind": "node",
+        "labels": "Person",
+        "nullable": false
+      }
+    },
+    {
+      "name": "r",
+      "type": {
+        "kind": "edge",
+        "edgeKey": {
+          "source": "Person",
+          "label": "AUTHORED",
+          "target": "Post"
+        },
+        "nullable": false
+      }
+    },
+    {
+      "name": "post",
+      "type": {
+        "kind": "node",
+        "labels": "Post",
+        "nullable": false
+      }
+    }
+  ],
+  "parameters": [],
+  "statement": "read"
+}

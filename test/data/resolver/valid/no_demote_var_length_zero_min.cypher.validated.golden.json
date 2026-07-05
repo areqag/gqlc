@@ -1,0 +1,37 @@
+{
+  "columns": [
+    {
+      "name": "p",
+      "type": {
+        "kind": "node",
+        "labels": "Person",
+        "nullable": true
+      }
+    },
+    {
+      "name": "r",
+      "type": {
+        "kind": "list",
+        "element": {
+          "kind": "edge",
+          "edgeKey": {
+            "source": "Person",
+            "label": "KNOWS",
+            "target": "Person"
+          },
+          "nullable": false
+        }
+      }
+    },
+    {
+      "name": "q",
+      "type": {
+        "kind": "node",
+        "labels": "Person",
+        "nullable": false
+      }
+    }
+  ],
+  "parameters": [],
+  "statement": "read"
+}

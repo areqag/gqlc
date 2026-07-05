@@ -1,0 +1,54 @@
+{
+  "columns": [
+    {
+      "name": "p",
+      "type": {
+        "kind": "node",
+        "labels": "Person",
+        "nullable": true
+      }
+    },
+    {
+      "name": "r1",
+      "type": {
+        "kind": "edge",
+        "edgeKey": {
+          "source": "Person",
+          "label": "AUTHORED",
+          "target": "Post"
+        },
+        "nullable": true
+      }
+    },
+    {
+      "name": "post",
+      "type": {
+        "kind": "node",
+        "labels": "Post",
+        "nullable": false
+      }
+    },
+    {
+      "name": "r2",
+      "type": {
+        "kind": "edge",
+        "edgeKey": {
+          "source": "Post",
+          "label": "AUTHORED",
+          "target": "Person"
+        },
+        "nullable": false
+      }
+    },
+    {
+      "name": "author",
+      "type": {
+        "kind": "node",
+        "labels": "Person",
+        "nullable": false
+      }
+    }
+  ],
+  "parameters": [],
+  "statement": "read"
+}

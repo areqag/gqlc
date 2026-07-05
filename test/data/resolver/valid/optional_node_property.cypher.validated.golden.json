@@ -1,0 +1,14 @@
+{
+  "columns": [
+    {
+      "name": "p.name",
+      "type": {
+        "kind": "property",
+        "type": "STRING",
+        "nullable": true
+      }
+    }
+  ],
+  "parameters": [],
+  "statement": "read"
+}

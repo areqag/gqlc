@@ -35,5 +35,19 @@
     "unlabelled_via_undirected.cypher": "social_r3.gql",
     "unlabelled_via_multi_type.cypher": "social_r3.gql",
     "edge_property_union_agree.cypher": "social_r3.gql",
-    "undirected_var_length_multi_type_property.cypher": "social_r3.gql"
+    "undirected_var_length_multi_type_property.cypher": "social_r3.gql",
+    "optional_node_whole_entity.cypher": "social_r4.gql",
+    "optional_node_property.cypher": "social_r4.gql",
+    "optional_node_nullable_property.cypher": "social_r4.gql",
+    "optional_edge_whole_entity.cypher": "social_r4.gql",
+    "optional_edge_property.cypher": "social_r4.gql",
+    "demote_required_edge_endpoints.cypher": "social_r4.gql",
+    "demote_chained_from_required.cypher": "social_r4.gql",
+    "demote_undirected_edge_endpoints.cypher": "social_r4.gql",
+    "demote_var_length_positive_min.cypher": "social_r4.gql",
+    "no_demote_var_length_zero_min.cypher": "social_r4.gql",
+    "demote_var_length_unbounded_lower.cypher": "social_r4.gql",
+    "demote_from_anonymous_required_edge.cypher": "social_r4.gql",
+    "optional_multi_type_union.cypher": "social_r4.gql",
+    "optional_var_length_whole_entity.cypher": "social_r4.gql"
 }

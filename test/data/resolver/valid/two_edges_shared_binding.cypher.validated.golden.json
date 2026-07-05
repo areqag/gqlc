@@ -4,21 +4,24 @@
       "name": "p",
       "type": {
         "kind": "node",
-        "labels": "Person"
+        "labels": "Person",
+        "nullable": false
       }
     },
     {
       "name": "post",
       "type": {
         "kind": "node",
-        "labels": "Post"
+        "labels": "Post",
+        "nullable": false
       }
     },
     {
       "name": "p2",
       "type": {
         "kind": "node",
-        "labels": "Person"
+        "labels": "Person",
+        "nullable": false
       }
     }
   ],

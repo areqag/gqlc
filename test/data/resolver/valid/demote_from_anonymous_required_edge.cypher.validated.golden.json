@@ -1,0 +1,30 @@
+{
+  "columns": [
+    {
+      "name": "a",
+      "type": {
+        "kind": "node",
+        "labels": "Person",
+        "nullable": false
+      }
+    },
+    {
+      "name": "b",
+      "type": {
+        "kind": "node",
+        "labels": "Post",
+        "nullable": true
+      }
+    },
+    {
+      "name": "c",
+      "type": {
+        "kind": "node",
+        "labels": "Post",
+        "nullable": false
+      }
+    }
+  ],
+  "parameters": [],
+  "statement": "read"
+}

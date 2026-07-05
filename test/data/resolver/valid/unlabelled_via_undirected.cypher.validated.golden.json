@@ -4,7 +4,8 @@
       "name": "a",
       "type": {
         "kind": "node",
-        "labels": "Person"
+        "labels": "Person",
+        "nullable": false
       }
     },
     {
@@ -15,7 +16,8 @@
           "source": "Person",
           "label": "LIKES",
           "target": "Post"
-        }
+        },
+        "nullable": false
       }
     }
   ],

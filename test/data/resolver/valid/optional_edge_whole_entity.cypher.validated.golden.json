@@ -1,0 +1,18 @@
+{
+  "columns": [
+    {
+      "name": "r",
+      "type": {
+        "kind": "edge",
+        "edgeKey": {
+          "source": "Person",
+          "label": "AUTHORED",
+          "target": "Post"
+        },
+        "nullable": true
+      }
+    }
+  ],
+  "parameters": [],
+  "statement": "read"
+}
