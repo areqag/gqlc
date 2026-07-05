@@ -69,5 +69,8 @@
     "carry_nullable_binding.cypher": "social_r5.gql",
     "distinct_projection.cypher": "social_r5.gql",
     "with_distinct.cypher": "social_r5.gql",
-    "literal_only_return.cypher": "social_r5.gql"
+    "literal_only_return.cypher": "social_r5.gql",
+    "parameter_across_with_alias_shadow.cypher": "social_r5.gql",
+    "parameter_across_union_same_name.cypher": "social_r5.gql",
+    "parameter_across_with_multi_part.cypher": "social_r5.gql"
 }

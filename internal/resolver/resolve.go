@@ -1,6 +1,7 @@
 package resolver
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -638,20 +639,44 @@ func unifyParameterUsesAcrossScopes(params []query.Parameter, scopes []partScope
 // Use's Ref (for a PropertyUse), or exactly one witness for a Part-agnostic
 // Use (ClauseSlot / ExprUse). An unattributed PropertyUse (no scope contains
 // its Ref) returns zero witnesses — the unifier treats this as ResolvedUnknown.
+//
+// PropertyUse semantics (§4.2.4 any-valid-witness rule): the wire carries no
+// Use→Part attribution, so a Ref like `a.title` may name `a` in several Parts
+// (e.g. `MATCH (a:Person) WITH a.name AS a MATCH (a:Post) …` — after an
+// alias-export shadow, Part 0's `a` is Person and Part 1's `a` is Post; or a
+// UNION where two branches each bind `a` to a different type). We attempt the
+// witness in EVERY scope containing the Ref's variable, collect only the
+// SUCCESSFUL witnesses, and let the caller unify them via the R2 lattice. A
+// per-scope ErrUnknownProperty is swallowed: the true attributed Part may be
+// a different one that succeeds. Only when EVERY containing scope fails the
+// property lookup do we surface the last such error (a genuine unknown-
+// property fault). Non-property faults (ErrOutOfR0Scope for out-of-scope
+// edge Refs, var-length edge property projections) surface immediately —
+// they are structural, not scope-dependent.
 func witnessAcrossScopes(u query.Use, scopes []partScope, s schema.Schema) ([]ResolvedType, error) {
 	switch uu := u.(type) {
 	case query.PropertyUse:
 		ref := uu.Ref()
 		out := make([]ResolvedType, 0, 1)
+		var lastPropErr error
+		containing := 0
 		for _, sc := range scopes {
 			if !scopeContains(sc, ref.Variable) {
 				continue
 			}
+			containing++
 			w, err := propertyUseWitness(ref, sc.nodeTypes, sc.edgeTypes, sc.edgeCands, sc.edgeBindings, sc.nullableBinding, s)
 			if err != nil {
+				if errors.Is(err, ErrUnknownProperty) {
+					lastPropErr = err
+					continue
+				}
 				return nil, err
 			}
 			out = append(out, w)
+		}
+		if containing > 0 && len(out) == 0 && lastPropErr != nil {
+			return nil, lastPropErr
 		}
 		return out, nil
 	case query.ClauseSlotUse:
