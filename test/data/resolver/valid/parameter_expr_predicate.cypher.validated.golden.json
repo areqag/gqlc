@@ -1,0 +1,22 @@
+{
+  "columns": [
+    {
+      "name": "p.name",
+      "type": {
+        "kind": "property",
+        "type": "STRING",
+        "nullable": false
+      }
+    }
+  ],
+  "parameters": [
+    {
+      "name": "flag",
+      "type": {
+        "kind": "scalar",
+        "scalar": "bool"
+      }
+    }
+  ],
+  "statement": "read"
+}

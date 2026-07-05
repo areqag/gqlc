@@ -11,5 +11,17 @@
     "inline_endpoint_target.cypher": "social_r1.gql",
     "unlabelled_binding_from_edge.cypher": "social_r1.gql",
     "unlabelled_binding_target_inferred.cypher": "social_r1.gql",
-    "two_edges_shared_binding.cypher": "social_r1.gql"
+    "two_edges_shared_binding.cypher": "social_r1.gql",
+    "literal_int_projection.cypher": "social_r2.gql",
+    "literal_string_projection.cypher": "social_r2.gql",
+    "expr_projection_list.cypher": "social_r2.gql",
+    "func_projection_unknown.cypher": "social_r2.gql",
+    "func_projection_temporal.cypher": "social_r2.gql",
+    "expr_projection_bool.cypher": "social_r2.gql",
+    "expr_projection_unknown.cypher": "social_r2.gql",
+    "parameter_two_property_uses_agree.cypher": "social_r2.gql",
+    "parameter_clause_slot_skip.cypher": "social_r2.gql",
+    "parameter_clause_slot_limit.cypher": "social_r2.gql",
+    "parameter_expr_predicate.cypher": "social_r2.gql",
+    "parameter_property_and_unknown_expr.cypher": "social_r2.gql"
 }

@@ -1,0 +1,12 @@
+{
+  "columns": [
+    {
+      "name": "s",
+      "type": {
+        "kind": "unknown"
+      }
+    }
+  ],
+  "parameters": [],
+  "statement": "read"
+}

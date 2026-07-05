@@ -1,0 +1,13 @@
+{
+  "columns": [
+    {
+      "name": "greeting",
+      "type": {
+        "kind": "scalar",
+        "scalar": "string"
+      }
+    }
+  ],
+  "parameters": [],
+  "statement": "read"
+}

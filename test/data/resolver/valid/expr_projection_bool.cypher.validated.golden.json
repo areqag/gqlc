@@ -1,0 +1,13 @@
+{
+  "columns": [
+    {
+      "name": "is_adult",
+      "type": {
+        "kind": "scalar",
+        "scalar": "bool"
+      }
+    }
+  ],
+  "parameters": [],
+  "statement": "read"
+}
