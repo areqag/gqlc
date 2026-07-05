@@ -1,0 +1,16 @@
+{
+  "columns": [
+    {
+      "name": "a.name",
+      "type": {
+        "kind": "property",
+        "type": "STRING",
+        "nullable": false
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "read",
+  "distinct": true
+}

@@ -6,7 +6,8 @@
         "kind": "node",
         "labels": "Person",
         "nullable": false
-      }
+      },
+      "groupingKey": false
     },
     {
       "name": "r",
@@ -21,7 +22,8 @@
           },
           "nullable": false
         }
-      }
+      },
+      "groupingKey": false
     },
     {
       "name": "q",
@@ -29,9 +31,11 @@
         "kind": "node",
         "labels": "Person",
         "nullable": false
-      }
+      },
+      "groupingKey": false
     }
   ],
   "parameters": [],
-  "statement": "read"
+  "statement": "read",
+  "distinct": false
 }

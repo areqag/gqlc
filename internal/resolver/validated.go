@@ -10,19 +10,26 @@ import (
 // ValidatedQuery is the resolver's output: resolved result columns, resolved
 // parameters, and the statement kind codegen keys its transaction-mode decision
 // on. Provisional through R7; a future ADR — the ADR 0008 analogue — freezes
-// the shape once the resolver is feature-complete (ADR 0009).
+// the shape once the resolver is feature-complete (ADR 0009). R5 adds the
+// folded Distinct axis (RETURN DISTINCT / WITH DISTINCT anywhere OR any
+// UnionDistinct combinator), always-emit per §3.2.
 type ValidatedQuery struct {
 	Columns    []Column            `json:"columns"`
 	Parameters []ResolvedParameter `json:"parameters"`
 	Statement  StatementKind       `json:"statement"`
+	Distinct   bool                `json:"distinct"`
 }
 
 // Column is one result column in projection order: its name (an explicit alias
 // or the parser's source-text name, verbatim from ReturnItem.Name) and its
-// resolved type.
+// resolved type. R5 adds the per-column GroupingKey axis (§3.2.1), true iff
+// the column participates in the openCypher implicit-grouping key set for
+// branch 0's final Part (§4.5.2). Uniform-exclude posture: ExprProjection
+// residuals are never grouping keys.
 type Column struct {
-	Name string       `json:"name"`
-	Type ResolvedType `json:"type"`
+	Name        string       `json:"name"`
+	Type        ResolvedType `json:"type"`
+	GroupingKey bool         `json:"groupingKey"`
 }
 
 // ResolvedParameter is one query parameter in query-wide first-appearance

@@ -5,9 +5,11 @@
       "type": {
         "kind": "temporal",
         "temporal": "date"
-      }
+      },
+      "groupingKey": false
     }
   ],
   "parameters": [],
-  "statement": "read"
+  "statement": "read",
+  "distinct": false
 }

@@ -8,9 +8,11 @@
           "kind": "scalar",
           "scalar": "int"
         }
-      }
+      },
+      "groupingKey": false
     }
   ],
   "parameters": [],
-  "statement": "read"
+  "statement": "read",
+  "distinct": false
 }

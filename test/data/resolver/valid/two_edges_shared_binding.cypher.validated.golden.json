@@ -6,7 +6,8 @@
         "kind": "node",
         "labels": "Person",
         "nullable": false
-      }
+      },
+      "groupingKey": false
     },
     {
       "name": "post",
@@ -14,7 +15,8 @@
         "kind": "node",
         "labels": "Post",
         "nullable": false
-      }
+      },
+      "groupingKey": false
     },
     {
       "name": "p2",
@@ -22,9 +24,11 @@
         "kind": "node",
         "labels": "Person",
         "nullable": false
-      }
+      },
+      "groupingKey": false
     }
   ],
   "parameters": [],
-  "statement": "read"
+  "statement": "read",
+  "distinct": false
 }

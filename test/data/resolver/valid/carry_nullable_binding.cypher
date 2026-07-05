@@ -1,0 +1,1 @@
+OPTIONAL MATCH (a:Person) WITH a RETURN a

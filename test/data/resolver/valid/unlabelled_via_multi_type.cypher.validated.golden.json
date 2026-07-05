@@ -6,9 +6,11 @@
         "kind": "node",
         "labels": "Person",
         "nullable": false
-      }
+      },
+      "groupingKey": false
     }
   ],
   "parameters": [],
-  "statement": "read"
+  "statement": "read",
+  "distinct": false
 }

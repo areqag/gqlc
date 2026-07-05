@@ -1,0 +1,15 @@
+{
+  "columns": [
+    {
+      "name": "1",
+      "type": {
+        "kind": "scalar",
+        "scalar": "int"
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "read",
+  "distinct": false
+}
