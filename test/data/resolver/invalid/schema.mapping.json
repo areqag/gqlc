@@ -1,10 +1,6 @@
 {
     "unknown_label.cypher": "social.gql",
     "unknown_property.cypher": "social.gql",
-    "with_clause.cypher": "social.gql",
-    "aggregate_projection.cypher": "social.gql",
-    "return_distinct.cypher": "social.gql",
-    "returns_all.cypher": "social.gql",
     "unknown_edge.cypher": "social.gql",
     "unknown_edge_property.cypher": "social.gql",
     "ambiguous_unlabelled_binding.cypher": "social_ambiguous.gql",
@@ -25,5 +21,9 @@
     "unknown_property_union_type_differs.cypher": "social_r3_typediff.gql",
     "untyped_edge.cypher": "social_r3.gql",
     "var_length_edge_property_projection.cypher": "social_r3.gql",
-    "optional_match_with_clause.cypher": "social.gql"
+    "union_column_count_mismatch.cypher": "social_r5.gql",
+    "union_column_name_mismatch.cypher": "social_r5.gql",
+    "union_column_type_mismatch.cypher": "social_r5.gql",
+    "union_column_nullability_mismatch.cypher": "social_r5.gql",
+    "union_unknown_label_branch.cypher": "social_r5.gql"
 }

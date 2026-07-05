@@ -58,6 +58,12 @@ var (
 	// pattern (no `|` union opt-in) cannot commit to one without erasing the
 	// other. Introduced at R3. See R3 spec §4.6 verdict-C.
 	ErrAmbiguousEdgeOrientation = errors.New("ambiguous edge orientation")
+
+	// ErrUnionColumnMismatch is returned when a UNION query has branches whose
+	// result columns disagree on count, on names at the same index, on types
+	// at the same index, or on the nullability bit of a same-named column.
+	// Introduced at R5. See R5 spec §4.3.
+	ErrUnionColumnMismatch = errors.New("union column mismatch")
 )
 
 // allSentinels is the canonical closed set of sentinels the resolver may
@@ -72,4 +78,5 @@ var allSentinels = []error{
 	ErrAmbiguousBinding,
 	ErrParameterTypeConflict,
 	ErrAmbiguousEdgeOrientation,
+	ErrUnionColumnMismatch,
 }
