@@ -262,7 +262,7 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema) ([]Column,
 
 	// Materialise the Part's ReturnItems: either the parser's Returns verbatim,
 	// or the virtual items §4.4.2 constructs for RETURN * / WITH *.
-	items, err := materialiseReturns(part, scopeOrder, carry, nodeTypes, edgeBindings, edgeTypes, edgeCands)
+	items, err := materialiseReturns(part, scopeOrder, carry, nodeTypes, edgeBindings)
 	if err != nil {
 		return nil, branchState{}, nil, err
 	}
@@ -293,7 +293,7 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema) ([]Column,
 // ReturnsAll is false, returns part.Returns unchanged. When true, builds the
 // virtual ReturnItem sequence over scopeOrder (§4.4.2) — one item per in-scope
 // name in own-Part-first, shadowing-dedup order.
-func materialiseReturns(part query.Part, scopeOrder []string, carry branchState, nodeTypes map[string]schema.NodeType, edgeBindings map[string]query.EdgeBinding, edgeTypes map[string]schema.EdgeType, edgeCands map[string][]schema.EdgeKey) ([]query.ReturnItem, error) {
+func materialiseReturns(part query.Part, scopeOrder []string, carry branchState, nodeTypes map[string]schema.NodeType, edgeBindings map[string]query.EdgeBinding) ([]query.ReturnItem, error) {
 	if !part.ReturnsAll {
 		return part.Returns, nil
 	}
@@ -303,7 +303,7 @@ func materialiseReturns(part query.Part, scopeOrder []string, carry branchState,
 	}
 	items := make([]query.ReturnItem, 0, len(scopeOrder))
 	for _, v := range scopeOrder {
-		val, err := virtualProjection(v, nodeTypes, edgeBindings, edgeTypes, edgeCands, carry)
+		val, err := virtualProjection(v, nodeTypes, edgeBindings, carry)
 		if err != nil {
 			return nil, err
 		}
@@ -314,7 +314,7 @@ func materialiseReturns(part query.Part, scopeOrder []string, carry branchState,
 
 // virtualProjection constructs the RefProjection (or carried-alias Value)
 // §4.4.2 assigns to a wildcard-expanded name.
-func virtualProjection(name string, nodeTypes map[string]schema.NodeType, edgeBindings map[string]query.EdgeBinding, edgeTypes map[string]schema.EdgeType, edgeCands map[string][]schema.EdgeKey, carry branchState) (query.Projection, error) {
+func virtualProjection(name string, nodeTypes map[string]schema.NodeType, edgeBindings map[string]query.EdgeBinding, carry branchState) (query.Projection, error) {
 	if _, ok := nodeTypes[name]; ok {
 		return query.NewRefProjection(query.Ref{Variable: name}, query.TypeNode{}), nil
 	}
