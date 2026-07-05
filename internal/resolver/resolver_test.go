@@ -54,6 +54,7 @@ var invalidFixtures = map[string]error{
 	"union_column_nullability_mismatch.cypher": ErrUnionColumnMismatch,
 	"union_unknown_label_branch.cypher":        ErrUnknownLabel,
 	"part_binding_type_conflict.cypher":        ErrPartBindingTypeConflict,
+	"part_binding_type_conflict_edge.cypher":   ErrPartBindingTypeConflict,
 }
 
 type ResolverSuite struct {

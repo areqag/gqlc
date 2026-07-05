@@ -26,5 +26,6 @@
     "union_column_type_mismatch.cypher": "social_r5.gql",
     "union_column_nullability_mismatch.cypher": "social_r5.gql",
     "union_unknown_label_branch.cypher": "social_r5.gql",
-    "part_binding_type_conflict.cypher": "social_r5.gql"
+    "part_binding_type_conflict.cypher": "social_r5.gql",
+    "part_binding_type_conflict_edge.cypher": "social_r5.gql"
 }

@@ -107,7 +107,9 @@ type parameterUseSite struct {
 //
 // Pinned signature per R5 §2.2 / team-lead brief.
 func resolveBranch(branch query.Branch, s schema.Schema, r procsig.Registry) ([]Column, []parameterUseSite, error) {
-	_ = r // R5 does not admit CALL; the registry is reserved for R7.
+	_ = r // R5 does not admit CALL; the registry is reserved for R7. When
+	// R7 lands the CALL/YIELD handler here, drop this discard and route
+	// the registry into that handler's procedure-signature witness.
 	if len(branch.Parts) == 0 {
 		// Defensive tripwire; parser's buildBranch guarantees >= 1.
 		return nil, nil, fmt.Errorf("%w: empty parts", ErrOutOfR0Scope)
@@ -213,9 +215,25 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema) ([]Column,
 			}
 			supportedEdges = append(supportedEdges, bb)
 			if v := bb.Variable(); v != "" {
+				// R5 §6.4 edge parity: if the carry seed already carried an
+				// edge binding for `v`, and the local re-bind's label set
+				// differs, that is a Part-cross irreconcilable re-typing.
+				// Same label-set key = trivial re-bind, admit (openCypher
+				// semantics for the analogous node case). Different key =
+				// ErrPartBindingTypeConflict, same sentinel as the node arm.
+				if prev, seen := edgeBindings[v]; seen && prev.Labels().Key() != bb.Labels().Key() {
+					return nil, branchState{}, nil, fmt.Errorf("%w: variable %q carried as edge with labels %s, re-bound with labels %s", ErrPartBindingTypeConflict, v, prev.Labels().Key(), bb.Labels().Key())
+				}
 				edgeBindings[v] = bb
 				// Edge shadows any carried node state.
 				delete(nodeTypes, v)
+				// Local edge re-bind resets any carried closed-edge state
+				// for `v` — Phase A2/C's closeEdge is authoritative for the
+				// new binding's source/target endpoints, which may differ
+				// from the carried binding's even under a trivial re-bind.
+				delete(edgeTypes, v)
+				delete(edgeKeys, v)
+				delete(edgeCands, v)
 			}
 		default:
 			return nil, branchState{}, nil, fmt.Errorf("%w: %s binding", ErrOutOfR0Scope, b.Kind())
@@ -294,7 +312,7 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema) ([]Column,
 	site := parameterUseSite{scope: snapshotScope(nodeTypes, edgeTypes, edgeCands, edgeBindings, nullableBinding)}
 
 	// Build the exported branchState for Part K+1.
-	exported := exportScope(part, columns, items, scopeOrder, nodeTypes, edgeTypes, edgeKeys, edgeCands, edgeBindings, nullableBinding, carry)
+	exported := exportScope(part, columns, items, scopeOrder, nodeTypes, edgeTypes, edgeKeys, edgeCands, edgeBindings, nullableBinding)
 
 	return columns, exported, []parameterUseSite{site}, nil
 }
@@ -387,7 +405,7 @@ func buildScopeOrder(bindings []query.Binding, carryOrder []string, nodeTypes ma
 // set is the full in-scope binding set at the moment WITH ran, in scopeOrder.
 // For a final Part (RETURN), the returned branchState is irrelevant (no next
 // Part reads it) but we still build it for symmetry.
-func exportScope(part query.Part, columns []Column, items []query.ReturnItem, scopeOrder []string, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, nullableBinding map[string]bool, carry branchState) branchState {
+func exportScope(part query.Part, columns []Column, items []query.ReturnItem, scopeOrder []string, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, nullableBinding map[string]bool) branchState {
 	out := branchState{
 		exportedNodeTypes:       make(map[string]schema.NodeType),
 		exportedEdgeTypes:       make(map[string]schema.EdgeType),
@@ -457,7 +475,6 @@ func exportScope(part query.Part, columns []Column, items []query.ReturnItem, sc
 			out.exportedNullableBinding[v] = nb
 		}
 	}
-	_ = carry
 	return out
 }
 
@@ -851,6 +868,25 @@ func describeTriedEdges(e query.EdgeBinding, src, tgt graph.LabelSetKey) string 
 func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, resolved map[string]schema.NodeType) error {
 	if len(pending) == 0 {
 		return nil
+	}
+	// R5 §4.2.3 N1 posture: CARRY WINS. An unlabelled binding whose
+	// variable was already typed by the carry seed at Phase A1 is a JOIN
+	// on the same node identity (openCypher semantics for `WITH a MATCH
+	// (a)-[...]->…`), not a redeclaration; skip Phase B inference for it
+	// entirely so the carry-seeded type stays authoritative. Doing this
+	// here also erases the order-dependence Linus observed in the raw
+	// per-Part inference (before this guard, whether an unlabelled `(a)`
+	// after `WITH a` got reinferred depended on whether the enclosing
+	// edge's other endpoint had already committed).
+	if len(resolved) > 0 {
+		filtered := pending[:0]
+		for _, n := range pending {
+			if _, carried := resolved[n.Variable()]; carried {
+				continue
+			}
+			filtered = append(filtered, n)
+		}
+		pending = filtered
 	}
 	for len(pending) > 0 {
 		var next []query.NodeBinding

@@ -72,5 +72,7 @@
     "literal_only_return.cypher": "social_r5.gql",
     "parameter_across_with_alias_shadow.cypher": "social_r5.gql",
     "parameter_across_union_same_name.cypher": "social_r5.gql",
-    "parameter_across_with_multi_part.cypher": "social_r5.gql"
+    "parameter_across_with_multi_part.cypher": "social_r5.gql",
+    "carry_wins_over_unlabelled_rebind.cypher": "social_r5.gql",
+    "returns_all_local_first_ordering.cypher": "social_r5.gql"
 }
