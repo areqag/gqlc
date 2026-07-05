@@ -64,6 +64,15 @@ var (
 	// at the same index, or on the nullability bit of a same-named column.
 	// Introduced at R5. See R5 spec §4.3.
 	ErrUnionColumnMismatch = errors.New("union column mismatch")
+
+	// ErrPartBindingTypeConflict is returned when a Part K > 0 re-declares a
+	// carried variable with a labelled binding whose schema-typed identity
+	// disagrees with the carried type. Concretely: at Part K a labelled
+	// NodeBinding for name `v` resolves to a schema.NodeType whose
+	// LabelSetKey differs from the carry-seed's LabelSetKey for `v`. Same
+	// key = trivial re-binding, admitted. Different key = irreconcilable,
+	// rejected. Introduced at R5. See R5 spec §6.4.
+	ErrPartBindingTypeConflict = errors.New("part binding type conflict")
 )
 
 // allSentinels is the canonical closed set of sentinels the resolver may
@@ -79,4 +88,5 @@ var allSentinels = []error{
 	ErrParameterTypeConflict,
 	ErrAmbiguousEdgeOrientation,
 	ErrUnionColumnMismatch,
+	ErrPartBindingTypeConflict,
 }

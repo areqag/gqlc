@@ -190,6 +190,15 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema) ([]Column,
 			if !ok {
 				return nil, branchState{}, nil, fmt.Errorf("%w: %s", ErrUnknownLabel, key)
 			}
+			// R5 §6.4: a labelled re-binding of a carried name whose schema-
+			// typed identity differs from the carry is irreconcilable. Same
+			// LabelSetKey = trivial re-binding, admit. Any pre-existing entry
+			// here can only originate from the carry seed (§4.2.3): local
+			// same-Part siblings with the same variable are merged into one
+			// binding at parse time.
+			if prev, seen := nodeTypes[bb.Variable()]; seen && prev.Labels != nt.Labels {
+				return nil, branchState{}, nil, fmt.Errorf("%w: variable %q carried as %s, re-bound as %s", ErrPartBindingTypeConflict, bb.Variable(), prev.Labels, nt.Labels)
+			}
 			nodeTypes[bb.Variable()] = nt
 			// Local binding shadows any carried edge state at the same name;
 			// R5 §4.2.3 shadowing rule.
