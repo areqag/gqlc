@@ -1,0 +1,14 @@
+{
+  "columns": [
+    {
+      "name": "r.likedAt",
+      "type": {
+        "kind": "property",
+        "type": "TIMESTAMP",
+        "nullable": true
+      }
+    }
+  ],
+  "parameters": [],
+  "statement": "read"
+}

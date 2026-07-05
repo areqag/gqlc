@@ -1,0 +1,20 @@
+{
+  "columns": [
+    {
+      "name": "r",
+      "type": {
+        "kind": "list",
+        "element": {
+          "kind": "edge",
+          "edgeKey": {
+            "source": "Person",
+            "label": "LIKES",
+            "target": "Post"
+          }
+        }
+      }
+    }
+  ],
+  "parameters": [],
+  "statement": "read"
+}

@@ -1,0 +1,12 @@
+CREATE PROPERTY GRAPH TYPE SocialR3TypeDiff AS {
+    (:Person {
+        id       :: INT NOT NULL,
+        name     :: STRING NOT NULL
+    }),
+    (:Post {
+        id       :: INT NOT NULL,
+        title    :: STRING NOT NULL
+    }),
+    (:Person) -[:AUTHORED { weight :: INT NOT NULL }]-> (:Post),
+    (:Person) -[:LIKES { weight :: FLOAT NOT NULL }]-> (:Post)
+}

@@ -3,6 +3,7 @@ package resolver
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/procsig"
@@ -10,13 +11,15 @@ import (
 	"github.com/areqag/gqlc/internal/schema"
 )
 
-// resolve is the R0..R1 resolution kernel: pure, deterministic, short-circuit.
-// It walks a query.Query and produces a ValidatedQuery for the R1 capability
-// scope (§7 of the R1 spec): one branch, one part, one or more node and
-// directed single-hop single-type edge bindings, only RefProjection items, no
-// writes, no CALL, no WITH, no UNION, no RETURN DISTINCT, no RETURN *. R1
-// resolves unlabelled node bindings via inference from the edges that touch
-// them. Everything else routes to ErrOutOfR0Scope.
+// resolve is the R0..R3 resolution kernel: pure, deterministic, short-circuit.
+// It walks a query.Query and produces a ValidatedQuery for the R3 capability
+// scope: one branch, one part, one or more node and edge bindings (edges may
+// be directed or undirected, single-hop or var-length, single-type or
+// multi-type — untyped edges still route to ErrOutOfR0Scope), only
+// RefProjection / LiteralProjection / FuncProjection / ExprProjection items,
+// no writes, no CALL, no WITH, no UNION, no RETURN DISTINCT, no RETURN *.
+// Phase B infers unlabelled node bindings via candidate-endpoint sets over
+// the label × orientation cross-product of every R3-admitted touching edge.
 func resolve(q query.Query, s schema.Schema, _ procsig.Registry) (ValidatedQuery, error) {
 	if len(q.Branches) != 1 || len(q.Combinators) != 0 {
 		return ValidatedQuery{}, fmt.Errorf("%w: UNION / multi-branch query", ErrOutOfR0Scope)
@@ -43,6 +46,8 @@ func resolve(q query.Query, s schema.Schema, _ procsig.Registry) (ValidatedQuery
 	nodeTypes := make(map[string]schema.NodeType)
 	edgeTypes := make(map[string]schema.EdgeType)
 	edgeKeys := make(map[string]schema.EdgeKey)
+	edgeCands := make(map[string][]schema.EdgeKey)
+	edgeBindings := make(map[string]query.EdgeBinding)
 
 	// Phase A1: labelled node bindings. Also reject unsupported binding
 	// kinds; unlabelled node bindings are deferred to Phase B.
@@ -62,18 +67,20 @@ func resolve(q query.Query, s schema.Schema, _ procsig.Registry) (ValidatedQuery
 			}
 			nodeTypes[bb.Variable()] = nt
 		case query.EdgeBinding:
-			if err := r1EdgeAdmissible(bb); err != nil {
+			if err := r3EdgeAdmissible(bb); err != nil {
 				return ValidatedQuery{}, err
 			}
 			supportedEdges = append(supportedEdges, bb)
+			if v := bb.Variable(); v != "" {
+				edgeBindings[v] = bb
+			}
 		default:
 			return ValidatedQuery{}, fmt.Errorf("%w: %s binding", ErrOutOfR0Scope, b.Kind())
 		}
 	}
 
-	// Phase A2: labelled directed single-hop edges — attempt EdgeKey
-	// formation. Edges whose endpoints are not yet fully labelled are
-	// deferred to Phase C.
+	// Phase A2: R3-admitted edges — attempt candidate-set formation. Edges
+	// whose endpoints are not yet fully labelled are deferred to Phase C.
 	deferredEdges := make([]query.EdgeBinding, 0, len(supportedEdges))
 	for _, e := range supportedEdges {
 		src, srcOK := endpointLabels(e.Source(), nodeTypes)
@@ -82,12 +89,13 @@ func resolve(q query.Query, s schema.Schema, _ procsig.Registry) (ValidatedQuery
 			deferredEdges = append(deferredEdges, e)
 			continue
 		}
-		if err := closeEdge(e, src, tgt, s, edgeTypes, edgeKeys); err != nil {
+		if err := closeEdge(e, src, tgt, s, edgeTypes, edgeKeys, edgeCands); err != nil {
 			return ValidatedQuery{}, err
 		}
 	}
 
-	// Phase B: unlabelled-node inference to a fixed point.
+	// Phase B: unlabelled-node inference to a fixed point over R3-admitted
+	// touching edges (label × orientation cross-product).
 	if err := inferUnlabelled(pendingNodes, supportedEdges, s, nodeTypes); err != nil {
 		return ValidatedQuery{}, err
 	}
@@ -102,7 +110,7 @@ func resolve(q query.Query, s schema.Schema, _ procsig.Registry) (ValidatedQuery
 		if !tgtOK {
 			return ValidatedQuery{}, fmt.Errorf("%w: cannot infer type of target endpoint of edge %q", ErrUnknownLabel, e.Variable())
 		}
-		if err := closeEdge(e, src, tgt, s, edgeTypes, edgeKeys); err != nil {
+		if err := closeEdge(e, src, tgt, s, edgeTypes, edgeKeys, edgeCands); err != nil {
 			return ValidatedQuery{}, err
 		}
 	}
@@ -113,7 +121,7 @@ func resolve(q query.Query, s schema.Schema, _ procsig.Registry) (ValidatedQuery
 
 	columns := make([]Column, 0, len(part.Returns))
 	for _, item := range part.Returns {
-		colType, err := projectionType(item.Value, nodeTypes, edgeTypes, edgeKeys)
+		colType, err := projectionType(item.Value, nodeTypes, edgeTypes, edgeKeys, edgeCands, edgeBindings, s)
 		if err != nil {
 			return ValidatedQuery{}, err
 		}
@@ -124,7 +132,7 @@ func resolve(q query.Query, s schema.Schema, _ procsig.Registry) (ValidatedQuery
 	for _, p := range q.Parameters {
 		var unified ResolvedType
 		for i, u := range p.Uses {
-			w, err := useWitness(u, nodeTypes, edgeTypes)
+			w, err := useWitness(u, nodeTypes, edgeTypes, edgeCands, edgeBindings, s)
 			if err != nil {
 				return ValidatedQuery{}, err
 			}
@@ -148,25 +156,55 @@ func resolve(q query.Query, s schema.Schema, _ procsig.Registry) (ValidatedQuery
 	}, nil
 }
 
-// r1EdgeAdmissible screens an EdgeBinding against R1's edge shape predicate:
-// directed, single-hop, single-type. Everything else — undirected, var-length,
-// multi-type, untyped — routes to ErrOutOfR0Scope with a fail-message
-// distinguishing the sub-case.
-func r1EdgeAdmissible(e query.EdgeBinding) error {
-	if !e.Directed() {
-		return fmt.Errorf("%w: undirected edge", ErrOutOfR0Scope)
-	}
-	if e.Hops() != nil {
-		return fmt.Errorf("%w: variable-length edge", ErrOutOfR0Scope)
-	}
-	switch len(e.Labels()) {
-	case 0:
+// r3EdgeAdmissible screens an EdgeBinding against R3's edge shape predicate:
+// labelled (at least one type). Every R3 shape — directed or undirected,
+// single-hop or var-length, single-type or multi-type — is admitted; untyped
+// edges route to ErrOutOfR0Scope (R-later takes them up).
+func r3EdgeAdmissible(e query.EdgeBinding) error {
+	if len(e.Labels()) == 0 {
 		return fmt.Errorf("%w: untyped edge", ErrOutOfR0Scope)
-	case 1:
-		return nil
-	default:
-		return fmt.Errorf("%w: multi-type edge", ErrOutOfR0Scope)
 	}
+	return nil
+}
+
+// edgeCandidates enumerates the closed candidate set for one edge binding
+// whose endpoint keys are already committed: it forms one candidate EdgeKey
+// per (label, orientation) pair — outer loop label first-appearance (the
+// LabelSet slice's textual order per internal/graph/labelset.go), inner loop
+// orientation (src, tgt) then (tgt, src) when e.Directed() is false — and
+// keeps only the keys the schema declares.
+func edgeCandidates(e query.EdgeBinding, src, tgt graph.LabelSetKey, s schema.Schema) []schema.EdgeKey {
+	out := make([]schema.EdgeKey, 0, len(e.Labels()))
+	for _, L := range e.Labels() {
+		labelKey := graph.LabelSet{L}.Key()
+		orientations := [][2]graph.LabelSetKey{{src, tgt}}
+		if !e.Directed() {
+			orientations = append(orientations, [2]graph.LabelSetKey{tgt, src})
+		}
+		for _, o := range orientations {
+			k := schema.EdgeKey{Source: o[0], Label: labelKey, Target: o[1]}
+			if _, ok := s.Edges[k]; ok {
+				out = append(out, k)
+			}
+		}
+	}
+	return out
+}
+
+// formatEdgeKey renders an EdgeKey as "Source-[Label]->Target" for
+// fail-messages.
+func formatEdgeKey(k schema.EdgeKey) string {
+	return fmt.Sprintf("%s-[%s]->%s", k.Source, k.Label, k.Target)
+}
+
+// formatEdgeKeys joins a slice of EdgeKeys with ", " — canonical order
+// preserved (the caller supplies it).
+func formatEdgeKeys(keys []schema.EdgeKey) string {
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = formatEdgeKey(k)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // endpointLabels reads the labels an edge endpoint carries at the point
@@ -196,21 +234,59 @@ func endpointLabels(e query.Endpoint, resolved map[string]schema.NodeType) (grap
 	}
 }
 
-// closeEdge forms the EdgeKey for one already-endpoint-resolved edge, looks
-// it up in the schema, and records the type against the edge's variable (if
-// named). An anonymous edge closes successfully but is not added to
-// edgeTypes/edgeKeys — nothing can project it (§4.4).
-func closeEdge(e query.EdgeBinding, src, tgt graph.LabelSetKey, s schema.Schema, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey) error {
-	key := schema.EdgeKey{Source: src, Label: e.Labels().Key(), Target: tgt}
-	et, ok := s.Edges[key]
-	if !ok {
-		return fmt.Errorf("%w: %s-[%s]->%s", ErrUnknownEdge, key.Source, key.Label, key.Target)
+// closeEdge applies §4.4 (edgeCandidates) and §4.6 (verdict table) to one
+// already-endpoint-resolved edge and records the resolved shape against the
+// binding's variable (if named). An anonymous edge closes successfully but is
+// not added to any table — nothing can project it (§4.4).
+//
+// Verdicts:
+//   - zero candidates → ErrUnknownEdge (fail-message lists every tried
+//     (label, orientation) pair when the trial had more than one attempt);
+//   - single candidate → ResolvedEdge shape; record in edgeTypes+edgeKeys;
+//   - ≥ 2 candidates and single-type undirected → ErrAmbiguousEdgeOrientation
+//     (fail-message names both matched keys and the binding variable);
+//   - ≥ 2 candidates for any other R3 shape → ResolvedEdgeUnion shape;
+//     record in edgeCands (edgeTypes/edgeKeys stay unpopulated for the union
+//     case — §4.7/§4.8 read edgeCands and dispatch to the union path).
+func closeEdge(e query.EdgeBinding, src, tgt graph.LabelSetKey, s schema.Schema, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey, edgeCands map[string][]schema.EdgeKey) error {
+	cands := edgeCandidates(e, src, tgt, s)
+	v := e.Variable()
+
+	switch len(cands) {
+	case 0:
+		return fmt.Errorf("%w: %s", ErrUnknownEdge, describeTriedEdges(e, src, tgt))
+	case 1:
+		key := cands[0]
+		et := s.Edges[key]
+		if v != "" {
+			edgeTypes[v] = et
+			edgeKeys[v] = key
+		}
+		return nil
+	default:
+		if !e.Directed() && len(e.Labels()) == 1 {
+			return fmt.Errorf("%w: edge %q matches both %s", ErrAmbiguousEdgeOrientation, v, formatEdgeKeys(cands))
+		}
+		if v != "" {
+			edgeCands[v] = cands
+		}
+		return nil
 	}
-	if v := e.Variable(); v != "" {
-		edgeTypes[v] = et
-		edgeKeys[v] = key
+}
+
+// describeTriedEdges renders the (label, orientation) pairs edgeCandidates
+// would attempt for e — the same order, but not filtered by the schema — so
+// an ErrUnknownEdge fail-message names every attempt.
+func describeTriedEdges(e query.EdgeBinding, src, tgt graph.LabelSetKey) string {
+	parts := make([]string, 0, len(e.Labels())*2)
+	for _, L := range e.Labels() {
+		labelKey := graph.LabelSet{L}.Key()
+		parts = append(parts, formatEdgeKey(schema.EdgeKey{Source: src, Label: labelKey, Target: tgt}))
+		if !e.Directed() {
+			parts = append(parts, formatEdgeKey(schema.EdgeKey{Source: tgt, Label: labelKey, Target: src}))
+		}
 	}
-	return nil
+	return strings.Join(parts, ", ")
 }
 
 // inferUnlabelled runs Phase B: iterate the pending unlabelled node binding
@@ -255,9 +331,15 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 }
 
 // candidateTypes computes the intersection of node-type candidates for one
-// pending unlabelled binding across every R1-supported edge that touches it.
-// A touching edge whose other endpoint is still unlabelled contributes
-// nothing (it cannot constrain the binding alone).
+// pending unlabelled binding across every R3-admitted edge that touches it.
+// Per-edge contribution is the union across (label × orientation), per §4.5.2
+// — a multi-type edge [:A|B] declares "n sits on the other side of an A OR a
+// B edge to this endpoint"; an undirected edge admits both orientations. A
+// touching edge whose other endpoint is still unlabelled contributes nothing
+// (it cannot constrain the binding alone). Self-loops fall out uniformly:
+// when n sits at both endpoints, touchingSide reports source (the first
+// match) and the union across labels/orientations restricts to schema edges
+// whose Source == Target.
 func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, resolved map[string]schema.NodeType) map[graph.LabelSetKey]struct{} {
 	var acc map[graph.LabelSetKey]struct{}
 	for _, e := range edges {
@@ -273,17 +355,30 @@ func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Sch
 		if !ok {
 			continue
 		}
-		label := e.Labels().Key()
 		cand := make(map[graph.LabelSetKey]struct{})
-		for k := range s.Edges {
-			if k.Label != label {
-				continue
-			}
-			if side == "source" && k.Target == otherKey {
-				cand[k.Source] = struct{}{}
-			}
-			if side == "target" && k.Source == otherKey {
-				cand[k.Target] = struct{}{}
+		orientations := []bool{true}
+		if !e.Directed() {
+			orientations = []bool{true, false}
+		}
+		for _, L := range e.Labels() {
+			labelKey := graph.LabelSet{L}.Key()
+			for _, forward := range orientations {
+				for k := range s.Edges {
+					if k.Label != labelKey {
+						continue
+					}
+					// forward=true: side==source means n sits at k.Source,
+					// other==k.Target; side==target means n sits at
+					// k.Target, other==k.Source.
+					// forward=false swaps other's side.
+					nAtSource := (side == "source") == forward
+					if nAtSource && k.Target == otherKey {
+						cand[k.Source] = struct{}{}
+					}
+					if !nAtSource && k.Source == otherKey {
+						cand[k.Target] = struct{}{}
+					}
+				}
 			}
 		}
 		if acc == nil {
@@ -344,10 +439,10 @@ func joinCandidates(c map[graph.LabelSetKey]struct{}) string {
 // column's resolved type. R2 admits RefProjection, LiteralProjection,
 // FuncProjection, and ExprProjection; AggregateProjection routes to
 // ErrOutOfR0Scope (R5 owns grouping). §4.5.
-func projectionType(p query.Projection, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey) (ResolvedType, error) {
+func projectionType(p query.Projection, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, s schema.Schema) (ResolvedType, error) {
 	switch pp := p.(type) {
 	case query.RefProjection:
-		return refProjectionType(pp.Ref(), nodeTypes, edgeTypes, edgeKeys)
+		return refProjectionType(pp.Ref(), nodeTypes, edgeTypes, edgeKeys, edgeCands, edgeBindings, s)
 	case query.LiteralProjection:
 		return resolveType(pp.Type())
 	case query.FuncProjection:
@@ -362,13 +457,11 @@ func projectionType(p query.Projection, nodeTypes map[string]schema.NodeType, ed
 }
 
 // refProjectionType dispatches a RefProjection's Ref against the resolved
-// node and edge binding tables. Whole-entity (Property == "") emits
-// ResolvedNode or ResolvedEdge; property lookup emits ResolvedProperty via
-// the schema witness. A ref naming no known binding at R2 is architecturally
-// possible only for a variable pointing at an as-yet-unsupported binding
-// kind (path, unwind, call) — those are rejected in Phase A with
-// ErrOutOfR0Scope.
-func refProjectionType(ref query.Ref, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey) (ResolvedType, error) {
+// node and edge binding tables. R3 revises the edge arm to dispatch on the
+// binding's hops axis and candidate multiplicity per §4.7. A ref naming no
+// known binding is architecturally possible only for a variable pointing at
+// an as-yet-unsupported binding kind (path, unwind, call).
+func refProjectionType(ref query.Ref, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, s schema.Schema) (ResolvedType, error) {
 	if nt, ok := nodeTypes[ref.Variable]; ok {
 		if ref.Property == "" {
 			return ResolvedNode{Labels: nt.Labels}, nil
@@ -379,17 +472,68 @@ func refProjectionType(ref query.Ref, nodeTypes map[string]schema.NodeType, edge
 		}
 		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable}, nil
 	}
-	if et, ok := edgeTypes[ref.Variable]; ok {
-		if ref.Property == "" {
-			return ResolvedEdge{EdgeKey: edgeKeys[ref.Variable]}, nil
+	// Edge-binding arm — either single-candidate (edgeTypes/edgeKeys) or
+	// multi-candidate (edgeCands). The two tables are mutually exclusive by
+	// closeEdge construction.
+	_, singleCand := edgeTypes[ref.Variable]
+	cands, multiCand := edgeCands[ref.Variable]
+	if !singleCand && !multiCand {
+		return nil, fmt.Errorf("%w: %s", ErrOutOfR0Scope, ref.Variable)
+	}
+
+	binding := edgeBindings[ref.Variable]
+	varLength := binding.Hops() != nil
+
+	if ref.Property == "" {
+		var element ResolvedType
+		if singleCand {
+			element = ResolvedEdge{EdgeKey: edgeKeys[ref.Variable]}
+		} else {
+			element = ResolvedEdgeUnion{EdgeKeys: cands}
 		}
+		if varLength {
+			return ResolvedList{Element: element}, nil
+		}
+		return element, nil
+	}
+
+	// Property lookup on an edge binding.
+	if varLength {
+		return nil, fmt.Errorf("%w: property projection on variable-length edge binding: reach list elements via list-element access (UNWIND in R5 or later)", ErrOutOfR0Scope)
+	}
+	if singleCand {
+		et := edgeTypes[ref.Variable]
 		prop, ok := et.Properties[ref.Property]
 		if !ok {
 			return nil, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
 		}
 		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable}, nil
 	}
-	return nil, fmt.Errorf("%w: %s", ErrOutOfR0Scope, ref.Variable)
+	// Multi-candidate: §4.8's uniform-property rule.
+	return unionProperty(cands, s, ref.Variable, ref.Property)
+}
+
+// unionProperty applies §4.8: look up ref.Property on every union member;
+// require every hit; require every hit's (Type, Nullable) to match the first.
+// Any miss or disagreement widens ErrUnknownProperty's message set (§5.2).
+func unionProperty(cands []schema.EdgeKey, s schema.Schema, refVar, refProp string) (ResolvedType, error) {
+	var first ResolvedProperty
+	for i, k := range cands {
+		et := s.Edges[k]
+		prop, ok := et.Properties[refProp]
+		if !ok {
+			return nil, fmt.Errorf("%w: property %s.%s missing on union member %s", ErrUnknownProperty, refVar, refProp, formatEdgeKey(k))
+		}
+		hit := ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable}
+		if i == 0 {
+			first = hit
+			continue
+		}
+		if hit.Type != first.Type || hit.Nullable != first.Nullable {
+			return nil, fmt.Errorf("%w: property %s.%s type differs across union members: %s vs %s", ErrUnknownProperty, refVar, refProp, first.String(), hit.String())
+		}
+	}
+	return first, nil
 }
 
 // resolveType maps a parser Type into its resolver ResolvedType per the R0
@@ -453,10 +597,10 @@ func resolveType(t query.Type) (ResolvedType, error) {
 // useWitness computes the ResolvedType witness for one parameter Use.
 // §4.6. Dispatches on the sealed Use sum. Write-side ExprUses
 // (ExprInSetValue / ExprInDeleteTarget) route to ErrOutOfR0Scope.
-func useWitness(u query.Use, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType) (ResolvedType, error) {
+func useWitness(u query.Use, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, s schema.Schema) (ResolvedType, error) {
 	switch uu := u.(type) {
 	case query.PropertyUse:
-		return propertyUseWitness(uu.Ref(), nodeTypes, edgeTypes)
+		return propertyUseWitness(uu.Ref(), nodeTypes, edgeTypes, edgeCands, edgeBindings, s)
 	case query.ClauseSlotUse:
 		return ResolvedScalar{Kind: ScalarInt}, nil
 	case query.ExprUse:
@@ -476,8 +620,11 @@ func useWitness(u query.Use, nodeTypes map[string]schema.NodeType, edgeTypes map
 }
 
 // propertyUseWitness looks up the schema property named by a PropertyUse's
-// Ref. Miss -> ErrUnknownProperty. §4.6.
-func propertyUseWitness(ref query.Ref, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType) (ResolvedType, error) {
+// Ref. R3 routes a multi-candidate edge binding through §4.8's uniform-
+// property rule; single-candidate edges keep R2's shape. Miss ->
+// ErrUnknownProperty. Var-length edge property parameters ride the same
+// var-length reject as §4.7 — a list<edge> has no scalar property witness.
+func propertyUseWitness(ref query.Ref, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, s schema.Schema) (ResolvedType, error) {
 	if nt, ok := nodeTypes[ref.Variable]; ok {
 		prop, ok := nt.Properties[ref.Property]
 		if !ok {
@@ -485,14 +632,23 @@ func propertyUseWitness(ref query.Ref, nodeTypes map[string]schema.NodeType, edg
 		}
 		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable}, nil
 	}
-	if et, ok := edgeTypes[ref.Variable]; ok {
+	_, singleCand := edgeTypes[ref.Variable]
+	cands, multiCand := edgeCands[ref.Variable]
+	if !singleCand && !multiCand {
+		return nil, fmt.Errorf("%w: %s", ErrOutOfR0Scope, ref.Variable)
+	}
+	if binding := edgeBindings[ref.Variable]; binding.Hops() != nil {
+		return nil, fmt.Errorf("%w: property projection on variable-length edge binding: reach list elements via list-element access (UNWIND in R5 or later)", ErrOutOfR0Scope)
+	}
+	if singleCand {
+		et := edgeTypes[ref.Variable]
 		prop, ok := et.Properties[ref.Property]
 		if !ok {
 			return nil, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
 		}
 		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable}, nil
 	}
-	return nil, fmt.Errorf("%w: %s", ErrOutOfR0Scope, ref.Variable)
+	return unionProperty(cands, s, ref.Variable, ref.Property)
 }
 
 // unify agrees two ResolvedTypes iff they are structurally equal or one side

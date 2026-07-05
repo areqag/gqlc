@@ -36,9 +36,6 @@ var invalidFixtures = map[string]error{
 	"ambiguous_unlabelled_binding.cypher":                  ErrAmbiguousBinding,
 	"unlabelled_binding_no_edge.cypher":                    ErrUnknownLabel,
 	"empty_inline_endpoint.cypher":                         ErrUnknownLabel,
-	"undirected_edge.cypher":                               ErrOutOfR0Scope,
-	"var_length_edge.cypher":                               ErrOutOfR0Scope,
-	"multi_type_edge.cypher":                               ErrOutOfR0Scope,
 	"parameter_type_conflict_two_properties.cypher":        ErrParameterTypeConflict,
 	"parameter_type_conflict_clause_slot_vs_string.cypher": ErrParameterTypeConflict,
 	"parameter_type_conflict_property_vs_expr_bool.cypher": ErrParameterTypeConflict,
@@ -47,6 +44,13 @@ var invalidFixtures = map[string]error{
 	"expr_use_set_value.cypher":                            ErrOutOfR0Scope,
 	"list_of_nodes_projection.cypher":                      ErrOutOfR0Scope,
 	"list_of_edges_projection.cypher":                      ErrOutOfR0Scope,
+	"ambiguous_edge_orientation.cypher":                    ErrAmbiguousEdgeOrientation,
+	"unknown_edge_undirected.cypher":                       ErrUnknownEdge,
+	"unknown_edge_multi_type_all_miss.cypher":              ErrUnknownEdge,
+	"unknown_property_union_missing.cypher":                ErrUnknownProperty,
+	"unknown_property_union_type_differs.cypher":           ErrUnknownProperty,
+	"untyped_edge.cypher":                                  ErrOutOfR0Scope,
+	"var_length_edge_property_projection.cypher":           ErrOutOfR0Scope,
 }
 
 type ResolverSuite struct {

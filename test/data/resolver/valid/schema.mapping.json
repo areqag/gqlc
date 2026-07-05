@@ -23,5 +23,17 @@
     "parameter_clause_slot_skip.cypher": "social_r2.gql",
     "parameter_clause_slot_limit.cypher": "social_r2.gql",
     "parameter_expr_predicate.cypher": "social_r2.gql",
-    "parameter_property_and_unknown_expr.cypher": "social_r2.gql"
+    "parameter_property_and_unknown_expr.cypher": "social_r2.gql",
+    "undirected_single_match.cypher": "social_r3.gql",
+    "undirected_single_match_reverse.cypher": "social_r3.gql",
+    "multi_type_directed_union.cypher": "social_r3.gql",
+    "multi_type_undirected.cypher": "social_r3.gql",
+    "var_length_directed.cypher": "social_r3.gql",
+    "var_length_undirected_single_match.cypher": "social_r3.gql",
+    "var_length_multi_type.cypher": "social_r3.gql",
+    "self_loop_directed.cypher": "social_r3.gql",
+    "unlabelled_via_undirected.cypher": "social_r3.gql",
+    "unlabelled_via_multi_type.cypher": "social_r3.gql",
+    "edge_property_union_agree.cypher": "social_r3.gql",
+    "undirected_var_length_multi_type_property.cypher": "social_r3.gql"
 }

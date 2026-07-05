@@ -50,6 +50,14 @@ var (
 	// with a co-occurring PropertyUse. Introduced at R2. See §4.8 for the
 	// unification lattice.
 	ErrParameterTypeConflict = errors.New("parameter type conflict")
+
+	// ErrAmbiguousEdgeOrientation is returned when an undirected single-type
+	// single-hop edge binding's two-orientation trial matches two distinct
+	// EdgeKeys against the schema — both {A, L, B} and {B, L, A} are declared
+	// as distinct edge types with the same label, and the author's undirected
+	// pattern (no `|` union opt-in) cannot commit to one without erasing the
+	// other. Introduced at R3. See R3 spec §4.6 verdict-C.
+	ErrAmbiguousEdgeOrientation = errors.New("ambiguous edge orientation")
 )
 
 // allSentinels is the canonical closed set of sentinels the resolver may
@@ -63,4 +71,5 @@ var allSentinels = []error{
 	ErrUnknownEdge,
 	ErrAmbiguousBinding,
 	ErrParameterTypeConflict,
+	ErrAmbiguousEdgeOrientation,
 }
