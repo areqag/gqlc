@@ -115,13 +115,18 @@ func resolve(q query.Query, s schema.Schema, _ procsig.Registry) (ValidatedQuery
 		}
 	}
 
+	// Phase D (R4): compute the effective-nullability table for the projection
+	// and parameter walks. Regime (a) — a required (non-nullable) edge
+	// witness demotes its named node-endpoints. Single pass, monotone (⊥ → ⊤).
+	nullableBinding := demoteNullable(part.Bindings)
+
 	if len(part.Returns) == 0 {
 		return ValidatedQuery{}, fmt.Errorf("%w: empty projection", ErrOutOfR0Scope)
 	}
 
 	columns := make([]Column, 0, len(part.Returns))
 	for _, item := range part.Returns {
-		colType, err := projectionType(item.Value, nodeTypes, edgeTypes, edgeKeys, edgeCands, edgeBindings, s)
+		colType, err := projectionType(item.Value, nodeTypes, edgeTypes, edgeKeys, edgeCands, edgeBindings, nullableBinding, s)
 		if err != nil {
 			return ValidatedQuery{}, err
 		}
@@ -132,7 +137,7 @@ func resolve(q query.Query, s schema.Schema, _ procsig.Registry) (ValidatedQuery
 	for _, p := range q.Parameters {
 		var unified ResolvedType
 		for i, u := range p.Uses {
-			w, err := useWitness(u, nodeTypes, edgeTypes, edgeCands, edgeBindings, s)
+			w, err := useWitness(u, nodeTypes, edgeTypes, edgeCands, edgeBindings, nullableBinding, s)
 			if err != nil {
 				return ValidatedQuery{}, err
 			}
@@ -438,11 +443,13 @@ func joinCandidates(c map[graph.LabelSetKey]struct{}) string {
 // projectionType dispatches a Projection to its handler and returns the
 // column's resolved type. R2 admits RefProjection, LiteralProjection,
 // FuncProjection, and ExprProjection; AggregateProjection routes to
-// ErrOutOfR0Scope (R5 owns grouping). §4.5.
-func projectionType(p query.Projection, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, s schema.Schema) (ResolvedType, error) {
+// ErrOutOfR0Scope (R5 owns grouping). §4.5. R4 threads the
+// nullableBinding table so RefProjection sees the effective-nullability
+// axis; other projection variants carry no binding-side Ref.
+func projectionType(p query.Projection, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, nullableBinding map[string]bool, s schema.Schema) (ResolvedType, error) {
 	switch pp := p.(type) {
 	case query.RefProjection:
-		return refProjectionType(pp.Ref(), nodeTypes, edgeTypes, edgeKeys, edgeCands, edgeBindings, s)
+		return refProjectionType(pp.Ref(), nodeTypes, edgeTypes, edgeKeys, edgeCands, edgeBindings, nullableBinding, s)
 	case query.LiteralProjection:
 		return resolveType(pp.Type())
 	case query.FuncProjection:
@@ -458,19 +465,20 @@ func projectionType(p query.Projection, nodeTypes map[string]schema.NodeType, ed
 
 // refProjectionType dispatches a RefProjection's Ref against the resolved
 // node and edge binding tables. R3 revises the edge arm to dispatch on the
-// binding's hops axis and candidate multiplicity per §4.7. A ref naming no
-// known binding is architecturally possible only for a variable pointing at
-// an as-yet-unsupported binding kind (path, unwind, call).
-func refProjectionType(ref query.Ref, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, s schema.Schema) (ResolvedType, error) {
+// binding's hops axis and candidate multiplicity per §4.7. R4 threads the
+// effective-nullability table so the whole-entity variants carry the
+// Nullable axis (§4.5) and property projections OR the binding-side
+// nullability with the schema property's own (§3.4 disjunction).
+func refProjectionType(ref query.Ref, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, nullableBinding map[string]bool, s schema.Schema) (ResolvedType, error) {
 	if nt, ok := nodeTypes[ref.Variable]; ok {
 		if ref.Property == "" {
-			return ResolvedNode{Labels: nt.Labels}, nil
+			return ResolvedNode{Labels: nt.Labels, Nullable: nullableBinding[ref.Variable]}, nil
 		}
 		prop, ok := nt.Properties[ref.Property]
 		if !ok {
 			return nil, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
 		}
-		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable}, nil
+		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable || nullableBinding[ref.Variable]}, nil
 	}
 	// Edge-binding arm — either single-candidate (edgeTypes/edgeKeys) or
 	// multi-candidate (edgeCands). The two tables are mutually exclusive by
@@ -483,13 +491,14 @@ func refProjectionType(ref query.Ref, nodeTypes map[string]schema.NodeType, edge
 
 	binding := edgeBindings[ref.Variable]
 	varLength := binding.Hops() != nil
+	edgeNullable := nullableBinding[ref.Variable]
 
 	if ref.Property == "" {
 		var element ResolvedType
 		if singleCand {
-			element = ResolvedEdge{EdgeKey: edgeKeys[ref.Variable]}
+			element = ResolvedEdge{EdgeKey: edgeKeys[ref.Variable], Nullable: edgeNullable}
 		} else {
-			element = ResolvedEdgeUnion{EdgeKeys: cands}
+			element = ResolvedEdgeUnion{EdgeKeys: cands, Nullable: edgeNullable}
 		}
 		if varLength {
 			return ResolvedList{Element: element}, nil
@@ -507,16 +516,21 @@ func refProjectionType(ref query.Ref, nodeTypes map[string]schema.NodeType, edge
 		if !ok {
 			return nil, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
 		}
-		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable}, nil
+		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable || edgeNullable}, nil
 	}
-	// Multi-candidate: §4.8's uniform-property rule.
-	return unionProperty(cands, s, ref.Variable, ref.Property)
+	// Multi-candidate: §4.8's uniform-property rule (R4 threads the
+	// binding-side Nullable through §3.4's disjunction).
+	return unionProperty(cands, s, ref.Variable, ref.Property, edgeNullable)
 }
 
 // unionProperty applies §4.8: look up ref.Property on every union member;
 // require every hit; require every hit's (Type, Nullable) to match the first.
 // Any miss or disagreement widens ErrUnknownProperty's message set (§5.2).
-func unionProperty(cands []schema.EdgeKey, s schema.Schema, refVar, refProp string) (ResolvedType, error) {
+// R4 addition: bindingNullable is OR'd into the returned Nullable on the
+// happy path — §3.4's disjunction, applied AFTER the union-agreement check
+// so a schema-side nullability divergence still fires ErrUnknownProperty
+// (§4.5 judgment call).
+func unionProperty(cands []schema.EdgeKey, s schema.Schema, refVar, refProp string, bindingNullable bool) (ResolvedType, error) {
 	var first ResolvedProperty
 	for i, k := range cands {
 		et := s.Edges[k]
@@ -533,6 +547,7 @@ func unionProperty(cands []schema.EdgeKey, s schema.Schema, refVar, refProp stri
 			return nil, fmt.Errorf("%w: property %s.%s type differs across union members: %s vs %s", ErrUnknownProperty, refVar, refProp, first.String(), hit.String())
 		}
 	}
+	first.Nullable = first.Nullable || bindingNullable
 	return first, nil
 }
 
@@ -596,11 +611,13 @@ func resolveType(t query.Type) (ResolvedType, error) {
 
 // useWitness computes the ResolvedType witness for one parameter Use.
 // §4.6. Dispatches on the sealed Use sum. Write-side ExprUses
-// (ExprInSetValue / ExprInDeleteTarget) route to ErrOutOfR0Scope.
-func useWitness(u query.Use, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, s schema.Schema) (ResolvedType, error) {
+// (ExprInSetValue / ExprInDeleteTarget) route to ErrOutOfR0Scope. R4
+// threads the nullableBinding table so PropertyUse's witness carries the
+// §3.4 disjunction; ClauseSlotUse and ExprUse carry no binding-side Ref.
+func useWitness(u query.Use, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, nullableBinding map[string]bool, s schema.Schema) (ResolvedType, error) {
 	switch uu := u.(type) {
 	case query.PropertyUse:
-		return propertyUseWitness(uu.Ref(), nodeTypes, edgeTypes, edgeCands, edgeBindings, s)
+		return propertyUseWitness(uu.Ref(), nodeTypes, edgeTypes, edgeCands, edgeBindings, nullableBinding, s)
 	case query.ClauseSlotUse:
 		return ResolvedScalar{Kind: ScalarInt}, nil
 	case query.ExprUse:
@@ -624,13 +641,17 @@ func useWitness(u query.Use, nodeTypes map[string]schema.NodeType, edgeTypes map
 // property rule; single-candidate edges keep R2's shape. Miss ->
 // ErrUnknownProperty. Var-length edge property parameters ride the same
 // var-length reject as §4.7 — a list<edge> has no scalar property witness.
-func propertyUseWitness(ref query.Ref, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, s schema.Schema) (ResolvedType, error) {
+// R4 addition: the binding's effective-nullable bit (nullableBinding[v])
+// is OR'd into the returned Nullable per §3.4/§4.6 — the parameter
+// unification lattice (R2 §4.8) receives the pre-disjuncted witness so
+// two Uses on the same OPTIONAL-derived binding agree without conflict.
+func propertyUseWitness(ref query.Ref, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, nullableBinding map[string]bool, s schema.Schema) (ResolvedType, error) {
 	if nt, ok := nodeTypes[ref.Variable]; ok {
 		prop, ok := nt.Properties[ref.Property]
 		if !ok {
 			return nil, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
 		}
-		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable}, nil
+		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable || nullableBinding[ref.Variable]}, nil
 	}
 	_, singleCand := edgeTypes[ref.Variable]
 	cands, multiCand := edgeCands[ref.Variable]
@@ -640,15 +661,92 @@ func propertyUseWitness(ref query.Ref, nodeTypes map[string]schema.NodeType, edg
 	if binding := edgeBindings[ref.Variable]; binding.Hops() != nil {
 		return nil, fmt.Errorf("%w: property projection on variable-length edge binding: reach list elements via list-element access (UNWIND in R5 or later)", ErrOutOfR0Scope)
 	}
+	edgeNullable := nullableBinding[ref.Variable]
 	if singleCand {
 		et := edgeTypes[ref.Variable]
 		prop, ok := et.Properties[ref.Property]
 		if !ok {
 			return nil, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
 		}
-		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable}, nil
+		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable || edgeNullable}, nil
 	}
-	return unionProperty(cands, s, ref.Variable, ref.Property)
+	return unionProperty(cands, s, ref.Variable, ref.Property, edgeNullable)
+}
+
+// demoteNullable builds the effective-nullability table (§4.3). Seeds one
+// entry per named binding from binding.Nullable(); then walks part.Bindings
+// once (§4.4.2 simplified pseudocode) and, for each non-nullable qualifying
+// EdgeBinding witness, sets its named node-endpoints' entries to false.
+// Regime (a) only — edge bindings are seeded and never rewritten
+// (§4.3 flow-through). Anonymous edges (Variable() == "") contribute as
+// witnesses via their VarEndpoint sides but are not themselves in the
+// table. Single pass suffices because the write set is monotone
+// (⊥ → ⊤) and only node-endpoints get written (§4.4.4 termination).
+func demoteNullable(bindings []query.Binding) map[string]bool {
+	table := make(map[string]bool, len(bindings))
+	for _, b := range bindings {
+		v, ok := bindingVariable(b)
+		if !ok || v == "" {
+			continue
+		}
+		table[v] = b.Nullable()
+	}
+	for _, b := range bindings {
+		e, ok := b.(query.EdgeBinding)
+		if !ok {
+			continue
+		}
+		if e.Nullable() || !qualifiedDemoter(e) {
+			continue
+		}
+		for _, side := range [2]query.Endpoint{e.Source(), e.Target()} {
+			ve, ok := side.(query.VarEndpoint)
+			if !ok {
+				continue
+			}
+			v := ve.Variable()
+			if v == "" {
+				continue
+			}
+			if _, present := table[v]; present {
+				table[v] = false
+			}
+		}
+	}
+	return table
+}
+
+// bindingVariable returns the binding's variable name for the two variants
+// R4 admits (NodeBinding, EdgeBinding). Phase A1 has already rejected the
+// other Binding variants by the time this runs, so the two-arm switch is
+// exhaustive against the reachable set; the false-return arm is a
+// defensive tripwire that should never fire at R4.
+func bindingVariable(b query.Binding) (string, bool) {
+	switch bb := b.(type) {
+	case query.NodeBinding:
+		return bb.Variable(), true
+	case query.EdgeBinding:
+		return bb.Variable(), true
+	default:
+		return "", false
+	}
+}
+
+// qualifiedDemoter applies §4.4.3's demoter-shape gate: a single-hop edge
+// always qualifies; a var-length edge qualifies iff its lower bound is >= 1
+// (unbounded lower — Min() == nil — is openCypher-semantic min = 1 and
+// qualifies). A *0..N var-length edge admits a zero-hop match (source ==
+// target) and cannot independently witness endpoint existence.
+func qualifiedDemoter(e query.EdgeBinding) bool {
+	h := e.Hops()
+	if h == nil {
+		return true
+	}
+	lower := h.Min()
+	if lower == nil {
+		return true
+	}
+	return *lower >= 1
 }
 
 // unify agrees two ResolvedTypes iff they are structurally equal or one side

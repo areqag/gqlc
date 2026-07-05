@@ -9,18 +9,22 @@
       }
     },
     {
-      "name": "p.id",
+      "name": "r",
       "type": {
-        "kind": "property",
-        "type": "INT",
+        "kind": "edge",
+        "edgeKey": {
+          "source": "Person",
+          "label": "LIKES",
+          "target": "Post"
+        },
         "nullable": false
       }
     },
     {
-      "name": "p.name",
+      "name": "post",
       "type": {
-        "kind": "property",
-        "type": "STRING",
+        "kind": "node",
+        "labels": "Post",
         "nullable": false
       }
     }

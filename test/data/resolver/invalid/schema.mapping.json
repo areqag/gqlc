@@ -24,5 +24,6 @@
     "unknown_property_union_missing.cypher": "social_r3.gql",
     "unknown_property_union_type_differs.cypher": "social_r3_typediff.gql",
     "untyped_edge.cypher": "social_r3.gql",
-    "var_length_edge_property_projection.cypher": "social_r3.gql"
+    "var_length_edge_property_projection.cypher": "social_r3.gql",
+    "optional_match_with_clause.cypher": "social.gql"
 }
