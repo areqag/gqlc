@@ -102,11 +102,15 @@ Four helpers in `resolve.go`:
   Extends `r1ColumnType` with the non-`RefProjection` variants;
   `r1ColumnType` is inlined into the `RefProjection` case and retired as
   its own function.
-- **`resolveType(t query.Type) ResolvedType`** — the parser-`Type` →
-  resolver-`ResolvedType` mapper (§4.7). Total, deterministic, pure —
-  the closed R0 §4 table's implementation. Used by
-  `LiteralProjection` / `FuncProjection` / `ExprProjection` cases in
-  §4.5 and by `ExprUse` in §4.6.
+- **`resolveType(t query.Type) (ResolvedType, error)`** — the
+  parser-`Type` → resolver-`ResolvedType` mapper (§4.7). Deterministic,
+  pure — the closed R0 §4 table's implementation. Returns
+  `ErrOutOfR0Scope` on `TypeList{TypeNode|TypeEdge}` (a list literal of
+  bare entity variables — the "list-of-entities projection" R5
+  admits); returns nil error on every other reachable row (§4.7's
+  reachability posture). Used by `LiteralProjection` /
+  `FuncProjection` / `ExprProjection` cases in §4.5 and by read-side
+  `ExprUse` in §4.6.
 - **`useWitness(u query.Use, nodeTypes, edgeTypes) (ResolvedType,
   error)`** — the new per-`Use` witness computer (§4.6). Dispatches on
   the sealed `Use` sum: `PropertyUse` → schema lookup;
@@ -352,28 +356,41 @@ its `Value Projection` on the `Projection` sum (five variants —
   *only* projection-side `TypeUnknown` R0/R1 emits at
   `RefProjection.Type()` — that row was R0-owned already, so R2 keeps
   it verbatim.
-- **`LiteralProjection`** — call `resolveType(p.Type())` (§4.7) and
-  emit `Column{Name, <resolved>}`. Total: `LiteralProjection.Type()` is
-  never `TypeNode` / `TypeEdge` / `TypePath` (no literal syntax for
-  those, `internal/query/query.go:107-113`, 123-125, 271-278) and
-  the coarse scalar / list / temporal rows all have a `resolveType`
-  answer.
+- **`LiteralProjection`** — call `resolveType(p.Type())` (§4.7); on
+  `nil` error emit `Column{Name, <resolved>}`, otherwise short-circuit
+  (§4.9). `LiteralProjection.Type()` is never `TypeNode` / `TypeEdge` /
+  `TypePath` (no literal syntax for those,
+  `internal/query/query.go:107-113`, 123-125, 271-278) and every
+  producible row in §4.7 returns a nil error for a literal — the
+  error path exists only for `TypeList{TypeNode|TypeEdge}`, which
+  requires a bare entity variable inside the list, not a literal.
 - **`FuncProjection`** — call `resolveType(p.Type())`. Parser posture:
-  `FuncProjection.Type()` is `TypeUnknown` today for every non-aggregate
-  function call (parser has no signature registry for non-procedure
-  functions, `internal/query/query.go:1112-1114`). `resolveType(TypeUnknown)`
-  is `ResolvedUnknown` (§4.7), so every `FuncProjection` column resolves
-  to `ResolvedUnknown` at R2 — the honest admission (§3.4). If a future
-  parser stage commits a concrete `FuncProjection.Type()` for a specific
-  function (a temporal constructor, say, per Stage-7 typing), the R2
-  mapper's temporal row is already ready and the column upgrades
-  automatically — no R2-side kernel change.
-- **`ExprProjection`** — call `resolveType(p.Type())`. Parser posture:
-  `ExprProjection.Type()` is often concrete (a boolean predicate on a
-  literal returns `TypeBool`) and often `TypeUnknown` (any
-  property-participating expression, NULL propagation). Both paths
-  resolve honestly: concrete rows → their resolved counterpart;
-  `TypeUnknown` → `ResolvedUnknown`.
+  `FuncProjection.Type()` is a concrete openCypher temporal (`TypeDate` /
+  `TypeTime` / `TypeLocalTime` / `TypeDateTime` / `TypeLocalDateTime` /
+  `TypeDuration`) when the call name matches the temporal-constructor
+  set (`internal/query/cypher/expr.go:358-361`,
+  `temporalConstructorType`), and `TypeUnknown` for every other
+  non-aggregate function call (the parser has no signature registry
+  outside that set, `internal/query/query.go:1112-1114`). Both paths
+  resolve honestly: temporal rows → their `ResolvedTemporal` row
+  (§4.7); `TypeUnknown` → `ResolvedUnknown` (§3.4). No error on this
+  arm — a `FuncProjection.Type()` of `TypeList{TypeNode|TypeEdge}` is
+  unreachable (the parser's temporal-constructor set does not return
+  entity lists, and every other call keeps `TypeUnknown`).
+- **`ExprProjection`** — call `resolveType(p.Type())`; on `nil` error
+  emit `Column{Name, <resolved>}`, otherwise short-circuit (§4.9). Parser
+  posture: `ExprProjection.Type()` is often concrete (a boolean
+  predicate on a literal returns `TypeBool`) and often `TypeUnknown`
+  (any property-participating expression, NULL propagation). The
+  error case is `TypeList{TypeNode}` / `TypeList{TypeEdge}` — a list
+  literal of bare entity variables (`RETURN [a] AS xs`,
+  `RETURN [r] AS es`) composed by `listLiteralType`
+  (`internal/query/cypher/typing.go:553-563`); resolveType rejects
+  with `ErrOutOfR0Scope` (§4.7's reachability posture), and R2's
+  scope statement (§7) records this as deferred to R5's grouping-key
+  work. Every other `ExprProjection.Type()` shape (concrete scalar,
+  concrete temporal, `TypeUnknown`, `TypeList{scalar|temporal|unknown}`)
+  resolves without error.
 - **`AggregateProjection`** — return
   `ErrOutOfR0Scope` with the wrapped message `"aggregate projection
   (R5 owns grouping)"`. R5's grouping-key work (ADR 0009) is where the
@@ -427,9 +444,9 @@ The dispatch table:
 | Variant | Handler | Returns |
 |---|---|---|
 | `query.RefProjection` | R1 §4.5 path (inlined) | `ResolvedNode` / `ResolvedEdge` / `ResolvedProperty` |
-| `query.LiteralProjection` | `resolveType(p.Type())` | any of §3.1–§3.4 |
-| `query.FuncProjection` | `resolveType(p.Type())` | `ResolvedUnknown` (today's parser posture) |
-| `query.ExprProjection` | `resolveType(p.Type())` | concrete or `ResolvedUnknown` |
+| `query.LiteralProjection` | `resolveType(p.Type())` | any of §3.1–§3.4 (nil error) |
+| `query.FuncProjection` | `resolveType(p.Type())` | `ResolvedTemporal` (temporal constructor) or `ResolvedUnknown` (nil error) |
+| `query.ExprProjection` | `resolveType(p.Type())` | concrete / `ResolvedUnknown` on nil error; `ErrOutOfR0Scope` on `TypeList{TypeNode\|TypeEdge}` |
 | `query.AggregateProjection` | reject | `ErrOutOfR0Scope` |
 
 The `RefProjection` case does *not* route through `resolveType` — a
@@ -472,13 +489,22 @@ Dispatch on the sealed `Use` sum (three variants —
   additive R-later change.
 - **`ExprUse`** — dispatch on `u.Position()` (four positions —
   `internal/query/query.go:1352-1391`):
-  - `ExprInProjection` or `ExprInPredicate` (read-side): return
-    `resolveType(u.EnclosingType())`. Parser posture: the enclosing
-    type is `TypeBool` for a predicate the typer committed to,
-    `TypeUnknown` for a shape the typer could not commit
+  - `ExprInProjection` or `ExprInPredicate` (read-side): call
+    `resolveType(u.EnclosingType())` and propagate its (type, error)
+    pair. Parser posture: the enclosing type is `TypeBool` for a
+    predicate the typer committed to, `TypeUnknown` for a shape the
+    typer could not commit
     (`internal/query/cypher/expr.go:444-459`), or the projection's
     Stage-6 result type for a projection-position parameter. Every
-    case maps into `ResolvedType` via §4.7.
+    scalar / temporal / list-of-scalar / TypeUnknown case maps into
+    `ResolvedType` with nil error via §4.7. A parameter whose
+    enclosing type is `TypeList{TypeNode|TypeEdge}` (an
+    ExprInProjection witness registered by
+    `internal/query/cypher/typing.go:867-874` when the projection is
+    a list literal of bare entity vars) short-circuits the parameter
+    walk with `ErrOutOfR0Scope`, matching the §4.5 ExprProjection
+    arm's rejection — parameter unification does not accept a
+    witness the projection dispatch would refuse.
   - `ExprInSetValue` or `ExprInDeleteTarget` (write-side): return
     `ErrOutOfR0Scope` — writes are R6's business, and the parameter
     witness cannot be honestly computed until the write's target
@@ -496,47 +522,90 @@ Signature and behaviour:
 ```go
 // resolveType maps a parser Type into its resolver ResolvedType, per
 // the R0 §4 mapping table (updated at R2 to include ResolvedScalar /
-// ResolvedTemporal / ResolvedList / ResolvedUnknown rows). Total,
-// deterministic. TypeNode / TypeEdge do not appear here — the schema
-// witness lives on the binding, not on the projection's Type(), and
-// callers of resolveType are the non-Ref projection dispatch and the
-// ExprUse handler, neither of which reaches TypeNode/TypeEdge (they
-// come only from RefProjection.Type() at R0/R1, handled elsewhere).
-// TypePath is R5's business; if reached at R2, panic (unreachable —
-// parser stages 6/7 do not produce path outside a PathBinding, and R2
-// does not admit path bindings).
-func resolveType(t query.Type) ResolvedType
+// ResolvedTemporal / ResolvedList / ResolvedUnknown rows). Deterministic.
+// Returns ErrOutOfR0Scope for a TypeList element whose type is
+// TypeNode / TypeEdge — a list literal of bare entity variables
+// (RETURN [a] AS xs, RETURN [r] AS es) reaches this recursion via
+// §4.5's ExprProjection dispatch (listLiteralType composes
+// TypeList{TypeNode|TypeEdge} — internal/query/cypher/typing.go:553-563),
+// and the resolver would forfeit the schema witness by collapsing to
+// ResolvedNode{} / ResolvedEdge{}; the "list-of-entities projection"
+// admission is deferred to a later R-stage (R5 admits typed entity
+// lists through the grouping / collect() path). A bare TypeNode /
+// TypeEdge reaching resolveType is a resolver bug (RefProjection is
+// dispatched elsewhere in §4.5 without touching resolveType), so those
+// arms panic. TypePath is R5's business; if reached at R2, panic
+// (unreachable — parser stages 6/7 do not produce path outside a
+// PathBinding, and R2 does not admit path bindings).
+func resolveType(t query.Type) (ResolvedType, error)
 ```
 
 The switch table:
 
-| `query.Type` | `ResolvedType` returned | Row from §4.10 |
+| `query.Type` | Returns | Row from §4.10 |
 |---|---|---|
-| `TypeBool{}` | `ResolvedScalar{ScalarBool}` | 4.10 bool |
-| `TypeInt{}` | `ResolvedScalar{ScalarInt}` | 4.10 int |
-| `TypeFloat{}` | `ResolvedScalar{ScalarFloat}` | 4.10 float |
-| `TypeString{}` | `ResolvedScalar{ScalarString}` | 4.10 string |
-| `TypeNull{}` | `ResolvedScalar{ScalarNull}` | 4.10 null |
-| `TypeMap{}` | `ResolvedScalar{ScalarMap}` | 4.10 map |
-| `TypeDate{}` | `ResolvedTemporal{TemporalDate}` | 4.10 date |
-| `TypeTime{}` | `ResolvedTemporal{TemporalTime}` | 4.10 time |
-| `TypeLocalTime{}` | `ResolvedTemporal{TemporalLocalTime}` | 4.10 localtime |
-| `TypeDateTime{}` | `ResolvedTemporal{TemporalDateTime}` | 4.10 datetime |
-| `TypeLocalDateTime{}` | `ResolvedTemporal{TemporalLocalDateTime}` | 4.10 localdatetime |
-| `TypeDuration{}` | `ResolvedTemporal{TemporalDuration}` | 4.10 duration |
-| `TypeList{element}` | `ResolvedList{Element: resolveType(element)}` | 4.10 list |
-| `TypeUnknown{}` | `ResolvedUnknown{}` | 4.10 unknown (other) |
-| `TypeNode{}` | panic (not reached — RefProjection path) | 4.10 node (R0) |
-| `TypeEdge{}` | panic (not reached — RefProjection path) | 4.10 edge (R1) |
+| `TypeBool{}` | `ResolvedScalar{ScalarBool}`, nil | 4.10 bool |
+| `TypeInt{}` | `ResolvedScalar{ScalarInt}`, nil | 4.10 int |
+| `TypeFloat{}` | `ResolvedScalar{ScalarFloat}`, nil | 4.10 float |
+| `TypeString{}` | `ResolvedScalar{ScalarString}`, nil | 4.10 string |
+| `TypeNull{}` | `ResolvedScalar{ScalarNull}`, nil | 4.10 null |
+| `TypeMap{}` | `ResolvedScalar{ScalarMap}`, nil | 4.10 map |
+| `TypeDate{}` | `ResolvedTemporal{TemporalDate}`, nil | 4.10 date |
+| `TypeTime{}` | `ResolvedTemporal{TemporalTime}`, nil | 4.10 time |
+| `TypeLocalTime{}` | `ResolvedTemporal{TemporalLocalTime}`, nil | 4.10 localtime |
+| `TypeDateTime{}` | `ResolvedTemporal{TemporalDateTime}`, nil | 4.10 datetime |
+| `TypeLocalDateTime{}` | `ResolvedTemporal{TemporalLocalDateTime}`, nil | 4.10 localdatetime |
+| `TypeDuration{}` | `ResolvedTemporal{TemporalDuration}`, nil | 4.10 duration |
+| `TypeList{TypeNode{}}` | `nil, fmt.Errorf("%w: list-of-nodes projection", ErrOutOfR0Scope)` | 4.10 list (entity element) |
+| `TypeList{TypeEdge{}}` | `nil, fmt.Errorf("%w: list-of-edges projection", ErrOutOfR0Scope)` | 4.10 list (entity element) |
+| `TypeList{element}` (other) | `ResolvedList{Element: resolveType(element)}`, nil (error propagates) | 4.10 list |
+| `TypeUnknown{}` | `ResolvedUnknown{}`, nil | 4.10 unknown (other) |
+| `TypeNode{}` | panic (resolver bug — RefProjection path in §4.5 bypasses resolveType) | 4.10 node (R0) |
+| `TypeEdge{}` | panic (resolver bug — RefProjection path in §4.5 bypasses resolveType) | 4.10 edge (R1) |
 | `TypePath{}` | panic (not reached — R5) | 4.10 path (R5) |
 
-The three panic arms are unreachable-by-construction at R2 (see §4.5's
-`RefProjection` note); a panic reaching production would be a resolver
-bug. The panic is the right posture — a returned zero value would
-silently hide the bug, and returning an error would force every caller
-site (four) to handle an impossible error branch. R5's spec revises the
-`TypePath` arm when path bindings are admitted; R1 already covered
-`TypeEdge` via the `RefProjection` path.
+**Reachability posture — panic vs. error, per arm.**
+
+- `TypeList{TypeNode|TypeEdge}` (**reachable**, error): a list literal
+  of bare entity variables (`RETURN [a]`, `RETURN [r]`) is refused by
+  `classifyProjection` because it is not a scalar literal
+  (`internal/query/cypher/shape.go:66-68`,
+  `internal/query/cypher/expr.go:254-258`), falls through to
+  `classifyRichExpression` (`internal/query/cypher/typing.go:866-876`),
+  and `typeAtom` on a bare node/edge variable returns `TypeNode` /
+  `TypeEdge` from the `refType` lookup
+  (`internal/query/cypher/typing.go:322-326`). `listLiteralType`
+  composes `TypeList{TypeNode}` / `TypeList{TypeEdge}`
+  (`internal/query/cypher/typing.go:553-563`), which flows into
+  §4.5's `ExprProjection` arm as the `p.Type()` of the residual
+  expression. The resolver rejects rather than collapse the schema
+  witness — the entity variable's `RefProjection` route is where the
+  witness travels; when it is wrapped inside a list literal, the
+  witness is lost by construction inside `ExprProjection.Refs`
+  (a flat `[]Ref` without a per-list-element type discriminator).
+  Admitting this properly means either (a) extending
+  `ExprProjection` to carry a per-slot schema witness, or (b) letting
+  R5's collect()-position grouping-key work own the typed entity list.
+  R2 chooses "reject cleanly" and defers to R5.
+- `TypeNode` / `TypeEdge` bare (**unreachable**, panic): the only
+  producers of these types at R2 are (i) a `RefProjection` whose
+  `Type()` is inspected by §4.5's `RefProjection` handler, which does
+  *not* call `resolveType` (§4.5 note), and (ii) a `typeAtom` deep
+  inside an expression tree, which is only observed by `resolveType`
+  when it appears composed under a `TypeList` (the reachable case
+  above). No R2 site reaches `resolveType(TypeNode{})` directly; a
+  panic there is a resolver bug and the correct posture is to fail
+  loudly rather than silently return a schema-witnessless
+  `ResolvedNode{}`.
+- `TypePath` (**unreachable**, panic): R2 does not admit path
+  bindings (§4.1 gates), so parser stages 6/7 cannot present a
+  `TypePath` to §4.5's dispatch. R5's spec revises this arm when
+  path bindings are admitted.
+
+The `TypeList{TypeNode|TypeEdge}` rejection maps into §5's closed
+sentinel set as an `ErrOutOfR0Scope` sub-case (§5.2's message-set
+widening); no new sentinel is added. `§6.4` covers this with
+`list_of_nodes_projection.cypher` and `list_of_edges_projection.cypher`.
 
 ### 4.8 `unify` — the R2 unification lattice
 
@@ -597,13 +666,27 @@ note is a comparable case, deferred to R7); R2 stays strict.
 Determinism reads from parser guarantees:
 - `Query.Parameters` in first-appearance order
   (`internal/query/query.go:79` and the R1 spec §6.5 sweep).
-- `Parameter.Uses` in slot-appearance order (mining walks in listener
-  order — `internal/query/cypher/expr.go` and neighbours).
+- `Parameter.Uses` in **listener-callback order for the current part**:
+  every miner (`mineComparisons`, `mineSortItemParameters`,
+  `mineWhere`, `classifyProjection` /
+  `classifyRichExpression`'s parameter registration,
+  `mineClauseSlotParameter`, `classifyFunction`'s aggregate-argument
+  registration) appends to the parameter's `Uses` slice in the order
+  the ANTLR listener visits the enclosing grammar node. The visit
+  order is a fixed depth-first pre-order over the part's parse tree,
+  so two parses of the same text produce the same `Uses` sequence
+  bit-for-bit — this is the invariant golden determinism rests on.
+  The parser test suite pins this by asserting exact `Uses` slices
+  against goldens; a listener refactor that changed callback order
+  would break both parser and resolver goldens.
 - Projection walk in `Part.Returns` order.
 
-Short-circuit: the first `ErrParameterTypeConflict` fails resolution
+Short-circuit: the first `ErrParameterTypeConflict` (or the first
+propagated `ErrOutOfR0Scope` / `ErrUnknownProperty` from §4.5's
+projection dispatch or §4.6's witness computation) fails resolution
 (R0 §2.3 posture). No partial `ValidatedQuery` is returned. The
-short-circuit is deterministic given the deterministic Uses order.
+short-circuit is deterministic given the deterministic projection
+and Uses orders.
 
 ### 4.10 The revised type-mapping table
 
@@ -709,7 +792,21 @@ right suffix.
   (multi-use parameters no longer route here; `ClauseSlotUse` no
   longer routes here; read-side `ExprUse` no longer routes here;
   non-`RefProjection` items except `AggregateProjection` no longer
-  route here) and the R2 add (`AggregateProjection` explicitly).
+  route here) and the R2 adds:
+  - `AggregateProjection` (message: `"aggregate projection (R5 owns grouping)"`).
+  - `ExprProjection` whose type is `TypeList{TypeNode}` (message:
+    `"list-of-nodes projection"`) — a list literal of bare node
+    variables (§4.7 reachability posture; deferred to R5).
+  - `ExprProjection` whose type is `TypeList{TypeEdge}` (message:
+    `"list-of-edges projection"`) — same, for bare edge variables.
+  - Read-side `ExprUse` whose enclosing type is
+    `TypeList{TypeNode|TypeEdge}` (an ExprInProjection witness
+    registered against a list-of-entities projection, §4.6). The
+    fail-site is the projection walk on which the ExprProjection
+    lives, so in practice the projection-dispatch message fires
+    first; the ExprUse arm is retained for the write-side gate
+    posture symmetry (§4.6).
+
   Sentinel name is unchanged (R0 §5's retirement plan holds).
 
 ### 5.3 Not added at R2
@@ -814,23 +911,14 @@ file; each has one paired `.validated.golden.json` regenerated by
 | `literal_string_projection.cypher` | `MATCH (p:Person) RETURN 'hi' AS greeting` | `LiteralProjection{TypeString}` → `ResolvedScalar{ScalarString}` |
 | `expr_projection_list.cypher` | `MATCH (p:Person) RETURN [1, 2, 3] AS xs` | `ExprProjection{TypeList<TypeInt>}` → `ResolvedList{ResolvedScalar{ScalarInt}}`. **Parser routing note:** list literals are not scalar, so `classifyProjection` refuses them (`internal/query/cypher/expr.go:254-258`, gated by `isScalarLiteral`); they fall through to `classifyRichExpression` and land in `ExprProjection`. The R2 projection walk resolves them via §4.5's `ExprProjection` arm, so the golden's `kind` is `list` with element `scalar` — same `ResolvedType` shape, different `Projection` producer. |
 | `func_projection_unknown.cypher` | `MATCH (p:Person) RETURN toString(p.age) AS s` | `FuncProjection{TypeUnknown}` → `ResolvedUnknown{}` (honest posture, §3.4) |
+| `func_projection_temporal.cypher` | `MATCH (p:Person) RETURN date() AS d` | `FuncProjection{TypeDate}` (parser Stage 7 commits via `temporalConstructorType`, `internal/query/cypher/expr.go:358-361`) → `ResolvedTemporal{TemporalDate}` (§3.2) — exercises the concrete-return arm of §4.2's FuncProjection dispatch |
 | `expr_projection_bool.cypher` | `MATCH (p:Person) RETURN p.age > 18 AS is_adult` | `ExprProjection{TypeBool}` → `ResolvedScalar{ScalarBool}` |
 | `expr_projection_unknown.cypher` | `MATCH (p:Person) RETURN p.age + 1 AS bumped` | `ExprProjection{TypeUnknown}` → `ResolvedUnknown{}` (property-participating arithmetic) |
 | `parameter_two_property_uses_agree.cypher` | `MATCH (p:Person), (q:Person) WHERE p.age = $threshold AND q.age = $threshold RETURN p.name` | two `PropertyUse{age}` witnesses agree → `ResolvedProperty{INT, true}` |
 | `parameter_clause_slot_skip.cypher` | `MATCH (p:Person) RETURN p.name SKIP $offset` | one `ClauseSlotUse{Skip}` → `ResolvedScalar{ScalarInt}` |
 | `parameter_clause_slot_limit.cypher` | `MATCH (p:Person) RETURN p.name LIMIT $n` | one `ClauseSlotUse{Limit}` → `ResolvedScalar{ScalarInt}` |
 | `parameter_expr_predicate.cypher` | `MATCH (p:Person) WHERE p.age > 0 AND $flag RETURN p.name` | one `ExprUse{TypeBool, Predicate}` → `ResolvedScalar{ScalarBool}` |
-| `parameter_expr_and_property.cypher` | `MATCH (p:Person) WHERE p.age = $x AND $x > 0 RETURN p.name` | `PropertyUse{age}` (`ResolvedProperty{INT, true}`) + `ExprUse{TypeBool, Predicate}` (`ResolvedScalar{ScalarBool}`); this is a **conflict** — see §6.4 invalid, and this row moves to §6.4. **Deleted from valid.** |
 | `parameter_property_and_unknown_expr.cypher` | `MATCH (p:Person) WHERE p.age = $x RETURN p.age + $x AS bumped` | `PropertyUse{age}` (`ResolvedProperty{INT, true}`) + `ExprUse{TypeUnknown, Projection}` (`ResolvedUnknown{}` — property-participating arithmetic types as `TypeUnknown` per parser Stage 6); unifies at `ResolvedProperty{INT, true}` (bottom-absorbs, §4.8). **Parser routing note:** the RETURN projection `p.age + $x` is an `ExprProjection{TypeUnknown}` (§4.5's ExprProjection arm resolves the column to `ResolvedUnknown`); the `$x` inside it is queued for `ExprUse{TypeUnknown, ExprInProjection}` because Stage-6's rich typer refuses to commit on property-participating arithmetic (`internal/query/cypher/typing.go` addition/subtraction lines). |
-
-**Erratum — the `parameter_expr_and_property.cypher` row above is an
-invalid fixture, not a valid one.** The row is preserved as a
-documentation trail: `PropertyUse{INT}` vs `ExprUse{TypeBool}` unifies
-`ResolvedProperty{INT, true}` against `ResolvedScalar{ScalarBool}`,
-which are not structurally equal and neither is `ResolvedUnknown`, so
-the unify lattice returns conflict (§4.8). The fixture belongs in
-§6.4 as `parameter_type_conflict_property_vs_expr_bool.cypher`.
-Removed from the valid list.
 
 **Coverage sketch (one line per row, keyed to the algorithm):**
 
@@ -842,6 +930,9 @@ Removed from the valid list.
   on a list-literal residue and §4.7's `TypeList` row.
 - `func_projection_unknown` — exercise §4.5's `FuncProjection` handler
   and the `TypeUnknown → ResolvedUnknown` row (§4.7).
+- `func_projection_temporal` — exercise §4.5's `FuncProjection`
+  handler on the parser's concrete-temporal case
+  (`temporalConstructorType`), lands on §4.7's `TypeDate` row.
 - `expr_projection_bool` — exercise §4.5's `ExprProjection` handler
   with a parser-committed concrete type.
 - `expr_projection_unknown` — exercise §4.5's `ExprProjection` handler
@@ -889,6 +980,8 @@ var invalidFixtures = map[string]error{
     "parameter_type_conflict_nullability.cypher":            ErrParameterTypeConflict,
     "unknown_property_via_expr_use.cypher":                  ErrUnknownProperty,
     "expr_use_set_value.cypher":                             ErrOutOfR0Scope,
+    "list_of_nodes_projection.cypher":                       ErrOutOfR0Scope,
+    "list_of_edges_projection.cypher":                       ErrOutOfR0Scope,
 }
 ```
 
@@ -913,7 +1006,12 @@ var invalidFixtures = map[string]error{
   the golden is regenerated to whatever the parser emits, and the
   test's assertion is `errors.Is(err, ErrParameterTypeConflict)` —
   the resolver's job is to reject *when* the parser gives it two
-  disagreeing witnesses, not to fabricate them.
+  disagreeing witnesses, not to fabricate them. This is the moved-in
+  routing trail for the earlier draft's `parameter_expr_and_property`
+  candidate: `ResolvedProperty{INT, true}` does not structurally equal
+  `ResolvedScalar{ScalarBool}` and neither side is `ResolvedUnknown`,
+  so the unify lattice returns conflict — the fixture belongs here in
+  §6.4, not in §6.3's valid list.
 - `parameter_type_conflict_nullability.cypher`:
   `MATCH (p:Person), (q:Person) WHERE p.name = $x AND q.nickname = $x
    RETURN p.name` — `p.name` (`ResolvedProperty{STRING, false}`) vs
@@ -939,6 +1037,28 @@ var invalidFixtures = map[string]error{
   write-clause routes to `ErrOutOfR0Scope`; the ExprUse arm's
   reachability is architectural, not exercised by a fixture. See
   §6.5's note.
+- `list_of_nodes_projection.cypher`:
+  `MATCH (a:Person) RETURN [a] AS things`. Parser routing: `[a]` is a
+  non-scalar literal so `classifyProjection` refuses it
+  (`internal/query/cypher/expr.go:254-258`) and falls through to
+  `classifyRichExpression` (`internal/query/cypher/typing.go:866-876`);
+  `typeAtom` on the bare `a` returns `TypeNode`
+  (`internal/query/cypher/typing.go:322-326`); `listLiteralType`
+  composes `TypeList{TypeNode{}}`
+  (`internal/query/cypher/typing.go:553-563`). §4.5's `ExprProjection`
+  arm calls `resolveType(TypeList{TypeNode{}})`; §4.7's table row
+  returns `nil, fmt.Errorf("%w: list-of-nodes projection", ErrOutOfR0Scope)`.
+  Schema: `social.gql`. This exercises the "list of nodes" reachability
+  posture (§4.7) — the same posture that R5's collect()-position
+  grouping-key work will later admit through a widened projection sum.
+- `list_of_edges_projection.cypher`:
+  `MATCH (a:Person)-[r:AUTHORED]->(p:Post) RETURN [r] AS es`. Parser
+  routing: identical to the node case with the edge binding replacing
+  the node binding — `typeAtom` returns `TypeEdge` for a bare edge
+  variable, `listLiteralType` composes `TypeList{TypeEdge{}}`, §4.5
+  dispatches to `resolveType`, §4.7 returns
+  `nil, fmt.Errorf("%w: list-of-edges projection", ErrOutOfR0Scope)`.
+  Schema: `social.gql`.
 
 Each fixture is paired to its schema via `invalid/schema.mapping.json`,
 extended to include the new fixtures. The
@@ -1045,6 +1165,8 @@ R0 §6.6 and R1 §6.6 invariants stand. R2 adds:
 | Unwind binding | `ErrOutOfR0Scope` | R5 or later |
 | Call binding | `ErrOutOfR0Scope` | R7 |
 | `AggregateProjection` | `ErrOutOfR0Scope` | R5 |
+| `ExprProjection` typed `TypeList{TypeNode}` (list literal of bare node vars) | `ErrOutOfR0Scope` | R5 |
+| `ExprProjection` typed `TypeList{TypeEdge}` (list literal of bare edge vars) | `ErrOutOfR0Scope` | R5 |
 | `ExprUse` at `ExprInSetValue` | `ErrOutOfR0Scope` | R6 |
 | `ExprUse` at `ExprInDeleteTarget` | `ErrOutOfR0Scope` | R6 |
 | Nullability upgrades (OPTIONAL MATCH regimes) | `ErrOutOfR0Scope` | R4 |
@@ -1092,12 +1214,29 @@ describes still holds.
 - **Projection sum arity ×5** — `internal/query/query.go:1030-1036`;
   closed at RefProjection, LiteralProjection, FuncProjection,
   AggregateProjection, ExprProjection.
-- **`FuncProjection.Type()` is `TypeUnknown` today** —
-  `internal/query/query.go:1112-1114` (documented) and
-  `internal/query/cypher/expr.go:175` (a listener path emitting an
-  ExprUse with a TypeUnknown enclosing type from a function call
-  residue); the parser has no signature registry for non-procedure
-  functions (§3.4's judgment call).
+- **`FuncProjection.Type()` is `TypeUnknown` for every non-aggregate
+  function call outside the temporal-constructor set, and one of the
+  six `TypeDate` / `TypeTime` / `TypeLocalTime` / `TypeDateTime` /
+  `TypeLocalDateTime` / `TypeDuration` variants when the call name
+  matches** — `internal/query/query.go:1112-1114` (documented) and
+  `internal/query/cypher/expr.go:358-361`
+  (`classifyFunction` commits `temporalConstructorType` on a
+  matching call; falls through to `TypeUnknown` otherwise). The
+  parser has no signature registry for non-procedure functions
+  outside that set (§3.4's judgment call).
+- **Read-side `ExprUse` with a `TypeUnknown` enclosing type is
+  emitted by the Stage-6 rich-expression walker** —
+  `internal/query/cypher/typing.go:867-874`
+  (`classifyRichExpression` types the whole sub-tree with
+  `typeExpressionMining` and registers every mined parameter as
+  `ExprUse{t, ExprInProjection}`; when the walker cannot commit,
+  `t` is `TypeUnknown`). The aggregate-argument analogue is
+  `internal/query/cypher/expr.go:398-403`
+  (`classifyAggregateCall` uses the aggregate's result type as the
+  enclosing type; a `count($p)` argument registers as
+  `ExprUse{aggregateResultType, ExprInProjection}` with a concrete
+  result type, not `TypeUnknown` — the "no parameter silently
+  dropped" invariant of parser Stage 6 §4).
 - **`LiteralProjection.Type()` is the literal's scalar / list / map
   kind** — `internal/query/query.go:1073-1087`.
 - **`ExprProjection.Type()` is the parser-computed rich-expression
