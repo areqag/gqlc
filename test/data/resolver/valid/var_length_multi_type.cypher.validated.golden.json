@@ -1,0 +1,27 @@
+{
+  "columns": [
+    {
+      "name": "r",
+      "type": {
+        "kind": "list",
+        "element": {
+          "kind": "edgeUnion",
+          "edgeKeys": [
+            {
+              "source": "Person",
+              "label": "AUTHORED",
+              "target": "Post"
+            },
+            {
+              "source": "Person",
+              "label": "LIKES",
+              "target": "Post"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "parameters": [],
+  "statement": "read"
+}
