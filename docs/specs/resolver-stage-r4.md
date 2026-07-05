@@ -548,12 +548,14 @@ OPTIONAL-clause siblings without knowing which bindings share a
 clause of introduction, and the frozen model does not record that.
 Leaving `a` and `r1` at `Nullable = true` is safe (§4.2's lattice
 invariant: no binding is ever demoted incorrectly) and preserves
-the non-breaking-refinement guarantee. §7.5 walks the four questions
+the non-breaking-refinement guarantee. §7.5 walks the honest state
 in order: what openCypher means (§7.5.1), where the model falls
-short (§7.5.2), what capability R4-as-scoped loses (§7.5.3), and
-the ADR 0008 additive-in-protocol unfreeze that would close the gap
-(§7.5.4). §7.5.5 recommends filing the unfreeze as a follow-up bead
-and proceeding with R4 as scoped.
+short (§7.5.2), what R4-as-scoped loses split into two model-gap
+classes (§7.5.3 Class A = missing group membership; Class B =
+missing witness), the two ADR 0008 additive-in-protocol unfreeze
+axes that would close them (§7.5.4 Axis 1 + Axis 2), and the
+recommendation (§7.5.5) to file both as separate follow-up beads
+and proceed with R4 as scoped.
 
 #### 4.4.1 The demotion witness — which edges prove which endpoints exist?
 
@@ -990,7 +992,7 @@ spec cycle.
 | `demote_undirected_edge_endpoints.cypher` | `MATCH (p:Person)-[r:LIKES]-(post:Post) RETURN p, r, post` | undirected single-match required edge; §4.4.1 row 3 → both endpoints demoted (they were non-nullable already; witness verified). Whole-entity nullable stays false. Fixture confirms undirected witnesses same as directed. |
 | `demote_var_length_positive_min.cypher` | `MATCH (p:Person)-[r:KNOWS*1..3]->(q:Person) RETURN p, r, q` | var-length required edge with `Min() == 1 >= 1` (§4.4.3) → demotes both endpoints. Whole-entity nullable false; `r` projects as `ResolvedList{Element: ResolvedEdge{Nullable: false}}` (a var-length required edge is a required list; the element carries the required flag). |
 | `no_demote_var_length_zero_min.cypher` | `OPTIONAL MATCH (p:Person) MATCH (p)-[r:KNOWS*0..3]->(q:Person) RETURN p, r, q` | seed: `p` nullable (first-introduced in OPTIONAL, then re-referenced in required MATCH — parser preserves nullable per `pattern.go:373-401`), `r` non-nullable (required var-length), `q` non-nullable. `r` is a NON-nullable var-length edge with `*Min() == 0` — the zero-min exclusion in §4.4.3 blocks `qualifiedDemoter(r)`, so `p` stays `Nullable: true` even though `r` touches it. Golden: `p` nullable; `r`/`q` non-nullable. **Discriminating**: an implementation that used `*Min() >= 0` instead of `*Min() >= 1` (i.e., forgot the zero-min exclusion) would wrongly demote `p` — this fixture's golden fails under the broken rule. |
-| `demote_var_length_unbounded_lower.cypher` | `MATCH (p:Person)-[r:KNOWS*]->(q:Person) RETURN p, r, q` | var-length required edge with `Min() == nil` (unbounded lower ⇒ openCypher-semantic min=1, §4.4.3 second judgment call) → does demote both endpoints. Whole-entity `p`, `r`, `q` all `Nullable: false`. Pins that the `nil`-min case is admitted as a witness. |
+| `demote_var_length_unbounded_lower.cypher` | `OPTIONAL MATCH (p:Person) MATCH (p)-[r:KNOWS*]->(q:Person) RETURN p, r, q` | seed: `p` nullable (first-introduced in OPTIONAL, then re-referenced in required MATCH — parser preserves nullable per `pattern.go:373-401`), `r` non-nullable (required var-length), `q` non-nullable. `r` has `Min() == nil` (unbounded lower ⇒ openCypher-semantic min=1, §4.4.3 second judgment call), so `qualifiedDemoter(r)` returns true and `r` demotes both endpoints. Golden: `p` transitions from `Nullable=true` to `Nullable: false` (demoted); `r`/`q` non-nullable. **Discriminating**: an implementation that read `Min() == nil` as "no witness" (e.g. defaulted to `false` in `qualifiedDemoter` when the pointer is nil) would leave `p` nullable — this fixture's golden fails under the broken rule. Mirrors the `no_demote_var_length_zero_min` (B5) discrimination shape. |
 | `demote_from_anonymous_required_edge.cypher` | `OPTIONAL MATCH (a:Person)-[:AUTHORED]->(b:Post) MATCH (a)-[:AUTHORED]->(c:Post) RETURN a, b, c` | anonymous required edge in the second MATCH demotes `a` (via §4.4.2's walk over anonymous edges); `c` is directly non-nullable from parser (introduced in required MATCH). `b` stays `Nullable: true` — the OPTIONAL edge does not prove `b` exists. Note: `a` is initially OPTIONAL-nullable, but the anonymous non-nullable edge in the second required MATCH's pattern demotes it. |
 | `optional_multi_type_union.cypher` | `OPTIONAL MATCH (p:Person)-[r:AUTHORED\|LIKES]->(post:Post) RETURN r` | multi-candidate + nullable: `ResolvedEdgeUnion{[Person→AUTHORED→Post, Person→LIKES→Post], Nullable: true}` |
 | `optional_var_length_whole_entity.cypher` | `OPTIONAL MATCH (p:Person)-[r:KNOWS*1..3]->(q:Person) RETURN r` | var-length + nullable: `ResolvedList{Element: ResolvedEdge{Person→KNOWS→Person, Nullable: true}}` — the element's Nullable is the binding's effective nullable per §3.5 |
@@ -1024,12 +1026,17 @@ spec cycle.
   would demote `p`. Under the correct rule `p` stays nullable; the
   golden differentiates the two implementations.
 - `demote_var_length_unbounded_lower` — exercises §4.4.3's second
-  judgment call (`Min() == nil` ⇒ min=1 ⇒ demoter).
+  judgment call (`Min() == nil` ⇒ min=1 ⇒ demoter). Uses the same
+  OPTIONAL-then-required-re-MATCH shape as the zero-min fixture so
+  that a broken demoter (nil-min treated as non-witness) shows up as
+  a golden divergence on `p`, not as a silent identity.
 - `demote_from_anonymous_required_edge` — exercises §4.4.2's
   named-plus-anonymous walk: anonymous edges are witnesses too.
-  Same-part reuse of `a` doesn't help (regime (b), R5); the
-  demotion comes from the *anonymous* edge in the same required
-  MATCH.
+  Same-part reuse of `a` as a bare pattern doesn't help — that is
+  Class B (same-Part regime (b), §7.5.5 bead 2, §7.5.3 item 2), and
+  the parser discards the second occurrence at `pattern.go:373-401`.
+  The demotion here comes from the *anonymous* edge in the same
+  required MATCH, whose existence *is* recorded in `part.Bindings`.
 - `optional_multi_type_union` — exercises §3.3's `Nullable` axis
   on a `ResolvedEdgeUnion`.
 - `optional_var_length_whole_entity` — exercises §3.5's element-
@@ -1174,8 +1181,8 @@ sentinel-relationship revised:
 | `ExprUse` at `ExprInSetValue` / `ExprInDeleteTarget` | `ErrOutOfR0Scope` | R6 |
 | **Nullability upgrades (OPTIONAL MATCH regime (a), edge-endpoint witness)** | **~~ErrOutOfR0Scope → in-scope at R4~~** | **R4 (this stage)** |
 | **Nullability upgrades (regime (b), cross-WITH re-MATCH — multi-part admission)** | `ErrOutOfR0Scope` (via the multi-part admission gate; §7.4 item 1) | **R5** |
-| **Nullability upgrades (regime (b), same-Part re-MATCH — frozen-model gap)** | silently under-demoted (safe under §4.2 lattice invariant); §7.4 item 2, §7.5 | **§7.5.4 unfreeze bead** (post-R4 follow-up) |
-| **OPTIONAL-clause-sibling demotion** (chain proves one sibling → all siblings demote) | silently under-demoted (safe under §4.2 lattice invariant); §7.5.3 items 1, 3 | **§7.5.4 unfreeze bead** (post-R4 follow-up) |
+| **Nullability upgrades (regime (b), same-Part re-MATCH — Class B: missing-witness model gap)** | silently under-demoted (safe under §4.2 lattice invariant); §7.4 item 2, §7.5.3 item 2 | **§7.5.5 bead 2** (Axis 2 unfreeze) |
+| **OPTIONAL-clause-sibling demotion** (chain proves one sibling → all siblings demote — Class A: missing-group-membership model gap) | silently under-demoted (safe under §4.2 lattice invariant); §7.5.3 items 1, 3 | **§7.5.5 bead 1** (Axis 1 unfreeze) |
 | `Part.Distinct == true` / `Part.ReturnsAll == true` | `ErrOutOfR0Scope` | R5 |
 | WITH carry-forward; UNION | `ErrOutOfR0Scope` | R5 |
 | Writes / CREATE / MERGE / SET / REMOVE / DELETE | `ErrOutOfR0Scope` | R6 |
@@ -1198,7 +1205,9 @@ WHERE / ORDER BY / SKIP / LIMIT). R4 does not extend it.
 flow-typing regimes a and b (`gqlc-lqm`), relaxing the conservative
 everything-OPTIONAL-is-nullable default — a non-breaking refinement
 by construction." R4 as this spec scopes it implements regime (a)
-fully and defers regime (b) to R5 with an explicit citation (§7.4).
+fully and defers **cross-WITH regime (b) to R5** and **same-Part
+regime (b) to §7.5.5 bead 2's model-unfreeze follow-up** with
+explicit citations (§7.4).
 The **non-breaking refinement** claim is defended by §4.2's lattice
 invariant and by §6.6's "happy path values unchanged" invariant.
 
@@ -1220,32 +1229,43 @@ two distinct axes so each is defended honestly:
    directly visible to R5's per-Part walk. **No model change is
    required for the cross-WITH case** — it is purely an
    admission-gate scope question. R5 owns it.
-2. **Same-Part regime (b) — the frozen-model gap.**
+2. **Same-Part regime (b) — a distinct frozen-model gap (missing
+   witness, not missing grouping).**
    `OPTIONAL MATCH (a)-[:R]->(b) MATCH (b) RETURN b` (no WITH) is a
    single-Part query R4 does admit, but the Stage-0 merge rule
    (`internal/query/cypher/pattern.go:373-401`, `mergeBinding`)
-   collapses the two `MATCH (b)`s into one binding whose
-   first-introduction `Nullable()` is OPTIONAL, so the second
-   required MATCH is invisible in the model. This is the **same
-   clause-of-introduction gap** that under-demotes the canonical
-   chain example (§7.5). R4 does not resolve it under scope; the
-   resolution path is the ADR 0008 additive-in-protocol unfreeze
-   surfaced in §7.5.4, not R5.
+   collapses the two `MATCH (b)`s into one binding — and *discards*
+   the second occurrence entirely, keeping only first-introduction
+   `Nullable`, endpoints, and hops. The second required MATCH is not
+   just ungrouped in the model; it is **absent** from the model. This
+   is a **distinct** frozen-model gap from the OPTIONAL-clause-
+   sibling gap that under-demotes the canonical chain example (§7.5
+   Class A): sibling demotion is missing *group membership* between
+   bindings that are all present; same-Part regime (b) is missing
+   the *witness itself*. One additive axis on `Binding` closes each
+   gap — a different axis for each; adding one does not close the
+   other (§7.5.4 Axis 1 vs Axis 2). R4 resolves neither under scope;
+   the resolution paths are the two ADR 0008 additive-in-protocol
+   unfreeze beads surfaced in §7.5.5, not R5.
 
-Conclusion: neither same-Part nor cross-WITH regime (b) is
-reachable-and-resolvable at R4-as-scoped, but for **different
-reasons**: cross-WITH is an admission-gate scope question that R5
-owns and resolves without a model change; same-Part is a frozen-
-model gap that neither R4 nor R5 resolves at their current scopes —
-the resolution path is the §7.5.4 unfreeze bead. Conflating the two
-would obscure that R5 does not, by itself, close the same-Part gap.
+Conclusion: cross-WITH regime (b), same-Part regime (b), and Class-A
+OPTIONAL-sibling under-demotion are **three distinct problems**
+with three distinct resolutions: cross-WITH is an admission-gate
+scope question that R5 owns and resolves without a model change;
+Class A is a missing-group-membership model gap closed by §7.5.4
+Axis 1; same-Part regime (b) is a missing-witness model gap closed
+by §7.5.4 Axis 2. Flattening these into "R5's clause structure" or
+"the same clause-of-introduction gap" obscures that the two
+model-gap classes are not co-closable and need separate follow-up
+beads.
 
 **Bead update (informational, not spec-authoritative).** gqlc-lqm's
 description will be revised at the R4 code-cycle close-out to
-reflect this split: (a) closes with R4; cross-WITH (b) closes with
-R5; same-Part (b) is retitled and remains open, gated on the
-§7.5.4 unfreeze bead. This spec does not commit to that revision —
-it lives in beads workflow.
+reflect the three-way split: regime (a) closes with R4; cross-WITH
+regime (b) closes with R5; Class A OPTIONAL-sibling demotion is
+retitled and gated on §7.5.5 bead 1; same-Part regime (b) is
+retitled and gated on §7.5.5 bead 2. This spec does not commit to
+that revision — it lives in beads workflow.
 
 ### 7.5 Under-approximation vs the bead's canonical example, and the unfreeze option
 
@@ -1308,8 +1328,17 @@ and belong in a separate PR, not this one.
 #### 7.5.3 What R4-as-scoped loses, quantified
 
 R4 as this spec scopes it implements regime (a) with a per-edge
-witness (§4.4.1) reading the flat `part.Bindings`. Concretely, three
-things are lost that ideal flow-typing would deliver:
+witness (§4.4.1) reading the flat `part.Bindings`. The under-
+demotions split into **two model-gap classes** that need two
+distinct model changes — conflating them (§7.5.4-round-1 did) hides
+that fact. Class A is the OPTIONAL-clause-sibling gap; Class B is
+the same-Part second-reference gap.
+
+**Class A — OPTIONAL-clause-sibling gap (missing group membership).**
+The model records per-binding `Nullable()` but not which bindings
+were co-introduced by the same OPTIONAL clause. Every co-introduced
+binding is *present in* `part.Bindings` — the witness is not
+dropped; only the *grouping* is missing. Two items are in this class:
 
 1. **Chained-from-required, OPTIONAL-clause siblings** —
    `OPTIONAL MATCH (a)-[r1:R1]->(b) MATCH (b)-[r2:R2]->(c) RETURN a,
@@ -1317,109 +1346,199 @@ things are lost that ideal flow-typing would deliver:
    `b` and `c` demote; `a` and `r1` stay `Nullable = true`. Two
    bindings under-demoted (per OPTIONAL clause of arity 2 nodes + 1
    edge).
-2. **Same-Part bare-pattern demotion** —
-   `OPTIONAL MATCH (a)-[:R]->(b) MATCH (b) RETURN b` (no WITH).
-   Ideal: `b` demotes (row-drop filter). R4-as-scoped: `b` stays
-   `Nullable = true`. One binding under-demoted. This is what the
-   bead calls "regime (b), bare-pattern demotion". The model gap
-   that blocks it is **the same** clause-of-introduction gap named
-   in §7.5.2 — not a distinct "R5 clause structure" dependence.
 3. **Larger OPTIONAL groups.** Any OPTIONAL clause of arity *k* whose
    downstream chain proves one member exists leaves *k − 1* members
    under-demoted for the same reason.
 
-What R4-as-scoped does NOT lose from this model gap:
+Class A is closable by a single additive axis — for example, an
+`OptionalGroup int` per binding — because the *demotion witness*
+(the required edge in the chain) is still present in the model;
+only the sibling-relation is missing. Once R4 can see "these three
+bindings share a clause of introduction", chain-demoting one
+propagates to all three.
+
+**Class B — Same-Part second-reference gap (missing witness).**
+The model records only *first-introduction* facts about each
+binding. When the same variable appears in a later clause of the
+same Part, the parser's `mergeBinding`
+(`internal/query/cypher/pattern.go:373-401`) *dedupes it into the
+existing binding and discards everything except label unioning* —
+the second reference is not recorded anywhere. This is a strictly
+different loss shape from Class A:
+
+2. **Same-Part bare-pattern demotion** —
+   `OPTIONAL MATCH (a)-[:R]->(b) MATCH (b) RETURN b` (no WITH).
+   Ideal: `b` demotes (the required bare `MATCH (b)` filters
+   NULL-`b` rows; row-drop). R4-as-scoped: `b` stays
+   `Nullable = true`. One binding under-demoted. The demotion
+   *witness* for `b` is the second, required, bare `MATCH (b)` —
+   and the parser has already collapsed that occurrence into the
+   OPTIONAL-introduced binding by the time the resolver sees the
+   model. This is what the bead calls "regime (b), bare-pattern
+   demotion".
+
+Class B is **not** closable by `OptionalGroup` alone: adding
+group-membership does not resurrect a dropped clause reference.
+Item 2 needs a *second, distinct* model change — either "preserve
+all clause references per binding, not just first-introduction" or
+"add a per-binding `ReferencedInRequiredBarePattern bool` axis that
+`mergeBinding` sets when the second occurrence is a required
+non-anonymous bare pattern". Either shape widens the *content* of
+what the model records for a binding beyond `Nullable() + first
+labels + first endpoints + first hops`. Item 2's under-demotion is
+not resolved until this second axis lands, whether or not Class A's
+axis exists.
+
+Neither class is resolved by R5 alone — see §7.4 item 2. What R5
+does close is a genuinely different case:
 
 - **Cross-WITH regime (b)** — `OPTIONAL MATCH (a)-[:R]->(b) WITH b
-  MATCH (b) RETURN b`. This is a genuinely different case: the WITH
-  boundary makes the re-MATCH live in a *second Part*, and R4's
-  admission gate (`internal/resolver/resolve.go:28-30`) rejects
-  multi-part queries with `ErrOutOfR0Scope`. R5's business is to
-  widen the admission gate to admit multi-part queries;
-  cross-WITH demotion falls out from that widening even without a
-  model change (each Part has its own `Bindings` slice; the second
-  Part's required MATCH of a WITH-carried nullable `b` is directly
-  visible). So the R5 deferral of the cross-WITH regime-(b) case
-  is **not** the frozen-model gap; it is R5's admission-gate scope.
-  §7.4 (revised) makes this distinction sharp.
+  MATCH (b) RETURN b`. The WITH boundary makes the re-MATCH live in
+  a *second Part*, and R4's admission gate
+  (`internal/resolver/resolve.go:28-30`) rejects multi-part queries
+  with `ErrOutOfR0Scope`. R5's business is to widen the admission
+  gate to admit multi-part queries; cross-WITH demotion falls out
+  from that widening **without any model change** — each Part has
+  its own `Bindings` slice, so the second Part's required MATCH of
+  the WITH-carried nullable `b` is directly visible to R5's per-Part
+  walk. So the R5 deferral of the cross-WITH regime-(b) case is
+  **not** a frozen-model gap; it is R5's admission-gate scope. §7.4
+  (revised) makes this distinction sharp.
 
-#### 7.5.4 The unfreeze option
+#### 7.5.4 The unfreeze option — two distinct axes, two follow-up beads
 
 ADR 0008's freeze is a stability commitment, not a wall. Under
-its own §Post-freeze revision protocol, a new axis with a
-zero-value-compatible wire default is in-protocol; the ADR lists
+its own §Post-freeze revision protocol, new axes with
+zero-value-compatible wire defaults are in-protocol; the ADR lists
 several such deferred additions by name (shortestPath selector on
 `PathBinding`, `EXISTS` Use precision, `CreateEffect`
 created-vs-prebound split, `ContainsAggregate` on `ExprProjection`).
-Adding a clause-of-introduction marker to bindings — for example, a
-per-binding `OptionalGroup int` axis whose zero value means "not in
-any OPTIONAL group" and whose non-zero values group co-introduced
-bindings — is the same in-protocol move.
+The two under-demotion classes named in §7.5.3 close through **two
+distinct additive axes**, each a separate follow-up bead. Naming
+one axis and gesturing at the other is a common way to obscure
+that item 2 is not closable by item 1's mechanism — this section is
+explicit about the split.
 
-**Shape of the change (illustrative, not committed):** each
-`Binding` variant gains an `OptionalGroup int` accessor; the builder
-threads a fresh per-OPTIONAL-clause group id through
-`collectPattern`; the wire adds an integer axis with default `0`
-(zero-value-safe, ADR 0008 additive rule). R4's per-edge demotion
+**Axis 1 — OPTIONAL-group membership (closes Class A, items 1 + 3).**
+Illustrative shape: each `Binding` variant gains an
+`OptionalGroup int` accessor; the builder threads a fresh
+per-OPTIONAL-clause group id through `collectPattern`
+(`internal/query/cypher/listener.go:261-270`,
+`internal/query/cypher/build.go:258-286`); the wire adds an
+integer axis with default `0` (zero-value-safe, ADR 0008 additive
+rule) meaning "not in any OPTIONAL group". R4's per-edge demotion
 rule extends to: "if a required chain proves any member of an
 OPTIONAL group exists, every member of that group demotes." This
-extension covers both under-demotions in §7.5.3 items 1 and 2 with a
-single mechanism.
+mechanism closes **Class A only** — items 1 and 3 in §7.5.3. It
+does **not** close item 2, because Class B's problem is a missing
+witness, not a missing group.
 
-This is a **separate PR**, gated on the owner's unfreeze decision.
-It never lands on this R4 branch. R4 is scoped to what the frozen
-model can express; the unfreeze, if warranted, precedes an R4
-follow-up that widens the demotion rule to consume the new axis.
+**Axis 2 — same-Part second-reference preservation (closes Class B,
+item 2).** The `mergeBinding` function
+(`internal/query/cypher/pattern.go:373-401`) currently discards
+every subsequent occurrence of a variable within a Part, keeping
+only the first-introduction's `Nullable`, endpoints, and hops. Two
+in-protocol shapes will do:
+
+  a. **Preserve all clause references per binding** — extend each
+     `Binding` variant with a `RequiredReferences []ClauseRef` (or
+     similar) axis defaulting to an empty slice, populated by
+     `mergeBinding` on every non-first occurrence. R4's demotion
+     rule extends to: "a binding whose `RequiredReferences` contains
+     any bare-pattern reference from a required (non-OPTIONAL)
+     clause is demoted." Wider surface; strictly more information
+     preserved.
+  b. **Per-binding `ReferencedInRequiredBarePattern bool`** — narrower
+     surface: `mergeBinding` sets a boolean when the second
+     occurrence is a required, non-anonymous bare pattern. Default
+     `false`. R4's demotion rule extends to: "a binding whose
+     `ReferencedInRequiredBarePattern` is true is demoted." Minimum
+     information sufficient for Class B, no more.
+
+Either shape widens the *content* the model records for a binding
+beyond first-introduction facts. This is a strictly different axis
+from Axis 1 — Axis 1 records how bindings *group* at introduction;
+Axis 2 records what happens to a binding *after* introduction. One
+does not subsume the other. A future spec cycle picks between shape
+(a) and (b) on cost grounds; the choice is not fixed here.
+
+**Both axes are separate PRs**, each its own bead, each gated on
+the owner's unfreeze decision. Neither lands on this R4 branch.
+R4 is scoped to what the frozen model can express; if the owner
+elects to unfreeze, each axis lands on its own PR before the
+corresponding R4-refinement PR widens the demotion rule to consume
+it.
 
 #### 7.5.5 Recommendation
 
-**R4 proceeds as scoped; the model unfreeze is filed as a follow-up
-bead and surfaced to the owner as a separate decision.**
+**R4 proceeds as scoped; two model-unfreeze beads are filed as
+follow-ups and surfaced to the owner as a pair of separate
+decisions.**
 
 Rationale:
 
-- The lost capability is bounded and characterisable: R4-as-scoped
-  under-demotes OPTIONAL-clause siblings of a chain-demoted binding
-  (§7.5.3 items 1, 2, 3). The under-approximation is safe (the
-  lattice invariant, §4.2, holds — no binding is demoted
-  incorrectly). Consumers that treat `Nullable = true` as "may or
-  may not be present" remain correct.
-- The lost capability is real, not marginal. Any query that starts
-  with an OPTIONAL of arity ≥ 2 and then chains through one of its
-  members loses the sibling demotion. The chain case in the bead's
-  own canonical example is exactly this shape.
-- The unfreeze is in-protocol under ADR 0008 §Post-freeze revision
-  protocol (additive axis, zero-value-safe wire default), so it is
-  a normal follow-up, not an ADR supersedure. It does not gate R4's
-  merit as a stage: R4 delivers regime (a)'s edge-endpoint witness,
-  the projection/parameter walk that reads the demotion table, the
-  wire widening on the three whole-entity resolved types, and the
-  golden rebaseline. All of that stands whether the unfreeze happens
-  before R5, between R5 and R6, or never.
-- Pausing R4 to do the unfreeze first would couple two decisions
+- The lost capability is bounded and characterisable, and now
+  split into two classes per §7.5.3: Class A (OPTIONAL-sibling
+  demotion, items 1 + 3) and Class B (same-Part bare-pattern
+  demotion, item 2). Both are safe under-approximations — the
+  lattice invariant (§4.2) holds; no binding is demoted incorrectly.
+  Consumers that treat `Nullable = true` as "may or may not be
+  present" remain correct.
+- Both classes are real, not marginal. Any query that starts with
+  an OPTIONAL of arity ≥ 2 and chains through one of its members
+  hits Class A; any query that OPTIONAL-introduces `b` and then
+  re-uses `b` in a required bare pattern in the same Part hits
+  Class B. The bead's own canonical example is Class A; the bead's
+  "regime (b), bare-pattern" example is Class B.
+- Both unfreezes are in-protocol under ADR 0008 §Post-freeze
+  revision protocol (additive axis, zero-value-safe wire default),
+  so each is a normal follow-up, not an ADR supersedure. Neither
+  gates R4's merit as a stage: R4 delivers regime (a)'s
+  edge-endpoint witness, the projection/parameter walk that reads
+  the demotion table, the wire widening on the three whole-entity
+  resolved types, and the golden rebaseline. All of that stands
+  whether either unfreeze happens before R5, between R5 and R6, or
+  never.
+- Pausing R4 to do the unfreezes first would couple three decisions
   the owner should make separately: (i) the R4 shape as it stands,
-  and (ii) whether to spend a model-widening PR now on a refinement
-  that the code base has not yet exercised any consumer against.
-  Filing the unfreeze bead lets the owner decide (ii) with the R4
-  code cycle's actual usage evidence in hand.
+  (ii) whether to spend a model-widening PR now on Class A, and
+  (iii) whether to spend a second model-widening PR on Class B.
+  Filing both unfreeze beads lets the owner decide (ii) and (iii)
+  with the R4 code cycle's actual usage evidence in hand — and lets
+  the two decisions be made independently (Class A may be worth
+  landing while Class B is not, or vice versa).
 
 If the owner reverses this recommendation and elects to unfreeze
-before R4 code-cycle merge, the R4 spec is revised on the same
-branch (this section replaced with the widened rule) and the R4
-code cycle waits on the unfreeze PR.
+either or both axes before R4 code-cycle merge, the R4 spec is
+revised on the same branch (this section replaced with the widened
+rule per the axis that landed) and the R4 code cycle waits on that
+axis's unfreeze PR.
 
-**Follow-up bead to file:** "Model: add clause-of-introduction /
-OPTIONAL-group axis to `Binding` (additive under ADR 0008); revise
-resolver R4 flow-typing to consume it". Dependencies: gqlc-0mx.6
-(R4 code cycle) at close; blocks a future R4-refinement bead. The
-follow-up bead is filed at the R4 close-out — see §9 item 8; this
-spec does not create the bead itself.
+**Follow-up beads to file (two):**
+
+1. "Model: add OPTIONAL-clause-group axis to `Binding` (additive
+   under ADR 0008); revise resolver R4 flow-typing to consume it,
+   closing §7.5.3 Class A items 1 + 3". Dependencies: gqlc-0mx.6
+   (R4 code cycle) at close; blocks the corresponding R4-Class-A-
+   refinement bead.
+2. "Model: preserve same-Part second-reference facts on `Binding`
+   (either shape (a) or shape (b) per §7.5.4 Axis 2; additive under
+   ADR 0008); revise resolver R4 flow-typing to consume it, closing
+   §7.5.3 Class B item 2". Dependencies: gqlc-0mx.6 (R4 code cycle)
+   at close; blocks the corresponding R4-Class-B-refinement bead.
+
+The two beads are independent — the owner can accept one, both, or
+neither. Both are filed at the R4 close-out (Cycle 2 — see §9 item
+9); this spec does not create the beads itself.
 
 The `demote_chained_from_required.cypher` fixture (§6.3) encodes
 R4-as-scoped's decision (`a` stays nullable, `b` demotes) and pins
-the under-approximation as a testable outcome. If the unfreeze bead
+the Class A under-approximation as a testable outcome. If bead 1
 lands and the demotion rule widens, that fixture's golden is
-updated on the widening PR — not on this branch.
+updated on the widening PR — not on this branch. Class B has no
+dedicated fixture at R4 (there is no fixture in §6.3 that exercises
+same-Part bare-pattern re-MATCH of an OPTIONAL binding — such a
+fixture would be added on bead 2's widening PR).
 
 ---
 
@@ -1553,22 +1672,26 @@ out of scope of this document. The spec is done when:
    §6.6), and the R4 harness invariants.
 6. §7 states the R4 capability scope in shape terms and lists its
    out-of-scope complement with the sentinel or under-demotion
-   posture for each construct and the R-stage (or the §7.5.4
-   follow-up bead) that owns the next widening. §7.4 splits regime
-   (b)'s deferral into two axes (cross-WITH → R5's admission gate;
-   same-Part → §7.5.4 unfreeze) with source citations. §7.5 walks
-   the four-question sequence: openCypher semantics (§7.5.1),
-   frozen-model gap (§7.5.2), quantified capability loss (§7.5.3),
-   the ADR-0008-in-protocol unfreeze option (§7.5.4), and the
-   recommendation to file the unfreeze as a follow-up bead and
-   proceed with R4 as scoped (§7.5.5).
+   posture for each construct and the R-stage (or the specific
+   §7.5.5 follow-up bead — bead 1 for Class A, bead 2 for Class B)
+   that owns the next widening. §7.4 splits regime (b)'s deferral
+   three ways: cross-WITH → R5's admission gate (no model change);
+   Class A OPTIONAL-sibling gap → §7.5.5 bead 1 (Axis 1 unfreeze);
+   Class B same-Part missing-witness gap → §7.5.5 bead 2 (Axis 2
+   unfreeze). §7.5 walks the honest state: openCypher semantics
+   (§7.5.1), frozen-model gap (§7.5.2), quantified capability loss
+   split into Class A and Class B (§7.5.3), the two distinct
+   ADR-0008-in-protocol unfreeze axes (§7.5.4 Axis 1 + Axis 2),
+   and the recommendation to file both as separate follow-up beads
+   and proceed with R4 as scoped (§7.5.5).
 7. §8 cross-checks every factual claim against source file:line.
 8. `just test` is untouched-green — this cycle is docs-only.
 9. **At R4 code-cycle close-out** (Cycle 2, not this Cycle 1),
-   the §7.5.4 unfreeze follow-up bead is filed and surfaced to
-   the owner as a separate decision; gqlc-lqm's description is
-   updated per §7.4's split (informational). Neither action lands
-   on this spec branch.
+   two unfreeze follow-up beads are filed and surfaced to the owner
+   as independent decisions (§7.5.5 beads 1 + 2 — Class A and Class
+   B are separately closable); gqlc-lqm's description is updated
+   per §7.4's three-way split (informational). None of these
+   actions land on this spec branch.
 
 The spec is a review artefact for Linus (adversarial reviewer);
 every blocker he raises is fixed on this same branch before the
