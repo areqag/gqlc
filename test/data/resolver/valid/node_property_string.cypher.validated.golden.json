@@ -6,9 +6,11 @@
         "kind": "property",
         "type": "STRING",
         "nullable": false
-      }
+      },
+      "groupingKey": false
     }
   ],
   "parameters": [],
-  "statement": "read"
+  "statement": "read",
+  "distinct": false
 }

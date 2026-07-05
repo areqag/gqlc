@@ -6,7 +6,8 @@
         "kind": "node",
         "labels": "Person",
         "nullable": false
-      }
+      },
+      "groupingKey": false
     },
     {
       "name": "r",
@@ -18,7 +19,8 @@
           "target": "Post"
         },
         "nullable": false
-      }
+      },
+      "groupingKey": false
     },
     {
       "name": "p",
@@ -26,9 +28,11 @@
         "kind": "node",
         "labels": "Post",
         "nullable": false
-      }
+      },
+      "groupingKey": false
     }
   ],
   "parameters": [],
-  "statement": "read"
+  "statement": "read",
+  "distinct": false
 }
