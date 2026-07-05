@@ -4,9 +4,11 @@
       "name": "s",
       "type": {
         "kind": "unknown"
-      }
+      },
+      "groupingKey": false
     }
   ],
   "parameters": [],
-  "statement": "read"
+  "statement": "read",
+  "distinct": false
 }
