@@ -143,8 +143,10 @@ One new helper in `resolve.go`:
   map[string]query.EdgeBinding, edgeKeys map[string]schema.EdgeKey,
   edgeCands map[string][]schema.EdgeKey) map[string]bool`** (new).
   Produces the effective-nullability table per §4.4. Deterministic —
-  iteration is over the parser's `Part.Bindings` in first-appearance order,
-  and each pass either shrinks the pending demotion candidates or halts.
+  one pass over the parser's `Part.Bindings` in first-appearance order
+  suffices for regime (a) (§4.4.2's termination argument): the loop
+  only writes `false` to node-binding entries, edges are never demoted
+  in R4, so a single walk over the bindings closes the algorithm.
 
 R3's existing helpers (`edgeCandidates`, `closeEdge`, `endpointLabels`,
 `candidateTypes`, `touchingSide`, `intersect`, `refProjectionType`,
@@ -460,12 +462,23 @@ for each b in part.Bindings with named Variable():
 The seed reads the frozen `Nullable()` accessor
 (`internal/query/query.go:356` for `NodeBinding`, `query.go:464` for
 `EdgeBinding`), which is a static local fact per ADR 0006 — never
-demoted by the parser. Anonymous edges are
-skipped in the seed (their `Variable() == ""`; they cannot appear in
-a projection or parameter Ref); their nullability does not affect
-the algorithm because the demotion witness in §4.4 walks named-edge
-existence, and an anonymous edge whose existence would prove an
-endpoint's non-nullability is still a witness — see §4.4.2.
+demoted by the parser. Anonymous edges are skipped in the seed
+(their `Variable() == ""`; they cannot appear in a projection or
+parameter Ref); their nullability does not affect the algorithm
+because the demotion witness in §4.4 walks named-edge existence,
+and an anonymous edge whose existence would prove an endpoint's
+non-nullability is still a witness — see §4.4.2.
+
+**Named-edge entries in the seed — flow-through.** The seed writes
+one entry per named binding, including named edges, though §4.4.2
+never demotes edge entries (only node entries; edge bindings are
+never targets of demotion in regime (a)). The named-edge entries
+persist unchanged from seed to end-of-loop; they are read by §4.5's
+projection walk when emitting `ResolvedEdge.Nullable` /
+`ResolvedEdgeUnion.Nullable` for a whole-entity edge column. The
+seed value (`edgeBinding.Nullable()`) is the correct final value in
+R4 — an OPTIONAL-introduced edge stays nullable; a required edge
+stays non-nullable. Regime (b) at R5 may revise this.
 
 **Anonymous-edge exception (subtle).** An anonymous edge with
 `Nullable() == false` and `VarEndpoint` on both sides *does* prove
@@ -588,16 +601,19 @@ nullableBinding := seed()  // §4.3
 
 for {
     changed := false
-    for each edge e in part.Bindings (in first-appearance order):
+    for each b in part.Bindings (in first-appearance order):
+        e, ok := b.(query.EdgeBinding)
+        if !ok:
+            continue          // node bindings are never witnesses
         if e.Nullable() {
-            continue  // seed unchanged; regime (a) only demotes from
-                      // required edges. The fixed-point does not
-                      // promote an OPTIONAL edge to required.
+            continue          // seed unchanged; regime (a) only demotes
+                              // from required edges. The fixed-point does
+                              // not promote an OPTIONAL edge to required.
         }
-        if not qualifiedDemoter(e):  // §4.4.3 (var-length gate)
+        if not qualifiedDemoter(e):     // §4.4.3 (var-length gate)
             continue
-        for each side in {Source, Target}:
-            if side is VarEndpoint{Variable: v} and v != "":
+        for each side in {e.Source(), e.Target()}:
+            if side is query.VarEndpoint{Variable: v} and v != "":
                 if nullableBinding[v] {
                     nullableBinding[v] = false
                     changed = true
@@ -643,11 +659,14 @@ existence but only *writes* to `nullableBinding[<node-var>]`. To
 make this explicit, the pseudocode simplification:
 
 ```
-for each edge e (in first-appearance order):
+for each b in part.Bindings (in first-appearance order):
+    e, ok := b.(query.EdgeBinding)
+    if !ok:
+        continue                     // node bindings are not witnesses
     if e.Nullable() or not qualifiedDemoter(e):
         continue
-    for each side in {Source, Target}:
-        if side is VarEndpoint{Variable: v}:
+    for each side in {e.Source(), e.Target()}:
+        if side is query.VarEndpoint{Variable: v} and v != "":
             nullableBinding[v] = false
 ```
 
@@ -973,7 +992,7 @@ spec cycle.
 | `demote_chained_from_required.cypher` | `OPTIONAL MATCH (p:Person)-[r1:AUTHORED]->(post:Post) MATCH (post)-[r2:AUTHORED]->(author:Person) RETURN p, r1, post, r2, author` | seed: `p`, `r1`, `post` nullable; `r2`, `author` non-nullable; §4.4.1 rule: `r2` is required directed single-hop → demotes both `post` and `author`; `post` transitions to `Nullable: false`. `p` and `r1` stay `Nullable: true` (no required witness). Golden: `ResolvedNode{Person, Nullable: true}` for `p`, `ResolvedEdge{Nullable: true}` for `r1`, `ResolvedNode{Post, Nullable: false}` for `post` (demoted), `ResolvedEdge{Nullable: false}` for `r2`, `ResolvedNode{Person, Nullable: false}` for `author`. |
 | `demote_undirected_edge_endpoints.cypher` | `MATCH (p:Person)-[r:LIKES]-(post:Post) RETURN p, r, post` | undirected single-match required edge; §4.4.1 row 3 → both endpoints demoted (they were non-nullable already; witness verified). Whole-entity nullable stays false. Fixture confirms undirected witnesses same as directed. |
 | `demote_var_length_positive_min.cypher` | `MATCH (p:Person)-[r:KNOWS*1..3]->(q:Person) RETURN p, r, q` | var-length required edge with `Min() == 1 >= 1` (§4.4.3) → demotes both endpoints. Whole-entity nullable false; `r` projects as `ResolvedList{Element: ResolvedEdge{Nullable: false}}` (a var-length required edge is a required list; the element carries the required flag). |
-| `no_demote_var_length_zero_min.cypher` | `OPTIONAL MATCH (p:Person)-[r:KNOWS*0..3]->(q:Person) RETURN p, r, q` | OPTIONAL var-length edge with `*Min() == 0` (§4.4.3 exclusion) → does NOT demote from *this* edge; nothing else in the pattern is a witness either, so `p`, `r`, `q` all stay `Nullable: true`. Exercises the zero-min-exclusion arm directly: without the exclusion the required-looking `r` would wrongly demote `p` and `q`, but the parser's OPTIONAL flag is preserved on the emitted goldens.
+| `no_demote_var_length_zero_min.cypher` | `OPTIONAL MATCH (p:Person) MATCH (p)-[r:KNOWS*0..3]->(q:Person) RETURN p, r, q` | seed: `p` nullable (first-introduced in OPTIONAL, then re-referenced in required MATCH — parser preserves nullable per `pattern.go:373-401`), `r` non-nullable (required var-length), `q` non-nullable. `r` is a NON-nullable var-length edge with `*Min() == 0` — the zero-min exclusion in §4.4.3 blocks `qualifiedDemoter(r)`, so `p` stays `Nullable: true` even though `r` touches it. Golden: `p` nullable; `r`/`q` non-nullable. **Discriminating**: an implementation that used `*Min() >= 0` instead of `*Min() >= 1` (i.e., forgot the zero-min exclusion) would wrongly demote `p` — this fixture's golden fails under the broken rule. |
 | `demote_var_length_unbounded_lower.cypher` | `MATCH (p:Person)-[r:KNOWS*]->(q:Person) RETURN p, r, q` | var-length required edge with `Min() == nil` (unbounded lower ⇒ openCypher-semantic min=1, §4.4.3 second judgment call) → does demote both endpoints. Whole-entity `p`, `r`, `q` all `Nullable: false`. Pins that the `nil`-min case is admitted as a witness. |
 | `demote_from_anonymous_required_edge.cypher` | `OPTIONAL MATCH (a:Person)-[:AUTHORED]->(b:Post) MATCH (a)-[:AUTHORED]->(c:Post) RETURN a, b, c` | anonymous required edge in the second MATCH demotes `a` (via §4.4.2's walk over anonymous edges); `c` is directly non-nullable from parser (introduced in required MATCH). `b` stays `Nullable: true` — the OPTIONAL edge does not prove `b` exists. Note: `a` is initially OPTIONAL-nullable, but the anonymous non-nullable edge in the second required MATCH's pattern demotes it. |
 | `optional_multi_type_union.cypher` | `OPTIONAL MATCH (p:Person)-[r:AUTHORED\|LIKES]->(post:Post) RETURN r` | multi-candidate + nullable: `ResolvedEdgeUnion{[Person→AUTHORED→Post, Person→LIKES→Post], Nullable: true}` |
@@ -1002,9 +1021,11 @@ spec cycle.
 - `demote_var_length_positive_min` — exercises §4.4.3's positive-min
   branch (var-length with `*Min() >= 1` IS a witness).
 - `no_demote_var_length_zero_min` — exercises §4.4.3's zero-min
-  exclusion using an OPTIONAL var-length so the parser seed leaves
-  the endpoints nullable; the fixture's golden pins that the
-  required-looking `r` does NOT demote them.
+  exclusion. The pattern is an OPTIONAL-introduced `p` followed by
+  a required `MATCH (p)-[r:KNOWS*0..3]->(q)`. `r` is non-nullable
+  and touches `p`, so a demoter that ignored the zero-min exclusion
+  would demote `p`. Under the correct rule `p` stays nullable; the
+  golden differentiates the two implementations.
 - `demote_var_length_unbounded_lower` — exercises §4.4.3's second
   judgment call (`Min() == nil` ⇒ min=1 ⇒ demoter).
 - `demote_from_anonymous_required_edge` — exercises §4.4.2's
