@@ -10,7 +10,8 @@
             "source": "Person",
             "label": "KNOWS",
             "target": "Person"
-          }
+          },
+          "nullable": false
         }
       }
     }

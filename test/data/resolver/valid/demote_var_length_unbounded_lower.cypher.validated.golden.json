@@ -9,15 +9,22 @@
       }
     },
     {
-      "name": "post",
+      "name": "r",
       "type": {
-        "kind": "node",
-        "labels": "Post",
-        "nullable": false
+        "kind": "list",
+        "element": {
+          "kind": "edge",
+          "edgeKey": {
+            "source": "Person",
+            "label": "KNOWS",
+            "target": "Person"
+          },
+          "nullable": false
+        }
       }
     },
     {
-      "name": "p2",
+      "name": "q",
       "type": {
         "kind": "node",
         "labels": "Person",

@@ -51,6 +51,7 @@ var invalidFixtures = map[string]error{
 	"unknown_property_union_type_differs.cypher":           ErrUnknownProperty,
 	"untyped_edge.cypher":                                  ErrOutOfR0Scope,
 	"var_length_edge_property_projection.cypher":           ErrOutOfR0Scope,
+	"optional_match_with_clause.cypher":                    ErrOutOfR0Scope,
 }
 
 type ResolverSuite struct {

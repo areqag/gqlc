@@ -8,10 +8,10 @@
           "kind": "edge",
           "edgeKey": {
             "source": "Person",
-            "label": "LIKES",
-            "target": "Post"
+            "label": "KNOWS",
+            "target": "Person"
           },
-          "nullable": false
+          "nullable": true
         }
       }
     }

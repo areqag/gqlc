@@ -6,10 +6,10 @@
         "kind": "edge",
         "edgeKey": {
           "source": "Person",
-          "label": "KNOWS",
-          "target": "Person"
+          "label": "AUTHORED",
+          "target": "Post"
         },
-        "nullable": false
+        "nullable": true
       }
     }
   ],

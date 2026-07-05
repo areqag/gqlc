@@ -75,20 +75,26 @@ type ResolvedType interface {
 }
 
 // ResolvedNode is a whole-entity projection whose Ref names a node binding,
-// keyed by the resolved node type's canonical label set.
+// keyed by the resolved node type's canonical label set. R4 adds Nullable:
+// the binding's effective nullability after R4 regime-(a) demotion — true iff
+// the binding was first introduced in an OPTIONAL MATCH clause AND no
+// non-nullable edge in the pattern proves its existence.
 type ResolvedNode struct {
-	Labels graph.LabelSetKey `json:"labels"`
+	Labels   graph.LabelSetKey `json:"labels"`
+	Nullable bool              `json:"nullable"`
 }
 
 // String is the wire tag "node".
 func (ResolvedNode) String() string { return "node" }
 
-// MarshalJSON emits a tagged-union object with a "kind" discriminator.
+// MarshalJSON emits a tagged-union object with a "kind" discriminator plus
+// the R4 nullable bit.
 func (n ResolvedNode) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Kind   string            `json:"kind"`
-		Labels graph.LabelSetKey `json:"labels"`
-	}{Kind: n.String(), Labels: n.Labels})
+		Kind     string            `json:"kind"`
+		Labels   graph.LabelSetKey `json:"labels"`
+		Nullable bool              `json:"nullable"`
+	}{Kind: n.String(), Labels: n.Labels, Nullable: n.Nullable})
 }
 
 func (ResolvedNode) isResolvedType() {}
@@ -122,22 +128,27 @@ func (p ResolvedProperty) MarshalJSON() ([]byte, error) {
 func (ResolvedProperty) isResolvedType() {}
 
 // ResolvedEdge is a whole-entity edge projection: the schema's canonical
-// (source, label, target) triple. R1 produces this variant for a RefProjection
-// whose Ref names an EdgeBinding and whose Property is empty. Multi-hop
-// (list<edge>) is R3's business.
+// (source, label, target) triple plus (R4) the binding's effective
+// nullability. R4 semantics identical to ResolvedNode: true iff the edge
+// binding was first introduced in an OPTIONAL MATCH and R4 demotion could
+// not prove it non-nullable. R1 introduces the shape; R3 keeps it for
+// single-candidate edges; R4 adds Nullable.
 type ResolvedEdge struct {
-	EdgeKey schema.EdgeKey `json:"edgeKey"`
+	EdgeKey  schema.EdgeKey `json:"edgeKey"`
+	Nullable bool           `json:"nullable"`
 }
 
 // String is the wire tag "edge".
 func (ResolvedEdge) String() string { return "edge" }
 
-// MarshalJSON emits a tagged-union object with a "kind" discriminator.
+// MarshalJSON emits a tagged-union object with a "kind" discriminator plus
+// the R4 nullable bit.
 func (e ResolvedEdge) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Kind    string         `json:"kind"`
-		EdgeKey schema.EdgeKey `json:"edgeKey"`
-	}{Kind: e.String(), EdgeKey: e.EdgeKey})
+		Kind     string         `json:"kind"`
+		EdgeKey  schema.EdgeKey `json:"edgeKey"`
+		Nullable bool           `json:"nullable"`
+	}{Kind: e.String(), EdgeKey: e.EdgeKey, Nullable: e.Nullable})
 }
 
 func (ResolvedEdge) isResolvedType() {}
@@ -153,18 +164,21 @@ func (ResolvedEdge) isResolvedType() {}
 // ResolvedEdge.
 type ResolvedEdgeUnion struct {
 	EdgeKeys []schema.EdgeKey `json:"edgeKeys"`
+	Nullable bool             `json:"nullable"`
 }
 
 // String is the wire tag "edgeUnion".
 func (ResolvedEdgeUnion) String() string { return "edgeUnion" }
 
 // MarshalJSON emits a tagged-union object with a "kind" discriminator plus
-// the ordered candidate slice.
+// the ordered candidate slice and the R4 nullable bit. Every union member
+// shares one Nullable — the axis is on the binding, not the schema side.
 func (u ResolvedEdgeUnion) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Kind     string           `json:"kind"`
 		EdgeKeys []schema.EdgeKey `json:"edgeKeys"`
-	}{Kind: u.String(), EdgeKeys: u.EdgeKeys})
+		Nullable bool             `json:"nullable"`
+	}{Kind: u.String(), EdgeKeys: u.EdgeKeys, Nullable: u.Nullable})
 }
 
 func (ResolvedEdgeUnion) isResolvedType() {}
