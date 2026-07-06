@@ -1,0 +1,22 @@
+{
+  "columns": [
+    {
+      "name": "1 + n.age",
+      "type": {
+        "kind": "unknown"
+      },
+      "groupingKey": true
+    },
+    {
+      "name": "count(n)",
+      "type": {
+        "kind": "scalar",
+        "scalar": "int"
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "read",
+  "distinct": false
+}
