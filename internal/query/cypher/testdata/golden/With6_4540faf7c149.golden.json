@@ -22,7 +22,8 @@
                     "property": "age"
                   }
                 ],
-                "type": "unknown"
+                "type": "unknown",
+                "containsAggregate": true
               }
             }
           ],
