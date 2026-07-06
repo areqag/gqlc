@@ -89,8 +89,9 @@ merges):
   §7.4.
 - Every pre-existing resolver-valid golden is byte-identical after
   the widening PR (§7.5). The fence check runs from the worktree:
-  `just test` without `-update` over the 102-golden R0–R7 corpus.
-  Only the one new fixture appears in the diff.
+  `just test` without `-update` over the 116-fixture-pair R0–R7
+  corpus at branch base (`ls test/data/resolver/valid/*.cypher |
+  wc -l` = 116). Only the one new fixture appears in the diff.
 
 Nothing downstream of the resolver is built — the resolver's widening
 lands the corrected grouping-key semantics; codegen consumes them
@@ -142,7 +143,8 @@ false` semantics — the existing constructor is preserved unchanged.
 **What does change.** The one parser-test pin `"count in arithmetic"`
 (`parser_test.go:1319-1327`) rebaselines — its `ExprProjection` now
 carries `ContainsAggregate = true`. The wire JSON of ExprProjection
-gains one field: `containsAggregate` (always-emit; §4.1.3 justifies).
+gains one field: `containsAggregate` (omit-when-false; §4.1.3
+records the post-freeze convention and the fence).
 The ADR 0008 amendment records the axis's promotion. The resolver's
 `fillGroupingKeys` gains one branch on the new bit.
 
@@ -390,8 +392,14 @@ not.**
   `internal/query/query.go` (Stage 6 ADR 0006 added the nullable
   axis via a parallel constructor, not a signature change).
 - **Accessor** — same, `ContainsAggregate() bool`. §4.1.2.
-- **JSON** — DECIDED ALWAYS-EMIT (§4.1.3 justifies against the
-  fence-diff requirement). Follows the `directed` precedent.
+- **JSON** — DIVERGES. Decided **omit-when-false** (`,omitempty`).
+  §4.1.3 justifies against the fence-diff requirement: 2055 of 3199
+  goldens embed `"kind": "expr"` blobs, and an always-emit posture
+  would rebaseline all of them for zero semantic content. This
+  cycle establishes the campaign convention that post-freeze
+  additive axes emit **omit-when-zero-value**, deliberately not
+  following the pre-freeze `directed` precedent — a decision the
+  ADR 0008 amendment note in §6 records verbatim.
 
 ### 3.7 R5's audit note — what this cycle closes
 
@@ -469,7 +477,7 @@ func (p ExprProjection) ContainsAggregate() bool { return p.containsAggregate }
 
 `isProjection()`, `Refs()`, `Type()` are unchanged.
 
-#### 4.1.3 JSON — always-emit, not omit-when-false
+#### 4.1.3 JSON — omit-when-false, deliberately diverging from pre-freeze precedent
 
 The marshalled struct gains one field:
 
@@ -479,7 +487,7 @@ func (p ExprProjection) MarshalJSON() ([]byte, error) {
         Kind              string    `json:"kind"`
         Refs              []flatRef `json:"refs"`
         Type              Type      `json:"type"`
-        ContainsAggregate bool      `json:"containsAggregate"`
+        ContainsAggregate bool      `json:"containsAggregate,omitempty"`
     }{
         Kind:              projectionKindExpr,
         Refs:              flattenRefs(p.refs),
@@ -489,92 +497,108 @@ func (p ExprProjection) MarshalJSON() ([]byte, error) {
 }
 ```
 
-**Always-emit vs omit-when-false — the trade-off.**
+**Round-1 correction (2026-07-06).** An earlier draft of this
+subsection asserted "no parser JSON goldens" and ruled always-emit.
+That premise was wrong: `internal/query/cypher/testdata/golden/`
+holds **3199 `*.golden.json` files**, of which **2055 contain
+`"kind": "expr"` blobs**, and `checkGolden`
+(`internal/query/cypher/acceptance_test.go:1052`) is a byte-exact
+`strings.TrimRight(string(want), "\n") != string(got)` diff. Under
+an always-emit encoding the unfreeze PR would rebaseline
+**2055 goldens** whose semantic content is unchanged — the diff
+would be dominated by mechanical `"containsAggregate":false` key
+insertions, not the semantic change ADR 0008's "diff shows only the
+new surface" fence targets.
 
-- **Omit-when-false** (add `,omitempty`): every ExprProjection golden
-  whose bit is `false` — every non-aggregate expression — is
-  byte-identical after the change. Only aggregate-carrying
-  ExprProjections gain the key. The parser-golden fence diff would
-  be limited to the one bit-changed pin.
-  **Problem:** the wire shape's discriminator asymmetry silently
-  encodes model semantics: a downstream consumer that reads the JSON
-  and treats "field absent" as "false" is correct on this axis but
-  wrong on any future addition where `false` is not the safe default.
-  The convention across the frozen wire — `directed`, `nullable`,
-  `returnsAll`, `hops` — is **always-emit** (verified verbatim at
-  query.go:1483-1490 for NodeBinding; :1497-1508 for EdgeBinding;
-  :1613-1619 for the returnsAll block). The wire-encoding audit
-  reviewer would flag an `omitempty` here as inconsistent.
+**Ruling: omit-when-false (`,omitempty`).** Under this encoding the
+**2048** ExprProjection-bearing goldens whose top-level Returns
+position embeds no aggregate call remain byte-identical, and the
+rebaseline diff surfaces **exactly** the goldens whose semantic
+content actually changes — i.e. those whose ExprProjection now
+carries `ContainsAggregate = true`. The rebaseline IS the semantic
+change; nothing else moves.
 
-- **Always-emit**: every ExprProjection golden gains one key.
-  If any resolver-side golden marshals `query.Query` (verify: none
-  do — the resolver marshals only `ValidatedQuery`, and
-  `ValidatedQuery` carries no ExprProjection JSON — §7.5), the
-  parser-side unit tests are the ONLY witnesses to the wire shape.
-  The parser tests do not persist goldens (`mustParse` compares
-  in-memory `query.Query` values via `require.Equal`), so the wire
-  fence-diff scope is limited to `TestExprProjectionMarshalJSON`
-  at `type_test.go:124-131` and the new test at §5.
-  **Fence-diff assessment:** always-emit changes exactly one line
-  of one test file — `type_test.go:129` — from
-  `"type":"int"` to `"type":"int","containsAggregate":false`.
-  Every parser-test golden that would emit an ExprProjection JSON
-  (there are none — parser tests use struct equality, not JSON
-  goldens) would gain the key. The fence-diff scope is
-  **one file, one line**.
+**Campaign convention — recorded here.** Post-freeze additive axes
+emit **omit-when-zero-value**, deliberately diverging from the
+pre-freeze always-emit precedent (`directed`, `nullable`,
+`returnsAll`, `hops` — verified verbatim at query.go:1483-1490 for
+NodeBinding, :1497-1508 for EdgeBinding, :1613-1619 for the
+returnsAll block). The reason for the divergence is the constraint
+flip that ADR 0008's freeze codifies:
 
-**Decision: always-emit.** Reasons:
+- **Pre-freeze:** parser was the only consumer; model churn was
+  cheap; the wire-consistency argument for always-emit dominated
+  because rebaseline cost was near-zero.
+- **Post-freeze:** golden rebaselines are the primary auditability
+  surface for every additive change. The remaining unfreeze
+  campaign axes (Use→Part attribution on `PropertyUse`/`ExprUse`/
+  `ClauseSlotUse` per gqlc-fvo; per-position CALL-arg records on
+  `CallBinding` per gqlc-0ig; group fields on `Binding` per gqlc-ay9
+  and gqlc-5xg) sit on records present in **nearly every golden**.
+  An always-emit posture across the campaign forces near-total
+  rebaselines of the 3199-file corpus on each cycle. Post-freeze
+  auditability is the load-bearing constraint, and it is the
+  constraint the omit-when-zero-value convention protects.
 
-1. Consistency with the existing wire convention (`directed`,
-   `nullable`, `returnsAll`, `hops` are all always-emit).
-2. The fence-diff scope is one line in
-   `internal/query/type_test.go` — smaller than the omit-when-false
-   variant's promise implies (there are no golden JSON files whose
-   ExprProjection tags are inline; parser tests compare Go values).
-3. The wire audit's readability improves: a reviewer inspecting a
-   `"kind":"expr"` blob sees the `containsAggregate` bit directly
-   without inferring "absent = false".
-4. The resolver-widening PR is unblocked either way (the resolver
-   reads the field via the Go accessor, not via JSON).
+**The convention in one line.** For any additive axis landing under
+the ADR 0008 revision protocol whose zero value is the semantic
+default of the pre-freeze corpus, the JSON encoding is
+`,omitempty`; the always-emit precedent applies only to axes
+already frozen at the freeze snapshot.
 
-**Consequence for parser goldens** (`test/data/resolver/valid/*.json`
-and any other JSON goldens containing embedded ExprProjection):
+**Consequences for the unfreeze PR fence.**
 
-- **Resolver goldens.** No ExprProjection JSON appears in any
-  resolver golden. Verified by search: `grep -l '"kind":"expr"'
-  test/data/resolver/valid/*.json` yields zero matches at branch
-  base. Resolver goldens marshal only `ValidatedQuery`, whose axis
-  set (`columns`, `parameters`, `statement`, `distinct`) does not
-  embed a query.Projection. §7.5 pins the byte-identity claim over
-  the 102-golden R0–R7 corpus.
-- **Parser goldens.** No JSON golden files exist for the parser
-  package (verified: `find test/data -name '*.json' -not -path
-  '*/resolver/*'` returns only schema goldens and TCK graph
-  fixtures, none of which serialise ExprProjection). Parser tests
-  are in-code via `require.Equal(t, c.want, got)` — the wire shape
-  is tested exclusively at `internal/query/type_test.go`.
+- **Parser-golden rebaseline scope.** The unfreeze PR rebaselines
+  **exactly the 7 goldens** whose top-level Returns position embeds
+  an ExprProjection whose expression text contains an aggregate
+  function call, enumerated in §4.4 (mined by the discovery command
+  recorded there). Every other ExprProjection-bearing golden — 2048
+  files — stays byte-identical.
+- **The reviewer-side fence.** Strip the `containsAggregate` key
+  from all goldens and diff against the branch base. The result
+  MUST be byte-identical. Recorded fence command (run from the
+  worktree at the unfreeze PR's branch tip, against
+  `origin/master @ e77f33e`):
 
-Enumeration of affected parser goldens under always-emit: **the
-single unit test `TestExprProjectionMarshalJSON` at
-`internal/query/type_test.go:124-131`**. That test rebaselines from
+  ```
+  python3 - <<'PY'
+  import glob, json, sys
+  for path in sorted(glob.glob(
+          'internal/query/cypher/testdata/golden/*.golden.json')):
+      with open(path) as f: data = json.load(f)
+      def strip(n):
+          if isinstance(n, dict):
+              n.pop('containsAggregate', None)
+              for v in n.values(): strip(v)
+          elif isinstance(n, list):
+              for v in n: strip(v)
+      strip(data)
+      with open(path, 'w') as f:
+          json.dump(data, f, indent=2); f.write('\n')
+  PY
+  git diff --stat origin/master -- \
+      internal/query/cypher/testdata/golden/*.golden.json
+  # MUST print: no changes.
+  git checkout -- internal/query/cypher/testdata/golden/
+  ```
 
-```
-`{"kind":"expr","refs":[{"variable":"a","property":"n"}],"type":"int"}`
-```
+  If the stat print is non-empty, some non-aggregate ExprProjection
+  golden regenerated — the encoding leaked a `containsAggregate:
+  true` where the semantic default should hold, or a spurious
+  formatting change slipped in. The unfreeze PR is buggy.
 
-to
+- **`TestExprProjectionMarshalJSON` at `internal/query/type_test.go:
+  124-131` stays VERBATIM.** The test's blob has
+  `containsAggregate = false`; under omit-when-false the key is
+  absent, matching the current pinned string
+  `{"kind":"expr","refs":[…],"type":"int"}` bit-for-bit. §5's new
+  test `TestNewExprProjectionWithAggregateTrue` is the sole witness
+  for the true side of the axis's wire encoding.
 
-```
-`{"kind":"expr","refs":[{"variable":"a","property":"n"}],"type":"int","containsAggregate":false}`
-```
-
-Enumeration under omit-when-false: **zero** (the test's blob has
-`containsAggregate = false`, so no key is emitted — the test stays
-verbatim; a NEW test would cover the true case).
-
-The always-emit fence-diff scope (**one line in one test**) is small
-enough that the convention-consistency + wire-audit-readability
-arguments dominate. Committed: always-emit.
+- **`ValidatedQuery` unaffected.** No resolver-side golden marshals
+  `query.Query`; verified by `grep -l '"kind":"expr"' test/data/
+  resolver/valid/*.json` yielding zero matches at branch base. §7.5
+  covers the resolver byte-identity fence separately.
 
 ### 4.2 `classifyRichExpression` — the walk that already has the answer
 
@@ -658,6 +682,60 @@ but violates the "additive-only" reading of the revision protocol
 in spirit — it modifies the internal signature of every typing
 helper. The walk-based helper leaves the existing walk untouched
 and localises the change to two files.
+
+#### 4.2.1 Boundary posture — the walker is typing-scoped
+
+`subtreeContainsAggregate` MUST mirror the typing walk's scope
+boundaries. Concretely, at every ANTLR node whose typing behaviour
+in `typeNonArithmetic` refuses to descend into the sub-tree because
+it opens a nested scope, the aggregate probe MUST likewise NOT
+descend. Three specific stops, verified verbatim against
+`internal/query/cypher/typing.go:382-403`:
+
+- **`OC_ExistentialSubquery`** — `EXISTS { … }` returns a boolean
+  at `typing.go:382-388`; parameters inside the subquery are mined
+  at `EnterOC_ExistentialSubquery` (listener.go, `subqueryDepth`
+  counter) and never enter the outer part's state. An aggregate
+  inside `EXISTS { RETURN count(n) }` aggregates over the
+  subquery's rows, not over the outer Part's rows, so it does not
+  discriminate the outer projection.
+- **`OC_ListComprehension`** — carries a list result whose element
+  type is honestly `TypeUnknown` (Stage 11's ADR-0005-aligned
+  posture at `typing.go:398-403`); the projection sub-tree runs in
+  the iteration variable's local scope. An aggregate inside
+  `[x IN xs WHERE count(x) > 0]` — grammar-valid in the vendored
+  Cypher but semantically closed over the comprehension's inner
+  rows — does not aggregate over the outer Part.
+- **`OC_PatternComprehension`** — same posture as
+  `OC_ListComprehension` at the same site.
+
+The probe MUST stop at these three atoms and return `false` for
+their subtrees, mirroring the typing walk's own refusal to descend.
+Formally: `aggregateProbe.EnterOC_ExistentialSubquery`,
+`aggregateProbe.EnterOC_ListComprehension`, and
+`aggregateProbe.EnterOC_PatternComprehension` MUST set a
+`skipChildren` flag on the walker, or override the enter callbacks
+to return early WITHOUT recursing into the sub-tree's atoms.
+
+**Semantic justification.** `ExprProjection.ContainsAggregate`
+answers exactly one question — "does the resolver's
+`fillGroupingKeys` exclude this projection from the grouping key
+set of the enclosing Part?" — and only aggregates that aggregate
+over the enclosing Part's rows can motivate that exclusion. An
+aggregate inside a sub-scope aggregates over the sub-scope, so
+poisoning the outer projection's grouping-key eligibility on that
+basis is a soundness error. The boundary is not an optimisation;
+it is a correctness requirement.
+
+**Boundary pins.** No parser-test pin exercises these boundaries
+at branch base (they are grammar-valid but corpus-scenario-rare in
+the vendored TCK). §5 adds no pin for them either — the walker is
+a private helper, and its boundaries are witnessed indirectly by
+the frozen shape of every existing `EXISTS` / comprehension pin
+staying `ContainsAggregate = false` even when they textually
+contain `count(…)`. If a future TCK bump adds a scenario whose
+outer projection embeds an `EXISTS { … count … }`, the pin's `want`
+authors `ContainsAggregate = false` on the outer ExprProjection.
 
 ### 4.3 The deferral pin — flip its bit
 
@@ -751,9 +829,111 @@ go test -run 'TestMustParse|TestMustReject|TestExprProjectionMarshalJSON|TestNew
 ```
 
 The 24 unchanged pins pass without modification. Only the one flipped
-pin (§4.3) plus `TestExprProjectionMarshalJSON` (rebaselined per
-§4.1.3) plus the new `TestNewExprProjectionWithAggregateTrue`
-(§5) show a diff.
+pin (§4.3) plus the new `TestNewExprProjectionWithAggregateTrue`
+(§5) show a diff. `TestExprProjectionMarshalJSON` stays verbatim per
+the omit-when-false ruling (§4.1.3).
+
+#### 4.4.1 Golden-corpus rebaseline — the 7 flip fixtures
+
+Under the omit-when-false JSON encoding (§4.1.3), the
+`containsAggregate` key is emitted **only** when the ExprProjection's
+walk returns `true`. The `internal/query/cypher/testdata/golden/`
+corpus at branch base `origin/master @ e77f33e` contains **2055**
+goldens that embed a `"kind": "expr"` blob; of those, exactly **7**
+have an ExprProjection at a top-level Returns position whose
+projected expression text (the ReturnItem `name`) embeds an aggregate
+function call and therefore flips the bit under the widened walker
+(§4.2). The 2048 remaining ExprProjection-bearing goldens carry the
+zero value and stay byte-identical.
+
+**Discovery command** (Python 3, run from the worktree root; the
+project's host lacks `jq`):
+
+```
+python3 - <<'PY'
+import glob, json, os, re
+AGGS = r"(?:count|sum|collect|min|max|avg|stDev|stDevP|percentileCont|percentileDisc|percentile)"
+call = re.compile(rf"\b{AGGS}\s*\(", re.IGNORECASE)
+
+def find_returns(n, out):
+    if isinstance(n, dict):
+        if isinstance(n.get("returns"), list):
+            for ri in n["returns"]:
+                if isinstance(ri, dict) and "value" in ri and "name" in ri:
+                    out.append(ri)
+        for v in n.values(): find_returns(v, out)
+    elif isinstance(n, list):
+        for v in n: find_returns(v, out)
+
+flips = []
+for path in sorted(glob.glob(
+        "internal/query/cypher/testdata/golden/*.golden.json")):
+    with open(path) as f: data = json.load(f)
+    ris = []
+    find_returns(data, ris)
+    hits = [ri["name"] for ri in ris
+            if isinstance(ri.get("value"), dict)
+            and ri["value"].get("kind") == "expr"
+            and call.search(ri.get("name", ""))]
+    if hits:
+        flips.append((os.path.basename(path), hits))
+print(f"flip goldens: {len(flips)}")
+for f, hits in flips:
+    print(f"  {f} -> {hits}")
+PY
+```
+
+**The 7 flip goldens** (verbatim command output at branch base
+`origin/master @ e77f33e`):
+
+| Golden | Aggregate-embedding expression (from ReturnItem `name`) |
+|---|---|
+| `Return2_0d955bc4a162.golden.json` | `count(a) > 0` |
+| `Return6_1544b3f065a8.golden.json` | `size(collect(a))` |
+| `Return6_1620cd819bff.golden.json` | `$age + avg(person.age) - 1000` |
+| `Return6_29fccd6d88dd.golden.json` | `me.age + count(you.age)` |
+| `Return6_830281f0127e.golden.json` | `age + count(you.age)` |
+| `Return6_c27310dae8c0.golden.json` | `count(a) + 3` |
+| `Return6_d980d0acf9b2.golden.json` | `{foo: a.name='Andres', kids: collect(child.name)}` |
+
+Under the widened `classifyRichExpression` (§4.2) each of these
+seven ExprProjection blobs picks up `"containsAggregate": true`;
+under omit-when-false that key is emitted, and the golden is
+regenerated. Every other ExprProjection-bearing golden — the
+remaining **2048** files — stays byte-identical because the walker
+returns `false` and the omitempty tag suppresses the key.
+
+**Semantic-diff-only fence** (the reviewer's proof that the
+rebaseline surfaces only the semantic change):
+
+```
+python3 - <<'PY'
+import glob, json
+for path in sorted(glob.glob(
+        "internal/query/cypher/testdata/golden/*.golden.json")):
+    with open(path) as f: data = json.load(f)
+    def strip(n):
+        if isinstance(n, dict):
+            n.pop("containsAggregate", None)
+            for v in n.values(): strip(v)
+        elif isinstance(n, list):
+            for v in n: strip(v)
+    strip(data)
+    with open(path, "w") as f:
+        json.dump(data, f, indent=2); f.write("\n")
+PY
+git diff --stat origin/master -- \
+    internal/query/cypher/testdata/golden/*.golden.json
+# MUST print: no changes.
+git checkout -- internal/query/cypher/testdata/golden/
+```
+
+If that stat is non-empty, the unfreeze PR either leaked a
+`containsAggregate: true` into a non-aggregate golden (walker
+bug — §4.2 boundary violation, likely a missed sub-scope stop from
+§4.2.1) or introduced a formatting drift into the marshaller
+(unrelated to this axis but forbidden by the ADR 0008 fence). The
+PR is buggy.
 
 ### 4.5 The parser test suite's aggregate coverage — no other pin changes
 
@@ -784,8 +964,10 @@ existing three ExprProjection tests:
 // TestNewExprProjectionWithAggregateTrue pins the widened Stage-6
 // variant per ADR 0008 amendment 2026-07-06: the ContainsAggregate
 // axis carries through the constructor, the accessor, and the wire
-// shape as an always-emit key. Complements TestExprProjectionMarshalJSON
-// (which pins the containsAggregate=false zero-value default).
+// shape as an omit-when-false key (§4.1.3 — post-freeze convention:
+// additive axes emit omit-when-zero-value). Complements
+// TestExprProjectionMarshalJSON (which pins the containsAggregate=false
+// zero-value default as an ABSENT key — that test stays verbatim).
 func TestNewExprProjectionWithAggregateTrue(t *testing.T) {
     refs := []query.Ref{{Variable: "n"}}
     p := query.NewExprProjectionWithAggregate(refs, query.TypeInt{}, true)
@@ -802,13 +984,13 @@ func TestNewExprProjectionWithAggregateTrue(t *testing.T) {
 ```
 
 The existing `TestExprProjectionMarshalJSON` (type_test.go:124-131)
-rebaselines to include `"containsAggregate":false`:
-
-```go
-require.JSONEq(t,
-    `{"kind":"expr","refs":[{"variable":"a","property":"n"}],"type":"int","containsAggregate":false}`,
-    string(out))
-```
+stays **VERBATIM** — under the omit-when-false ruling in §4.1.3, the
+`containsAggregate = false` zero value is not emitted, so the
+already-pinned string
+`{"kind":"expr","refs":[{"variable":"a","property":"n"}],"type":"int"}`
+matches the widened marshaller bit-for-bit. That test is the sole
+witness for the false side (encoded as key-absent); the new test
+above is the sole witness for the true side.
 
 `TestNewExprProjection` and `TestNewExprProjectionAllowsNoRefs`
 (type_test.go:105-120) are UNCHANGED. Their assertions
@@ -847,8 +1029,21 @@ Verbatim text:
 > parser-side during `classifyRichExpression`'s walk of the
 > expression subtree (a boolean scan for the two aggregate arms
 > `typeAtom` already recognises — `internal/query/cypher/typing.go:
-> 340` and `:358-365`). See `docs/specs/unfreeze-hk0-containsaggregate.md`
-> for the full contract._
+> 340` and `:358-365`), with the walker respecting the typing
+> walk's sub-scope boundaries (`OC_ExistentialSubquery`,
+> `OC_ListComprehension`, `OC_PatternComprehension` — mirroring
+> `typing.go:382-403`). The JSON encoding is **omit-when-false**
+> (`,omitempty`), which establishes the post-freeze wire
+> convention for the remainder of this ADR's revision protocol:
+> additive axes emit **omit-when-zero-value**, deliberately
+> diverging from the pre-freeze always-emit precedent
+> (`directed`, `nullable`, `returnsAll`, `hops`) because
+> post-freeze golden rebaselines are the primary auditability
+> surface and always-emit forces near-total 3199-file rebaselines
+> on each additive cycle. See
+> `docs/specs/unfreeze-hk0-containsaggregate.md` for the full
+> contract, the walker boundaries, the 7-golden rebaseline set,
+> and the semantic-diff-only fence command._
 ```
 
 The bullet in "Known deferred additions"
@@ -1040,28 +1235,46 @@ not a validity gate.
 
 ### 7.5 Byte-identity fence over the R5/R6/R7 resolver goldens
 
-Every pre-existing resolver-valid golden — the enumeration from R7
-§3.3 (102 stems at `origin/master @ 0900a8e`; refresh at branch base
-by running `ls test/data/resolver/valid/*.validated.golden.json |
-sed 's|.*/||; s|\.cypher\.validated\.golden\.json$||' | sort`) — is
-**byte-identical** after the widening PR merges.
+Every pre-existing resolver-valid golden — the enumeration at branch
+base `origin/master @ e77f33e`: **116 fixture pairs** (116
+`*.cypher` sources + 116 `*.cypher.validated.golden.json` outputs),
+one shared `schema.mapping.json`, and eight schema files under
+`schemas/` (`social.gql` + `social_r1.gql` … `social_r7.gql`), for a
+total of 234 files under `test/data/resolver/valid/` at branch
+base — is **byte-identical** after the widening PR merges. Refresh
+the fixture count at branch base by running
+`ls test/data/resolver/valid/*.cypher | wc -l` (yields 116; each
+pairs with a `*.cypher.validated.golden.json`).
 
 **Enumeration of the potentially-affected fixtures and why each stays
 byte-identical.**
 
-Search the enumeration for fixtures whose Returns embed an
-`ExprProjection`:
+The widening (§7.1) changes `fillGroupingKeys` in two ways:
+(a) treat `ExprProjection.ContainsAggregate() == true` as inducing
+grouping in the `hasAggregate` scan; (b) exclude such projections
+from the grouping-key set. Search the 116-fixture enumeration for
+each pre-widening path:
 
-- `aggregate_with_expr_residual.cypher` — `RETURN 1 + count(n)`.
-  ExprProjection contains `count(n)`, so under the widening
-  `ContainsAggregate = true` → excluded from the grouping key set.
-  R5's uniform-exclude ALSO excluded it. Golden unchanged.
-- `expr_projection_bool` — `RETURN true AND false AS b` or similar
-  boolean expression, no aggregate. Under the widening
-  `ContainsAggregate = false` → would be a grouping key IF the Part
-  had an AggregateProjection. The Part does not (no AggregateProjection
-  in Returns), so `hasAggregate = false` gate returns early —
-  no key marked. Golden unchanged.
+- `aggregate_with_expr_residual.cypher` — `MATCH (n:Person)
+  RETURN 1 + count(n)`. One column; the Return has no
+  `AggregateProjection` sibling (the aggregate is nested inside the
+  ExprProjection, not lifted). **Pre-widening path**: the
+  `hasAggregate` scan at `internal/resolver/resolve.go:583-589`
+  finds no `AggregateProjection` in `part.Returns`, so
+  `hasAggregate = false`; the function returns early at
+  `resolve.go:590-592` and every column's `GroupingKey` stays at
+  its default `false`. R5 §4.5.2's uniform-exclude of ExprProjection
+  at `resolve.go:594-601` is NOT reached for this fixture. **Post-
+  widening path**: `ExprProjection.ContainsAggregate() = true` on
+  the sole column, so the widened `hasAggregate` scan flips to
+  `true`; execution reaches the grouping-key loop; the ExprProjection
+  is excluded on the ContainsAggregate discriminator. Different
+  path, same result: `GroupingKey = false`. Golden byte-identical.
+- `expr_projection_bool` — boolean expression, no aggregate, no
+  AggregateProjection in Returns. Under widening
+  `ContainsAggregate = false` → same early return at
+  `resolve.go:590` as pre-widening (single-column Part with no
+  aggregate present). Golden unchanged.
 - `expr_projection_list` — list literal, no aggregate, no
   AggregateProjection in Returns. Same as above. Golden unchanged.
 - `expr_projection_unknown` — an expression typing as TypeUnknown,
@@ -1070,7 +1283,12 @@ Search the enumeration for fixtures whose Returns embed an
   `literal_only_return` — LiteralProjection, not ExprProjection.
   Unaffected.
 - Every other fixture — inspection confirms no
-  ExprProjection + AggregateProjection co-occurrence.
+  ExprProjection whose ContainsAggregate would flip AND which
+  co-occurs with an AggregateProjection sibling that would trigger
+  the R5 uniform-exclude branch pre-widening. The two-path
+  divergence above is `aggregate_with_expr_residual`-specific;
+  every other fixture reaches the same grouping-key branch under
+  both paths.
 
 **The byte-identity fence check** (from the worktree, on the
 widening PR's branch tip):
@@ -1145,10 +1363,11 @@ The gqlc-hk0 campaign lands in three PRs, in this order:
      pin flips per §4.3.
    - `docs/adr/0008-query-model-freeze-resolver-api.md` — the
      amendment note and the "Known deferred additions" edit.
-   - `internal/resolver/*` — untouched. The 102 resolver goldens
-     stay byte-identical (no wire change in `ValidatedQuery`; the
-     new field lives only on `query.Query`'s ExprProjection JSON,
-     which the resolver does not marshal — verified in §4.1.3).
+   - `internal/resolver/*` — untouched. The 116 resolver
+     `.cypher.validated.golden.json` fixtures stay byte-identical
+     (no wire change in `ValidatedQuery`; the new field lives only
+     on `query.Query`'s ExprProjection JSON, which the resolver
+     does not marshal — verified in §4.1.3).
    - `just test` from the worktree: PASSES.
    - `just lint-new` from the worktree: PASSES.
 3. **Resolver-widening PR** — after PR 2 merges to master. Changes
