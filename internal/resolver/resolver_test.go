@@ -37,7 +37,6 @@ var invalidFixtures = map[string]error{
 	"parameter_type_conflict_property_vs_expr_bool.cypher": ErrParameterTypeConflict,
 	"parameter_type_conflict_nullability.cypher":           ErrParameterTypeConflict,
 	"unknown_property_via_expr_use.cypher":                 ErrUnknownProperty,
-	"expr_use_set_value.cypher":                            ErrOutOfR0Scope,
 	"list_of_nodes_projection.cypher":                      ErrOutOfR0Scope,
 	"list_of_edges_projection.cypher":                      ErrOutOfR0Scope,
 	"ambiguous_edge_orientation.cypher":                    ErrAmbiguousEdgeOrientation,
@@ -55,6 +54,24 @@ var invalidFixtures = map[string]error{
 	"union_unknown_label_branch.cypher":        ErrUnknownLabel,
 	"part_binding_type_conflict.cypher":        ErrPartBindingTypeConflict,
 	"part_binding_type_conflict_edge.cypher":   ErrPartBindingTypeConflict,
+	// R6 additions:
+	"create_unknown_label.cypher":                 ErrUnknownLabel,
+	"create_unknown_edge.cypher":                  ErrUnknownEdge,
+	"merge_endpoint_unknown_label.cypher":         ErrUnknownLabel,
+	"merge_unknown_edge.cypher":                   ErrUnknownEdge,
+	"merge_on_match_unknown_property.cypher":      ErrUnknownProperty,
+	"set_property_unknown_property.cypher":        ErrUnknownProperty,
+	"set_property_on_projection_alias.cypher":     ErrInvalidEffectTarget,
+	"set_property_on_var_length_edge.cypher":      ErrInvalidEffectTarget,
+	"set_entity_on_projection_alias.cypher":       ErrInvalidEffectTarget,
+	"set_labels_undeclared.cypher":                ErrUnknownLabel,
+	"set_labels_on_edge.cypher":                   ErrInvalidEffectTarget,
+	"remove_property_unknown.cypher":              ErrUnknownProperty,
+	"remove_property_on_projection_alias.cypher":  ErrInvalidEffectTarget,
+	"remove_labels_undeclared.cypher":             ErrUnknownLabel,
+	"delete_projection_alias.cypher":              ErrInvalidEffectTarget,
+	"delete_bare_property_unknown.cypher":         ErrUnknownProperty,
+	"union_writes_vs_returns_column_count.cypher": ErrUnionColumnMismatch,
 }
 
 type ResolverSuite struct {

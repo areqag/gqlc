@@ -1,0 +1,16 @@
+{
+  "columns": [
+    {
+      "name": "n.age",
+      "type": {
+        "kind": "property",
+        "type": "INT",
+        "nullable": true
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "write",
+  "distinct": false
+}
