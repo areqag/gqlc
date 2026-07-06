@@ -99,14 +99,18 @@ CALL bindings is `StatementRead` — CALL is a Read clause per
   `ResolvedType` variants are unchanged in shape. R7's YIELD column
   typing populates `Column.Type` from the R2 lattice's existing
   `ResolvedProperty{Type, Nullable}` variant (INTEGER → `ResolvedProperty{
-  Type: graph.INT, Nullable: bool}`; FLOAT → `ResolvedProperty{Type:
-  graph.FLOAT, Nullable}`; STRING → `ResolvedProperty{Type: graph.STRING,
+  Type: graph.TypeInt, Nullable: bool}`; FLOAT → `ResolvedProperty{Type:
+  graph.TypeFloat, Nullable}`; STRING → `ResolvedProperty{Type: graph.TypeString,
   Nullable}`; NUMBER → `ResolvedUnknown{}`; §4.2 pins the mapping table).
 - `internal/resolver/errors.go` — **no sentinel additions**. The
   `ErrOutOfR0Scope` message-set list revises to reflect one retirement
-  (`"call binding"` — §5.2). R6 sentinel identities are preserved; no
-  wrapped-message set widens because R7's YIELD column typing produces
-  positive types, not failures.
+  (`call binding` — §5.2). R6 sentinel identities are preserved.
+  **Two wrapped-message sets widen** on existing sentinels: one on
+  `ErrUnknownProperty` for property-on-CALL-YIELD-scalar (§4.2.2),
+  one on `ErrPartBindingTypeConflict` for the scalar-vs-entity
+  shape mismatch at cross-Part re-bind (§4.1.2). Both are the
+  "same sentinel, more messages" widening pattern from ADR 0009
+  §Test strategy; neither creates a new sentinel. §5.3 pins both.
 - `internal/resolver/resolve.go` — extended with:
   - A **`CallBinding` admission arm in Phase A1** (§4.1) that replaces
     the R6 default-reject arm at `resolve.go:234-236` for `BindingCall`.
@@ -148,12 +152,26 @@ CALL bindings is `StatementRead` — CALL is a Read clause per
   fixture parses identically because none contains a `CALL` (an
   empty-registry parse still succeeds on non-CALL queries — verified
   first-party against `internal/query/cypher/parser.go:47-50`).
-- `test/data/resolver/valid/registry.fixtures.go` — a new fixture-side
-  Go source declaring the R7 procedure signatures. Same
+- `internal/resolver/resolver_test.go` — a new package-private
+  `signaturesR7` slice + `regR7` variable declaring the R7
+  procedure signatures for the test harness. Uses the same
   `internal/procsig` package the parser tests wire (§6.2). One
   registry serves both `valid/` and `invalid/` — the CALL fail-sites
   in `invalid/` are the resolver's, not the parser's, so a fixture in
   `invalid/` that must reach the resolver first parses cleanly.
+  **Rationale for placing this inside `resolver_test.go` rather than
+  under `test/data/resolver/valid/`**: `test/data/resolver/` contains
+  only `.cypher` and `.validated.golden.json` today (no `.go`), and
+  the registry is test-harness wiring, not fixture data. §6.3 pins
+  the placement decision.
+- `internal/resolver/resolver.go` — the `WithRegistry` doc comment at
+  `resolver.go:36-38` reads today "raises the R7 unknown-procedure
+  sentinel" — an incorrect prediction. R7 **retires** that claim
+  (§4.4 trust posture: the parser is authoritative; the resolver
+  does not re-check). The code cycle rewrites the doc comment to
+  state the registry is preserved for future stages but discarded
+  at R7 (mirror the actual `_ = r` discard at `resolve.go:110`). No
+  behavioural change; comment-only fix.
 - `test/data/resolver/valid/schemas/social_r7.gql` — a new schema
   fixture. R7's YIELD columns are opaque scalar types (not schema
   entities), so schema shape barely matters; `social_r7.gql` is a
@@ -389,12 +407,12 @@ type resolution** for `RefProjection` when the Ref names a CallBinding:
 
 - `RefProjection{Ref{v, ""}}` where `v` is a CallBinding in scope →
   `Column.Type` is one of:
-  - `ResolvedProperty{Type: graph.INT, Nullable: cb.Nullable()}` if
+  - `ResolvedProperty{Type: graph.TypeInt, Nullable: cb.Nullable()}` if
     the CallBinding's `ResultType()` is `query.TypeInt{}`
     (signature `INTEGER`);
-  - `ResolvedProperty{Type: graph.FLOAT, Nullable: cb.Nullable()}` if
+  - `ResolvedProperty{Type: graph.TypeFloat, Nullable: cb.Nullable()}` if
     `ResultType()` is `query.TypeFloat{}` (signature `FLOAT`);
-  - `ResolvedProperty{Type: graph.STRING, Nullable: cb.Nullable()}` if
+  - `ResolvedProperty{Type: graph.TypeString, Nullable: cb.Nullable()}` if
     `ResultType()` is `query.TypeString{}` (signature `STRING`);
   - `ResolvedUnknown{}` if `ResultType()` is `query.TypeUnknown{}`
     (signature `NUMBER` — the assignable-from marker bridges to
@@ -417,6 +435,42 @@ because CallBindings are not edge endpoints and do not participate
 in R4's OPTIONAL-scoped demoter set. Consequence: a Ref to a
 CallBinding yields a Column whose `Nullable` is exactly the
 signature's declared `?` bit.
+
+**Judgment call — `ResolvedProperty{Type, Nullable}` over
+`ResolvedScalar{Kind}` for CALL YIELD scalars.** The R2 lattice
+carries two scalar-typed variants: `ResolvedProperty{Type,
+Nullable}` (for property-projected node/edge scalars) and
+`ResolvedScalar{Kind}` (for literal / func-projected scalars in
+`ExprProjection`). R7 routes CALL YIELD scalar columns to
+`ResolvedProperty`, not `ResolvedScalar`. Two reasons:
+
+1. **Only `ResolvedProperty` carries `Nullable`.** A CALL YIELD
+   column carries a signature-declared `?` bit
+   (`CallBinding.Nullable()`); `ResolvedScalar{Kind}` has no
+   nullability slot, so a signature `col STRING?` would lose the
+   `?` under `ResolvedScalar`. `ResolvedProperty` preserves it.
+2. **The property-side lattice is the closest fit to a
+   signature-typed scalar.** A CALL YIELD scalar is
+   schema-untyped (the signature is not a schema entity), but its
+   TYPE identity (INT / FLOAT / STRING / opaque) mirrors
+   `graph.PropertyType`'s primary axis — the same axis
+   `ResolvedProperty.Type` witnesses for the property arm.
+   Rehydrating a distinct `ResolvedScalar` sub-lattice for CALL
+   YIELD would fragment the wire encoding across two
+   discriminator tags for no consumer gain.
+
+**Acknowledged asymmetry — vs R2's `ResolvedScalar` literal
+goldens.** Literals in `ExprProjection` (e.g.
+`literal_int_projection.cypher`) currently pin
+`{kind: "scalar", scalar: "INT"}` in their goldens, not
+`{kind: "property", type: "INT"}`. R7's use of
+`ResolvedProperty` for CALL YIELD produces the `"property"`
+discriminator, so R7 goldens read `{kind: "property", type: "INT",
+nullable: true}` — the same disc tag R2 uses for
+property-projected columns. This asymmetry is intentional: CALL
+YIELD scalars carry a nullability bit, and literals do not.
+Wire-encoding-wise, downstream consumers distinguish by the
+`nullable` field's presence.
 
 ### 3.2 `ValidatedQuery.Statement` — CALL is a Read
 
@@ -722,36 +776,214 @@ Every parser-emitted `CallBinding` shape is admitted at R7:
 CallBinding admits at Phase A1. Failure edges are limited to invalid
 uses of the CALL-yielded scalar (property lookup — see §4.2.2).
 
-#### 4.1.2 Same-name node × call shadowing — parser-enforced
+#### 4.1.2 Cross-clause re-bind — prescriptive shape-posture extension
 
-Parser Stage 14 `buildPart` §4.7 (`internal/query/cypher/build.go:
-127-146`) enforces that a same-Part collision between a NodeBinding /
-EdgeBinding / PathBinding / UnwindBinding and a CallBinding fires
-`ErrVariableKindConflict` at parse. The resolver never sees a Part
-whose `Bindings` contain both a NodeBinding{n} and a CallBinding{n}.
+**Frame.** R5 §6.4 introduced the `ErrPartBindingTypeConflict` shape
+posture: a carried variable name whose LOCAL re-bind resolves to a
+different SHAPE (LabelSetKey mismatch on a node; Labels().Key()
+mismatch on an edge) fails at Phase A1 with
+`ErrPartBindingTypeConflict`. R5's discriminator is
+schema-typed LabelSet identity. R7 EXTENDS this posture: it adds a
+new "shape" — the CALL-YIELD scalar — and adds the reciprocal
+collision checks for that shape to every existing entity-binding
+arm. This is a widening of R5's shape-posture family, not a new
+sentinel and not a new discipline. The `ErrPartBindingTypeConflict`
+identity is preserved; the wrapped message set widens to name the
+new fault.
 
-**Cross-Part shadowing:** a Part K MATCH binding a node `n:Person`
-carried through a WITH, then Part K+1 does `CALL … YIELD n`. Parser
-Stage 14 §4.7 imported-scope collision arm rejects this at parse
-(`ErrVariableKindConflict`). Fixture (parser-side): the Stage 14
-suite covers this at `parser_test.go:2018-2200`+; the resolver
-never reaches such input.
+**Message-set widening declaration.** R7 widens
+`ErrPartBindingTypeConflict`'s wrapped message set by one shape:
+`variable %q carried as CALL YIELD scalar, re-bound as %s` — where
+`%s` names the local-side shape (labelled node's LabelSetKey; edge's
+Labels().Key()). This is a SECOND widening of an EXISTING sentinel
+in the same spec (alongside `ErrUnknownProperty`'s widening in
+§4.2.2), keeping §5's zero-new-sentinels claim TRUE. §5.3 records
+both widenings side by side.
 
-**Cross-Part re-binding under the same name via a different clause:**
-`CALL … YIELD n; WITH n; MATCH (n:Person)` where the parser admits
-because the YIELD-produced `n` and the WITH-carried `n` and the
-MATCH-authored `n` are all named `n`. This is a resolver-side
-concern: the Part-K MATCH's NodeBinding{n:Person} tries to enter
-`nodeTypes["n"]`, but Phase A1's carry-seed step has seeded
-`callTypes["n"]`. Under R5's `ErrPartBindingTypeConflict` shape
-posture (§6.4 R5 spec), this is a type-shape conflict: a scalar
-CallBinding cannot rebind as an entity NodeBinding. **R7 emits
-`ErrPartBindingTypeConflict`**. Fixture:
-`part_binding_type_conflict_call_vs_node.cypher` (§6.4).
+**Same-Part collisions are parser-enforced.** Parser Stage 14
+`buildPart` (`internal/query/cypher/build.go:127-153`) enforces that
+a same-Part collision between a NodeBinding / EdgeBinding /
+PathBinding / UnwindBinding and a CallBinding fires
+`ErrVariableKindConflict` at parse (five-way sweep — entity / path
+/ unwind / prior call / imported). The resolver never sees a Part
+whose local `Bindings` contain both a NodeBinding{n} and a
+CallBinding{n}. R7 does not defend against this.
 
-**Reciprocal direction** — a Part K MATCH binding `n:Person` carried
-through WITH, then Part K+1 `CALL … YIELD n` — is grammar-impossible:
-parser Stage 14 §4.7 imported-scope collision rejects at parse.
+**Cross-Part direction A — carried entity → local CALL YIELD.** A
+Part K MATCH binding `n:Person` carried through WITH, then Part K+1
+`CALL … YIELD n` — this is caught at PARSE by
+`build.go:148-150`'s `imported[v]` check (an imported name of ANY
+kind collides with a local CallBinding name). Parser fires
+`ErrVariableKindConflict` before the resolver runs. Verified
+first-party at `build.go:148-150`. R7 does not defend against this.
+
+**Cross-Part direction B — carried CALL YIELD → local entity
+(node / edge).** A Part K `CALL … YIELD n` carried through WITH,
+then Part K+1 `MATCH (n:Person) RETURN n`. This is
+**resolver-reachable**: parser `buildPart` at `build.go:81-85`
+populates the local `scope` map from `rp.bindings` (entity sweep)
+WITHOUT any collision check against `imported` names — verified
+first-party at `build.go:81-85`. The `imported[v]` collision check
+at `build.go:148-150` is ONE-DIRECTIONAL (fires only when a local
+CallBinding shadows an imported name); the reciprocal (local
+NodeBinding / EdgeBinding shadowing an imported CALL-YIELD name)
+is silently admitted at parse. Consequence: Part K+1's resolver
+Phase A1 sees `imported = {n}` (a call-yielded scalar) and a local
+`NodeBinding{n:Person}`. **R7 must prescriptively detect this and
+raise `ErrPartBindingTypeConflict`** — otherwise the fixture
+silently admits with `n` typed as a NodeBinding and the CALL-YIELD
+scalar identity lost. The R6 code guards Phase A1 collisions
+INSIDE `case query.CallBinding` only (the arm §4.1 introduces);
+the NodeBinding arm at `resolve.go:198-201` and EdgeBinding arm at
+`resolve.go:213-233` have no `callTypes` collision check today, so
+the fixture would silently admit if R7 didn't add one. §4.1.2.1
+below pins the prescriptive checks; §4.1.2.2 covers the reciprocal
+directions.
+
+##### 4.1.2.1 NodeBinding × carried CALL YIELD — prescriptive check
+
+R7 EXTENDS the R6 NodeBinding arm at `resolve.go:198-201` with a
+`callTypes` collision check. The R7 arm becomes:
+
+```go
+case query.NodeBinding:
+    if len(bb.Labels()) == 0 {
+        pendingNodes = append(pendingNodes, bb)
+        continue
+    }
+    v := bb.Variable()
+    key := bb.Labels().Key()
+    nt, ok := s.Nodes[key]
+    if !ok {
+        return nil, branchState{}, nil, fmt.Errorf(
+            "%w: %s", ErrUnknownLabel, key)
+    }
+    // R7 addition — carried CALL YIELD → local labelled node is
+    // a cross-clause shape mismatch (scalar vs entity). Message
+    // set widening of ErrPartBindingTypeConflict; no new sentinel.
+    if _, seenCall := callTypes[v]; seenCall {
+        return nil, branchState{}, nil, fmt.Errorf(
+            "%w: variable %q carried as CALL YIELD scalar, re-bound as %s",
+            ErrPartBindingTypeConflict, v, key)
+    }
+    // R5 §6.4 unchanged — carried labelled-node shape check.
+    if prev, seen := nodeTypes[v]; seen && prev.Labels != nt.Labels {
+        return nil, branchState{}, nil, fmt.Errorf(
+            "%w: variable %q carried as %s, re-bound as %s",
+            ErrPartBindingTypeConflict, v, prev.Labels, nt.Labels)
+    }
+    nodeTypes[v] = nt
+    // Local binding shadows carried edge state (unchanged).
+    delete(edgeTypes, v)
+    delete(edgeKeys, v)
+    delete(edgeCands, v)
+    delete(edgeBindings, v)
+    // R7 addition — local NodeBinding does NOT shadow-delete the
+    // carried callTypes[v] here because the check above already
+    // short-circuited; if we reach the delete-block, callTypes[v]
+    // was NOT set. No delete(callTypes, v) needed.
+```
+
+**Ordering invariant** — the check MUST run BEFORE the `nodeTypes[v]`
+write. Otherwise the shape conflict would be masked by the R5
+LabelSetKey check if the carry-seed happened to sit alongside a
+carried NodeBinding (which cannot co-occur because a variable is
+either a CALL-YIELD or an entity carry, not both — but the ordering
+discipline is defensive).
+
+**Unlabelled node arm** — `len(bb.Labels()) == 0` falls into
+`pendingNodes` before the check, so the collision is NOT detected
+at the NodeBinding arm entry. Phase B (`inferUnlabelled`) commits
+an unlabelled node's inferred type into `nodeTypes[v]`; the same
+`callTypes[v]` check must fire in Phase B before the commit.
+**R7 code cycle**: add the check inside `inferUnlabelled`'s commit
+site, wrapping `ErrPartBindingTypeConflict` with the same widened
+message shape (`carried as CALL YIELD scalar, re-bound as %s`).
+
+##### 4.1.2.2 EdgeBinding × carried CALL YIELD — prescriptive check
+
+R7 EXTENDS the R6 EdgeBinding arm at `resolve.go:213-233` with a
+`callTypes` collision check on `bb.Variable()`. The R7 arm becomes:
+
+```go
+case query.EdgeBinding:
+    if err := r3EdgeAdmissible(bb); err != nil {
+        return nil, branchState{}, nil, err
+    }
+    supportedEdges = append(supportedEdges, bb)
+    v := bb.Variable()
+    if v == "" {
+        continue // anonymous edge; no scope entry
+    }
+    // R7 addition — carried CALL YIELD → local edge is a
+    // cross-clause shape mismatch. Message-set widening of
+    // ErrPartBindingTypeConflict.
+    if _, seenCall := callTypes[v]; seenCall {
+        return nil, branchState{}, nil, fmt.Errorf(
+            "%w: variable %q carried as CALL YIELD scalar, re-bound as edge with labels %s",
+            ErrPartBindingTypeConflict, v, bb.Labels().Key())
+    }
+    // R5 §6.4 edge parity — unchanged.
+    if prev, seen := edgeBindings[v]; seen && prev.Labels().Key() != bb.Labels().Key() {
+        return nil, branchState{}, nil, fmt.Errorf(
+            "%w: variable %q carried as edge with labels %s, re-bound with labels %s",
+            ErrPartBindingTypeConflict, v, prev.Labels().Key(), bb.Labels().Key())
+    }
+    edgeBindings[v] = bb
+    delete(nodeTypes, v)
+    delete(edgeTypes, v)
+    delete(edgeKeys, v)
+    delete(edgeCands, v)
+```
+
+##### 4.1.2.3 PathBinding / UnwindBinding — R-later, unreachable at R7
+
+Path bindings and unwind bindings remain out-of-scope at R7; the
+kind-switch default arm at `resolve.go:234-236` continues to reject
+them with `ErrOutOfR0Scope`. Because the default fires BEFORE any
+`callTypes` collision check could run, the reciprocal collision
+(carried CALL YIELD → local PathBinding / UnwindBinding) is
+unreachable at R7 — the OOR reject short-circuits first. When
+either binding kind is admitted (R-later stages), that stage MUST
+add the `callTypes` collision check to its admission arm on the
+same posture as §4.1.2.1 / §4.1.2.2. Recorded as a
+forward-compatibility note for those stages.
+
+##### 4.1.2.4 CallBinding × carried entity — the CallBinding arm covers it
+
+Reciprocal direction — carried NodeBinding / EdgeBinding into a
+local CallBinding — is parser-rejected (build.go:148-150's
+`imported[v]` check fires at parse). Additionally, the R7
+CallBinding arm at §4.1 unconditionally SHADOW-DELETES the carried
+node / edge state via `delete(nodeTypes, v); delete(edgeTypes, v);
+delete(edgeKeys, v); delete(edgeCands, v); delete(edgeBindings,
+v)` before writing `callTypes[v]`. So even if the parser check
+were bypassed, the resolver's local CallBinding correctly shadows
+the carried entity, mirroring R5's local-shadows-carry rule for
+node/edge (§4.2.3 R5). This is safe because the collision is
+resolver-unreachable via parse; the shadow-delete is a defensive
+carry-forward-safety measure, not a fault site.
+
+##### 4.1.2.5 Reachability matrix — the fixture pin
+
+| Carried shape | Local shape | Resolver reachable? | Handling |
+|---|---|---|---|
+| entity (node/edge) | CALL YIELD scalar | NO — parser `build.go:148-150` rejects | (parser-side) |
+| CALL YIELD scalar | labelled NodeBinding | **YES** | §4.1.2.1 `ErrPartBindingTypeConflict` — fixture pins |
+| CALL YIELD scalar | unlabelled NodeBinding | **YES** (post-Phase-B) | §4.1.2.1 addendum inside `inferUnlabelled` |
+| CALL YIELD scalar | EdgeBinding | **YES** | §4.1.2.2 `ErrPartBindingTypeConflict` |
+| CALL YIELD scalar | PathBinding / UnwindBinding | NO — R-later OOR reject | (out of scope) |
+| entity (node/edge) | CALL YIELD scalar (same Part) | NO — parser `build.go:127-153` rejects | (parser-side) |
+
+**Fixture**: `part_binding_type_conflict_call_vs_node.cypher`
+(§6.4) — a labelled MATCH after a carried CALL YIELD. Pins
+`ErrPartBindingTypeConflict` at the §4.1.2.1 fail-site.
+
+**Additional fixture**:
+`part_binding_type_conflict_call_vs_edge.cypher` (§6.4) — an
+EdgeBinding after a carried CALL YIELD. Pins the §4.1.2.2
+fail-site. Both fixtures target the SAME sentinel; both add to the
+widened `ErrPartBindingTypeConflict` message set.
 
 #### 4.1.3 Defensive tripwires
 
@@ -853,9 +1085,9 @@ callers exist.
 
 | CallBinding `ResultType()` | Signature token | `Column.Type` |
 |---|---|---|
-| `query.TypeInt{}` | `INTEGER` | `ResolvedProperty{Type: graph.INT, Nullable: nullableBinding[ref.Variable]}` |
-| `query.TypeFloat{}` | `FLOAT` | `ResolvedProperty{Type: graph.FLOAT, Nullable: nullableBinding[ref.Variable]}` |
-| `query.TypeString{}` | `STRING` | `ResolvedProperty{Type: graph.STRING, Nullable: nullableBinding[ref.Variable]}` |
+| `query.TypeInt{}` | `INTEGER` | `ResolvedProperty{Type: graph.TypeInt, Nullable: nullableBinding[ref.Variable]}` |
+| `query.TypeFloat{}` | `FLOAT` | `ResolvedProperty{Type: graph.TypeFloat, Nullable: nullableBinding[ref.Variable]}` |
+| `query.TypeString{}` | `STRING` | `ResolvedProperty{Type: graph.TypeString, Nullable: nullableBinding[ref.Variable]}` |
 | `query.TypeUnknown{}` | `NUMBER` | `ResolvedUnknown{}` |
 | (any other) | — | defensive: `ResolvedUnknown{}` |
 
@@ -924,7 +1156,7 @@ diagnostics.
 R6's `bindingVariable` at `resolve.go:1231-1240` returns
 `(bb.Variable(), true)` for NodeBinding and EdgeBinding, and
 `("", false)` for the default case. `buildScopeOrder`
-(`resolve.go:374-404`) iterates `part.Bindings`, calling
+(`resolve.go:370-404`) iterates `part.Bindings`, calling
 `bindingVariable`, and skipping any binding it does not name — so a
 CallBinding today does not participate in `RETURN *` expansion.
 
@@ -970,7 +1202,7 @@ R7's `buildScopeOrder` widening makes `scopeOrder = ["label"]`, and
 R6's `materialiseReturns` walks that list to produce a
 `RefProjection{Ref{"label", ""}, TypeString}` per item, which
 `refProjectionType` witnesses via the new `callTypes` arm to
-`ResolvedProperty{Type: graph.STRING, Nullable: true}`.
+`ResolvedProperty{Type: graph.TypeString, Nullable: true}`.
 
 ### 4.4 Unknown procedure — parser-authoritative trust posture
 
@@ -1082,7 +1314,7 @@ scopeOrder = ["label"] (buildScopeOrder R7 widening).
 materialiseReturns: parser's synthetic Returns walked.
 Projection walk: RefProjection{Ref{"label", ""}} →
   refProjectionType hits the callTypes arm →
-  callProjectionType returns ResolvedProperty{Type: graph.STRING, Nullable: true}.
+  callProjectionType returns ResolvedProperty{Type: graph.TypeString, Nullable: true}.
 Result: 1 column {"label", string?, distinct false, statement "read"}.
 ```
 
@@ -1186,7 +1418,7 @@ metadata table. R7 keeps them separate because:
 
 ### 4.7 `virtualProjection` and CALL YIELD — no change needed
 
-R6's `virtualProjection` at `resolve.go:344-368` synthesises a
+R6's `virtualProjection` at `resolve.go:347-368` synthesises a
 `RefProjection` for a bare-name binding in a `RETURN *` /
 `WITH *` context. For a CALL YIELD variable, the parser has ALREADY
 populated `Part.Returns` with a properly-typed
@@ -1219,7 +1451,7 @@ the parser's Stage 14 §4.3 synthesis for standalone CALL is
 
 **Consequence**: R7's `virtualProjection` MUST widen to synthesise
 correctly for a call-yielded variable. The current arm at
-`resolve.go:344-368`:
+`resolve.go:347-368`:
 
 ```go
 func virtualProjection(name string, carry branchState, nodeTypes map[string]schema.NodeType, edgeBindings map[string]query.EdgeBinding) (query.ReturnItem, error) {
@@ -1241,14 +1473,18 @@ func virtualProjection(name string, carry branchState, nodeTypes map[string]sche
 }
 ```
 
-R7 widens to include CallBinding synthesis:
+R7 widens to include CallBinding synthesis. **Signature-order
+discipline**: the existing R6 signature is `virtualProjection(name,
+nodeTypes, edgeBindings, carry)` — R7 appends `callTypes` at the
+TAIL, preserving parameter order for every prior arg. No
+reordering.
 
 ```go
-func virtualProjection(name string, carry branchState, nodeTypes map[string]schema.NodeType, edgeBindings map[string]query.EdgeBinding, callTypes map[string]callBindingSlot) (query.ReturnItem, error) {
+func virtualProjection(name string, nodeTypes map[string]schema.NodeType, edgeBindings map[string]query.EdgeBinding, carry branchState, callTypes map[string]callBindingSlot) (query.Projection, error) {
     if _, ok := nodeTypes[name]; ok { ... /* unchanged */ }
     if binding, ok := edgeBindings[name]; ok { ... /* unchanged */ }
     if slot, ok := callTypes[name]; ok {
-        return query.NewRefProjection(query.Ref{Variable: name}, slot.resultType)
+        return query.NewRefProjection(query.Ref{Variable: name}, slot.resultType), nil
     }
     // R6 carried-alias bypass unchanged.
     ...
@@ -1266,8 +1502,10 @@ NewRefProjection constructor.
 matches. No shape error.
 
 **Signature widening**: `virtualProjection` gains `callTypes` as its
-fifth parameter. The single caller (`materialiseReturns`) threads it.
-`materialiseReturns` gains `callTypes` too. No other callers.
+fifth (tail) parameter — new-only-at-tail; no existing param is
+reordered. The single caller (`materialiseReturns`) threads it.
+`materialiseReturns` gains `callTypes` as its final trailing
+parameter too. No other callers.
 
 **Correctness check on the parser's Stage 14 §4.3 synthesis.** The
 parser injects RefProjection items into `Part.Returns` for a
@@ -1381,7 +1619,11 @@ R6's message-set list under `errors.go` documenting
 R7 updates the "call bindings" portion of that comment — the CALL
 retirement lands the R7 arm.
 
-### 5.3 R6 sentinels' message sets — one widening
+### 5.3 R6 sentinels' message sets — TWO widenings
+
+R7 widens the wrapped message set of TWO existing sentinels;
+NEITHER is a new sentinel; both keep §5.1's zero-new-sentinels
+claim TRUE.
 
 **`ErrUnknownProperty` widens** at the `refProjectionType` CALL
 YIELD arm (§4.2.2):
@@ -1393,11 +1635,38 @@ YIELD arm (§4.2.2):
 
 Fixture: `call_yield_property_lookup.cypher` (§6.4).
 
-R6 sentinels other than `ErrUnknownProperty` do NOT widen at R7. The
-CALL-related parser-time sentinels (`ErrUnknownProcedure`,
-`ErrProcedureArity`, `ErrVariableKindConflict`) fire in the
-`cypher` package before the resolver runs; they are not on the
-resolver's `allSentinels` and are not counted here.
+**`ErrPartBindingTypeConflict` widens** at the NodeBinding /
+EdgeBinding admission arms (§4.1.2.1 / §4.1.2.2):
+
+```go
+// R7 additions:
+"%w: variable %q carried as CALL YIELD scalar, re-bound as %s"           (ErrPartBindingTypeConflict) // NodeBinding arm
+"%w: variable %q carried as CALL YIELD scalar, re-bound as edge with labels %s" (ErrPartBindingTypeConflict) // EdgeBinding arm
+```
+
+Fixtures: `part_binding_type_conflict_call_vs_node.cypher` and
+`part_binding_type_conflict_call_vs_edge.cypher` (§6.4).
+
+**Framing — the widening is a shape-posture extension, not a new
+policy.** R5 §6.4 established that
+`ErrPartBindingTypeConflict` fires when a carried-name's
+LOCAL re-bind resolves to a different SHAPE (LabelSetKey /
+Labels().Key() mismatch). R7 EXTENDS the shape universe by adding
+the CALL-YIELD scalar as a new shape, and adds the collision
+checks so the scalar-vs-entity direction fires the SAME sentinel
+under a WIDENED wrapped-message set. This is the same discipline
+R7 applies to `ErrUnknownProperty` at §4.2.2 (widening the
+"property was named but doesn't exist" family to include
+"property was named on a scalar CALL-YIELD"). Both widenings live
+under the "same sentinel, more messages" rule ADR 0009 §Test
+strategy encodes.
+
+R6 sentinels other than `ErrUnknownProperty` and
+`ErrPartBindingTypeConflict` do NOT widen at R7. The CALL-related
+parser-time sentinels (`ErrUnknownProcedure`, `ErrProcedureArity`,
+`ErrVariableKindConflict`) fire in the `cypher` package before the
+resolver runs; they are not on the resolver's `allSentinels` and
+are not counted here.
 
 ### 5.4 The closed R7 set — unchanged from R6
 
@@ -1423,11 +1692,14 @@ member has ≥1 negative fixture; every mapped sentinel is in
 `allSentinels`. R7 does not add a sentinel, so the invariant is
 maintained iff every existing member still has a fixture.
 
-**`ErrPartBindingTypeConflict` — the R7 addition site.** R7's
-`part_binding_type_conflict_call_vs_node.cypher` fixture (§6.4)
-pins `ErrPartBindingTypeConflict` for the CALL YIELD →
-subsequent-Part MATCH re-binding. This is a new fail-site for an
-existing sentinel — the bidirectional discipline continues to hold.
+**`ErrPartBindingTypeConflict` — the R7 addition sites.** R7's
+`part_binding_type_conflict_call_vs_node.cypher` and
+`part_binding_type_conflict_call_vs_edge.cypher` fixtures (§6.5)
+pin `ErrPartBindingTypeConflict` for the two cross-clause
+CALL-YIELD-scalar re-bind directions (node arm and edge arm). Both
+are new fail-sites for an EXISTING sentinel under a WIDENED
+wrapped-message set (§5.3); the sentinel identity is unchanged.
+The bidirectional discipline continues to hold.
 
 **`ErrUnknownProperty` — R7 pins.** R7's
 `call_yield_property_lookup.cypher` pins `ErrUnknownProperty` for
@@ -1471,26 +1743,29 @@ even when the delta was minimal).
 schema convention is a strict discipline (each stage may claim its
 own schema shape) that R7 preserves.
 
-### 6.3 Registry fixture — `test/data/resolver/valid/registry.fixtures.go`
+### 6.3 Registry fixture — inside `resolver_test.go`
 
-R7 introduces a fixture-side Go file that declares the procedure
-signatures the R7 CALL fixtures need. The file lives inside the
-resolver test data directory (parallel to `.cypher` and
-`.validated.golden.json`) so it is versioned with the fixtures it
-serves:
+R7's registry fixture lives inside `internal/resolver/resolver_test.go`
+as a package-private `signaturesR7` slice. **Judgment call**: keep
+the declaration in the test package rather than under
+`test/data/resolver/valid/`. Rationale: (1) `test/data/resolver/`
+contains only `.cypher` sources and `.validated.golden.json`
+goldens today — introducing the first Go source in that tree
+breaks the "data only" convention there (verified via
+`find test/data/resolver -name '*.go'` — zero results at
+`origin/master @ 0900a8e`); (2) the registry is test-harness state,
+not a golden the harness verifies against, so it belongs beside
+`loadQuery` (the sole consumer); (3) a package-private
+`signaturesR7` var is the shortest wiring path from declaration to
+`cypher.WithRegistry(procsig.NewRegistry(signaturesR7))` in
+`TestMain` / `SetupSuite`.
+
+Sketch (all inside `internal/resolver/resolver_test.go`):
 
 ```go
-// Package resolver_r7_fixtures declares the procsig.Registry the
-// R7 resolver test harness threads into cypher.WithRegistry when
-// parsing fixtures. Every fixture that references a procedure
-// must have that procedure declared here.
-package resolver_r7_fixtures
-
-import "github.com/areqag/gqlc/internal/procsig"
-
-// SignaturesR7 declares the procedures the R7 fixture set exercises.
+// signaturesR7 declares the procedures the R7 fixture set exercises.
 // Each mirrors a Stage-14 corpus signature (parser_test.go §Call*).
-var SignaturesR7 = []procsig.Signature{
+var signaturesR7 = []procsig.Signature{
     // Single STRING? result — the "test.labels" from Call1[5].
     {
         Name:    "test.labels",
@@ -1558,7 +1833,7 @@ The `test.constants` signature is authored specifically for this.
 **Design note — registry construction is asserted at suite
 setup.** `resolver_test.go` gains a package-level `regR7` variable
 and a `TestMain` or `init()` that calls
-`procsig.NewRegistry(SignaturesR7)` — the same posture as
+`procsig.NewRegistry(signaturesR7)` — the same posture as
 `parser_test.go:2517-2525`'s `newParserFor` helper. Registry-level
 failures fail the suite, not individual fixtures.
 
@@ -1739,10 +2014,12 @@ variants, two mixed). Each exercises one distinct arm of §4.
 
 ### 6.5 R7 invalid fixtures — updated `invalidFixtures` map
 
-Each fixture keyed to a sentinel it must pin. §5 pins the two R7
+Each fixture keyed to a sentinel it must pin. §5 pins the three R7
 fail-sites: property lookup on CALL YIELD scalar
-(`ErrUnknownProperty`), and part-binding-type-conflict on
-CALL-then-MATCH re-bind (`ErrPartBindingTypeConflict`).
+(`ErrUnknownProperty`), cross-clause CALL-YIELD-scalar vs
+NodeBinding re-bind (`ErrPartBindingTypeConflict`), and
+cross-clause CALL-YIELD-scalar vs EdgeBinding re-bind
+(`ErrPartBindingTypeConflict`).
 
 **R7 additions:**
 
@@ -1756,25 +2033,43 @@ CALL-then-MATCH re-bind (`ErrPartBindingTypeConflict`).
 - `part_binding_type_conflict_call_vs_node.cypher` —
   `CALL test.labels() YIELD label\nWITH label\nMATCH (label:Person) RETURN label`.
   Schema: `social_r7.gql`. Fires:
-  `ErrPartBindingTypeConflict` at Part 1's Phase A1 — carry seeds
-  callTypes["label"] as STRING scalar; local MATCH binds
-  NodeBinding{"label", ["Person"]}; the resolver detects the
-  cross-Part scalar-vs-entity type shape conflict.
-  Pins: `ErrPartBindingTypeConflict`.
+  `ErrPartBindingTypeConflict` at Part 1's NodeBinding admission
+  arm — carry seeds callTypes["label"] as STRING scalar; local
+  MATCH binds NodeBinding{"label", ["Person"]}; the resolver
+  detects the cross-clause scalar-vs-entity type shape conflict
+  per §4.1.2.1.
+  Pins: `ErrPartBindingTypeConflict`. Wrapped message:
+  `variable "label" carried as CALL YIELD scalar, re-bound as
+  Person`.
 
-  **Judgment call on parser reachability**: verify at spec-review time
-  that this query parses cleanly. Parser Stage 14 §4.7 imported-scope
-  collision arm fires on YIELD-side; the reverse direction (WITH
-  carries a CALL YIELD; subsequent MATCH re-binds) may or may not
-  reject at parse. If the parser DOES reject at parse (the collision
-  arm at Stage 14 §4.7 is bidirectional), the R7 spec must document
-  that this fixture is unreachable and adjust. Verify first-party
-  before writing goldens.
+  **Parser reachability — VERIFIED reachable at spec-review.** The
+  parser's `build.go:81-85` entity-sweep populates `scope` from
+  `rp.bindings` WITHOUT a collision check against `imported`; the
+  `imported[v]` collision at `build.go:148-150` fires only on the
+  CallBinding-import direction (imported name → local CallBinding),
+  not the reciprocal (imported CALL YIELD → local NodeBinding).
+  Consequence: this fixture PARSES cleanly and reaches the
+  resolver; without R7's §4.1.2.1 check, the resolver would
+  SILENTLY ADMIT with `n` typed as a NodeBinding and the CALL
+  YIELD scalar identity silently lost. §4.1.2 details the
+  reachability analysis with first-party citations.
 
-  **Fallback if unreachable**: R7 does not add this fixture; the
-  R6 `part_binding_type_conflict.cypher` fixture continues to cover
-  `ErrPartBindingTypeConflict`. R7's bidirectional reachability
-  discipline is maintained by the R6 fixture surviving.
+- `part_binding_type_conflict_call_vs_edge.cypher` —
+  `CALL test.labels() YIELD label\nWITH label\nMATCH ()-[label:KNOWS]->() RETURN label`.
+  Schema: `social_r7.gql`. Fires:
+  `ErrPartBindingTypeConflict` at Part 1's EdgeBinding admission
+  arm — carry seeds callTypes["label"] as STRING scalar; local
+  MATCH binds EdgeBinding{"label", ["KNOWS"]}; the resolver
+  detects the cross-clause scalar-vs-entity type shape conflict
+  per §4.1.2.2.
+  Pins: `ErrPartBindingTypeConflict`. Wrapped message:
+  `variable "label" carried as CALL YIELD scalar, re-bound as
+  edge with labels KNOWS`.
+
+  Parser reachability: identical to the node case (verified via
+  same `build.go:81-85` sweep — the entity sweep runs for edges
+  too by shared code path). Confirm by parser-side dry run before
+  writing the golden.
 
 **Updated `invalidFixtures` map** (R6 base + R7 additions):
 
@@ -1786,20 +2081,23 @@ var invalidFixtures = map[string]error{
     // R7 additions:
     "call_yield_property_lookup.cypher":                   ErrUnknownProperty,
     "part_binding_type_conflict_call_vs_node.cypher":      ErrPartBindingTypeConflict,
+    "part_binding_type_conflict_call_vs_edge.cypher":      ErrPartBindingTypeConflict,
 }
 ```
 
-**Ordering summary:** 1-2 invalid fixtures at R7 (the CALL-scalar
-property lookup is guaranteed; the CALL-then-MATCH re-bind is
-verify-required at spec-review). This is the deliberate scarcity
-called out in §5.1: R7 is a positive-output stage; there are few
-resolver-side rejection sites for CALL by construction.
+**Ordering summary:** 3 invalid fixtures at R7 (one property-on-
+CALL-YIELD-scalar; two CALL-YIELD-scalar-vs-entity re-bind — one
+node-side, one edge-side). All three parse cleanly and are
+resolver-reachable per §4.1.2's first-party build.go analysis.
+R7 remains a positive-output stage; the three fail-sites are the
+complete resolver-side rejection surface for CALL.
 
 **Sentinel reachability sweep passes**: every R6 sentinel still has
 a fixture; the R7 additions target `ErrUnknownProperty` (already
-covered — R7 widens the message set) and `ErrPartBindingTypeConflict`
-(already covered by R5 fixture — R7 adds a second angle if the
-fixture parses cleanly).
+covered — R7 widens the message set with the CALL-YIELD-scalar
+arm) and `ErrPartBindingTypeConflict` (already covered by R5's
+`part_binding_type_conflict.cypher` — R7 adds two additional
+message-shape angles per §5.3, without adding a sentinel).
 
 ### 6.6 Determinism check — R7 additions
 
@@ -1874,8 +2172,9 @@ R6's out-of-scope table survives with revisions:
 | Unlabelled node with a multi-candidate set that survives Phase B fixed-point | `ErrAmbiguousBinding` | (unchanged) |
 | Parameter Uses that do not unify | `ErrParameterTypeConflict` | (unchanged) |
 | UNION branches disagree on column count, names, types, or nullability | `ErrUnionColumnMismatch` | (unchanged) |
-| Part K > 0 re-declares a carried variable with a conflicting labelled binding | `ErrPartBindingTypeConflict` | (unchanged; R7 widens to CALL-vs-node) |
-| Part K CALL YIELD carried through WITH; Part K+1 MATCH re-binds the same name as an entity | `ErrPartBindingTypeConflict` | **R7 (this stage; verify parser reachability at §6.4)** |
+| Part K > 0 re-declares a carried variable with a conflicting labelled binding | `ErrPartBindingTypeConflict` | (unchanged; R5) |
+| Part K CALL YIELD carried through WITH; Part K+1 MATCH re-binds the same name as a labelled node | `ErrPartBindingTypeConflict` | **R7 (this stage; §4.1.2.1; message-set widening — §5.3)** |
+| Part K CALL YIELD carried through WITH; Part K+1 MATCH re-binds the same name as an edge | `ErrPartBindingTypeConflict` | **R7 (this stage; §4.1.2.2; message-set widening — §5.3)** |
 | SET / REMOVE property on schema-unknown property | `ErrUnknownProperty` | (unchanged) |
 | SET / REMOVE labels with schema-undeclared label | `ErrUnknownLabel` | (unchanged) |
 | CREATE / MERGE with schema-unknown label | `ErrUnknownLabel` | (unchanged) |
@@ -2118,7 +2417,7 @@ citations below name the file:line the claim rests on.
 - **`buildScopeOrder` — the walk R7 widens** —
   `internal/resolver/resolve.go:370-404`.
 - **`virtualProjection` — the ReturnsAll synthesis R7 widens** —
-  `internal/resolver/resolve.go:344-368`.
+  `internal/resolver/resolve.go:347-368`.
 - **`exportScope` — the R7 `exportedCallTypes` lane** —
   `internal/resolver/resolve.go:406-484`.
 - **`branchState` — the R7 `exportedCallTypes` field** —
@@ -2139,7 +2438,7 @@ via `ls test/data/resolver/{valid,invalid}/*.cypher | sed | sort |
 wc -l` at commit `0900a8e`.
 
 **Test-side registry fixture in parser tests (the model for R7's
-`registry.fixtures.go`)** —
+`signaturesR7` slice inside `resolver_test.go`)** —
 `internal/query/cypher/parser_test.go:2517-2525` (`newParserFor`).
 
 ---
@@ -2163,13 +2462,17 @@ out of scope of this document. The spec is done when:
    `exportScope`'s callTypes carry-forward (§4.6), and the
    argument-parameter Use posture (§4.8).
 4. §5 records the zero-sentinel-addition posture, the one
-   `ErrOutOfR0Scope` message-set retirement (§5.2), and the one
-   `ErrUnknownProperty` message-set widening (§5.3). The
-   `allSentinels` closed set is unchanged from R6 (§5.4).
+   `ErrOutOfR0Scope` message-set retirement (§5.2), and the TWO
+   R6-sentinel message-set widenings — `ErrUnknownProperty`
+   (property-on-CALL-YIELD-scalar) and `ErrPartBindingTypeConflict`
+   (scalar-vs-entity cross-clause re-bind, §5.3). The `allSentinels`
+   closed set is unchanged from R6 (§5.4).
 5. §6 designs the fixture set: the R7 valid schema `social_r7.gql`
-   (§6.2), the R7 registry fixture `registry.fixtures.go` (§6.3), the
-   R7 valid fixture list (~14 fixtures), the R7 invalid fixture list
-   (1-2 additions), the revised `invalidFixtures` map (§6.5).
+   (§6.2), the R7 registry fixture — `signaturesR7` slice inside
+   `internal/resolver/resolver_test.go` (§6.3), the R7 valid
+   fixture list (~14 fixtures), the R7 invalid fixture list (three
+   additions: one property-on-scalar, one call-vs-node, one
+   call-vs-edge), the revised `invalidFixtures` map (§6.5).
 6. §7 states the R7 capability scope in shape terms and lists its
    out-of-scope complement with the sentinel or under-demote posture
    for each construct. §7.1 records the ONE new frozen-model
