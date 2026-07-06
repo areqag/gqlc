@@ -36,7 +36,8 @@
                     "property": ""
                   }
                 ],
-                "type": "int"
+                "type": "int",
+                "containsAggregate": true
               }
             }
           ],

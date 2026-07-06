@@ -1169,15 +1169,27 @@ func (AggregateProjection) isProjection() {}
 // (property-participating arithmetic, NULL propagation, unknown function
 // return types) types as TypeUnknown; the resolver upgrades from the schema.
 type ExprProjection struct {
-	refs       []Ref // the var/var.prop bindings the expression touches
-	resultType Type  // the parser-computed result type; TypeUnknown when it cannot commit
+	refs              []Ref // the var/var.prop bindings the expression touches
+	resultType        Type  // the parser-computed result type; TypeUnknown when it cannot commit
+	containsAggregate bool  // true iff the expression subtree contains at least one aggregate call (Shape B, ADR 0008 amendment 2026-07-06)
 }
 
 // NewExprProjection builds an ExprProjection carrying its result type and
 // touched refs. Total: the listener supplies Refs it has already mined from
-// the sub-expression and a Type value.
+// the sub-expression and a Type value. Forwards containsAggregate=false to
+// NewExprProjectionWithAggregate — the zero-value-safe shorthand for callers
+// that predate the ADR 0008 2026-07-06 amendment.
 func NewExprProjection(refs []Ref, t Type) ExprProjection {
-	return ExprProjection{refs: refs, resultType: t}
+	return NewExprProjectionWithAggregate(refs, t, false)
+}
+
+// NewExprProjectionWithAggregate builds an ExprProjection carrying its
+// result type, touched refs, and the ContainsAggregate bit — true iff the
+// expression subtree contains at least one aggregate function call (Shape B
+// per ADR 0008 amendment 2026-07-06). Callers that do not need the bit use
+// NewExprProjection, which forwards containsAggregate=false.
+func NewExprProjectionWithAggregate(refs []Ref, t Type, containsAggregate bool) ExprProjection {
+	return ExprProjection{refs: refs, resultType: t, containsAggregate: containsAggregate}
 }
 
 // Refs are the var/var.prop bindings the expression touches, so the
@@ -1189,17 +1201,32 @@ func (p ExprProjection) Refs() []Ref { return p.refs }
 // arithmetic, NULL propagation, unknown function return types).
 func (p ExprProjection) Type() Type { return p.resultType }
 
+// ContainsAggregate reports whether the expression subtree contains at least
+// one aggregate function call. Populated parser-side during
+// classifyRichExpression's walk (Shape B, ADR 0008 amendment 2026-07-06).
+// The resolver's grouping-key discriminator reads this bit
+// (docs/specs/resolver-stage-r5.md §4.5.3 close-out).
+func (p ExprProjection) ContainsAggregate() bool { return p.containsAggregate }
+
 func (ExprProjection) isProjection() {}
 
 // MarshalJSON renders an ExprProjection as a tagged union member discriminated
-// by "kind", carrying its refs and always-emitted result type — same posture
-// as FuncProjection with an added type field.
+// by "kind", carrying its refs, always-emitted result type, and the
+// ContainsAggregate axis (omit-when-false — the campaign convention recorded
+// in the ADR 0008 2026-07-06 amendment note, so pre-freeze goldens whose
+// subtree carries no aggregate stay byte-identical).
 func (p ExprProjection) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Kind string    `json:"kind"`
-		Refs []flatRef `json:"refs"`
-		Type Type      `json:"type"`
-	}{Kind: projectionKindExpr, Refs: flattenRefs(p.refs), Type: projectionType(p.resultType)})
+		Kind              string    `json:"kind"`
+		Refs              []flatRef `json:"refs"`
+		Type              Type      `json:"type"`
+		ContainsAggregate bool      `json:"containsAggregate,omitempty"`
+	}{
+		Kind:              projectionKindExpr,
+		Refs:              flattenRefs(p.refs),
+		Type:              projectionType(p.resultType),
+		ContainsAggregate: p.containsAggregate,
+	})
 }
 
 // AggregateFunc identifies one of the openCypher aggregating functions. The set
