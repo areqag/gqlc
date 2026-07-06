@@ -150,8 +150,11 @@ The ADR 0008 amendment records the axis's promotion. The resolver's
 `fillGroupingKeys` gains a gate arm and a loop arm on the new bit
 (§7.1: the top-level presence gate widens with an `ExprProjection`
 `ContainsAggregate=true` disjunct, and the per-column key-emission
-loop widens with an `ExprProjection` `ContainsAggregate=true`
-exclude arm alongside the existing `AggregateProjection` exclude).
+loop widens with an `ExprProjection` `ContainsAggregate=false`
+INCLUDE arm alongside the existing `RefProjection` /
+`LiteralProjection` / `FuncProjection` include arms —
+`AggregateProjection` remains excluded by case-absence, not by an
+explicit arm).
 
 **Why Shape B and not Shape A.** Shape A (promote nested-aggregate
 residuals to `AggregateProjection`) is a semantic widening of the
@@ -798,12 +801,15 @@ outer projection use OC_Atom shapes that never reach
 aggregate at grammar-valid position). §5 adds no pin for the stops
 either — the walker is a private helper, and its boundaries are
 witnessed indirectly by the §4.4.1 golden enumeration: **every
-List11 / List12 / List13 golden with an inner-comprehension
-aggregate stays byte-identical** (source-verified at §4.4.1;
-Return6 `[3] Size of list comprehension`'s golden
-`List12_33d76b6f508c.golden.json` shows `"kind": "expr"` with no
-`containsAggregate` key at branch base and post-widening — the
-first-party audit that proves the stop). If a future TCK bump adds
+List12 / List13 golden with an inner-comprehension aggregate stays
+byte-identical** (source-verified at §4.4.1; Return6 `[3] Size of
+list comprehension`'s golden `List12_33d76b6f508c.golden.json`
+shows `"kind": "expr"` with no `containsAggregate` key at branch
+base and post-widening — the first-party audit that proves the
+stop). The row-10 partial case (quantifier source-list) is NOT
+inside this boundary set — see §4.4.1's "Not a boundary case:
+quantifier source-list" paragraph, which pins `List11_f7c0a30b582c`
+as a flip (row 20). If a future TCK bump adds
 a scenario whose outer projection embeds an `EXISTS { RETURN
 count(…) }` or `all(x IN collect(…) WHERE …)` at RETURN /
 WITH-projection position, the pin's `want` MUST author
@@ -1055,16 +1061,41 @@ def redact(expr):
     # Quantifiers all/any/none/single(x IN src [WHERE pred]) — §4.2.1 row
     # 10 partial stop: keep the source list (walker descends into it via
     # typing.go:437-438), blank only the WHERE-body (walker discards it
-    # via the savedOuter/restore idiom at typing.go:449-452).
-    for q in ["all","any","none","single"]:
-        def strip_where(m, qname=q):
-            body = m.group(1)
-            wm = re.search(r"\bWHERE\b", body, re.IGNORECASE)
-            if wm:
-                body = body[:wm.start()]
-            return f"{qname}({body})"
-        e = re.sub(rf"(?is)\b{q}\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)",
-                   strip_where, e)
+    # via the savedOuter/restore idiom at typing.go:449-452). Hand-rolled
+    # balanced-paren walker rather than a regex — round-4: List11's actual
+    # depth-3 form `ALL(ok IN collect((size(list) = 0) = empty) WHERE ok)`
+    # over-runs a fixed-depth regex, so we mirror the bracket walker above.
+    qpat = re.compile(r"(?i)\b(all|any|none|single)\s*\(")
+    changed = True
+    while changed:
+        changed = False
+        m = qpat.search(e)
+        while m:
+            i = m.end() - 1                 # position of the opening '('
+            d = 1; j = i + 1
+            while j < len(e) and d > 0:
+                if e[j] == "(": d += 1
+                elif e[j] == ")": d -= 1
+                j += 1
+            if d != 0:                       # unbalanced — bail on this hit
+                m = qpat.search(e, j)
+                continue
+            body = e[i+1:j-1]
+            # Depth-0 " WHERE " scan.
+            d2 = 0; wpos = -1; k = 0
+            while k < len(body):
+                c = body[k]
+                if c in "([{": d2 += 1
+                elif c in ")]}": d2 -= 1
+                if d2 == 0 and re.match(r"\bWHERE\b", body[k:], re.IGNORECASE):
+                    wpos = k; break
+                k += 1
+            if wpos >= 0:
+                new_body = body[:wpos]
+                e = e[:i+1] + new_body + e[j-1:]
+                changed = True
+                break                        # restart from top of outer loop
+            m = qpat.search(e, j)
     return e
 
 def outer_is_bare_aggregate(expr):
@@ -1213,7 +1244,7 @@ stop from §4.2.1 row 13 is load-bearing, not decorative.
 into `src` (`typing.go:437-438`) and DOES stop at the WHERE-body
 (`savedOuter/restore` at `typing.go:449-452`). Consequently
 `List11_f7c0a30b582c` (`RETURN ALL(ok IN collect((size(list) = 0)
-= empty) WHERE ok) AS collectionMatches` — the `collect(...)` sits
+= empty) WHERE ok) AS okay` — the `collect(...)` sits
 in the ALL source list, not in its WHERE-body) is a flip
 (row 20 of the table), NOT a boundary witness. A quantifier
 scenario whose aggregate lived only inside the WHERE-body (e.g.
