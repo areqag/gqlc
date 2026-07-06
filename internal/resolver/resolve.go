@@ -150,10 +150,6 @@ func resolveBranch(branch query.Branch, s schema.Schema, r procsig.Registry) ([]
 // Part), the branchState exported to Part K+1 (§4.2.2), and the parameter-Use
 // witnesses collected inside this Part.
 func resolvePart(part query.Part, carry branchState, s schema.Schema) ([]Column, branchState, []parameterUseSite, error) {
-	if len(part.Effects) != 0 {
-		return nil, branchState{}, nil, fmt.Errorf("%w: write clause", ErrOutOfR0Scope)
-	}
-
 	nodeTypes := make(map[string]schema.NodeType)
 	edgeTypes := make(map[string]schema.EdgeType)
 	edgeKeys := make(map[string]schema.EdgeKey)
@@ -284,6 +280,14 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema) ([]Column,
 	// OPTIONAL-carried `b` see nullableBinding["b"] = false.
 	seedLocalNullability(part.Bindings, nullableBinding)
 	demoteNullableInPlace(part.Bindings, nullableBinding)
+
+	// Phase E (R6 §4.1): effect validation. Runs after Phase D so effect
+	// targets see the same schema-committed binding tables and effective-
+	// nullability map that the projection walk sees. First failure short-
+	// circuits.
+	if err := validateEffects(part.Effects, nodeTypes, edgeTypes, edgeCands, edgeBindings, carry.exportedResolvedTypes, s); err != nil {
+		return nil, branchState{}, nil, err
+	}
 
 	// Ordered in-scope name list — used by ReturnsAll expansion (§4.4.1).
 	scopeOrder := buildScopeOrder(part.Bindings, carry.exportedOrder, nodeTypes, edgeBindings)
@@ -700,16 +704,13 @@ func witnessAcrossScopes(u query.Use, scopes []partScope, s schema.Schema) ([]Re
 		return []ResolvedType{ResolvedScalar{Kind: ScalarInt}}, nil
 	case query.ExprUse:
 		switch uu.Position() {
-		case query.ExprInProjection, query.ExprInPredicate:
+		case query.ExprInProjection, query.ExprInPredicate,
+			query.ExprInSetValue, query.ExprInDeleteTarget:
 			w, err := resolveType(uu.EnclosingType())
 			if err != nil {
 				return nil, err
 			}
 			return []ResolvedType{w}, nil
-		case query.ExprInSetValue:
-			return nil, fmt.Errorf("%w: parameter used in SET value", ErrOutOfR0Scope)
-		case query.ExprInDeleteTarget:
-			return nil, fmt.Errorf("%w: parameter used in DELETE target", ErrOutOfR0Scope)
 		default:
 			return nil, fmt.Errorf("%w: unknown ExprUse position", ErrOutOfR0Scope)
 		}
@@ -1304,4 +1305,306 @@ func unify(a, b ResolvedType) (ResolvedType, bool) {
 	default:
 		return nil, false
 	}
+}
+
+// validateEffects is R6 Phase E: walk part.Effects in slice order, dispatch
+// each Effect through its per-variant validator, short-circuit on first
+// failure. Reads from the schema-committed binding tables and the carried
+// resolved types; never mutates them. The dispatch is a type switch on the
+// closed Effect sum (query.go:1631-1660); the default arm is a defensive
+// tripwire for a future Effect variant landing without an R6 refresh.
+func validateEffects(effects []query.Effect, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, carriedResolvedTypes map[string]ResolvedType, s schema.Schema) error {
+	for _, e := range effects {
+		if err := validateEffect(e, nodeTypes, edgeTypes, edgeCands, edgeBindings, carriedResolvedTypes, s); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateEffect(e query.Effect, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, carriedResolvedTypes map[string]ResolvedType, s schema.Schema) error {
+	switch ee := e.(type) {
+	case query.CreateEffect:
+		return validateCreateEffect(ee, nodeTypes, edgeBindings)
+	case query.MergeEffect:
+		return validateMergeEffect(ee, nodeTypes, edgeTypes, edgeCands, edgeBindings, carriedResolvedTypes, s)
+	case query.SetPropertyEffect:
+		return validateSetPropertyEffect(ee, nodeTypes, edgeTypes, edgeCands, edgeBindings, carriedResolvedTypes, s)
+	case query.SetEntityEffect:
+		return validateSetEntityEffect(ee, nodeTypes, edgeTypes, edgeCands, edgeBindings, carriedResolvedTypes)
+	case query.SetLabelsEffect:
+		return validateSetLabelsEffect(ee, nodeTypes, edgeBindings, carriedResolvedTypes, s)
+	case query.RemovePropertyEffect:
+		return validateRemovePropertyEffect(ee, nodeTypes, edgeTypes, edgeCands, edgeBindings, carriedResolvedTypes, s)
+	case query.RemoveLabelsEffect:
+		return validateRemoveLabelsEffect(ee, nodeTypes, edgeBindings, carriedResolvedTypes, s)
+	case query.DeleteEffect:
+		return validateDeleteEffect(ee, nodeTypes, edgeTypes, edgeCands, edgeBindings, carriedResolvedTypes, s)
+	default:
+		return fmt.Errorf("%w: unknown Effect variant (%T)", ErrOutOfR0Scope, e)
+	}
+}
+
+// validateCreateEffect walks e.Variables() and confirms each non-empty name is
+// present in nodeTypes OR edgeBindings. Anonymous edges (v == "") skip per
+// listener.go:349-350. Reachability of the tripwire is zero from parser input.
+func validateCreateEffect(e query.CreateEffect, nodeTypes map[string]schema.NodeType, edgeBindings map[string]query.EdgeBinding) error {
+	for _, v := range e.Variables() {
+		if v == "" {
+			continue
+		}
+		if _, ok := nodeTypes[v]; ok {
+			continue
+		}
+		if _, ok := edgeBindings[v]; ok {
+			continue
+		}
+		return fmt.Errorf("%w: CREATE variable %q not bound after phase C", ErrInvalidEffectTarget, v)
+	}
+	return nil
+}
+
+// validateMergeEffect runs the CREATE variable-presence check and routes each
+// SetEffect in OnMatch / OnCreate through the SET-family validators. Sub-sum
+// type-safety is guaranteed by query.go:1651-1660 (only Set-family effects can
+// appear inside).
+func validateMergeEffect(e query.MergeEffect, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, carriedResolvedTypes map[string]ResolvedType, s schema.Schema) error {
+	for _, v := range e.Variables() {
+		if v == "" {
+			continue
+		}
+		if _, ok := nodeTypes[v]; ok {
+			continue
+		}
+		if _, ok := edgeBindings[v]; ok {
+			continue
+		}
+		return fmt.Errorf("%w: MERGE variable %q not bound after phase C", ErrInvalidEffectTarget, v)
+	}
+	for _, se := range e.OnMatch() {
+		if err := validateEffect(se, nodeTypes, edgeTypes, edgeCands, edgeBindings, carriedResolvedTypes, s); err != nil {
+			return err
+		}
+	}
+	for _, se := range e.OnCreate() {
+		if err := validateEffect(se, nodeTypes, edgeTypes, edgeCands, edgeBindings, carriedResolvedTypes, s); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateSetPropertyEffect resolves the target Ref against the binding tables
+// and looks up the property on the resolved schema entity. Rejects var-length
+// edge targets (a var-length binding is a list of edges, not one edge).
+// Rejects projection-alias targets and out-of-scope names (defensive tripwire)
+// with ErrInvalidEffectTarget.
+func validateSetPropertyEffect(e query.SetPropertyEffect, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, carriedResolvedTypes map[string]ResolvedType, s schema.Schema) error {
+	v := e.Target().Variable
+	p := e.Target().Property
+	if nt, ok := nodeTypes[v]; ok {
+		if _, ok := nt.Properties[p]; !ok {
+			return fmt.Errorf("%w: %s.%s", ErrUnknownProperty, v, p)
+		}
+		return nil
+	}
+	if et, ok := edgeTypes[v]; ok {
+		if edgeBindings[v].Hops() != nil {
+			return fmt.Errorf("%w: SET on variable-length edge %q", ErrInvalidEffectTarget, v)
+		}
+		if _, ok := et.Properties[p]; !ok {
+			return fmt.Errorf("%w: %s.%s", ErrUnknownProperty, v, p)
+		}
+		return nil
+	}
+	if cands, ok := edgeCands[v]; ok {
+		if edgeBindings[v].Hops() != nil {
+			return fmt.Errorf("%w: SET on variable-length edge %q", ErrInvalidEffectTarget, v)
+		}
+		if _, err := unionProperty(cands, s, v, p, false); err != nil {
+			return err
+		}
+		return nil
+	}
+	if _, ok := carriedResolvedTypes[v]; ok {
+		return fmt.Errorf("%w: SET %s.%s: %q resolves to a projection alias, not an entity binding", ErrInvalidEffectTarget, v, p, v)
+	}
+	return fmt.Errorf("%w: SET %s.%s: %q not in any Part scope", ErrInvalidEffectTarget, v, p, v)
+}
+
+// validateSetEntityEffect resolves the target variable against the entity
+// binding tables. Rejects var-length edge targets and projection-alias / out-
+// of-scope targets with ErrInvalidEffectTarget. No property-existence check —
+// the RHS map's keys are runtime (per §4.3.2 in the R6 spec).
+func validateSetEntityEffect(e query.SetEntityEffect, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, carriedResolvedTypes map[string]ResolvedType) error {
+	v := e.TargetVariable()
+	if _, ok := nodeTypes[v]; ok {
+		return nil
+	}
+	if _, ok := edgeTypes[v]; ok {
+		if edgeBindings[v].Hops() != nil {
+			return fmt.Errorf("%w: SET on variable-length edge %q", ErrInvalidEffectTarget, v)
+		}
+		return nil
+	}
+	if _, ok := edgeCands[v]; ok {
+		if edgeBindings[v].Hops() != nil {
+			return fmt.Errorf("%w: SET on variable-length edge %q", ErrInvalidEffectTarget, v)
+		}
+		return nil
+	}
+	if _, ok := carriedResolvedTypes[v]; ok {
+		return fmt.Errorf("%w: SET %s = ...: %q resolves to a projection alias, not an entity binding", ErrInvalidEffectTarget, v, v)
+	}
+	return fmt.Errorf("%w: SET %s = ...: %q not in any Part scope", ErrInvalidEffectTarget, v, v)
+}
+
+// validateSetLabelsEffect verifies the target is a node binding (edges reject
+// with ErrInvalidEffectTarget since labels are node-only), then confirms each
+// label individually appears in at least one declared NodeType's LabelSet.
+// Missing labels surface ErrUnknownLabel per §4.3.3.
+func validateSetLabelsEffect(e query.SetLabelsEffect, nodeTypes map[string]schema.NodeType, edgeBindings map[string]query.EdgeBinding, carriedResolvedTypes map[string]ResolvedType, s schema.Schema) error {
+	v := e.TargetVariable()
+	if _, ok := nodeTypes[v]; !ok {
+		if _, ok := edgeBindings[v]; ok {
+			return fmt.Errorf("%w: SET labels on edge binding %q", ErrInvalidEffectTarget, v)
+		}
+		if _, ok := carriedResolvedTypes[v]; ok {
+			return fmt.Errorf("%w: SET labels on projection alias %q", ErrInvalidEffectTarget, v)
+		}
+		return fmt.Errorf("%w: SET %s: %q not in any Part scope", ErrInvalidEffectTarget, v, v)
+	}
+	for _, L := range e.Labels() {
+		if !labelDeclared(L, s) {
+			return fmt.Errorf("%w: SET %s:%s: label %q not declared on any node type", ErrUnknownLabel, v, L, L)
+		}
+	}
+	return nil
+}
+
+// validateRemovePropertyEffect mirrors validateSetPropertyEffect: same target
+// resolution, same property-existence check. No value side to check.
+func validateRemovePropertyEffect(e query.RemovePropertyEffect, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, carriedResolvedTypes map[string]ResolvedType, s schema.Schema) error {
+	v := e.Target().Variable
+	p := e.Target().Property
+	if nt, ok := nodeTypes[v]; ok {
+		if _, ok := nt.Properties[p]; !ok {
+			return fmt.Errorf("%w: %s.%s", ErrUnknownProperty, v, p)
+		}
+		return nil
+	}
+	if et, ok := edgeTypes[v]; ok {
+		if edgeBindings[v].Hops() != nil {
+			return fmt.Errorf("%w: REMOVE on variable-length edge %q", ErrInvalidEffectTarget, v)
+		}
+		if _, ok := et.Properties[p]; !ok {
+			return fmt.Errorf("%w: %s.%s", ErrUnknownProperty, v, p)
+		}
+		return nil
+	}
+	if cands, ok := edgeCands[v]; ok {
+		if edgeBindings[v].Hops() != nil {
+			return fmt.Errorf("%w: REMOVE on variable-length edge %q", ErrInvalidEffectTarget, v)
+		}
+		if _, err := unionProperty(cands, s, v, p, false); err != nil {
+			return err
+		}
+		return nil
+	}
+	if _, ok := carriedResolvedTypes[v]; ok {
+		return fmt.Errorf("%w: REMOVE %s.%s: %q resolves to a projection alias, not an entity binding", ErrInvalidEffectTarget, v, p, v)
+	}
+	return fmt.Errorf("%w: REMOVE %s.%s: %q not in any Part scope", ErrInvalidEffectTarget, v, p, v)
+}
+
+// validateRemoveLabelsEffect is the REMOVE analogue of validateSetLabelsEffect:
+// same target discipline, same per-label declaration check.
+func validateRemoveLabelsEffect(e query.RemoveLabelsEffect, nodeTypes map[string]schema.NodeType, edgeBindings map[string]query.EdgeBinding, carriedResolvedTypes map[string]ResolvedType, s schema.Schema) error {
+	v := e.TargetVariable()
+	if _, ok := nodeTypes[v]; !ok {
+		if _, ok := edgeBindings[v]; ok {
+			return fmt.Errorf("%w: REMOVE labels on edge binding %q", ErrInvalidEffectTarget, v)
+		}
+		if _, ok := carriedResolvedTypes[v]; ok {
+			return fmt.Errorf("%w: REMOVE labels on projection alias %q", ErrInvalidEffectTarget, v)
+		}
+		return fmt.Errorf("%w: REMOVE %s: %q not in any Part scope", ErrInvalidEffectTarget, v, v)
+	}
+	for _, L := range e.Labels() {
+		if !labelDeclared(L, s) {
+			return fmt.Errorf("%w: REMOVE %s:%s: label %q not declared on any node type", ErrUnknownLabel, v, L, L)
+		}
+	}
+	return nil
+}
+
+// validateDeleteEffect walks e.Targets() for bare-shape checks (entity DELETE
+// or bare-property DELETE) and e.Refs() as a defensive walk (parser
+// referential integrity already covers them). See §4.4.
+func validateDeleteEffect(e query.DeleteEffect, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, carriedResolvedTypes map[string]ResolvedType, s schema.Schema) error {
+	for _, t := range e.Targets() {
+		v := t.Variable
+		p := t.Property
+		if p == "" {
+			if _, ok := nodeTypes[v]; ok {
+				continue
+			}
+			if _, ok := edgeTypes[v]; ok {
+				continue
+			}
+			if _, ok := edgeCands[v]; ok {
+				continue
+			}
+			if _, ok := carriedResolvedTypes[v]; ok {
+				return fmt.Errorf("%w: DELETE %s: %q resolves to a projection alias, not an entity binding", ErrInvalidEffectTarget, v, v)
+			}
+			return fmt.Errorf("%w: DELETE %s: %q not in any Part scope", ErrInvalidEffectTarget, v, v)
+		}
+		if nt, ok := nodeTypes[v]; ok {
+			if _, ok := nt.Properties[p]; !ok {
+				return fmt.Errorf("%w: %s.%s", ErrUnknownProperty, v, p)
+			}
+			continue
+		}
+		if et, ok := edgeTypes[v]; ok {
+			if edgeBindings[v].Hops() != nil {
+				return fmt.Errorf("%w: DELETE on variable-length edge %q", ErrInvalidEffectTarget, v)
+			}
+			if _, ok := et.Properties[p]; !ok {
+				return fmt.Errorf("%w: %s.%s", ErrUnknownProperty, v, p)
+			}
+			continue
+		}
+		if cands, ok := edgeCands[v]; ok {
+			if edgeBindings[v].Hops() != nil {
+				return fmt.Errorf("%w: DELETE on variable-length edge %q", ErrInvalidEffectTarget, v)
+			}
+			if _, err := unionProperty(cands, s, v, p, false); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, ok := carriedResolvedTypes[v]; ok {
+			return fmt.Errorf("%w: DELETE %s.%s: %q resolves to a projection alias, not an entity binding", ErrInvalidEffectTarget, v, p, v)
+		}
+		return fmt.Errorf("%w: DELETE %s.%s: %q not in any Part scope", ErrInvalidEffectTarget, v, p, v)
+	}
+	// Refs walk: parser's referential-integrity sweep covers these; skip per
+	// §4.4 step 2 ("R6 runs no additional check on e.Refs()").
+	return nil
+}
+
+// labelDeclared reports whether L appears as a component of any declared
+// NodeType's LabelSetKey — the R6 policy per §4.3.3 (per-label existence, not
+// union-existence). Naive O(|s.Nodes| × avg-arity) iteration; schemas are
+// small.
+func labelDeclared(L string, s schema.Schema) bool {
+	for k := range s.Nodes {
+		for _, lbl := range k.Split() {
+			if lbl == L {
+				return true
+			}
+		}
+	}
+	return false
 }
