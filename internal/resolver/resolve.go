@@ -87,7 +87,18 @@ type branchState struct {
 	exportedEdgeBindings    map[string]query.EdgeBinding
 	exportedNullableBinding map[string]bool
 	exportedResolvedTypes   map[string]ResolvedType
+	exportedCallTypes       map[string]callBindingSlot
 	exportedOrder           []string
+}
+
+// callBindingSlot carries the resolver-side view of a CallBinding at a Part's
+// Phase A1: bridged Stage-6 type, nullability, and the two identity strings
+// codegen may consult on the query.Query side (spec §4.1).
+type callBindingSlot struct {
+	resultType  query.Type
+	nullable    bool
+	procedure   string
+	sourceField string
 }
 
 // parameterUseSite is resolveBranch's second-return element (pinned type per
@@ -155,6 +166,7 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema) ([]Column,
 	edgeKeys := make(map[string]schema.EdgeKey)
 	edgeCands := make(map[string][]schema.EdgeKey)
 	edgeBindings := make(map[string]query.EdgeBinding)
+	callTypes := make(map[string]callBindingSlot)
 	// Carry seed happens BEFORE local bindings write in — local shadows carry
 	// per §4.2.3.
 	for name, nt := range carry.exportedNodeTypes {
@@ -172,9 +184,13 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema) ([]Column,
 	for name, b := range carry.exportedEdgeBindings {
 		edgeBindings[name] = b
 	}
+	for name, slot := range carry.exportedCallTypes {
+		callTypes[name] = slot
+	}
 
 	// Phase A1: local labelled node bindings (shadows carry) + edge admission
-	// screening. Unlabelled node bindings defer to Phase B.
+	// screening + CALL binding admission (R7 §4.1). Unlabelled node bindings
+	// defer to Phase B (with a matching call-collision check at commit).
 	var pendingNodes []query.NodeBinding
 	var supportedEdges []query.EdgeBinding
 	for _, b := range part.Bindings {
@@ -188,6 +204,13 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema) ([]Column,
 			nt, ok := s.Nodes[key]
 			if !ok {
 				return nil, branchState{}, nil, fmt.Errorf("%w: %s", ErrUnknownLabel, key)
+			}
+			// R7 §4.1.2.1: a carried CALL YIELD scalar cannot re-bind as a
+			// labelled node — the shape-posture extension of R5's LabelSetKey
+			// check. Fires BEFORE the R5 arm so the scalar-vs-entity fault is
+			// named correctly, not masked by the node-vs-node message.
+			if _, seenCall := callTypes[bb.Variable()]; seenCall {
+				return nil, branchState{}, nil, fmt.Errorf("%w: variable %q carried as CALL YIELD scalar, re-bound as %s", ErrPartBindingTypeConflict, bb.Variable(), key)
 			}
 			// R5 §6.4: a labelled re-binding of a carried name whose schema-
 			// typed identity differs from the carry is irreconcilable. Same
@@ -211,6 +234,10 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema) ([]Column,
 			}
 			supportedEdges = append(supportedEdges, bb)
 			if v := bb.Variable(); v != "" {
+				// R7 §4.1.2.2: reciprocal call-vs-edge shape-mismatch guard.
+				if _, seenCall := callTypes[v]; seenCall {
+					return nil, branchState{}, nil, fmt.Errorf("%w: variable %q carried as CALL YIELD scalar, re-bound as edge with labels %s", ErrPartBindingTypeConflict, v, bb.Labels().Key())
+				}
 				// R5 §6.4 edge parity: if the carry seed already carried an
 				// edge binding for `v`, and the local re-bind's label set
 				// differs, that is a Part-cross irreconcilable re-typing.
@@ -230,6 +257,30 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema) ([]Column,
 				delete(edgeTypes, v)
 				delete(edgeKeys, v)
 				delete(edgeCands, v)
+			}
+		case query.CallBinding:
+			v := bb.Variable()
+			// R7 §4.1: local CallBinding shadows any carried entity state
+			// at the same name (parser-unreachable belt-and-braces, since
+			// build.go:148-150's imported[v] check rejects the collision
+			// direction at parse). Same posture as R5's local-shadows-carry
+			// rule for node/edge (§4.2.3 R5).
+			delete(nodeTypes, v)
+			delete(edgeTypes, v)
+			delete(edgeKeys, v)
+			delete(edgeCands, v)
+			delete(edgeBindings, v)
+			// Same-Part duplicate CallBinding variable is grammar-impossible
+			// (parser Stage 14 §4.7 ErrVariableKindConflict — see
+			// internal/query/cypher/build.go:127-153). Defensive tripwire.
+			if _, seen := callTypes[v]; seen {
+				return nil, branchState{}, nil, fmt.Errorf("%w: variable %q re-CALL-bound in single part", ErrPartBindingTypeConflict, v)
+			}
+			callTypes[v] = callBindingSlot{
+				resultType:  bb.ResultType(),
+				nullable:    bb.Nullable(),
+				procedure:   bb.Procedure(),
+				sourceField: bb.SourceField(),
 			}
 		default:
 			return nil, branchState{}, nil, fmt.Errorf("%w: %s binding", ErrOutOfR0Scope, b.Kind())
@@ -251,7 +302,10 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema) ([]Column,
 	}
 
 	// Phase B: unlabelled-node inference over R3-admitted touching edges.
-	if err := inferUnlabelled(pendingNodes, supportedEdges, s, nodeTypes); err != nil {
+	// R7 §4.1.2.1 addendum: pass callTypes so an inferred unlabelled node
+	// whose Variable collides with a carried CALL YIELD scalar fails at
+	// commit with ErrPartBindingTypeConflict, mirroring the labelled arm.
+	if err := inferUnlabelled(pendingNodes, supportedEdges, s, nodeTypes, callTypes); err != nil {
 		return nil, branchState{}, nil, err
 	}
 
@@ -290,11 +344,14 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema) ([]Column,
 	}
 
 	// Ordered in-scope name list — used by ReturnsAll expansion (§4.4.1).
-	scopeOrder := buildScopeOrder(part.Bindings, carry.exportedOrder, nodeTypes, edgeBindings)
+	// R7 §4.3: buildScopeOrder is widened to include CALL YIELD variables.
+	scopeOrder := buildScopeOrder(part.Bindings, carry.exportedOrder, nodeTypes, edgeBindings, callTypes)
 
 	// Materialise the Part's ReturnItems: either the parser's Returns verbatim,
-	// or the virtual items §4.4.2 constructs for RETURN * / WITH *.
-	items, err := materialiseReturns(part, scopeOrder, carry, nodeTypes, edgeBindings)
+	// or the virtual items §4.4.2 constructs for RETURN * / WITH *. R7's
+	// virtualProjection widening synthesises CALL YIELD RefProjections with
+	// the CallBinding's ResultType (§4.7).
+	items, err := materialiseReturns(part, scopeOrder, carry, nodeTypes, edgeBindings, callTypes)
 	if err != nil {
 		return nil, branchState{}, nil, err
 	}
@@ -303,7 +360,7 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema) ([]Column,
 	// resolveBranch fills it on the final Part only.
 	columns := make([]Column, 0, len(items))
 	for _, item := range items {
-		colType, err := projectionType(item.Value, nodeTypes, edgeTypes, edgeKeys, edgeCands, edgeBindings, nullableBinding, carry.exportedResolvedTypes, s)
+		colType, err := projectionType(item.Value, nodeTypes, edgeTypes, edgeKeys, edgeCands, edgeBindings, nullableBinding, callTypes, carry.exportedResolvedTypes, s)
 		if err != nil {
 			return nil, branchState{}, nil, err
 		}
@@ -315,8 +372,9 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema) ([]Column,
 	// witnesses at the scope whose tables contain its Ref's binding (§4.2.4).
 	site := parameterUseSite{scope: snapshotScope(nodeTypes, edgeTypes, edgeCands, edgeBindings, nullableBinding)}
 
-	// Build the exported branchState for Part K+1.
-	exported := exportScope(part, columns, items, scopeOrder, nodeTypes, edgeTypes, edgeKeys, edgeCands, edgeBindings, nullableBinding)
+	// Build the exported branchState for Part K+1. R7 §4.6 adds the
+	// exportedCallTypes lane for CALL YIELD carry-forward.
+	exported := exportScope(part, columns, items, scopeOrder, nodeTypes, edgeTypes, edgeKeys, edgeCands, edgeBindings, nullableBinding, callTypes)
 
 	return columns, exported, []parameterUseSite{site}, nil
 }
@@ -324,8 +382,9 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema) ([]Column,
 // materialiseReturns handles the RETURN * / WITH * expansion (§4.4). When
 // ReturnsAll is false, returns part.Returns unchanged. When true, builds the
 // virtual ReturnItem sequence over scopeOrder (§4.4.2) — one item per in-scope
-// name in own-Part-first, shadowing-dedup order.
-func materialiseReturns(part query.Part, scopeOrder []string, carry branchState, nodeTypes map[string]schema.NodeType, edgeBindings map[string]query.EdgeBinding) ([]query.ReturnItem, error) {
+// name in own-Part-first, shadowing-dedup order. R7 threads callTypes so
+// CALL YIELD variables synthesise a properly-typed RefProjection (§4.7).
+func materialiseReturns(part query.Part, scopeOrder []string, carry branchState, nodeTypes map[string]schema.NodeType, edgeBindings map[string]query.EdgeBinding, callTypes map[string]callBindingSlot) ([]query.ReturnItem, error) {
 	if !part.ReturnsAll {
 		return part.Returns, nil
 	}
@@ -335,7 +394,7 @@ func materialiseReturns(part query.Part, scopeOrder []string, carry branchState,
 	}
 	items := make([]query.ReturnItem, 0, len(scopeOrder))
 	for _, v := range scopeOrder {
-		val, err := virtualProjection(v, nodeTypes, edgeBindings, carry)
+		val, err := virtualProjection(v, nodeTypes, edgeBindings, carry, callTypes)
 		if err != nil {
 			return nil, err
 		}
@@ -345,8 +404,10 @@ func materialiseReturns(part query.Part, scopeOrder []string, carry branchState,
 }
 
 // virtualProjection constructs the RefProjection (or carried-alias Value)
-// §4.4.2 assigns to a wildcard-expanded name.
-func virtualProjection(name string, nodeTypes map[string]schema.NodeType, edgeBindings map[string]query.EdgeBinding, carry branchState) (query.Projection, error) {
+// §4.4.2 assigns to a wildcard-expanded name. R7 §4.7: the callTypes lane
+// (appended at the tail) synthesises a CALL YIELD variable's RefProjection
+// with the CallBinding's bridged ResultType.
+func virtualProjection(name string, nodeTypes map[string]schema.NodeType, edgeBindings map[string]query.EdgeBinding, carry branchState, callTypes map[string]callBindingSlot) (query.Projection, error) {
 	if _, ok := nodeTypes[name]; ok {
 		return query.NewRefProjection(query.Ref{Variable: name}, query.TypeNode{}), nil
 	}
@@ -355,6 +416,9 @@ func virtualProjection(name string, nodeTypes map[string]schema.NodeType, edgeBi
 			return query.NewRefProjection(query.Ref{Variable: name}, query.TypeList{}), nil
 		}
 		return query.NewRefProjection(query.Ref{Variable: name}, query.TypeEdge{}), nil
+	}
+	if slot, ok := callTypes[name]; ok {
+		return query.NewRefProjection(query.Ref{Variable: name}, slot.resultType), nil
 	}
 	// Not a binding — must be a projection-alias carried through WITH; the
 	// §4.5.4 bypass path serves it. Use a placeholder RefProjection whose
@@ -370,8 +434,10 @@ func virtualProjection(name string, nodeTypes map[string]schema.NodeType, edgeBi
 // buildScopeOrder computes the deterministic order for RETURN * / WITH *
 // expansion (§4.4.1): local Part.Bindings in first-appearance order (named
 // only), then carried names not covered by local, in carry-order. Also serves
-// as the deterministic export order for a non-ReturnsAll WITH.
-func buildScopeOrder(bindings []query.Binding, carryOrder []string, nodeTypes map[string]schema.NodeType, edgeBindings map[string]query.EdgeBinding) []string {
+// as the deterministic export order for a non-ReturnsAll WITH. R7 §4.3
+// widens the walk to include CALL YIELD variables so standalone-CALL Parts
+// (parser Stage 14 §4.3 ReturnsAll=true) synthesise their column list.
+func buildScopeOrder(bindings []query.Binding, carryOrder []string, nodeTypes map[string]schema.NodeType, edgeBindings map[string]query.EdgeBinding, callTypes map[string]callBindingSlot) []string {
 	seen := make(map[string]bool)
 	out := make([]string, 0, len(bindings)+len(carryOrder))
 	for _, b := range bindings {
@@ -391,6 +457,11 @@ func buildScopeOrder(bindings []query.Binding, carryOrder []string, nodeTypes ma
 		if _, isEdge := edgeBindings[v]; isEdge {
 			seen[v] = true
 			out = append(out, v)
+			continue
+		}
+		if _, isCall := callTypes[v]; isCall {
+			seen[v] = true
+			out = append(out, v)
 		}
 	}
 	for _, v := range carryOrder {
@@ -408,8 +479,10 @@ func buildScopeOrder(bindings []query.Binding, carryOrder []string, nodeTypes ma
 // Returns items keyed by Name. For WITH * (ReturnsAll == true), the exported
 // set is the full in-scope binding set at the moment WITH ran, in scopeOrder.
 // For a final Part (RETURN), the returned branchState is irrelevant (no next
-// Part reads it) but we still build it for symmetry.
-func exportScope(part query.Part, columns []Column, items []query.ReturnItem, scopeOrder []string, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, nullableBinding map[string]bool) branchState {
+// Part reads it) but we still build it for symmetry. R7 §4.6 adds the
+// exportedCallTypes lane so CALL YIELD scalars survive a bare `WITH v`
+// carry (aliased carry also lands in exportedResolvedTypes via the R5 path).
+func exportScope(part query.Part, columns []Column, items []query.ReturnItem, scopeOrder []string, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, nullableBinding map[string]bool, callTypes map[string]callBindingSlot) branchState {
 	out := branchState{
 		exportedNodeTypes:       make(map[string]schema.NodeType),
 		exportedEdgeTypes:       make(map[string]schema.EdgeType),
@@ -418,6 +491,7 @@ func exportScope(part query.Part, columns []Column, items []query.ReturnItem, sc
 		exportedEdgeBindings:    make(map[string]query.EdgeBinding),
 		exportedNullableBinding: make(map[string]bool),
 		exportedResolvedTypes:   make(map[string]ResolvedType),
+		exportedCallTypes:       make(map[string]callBindingSlot),
 	}
 
 	// Names that leave via WITH — for WITH * that's every scopeOrder name;
@@ -477,6 +551,9 @@ func exportScope(part query.Part, columns []Column, items []query.ReturnItem, sc
 		}
 		if nb, ok := nullableBinding[v]; ok {
 			out.exportedNullableBinding[v] = nb
+		}
+		if slot, ok := callTypes[v]; ok {
+			out.exportedCallTypes[v] = slot
 		}
 	}
 	return out
@@ -866,7 +943,7 @@ func describeTriedEdges(e query.EdgeBinding, src, tgt graph.LabelSetKey) string 
 	return strings.Join(parts, ", ")
 }
 
-func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, resolved map[string]schema.NodeType) error {
+func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, resolved map[string]schema.NodeType, callTypes map[string]callBindingSlot) error {
 	if len(pending) == 0 {
 		return nil
 	}
@@ -901,6 +978,13 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 				var only graph.LabelSetKey
 				for k := range cands {
 					only = k
+				}
+				// R7 §4.1.2.1 addendum: an inferred unlabelled node whose
+				// name collides with a carried CALL YIELD scalar fails at
+				// commit — the shape-posture check the labelled arm runs
+				// at Phase A1 fires here for the unlabelled path.
+				if _, seenCall := callTypes[n.Variable()]; seenCall {
+					return fmt.Errorf("%w: variable %q carried as CALL YIELD scalar, re-bound as %s", ErrPartBindingTypeConflict, n.Variable(), only)
 				}
 				resolved[n.Variable()] = s.Nodes[only]
 				committed++
@@ -1007,10 +1091,10 @@ func joinCandidates(c map[graph.LabelSetKey]struct{}) string {
 // column's resolved type. R5 admits AggregateProjection (§4.5) and threads a
 // carriedResolvedTypes map so the §4.5.4 RefProjection bypass path can serve
 // carried-alias refs.
-func projectionType(p query.Projection, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, nullableBinding map[string]bool, carriedResolvedTypes map[string]ResolvedType, s schema.Schema) (ResolvedType, error) {
+func projectionType(p query.Projection, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, nullableBinding map[string]bool, callTypes map[string]callBindingSlot, carriedResolvedTypes map[string]ResolvedType, s schema.Schema) (ResolvedType, error) {
 	switch pp := p.(type) {
 	case query.RefProjection:
-		return refProjectionType(pp.Ref(), nodeTypes, edgeTypes, edgeKeys, edgeCands, edgeBindings, nullableBinding, carriedResolvedTypes, s)
+		return refProjectionType(pp.Ref(), nodeTypes, edgeTypes, edgeKeys, edgeCands, edgeBindings, nullableBinding, callTypes, carriedResolvedTypes, s)
 	case query.LiteralProjection:
 		return resolveType(pp.Type())
 	case query.FuncProjection:
@@ -1027,8 +1111,12 @@ func projectionType(p query.Projection, nodeTypes map[string]schema.NodeType, ed
 // refProjectionType dispatches a RefProjection's Ref against the resolved
 // node and edge binding tables. §4.5.4 adds the carried-alias bypass — when a
 // name lives ONLY in carriedResolvedTypes (e.g. `WITH count(n) AS c` seen
-// downstream), refProjectionType returns the carried type directly.
-func refProjectionType(ref query.Ref, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, nullableBinding map[string]bool, carriedResolvedTypes map[string]ResolvedType, s schema.Schema) (ResolvedType, error) {
+// downstream), refProjectionType returns the carried type directly. R7 §4.2
+// adds the callTypes lane BEFORE the carried-alias bypass: a bare Ref against
+// a CALL YIELD variable bridges to ResolvedProperty (or ResolvedUnknown for
+// NUMBER); a property lookup on a CALL YIELD variable fires ErrUnknownProperty
+// with a widened message set.
+func refProjectionType(ref query.Ref, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, nullableBinding map[string]bool, callTypes map[string]callBindingSlot, carriedResolvedTypes map[string]ResolvedType, s schema.Schema) (ResolvedType, error) {
 	if nt, ok := nodeTypes[ref.Variable]; ok {
 		if ref.Property == "" {
 			return ResolvedNode{Labels: nt.Labels, Nullable: nullableBinding[ref.Variable]}, nil
@@ -1042,6 +1130,10 @@ func refProjectionType(ref query.Ref, nodeTypes map[string]schema.NodeType, edge
 	_, singleCand := edgeTypes[ref.Variable]
 	cands, multiCand := edgeCands[ref.Variable]
 	if !singleCand && !multiCand {
+		// R7 §4.2 — CALL YIELD lane, fired BEFORE the carried-alias bypass.
+		if slot, ok := callTypes[ref.Variable]; ok {
+			return callProjectionType(slot, ref, nullableBinding)
+		}
 		// §4.5.4 — carried-alias bypass. A RefProjection whose Variable lives
 		// only in carriedResolvedTypes yields the carried type verbatim
 		// (property lookups on a carried alias are unreachable — parser scope
@@ -1081,6 +1173,31 @@ func refProjectionType(ref query.Ref, nodeTypes map[string]schema.NodeType, edge
 		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable || edgeNullable}, nil
 	}
 	return unionProperty(cands, s, ref.Variable, ref.Property, edgeNullable)
+}
+
+// callProjectionType maps a Ref against a CALL YIELD variable's callBindingSlot
+// to its resolved column type (spec §4.2.1). Bare Ref bridges the bridged
+// query.Type to ResolvedProperty (INT / FLOAT / STRING) or ResolvedUnknown
+// (NUMBER-marker → TypeUnknown wire form). Property lookup on a scalar
+// (Ref.Property != "") fires ErrUnknownProperty with a widened message set —
+// §4.2.2, one of the R7 §5.3 message-set widenings.
+func callProjectionType(slot callBindingSlot, ref query.Ref, nullableBinding map[string]bool) (ResolvedType, error) {
+	if ref.Property != "" {
+		return nil, fmt.Errorf("%w: %s.%s (CALL YIELD variable %q is a scalar)", ErrUnknownProperty, ref.Variable, ref.Property, ref.Variable)
+	}
+	nullable := nullableBinding[ref.Variable]
+	switch slot.resultType.(type) {
+	case query.TypeInt:
+		return ResolvedProperty{Type: graph.TypeInt, Nullable: nullable}, nil
+	case query.TypeFloat:
+		return ResolvedProperty{Type: graph.TypeFloat, Nullable: nullable}, nil
+	case query.TypeString:
+		return ResolvedProperty{Type: graph.TypeString, Nullable: nullable}, nil
+	case query.TypeUnknown:
+		return ResolvedUnknown{}, nil
+	default:
+		return ResolvedUnknown{}, nil
+	}
 }
 
 func unionProperty(cands []schema.EdgeKey, s schema.Schema, refVar, refProp string, bindingNullable bool) (ResolvedType, error) {
@@ -1233,6 +1350,8 @@ func bindingVariable(b query.Binding) (string, bool) {
 	case query.NodeBinding:
 		return bb.Variable(), true
 	case query.EdgeBinding:
+		return bb.Variable(), true
+	case query.CallBinding:
 		return bb.Variable(), true
 	default:
 		return "", false
