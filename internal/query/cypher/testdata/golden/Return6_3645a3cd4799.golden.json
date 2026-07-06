@@ -10,7 +10,8 @@
               "value": {
                 "kind": "expr",
                 "refs": null,
-                "type": "int"
+                "type": "int",
+                "containsAggregate": true
               }
             }
           ],

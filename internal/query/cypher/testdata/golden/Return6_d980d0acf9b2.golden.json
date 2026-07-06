@@ -59,7 +59,8 @@
                     "property": "name"
                   }
                 ],
-                "type": "map"
+                "type": "map",
+                "containsAggregate": true
               }
             }
           ],

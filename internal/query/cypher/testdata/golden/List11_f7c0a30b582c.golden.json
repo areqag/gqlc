@@ -184,7 +184,8 @@
                     "property": ""
                   }
                 ],
-                "type": "bool"
+                "type": "bool",
+                "containsAggregate": true
               }
             }
           ],

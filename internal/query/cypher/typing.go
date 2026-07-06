@@ -872,5 +872,81 @@ func (l *listener) classifyRichExpression(e gen.IOC_ExpressionContext) query.Pro
 		}
 		l.addParameterUse(name, p, query.NewExprUse(t, query.ExprInProjection))
 	}
-	return query.NewExprProjection(refs, t)
+	return query.NewExprProjectionWithAggregate(refs, t, subtreeContainsAggregate(e))
+}
+
+// subtreeContainsAggregate reports whether the expression subtree contains at
+// least one aggregate function call (Shape B per ADR 0008 amendment
+// 2026-07-06). Mirrors typeAtom's two aggregate arms (typing.go: the a.COUNT()
+// star-atom above and the aggregateFunc(name) arm below), and mirrors the
+// typing walk's sub-scope boundaries — the probe descends exactly where the
+// typing walk descends. The five stops are: OC_ExistentialSubquery,
+// OC_PatternPredicate, OC_ListComprehension, OC_PatternComprehension (all
+// four are full stops — the typing walk returns without descending, so
+// aggregates inside them aggregate over a sub-scope and cannot poison the
+// outer projection's grouping-key eligibility), and the OC_Where of an
+// OC_Quantifier's OC_FilterExpression (partial stop — descend into the
+// x IN <src> source list, skip the WHERE filter body, mirroring
+// typeQuantifier's savedOuter/restore idiom).
+func subtreeContainsAggregate(e gen.IOC_ExpressionContext) bool {
+	if e == nil {
+		return false
+	}
+	return walkForAggregate(e)
+}
+
+// walkForAggregate is a manual pre-order recursion over the ANTLR parse tree,
+// honouring the five §4.2.1 boundary stops in-place. Cheaper than a
+// skipDepth counter on a ParseTreeWalker for a five-stop probe, and it
+// keeps the boundary semantics visible on the fault line where the
+// recursion decides whether to descend.
+func walkForAggregate(node antlr.Tree) bool {
+	switch n := node.(type) {
+	case gen.IOC_ExistentialSubqueryContext, gen.IOC_PatternPredicateContext,
+		gen.IOC_ListComprehensionContext, gen.IOC_PatternComprehensionContext:
+		// Row 11 / 12 / 13 / 14 — full stop: the typing walk returns
+		// without descending, so aggregates inside are opaque to the outer
+		// Part.
+		_ = n
+		return false
+	case gen.IOC_AtomContext:
+		if n.COUNT() != nil {
+			// Row 2 — count(*) star atom hit.
+			return true
+		}
+	case gen.IOC_FunctionInvocationContext:
+		if name, ok := functionName(n); ok {
+			if _, isAgg := aggregateFunc(name); isAgg {
+				// Row 5 — named-aggregate arm hit. Do not descend into
+				// args; a nested aggregate inside an aggregate call
+				// (count(count(*))) is caught by classifyFunction as an
+				// AggregateProjection at the outer position, so this
+				// probe only needs to answer whether the ExprProjection's
+				// subtree has an aggregate anywhere — one hit is enough.
+				return true
+			}
+		}
+	case gen.IOC_QuantifierContext:
+		// Row 10 partial: descend into the source list, skip the WHERE
+		// filter body (which mirrors typeQuantifier's savedOuter/restore
+		// at typing.go:449-452).
+		filter := n.OC_FilterExpression()
+		if filter == nil {
+			return false
+		}
+		if idInColl := filter.OC_IdInColl(); idInColl != nil {
+			if src := idInColl.OC_Expression(); src != nil {
+				if walkForAggregate(src) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	for i := 0; i < node.GetChildCount(); i++ {
+		if walkForAggregate(node.GetChild(i)) {
+			return true
+		}
+	}
+	return false
 }

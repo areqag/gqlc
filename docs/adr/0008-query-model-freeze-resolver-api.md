@@ -1,5 +1,40 @@
 # `query.Query` is frozen; the resolver API is pinned
 
+> _Amendment (2026-07-06, gqlc-hk0 unfreeze cycle): the
+> ContainsAggregate axis on `ExprProjection` — recorded as an
+> escape hatch in the "Known deferred additions" list — is
+> **adopted** under this ADR's additive-only revision protocol.
+> Shape A (promote nested-aggregate residuals to
+> `AggregateProjection`) was second-ranked in `docs/specs/
+> resolver-stage-r5.md §4.5.3.3` and is **retired**: it is a semantic
+> widening of an existing sum variant, requiring every downstream
+> consumer of `AggregateProjection` to audit. Shape C (`ReturnItem.
+> TextSpan` / `ExprProjection.OriginalText` text-based recovery) is
+> **retired**: R5 §4.5.3.4 (B7 evidence) demonstrates that no
+> resolver-side re-parse of the recovered text can recover the
+> aggregate structure `classifyRichExpression` drops at
+> classification — the parser must emit the discriminator. The
+> committed strategy is therefore Shape B: an additive
+> `containsAggregate bool` field on `ExprProjection`, set
+> parser-side during `classifyRichExpression`'s walk of the
+> expression subtree (a boolean scan for the two aggregate arms
+> `typeAtom` already recognises — `internal/query/cypher/typing.go:
+> 340` and `:358-365`), with the walker respecting the typing
+> walk's sub-scope boundaries (`OC_ExistentialSubquery`,
+> `OC_ListComprehension`, `OC_PatternComprehension` — mirroring
+> `typing.go:382-403`). The JSON encoding is **omit-when-false**
+> (`,omitempty`), which establishes the post-freeze wire
+> convention for the remainder of this ADR's revision protocol:
+> additive axes emit **omit-when-zero-value**, deliberately
+> diverging from the pre-freeze always-emit precedent
+> (`directed`, `nullable`, `returnsAll`, `hops`) because
+> post-freeze golden rebaselines are the primary auditability
+> surface and always-emit forces near-total 3199-file rebaselines
+> on each additive cycle. See
+> `docs/specs/unfreeze-hk0-containsaggregate.md` for the full
+> contract, the walker boundaries, the 20-golden rebaseline set,
+> and the semantic-diff-only fence command._
+
 ADR 0004's freeze gate is discharged. All fifteen parser stages (the read core
 of Stages 0–5 plus the ADR 0007 expansion through Stage 14) and the TCK corpus
 sweep are complete, and the two pre-freeze cardinality fixes — the Part-level
@@ -162,11 +197,13 @@ in-protocol when they arrive, not scope creep:
   existential subquery currently record coarse `ExprUse`s.
 - **`CreateEffect` created-vs-prebound split** (gqlc-33k.4): deferred until
   a consumer demonstrates the need — no speculative modelling.
-- **`ContainsAggregate` axis on `ExprProjection`** — the escape hatch
-  recorded on gqlc-gyw. The committed strategy for grouping-key discovery
-  over expression residuals (nested aggregates like `count(n) + 1`) is a
-  resolver-side re-parse of the projection's original text span; the axis
-  is added only if that proves untenable, and is never inferred from `Type`.
+- **`ContainsAggregate` axis on `ExprProjection`** — adopted
+  2026-07-06 (see the amendment note above and
+  `docs/specs/unfreeze-hk0-containsaggregate.md`). Populated
+  parser-side by `classifyRichExpression`'s subtree walk; consumed
+  by the resolver's `fillGroupingKeys` (`internal/resolver/resolve.go`)
+  to discriminate aggregate-carrying residuals from grouping-key
+  candidates. Never inferred from `Type`.
 
 ### shortestPath is a dialect extension, out of the frozen scope
 

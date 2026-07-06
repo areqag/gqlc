@@ -24,7 +24,8 @@
                     "property": ""
                   }
                 ],
-                "type": "map"
+                "type": "map",
+                "containsAggregate": true
               }
             }
           ],

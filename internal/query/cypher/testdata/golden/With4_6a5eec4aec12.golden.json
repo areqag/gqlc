@@ -90,7 +90,8 @@
                     "property": ""
                   }
                 ],
-                "type": "unknown"
+                "type": "unknown",
+                "containsAggregate": true
               }
             },
             {

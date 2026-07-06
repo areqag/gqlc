@@ -1308,20 +1308,22 @@ var mustParse = map[string]struct {
 	// Stage 10 — an aggregate inside a rich expression types via the
 	// same table: count(n) types as TypeInt, so count(n) + 1 types as
 	// TypeInt via promoteAdd(TypeInt, TypeInt). The ExprProjection carries
-	// the aggregate's touched ref and the promoted result type.
+	// the aggregate's touched ref, the promoted result type, and the
+	// ContainsAggregate=true bit (Shape B per ADR 0008 amendment
+	// 2026-07-06).
 	//
-	// aggregate-kind-rich-exprs spec §4.5 pin #7 — the deferral lock: the
-	// outer expression is not an aggregate call, so per §1.3 the model does
-	// NOT lift the inner count(n) kind through a rich-expression wrapper.
-	// This pin stays GREEN both pre- and post-widening; a future change
-	// that silently introduces an inner-aggregate axis on ExprProjection
-	// breaks the pin structurally.
+	// aggregate-kind-rich-exprs spec §4.5 pin #7 — closed. The outer
+	// expression is not an aggregate call, so per §1.3 the model still
+	// does NOT lift the inner count(n) kind as an AggregateProjection.
+	// Instead the parser sets ContainsAggregate=true so the resolver's
+	// grouping-key discriminator (fillGroupingKeys, R5 §4.5.3) can
+	// exclude the residual honestly.
 	"count in arithmetic": {
 		src: "MATCH (n)\nRETURN count(n) + 1",
 		want: oneBranch(query.Part{
 			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
 			Returns: []query.ReturnItem{
-				{Name: "count(n) + 1", Value: query.NewExprProjection([]query.Ref{{Variable: "n"}}, query.TypeInt{})},
+				{Name: "count(n) + 1", Value: query.NewExprProjectionWithAggregate([]query.Ref{{Variable: "n"}}, query.TypeInt{}, true)},
 			},
 		}),
 	},

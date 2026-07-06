@@ -130,6 +130,27 @@ func TestExprProjectionMarshalJSON(t *testing.T) {
 		string(out))
 }
 
+// TestNewExprProjectionWithAggregateTrue pins the widened Stage-6 variant per
+// ADR 0008 amendment 2026-07-06: the ContainsAggregate axis carries through
+// the constructor, the accessor, and the wire shape as an omit-when-false key
+// (post-freeze convention: additive axes emit omit-when-zero-value).
+// Complements TestExprProjectionMarshalJSON (which pins the
+// containsAggregate=false zero-value default as an ABSENT key — that test
+// stays verbatim).
+func TestNewExprProjectionWithAggregateTrue(t *testing.T) {
+	refs := []query.Ref{{Variable: "n"}}
+	p := query.NewExprProjectionWithAggregate(refs, query.TypeInt{}, true)
+	require.Equal(t, refs, p.Refs())
+	require.Equal(t, query.TypeInt{}, p.Type())
+	require.True(t, p.ContainsAggregate())
+
+	out, err := json.Marshal(p)
+	require.NoError(t, err)
+	require.JSONEq(t,
+		`{"kind":"expr","refs":[{"variable":"n","property":""}],"type":"int","containsAggregate":true}`,
+		string(out))
+}
+
 // TestFuncProjectionType pins the Stage-6 accessor: FuncProjection carries its
 // result type. Function identity is below the boundary (ADR 0005), so the
 // listener passes TypeUnknown for any function whose return type it cannot
