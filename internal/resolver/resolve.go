@@ -1594,14 +1594,14 @@ func validateDeleteEffect(e query.DeleteEffect, nodeTypes map[string]schema.Node
 	return nil
 }
 
-// labelDeclared reports whether L appears as a component of any declared
+// labelDeclared reports whether label appears as a component of any declared
 // NodeType's LabelSetKey — the R6 policy per §4.3.3 (per-label existence, not
 // union-existence). Naive O(|s.Nodes| × avg-arity) iteration; schemas are
 // small.
-func labelDeclared(L string, s schema.Schema) bool {
+func labelDeclared(label string, s schema.Schema) bool {
 	for k := range s.Nodes {
 		for _, lbl := range k.Split() {
-			if lbl == L {
+			if lbl == label {
 				return true
 			}
 		}
