@@ -100,5 +100,19 @@
     "set_property_with_star.cypher": "social_r6.gql",
     "set_property_on_nullable.cypher": "social_r6.gql",
     "union_all_writes_all_writes.cypher": "social_r6.gql",
-    "merge_then_return.cypher": "social_r6.gql"
+    "merge_then_return.cypher": "social_r6.gql",
+    "call_standalone_yield_star_integer.cypher": "social_r7.gql",
+    "call_standalone_yield_star_string_nullable.cypher": "social_r7.gql",
+    "call_standalone_yield_star_float.cypher": "social_r7.gql",
+    "call_standalone_yield_star_number.cypher": "social_r7.gql",
+    "call_standalone_yield_star_non_nullable.cypher": "social_r7.gql",
+    "call_in_query_yield_return.cypher": "social_r7.gql",
+    "call_in_query_yield_as.cypher": "social_r7.gql",
+    "call_yield_two_columns.cypher": "social_r7.gql",
+    "call_standalone_yield_items.cypher": "social_r7.gql",
+    "call_standalone_yield_items_reordered.cypher": "social_r7.gql",
+    "call_yield_carry_forward.cypher": "social_r7.gql",
+    "call_yield_carry_with_alias.cypher": "social_r7.gql",
+    "call_yield_mixed_return.cypher": "social_r7.gql",
+    "call_yield_before_match.cypher": "social_r7.gql"
 }

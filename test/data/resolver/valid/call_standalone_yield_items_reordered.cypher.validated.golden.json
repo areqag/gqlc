@@ -1,0 +1,25 @@
+{
+  "columns": [
+    {
+      "name": "country_code",
+      "type": {
+        "kind": "property",
+        "type": "INT",
+        "nullable": true
+      },
+      "groupingKey": false
+    },
+    {
+      "name": "city",
+      "type": {
+        "kind": "property",
+        "type": "STRING",
+        "nullable": true
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "read",
+  "distinct": false
+}

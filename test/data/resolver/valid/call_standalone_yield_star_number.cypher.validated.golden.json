@@ -1,0 +1,14 @@
+{
+  "columns": [
+    {
+      "name": "value",
+      "type": {
+        "kind": "unknown"
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "read",
+  "distinct": false
+}

@@ -1,0 +1,1 @@
+CALL test.my.proc('Stefan', 1) YIELD city, country_code

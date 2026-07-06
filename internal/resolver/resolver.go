@@ -32,10 +32,15 @@ type Resolver struct {
 // Option configures a Resolver at construction time.
 type Option func(*Resolver)
 
-// WithRegistry supplies the procedure signature registry the resolver consults
-// at CALL YIELD (R7). Absent, the zero registry misses on every lookup — a
-// CALL against a registry-less resolver raises the R7 unknown-procedure
-// sentinel.
+// WithRegistry accepts a procedure signature registry so callers can construct
+// the resolver symmetrically with the parser (both take one). The resolver
+// itself does NOT consult the registry: R7 §4.4 pins a parser-authoritative
+// trust posture — the parser has already resolved every CALL against its own
+// registry and emitted a fully-typed CallBinding (procedure, sourceField,
+// bridged ResultType, nullable) on the wire; the resolver types CALL YIELD
+// columns from the CallBinding alone. The threading is preserved so future
+// stages that need resolver-side signature consultation (post-R7, under a
+// new ADR) can drop the discard at resolve.go's registry sink.
 func WithRegistry(r procsig.Registry) Option {
 	return func(res *Resolver) { res.registry = r }
 }

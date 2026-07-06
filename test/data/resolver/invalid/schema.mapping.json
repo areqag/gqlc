@@ -43,5 +43,8 @@
     "remove_labels_undeclared.cypher": "social_r6.gql",
     "delete_projection_alias.cypher": "social_r6.gql",
     "delete_bare_property_unknown.cypher": "social_r6.gql",
-    "union_writes_vs_returns_column_count.cypher": "social_r6.gql"
+    "union_writes_vs_returns_column_count.cypher": "social_r6.gql",
+    "call_yield_property_lookup.cypher": "social_r7.gql",
+    "part_binding_type_conflict_call_vs_node.cypher": "social_r7.gql",
+    "part_binding_type_conflict_call_vs_edge.cypher": "social_r7.gql"
 }
