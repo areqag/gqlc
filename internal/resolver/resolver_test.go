@@ -11,11 +11,75 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/areqag/gqlc/internal/procsig"
 	"github.com/areqag/gqlc/internal/query"
 	"github.com/areqag/gqlc/internal/query/cypher"
 	"github.com/areqag/gqlc/internal/schema"
 	"github.com/areqag/gqlc/internal/schema/gql"
 )
+
+// signaturesR7 declares the procedures the R7 fixture set exercises. Each
+// mirrors a Stage-14 corpus signature (parser_test.go §Call*). The wire
+// discipline is: parser consumes this registry via cypher.WithRegistry(regR7)
+// at loadQuery; the resolver receives it via New(...) for R7's YIELD column
+// typing arms (spec §4.2.1) but discards it at resolve.go's registry sink —
+// the parser is authoritative on procedure lookup (§4.4 trust posture).
+var signaturesR7 = []procsig.Signature{
+	{
+		Name: "test.labels",
+		Results: []procsig.Result{
+			{Name: "label", Token: procsig.TokenString, Nullable: true},
+		},
+	},
+	{
+		Name: "test.my.proc",
+		Params: []procsig.Param{
+			{Name: "name", Token: procsig.TokenString, Nullable: true},
+			{Name: "id", Token: procsig.TokenInteger, Nullable: true},
+		},
+		Results: []procsig.Result{
+			{Name: "city", Token: procsig.TokenString, Nullable: true},
+			{Name: "country_code", Token: procsig.TokenInteger, Nullable: true},
+		},
+	},
+	{
+		Name: "test.count",
+		Results: []procsig.Result{
+			{Name: "n", Token: procsig.TokenInteger, Nullable: true},
+		},
+	},
+	{
+		Name: "test.temperature",
+		Results: []procsig.Result{
+			{Name: "celsius", Token: procsig.TokenFloat, Nullable: true},
+		},
+	},
+	{
+		Name: "test.number",
+		Results: []procsig.Result{
+			{Name: "value", Token: procsig.TokenNumber, Nullable: true},
+		},
+	},
+	{
+		Name: "test.constants",
+		Results: []procsig.Result{
+			{Name: "constant", Token: procsig.TokenString, Nullable: false},
+		},
+	},
+}
+
+// regR7 is the Registry built from signaturesR7. Package-level so the R7
+// fixture suite constructs it once — a construction failure fails the whole
+// suite via mustBuildRegR7's panic-on-error posture (spec §6.3 design note).
+var regR7 = mustBuildRegR7()
+
+func mustBuildRegR7() procsig.Registry {
+	reg, err := procsig.NewRegistry(signaturesR7)
+	if err != nil {
+		panic("resolver_test: R7 signatures failed to build registry: " + err.Error())
+	}
+	return reg
+}
 
 var update = flag.Bool("update", false, "regenerate resolver .validated.golden.json files")
 
@@ -72,6 +136,10 @@ var invalidFixtures = map[string]error{
 	"delete_projection_alias.cypher":              ErrInvalidEffectTarget,
 	"delete_bare_property_unknown.cypher":         ErrUnknownProperty,
 	"union_writes_vs_returns_column_count.cypher": ErrUnionColumnMismatch,
+	// R7 additions:
+	"call_yield_property_lookup.cypher":              ErrUnknownProperty,
+	"part_binding_type_conflict_call_vs_node.cypher": ErrPartBindingTypeConflict,
+	"part_binding_type_conflict_call_vs_edge.cypher": ErrPartBindingTypeConflict,
 }
 
 type ResolverSuite struct {
@@ -102,11 +170,15 @@ func (s *ResolverSuite) loadSchema(subdir, name string) schema.Schema {
 	return sch
 }
 
-// loadQuery parses a Cypher query fixture.
+// loadQuery parses a Cypher query fixture. R7 threads regR7 into the parser
+// so CALL fixtures resolve procedure signatures; non-CALL fixtures parse
+// identically because the parser consults the registry only inside
+// collectCall (verified against internal/query/cypher/call.go:41), so all
+// R0–R6 goldens stay byte-identical.
 func (s *ResolverSuite) loadQuery(path string) query.Query {
 	src, err := os.ReadFile(path)
 	s.Require().NoError(err)
-	q, err := cypher.New().Parse(bytes.NewReader(src))
+	q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader(src))
 	s.Require().NoError(err)
 	return q
 }
@@ -130,7 +202,7 @@ func (s *ResolverSuite) TestValid() {
 			sch := s.loadSchema("valid", schemaName)
 			q := s.loadQuery(path)
 
-			vq, err := New(sch).Resolve(q)
+			vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
 			s.Require().NoError(err)
 
 			got, err := json.MarshalIndent(vq, "", "  ")
@@ -171,7 +243,7 @@ func (s *ResolverSuite) TestInvalid() {
 			sch := s.loadSchema("invalid", schemaName)
 			q := s.loadQuery(path)
 
-			vq, err := New(sch).Resolve(q)
+			vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
 			s.Require().Error(err)
 			s.Equal(ValidatedQuery{}, vq, "model must be the zero value on error")
 			s.Require().ErrorIs(err, wantErr)
