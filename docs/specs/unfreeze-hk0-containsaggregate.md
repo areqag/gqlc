@@ -45,7 +45,7 @@ Unfreeze cycle (Cycle 2, follow-up PR):
   `TestExprProjectionMarshalJSON` stay verbatim — they exercise the
   zero-value default and pin the wire back-compatibility fence. §4.1
   and §5.
-- `internal/query/cypher/typing.go:857-877` —
+- `internal/query/cypher/typing.go:866-876` —
   `classifyRichExpression` gains a boolean scan of the sub-tree for
   aggregate calls (a helper `subtreeContainsAggregate` alongside
   `typeExpressionMining`), passing the bit to
@@ -109,7 +109,7 @@ excluded from the grouping-key set (`docs/specs/resolver-stage-r5.md
 The R5 spec pins the source (`§4.5.3.4`): the parser's
 `classifyRichExpression` drops the aggregate structure at
 classification (verified verbatim at
-`internal/query/cypher/typing.go:857-877`), so no resolver-side
+`internal/query/cypher/typing.go:866-876`), so no resolver-side
 re-parse of the original text — including any of Shape A
 (`OriginalText`) or Shape C (`ReturnItem.TextSpan`) — recovers it.
 
@@ -147,7 +147,11 @@ carries `ContainsAggregate = true`. The wire JSON of ExprProjection
 gains one field: `containsAggregate` (omit-when-false; §4.1.3
 records the post-freeze convention and the fence).
 The ADR 0008 amendment records the axis's promotion. The resolver's
-`fillGroupingKeys` gains one branch on the new bit.
+`fillGroupingKeys` gains a gate arm and a loop arm on the new bit
+(§7.1: the top-level presence gate widens with an `ExprProjection`
+`ContainsAggregate=true` disjunct, and the per-column key-emission
+loop widens with an `ExprProjection` `ContainsAggregate=true`
+exclude arm alongside the existing `AggregateProjection` exclude).
 
 **Why Shape B and not Shape A.** Shape A (promote nested-aggregate
 residuals to `AggregateProjection`) is a semantic widening of the
@@ -515,7 +519,7 @@ insertions, not the semantic change ADR 0008's "diff shows only the
 new surface" fence targets.
 
 **Ruling: omit-when-false (`,omitempty`).** Under this encoding the
-**2048** ExprProjection-bearing goldens whose top-level Returns
+**2049** ExprProjection-bearing goldens whose top-level Returns
 position embeds no aggregate call remain byte-identical, and the
 rebaseline diff surfaces **exactly** the goldens whose semantic
 content actually changes — i.e. those whose ExprProjection now
@@ -553,11 +557,12 @@ already frozen at the freeze snapshot.
 **Consequences for the unfreeze PR fence.**
 
 - **Parser-golden rebaseline scope.** The unfreeze PR rebaselines
-  **exactly the 7 goldens** whose top-level Returns position embeds
+  **exactly the 20 goldens** whose top-level Returns position embeds
   an ExprProjection whose expression text contains an aggregate
-  function call, enumerated in §4.4 (mined by the discovery command
-  recorded there). Every other ExprProjection-bearing golden — 2048
-  files — stays byte-identical.
+  function call surviving the §4.2.1 boundary walk, enumerated in
+  §4.4.1 (mined by the discovery command recorded there). Every
+  other ExprProjection-bearing golden — 2029 files — stays
+  byte-identical.
 - **The reviewer-side fence.** Strip the `containsAggregate` key
   from all goldens and diff against the branch base. The result
   MUST be byte-identical. Recorded fence command (run from the
@@ -903,19 +908,21 @@ pin (§4.3) plus the new `TestNewExprProjectionWithAggregateTrue`
 (§5) show a diff. `TestExprProjectionMarshalJSON` stays verbatim per
 the omit-when-false ruling (§4.1.3).
 
-#### 4.4.1 Golden-corpus rebaseline — the 18 flip fixtures (scenario-source discovery)
+#### 4.4.1 Golden-corpus rebaseline — the 20 flip fixtures (scenario-source discovery)
 
 Under the omit-when-false JSON encoding (§4.1.3), the
 `containsAggregate` key is emitted **only** when the ExprProjection's
 walk returns `true`. The `internal/query/cypher/testdata/golden/`
 corpus at branch base `origin/master @ e77f33e` contains **2055**
-goldens that embed a `"kind": "expr"` blob; of those, exactly
-**18** are flipped by the widened walker (§4.2 + §4.2.1 boundary
-posture) once cross-verified against the scenario source. The
-**2037** remaining ExprProjection-bearing goldens carry the zero
-value and stay byte-identical.
+goldens that embed a `"kind": "expr"` blob anywhere; of those,
+**2049** hold an ExprProjection at top-level Returns (§4.1.3's
+scope), and exactly **20** of those top-level cases are flipped by
+the widened walker (§4.2 + §4.2.1 boundary posture) once
+cross-verified against the scenario source. The **2029** remaining
+top-level ExprProjection-bearing goldens carry the zero value and
+stay byte-identical.
 
-**Round-1 correction (why 18, not 7).** An earlier draft here
+**Round-1 correction (why not 7).** An earlier draft here
 enumerated 7 flip goldens by regex-matching the ReturnItem `name`
 field for an aggregate call. That undercounts by design:
 `ReturnItem.Name` records the AS-alias when present
@@ -1045,8 +1052,19 @@ def redact(expr):
                 i = j
             else:
                 i += 1
+    # Quantifiers all/any/none/single(x IN src [WHERE pred]) — §4.2.1 row
+    # 10 partial stop: keep the source list (walker descends into it via
+    # typing.go:437-438), blank only the WHERE-body (walker discards it
+    # via the savedOuter/restore idiom at typing.go:449-452).
     for q in ["all","any","none","single"]:
-        e = re.sub(rf"(?is)\b{q}\s*\([^)]*\)", " ", e)
+        def strip_where(m, qname=q):
+            body = m.group(1)
+            wm = re.search(r"\bWHERE\b", body, re.IGNORECASE)
+            if wm:
+                body = body[:wm.start()]
+            return f"{qname}({body})"
+        e = re.sub(rf"(?is)\b{q}\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)",
+                   strip_where, e)
     return e
 
 def outer_is_bare_aggregate(expr):
@@ -1087,9 +1105,15 @@ def alias_split(item):
     return item.strip(), item.strip()
 
 def clause_projections(q):
+    # Terminator lookahead includes DETACH so that a `DETACH DELETE …`
+    # line after a projection ends the RETURN/WITH body — the DELETE
+    # keyword is mid-line, and the newline-anchored lookahead needs the
+    # leading DETACH to stop the greedy body match (Delete5's
+    # `{key: collect(u)}` projection was missed by an earlier draft
+    # that omitted DETACH here).
     for m in re.finditer(
         r"\b(RETURN|WITH)\b(.+?)(?=\n\s*(?:ORDER|SKIP|LIMIT|WHERE|"
-        r"MATCH|WITH|RETURN|UNWIND|MERGE|CREATE|DELETE|SET|REMOVE|"
+        r"MATCH|WITH|RETURN|UNWIND|MERGE|CREATE|DETACH|DELETE|SET|REMOVE|"
         r"CALL|UNION)\b|$)", q, re.IGNORECASE | re.DOTALL):
         clause = re.sub(r"^\s*DISTINCT\s+", "", m.group(2),
                         flags=re.IGNORECASE)
@@ -1136,13 +1160,15 @@ for g, src in flip:
 PY
 ```
 
-**The 18 flip goldens** (verbatim command output at branch base
+**The 20 flip goldens** (verbatim command output at branch base
 `origin/master @ e77f33e`):
 
 | Golden | Aggregate-embedding SOURCE expression |
 |---|---|
 | `Delete5_2fdf511bf8c3.golden.json` | `{key: {key: collect(r)}}` |
 | `Delete5_31014ff88e69.golden.json` | `{key: collect(p)}` |
+| `Delete5_656387555487.golden.json` | `{key: collect(u)}` |
+| `List11_f7c0a30b582c.golden.json` | `ALL(ok IN collect((size(list) = 0) = empty) WHERE ok)` |
 | `Return2_0d955bc4a162.golden.json` | `count(a) > 0` |
 | `Return4_643233009cfd.golden.json` | `{name: count(b)}` |
 | `Return4_7465ea25655a.golden.json` | `head(collect({likeTime: likeTime}))` |
@@ -1161,30 +1187,44 @@ PY
 | `With6_997ef885e794.golden.json` | `me.age + count(you.age)` |
 
 Under the widened `classifyRichExpression` (§4.2) each of these
-18 ExprProjection blobs picks up `"containsAggregate": true`;
+20 ExprProjection blobs picks up `"containsAggregate": true`;
 under omit-when-false that key is emitted, and the golden is
-regenerated. Every other ExprProjection-bearing golden — the
-remaining **2037** files — stays byte-identical because the walker
-returns `false` and the omitempty tag suppresses the key.
+regenerated. Every other top-level ExprProjection-bearing golden —
+the remaining **2029** files — stays byte-identical because the
+walker returns `false` and the omitempty tag suppresses the key.
 
 **Boundary-preserved witnesses** (goldens that carry an
 ExprProjection whose SOURCE text contains an aggregate call but
 whose aggregate lives entirely inside a §4.2.1 boundary — they
 stay byte-identical, mirroring the typing walk's opacity): the
-`List11` / `List12` / `List13` scenarios that project `size([x
-IN <src-list> WHERE …])` / `[x IN xs | count(x)]` / similar, and
-any comprehension-embedded aggregate reached through the outer
-projection. The first-party audit witness at branch base:
+List12 / List13 scenarios that project `size([x IN collect(r)
+WHERE …])` / `[x IN xs | count(x)]` / similar — a list or pattern
+comprehension is a full stop at row 13, so any aggregate inside
+its brackets is invisible to the walker regardless of whether it
+sits in the source list or in the WHERE-body / projection body.
+The first-party audit witness at branch base:
 `List12_33d76b6f508c.golden.json` (`RETURN size([x IN collect(r)
 WHERE x <> null]) AS cn`) shows `"kind": "expr"` with no
 `containsAggregate` key both before and after — proving the
 stop from §4.2.1 row 13 is load-bearing, not decorative.
 
+**Not a boundary case: quantifier source-list** — a quantifier
+`all(x IN src WHERE p)` is row 10 partial: the walker DOES descend
+into `src` (`typing.go:437-438`) and DOES stop at the WHERE-body
+(`savedOuter/restore` at `typing.go:449-452`). Consequently
+`List11_f7c0a30b582c` (`RETURN ALL(ok IN collect((size(list) = 0)
+= empty) WHERE ok) AS collectionMatches` — the `collect(...)` sits
+in the ALL source list, not in its WHERE-body) is a flip
+(row 20 of the table), NOT a boundary witness. A quantifier
+scenario whose aggregate lived only inside the WHERE-body (e.g.
+`all(x IN xs WHERE count(x) > 0)` — no such scenario in the
+current TCK read-core corpus) WOULD be a boundary witness.
+
 **Bidirectional fence** (per round-2 ruling: reviewer must both
 detect overreach AND detect misses):
 
 *Fence 1 — strip-key overreach detector* (the widened marshaller
-must not leak `containsAggregate: true` outside the 18-golden
+must not leak `containsAggregate: true` outside the 20-golden
 set):
 
 ```
@@ -1219,6 +1259,8 @@ git diff --name-only origin/master -- \
 cat > /tmp/expected.txt <<'EOF'
 Delete5_2fdf511bf8c3.golden.json
 Delete5_31014ff88e69.golden.json
+Delete5_656387555487.golden.json
+List11_f7c0a30b582c.golden.json
 Return2_0d955bc4a162.golden.json
 Return4_643233009cfd.golden.json
 Return4_7465ea25655a.golden.json
@@ -1359,7 +1401,7 @@ Verbatim text:
 > surface and always-emit forces near-total 3199-file rebaselines
 > on each additive cycle. See
 > `docs/specs/unfreeze-hk0-containsaggregate.md` for the full
-> contract, the walker boundaries, the 7-golden rebaseline set,
+> contract, the walker boundaries, the 20-golden rebaseline set,
 > and the semantic-diff-only fence command._
 ```
 
