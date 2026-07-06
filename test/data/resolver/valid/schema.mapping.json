@@ -64,6 +64,8 @@
     "aggregate_sum_property.cypher": "social_r5.gql",
     "aggregate_with_grouping.cypher": "social_r5.gql",
     "aggregate_with_expr_residual.cypher": "social_r5.gql",
+    "aggregate_with_expr_grouping_key.cypher": "social_r7.gql",
+    "aggregate_with_expr_only_grouping.cypher": "social_r7.gql",
     "aggregate_at_with.cypher": "social_r5.gql",
     "demote_cross_with_remerge.cypher": "social_r5.gql",
     "carry_nullable_binding.cypher": "social_r5.gql",
