@@ -1,0 +1,1 @@
+MATCH (n:Person) DETACH DELETE n
