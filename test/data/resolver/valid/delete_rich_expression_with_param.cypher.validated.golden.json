@@ -1,0 +1,13 @@
+{
+  "columns": [],
+  "parameters": [
+    {
+      "name": "p",
+      "type": {
+        "kind": "unknown"
+      }
+    }
+  ],
+  "statement": "write",
+  "distinct": false
+}

@@ -1,0 +1,20 @@
+{
+  "columns": [
+    {
+      "name": "e",
+      "type": {
+        "kind": "edge",
+        "edgeKey": {
+          "source": "Person",
+          "label": "AUTHORED",
+          "target": "Post"
+        },
+        "nullable": false
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "write",
+  "distinct": false
+}

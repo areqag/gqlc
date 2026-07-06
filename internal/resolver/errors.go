@@ -73,6 +73,21 @@ var (
 	// key = trivial re-binding, admitted. Different key = irreconcilable,
 	// rejected. Introduced at R5. See R5 spec §6.4.
 	ErrPartBindingTypeConflict = errors.New("part binding type conflict")
+
+	// ErrInvalidEffectTarget is returned when a write clause's target
+	// variable is bound at the parser scope but resolves to something
+	// other than an entity (node or edge) binding — a projection alias
+	// exported by a WITH, a literal, or a scalar-typed carried entry.
+	// Concretely: SET / REMOVE / DELETE on a variable that lives in
+	// carriedResolvedTypes but not in nodeTypes / edgeTypes / edgeCands.
+	// Also fires for SET / REMOVE labels on an edge binding (labels are
+	// node-only), for SET / REMOVE / DELETE on a var-length edge property
+	// (a var-length binding is a list, not a single edge), and for the
+	// defensive tripwire where a write's target variable is not in any
+	// Part scope (parser scope check should have caught this; the guard
+	// keeps the invariant tight). Introduced at R6. See R6 spec §4.3,
+	// §4.4 for the fail-sites.
+	ErrInvalidEffectTarget = errors.New("invalid effect target")
 )
 
 // allSentinels is the canonical closed set of sentinels the resolver may
@@ -89,4 +104,5 @@ var allSentinels = []error{
 	ErrAmbiguousEdgeOrientation,
 	ErrUnionColumnMismatch,
 	ErrPartBindingTypeConflict,
+	ErrInvalidEffectTarget,
 }

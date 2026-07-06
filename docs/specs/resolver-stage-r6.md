@@ -1542,17 +1542,21 @@ count in the golden.
   PropertyUse in this shape). Golden: 1 column (node),
   parameter `$newAge → ResolvedUnknown{}`, statement "write".
 - `set_property_int_literal_to_int32.cypher` — `MATCH (n:Person)
-  SET n.age = 42 RETURN n` under a schema whose `Person.age ::
-  INT NOT NULL` — Golden pins today's admit posture (no width
+  SET n.age = 42 RETURN n.age` under a schema whose `Person.age ::
+  INT` (nullable) — Golden pins today's admit posture (no width
   check; see §4.3.1 judgment call). **Breakage**: a future R-later
   refinement that enforces bit-width assignability would reject
   this query if the parser types the literal as `TypeInt` but the
   schema property is a narrower `INT32`. R6 does not enforce.
-  Golden: 1 column (node), statement "write". (Note: this fixture
-  uses the R6 `social_r6.gql` schema unchanged; the `age`
-  property is declared `INT NOT NULL` — the same width as R5's
-  `social_r5.gql`. The fixture pins the admit posture, not a
-  width-refinement outcome.)
+  Golden: 1 property column `n.age`, `INT`, `nullable: true`,
+  statement "write". (Note: this fixture uses the R6 `social_r6.gql`
+  schema unchanged; the `age` property is declared `INT` — the
+  same declaration as R5's `social_r5.gql`. The fixture pins the
+  admit posture, not a width-refinement outcome. Projecting
+  `n.age` (rather than the whole node `n`) exposes the property's
+  declared type + nullability directly on the wire, which is what
+  the width-check discriminator is about; the projection choice is
+  orthogonal to the SET admit-posture the fixture pins.)
 
 **SET entity (§4.3.2):**
 

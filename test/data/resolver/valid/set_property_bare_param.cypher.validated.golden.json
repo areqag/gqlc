@@ -1,0 +1,23 @@
+{
+  "columns": [
+    {
+      "name": "n",
+      "type": {
+        "kind": "node",
+        "labels": "Person",
+        "nullable": false
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [
+    {
+      "name": "newAge",
+      "type": {
+        "kind": "unknown"
+      }
+    }
+  ],
+  "statement": "write",
+  "distinct": false
+}

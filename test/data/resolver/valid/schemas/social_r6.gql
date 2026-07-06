@@ -1,0 +1,31 @@
+CREATE PROPERTY GRAPH TYPE SocialR6 AS {
+    (:Person {
+        id       :: INT NOT NULL,
+        name     :: STRING NOT NULL,
+        age      :: INT,
+        nickname :: STRING,
+        score    :: FLOAT NOT NULL
+    }),
+    (:Post {
+        id       :: INT NOT NULL,
+        title    :: STRING NOT NULL,
+        body     :: STRING
+    }),
+    (:Draft {
+        id       :: INT NOT NULL,
+        title    :: STRING NOT NULL
+    }),
+    (:Company {
+        ein      :: INT NOT NULL,
+        name     :: STRING NOT NULL,
+        founded  :: DATE
+    }),
+    (:Tag {
+        name     :: STRING NOT NULL
+    }),
+    (:Person) -[:AUTHORED { publishedAt :: TIMESTAMP, views :: INT NOT NULL, likedAt :: TIMESTAMP }]-> (:Post),
+    (:Person) -[:LIKES { likedAt :: TIMESTAMP }]-> (:Post),
+    (:Post)   -[:AUTHORED { authoredBy :: STRING NOT NULL }]-> (:Person),
+    (:Person) -[:KNOWS { since :: DATE }]-> (:Person),
+    (:Company) -[:EMPLOYS { since :: DATE, role :: STRING }]-> (:Person)
+}

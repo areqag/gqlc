@@ -1,0 +1,16 @@
+{
+  "columns": [
+    {
+      "name": "n",
+      "type": {
+        "kind": "node",
+        "labels": "Person",
+        "nullable": false
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "write",
+  "distinct": false
+}
