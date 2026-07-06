@@ -21,8 +21,9 @@
 > `typeAtom` already recognises — `internal/query/cypher/typing.go:
 > 340` and `:358-365`), with the walker respecting the typing
 > walk's sub-scope boundaries (`OC_ExistentialSubquery`,
-> `OC_ListComprehension`, `OC_PatternComprehension` — mirroring
-> `typing.go:382-403`). The JSON encoding is **omit-when-false**
+> `OC_PatternPredicate`, `OC_ListComprehension`,
+> `OC_PatternComprehension` — mirroring `typing.go:382-403`). The
+> JSON encoding is **omit-when-false**
 > (`,omitempty`), which establishes the post-freeze wire
 > convention for the remainder of this ADR's revision protocol:
 > additive axes emit **omit-when-zero-value**, deliberately
