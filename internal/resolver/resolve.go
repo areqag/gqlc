@@ -569,8 +569,11 @@ func choose(returns []query.ReturnItem, items []query.ReturnItem, returnsAll boo
 }
 
 // fillGroupingKeys populates Column.GroupingKey for branch 0's final Part per
-// §4.5.2. hasAggregate gate: at least one AggregateProjection in Returns.
-// Uniform-exclude posture: ExprProjection is NEVER a grouping key.
+// §4.5.2. Grouping mode is entered when Returns contains at least one
+// aggregate — either as a top-level AggregateProjection OR embedded inside
+// an ExprProjection (ContainsAggregate() == true). In grouping mode,
+// ExprProjection is a grouping key iff ContainsAggregate() == false
+// (ADR 0008 amendment 2026-07-06).
 func fillGroupingKeys(cols []Column, part query.Part) {
 	// A ReturnsAll-expanded Part's Returns is empty (parser guarantees
 	// mutual exclusion); expanded items are RefProjection over bindings,
@@ -582,22 +585,33 @@ func fillGroupingKeys(cols []Column, part query.Part) {
 	}
 	hasAggregate := false
 	for _, item := range part.Returns {
-		if _, ok := item.Value.(query.AggregateProjection); ok {
+		switch v := item.Value.(type) {
+		case query.AggregateProjection:
 			hasAggregate = true
+		case query.ExprProjection:
+			if v.ContainsAggregate() {
+				hasAggregate = true
+			}
+		}
+		if hasAggregate {
 			break
 		}
 	}
 	if !hasAggregate {
 		return
 	}
-	// Grouping applies. Non-aggregate, non-ExprProjection items are keys.
+	// Grouping applies. Non-aggregate items are keys; ExprProjection is a
+	// key iff it does NOT contain a nested aggregate.
 	for i, item := range part.Returns {
-		switch item.Value.(type) {
+		switch v := item.Value.(type) {
 		case query.RefProjection, query.LiteralProjection, query.FuncProjection:
 			cols[i].GroupingKey = true
+		case query.ExprProjection:
+			if !v.ContainsAggregate() {
+				cols[i].GroupingKey = true
+			}
 		}
-		// AggregateProjection and ExprProjection remain false (§4.5.2
-		// uniform-exclude).
+		// AggregateProjection stays false (the aggregate itself is not a key).
 	}
 }
 
