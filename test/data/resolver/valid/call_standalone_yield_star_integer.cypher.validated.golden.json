@@ -1,0 +1,16 @@
+{
+  "columns": [
+    {
+      "name": "n",
+      "type": {
+        "kind": "property",
+        "type": "INT",
+        "nullable": true
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "read",
+  "distinct": false
+}
