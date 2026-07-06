@@ -574,7 +574,16 @@ already frozen at the freeze snapshot.
 
   ```
   python3 - <<'PY'
-  import glob, json, sys
+  import glob, json
+  def go_dump(data, f):
+      # Go's encoding/json HTML-escapes <, >, & inside strings;
+      # a plain json.dump re-writes them literally and
+      # false-positives every golden carrying one (243 files).
+      s = json.dumps(data, indent=2, ensure_ascii=False)
+      s = (s.replace('&', '\\u0026')
+            .replace('<', '\\u003c')
+            .replace('>', '\\u003e'))
+      f.write(s); f.write('\n')
   for path in sorted(glob.glob(
           'internal/query/cypher/testdata/golden/*.golden.json')):
       with open(path) as f: data = json.load(f)
@@ -586,7 +595,7 @@ already frozen at the freeze snapshot.
               for v in n: strip(v)
       strip(data)
       with open(path, 'w') as f:
-          json.dump(data, f, indent=2); f.write('\n')
+          go_dump(data, f)
   PY
   git diff --stat origin/master -- \
       internal/query/cypher/testdata/golden/*.golden.json
@@ -1261,6 +1270,15 @@ set):
 ```
 python3 - <<'PY'
 import glob, json
+def go_dump(data, f):
+    # Go's encoding/json HTML-escapes <, >, & inside strings;
+    # a plain json.dump re-writes them literally and
+    # false-positives every golden carrying one (243 files).
+    s = json.dumps(data, indent=2, ensure_ascii=False)
+    s = (s.replace("&", "\\u0026")
+          .replace("<", "\\u003c")
+          .replace(">", "\\u003e"))
+    f.write(s); f.write("\n")
 for path in sorted(glob.glob(
         "internal/query/cypher/testdata/golden/*.golden.json")):
     with open(path) as f: data = json.load(f)
@@ -1272,7 +1290,7 @@ for path in sorted(glob.glob(
             for v in n: strip(v)
     strip(data)
     with open(path, "w") as f:
-        json.dump(data, f, indent=2); f.write("\n")
+        go_dump(data, f)
 PY
 git diff --stat origin/master -- \
     internal/query/cypher/testdata/golden/*.golden.json
@@ -1351,13 +1369,13 @@ pin for it, that pin authors under the widened shape with
 existing three ExprProjection tests:
 
 ```go
-// TestNewExprProjectionWithAggregateTrue pins the widened Stage-6
-// variant per ADR 0008 amendment 2026-07-06: the ContainsAggregate
-// axis carries through the constructor, the accessor, and the wire
-// shape as an omit-when-false key (§4.1.3 — post-freeze convention:
-// additive axes emit omit-when-zero-value). Complements
-// TestExprProjectionMarshalJSON (which pins the containsAggregate=false
-// zero-value default as an ABSENT key — that test stays verbatim).
+// TestNewExprProjectionWithAggregateTrue pins the widened Stage-6 variant per
+// ADR 0008 amendment 2026-07-06: the ContainsAggregate axis carries through
+// the constructor, the accessor, and the wire shape as an omit-when-false key
+// (post-freeze convention: additive axes emit omit-when-zero-value).
+// Complements TestExprProjectionMarshalJSON (which pins the
+// containsAggregate=false zero-value default as an ABSENT key — that test
+// stays verbatim).
 func TestNewExprProjectionWithAggregateTrue(t *testing.T) {
     refs := []query.Ref{{Variable: "n"}}
     p := query.NewExprProjectionWithAggregate(refs, query.TypeInt{}, true)
@@ -1368,10 +1386,16 @@ func TestNewExprProjectionWithAggregateTrue(t *testing.T) {
     out, err := json.Marshal(p)
     require.NoError(t, err)
     require.JSONEq(t,
-        `{"kind":"expr","refs":[{"variable":"n"}],"type":"int","containsAggregate":true}`,
+        `{"kind":"expr","refs":[{"variable":"n","property":""}],"type":"int","containsAggregate":true}`,
         string(out))
 }
 ```
+
+Note (erratum, cycle close-out): the expected JSON carries
+`"property":""` — `flatRef` (`internal/query/query.go:1580`) declares
+`Property string` with **no** `omitempty`, so every wire ref always
+emits the `property` key. The spec's original draft omitted it; the
+landed test matches the marshaller, the only additive-safe direction.
 
 The existing `TestExprProjectionMarshalJSON` (type_test.go:124-131)
 stays **VERBATIM** — under the omit-when-false ruling in §4.1.3, the
@@ -1421,8 +1445,9 @@ Verbatim text:
 > `typeAtom` already recognises — `internal/query/cypher/typing.go:
 > 340` and `:358-365`), with the walker respecting the typing
 > walk's sub-scope boundaries (`OC_ExistentialSubquery`,
-> `OC_ListComprehension`, `OC_PatternComprehension` — mirroring
-> `typing.go:382-403`). The JSON encoding is **omit-when-false**
+> `OC_PatternPredicate`, `OC_ListComprehension`,
+> `OC_PatternComprehension` — mirroring `typing.go:382-403`). The
+> JSON encoding is **omit-when-false**
 > (`,omitempty`), which establishes the post-freeze wire
 > convention for the remainder of this ADR's revision protocol:
 > additive axes emit **omit-when-zero-value**, deliberately
@@ -1674,8 +1699,7 @@ MATCH (n:Person) RETURN 1 + n.age, count(n)
     {
       "name": "1 + n.age",
       "type": {
-        "kind": "scalar",
-        "scalar": "int"
+        "kind": "unknown"
       },
       "groupingKey": true
     },
@@ -1699,6 +1723,16 @@ The `1 + n.age` ExprProjection carries `ContainsAggregate=false`
 subtree), so the widened fillGroupingKeys marks it as a grouping
 key. The `count(n)` AggregateProjection stays a non-key. Confirmed
 against §7.2 sub-case 4.
+
+Note (erratum, cycle close-out): the column type is
+`{"kind": "unknown"}`, not scalar int as originally hand-drawn. The
+parser types property lookups as `TypeUnknown`, and `promoteBase`
+(`internal/query/cypher/typing.go:805-810`) propagates unknown
+through arithmetic when either operand is unknown; the resolver's
+ExprProjection column-type dispatch
+(`internal/resolver/resolve.go:1116-1117`) is a `resolveType`
+pass-through. Frozen typing behavior — the widening changes only
+`groupingKey` bits.
 
 #### 7.4b `aggregate_with_expr_only_grouping.cypher` — sub-case 5 (round-2 addition)
 
@@ -1728,8 +1762,9 @@ MATCH (n:Person) RETURN n.age, 1 + count(n)
     {
       "name": "n.age",
       "type": {
-        "kind": "scalar",
-        "scalar": "int"
+        "kind": "property",
+        "type": "INT",
+        "nullable": true
       },
       "groupingKey": true
     },
@@ -1753,6 +1788,12 @@ widened loop; the ExprProjection `1 + count(n)` carries
 `ContainsAggregate=true`, flipping the gate (previously false — no
 AggregateProjection sibling), and is excluded on the discriminator.
 Confirmed against §7.2 sub-case 5.
+
+Note (erratum, cycle close-out): the `n.age` column type is the
+house property shape `{"kind": "property", "type": "INT",
+"nullable": true}` — a RefProjection over a schema property (cf.
+`call_standalone_yield_items`), not scalar int as originally
+hand-drawn.
 
 **Invalid fixture set** — no additions. The widening does not
 introduce a new sentinel; every fail-site remains covered by the
@@ -2238,3 +2279,30 @@ Follow-up PRs (Cycles 2 and 3) reference this brief as their
 implementation contract. The bead `gqlc-hk0` moves out of
 `in_progress` only when the resolver-widening PR (Cycle 3) merges;
 the spec PR does not close it.
+
+---
+
+## 12. Errata (2026-07-06, cycle close-out)
+
+Five defects found during the adversarial implementation cycle
+(PRs #111/#112/#113), corrected in place above after all three PRs
+merged. None affected landed code — each was a spec-text divergence
+from resolver/marshaller reality caught by first-party corroboration.
+
+1. **Fence strip-key command (both copies — §4.1.3 and §4.4.1
+   Fence 1):** the original `json.dump` re-write lacked Go
+   `encoding/json`'s HTML escaping of `<`, `>`, `&`, false-positiving
+   243 goldens. Both copies now use the `go_dump` shim
+   (`ensure_ascii=False` + escape the three HTML chars).
+2. **§5 expected JSON:** omitted `"property":""` — `flatRef`
+   (`internal/query/query.go:1580`) has no `omitempty` on `Property`,
+   so refs always emit the key. Block now matches the landed test
+   verbatim.
+3. **§6 ADR amendment note (and the landed ADR text, fixed in the
+   same commit):** listed three of the four full walker stops,
+   omitting `OC_PatternPredicate` (`typing.go:389`).
+4. **§7.4a golden:** `1 + n.age` column type is `{"kind": "unknown"}`
+   (frozen `promoteBase` unknown-propagation), not scalar int.
+5. **§7.4b golden:** `n.age` column type is the house property shape
+   `{"kind": "property", "type": "INT", "nullable": true}`, not
+   scalar int.
