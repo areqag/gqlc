@@ -82,16 +82,17 @@ merges):
 - `internal/resolver/validated.go:15-27` — the doc comment on
   `Column.GroupingKey` updates to remove the "uniform-exclude"
   wording; the axis semantics themselves are unchanged. §7.
-- `test/data/resolver/valid/aggregate_with_expr_grouping_key.cypher`
-  + `.validated.golden.json` — one new fixture, the
-  R5-spec-recorded target-discriminating shape
-  (`docs/specs/resolver-stage-r5.md §4.5.3.5` post-follow-up target).
-  §7.4.
+- Two new resolver fixtures, one per newly-observable sub-case:
+  `aggregate_with_expr_grouping_key.cypher` + golden (sub-case 4 —
+  the R5-spec-recorded target at
+  `docs/specs/resolver-stage-r5.md §4.5.3.5`), and
+  `aggregate_with_expr_only_grouping.cypher` + golden (sub-case 5 —
+  the gate-widening round-2 ruling). §7.4a and §7.4b.
 - Every pre-existing resolver-valid golden is byte-identical after
   the widening PR (§7.5). The fence check runs from the worktree:
   `just test` without `-update` over the 116-fixture-pair R0–R7
   corpus at branch base (`ls test/data/resolver/valid/*.cypher |
-  wc -l` = 116). Only the one new fixture appears in the diff.
+  wc -l` = 116). Only the two new fixtures appear in the diff.
 
 Nothing downstream of the resolver is built — the resolver's widening
 lands the corrected grouping-key semantics; codegen consumes them
@@ -307,12 +308,15 @@ func fillGroupingKeys(cols []Column, part query.Part) {
 }
 ```
 
-The `switch item.Value.(type)` at line 594-598 is the exact widening
-site: adding an `ExprProjection` arm that consults
-`item.Value.(query.ExprProjection).ContainsAggregate()` and marks the
-key when false is the entire resolver-side change. The `hasAggregate`
-gate is unchanged — the presence of an `AggregateProjection` still
-gates grouping mode. §7.1 pins the widened body.
+The `switch item.Value.(type)` at line 594-598 is the widening's
+grouping-key site: adding an `ExprProjection` arm that consults
+`item.Value.(query.ExprProjection).ContainsAggregate()` and marks
+the key when false. §7.1 also widens the `hasAggregate` gate above
+(lines 583-591) so an `ExprProjection` with
+`ContainsAggregate() == true` flips grouping mode ON even without a
+top-level `AggregateProjection` sibling — the round-2 design ruling
+that motivates §7.4b's new sub-case-5 fixture. §7.1 pins the fully
+widened body.
 
 ### 3.5 The deferral pin — verbatim quotation
 
@@ -683,39 +687,93 @@ in spirit — it modifies the internal signature of every typing
 helper. The walk-based helper leaves the existing walk untouched
 and localises the change to two files.
 
-#### 4.2.1 Boundary posture — the walker is typing-scoped
+#### 4.2.1 Boundary posture — the probe descends exactly where the typing walk descends
 
 `subtreeContainsAggregate` MUST mirror the typing walk's scope
-boundaries. Concretely, at every ANTLR node whose typing behaviour
-in `typeNonArithmetic` refuses to descend into the sub-tree because
-it opens a nested scope, the aggregate probe MUST likewise NOT
-descend. Three specific stops, verified verbatim against
-`internal/query/cypher/typing.go:382-403`:
+boundaries. The general principle: **the probe descends exactly
+where the typing walk descends** — every arm where the typing walk
+either refuses to descend or discards mined refs is a boundary the
+probe MUST also honour.
 
-- **`OC_ExistentialSubquery`** — `EXISTS { … }` returns a boolean
-  at `typing.go:382-388`; parameters inside the subquery are mined
-  at `EnterOC_ExistentialSubquery` (listener.go, `subqueryDepth`
-  counter) and never enter the outer part's state. An aggregate
-  inside `EXISTS { RETURN count(n) }` aggregates over the
-  subquery's rows, not over the outer Part's rows, so it does not
-  discriminate the outer projection.
-- **`OC_ListComprehension`** — carries a list result whose element
-  type is honestly `TypeUnknown` (Stage 11's ADR-0005-aligned
-  posture at `typing.go:398-403`); the projection sub-tree runs in
-  the iteration variable's local scope. An aggregate inside
-  `[x IN xs WHERE count(x) > 0]` — grammar-valid in the vendored
-  Cypher but semantically closed over the comprehension's inner
-  rows — does not aggregate over the outer Part.
-- **`OC_PatternComprehension`** — same posture as
-  `OC_ListComprehension` at the same site.
+**The full arm-by-arm sweep** across `typeNonArithmetic` /
+`typeAtom` / `typeQuantifier`, cited at branch base
+`origin/master @ e77f33e`:
 
-The probe MUST stop at these three atoms and return `false` for
-their subtrees, mirroring the typing walk's own refusal to descend.
-Formally: `aggregateProbe.EnterOC_ExistentialSubquery`,
-`aggregateProbe.EnterOC_ListComprehension`, and
-`aggregateProbe.EnterOC_PatternComprehension` MUST set a
-`skipChildren` flag on the walker, or override the enter callbacks
-to return early WITHOUT recursing into the sub-tree's atoms.
+| # | Grammar node | Typing walk (typing.go:line) | Refs recorded? | Probe descends? |
+|---|---|---|---|---|
+| 1 | `OC_Atom` — variable | `typing.go:322-333` | yes (outer) | **yes** — no sub-scope |
+| 2 | `OC_Atom` — count-star `count(*)` | `typing.go:340` | no ref | **yes — hit reported** (aggregate arm #1) |
+| 3 | `OC_Atom` — scalar literal | `typing.go:335-338` | no ref | **yes** — no sub-scope, no aggregate possible |
+| 4 | `OC_Atom` — parameter | `typing.go:347-355` | no ref | **yes** — no sub-scope |
+| 5 | `OC_Atom` — function invocation | `typing.go:358-365` (aggregateFunc check) | outer (args) | **yes — hit reported for aggregate names** (aggregate arm #2), otherwise descend into args |
+| 6 | `OC_Atom` — parenthesised expression | `typing.go:367-370` | outer | **yes** — pure precedence node, no sub-scope |
+| 7 | `OC_Atom` — CASE | `typeCase` at `typing.go:475+` | outer | **yes** — subject / WHEN / THEN / ELSE are all outer-scope |
+| 8 | `OC_Atom` — list literal `[e1, e2, …]` | `typing.go` (list literal walk) | outer | **yes** — element expressions are outer-scope |
+| 9 | `OC_Atom` — map literal `{k: e1, …}` | (map literal walk) | outer | **yes** — value expressions are outer-scope |
+| 10 | `OC_Atom` — quantifier `all/any/none/single(x IN src WHERE pred)` | `typeQuantifier` at `typing.go:409-462` | source list: **outer** (`typing.go:437`); WHERE filter body: **discarded** (`savedOuter/restore` at `typing.go:449-452`) | **partial** — descend into source list, **STOP at the WHERE-body OC_Where** |
+| 11 | `OC_Atom` — existential subquery `EXISTS { … }` | `typing.go:382-388` returns `TypeBool` without descending | none | **NO — full stop at `OC_ExistentialSubquery`** |
+| 12 | `OC_Atom` — pattern predicate | `typing.go:389-397` returns `TypeBool` without descending; the pattern-atom refs are runtime-scope | none | **NO — full stop at `OC_PatternPredicate`** |
+| 13 | `OC_Atom` — list comprehension `[x IN src \| body]` or `[x IN src WHERE pred]` | `typing.go:398-403` returns `TypeUnknown` without descending | none | **NO — full stop at `OC_ListComprehension`** |
+| 14 | `OC_Atom` — pattern comprehension | `typing.go:398-403` (same arm as list comprehension) | none | **NO — full stop at `OC_PatternComprehension`** |
+| 15 | Arithmetic / precedence towers (add/sub/mul/div/power/unary/comparison/string-list-null/and/or/xor/not) | `typing.go:210-315` (typing sub-walk) | outer at every level | **yes** — pure precedence, no sub-scope |
+
+**The five hard stops** (rows 10 partial + 11 + 12 + 13 + 14):
+
+- **10 — `OC_Quantifier` WHERE-body.** For `all(x IN xs WHERE p) /
+  any / none / single`, the source list is outer-scope, but the
+  filter body's refs are discarded to enforce iteration-variable
+  scoping (`typing.go:449-452`: `savedOuter := l.curPart.refs; ...
+  l.curPart.refs = savedOuter`). The probe MUST descend into the
+  quantifier's source list (`x IN <src>`) but MUST NOT descend
+  into the `OC_Where` sub-node of the `OC_FilterExpression`. This
+  matches the typing walk exactly: an aggregate over the source
+  list aggregates over the outer Part's rows (`all(x IN
+  collect(n) WHERE …)` would flip the outer projection), while an
+  aggregate inside the WHERE body aggregates over the iteration
+  scope and is not the outer Part's concern.
+- **11 — `OC_ExistentialSubquery`.** `EXISTS { RETURN count(n) }`
+  aggregates over the subquery's rows; the outer projection is a
+  boolean. The typing walk returns `TypeBool` without descending
+  (`typing.go:382-388`) and parameters are mined at
+  `EnterOC_ExistentialSubquery` via the `subqueryDepth` counter,
+  never entering the outer part's state.
+- **12 — `OC_PatternPredicate`.** `(a)-->(b)` at predicate
+  position is boolean; the inner pattern's refs are runtime-scope
+  (Stage 11 §1.3). At projection position the atom is rejected
+  earlier via `ErrPatternInProjection`
+  (`collectReturnItem`, `expr.go:196-199`), so this arm never
+  reaches `classifyRichExpression` in practice — but the probe
+  still declares the stop explicitly for symmetry with the typing
+  walk.
+- **13 — `OC_ListComprehension`.** `[x IN xs | e]` /
+  `[x IN xs WHERE p]` / `[x IN xs WHERE p | e]` — the typing walk
+  at `typing.go:398-403` returns `TypeUnknown` without walking the
+  sub-tree, so BOTH the source list `xs` AND the body `e` /
+  predicate `p` are opaque to the outer walk. Aggregates ANYWHERE
+  inside a list comprehension do not reach the outer Part; the
+  probe stops fully at `OC_ListComprehension`. The wire-observable
+  witness: `Return6` scenario `[3] Size of list comprehension`
+  (`RETURN size([x IN collect(r) WHERE x <> null]) AS cn`)
+  produces an `ExprProjection` with `ContainsAggregate = false` at
+  branch base — the `collect(r)` inside the comprehension does
+  not flip the outer bit, matching the typing walk's opacity.
+- **14 — `OC_PatternComprehension`.** Same site as
+  `OC_ListComprehension`, same stop.
+
+**Implementation directive.** `aggregateProbe` MUST override
+`EnterOC_Quantifier` to walk only the source list sub-node and
+suppress recursion into the filter body's `OC_Where`; MUST override
+`EnterOC_ExistentialSubquery`, `EnterOC_ListComprehension`,
+`EnterOC_PatternComprehension`, and `EnterOC_PatternPredicate` to
+return WITHOUT recursing into the sub-tree's children. ANTLR's
+`ParseTreeWalker` does not natively expose a "skip children" flag;
+the standard workaround is to maintain a `skipDepth int` counter on
+the probe struct: incremented at the stop's `Enter*`, decremented
+at the corresponding `Exit*`, and consulted at every `Enter*` to
+early-return when non-zero. Alternatively, drive the walk with a
+manual pre-order recursion over `antlr.Tree`-typed children and
+skip the specific `IOC_*Context` types at the visit site — a
+smaller implementation than the counter for a five-stop probe.
 
 **Semantic justification.** `ExprProjection.ContainsAggregate`
 answers exactly one question — "does the resolver's
@@ -727,15 +785,27 @@ poisoning the outer projection's grouping-key eligibility on that
 basis is a soundness error. The boundary is not an optimisation;
 it is a correctness requirement.
 
-**Boundary pins.** No parser-test pin exercises these boundaries
-at branch base (they are grammar-valid but corpus-scenario-rare in
-the vendored TCK). §5 adds no pin for them either — the walker is
-a private helper, and its boundaries are witnessed indirectly by
-the frozen shape of every existing `EXISTS` / comprehension pin
-staying `ContainsAggregate = false` even when they textually
-contain `count(…)`. If a future TCK bump adds a scenario whose
-outer projection embeds an `EXISTS { … count … }`, the pin's `want`
-authors `ContainsAggregate = false` on the outer ExprProjection.
+**Boundary pins — plain statement.** No parser-test pin at branch
+base exercises any of the five stops (the vendored TCK's
+comprehension / quantifier / EXISTS scenarios that co-occur with an
+outer projection use OC_Atom shapes that never reach
+`classifyRichExpression`, or the outer projection is a bare
+aggregate at grammar-valid position). §5 adds no pin for the stops
+either — the walker is a private helper, and its boundaries are
+witnessed indirectly by the §4.4.1 golden enumeration: **every
+List11 / List12 / List13 golden with an inner-comprehension
+aggregate stays byte-identical** (source-verified at §4.4.1;
+Return6 `[3] Size of list comprehension`'s golden
+`List12_33d76b6f508c.golden.json` shows `"kind": "expr"` with no
+`containsAggregate` key at branch base and post-widening — the
+first-party audit that proves the stop). If a future TCK bump adds
+a scenario whose outer projection embeds an `EXISTS { RETURN
+count(…) }` or `all(x IN collect(…) WHERE …)` at RETURN /
+WITH-projection position, the pin's `want` MUST author
+`ContainsAggregate = false` on the outer ExprProjection for the
+comprehension / EXISTS cases (stops 11/13/14) and
+`ContainsAggregate = true` for the quantifier-source-list case
+(stop 10 partial).
 
 ### 4.3 The deferral pin — flip its bit
 
@@ -833,78 +903,289 @@ pin (§4.3) plus the new `TestNewExprProjectionWithAggregateTrue`
 (§5) show a diff. `TestExprProjectionMarshalJSON` stays verbatim per
 the omit-when-false ruling (§4.1.3).
 
-#### 4.4.1 Golden-corpus rebaseline — the 7 flip fixtures
+#### 4.4.1 Golden-corpus rebaseline — the 18 flip fixtures (scenario-source discovery)
 
 Under the omit-when-false JSON encoding (§4.1.3), the
 `containsAggregate` key is emitted **only** when the ExprProjection's
 walk returns `true`. The `internal/query/cypher/testdata/golden/`
 corpus at branch base `origin/master @ e77f33e` contains **2055**
-goldens that embed a `"kind": "expr"` blob; of those, exactly **7**
-have an ExprProjection at a top-level Returns position whose
-projected expression text (the ReturnItem `name`) embeds an aggregate
-function call and therefore flips the bit under the widened walker
-(§4.2). The 2048 remaining ExprProjection-bearing goldens carry the
-zero value and stay byte-identical.
+goldens that embed a `"kind": "expr"` blob; of those, exactly
+**18** are flipped by the widened walker (§4.2 + §4.2.1 boundary
+posture) once cross-verified against the scenario source. The
+**2037** remaining ExprProjection-bearing goldens carry the zero
+value and stay byte-identical.
 
-**Discovery command** (Python 3, run from the worktree root; the
-project's host lacks `jq`):
+**Round-1 correction (why 18, not 7).** An earlier draft here
+enumerated 7 flip goldens by regex-matching the ReturnItem `name`
+field for an aggregate call. That undercounts by design:
+`ReturnItem.Name` records the AS-alias when present
+(`expr.go:204-207` — `if alias := item.OC_Variable(); alias != nil
+{ name = alias.GetText() }`), so aliased embedded aggregates are
+invisible to a name-regex. First-party corroboration of goldens
+that carry `"kind": "expr"` but were missed by the round-1
+regex: `With4_6a5eec4aec12.golden.json` (`head(collect(...)) AS
+latestLike`), `With6_361998ddbe36.golden.json` +
+`With6_997ef885e794.golden.json` (`me.age + count(you.age) AS
+agg`), `With6_4540faf7c149.golden.json` (`$age + avg(person.age) -
+1000 AS agg`). The name-based scanner misses each of these — the
+alias `latestLike` / `agg` contains no aggregate function name.
+
+**Discovery method — scenario-source cross-check.** The correct
+discovery mines the TCK feature files (the ORIGINAL projection
+text, before AS-aliasing), computes each scenario's golden filename
+via the exact hash recipe used by `checkGolden` at
+`internal/query/cypher/acceptance_test.go:1063-1068`
+(`base + "_" + hex(sha1(uri + "\x00" + name + "\x00" + query)[:6])`,
+where `uri` is the feature file's path relative to
+`internal/query/cypher/` — `../../../test/data/query/cypher/tck/
+features/...`), and matches back to existing goldens whose top-
+level Returns position embeds an `ExprProjection` whose SOURCE
+expression (source text, not alias) contains an aggregate call
+surviving the §4.2.1 boundary redaction (comprehensions, EXISTS,
+pattern predicates, and quantifier WHERE-bodies redacted;
+quantifier source-lists preserved).
+
+**Complete discovery script** (Python 3; run from the worktree
+root; project host lacks `jq`):
 
 ```
 python3 - <<'PY'
-import glob, json, os, re
-AGGS = r"(?:count|sum|collect|min|max|avg|stDev|stDevP|percentileCont|percentileDisc|percentile)"
+import re, os, glob, hashlib, json
+
+CYPHER_DIR = "internal/query/cypher"
+FROOT     = "test/data/query/cypher/tck/features"
+GROOT     = f"{CYPHER_DIR}/testdata/golden"
+AGGS      = r"(count|sum|collect|min|max|avg|stDev|stDevP|percentileCont|percentileDisc|percentile)"
 call = re.compile(rf"\b{AGGS}\s*\(", re.IGNORECASE)
 
-def find_returns(n, out):
-    if isinstance(n, dict):
-        if isinstance(n.get("returns"), list):
-            for ri in n["returns"]:
-                if isinstance(ri, dict) and "value" in ri and "name" in ri:
-                    out.append(ri)
-        for v in n.values(): find_returns(v, out)
-    elif isinstance(n, list):
-        for v in n: find_returns(v, out)
+def uri_form(p):
+    return os.path.relpath(p, CYPHER_DIR)
 
-flips = []
-for path in sorted(glob.glob(
-        "internal/query/cypher/testdata/golden/*.golden.json")):
+def hash_golden(uri, name, q):
+    s = hashlib.sha1((uri + "\x00" + name + "\x00" + q).encode()).digest()
+    base = os.path.splitext(os.path.basename(uri))[0]
+    return f"{base}_{s[:6].hex()}.golden.json"
+
+def scan_feature(path):
+    with open(path) as f: text = f.read()
+    out = []
+    parts = re.split(r"(?m)^\s*(Scenario(?: Outline)?:\s*.+)$", text)
+    for i in range(1, len(parts), 2):
+        header, body = parts[i], parts[i+1] if i+1 < len(parts) else ""
+        name = header.split(":", 1)[1].strip()
+        is_outline = header.startswith("Scenario Outline:")
+        examples = []
+        if is_outline:
+            em = re.search(r"(?ms)^\s*Examples:\s*\n((?:\s*\|.*\n?)+)", body)
+            if em:
+                lines = [l.strip() for l in em.group(1).strip().splitlines()
+                         if l.strip()]
+                if lines:
+                    hdr = [c.strip() for c in lines[0].strip("|").split("|")]
+                    for row in lines[1:]:
+                        cells = [c.strip() for c in row.strip("|").split("|")]
+                        examples.append(dict(zip(hdr, cells)))
+                    body = body[:em.start()]
+        ds = []
+        for m in re.finditer(r'"""\s*\n(.*?)\n\s*"""', body, re.DOTALL):
+            q = m.group(1)
+            lines = q.splitlines()
+            if lines:
+                nb = [l for l in lines if l.strip()]
+                if nb:
+                    ind = min(len(l) - len(l.lstrip()) for l in nb)
+                    q = "\n".join(l[ind:] if len(l) >= ind else l
+                                  for l in lines)
+            ds.append(q)
+        if not is_outline:
+            for q in ds: out.append((name, q))
+        else:
+            for row in examples:
+                for q in ds:
+                    qs = q
+                    for k, v in row.items():
+                        qs = qs.replace(f"<{k}>", v)
+                    out.append((name, qs))
+    return out
+
+# Build golden -> (uri, scenario name, query text) index.
+scenario_index = {}
+for feat in sorted(glob.glob(f"{FROOT}/**/*.feature", recursive=True)):
+    uri = uri_form(feat)
+    for name, q in scan_feature(feat):
+        scenario_index[hash_golden(uri, name, q)] = (uri, name, q)
+
+# Redact §4.2.1 boundary regions: EXISTS { ... }, list/pattern
+# comprehensions [ ... IN ... ], quantifiers all/any/none/single(...).
+def redact(expr):
+    e = re.sub(r"(?is)\bEXISTS\s*\{[^{}]*\}", " ", expr)
+    changed = True
+    while changed:
+        changed = False
+        i = 0
+        while i < len(e):
+            if e[i] == "[":
+                d = 1; j = i + 1
+                while j < len(e) and d > 0:
+                    if e[j] == "[": d += 1
+                    elif e[j] == "]": d -= 1
+                    j += 1
+                inner = e[i+1:j-1]
+                d2 = 0; is_comp = False
+                for k in range(len(inner)):
+                    ic = inner[k]
+                    if ic in "([{": d2 += 1
+                    elif ic in ")]}": d2 -= 1
+                    if (d2 == 0 and inner[k:k+4].upper() == " IN "
+                            and re.match(r"\w+\s*$", inner[:k])):
+                        is_comp = True; break
+                if is_comp:
+                    e = e[:i] + " " + e[j:]
+                    changed = True; break
+                i = j
+            else:
+                i += 1
+    for q in ["all","any","none","single"]:
+        e = re.sub(rf"(?is)\b{q}\s*\([^)]*\)", " ", e)
+    return e
+
+def outer_is_bare_aggregate(expr):
+    e = re.sub(r"^\s*DISTINCT\s+", "", expr, flags=re.IGNORECASE)
+    m = re.match(rf"^{AGGS}\s*\(", e, re.IGNORECASE)
+    if not m: return False
+    d = 0; i = m.end() - 1
+    while i < len(e):
+        c = e[i]
+        if c == "(": d += 1
+        elif c == ")":
+            d -= 1
+            if d == 0: break
+        i += 1
+    return e[i+1:].strip() == ""
+
+def has_embedded_agg(expr):
+    reduced = redact(expr)
+    if not re.search(rf"\b{AGGS}\s*\(", reduced, re.IGNORECASE):
+        return False
+    return not outer_is_bare_aggregate(expr)
+
+def split_at_top_commas(s):
+    parts, d, buf = [], 0, ""
+    for c in s:
+        if c in "([{": d += 1
+        elif c in ")]}": d -= 1
+        if c == "," and d == 0:
+            parts.append(buf); buf = ""
+        else: buf += c
+    parts.append(buf)
+    return [p.strip() for p in parts if p.strip()]
+
+def alias_split(item):
+    m = re.search(r"^(.*?)\s+AS\s+(\w+)\s*$", item,
+                  re.IGNORECASE | re.DOTALL)
+    if m: return m.group(1).strip(), m.group(2).strip()
+    return item.strip(), item.strip()
+
+def clause_projections(q):
+    for m in re.finditer(
+        r"\b(RETURN|WITH)\b(.+?)(?=\n\s*(?:ORDER|SKIP|LIMIT|WHERE|"
+        r"MATCH|WITH|RETURN|UNWIND|MERGE|CREATE|DELETE|SET|REMOVE|"
+        r"CALL|UNION)\b|$)", q, re.IGNORECASE | re.DOTALL):
+        clause = re.sub(r"^\s*DISTINCT\s+", "", m.group(2),
+                        flags=re.IGNORECASE)
+        for item in split_at_top_commas(clause):
+            yield alias_split(item)
+
+def expr_returnitem_names(data):
+    names = []
+    def walk(n):
+        if isinstance(n, dict):
+            if isinstance(n.get("returns"), list):
+                for ri in n["returns"]:
+                    if (isinstance(ri, dict)
+                        and isinstance(ri.get("value"), dict)
+                        and ri["value"].get("kind") == "expr"):
+                        names.append(ri.get("name", ""))
+            for v in n.values(): walk(v)
+        elif isinstance(n, list):
+            for v in n: walk(v)
+    walk(data)
+    return names
+
+flip = []
+for path in sorted(glob.glob(f"{GROOT}/*.golden.json")):
     with open(path) as f: data = json.load(f)
-    ris = []
-    find_returns(data, ris)
-    hits = [ri["name"] for ri in ris
-            if isinstance(ri.get("value"), dict)
-            and ri["value"].get("kind") == "expr"
-            and call.search(ri.get("name", ""))]
-    if hits:
-        flips.append((os.path.basename(path), hits))
-print(f"flip goldens: {len(flips)}")
-for f, hits in flips:
-    print(f"  {f} -> {hits}")
+    names = expr_returnitem_names(data)
+    if not names: continue
+    g = os.path.basename(path)
+    entry = scenario_index.get(g)
+    if entry is None: continue
+    _, _, q = entry
+    projs = list(clause_projections(q))
+    for ename in names:
+        for src, alias in projs:
+            if alias == ename or src == ename:
+                if has_embedded_agg(src):
+                    flip.append((g, src))
+                break
+
+flip.sort()
+print(f"flip goldens: {len(flip)}")
+for g, src in flip:
+    print(f"  {g}  |  {src[:80]}")
 PY
 ```
 
-**The 7 flip goldens** (verbatim command output at branch base
+**The 18 flip goldens** (verbatim command output at branch base
 `origin/master @ e77f33e`):
 
-| Golden | Aggregate-embedding expression (from ReturnItem `name`) |
+| Golden | Aggregate-embedding SOURCE expression |
 |---|---|
+| `Delete5_2fdf511bf8c3.golden.json` | `{key: {key: collect(r)}}` |
+| `Delete5_31014ff88e69.golden.json` | `{key: collect(p)}` |
 | `Return2_0d955bc4a162.golden.json` | `count(a) > 0` |
+| `Return4_643233009cfd.golden.json` | `{name: count(b)}` |
+| `Return4_7465ea25655a.golden.json` | `head(collect({likeTime: likeTime}))` |
 | `Return6_1544b3f065a8.golden.json` | `size(collect(a))` |
 | `Return6_1620cd819bff.golden.json` | `$age + avg(person.age) - 1000` |
 | `Return6_29fccd6d88dd.golden.json` | `me.age + count(you.age)` |
+| `Return6_3645a3cd4799.golden.json` | `count(*) * 10` |
 | `Return6_830281f0127e.golden.json` | `age + count(you.age)` |
 | `Return6_c27310dae8c0.golden.json` | `count(a) + 3` |
 | `Return6_d980d0acf9b2.golden.json` | `{foo: a.name='Andres', kids: collect(child.name)}` |
+| `Return6_fd6e60a49215.golden.json` | `count(n) / 60 / 60` |
+| `ReturnOrderBy2_418ea26a331b.golden.json` | `count(a) * 10 + count(b) * 5` |
+| `With4_6a5eec4aec12.golden.json` | `head(collect({likeTime: likeTime}))` |
+| `With6_361998ddbe36.golden.json` | `age + count(you.age)` |
+| `With6_4540faf7c149.golden.json` | `$age + avg(person.age) - 1000` |
+| `With6_997ef885e794.golden.json` | `me.age + count(you.age)` |
 
 Under the widened `classifyRichExpression` (§4.2) each of these
-seven ExprProjection blobs picks up `"containsAggregate": true`;
+18 ExprProjection blobs picks up `"containsAggregate": true`;
 under omit-when-false that key is emitted, and the golden is
 regenerated. Every other ExprProjection-bearing golden — the
-remaining **2048** files — stays byte-identical because the walker
+remaining **2037** files — stays byte-identical because the walker
 returns `false` and the omitempty tag suppresses the key.
 
-**Semantic-diff-only fence** (the reviewer's proof that the
-rebaseline surfaces only the semantic change):
+**Boundary-preserved witnesses** (goldens that carry an
+ExprProjection whose SOURCE text contains an aggregate call but
+whose aggregate lives entirely inside a §4.2.1 boundary — they
+stay byte-identical, mirroring the typing walk's opacity): the
+`List11` / `List12` / `List13` scenarios that project `size([x
+IN <src-list> WHERE …])` / `[x IN xs | count(x)]` / similar, and
+any comprehension-embedded aggregate reached through the outer
+projection. The first-party audit witness at branch base:
+`List12_33d76b6f508c.golden.json` (`RETURN size([x IN collect(r)
+WHERE x <> null]) AS cn`) shows `"kind": "expr"` with no
+`containsAggregate` key both before and after — proving the
+stop from §4.2.1 row 13 is load-bearing, not decorative.
+
+**Bidirectional fence** (per round-2 ruling: reviewer must both
+detect overreach AND detect misses):
+
+*Fence 1 — strip-key overreach detector* (the widened marshaller
+must not leak `containsAggregate: true` outside the 18-golden
+set):
 
 ```
 python3 - <<'PY'
@@ -928,12 +1209,48 @@ git diff --stat origin/master -- \
 git checkout -- internal/query/cypher/testdata/golden/
 ```
 
-If that stat is non-empty, the unfreeze PR either leaked a
-`containsAggregate: true` into a non-aggregate golden (walker
-bug — §4.2 boundary violation, likely a missed sub-scope stop from
-§4.2.1) or introduced a formatting drift into the marshaller
-(unrelated to this axis but forbidden by the ADR 0008 fence). The
-PR is buggy.
+*Fence 2 — set-equality check* (the set of changed goldens must
+EQUAL the enumeration above — no extras, no misses):
+
+```
+git diff --name-only origin/master -- \
+    internal/query/cypher/testdata/golden/*.golden.json | \
+    sed 's|.*/||' | sort > /tmp/changed.txt
+cat > /tmp/expected.txt <<'EOF'
+Delete5_2fdf511bf8c3.golden.json
+Delete5_31014ff88e69.golden.json
+Return2_0d955bc4a162.golden.json
+Return4_643233009cfd.golden.json
+Return4_7465ea25655a.golden.json
+Return6_1544b3f065a8.golden.json
+Return6_1620cd819bff.golden.json
+Return6_29fccd6d88dd.golden.json
+Return6_3645a3cd4799.golden.json
+Return6_830281f0127e.golden.json
+Return6_c27310dae8c0.golden.json
+Return6_d980d0acf9b2.golden.json
+Return6_fd6e60a49215.golden.json
+ReturnOrderBy2_418ea26a331b.golden.json
+With4_6a5eec4aec12.golden.json
+With6_361998ddbe36.golden.json
+With6_4540faf7c149.golden.json
+With6_997ef885e794.golden.json
+EOF
+diff /tmp/expected.txt /tmp/changed.txt && echo "SET-EQUAL: PASS"
+# MUST print: SET-EQUAL: PASS.
+```
+
+If Fence 1 fails (stat is non-empty), the widened marshaller
+leaked `containsAggregate: true` into a golden whose semantic
+content is unchanged after key-stripping — a walker bug (likely a
+missed §4.2.1 boundary stop) or a formatting drift in the
+marshaller. If Fence 2 fails (extra files, missing files, or a
+non-empty diff), either the walker over-flipped (extras: reviewer
+inspects each extra to determine whether the discovery script was
+under-approximating or the walker over-fired) or under-flipped
+(misses: reviewer inspects each missing golden — likely a walker
+boundary that should NOT have stopped, or a discovery-script false
+positive). The unfreeze PR must pass BOTH fences before landing.
 
 ### 4.5 The parser test suite's aggregate coverage — no other pin changes
 
@@ -1072,15 +1389,26 @@ axis. The freeze protocol itself is exercised, not amended.
 The resolver widening is spec'd here but LANDS as a separate PR
 after the unfreeze PR merges. It cannot bundle with the unfreeze
 because the unfreeze PR's fence is "resolver stays byte-identical"
-(§8) — the widening PR flips one column of one new fixture and one
-existing fixture's byte-identity contract is preserved via the
-enumeration in §7.5.
+(§8) — the widening PR adds two new fixtures (§7.4a and §7.4b) and
+preserves every pre-existing fixture's byte-identity contract via
+the enumeration in §7.5.
 
-### 7.1 `fillGroupingKeys` — the exact widening
+### 7.1 `fillGroupingKeys` — the exact widening (gate + loop)
 
 Before (`internal/resolver/resolve.go:571-602`, verbatim per §3.4):
 
 ```go
+// R5 §4.5.2 — grouping applies when at least one AggregateProjection is
+// present.
+if part.ReturnsAll { return }
+hasAggregate := false
+for _, item := range part.Returns {
+    if _, ok := item.Value.(query.AggregateProjection); ok {
+        hasAggregate = true
+        break
+    }
+}
+if !hasAggregate { return }
 // Grouping applies. Non-aggregate, non-ExprProjection items are keys.
 for i, item := range part.Returns {
     switch item.Value.(type) {
@@ -1095,9 +1423,26 @@ for i, item := range part.Returns {
 After:
 
 ```go
-// Grouping applies. Non-aggregate items are keys; ExprProjection is
-// a key iff it does NOT contain a nested aggregate (Shape B, ADR 0008
-// amendment 2026-07-06; docs/specs/unfreeze-hk0-containsaggregate.md).
+// Grouping applies when at least one aggregate is present anywhere in
+// Returns — either as a top-level AggregateProjection OR embedded inside
+// an ExprProjection (Shape B, ADR 0008 amendment 2026-07-06;
+// docs/specs/unfreeze-hk0-containsaggregate.md).
+if part.ReturnsAll { return }
+hasAggregate := false
+for _, item := range part.Returns {
+    switch v := item.Value.(type) {
+    case query.AggregateProjection:
+        hasAggregate = true
+    case query.ExprProjection:
+        if v.ContainsAggregate() {
+            hasAggregate = true
+        }
+    }
+    if hasAggregate { break }
+}
+if !hasAggregate { return }
+// Grouping applies. Non-aggregate items are keys; ExprProjection is a
+// key iff it does NOT contain a nested aggregate.
 for i, item := range part.Returns {
     switch v := item.Value.(type) {
     case query.RefProjection, query.LiteralProjection, query.FuncProjection:
@@ -1111,39 +1456,91 @@ for i, item := range part.Returns {
 }
 ```
 
-The `hasAggregate` gate above (`resolve.go:583-591`) is unchanged.
-An `ExprProjection` whose `ContainsAggregate() == true` still gates
-grouping mode ON ONLY if an `AggregateProjection` is also present —
-this preserves R5's non-grouping-mode semantics for a pure
-ExprProjection Part (no `AggregateProjection`; no grouping). §7.2
-enumerates the four sub-cases.
+**Two changes**, not one:
+
+1. **`hasAggregate` gate widens.** An `ExprProjection` whose
+   `ContainsAggregate() == true` now flips the gate independently
+   of any `AggregateProjection` sibling.
+2. **Grouping-key loop widens.** An `ExprProjection` whose
+   `ContainsAggregate() == false` is marked as a grouping key
+   (was: uniformly excluded).
+
+**Why the gate widens** (round-2 design ruling). Without the gate
+widening, `RETURN n.x, count(n)+1` under-groups: the `count(n)+1`
+ExprProjection has `ContainsAggregate=true`, but no
+`AggregateProjection` sibling, so the pre-widening gate returns
+early and `n.x` is never marked as a key. Meanwhile, `RETURN n.x,
+count(n), count(n)+1` correctly groups because the top-level
+`count(n)` flips the pre-widening gate. Two queries that agree on
+"row groups keyed by `n.x` when aggregating over the group" would
+disagree on `n.x`'s wire-observable `GroupingKey` — an
+inconsistency that violates gqlc-hk0's "exact grouping-key
+semantics for mixed Parts" acceptance criterion. Widening the gate
+resolves the split: any aggregate — top-level or embedded — makes
+`n.x` a grouping key when it stands alongside.
 
 The doc comment on `fillGroupingKeys` at
 `internal/resolver/resolve.go:571-573` updates:
 
 ```go
 // fillGroupingKeys populates Column.GroupingKey for branch 0's final Part per
-// §4.5.2. hasAggregate gate: at least one AggregateProjection in Returns.
-// Discrimination posture (ADR 0008 amendment 2026-07-06): ExprProjection is
-// a grouping key iff ContainsAggregate() == false.
+// §4.5.2. Grouping mode is entered when Returns contains at least one
+// aggregate — either as a top-level AggregateProjection OR embedded inside
+// an ExprProjection (ContainsAggregate() == true). In grouping mode,
+// ExprProjection is a grouping key iff ContainsAggregate() == false
+// (ADR 0008 amendment 2026-07-06).
 ```
 
 The R5 `// Uniform-exclude posture: ExprProjection is NEVER a
 grouping key.` line RETIRES.
 
-### 7.2 The four sub-cases the widening handles
+**FuncProjection-vs-ExprProjection soundness verification.** The
+widened loop marks `FuncProjection` unconditionally as a grouping
+key. This is sound only if `FuncProjection` cannot smuggle a nested
+aggregate — verified first-party against the parser at branch base:
 
-| Part.Returns | ExprProjection.ContainsAggregate | fillGroupingKeys behaviour |
-|---|---|---|
-| No AggregateProjection, no ExprProjection | n/a | `hasAggregate=false` gate returns early — no keys marked. Unchanged from R5. |
-| No AggregateProjection, ExprProjection(s) present | either | `hasAggregate=false` gate returns early — no keys marked. Unchanged from R5. Consistent with openCypher: grouping only fires when at least one aggregate is present. |
-| AggregateProjection present, ExprProjection present, all ExprProjections have ContainsAggregate=true (e.g. `RETURN 1 + count(n), count(m)`) | true | ExprProjection excluded (aggregate residual is not a key). Behaviour matches R5 uniform-exclude. Golden UNCHANGED. |
-| AggregateProjection present, ExprProjection present, at least one ExprProjection has ContainsAggregate=false (e.g. `RETURN 1 + n.age, count(n)`) | false | The non-aggregate ExprProjection is marked as a key. **Behaviour differs from R5.** Golden CHANGES for the new fixture (§7.4). |
+- `classifyFunction` at `internal/query/cypher/expr.go:336-363`
+  branches on `aggregateFunc(name)`: if the outermost function
+  name is in the closed aggregate set (`count, sum, collect, min,
+  max, avg, stDev, stDevP, percentileCont, percentileDisc,
+  percentile`), the call lowers as `AggregateProjection` via
+  `classifyAggregateCall`; otherwise it calls `functionArgRefs`.
+- `functionArgRefs` at
+  `internal/query/cypher/shape.go:260-279` requires each argument
+  to be either a bare var / var.prop (yielding a Ref) or a scalar
+  literal. Any argument that is anything else — a nested function
+  call (`toFloat(count(n))`), arithmetic (`toFloat(n.x + 1)`), a
+  parameter, a list literal — makes `functionArgRefs` return
+  `nil, false`.
+- When `functionArgRefs` fails, `classifyFunction` returns
+  `nil, false`; `classifyProjection` at
+  `internal/query/cypher/expr.go:260-264` then also returns
+  `nil, false`; and `collectReturnItem` at
+  `internal/query/cypher/expr.go:200-201` falls through to
+  `classifyRichExpression`, producing an `ExprProjection` — NOT
+  a `FuncProjection`.
 
-Only sub-case 4 has a wire-observable behaviour change. Sub-case 3
-matches by coincidence (both R5 and the widening exclude — the
-widening's exclusion is honest, R5's is uniform). Sub-cases 1 and 2
-are gated out before the widening branch runs.
+Therefore `FuncProjection` can only ever carry
+bare-var/prop/literal arguments; a nested aggregate (`toFloat(
+count(n))`) is classified as `ExprProjection` whose
+`ContainsAggregate()` correctly returns `true` via the widened
+walk. The unconditional grouping-key mark on `FuncProjection` is
+sound. **No soundness hole.**
+
+### 7.2 The five sub-cases the widening handles
+
+| # | Part.Returns pattern | AggProj present? | ExprProj.ContainsAggregate | `hasAggregate` gate | Grouping-key marking (this cycle vs R5) |
+|---|---|---|---|---|---|
+| 1 | No AggregateProjection, no ExprProjection | no | n/a | false — early return | no keys marked. Unchanged from R5. |
+| 2 | No AggregateProjection, ExprProjection(s), all `ContainsAggregate=false` (e.g. `RETURN 1 + n.age`) | no | false | false — early return | no keys marked. Unchanged from R5. Consistent with openCypher: no aggregate → no grouping. |
+| 3 | AggregateProjection present, ExprProjection present, all ExprProjections have `ContainsAggregate=true` (e.g. `RETURN 1 + count(n), count(m)`) | yes | true | true (via AggProj) | ExprProjection excluded (aggregate residual is not a key). Matches R5 uniform-exclude by coincidence — the widening's exclusion is honest, R5's is uniform. Golden UNCHANGED. |
+| 4 | AggregateProjection present, ExprProjection present, at least one ExprProjection has `ContainsAggregate=false` (e.g. `RETURN 1 + n.age, count(n)`) | yes | false (mixed) | true (via AggProj) | The non-aggregate ExprProjection is marked as a key. **Behaviour differs from R5.** Golden CHANGES for the new fixture (§7.4a). |
+| 5 | **No AggregateProjection**, at least one ExprProjection has `ContainsAggregate=true`, plus one or more key-eligible siblings (e.g. `RETURN n.age, 1 + count(n)`) | no | true | **true (via widened gate — new)** | Non-aggregate siblings marked as keys; the embedded-aggregate ExprProjection excluded. **Behaviour differs from R5 (which returned early).** Golden CHANGES for the new fixture (§7.4b). |
+
+Sub-cases 4 and 5 have wire-observable behaviour changes. Sub-case
+3 matches by coincidence. Sub-cases 1 and 2 are gated out before
+the loop runs. **Sub-case 5 is new to round 2** — the gate-widening
+ruling motivates it.
 
 ### 7.3 R5 R6 R7 grouping-key semantics — the exact decision sites that widen
 
@@ -1172,10 +1569,15 @@ yields hits only at:
 **Conclusion:** the widening is one-site. The R5 `§4.5.3` gap
 closes exactly here; no other resolver machinery is touched.
 
-### 7.4 New fixture — `aggregate_with_expr_grouping_key.cypher`
+### 7.4 New fixtures — sub-case 4 and sub-case 5 witnesses
+
+Two new fixtures land in the widening PR: one per newly-observable
+sub-case. Both use `social_r7.gql`.
+
+#### 7.4a `aggregate_with_expr_grouping_key.cypher` — sub-case 4
 
 The R5-spec-recorded target fixture (`docs/specs/resolver-stage-r5.md
-§4.5.3.5`), landed by this cycle.
+§4.5.3.5`) — witnesses the sub-case 4 change.
 
 **Fixture query** (`test/data/resolver/valid/aggregate_with_expr_grouping_key.cypher`):
 
@@ -1183,10 +1585,8 @@ The R5-spec-recorded target fixture (`docs/specs/resolver-stage-r5.md
 MATCH (n:Person) RETURN 1 + n.age, count(n)
 ```
 
-**Fixture schema mapping** — uses `social_r7.gql` (which extends
-`social_r6.gql` per R7 §6.1 and defines a `Person` node with an
-`age: INT` property). The mapping in
-`test/data/resolver/valid/schema.mapping.json` gains one entry:
+**Schema mapping entry** in
+`test/data/resolver/valid/schema.mapping.json`:
 
 ```
 "aggregate_with_expr_grouping_key.cypher": "social_r7.gql"
@@ -1225,7 +1625,61 @@ The `1 + n.age` ExprProjection carries `ContainsAggregate=false`
 (pure arithmetic over a property lookup — no aggregate in the
 subtree), so the widened fillGroupingKeys marks it as a grouping
 key. The `count(n)` AggregateProjection stays a non-key. Confirmed
-against the widening table in §7.2 (sub-case 4).
+against §7.2 sub-case 4.
+
+#### 7.4b `aggregate_with_expr_only_grouping.cypher` — sub-case 5 (round-2 addition)
+
+Witnesses the gate-widening ruling: an embedded aggregate inside
+an ExprProjection is enough to enter grouping mode, and its key-
+eligible sibling `n.age` gains `GroupingKey=true`.
+
+**Fixture query** (`test/data/resolver/valid/aggregate_with_expr_only_grouping.cypher`):
+
+```
+MATCH (n:Person) RETURN n.age, 1 + count(n)
+```
+
+**Schema mapping entry** in
+`test/data/resolver/valid/schema.mapping.json`:
+
+```
+"aggregate_with_expr_only_grouping.cypher": "social_r7.gql"
+```
+
+**Expected golden**
+(`test/data/resolver/valid/aggregate_with_expr_only_grouping.cypher.validated.golden.json`):
+
+```json
+{
+  "columns": [
+    {
+      "name": "n.age",
+      "type": {
+        "kind": "scalar",
+        "scalar": "int"
+      },
+      "groupingKey": true
+    },
+    {
+      "name": "1 + count(n)",
+      "type": {
+        "kind": "scalar",
+        "scalar": "int"
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "read",
+  "distinct": false
+}
+```
+
+The RefProjection `n.age` is marked as a grouping key by the
+widened loop; the ExprProjection `1 + count(n)` carries
+`ContainsAggregate=true`, flipping the gate (previously false — no
+AggregateProjection sibling), and is excluded on the discriminator.
+Confirmed against §7.2 sub-case 5.
 
 **Invalid fixture set** — no additions. The widening does not
 introduce a new sentinel; every fail-site remains covered by the
@@ -1250,45 +1704,191 @@ pairs with a `*.cypher.validated.golden.json`).
 byte-identical.**
 
 The widening (§7.1) changes `fillGroupingKeys` in two ways:
-(a) treat `ExprProjection.ContainsAggregate() == true` as inducing
-grouping in the `hasAggregate` scan; (b) exclude such projections
-from the grouping-key set. Search the 116-fixture enumeration for
-each pre-widening path:
+(a) the `hasAggregate` gate scans `ExprProjection.ContainsAggregate()
+== true` as inducing grouping (in addition to any top-level
+`AggregateProjection`); (b) the loop treats an `ExprProjection`
+with `ContainsAggregate() == false` as a grouping key rather than
+uniformly excluding all ExprProjections. A pre-existing golden
+STAYS byte-identical iff its wire outcome under the widened
+`fillGroupingKeys` matches its wire outcome under the R5-era one.
+That's a wire-observable claim on `GroupingKey`, not a
+path-equivalence claim — the two implementations may reach the
+same wire via different branches.
+
+**Class A — fixtures with an embedded-only aggregate** (the sole
+class where the gate widening is load-bearing at branch base):
 
 - `aggregate_with_expr_residual.cypher` — `MATCH (n:Person)
-  RETURN 1 + count(n)`. One column; the Return has no
-  `AggregateProjection` sibling (the aggregate is nested inside the
-  ExprProjection, not lifted). **Pre-widening path**: the
-  `hasAggregate` scan at `internal/resolver/resolve.go:583-589`
-  finds no `AggregateProjection` in `part.Returns`, so
-  `hasAggregate = false`; the function returns early at
-  `resolve.go:590-592` and every column's `GroupingKey` stays at
-  its default `false`. R5 §4.5.2's uniform-exclude of ExprProjection
-  at `resolve.go:594-601` is NOT reached for this fixture. **Post-
-  widening path**: `ExprProjection.ContainsAggregate() = true` on
-  the sole column, so the widened `hasAggregate` scan flips to
-  `true`; execution reaches the grouping-key loop; the ExprProjection
-  is excluded on the ContainsAggregate discriminator. Different
-  path, same result: `GroupingKey = false`. Golden byte-identical.
-- `expr_projection_bool` — boolean expression, no aggregate, no
-  AggregateProjection in Returns. Under widening
-  `ContainsAggregate = false` → same early return at
-  `resolve.go:590` as pre-widening (single-column Part with no
-  aggregate present). Golden unchanged.
-- `expr_projection_list` — list literal, no aggregate, no
-  AggregateProjection in Returns. Same as above. Golden unchanged.
-- `expr_projection_unknown` — an expression typing as TypeUnknown,
-  no aggregate. Same as above. Golden unchanged.
+  RETURN 1 + count(n)`. One column; no `AggregateProjection`
+  sibling (the aggregate is nested inside the ExprProjection, not
+  lifted). Enumeration proof at branch base: mining
+  `test/data/resolver/valid/*.cypher` for queries whose
+  RETURN/WITH projections carry an aggregate call embedded in a
+  rich expression AND whose siblings contain no bare aggregate
+  call yields **exactly this one fixture**. Discovery command
+  (Python 3, run from the worktree root):
+
+  ```
+  python3 - <<'PY'
+  import re, os, glob
+  AGGS = r"(count|sum|collect|min|max|avg|stDev|stDevP|percentileCont|percentileDisc|percentile)"
+  call = re.compile(rf"\b{AGGS}\s*\(", re.IGNORECASE)
+  root = "test/data/resolver/valid"
+  hits = []
+  for path in sorted(glob.glob(f"{root}/*.cypher")):
+      with open(path) as f: q = f.read()
+      # Any embedded aggregate in a RETURN/WITH projection?
+      embedded = False; standalone = False
+      for m in re.finditer(
+              r"\b(RETURN|WITH)\b(.+?)(?=\n\s*(?:ORDER|SKIP|LIMIT|"
+              r"WHERE|MATCH|WITH|RETURN|UNWIND|MERGE|CREATE|DELETE|"
+              r"SET|REMOVE|CALL|UNION)\b|$)",
+              q, re.IGNORECASE | re.DOTALL):
+          clause = re.sub(r"^\s*DISTINCT\s+", "", m.group(2),
+                          flags=re.IGNORECASE)
+          parts, d, buf = [], 0, ""
+          for c in clause:
+              if c in "([{": d += 1
+              elif c in ")]}": d -= 1
+              if c == "," and d == 0:
+                  parts.append(buf); buf = ""
+              else: buf += c
+          parts.append(buf)
+          for p in parts:
+              ps = re.sub(r"\s+AS\s+\w+\s*$", "", p.strip(),
+                          flags=re.IGNORECASE).strip()
+              if not ps or not call.search(ps): continue
+              m2 = re.match(rf"^{AGGS}\s*\(", ps, re.IGNORECASE)
+              outermost_agg = False
+              if m2:
+                  dp = 0; i = m2.end() - 1
+                  while i < len(ps):
+                      c2 = ps[i]
+                      if c2 == "(": dp += 1
+                      elif c2 == ")":
+                          dp -= 1
+                          if dp == 0: break
+                      i += 1
+                  if ps[i+1:].strip() == "":
+                      outermost_agg = True
+              if outermost_agg: standalone = True
+              else: embedded = True
+      if embedded and not standalone:
+          hits.append(os.path.basename(path))
+  print(f"embedded-only aggregate fixtures: {hits}")
+  PY
+  ```
+
+  Verified output at branch base `origin/master @ e77f33e`:
+  `['aggregate_with_expr_residual.cypher']`.
+
+  **Pre-widening path**: no `AggregateProjection` in Returns →
+  `hasAggregate = false` (R5 gate) → early return at
+  `internal/resolver/resolve.go:590-592` → every column's
+  `GroupingKey` stays at its default `false`. R5 §4.5.2's
+  uniform-exclude branch is NOT reached.
+  **Post-widening path**: `ExprProjection.ContainsAggregate() =
+  true` on the sole column → widened gate flips `hasAggregate =
+  true` at the ExprProjection arm of the gate scan → execution
+  reaches the widened grouping-key loop → the ExprProjection is
+  excluded on the `ContainsAggregate` discriminator → the sole
+  column's `GroupingKey` stays at its default `false`.
+  Different code path, same wire outcome. **Golden byte-identical.**
+
+**Class B — fixtures with no aggregate at all** (the vast
+majority; enumerated by exclusion from Class A):
+
+- `expr_projection_bool`, `expr_projection_list`,
+  `expr_projection_unknown` — expressions typing as bool /
+  list / TypeUnknown; no aggregate anywhere. Under both
+  pre-widening and post-widening: `hasAggregate = false` at the
+  gate → early return → every `GroupingKey` stays `false`.
+  Golden unchanged.
 - `literal_int_projection`, `literal_string_projection`,
-  `literal_only_return` — LiteralProjection, not ExprProjection.
-  Unaffected.
-- Every other fixture — inspection confirms no
-  ExprProjection whose ContainsAggregate would flip AND which
-  co-occurs with an AggregateProjection sibling that would trigger
-  the R5 uniform-exclude branch pre-widening. The two-path
-  divergence above is `aggregate_with_expr_residual`-specific;
-  every other fixture reaches the same grouping-key branch under
-  both paths.
+  `literal_only_return` — `LiteralProjection`, not
+  `ExprProjection`. The gate/loop doesn't inspect them (gate
+  scans only `AggregateProjection` and `ExprProjection`, loop
+  marks `Literal` unconditionally as a key when reached). Under
+  both paths: gate stays `false` (no aggregate anywhere) →
+  early return → `GroupingKey = false`. Golden unchanged.
+
+**Class C — fixtures with a top-level `AggregateProjection`
+sibling** (R5's original grouping-mode fixtures):
+
+At branch base, mining `test/data/resolver/valid/*.cypher` for
+queries whose RETURN/WITH contains at least one bare aggregate
+call at a top-level projection position yields the R5/R6/R7
+grouping-mode set — every fixture whose golden already carries
+`groupingKey: true` on any column plus every fixture whose golden
+has the `hasAggregate` gate open. For each such fixture:
+
+- **All ExprProjection siblings have `ContainsAggregate = false`**
+  (pre-widening: uniformly excluded via R5 §4.5.2; post-widening:
+  marked as grouping keys via the widened loop). This is
+  **sub-case 4** in §7.2, and it would CHANGE the wire outcome —
+  the ExprProjection column's `GroupingKey` would go from `false`
+  to `true`. **Enumeration proof at branch base**: mining for
+  R5/R6/R7 fixtures matching sub-case 4 — a top-level aggregate
+  sibling alongside a non-aggregate ExprProjection sibling —
+  yields **zero fixtures**. Every existing R5-era grouping-mode
+  fixture pairs the top-level aggregate with `RefProjection`,
+  `LiteralProjection`, or `FuncProjection` siblings, never with a
+  non-aggregate `ExprProjection`. Sub-case 4 is UNCOVERED at
+  branch base; §7.4a's `aggregate_with_expr_grouping_key.cypher`
+  is its first witness. Discovery command:
+
+  ```
+  python3 - <<'PY'
+  import re, os, glob, json
+  root = "test/data/resolver/valid"
+  # A fixture matches sub-case 4 iff its golden has grouping mode ON
+  # AND a column whose name is a non-aggregate expression that is not
+  # a bare ref/literal/function call. Heuristic: golden has any column
+  # with groupingKey=true, and any other column whose name embeds
+  # arithmetic (+ - * / etc.) at depth 0 AND no aggregate call in the
+  # expression text.
+  AGGS = r"(count|sum|collect|min|max|avg|stDev|stDevP|percentileCont|percentileDisc|percentile)"
+  call = re.compile(rf"\b{AGGS}\s*\(", re.IGNORECASE)
+  arith = re.compile(r"[+\-*/]")
+  hits = []
+  for path in sorted(glob.glob(f"{root}/*.validated.golden.json")):
+      with open(path) as f: g = json.load(f)
+      cols = g.get("columns", [])
+      any_grouping = any(c.get("groupingKey") for c in cols)
+      if not any_grouping: continue
+      for c in cols:
+          n = c.get("name","")
+          if arith.search(n) and not call.search(n):
+              hits.append(os.path.basename(path))
+              break
+  print(f"sub-case 4 pre-existing fixtures: {hits}")
+  PY
+  ```
+
+  Verified output at branch base: `[]`.
+
+- **At least one ExprProjection sibling has `ContainsAggregate =
+  true`** (**sub-case 3** in §7.2). Both pre-widening (R5
+  uniform-exclude) and post-widening (honest-exclude) exclude
+  the ExprProjection from the grouping-key set. Same wire.
+  Golden unchanged.
+
+**Class D — fixtures whose ONLY aggregate is embedded in an
+ExprProjection, PLUS a key-eligible sibling** (sub-case 5 in
+§7.2). Enumeration proof at branch base: the Class A discovery
+command above returned exactly one fixture
+(`aggregate_with_expr_residual`), which has NO key-eligible
+sibling (its single column IS the embedded-aggregate
+ExprProjection). Class D is therefore UNCOVERED at branch base;
+§7.4b's `aggregate_with_expr_only_grouping.cypher` is its first
+witness.
+
+**Conclusion.** Class A has one fixture, and its wire outcome is
+preserved via a different code path. Classes B and C stay
+byte-identical by class-invariant reasoning. Classes 4 and 5 —
+the newly-observable behaviour — are UNCOVERED at branch base;
+the §7.4a / §7.4b fixtures are their first witnesses. Every
+pre-existing golden stays byte-identical.
 
 **The byte-identity fence check** (from the worktree, on the
 widening PR's branch tip):
@@ -1300,11 +1900,15 @@ git diff test/data/resolver/valid/*.validated.golden.json
 
 The diff MUST show:
 
-- Exactly ONE new file:
-  `aggregate_with_expr_grouping_key.cypher.validated.golden.json`.
-- Exactly one modification to
-  `schema.mapping.json` (the mapping entry for the new fixture).
-- Zero modifications to any other `.validated.golden.json`.
+- Exactly TWO new files:
+  `aggregate_with_expr_grouping_key.cypher.validated.golden.json`
+  and
+  `aggregate_with_expr_only_grouping.cypher.validated.golden.json`,
+  plus their two `.cypher` sources.
+- Exactly two entries added to `schema.mapping.json` (one per
+  new fixture, both pointing to `social_r7.gql`).
+- Zero modifications to any pre-existing `.validated.golden.json`
+  (the 116 branch-base pairs).
 
 If any pre-existing golden regenerates, the widening PR is buggy.
 The commit fails review.
@@ -1371,10 +1975,11 @@ The gqlc-hk0 campaign lands in three PRs, in this order:
    - `just test` from the worktree: PASSES.
    - `just lint-new` from the worktree: PASSES.
 3. **Resolver-widening PR** — after PR 2 merges to master. Changes
-   `internal/resolver/resolve.go:571-602` per §7.1; adds one fixture
-   per §7.4; updates one doc comment per §7.1. Every pre-existing
-   fixture stays byte-identical per §7.5. `just test` from the
-   worktree: PASSES.
+   `internal/resolver/resolve.go:571-602` per §7.1 (both the
+   `hasAggregate` gate and the grouping-key loop widen); adds two
+   fixtures per §7.4a and §7.4b; updates one doc comment per §7.1.
+   Every pre-existing fixture stays byte-identical per §7.5.
+   `just test` from the worktree: PASSES.
 
 **Cross-PR verification: PR 2's resolver-green claim.**
 
