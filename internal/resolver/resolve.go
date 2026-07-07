@@ -1,7 +1,6 @@
 package resolver
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -280,24 +279,30 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.
 			// parser construction (§4.3.1), so the check runs at most
 			// once per CALL — subsequent bindings from the same clause
 			// hit the same slice header and re-verify the same
-			// assignments. The registry lookup is guaranteed non-empty
-			// (parser rejects unknown procedures at ErrUnknownProcedure),
-			// so a miss here is a defensive tripwire.
+			// assignments.
+			//
+			// Sentinel discipline (spec §8.1): ErrCallArgAssignability is
+			// reserved for the per-position lattice check — the sole
+			// resolver-reachable fail mode this axis introduces. The two
+			// drift arms below (registry miss, arity mismatch) are
+			// parser-authoritative pre-conditions (spec §4.4 trust
+			// posture; ErrUnknownProcedure + ErrProcedureArity fire at
+			// parse-time) and unreachable in-corpus; they surface as
+			// plain non-sentinel errors so a drift bug is loud but does
+			// not pollute the assignability sentinel's fixture semantics.
+			// R7 §5.2 retired ErrOutOfR0Scope at the BindingCall fail-site
+			// so it is not reused here either.
 			if args := bb.Args(); len(args) > 0 {
 				sig, ok := r.Lookup(bb.Procedure())
 				if !ok {
-					return nil, branchState{}, nil, fmt.Errorf("%w: procedure %q missing from registry", ErrCallArgAssignability, bb.Procedure())
+					return nil, branchState{}, nil, fmt.Errorf("resolver: procedure %q missing from registry (parser drift)", bb.Procedure())
 				}
 				if len(args) != len(sig.Params) {
-					// Parser already checked arity for explicit invocations.
-					// Implicit invocation (§4.2 step 4, Q4 ruling) mines 0
-					// arguments, so len(args) > 0 && != len(Params) is only
-					// reachable via parser drift. Defensive tripwire.
-					return nil, branchState{}, nil, fmt.Errorf("%w: procedure %q expects %d arguments, got %d", ErrCallArgAssignability, bb.Procedure(), len(sig.Params), len(args))
+					return nil, branchState{}, nil, fmt.Errorf("resolver: procedure %q expects %d arguments, got %d (parser drift)", bb.Procedure(), len(sig.Params), len(args))
 				}
 				for i, a := range args {
 					if !argAssignable(sig.Params[i].Token, a.Type()) {
-						return nil, branchState{}, nil, fmt.Errorf("%w: procedure %q argument %d: cannot assign %s to %s", ErrCallArgAssignability, bb.Procedure(), i, typeWireTag(a.Type()), sig.Params[i].Token)
+						return nil, branchState{}, nil, fmt.Errorf("%w: procedure %q argument %d: cannot assign %s to %s", ErrCallArgAssignability, bb.Procedure(), i, a.Type().String(), sig.Params[i].Token)
 					}
 				}
 			}
@@ -1857,13 +1862,19 @@ func labelDeclared(label string, s schema.Schema) bool {
 //   - NUMBER:  loose  — TypeInt OR TypeFloat (ADR 0007 line 172-174:
 //     "assignable-from INTEGER-or-FLOAT at the argument site").
 //
-// TypeUnknown is a resolver-side wildcard for a $param / n.name / null
-// argument (the parser cannot type-narrow those at CALL-site); admitting it
-// preserves R7's parser-authoritative posture — a downstream $param whose
-// enclosing type disagrees with the sig token is caught by the parameter-
-// unification pass in ExprInProjection anyway.
+// TypeUnknown and TypeNull are resolver-side wildcards: TypeUnknown for a
+// $param / n.name argument (the parser cannot type-narrow those at CALL-site),
+// TypeNull for a bare null literal (shape.go:79 mines NULL to TypeNull, a
+// distinct sum member from TypeUnknown per type.go:80). Admitting both
+// preserves R7's parser-authoritative posture and validates TCK Call5 [4]
+// (CALL test.my.proc(null) against nullable-typed params). A downstream
+// $param whose enclosing type disagrees with the sig token is caught by the
+// parameter-unification pass in ExprInProjection anyway.
 func argAssignable(token procsig.TypeToken, argType query.Type) bool {
 	if _, isUnknown := argType.(query.TypeUnknown); isUnknown {
+		return true
+	}
+	if _, isNull := argType.(query.TypeNull); isNull {
 		return true
 	}
 	switch token {
@@ -1884,23 +1895,4 @@ func argAssignable(token procsig.TypeToken, argType query.Type) bool {
 	default:
 		return false
 	}
-}
-
-// typeWireTag returns the JSON wire tag for a query.Type (int / float /
-// string / bool / node / edge / list / unknown / ...) via the same
-// MarshalJSON path CallBinding uses, giving argAssignable's error messages a
-// tag that matches the wire the reviewer would see in a golden.
-func typeWireTag(t query.Type) string {
-	if t == nil {
-		return "unknown"
-	}
-	raw, err := json.Marshal(t)
-	if err != nil {
-		return "unknown"
-	}
-	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
-		return s
-	}
-	return string(raw)
 }
