@@ -78,7 +78,7 @@ Unfreeze cycle (Cycle 2, follow-up PR):
   `CallBinding` carries the same args slice. The two existing
   callees gain an `args []query.CallArg` parameter; the parameter-use
   and ref emission (lines 54-66) stays verbatim. §4.2.
-- `internal/query/cypher/parser_test.go` — the 30 CallBinding pins
+- `internal/query/cypher/parser_test.go` — the 15 CallBinding pins
   (§4.3 enumerates each) that today use `NewCallBinding("var",
   "proc", "field", ...)` stay VERBATIM under `require.Equal` for
   the pins whose CALLs have zero arguments (Go struct zero-value
@@ -1136,70 +1136,66 @@ per-scenario expected shape.
 
 ### 4.3 Parser-test pins — flips vs preserved
 
-`internal/query/cypher/parser_test.go` at branch base carries **30
-CallBinding pins** (fresh grep: `grep -c "NewCallBinding" internal/query/cypher/parser_test.go`
-returns 30). Under `require.Equal` (`reflect.DeepEqual`), a
-`CallBinding{…, args: nil}` equals a `CallBinding{…}` bit-for-bit
-(nil-slice-equals-nil-slice). Pins whose CALL has zero args stay
-verbatim; pins whose CALL has ≥ 1 arg flip.
+`internal/query/cypher/parser_test.go` at branch base carries **15
+CallBinding pins** (fresh grep at master `62923d8`:
+`grep -c "NewCallBinding" internal/query/cypher/parser_test.go`
+returns **15** — one `NewCallBinding` invocation per line). Under
+`require.Equal` (`reflect.DeepEqual`), a `CallBinding{…, args: nil}`
+equals a `CallBinding{…}` bit-for-bit (nil-slice-equals-nil-slice).
+Pins whose CALL has zero args stay verbatim; pins whose CALL has
+≥ 1 arg flip.
 
-Fresh census at `parser_test.go` (line numbers from master
-`62923d8`, cross-checked; asterisk marks a flip):
+Full census at `parser_test.go` (line numbers from master
+`62923d8`; asterisk marks a flip; twin lines share their pin's
+args slice by construction — same CALL, one args slice, two
+`NewCallBindingWithArgs(…)` call sites pointing at it):
 
-| Line | Pin name | CALL args | Flip? | Expected args slice |
+| Line | Enclosing pin | src (CALL invocation) | Flip? | Expected args slice |
 |---|---|---|---|---|
-| 2211 | `CALL standalone STRING YIELD * (Call1[3])` | `CALL test.labels()` — 0 args | no | `nil` |
-| 2232 | `CALL standalone STRING YIELD explicit (Call1[4])` | `CALL test.labels()` — 0 args | no | `nil` |
-| 2252 | `CALL standalone two args Standalone Returns (Call2[2])` | `CALL test.my.proc('Stefan', 1)` — 2 args | **yes*** | `[{TypeString}, {TypeInt}]` |
-| 2253 | (twin binding on the same pin above) | (same CALL) | **yes*** | (same slice — shared) |
-| 2279 | `CALL two-arg YIELD-star-implicit (Call2[…])` | `CALL test.my.proc('Stefan', 1)` — 2 args | **yes*** | `[{TypeString}, {TypeInt}]` |
-| 2280 | (twin binding) | (same CALL) | **yes*** | (shared) |
-| 2307 | `CALL in-query two-arg YIELD (Call2[…])` | 2 args | **yes*** | `[{TypeString}, {TypeInt}]` |
-| 2336 | `CALL NUMBER accepts INTEGER (Call3[1])` | `CALL test.my.proc(42)` — 1 arg | **yes*** | `[{TypeInt}]` |
-| 2385 | `CALL inside EXISTS suppression` | (no CallBinding minted — EXISTS suppresses) | n/a | (no binding) |
-| 2409 | `CALL bound-var argument regression lock` | `CALL test.labels(n.name)` — 1 arg | **yes*** | `[{TypeUnknown}]` |
-| 2410 | (twin binding on the same pin) | (same CALL) | **yes*** | (shared) |
+| 2211 | `CALL standalone no-args implicit-YIELD (Call1[5])` | `CALL test.labels()` — 0 args | no | `nil` |
+| 2232 | `CALL in-query YIELD RETURN (Call1[6])` | `CALL test.labels() YIELD label \| RETURN label` — 0 args | no | `nil` |
+| 2252 | `CALL in-query explicit args YIELD RETURN (Call2[1])` | `CALL test.my.proc('Stefan', 1)` — 2 args | **yes*** | `[{TypeString}, {TypeInt}]` |
+| 2253 | (twin on same pin, `country_code`) | (same CALL) | **yes*** | (shared slice) |
+| 2279 | `CALL standalone explicit args implicit-YIELD (Call2[2])` | `CALL test.my.proc('Stefan', 1)` — 2 args | **yes*** | `[{TypeString}, {TypeInt}]` |
+| 2280 | (twin on same pin, `country_code`) | (same CALL) | **yes*** | (shared slice) |
+| 2307 | `CALL standalone explicit args YIELD * (Call5[8])` | `CALL test.my.proc('Stefan', 1) YIELD *` — 2 args | **yes*** | `[{TypeString}, {TypeInt}]` |
+| 2308 | (twin on same pin, `country_code`) | (same CALL) | **yes*** | (shared slice) |
+| 2336 | `CALL NUMBER accepts INTEGER standalone (Call3[1])` | `CALL test.my.proc(42)` — 1 arg | **yes*** | `[{TypeInt}]` |
+| 2385 | `authored CALL bound-var argument regression lock` | `MATCH (n) \| CALL test.labels(n.name) YIELD label` — 1 arg | **yes*** | `[{TypeUnknown}]` |
+| 2409 | `authored CALL standalone Returns signature-declaration-order` | `CALL test.my.proc(42)` — 1 arg | **yes*** | `[{TypeInt}]` |
+| 2410 | (twin on same pin, second Returns binding) | (same CALL) | **yes*** | (shared slice) |
 | 2444 | `CALL then WITH then CALL (Call6[1])` Part 1 | `CALL test.labels()` — 0 args | no | `nil` |
 | 2452 | `CALL then WITH then CALL (Call6[1])` Part 2 | `CALL test.labels()` — 0 args | no | `nil` |
-| 2475 | `CALL YIELD trailing WHERE parameter-mining probe` | `CALL test.labels()` — 0 args | no | `nil` |
-| 2211 | `authored CALL standalone Returns signature-declaration-order` | `CALL test.my.proc(42)` — 1 arg | **yes*** | `[{TypeInt}]` |
-| (14 more pins across Call4 / Call5 outlines — same shape) | | | | |
+| 2475 | `authored CALL YIELD trailing WHERE parameter-mining probe` | `CALL test.labels() YIELD label WHERE label = $needle` — 0 args | no | `nil` |
 
-**The Call5 outline pins are the largest single flip cluster** —
-Call5 tests iterate over 8+ YIELD orderings for the same 2-arg
-signature; each pin flips independently. §4.3.1 enumerates each.
+**Totals.** 15 pins across 11 distinct `mustParse` entries: **9
+flip** (all ≥1-arg CALLs, across 6 distinct pins — the twins
+cluster on 3 shared 2-arg CALLs and 1 shared 1-arg CALL) and **6
+preserve** (all zero-arg CALLs, one pin each). Every flip is a
+mechanical constructor swap from `NewCallBinding(…)` to
+`NewCallBindingWithArgs(…, sharedArgsSlice)`; no pin is added,
+deleted, or split by this cycle.
 
-The full 30-pin census is authoritatively derived by:
+**Corpus stability note.** The 15-pin count is stable against
+master `62923d8`. Any code-cycle PR that adds a new CallBinding
+pin between spec merge and unfreeze merge MUST update this census
+authoritatively — a diff-mismatch here is a code-vs-spec drift.
+The unfreeze PR is expected to leave the pin count at 15 and
+apply exactly the flip pattern above.
 
-```
-grep -n "NewCallBinding" internal/query/cypher/parser_test.go
-```
+#### 4.3.1 Full 15-pin flip census
 
-against master `62923d8`; every match at a line number ≥ 2211 is
-one CallBinding constructor invocation, and the enclosing
-`mustParse` pin's `src` field text identifies the CALL args.
-**Any code-cycle PR that adds a new CallBinding pin between spec
-merge and unfreeze merge MUST add it to §4.3.1's census
-authoritatively — a diff-mismatch here is a code-vs-spec drift.**
-
-#### 4.3.1 Full 30-pin flip census
-
-To be enumerated at unfreeze-PR-drafting time by running:
-
-```
-grep -n "NewCallBinding" internal/query/cypher/parser_test.go > /tmp/pins.txt
-# For each hit at line L, read the enclosing `mustParse` entry's
-# src field (5-40 lines up from L), identify the CALL invocation
-# by regex, and classify as no-args (line stays verbatim) or
-# ≥1-arg (line flips from NewCallBinding(…) to
-# NewCallBindingWithArgs(…, []query.CallArg{ NewCallArg(t1), …})).
-```
-
-The mechanical enumeration is deferred to the unfreeze PR (the pin
-count and classification is stable against `62923d8`; per-line
-witnessing is a fresh-read discipline at PR-draft time). §4.3.2
-lists the fresh-mined classification format the PR must use, so
-reviewer verification is a mechanical set-check.
+The full census is **the table in §4.3 above** — no further
+enumeration is deferred. Reviewer verification is a mechanical
+set-check: run `grep -n "NewCallBinding" internal/query/cypher/parser_test.go`
+against the unfreeze branch, cross-reference each hit's line
+number and enclosing pin name against the table, then confirm the
+flip predicate (0-arg CALL ⇒ preserved, ≥1-arg CALL ⇒ flipped to
+`NewCallBindingWithArgs`). Twin lines (`2253`, `2280`, `2308`,
+`2410`) share their pin's args slice by construction — the
+unfreeze PR MUST allocate one `[]query.CallArg{…}` literal per
+`mustParse` entry and pass the same slice value to both twin
+`NewCallBindingWithArgs` invocations.
 
 #### 4.3.2 Classification format for the unfreeze PR
 
@@ -2055,9 +2051,9 @@ numbers verified against master `62923d8`.
   - Per-prefix: Call1 2 (both no-arg), Call2 3 (2 flip, 1 no-arg
     implicit), Call3 6 (all 6 flip), Call4 2 (all 2 flip), Call5
     16 (all 16 flip), Call6 3 (2 flip, 1 no-arg)
-- **Parser-test pin count** — 30 CallBinding pins at branch base
+- **Parser-test pin count** — 15 CallBinding pins at branch base
   (fresh grep `grep -c NewCallBinding internal/query/cypher/parser_test.go`
-  returns 30; verified this cycle).
+  returns 15; verified this cycle).
 
 **Design-escalation checklist** (team-lead / linus resolve before
 resolver-widening PR):
