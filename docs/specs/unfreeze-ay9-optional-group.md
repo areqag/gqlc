@@ -58,8 +58,8 @@ Unfreeze cycle (Cycle 2, follow-up PR):
   `OptionalGroup int \`json:"optionalGroup,omitempty"\`` key. §4.1.
 - `internal/query/query_test.go` — new tests pinning the InGroup
   constructors' true side, the group<1 rejection, the
-  omit-when-zero wire, and the group-carrying wire fragment. The 13
-  pre-existing `NewNullable*` pins (4 + 7 + 2 across the three
+  omit-when-zero wire, and the group-carrying wire fragment. The 10
+  pre-existing `NewNullable*` pins (3 + 6 + 1 across the three
   ctors) stay verbatim — they pin the preserved group-0 behaviour.
   §5.
 - `internal/query/cypher/listener.go` — the `listener` struct
@@ -360,14 +360,15 @@ Two precedents exist:
    used new-ctor for exactly this reason.
 2. **Blast radius, counted.** Existing `NewNullable*` call sites at
    branch base (declarations excluded): trailing-param would edit
-   **20 sites** — `build.go` 3 (the `toBinding` arms, which change
-   under either strategy), `internal/query/query_test.go` 13
-   (4 node + 7 edge + 2 var-length), `parser_test.go` 4 (`:327`,
-   `:344`, `:349`, `:1192`). New-ctor edits only the sites that
-   *must* change because parser behaviour changes: `build.go`'s 3
-   arms and `parser_test.go`'s 4 invocations (§4.3); the 13
-   query_test pins stay verbatim, pinning the preserved ctors'
-   group-0 behaviour.
+   **17 sites** — `build.go` 3 (the `toBinding` arms, which change
+   under either strategy), `internal/query/query_test.go` 10
+   (3 node at `:50`/`:61`/`:710` + 6 edge at
+   `:116`/`:131`/`:139`/`:141`/`:166`/`:714` + 1 var-length at
+   `:1140`), `parser_test.go` 4 (`:327`, `:344`, `:349`, `:1192`).
+   New-ctor edits only the sites that *must* change because parser
+   behaviour changes: `build.go`'s 3 arms and `parser_test.go`'s 4
+   invocations (§4.3); the 10 query_test pins stay verbatim,
+   pinning the preserved ctors' group-0 behaviour.
 
 The three new constructors (§4.1.2) reject `group < 1` — group 0 is
 reachable only through the preserved legacy ctors, keeping "in a
@@ -821,7 +822,7 @@ axis):
   which is the wire-compat fence in unit form.
 
 The pre-existing `TestMarshalJSONEmitsNullable`
-(`query_test.go:704-723`) and the 13 `NewNullable*` pins stay
+(`query_test.go:704-723`) and the 10 `NewNullable*` pins stay
 verbatim.
 
 ---
@@ -1158,6 +1159,9 @@ verbatim), located at branch base:
 | `resolver-stage-r5.md:2311` | §7 table | "Nullability upgrades (OPTIONAL-clause-sibling …) … gqlc-ay9" |
 | `resolver-stage-r6.md:1884` | §7 table | "… gqlc-ay9 (Class A, model unfreeze — unchanged from R5)" |
 | `resolver-stage-r7.md:2190` | §7 table | "… gqlc-ay9 (unchanged)" |
+| `resolver-stage-r5.md:40` | §1 prose | "sibling under-approximation (gap tracked on gqlc-ay9) is also unchanged" |
+| `resolver-stage-r6.md:29` | §1 prose | "same-Part regime (b) nullability under-approximations (`gqlc-ay9`, …" |
+| `resolver-stage-r7.md:2335` | §7.1.2 prose | "R4-inherited gaps (`gqlc-ay9` Class A, … persist at R7 unchanged" |
 
 Successor wording per row: "closed by the ay9 unfreeze + widening
 (`docs/specs/unfreeze-ay9-optional-group.md`); residual cross-Part
