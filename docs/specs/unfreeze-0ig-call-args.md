@@ -1851,6 +1851,18 @@ func argAssignable(argType query.Type, paramToken procsig.TypeToken) bool {
 }
 ```
 
+**Drift-arm sentinel discipline (Errata E2, §12).** The sketch above wraps the
+two parser-drift arms (registry miss, arity mismatch) in a sentinel. As
+landed on `unfreeze-0ig-resolver`, both drift arms fire as **plain
+non-sentinel** `fmt.Errorf` — not `ErrOutOfR0Scope` (R7 §5.2 retired that
+sentinel's BindingCall fail-site; reintroducing it here would reverse
+that retirement) and not `ErrCallArgAssignability` (sole-purpose for the
+per-position lattice check — §8.3 / NIT7). Both drift arms are
+parser-authoritative pre-conditions (`ErrUnknownProcedure` +
+`ErrProcedureArity` fire at parse-time; the resolver arms are
+unreachable in-corpus), so a plain error is loud when it does fire
+without polluting the assignability sentinel's fixture semantics.
+
 **Slot placement.** The helper lives in `resolve.go` alongside the
 existing `callBindingSlot` machinery (`:95-103`). No new file.
 
@@ -1899,7 +1911,8 @@ Per §2.4:
 | NUMBER | TypeInt | yes | (Call3 [1]/[2]) |
 | NUMBER | TypeFloat | yes | (Call3 [3]/[4]) |
 | NUMBER | TypeString | **no** | (out of NUMBER scope — reject) |
-| any | TypeUnknown | yes | (`$param` / `n.name` / `null`) |
+| any | TypeUnknown | yes | (`$param` / `n.name` — Stage 6 §4 fallback) |
+| any | TypeNull | yes | (bare `null` literal — mines to `TypeNull` via `shape.go:79`, distinct sum member per `type.go:80`. Wildcard-admits alongside `TypeUnknown` so TCK Call5 [4] `CALL test.my.proc(null)` against a nullable-typed param resolves. Errata E1 — §12) |
 
 **Wait — FLOAT accepts INTEGER? Re-check.** ADR 0007 line 173:
 _"NUMBER stays a signature-only marker (assignable-from INTEGER-or-
@@ -2291,13 +2304,17 @@ resolver-widening PR (cycle 3) then implements §8 verbatim.
 
 ## 12. Errata (2026-07-07, adversarial post-merge review)
 
-Eight defects surfaced by adversarial review of the spec against
+Ten defects surfaced by adversarial review of the spec against
 the landed model (PR #122, `70f5c29`) and the resolver-widening
-branch (`origin/unfreeze-0ig-resolver` head `1eb7764`). None
-required a code edit — every defect was a spec-text divergence
-from repo reality or a load-bearing gap the earlier draft
-under-specified. Fixes applied in place above; this section is
-the reviewer-facing index.
+branch (`origin/unfreeze-0ig-resolver` post-review head
+`43e40a8`). None required a code edit that changed observable
+model behaviour — every defect was a spec-text divergence from
+repo reality or a load-bearing gap the earlier draft
+under-specified. The eight items B1/B3/B4/Item-4/Item-5/NIT5/
+NIT6/NIT7 landed in the first errata commit (`9a4d360`); E1 and
+E2 land in a follow-up errata commit alongside PR #123's
+`unfreeze-0ig-resolver` review findings. Fixes applied in place
+above; this section is the reviewer-facing index.
 
 **B1. Fabricated Call5_31baf2f6ab54 witness (§4.4.2 + §3.4
 arithmetic).** The original §4.4.2 "sixth witness for the
@@ -2414,3 +2431,37 @@ divergence, its reasoning, and the resolution. The "zero new
 sentinels" line was an R7-scoped commitment, not an ADR-level
 ban; 0ig introduces one new sentinel with its own semantic
 surface.
+
+**E1. `TypeNull` accept-anywhere wildcard (§8.2 lattice table).** §8.2's
+original lattice attributed a bare `null` argument to the `TypeUnknown`
+wildcard row. That is wrong at the mining site: `shape.go:79` mines a
+`NULL` literal to `query.TypeNull{}`, a distinct sum member from
+`query.TypeUnknown{}` (`type.go:80`; the two variants marshal to
+different wire tags — `"null"` vs `"unknown"`). §8.2's lattice table
+now carries a **separate `TypeNull` wildcard row** alongside
+`TypeUnknown`, so both accept at every param position. The resolver
+implementation (`argAssignable`) admits both explicitly.
+
+Ground-truth grep: `internal/query/cypher/shape.go:74-90` returns
+`TypeNull{}` on the `lit.NULL()` branch; `internal/query/type.go:1-90`
+declares `TypeNull` as its own sum member (`func (TypeNull) isType() {}`
+at :88). TCK Call5 [4] (`CALL test.my.proc(null) YIELD a, b AS d`) is
+the driving witness: without a `TypeNull` wildcard, it would reject at
+`INTEGER?`. §4.4.2's Call5[4] correction (B1) and §3.5's real wire
+quotes (B3) already presume this — the two prior errata items were
+inconsistent with the lattice until this row landed.
+
+**E2. Drift-arm sentinel discipline (§8.1 checkCallArgs).** §8.1's
+sketch of `checkCallArgs` wrapped the two parser-drift arms
+(registry-miss, arity-mismatch) in `ErrOutOfR0Scope`. As landed on
+`unfreeze-0ig-resolver` (post-review at 43e40a8), both drift arms fire
+**plain non-sentinel** `fmt.Errorf` — not `ErrOutOfR0Scope` (R7 §5.2
+retired that sentinel's BindingCall fail-site; the drift-arm wrap
+would reintroduce it) and not `ErrCallArgAssignability` (sole-purpose
+for the per-position lattice check — NIT7). The parser is authoritative
+on procedure lookup and arity (`ErrUnknownProcedure` at `call.go:42`,
+`ErrProcedureArity` at `call.go:74-76`), so both resolver drift arms
+are unreachable in-corpus; a plain error is loud when it does fire
+without polluting `ErrCallArgAssignability`'s fixture semantics or
+reversing R7 §5.2's retirement. §8.1 now records the discipline
+directly under the sketch code block ("**Drift-arm sentinel discipline**").
