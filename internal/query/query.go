@@ -841,11 +841,45 @@ func (b UnwindBinding) MarshalJSON() ([]byte, error) {
 // call-yielded variable types as ResultType() (see cypher's
 // internal refType in typing.go).
 type CallBinding struct {
-	variable    string // always non-empty
-	procedure   string // fully-qualified name; always non-empty
-	sourceField string // signature-declared result column; always non-empty
-	resultType  Type   // bridged Stage-6 result type; TypeUnknown for NUMBER
-	nullable    bool   // signature's trailing '?'
+	variable    string    // always non-empty
+	procedure   string    // fully-qualified name; always non-empty
+	sourceField string    // signature-declared result column; always non-empty
+	resultType  Type      // bridged Stage-6 result type; TypeUnknown for NUMBER
+	nullable    bool      // signature's trailing '?'
+	args        []CallArg // per-position mined arg types (0ig, ADR 0008 amendment 2026-07-07)
+}
+
+// CallArg is one per-position argument record on a CallBinding: the
+// Stage-6 type mined from the argument expression at parse time. The
+// slice index is the argument position; the sig-vocabulary check
+// (procsig.Registry.Lookup(procedure).Params[i]) stays resolver-side
+// (0ig spec §3.2 — the wire records only query.Type).
+type CallArg struct {
+	t Type // mined Stage-6 type; TypeUnknown for $param / n.name / null (never bare nil)
+}
+
+// NewCallArg builds a CallArg, normalising a nil Type to TypeUnknown{}
+// (mirroring NewCallBinding at :867-869). The parser never mints a bare
+// nil, but the constructor is the model-invariant guard.
+func NewCallArg(t Type) CallArg {
+	if t == nil {
+		t = TypeUnknown{}
+	}
+	return CallArg{t: t}
+}
+
+// Type is the argument's mined Stage-6 type.
+func (a CallArg) Type() Type { return a.t }
+
+// MarshalJSON renders a CallArg as a JSON object with a single "type"
+// field carrying the mined Stage-6 type. Every field is always
+// emitted (the record is atomic — the wire cannot represent a CallArg
+// with an unknown type differently from an argument whose expression
+// mines to TypeUnknown).
+func (a CallArg) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Type Type `json:"type"`
+	}{Type: a.t})
 }
 
 // NewCallBinding builds a CallBinding, rejecting the empty variable /
@@ -855,6 +889,16 @@ type CallBinding struct {
 // same "cannot tell" fallback NewUnwindBinding and NewRefProjection
 // use.
 func NewCallBinding(variable, procedure, sourceField string, resultType Type, nullable bool) (CallBinding, error) {
+	return NewCallBindingWithArgs(variable, procedure, sourceField, resultType, nullable, nil)
+}
+
+// NewCallBindingWithArgs builds a CallBinding carrying an additive
+// per-position args slice (0ig). The args slice is shared verbatim
+// across every CallBinding minted from the same CALL clause (spec
+// §4.3.1) — the caller is responsible for allocating one slice per
+// CALL and passing the same slice value to each NewCallBindingWithArgs
+// invocation.
+func NewCallBindingWithArgs(variable, procedure, sourceField string, resultType Type, nullable bool, args []CallArg) (CallBinding, error) {
 	if variable == "" {
 		return CallBinding{}, errors.New("query: call binding requires a non-empty variable")
 	}
@@ -873,6 +917,7 @@ func NewCallBinding(variable, procedure, sourceField string, resultType Type, nu
 		sourceField: sourceField,
 		resultType:  resultType,
 		nullable:    nullable,
+		args:        args,
 	}, nil
 }
 
@@ -906,21 +951,34 @@ func (CallBinding) Kind() BindingKind { return BindingCall }
 // field verbatim — a static parser-time fact set at construction.
 func (b CallBinding) Nullable() bool { return b.nullable }
 
+// Args is the per-position mined-arg record for this CALL. All
+// CallBindings minted from the same CALL clause share the same slice
+// value by construction (spec §4.3.1); the slice is nil for a
+// zero-arg CALL. The resolver reads Args() to check argument-site
+// assignability against procsig.Registry.Lookup(procedure).Params
+// under the ADR 0007 Stage-14 NUMBER-assignable-from-INTEGER-or-FLOAT
+// rule (0ig resolver-widening PR).
+func (b CallBinding) Args() []CallArg { return b.args }
+
 func (CallBinding) isBinding() {}
 
 // MarshalJSON renders a CallBinding as a tagged union member
 // discriminated by "kind" (derived from BindingKind, the single
 // source), carrying every field always-emitted. sourceField is
 // always emitted (even when equal to variable) so a rename
-// (`YIELD out AS x`) is unambiguous at the wire.
+// (`YIELD out AS x`) is unambiguous at the wire. args is
+// omit-when-zero-length (post-freeze convention hk0/fvo
+// established), so a zero-arg CALL serialises byte-identical to
+// the pre-0ig wire.
 func (b CallBinding) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Kind        string `json:"kind"`
-		Variable    string `json:"variable"`
-		Procedure   string `json:"procedure"`
-		SourceField string `json:"sourceField"`
-		ResultType  Type   `json:"resultType"`
-		Nullable    bool   `json:"nullable"`
+		Kind        string    `json:"kind"`
+		Variable    string    `json:"variable"`
+		Procedure   string    `json:"procedure"`
+		SourceField string    `json:"sourceField"`
+		ResultType  Type      `json:"resultType"`
+		Nullable    bool      `json:"nullable"`
+		Args        []CallArg `json:"args,omitempty"`
 	}{
 		Kind:        b.Kind().String(),
 		Variable:    b.variable,
@@ -928,6 +986,7 @@ func (b CallBinding) MarshalJSON() ([]byte, error) {
 		SourceField: b.sourceField,
 		ResultType:  b.resultType,
 		Nullable:    b.nullable,
+		Args:        b.args,
 	})
 }
 

@@ -10,7 +10,12 @@
               "procedure": "test.my.proc",
               "sourceField": "b",
               "resultType": "int",
-              "nullable": true
+              "nullable": true,
+              "args": [
+                {
+                  "type": "null"
+                }
+              ]
             },
             {
               "kind": "call",
@@ -18,7 +23,12 @@
               "procedure": "test.my.proc",
               "sourceField": "a",
               "resultType": "int",
-              "nullable": true
+              "nullable": true,
+              "args": [
+                {
+                  "type": "null"
+                }
+              ]
             }
           ],
           "returns": [

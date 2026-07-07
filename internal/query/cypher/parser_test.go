@@ -2249,8 +2249,8 @@ var mustParse = map[string]struct {
 		src: "CALL test.my.proc('Stefan', 1) YIELD city, country_code\nRETURN city, country_code",
 		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
-				must(query.NewCallBinding("city", "test.my.proc", "city", query.TypeString{}, true)),
-				must(query.NewCallBinding("country_code", "test.my.proc", "country_code", query.TypeInt{}, true)),
+				must(query.NewCallBindingWithArgs("city", "test.my.proc", "city", query.TypeString{}, true, []query.CallArg{query.NewCallArg(query.TypeString{}), query.NewCallArg(query.TypeInt{})})),
+				must(query.NewCallBindingWithArgs("country_code", "test.my.proc", "country_code", query.TypeInt{}, true, []query.CallArg{query.NewCallArg(query.TypeString{}), query.NewCallArg(query.TypeInt{})})),
 			},
 			Returns: []query.ReturnItem{
 				{Name: "city", Value: query.NewRefProjection(query.Ref{Variable: "city"}, query.TypeString{})},
@@ -2276,8 +2276,8 @@ var mustParse = map[string]struct {
 		src: "CALL test.my.proc('Stefan', 1)",
 		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
-				must(query.NewCallBinding("city", "test.my.proc", "city", query.TypeString{}, true)),
-				must(query.NewCallBinding("country_code", "test.my.proc", "country_code", query.TypeInt{}, true)),
+				must(query.NewCallBindingWithArgs("city", "test.my.proc", "city", query.TypeString{}, true, []query.CallArg{query.NewCallArg(query.TypeString{}), query.NewCallArg(query.TypeInt{})})),
+				must(query.NewCallBindingWithArgs("country_code", "test.my.proc", "country_code", query.TypeInt{}, true, []query.CallArg{query.NewCallArg(query.TypeString{}), query.NewCallArg(query.TypeInt{})})),
 			},
 			Returns: []query.ReturnItem{
 				{Name: "city", Value: query.NewRefProjection(query.Ref{Variable: "city"}, query.TypeString{})},
@@ -2304,8 +2304,8 @@ var mustParse = map[string]struct {
 		src: "CALL test.my.proc('Stefan', 1) YIELD *",
 		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
-				must(query.NewCallBinding("city", "test.my.proc", "city", query.TypeString{}, true)),
-				must(query.NewCallBinding("country_code", "test.my.proc", "country_code", query.TypeInt{}, true)),
+				must(query.NewCallBindingWithArgs("city", "test.my.proc", "city", query.TypeString{}, true, []query.CallArg{query.NewCallArg(query.TypeString{}), query.NewCallArg(query.TypeInt{})})),
+				must(query.NewCallBindingWithArgs("country_code", "test.my.proc", "country_code", query.TypeInt{}, true, []query.CallArg{query.NewCallArg(query.TypeString{}), query.NewCallArg(query.TypeInt{})})),
 			},
 			Returns: []query.ReturnItem{
 				{Name: "city", Value: query.NewRefProjection(query.Ref{Variable: "city"}, query.TypeString{})},
@@ -2333,7 +2333,7 @@ var mustParse = map[string]struct {
 		src: "CALL test.my.proc(42)",
 		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
-				must(query.NewCallBinding("out", "test.my.proc", "out", query.TypeString{}, true)),
+				must(query.NewCallBindingWithArgs("out", "test.my.proc", "out", query.TypeString{}, true, []query.CallArg{query.NewCallArg(query.TypeInt{})})),
 			},
 			Returns: []query.ReturnItem{
 				{Name: "out", Value: query.NewRefProjection(query.Ref{Variable: "out"}, query.TypeString{})},
@@ -2382,7 +2382,7 @@ var mustParse = map[string]struct {
 		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("n", nil)),
-				must(query.NewCallBinding("label", "test.labels", "label", query.TypeString{}, true)),
+				must(query.NewCallBindingWithArgs("label", "test.labels", "label", query.TypeString{}, true, []query.CallArg{query.NewCallArg(query.TypeUnknown{})})),
 			},
 			Returns: []query.ReturnItem{
 				{Name: "label", Value: query.NewRefProjection(query.Ref{Variable: "label"}, query.TypeString{})},
@@ -2406,8 +2406,8 @@ var mustParse = map[string]struct {
 		src: "CALL test.my.proc(42)",
 		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
-				must(query.NewCallBinding("a", "test.my.proc", "a", query.TypeInt{}, true)),
-				must(query.NewCallBinding("b", "test.my.proc", "b", query.TypeString{}, true)),
+				must(query.NewCallBindingWithArgs("a", "test.my.proc", "a", query.TypeInt{}, true, []query.CallArg{query.NewCallArg(query.TypeInt{})})),
+				must(query.NewCallBindingWithArgs("b", "test.my.proc", "b", query.TypeString{}, true, []query.CallArg{query.NewCallArg(query.TypeInt{})})),
 			},
 			Returns: []query.ReturnItem{
 				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeInt{})},

@@ -1,5 +1,36 @@
 # `query.Query` is frozen; the resolver API is pinned
 
+> _Amendment (2026-07-07, gqlc-0ig unfreeze cycle): the
+> per-position CALL-arg attribution axis on `CallBinding` — recorded
+> as the R7 §7.1.1 CALL-arg-attribution deferral — is **adopted**
+> under this ADR's additive-only revision protocol. The R7-shipped
+> "no arg-site check" posture
+> (`docs/specs/resolver-stage-r7.md §7.1.1`) was an honest
+> workaround for the wire's missing per-argument attribution; the
+> resolver widening (post-0ig) walks each CallBinding's `Args()`
+> per Phase A1 and checks each mined type against
+> `procsig.Registry.Lookup(procedure).Params[i].Token` under the
+> ADR 0007 Stage-14 note's assignability rule
+> (`docs/adr/0007-pre-freeze-scope-full-opencypher-surface.md`
+> lines 172-174: NUMBER assignable-from INTEGER-or-FLOAT). The
+> `CallBinding` sum gains one additive field `args []CallArg`, one
+> new positional constructor `NewCallBindingWithArgs`, one new
+> accessor `Args() []CallArg`, and one new sub-type `CallArg` with
+> `NewCallArg(t Type)` and `Type() Type`. The `CallBinding.args`
+> encoding is **omit-when-zero-length** (`,omitempty`), following
+> the post-freeze convention this ADR's hk0 amendment established
+> for additive axes. `procsig.TypeToken` stays a signature-only
+> vocabulary (ADR 0007 Stage-14 note); the wire records only the
+> parser-mined `query.Type`, and the resolver bridges by looking up
+> the procedure name against the compile-time `procsig.Registry`.
+> The Binding interface stays sealed at one method (`isBinding()`);
+> Args attribution is a CallBinding-only field-and-accessor concern.
+> See `docs/specs/unfreeze-0ig-call-args.md` for the full contract,
+> the 28-golden rebaseline accounting with per-scenario spot
+> witnesses, the layering divergence from the bead text's
+> parser-emits-sig-token proposal, and the semantic-diff-only fence
+> commands._
+
 > _Amendment (2026-07-06, gqlc-fvo unfreeze cycle): the
 > Use → Part attribution axis on `PropertyUse` / `ExprUse` /
 > `ClauseSlotUse` — recorded implicitly as the R5 §4.2.4
@@ -262,6 +293,17 @@ in-protocol when they arrive, not scope creep:
   CLOSED Part) is honestly recorded in the amendment note
   above and filed as a follow-up (§7.6 and §9 in the fvo
   spec).
+- **`CallBinding.Args` axis** — adopted 2026-07-07 (see the
+  amendment note above and `docs/specs/unfreeze-0ig-call-args.md`).
+  Populated parser-side by `collectCall`'s existing arg-mining
+  loop capturing the mined `query.Type` per argument position;
+  consumed by the resolver's Phase A1 arg-site assignability walk
+  (`internal/resolver/resolve.go` CallBinding arm — see 0ig
+  resolver-widening PR) which looks up
+  `procsig.Registry.Lookup(procedure).Params[i].Token` and checks
+  under ADR 0007's NUMBER-assignable-from-INTEGER-or-FLOAT rule.
+  `procsig.TypeToken` stays signature-only vocabulary; the wire
+  records only `query.Type`. The R7 §7.1.1 deferral is closed.
 
 ### shortestPath is a dialect extension, out of the frozen scope
 

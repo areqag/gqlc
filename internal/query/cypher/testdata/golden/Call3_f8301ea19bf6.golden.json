@@ -10,7 +10,12 @@
               "procedure": "test.my.proc",
               "sourceField": "out",
               "resultType": "string",
-              "nullable": true
+              "nullable": true,
+              "args": [
+                {
+                  "type": "int"
+                }
+              ]
             }
           ],
           "returns": [
