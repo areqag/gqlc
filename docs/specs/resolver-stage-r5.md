@@ -869,11 +869,16 @@ end-of-query on the collected witnesses.
 property) AND a Part index (fvo per ADR 0008 amendment
 2026-07-06 — see `docs/specs/unfreeze-fvo-use-part.md`). The
 resolver's `witnessAcrossScopes` reads `u.Part()` and witnesses
-against `branchScopes[u.Part()]` exactly once — the scope of the
-Part the parser attributed the Use to at emission time. If the
-scope does not contain the Ref's variable, the Use contributes
-zero witnesses (treated as ResolvedUnknown by the unifier). If the
-scope contains the variable but the property lookup fails,
+against `branchScopes[u.Part()]` — the scope of the Part the
+parser attributed the Use to at emission time. Under UNION the
+`witnessInBranch` dispatcher wraps this call with a
+cross-branch fallback at the same Part index on
+`ErrUnknownProperty` (see fvo spec §7.2.2 for the position
+cursor + fallback machinery that recovers per-Use branch
+attribution from the frozen query model). If the scope does not
+contain the Ref's variable, the Use contributes zero witnesses
+(treated as ResolvedUnknown by the unifier). If the scope
+contains the variable but the property lookup fails,
 `ErrUnknownProperty` surfaces immediately.
 
 For a `PropertyUse` this discipline closes the pre-fvo
@@ -2305,7 +2310,7 @@ R4's out-of-scope table survives with revisions:
 | Nullability upgrades (regime (b), same-Part re-MATCH — Class B: missing-witness model gap) | silently under-demoted | gqlc-5xg (model unfreeze) |
 | Nullability upgrades (OPTIONAL-clause-sibling — Class A: missing-group-membership model gap) | silently under-demoted | gqlc-ay9 (model unfreeze) |
 | `ExprProjection` residual mixed with `AggregateProjection` in the same Part's Returns — grouping-key discrimination gap | silently under-grouped (uniform-exclude posture) | §4.5.3.3 follow-up bead (Shape B `ContainsAggregate` parser-side bit) |
-| Cross-Part parameter Use where the true attributed Part would reject but another same-name Part admits — Use→Part attribution gap (§4.2.4) | **closed by gqlc-fvo (2026-07-06)**: `docs/specs/unfreeze-fvo-use-part.md` threads `Part` on every `Use` and the resolver's `witnessAcrossScopes` witnesses against `branchScopes[u.Part()]` exactly. Residual WITH-aliased-projection shadow (see fvo spec §7.6.1) is filed for a future scope-attribution cycle. | closed |
+| Cross-Part parameter Use where the true attributed Part would reject but another same-name Part admits — Use→Part attribution gap (§4.2.4) | **closed by gqlc-fvo (2026-07-06)**: `docs/specs/unfreeze-fvo-use-part.md` threads `Part` on every `Use` and the resolver's `witnessAcrossScopes` witnesses against `branchScopes[u.Part()]`. Under UNION the `witnessInBranch` dispatcher wraps this with a same-Part cross-branch fallback (fvo spec §7.2.2, PR #118) — two residuals of that fallback (same-Part UNION boundary ambiguity, UNION-later-Part spurious rejection) are filed as **gqlc-qcc** for a future cycle. Residual WITH-aliased-projection shadow (fvo spec §7.6.1) is filed as **gqlc-4w5** for a future scope-attribution cycle. | closed |
 
 **Silently accepted (not routed anywhere):**
 

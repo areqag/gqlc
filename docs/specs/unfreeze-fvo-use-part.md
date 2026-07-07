@@ -408,10 +408,19 @@ and a fresh `curPart` (parts[0]).
 positive. `subqueryDepth > 0` implies clause collection is
 suppressed — but parameter mining still fires at entry
 (`internal/query/cypher/listener.go:629-638`), which calls
-`addParameterUse` with `curPart` pointing at the OUTER Part. The
-attribution is to the OUTER Part where the EXISTS lexically
-sits — sound: the outer parser's `curPart` is Part K where the
-outer projection/predicate carries the `EXISTS { … }`.
+`addParameterUse` against whatever `curPart` was installed by the
+walker at that point. **The attribution is to the emission-time
+`curPart` — NOT unconditionally the "outer" Part.** For the
+MATCH-WHERE-EXISTS shape `curPart` is Part K (the outer MATCH's
+Part); for the WITH-WHERE-EXISTS shape, `EnterOC_With`
+(`:278-294`) runs FIRST — descending into the WITH's OC_Where
+subtree calls `mineWhere` (`expr.go:475-483` guards against
+descending into `IOC_ExistentialSubquery`), then the swap at
+`:292-293` installs the NEW Part K+1, THEN the walker descends
+into the WHERE's `IOC_ExistentialSubquery` child and fires
+`EnterOC_ExistentialSubquery` — so `curPart` at emission is Part
+K+1. See §12 ERRATUM 1 and the pin at `parser_test.go:1712`
+(`NewExprUseAt(TypeBool, ExprInPredicate, 1)`).
 
 **All emission points reach `addParameterUse`** via one of the
 sites at §3.3; §3.3 tabulates each with its emission-time
@@ -436,7 +445,7 @@ same helper, so the row count reads 16 while the site count is 18
 | # | File | Line | Enclosing handler / helper | Use variant | Part index knowable? |
 |---|---|---|---|---|---|
 | 1 | `listener.go` | 499 | `EnterOC_Delete` — DELETE target expression parameter | `NewExprUse(TypeUnknown, ExprInDeleteTarget)` | **yes** — Delete is a Part-collecting handler with `curPart` = the Part containing the DELETE |
-| 2 | `listener.go` | 637 | `EnterOC_ExistentialSubquery` — parameter inside an EXISTS body | `NewExprUse(TypeBool, ExprInPredicate)` | **yes** — the outer Part index (the EXISTS lexically sits in the outer projection/predicate); `curPart` at entry is the outer Part |
+| 2 | `listener.go` | 637 | `EnterOC_ExistentialSubquery` — parameter inside an EXISTS body | `NewExprUse(TypeBool, ExprInPredicate)` | **yes** — the emission-time `curPart` (§12 ERRATUM 1): Part K when the enclosing WHERE is a MATCH-WHERE (no prior swap), Part K+1 when the enclosing WHERE is a WITH-WHERE (`EnterOC_With` at `:278-294` has already swapped `curPart` by the time the walker descends into the WHERE's `IOC_ExistentialSubquery` child) |
 | 3 | `call.go` | 64 | `enterInQueryCall` / `enterStandaloneCall` — CALL argument parameter (rich-expression path) | `NewExprUse(t, ExprInProjection)` | **yes** — CALL clauses are Part-collecting handlers; `curPart` = the Part containing the CALL |
 | 4 | `call.go` | 164 | `enterInQueryCall` — CALL WHERE-on-YIELD parameter | `NewExprUse(TypeBool, ExprInPredicate)` | **yes** — same Part as (3) |
 | 5 | `typing.go` | 445 | `typeQuantifier` — quantifier source-list parameter (mined inside typing walk) | `NewExprUse(sourceType, ExprInPredicate)` | **yes** — the typing walk runs inside a `collectReturnItem` / `mineWhere` / `collectSetItem` / `collectDeleteItem` frame; `curPart` is unchanged during the walk |
@@ -1219,26 +1228,37 @@ at branch base `baba282`:
 | 1528 | Rich projection | `NewExprUse(TypeInt, ExprInProjection)` | `RETURN sum($p + 1)` or similar — single-Part | 0 |
 | 1672 | Predicate residual | `NewExprUse(TypeBool, ExprInPredicate)` | WHERE residual | 0 |
 | 1690 | Predicate residual | `NewExprUse(TypeBool, ExprInPredicate)` | WHERE residual | 0 |
-| 1712 | Predicate residual | `NewExprUse(TypeBool, ExprInPredicate)` | WHERE residual | 0 |
+| 1712 | Predicate residual (EXISTS body via WITH-WHERE) | `NewExprUseAt(TypeBool, ExprInPredicate, 1)` | `MATCH (n) WITH n WHERE exists { (n)-->(m) WHERE m.age > $threshold }` — `EnterOC_With` swaps `curPart` before descent into the OC_ExistentialSubquery child; emission-time `curPart` is the post-swap Part (§12 ERRATUM 1) | 1 |
 | 1731 | Predicate residual | `NewExprUse(TypeBool, ExprInPredicate)` | WHERE residual | 0 |
 | 1884 | Property use | `NewPropertyUse(Ref{"p", "name"})` | pin's context — single-Part or Use in Part 0 | 0 |
 | 1910 | SET value | `NewExprUse(TypeUnknown, ExprInSetValue)` | SET's value expression | 0 |
 | 1936 | DELETE target | `NewExprUse(TypeUnknown, ExprInDeleteTarget)` | DELETE target | 0 |
 | 2479 | Predicate residual (nested Use{} slice) | `NewExprUse(TypeBool, ExprInPredicate)` | pin's context | 0 |
 
-**Every Use in every parser-test pin lives in Part 0.** No pin
-rebaselines. Under Go struct zero-value equality
-(`reflect.DeepEqual` at `require.Equal`), a `PropertyUse{ref, 0}`
-matches `PropertyUse{ref, part: 0}` bit-for-bit; likewise for
-ExprUse and ClauseSlotUse. The 18 assertions above pass without
-modification.
+**All but one Use pin lives in Part 0; the WITH-WHERE-EXISTS pin
+at line 1712 rebaselines to Part 1** (§12 ERRATUM 1: the walker
+swap in `EnterOC_With` runs before the walker descends into the
+WHERE's `IOC_ExistentialSubquery` child). Under Go struct
+zero-value equality (`reflect.DeepEqual` at `require.Equal`), the
+17 Part-0 pins hold bit-for-bit: `PropertyUse{ref, 0}` matches
+`PropertyUse{ref, part: 0}`; likewise for ExprUse and
+ClauseSlotUse. The remaining pin (1712) migrates from
+`NewExprUse` to `NewExprUseAt(...,1)` in the unfreeze PR — the
+only mechanical parser-test change beyond the additive
+constructors.
 
 The re-verification method for the "Part 0" claim per pin: for
 each row, read the pin's `src` field, count occurrences of `WITH`
 before the `$param` token, and count preceding `UNION` tokens.
-Every row's src has zero preceding `WITH` (single-Part queries)
-and zero preceding `UNION` (single-branch queries). The check is
-mechanical:
+Every row's src has zero preceding `UNION` (single-branch
+queries). All but one row has zero preceding `WITH` (single-Part
+queries) — the outlier is line 1712, whose `WITH n WHERE exists
+{ … $threshold }` places the `$threshold` mining site inside the
+WITH's trailing WHERE's EXISTS body, which the walker enters
+AFTER `EnterOC_With` has swapped `curPart` (§12 ERRATUM 1;
+compare pins 1664, 1682, 1690 which are the MATCH-WHERE-EXISTS
+twins — no prior swap, so those Uses stay at Part 0). The check
+is mechanical:
 
 ```
 grep -A1 "NewPropertyUse\|NewExprUse\|NewClauseSlotUse" \
@@ -1247,8 +1267,9 @@ grep -A1 "NewPropertyUse\|NewExprUse\|NewClauseSlotUse" \
 ```
 
 (The reviewer's fence for the unfreeze PR is: run the parser test
-suite. Every pin passes untouched, which is the byte-identity
-witness.)
+suite. 17 of 18 pins pass untouched (byte-identity via zero-value
+`part` field); the 1712 pin migrates from `NewExprUse` to
+`NewExprUseAt(...,1)` in the same PR — see §12 ERRATUM 1.)
 
 **The fence check for parser tests** (from the worktree; the run
 list includes the two pre-existing Use unit tests AND the seven
@@ -1258,8 +1279,10 @@ new tests §5 adds):
 go test -run 'TestMustParse|TestMustReject|TestNewExprUse|TestExprUseMarshalJSON|TestNewPropertyUse|TestPropertyUseMarshalJSON|TestNewClauseSlotUse|TestClauseSlotUseMarshalJSON|TestNewPropertyUseAt|TestNewExprUseAt|TestNewClauseSlotUseAt' ./internal/query/... -shuffle=on
 ```
 
-The 18 parser-test pins pass without modification (byte-identity
-under `reflect.DeepEqual`; §4.3). The two pre-existing Use unit
+Seventeen of the 18 parser-test pins pass without modification
+(byte-identity under `reflect.DeepEqual`; §4.3); the 1712 pin
+migrates from `NewExprUse` to `NewExprUseAt(...,1)` in the
+unfreeze PR (§12 ERRATUM 1). The two pre-existing Use unit
 tests (`TestNewExprUse`, `TestExprUseMarshalJSON`) also pass
 unchanged. The seven tests §5 adds (four zero-side, three
 non-zero-side `TestNew…UseAt`) are the only test-file additions
@@ -2275,32 +2298,40 @@ and so on. The recovery pass exploits this: it does not match
 Uses by their fields (which would be ambiguous under identical
 same-name shapes), it matches by INDEX.
 
-**Algorithm sketch** (the widening PR's code; this is the shape,
-not the final implementation):
+**Algorithm — as shipped** (see §12 ERRATUM 2; the pre-merge
+sketch below the errata's dividing line was replaced during
+PR #118 implementation). The frozen query model does not let a
+per-Query traversal count WHERE-body Uses per Part (they leave
+no footprint on `Part.Bindings` / `Part.Returns` /
+`Part.Effects` — `Parameter.Uses` lives at Query level only), so
+a `countUsesInBranch(branch, param)` helper is unimplementable.
+Instead PR #118 (`internal/resolver/resolve.go:733-782`,
+`unifyParameterUsesAcrossBranches`) exploits a weaker but
+sufficient emission invariant:
 
-```go
-// countUsesInBranch walks a branch's Parts in source order and counts,
-// per Part, how many Uses that Part contributed via addParameterUse.
-// Uses inside subordinate scopes (EXISTS body, quantifier body) are
-// mined by their own hooks against the OUTER curPart, so their
-// attribution is the outer Part — the count already reflects that.
-func countUsesInBranch(b query.Branch, paramName string) []int { ... }
+- `addParameterUse` (`internal/query/cypher/expr.go`) mints Uses
+  in walker order — branch-major, then within a branch every
+  emission's `u.Part()` is monotonically non-decreasing (Part
+  index is `len(l.curBranch.parts) - 1`, and Parts are only ever
+  appended to `curBranch.parts` — see §3.2 step 3).
+- Therefore a Part-index DROP in the linear scan of `p.Uses` is
+  a branch boundary. A branch cursor initialised to 0 and
+  incremented on every drop routes each Use to its lexical
+  branch's `partScope` table without needing a count.
 
-// witnessUsesInBranchOrder walks p.Uses in slice order, holding a
-// cursor over the branch table. For branch 0, the first count_0 Uses
-// are witnessed against branchScopes[0][u.Part()]; for branch 1, the
-// next count_1 Uses are witnessed against branchScopes[1][u.Part()];
-// and so on.
-//
-// Invariant (proven by construction of addParameterUse):
-//   for i < count_0:              p.Uses[i]                       ∈ branch 0
-//   for count_0 ≤ i < count_0+1:  p.Uses[i]                       ∈ branch 1
-//   ...
-// The cursor over p.Uses in branch-then-Part order recovers each
-// Use's branch by INDEX, not by field match — so the corner case
-// where branch 0 Part 0 and branch 1 Part 0 mint two structurally
-// identical PropertyUse records is resolved by position.
-```
+The shipped `unifyParameterUsesAcrossBranches` walks `p.Uses` in
+slice order with two pieces of state: the current branch index
+`curBranch` and the previous Use's `u.Part()`. On a Part drop it
+increments `curBranch`; then it calls
+`witnessInBranch(u, tables, curBranch, s)`
+(`resolve.go:806-838`). `witnessInBranch` primarily witnesses
+against `tables[curBranch][u.Part()]`; on `ErrUnknownProperty`
+it falls back to `tables[b][u.Part()]` for every other branch
+`b` at the SAME Part index. The fallback is what preserves
+`parameter_across_union_same_name.cypher`'s byte-identity — a
+Use minted in branch 0 whose true attribution (by walker order)
+is branch 0 can be witnessed via branch 1's scope at Part 0
+when the two branches share the parameter name.
 
 **Why field-matching would be wrong.** Under
 `parameter_across_union_same_name.cypher`, branch 0 and branch 1
@@ -2311,14 +2342,27 @@ the pass exists to prevent. Position-match recovery is
 unambiguous because the emission order of `addParameterUse` is
 deterministic and total.
 
-Alternative — add a `branch int` field to Use (rejected in
-§3.5) — remains available for a future cycle if the branch-
-recovery pass proves brittle under a widened UNION corpus.
+**Recorded residuals** (Linus verified in the PR #118 review; no
+corpus fixture triggers either). The position cursor + witness
+fallback is not equivalent to a `branch int` axis:
 
-**Recorded risk.** The branch-recovery pass is a runtime cost with
-a subtle invariant. §7.6 records it as a follow-up bead for
-audit; the pass is the widening PR's judgment call, gated by
-`parameter_across_union_same_name.cypher`'s byte-identity claim.
+- (a) **Same-Part UNION boundary ambiguity.** A Use whose true
+  branch would reject it at `tables[curBranch][u.Part()]` with
+  `ErrUnknownProperty` can be admitted by the cross-branch
+  fallback when a sibling branch at the same Part index admits.
+  Any-valid-witness survives — only in the cross-branch
+  direction — as a residual of the fallback machinery.
+- (b) **UNION-later-Part spurious rejection.** When branch 0 has
+  fewer Parts than the cursor's primary-branch guess, the primary
+  try surfaces `ErrOutOfR0Scope` (`u.Part()` is out of range for
+  `tables[curBranch]`); the fallback only recovers from
+  `ErrUnknownProperty`, so a Use genuinely in branch 1 Part 1
+  with branch 0 stopping at Part 0 is spuriously rejected.
+
+Closing both requires an additive `branch int` axis on `Use`
+records under the ADR 0008 revision protocol (or equivalent
+branch attribution), then deleting the cursor + fallback recovery.
+Filed as **gqlc-qcc** for a future cycle.
 
 ### 7.6 Sentinel discipline — no new sentinel, no message widening
 
@@ -2723,10 +2767,65 @@ the spec PR does not close it.
 
 ---
 
-## 12. Errata
+## 12. Errata (2026-07-07, cycle close-out)
 
-None yet — this file lands as Cycle 1 of the gqlc-fvo unfreeze
-campaign. Any defects surfaced during the implementation cycles
-(PRs #N+1, #N+2 for the unfreeze and widening) land under this
-section as dated close-out errata, following the hk0 §12
-precedent.
+Two spec-text defects surfaced during the adversarial
+implementation cycles (PRs #117 unfreeze, #118 resolver widening),
+corrected in place above after both PRs merged. Neither affected
+landed code — each was a spec-text divergence from listener /
+resolver reality caught by first-party corroboration.
+
+1. **§3.2 EXISTS paragraph, §3.3 site #2 "Part index knowable?"
+   cell, §4.3 census row for `parser_test.go:1712` ("exists body
+   param via with-where"):** all three claimed the EXISTS body's
+   parameter attributes to Part 0 (the OUTER Part where the EXISTS
+   lexically sits). Wrong for the WITH-WHERE-EXISTS shape.
+   `mineWhere`'s static walk stops at `IOC_ExistentialSubquery`
+   (`expr.go:475-483`); parameters inside `EXISTS { … }` are mined
+   by the separate `EnterOC_ExistentialSubquery` callback
+   (`listener.go:627-638`), which fires during the tree-walker's
+   descent — AFTER `EnterOC_With` (`listener.go:278-294`) has
+   swapped `curPart` at `:292-293`. Emission-time `curPart` at
+   `EnterOC_ExistentialSubquery` is therefore the NEW (K+1) Part,
+   not the closing Part K. PR #117's pin at `parser_test.go:1712`
+   is `NewExprUseAt(TypeBool, ExprInPredicate, 1)`, not
+   `NewExprUse(...)`, and the census row at line 1222 rebaselines
+   from Part 0 to Part 1. The MATCH-WHERE-EXISTS twins (pins 1664,
+   1682, 1690) are unaffected — `EnterOC_Match` does not swap
+   `curPart`, so their EXISTS bodies mine at Part 0 as before.
+   Additionally, this cycle documents an intra-clause asymmetry
+   Linus surfaced in the PR #117 review: within the same syntactic
+   `WITH n WHERE …` clause, a direct parameter (e.g. `WHERE $x = 1`)
+   is mined pre-swap by `mineWhere` at Part K, while an EXISTS-body
+   parameter in the same WHERE is mined post-swap at Part K+1. This
+   is a walker-order artefact of the lexical-Part axis; closing it
+   requires the semantic-scope axis filed as **gqlc-4w5** (see
+   §7.6.1 residual and §7.7).
+2. **§7.2.2 branch-recovery algorithm sketch:** the sketched
+   `countUsesInBranch(branch, param)` is unimplementable from the
+   frozen model. Per-branch Use counting requires observing every
+   emission site, but WHERE-body Uses leave no footprint on
+   `Part.Bindings` / `Part.Returns` / `Part.Effects` —
+   `Parameter.Uses` lives at Query level only, so a per-branch
+   traversal of the Query cannot count them. PR #118 shipped a
+   different mechanism: a position cursor over `p.Uses` with
+   Part-index-drop boundary detection
+   (`internal/resolver/resolve.go:733-782`, function
+   `unifyParameterUsesAcrossBranches`), plus a `witnessInBranch`
+   cross-branch fallback at the SAME Part index on
+   `ErrUnknownProperty` (`resolve.go:806-838`). The
+   emission-order invariant (branch-major, then Part-major within
+   a branch, monotone per branch) still holds and is the correctness
+   basis for the cursor. Two residuals Linus verified in the PR #118
+   review (no corpus fixture triggers either):
+   (a) **same-Part UNION boundary ambiguity** — a Use invalid in its
+   true branch but valid in a sibling branch at the same Part index
+   is admitted via the cross-branch fallback (any-valid-witness
+   survives in the cross-branch direction only);
+   (b) **UNION-later-Part spurious rejection** — a Use whose true
+   branch has more Parts than the cursor's primary branch guess
+   surfaces `ErrOutOfR0Scope` on the primary try; the fallback only
+   recovers from `ErrUnknownProperty`, so a Use genuinely in
+   branch 1 Part 1 (with branch 0 shorter) is spuriously rejected.
+   Closing both requires a `branch int` axis on `Use` records under
+   ADR 0008 revision protocol, filed as **gqlc-qcc**.
