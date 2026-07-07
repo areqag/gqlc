@@ -1709,7 +1709,11 @@ var mustParse = map[string]struct {
 				},
 			},
 		}}}, Parameters: []query.Parameter{{Name: "threshold", Uses: []query.Use{
-			query.NewExprUse(query.TypeBool{}, query.ExprInPredicate),
+			// EnterOC_ExistentialSubquery fires after EnterOC_With's Part swap
+			// (listener.go:293), so emission-time curPart is Part 1 (fvo, ADR
+			// 0008 amendment 2026-07-06). Part 1's scope carries n via
+			// exportedTypes — resolver-adequate for the EXISTS body's $threshold.
+			query.NewExprUseAt(query.TypeBool{}, query.ExprInPredicate, 1),
 		}}}},
 	},
 	// Stage 11 §1.1 — a $param inside a quantifier's filter WHERE body, paired
