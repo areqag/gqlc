@@ -319,12 +319,13 @@ var mustParse = map[string]struct {
 	},
 	// Match7 [1] "Simple OPTIONAL MATCH on empty graph" — verbatim TCK query.
 	// The single node binding is introduced in OPTIONAL MATCH, so its nullable
-	// flag is true (ADR 0006). The RETURN item traces back to it via Ref{n,""}.
+	// flag is true (ADR 0006) and it carries the clause's group id 1 (ay9).
+	// The RETURN item traces back to it via Ref{n,""}.
 	"optional match simple": {
 		src: "OPTIONAL MATCH (n)\nRETURN n",
 		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
-				must(query.NewNullableNodeBinding("n", nil)),
+				must(query.NewNullableNodeBindingInGroup("n", nil, 1)),
 			},
 			Returns: []query.ReturnItem{
 				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
@@ -333,26 +334,74 @@ var mustParse = map[string]struct {
 	},
 	// Match7 [2] "OPTIONAL MATCH with previously bound nodes" — verbatim TCK
 	// query. Pins the reuse rule (ADR 0006): n is first introduced in the
-	// required MATCH (non-nullable); the anonymous :NOT_EXIST edge and x are
-	// first introduced in OPTIONAL MATCH (both nullable). The anonymous edge
-	// carries the nullable flag uniformly even though no Ref reads it.
+	// required MATCH (non-nullable, group 0); the anonymous :NOT_EXIST edge
+	// and x are first introduced in OPTIONAL MATCH (both nullable, sharing
+	// the clause's group id 1 — ay9). The anonymous edge carries the group
+	// uniformly even though no Ref reads it.
 	"optional match reuses prior binding": {
 		src: "MATCH (n)\nOPTIONAL MATCH (n)-[:NOT_EXIST]->(x)\nRETURN n, x",
 		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
 				must(query.NewNodeBinding("n", nil)),
-				must(query.NewNullableEdgeBinding("", graph.LabelSet{"NOT_EXIST"},
+				must(query.NewNullableEdgeBindingInGroup("", graph.LabelSet{"NOT_EXIST"},
 					must(query.NewVarEndpoint("n")),
 					must(query.NewVarEndpoint("x")),
 					true,
+					1,
 				)),
-				must(query.NewNullableNodeBinding("x", nil)),
+				must(query.NewNullableNodeBindingInGroup("x", nil, 1)),
 			},
 			Returns: []query.ReturnItem{
 				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
 				{Name: "x", Value: query.NewRefProjection(query.Ref{Variable: "x"}, query.TypeNode{})},
 			},
 		}),
+	},
+	// ay9 spec §2.2 — two OPTIONAL MATCH clauses mint distinct group ids: a
+	// takes the first clause's group 1, b the second clause's group 2. A group
+	// per clause (not per query-wide OPTIONAL region) is what lets the
+	// resolver's group-closure demotion discriminate a proven clause from an
+	// unproven one.
+	"two optional matches mint distinct groups": {
+		src: "OPTIONAL MATCH (a)\nOPTIONAL MATCH (b)\nRETURN a, b",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNullableNodeBindingInGroup("a", nil, 1)),
+				must(query.NewNullableNodeBindingInGroup("b", nil, 2)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
+				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"}, query.TypeNode{})},
+			},
+		}),
+	},
+	// ay9 spec §3.3 — group ids are query-scoped, not per-Part: the counter
+	// does not reset at the WITH boundary, so Part 1's OPTIONAL clause mints
+	// group 2, not a colliding "group 1 of Part 1". Query-scoped ids keep a
+	// future cross-Part carry well-defined without re-minting.
+	"optional group ids span parts without reset": {
+		src: "OPTIONAL MATCH (a)\nWITH a\nOPTIONAL MATCH (b)\nRETURN a, b",
+		want: query.Query{
+			Branches: []query.Branch{{Parts: []query.Part{
+				{
+					Bindings: []query.Binding{
+						must(query.NewNullableNodeBindingInGroup("a", nil, 1)),
+					},
+					Returns: []query.ReturnItem{
+						{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
+					},
+				},
+				{
+					Bindings: []query.Binding{
+						must(query.NewNullableNodeBindingInGroup("b", nil, 2)),
+					},
+					Returns: []query.ReturnItem{
+						{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
+						{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"}, query.TypeNode{})},
+					},
+				},
+			}}},
+		},
 	},
 	// Temporal4 [1] property return with no alias: E1 derives the column name from
 	// the verbatim expression text — "n.created", not "created".
@@ -1189,7 +1238,7 @@ var mustParse = map[string]struct {
 		src: "OPTIONAL MATCH (a)\nRETURN count(DISTINCT a)",
 		want: oneBranch(query.Part{
 			Bindings: []query.Binding{
-				must(query.NewNullableNodeBinding("a", nil)),
+				must(query.NewNullableNodeBindingInGroup("a", nil, 1)),
 			},
 			Returns: []query.ReturnItem{
 				{Name: "count(DISTINCT a)", Value: query.NewAggregateProjection(query.AggCount, []query.Ref{{Variable: "a"}}, true, query.TypeInt{})},
