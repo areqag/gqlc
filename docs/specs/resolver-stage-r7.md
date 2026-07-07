@@ -2190,18 +2190,24 @@ R6's out-of-scope table survives with revisions:
 | OPTIONAL-clause-sibling nullability under-demote | silently under-demoted | gqlc-ay9 (unchanged) |
 | `ExprProjection` residual grouping-key discrimination | silently under-grouped | gqlc-hk0 / Shape B (unchanged) |
 | Cross-Part parameter Use attribution gap | silently false-admitted | gqlc-fvo (unchanged) |
-| CALL argument-vs-parameter type check (incl. NUMBER assignable-from) | silently admitted | **frozen-model deficiency filed at R7 close-out** (§7.1.1) |
+| CALL argument-vs-parameter type check (incl. NUMBER assignable-from) | ~~silently admitted~~ **checked** (0ig, 2026-07-07) | ~~frozen-model deficiency filed at R7 close-out~~ CLOSED (§7.1.1; `docs/specs/unfreeze-0ig-call-args.md`) |
 | Parser trusts CALL procedure lookup; resolver does not re-check | silently admitted | (trust posture; §4.4 — same family as R6 Refs referential integrity) |
 
 **Silently accepted (not routed anywhere):**
 
-R0–R6's silently-accepted set stands unchanged. R7 adds:
-- **CALL argument type-agreement against signature params** (§7.1.1
+R0–R6's silently-accepted set stands unchanged. ~~R7 adds:~~ **Both
+R7 additions below were closed by the 0ig unfreeze cycle
+(2026-07-07; §7.1.1 banner, `docs/specs/unfreeze-0ig-call-args.md`):**
+- ~~**CALL argument type-agreement against signature params** (§7.1.1
   frozen-model deficiency — resolver has no attribution to run the
-  check).
-- **NUMBER assignable-from at argument sites** — no resolver
+  check).~~ **checked** (0ig, 2026-07-07): the resolver's Phase A1
+  CallBinding arm walks `CallBinding.Args()` per position and fires
+  `ErrCallArgAssignability` on mismatch.
+- ~~**NUMBER assignable-from at argument sites** — no resolver
   application site because CALL-arg attribution is dropped (§7.1.1;
-  §4.8).
+  §4.8).~~ **delivered** (0ig, 2026-07-07): the assignability lattice
+  (`unfreeze-0ig-call-args.md §8.2`) applies NUMBER
+  assignable-from-INTEGER-or-FLOAT at the argument site.
 
 **Recorded ADR 0009 cross-check.** ADR 0009 R7: "CALL — YIELD column
 typing from the procsig.Registry; argument assignability including
@@ -2217,11 +2223,13 @@ spec scopes it:
   column. Signature identity carries via `CallBinding.Procedure()`
   and `CallBinding.SourceField()` on `query.Query` for codegen.
 - **Argument assignability including NUMBER assignable-from
-  INTEGER-or-FLOAT**: DEFERRED per §7.1.1 — this is a frozen-model
-  deficiency (the wire drops CALL-arg attribution; the resolver
-  cannot link a param Use back to a CALL param position). The
-  assignability check has no application site at R7. NUMBER
-  assignable-from is a subset of the same deficiency.
+  INTEGER-or-FLOAT**: ~~DEFERRED~~ **DELIVERED** by the 0ig cycle
+  (`docs/specs/unfreeze-0ig-call-args.md`; ADR 0008 amendment
+  2026-07-07). The wire now carries per-position `CallArg` records
+  on `CallBinding.Args()`; the resolver's Phase A1 CallBinding arm
+  applies the assignability lattice (spec §8.2) and fails with
+  `ErrCallArgAssignability` on mismatch. See §7.1.1 for the historical
+  context of the R7-shipped deferral.
 - **Unknown procedure = generation-time error by design**: delivered
   by the parser (`cypher.ErrUnknownProcedure`). The resolver does
   not re-check per §4.4 (trust posture — same family as R6 Refs
@@ -2234,7 +2242,25 @@ Following the R6 §7.1 template — R7 discovers ONE new frozen-model
 deficiency (§7.1.1) and inherits every R6 open axis unchanged
 (§7.1.2).
 
-#### 7.1.1 CALL-arg attribution — a frozen-model deficiency
+#### 7.1.1 CALL-arg attribution — a frozen-model deficiency ~~open~~ CLOSED (2026-07-07)
+
+> **Cycle 3 errata (2026-07-07, gqlc-0ig unfreeze cycle):** the
+> frozen-model deficiency this section records has been **closed** by
+> the ADR 0008 amendment adopted 2026-07-07 (`docs/adr/0008-query-
+> model-freeze-resolver-api.md` top). The wire now carries per-
+> position `CallArg` records on `CallBinding.Args()`; the resolver's
+> Phase A1 CallBinding arm walks `Args()` against the matched
+> `procsig.Registry.Lookup(procedure).Params[i].Token` and fails with
+> the new `ErrCallArgAssignability` sentinel on mismatch under the
+> ADR 0007 Stage-14 assignability lattice (`docs/specs/unfreeze-0ig-
+> call-args.md §8.2`: NUMBER accepts INTEGER-or-FLOAT; FLOAT accepts
+> INTEGER per TCK Call3 [5]; STRING / INTEGER strict; TypeUnknown
+> and TypeNull wildcards — bare `null` literals mine to `TypeNull`,
+> a distinct sum member from `TypeUnknown`, per §8.2's E1 row). The
+> prose below is preserved as-of-R7-shipping for
+> historical grounding; the current model surface is the amendment's.
+> Escape-hatch entry in the "Known deferred additions" list is now
+> `CallBinding.Args` axis (adopted).
 
 **The gap.** The parser's Stage 14 `collectCall` at
 `internal/query/cypher/call.go:47-66` mines CALL arguments and
@@ -2304,22 +2330,28 @@ proceeds without the widening.
 The R6-discovered design axes (§7.1.1 value-target assignability;
 §7.1.2 Effects-on-wire) persist at R7 unchanged. R5-inherited gaps
 (`gqlc-hk0` ExprProjection residual discrimination, `gqlc-fvo`
-cross-Part Use attribution — of which R7's CALL-arg gap is a child)
-persist at R7 unchanged. R4-inherited gaps (`gqlc-ay9` Class A,
+cross-Part Use attribution ~~— of which R7's CALL-arg gap is a
+child~~ — the CALL-arg child gap was closed by 0ig, 2026-07-07; see
+§7.1.1) persist at R7 unchanged. R4-inherited gaps (`gqlc-ay9` Class A,
 `gqlc-5xg` Class B nullability) persist at R7 unchanged.
 
 #### 7.1.3 Freeze-not-a-wall status
 
 R7 discovers ONE new frozen-model deficiency (§7.1.1 — CALL-arg
-attribution). Owner-decision bead filed at close-out. R7 does not
+attribution). Owner-decision bead filed at close-out (that bead,
+`gqlc-0ig`, has since closed the deficiency — 2026-07-07). R7 does not
 delay the spec on it; the CALL-YIELD-typing arm delivers standalone.
 
 #### 7.1.4 Summary of R7 deferrals
 
-- **CALL-arg attribution** — deferred to a future frozen-model
+- ~~**CALL-arg attribution** — deferred to a future frozen-model
   widening (owner-decision bead filed at close-out). NUMBER
   assignable-from and argument-vs-param type agreement are both
-  downstream of this gap. Not a code-side deferral. §7.1.1.
+  downstream of this gap. Not a code-side deferral. §7.1.1.~~
+  **CALL-arg attribution — closed by 0ig (2026-07-07).** The
+  owner-decision bead delivered the widening; argument-vs-param
+  type agreement and NUMBER assignable-from now run in the
+  resolver's Phase A1 CallBinding arm. §7.1.1 banner.
 - **R6 open axes carry unchanged** — value-target assignability
   (§7.1.1 R6), Effects-on-wire (§7.1.2 R6). §7.1.2.
 - **R5 / R4 open axes carry unchanged** — `gqlc-fvo`, `gqlc-hk0`,
