@@ -116,5 +116,9 @@
     "call_yield_carry_forward.cypher": "social_r7.gql",
     "call_yield_carry_with_alias.cypher": "social_r7.gql",
     "call_yield_mixed_return.cypher": "social_r7.gql",
-    "call_yield_before_match.cypher": "social_r7.gql"
+    "call_yield_before_match.cypher": "social_r7.gql",
+    "call_arg_int_at_float.cypher": "social_r7.gql",
+    "call_arg_int_at_number.cypher": "social_r7.gql",
+    "call_arg_float_at_number.cypher": "social_r7.gql",
+    "call_arg_null_at_typed.cypher": "social_r7.gql"
 }

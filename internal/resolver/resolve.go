@@ -119,9 +119,6 @@ type parameterUseSite struct {
 //
 // Pinned signature per R5 §2.2 / team-lead brief.
 func resolveBranch(branch query.Branch, s schema.Schema, r procsig.Registry) ([]Column, []parameterUseSite, error) {
-	_ = r // R5 does not admit CALL; the registry is reserved for R7. When
-	// R7 lands the CALL/YIELD handler here, drop this discard and route
-	// the registry into that handler's procedure-signature witness.
 	if len(branch.Parts) == 0 {
 		// Defensive tripwire; parser's buildBranch guarantees >= 1.
 		return nil, nil, fmt.Errorf("%w: empty parts", ErrOutOfR0Scope)
@@ -134,7 +131,7 @@ func resolveBranch(branch query.Branch, s schema.Schema, r procsig.Registry) ([]
 	lastIdx := len(branch.Parts) - 1
 
 	for k, part := range branch.Parts {
-		cols, exported, uses, err := resolvePart(part, carry, s)
+		cols, exported, uses, err := resolvePart(part, carry, s, r)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -161,7 +158,7 @@ func resolveBranch(branch query.Branch, s schema.Schema, r procsig.Registry) ([]
 // column list (unfilled GroupingKey; filled by resolveBranch on the final
 // Part), the branchState exported to Part K+1 (§4.2.2), and the parameter-Use
 // witnesses collected inside this Part.
-func resolvePart(part query.Part, carry branchState, s schema.Schema) ([]Column, branchState, []parameterUseSite, error) {
+func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.Registry) ([]Column, branchState, []parameterUseSite, error) {
 	nodeTypes := make(map[string]schema.NodeType)
 	edgeTypes := make(map[string]schema.EdgeType)
 	edgeKeys := make(map[string]schema.EdgeKey)
@@ -276,6 +273,38 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema) ([]Column,
 			// internal/query/cypher/build.go:127-153). Defensive tripwire.
 			if _, seen := callTypes[v]; seen {
 				return nil, branchState{}, nil, fmt.Errorf("%w: variable %q re-CALL-bound in single part", ErrPartBindingTypeConflict, v)
+			}
+			// 0ig: argument-site assignability. Each CallBinding minted
+			// from the same CALL clause carries the SAME args slice by
+			// parser construction (§4.3.1), so the check runs at most
+			// once per CALL — subsequent bindings from the same clause
+			// hit the same slice header and re-verify the same
+			// assignments.
+			//
+			// Sentinel discipline (spec §8.1): ErrCallArgAssignability is
+			// reserved for the per-position lattice check — the sole
+			// resolver-reachable fail mode this axis introduces. The two
+			// drift arms below (registry miss, arity mismatch) are
+			// parser-authoritative pre-conditions (spec §4.4 trust
+			// posture; ErrUnknownProcedure + ErrProcedureArity fire at
+			// parse-time) and unreachable in-corpus; they surface as
+			// plain non-sentinel errors so a drift bug is loud but does
+			// not pollute the assignability sentinel's fixture semantics.
+			// R7 §5.2 retired ErrOutOfR0Scope at the BindingCall fail-site
+			// so it is not reused here either.
+			if args := bb.Args(); len(args) > 0 {
+				sig, ok := r.Lookup(bb.Procedure())
+				if !ok {
+					return nil, branchState{}, nil, fmt.Errorf("resolver: procedure %q missing from registry (parser drift)", bb.Procedure())
+				}
+				if len(args) != len(sig.Params) {
+					return nil, branchState{}, nil, fmt.Errorf("resolver: procedure %q expects %d arguments, got %d (parser drift)", bb.Procedure(), len(sig.Params), len(args))
+				}
+				for i, a := range args {
+					if !argAssignable(sig.Params[i].Token, a.Type()) {
+						return nil, branchState{}, nil, fmt.Errorf("%w: procedure %q argument %d: cannot assign %s to %s", ErrCallArgAssignability, bb.Procedure(), i, a.Type().String(), sig.Params[i].Token)
+					}
+				}
 			}
 			callTypes[v] = callBindingSlot{
 				resultType:  bb.ResultType(),
@@ -1820,4 +1849,50 @@ func labelDeclared(label string, s schema.Schema) bool {
 		}
 	}
 	return false
+}
+
+// argAssignable reports whether an argument mined to argType at parse can be
+// assigned to a signature parameter declared with token. The 0ig-adopted
+// assignability lattice (spec §8.2):
+//
+//   - INTEGER: strict — TypeInt only.
+//   - FLOAT:   loose  — TypeFloat OR TypeInt (TCK Call3 [5] admits INTEGER
+//     at a FLOAT-typed position; ADR 0007 line 173 does not exclude this).
+//   - STRING:  strict — TypeString only.
+//   - NUMBER:  loose  — TypeInt OR TypeFloat (ADR 0007 line 172-174:
+//     "assignable-from INTEGER-or-FLOAT at the argument site").
+//
+// TypeUnknown and TypeNull are resolver-side wildcards: TypeUnknown for a
+// $param / n.name argument (the parser cannot type-narrow those at CALL-site),
+// TypeNull for a bare null literal (shape.go:79 mines NULL to TypeNull, a
+// distinct sum member from TypeUnknown per type.go:80). Admitting both
+// preserves R7's parser-authoritative posture and validates TCK Call5 [4]
+// (CALL test.my.proc(null) against nullable-typed params). A downstream
+// $param whose enclosing type disagrees with the sig token is caught by the
+// parameter-unification pass in ExprInProjection anyway.
+func argAssignable(token procsig.TypeToken, argType query.Type) bool {
+	if _, isUnknown := argType.(query.TypeUnknown); isUnknown {
+		return true
+	}
+	if _, isNull := argType.(query.TypeNull); isNull {
+		return true
+	}
+	switch token {
+	case procsig.TokenInteger:
+		_, ok := argType.(query.TypeInt)
+		return ok
+	case procsig.TokenFloat:
+		_, isFloat := argType.(query.TypeFloat)
+		_, isInt := argType.(query.TypeInt) // §8.2.1: TCK Call3 [5] admits INTEGER-at-FLOAT.
+		return isFloat || isInt
+	case procsig.TokenString:
+		_, ok := argType.(query.TypeString)
+		return ok
+	case procsig.TokenNumber:
+		_, isFloat := argType.(query.TypeFloat)
+		_, isInt := argType.(query.TypeInt)
+		return isFloat || isInt
+	default:
+		return false
+	}
 }

@@ -66,6 +66,30 @@ var signaturesR7 = []procsig.Signature{
 			{Name: "constant", Token: procsig.TokenString, Nullable: false},
 		},
 	},
+	// 0ig accept-path signatures: FLOAT and NUMBER param axes are absent from
+	// the R7 corpus (its Params surface is INTEGER+STRING only via
+	// test.my.proc), so the argAssignable loose arms (§8.2.1 INT-at-FLOAT
+	// / TCK Call3 [5], NUMBER assignable-from INTEGER-or-FLOAT) have no
+	// production reach without new signatures. Test-only surface — the
+	// wire registry is authored per deployment.
+	{
+		Name: "test.float.proc",
+		Params: []procsig.Param{
+			{Name: "temp", Token: procsig.TokenFloat, Nullable: true},
+		},
+		Results: []procsig.Result{
+			{Name: "reading", Token: procsig.TokenFloat, Nullable: true},
+		},
+	},
+	{
+		Name: "test.number.proc",
+		Params: []procsig.Param{
+			{Name: "value", Token: procsig.TokenNumber, Nullable: true},
+		},
+		Results: []procsig.Result{
+			{Name: "out", Token: procsig.TokenString, Nullable: true},
+		},
+	},
 }
 
 // regR7 is the Registry built from signaturesR7. Package-level so the R7
@@ -141,6 +165,8 @@ var invalidFixtures = map[string]error{
 	"call_yield_property_lookup.cypher":              ErrUnknownProperty,
 	"part_binding_type_conflict_call_vs_node.cypher": ErrPartBindingTypeConflict,
 	"part_binding_type_conflict_call_vs_edge.cypher": ErrPartBindingTypeConflict,
+	// 0ig addition:
+	"call_arg_type_mismatch.cypher": ErrCallArgAssignability,
 }
 
 type ResolverSuite struct {
