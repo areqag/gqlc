@@ -10,7 +10,15 @@
               "procedure": "test.my.proc",
               "sourceField": "city",
               "resultType": "string",
-              "nullable": true
+              "nullable": true,
+              "args": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "int"
+                }
+              ]
             },
             {
               "kind": "call",
@@ -18,7 +26,15 @@
               "procedure": "test.my.proc",
               "sourceField": "country_code",
               "resultType": "int",
-              "nullable": true
+              "nullable": true,
+              "args": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "int"
+                }
+              ]
             }
           ],
           "returns": [
