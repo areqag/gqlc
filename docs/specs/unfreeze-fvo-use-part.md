@@ -1301,10 +1301,51 @@ def hash_golden(uri, name, q):
     base = os.path.splitext(os.path.basename(uri))[0]
     return f"{base}_{s[:6].hex()}.golden.json"
 
-# (scan_feature is the hk0 §4.4.1 helper — mirror it verbatim,
-#  including the Scenario Outline expansion, Examples table row
-#  substitution, and """query""" block dedent.)
-# ... (elided: see hk0 §4.4.1 for the full body) ...
+# scan_feature — verbatim port of the hk0 §4.4.1 helper. Given a
+# TCK feature file, yield (scenario name, query text) tuples,
+# expanding Scenario Outlines against their Examples table and
+# dedenting each """ query """ block.
+def scan_feature(path):
+    with open(path) as f: text = f.read()
+    out = []
+    parts = re.split(r"(?m)^\s*(Scenario(?: Outline)?:\s*.+)$", text)
+    for i in range(1, len(parts), 2):
+        header, body = parts[i], parts[i+1] if i+1 < len(parts) else ""
+        name = header.split(":", 1)[1].strip()
+        is_outline = header.startswith("Scenario Outline:")
+        examples = []
+        if is_outline:
+            em = re.search(r"(?ms)^\s*Examples:\s*\n((?:\s*\|.*\n?)+)", body)
+            if em:
+                lines = [l.strip() for l in em.group(1).strip().splitlines()
+                         if l.strip()]
+                if lines:
+                    hdr = [c.strip() for c in lines[0].strip("|").split("|")]
+                    for row in lines[1:]:
+                        cells = [c.strip() for c in row.strip("|").split("|")]
+                        examples.append(dict(zip(hdr, cells)))
+                    body = body[:em.start()]
+        ds = []
+        for m in re.finditer(r'"""\s*\n(.*?)\n\s*"""', body, re.DOTALL):
+            q = m.group(1)
+            lines = q.splitlines()
+            if lines:
+                nb = [l for l in lines if l.strip()]
+                if nb:
+                    ind = min(len(l) - len(l.lstrip()) for l in nb)
+                    q = "\n".join(l[ind:] if len(l) >= ind else l
+                                  for l in lines)
+            ds.append(q)
+        if not is_outline:
+            for q in ds: out.append((name, q))
+        else:
+            for row in examples:
+                for q in ds:
+                    qs = q
+                    for k, v in row.items():
+                        qs = qs.replace(f"<{k}>", v)
+                    out.append((name, qs))
+    return out
 
 def has_uses(data):
     for p in (data.get("parameters") or []):
@@ -1607,29 +1648,22 @@ exactly. Re-verify by running the seven new tests against the
 compiled marshaller from a fresh worktree; do not hand-draw the
 JSON string.
 
-### 5.3 Fence 3 accounting (updates §4.1.3.2 Fence 3)
+### 5.3 The unit-test run list for Fence 3
 
-The Fence 3 statement in §4.1.3.2 says "the three existing
-`TestPropertyUseMarshalJSON` / `TestExprUseMarshalJSON` /
-`TestClauseSlotUseMarshalJSON` pins stay VERBATIM." That statement
-is corrected here per §3.1.4: only `TestExprUseMarshalJSON`
-pre-exists at branch base. The four zero-side tests in §5.1
-(`TestNewPropertyUse`, `TestPropertyUseMarshalJSON`,
-`TestNewClauseSlotUse`, `TestClauseSlotUseMarshalJSON`) are NEW
-in the unfreeze PR — they land alongside the widened marshallers
-and pin the zero side (`part = 0` key ABSENT). The pre-existing
-`TestNewExprUse` and `TestExprUseMarshalJSON` stay VERBATIM.
-
-Consequently the Fence 3 grep should include the seven new test
-symbols alongside the two pre-existing ones:
+The Fence 3 grep in §4.1.3.2 exercises the two pre-existing Use
+unit tests AND the seven new tests §5.1 + §5.2 add. The run
+list, in one place for the reviewer to copy:
 
 ```
 go test -run 'TestMustParse|TestMustReject|TestNewPropertyUse|TestPropertyUseMarshalJSON|TestNewExprUse|TestExprUseMarshalJSON|TestNewClauseSlotUse|TestClauseSlotUseMarshalJSON|TestNewPropertyUseAt|TestNewExprUseAt|TestNewClauseSlotUseAt' ./internal/query/... -shuffle=on
 ```
 
-The two pre-existing tests are byte-identical after the widening
-(omit-when-zero, `part=0` absent); the seven new tests witness
-both sides of the axis.
+The two pre-existing tests
+(`TestNewExprUse` at `internal/query/type_test.go:73`;
+`TestExprUseMarshalJSON` at `:93`) are byte-identical after the
+widening (omit-when-zero, `part = 0` absent). The seven new
+tests witness both sides of the axis: four zero-side (§5.1) and
+three non-zero-side (§5.2).
 
 ---
 
@@ -2118,8 +2152,10 @@ fixture that R5 silently admitted (any-valid-witness) and now
 honestly rejects. The rejection uses the existing
 `ErrUnknownProperty` sentinel; the fail-site (a property lookup
 inside `propertyUseWitness`) already raises this sentinel at
-`internal/resolver/resolve.go:1296` (`propertyUseWitness`
-function scope `:1292-1298`) and its neighbouring site at `:1313`.
+`internal/resolver/resolve.go:1296` (`propertyUseWitness`'s
+node-type arm at `:1293-1299`, inside the function whose full body
+is `:1292-1318`) and its neighbouring site at `:1313`
+(the edge-type single-candidate arm at `:1309-1316`).
 No message-set widening required — the message
 `"unknown property: <var>.<prop>"` matches the shape the widened
 witness produces.
@@ -2317,7 +2353,7 @@ LEXICAL Part of a Use, not the SEMANTIC scope Cypher evaluates it
 against. For WITH…WHERE these two coincide in every branch-base
 resolver-valid fixture: the WITH's trailing WHERE is mined by
 `mineWhere` from `EnterOC_With` (`listener.go:283-284`) BEFORE
-the Part swap at `:290-293`, so the WHERE's PropertyUses attribute
+the Part swap at `:292-293`, so the WHERE's PropertyUses attribute
 to the CLOSED Part K — and in every non-shadowing shape the
 binding at Part K is the same as the projected binding at Part
 K+1.
@@ -2339,7 +2375,10 @@ MATCH (a:Post) WITH a.title AS a WHERE a.x = $p RETURN a
   (projecting `a.title AS a` — an ExprProjection or
   RefProjection depending on the classifier).
 - `mineWhere(w)` runs against Part 0 (`listener.go:283-284`,
-  BEFORE the swap at `:290`).
+  BEFORE the swap at `:292-293` — `:290` is only `newRawPart()`
+  binding the future Part to a local; the actual swap is the
+  `l.curBranch.parts = append(…, part)` + `l.curPart = part` pair
+  at `:292-293`, consistent with §3.2 step 3 and §4.2.2).
 - `mineWhere` (`expr.go:444`) calls `mineComparisons` on the
   WHERE expression.
 - `mineComparisons` (`expr.go:477`) recurses to the comparison
@@ -2536,13 +2575,14 @@ branch base `origin/master @ baba282` before writing code.
 - `EnterOC_With` collect-then-swap:
   `internal/query/cypher/listener.go:278-294`.
 - `EnterOC_Return` no-swap:
-  `internal/query/cypher/listener.go:602-610`.
+  `internal/query/cypher/listener.go:605-610`.
 - `EnterOC_Union` combinator append:
   `internal/query/cypher/listener.go:243-252`.
 - `EnterOC_StandaloneCall` primer:
-  `internal/query/cypher/listener.go:588-599`.
+  `internal/query/cypher/listener.go:588-600`.
 - `EnterOC_ExistentialSubquery` param mining + suppression:
-  `internal/query/cypher/listener.go:627-645`.
+  `internal/query/cypher/listener.go:627-639`
+  (paired `ExitOC_ExistentialSubquery` at `:641-645`).
 - `EnterOC_Match` — no swap; collects into current curPart:
   `internal/query/cypher/listener.go:261-269`.
 
@@ -2566,9 +2606,13 @@ branch base `origin/master @ baba282` before writing code.
 - Its sole call site: `internal/resolver/resolve.go:721`
   (`unifyParameterUsesAcrossScopes`).
 - `scopeContains`: `internal/resolver/resolve.go:813-824`.
-- `propertyUseWitness` function scope:
-  `internal/resolver/resolve.go:1292-1298`; its first
-  `ErrUnknownProperty` fail-site: `internal/resolver/resolve.go:1296`.
+- `propertyUseWitness` full function:
+  `internal/resolver/resolve.go:1292-1318` (signature at `:1292`,
+  closing brace at `:1318`). Node-type arm (the arm the widening
+  witnesses through when the Ref binds a node): `:1293-1299`; its
+  `ErrUnknownProperty` fail-site: `:1296`. Edge-type arm (single
+  candidate): `:1309-1316`; its `ErrUnknownProperty` fail-site:
+  `:1313`. Edge-union delegation to `unionProperty`: `:1317`.
 - `refProjectionType` (the OTHER `ErrUnknownProperty` fail-site
   the widening does not touch, used in projection typing not
   parameter witnessing): `internal/resolver/resolve.go:1133-1195`;
@@ -2614,7 +2658,8 @@ branch base `origin/master @ baba282` before writing code.
 
 - Field: `internal/query/query.go:378`.
 - Constructor: `internal/query/query.go:388-393` (trailing param).
-- Accessor: `internal/query/query.go:445-447`.
+- Accessor: `internal/query/query.go:447`; doc-comment
+  immediately above at `:445-446`.
 - Always-emit JSON: `internal/query/query.go:1524-1535`
   (`Directed bool json:"directed"` unconditional in the composite
   literal).
