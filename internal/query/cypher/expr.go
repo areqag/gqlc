@@ -629,7 +629,8 @@ func (l *listener) requireAllParametersApproved(e antlr.Tree) {
 // approved. The single chokepoint for parameter dedup-by-Name across both
 // Use variants: every caller (a property predicate, an inline property map,
 // a SKIP/LIMIT clause slot) flows through here so the dedup-and-order
-// discipline lives in exactly one place.
+// discipline lives in exactly one place. Stamps the branch-relative Part index
+// via attributePart at emission time (fvo per ADR 0008 amendment 2026-07-06).
 func (l *listener) addParameterUse(name string, node antlr.Tree, use query.Use) {
 	idx, ok := l.byParam[name]
 	if !ok {
@@ -637,8 +638,34 @@ func (l *listener) addParameterUse(name string, node antlr.Tree, use query.Use) 
 		l.byParam[name] = idx
 		l.params = append(l.params, &query.Parameter{Name: name})
 	}
-	l.params[idx].Uses = append(l.params[idx].Uses, use)
+	l.params[idx].Uses = append(l.params[idx].Uses, attributePart(use, l.currentPartIndex()))
 	l.approved[node] = true
+}
+
+// currentPartIndex returns the branch-relative index of the Part collection
+// handlers currently write into — len(curBranch.parts)-1 by construction of
+// the priming discipline at listener.go:EnterOC_SingleQuery and
+// EnterOC_StandaloneCall (fvo per ADR 0008 amendment 2026-07-06). Every
+// addParameterUse call site runs under a non-nil curBranch and non-nil
+// curPart, so the subtraction is well-defined.
+func (l *listener) currentPartIndex() int {
+	return len(l.curBranch.parts) - 1
+}
+
+// attributePart returns the Use with its part field populated. Sum-preserving:
+// the returned Use has the same variant as u. Used by addParameterUse to
+// stamp the branch-relative Part index onto every Use at emission time.
+func attributePart(u query.Use, part int) query.Use {
+	switch uu := u.(type) {
+	case query.PropertyUse:
+		return query.NewPropertyUseAt(uu.Ref(), part)
+	case query.ExprUse:
+		return query.NewExprUseAt(uu.EnclosingType(), uu.Position(), part)
+	case query.ClauseSlotUse:
+		return query.NewClauseSlotUseAt(uu.Slot(), part)
+	default:
+		return u
+	}
 }
 
 // --- write clauses (Stage 12) ---

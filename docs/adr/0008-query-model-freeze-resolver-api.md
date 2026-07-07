@@ -1,5 +1,50 @@
 # `query.Query` is frozen; the resolver API is pinned
 
+> _Amendment (2026-07-06, gqlc-fvo unfreeze cycle): the
+> Use → Part attribution axis on `PropertyUse` / `ExprUse` /
+> `ClauseSlotUse` — recorded implicitly as the R5 §4.2.4
+> follow-up bead — is **adopted** under this ADR's
+> additive-only revision protocol. The R5-shipped
+> "any-valid-witness" rule
+> (`internal/resolver/resolve.go:750-811`) was an honest
+> workaround for the wire's missing Part attribution; the
+> resolver widening (post-fvo) narrows to lexical-Part witness
+> exactly against `scopes[u.Part()]`, closing the primary
+> gap. **Residual**: attribution is Part-granular, not
+> post-projection-scope-granular; a WITH…WHERE whose trailing
+> WHERE aliases the WITH-projected name back to a same-name
+> shadow (e.g. `MATCH (a:Post) WITH a.title AS a WHERE
+> a.x = $p RETURN a`) lexes the WHERE's `$p` in the CLOSED
+> Part (see §7.6 residual note in the fvo spec). Under a
+> shape where the CLOSED-Part scope's binding for the shadowed
+> name admits the property lookup, the widened resolver
+> still admits a semantically-invalid query — same
+> admit-shape as R5 §4.2.4, surviving the widening. No
+> regression versus branch base (any-valid-witness also
+> admitted this shape). Filed as a follow-up bead (§9
+> non-goals in the fvo spec)._
+> Each `Use` variant gains an additive `part int` field, one
+> new positional constructor (`NewPropertyUseAt` / `NewExprUseAt`
+> / `NewClauseSlotUseAt`), one new accessor `Part() int`, and
+> one new JSON key `"part"` with `,omitempty`. The existing
+> zero-argument-Part constructors are preserved verbatim.
+> The parser populates the axis at `addParameterUse`
+> (`internal/query/cypher/expr.go:633`) via
+> `l.currentPartIndex() = len(l.curBranch.parts) - 1` — the
+> branch-relative index of the Part the Use lexically occurs
+> in, well-defined at every emission site by the
+> priming-and-swap discipline of `EnterOC_SingleQuery` /
+> `EnterOC_With` / `EnterOC_StandaloneCall`. The JSON encoding
+> is **omit-when-zero-value** (`,omitempty`), following the
+> post-freeze convention this ADR's hk0 amendment established
+> for additive axes. The Use interface stays sealed at one
+> method (`isUse()`); Part attribution is a per-variant
+> field-and-accessor concern. See
+> `docs/specs/unfreeze-fvo-use-part.md` for the full contract,
+> the emission-site table, the zero-golden rebaseline
+> accounting, the reversed alias-shadow discriminating fixture,
+> and the semantic-diff-only fence commands._
+
 > _Amendment (2026-07-06, gqlc-hk0 unfreeze cycle): the
 > ContainsAggregate axis on `ExprProjection` — recorded as an
 > escape hatch in the "Known deferred additions" list — is
@@ -205,6 +250,18 @@ in-protocol when they arrive, not scope creep:
   by the resolver's `fillGroupingKeys` (`internal/resolver/resolve.go`)
   to discriminate aggregate-carrying residuals from grouping-key
   candidates. Never inferred from `Type`.
+- **`Use.Part` attribution axis on `PropertyUse` / `ExprUse` /
+  `ClauseSlotUse`** — adopted 2026-07-06 (see the amendment
+  note above and `docs/specs/unfreeze-fvo-use-part.md`).
+  Populated parser-side by `addParameterUse` from
+  `l.currentPartIndex()`; consumed by the resolver's
+  `witnessAcrossScopes` (`internal/resolver/resolve.go:750-811`)
+  to witness a PropertyUse against exactly the lexical Part's
+  scope, closing R5's any-valid-witness gap over the primary
+  shape. Residual (WITH…WHERE aliased-shadow across the
+  CLOSED Part) is honestly recorded in the amendment note
+  above and filed as a follow-up (§7.6 and §9 in the fvo
+  spec).
 
 ### shortestPath is a dialect extension, out of the frozen scope
 
