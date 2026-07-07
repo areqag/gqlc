@@ -2195,13 +2195,19 @@ R6's out-of-scope table survives with revisions:
 
 **Silently accepted (not routed anywhere):**
 
-R0–R6's silently-accepted set stands unchanged. R7 adds:
-- **CALL argument type-agreement against signature params** (§7.1.1
+R0–R6's silently-accepted set stands unchanged. ~~R7 adds:~~ **Both
+R7 additions below were closed by the 0ig unfreeze cycle
+(2026-07-07; §7.1.1 banner, `docs/specs/unfreeze-0ig-call-args.md`):**
+- ~~**CALL argument type-agreement against signature params** (§7.1.1
   frozen-model deficiency — resolver has no attribution to run the
-  check).
-- **NUMBER assignable-from at argument sites** — no resolver
+  check).~~ **checked** (0ig, 2026-07-07): the resolver's Phase A1
+  CallBinding arm walks `CallBinding.Args()` per position and fires
+  `ErrCallArgAssignability` on mismatch.
+- ~~**NUMBER assignable-from at argument sites** — no resolver
   application site because CALL-arg attribution is dropped (§7.1.1;
-  §4.8).
+  §4.8).~~ **delivered** (0ig, 2026-07-07): the assignability lattice
+  (`unfreeze-0ig-call-args.md §8.2`) applies NUMBER
+  assignable-from-INTEGER-or-FLOAT at the argument site.
 
 **Recorded ADR 0009 cross-check.** ADR 0009 R7: "CALL — YIELD column
 typing from the procsig.Registry; argument assignability including
@@ -2249,7 +2255,9 @@ deficiency (§7.1.1) and inherits every R6 open axis unchanged
 > ADR 0007 Stage-14 assignability lattice (`docs/specs/unfreeze-0ig-
 > call-args.md §8.2`: NUMBER accepts INTEGER-or-FLOAT; FLOAT accepts
 > INTEGER per TCK Call3 [5]; STRING / INTEGER strict; TypeUnknown
-> wildcard). The prose below is preserved as-of-R7-shipping for
+> and TypeNull wildcards — bare `null` literals mine to `TypeNull`,
+> a distinct sum member from `TypeUnknown`, per §8.2's E1 row). The
+> prose below is preserved as-of-R7-shipping for
 > historical grounding; the current model surface is the amendment's.
 > Escape-hatch entry in the "Known deferred additions" list is now
 > `CallBinding.Args` axis (adopted).
@@ -2322,22 +2330,28 @@ proceeds without the widening.
 The R6-discovered design axes (§7.1.1 value-target assignability;
 §7.1.2 Effects-on-wire) persist at R7 unchanged. R5-inherited gaps
 (`gqlc-hk0` ExprProjection residual discrimination, `gqlc-fvo`
-cross-Part Use attribution — of which R7's CALL-arg gap is a child)
-persist at R7 unchanged. R4-inherited gaps (`gqlc-ay9` Class A,
+cross-Part Use attribution ~~— of which R7's CALL-arg gap is a
+child~~ — the CALL-arg child gap was closed by 0ig, 2026-07-07; see
+§7.1.1) persist at R7 unchanged. R4-inherited gaps (`gqlc-ay9` Class A,
 `gqlc-5xg` Class B nullability) persist at R7 unchanged.
 
 #### 7.1.3 Freeze-not-a-wall status
 
 R7 discovers ONE new frozen-model deficiency (§7.1.1 — CALL-arg
-attribution). Owner-decision bead filed at close-out. R7 does not
+attribution). Owner-decision bead filed at close-out (that bead,
+`gqlc-0ig`, has since closed the deficiency — 2026-07-07). R7 does not
 delay the spec on it; the CALL-YIELD-typing arm delivers standalone.
 
 #### 7.1.4 Summary of R7 deferrals
 
-- **CALL-arg attribution** — deferred to a future frozen-model
+- ~~**CALL-arg attribution** — deferred to a future frozen-model
   widening (owner-decision bead filed at close-out). NUMBER
   assignable-from and argument-vs-param type agreement are both
-  downstream of this gap. Not a code-side deferral. §7.1.1.
+  downstream of this gap. Not a code-side deferral. §7.1.1.~~
+  **CALL-arg attribution — closed by 0ig (2026-07-07).** The
+  owner-decision bead delivered the widening; argument-vs-param
+  type agreement and NUMBER assignable-from now run in the
+  resolver's Phase A1 CallBinding arm. §7.1.1 banner.
 - **R6 open axes carry unchanged** — value-target assignability
   (§7.1.1 R6), Effects-on-wire (§7.1.2 R6). §7.1.2.
 - **R5 / R4 open axes carry unchanged** — `gqlc-fvo`, `gqlc-hk0`,
