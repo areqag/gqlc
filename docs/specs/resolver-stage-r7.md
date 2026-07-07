@@ -2190,7 +2190,7 @@ R6's out-of-scope table survives with revisions:
 | OPTIONAL-clause-sibling nullability under-demote | silently under-demoted | gqlc-ay9 (unchanged) |
 | `ExprProjection` residual grouping-key discrimination | silently under-grouped | gqlc-hk0 / Shape B (unchanged) |
 | Cross-Part parameter Use attribution gap | silently false-admitted | gqlc-fvo (unchanged) |
-| CALL argument-vs-parameter type check (incl. NUMBER assignable-from) | silently admitted | **frozen-model deficiency filed at R7 close-out** (§7.1.1) |
+| CALL argument-vs-parameter type check (incl. NUMBER assignable-from) | ~~silently admitted~~ **checked** (0ig, 2026-07-07) | ~~frozen-model deficiency filed at R7 close-out~~ CLOSED (§7.1.1; `docs/specs/unfreeze-0ig-call-args.md`) |
 | Parser trusts CALL procedure lookup; resolver does not re-check | silently admitted | (trust posture; §4.4 — same family as R6 Refs referential integrity) |
 
 **Silently accepted (not routed anywhere):**
@@ -2217,11 +2217,13 @@ spec scopes it:
   column. Signature identity carries via `CallBinding.Procedure()`
   and `CallBinding.SourceField()` on `query.Query` for codegen.
 - **Argument assignability including NUMBER assignable-from
-  INTEGER-or-FLOAT**: DEFERRED per §7.1.1 — this is a frozen-model
-  deficiency (the wire drops CALL-arg attribution; the resolver
-  cannot link a param Use back to a CALL param position). The
-  assignability check has no application site at R7. NUMBER
-  assignable-from is a subset of the same deficiency.
+  INTEGER-or-FLOAT**: ~~DEFERRED~~ **DELIVERED** by the 0ig cycle
+  (`docs/specs/unfreeze-0ig-call-args.md`; ADR 0008 amendment
+  2026-07-07). The wire now carries per-position `CallArg` records
+  on `CallBinding.Args()`; the resolver's Phase A1 CallBinding arm
+  applies the assignability lattice (spec §8.2) and fails with
+  `ErrCallArgAssignability` on mismatch. See §7.1.1 for the historical
+  context of the R7-shipped deferral.
 - **Unknown procedure = generation-time error by design**: delivered
   by the parser (`cypher.ErrUnknownProcedure`). The resolver does
   not re-check per §4.4 (trust posture — same family as R6 Refs
@@ -2234,7 +2236,23 @@ Following the R6 §7.1 template — R7 discovers ONE new frozen-model
 deficiency (§7.1.1) and inherits every R6 open axis unchanged
 (§7.1.2).
 
-#### 7.1.1 CALL-arg attribution — a frozen-model deficiency
+#### 7.1.1 CALL-arg attribution — a frozen-model deficiency ~~open~~ CLOSED (2026-07-07)
+
+> **Cycle 3 errata (2026-07-07, gqlc-0ig unfreeze cycle):** the
+> frozen-model deficiency this section records has been **closed** by
+> the ADR 0008 amendment adopted 2026-07-07 (`docs/adr/0008-query-
+> model-freeze-resolver-api.md` top). The wire now carries per-
+> position `CallArg` records on `CallBinding.Args()`; the resolver's
+> Phase A1 CallBinding arm walks `Args()` against the matched
+> `procsig.Registry.Lookup(procedure).Params[i].Token` and fails with
+> the new `ErrCallArgAssignability` sentinel on mismatch under the
+> ADR 0007 Stage-14 assignability lattice (`docs/specs/unfreeze-0ig-
+> call-args.md §8.2`: NUMBER accepts INTEGER-or-FLOAT; FLOAT accepts
+> INTEGER per TCK Call3 [5]; STRING / INTEGER strict; TypeUnknown
+> wildcard). The prose below is preserved as-of-R7-shipping for
+> historical grounding; the current model surface is the amendment's.
+> Escape-hatch entry in the "Known deferred additions" list is now
+> `CallBinding.Args` axis (adopted).
 
 **The gap.** The parser's Stage 14 `collectCall` at
 `internal/query/cypher/call.go:47-66` mines CALL arguments and
