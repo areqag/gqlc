@@ -289,8 +289,11 @@ this cycle:
 
 ### 3.1 `CallBinding` — the frozen shape
 
-Verbatim from `internal/query/query.go:820-932`
-(read fresh against master `62923d8`):
+The pre-widening shape (branch base `62923d8`, pre-0ig) is quoted
+below for the historical framing this section rests on. Current
+master `70f5c29` (post-#122) already includes the additive `args`
+field this cycle adds; the corresponding post-#122 line refs are
+noted under each ref below (§12 errata NIT5).
 
 ```go
 // CallBinding is a query variable bound to one YIELD result column of a
@@ -315,23 +318,25 @@ type CallBinding struct {
 }
 ```
 
-`NewCallBinding` at `:857-877` rejects empty `variable` / `procedure`
-/ `sourceField`; normalises `nil` `resultType` to `TypeUnknown{}`.
+`NewCallBinding` rejects empty `variable` / `procedure` /
+`sourceField`; normalises `nil` `resultType` to `TypeUnknown{}`
+(post-#122 master: `internal/query/query.go:891`).
 
-Accessors at `:882-908`:
+Accessors (post-#122 master `70f5c29` line refs; §12 NIT5):
 
 | Method | Return |
 |---|---|
-| `Variable() string` | `:882` |
-| `Procedure() string` | `:886` |
-| `SourceField() string` | `:893` |
-| `ResultType() Type` | `:900` |
-| `Kind() BindingKind` | `:903` |
-| `Nullable() bool` | `:907` |
-| `isBinding()` | `:909` |
+| `Variable() string` | `:927` |
+| `Procedure() string` | `:931` |
+| `SourceField() string` | `:938` |
+| `ResultType() Type` | `:945` |
+| `Kind() BindingKind` | `:948` |
+| `Nullable() bool` | `:952` |
+| `Args() []CallArg` (0ig) | `:961` |
+| `isBinding()` | `:963` |
 
-MarshalJSON at `:916-932` (**every field always-emitted**, per the
-pre-freeze frozen wire posture):
+MarshalJSON (post-#122 master: `:973-991`) — every pre-0ig field
+always-emitted, plus the new `args` field under omit-when-zero-length:
 
 ```go
 func (b CallBinding) MarshalJSON() ([]byte, error) {
@@ -526,8 +531,14 @@ the resolver-side check:
 **The cost of the divergence: bounded per-yield-column
 duplication.** A CALL with N ≥ 2 YIELD columns and M ≥ 1 args
 duplicates the args slice across N CallBindings — the worst
-corpus case is Call5 (5-column signatures) × 2 args =
-5 × 2 = 10 args records duplicated. Not a wire-size concern
+corpus case is Call5[4] (`CALL test.my.proc(null) YIELD a, b AS d
+RETURN a, d`) with N=2 CallBindings × M=1 arg =
+2 × 1 = 2 args records duplicated (the earlier arithmetic in this
+section fabricated a "5-column signature × 2 args = 10 records"
+witness — see §12 errata B1 for correction; no such 5-column CALL
+exists in the corpus at branch base `62923d8`, and Call5's `[8]
+Allow standalone call to procedure with YIELD *` maxes at N=2
+CallBindings × M=2 args = 4 records). Not a wire-size concern
 against the 3199-file golden corpus; a data-structure smell the
 per-Part `Calls` axis would fix, at the cost of a positional
 linkage and an extra grammar-motivated axis.
@@ -569,35 +580,70 @@ and an empty non-nil slice both encode as key-absent under
 
 **Within-record zero-value hazard.** A `CallArg{Type: TypeUnknown{}}`
 is the honest wire record for a `$param` or `n.name` argument (both
-mine to TypeUnknown per `typeExpressionMining`'s Stage 6 fallback).
-The zero value of the `Type` field IS `nil` (the interface's zero),
-but the widened marshaller renders a `nil` Type via the frozen
-`Type` marshalling (verified: `internal/query/query.go` — `Type`
-interface members render as `{"kind": "unknown"}` when marshalled).
+mine to TypeUnknown per `typeExpressionMining`'s Stage 6 fallback);
+a `null` literal argument mines to `TypeNull{}` (not TypeUnknown —
+see `internal/query/cypher/shape.go:78-79`; the §12 errata B1
+witness in §4.4.2 rests on this). The zero value of the `Type`
+field IS `nil` (the interface's zero), but the widened marshaller
+renders any Type via the frozen `marshalType` path
+(`internal/query/type.go:8`: `marshalType(t) = json.Marshal(t.String())`)
+so each Type variant serialises as a **plain JSON string** — never
+a `{"kind":…}` object. Real bytes at branch tip, quoted verbatim
+from `internal/query/cypher/testdata/golden/Call4_5e83e83041b5.golden.json`
+(Call4[2] `CALL test.my.proc(null) YIELD out`; the sole CallBinding's
+`args` slice):
+
+```json
+"args": [
+  {
+    "type": "null"
+  }
+]
+```
+
+And from `Call3_07c57b301e10.golden.json` (Call3[1] `CALL test.my.proc(42)`):
+
+```json
+"args": [
+  {
+    "type": "int"
+  }
+]
+```
+
+Every `args[i].type` value is one of the fifteen `query.Type`
+stringer wire tags (`"int"`, `"float"`, `"string"`, `"bool"`,
+`"null"`, `"map"`, `"node"`, `"edge"`, `"list<…>"`, `"unknown"`,
+`"date"`, `"time"`, `"localtime"`, `"datetime"`, `"localdatetime"`,
+`"duration"`, `"path"`; see `internal/query/type.go`), quoted.
 **No collision.** The `NewCallArg` constructor normalises `nil` to
-`TypeUnknown{}` (mirroring `NewCallBinding` at `:867-869`; verified
-against master), so the wire never sees a bare-nil Type.
+`TypeUnknown{}` (mirroring `NewCallBinding`'s ResultType handling
+at post-#122 master `internal/query/query.go:911-913`), so the
+wire never sees a bare-nil Type. The original §3.5 text quoted a
+fabricated `{"kind":"unknown"}` object encoding for arg types —
+that encoding does not exist. Corrected in §12 errata B3.
 
 ### 3.6 `EdgeBinding.directed`, `ExprProjection.ContainsAggregate`,
       `Use.Part` — the axis precedents
 
 Three axis precedents on the frozen model, listed in the order they
-landed:
+landed (line refs against current master `70f5c29`, per §12 errata
+NIT5):
 
 - **`EdgeBinding.directed`** (pre-freeze) — always-emit,
-  bool. `internal/query/query.go:378` (verified against master).
-  Predates the omit-when-zero-value convention.
+  bool. `internal/query/query.go:378`. Predates the
+  omit-when-zero-value convention.
 - **`ExprProjection.ContainsAggregate`** (hk0, 2026-07-06) —
-  omit-when-false, bool. `internal/query/query.go:1174` (field) /
-  `:1223` (marshal tag) — verified against master. ESTABLISHED
-  the omit-when-zero-value convention as post-freeze doctrine
+  omit-when-false, bool. `internal/query/query.go:1233` (field) /
+  `:1282` (marshal tag). ESTABLISHED the omit-when-zero-value
+  convention as post-freeze doctrine
   (`docs/adr/0008-query-model-freeze-resolver-api.md`
-  hk0 amendment note, lines 73-74).
+  hk0 amendment note).
 - **`PropertyUse.part` / `ExprUse.part` / `ClauseSlotUse.part`**
   (fvo, 2026-07-06) — omit-when-zero-int, int.
-  `internal/query/query.go:1321` (PropertyUse.part) / `:1447`
-  (ExprUse.part) / `:1500` (ClauseSlotUse.part) — verified against
-  master. APPLIED the hk0 convention to a slot-int axis.
+  `internal/query/query.go:1380` (PropertyUse.part) / `:1506`
+  (ExprUse.part) / `:1559` (ClauseSlotUse.part). APPLIED the hk0
+  convention to a slot-int axis.
 
 The 0ig axis:
 
@@ -892,7 +938,10 @@ carrying between CALLs in the same Part; an early-return that
 mints the slice but doesn't gate on non-emptiness).
 
 **Fence 2 — set-equality check** (the set of changed goldens must
-EQUAL the 28-file expected set):
+EQUAL the 28-file expected set below; per §12 errata B4, this
+inline list retires the earlier `[…every Call5 with args][see
+§4.4.1]` placeholder and matches the discovery script's output at
+master `70f5c29` verbatim):
 
 ```
 git diff --name-only origin/master -- \
@@ -914,16 +963,29 @@ Call5_23c85362b6f6.golden.json
 Call5_31baf2f6ab54.golden.json
 Call5_406b0ad48caa.golden.json
 Call5_45dc74965bc1.golden.json
-Call5_[…every Call5 with args][see §4.4.1 for the full 28-file list]
+Call5_4b9fca0af0f4.golden.json
+Call5_79f87f255f76.golden.json
+Call5_8a814c275874.golden.json
+Call5_909791b1f127.golden.json
+Call5_a386ea2d5bcf.golden.json
+Call5_b7635770dbca.golden.json
+Call5_c5fbac0ac9b7.golden.json
+Call5_c82f1b0097e8.golden.json
+Call5_d8eb83486999.golden.json
+Call5_dee66ed52bd6.golden.json
+Call5_fa0e3637463d.golden.json
+Call6_6f415ed09e01.golden.json
+Call6_b26a673eb8ad.golden.json
 EOF
 diff /tmp/expected.txt /tmp/changed.txt && echo "SET-EQUAL: PASS"
 # MUST print: SET-EQUAL: PASS.
 ```
 
-The full 28-file expected set is enumerated in §4.4.1. **§4.4.1 is
-the authoritative list; §4.1.3.2's expected file is the
-mechanical enumeration of that list, copied verbatim at fence
-time.**
+The 28 filenames above are the authoritative Fence 2 expected set.
+§4.4.1's Golden-corpus enumeration re-derives this list from the
+discovery script; the two lists MUST agree. Verify at PR-draft time
+via `grep -l '"args":' internal/query/cypher/testdata/golden/Call*.golden.json | xargs -n1 basename | sort`
+against current master — the output equals the list above.
 
 If Fence 1 passes but Fence 2 fails, the widened marshaller
 emitted a non-`args` change on some golden — a formatting drift
@@ -1103,9 +1165,15 @@ is identical — no args on absent CallBindings).
   `TypeFloat{}` via `typeAtom`'s literal recognition (Stage 6 §3;
   numeric literal path).
 - **String literal (`'Stefan'`)**: mines to `TypeString{}`.
-- **`null` literal**: mines to `TypeUnknown{}` — the Stage 6 §4
-  "cannot tell" fallback (verified: `typeAtom`'s null handling
-  returns TypeUnknown via `promoteBase`).
+- **`null` literal**: mines to `TypeNull{}` via the literal-atom
+  path (`internal/query/cypher/shape.go:78-79`:
+  `case lit.NULL() != nil: return query.TypeNull{}`) — the wire
+  tag is `"null"` (`internal/query/type.go:83`), not `"unknown"`.
+  See §12 errata B1 for the corrected mining witnesses. NULL
+  participating in an operator collapses to TypeUnknown via
+  `promoteBase` (typing.go:811-814), but a bare `null` argument to
+  CALL is a literal-atom, not an operator, so it stays TypeNull
+  on the wire.
 - **`$param`**: mines to `TypeUnknown{}` — Stage 6 §4 "no
   parameter is silently pinned" ruling; the mined type is
   TypeUnknown because the parameter's runtime type is not known
@@ -1117,22 +1185,26 @@ is identical — no args on absent CallBindings).
   `promoteBase` result of the operands, per the Stage 6 §3.5
   arithmetic promotion rules.
 
-**Corpus check.** All 28 flip goldens' CALL arguments are one of:
+**Corpus check.** All 28 flip goldens' CALL arguments are one of
+(fresh-classified from the corpus at current master `70f5c29`,
+per §4.4.1):
 
-- Literal numeric: 20 goldens (Call3, Call4, Call5 outlines with
-  `42`, `42.3`, `null`, `-1`, `0`).
-- Literal string: 2 goldens (Call2 with `'Stefan', 1` → mixed
-  string + int arg positions).
-- Literal null: 4 goldens (Call4 + 2 Call5 outlines with `null`).
+- Literal numeric: 6 goldens (Call3 [1]-[6] with `42` or `42.3`).
+- Literal string + int mix (`'Stefan', 1`): 3 goldens (Call2 [1],
+  Call2 [2], Call5 [8]).
+- Literal null: 19 goldens (Call4 [1]-[2] and Call5 outlines with
+  `null` — Call5 [1], [2], [3] two rows, [4] eleven Examples rows).
 - Bound-var property: 0 goldens (`authored CALL bound-var
   argument regression lock` is a parser-test pin, not a corpus
   golden; the argument is `n.name`, mines to TypeUnknown — verified
-  at `parser_test.go:2381`).
+  at `parser_test.go:2385`).
 
 **Consequence for the fence.** Every flip golden's `args[i].type`
-is one of `{"kind":"int"}`, `{"kind":"float"}`, `{"kind":"string"}`,
-or `{"kind":"unknown"}`. §4.4.1 spot-witnesses each with the
-per-scenario expected shape.
+is a plain JSON **string** — one of `"int"`, `"float"`, `"string"`,
+or `"null"`. Types serialise via `marshalType` (`internal/query/type.go:8`
+= `json.Marshal(t.String())`); the wire is never a `{"kind":…}`
+object. See §12 errata B3 for the corrected wire quote. §4.4.1
+spot-witnesses each with the per-scenario expected shape.
 
 ### 4.3 Parser-test pins — flips vs preserved
 
@@ -1332,12 +1404,57 @@ PY
 ```
 
 **Verified output at branch base `master @ 62923d8`** (fresh-run
-this cycle):
+this cycle, and re-verified at post-#122 master `70f5c29` against
+the currently-landed goldens):
 
 - Total 'kind': 'call' goldens: **32**
 - Flipping (≥ 1 arg CALL): **28**
 - Byte-identical (0-arg CALL only): **4** (enumerated in
   §4.1.3.1 above with their scenario source lines).
+
+**Authoritative 28-witness table** (each row cross-checked against
+the on-disk golden bytes and the TCK scenario source at current
+master `70f5c29`; §12 errata item 5 requires each Call5 witness
+to be pinned individually, retiring the earlier "5+ spot witnesses"
+under-approximation):
+
+| Golden | Scenario | CALL args (source) | Mined types → `args` |
+|---|---|---|---|
+| `Call2_708fd68c8e95.golden.json` | Call2 [2] Standalone call to procedure with explicit arguments | `'Stefan', 1` | `[{"type":"string"},{"type":"int"}]` |
+| `Call2_aeadf4f8844e.golden.json` | Call2 [1] In-query call to procedure with explicit arguments | `'Stefan', 1` | `[{"type":"string"},{"type":"int"}]` |
+| `Call3_07c57b301e10.golden.json` | Call3 [1] NUMBER accepts INTEGER (standalone) | `42` | `[{"type":"int"}]` |
+| `Call3_389619d1622f.golden.json` | Call3 [3] NUMBER accepts FLOAT (standalone) | `42.3` | `[{"type":"float"}]` |
+| `Call3_651e6e2c2643.golden.json` | Call3 [4] NUMBER accepts FLOAT (in-query) | `42.3` | `[{"type":"float"}]` |
+| `Call3_88c3ef85b829.golden.json` | Call3 [5] FLOAT accepts INTEGER (standalone) | `42` | `[{"type":"int"}]` |
+| `Call3_ba1334616b0c.golden.json` | Call3 [2] NUMBER accepts INTEGER (in-query) | `42` | `[{"type":"int"}]` |
+| `Call3_f8301ea19bf6.golden.json` | Call3 [6] FLOAT accepts INTEGER (in-query) | `42` | `[{"type":"int"}]` |
+| `Call4_5e83e83041b5.golden.json` | Call4 [2] In-query call with null argument | `null` | `[{"type":"null"}]` |
+| `Call4_954470d1d743.golden.json` | Call4 [1] Standalone call with null argument | `null` | `[{"type":"null"}]` |
+| `Call5_05b3c946be0d.golden.json` | Call5 [3] Order of yield items is irrelevant (Examples row) | `null` | `[{"type":"null"}]` |
+| `Call5_23c85362b6f6.golden.json` | Call5 [4] Rename outputs to unbound (Examples row) | `null` | `[{"type":"null"}]` |
+| `Call5_31baf2f6ab54.golden.json` | Call5 [4] Rename outputs to unbound (Examples row `a AS c, b AS d`) | `null` | `[{"type":"null"}]` |
+| `Call5_406b0ad48caa.golden.json` | Call5 [4] Rename outputs to unbound (Examples row) | `null` | `[{"type":"null"}]` |
+| `Call5_45dc74965bc1.golden.json` | Call5 [4] Rename outputs to unbound (Examples row) | `null` | `[{"type":"null"}]` |
+| `Call5_4b9fca0af0f4.golden.json` | Call5 [4] Rename outputs to unbound (Examples row) | `null` | `[{"type":"null"}]` |
+| `Call5_79f87f255f76.golden.json` | Call5 [4] Rename outputs to unbound (Examples row) | `null` | `[{"type":"null"}]` |
+| `Call5_8a814c275874.golden.json` | Call5 [1] Explicit procedure result projection | `null` | `[{"type":"null"}]` |
+| `Call5_909791b1f127.golden.json` | Call5 [4] Rename outputs to unbound (Examples row) | `null` | `[{"type":"null"}]` |
+| `Call5_a386ea2d5bcf.golden.json` | Call5 [4] Rename outputs to unbound (Examples row) | `null` | `[{"type":"null"}]` |
+| `Call5_b7635770dbca.golden.json` | Call5 [4] Rename outputs to unbound (Examples row) | `null` | `[{"type":"null"}]` |
+| `Call5_c5fbac0ac9b7.golden.json` | Call5 [2] Explicit procedure result projection with RETURN * | `null` | `[{"type":"null"}]` |
+| `Call5_c82f1b0097e8.golden.json` | Call5 [4] Rename outputs to unbound (Examples row) | `null` | `[{"type":"null"}]` |
+| `Call5_d8eb83486999.golden.json` | Call5 [3] Order of yield items is irrelevant (Examples row) | `null` | `[{"type":"null"}]` |
+| `Call5_dee66ed52bd6.golden.json` | Call5 [8] Standalone call with YIELD * | `'Stefan', 1` | `[{"type":"string"},{"type":"int"}]` |
+| `Call5_fa0e3637463d.golden.json` | Call5 [4] Rename outputs to unbound (Examples row) | `null` | `[{"type":"null"}]` |
+| `Call6_6f415ed09e01.golden.json` | Call6 [2] Project procedure results between query scopes with WITH clause | `null` | `[{"type":"null"}]` |
+| `Call6_b26a673eb8ad.golden.json` | Call6 [3] Project procedure results between query scopes with WITH clause and rename the projection | `null` | `[{"type":"null"}]` |
+
+**Discovery-script cross-check.** Each row above is what the Python
+discovery script at the head of §4.4.1 emits for the corresponding
+golden hash; each was independently verified by running
+`grep -A 2 '"kind": "call"'` on the golden file to confirm the
+first CallBinding's args slice matches the "Mined types" column
+byte-for-byte.
 
 **Bidirectional fence** — same discipline as fvo §4.4.1 and hk0
 §4.4.1:
@@ -1359,30 +1476,49 @@ walker mis-attributed) or a non-`args` change slipped in.
 Cycle-2 erratum 1 lesson: mining claims must be verified against
 live walker order. Five spot witnesses (freshly-read from
 `internal/query/cypher/testdata/golden/*.golden.json` and the TCK
-scenario source at branch base `master @ 62923d8`):
+scenario source at current master `70f5c29`):
 
 | Golden | Scenario | CALL query | Expected `args` per CallBinding |
 |---|---|---|---|
-| `Call2_708fd68c8e95.golden.json` | Call2 [2] Standalone call to procedure with explicit arguments | `CALL test.my.proc('Stefan', 1)` — args: string literal, int literal → mined `(TypeString, TypeInt)` | 2 CallBindings (city, country_code) each carry `[{type:string}, {type:int}]` |
+| `Call2_708fd68c8e95.golden.json` | Call2 [2] Standalone call to procedure with explicit arguments | `CALL test.my.proc('Stefan', 1)` — args: string literal, int literal → mined `(TypeString, TypeInt)` | 2 CallBindings (city, country_code) each carry `[{type:"string"},{type:"int"}]` |
 | `Call2_aeadf4f8844e.golden.json` | Call2 [1] In-query call to procedure with explicit arguments | `CALL test.my.proc('Stefan', 1) YIELD city, country_code` | same 2-arg slice, same 2 CallBindings |
-| `Call3_07c57b301e10.golden.json` | Call3 [1] Standalone call to procedure with argument of type NUMBER accepts value of type INTEGER | `CALL test.my.proc(42)` — mined `(TypeInt)` | 1 CallBinding (out) carries `[{type:int}]` |
-| `Call3_389619d1622f.golden.json` | Call3 [3] Standalone call to procedure with argument of type NUMBER accepts value of type FLOAT | `CALL test.my.proc(42.3)` — mined `(TypeFloat)` | 1 CallBinding carries `[{type:float}]` |
-| `Call4_5e83e83041b5.golden.json` | Call4 [2] In-query call to procedure with null argument | `CALL test.my.proc(null) YIELD out` — mined `(TypeUnknown)` | 1 CallBinding carries `[{type:unknown}]` |
+| `Call3_07c57b301e10.golden.json` | Call3 [1] Standalone call to procedure with argument of type NUMBER accepts value of type INTEGER | `CALL test.my.proc(42)` — mined `(TypeInt)` | 1 CallBinding (out) carries `[{type:"int"}]` |
+| `Call3_389619d1622f.golden.json` | Call3 [3] Standalone call to procedure with argument of type NUMBER accepts value of type FLOAT | `CALL test.my.proc(42.3)` — mined `(TypeFloat)` | 1 CallBinding carries `[{type:"float"}]` |
+| `Call4_5e83e83041b5.golden.json` | Call4 [2] In-query call to procedure with null argument | `CALL test.my.proc(null) YIELD out` — mined `(TypeNull)` | 1 CallBinding carries `[{type:"null"}]` |
 
 The scenario source text for each is fresh-read from
 `test/data/query/cypher/tck/features/clauses/call/Call{2,3,4}.feature`
 at branch base — the CALL invocation appears verbatim in each
-scenario's `"""` block.
+scenario's `"""` block. The Call4 witness pins that a `null`
+literal mines to `TypeNull`, not `TypeUnknown` — see the corrected
+mining discipline in §4.2.1 (previously stated as TypeUnknown; see
+§12 errata B1).
 
 **A sixth witness for the multi-column shape** —
-`Call5_31baf2f6ab54.golden.json` (Call5 [1] iterate 5-column
-`(a: INT, b: STRING, c: INT, d: STRING, e: INT)` signature, YIELD
-all in declaration order): the CALL is `CALL test.my.proc('foo',
-1)` (fresh-read from `Call5.feature`); mined `(TypeString,
-TypeInt)`; 5 CallBindings each carry the SAME 2-arg args slice.
-This is the WIDEST duplication case at branch base — five
-CallBindings sharing one args slice, exercising the slice-sharing
-safety at §4.2.
+`Call5_31baf2f6ab54.golden.json` (Call5 [4] Rename outputs to
+unbound variable names, Examples-row `a AS c, b AS d`): the CALL
+is `CALL test.my.proc(null) YIELD a, b AS d RETURN a, d`
+(fresh-read from `Call5.feature`); signature is
+`test.my.proc(in :: INTEGER?) :: (a :: INTEGER?, b :: INTEGER?)`;
+mined `(TypeNull)` (1 arg); 2 CallBindings (`a` and `d`, where `d`
+is the AS-rename of source-field `b`) each carry the SAME 1-arg
+args slice `[{type:"null"}]`. The bytes at
+`internal/query/cypher/testdata/golden/Call5_31baf2f6ab54.golden.json`
+confirm: two `"kind":"call"` records at variables `a` and `d`,
+each with `"args":[{"type":"null"}]`.
+
+There is **no 5-column signature** anywhere in the Call*.feature
+corpus at branch base — the earlier §4.4.2 text fabricated a
+`(a: INT, b: STRING, c: INT, d: STRING, e: INT)` witness with args
+`('foo', 1)`; that scenario does not exist. Corrected in §12
+errata B1. The genuine widest duplication case at branch base is
+Call5[8] `Allow standalone call to procedure with YIELD *`
+(`Call5_dee66ed52bd6.golden.json`): signature
+`test.my.proc(name :: STRING?, id :: INTEGER?) :: (city :: STRING?,
+country_code :: INTEGER?)`; CALL is `CALL test.my.proc('Stefan', 1)
+YIELD *`; 2 CallBindings (`city`, `country_code`) each carry the
+SAME 2-arg `[{type:"string"},{type:"int"}]` slice, exercising the
+slice-sharing safety at §4.2.
 
 ### 4.5 The `Parameter` list-order invariant is preserved
 
@@ -1718,7 +1854,37 @@ func argAssignable(argType query.Type, paramToken procsig.TypeToken) bool {
 **Slot placement.** The helper lives in `resolve.go` alongside the
 existing `callBindingSlot` machinery (`:95-103`). No new file.
 
-### 8.2 The 5-case assignability table (worked)
+#### 8.1.1 Registry threading — `resolveBranch` → `resolvePart`
+
+The spec's §8.1 sketch assumes the `procsig.Registry` is already
+available inside `resolvePart`. In the R5-through-R7 kernel it was
+NOT: `resolveBranch` carried the parameter but discarded it with
+`_ = r` (R5 comment: _"R5 does not admit CALL; the registry is
+reserved for R7. When R7 lands the CALL/YIELD handler here, drop
+this discard and route the registry into that handler's
+procedure-signature witness."_ — `internal/resolver/resolve.go:122`
+on master `70f5c29`). R7's YIELD handler kept the discard in place
+because R7's CallBinding arm consulted only bridged fields
+(`bb.ResultType()`, `bb.Nullable()`, `bb.Procedure()`,
+`bb.SourceField()`) already resolver-facing on the binding.
+
+The 0ig resolver-widening PR (`origin/unfreeze-0ig-resolver` head
+`1eb7764`) therefore does TWO threading edits before §8.1's
+CallBinding-arm widening compiles:
+
+1. **Drop the `_ = r` discard** at `resolve.go:122` (R5-era guard),
+   because 0ig's Phase-A1 walk now consumes the registry via
+   `argAssignable`.
+2. **Widen `resolvePart`'s signature** to accept the registry —
+   `resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.Registry)`
+   — and thread `r` from `resolveBranch`'s caller-site
+   (`resolve.go:135`) through every `resolvePart` invocation.
+
+Neither edit is R5-through-R7 wire-observable (the registry was
+already reachable at the `resolveBranch` boundary; the R7 tests
+did not need it inside `resolvePart`). Both are prerequisites for
+the CallBinding-arm widening at §8.1; §12 errata NIT6 records
+that the earlier spec did not enumerate these threading edits.
 
 Per §2.4:
 
@@ -1776,31 +1942,67 @@ This resolution is a design escalation Linus must sign off on;
 §10 §8.2.1 lists the two questions team-lead + linus resolve at
 resolver-widening-PR review time.
 
-### 8.3 Sentinel discipline — no new sentinel, message-set widening
+### 8.3 Sentinel discipline — spec-vs-implementation divergence
 
-R7 §5.1 committed to zero new sentinels; the 0ig resolver widening
-holds that line. The arg-site mismatch fires the existing
-`ErrOutOfR0Scope` sentinel with a widened message set:
+**Spec-time posture** (this section's original wording, preserved
+below for the historical framing): the 0ig resolver widening was
+proposed to fire an existing sentinel — the same `ErrOutOfR0Scope`
+that R7 §5.2 was already in the middle of retiring for the
+BindingCall arm (`docs/specs/resolver-stage-r7.md §5.2 — "R7
+retires ONE ErrOutOfR0Scope fail-site … at Phase A1 default arm
+at resolve.go:234-236 for BindingCall"`). The spec argued this
+matched R7 §5.1's "zero new sentinels" line and preserved the
+"widen message set, not sum" invariant.
 
-- `"unknown procedure %q at resolver arg-site (parser-resolver registry drift)"` — parser-resolver drift; unreachable belt-and-braces.
-- `"procedure %q arity mismatch at resolver arg-site (%d args, %d params) — parser-resolver drift"` — parser-resolver drift; unreachable belt-and-braces.
-- `"procedure %q argument %d has type %s, signature declares %s"` — the semantic fail-site the check exists to detect.
+**Implementation reality** (`origin/unfreeze-0ig-resolver` head
+`1eb7764`, resolver-widening PR): a NEW sentinel
+`ErrCallArgAssignability` was minted at
+`internal/resolver/errors.go:88-96` and added to `allSentinels` at
+`:118`. The Phase-A1 CallBinding arm at `resolve.go:275-302` fires
+this new sentinel with three wrapped messages:
 
-**Why not a new `ErrCallArgType`?** R7 §5.1's precedent
-(`docs/specs/resolver-stage-r7.md`): _"R7 introduces no new
-sentinel. The R6 close-out committed to one per stage as a hard
-maximum; zero is a floor R7 hits naturally"_. The 0ig widening is a
-YIELD-adjacent CALL widening; adding a new sentinel duplicates
-`ErrOutOfR0Scope`'s "resolver rejects a construct the type-interface
-does not fully model" role. The wrapped message disambiguates for
-the diagnostic reader (procedure name + argument index + the
-mismatched types).
+- `"procedure %q missing from registry"`
+- `"procedure %q expects %d arguments, got %d"`
+- `"procedure %q argument %d: cannot assign %s to %s"`
 
-**Consistency with R5/R6/R7.** R5 introduced no new arg-site
-sentinel (parameter conflicts fire `ErrParameterTypeConflict`).
-R6 introduced `ErrInvalidEffectTarget` — for a semantically distinct
-Effect-target arm. R7 introduced zero. 0ig introduces zero, matching
-R7 and the "arg-site is a YIELD-neighbour widening" framing.
+**Why the divergence, and why it holds up against R7 §5.2.**
+Under R7's retirement, `ErrOutOfR0Scope` is being narrowed on the
+BindingCall arm: R7 replaced the `"%w: %s binding"` default arm's
+CALL fall-through with an explicit CallBinding switch case that
+does NOT fire `ErrOutOfR0Scope`. Widening `ErrOutOfR0Scope`'s
+message set back to CALL — as the spec-time §8.3 proposed —
+would REVERSE R7's just-landed narrowing, telling the diagnostic
+reader "this construct is out-of-R0-scope" for what is actually a
+type-check failure inside a fully R7-supported construct.
+`ErrCallArgAssignability` gives the CALL arm its own semantic
+identity: a valid CALL whose argument type is wrong, distinct from
+"a construct we do not yet support at all."
+
+**Consequence for the "zero new sentinels" line.** The zero-new
+posture was an R7-scoped commitment (R7 §5.1 explicitly framed as
+"R7 introduces no new sentinel"). It was NOT an ADR-level ban.
+0ig introduces ONE new sentinel to close a widening whose
+diagnostic identity is distinct from R6's `ErrInvalidEffectTarget`
+and R2-through-R7's `ErrOutOfR0Scope`. The 0ig-adopted sentinel
+name and semantics match the widening's semantic surface;
+§8.3-original's message-set widening is REJECTED in favour of the
+sentinel-add posture the resolver PR landed.
+
+**Coordination with R7 §5.2's retirement.** The R7 close-out
+already narrowed `ErrOutOfR0Scope`'s CallBinding fail-site (the
+default-arm `"%w: call binding"` wrap); 0ig does NOT reintroduce
+that message. R7's retirement stands; 0ig adds a NEW arm firing
+a NEW sentinel. The two edits compose additively.
+
+**Consistency with R5/R6/R7 sentinels.** R5 introduced no new
+arg-site sentinel; R6 introduced `ErrInvalidEffectTarget` for a
+distinct Effect-target arm; R7 introduced zero. 0ig introduces
+`ErrCallArgAssignability` — one new sentinel — because CALL
+arg-site type mismatches are a semantically-distinct failure mode
+that R7's `ErrOutOfR0Scope` retirement removed from the natural
+wrap-site.
+
+§12 errata NIT7 records the divergence and its resolution.
 
 ### 8.4 New invalid fixture — `call_arg_wrong_type_at_arg_site.cypher`
 
@@ -2087,10 +2289,128 @@ resolver-widening PR (cycle 3) then implements §8 verbatim.
 
 ---
 
-## 12. Errata
+## 12. Errata (2026-07-07, adversarial post-merge review)
 
-_(To be populated at cycle close-out per the fvo §12 / hk0 §12
-convention. Cycle-2 lesson: any spec-text divergence from the
-landed listener/resolver reality caught during the code cycles
-is recorded here after both code PRs merge, with the fix applied
-in-place above.)_
+Eight defects surfaced by adversarial review of the spec against
+the landed model (PR #122, `70f5c29`) and the resolver-widening
+branch (`origin/unfreeze-0ig-resolver` head `1eb7764`). None
+required a code edit — every defect was a spec-text divergence
+from repo reality or a load-bearing gap the earlier draft
+under-specified. Fixes applied in place above; this section is
+the reviewer-facing index.
+
+**B1. Fabricated Call5_31baf2f6ab54 witness (§4.4.2 + §3.4
+arithmetic).** The original §4.4.2 "sixth witness for the
+multi-column shape" described `Call5_31baf2f6ab54.golden.json` as
+Call5[1] against a 5-column `(a: INT, b: STRING, c: INT, d: STRING,
+e: INT)` signature with query `CALL test.my.proc('foo', 1)`.
+Neither fact holds: the golden hashes to Call5[4]
+`Rename outputs to unbound variable names` (Examples row `a AS c,
+b AS d`); the query is `CALL test.my.proc(null) YIELD a, b AS d
+RETURN a, d`; the signature is
+`test.my.proc(in :: INTEGER?) :: (a :: INTEGER?, b :: INTEGER?)`
+(the same 2-column shape every Call5[3]-[6] outline uses); the
+CALL takes 1 arg (a `null` literal, mining to `TypeNull`), not 2;
+the golden carries 2 CallBindings (variables `a` and `d`), not 5.
+There is NO 5-column signature in the branch-base Call*.feature
+corpus. §4.4.2's sixth witness is now rewritten against the
+genuine Call5[4] shape; §3.4's dependent arithmetic
+"5 × 2 = 10 records duplicated" is corrected to the real
+worst-case "2 × 1 = 2 records" for this golden, with the
+corpus-wide worst case pointed at Call5[8]
+(`Call5_dee66ed52bd6.golden.json`, N=2 × M=2 = 4).
+
+**B3. Fabricated `{"kind":"unknown"}` wire quote (§3.5, §4.2.1).**
+The original §3.5 "Within-record zero-value hazard" claimed
+_"`Type` interface members render as `{"kind": "unknown"}` when
+marshalled"_, and the original §4.2.1 "Consequence for the fence"
+listed the wire shape as one of
+`{"kind":"int"} / {"kind":"float"} / {"kind":"string"} / {"kind":"unknown"}`.
+That object-shaped encoding does not exist. Every `query.Type`
+variant serialises via `marshalType` at `internal/query/type.go:8`
+= `json.Marshal(t.String())`, i.e. as a plain JSON **string** —
+`"int"`, `"float"`, `"string"`, `"null"`, `"unknown"`, and so on.
+Both sections now quote real byte-fragments from landed goldens
+(`Call4_5e83e83041b5.golden.json` `[{"type":"null"}]`,
+`Call3_07c57b301e10.golden.json` `[{"type":"int"}]`,
+`Call2_708fd68c8e95.golden.json`
+`[{"type":"string"},{"type":"int"}]`). The B1 correction to
+Call4/Call5's `null` witnesses is what surfaced this — a `null`
+literal mines to `TypeNull` (wire `"null"`), not `TypeUnknown`
+(wire `"unknown"`), further contradicting the fabricated quote.
+
+**B4. Fence 2 inline expected set (§4.1.3.2).** The original
+Fence 2 heredoc terminated with the placeholder
+`Call5_[…every Call5 with args][see §4.4.1 for the full 28-file list]`,
+leaving reviewers no runnable expected set. §4.1.3.2 now
+enumerates all 28 flip goldens inline, matching the discovery
+script's output at master `70f5c29` verbatim, and points at
+§4.4.1's authoritative 28-witness table as the cross-check.
+
+**Item-4 census note (spec-vs-brief divergence, wrong-as-briefed).**
+The team-lead brief instructed the implementer to expand a "13-row"
+§4.3 census table to 15 rows. The census table in §4.3 (this
+document, lines 1153-1169) already carries **15 rows** on master
+`70f5c29`, matching the 15-invocation grep against
+`internal/query/cypher/parser_test.go`
+(`NewCallBinding` + `NewCallBindingWithArgs` invocations = 2 + 13
+= 15; the zero-arg pin near line 2475 is present). The census was
+already corrected on 2026-07-07 by commit `00682c1`
+_"docs(spec): 0ig — correct §4.3 parser-pin census (15 pins, not
+30)"_ — the prior defect ("30" or "13") having landed before that
+correction. No edit is required by this errata; the table is
+accurate as-of `70f5c29`. See implementer report to team-lead for
+the corroborating grep + line-count evidence.
+
+**Item-5 Call5 witness rows (§4.4.1).** §4.4.1's original prose
+enumerated only 5 spot witnesses (§4.4.2's row set), leaving the
+16 Call5 flip goldens un-pinned. §4.4.1 now carries an
+authoritative 28-witness table naming every flip golden's
+scenario, CALL args, and mined `args` slice — the reviewer can
+diff this table against `grep -l '"args":'` on the corpus
+mechanically.
+
+**NIT5. Stale line references (§3.1, §3.6, §4.1.1).** Every
+`internal/query/query.go:LINE` reference in these sections
+predated PRs #111/#118/#122; the post-#122 landing shifted the
+symbols downward (CallBinding struct 820→843; NewCallBinding
+857→891; MarshalJSON 916→973; ExprProjection.ContainsAggregate
+field 1174→1233, marshal tag 1223→1282; PropertyUse.part
+1321→1380; ExprUse.part 1447→1506; ClauseSlotUse.part 1500→1559).
+§3.1's line refs are re-scraped against master `70f5c29` and now
+point at the current landing lines; §3.6's axis-precedents block
+carries the corrected line numbers; §4.1.1's constructor prose is
+unchanged (it carries no explicit line refs).
+
+**NIT6. Registry threading (§8.1.1, new).** §8.1's original
+CallBinding-arm sketch presumed `procsig.Registry` was already
+available inside `resolvePart`. On master `70f5c29` the registry
+is threaded through `resolveBranch` and discarded with `_ = r` at
+`internal/resolver/resolve.go:122` (R5-era guard). The
+resolver-widening branch (`unfreeze-0ig-resolver` `1eb7764`)
+drops the discard AND widens `resolvePart`'s signature to accept
+`r procsig.Registry`. Neither edit is R5-through-R7 wire-observable,
+but both are prerequisites for the CallBinding-arm widening at
+§8.1. §8.1.1 is a new subsection enumerating the two threading
+edits so the resolver-widening PR body has a checklist matching
+what actually lands.
+
+**NIT7. `ErrCallArgAssignability` — new sentinel, not
+`ErrOutOfR0Scope` widening (§8.3).** §8.3's original wording
+committed to "no new sentinel" and proposed widening
+`ErrOutOfR0Scope`'s message set. The resolver-widening branch
+instead mints a new sentinel `ErrCallArgAssignability`
+(`internal/resolver/errors.go:88-96`, added to `allSentinels` at
+`:118`). The change is deliberate: R7 §5.2 just RETIRED
+`ErrOutOfR0Scope`'s BindingCall fail-site (the default-arm `"%w:
+call binding"` wrap), and widening it back to CALL — as §8.3
+originally proposed — would REVERSE that retirement, mis-labeling
+type-check failures inside a fully R7-supported construct as
+"out-of-R0-scope." `ErrCallArgAssignability` gives the arm its own
+diagnostic identity while composing additively with R7's
+retirement (R7's narrowing stands; 0ig's new arm fires a new
+sentinel). §8.3 is rewritten to record the spec-vs-implementation
+divergence, its reasoning, and the resolution. The "zero new
+sentinels" line was an R7-scoped commitment, not an ADR-level
+ban; 0ig introduces one new sentinel with its own semantic
+surface.
