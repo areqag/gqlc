@@ -88,6 +88,16 @@ var (
 	// keeps the invariant tight). Introduced at R6. See R6 spec §4.3,
 	// §4.4 for the fail-sites.
 	ErrInvalidEffectTarget = errors.New("invalid effect target")
+
+	// ErrCallArgAssignability is returned when a CALL clause's argument
+	// at position i mines to a Stage-6 type that cannot be assigned to
+	// the matched procedure signature's Params[i].Token under the ADR
+	// 0007 Stage-14 assignability rule (NUMBER assignable-from INTEGER-
+	// or-FLOAT; FLOAT accepts INTEGER per TCK Call3 [5]; STRING /
+	// INTEGER / FLOAT are strict; TypeUnknown is a resolver-side
+	// wildcard for $param / n.name / null arguments). Introduced at
+	// R7-0ig (spec §8.2).
+	ErrCallArgAssignability = errors.New("call argument assignability")
 )
 
 // allSentinels is the canonical closed set of sentinels the resolver may
@@ -105,4 +115,5 @@ var allSentinels = []error{
 	ErrUnionColumnMismatch,
 	ErrPartBindingTypeConflict,
 	ErrInvalidEffectTarget,
+	ErrCallArgAssignability,
 }

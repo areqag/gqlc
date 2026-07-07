@@ -141,6 +141,8 @@ var invalidFixtures = map[string]error{
 	"call_yield_property_lookup.cypher":              ErrUnknownProperty,
 	"part_binding_type_conflict_call_vs_node.cypher": ErrPartBindingTypeConflict,
 	"part_binding_type_conflict_call_vs_edge.cypher": ErrPartBindingTypeConflict,
+	// 0ig addition:
+	"call_arg_type_mismatch.cypher": ErrCallArgAssignability,
 }
 
 type ResolverSuite struct {
