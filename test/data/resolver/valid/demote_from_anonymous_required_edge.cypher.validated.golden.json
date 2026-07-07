@@ -14,7 +14,7 @@
       "type": {
         "kind": "node",
         "labels": "Post",
-        "nullable": true
+        "nullable": false
       },
       "groupingKey": false
     },
