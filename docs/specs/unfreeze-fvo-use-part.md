@@ -44,15 +44,19 @@ Unfreeze cycle (Cycle 2, follow-up PR):
   `NewClauseSlotUse` constructors are preserved verbatim as the
   zero-value-safe shorthands (each delegates to the new
   constructor with `part=0`). §4.1.
-- `internal/query/type_test.go` — three new tests
-  `TestNewPropertyUseAt`, `TestNewExprUseAt`, `TestNewClauseSlotUseAt`
-  pinning the axis wiring (constructor → accessor → JSON round-trip
-  with a non-zero Part). Existing `TestNewPropertyUse`,
-  `TestNewExprUse`, `TestNewClauseSlotUse`, and
-  `TestPropertyUseMarshalJSON` / `TestExprUseMarshalJSON` /
-  `TestClauseSlotUseMarshalJSON` stay verbatim — they exercise the
-  zero-value default (Part 0) and pin the wire back-compatibility
-  fence via omit-when-zero. §4.1 and §5.
+- `internal/query/type_test.go` — three new
+  `TestNew…UseAt` tests pinning the true-side axis wiring
+  (constructor → accessor → JSON marshal-and-compare with a
+  non-zero Part), plus four new zero-side tests filling the
+  branch-base coverage gap: `TestNewPropertyUse`,
+  `TestPropertyUseMarshalJSON`, `TestNewClauseSlotUse`,
+  `TestClauseSlotUseMarshalJSON` (PropertyUse and ClauseSlotUse
+  have no unit coverage at branch base — only ExprUse does; grep
+  at `baba282`: `TestNewExprUse` at `internal/query/type_test.go:73`
+  and `TestExprUseMarshalJSON` at `:93` are the only pre-existing
+  Use unit tests). The two pre-existing ExprUse tests stay
+  verbatim; the four new zero-side tests pin `part = 0` via
+  key-absence under omit-when-zero. §4.1 and §5.
 - `internal/query/cypher/expr.go:633` — `addParameterUse` gains
   one line: reading the current Part index
   `l.currentPartIndex()` before appending, and wrapping the
@@ -65,11 +69,13 @@ Unfreeze cycle (Cycle 2, follow-up PR):
   stays verbatim — none of them needs to change. §4.2.
 - `internal/query/cypher/parser_test.go` — the parser test pins
   that assert `Use` shapes remain byte-for-byte identical under
-  `require.Equal`: 24 assertions carry Uses in Part 0 (Go
+  `require.Equal`: 18 pins carry Uses in Part 0 (Go
   struct zero-value equality — a `PropertyUse{ref, 0}` equals
   `PropertyUse{ref, part: 0}` bit-for-bit under `reflect.DeepEqual`).
-  §4.3 enumerates every pin; §4.4 covers the golden-corpus
-  rebaseline.
+  The count of 18 is corroborated by
+  `grep -c "NewPropertyUse\|NewExprUse\|NewClauseSlotUse" internal/query/cypher/parser_test.go`
+  at branch base `baba282`. §4.3 enumerates every pin; §4.4 covers
+  the golden-corpus rebaseline.
 - `docs/adr/0008-query-model-freeze-resolver-api.md` — one dated
   amendment note (top of the file, ADR 0003 stage-note convention)
   recording the `Use → Part` axis's adoption. The "Known deferred
@@ -332,12 +338,25 @@ Two always-emit fields.
 
 #### 3.1.4 Existing unit test witnesses
 
-- `TestNewPropertyUse` at `internal/query/type_test.go` (verify at
-  branch base).
-- `TestNewExprUse` at `internal/query/type_test.go`.
-- `TestNewClauseSlotUse` at `internal/query/type_test.go`.
-- The three `Marshal…JSON` tests pin the wire shape as strings —
-  each stays verbatim under omit-when-zero (§5).
+At branch base `baba282`, the Use sum has partial unit coverage.
+The exact enumeration (fresh
+`grep -n "TestNewPropertyUse\|TestNewExprUse\|TestNewClauseSlotUse\|TestPropertyUseMarshalJSON\|TestExprUseMarshalJSON\|TestClauseSlotUseMarshalJSON" internal/query/type_test.go`):
+
+- `TestNewExprUse` at `internal/query/type_test.go:73` — pins
+  `NewExprUse(TypeInt, ExprInProjection)` and its accessors.
+- `TestExprUseMarshalJSON` at `internal/query/type_test.go:93` —
+  pins the wire encoding
+  `{"kind":"expr","enclosingType":"int","position":"projection"}`.
+
+That is the complete pre-existing set. `PropertyUse` and
+`ClauseSlotUse` have **no** dedicated constructor or
+`Marshal…JSON` unit tests at branch base — their wire shape is
+witnessed only transitively through parser-test pins in
+`internal/query/cypher/parser_test.go` (§4.3). The unfreeze PR
+adds four new zero-side unit tests (§5.1) to bring
+PropertyUse and ClauseSlotUse to parity before the widened
+constructors ship. Both pre-existing ExprUse tests stay verbatim
+under the omit-when-zero ruling (§4.1.3, §5).
 
 ### 3.2 The Part construction lifecycle — the emission-time index invariant
 
@@ -398,14 +417,21 @@ outer projection/predicate carries the `EXISTS { … }`.
 sites at §3.3; §3.3 tabulates each with its emission-time
 `curPart` context.
 
-### 3.3 The 15 `addParameterUse` call sites — Part-index knowability
+### 3.3 The 18 `addParameterUse` call sites — Part-index knowability
 
-Enumeration of every call site (`grep -n addParameterUse
-internal/query/cypher/`), each cross-checked against the Part
-lifecycle at §3.2. Every site is inside an `Enter*` handler whose
-`curPart` is guaranteed non-nil by the priming discipline at
+Enumeration of every call site (fresh `grep -n addParameterUse
+internal/query/cypher/` at branch base `baba282`, excluding the
+definition at `expr.go:633` and the doc-comment at `:627`), each
+cross-checked against the Part lifecycle at §3.2. Every site is
+inside an `Enter*` handler (or a mining helper invoked from one)
+whose `curPart` is guaranteed non-nil by the priming discipline at
 §3.2. Consequently `len(l.curBranch.parts) - 1` is a well-defined
 non-negative int at every site.
+
+The table below has 16 rows, but two rows (`expr.go:591 / 607` and
+`expr.go:677 / 707`) each represent two adjacent call sites in the
+same helper, so the row count reads 16 while the site count is 18
+— the count the section title advertises.
 
 | # | File | Line | Enclosing handler / helper | Use variant | Part index knowable? |
 |---|---|---|---|---|---|
@@ -416,15 +442,15 @@ non-negative int at every site.
 | 5 | `typing.go` | 445 | `typeQuantifier` — quantifier source-list parameter (mined inside typing walk) | `NewExprUse(sourceType, ExprInPredicate)` | **yes** — the typing walk runs inside a `collectReturnItem` / `mineWhere` / `collectSetItem` / `collectDeleteItem` frame; `curPart` is unchanged during the walk |
 | 6 | `typing.go` | 458 | `typeQuantifier` — quantifier WHERE-body parameter | `NewExprUse(TypeBool, ExprInPredicate)` | **yes** — same frame as (5) |
 | 7 | `typing.go` | 873 | `classifyRichExpression` — rich-expression projection parameter | `NewExprUse(t, ExprInProjection)` | **yes** — called from `collectReturnItem`; `curPart` = the Part containing the RETURN / WITH |
-| 8 | `expr.go` | 131 | `classifyRefWithParameter` — subscript parameter in a RefProjection context | `NewExprUse(sourceType, ExprInProjection)` | **yes** — RETURN / WITH item path; `curPart` unchanged |
-| 9 | `expr.go` | 175 | `classifyFunction` residual — function-argument parameter | `NewExprUse(TypeUnknown, ExprInProjection)` | **yes** — same as (8) |
-| 10 | `expr.go` | 403 | `classifyAggregateCall` — aggregate-argument parameter | `NewExprUse(resultType, ExprInProjection)` | **yes** — same as (8) |
-| 11 | `expr.go` | 419 | `collectClauseSlot` — SKIP / LIMIT slot parameter | `NewClauseSlotUse(slot)` | **yes** — collected inside `collectProjection`, which runs against `curPart` before the WITH-swap (§3.2 step 2) |
-| 12 | `expr.go` | 458 | `mineWhere` — WHERE-body residual parameter | `NewExprUse(t, ExprInPredicate)` | **yes** — WHERE is Part-attached; `curPart` is the Part the WHERE belongs to (§3.2 shows the WITH-attached WHERE is attributed to the CLOSED Part) |
-| 13 | `expr.go` | 535 | `mineComparisons` D1a arm — comparison-pair `PropertyUse` (comparison) | `NewPropertyUse(Ref{Variable, Property})` | **yes** — WHERE or MATCH pattern path; `curPart` is the Part containing the predicate |
-| 14 | `expr.go` | 542 | `mineComparisons` D1a arm — string-predicate `PropertyUse` | `NewPropertyUse(Ref{Variable, Property})` | **yes** — same as (13) |
-| 15 | `expr.go` | 591 / 607 | `collectPropertyMap` — inline property-map `PropertyUse` | `NewPropertyUse(Ref{Variable, Property})` | **yes** — pattern collection path; `curPart` is the Part whose MATCH / MERGE contains the pattern |
-| 16 | `expr.go` | 677 / 707 | `collectSetItem` — SET-value parameter | `NewExprUse(valueType, ExprInSetValue)` | **yes** — SET is Part-attached (Part containing the SET clause) |
+| 8 | `expr.go` | 131 | `collectUnwind` (`:87`) — UNWIND source-expression residual parameter | `NewExprUse(sourceType, ExprInProjection)` | **yes** — `collectUnwind` is a `curPart`-mutating collection helper called from `EnterOC_Unwind`; `curPart` is the Part the UNWIND lexes in |
+| 9 | `expr.go` | 175 | `mineSortItemParameters` (`:163`) — ORDER BY sort-item residual parameter | `NewExprUse(TypeUnknown, ExprInProjection)` | **yes** — called from `collectProjection`, which runs against `curPart` before the WITH-swap (§3.2 step 2) |
+| 10 | `expr.go` | 403 | `classifyAggregateCall` (`:380`) — aggregate-argument parameter | `NewExprUse(resultType, ExprInProjection)` | **yes** — reached via `collectReturnItem` → `classifyProjection`; `curPart` = the Part containing the RETURN / WITH |
+| 11 | `expr.go` | 419 | `mineClauseSlotParameter` (`:414`) — SKIP / LIMIT slot parameter | `NewClauseSlotUse(slot)` | **yes** — called from `collectProjection` (`expr.go:70` for SKIP, `:73` for LIMIT), which runs against `curPart` before the WITH-swap (§3.2 step 2) |
+| 12 | `expr.go` | 458 | `mineWhere` (`:444`) — WHERE-body residual parameter | `NewExprUse(t, ExprInPredicate)` | **yes** — WHERE is Part-attached; `curPart` is the Part the WHERE belongs to (§3.2 shows the WITH-attached WHERE is attributed to the CLOSED Part) |
+| 13 | `expr.go` | 535 | `pairAddSub` (`:529`) — a → b arm: `ref` from operand `a`, `param` from operand `b`; emits `PropertyUse{Ref{ref.Variable, ref.Property}}` on `param` | `NewPropertyUse(Ref{Variable, Property})` | **yes** — `pairAddSub` is reached from `mineComparisons` / `mineStringPredicate`, both invoked from `mineWhere` (Part-attached; see row 12) or `mineComparisons` under a MATCH pattern predicate context. `curPart` is the Part containing the predicate |
+| 14 | `expr.go` | 542 | `pairAddSub` (`:529`) — b → a arm: `ref` from operand `b`, `param` from operand `a`; emits `PropertyUse{Ref{ref.Variable, ref.Property}}` on `param` | `NewPropertyUse(Ref{Variable, Property})` | **yes** — same call context as (13) |
+| 15 | `expr.go` | 591 / 607 | `mineInlineMap` (`:570`) — inline property-map `PropertyUse`: `:591` fast path (bare `$param` value); `:607` widening path (rich value whose typing walk surfaces nested parameters) | `NewPropertyUse(Ref{Variable, Property})` | **yes** — `mineInlineMap` is reached from pattern-collection helpers; `curPart` is the Part whose MATCH / MERGE contains the pattern |
+| 16 | `expr.go` | 677 / 707 | `collectSetItem` (`:662`) — SET-value parameter | `NewExprUse(valueType, ExprInSetValue)` | **yes** — SET is Part-attached (Part containing the SET clause) |
 
 **No emission site sits outside a `curPart`-in-scope frame.** The
 proof: every site is reached via one of the `Enter*` handlers
@@ -662,7 +688,7 @@ codebase — **yes**, by construction. The two consumer paths:
   explicitly as `null`. Under this shape a legacy golden could be
   distinguished from an attributed Use. **Rejected** — the axis
   is TOTAL: every emission site produces a valid Part index
-  (§3.3, all 15 sites are inside a `curPart`-in-scope frame).
+  (§3.3, all 18 sites are inside a `curPart`-in-scope frame).
   There is no such thing as an "unattributed" Use produced by the
   parser. A nullable encoding would express an
   impossible-by-construction state on the wire, and force every
@@ -678,13 +704,31 @@ codebase — **yes**, by construction. The two consumer paths:
   `directed`). **Rejected** post-freeze: rewriting every
   parser-test pin's `NewPropertyUse` / `NewExprUse` /
   `NewClauseSlotUse` call to add a positional `0` would break
-  the byte-identity of 24 assertions for no semantic gain, and
+  the byte-identity of 18 assertions for no semantic gain, and
   the Preserved-constructor precedent from hk0's own
   `NewExprProjection` remains the house rule.
 
 Chosen: **omit-when-zero on all three variants; decoder treats
 absence as `part: 0`; the "Part 0 default" is sound for every
 branch-base consumer because every legacy Use IS in Part 0**.
+
+**A note on decoding.** No `UnmarshalJSON` exists on any Use
+variant at branch base — Uses are minted by the parser and
+consumed only by the resolver, entirely in-process; the wire shape
+is a golden-fixture read-target for the parser-test harness, not
+a boundary a decoder needs to cross. `ValidatedQuery`
+(§7.5) does not embed raw Uses either — it carries `[]ResolvedParameter`
+whose per-parameter Type is precomputed. So the
+"absence ⇒ `part = 0`" rule this section states is a
+FORWARD-COMPATIBILITY convention for a future consumer that adds
+decode paths (e.g. an out-of-process resolver reading persisted
+parser output), not a decoder that exists today. The primary
+justification for the encoding choice remains golden
+byte-identity at branch base (§4.4.1: zero goldens rebaseline
+because every branch-base Use is in Part 0 and omit-when-zero
+serialises Part 0 as key-absent). When a decode path is added,
+the convention gives that path a well-defined answer for the
+legacy shape without a wire migration.
 
 ### 3.7 R5's audit note — what this cycle closes
 
@@ -974,12 +1018,16 @@ non-`part` change on some golden — a formatting drift or an
 unrelated wire-shape edit that slipped in. The unfreeze PR must
 pass BOTH fences before landing.
 
-**Fence 3 (unit-test back-compat)** — the three existing
-`TestPropertyUseMarshalJSON` / `TestExprUseMarshalJSON` /
-`TestClauseSlotUseMarshalJSON` pins in `internal/query/type_test.go`
-stay VERBATIM. Their pinned JSON strings all carry `part=0`
-Uses; under omit-when-zero the key is absent, matching the
-existing pinned strings bit-for-bit. §5 records the three new
+**Fence 3 (unit-test back-compat)** — the pre-existing
+`TestExprUseMarshalJSON` pin in `internal/query/type_test.go:93`
+stays VERBATIM (the only pre-existing Use `Marshal…JSON` test
+at branch base per §3.1.4). Its pinned JSON string carries a
+`part=0` Use; under omit-when-zero the key is absent, matching
+the existing pinned string bit-for-bit. `TestNewExprUse` at
+`:73` also stays verbatim (its assertions do not consult
+`Part()`). §5.1 records the four NEW zero-side tests the
+unfreeze PR adds to bring PropertyUse and ClauseSlotUse to
+ExprUse's coverage level. §5.2 records the three new
 Part-≥-1 test cases that witness the true-side encoding.
 
 ### 4.2 `addParameterUse` — the emission-time attribution
@@ -1043,7 +1091,7 @@ func attributePart(u query.Use, part int) query.Use {
 }
 ```
 
-The 15 call sites (§3.3) stay verbatim — each continues to pass
+The 18 call sites (§3.3) stay verbatim — each continues to pass
 the zero-Part Use it constructs today. The stamping is centralised
 at `addParameterUse` because it is the single chokepoint (per the
 listener struct's dedup discipline, `expr.go:627-632`).
@@ -1051,7 +1099,7 @@ listener struct's dedup discipline, `expr.go:627-632`).
 **Alternative shape considered.** Pushing the Part index into each
 call site (each `NewExprUse(t, pos)` becomes
 `NewExprUseAt(t, pos, l.currentPartIndex())`). **Rejected**: this
-scatters the Part-index lookup across 15 sites, each of which
+scatters the Part-index lookup across 18 sites, each of which
 would need to re-read `curBranch.parts`; the centralised
 `addParameterUse` chokepoint is exactly the right place for the
 attribution — one call, one invariant, one place to audit.
@@ -1202,17 +1250,20 @@ grep -A1 "NewPropertyUse\|NewExprUse\|NewClauseSlotUse" \
 suite. Every pin passes untouched, which is the byte-identity
 witness.)
 
-**The fence check for parser tests** (from the worktree):
+**The fence check for parser tests** (from the worktree; the run
+list includes the two pre-existing Use unit tests AND the seven
+new tests §5 adds):
 
 ```
-go test -run 'TestMustParse|TestMustReject|TestPropertyUseMarshalJSON|TestExprUseMarshalJSON|TestClauseSlotUseMarshalJSON|TestNewPropertyUse|TestNewExprUse|TestNewClauseSlotUse' ./internal/query/... -shuffle=on
+go test -run 'TestMustParse|TestMustReject|TestNewExprUse|TestExprUseMarshalJSON|TestNewPropertyUse|TestPropertyUseMarshalJSON|TestNewClauseSlotUse|TestClauseSlotUseMarshalJSON|TestNewPropertyUseAt|TestNewExprUseAt|TestNewClauseSlotUseAt' ./internal/query/... -shuffle=on
 ```
 
-The 18 unchanged pins pass without modification. Only the three
-new `TestNew…UseAt` tests (§5) show a diff.
-`TestPropertyUseMarshalJSON`, `TestExprUseMarshalJSON`, and
-`TestClauseSlotUseMarshalJSON` all stay verbatim per the
-omit-when-zero ruling (§4.1.3).
+The 18 parser-test pins pass without modification (byte-identity
+under `reflect.DeepEqual`; §4.3). The two pre-existing Use unit
+tests (`TestNewExprUse`, `TestExprUseMarshalJSON`) also pass
+unchanged. The seven tests §5 adds (four zero-side, three
+non-zero-side `TestNew…UseAt`) are the only test-file additions
+in the unfreeze PR.
 
 ### 4.4 Every parser golden — byte-identical
 
@@ -1380,9 +1431,12 @@ change slipped in (the diff shows what).
 ### 4.5 The parser test suite's Use coverage — no other pin changes
 
 Beyond the 18 pins at §4.3, no parser test consumes a Use record
-directly. The three `Marshal…JSON` tests at
-`internal/query/type_test.go` pin the wire shape as strings; per
-§4.1.3.2 Fence 3 they stay verbatim under omit-when-zero.
+directly. The pre-existing `TestExprUseMarshalJSON` at
+`internal/query/type_test.go:93` pins the wire shape as a string
+and stays verbatim under omit-when-zero (§4.1.3.2 Fence 3). §5.1
+adds the missing zero-side coverage for PropertyUse and
+ClauseSlotUse; those additions are unit-test additions, not
+parser-test-pin edits.
 
 ### 4.6 The `Parameter` list-order invariant is preserved
 
@@ -1411,18 +1465,95 @@ cycle records it.
 
 ---
 
-## 5. New `TestNew…UseAt` tests — witnessing the non-zero-Part side
+## 5. Unit-test additions — the two-sided axis
 
-`internal/query/type_test.go` — three new tests appended after the
-existing Use tests:
+`internal/query/type_test.go` — this section adds SEVEN new tests
+and preserves TWO pre-existing tests verbatim. The additions
+split into two groups:
+
+- §5.1 **zero-side coverage** (four new tests): PropertyUse and
+  ClauseSlotUse have no dedicated constructor or `Marshal…JSON`
+  unit tests at branch base (§3.1.4). The widening MUST NOT
+  leave them uncovered on the zero side, so the unfreeze PR
+  brings PropertyUse and ClauseSlotUse up to ExprUse's coverage
+  level BEFORE ExprUse's own zero-side pins would be revalidated.
+  The new tests each pin the constructor's field wiring and the
+  omit-when-zero wire shape (`part=0` key ABSENT).
+- §5.2 **non-zero-side coverage** (three new tests): the three
+  `TestNew…UseAt` tests witness the widened constructor path
+  with a non-zero Part, pinning the omit-when-zero wire shape
+  from the other direction (`part=<n>` key PRESENT).
+
+The pre-existing `TestNewExprUse` (`internal/query/type_test.go:73`)
+and `TestExprUseMarshalJSON` (`:93`) stay VERBATIM — their
+assertions do not consult `Part()`, and under omit-when-zero the
+already-pinned JSON string matches the widened marshaller
+bit-for-bit.
+
+### 5.1 New zero-side tests — PropertyUse and ClauseSlotUse coverage
+
+```go
+// TestNewPropertyUse pins the pre-existing constructor's field wiring —
+// the widened constructor delegates to NewPropertyUseAt(ref, 0), so the
+// zero-value Part must round-trip through the accessor. New at fvo per
+// §5.1: PropertyUse had no dedicated constructor unit test at branch base
+// (only ExprUse did); the widening must not leave the zero side of a Use
+// variant it touches uncovered.
+func TestNewPropertyUse(t *testing.T) {
+    u := query.NewPropertyUse(query.Ref{Variable: "a", Property: "title"})
+    require.Equal(t, query.Ref{Variable: "a", Property: "title"}, u.Ref())
+    require.Equal(t, 0, u.Part())
+    var _ query.Use = u
+}
+
+// TestPropertyUseMarshalJSON pins the wire encoding for the zero-value Part —
+// the "part" key is ABSENT under omit-when-zero. New at fvo per §5.1: same
+// rationale as TestNewPropertyUse; PropertyUse had no MarshalJSON test at
+// branch base.
+//
+// Cross-check hk0 §12 errata 2 (flatRef always emits "property":""): the
+// PropertyUse marshaller has no omitempty on "property", so a bare-Property
+// case would still emit `"property":""`. This test's Ref carries a
+// non-empty Property; the always-emit invariant is witnessed by the
+// parser-test pins via the flatRef path, not here.
+func TestPropertyUseMarshalJSON(t *testing.T) {
+    out, err := json.Marshal(query.NewPropertyUse(query.Ref{Variable: "a", Property: "title"}))
+    require.NoError(t, err)
+    require.JSONEq(t,
+        `{"kind":"property","variable":"a","property":"title"}`,
+        string(out))
+}
+
+// TestNewClauseSlotUse pins the pre-existing constructor's field wiring —
+// the widened constructor delegates to NewClauseSlotUseAt(slot, 0). New at
+// fvo per §5.1: ClauseSlotUse had no dedicated constructor unit test at
+// branch base.
+func TestNewClauseSlotUse(t *testing.T) {
+    u := query.NewClauseSlotUse(query.ClauseSlotSkip)
+    require.Equal(t, query.ClauseSlotSkip, u.Slot())
+    require.Equal(t, 0, u.Part())
+    var _ query.Use = u
+}
+
+// TestClauseSlotUseMarshalJSON pins the wire encoding for the zero-value
+// Part — the "part" key is ABSENT under omit-when-zero. New at fvo per
+// §5.1: same rationale as TestNewClauseSlotUse.
+func TestClauseSlotUseMarshalJSON(t *testing.T) {
+    out, err := json.Marshal(query.NewClauseSlotUse(query.ClauseSlotSkip))
+    require.NoError(t, err)
+    require.JSONEq(t,
+        `{"kind":"clause-slot","slot":"skip"}`,
+        string(out))
+}
+```
+
+### 5.2 New non-zero-side tests — `TestNew…UseAt`
 
 ```go
 // TestNewPropertyUseAt pins the widened Use variant per ADR 0008 amendment
 // 2026-07-06: the Part axis carries through the constructor, the accessor,
 // and the wire shape as an omit-when-zero key (post-freeze convention:
-// additive axes emit omit-when-zero-value). Complements
-// TestPropertyUseMarshalJSON (which pins the part=0 zero-value default as an
-// ABSENT key — that test stays verbatim).
+// additive axes emit omit-when-zero-value).
 func TestNewPropertyUseAt(t *testing.T) {
     u := query.NewPropertyUseAt(query.Ref{Variable: "a", Property: "title"}, 1)
     require.Equal(t, query.Ref{Variable: "a", Property: "title"}, u.Ref())
@@ -1466,28 +1597,39 @@ func TestNewClauseSlotUseAt(t *testing.T) {
 ```
 
 **Note (implementer, re: hk0 §12 errata 2 lesson).** The expected
-JSON must match Go `encoding/json`'s field ordering AND include
-EVERY field the marshalled struct declares. `flatRef` has no
-`omitempty` on `Property` in the hk0 spec §5 errata; the same
-discipline applies here — every `Marshal…JSON`'s composite
-struct declares its keys in a fixed order, and the expected string
-must match the marshaller's output exactly. Re-verify by running
-`go test -run 'TestNew…UseAt' -v` against the compiled
-marshaller; do not hand-draw the JSON string.
+JSON in every new test above must match Go `encoding/json`'s
+field ordering AND include EVERY field the marshalled struct
+declares. `flatRef` has no `omitempty` on `Property` in the hk0
+spec §5 errata; the same discipline applies here — every
+`Marshal…JSON`'s composite struct declares its keys in a fixed
+order, and the expected string must match the marshaller's output
+exactly. Re-verify by running the seven new tests against the
+compiled marshaller from a fresh worktree; do not hand-draw the
+JSON string.
 
-The existing `TestPropertyUseMarshalJSON`, `TestExprUseMarshalJSON`,
-and `TestClauseSlotUseMarshalJSON` (verify locations at branch
-base) stay **VERBATIM** — under the omit-when-zero ruling in
-§4.1.3, the `part = 0` zero value is not emitted, so the
-already-pinned strings match the widened marshaller bit-for-bit.
-Those tests are the sole witnesses for the zero side (encoded as
-key-absent); the three new tests above are the sole witnesses for
-the non-zero side.
+### 5.3 Fence 3 accounting (updates §4.1.3.2 Fence 3)
 
-The existing `TestNewPropertyUse`, `TestNewExprUse`, and
-`TestNewClauseSlotUse` (each pins constructor + accessors) are
-UNCHANGED. Their assertions do not consult `Part()`; the zero-value
-default the preserved constructors supply matches implicitly.
+The Fence 3 statement in §4.1.3.2 says "the three existing
+`TestPropertyUseMarshalJSON` / `TestExprUseMarshalJSON` /
+`TestClauseSlotUseMarshalJSON` pins stay VERBATIM." That statement
+is corrected here per §3.1.4: only `TestExprUseMarshalJSON`
+pre-exists at branch base. The four zero-side tests in §5.1
+(`TestNewPropertyUse`, `TestPropertyUseMarshalJSON`,
+`TestNewClauseSlotUse`, `TestClauseSlotUseMarshalJSON`) are NEW
+in the unfreeze PR — they land alongside the widened marshallers
+and pin the zero side (`part = 0` key ABSENT). The pre-existing
+`TestNewExprUse` and `TestExprUseMarshalJSON` stay VERBATIM.
+
+Consequently the Fence 3 grep should include the seven new test
+symbols alongside the two pre-existing ones:
+
+```
+go test -run 'TestMustParse|TestMustReject|TestNewPropertyUse|TestPropertyUseMarshalJSON|TestNewExprUse|TestExprUseMarshalJSON|TestNewClauseSlotUse|TestClauseSlotUseMarshalJSON|TestNewPropertyUseAt|TestNewExprUseAt|TestNewClauseSlotUseAt' ./internal/query/... -shuffle=on
+```
+
+The two pre-existing tests are byte-identical after the widening
+(omit-when-zero, `part=0` absent); the seven new tests witness
+both sides of the axis.
 
 ---
 
@@ -1510,7 +1652,20 @@ Verbatim text:
 > (`internal/resolver/resolve.go:750-811`) was an honest
 > workaround for the wire's missing Part attribution; the
 > resolver widening (post-fvo) narrows to lexical-Part witness
-> exactly against `scopes[u.Part()]`, retiring the workaround.
+> exactly against `scopes[u.Part()]`, closing the primary
+> gap. **Residual**: attribution is Part-granular, not
+> post-projection-scope-granular; a WITH…WHERE whose trailing
+> WHERE aliases the WITH-projected name back to a same-name
+> shadow (e.g. `MATCH (a:Post) WITH a.title AS a WHERE
+> a.x = $p RETURN a`) lexes the WHERE's `$p` in the CLOSED
+> Part (see §7.6 residual note in the fvo spec). Under a
+> shape where the CLOSED-Part scope's binding for the shadowed
+> name admits the property lookup, the widened resolver
+> still admits a semantically-invalid query — same
+> admit-shape as R5 §4.2.4, surviving the widening. No
+> regression versus branch base (any-valid-witness also
+> admitted this shape). Filed as a follow-up bead (§9
+> non-goals in the fvo spec)._
 > Each `Use` variant gains an additive `part int` field, one
 > new positional constructor (`NewPropertyUseAt` / `NewExprUseAt`
 > / `NewClauseSlotUseAt`), one new accessor `Part() int`, and
@@ -1547,7 +1702,11 @@ close-out entry:
   `l.currentPartIndex()`; consumed by the resolver's
   `witnessAcrossScopes` (`internal/resolver/resolve.go:750-811`)
   to witness a PropertyUse against exactly the lexical Part's
-  scope, retiring R5's any-valid-witness workaround.
+  scope, closing R5's any-valid-witness gap over the primary
+  shape. Residual (WITH…WHERE aliased-shadow across the
+  CLOSED Part) is honestly recorded in the amendment note
+  above and filed as a follow-up (§7.6 and §9 in the fvo
+  spec).
 ```
 
 No other ADR text changes. ADR 0003, ADR 0004, ADR 0006, and
@@ -1959,7 +2118,8 @@ fixture that R5 silently admitted (any-valid-witness) and now
 honestly rejects. The rejection uses the existing
 `ErrUnknownProperty` sentinel; the fail-site (a property lookup
 inside `propertyUseWitness`) already raises this sentinel at
-`internal/resolver/resolve.go:1140` and neighbouring sites.
+`internal/resolver/resolve.go:1296` (`propertyUseWitness`
+function scope `:1292-1298`) and its neighbouring site at `:1313`.
 No message-set widening required — the message
 `"unknown property: <var>.<prop>"` matches the shape the widened
 witness produces.
@@ -2053,38 +2213,70 @@ lexical-Part witness produce the same one witness. No wire change.
 
 #### 7.2.2 The branch-recovery pass — supplement to §7.2
 
-To preserve `parameter_across_union_same_name.cypher`'s byte-identity
-(§7.5 Class A ruling), `unifyParameterUsesAcrossBranches` recovers
-the branch of each Use by walking the query structure:
+**Why it exists.** `parameter_across_union_same_name.cypher`
+places the same parameter name in TWO branches under UNION. The
+parser mints one `Parameter` record per name and appends one Use
+per emission (see `addParameterUse` at `expr.go:633-642` — the
+Parameter's `Uses` slice is append-only). So the query-wide
+`Parameters` slice carries a single `Parameter{Name: <p>, Uses: [u_A, u_B]}`
+where `u_A` was minted while parsing branch 0 and `u_B` while
+parsing branch 1. To witness `u_A` against branch 0's Part scopes
+and `u_B` against branch 1's, the widened resolver must recover
+per-Use branch attribution from a query state that no longer
+carries it explicitly. The recovery pass rebuilds it. Preserving
+`parameter_across_union_same_name.cypher`'s byte-identity is a
+Class A ruling in §7.5.
+
+**Load-bearing emission-order invariant.** `addParameterUse`
+(`expr.go:633-642`) records Uses on the shared Parameter in the
+order the parser encounters emission sites during walk. UNION
+branches are walked in source order (branch 0 fully before branch
+1). Consequently, per-branch counters `count_b` (the number of
+Uses minted while walking branch `b`) satisfy
+`u_0, u_1, …, u_{count_0-1}` all live in branch 0, then
+`u_{count_0}, …, u_{count_0 + count_1 - 1}` all live in branch 1,
+and so on. The recovery pass exploits this: it does not match
+Uses by their fields (which would be ambiguous under identical
+same-name shapes), it matches by INDEX.
+
+**Algorithm sketch** (the widening PR's code; this is the shape,
+not the final implementation):
 
 ```go
-// branchOfUse identifies which branch a Use belongs to by scanning each
-// branch's Parts for a matching Use record. Every Use exists in exactly
-// one branch (parser dedup guarantee: `addParameterUse` mints the Use in
-// the current branch's parameter list, which is one-per-Parameter, but
-// the Parameter is query-wide — so a UNION with the SAME parameter name
-// in two branches records TWO Uses on ONE Parameter, and the Uses live
-// in different branches). Match by identity: two Uses are "the same use"
-// iff they share a variant, ref/enclosingType/slot, position (for ExprUse),
-// and Part index.
-func branchOfUse(u query.Use, branches []query.Branch) int {
-    // NOTE: without an intrinsic Use identity (there is no wire-carried
-    // (branch, part) tuple on the Use), the recovery pass matches Uses by
-    // their FIELDS. Under a UNION where the same parameter appears in
-    // branch 0 Part 0 AND branch 1 Part 0 with the SAME variant + fields,
-    // recovery is ambiguous — the pass would associate the first-listed
-    // Use with the first-scanned branch and the second-listed Use with
-    // the second-scanned branch, using the query.Parameters slice order.
-    // This preserves R5's implicit invariant: Uses on a Parameter are
-    // recorded in source order (addParameterUse dedup preserves ordering),
-    // so the walk over branches in index order recovers the mapping.
-    // ...
-}
+// countUsesInBranch walks a branch's Parts in source order and counts,
+// per Part, how many Uses that Part contributed via addParameterUse.
+// Uses inside subordinate scopes (EXISTS body, quantifier body) are
+// mined by their own hooks against the OUTER curPart, so their
+// attribution is the outer Part — the count already reflects that.
+func countUsesInBranch(b query.Branch, paramName string) []int { ... }
+
+// witnessUsesInBranchOrder walks p.Uses in slice order, holding a
+// cursor over the branch table. For branch 0, the first count_0 Uses
+// are witnessed against branchScopes[0][u.Part()]; for branch 1, the
+// next count_1 Uses are witnessed against branchScopes[1][u.Part()];
+// and so on.
+//
+// Invariant (proven by construction of addParameterUse):
+//   for i < count_0:              p.Uses[i]                       ∈ branch 0
+//   for count_0 ≤ i < count_0+1:  p.Uses[i]                       ∈ branch 1
+//   ...
+// The cursor over p.Uses in branch-then-Part order recovers each
+// Use's branch by INDEX, not by field match — so the corner case
+// where branch 0 Part 0 and branch 1 Part 0 mint two structurally
+// identical PropertyUse records is resolved by position.
 ```
 
-This is the shape; the exact implementation lives in the widening
-PR's code. Alternative — add a `branch int` field to Use (rejected
-in §3.5) — remains available for a future cycle if the branch-
+**Why field-matching would be wrong.** Under
+`parameter_across_union_same_name.cypher`, branch 0 and branch 1
+can produce two Uses whose (variant, ref, position, part) tuple is
+identical. A field-match recovery would collapse them into one
+witness site and drop the second — the exact byte-identity break
+the pass exists to prevent. Position-match recovery is
+unambiguous because the emission order of `addParameterUse` is
+deterministic and total.
+
+Alternative — add a `branch int` field to Use (rejected in
+§3.5) — remains available for a future cycle if the branch-
 recovery pass proves brittle under a widened UNION corpus.
 
 **Recorded risk.** The branch-recovery pass is a runtime cost with
@@ -2118,6 +2310,84 @@ actually introduced. The fvo widening INTENSIFIES an existing
 fail-site (Part 1's `a.title` on a Person now fails), it does
 not INVENT one.
 
+#### 7.6.1 Residual under lexical-Part attribution — WITH…WHERE aliased shadow
+
+The Part-granular attribution axis this cycle adds records the
+LEXICAL Part of a Use, not the SEMANTIC scope Cypher evaluates it
+against. For WITH…WHERE these two coincide in every branch-base
+resolver-valid fixture: the WITH's trailing WHERE is mined by
+`mineWhere` from `EnterOC_With` (`listener.go:283-284`) BEFORE
+the Part swap at `:290-293`, so the WHERE's PropertyUses attribute
+to the CLOSED Part K — and in every non-shadowing shape the
+binding at Part K is the same as the projected binding at Part
+K+1.
+
+**The corner case that survives.** A WITH that projects
+`<var>.<prop> AS <var>` (aliasing the projected value back to the
+same name) followed by a trailing WHERE that reads
+`<var>.<other> = $p` is a shape where lexical-Part and
+post-projection-scope diverge:
+
+```
+MATCH (a:Post) WITH a.title AS a WHERE a.x = $p RETURN a
+```
+
+**Mined behaviour** (fresh reads at branch base `baba282`):
+
+- `EnterOC_With` (`listener.go:278-294`): before the swap,
+  `curPart` = Part 0. `collectProjection` runs against Part 0
+  (projecting `a.title AS a` — an ExprProjection or
+  RefProjection depending on the classifier).
+- `mineWhere(w)` runs against Part 0 (`listener.go:283-284`,
+  BEFORE the swap at `:290`).
+- `mineWhere` (`expr.go:444`) calls `mineComparisons` on the
+  WHERE expression.
+- `mineComparisons` (`expr.go:477`) recurses to the comparison
+  `a.x = $p`; `mineComparison` (`expr.go:498`) then
+  `pairOperands` (`expr.go:522`) then `pairAddSub` (`expr.go:529`).
+- `pairAddSub`'s a→b arm (`:533-538`) fires:
+  `propertyRefFromAddSub(a.x)` — a **syntactic** check that has
+  no scope awareness — returns `Ref{"a", "x"}`.
+  `parameterFromAddSub($p)` returns the `$p` node.
+- Line 535 fires: `addParameterUse("p", node, NewPropertyUse(Ref{"a", "x"}))`.
+  `curPart` is still Part 0. Under fvo,
+  `l.currentPartIndex() = 0` — the PropertyUse attributes to
+  Part 0.
+- Post-fvo resolver: `witnessAcrossScopes` witnesses against
+  Part 0's scope. Part 0's `a` = `Post`. If `Post` has `x`, the
+  widened resolver ADMITS.
+
+**Semantically**, Cypher's WITH…WHERE evaluates against the
+POST-projection scope: `a` in the WHERE is the STRING projected
+by `WITH a.title AS a`, so `a.x` is a member access on a STRING
+— a semantic error the resolver should reject. Under fvo it does
+NOT reject when Part 0's `a: Post` admits `x`.
+
+**Regression assessment.** No regression versus branch base.
+R5's any-valid-witness ALSO admits this shape (Part 0's
+`a: Post` admits — done). So this residual is a lexical-attribution
+LIMITATION of the fvo axis, not a widening REGRESSION.
+
+**Why this cycle does not close it.** Closing it requires a
+DIFFERENT axis: not "which Part does the Use lexically live in"
+but "which scope does the Use semantically resolve against". That
+scope on a WITH's trailing WHERE is the post-projection scope of
+the CLOSED Part — an EXPORTED scope, not a bindings scope. R4's
+`OptionalGroup` axis (gqlc-ay9, Cycle 4) and R5's carried-type
+threading are relevant infrastructure. See §9 non-goals for the
+follow-up bead.
+
+**Fixture posture.** No branch-base resolver-valid golden
+carries this shape. The discriminating fixture cited at
+§7.4 (`parameter_across_with_alias_shadow_reversed.cypher`) is
+the RE-BOUND shadow, not the aliased-projection shadow. Under
+fvo the reversed fixture (Part 1 re-declares `a: Person`) DOES
+witness the widening because the re-declared `a` in Part 1 lacks
+`title` — a lexical-Part-scope hit. The aliased-projection
+shadow above is a distinct shape whose Part-attribution and
+semantic-attribution diverge, and fvo's axis cannot bridge that
+divergence.
+
 ### 7.7 Follow-up beads flagged for close-out
 
 - **UNION-with-Uses branch attribution** — §7.2.1 records the
@@ -2148,10 +2418,16 @@ The gqlc-fvo campaign lands in three PRs, in this order:
    fence:
    - `internal/query/query.go` gains three fields + three
      constructors + three accessors + three JSON keys.
-   - `internal/query/type_test.go` adds
-     `TestNewPropertyUseAt`, `TestNewExprUseAt`,
-     `TestNewClauseSlotUseAt`. Every existing test stays verbatim
-     per the omit-when-zero ruling.
+   - `internal/query/type_test.go` adds SEVEN new tests: four
+     zero-side tests filling the PropertyUse and ClauseSlotUse
+     coverage gap (`TestNewPropertyUse`,
+     `TestPropertyUseMarshalJSON`, `TestNewClauseSlotUse`,
+     `TestClauseSlotUseMarshalJSON` — §5.1), and three
+     non-zero-side tests (`TestNewPropertyUseAt`,
+     `TestNewExprUseAt`, `TestNewClauseSlotUseAt` — §5.2). The
+     two pre-existing tests (`TestNewExprUse` at
+     `internal/query/type_test.go:73`, `TestExprUseMarshalJSON`
+     at `:93`) stay verbatim per the omit-when-zero ruling.
    - `internal/query/cypher/expr.go` widens
      `addParameterUse` by one line and adds
      `currentPartIndex` + `attributePart`.
@@ -2218,6 +2494,7 @@ The following are explicitly OUT OF SCOPE of the gqlc-fvo campaign:
 | **`Use.Branch` axis** | Adding a `branch int` field to each Use variant | §3.5 rejects the axis at this cycle: zero branch-base fixtures force it; the branch-recovery pass at §7.2.2 handles the corpus. If a future TCK bump adds a UNION-with-Uses scenario that defeats the pass, a NEW unfreeze bead adds the axis. |
 | **`ExprInCallArg` position + Part.Calls axis** (R7's CALL-arg attribution — the CHILD of fvo per R7 §7.1.1) | R7's file-at-close-out follow-up | Deferred to a NEW bead (per R7 §7.1.1 recommendation). fvo lands the parent attribution primitive; the CALL-arg cycle builds on it. |
 | **Widening the ClauseSlotUse or ExprUse witness on `Part()`** | Making the two Part-agnostic variants' witnesses vary by Part | §7.1 preserves the R5 semantics for both variants: they contribute a witness independent of any Part's scope. Widening either would be a semantic change on top of the additive axis; not in scope. Filed at close-out (§7.6) if a downstream consumer demands it. |
+| **Semantic-scope attribution (WITH…WHERE aliased-shadow residual)** — file at close-out as candidate follow-up bead | The lexical-Part axis fvo adds diverges from Cypher's post-projection-scope evaluation for the aliased-projection shadow shape (§7.6.1). Under the shape `MATCH (a:Post) WITH a.title AS a WHERE a.x = $p RETURN a`, `$p`'s PropertyUse attributes to Part 0 (`a: Post`) where a member access on `x` may admit; semantically the WHERE evaluates against the post-projection `a: STRING`. | Closing this residual requires a scope-attribution axis (not a Part-attribution axis) — a distinct model change from fvo's. No branch-base resolver-valid golden exercises the shape; no regression versus branch base (any-valid-witness admits the same shape). Filed at close-out as a candidate follow-up; the widened resolver honestly records the residual in §7.6.1 and the ADR 0008 amendment (§6). |
 
 **gqlc-fvo closes** at the resolver-widening PR merge:
 - The bead moves to `closed`.
@@ -2269,12 +2546,18 @@ branch base `origin/master @ baba282` before writing code.
 - `EnterOC_Match` — no swap; collects into current curPart:
   `internal/query/cypher/listener.go:261-269`.
 
-**The 15 `addParameterUse` call sites (§3.3):**
+**The 18 `addParameterUse` call sites (§3.3):**
 
 - Enumerated by
   `grep -rn "addParameterUse" internal/query/cypher/`
-  at branch base `baba282`. Each site is inside one of the
-  `Enter*` handlers above. The wrapper itself is at
+  at branch base `baba282` (excluding the definition at
+  `expr.go:633` and the doc-comment at `:627`). Distribution:
+  `call.go` × 2 (`:64`, `:164`), `listener.go` × 2 (`:499`,
+  `:637`), `typing.go` × 3 (`:445`, `:458`, `:873`),
+  `expr.go` × 11 (`:131`, `:175`, `:403`, `:419`, `:458`,
+  `:535`, `:542`, `:591`, `:607`, `:677`, `:707`) — total 18.
+  Each site is inside one of the `Enter*` handlers above or a
+  mining helper called from one. The wrapper itself is at
   `internal/query/cypher/expr.go:633-642`.
 
 **Resolver R5 witness machinery (§3.4, §7.1):**
@@ -2283,8 +2566,13 @@ branch base `origin/master @ baba282` before writing code.
 - Its sole call site: `internal/resolver/resolve.go:721`
   (`unifyParameterUsesAcrossScopes`).
 - `scopeContains`: `internal/resolver/resolve.go:813-824`.
-- `propertyUseWitness` first fail-site (`ErrUnknownProperty`):
-  `internal/resolver/resolve.go:1140`.
+- `propertyUseWitness` function scope:
+  `internal/resolver/resolve.go:1292-1298`; its first
+  `ErrUnknownProperty` fail-site: `internal/resolver/resolve.go:1296`.
+- `refProjectionType` (the OTHER `ErrUnknownProperty` fail-site
+  the widening does not touch, used in projection typing not
+  parameter witnessing): `internal/resolver/resolve.go:1133-1195`;
+  its first `ErrUnknownProperty` fail-site: `:1140`.
 - `partScope`: `internal/resolver/resolve.go:56-67`.
 - `parameterUseSite`: `internal/resolver/resolve.go:110-113`.
 - `useSitesToScopes` adapter: `internal/resolver/resolve.go:72-78`.
