@@ -11,6 +11,7 @@
     "parameter_type_conflict_property_vs_expr_bool.cypher": "social.gql",
     "parameter_type_conflict_nullability.cypher": "social_r2.gql",
     "unknown_property_via_expr_use.cypher": "social.gql",
+    "parameter_across_with_alias_shadow_reversed.cypher": "social_r5.gql",
     "list_of_nodes_projection.cypher": "social.gql",
     "list_of_edges_projection.cypher": "social.gql",
     "ambiguous_edge_orientation.cypher": "social_r3.gql",
