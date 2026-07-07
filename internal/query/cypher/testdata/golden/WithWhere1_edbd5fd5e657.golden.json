@@ -16,7 +16,8 @@
               "kind": "node",
               "variable": "a",
               "labels": null,
-              "nullable": true
+              "nullable": true,
+              "optionalGroup": 1
             },
             {
               "kind": "edge",
@@ -32,7 +33,8 @@
               },
               "nullable": true,
               "directed": true,
-              "hops": null
+              "hops": null,
+              "optionalGroup": 1
             }
           ],
           "returns": [

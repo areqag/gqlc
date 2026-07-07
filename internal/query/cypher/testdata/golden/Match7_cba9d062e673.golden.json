@@ -26,7 +26,8 @@
               },
               "nullable": true,
               "directed": true,
-              "hops": null
+              "hops": null,
+              "optionalGroup": 1
             },
             {
               "kind": "edge",
@@ -44,13 +45,15 @@
               },
               "nullable": true,
               "directed": true,
-              "hops": null
+              "hops": null,
+              "optionalGroup": 1
             },
             {
               "kind": "node",
               "variable": "foo",
               "labels": null,
-              "nullable": true
+              "nullable": true,
+              "optionalGroup": 1
             }
           ],
           "returns": [

@@ -10,7 +10,8 @@
               "labels": [
                 "DoesExist"
               ],
-              "nullable": true
+              "nullable": true,
+              "optionalGroup": 1
             },
             {
               "kind": "node",
@@ -18,7 +19,8 @@
               "labels": [
                 "DoesNotExist"
               ],
-              "nullable": true
+              "nullable": true,
+              "optionalGroup": 2
             }
           ],
           "returns": [
