@@ -1967,16 +1967,21 @@ at resolve.go:234-236 for BindingCall"`). The spec argued this
 matched R7 §5.1's "zero new sentinels" line and preserved the
 "widen message set, not sum" invariant.
 
-**Implementation reality** (`origin/unfreeze-0ig-resolver` head
-`1eb7764`, resolver-widening PR): a NEW sentinel
-`ErrCallArgAssignability` was minted at
-`internal/resolver/errors.go:88-96` and added to `allSentinels` at
-`:118`. The Phase-A1 CallBinding arm at `resolve.go:275-302` fires
-this new sentinel with three wrapped messages:
+**Implementation reality** (`origin/unfreeze-0ig-resolver` post-review
+head `43e40a8`, resolver-widening PR + review-finding fixes): a NEW
+sentinel `ErrCallArgAssignability` was minted with its doc comment
+starting at `internal/resolver/errors.go:92`, the `errors.New`
+declaration at `:100`, and added to `allSentinels` at `:118`. The
+Phase-A1 CallBinding arm at `resolve.go:275-303` fires this new sentinel
+with a SINGLE wrapped message at the per-position lattice check (the
+two former drift-arm wraps landed as plain non-sentinel `fmt.Errorf`
+after the review-finding fix — see NIT7 rewrite / E2):
 
-- `"procedure %q missing from registry"`
-- `"procedure %q expects %d arguments, got %d"`
-- `"procedure %q argument %d: cannot assign %s to %s"`
+- `"procedure %q argument %d: cannot assign %s to %s"` — the sole
+  `ErrCallArgAssignability`-wrapped message. The two former
+  drift-arm messages (`"procedure %q missing from registry (parser
+  drift)"` and `"procedure %q expects %d arguments, got %d (parser
+  drift)"`) now fire as plain `fmt.Errorf` with no sentinel wrap.
 
 **Why the divergence, and why it holds up against R7 §5.2.**
 Under R7's retirement, `ErrOutOfR0Scope` is being narrowed on the
@@ -2316,6 +2321,20 @@ E2 land in a follow-up errata commit alongside PR #123's
 `unfreeze-0ig-resolver` review findings. Fixes applied in place
 above; this section is the reviewer-facing index.
 
+**B2 numbering gap (why the list runs B1, B3, B4).** B2 was the
+§4.3 parser-pin census fabrication (originally "30 pins", then
+transiently "13 pins"). It was corrected **pre-merge** by
+commit `00682c1` _"docs(spec): 0ig — correct §4.3 parser-pin
+census (15 pins, not 30)"_, which landed inside PR #121 via
+squash-merge — the tree of `39a7da0` (PR #121's merge commit)
+is byte-identical to the tree of `00682c1` at
+`docs/specs/unfreeze-0ig-call-args.md` (verified: `git diff
+00682c1:… 39a7da0:…` = empty). B2 therefore never entered this
+errata's remaining-defects list; only the label is retained so
+B1, B3, B4 keep their reviewer-facing shorthand from the
+original round-1 review notes. See Item-4 below (which cites
+00682c1 by SHA) for the corroborating evidence.
+
 **B1. Fabricated Call5_31baf2f6ab54 witness (§4.4.2 + §3.4
 arithmetic).** The original §4.4.2 "sixth witness for the
 multi-column shape" described `Call5_31baf2f6ab54.golden.json` as
@@ -2416,9 +2435,11 @@ what actually lands.
 `ErrOutOfR0Scope` widening (§8.3).** §8.3's original wording
 committed to "no new sentinel" and proposed widening
 `ErrOutOfR0Scope`'s message set. The resolver-widening branch
-instead mints a new sentinel `ErrCallArgAssignability`
-(`internal/resolver/errors.go:88-96`, added to `allSentinels` at
-`:118`). The change is deliberate: R7 §5.2 just RETIRED
+instead mints a new sentinel `ErrCallArgAssignability` (doc
+comment starting at `internal/resolver/errors.go:92`, the
+`errors.New` declaration at `:100`, added to `allSentinels` at
+`:118`; line refs re-scraped against post-review head `43e40a8`).
+The change is deliberate: R7 §5.2 just RETIRED
 `ErrOutOfR0Scope`'s BindingCall fail-site (the default-arm `"%w:
 call binding"` wrap), and widening it back to CALL — as §8.3
 originally proposed — would REVERSE that retirement, mis-labeling
