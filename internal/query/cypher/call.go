@@ -44,15 +44,18 @@ func (l *listener) collectCall(
 		return
 	}
 
-	// Argument mining: refs and parameter uses. The mined argument
-	// type is discarded — the arg-type check against sig.Params is
-	// bucket-3 (spec §4.5), so today's job is only to route param
-	// and ref info onto the part's state so referential integrity
-	// and parameter tables stay honest. This preserves the "silent
-	// info drop where parser could reject" invariant the Stage-13
-	// mineInlineMap widening established for CREATE.
+	// Argument mining: refs, parameter uses, and per-position mined
+	// types. The args slice (0ig) is retained on every CallBinding
+	// minted from this CALL clause and consumed by the resolver's
+	// argument-site assignability walk. Refs/params routing preserves
+	// the Stage-13 "no silent parser info drop" invariant.
+	var args []query.CallArg
+	if len(argExprs) > 0 {
+		args = make([]query.CallArg, 0, len(argExprs))
+	}
 	for _, e := range argExprs {
 		t, refs, params := l.typeExpressionMining(e)
+		args = append(args, query.NewCallArg(t))
 		for _, ref := range refs {
 			l.curPart.refs = append(l.curPart.refs, varRef{name: ref.Variable})
 		}
@@ -82,9 +85,9 @@ func (l *listener) collectCall(
 	//   3. No YIELD: standalone expands like YIELD *; in-query
 	//      produces no CallBinding.
 	if yieldItems != nil {
-		l.collectYieldItems(name, sig, yieldItems)
+		l.collectYieldItems(name, sig, yieldItems, args)
 	} else if yieldStar || standalone {
-		l.expandAllResults(name, sig)
+		l.expandAllResults(name, sig, args)
 	}
 	// In-query CALL without YIELD: fall through — no CallBinding.
 
@@ -123,6 +126,7 @@ func (l *listener) collectYieldItems(
 	procName string,
 	sig procsig.Signature,
 	items gen.IOC_YieldItemsContext,
+	args []query.CallArg,
 ) {
 	seen := make(map[string]bool, len(items.AllOC_YieldItem()))
 	for _, item := range items.AllOC_YieldItem() {
@@ -141,9 +145,10 @@ func (l *listener) collectYieldItems(
 			return
 		}
 		seen[variable] = true
-		cb, err := query.NewCallBinding(
+		cb, err := query.NewCallBindingWithArgs(
 			variable, procName, sourceField,
 			typeForToken(result.Token), result.Nullable,
+			args,
 		)
 		if err != nil {
 			l.fail(err)
@@ -171,11 +176,12 @@ func (l *listener) collectYieldItems(
 // and no-YIELD standalone (spec §4.2 steps 7/8). Every binding uses
 // its Result.Name as both variable and sourceField (no aliasing is
 // possible in these shapes).
-func (l *listener) expandAllResults(procName string, sig procsig.Signature) {
+func (l *listener) expandAllResults(procName string, sig procsig.Signature, args []query.CallArg) {
 	for _, result := range sig.Results {
-		cb, err := query.NewCallBinding(
+		cb, err := query.NewCallBindingWithArgs(
 			result.Name, procName, result.Name,
 			typeForToken(result.Token), result.Nullable,
+			args,
 		)
 		if err != nil {
 			l.fail(err)

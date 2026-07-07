@@ -1405,3 +1405,94 @@ func TestCallBindingMarshalJSONNumberBridgesToUnknown(t *testing.T) {
 func TestBindingCallKindString(t *testing.T) {
 	require.Equal(t, "call", query.BindingCall.String())
 }
+
+// TestNewCallBindingWithArgsRoundTrip pins the 0ig additive axis: the
+// args slice supplied at construction is retained verbatim and
+// returned by Args(). Verifies the shared-slice convention: two
+// bindings from the same CALL clause share one slice value.
+func TestNewCallBindingWithArgsRoundTrip(t *testing.T) {
+	args := []query.CallArg{
+		query.NewCallArg(query.TypeString{}),
+		query.NewCallArg(query.TypeInt{}),
+	}
+	a, err := query.NewCallBindingWithArgs("city", "test.my.proc", "city", query.TypeString{}, true, args)
+	require.NoError(t, err)
+	b, err := query.NewCallBindingWithArgs("country_code", "test.my.proc", "country_code", query.TypeInt{}, true, args)
+	require.NoError(t, err)
+	require.Equal(t, args, a.Args())
+	require.Equal(t, args, b.Args())
+	require.Equal(t, query.TypeString{}, a.Args()[0].Type())
+	require.Equal(t, query.TypeInt{}, a.Args()[1].Type())
+}
+
+// TestNewCallBindingArgsNilIsEquivalent pins the zero-value posture:
+// the args-less constructor NewCallBinding delegates through
+// NewCallBindingWithArgs with a nil args slice, so an omit-when-zero-
+// length CallBinding is bit-for-bit indistinguishable from the pre-0ig
+// wire under reflect.DeepEqual.
+func TestNewCallBindingArgsNilIsEquivalent(t *testing.T) {
+	pre := must(query.NewCallBinding("out", "test.my.proc", "out", query.TypeString{}, true))
+	post := must(query.NewCallBindingWithArgs("out", "test.my.proc", "out", query.TypeString{}, true, nil))
+	require.Equal(t, pre, post)
+	require.Nil(t, post.Args())
+}
+
+// TestNewCallArgNormalisesNilTypeToUnknown pins the CallArg
+// constructor's "cannot tell" fallback: nil input becomes TypeUnknown,
+// mirroring NewCallBinding's resultType normalisation. Guards against
+// a bare-nil Type ever reaching MarshalJSON.
+func TestNewCallArgNormalisesNilTypeToUnknown(t *testing.T) {
+	a := query.NewCallArg(nil)
+	require.Equal(t, query.TypeUnknown{}, a.Type())
+}
+
+// TestCallBindingMarshalJSONWithArgs pins the wire shape under the
+// 0ig axis: args emits as a JSON array with one object per position,
+// each carrying a canonical Type wire tag. Verifies the omit-when-
+// zero-length convention: the args key IS present when the slice
+// has length ≥ 1.
+func TestCallBindingMarshalJSONWithArgs(t *testing.T) {
+	b := must(query.NewCallBindingWithArgs("out", "test.my.proc", "out", query.TypeString{}, true, []query.CallArg{
+		query.NewCallArg(query.TypeInt{}),
+		query.NewCallArg(query.TypeString{}),
+	}))
+	out, err := json.Marshal(b)
+	require.NoError(t, err)
+	require.JSONEq(t,
+		`{"kind":"call","variable":"out","procedure":"test.my.proc","sourceField":"out","resultType":"string","nullable":true,"args":[{"type":"int"},{"type":"string"}]}`,
+		string(out))
+}
+
+// TestCallBindingMarshalJSONZeroArgsOmitsKey pins the omit-when-zero-
+// length convention on the zero-args (pre-0ig-shape) path: a nil args
+// slice serialises with the "args" key ABSENT — matching the pre-0ig
+// wire byte-for-byte. This is the fence that makes the 4 zero-arg
+// goldens (§4.1.3.1) byte-identical under the axis.
+func TestCallBindingMarshalJSONZeroArgsOmitsKey(t *testing.T) {
+	b := must(query.NewCallBinding("label", "test.labels", "label", query.TypeString{}, true))
+	out, err := json.Marshal(b)
+	require.NoError(t, err)
+	require.JSONEq(t,
+		`{"kind":"call","variable":"label","procedure":"test.labels","sourceField":"label","resultType":"string","nullable":true}`,
+		string(out))
+}
+
+// TestCallArgMarshalJSON pins the CallArg wire shape: {"type": <wire
+// tag>} — atomic; unaware of position (position IS the slice index).
+func TestCallArgMarshalJSON(t *testing.T) {
+	a := query.NewCallArg(query.TypeInt{})
+	out, err := json.Marshal(a)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"type":"int"}`, string(out))
+}
+
+// TestCallArgMarshalJSONUnknown pins the TypeUnknown case: a $param
+// or n.name argument mines to TypeUnknown at parse time, and its
+// wire tag is "unknown" (same tag CallBinding.resultType uses for the
+// NUMBER bridge — no new vocabulary).
+func TestCallArgMarshalJSONUnknown(t *testing.T) {
+	a := query.NewCallArg(query.TypeUnknown{})
+	out, err := json.Marshal(a)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"type":"unknown"}`, string(out))
+}
