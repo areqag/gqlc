@@ -1,5 +1,50 @@
 # `query.Query` is frozen; the resolver API is pinned
 
+> _Amendment (2026-07-07, gqlc-ay9 unfreeze cycle): the
+> OPTIONAL-group membership axis on `NodeBinding` / `EdgeBinding` —
+> R4 §7.5.4's **Axis 1**, filed from the R4 close-out as gqlc-ay9 —
+> is **adopted** under this ADR's additive-only revision protocol.
+> The frozen wire recorded per-binding `Nullable()` but not which
+> bindings were co-introduced by the same OPTIONAL MATCH clause, so
+> the resolver's R4 regime-(a) demotion could not propagate a proven
+> member's non-nullness to its clause siblings (Class A,
+> `docs/specs/resolver-stage-r4.md §7.5.3` items 1 + 3). Each of the
+> two OPTIONAL-introducible Binding variants gains one additive
+> field `optionalGroup int`, one accessor `OptionalGroup() int`, and
+> one new constructor per OPTIONAL-introduced shape
+> (`NewNullableNodeBindingInGroup`, `NewNullableEdgeBindingInGroup`,
+> `NewNullableVarLengthEdgeBindingInGroup`); the six existing
+> binding constructors are preserved verbatim and continue to mint
+> group 0 ("not in any OPTIONAL group"). Group ids are minted
+> per-parse by the parser — fresh id per OPTIONAL MATCH clause,
+> unique across the whole query — and recorded only at first
+> introduction, matching ADR 0006's nullability discipline.
+> `PathBinding` / `UnwindBinding` / `CallBinding` are untouched
+> (their `Nullable()` is not OPTIONAL-derived; a named path's group
+> facts flow through its member bindings, the Stage-8 posture). The
+> JSON encoding is **omit-when-zero-value** (`,omitempty`),
+> following the post-freeze convention this ADR's hk0 amendment
+> established; 100 of 3199 parser goldens rebaseline, 3099 are
+> byte-identical. The Binding interface stays sealed at
+> `Kind()`/`Nullable()`/`isBinding()`; group membership is a
+> per-variant field-and-accessor concern. The resolver widening
+> (post-ay9 PR) extends `demoteNullableInPlace` to the group-closure
+> fixed point — "if a required chain proves any member of an
+> OPTIONAL group exists, every member of that group demotes" —
+> flipping two resolver goldens (`demote_chained_from_required`,
+> `demote_from_anonymous_required_edge`) and adding no sentinel.
+> **Residual**: the resolver's cross-Part carry is name-granular and
+> does not yet carry group ids, so a WITH-carried binding demotes
+> without its co-introduced siblings; closing this needs only a
+> resolver-internal `branchState` extension (no further model
+> change) and is filed as a follow-up bead at close-out. Class B —
+> the same-Part second-reference gap (R4 §7.5.3 item 2, Axis 2,
+> gqlc-5xg) — is a missing-witness gap this axis deliberately does
+> not close. See `docs/specs/unfreeze-ay9-optional-group.md` for the
+> full contract, the 100-golden flip census with spot witnesses, the
+> constructor-strategy and id-scope decisions, and the fence
+> commands._
+
 > _Amendment (2026-07-07, gqlc-0ig unfreeze cycle): the
 > per-position CALL-arg attribution axis on `CallBinding` — recorded
 > as the R7 §7.1.1 CALL-arg-attribution deferral — is **adopted**
@@ -304,6 +349,16 @@ in-protocol when they arrive, not scope creep:
   under ADR 0007's NUMBER-assignable-from-INTEGER-or-FLOAT rule.
   `procsig.TypeToken` stays signature-only vocabulary; the wire
   records only `query.Type`. The R7 §7.1.1 deferral is closed.
+- **`OptionalGroup` axis on `NodeBinding` / `EdgeBinding`** —
+  adopted 2026-07-07 (see the amendment note above and
+  `docs/specs/unfreeze-ay9-optional-group.md`). Populated
+  parser-side by the OPTIONAL threading through `collectPattern`
+  (fresh id per OPTIONAL MATCH clause, query-scoped, minted in
+  `EnterOC_Match`); consumed by the resolver's Phase D
+  group-closure demotion (`demoteNullableInPlace`,
+  `internal/resolver/resolve.go` — see the ay9 resolver-widening
+  PR), closing R4 §7.5.3 Class A (items 1 + 3). Class B (item 2)
+  remains open under gqlc-5xg.
 
 ### shortestPath is a dialect extension, out of the frozen scope
 
