@@ -24,7 +24,8 @@
               },
               "nullable": true,
               "directed": false,
-              "hops": null
+              "hops": null,
+              "optionalGroup": 1
             }
           ],
           "returns": null,

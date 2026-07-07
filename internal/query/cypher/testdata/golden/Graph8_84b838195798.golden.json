@@ -8,7 +8,8 @@
               "kind": "node",
               "variable": "n",
               "labels": null,
-              "nullable": true
+              "nullable": true,
+              "optionalGroup": 1
             },
             {
               "kind": "unwind",

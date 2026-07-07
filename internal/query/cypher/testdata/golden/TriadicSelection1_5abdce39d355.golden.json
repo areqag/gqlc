@@ -72,7 +72,8 @@
               },
               "nullable": true,
               "directed": true,
-              "hops": null
+              "hops": null,
+              "optionalGroup": 1
             }
           ],
           "returns": [
