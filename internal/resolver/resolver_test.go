@@ -101,6 +101,7 @@ var invalidFixtures = map[string]error{
 	"parameter_type_conflict_property_vs_expr_bool.cypher": ErrParameterTypeConflict,
 	"parameter_type_conflict_nullability.cypher":           ErrParameterTypeConflict,
 	"unknown_property_via_expr_use.cypher":                 ErrUnknownProperty,
+	"parameter_across_with_alias_shadow_reversed.cypher":   ErrUnknownProperty,
 	"list_of_nodes_projection.cypher":                      ErrOutOfR0Scope,
 	"list_of_edges_projection.cypher":                      ErrOutOfR0Scope,
 	"ambiguous_edge_orientation.cypher":                    ErrAmbiguousEdgeOrientation,

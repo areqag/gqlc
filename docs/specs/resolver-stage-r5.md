@@ -864,64 +864,31 @@ or predicate is witnessed against **Part K's binding tables (local +
 carried)**. The parameter-unification lattice (§2.3) runs at
 end-of-query on the collected witnesses.
 
-**Actual rule — any-valid-witness under wire-level attribution gap.**
-`query.Query`'s `Parameter.Uses` slice carries the Ref (variable +
-optional property) but **not the Part index** in which the Use
-appeared. The parser attributes Uses to a parameter, not to a Part —
-see the `Use` sum in `internal/query/query.go` (no `Part` field on
-`PropertyUse`, `ExprUse`, or `ClauseSlotUse`). So the resolver cannot
-walk each Use directly against its true Part; it must recover the
-Part from the Ref's variable-in-scope.
+**Actual rule (post-fvo) — lexical-Part witness.** `query.Query`'s
+`Parameter.Uses` slice carries a Ref (variable + optional
+property) AND a Part index (fvo per ADR 0008 amendment
+2026-07-06 — see `docs/specs/unfreeze-fvo-use-part.md`). The
+resolver's `witnessAcrossScopes` reads `u.Part()` and witnesses
+against `branchScopes[u.Part()]` exactly once — the scope of the
+Part the parser attributed the Use to at emission time. If the
+scope does not contain the Ref's variable, the Use contributes
+zero witnesses (treated as ResolvedUnknown by the unifier). If the
+scope contains the variable but the property lookup fails,
+`ErrUnknownProperty` surfaces immediately.
 
-For a `PropertyUse` whose Ref names variable `v`, the resolver
-attempts the witness in **every Part scope containing `v`**, collects
-the SUCCESSFUL witnesses, and unifies them via the R2 lattice. Only
-when **every** containing scope fails the property lookup with
-`ErrUnknownProperty` does the resolver surface the last such error
-(a genuine unknown-property fault). Per-scope `ErrUnknownProperty` is
-swallowed while there is at least one successful witness — the true
-attributed Part may be one that succeeds. Non-property faults
-(`ErrOutOfR0Scope` for an out-of-scope edge Ref, or a var-length edge
-property projection) surface immediately: they are structural, not
-scope-dependent.
+For a `PropertyUse` this discipline closes the pre-fvo
+any-valid-witness soundness gap: a `MATCH (a:Post) WITH a.title
+AS a MATCH (a:Person) WHERE a.title = $p` shape — where the
+lexical Part 1 has `a: Person` (no `title`), but the pre-fvo
+resolver would silently witness against Part 0's `a: Post` (which
+has `title`) — now fires `ErrUnknownProperty` honestly. The
+discriminating fixture at §6.3 (`parameter_across_with_alias_shadow_reversed.cypher`)
+pins the rejection; see `docs/specs/unfreeze-fvo-use-part.md` §7.4.
 
-`ClauseSlotUse` and `ExprUse` are Part-agnostic in their type
-witness — they contribute a witness independent of any Part's binding
-tables (`INT` for SKIP/LIMIT, or the enclosing expression's parser-
-carried type). The wire-attribution gap does not affect them.
-
-**Why this is not perfectly sound.** A parameter Use whose true Part
-would reject it (property missing on that Part's `v`) can
-false-witness against a same-named differently-typed `v` in a
-different Part that happens to admit the property. Reachability is
-narrow: the Ref must have the same variable name bound in ≥ 2 Parts to
-distinct schema-typed bindings. Two known reach paths:
-1. **Alias-export shadow across WITH.** `MATCH (a:Person) WITH a.name
-   AS a MATCH (a:Post) WHERE a.title = $p RETURN a` — Part 0's `a` is
-   `Person` (no `title`), Part 1's `a` is `Post` (has `title`). The
-   parser accepts because scope re-declaration is fresh at each Part
-   (parser Stage 4 §4); the `a.title` PropertyUse witnesses only in
-   Part 1 under the any-valid-witness rule.
-2. **UNION with same-named different-typed branches.** `MATCH
-   (a:Person) RETURN a.id AS x UNION MATCH (a:Post) WHERE a.title = $p
-   RETURN a.id AS x` — branch 0 has `a: Person` (no `title`), branch 1
-   has `a: Post` (has `title`). Same-name-across-scopes case.
-Worst case: the resolver admits a query openCypher would reject on
-Part-attributed re-analysis. The parameter's resolved type is the
-UNIFICATION of the valid witnesses — the emitted type reflects the
-Parts the Use *could* attribute to, and codegen has to reflect that
-uniform type at runtime regardless of which Part actually binds it.
-The invariant "resolved type witnessed against SOME in-scope Part"
-holds; the invariant "resolved type witnessed against THE Part where
-the parser attributed the Use" does not.
-
-**The soundness gap is a frozen-model deficiency, not a resolver bug.**
-Closing it requires threading a `Part` index through every `Use` on
-the wire and having the parser attribute Uses to Parts at
-walk/build time. Per the standing "freeze is not a wall" policy, that
-becomes a separate unfreeze-PR decision surfaced at R5 close-out,
-never an R5 contortion. Recorded as a §7 follow-up: **model unfreeze
-for `Use → Part` attribution**.
+`ClauseSlotUse` and `ExprUse` remain Part-agnostic in their type
+witness — the Part axis on their records is a lexical-attribution
+recorder for future consumer stages, not a witness discriminator
+today.
 
 **N3 — nullability posture for cross-Part parameter Uses (strict-agree).**
 The R2 lattice at §2.3 already demands nullability agreement across a
@@ -936,12 +903,20 @@ possible later stage; R5 does not do it.
 
 **Discriminating fixtures (§6.3).**
 - `parameter_across_with_alias_shadow.cypher` — the P1 shape,
-  pins `$p → STRING NOT NULL`.
+  pins `$p → STRING NOT NULL` (Part 1's `a: Post` has `title`;
+  lexical-Part witness admits, byte-identical to pre-fvo).
 - `parameter_across_union_same_name.cypher` — the P2 shape,
-  pins `$p → STRING NOT NULL`.
+  pins `$p → STRING NOT NULL` (branch 1's `a: Post` has `title`;
+  lexical-Part witness + UNION cross-branch fallback admits,
+  byte-identical to pre-fvo).
 - `parameter_across_with_multi_part.cypher` — `$p` used consistently
   across Parts (Person.id × AUTHORED.views both `INT NOT NULL`),
   pins `$p → INT NOT NULL` (unification happy path).
+- `parameter_across_with_alias_shadow_reversed.cypher` (fvo,
+  under `invalid/`) — Part 1's `a: Person` lacks `title`;
+  lexical-Part witness fires `ErrUnknownProperty`. This is the
+  post-fvo close-out of the pre-fvo any-valid-witness gap; see
+  `docs/specs/unfreeze-fvo-use-part.md` §7.4.
 
 ### 4.3 UNION column compatibility
 
@@ -2068,7 +2043,7 @@ json`, generated with `-update`.
   `Distinct == false`. The R4 `resolve.go:42-44` gate is removed for
   this shape.
 
-**Cross-Part parameter Uses (§4.2.4 any-valid-witness):**
+**Cross-Part parameter Uses (§4.2.4 lexical-Part witness, post-fvo):**
 
 - `parameter_across_with_alias_shadow.cypher` — `MATCH (a:Person) WITH
   a.name AS a MATCH (a:Post) WHERE a.title = $p RETURN a`. The P1
@@ -2330,7 +2305,7 @@ R4's out-of-scope table survives with revisions:
 | Nullability upgrades (regime (b), same-Part re-MATCH — Class B: missing-witness model gap) | silently under-demoted | gqlc-5xg (model unfreeze) |
 | Nullability upgrades (OPTIONAL-clause-sibling — Class A: missing-group-membership model gap) | silently under-demoted | gqlc-ay9 (model unfreeze) |
 | `ExprProjection` residual mixed with `AggregateProjection` in the same Part's Returns — grouping-key discrimination gap | silently under-grouped (uniform-exclude posture) | §4.5.3.3 follow-up bead (Shape B `ContainsAggregate` parser-side bit) |
-| Cross-Part parameter Use where the true attributed Part would reject but another same-name Part admits — Use→Part attribution gap (§4.2.4) | silently false-admitted under any-valid-witness (parameter type is the unified valid witnesses) | model-unfreeze bead: thread `Part` index through every `Use` on the wire and have the parser attribute Uses to Parts at build time (surface at R5 close-out as a separate unfreeze PR decision per standing "freeze is not a wall" policy) |
+| Cross-Part parameter Use where the true attributed Part would reject but another same-name Part admits — Use→Part attribution gap (§4.2.4) | **closed by gqlc-fvo (2026-07-06)**: `docs/specs/unfreeze-fvo-use-part.md` threads `Part` on every `Use` and the resolver's `witnessAcrossScopes` witnesses against `branchScopes[u.Part()]` exactly. Residual WITH-aliased-projection shadow (see fvo spec §7.6.1) is filed for a future scope-attribution cycle. | closed |
 
 **Silently accepted (not routed anywhere):**
 

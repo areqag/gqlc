@@ -14,9 +14,10 @@ import (
 
 // resolve is the R5 kernel: it walks q.Branches left-to-right, resolves each
 // branch's Part chain via resolveBranch, certifies branch-0 column compatibility
-// against every other branch (§4.3), witnesses parameter Uses against the
-// merged binding scope from every Part (§4.2.4), and folds Part.Distinct +
-// UnionKind into ValidatedQuery.Distinct (§3.2/§4.7).
+// against every other branch (§4.3), witnesses each parameter Use against the
+// exact lexical Part's scope in its lexical branch (fvo per ADR 0008 amendment
+// 2026-07-06; the pre-fvo any-valid-witness rule at §4.2.4 retires), and folds
+// Part.Distinct + UnionKind into ValidatedQuery.Distinct (§3.2/§4.7).
 func resolve(q query.Query, s schema.Schema, r procsig.Registry) (ValidatedQuery, error) {
 	if len(q.Branches) == 0 {
 		// Defensive tripwire; the parser's buildBranch guarantees >= 1
@@ -25,7 +26,7 @@ func resolve(q query.Query, s schema.Schema, r procsig.Registry) (ValidatedQuery
 	}
 
 	branchCols := make([][]Column, len(q.Branches))
-	var mergedScopes []partScope
+	branchScopeTables := make([][]partScope, len(q.Branches))
 
 	for b, branch := range q.Branches {
 		cols, uses, err := resolveBranch(branch, s, r)
@@ -33,14 +34,14 @@ func resolve(q query.Query, s schema.Schema, r procsig.Registry) (ValidatedQuery
 			return ValidatedQuery{}, err
 		}
 		branchCols[b] = cols
-		mergedScopes = append(mergedScopes, useSitesToScopes(uses)...)
+		branchScopeTables[b] = useSitesToScopes(uses)
 	}
 
 	if err := compareBranchColumns(branchCols); err != nil {
 		return ValidatedQuery{}, err
 	}
 
-	params, err := unifyParameterUsesAcrossScopes(q.Parameters, mergedScopes, s)
+	params, err := unifyParameterUsesAcrossBranches(q.Parameters, branchScopeTables, s)
 	if err != nil {
 		return ValidatedQuery{}, err
 	}
@@ -703,22 +704,57 @@ func computeDistinct(q query.Query) bool {
 	return false
 }
 
-// unifyParameterUsesAcrossScopes walks each parameter's Uses against every
-// Part scope. A PropertyUse witnesses at the Part whose scope contains the
-// Ref's binding — under §4.2.4 that's the Part where the parser attributed
-// the Use, though the wire doesn't carry Part attribution. A ClauseSlotUse
-// and ExprUse are Part-agnostic and witness once. Witnesses are unified via
+// unifyParameterUsesAcrossBranches walks each parameter's Uses in emission
+// order, attributes each Use to its lexical branch via a position-cursor over
+// Part-index resets, and witnesses against that branch's Part-indexed scope
+// table (fvo per ADR 0008 amendment 2026-07-06). Witnesses are unified via
 // R2's lattice; the first conflict fires ErrParameterTypeConflict.
-func unifyParameterUsesAcrossScopes(params []query.Parameter, scopes []partScope, s schema.Schema) ([]ResolvedParameter, error) {
+//
+// Position-cursor recovery. The parser walks branches in source order and
+// appends every emission via addParameterUse. Within one branch, Part indices
+// on p.Uses are non-decreasing (WITH-swap only advances). A drop in Part index
+// signals a UNION boundary — curBranch increments. Same-Part boundaries
+// (branch-0 emits Part 0 and branch-1's first emission is also Part 0) are
+// ambiguous by index alone: the cursor defaults to the earlier branch, and
+// the cross-branch fallback below covers the case where that guess misses.
+//
+// Cross-branch fallback for the UNION corpus. If the cursor's target scope
+// does not contain the Use's Ref variable, the Use contributes zero witnesses
+// (bottom by unifier — matches pre-fvo behaviour). If the target scope
+// contains the variable but the property lookup fails with ErrUnknownProperty,
+// the resolver tries every OTHER branch's scope-table at the same Use.Part()
+// index; if any produces a witness, it wins. Only when every branch's scope
+// at Use.Part() fails does ErrUnknownProperty surface. This preserves
+// byte-identity for parameter_across_union_same_name.cypher (Class-A per
+// spec §7.5) while retiring any-valid-witness within a single branch. The
+// residual (same-Part UNION boundary + genuine unknown-property) is recorded
+// as a follow-up per §7.7 — closing it needs a Use.Branch axis (§3.5), out
+// of this cycle's scope.
+func unifyParameterUsesAcrossBranches(params []query.Parameter, tables [][]partScope, s schema.Schema) ([]ResolvedParameter, error) {
 	if len(params) == 0 {
 		return []ResolvedParameter{}, nil
+	}
+	if len(tables) == 0 {
+		return nil, fmt.Errorf("%w: no branch scope tables", ErrOutOfR0Scope)
 	}
 	out := make([]ResolvedParameter, 0, len(params))
 	for _, p := range params {
 		var unified ResolvedType
 		seen := false
+		curBranch := 0
+		prevPart := -1
 		for _, u := range p.Uses {
-			ws, err := witnessAcrossScopes(u, scopes, s)
+			// Part-index-drop cursor: a Part decrease within one parameter's
+			// Uses signals a UNION-boundary transition to the next branch.
+			// Guard against overshoot when a query has fewer branches than
+			// naive index growth would suggest.
+			part := usePart(u)
+			if part < prevPart && curBranch+1 < len(tables) {
+				curBranch++
+			}
+			prevPart = part
+
+			ws, err := witnessInBranch(u, tables, curBranch, s)
 			if err != nil {
 				return nil, err
 			}
@@ -736,10 +772,6 @@ func unifyParameterUsesAcrossScopes(params []query.Parameter, scopes []partScope
 			}
 		}
 		if !seen {
-			// No Part attributed the Use — falls to ResolvedUnknown; consumers
-			// that hit an out-of-scope Use would have short-circuited by now
-			// via ErrOutOfR0Scope in the projection walk, so this arm is
-			// the honest bottom.
 			unified = ResolvedUnknown{}
 		}
 		out = append(out, ResolvedParameter{Name: p.Name, Type: unified})
@@ -747,50 +779,98 @@ func unifyParameterUsesAcrossScopes(params []query.Parameter, scopes []partScope
 	return out, nil
 }
 
-// witnessAcrossScopes produces one witness per Part whose scope contains the
-// Use's Ref (for a PropertyUse), or exactly one witness for a Part-agnostic
-// Use (ClauseSlot / ExprUse). An unattributed PropertyUse (no scope contains
-// its Ref) returns zero witnesses — the unifier treats this as ResolvedUnknown.
+// usePart returns the branch-relative Part index for a Use. PropertyUse,
+// ExprUse, and ClauseSlotUse each carry the axis (fvo). Unknown variants
+// return 0 — the tripwire lives in witnessAcrossScopes.
+func usePart(u query.Use) int {
+	switch uu := u.(type) {
+	case query.PropertyUse:
+		return uu.Part()
+	case query.ExprUse:
+		return uu.Part()
+	case query.ClauseSlotUse:
+		return uu.Part()
+	default:
+		return 0
+	}
+}
+
+// witnessInBranch dispatches a Use to its lexical branch's scope table,
+// applying the cross-branch fallback for the UNION-same-Part shape. For a
+// PropertyUse, if the primary branch's scope at Use.Part() lacks the Ref
+// variable, the caller receives zero witnesses (bottom by unifier). If it
+// contains the variable but the property lookup fails, retry against every
+// other branch's scope at the same Part index; if all fail, the last
+// ErrUnknownProperty surfaces. ClauseSlotUse and ExprUse remain
+// Part-agnostic — witnessAcrossScopes handles them directly.
+func witnessInBranch(u query.Use, tables [][]partScope, primary int, s schema.Schema) ([]ResolvedType, error) {
+	if _, isProp := u.(query.PropertyUse); !isProp {
+		// Non-property Uses ignore the branch table beyond bounds — pass any
+		// non-empty scopes slice; witnessAcrossScopes never indexes into it
+		// for these variants. Use the primary branch's scopes for shape.
+		return witnessAcrossScopes(u, tables[primary], s)
+	}
+	ws, err := witnessAcrossScopes(u, tables[primary], s)
+	if err == nil {
+		return ws, nil
+	}
+	if !errors.Is(err, ErrUnknownProperty) {
+		return nil, err
+	}
+	// Cross-branch fallback: try every other branch at the same Part.
+	// Preserves byte-identity for parameter_across_union_same_name.cypher.
+	lastErr := err
+	for b := range tables {
+		if b == primary {
+			continue
+		}
+		ws, err = witnessAcrossScopes(u, tables[b], s)
+		if err == nil {
+			return ws, nil
+		}
+		if errors.Is(err, ErrUnknownProperty) {
+			lastErr = err
+			continue
+		}
+		return nil, err
+	}
+	return nil, lastErr
+}
+
+// witnessAcrossScopes produces exactly one witness for a Use — the lexical
+// Part attribution now recorded on the Use record (fvo per ADR 0008 amendment
+// 2026-07-06) selects the scope. A PropertyUse witnesses against
+// branchScopes[u.Part()] only; if that scope does not contain the Ref's
+// variable, the caller receives zero witnesses (bottom by unifier — matches
+// the pre-fvo behaviour for an unattributed Ref). If the scope contains the
+// variable but the property lookup fails, ErrUnknownProperty surfaces
+// immediately — the pre-fvo any-valid-witness swallowing (R5 §4.2.4) is
+// retired. Non-property faults (ErrOutOfR0Scope for out-of-scope edge Refs,
+// var-length edge property projections) surface immediately.
 //
-// PropertyUse semantics (§4.2.4 any-valid-witness rule): the wire carries no
-// Use→Part attribution, so a Ref like `a.title` may name `a` in several Parts
-// (e.g. `MATCH (a:Person) WITH a.name AS a MATCH (a:Post) …` — after an
-// alias-export shadow, Part 0's `a` is Person and Part 1's `a` is Post; or a
-// UNION where two branches each bind `a` to a different type). We attempt the
-// witness in EVERY scope containing the Ref's variable, collect only the
-// SUCCESSFUL witnesses, and let the caller unify them via the R2 lattice. A
-// per-scope ErrUnknownProperty is swallowed: the true attributed Part may be
-// a different one that succeeds. Only when EVERY containing scope fails the
-// property lookup do we surface the last such error (a genuine unknown-
-// property fault). Non-property faults (ErrOutOfR0Scope for out-of-scope
-// edge Refs, var-length edge property projections) surface immediately —
-// they are structural, not scope-dependent.
-func witnessAcrossScopes(u query.Use, scopes []partScope, s schema.Schema) ([]ResolvedType, error) {
+// ClauseSlotUse and ExprUse remain Part-agnostic in their type witness —
+// the Part axis on their records is a lexical-attribution property for
+// future consumer stages (§7.6), not a witness discriminator today.
+func witnessAcrossScopes(u query.Use, branchScopes []partScope, s schema.Schema) ([]ResolvedType, error) {
 	switch uu := u.(type) {
 	case query.PropertyUse:
 		ref := uu.Ref()
-		out := make([]ResolvedType, 0, 1)
-		var lastPropErr error
-		containing := 0
-		for _, sc := range scopes {
-			if !scopeContains(sc, ref.Variable) {
-				continue
-			}
-			containing++
-			w, err := propertyUseWitness(ref, sc.nodeTypes, sc.edgeTypes, sc.edgeCands, sc.edgeBindings, sc.nullableBinding, s)
-			if err != nil {
-				if errors.Is(err, ErrUnknownProperty) {
-					lastPropErr = err
-					continue
-				}
-				return nil, err
-			}
-			out = append(out, w)
+		idx := uu.Part()
+		if idx < 0 || idx >= len(branchScopes) {
+			// Defensive: the parser attributes to a valid branch-relative
+			// index by construction. An out-of-range index indicates a
+			// decoder or model corruption — surface honestly.
+			return nil, fmt.Errorf("%w: PropertyUse Part index %d out of range for branch with %d Parts", ErrOutOfR0Scope, idx, len(branchScopes))
 		}
-		if containing > 0 && len(out) == 0 && lastPropErr != nil {
-			return nil, lastPropErr
+		sc := branchScopes[idx]
+		if !scopeContains(sc, ref.Variable) {
+			return nil, nil
 		}
-		return out, nil
+		w, err := propertyUseWitness(ref, sc.nodeTypes, sc.edgeTypes, sc.edgeCands, sc.edgeBindings, sc.nullableBinding, s)
+		if err != nil {
+			return nil, err
+		}
+		return []ResolvedType{w}, nil
 	case query.ClauseSlotUse:
 		return []ResolvedType{ResolvedScalar{Kind: ScalarInt}}, nil
 	case query.ExprUse:
