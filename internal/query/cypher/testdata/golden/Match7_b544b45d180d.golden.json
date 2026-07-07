@@ -10,7 +10,8 @@
               "labels": [
                 "NotThere"
               ],
-              "nullable": true
+              "nullable": true,
+              "optionalGroup": 1
             }
           ],
           "returns": [
@@ -69,7 +70,8 @@
               "kind": "node",
               "variable": "b",
               "labels": null,
-              "nullable": true
+              "nullable": true,
+              "optionalGroup": 2
             },
             {
               "kind": "edge",
@@ -87,13 +89,15 @@
               },
               "nullable": true,
               "directed": true,
-              "hops": null
+              "hops": null,
+              "optionalGroup": 2
             },
             {
               "kind": "node",
               "variable": "a",
               "labels": null,
-              "nullable": true
+              "nullable": true,
+              "optionalGroup": 2
             }
           ],
           "returns": [

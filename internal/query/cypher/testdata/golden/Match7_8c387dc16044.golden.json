@@ -29,13 +29,15 @@
               "hops": {
                 "min": 3,
                 "max": null
-              }
+              },
+              "optionalGroup": 1
             },
             {
               "kind": "node",
               "variable": "b",
               "labels": null,
-              "nullable": true
+              "nullable": true,
+              "optionalGroup": 1
             }
           ],
           "returns": [

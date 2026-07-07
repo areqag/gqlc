@@ -255,11 +255,12 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Part,
 }
 
 // toBinding builds the model binding from a raw binding via the smart
-// constructors, so the model's invariants are enforced at assembly. The
-// nullable flag picks the OPTIONAL-introduced variant (ADR 0006). Stage 8:
-// hops picks the variable-length variant (list-of-edge cardinality) — the
-// four-way choice (nullable × var-length) routes through the four
-// constructors.
+// constructors, so the model's invariants are enforced at assembly. A
+// positive optionalGroup picks the OPTIONAL-introduced InGroup variant
+// (ADR 0006; ay9 — nullable ⇔ group ≥ 1 is the parser-side invariant).
+// Stage 8: hops picks the variable-length variant (list-of-edge
+// cardinality) — the four-way choice (OPTIONAL-introduced × var-length)
+// routes through the constructors.
 func (rb *rawBinding) toBinding() (query.Binding, error) {
 	if rb.kind == graph.Edge {
 		// The single polarity flip from the listener's zero-value-safe inverted
@@ -267,18 +268,18 @@ func (rb *rawBinding) toBinding() (query.Binding, error) {
 		// (Stage 5 §4): directed = !undirected.
 		directed := !rb.undirected
 		if rb.hops != nil {
-			if rb.nullable {
-				return query.NewNullableVarLengthEdgeBinding(rb.variable, rb.labels, rb.source, rb.target, directed, *rb.hops)
+			if rb.optionalGroup > 0 {
+				return query.NewNullableVarLengthEdgeBindingInGroup(rb.variable, rb.labels, rb.source, rb.target, directed, *rb.hops, rb.optionalGroup)
 			}
 			return query.NewVarLengthEdgeBinding(rb.variable, rb.labels, rb.source, rb.target, directed, *rb.hops)
 		}
-		if rb.nullable {
-			return query.NewNullableEdgeBinding(rb.variable, rb.labels, rb.source, rb.target, directed)
+		if rb.optionalGroup > 0 {
+			return query.NewNullableEdgeBindingInGroup(rb.variable, rb.labels, rb.source, rb.target, directed, rb.optionalGroup)
 		}
 		return query.NewEdgeBinding(rb.variable, rb.labels, rb.source, rb.target, directed)
 	}
-	if rb.nullable {
-		return query.NewNullableNodeBinding(rb.variable, rb.labels)
+	if rb.optionalGroup > 0 {
+		return query.NewNullableNodeBindingInGroup(rb.variable, rb.labels, rb.optionalGroup)
 	}
 	return query.NewNodeBinding(rb.variable, rb.labels)
 }

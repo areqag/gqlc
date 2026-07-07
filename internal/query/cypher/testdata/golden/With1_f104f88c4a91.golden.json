@@ -10,7 +10,8 @@
               "labels": [
                 "Start"
               ],
-              "nullable": true
+              "nullable": true,
+              "optionalGroup": 1
             }
           ],
           "returns": [

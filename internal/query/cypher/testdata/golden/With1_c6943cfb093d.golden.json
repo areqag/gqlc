@@ -10,7 +10,8 @@
               "labels": [
                 "A"
               ],
-              "nullable": true
+              "nullable": true,
+              "optionalGroup": 1
             }
           ],
           "returns": [

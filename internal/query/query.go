@@ -311,9 +311,10 @@ type Binding interface {
 // touch it. A node binding is never anonymous — an anonymous node is a pure
 // filter, not a binding — so its variable is always non-empty (NewNodeBinding).
 type NodeBinding struct {
-	variable string         // the name as written: the p in (p:Person)
-	labels   graph.LabelSet // labels as written; may be empty
-	nullable bool           // set when first introduced in OPTIONAL MATCH (ADR 0006)
+	variable      string         // the name as written: the p in (p:Person)
+	labels        graph.LabelSet // labels as written; may be empty
+	nullable      bool           // set when first introduced in OPTIONAL MATCH (ADR 0006)
+	optionalGroup int            // ≥1: id of the introducing OPTIONAL clause (ay9); 0: not OPTIONAL-introduced
 }
 
 // NewNodeBinding builds a NodeBinding, rejecting the empty variable: an anonymous
@@ -336,6 +337,24 @@ func NewNullableNodeBinding(variable string, labels graph.LabelSet) (NodeBinding
 	return b, nil
 }
 
+// NewNullableNodeBindingInGroup builds the OPTIONAL-introduced variant
+// carrying its introducing clause's group id (ay9, ADR 0008 amendment
+// 2026-07-07). group identifies the OPTIONAL MATCH clause that first
+// introduced this binding — unique per query, minted by the parser —
+// and must be ≥ 1: group 0 ("no group") is reachable only through
+// NewNullableNodeBinding, preserved verbatim above.
+func NewNullableNodeBindingInGroup(variable string, labels graph.LabelSet, group int) (NodeBinding, error) {
+	if group < 1 {
+		return NodeBinding{}, errors.New("query: optional group id must be ≥ 1")
+	}
+	b, err := NewNullableNodeBinding(variable, labels)
+	if err != nil {
+		return NodeBinding{}, err
+	}
+	b.optionalGroup = group
+	return b, nil
+}
+
 // Variable is the name as written: the p in (p:Person). Always non-empty.
 func (b NodeBinding) Variable() string { return b.variable }
 
@@ -355,6 +374,14 @@ func (NodeBinding) EntityKind() graph.EntityKind { return graph.Node }
 // MATCH clause (ADR 0006).
 func (b NodeBinding) Nullable() bool { return b.nullable }
 
+// OptionalGroup is the id of the OPTIONAL MATCH clause that first
+// introduced this binding (unique per query), or 0 when the binding
+// was not OPTIONAL-introduced. Nullable() == true ⇔ OptionalGroup() ≥ 1
+// for every parser-produced binding; the resolver's group-closure
+// demotion (ay9 widening) reads it to propagate a proven member's
+// non-nullness to its clause siblings.
+func (b NodeBinding) OptionalGroup() int { return b.optionalGroup }
+
 func (NodeBinding) isBinding() {}
 
 // EdgeBinding is a query variable bound to an edge, carrying its labels as
@@ -370,13 +397,14 @@ func (NodeBinding) isBinding() {}
 // single-hop edge (Stages 0..7) and non-nil for a variable-length edge (Stage 8);
 // a var-length edge binding projects as list<edge>, a single-hop as edge.
 type EdgeBinding struct {
-	variable string         // the name as written: the r in [r:KNOWS]; empty if anonymous
-	labels   graph.LabelSet // labels as written; may be empty; may carry multiple types (Stage 8)
-	source   Endpoint       // the source endpoint; always set
-	target   Endpoint       // the target endpoint; always set
-	nullable bool           // set when first introduced in OPTIONAL MATCH (ADR 0006)
-	directed bool           // true for a one-arrow edge; false for an undirected edge (Stage 5)
-	hops     *EdgeHops      // Stage 8: nil for single-hop; non-nil for variable-length
+	variable      string         // the name as written: the r in [r:KNOWS]; empty if anonymous
+	labels        graph.LabelSet // labels as written; may be empty; may carry multiple types (Stage 8)
+	source        Endpoint       // the source endpoint; always set
+	target        Endpoint       // the target endpoint; always set
+	nullable      bool           // set when first introduced in OPTIONAL MATCH (ADR 0006)
+	directed      bool           // true for a one-arrow edge; false for an undirected edge (Stage 5)
+	hops          *EdgeHops      // Stage 8: nil for single-hop; non-nil for variable-length
+	optionalGroup int            // ≥1: id of the introducing OPTIONAL clause (ay9); 0: not OPTIONAL-introduced
 }
 
 // NewEdgeBinding builds a single-hop EdgeBinding, rejecting a missing endpoint:
@@ -405,6 +433,23 @@ func NewNullableEdgeBinding(variable string, labels graph.LabelSet, source, targ
 	return b, nil
 }
 
+// NewNullableEdgeBindingInGroup builds the OPTIONAL-introduced single-hop
+// variant carrying its introducing clause's group id (ay9, ADR 0008
+// amendment 2026-07-07). group must be ≥ 1 — see
+// NewNullableNodeBindingInGroup; group 0 is reachable only through
+// NewNullableEdgeBinding, preserved verbatim above.
+func NewNullableEdgeBindingInGroup(variable string, labels graph.LabelSet, source, target Endpoint, directed bool, group int) (EdgeBinding, error) {
+	if group < 1 {
+		return EdgeBinding{}, errors.New("query: optional group id must be ≥ 1")
+	}
+	b, err := NewNullableEdgeBinding(variable, labels, source, target, directed)
+	if err != nil {
+		return EdgeBinding{}, err
+	}
+	b.optionalGroup = group
+	return b, nil
+}
+
 // NewVarLengthEdgeBinding builds a variable-length EdgeBinding (Stage 8 spec §3.4):
 // the same fields as a single-hop edge, plus an EdgeHops range value. hops is
 // stored by pointer so a nil Hops() distinguishes the single-hop case (the
@@ -427,6 +472,23 @@ func NewNullableVarLengthEdgeBinding(variable string, labels graph.LabelSet, sou
 		return EdgeBinding{}, err
 	}
 	b.nullable = true
+	return b, nil
+}
+
+// NewNullableVarLengthEdgeBindingInGroup builds the OPTIONAL-introduced
+// variable-length variant carrying its introducing clause's group id (ay9,
+// ADR 0008 amendment 2026-07-07). group must be ≥ 1 — see
+// NewNullableNodeBindingInGroup; group 0 is reachable only through
+// NewNullableVarLengthEdgeBinding, preserved verbatim above.
+func NewNullableVarLengthEdgeBindingInGroup(variable string, labels graph.LabelSet, source, target Endpoint, directed bool, hops EdgeHops, group int) (EdgeBinding, error) {
+	if group < 1 {
+		return EdgeBinding{}, errors.New("query: optional group id must be ≥ 1")
+	}
+	b, err := NewNullableVarLengthEdgeBinding(variable, labels, source, target, directed, hops)
+	if err != nil {
+		return EdgeBinding{}, err
+	}
+	b.optionalGroup = group
 	return b, nil
 }
 
@@ -462,6 +524,12 @@ func (EdgeBinding) EntityKind() graph.EntityKind { return graph.Edge }
 // Nullable reports whether the binding was first introduced inside an OPTIONAL
 // MATCH clause (ADR 0006).
 func (b EdgeBinding) Nullable() bool { return b.nullable }
+
+// OptionalGroup is the id of the OPTIONAL MATCH clause that first
+// introduced this binding (unique per query), or 0 when the binding
+// was not OPTIONAL-introduced — see NodeBinding.OptionalGroup for the
+// axis contract (ay9, ADR 0008 amendment 2026-07-07).
+func (b EdgeBinding) OptionalGroup() int { return b.optionalGroup }
 
 func (EdgeBinding) isBinding() {}
 
@@ -1612,14 +1680,17 @@ const (
 // "kind", so the Binding sum marshals to a stable, self-describing shape across
 // both variants. The tag derives from graph.EntityKind, so it cannot drift from
 // Kind(). Mirrors schema.Schema's determinism discipline: the encoding is fixed
-// and independent of any map iteration order.
+// and independent of any map iteration order. "optionalGroup" is
+// omit-when-zero-value per the post-freeze wire convention (ay9 per ADR 0008
+// amendment 2026-07-07).
 func (b NodeBinding) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Kind     string         `json:"kind"`
-		Variable string         `json:"variable"`
-		Labels   graph.LabelSet `json:"labels"`
-		Nullable bool           `json:"nullable"`
-	}{Kind: b.Kind().String(), Variable: b.variable, Labels: b.labels, Nullable: b.nullable})
+		Kind          string         `json:"kind"`
+		Variable      string         `json:"variable"`
+		Labels        graph.LabelSet `json:"labels"`
+		Nullable      bool           `json:"nullable"`
+		OptionalGroup int            `json:"optionalGroup,omitempty"`
+	}{Kind: b.Kind().String(), Variable: b.variable, Labels: b.labels, Nullable: b.nullable, OptionalGroup: b.optionalGroup})
 }
 
 // MarshalJSON renders an EdgeBinding as a tagged union member discriminated by
@@ -1627,17 +1698,20 @@ func (b NodeBinding) MarshalJSON() ([]byte, error) {
 // tagged-union endpoints. Stage 8: hops is always emitted — null for a
 // single-hop edge (Stages 0..7), a {"min", "max"} object for a variable-length
 // edge — matching the always-emit convention nullable / directed / returnsAll follow.
+// "optionalGroup" is omit-when-zero-value per the post-freeze wire convention
+// (ay9 per ADR 0008 amendment 2026-07-07).
 func (b EdgeBinding) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Kind     string         `json:"kind"`
-		Variable string         `json:"variable"`
-		Labels   graph.LabelSet `json:"labels"`
-		Source   Endpoint       `json:"source"`
-		Target   Endpoint       `json:"target"`
-		Nullable bool           `json:"nullable"`
-		Directed bool           `json:"directed"`
-		Hops     *EdgeHops      `json:"hops"`
-	}{Kind: b.Kind().String(), Variable: b.variable, Labels: b.labels, Source: b.source, Target: b.target, Nullable: b.nullable, Directed: b.directed, Hops: b.hops})
+		Kind          string         `json:"kind"`
+		Variable      string         `json:"variable"`
+		Labels        graph.LabelSet `json:"labels"`
+		Source        Endpoint       `json:"source"`
+		Target        Endpoint       `json:"target"`
+		Nullable      bool           `json:"nullable"`
+		Directed      bool           `json:"directed"`
+		Hops          *EdgeHops      `json:"hops"`
+		OptionalGroup int            `json:"optionalGroup,omitempty"`
+	}{Kind: b.Kind().String(), Variable: b.variable, Labels: b.labels, Source: b.source, Target: b.target, Nullable: b.nullable, Directed: b.directed, Hops: b.hops, OptionalGroup: b.optionalGroup})
 }
 
 // MarshalJSON renders a VarEndpoint as a tagged union member discriminated by

@@ -32,14 +32,15 @@ func isDotDotToken(tree antlr.Tree) bool {
 // anonymous edges and anonymous intermediate nodes surface as
 // AnonEdgeMember / AnonNodeMember slots (the anonymous slots carry no name,
 // so they never collide with a user variable in the byVar namespace).
-// optional flags an OPTIONAL MATCH clause: any binding first introduced here
-// is marked nullable (ADR 0006).
-func (l *listener) collectPattern(p gen.IOC_PatternContext, optional bool) {
+// group is the introducing OPTIONAL MATCH clause's query-scoped id, or 0 for
+// a required clause (ay9): any binding first introduced here records it and
+// is nullable iff group ≥ 1 (ADR 0006).
+func (l *listener) collectPattern(p gen.IOC_PatternContext, group int) {
 	if p == nil || l.err != nil {
 		return
 	}
 	for _, part := range p.AllOC_PatternPart() {
-		l.collectPatternPart(part, optional)
+		l.collectPatternPart(part, group)
 		if l.err != nil {
 			return
 		}
@@ -50,7 +51,7 @@ func (l *listener) collectPattern(p gen.IOC_PatternContext, optional bool) {
 // collectPattern so MERGE (which admits exactly one oC_PatternPart per the
 // grammar — Cypher.g4 §oC_Merge) can share the code path without the outer
 // comma-list loop.
-func (l *listener) collectPatternPart(part gen.IOC_PatternPartContext, optional bool) {
+func (l *listener) collectPatternPart(part gen.IOC_PatternPartContext, group int) {
 	if part == nil {
 		return
 	}
@@ -66,7 +67,7 @@ func (l *listener) collectPatternPart(part gen.IOC_PatternPartContext, optional 
 		pathMembers = make([]query.PathMember, 0, 8)
 		l.curPart.pathMemberSink = &pathMembers
 	}
-	l.collectPatternElement(part.OC_AnonymousPatternPart().OC_PatternElement(), optional)
+	l.collectPatternElement(part.OC_AnonymousPatternPart().OC_PatternElement(), group)
 	l.curPart.pathMemberSink = nil
 	if l.err != nil {
 		return
@@ -137,9 +138,9 @@ func (l *listener) recordPathEdge(variable string) {
 // collectPatternElement lowers a single pattern element: a head node followed by
 // zero or more (relationship, node) chain links. A parenthesised element
 // ('(' patternElement ')') is unwrapped. Each chain link becomes an edge binding
-// whose endpoints are the node on either side. optional flows through so any
-// binding first introduced here is marked nullable.
-func (l *listener) collectPatternElement(e gen.IOC_PatternElementContext, optional bool) {
+// whose endpoints are the node on either side. group flows through so any
+// binding first introduced here records its OPTIONAL group (0 = required).
+func (l *listener) collectPatternElement(e gen.IOC_PatternElementContext, group int) {
 	for e != nil && e.OC_NodePattern() == nil {
 		e = e.OC_PatternElement() // unwrap '(' patternElement ')'
 	}
@@ -148,7 +149,7 @@ func (l *listener) collectPatternElement(e gen.IOC_PatternElementContext, option
 	}
 
 	prev := e.OC_NodePattern()
-	l.collectNode(prev, optional)
+	l.collectNode(prev, group)
 	if l.err != nil {
 		return
 	}
@@ -158,11 +159,11 @@ func (l *listener) collectPatternElement(e gen.IOC_PatternElementContext, option
 		// Record in textual first-appearance order: the relationship variable is
 		// written before the node that follows it. collectEdge reads next only to
 		// form the target endpoint; it does not need next's binding recorded first.
-		l.collectEdge(link.OC_RelationshipPattern(), prev, next, optional)
+		l.collectEdge(link.OC_RelationshipPattern(), prev, next, group)
 		if l.err != nil {
 			return
 		}
-		l.collectNode(next, optional)
+		l.collectNode(next, group)
 		if l.err != nil {
 			return
 		}
@@ -184,7 +185,7 @@ func (l *listener) collectPatternElement(e gen.IOC_PatternElementContext, option
 // path reused as a node/edge pattern is a compile-time kind conflict per
 // openCypher (a path is never a node/edge), so the existing buildPart
 // pathBindings-vs-byVar collision check must fire.
-func (l *listener) collectNode(n gen.IOC_NodePatternContext, optional bool) {
+func (l *listener) collectNode(n gen.IOC_NodePatternContext, group int) {
 	if n == nil {
 		return
 	}
@@ -194,7 +195,7 @@ func (l *listener) collectNode(n gen.IOC_NodePatternContext, optional bool) {
 	}
 	l.mineInlineMap(variable, n.OC_Properties())
 	if variable != "" && !l.nameBoundAsUnwind(variable) {
-		l.mergeBinding(variable, graph.Node, nodeLabels(n.OC_NodeLabels()), nil, nil, optional, false, nil)
+		l.mergeBinding(variable, graph.Node, nodeLabels(n.OC_NodeLabels()), nil, nil, group, false, nil)
 	}
 	l.recordPathNode(variable)
 }
@@ -246,9 +247,10 @@ func (l *listener) nameBoundAsUnwind(variable string) bool {
 // carry a non-nil hops range (Stage 8). A directed left-arc is canonicalised
 // to source->target, while an undirected edge keeps textual order with the
 // undirected flag set (Stage 5). Each endpoint is formed from its node (a
-// VarEndpoint for a named node, an InlineEndpoint otherwise). optional marks any
-// edge binding (named or anonymous) introduced here as nullable.
-func (l *listener) collectEdge(r gen.IOC_RelationshipPatternContext, prev, next gen.IOC_NodePatternContext, optional bool) {
+// VarEndpoint for a named node, an InlineEndpoint otherwise). group marks any
+// edge binding (named or anonymous) introduced here with its OPTIONAL clause's
+// id (0 = required clause; nullable ⇔ group ≥ 1).
+func (l *listener) collectEdge(r gen.IOC_RelationshipPatternContext, prev, next gen.IOC_NodePatternContext, group int) {
 	left := r.OC_LeftArrowHead() != nil
 	right := r.OC_RightArrowHead() != nil
 	// One arrow (left != right) is directed; both heads (<-[]->) or neither (-[]-)
@@ -292,16 +294,17 @@ func (l *listener) collectEdge(r gen.IOC_RelationshipPatternContext, prev, next 
 		// An anonymous edge is its own binding (C1): append the raw binding and let
 		// build() construct it once, exactly as the named path does — no early
 		// construct just to read back the (unchanged) labels. Anonymous edges
-		// introduced inside OPTIONAL MATCH carry the nullable flag uniformly
-		// (ADR 0006) even though no Ref will ever observe it.
-		rb := &rawBinding{variable: "", kind: graph.Edge, source: source, target: target, nullable: optional, undirected: !directed, hops: hops}
+		// introduced inside OPTIONAL MATCH carry the group id (and thus the
+		// nullable flag) uniformly (ADR 0006; ay9) even though no Ref will ever
+		// observe it.
+		rb := &rawBinding{variable: "", kind: graph.Edge, source: source, target: target, optionalGroup: group, undirected: !directed, hops: hops}
 		rb.mergeLabels(labels)
 		l.curPart.bindings = append(l.curPart.bindings, rb)
 		l.recordPathEdge("")
 		return
 	}
 	if !l.nameBoundAsUnwind(variable) {
-		l.mergeBinding(variable, graph.Edge, labels, source, target, optional, !directed, hops)
+		l.mergeBinding(variable, graph.Edge, labels, source, target, group, !directed, hops)
 	}
 	l.recordPathEdge(variable)
 }
@@ -376,17 +379,17 @@ func (l *listener) recordEndpointRefs(eps ...query.Endpoint) {
 // a later part is a fresh binding there (spec §3). A variable seen as both a node
 // and an edge within a part is a kind conflict (recorded for build()). For an
 // edge's first occurrence the endpoints are set; later occurrences merge labels
-// only. optional is honoured only on first introduction (ADR 0006): a binding's
-// nullability is a static fact about its *introducing* clause; a later
-// non-OPTIONAL occurrence neither sets nor clears the flag — that demotion is the
-// resolver's job (gqlc-lqm). Stage 8: hops carries the var-length hop range
-// (nil for single-hop); it is honoured only on first introduction, matching
-// the nullable/directed discipline.
-func (l *listener) mergeBinding(variable string, kind graph.EntityKind, labels graph.LabelSet, source, target query.Endpoint, optional, undirected bool, hops *query.EdgeHops) {
+// only. group is honoured only on first introduction (ADR 0006; ay9): a
+// binding's nullability and OPTIONAL-group membership are static facts about
+// its *introducing* clause; a later non-OPTIONAL occurrence neither sets nor
+// clears them — that demotion is the resolver's job (gqlc-lqm). Stage 8: hops
+// carries the var-length hop range (nil for single-hop); it is honoured only
+// on first introduction, matching the group/directed discipline.
+func (l *listener) mergeBinding(variable string, kind graph.EntityKind, labels graph.LabelSet, source, target query.Endpoint, group int, undirected bool, hops *query.EdgeHops) {
 	part := l.curPart
 	idx, ok := part.byVar[variable]
 	if !ok {
-		rb := &rawBinding{variable: variable, kind: kind, seen: map[string]bool{}, source: source, target: target, nullable: optional, undirected: undirected, hops: hops}
+		rb := &rawBinding{variable: variable, kind: kind, seen: map[string]bool{}, source: source, target: target, optionalGroup: group, undirected: undirected, hops: hops}
 		rb.mergeLabels(labels)
 		part.byVar[variable] = len(part.bindings)
 		part.bindings = append(part.bindings, rb)

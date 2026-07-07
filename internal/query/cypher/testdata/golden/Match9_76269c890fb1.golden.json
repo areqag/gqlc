@@ -37,7 +37,8 @@
               "hops": {
                 "min": null,
                 "max": null
-              }
+              },
+              "optionalGroup": 1
             }
           ],
           "returns": [

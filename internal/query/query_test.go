@@ -62,6 +62,26 @@ func TestNewNullableNodeBindingRejectsEmptyVariable(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestNewNullableNodeBindingInGroup(t *testing.T) {
+	// The InGroup variant (ay9) carries the introducing OPTIONAL clause's group
+	// id on top of the NewNullableNodeBinding invariants.
+	b, err := query.NewNullableNodeBindingInGroup("p", graph.LabelSet{"Person"}, 3)
+	require.NoError(t, err)
+	require.Equal(t, "p", b.Variable())
+	require.Equal(t, graph.LabelSet{"Person"}, b.Labels())
+	require.True(t, b.Nullable())
+	require.Equal(t, 3, b.OptionalGroup())
+}
+
+func TestNewNullableNodeBindingInGroupRejectsNonPositiveGroup(t *testing.T) {
+	// Group 0 ("no group") is reachable only through NewNullableNodeBinding —
+	// "in a group" and "not in a group" stay constructor-disjoint (ay9 §3.2).
+	_, err := query.NewNullableNodeBindingInGroup("p", nil, 0)
+	require.Error(t, err)
+	_, err = query.NewNullableNodeBindingInGroup("p", nil, -1)
+	require.Error(t, err)
+}
+
 func TestNewEdgeBinding(t *testing.T) {
 	src, err := query.NewVarEndpoint("a")
 	require.NoError(t, err)
@@ -139,6 +159,29 @@ func TestNewNullableEdgeBindingRejectsMissingEndpoint(t *testing.T) {
 	_, err := query.NewNullableEdgeBinding("r", nil, nil, tgt, true)
 	require.Error(t, err)
 	_, err = query.NewNullableEdgeBinding("r", nil, tgt, nil, true)
+	require.Error(t, err)
+}
+
+func TestNewNullableEdgeBindingInGroup(t *testing.T) {
+	// The InGroup variant (ay9) carries the introducing OPTIONAL clause's group
+	// id on top of the NewNullableEdgeBinding invariants.
+	src := must(query.NewVarEndpoint("a"))
+	tgt := must(query.NewVarEndpoint("b"))
+	b, err := query.NewNullableEdgeBindingInGroup("r", graph.LabelSet{"KNOWS"}, src, tgt, true, 2)
+	require.NoError(t, err)
+	require.Equal(t, "r", b.Variable())
+	require.Equal(t, src, b.Source())
+	require.Equal(t, tgt, b.Target())
+	require.True(t, b.Nullable())
+	require.Equal(t, 2, b.OptionalGroup())
+}
+
+func TestNewNullableEdgeBindingInGroupRejectsNonPositiveGroup(t *testing.T) {
+	src := must(query.NewVarEndpoint("a"))
+	tgt := must(query.NewVarEndpoint("b"))
+	_, err := query.NewNullableEdgeBindingInGroup("r", nil, src, tgt, true, 0)
+	require.Error(t, err)
+	_, err = query.NewNullableEdgeBindingInGroup("r", nil, src, tgt, true, -1)
 	require.Error(t, err)
 }
 
@@ -722,6 +765,56 @@ func TestMarshalJSONEmitsNullable(t *testing.T) {
 	require.Contains(t, string(outE), `"nullable":true`)
 }
 
+// TestOptionalGroupZeroOnLegacyConstructors pins the ay9 zero-value posture:
+// every one of the six preserved binding constructors yields OptionalGroup 0
+// — including the nullable-without-group legacy state, which the resolver
+// treats exactly as pre-ay9 (nullable, no sibling propagation).
+func TestOptionalGroupZeroOnLegacyConstructors(t *testing.T) {
+	src := must(query.NewVarEndpoint("a"))
+	tgt := must(query.NewVarEndpoint("b"))
+	hops := must(query.NewEdgeHops(nil, nil))
+
+	require.Equal(t, 0, must(query.NewNodeBinding("p", nil)).OptionalGroup())
+	require.Equal(t, 0, must(query.NewNullableNodeBinding("p", nil)).OptionalGroup())
+	require.Equal(t, 0, must(query.NewEdgeBinding("r", nil, src, tgt, true)).OptionalGroup())
+	require.Equal(t, 0, must(query.NewNullableEdgeBinding("r", nil, src, tgt, true)).OptionalGroup())
+	require.Equal(t, 0, must(query.NewVarLengthEdgeBinding("r", nil, src, tgt, true, hops)).OptionalGroup())
+	require.Equal(t, 0, must(query.NewNullableVarLengthEdgeBinding("r", nil, src, tgt, true, hops)).OptionalGroup())
+}
+
+// TestMarshalJSONEmitsOptionalGroup pins the group-carrying wire fragment
+// (ay9): the key is the tail key — after "nullable" on a node, after "hops"
+// on an edge.
+func TestMarshalJSONEmitsOptionalGroup(t *testing.T) {
+	n := must(query.NewNullableNodeBindingInGroup("p", nil, 2))
+	outN := must(json.Marshal(n))
+	require.Contains(t, string(outN), `"nullable":true,"optionalGroup":2`)
+
+	src := must(query.NewVarEndpoint("a"))
+	tgt := must(query.NewVarEndpoint("b"))
+	e := must(query.NewNullableEdgeBindingInGroup("r", nil, src, tgt, true, 1))
+	outE := must(json.Marshal(e))
+	require.Contains(t, string(outE), `"hops":null,"optionalGroup":1`)
+}
+
+// TestMarshalJSONOmitsZeroOptionalGroup is the wire-compat fence in unit
+// form (ay9): a group-0 binding — every preserved constructor, nullable
+// included — serialises without the "optionalGroup" key, so pre-ay9 goldens
+// stay byte-identical.
+func TestMarshalJSONOmitsZeroOptionalGroup(t *testing.T) {
+	src := must(query.NewVarEndpoint("a"))
+	tgt := must(query.NewVarEndpoint("b"))
+
+	for _, b := range []query.Binding{
+		must(query.NewNodeBinding("p", nil)),
+		must(query.NewNullableNodeBinding("p", nil)),
+		must(query.NewEdgeBinding("r", nil, src, tgt, true)),
+	} {
+		out := must(json.Marshal(b))
+		require.NotContains(t, string(out), `"optionalGroup"`)
+	}
+}
+
 // TestBindingDiscriminatorTracksEntityKind pins the binding "kind" tag to
 // graph.EntityKind.String, the single source it derives from, so the serialised
 // tag can never drift from Kind().
@@ -1143,6 +1236,32 @@ func TestNewNullableVarLengthEdgeBinding(t *testing.T) {
 	require.NotNil(t, b.Hops())
 	require.Equal(t, 1, *b.Hops().Min())
 	require.Equal(t, 3, *b.Hops().Max())
+}
+
+// TestNewNullableVarLengthEdgeBindingInGroup pins the ay9 InGroup variant:
+// the group id rides alongside the var-length invariants (hops preserved).
+func TestNewNullableVarLengthEdgeBindingInGroup(t *testing.T) {
+	src := must(query.NewVarEndpoint("a"))
+	tgt := must(query.NewVarEndpoint("b"))
+	one, three := 1, 3
+	hops := must(query.NewEdgeHops(&one, &three))
+	b, err := query.NewNullableVarLengthEdgeBindingInGroup("r", nil, src, tgt, true, hops, 4)
+	require.NoError(t, err)
+	require.True(t, b.Nullable())
+	require.Equal(t, 4, b.OptionalGroup())
+	require.NotNil(t, b.Hops())
+	require.Equal(t, 1, *b.Hops().Min())
+	require.Equal(t, 3, *b.Hops().Max())
+}
+
+func TestNewNullableVarLengthEdgeBindingInGroupRejectsNonPositiveGroup(t *testing.T) {
+	src := must(query.NewVarEndpoint("a"))
+	tgt := must(query.NewVarEndpoint("b"))
+	hops := must(query.NewEdgeHops(nil, nil))
+	_, err := query.NewNullableVarLengthEdgeBindingInGroup("r", nil, src, tgt, true, hops, 0)
+	require.Error(t, err)
+	_, err = query.NewNullableVarLengthEdgeBindingInGroup("r", nil, src, tgt, true, hops, -1)
+	require.Error(t, err)
 }
 
 // TestVarLengthEdgeBindingMarshalJSON pins the wire shape: the same fields

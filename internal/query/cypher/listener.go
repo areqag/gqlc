@@ -74,6 +74,13 @@ type listener struct {
 	// collection.
 	subqueryDepth int
 
+	// optionalGroupSeq mints per-query OPTIONAL-clause group ids (ay9).
+	// Incremented once per collected OPTIONAL MATCH clause; never reset
+	// (ids are query-scoped — see the ay9 spec §3.3). Suppressed clauses
+	// inside EXISTS { … } consume no id (the mint sits after the
+	// subqueryDepth guard).
+	optionalGroupSeq int
+
 	// writeSeen is the Stage-12 query-wide flag build() reads to populate
 	// Query.StatementKind. Set true by every outer-scope Enter handler for
 	// a write clause (Create / Delete / Set / Remove). A write suppressed
@@ -149,21 +156,23 @@ func newRawPart() *rawPart {
 
 // rawBinding is a binding under construction: its variable, accumulated labels
 // (ordered union, first appearance), kind, and — for an edge — its endpoints.
-// nullable records the static, parser-time fact that the binding was first
-// introduced inside an OPTIONAL MATCH clause (ADR 0006). Once set, later
-// re-uses of the same variable in non-OPTIONAL clauses never demote it; that
-// is the resolver's job (see gqlc-lqm). Stage 8: hops carries the var-length
-// hop range (nil for single-hop; a var-length edge projects as list<edge>).
+// optionalGroup records the static, parser-time fact that the binding was
+// first introduced inside an OPTIONAL MATCH clause and which clause it was
+// (ADR 0006; ay9: ≥1 is the introducing clause's query-scoped id, 0 means a
+// required clause — nullable ⇔ optionalGroup ≥ 1). Once set, later re-uses of
+// the same variable in non-OPTIONAL clauses never demote it; that is the
+// resolver's job (see gqlc-lqm). Stage 8: hops carries the var-length hop
+// range (nil for single-hop; a var-length edge projects as list<edge>).
 type rawBinding struct {
-	variable   string
-	labels     graph.LabelSet
-	seen       map[string]bool // labels already merged, for the ordered union
-	kind       graph.EntityKind
-	source     query.Endpoint
-	target     query.Endpoint
-	nullable   bool
-	undirected bool            // zero value false == directed; set true only on the undirected branch (inverted to keep existing literals zero-value-safe, see §4)
-	hops       *query.EdgeHops // Stage 8: non-nil for a variable-length edge
+	variable      string
+	labels        graph.LabelSet
+	seen          map[string]bool // labels already merged, for the ordered union
+	kind          graph.EntityKind
+	source        query.Endpoint
+	target        query.Endpoint
+	optionalGroup int
+	undirected    bool            // zero value false == directed; set true only on the undirected branch (inverted to keep existing literals zero-value-safe, see §4)
+	hops          *query.EdgeHops // Stage 8: non-nil for a variable-length edge
 }
 
 // varRef is a use of a variable name that build() must resolve to a binding. An
@@ -255,15 +264,20 @@ func (l *listener) EnterOC_Union(c *gen.OC_UnionContext) {
 
 // EnterOC_Match collects one MATCH or OPTIONAL MATCH clause's pattern and WHERE
 // into the current part. Bindings first introduced inside an OPTIONAL clause are
-// marked nullable (ADR 0006); the WHERE itself does not introduce bindings, so it
-// reads parameters the same way in either case. Collection runs here, in walk
-// order, so first appearance of a variable is the source order within the part.
+// marked nullable and carry the clause's freshly-minted group id (ADR 0006; ay9);
+// the WHERE itself does not introduce bindings, so it reads parameters the same
+// way in either case. Collection runs here, in walk order, so first appearance
+// of a variable is the source order within the part.
 func (l *listener) EnterOC_Match(c *gen.OC_MatchContext) {
 	if l.subqueryDepth > 0 {
 		return // Stage 11 §1.2: EXISTS { ... } suppresses inner clause collection.
 	}
-	optional := c.OPTIONAL() != nil
-	l.collectPattern(c.OC_Pattern(), optional)
+	group := 0
+	if c.OPTIONAL() != nil {
+		l.optionalGroupSeq++
+		group = l.optionalGroupSeq
+	}
+	l.collectPattern(c.OC_Pattern(), group)
 	if w := c.OC_Where(); w != nil {
 		l.mineWhere(w)
 	}
@@ -349,13 +363,13 @@ func exportedTypes(closed *rawPart) map[string]query.Type {
 // A named binding contributes its variable; an anonymous edge contributes an
 // empty string. An anonymous node is not a binding (C3) and thus does not
 // enter the CreateEffect's variables list — matching the read-side discipline.
-// nullable is unconditionally false: openCypher has no OPTIONAL CREATE.
+// group is unconditionally 0 (non-nullable): openCypher has no OPTIONAL CREATE.
 func (l *listener) EnterOC_Create(c *gen.OC_CreateContext) {
 	if l.subqueryDepth > 0 {
 		return // Stage 11 §1.6: writes inside EXISTS { ... } parse-accept; bucket-3 engine-side.
 	}
 	before := len(l.curPart.bindings)
-	l.collectPattern(c.OC_Pattern(), false)
+	l.collectPattern(c.OC_Pattern(), 0)
 	if l.err != nil {
 		return
 	}
@@ -380,7 +394,7 @@ func (l *listener) EnterOC_Merge(c *gen.OC_MergeContext) {
 		return // Stage 11 §1.6: writes inside EXISTS { ... } are suppressed.
 	}
 	before := len(l.curPart.bindings)
-	l.collectPatternPart(c.OC_PatternPart(), false)
+	l.collectPatternPart(c.OC_PatternPart(), 0)
 	if l.err != nil {
 		return
 	}

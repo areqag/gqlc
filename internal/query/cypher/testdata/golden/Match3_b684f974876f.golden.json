@@ -10,7 +10,8 @@
               "labels": [
                 "TheLabel"
               ],
-              "nullable": true
+              "nullable": true,
+              "optionalGroup": 1
             }
           ],
           "returns": [
