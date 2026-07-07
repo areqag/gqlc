@@ -1317,20 +1317,36 @@ type Use interface {
 // multi-level access (a.b.c) is unrepresentable, because Ref itself only carries
 // one Property name.
 type PropertyUse struct {
-	ref Ref // the binding property the parameter sits against
+	ref  Ref // the binding property the parameter sits against
+	part int // the branch-relative index of the enclosing Part (fvo, ADR 0008 amendment 2026-07-06)
 }
 
-// NewPropertyUse builds a PropertyUse. Total: a parameter use carries a Ref
-// the listener has already validated (parameter mining only fires after the
-// expression shape gates accept a bound variable + property), so no
+// NewPropertyUse builds a PropertyUse at Part 0. Total: a parameter use carries
+// a Ref the listener has already validated (parameter mining only fires after
+// the expression shape gates accept a bound variable + property), so no
 // constructor error is possible at the call site. Mirrors NewInlineEndpoint's
-// total posture.
+// total posture. Delegates to NewPropertyUseAt with part=0 so single-Part
+// callers stay verbatim.
 func NewPropertyUse(r Ref) PropertyUse {
-	return PropertyUse{ref: r}
+	return NewPropertyUseAt(r, 0)
+}
+
+// NewPropertyUseAt builds a PropertyUse carrying its Ref and the branch-relative
+// index of the enclosing Part (Part 0 for a single-Part branch, or the position
+// under EnterOC_With's Part swap; fvo per ADR 0008 amendment 2026-07-06).
+func NewPropertyUseAt(r Ref, part int) PropertyUse {
+	return PropertyUse{ref: r, part: part}
 }
 
 // Ref is the binding property the parameter sits against.
 func (u PropertyUse) Ref() Ref { return u.ref }
+
+// Part reports the branch-relative index of the Part the parameter Use
+// lexically occurs in (fvo per ADR 0008 amendment 2026-07-06). Populated
+// parser-side by addParameterUse's currentPartIndex call. The resolver's
+// witnessAcrossScopes reads this to select the exact scope to witness
+// against (docs/specs/resolver-stage-r5.md §4.2.4 close-out).
+func (u PropertyUse) Part() int { return u.part }
 
 func (PropertyUse) isUse() {}
 
@@ -1428,13 +1444,21 @@ func (p ExprPosition) String() string {
 type ExprUse struct {
 	enclosingType Type         // the result type of the enclosing rich expression
 	position      ExprPosition // where the enclosing expression sits (projection / predicate)
+	part          int          // the branch-relative index of the enclosing Part (fvo)
 }
 
-// NewExprUse builds an ExprUse carrying the enclosing rich expression's result
-// type and position. Total: the listener supplies both values it has already
-// computed at the use site.
+// NewExprUse builds an ExprUse at Part 0 carrying the enclosing rich
+// expression's result type and position. Delegates to NewExprUseAt with
+// part=0 so single-Part callers stay verbatim.
 func NewExprUse(enclosing Type, position ExprPosition) ExprUse {
-	return ExprUse{enclosingType: enclosing, position: position}
+	return NewExprUseAt(enclosing, position, 0)
+}
+
+// NewExprUseAt builds an ExprUse carrying the enclosing rich expression's
+// result type, position discriminator, and the branch-relative index of the
+// enclosing Part (fvo per ADR 0008 amendment 2026-07-06).
+func NewExprUseAt(enclosing Type, position ExprPosition, part int) ExprUse {
+	return ExprUse{enclosingType: enclosing, position: position, part: part}
 }
 
 // EnclosingType is the result type of the enclosing rich expression at the
@@ -1444,17 +1468,28 @@ func (u ExprUse) EnclosingType() Type { return u.enclosingType }
 // Position is where the enclosing expression sits (projection column / predicate).
 func (u ExprUse) Position() ExprPosition { return u.position }
 
+// Part reports the branch-relative index of the Part the parameter Use
+// lexically occurs in (fvo per ADR 0008 amendment 2026-07-06).
+func (u ExprUse) Part() int { return u.part }
+
 func (ExprUse) isUse() {}
 
 // MarshalJSON renders an ExprUse as a tagged union member discriminated by
-// "kind", carrying the enclosing type and position — same convention as the
-// other Use variants.
+// "kind", carrying the enclosing type, position, and (fvo per ADR 0008
+// amendment 2026-07-06) the branch-relative Part index. "part" is
+// omit-when-zero-value per the post-freeze wire convention.
 func (u ExprUse) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Kind          string `json:"kind"`
 		EnclosingType Type   `json:"enclosingType"`
 		Position      string `json:"position"`
-	}{Kind: useKindExpr, EnclosingType: projectionType(u.enclosingType), Position: u.position.String()})
+		Part          int    `json:"part,omitempty"`
+	}{
+		Kind:          useKindExpr,
+		EnclosingType: projectionType(u.enclosingType),
+		Position:      u.position.String(),
+		Part:          u.part,
+	})
 }
 
 // ClauseSlotUse is a parameter use that occupies a SKIP/LIMIT clause slot. The
@@ -1462,16 +1497,28 @@ func (u ExprUse) MarshalJSON() ([]byte, error) {
 // property, so this variant carries no Ref.
 type ClauseSlotUse struct {
 	slot ClauseSlot
+	part int // the branch-relative index of the enclosing Part (fvo)
 }
 
-// NewClauseSlotUse builds a ClauseSlotUse. Total: ClauseSlot is a closed enum
-// (currently SKIP or LIMIT) so every value is valid.
+// NewClauseSlotUse builds a ClauseSlotUse at Part 0. Delegates to
+// NewClauseSlotUseAt with part=0 so single-Part callers stay verbatim.
 func NewClauseSlotUse(s ClauseSlot) ClauseSlotUse {
-	return ClauseSlotUse{slot: s}
+	return NewClauseSlotUseAt(s, 0)
+}
+
+// NewClauseSlotUseAt builds a ClauseSlotUse carrying the clause slot and the
+// branch-relative index of the enclosing Part (fvo per ADR 0008 amendment
+// 2026-07-06).
+func NewClauseSlotUseAt(s ClauseSlot, part int) ClauseSlotUse {
+	return ClauseSlotUse{slot: s, part: part}
 }
 
 // Slot is the clause whose slot the parameter occupies.
 func (u ClauseSlotUse) Slot() ClauseSlot { return u.slot }
+
+// Part reports the branch-relative index of the Part the parameter Use
+// lexically occurs in (fvo per ADR 0008 amendment 2026-07-06).
+func (u ClauseSlotUse) Part() int { return u.part }
 
 func (ClauseSlotUse) isUse() {}
 
@@ -1555,22 +1602,36 @@ func (e InlineEndpoint) MarshalJSON() ([]byte, error) {
 // MarshalJSON renders a PropertyUse as a tagged union member discriminated by
 // "kind", flattening its Ref into sibling "variable" and "property" fields so
 // the use's shape stays one level deep — same posture as the Binding sum.
+// "part" is omit-when-zero-value per the post-freeze wire convention (fvo per
+// ADR 0008 amendment 2026-07-06).
 func (u PropertyUse) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Kind     string `json:"kind"`
 		Variable string `json:"variable"`
 		Property string `json:"property"`
-	}{Kind: useKindProperty, Variable: u.ref.Variable, Property: u.ref.Property})
+		Part     int    `json:"part,omitempty"`
+	}{
+		Kind:     useKindProperty,
+		Variable: u.ref.Variable,
+		Property: u.ref.Property,
+		Part:     u.part,
+	})
 }
 
 // MarshalJSON renders a ClauseSlotUse as a tagged union member discriminated by
 // "kind". The "slot" tag derives from ClauseSlot.String, so the serialised slot
-// can never drift from Slot().
+// can never drift from Slot(). "part" is omit-when-zero-value per the
+// post-freeze wire convention (fvo per ADR 0008 amendment 2026-07-06).
 func (u ClauseSlotUse) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Kind string `json:"kind"`
 		Slot string `json:"slot"`
-	}{Kind: useKindClauseSlot, Slot: u.slot.String()})
+		Part int    `json:"part,omitempty"`
+	}{
+		Kind: useKindClauseSlot,
+		Slot: u.slot.String(),
+		Part: u.part,
+	})
 }
 
 // flatRef is the one-level-deep shape a Ref takes inside a projection's "refs"
