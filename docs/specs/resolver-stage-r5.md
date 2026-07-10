@@ -897,11 +897,15 @@ contains the variable but the property lookup fails,
 `ErrUnknownProperty` surfaces immediately.
 
 For a `PropertyUse` this discipline closes the pre-fvo
-any-valid-witness soundness gap: a `MATCH (a:Post) WITH a.title
+any-scope-admits soundness gap: a `MATCH (a:Post) WITH a.title
 AS a MATCH (a:Person) WHERE a.title = $p` shape — where the
 lexical Part 1 has `a: Person` (no `title`), but the pre-fvo
-resolver would silently witness against Part 0's `a: Post` (which
-has `title`) — now fires `ErrUnknownProperty` honestly. The
+resolver, witnessing the Use independently against every Part's
+binding tables and admitting on the first success, would take
+Part 0's `a: Post` (which has `title`) as a valid witness even
+though Part 1 is where the Use lexically lives. The post-fvo rule
+witnesses ONLY against `branchScopes[u.Part()]` — the lexical
+Part — and now fires `ErrUnknownProperty` honestly. The
 discriminating fixture at §6.3 (`parameter_across_with_alias_shadow_reversed.cypher`)
 pins the rejection; see `docs/specs/unfreeze-fvo-use-part.md` §7.4.
 
@@ -935,7 +939,7 @@ possible later stage; R5 does not do it.
 - `parameter_across_with_alias_shadow_reversed.cypher` (fvo,
   under `invalid/`) — Part 1's `a: Person` lacks `title`;
   lexical-Part witness fires `ErrUnknownProperty`. This is the
-  post-fvo close-out of the pre-fvo any-valid-witness gap; see
+  post-fvo close-out of the pre-fvo any-scope-admits gap; see
   `docs/specs/unfreeze-fvo-use-part.md` §7.4.
 
 ### 4.3 UNION column compatibility
@@ -2343,7 +2347,7 @@ R4's out-of-scope table survives with revisions:
 | Nullability upgrades (regime (b), same-Part re-MATCH — Class B: missing-witness model gap) | ~~silently under-demoted~~ **closed** (5xg, 2026-07-10) | ~~gqlc-5xg (model unfreeze)~~ **closed** by 5xg unfreeze + widening (`docs/specs/unfreeze-5xg-required-bare-ref.md`); edge-side non-bare missing-witness residual filed as gqlc-0kq |
 | Nullability upgrades (OPTIONAL-clause-sibling — Class A: missing-group-membership model gap) | ~~silently under-demoted~~ **closed** (ay9, 2026-07-10) | ~~gqlc-ay9 (model unfreeze)~~ **closed** by ay9 unfreeze + widening (`docs/specs/unfreeze-ay9-optional-group.md`); residual cross-Part carry gap filed as gqlc-984 |
 | `ExprProjection` residual mixed with `AggregateProjection` in the same Part's Returns — grouping-key discrimination gap | silently under-grouped (uniform-exclude posture) | §4.5.3.3 follow-up bead (Shape B `ContainsAggregate` parser-side bit) |
-| Cross-Part parameter Use where the true attributed Part would reject but another same-name Part admits — Use→Part attribution gap (§4.2.4) | **closed by gqlc-fvo (2026-07-06)**: `docs/specs/unfreeze-fvo-use-part.md` threads `Part` on every `Use` and the resolver's `witnessAcrossScopes` witnesses against `branchScopes[u.Part()]`. Under UNION the `witnessInBranch` dispatcher wraps this with a same-Part cross-branch fallback (fvo spec §7.2.2, PR #118) — two residuals of that fallback (same-Part UNION boundary ambiguity, UNION-later-Part spurious rejection) are filed as **gqlc-qcc** for a future cycle. Residual WITH-aliased-projection shadow (fvo spec §7.6.1) is filed as **gqlc-4w5** for a future scope-attribution cycle. | closed |
+| Cross-Part parameter Use where the pre-fvo resolver witnesses the Use against every Part's binding tables independently and admits on any scope's success, letting a same-name Part other than the lexical one supply the witness — any-scope-admits gap (§4.2.4) | **closed by gqlc-fvo (2026-07-06)**: `docs/specs/unfreeze-fvo-use-part.md` threads `Part` on every `Use` and the resolver's `witnessAcrossScopes` witnesses ONLY against `branchScopes[u.Part()]` — the lexical Part. Under UNION the `witnessInBranch` dispatcher wraps this with a same-Part cross-branch fallback (fvo spec §7.2.2, PR #118) — two residuals of that fallback (same-Part UNION boundary ambiguity, UNION-later-Part spurious rejection) are filed as **gqlc-qcc** for a future cycle. Residual WITH-aliased-projection shadow (fvo spec §7.6.1) is filed as **gqlc-4w5** for a future scope-attribution cycle. | closed |
 
 **Silently accepted (not routed anywhere):**
 
