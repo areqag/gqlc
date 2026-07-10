@@ -53,14 +53,22 @@ a scope trim: it is a frozen-model deficiency in the same family as
 `gqlc-fvo` (cross-Part parameter Use attribution, unchanged from R5/R6).
 §7.1 records the deficiency with the exact widening required.
 
-The R4 Class A and Class B same-Part regime (b) nullability
-under-approximations (`gqlc-ay9`, `gqlc-5xg`), the R5
+~~The R4 Class A and Class B same-Part regime (b) nullability
+under-approximations (`gqlc-ay9`, `gqlc-5xg`),~~ [closed 2026-07-10:
+Class A landed via gqlc-ay9 (PRs #127/#128/#129,
+`docs/specs/unfreeze-ay9-optional-group.md`; residual gqlc-984) and
+Class B / same-Part regime (b) landed via gqlc-5xg (PRs
+#132/#133/#134, `docs/specs/unfreeze-5xg-required-bare-ref.md`;
+residual gqlc-0kq); R7 inherits both closures unchanged.] the R5
 `ExprProjection`-residual grouping-key gap (`gqlc-gyw` Shape B /
 `gqlc-hk0`), and the R5 cross-Part parameter-Use attribution gap
 (`gqlc-fvo`) are unchanged at R7. R6's two design deferrals
-(value-target assignability, Effects-on-wire) are unchanged at R7. None
+(value-target assignability, Effects-on-wire) are unchanged at R7. ~~None
 of these gaps is closable without a model unfreeze (owner decision
-pending); R7 does not contort the resolver around any of them. `PathBinding`
+pending); R7 does not contort the resolver around any of them.~~
+[closed 2026-07-10 for the two R4 nullability gaps (ay9, 5xg); the
+R5 gaps (`gqlc-hk0`, `gqlc-fvo`) persist at R7; R7 does not contort
+the resolver around them.] `PathBinding`
 and `UnwindBinding` remain out of scope and continue to route to
 `ErrOutOfR0Scope` (R-later).
 
@@ -2186,7 +2194,7 @@ R6's out-of-scope table survives with revisions:
 | Value-target type-agreement in `SET n.p = value` | silently admitted | R-later (design axis; unchanged from R6) |
 | Runtime SET / DELETE on NULL target (row-drop semantics) | silently admitted | bucket 3 (unchanged) |
 | DETACH DELETE cascade semantics vs plain DELETE | silently admitted | bucket 3 (unchanged) |
-| Same-Part regime (b) nullability under-demote | silently under-demoted | gqlc-5xg (unchanged) |
+| Same-Part regime (b) nullability under-demote | ~~silently under-demoted~~ **closed** (5xg, 2026-07-10) | ~~gqlc-5xg (unchanged)~~ **closed** by 5xg unfreeze + widening (`docs/specs/unfreeze-5xg-required-bare-ref.md`); edge-side non-bare missing-witness residual filed as gqlc-0kq |
 | OPTIONAL-clause-sibling nullability under-demote | ~~silently under-demoted~~ **closed** (ay9, 2026-07-10) | ~~gqlc-ay9~~ **closed** by ay9 unfreeze + widening (`docs/specs/unfreeze-ay9-optional-group.md`); residual cross-Part carry gap filed as gqlc-984 |
 | `ExprProjection` residual grouping-key discrimination | silently under-grouped | gqlc-hk0 / Shape B (unchanged) |
 | Cross-Part parameter Use attribution gap | silently false-admitted | gqlc-fvo (unchanged) |
@@ -2336,8 +2344,12 @@ child~~ — the CALL-arg child gap was closed by 0ig, 2026-07-07; see
 `gqlc-5xg` Class B nullability) persist at R7 unchanged~~ — Class A
 (`gqlc-ay9`) was closed by the ay9 unfreeze + widening on 2026-07-10
 (PRs #127/#128/#129, `docs/specs/unfreeze-ay9-optional-group.md`;
-residual cross-Part carry gap filed as gqlc-984); Class B
-(`gqlc-5xg`) persists at R7 unchanged.
+residual cross-Part carry gap filed as gqlc-984); ~~Class B
+(`gqlc-5xg`) persists at R7 unchanged.~~ Class B (`gqlc-5xg`) was
+closed by the 5xg unfreeze + widening on 2026-07-10 (PRs
+#132/#133/#134, `docs/specs/unfreeze-5xg-required-bare-ref.md`;
+edge-side non-bare missing-witness residual filed as gqlc-0kq); R7
+inherits the closure unchanged.
 
 #### 7.1.3 Freeze-not-a-wall status
 
@@ -2359,7 +2371,12 @@ delay the spec on it; the CALL-YIELD-typing arm delivers standalone.
 - **R6 open axes carry unchanged** — value-target assignability
   (§7.1.1 R6), Effects-on-wire (§7.1.2 R6). §7.1.2.
 - **R5 / R4 open axes carry unchanged** — `gqlc-fvo`, `gqlc-hk0`,
-  `gqlc-ay9`, `gqlc-5xg`. §7.1.2.
+  ~~`gqlc-ay9`, `gqlc-5xg`~~. §7.1.2. [closed 2026-07-10: `gqlc-ay9`
+  landed via PRs #127/#128/#129
+  (`docs/specs/unfreeze-ay9-optional-group.md`; residual gqlc-984),
+  and `gqlc-5xg` landed via PRs #132/#133/#134
+  (`docs/specs/unfreeze-5xg-required-bare-ref.md`; residual gqlc-0kq);
+  R7 inherits both closures unchanged.]
 
 ---
 
@@ -2524,8 +2541,13 @@ out of scope of this document. The spec is done when:
      `gqlc-fvo`, `gqlc-lta`, etc.
    - No new sentinel bead files.
    - gqlc-0mx.9 closes (this stage's bead).
-   - gqlc-ay9, gqlc-5xg, gqlc-hk0, gqlc-fvo, gqlc-lta remain OPEN
-     unchanged; R7 does not close any of them.
+   - ~~gqlc-ay9, gqlc-5xg,~~ gqlc-hk0, gqlc-fvo, gqlc-lta remain OPEN
+     unchanged; R7 does not close any of them. [closed 2026-07-10:
+     gqlc-ay9 landed via PRs #127/#128/#129
+     (`docs/specs/unfreeze-ay9-optional-group.md`; residual gqlc-984),
+     and gqlc-5xg landed via PRs #132/#133/#134
+     (`docs/specs/unfreeze-5xg-required-bare-ref.md`; residual gqlc-0kq);
+     R7 inherits both closures unchanged.]
    - The R7 code cycle asserts §3.3's byte-identical claim by
      running `just test` on the R0–R6 corpus WITHOUT `-update`
      before writing any R7 goldens; any regeneration in the R0–R6
