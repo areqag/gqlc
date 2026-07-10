@@ -492,7 +492,7 @@ var mustParse = map[string]struct {
 	// Stage 3 — RETURN *. The query-level wildcard over in-scope bindings: the
 	// honest schema-agnostic representation is ReturnsAll, with Returns empty (the
 	// two are mutually exclusive at Stage 3, spec §3). The resolver expands * to
-	// the in-scope bindings post-freeze; the parser records "every in-scope
+	// the in-scope bindings; the parser records "every in-scope
 	// binding" without guessing the column list.
 	"return all": {
 		src: "MATCH (n)\nRETURN *",
@@ -1142,7 +1142,7 @@ var mustParse = map[string]struct {
 	},
 	// Stage 8 — multi-type relationship `[r:A|B]`. The two types are recorded
 	// on the binding's LabelSet in textual first-appearance order; the
-	// resolver forms one candidate EdgeKey per type post-freeze. The RETURN
+	// resolver forms one candidate EdgeKey per type. The RETURN
 	// item still types as TypeEdge (a multi-type edge is still a single-hop
 	// edge from the type-interface's perspective; the label-set carries the
 	// widened admissible type set).
@@ -1280,7 +1280,7 @@ var mustParse = map[string]struct {
 	// rejected under Stages 0–8). Under Stage 9 the parameter is
 	// recorded as an ExprUse against a TypeUnknown enclosing type
 	// (a sort-key contributor's role does not commit to a computed
-	// type; the resolver upgrades from the schema post-freeze) with
+	// type; the resolver upgrades from the schema) with
 	// ExprInProjection position (ORDER BY sits over a projection
 	// column). The RETURN item itself is a bare RefProjection.
 	"return order by param": {
@@ -1436,7 +1436,7 @@ var mustParse = map[string]struct {
 	},
 	// Stage 10 — avg stays honest-Unknown for numeric operands (engine-
 	// dependent whether it returns int or float; the resolver upgrades from
-	// the schema post-freeze).
+	// the schema).
 	"avg over unwind int": {
 		src: "UNWIND [1, 2, 3] AS x\nRETURN avg(x)",
 		want: oneBranch(query.Part{
@@ -2027,8 +2027,8 @@ var mustParse = map[string]struct {
 	// pinned-tag TCK does not exercise a $param inside a CREATE inline map
 	// (grep confirmed zero); this shape pins the typed-Create story — the
 	// inline-map miner records PropertyUse{Ref{p, name}} against $name, so
-	// the resolver upgrades $name's type from Person.name via the schema
-	// post-freeze. Replaces with a verbatim corpus entry if a future TCK
+	// the resolver upgrades $name's type from Person.name via the schema.
+	// Replaces with a verbatim corpus entry if a future TCK
 	// bump supplies one.
 	"create with inline-map param": {
 		src: "CREATE (p:Person {name: $name})",
@@ -2047,7 +2047,7 @@ var mustParse = map[string]struct {
 	// expression (grep confirmed zero). The bare $param has no enclosing
 	// arithmetic that would pin a concrete type, so the value expression
 	// types as TypeUnknown at the parser boundary — an honest posture the
-	// resolver upgrades from n.age via the schema post-freeze. The Use
+	// resolver upgrades from n.age via the schema. The Use
 	// records ExprUse{TypeUnknown, ExprInSetValue} — the SET value is a
 	// producer position (value written to the graph), semantically opposite
 	// to a projection column's consumer role, so the position discriminator
@@ -3343,7 +3343,7 @@ func assertReferentialIntegrity(rt *rapid.T, q query.Query, src string) {
 			case query.ExprUse:
 				// Stage 6 §4: an ExprUse carries the enclosing expression's
 				// result type and a projection/predicate discriminator; no Ref
-				// to check. The parameter's own type is inferred post-freeze.
+				// to check. The parameter's own type is inferred later.
 			default:
 				rt.Fatalf("parameter %q has unknown Use variant %T in %q", p.Name, u, src)
 			}

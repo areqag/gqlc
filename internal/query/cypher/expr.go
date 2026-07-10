@@ -157,7 +157,7 @@ func unwindElementType(sourceType query.Type) query.Type {
 // TypeUnknown because the parameter's role is a sort-key contributor,
 // not a computed value — recording the sort key's computed type would
 // be incidental to the parameter's role; TypeUnknown is honest and
-// the resolver upgrades from the schema post-freeze (Stage 9 spec
+// the resolver upgrades from the schema (Stage 9 spec
 // §4.2). savedRefs is snapshotted so the sort key's touched bindings
 // stay out of the part's refs list.
 func (l *listener) mineSortItemParameters(e gen.IOC_ExpressionContext) {

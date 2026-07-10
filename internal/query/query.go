@@ -912,7 +912,7 @@ func (b PathBinding) MarshalJSON() ([]byte, error) {
 // element type of the source expression (TypeInt for `[1,2,3]`, TypeUnknown
 // for `range(1,3)` or `null` or a bare `$param` — the parser records the
 // honest "cannot tell" instead of guessing, and the resolver upgrades from
-// the schema post-freeze). UNWIND is a reading clause distinct from MATCH,
+// the schema). UNWIND is a reading clause distinct from MATCH,
 // so an UnwindBinding is not a graph entity — it has no labels, no
 // endpoints, no EntityKind(). Never nullable at Stage 9: an empty or null
 // source list yields zero rows at runtime, a row-cardinality fact below
@@ -978,7 +978,7 @@ func (b UnwindBinding) MarshalJSON() ([]byte, error) {
 // (kept even when it equals the variable, so a YIELD out AS x is
 // unambiguous at codegen). The resultType is the bridged Stage-6
 // type (TypeInt / TypeFloat / TypeString / TypeUnknown — the last for
-// a NUMBER signature token, whose runtime column type post-freeze
+// a NUMBER signature token, whose runtime column type
 // codegen reads from the registry directly). Nullable mirrors the
 // signature's trailing `?` verbatim.
 //
@@ -1079,7 +1079,7 @@ func (b CallBinding) Procedure() string { return b.procedure }
 
 // SourceField is the signature-declared result column this binding
 // draws from. It equals Variable for a bare `YIELD out`; it differs
-// for `YIELD out AS x`. Always non-empty. Codegen post-freeze reads
+// for `YIELD out AS x`. Always non-empty. Codegen reads
 // SourceField to name the driver-visible column and Variable to name
 // the caller-visible one.
 func (b CallBinding) SourceField() string { return b.sourceField }
@@ -1114,7 +1114,7 @@ func (CallBinding) isBinding() {}
 // source), carrying every field always-emitted. sourceField is
 // always emitted (even when equal to variable) so a rename
 // (`YIELD out AS x`) is unambiguous at the wire. args is
-// omit-when-zero-length (post-freeze convention hk0/fvo
+// omit-when-zero-length (wire convention hk0/fvo
 // established), so a zero-arg CALL serialises byte-identical to
 // the pre-0ig wire.
 func (b CallBinding) MarshalJSON() ([]byte, error) {
@@ -1419,7 +1419,7 @@ func (ExprProjection) isProjection() {}
 // MarshalJSON renders an ExprProjection as a tagged union member discriminated
 // by "kind", carrying its refs, always-emitted result type, and the
 // ContainsAggregate axis (omit-when-false — the campaign convention recorded
-// in the ADR 0008 2026-07-06 amendment note, so pre-freeze goldens whose
+// in the ADR 0008 2026-07-06 amendment note, so earlier goldens whose
 // subtree carries no aggregate stay byte-identical).
 func (p ExprProjection) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
@@ -1498,7 +1498,7 @@ func (f AggregateFunc) String() string {
 // $threshold has two PropertyUses: Ref{Variable: "a", Property: "age"} and
 // Ref{Variable: "b", Property: "age"}. In SKIP $page, $page has one
 // ClauseSlotUse{ClauseSlotSkip}. The resolver judges type unification across
-// uses post-freeze (the parser stays schema-agnostic per ADR 0003); mixed-kind
+// uses (the parser stays schema-agnostic per ADR 0003); mixed-kind
 // uses on one Parameter are not a parser-level conflict.
 type Parameter struct {
 	Name string `json:"name"`
@@ -1642,8 +1642,8 @@ func (p ExprPosition) String() string {
 // ExprUse is a parameter use that appears inside a rich scalar expression
 // (Stage 6). Its own type is not directly bindable to a single property or a
 // clause slot — the expression's result type is what the model carries, and
-// the resolver unifies the parameter's type from the enclosing expression
-// post-freeze. The variant carries the enclosing expression's Stage-6 result
+// the resolver unifies the parameter's type from the enclosing expression.
+// The variant carries the enclosing expression's Stage-6 result
 // type and a position discriminator (a projection column vs a predicate) so
 // the resolver can distinguish uses that participate in aggregation grouping
 // from uses that participate in filtering.
@@ -1683,7 +1683,7 @@ func (ExprUse) isUse() {}
 // MarshalJSON renders an ExprUse as a tagged union member discriminated by
 // "kind", carrying the enclosing type, position, and (fvo per ADR 0008
 // amendment 2026-07-06) the branch-relative Part index. "part" is
-// omit-when-zero-value per the post-freeze wire convention.
+// omit-when-zero-value per the wire convention.
 func (u ExprUse) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Kind          string `json:"kind"`
@@ -1760,9 +1760,9 @@ const (
 // both variants. The tag derives from graph.EntityKind, so it cannot drift from
 // Kind(). Mirrors schema.Schema's determinism discipline: the encoding is fixed
 // and independent of any map iteration order. "optionalGroup" is
-// omit-when-zero-value per the post-freeze wire convention (ay9 per ADR 0008
+// omit-when-zero-value per the wire convention (ay9 per ADR 0008
 // amendment 2026-07-07). "referencedInRequiredBarePattern" is
-// omit-when-false per the same post-freeze convention (5xg per ADR 0008
+// omit-when-false per the same convention (5xg per ADR 0008
 // amendment 2026-07-11).
 func (b NodeBinding) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
@@ -1780,10 +1780,10 @@ func (b NodeBinding) MarshalJSON() ([]byte, error) {
 // tagged-union endpoints. Stage 8: hops is always emitted — null for a
 // single-hop edge (Stages 0..7), a {"min", "max"} object for a variable-length
 // edge — matching the always-emit convention nullable / directed / returnsAll follow.
-// "optionalGroup" is omit-when-zero-value per the post-freeze wire convention
+// "optionalGroup" is omit-when-zero-value per the wire convention
 // (ay9 per ADR 0008 amendment 2026-07-07).
 // "referencedInRequiredBarePattern" is omit-when-false per the same
-// post-freeze convention (5xg per ADR 0008 amendment 2026-07-11). Its true
+// convention (5xg per ADR 0008 amendment 2026-07-11). Its true
 // side is grammatically-unreachable on edges (§2.3); the field ships for wire
 // symmetry with NodeBinding.
 func (b EdgeBinding) MarshalJSON() ([]byte, error) {
@@ -1822,7 +1822,7 @@ func (e InlineEndpoint) MarshalJSON() ([]byte, error) {
 // MarshalJSON renders a PropertyUse as a tagged union member discriminated by
 // "kind", flattening its Ref into sibling "variable" and "property" fields so
 // the use's shape stays one level deep — same posture as the Binding sum.
-// "part" is omit-when-zero-value per the post-freeze wire convention (fvo per
+// "part" is omit-when-zero-value per the wire convention (fvo per
 // ADR 0008 amendment 2026-07-06).
 func (u PropertyUse) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
@@ -1841,7 +1841,7 @@ func (u PropertyUse) MarshalJSON() ([]byte, error) {
 // MarshalJSON renders a ClauseSlotUse as a tagged union member discriminated by
 // "kind". The "slot" tag derives from ClauseSlot.String, so the serialised slot
 // can never drift from Slot(). "part" is omit-when-zero-value per the
-// post-freeze wire convention (fvo per ADR 0008 amendment 2026-07-06).
+// wire convention (fvo per ADR 0008 amendment 2026-07-06).
 func (u ClauseSlotUse) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Kind string `json:"kind"`

@@ -7,7 +7,7 @@
 //
 // The package is dependency-independent of both internal/query and
 // internal/schema so its TypeToken sum can grow (or, for NUMBER, stay a
-// signature-only marker) without touching the query.Type freeze surface.
+// signature-only marker) without touching query.Type.
 // The bridge from TypeToken to query.Type lives in the cypher package (Stage
 // 14 spec §3.2).
 package procsig
@@ -39,8 +39,8 @@ const (
 	// marker that accepts either INTEGER or FLOAT at the argument-typing
 	// site (Call3 scenarios). It never appears as a runtime column type
 	// on the query wire; the cypher-package bridge maps it to
-	// query.TypeUnknown so no NUMBER identity leaks into the freeze
-	// surface (Stage 14 §3.2).
+	// query.TypeUnknown so no NUMBER identity leaks into query.Type
+	// (Stage 14 §3.2).
 	TokenNumber
 )
 

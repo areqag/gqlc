@@ -1022,7 +1022,7 @@ func TestNodeBindingKindReturnsBindingNode(t *testing.T) {
 
 // TestEdgeBindingKindReturnsBindingEdge pins the edge side: an edge binding's
 // Kind() is BindingEdge; its EntityKind() (only on entity bindings, not on
-// PathBinding) is graph.Edge for schema-key formation post-freeze.
+// PathBinding) is graph.Edge for schema-key formation.
 func TestEdgeBindingKindReturnsBindingEdge(t *testing.T) {
 	src := must(query.NewVarEndpoint("a"))
 	tgt := must(query.NewVarEndpoint("b"))
@@ -1569,8 +1569,8 @@ func TestCallBindingMarshalJSON(t *testing.T) {
 }
 
 // TestCallBindingMarshalJSONAlias pins that a YIELD-AS rename keeps
-// sourceField distinct from variable on the wire — codegen post-
-// freeze needs both names to route the driver-visible column into
+// sourceField distinct from variable on the wire — codegen needs
+// both names to route the driver-visible column into
 // the caller-visible one.
 func TestCallBindingMarshalJSONAlias(t *testing.T) {
 	b := must(query.NewCallBinding("x", "test.my.proc", "out", query.TypeInt{}, false))
@@ -1584,8 +1584,8 @@ func TestCallBindingMarshalJSONAlias(t *testing.T) {
 // TestCallBindingMarshalJSONNumberBridgesToUnknown pins the bridge:
 // a signature-time NUMBER token maps to TypeUnknown on the wire
 // (spec §3.2 / Q3 ruling), so no NUMBER identity leaks into
-// query.Type's freeze surface. The registry stays the source of
-// truth for NUMBER's assignable-from semantics post-freeze.
+// query.Type. The registry stays the source of
+// truth for NUMBER's assignable-from semantics.
 func TestCallBindingMarshalJSONNumberBridgesToUnknown(t *testing.T) {
 	b := must(query.NewCallBinding("out", "test.my.proc", "out", query.TypeUnknown{}, true))
 	out, err := json.Marshal(b)

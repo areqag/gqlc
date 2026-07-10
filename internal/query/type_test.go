@@ -9,7 +9,7 @@ import (
 	"github.com/areqag/gqlc/internal/query"
 )
 
-// The Type sum is the freeze-locked type vocabulary the resolver reads (Stage 6
+// The Type sum is the type vocabulary the resolver reads (Stage 6
 // spec §3). Each variant carries a stringer that is the single source of the
 // wire tag, mirroring AggregateFunc / UnionKind.
 
@@ -69,7 +69,7 @@ func TestRefProjectionType(t *testing.T) {
 // TestNewExprUse pins the new Use variant: a $param inside a rich expression
 // records its enclosing projection's result type and the expression position
 // (a projection column vs a predicate). Its own type is inferred by the
-// resolver from the enclosing expression, post-freeze.
+// resolver from the enclosing expression.
 func TestNewExprUse(t *testing.T) {
 	u := query.NewExprUse(query.TypeInt{}, query.ExprInProjection)
 	require.Equal(t, query.TypeInt{}, u.EnclosingType())
@@ -147,7 +147,7 @@ func TestClauseSlotUseMarshalJSON(t *testing.T) {
 
 // TestNewPropertyUseAt pins the widened Use variant per ADR 0008 amendment
 // 2026-07-06: the Part axis carries through the constructor, the accessor,
-// and the wire shape as an omit-when-zero key (post-freeze convention:
+// and the wire shape as an omit-when-zero key (wire convention:
 // additive axes emit omit-when-zero-value).
 func TestNewPropertyUseAt(t *testing.T) {
 	u := query.NewPropertyUseAt(query.Ref{Variable: "a", Property: "title"}, 1)
@@ -225,7 +225,7 @@ func TestExprProjectionMarshalJSON(t *testing.T) {
 // TestNewExprProjectionWithAggregateTrue pins the widened Stage-6 variant per
 // ADR 0008 amendment 2026-07-06: the ContainsAggregate axis carries through
 // the constructor, the accessor, and the wire shape as an omit-when-false key
-// (post-freeze convention: additive axes emit omit-when-zero-value).
+// (wire convention: additive axes emit omit-when-zero-value).
 // Complements TestExprProjectionMarshalJSON (which pins the
 // containsAggregate=false zero-value default as an ABSENT key — that test
 // stays verbatim).

@@ -43,7 +43,7 @@ var (
 	// imported name) — the operative semantic is "binding collision in scope,"
 	// not strictly node/edge/path (Q4 ruling, matching the Stage-9 unwind-vs-
 	// unwind precedent in build.go:114-121). The message text mirrors that
-	// broader semantic; the sentinel identity (not the text) is the frozen
+	// broader semantic; the sentinel identity (not the text) is the stable
 	// contract.
 	ErrVariableKindConflict = errors.New("variable bound with conflicting kinds")
 
@@ -53,7 +53,7 @@ var (
 	// (WHERE / EXISTS / rich-expression predicate); using one as a scalar
 	// column (MATCH (n) RETURN (n)-[]->()) is SyntaxError:UnexpectedSyntax per
 	// the TCK (Pattern1 [22]/[23]). Stage 11 adds the fail-site; the sentinel
-	// is freeze-durable — pattern predicates never become legal projection
+	// is durable — pattern predicates never become legal projection
 	// atoms.
 	ErrPatternInProjection = errors.New("pattern predicate in projection position")
 

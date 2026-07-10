@@ -197,7 +197,7 @@ var skiplist = map[string]skipCategory{
 
 	// RETURN * with nothing in scope expands to zero columns: a scope/value error
 	// (NoVariablesInScope), not a parse-shape one. We record ReturnsAll and the
-	// resolver expands * post-freeze.
+	// resolver expands *.
 	"[2] Fail when using RETURN * without variables in scope": catResultAssertionOnly,
 	// RETURN 1 AS a, 2 AS a: duplicate column names are a value-level result-shape
 	// check (ColumnNameConflict); Returns is duplicate-preserving (Stage-0 rule),
@@ -360,7 +360,7 @@ var skiplist = map[string]skipCategory{
 
 	// CREATE-side pattern constraints (Create2 [18]-[22]): an edge must have
 	// exactly one type, an unambiguous direction, and no hop range. Codegen
-	// post-freeze reads StatementKind and could enforce these at generation
+	// reads StatementKind and could enforce these at generation
 	// time; today the engine raises them.
 	"[18] Fail when creating a relationship without a type":          catWriteShapeConstraint,
 	"[19] Fail when creating a relationship without a direction":     catWriteShapeConstraint,
