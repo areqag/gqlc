@@ -37,19 +37,19 @@ Writes (R6), `CALL` / `YIELD` (R7), path bindings (`PathBinding`),
 continue to route to `ErrOutOfR0Scope`. ~~The same-Part regime (b)
 nullability under-approximation surviving from R4 (§7.5 Class B, gap
 tracked on gqlc-5xg) is unchanged at R5.~~ [closed 2026-07-10 by 5xg
-(PRs #132/#133/#134, `docs/specs/unfreeze-5xg-required-bare-ref.md`):
+(PRs #132/#133/#134, `docs/specs/model-change-5xg-required-bare-ref.md`):
 R4's `demoteNullableInPlace` now reads the widened
 `ReferencedInRequiredBarePattern()` axis; R5 inherits the closure
 unchanged. Edge-side non-bare missing-witness residual filed as
 gqlc-0kq.] The Class A OPTIONAL-clause-
 sibling under-approximation ~~(gap tracked on gqlc-ay9) is also
 unchanged at R5~~ was **closed by ay9** (2026-07-10, PRs #127/#128/#129;
-`docs/specs/unfreeze-ay9-optional-group.md`); residual cross-Part
+`docs/specs/model-change-ay9-optional-group.md`); residual cross-Part
 carry gap filed as gqlc-984. ~~Neither class is closable without a
-model unfreeze (owner decision pending); Class B (gqlc-5xg) is the
-sole remaining unfreeze at R5;~~ [closed 2026-07-10: both Class A
+model change (owner decision pending); Class B (gqlc-5xg) is the
+sole remaining change at R5;~~ [closed 2026-07-10: both Class A
 (ay9) and Class B (5xg) landed as additive `Binding` axes; no
-remaining nullability unfreeze at R5.] R5 does not contort the resolver
+remaining nullability change at R5.] R5 does not contort the resolver
 around either.
 
 R5 introduces **two new sentinels**: **`ErrUnionColumnMismatch`**
@@ -287,7 +287,7 @@ Part each Use belongs to by walking the Parts' projections/predicates
 in Part order and matching by object identity.
 
 **Judgment call — Use-to-Part attribution via structural walk.** The
-parser could have carried a `PartIndex` on each Use, but the frozen
+parser could have carried a `PartIndex` on each Use, but the
 model does not. The resolver walks each Part's projections and
 predicates, and for every encountered `Ref` looks up its enclosing
 Part's binding table. A parameter's Use whose witness computation
@@ -537,7 +537,7 @@ top-level `Columns` list is populated from branch 0 only, and the
 `Distinct` axis records the fold.
 
 Multi-Part goldens have their `Bindings` and `Returns` per Part on the
-`Query.Query` side (that is the frozen model's wire); the resolver's
+`Query.Query` side (that is the query model's wire); the resolver's
 `ValidatedQuery.Columns` reflects only the **final Part of branch 0**.
 
 ---
@@ -617,13 +617,13 @@ driver (§4.1.1).
 | `ExprProjection` typed `TypeList{TypeNode\|TypeEdge}` | `ErrOutOfR0Scope` | R-later |
 | `ExprUse` at `ExprInSetValue` / `ExprInDeleteTarget` | `ErrOutOfR0Scope` | R6 |
 | Property projection on a variable-length edge binding | `ErrOutOfR0Scope` | R-later |
-| Same-Part regime (b) nullability under-demote | ~~silently under-demoted (§4.6)~~ **closed** (5xg, 2026-07-10) | ~~gqlc-5xg (Class B, model unfreeze)~~ **closed** by 5xg unfreeze + widening (`docs/specs/unfreeze-5xg-required-bare-ref.md`); edge-side non-bare missing-witness residual filed as gqlc-0kq |
-| OPTIONAL-clause-sibling nullability under-demote | ~~silently under-demoted (§4.6)~~ **closed** (ay9, 2026-07-10) | ~~gqlc-ay9 (Class A, model unfreeze)~~ **closed** by ay9 unfreeze + widening (`docs/specs/unfreeze-ay9-optional-group.md`); residual cross-Part carry gap filed as gqlc-984 |
+| Same-Part regime (b) nullability under-demote | ~~silently under-demoted (§4.6)~~ **closed** (5xg, 2026-07-10) | ~~gqlc-5xg (Class B, model change)~~ **closed** by 5xg change + widening (`docs/specs/model-change-5xg-required-bare-ref.md`); edge-side non-bare missing-witness residual filed as gqlc-0kq |
+| OPTIONAL-clause-sibling nullability under-demote | ~~silently under-demoted (§4.6)~~ **closed** (ay9, 2026-07-10) | ~~gqlc-ay9 (Class A, model change)~~ **closed** by ay9 change + widening (`docs/specs/model-change-ay9-optional-group.md`); residual cross-Part carry gap filed as gqlc-984 |
 
 The R4 §7.4 explanation stands: cross-WITH regime (b) is R5's business
 and is closed by §4.6 without a model change; ~~same-Part regime (b) and
 Class A both remain safe under-approximations gated on the two model-
-unfreeze beads.~~ [closed 2026-07-10: both Class A (ay9) and Class B
+change beads.~~ [closed 2026-07-10: both Class A (ay9) and Class B
 / same-Part regime (b) (5xg) landed as additive `Binding` axes;
 neither remains a safe under-approximation at R5. Residual cross-
 Part carry gap filed as gqlc-984 (ay9) and edge-side non-bare
@@ -882,7 +882,7 @@ end-of-query on the collected witnesses.
 **Actual rule (post-fvo) — lexical-Part witness.** `query.Query`'s
 `Parameter.Uses` slice carries a Ref (variable + optional
 property) AND a Part index (fvo per ADR 0008 amendment
-2026-07-06 — see `docs/specs/unfreeze-fvo-use-part.md`). The
+2026-07-06 — see `docs/specs/model-change-fvo-use-part.md`). The
 resolver's `witnessAcrossScopes` reads `u.Part()` and witnesses
 against `branchScopes[u.Part()]` — the scope of the Part the
 parser attributed the Use to at emission time. Under UNION the
@@ -890,7 +890,7 @@ parser attributed the Use to at emission time. Under UNION the
 cross-branch fallback at the same Part index on
 `ErrUnknownProperty` (see fvo spec §7.2.2 for the position
 cursor + fallback machinery that recovers per-Use branch
-attribution from the frozen query model). If the scope does not
+attribution from the query model). If the scope does not
 contain the Ref's variable, the Use contributes zero witnesses
 (treated as ResolvedUnknown by the unifier). If the scope
 contains the variable but the property lookup fails,
@@ -907,7 +907,7 @@ though Part 1 is where the Use lexically lives. The post-fvo rule
 witnesses ONLY against `branchScopes[u.Part()]` — the lexical
 Part — and now fires `ErrUnknownProperty` honestly. The
 discriminating fixture at §6.3 (`parameter_across_with_alias_shadow_reversed.cypher`)
-pins the rejection; see `docs/specs/unfreeze-fvo-use-part.md` §7.4.
+pins the rejection; see `docs/specs/model-change-fvo-use-part.md` §7.4.
 
 `ClauseSlotUse` and `ExprUse` remain Part-agnostic in their type
 witness — the Part axis on their records is a lexical-attribution
@@ -940,7 +940,7 @@ possible later stage; R5 does not do it.
   under `invalid/`) — Part 1's `a: Person` lacks `title`;
   lexical-Part witness fires `ErrUnknownProperty`. This is the
   post-fvo close-out of the pre-fvo any-scope-admits gap; see
-  `docs/specs/unfreeze-fvo-use-part.md` §7.4.
+  `docs/specs/model-change-fvo-use-part.md` §7.4.
 
 ### 4.3 UNION column compatibility
 
@@ -1194,7 +1194,7 @@ The grouping-key algorithm at R5:
 computeGroupingKeys(part query.Part) []GroupingKey =
     // Grouping applies iff at least one ReturnItem is an
     // AggregateProjection. ExprProjection cannot signal aggregate
-    // presence in the frozen model (§4.5.3.1), so it is not a
+    // presence in the query model (§4.5.3.1), so it is not a
     // grouping trigger at R5.
     hasAggregate := false
     for each item in part.Returns:
@@ -1230,7 +1230,7 @@ aggregate (`count(n) + 1`) is dropped at construction. The parser test
 concretely: `RETURN count(n) + 1` produces
 `ExprProjection{[Ref{n}], TypeInt}` — refs and result type only, no
 aggregate visibility. Because a resolver cannot distinguish
-aggregate-carrying from aggregate-free ExprProjection using the frozen
+aggregate-carrying from aggregate-free ExprProjection using the
 model alone, R5 uniformly treats every `ExprProjection` as a
 non-grouping-key column. See §4.5.3 for the blast-radius argument and
 the follow-up beads that close this.
@@ -1260,7 +1260,7 @@ Per parser aggregate-kind-rich-exprs §1.3 and gqlc-gyw's notes: an
 the projection as `ExprProjection{refs, type}` with the aggregate kind
 invisible on the wire.
 
-**§4.5.3.1 What the frozen model records for a rich residual — the
+**§4.5.3.1 What the query model records for a rich residual — the
 classifier is unconditional.** The parser's Stage-6 residual classifier
 `classifyRichExpression` (`internal/query/cypher/typing.go:857-877`)
 unconditionally returns `NewExprProjection(refs, t)` for every
@@ -1283,7 +1283,7 @@ the aggregate structure is invisible to the wire regardless of whether
 the projection has an AS alias.
 
 **Corollary: the gqlc-gyw re-parse strategy is not implementable
-against the frozen model at R5.** Any re-parse of the residual text —
+against the query model at R5.** Any re-parse of the residual text —
 whether via a synthesised `RETURN <text>` (Option P2), a direct
 `ParseExpression` API (Option P1), or reading the residual off a
 future `ExprProjection.OriginalText` axis (Shape A) — feeds the same
@@ -1295,7 +1295,7 @@ the walker. This is orthogonal to alias status and to text-span
 recovery — the discrimination capability requires a **parser-side
 change** that emits either an explicit `AggregateProjection` for
 nested-aggregate residuals or an additive `ContainsAggregate` bit
-(Shape B). Neither exists at R5 freeze; both are follow-up beads.
+(Shape B). Neither exists at R5 close-out; both are follow-up beads.
 
 **§4.5.3.2 The R5 posture: uniform-exclude for every
 `ExprProjection` residual.**
@@ -1373,10 +1373,10 @@ by inspection alone (any Part whose `Returns` mixes at least one
   admitted under-approximation, filed as an outstanding refinement
   bead, not as a permanent posture.
 
-**§4.5.3.3 The unfreeze options — parser-side discrimination is
+**§4.5.3.3 The change options — parser-side discrimination is
 required.**
 
-Per ADR 0008 post-freeze revision protocol, additive axes are
+Per ADR 0008 later additions convention, additive axes are
 in-protocol. Two shape families could close the gap; both live at the
 parser boundary because that is where classification happens. Shape C
 (text-on-`ReturnItem`) is retired: this round's B7 finding shows that
@@ -1399,10 +1399,10 @@ no re-parse, no text, no unbound-ref problem. Independent of `Type`
 and of AS alias. **Cons:** this is the axis gqlc-gyw's notes labelled
 "the escape hatch"; adopting it accepts that the "re-parse the text
 span" strategy was based on a mistaken assumption about what the
-frozen model preserves. Given B7 (parser drops aggregate structure at
+query model preserves. Given B7 (parser drops aggregate structure at
 classification, so no re-parse recovers it), the escape hatch is the
 correctly-scoped fix, not a retreat — it directly addresses the
-information the frozen model does not carry.
+information the query model does not carry.
 
 **Shape A/A′ — parser refines the classifier to emit
 `AggregateProjection` for nested-aggregate residuals** (parser-side
@@ -1425,7 +1425,7 @@ Shape B.
    the discrimination is needed, no downstream semantic widening.
    Adopts the gqlc-gyw-documented escape hatch honestly: B7 evidence
    proves the re-parse strategy is not implementable against the
-   frozen model, so the "escape hatch" characterisation was itself
+   query model, so the "escape hatch" characterisation was itself
    under-specified — the bit is the correctly-scoped fix, not a
    retreat from a working strategy.
 2. **Shape A/A′** — second choice. Correct but a semantic widening of
@@ -1443,7 +1443,7 @@ that `classifyRichExpression` dropped at classification.
   simple, deterministic, no re-parse. Preserved-vs-violated split as
   §4.5.3.2 pins.
 
-- **File a follow-up model unfreeze bead** — "Model: add
+- **File a follow-up model change bead** — "Model: add
   `ExprProjection.ContainsAggregate bool` (Shape B per
   resolver-stage-r5 §4.5.3.3), populated by the parser's
   `classifyRichExpression` walk of the ANTLR sub-tree for aggregate-
@@ -1463,7 +1463,7 @@ that `classifyRichExpression` dropped at classification.
 
 The gqlc-gyw notes committed to "resolver-side re-parse of the
 projection's original text span". This round-2 review discovered that
-the strategy is not implementable against the frozen model, for two
+the strategy is not implementable against the query model, for two
 independent reasons:
 
 - **B7a — synthesise-and-parse (Option P2) breaks on unbound refs.**
@@ -1733,8 +1733,8 @@ discards the second occurrence within one Part) persists; the Class B
 fixture in R4 §7.5.5 remains a documented under-approximation at R5
 too. Owner decision on gqlc-5xg is still pending. If gqlc-5xg lands,
 R5's `demoteNullable` reads the new axis; no R5-spec-level revision
-needed beyond that.~~ Closed by 5xg unfreeze + widening (PRs
-#132/#133/#134, `docs/specs/unfreeze-5xg-required-bare-ref.md`). The
+needed beyond that.~~ Closed by 5xg change + widening (PRs
+#132/#133/#134, `docs/specs/model-change-5xg-required-bare-ref.md`). The
 gap-closure story from R4 §7.5 held: 5xg added a
 `ReferencedInRequiredBarePattern()` axis to
 `NodeBinding`/`EdgeBinding` (set by a resolver-side parse-tree pre-
@@ -1747,8 +1747,8 @@ it).
 
 **§4.6.2 Class A OPTIONAL-clause-sibling gap ~~still under-approximates
 at R5~~ closed by ay9 (2026-07-10).** ~~Same story: gqlc-ay9. R5 does
-not close Class A.~~ Closed by ay9 unfreeze + widening (PRs
-#127/#128/#129, `docs/specs/unfreeze-ay9-optional-group.md`). R5's
+not close Class A.~~ Closed by ay9 change + widening (PRs
+#127/#128/#129, `docs/specs/model-change-ay9-optional-group.md`). R5's
 `demoteNullable` reads the widened `demoteNullableInPlace` unchanged
 — no R5-spec-level revision beyond that. Residual cross-Part carry
 gap (WITH-boundary group membership through `branchState`) is filed
@@ -1778,7 +1778,7 @@ return distinct
 ```
 
 This computation runs after all branches resolve their columns, before
-`Resolve` returns. It reads directly from `q.Query`'s frozen model
+`Resolve` returns. It reads directly from `q.Query`'s query model
 without additional binding table access. Deterministic; short-circuit-
 safe (no fail-sites).
 
@@ -2344,10 +2344,10 @@ R4's out-of-scope table survives with revisions:
 | Unlabelled node with a multi-candidate set that survives Phase B fixed-point | `ErrAmbiguousBinding` | (unchanged) |
 | Parameter Uses that do not unify | `ErrParameterTypeConflict` | (unchanged) |
 | UNION branches disagree on column count, names, types, or nullability | `ErrUnionColumnMismatch` | **R5 (this stage)** |
-| Nullability upgrades (regime (b), same-Part re-MATCH — Class B: missing-witness model gap) | ~~silently under-demoted~~ **closed** (5xg, 2026-07-10) | ~~gqlc-5xg (model unfreeze)~~ **closed** by 5xg unfreeze + widening (`docs/specs/unfreeze-5xg-required-bare-ref.md`); edge-side non-bare missing-witness residual filed as gqlc-0kq |
-| Nullability upgrades (OPTIONAL-clause-sibling — Class A: missing-group-membership model gap) | ~~silently under-demoted~~ **closed** (ay9, 2026-07-10) | ~~gqlc-ay9 (model unfreeze)~~ **closed** by ay9 unfreeze + widening (`docs/specs/unfreeze-ay9-optional-group.md`); residual cross-Part carry gap filed as gqlc-984 |
+| Nullability upgrades (regime (b), same-Part re-MATCH — Class B: missing-witness model gap) | ~~silently under-demoted~~ **closed** (5xg, 2026-07-10) | ~~gqlc-5xg (model change)~~ **closed** by 5xg change + widening (`docs/specs/model-change-5xg-required-bare-ref.md`); edge-side non-bare missing-witness residual filed as gqlc-0kq |
+| Nullability upgrades (OPTIONAL-clause-sibling — Class A: missing-group-membership model gap) | ~~silently under-demoted~~ **closed** (ay9, 2026-07-10) | ~~gqlc-ay9 (model change)~~ **closed** by ay9 change + widening (`docs/specs/model-change-ay9-optional-group.md`); residual cross-Part carry gap filed as gqlc-984 |
 | `ExprProjection` residual mixed with `AggregateProjection` in the same Part's Returns — grouping-key discrimination gap | silently under-grouped (uniform-exclude posture) | §4.5.3.3 follow-up bead (Shape B `ContainsAggregate` parser-side bit) |
-| Cross-Part parameter Use where the pre-fvo resolver witnesses the Use against every Part's binding tables independently and admits on any scope's success, letting a same-name Part other than the lexical one supply the witness — any-scope-admits gap (§4.2.4) | **closed by gqlc-fvo (2026-07-06)**: `docs/specs/unfreeze-fvo-use-part.md` threads `Part` on every `Use` and the resolver's `witnessAcrossScopes` witnesses ONLY against `branchScopes[u.Part()]` — the lexical Part. Under UNION the `witnessInBranch` dispatcher wraps this with a same-Part cross-branch fallback (fvo spec §7.2.2, PR #118) — two residuals of that fallback (same-Part UNION boundary ambiguity, UNION-later-Part spurious rejection) are filed as **gqlc-qcc** for a future cycle. Residual WITH-aliased-projection shadow (fvo spec §7.6.1) is filed as **gqlc-4w5** for a future scope-attribution cycle. | closed |
+| Cross-Part parameter Use where the pre-fvo resolver witnesses the Use against every Part's binding tables independently and admits on any scope's success, letting a same-name Part other than the lexical one supply the witness — any-scope-admits gap (§4.2.4) | **closed by gqlc-fvo (2026-07-06)**: `docs/specs/model-change-fvo-use-part.md` threads `Part` on every `Use` and the resolver's `witnessAcrossScopes` witnesses ONLY against `branchScopes[u.Part()]` — the lexical Part. Under UNION the `witnessInBranch` dispatcher wraps this with a same-Part cross-branch fallback (fvo spec §7.2.2, PR #118) — two residuals of that fallback (same-Part UNION boundary ambiguity, UNION-later-Part spurious rejection) are filed as **gqlc-qcc** for a future cycle. Residual WITH-aliased-projection shadow (fvo spec §7.6.1) is filed as **gqlc-4w5** for a future scope-attribution cycle. | closed |
 
 **Silently accepted (not routed anywhere):**
 
@@ -2380,7 +2380,7 @@ escape hatch." R5 as this spec scopes it:
   algorithm.
 - **`gqlc-gyw` re-parse contract:** NOT implemented at R5. Round-2
   evidence (§4.5.3.4) shows the re-parse strategy is not implementable
-  against the frozen model — `classifyRichExpression` (typing.go:
+  against the query model — `classifyRichExpression` (typing.go:
   857-877) drops aggregate structure at classification, so no
   resolver-side re-parse recovers it, regardless of P1/P2/text-span
   mechanic. R5 ships with uniform-exclude of every `ExprProjection`
@@ -2422,13 +2422,13 @@ top-level aggregate, `hasAggregate` false — the residual is opaque);
 the results agree by construction (see
 `aggregate_with_expr_residual.cypher` at §6.3).
 
-#### 7.1.2 The frozen-model gap, stated honestly
+#### 7.1.2 The model gap, stated honestly
 
 ~~R4 recorded two gaps (gqlc-ay9, gqlc-5xg).~~ [closed 2026-07-10:
 both R4-recorded gaps landed as additive `Binding` axes — gqlc-ay9
-via PRs #127/#128/#129 (`docs/specs/unfreeze-ay9-optional-group.md`;
+via PRs #127/#128/#129 (`docs/specs/model-change-ay9-optional-group.md`;
 residual gqlc-984) and gqlc-5xg via PRs #132/#133/#134
-(`docs/specs/unfreeze-5xg-required-bare-ref.md`; residual gqlc-0kq).]
+(`docs/specs/model-change-5xg-required-bare-ref.md`; residual gqlc-0kq).]
 R5 discovers one new gap distinct from both (the R5 gap is
 unaffected by either R4 closure):
 
@@ -2445,12 +2445,12 @@ unaffected by either R4 closure):
   parser_test.go:1320-1324 pins the shape. Consequence: no
   resolver-side re-parse can distinguish `count(n) + 1` from `n.age
   + 1`; gqlc-gyw's re-parse strategy is not implementable against
-  the frozen model (§4.5.3.4). Distinct from ~~gqlc-ay9 (missing group
+  the query model (§4.5.3.4). Distinct from ~~gqlc-ay9 (missing group
   membership on `Binding`) and gqlc-5xg (missing witness on `Binding`
   after mergeBinding)~~ the two R4 nullability gaps that landed at
   cycle-5 close-out (both closed 2026-07-10: gqlc-ay9 via
-  `docs/specs/unfreeze-ay9-optional-group.md`; gqlc-5xg via
-  `docs/specs/unfreeze-5xg-required-bare-ref.md`). This gap sits at
+  `docs/specs/model-change-ay9-optional-group.md`; gqlc-5xg via
+  `docs/specs/model-change-5xg-required-bare-ref.md`). This gap sits at
   the parser's classification boundary and is closed by a parser-
   side change (Shape B, §4.5.3.3).
 
@@ -2474,7 +2474,7 @@ unaffected by either R4 closure):
   fixture exercises the failure shape (§6.3 deliberately excludes
   mixed-shape residuals; §4.5.3.5).
 
-#### 7.1.4 The unfreeze options (following §4.5.3.3)
+#### 7.1.4 The change options (following §4.5.3.3)
 
 Two shape candidates for the residual-discrimination gap, ranked:
 
@@ -2495,7 +2495,7 @@ text-based recovery cannot re-materialise the aggregate structure
 dropped by `classifyRichExpression` at classification.
 
 R5 spec commits to Shape B as the recommendation. Owner still holds
-merge authority for the unfreeze PR, but reviews a specific
+merge authority for the model-change PR, but reviews a specific
 recommendation, not a menu — per the R4 §7.5.5 precedent.
 
 #### 7.1.5 Recommendation
@@ -2519,7 +2519,7 @@ Rationale:
   `ExprProjection`); the follow-up is a normal escalation, not an
   ADR supersedure. No parser-API follow-up (P1) is needed under
   fix 4 — the resolver does not re-parse at R5, and under Shape B it
-  does not re-parse post-unfreeze either; the discrimination bit is
+  does not re-parse post-change either; the discrimination bit is
   read directly. The round-1 P1 follow-up bead is RETIRED.
 
 **Follow-up bead — parser-side discrimination (Shape B):**
@@ -2535,15 +2535,15 @@ Rationale:
   `AggregateProjection`, semantic widening of the sum variant)."
   Independent of ~~gqlc-ay9 / gqlc-5xg~~ the two R4 nullability
   unfreezes (both closed 2026-07-10; see
-  `docs/specs/unfreeze-ay9-optional-group.md` and
-  `docs/specs/unfreeze-5xg-required-bare-ref.md`). Dependency:
+  `docs/specs/model-change-ay9-optional-group.md` and
+  `docs/specs/model-change-5xg-required-bare-ref.md`). Dependency:
   gqlc-0mx.7 (R5 code
   cycle) at close; blocks the resolver R5 grouping-key refinement PR.
 
 **No parser-API bead (P1) — retired.** Round 1 proposed
 `cypher.ParseExpression` as a follow-up parser API for resolver-side
 re-parse. B7 evidence shows the re-parse strategy is not implementable
-against the frozen model; the parser API alone would not close the
+against the query model; the parser API alone would not close the
 gap. Shape B (a parser-side discrimination bit) closes it directly;
 `ParseExpression` is not needed at R5 or after Shape B lands.
 
@@ -2592,7 +2592,7 @@ citations below name the file:line the claim rests on.
   values.
 - **`ExprProjection` struct with `refs` and `resultType` fields only**
   — `internal/query/query.go:1171-1174`. No original-text axis and no
-  aggregate-content bit at freeze — the boundary that produces
+  aggregate-content bit at Stage 14 — the boundary that produces
   §4.5.3.2's gap.
 - **`classifyRichExpression` drops aggregate structure at
   classification** — `internal/query/cypher/typing.go:857-877` (the
@@ -2610,7 +2610,7 @@ citations below name the file:line the claim rests on.
   [ref.name] { ErrUnboundVariable }`). §4.5.3.4 relies on this: any
   resolver-side `RETURN " + item.Name"` synthesise-and-parse fails
   the sweep as soon as the residual carries a Ref, so P2 is
-  unimplementable against the frozen surface without ref
+  unimplementable against `query.Query` without ref
   scaffolding (and even with scaffolding, `classifyRichExpression`
   drops the aggregate — see the two prior bullets).
 - **`ExprProjection.Refs()`, `ExprProjection.Type()`** —
@@ -2658,9 +2658,9 @@ citations below name the file:line the claim rests on.
   (§4.6.1).~~ [closed 2026-07-10 by 5xg: rather than change
   `mergeBinding`, 5xg adds a `ReferencedInRequiredBarePattern()`
   axis set by a resolver-side parse-tree pre-pass. The
-  merge-rule shape stays frozen; the axis captures the second-
+  merge-rule shape stays stable; the axis captures the second-
   reference fact `mergeBinding` discards. See
-  `docs/specs/unfreeze-5xg-required-bare-ref.md` §5-§7. Edge-side
+  `docs/specs/model-change-5xg-required-bare-ref.md` §5-§7. Edge-side
   non-bare missing-witness residual filed as gqlc-0kq.]
 - **Query is builder-maintained, not smart-constructor-guarded** —
   parser Stage 4 §3 lines 141-160 documents this posture (exported
@@ -2688,8 +2688,8 @@ citations below name the file:line the claim rests on.
 - **`ResolvedProperty.Nullable`** —
   `internal/resolver/validated.go:106-109`. §4.3 nullability sub-rule
   reads this.
-- **ADR 0008 §Post-freeze revision protocol** —
-  `docs/adr/0008-query-model-freeze-resolver-api.md:143-169`. §4.5.3.3
+- **ADR 0008 §Additions since Stage 14** —
+  `docs/adr/0008-query-model-surface-resolver-api.md:143-169`. §4.5.3.3
   reads.
 - **ADR 0009 R5 line** —
   `docs/adr/0009-resolver-test-first-staged-build.md:126-131`.
@@ -2705,8 +2705,8 @@ citations below name the file:line the claim rests on.
   `docs/specs/cypher-query-parser-aggregate-kind-rich-exprs.md:99-207`.
 - **R4 spec §7.4 item 1 (cross-WITH regime (b) hand-off to R5)** —
   `docs/specs/resolver-stage-r4.md:1220-1231`.
-- **R4 spec §7.5 template (openCypher semantics → frozen-model gap →
-  quantified loss → unfreeze options → recommendation)** —
+- **R4 spec §7.5 template (openCypher semantics → model gap →
+  quantified loss → change options → recommendation)** —
   `docs/specs/resolver-stage-r4.md:1270-1542`. §7.1 above follows this
   template.
 
@@ -2767,9 +2767,9 @@ of scope of this document. The spec is done when:
    - ~~gqlc-ay9 and gqlc-5xg remain OPEN; R5 does not close them.~~
      [closed 2026-07-10: both landed as additive `Binding` axes
      (ay9: `OptionalGroup`, PRs #127/#128/#129,
-     `docs/specs/unfreeze-ay9-optional-group.md`; 5xg:
+     `docs/specs/model-change-ay9-optional-group.md`; 5xg:
      `ReferencedInRequiredBarePattern`, PRs #132/#133/#134,
-     `docs/specs/unfreeze-5xg-required-bare-ref.md`). R5 inherits
+     `docs/specs/model-change-5xg-required-bare-ref.md`). R5 inherits
      both closures unchanged. Residuals filed as gqlc-984 (ay9)
      and gqlc-0kq (5xg).]
    - gqlc-gyw closes (R5 admits AggregateProjection; the residual-

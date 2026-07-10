@@ -209,7 +209,7 @@ Stage 2 closes when all of the following hold:
    "Nullable" entry (stage-2-prep), AGENTS.md "Workflow: stacked branches"
    section (stage-2-prep), this spec doc (stage-2-docs).
 5. Beads: `gqlc-s2t` closed. `gqlc-lqm` (resolver-side flow-typing) filed
-   with dependencies on freeze + resolver-exists + Stage 4 clause
+   with dependencies on Stage 14 + resolver-exists + Stage 4 clause
    structure.
 
 ---

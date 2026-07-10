@@ -4,7 +4,7 @@ The implementation brief for Stage 11 of the Cypher implementation of
 `query.Parser`. Eleventh model evolution after Stage 10 per ADR 0004
 (test-first, evolving until feature-complete), under the curation
 discipline of ADR 0003 and the type-interface boundary of ADR 0005.
-Stage 11 is the sixth stage of the ADR-0007 pre-freeze expansion beyond
+Stage 11 is the sixth stage of the ADR-0007 before Stage 14 expansion beyond
 the read core. It **completes the predicate-expression surface**: the
 four list quantifiers (`ALL` / `ANY` / `NONE` / `SINGLE`), existential
 subqueries (`EXISTS { ... }`), and — folded in from the parallel bead
@@ -231,7 +231,7 @@ None of the four match: a pattern predicate at projection position is
 not a clause, parameter, unbound name, or kind conflict — it is a
 position-shape violation. Rather than overload one of the four with
 a fifth meaning, Stage 11 adds a fifth sentinel that is
-freeze-durable (pattern predicates never become legal projection
+durable (pattern predicates never become legal projection
 atoms; the openCypher grammar admits them only inside boolean
 positions). The sentinel set grows from four to five.
 

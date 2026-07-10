@@ -1,6 +1,6 @@
-# Model unfreeze — required-bare-pattern re-reference on Binding
+# Model change — required-bare-pattern re-reference on Binding
 
-The implementation brief for cycle **gqlc-5xg** of the model-unfreeze
+The implementation brief for cycle **gqlc-5xg** of the model-additions
 campaign (Cycle 5, after hk0 / fvo / 0ig / ay9): an additive
 `ReferencedInRequiredBarePattern bool` axis on `query.NodeBinding`
 and `query.EdgeBinding`, populated parser-side by `mergeBinding`'s
@@ -18,22 +18,22 @@ is byte-identical under the campaign's omit-when-false convention
 (ADR 0008 hk0 amendment).
 
 This brief is the **contract for the whole gqlc-5xg cycle**: it spans
-the spec PR (this file), the unfreeze PR (model + parser + ADR 0008
+the spec PR (this file), the model-change PR (model + parser + ADR 0008
 amendment + parser-pin and parser-golden verification; resolver
 untouched and green), the resolver-widening PR (bare-ref demotion in
 `demoteNullableInPlace`; zero existing resolver goldens rebaseline,
 four new fixtures land), and a docs-errata PR retiring the
 "silently under-demoted / gqlc-5xg" rows across the R4–R7 stage
-specs. All code PRs land under ADR 0008's post-freeze revision
+specs. All code PRs land under ADR 0008's later revision
 protocol — additive-only, dated amendment, golden rebaseline whose
 diff shows only the new surface.
 
-**Class B is the last outstanding planned unfreeze bead.** ay9 closed
+**Class B is the last outstanding planned change bead.** ay9 closed
 Class A (OPTIONAL-clause-sibling gap) on 2026-07-10 by adding the
 `OptionalGroup` axis and widening the resolver to a group-closure
 fixed point. 5xg closes Class B (same-Part second-reference gap) by
 recording the required-bare-pattern re-reference on the binding it
-targets — the missing-witness content the frozen model discarded at
+targets — the missing-witness content the query model discarded at
 `mergeBinding` — and widening the resolver to demote any binding
 carrying that flag. The two axes are orthogonal: a binding can be
 group-demoted (ay9) AND bare-ref-demoted (5xg) simultaneously; both
@@ -46,9 +46,9 @@ without ordering constraints (§8.1).
 
 Spec cycle (Cycle 1) — this PR:
 
-- `docs/specs/unfreeze-5xg-required-bare-ref.md` — this file.
+- `docs/specs/model-change-5xg-required-bare-ref.md` — this file.
 
-Unfreeze cycle (Cycle 2, follow-up PR):
+Cycle ( 2, follow-up PR):
 
 - `internal/query/query.go` — one additive field
   `referencedInRequiredBarePattern bool` on `NodeBinding`
@@ -110,7 +110,7 @@ Unfreeze cycle (Cycle 2, follow-up PR):
   query-shape classes, none same-Part-bare-re-referencing), so no
   golden gains the new key. §4.4 pins the discovery method and the
   0-file result; a rebaseline touching any golden FAILS review.
-- `docs/adr/0008-query-model-freeze-resolver-api.md` — one dated
+- `docs/adr/0008-query-model-surface-resolver-api.md` — one dated
   amendment note (2026-07-11, top of file, above the ay9 note) plus
   one closed-out "Known deferred additions" entry.
   `ReferencedInRequiredBarePattern` does **not** appear on the ADR's
@@ -120,7 +120,7 @@ Unfreeze cycle (Cycle 2, follow-up PR):
   adopts the axis directly under the additive rule, the same move
   0ig and ay9 made for their axes. Verbatim text §7.
 
-Resolver-widening cycle (Cycle 3, follow-up PR after the unfreeze
+Resolver-widening cycle (Cycle 3, follow-up PR after the change
 PR merges):
 
 - `internal/resolver/resolve.go` — `demoteNullableInPlace`
@@ -188,7 +188,7 @@ only the label union — the re-reference itself is discarded (§3.1).
 This is the missing-witness gap R4 §7.5.3 names as **Class B**:
 sibling demotion (Class A, ay9) walks bindings that are all present
 in the model; bare-ref demotion (Class B, 5xg) needs a fact about a
-reference the frozen model does not preserve. Canonical example (R4
+reference the query model does not preserve. Canonical example (R4
 §7.5.1, encoded as fixture
 `test/data/resolver/valid/demote_bare_reference_from_optional.cypher`,
 new §8.4):
@@ -238,7 +238,7 @@ same-Part bare re-reference sets it (which would be `MATCH (n) MATCH
 (n) RETURN n` — a legal but pathological shape).
 
 The JSON encoding is **omit-when-false** (`,omitempty` on `bool`),
-following the post-freeze convention hk0 established
+following the wire convention hk0 established
 (omit-when-false; the direct precedent: `ContainsAggregate`), fvo
 continued (omit-when-zero-int — `Use.part`), 0ig continued
 (omit-when-zero-length — `CallBinding.args`), and ay9 continued
@@ -449,11 +449,11 @@ a `query.Binding` sum variant.
    unexported field, visible only through the accessor.
 3. **Blast radius.** One call site per variant (`toBinding`,
    `build.go:264-285`), and only when the raw flag is true. Zero
-   call-site edits at frozen consumers.
+   call-site edits at coupled consumers.
 
 The mutator is named `markReferencedInRequiredBarePattern` on
 each variant (unexported, so package-local convention takes any
-name; the descriptive verb matches the post-freeze "mark"
+name; the descriptive verb matches the later "mark"
 convention 0ig chose for its post-construction paths). Its body
 is one field write:
 
@@ -527,7 +527,7 @@ exact signatures.
   }
   ```
 
-  post-unfreeze (tail-append, §4.1.3):
+  post-change (tail-append, §4.1.3):
 
   ```json
   {
@@ -545,7 +545,7 @@ exact signatures.
 
 ---
 
-## 4. The unfreeze — model and parser changes
+## 4. The change — model and parser changes
 
 ### 4.1 `internal/query/query.go`
 
@@ -609,7 +609,7 @@ The six existing constructors (`NewNodeBinding`,
 `NewNullableEdgeBindingInGroup`, `NewVarLengthEdgeBinding`,
 `NewNullableVarLengthEdgeBinding`,
 `NewNullableVarLengthEdgeBindingInGroup`) are **byte-identical** —
-including doc comments — so every frozen API consumer is
+including doc comments — so every API consumer is
 untouched and every group-0-and-flag-false pin is preserved.
 
 #### 4.1.3 JSON — omit-when-false on `referencedInRequiredBarePattern`
@@ -626,10 +626,10 @@ as the **last** key (node key order becomes `kind, variable,
 labels, nullable, optionalGroup, referencedInRequiredBarePattern`;
 edge: `kind, variable, labels, source, target, nullable, directed,
 hops, optionalGroup, referencedInRequiredBarePattern`). The
-post-freeze omit-when-false convention (hk0's `ContainsAggregate`,
-the direct precedent) is followed; the pre-freeze always-emit
+later omit-when-false convention (hk0's `ContainsAggregate`,
+the direct precedent) is followed; the before Stage 14 always-emit
 convention (`nullable`, `directed`, `hops`) does not apply — ADR
-0008's hk0 amendment fixed omit-when-zero-value as the post-freeze
+0008's hk0 amendment fixed omit-when-zero-value as the later
 convention precisely so additive cycles do not force
 near-total rebaselines.
 
@@ -876,7 +876,7 @@ FAILS review. §4.4.1 gives the reviewer-side fence commands.
 
 #### 4.4.1 Reviewer-side fence commands
 
-From the unfreeze-PR branch tip:
+From the model-change-PR branch tip:
 
 ```sh
 # Fence A — rebaseline reproducibility: regenerate and expect no drift.
@@ -902,7 +902,7 @@ git status --porcelain test/data/resolver/
 # tree during the cycle window. If this fails, the flip set is no
 # longer 0; re-run §8.3 and update the spec.
 git log --since="2026-06-01" --name-only -- test/data/query/cypher/tck/features/ | wc -l
-# Expect: 0 (TCK vendor is frozen for the campaign).
+# Expect: 0 (TCK vendor is stable for the campaign).
 ```
 
 ---
@@ -1055,16 +1055,16 @@ observation point (`byVar` lookup at `pattern.go:390`).
 ## 7. ADR 0008 amendment note — the dated stage note
 
 Verbatim text to add at the top of
-`docs/adr/0008-query-model-freeze-resolver-api.md`, above the ay9
+`docs/adr/0008-query-model-surface-resolver-api.md`, above the ay9
 note, following the established amendment format:
 
 ```markdown
-> _Amendment (2026-07-11, gqlc-5xg unfreeze cycle): the required-
+> _Amendment (2026-07-11, gqlc-5xg model-change cycle): the required-
 > bare-pattern re-reference axis on `NodeBinding` / `EdgeBinding` —
 > R4 §7.5.4's **Axis 2 shape (b)** (the narrower boolean, not
 > shape (a)'s `RequiredReferences []ClauseRef`), filed from the R4
 > close-out as gqlc-5xg — is **adopted** under this ADR's additive-
-> only revision protocol. The frozen wire recorded first-introduction
+> only additions convention. The wire recorded first-introduction
 > facts about each binding but not what happened to that binding
 > after: when the same variable appeared in a later same-Part
 > clause, `mergeBinding` (`internal/query/cypher/pattern.go:388-404`)
@@ -1094,7 +1094,7 @@ note, following the established amendment format:
 > (path members carry the flag through their referenced node/edge
 > bindings; UNWIND has no bare-re-reference form; CALL YIELD is not
 > re-referenceable). The JSON encoding is **omit-when-false**
-> (`,omitempty`), following the post-freeze convention this ADR's
+> (`,omitempty`), following the wire convention this ADR's
 > hk0 amendment established; **zero** of 3199 parser goldens
 > rebaseline (the TCK does not exercise the shape), all 3199 are
 > byte-identical. The Binding interface stays sealed at
@@ -1117,8 +1117,8 @@ note, following the established amendment format:
 > closed (2026-07-10; ADR 0008 amendment above). With gqlc-5xg
 > adopted, the R4-inherited Class B row across the R4-R7 stage
 > specs is retired in the docs-errata cycle (§8.6); the model-
-> unfreeze campaign's planned scope is fully discharged. See
-> `docs/specs/unfreeze-5xg-required-bare-ref.md` for the full
+> model-additions campaign's planned scope is fully discharged. See
+> `docs/specs/model-change-5xg-required-bare-ref.md` for the full
 > contract, the 0-golden flip census, the constructor-strategy
 > and predicate-derivation decisions, and the fence commands._
 ```
@@ -1131,7 +1131,7 @@ made for their axes):
 ```markdown
 - **`ReferencedInRequiredBarePattern` axis on `NodeBinding` /
   `EdgeBinding`** — adopted 2026-07-11 (see the amendment note
-  above and `docs/specs/unfreeze-5xg-required-bare-ref.md`).
+  above and `docs/specs/model-change-5xg-required-bare-ref.md`).
   Populated parser-side by `mergeBinding`'s merge arm at
   `internal/query/cypher/pattern.go:388-404` when the current
   occurrence is required and bare; consumed by the resolver's
@@ -1140,15 +1140,15 @@ made for their axes):
   PR), closing R4 §7.5.3 Class B (item 2). The edge-side non-bare
   missing-witness residual is filed as a follow-up bead at
   close-out. With ay9 (Class A, closed 2026-07-10), R4 §7.5.3's two
-  named classes are closed; the planned model-unfreeze campaign is
+  named classes are closed; the planned model-model-additions campaign is
   discharged.
 ```
 
 ---
 
-## 8. Resolver widening — the follow-up PR after the unfreeze merges
+## 8. Resolver widening — the follow-up PR after the change merges
 
-The unfreeze PR lands with the resolver green and unchanged: the
+The model-change PR lands with the resolver green and unchanged: the
 kernel reads `Nullable()` and `OptionalGroup()`,
 `ReferencedInRequiredBarePattern()` is populated but unconsumed. The
 widening PR then extends Phase D. This section pins the semantics;
@@ -1257,7 +1257,7 @@ entire R4+ay9 demotion path is error-free at branch base —
 branch. The 5xg pre-pass adds a linear scan writing `false` to a
 map. `allSentinels` (`internal/resolver/errors.go:103-119`) stays at
 its current **11 entries**. This is the same posture ay9 held (§8.2,
-verbatim precedent); the campaign's post-freeze rejection class
+verbatim precedent); the campaign's later rejection class
 count is unchanged.
 
 ### 8.3 Existing resolver goldens — exactly 0 flip, derived
@@ -1406,33 +1406,33 @@ retired or stayed verbatim), located at branch base `d8d2818`:
 
 | File | Site | Current text (abridged) |
 |---|---|---|
-| `resolver-stage-r4.md:1191` | §7 table | "Nullability upgrades (regime (b), same-Part re-MATCH — Class B: missing-witness model gap) … §7.5.5 bead 2 (Axis 2 unfreeze)" |
+| `resolver-stage-r4.md:1191` | §7 table | "Nullability upgrades (regime (b), same-Part re-MATCH — Class B: missing-witness model gap) … §7.5.5 bead 2 (Axis 2 change)" |
 | `resolver-stage-r4.md:1273` | §7.4 wording-revision note | "same-Part regime (b) is retitled and gated on §7.5.5 bead 2" — stale gate reference post-5xg (bead is closed, not gated on) |
 | `resolver-stage-r4.md:1042-1044` | §6.3 fixture note | "Same-part reuse of `a` as a bare pattern doesn't help — that is Class B … the parser discards the second occurrence at `pattern.go:373-401`" |
-| `resolver-stage-r4.md:1239-1256` | §7.4 item 2 | "Same-Part regime (b) — a distinct frozen-model gap (missing witness, not missing grouping)" |
+| `resolver-stage-r4.md:1239-1256` | §7.4 item 2 | "Same-Part regime (b) — a distinct model gap (missing witness, not missing grouping)" |
 | `resolver-stage-r4.md:1258-1267` | §7.4 conclusion | "cross-WITH regime (b), same-Part regime (b), and Class-A OPTIONAL-sibling under-demotion are three distinct problems …" |
 | `resolver-stage-r4.md:1367-1397` | §7.5.3 Class B block | full-block prose describing Class B and the missing witness |
 | `resolver-stage-r4.md:1443-1470` | §7.5.4 Axis 2 | "Axis 2 — same-Part second-reference preservation (closes Class B, item 2)" — full paragraph |
 | `resolver-stage-r4.md:1489-1516` | §7.5.5 recommendation | Class B references in the "both classes are real" defense |
 | `resolver-stage-r4.md:1531-1535` | §7.5.5 bead 2 | "Model: preserve same-Part second-reference facts on `Binding` (either shape (a) or shape (b) per §7.5.4 Axis 2)" |
 | `resolver-stage-r4.md:1549-1552` | §7.5.5 fixture note | "Class B has no dedicated fixture at R4 (there is no fixture in §6.3 that exercises same-Part bare-pattern re-MATCH …)" — discharge |
-| `resolver-stage-r4.md:1687-1695` | §9 close-out block | "bead 2 for Class B … Class B same-Part missing-witness gap → §7.5.5 bead 2 (Axis 2 unfreeze)" |
+| `resolver-stage-r4.md:1687-1695` | §9 close-out block | "bead 2 for Class B … Class B same-Part missing-witness gap → §7.5.5 bead 2 (Axis 2 change)" |
 | `resolver-stage-r5.md:37-46` | §1 banner | "same-Part regime (b) nullability under-approximation surviving from R4 (§7.5 Class B, gap tracked on gqlc-5xg) is unchanged at R5" |
-| `resolver-stage-r5.md:613` | §4.1.1 table | "Same-Part regime (b) nullability under-demote … gqlc-5xg (Class B, model unfreeze)" |
-| `resolver-stage-r5.md:617` | §4.1.1 R4 §7.4 explanation | "same-Part regime (b) and Class A both remain safe under-approximations gated on the two model-unfreeze beads" — factually wrong post-5xg (both closed) |
+| `resolver-stage-r5.md:613` | §4.1.1 table | "Same-Part regime (b) nullability under-demote … gqlc-5xg (Class B, model change)" |
+| `resolver-stage-r5.md:617` | §4.1.1 R4 §7.4 explanation | "same-Part regime (b) and Class A both remain safe under-approximations gated on the two model-additions beads" — factually wrong post-5xg (both closed) |
 | `resolver-stage-r5.md:1713-1721` | §4.6.1 | "Same-Part regime (b) still under-approximates at R5. R4 §7.5 Class B — same-Part bare-pattern re-MATCH of an OPTIONAL binding — is unchanged (the parser's merge rule …)" |
-| `resolver-stage-r5.md:2321` | §7 table | "Nullability upgrades (regime (b), same-Part re-MATCH — Class B: missing-witness model gap) … gqlc-5xg (model unfreeze)" |
+| `resolver-stage-r5.md:2321` | §7 table | "Nullability upgrades (regime (b), same-Part re-MATCH — Class B: missing-witness model gap) … gqlc-5xg (model change)" |
 | `resolver-stage-r5.md:2401,2418,2501,2618,2705,2718` | close-out prose | "gqlc-ay9 and gqlc-5xg remain OPEN; R5 does not close them" and siblings |
 | `resolver-stage-r6.md:29-30` | §1 banner | "Class B same-Part regime (b) nullability under-approximation (`gqlc-5xg`)" |
-| `resolver-stage-r6.md:1883` | §7 table | "Same-Part regime (b) nullability under-demote … gqlc-5xg (Class B, model unfreeze — unchanged from R5)" |
+| `resolver-stage-r6.md:1883` | §7 table | "Same-Part regime (b) nullability under-demote … gqlc-5xg (Class B, model change — unchanged from R5)" |
 | `resolver-stage-r6.md:2014,2270` | close-out prose | "gqlc-5xg … remain OPEN unchanged" siblings |
 | `resolver-stage-r7.md:56-57` | §1 banner | "Class B same-Part regime (b) nullability under-approximations (`gqlc-ay9`, `gqlc-5xg`)" |
 | `resolver-stage-r7.md:2189` | §7 table | "Same-Part regime (b) nullability under-demote … gqlc-5xg (unchanged)" |
 | `resolver-stage-r7.md:2336-2340` | §7.1.2 prose | "Class B (`gqlc-5xg`) persists at R7 unchanged" |
 | `resolver-stage-r7.md:2362,2527` | close-out prose | "gqlc-5xg, … remain OPEN" siblings |
 
-Successor wording per row: "closed by the 5xg unfreeze + widening
-(`docs/specs/unfreeze-5xg-required-bare-ref.md`); edge-side non-bare
+Successor wording per row: "closed by the 5xg change + widening
+(`docs/specs/model-change-5xg-required-bare-ref.md`); edge-side non-bare
 missing-witness residual filed as <follow-up bead id>". The R4
 §7.5.5 bead-2 paragraph and the §7.5.4 Axis 2 block gain dated
 closure notes rather than deletion (stage-spec history stays
@@ -1479,19 +1479,19 @@ grep -nE "gqlc-5xg|Class B|same-Part regime \(b\)|Same-Part regime \(b\)" \
 | Edge-side non-bare missing-witness gap (Class B for edges) | follow-up bead filed at close-out (§7 residual, §2.5) — needs shape (a)'s `RequiredReferences` axis |
 | Bare-ref demotion feeding ay9 group closure | intentional §8.1 conservative boundary; fixture 4 pins the residual |
 | Cross-Part carry of bare-ref flag | resolver-internal `branchState` (name → bool) already carries the demoted-to-false table entry across WITH; no model change needed |
-| `PathBinding` bare-ref axis | frozen Stage-8 posture (`Nullable()` hardcoded false; a named path's bindings carry the flag through their referenced node/edge bindings) |
+| `PathBinding` bare-ref axis | Stage-8 posture (`Nullable()` hardcoded false; a named path's bindings carry the flag through their referenced node/edge bindings) |
 | `UnwindBinding` / `CallBinding` bare-ref axis | no re-reference form; UNWIND has no bare-re-reference grammar shape (the AS variable enters scope but its re-reference in a MATCH is a fresh required binding, kind conflict); CALL YIELD variables enter scope but their re-reference in a bare MATCH is a kind conflict caught in buildPart |
 | EXISTS-suppressed bare re-references | Stage-11 posture unchanged; `mergeBinding` runs outside `subqueryDepth > 0`, so a bare re-reference inside `EXISTS { ... }` never reaches the flag-setting site |
 | Codegen consumption of widened nullability | future ADR |
 | apidiff CI gate | pre-existing ADR 0008 bead, unchanged by this cycle |
-| Other unfreeze beads' surfaces (`hk0`/`fvo`/`0ig`/`ay9` axes) | closed; untouched |
+| Other change beads' surfaces (`hk0`/`fvo`/`0ig`/`ay9` axes) | closed; untouched |
 
 ---
 
 ## 10. Ground-truth cross-check
 
 Every claim above rests on the citations below, all re-derived at
-branch base `d8d2818` (worktree `unfreeze-5xg-spec`); counts were
+branch base `d8d2818` (worktree `model-change-5xg-spec`); counts were
 produced by the scripts described in §4.4 and §8.3, not copied from
 prior documents.
 
@@ -1523,7 +1523,7 @@ prior documents.
 - `allSentinels` (11 entries) —
   `internal/resolver/errors.go:103-119`.
 - ay9 spec, referenced heavily —
-  `docs/specs/unfreeze-ay9-optional-group.md`, especially §2.3
+  `docs/specs/model-change-ay9-optional-group.md`, especially §2.3
   variant-set justification, §3.4 zero-value analysis, §8.1
   widening prose (this spec inherits ay9's fixed-point loop and
   adds an orthogonal pre-pass).
@@ -1539,13 +1539,13 @@ prior documents.
   MATCH" test/data/query/cypher/tck/features/`.
 - Parser goldens (3199 at branch base `d8d2818`) —
   `ls internal/query/cypher/testdata/golden | wc -l`.
-- ADR 0008 revision protocol + Known-deferred-additions list —
-  `docs/adr/0008-query-model-freeze-resolver-api.md:300-361`.
-- Campaign precedents — `docs/specs/unfreeze-ay9-optional-group.md`
-  (template, ~1274 lines), `docs/specs/unfreeze-0ig-call-args.md`
+- ADR 0008 additions convention + Known-deferred-additions list —
+  `docs/adr/0008-query-model-surface-resolver-api.md:300-361`.
+- Campaign precedents — `docs/specs/model-change-ay9-optional-group.md`
+  (template, ~1274 lines), `docs/specs/model-change-0ig-call-args.md`
   (constructor-strategy precedent for post-construction axis),
-  `docs/specs/unfreeze-fvo-use-part.md` (omit-when-zero convention),
-  `docs/specs/unfreeze-hk0-containsaggregate.md` (omit-when-false
+  `docs/specs/model-change-fvo-use-part.md` (omit-when-zero convention),
+  `docs/specs/model-change-hk0-containsaggregate.md` (omit-when-false
   bool wire — direct precedent).
 
 Spec-vs-repo divergences found while mining (carried into the
@@ -1586,7 +1586,7 @@ docs-errata cycle where they touch stage-spec text):
 The spec PR is done when:
 
 - This file lands on master under
-  `docs/specs/unfreeze-5xg-required-bare-ref.md`.
+  `docs/specs/model-change-5xg-required-bare-ref.md`.
 - No behavioural code changes (spec-only cycle).
 - Review explicitly ACKs the five pinned decisions:
   - **Axis shape**: `bool` (shape (b)), NOT
@@ -1607,7 +1607,7 @@ The spec PR is done when:
     automatically demote its OPTIONAL group; §8.1 conservative
     boundary; §8.4 fixture 4 pins the residual.
 
-The unfreeze PR (Cycle 2) then implements §4-§7 verbatim; the
+The model-change PR (Cycle 2) then implements §4-§7 verbatim; the
 resolver-widening PR (Cycle 3) implements §8; the docs-errata PR
 (Cycle 4) lands §8.6's successor prose. Docs-errata DoD fence
 (§8.6):
@@ -1627,7 +1627,7 @@ grep -nE "gqlc-5xg|Class B|same-Part regime \(b\)|Same-Part regime \(b\)" \
 # independence claim).
 ```
 
-With this cycle's four PRs merged, the model-unfreeze campaign
+With this cycle's four PRs merged, the model-model-additions campaign
 (hk0 / fvo / 0ig / ay9 / 5xg) has discharged every planned bead. The
 edge-side non-bare missing-witness residual (§9) is the sole
 outstanding known gap in the R4 §7.5.3 taxonomy, filed as a

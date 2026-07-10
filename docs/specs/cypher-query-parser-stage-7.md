@@ -4,7 +4,7 @@ The implementation brief for Stage 7 of the Cypher implementation of
 `query.Parser`. Seventh model evolution after Stage 6 per ADR 0004 (test-first,
 evolving until feature-complete), under the curation discipline of ADR 0003 and
 the type-interface boundary of ADR 0005. Stage 7 is the second stage of the
-ADR-0007 pre-freeze expansion beyond the read core. It **extends the `Type` sum
+ADR-0007 before Stage 14 expansion beyond the read core. It **extends the `Type` sum
 with the six openCypher temporal types** — `DATE`, `TIME`, `LOCAL_TIME`,
 `DATETIME`, `LOCAL_DATETIME`, `DURATION` — and teaches the Stage-6
 rich-expression typer to recognise the temporal constructor functions, the
@@ -110,7 +110,7 @@ invariant).
   are single-level property lookups whose result type depends on the
   temporal *value* they read from and the accessor *name*. The parser cannot
   commit to the accessor's result type schema-free — the accessor set is
-  large (§3), the mapping is per-accessor, and the resolver (post-freeze)
+  large (§3), the mapping is per-accessor, and the resolver (later)
   has the schema to type them precisely from the referenced binding's
   temporal kind. So temporal accessors continue to type as `TypeUnknown`
   under the Stage-6 `typeNonArithmetic` property-lookup rule, honestly:
@@ -236,12 +236,12 @@ Six variants, one for each openCypher temporal type. The distinction
 between the two flavours of each (`TIME` / `LOCAL_TIME`, `DATETIME` /
 `LOCAL_DATETIME`) is a **zoned vs. non-zoned** distinction the type
 interface carries — a `LOCAL_TIME` has no timezone offset; a `TIME`
-does. Codegen post-freeze emits distinct method signatures for the two
+does. Codegen later emits distinct method signatures for the two
 because the driver's binding representation differs (a `LOCAL_TIME`
 maps to `time.Time` with `UTC` and a zero date component in Go, for
 example, while a `TIME` also carries the zone). Collapsing them under
 one variant would lose this distinction and reintroduce a lossy
-representation at the frozen boundary.
+representation at the parser–resolver boundary.
 
 Wire encoding — the six new tags, quoted lowercase, join the existing
 scalar tags:
@@ -265,8 +265,8 @@ temporal-typed value like `d.year`, `d.hour`, `d.timezone`,
 `TypeUnknown`: the accessor set is large (Temporal5's accessor scenario
 alone reads twenty distinct accessor names off a duration), and the
 per-accessor result type depends on both the accessor name and the
-temporal kind. The resolver, holding the schema, will type these post-
-freeze; the parser records the ref (mined by the existing lookup arm
+temporal kind. The resolver, holding the schema, will type these
+later; the parser records the ref (mined by the existing lookup arm
 in `typeNonArithmetic`) and leaves the type honest.
 
 `TypePath` (Stage 8) is unaffected by this stage — a temporal type is
@@ -433,11 +433,11 @@ handful of `duration.<truncate>` variants. Stage 7 commits to the
 standard set only. A dialect-specific constructor call at RETURN types
 as `TypeUnknown`, which is honest (a query author who calls
 `duration.inDays(...)` will see the resolver upgrade the type against
-the driver's known return type post-freeze), but it does mean the
+the driver's known return type later), but it does mean the
 progress meter for the ninth Temporal9 feature stays at
 `TypeUnknown` for `d.truncate(...)`. The mitigation is exactly the
 Stage-3 aggregate posture: the lookup is a small closed name set the
-freeze locks against openCypher, and dialect extensions ride
+Stage 14 targets openCypher, and dialect extensions ride
 `TypeUnknown`, which the resolver types from the schema/driver
 knowledge.
 

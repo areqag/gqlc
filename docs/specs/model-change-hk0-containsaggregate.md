@@ -1,22 +1,22 @@
-# Model unfreeze — `ExprProjection.ContainsAggregate` (Shape B)
+# Model change — `ExprProjection.ContainsAggregate` (Shape B)
 
-The implementation brief for cycle **gqlc-hk0** of the model-unfreeze
+The implementation brief for cycle **gqlc-hk0** of the model-additions
 campaign: an additive `ContainsAggregate bool` axis on
 `query.ExprProjection`, populated parser-side during the walk
 `classifyRichExpression` already performs, closing the R5 uniform-exclude
 grouping-key gap (`docs/specs/resolver-stage-r5.md §4.5.3`) without
-touching the frozen wire shape's zero-value semantics.
+touching the wire shape's zero-value semantics.
 
 This brief is the **contract for the whole hk0 cycle**: it spans the
-spec PR (this file), the unfreeze PR (model + parser + ADR 0008
+spec PR (this file), the model-change PR (model + parser + ADR 0008
 amendment + parser-test rebaseline; resolver untouched and green), and
 the resolver-widening PR (fillGroupingKeys widens to discriminate
 `ContainsAggregate`; new discriminating fixture + adjusted golden set).
-Both code PRs land under ADR 0008's post-freeze revision protocol
-(§Post-freeze revision protocol) — additive-only, dated amendment,
+Both code PRs land as coordinated model + resolver changes
+(§Additions since Stage 14) — coordinated change with consumers, dated amendment,
 golden rebaseline whose diff shows only the new surface.
 
-The four other unfreeze beads (`gqlc-fvo`, `gqlc-0ig`, `gqlc-ay9`,
+The four other change beads (`gqlc-fvo`, `gqlc-0ig`, `gqlc-ay9`,
 `gqlc-5xg`) and codegen are **out of scope** — this campaign closes
 hk0 alone. See §9 for the non-goals table.
 
@@ -26,9 +26,9 @@ hk0 alone. See §9 for the non-goals table.
 
 Spec cycle (Cycle 1) — this PR:
 
-- `docs/specs/unfreeze-hk0-containsaggregate.md` — this file.
+- `docs/specs/model-change-hk0-containsaggregate.md` — this file.
 
-Unfreeze cycle (Cycle 2, follow-up PR):
+Cycle ( 2, follow-up PR):
 
 - `internal/query/query.go` — one additive field
   `containsAggregate bool` on `ExprProjection`, one new constructor
@@ -59,7 +59,7 @@ Unfreeze cycle (Cycle 2, follow-up PR):
   (24 assertions, §4.4) stay verbatim — they carry non-aggregate
   expressions whose bit is zero, i.e. the existing constructor still
   produces the correct shape.
-- `docs/adr/0008-query-model-freeze-resolver-api.md` — one dated
+- `docs/adr/0008-query-model-surface-resolver-api.md` — one dated
   amendment note (top of the file, ADR 0003 stage-note convention)
   recording Shape B's adoption and the A/C retirement rationale.
   The "Known deferred additions" entry for `ContainsAggregate`
@@ -71,7 +71,7 @@ Unfreeze cycle (Cycle 2, follow-up PR):
   bit-for-bit match because Go struct zero-value equality holds.
   §4.4 enumerates the affected pins.
 
-Resolver-widening cycle (Cycle 3, follow-up PR after the unfreeze PR
+Resolver-widening cycle (Cycle 3, follow-up PR after the model-change PR
 merges):
 
 - `internal/resolver/resolve.go:571-602` — `fillGroupingKeys` widens
@@ -122,11 +122,11 @@ ADR 0008's "Known deferred additions" registered a
 > resolver-side re-parse of the projection's original text span; the axis
 > is added only if that proves untenable, and is never inferred from `Type`.
 
-`(docs/adr/0008-query-model-freeze-resolver-api.md:166-169)`.
+`(docs/adr/0008-query-model-surface-resolver-api.md:166-169)`.
 
 R5 §4.5.3.4 pinned the "untenable" — the escape-hatch condition
 fires. This cycle promotes the axis from escape hatch to committed
-strategy under the additive-only revision protocol, records the
+strategy under the coordinated change with consumers, records the
 promotion on ADR 0008 with a dated amendment note (§6), lands the
 axis parser-side (§4), and widens the resolver's grouping-key rule
 to consume it (§7).
@@ -145,7 +145,7 @@ false` semantics — the existing constructor is preserved unchanged.
 (`parser_test.go:1319-1327`) rebaselines — its `ExprProjection` now
 carries `ContainsAggregate = true`. The wire JSON of ExprProjection
 gains one field: `containsAggregate` (omit-when-false; §4.1.3
-records the post-freeze convention and the fence).
+records the wire convention and the fence).
 The ADR 0008 amendment records the axis's promotion. The resolver's
 `fillGroupingKeys` gains a gate arm and a loop arm on the new bit
 (§7.1: the top-level presence gate widens with an `ExprProjection`
@@ -167,13 +167,13 @@ aggregate structure that `classifyRichExpression` dropped.
 
 ---
 
-## 3. Mining — what the frozen model records today
+## 3. Mining — what the query model records today
 
 Every claim in §4 rests on citations here. Re-verify each file:line at
 branch base `origin/master @ e77f33e` before writing code — line
 numbers can drift on merge.
 
-### 3.1 `ExprProjection` — the frozen shape
+### 3.1 `ExprProjection` — the query.Query surface
 
 ```
 type ExprProjection struct {
@@ -365,8 +365,8 @@ and the surrounding narrative comment.
 ### 3.6 EdgeBinding's `directed` — the axis-precedent house style
 
 The only precedent for an additive boolean axis with an always-emit
-JSON default on a frozen sum variant is `EdgeBinding.directed`
-(added at Stage 5; frozen at ADR 0008). Its layout:
+JSON default on a sum variant is `EdgeBinding.directed`
+(added at Stage 5; recorded in ADR 0008). Its layout:
 
 - **Field:** `directed bool` on the struct (`internal/query/query.go:378`).
 - **Constructor:** trailing positional parameter — `NewEdgeBinding(
@@ -386,15 +386,15 @@ not.**
 - **Field** — same, unexported `containsAggregate bool` on
   `ExprProjection`. §4.1.1.
 - **Constructor** — DIVERGES. `directed` is required on
-  `NewEdgeBinding` because Stage 5 was pre-freeze; every parser call
+  `NewEdgeBinding` because Stage 5 was before Stage 14; every parser call
   site was rewritten in the same cycle. `ContainsAggregate` lands
-  post-freeze, so an additive constructor overload is preferable to
+  later, so an additive constructor overload is preferable to
   a breaking parameter addition. **The existing
   `NewExprProjection(refs, t)` constructor stays** as the
   zero-value-default shorthand; a new
   `NewExprProjectionWithAggregate(refs, t, containsAggregate)` takes
   the third parameter. Justification: the additive-only revision
-  protocol (`ADR 0008 §Post-freeze revision protocol`) is
+  protocol (`ADR 0008 §Additions since Stage 14`) is
   zero-value-safe by design; a constructor rewrite would touch every
   parser-test pin whose ExprProjection has `containsAggregate =
   false`, breaking the byte-identity of 24 assertions for no
@@ -407,20 +407,20 @@ not.**
   §4.1.3 justifies against the fence-diff requirement: 2055 of 3199
   goldens embed `"kind": "expr"` blobs, and an always-emit posture
   would rebaseline all of them for zero semantic content. This
-  cycle establishes the campaign convention that post-freeze
+  cycle establishes the campaign convention that later
   additive axes emit **omit-when-zero-value**, deliberately not
-  following the pre-freeze `directed` precedent — a decision the
+  following the earlier `directed` precedent — a decision the
   ADR 0008 amendment note in §6 records verbatim.
 
 ### 3.7 R5's audit note — what this cycle closes
 
 `docs/specs/resolver-stage-r5.md §4.5.3` records:
 
-- **§4.5.3.1** — the shape of the frozen model at classification;
+- **§4.5.3.1** — the shape of the query model at classification;
 - **§4.5.3.2** — R5's uniform-exclude posture, the
   preserved-vs-violated split (grouping-key SUBSET preserved;
   result-set semantics for non-aggregate residuals violated);
-- **§4.5.3.3** — the two unfreeze options (Shape A, Shape B; Shape C
+- **§4.5.3.3** — the two change options (Shape A, Shape B; Shape C
   retired), with Shape B ranked first;
 - **§4.5.3.5** — the target discriminating fixture
   `aggregate_with_expr_grouping_key.cypher` — `MATCH (n:Person)
@@ -433,7 +433,7 @@ adds the R5 §4.5.3.5 target fixture (§7.4), and closes the R5
 
 ---
 
-## 4. The unfreeze — parser and model changes
+## 4. The change — parser and model changes
 
 ### 4.1 `ExprProjection` — the additive field
 
@@ -488,7 +488,7 @@ func (p ExprProjection) ContainsAggregate() bool { return p.containsAggregate }
 
 `isProjection()`, `Refs()`, `Type()` are unchanged.
 
-#### 4.1.3 JSON — omit-when-false, deliberately diverging from pre-freeze precedent
+#### 4.1.3 JSON — omit-when-false, deliberately diverging from before Stage 14 precedent
 
 The marshalled struct gains one field:
 
@@ -515,7 +515,7 @@ holds **3199 `*.golden.json` files**, of which **2055 contain
 `"kind": "expr"` blobs**, and `checkGolden`
 (`internal/query/cypher/acceptance_test.go:1052`) is a byte-exact
 `strings.TrimRight(string(want), "\n") != string(got)` diff. Under
-an always-emit encoding the unfreeze PR would rebaseline
+an always-emit encoding the model-change PR would rebaseline
 **2055 goldens** whose semantic content is unchanged — the diff
 would be dominated by mechanical `"containsAggregate":false` key
 insertions, not the semantic change ADR 0008's "diff shows only the
@@ -529,37 +529,37 @@ content actually changes — i.e. those whose ExprProjection now
 carries `ContainsAggregate = true`. The rebaseline IS the semantic
 change; nothing else moves.
 
-**Campaign convention — recorded here.** Post-freeze additive axes
+**Campaign convention — recorded here.** Later additive axes
 emit **omit-when-zero-value**, deliberately diverging from the
-pre-freeze always-emit precedent (`directed`, `nullable`,
+earlier always-emit precedent (`directed`, `nullable`,
 `returnsAll`, `hops` — verified verbatim at query.go:1483-1490 for
 NodeBinding, :1497-1508 for EdgeBinding, :1613-1619 for the
 returnsAll block). The reason for the divergence is the constraint
-flip that ADR 0008's freeze codifies:
+flip that ADR 0008 records:
 
-- **Pre-freeze:** parser was the only consumer; model churn was
+- **Before Stage 14:** parser was the only consumer; model churn was
   cheap; the wire-consistency argument for always-emit dominated
   because rebaseline cost was near-zero.
-- **Post-freeze:** golden rebaselines are the primary auditability
-  surface for every additive change. The remaining unfreeze
+- **After Stage 14:** golden rebaselines are the primary auditability
+  surface for every additive change. The remaining change
   campaign axes (Use→Part attribution on `PropertyUse`/`ExprUse`/
   `ClauseSlotUse` per gqlc-fvo; per-position CALL-arg records on
   `CallBinding` per gqlc-0ig; group fields on `Binding` per gqlc-ay9
   and gqlc-5xg) sit on records present in **nearly every golden**.
   An always-emit posture across the campaign forces near-total
-  rebaselines of the 3199-file corpus on each cycle. Post-freeze
+  rebaselines of the 3199-file corpus on each cycle. After Stage 14
   auditability is the load-bearing constraint, and it is the
   constraint the omit-when-zero-value convention protects.
 
 **The convention in one line.** For any additive axis landing under
-the ADR 0008 revision protocol whose zero value is the semantic
-default of the pre-freeze corpus, the JSON encoding is
+the ADR 0008 additions convention whose zero value is the semantic
+default of the before Stage 14 corpus, the JSON encoding is
 `,omitempty`; the always-emit precedent applies only to axes
-already frozen at the freeze snapshot.
+already recorded at Stage 14 completion.
 
-**Consequences for the unfreeze PR fence.**
+**Consequences for the model-change PR fence.**
 
-- **Parser-golden rebaseline scope.** The unfreeze PR rebaselines
+- **Parser-golden rebaseline scope.** The model-change PR rebaselines
   **exactly the 20 goldens** whose top-level Returns position embeds
   an ExprProjection whose expression text contains an aggregate
   function call surviving the §4.2.1 boundary walk, enumerated in
@@ -569,7 +569,7 @@ already frozen at the freeze snapshot.
 - **The reviewer-side fence.** Strip the `containsAggregate` key
   from all goldens and diff against the branch base. The result
   MUST be byte-identical. Recorded fence command (run from the
-  worktree at the unfreeze PR's branch tip, against
+  worktree at the model-change PR's branch tip, against
   `origin/master @ e77f33e`):
 
   ```
@@ -606,7 +606,7 @@ already frozen at the freeze snapshot.
   If the stat print is non-empty, some non-aggregate ExprProjection
   golden regenerated — the encoding leaked a `containsAggregate:
   true` where the semantic default should hold, or a spurious
-  formatting change slipped in. The unfreeze PR is buggy.
+  formatting change slipped in. The model-change PR is buggy.
 
 - **`TestExprProjectionMarshalJSON` at `internal/query/type_test.go:
   124-131` stays VERBATIM.** The test's blob has
@@ -699,7 +699,7 @@ depth, which is bounded by the length of the return item.
 
 **Alternative shape.** A one-line change threading a `*bool` pointer
 through `typeExpressionMining` and each recursive callee would work
-but violates the "additive-only" reading of the revision protocol
+but violates the "additive-only" reading of the additions convention
 in spirit — it modifies the internal signature of every typing
 helper. The walk-based helper leaves the existing walk untouched
 and localises the change to two files.
@@ -830,7 +830,7 @@ comprehension / EXISTS cases (stops 11/13/14) and
 ### 4.3 The deferral pin — flip its bit
 
 `internal/query/cypher/parser_test.go:1308-1327` — verbatim
-before-state per §3.5. After the unfreeze:
+before-state per §3.5. After the change:
 
 ```go
 // Stage 10 — an aggregate inside a rich expression types via the
@@ -1341,7 +1341,7 @@ inspects each extra to determine whether the discovery script was
 under-approximating or the walker over-fired) or under-flipped
 (misses: reviewer inspects each missing golden — likely a walker
 boundary that should NOT have stopped, or a discovery-script false
-positive). The unfreeze PR must pass BOTH fences before landing.
+positive). The model-change PR must pass BOTH fences before landing.
 
 ### 4.5 The parser test suite's aggregate coverage — no other pin changes
 
@@ -1372,7 +1372,7 @@ existing three ExprProjection tests:
 // TestNewExprProjectionWithAggregateTrue pins the widened Stage-6 variant per
 // ADR 0008 amendment 2026-07-06: the ContainsAggregate axis carries through
 // the constructor, the accessor, and the wire shape as an omit-when-false key
-// (post-freeze convention: additive axes emit omit-when-zero-value).
+// (wire convention: additive axes emit omit-when-zero-value).
 // Complements TestExprProjectionMarshalJSON (which pins the
 // containsAggregate=false zero-value default as an ABSENT key — that test
 // stays verbatim).
@@ -1424,10 +1424,10 @@ convention at `docs/adr/0003-curated-dialect-agnostic-query-model.md:3-7`).
 Verbatim text:
 
 ```
-> _Amendment (2026-07-06, gqlc-hk0 unfreeze cycle): the
+> _Amendment (2026-07-06, gqlc-hk0 model-change cycle): the
 > ContainsAggregate axis on `ExprProjection` — recorded as an
 > escape hatch in the "Known deferred additions" list — is
-> **adopted** under this ADR's additive-only revision protocol.
+> **adopted** under this ADR's coordinated change with consumers.
 > Shape A (promote nested-aggregate residuals to
 > `AggregateProjection`) was second-ranked in `docs/specs/
 > resolver-stage-r5.md §4.5.3.3` and is **retired**: it is a semantic
@@ -1448,27 +1448,27 @@ Verbatim text:
 > `OC_PatternPredicate`, `OC_ListComprehension`,
 > `OC_PatternComprehension` — mirroring `typing.go:382-403`). The
 > JSON encoding is **omit-when-false**
-> (`,omitempty`), which establishes the post-freeze wire
-> convention for the remainder of this ADR's revision protocol:
+> (`,omitempty`), which establishes the wire
+> convention for the remainder of this ADR's additions convention:
 > additive axes emit **omit-when-zero-value**, deliberately
-> diverging from the pre-freeze always-emit precedent
+> diverging from the earlier always-emit precedent
 > (`directed`, `nullable`, `returnsAll`, `hops`) because
-> post-freeze golden rebaselines are the primary auditability
+> golden rebaselines are the primary auditability
 > surface and always-emit forces near-total 3199-file rebaselines
 > on each additive cycle. See
-> `docs/specs/unfreeze-hk0-containsaggregate.md` for the full
+> `docs/specs/model-change-hk0-containsaggregate.md` for the full
 > contract, the walker boundaries, the 20-golden rebaseline set,
 > and the semantic-diff-only fence command._
 ```
 
 The bullet in "Known deferred additions"
-(`docs/adr/0008-query-model-freeze-resolver-api.md:166-169`) is
+(`docs/adr/0008-query-model-surface-resolver-api.md:166-169`) is
 updated in the same PR:
 
 ```
 - **`ContainsAggregate` axis on `ExprProjection`** — adopted
   2026-07-06 (see the amendment note above and
-  `docs/specs/unfreeze-hk0-containsaggregate.md`). Populated
+  `docs/specs/model-change-hk0-containsaggregate.md`). Populated
   parser-side by `classifyRichExpression`'s subtree walk; consumed
   by the resolver's `fillGroupingKeys` (`internal/resolver/resolve.go`)
   to discriminate aggregate-carrying residuals from grouping-key
@@ -1476,17 +1476,17 @@ updated in the same PR:
 ```
 
 No other ADR text changes. ADR 0003, ADR 0004, ADR 0006, and
-ADR 0009 are untouched — the freeze contract's shape and the
+ADR 0009 are untouched — the ADR 0008 record's shape and the
 resolver's staged-build discipline are unaffected by the additive
-axis. The freeze protocol itself is exercised, not amended.
+axis. The additions convention itself is exercised, not amended.
 
 ---
 
-## 7. Resolver widening — the follow-up PR after the unfreeze merges
+## 7. Resolver widening — the follow-up PR after the change merges
 
 The resolver widening is spec'd here but LANDS as a separate PR
-after the unfreeze PR merges. It cannot bundle with the unfreeze
-because the unfreeze PR's fence is "resolver stays byte-identical"
+after the model-change PR merges. It cannot bundle with the change
+because the model-change PR's fence is "resolver stays byte-identical"
 (§8) — the widening PR adds two new fixtures (§7.4a and §7.4b) and
 preserves every pre-existing fixture's byte-identity contract via
 the enumeration in §7.5.
@@ -1524,7 +1524,7 @@ After:
 // Grouping applies when at least one aggregate is present anywhere in
 // Returns — either as a top-level AggregateProjection OR embedded inside
 // an ExprProjection (Shape B, ADR 0008 amendment 2026-07-06;
-// docs/specs/unfreeze-hk0-containsaggregate.md).
+// docs/specs/model-change-hk0-containsaggregate.md).
 if part.ReturnsAll { return }
 hasAggregate := false
 for _, item := range part.Returns {
@@ -1731,7 +1731,7 @@ parser types property lookups as `TypeUnknown`, and `promoteBase`
 through arithmetic when either operand is unknown; the resolver's
 ExprProjection column-type dispatch
 (`internal/resolver/resolve.go:1116-1117`) is a `resolveType`
-pass-through. Frozen typing behavior — the widening changes only
+pass-through. Typing behavior — the widening changes only
 `groupingKey` bits.
 
 #### 7.4b `aggregate_with_expr_only_grouping.cypher` — sub-case 5 (round-2 addition)
@@ -2067,7 +2067,7 @@ The gqlc-hk0 campaign lands in three PRs, in this order:
 
 1. **Spec PR** (this file). No code change. `just test` and
    `just lint-new` from the worktree are trivially green (docs-only).
-2. **Unfreeze PR** — model + parser + ADR 0008 amendment +
+2. **Change PR** — model + parser + ADR 0008 amendment +
    parser-test rebaseline. Resolver **untouched**; resolver test
    suite fully green. The specific fence:
    - `internal/query/query.go` gains the field + constructor +
@@ -2079,7 +2079,7 @@ The gqlc-hk0 campaign lands in three PRs, in this order:
      `classifyRichExpression` and adds `subtreeContainsAggregate`.
    - `internal/query/cypher/parser_test.go:1319-1327` — the one
      pin flips per §4.3.
-   - `docs/adr/0008-query-model-freeze-resolver-api.md` — the
+   - `docs/adr/0008-query-model-surface-resolver-api.md` — the
      amendment note and the "Known deferred additions" edit.
    - `internal/resolver/*` — untouched. The 116 resolver
      `.cypher.validated.golden.json` fixtures stay byte-identical
@@ -2119,7 +2119,7 @@ validated.go`'s marshalling walks `Columns` and `Parameters` only,
 neither of which carries an ExprProjection. Resolver goldens stay
 byte-identical across PR 2.
 
-Confirmed: the resolver stays green through the unfreeze PR with the
+Confirmed: the resolver stays green through the model-change PR with the
 field present but unconsumed.
 
 ---
@@ -2130,12 +2130,12 @@ The following are explicitly OUT OF SCOPE of the gqlc-hk0 campaign:
 
 | Bead | Subject | Why out of scope |
 |---|---|---|
-| gqlc-fvo | Use→Part attribution across WITH — parameter Use type conflict silently admitted under any-valid-witness | Different axis (parameter Use vs projection classification); different frozen-model gap. Filed alongside R5 close-out. Independent unfreeze bead. |
-| gqlc-0ig | (as filed, R7 close-out — verify against `bd show`) | Filed alongside R7. Separate unfreeze cycle. |
-| gqlc-ay9 | R4 nullability under-approximation Class A — OPTIONAL-clause-sibling | Different subsystem (nullability, not grouping). Different frozen-model gap. |
-| gqlc-5xg | R4 nullability under-approximation Class B — same-Part re-MATCH missing-witness | Different subsystem (nullability, not grouping). Different frozen-model gap. |
+| gqlc-fvo | Use→Part attribution across WITH — parameter Use type conflict silently admitted under any-valid-witness | Different axis (parameter Use vs projection classification); different model gap. Filed alongside R5 close-out. Independent change bead. |
+| gqlc-0ig | (as filed, R7 close-out — verify against `bd show`) | Filed alongside R7. Separate model-change cycle. |
+| gqlc-ay9 | R4 nullability under-approximation Class A — OPTIONAL-clause-sibling | Different subsystem (nullability, not grouping). Different model gap. |
+| gqlc-5xg | R4 nullability under-approximation Class B — same-Part re-MATCH missing-witness | Different subsystem (nullability, not grouping). Different model gap. |
 | **Codegen** | Consumer of `ValidatedQuery` — codegen ADR post-R7 | ADR 0008 §Consequences: codegen is downstream of the resolver; the resolver-widening PR delivers the correct grouping-key wire, and codegen consumes it under a future ADR. |
-| **`ContainsAggregate` at ANY other Projection variant** | Adding the axis to `AggregateProjection`, `FuncProjection`, etc. | `AggregateProjection` IS an aggregate by construction — the bit would be a tautology. `FuncProjection` cannot contain an aggregate under the frozen model (`classifyFunction` at `expr.go:346-349` routes aggregate names to `AggregateProjection` before `FuncProjection` — verified verbatim). No other variant would benefit; no bead. |
+| **`ContainsAggregate` at ANY other Projection variant** | Adding the axis to `AggregateProjection`, `FuncProjection`, etc. | `AggregateProjection` IS an aggregate by construction — the bit would be a tautology. `FuncProjection` cannot contain an aggregate under the query model (`classifyFunction` at `expr.go:346-349` routes aggregate names to `AggregateProjection` before `FuncProjection` — verified verbatim). No other variant would benefit; no bead. |
 
 **gqlc-hk0 closes** at the resolver-widening PR merge:
 - The bead moves to `closed`.
@@ -2152,7 +2152,7 @@ Every factual claim in this spec is verifiable against source; the
 citations below name the file:line the claim rests on. Re-verify at
 branch base `origin/master @ e77f33e` before writing code.
 
-**Frozen `ExprProjection` shape (§3.1, §4.1):**
+**`ExprProjection` shape (§3.1, §4.1):**
 
 - Struct: `internal/query/query.go:1171-1174` (two fields).
 - `NewExprProjection` constructor:
@@ -2203,20 +2203,20 @@ branch base `origin/master @ e77f33e` before writing code.
 
 **ADR 0008 (§6):**
 
-- Freeze declaration: `docs/adr/0008-query-model-freeze-resolver-api.
+- ADR 0008: `docs/adr/0008-query-model-surface-resolver-api.
   md:7-12`.
-- Additive-only revision protocol:
-  `docs/adr/0008-query-model-freeze-resolver-api.md:144-155`.
+- Additive-only additions convention:
+  `docs/adr/0008-query-model-surface-resolver-api.md:144-155`.
 - `ContainsAggregate` in "Known deferred additions":
-  `docs/adr/0008-query-model-freeze-resolver-api.md:166-169`.
+  `docs/adr/0008-query-model-surface-resolver-api.md:166-169`.
 
 **R5 uniform-exclude posture (§2, §3.7):**
 
-- `docs/specs/resolver-stage-r5.md §4.5.3.1` (frozen model records
+- `docs/specs/resolver-stage-r5.md §4.5.3.1` (query model records
   the residual) at line 1255.
 - `docs/specs/resolver-stage-r5.md §4.5.3.2` (R5 uniform-exclude
   posture; preserved-vs-violated split) at line 1301.
-- `docs/specs/resolver-stage-r5.md §4.5.3.3` (unfreeze options —
+- `docs/specs/resolver-stage-r5.md §4.5.3.3` (change options —
   Shape B ranked first) at line 1377.
 - `docs/specs/resolver-stage-r5.md §4.5.3.4` (why not re-parse; B7
   evidence) at line 1463.
@@ -2266,8 +2266,8 @@ branch base `origin/master @ e77f33e` before writing code.
 
 ## 11. Definition of done for the spec cycle
 
-This file exists on branch `unfreeze-hk0-spec` and is committed with
-the message `docs(spec): unfreeze hk0 — ExprProjection.ContainsAggregate (Shape B)`.
+This file exists on branch `model-change-hk0-spec` and is committed with
+the message `docs(spec): change hk0 — ExprProjection.ContainsAggregate (Shape B)`.
 
 `just test` from the worktree passes (docs-only cycle; nothing
 depends on this file compiling).
@@ -2302,7 +2302,7 @@ from resolver/marshaller reality caught by first-party corroboration.
    same commit):** listed three of the four full walker stops,
    omitting `OC_PatternPredicate` (`typing.go:389`).
 4. **§7.4a golden:** `1 + n.age` column type is `{"kind": "unknown"}`
-   (frozen `promoteBase` unknown-propagation), not scalar int.
+   (`promoteBase` unknown-propagation), not scalar int.
 5. **§7.4b golden:** `n.age` column type is the house property shape
    `{"kind": "property", "type": "INT", "nullable": true}`, not
    scalar int.

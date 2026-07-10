@@ -4,7 +4,7 @@ The implementation brief for Stage 8 of the Cypher implementation of
 `query.Parser`. Eighth model evolution after Stage 7 per ADR 0004 (test-first,
 evolving until feature-complete), under the curation discipline of ADR 0003 and
 the type-interface boundary of ADR 0005. Stage 8 is the third stage of the
-ADR-0007 pre-freeze expansion beyond the read core. It **retires
+ADR-0007 before Stage 14 expansion beyond the read core. It **retires
 `ErrUnsupportedPattern`** by widening the pattern model to carry the three
 shapes the sentinel currently rejects: **named paths** (`p = ...`), **variable-
 length relationships** (`[r*1..3]`, `[*]`), and **multi-type relationships**
@@ -76,7 +76,7 @@ chosen variable in the `byVar` namespace (a user pattern element may bind
 a node named literally `__anon_edge_0`, and the collision would be silent
 under a string-only member list). The list is **shape-faithful**: every
 element the pattern chain composes appears in order (node, edge, node, edge,
-… , node), so codegen post-freeze can reconstruct the path shape from
+… , node), so codegen later can reconstruct the path shape from
 `Members()` alone without walking the pattern chain a second time.
 
 Named members reference the part's entity bindings by variable — the path
@@ -164,7 +164,7 @@ Two changes to `EdgeBinding` for the variable-length and multi-type shapes:
 
 - **Var-length edges' binding cardinality changes.** A var-length edge
   variable binds to a **list of edges** at runtime, not a single edge —
-  the crucial model question. Codegen post-freeze needs to know a
+  the crucial model question. Codegen later needs to know a
   `RETURN r` on a var-length `r` emits a list-of-edge column, not an
   edge column. The model records this via `refType` in the parser
   (`internal/query/cypher/expr.go`): when a `RefProjection`'s ref names
@@ -627,7 +627,7 @@ tagged sum makes the collision unrepresentable).
 The trade-off: `PathBinding` cannot be resolved standalone (you need
 the part to look up named members). But the alternatives are worse:
 `[]Binding` would co-own the members (two owners of the same binding,
-freeze-time concern); `[]int` (indices into `Part.Bindings`) would couple
+feature-complete concern); `[]int` (indices into `Part.Bindings`) would couple
 the path to a slice position that reordering a printer might change; a
 flat `[]string` would collide as described. The tagged sum is the
 minimal representation that carries what codegen needs (shape + named
@@ -644,7 +644,7 @@ without walking the pattern chain a second time.
 to fold the "single edge vs list-of-edges" distinction into
 `EdgeBinding.Hops()` rather than a new binding variant means the sum
 stays at three variants, and every consumer of `EdgeBinding` (including
-the resolver post-freeze) reads `Hops()` to branch. The alternative
+the resolver later) reads `Hops()` to branch. The alternative
 (a `VarLengthEdgeBinding` variant) would double the resolver's edge-
 binding logic to reproduce every read (source, target, direction,
 labels) on a second type. The cardinality axis on the existing binding
@@ -659,7 +659,7 @@ The lesser risks, recorded for completeness:
   return type now sees a query-side one. The wire format is unchanged
   for the two shared values ("node"/"edge"); "path" is new. Adding a
   consumer that mishandles a path binding is a codegen concern the
-  freeze will lock against.
+  Stage 14 will target.
 - **Zero-hops (`*0..N`) parses.** The openCypher grammar accepts a
   zero-lower-bound range literal; the runtime engine interprets zero
   hops as "the source node itself." The parser accepts the shape and
@@ -670,4 +670,4 @@ The lesser risks, recorded for completeness:
   types on the wire is not semantically meaningful (`[r:A|B]` and
   `[r:B|A]` match the same edges). Recording textual order is honest
   (the source said `A|B`, not `B|A`) and deterministic; a canonicalised
-  sorted order would be a lossy widening the freeze does not need.
+  sorted order would be a lossy widening Stage 14 does not need.

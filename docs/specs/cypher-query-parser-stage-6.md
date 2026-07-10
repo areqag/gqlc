@@ -4,12 +4,12 @@ The implementation brief for Stage 6 of the Cypher implementation of
 `query.Parser`. This is the sixth model evolution after Stage 5 per ADR 0004
 (test-first, evolving until feature-complete) and per the curation discipline
 of ADR 0003 and the type-interface boundary of ADR 0005. Stage 6 is the first
-stage of the ADR-0007 pre-freeze expansion beyond the read core. It widens the
+stage of the ADR-0007 before Stage 14 expansion beyond the read core. It widens the
 projection sum to accept the **full scalar expression grammar** (arithmetic,
 comparisons, string/list/null predicates, CASE, list and map literals with
 indexing and slicing, type-conversion functions, and unary/binary operator
 precedence in general) at RETURN / WITH position and records each projected
-column's **result type**. It closes the base type vocabulary the freeze locks:
+column's **result type**. It closes the base type vocabulary Stage 14 records:
 `LIST` and `MAP` join the scalar types the model already carries implicitly;
 `NODE` and `EDGE` are the two entity types a `RefProjection` already carries
 transitively via its binding. Temporal types (`DATE`, `TIME`, `DATETIME`,
@@ -210,7 +210,7 @@ incrementally — the constraint is landing-solo, not commit-of-one.
 
 ## 3. Type sum — what's in and what's out
 
-The `Type` sum is the freeze-locked type vocabulary the resolver reads.
+The `Type` sum is the type vocabulary the resolver reads.
 It is designed to be **incremental**: Stage 6 lands its scalar and
 collection base; Stage 7 adds temporal variants; Stage 8 adds `PATH`. No
 Stage-6 decision commits any variant that Stage 7/8 would need to widen or
@@ -247,7 +247,7 @@ restructure.
   legal), so a fully typed map would immediately need per-key typing,
   which reintroduces the expression tree the model curates out
   (ADR 0003). `TypeMap` carries the shape "this is a map"; the resolver
-  types keys post-freeze if it needs to.
+  types keys later if it needs to.
 - `TypeNode` — a whole-entity `RefProjection` whose `Ref` names a node
   binding. Not directly constructible from an expression literal (no
   node-literal syntax exists); reached only via `RefProjection.Type()`.
@@ -300,7 +300,7 @@ weighed:
 - Against parameterisation: it commits the parser to computing an
   element type it cannot always compute (mixed-element list). Rejected:
   a mixed list types as `TypeList(TypeUnknown)`, honest and correct —
-  the resolver widens or complains post-freeze. This is not a promise
+  the resolver widens or complains later. This is not a promise
   the parser cannot keep; it is a "I cannot tell" the parser records
   once and consistently.
 - Against non-parameterisation: it would collapse `LIST<INT>` and
@@ -312,7 +312,7 @@ weighed:
   Parameterisation wins.
 
 `TypeMap` is intentionally *not* parameterised (see §3's `TypeMap`
-paragraph). If a dialect later gains typed maps the freeze ADR can
+paragraph). If a dialect later gains typed maps ADR 0008 can
 revisit.
 
 ---
@@ -333,7 +333,7 @@ Stage 6 widens the projection surface, and rich expressions may contain
 - **Extend the `Use` sum with an `ExprUse` variant.** Chosen. `ExprUse`
   records that the parameter appears inside an expression whose result
   type the model carries; the parameter's own type is inferred from the
-  expression it participates in (the resolver's job, post-freeze). At
+  expression it participates in (the resolver's job, later). At
   the parser boundary, `ExprUse` carries just the `Type` of the enclosing
   projection column and a discriminator for the position (a projection
   vs a WHERE expression). This keeps the closed-sum discipline of `Use`
@@ -502,7 +502,7 @@ needed for the deleted sentinel.
 4. Documentation: this spec; CONTEXT.md `Type` / `Result type` entries +
    revised `Projection` / `Return item`; ADR 0003 note.
 5. Beads: `gqlc-97z` closed; the resolver-side "type inference over the
-   frozen `Type` sum" follow-up filed or confirmed to cover Stage-6
+   `Type` sum" follow-up filed or confirmed to cover Stage-6
    work (a resolver-side bead already exists for Stage-4 grouping;
    Stage 6's follow-up mirrors that shape).
 
@@ -533,7 +533,7 @@ fraction of Stage-6 projections type as `TypeUnknown` — every property
 lookup, every function call, every aggregate, every arithmetic
 expression touching a property, every list mixing types, every
 NULL-participating expression. On the wire this shows up as many
-`"type": "unknown"` values, and the freeze locks that vocabulary.
+`"type": "unknown"` values, and Stage 14 records that vocabulary.
 
 The honest question: does the resolver have enough information from
 `TypeUnknown` + touched-refs to produce a typed codegen output? For
@@ -572,10 +572,10 @@ Two mitigations, in decreasing order of confidence:
 The lesser risks, recorded for completeness:
 
 - **`TypeMap` unparameterised** — noted in §3. If dialects gain typed
-  maps, revisit at freeze.
+  maps, revisit later.
 - **NULL propagation** — the parser refuses to compute it; every
   NULL-participating expression types as `TypeUnknown`. Might be
-  worth a nullability bit on `Type` at freeze if the resolver proves
+  worth a nullability bit on `Type` at Stage 14 if the resolver proves
   it consistently over-conservatively rejects. Cheap widening.
 - **`ExprUse` and grouping semantics** — a projection-position
   parameter and a WHERE-position parameter both type from their

@@ -1,26 +1,26 @@
-# Model unfreeze — `Use → Part` attribution
+# Model change — `Use → Part` attribution
 
-The implementation brief for cycle **gqlc-fvo** of the model-unfreeze
+The implementation brief for cycle **gqlc-fvo** of the model-additions
 campaign: an additive `part int` axis on every `Use` variant
 (`PropertyUse`, `ExprUse`, `ClauseSlotUse`), populated parser-side
 during `addParameterUse` from the branch-relative index of the
 Part the Use lexically occurs in, closing the R5 §4.2.4
 any-valid-witness soundness gap
 (`docs/specs/resolver-stage-r5.md §4.2.4`) without touching the
-frozen wire shape's zero-value semantics.
+wire shape's zero-value semantics.
 
 This brief is the **contract for the whole gqlc-fvo cycle**: it spans
-the spec PR (this file), the unfreeze PR (model + parser +
+the spec PR (this file), the model-change PR (model + parser +
 ADR 0008 amendment + parser-test rebaseline; resolver untouched
 and green), and the resolver-widening PR (`witnessAcrossScopes`
 narrows from any-valid-witness to lexical-Part witness; new
 discriminating invalid fixture + preserved byte-identity over
 every pre-existing resolver golden). Both code PRs land under
-ADR 0008's post-freeze revision protocol
-(§Post-freeze revision protocol) — additive-only, dated amendment,
+ADR 0008's later additions convention
+(§Additions since Stage 14) — coordinated change with consumers, dated amendment,
 golden rebaseline whose diff shows only the new surface.
 
-The four other unfreeze beads (`gqlc-hk0` — CLOSED,
+The four other change beads (`gqlc-hk0` — CLOSED,
 `gqlc-0ig`, `gqlc-ay9`, `gqlc-5xg`) and codegen are **out of
 scope** — this campaign closes fvo alone. See §9 for the non-goals
 table.
@@ -31,9 +31,9 @@ table.
 
 Spec cycle (Cycle 1) — this PR:
 
-- `docs/specs/unfreeze-fvo-use-part.md` — this file.
+- `docs/specs/model-change-fvo-use-part.md` — this file.
 
-Unfreeze cycle (Cycle 2, follow-up PR):
+Cycle ( 2, follow-up PR):
 
 - `internal/query/query.go` — one additive field
   `part int` on each of `PropertyUse`, `ExprUse`, `ClauseSlotUse`;
@@ -76,7 +76,7 @@ Unfreeze cycle (Cycle 2, follow-up PR):
   `grep -c "NewPropertyUse\|NewExprUse\|NewClauseSlotUse" internal/query/cypher/parser_test.go`
   at branch base `baba282`. §4.3 enumerates every pin; §4.4 covers
   the golden-corpus rebaseline.
-- `docs/adr/0008-query-model-freeze-resolver-api.md` — one dated
+- `docs/adr/0008-query-model-surface-resolver-api.md` — one dated
   amendment note (top of the file, ADR 0003 stage-note convention)
   recording the `Use → Part` axis's adoption. The "Known deferred
   additions" list gains a new closed-out entry for
@@ -89,7 +89,7 @@ Unfreeze cycle (Cycle 2, follow-up PR):
   a Part index ≥ 1. Every golden is byte-for-byte identical.
   §4.4 pins the fence.
 
-Resolver-widening cycle (Cycle 3, follow-up PR after the unfreeze PR
+Resolver-widening cycle (Cycle 3, follow-up PR after the model-change PR
 merges):
 
 - `internal/resolver/resolve.go:750-811` — `witnessAcrossScopes`
@@ -145,7 +145,7 @@ the residual: **"Cross-Part parameter Use where the true attributed
 Part would reject but another same-name Part admits — Use→Part
 attribution gap (§4.2.4): silently false-admitted under
 any-valid-witness (parameter type is the unified valid witnesses)"**.
-The recorded remediation is a model unfreeze — this cycle.
+The recorded remediation is a model change — this cycle.
 
 ADR 0008's "Known deferred additions" registered several axes; this
 cycle's is the successor to R5's escape hatch (per R7 §7.1.1
@@ -193,7 +193,7 @@ to lexical-Part witness (§7.1).
   recorded on the record even if the R5 resolver would not consult
   it, and a future R-later stage that widens the resolver to
   discriminate `ExprUse` positions per Part (e.g. per §7.6's
-  gqlc-lta family) would need a re-unfreeze cycle otherwise. One
+  gqlc-lta family) would need a re-model-change cycle otherwise. One
   cycle, one axis, three variants: closes the sum.
 - **Axis on `Use` at the interface level (a `Use.Part()` method,
   each variant implementing it).** Same wire and same consumption;
@@ -213,19 +213,19 @@ to lexical-Part witness (§7.1).
 Chosen: **additive `part int` field on all three `Use` variants,
 constructor + accessor per variant, omit-when-zero JSON encoding**.
 Justified against the hk0 house convention (`omit-when-zero-value`
-for post-freeze additive axes) with a divergence-audit in §4.1.3
+for later additive axes) with a divergence-audit in §4.1.3
 covering the semantic difference between "0 = no aggregate"
 (hk0's bool) and "0 = Part 0" (fvo's int).
 
 ---
 
-## 3. Mining — what the frozen model records today
+## 3. Mining — what the query model records today
 
 Every claim in §4 rests on citations here. Re-verify each file:line
 at branch base `origin/master @ baba282` before writing code — line
 numbers can drift on merge.
 
-### 3.1 `Use` — the frozen sum
+### 3.1 `Use` — the sum
 
 The interface (`internal/query/query.go:1302-1312`):
 
@@ -352,7 +352,7 @@ That is the complete pre-existing set. `PropertyUse` and
 `ClauseSlotUse` have **no** dedicated constructor or
 `Marshal…JSON` unit tests at branch base — their wire shape is
 witnessed only transitively through parser-test pins in
-`internal/query/cypher/parser_test.go` (§4.3). The unfreeze PR
+`internal/query/cypher/parser_test.go` (§4.3). The model-change PR
 adds four new zero-side unit tests (§5.1) to bring
 PropertyUse and ClauseSlotUse to parity before the widened
 constructors ship. Both pre-existing ExprUse tests stay verbatim
@@ -604,27 +604,27 @@ posture. The resolver-side branch bookkeeping (§7.2) is a
 one-function change and does not add wire surface. If a future
 corpus scenario introduces a UNION-with-Uses shape that demands
 branch attribution on the wire itself (rather than derived from
-the parameter walk), that lands under a NEW unfreeze bead.
+the parameter walk), that lands under a NEW change bead.
 
 ### 3.6 `EdgeBinding.directed` and `ExprProjection.containsAggregate` — the axis precedents
 
-**Pre-freeze always-emit precedent.** `EdgeBinding.directed`
+**Before Stage 14 always-emit precedent.** `EdgeBinding.directed`
 (Stage 5) added a boolean axis with an always-emit JSON default
-on a frozen sum variant. It emits `"directed": true` or
+on a sum variant. It emits `"directed": true` or
 `"directed": false` on every edge binding golden, unconditionally.
 Layout: field (`internal/query/query.go:378`), constructor
 (`:388-393`), accessor (`:445-447`), always-emit JSON
 (`:1497-1508`).
 
-**Post-freeze omit-when-zero precedent.** `ExprProjection.containsAggregate`
-(gqlc-hk0, `docs/specs/unfreeze-hk0-containsaggregate.md`, merged
+**After Stage 14 omit-when-zero precedent.** `ExprProjection.containsAggregate`
+(gqlc-hk0, `docs/specs/model-change-hk0-containsaggregate.md`, merged
 2026-07-06) added a boolean axis under
-the post-freeze revision protocol with an `omit-when-false` JSON
+the later additions convention with an `omit-when-false` JSON
 tag. It emits `"containsAggregate": true` only when the
 expression subtree contains an aggregate call; the false zero
 value is absent. The ADR 0008 amendment recorded the campaign
-convention: **"post-freeze additive axes emit
-omit-when-zero-value, deliberately diverging from the pre-freeze
+convention: **"later additive axes emit
+omit-when-zero-value, deliberately diverging from the before Stage 14
 always-emit precedent"**. This cycle FOLLOWS that convention —
 §4.1.3 pins the encoding — and §4.1.3.1 justifies the divergence
 from `directed`'s always-emit posture on the same
@@ -685,13 +685,13 @@ codebase — **yes**, by construction. The two consumer paths:
 
 **Alternative encodings considered.**
 
-- **`part int` always-emit** (mirror of `directed`'s pre-freeze
+- **`part int` always-emit** (mirror of `directed`'s before Stage 14
   posture). Every Use record gains a `"part": <n>` field
   unconditionally. Under this encoding, at branch base 31 Uses
   across 22 goldens gain the key with value 0 — 22 goldens
   rebaseline. Compare with omit-when-zero: 0 goldens rebaseline.
   **Rejected** — the hk0 amendment's campaign convention rules
-  this out: post-freeze additive axes emit omit-when-zero-value.
+  this out: later additive axes emit omit-when-zero-value.
   §4.1.3 pins the specific accounting.
 - **`part *int` (pointer, omit-when-nil)** — encodes "unattributed"
   explicitly as `null`. Under this shape a legacy golden could be
@@ -710,7 +710,7 @@ codebase — **yes**, by construction. The two consumer paths:
 - **`part int` always-emit + rename existing constructors to
   require Part explicitly** — the hk0 spec §3.6 called this out
   as the Stage-5 house style (`NewEdgeBinding` required
-  `directed`). **Rejected** post-freeze: rewriting every
+  `directed`). **Rejected** later: rewriting every
   parser-test pin's `NewPropertyUse` / `NewExprUse` /
   `NewClauseSlotUse` call to add a positional `0` would break
   the byte-identity of 18 assertions for no semantic gain, and
@@ -760,7 +760,7 @@ legacy shape without a wire migration.
   Parts at build time. Filed as `gqlc-fvo` (this cycle).
 
 R5 §7.1 audit table (line 2333) pins the residual as the
-model-unfreeze bead. R6 (`docs/specs/resolver-stage-r6.md §7.1.3`
+model-additions bead. R6 (`docs/specs/resolver-stage-r6.md §7.1.3`
 line 1994) and R7 (`docs/specs/resolver-stage-r7.md` lines 56-60)
 carry the gap unchanged.
 
@@ -778,7 +778,7 @@ alias-shadow — §7.4), and closes the R5 §7.1 audit-table row.
 
 ---
 
-## 4. The unfreeze — parser and model changes
+## 4. The change — parser and model changes
 
 ### 4.1 `Use` variants — the additive field
 
@@ -940,7 +940,7 @@ func (u ClauseSlotUse) MarshalJSON() ([]byte, error) {
 branch-base golden serialises to the SAME wire it emits today —
 the `"part"` key is absent because the value is 0. Golden
 rebaseline scope: **0 files**. Every parser golden is
-byte-for-bit identical after the unfreeze PR.
+byte-for-bit identical after the model-change PR.
 
 **Divergence audit against the hk0 house convention.** hk0's
 omit-when-false ruling rebaselined 20 goldens (its widened
@@ -969,7 +969,7 @@ Part-index-≥-1 Use flips a small, enumerable set of goldens
 marshaller must not leak `part: <nonzero>` outside a
 scenario-verified set; at branch base every Use is Part 0, so the
 detector must find ZERO non-zero part keys in the widened
-corpus). Run from the worktree at the unfreeze PR's branch tip,
+corpus). Run from the worktree at the model-change PR's branch tip,
 against `origin/master @ baba282`:
 
 ```
@@ -1024,7 +1024,7 @@ diff /tmp/expected.txt /tmp/changed.txt && echo "SET-EQUAL: PASS"
 
 If Fence 1 passes but Fence 2 fails, the marshaller emitted a
 non-`part` change on some golden — a formatting drift or an
-unrelated wire-shape edit that slipped in. The unfreeze PR must
+unrelated wire-shape edit that slipped in. The model-change PR must
 pass BOTH fences before landing.
 
 **Fence 3 (unit-test back-compat)** — the pre-existing
@@ -1035,7 +1035,7 @@ at branch base per §3.1.4). Its pinned JSON string carries a
 the existing pinned string bit-for-bit. `TestNewExprUse` at
 `:73` also stays verbatim (its assertions do not consult
 `Part()`). §5.1 records the four NEW zero-side tests the
-unfreeze PR adds to bring PropertyUse and ClauseSlotUse to
+model-change PR adds to bring PropertyUse and ClauseSlotUse to
 ExprUse's coverage level. §5.2 records the three new
 Part-≥-1 test cases that witness the true-side encoding.
 
@@ -1243,7 +1243,7 @@ zero-value equality (`reflect.DeepEqual` at `require.Equal`), the
 17 Part-0 pins hold bit-for-bit: `PropertyUse{ref, 0}` matches
 `PropertyUse{ref, part: 0}`; likewise for ExprUse and
 ClauseSlotUse. The remaining pin (1712) migrates from
-`NewExprUse` to `NewExprUseAt(...,1)` in the unfreeze PR — the
+`NewExprUse` to `NewExprUseAt(...,1)` in the model-change PR — the
 only mechanical parser-test change beyond the additive
 constructors.
 
@@ -1266,7 +1266,7 @@ grep -A1 "NewPropertyUse\|NewExprUse\|NewClauseSlotUse" \
   | grep -B10 "src:" | ...
 ```
 
-(The reviewer's fence for the unfreeze PR is: run the parser test
+(The reviewer's fence for the model-change PR is: run the parser test
 suite. 17 of 18 pins pass untouched (byte-identity via zero-value
 `part` field); the 1712 pin migrates from `NewExprUse` to
 `NewExprUseAt(...,1)` in the same PR — see §12 ERRATUM 1.)
@@ -1282,11 +1282,11 @@ go test -run 'TestMustParse|TestMustReject|TestNewExprUse|TestExprUseMarshalJSON
 Seventeen of the 18 parser-test pins pass without modification
 (byte-identity under `reflect.DeepEqual`; §4.3); the 1712 pin
 migrates from `NewExprUse` to `NewExprUseAt(...,1)` in the
-unfreeze PR (§12 ERRATUM 1). The two pre-existing Use unit
+model-change PR (§12 ERRATUM 1). The two pre-existing Use unit
 tests (`TestNewExprUse`, `TestExprUseMarshalJSON`) also pass
 unchanged. The seven tests §5 adds (four zero-side, three
 non-zero-side `TestNew…UseAt`) are the only test-file additions
-in the unfreeze PR.
+in the model-change PR.
 
 ### 4.4 Every parser golden — byte-identical
 
@@ -1538,7 +1538,7 @@ split into two groups:
 - §5.1 **zero-side coverage** (four new tests): PropertyUse and
   ClauseSlotUse have no dedicated constructor or `Marshal…JSON`
   unit tests at branch base (§3.1.4). The widening MUST NOT
-  leave them uncovered on the zero side, so the unfreeze PR
+  leave them uncovered on the zero side, so the model-change PR
   brings PropertyUse and ClauseSlotUse up to ExprUse's coverage
   level BEFORE ExprUse's own zero-side pins would be revalidated.
   The new tests each pin the constructor's field wiring and the
@@ -1616,7 +1616,7 @@ func TestClauseSlotUseMarshalJSON(t *testing.T) {
 ```go
 // TestNewPropertyUseAt pins the widened Use variant per ADR 0008 amendment
 // 2026-07-06: the Part axis carries through the constructor, the accessor,
-// and the wire shape as an omit-when-zero key (post-freeze convention:
+// and the wire shape as an omit-when-zero key (wire convention:
 // additive axes emit omit-when-zero-value).
 func TestNewPropertyUseAt(t *testing.T) {
     u := query.NewPropertyUseAt(query.Ref{Variable: "a", Property: "title"}, 1)
@@ -1700,11 +1700,11 @@ newest amendments on top, older amendments below).
 Verbatim text:
 
 ```
-> _Amendment (2026-07-06, gqlc-fvo unfreeze cycle): the
+> _Amendment (2026-07-06, gqlc-fvo model-change cycle): the
 > Use → Part attribution axis on `PropertyUse` / `ExprUse` /
 > `ClauseSlotUse` — recorded implicitly as the R5 §4.2.4
 > follow-up bead — is **adopted** under this ADR's
-> additive-only revision protocol. The R5-shipped
+> coordinated change with consumers. The R5-shipped
 > "any-valid-witness" rule
 > (`internal/resolver/resolve.go:750-811`) was an honest
 > workaround for the wire's missing Part attribution; the
@@ -1736,25 +1736,25 @@ Verbatim text:
 > priming-and-swap discipline of `EnterOC_SingleQuery` /
 > `EnterOC_With` / `EnterOC_StandaloneCall`. The JSON encoding
 > is **omit-when-zero-value** (`,omitempty`), following the
-> post-freeze convention this ADR's hk0 amendment established
+> wire convention this ADR's hk0 amendment established
 > for additive axes. The Use interface stays sealed at one
 > method (`isUse()`); Part attribution is a per-variant
 > field-and-accessor concern. See
-> `docs/specs/unfreeze-fvo-use-part.md` for the full contract,
+> `docs/specs/model-change-fvo-use-part.md` for the full contract,
 > the emission-site table, the zero-golden rebaseline
 > accounting, the reversed alias-shadow discriminating fixture,
 > and the semantic-diff-only fence commands._
 ```
 
 The bullet in "Known deferred additions"
-(`docs/adr/0008-query-model-freeze-resolver-api.md:193-208`) is
+(`docs/adr/0008-query-model-surface-resolver-api.md:193-208`) is
 updated in the same PR — a new bullet lands alongside the hk0
 close-out entry:
 
 ```
 - **`Use.Part` attribution axis on `PropertyUse` / `ExprUse` /
   `ClauseSlotUse`** — adopted 2026-07-06 (see the amendment
-  note above and `docs/specs/unfreeze-fvo-use-part.md`).
+  note above and `docs/specs/model-change-fvo-use-part.md`).
   Populated parser-side by `addParameterUse` from
   `l.currentPartIndex()`; consumed by the resolver's
   `witnessAcrossScopes` (`internal/resolver/resolve.go:750-811`)
@@ -1767,17 +1767,17 @@ close-out entry:
 ```
 
 No other ADR text changes. ADR 0003, ADR 0004, ADR 0006, and
-ADR 0009 are untouched — the freeze contract's shape and the
+ADR 0009 are untouched — the ADR 0008 record's shape and the
 resolver's staged-build discipline are unaffected by the additive
-axis. The freeze protocol itself is exercised, not amended.
+axis. The additions convention itself is exercised, not amended.
 
 ---
 
-## 7. Resolver widening — the follow-up PR after the unfreeze merges
+## 7. Resolver widening — the follow-up PR after the change merges
 
 The resolver widening is spec'd here but LANDS as a separate PR
-after the unfreeze PR merges. It cannot bundle with the unfreeze
-because the unfreeze PR's fence is "resolver stays byte-identical"
+after the model-change PR merges. It cannot bundle with the change
+because the model-change PR's fence is "resolver stays byte-identical"
 (§8) — the widening PR adds one new invalid fixture (§7.4) and
 preserves every pre-existing fixture's byte-identity contract via
 the enumeration in §7.5.
@@ -2004,7 +2004,7 @@ func unifyParameterUsesAcrossBranches(params []query.Parameter, branches []query
             // §7.2.1: witness against branch 0's scopes. Sound for every
             // branch-base fixture (no UNION-with-Uses). If a future
             // corpus scenario adds cross-branch parameter Uses, a new
-            // unfreeze cycle adds a `branch int` axis on the Use record.
+            // model-change cycle adds a `branch int` axis on the Use record.
             branchScopes := tables[0]
             ws, err := witnessAcrossScopes(u, branchScopes, s)
             if err != nil {
@@ -2045,7 +2045,7 @@ branch). Under a hypothetical UNION-with-Uses scenario, a Use in
 branch 1 would witness against branch 0's scopes — potentially
 false-admitting or false-rejecting.
 
-**Why deferred, not closed.** ADR 0008's revision protocol asks
+**Why deferred, not closed.** ADR 0008's additions convention asks
 "is the change forced by the corpus?" Zero branch-base fixtures
 force it. Closing the gap requires either (a) adding a
 `branch int` axis to every Use record (a second cycle of this
@@ -2069,7 +2069,7 @@ TCK scenario forces it.
 **Actual rule (post-fvo) — lexical-Part witness.** `query.Query`'s
 `Parameter.Uses` slice carries a Ref (variable + optional
 property) AND a Part index (fvo per ADR 0008 amendment
-2026-07-06 — see `docs/specs/unfreeze-fvo-use-part.md`). The
+2026-07-06 — see `docs/specs/model-change-fvo-use-part.md`). The
 resolver's `witnessAcrossScopes` reads `u.Part()` and witnesses
 against `branchScopes[u.Part()]` exactly once — the scope of the
 Part the parser attributed the Use to at emission time. If the
@@ -2084,7 +2084,7 @@ AS a MATCH (a:Person) WHERE a.title = $p` shape — where the
 lexical Part 1 has `a: Person` (no `title`), but the pre-fvo
 resolver would silently witness against Part 0's `a: Post` (which
 has `title`) — now fires `ErrUnknownProperty` honestly. The
-witness §7.4 of `docs/specs/unfreeze-fvo-use-part.md` pins the
+witness §7.4 of `docs/specs/model-change-fvo-use-part.md` pins the
 discriminating fixture.
 
 `ClauseSlotUse` and `ExprUse` remain Part-agnostic in their type
@@ -2094,7 +2094,7 @@ today.
 ```
 
 The "Why this is not perfectly sound" paragraph retires; the
-"The soundness gap is a frozen-model deficiency, not a resolver
+"The soundness gap is a model gap, not a resolver
 bug" paragraph retires. The R5 §7.1 audit-table row (line 2333)
 updates: the "silently false-admitted" cell becomes "closed by
 gqlc-fvo (2026-07-06)" and the remediation column points at
@@ -2300,7 +2300,7 @@ same-name shapes), it matches by INDEX.
 
 **Algorithm — as shipped** (see §12 ERRATUM 2; the pre-merge
 sketch below the errata's dividing line was replaced during
-PR #118 implementation). The frozen query model does not let a
+PR #118 implementation). The query model does not let a
 per-Query traversal count WHERE-body Uses per Part (they leave
 no footprint on `Part.Bindings` / `Part.Returns` /
 `Part.Effects` — `Parameter.Uses` lives at Query level only), so
@@ -2360,7 +2360,7 @@ fallback is not equivalent to a `branch int` axis:
   with branch 0 stopping at Part 0 is spuriously rejected.
 
 Closing both requires an additive `branch int` axis on `Use`
-records under the ADR 0008 revision protocol (or equivalent
+records under the ADR 0008 additions convention (or equivalent
 branch attribution), then deleting the cursor + fallback recovery.
 Filed as **gqlc-qcc** for a future cycle.
 
@@ -2496,7 +2496,7 @@ The gqlc-fvo campaign lands in three PRs, in this order:
 1. **Spec PR** (this file). No code change. `just test` and
    `just lint-new` from the worktree are trivially green
    (docs-only).
-2. **Unfreeze PR** — model + parser + ADR 0008 amendment. Resolver
+2. **Change PR** — model + parser + ADR 0008 amendment. Resolver
    **untouched**; resolver test suite fully green. The specific
    fence:
    - `internal/query/query.go` gains three fields + three
@@ -2517,7 +2517,7 @@ The gqlc-fvo campaign lands in three PRs, in this order:
    - `internal/query/cypher/parser_test.go` — zero pins flip
      (§4.3: every use is in Part 0, Go zero-value equality
      preserves each assertion).
-   - `docs/adr/0008-query-model-freeze-resolver-api.md` — the
+   - `docs/adr/0008-query-model-surface-resolver-api.md` — the
      amendment note and the "Known deferred additions" edit.
    - `internal/resolver/*` — untouched. The 118 resolver
      `.cypher.validated.golden.json` fixtures stay byte-identical
@@ -2558,7 +2558,7 @@ Verified in hk0 §8 by inspection of `internal/resolver/validated.go`;
 same conclusion holds here. Resolver goldens stay byte-identical
 across PR 2.
 
-Confirmed: the resolver stays green through the unfreeze PR with
+Confirmed: the resolver stays green through the model-change PR with
 the field present but unconsumed.
 
 ---
@@ -2569,12 +2569,12 @@ The following are explicitly OUT OF SCOPE of the gqlc-fvo campaign:
 
 | Bead | Subject | Why out of scope |
 |---|---|---|
-| gqlc-hk0 | ExprProjection.ContainsAggregate axis (Shape B) — CLOSED at PR #113 | Different axis (grouping-key discriminator on ExprProjection); different frozen-model gap. Cycle merged 2026-07-06. |
-| gqlc-0ig | (as filed, R7 close-out — verify against `bd show`) | Filed alongside R7. Separate unfreeze cycle. |
-| gqlc-ay9 | R4 nullability under-approximation Class A — OPTIONAL-clause-sibling | Different subsystem (nullability, not parameter attribution). Different frozen-model gap. |
-| gqlc-5xg | R4 nullability under-approximation Class B — same-Part re-MATCH missing-witness | Different subsystem. Different frozen-model gap. |
+| gqlc-hk0 | ExprProjection.ContainsAggregate axis (Shape B) — CLOSED at PR #113 | Different axis (grouping-key discriminator on ExprProjection); different model gap. Cycle merged 2026-07-06. |
+| gqlc-0ig | (as filed, R7 close-out — verify against `bd show`) | Filed alongside R7. Separate model-change cycle. |
+| gqlc-ay9 | R4 nullability under-approximation Class A — OPTIONAL-clause-sibling | Different subsystem (nullability, not parameter attribution). Different model gap. |
+| gqlc-5xg | R4 nullability under-approximation Class B — same-Part re-MATCH missing-witness | Different subsystem. Different model gap. |
 | **Codegen** | Consumer of `ValidatedQuery` — codegen ADR post-R7 | ADR 0008 §Consequences: codegen is downstream of the resolver; the resolver-widening PR delivers the corrected parameter-Use attribution wire, and codegen consumes it under a future ADR. |
-| **`Use.Branch` axis** | Adding a `branch int` field to each Use variant | §3.5 rejects the axis at this cycle: zero branch-base fixtures force it; the branch-recovery pass at §7.2.2 handles the corpus. If a future TCK bump adds a UNION-with-Uses scenario that defeats the pass, a NEW unfreeze bead adds the axis. |
+| **`Use.Branch` axis** | Adding a `branch int` field to each Use variant | §3.5 rejects the axis at this cycle: zero branch-base fixtures force it; the branch-recovery pass at §7.2.2 handles the corpus. If a future TCK bump adds a UNION-with-Uses scenario that defeats the pass, a NEW change bead adds the axis. |
 | **`ExprInCallArg` position + Part.Calls axis** (R7's CALL-arg attribution — the CHILD of fvo per R7 §7.1.1) | R7's file-at-close-out follow-up | Deferred to a NEW bead (per R7 §7.1.1 recommendation). fvo lands the parent attribution primitive; the CALL-arg cycle builds on it. |
 | **Widening the ClauseSlotUse or ExprUse witness on `Part()`** | Making the two Part-agnostic variants' witnesses vary by Part | §7.1 preserves the R5 semantics for both variants: they contribute a witness independent of any Part's scope. Widening either would be a semantic change on top of the additive axis; not in scope. Filed at close-out (§7.6) if a downstream consumer demands it. |
 | **Semantic-scope attribution (WITH…WHERE aliased-shadow residual)** — file at close-out as candidate follow-up bead | The lexical-Part axis fvo adds diverges from Cypher's post-projection-scope evaluation for the aliased-projection shadow shape (§7.6.1). Under the shape `MATCH (a:Post) WITH a.title AS a WHERE a.x = $p RETURN a`, `$p`'s PropertyUse attributes to Part 0 (`a: Post`) where a member access on `x` may admit; semantically the WHERE evaluates against the post-projection `a: STRING`. | Closing this residual requires a scope-attribution axis (not a Part-attribution axis) — a distinct model change from fvo's. No branch-base resolver-valid golden exercises the shape; no regression versus branch base (any-valid-witness admits the same shape). Filed at close-out as a candidate follow-up; the widened resolver honestly records the residual in §7.6.1 and the ADR 0008 amendment (§6). |
@@ -2594,7 +2594,7 @@ Every factual claim in this spec is verifiable against source; the
 citations below name the file:line the claim rests on. Re-verify at
 branch base `origin/master @ baba282` before writing code.
 
-**Frozen `Use` variants (§3.1, §4.1):**
+**`Use` variants (§3.1, §4.1):**
 
 - `Use` interface: `internal/query/query.go:1310-1312`.
 - `PropertyUse` struct: `internal/query/query.go:1319-1321`;
@@ -2681,16 +2681,16 @@ branch base `origin/master @ baba282` before writing code.
 
 **ADR 0008 (§6):**
 
-- Freeze declaration:
-  `docs/adr/0008-query-model-freeze-resolver-api.md:39-48`.
-- Additive-only revision protocol: `:179-207`.
+- ADR 0008:
+  `docs/adr/0008-query-model-surface-resolver-api.md:39-48`.
+- Additive-only additions convention: `:179-207`.
 - hk0 amendment (top-of-file precedent for this cycle's
   amendment): `:3-37`.
 - "Known deferred additions" list: `:193-207`.
 
 **hk0 house convention (§3.6, §4.1.3):**
 
-- Spec: `docs/specs/unfreeze-hk0-containsaggregate.md`, complete
+- Spec: `docs/specs/model-change-hk0-containsaggregate.md`, complete
   file. Section references quoted throughout this brief.
 
 **Justfile recipes (§8):**
@@ -2750,9 +2750,9 @@ branch base `origin/master @ baba282` before writing code.
 
 ## 11. Definition of done for the spec cycle
 
-This file exists on branch `unfreeze-fvo-spec` and is committed
+This file exists on branch `model-change-fvo-spec` and is committed
 with the message
-`docs(spec): unfreeze fvo — Use→Part attribution`.
+`docs(spec): change fvo — Use→Part attribution`.
 
 `just test` from the worktree passes (docs-only cycle; nothing
 depends on this file compiling).
@@ -2770,7 +2770,7 @@ the spec PR does not close it.
 ## 12. Errata (2026-07-07, cycle close-out)
 
 Two spec-text defects surfaced during the adversarial
-implementation cycles (PRs #117 unfreeze, #118 resolver widening),
+implementation cycles (PRs #117 change, #118 resolver widening),
 corrected in place above after both PRs merged. Neither affected
 landed code — each was a spec-text divergence from listener /
 resolver reality caught by first-party corroboration.
@@ -2803,7 +2803,7 @@ resolver reality caught by first-party corroboration.
    §7.6.1 residual and §7.7).
 2. **§7.2.2 branch-recovery algorithm sketch:** the sketched
    `countUsesInBranch(branch, param)` is unimplementable from the
-   frozen model. Per-branch Use counting requires observing every
+   query model. Per-branch Use counting requires observing every
    emission site, but WHERE-body Uses leave no footprint on
    `Part.Bindings` / `Part.Returns` / `Part.Effects` —
    `Parameter.Uses` lives at Query level only, so a per-branch
@@ -2828,4 +2828,4 @@ resolver reality caught by first-party corroboration.
    recovers from `ErrUnknownProperty`, so a Use genuinely in
    branch 1 Part 1 (with branch 0 shorter) is spuriously rejected.
    Closing both requires a `branch int` axis on `Use` records under
-   ADR 0008 revision protocol, filed as **gqlc-qcc**.
+   ADR 0008 additions convention, filed as **gqlc-qcc**.

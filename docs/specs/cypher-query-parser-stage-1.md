@@ -112,7 +112,7 @@ D2, D3 — unchanged.
 > Every `Parameter` has ≥1 `Use`, and every `Use` is a closed-sum member
 > (`PropertyUse` or `ClauseSlotUse`). Mixed-kind uses on one `Parameter`
 > are allowed at parse time — the resolver judges type unification
-> post-freeze (ADR 0003).
+> later (ADR 0003).
 
 The deferred list shrinks to: parameter-in-arithmetic; bare-predicate
 params; param-vs-param/literal; `a.prop IN $p`; params nested in

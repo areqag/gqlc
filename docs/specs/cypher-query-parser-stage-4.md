@@ -148,14 +148,14 @@ UnionKind    = UnionDistinct | UnionAll      (int-backed, stringer)
   invariant `Query` already carries today as a builder-maintained product (its
   own `Returns`-empty-iff-`ReturnsAll` rule — `internal/query/query.go`). Adding
   a smart constructor for the part would mean either (a) `Query` should have had
-  one too and didn't — an inconsistency to fix *project-wide* in the freeze ADR,
+  one too and didn't — an inconsistency to fix *project-wide* in ADR 0008,
   not to introduce unilaterally for one new type mid-evolution, or (b) treating
   arity invariants as sum-grade, which over-applies the discipline. The
   "make illegal states unrepresentable" value (commit #11) is satisfied by the
   builder being the *sole writer* and `-update` goldens proving the invariant
   holds across the whole corpus — the same guarantee `Query` relies on. **Mirror
   `Query`: exported fields, builder-maintained, no smart constructor.** If the
-  freeze ADR later decides product invariants deserve constructors, it converts
+  ADR 0008 later decides product invariants deserve constructors, it converts
   `Query`, `Ref`, `ReturnItem`, `QueryBranch` and `QueryPart` together, as one
   consistent policy.
 - **Why parts carry their own bindings.** A binding is scoped: `MATCH (a) WITH
@@ -354,7 +354,7 @@ the discriminator. The residual risk is narrower than the draft implied: it is
 implicit group key), not entity-vs-scalar carry, and that risk is identical to
 Stage 3's recorded weakest point (an aggregate's `[]Ref`-only payload may need
 reopening). That is acceptable only because ADR 0004 keeps the model unlocked
-until freeze and no consumer is attached yet. The discipline that keeps this
+until Stage 14 and no consumer is attached yet. The discipline that keeps this
 safe is the same as every prior stage: refuse to model the expression tree or
 the grouping key; record structure and named projection items, and let the
 resolver chain types.

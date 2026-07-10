@@ -1,6 +1,6 @@
-# Model unfreeze — OPTIONAL-group membership on Binding
+# Model change — OPTIONAL-group membership on Binding
 
-The implementation brief for cycle **gqlc-ay9** of the model-unfreeze
+The implementation brief for cycle **gqlc-ay9** of the model-additions
 campaign (Cycle 4, after hk0 / fvo / 0ig): an additive
 `OptionalGroup int` axis on `query.NodeBinding` and
 `query.EdgeBinding`, populated parser-side by the existing OPTIONAL
@@ -14,13 +14,13 @@ golden is byte-identical under the campaign's omit-when-zero-value
 convention (ADR 0008, hk0 amendment).
 
 This brief is the **contract for the whole gqlc-ay9 cycle**: it spans
-the spec PR (this file), the unfreeze PR (model + parser + ADR 0008
+the spec PR (this file), the model-change PR (model + parser + ADR 0008
 amendment + parser-pin and parser-golden rebaseline; resolver
 untouched and green), the resolver-widening PR (group-closure
 demotion in `demoteNullableInPlace`; two existing resolver goldens
 rebaseline, four new fixtures land), and a docs-errata PR retiring
 the "silently under-demoted / gqlc-ay9" rows across the R4–R7 stage
-specs. All code PRs land under ADR 0008's post-freeze revision
+specs. All code PRs land under ADR 0008's later revision
 protocol — additive-only, dated amendment, golden rebaseline whose
 diff shows only the new surface.
 
@@ -40,9 +40,9 @@ rows stay pointed at gqlc-5xg verbatim (§8.6).
 
 Spec cycle (Cycle 1) — this PR:
 
-- `docs/specs/unfreeze-ay9-optional-group.md` — this file.
+- `docs/specs/model-change-ay9-optional-group.md` — this file.
 
-Unfreeze cycle (Cycle 2, follow-up PR):
+Cycle ( 2, follow-up PR):
 
 - `internal/query/query.go` — one additive field `optionalGroup int`
   on `NodeBinding` (tail-append after `nullable`, struct at
@@ -76,7 +76,7 @@ Unfreeze cycle (Cycle 2, follow-up PR):
   (`listener.go:164`) is replaced by `rawBinding.optionalGroup int`
   at both literal sites (`pattern.go:297` anonymous edge, `:389`
   mergeBinding first-introduction). All unexported parser-internal
-  surface — the frozen contract is untouched. §4.2.2.
+  surface — the ADR 0008 record is untouched. §4.2.2.
 - `internal/query/cypher/build.go` — `toBinding`
   (`build.go:263-284`) routes through the InGroup constructors when
   `rb.optionalGroup > 0` (deriving `nullable := optionalGroup > 0`,
@@ -95,7 +95,7 @@ Unfreeze cycle (Cycle 2, follow-up PR):
   each such binding gains an `"optionalGroup"` key), **3099
   byte-identical**. §4.4 pins the full 100-file set inline and the
   discovery script that regenerates it.
-- `docs/adr/0008-query-model-freeze-resolver-api.md` — one dated
+- `docs/adr/0008-query-model-surface-resolver-api.md` — one dated
   amendment note (2026-07-07, top of file) plus one closed-out
   "Known deferred additions" entry. `OptionalGroup` does **not**
   appear on the ADR's current Known-deferred-additions list
@@ -104,7 +104,7 @@ Unfreeze cycle (Cycle 2, follow-up PR):
   the amendment adopts the axis directly under the additive rule,
   the same move 0ig made for `CallBinding.Args`. Verbatim text §7.
 
-Resolver-widening cycle (Cycle 3, follow-up PR after the unfreeze
+Resolver-widening cycle (Cycle 3, follow-up PR after the change
 PR merges):
 
 - `internal/resolver/resolve.go` — `demoteNullableInPlace`
@@ -199,7 +199,7 @@ honours neither on re-occurrence, matching the ADR 0006
 discipline stated at `pattern.go:379-384`).
 
 The JSON encoding is **omit-when-zero-value** (`,omitempty` on an
-`int`), following the post-freeze convention hk0 established
+`int`), following the wire convention hk0 established
 (omit-when-false), fvo continued (omit-when-zero-int — the direct
 precedent: `Use.part`), and 0ig continued (omit-when-zero-length).
 A required binding's wire is byte-identical to the pre-ay9 wire;
@@ -218,7 +218,7 @@ Grounding, variant by variant (all verified at branch base):
   in an OPTIONAL clause (`OPTIONAL MATCH p = (a)-[r]->(b)`)
   contributes its group facts via its member node/edge bindings,
   which the demotion table already keys. Adding a group to
-  `PathBinding` would contradict the frozen Stage-8 posture for no
+  `PathBinding` would contradict the Stage-8 posture for no
   consumer benefit — the axis is **not** added.
 - **`UnwindBinding`** — `Nullable()` hardcoded `false`
   (`query.go:803-806`); UNWIND has no OPTIONAL form in the vendored
@@ -338,25 +338,25 @@ counter.
 
 Two precedents exist:
 
-- **Pre-freeze trailing-param** (`EdgeBinding.directed`, Stage 5):
+- **Before Stage 14 trailing-param** (`EdgeBinding.directed`, Stage 5):
   append a parameter to the existing constructors and touch every
   call site.
-- **Post-freeze new-ctor** (hk0 / fvo `NewPropertyUseAt` et al. /
+- **After Stage 14 new-ctor** (hk0 / fvo `NewPropertyUseAt` et al. /
   0ig `NewCallBindingWithArgs`): add a new constructor; preserve
   the existing one verbatim (0ig: `NewCallBinding` forwards through
   `NewCallBindingWithArgs` with `args=nil`, `query.go:891-893`).
 
 **Decision: new-ctor.** Two grounds, in order of force:
 
-1. **Protocol.** ADR 0008's revision protocol is additive-only —
+1. **Protocol.** ADR 0008's additions convention is additive-only —
    "never rename, remove, or re-type what exists" — over "the
    exported Go API of `internal/query` (types, marker methods,
    constructors, accessors)". Appending a parameter to
    `NewNullableNodeBinding` / `NewNullableEdgeBinding` /
-   `NewNullableVarLengthEdgeBinding` re-types three frozen exported
+   `NewNullableVarLengthEdgeBinding` re-types three exported
    functions: an incompatible API change requiring a superseding
-   ADR. The `directed` precedent was Stage 5, pre-freeze; it is not
-   available post-freeze. Every post-freeze cycle (hk0, fvo, 0ig)
+   ADR. The `directed` precedent was Stage 5, before Stage 14; it is not
+   available later. Every later cycle (hk0, fvo, 0ig)
    used new-ctor for exactly this reason.
 2. **Blast radius, counted.** Existing `NewNullable*` call sites at
    branch base (declarations excluded): trailing-param would edit
@@ -436,7 +436,7 @@ strictly stronger than any consumer requires.
   }
   ```
 
-  post-unfreeze (tail-append, §4.1.3):
+  post-change (tail-append, §4.1.3):
 
   ```json
   {
@@ -450,7 +450,7 @@ strictly stronger than any consumer requires.
 
 ---
 
-## 4. The unfreeze — model and parser changes
+## 4. The change — model and parser changes
 
 ### 4.1 `internal/query/query.go`
 
@@ -487,7 +487,7 @@ Each forwards through its existing `NewNullable*` counterpart
 `optionalGroup`, after rejecting `group < 1` with an error
 (`"query: optional group id must be ≥ 1"` — model-invariant guard;
 the parser never mints 0 here). The six existing constructors are
-**byte-identical** — including doc comments — so every frozen API
+**byte-identical** — including doc comments — so every API
 consumer and every group-0 pin is untouched.
 
 Accessors:
@@ -516,9 +516,9 @@ OptionalGroup int `json:"optionalGroup,omitempty"`
 as the **last** key (node key order becomes `kind, variable,
 labels, nullable, optionalGroup`; edge: `kind, variable, labels,
 source, target, nullable, directed, hops, optionalGroup`). The
-pre-freeze always-emit convention (`nullable`, `directed`, `hops`)
+before Stage 14 always-emit convention (`nullable`, `directed`, `hops`)
 is deliberately not followed — ADR 0008's hk0 amendment fixed
-omit-when-zero-value as the post-freeze convention precisely so
+omit-when-zero-value as the wire convention precisely so
 additive cycles do not force near-total 3199-file rebaselines.
 
 ### 4.2 Parser threading
@@ -648,7 +648,7 @@ mechanical — the invocation gains `InGroup` and a trailing `1`:
 
 The remaining 149 invocations construct group-0 bindings and
 compare equal to parser output bit-for-bit (§3.4); they stay
-verbatim. Classification format for the unfreeze PR body follows
+verbatim. Classification format for the model-change PR body follows
 0ig §4.3.2: each flipped pin cited by test name + line + new group
 value.
 
@@ -765,7 +765,7 @@ golden filenames before use.
 
 #### 4.4.2 Reviewer-side fence commands
 
-From the unfreeze-PR branch tip:
+From the model-change-PR branch tip:
 
 ```sh
 # Fence A — rebaseline reproducibility: regenerate and expect no drift.
@@ -840,15 +840,15 @@ against, because it is the grammar's only OPTIONAL production
 ## 7. ADR 0008 amendment note — the dated stage note
 
 Verbatim text to add at the top of
-`docs/adr/0008-query-model-freeze-resolver-api.md`, above the 0ig
+`docs/adr/0008-query-model-surface-resolver-api.md`, above the 0ig
 note, following the established amendment format:
 
 ```markdown
-> _Amendment (2026-07-07, gqlc-ay9 unfreeze cycle): the
+> _Amendment (2026-07-07, gqlc-ay9 model-change cycle): the
 > OPTIONAL-group membership axis on `NodeBinding` / `EdgeBinding` —
 > R4 §7.5.4's **Axis 1**, filed from the R4 close-out as gqlc-ay9 —
-> is **adopted** under this ADR's additive-only revision protocol.
-> The frozen wire recorded per-binding `Nullable()` but not which
+> is **adopted** under this ADR's coordinated change with consumers.
+> The wire recorded per-binding `Nullable()` but not which
 > bindings were co-introduced by the same OPTIONAL MATCH clause, so
 > the resolver's R4 regime-(a) demotion could not propagate a proven
 > member's non-nullness to its clause siblings (Class A,
@@ -867,7 +867,7 @@ note, following the established amendment format:
 > (their `Nullable()` is not OPTIONAL-derived; a named path's group
 > facts flow through its member bindings, the Stage-8 posture). The
 > JSON encoding is **omit-when-zero-value** (`,omitempty`),
-> following the post-freeze convention this ADR's hk0 amendment
+> following the wire convention this ADR's hk0 amendment
 > established; 100 of 3199 parser goldens rebaseline, 3099 are
 > byte-identical. The Binding interface stays sealed at
 > `Kind()`/`Nullable()`/`isBinding()`; group membership is a
@@ -884,7 +884,7 @@ note, following the established amendment format:
 > change) and is filed as a follow-up bead at close-out. Class B —
 > the same-Part second-reference gap (R4 §7.5.3 item 2, Axis 2,
 > gqlc-5xg) — is a missing-witness gap this axis deliberately does
-> not close. See `docs/specs/unfreeze-ay9-optional-group.md` for the
+> not close. See `docs/specs/model-change-ay9-optional-group.md` for the
 > full contract, the 100-golden flip census with spot witnesses, the
 > constructor-strategy and id-scope decisions, and the fence
 > commands._
@@ -898,7 +898,7 @@ added closed-out, the same move the 0ig cycle made for
 ```markdown
 - **`OptionalGroup` axis on `NodeBinding` / `EdgeBinding`** —
   adopted 2026-07-07 (see the amendment note above and
-  `docs/specs/unfreeze-ay9-optional-group.md`). Populated
+  `docs/specs/model-change-ay9-optional-group.md`). Populated
   parser-side by the OPTIONAL threading through `collectPattern`
   (fresh id per OPTIONAL MATCH clause, query-scoped, minted in
   `EnterOC_Match`); consumed by the resolver's Phase D
@@ -910,9 +910,9 @@ added closed-out, the same move the 0ig cycle made for
 
 ---
 
-## 8. Resolver widening — the follow-up PR after the unfreeze merges
+## 8. Resolver widening — the follow-up PR after the change merges
 
-The unfreeze PR lands with the resolver green and unchanged: the
+The model-change PR lands with the resolver green and unchanged: the
 kernel reads `Nullable()` only, `OptionalGroup()` is populated but
 unconsumed. The widening PR then extends Phase D. This section pins
 the semantics; the PR implements them.
@@ -1152,19 +1152,19 @@ verbatim), located at branch base:
 | File | Site | Current text (abridged) |
 |---|---|---|
 | `resolver-stage-r4.md:1185` | §7.4 table | "OPTIONAL-clause-sibling demotion … silently under-demoted … §7.5.5 bead 1" |
-| `resolver-stage-r4.md` §4.4 (`:528-539`) | "Pass 2" prose | "not across OPTIONAL-clause siblings … the frozen model does not record that" |
+| `resolver-stage-r4.md` §4.4 (`:528-539`) | "Pass 2" prose | "not across OPTIONAL-clause siblings … the query model does not record that" |
 | `resolver-stage-r4.md:1534-1541` | §7.5.5 fixture note | "If bead 1 lands … that fixture's golden is updated on the widening PR" — discharge |
 | `resolver-stage-r5.md:610` | §4.1.1 table | "OPTIONAL-clause-sibling nullability under-demote … gqlc-ay9" |
 | `resolver-stage-r5.md:1718-1719` | §4.6.2 | "Class A … still under-approximates at R5. Same story: gqlc-ay9" |
 | `resolver-stage-r5.md:2311` | §7 table | "Nullability upgrades (OPTIONAL-clause-sibling …) … gqlc-ay9" |
-| `resolver-stage-r6.md:1884` | §7 table | "… gqlc-ay9 (Class A, model unfreeze — unchanged from R5)" |
+| `resolver-stage-r6.md:1884` | §7 table | "… gqlc-ay9 (Class A, model change — unchanged from R5)" |
 | `resolver-stage-r7.md:2190` | §7 table | "… gqlc-ay9 (unchanged)" |
 | `resolver-stage-r5.md:40` | §1 prose | "sibling under-approximation (gap tracked on gqlc-ay9) is also unchanged" |
 | `resolver-stage-r6.md:29` | §1 prose | "same-Part regime (b) nullability under-approximations (`gqlc-ay9`, …" |
 | `resolver-stage-r7.md:2335` | §7.1.2 prose | "R4-inherited gaps (`gqlc-ay9` Class A, … persist at R7 unchanged" |
 
-Successor wording per row: "closed by the ay9 unfreeze + widening
-(`docs/specs/unfreeze-ay9-optional-group.md`); residual cross-Part
+Successor wording per row: "closed by the ay9 change + widening
+(`docs/specs/model-change-ay9-optional-group.md`); residual cross-Part
 carry gap filed as <follow-up bead id>". The R4 §7.5.5 bead-1
 paragraph gains a dated closure note rather than deletion
 (stage-spec history stays readable, the 0ig §8.6 precedent).
@@ -1177,18 +1177,18 @@ paragraph gains a dated closure note rather than deletion
 |---|---|
 | Class B same-Part second-reference gap (Axis 2) | gqlc-5xg — separate spec cycle; boundary pinned at top and §2.5 |
 | Cross-Part group carry in `branchState` | follow-up bead filed at close-out (§2.5, §7 residual) |
-| `PathBinding` group/nullability axis | frozen Stage-8 posture (§2.3) |
+| `PathBinding` group/nullability axis | Stage-8 posture (§2.3) |
 | EXISTS-suppressed OPTIONAL clauses | Stage-11 posture unchanged; no ids minted (§4.2.1) |
 | Codegen consumption of widened nullability | future ADR |
 | apidiff CI gate | pre-existing ADR 0008 bead, unchanged by this cycle |
-| Other unfreeze beads' surfaces (`hk0`/`fvo`/`0ig` axes) | closed; untouched |
+| Other change beads' surfaces (`hk0`/`fvo`/`0ig` axes) | closed; untouched |
 
 ---
 
 ## 10. Ground-truth cross-check
 
 Every claim above rests on the citations below, all re-derived at
-branch base `56718ff` (worktree `unfreeze-ay9-spec`); counts were
+branch base `56718ff` (worktree `model-change-ay9-spec`); counts were
 produced by the scripts described in §4.4 and §4.4.1, not copied
 from prior documents.
 
@@ -1230,10 +1230,10 @@ from prior documents.
   OPTIONAL-carrying resolver fixtures (grep -il OPTIONAL).
 - Design source — `docs/specs/resolver-stage-r4.md` §4.4
   (`:492-559`), §7.4 (`:1184-1185`), §7.5 (`:1270-1541`).
-- Campaign precedents — `docs/adr/0008-query-model-freeze-resolver-api.md`
+- Campaign precedents — `docs/adr/0008-query-model-surface-resolver-api.md`
   (protocol + three amendment notes + Known-deferred list),
-  `docs/specs/unfreeze-0ig-call-args.md` (template + errata §12),
-  `docs/specs/unfreeze-fvo-use-part.md:2459` (names this axis as
+  `docs/specs/model-change-0ig-call-args.md` (template + errata §12),
+  `docs/specs/model-change-fvo-use-part.md:2459` (names this axis as
   "gqlc-ay9, Cycle 4").
 
 Spec-vs-repo divergences found while mining (carried into the
@@ -1261,7 +1261,7 @@ docs-errata cycle where they touch stage-spec text):
 The spec PR is done when:
 
 - This file lands on master under
-  `docs/specs/unfreeze-ay9-optional-group.md`.
+  `docs/specs/model-change-ay9-optional-group.md`.
 - No behavioural code changes (spec-only cycle).
 - Review explicitly ACKs the four pinned decisions: variant set
   (Node + Edge only, §2.3), constructor strategy (new InGroup
@@ -1269,6 +1269,6 @@ The spec PR is done when:
   resolver flip set (§8.3) — the last because it diverges from R4
   §7.5.5's one-golden language.
 
-The unfreeze PR (Cycle 2) then implements §4-§7 verbatim; the
+The model-change PR (Cycle 2) then implements §4-§7 verbatim; the
 resolver-widening PR (Cycle 3) implements §8; the docs-errata PR
 (Cycle 4) lands §8.6's successor prose.

@@ -93,7 +93,7 @@ AggregateFunc = AggCount | AggSum | AggCollect | AggMin | AggMax | AggAvg | AggS
   bindings" so referential integrity (every `Ref` resolves) holds.
 - `AggregateProjection` carries an `AggregateFunc` and the referenced bindings
   as `[]Ref`. The aggregate *kind* is carried (§4) because it is the one
-  function-call distinction that is type-interface-relevant pre-freeze: an
+  function-call distinction that is type-interface-relevant before Stage 14: an
   aggregate collapses rows, changing result cardinality the generated code must
   model. `count(*)` is the degenerate case — `AggCount` with empty `[]Ref`.
 
@@ -120,7 +120,7 @@ Query.Returns    []ReturnItem  // empty when ReturnsAll, else the explicit colum
 `RETURN *` does not mix with explicit items in the read core (`RETURN *, x` is a
 Stage-4-scope shape), so the two are mutually exclusive at Stage 3: when
 `ReturnsAll` is true, `Returns` is empty. The resolver expands `*` to the
-in-scope bindings post-freeze. The parser records "the author asked for every
+in-scope bindings later. The parser records "the author asked for every
 in-scope binding" without guessing the column list — the schema-agnostic posture
 of ADR 0003.
 
@@ -132,7 +132,7 @@ scope/value error below the boundary: it parse-accepts as `ReturnsAll` and is
 
 ## 4. Aggregate vs ordinary function call
 
-The distinction **is** needed pre-freeze, for one reason: an aggregate changes
+The distinction **is** needed before Stage 14, for one reason: an aggregate changes
 result **cardinality** (it collapses matched rows into groups), a type-interface
 fact the generated code models differently from a row-wise function. A
 non-aggregate function (`type(r)`, `coalesce(...)`) is row-wise; column count and
@@ -196,7 +196,7 @@ no named path, no write clause; shape is var/var.prop/literal/func/aggregate or
 `RETURN *`): the bare-aggregate and column-rename families in Return4 and Return6
 (e.g. `count(*)`, `count(*) AS c`, `RETURN n.num, count(*)`). The exact set is
 pinned by the unlock commit's `-update` run and recorded in the bead; the spec
-does not freeze scenario indices because TCK reindexing would stale them — the
+does not pin scenario indices because TCK reindexing would stale them — the
 harness's `TestSkiplistOrphans` is the guard against drift.
 
 **New skiplist group — "projection value/semantics below the boundary"** (each
@@ -245,7 +245,7 @@ disqualifying clause. Net Layer-2: +2 mustParse, −1 mustReject (return star),
    "Aggregate" entries; ADR 0003 note that the curated subset now includes the
    projection sum.
 5. Beads: `gqlc-npg` closed; a resolver-side grouping-semantics follow-up filed
-   (depends on freeze + Stage 4 WITH).
+   (depends on Stage 14 + Stage 4 WITH).
 
 ---
 
@@ -268,7 +268,7 @@ resolver/Stage-4 concern, and the openCypher rules here are subtle
 (ambiguous-aggregation errors). There is a real risk that when the resolver and
 Stage 4 arrive, `AggregateProjection`'s `[]Ref`-only payload proves insufficient
 and the variant must be reopened. That is acceptable *only* because ADR 0004
-keeps the model unlocked until freeze and no consumer is attached yet — the exact
+keeps the model unlocked until Stage 14 and no consumer is attached yet — the exact
 cost the staging plan was designed to absorb. The discipline that keeps this safe
 is refusing to model the expression tree: hold that line against every change
 that wants "just one more field."
