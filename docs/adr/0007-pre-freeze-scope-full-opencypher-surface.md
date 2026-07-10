@@ -1,42 +1,42 @@
-# Pre-freeze scope grows from the read core to the full openCypher surface
+# Parser scope grows from the read core to the full openCypher surface
 
 ADR 0004's feature-complete target — read core plus the four capabilities of
-Stages 1–5 — is no longer the freeze gate. The product goal is generating
-type-safe repository code for practically any openCypher query, **reads and
-writes**, and every capability the corpus exercises has to land in `query.Query`
-**before** the freeze (bead `gqlc-cta`). Nine further stages (6–14) extend the
-model to writes, `MERGE`, `CALL`, the full pattern surface, the remaining read
-clauses, aggregations, quantifier/existential predicates, and a typed expression
-surface. The type vocabulary — lists, maps, temporal scalars, `PATH` — becomes
-part of the frozen interface and is settled by these stages, not deferred.
+Stages 1–5 — is expanded. The product goal is generating type-safe repository
+code for practically any openCypher query, **reads and writes**, and every
+capability the corpus exercises has to land in `query.Query` before consumers
+open (bead `gqlc-cta`). Nine further stages (6–14) extend the model to writes,
+`MERGE`, `CALL`, the full pattern surface, the remaining read clauses,
+aggregations, quantifier/existential predicates, and a typed expression
+surface. The type vocabulary — lists, maps, temporal scalars, `PATH` — is
+settled by these stages, not deferred.
 
 ## Context
 
 The Stage-5 progress meter is 550 TCK read-core scenarios, 380 parse-green, 170
 PENDING via the four `ErrUnsupported*` sentinels. Every pending is valid
-openCypher the current model cannot carry; each is now in scope for the freeze.
-ADR 0004 was written when "feature-complete" meant the read core, so its
+openCypher the current model cannot carry; each is now in scope. ADR 0004 was
+written when "feature-complete" meant the read core, so its
 Stages-to-feature-complete list stops at 5 and its "out of scope throughout"
 paragraph names writes, variable-length paths, and the wider predicate tree —
 the very set the product goal now requires.
 
-Retrofitting these after the freeze is the exact anti-cascade ADR 0004 was
-written to prevent: it would reopen `query.Query` *with the resolver, codegen,
-and generated driver code already attached to it*. The cheapest time to shape
+Retrofitting these after consumers exist is the anti-cascade ADR 0004 was
+written to defer: it would revise `query.Query` *with the resolver, codegen,
+and generated driver code already coupled to it*. The cheapest time to shape
 the write-side and expression-typed model is now, while the parser is the only
 consumer.
 
 ## Considered options
 
-**Freeze at Stage 5 and add writes/expressions as post-freeze model revisions.**
-Rejected: it inverts ADR 0004's own argument. The lock is meant to precede
-consumer construction, so that model shape is decided against the corpus alone.
-Freezing at Stage 5 would lock a model everyone knows is incomplete, then
-reopen it once the resolver and codegen are written against it — cascading
-churn through the downstream pipeline for every subsequent capability. The
-freeze stops being a freeze.
+**Stop at Stage 5 and add writes/expressions as later model revisions.**
+Rejected: it inverts ADR 0004's own argument. Consumer construction is meant
+to follow model shape, so shape is decided against the corpus alone. Stopping
+at Stage 5 would commit to a model everyone knows is incomplete, then revise
+it once the resolver and codegen are coupled to it — cascading churn through
+the downstream pipeline for every subsequent capability. The discipline of
+deferring consumers stops paying rent.
 
-**Freeze at Stage 5 and support the rest by string-passthrough only.** The
+**Stop at Stage 5 and support the rest by string-passthrough only.** The
 generated code already re-executes the original query text (ADR 0005), so a
 write or a `CALL` could in principle be handed to the driver as an opaque
 string. Rejected: a `CREATE`, a `MERGE`, or a `CALL` still has a **type
@@ -48,11 +48,11 @@ no result columns to emit; the "string passthrough" strategy collapses into a
 proposal to not generate typed methods for these queries at all, which
 contradicts the product goal.
 
-**Extend Stages 1–5 to Stages 6–14 and freeze at feature-complete over the
-whole corpus.** Chosen. The build discipline of ADR 0004 — test-first,
-one-capability-per-slice, model churn cheap while the parser is the only
-consumer — is exactly the right discipline for the expanded surface. What
-changes is the endpoint, not the method.
+**Extend Stages 1–5 to Stages 6–14 and open consumers at feature-complete
+over the whole corpus.** Chosen. The build discipline of ADR 0004 —
+test-first, one-capability-per-slice, model churn cheap while the parser is
+the only consumer — is exactly the right discipline for the expanded surface.
+What changes is the endpoint, not the method.
 
 ## Decision
 
@@ -172,13 +172,13 @@ registry being a **compile-time input**, not runtime discovery.
 > `NUMBER` stays a signature-only marker (assignable-from
 > `INTEGER`-or-`FLOAT` at the argument site); the cypher-package
 > bridge maps it to `TypeUnknown` on the wire so no signature-time
-> vocabulary leaks into the freeze surface. `cypher.New` widens to
+> vocabulary leaks into `query.Type`. `cypher.New` widens to
 > `func New(opts ...Option) query.Parser` with a `WithRegistry`
 > option — `Parse`'s signature is untouched. The on-disk format
 > (YAML / JSON / `.procsig`) is intentionally deferred out of
 > Stage 14: codegen consumes `procsig.Registry` values directly, so
-> the freeze cut proceeds on the in-memory API alone; a follow-up
-> bead tracks the file surface for the CLI consumer._
+> Stage 14 lands on the in-memory API alone; a follow-up bead tracks
+> the file surface for the CLI consumer._
 
 ### Stages 6–14, ordered by dependency
 
@@ -233,39 +233,39 @@ GitHub issue it closes; the epic is `gqlc-33k` (#40).
 After Stage 14, a corpus-sweep task (`gqlc-x6u`, #51) runs the whole TCK
 (not only the read-core dirs) against the parser, resolves the remaining
 skiplist against the three buckets above, and confirms every scenario is
-either parse-green, pinned to bucket 3, or bug-tracked. The freeze
-(`gqlc-cta`) then locks `query.Query`, revises ADR 0003 and CONTEXT.md, and
-opens the resolver, codegen, and generated driver work.
+either parse-green, pinned to bucket 3, or bug-tracked. `gqlc-cta` then
+records the `query.Query` surface at that point (ADR 0008), revises ADR 0003
+and CONTEXT.md, and opens the resolver, codegen, and generated driver work.
 
 Ordering between stages is by dependency, not corpus size, and may be
 resequenced as the corpus dictates (per ADR 0004). Stage 6 is a hard
 prerequisite for Stages 9–11; Stage 12 for Stage 13; the rest are
 independent.
 
-### Type vocabulary is part of the freeze
+### Type vocabulary is settled before consumers open
 
-The freeze locks not only the model's structure but also its **type sum**.
-`LIST`, `MAP`, the six temporal scalars, and `PATH` must exist in that sum
-before `query.Query` is locked, because adding a type to the vocabulary
-after the resolver and codegen are written against it is precisely the
-downstream cascade ADR 0004 exists to prevent. Stages 6, 7, and 8 own the
-respective additions; Stage 12 owns nothing new in the type sum but adds a
-non-projecting statement kind, which is a structural completion the freeze
-also depends on.
+The parser build settles not only the model's structure but also its
+**type sum**. `LIST`, `MAP`, the six temporal scalars, and `PATH` land in
+that sum before consumers open, because adding a type to the vocabulary
+after the resolver and codegen are coupled to it is the downstream
+cascade ADR 0004 exists to defer. Stages 6, 7, and 8 own the respective
+additions; Stage 12 owns nothing new in the type sum but adds a
+non-projecting statement kind, which is a structural completion the
+consumers also depend on.
 
 ## Consequences
 
 - ADR 0004's "Stages to feature-complete" list is extended, not replaced.
   Stages 0–5 remain the read-core build, complete as of Stage 5. Stages 6–14
   extend the same build discipline (test-first, one capability per slice,
-  model unlocked) to the write side and the full expression surface. The
-  freeze gate moves to the end of Stage 14 + corpus sweep. See the amendment
-  note on ADR 0004.
+  model provisional through the build) to the write side and the full
+  expression surface. Consumers open at the end of Stage 14 + corpus sweep.
+  See the amendment note on ADR 0004.
 - **Codegen builds against a larger, later, more complete model.** The
-  freeze is delayed, but the cost of delay is bounded by the same discipline
-  ADR 0004 justifies: while the parser is the only consumer, model churn is
-  cheap. What we buy is not having to revise the model — and every consumer
-  written against it — nine more times after codegen exists.
+  consumer-open point moves later, but the cost is bounded by the same
+  discipline ADR 0004 justifies: while the parser is the only consumer,
+  model churn is cheap. What we buy is not having to revise the model —
+  and every consumer coupled to it — nine more times after codegen exists.
 - The parser gains a second compile-time input (the procedure registry)
   alongside the schema. `internal/schema` and the registry occupy the same
   role — user-authored, machine-read at generation time — so the CLI

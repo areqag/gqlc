@@ -1,22 +1,21 @@
-# `query.Query` is frozen; the resolver API is pinned
+# The `query.Query` surface + resolver API
 
-> _Amendment (2026-07-11, gqlc-5xg unfreeze cycle): the required-
-> bare-pattern re-reference axis on `NodeBinding` / `EdgeBinding` —
-> R4 §7.5.4's **Axis 2 shape (b)** (the narrower boolean, not
-> shape (a)'s `RequiredReferences []ClauseRef`), filed from the R4
-> close-out as gqlc-5xg — is **adopted** under this ADR's additive-
-> only revision protocol. The frozen wire recorded first-introduction
-> facts about each binding but not what happened to that binding
-> after: when the same variable appeared in a later same-Part
-> clause, `mergeBinding` (`internal/query/cypher/pattern.go:388-404`)
-> dedupes the re-reference and discards its shape, so the resolver
-> could not distinguish a bare re-reference (row-drop witness) from
-> an edge-chain re-reference (existing endpoint witness) or from
-> another OPTIONAL clause (no witness). Class B
-> (`docs/specs/resolver-stage-r4.md §7.5.3` item 2) was this cycle's
-> target. Each of the two node/edge Binding variants gains one
-> additive field `referencedInRequiredBarePattern bool` and one
-> accessor `ReferencedInRequiredBarePattern() bool`. **No new
+> _Amendment (2026-07-11, gqlc-5xg): the required-bare-pattern
+> re-reference axis on `NodeBinding` / `EdgeBinding` — R4 §7.5.4's
+> **Axis 2 shape (b)** (the narrower boolean, not shape (a)'s
+> `RequiredReferences []ClauseRef`), filed from the R4 close-out
+> as gqlc-5xg — is added to `query.Query`. The wire at Stage 14
+> recorded first-introduction facts about each binding but not what
+> happened to that binding after: when the same variable appeared in
+> a later same-Part clause, `mergeBinding`
+> (`internal/query/cypher/pattern.go:388-404`) dedupes the re-reference
+> and discards its shape, so the resolver could not distinguish a bare
+> re-reference (row-drop witness) from an edge-chain re-reference
+> (existing endpoint witness) or from another OPTIONAL clause (no
+> witness). Class B (`docs/specs/resolver-stage-r4.md §7.5.3` item 2)
+> was this cycle's target. Each of the two node/edge Binding variants
+> gains one additive field `referencedInRequiredBarePattern bool` and
+> one accessor `ReferencedInRequiredBarePattern() bool`. **No new
 > constructor** — the axis is a post-introduction fact
 > `mergeBinding`'s merge arm sets on the raw binding, forwarded
 > through `toBinding` via an unexported per-variant mutator
@@ -35,8 +34,8 @@
 > (path members carry the flag through their referenced node/edge
 > bindings; UNWIND has no bare-re-reference form; CALL YIELD is not
 > re-referenceable). The JSON encoding is **omit-when-false**
-> (`,omitempty`), following the post-freeze convention this ADR's
-> hk0 amendment established; **zero** of 3199 parser goldens
+> (`,omitempty`), following the wire convention this ADR's hk0
+> amendment established; **zero** of 3199 parser goldens
 > rebaseline (the TCK does not exercise the shape), all 3199 are
 > byte-identical. The Binding interface stays sealed at
 > `Kind()`/`Nullable()`/`isBinding()`; bare-ref recording is a
@@ -57,18 +56,17 @@
 > filed as a follow-up bead at close-out. Class A / gqlc-ay9 is
 > closed (2026-07-10; ADR 0008 amendment above). With gqlc-5xg
 > adopted, the R4-inherited Class B row across the R4-R7 stage
-> specs is retired in the docs-errata cycle (§8.6); the model-
-> unfreeze campaign's planned scope is fully discharged. See
+> specs is retired in the docs-errata cycle (§8.6). See
 > `docs/specs/unfreeze-5xg-required-bare-ref.md` for the full
 > contract, the 0-golden flip census, the constructor-strategy
 > and predicate-derivation decisions, and the fence commands._
 
-> _Amendment (2026-07-07, gqlc-ay9 unfreeze cycle): the
-> OPTIONAL-group membership axis on `NodeBinding` / `EdgeBinding` —
-> R4 §7.5.4's **Axis 1**, filed from the R4 close-out as gqlc-ay9 —
-> is **adopted** under this ADR's additive-only revision protocol.
-> The frozen wire recorded per-binding `Nullable()` but not which
-> bindings were co-introduced by the same OPTIONAL MATCH clause, so
+> _Amendment (2026-07-07, gqlc-ay9): the OPTIONAL-group membership
+> axis on `NodeBinding` / `EdgeBinding` — R4 §7.5.4's **Axis 1**,
+> filed from the R4 close-out as gqlc-ay9 — is added to
+> `query.Query`. The wire at Stage 14 recorded per-binding
+> `Nullable()` but not which bindings were co-introduced by the same
+> OPTIONAL MATCH clause, so
 > the resolver's R4 regime-(a) demotion could not propagate a proven
 > member's non-nullness to its clause siblings (Class A,
 > `docs/specs/resolver-stage-r4.md §7.5.3` items 1 + 3). Each of the
@@ -86,7 +84,7 @@
 > (their `Nullable()` is not OPTIONAL-derived; a named path's group
 > facts flow through its member bindings, the Stage-8 posture). The
 > JSON encoding is **omit-when-zero-value** (`,omitempty`),
-> following the post-freeze convention this ADR's hk0 amendment
+> following the wire convention this ADR's hk0 amendment
 > established; 100 of 3199 parser goldens rebaseline, 3099 are
 > byte-identical. The Binding interface stays sealed at
 > `Kind()`/`Nullable()`/`isBinding()`; group membership is a
@@ -108,10 +106,10 @@
 > constructor-strategy and id-scope decisions, and the fence
 > commands._
 
-> _Amendment (2026-07-07, gqlc-0ig unfreeze cycle): the
-> per-position CALL-arg attribution axis on `CallBinding` — recorded
-> as the R7 §7.1.1 CALL-arg-attribution deferral — is **adopted**
-> under this ADR's additive-only revision protocol. The R7-shipped
+> _Amendment (2026-07-07, gqlc-0ig): the per-position CALL-arg
+> attribution axis on `CallBinding` — recorded as the R7 §7.1.1
+> CALL-arg-attribution deferral — is added to `query.Query`. The
+> R7-shipped
 > "no arg-site check" posture
 > (`docs/specs/resolver-stage-r7.md §7.1.1`) was an honest
 > workaround for the wire's missing per-argument attribution; the
@@ -126,8 +124,8 @@
 > accessor `Args() []CallArg`, and one new sub-type `CallArg` with
 > `NewCallArg(t Type)` and `Type() Type`. The `CallBinding.args`
 > encoding is **omit-when-zero-length** (`,omitempty`), following
-> the post-freeze convention this ADR's hk0 amendment established
-> for additive axes. `procsig.TypeToken` stays a signature-only
+> the wire convention this ADR's hk0 amendment established for
+> additive axes. `procsig.TypeToken` stays a signature-only
 > vocabulary (ADR 0007 Stage-14 note); the wire records only the
 > parser-mined `query.Type`, and the resolver bridges by looking up
 > the procedure name against the compile-time `procsig.Registry`.
@@ -139,11 +137,10 @@
 > parser-emits-sig-token proposal, and the semantic-diff-only fence
 > commands._
 
-> _Amendment (2026-07-06, gqlc-fvo unfreeze cycle): the
-> Use → Part attribution axis on `PropertyUse` / `ExprUse` /
-> `ClauseSlotUse` — recorded implicitly as the R5 §4.2.4
-> follow-up bead — is **adopted** under this ADR's
-> additive-only revision protocol. The R5-shipped
+> _Amendment (2026-07-06, gqlc-fvo): the Use → Part attribution
+> axis on `PropertyUse` / `ExprUse` / `ClauseSlotUse` — recorded
+> implicitly as the R5 §4.2.4 follow-up bead — is added to
+> `query.Query`. The R5-shipped
 > "any-valid-witness" rule
 > (`internal/resolver/resolve.go:750-811`) was an honest
 > workaround for the wire's missing Part attribution; the
@@ -174,9 +171,9 @@
 > in, well-defined at every emission site by the
 > priming-and-swap discipline of `EnterOC_SingleQuery` /
 > `EnterOC_With` / `EnterOC_StandaloneCall`. The JSON encoding
-> is **omit-when-zero-value** (`,omitempty`), following the
-> post-freeze convention this ADR's hk0 amendment established
-> for additive axes. The Use interface stays sealed at one
+> is **omit-when-zero-value** (`,omitempty`), following the wire
+> convention this ADR's hk0 amendment established for additive
+> axes. The Use interface stays sealed at one
 > method (`isUse()`); Part attribution is a per-variant
 > field-and-accessor concern. See
 > `docs/specs/unfreeze-fvo-use-part.md` for the full contract,
@@ -184,11 +181,10 @@
 > accounting, the reversed alias-shadow discriminating fixture,
 > and the semantic-diff-only fence commands._
 
-> _Amendment (2026-07-06, gqlc-hk0 unfreeze cycle): the
-> ContainsAggregate axis on `ExprProjection` — recorded as an
-> escape hatch in the "Known deferred additions" list — is
-> **adopted** under this ADR's additive-only revision protocol.
-> Shape A (promote nested-aggregate residuals to
+> _Amendment (2026-07-06, gqlc-hk0): the ContainsAggregate axis
+> on `ExprProjection` — recorded as an escape hatch in the "Later
+> additions" list — is added to `query.Query`. Shape A (promote
+> nested-aggregate residuals to
 > `AggregateProjection`) was second-ranked in `docs/specs/
 > resolver-stage-r5.md §4.5.3.3` and is **retired**: it is a semantic
 > widening of an existing sum variant, requiring every downstream
@@ -207,51 +203,49 @@
 > walk's sub-scope boundaries (`OC_ExistentialSubquery`,
 > `OC_PatternPredicate`, `OC_ListComprehension`,
 > `OC_PatternComprehension` — mirroring `typing.go:382-403`). The
-> JSON encoding is **omit-when-false**
-> (`,omitempty`), which establishes the post-freeze wire
-> convention for the remainder of this ADR's revision protocol:
-> additive axes emit **omit-when-zero-value**, deliberately
-> diverging from the pre-freeze always-emit precedent
-> (`directed`, `nullable`, `returnsAll`, `hops`) because
-> post-freeze golden rebaselines are the primary auditability
+> JSON encoding is **omit-when-false** (`,omitempty`), which
+> establishes the wire convention for later additive axes: they
+> emit **omit-when-zero-value**, diverging from the Stage-0–14
+> always-emit precedent (`directed`, `nullable`, `returnsAll`,
+> `hops`) because golden rebaselines are the primary auditability
 > surface and always-emit forces near-total 3199-file rebaselines
 > on each additive cycle. See
 > `docs/specs/unfreeze-hk0-containsaggregate.md` for the full
 > contract, the walker boundaries, the 20-golden rebaseline set,
 > and the semantic-diff-only fence command._
 
-ADR 0004's freeze gate is discharged. All fifteen parser stages (the read core
-of Stages 0–5 plus the ADR 0007 expansion through Stage 14) and the TCK corpus
-sweep are complete, and the two pre-freeze cardinality fixes — the Part-level
+ADR 0004's feature-complete target is reached. All fifteen parser stages (the
+read core of Stages 0–5 plus the ADR 0007 expansion through Stage 14) and the
+TCK corpus sweep are complete, and the two cardinality fixes — the Part-level
 DISTINCT axis and aggregate-kind preservation over rich arguments — have
-landed. `query.Query` is **frozen**: its Go API surface and its wire shape are
-now the stable contract of ADR 0003, changed only under the additive-only
-revision protocol below. This ADR records the frozen shape, pins the
-resolver's package and API (discharging the deferral in ADR 0006's
-consequences), and opens consumer work — resolver, codegen, generated driver —
-that ADR 0004 gated on this moment.
+landed. This ADR records the `query.Query` surface at Stage 14 completion and
+pins the resolver's package and API (discharging the deferral in ADR 0006's
+consequences), opening consumer work — resolver, codegen, generated driver.
+The additions inventoried in the amendment notes above have landed since;
+each is a coordinated model + resolver change tracked by a bead and
+documented in `docs/specs/`.
 
 ## Context
 
-The progress meter at the freeze: godog over the entire vendored TCK reports
-**3897 scenarios — 3459 parse-green, 438 pending, 0 failed**. Every pending
-scenario is skiplist-pinned to bucket 3 of ADR 0007 — runtime semantics below
-the type-interface boundary (ADR 0005), where the parser accepts and the
-driver raises on the original text. No scenario is pending for "not supported
-yet". Of the four `ErrUnsupported*` sentinels that carried that meaning,
-three are retired — `ErrUnsupportedProjection` (Stage 6),
-`ErrUnsupportedPattern` (Stage 8), `ErrUnsupportedClause` (Stage 14).
-`ErrUnsupportedParameter` remains exported, with fail-sites for the parameter
-shapes the model deliberately does not carry (a `$param` occupying a clause
-slot's expression, a whole-property-map parameter, a parameter on an
-anonymous pattern element); at the freeze every corpus occurrence of those
-shapes is a negative (`Fail when …`) scenario, where the rejection is the
-asserted behaviour — zero pending scenarios route through it. It stays in
-the acceptance harness's progress-meter set deliberately: a future corpus
-shape that reaches it from a positive scenario surfaces as PENDING rather
-than as a silent mis-model.
+The progress meter at Stage 14 completion: godog over the entire vendored
+TCK reports **3897 scenarios — 3459 parse-green, 438 pending, 0 failed**.
+Every pending scenario is skiplist-pinned to bucket 3 of ADR 0007 — runtime
+semantics below the type-interface boundary (ADR 0005), where the parser
+accepts and the driver raises on the original text. No scenario is pending
+for "not supported yet". Of the four `ErrUnsupported*` sentinels that
+carried that meaning, three are retired — `ErrUnsupportedProjection`
+(Stage 6), `ErrUnsupportedPattern` (Stage 8), `ErrUnsupportedClause`
+(Stage 14). `ErrUnsupportedParameter` remains exported, with fail-sites for
+the parameter shapes the model deliberately does not carry (a `$param`
+occupying a clause slot's expression, a whole-property-map parameter, a
+parameter on an anonymous pattern element); at Stage 14 every corpus
+occurrence of those shapes is a negative (`Fail when …`) scenario, where the
+rejection is the asserted behaviour — zero pending scenarios route through
+it. It stays in the acceptance harness's progress-meter set deliberately: a
+future corpus shape that reaches it from a positive scenario surfaces as
+PENDING rather than as a silent mis-model.
 
-Two model fixes were pulled ahead of the freeze because they are
+Two model fixes were pulled in before the resolver opens because they are
 cardinality-critical for the resolver's grouping-key work, where an aggregate
 column must be distinguishable from a plain expression column:
 
@@ -265,19 +259,20 @@ column must be distinguishable from a plain expression column:
   documented deferral with a recorded resolver strategy (see the revision
   protocol below).
 
-ADR 0004's economic argument now inverts: while the parser was the only
+ADR 0004's economic argument now applies: while the parser was the only
 consumer, model churn was cheap; from here every change propagates through
-the resolver, codegen, and generated driver code. The freeze is the point
-where that cost flips, so the shape is locked against the corpus alone,
-before any consumer exists.
+the resolver, codegen, and generated driver code. This ADR records the
+shape as of Stage 14 completion — decided against the corpus alone, before
+any consumer exists — as the reference for the coupled downstream work.
 
 ## Decision
 
-### The frozen shape
+### The `query.Query` surface
 
-`query.Query` is the model as of this ADR — sealed sums over marker-method
-interfaces, smart constructors that make illegal states unrepresentable, and
-tagged-union JSON marshalling (the golden-file wire shape). The inventory:
+`query.Query` is the model as of Stage 14 completion — sealed sums over
+marker-method interfaces, smart constructors that make illegal states
+unrepresentable, and tagged-union JSON marshalling (the golden-file wire
+shape). The inventory:
 
 **Top-level structure.** `Query` = `Branches []Branch` (UNION-joined arms,
 always at least one) + `Combinators []UnionKind` (how each subsequent branch
@@ -287,7 +282,7 @@ axis). `Branch` = `Parts []Part` (WITH-bounded scope segments). `Part` =
 `Bindings` + `Returns []ReturnItem` + `ReturnsAll bool` + `Distinct bool` +
 `Effects []Effect`, guarded by `NewPart`'s at-least-one-of invariant.
 
-**Sealed sums** (variant counts are the frozen arity):
+**Sealed sums** (variant counts as of Stage 14):
 
 | Sum | Variants |
 |---|---|
@@ -321,10 +316,10 @@ axis). `Branch` = `Parts []Part` (WITH-bounded scope segments). `Part` =
   (the producer/consumer axis on `ExprUse`).
 - `SetOp` ×2 — `replace` (`=`) / `merge` (`+=`) on `SetEntityEffect`.
 
-**What "frozen" covers.** Both faces of the contract: the exported Go API of
-`internal/query` (types, marker methods, constructors, accessors) and the
-JSON wire shape the golden suite pins (tagged unions, always-emit
-conventions, key names). A consumer may rely on either.
+**Two faces.** The `query.Query` surface has two faces: the exported Go API
+of `internal/query` (types, marker methods, constructors, accessors) and
+the JSON wire shape the golden suite pins (tagged unions, wire conventions,
+key names). Consumer packages depend on either.
 
 ### The resolver API
 
@@ -360,22 +355,26 @@ The resolver's build approach — staging, test strategy, error posture,
 `ValidatedQuery`'s internal vocabulary — is ADR 0009's subject, not this
 one's. This ADR pins only the surface consumers see.
 
-### Post-freeze revision protocol
+### Additions since Stage 14
 
-- **Additive-only.** A revision may add a new variant to a sum, a new axis
-  (field with a zero-value-compatible wire default), or a new enum value —
-  never rename, remove, or re-type what exists. Each addition lands with a
-  dated amendment note on this ADR (the ADR 0003 stage-note convention) and
-  a golden rebaseline whose diff shows only the new surface.
-- **Breaking changes require a superseding ADR** plus a migration plan for
-  every consumer — the deliberately expensive path.
-- **`apidiff` gate.** A CI check over `internal/query` (a `just` recipe and
-  a CI step, per the recipe-parity convention) fails any PR whose exported
-  API change is not compatible. Tracked as its own bead; until it lands,
-  review carries the guarantee.
+The additions inventoried below have landed after the shape recorded above,
+each documented in the amendment notes at the top of this ADR. `query.Query`
+is an internal package (`internal/query`) — there is no external consumer to
+protect and no formal revision protocol; changes are coordinated with the
+resolver, codegen, and driver code the same way any coupled internal
+packages are (compile errors, test failures, PR review). Additions land as
+dated amendment notes on this ADR (the ADR 0003 stage-note convention) with
+their golden rebaseline included in the amendment PR. Removals or re-typings
+of existing surface are rewrites of coupled packages and are recorded here
+the same way, without a formal ceremony beyond documenting what changed.
 
-**Known deferred additions** — named here so they are recognised as
-in-protocol when they arrive, not scope creep:
+The additive-only, omit-when-zero-value wire convention this ADR's hk0
+amendment established (see the amendment note) is preserved for later
+additions on its own merits — omit-when-zero-value keeps golden diffs
+scoped to fields that actually changed, rather than churning all 3199 files
+on each additive cycle.
+
+**Later additions** — inventory:
 
 - **shortestPath selector axis** on `PathBinding` (see posture below).
 - **`EXISTS { … }` Use precision** (gqlc-33k.3): parameters inside an
@@ -433,33 +432,35 @@ in-protocol when they arrive, not scope creep:
   PR), closing R4 §7.5.3 Class B (item 2). The edge-side non-bare
   missing-witness residual is filed as a follow-up bead at
   close-out. With ay9 (Class A, closed 2026-07-10), R4 §7.5.3's two
-  named classes are closed; the planned model-unfreeze campaign is
-  discharged.
+  named classes are closed.
 
-### shortestPath is a dialect extension, out of the frozen scope
+### shortestPath is a dialect extension
 
 `shortestPath()` / `allShortestPaths()` are Neo4j dialect extensions, not
 openCypher: the vendored grammar (`internal/grammar/cypher/Cypher.g4`) has no
 rule for either, and the vendored TCK contains zero occurrences. They are
-therefore not a gap in the corpus sweep and not a freeze blocker. If dialect
-support is taken up post-freeze, the expected shape is an additive selector
-axis on `PathBinding` — the same move `EdgeHops` made on `EdgeBinding` —
-landing under the revision protocol above.
+therefore not a gap in the corpus sweep. If dialect support is taken up,
+the expected shape is an additive selector axis on `PathBinding` — the
+same move `EdgeHops` made on `EdgeBinding`.
 
 ## Consequences
 
 - **Consumer work is open.** The resolver (ADR 0009), codegen, and the
-  generated driver may now be written against a shape that will not move
-  under them — the payoff ADR 0004 deferred them for.
-- **ADR 0003's provisional header note is replaced** with a frozen note
-  pointing here; its "stable contract" framing is now literally true. The
-  stage-note diary on ADR 0003 remains as history. CONTEXT.md's **Resolver**
-  and **Validated query** entries carry the pinned API.
-- **Model mistakes are now expensive by design.** Anything the corpus did
-  not force into the model arrives via the additive protocol or a
-  superseding ADR; the freeze converts "revisit the model" from a cheap
-  parser-local edit into a consumer-wide migration, which is exactly the
-  pressure that keeps the contract stable.
+  generated driver may now be written against the shape recorded above —
+  the payoff ADR 0004 deferred them for.
+- **ADR 0003's provisional header note is replaced** with a milestone note
+  pointing here; its "stable contract" framing describes the parser-to-
+  resolver interface as recorded. The stage-note diary on ADR 0003 remains
+  as history. CONTEXT.md's **Resolver** and **Validated query** entries
+  carry the pinned API.
+- **Model changes propagate through coupled internal packages.** Anything
+  the corpus did not force into the model arrives as a later addition on
+  this ADR (see "Additions since Stage 14"); a change is judged against
+  the churn it creates in the resolver, codegen, and driver code. Normal
+  Go tooling (compile errors, test failures, PR review) surfaces the
+  coupling; `internal/` has no external consumer, so there is no formal
+  contract preventing changes — only the coupling cost, and the discipline
+  of keeping additions coordinated with their consumers.
 - **The 438 pending scenarios are a stable posture, not debt.** They assert
   runtime semantics the type interface deliberately does not carry
   (ADR 0005); they stay pending permanently unless the boundary itself is

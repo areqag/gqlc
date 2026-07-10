@@ -1,17 +1,18 @@
-# The resolver is built test-first, in staged slices, against the frozen model
+# The resolver is built test-first, in staged slices
 
 The resolver — the first consumer ADR 0008 opened — is built with the same
 discipline that built the parser (ADR 0004): a golden-file test suite written
-before the implementation, one capability per slice, and an output model that
-stays provisional while the resolver is its only producer and nothing is its
-consumer. This ADR fixes what ADR 0008 deliberately left open: the resolver's
-internal vocabulary, its error posture, its test strategy, and the staging
-order (R0–R7). The API surface itself — package, constructor, `Resolve`
-signature — is already pinned by ADR 0008 and is not revisited here.
+before the implementation, one capability per slice, and an output model
+that develops while the resolver is its only producer. This ADR fixes what
+ADR 0008 deliberately left open: the resolver's internal vocabulary, its
+error posture, its test strategy, and the staging order (R0–R7). The API
+surface itself — package, constructor, `Resolve` signature — is already
+pinned by ADR 0008 and is not revisited here.
 
 ## Context
 
-`query.Query` is frozen (ADR 0008) and the resolver's externally visible
+`query.Query` reached its feature-complete surface at Stage 14 (ADR 0008)
+and the resolver's externally visible
 shape is pinned: `internal/resolver`, `resolver.New(s schema.Schema,
 opts ...Option)` with `WithRegistry(procsig.Registry)`, and a pure
 `(*Resolver).Resolve(q query.Query) (ValidatedQuery, error)`. What is not yet
@@ -29,7 +30,7 @@ answer:
   without a consumer-facing rewrite: tests first, capabilities one at a time,
   the model unlocked exactly as long as churn is cheap.
 
-The resolver sits between two fixed vocabularies: the frozen `query.Type` sum
+The resolver sits between two vocabularies: the `query.Type` sum
 (deliberately coarse — `unknown` is the parser's honest "cannot tell") and
 the schema's bit-width-preserving `graph.PropertyType` families (ADR 0002:
 `INT`…`INT256`, `UINT`…`UINT256`, `FLOAT`…`FLOAT256`, `DECIMAL`, `STRING`,
@@ -69,18 +70,17 @@ lists, paths, temporal values from expressions). Resolution is exactly the
 upgrade of the parser's honest `unknown`/coarse types into this richer
 vocabulary; a resolver that flattened `INT32` to "int" would forfeit the
 bit-width preservation ADR 0002 exists for. The concrete mapping table —
-each of the seventeen frozen `query.Type` variants → its resolved-type
+each of the seventeen `query.Type` variants → its resolved-type
 counterpart, including which are already final (a literal's `int`), which
 upgrade from the schema (`unknown` on a property ref), and which unify across
 uses (parameters) — is the **R0 spec's first design item**, decided on paper
 before the skeleton lands.
 
-Like `query.Query` before its freeze, **`ValidatedQuery` is provisional
-through R0–R7**: it evolves slice by slice while the resolver is the only
-producer and no consumer exists, and it is frozen — by a future ADR, the 0008
-analogue — only when the resolver is feature-complete. Codegen is not built
-against it before that freeze; the ADR 0004 anti-cascade argument applies
-verbatim one layer down.
+**`ValidatedQuery` develops through R0–R7**: it evolves slice by slice
+while the resolver is the only producer. Codegen and driver code follow
+once the resolver expresses what they target — the ADR 0004 anti-cascade
+argument applies verbatim one layer down: model churn is cheapest while
+downstream code does not yet exist.
 
 ### Test strategy
 
@@ -140,17 +140,17 @@ spec round shows the dependency was misjudged.
 
 ## Considered options
 
-**Resolve everything in one build against the frozen model, then test.**
-Rejected: the frozen input model removes one source of churn, but
+**Resolve everything in one build against the query model, then test.**
+Rejected: the query model reached feature-complete at Stage 14, but
 `ValidatedQuery` itself is new and its shape is exactly what the staged,
 test-first approach is for. The parser's sixteen slices are the evidence the
 discipline works; there is no reason to believe the resolver is different.
 
 **Reuse `query.Type` as the resolved vocabulary and bolt bit-widths on
 later.** Rejected: that repeats the mistake ADR 0002 prevents on the schema
-side. The parser's sum is frozen and coarse by design (it is schema-free);
-the resolver exists to produce the schema-accurate types. Starting coarse
-would make every later width-refinement a breaking change to codegen.
+side. The parser's sum is coarse by design (it is schema-free); the resolver
+exists to produce the schema-accurate types. Starting coarse would make every
+later width-refinement a change that has to propagate through codegen.
 
 **Multi-error accumulation instead of short-circuit.** Rejected for now: the
 generation pipeline aborts on the first invalid query anyway, and
@@ -163,9 +163,9 @@ not the signature, would change).
 - **No resolver code before the owner grills this ADR.** The staging, the
   vocabulary decision, and the harness shape are the reviewable surface; R0
   (`gqlc-0mx.2`) is blocked on this ADR's bead (`gqlc-0mx.1`) closing.
-- **`ValidatedQuery` is provisional until a future freeze ADR locks it**; no
-  codegen is written against it before then. The R-stage specs may revise it
-  freely, exactly as the parser stages revised `query.Query`.
+- **`ValidatedQuery` develops slice by slice through R0–R7.** Codegen is
+  built once the resolver expresses what it needs; the R-stage specs revise
+  `ValidatedQuery` freely, exactly as the parser stages revised `query.Query`.
 - **A second fixture corpus begins.** Hand-authored fixtures lack the TCK's
   breadth; coverage grows with each stage's spec, and the sentinel
   reachability sweep keeps the rejection surface honest. If a public GQL
@@ -173,5 +173,4 @@ not the signature, would change).
   harness shape.
 - **The type-mapping table becomes load-bearing.** It is decided in R0's
   spec, revised per stage as new `query.Type` variants become resolvable,
-  and it is the natural seed for the future `ValidatedQuery` freeze ADR's
-  inventory.
+  and it is the load-bearing R-stage spec item.
