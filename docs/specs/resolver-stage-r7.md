@@ -479,7 +479,7 @@ Nullable}` (for property-projected node/edge scalars) and
 **Acknowledged asymmetry — vs R2's `ResolvedScalar` literal
 goldens.** Literals in `ExprProjection` (e.g.
 `literal_int_projection.cypher`) currently pin
-`{kind: "scalar", scalar: "INT"}` in their goldens, not
+`{kind: "scalar", scalar: "int"}` in their goldens, not
 `{kind: "property", type: "INT"}`. R7's use of
 `ResolvedProperty` for CALL YIELD produces the `"property"`
 discriminator, so R7 goldens read `{kind: "property", type: "INT",
