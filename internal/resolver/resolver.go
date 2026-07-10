@@ -33,14 +33,18 @@ type Resolver struct {
 type Option func(*Resolver)
 
 // WithRegistry accepts a procedure signature registry so callers can construct
-// the resolver symmetrically with the parser (both take one). The resolver
-// itself does NOT consult the registry: R7 §4.4 pins a parser-authoritative
-// trust posture — the parser has already resolved every CALL against its own
-// registry and emitted a fully-typed CallBinding (procedure, sourceField,
-// bridged ResultType, nullable) on the wire; the resolver types CALL YIELD
-// columns from the CallBinding alone. The threading is preserved so future
-// stages that need resolver-side signature consultation (post-R7, under a
-// new ADR) can drop the discard at resolve.go's registry sink.
+// the resolver symmetrically with the parser (both take one). Trust posture
+// per R7 §4.4 (with the 0ig §7.1.1 amendment, 2026-07-07): the parser is
+// authoritative for CALL-procedure existence and for the CallBinding's
+// YIELD-column typing (procedure, sourceField, bridged ResultType, nullable);
+// the resolver types CALL YIELD columns from the CallBinding alone and does
+// NOT re-check unknown-procedure. The resolver DOES consult this registry at
+// exactly one site — the Phase A1 CallBinding argument-position assignability
+// walk (resolve.go's CallBinding arm) — where Lookup(procedure) yields the
+// signature the per-position lattice check runs against (ErrCallArgAssignability
+// under the ADR 0007 Stage-14 rule). Registry-miss and arity-mismatch at that
+// site fire as plain non-sentinel errors (parser-authoritative drift arms,
+// unreachable in-corpus).
 func WithRegistry(r procsig.Registry) Option {
 	return func(res *Resolver) { res.registry = r }
 }
