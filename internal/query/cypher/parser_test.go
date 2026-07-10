@@ -553,6 +553,54 @@ var mustParse = map[string]struct {
 			}}},
 		},
 	},
+	// With7 [2] "Multiple WITHs using a predicate and aggregation" — verbatim
+	// TCK query (the "foaf shape"). The regression this locks is at expr.go's
+	// mineWhere: the WHERE that follows a WITH-with-aggregation-alias references
+	// a name (foaf) bound by the WITH projection itself, not by any earlier
+	// pattern binding. The rich-typer sweep inside mineWhere would otherwise
+	// append that alias's refs to curPart.refs and break the referential-
+	// integrity sweep at build; a snapshot/restore of l.curPart.refs around
+	// typeExpressionMining (expr.go:450–452) discards them. The pin catches a
+	// refactor that drops the snapshot restore — Part 1's Returns must be
+	// exactly [otherPerson] (no leaked foaf/count(*) refs), and Parameters must
+	// stay nil (the literal-vs-alias predicate mines nothing).
+	"with-aggregate-where scope snapshot (foaf)": {
+		src: "MATCH (david {name: 'David'})--(otherPerson)-->()\nWITH otherPerson, count(*) AS foaf\nWHERE foaf > 1\nWITH otherPerson\nWHERE otherPerson.name <> 'NotOther'\nRETURN count(*)",
+		want: query.Query{
+			Branches: []query.Branch{{Parts: []query.Part{
+				{
+					Bindings: []query.Binding{
+						must(query.NewNodeBinding("david", nil)),
+						must(query.NewEdgeBinding("", nil,
+							must(query.NewVarEndpoint("david")),
+							must(query.NewVarEndpoint("otherPerson")),
+							false,
+						)),
+						must(query.NewNodeBinding("otherPerson", nil)),
+						must(query.NewEdgeBinding("", nil,
+							must(query.NewVarEndpoint("otherPerson")),
+							query.NewInlineEndpoint(nil),
+							true,
+						)),
+					},
+					Returns: []query.ReturnItem{
+						{Name: "otherPerson", Value: query.NewRefProjection(query.Ref{Variable: "otherPerson"}, query.TypeNode{})},
+						{Name: "foaf", Value: query.NewAggregateProjection(query.AggCount, nil, false, query.TypeInt{})},
+					},
+				},
+				{
+					Returns: []query.ReturnItem{
+						{Name: "otherPerson", Value: query.NewRefProjection(query.Ref{Variable: "otherPerson"}, query.TypeNode{})},
+					},
+				},
+				{
+					Returns: []query.ReturnItem{
+						{Name: "count(*)", Value: query.NewAggregateProjection(query.AggCount, nil, false, query.TypeInt{})},
+					},
+				},
+			}}},
+		},
+	},
 	// Stage 4 — canonical two-branch UNION (distinct). Each branch is one part
 	// with its own binding; Combinators has one entry, UnionDistinct. The branches
 	// are recorded verbatim in source order — the parser does not pre-pick branch 0
