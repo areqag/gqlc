@@ -25,9 +25,9 @@ Stage R6 admits every query shape R5 admits, extended to:
 
 `CallBinding` / CALL / YIELD (R7), `PathBinding`, `UnwindBinding`, untyped
 edges, and `ExprProjection` typed `list<node>` / `list<edge>` remain out of
-scope and continue to route to `ErrOutOfR0Scope`. The R4 Class A and Class B
-same-Part regime (b) nullability under-approximations (`gqlc-ay9`,
-`gqlc-5xg`) and the R5 `ExprProjection`-residual grouping-key gap
+scope and continue to route to `ErrOutOfR0Scope`. The R4 ~~Class A and~~
+Class B same-Part regime (b) nullability under-approximation ~~(`gqlc-ay9`,
+`gqlc-5xg`)~~ (`gqlc-5xg`) and the R5 `ExprProjection`-residual grouping-key gap
 (`gqlc-gyw` Shape B / `gqlc-hk0` per the R5 close-out) are unchanged at R6.
 The R5 cross-Part parameter-Use attribution gap (`gqlc-fvo`) is unchanged at
 R6. None of these gaps is closable without a model unfreeze (owner decision
@@ -1881,7 +1881,7 @@ R5's out-of-scope table survives with revisions:
 | Runtime SET / DELETE on NULL target (row-drop semantics) | silently admitted | bucket 3 (ADR 0007 §III) |
 | DETACH DELETE cascade semantics vs plain DELETE | silently admitted | bucket 3 |
 | Same-Part regime (b) nullability under-demote | silently under-demoted | gqlc-5xg (Class B, model unfreeze — unchanged from R5) |
-| OPTIONAL-clause-sibling nullability under-demote | silently under-demoted | gqlc-ay9 (Class A, model unfreeze — unchanged from R5) |
+| OPTIONAL-clause-sibling nullability under-demote | ~~silently under-demoted~~ **closed** (ay9, 2026-07-10) | ~~gqlc-ay9 (Class A, model unfreeze — unchanged from R5)~~ **closed** by ay9 unfreeze + widening (`docs/specs/unfreeze-ay9-optional-group.md`); residual cross-Part carry gap filed as gqlc-984 |
 | `ExprProjection` residual grouping-key discrimination | silently under-grouped | gqlc-hk0 / Shape B follow-up (unchanged from R5) |
 | Cross-Part parameter Use attribution gap | silently false-admitted | gqlc-fvo (unchanged from R5) |
 

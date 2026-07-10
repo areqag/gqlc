@@ -2187,7 +2187,7 @@ R6's out-of-scope table survives with revisions:
 | Runtime SET / DELETE on NULL target (row-drop semantics) | silently admitted | bucket 3 (unchanged) |
 | DETACH DELETE cascade semantics vs plain DELETE | silently admitted | bucket 3 (unchanged) |
 | Same-Part regime (b) nullability under-demote | silently under-demoted | gqlc-5xg (unchanged) |
-| OPTIONAL-clause-sibling nullability under-demote | silently under-demoted | gqlc-ay9 (unchanged) |
+| OPTIONAL-clause-sibling nullability under-demote | ~~silently under-demoted~~ **closed** (ay9, 2026-07-10) | ~~gqlc-ay9~~ **closed** by ay9 unfreeze + widening (`docs/specs/unfreeze-ay9-optional-group.md`); residual cross-Part carry gap filed as gqlc-984 |
 | `ExprProjection` residual grouping-key discrimination | silently under-grouped | gqlc-hk0 / Shape B (unchanged) |
 | Cross-Part parameter Use attribution gap | silently false-admitted | gqlc-fvo (unchanged) |
 | CALL argument-vs-parameter type check (incl. NUMBER assignable-from) | ~~silently admitted~~ **checked** (0ig, 2026-07-07) | ~~frozen-model deficiency filed at R7 close-out~~ CLOSED (§7.1.1; `docs/specs/unfreeze-0ig-call-args.md`) |
@@ -2332,8 +2332,12 @@ The R6-discovered design axes (§7.1.1 value-target assignability;
 (`gqlc-hk0` ExprProjection residual discrimination, `gqlc-fvo`
 cross-Part Use attribution ~~— of which R7's CALL-arg gap is a
 child~~ — the CALL-arg child gap was closed by 0ig, 2026-07-07; see
-§7.1.1) persist at R7 unchanged. R4-inherited gaps (`gqlc-ay9` Class A,
-`gqlc-5xg` Class B nullability) persist at R7 unchanged.
+§7.1.1) persist at R7 unchanged. R4-inherited gaps ~~(`gqlc-ay9` Class A,
+`gqlc-5xg` Class B nullability) persist at R7 unchanged~~ — Class A
+(`gqlc-ay9`) was closed by the ay9 unfreeze + widening on 2026-07-10
+(PRs #127/#128/#129, `docs/specs/unfreeze-ay9-optional-group.md`;
+residual cross-Part carry gap filed as gqlc-984); Class B
+(`gqlc-5xg`) persists at R7 unchanged.
 
 #### 7.1.3 Freeze-not-a-wall status
 

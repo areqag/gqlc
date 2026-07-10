@@ -527,15 +527,22 @@ next pass — `r1`, which was OPTIONAL, still has `Nullable=true` at
 this point.
 
 Pass 2: **The edge-chain demotion is only from edges to endpoints,
-not from endpoints to edges, and not across OPTIONAL-clause
-siblings.** Regime (a) walks per-edge witnesses: each non-nullable
-edge demotes its two named endpoints. It does not walk sibling
-relations inside an OPTIONAL clause — the frozen model records
-per-binding `Nullable()`, not clause-of-introduction / OPTIONAL-group
-membership (see §7.5.2 for the model gap; §7.5.4 for the resolution
-path). So on Pass 2 nothing new happens in the example: `r1`
-(OPTIONAL) is skipped by the loop's own gate; `a` has no other
-touching edge, so `a` stays nullable.
+not from endpoints to edges, ~~and not across OPTIONAL-clause
+siblings~~ — the sibling clause was closed by ay9 (2026-07-10, PR
+#129); see the closure note below.** Regime (a) walks per-edge
+witnesses: each non-nullable edge demotes its two named endpoints.
+~~It does not walk sibling relations inside an OPTIONAL clause~~ —
+the frozen model records per-binding `Nullable()`, not clause-of-
+introduction / OPTIONAL-group membership (see §7.5.2 for the model
+gap; §7.5.4 for the resolution path). So on Pass 2 ~~nothing new
+happens in the example: `r1` (OPTIONAL) is skipped by the loop's
+own gate; `a` has no other touching edge, so `a` stays nullable~~
+[ay9-widened behaviour: `r1` is now pulled by the group-closure
+step (its group has been proven via `b`'s demotion), so `r1`
+demotes; `a` demotes as an endpoint of the now-effective-witness
+`r1`. R4-as-shipped left `r1` and `a` nullable; the widened
+`demoteNullableInPlace` demotes both. See
+`docs/specs/unfreeze-ay9-optional-group.md` §8.1].
 
 **The bead is semantically correct; R4 under-approximates for a
 model-shape reason, not a semantic one.** Under openCypher's
@@ -1182,7 +1189,7 @@ sentinel-relationship revised:
 | **Nullability upgrades (OPTIONAL MATCH regime (a), edge-endpoint witness)** | **~~ErrOutOfR0Scope → in-scope at R4~~** | **R4 (this stage)** |
 | **Nullability upgrades (regime (b), cross-WITH re-MATCH — multi-part admission)** | `ErrOutOfR0Scope` (via the multi-part admission gate; §7.4 item 1) | **R5** |
 | **Nullability upgrades (regime (b), same-Part re-MATCH — Class B: missing-witness model gap)** | silently under-demoted (safe under §4.2 lattice invariant); §7.4 item 2, §7.5.3 item 2 | **§7.5.5 bead 2** (Axis 2 unfreeze) |
-| **OPTIONAL-clause-sibling demotion** (chain proves one sibling → all siblings demote — Class A: missing-group-membership model gap) | silently under-demoted (safe under §4.2 lattice invariant); §7.5.3 items 1, 3 | **§7.5.5 bead 1** (Axis 1 unfreeze) |
+| **OPTIONAL-clause-sibling demotion** (chain proves one sibling → all siblings demote — Class A: missing-group-membership model gap) | ~~silently under-demoted (safe under §4.2 lattice invariant); §7.5.3 items 1, 3~~ **closed** (ay9, 2026-07-10) | ~~**§7.5.5 bead 1** (Axis 1 unfreeze)~~ **closed** by ay9 unfreeze + widening (`docs/specs/unfreeze-ay9-optional-group.md`); residual cross-Part carry gap filed as gqlc-984 |
 | `Part.Distinct == true` / `Part.ReturnsAll == true` | `ErrOutOfR0Scope` | R5 |
 | WITH carry-forward; UNION | `ErrOutOfR0Scope` | R5 |
 | Writes / CREATE / MERGE / SET / REMOVE / DELETE | `ErrOutOfR0Scope` | R6 |
@@ -1531,11 +1538,15 @@ The two beads are independent — the owner can accept one, both, or
 neither. Both are filed at the R4 close-out (Cycle 2 — see §9 item
 9); this spec does not create the beads itself.
 
-The `demote_chained_from_required.cypher` fixture (§6.3) encodes
+The `demote_chained_from_required.cypher` fixture (§6.3) ~~encodes
 R4-as-scoped's decision (`a` stays nullable, `b` demotes) and pins
 the Class A under-approximation as a testable outcome. If bead 1
 lands and the demotion rule widens, that fixture's golden is
-updated on the widening PR — not on this branch. Class B has no
+updated on the widening PR — not on this branch~~ [closed 2026-07-10:
+bead 1 (`gqlc-ay9`) landed, spec + model + resolver merged via PRs
+#127/#128/#129; the fixture's golden was rebaselined on the ay9
+widening PR (`p` and `r1` `nullable: true → false`). See
+`docs/specs/unfreeze-ay9-optional-group.md` §8.3]. Class B has no
 dedicated fixture at R4 (there is no fixture in §6.3 that exercises
 same-Part bare-pattern re-MATCH of an OPTIONAL binding — such a
 fixture would be added on bead 2's widening PR).
