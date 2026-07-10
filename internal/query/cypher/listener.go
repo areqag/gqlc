@@ -85,9 +85,9 @@ type listener struct {
 	// Query.StatementKind. Set true by every outer-scope Enter handler for
 	// a write clause (Create / Delete / Set / Remove). A write suppressed
 	// inside an EXISTS { ... } subquery does not flip the flag — the outer
-	// query does not modify the graph. Stage 13 will also flip it on
-	// EnterOC_Merge once MERGE lands; today MERGE stays behind
-	// ErrUnsupportedClause.
+	// query does not modify the graph. Stage 13 also flipped it on
+	// EnterOC_Merge when MERGE landed; ErrUnsupportedClause was retired
+	// at Stage 14.
 	writeSeen bool
 
 	// registry is the per-parse procedure signature registry (Stage 14).
