@@ -34,15 +34,22 @@ nullability), extended to:
 
 Writes (R6), `CALL` / `YIELD` (R7), path bindings (`PathBinding`),
 `UnwindBinding`, `CallBinding`, and untyped edges remain out of scope and
-continue to route to `ErrOutOfR0Scope`. The same-Part regime (b)
+continue to route to `ErrOutOfR0Scope`. ~~The same-Part regime (b)
 nullability under-approximation surviving from R4 (§7.5 Class B, gap
-tracked on gqlc-5xg) is unchanged at R5. The Class A OPTIONAL-clause-
+tracked on gqlc-5xg) is unchanged at R5.~~ [closed 2026-07-10 by 5xg
+(PRs #132/#133/#134, `docs/specs/unfreeze-5xg-required-bare-ref.md`):
+R4's `demoteNullableInPlace` now reads the widened
+`ReferencedInRequiredBarePattern()` axis; R5 inherits the closure
+unchanged. Edge-side non-bare missing-witness residual filed as
+gqlc-0kq.] The Class A OPTIONAL-clause-
 sibling under-approximation ~~(gap tracked on gqlc-ay9) is also
 unchanged at R5~~ was **closed by ay9** (2026-07-10, PRs #127/#128/#129;
 `docs/specs/unfreeze-ay9-optional-group.md`); residual cross-Part
 carry gap filed as gqlc-984. ~~Neither class is closable without a
-model unfreeze (owner decision pending);~~ Class B (gqlc-5xg) is the
-sole remaining unfreeze at R5; R5 does not contort the resolver
+model unfreeze (owner decision pending); Class B (gqlc-5xg) is the
+sole remaining unfreeze at R5;~~ [closed 2026-07-10: both Class A
+(ay9) and Class B (5xg) landed as additive `Binding` axes; no
+remaining nullability unfreeze at R5.] R5 does not contort the resolver
 around either.
 
 R5 introduces **two new sentinels**: **`ErrUnionColumnMismatch`**
@@ -610,13 +617,17 @@ driver (§4.1.1).
 | `ExprProjection` typed `TypeList{TypeNode\|TypeEdge}` | `ErrOutOfR0Scope` | R-later |
 | `ExprUse` at `ExprInSetValue` / `ExprInDeleteTarget` | `ErrOutOfR0Scope` | R6 |
 | Property projection on a variable-length edge binding | `ErrOutOfR0Scope` | R-later |
-| Same-Part regime (b) nullability under-demote | silently under-demoted (§4.6) | gqlc-5xg (Class B, model unfreeze) |
+| Same-Part regime (b) nullability under-demote | ~~silently under-demoted (§4.6)~~ **closed** (5xg, 2026-07-10) | ~~gqlc-5xg (Class B, model unfreeze)~~ **closed** by 5xg unfreeze + widening (`docs/specs/unfreeze-5xg-required-bare-ref.md`); edge-side non-bare missing-witness residual filed as gqlc-0kq |
 | OPTIONAL-clause-sibling nullability under-demote | ~~silently under-demoted (§4.6)~~ **closed** (ay9, 2026-07-10) | ~~gqlc-ay9 (Class A, model unfreeze)~~ **closed** by ay9 unfreeze + widening (`docs/specs/unfreeze-ay9-optional-group.md`); residual cross-Part carry gap filed as gqlc-984 |
 
 The R4 §7.4 explanation stands: cross-WITH regime (b) is R5's business
-and is closed by §4.6 without a model change; same-Part regime (b) and
+and is closed by §4.6 without a model change; ~~same-Part regime (b) and
 Class A both remain safe under-approximations gated on the two model-
-unfreeze beads.
+unfreeze beads.~~ [closed 2026-07-10: both Class A (ay9) and Class B
+/ same-Part regime (b) (5xg) landed as additive `Binding` axes;
+neither remains a safe under-approximation at R5. Residual cross-
+Part carry gap filed as gqlc-984 (ay9) and edge-side non-bare
+missing-witness residual filed as gqlc-0kq (5xg).]
 
 **Special case — empty bindings.** R4's `resolve.go:42-44` gate rejected
 a Part with empty `Bindings`. R5 **drops that gate entirely** — empty
@@ -1710,14 +1721,25 @@ is `false` because `a` came from a required MATCH) is threaded through
 into Part 1's `nullableBinding["a"] = false`, and `Column{Name:"a",
 Type: ResolvedNode{Person, Nullable:false}}` emits correctly.
 
-**§4.6.1 Same-Part regime (b) still under-approximates at R5.** R4 §7.5
+**§4.6.1 Same-Part regime (b) ~~still under-approximates at R5~~
+closed by 5xg (2026-07-10).** ~~R4 §7.5
 Class B — same-Part bare-pattern re-MATCH of an OPTIONAL binding — is
 NOT closed by R5. The gap (missing witness — parser's `mergeBinding`
 discards the second occurrence within one Part) persists; the Class B
 fixture in R4 §7.5.5 remains a documented under-approximation at R5
 too. Owner decision on gqlc-5xg is still pending. If gqlc-5xg lands,
 R5's `demoteNullable` reads the new axis; no R5-spec-level revision
-needed beyond that.
+needed beyond that.~~ Closed by 5xg unfreeze + widening (PRs
+#132/#133/#134, `docs/specs/unfreeze-5xg-required-bare-ref.md`). The
+gap-closure story from R4 §7.5 held: 5xg added a
+`ReferencedInRequiredBarePattern()` axis to
+`NodeBinding`/`EdgeBinding` (set by a resolver-side parse-tree pre-
+pass, not by `mergeBinding`), and R4's `demoteNullableInPlace`
+reads the new axis. R5's `demoteNullable` inherits the closure
+unchanged — no R5-spec-level revision beyond that. Edge-side
+non-bare missing-witness residual filed as gqlc-0kq (a legitimate
+under-demotion; both ay9 Class A and 5xg Class B fail to close
+it).
 
 **§4.6.2 Class A OPTIONAL-clause-sibling gap ~~still under-approximates
 at R5~~ closed by ay9 (2026-07-10).** ~~Same story: gqlc-ay9. R5 does
@@ -2318,7 +2340,7 @@ R4's out-of-scope table survives with revisions:
 | Unlabelled node with a multi-candidate set that survives Phase B fixed-point | `ErrAmbiguousBinding` | (unchanged) |
 | Parameter Uses that do not unify | `ErrParameterTypeConflict` | (unchanged) |
 | UNION branches disagree on column count, names, types, or nullability | `ErrUnionColumnMismatch` | **R5 (this stage)** |
-| Nullability upgrades (regime (b), same-Part re-MATCH — Class B: missing-witness model gap) | silently under-demoted | gqlc-5xg (model unfreeze) |
+| Nullability upgrades (regime (b), same-Part re-MATCH — Class B: missing-witness model gap) | ~~silently under-demoted~~ **closed** (5xg, 2026-07-10) | ~~gqlc-5xg (model unfreeze)~~ **closed** by 5xg unfreeze + widening (`docs/specs/unfreeze-5xg-required-bare-ref.md`); edge-side non-bare missing-witness residual filed as gqlc-0kq |
 | Nullability upgrades (OPTIONAL-clause-sibling — Class A: missing-group-membership model gap) | ~~silently under-demoted~~ **closed** (ay9, 2026-07-10) | ~~gqlc-ay9 (model unfreeze)~~ **closed** by ay9 unfreeze + widening (`docs/specs/unfreeze-ay9-optional-group.md`); residual cross-Part carry gap filed as gqlc-984 |
 | `ExprProjection` residual mixed with `AggregateProjection` in the same Part's Returns — grouping-key discrimination gap | silently under-grouped (uniform-exclude posture) | §4.5.3.3 follow-up bead (Shape B `ContainsAggregate` parser-side bit) |
 | Cross-Part parameter Use where the true attributed Part would reject but another same-name Part admits — Use→Part attribution gap (§4.2.4) | **closed by gqlc-fvo (2026-07-06)**: `docs/specs/unfreeze-fvo-use-part.md` threads `Part` on every `Use` and the resolver's `witnessAcrossScopes` witnesses against `branchScopes[u.Part()]`. Under UNION the `witnessInBranch` dispatcher wraps this with a same-Part cross-branch fallback (fvo spec §7.2.2, PR #118) — two residuals of that fallback (same-Part UNION boundary ambiguity, UNION-later-Part spurious rejection) are filed as **gqlc-qcc** for a future cycle. Residual WITH-aliased-projection shadow (fvo spec §7.6.1) is filed as **gqlc-4w5** for a future scope-attribution cycle. | closed |
@@ -2398,8 +2420,13 @@ the results agree by construction (see
 
 #### 7.1.2 The frozen-model gap, stated honestly
 
-R4 recorded two gaps (gqlc-ay9, gqlc-5xg). R5 discovers one new gap
-distinct from both:
+~~R4 recorded two gaps (gqlc-ay9, gqlc-5xg).~~ [closed 2026-07-10:
+both R4-recorded gaps landed as additive `Binding` axes — gqlc-ay9
+via PRs #127/#128/#129 (`docs/specs/unfreeze-ay9-optional-group.md`;
+residual gqlc-984) and gqlc-5xg via PRs #132/#133/#134
+(`docs/specs/unfreeze-5xg-required-bare-ref.md`; residual gqlc-0kq).]
+R5 discovers one new gap distinct from both (the R5 gap is
+unaffected by either R4 closure):
 
 - **Cross-WITH regime (b) — closed by R5 without a model change**
   (§4.6). Not a gap; the parser's cross-WITH re-MATCH behaviour is
@@ -2414,10 +2441,14 @@ distinct from both:
   parser_test.go:1320-1324 pins the shape. Consequence: no
   resolver-side re-parse can distinguish `count(n) + 1` from `n.age
   + 1`; gqlc-gyw's re-parse strategy is not implementable against
-  the frozen model (§4.5.3.4). Distinct from gqlc-ay9 (missing group
+  the frozen model (§4.5.3.4). Distinct from ~~gqlc-ay9 (missing group
   membership on `Binding`) and gqlc-5xg (missing witness on `Binding`
-  after mergeBinding). This gap sits at the parser's classification
-  boundary and is closed by a parser-side change (Shape B, §4.5.3.3).
+  after mergeBinding)~~ the two R4 nullability gaps that landed at
+  cycle-5 close-out (both closed 2026-07-10: gqlc-ay9 via
+  `docs/specs/unfreeze-ay9-optional-group.md`; gqlc-5xg via
+  `docs/specs/unfreeze-5xg-required-bare-ref.md`). This gap sits at
+  the parser's classification boundary and is closed by a parser-
+  side change (Shape B, §4.5.3.3).
 
 #### 7.1.3 What R5-as-scoped loses, quantified
 
@@ -2498,7 +2529,11 @@ Rationale:
   `true` as skipped. Secondary option if Shape B is rejected:
   Shape A/A′ (classifier promotes nested-aggregate residuals to
   `AggregateProjection`, semantic widening of the sum variant)."
-  Independent of gqlc-ay9 / gqlc-5xg. Dependency: gqlc-0mx.7 (R5 code
+  Independent of ~~gqlc-ay9 / gqlc-5xg~~ the two R4 nullability
+  unfreezes (both closed 2026-07-10; see
+  `docs/specs/unfreeze-ay9-optional-group.md` and
+  `docs/specs/unfreeze-5xg-required-bare-ref.md`). Dependency:
+  gqlc-0mx.7 (R5 code
   cycle) at close; blocks the resolver R5 grouping-key refinement PR.
 
 **No parser-API bead (P1) — retired.** Round 1 proposed
@@ -2614,9 +2649,15 @@ citations below name the file:line the claim rests on.
   entry, distinct from Part 0's `a`. §4.6's local-seed override
   algorithm relies on this shape and consumes it correctly.
 - **Parser's within-Part `mergeBinding` merges same-Part re-MATCH**
-  — `internal/query/cypher/pattern.go:373-401`. This is what makes
+  — `internal/query/cypher/pattern.go:373-401`. ~~This is what makes
   same-Part regime (b) an under-approximation gap at R4 and R5
-  (§4.6.1).
+  (§4.6.1).~~ [closed 2026-07-10 by 5xg: rather than change
+  `mergeBinding`, 5xg adds a `ReferencedInRequiredBarePattern()`
+  axis set by a resolver-side parse-tree pre-pass. The
+  merge-rule shape stays frozen; the axis captures the second-
+  reference fact `mergeBinding` discards. See
+  `docs/specs/unfreeze-5xg-required-bare-ref.md` §5-§7. Edge-side
+  non-bare missing-witness residual filed as gqlc-0kq.]
 - **Query is builder-maintained, not smart-constructor-guarded** —
   parser Stage 4 §3 lines 141-160 documents this posture (exported
   fields, `-update` goldens as the invariant witness); the parser's
@@ -2702,8 +2743,12 @@ of scope of this document. The spec is done when:
    for each construct. §7.1 walks the honest state on the discovered
    gap classes: cross-WITH regime (b) closes (contingent on parser
    assumption); `ExprProjection` residual grouping-key discrimination
-   uniformly under-groups pending Shape B follow-up; Class A + Class B
-   under-approximations from R4 persist unchanged.
+   uniformly under-groups pending Shape B follow-up; ~~Class A + Class B
+   under-approximations from R4 persist unchanged.~~ [closed
+   2026-07-10: both Class A (ay9) and Class B (5xg) landed as
+   additive `Binding` axes; R5 inherits both closures unchanged.
+   Residuals: gqlc-984 (ay9 cross-Part carry) and gqlc-0kq (5xg
+   edge-side non-bare missing witness).]
 7. §8 cross-checks every factual claim against source file:line.
 8. `just test` is untouched-green — this cycle is docs-only.
 9. **At R5 code-cycle close-out** (Cycle 2, not this Cycle 1):
@@ -2715,7 +2760,14 @@ of scope of this document. The spec is done when:
    - The round-1 parser-API bead (`cypher.ParseExpression`) is
      RETIRED — the resolver does not re-parse at R5 and does not
      re-parse under Shape B either.
-   - gqlc-ay9 and gqlc-5xg remain OPEN; R5 does not close them.
+   - ~~gqlc-ay9 and gqlc-5xg remain OPEN; R5 does not close them.~~
+     [closed 2026-07-10: both landed as additive `Binding` axes
+     (ay9: `OptionalGroup`, PRs #127/#128/#129,
+     `docs/specs/unfreeze-ay9-optional-group.md`; 5xg:
+     `ReferencedInRequiredBarePattern`, PRs #132/#133/#134,
+     `docs/specs/unfreeze-5xg-required-bare-ref.md`). R5 inherits
+     both closures unchanged. Residuals filed as gqlc-984 (ay9)
+     and gqlc-0kq (5xg).]
    - gqlc-gyw closes (R5 admits AggregateProjection; the residual-
      discrimination question is scoped to the new Shape B follow-up
      bead above, not gqlc-gyw).
