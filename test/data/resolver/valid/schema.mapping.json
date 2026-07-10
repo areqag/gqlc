@@ -85,6 +85,7 @@
     "parameter_across_union_same_name.cypher": "social_r5.gql",
     "parameter_across_with_multi_part.cypher": "social_r5.gql",
     "carry_wins_over_unlabelled_rebind.cypher": "social_r5.gql",
+    "edge_rebind_var_length_vs_fixed.cypher": "social_r5.gql",
     "returns_all_local_first_ordering.cypher": "social_r5.gql",
     "create_labelled_node.cypher": "social_r6.gql",
     "create_anonymous_node.cypher": "social_r6.gql",
