@@ -25,13 +25,22 @@ Stage R6 admits every query shape R5 admits, extended to:
 
 `CallBinding` / CALL / YIELD (R7), `PathBinding`, `UnwindBinding`, untyped
 edges, and `ExprProjection` typed `list<node>` / `list<edge>` remain out of
-scope and continue to route to `ErrOutOfR0Scope`. The R4 ~~Class A and~~
-Class B same-Part regime (b) nullability under-approximation ~~(`gqlc-ay9`,
-`gqlc-5xg`)~~ (`gqlc-5xg`) and the R5 `ExprProjection`-residual grouping-key gap
+scope and continue to route to `ErrOutOfR0Scope`. ~~The R4 Class A and
+Class B same-Part regime (b) nullability under-approximation (`gqlc-ay9`,
+`gqlc-5xg`)~~ [closed 2026-07-10: Class A landed via gqlc-ay9 (PRs
+#127/#128/#129, `docs/specs/unfreeze-ay9-optional-group.md`; residual
+gqlc-984) and Class B / same-Part regime (b) landed via gqlc-5xg
+(PRs #132/#133/#134,
+`docs/specs/unfreeze-5xg-required-bare-ref.md`; residual gqlc-0kq);
+R6 inherits both closures unchanged.] and the R5
+`ExprProjection`-residual grouping-key gap
 (`gqlc-gyw` Shape B / `gqlc-hk0` per the R5 close-out) are unchanged at R6.
 The R5 cross-Part parameter-Use attribution gap (`gqlc-fvo`) is unchanged at
-R6. None of these gaps is closable without a model unfreeze (owner decision
-pending); R6 does not contort the resolver around any of them.
+R6. ~~None of these gaps is closable without a model unfreeze (owner decision
+pending); R6 does not contort the resolver around any of them.~~
+[closed 2026-07-10: the two R4 nullability gaps landed as additive
+`Binding` axes (ay9, 5xg); the R5 gaps (`gqlc-hk0`, `gqlc-fvo`)
+persist at R6; R6 does not contort the resolver around them.]
 
 R6 introduces **one new sentinel**, **`ErrInvalidEffectTarget`** (§5.1),
 covering the one class of write-shape failure that no R0–R5 sentinel names
@@ -1880,7 +1889,7 @@ R5's out-of-scope table survives with revisions:
 | Value-target type-agreement in `SET n.p = value` (bit-width assignability, nullability lift) | silently admitted (§4.3.1 judgment call) | R-later (design axis for codegen boundary) |
 | Runtime SET / DELETE on NULL target (row-drop semantics) | silently admitted | bucket 3 (ADR 0007 §III) |
 | DETACH DELETE cascade semantics vs plain DELETE | silently admitted | bucket 3 |
-| Same-Part regime (b) nullability under-demote | silently under-demoted | gqlc-5xg (Class B, model unfreeze — unchanged from R5) |
+| Same-Part regime (b) nullability under-demote | ~~silently under-demoted~~ **closed** (5xg, 2026-07-10) | ~~gqlc-5xg (Class B, model unfreeze — unchanged from R5)~~ **closed** by 5xg unfreeze + widening (`docs/specs/unfreeze-5xg-required-bare-ref.md`); edge-side non-bare missing-witness residual filed as gqlc-0kq |
 | OPTIONAL-clause-sibling nullability under-demote | ~~silently under-demoted~~ **closed** (ay9, 2026-07-10) | ~~gqlc-ay9 (Class A, model unfreeze — unchanged from R5)~~ **closed** by ay9 unfreeze + widening (`docs/specs/unfreeze-ay9-optional-group.md`); residual cross-Part carry gap filed as gqlc-984 |
 | `ExprProjection` residual grouping-key discrimination | silently under-grouped | gqlc-hk0 / Shape B follow-up (unchanged from R5) |
 | Cross-Part parameter Use attribution gap | silently false-admitted | gqlc-fvo (unchanged from R5) |
@@ -2011,8 +2020,11 @@ unchanged, as the R5 spec §7.1 recorded.
   codegen boundary. No follow-up bead. §7.1.1.
 - **Effects on `ValidatedQuery`** — deferred to a future codegen-
   driven ADR. §7.1.2.
-- **R5 open gaps carry unchanged** — gqlc-ay9, gqlc-5xg, gqlc-hk0,
-  gqlc-fvo. §7.1.3.
+- **R5 open gaps carry unchanged** — ~~gqlc-ay9, gqlc-5xg,~~ gqlc-hk0,
+  gqlc-fvo. §7.1.3. [closed 2026-07-10: gqlc-ay9 (Class A) and
+  gqlc-5xg (Class B) both landed as additive `Binding` axes; R6
+  inherits both closures unchanged. Residuals: gqlc-984 (ay9) and
+  gqlc-0kq (5xg).]
 
 ---
 
@@ -2267,8 +2279,13 @@ out of scope of this document. The spec is done when:
      (value-target assignability and Effects-on-wire are open
      decisions surfaced in the spec, not bug reports).
    - gqlc-0mx.8 closes (this stage's bead).
-   - gqlc-ay9, gqlc-5xg, gqlc-hk0, gqlc-fvo remain OPEN unchanged;
-     R6 does not close any of them.
+   - ~~gqlc-ay9, gqlc-5xg,~~ gqlc-hk0, gqlc-fvo remain OPEN unchanged;
+     R6 does not close any of them. [closed 2026-07-10: gqlc-ay9
+     landed via PRs #127/#128/#129
+     (`docs/specs/unfreeze-ay9-optional-group.md`; residual gqlc-984),
+     and gqlc-5xg landed via PRs #132/#133/#134
+     (`docs/specs/unfreeze-5xg-required-bare-ref.md`; residual gqlc-0kq);
+     R6 inherits both closures unchanged.]
    - The R6 code cycle asserts §3.4's byte-identical claim by
      running `just test` on the R0–R5 corpus WITHOUT `-update`
      before writing any R6 goldens; any regeneration in the R0–R5
