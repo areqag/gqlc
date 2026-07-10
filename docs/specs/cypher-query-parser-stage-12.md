@@ -176,8 +176,15 @@ only the **named** bindings the clause introduced (the anonymous
 edge case: variable is empty, so the effect's variable list carries
 "" — which is legal per the Effect variant's semantics: a caller
 wanting to inspect "which bindings were created here" iterates the
-Effect's variables and skips empty strings). A future Stage 13 review
-may consolidate this into a richer per-effect binding index; for
+Effect's variables and skips empty strings). A CREATE clause whose
+pattern is **anonymous-only** — e.g. `CREATE ({prop: <literal>})` —
+adds no entries to `curPart.bindings` at all, so the
+`[before..len(bindings)]` delta walk yields an empty slice, which
+marshals as `"variables": null` on the CreateEffect (see goldens
+`Create1_2edce65e88dc` and `Temporal4_06cc612fd9c1`). The null is
+not a silent-drop bug: it is the honest emergent outcome of "no
+named binding was introduced." A future Stage 13 review may
+consolidate this into a richer per-effect binding index; for
 Stage 12 the coarse list is correct.
 
 **Nullability.** `CREATE` never introduces a nullable binding — an
@@ -1252,7 +1259,10 @@ The lesser risks, recorded for completeness:
   the old hash is either genuinely stale (a scenario the corpus
   removed) or its scenario has re-keyed — the meta-test does not
   silently break. The UNLOCK commit's ~136 additions and the amend
-  commit's ~24 re-keyed adds sum to the ~160 new goldens (not 137);
-  the earlier "137 golden generation" phrasing in the "meta-test
-  behavior change" bullet above referred to the write-dir generation
-  only and did not account for the Temporal4 re-key delta.
+  commit's ~24 re-keyed adds sum to the ~160 new goldens correct at
+  2aacf3c (not 137); SF3 (`756da6e`) later minted +71 more (53
+  create/delete + 18 Temporal4), bringing the total Stage-12 new-
+  goldens delta to ~231. The earlier "137 golden generation" phrasing
+  in the "meta-test behavior change" bullet above referred to the
+  write-dir generation only and did not account for the Temporal4
+  re-key delta or the SF3 snapshot pass.
