@@ -1004,14 +1004,18 @@ func isBucketThreeError(kind, detail string) bool {
 	}
 	// SyntaxError details the TCK uses for engine-side value / semantic rules
 	// (per ADR 0007 §6 read-through: the parser accepts, the engine raises).
+	// InvalidNumberLiteral / InvalidUnicodeCharacter / InvalidUnicodeLiteral are
+	// deliberately absent: every TCK scenario tagged with those details today is
+	// a parse-shape rule the lexer owns (alpha in decimal, 0x with no digits,
+	// non-hex digit in \u escape, em-dash operator). Value-out-of-range cases
+	// use IntegerOverflow / FloatingPointOverflow. Admitting the parse-shape
+	// details would silently PENDING a future lexer regression instead of
+	// exposing it — bead gqlc-j6c.
 	switch detail {
 	case "IntegerOverflow",
 		"FloatingPointOverflow",
 		"InvalidArgumentType",
 		"InvalidArgumentValue",
-		"InvalidNumberLiteral",
-		"InvalidUnicodeCharacter",
-		"InvalidUnicodeLiteral",
 		"UndefinedVariable",
 		"InvalidAggregation",
 		"NegativeIntegerArgument",
