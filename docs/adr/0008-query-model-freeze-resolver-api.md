@@ -1,5 +1,68 @@
 # `query.Query` is frozen; the resolver API is pinned
 
+> _Amendment (2026-07-11, gqlc-5xg unfreeze cycle): the required-
+> bare-pattern re-reference axis on `NodeBinding` / `EdgeBinding` —
+> R4 §7.5.4's **Axis 2 shape (b)** (the narrower boolean, not
+> shape (a)'s `RequiredReferences []ClauseRef`), filed from the R4
+> close-out as gqlc-5xg — is **adopted** under this ADR's additive-
+> only revision protocol. The frozen wire recorded first-introduction
+> facts about each binding but not what happened to that binding
+> after: when the same variable appeared in a later same-Part
+> clause, `mergeBinding` (`internal/query/cypher/pattern.go:388-404`)
+> dedupes the re-reference and discards its shape, so the resolver
+> could not distinguish a bare re-reference (row-drop witness) from
+> an edge-chain re-reference (existing endpoint witness) or from
+> another OPTIONAL clause (no witness). Class B
+> (`docs/specs/resolver-stage-r4.md §7.5.3` item 2) was this cycle's
+> target. Each of the two node/edge Binding variants gains one
+> additive field `referencedInRequiredBarePattern bool` and one
+> accessor `ReferencedInRequiredBarePattern() bool`. **No new
+> constructor** — the axis is a post-introduction fact
+> `mergeBinding`'s merge arm sets on the raw binding, forwarded
+> through `toBinding` via an unexported per-variant mutator
+> `markReferencedInRequiredBarePattern()`; the nine existing binding
+> constructors (six pre-ay9 + three ay9 InGroup) are preserved
+> verbatim and continue to mint `false`. The parser sets the flag
+> iff (i) the enclosing clause is required (non-OPTIONAL, `group ==
+> 0`) and (ii) the pattern element is bare (`len(chain) == 0` at
+> `collectPatternElement`; a node has no adjacent edge chain link,
+> so the label/property filter on NULL drops the row under
+> left-join). On an edge variable the parser never sets the flag —
+> an edge occurrence always sits inside `-[...]-` between two node
+> positions, so the "bare" predicate is grammatically-unreachable;
+> the field is added for wire symmetry and forward compatibility.
+> `PathBinding` / `UnwindBinding` / `CallBinding` are untouched
+> (path members carry the flag through their referenced node/edge
+> bindings; UNWIND has no bare-re-reference form; CALL YIELD is not
+> re-referenceable). The JSON encoding is **omit-when-false**
+> (`,omitempty`), following the post-freeze convention this ADR's
+> hk0 amendment established; **zero** of 3199 parser goldens
+> rebaseline (the TCK does not exercise the shape), all 3199 are
+> byte-identical. The Binding interface stays sealed at
+> `Kind()`/`Nullable()`/`isBinding()`; bare-ref recording is a
+> per-variant field-and-accessor concern. The resolver widening
+> (post-5xg PR) adds a pre-pass to `demoteNullableInPlace` that
+> demotes any binding whose `ReferencedInRequiredBarePattern()`
+> returns true, orthogonal to ay9's group closure — the two
+> demotion channels compose commutatively (both flip the same
+> table entry to false; bare-ref demotion never seeds
+> `demotedGroups`). **Zero existing resolver goldens flip** (no
+> in-tree fixture exercises the shape); four new fixtures land
+> covering the canonical Class B case, the label-filtered variant,
+> the OPTIONAL-re-reference kill-probe, and the compose-with-ay9
+> witness. **Residual**: the edge-side missing-witness gap —
+> non-bare edge re-references that drop endpoint state at
+> `mergeBinding` — is not closed by this narrower boolean; closing
+> it needs shape (a)'s `RequiredReferences []ClauseRef` axis and is
+> filed as a follow-up bead at close-out. Class A / gqlc-ay9 is
+> closed (2026-07-10; ADR 0008 amendment above). With gqlc-5xg
+> adopted, the R4-inherited Class B row across the R4-R7 stage
+> specs is retired in the docs-errata cycle (§8.6); the model-
+> unfreeze campaign's planned scope is fully discharged. See
+> `docs/specs/unfreeze-5xg-required-bare-ref.md` for the full
+> contract, the 0-golden flip census, the constructor-strategy
+> and predicate-derivation decisions, and the fence commands._
+
 > _Amendment (2026-07-07, gqlc-ay9 unfreeze cycle): the
 > OPTIONAL-group membership axis on `NodeBinding` / `EdgeBinding` —
 > R4 §7.5.4's **Axis 1**, filed from the R4 close-out as gqlc-ay9 —
@@ -359,6 +422,19 @@ in-protocol when they arrive, not scope creep:
   `internal/resolver/resolve.go` — see the ay9 resolver-widening
   PR), closing R4 §7.5.3 Class A (items 1 + 3). Class B (item 2)
   remains open under gqlc-5xg.
+- **`ReferencedInRequiredBarePattern` axis on `NodeBinding` /
+  `EdgeBinding`** — adopted 2026-07-11 (see the amendment note
+  above and `docs/specs/unfreeze-5xg-required-bare-ref.md`).
+  Populated parser-side by `mergeBinding`'s merge arm at
+  `internal/query/cypher/pattern.go:388-404` when the current
+  occurrence is required and bare; consumed by the resolver's
+  Phase D bare-ref pre-pass in `demoteNullableInPlace`
+  (`internal/resolver/resolve.go` — see the 5xg resolver-widening
+  PR), closing R4 §7.5.3 Class B (item 2). The edge-side non-bare
+  missing-witness residual is filed as a follow-up bead at
+  close-out. With ay9 (Class A, closed 2026-07-10), R4 §7.5.3's two
+  named classes are closed; the planned model-unfreeze campaign is
+  discharged.
 
 ### shortestPath is a dialect extension, out of the frozen scope
 

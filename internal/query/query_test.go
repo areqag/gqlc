@@ -815,6 +815,83 @@ func TestMarshalJSONOmitsZeroOptionalGroup(t *testing.T) {
 	}
 }
 
+// TestNodeBindingReferencedInRequiredBarePatternZeroDefault pins the 5xg
+// zero-value posture on the node side: every one of the three preserved
+// node constructors (pre-ay9 + ay9 InGroup) yields
+// ReferencedInRequiredBarePattern() == false. Bare-ref demotion is a
+// derived post-introduction fact; the constructors don't take the flag.
+func TestNodeBindingReferencedInRequiredBarePatternZeroDefault(t *testing.T) {
+	require.False(t, must(query.NewNodeBinding("p", nil)).ReferencedInRequiredBarePattern())
+	require.False(t, must(query.NewNullableNodeBinding("p", nil)).ReferencedInRequiredBarePattern())
+	require.False(t, must(query.NewNullableNodeBindingInGroup("p", nil, 1)).ReferencedInRequiredBarePattern())
+}
+
+// TestEdgeBindingReferencedInRequiredBarePatternZeroDefault pins the 5xg
+// zero-value posture on the edge side: every one of the six preserved
+// edge constructors yields ReferencedInRequiredBarePattern() == false.
+// The edge-side true value is grammatically-unreachable (§2.3, §2.5); the
+// zero-value pin fences the wire-compat guarantee for the parser corpus.
+func TestEdgeBindingReferencedInRequiredBarePatternZeroDefault(t *testing.T) {
+	src := must(query.NewVarEndpoint("a"))
+	tgt := must(query.NewVarEndpoint("b"))
+	hops := must(query.NewEdgeHops(nil, nil))
+
+	require.False(t, must(query.NewEdgeBinding("r", nil, src, tgt, true)).ReferencedInRequiredBarePattern())
+	require.False(t, must(query.NewNullableEdgeBinding("r", nil, src, tgt, true)).ReferencedInRequiredBarePattern())
+	require.False(t, must(query.NewNullableEdgeBindingInGroup("r", nil, src, tgt, true, 1)).ReferencedInRequiredBarePattern())
+	require.False(t, must(query.NewVarLengthEdgeBinding("r", nil, src, tgt, true, hops)).ReferencedInRequiredBarePattern())
+	require.False(t, must(query.NewNullableVarLengthEdgeBinding("r", nil, src, tgt, true, hops)).ReferencedInRequiredBarePattern())
+	require.False(t, must(query.NewNullableVarLengthEdgeBindingInGroup("r", nil, src, tgt, true, hops, 1)).ReferencedInRequiredBarePattern())
+}
+
+// TestMarshalJSONOmitsReferencedInRequiredBarePatternWhenFalse is the 5xg
+// wire-compat fence in unit form: a binding whose bare-ref flag is false
+// — every preserved constructor's output — serialises without the
+// "referencedInRequiredBarePattern" key, so every non-bare-re-referenced
+// parser golden stays byte-identical.
+func TestMarshalJSONOmitsReferencedInRequiredBarePatternWhenFalse(t *testing.T) {
+	src := must(query.NewVarEndpoint("a"))
+	tgt := must(query.NewVarEndpoint("b"))
+	hops := must(query.NewEdgeHops(nil, nil))
+
+	for _, b := range []query.Binding{
+		must(query.NewNodeBinding("p", nil)),
+		must(query.NewNullableNodeBinding("p", nil)),
+		must(query.NewNullableNodeBindingInGroup("p", nil, 1)),
+		must(query.NewEdgeBinding("r", nil, src, tgt, true)),
+		must(query.NewNullableEdgeBinding("r", nil, src, tgt, true)),
+		must(query.NewNullableEdgeBindingInGroup("r", nil, src, tgt, true, 1)),
+		must(query.NewVarLengthEdgeBinding("r", nil, src, tgt, true, hops)),
+		must(query.NewNullableVarLengthEdgeBinding("r", nil, src, tgt, true, hops)),
+		must(query.NewNullableVarLengthEdgeBindingInGroup("r", nil, src, tgt, true, hops, 1)),
+	} {
+		out := must(json.Marshal(b))
+		require.NotContains(t, string(out), `"referencedInRequiredBarePattern"`)
+	}
+}
+
+// TestMarshalJSONEmitsReferencedInRequiredBarePatternWhenTrue pins the
+// bare-ref-carrying wire fragment (5xg): the key is the tail key —
+// after "optionalGroup" on a node, after "optionalGroup" on an edge. The
+// parser-side mark path (query.MarkNodeBindingReferencedInRequiredBarePattern)
+// is the same symbol build.go uses; a round-trip through the mark keeps
+// wire and Go in lockstep.
+func TestMarshalJSONEmitsReferencedInRequiredBarePatternWhenTrue(t *testing.T) {
+	n := must(query.NewNullableNodeBindingInGroup("b", nil, 1))
+	query.MarkNodeBindingReferencedInRequiredBarePattern(&n)
+	require.True(t, n.ReferencedInRequiredBarePattern())
+	outN := must(json.Marshal(n))
+	require.Contains(t, string(outN), `"optionalGroup":1,"referencedInRequiredBarePattern":true`)
+
+	src := must(query.NewVarEndpoint("a"))
+	tgt := must(query.NewVarEndpoint("b"))
+	e := must(query.NewNullableEdgeBindingInGroup("r", nil, src, tgt, true, 1))
+	query.MarkEdgeBindingReferencedInRequiredBarePattern(&e)
+	require.True(t, e.ReferencedInRequiredBarePattern())
+	outE := must(json.Marshal(e))
+	require.Contains(t, string(outE), `"optionalGroup":1,"referencedInRequiredBarePattern":true`)
+}
+
 // TestBindingDiscriminatorTracksEntityKind pins the binding "kind" tag to
 // graph.EntityKind.String, the single source it derives from, so the serialised
 // tag can never drift from Kind().

@@ -403,6 +403,62 @@ var mustParse = map[string]struct {
 			}}},
 		},
 	},
+	// 5xg spec §5.1.1 — a required (non-OPTIONAL) bare re-reference of an
+	// OPTIONAL-introduced node sets the referencedInRequiredBarePattern flag
+	// on the existing binding at mergeBinding's merge arm. `a` and the
+	// anonymous edge stay flag-false: only `b` is bare-re-referenced (the
+	// second MATCH's element has no adjacent chain).
+	"required bare re-reference sets flag on optional node": {
+		src: "OPTIONAL MATCH (a)-[:R]->(b)\nMATCH (b)\nRETURN b",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNullableNodeBindingInGroup("a", nil, 1)),
+				must(query.NewNullableEdgeBindingInGroup("", graph.LabelSet{"R"},
+					must(query.NewVarEndpoint("a")),
+					must(query.NewVarEndpoint("b")),
+					true,
+					1,
+				)),
+				markBareRefNode(must(query.NewNullableNodeBindingInGroup("b", nil, 1))),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"}, query.TypeNode{})},
+			},
+		}),
+	},
+	// 5xg spec §5.1.2 — kill-probe: a required chain re-reference (b at the
+	// head of `-[:S]->(c)`) has an adjacent edge on its right, so `bare` is
+	// false at the merge site and the flag is NOT set. The existing R4
+	// endpoint-witnessing already demotes `b` via the required :S edge; the
+	// 5xg axis stays out of the way. This pin fails loudly if the parser
+	// misfires the flag on non-bare chain re-references.
+	"required chain re-reference does not set bare-ref flag": {
+		src: "OPTIONAL MATCH (a)-[:R]->(b)\nMATCH (b)-[:S]->(c)\nRETURN b, c",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNullableNodeBindingInGroup("a", nil, 1)),
+				must(query.NewNullableEdgeBindingInGroup("", graph.LabelSet{"R"},
+					must(query.NewVarEndpoint("a")),
+					must(query.NewVarEndpoint("b")),
+					true,
+					1,
+				)),
+				// b's flag is NOT set — the second occurrence is chain-headed,
+				// not bare (a `-[:S]->` follows it in the same pattern element).
+				must(query.NewNullableNodeBindingInGroup("b", nil, 1)),
+				must(query.NewEdgeBinding("", graph.LabelSet{"S"},
+					must(query.NewVarEndpoint("b")),
+					must(query.NewVarEndpoint("c")),
+					true,
+				)),
+				must(query.NewNodeBinding("c", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"}, query.TypeNode{})},
+				{Name: "c", Value: query.NewRefProjection(query.Ref{Variable: "c"}, query.TypeNode{})},
+			},
+		}),
+	},
 	// Temporal4 [1] property return with no alias: E1 derives the column name from
 	// the verbatim expression text — "n.created", not "created".
 	"property return no alias": {
@@ -2550,6 +2606,18 @@ func must[T any](v T, err error) T {
 		panic(err)
 	}
 	return v
+}
+
+// markBareRefNode is the 5xg parser-test bridge to the unexported
+// markReferencedInRequiredBarePattern mutator. It captures the value in an
+// addressable local, flips the flag through the exported parser wrapper
+// (query.MarkNodeBindingReferencedInRequiredBarePattern — the same symbol
+// build.go uses), and returns the mutated value so it can sit inline in a
+// struct-literal Bindings slice. Only used from mustParse pins that exercise
+// the axis's true side (§5.1.1); every non-5xg pin stays byte-identical.
+func markBareRefNode(b query.NodeBinding) query.NodeBinding {
+	query.MarkNodeBindingReferencedInRequiredBarePattern(&b)
+	return b
 }
 
 func TestMustParse(t *testing.T) {

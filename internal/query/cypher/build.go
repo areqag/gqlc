@@ -260,26 +260,56 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Part,
 // (ADR 0006; ay9 — nullable ⇔ group ≥ 1 is the parser-side invariant).
 // Stage 8: hops picks the variable-length variant (list-of-edge
 // cardinality) — the four-way choice (OPTIONAL-introduced × var-length)
-// routes through the constructors.
+// routes through the constructors. 5xg (ADR 0008 amendment 2026-07-11):
+// when the raw binding recorded a required same-Part bare re-reference,
+// the constructed binding is post-mutated through the unexported
+// per-variant markReferencedInRequiredBarePattern; the mutation is
+// gated on the raw flag so untouched-common-case bindings are
+// bit-identical to their pre-5xg values.
 func (rb *rawBinding) toBinding() (query.Binding, error) {
-	if rb.kind == graph.Edge {
+	var b query.Binding
+	var err error
+	switch {
+	case rb.kind == graph.Edge:
 		// The single polarity flip from the listener's zero-value-safe inverted
 		// rawBinding.undirected to the model's positive directed field lives here
 		// (Stage 5 §4): directed = !undirected.
 		directed := !rb.undirected
-		if rb.hops != nil {
-			if rb.optionalGroup > 0 {
-				return query.NewNullableVarLengthEdgeBindingInGroup(rb.variable, rb.labels, rb.source, rb.target, directed, *rb.hops, rb.optionalGroup)
-			}
-			return query.NewVarLengthEdgeBinding(rb.variable, rb.labels, rb.source, rb.target, directed, *rb.hops)
+		switch {
+		case rb.hops != nil && rb.optionalGroup > 0:
+			b, err = query.NewNullableVarLengthEdgeBindingInGroup(rb.variable, rb.labels, rb.source, rb.target, directed, *rb.hops, rb.optionalGroup)
+		case rb.hops != nil:
+			b, err = query.NewVarLengthEdgeBinding(rb.variable, rb.labels, rb.source, rb.target, directed, *rb.hops)
+		case rb.optionalGroup > 0:
+			b, err = query.NewNullableEdgeBindingInGroup(rb.variable, rb.labels, rb.source, rb.target, directed, rb.optionalGroup)
+		default:
+			b, err = query.NewEdgeBinding(rb.variable, rb.labels, rb.source, rb.target, directed)
 		}
-		if rb.optionalGroup > 0 {
-			return query.NewNullableEdgeBindingInGroup(rb.variable, rb.labels, rb.source, rb.target, directed, rb.optionalGroup)
+	case rb.optionalGroup > 0:
+		b, err = query.NewNullableNodeBindingInGroup(rb.variable, rb.labels, rb.optionalGroup)
+	default:
+		b, err = query.NewNodeBinding(rb.variable, rb.labels)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if rb.referencedInRequiredBarePattern {
+		// 5xg: pointer receiver on the mutator forces a type-switch so the
+		// local variable is addressable; mutation is committed back through
+		// the interface via b = bb. The mutator is exported on the model
+		// (query.MarkReferencedInRequiredBarePattern*) rather than unexported
+		// because build.go lives outside package query — see ADR 0008 5xg
+		// amendment; the exported symbol has no legitimate external caller
+		// (the flag is only knowable at parser merge time) and the accessor
+		// remains the only public read path.
+		switch bb := b.(type) {
+		case query.NodeBinding:
+			query.MarkNodeBindingReferencedInRequiredBarePattern(&bb)
+			b = bb
+		case query.EdgeBinding:
+			query.MarkEdgeBindingReferencedInRequiredBarePattern(&bb)
+			b = bb
 		}
-		return query.NewEdgeBinding(rb.variable, rb.labels, rb.source, rb.target, directed)
 	}
-	if rb.optionalGroup > 0 {
-		return query.NewNullableNodeBindingInGroup(rb.variable, rb.labels, rb.optionalGroup)
-	}
-	return query.NewNodeBinding(rb.variable, rb.labels)
+	return b, nil
 }
