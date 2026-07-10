@@ -4,7 +4,7 @@ The implementation brief for Stage 12 of the Cypher implementation of
 `query.Parser`. Twelfth model evolution after Stage 11 per ADR 0004
 (test-first, evolving until feature-complete), under the curation
 discipline of ADR 0003 and the type-interface boundary of ADR 0005.
-Stage 12 is the seventh stage of the ADR-0007 pre-freeze expansion
+Stage 12 is the seventh stage of the ADR-0007 before Stage 14 expansion
 beyond the read core. It **adds the four write clauses**:
 `CREATE`, `DELETE` (with `DETACH`), `SET`, and `REMOVE`. `MERGE` is
 its own stage (13) because the read/create alternation is a distinct
@@ -29,8 +29,8 @@ comes for free from Stage 6's existing rich-expression typer: a
 and hangs an `ExprUse{sourceType, ExprInProjection}` on the parameter.
 An inline `CREATE (p:Person {name: $name})` mines its map through the
 existing `mineInlineMap` and produces a `PropertyUse{p, name}` — the
-resolver upgrades $name's type from the schema's `Person.name` after
-the freeze. No new parameter mining machinery is introduced; every
+resolver upgrades $name's type from the schema's `Person.name`. No
+new parameter mining machinery is introduced; every
 value expression rides an existing path.
 
 This document is a **delta** against Stages 0–11 (referenced
@@ -214,8 +214,8 @@ two categories:
   producer role and from a projection column's return-side role.
   Wire tag: `"deleteTarget"`. `TypeUnknown` is the honest posture:
   the parameter's role is a delete target whose entity kind the
-  parser cannot commit to schema-free; the resolver upgrades post-
-  freeze from the schema-known entity the value ultimately references.
+  parser cannot commit to schema-free; the resolver upgrades from the
+  schema-known entity the value ultimately references.
 
 **Field contract on `DeleteEffect{Targets, Refs}`.** Every DELETE
 expression the query names appears in EXACTLY ONE of the Effect's
@@ -443,7 +443,7 @@ exercise (§1.5 discussed the finding).
   story: one Parameter `newAge` with ExprUse{TypeUnknown,
   ExprInProjection} (TypeUnknown because a bare `$newAge` has no
   enclosing arithmetic that pins a concrete type; the resolver
-  upgrades from `n.age` via the schema post-freeze). No verbatim
+  upgrades from `n.age` via the schema later). No verbatim
   corpus query exercises this shape at the pinned tag.
 
 Approximate count: 11 new `mustParse` pins; the number is a ceiling
@@ -1191,10 +1191,10 @@ The lesser risks, recorded for completeness:
   ExprInSetValue}` for the bare-`$newAge` SET case, and
   `ExprUse{TypeUnknown, ExprInDeleteTarget}` for the `nodes($p)`
   DELETE case. The RESOLVER's job is to unify these into a concrete
-  parameter type post-freeze; the PARSER's contract is only "no
+  parameter type later; the PARSER's contract is only "no
   parameter is silently dropped, and every use carries enough for
   the resolver to unify from the schema." A downstream consumer
-  that reads the parameter's Uses list before the freeze would see
+  that reads the parameter's Uses list before Stage 14 would see
   TypeUnknown on the bare-SET and DELETE cases and rightly conclude
   "the parser cannot tell" — which is the honest posture (ADR 0005).
 - **Meta-test behavior change — `the result should be empty` gate

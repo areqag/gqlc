@@ -1,11 +1,11 @@
-# Model unfreeze — per-position CALL-arg records
+# Model change — per-position CALL-arg records
 
-The implementation brief for cycle **gqlc-0ig** of the model-unfreeze
+The implementation brief for cycle **gqlc-0ig** of the model-additions
 campaign: an additive `Args []CallArg` axis on `query.CallBinding`,
 populated parser-side at `collectCall`'s existing argument-mining
 loop, closing the R7 §7.1.1 CALL-arg-attribution gap
 (`docs/specs/resolver-stage-r7.md §7.1.1`) without touching the
-frozen wire shape's zero-value semantics. The axis carries the
+wire shape's zero-value semantics. The axis carries the
 mined argument's `query.Type` plus an implicit position (slice
 index); the procedure signature match (including the
 NUMBER-assignable-from-INTEGER-or-FLOAT rule from ADR 0007) stays
@@ -13,17 +13,17 @@ resolver-side, consulting the per-parse `procsig.Registry` the
 resolver already holds (`internal/resolver/resolve.go:21`).
 
 This brief is the **contract for the whole gqlc-0ig cycle**: it spans
-the spec PR (this file), the unfreeze PR (model + parser +
+the spec PR (this file), the model-change PR (model + parser +
 ADR 0008 amendment + parser-test rebaseline; resolver untouched
 and green), and the resolver-widening PR (a new argument-site
 assignability walk over `CallBinding.Args()`; new discriminating
 invalid fixture + preserved byte-identity over every pre-existing
-resolver golden). Both code PRs land under ADR 0008's post-freeze
-revision protocol (§Post-freeze revision protocol) — additive-only,
+resolver golden). Both code PRs land under ADR 0008's later
+additions convention (§Additions since Stage 14) — additive-only,
 dated amendment, golden rebaseline whose diff shows only the new
 surface.
 
-The three other unfreeze beads (`gqlc-hk0` — CLOSED, `gqlc-fvo` —
+The three other change beads (`gqlc-hk0` — CLOSED, `gqlc-fvo` —
 CLOSED, `gqlc-ay9`, `gqlc-5xg`), the cycle-2 residual beads
 (`gqlc-4w5`, `gqlc-qcc`), and codegen are **out of scope** — this
 campaign closes 0ig alone. See §9 for the non-goals table.
@@ -47,9 +47,9 @@ campaign closes 0ig alone. See §9 for the non-goals table.
 
 Spec cycle (Cycle 1) — this PR:
 
-- `docs/specs/unfreeze-0ig-call-args.md` — this file.
+- `docs/specs/model-change-0ig-call-args.md` — this file.
 
-Unfreeze cycle (Cycle 2, follow-up PR):
+Cycle ( 2, follow-up PR):
 
 - `internal/query/query.go` — one additive field `args []CallArg`
   on `CallBinding` (last field, per the tail-append convention hk0
@@ -88,7 +88,7 @@ Unfreeze cycle (Cycle 2, follow-up PR):
   rebaseline — the pin's `NewCallBinding(...)` becomes
   `NewCallBindingWithArgs(..., []query.CallArg{...})` with mined
   types. §4.3 pins each rebaseline.
-- `docs/adr/0008-query-model-freeze-resolver-api.md` — one dated
+- `docs/adr/0008-query-model-surface-resolver-api.md` — one dated
   amendment note (top of the file, ADR 0003 stage-note convention)
   recording the CALL-arg axis's adoption. The "Known deferred
   additions" list carries a new closed-out entry for `CallBinding.
@@ -102,7 +102,7 @@ Unfreeze cycle (Cycle 2, follow-up PR):
   are byte-identical. §4.4 pins the fence with per-scenario
   witnessing.
 
-Resolver-widening cycle (Cycle 3, follow-up PR after the unfreeze PR
+Resolver-widening cycle (Cycle 3, follow-up PR after the model-change PR
 merges):
 
 - `internal/resolver/resolve.go` — a new argument-site assignability
@@ -149,7 +149,7 @@ honest"). The bucket-3 skiplisting cite is
 `docs/specs/cypher-query-parser-stage-14.md:971-990`. The mined
 type is then used only to construct an `ExprUse{t,
 ExprInProjection}` for any parameter tree the expression walks over
-(line 64). The frozen wire — `query.CallBinding` at
+(line 64). The wire — `query.CallBinding` at
 `internal/query/query.go:843-849` — carries **zero information about
 the arguments**: only the yielded column's variable, procedure name,
 source field, result type, and nullable bit.
@@ -264,12 +264,12 @@ this cycle:
   ExprInProjection}` STAY `ExprInProjection`; the arg-site
   assignability check consults `CallBinding.Args()`, not the
   Use's position discriminator. §3.4 argues the divergence from
-  R7 §7.1.1's "Two minimal frozen-model changes" list (which
+  R7 §7.1.1's "Two minimal model changes" list (which
   proposes both `ExprInCallArg` AND a `Calls` axis on `Part`).
 - **`Binding` remains sealed at five variants** — CallBinding gains
   a field, not a new sibling.
 - **`Type` remains sealed at seventeen variants** — the mined
-  arg types reuse the existing frozen Type sum.
+  arg types reuse the existing Type sum.
 - **`procsig.TypeToken`** stays a signature-only vocabulary
   (ADR 0007 Stage-14 note lines 172-174) — it never appears on
   the query wire. The resolver bridges `procsig.TokenNumber` to
@@ -285,9 +285,9 @@ this cycle:
 
 ---
 
-## 3. Mining — what the frozen model records today
+## 3. Mining — what the query model records today
 
-### 3.1 `CallBinding` — the frozen shape
+### 3.1 `CallBinding` — the query.Query surface
 
 The pre-widening shape (branch base `62923d8`, pre-0ig) is quoted
 below for the historical framing this section rests on. Current
@@ -306,7 +306,7 @@ noted under each ref below (§12 errata NIT5).
 // (kept even when it equals the variable, so a YIELD out AS x is
 // unambiguous at codegen). The resultType is the bridged Stage-6
 // type (TypeInt / TypeFloat / TypeString / TypeUnknown — the last for
-// a NUMBER signature token, whose runtime column type post-freeze
+// a NUMBER signature token, whose runtime column type later
 // codegen reads from the registry directly). Nullable mirrors the
 // signature's trailing `?` verbatim.
 type CallBinding struct {
@@ -399,13 +399,13 @@ walk by re-looking-up the procedure by name.
    even though the signature is a compile-time input the codegen
    consumer already holds a copy of. Change the signature (a
    registry edit for a new procedure release); the wire diverges.
-2. **Puts `procsig.TypeToken` on the freeze surface.** The
+2. **Puts `procsig.TypeToken` on query.Type.** The
    `TypeToken` sum is intentionally decoupled from the query wire
    (`internal/procsig` package doc, mined against master; verified
    at branch base). ADR 0007's Stage-14 note (lines 172-174) is
    explicit: _"NUMBER stays a signature-only marker … the cypher-
    package bridge maps it to TypeUnknown on the wire so no
-   signature-time vocabulary leaks into the freeze surface."_
+   signature-time vocabulary leaks into query.Type."_
    The bead text's proposal directly violates this.
 3. **Couples the parser tighter to the registry semantics.** The
    parser currently uses the registry for two facts: does the
@@ -437,7 +437,7 @@ are:
   | "NUMBER"`).
 
 Both shapes are additive under ADR 0008; the choice is layering /
-freeze-surface-scope, not correctness. **Escalation flagged
+surface-scope, not correctness. **Escalation flagged
 prominently at spec front.**
 
 ### 3.3 The emission site — `collectCall` at branch base
@@ -496,7 +496,7 @@ alongside the ExprUse emission, then threaded to
 
 ### 3.4 Divergence from R7 §7.1.1's proposed shape — why NOT `ExprInCallArg`
 
-R7 §7.1.1 proposed **two** minimal frozen-model changes to enable
+R7 §7.1.1 proposed **two** minimal model changes to enable
 the resolver-side check:
 
 1. Add `ExprInCallArg` to the `ExprPosition` sum.
@@ -585,7 +585,7 @@ a `null` literal argument mines to `TypeNull{}` (not TypeUnknown —
 see `internal/query/cypher/shape.go:78-79`; the §12 errata B1
 witness in §4.4.2 rests on this). The zero value of the `Type`
 field IS `nil` (the interface's zero), but the widened marshaller
-renders any Type via the frozen `marshalType` path
+renders any Type via the `marshalType` path
 (`internal/query/type.go:8`: `marshalType(t) = json.Marshal(t.String())`)
 so each Type variant serialises as a **plain JSON string** — never
 a `{"kind":…}` object. Real bytes at branch tip, quoted verbatim
@@ -626,18 +626,18 @@ that encoding does not exist. Corrected in §12 errata B3.
 ### 3.6 `EdgeBinding.directed`, `ExprProjection.ContainsAggregate`,
       `Use.Part` — the axis precedents
 
-Three axis precedents on the frozen model, listed in the order they
+Three axis precedents on the query model, listed in the order they
 landed (line refs against current master `70f5c29`, per §12 errata
 NIT5):
 
-- **`EdgeBinding.directed`** (pre-freeze) — always-emit,
+- **`EdgeBinding.directed`** (before Stage 14) — always-emit,
   bool. `internal/query/query.go:378`. Predates the
   omit-when-zero-value convention.
 - **`ExprProjection.ContainsAggregate`** (hk0, 2026-07-06) —
   omit-when-false, bool. `internal/query/query.go:1233` (field) /
   `:1282` (marshal tag). ESTABLISHED the omit-when-zero-value
-  convention as post-freeze doctrine
-  (`docs/adr/0008-query-model-freeze-resolver-api.md`
+  convention as later doctrine
+  (`docs/adr/0008-query-model-surface-resolver-api.md`
   hk0 amendment note).
 - **`PropertyUse.part` / `ExprUse.part` / `ClauseSlotUse.part`**
   (fvo, 2026-07-06) — omit-when-zero-int, int.
@@ -671,7 +671,7 @@ arg params; the check axis lives on CallBinding, not on Use).
 
 ---
 
-## 4. The unfreeze — parser and model changes
+## 4. The change — parser and model changes
 
 ### 4.1 `CallBinding` — the additive field
 
@@ -895,7 +895,7 @@ campaign's convention holds. §4.1.3.2 pins the fences.
 
 **Fence 1 — strip-key overreach detector** (the widened
 marshaller must not leak `args: [ … ]` outside the scenario-
-verified set of 28 goldens). Run from the worktree at the unfreeze
+verified set of 28 goldens). Run from the worktree at the change
 PR's branch tip against `origin/master @ 62923d8`:
 
 ```
@@ -989,7 +989,7 @@ against current master — the output equals the list above.
 
 If Fence 1 passes but Fence 2 fails, the widened marshaller
 emitted a non-`args` change on some golden — a formatting drift
-or an unrelated wire-shape edit. The unfreeze PR must pass BOTH
+or an unrelated wire-shape edit. The model-change PR must pass BOTH
 fences before landing.
 
 **Fence 3 (unit-test back-compat)** — the pre-existing
@@ -1250,9 +1250,9 @@ deleted, or split by this cycle.
 
 **Corpus stability note.** The 15-pin count is stable against
 master `62923d8`. Any code-cycle PR that adds a new CallBinding
-pin between spec merge and unfreeze merge MUST update this census
+pin between spec merge and change merge MUST update this census
 authoritatively — a diff-mismatch here is a code-vs-spec drift.
-The unfreeze PR is expected to leave the pin count at 15 and
+The model-change PR is expected to leave the pin count at 15 and
 apply exactly the flip pattern above.
 
 #### 4.3.1 Full 15-pin flip census
@@ -1260,16 +1260,16 @@ apply exactly the flip pattern above.
 The full census is **the table in §4.3 above** — no further
 enumeration is deferred. Reviewer verification is a mechanical
 set-check: run `grep -n "NewCallBinding" internal/query/cypher/parser_test.go`
-against the unfreeze branch, cross-reference each hit's line
+against the change branch, cross-reference each hit's line
 number and enclosing pin name against the table, then confirm the
 flip predicate (0-arg CALL ⇒ preserved, ≥1-arg CALL ⇒ flipped to
 `NewCallBindingWithArgs`). Twin lines (`2253`, `2280`, `2308`,
 `2410`) share their pin's args slice by construction — the
-unfreeze PR MUST allocate one `[]query.CallArg{…}` literal per
+model-change PR MUST allocate one `[]query.CallArg{…}` literal per
 `mustParse` entry and pass the same slice value to both twin
 `NewCallBindingWithArgs` invocations.
 
-#### 4.3.2 Classification format for the unfreeze PR
+#### 4.3.2 Classification format for the model-change PR
 
 Per pin, the PR body records:
 
@@ -1645,7 +1645,7 @@ validation.
 
 **Cycle-2 erratum 2 lesson applied.** The lesson: any helper algorithm
 the spec sketches must be implementable from data available in the
-frozen model. Verification: the mined `t` from `typeExpressionMining`
+query model. Verification: the mined `t` from `typeExpressionMining`
 IS available at the emission moment (line 55 of call.go). No new
 data plumbing is needed. §4.2's widening consumes only what the
 current code already computes.
@@ -1655,15 +1655,15 @@ current code already computes.
 ## 7. ADR 0008 amendment note — the dated stage note
 
 Verbatim text to add at the top of
-`docs/adr/0008-query-model-freeze-resolver-api.md`, following the
+`docs/adr/0008-query-model-surface-resolver-api.md`, following the
 two existing amendment notes' format (fvo lines 3-46; hk0 lines
 48-82; verified against master `62923d8`):
 
 ```markdown
-> _Amendment (2026-07-07, gqlc-0ig unfreeze cycle): the
+> _Amendment (2026-07-07, gqlc-0ig model-change cycle): the
 > per-position CALL-arg attribution axis on `CallBinding` — recorded
 > as the R7 §7.1.1 CALL-arg-attribution deferral — is **adopted**
-> under this ADR's additive-only revision protocol. The R7-shipped
+> under this ADR's coordinated change with consumers. The R7-shipped
 > "no arg-site check" posture
 > (`docs/specs/resolver-stage-r7.md §7.1.1`) was an honest
 > workaround for the wire's missing per-argument attribution; the
@@ -1671,21 +1671,21 @@ two existing amendment notes' format (fvo lines 3-46; hk0 lines
 > per Phase A1 and checks each mined type against
 > `procsig.Registry.Lookup(procedure).Params[i].Token` under the
 > ADR 0007 Stage-14 note's assignability rule
-> (`docs/adr/0007-pre-freeze-scope-full-opencypher-surface.md`
+> (`docs/adr/0007-parser-scope-full-opencypher-surface.md`
 > lines 172-174: NUMBER assignable-from INTEGER-or-FLOAT). The
 > `CallBinding` sum gains one additive field `args []CallArg`, one
 > new positional constructor `NewCallBindingWithArgs`, one new
 > accessor `Args() []CallArg`, and one new sub-type `CallArg` with
 > `NewCallArg(t Type)` and `Type() Type`. The `CallBinding.args`
 > encoding is **omit-when-zero-length** (`,omitempty`), following
-> the post-freeze convention this ADR's hk0 amendment established
+> the wire convention this ADR's hk0 amendment established
 > for additive axes. `procsig.TypeToken` stays a signature-only
 > vocabulary (ADR 0007 Stage-14 note); the wire records only the
 > parser-mined `query.Type`, and the resolver bridges by looking up
 > the procedure name against the compile-time `procsig.Registry`.
 > The Binding interface stays sealed at one method (`isBinding()`);
 > Args attribution is a CallBinding-only field-and-accessor concern.
-> See `docs/specs/unfreeze-0ig-call-args.md` for the full contract,
+> See `docs/specs/model-change-0ig-call-args.md` for the full contract,
 > the 28-golden rebaseline accounting with per-scenario spot
 > witnesses, the layering divergence from the bead text's
 > parser-emits-sig-token proposal, and the semantic-diff-only fence
@@ -1698,7 +1698,7 @@ close-out entries' format at lines 246-264; verified against master
 
 ```markdown
 - **`CallBinding.Args` axis** — adopted 2026-07-07 (see the
-  amendment note above and `docs/specs/unfreeze-0ig-call-args.md`).
+  amendment note above and `docs/specs/model-change-0ig-call-args.md`).
   Populated parser-side by `collectCall`'s existing arg-mining
   loop capturing the mined `query.Type` per argument position;
   consumed by the resolver's Phase A1 arg-site assignability walk
@@ -1712,9 +1712,9 @@ close-out entries' format at lines 246-264; verified against master
 
 ---
 
-## 8. Resolver widening — the follow-up PR after the unfreeze merges
+## 8. Resolver widening — the follow-up PR after the change merges
 
-The unfreeze PR lands the model + parser change with the resolver
+The model-change PR lands the model + parser change with the resolver
 green (0ig's `CallBinding.Args()` is populated but unconsumed at
 that point — see §9). The resolver-widening PR fires next, adding
 the arg-site assignability walk and one new invalid fixture. This
@@ -1853,7 +1853,7 @@ func argAssignable(argType query.Type, paramToken procsig.TypeToken) bool {
 
 **Drift-arm sentinel discipline (Errata E2, §12).** The sketch above wraps the
 two parser-drift arms (registry miss, arity mismatch) in a sentinel. As
-landed on `unfreeze-0ig-resolver`, both drift arms fire as **plain
+landed on `model-change-0ig-resolver`, both drift arms fire as **plain
 non-sentinel** `fmt.Errorf` — not `ErrOutOfR0Scope` (R7 §5.2 retired that
 sentinel's BindingCall fail-site; reintroducing it here would reverse
 that retirement) and not `ErrCallArgAssignability` (sole-purpose for the
@@ -1880,7 +1880,7 @@ because R7's CallBinding arm consulted only bridged fields
 (`bb.ResultType()`, `bb.Nullable()`, `bb.Procedure()`,
 `bb.SourceField()`) already resolver-facing on the binding.
 
-The 0ig resolver-widening PR (`origin/unfreeze-0ig-resolver` head
+The 0ig resolver-widening PR (`origin/model-change-0ig-resolver` head
 `1eb7764`) therefore does TWO threading edits before §8.1's
 CallBinding-arm widening compiles:
 
@@ -1967,7 +1967,7 @@ at resolve.go:234-236 for BindingCall"`). The spec argued this
 matched R7 §5.1's "zero new sentinels" line and preserved the
 "widen message set, not sum" invariant.
 
-**Implementation reality** (`origin/unfreeze-0ig-resolver` post-review
+**Implementation reality** (`origin/model-change-0ig-resolver` post-review
 head `43e40a8`, resolver-widening PR + review-finding fixes): a NEW
 sentinel `ErrCallArgAssignability` was minted with its doc comment
 starting at `internal/resolver/errors.go:92`, the `errors.New`
@@ -2118,7 +2118,7 @@ under a new "**Closure (0ig cycle)**" subhead):
 
 **Status update, 2026-07-07 (post-`gqlc-0ig` close-out).** The
 CALL-arg attribution deferral R7 §7.1.1 recorded is closed by the
-0ig unfreeze cycle: an additive `Args []CallArg` axis on
+0ig: an additive `Args []CallArg` axis on
 `query.CallBinding`, populated parser-side by `collectCall`'s
 existing arg-mining loop (the mined type at `call.go:55` is now
 captured into the axis instead of discarded), consumed by the
@@ -2128,7 +2128,7 @@ assignable-from INTEGER-or-FLOAT (ADR 0007 Stage-14 note lines
 172-174) is honoured; TypeUnknown accepts silently at every
 position (Q4 posture preserved). The R7-shipped
 "no arg-site check" workaround retires; the R7 §7.1.1 open axis is
-closed. See `docs/specs/unfreeze-0ig-call-args.md` for the full
+closed. See `docs/specs/model-change-0ig-call-args.md` for the full
 contract.
 
 **What did NOT need to change.** R7 §7.1.1 proposed TWO minimal
@@ -2165,12 +2165,12 @@ Do NOT close: `gqlc-4w5`, `gqlc-qcc` (cycle 2 residuals),
 
 | Item | Landing PR |
 |---|---|
-| `CallBinding.Args` model addition | Unfreeze PR |
-| `CallArg` sub-type | Unfreeze PR |
-| Parser `collectCall` widening | Unfreeze PR |
-| ADR 0008 amendment note | Unfreeze PR |
-| 28-golden parser rebaseline | Unfreeze PR |
-| Parser-test pin rebaseline for ≥ 1-arg pins | Unfreeze PR |
+| `CallBinding.Args` model addition | Change PR |
+| `CallArg` sub-type | Change PR |
+| Parser `collectCall` widening | Change PR |
+| ADR 0008 amendment note | Change PR |
+| 28-golden parser rebaseline | Change PR |
+| Parser-test pin rebaseline for ≥ 1-arg pins | Change PR |
 | Resolver arg-site assignability walk | Resolver-widening PR |
 | `call_arg_wrong_type_at_arg_site.cypher` fixture | Resolver-widening PR |
 | R7 §7.1.1 closure prose | Resolver-widening PR |
@@ -2242,12 +2242,12 @@ numbers verified against master `62923d8`.
   `docs/specs/resolver-stage-r7.md:1520-1567`. The prose that
   0ig does NOT close (the Use position discriminator stays
   ExprInProjection; §3.4 pins the reason).
-- **ADR 0008** — `docs/adr/0008-query-model-freeze-resolver-api.md`.
-  Additive-only revision protocol at §Post-freeze revision protocol
+- **ADR 0008** — `docs/adr/0008-query-model-surface-resolver-api.md`.
+  Additive-only additions convention at §Additions since Stage 14
   (`:224-264`). The two existing amendment notes at `:3-46` (fvo)
   and `:48-82` (hk0) — the template for §7.
 - **ADR 0007 Stage-14 note** —
-  `docs/adr/0007-pre-freeze-scope-full-opencypher-surface.md:166-181`.
+  `docs/adr/0007-parser-scope-full-opencypher-surface.md:166-181`.
   NUMBER assignable-from INTEGER-or-FLOAT at lines 172-174.
 - **Stage 14 spec §4.5 bucket-3 skiplist** —
   `docs/specs/cypher-query-parser-stage-14.md:971-990`. The Q4
@@ -2297,12 +2297,12 @@ resolver-widening PR):
 
 The spec PR is done when:
 
-- This file lands on master under `docs/specs/unfreeze-0ig-call-args.md`.
+- This file lands on master under `docs/specs/model-change-0ig-call-args.md`.
 - No behavioural code changes yet (spec-only cycle).
 - Linus review PASSES; team-lead PASSES; both explicitly ACK the
   four escalation items in §10.
 
-The unfreeze PR (cycle 2) then implements §4 verbatim. The
+The model-change PR (cycle 2) then implements §4 verbatim. The
 resolver-widening PR (cycle 3) then implements §8 verbatim.
 
 ---
@@ -2311,14 +2311,14 @@ resolver-widening PR (cycle 3) then implements §8 verbatim.
 
 Ten defects surfaced by adversarial review of the spec against
 the landed model (PR #122, `70f5c29`) and the resolver-widening
-branch (`origin/unfreeze-0ig-resolver` post-review head
+branch (`origin/model-change-0ig-resolver` post-review head
 `43e40a8`). None required a code edit that changed observable
 model behaviour — every defect was a spec-text divergence from
 repo reality or a load-bearing gap the earlier draft
 under-specified. The eight items B1/B3/B4/Item-4/Item-5/NIT5/
 NIT6/NIT7 landed in the first errata commit (`9a4d360`); E1 and
 E2 land in a follow-up errata commit alongside PR #123's
-`unfreeze-0ig-resolver` review findings. Fixes applied in place
+`model-change-0ig-resolver` review findings. Fixes applied in place
 above; this section is the reviewer-facing index.
 
 **B2 numbering gap (why the list runs B1, B3, B4).** B2 was the
@@ -2328,7 +2328,7 @@ commit `00682c1` _"docs(spec): 0ig — correct §4.3 parser-pin
 census (15 pins, not 30)"_, which landed inside PR #121 via
 squash-merge — the tree of `39a7da0` (PR #121's merge commit)
 is byte-identical to the tree of `00682c1` at
-`docs/specs/unfreeze-0ig-call-args.md` (verified: `git diff
+`docs/specs/model-change-0ig-call-args.md` (verified: `git diff
 00682c1:… 39a7da0:…` = empty). B2 therefore never entered this
 errata's remaining-defects list; only the label is retained so
 B1, B3, B4 keep their reviewer-facing shorthand from the
@@ -2423,7 +2423,7 @@ CallBinding-arm sketch presumed `procsig.Registry` was already
 available inside `resolvePart`. On master `70f5c29` the registry
 is threaded through `resolveBranch` and discarded with `_ = r` at
 `internal/resolver/resolve.go:122` (R5-era guard). The
-resolver-widening branch (`unfreeze-0ig-resolver` `1eb7764`)
+resolver-widening branch (`model-change-0ig-resolver` `1eb7764`)
 drops the discard AND widens `resolvePart`'s signature to accept
 `r procsig.Registry`. Neither edit is R5-through-R7 wire-observable,
 but both are prerequisites for the CallBinding-arm widening at
@@ -2475,7 +2475,7 @@ inconsistent with the lattice until this row landed.
 **E2. Drift-arm sentinel discipline (§8.1 checkCallArgs).** §8.1's
 sketch of `checkCallArgs` wrapped the two parser-drift arms
 (registry-miss, arity-mismatch) in `ErrOutOfR0Scope`. As landed on
-`unfreeze-0ig-resolver` (post-review at 43e40a8), both drift arms fire
+`model-change-0ig-resolver` (post-review at 43e40a8), both drift arms fire
 **plain non-sentinel** `fmt.Errorf` — not `ErrOutOfR0Scope` (R7 §5.2
 retired that sentinel's BindingCall fail-site; the drift-arm wrap
 would reintroduce it) and not `ErrCallArgAssignability` (sole-purpose

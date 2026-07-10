@@ -170,7 +170,7 @@ sentinel-reachability sweep (as in `internal/schema/gql`) guards the set.
   source text of the expression — `RETURN p` → `"p"`, `RETURN p.name` →
   `"p.name"`, `RETURN p.name AS firstName` → `"firstName"`. This is the column
   name openCypher itself produces. Go-identifier sanitization is a codegen concern
-  (post-freeze); the model stores the openCypher name.
+  (later); the model stores the openCypher name.
 - **E2 — Ref mapping.** `var` → `Ref{var, ""}`; `var.prop` → `Ref{var, prop}`.
 - **E3 — whole-entity return.** `RETURN p` → `Ref{p, ""}` allowed; the resolver
   later expands it.

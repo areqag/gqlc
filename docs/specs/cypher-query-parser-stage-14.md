@@ -4,7 +4,7 @@ The implementation brief for Stage 14 of the Cypher implementation of
 `query.Parser`. Fourteenth model evolution after Stage 13 per ADR 0004
 (test-first, evolving until feature-complete), under the curation
 discipline of ADR 0003 and the type-interface boundary of ADR 0005.
-Stage 14 is the ninth (and final pre-freeze) stage of the ADR-0007
+Stage 14 is the ninth (and final before Stage 14) stage of the ADR-0007
 expansion beyond the read core. It wires the CALL clause — standalone
 CALL, `CALL … YIELD`, and in-query CALL — and introduces the **procedure
 signature registry** as a second compile-time input alongside the
@@ -81,18 +81,19 @@ and `schema`. It carries:
   `TypeToken`. Returns an error on any violation; the zero `Registry`
   is a valid, empty registry (all lookups miss).
 
-**Why a separate package.** ADR 0007 §I keeps `query` closed after the
-freeze: adding a `Number` token, or any signature-specific vocabulary,
-into `query.Type` would enlarge the freeze surface. `procsig` decouples
+**Why a separate package.** ADR 0007 §I keeps `query` closed to
+signature-only vocabulary: adding a `Number` token, or any
+signature-specific vocabulary, into `query.Type` would enlarge
+query.Type. `procsig` decouples
 signature vocabulary from result-column vocabulary: NUMBER is a
 signature-time marker (assignable-from INTEGER-or-FLOAT), it is NOT a
 runtime result type, and it must never appear on the wire as a column
 type. Keeping it in `procsig` and bridging (§3.2) preserves the
-type-interface freeze contract. Q2 fold-in.
+type-interface ADR 0008 record. Q2 fold-in.
 
 **Why not import `query.Type` directly.** A `procsig` that named
 `query.Type` values as its signature vocabulary would either: (a) force
-`query.Type` to grow a `TypeNumber` variant (freeze-surface enlargement,
+`query.Type` to grow a `TypeNumber` variant (query.Type enlargement,
 rejected by Q3 ruling), or (b) omit NUMBER and silently coerce the
 registry to INTEGER-or-FLOAT (silent info drop; a future stage that
 wants to enforce NUMBER-vs-INTEGER at the fail-site would have nothing
@@ -111,9 +112,9 @@ one of the two. See §4.5 (arg-type check) for the exact rule.
 in Stage 14: `NewRegistry([]Signature{...})` from Go, populated by the
 godog step from parsed feature-table rows. A textual file format (a
 `.procsig` or YAML surface for a real CLI user) is intentionally
-deferred. It is filed as a follow-up bead at close-out; the freeze
-(`gqlc-cta`) can proceed on the in-memory API alone, since codegen
-consumes `procsig.Registry` values directly.
+deferred. It is filed as a follow-up bead at close-out; the Stage 14
+close-out (`gqlc-cta`) can proceed on the in-memory API alone, since
+codegen consumes `procsig.Registry` values directly.
 
 ### 1.2 `CallBinding` — new Binding-sum variant (§3.2)
 
@@ -129,7 +130,7 @@ consumes `procsig.Registry` values directly.
   for the declared token: `TokenInteger` → `TypeInt`, `TokenFloat` →
   `TypeFloat`, `TokenString` → `TypeString`, `TokenNumber` →
   `TypeUnknown` (the wire type — signature-time NUMBER carries no
-  honest result-column type; codegen post-freeze consults the
+  honest result-column type; codegen later consults the
   registry directly).
 - `Nullable() bool` — the signature's `?` on the source result field
   (Call1 [5]: `label :: STRING?` → `Nullable: true`).
@@ -235,7 +236,7 @@ supplied to the constructor, not the per-parse call. Also,
 `query.Parser` is an interface (`internal/query/parser.go`): widening
 its `Parse` signature would break the interface's Stage-0 contract
 that mirrors `schema.Parser`. Keeping the option on the constructor
-preserves the interface freeze surface.
+preserves the interface `query.Query` surface.
 
 ### 1.5 Retirement of `ErrUnsupportedClause`
 
@@ -606,7 +607,7 @@ RED-phase posture, exact:
 ### 1.9 Docs inline
 
 - This spec.
-- `docs/adr/0007-pre-freeze-scope-full-opencypher-surface.md` gains
+- `docs/adr/0007-parser-scope-full-opencypher-surface.md` gains
   a Stage-14 amendment note under §"Procedure signatures as a
   compile-time input artifact": the concrete registry package is
   `internal/procsig`; the `TypeToken` sum decouples signature
@@ -753,7 +754,7 @@ func typeForToken(tok procsig.TypeToken) query.Type {
 
 `TokenNumber` → `TypeUnknown` is the wire-honest translation (Q3
 ruling): NUMBER is a signature-time marker with no honest result-
-column identity. Post-freeze codegen consults the registry directly
+column identity. After Stage 14 codegen consults the registry directly
 (the Signature has a `TokenNumber` in its Results if the procedure
 returns a NUMBER column), so no information is lost — only the wire
 Type is TypeUnknown.
@@ -1296,7 +1297,7 @@ mustReject pins that pointed at it happens in the same commit.
   skiplists the wrong-type reject). A stubbed registry mislabelling
   a NUMBER param as INTEGER would not fail any Stage-14 pin. Q3
   ruling accepts this: NUMBER's assignable-from semantics live in
-  post-freeze codegen (the registry is the source of truth), and
+  codegen (the registry is the source of truth), and
   the Stage-14 pin (`AUTHORED: standalone-CALL Returns expansion`)
   exercises the accept-path through the CallBinding shape. A future
   stage that promotes arg-type checks to Layer 1 would tighten
@@ -1314,9 +1315,9 @@ mustReject pins that pointed at it happens in the same commit.
 - **On-disk registry format deferred.** The registry is an in-
   memory API at Stage 14. A real CLI user would eventually need a
   file surface (YAML, JSON, `.procsig`, etc.). Follow-up bead
-  filed at close-out: the freeze does not gate on this — codegen
+  filed at close-out: Stage 14 does not gate on this — codegen
   consumes `procsig.Registry` values directly, and the initial
-  freeze-and-cut can proceed with the in-memory-only surface.
+  Stage 14 cut can proceed with the in-memory-only surface.
 
 - **Aggregate-in-arg is bucket-3 without a widening path.**
   Call1 [16] (`CALL foo(count(n))`) skiplists as bucket-3 — the
@@ -1328,7 +1329,7 @@ mustReject pins that pointed at it happens in the same commit.
 
 - **CallBinding does not carry the procedure's arg list.** The
   wire model records the YIELD-side (each CallBinding is one
-  output column), not the argument list. Codegen post-freeze reads
+  output column), not the argument list. Codegen later reads
   the CallBinding's `procedure` field, looks it up in the registry
   (registry is a codegen-time input alongside the wire model), and
   reconstructs the argument list from the original text (ADR 0005).
