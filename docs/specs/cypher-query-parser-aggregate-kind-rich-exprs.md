@@ -1,9 +1,9 @@
 # Aggregate-kind preservation on rich arguments — Cypher query parser
 
-The implementation brief for the pre-freeze fix that stops the parser
+The implementation brief for the before Stage 14 fix that stops the parser
 from silently dropping the `AggregateFunc` kind when an aggregate call
-carries a non-bare argument. One of the last two pre-freeze `query.Query`
-model fixes before the ADR 0004 API freeze, under the curation
+carries a non-bare argument. One of the last two before Stage 14 `query.Query`
+model fixes before the ADR 0004 Stage 14 milestone, under the curation
 discipline of ADR 0003 and the type-interface boundary of ADR 0005.
 Not a numbered stage: closes the "non-bare-aggregate-argument" gap
 Stage 10 §8 recorded but did not close.
@@ -32,13 +32,13 @@ scenario [16] is a live TCK-corpus data point: `sum(...)` over a
 seven-term arithmetic expression lands as `ExprProjection{refs:[…],
 type:unknown}` in `Return6_9d684013a026.golden.json` today.
 
-This document is a **delta** against Stages 0–15 and the two pre-freeze
+This document is a **delta** against Stages 0–15 and the two before Stage 14
 axes ([[cypher-query-parser-part-distinct-axis]], `gqlc-33k.2`) landing
 in parallel; everything not stated here carries over verbatim. Sections
 appear here only where this change adds something.
 
 Tracking: bead `gqlc-33k.1` (GitHub #78). Blocks the `query.Query`
-freeze (gqlc-cta) alongside [[cypher-query-parser-part-distinct-axis]].
+Stage 14 close-out (gqlc-cta) alongside [[cypher-query-parser-part-distinct-axis]].
 
 ---
 
@@ -131,23 +131,23 @@ Position and rationale:
   discovery over the projection's original text span** (e.g. reusing
   the cypher package's expression walker); the model will not answer
   it. If that re-parse proves impractical, the **sanctioned escape
-  hatch is a post-freeze additive axis on `ExprProjection`
-  (`ContainsAggregate bool`) via the ADR 0008 revision protocol** —
+  hatch is a later additive axis on `ExprProjection`
+  (`ContainsAggregate bool`) via the ADR 0008 additions convention** —
   and even then, it is not inferred from `Type` (because
   `count(n) + 1` and `x + 1` can both type `TypeUnknown` under
   operand types the current corpus doesn't press but future dialect
   extensions could). This spec therefore closes the door at the
   outermost projection node (the SF-3 fix) and, per the recorded
   contract on `gqlc-gyw`, does **not** open a `ContainsAggregate`
-  axis pre-freeze. The escape hatch remains — additive, gated on the
-  revision protocol, invoked only if the resolver's re-parse is
+  axis before Stage 14. The escape hatch remains — additive, gated on the
+  additions convention, invoked only if the resolver's re-parse is
   impractical.
 
 - **The kind belongs to the outermost projection node.** ADR 0003 §4
   is explicit: the model carries one cardinality-bearing distinction
   per projection node (`AggregateFunc` for `AggregateProjection`), not
   a sub-projection tree. Adding an inner-projection axis on
-  `ExprProjection` pre-freeze would either (a) drag a partial
+  `ExprProjection` before Stage 14 would either (a) drag a partial
   expression tree into the model (violating the rule this axis is
   meant to protect) or (b) collapse to a boolean signal ("some
   aggregate lurks in here") that pre-empts the `gqlc-gyw` contract
@@ -194,8 +194,8 @@ sub-projection fact the model does not encode, matching ADR 0003 §4
 and the `gqlc-gyw` contract. The resolver's grouping-key computation
 re-derives inner-aggregate presence from the projection list by
 walking the original text (ADR 0005). The sanctioned escape hatch —
-a post-freeze additive `ContainsAggregate` axis via the ADR 0008
-revision protocol, never inferred from `Type` — remains available
+a later additive `ContainsAggregate` axis via the ADR 0008
+additions convention, never inferred from `Type` — remains available
 if the re-parse proves impractical.
 
 This closes the door explicitly: the change fixes the *outermost*-
@@ -455,8 +455,8 @@ Nothing downstream of the parser is built (no resolver, no codegen)
 `gqlc-gyw`; this change strictly widens the signal it consumes at
 the outer projection, and defers the intersection-residual (§7)
 according to the contract recorded on `gqlc-gyw` (2026-07-03 notes):
-resolver-side re-parse first; post-freeze additive `ContainsAggregate`
-axis via the ADR 0008 revision protocol only if the re-parse proves
+resolver-side re-parse first; later additive `ContainsAggregate`
+axis via the ADR 0008 additions convention only if the re-parse proves
 impractical; never inferred from `Type`.
 
 ### 1.11 What this change does not do
@@ -468,8 +468,8 @@ impractical; never inferred from `Type`.
 - Does not read DISTINCT from any new grammar site (still
   `fi.DISTINCT()` on `oC_FunctionInvocation`, unchanged from Stage 10).
 - Does not add a `ContainsAggregate` (or any inner-projection) axis
-  to `ExprProjection` pre-freeze. The sanctioned escape hatch remains
-  post-freeze, additive, via the ADR 0008 revision protocol —
+  to `ExprProjection` before Stage 14. The sanctioned escape hatch remains
+  later, additive, via the ADR 0008 additions convention —
   recorded on bead `gqlc-gyw`, invoked only if the resolver-side
   re-parse proves impractical.
 - Does not touch `classifyRichExpression`, `typeAtom`, or Stage 6's
@@ -499,7 +499,7 @@ classifier's outer-aggregate story. Splitting the classifier change
 from the golden rebaseline would leave the acceptance suite in a
 mid-migration state where every affected part's JSON disagrees with
 the wire the model emits. The full change lands as one branch, atomic
-against the two other pre-freeze axes.
+against the two other before Stage 14 axes.
 
 Within the branch, the commit inventory (§6) separates spec from
 RED from GREEN, matching the Stage-10 / Cycle-1 template.
@@ -1012,14 +1012,14 @@ because `n.age + 1` also types unknown for a property-lookup case).
 
 The alternatives, considered and declined:
 
-- **A `ContainsAggregate` boolean on `ExprProjection` pre-freeze.**
+- **A `ContainsAggregate` boolean on `ExprProjection` before Stage 14.**
   Declined per the recorded contract on bead `gqlc-gyw` (see
   `bd show gqlc-gyw`, notes dated 2026-07-03): grouping-key
   discovery for `ExprProjection` residuals is a resolver-side
   re-parse of the projection's original text span; the sanctioned
-  escape hatch for a `ContainsAggregate` axis is **post-freeze,
-  additive, via the ADR 0008 revision protocol**, invoked only if
-  the re-parse proves impractical. Pre-freeze introduction would
+  escape hatch for a `ContainsAggregate` axis is **later,
+  additive, via the ADR 0008 additions convention**, invoked only if
+  the re-parse proves impractical. Before Stage 14 introduction would
   foreclose the re-parse path before it has been proved impractical
   and pre-empt the sanctioned escape hatch. The bead is the source
   of truth for this decision; this spec defers to it.

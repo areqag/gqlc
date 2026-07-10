@@ -4,7 +4,7 @@ The implementation brief for Stage 13 of the Cypher implementation of
 `query.Parser`. Thirteenth model evolution after Stage 12 per ADR 0004
 (test-first, evolving until feature-complete), under the curation
 discipline of ADR 0003 and the type-interface boundary of ADR 0005.
-Stage 13 is the eighth stage of the ADR-0007 pre-freeze expansion
+Stage 13 is the eighth stage of the ADR-0007 before Stage 14 expansion
 beyond the read core. It **adds one write clause**: `MERGE`. `MERGE`
 is its own stage because the read/create alternation and its two
 optional ON action branches (`ON MATCH SET …`, `ON CREATE SET …`) are
@@ -891,7 +891,7 @@ Notes on the widening:
   `PropertyUse{Ref{var, key}}` — the SAME shape the fast path
   produces — because the parameter's ULTIMATE contract is that the
   parser records "this parameter fills the `var.key` property slot,"
-  and the resolver upgrades from the schema post-freeze. This is a
+  and the resolver upgrades from the schema later. This is a
   cleaner unification than Stage 12's `ExprUse{TypeUnknown,
   ExprInSetValue}` posture because the inline-map key gives the
   parser a concrete property target the SET-value case does not
@@ -911,7 +911,7 @@ Notes on the widening:
   defensible — the Use points at the correct property slot (the
   `tags` key), just at the wrong nesting level (the parameter fills
   a list element, not the property itself); the resolver reconciles
-  the property's expected list-of-scalar shape post-freeze. After
+  the property's expected list-of-scalar shape later. After
   the widening, `requireAllParametersApproved` acts as a
   belt-and-braces sweep against parameter atoms the walk somehow
   did not reach; the whole-map shape (`MERGE (a $params)`) is
@@ -1125,7 +1125,7 @@ posture is obviously superior; the safer default is posture 1
 (defer to Stage 6's typing) because the typer's ExprUse posture is
 the honest ADR-0005 boundary posture for a rich value expression:
 "the parser cannot commit to a concrete property target from a
-sum expression, the resolver upgrades post-freeze." Posture 2 is
+sum expression, the resolver upgrades later." Posture 2 is
 tighter but leaks a heuristic ("the parameter is at the inline-map
 key value slot, so it fills `var.key`") that the sum expression
 does not honestly support. The current draft chooses posture 1.~~

@@ -4,7 +4,7 @@ The implementation brief for Stage 10 of the Cypher implementation of
 `query.Parser`. Tenth model evolution after Stage 9 per ADR 0004 (test-first,
 evolving until feature-complete), under the curation discipline of ADR 0003
 and the type-interface boundary of ADR 0005. Stage 10 is the fifth stage of
-the ADR-0007 pre-freeze expansion beyond the read core. It **completes the
+the ADR-0007 before Stage 14 expansion beyond the read core. It **completes the
 aggregate surface**: the parser already recognises the eight aggregate
 functions and their `count(*)` degenerate case (Stage 3), but the model
 records `TypeUnknown` for every aggregate result and silently drops
@@ -118,7 +118,7 @@ Design commitments captured in the table:
   aggregate is a list constructor; the outer type IS list. When the
   parser cannot type the element, the honest posture is
   `list<unknown>` — a `TypeList` value whose element is `TypeUnknown{}`.
-  Codegen post-freeze emits `[]T` (with `T` honestly-unknown, upgraded
+  Codegen later emits `[]T` (with `T` honestly-unknown, upgraded
   by the resolver from the schema) rather than `any`, which is
   strictly better than a bare `TypeUnknown` result.
 
@@ -148,7 +148,7 @@ Design commitments captured in the table:
 - **`stDev/stDevP` and `percentile*` stay honest-Unknown.** These are
   statistical outputs whose result-type table is engine-detailed and
   not worth committing at the parser boundary. The resolver upgrades
-  from the schema post-freeze if the schema is willing to commit
+  from the schema later if the schema is willing to commit
   (few will be).
 
 The rules are keyed off the operand's **Stage-6 computed type** — the

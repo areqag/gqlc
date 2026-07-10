@@ -206,10 +206,10 @@ keys). No `Nullable` bit at R1 (the R1 capability scope excludes
 **Alternative considered and rejected: carry the edge's property types
 inline.** An edge column with `RETURN r` is a whole-entity projection,
 not a per-property view; codegen decides the wire layout of an entity
-row post-freeze (a struct of columns, a driver-native shape, or a
+row later (a struct of columns, a driver-native shape, or a
 tuple). Carrying the property map here would duplicate the schema and
 force every column-consumer to walk it. The `EdgeKey` alone is enough
-to reach the schema `EdgeType` post-freeze; codegen indexes back via
+to reach the schema `EdgeType` later; codegen indexes back via
 `schema.Schema.Edges[EdgeKey]`. Symmetric with `ResolvedNode`
 carrying only `Labels` (R0 §3.4).
 
@@ -864,7 +864,7 @@ takes it up defends the placement in its own spec cycle.
 **Silently accepted (not routed anywhere):**
 
 R0's silently-accepted set stands unchanged. Literal-only WHERE / ORDER
-BY / SKIP / LIMIT continue to leave no witness in the frozen
+BY / SKIP / LIMIT continue to leave no witness in the
 `query.Query`; ADR 0005 continues to say the original text runs. R1
 does not extend the silently-accepted set.
 

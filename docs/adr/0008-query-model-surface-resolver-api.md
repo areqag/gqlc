@@ -57,7 +57,7 @@
 > closed (2026-07-10; ADR 0008 amendment above). With gqlc-5xg
 > adopted, the R4-inherited Class B row across the R4-R7 stage
 > specs is retired in the docs-errata cycle (§8.6). See
-> `docs/specs/unfreeze-5xg-required-bare-ref.md` for the full
+> `docs/specs/model-change-5xg-required-bare-ref.md` for the full
 > contract, the 0-golden flip census, the constructor-strategy
 > and predicate-derivation decisions, and the fence commands._
 
@@ -101,7 +101,7 @@
 > change) and is filed as a follow-up bead at close-out. Class B —
 > the same-Part second-reference gap (R4 §7.5.3 item 2, Axis 2,
 > gqlc-5xg) — is a missing-witness gap this axis deliberately does
-> not close. See `docs/specs/unfreeze-ay9-optional-group.md` for the
+> not close. See `docs/specs/model-change-ay9-optional-group.md` for the
 > full contract, the 100-golden flip census with spot witnesses, the
 > constructor-strategy and id-scope decisions, and the fence
 > commands._
@@ -117,7 +117,7 @@
 > per Phase A1 and checks each mined type against
 > `procsig.Registry.Lookup(procedure).Params[i].Token` under the
 > ADR 0007 Stage-14 note's assignability rule
-> (`docs/adr/0007-pre-freeze-scope-full-opencypher-surface.md`
+> (`docs/adr/0007-parser-scope-full-opencypher-surface.md`
 > lines 172-174: NUMBER assignable-from INTEGER-or-FLOAT). The
 > `CallBinding` sum gains one additive field `args []CallArg`, one
 > new positional constructor `NewCallBindingWithArgs`, one new
@@ -131,7 +131,7 @@
 > the procedure name against the compile-time `procsig.Registry`.
 > The Binding interface stays sealed at one method (`isBinding()`);
 > Args attribution is a CallBinding-only field-and-accessor concern.
-> See `docs/specs/unfreeze-0ig-call-args.md` for the full contract,
+> See `docs/specs/model-change-0ig-call-args.md` for the full contract,
 > the 28-golden rebaseline accounting with per-scenario spot
 > witnesses, the layering divergence from the bead text's
 > parser-emits-sig-token proposal, and the semantic-diff-only fence
@@ -176,7 +176,7 @@
 > axes. The Use interface stays sealed at one
 > method (`isUse()`); Part attribution is a per-variant
 > field-and-accessor concern. See
-> `docs/specs/unfreeze-fvo-use-part.md` for the full contract,
+> `docs/specs/model-change-fvo-use-part.md` for the full contract,
 > the emission-site table, the zero-golden rebaseline
 > accounting, the reversed alias-shadow discriminating fixture,
 > and the semantic-diff-only fence commands._
@@ -210,7 +210,7 @@
 > `hops`) because golden rebaselines are the primary auditability
 > surface and always-emit forces near-total 3199-file rebaselines
 > on each additive cycle. See
-> `docs/specs/unfreeze-hk0-containsaggregate.md` for the full
+> `docs/specs/model-change-hk0-containsaggregate.md` for the full
 > contract, the walker boundaries, the 20-golden rebaseline set,
 > and the semantic-diff-only fence command._
 
@@ -383,14 +383,14 @@ on each additive cycle.
   a consumer demonstrates the need — no speculative modelling.
 - **`ContainsAggregate` axis on `ExprProjection`** — adopted
   2026-07-06 (see the amendment note above and
-  `docs/specs/unfreeze-hk0-containsaggregate.md`). Populated
+  `docs/specs/model-change-hk0-containsaggregate.md`). Populated
   parser-side by `classifyRichExpression`'s subtree walk; consumed
   by the resolver's `fillGroupingKeys` (`internal/resolver/resolve.go`)
   to discriminate aggregate-carrying residuals from grouping-key
   candidates. Never inferred from `Type`.
 - **`Use.Part` attribution axis on `PropertyUse` / `ExprUse` /
   `ClauseSlotUse`** — adopted 2026-07-06 (see the amendment
-  note above and `docs/specs/unfreeze-fvo-use-part.md`).
+  note above and `docs/specs/model-change-fvo-use-part.md`).
   Populated parser-side by `addParameterUse` from
   `l.currentPartIndex()`; consumed by the resolver's
   `witnessAcrossScopes` (`internal/resolver/resolve.go:750-811`)
@@ -401,7 +401,7 @@ on each additive cycle.
   above and filed as a follow-up (§7.6 and §9 in the fvo
   spec).
 - **`CallBinding.Args` axis** — adopted 2026-07-07 (see the
-  amendment note above and `docs/specs/unfreeze-0ig-call-args.md`).
+  amendment note above and `docs/specs/model-change-0ig-call-args.md`).
   Populated parser-side by `collectCall`'s existing arg-mining
   loop capturing the mined `query.Type` per argument position;
   consumed by the resolver's Phase A1 arg-site assignability walk
@@ -413,7 +413,7 @@ on each additive cycle.
   records only `query.Type`. The R7 §7.1.1 deferral is closed.
 - **`OptionalGroup` axis on `NodeBinding` / `EdgeBinding`** —
   adopted 2026-07-07 (see the amendment note above and
-  `docs/specs/unfreeze-ay9-optional-group.md`). Populated
+  `docs/specs/model-change-ay9-optional-group.md`). Populated
   parser-side by the OPTIONAL threading through `collectPattern`
   (fresh id per OPTIONAL MATCH clause, query-scoped, minted in
   `EnterOC_Match`); consumed by the resolver's Phase D
@@ -423,7 +423,7 @@ on each additive cycle.
   remains open under gqlc-5xg.
 - **`ReferencedInRequiredBarePattern` axis on `NodeBinding` /
   `EdgeBinding`** — adopted 2026-07-11 (see the amendment note
-  above and `docs/specs/unfreeze-5xg-required-bare-ref.md`).
+  above and `docs/specs/model-change-5xg-required-bare-ref.md`).
   Populated parser-side by `mergeBinding`'s merge arm at
   `internal/query/cypher/pattern.go:388-404` when the current
   occurrence is required and bare; consumed by the resolver's

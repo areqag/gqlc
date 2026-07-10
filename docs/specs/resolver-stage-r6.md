@@ -28,15 +28,15 @@ edges, and `ExprProjection` typed `list<node>` / `list<edge>` remain out of
 scope and continue to route to `ErrOutOfR0Scope`. ~~The R4 Class A and
 Class B same-Part regime (b) nullability under-approximation (`gqlc-ay9`,
 `gqlc-5xg`)~~ [closed 2026-07-10: Class A landed via gqlc-ay9 (PRs
-#127/#128/#129, `docs/specs/unfreeze-ay9-optional-group.md`; residual
+#127/#128/#129, `docs/specs/model-change-ay9-optional-group.md`; residual
 gqlc-984) and Class B / same-Part regime (b) landed via gqlc-5xg
 (PRs #132/#133/#134,
-`docs/specs/unfreeze-5xg-required-bare-ref.md`; residual gqlc-0kq);
+`docs/specs/model-change-5xg-required-bare-ref.md`; residual gqlc-0kq);
 R6 inherits both closures unchanged.] and the R5
 `ExprProjection`-residual grouping-key gap
 (`gqlc-gyw` Shape B / `gqlc-hk0` per the R5 close-out) are unchanged at R6.
 The R5 cross-Part parameter-Use attribution gap (`gqlc-fvo`) is unchanged at
-R6. ~~None of these gaps is closable without a model unfreeze (owner decision
+R6. ~~None of these gaps is closable without a model change (owner decision
 pending); R6 does not contort the resolver around any of them.~~
 [closed 2026-07-10: the two R4 nullability gaps landed as additive
 `Binding` axes (ay9, 5xg); the R5 gaps (`gqlc-hk0`, `gqlc-fvo`)
@@ -58,7 +58,7 @@ shape and in field type. The `Columns` field's *population rule* widens
 (§3.1): when branch 0's final `Part` is projection-less, `ValidatedQuery.
 Columns` is `[]Column{}` — a non-nil empty slice, marshalling as
 `"columns": []`. Effects themselves DO NOT surface on the wire at R6 — the
-consumer (codegen, R-later) reaches the effect list on the frozen
+consumer (codegen, R-later) reaches the effect list on the ADR 0008
 `query.Query` side, and the resolver's job is to certify that every Effect
 would succeed against the schema. §3.4 records the exact wire posture.
 
@@ -491,7 +491,7 @@ R0–R5 code path.
 **Judgment call — Effects stay on `query.Query`, not on
 `ValidatedQuery`, at R6.** The resolver's job at R6 is to certify
 that every Effect would succeed against the schema. Codegen (R-later)
-reaches the effect list on the frozen `query.Query` side (accessible
+reaches the effect list on the `query.Query` side (accessible
 to codegen via the passed-in `query.Query` alongside the
 `ValidatedQuery`). Two reasons R6 does not add an `Effects`
 axis to `ValidatedQuery`:
@@ -505,7 +505,7 @@ axis to `ValidatedQuery`:
    analogue on `ValidatedQuery`; that decision is not R6's to
    make.
 2. **Every fact codegen needs is already on `query.Query`.** The
-   sixty-day-frozen model records the effect kind, target Ref,
+   sixty-day-query model records the effect kind, target Ref,
    value type, refs, labels, endpoints, MERGE-ON branches, and
    the `Detach` bit — all facts codegen consumes verbatim. The
    resolver's Phase E outcome is BINARY (admit or reject); the
@@ -799,7 +799,7 @@ defers a design axis to R-later (see §7.1 for the full deferral
 statement).
 
 **Judgment call — no value-target type-agreement check at R6.**
-The frozen model records `e.ValueType()` as `TypeString`,
+The query model records `e.ValueType()` as `TypeString`,
 `TypeInt`, or `TypeUnknown` (parser Stage 6); the schema records
 the target property's `graph.PropertyType`. A width-preserving
 type-agreement check would say "value `TypeInt` writes to
@@ -1889,8 +1889,8 @@ R5's out-of-scope table survives with revisions:
 | Value-target type-agreement in `SET n.p = value` (bit-width assignability, nullability lift) | silently admitted (§4.3.1 judgment call) | R-later (design axis for codegen boundary) |
 | Runtime SET / DELETE on NULL target (row-drop semantics) | silently admitted | bucket 3 (ADR 0007 §III) |
 | DETACH DELETE cascade semantics vs plain DELETE | silently admitted | bucket 3 |
-| Same-Part regime (b) nullability under-demote | ~~silently under-demoted~~ **closed** (5xg, 2026-07-10) | ~~gqlc-5xg (Class B, model unfreeze — unchanged from R5)~~ **closed** by 5xg unfreeze + widening (`docs/specs/unfreeze-5xg-required-bare-ref.md`); edge-side non-bare missing-witness residual filed as gqlc-0kq |
-| OPTIONAL-clause-sibling nullability under-demote | ~~silently under-demoted~~ **closed** (ay9, 2026-07-10) | ~~gqlc-ay9 (Class A, model unfreeze — unchanged from R5)~~ **closed** by ay9 unfreeze + widening (`docs/specs/unfreeze-ay9-optional-group.md`); residual cross-Part carry gap filed as gqlc-984 |
+| Same-Part regime (b) nullability under-demote | ~~silently under-demoted~~ **closed** (5xg, 2026-07-10) | ~~gqlc-5xg (Class B, model change — unchanged from R5)~~ **closed** by 5xg change + widening (`docs/specs/model-change-5xg-required-bare-ref.md`); edge-side non-bare missing-witness residual filed as gqlc-0kq |
+| OPTIONAL-clause-sibling nullability under-demote | ~~silently under-demoted~~ **closed** (ay9, 2026-07-10) | ~~gqlc-ay9 (Class A, model change — unchanged from R5)~~ **closed** by ay9 change + widening (`docs/specs/model-change-ay9-optional-group.md`); residual cross-Part carry gap filed as gqlc-984 |
 | `ExprProjection` residual grouping-key discrimination | silently under-grouped | gqlc-hk0 / Shape B follow-up (unchanged from R5) |
 | Cross-Part parameter Use attribution gap | silently false-admitted | gqlc-fvo (unchanged from R5) |
 
@@ -1947,7 +1947,7 @@ assigned to an INT column. openCypher recognises implicit
 widening in narrow cases (INTEGER → FLOAT). At compile time,
 openCypher does not enforce assignability; runtime does.
 
-**The frozen-model posture.** `SetPropertyEffect.ValueType()`
+**The model posture.** `SetPropertyEffect.ValueType()`
 records the parser's Stage-6 rich-typer output — `TypeString`,
 `TypeInt`, `TypeFloat`, `TypeMap`, `TypeUnknown` — a coarse type
 that does not carry a bit-width family. The schema's target
@@ -1972,8 +1972,8 @@ assignability decision — including implicit widening — is
 codegen's concern, and codegen has the resolved property type
 (from the `query.Query` side) to run the check on if it chooses.
 
-**Not a frozen-model gap.** `SetPropertyEffect.ValueType()` and
-the schema's `Property.Type` are both on the frozen surface; no
+**Not a model gap.** `SetPropertyEffect.ValueType()` and
+the schema's `Property.Type` are both on `query.Query`; no
 model change is needed to add the check. R6 defers because the
 check's placement (resolver vs codegen) is a design axis the R6
 brief does not decide, not because the information is missing.
@@ -2000,13 +2000,13 @@ Refs []query.Ref}`), the shape lands under a future ADR (the ADR
 0008 analogue) alongside the codegen consumer, per ADR 0009's
 provisional-through-R7 discipline. R6 does not pre-commit.
 
-#### 7.1.3 Freeze-not-a-wall status
+#### 7.1.3 Model-change status
 
-R6 discovers no new frozen-model deficiency. Effects and their
+R6 discovers no new model gap. Effects and their
 components (`Ref`, `Type`, `SetOp`, `LabelSet`) are all on the
-frozen surface at the resolution needed. Every R6 fail-site is a
+surface at the resolution needed. Every R6 fail-site is a
 schema mismatch (an existing sentinel widens) or a shape-only
-issue (`ErrInvalidEffectTarget` covers it). No unfreeze
+issue (`ErrInvalidEffectTarget` covers it). No change
 recommendation.
 
 The R5-discovered gaps (gqlc-hk0 `ExprProjection` residual
@@ -2016,7 +2016,7 @@ unchanged, as the R5 spec §7.1 recorded.
 #### 7.1.4 Summary of R6 deferrals
 
 - **Value-target assignability in SET** — deferred to R-later or
-  codegen. Not a frozen-model gap; a design axis on the resolver/
+  codegen. Not a model gap; a design axis on the resolver/
   codegen boundary. No follow-up bead. §7.1.1.
 - **Effects on `ValidatedQuery`** — deferred to a future codegen-
   driven ADR. §7.1.2.
@@ -2192,11 +2192,11 @@ citations below name the file:line the claim rests on.
   parse time** — `internal/query/cypher/build.go:155-158` (`if
   !scope[ref.name] { ErrUnboundVariable }`); Stage 4 §4. §4.3.1
   step 5 defensive tripwire relies on this.
-- **ADR 0008 §Post-freeze revision protocol** —
-  `docs/adr/0008-query-model-freeze-resolver-api.md:143-169`.
+- **ADR 0008 §Additions since Stage 14** —
+  `docs/adr/0008-query-model-surface-resolver-api.md:143-169`.
   §3.5, §7.1.2 read.
 - **ADR 0008 pinned resolver API** —
-  `docs/adr/0008-query-model-freeze-resolver-api.md:110-142`.
+  `docs/adr/0008-query-model-surface-resolver-api.md:110-142`.
   §1 and §2.1 respect.
 - **ADR 0009 R6 line** —
   `docs/adr/0009-resolver-test-first-staged-build.md:132-136`.
@@ -2207,7 +2207,7 @@ citations below name the file:line the claim rests on.
   boundary** — `docs/adr/0005-generated-code-executes-original-
   query-text.md`. §2.4, §4.3.1, §4.4 read.
 - **ADR 0007 §III bucket 3 — runtime semantics** —
-  `docs/adr/0007-pre-freeze-scope-full-opencypher-surface.md`.
+  `docs/adr/0007-parser-scope-full-opencypher-surface.md`.
   §2.4, §4.4 read.
 - **R5 spec §4.2 — carried scope construction** —
   `docs/specs/resolver-stage-r5.md:691-945`. §2.4 relies on the
@@ -2269,12 +2269,12 @@ out of scope of this document. The spec is done when:
    out-of-scope complement with the sentinel or under-demote
    posture for each construct. §7.1 walks the honest state on the
    discovered design axes (value-target assignability, Effects on
-   the wire), states no new frozen-model deficiency, and confirms
+   the wire), states no new model gap, and confirms
    the R5-inherited gaps carry unchanged.
 7. §8 cross-checks every factual claim against source file:line.
 8. `just test` is untouched-green — this cycle is docs-only.
 9. **At R6 code-cycle close-out** (Cycle 2, not this Cycle 1):
-   - No unfreeze bead files (R6 discovers no frozen-model gap).
+   - No change bead files (R6 discovers no model gap).
    - No follow-up beads file for the deferred design axes
      (value-target assignability and Effects-on-wire are open
      decisions surfaced in the spec, not bug reports).
@@ -2282,9 +2282,9 @@ out of scope of this document. The spec is done when:
    - ~~gqlc-ay9, gqlc-5xg,~~ gqlc-hk0, gqlc-fvo remain OPEN unchanged;
      R6 does not close any of them. [closed 2026-07-10: gqlc-ay9
      landed via PRs #127/#128/#129
-     (`docs/specs/unfreeze-ay9-optional-group.md`; residual gqlc-984),
+     (`docs/specs/model-change-ay9-optional-group.md`; residual gqlc-984),
      and gqlc-5xg landed via PRs #132/#133/#134
-     (`docs/specs/unfreeze-5xg-required-bare-ref.md`; residual gqlc-0kq);
+     (`docs/specs/model-change-5xg-required-bare-ref.md`; residual gqlc-0kq);
      R6 inherits both closures unchanged.]
    - The R6 code cycle asserts §3.4's byte-identical claim by
      running `just test` on the R0–R5 corpus WITHOUT `-update`

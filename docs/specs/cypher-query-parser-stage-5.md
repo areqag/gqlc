@@ -40,7 +40,7 @@ not exist yet. The division of labour is:
 - **Parser (this stage):** record that the edge is undirected — a single marker
   bit on the edge binding — and record its two endpoints in textual order. No
   orientation is chosen; none can be, without a schema.
-- **Resolver (post-freeze, out of scope):** for an undirected edge, try **both**
+- **Resolver (later, out of scope):** for an undirected edge, try **both**
   orientations (`source→target` and `target→source`) against the directed
   `schema.EdgeKey` and accept the binding if *either* resolves. If a future
   schema admits no undirected match the resolver rejects there — that is its job,
@@ -206,7 +206,7 @@ and carries no cross-cutting semantics — it is just another field of the edge,
 like `source`/`target`, which are already plain parameters. Making it a parameter
 keeps the constructor count at two and the call sites explicit (`directed: true`
 at every existing site, `directed: false` only in the undirected path). If the
-freeze ADR later unifies the binding constructors (e.g. options), it does so for
+ADR 0008 later unifies the binding constructors (e.g. options), it does so for
 `nullable` and `directed` together as one policy — not unilaterally mid-evolution
 (the same posture Stage 4 §3 took on product invariants).
 
@@ -334,11 +334,11 @@ under ADR 0003 must not — say what a *double* match means (the schema has both
 `A→B` and `B→A` with the queried label: is the undirected edge ambiguous, a union
 of both, or an error?). The bool is sufficient *input* for the resolver to make
 that call, but the call is unmade and unwritten, because the resolver does not
-exist (ADR 0004 freeze gate). The honest risk is therefore: when the resolver is
+exist (ADR 0004 feature-complete gate). The honest risk is therefore: when the resolver is
 built it may discover it needs more than "try both" can express from a single
 marker (e.g. to report *which* orientation(s) matched, for a typed result or a
 diagnostic). If so, the marker widens — but that is a resolver-era model revision
-the freeze ADR explicitly admits (`gqlc-cta` is downstream of the resolver design,
+ADR 0008 explicitly admits (`gqlc-cta` is downstream of the resolver design,
 not upstream of it), and it is cheap because no consumer is attached yet. This
 risk rides with the "try both orientations" resolver follow-up bead (§7 item 5)
 so it is tracked as a known open contract, not discovered late.
@@ -356,7 +356,7 @@ futures, not parser gaps, both cheap to widen (bool → enum):
   no read-surface semantics depend on the spelling, so the model collapses them.
   If a dialect ever attached meaning to the both-arrows form, the bool would need
   to become a small enum. This is judged vanishingly unlikely (it is undirected in
-  every openCypher dialect), so collapsing is the right curation now; the freeze
+  every openCypher dialect), so collapsing is the right curation now; Stage 14
   ADR can revisit if a dialect proves otherwise.
 
 The discipline that keeps all three safe is the same as every prior stage: record

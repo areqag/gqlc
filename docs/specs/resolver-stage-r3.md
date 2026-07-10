@@ -25,7 +25,7 @@ category-grained per R0 §5).
 This spec also decides the **double-match question** on bead `gqlc-int`
 (§4.6 and §3.5) — recorded on parser Stage 5 §9 as "the open resolution
 contract the undirected marker implicitly hands off" — and pins the shape
-of orientation reporting (§3.2). The parser side (`query.Query`) is frozen
+of orientation reporting (§3.2). The parser side (`query.Query`) is stable
 by ADR 0008; every R3 addition lands on `ValidatedQuery`, which stays
 provisional through R7 (ADR 0009).
 
@@ -721,7 +721,7 @@ versus parser Stage 6 (`typeAtom` composed into `listLiteralType` for
 a bare-var list literal in an ExprProjection) — remain distinguished
 by the enclosing `Projection` variant, not by `TypeList` alone.
 
-The table stays closed at R3: every variant of the frozen `query.Type`
+The table stays closed at R3: every variant of the `query.Type`
 sum still appears, each classified, each with an R-stage owner.
 R4/R5/R6/R7 revise rows they take up.
 
@@ -1217,7 +1217,7 @@ Nothing in §7 disagrees with ADR 0009 by construction.
 **Recorded parser Stage 5 §9 cross-check.** Parser Stage 5 §9
 recorded three open issues: (i) what a double match means; (ii)
 whether the resolver reports *which* orientation(s) matched; (iii)
-whether the marker widens post-freeze. R3 decides:
+whether the marker widens later. R3 decides:
 
 - (i) Double match on a single-type undirected edge is an
   ambiguity error (§4.6 case C). Double match on a multi-type
@@ -1228,7 +1228,7 @@ whether the marker widens post-freeze. R3 decides:
   orientation is present in `EdgeKeys`. No parser-side widening.
 - (iii) The `directed` marker on `EdgeBinding` needs no widening;
   the resolver has enough from the boolean plus its
-  `edgeCandidates` cross-product. `query.Query` stays frozen (ADR
+  `edgeCandidates` cross-product. `query.Query` stays stable (ADR
   0008 respected).
 
 ---
@@ -1324,7 +1324,7 @@ describes still holds.
   runtime executes the original text, so var-length hop traversal
   and undirected orientation walking are runtime concerns; the
   resolver types the result column only.
-- **ADR 0008 frozen query.Query** — `docs/adr/0008-...`; every R3
+- **ADR 0008 query.Query record** — `docs/adr/0008-...`; every R3
   addition lives in `ValidatedQuery`, not `query.Query`.
 - **ADR 0009 R3 remit** — `docs/adr/0009-...`, R3 stage line
   ("undirected two-orientation trial ... multi-type edges as one
