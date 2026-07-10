@@ -1439,30 +1439,73 @@ func seedLocalNullability(bindings []query.Binding, table map[string]bool) {
 	}
 }
 
-// demoteNullableInPlace runs R4's regime-(a) demotion on part.Bindings against
-// a pre-seeded table. Same semantics as R4's demoteNullable, but the table is
-// supplied by the caller so §4.6's carry-seed → local-override → demote order
-// is applied to the same map.
+// demoteNullableInPlace runs the ay9-widened regime-(a) demotion on
+// part.Bindings against a pre-seeded table: per-edge endpoint
+// witnessing (R4 §4.4) plus OPTIONAL-group closure (ay9 — a proven
+// member demotes its whole introducing clause). The loop is a genuine
+// fixed point: a group-demoted OPTIONAL edge becomes an effective
+// witness for its own endpoints, which may prove an earlier group.
+// Monotone (table entries flip true→false, demotedGroups false→true),
+// so it terminates.
 func demoteNullableInPlace(bindings []query.Binding, table map[string]bool) {
+	members := map[int][]string{} // group id → named members
+	groupOf := map[string]int{}   // named member → group id
 	for _, b := range bindings {
-		e, ok := b.(query.EdgeBinding)
-		if !ok {
-			continue
+		switch bb := b.(type) {
+		case query.NodeBinding:
+			if g := bb.OptionalGroup(); g > 0 {
+				members[g] = append(members[g], bb.Variable())
+				groupOf[bb.Variable()] = g
+			}
+		case query.EdgeBinding:
+			if g := bb.OptionalGroup(); g > 0 && bb.Variable() != "" {
+				members[g] = append(members[g], bb.Variable())
+				groupOf[bb.Variable()] = g
+			}
 		}
-		if e.Nullable() || !qualifiedDemoter(e) {
-			continue
+	}
+	demotedGroups := map[int]bool{}
+	demoteGroup := func(g int) bool {
+		if g == 0 || demotedGroups[g] {
+			return false
 		}
-		for _, side := range [2]query.Endpoint{e.Source(), e.Target()} {
-			ve, ok := side.(query.VarEndpoint)
+		demotedGroups[g] = true
+		for _, m := range members[g] {
+			if _, present := table[m]; present {
+				table[m] = false
+			}
+		}
+		return true
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, b := range bindings {
+			e, ok := b.(query.EdgeBinding)
 			if !ok {
 				continue
 			}
-			v := ve.Variable()
-			if v == "" {
+			// ay9: an OPTIONAL edge whose group is proven is an
+			// effective witness (its existence on surviving rows is
+			// established); the §4.4.3 hop gate applies unchanged.
+			if (e.Nullable() && !demotedGroups[e.OptionalGroup()]) || !qualifiedDemoter(e) {
 				continue
 			}
-			if _, present := table[v]; present {
-				table[v] = false
+			for _, side := range [2]query.Endpoint{e.Source(), e.Target()} {
+				ve, ok := side.(query.VarEndpoint)
+				if !ok {
+					continue
+				}
+				v := ve.Variable()
+				if v == "" {
+					continue
+				}
+				if nb, present := table[v]; present && nb {
+					table[v] = false
+					changed = true
+				}
+				if demoteGroup(groupOf[v]) {
+					changed = true
+				}
 			}
 		}
 	}

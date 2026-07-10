@@ -1,0 +1,69 @@
+{
+  "columns": [
+    {
+      "name": "a",
+      "type": {
+        "kind": "node",
+        "labels": "Person",
+        "nullable": false
+      },
+      "groupingKey": false
+    },
+    {
+      "name": "r1",
+      "type": {
+        "kind": "edge",
+        "edgeKey": {
+          "source": "Person",
+          "label": "KNOWS",
+          "target": "Person"
+        },
+        "nullable": false
+      },
+      "groupingKey": false
+    },
+    {
+      "name": "b",
+      "type": {
+        "kind": "node",
+        "labels": "Person",
+        "nullable": false
+      },
+      "groupingKey": false
+    },
+    {
+      "name": "r2",
+      "type": {
+        "kind": "edge",
+        "edgeKey": {
+          "source": "Person",
+          "label": "KNOWS",
+          "target": "Person"
+        },
+        "nullable": false
+      },
+      "groupingKey": false
+    },
+    {
+      "name": "c",
+      "type": {
+        "kind": "node",
+        "labels": "Person",
+        "nullable": false
+      },
+      "groupingKey": false
+    },
+    {
+      "name": "d",
+      "type": {
+        "kind": "node",
+        "labels": "Person",
+        "nullable": false
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "read",
+  "distinct": false
+}
