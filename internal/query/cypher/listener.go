@@ -164,15 +164,16 @@ func newRawPart() *rawPart {
 // resolver's job (see gqlc-lqm). Stage 8: hops carries the var-length hop
 // range (nil for single-hop; a var-length edge projects as list<edge>).
 type rawBinding struct {
-	variable      string
-	labels        graph.LabelSet
-	seen          map[string]bool // labels already merged, for the ordered union
-	kind          graph.EntityKind
-	source        query.Endpoint
-	target        query.Endpoint
-	optionalGroup int
-	undirected    bool            // zero value false == directed; set true only on the undirected branch (inverted to keep existing literals zero-value-safe, see §4)
-	hops          *query.EdgeHops // Stage 8: non-nil for a variable-length edge
+	variable                        string
+	labels                          graph.LabelSet
+	seen                            map[string]bool // labels already merged, for the ordered union
+	kind                            graph.EntityKind
+	source                          query.Endpoint
+	target                          query.Endpoint
+	optionalGroup                   int
+	undirected                      bool            // zero value false == directed; set true only on the undirected branch (inverted to keep existing literals zero-value-safe, see §4)
+	hops                            *query.EdgeHops // Stage 8: non-nil for a variable-length edge
+	referencedInRequiredBarePattern bool            // 5xg: set by mergeBinding's merge arm on a required (non-OPTIONAL) bare-pattern re-reference of an already-introduced variable
 }
 
 // varRef is a use of a variable name that build() must resolve to a binding. An

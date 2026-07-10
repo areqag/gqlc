@@ -311,10 +311,11 @@ type Binding interface {
 // touch it. A node binding is never anonymous — an anonymous node is a pure
 // filter, not a binding — so its variable is always non-empty (NewNodeBinding).
 type NodeBinding struct {
-	variable      string         // the name as written: the p in (p:Person)
-	labels        graph.LabelSet // labels as written; may be empty
-	nullable      bool           // set when first introduced in OPTIONAL MATCH (ADR 0006)
-	optionalGroup int            // ≥1: id of the introducing OPTIONAL clause (ay9); 0: not OPTIONAL-introduced
+	variable                        string         // the name as written: the p in (p:Person)
+	labels                          graph.LabelSet // labels as written; may be empty
+	nullable                        bool           // set when first introduced in OPTIONAL MATCH (ADR 0006)
+	optionalGroup                   int            // ≥1: id of the introducing OPTIONAL clause (ay9); 0: not OPTIONAL-introduced
+	referencedInRequiredBarePattern bool           // set by mergeBinding when a later same-Part occurrence is a required bare pattern (5xg)
 }
 
 // NewNodeBinding builds a NodeBinding, rejecting the empty variable: an anonymous
@@ -382,6 +383,50 @@ func (b NodeBinding) Nullable() bool { return b.nullable }
 // non-nullness to its clause siblings.
 func (b NodeBinding) OptionalGroup() int { return b.optionalGroup }
 
+// ReferencedInRequiredBarePattern reports whether at least one
+// non-first occurrence of this variable in the same Part was a
+// required (non-OPTIONAL) bare pattern (5xg, ADR 0008 amendment
+// 2026-07-11). A bare pattern is one whose element has no adjacent
+// edge chain link on either side — MATCH (v), MATCH (v:Label),
+// MATCH (v {prop: 'x'}) — where the re-referenced variable's row is
+// filtered on NULL (label / property lookup on NULL → row-drop).
+// The resolver's 5xg widening reads this to demote the binding
+// non-nullable in the local table (parallel to the OPTIONAL-group
+// closure ay9 added, orthogonal in its effect on demotedGroups).
+func (b NodeBinding) ReferencedInRequiredBarePattern() bool {
+	return b.referencedInRequiredBarePattern
+}
+
+// markReferencedInRequiredBarePattern sets the flag on a binding
+// whose raw form recorded a same-Part required bare re-reference
+// (5xg). The mutator body is a single field write; it is the
+// package-private anchor for the axis's post-introduction mutation,
+// wrapped by MarkNodeBindingReferencedInRequiredBarePattern for the
+// parser's build.go (the only legitimate caller). Public callers of
+// the sum-variant constructors cannot reach the wrapper's use
+// pattern (the flag is only knowable at parser merge time), so
+// first-introduction values remain immutable through their public
+// API.
+func (b *NodeBinding) markReferencedInRequiredBarePattern() {
+	b.referencedInRequiredBarePattern = true
+}
+
+// MarkNodeBindingReferencedInRequiredBarePattern is the parser-side
+// wrapper for the unexported markReferencedInRequiredBarePattern
+// mutator (5xg, ADR 0008 amendment 2026-07-11). The wrapper is
+// exported to admit a single cross-package caller: the cypher
+// parser's toBinding routine, which owns the raw binding whose
+// referencedInRequiredBarePattern flag was set on mergeBinding's
+// merge arm. It has no other legitimate caller: a NodeBinding
+// value obtained via any public constructor has flag false, and
+// the "did this variable get re-referenced in a required bare
+// pattern later in the same Part" fact is only observable during
+// parse. External code should read the flag via
+// ReferencedInRequiredBarePattern, never write it.
+func MarkNodeBindingReferencedInRequiredBarePattern(b *NodeBinding) {
+	b.markReferencedInRequiredBarePattern()
+}
+
 func (NodeBinding) isBinding() {}
 
 // EdgeBinding is a query variable bound to an edge, carrying its labels as
@@ -397,14 +442,15 @@ func (NodeBinding) isBinding() {}
 // single-hop edge (Stages 0..7) and non-nil for a variable-length edge (Stage 8);
 // a var-length edge binding projects as list<edge>, a single-hop as edge.
 type EdgeBinding struct {
-	variable      string         // the name as written: the r in [r:KNOWS]; empty if anonymous
-	labels        graph.LabelSet // labels as written; may be empty; may carry multiple types (Stage 8)
-	source        Endpoint       // the source endpoint; always set
-	target        Endpoint       // the target endpoint; always set
-	nullable      bool           // set when first introduced in OPTIONAL MATCH (ADR 0006)
-	directed      bool           // true for a one-arrow edge; false for an undirected edge (Stage 5)
-	hops          *EdgeHops      // Stage 8: nil for single-hop; non-nil for variable-length
-	optionalGroup int            // ≥1: id of the introducing OPTIONAL clause (ay9); 0: not OPTIONAL-introduced
+	variable                        string         // the name as written: the r in [r:KNOWS]; empty if anonymous
+	labels                          graph.LabelSet // labels as written; may be empty; may carry multiple types (Stage 8)
+	source                          Endpoint       // the source endpoint; always set
+	target                          Endpoint       // the target endpoint; always set
+	nullable                        bool           // set when first introduced in OPTIONAL MATCH (ADR 0006)
+	directed                        bool           // true for a one-arrow edge; false for an undirected edge (Stage 5)
+	hops                            *EdgeHops      // Stage 8: nil for single-hop; non-nil for variable-length
+	optionalGroup                   int            // ≥1: id of the introducing OPTIONAL clause (ay9); 0: not OPTIONAL-introduced
+	referencedInRequiredBarePattern bool           // set by mergeBinding when a later same-Part occurrence is a required bare pattern (5xg)
 }
 
 // NewEdgeBinding builds a single-hop EdgeBinding, rejecting a missing endpoint:
@@ -530,6 +576,39 @@ func (b EdgeBinding) Nullable() bool { return b.nullable }
 // was not OPTIONAL-introduced — see NodeBinding.OptionalGroup for the
 // axis contract (ay9, ADR 0008 amendment 2026-07-07).
 func (b EdgeBinding) OptionalGroup() int { return b.optionalGroup }
+
+// ReferencedInRequiredBarePattern reports whether at least one
+// non-first occurrence of this variable in the same Part was a
+// required (non-OPTIONAL) bare pattern (5xg, ADR 0008 amendment
+// 2026-07-11) — see NodeBinding.ReferencedInRequiredBarePattern for
+// the axis contract. On an edge variable the parser never sets the
+// flag: an edge occurrence always sits inside `-[...]-` between two
+// node positions, so the "bare" predicate is grammatically-unreachable.
+// The field is added for wire symmetry with NodeBinding and forward
+// compatibility.
+func (b EdgeBinding) ReferencedInRequiredBarePattern() bool {
+	return b.referencedInRequiredBarePattern
+}
+
+// markReferencedInRequiredBarePattern sets the flag on a binding
+// whose raw form recorded a same-Part required bare re-reference
+// (5xg) — see NodeBinding.markReferencedInRequiredBarePattern for
+// the mutator contract.
+func (b *EdgeBinding) markReferencedInRequiredBarePattern() {
+	b.referencedInRequiredBarePattern = true
+}
+
+// MarkEdgeBindingReferencedInRequiredBarePattern is the parser-side
+// wrapper for EdgeBinding.markReferencedInRequiredBarePattern
+// (5xg, ADR 0008 amendment 2026-07-11) — see
+// MarkNodeBindingReferencedInRequiredBarePattern for the wrapper's
+// contract. The edge-side wrapper is present for wire symmetry with
+// the node side; the parser never calls it in practice because the
+// "bare" predicate is grammatically-unreachable on edges (an edge
+// always sits inside `-[...]-` between two node positions).
+func MarkEdgeBindingReferencedInRequiredBarePattern(b *EdgeBinding) {
+	b.markReferencedInRequiredBarePattern()
+}
 
 func (EdgeBinding) isBinding() {}
 
@@ -1682,15 +1761,18 @@ const (
 // Kind(). Mirrors schema.Schema's determinism discipline: the encoding is fixed
 // and independent of any map iteration order. "optionalGroup" is
 // omit-when-zero-value per the post-freeze wire convention (ay9 per ADR 0008
-// amendment 2026-07-07).
+// amendment 2026-07-07). "referencedInRequiredBarePattern" is
+// omit-when-false per the same post-freeze convention (5xg per ADR 0008
+// amendment 2026-07-11).
 func (b NodeBinding) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Kind          string         `json:"kind"`
-		Variable      string         `json:"variable"`
-		Labels        graph.LabelSet `json:"labels"`
-		Nullable      bool           `json:"nullable"`
-		OptionalGroup int            `json:"optionalGroup,omitempty"`
-	}{Kind: b.Kind().String(), Variable: b.variable, Labels: b.labels, Nullable: b.nullable, OptionalGroup: b.optionalGroup})
+		Kind                            string         `json:"kind"`
+		Variable                        string         `json:"variable"`
+		Labels                          graph.LabelSet `json:"labels"`
+		Nullable                        bool           `json:"nullable"`
+		OptionalGroup                   int            `json:"optionalGroup,omitempty"`
+		ReferencedInRequiredBarePattern bool           `json:"referencedInRequiredBarePattern,omitempty"`
+	}{Kind: b.Kind().String(), Variable: b.variable, Labels: b.labels, Nullable: b.nullable, OptionalGroup: b.optionalGroup, ReferencedInRequiredBarePattern: b.referencedInRequiredBarePattern})
 }
 
 // MarshalJSON renders an EdgeBinding as a tagged union member discriminated by
@@ -1700,18 +1782,23 @@ func (b NodeBinding) MarshalJSON() ([]byte, error) {
 // edge — matching the always-emit convention nullable / directed / returnsAll follow.
 // "optionalGroup" is omit-when-zero-value per the post-freeze wire convention
 // (ay9 per ADR 0008 amendment 2026-07-07).
+// "referencedInRequiredBarePattern" is omit-when-false per the same
+// post-freeze convention (5xg per ADR 0008 amendment 2026-07-11). Its true
+// side is grammatically-unreachable on edges (§2.3); the field ships for wire
+// symmetry with NodeBinding.
 func (b EdgeBinding) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
-		Kind          string         `json:"kind"`
-		Variable      string         `json:"variable"`
-		Labels        graph.LabelSet `json:"labels"`
-		Source        Endpoint       `json:"source"`
-		Target        Endpoint       `json:"target"`
-		Nullable      bool           `json:"nullable"`
-		Directed      bool           `json:"directed"`
-		Hops          *EdgeHops      `json:"hops"`
-		OptionalGroup int            `json:"optionalGroup,omitempty"`
-	}{Kind: b.Kind().String(), Variable: b.variable, Labels: b.labels, Source: b.source, Target: b.target, Nullable: b.nullable, Directed: b.directed, Hops: b.hops, OptionalGroup: b.optionalGroup})
+		Kind                            string         `json:"kind"`
+		Variable                        string         `json:"variable"`
+		Labels                          graph.LabelSet `json:"labels"`
+		Source                          Endpoint       `json:"source"`
+		Target                          Endpoint       `json:"target"`
+		Nullable                        bool           `json:"nullable"`
+		Directed                        bool           `json:"directed"`
+		Hops                            *EdgeHops      `json:"hops"`
+		OptionalGroup                   int            `json:"optionalGroup,omitempty"`
+		ReferencedInRequiredBarePattern bool           `json:"referencedInRequiredBarePattern,omitempty"`
+	}{Kind: b.Kind().String(), Variable: b.variable, Labels: b.labels, Source: b.source, Target: b.target, Nullable: b.nullable, Directed: b.directed, Hops: b.hops, OptionalGroup: b.optionalGroup, ReferencedInRequiredBarePattern: b.referencedInRequiredBarePattern})
 }
 
 // MarshalJSON renders a VarEndpoint as a tagged union member discriminated by
