@@ -37,9 +37,13 @@ Writes (R6), `CALL` / `YIELD` (R7), path bindings (`PathBinding`),
 continue to route to `ErrOutOfR0Scope`. The same-Part regime (b)
 nullability under-approximation surviving from R4 (§7.5 Class B, gap
 tracked on gqlc-5xg) is unchanged at R5. The Class A OPTIONAL-clause-
-sibling under-approximation (gap tracked on gqlc-ay9) is also unchanged
-at R5. Neither class is closable without a model unfreeze (owner
-decision pending); R5 does not contort the resolver around either.
+sibling under-approximation ~~(gap tracked on gqlc-ay9) is also
+unchanged at R5~~ was **closed by ay9** (2026-07-10, PRs #127/#128/#129;
+`docs/specs/unfreeze-ay9-optional-group.md`); residual cross-Part
+carry gap filed as gqlc-984. ~~Neither class is closable without a
+model unfreeze (owner decision pending);~~ Class B (gqlc-5xg) is the
+sole remaining unfreeze at R5; R5 does not contort the resolver
+around either.
 
 R5 introduces **two new sentinels**: **`ErrUnionColumnMismatch`**
 (§5.1), covering the column-incompatibility shapes UNION branches can
@@ -607,7 +611,7 @@ driver (§4.1.1).
 | `ExprUse` at `ExprInSetValue` / `ExprInDeleteTarget` | `ErrOutOfR0Scope` | R6 |
 | Property projection on a variable-length edge binding | `ErrOutOfR0Scope` | R-later |
 | Same-Part regime (b) nullability under-demote | silently under-demoted (§4.6) | gqlc-5xg (Class B, model unfreeze) |
-| OPTIONAL-clause-sibling nullability under-demote | silently under-demoted (§4.6) | gqlc-ay9 (Class A, model unfreeze) |
+| OPTIONAL-clause-sibling nullability under-demote | ~~silently under-demoted (§4.6)~~ **closed** (ay9, 2026-07-10) | ~~gqlc-ay9 (Class A, model unfreeze)~~ **closed** by ay9 unfreeze + widening (`docs/specs/unfreeze-ay9-optional-group.md`); residual cross-Part carry gap filed as gqlc-984 |
 
 The R4 §7.4 explanation stands: cross-WITH regime (b) is R5's business
 and is closed by §4.6 without a model change; same-Part regime (b) and
@@ -1715,8 +1719,15 @@ too. Owner decision on gqlc-5xg is still pending. If gqlc-5xg lands,
 R5's `demoteNullable` reads the new axis; no R5-spec-level revision
 needed beyond that.
 
-**§4.6.2 Class A OPTIONAL-clause-sibling gap still under-approximates
-at R5.** Same story: gqlc-ay9. R5 does not close Class A.
+**§4.6.2 Class A OPTIONAL-clause-sibling gap ~~still under-approximates
+at R5~~ closed by ay9 (2026-07-10).** ~~Same story: gqlc-ay9. R5 does
+not close Class A.~~ Closed by ay9 unfreeze + widening (PRs
+#127/#128/#129, `docs/specs/unfreeze-ay9-optional-group.md`). R5's
+`demoteNullable` reads the widened `demoteNullableInPlace` unchanged
+— no R5-spec-level revision beyond that. Residual cross-Part carry
+gap (WITH-boundary group membership through `branchState`) is filed
+as gqlc-984 and is R5's territory when picked up (resolver-internal,
+no model change).
 
 **Under-approximations at R5 are consistent with R4.** No new class of
 under-approximation appears at R5. What R5 gains is the ability to
@@ -2308,7 +2319,7 @@ R4's out-of-scope table survives with revisions:
 | Parameter Uses that do not unify | `ErrParameterTypeConflict` | (unchanged) |
 | UNION branches disagree on column count, names, types, or nullability | `ErrUnionColumnMismatch` | **R5 (this stage)** |
 | Nullability upgrades (regime (b), same-Part re-MATCH — Class B: missing-witness model gap) | silently under-demoted | gqlc-5xg (model unfreeze) |
-| Nullability upgrades (OPTIONAL-clause-sibling — Class A: missing-group-membership model gap) | silently under-demoted | gqlc-ay9 (model unfreeze) |
+| Nullability upgrades (OPTIONAL-clause-sibling — Class A: missing-group-membership model gap) | ~~silently under-demoted~~ **closed** (ay9, 2026-07-10) | ~~gqlc-ay9 (model unfreeze)~~ **closed** by ay9 unfreeze + widening (`docs/specs/unfreeze-ay9-optional-group.md`); residual cross-Part carry gap filed as gqlc-984 |
 | `ExprProjection` residual mixed with `AggregateProjection` in the same Part's Returns — grouping-key discrimination gap | silently under-grouped (uniform-exclude posture) | §4.5.3.3 follow-up bead (Shape B `ContainsAggregate` parser-side bit) |
 | Cross-Part parameter Use where the true attributed Part would reject but another same-name Part admits — Use→Part attribution gap (§4.2.4) | **closed by gqlc-fvo (2026-07-06)**: `docs/specs/unfreeze-fvo-use-part.md` threads `Part` on every `Use` and the resolver's `witnessAcrossScopes` witnesses against `branchScopes[u.Part()]`. Under UNION the `witnessInBranch` dispatcher wraps this with a same-Part cross-branch fallback (fvo spec §7.2.2, PR #118) — two residuals of that fallback (same-Part UNION boundary ambiguity, UNION-later-Part spurious rejection) are filed as **gqlc-qcc** for a future cycle. Residual WITH-aliased-projection shadow (fvo spec §7.6.1) is filed as **gqlc-4w5** for a future scope-attribution cycle. | closed |
 
