@@ -1,8 +1,8 @@
 # Part-level DISTINCT axis — Cypher query parser
 
-The implementation brief for the pre-freeze `query.Part` model fix that lifts
+The implementation brief for the before Stage 14 `query.Part` model fix that lifts
 projection-list `DISTINCT` into the curated model. One of the last two
-pre-freeze model changes before the `query.Query` API freeze, under the
+before Stage 14 model changes, under the
 curation discipline of ADR 0003 and the type-interface boundary of ADR 0005.
 This is not a numbered stage: it fixes a known gap in Stage 4's part
 structure that Stage 10 (aggregate DISTINCT) rediscovered but did not close.
@@ -24,7 +24,7 @@ This document is a **delta** against Stages 0–15 (referenced individually
 where relevant); everything not stated here carries over verbatim.
 Sections appear here only where this change adds something.
 
-Tracking: bead `gqlc-33k.2` (GitHub #75). Blocks the `query.Query` freeze
+Tracking: bead `gqlc-33k.2` (GitHub #75). Blocks Stage 14 close-out
 (gqlc-cta) alongside `gqlc-33k.1`.
 
 ---
@@ -117,7 +117,7 @@ it modifies the projection (like `returnsAll`), not the effects list.
 **Blast radius.** One production caller (`build.go:236`) and five test
 call sites (`query_test.go:204/208/214/218/232`) — no wire-shape
 consumers outside the parser package (ADR 0004: nothing downstream of
-the parser is built pre-freeze). The signature change is a one-hop
+the parser is built before Stage 14). The signature change is a one-hop
 mechanical update.
 
 ### 1.3 Semantics — which part owns the DISTINCT

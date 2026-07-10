@@ -1,7 +1,7 @@
 # Stage 15 spec — Cypher query parser: TCK corpus completion and skiplist policy categorization
 
 The implementation brief for Stage 15 of the Cypher implementation of
-`query.Parser`. Fifteenth (and final pre-freeze) model evolution after
+`query.Parser`. Fifteenth (and final before Stage 14) model evolution after
 Stage 14 per ADR 0004, under the curation discipline of ADR 0003 and
 the type-interface boundary of ADR 0005. This stage closes out the
 `ADR 0007` expansion audit: every TCK feature directory is either
@@ -15,7 +15,7 @@ type-interface surface freezes exactly where Stage 14 left it. This
 document is a **delta** against Stages 0–14 in the same spirit as the
 Stage-14 spec — sections appear only where Stage 15 changes something.
 
-Tracking: bead `gqlc-x6u` (GitHub #51). Blocks the query.Query freeze
+Tracking: bead `gqlc-x6u` (GitHub #51). Blocks Stage 14 close-out
 (gqlc-cta). Lands as one graphite branch (`tck-corpus-sweep`) with
 separated commits (spec + docs → step registrations + noop wiring →
 useCases dir enablement + goldens → skiplist policy enum + Test
@@ -221,8 +221,8 @@ Kept short (Q6 ruling); no aspirational language.
 
 ## 2. Scope discipline (what Stage 15 does NOT change)
 
-**No model widening.** `query.Query`, `Part`, `Effect`, all sums frozen
-exactly at Stage 14. This bead directly blocks the freeze bead
+**No model widening.** `query.Query`, `Part`, `Effect`, all sums settled
+exactly at Stage 14. This bead directly blocks the close-out bead
 (`gqlc-cta`) — a model change here would defeat the purpose. If the
 implementation encounters an unavoidable model change need, the
 implementer STOPS and reports before proceeding (per the team-lead

@@ -1,12 +1,12 @@
 # Stage R0 spec — resolver: skeleton and the type-mapping table
 
 The implementation brief for Stage R0 of `internal/resolver`, the first
-consumer of the frozen `query.Query` (ADR 0008). Build this **test-first**.
+consumer of the `query.Query` (ADR 0008). Build this **test-first**.
 Scope, sequencing, and error posture are set by ADR 0009 (the resolver's
 build charter). The externally visible surface is pinned by ADR 0008
 (package, constructor, `Resolve` signature). The type vocabulary is
 grounded in ADR 0002 (bit-width preservation) on the schema side and the
-frozen `query.Type` sum (ADR 0008) on the query side. This document is
+`query.Type` sum (ADR 0008) on the query side. This document is
 the precise decision surface for R0 alone: the type-mapping table
 (load-bearing per ADR 0009), the R0 shape of `ValidatedQuery`, the
 `Resolver` seam, the R0 sentinel set, the golden-pair harness, and the R0
@@ -149,7 +149,7 @@ will one day consume (ADR 0008). The R0 shape is minimal: exactly the
 information the R0 capability scope (§7) produces, and no speculative
 fields for later stages. It is provisional through R7 (ADR 0009); no
 consumer exists yet, so every later stage may add fields, add variants,
-or rename what R0 introduces — the freeze pressure that governs
+or rename what R0 introduces — the stability pressure that governs
 `query.Query` does not apply here yet.
 
 ### 3.1 Top-level shape
@@ -247,7 +247,7 @@ the resolver's vocabulary, distinct from `query.Type`: it may add
 variants `query.Type` does not carry (`ResolvedProperty` with a
 `graph.PropertyType` payload), it may collapse variants `query.Type`
 distinguishes but the resolver does not use, and it evolves per stage
-until frozen. The R0 shape carries only the variants R0's capability
+until Stage 14. The R0 shape carries only the variants R0's capability
 scope produces.
 
 ```go
@@ -288,7 +288,7 @@ restructure this type — `ValidatedQuery` is provisional through R7
 back to a specific row of it.
 
 **Alternative considered and rejected: reuse `query.Type` directly.**
-`query.Type` is the parser's frozen sum, deliberately schema-free —
+`query.Type` is the parser's sum, deliberately schema-free —
 its `TypeUnknown` is the parser's honest "cannot tell" for a property
 ref, and its scalar variants (`TypeInt`, `TypeString`) do not carry the
 bit width the schema does. Reusing `query.Type` would force the
@@ -302,8 +302,8 @@ carrying exactly the information its layer knows.
 ## 4. The type-mapping table
 
 ADR 0009 makes this table the R0 spec's first design item and the
-future `ValidatedQuery` freeze ADR's seed. Every one of the seventeen
-frozen `query.Type` variants gets a row: the resolver's counterpart, a
+future `ValidatedQuery` ADR 0008's seed. Every one of the seventeen
+`query.Type` variants gets a row: the resolver's counterpart, a
 classification (`final` / `schema-upgraded` / `unified-across-uses`),
 and the stage that owns the upgrade. The **classification key** below
 comes straight from ADR 0009's language:
@@ -511,7 +511,7 @@ Recorded for the spine; no R0 fixture reaches a temporal type.
 (Twenty rows: the `TypeUnknown` split is documented as one variant
 with four rows because `TypeUnknown`'s upgrade path depends on its
 source. The seventeen-variant count matches ADR 0009's "seventeen
-frozen `query.Type` variants" — the four `TypeUnknown` rows collapse
+`query.Type` variants" — the four `TypeUnknown` rows collapse
 into one variant, giving 20 − 4 + 1 = 17.)
 
 Rows classified as R0 owners are the only rows R0 implements. Every
@@ -835,7 +835,7 @@ from both. Same posture as the parser.
 | Literal-only `ORDER BY <expr>` (no parameter)          | ADR 0005   |
 | Literal `SKIP <int>` / `LIMIT <int>` (no parameter)    | ADR 0005   |
 
-These clauses leave *no witness* in the frozen `query.Query` model:
+These clauses leave *no witness* in the `query.Query` model:
 `query.Part` carries `Bindings`, `Returns`, `ReturnsAll`, `Distinct`,
 and `Effects` (`internal/query/query.go:81-123`) — and *none* of those
 five fields carries a WHERE, an ORDER BY, or a literal SKIP/LIMIT.
@@ -851,7 +851,7 @@ clause.
 A future reader must not attempt to route these to `ErrOutOfR0Scope`:
 there is no witness in the model to guard on, and proposing a
 `query.Query` amendment to expose the clauses would be an ADR 0008
-revision protocol change — out of scope for R0.
+additions convention change — out of scope for R0.
 
 **`RETURN DISTINCT` / `WITH DISTINCT` / `RETURN *` / `WITH *` are NOT
 in this silently-accepted set.** They *are* witnesses in the model:
@@ -859,13 +859,13 @@ the parser sets `Part.Distinct = true`
 (`internal/query/cypher/expr.go:35-37`) and forwards it to `NewPart`
 (`internal/query/cypher/build.go:236`); `Part.ReturnsAll` is set the
 same way. Both are first-class cardinality-affecting bits by ADR 0008
-lines 38-40 (the pre-freeze Part-DISTINCT axis) and by `query.go:105-114`
+lines 38-40 (the before Stage 14 Part-DISTINCT axis) and by `query.go:105-114`
 ("Distinct is true iff the part's projection body carried the DISTINCT
 keyword … Composes freely with ReturnsAll … a different cardinality
 decision on a different model surface"). Silently ignoring
 `Part.Distinct` would let `RETURN DISTINCT n` produce the same
 `ValidatedQuery` as `RETURN n` — exactly the cardinality mismatch the
-pre-freeze fix exists to prevent. They therefore route to
+before Stage 14 fix exists to prevent. They therefore route to
 `ErrOutOfR0Scope` via the two dedicated rows above.
 
 Each row above corresponds to at least one guard in the R0 kernel that
@@ -894,7 +894,7 @@ of scope of this document. The spec is done when:
 
 1. This file exists at `docs/specs/resolver-stage-r0.md`, committed on
    branch `resolver-r0-spec`.
-2. The type-mapping table (§4) covers all seventeen frozen
+2. The type-mapping table (§4) covers all seventeen
    `query.Type` variants, each classified and each with an owner
    stage. R0-owned rows are named.
 3. `ValidatedQuery`'s R0 shape (§3) is decided: fields, `Column`,

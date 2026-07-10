@@ -186,7 +186,7 @@ adds the scalar's kind. Nullability is *not* a field on
 by the slot's own nullability semantics (SKIP / LIMIT reject a NULL
 integer at runtime — ADR 0005, the original text runs). If a future
 consumer needs a nullable-scalar distinction, it lands as an additive
-axis under the ADR 0008 protocol post-freeze.
+axis under the ADR 0008 protocol later.
 
 ### 3.2 `ResolvedTemporal` — the six openCypher temporals
 
@@ -269,7 +269,7 @@ truth at R2.
 // call's result (function identity below the type-interface boundary,
 // ADR 0005), a list of unknown-element parser-coarse type. The runtime
 // re-executes the original text; the resolver records "unknown" as
-// the honest column / parameter type. Codegen post-freeze may reject
+// the honest column / parameter type. Codegen later may reject
 // or degrade a ResolvedUnknown-typed column, but that is a future
 // consumer decision — the R2 model does not fail on it.
 type ResolvedUnknown struct{}
@@ -399,7 +399,7 @@ its `Value Projection` on the `Projection` sum (five variants —
 
 The dispatch is exhaustive over the `Projection` sum (five variants, all
 covered — four resolved, one refused). A future additive variant on
-`Projection` (post-freeze, ADR 0008 protocol) is a compile error at the
+`Projection` (later, ADR 0008 protocol) is a compile error at the
 switch's zero-arms default — a stage-later specification will pick it up.
 
 ### 4.3 Step 5 (revised) — parameter unification
@@ -511,7 +511,7 @@ Dispatch on the sealed `Use` sum (three variants —
     property is committed.
 
 The dispatch is exhaustive over the sealed `Use` sum (three variants,
-all covered). A parser-side additive `Use` variant post-freeze would be
+all covered). A parser-side additive `Use` variant later would be
 a compile error at the switch default — a stage-later specification
 picks it up.
 
@@ -740,7 +740,7 @@ speculative row for `ResolvedScalar{ScalarInt}` into the concrete
   a `ClauseSlotUse` witness. The counterpart column is unchanged; the
   producer axis just widens.
 
-The table is closed at R2: every variant of the frozen `query.Type` sum
+The table is closed at R2: every variant of the `query.Type` sum
 appears, each classified, each with an R-stage owner. R3–R7 revise
 rows they take up (R3 for var-length `list<edge>`, R5 for path and
 aggregate result); no row is renamed or reclassified silently.
@@ -1269,7 +1269,7 @@ describes still holds.
   `internal/schema/schema.go:43-47`.
 - **`schema.NodeType.Properties` and `schema.EdgeType.Properties` are
   `map[string]Property`** — `internal/schema/schema.go:23-32`.
-- **Frozen `query.Type` seventeen-variant sum** — ADR 0008,
+- **`query.Type` seventeen-variant sum** — ADR 0008,
   `internal/query/type.go` (all variants).
 - **R1 kernel's parameter walk currently rejects
   `len(Uses) != 1` and non-`PropertyUse` with `ErrOutOfR0Scope`** —

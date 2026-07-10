@@ -46,7 +46,7 @@ delivers **YIELD column typing** fully. ~~**Argument assignability**
 resolver-side application site** at R7 because the parser discards
 CALL-arg attribution on the wire (spec §7.2 and §7.3).~~ [closed
 2026-07-07 by gqlc-0ig (PRs #122/#123/#124,
-`docs/specs/unfreeze-0ig-call-args.md`): the wire now carries per-
+`docs/specs/model-change-0ig-call-args.md`): the wire now carries per-
 position `CallBinding.Args()` records; the resolver's Phase A1
 CallBinding arm walks `Args()` against the matched
 `procsig.Registry.Lookup(procedure).Params[i].Token` and fails with
@@ -55,8 +55,8 @@ lattice. §7.1.1 banner.] **Unknown procedure** at generation time is
 delivered by the parser (`cypher.ErrUnknownProcedure`;
 `internal/query/cypher/call.go:41-44`); the resolver **does not re-check**
 — R7 documents this as a trust posture mirroring R6's Refs referential-
-integrity trust (spec §4.4). ~~This is not a scope trim: it is a frozen-
-model deficiency in the same family as `gqlc-fvo` (cross-Part parameter
+integrity trust (spec §4.4). ~~This is not a scope trim: it is a model
+deficiency in the same family as `gqlc-fvo` (cross-Part parameter
 Use attribution, unchanged from R5/R6). §7.1 records the deficiency with
 the exact widening required.~~ [closed 2026-07-07: the argument-
 assignability deficiency this paragraph declared is closed by gqlc-0ig;
@@ -65,15 +65,15 @@ assignability deficiency this paragraph declared is closed by gqlc-0ig;
 ~~The R4 Class A and Class B same-Part regime (b) nullability
 under-approximations (`gqlc-ay9`, `gqlc-5xg`),~~ [closed 2026-07-10:
 Class A landed via gqlc-ay9 (PRs #127/#128/#129,
-`docs/specs/unfreeze-ay9-optional-group.md`; residual gqlc-984) and
+`docs/specs/model-change-ay9-optional-group.md`; residual gqlc-984) and
 Class B / same-Part regime (b) landed via gqlc-5xg (PRs
-#132/#133/#134, `docs/specs/unfreeze-5xg-required-bare-ref.md`;
+#132/#133/#134, `docs/specs/model-change-5xg-required-bare-ref.md`;
 residual gqlc-0kq); R7 inherits both closures unchanged.] the R5
 `ExprProjection`-residual grouping-key gap (`gqlc-gyw` Shape B /
 `gqlc-hk0`), and the R5 cross-Part parameter-Use attribution gap
 (`gqlc-fvo`) are unchanged at R7. R6's two design deferrals
 (value-target assignability, Effects-on-wire) are unchanged at R7. ~~None
-of these gaps is closable without a model unfreeze (owner decision
+of these gaps is closable without a model change (owner decision
 pending); R7 does not contort the resolver around any of them.~~
 [closed 2026-07-10 for the two R4 nullability gaps (ay9, 5xg); the
 R5 gaps (`gqlc-hk0`, `gqlc-fvo`) persist at R7; R7 does not contort
@@ -642,7 +642,7 @@ in an R0–R6 code path.
 **Judgment call — CallBindings stay on `query.Query`, not on
 `ValidatedQuery`, at R7.** The resolver's job at R7 is to certify
 that every `CallBinding` bridges to a resolved column type. Codegen
-(post-R7) reaches the CallBinding list on the frozen `query.Query`
+(post-R7) reaches the CallBinding list on the `query.Query`
 side (accessible to codegen via the passed-in `query.Query`
 alongside the `ValidatedQuery`) if it needs the procedure name,
 sourceField, or nullability metadata for driver call planning. Two
@@ -656,7 +656,7 @@ reasons R7 does not add a `Calls` axis to `ValidatedQuery`:
    to consume CallBindings from `query.Query` or from a resolved
    analogue on `ValidatedQuery`; that decision is not R7's to make.
 2. **Every fact codegen needs is already on `query.Query`.** The
-   sixty-day-frozen model records the CallBinding's procedure name,
+   sixty-day-query model records the CallBinding's procedure name,
    sourceField, resultType (bridged), and nullable bit — all
    codegen consumes verbatim. The resolver's R7 outcome is a
    `Column` on the wire for each YIELD-projected variable; no
@@ -1583,7 +1583,7 @@ back to the param position. The assignability check would need
 per-position CALL-arg attribution on the wire; the parser does not
 emit it. §7.1 records the widening required.~~ [closed 2026-07-07
 by gqlc-0ig (PRs #122/#123/#124,
-`docs/specs/unfreeze-0ig-call-args.md`): per-position CALL-arg
+`docs/specs/model-change-0ig-call-args.md`): per-position CALL-arg
 attribution now lands on the wire as `CallBinding.Args()`; the
 resolver's Phase A1 CallBinding arm walks `Args()` against
 `procsig.Registry.Lookup(procedure).Params[i].Token` and enforces
@@ -2214,27 +2214,27 @@ R6's out-of-scope table survives with revisions:
 | Value-target type-agreement in `SET n.p = value` | silently admitted | R-later (design axis; unchanged from R6) |
 | Runtime SET / DELETE on NULL target (row-drop semantics) | silently admitted | bucket 3 (unchanged) |
 | DETACH DELETE cascade semantics vs plain DELETE | silently admitted | bucket 3 (unchanged) |
-| Same-Part regime (b) nullability under-demote | ~~silently under-demoted~~ **closed** (5xg, 2026-07-10) | ~~gqlc-5xg (unchanged)~~ **closed** by 5xg unfreeze + widening (`docs/specs/unfreeze-5xg-required-bare-ref.md`); edge-side non-bare missing-witness residual filed as gqlc-0kq |
-| OPTIONAL-clause-sibling nullability under-demote | ~~silently under-demoted~~ **closed** (ay9, 2026-07-10) | ~~gqlc-ay9~~ **closed** by ay9 unfreeze + widening (`docs/specs/unfreeze-ay9-optional-group.md`); residual cross-Part carry gap filed as gqlc-984 |
+| Same-Part regime (b) nullability under-demote | ~~silently under-demoted~~ **closed** (5xg, 2026-07-10) | ~~gqlc-5xg (unchanged)~~ **closed** by 5xg change + widening (`docs/specs/model-change-5xg-required-bare-ref.md`); edge-side non-bare missing-witness residual filed as gqlc-0kq |
+| OPTIONAL-clause-sibling nullability under-demote | ~~silently under-demoted~~ **closed** (ay9, 2026-07-10) | ~~gqlc-ay9~~ **closed** by ay9 change + widening (`docs/specs/model-change-ay9-optional-group.md`); residual cross-Part carry gap filed as gqlc-984 |
 | `ExprProjection` residual grouping-key discrimination | silently under-grouped | gqlc-hk0 / Shape B (unchanged) |
 | Cross-Part parameter Use attribution gap | silently false-admitted | gqlc-fvo (unchanged) |
-| CALL argument-vs-parameter type check (incl. NUMBER assignable-from) | ~~silently admitted~~ **checked** (0ig, 2026-07-07) | ~~frozen-model deficiency filed at R7 close-out~~ CLOSED (§7.1.1; `docs/specs/unfreeze-0ig-call-args.md`) |
+| CALL argument-vs-parameter type check (incl. NUMBER assignable-from) | ~~silently admitted~~ **checked** (0ig, 2026-07-07) | ~~model gap filed at R7 close-out~~ CLOSED (§7.1.1; `docs/specs/model-change-0ig-call-args.md`) |
 | Parser trusts CALL procedure lookup; resolver does not re-check | silently admitted | (trust posture; §4.4 — same family as R6 Refs referential integrity) |
 
 **Silently accepted (not routed anywhere):**
 
 R0–R6's silently-accepted set stands unchanged. ~~R7 adds:~~ **Both
-R7 additions below were closed by the 0ig unfreeze cycle
-(2026-07-07; §7.1.1 banner, `docs/specs/unfreeze-0ig-call-args.md`):**
+R7 additions below were closed by the 0ig model-change cycle
+(2026-07-07; §7.1.1 banner, `docs/specs/model-change-0ig-call-args.md`):**
 - ~~**CALL argument type-agreement against signature params** (§7.1.1
-  frozen-model deficiency — resolver has no attribution to run the
+  model gap — resolver has no attribution to run the
   check).~~ **checked** (0ig, 2026-07-07): the resolver's Phase A1
   CallBinding arm walks `CallBinding.Args()` per position and fires
   `ErrCallArgAssignability` on mismatch.
 - ~~**NUMBER assignable-from at argument sites** — no resolver
   application site because CALL-arg attribution is dropped (§7.1.1;
   §4.8).~~ **delivered** (0ig, 2026-07-07): the assignability lattice
-  (`unfreeze-0ig-call-args.md §8.2`) applies NUMBER
+  (`model-change-0ig-call-args.md §8.2`) applies NUMBER
   assignable-from-INTEGER-or-FLOAT at the argument site.
 
 **Recorded ADR 0009 cross-check.** ADR 0009 R7: "CALL — YIELD column
@@ -2252,7 +2252,7 @@ spec scopes it:
   and `CallBinding.SourceField()` on `query.Query` for codegen.
 - **Argument assignability including NUMBER assignable-from
   INTEGER-or-FLOAT**: ~~DEFERRED~~ **DELIVERED** by the 0ig cycle
-  (`docs/specs/unfreeze-0ig-call-args.md`; ADR 0008 amendment
+  (`docs/specs/model-change-0ig-call-args.md`; ADR 0008 amendment
   2026-07-07). The wire now carries per-position `CallArg` records
   on `CallBinding.Args()`; the resolver's Phase A1 CallBinding arm
   applies the assignability lattice (spec §8.2) and fails with
@@ -2266,21 +2266,21 @@ spec scopes it:
 
 ### 7.1 Under-approximation and R7-specific design deferrals
 
-Following the R6 §7.1 template — R7 discovers ONE new frozen-model
+Following the R6 §7.1 template — R7 discovers ONE new model
 deficiency (§7.1.1) and inherits every R6 open axis unchanged
 (§7.1.2).
 
-#### 7.1.1 CALL-arg attribution — a frozen-model deficiency ~~open~~ CLOSED (2026-07-07)
+#### 7.1.1 CALL-arg attribution — a model gap ~~open~~ CLOSED (2026-07-07)
 
-> **Cycle 3 errata (2026-07-07, gqlc-0ig unfreeze cycle):** the
-> frozen-model deficiency this section records has been **closed** by
+> **Cycle 3 errata (2026-07-07, gqlc-0ig model-change cycle):** the
+> model gap this section records has been **closed** by
 > the ADR 0008 amendment adopted 2026-07-07 (`docs/adr/0008-query-
-> model-freeze-resolver-api.md` top). The wire now carries per-
+> model-surface-resolver-api.md` top). The wire now carries per-
 > position `CallArg` records on `CallBinding.Args()`; the resolver's
 > Phase A1 CallBinding arm walks `Args()` against the matched
 > `procsig.Registry.Lookup(procedure).Params[i].Token` and fails with
 > the new `ErrCallArgAssignability` sentinel on mismatch under the
-> ADR 0007 Stage-14 assignability lattice (`docs/specs/unfreeze-0ig-
+> ADR 0007 Stage-14 assignability lattice (`docs/specs/model-change-0ig-
 > call-args.md §8.2`: NUMBER accepts INTEGER-or-FLOAT; FLOAT accepts
 > INTEGER per TCK Call3 [5]; STRING / INTEGER strict; TypeUnknown
 > and TypeNull wildcards — bare `null` literals mine to `TypeNull`,
@@ -2314,7 +2314,7 @@ consult.
 
 **What a widening would look like.**
 
-Two minimal frozen-model changes would enable the resolver-side
+Two minimal model changes would enable the resolver-side
 check:
 
 1. **Add `ExprInCallArg` to the `ExprPosition` sum.** Parser's
@@ -2329,7 +2329,7 @@ check:
    and either widen the witness (NUMBER accepts INTEGER-or-FLOAT)
    or narrow it (STRING param requires TypeString-only Uses).
 
-Either widening lands under a new frozen-model unfreeze bead
+Either widening lands under a new model change bead
 (same family as `gqlc-fvo` — the cross-Part parameter Use
 attribution gap, which is the parent of THIS gap: `gqlc-fvo` says
 "the wire loses which Part a Use came from"; this gap says "the
@@ -2349,7 +2349,7 @@ set is deliberately silent on argument-side; the ADR delivery is
 the YIELD column typing axis.
 
 **Recommendation.** File the owner-decision bead at close-out
-under the `gqlc-fvo` pattern (owner unfreeze decision pending).
+under the `gqlc-fvo` pattern (owner change decision pending).
 Reference: bead filed at close-out (see §9). R7 code cycle
 proceeds without the widening.
 
@@ -2362,25 +2362,25 @@ cross-Part Use attribution ~~— of which R7's CALL-arg gap is a
 child~~ — the CALL-arg child gap was closed by 0ig, 2026-07-07; see
 §7.1.1) persist at R7 unchanged. R4-inherited gaps ~~(`gqlc-ay9` Class A,
 `gqlc-5xg` Class B nullability) persist at R7 unchanged~~ — Class A
-(`gqlc-ay9`) was closed by the ay9 unfreeze + widening on 2026-07-10
-(PRs #127/#128/#129, `docs/specs/unfreeze-ay9-optional-group.md`;
+(`gqlc-ay9`) was closed by the ay9 change + widening on 2026-07-10
+(PRs #127/#128/#129, `docs/specs/model-change-ay9-optional-group.md`;
 residual cross-Part carry gap filed as gqlc-984); ~~Class B
 (`gqlc-5xg`) persists at R7 unchanged.~~ Class B (`gqlc-5xg`) was
-closed by the 5xg unfreeze + widening on 2026-07-10 (PRs
-#132/#133/#134, `docs/specs/unfreeze-5xg-required-bare-ref.md`;
+closed by the 5xg change + widening on 2026-07-10 (PRs
+#132/#133/#134, `docs/specs/model-change-5xg-required-bare-ref.md`;
 edge-side non-bare missing-witness residual filed as gqlc-0kq); R7
 inherits the closure unchanged.
 
-#### 7.1.3 Freeze-not-a-wall status
+#### 7.1.3 Model-change status
 
-R7 discovers ONE new frozen-model deficiency (§7.1.1 — CALL-arg
+R7 discovers ONE new model gap (§7.1.1 — CALL-arg
 attribution). Owner-decision bead filed at close-out (that bead,
 `gqlc-0ig`, has since closed the deficiency — 2026-07-07). R7 does not
 delay the spec on it; the CALL-YIELD-typing arm delivers standalone.
 
 #### 7.1.4 Summary of R7 deferrals
 
-- ~~**CALL-arg attribution** — deferred to a future frozen-model
+- ~~**CALL-arg attribution** — deferred to a future model
   widening (owner-decision bead filed at close-out). NUMBER
   assignable-from and argument-vs-param type agreement are both
   downstream of this gap. Not a code-side deferral. §7.1.1.~~
@@ -2393,9 +2393,9 @@ delay the spec on it; the CALL-YIELD-typing arm delivers standalone.
 - **R5 / R4 open axes carry unchanged** — `gqlc-fvo`, `gqlc-hk0`,
   ~~`gqlc-ay9`, `gqlc-5xg`~~. §7.1.2. [closed 2026-07-10: `gqlc-ay9`
   landed via PRs #127/#128/#129
-  (`docs/specs/unfreeze-ay9-optional-group.md`; residual gqlc-984),
+  (`docs/specs/model-change-ay9-optional-group.md`; residual gqlc-984),
   and `gqlc-5xg` landed via PRs #132/#133/#134
-  (`docs/specs/unfreeze-5xg-required-bare-ref.md`; residual gqlc-0kq);
+  (`docs/specs/model-change-5xg-required-bare-ref.md`; residual gqlc-0kq);
   R7 inherits both closures unchanged.]
 
 ---
@@ -2465,9 +2465,9 @@ citations below name the file:line the claim rests on.
 - **ADR 0009 R7 line verbatim** —
   `docs/adr/0009-resolver-test-first-staged-build.md:136-139`.
 - **ADR 0007 Stage-14 note on NUMBER assignable-from** —
-  `docs/adr/0007-pre-freeze-scope-full-opencypher-surface.md:166-181`.
+  `docs/adr/0007-parser-scope-full-opencypher-surface.md:166-181`.
 - **ADR 0008 pinned resolver API** —
-  `docs/adr/0008-query-model-freeze-resolver-api.md:117-135`.
+  `docs/adr/0008-query-model-surface-resolver-api.md:117-135`.
 - **Stage 14 §4.5 — arg-type check bucket-3 skiplist** —
   `docs/specs/cypher-query-parser-stage-14.md:971-994`. Direct
   quote: "the arg-vs-param type dance itself is not modelled".
@@ -2548,14 +2548,14 @@ out of scope of this document. The spec is done when:
    call-vs-edge), the revised `invalidFixtures` map (§6.5).
 6. §7 states the R7 capability scope in shape terms and lists its
    out-of-scope complement with the sentinel or under-demote posture
-   for each construct. §7.1 records the ONE new frozen-model
+   for each construct. §7.1 records the ONE new model
    deficiency (CALL-arg attribution — §7.1.1) with the widening
    required and the owner-decision bead-file-at-close-out
    commitment. Confirms the R6-inherited gaps carry unchanged.
 7. §8 cross-checks every factual claim against source file:line.
 8. `just test` is untouched-green — this cycle is docs-only.
 9. **At R7 code-cycle close-out** (Cycle 2, not this Cycle 1):
-   - File the frozen-model deficiency owner-decision bead
+   - File the model gap owner-decision bead
      (CALL-arg attribution; parent of NUMBER assignable-from's
      missing application site; sibling of `gqlc-fvo`). Pattern:
      `gqlc-fvo`, `gqlc-lta`, etc.
@@ -2564,9 +2564,9 @@ out of scope of this document. The spec is done when:
    - ~~gqlc-ay9, gqlc-5xg,~~ gqlc-hk0, gqlc-fvo, gqlc-lta remain OPEN
      unchanged; R7 does not close any of them. [closed 2026-07-10:
      gqlc-ay9 landed via PRs #127/#128/#129
-     (`docs/specs/unfreeze-ay9-optional-group.md`; residual gqlc-984),
+     (`docs/specs/model-change-ay9-optional-group.md`; residual gqlc-984),
      and gqlc-5xg landed via PRs #132/#133/#134
-     (`docs/specs/unfreeze-5xg-required-bare-ref.md`; residual gqlc-0kq);
+     (`docs/specs/model-change-5xg-required-bare-ref.md`; residual gqlc-0kq);
      R7 inherits both closures unchanged.]
    - The R7 code cycle asserts §3.3's byte-identical claim by
      running `just test` on the R0–R6 corpus WITHOUT `-update`

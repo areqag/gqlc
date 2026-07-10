@@ -4,7 +4,7 @@ The implementation brief for Stage 9 of the Cypher implementation of
 `query.Parser`. Ninth model evolution after Stage 8 per ADR 0004 (test-first,
 evolving until feature-complete), under the curation discipline of ADR 0003 and
 the type-interface boundary of ADR 0005. Stage 9 is the fourth stage of the
-ADR-0007 pre-freeze expansion beyond the read core. It **closes out the read
+ADR-0007 before Stage 14 expansion beyond the read core. It **closes out the read
 clauses**: `UNWIND` as a reading clause that introduces a scalar binding whose
 type is derived from the source list (Stage 6 typing machinery), `WITH ... WHERE`
 as a filter after projection, `WITH ... ORDER BY / SKIP / LIMIT` as intermediate
@@ -598,7 +598,7 @@ The lesser risks, recorded for completeness:
   not a list, parameter type unknown). The element type therefore
   collapses to TypeUnknown for those shapes. This is honest: the
   resolver can upgrade from the schema (for a $param whose type it
-  infers post-freeze), and a wrong concrete type would be strictly
+  infers later), and a wrong concrete type would be strictly
   worse.
 - **UNWIND parameter records an `ExprUse{sourceType,
   ExprInProjection}`.** The `ExprPosition` enum has two values today
@@ -612,6 +612,6 @@ The lesser risks, recorded for completeness:
   The parser could record `TypeBool` (ORDER BY compares) or the sort
   key's actual computed type. Both are incidental to the parameter's
   role, which is a sort-key contributor. `TypeUnknown` is honest:
-  the resolver upgrades from the schema post-freeze. A concrete
+  the resolver upgrades from the schema later. A concrete
   type would be strictly worse (a wrong-shape ExprUse the resolver
   cannot invalidate).
