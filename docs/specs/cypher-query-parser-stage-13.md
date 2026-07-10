@@ -1107,7 +1107,7 @@ mitigation postures are available depending on the answer:
    off).
 
 The spec commits to answering the probe in the parser-green commit
-and disclosing which posture is chosen with its trade-off. Neither
+and disclosing which posture is chosen with its trade-off. ~~Neither
 posture is obviously superior; the safer default is posture 1
 (defer to Stage 6's typing) because the typer's ExprUse posture is
 the honest ADR-0005 boundary posture for a rich value expression:
@@ -1115,7 +1115,16 @@ the honest ADR-0005 boundary posture for a rich value expression:
 sum expression, the resolver upgrades post-freeze." Posture 2 is
 tighter but leaks a heuristic ("the parameter is at the inline-map
 key value slot, so it fills `var.key`") that the sum expression
-does not honestly support. The current draft chooses posture 1.
+does not honestly support. The current draft chooses posture 1.~~
+[retired 2026-07-10 by gqlc-11c: **posture 2 shipped**; §4.3 is the
+source of truth. The widened path forwards each mined parameter
+through `addParameterUse` with `PropertyUse{Ref{var, key}}` — the
+same shape the fast path produces — and §4.3's third bullet
+("Parameters under a rich value expression record
+`PropertyUse{Ref{var, key}}` — the SAME shape the fast path
+produces") documents the rationale. The posture-1 verdict recorded
+above contradicts §4.3 and the parser-green implementation; the
+enumeration of both postures is preserved as narrative history.]
 
 **The next-most fragile part is the `collectMergeAction`'s save/
 restore around `curPart.effects`.** The pattern is: snapshot the
