@@ -42,8 +42,10 @@ var (
 	// collisions (intra-YIELD name reuse and cross-scope shadowing of an
 	// imported name) — the operative semantic is "binding collision in scope,"
 	// not strictly node/edge/path (Q4 ruling, matching the Stage-9 unwind-vs-
-	// unwind precedent in build.go:114-121).
-	ErrVariableKindConflict = errors.New("variable used as both node and edge")
+	// unwind precedent in build.go:114-121). The message text mirrors that
+	// broader semantic; the sentinel identity (not the text) is the frozen
+	// contract.
+	ErrVariableKindConflict = errors.New("variable bound with conflicting kinds")
 
 	// ErrPatternInProjection rejects a pattern predicate at RETURN or WITH
 	// projection position — a bucket-1 parse-shape rule (ADR 0007 §I). Pattern
