@@ -41,17 +41,26 @@ R7 admits every query shape R6 admits, extended to:
 **Honest scope-vs-ADR delta**: the ADR 0009 R7 line names three axes —
 YIELD column typing, argument assignability (incl. NUMBER assignable-from),
 and unknown-procedure = generation-time error. R7 as this spec scopes it
-delivers **YIELD column typing** fully. **Argument assignability**
+delivers **YIELD column typing** fully. ~~**Argument assignability**
 (including NUMBER assignable-from INTEGER-or-FLOAT) has **no
 resolver-side application site** at R7 because the parser discards
-CALL-arg attribution on the wire (spec §7.2 and §7.3). **Unknown
-procedure** at generation time is delivered by the parser
-(`cypher.ErrUnknownProcedure`; `internal/query/cypher/call.go:41-44`); the
-resolver **does not re-check** — R7 documents this as a trust posture
-mirroring R6's Refs referential-integrity trust (spec §4.4). This is not
-a scope trim: it is a frozen-model deficiency in the same family as
-`gqlc-fvo` (cross-Part parameter Use attribution, unchanged from R5/R6).
-§7.1 records the deficiency with the exact widening required.
+CALL-arg attribution on the wire (spec §7.2 and §7.3).~~ [closed
+2026-07-07 by gqlc-0ig (PRs #122/#123/#124,
+`docs/specs/unfreeze-0ig-call-args.md`): the wire now carries per-
+position `CallBinding.Args()` records; the resolver's Phase A1
+CallBinding arm walks `Args()` against the matched
+`procsig.Registry.Lookup(procedure).Params[i].Token` and fails with
+`ErrCallArgAssignability` on mismatch under the ADR 0007 Stage-14
+lattice. §7.1.1 banner.] **Unknown procedure** at generation time is
+delivered by the parser (`cypher.ErrUnknownProcedure`;
+`internal/query/cypher/call.go:41-44`); the resolver **does not re-check**
+— R7 documents this as a trust posture mirroring R6's Refs referential-
+integrity trust (spec §4.4). ~~This is not a scope trim: it is a frozen-
+model deficiency in the same family as `gqlc-fvo` (cross-Part parameter
+Use attribution, unchanged from R5/R6). §7.1 records the deficiency with
+the exact widening required.~~ [closed 2026-07-07: the argument-
+assignability deficiency this paragraph declared is closed by gqlc-0ig;
+§7.1.1 carries the closure banner.]
 
 ~~The R4 Class A and Class B same-Part regime (b) nullability
 under-approximations (`gqlc-ay9`, `gqlc-5xg`),~~ [closed 2026-07-10:
@@ -1565,14 +1574,25 @@ NOT declared in `query.Query.Parameters` but appears in `argExprs`
 is a wire consistency violation that the parser would have caught
 (parser's declared vs used sweep). R7 does not defend against this.
 
-**The NUMBER assignable-from axis has NO R7 application site.**
+~~**The NUMBER assignable-from axis has NO R7 application site.**
 The team-lead ruling stands: because parser attribution is
 `ExprInProjection` (not `ExprInCallArg`), the resolver cannot tell
 that a Use came from a CALL argument. Even if the CALL param's
 declared token is NUMBER, the resolver has no way to link the Use
 back to the param position. The assignability check would need
 per-position CALL-arg attribution on the wire; the parser does not
-emit it. §7.1 records the widening required.
+emit it. §7.1 records the widening required.~~ [closed 2026-07-07
+by gqlc-0ig (PRs #122/#123/#124,
+`docs/specs/unfreeze-0ig-call-args.md`): per-position CALL-arg
+attribution now lands on the wire as `CallBinding.Args()`; the
+resolver's Phase A1 CallBinding arm walks `Args()` against
+`procsig.Registry.Lookup(procedure).Params[i].Token` and enforces
+the ADR 0007 Stage-14 assignability lattice (NUMBER accepts
+INTEGER-or-FLOAT; FLOAT accepts INTEGER; STRING / INTEGER strict;
+`TypeUnknown` / `TypeNull` wildcards), firing
+`ErrCallArgAssignability` on mismatch. The paragraph above is
+preserved as-of-R7-shipping for historical grounding; §7.1.1
+banner is authoritative.]
 
 ---
 
