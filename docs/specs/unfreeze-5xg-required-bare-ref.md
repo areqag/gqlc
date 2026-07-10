@@ -1407,6 +1407,7 @@ retired or stayed verbatim), located at branch base `d8d2818`:
 | File | Site | Current text (abridged) |
 |---|---|---|
 | `resolver-stage-r4.md:1191` | §7 table | "Nullability upgrades (regime (b), same-Part re-MATCH — Class B: missing-witness model gap) … §7.5.5 bead 2 (Axis 2 unfreeze)" |
+| `resolver-stage-r4.md:1273` | §7.4 wording-revision note | "same-Part regime (b) is retitled and gated on §7.5.5 bead 2" — stale gate reference post-5xg (bead is closed, not gated on) |
 | `resolver-stage-r4.md:1042-1044` | §6.3 fixture note | "Same-part reuse of `a` as a bare pattern doesn't help — that is Class B … the parser discards the second occurrence at `pattern.go:373-401`" |
 | `resolver-stage-r4.md:1239-1256` | §7.4 item 2 | "Same-Part regime (b) — a distinct frozen-model gap (missing witness, not missing grouping)" |
 | `resolver-stage-r4.md:1258-1267` | §7.4 conclusion | "cross-WITH regime (b), same-Part regime (b), and Class-A OPTIONAL-sibling under-demotion are three distinct problems …" |
@@ -1418,6 +1419,7 @@ retired or stayed verbatim), located at branch base `d8d2818`:
 | `resolver-stage-r4.md:1687-1695` | §9 close-out block | "bead 2 for Class B … Class B same-Part missing-witness gap → §7.5.5 bead 2 (Axis 2 unfreeze)" |
 | `resolver-stage-r5.md:37-46` | §1 banner | "same-Part regime (b) nullability under-approximation surviving from R4 (§7.5 Class B, gap tracked on gqlc-5xg) is unchanged at R5" |
 | `resolver-stage-r5.md:613` | §4.1.1 table | "Same-Part regime (b) nullability under-demote … gqlc-5xg (Class B, model unfreeze)" |
+| `resolver-stage-r5.md:617` | §4.1.1 R4 §7.4 explanation | "same-Part regime (b) and Class A both remain safe under-approximations gated on the two model-unfreeze beads" — factually wrong post-5xg (both closed) |
 | `resolver-stage-r5.md:1713-1721` | §4.6.1 | "Same-Part regime (b) still under-approximates at R5. R4 §7.5 Class B — same-Part bare-pattern re-MATCH of an OPTIONAL binding — is unchanged (the parser's merge rule …)" |
 | `resolver-stage-r5.md:2321` | §7 table | "Nullability upgrades (regime (b), same-Part re-MATCH — Class B: missing-witness model gap) … gqlc-5xg (model unfreeze)" |
 | `resolver-stage-r5.md:2401,2418,2501,2618,2705,2718` | close-out prose | "gqlc-ay9 and gqlc-5xg remain OPEN; R5 does not close them" and siblings |
@@ -1438,11 +1440,35 @@ readable, the ay9 §8.6 precedent). Every "same-Part regime (b)"
 mention gains a strikethrough with a closure annotation pointing to
 this spec, matching the ay9 close-out PR's format on Class A rows.
 
-Enumeration is exhaustive: `grep -n "gqlc-5xg\|Class B\|same-Part
-regime (b)\|Same-Part regime (b)" docs/specs/resolver-stage-r[4-7].md`
-should print no matches outside strikethrough-annotated regions
-after the docs-errata PR merges. §11 pins this as a definition-of-
-done fence.
+**Rows kept verbatim (definitional; grep-matches but not stale
+post-5xg).** These four lines match the DoD grep pattern but
+describe historically-true class definitions and inter-cycle
+independence claims that remain accurate after 5xg closes. They
+receive no strikethrough:
+
+| File | Site | Why kept verbatim |
+|---|---|---|
+| `resolver-stage-r4.md:561` | §7.5 walk-order preamble | Class B name-and-definition ("missing witness") — historically-true class label, definitional |
+| `resolver-stage-r4.md:1341` | §7.5.3 two-classes intro | "Class A is the OPTIONAL-clause-sibling gap; Class B is the same-Part second-reference gap" — definitional class taxonomy, permanent |
+| `resolver-stage-r4.md:1440` | §7.5.4 Axis 1 non-closure | "does **not** close item 2, because Class B's problem is a missing witness, not a missing group" — historically-true statement about the ay9 axis's scope, remains accurate post-5xg |
+| `resolver-stage-r5.md:1439` | §4.5.3.3 hk0 residual note | "Independent of gqlc-ay9 / gqlc-5xg" — passing scope reference in an unrelated (hk0/Shape B) residual, historically-true independence claim |
+
+Enumeration is exhaustive across both tables. The definition-of-
+done grep in §11 must whitelist the four definitional lines above:
+
+```sh
+grep -nE "gqlc-5xg|Class B|same-Part regime \(b\)|Same-Part regime \(b\)" \
+  docs/specs/resolver-stage-r[4-7].md \
+  | grep -v \
+    -e "resolver-stage-r4.md:561:" \
+    -e "resolver-stage-r4.md:1341:" \
+    -e "resolver-stage-r4.md:1440:" \
+    -e "resolver-stage-r5.md:1439:"
+# MUST print no matches outside strikethrough-annotated regions
+# after the docs-errata PR merges.
+```
+
+§11 pins this as a definition-of-done fence.
 
 ---
 
@@ -1583,7 +1609,23 @@ The spec PR is done when:
 
 The unfreeze PR (Cycle 2) then implements §4-§7 verbatim; the
 resolver-widening PR (Cycle 3) implements §8; the docs-errata PR
-(Cycle 4) lands §8.6's successor prose.
+(Cycle 4) lands §8.6's successor prose. Docs-errata DoD fence
+(§8.6):
+
+```sh
+grep -nE "gqlc-5xg|Class B|same-Part regime \(b\)|Same-Part regime \(b\)" \
+  docs/specs/resolver-stage-r[4-7].md \
+  | grep -v \
+    -e "resolver-stage-r4.md:561:" \
+    -e "resolver-stage-r4.md:1341:" \
+    -e "resolver-stage-r4.md:1440:" \
+    -e "resolver-stage-r5.md:1439:"
+# MUST print no matches outside strikethrough-annotated regions after
+# the docs-errata PR merges. The four whitelist lines are §8.6's
+# definitional-verbatim exceptions (Class B name-and-definition,
+# two-classes intro, Axis-1-non-closure statement, hk0/Shape B
+# independence claim).
+```
 
 With this cycle's four PRs merged, the model-unfreeze campaign
 (hk0 / fvo / 0ig / ay9 / 5xg) has discharged every planned bead. The
