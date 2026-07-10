@@ -26,6 +26,10 @@
       {
         "hooks": [
           {
+            "command": "if command -v bd >/dev/null && command -v gh >/dev/null; then GITHUB_TOKEN=$(gh auth token 2>/dev/null) bd github sync --pull-only --prefer-github 2>&1 | tail -1; fi",
+            "type": "command"
+          },
+          {
             "command": "bd prime",
             "type": "command"
           }

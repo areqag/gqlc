@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Post-merge hook: pull GH issue state into bd so bd reflects human-side
+# actions taken in the GH UI (closes, comments, new issues).
+# Activated by: git config core.hooksPath .githooks
+# (run `just init` after cloning)
+# --prefer-github: GH is the source of truth when statuses diverge.
+# Silent, non-blocking — never fail the underlying `git pull`.
+
+if command -v bd >/dev/null 2>&1 && command -v gh >/dev/null 2>&1; then
+  if _token=$(gh auth token 2>/dev/null) && [ -n "$_token" ]; then
+    GITHUB_TOKEN="$_token" bd github sync --pull-only --prefer-github >/dev/null 2>&1 || true
+  fi
+fi
+exit 0

@@ -15,3 +15,12 @@ if just ensure-golangci >/dev/null 2>&1; then
 else
   echo "WARN: could not provision golangci-lint (offline?); skipping lint" >&2
 fi
+
+# GH↔bd sync: push locally-created beads to GH so agent-filed issues show up
+# in the human's GH view at the natural end-of-work push. Silent,
+# non-blocking — never fail the underlying `git push`.
+if command -v bd >/dev/null 2>&1 && command -v gh >/dev/null 2>&1; then
+  if _token=$(gh auth token 2>/dev/null) && [ -n "$_token" ]; then
+    GITHUB_TOKEN="$_token" bd github sync --push-only >/dev/null 2>&1 || true
+  fi
+fi
