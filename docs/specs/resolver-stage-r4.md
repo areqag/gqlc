@@ -1039,9 +1039,16 @@ spec cycle.
   a golden divergence on `p`, not as a silent identity.
 - `demote_from_anonymous_required_edge` — exercises §4.4.2's
   named-plus-anonymous walk: anonymous edges are witnesses too.
-  Same-part reuse of `a` as a bare pattern doesn't help — that is
+  ~~Same-part reuse of `a` as a bare pattern doesn't help — that is
   Class B (same-Part regime (b), §7.5.5 bead 2, §7.5.3 item 2), and
-  the parser discards the second occurrence at `pattern.go:373-401`.
+  the parser discards the second occurrence at `pattern.go:373-401`.~~
+  [closed 2026-07-10 by 5xg (PRs #132/#133/#134,
+  `docs/specs/unfreeze-5xg-required-bare-ref.md`): the parser's
+  bare-predicate now sets `ReferencedInRequiredBarePattern()==true`
+  on the OPTIONAL binding when a required same-Part MATCH re-
+  references it bare, and `demoteNullableInPlace` demotes on that
+  axis. Edge-side non-bare missing-witness residual filed as
+  gqlc-0kq.]
   The demotion here comes from the *anonymous* edge in the same
   required MATCH, whose existence *is* recorded in `part.Bindings`.
 - `optional_multi_type_union` — exercises §3.3's `Nullable` axis
@@ -1188,7 +1195,7 @@ sentinel-relationship revised:
 | `ExprUse` at `ExprInSetValue` / `ExprInDeleteTarget` | `ErrOutOfR0Scope` | R6 |
 | **Nullability upgrades (OPTIONAL MATCH regime (a), edge-endpoint witness)** | **~~ErrOutOfR0Scope → in-scope at R4~~** | **R4 (this stage)** |
 | **Nullability upgrades (regime (b), cross-WITH re-MATCH — multi-part admission)** | `ErrOutOfR0Scope` (via the multi-part admission gate; §7.4 item 1) | **R5** |
-| **Nullability upgrades (regime (b), same-Part re-MATCH — Class B: missing-witness model gap)** | silently under-demoted (safe under §4.2 lattice invariant); §7.4 item 2, §7.5.3 item 2 | **§7.5.5 bead 2** (Axis 2 unfreeze) |
+| **Nullability upgrades (regime (b), same-Part re-MATCH — Class B: missing-witness model gap)** | ~~silently under-demoted (safe under §4.2 lattice invariant); §7.4 item 2, §7.5.3 item 2~~ **closed** (5xg, 2026-07-10) | ~~**§7.5.5 bead 2** (Axis 2 unfreeze)~~ **closed** by 5xg unfreeze + widening (`docs/specs/unfreeze-5xg-required-bare-ref.md`); edge-side non-bare missing-witness residual filed as gqlc-0kq |
 | **OPTIONAL-clause-sibling demotion** (chain proves one sibling → all siblings demote — Class A: missing-group-membership model gap) | ~~silently under-demoted (safe under §4.2 lattice invariant); §7.5.3 items 1, 3~~ **closed** (ay9, 2026-07-10) | ~~**§7.5.5 bead 1** (Axis 1 unfreeze)~~ **closed** by ay9 unfreeze + widening (`docs/specs/unfreeze-ay9-optional-group.md`); residual cross-Part carry gap filed as gqlc-984 |
 | `Part.Distinct == true` / `Part.ReturnsAll == true` | `ErrOutOfR0Scope` | R5 |
 | WITH carry-forward; UNION | `ErrOutOfR0Scope` | R5 |
@@ -1236,16 +1243,23 @@ two distinct axes so each is defended honestly:
    directly visible to R5's per-Part walk. **No model change is
    required for the cross-WITH case** — it is purely an
    admission-gate scope question. R5 owns it.
-2. **Same-Part regime (b) — a distinct frozen-model gap (missing
-   witness, not missing grouping).**
+2. **Same-Part regime (b) — ~~a distinct frozen-model gap (missing
+   witness, not missing grouping)~~ closed by 5xg (2026-07-10, PRs
+   #132/#133/#134).**
    `OPTIONAL MATCH (a)-[:R]->(b) MATCH (b) RETURN b` (no WITH) is a
    single-Part query R4 does admit, but the Stage-0 merge rule
    (`internal/query/cypher/pattern.go:373-401`, `mergeBinding`)
-   collapses the two `MATCH (b)`s into one binding — and *discards*
+   ~~collapses the two `MATCH (b)`s into one binding — and *discards*
    the second occurrence entirely, keeping only first-introduction
    `Nullable`, endpoints, and hops. The second required MATCH is not
-   just ungrouped in the model; it is **absent** from the model. This
-   is a **distinct** frozen-model gap from the OPTIONAL-clause-
+   just ungrouped in the model; it is **absent** from the model.~~
+   collapses the two `MATCH (b)`s into one binding at the model
+   level; 5xg's pre-pass now visits the parse tree and sets
+   `ReferencedInRequiredBarePattern()==true` on the OPTIONAL binding
+   when a required same-Part MATCH re-references it bare, and
+   `demoteNullableInPlace` demotes on that axis. See
+   `docs/specs/unfreeze-5xg-required-bare-ref.md` §5-§7. This
+   ~~is a **distinct** frozen-model gap from the OPTIONAL-clause-
    sibling gap that under-demotes the canonical chain example (§7.5
    Class A): sibling demotion is missing *group membership* between
    bindings that are all present; same-Part regime (b) is missing
@@ -1253,9 +1267,12 @@ two distinct axes so each is defended honestly:
    gap — a different axis for each; adding one does not close the
    other (§7.5.4 Axis 1 vs Axis 2). R4 resolves neither under scope;
    the resolution paths are the two ADR 0008 additive-in-protocol
-   unfreeze beads surfaced in §7.5.5, not R5.
+   unfreeze beads surfaced in §7.5.5, not R5.~~ was the historical
+   frozen-model distinction; both ay9 (Class A) and 5xg (Class B)
+   have since landed as additive `Binding` axes. Edge-side non-bare
+   missing-witness residual filed as gqlc-0kq.
 
-Conclusion: cross-WITH regime (b), same-Part regime (b), and Class-A
+Conclusion: ~~cross-WITH regime (b), same-Part regime (b), and Class-A
 OPTIONAL-sibling under-demotion are **three distinct problems**
 with three distinct resolutions: cross-WITH is an admission-gate
 scope question that R5 owns and resolves without a model change;
@@ -1264,14 +1281,26 @@ Axis 1; same-Part regime (b) is a missing-witness model gap closed
 by §7.5.4 Axis 2. Flattening these into "R5's clause structure" or
 "the same clause-of-introduction gap" obscures that the two
 model-gap classes are not co-closable and need separate follow-up
-beads.
+beads.~~ [closed 2026-07-10: the three-way split held — cross-WITH
+regime (b) is R5's admission-gate widening (unchanged), Class A
+landed via the ay9 unfreeze (PRs #127/#128/#129,
+`docs/specs/unfreeze-ay9-optional-group.md`), and Class B / same-
+Part regime (b) landed via the 5xg unfreeze
+(`docs/specs/unfreeze-5xg-required-bare-ref.md`). Both model-gap
+classes are closed; the historical narrative is preserved above.]
 
-**Bead update (informational, not spec-authoritative).** gqlc-lqm's
+**Bead update (informational, not spec-authoritative).** ~~gqlc-lqm's
 description will be revised at the R4 code-cycle close-out to
 reflect the three-way split: regime (a) closes with R4; cross-WITH
 regime (b) closes with R5; Class A OPTIONAL-sibling demotion is
 retitled and gated on §7.5.5 bead 1; same-Part regime (b) is
-retitled and gated on §7.5.5 bead 2. This spec does not commit to
+retitled and gated on §7.5.5 bead 2.~~ [closed 2026-07-10: gqlc-lqm
+was retitled at the R4 code-cycle close-out to the three-way split.
+Class A landed via gqlc-ay9 (2026-07-10, PRs #127/#128/#129,
+`docs/specs/unfreeze-ay9-optional-group.md`); Class B / same-Part
+regime (b) landed via gqlc-5xg (2026-07-10, PRs #132/#133/#134,
+`docs/specs/unfreeze-5xg-required-bare-ref.md`); edge-side non-bare
+missing-witness residual filed as gqlc-0kq.] This spec does not commit to
 that revision — it lives in beads workflow.
 
 ### 7.5 Under-approximation vs the bead's canonical example, and the unfreeze option
@@ -1365,26 +1394,36 @@ bindings share a clause of introduction", chain-demoting one
 propagates to all three.
 
 **Class B — Same-Part second-reference gap (missing witness).**
-The model records only *first-introduction* facts about each
+~~The model records only *first-introduction* facts about each
 binding. When the same variable appears in a later clause of the
 same Part, the parser's `mergeBinding`
 (`internal/query/cypher/pattern.go:373-401`) *dedupes it into the
 existing binding and discards everything except label unioning* —
-the second reference is not recorded anywhere. This is a strictly
-different loss shape from Class A:
+the second reference is not recorded anywhere.~~ [closed 2026-07-10
+by 5xg (PRs #132/#133/#134,
+`docs/specs/unfreeze-5xg-required-bare-ref.md`): rather than change
+`mergeBinding`, 5xg adds a `ReferencedInRequiredBarePattern()` axis
+to `NodeBinding` / `EdgeBinding` set by a pre-pass over the parse
+tree; the model's first-introduction posture is preserved, and the
+axis captures the second-reference fact without a merge-rule
+change.] This is a strictly different loss shape from Class A:
 
 2. **Same-Part bare-pattern demotion** —
    `OPTIONAL MATCH (a)-[:R]->(b) MATCH (b) RETURN b` (no WITH).
    Ideal: `b` demotes (the required bare `MATCH (b)` filters
-   NULL-`b` rows; row-drop). R4-as-scoped: `b` stays
-   `Nullable = true`. One binding under-demoted. The demotion
+   NULL-`b` rows; row-drop). ~~R4-as-scoped: `b` stays
+   `Nullable = true`. One binding under-demoted.~~ [closed 2026-07-10
+   by 5xg: `b` now demotes on the widened
+   `ReferencedInRequiredBarePattern()` axis via
+   `demoteNullableInPlace` (`docs/specs/unfreeze-5xg-required-
+   bare-ref.md` §7).] The demotion
    *witness* for `b` is the second, required, bare `MATCH (b)` —
    and the parser has already collapsed that occurrence into the
    OPTIONAL-introduced binding by the time the resolver sees the
    model. This is what the bead calls "regime (b), bare-pattern
    demotion".
 
-Class B is **not** closable by `OptionalGroup` alone: adding
+~~Class B is **not** closable by `OptionalGroup` alone: adding
 group-membership does not resurrect a dropped clause reference.
 Item 2 needs a *second, distinct* model change — either "preserve
 all clause references per binding, not just first-introduction" or
@@ -1394,7 +1433,14 @@ non-anonymous bare pattern". Either shape widens the *content* of
 what the model records for a binding beyond `Nullable() + first
 labels + first endpoints + first hops`. Item 2's under-demotion is
 not resolved until this second axis lands, whether or not Class A's
-axis exists.
+axis exists.~~ [closed 2026-07-10 by 5xg: the second axis chosen
+was `ReferencedInRequiredBarePattern()` (not "preserve all
+clause references"), set by a parse-tree pre-pass rather than by
+`mergeBinding`; the merge rule stays frozen and the axis widens
+the model's first-introduction posture minimally. Class A landed
+independently via gqlc-ay9 (2026-07-10); the "whether or not
+Class A's axis exists" independence prediction held. Edge-side
+non-bare missing-witness residual filed as gqlc-0kq.]
 
 Neither class is resolved by R5 alone — see §7.4 item 2. What R5
 does close is a genuinely different case:
@@ -1441,7 +1487,7 @@ does **not** close item 2, because Class B's problem is a missing
 witness, not a missing group.
 
 **Axis 2 — same-Part second-reference preservation (closes Class B,
-item 2).** The `mergeBinding` function
+item 2).** ~~The `mergeBinding` function
 (`internal/query/cypher/pattern.go:373-401`) currently discards
 every subsequent occurrence of a variable within a Part, keeping
 only the first-introduction's `Nullable`, endpoints, and hops. Two
@@ -1467,7 +1513,16 @@ beyond first-introduction facts. This is a strictly different axis
 from Axis 1 — Axis 1 records how bindings *group* at introduction;
 Axis 2 records what happens to a binding *after* introduction. One
 does not subsume the other. A future spec cycle picks between shape
-(a) and (b) on cost grounds; the choice is not fixed here.
+(a) and (b) on cost grounds; the choice is not fixed here.~~
+[closed 2026-07-10 by 5xg (PRs #132/#133/#134,
+`docs/specs/unfreeze-5xg-required-bare-ref.md`): shape (b) was
+chosen (per-binding `ReferencedInRequiredBarePattern bool`), and
+the flag is set by a resolver-side pre-pass over the parse tree
+rather than by `mergeBinding` — the merge rule stays frozen. The
+"one does not subsume the other" prediction held: Axis 1 (ay9,
+Class A) and Axis 2 (5xg, Class B) landed as independent additive
+`Binding` axes on separate PRs. Edge-side non-bare missing-witness
+residual filed as gqlc-0kq.]
 
 **Both axes are separate PRs**, each its own bead, each gated on
 the owner's unfreeze decision. Neither lands on this R4 branch.
@@ -1486,34 +1541,48 @@ Rationale:
 
 - The lost capability is bounded and characterisable, and now
   split into two classes per §7.5.3: Class A (OPTIONAL-sibling
-  demotion, items 1 + 3) and Class B (same-Part bare-pattern
-  demotion, item 2). Both are safe under-approximations — the
+  demotion, items 1 + 3) and ~~Class B (same-Part bare-pattern
+  demotion, item 2)~~ **Class B closed 2026-07-10 by 5xg (PRs
+  #132/#133/#134, `docs/specs/unfreeze-5xg-required-bare-ref.md`)**.
+  Both are safe under-approximations — the
   lattice invariant (§4.2) holds; no binding is demoted incorrectly.
   Consumers that treat `Nullable = true` as "may or may not be
   present" remain correct.
 - Both classes are real, not marginal. Any query that starts with
   an OPTIONAL of arity ≥ 2 and chains through one of its members
   hits Class A; any query that OPTIONAL-introduces `b` and then
-  re-uses `b` in a required bare pattern in the same Part hits
-  Class B. The bead's own canonical example is Class A; the bead's
+  re-uses `b` in a required bare pattern in the same Part ~~hits
+  Class B~~ **hit Class B pre-5xg; now demotes on the
+  `ReferencedInRequiredBarePattern()` axis**. The bead's own
+  canonical example is Class A; the bead's
   "regime (b), bare-pattern" example is Class B.
-- Both unfreezes are in-protocol under ADR 0008 §Post-freeze
+- ~~Both unfreezes are in-protocol under ADR 0008 §Post-freeze
   revision protocol (additive axis, zero-value-safe wire default),
-  so each is a normal follow-up, not an ADR supersedure. Neither
+  so each is a normal follow-up, not an ADR supersedure.~~ [closed
+  2026-07-10: both unfreezes landed as additive axes under ADR 0008
+  — ay9's `OptionalGroup` (PR #128) and 5xg's
+  `ReferencedInRequiredBarePattern` (PR #133); both remained
+  in-protocol; neither required an ADR supersedure.] Neither
   gates R4's merit as a stage: R4 delivers regime (a)'s
   edge-endpoint witness, the projection/parameter walk that reads
   the demotion table, the wire widening on the three whole-entity
   resolved types, and the golden rebaseline. All of that stands
   whether either unfreeze happens before R5, between R5 and R6, or
   never.
-- Pausing R4 to do the unfreezes first would couple three decisions
+- ~~Pausing R4 to do the unfreezes first would couple three decisions
   the owner should make separately: (i) the R4 shape as it stands,
   (ii) whether to spend a model-widening PR now on Class A, and
   (iii) whether to spend a second model-widening PR on Class B.
   Filing both unfreeze beads lets the owner decide (ii) and (iii)
   with the R4 code cycle's actual usage evidence in hand — and lets
   the two decisions be made independently (Class A may be worth
-  landing while Class B is not, or vice versa).
+  landing while Class B is not, or vice versa).~~ [closed 2026-07-10:
+  the three decisions were made separately as this recommendation
+  predicted — R4 shipped as scoped (Cycle 2, PR #83), Class A landed
+  independently (ay9, Cycle 4, PRs #127/#128/#129), Class B landed
+  independently (5xg, Cycle 5, PRs #132/#133/#134). The
+  "independently landable" prediction held. Edge-side non-bare
+  missing-witness residual filed as gqlc-0kq.]
 
 If the owner reverses this recommendation and elects to unfreeze
 either or both axes before R4 code-cycle merge, the R4 spec is
@@ -1528,11 +1597,17 @@ axis's unfreeze PR.
    closing §7.5.3 Class A items 1 + 3". Dependencies: gqlc-0mx.6
    (R4 code cycle) at close; blocks the corresponding R4-Class-A-
    refinement bead.
-2. "Model: preserve same-Part second-reference facts on `Binding`
+2. ~~"Model: preserve same-Part second-reference facts on `Binding`
    (either shape (a) or shape (b) per §7.5.4 Axis 2; additive under
    ADR 0008); revise resolver R4 flow-typing to consume it, closing
    §7.5.3 Class B item 2". Dependencies: gqlc-0mx.6 (R4 code cycle)
-   at close; blocks the corresponding R4-Class-B-refinement bead.
+   at close; blocks the corresponding R4-Class-B-refinement bead.~~
+   [closed 2026-07-10: filed as gqlc-5xg, landed via PRs
+   #132/#133/#134 (`docs/specs/unfreeze-5xg-required-bare-ref.md`).
+   Shape (b) was chosen (`ReferencedInRequiredBarePattern bool`),
+   set by a resolver-side parse-tree pre-pass; the merge rule stays
+   frozen. Edge-side non-bare missing-witness residual filed as
+   gqlc-0kq.]
 
 The two beads are independent — the owner can accept one, both, or
 neither. Both are filed at the R4 close-out (Cycle 2 — see §9 item
@@ -1546,10 +1621,16 @@ updated on the widening PR — not on this branch~~ [closed 2026-07-10:
 bead 1 (`gqlc-ay9`) landed, spec + model + resolver merged via PRs
 #127/#128/#129; the fixture's golden was rebaselined on the ay9
 widening PR (`p` and `r1` `nullable: true → false`). See
-`docs/specs/unfreeze-ay9-optional-group.md` §8.3]. Class B has no
+`docs/specs/unfreeze-ay9-optional-group.md` §8.3]. ~~Class B has no
 dedicated fixture at R4 (there is no fixture in §6.3 that exercises
 same-Part bare-pattern re-MATCH of an OPTIONAL binding — such a
-fixture would be added on bead 2's widening PR).
+fixture would be added on bead 2's widening PR).~~ [closed 2026-07-10
+by 5xg: bead 2 (`gqlc-5xg`) landed as PR #134, adding four new
+dedicated Class B fixtures at R4
+(`demote_bare_reference_from_optional`,
+`demote_bare_reference_with_label`, `no_demote_optional_bare_reference`,
+`demote_bare_reference_composes_with_group`); see
+`docs/specs/unfreeze-5xg-required-bare-ref.md` §6.]
 
 ---
 
@@ -1684,12 +1765,19 @@ out of scope of this document. The spec is done when:
 6. §7 states the R4 capability scope in shape terms and lists its
    out-of-scope complement with the sentinel or under-demotion
    posture for each construct and the R-stage (or the specific
-   §7.5.5 follow-up bead — bead 1 for Class A, bead 2 for Class B)
+   §7.5.5 follow-up bead — ~~bead 1 for Class A, bead 2 for Class B~~
+   [closed 2026-07-10: both beads landed — gqlc-ay9 for Class A
+   (PRs #127/#128/#129) and gqlc-5xg for Class B (PRs
+   #132/#133/#134)])
    that owns the next widening. §7.4 splits regime (b)'s deferral
    three ways: cross-WITH → R5's admission gate (no model change);
    Class A OPTIONAL-sibling gap → §7.5.5 bead 1 (Axis 1 unfreeze);
-   Class B same-Part missing-witness gap → §7.5.5 bead 2 (Axis 2
-   unfreeze). §7.5 walks the honest state: openCypher semantics
+   ~~Class B same-Part missing-witness gap → §7.5.5 bead 2 (Axis 2
+   unfreeze)~~ Class B same-Part missing-witness gap → §7.5.5 bead 2
+   (Axis 2 unfreeze) — **closed 2026-07-10 by 5xg
+   (`docs/specs/unfreeze-5xg-required-bare-ref.md`); edge-side
+   non-bare missing-witness residual filed as gqlc-0kq**. §7.5
+   walks the honest state: openCypher semantics
    (§7.5.1), frozen-model gap (§7.5.2), quantified capability loss
    split into Class A and Class B (§7.5.3), the two distinct
    ADR-0008-in-protocol unfreeze axes (§7.5.4 Axis 1 + Axis 2),
