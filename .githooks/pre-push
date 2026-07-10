@@ -15,3 +15,6 @@ if just ensure-golangci >/dev/null 2>&1; then
 else
   echo "WARN: could not provision golangci-lint (offline?); skipping lint" >&2
 fi
+
+# GH↔bd sync: push locally-created beads to GH.
+"$(dirname "$0")/bd-gh-sync" push >/dev/null 2>&1 || true
