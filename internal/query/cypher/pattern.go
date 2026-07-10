@@ -224,7 +224,7 @@ func (l *listener) collectNode(n gen.IOC_NodePatternContext, group int, bare boo
 //   - TypeUnknown: the honest posture the Stage-6 typer records when
 //     the source expression's element type cannot be pinned (aggregate
 //     identity below the boundary, ADR 0005), and the resolver upgrades
-//     from the schema post-freeze.
+//     from the schema.
 //
 // Any other concrete elemType (int, string, bool, list<…>, temporal, …)
 // is definitely not a node or an edge, and the parser rejects at

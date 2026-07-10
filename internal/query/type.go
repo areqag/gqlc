@@ -7,7 +7,7 @@ import "encoding/json"
 // String, the single source, without repetition per variant.
 func marshalType(t Type) ([]byte, error) { return json.Marshal(t.String()) }
 
-// Type is the result type of a Projection: the freeze-locked type vocabulary
+// Type is the result type of a Projection: the type vocabulary
 // the resolver reads from a parsed query (Stage 6 spec §3). It is a sealed sum
 // via the private isType() marker — no foreign package can add a variant, so
 // switching on a Type is exhaustive across the parser+resolver boundary. Each
@@ -182,8 +182,8 @@ func (TypeUnknown) isType() {}
 // marshalType, and the private isType() marker so the sum stays sealed.
 // The zoned / non-zoned distinction (TypeTime vs. TypeLocalTime,
 // TypeDateTime vs. TypeLocalDateTime) is carried at the type level because
-// codegen post-freeze emits distinct method signatures for each — collapsing
-// them would reintroduce the lossy representation the freeze forbids.
+// codegen emits distinct method signatures for each — collapsing
+// them would reintroduce the lossy representation the model avoids.
 
 // TypeDate is the openCypher DATE: a calendar date with no time-of-day or
 // timezone. Reached from the date(...) constructor and from temporal
