@@ -26,6 +26,10 @@
       {
         "hooks": [
           {
+            "command": ".githooks/bd-gh-sync pull 2>&1 | tail -1",
+            "type": "command"
+          },
+          {
             "command": "bd prime",
             "type": "command"
           }

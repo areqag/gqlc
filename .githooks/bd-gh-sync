@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# GH↔bd sync helper. Single sync surface shared by:
+#   - .githooks/post-merge      (pull, on git pull/merge)
+#   - .githooks/pre-push        (push, on git push)
+#   - .claude/settings.json     (pull, on Claude Code session start)
+#
+# Args: pull | push
+# Silent to stdout/stderr — caller decides whether to redirect or tail.
+# Never fails: exits 0 on any error so the git/session operation continues.
+#
+# Design: human works through GitHub issues; agents work through bd.
+#   - pull:  mirror GH state (creates, closes, comments) into bd.
+#            --prefer-github breaks ties toward GH; GH is source of truth.
+#   - push:  mirror bd-created beads that have no GH mirror yet.
+#            Deliberately does NOT run `bd github sync --push-only` (which
+#            takes ~30s scanning every bead). Filters to beads with no
+#            `external_ref` and calls `bd github push <ids>` per-bead.
+#            Known gap: status/comment updates on already-mirrored beads
+#            do NOT propagate bd → GH here. Human closes those on GH.
+
+_action="${1:-}"
+case "$_action" in pull|push) ;; *)
+  echo "usage: $0 pull|push" >&2
+  exit 0
+esac
+
+command -v bd >/dev/null 2>&1 || exit 0
+command -v gh >/dev/null 2>&1 || exit 0
+_token=$(gh auth token 2>/dev/null) || exit 0
+[ -n "$_token" ] || exit 0
+
+if [ "$_action" = "pull" ]; then
+  GITHUB_TOKEN="$_token" bd github sync --pull-only --prefer-github || true
+  exit 0
+fi
+
+# push
+_new=$(bd list --status all --limit 0 --json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    for b in json.load(sys.stdin):
+        if not b.get("external_ref"):
+            print(b["id"])
+except Exception:
+    pass
+' 2>/dev/null)
+if [ -n "$_new" ]; then
+  GITHUB_TOKEN="$_token" bd github push $_new || true
+fi
+exit 0
