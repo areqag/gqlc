@@ -225,7 +225,7 @@ func findResultByName(results []procsig.Result, name string) (procsig.Result, bo
 // typeForToken bridges a procsig.TypeToken to the corresponding
 // query.Type. NUMBER maps to TypeUnknown — the wire-honest translation
 // (Q3 ruling): NUMBER is a signature-time marker with no honest
-// result-column identity; post-freeze codegen consults the registry
+// result-column identity; codegen consults the registry
 // directly, so no information is lost. The default arm is a
 // belt-and-braces guard against a future TypeToken widening reaching
 // this bridge without a token addition here.
