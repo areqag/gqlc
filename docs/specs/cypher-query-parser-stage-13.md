@@ -898,13 +898,26 @@ Notes on the widening:
   have (a SET value with a `$param` on the RHS has NO enclosing
   property key — the ExprUse posture is honest there because the
   parser cannot pin one).
-- `requireAllParametersApproved` still fires at the end: a parameter
-  nested in a list inside a rich value expression (e.g.,
-  `{tags: [$t, $u]}`) is NOT approved by the loop (it does not
-  appear as a `parameterFromExpr` match on the top-level expression
-  and typeExpressionMining does not approve it), so
-  `requireAllParametersApproved` catches it with
-  `ErrUnsupportedParameter` — matching the Stage 12 discipline.
+- `requireAllParametersApproved` still fires at the end but does NOT
+  catch a parameter nested in a list inside a rich value expression
+  (e.g., `{tags: [$t, $u]}`): `typeAtom` approves every parameter
+  atom it visits (`l.approved[p] = true` at
+  `internal/query/cypher/typing.go:335-338`), and
+  `typeExpressionMining` collects those atoms via `exprParams`
+  (typing.go:41-52), so the widening loop reaches the list-nested
+  `$t` and `$u` and records
+  `PropertyUse{Ref{a, tags}}` on both via `addParameterUse`
+  (`internal/query/cypher/expr.go:597-608`). Wire behavior is
+  defensible — the Use points at the correct property slot (the
+  `tags` key), just at the wrong nesting level (the parameter fills
+  a list element, not the property itself); the resolver reconciles
+  the property's expected list-of-scalar shape post-freeze. After
+  the widening, `requireAllParametersApproved` acts as a
+  belt-and-braces sweep against parameter atoms the walk somehow
+  did not reach; the whole-map shape (`MERGE (a $params)`) is
+  rejected earlier by `mineInlineMap` with `ErrUnsupportedParameter`
+  (`internal/query/cypher/expr.go:574-577`), not by this final
+  sweep.
 
 ### 4.4 Grammar-reject pin (`MERGE (a), (b)`)
 
