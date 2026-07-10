@@ -16,26 +16,5 @@ else
   echo "WARN: could not provision golangci-lint (offline?); skipping lint" >&2
 fi
 
-# GH↔bd sync: push locally-created beads (those without a GH mirror yet) so
-# agent-filed issues appear in the human's GH view. Silent, non-blocking.
-#
-# Uses `bd github push <ids>` (per-issue, ~2s each) filtered to beads with no
-# `external_ref`, not `bd github sync --push-only` (which scans every bead
-# against GH and takes ~30s regardless of drift). Status changes on existing
-# beads are handled the other direction — the pull hook is the primary path.
-if command -v bd >/dev/null 2>&1 && command -v gh >/dev/null 2>&1; then
-  if _token=$(gh auth token 2>/dev/null) && [ -n "$_token" ]; then
-    _new=$(bd list --status all --limit 200 --json 2>/dev/null | python3 -c '
-import json, sys
-try:
-    for b in json.load(sys.stdin):
-        if not b.get("external_ref"):
-            print(b["id"])
-except Exception:
-    pass
-' 2>/dev/null)
-    if [ -n "$_new" ]; then
-      GITHUB_TOKEN="$_token" bd github push $_new >/dev/null 2>&1 || true
-    fi
-  fi
-fi
+# GH↔bd sync: push locally-created beads to GH.
+"$(dirname "$0")/bd-gh-sync" push >/dev/null 2>&1 || true
