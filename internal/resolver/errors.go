@@ -25,7 +25,7 @@ var (
 	// current capability scope does not support (multi-part, multi-branch,
 	// AggregateProjection, WITH, UNION, writes, CALL, RETURN DISTINCT,
 	// RETURN *, undirected / var-length / multi-type / untyped edges, path /
-	// unwind / call bindings, write-side ExprUses (SET / DELETE),
+	// unwind bindings, write-side ExprUses (SET / DELETE),
 	// ExprProjection typed as list-of-entities). Its fail-sites retire
 	// stage by stage as R2..R7 introduce the constructs.
 	ErrOutOfR0Scope = errors.New("query construct not supported at resolver stage R0")
