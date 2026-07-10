@@ -359,7 +359,7 @@ func exportedTypes(closed *rawPart) map[string]query.Type {
 // via the same collectPattern path MATCH uses (Stage 12 spec §4.1). Every
 // binding the pattern introduces enters curPart.bindings verbatim; the delta
 // [before..len(bindings)] captures which bindings this specific clause
-// introduced, so the CreateEffect can record them for post-freeze codegen
+// introduced, so the CreateEffect can record them for codegen
 // (which needs the create/match distinction per clause, not per binding).
 // A named binding contributes its variable; an anonymous edge contributes an
 // empty string. An anonymous node is not a binding (C3) and thus does not

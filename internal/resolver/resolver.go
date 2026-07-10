@@ -1,5 +1,5 @@
 // Package resolver lowers a parsed query.Query into a schema-checked, fully
-// typed ValidatedQuery — the first consumer of the frozen query.Query (ADR
+// typed ValidatedQuery — the first consumer of the query.Query model (ADR
 // 0008), staged R0..R7 per ADR 0009. R0 handles labelled single-node
 // MATCH/RETURN — whole-entity and property refs.
 package resolver
