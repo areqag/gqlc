@@ -6,8 +6,8 @@ local fact** about where the binding was introduced; the parser never demotes
 it based on downstream clauses, even when downstream clauses prove the binding
 must exist (a required `MATCH` referencing it, a required edge whose endpoints
 include it, etc.). Refining nullability across clause structure —
-**flow-typing** — is reserved for the **resolver** (ADR 0003): the post-freeze
-stage that takes `(query.Query, schema.Schema)` and produces a validated query.
+**flow-typing** — is reserved for the **resolver** (ADR 0003): the stage that
+takes `(query.Query, schema.Schema)` and produces a validated query.
 
 ## Context
 
@@ -59,7 +59,6 @@ refinement. Schema- and structure-aware reasoning is its purpose.
   covers — is left to the resolver's own work. The Stage 2 model commits
   only to *not destroying the information the resolver would need*.
 - **Resolver API shape is deferred.** The resolver does not exist as code
-  yet (ADR 0004's freeze gate). Its API will be specified in the freeze ADR
-  that revises ADR 0003 at parser feature-complete. ADR 0006 only names the
-  resolver as the home for flow-typing; it does not pin the resolver's
-  package path, constructor signature, or output type.
+  yet. Its API is pinned by ADR 0008 once the parser is feature-complete.
+  ADR 0006 only names the resolver as the home for flow-typing; it does not
+  pin the resolver's package path, constructor signature, or output type.

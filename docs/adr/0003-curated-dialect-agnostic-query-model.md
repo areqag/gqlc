@@ -1,10 +1,9 @@
 # A curated, dialect-agnostic query model, resolved separately from the schema
 
-> _Note (ADR 0008): `query.Query` is **frozen** as of 2026-07-03 — the parser
-> is feature-complete over the TCK corpus and the "stable contract" framing
-> below now holds. ADR 0008 records the frozen shape, pins the resolver API,
-> and defines the additive-only revision protocol. The stage notes throughout
-> this ADR are the build diary and remain as history._
+> _Note (ADR 0008): the parser is feature-complete over the TCK corpus as of
+> 2026-07-03; ADR 0008 records the `query.Query` surface at that point and pins
+> the resolver API. The stage notes throughout this ADR are the build diary and
+> remain as history._
 
 The query parser lowers one query into `query.Query` — a curated, gqlc-owned
 domain model (the entities a query binds, its parameters, its return items), not
@@ -80,8 +79,8 @@ and the full expression tree are deliberately outside the initial model.
 > re-executes the original text (ADR 0005). `TypeAny` is deliberately absent
 > — the parser's honest "I cannot tell" is `TypeUnknown`, and adding two
 > names for the same posture would confuse the boundary. The `Type` sum is
-> incremental: Stage 7 adds temporal types, Stage 8 adds `PATH`; the freeze
-> ADR locks the sum. `Use` gains an **`ExprUse`** variant so a `$param`
+> incremental: Stage 7 adds temporal types, Stage 8 adds `PATH`; ADR 0008
+> records the sum. `Use` gains an **`ExprUse`** variant so a `$param`
 > inside a rich expression is recorded (its type comes from the enclosing
 > expression, not from a binding). The no-expression-tree line holds._
 >
@@ -239,7 +238,7 @@ and the full expression tree are deliberately outside the initial model.
 > clause (a CallBinding does not flip StatementWrite). The `Type`
 > sum is **unchanged** (a signature-time NUMBER bridges to
 > `TypeUnknown` on the wire — the registry stays the source of
-> truth for NUMBER's assignable-from semantics post-freeze). The
+> truth for NUMBER's assignable-from semantics). The
 > `Effect` sum is **unchanged** (no `CallEffect` — CALL YIELD is
 > not a write). `ErrUnsupportedClause` retires entirely; the last
 > fail-site (CALL) is now covered by two new bucket-1 sentinels,

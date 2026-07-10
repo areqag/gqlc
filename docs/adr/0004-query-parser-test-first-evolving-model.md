@@ -1,13 +1,13 @@
-# Query parser is built test-first; the query model evolves until feature-complete, then locks
+# Query parser is built test-first; the query model evolves with the openCypher corpus
 
 The Cypher implementation of `query.Parser` is built test-first against a corpus
 of standard openCypher queries (the openCypher TCK), growing support one
 capability at a time. We start on the current `query.Query` model — which is
 complete for the read core and nothing more — and let the corpus drive what we
-add next. The model is **deliberately unlocked** for the whole of this build and
-will change shape repeatedly; it is frozen only once the parser is
-feature-complete, and **no consumer** (resolver, codegen, generated driver) is
-written until after that freeze.
+add next. The model changes shape as capabilities are added; **consumers**
+(resolver, codegen, generated driver) are built once the parser expresses the
+queries they target, so that model churn stays cheap while there is no
+downstream code yet.
 
 ## Context
 
@@ -26,18 +26,19 @@ endpoint is known (the full readable surface), so this is not speculative
 generality. Rejected: knowing the *requirement* is not knowing the
 *representation*. How `ReturnItem` should hold an aggregate, or how `Query`
 should hold UNION branches, is decided by the consumers (resolver, codegen) and
-by the real corpus — neither of which exists yet. An up-front lock is a lock on a
-guess; when the guess proves wrong it must be reopened *with the resolver already
-attached to it*, which is the exact downstream cascade the lock was meant to
-prevent. A large wrong model is also harder to change than a small concrete one.
+by the real corpus — neither of which exists yet. Committing to a shape up
+front commits to a guess; revising when the guess proves wrong is expensive
+*with the resolver already attached to it*, which is the downstream cascade
+we want to defer. A large wrong model is also harder to change than a small
+concrete one.
 
-**Evolve the model incrementally, test-first, and lock at feature-complete.**
-Chosen. While the parser is under construction the only consumer of `query.Query`
-is the parser itself and its golden files (regenerated mechanically), so model
-churn is cheap *now* and only becomes expensive once a resolver exists. Locking
-before consumers exist — not before the corpus is understood — is the
-anti-cascade guarantee, and it lets the corpus dictate the minimal honest shape
-of each addition (curation, per ADR 0003).
+**Evolve the model incrementally, test-first.** Chosen. While the parser is
+under construction the only consumer of `query.Query` is the parser itself
+and its golden files (regenerated mechanically), so model churn is cheap
+*now* and only becomes expensive once a resolver exists. Deferring consumer
+construction until the corpus is understood is the anti-cascade guarantee,
+and it lets the corpus dictate the minimal honest shape of each addition
+(curation, per ADR 0003).
 
 ## Decision
 
@@ -51,13 +52,15 @@ of each addition (curation, per ADR 0003).
 - **Incremental, corpus-driven.** Support grows one capability at a time; each
   capability is a TDD slice that may change the model. We do not pre-build the
   endpoint.
-- **Model unlocked until feature-complete.** The query model is explicitly
-  provisional. ADR 0003's "stable contract" applies *from the freeze onward*, not
-  during this build.
-- **Freeze, then consumers.** When the parser parses the targeted corpus, we
-  freeze the model, revise ADR 0003 and CONTEXT.md to the final shape, and only
-  then build the resolver, codegen, and generated driver code — each written once
-  against a stable model.
+- **Model provisional through the build.** The query model changes shape as
+  capabilities are added; ADR 0003's "stable contract" framing describes the
+  parser-to-resolver interface once the parser expresses the queries the
+  resolver targets, not the middle of this build.
+- **Consumers come when the parser is ready.** When the parser parses the
+  targeted corpus, we build the resolver, then codegen, then generated driver
+  code. Consumers are updated when the model changes — that's normal
+  coupling between coupled internal packages, and the churn is bounded by
+  keeping the parser the only consumer for as long as possible.
 
 ## Stages to feature-complete
 
@@ -93,17 +96,17 @@ parameter and edge-endpoint extraction need (ADR 0003).
 > stages 6–14 extend the model — expressions and result types, temporals, the
 > full pattern surface, remaining read clauses, aggregations, quantifier and
 > existential predicates, writes, `MERGE`, and `CALL` with a procedure
-> registry — and the freeze gate moves to the end of that list. The
-> "out of scope throughout" paragraph above no longer applies; every
-> construct it names is now in scope for the freeze. Build discipline
-> (test-first, one capability per slice, model unlocked until
-> feature-complete) is unchanged._
+> registry. The "out of scope throughout" paragraph above no longer applies;
+> every construct it names is now in scope. Build discipline (test-first,
+> one capability per slice, model provisional through the build) is
+> unchanged._
 
 ## Consequences
 
 The query model changes shape across several commits; reviewers and any early
-readers must treat it as provisional until the freeze ADR lands, and must not
-build against it before then. The golden suite absorbs most of the churn via
+readers must treat it as provisional through the parser build, and consumers
+open only when the parser expresses the queries they target. The golden
+suite absorbs most of the churn via
 `-update`. Because the corpus is Gherkin `.feature` files, an extraction step
 lifts the Cypher query strings (and their declared parameters and expected
 errors) into our fixture format.

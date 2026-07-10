@@ -161,10 +161,10 @@ Either bound may be absent (unbounded); a fixed hop count (`-[r*3]->`) sets
 `min = max`; a negative bound is unrepresentable (the constructor rejects
 it — the only invariant the type alone cannot express). Compose freely with
 the edge's direction axis and label set: a var-length undirected multi-type
-edge is one binding carrying all three facts. Post-freeze codegen reads
-`Hops()` to emit list-typed method results for var-length edges without
-adding a distinct binding variant — the cardinality axis mirrors the
-direction axis in that respect.
+edge is one binding carrying all three facts. Codegen reads `Hops()` to emit
+list-typed method results for var-length edges without adding a distinct
+binding variant — the cardinality axis mirrors the direction axis in that
+respect.
 _Avoid_: length (colloquial; reserve for "path length", a separate concept);
 range (ambiguous with SKIP/LIMIT paging).
 
@@ -174,8 +174,8 @@ source list (the `x` in `UNWIND [1, 2, 3] AS x`). Modelled as an **unwind
 binding** — kind `unwind` — carrying the AS variable and the source
 expression's **element type** (`TypeInt` for `[1, 2, 3]`, `TypeUnknown` for
 `range(1, 3)` or `null` or a `$param` — the parser records the honest
-"cannot tell" instead of guessing, and the resolver upgrades post-freeze).
-An UNWIND is a reading clause distinct from `MATCH`, so an unwind binding is
+"cannot tell" instead of guessing, and the resolver upgrades from the
+schema). An UNWIND is a reading clause distinct from `MATCH`, so an unwind binding is
 not a graph entity: it has no labels, no endpoints, no `EntityKind()` — and
 the resolver never forms a schema key from it. Never nullable at Stage 9:
 an empty or null source list yields zero rows at runtime, a row-cardinality
@@ -199,7 +199,7 @@ binding, and every return item that traces back to it, may be absent. Set on
 bindings first introduced inside an `OPTIONAL MATCH` clause; the surface
 keyword is `OPTIONAL`, the lowered attribute is **nullable**, mirroring the
 schema side's type-system posture. Codegen emits the corresponding result as
-a pointer or option type post-freeze.
+a pointer or option type.
 _Avoid_: optional (reserve for the Cypher keyword `OPTIONAL MATCH`).
 
 **Endpoint**:
@@ -242,9 +242,9 @@ SKIP or LIMIT clause whose type is fixed by the clause (an integer)
 rather than inferred from a binding; an expression use records that the
 parameter appears inside a rich scalar expression whose enclosing result
 **type** the model carries — the parameter's own type is inferred by the
-resolver from the expression it participates in, post-freeze. Every
-parameter carries a list of uses in first-appearance order, which the
-resolver unifies into a single type.
+resolver from the expression it participates in. Every parameter carries a
+list of uses in first-appearance order, which the resolver unifies into a
+single type.
 _Avoid_: site (overloaded with the spec's "fail-site"), occurrence.
 
 **Parameter**:
@@ -342,8 +342,8 @@ The result type of a **projection**: a closed sum of `bool`, `int`, `float`,
 `string`, `null`, `list<T>` (parameterised over an element type), `map`,
 `node`, `edge`, the six **temporal types** (`date`, `time`, `localtime`,
 `datetime`, `localdatetime`, `duration`), `path`, and a distinguished
-`unknown` for types the parser cannot compute schema-free. It is the
-freeze-locked type vocabulary the resolver reads from a parsed query: a
+`unknown` for types the parser cannot compute schema-free. It is the type
+vocabulary the resolver reads from a parsed query: a
 `RefProjection` on a whole entity types as `node` or `edge`; on a
 **named path** as `path`; on a variable-length edge (see **Hop range**)
 as `list<edge>`; a scalar literal types as its literal kind; a rich
@@ -352,8 +352,8 @@ scalar-expression grammar. `unknown` is the parser's honest posture on
 the type-interface boundary (ADR 0005) for property lookups, function
 calls, aggregates, and any expression touching a property or `null` —
 the resolver upgrades these from the schema. Incremental: Stage 7 added
-the six temporal types, Stage 8 added `path`; ADR 0008 locks the sum at
-seventeen.
+the six temporal types, Stage 8 added `path`; ADR 0008 records the sum
+at seventeen as of Stage 14 completion.
 _Avoid_: `any` (use `unknown` — the parser's "I cannot tell"); property
 type (reserve for the schema-side scalar type `PropertyType`).
 
@@ -362,7 +362,7 @@ One of the six openCypher temporal types the parser carries in the
 **type** sum: `date`, `time`, `localtime`, `datetime`, `localdatetime`,
 `duration`. The `time`/`localtime` and `datetime`/`localdatetime` pairs
 are the **zoned vs. non-zoned** distinction the type interface preserves
-so codegen post-freeze can emit distinct Go binding signatures. The
+so codegen can emit distinct Go binding signatures. The
 parser types a **temporal constructor** call (`date(...)`, `time(...)`,
 `duration.between(...)`, etc.) to its concrete temporal result type via
 a closed name-based lookup; it also types **temporal arithmetic** under
@@ -394,7 +394,7 @@ generally for a method's return, ambiguous with the whole result row).
 A projection over an aggregating function (`count`, `sum`, `collect`, `min`,
 `max`, `avg`, `stDev`/`stDevP`, `percentileCont`/`percentileDisc`). Distinguished
 from an ordinary function call because it collapses matched rows into groups,
-changing result cardinality — the one function distinction the frozen model
+changing result cardinality — the one function distinction the model
 carries. `count(*)` is the degenerate case: a count over rows that references
 no binding. Also carries a **DISTINCT axis** (`count(DISTINCT x)`,
 `collect(DISTINCT y)`, …) as a single-bit annotation: DISTINCT deduplicates
