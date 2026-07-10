@@ -127,9 +127,10 @@ func (l *listener) buildPart(rp *rawPart, imported map[string]bool) (query.Part,
 	// path / unwind / prior call / imported) — imported catches
 	// Call1[15]'s `WITH 'Hi' AS label CALL test.labels() YIELD label`
 	// pattern, where the CallBinding's variable collides with a name
-	// exported by the preceding WITH. Intra-YIELD collisions are
-	// caught in collectCall (spec §4.2 step 6); the sweeps here are
-	// the belt-and-braces symmetric backstop.
+	// exported by the preceding WITH. The `if callByVar[v]` arm is
+	// the sole authority for intra-YIELD name collision — the two
+	// `CALL YIELD intra rename collision` reject cases in
+	// parser_test.go discriminate it.
 	callByVar := make(map[string]bool, len(rp.callBindings))
 	for _, cb := range rp.callBindings {
 		v := cb.Variable()
