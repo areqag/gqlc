@@ -50,6 +50,14 @@ bd close <id>         # Complete work
 - If push fails, resolve and retry until it succeeds
 <!-- END BEADS INTEGRATION -->
 
+## PR & GitHub issue hygiene
+
+Beads IDs alone don't auto-close linked GitHub issues on merge — GitHub only recognises `Closes #N` (or `Fixes` / `Resolves`, case-insensitive) with the **GH issue number**.
+
+- **Direct 1:1 bd↔GH issue:** put `Closes #N` in the PR body. Find N via `bd show <id>` (External link).
+- **Umbrella / epic GH issues** (multi-stage tracking): child PRs must NOT `Close` them. Either the final PR of the epic writes `Closes #N`, or run `gh issue close N` manually when the beads mirror closes.
+
+See `bd memories pr-body-closes-gh-issue` for the full note and the incidents that motivated it.
 
 ## Build & Test
 
