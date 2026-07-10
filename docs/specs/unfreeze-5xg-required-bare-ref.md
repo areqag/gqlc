@@ -1449,9 +1449,9 @@ receive no strikethrough:
 | File | Site | Why kept verbatim |
 |---|---|---|
 | `resolver-stage-r4.md:561` | §7.5 walk-order preamble | Class B name-and-definition ("missing witness") — historically-true class label, definitional |
-| `resolver-stage-r4.md:1341` | §7.5.3 two-classes intro | "Class A is the OPTIONAL-clause-sibling gap; Class B is the same-Part second-reference gap" — definitional class taxonomy, permanent |
-| `resolver-stage-r4.md:1440` | §7.5.4 Axis 1 non-closure | "does **not** close item 2, because Class B's problem is a missing witness, not a missing group" — historically-true statement about the ay9 axis's scope, remains accurate post-5xg |
-| `resolver-stage-r5.md:1439` | §4.5.3.3 hk0 residual note | "Independent of gqlc-ay9 / gqlc-5xg" — passing scope reference in an unrelated (hk0/Shape B) residual, historically-true independence claim |
+| `resolver-stage-r4.md:1370` | §7.5.3 two-classes intro | "Class A is the OPTIONAL-clause-sibling gap; Class B is the same-Part second-reference gap" — definitional class taxonomy, permanent (line shifted from :1341 by errata insertions) |
+| `resolver-stage-r4.md:1486` | §7.5.4 Axis 1 non-closure | "does **not** close item 2, because Class B's problem is a missing witness, not a missing group" — historically-true statement about the ay9 axis's scope, remains accurate post-5xg (line shifted from :1440 by errata insertions) |
+| `resolver-stage-r5.md:1450` | §4.5.3.3 hk0 residual note | "Independent of gqlc-ay9 / gqlc-5xg" — passing scope reference in an unrelated (hk0/Shape B) residual, historically-true independence claim (line shifted from :1439 by errata insertions) |
 
 Enumeration is exhaustive across both tables. The definition-of-
 done grep in §11 must whitelist the four definitional lines above:
@@ -1461,9 +1461,9 @@ grep -nE "gqlc-5xg|Class B|same-Part regime \(b\)|Same-Part regime \(b\)" \
   docs/specs/resolver-stage-r[4-7].md \
   | grep -v \
     -e "resolver-stage-r4.md:561:" \
-    -e "resolver-stage-r4.md:1341:" \
-    -e "resolver-stage-r4.md:1440:" \
-    -e "resolver-stage-r5.md:1439:"
+    -e "resolver-stage-r4.md:1370:" \
+    -e "resolver-stage-r4.md:1486:" \
+    -e "resolver-stage-r5.md:1450:"
 # MUST print no matches outside strikethrough-annotated regions
 # after the docs-errata PR merges.
 ```
@@ -1617,9 +1617,9 @@ grep -nE "gqlc-5xg|Class B|same-Part regime \(b\)|Same-Part regime \(b\)" \
   docs/specs/resolver-stage-r[4-7].md \
   | grep -v \
     -e "resolver-stage-r4.md:561:" \
-    -e "resolver-stage-r4.md:1341:" \
-    -e "resolver-stage-r4.md:1440:" \
-    -e "resolver-stage-r5.md:1439:"
+    -e "resolver-stage-r4.md:1370:" \
+    -e "resolver-stage-r4.md:1486:" \
+    -e "resolver-stage-r5.md:1450:"
 # MUST print no matches outside strikethrough-annotated regions after
 # the docs-errata PR merges. The four whitelist lines are §8.6's
 # definitional-verbatim exceptions (Class B name-and-definition,
