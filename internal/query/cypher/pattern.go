@@ -148,13 +148,20 @@ func (l *listener) collectPatternElement(e gen.IOC_PatternElementContext, group 
 		return
 	}
 
+	// 5xg: the head node is "bare" iff no chain link follows it. A node
+	// with an adjacent edge chain link on either side is never bare (§2.3);
+	// non-head nodes in the loop below always have the immediately-preceding
+	// chain link on their left, so they pass bare=false unconditionally.
+	chain := e.AllOC_PatternElementChain()
+	headBare := len(chain) == 0
+
 	prev := e.OC_NodePattern()
-	l.collectNode(prev, group)
+	l.collectNode(prev, group, headBare)
 	if l.err != nil {
 		return
 	}
 
-	for _, link := range e.AllOC_PatternElementChain() {
+	for _, link := range chain {
 		next := link.OC_NodePattern()
 		// Record in textual first-appearance order: the relationship variable is
 		// written before the node that follows it. collectEdge reads next only to
@@ -163,7 +170,7 @@ func (l *listener) collectPatternElement(e gen.IOC_PatternElementContext, group 
 		if l.err != nil {
 			return
 		}
-		l.collectNode(next, group)
+		l.collectNode(next, group, false)
 		if l.err != nil {
 			return
 		}
@@ -185,7 +192,7 @@ func (l *listener) collectPatternElement(e gen.IOC_PatternElementContext, group 
 // path reused as a node/edge pattern is a compile-time kind conflict per
 // openCypher (a path is never a node/edge), so the existing buildPart
 // pathBindings-vs-byVar collision check must fire.
-func (l *listener) collectNode(n gen.IOC_NodePatternContext, group int) {
+func (l *listener) collectNode(n gen.IOC_NodePatternContext, group int, bare bool) {
 	if n == nil {
 		return
 	}
@@ -195,7 +202,7 @@ func (l *listener) collectNode(n gen.IOC_NodePatternContext, group int) {
 	}
 	l.mineInlineMap(variable, n.OC_Properties())
 	if variable != "" && !l.nameBoundAsUnwind(variable) {
-		l.mergeBinding(variable, graph.Node, nodeLabels(n.OC_NodeLabels()), nil, nil, group, false, nil)
+		l.mergeBinding(variable, graph.Node, nodeLabels(n.OC_NodeLabels()), nil, nil, group, false, nil, bare)
 	}
 	l.recordPathNode(variable)
 }
@@ -304,7 +311,10 @@ func (l *listener) collectEdge(r gen.IOC_RelationshipPatternContext, prev, next 
 		return
 	}
 	if !l.nameBoundAsUnwind(variable) {
-		l.mergeBinding(variable, graph.Edge, labels, source, target, group, !directed, hops)
+		// 5xg: an edge is grammatically never bare — it always sits inside
+		// -[...]- between two node positions — so the parameter is a
+		// compile-time constant false at this site.
+		l.mergeBinding(variable, graph.Edge, labels, source, target, group, !directed, hops, false)
 	}
 	l.recordPathEdge(variable)
 }
@@ -385,7 +395,7 @@ func (l *listener) recordEndpointRefs(eps ...query.Endpoint) {
 // clears them — that demotion is the resolver's job (gqlc-lqm). Stage 8: hops
 // carries the var-length hop range (nil for single-hop); it is honoured only
 // on first introduction, matching the group/directed discipline.
-func (l *listener) mergeBinding(variable string, kind graph.EntityKind, labels graph.LabelSet, source, target query.Endpoint, group int, undirected bool, hops *query.EdgeHops) {
+func (l *listener) mergeBinding(variable string, kind graph.EntityKind, labels graph.LabelSet, source, target query.Endpoint, group int, undirected bool, hops *query.EdgeHops, bare bool) {
 	part := l.curPart
 	idx, ok := part.byVar[variable]
 	if !ok {
@@ -401,6 +411,14 @@ func (l *listener) mergeBinding(variable string, kind graph.EntityKind, labels g
 		return
 	}
 	rb.mergeLabels(labels)
+	if group == 0 && bare {
+		// 5xg: the current occurrence is a required (non-OPTIONAL) bare
+		// pattern re-reference of a binding that was previously introduced.
+		// The flag is monotone (once set, stays true), so repeated bare
+		// re-references are idempotent. The first-introduction arm above
+		// never sets it — by definition, no re-reference has occurred yet.
+		rb.referencedInRequiredBarePattern = true
+	}
 }
 
 // mergeLabels adds labels not already present, preserving first-appearance order
