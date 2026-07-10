@@ -1439,15 +1439,40 @@ func seedLocalNullability(bindings []query.Binding, table map[string]bool) {
 	}
 }
 
-// demoteNullableInPlace runs the ay9-widened regime-(a) demotion on
-// part.Bindings against a pre-seeded table: per-edge endpoint
-// witnessing (R4 §4.4) plus OPTIONAL-group closure (ay9 — a proven
-// member demotes its whole introducing clause). The loop is a genuine
-// fixed point: a group-demoted OPTIONAL edge becomes an effective
-// witness for its own endpoints, which may prove an earlier group.
-// Monotone (table entries flip true→false, demotedGroups false→true),
-// so it terminates.
+// demoteNullableInPlace runs the ay9+5xg-widened regime-(a) demotion
+// on part.Bindings against a pre-seeded table: bare-ref demotion
+// (5xg — a required bare re-reference is a witness, flipping the
+// re-referenced binding's table entry directly), plus per-edge
+// endpoint witnessing (R4 §4.4), plus OPTIONAL-group closure (ay9).
+// The 5xg pre-pass runs before the group-closure fixed point and
+// does not touch demotedGroups; the two demotion channels are
+// orthogonal (both write false to the same table, both are monotone,
+// composition is order-independent). The subsequent fixed-point loop
+// may observe 5xg's flipped entries and demote co-introduced siblings
+// via (iv), producing the compose-with-group cascade §8.4 fixture 4
+// witnesses.
 func demoteNullableInPlace(bindings []query.Binding, table map[string]bool) {
+	// 5xg pre-pass: bare-ref demotion. A binding whose parser-time
+	// flag is true was re-referenced in a required bare pattern; the
+	// row-drop witness demotes it. Anonymous bindings (v == "") skip
+	// — they carry no table entry.
+	for _, b := range bindings {
+		switch bb := b.(type) {
+		case query.NodeBinding:
+			if bb.ReferencedInRequiredBarePattern() && bb.Variable() != "" {
+				if _, present := table[bb.Variable()]; present {
+					table[bb.Variable()] = false
+				}
+			}
+		case query.EdgeBinding:
+			if bb.ReferencedInRequiredBarePattern() && bb.Variable() != "" {
+				if _, present := table[bb.Variable()]; present {
+					table[bb.Variable()] = false
+				}
+			}
+		}
+	}
+	// ay9 pre-pass: OPTIONAL-group membership scan.
 	members := map[int][]string{} // group id → named members
 	groupOf := map[string]int{}   // named member → group id
 	for _, b := range bindings {
