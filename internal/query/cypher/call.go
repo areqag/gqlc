@@ -20,12 +20,12 @@ import (
 // a would-be result column fails via ErrUnboundVariable at buildPart.
 //
 // Fail-sites (in order): unknown procedure (ErrUnknownProcedure),
-// arity mismatch on explicit invocation (ErrProcedureArity), intra-
-// YIELD collision (ErrVariableKindConflict), unknown YIELD result
-// field (ErrUnknownProcedure — one sentinel covers both name and field
-// miss per Q1 ruling). Every fail-site fires before any CallBinding
-// enters curPart.callBindings, so a failed lookup leaves the part
-// unchanged.
+// arity mismatch on explicit invocation (ErrProcedureArity), unknown
+// YIELD result field (ErrUnknownProcedure — one sentinel covers both
+// name and field miss per Q1 ruling). Intra-YIELD name collision is
+// caught at buildPart's five-way sweep (build.go: `if callByVar[v]`),
+// not here. Every fail-site fires before any CallBinding enters
+// curPart.callBindings, so a failed lookup leaves the part unchanged.
 func (l *listener) collectCall(
 	procName gen.IOC_ProcedureNameContext,
 	argExprs []gen.IOC_ExpressionContext,
@@ -54,11 +54,8 @@ func (l *listener) collectCall(
 		args = make([]query.CallArg, 0, len(argExprs))
 	}
 	for _, e := range argExprs {
-		t, refs, params := l.typeExpressionMining(e)
+		t, _, params := l.typeExpressionMining(e)
 		args = append(args, query.NewCallArg(t))
-		for _, ref := range refs {
-			l.curPart.refs = append(l.curPart.refs, varRef{name: ref.Variable})
-		}
 		for _, p := range params {
 			n := parameterName(p)
 			if n == "" {
@@ -79,7 +76,7 @@ func (l *listener) collectCall(
 
 	// YIELD expansion. Three shapes:
 	//   1. Explicit YIELD (items present): iterate items, resolve
-	//      each against sig.Results, check intra-YIELD collisions.
+	//      each against sig.Results.
 	//   2. YIELD * (standalone-only, grammar-enforced): iterate
 	//      sig.Results in declaration order.
 	//   3. No YIELD: standalone expands like YIELD *; in-query
@@ -118,17 +115,17 @@ func extractProcedureName(procName gen.IOC_ProcedureNameContext) string {
 }
 
 // collectYieldItems iterates the YIELD list, resolving each item
-// against the signature's Results, checking intra-YIELD name
-// collisions, and appending one CallBinding per item to
-// curPart.callBindings. A YIELD trailing WHERE (grammar-legal,
-// corpus-silent) is walked for parameter mining. Spec §4.2 step 6.
+// against the signature's Results and appending one CallBinding per
+// item to curPart.callBindings. Intra-YIELD name collisions are
+// caught downstream at buildPart's five-way sweep, not here. A YIELD
+// trailing WHERE (grammar-legal, corpus-silent) is walked for
+// parameter mining. Spec §4.2 step 6.
 func (l *listener) collectYieldItems(
 	procName string,
 	sig procsig.Signature,
 	items gen.IOC_YieldItemsContext,
 	args []query.CallArg,
 ) {
-	seen := make(map[string]bool, len(items.AllOC_YieldItem()))
 	for _, item := range items.AllOC_YieldItem() {
 		variable, sourceField := extractYieldItem(item)
 		if variable == "" || sourceField == "" {
@@ -140,11 +137,6 @@ func (l *listener) collectYieldItems(
 				ErrUnknownProcedure, sourceField, procName))
 			return
 		}
-		if seen[variable] {
-			l.fail(fmt.Errorf("%w: %q", ErrVariableKindConflict, variable))
-			return
-		}
-		seen[variable] = true
 		cb, err := query.NewCallBindingWithArgs(
 			variable, procName, sourceField,
 			typeForToken(result.Token), result.Nullable,
