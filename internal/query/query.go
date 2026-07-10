@@ -1941,7 +1941,7 @@ func (p AggregateProjection) MarshalJSON() ([]byte, error) {
 // is a closed sum of CreateEffect, DeleteEffect, SetPropertyEffect,
 // SetEntityEffect, SetLabelsEffect, RemovePropertyEffect, and
 // RemoveLabelsEffect — no other type can implement it — so an effect is
-// exactly one of the seven. Each variant holds its data in unexported fields;
+// exactly one of the eight. Each variant holds its data in unexported fields;
 // smart constructors are the only way to build a non-zero value, so the
 // invariants the types alone cannot express (non-empty target variables for
 // the SET / REMOVE variants that carry one) hold for every value that exists.
