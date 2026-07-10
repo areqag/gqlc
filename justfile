@@ -12,6 +12,21 @@ init:
     git config core.hooksPath .githooks
     @echo "git hooks activated (core.hooksPath = .githooks)"
 
+# warns (to stderr, non-fatal) when core.hooksPath drifts from .githooks — the
+# only way local pre-commit/pre-push gates can silently die (CI cannot see local
+# git config). Sub-ms; wired into `test` so developers hit it naturally.
+[private]
+check-hooks:
+    #!/usr/bin/env bash
+    got="$(git config --get core.hooksPath || true)"
+    if [ "$got" != ".githooks" ]; then
+        echo "warning: core.hooksPath is '${got:-<unset>}', expected '.githooks' — local hooks are inactive. Run 'just init' to fix." >&2
+    fi
+
+# health check for local dev environment; extend as new drift modes emerge
+doctor: check-hooks
+    @echo "ok"
+
 # provisions the pinned golangci-lint into the gitignored .bin/ when missing
 # or version-mismatched (~3s; official release binary — golangci-lint does not
 # support builds from source). The happy path is a ~30ms version check, cheap
@@ -49,7 +64,7 @@ fmt-check: ensure-golangci
 # of fetch-tck: the TCK is vendored, so there is no network at test time.
 # -shuffle catches inter-test coupling; go build link-checks package main,
 # which has no tests and is otherwise only compile-checked by lint.
-test:
+test: check-hooks
     go build ./...
     go test -shuffle=on ./...
 

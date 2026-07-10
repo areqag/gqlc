@@ -9,6 +9,10 @@ The same guard is wired into Claude Code as a `PreToolUse` hook so AI agents are
 blocked at the conversation level too. The recipe is idempotent — running it
 multiple times is safe.
 
+`just test` and `just doctor` warn on stderr (non-fatal) when `core.hooksPath`
+has drifted away from `.githooks` — the only failure mode by which local hooks
+silently die. CI cannot see local git config, so this is where drift surfaces.
+
 ## Development
 
 Everything runs through `just`, locally and in CI — same recipes, same pinned
