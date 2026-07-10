@@ -1,7 +1,7 @@
 {
   "columns": [
     {
-      "name": "p",
+      "name": "a",
       "type": {
         "kind": "node",
         "labels": "Person",
@@ -15,18 +15,18 @@
         "kind": "edge",
         "edgeKey": {
           "source": "Person",
-          "label": "AUTHORED",
-          "target": "Post"
+          "label": "KNOWS",
+          "target": "Person"
         },
         "nullable": false
       },
       "groupingKey": false
     },
     {
-      "name": "post",
+      "name": "b",
       "type": {
         "kind": "node",
-        "labels": "Post",
+        "labels": "Person",
         "nullable": false
       },
       "groupingKey": false
@@ -36,8 +36,8 @@
       "type": {
         "kind": "edge",
         "edgeKey": {
-          "source": "Post",
-          "label": "AUTHORED",
+          "source": "Person",
+          "label": "KNOWS",
           "target": "Person"
         },
         "nullable": false
@@ -45,7 +45,16 @@
       "groupingKey": false
     },
     {
-      "name": "author",
+      "name": "c",
+      "type": {
+        "kind": "node",
+        "labels": "Person",
+        "nullable": false
+      },
+      "groupingKey": false
+    },
+    {
+      "name": "d",
       "type": {
         "kind": "node",
         "labels": "Person",
