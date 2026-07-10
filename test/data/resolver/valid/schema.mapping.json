@@ -32,6 +32,7 @@
     "var_length_undirected_single_match.cypher": "social_r3.gql",
     "var_length_multi_type.cypher": "social_r3.gql",
     "self_loop_directed.cypher": "social_r3.gql",
+    "self_loop_same_binding.cypher": "social_r3.gql",
     "unlabelled_via_undirected.cypher": "social_r3.gql",
     "unlabelled_via_multi_type.cypher": "social_r3.gql",
     "edge_property_union_agree.cypher": "social_r3.gql",
