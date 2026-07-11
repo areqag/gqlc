@@ -358,8 +358,41 @@ func (l *listener) classifyFunction(fi gen.IOC_FunctionInvocationContext) (query
 	resultType := query.Type(query.TypeUnknown{})
 	if t, ok := temporalConstructorType(fullFunctionName(fi)); ok {
 		resultType = t
+	} else if name, ok := functionName(fi); ok {
+		// gqlc-v5t: builtin-widen after the temporal check; functionName
+		// returns ok=false for a namespaced call so a shadowing
+		// `foo.elementId` cannot match. Arg types come from the grammatical
+		// arg list, not the refs slice (which drops scalar-literal args) so
+		// a mismatched arity like `elementId('lit', n)` cannot promote.
+		if t, ok := builtinScalarFuncType(name, l.builtinArgTypes(fi)); ok {
+			resultType = t
+		}
 	}
 	return query.NewFuncProjection(refs, resultType), true
+}
+
+// builtinArgTypes returns the parser's per-part type for each grammatical
+// argument of a function invocation, preserving order. Only bare-variable
+// atoms contribute via l.refType; every other atom shape stays TypeUnknown
+// so builtinScalarFuncType's arg-kind guard cannot accept a mismatched
+// shape by accident.
+func (l *listener) builtinArgTypes(fi gen.IOC_FunctionInvocationContext) []query.Type {
+	args := fi.AllOC_Expression()
+	out := make([]query.Type, len(args))
+	for i, arg := range args {
+		nae := nonArithmeticAtom(arg)
+		if nae == nil {
+			out[i] = query.TypeUnknown{}
+			continue
+		}
+		ref, ok := refFromNonArithmetic(nae)
+		if !ok {
+			out[i] = query.TypeUnknown{}
+			continue
+		}
+		out[i] = l.refType(ref)
+	}
+	return out
 }
 
 // classifyAggregateCall lowers an aggregate function invocation, whether its

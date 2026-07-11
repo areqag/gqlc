@@ -363,6 +363,11 @@ func (l *listener) typeAtom(a gen.IOC_AtomContext, refs *[]query.Ref) query.Type
 				}
 				return aggregateResultType(fn, operand)
 			}
+			// gqlc-v5t: same table classifyFunction uses at RETURN/WITH
+			// position, so the two positions cannot disagree on one call.
+			if t, ok := builtinScalarFuncType(name, l.builtinArgTypes(fi)); ok {
+				return t
+			}
 		}
 		return query.TypeUnknown{}
 	case a.OC_ParenthesizedExpression() != nil:
