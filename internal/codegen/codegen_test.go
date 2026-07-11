@@ -78,6 +78,10 @@ func sentinelIdent(err error) string {
 		return "ErrFormatFailure"
 	case ErrOutOfC4Scope:
 		return "ErrOutOfC4Scope"
+	case ErrExecOnProjection:
+		return "ErrExecOnProjection"
+	case ErrCardinalityShapeMismatch:
+		return "ErrCardinalityShapeMismatch"
 	case ErrUnrepresentableWidth:
 		return "ErrUnrepresentableWidth"
 	case ErrParamNameCollision:

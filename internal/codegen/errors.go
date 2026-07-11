@@ -69,6 +69,27 @@ var (
 	// during list recursion for list leaves. Introduced at C3.
 	ErrUnrepresentableWidth = errors.New("unrepresentable property width")
 
+	// ErrExecOnProjection is returned when a query annotated :exec has at
+	// least one projected column (len(Validated.Columns) > 0). The caller
+	// either drops the :exec annotation (annotate :one or :many per the
+	// desired arity) or drops the RETURN clause (annotate :exec on the
+	// pure write). sqlc silently allows :exec on a SELECT, discarding
+	// rows; we refuse (ADR 0010 D1 Resolved: reject-don't-guess). The
+	// fail-message names the query, the cardinality (:exec), the projected
+	// column count, and the first column's name. Introduced at C4.
+	ErrExecOnProjection = errors.New("exec cardinality on projection query")
+
+	// ErrCardinalityShapeMismatch is returned when a query annotated :one
+	// or :many has zero projected columns (len(Validated.Columns) == 0).
+	// Zero-column reads and zero-column writes both flag: the caller
+	// either annotates :exec (if no rows are wanted) or adds a RETURN
+	// clause (if rows are wanted). The fail-message names the query, the
+	// cardinality (:one or :many), the statement kind (read or write),
+	// and the shape ("zero-column read" or "zero-column write"). Distinct
+	// from ErrExecOnProjection: the two sentinels address different query
+	// edits (annotation vs clause). Introduced at C4.
+	ErrCardinalityShapeMismatch = errors.New("cardinality-shape mismatch")
+
 	// ErrParamNameCollision is returned when two Parameters mangle to
 	// the same Params-struct field name (§4.2). The fail-message names
 	// both parameter positions. Introduced at C1.
@@ -146,4 +167,6 @@ var allSentinels = []error{
 	ErrUnnamedMultiLabelType,
 	ErrPropertyFieldCollision,
 	ErrUnrepresentableWidth,
+	ErrExecOnProjection,
+	ErrCardinalityShapeMismatch,
 }

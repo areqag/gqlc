@@ -161,6 +161,22 @@ type preparedEntityField struct {
 	Nullable bool
 }
 
+// cardinalityAnnotation renders a Cardinality as its ":one" / ":many" /
+// ":exec" annotation text — the caller-visible form Phase A's fail
+// messages use so the error line reads back the exact string the author
+// typed on the // name: line.
+func cardinalityAnnotation(c Cardinality) string {
+	switch c {
+	case CardinalityOne:
+		return ":one"
+	case CardinalityMany:
+		return ":many"
+	case CardinalityExec:
+		return ":exec"
+	}
+	return "<invalid>"
+}
+
 // generate is the pure emission kernel. Determinism per §2.3: input
 // slices are walked in their author-defined order; the output slice is
 // sorted by Path before return. First-error short-circuit: (nil, err)
@@ -513,27 +529,37 @@ func prepareEntityFields(entityName string, props map[string]schema.Property) ([
 
 // phaseAAdmit is spec §2.1's Phase A: gates every query on axes Phase B
 // depends on for name derivation. First offender in slice order wins.
-// C3 widens the admissible column shape set to the full closed sum
-// minus ResolvedEdgeUnion (which C5 owns); parameter admission stays
-// property-only, extended to temporal-property widths DATE / TIMESTAMP.
-// Unrepresentable widths on columns and parameters route through
-// ErrUnrepresentableWidth (Phase Z already caught schema-side offenders
-// so a column projecting an unrepresentable-width property is unreachable
-// unless the query declares an unrepresentable width on a parameter).
+// C4 widens cardinality admission to the full {One, Many, Exec} set and
+// pairs it with a cardinality × shape gate (spec §4.9): :exec on a
+// column-producing query routes through ErrExecOnProjection; :one or
+// :many on a zero-column query routes through ErrCardinalityShapeMismatch.
+// Column and parameter admission unchanged from C3 (property-widths on
+// parameters, full closed sum minus ResolvedEdgeUnion on columns);
+// unrepresentable widths route through ErrUnrepresentableWidth (Phase Z
+// already caught schema-side offenders so a column projecting an
+// unrepresentable-width property is unreachable unless the query declares
+// an unrepresentable width on a parameter).
 func phaseAAdmit(queries []NamedQuery, entities []preparedEntity, entityIndex map[entityLookupKey]int) error {
 	for i, q := range queries {
 		if _, reserved := reservedIdentifiers[q.Name]; reserved {
 			return fmt.Errorf("%w: query %q at position %d collides with reserved identifier", ErrIdentifierCollision, q.Name, i)
 		}
-		if q.Cardinality == CardinalityExec {
-			return fmt.Errorf("%w: query %q at position %d has cardinality :exec (C4 owns writes)", ErrOutOfC4Scope, q.Name, i)
-		}
-		if q.Cardinality != CardinalityOne && q.Cardinality != CardinalityMany {
+		if q.Cardinality != CardinalityOne && q.Cardinality != CardinalityMany && q.Cardinality != CardinalityExec {
 			return fmt.Errorf("%w: query %q at position %d has unrecognised cardinality %d", ErrInvalidCardinality, q.Name, i, q.Cardinality)
 		}
-		if len(q.Validated.Columns) == 0 {
-			// A projection query must project at least one column (§7).
-			return fmt.Errorf("%w: query %q at position %d has no projected columns", ErrOutOfC4Scope, q.Name, i)
+		// Cardinality × shape gate (spec §4.9). Runs before the column-type
+		// sweep so a fixture combining :exec-on-projection with an
+		// unrepresentable-width column fires ErrExecOnProjection first —
+		// the caller fixes the cardinality axis before revisiting widths.
+		if q.Cardinality == CardinalityExec && len(q.Validated.Columns) > 0 {
+			return fmt.Errorf("%w: query %q at position %d has cardinality :exec but projects %d column(s) (first column %q) — drop :exec or drop RETURN", ErrExecOnProjection, q.Name, i, len(q.Validated.Columns), q.Validated.Columns[0].Name)
+		}
+		if (q.Cardinality == CardinalityOne || q.Cardinality == CardinalityMany) && len(q.Validated.Columns) == 0 {
+			shape := "zero-column read"
+			if q.Validated.Statement == resolver.StatementWrite {
+				shape = "zero-column write"
+			}
+			return fmt.Errorf("%w: query %q at position %d has cardinality %s but the query is a %s — annotate :exec or add a RETURN clause", ErrCardinalityShapeMismatch, q.Name, i, cardinalityAnnotation(q.Cardinality), shape)
 		}
 		if strings.ContainsRune(q.SourceText, '`') {
 			return fmt.Errorf("%w: query %q at position %d has a backtick in its source text", ErrOutOfC4Scope, q.Name, i)
