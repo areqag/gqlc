@@ -1,0 +1,3 @@
+CREATE PROPERTY GRAPH TYPE InvalidCard AS {
+    (:Person { id :: INT NOT NULL })
+}

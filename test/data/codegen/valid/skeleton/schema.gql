@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE Skeleton AS {
+    (:Person {
+        id   :: INT NOT NULL,
+        name :: STRING NOT NULL
+    })
+}

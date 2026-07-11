@@ -84,6 +84,7 @@ linters:
         - stdlib
         - generic
         - github.com/areqag/gqlc/internal/query\.(Parser|Binding|Endpoint|Projection|Type|Use)$
+        - github.com/areqag/gqlc/internal/queryfile\.Parser$
         - github.com/areqag/gqlc/internal/resolver\.ResolvedType$
         - github.com/areqag/gqlc/internal/schema\.Parser$
         # ANTLR's Go target generates every grammar-rule context as an

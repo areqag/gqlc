@@ -1,0 +1,19 @@
+{
+  "queries": [
+    {
+      "name": "FindPerson",
+      "cardinality": "one",
+      "text": "MATCH (p:Person) WHERE p.id = $id RETURN p"
+    },
+    {
+      "name": "ListPeople",
+      "cardinality": "many",
+      "text": "MATCH (p:Person)\nRETURN p.name AS name, p.age AS age\nORDER BY p.name"
+    },
+    {
+      "name": "DeletePerson",
+      "cardinality": "exec",
+      "text": "MATCH (p:Person) WHERE p.id = $id DELETE p"
+    }
+  ]
+}

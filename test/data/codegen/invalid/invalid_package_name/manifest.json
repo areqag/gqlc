@@ -1,0 +1,5 @@
+{
+  "package": "3movies",
+  "queryFiles": [],
+  "expectedError": "codegen.ErrInvalidPackageName"
+}
