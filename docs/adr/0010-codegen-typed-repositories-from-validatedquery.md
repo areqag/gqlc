@@ -565,10 +565,87 @@ func (q *Queries) HeaviestPeople(ctx context.Context) iter.Seq2[PersonRow, error
   `:iter` joins `:one/:many/:exec` without an annotation-grammar break;
   (b) nothing in D2's method shape assumes materialisation.
 - Requires Go ≥ 1.23 in the *user's* module (this repo is on 1.26).
-- Design opens transferred to `gqlc-1a5` (not open here): `:iter` as
-  author-declared cardinality vs an auto-generated `XIter` sibling for
-  every `:many`; interaction with SKIP/LIMIT pagination parameters
-  (orthogonal — document both).
+- Resolved (grill, 2026-07-11): `:iter` is **author-declared, opt-in** —
+  it takes its own annotation, joining `:one/:many/:exec` as the fourth
+  cardinality. Auto-generating an `XIter` sibling for every `:many`
+  rejected: consistency with §D1's reject-don't-guess posture, session-
+  lifetime discipline is a hazard callers must opt into, doubling the
+  Querier surface for users who never asked for streaming taxes the
+  mocking + docs path. Callers who want both shapes write two
+  annotations (`AllPeople :many`, `AllPeopleIter :iter`). Universal
+  `:iter` (kill `:many`) considered as a safety-by-default framing and
+  deferred to a later revisit — it fixes the memory footgun but breaks
+  managed retry (pre-first-yield-only, below) and creates a read-
+  uncommitted visibility hazard on writes.
+- Resolved (grill, 2026-07-11): `:iter` is **read-only**. New sentinel
+  `ErrIterOnWrite` (introduced when the bead lands) rejects `:iter` on
+  `StatementWrite` at generation time. Writes-with-return under `:iter`
+  leak uncommitted data — the callback yields rows to the caller while
+  the tx is still open, so a mid-stream error rolls the tx back and the
+  caller keeps references to rows that no longer exist, or pre-first-
+  yield retry re-runs the CREATE and the caller's stashed `elementId`
+  no longer matches. `:many` holds the invariant "if you see it, it's
+  committed"; `:iter` cannot. Callers who need streaming plus write must
+  use `:many` and accept materialisation.
+- Resolved (grill, 2026-07-11): cardinality×shape validation extends
+  symmetrically — `:iter` requires `len(Columns) > 0`; zero-column
+  `:iter` reuses `ErrCardinalityShapeMismatch`. Truth table gains one
+  reject cell (`:iter` + Write + columns → `ErrIterOnWrite`) and mirrors
+  the existing zero-column rejects.
+- Resolved (grill, 2026-07-11): method naming inherits §D2's rule
+  verbatim — the annotation name is the method name. No `Iter` suffix
+  auto-appended; author owns the name. Collisions between `:many` and
+  `:iter` on the same query name caught by the existing package-level
+  identifier collision sentinel (§D2 point 4).
+- Resolved (grill, 2026-07-11): retry envelope is **pre-first-yield
+  only**. `tx.Run(ctx, ...)` failure inside the `ExecuteRead` callback
+  triggers the driver's managed retry — the connection-setup /
+  leader-election flake class is covered. Once the first row is yielded
+  to the caller, transient errors from `result.Err()` or per-row decode
+  are yielded as `(zeroRow, err)` and the callback returns nil to
+  prevent retry (retry would double-yield already-delivered rows):
+
+  ```go
+  func (q *Queries) HeaviestPeople(ctx context.Context) iter.Seq2[Row, error] {
+      return func(yield func(Row, error) bool) {
+          err := q.session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (any, error) {
+              result, err := tx.Run(ctx, cypher, params)
+              if err != nil { return nil, err }         // retry covers this
+              for result.Next(ctx) {
+                  if !yield(decode(result.Record())) {
+                      return nil, nil                    // consumer break
+                  }
+              }
+              if err := result.Err(); err != nil {
+                  yield(zeroRow, err)                    // mid-stream err
+                  return nil, nil                        // nil = no retry
+              }
+              return nil, nil
+          })
+          if err != nil { yield(zeroRow, err) }          // retries exhausted
+      }
+  }
+  ```
+
+- Resolved (grill, 2026-07-11): `SKIP` / `LIMIT` are **orthogonal** to
+  cardinality — they flow through as `$skip` / `$limit` Params like any
+  other typed argument (int64 per D3). Three legit patterns: `:iter`
+  alone (stream, break to stop early), `:many` with `SKIP`/`LIMIT`
+  (retry-covered pagination), `:iter` with `SKIP`/`LIMIT` (streamed
+  window). No special codegen handling.
+- Resolved (grill, 2026-07-11): testing mirrors the existing codegen
+  fence. Goldens under `test/data/codegen/valid/iter_read_*` for shape
+  (scalar, entity, multi-column) and under `invalid/iter_on_write` +
+  `invalid/iter_zero_column_read` for sentinels. The `gqlc-73h`
+  testcontainer harness (once merged) is extended with `:iter` cases:
+  seed rows → range via `:iter` → assert values; verify early `break`
+  cleanup; verify pre-first-yield retry. Nested golden module `go.mod`
+  for `:iter` fixtures specifies `go 1.23` minimum.
+- Implementation trigger: gqlc-1a5 remains open at P3. Picking up the
+  build is gated on real user demand (someone files an issue for
+  streaming) or benchmarked need (`[]Row` materialisation shown to
+  bottleneck a workload). The grill markers above are the paved runway
+  when the trigger fires.
 
 ## Consequences
 
