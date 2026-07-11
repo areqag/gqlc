@@ -1537,8 +1537,8 @@ func demoteNullableInPlace(bindings []query.Binding, table map[string]bool, carr
 	// OPTIONAL MATCH. Any one group being proven demotes the name (and every
 	// other member of that group). Seed from carry first, then union in the
 	// local declarations.
-	members := map[int][]string{}   // group id → named members
-	groupsOf := map[string][]int{}  // named member → group ids (may span carry + local)
+	members := map[int][]string{}  // group id → named members
+	groupsOf := map[string][]int{} // named member → group ids (may span carry + local)
 	addMember := func(v string, g int) {
 		if v == "" || g <= 0 {
 			return
