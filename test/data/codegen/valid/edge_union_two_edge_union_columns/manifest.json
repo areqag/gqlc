@@ -1,0 +1,4 @@
+{
+  "package": "edgeuniontwoedgeunioncolumns",
+  "queryFiles": ["queries.cypher"]
+}

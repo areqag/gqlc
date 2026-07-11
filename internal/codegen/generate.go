@@ -1414,7 +1414,7 @@ func columnNeedsImports(f preparedRow) (needDbtype, needTime bool) {
 					return false, false
 				}
 				return goTypeNeedsImports(ty)
-			case resolver.ResolvedNode, resolver.ResolvedEdge:
+			case resolver.ResolvedNode, resolver.ResolvedEdge, resolver.ResolvedEdgeUnion:
 				return true, false
 			case resolver.ResolvedTemporal:
 				return goTypeNeedsImports(temporalGoType(tt.Kind))
@@ -1493,7 +1493,9 @@ func renderCypherFile(pkg string, queries []preparedQuery, withDbtype, withTime,
 				b.WriteString("\t")
 				b.WriteString(f.Field)
 				b.WriteString(" ")
-				if f.Nullable {
+				// EdgeUnion columns emit the bare interface, never
+				// pointer-to-interface — even when nullable (§3.3).
+				if f.Nullable && f.Kind != columnEdgeUnion {
 					b.WriteString("*")
 				}
 				b.WriteString(f.GoType)
@@ -1542,7 +1544,12 @@ func returnTypeText(p preparedQuery) string {
 	var elem string
 	if len(p.RowFields) == 1 {
 		elem = ""
-		if p.RowFields[0].Nullable {
+		// Nullable columns wrap the emitted Go type in a pointer, EXCEPT
+		// edgeUnion columns whose emitted type is a sealed interface —
+		// nil is the natural absence value for an interface, and
+		// pointer-to-interface is the Go anti-pattern ADR 0010 D3
+		// Resolved (lines 343–345) forbids (§3.3).
+		if p.RowFields[0].Nullable && p.RowFields[0].Kind != columnEdgeUnion {
 			elem = "*"
 		}
 		elem += p.RowFields[0].GoType
@@ -1740,7 +1747,9 @@ func writeOneBody(b *strings.Builder, p preparedQuery) {
 func writeManyBody(b *strings.Builder, p preparedQuery) {
 	var elem string
 	if len(p.RowFields) == 1 {
-		if p.RowFields[0].Nullable {
+		// EdgeUnion columns emit the bare interface, never
+		// pointer-to-interface — even when nullable (§3.3).
+		if p.RowFields[0].Nullable && p.RowFields[0].Kind != columnEdgeUnion {
 			elem = "*"
 		}
 		elem += p.RowFields[0].GoType
@@ -2043,24 +2052,32 @@ func writeEdgeUnionColumnDecodeIndent(b *strings.Builder, p preparedQuery, f pre
 		okLocal = "ok" + suffix
 		entityLocal = "entity" + suffix
 	}
+	// assignBody carries the caller-supplied `<prefix><value><suffix>`
+	// pattern with the outer indent already baked in. Every arm of the
+	// dispatch appends one such body at `indent + extraIndent`.
+	assignBody := func(extraIndent, valueExpr string) {
+		b.WriteString(indent)
+		b.WriteString(extraIndent)
+		b.WriteString(assignPrefix[len(indent):])
+		b.WriteString(valueExpr)
+		b.WriteString(assignSuffix)
+	}
 	fmt.Fprintf(b, "%s%s, %s := %s.Get(%q)\n", indent, rawLocal, okLocal, recordExpr, f.ColumnName)
 	fmt.Fprintf(b, "%sif !%s {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q missing from record\", %q)\n%s}\n", indent, okLocal, indent, zero, p.MethodName, f.ColumnName, indent)
 	if f.Nullable {
-		// Nullable: nil raw propagates as the nil interface value.
+		// Nullable: nil raw propagates as the nil interface value. The
+		// dispatch body sits inside an `else` block, indented one tab
+		// deeper than the caller's baseline.
 		fmt.Fprintf(b, "%sif %s == nil {\n", indent, rawLocal)
-		b.WriteString(indent)
-		b.WriteString("\t")
-		b.WriteString(assignPrefix[len(indent):])
-		b.WriteString("nil")
-		b.WriteString(assignSuffix)
+		assignBody("\t", "nil")
 		fmt.Fprintf(b, "%s} else {\n", indent)
-		writeEdgeUnionDispatchBody(b, p, f, rawLocal, relLocal, okLocal, entityLocal, zero, assignPrefix, assignSuffix, indent+"\t")
+		writeEdgeUnionDispatchBody(b, p, f, rawLocal, relLocal, okLocal, entityLocal, zero, assignBody, indent, "\t")
 		fmt.Fprintf(b, "%s}\n", indent)
 		return
 	}
 	// Non-nullable: nil raw is a decode error.
 	fmt.Fprintf(b, "%sif %s == nil {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)\n%s}\n", indent, rawLocal, indent, zero, p.MethodName, f.ColumnName, indent)
-	writeEdgeUnionDispatchBody(b, p, f, rawLocal, relLocal, okLocal, entityLocal, zero, assignPrefix, assignSuffix, indent)
+	writeEdgeUnionDispatchBody(b, p, f, rawLocal, relLocal, okLocal, entityLocal, zero, assignBody, indent, "")
 }
 
 // writeEdgeUnionDispatchBody emits the type-assert + type-switch
@@ -2068,23 +2085,23 @@ func writeEdgeUnionColumnDecodeIndent(b *strings.Builder, p preparedQuery, f pre
 // so the nullable arm can reuse the same body inside an `else` branch
 // (skipping the non-null raw gate). The dispatch keys are EdgeKey.Label
 // strings — the driver's wire labels — not the mangled entity struct
-// names.
-func writeEdgeUnionDispatchBody(b *strings.Builder, p preparedQuery, f preparedRow, rawLocal, relLocal, okLocal, entityLocal, zero, assignPrefix, assignSuffix, indent string) {
-	fmt.Fprintf(b, "%s%s, %s := %s.(dbtype.Relationship)\n", indent, relLocal, okLocal, rawLocal)
-	fmt.Fprintf(b, "%sif !%s {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q: expected dbtype.Relationship, got %%T\", %q, %s)\n%s}\n", indent, okLocal, indent, zero, p.MethodName, f.ColumnName, rawLocal, indent)
-	fmt.Fprintf(b, "%sswitch %s.Type {\n", indent, relLocal)
+// names. assignBody writes one `<indent><extraIndent><prefix><value><suffix>`
+// assignment line; the callback keeps the raw assignPrefix / assignSuffix
+// out of the dispatch-body inner loop so the indent arithmetic is done
+// in exactly one place.
+func writeEdgeUnionDispatchBody(b *strings.Builder, p preparedQuery, f preparedRow, rawLocal, relLocal, okLocal, entityLocal, zero string, assignBody func(extraIndent, valueExpr string), indent, extraIndent string) {
+	dispatchIndent := indent + extraIndent
+	fmt.Fprintf(b, "%s%s, %s := %s.(dbtype.Relationship)\n", dispatchIndent, relLocal, okLocal, rawLocal)
+	fmt.Fprintf(b, "%sif !%s {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q: expected dbtype.Relationship, got %%T\", %q, %s)\n%s}\n", dispatchIndent, okLocal, dispatchIndent, zero, p.MethodName, f.ColumnName, rawLocal, dispatchIndent)
+	fmt.Fprintf(b, "%sswitch %s.Type {\n", dispatchIndent, relLocal)
 	for i, ek := range f.EdgeKeys {
 		entityName := edgeKeyToEntityName(p, f, i)
-		fmt.Fprintf(b, "%scase %q:\n", indent, string(ek.Label))
-		fmt.Fprintf(b, "%s\t%s, err := decode%s(%s)\n", indent, entityLocal, entityName, relLocal)
-		fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s\t}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
-		b.WriteString(indent)
-		b.WriteString("\t")
-		b.WriteString(assignPrefix[len(indent):])
-		b.WriteString(entityLocal)
-		b.WriteString(assignSuffix)
+		fmt.Fprintf(b, "%scase %q:\n", dispatchIndent, string(ek.Label))
+		fmt.Fprintf(b, "%s\t%s, err := decode%s(%s)\n", dispatchIndent, entityLocal, entityName, relLocal)
+		fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s\t}\n", dispatchIndent, dispatchIndent, zero, p.MethodName, f.ColumnName, dispatchIndent)
+		assignBody(extraIndent+"\t", entityLocal)
 	}
-	fmt.Fprintf(b, "%sdefault:\n%s\treturn %s, fmt.Errorf(\"%s: column %%q: unexpected relationship type %%q\", %q, %s.Type)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, relLocal, indent)
+	fmt.Fprintf(b, "%sdefault:\n%s\treturn %s, fmt.Errorf(\"%s: column %%q: unexpected relationship type %%q\", %q, %s.Type)\n%s}\n", dispatchIndent, dispatchIndent, zero, p.MethodName, f.ColumnName, relLocal, dispatchIndent)
 }
 
 // edgeKeyToEntityName resolves an EdgeKey position in a preparedRow's
