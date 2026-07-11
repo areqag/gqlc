@@ -1,0 +1,5 @@
+CREATE PROPERTY GRAPH TYPE OneColMany AS {
+    (:Person {
+        name :: STRING NOT NULL
+    })
+}

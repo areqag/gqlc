@@ -1,0 +1,5 @@
+{
+  "package": "reservedident",
+  "queryFiles": ["queries.cypher"],
+  "expectedError": "codegen.ErrIdentifierCollision"
+}

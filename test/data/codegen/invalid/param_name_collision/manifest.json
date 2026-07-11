@@ -1,0 +1,5 @@
+{
+  "package": "paramcollision",
+  "queryFiles": ["queries.cypher"],
+  "expectedError": "codegen.ErrParamNameCollision"
+}

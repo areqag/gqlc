@@ -1,0 +1,4 @@
+{
+  "package": "nullablecolumns",
+  "queryFiles": ["queries.cypher"]
+}
