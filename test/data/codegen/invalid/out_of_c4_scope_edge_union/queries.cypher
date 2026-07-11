@@ -1,2 +1,0 @@
-// name: PostAction :one
-MATCH (p:Person)-[r:AUTHORED|LIKES]->(post:Post) RETURN r

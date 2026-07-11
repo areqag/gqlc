@@ -1,0 +1,4 @@
+{
+  "package": "edgeunionmanytwocandidates",
+  "queryFiles": ["queries.cypher"]
+}

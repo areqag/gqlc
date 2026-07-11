@@ -1,0 +1,4 @@
+{
+  "package": "edgeuniontwoqueriessamecolumnshape",
+  "queryFiles": ["queries.cypher"]
+}

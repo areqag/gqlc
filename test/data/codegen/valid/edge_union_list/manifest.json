@@ -1,0 +1,4 @@
+{
+  "package": "edgeunionlist",
+  "queryFiles": ["queries.cypher"]
+}

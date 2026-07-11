@@ -1,0 +1,7 @@
+CREATE PROPERTY GRAPH TYPE EdgeUnionThreeCandidates AS {
+    (:Person { id :: INT64 NOT NULL }),
+    (:Post   { id :: INT64 NOT NULL }),
+    (:Person) -[:AUTHORED { since :: INT64 NOT NULL }]-> (:Post),
+    (:Person) -[:LIKES]-> (:Post),
+    (:Person) -[:REPOSTED]-> (:Post)
+}

@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE EdgeUnionTwoEdgeUnionColumns AS {
+    (:Person { id :: INT64 NOT NULL }),
+    (:Post   { id :: INT64 NOT NULL }),
+    (:Person) -[:AUTHORED { since :: INT64 NOT NULL }]-> (:Post),
+    (:Person) -[:LIKES]-> (:Post)
+}

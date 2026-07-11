@@ -1,0 +1,5 @@
+{
+  "package": "identifiercollisionedgeunioninterfaceentity",
+  "queryFiles": ["queries.cypher"],
+  "expectedError": "codegen.ErrIdentifierCollision"
+}
