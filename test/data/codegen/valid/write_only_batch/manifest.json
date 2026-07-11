@@ -1,0 +1,4 @@
+{
+  "package": "writeonlybatch",
+  "queryFiles": ["queries.cypher"]
+}

@@ -247,10 +247,10 @@ func generate(in Input) ([]File, error) {
 	// SourceFile basename in first-appearance order (§5.5). Basename
 	// stripped of extension.
 	for _, group := range groupBySource(prepared) {
-		needDbtype, needTime := groupImports(group.queries)
+		needDbtype, needTime, needFmt := groupImports(group.queries)
 		files = append(files, File{
 			Path:     group.filename,
-			Contents: renderCypherFile(pkg, group.queries, needDbtype, needTime),
+			Contents: renderCypherFile(pkg, group.queries, needDbtype, needTime, needFmt),
 		})
 	}
 
@@ -1173,14 +1173,22 @@ func groupBySource(prepared []preparedQuery) []sourceGroup {
 }
 
 // groupImports computes the C3 per-file import gates for one
-// <name>.cypher.go source group. dbtype fires when any column in the
-// group decodes through a dbtype.<Kind> carrier (entity, DATE property,
-// six temporal-column kinds except TemporalDateTime, or a list column
-// whose leaf uses dbtype.<Kind>). time fires when any column decodes
-// as time.Time (TIMESTAMP property, TemporalDateTime column, or a list
-// column whose leaf is either).
-func groupImports(queries []preparedQuery) (needDbtype, needTime bool) {
+// <name>.cypher.go source group. dbtype fires when any column or
+// parameter decodes / encodes through a dbtype.<Kind> carrier
+// (entity, DATE property, six temporal-column kinds except
+// TemporalDateTime, or a list column whose leaf uses dbtype.<Kind>).
+// time fires when any column or parameter uses time.Time (TIMESTAMP
+// property, TemporalDateTime column, or a list column whose leaf is
+// either). fmt fires when any method's body emits a decode wrapper
+// (`fmt.Errorf`) — every :one / :many method does, and every write-
+// with-projection method does; the C4 :exec three-line body does not
+// (spec §5.5).
+func groupImports(queries []preparedQuery) (needDbtype, needTime, needFmt bool) {
 	for _, p := range queries {
+		if p.Cardinality != CardinalityExec {
+			// Row-assembly bodies emit fmt.Errorf decode wrappers.
+			needFmt = true
+		}
 		for _, f := range p.RowFields {
 			nd, nt := columnNeedsImports(f)
 			if nd {
@@ -1190,8 +1198,17 @@ func groupImports(queries []preparedQuery) (needDbtype, needTime bool) {
 				needTime = true
 			}
 		}
+		for _, f := range p.ParamFields {
+			nd, nt := goTypeNeedsImports(f.GoType)
+			if nd {
+				needDbtype = true
+			}
+			if nt {
+				needTime = true
+			}
+		}
 	}
-	return needDbtype, needTime
+	return needDbtype, needTime, needFmt
 }
 
 // columnNeedsImports reports whether one prepared row needs dbtype /
@@ -1245,9 +1262,11 @@ func goTypeNeedsImports(ty string) (bool, bool) {
 // query in order: query-text const, Params struct (if any), Row struct
 // (if any), method. The withDbtype flag toggles the dbtype import; the
 // withTime flag toggles the time-stdlib import (C3, for TIMESTAMP /
-// TemporalDateTime carriers). The row-assembly template inlines the
-// per-kind decode arm.
-func renderCypherFile(pkg string, queries []preparedQuery, withDbtype, withTime bool) []byte {
+// TemporalDateTime carriers). The withFmt flag toggles the fmt import
+// (C4: a write-only file whose queries are all :exec emits no
+// fmt.Errorf wrapper, so fmt is elided). The row-assembly template
+// inlines the per-kind decode arm.
+func renderCypherFile(pkg string, queries []preparedQuery, withDbtype, withTime, withFmt bool) []byte {
 	var b strings.Builder
 	b.WriteString(header())
 	b.WriteString("package ")
@@ -1256,7 +1275,10 @@ func renderCypherFile(pkg string, queries []preparedQuery, withDbtype, withTime 
 	// Import order per goimports: stdlib first (context, fmt, time),
 	// then third-party (neo4j, dbtype). A single grouped import ()
 	// block keeps gofmt output stable.
-	b.WriteString("import (\n\t\"context\"\n\t\"fmt\"\n")
+	b.WriteString("import (\n\t\"context\"\n")
+	if withFmt {
+		b.WriteString("\t\"fmt\"\n")
+	}
 	if withTime {
 		b.WriteString("\t\"time\"\n")
 	}

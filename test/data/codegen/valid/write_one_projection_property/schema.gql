@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE WriteOneProjectionProperty AS {
+    (:Person {
+        id   :: INT64 NOT NULL,
+        name :: STRING NOT NULL
+    })
+}
