@@ -1,0 +1,5 @@
+CREATE PROPERTY GRAPH TYPE AliasRequiredExpr AS {
+    (:Person {
+        age :: INT64 NOT NULL
+    })
+}

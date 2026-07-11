@@ -1,0 +1,5 @@
+{
+  "package": "aliasrequiredfn",
+  "queryFiles": ["queries.cypher"],
+  "expectedError": "codegen.ErrAliasRequired"
+}

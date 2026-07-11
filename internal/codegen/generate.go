@@ -219,6 +219,14 @@ func phaseAAdmit(queries []NamedQuery) error {
 			return fmt.Errorf("%w: query %q at position %d has a backtick in its source text", ErrOutOfC1Scope, q.Name, i)
 		}
 		for ci, col := range q.Validated.Columns {
+			// Shape check first (spec §4.3, §6.4): count(*), arithmetic
+			// expressions, and other non-clean shapes route to
+			// ErrAliasRequired regardless of their resolved type — the fix
+			// is an AS alias, not a scope change. Only after the column's
+			// text is a known shape do we check its resolved type.
+			if _, ok := rowFieldName(col.Name); !ok {
+				return fmt.Errorf("%w: query %q column %d %q is neither a bare identifier nor a property access — add an explicit AS alias", ErrAliasRequired, q.Name, ci, col.Name)
+			}
 			prop, ok := col.Type.(resolver.ResolvedProperty)
 			if !ok {
 				return fmt.Errorf("%w: query %q column %d %q resolved as %s (C1 projects ResolvedProperty only)", ErrOutOfC1Scope, q.Name, ci, col.Name, col.Type.String())
