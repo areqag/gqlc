@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE PropertyFieldCollision AS {
+    (p :Person {
+        min_age :: INT64 NOT NULL,
+        minAge  :: INT64 NOT NULL
+    })
+}

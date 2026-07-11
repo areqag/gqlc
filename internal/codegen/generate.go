@@ -12,6 +12,7 @@ import (
 
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/resolver"
+	"github.com/areqag/gqlc/internal/schema"
 )
 
 // version is the version stamp embedded in every generated file's header.
@@ -34,6 +35,13 @@ var rowBareIdent = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // property access projection like RETURN p.name (spec §4.3 shape 2).
 // Anchored so substring matches are impossible.
 var rowPropAccess = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*$`)
+
+// exportedGoIdentRe is the ASCII exported Go identifier grammar (spec §4.5
+// Rule 1). Explicit entity Names must satisfy it; the single-label mangle
+// (Rule 2 / Rule 3) also lands its result on this predicate. C1's queryfile
+// front end uses the same grammar for method names — deliberately, so a
+// schema-side identifier reads the same as a query-side one.
+var exportedGoIdentRe = regexp.MustCompile(`^[A-Z][A-Za-z0-9]*$`)
 
 // reservedIdentifiers is the C1 exported-identifier reserved set (spec
 // §4.1). A NamedQuery.Name matching any of these routes to
@@ -75,8 +83,61 @@ type preparedParam struct {
 type preparedRow struct {
 	ColumnName string // resolver Column.Name — the driver record key
 	Field      string // mangle §4.3
-	GoType     string // §5.1
+	GoType     string // §5.1 — a Go type text; for entity columns the entity struct name
 	Nullable   bool
+	Kind       columnKind // property (C1) or entity — property/node/edge
+}
+
+// columnKind discriminates the row-assembly template arm to run for a
+// given RowField. C1 always emitted a property arm; C2 adds node/edge
+// entity arms. The kind is derived once at Phase B and carried onto
+// preparedRow so the row-assembly template (§5.5) needs no per-emission
+// re-derivation.
+type columnKind int
+
+const (
+	// columnProperty is C1's property arm: neo4j.GetRecordValue[<carrier>]
+	// with a narrow-carrier + convert dance.
+	columnProperty columnKind = iota
+	// columnNode is C2's node-entity arm: neo4j.GetRecordValue[dbtype.Node]
+	// followed by a decode<EntityName>(node) call.
+	columnNode
+	// columnEdge is C2's edge-entity arm: neo4j.GetRecordValue[dbtype.Relationship]
+	// followed by a decode<EntityName>(rel) call.
+	columnEdge
+)
+
+// entityKind discriminates node from edge in the entity-naming and
+// emission passes. Node reads NodeType.Labels; edge reads EdgeType.EdgeKey.
+type entityKind int
+
+const (
+	entityNode entityKind = iota
+	entityEdge
+)
+
+// preparedEntity is Phase Z's per-entity result: struct name plus ordered
+// field list plus the source-axis text for the doc comment. Cached in a
+// slice the emission walk (§5.2) reads in insertion order.
+type preparedEntity struct {
+	Kind       entityKind
+	Name       string            // derived struct name (spec §4.5)
+	Labels     graph.LabelSetKey // node-only source axis (empty for edge)
+	EdgeKey    schema.EdgeKey    // edge-only source axis (zero for node)
+	DocAxis    string            // "<labels>" or "<label> edge (<src> -> <tgt>)" for doc
+	Fields     []preparedEntityField
+	AnyProp    bool // any property emits (⇒ fmt used)
+	AnyNonNull bool // any non-nullable property emits (⇒ neo4j.GetProperty[T] used)
+}
+
+// preparedEntityField carries one property's derived struct field name
+// and its Go type text. Property source name is retained for the driver
+// property-map key.
+type preparedEntityField struct {
+	PropName string // Property.Name — the driver's Props map key
+	Field    string // paramFieldName(PropName)
+	GoType   string // §5.1 property-side row (unchanged from C1)
+	Nullable bool
 }
 
 // generate is the pure emission kernel. Determinism per §2.3: input
@@ -89,28 +150,43 @@ func generate(in Input) ([]File, error) {
 		return nil, err
 	}
 
+	// Phase Z — schema-shape admission and entity naming (§2.1, §4.5,
+	// §5.2). Eagerly walks every NodeType and EdgeType, deriving the
+	// entity struct name via the entity-naming rules and the per-entity
+	// property field list. First offender wins across the schema-shape
+	// axis. Runs before Phase A because Phase A's ResolvedNode /
+	// ResolvedEdge admission reads Phase Z's cache to type-check the Go
+	// type text.
+	entities, entityIndex, err := phaseZAdmit(in.Schema)
+	if err != nil {
+		return nil, err
+	}
+
 	if err := validateQueries(in.Queries); err != nil {
 		return nil, err
 	}
 
 	// Phase A — batch admission: for each query in slice order, gate on
-	// resolved type / cardinality / reserved-identifier. First offender
-	// wins (spec §2.1).
-	if err := phaseAAdmit(in.Queries); err != nil {
+	// resolved type / cardinality / reserved-identifier. C2 widens the
+	// admissible column shape to ResolvedNode + ResolvedEdge; parameter
+	// admission stays property-only. First offender wins (spec §2.1).
+	if err := phaseAAdmit(in.Queries, entityIndex); err != nil {
 		return nil, err
 	}
 
 	// Phase B — per-query name derivation. Row-field text-shape analysis,
-	// Params-field mangle, per-query collision checks. First offender
-	// wins.
-	prepared, err := phaseBDerive(in.Queries)
+	// Params-field mangle, per-query collision checks. C2 extends the
+	// row-field type mapping with entity-column lookup into Phase Z's
+	// cache. First offender wins.
+	prepared, err := phaseBDerive(in.Queries, entities, entityIndex)
 	if err != nil {
 		return nil, err
 	}
 
 	// Cross-query package-level exported-identifier collision sweep
-	// (§4.4).
-	if err := sweepIdentifiers(prepared); err != nil {
+	// (§4.6). C2 adds entity struct names as the fourth identifier
+	// source, swept first.
+	if err := sweepIdentifiers(entities, prepared); err != nil {
 		return nil, err
 	}
 
@@ -125,7 +201,7 @@ func generate(in Input) ([]File, error) {
 	files := []File{
 		{Path: "db.go", Contents: renderDB(pkg, hasOne)},
 		{Path: "querier.go", Contents: renderQuerier(pkg, prepared)},
-		{Path: "models.go", Contents: renderModels(pkg)},
+		{Path: "models.go", Contents: renderModels(pkg, entities)},
 	}
 
 	// Per-source `<name>.cypher.go` file emission — grouped by
@@ -134,7 +210,7 @@ func generate(in Input) ([]File, error) {
 	for _, group := range groupBySource(prepared) {
 		files = append(files, File{
 			Path:     group.filename,
-			Contents: renderCypherFile(pkg, group.queries),
+			Contents: renderCypherFile(pkg, group.queries, groupHasEntityColumn(group.queries)),
 		})
 	}
 
@@ -198,9 +274,212 @@ func validateQueries(queries []NamedQuery) error {
 	return nil
 }
 
+// entityLookupKey identifies a Phase Z cache entry: kind + the source-axis
+// value (labels for a node, edge-key for an edge). Comparable so it lands
+// in a Go map key directly.
+type entityLookupKey struct {
+	Kind    entityKind
+	Labels  graph.LabelSetKey // node axis; zero for edge
+	EdgeKey schema.EdgeKey    // edge axis; zero for node
+}
+
+// phaseZAdmit is spec §2.1's Phase Z: eagerly walks the schema's node and
+// edge types deriving struct names + property field lists. First offender
+// wins across the schema-shape axis. Every multi-label node type and every
+// ambiguous edge label must carry an explicit Name — a lazy check would
+// make output depend on the query set, which D3 Resolved rejects.
+func phaseZAdmit(sch schema.Schema) ([]preparedEntity, map[entityLookupKey]int, error) {
+	// Deterministic iteration: keys sorted lexically.
+	nodeKeys := make([]graph.LabelSetKey, 0, len(sch.Nodes))
+	for k := range sch.Nodes {
+		nodeKeys = append(nodeKeys, k)
+	}
+	slices.Sort(nodeKeys)
+
+	edgeKeys := make([]schema.EdgeKey, 0, len(sch.Edges))
+	for k := range sch.Edges {
+		edgeKeys = append(edgeKeys, k)
+	}
+	slices.SortFunc(edgeKeys, func(a, b schema.EdgeKey) int {
+		return cmp.Or(
+			cmp.Compare(a.Source, b.Source),
+			cmp.Compare(a.Label, b.Label),
+			cmp.Compare(a.Target, b.Target),
+		)
+	})
+
+	// Ambiguity axis: an edge Label appearing on more than one EdgeKey is
+	// ambiguous even when the two endpoint pairs differ (spec §4.5 Rule 4).
+	labelCount := make(map[graph.LabelSetKey]int, len(sch.Edges))
+	for _, k := range edgeKeys {
+		labelCount[k.Label]++
+	}
+
+	entities := make([]preparedEntity, 0, len(sch.Nodes)+len(sch.Edges))
+	index := make(map[entityLookupKey]int, len(sch.Nodes)+len(sch.Edges))
+
+	for _, k := range nodeKeys {
+		nt := sch.Nodes[k]
+		name, err := entityStructName(entityNode, nt.Labels, schema.EdgeKey{}, nt.Name, false)
+		if err != nil {
+			return nil, nil, err
+		}
+		fields, anyProp, anyNonNull, err := prepareEntityFields(name, nt.Properties)
+		if err != nil {
+			return nil, nil, err
+		}
+		labels := strings.Join(nt.Labels.Split(), "&")
+		ent := preparedEntity{
+			Kind:       entityNode,
+			Name:       name,
+			Labels:     nt.Labels,
+			DocAxis:    labels,
+			Fields:     fields,
+			AnyProp:    anyProp,
+			AnyNonNull: anyNonNull,
+		}
+		index[entityLookupKey{Kind: entityNode, Labels: nt.Labels}] = len(entities)
+		entities = append(entities, ent)
+	}
+
+	for _, k := range edgeKeys {
+		et := sch.Edges[k]
+		ambig := labelCount[et.Label] > 1
+		name, err := entityStructName(entityEdge, "", et.EdgeKey, et.Name, ambig)
+		if err != nil {
+			return nil, nil, err
+		}
+		fields, anyProp, anyNonNull, err := prepareEntityFields(name, et.Properties)
+		if err != nil {
+			return nil, nil, err
+		}
+		docAxis := fmt.Sprintf("%s edge type (%s -> %s)", string(et.Label), string(et.Source), string(et.Target))
+		ent := preparedEntity{
+			Kind:       entityEdge,
+			Name:       name,
+			EdgeKey:    et.EdgeKey,
+			DocAxis:    docAxis,
+			Fields:     fields,
+			AnyProp:    anyProp,
+			AnyNonNull: anyNonNull,
+		}
+		index[entityLookupKey{Kind: entityEdge, EdgeKey: et.EdgeKey}] = len(entities)
+		entities = append(entities, ent)
+	}
+	return entities, index, nil
+}
+
+// entityStructName derives the exported Go struct name for a schema node
+// or edge type per spec §4.5's five rules. First failure wins in rule
+// order: Rule 1 (explicit Name invalid) → ErrInvalidEntityName; Rule 4
+// (multi-label / ambiguous without explicit Name) → ErrUnnamedMultiLabelType;
+// Rule 2/3 (mangle result invalid) → ErrInvalidEntityName.
+func entityStructName(kind entityKind, labels graph.LabelSetKey, edgeKey schema.EdgeKey, explicitName string, ambiguousEdgeLabel bool) (string, error) {
+	if explicitName != "" {
+		if exportedGoIdent(explicitName) {
+			return explicitName, nil
+		}
+		return "", fmt.Errorf("%w: %s explicit Name %q is not a valid exported Go identifier", ErrInvalidEntityName, entityAxisText(kind, labels, edgeKey), explicitName)
+	}
+
+	if kind == entityNode {
+		parts := labels.Split()
+		if len(parts) > 1 {
+			return "", fmt.Errorf("%w: node type with multi-label set %q requires an explicit Name", ErrUnnamedMultiLabelType, string(labels))
+		}
+		if len(parts) == 0 {
+			return "", fmt.Errorf("%w: node type with empty label set requires an explicit Name", ErrUnnamedMultiLabelType)
+		}
+		name := paramFieldName(parts[0])
+		if !exportedGoIdent(name) {
+			return "", fmt.Errorf("%w: node type labels %q mangle to %q, not a valid exported Go identifier", ErrInvalidEntityName, string(labels), name)
+		}
+		return name, nil
+	}
+
+	// Edge.
+	labelParts := edgeKey.Label.Split()
+	if len(labelParts) > 1 {
+		return "", fmt.Errorf("%w: multi-label edge type (%s -[:%s]-> %s) requires an explicit Name", ErrUnnamedMultiLabelType, string(edgeKey.Source), string(edgeKey.Label), string(edgeKey.Target))
+	}
+	if len(labelParts) == 0 {
+		return "", fmt.Errorf("%w: edge type with empty label requires an explicit Name", ErrUnnamedMultiLabelType)
+	}
+	if ambiguousEdgeLabel {
+		return "", fmt.Errorf("%w: edge label %q is shared across endpoint pairs — (%s -[:%s]-> %s) requires an explicit Name", ErrUnnamedMultiLabelType, string(edgeKey.Label), string(edgeKey.Source), string(edgeKey.Label), string(edgeKey.Target))
+	}
+	name := paramFieldName(labelParts[0])
+	if !exportedGoIdent(name) {
+		return "", fmt.Errorf("%w: edge type label %q mangles to %q, not a valid exported Go identifier", ErrInvalidEntityName, string(edgeKey.Label), name)
+	}
+	return name, nil
+}
+
+// exportedGoIdent reports whether s matches ^[A-Z][A-Za-z0-9]*$ — the
+// exported-Go-identifier grammar spec §4.5 Rule 1 pins for entity names.
+// ASCII-only; Unicode escape hatch lives on field-name mangle only.
+func exportedGoIdent(s string) bool {
+	return exportedGoIdentRe.MatchString(s)
+}
+
+// entityAxisText renders a human-readable source-axis fragment for a
+// fail-message: "node type Person&Employee" or
+// "edge type (Person -[:KNOWS]-> Company)".
+func entityAxisText(kind entityKind, labels graph.LabelSetKey, edgeKey schema.EdgeKey) string {
+	if kind == entityNode {
+		return fmt.Sprintf("node type %q", string(labels))
+	}
+	return fmt.Sprintf("edge type (%s -[:%s]-> %s)", string(edgeKey.Source), string(edgeKey.Label), string(edgeKey.Target))
+}
+
+// prepareEntityFields derives an entity's per-property field list in
+// map-key-sorted order (spec §5.2). Returns the fields, the anyProp bit
+// (any property emits, ⇒ fmt used in decode helper), the anyNonNull bit
+// (any non-nullable property emits, ⇒ neo4j.GetProperty[T] used), and a
+// same-entity field-name collision as ErrPropertyFieldCollision.
+func prepareEntityFields(entityName string, props map[string]schema.Property) ([]preparedEntityField, bool, bool, error) {
+	keys := make([]string, 0, len(props))
+	for k := range props {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	fields := make([]preparedEntityField, 0, len(props))
+	seen := make(map[string]string, len(props))
+	anyProp := false
+	anyNonNull := false
+	for _, k := range keys {
+		p := props[k]
+		field := paramFieldName(p.Name)
+		if first, dup := seen[field]; dup {
+			return nil, false, false, fmt.Errorf("%w: entity %q properties %q and %q both mangle to %q", ErrPropertyFieldCollision, entityName, first, p.Name, field)
+		}
+		seen[field] = p.Name
+		ty, ok := goType(p.Type)
+		if !ok {
+			// C3 owns unrepresentable-width and temporal property types
+			// — including on entity properties. Route through the same
+			// scope sentinel as a query column with the same width.
+			return nil, false, false, fmt.Errorf("%w: entity %q property %q has unrepresentable property width %s (C3 owns)", ErrOutOfC2Scope, entityName, p.Name, p.Type)
+		}
+		fields = append(fields, preparedEntityField{
+			PropName: p.Name,
+			Field:    field,
+			GoType:   ty,
+			Nullable: p.Nullable,
+		})
+		anyProp = true
+		if !p.Nullable {
+			anyNonNull = true
+		}
+	}
+	return fields, anyProp, anyNonNull, nil
+}
+
 // phaseAAdmit is spec §2.1's Phase A: gates every query on axes Phase B
 // depends on for name derivation. First offender in slice order wins.
-func phaseAAdmit(queries []NamedQuery) error {
+// C2 widens the admissible column shape set to include ResolvedNode and
+// ResolvedEdge; parameter admission stays property-only.
+func phaseAAdmit(queries []NamedQuery, entityIndex map[entityLookupKey]int) error {
 	for i, q := range queries {
 		if _, reserved := reservedIdentifiers[q.Name]; reserved {
 			return fmt.Errorf("%w: query %q at position %d collides with reserved identifier", ErrIdentifierCollision, q.Name, i)
@@ -212,7 +491,7 @@ func phaseAAdmit(queries []NamedQuery) error {
 			return fmt.Errorf("%w: query %q at position %d has unrecognised cardinality %d", ErrInvalidCardinality, q.Name, i, q.Cardinality)
 		}
 		if len(q.Validated.Columns) == 0 {
-			// C1 admissibility requires a non-empty projection (§7).
+			// C2 admissibility requires a non-empty projection (§7).
 			return fmt.Errorf("%w: query %q at position %d has no projected columns", ErrOutOfC2Scope, q.Name, i)
 		}
 		if strings.ContainsRune(q.SourceText, '`') {
@@ -227,18 +506,29 @@ func phaseAAdmit(queries []NamedQuery) error {
 			if _, ok := rowFieldName(col.Name); !ok {
 				return fmt.Errorf("%w: query %q column %d %q is neither a bare identifier nor a property access — add an explicit AS alias", ErrAliasRequired, q.Name, ci, col.Name)
 			}
-			prop, ok := col.Type.(resolver.ResolvedProperty)
-			if !ok {
-				return fmt.Errorf("%w: query %q column %d %q resolved as %s (C1 projects ResolvedProperty only)", ErrOutOfC2Scope, q.Name, ci, col.Name, col.Type.String())
-			}
-			if _, ok := goType(prop.Type); !ok {
-				return fmt.Errorf("%w: query %q column %d %q has unrepresentable property width %s (C3 owns)", ErrOutOfC2Scope, q.Name, ci, col.Name, prop.Type)
+			switch t := col.Type.(type) {
+			case resolver.ResolvedProperty:
+				if _, ok := goType(t.Type); !ok {
+					return fmt.Errorf("%w: query %q column %d %q has unrepresentable property width %s (C3 owns)", ErrOutOfC2Scope, q.Name, ci, col.Name, t.Type)
+				}
+			case resolver.ResolvedNode:
+				if _, ok := entityIndex[entityLookupKey{Kind: entityNode, Labels: t.Labels}]; !ok {
+					// Unknown node type — the resolver's R0 gate should
+					// have caught this; a synthetic test seam lands here.
+					return fmt.Errorf("%w: query %q column %d %q references unknown node type %q", ErrOutOfC2Scope, q.Name, ci, col.Name, string(t.Labels))
+				}
+			case resolver.ResolvedEdge:
+				if _, ok := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: t.EdgeKey}]; !ok {
+					return fmt.Errorf("%w: query %q column %d %q references unknown edge type %s -[:%s]-> %s", ErrOutOfC2Scope, q.Name, ci, col.Name, string(t.EdgeKey.Source), string(t.EdgeKey.Label), string(t.EdgeKey.Target))
+				}
+			default:
+				return fmt.Errorf("%w: query %q column %d %q resolved as %s (C2 projects ResolvedProperty, ResolvedNode, ResolvedEdge only)", ErrOutOfC2Scope, q.Name, ci, col.Name, col.Type.String())
 			}
 		}
 		for pi, p := range q.Validated.Parameters {
 			prop, ok := p.Type.(resolver.ResolvedProperty)
 			if !ok {
-				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (C1 projects ResolvedProperty only)", ErrOutOfC2Scope, q.Name, pi, p.Name, p.Type.String())
+				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (C2 projects ResolvedProperty parameters only)", ErrOutOfC2Scope, q.Name, pi, p.Name, p.Type.String())
 			}
 			if _, ok := goType(prop.Type); !ok {
 				return fmt.Errorf("%w: query %q parameter %d $%s has unrepresentable property width %s (C3 owns)", ErrOutOfC2Scope, q.Name, pi, p.Name, prop.Type)
@@ -249,12 +539,13 @@ func phaseAAdmit(queries []NamedQuery) error {
 }
 
 // phaseBDerive is spec §2.1's Phase B: derives names for the method,
-// Params fields, and Row fields; runs per-query collision checks. Every
-// column and parameter is already known-property from Phase A, so
-// goType() cannot fail here.
-func phaseBDerive(queries []NamedQuery) ([]preparedQuery, error) {
+// Params fields, and Row fields; runs per-query collision checks. Phase A
+// guarantees columns are ResolvedProperty / ResolvedNode / ResolvedEdge
+// with a resolved entity index entry (for the latter two), so lookups
+// cannot fail here.
+func phaseBDerive(queries []NamedQuery, entities []preparedEntity, entityIndex map[entityLookupKey]int) ([]preparedQuery, error) {
 	out := make([]preparedQuery, 0, len(queries))
-	for qi, q := range queries {
+	for _, q := range queries {
 		p := preparedQuery{NamedQuery: q, MethodName: q.Name, Bare: lowerFirstRune(q.Name)}
 
 		// Params field derivation.
@@ -292,40 +583,71 @@ func phaseBDerive(queries []NamedQuery) ([]preparedQuery, error) {
 			}
 			seenRow[field] = ci
 
-			prop, ok := col.Type.(resolver.ResolvedProperty)
-			if !ok {
+			switch t := col.Type.(type) {
+			case resolver.ResolvedProperty:
+				ty, _ := goType(t.Type)
+				p.RowFields = append(p.RowFields, preparedRow{
+					ColumnName: col.Name,
+					Field:      field,
+					GoType:     ty,
+					Nullable:   t.Nullable,
+					Kind:       columnProperty,
+				})
+			case resolver.ResolvedNode:
+				idx := entityIndex[entityLookupKey{Kind: entityNode, Labels: t.Labels}]
+				p.RowFields = append(p.RowFields, preparedRow{
+					ColumnName: col.Name,
+					Field:      field,
+					GoType:     entities[idx].Name,
+					Nullable:   t.Nullable,
+					Kind:       columnNode,
+				})
+			case resolver.ResolvedEdge:
+				idx := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: t.EdgeKey}]
+				p.RowFields = append(p.RowFields, preparedRow{
+					ColumnName: col.Name,
+					Field:      field,
+					GoType:     entities[idx].Name,
+					Nullable:   t.Nullable,
+					Kind:       columnEdge,
+				})
+			default:
 				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC2Scope, q.Name, ci, col.Name, col.Type.String())
 			}
-			ty, _ := goType(prop.Type)
-			p.RowFields = append(p.RowFields, preparedRow{
-				ColumnName: col.Name,
-				Field:      field,
-				GoType:     ty,
-				Nullable:   prop.Nullable,
-			})
 		}
 
 		out = append(out, p)
-		_ = qi
 	}
 	return out, nil
 }
 
-// sweepIdentifiers runs spec §4.4's exported-identifier collision sweep
-// across every emitted top-level identifier: method names, Params
-// struct names, Row struct names. First insertion-order duplicate wins.
+// sweepIdentifiers runs spec §4.6's exported-identifier collision sweep
+// across every emitted top-level identifier. C2 inserts entity struct
+// names first (schema-side vocabulary anchor), then method names, then
+// <Method>Params, then <Method>Row. First insertion-order duplicate wins.
 // C0 skeleton identifiers (Queries / New / WithTx / ReadQuerier /
 // WriteQuerier / Querier) and the ErrNoRows / ErrMultipleResults
 // sentinels are already gate-checked by Phase A's reserved-identifier
 // match, so they never appear here.
-func sweepIdentifiers(prepared []preparedQuery) error {
-	seen := make(map[string]string, len(prepared)*3)
+func sweepIdentifiers(entities []preparedEntity, prepared []preparedQuery) error {
+	seen := make(map[string]string, len(entities)+len(prepared)*3)
 	insert := func(ident, source string) error {
 		if first, dup := seen[ident]; dup {
 			return fmt.Errorf("%w: identifier %q emitted by both %s and %s", ErrIdentifierCollision, ident, first, source)
 		}
 		seen[ident] = source
 		return nil
+	}
+	for _, e := range entities {
+		var srcAxis string
+		if e.Kind == entityNode {
+			srcAxis = fmt.Sprintf("entity struct %q (schema labels %q)", e.Name, string(e.Labels))
+		} else {
+			srcAxis = fmt.Sprintf("entity struct %q (schema edge %s -[:%s]-> %s)", e.Name, string(e.EdgeKey.Source), string(e.EdgeKey.Label), string(e.EdgeKey.Target))
+		}
+		if err := insert(e.Name, srcAxis); err != nil {
+			return err
+		}
 	}
 	for _, p := range prepared {
 		if err := insert(p.MethodName, fmt.Sprintf("query %q method", p.Name)); err != nil {
@@ -466,12 +788,138 @@ func renderQuerier(pkg string, prepared []preparedQuery) []byte {
 	return []byte(b.String())
 }
 
-// renderModels emits models.go (spec §5.5). Empty at C0 — schema-shaped
-// structs land at C2. The file exists so the golden tree carries a
-// stable file set from day one; later stages fill it in place.
-func renderModels(pkg string) []byte {
-	return []byte(header() + `package ` + pkg + `
+// renderModels emits models.go (spec §5.2). At C2 the body carries one
+// exported struct per schema NodeType and EdgeType (Phase Z emission
+// order) followed by an unexported decode<Name> helper. The import set
+// is a template invariant on schema shape:
+//
+//   - dbtype iff any entity struct emits (decode helpers take dbtype.Node
+//     or dbtype.Relationship)
+//   - fmt iff any property is decoded (decode-error wrapping)
+//   - neo4j iff any non-nullable property is decoded (neo4j.GetProperty[T])
+//
+// A schema with zero entity types emits an empty body — package clause
+// only — matching C1's byte-empty models.go (§7 "silently accepted").
+func renderModels(pkg string, entities []preparedEntity) []byte {
+	if len(entities) == 0 {
+		return []byte(header() + `package ` + pkg + `
 `)
+	}
+
+	anyProp := false
+	anyNonNull := false
+	for _, e := range entities {
+		if e.AnyProp {
+			anyProp = true
+		}
+		if e.AnyNonNull {
+			anyNonNull = true
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString(header())
+	b.WriteString("package ")
+	b.WriteString(pkg)
+	b.WriteString("\n\n")
+
+	// Imports: dbtype is unconditional (every helper's argument type);
+	// fmt gates on anyProp; neo4j gates on anyNonNull.
+	b.WriteString("import (\n")
+	if anyProp {
+		b.WriteString("\t\"fmt\"\n\n")
+	}
+	if anyNonNull {
+		b.WriteString("\t\"github.com/neo4j/neo4j-go-driver/v5/neo4j\"\n")
+	}
+	b.WriteString("\t\"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype\"\n")
+	b.WriteString(")\n\n")
+
+	for i, e := range entities {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		writeEntityStruct(&b, e)
+		b.WriteString("\n")
+		writeEntityDecodeHelper(&b, e)
+	}
+	return []byte(b.String())
+}
+
+// writeEntityStruct emits the exported struct declaration for one entity.
+// Zero-property entities emit an empty struct declaration (§7 "silently
+// accepted"). Doc comment names the source-side axis (labels or edge key).
+func writeEntityStruct(b *strings.Builder, e preparedEntity) {
+	if e.Kind == entityNode {
+		fmt.Fprintf(b, "// %s corresponds to the %s node type.\n", e.Name, e.DocAxis)
+	} else {
+		fmt.Fprintf(b, "// %s corresponds to the %s.\n", e.Name, e.DocAxis)
+	}
+	fmt.Fprintf(b, "type %s struct {\n", e.Name)
+	for _, f := range e.Fields {
+		if f.Nullable {
+			fmt.Fprintf(b, "\t%s *%s\n", f.Field, f.GoType)
+		} else {
+			fmt.Fprintf(b, "\t%s %s\n", f.Field, f.GoType)
+		}
+	}
+	b.WriteString("}\n")
+}
+
+// writeEntityDecodeHelper emits the unexported decode<Name> helper for
+// one entity. Nullable properties go through direct Props lookup + type
+// assertion (three-way outcome); non-nullable properties go through
+// neo4j.GetProperty[T] (missing key is a decode error).
+func writeEntityDecodeHelper(b *strings.Builder, e preparedEntity) {
+	var carrier, arg string
+	if e.Kind == entityNode {
+		carrier = "dbtype.Node"
+		arg = "node"
+	} else {
+		carrier = "dbtype.Relationship"
+		arg = "rel"
+	}
+	fmt.Fprintf(b, "// decode%s decodes a driver %s into a %s struct,\n", e.Name, carrier, e.Name)
+	b.WriteString("// enforcing per-property nullability against the schema.\n")
+	fmt.Fprintf(b, "func decode%s(%s %s) (%s, error) {\n", e.Name, arg, carrier, e.Name)
+	fmt.Fprintf(b, "\tvar out %s\n", e.Name)
+	for _, f := range e.Fields {
+		writeEntityFieldDecode(b, e, f, arg)
+	}
+	b.WriteString("\treturn out, nil\n")
+	b.WriteString("}\n")
+}
+
+// writeEntityFieldDecode emits one field's decode block. Nullable path:
+// Props lookup + type assertion + address-of-local into a pointer field.
+// Non-nullable path: neo4j.GetProperty[T] + fmt.Errorf wrap. The property
+// key is the source property name (Property.Name), not the derived field
+// name — the driver map is keyed on the schema-side name.
+func writeEntityFieldDecode(b *strings.Builder, e preparedEntity, f preparedEntityField, arg string) {
+	if f.Nullable {
+		fmt.Fprintf(b, "\tif v, ok := %s.Props[%q]; ok {\n", arg, f.PropName)
+		fmt.Fprintf(b, "\t\ts, ok := v.(%s)\n", f.GoType)
+		b.WriteString("\t\tif !ok {\n")
+		fmt.Fprintf(b, "\t\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: property %%q: expected %s, got %%T\", %q, v)\n", e.Name, e.Name, f.Field, f.GoType, f.PropName)
+		b.WriteString("\t\t}\n")
+		fmt.Fprintf(b, "\t\tout.%s = &s\n", f.Field)
+		b.WriteString("\t}\n")
+		return
+	}
+	// Non-nullable — use narrow driver carrier + Go conversion (same
+	// narrowing discipline as C1's per-column decode; see §5.1 of C1
+	// spec).
+	carrier := driverCarrier(f.GoType)
+	local := lowerFirstRune(f.Field)
+	fmt.Fprintf(b, "\t%s, err := neo4j.GetProperty[%s](%s, %q)\n", local, carrier, arg, f.PropName)
+	b.WriteString("\tif err != nil {\n")
+	fmt.Fprintf(b, "\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: %%w\", err)\n", e.Name, e.Name, f.Field)
+	b.WriteString("\t}\n")
+	if carrier != f.GoType {
+		fmt.Fprintf(b, "\tout.%s = %s(%s)\n", f.Field, f.GoType, local)
+	} else {
+		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, local)
+	}
 }
 
 // sourceGroup carries one <name>.cypher.go file's worth of prepared
@@ -510,16 +958,36 @@ func groupBySource(prepared []preparedQuery) []sourceGroup {
 	return groups
 }
 
+// groupHasEntityColumn reports whether any query in the group projects
+// a node-entity or edge-entity column. Gates the dbtype import in
+// <name>.cypher.go (§5.5).
+func groupHasEntityColumn(queries []preparedQuery) bool {
+	for _, p := range queries {
+		for _, f := range p.RowFields {
+			if f.Kind == columnNode || f.Kind == columnEdge {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // renderCypherFile emits one <name>.cypher.go file (spec §5.5). Per
 // query in order: query-text const, Params struct (if any), Row struct
-// (if any), method.
-func renderCypherFile(pkg string, queries []preparedQuery) []byte {
+// (if any), method. The withDbtype flag toggles the dbtype import; the
+// row-assembly template inlines the entity-column arm when a column's
+// kind is columnNode / columnEdge.
+func renderCypherFile(pkg string, queries []preparedQuery, withDbtype bool) []byte {
 	var b strings.Builder
 	b.WriteString(header())
 	b.WriteString("package ")
 	b.WriteString(pkg)
 	b.WriteString("\n\n")
-	b.WriteString("import (\n\t\"context\"\n\t\"fmt\"\n\n\t\"github.com/neo4j/neo4j-go-driver/v5/neo4j\"\n)\n\n")
+	b.WriteString("import (\n\t\"context\"\n\t\"fmt\"\n\n\t\"github.com/neo4j/neo4j-go-driver/v5/neo4j\"\n")
+	if withDbtype {
+		b.WriteString("\t\"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype\"\n")
+	}
+	b.WriteString(")\n\n")
 
 	for i, p := range queries {
 		if i > 0 {
@@ -606,7 +1074,8 @@ func returnTypeText(p preparedQuery) string {
 // query's return type, matching the emitted method signature (§5.3).
 // :many always returns a slice, whose zero value is nil. :one returns
 // T (single column) or MethodRow (multi-column) — the T's zero value
-// (or nil for a nullable pointer T).
+// (or nil for a nullable pointer T; entity struct's zero-composite for
+// a bare-value entity column).
 func zeroValueText(p preparedQuery) string {
 	if p.Cardinality == CardinalityMany {
 		return "nil"
@@ -614,6 +1083,9 @@ func zeroValueText(p preparedQuery) string {
 	if len(p.RowFields) == 1 {
 		if p.RowFields[0].Nullable {
 			return "nil"
+		}
+		if p.RowFields[0].Kind == columnNode || p.RowFields[0].Kind == columnEdge {
+			return p.RowFields[0].GoType + "{}"
 		}
 		switch p.RowFields[0].GoType {
 		case "string":
@@ -768,6 +1240,10 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p preparedQuery, f prepar
 			}
 		}
 	}
+	if f.Kind == columnNode || f.Kind == columnEdge {
+		writeEntityColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
+		return
+	}
 	carrier := driverCarrier(f.GoType)
 	fmt.Fprintf(b, "%s%s, isNil, err := neo4j.GetRecordValue[%s](%s, %q)\n", indent, varName, carrier, recordExpr, f.ColumnName)
 	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
@@ -794,6 +1270,55 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p preparedQuery, f prepar
 	b.WriteString(indent)
 	b.WriteString(assignPrefix[len(indent):])
 	b.WriteString(valueExpr)
+	b.WriteString(assignSuffix)
+}
+
+// writeEntityColumnDecodeIndent emits the entity-column arm of the row
+// assembly (spec §5.5). Carrier is dbtype.Node for node columns, dbtype.
+// Relationship for edge columns; the decode helper takes the driver
+// value and returns the entity struct. Nullable columns produce a
+// *EntityName pointer field via a local +address-of; non-nullable
+// columns are a decode error when the driver value arrived null.
+func writeEntityColumnDecodeIndent(b *strings.Builder, p preparedQuery, f preparedRow, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
+	var carrier, decodeArg string
+	if f.Kind == columnNode {
+		carrier = "dbtype.Node"
+		decodeArg = "node"
+	} else {
+		carrier = "dbtype.Relationship"
+		decodeArg = "rel"
+	}
+	// Distinct local names per column position (n/r suffix) to avoid
+	// shadowing in multi-column rows; when varName is "value" (single-
+	// column projection), we use "node"/"rel" as the carrier local.
+	local := decodeArg
+	if strings.HasPrefix(varName, "value") {
+		// Multi-column path — the varName is unique; append the carrier
+		// hint so per-column locals never collide.
+		local = varName + strings.ToUpper(decodeArg[:1]) + decodeArg[1:]
+	}
+	fmt.Fprintf(b, "%s%s, isNil, err := neo4j.GetRecordValue[%s](%s, %q)\n", indent, local, carrier, recordExpr, f.ColumnName)
+	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	if f.Nullable {
+		fmt.Fprintf(b, "%svar %sPtr *%s\n", indent, varName, f.GoType)
+		fmt.Fprintf(b, "%sif !isNil {\n", indent)
+		fmt.Fprintf(b, "%s\tv, err := decode%s(%s)\n", indent, f.GoType, local)
+		fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s\t}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+		fmt.Fprintf(b, "%s\t%sPtr = &v\n", indent, varName)
+		fmt.Fprintf(b, "%s}\n", indent)
+		b.WriteString(indent)
+		b.WriteString(assignPrefix[len(indent):])
+		b.WriteString(varName)
+		b.WriteString("Ptr")
+		b.WriteString(assignSuffix)
+		return
+	}
+	fmt.Fprintf(b, "%sif isNil {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	fmt.Fprintf(b, "%s%s, err := decode%s(%s)\n", indent, varName, f.GoType, local)
+	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	b.WriteString(indent)
+	b.WriteString(assignPrefix[len(indent):])
+	b.WriteString(varName)
 	b.WriteString(assignSuffix)
 }
 

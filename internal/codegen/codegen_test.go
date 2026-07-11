@@ -86,6 +86,12 @@ func sentinelIdent(err error) string {
 		return "ErrAliasRequired"
 	case ErrIdentifierCollision:
 		return "ErrIdentifierCollision"
+	case ErrInvalidEntityName:
+		return "ErrInvalidEntityName"
+	case ErrUnnamedMultiLabelType:
+		return "ErrUnnamedMultiLabelType"
+	case ErrPropertyFieldCollision:
+		return "ErrPropertyFieldCollision"
 	case queryfile.ErrMissingAnnotation:
 		return "ErrMissingAnnotation"
 	case queryfile.ErrUnknownCardinality:
