@@ -635,12 +635,34 @@ func (l *listener) EnterOC_Return(c *gen.OC_ReturnContext) {
 //
 // Parameter mining still runs at Stage 11 — the subquery body's clauses
 // do not, so a $param inside EXISTS { MATCH (n) WHERE $threshold ... }
-// would be silently dropped without this sweep. findParameters walks the
-// whole subtree once at entry and records ExprUse{TypeBool,
-// ExprInPredicate} against every $param, matching how mineWhere handles
-// parameters at the WHERE level.
+// would be silently dropped without this sweep.
+//
+// Two-pass: (1) clause-slot classification (gqlc-33k.3, ADR 0008 additive):
+// every OC_Skip / OC_Limit under the subtree — whether at the outer level
+// or nested one EXISTS deeper — has its bare-$p bound to the precise
+// ClauseSlotUse before the blanket sweep sees it, mirroring
+// mineClauseSlotParameter's outer discipline. The clause slot is a
+// syntactic property of the enclosing OC_Skip/OC_Limit node, not of the
+// subquery depth. (2) blanket ExprUse{TypeBool, ExprInPredicate} against
+// every residual $param, matching how mineWhere handles parameters at the
+// WHERE level. Nested EXISTS's own EnterOC_ExistentialSubquery is a no-op
+// on already-approved nodes (byParam dedup + approved-tree guard in
+// addParameterUse), so the outer sweep may cover the entire subtree
+// without double-recording.
 func (l *listener) EnterOC_ExistentialSubquery(c *gen.OC_ExistentialSubqueryContext) {
 	l.subqueryDepth++
+	for _, s := range findSkipNodes(c) {
+		l.mineClauseSlotParameter(s.OC_Expression(), query.ClauseSlotSkip)
+		if l.err != nil {
+			return
+		}
+	}
+	for _, lim := range findLimitNodes(c) {
+		l.mineClauseSlotParameter(lim.OC_Expression(), query.ClauseSlotLimit)
+		if l.err != nil {
+			return
+		}
+	}
 	for _, p := range findParameters(c) {
 		if l.approved[p] {
 			continue

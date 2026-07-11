@@ -1,0 +1,24 @@
+{
+  "columns": [
+    {
+      "name": "p.name",
+      "type": {
+        "kind": "property",
+        "type": "STRING",
+        "nullable": false
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [
+    {
+      "name": "lim",
+      "type": {
+        "kind": "scalar",
+        "scalar": "int"
+      }
+    }
+  ],
+  "statement": "read",
+  "distinct": false
+}
