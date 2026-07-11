@@ -1,0 +1,5 @@
+{
+  "package": "int128scope",
+  "queryFiles": ["queries.cypher"],
+  "expectedError": "codegen.ErrOutOfC1Scope"
+}

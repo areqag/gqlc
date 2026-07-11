@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE NullableParameter AS {
+    (:Person {
+        name :: STRING NOT NULL,
+        age  :: INT64
+    })
+}

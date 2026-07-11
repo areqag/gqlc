@@ -1,0 +1,4 @@
+{
+  "package": "manycolmany",
+  "queryFiles": ["queries.cypher"]
+}

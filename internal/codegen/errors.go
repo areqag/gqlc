@@ -41,6 +41,44 @@ var (
 	// because it is a codegen-internal invariant violation, not a
 	// user-facing failure mode; the reachability sweep skips it.
 	ErrFormatFailure = errors.New("format failure")
+
+	// ErrOutOfC1Scope is returned when a C1-admissible input carries a
+	// construct C1 does not project: a column or parameter whose resolved
+	// type is not ResolvedProperty (nodes / edges / edgeUnion / scalars /
+	// temporals / lists / unknowns), an unrepresentable-width property
+	// type (INT128+, UINT128+, FLOAT16, FLOAT128+, DECIMAL), a DATE or
+	// TIMESTAMP property column (C3 owns temporals), a :exec cardinality
+	// (C4 owns writes), or a query-text const carrying a raw-string-
+	// hostile character (backtick). Category-grained per C0's precedent
+	// (mirrors resolver.ErrOutOfR0Scope); C4/C5/C6 retire the sub-cases
+	// as they land. Introduced at C1.
+	ErrOutOfC1Scope = errors.New("out of C1 scope")
+
+	// ErrParamNameCollision is returned when two Parameters mangle to
+	// the same Params-struct field name (§4.2). The fail-message names
+	// both parameter positions. Introduced at C1.
+	ErrParamNameCollision = errors.New("parameter name collision")
+
+	// ErrRowFieldCollision is returned when two Columns derive to the
+	// same Row-struct field name (§4.3). The fail-message names both
+	// column positions and prompts an explicit AS alias. Introduced at
+	// C1.
+	ErrRowFieldCollision = errors.New("row field name collision")
+
+	// ErrAliasRequired is returned when a Column's Name matches neither
+	// the bare-identifier shape nor the property-access shape (§4.3),
+	// so the row-field name cannot be derived deterministically. The
+	// fail-message names the column and prompts an explicit AS alias.
+	// Introduced at C1.
+	ErrAliasRequired = errors.New("alias required")
+
+	// ErrIdentifierCollision is returned when two generated top-level
+	// identifiers in one package collide (§4.4), or a query's method
+	// name matches a reserved identifier the emission owns (§4.1). The
+	// fail-message names both identifier sources. C5 hardens the sweep
+	// as entity structs and decode helpers land (C2/C3). Introduced at
+	// C1.
+	ErrIdentifierCollision = errors.New("identifier collision")
 )
 
 // allSentinels is the canonical closed set of user-input-reachable
@@ -59,4 +97,9 @@ var allSentinels = []error{
 	ErrDuplicateSourceFile,
 	ErrDuplicateQueryName,
 	ErrInvalidCardinality,
+	ErrOutOfC1Scope,
+	ErrParamNameCollision,
+	ErrRowFieldCollision,
+	ErrAliasRequired,
+	ErrIdentifierCollision,
 }

@@ -1,0 +1,4 @@
+{
+  "package": "onecoloneparamone",
+  "queryFiles": ["queries.cypher"]
+}

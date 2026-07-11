@@ -1,0 +1,4 @@
+{
+  "package": "allwidths",
+  "queryFiles": ["queries.cypher"]
+}

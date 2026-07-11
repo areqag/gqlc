@@ -1,0 +1,5 @@
+CREATE PROPERTY GRAPH TYPE Int128Scope AS {
+    (:Row {
+        wide :: INT128 NOT NULL
+    })
+}

@@ -1,0 +1,5 @@
+{
+  "package": "rowcollision",
+  "queryFiles": ["queries.cypher"],
+  "expectedError": "codegen.ErrRowFieldCollision"
+}

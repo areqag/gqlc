@@ -1,0 +1,4 @@
+{
+  "package": "onecolmany",
+  "queryFiles": ["queries.cypher"]
+}

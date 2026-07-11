@@ -11,7 +11,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/areqag/gqlc/internal/procsig"
+	"github.com/areqag/gqlc/internal/query/cypher"
 	"github.com/areqag/gqlc/internal/queryfile"
+	"github.com/areqag/gqlc/internal/resolver"
 	"github.com/areqag/gqlc/internal/schema"
 	"github.com/areqag/gqlc/internal/schema/gql"
 )
@@ -73,6 +76,16 @@ func sentinelIdent(err error) string {
 		return "ErrInvalidCardinality"
 	case ErrFormatFailure:
 		return "ErrFormatFailure"
+	case ErrOutOfC1Scope:
+		return "ErrOutOfC1Scope"
+	case ErrParamNameCollision:
+		return "ErrParamNameCollision"
+	case ErrRowFieldCollision:
+		return "ErrRowFieldCollision"
+	case ErrAliasRequired:
+		return "ErrAliasRequired"
+	case ErrIdentifierCollision:
+		return "ErrIdentifierCollision"
 	case queryfile.ErrMissingAnnotation:
 		return "ErrMissingAnnotation"
 	case queryfile.ErrUnknownCardinality:
@@ -120,27 +133,58 @@ func (s *CodegenSuite) loadSchema(dir string) schema.Schema {
 }
 
 // loadNamedQueries walks the manifest's queryFiles and turns each into
-// NamedQueries via the queryfile parser. Resolution is skipped at C0:
-// codegen does not read Validated in C0, so leaving it zero produces
-// a byte-identical result. C1+ will thread the resolver in.
-func (s *CodegenSuite) loadNamedQueries(dir string, m manifest) []NamedQuery {
+// NamedQueries. C1 threads the cypher parser and the resolver into the
+// pipeline so every read query carries a real Validated shape — Phase A
+// and Phase B key on it (spec §2.1). A fixture whose queries fail
+// resolution earlier than codegen fails the suite via
+// s.Require().NoError below; the invalid-arm variant
+// (loadNamedQueriesAllowing) permits pre-codegen errors when the
+// fixture declares a non-codegen expected sentinel.
+func (s *CodegenSuite) loadNamedQueries(dir string, m manifest, sch schema.Schema) []NamedQuery {
+	out, err := loadNamedQueries(dir, m, sch)
+	s.Require().NoError(err)
+	return out
+}
+
+// loadNamedQueries is the shared load path used by both TestValid and
+// TestInvalid. Returns the first resolution error verbatim so the
+// invalid arm can decide whether to accept it (a fixture may target a
+// non-codegen sentinel that fires upstream of codegen).
+func loadNamedQueries(dir string, m manifest, sch schema.Schema) ([]NamedQuery, error) {
+	emptyReg, err := procsig.NewRegistry(nil)
+	if err != nil {
+		return nil, err
+	}
+	res := resolver.New(sch, resolver.WithRegistry(emptyReg))
 	var out []NamedQuery
 	for _, qf := range m.QueryFiles {
 		src, err := os.ReadFile(filepath.Join(dir, qf))
-		s.Require().NoError(err)
+		if err != nil {
+			return nil, err
+		}
 		parsed, err := queryfile.New().Parse(bytes.NewReader(src))
-		s.Require().NoError(err)
-		base := filepath.Base(qf)
+		if err != nil {
+			return nil, err
+		}
 		for _, aq := range parsed {
+			q, err := cypher.New(cypher.WithRegistry(emptyReg)).Parse(bytes.NewReader([]byte(aq.Text)))
+			if err != nil {
+				return nil, err
+			}
+			vq, err := res.Resolve(q)
+			if err != nil {
+				return nil, err
+			}
 			out = append(out, NamedQuery{
 				Name:        aq.Name,
 				Cardinality: aq.Cardinality,
-				SourceFile:  base,
+				SourceFile:  qf,
 				SourceText:  aq.Text,
+				Validated:   vq,
 			})
 		}
 	}
-	return out
+	return out, nil
 }
 
 // validFixtures walks valid/*/.
@@ -170,7 +214,7 @@ func (s *CodegenSuite) TestValid() {
 		s.Run(name, func() {
 			m := s.loadManifest(dir)
 			sch := s.loadSchema(dir)
-			queries := s.loadNamedQueries(dir, m)
+			queries := s.loadNamedQueries(dir, m, sch)
 
 			got, err := New().Generate(Input{Schema: sch, Queries: queries})
 			s.Require().NoError(err)
@@ -226,7 +270,7 @@ func (s *CodegenSuite) loadInvalidInput(dir string, m manifest) Input {
 			}},
 		}
 	}
-	return Input{Schema: sch, Queries: s.loadNamedQueries(dir, m)}
+	return Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
 }
 
 // TestDoubleRun asserts Generate is byte-deterministic: same Input in,
@@ -238,7 +282,8 @@ func (s *CodegenSuite) TestDoubleRun() {
 		name := filepath.Base(dir)
 		s.Run(name, func() {
 			m := s.loadManifest(dir)
-			in := Input{Schema: s.loadSchema(dir), Queries: s.loadNamedQueries(dir, m)}
+			sch := s.loadSchema(dir)
+			in := Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
 			first, err := New().Generate(in)
 			s.Require().NoError(err)
 			second, err := New().Generate(in)

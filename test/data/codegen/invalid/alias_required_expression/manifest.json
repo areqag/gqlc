@@ -1,0 +1,5 @@
+{
+  "package": "aliasrequiredexpr",
+  "queryFiles": ["queries.cypher"],
+  "expectedError": "codegen.ErrAliasRequired"
+}
