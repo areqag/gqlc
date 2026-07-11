@@ -10,23 +10,19 @@
       "groupingKey": false
     },
     {
-      "name": "r1",
+      "name": "b",
       "type": {
-        "kind": "edge",
-        "edgeKey": {
-          "source": "Person",
-          "label": "AUTHORED",
-          "target": "Post"
-        },
+        "kind": "node",
+        "labels": "Post",
         "nullable": false
       },
       "groupingKey": false
     },
     {
-      "name": "b",
+      "name": "c",
       "type": {
         "kind": "node",
-        "labels": "Post",
+        "labels": "Person",
         "nullable": false
       },
       "groupingKey": false
