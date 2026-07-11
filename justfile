@@ -72,6 +72,11 @@ test: check-hooks
 tidy-check:
     go mod tidy -diff
 
+# runs the codegen goldens' compile fence: go build && go vet inside the
+# nested module. Used identically locally (post-generate) and in CI.
+test-codegen-fence:
+    cd test/data/codegen && go build ./... && go vet ./...
+
 # call-graph-aware vulnerability scan; run on dependency changes and on the
 # weekly CI schedule ("@latest" deliberate: the vuln DB matters more than
 # tool-version reproducibility)
