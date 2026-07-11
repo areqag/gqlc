@@ -1,0 +1,4 @@
+{
+  "package": "writemanyprojectionproperty",
+  "queryFiles": ["queries.cypher"]
+}

@@ -1,5 +1,0 @@
-CREATE PROPERTY GRAPH TYPE OutOfC3ScopeNonPropertyParameter AS {
-    (:Person {
-        id :: INT64 NOT NULL
-    })
-}

@@ -1,0 +1,5 @@
+{
+  "package": "execonprojectionwrite",
+  "queryFiles": ["queries.cypher"],
+  "expectedError": "codegen.ErrExecOnProjection"
+}

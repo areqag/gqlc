@@ -47,8 +47,13 @@ func (d driverDB) run(ctx context.Context, cypher string, params map[string]any,
 			return result.Collect(ctx)
 		})
 	case neo4j.AccessModeWrite:
-		// C4 populates the write arm.
-		return nil, fmt.Errorf("gqlc: write path not implemented")
+		return neo4j.ExecuteWrite(ctx, session, func(tx neo4j.ManagedTransaction) ([]*neo4j.Record, error) {
+			result, err := tx.Run(ctx, cypher, params)
+			if err != nil {
+				return nil, err
+			}
+			return result.Collect(ctx)
+		})
 	default:
 		return nil, fmt.Errorf("gqlc: unknown access mode %v", access)
 	}

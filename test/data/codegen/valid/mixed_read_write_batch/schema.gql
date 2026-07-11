@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE MixedReadWriteBatch AS {
+    (:Person {
+        id   :: INT64 NOT NULL,
+        name :: STRING NOT NULL
+    })
+}

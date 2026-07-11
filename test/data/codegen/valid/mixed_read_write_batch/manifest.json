@@ -1,0 +1,4 @@
+{
+  "package": "mixedreadwritebatch",
+  "queryFiles": ["queries.cypher"]
+}

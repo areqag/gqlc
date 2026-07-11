@@ -1,0 +1,7 @@
+CREATE PROPERTY GRAPH TYPE WriteExecFloat32Param AS {
+    (:Person {
+        id     :: INT64 NOT NULL,
+        height :: FLOAT32 NOT NULL,
+        tall   :: BOOL NOT NULL
+    })
+}

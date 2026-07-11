@@ -161,6 +161,22 @@ type preparedEntityField struct {
 	Nullable bool
 }
 
+// cardinalityAnnotation renders a Cardinality as its ":one" / ":many" /
+// ":exec" annotation text — the caller-visible form Phase A's fail
+// messages use so the error line reads back the exact string the author
+// typed on the // name: line.
+func cardinalityAnnotation(c Cardinality) string {
+	switch c {
+	case CardinalityOne:
+		return ":one"
+	case CardinalityMany:
+		return ":many"
+	case CardinalityExec:
+		return ":exec"
+	}
+	return "<invalid>"
+}
+
 // generate is the pure emission kernel. Determinism per §2.3: input
 // slices are walked in their author-defined order; the output slice is
 // sorted by Path before return. First-error short-circuit: (nil, err)
@@ -231,10 +247,10 @@ func generate(in Input) ([]File, error) {
 	// SourceFile basename in first-appearance order (§5.5). Basename
 	// stripped of extension.
 	for _, group := range groupBySource(prepared) {
-		needDbtype, needTime := groupImports(group.queries)
+		needDbtype, needTime, needFmt := groupImports(group.queries)
 		files = append(files, File{
 			Path:     group.filename,
-			Contents: renderCypherFile(pkg, group.queries, needDbtype, needTime),
+			Contents: renderCypherFile(pkg, group.queries, needDbtype, needTime, needFmt),
 		})
 	}
 
@@ -513,30 +529,40 @@ func prepareEntityFields(entityName string, props map[string]schema.Property) ([
 
 // phaseAAdmit is spec §2.1's Phase A: gates every query on axes Phase B
 // depends on for name derivation. First offender in slice order wins.
-// C3 widens the admissible column shape set to the full closed sum
-// minus ResolvedEdgeUnion (which C5 owns); parameter admission stays
-// property-only, extended to temporal-property widths DATE / TIMESTAMP.
-// Unrepresentable widths on columns and parameters route through
-// ErrUnrepresentableWidth (Phase Z already caught schema-side offenders
-// so a column projecting an unrepresentable-width property is unreachable
-// unless the query declares an unrepresentable width on a parameter).
+// C4 widens cardinality admission to the full {One, Many, Exec} set and
+// pairs it with a cardinality × shape gate (spec §4.9): :exec on a
+// column-producing query routes through ErrExecOnProjection; :one or
+// :many on a zero-column query routes through ErrCardinalityShapeMismatch.
+// Column and parameter admission unchanged from C3 (property-widths on
+// parameters, full closed sum minus ResolvedEdgeUnion on columns);
+// unrepresentable widths route through ErrUnrepresentableWidth (Phase Z
+// already caught schema-side offenders so a column projecting an
+// unrepresentable-width property is unreachable unless the query declares
+// an unrepresentable width on a parameter).
 func phaseAAdmit(queries []NamedQuery, entities []preparedEntity, entityIndex map[entityLookupKey]int) error {
 	for i, q := range queries {
 		if _, reserved := reservedIdentifiers[q.Name]; reserved {
 			return fmt.Errorf("%w: query %q at position %d collides with reserved identifier", ErrIdentifierCollision, q.Name, i)
 		}
-		if q.Cardinality == CardinalityExec {
-			return fmt.Errorf("%w: query %q at position %d has cardinality :exec (C4 owns writes)", ErrOutOfC3Scope, q.Name, i)
-		}
-		if q.Cardinality != CardinalityOne && q.Cardinality != CardinalityMany {
+		if q.Cardinality != CardinalityOne && q.Cardinality != CardinalityMany && q.Cardinality != CardinalityExec {
 			return fmt.Errorf("%w: query %q at position %d has unrecognised cardinality %d", ErrInvalidCardinality, q.Name, i, q.Cardinality)
 		}
-		if len(q.Validated.Columns) == 0 {
-			// A projection query must project at least one column (§7).
-			return fmt.Errorf("%w: query %q at position %d has no projected columns", ErrOutOfC3Scope, q.Name, i)
+		// Cardinality × shape gate (spec §4.9). Runs before the column-type
+		// sweep so a fixture combining :exec-on-projection with an
+		// unrepresentable-width column fires ErrExecOnProjection first —
+		// the caller fixes the cardinality axis before revisiting widths.
+		if q.Cardinality == CardinalityExec && len(q.Validated.Columns) > 0 {
+			return fmt.Errorf("%w: query %q at position %d has cardinality :exec but projects %d column(s) (first column %q) — drop :exec or drop RETURN", ErrExecOnProjection, q.Name, i, len(q.Validated.Columns), q.Validated.Columns[0].Name)
+		}
+		if (q.Cardinality == CardinalityOne || q.Cardinality == CardinalityMany) && len(q.Validated.Columns) == 0 {
+			shape := "zero-column read"
+			if q.Validated.Statement == resolver.StatementWrite {
+				shape = "zero-column write"
+			}
+			return fmt.Errorf("%w: query %q at position %d has cardinality %s but the query is a %s — annotate :exec or add a RETURN clause", ErrCardinalityShapeMismatch, q.Name, i, cardinalityAnnotation(q.Cardinality), shape)
 		}
 		if strings.ContainsRune(q.SourceText, '`') {
-			return fmt.Errorf("%w: query %q at position %d has a backtick in its source text", ErrOutOfC3Scope, q.Name, i)
+			return fmt.Errorf("%w: query %q at position %d has a backtick in its source text", ErrOutOfC4Scope, q.Name, i)
 		}
 		for ci, col := range q.Validated.Columns {
 			// Shape check first (spec §4.3, §6.4): count(*), arithmetic
@@ -556,14 +582,14 @@ func phaseAAdmit(queries []NamedQuery, entities []preparedEntity, entityIndex ma
 				if _, ok := entityIndex[entityLookupKey{Kind: entityNode, Labels: t.Labels}]; !ok {
 					// Unknown node type — the resolver's R0 gate should
 					// have caught this; a synthetic test seam lands here.
-					return fmt.Errorf("%w: query %q column %d %q references unknown node type %q", ErrOutOfC3Scope, q.Name, ci, col.Name, string(t.Labels))
+					return fmt.Errorf("%w: query %q column %d %q references unknown node type %q", ErrOutOfC4Scope, q.Name, ci, col.Name, string(t.Labels))
 				}
 			case resolver.ResolvedEdge:
 				if _, ok := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: t.EdgeKey}]; !ok {
-					return fmt.Errorf("%w: query %q column %d %q references unknown edge type %s -[:%s]-> %s", ErrOutOfC3Scope, q.Name, ci, col.Name, string(t.EdgeKey.Source), string(t.EdgeKey.Label), string(t.EdgeKey.Target))
+					return fmt.Errorf("%w: query %q column %d %q references unknown edge type %s -[:%s]-> %s", ErrOutOfC4Scope, q.Name, ci, col.Name, string(t.EdgeKey.Source), string(t.EdgeKey.Label), string(t.EdgeKey.Target))
 				}
 			case resolver.ResolvedEdgeUnion:
-				return fmt.Errorf("%w: query %q column %d %q resolved as edgeUnion (C5 owns)", ErrOutOfC3Scope, q.Name, ci, col.Name)
+				return fmt.Errorf("%w: query %q column %d %q resolved as edgeUnion (C5 owns)", ErrOutOfC4Scope, q.Name, ci, col.Name)
 			case resolver.ResolvedTemporal:
 				// Every temporal kind is representable; the closed enum
 				// maps into the temporal Go type table (§5.1) without a
@@ -583,13 +609,13 @@ func phaseAAdmit(queries []NamedQuery, entities []preparedEntity, entityIndex ma
 					return fmt.Errorf("query %q column %d %q: %w", q.Name, ci, col.Name, err)
 				}
 			default:
-				return fmt.Errorf("%w: query %q column %d %q resolved as %s", ErrOutOfC3Scope, q.Name, ci, col.Name, col.Type.String())
+				return fmt.Errorf("%w: query %q column %d %q resolved as %s", ErrOutOfC4Scope, q.Name, ci, col.Name, col.Type.String())
 			}
 		}
 		for pi, p := range q.Validated.Parameters {
 			prop, ok := p.Type.(resolver.ResolvedProperty)
 			if !ok {
-				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (non-property parameters are post-v1)", ErrOutOfC3Scope, q.Name, pi, p.Name, p.Type.String())
+				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (non-property parameters are post-v1)", ErrOutOfC4Scope, q.Name, pi, p.Name, p.Type.String())
 			}
 			if _, ok := goType(prop.Type); !ok {
 				return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrUnrepresentableWidth, q.Name, pi, p.Name, prop.Type)
@@ -621,7 +647,7 @@ func phaseBDerive(queries []NamedQuery, entities []preparedEntity, entityIndex m
 			// Phase A guaranteed ResolvedProperty + representable width.
 			prop, ok := param.Type.(resolver.ResolvedProperty)
 			if !ok {
-				return nil, fmt.Errorf("%w: query %q parameter %d $%s: internal invariant — Phase A missed non-property type %s", ErrOutOfC3Scope, q.Name, pi, param.Name, param.Type.String())
+				return nil, fmt.Errorf("%w: query %q parameter %d $%s: internal invariant — Phase A missed non-property type %s", ErrOutOfC4Scope, q.Name, pi, param.Name, param.Type.String())
 			}
 			ty, _ := goType(prop.Type)
 			p.ParamFields = append(p.ParamFields, preparedParam{
@@ -714,7 +740,7 @@ func phaseBDerive(queries []NamedQuery, entities []preparedEntity, entityIndex m
 					ListElem:   t.Element,
 				})
 			default:
-				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC3Scope, q.Name, ci, col.Name, col.Type.String())
+				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC4Scope, q.Name, ci, col.Name, col.Type.String())
 			}
 		}
 
@@ -843,8 +869,13 @@ func (d driverDB) run(ctx context.Context, cypher string, params map[string]any,
 			return result.Collect(ctx)
 		})
 	case neo4j.AccessModeWrite:
-		// C4 populates the write arm.
-		return nil, fmt.Errorf("gqlc: write path not implemented")
+		return neo4j.ExecuteWrite(ctx, session, func(tx neo4j.ManagedTransaction) ([]*neo4j.Record, error) {
+			result, err := tx.Run(ctx, cypher, params)
+			if err != nil {
+				return nil, err
+			}
+			return result.Collect(ctx)
+		})
 	default:
 		return nil, fmt.Errorf("gqlc: unknown access mode %v", access)
 	}
@@ -864,10 +895,14 @@ func (t txDB) run(ctx context.Context, cypher string, params map[string]any, _ n
 `)
 }
 
-// renderQuerier emits querier.go (spec §5.4). ReadQuerier is populated
-// with one method signature per read query in Input.Queries order.
-// WriteQuerier stays empty (C4 populates). The compile-time assertion
-// on the last line catches method-name drift.
+// renderQuerier emits querier.go (spec §5.4). ReadQuerier lists every
+// method whose Validated.Statement == StatementRead in Input.Queries
+// order; WriteQuerier lists every StatementWrite method in the same
+// filtered order. A method belongs to exactly one interface — the
+// partition is on Statement, not on Cardinality (a :one write-with-
+// projection lands in WriteQuerier; a :exec on a call-with-no-yield
+// lands in ReadQuerier). The compile-time assertion on the last line
+// catches method-name drift.
 func renderQuerier(pkg string, prepared []preparedQuery) []byte {
 	var b strings.Builder
 	b.WriteString(header())
@@ -894,12 +929,24 @@ func renderQuerier(pkg string, prepared []preparedQuery) []byte {
 	}
 	b.WriteString("type ReadQuerier interface {\n")
 	for _, p := range prepared {
+		if p.Validated.Statement != resolver.StatementRead {
+			continue
+		}
 		b.WriteString("\t")
 		writeMethodSignature(&b, p)
 		b.WriteString("\n")
 	}
 	b.WriteString("}\n\n")
-	b.WriteString("type WriteQuerier interface {\n}\n\n")
+	b.WriteString("type WriteQuerier interface {\n")
+	for _, p := range prepared {
+		if p.Validated.Statement != resolver.StatementWrite {
+			continue
+		}
+		b.WriteString("\t")
+		writeMethodSignature(&b, p)
+		b.WriteString("\n")
+	}
+	b.WriteString("}\n\n")
 	b.WriteString("type Querier interface {\n\tReadQuerier\n\tWriteQuerier\n}\n\n")
 	b.WriteString("var _ Querier = (*Queries)(nil)\n")
 	return []byte(b.String())
@@ -1126,14 +1173,22 @@ func groupBySource(prepared []preparedQuery) []sourceGroup {
 }
 
 // groupImports computes the C3 per-file import gates for one
-// <name>.cypher.go source group. dbtype fires when any column in the
-// group decodes through a dbtype.<Kind> carrier (entity, DATE property,
-// six temporal-column kinds except TemporalDateTime, or a list column
-// whose leaf uses dbtype.<Kind>). time fires when any column decodes
-// as time.Time (TIMESTAMP property, TemporalDateTime column, or a list
-// column whose leaf is either).
-func groupImports(queries []preparedQuery) (needDbtype, needTime bool) {
+// <name>.cypher.go source group. dbtype fires when any column or
+// parameter decodes / encodes through a dbtype.<Kind> carrier
+// (entity, DATE property, six temporal-column kinds except
+// TemporalDateTime, or a list column whose leaf uses dbtype.<Kind>).
+// time fires when any column or parameter uses time.Time (TIMESTAMP
+// property, TemporalDateTime column, or a list column whose leaf is
+// either). fmt fires when any method's body emits a decode wrapper
+// (`fmt.Errorf`) — every :one / :many method does, and every write-
+// with-projection method does; the C4 :exec three-line body does not
+// (spec §5.5).
+func groupImports(queries []preparedQuery) (needDbtype, needTime, needFmt bool) {
 	for _, p := range queries {
+		if p.Cardinality != CardinalityExec {
+			// Row-assembly bodies emit fmt.Errorf decode wrappers.
+			needFmt = true
+		}
 		for _, f := range p.RowFields {
 			nd, nt := columnNeedsImports(f)
 			if nd {
@@ -1143,8 +1198,17 @@ func groupImports(queries []preparedQuery) (needDbtype, needTime bool) {
 				needTime = true
 			}
 		}
+		for _, f := range p.ParamFields {
+			nd, nt := goTypeNeedsImports(f.GoType)
+			if nd {
+				needDbtype = true
+			}
+			if nt {
+				needTime = true
+			}
+		}
 	}
-	return needDbtype, needTime
+	return needDbtype, needTime, needFmt
 }
 
 // columnNeedsImports reports whether one prepared row needs dbtype /
@@ -1198,9 +1262,11 @@ func goTypeNeedsImports(ty string) (bool, bool) {
 // query in order: query-text const, Params struct (if any), Row struct
 // (if any), method. The withDbtype flag toggles the dbtype import; the
 // withTime flag toggles the time-stdlib import (C3, for TIMESTAMP /
-// TemporalDateTime carriers). The row-assembly template inlines the
-// per-kind decode arm.
-func renderCypherFile(pkg string, queries []preparedQuery, withDbtype, withTime bool) []byte {
+// TemporalDateTime carriers). The withFmt flag toggles the fmt import
+// (C4: a write-only file whose queries are all :exec emits no
+// fmt.Errorf wrapper, so fmt is elided). The row-assembly template
+// inlines the per-kind decode arm.
+func renderCypherFile(pkg string, queries []preparedQuery, withDbtype, withTime, withFmt bool) []byte {
 	var b strings.Builder
 	b.WriteString(header())
 	b.WriteString("package ")
@@ -1209,7 +1275,10 @@ func renderCypherFile(pkg string, queries []preparedQuery, withDbtype, withTime 
 	// Import order per goimports: stdlib first (context, fmt, time),
 	// then third-party (neo4j, dbtype). A single grouped import ()
 	// block keeps gofmt output stable.
-	b.WriteString("import (\n\t\"context\"\n\t\"fmt\"\n")
+	b.WriteString("import (\n\t\"context\"\n")
+	if withFmt {
+		b.WriteString("\t\"fmt\"\n")
+	}
 	if withTime {
 		b.WriteString("\t\"time\"\n")
 	}
@@ -1259,7 +1328,9 @@ func renderCypherFile(pkg string, queries []preparedQuery, withDbtype, withTime 
 
 // writeMethodSignature writes one `MethodName(ctx context.Context,
 // ...) (Return, error)` line — used both by the interface entry in
-// querier.go and by the method definition in <name>.cypher.go.
+// querier.go and by the method definition in <name>.cypher.go. C4
+// adds the :exec arm: the return list collapses to a bare `error`
+// (no rows-to-decode).
 func writeMethodSignature(b *strings.Builder, p preparedQuery) {
 	b.WriteString(p.MethodName)
 	b.WriteString("(ctx context.Context")
@@ -1274,6 +1345,10 @@ func writeMethodSignature(b *strings.Builder, p preparedQuery) {
 		b.WriteString(p.ParamFields[0].GoType)
 	default:
 		fmt.Fprintf(b, ", arg %sParams", p.MethodName)
+	}
+	if p.Cardinality == CardinalityExec {
+		b.WriteString(") error")
+		return
 	}
 	b.WriteString(") (")
 	b.WriteString(returnTypeText(p))
@@ -1348,12 +1423,21 @@ func zeroValueText(p preparedQuery) string {
 }
 
 // writeMethod writes the method definition + body (spec §5.3 / §5.5).
+// C4 adds the :exec arm: three-line body (run, discard rows, return
+// error) with no Row-struct decoding.
 func writeMethod(b *strings.Builder, p preparedQuery) {
 	// Doc comment: first 3 lines of query text, prefixed "//   ".
 	writeDocComment(b, p)
 	b.WriteString("func (q *Queries) ")
 	writeMethodSignature(b, p)
 	b.WriteString(" {\n")
+
+	if p.Cardinality == CardinalityExec {
+		fmt.Fprintf(b, "\t_, err := q.db.run(ctx, %sQueryText, %s, %s)\n", p.Bare, paramsMapText(p), accessModeText(p))
+		b.WriteString("\treturn err\n")
+		b.WriteString("}\n")
+		return
+	}
 
 	// Body: build the params map, call run, decode.
 	writeRunCall(b, p)
@@ -1364,6 +1448,18 @@ func writeMethod(b *strings.Builder, p preparedQuery) {
 		writeManyBody(b, p)
 	}
 	b.WriteString("}\n")
+}
+
+// accessModeText picks the fourth q.db.run argument for one prepared
+// query — AccessModeWrite iff Validated.Statement == StatementWrite,
+// AccessModeRead otherwise. The dispatch runs once per emitted method
+// at generation time (spec §5.5's access-mode threading rule); the
+// emitted body carries the constant, not a runtime branch.
+func accessModeText(p preparedQuery) string {
+	if p.Validated.Statement == resolver.StatementWrite {
+		return "neo4j.AccessModeWrite"
+	}
+	return "neo4j.AccessModeRead"
 }
 
 // writeDocComment emits the per-method doc comment: the method name
@@ -1384,8 +1480,10 @@ func writeDocComment(b *strings.Builder, p preparedQuery) {
 }
 
 // writeRunCall emits the `records, err := q.db.run(...)` prelude.
+// C4 threads the access mode dispatch per Validated.Statement (§5.5);
+// the C1 hardcoded neo4j.AccessModeRead retires.
 func writeRunCall(b *strings.Builder, p preparedQuery) {
-	fmt.Fprintf(b, "\trecords, err := q.db.run(ctx, %sQueryText, %s, neo4j.AccessModeRead)\n", p.Bare, paramsMapText(p))
+	fmt.Fprintf(b, "\trecords, err := q.db.run(ctx, %sQueryText, %s, %s)\n", p.Bare, paramsMapText(p), accessModeText(p))
 	fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %s, err\n\t}\n", zeroValueText(p))
 }
 
@@ -1939,7 +2037,7 @@ func scalarGoType(k resolver.Scalar) string {
 // resolvedListGoType derives the Go type text for a ResolvedType leaf
 // or nested ResolvedList (spec §2.2, §4.7). Returns (text, err):
 // err wraps ErrUnrepresentableWidth for a leaf property width that is
-// unrepresentable; err wraps ErrOutOfC3Scope for a ResolvedEdgeUnion
+// unrepresentable; err wraps ErrOutOfC4Scope for a ResolvedEdgeUnion
 // leaf (C5 owns). A ResolvedList element recurses; every other leaf is
 // one dispatch on the ResolvedType sum.
 func resolvedListGoType(t resolver.ResolvedType, entities []preparedEntity, entityIndex map[entityLookupKey]int) (string, error) {
@@ -1953,17 +2051,17 @@ func resolvedListGoType(t resolver.ResolvedType, entities []preparedEntity, enti
 	case resolver.ResolvedNode:
 		idx, ok := entityIndex[entityLookupKey{Kind: entityNode, Labels: tt.Labels}]
 		if !ok {
-			return "", fmt.Errorf("%w: list element references unknown node type %q", ErrOutOfC3Scope, string(tt.Labels))
+			return "", fmt.Errorf("%w: list element references unknown node type %q", ErrOutOfC4Scope, string(tt.Labels))
 		}
 		return entities[idx].Name, nil
 	case resolver.ResolvedEdge:
 		idx, ok := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: tt.EdgeKey}]
 		if !ok {
-			return "", fmt.Errorf("%w: list element references unknown edge type %s -[:%s]-> %s", ErrOutOfC3Scope, string(tt.EdgeKey.Source), string(tt.EdgeKey.Label), string(tt.EdgeKey.Target))
+			return "", fmt.Errorf("%w: list element references unknown edge type %s -[:%s]-> %s", ErrOutOfC4Scope, string(tt.EdgeKey.Source), string(tt.EdgeKey.Label), string(tt.EdgeKey.Target))
 		}
 		return entities[idx].Name, nil
 	case resolver.ResolvedEdgeUnion:
-		return "", fmt.Errorf("%w: list element resolved as edgeUnion (C5 owns)", ErrOutOfC3Scope)
+		return "", fmt.Errorf("%w: list element resolved as edgeUnion (C5 owns)", ErrOutOfC4Scope)
 	case resolver.ResolvedTemporal:
 		return temporalGoType(tt.Kind), nil
 	case resolver.ResolvedScalar:
@@ -1977,7 +2075,7 @@ func resolvedListGoType(t resolver.ResolvedType, entities []preparedEntity, enti
 		}
 		return "[]" + inner, nil
 	}
-	return "", fmt.Errorf("%w: list element has unknown resolved type %s", ErrOutOfC3Scope, t.String())
+	return "", fmt.Errorf("%w: list element has unknown resolved type %s", ErrOutOfC4Scope, t.String())
 }
 
 // lowerFirstRune lowercases the first rune of s. Used for the

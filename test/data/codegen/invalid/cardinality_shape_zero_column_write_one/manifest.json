@@ -1,0 +1,5 @@
+{
+  "package": "cardinalityshapezerocolumnwriteone",
+  "queryFiles": ["queries.cypher"],
+  "expectedError": "codegen.ErrCardinalityShapeMismatch"
+}

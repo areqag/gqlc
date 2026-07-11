@@ -1,0 +1,8 @@
+CREATE PROPERTY GRAPH TYPE WriteManyProjectionEntity AS {
+    (:Person {
+        id      :: INT64 NOT NULL,
+        name    :: STRING NOT NULL,
+        age     :: INT64 NOT NULL,
+        checked :: BOOL NOT NULL
+    })
+}

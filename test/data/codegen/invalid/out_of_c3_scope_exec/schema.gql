@@ -1,5 +1,0 @@
-CREATE PROPERTY GRAPH TYPE ExecScope AS {
-    (:Person {
-        id :: INT64 NOT NULL
-    })
-}

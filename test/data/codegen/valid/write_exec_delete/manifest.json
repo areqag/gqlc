@@ -1,0 +1,4 @@
+{
+  "package": "writeexecdelete",
+  "queryFiles": ["queries.cypher"]
+}
