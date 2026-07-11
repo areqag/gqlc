@@ -847,7 +847,7 @@ never reach a typed decode — the emitted Go type is `any`, and the
 column decode reduces to `record.Get(key)` returning the raw driver
 value (either `nil` or whatever the driver put there). To keep the
 `GetRecordValue` shape uniform, the emitted code uses
-`neo4j.GetRecordValue[[]any]` when the resolved type is
+`neo4j.GetRecordValue[map[string]any]` when the resolved type is
 `ResolvedScalar{Map}` (because `map[string]any` satisfies
 `RecordValue`) and drops back to `record.Get(key)` for `any` /
 `unknown` columns — the driver-native lookup that returns `any`
