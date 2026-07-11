@@ -80,6 +80,13 @@ func useSitesToScopes(sites []parameterUseSite) []partScope {
 
 // branchState is the resolver-typed carry from Part K to Part K+1 within one
 // branch (§4.2.1). All maps nil for Part 0 (empty carry).
+//
+// exportedOptionalGroup carries the OPTIONAL-group id of a WITH-carried
+// binding across the Part boundary — gqlc-984, closing the residual §2.5 note
+// of model-change-ay9-optional-group.md. Group ids are per-query and unique
+// across the whole parse (§3.3), so a carried id cannot collide with a local
+// id in the downstream Part. Demotion of a member proven in Part K+1 pulls
+// the whole carried group via the ay9 fixed-point in demoteNullableInPlace.
 type branchState struct {
 	exportedNodeTypes       map[string]schema.NodeType
 	exportedEdgeTypes       map[string]schema.EdgeType
@@ -87,6 +94,7 @@ type branchState struct {
 	exportedEdgeCands       map[string][]schema.EdgeKey
 	exportedEdgeBindings    map[string]query.EdgeBinding
 	exportedNullableBinding map[string]bool
+	exportedOptionalGroup   map[string]int
 	exportedResolvedTypes   map[string]ResolvedType
 	exportedCallTypes       map[string]callBindingSlot
 	exportedOrder           []string
@@ -363,7 +371,7 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.
 	// demotion runs. This is what makes a Part K+1 that re-MATCHes an
 	// OPTIONAL-carried `b` see nullableBinding["b"] = false.
 	seedLocalNullability(part.Bindings, nullableBinding)
-	demoteNullableInPlace(part.Bindings, nullableBinding)
+	demoteNullableInPlace(part.Bindings, nullableBinding, carry.exportedOptionalGroup)
 
 	// Phase E (R6 §4.1): effect validation. Runs after Phase D so effect
 	// targets see the same schema-committed binding tables and effective-
@@ -403,8 +411,11 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.
 	site := parameterUseSite{scope: snapshotScope(nodeTypes, edgeTypes, edgeCands, edgeBindings, nullableBinding)}
 
 	// Build the exported branchState for Part K+1. R7 §4.6 adds the
-	// exportedCallTypes lane for CALL YIELD carry-forward.
-	exported := exportScope(part, columns, items, scopeOrder, nodeTypes, edgeTypes, edgeKeys, edgeCands, edgeBindings, nullableBinding, callTypes)
+	// exportedCallTypes lane for CALL YIELD carry-forward. gqlc-984 adds
+	// exportedOptionalGroup: names surviving WITH keep their Part-K OPTIONAL
+	// group id (locally minted, or inherited from carry), so downstream
+	// Parts can close cross-Part group demotion via the ay9 fixed point.
+	exported := exportScope(part, columns, items, scopeOrder, nodeTypes, edgeTypes, edgeKeys, edgeCands, edgeBindings, nullableBinding, callTypes, carry.exportedOptionalGroup)
 
 	return columns, exported, []parameterUseSite{site}, nil
 }
@@ -512,7 +523,7 @@ func buildScopeOrder(bindings []query.Binding, carryOrder []string, nodeTypes ma
 // Part reads it) but we still build it for symmetry. R7 §4.6 adds the
 // exportedCallTypes lane so CALL YIELD scalars survive a bare `WITH v`
 // carry (aliased carry also lands in exportedResolvedTypes via the R5 path).
-func exportScope(part query.Part, columns []Column, items []query.ReturnItem, scopeOrder []string, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, nullableBinding map[string]bool, callTypes map[string]callBindingSlot) branchState {
+func exportScope(part query.Part, columns []Column, items []query.ReturnItem, scopeOrder []string, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, nullableBinding map[string]bool, callTypes map[string]callBindingSlot, carriedGroups map[string]int) branchState {
 	out := branchState{
 		exportedNodeTypes:       make(map[string]schema.NodeType),
 		exportedEdgeTypes:       make(map[string]schema.EdgeType),
@@ -520,8 +531,34 @@ func exportScope(part query.Part, columns []Column, items []query.ReturnItem, sc
 		exportedEdgeCands:       make(map[string][]schema.EdgeKey),
 		exportedEdgeBindings:    make(map[string]query.EdgeBinding),
 		exportedNullableBinding: make(map[string]bool),
+		exportedOptionalGroup:   make(map[string]int),
 		exportedResolvedTypes:   make(map[string]ResolvedType),
 		exportedCallTypes:       make(map[string]callBindingSlot),
+	}
+	// Build the local group-id lookup up front: a name gets its local
+	// binding's OptionalGroup if declared this Part, otherwise its carried
+	// group id from the incoming carry. Local shadows carry — a local
+	// re-declaration with a distinct (possibly zero) group replaces the
+	// carried id (gqlc-984). Only names surviving into exportedNames get
+	// promoted to the outgoing carry below.
+	localGroup := map[string]int{}
+	for _, b := range part.Bindings {
+		var v string
+		var g int
+		switch bb := b.(type) {
+		case query.NodeBinding:
+			v = bb.Variable()
+			g = bb.OptionalGroup()
+		case query.EdgeBinding:
+			v = bb.Variable()
+			g = bb.OptionalGroup()
+		default:
+			continue
+		}
+		if v == "" {
+			continue
+		}
+		localGroup[v] = g
 	}
 
 	// Names that leave via WITH — for WITH * that's every scopeOrder name;
@@ -584,6 +621,19 @@ func exportScope(part query.Part, columns []Column, items []query.ReturnItem, sc
 		}
 		if slot, ok := callTypes[v]; ok {
 			out.exportedCallTypes[v] = slot
+		}
+		// Group id: local wins over carry. A local binding with
+		// OptionalGroup == 0 (e.g. a re-MATCH of a carried OPTIONAL name
+		// in a required MATCH) drops the carried group id — the name is
+		// no longer OPTIONAL-scoped in this Part. Only propagate a
+		// positive id, so downstream Parts do not have to distinguish
+		// "declared, group 0" from "not declared" (§3.3 semantics).
+		if g, ok := localGroup[v]; ok {
+			if g > 0 {
+				out.exportedOptionalGroup[v] = g
+			}
+		} else if g, ok := carriedGroups[v]; ok && g > 0 {
+			out.exportedOptionalGroup[v] = g
 		}
 	}
 	return out
@@ -1451,7 +1501,16 @@ func seedLocalNullability(bindings []query.Binding, table map[string]bool) {
 // may observe 5xg's flipped entries and demote co-introduced siblings
 // via (iv), producing the compose-with-group cascade §8.4 fixture 4
 // witnesses.
-func demoteNullableInPlace(bindings []query.Binding, table map[string]bool) {
+//
+// carriedGroups seeds the group-membership maps from the carry (gqlc-984,
+// closing spec §2.5 residual): a WITH-carried binding retains its Part-K
+// OPTIONAL-group id, so proving any member in Part K+1 pulls its cross-Part
+// siblings via the same fixed point. Group ids are per-query and unique
+// across the whole parse (§3.3), so carried and local ids share the same
+// numeric space without collision. A local binding at the same name that
+// carries a distinct local group id overrides the carried id — local
+// shadows carry, matching the seedLocalNullability discipline.
+func demoteNullableInPlace(bindings []query.Binding, table map[string]bool, carriedGroups map[string]int) {
 	// 5xg pre-pass: bare-ref demotion. A binding whose parser-time
 	// flag is true was re-referenced in a required bare pattern; the
 	// row-drop witness demotes it. Anonymous bindings (v == "") skip
@@ -1472,21 +1531,35 @@ func demoteNullableInPlace(bindings []query.Binding, table map[string]bool) {
 			}
 		}
 	}
-	// ay9 pre-pass: OPTIONAL-group membership scan.
-	members := map[int][]string{} // group id → named members
-	groupOf := map[string]int{}   // named member → group id
+	// ay9 pre-pass: OPTIONAL-group membership scan. A name may belong to
+	// multiple groups simultaneously — a carried group id from Part K, plus a
+	// fresh local group id if Part K+1 re-declares the name under a new
+	// OPTIONAL MATCH. Any one group being proven demotes the name (and every
+	// other member of that group). Seed from carry first, then union in the
+	// local declarations.
+	members := map[int][]string{}   // group id → named members
+	groupsOf := map[string][]int{}  // named member → group ids (may span carry + local)
+	addMember := func(v string, g int) {
+		if v == "" || g <= 0 {
+			return
+		}
+		for _, existing := range groupsOf[v] {
+			if existing == g {
+				return
+			}
+		}
+		groupsOf[v] = append(groupsOf[v], g)
+		members[g] = append(members[g], v)
+	}
+	for name, g := range carriedGroups {
+		addMember(name, g)
+	}
 	for _, b := range bindings {
 		switch bb := b.(type) {
 		case query.NodeBinding:
-			if g := bb.OptionalGroup(); g > 0 {
-				members[g] = append(members[g], bb.Variable())
-				groupOf[bb.Variable()] = g
-			}
+			addMember(bb.Variable(), bb.OptionalGroup())
 		case query.EdgeBinding:
-			if g := bb.OptionalGroup(); g > 0 && bb.Variable() != "" {
-				members[g] = append(members[g], bb.Variable())
-				groupOf[bb.Variable()] = g
-			}
+			addMember(bb.Variable(), bb.OptionalGroup())
 		}
 	}
 	demotedGroups := map[int]bool{}
@@ -1501,6 +1574,27 @@ func demoteNullableInPlace(bindings []query.Binding, table map[string]bool) {
 			}
 		}
 		return true
+	}
+	// A carried binding whose local Nullable() entry in the table is
+	// already false (either from seedLocalNullability's re-MATCH override
+	// or from the 5xg pre-pass) is a proven witness for its carried
+	// group. Fire that closure before the edge-driven fixed point so a
+	// carried group without a local edge witness still demotes.
+	for name, gs := range groupsOf {
+		if nb, present := table[name]; present && !nb {
+			for _, g := range gs {
+				demoteGroup(g)
+			}
+		}
+	}
+	demoteGroupsOf := func(v string) bool {
+		changed := false
+		for _, g := range groupsOf[v] {
+			if demoteGroup(g) {
+				changed = true
+			}
+		}
+		return changed
 	}
 	for changed := true; changed; {
 		changed = false
@@ -1528,7 +1622,7 @@ func demoteNullableInPlace(bindings []query.Binding, table map[string]bool) {
 					table[v] = false
 					changed = true
 				}
-				if demoteGroup(groupOf[v]) {
+				if demoteGroupsOf(v) {
 					changed = true
 				}
 			}
