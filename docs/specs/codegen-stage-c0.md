@@ -540,14 +540,14 @@ func (q *Queries) WithTx(tx neo4j.ManagedTransaction) *Queries {
 // body routes through it, dispatching between the per-call-session
 // path (New) and the caller-owned managed-transaction path (WithTx).
 type driverOrTx interface {
-    run(ctx context.Context, statement string, params map[string]any, access neo4j.AccessMode) (neo4j.ResultWithContext, error)
+    run(ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode) (neo4j.ResultWithContext, error)
 }
 
 type driverDB struct {
     driver neo4j.DriverWithContext
 }
 
-func (d driverDB) run(ctx context.Context, statement string, params map[string]any, access neo4j.AccessMode) (neo4j.ResultWithContext, error) {
+func (d driverDB) run(ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode) (neo4j.ResultWithContext, error) {
     session := d.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: access})
     defer session.Close(ctx)
     // C0: the driverDB.run body dispatches ExecuteRead / ExecuteWrite
@@ -561,8 +561,8 @@ type txDB struct {
     tx neo4j.ManagedTransaction
 }
 
-func (t txDB) run(ctx context.Context, statement string, params map[string]any, _ neo4j.AccessMode) (neo4j.ResultWithContext, error) {
-    return t.tx.Run(ctx, statement, params)
+func (t txDB) run(ctx context.Context, cypher string, params map[string]any, _ neo4j.AccessMode) (neo4j.ResultWithContext, error) {
+    return t.tx.Run(ctx, cypher, params)
 }
 ```
 
@@ -1004,9 +1004,11 @@ var ErrDuplicateQueryName = errors.New("duplicate query name in batch")
 var ErrInvalidCardinality = errors.New("invalid cardinality")
 
 // ErrFormatFailure is returned when go/format.Source rejects an
-// emitted file's raw contents. A template bug; not expected to fire
-// under any legitimate fixture, but wrapped-and-named beats a
-// generic error.
+// emitted file's raw contents. A template bug — unreachable via any
+// legitimate fixture (well-formed emission cannot fail formatting) —
+// but wrapped-and-named beats a bare error string when it does fire.
+// Deliberately excluded from allSentinels because it is a codegen-
+// internal invariant violation, not a user-facing failure mode.
 var ErrFormatFailure = errors.New("format failure")
 
 var allSentinels = []error{
@@ -1014,14 +1016,19 @@ var allSentinels = []error{
     ErrDuplicateSourceFile,
     ErrDuplicateQueryName,
     ErrInvalidCardinality,
-    ErrFormatFailure,
 }
 ```
 
-- **`ErrFormatFailure` is reachable via a template-corruption fixture.**
-  C0's invalid-fixture set includes one fixture designed to fire it —
-  the specific construction is deferred to the code cycle, but the
-  reachability sweep demands coverage.
+- **`ErrFormatFailure` is defensive-only, outside the reachability
+  sweep.** `go/format.Source` cannot fail on well-formed emission,
+  so a fixture that fires it would require synthetic template
+  corruption — a test seam whose value does not pay for its
+  cost. The sentinel stays exported so a fail-site produces a
+  named error rather than a bare string, but it does not appear in
+  `allSentinels` and no negative fixture is required. This is the one
+  documented exception to the closed-set-with-sweep discipline; every
+  other codegen and queryfile sentinel is user-input-reachable and
+  swept.
 - **Category-grained where sensible, specific where needed.** The
   parser and resolver retired constructs from a category-grained
   sentinel (`ErrOutOfR0Scope`) as stages narrowed them; codegen's set
