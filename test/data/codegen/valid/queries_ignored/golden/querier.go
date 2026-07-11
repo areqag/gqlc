@@ -2,7 +2,10 @@
 
 package queriesignored
 
+import "context"
+
 type ReadQuerier interface {
+	PeopleOverAge(ctx context.Context, minAge *int) ([]string, error)
 }
 
 type WriteQuerier interface {
