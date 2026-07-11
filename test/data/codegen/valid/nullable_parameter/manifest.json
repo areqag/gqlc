@@ -1,0 +1,4 @@
+{
+  "package": "nullableparameter",
+  "queryFiles": ["queries.cypher"]
+}

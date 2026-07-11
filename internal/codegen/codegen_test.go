@@ -166,7 +166,6 @@ func loadNamedQueries(dir string, m manifest, sch schema.Schema) ([]NamedQuery, 
 		if err != nil {
 			return nil, err
 		}
-		base := filepath.Base(qf)
 		for _, aq := range parsed {
 			q, err := cypher.New(cypher.WithRegistry(emptyReg)).Parse(bytes.NewReader([]byte(aq.Text)))
 			if err != nil {
@@ -179,7 +178,7 @@ func loadNamedQueries(dir string, m manifest, sch schema.Schema) ([]NamedQuery, 
 			out = append(out, NamedQuery{
 				Name:        aq.Name,
 				Cardinality: aq.Cardinality,
-				SourceFile:  base,
+				SourceFile:  qf,
 				SourceText:  aq.Text,
 				Validated:   vq,
 			})

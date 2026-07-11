@@ -1,0 +1,4 @@
+{
+  "package": "multisourcefiles",
+  "queryFiles": ["people.cypher", "directory.cypher"]
+}

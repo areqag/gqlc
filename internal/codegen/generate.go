@@ -166,9 +166,15 @@ func derivePackage(schemaName string) (string, error) {
 // validateQueries runs the batch-level checks (spec §4.6). C0 does not
 // project queries but the sentinels fire uniformly regardless of stage
 // so a fixture that fails here at C0 stays failing at C5.
+//
+// ErrDuplicateSourceFile fires when two DISTINCT SourceFile paths share
+// a basename (e.g. "a/queries.cypher" and "b/queries.cypher"). Multiple
+// queries from the same file are legitimate — they share both full path
+// and basename by construction — and never trigger the sentinel.
 func validateQueries(queries []NamedQuery) error {
 	seenName := make(map[string]int, len(queries))
-	seenFile := make(map[string]int, len(queries))
+	seenFile := make(map[string]int, len(queries)) // basename -> first-appearance query index
+	basenameToPath := make(map[string]string, len(queries))
 	for i, q := range queries {
 		if q.Cardinality == 0 {
 			return fmt.Errorf("%w: query %q at position %d", ErrInvalidCardinality, q.Name, i)
@@ -179,10 +185,14 @@ func validateQueries(queries []NamedQuery) error {
 		seenName[q.Name] = i
 		if q.SourceFile != "" {
 			base := filepath.Base(q.SourceFile)
-			if first, dup := seenFile[base]; dup {
-				return fmt.Errorf("%w: %q shared by queries at positions %d and %d", ErrDuplicateSourceFile, base, first, i)
+			if firstPath, seen := basenameToPath[base]; seen {
+				if firstPath != q.SourceFile {
+					return fmt.Errorf("%w: %q shared by queries at positions %d and %d", ErrDuplicateSourceFile, base, seenFile[base], i)
+				}
+			} else {
+				basenameToPath[base] = q.SourceFile
+				seenFile[base] = i
 			}
-			seenFile[base] = i
 		}
 	}
 	return nil
@@ -730,15 +740,18 @@ func writeSingleColumnDecode(b *strings.Builder, p preparedQuery, f preparedRow,
 // writeSingleColumnDecodeIndent is writeSingleColumnDecode's inner
 // variant, taking the block indent explicitly so the :many loop body
 // can indent one level deeper.
+//
+// neo4j.GetRecordValue's T constraint is a narrow union (bool, int64,
+// float64, string, plus driver types); Go's arbitrary numeric widths
+// (int8..int32, int, uint*, float32) are NOT in it. C1's approach:
+// decode via the driver's native carrier (int64 for every integer
+// family, float64 for every float family), then narrow with a plain
+// Go conversion. This matches sqlc's approach for narrow-width columns
+// (its Int64 carrier + cast). Widening is safe; narrowing is the
+// caller's contract per the schema author's declared width (FLOAT32
+// schema-width contract is C3's business per §5.1).
 func writeSingleColumnDecodeIndent(b *strings.Builder, p preparedQuery, f preparedRow, recordExpr, zero, assignPrefix, assignSuffix, indent string) {
-	// Deterministic per-column variable name: bare "value" for single-
-	// column methods, "valueN" for the N-th column of a multi-column
-	// method. Overwriting `value` per column is legal Go and simplifies
-	// the emitted text; using a per-column name lets the linter's
-	// staticcheck see each variable, and cleanly composes into
-	// row.<Field> = ... .
 	varName := "value"
-	// determine local var index; find f in p.RowFields
 	if len(p.RowFields) > 1 {
 		for i, r := range p.RowFields {
 			if r.ColumnName == f.ColumnName && r.Field == f.Field {
@@ -747,12 +760,20 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p preparedQuery, f prepar
 			}
 		}
 	}
-	fmt.Fprintf(b, "%s%s, isNil, err := neo4j.GetRecordValue[%s](%s, %q)\n", indent, varName, f.GoType, recordExpr, f.ColumnName)
+	carrier := driverCarrier(f.GoType)
+	fmt.Fprintf(b, "%s%s, isNil, err := neo4j.GetRecordValue[%s](%s, %q)\n", indent, varName, carrier, recordExpr, f.ColumnName)
 	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	// Emit the value expression: bare varName if carrier == GoType, else a
+	// Go conversion. Used both in the nullable and non-nullable arms.
+	valueExpr := varName
+	if carrier != f.GoType {
+		valueExpr = fmt.Sprintf("%s(%s)", f.GoType, varName)
+	}
 	if f.Nullable {
-		// Nullable: nil pointer when null, address of local otherwise.
+		// Nullable: nil pointer when null, address of a narrowed local
+		// otherwise.
 		fmt.Fprintf(b, "%svar %sPtr *%s\n", indent, varName, f.GoType)
-		fmt.Fprintf(b, "%sif !isNil {\n%s\tv := %s\n%s\t%sPtr = &v\n%s}\n", indent, indent, varName, indent, varName, indent)
+		fmt.Fprintf(b, "%sif !isNil {\n%s\tv := %s\n%s\t%sPtr = &v\n%s}\n", indent, indent, valueExpr, indent, varName, indent)
 		b.WriteString(indent)
 		b.WriteString(assignPrefix[len(indent):])
 		b.WriteString(varName)
@@ -760,12 +781,28 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p preparedQuery, f prepar
 		b.WriteString(assignSuffix)
 		return
 	}
-	// Non-nullable: error if isNil; else assign value.
+	// Non-nullable: error if isNil; else assign narrowed value.
 	fmt.Fprintf(b, "%sif isNil {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
 	b.WriteString(indent)
 	b.WriteString(assignPrefix[len(indent):])
-	b.WriteString(varName)
+	b.WriteString(valueExpr)
 	b.WriteString(assignSuffix)
+}
+
+// driverCarrier picks the neo4j.GetRecordValue[T] type for a Go type
+// that C1 wants to emit. Integer widths widen to int64; float widths
+// widen to float64; string / bool pass through. The caller narrows via
+// a Go conversion.
+func driverCarrier(goType string) string {
+	switch goType {
+	case "int", "int8", "int16", "int32", "int64",
+		"uint", "uint8", "uint16", "uint32", "uint64":
+		return "int64"
+	case "float32", "float64":
+		return "float64"
+	default:
+		return goType
+	}
 }
 
 // paramFieldName derives the Params-struct field name for a parameter

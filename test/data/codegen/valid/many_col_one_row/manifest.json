@@ -1,0 +1,4 @@
+{
+  "package": "manycolonerow",
+  "queryFiles": ["queries.cypher"]
+}
