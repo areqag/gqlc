@@ -166,6 +166,37 @@ func temporalConstructorType(name string) (query.Type, bool) {
 	return nil, false
 }
 
+// builtinScalarFuncType maps a bare (non-namespaced) openCypher scalar
+// builtin's lowercased name and argument-type shape to its result type
+// (ADR 0010 D3). Same posture as temporalConstructorType: schema-
+// independent, resolver upgrades TypeUnknown into a concrete Go type when
+// this table commits. An unmatched name-or-shape returns nil, false so
+// callers preserve the "function identity below the boundary" default
+// without branching. A variable-length edge binding (TypeList(TypeEdge))
+// does not match — elementId over a list is undefined by openCypher / the
+// neo4j driver.
+func builtinScalarFuncType(name string, argTypes []query.Type) (query.Type, bool) {
+	switch name {
+	case "elementid":
+		if len(argTypes) == 1 && isNodeOrEdge(argTypes[0]) {
+			return query.TypeString{}, true
+		}
+	case "id":
+		if len(argTypes) == 1 && isNodeOrEdge(argTypes[0]) {
+			return query.TypeInt{}, true
+		}
+	}
+	return nil, false
+}
+
+func isNodeOrEdge(t query.Type) bool {
+	switch t.(type) {
+	case query.TypeNode, query.TypeEdge:
+		return true
+	}
+	return false
+}
+
 // aggregateFunc maps a lowercased function name to its AggregateFunc, reporting
 // whether the name is an aggregate at all (§4: the openCypher aggregating
 // functions are a closed set). stdev/stdevp and percentilecont/percentiledisc

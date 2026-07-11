@@ -1,0 +1,5 @@
+CREATE PROPERTY GRAPH TYPE IdentityElementId AS {
+    (:Person {
+        name :: STRING NOT NULL
+    })
+}
