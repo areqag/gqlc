@@ -869,8 +869,13 @@ func (d driverDB) run(ctx context.Context, cypher string, params map[string]any,
 			return result.Collect(ctx)
 		})
 	case neo4j.AccessModeWrite:
-		// C4 populates the write arm.
-		return nil, fmt.Errorf("gqlc: write path not implemented")
+		return neo4j.ExecuteWrite(ctx, session, func(tx neo4j.ManagedTransaction) ([]*neo4j.Record, error) {
+			result, err := tx.Run(ctx, cypher, params)
+			if err != nil {
+				return nil, err
+			}
+			return result.Collect(ctx)
+		})
 	default:
 		return nil, fmt.Errorf("gqlc: unknown access mode %v", access)
 	}
@@ -890,10 +895,14 @@ func (t txDB) run(ctx context.Context, cypher string, params map[string]any, _ n
 `)
 }
 
-// renderQuerier emits querier.go (spec §5.4). ReadQuerier is populated
-// with one method signature per read query in Input.Queries order.
-// WriteQuerier stays empty (C4 populates). The compile-time assertion
-// on the last line catches method-name drift.
+// renderQuerier emits querier.go (spec §5.4). ReadQuerier lists every
+// method whose Validated.Statement == StatementRead in Input.Queries
+// order; WriteQuerier lists every StatementWrite method in the same
+// filtered order. A method belongs to exactly one interface — the
+// partition is on Statement, not on Cardinality (a :one write-with-
+// projection lands in WriteQuerier; a :exec on a call-with-no-yield
+// lands in ReadQuerier). The compile-time assertion on the last line
+// catches method-name drift.
 func renderQuerier(pkg string, prepared []preparedQuery) []byte {
 	var b strings.Builder
 	b.WriteString(header())
@@ -920,12 +929,24 @@ func renderQuerier(pkg string, prepared []preparedQuery) []byte {
 	}
 	b.WriteString("type ReadQuerier interface {\n")
 	for _, p := range prepared {
+		if p.Validated.Statement != resolver.StatementRead {
+			continue
+		}
 		b.WriteString("\t")
 		writeMethodSignature(&b, p)
 		b.WriteString("\n")
 	}
 	b.WriteString("}\n\n")
-	b.WriteString("type WriteQuerier interface {\n}\n\n")
+	b.WriteString("type WriteQuerier interface {\n")
+	for _, p := range prepared {
+		if p.Validated.Statement != resolver.StatementWrite {
+			continue
+		}
+		b.WriteString("\t")
+		writeMethodSignature(&b, p)
+		b.WriteString("\n")
+	}
+	b.WriteString("}\n\n")
 	b.WriteString("type Querier interface {\n\tReadQuerier\n\tWriteQuerier\n}\n\n")
 	b.WriteString("var _ Querier = (*Queries)(nil)\n")
 	return []byte(b.String())
@@ -1285,7 +1306,9 @@ func renderCypherFile(pkg string, queries []preparedQuery, withDbtype, withTime 
 
 // writeMethodSignature writes one `MethodName(ctx context.Context,
 // ...) (Return, error)` line — used both by the interface entry in
-// querier.go and by the method definition in <name>.cypher.go.
+// querier.go and by the method definition in <name>.cypher.go. C4
+// adds the :exec arm: the return list collapses to a bare `error`
+// (no rows-to-decode).
 func writeMethodSignature(b *strings.Builder, p preparedQuery) {
 	b.WriteString(p.MethodName)
 	b.WriteString("(ctx context.Context")
@@ -1300,6 +1323,10 @@ func writeMethodSignature(b *strings.Builder, p preparedQuery) {
 		b.WriteString(p.ParamFields[0].GoType)
 	default:
 		fmt.Fprintf(b, ", arg %sParams", p.MethodName)
+	}
+	if p.Cardinality == CardinalityExec {
+		b.WriteString(") error")
+		return
 	}
 	b.WriteString(") (")
 	b.WriteString(returnTypeText(p))
@@ -1374,12 +1401,21 @@ func zeroValueText(p preparedQuery) string {
 }
 
 // writeMethod writes the method definition + body (spec §5.3 / §5.5).
+// C4 adds the :exec arm: three-line body (run, discard rows, return
+// error) with no Row-struct decoding.
 func writeMethod(b *strings.Builder, p preparedQuery) {
 	// Doc comment: first 3 lines of query text, prefixed "//   ".
 	writeDocComment(b, p)
 	b.WriteString("func (q *Queries) ")
 	writeMethodSignature(b, p)
 	b.WriteString(" {\n")
+
+	if p.Cardinality == CardinalityExec {
+		fmt.Fprintf(b, "\t_, err := q.db.run(ctx, %sQueryText, %s, %s)\n", p.Bare, paramsMapText(p), accessModeText(p))
+		b.WriteString("\treturn err\n")
+		b.WriteString("}\n")
+		return
+	}
 
 	// Body: build the params map, call run, decode.
 	writeRunCall(b, p)
@@ -1390,6 +1426,18 @@ func writeMethod(b *strings.Builder, p preparedQuery) {
 		writeManyBody(b, p)
 	}
 	b.WriteString("}\n")
+}
+
+// accessModeText picks the fourth q.db.run argument for one prepared
+// query — AccessModeWrite iff Validated.Statement == StatementWrite,
+// AccessModeRead otherwise. The dispatch runs once per emitted method
+// at generation time (spec §5.5's access-mode threading rule); the
+// emitted body carries the constant, not a runtime branch.
+func accessModeText(p preparedQuery) string {
+	if p.Validated.Statement == resolver.StatementWrite {
+		return "neo4j.AccessModeWrite"
+	}
+	return "neo4j.AccessModeRead"
 }
 
 // writeDocComment emits the per-method doc comment: the method name
@@ -1410,8 +1458,10 @@ func writeDocComment(b *strings.Builder, p preparedQuery) {
 }
 
 // writeRunCall emits the `records, err := q.db.run(...)` prelude.
+// C4 threads the access mode dispatch per Validated.Statement (§5.5);
+// the C1 hardcoded neo4j.AccessModeRead retires.
 func writeRunCall(b *strings.Builder, p preparedQuery) {
-	fmt.Fprintf(b, "\trecords, err := q.db.run(ctx, %sQueryText, %s, neo4j.AccessModeRead)\n", p.Bare, paramsMapText(p))
+	fmt.Fprintf(b, "\trecords, err := q.db.run(ctx, %sQueryText, %s, %s)\n", p.Bare, paramsMapText(p), accessModeText(p))
 	fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %s, err\n\t}\n", zeroValueText(p))
 }
 
