@@ -1125,20 +1125,6 @@ func groupBySource(prepared []preparedQuery) []sourceGroup {
 	return groups
 }
 
-// groupHasEntityColumn reports whether any query in the group projects
-// a node-entity or edge-entity column. Gates the dbtype import in
-// <name>.cypher.go (§5.5).
-func groupHasEntityColumn(queries []preparedQuery) bool {
-	for _, p := range queries {
-		for _, f := range p.RowFields {
-			if f.Kind == columnNode || f.Kind == columnEdge {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // groupImports computes the C3 per-file import gates for one
 // <name>.cypher.go source group. dbtype fires when any column in the
 // group decodes through a dbtype.<Kind> carrier (entity, DATE property,
