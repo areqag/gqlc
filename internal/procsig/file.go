@@ -69,8 +69,14 @@ func decode(r io.Reader, src string) (Registry, error) {
 	if buf.Len() == 0 {
 		return Registry{}, fmt.Errorf("procsig: %s is empty (write {\"signatures\":[]} for the empty registry)", src)
 	}
+	body := buf.Bytes()
 
-	dec := json.NewDecoder(&buf)
+	// Typed decode catches unknown top-level keys, unknown signature
+	// or column fields, and structural mismatches. Bare `null` and
+	// `{"signatures":null}` are then caught explicitly below — the
+	// typed decode accepts both as zero-value wireFile and would
+	// silently produce the empty registry.
+	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	var wf wireFile
 	if err := dec.Decode(&wf); err != nil {
@@ -78,6 +84,9 @@ func decode(r io.Reader, src string) (Registry, error) {
 	}
 	if wf.Version != nil && *wf.Version != fileVersion {
 		return Registry{}, fmt.Errorf("procsig: %s declares version %d; only version %d is supported", src, *wf.Version, fileVersion)
+	}
+	if err := requireSignaturesKey(body, src); err != nil {
+		return Registry{}, err
 	}
 
 	sigs := make([]Signature, 0, len(wf.Signatures))
@@ -93,6 +102,29 @@ func decode(r io.Reader, src string) (Registry, error) {
 		return Registry{}, fmt.Errorf("procsig: %s: %w", src, err)
 	}
 	return reg, nil
+}
+
+// requireSignaturesKey is the null-shape gate: the typed wireFile
+// decode accepts `null` and `{"signatures":null}` as a zero-value
+// wireFile, silently producing the empty registry. Re-decoding through
+// a raw-object map catches both by requiring a top-level object with a
+// non-null "signatures" key.
+func requireSignaturesKey(body []byte, src string) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return fmt.Errorf("procsig: decode %s: %w", src, err)
+	}
+	if raw == nil {
+		return fmt.Errorf("procsig: %s top-level must be a JSON object, got null", src)
+	}
+	sigsRaw, ok := raw["signatures"]
+	if !ok {
+		return fmt.Errorf("procsig: %s top-level object missing required \"signatures\" key", src)
+	}
+	if bytes.Equal(bytes.TrimSpace(sigsRaw), []byte("null")) {
+		return fmt.Errorf("procsig: %s \"signatures\" is null; write [] for the empty registry", src)
+	}
+	return nil
 }
 
 // toSignature lifts a wire signature into a procsig.Signature.

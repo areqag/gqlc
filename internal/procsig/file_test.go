@@ -244,6 +244,21 @@ func TestDecodeRejects(t *testing.T) {
 			body:    `{"version": 99, "signatures": []}`,
 			wantSub: "version",
 		},
+		{
+			name:    "bare top-level null",
+			body:    `null`,
+			wantSub: "top-level",
+		},
+		{
+			name:    "null signatures value",
+			body:    `{"signatures": null}`,
+			wantSub: "signatures",
+		},
+		{
+			name:    "bare top-level array",
+			body:    `[]`,
+			wantSub: "decode",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -308,6 +323,34 @@ func TestEmptySignaturesArrayValid(t *testing.T) {
 	}
 	if _, ok := reg2.Lookup("anything"); ok {
 		t.Fatal("empty-signatures registry (from file) must miss on every lookup")
+	}
+}
+
+// TestSaveEmitsFixtureBytes asserts Save writes byte-identical output
+// to the canonical fixture when fed the same Registry it declares.
+// This is what makes the round-trip claim in the spec §5.2 concrete:
+// the fixture is the source of truth for the format, and Save's
+// output must match it byte-for-byte, or the encoder has drifted.
+func TestSaveEmitsFixtureBytes(t *testing.T) {
+	reg, err := procsig.Load(canonicalPath)
+	if err != nil {
+		t.Fatalf("Load fixture: %v", err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "out.procsig.json")
+	if err := reg.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read saved: %v", err)
+	}
+	want, err := os.ReadFile(canonicalPath)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("Save output drifts from fixture:\n--- want ---\n%s\n--- got ---\n%s", want, got)
 	}
 }
 

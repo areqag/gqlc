@@ -300,17 +300,24 @@ covers every TypeToken variant.
 
 ### 5.2 Canonical byte-identity round trip
 
-For any file that is already in canonical form (signatures sorted by
-name; keys emitted in §3.2 / §3.3 order; no whitespace variations
-beyond the encoder's default two-space indent), the pipeline
+The canonical form is `json.MarshalIndent(r, "", "  ")` on a Registry
+whose signatures are sorted by Name — the exact output of `Save`
+minus the trailing newline. For any file already in canonical form,
+the pipeline
 
 ```
-bytes -> Decode -> MarshalJSON -> bytes
+bytes -> Decode -> MarshalIndent -> bytes
 ```
 
-produces byte-identical output. This is the canonical-form invariant;
-a fixture in `internal/procsig/testdata/` is the source of truth for
-the canonical form, and a test asserts the round-trip on that file.
+produces byte-identical output. `MarshalJSON` itself is the compact
+(unindented) form used inside `Save`, `MarshalIndent`, and any nested
+JSON context; the file surface picks the indented form by convention
+because human-editable configuration reads better that way.
+
+A fixture in `internal/procsig/testdata/canonical.procsig.json` is
+the source of truth for the canonical form. A test asserts the
+round-trip against that file (with a trailing-newline normalisation,
+since `MarshalIndent` does not append one).
 
 ### 5.3 Cross-surface round trip (TCK step -> JSON -> Registry)
 
