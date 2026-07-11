@@ -1,0 +1,9 @@
+{
+  "queries": [
+    {
+      "name": "PeopleOverAge",
+      "cardinality": "many",
+      "text": "MATCH (p:Person) WHERE p.age \u003e $minAge RETURN p.name AS name"
+    }
+  ]
+}
