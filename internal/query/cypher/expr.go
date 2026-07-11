@@ -443,12 +443,18 @@ func (l *listener) classifyAggregateCall(fi gen.IOC_FunctionInvocationContext, f
 // recording it as a ClauseSlotUse on the named parameter. Any non-bare $p in
 // the expression (e.g. SKIP $p + 1, LIMIT f($p)) is unsupported and surfaces
 // as ErrUnsupportedParameter, mirroring rejectClauseParameter's discipline for
-// non-bare cases on the remaining accept-and-ignored clause (ORDER BY).
+// non-bare cases on the remaining accept-and-ignored clause (ORDER BY). The
+// approved-tree guard makes the call idempotent so nested EnterOC_ExistentialSubquery
+// sweeps that revisit the same OC_Skip/OC_Limit node (gqlc-33k.3) do not double-
+// record; the outer-scope path fires exactly once per node and hits the fast path.
 func (l *listener) mineClauseSlotParameter(e gen.IOC_ExpressionContext, slot query.ClauseSlot) {
 	if e == nil {
 		return
 	}
 	if name, node, ok := parameterFromExpr(e); ok {
+		if l.approved[node] {
+			return
+		}
 		l.addParameterUse(name, node, query.NewClauseSlotUse(slot))
 		return
 	}

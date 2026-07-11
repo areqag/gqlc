@@ -447,6 +447,52 @@ func findParameters(tree antlr.Tree) []antlr.Tree {
 	return out
 }
 
+// findSkipNodes returns every oC_Skip node under tree, including inside
+// nested oC_ExistentialSubqueries — each retains its own enclosing clause
+// slot semantics regardless of subquery nesting depth. Used by
+// EnterOC_ExistentialSubquery to classify bare-$p atoms under an EXISTS
+// { RegularQuery } body against their precise ClauseSlotUse before the
+// blanket ExprUse sweep runs (gqlc-33k.3).
+func findSkipNodes(tree antlr.Tree) []gen.IOC_SkipContext {
+	var out []gen.IOC_SkipContext
+	var walk func(antlr.Tree)
+	walk = func(t antlr.Tree) {
+		if t == nil {
+			return
+		}
+		if s, ok := t.(gen.IOC_SkipContext); ok {
+			out = append(out, s)
+			// oC_Skip has no nested oC_Skip; skip children.
+			return
+		}
+		for i := 0; i < t.GetChildCount(); i++ {
+			walk(t.GetChild(i))
+		}
+	}
+	walk(tree)
+	return out
+}
+
+// findLimitNodes is the LIMIT twin of findSkipNodes (gqlc-33k.3).
+func findLimitNodes(tree antlr.Tree) []gen.IOC_LimitContext {
+	var out []gen.IOC_LimitContext
+	var walk func(antlr.Tree)
+	walk = func(t antlr.Tree) {
+		if t == nil {
+			return
+		}
+		if lim, ok := t.(gen.IOC_LimitContext); ok {
+			out = append(out, lim)
+			return
+		}
+		for i := 0; i < t.GetChildCount(); i++ {
+			walk(t.GetChild(i))
+		}
+	}
+	walk(tree)
+	return out
+}
+
 // isPatternPredicateAtom reports whether the expression is a bare
 // pattern-predicate atom in projection position — the shape Pattern1
 // [22]/[23] rejects. The precedence tower is collapsed via nonArithmetic;
