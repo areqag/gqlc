@@ -1,0 +1,8 @@
+CREATE PROPERTY GRAPH TYPE NullableColumns AS {
+    (:Person {
+        id       :: INT64 NOT NULL,
+        name     :: STRING NOT NULL,
+        nickname :: STRING,
+        age      :: INT64
+    })
+}

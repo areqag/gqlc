@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE AliasBareVariableAmbiguity AS {
+    (:Person {
+        name :: STRING NOT NULL,
+        age  :: INT64 NOT NULL
+    })
+}

@@ -1,0 +1,5 @@
+{
+  "package": "nodecolumnscope",
+  "queryFiles": ["queries.cypher"],
+  "expectedError": "codegen.ErrOutOfC1Scope"
+}
