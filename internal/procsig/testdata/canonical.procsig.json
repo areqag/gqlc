@@ -1,0 +1,65 @@
+{
+  "signatures": [
+    {
+      "name": "test.doNothing",
+      "params": [],
+      "results": []
+    },
+    {
+      "name": "test.my.numberProc",
+      "params": [
+        {
+          "name": "in",
+          "type": "NUMBER",
+          "nullable": true
+        }
+      ],
+      "results": [
+        {
+          "name": "out",
+          "type": "FLOAT",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "test.my.proc",
+      "params": [
+        {
+          "name": "in",
+          "type": "INTEGER",
+          "nullable": true
+        }
+      ],
+      "results": [
+        {
+          "name": "a",
+          "type": "STRING",
+          "nullable": true
+        },
+        {
+          "name": "b",
+          "type": "STRING",
+          "nullable": true
+        }
+      ]
+    },
+    {
+      "name": "test.strict",
+      "params": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "nullable": false
+        }
+      ],
+      "results": [
+        {
+          "name": "label",
+          "type": "STRING",
+          "nullable": false
+        }
+      ]
+    }
+  ]
+}
