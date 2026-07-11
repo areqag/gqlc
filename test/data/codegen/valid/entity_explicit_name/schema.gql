@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE EntityExplicitName AS {
+    NODE TYPE Actor (p :Person {
+        id   :: INT64 NOT NULL,
+        name :: STRING NOT NULL
+    })
+}

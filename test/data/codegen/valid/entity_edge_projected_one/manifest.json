@@ -1,0 +1,4 @@
+{
+  "package": "entityedgeprojectedone",
+  "queryFiles": ["queries.cypher"]
+}

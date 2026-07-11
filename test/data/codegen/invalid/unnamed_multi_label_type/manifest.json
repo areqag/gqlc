@@ -1,0 +1,5 @@
+{
+  "package": "unnamedmultilabel",
+  "queryFiles": [],
+  "expectedError": "codegen.ErrUnnamedMultiLabelType"
+}

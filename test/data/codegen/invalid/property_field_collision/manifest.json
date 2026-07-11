@@ -1,0 +1,5 @@
+{
+  "package": "propfieldcollision",
+  "queryFiles": [],
+  "expectedError": "codegen.ErrPropertyFieldCollision"
+}

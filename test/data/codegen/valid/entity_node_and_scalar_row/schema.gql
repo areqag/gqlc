@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE EntityNodeAndScalarRow AS {
+    (:Person {
+        id  :: INT64 NOT NULL,
+        age :: INT64 NOT NULL
+    })
+}
