@@ -514,15 +514,15 @@ type sweep and one gate before the parameter-type sweep:
 
 | Cardinality | Statement | `len(Columns)` | Outcome |
 |---|---|---|---|
-| `:one` | Read | 0 | `ErrCardinalityShapeMismatch` (a `:one` read with no `RETURN` is a caller bug; the C3-C4 rule is that `:one`/`:many` projections must have at least one column — sqlc precedent) |
+| `:one` | Read | 0 | `ErrCardinalityShapeMismatch` † (a `:one` read with no `RETURN` is a caller bug; the C3-C4 rule is that `:one`/`:many` projections must have at least one column — sqlc precedent) |
 | `:one` | Read | 1+ | Admitted (unchanged from C3) |
 | `:one` | Write | 0 | `ErrCardinalityShapeMismatch` (canonical zero-column write — annotate `:exec` instead) |
 | `:one` | Write | 1+ | Admitted (write-with-projection, §3.3) |
-| `:many` | Read | 0 | `ErrCardinalityShapeMismatch` (same reason as `:one` / Read / 0) |
+| `:many` | Read | 0 | `ErrCardinalityShapeMismatch` † (same reason as `:one` / Read / 0) |
 | `:many` | Read | 1+ | Admitted (unchanged from C3) |
 | `:many` | Write | 0 | `ErrCardinalityShapeMismatch` (same reason as `:one` / Write / 0) |
 | `:many` | Write | 1+ | Admitted (write-with-projection, §3.3) |
-| `:exec` | Read | 0 | Admitted (call-with-no-yield, §2.1) |
+| `:exec` | Read | 0 | Admitted † (call-with-no-yield, §2.1) |
 | `:exec` | Read | 1+ | `ErrExecOnProjection` (a projection query the author labelled `:exec` — the columns are contract) |
 | `:exec` | Write | 0 | Admitted (canonical write path, §3.1) |
 | `:exec` | Write | 1+ | `ErrExecOnProjection` (a write-with-`RETURN` labelled `:exec` — the RETURN is contract) |
@@ -588,6 +588,43 @@ type sweep and one gate before the parameter-type sweep:
   `:exec` on a read routes `AccessModeRead`; the emitted body
   is byte-identical to the write `:exec` body except the fourth
   `run` argument.
+
+**† Pipeline-unreachable cells.** Three cells in the table above
+are pipeline-unreachable at C4: the C4 test harness cannot
+produce a `NamedQuery` that lands on them, so no fixture in the
+C4 corpus exercises the gate at these rows directly. The
+outcomes still apply on the codegen side (the gate is written
+against `(Cardinality, Statement, len(Columns))` in the
+abstract, not against a fixture list), and the sentinel code
+paths are covered by the write-side symmetric fixtures verified
+in the C4 Linus PASS on PR #237
+(`cardinality_shape_zero_column_write_one` /
+`cardinality_shape_zero_column_write_many` for the
+`ErrCardinalityShapeMismatch` arm; the `:exec` write body for
+the admitted arm).
+
+- **`(:one, Read, 0)` — grammar-rejected.**
+  `oC_SinglePartQuery` requires `oC_Return` when no updating
+  clause is present, so a `StatementRead` with zero return
+  columns cannot be produced by the parser. The
+  `ErrCardinalityShapeMismatch` code path for zero-column
+  reads is covered by the symmetric zero-column write fixture
+  (`cardinality_shape_zero_column_write_one`).
+- **`(:many, Read, 0)` — grammar-rejected.** Same rationale as
+  `(:one, Read, 0)`; symmetric coverage from
+  `cardinality_shape_zero_column_write_many`.
+- **`(:exec, Read, 0)` — harness-side registry gap.** The only
+  legitimate source is a `CALL` procedure with no `YIELD`,
+  which requires a procsig registry entry naming the
+  procedure's zero-YIELD shape. The C4 test harness uses an
+  empty procsig registry, so no fixture can drive a
+  `StatementRead` `NamedQuery` with `len(Columns) == 0` through
+  the pipeline. The admitted-arm body is byte-identical to the
+  `:exec` write body except the fourth `run` argument
+  (`AccessModeRead` vs `AccessModeWrite`), and the `:exec`
+  write body is covered by every `write_exec_*` fixture; the
+  `AccessModeRead` dispatch itself is covered by every C1-C3
+  read golden.
 
 The truth table above lands as one paired-shape check on
 `(Cardinality, Statement, len(Columns))`, added to Phase A ahead
