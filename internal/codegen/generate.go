@@ -67,10 +67,11 @@ var reservedIdentifiers = map[string]struct{}{
 // than re-deriving each field from NamedQuery.Validated.
 type preparedQuery struct {
 	NamedQuery
-	MethodName  string          // verbatim NamedQuery.Name
-	Bare        string          // lowerCamel first rune of MethodName
-	ParamFields []preparedParam // in Validated.Parameters order
-	RowFields   []preparedRow   // in Validated.Columns order
+	MethodName  string              // verbatim NamedQuery.Name
+	Bare        string              // lowerCamel first rune of MethodName
+	ParamFields []preparedParam     // in Validated.Parameters order
+	RowFields   []preparedRow       // in Validated.Columns order
+	EdgeUnions  []preparedEdgeUnion // in Validated.Columns order (sub-ordered by column position); one per columnEdgeUnion Row field (C5)
 }
 
 type preparedParam struct {
@@ -83,10 +84,11 @@ type preparedParam struct {
 type preparedRow struct {
 	ColumnName string // resolver Column.Name — the driver record key
 	Field      string // mangle §4.3
-	GoType     string // §5.1 — a Go type text; for entity columns the entity struct name
+	GoType     string // §5.1 — a Go type text; for entity columns the entity struct name; for edgeUnion columns the synthesised interface name
 	Nullable   bool
-	Kind       columnKind            // property (C1) or entity — property/node/edge (C2); temporal/list/scalar/any (C3)
+	Kind       columnKind            // property (C1) or entity — property/node/edge (C2); temporal/list/scalar/any (C3); edgeUnion (C5)
 	ListElem   resolver.ResolvedType // populated when Kind == columnList — the element leaf, driving the loop body
+	EdgeKeys   []schema.EdgeKey      // populated when Kind == columnEdgeUnion — the candidate edge keys in resolver-canonical order (§5.5)
 }
 
 // columnKind discriminates the row-assembly template arm to run for a
@@ -125,6 +127,13 @@ const (
 	// bool). Used for ResolvedUnknown, ScalarNull, and (per §5.5) any
 	// leaf whose emitted Go type is `any`.
 	columnAny
+	// columnEdgeUnion is C5's multi-candidate-edge arm: record.Get(key)
+	// returning (any, bool) followed by a dbtype.Relationship assertion +
+	// type-switch dispatch on rel.Type in resolver-canonical EdgeKeys
+	// order (§5.5). The row-field GoType carries the synthesised
+	// interface name; each candidate satisfies the interface via a
+	// marker method emitted in models.go (§5.2).
+	columnEdgeUnion
 )
 
 // entityKind discriminates node from edge in the entity-naming and
@@ -135,6 +144,24 @@ const (
 	entityNode entityKind = iota
 	entityEdge
 )
+
+// preparedEdgeUnion carries one per-query-column edgeUnion synthesis
+// result (§4.10). The InterfaceName is the emitted sealed-marker
+// interface's Go identifier (<QueryName><RowFieldName>); Candidates is
+// the ordered slice of entity struct names each candidate schema edge
+// maps to (via entityIndex), matched positionally against the resolver's
+// EdgeKeys slice. Emission walks §5.2 to write the interface + marker
+// methods, and §5.5 to write the type-switch dispatch body. Introduced
+// at C5.
+type preparedEdgeUnion struct {
+	QueryName     string           // owning query's method name
+	ColumnPos     int              // 0-based column index in Validated.Columns
+	ColumnName    string           // Column.Name
+	FieldName     string           // row-field mangle (§4.3), also used as the interface suffix
+	InterfaceName string           // <QueryName><FieldName>
+	EdgeKeys      []schema.EdgeKey // resolver-canonical order (R3 spec §4.4)
+	Candidates    []string         // entity struct names, len == len(EdgeKeys); positional
+}
 
 // preparedEntity is Phase Z's per-entity result: struct name plus ordered
 // field list plus the source-axis text for the doc comment. Cached in a
@@ -240,7 +267,7 @@ func generate(in Input) ([]File, error) {
 	files := []File{
 		{Path: "db.go", Contents: renderDB(pkg, hasOne)},
 		{Path: "querier.go", Contents: renderQuerier(pkg, prepared)},
-		{Path: "models.go", Contents: renderModels(pkg, entities)},
+		{Path: "models.go", Contents: renderModels(pkg, entities, prepared)},
 	}
 
 	// Per-source `<name>.cypher.go` file emission — grouped by
@@ -589,7 +616,21 @@ func phaseAAdmit(queries []NamedQuery, entities []preparedEntity, entityIndex ma
 					return fmt.Errorf("%w: query %q column %d %q references unknown edge type %s -[:%s]-> %s", ErrOutOfC5Scope, q.Name, ci, col.Name, string(t.EdgeKey.Source), string(t.EdgeKey.Label), string(t.EdgeKey.Target))
 				}
 			case resolver.ResolvedEdgeUnion:
-				return fmt.Errorf("%w: query %q column %d %q resolved as edgeUnion (C5 owns)", ErrOutOfC5Scope, q.Name, ci, col.Name)
+				// C5 admission (§2.1): defensive gates on the resolver-
+				// guaranteed invariants. The resolver commits len(EdgeKeys)
+				// >= 2 (single-candidate collapses to ResolvedEdge) per R3
+				// spec §4.4; codegen reads defensively so a synthetic test
+				// seam fails at generation, not downstream. Every candidate
+				// must have a Phase Z schema-cache entry — a miss indicates
+				// the resolver committed an edge the schema does not declare.
+				if len(t.EdgeKeys) < 2 {
+					return fmt.Errorf("%w: query %q column %d %q resolved as edgeUnion with only %d candidate(s) — resolver invariant violated (expected >= 2)", ErrOutOfC5Scope, q.Name, ci, col.Name, len(t.EdgeKeys))
+				}
+				for _, ek := range t.EdgeKeys {
+					if _, ok := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: ek}]; !ok {
+						return fmt.Errorf("%w: query %q column %d %q edgeUnion candidate %s -[:%s]-> %s not declared by schema", ErrOutOfC5Scope, q.Name, ci, col.Name, string(ek.Source), string(ek.Label), string(ek.Target))
+					}
+				}
 			case resolver.ResolvedTemporal:
 				// Every temporal kind is representable; the closed enum
 				// maps into the temporal Go type table (§5.1) without a
@@ -602,10 +643,16 @@ func phaseAAdmit(queries []NamedQuery, entities []preparedEntity, entityIndex ma
 				// walks the record.Get path.
 			case resolver.ResolvedList:
 				// Recurse the list-element chain to find unrepresentable
-				// leaves or edgeUnion leaves (§4.7). The Go type text
-				// is derived at Phase B; here we only fail if the recursion
-				// itself rejects.
-				if _, err := resolvedListGoType(t.Element, entities, entityIndex); err != nil {
+				// leaves (§4.7). The Go type text is derived at Phase B;
+				// here we only fail if the recursion itself rejects. C5
+				// widens the recursion to synthesise the edgeUnion
+				// interface name for a ResolvedEdgeUnion leaf, threading
+				// the ambient query + column field through so the leaf's
+				// synthesised name matches the top-level Row-field
+				// interface. At Phase A we discard the derived text; the
+				// call is a validity probe.
+				rowField, _ := rowFieldName(col.Name)
+				if _, err := resolvedListGoType(t.Element, entities, entityIndex, q.Name, rowField); err != nil {
 					return fmt.Errorf("query %q column %d %q: %w", q.Name, ci, col.Name, err)
 				}
 			default:
@@ -727,10 +774,58 @@ func phaseBDerive(queries []NamedQuery, entities []preparedEntity, entityIndex m
 					GoType:     "any",
 					Kind:       columnAny,
 				})
+			case resolver.ResolvedEdgeUnion:
+				// C5 edgeUnion synthesis (§4.10): interface name is
+				// <QueryName><RowFieldName>; candidates are the schema's
+				// entity struct names in resolver-canonical EdgeKeys order.
+				// Every candidate has a Phase A guarantee of a schema-cache
+				// entry (§2.1), so the lookup is infallible here.
+				interfaceName := q.Name + field
+				candidates := make([]string, len(t.EdgeKeys))
+				for i, ek := range t.EdgeKeys {
+					candidates[i] = entities[entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: ek}]].Name
+				}
+				p.EdgeUnions = append(p.EdgeUnions, preparedEdgeUnion{
+					QueryName:     q.Name,
+					ColumnPos:     ci,
+					ColumnName:    col.Name,
+					FieldName:     field,
+					InterfaceName: interfaceName,
+					EdgeKeys:      t.EdgeKeys,
+					Candidates:    candidates,
+				})
+				p.RowFields = append(p.RowFields, preparedRow{
+					ColumnName: col.Name,
+					Field:      field,
+					GoType:     interfaceName,
+					Nullable:   t.Nullable,
+					Kind:       columnEdgeUnion,
+					EdgeKeys:   t.EdgeKeys,
+				})
 			case resolver.ResolvedList:
-				inner, err := resolvedListGoType(t.Element, entities, entityIndex)
+				inner, err := resolvedListGoType(t.Element, entities, entityIndex, q.Name, field)
 				if err != nil {
 					return nil, fmt.Errorf("query %q column %d %q: %w", q.Name, ci, col.Name, err)
+				}
+				// list-of-edgeUnion at a leaf synthesises a preparedEdgeUnion
+				// so models.go emits the interface + marker methods (§5.2).
+				// The leaf's synthesised interface name matches the top-level
+				// column's field name — every element of the list satisfies
+				// the same sealed sum.
+				if leafEK, isEdgeUnion := findEdgeUnionLeaf(t.Element); isEdgeUnion {
+					candidates := make([]string, len(leafEK))
+					for i, ek := range leafEK {
+						candidates[i] = entities[entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: ek}]].Name
+					}
+					p.EdgeUnions = append(p.EdgeUnions, preparedEdgeUnion{
+						QueryName:     q.Name,
+						ColumnPos:     ci,
+						ColumnName:    col.Name,
+						FieldName:     field,
+						InterfaceName: q.Name + field,
+						EdgeKeys:      leafEK,
+						Candidates:    candidates,
+					})
 				}
 				p.RowFields = append(p.RowFields, preparedRow{
 					ColumnName: col.Name,
@@ -750,15 +845,27 @@ func phaseBDerive(queries []NamedQuery, entities []preparedEntity, entityIndex m
 }
 
 // sweepIdentifiers runs spec §4.6's exported-identifier collision sweep
-// across every emitted top-level identifier. C2 inserts entity struct
-// names first (schema-side vocabulary anchor), then method names, then
-// <Method>Params, then <Method>Row. First insertion-order duplicate wins.
-// C0 skeleton identifiers (Queries / New / WithTx / ReadQuerier /
-// WriteQuerier / Querier) and the ErrNoRows / ErrMultipleResults
-// sentinels are already gate-checked by Phase A's reserved-identifier
-// match, so they never appear here.
+// across every emitted top-level identifier. Six sources at C5, in
+// insertion order (§2.2 / §5.7):
+//
+//  1. entity struct names (C2)
+//  2. entity decode helper names (`decode<Name>`, promoted to sweep at C5)
+//  3. method names (C1)
+//  4. `<Method>Params` for two-plus-param queries (C1)
+//  5. `<Method>Row` for two-plus-column queries (C1)
+//  6. edgeUnion interface names, per-query-column (C5)
+//
+// First insertion-order duplicate wins. C0 skeleton identifiers
+// (Queries / New / WithTx / ReadQuerier / WriteQuerier / Querier) and
+// the ErrNoRows / ErrMultipleResults sentinels are gate-checked by
+// Phase A's reserved-identifier match, so they never appear here.
+// Marker method names (source 6's per-candidate satisfier) and
+// <methodName>QueryText consts are unexported and stay off the sweep
+// (§4.6 defence): a marker collision is caught by the interface-name
+// axis first, and a QueryText collision is caught by the method-name
+// axis first.
 func sweepIdentifiers(entities []preparedEntity, prepared []preparedQuery) error {
-	seen := make(map[string]string, len(entities)+len(prepared)*3)
+	seen := make(map[string]string, len(entities)*2+len(prepared)*3)
 	insert := func(ident, source string) error {
 		if first, dup := seen[ident]; dup {
 			return fmt.Errorf("%w: identifier %q emitted by both %s and %s", ErrIdentifierCollision, ident, first, source)
@@ -766,6 +873,7 @@ func sweepIdentifiers(entities []preparedEntity, prepared []preparedQuery) error
 		seen[ident] = source
 		return nil
 	}
+	// Source 1: entity struct names.
 	for _, e := range entities {
 		var srcAxis string
 		if e.Kind == entityNode {
@@ -777,6 +885,16 @@ func sweepIdentifiers(entities []preparedEntity, prepared []preparedQuery) error
 			return err
 		}
 	}
+	// Source 2: entity decode helper names. Same insertion order as
+	// entity structs. Unexported by construction but promoted to the
+	// sweep at C5 so a future exported-decode-helper refactor cannot
+	// blow past the invariant (§2.2 defence).
+	for _, e := range entities {
+		if err := insert("decode"+e.Name, fmt.Sprintf("entity decode helper %q for entity struct %q", "decode"+e.Name, e.Name)); err != nil {
+			return err
+		}
+	}
+	// Sources 3-5: method / Params / Row.
 	for _, p := range prepared {
 		if err := insert(p.MethodName, fmt.Sprintf("query %q method", p.Name)); err != nil {
 			return err
@@ -788,6 +906,15 @@ func sweepIdentifiers(entities []preparedEntity, prepared []preparedQuery) error
 		}
 		if len(p.RowFields) >= 2 {
 			if err := insert(p.MethodName+"Row", fmt.Sprintf("query %q Row struct", p.Name)); err != nil {
+				return err
+			}
+		}
+	}
+	// Source 6: edgeUnion interface names, per-query-column in
+	// Input.Queries slice order sub-ordered by column position.
+	for _, p := range prepared {
+		for _, u := range p.EdgeUnions {
+			if err := insert(u.InterfaceName, fmt.Sprintf("edgeUnion interface %q for query %q column %d %q", u.InterfaceName, p.Name, u.ColumnPos, u.ColumnName)); err != nil {
 				return err
 			}
 		}
@@ -983,22 +1110,58 @@ func querierImports(prepared []preparedQuery) (needDbtype, needTime bool) {
 	return needDbtype, needTime
 }
 
-// renderModels emits models.go (spec §5.2). At C2 the body carries one
-// exported struct per schema NodeType and EdgeType (Phase Z emission
-// order) followed by an unexported decode<Name> helper. The import set
-// is a template invariant on schema shape:
+// renderModels emits models.go (spec §5.2). C2 emits one exported
+// struct per schema NodeType and EdgeType (Phase Z order) plus an
+// unexported decode<Name> helper. C5 adds two blocks:
 //
-//   - dbtype iff any entity struct emits (decode helpers take dbtype.Node
-//     or dbtype.Relationship)
+//   - Marker methods on each candidate entity struct, one per edgeUnion
+//     interface it participates in. Emitted between the struct
+//     declaration and the decode helper so a reader following the entity
+//     sees shape → sum-membership → decode.
+//   - EdgeUnion interface declarations, per-query-column in
+//     Input.Queries slice order sub-ordered by column position, with a
+//     `//sumtype:decl` comment line above each.
+//
+// The import set is a template invariant on schema shape:
+//
+//   - dbtype: unconditional (decode helpers take dbtype.Node /
+//     dbtype.Relationship)
 //   - fmt iff any property is decoded (decode-error wrapping)
 //   - neo4j iff any non-nullable property is decoded (neo4j.GetProperty[T])
 //
-// A schema with zero entity types emits an empty body — package clause
-// only — matching C1's byte-empty models.go (§7 "silently accepted").
-func renderModels(pkg string, entities []preparedEntity) []byte {
+// EdgeUnion emission adds no new import (the interface + marker methods
+// live in this package; no cross-package reference emerges). A schema
+// with zero entity types emits an empty body — package clause only —
+// matching C1's byte-empty models.go (§7 "silently accepted").
+func renderModels(pkg string, entities []preparedEntity, prepared []preparedQuery) []byte {
 	if len(entities) == 0 {
 		return []byte(header() + `package ` + pkg + `
 `)
+	}
+
+	// Collect edgeUnion interfaces across every query, preserving
+	// Input.Queries slice order sub-ordered by column position.
+	// markersByEntity maps entity-struct name -> ordered interface
+	// names it satisfies, deduplicated so an entity that appears twice
+	// in an EdgeKeys slice (impossible — resolver commits distinct
+	// candidates) or across two per-query columns projecting the same
+	// interface (impossible — per-query-column naming) still emits one
+	// marker per interface participation.
+	var unions []preparedEdgeUnion
+	markersByEntity := make(map[string][]string)
+	seenMarker := make(map[string]struct{})
+	for _, p := range prepared {
+		for _, u := range p.EdgeUnions {
+			unions = append(unions, u)
+			for _, cand := range u.Candidates {
+				key := cand + "\x00" + u.InterfaceName
+				if _, dup := seenMarker[key]; dup {
+					continue
+				}
+				seenMarker[key] = struct{}{}
+				markersByEntity[cand] = append(markersByEntity[cand], u.InterfaceName)
+			}
+		}
 	}
 
 	anyProp := false
@@ -1047,8 +1210,21 @@ func renderModels(pkg string, entities []preparedEntity) []byte {
 			b.WriteString("\n")
 		}
 		writeEntityStruct(&b, e)
+		if markers := markersByEntity[e.Name]; len(markers) > 0 {
+			b.WriteString("\n")
+			for _, iface := range markers {
+				fmt.Fprintf(&b, "func (%s) is%s() {}\n", e.Name, iface)
+			}
+		}
 		b.WriteString("\n")
 		writeEntityDecodeHelper(&b, e)
+	}
+
+	// EdgeUnion interface declarations, appended after entity blocks,
+	// one per synthesised per-query-column interface in emission order.
+	for _, u := range unions {
+		b.WriteString("\n//sumtype:decl\n")
+		fmt.Fprintf(&b, "type %s interface{ is%s() }\n", u.InterfaceName, u.InterfaceName)
 	}
 	return []byte(b.String())
 }
@@ -1217,7 +1393,11 @@ func groupImports(queries []preparedQuery) (needDbtype, needTime, needFmt bool) 
 // a per-kind test on the row's emitted Go type.
 func columnNeedsImports(f preparedRow) (needDbtype, needTime bool) {
 	switch f.Kind {
-	case columnNode, columnEdge:
+	case columnNode, columnEdge, columnEdgeUnion:
+		// edgeUnion decode type-asserts dbtype.Relationship (§5.5); the
+		// column's emitted Go type is the sealed interface (not a
+		// dbtype.* text), so goTypeNeedsImports does not fire and the
+		// need is declared here.
 		return true, false
 	case columnTemporal, columnProperty:
 		return goTypeNeedsImports(f.GoType)
@@ -1399,7 +1579,9 @@ func zeroValueText(p preparedQuery) string {
 			return f.GoType + "{}"
 		case columnList:
 			return "nil"
-		case columnAny:
+		case columnAny, columnEdgeUnion:
+			// edgeUnion single-column return type is the interface; its
+			// zero value is nil (§3.1 / §5.5).
 			return "nil"
 		case columnProperty, columnScalar:
 			// Fall through to the per-Go-type dispatch below.
@@ -1623,6 +1805,9 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p preparedQuery, f prepar
 	case columnList:
 		writeListColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
 		return
+	case columnEdgeUnion:
+		writeEdgeUnionColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
+		return
 	case columnProperty, columnTemporal, columnScalar:
 		// Fall through to the GetRecordValue + narrow-convert path below.
 	}
@@ -1804,6 +1989,22 @@ func writeListElementBody(b *strings.Builder, p preparedQuery, f preparedRow, el
 		fmt.Fprintf(b, "%sdecoded, err := decode%s(rel)\n", indent, elemGoType)
 		fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
 		fmt.Fprintf(b, "%s%s = append(%s, decoded)\n", indent, accVar, accVar)
+	case resolver.ResolvedEdgeUnion:
+		// C5 list-of-edgeUnion element arm (§5.5). The element type is
+		// the sealed interface (elemGoType); dispatch on rel.Type in
+		// EdgeKeys slice order, matching the top-level column's
+		// preparedEdgeUnion candidates positionally.
+		candidates := findEdgeUnionCandidates(p, f, tt.EdgeKeys)
+		fmt.Fprintf(b, "%srel, ok := %s.(dbtype.Relationship)\n", indent, iterVar)
+		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected dbtype.Relationship, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, iterVar, indent)
+		fmt.Fprintf(b, "%sswitch rel.Type {\n", indent)
+		for i, ek := range tt.EdgeKeys {
+			fmt.Fprintf(b, "%scase %q:\n", indent, string(ek.Label))
+			fmt.Fprintf(b, "%s\tentity, err := decode%s(rel)\n", indent, candidates[i])
+			fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)\n%s\t}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+			fmt.Fprintf(b, "%s\t%s = append(%s, entity)\n", indent, accVar, accVar)
+		}
+		fmt.Fprintf(b, "%sdefault:\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: unexpected relationship type %%q\", %q, i, rel.Type)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
 	case resolver.ResolvedList:
 		// Nested list: type-assert to []any, then recurse.
 		innerGoType := strings.TrimPrefix(elemGoType, "[]")
@@ -1813,6 +2014,96 @@ func writeListElementBody(b *strings.Builder, p preparedQuery, f preparedRow, el
 		writeListElementDecode(b, p, f, tt.Element, innerGoType, "innerAcc", "inner", zero, indent)
 		fmt.Fprintf(b, "%s%s = append(%s, innerAcc)\n", indent, accVar, accVar)
 	}
+}
+
+// writeEdgeUnionColumnDecodeIndent emits the edgeUnion-column arm of
+// the row assembly (spec §5.5, C5). The column is decoded via
+// record.Get returning (any, bool) — no neo4j.GetRecordValue[T]
+// overload exists for a dbtype.Relationship-or-nil result — then
+// type-asserted to dbtype.Relationship, then dispatched through a
+// type-switch on rel.Type in resolver-canonical EdgeKeys order. Each
+// case calls the entity's decode<Name> helper and either returns the
+// entity (single-column :one), appends to out (single-column :many),
+// or assigns to the Row field (multi-column). Nullable columns skip
+// the raw==nil non-null gate and let the nil interface propagate as
+// the natural absence value (§3.3, ADR 0010 D3 Resolved lines 343–345).
+func writeEdgeUnionColumnDecodeIndent(b *strings.Builder, p preparedQuery, f preparedRow, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
+	// Distinct per-column locals for the raw / rel bindings so
+	// multi-column Row-assembly bodies never shadow. Single-column
+	// projections keep the bare "raw" / "rel" locals matching spec
+	// §5.5's snippets.
+	rawLocal := "raw"
+	relLocal := "rel"
+	okLocal := "ok"
+	entityLocal := "entity"
+	if len(p.RowFields) > 1 {
+		suffix := strings.TrimPrefix(varName, "value")
+		rawLocal = "raw" + suffix
+		relLocal = "rel" + suffix
+		okLocal = "ok" + suffix
+		entityLocal = "entity" + suffix
+	}
+	fmt.Fprintf(b, "%s%s, %s := %s.Get(%q)\n", indent, rawLocal, okLocal, recordExpr, f.ColumnName)
+	fmt.Fprintf(b, "%sif !%s {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q missing from record\", %q)\n%s}\n", indent, okLocal, indent, zero, p.MethodName, f.ColumnName, indent)
+	if f.Nullable {
+		// Nullable: nil raw propagates as the nil interface value.
+		fmt.Fprintf(b, "%sif %s == nil {\n", indent, rawLocal)
+		b.WriteString(indent)
+		b.WriteString("\t")
+		b.WriteString(assignPrefix[len(indent):])
+		b.WriteString("nil")
+		b.WriteString(assignSuffix)
+		fmt.Fprintf(b, "%s} else {\n", indent)
+		writeEdgeUnionDispatchBody(b, p, f, rawLocal, relLocal, okLocal, entityLocal, zero, assignPrefix, assignSuffix, indent+"\t")
+		fmt.Fprintf(b, "%s}\n", indent)
+		return
+	}
+	// Non-nullable: nil raw is a decode error.
+	fmt.Fprintf(b, "%sif %s == nil {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)\n%s}\n", indent, rawLocal, indent, zero, p.MethodName, f.ColumnName, indent)
+	writeEdgeUnionDispatchBody(b, p, f, rawLocal, relLocal, okLocal, entityLocal, zero, assignPrefix, assignSuffix, indent)
+}
+
+// writeEdgeUnionDispatchBody emits the type-assert + type-switch
+// dispatch that owns the edgeUnion column's decode arm. Factored out
+// so the nullable arm can reuse the same body inside an `else` branch
+// (skipping the non-null raw gate). The dispatch keys are EdgeKey.Label
+// strings — the driver's wire labels — not the mangled entity struct
+// names.
+func writeEdgeUnionDispatchBody(b *strings.Builder, p preparedQuery, f preparedRow, rawLocal, relLocal, okLocal, entityLocal, zero, assignPrefix, assignSuffix, indent string) {
+	fmt.Fprintf(b, "%s%s, %s := %s.(dbtype.Relationship)\n", indent, relLocal, okLocal, rawLocal)
+	fmt.Fprintf(b, "%sif !%s {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q: expected dbtype.Relationship, got %%T\", %q, %s)\n%s}\n", indent, okLocal, indent, zero, p.MethodName, f.ColumnName, rawLocal, indent)
+	fmt.Fprintf(b, "%sswitch %s.Type {\n", indent, relLocal)
+	for i, ek := range f.EdgeKeys {
+		entityName := edgeKeyToEntityName(p, f, i)
+		fmt.Fprintf(b, "%scase %q:\n", indent, string(ek.Label))
+		fmt.Fprintf(b, "%s\t%s, err := decode%s(%s)\n", indent, entityLocal, entityName, relLocal)
+		fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s\t}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+		b.WriteString(indent)
+		b.WriteString("\t")
+		b.WriteString(assignPrefix[len(indent):])
+		b.WriteString(entityLocal)
+		b.WriteString(assignSuffix)
+	}
+	fmt.Fprintf(b, "%sdefault:\n%s\treturn %s, fmt.Errorf(\"%s: column %%q: unexpected relationship type %%q\", %q, %s.Type)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, relLocal, indent)
+}
+
+// edgeKeyToEntityName resolves an EdgeKey position in a preparedRow's
+// EdgeKeys slice to the emitted entity struct name. The lookup walks
+// the owning query's preparedEdgeUnion entries, matching on ColumnName
+// (unique per query), then indexes Candidates by the position. Every
+// call site has a Phase B guarantee that the row's edgeUnion entry
+// exists.
+func edgeKeyToEntityName(p preparedQuery, f preparedRow, i int) string {
+	for _, u := range p.EdgeUnions {
+		if u.ColumnName == f.ColumnName && u.FieldName == f.Field {
+			return u.Candidates[i]
+		}
+	}
+	// Unreachable: Phase B guarantees a matching preparedEdgeUnion for
+	// every columnEdgeUnion Row field. Returning the bare label keeps
+	// the emission textually distinct so a regression surfaces at the
+	// nested-module compile fence rather than silently miscompiling.
+	return string(f.EdgeKeys[i].Label)
 }
 
 // writeEntityColumnDecodeIndent emits the entity-column arm of the row
@@ -2037,10 +2328,12 @@ func scalarGoType(k resolver.Scalar) string {
 // resolvedListGoType derives the Go type text for a ResolvedType leaf
 // or nested ResolvedList (spec §2.2, §4.7). Returns (text, err):
 // err wraps ErrUnrepresentableWidth for a leaf property width that is
-// unrepresentable; err wraps ErrOutOfC5Scope for a ResolvedEdgeUnion
-// leaf (C5 owns). A ResolvedList element recurses; every other leaf is
-// one dispatch on the ResolvedType sum.
-func resolvedListGoType(t resolver.ResolvedType, entities []preparedEntity, entityIndex map[entityLookupKey]int) (string, error) {
+// unrepresentable. A ResolvedList element recurses; every other leaf is
+// one dispatch on the ResolvedType sum. C5 widens the sum to admit
+// ResolvedEdgeUnion leaves — the derived text is the ambient query's
+// synthesised interface name (<queryName><columnField>); the extra
+// parameters are inert for every non-edgeUnion arm.
+func resolvedListGoType(t resolver.ResolvedType, entities []preparedEntity, entityIndex map[entityLookupKey]int, queryName, columnField string) (string, error) {
 	switch tt := t.(type) {
 	case resolver.ResolvedProperty:
 		ty, ok := goType(tt.Type)
@@ -2061,7 +2354,23 @@ func resolvedListGoType(t resolver.ResolvedType, entities []preparedEntity, enti
 		}
 		return entities[idx].Name, nil
 	case resolver.ResolvedEdgeUnion:
-		return "", fmt.Errorf("%w: list element resolved as edgeUnion (C5 owns)", ErrOutOfC5Scope)
+		// C5 recursion arm: leaf synthesises the same interface name the
+		// top-level Row field would emit (§4.7). Phase A already asserted
+		// len(EdgeKeys) >= 2 and cache membership for the top-level column;
+		// list-of-edgeUnion at Phase A calls into this recursion path only
+		// for the validity probe, and Phase B repeats the derivation at
+		// emission time — so a schema-cache miss at the leaf indicates a
+		// resolver-produced foreign edge and routes through ErrOutOfC5Scope
+		// for uniformity with the top-level edgeUnion admission arm.
+		if len(tt.EdgeKeys) < 2 {
+			return "", fmt.Errorf("%w: list element resolved as edgeUnion with only %d candidate(s) — resolver invariant violated (expected >= 2)", ErrOutOfC5Scope, len(tt.EdgeKeys))
+		}
+		for _, ek := range tt.EdgeKeys {
+			if _, ok := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: ek}]; !ok {
+				return "", fmt.Errorf("%w: list element edgeUnion candidate %s -[:%s]-> %s not declared by schema", ErrOutOfC5Scope, string(ek.Source), string(ek.Label), string(ek.Target))
+			}
+		}
+		return queryName + columnField, nil
 	case resolver.ResolvedTemporal:
 		return temporalGoType(tt.Kind), nil
 	case resolver.ResolvedScalar:
@@ -2069,13 +2378,63 @@ func resolvedListGoType(t resolver.ResolvedType, entities []preparedEntity, enti
 	case resolver.ResolvedUnknown:
 		return "any", nil
 	case resolver.ResolvedList:
-		inner, err := resolvedListGoType(tt.Element, entities, entityIndex)
+		inner, err := resolvedListGoType(tt.Element, entities, entityIndex, queryName, columnField)
 		if err != nil {
 			return "", err
 		}
 		return "[]" + inner, nil
 	}
 	return "", fmt.Errorf("%w: list element has unknown resolved type %s", ErrOutOfC5Scope, t.String())
+}
+
+// findEdgeUnionCandidates resolves a list-of-edgeUnion leaf's EdgeKeys
+// to the emitted entity struct names by looking up the owning query's
+// preparedEdgeUnion entries. Phase B ensures every list-of-edgeUnion
+// column has a preparedEdgeUnion entry with matching keys. Callers
+// pass the leaf's EdgeKeys to disambiguate against different edgeUnion
+// columns on the same query.
+func findEdgeUnionCandidates(p preparedQuery, f preparedRow, keys []schema.EdgeKey) []string {
+	for _, u := range p.EdgeUnions {
+		if u.ColumnName != f.ColumnName || u.FieldName != f.Field {
+			continue
+		}
+		if len(u.EdgeKeys) != len(keys) {
+			continue
+		}
+		match := true
+		for i := range keys {
+			if u.EdgeKeys[i] != keys[i] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return u.Candidates
+		}
+	}
+	// Unreachable: Phase B synthesises a matching preparedEdgeUnion.
+	out := make([]string, len(keys))
+	for i, k := range keys {
+		out[i] = string(k.Label)
+	}
+	return out
+}
+
+// findEdgeUnionLeaf walks a list-element chain looking for an
+// edgeUnion leaf, returning the leaf's EdgeKeys and true when found.
+// Nested lists recurse; anything else terminates the search. Called at
+// Phase B to synthesise a preparedEdgeUnion (§4.7 recursion arm, §5.2
+// emission) for a list-of-edgeUnion column. A list whose leaf is any
+// non-edgeUnion type returns (nil, false) — no marker method emission
+// is needed and the list arm decodes the leaf through its own arm.
+func findEdgeUnionLeaf(t resolver.ResolvedType) ([]schema.EdgeKey, bool) {
+	switch tt := t.(type) {
+	case resolver.ResolvedEdgeUnion:
+		return tt.EdgeKeys, true
+	case resolver.ResolvedList:
+		return findEdgeUnionLeaf(tt.Element)
+	}
+	return nil, false
 }
 
 // lowerFirstRune lowercases the first rune of s. Used for the
