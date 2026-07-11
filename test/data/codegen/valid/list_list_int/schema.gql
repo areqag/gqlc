@@ -1,0 +1,5 @@
+CREATE PROPERTY GRAPH TYPE ListListInt AS {
+    (:Person {
+        id :: INT64 NOT NULL
+    })
+}

@@ -1,0 +1,4 @@
+{
+  "package": "listunknown",
+  "queryFiles": ["queries.cypher"]
+}

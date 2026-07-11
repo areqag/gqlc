@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE PropertyDate AS {
+    (:Person {
+        id  :: INT64 NOT NULL,
+        dob :: DATE  NOT NULL
+    })
+}

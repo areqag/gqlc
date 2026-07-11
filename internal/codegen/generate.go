@@ -874,8 +874,23 @@ func renderQuerier(pkg string, prepared []preparedQuery) []byte {
 	b.WriteString("package ")
 	b.WriteString(pkg)
 	b.WriteString("\n\n")
+	// Import set: context always (for method signatures); dbtype iff a
+	// method signature names a dbtype.<Kind>; time iff a signature names
+	// time.Time. The signature-search runs over Params and Row types.
+	needDbtype, needTime := querierImports(prepared)
 	if len(prepared) > 0 {
-		b.WriteString("import \"context\"\n\n")
+		if needDbtype || needTime {
+			b.WriteString("import (\n\t\"context\"\n")
+			if needTime {
+				b.WriteString("\t\"time\"\n")
+			}
+			if needDbtype {
+				b.WriteString("\n\t\"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype\"\n")
+			}
+			b.WriteString(")\n\n")
+		} else {
+			b.WriteString("import \"context\"\n\n")
+		}
 	}
 	b.WriteString("type ReadQuerier interface {\n")
 	for _, p := range prepared {
@@ -888,6 +903,37 @@ func renderQuerier(pkg string, prepared []preparedQuery) []byte {
 	b.WriteString("type Querier interface {\n\tReadQuerier\n\tWriteQuerier\n}\n\n")
 	b.WriteString("var _ Querier = (*Queries)(nil)\n")
 	return []byte(b.String())
+}
+
+// querierImports scans every prepared query's method signature (params
+// + return type) for dbtype / time references. Multi-column returns
+// use the MethodNameRow struct name (the struct itself lives in the
+// .cypher.go file, whose imports carry any dbtype / time it needs);
+// single-column returns and every parameter surface the carrier
+// directly in the signature. The querier interface file needs an
+// import when — and only when — its method signature strings contain
+// the carrier.
+func querierImports(prepared []preparedQuery) (needDbtype, needTime bool) {
+	scan := func(ty string) {
+		if strings.Contains(ty, "dbtype.") {
+			needDbtype = true
+		}
+		if strings.Contains(ty, "time.Time") {
+			needTime = true
+		}
+	}
+	for _, p := range prepared {
+		// Parameters appear verbatim in every method signature.
+		for _, param := range p.ParamFields {
+			scan(param.GoType)
+		}
+		// Return type: bare row Go type for single-column projections;
+		// MethodNameRow (no import needed) otherwise.
+		if len(p.RowFields) == 1 {
+			scan(p.RowFields[0].GoType)
+		}
+	}
+	return needDbtype, needTime
 }
 
 // renderModels emits models.go (spec §5.2). At C2 the body carries one
@@ -1601,10 +1647,32 @@ func writeListElementDecode(b *strings.Builder, p preparedQuery, f preparedRow, 
 	if strings.Contains(indent, "\t\t\t\t") { // three levels deep — disambiguate
 		iterVar = "elem" + fmt.Sprint(strings.Count(indent, "\t"))
 	}
-	fmt.Fprintf(b, "%sfor i, %s := range %s {\n", indent, iterVar, srcVar)
+	// The index variable is only used by the element-type-assertion fail
+	// message; a bare-append arm (ResolvedUnknown / ScalarNull) does not
+	// use i. Suppress the unused-var warning by ranging with `_` when the
+	// element decode is one of those two arms.
+	indexVar := "i"
+	if listElemUsesBareAppend(elem) {
+		indexVar = "_"
+	}
+	fmt.Fprintf(b, "%sfor %s, %s := range %s {\n", indent, indexVar, iterVar, srcVar)
 	inner := indent + "\t"
 	writeListElementBody(b, p, f, elem, elemGoType, accVar, iterVar, zero, inner)
 	fmt.Fprintf(b, "%s}\n", indent)
+}
+
+// listElemUsesBareAppend reports whether the list-element decode arm
+// for elem emits a bare `acc = append(acc, elem)` (no type assertion,
+// no error path). Applies to ResolvedUnknown and ResolvedScalar{Null} —
+// both surface `any` at the leaf.
+func listElemUsesBareAppend(elem resolver.ResolvedType) bool {
+	switch tt := elem.(type) {
+	case resolver.ResolvedUnknown:
+		return true
+	case resolver.ResolvedScalar:
+		return tt.Kind == resolver.ScalarNull
+	}
+	return false
 }
 
 // writeListElementBody emits the body of one list-element loop
