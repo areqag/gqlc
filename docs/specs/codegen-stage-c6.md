@@ -19,7 +19,7 @@ document revises only the sections C6 touches.
 Stage C6 keeps the C5 file set (`db.go` / `querier.go` / `models.go`
 / `<name>.cypher.go`) byte-identical for the parts C6 does not touch,
 introduces one new source file (`internal/codegen/version.go`, §4.1)
-carrying the `version` constant that `generate.go:22` currently owns,
+carrying the `version` package-level variable that `generate.go:22` currently owns,
 tightens the emitted-file header contract (§5.2) so the byte-format
 is pinned and the version substitution is the *only* per-invocation
 variability, adds one new unit test asserting the header regex
@@ -36,7 +36,7 @@ one sentinel touched is the per-stage rename `ErrOutOfC5Scope` →
 ## 1. Deliverables
 
 - `internal/codegen/version.go` — new file (§4.1) carrying the
-  `version` package-level constant. `generate.go:22` retires the
+  `version` package-level variable. `generate.go:22` retires the
   duplicate declaration. The value is `"dev"` by default; a
   `-ldflags "-X github.com/areqag/gqlc/internal/codegen.version=vX.Y.Z"`
   override at binary build time replaces it. The file's docstring
@@ -85,7 +85,7 @@ C5 edgeUnion arm), the eager width sweep, the C4 cardinality × shape
 gate, the C1 `driverOrTx.run` seam signature, the C0 `New` /
 `WithTx` shape. C6 makes no structural change: no new phase, no new
 per-query derivation, no new admission gate, no new emission. The
-sole compile-level change is the extraction of the `version` constant
+sole compile-level change is the extraction of the `version` package-level variable
 into its own file (§4.1). Every other C6 change is documentation —
 the header format contract (§5.2), the session-config axes v1 locks
 in (§5.4), the `gqlc-0aa` re-scope (§8) — that this spec pins so
@@ -166,7 +166,7 @@ edit the emitted API.
 
 ### 4.1 Source-of-truth: `internal/codegen/version.go`, `-ldflags -X`, no `runtime/debug`
 
-The version string is a **package-level constant** in
+The version string is a **package-level variable** in
 `internal/codegen/version.go`, overridable at binary build time via
 `-ldflags "-X github.com/areqag/gqlc/internal/codegen.version=vX.Y.Z"`:
 
@@ -179,7 +179,7 @@ package codegen
 //
 //     go build -ldflags "-X github.com/areqag/gqlc/internal/codegen.version=$(git describe --tags)"
 //
-// The value is a package-level constant so the double-run determinism
+// The value is a package-level variable so the double-run determinism
 // test (C0 §2.3) holds across arbitrary invocations of the same binary:
 // two invocations of the same binary always see the same string.
 var version = "dev"
@@ -641,7 +641,7 @@ unchanged.
 ### 6.4 Determinism — C6 additions
 
 C0's `TestDoubleRun` runs unchanged. C6 adds no new ordered
-surface: the version constant is a package-level string — read once
+surface: the version variable is a package-level string — read once
 at load, embedded in the header — so two invocations of the same
 binary read the same string. `TestGeneratedHeaderFormat` runs
 after `TestDoubleRun` (the harness's discovery order) and reads
