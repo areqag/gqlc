@@ -22,6 +22,8 @@
     "parameter_two_property_uses_agree.cypher": "social_r2.gql",
     "parameter_clause_slot_skip.cypher": "social_r2.gql",
     "parameter_clause_slot_limit.cypher": "social_r2.gql",
+    "parameter_exists_body_clause_slot_limit.cypher": "social_r2.gql",
+    "parameter_exists_body_clause_slot_skip.cypher": "social_r2.gql",
     "parameter_expr_predicate.cypher": "social_r2.gql",
     "parameter_property_and_unknown_expr.cypher": "social_r2.gql",
     "undirected_single_match.cypher": "social_r3.gql",

@@ -1,5 +1,35 @@
 # The `query.Query` surface + resolver API
 
+> _Amendment (2026-07-11, gqlc-33k.3): **Use-precision refinement**, not a
+> model surface change. A `$param` inside an `EXISTS { RegularQuery }`
+> subquery's `LIMIT` or `SKIP` slot previously recorded the blanket
+> `ExprUse{TypeBool, ExprInPredicate}` minted by
+> `EnterOC_ExistentialSubquery`'s parameter sweep (Stage 11 round-2
+> reviewer caveat S5). It now records the precise
+> `ClauseSlotUse{ClauseSlotLimit}` / `ClauseSlotUse{ClauseSlotSkip}` —
+> the same variant an outer-scope SKIP/LIMIT `$p` gets, because the
+> clause slot is a syntactic property of the enclosing `OC_Skip` /
+> `OC_Limit` node, not of the subquery depth. Fix mechanism (approach 1
+> per bead brief; classify at the sweep site): the subquery entry
+> handler now runs three passes — `findSkipNodes` classifies bare
+> `$p`s against `ClauseSlotSkip`, `findLimitNodes` against
+> `ClauseSlotLimit`, then the existing `findParameters` blanket sweep
+> handles residuals; `mineClauseSlotParameter` gains an
+> `approved`-tree idempotence guard so nested-`EXISTS` re-entry cannot
+> double-record. The `ClauseSlotUse` variant, its `ClauseSlotSkip` /
+> `ClauseSlotLimit` slots, and the `ClauseName()` accessor are all
+> pre-existing surface — no new field, no new constructor, no wire
+> change to shapes that were already precise, and **zero of 3199
+> parser goldens rebaseline**. Resolver-observable delta: two new
+> `test/data/resolver/valid/parameter_exists_body_clause_slot_*.cypher`
+> fixtures pin the parameter as `kind=scalar, scalar=int` (same as the
+> outer-scope `parameter_clause_slot_*.cypher` twins) rather than
+> `kind=scalar, scalar=bool` (the pre-fix imprecise emission). No
+> other resolver goldens flip because no in-tree fixture previously
+> exercised the shape. See listener.go's `EnterOC_ExistentialSubquery`
+> and `internal/query/cypher/cypher-query-parser-stage-11.md §8` for
+> the pin narrative. Closes the S5 caveat._
+
 > _Amendment (2026-07-11, gqlc-5xg): the required-bare-pattern
 > re-reference axis on `NodeBinding` / `EdgeBinding` — R4 §7.5.4's
 > **Axis 2 shape (b)** (the narrower boolean, not shape (a)'s
@@ -378,7 +408,11 @@ on each additive cycle.
 
 - **shortestPath selector axis** on `PathBinding` (see posture below).
 - **`EXISTS { … }` Use precision** (gqlc-33k.3): parameters inside an
-  existential subquery currently record coarse `ExprUse`s.
+  existential subquery previously recorded coarse `ExprUse`s. **Closed
+  2026-07-11** — LIMIT/SKIP slots now emit precise `ClauseSlotUse`,
+  matching outer-scope discipline (see the amendment note at the top
+  of this ADR). Not a model surface change; a fix on the parser's
+  Use-classification path.
 - **`CreateEffect` created-vs-prebound split** (gqlc-33k.4): deferred until
   a consumer demonstrates the need — no speculative modelling.
 - **`ContainsAggregate` axis on `ExprProjection`** — adopted

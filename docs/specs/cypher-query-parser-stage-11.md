@@ -814,6 +814,47 @@ name is enforced). The invariant this holds: a `$param` in an
 two. The `mustParse` pins on nested-EXISTS shapes (`ExistentialSubquery3
 [1]`) exercise this end-to-end.
 
+**gqlc-33k.3 addendum (2026-07-11) — S5 caveat closure: LIMIT/SKIP
+clause-slot precision in an `EXISTS { RegularQuery }` body.** The
+round-2 review flagged that a `$param` inside `EXISTS { … LIMIT $x }`
+or `EXISTS { … SKIP $y }` recorded the blanket
+`ExprUse{TypeBool, ExprInPredicate}` minted by the subquery-entry
+sweep, rather than the precise `ClauseSlotUse{ClauseSlotLimit}` /
+`ClauseSlotUse{ClauseSlotSkip}` an outer-scope SKIP/LIMIT `$p` gets
+via `collectProjection` → `mineClauseSlotParameter`. Root cause: the
+inner LIMIT/SKIP path lives on `collectProjection`, which
+`EnterOC_With` / `EnterOC_Return` early-return before under the
+`subqueryDepth > 0` guard (§1.2), so the subquery sweep was the
+only mining path — and it did not classify by enclosing slot. This
+was sound but imprecise: the parameter was recorded (no silent
+drop), but with a coarser type/position than the syntactic slot
+warranted. **Closed** by classifying at the sweep site (approach 1
+per the bead brief; centralises Use-classification rather than
+duplicating between the sweep and re-enabled slot handlers):
+`EnterOC_ExistentialSubquery` now runs three passes —
+`findSkipNodes` classifies bare `$p`s against `ClauseSlotSkip`,
+`findLimitNodes` against `ClauseSlotLimit`, then the existing
+`findParameters` blanket sweep handles residuals (the WHERE
+`$threshold` and friends). `mineClauseSlotParameter` gains an
+`approved`-tree idempotence guard so nested-`EXISTS` re-entry (each
+level fires its own sweep) cannot double-record a slot use. The
+clause slot is a syntactic property of the enclosing `OC_Skip` /
+`OC_Limit` node, so this classification is well-defined at any
+subquery depth. Pinned by four new `mustParse` cases in
+`parser_test.go` (single LIMIT, single SKIP, mixed LIMIT+SKIP+WHERE,
+nested EXISTS with both slots one level deeper) and two new
+resolver fixtures
+(`test/data/resolver/valid/parameter_exists_body_clause_slot_{limit,skip}.cypher`)
+whose goldens land as `kind=scalar, scalar=int` — identical to the
+outer-scope `parameter_clause_slot_{limit,skip}.cypher` twins, and
+distinct from the pre-fix `kind=scalar, scalar=bool` that would
+have arisen from the imprecise `ExprUse{TypeBool}`. Zero of the
+existing 3199 parser goldens rebaseline; no other resolver goldens
+flip (no in-tree fixture previously exercised the shape). See ADR
+0008 amendment (2026-07-11, gqlc-33k.3) for the surface-neutral
+posture: no new field, no new constructor — a Use-classification
+refinement inside the existing sealed variant set.
+
 The lesser risks, recorded for completeness:
 
 - **Correlated outer names in `EXISTS {}` are not verified.** A
