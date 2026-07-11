@@ -42,16 +42,19 @@ var (
 	// user-facing failure mode; the reachability sweep skips it.
 	ErrFormatFailure = errors.New("format failure")
 
-	// ErrOutOfC2Scope is returned when a C2-admissible input carries a
-	// construct C2 does not project: a column whose resolved type is
+	// ErrOutOfC3Scope is returned when a C3-admissible input carries a
+	// construct C3 does not project: a column whose resolved type is
 	// ResolvedEdgeUnion (C5) or ResolvedScalar / ResolvedTemporal /
-	// ResolvedList / ResolvedUnknown (C3), a ResolvedProperty column or
+	// ResolvedList / ResolvedUnknown (widened at C3 — still catchment for
+	// what the widening does not admit), a ResolvedProperty column or
 	// parameter with an unrepresentable width or a temporal property type
-	// (C3), a non-property parameter (C3), a :exec cardinality (C4), or a
-	// query text carrying a raw-string-hostile backtick. Category-grained
-	// per C0's precedent; C3/C4/C5 retire the sub-cases as they land.
-	// Renamed from ErrOutOfC1Scope at C2 — the entity-column axis retired.
-	ErrOutOfC2Scope = errors.New("out of C2 scope")
+	// (until C3 splits width sentinels out), a non-property parameter, a
+	// :exec cardinality (C4), or a query text carrying a raw-string-hostile
+	// backtick. Category-grained per C0's precedent; C4/C5 retire the sub-
+	// cases as they land. Renamed from ErrOutOfC2Scope at C3 — the C2
+	// catchment retires; width splits into ErrUnrepresentableWidth in the
+	// following commit.
+	ErrOutOfC3Scope = errors.New("out of C3 scope")
 
 	// ErrParamNameCollision is returned when two Parameters mangle to
 	// the same Params-struct field name (§4.2). The fail-message names
@@ -121,7 +124,7 @@ var allSentinels = []error{
 	ErrDuplicateSourceFile,
 	ErrDuplicateQueryName,
 	ErrInvalidCardinality,
-	ErrOutOfC2Scope,
+	ErrOutOfC3Scope,
 	ErrParamNameCollision,
 	ErrRowFieldCollision,
 	ErrAliasRequired,

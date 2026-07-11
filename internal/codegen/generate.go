@@ -459,7 +459,7 @@ func prepareEntityFields(entityName string, props map[string]schema.Property) ([
 			// C3 owns unrepresentable-width and temporal property types
 			// — including on entity properties. Route through the same
 			// scope sentinel as a query column with the same width.
-			return nil, false, false, fmt.Errorf("%w: entity %q property %q has unrepresentable property width %s (C3 owns)", ErrOutOfC2Scope, entityName, p.Name, p.Type)
+			return nil, false, false, fmt.Errorf("%w: entity %q property %q has unrepresentable property width %s (C3 owns)", ErrOutOfC3Scope, entityName, p.Name, p.Type)
 		}
 		fields = append(fields, preparedEntityField{
 			PropName: p.Name,
@@ -485,17 +485,17 @@ func phaseAAdmit(queries []NamedQuery, entityIndex map[entityLookupKey]int) erro
 			return fmt.Errorf("%w: query %q at position %d collides with reserved identifier", ErrIdentifierCollision, q.Name, i)
 		}
 		if q.Cardinality == CardinalityExec {
-			return fmt.Errorf("%w: query %q at position %d has cardinality :exec (C4 owns writes)", ErrOutOfC2Scope, q.Name, i)
+			return fmt.Errorf("%w: query %q at position %d has cardinality :exec (C4 owns writes)", ErrOutOfC3Scope, q.Name, i)
 		}
 		if q.Cardinality != CardinalityOne && q.Cardinality != CardinalityMany {
 			return fmt.Errorf("%w: query %q at position %d has unrecognised cardinality %d", ErrInvalidCardinality, q.Name, i, q.Cardinality)
 		}
 		if len(q.Validated.Columns) == 0 {
 			// C2 admissibility requires a non-empty projection (§7).
-			return fmt.Errorf("%w: query %q at position %d has no projected columns", ErrOutOfC2Scope, q.Name, i)
+			return fmt.Errorf("%w: query %q at position %d has no projected columns", ErrOutOfC3Scope, q.Name, i)
 		}
 		if strings.ContainsRune(q.SourceText, '`') {
-			return fmt.Errorf("%w: query %q at position %d has a backtick in its source text", ErrOutOfC2Scope, q.Name, i)
+			return fmt.Errorf("%w: query %q at position %d has a backtick in its source text", ErrOutOfC3Scope, q.Name, i)
 		}
 		for ci, col := range q.Validated.Columns {
 			// Shape check first (spec §4.3, §6.4): count(*), arithmetic
@@ -509,29 +509,29 @@ func phaseAAdmit(queries []NamedQuery, entityIndex map[entityLookupKey]int) erro
 			switch t := col.Type.(type) {
 			case resolver.ResolvedProperty:
 				if _, ok := goType(t.Type); !ok {
-					return fmt.Errorf("%w: query %q column %d %q has unrepresentable property width %s (C3 owns)", ErrOutOfC2Scope, q.Name, ci, col.Name, t.Type)
+					return fmt.Errorf("%w: query %q column %d %q has unrepresentable property width %s (C3 owns)", ErrOutOfC3Scope, q.Name, ci, col.Name, t.Type)
 				}
 			case resolver.ResolvedNode:
 				if _, ok := entityIndex[entityLookupKey{Kind: entityNode, Labels: t.Labels}]; !ok {
 					// Unknown node type — the resolver's R0 gate should
 					// have caught this; a synthetic test seam lands here.
-					return fmt.Errorf("%w: query %q column %d %q references unknown node type %q", ErrOutOfC2Scope, q.Name, ci, col.Name, string(t.Labels))
+					return fmt.Errorf("%w: query %q column %d %q references unknown node type %q", ErrOutOfC3Scope, q.Name, ci, col.Name, string(t.Labels))
 				}
 			case resolver.ResolvedEdge:
 				if _, ok := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: t.EdgeKey}]; !ok {
-					return fmt.Errorf("%w: query %q column %d %q references unknown edge type %s -[:%s]-> %s", ErrOutOfC2Scope, q.Name, ci, col.Name, string(t.EdgeKey.Source), string(t.EdgeKey.Label), string(t.EdgeKey.Target))
+					return fmt.Errorf("%w: query %q column %d %q references unknown edge type %s -[:%s]-> %s", ErrOutOfC3Scope, q.Name, ci, col.Name, string(t.EdgeKey.Source), string(t.EdgeKey.Label), string(t.EdgeKey.Target))
 				}
 			default:
-				return fmt.Errorf("%w: query %q column %d %q resolved as %s (C2 projects ResolvedProperty, ResolvedNode, ResolvedEdge only)", ErrOutOfC2Scope, q.Name, ci, col.Name, col.Type.String())
+				return fmt.Errorf("%w: query %q column %d %q resolved as %s (C2 projects ResolvedProperty, ResolvedNode, ResolvedEdge only)", ErrOutOfC3Scope, q.Name, ci, col.Name, col.Type.String())
 			}
 		}
 		for pi, p := range q.Validated.Parameters {
 			prop, ok := p.Type.(resolver.ResolvedProperty)
 			if !ok {
-				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (C2 projects ResolvedProperty parameters only)", ErrOutOfC2Scope, q.Name, pi, p.Name, p.Type.String())
+				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (C2 projects ResolvedProperty parameters only)", ErrOutOfC3Scope, q.Name, pi, p.Name, p.Type.String())
 			}
 			if _, ok := goType(prop.Type); !ok {
-				return fmt.Errorf("%w: query %q parameter %d $%s has unrepresentable property width %s (C3 owns)", ErrOutOfC2Scope, q.Name, pi, p.Name, prop.Type)
+				return fmt.Errorf("%w: query %q parameter %d $%s has unrepresentable property width %s (C3 owns)", ErrOutOfC3Scope, q.Name, pi, p.Name, prop.Type)
 			}
 		}
 	}
@@ -560,7 +560,7 @@ func phaseBDerive(queries []NamedQuery, entities []preparedEntity, entityIndex m
 			// Phase A guaranteed ResolvedProperty + representable width.
 			prop, ok := param.Type.(resolver.ResolvedProperty)
 			if !ok {
-				return nil, fmt.Errorf("%w: query %q parameter %d $%s: internal invariant — Phase A missed non-property type %s", ErrOutOfC2Scope, q.Name, pi, param.Name, param.Type.String())
+				return nil, fmt.Errorf("%w: query %q parameter %d $%s: internal invariant — Phase A missed non-property type %s", ErrOutOfC3Scope, q.Name, pi, param.Name, param.Type.String())
 			}
 			ty, _ := goType(prop.Type)
 			p.ParamFields = append(p.ParamFields, preparedParam{
@@ -612,7 +612,7 @@ func phaseBDerive(queries []NamedQuery, entities []preparedEntity, entityIndex m
 					Kind:       columnEdge,
 				})
 			default:
-				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC2Scope, q.Name, ci, col.Name, col.Type.String())
+				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC3Scope, q.Name, ci, col.Name, col.Type.String())
 			}
 		}
 
@@ -1396,7 +1396,7 @@ func rowFieldName(colText string) (string, bool) {
 
 // goType maps a resolved property type to its native Go emission (spec
 // §5.1). Returns (typeText, ok): ok=false for the widths C3 owns —
-// caller routes to ErrOutOfC2Scope naming the width. Callers append a
+// caller routes to ErrOutOfC3Scope naming the width. Callers append a
 // leading '*' for nullable columns/parameters at emission time.
 func goType(pt graph.PropertyType) (string, bool) {
 	switch pt {
