@@ -188,11 +188,27 @@ C0 §2.3's three invariants stand:
 ### 2.4 What the driverDB.run body change means for gqlc's module
 
 C1's `driverDB.run` moves from C0's `_ = session; return nil, nil` stub
-to a real `session.ExecuteRead` call whose result is materialised into
-`neo4j.ResultWithContext` for the generated method to collect against
-(§5.6). The change is entirely inside the emitted `db.go` template
-string (§5.6 gives the exact body); gqlc's own module is not affected
-— the generator emits text, and text-level changes cross no dependency
+to a real `session.ExecuteRead` call whose callback runs the query and
+buffers the driver's result stream into `[]*neo4j.Record` **inside the
+transaction lifetime**, returning that slice to the caller for
+post-close decoding (§5.6). This is a **C0-committed seam signature
+revision**: C0 declared `driverOrTx.run` returning
+`(neo4j.ResultWithContext, error)`, but the neo4j-go-driver v5
+`ResultWithContext` is only valid inside its transaction — consuming
+it after `ExecuteRead` returns is not a documented pattern (verified
+against `pkg.go.dev/github.com/neo4j/neo4j-go-driver/v5/neo4j`,
+2026-07-11). C0's stub body never exercised the lifetime issue, so
+the invalid signature shipped. C1 is the first stage that actually
+exercises the seam; the revision must land here, not later. The new
+signature (§5.6) returns `[]*neo4j.Record` — driver-documented as
+self-contained value snapshots safe to consume after the transaction
+closes. Both `driverDB.run` and `txDB.run` update symmetrically so the
+`driverOrTx` abstraction still holds; decode runs in the generated
+method body outside the run indirection.
+
+The change is entirely inside the emitted `db.go` template string
+(§5.6 gives the exact body); gqlc's own module is not affected — the
+generator emits text, and text-level changes cross no dependency
 boundary. The nested-module compile fence (`just test-codegen-fence`,
 C0 §7) is what proves the emitted body type-checks against the pinned
 driver version (`test/data/codegen/go.mod`, v5.28.4 today).
@@ -201,10 +217,13 @@ driver version (`test/data/codegen/go.mod`, v5.28.4 today).
 
 ## 3. Emitted API surface — the C1 shape
 
-The user-visible generated surface C1 adds on top of C0. C1's package-
-level identifiers are: the C0 skeleton set (`Queries`, `New`, `WithTx`,
-`ReadQuerier`, `WriteQuerier`, `Querier`, `driverOrTx`, `driverDB`,
-`txDB`) plus the C1 additions below.
+The user-visible generated surface C1 adds on top of C0. C1's exported
+package-level identifiers are: the C0 exported skeleton set (`Queries`,
+`New`, `WithTx`, `ReadQuerier`, `WriteQuerier`, `Querier`) plus the
+C1 additions below. C0's unexported items (`driverOrTx` /
+`driverDB` / `txDB`) stay unexported; C1 adds the unexported per-
+query `<methodName>QueryText` const per §5.3 / §5.5 — neither set
+participates in §4.4's exported-collision sweep.
 
 ### 3.1 Per-query method surface
 
@@ -317,6 +336,35 @@ closed set of errors `Generate` returns; these are emitted values in
 the *user's* package, not codegen returns. The sweep discipline (§5.7)
 does not apply.
 
+### 3.6 The `driverOrTx.run` seam signature — C0 revision
+
+C0's `driverOrTx.run` returned `(neo4j.ResultWithContext, error)` on
+the strength of a stub body that never exercised the driver. C1 is
+the first stage to actually call the seam and finds the shape is
+invalid: `ResultWithContext` from a `ManagedTransaction.Run` is only
+valid inside the callback that owns the transaction (verified against
+`pkg.go.dev/github.com/neo4j/neo4j-go-driver/v5/neo4j`, 2026-07-11).
+C1 therefore revises the seam:
+
+```go
+// C0's declaration (unchanged in queryfile, replaced in codegen):
+//   run(...) (neo4j.ResultWithContext, error)
+// C1's replacement (both driverDB and txDB):
+type driverOrTx interface {
+    run(ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode) ([]*neo4j.Record, error)
+}
+```
+
+`[]*neo4j.Record` is the driver's documented safe-post-close shape:
+`Record` values are self-contained snapshots. The callback buffers
+via `.Collect(ctx)` inside the transaction; the outer function
+returns the buffered slice. §5.6 gives the full `driverDB.run` /
+`txDB.run` bodies. The user-visible surface (§3.1's methods) is
+unchanged — the seam is unexported and internal — but the C0
+goldens' `db.go` file regenerates under the new template on the
+first C1 run; the byte diff is the signature swap plus the real
+read-arm body plus a `fmt` import.
+
 ---
 
 ## 4. The naming kernel
@@ -330,19 +378,21 @@ the reserved-identifier match:
 
 ```
 Name ∈ { "Queries", "New", "WithTx", "ReadQuerier", "WriteQuerier",
-         "Querier", "driverOrTx", "driverDB", "txDB",
-         "ErrNoRows", "ErrMultipleResults" }
+         "Querier", "ErrNoRows", "ErrMultipleResults" }
        → ErrIdentifierCollision
 ```
 
-The reserved list is the C1 package-level identifier set exactly.
-Non-C0-emitted C1 additions (`ErrNoRows`, `ErrMultipleResults`) are
-included even though they only emit for `:one`-carrying batches — the
-check is uniform: a query named `ErrNoRows` collides with the sentinel
-name whether or not the sentinel actually emits, because C5's
-package-level collision sweep will not want a discontinuity introduced
-at C1 (a rename that works in one batch but not another is exactly
-the "renaming scheme" D2 Resolved refused).
+The reserved list is the C1 package-level *exported*-identifier set
+exactly (unexported items like `driverOrTx` / `driverDB` / `txDB`
+cannot be reached because `NamedQuery.Name` must be exported — front
+end enforces `^[A-Z][A-Za-z0-9]*$`). Non-C0-emitted C1 additions
+(`ErrNoRows`, `ErrMultipleResults`) are included even though they
+only emit for `:one`-carrying batches — the check is uniform: a
+query named `ErrNoRows` collides with the sentinel name whether or
+not the sentinel actually emits, because C5's package-level collision
+sweep will not want a discontinuity introduced at C1 (a rename that
+works in one batch but not another is exactly the "renaming scheme"
+D2 Resolved refused).
 
 A cross-query method collision (two `:one` queries both named `Widget`)
 is caught by C0's `validateQueries` `ErrDuplicateQueryName` on
@@ -375,16 +425,15 @@ has been mangled (not per-parameter as the derivation runs, so the
 error message names both offenders) but reports on the *first*
 collision (Phase B short-circuit).
 
-**Non-ASCII parameter names.** The Cypher parser accepts identifier
-runes matching `oC_SymbolicName`, which includes Unicode letters. A
+**Resolved (spec-cycle, 2026-07-11): non-ASCII parameter names
+accepted.** Cypher's `oC_SymbolicName` admits Unicode letters; Go
+identifiers accept Unicode letters as identifier runes; the compile
+fence catches malformed derived names before goldens bake. A
 non-ASCII parameter's mangle rules follow the same split-on-`_` and
-first-rune-uppercase discipline — Go identifiers accept Unicode letters
-as identifier runes. No sentinel fires for non-ASCII; the derived
-field name will pass compilation as long as it obeys the identifier
-grammar (verified at the nested-module fence). This is consistent with
-C0's `packageIdent` check being an ASCII-only grammar for the package
-identifier — a package name is a directory-name concern, a field name
-is a source-token concern.
+first-rune-uppercase discipline. No sentinel fires for non-ASCII.
+This is consistent with C0's `packageIdent` check being an
+ASCII-only grammar for the package identifier — a package name is
+a directory-name concern, a field name is a source-token concern.
 
 ### 4.3 Row field names — text-shape analysis on `Column.Name`
 
@@ -431,20 +480,22 @@ The two-columns case is deterministic on first-appearance in
 
 ### 4.4 Package-level identifier collision sweep
 
-After Phase B, sweep every emitted top-level identifier for
-duplicates. The C1 identifier set per generated package is:
+After Phase B, sweep every emitted **exported** top-level identifier
+for duplicates. Unexported package-internal identifiers (currently
+`driverOrTx` / `driverDB` / `txDB` from the C0 skeleton and the
+per-query `<methodName>QueryText` const) are not swept here — the
+nested-module compile fence catches unexported redeclarations with a
+strictly-better diagnostic (§4.4 rationale below). The exported
+identifier set per generated package is:
 
-- The C0 skeleton set: `Queries`, `New`, `WithTx`, `ReadQuerier`,
-  `WriteQuerier`, `Querier`, `driverOrTx`, `driverDB`, `txDB`.
+- The C0 exported skeleton set: `Queries`, `New`, `WithTx`,
+  `ReadQuerier`, `WriteQuerier`, `Querier`.
 - Zero or one sentinel emission: `ErrNoRows`, `ErrMultipleResults`
   (both or neither — always paired when the batch contains at least
   one `:one` query, §3.5).
 - One per query: the method name.
 - Zero or one per query: `XParams` (query has two-plus parameters).
 - Zero or one per query: `XRow` (query has two-plus columns).
-- One per query: `<name>QueryText` — the per-query package-level
-  const carrying the query text (§5.5, `queryText` casing is
-  compound-lowercase-suffix on the query name, `PeopleOverAgeQueryText`).
 
 Any duplicate → `ErrIdentifierCollision` naming both identifier
 sources (e.g. "method `PersonRow` collides with row struct
@@ -459,13 +510,23 @@ identifier is not reserved and cannot collide. A separate query
 whose Row *does* have to be named `PersonNames` would be free to do
 so.
 
-**Why `<name>QueryText` participates in the sweep.** A query named
-`PersonQueryText` would collide with the const for another query
-whose auto-suffix produced the same name (or with its own const if
-`<name>QueryText` is the auto-suffix, which is idempotent). The
-sweep catches the pathological name deterministically instead of
-hiding it in a per-query file that only fails compilation at the
-fence — the fence's diagnostic is worse.
+**Why `<methodName>QueryText` consts do not participate in the
+exported-identifier sweep.** The per-query query-text const's name is
+`<methodName>QueryText` (lower-camel-case first rune, §5.3, §5.5) —
+unexported. The user calls the method, never the const; the const is
+a codegen implementation detail that no user code can name or shadow.
+Two unexported consts colliding would fail the nested-module compile
+fence with a "redeclared in this block" error — the fence is the
+enforcement surface for unexported identifiers, and the fence error
+names the file and both declaration sites, which is a strictly
+better diagnostic than an `ErrIdentifierCollision` fail-message that
+only names the query pair. The `<methodName>` prefix is deterministic
+in `Input.Queries` order (§4.1 verbatim method name → lowercase
+first rune), so a duplicate at this axis would already imply a
+duplicate method-name collision the exported sweep catches first. C5
+extends the exported sweep with entity-struct and decode-helper
+identifiers, which are user-visible; unexported package-internal
+identifiers stay on the fence.
 
 C5 hardens this sweep against additional identifier sources
 (entity structs, decode helpers) as C2/C3 add them (ADR 0010 D7).
@@ -508,13 +569,20 @@ types only, in the source order of `internal/graph/propertytype.go`:
 - **`FLOAT` (unqualified) → `float64`.** The schema language accepts
   `FLOAT` as the machine-width family (analogue of `INT` / `UINT`);
   the neo4j driver stores floats as float64, so unqualified `FLOAT`
-  maps to `float64` unconditionally. The FLOAT32 schema-width
-  contract (D3 Resolved) is the *widening/narrowing* contract for a
-  schema author who declared FLOAT32 specifically — its
-  implementation is C3's business (encode widens to float64; decode
-  narrows by plain conversion, no range check). At C1, FLOAT32 emits
-  as `float32`; the encode/decode contract is documented in the C1
-  fixture golden as an accepted TODO for C3, not implemented.
+  maps to `float64` unconditionally. ADR 0010 D3 audit: unqualified
+  FLOAT is extrapolated by analogue with the INT/UINT machine rows —
+  D3's table has "`property` INT / UINT (machine) → `int` / `uint`"
+  but omits a corresponding FLOAT row; if D3 later disagrees with
+  the machine-width analogue (e.g., ruling that unqualified FLOAT is
+  invalid schema syntax and must appear only as one of the
+  bit-widthed variants), revise the row here. The FLOAT32
+  schema-width contract (D3 Resolved) is the *widening/narrowing*
+  contract for a schema author who declared FLOAT32 specifically —
+  its implementation is C3's business (encode widens to float64;
+  decode narrows by plain conversion, no range check). At C1,
+  FLOAT32 emits as `float32`; the encode/decode contract is
+  documented in the C1 fixture golden as an accepted TODO for C3,
+  not implemented.
 - **`DATE` / `TIMESTAMP` → deferred to C3.** They are property-side
   temporals; C1's scope explicitly does not cover temporals (§7). A
   query projecting a `DATE` or `TIMESTAMP` property column routes to
@@ -583,11 +651,11 @@ the full C1 body). Every `:one`/`:many` method's shape is:
 //   <first-3-lines-of-query-text>
 //   [... truncated if the query exceeds 3 lines]
 func (q *Queries) <MethodName>(ctx context.Context<param-list>) (<return>, error) {
-    result, err := q.db.run(ctx, <queryTextConst>, <paramsMap>, neo4j.AccessModeRead)
+    records, err := q.db.run(ctx, <queryTextConst>, <paramsMap>, neo4j.AccessModeRead)
     if err != nil {
         return <zero>, err
     }
-    <collect-body>
+    <decode-body>
 }
 ```
 
@@ -617,12 +685,13 @@ func (q *Queries) <MethodName>(ctx context.Context<param-list>) (<return>, error
   `string`, `0` for numerics, `false` for `bool`, `nil` for slices
   and pointer types, `<MethodName>Row{}` for a two-plus-column
   Row-returning `:one`.
-- **`<collect-body>`** — the per-query row assembly, §5.5. Runs
-  `result.Collect(ctx)` (`:many`) or `result.Single(ctx)` (`:one`),
-  handles `ErrNoRows` (`:one` empty) and `ErrMultipleResults`
-  (`:one` multi), decodes each `neo4j.Record` into the Row shape via
+- **`<decode-body>`** — the per-query row assembly, §5.5. Runs a
+  `len(records)` arity test (`:one` empty → `ErrNoRows`, `:one`
+  multi → `ErrMultipleResults`, `:many` any length is accepted),
+  decodes each `neo4j.Record` into the Row shape via
   `neo4j.GetRecordValue[T]` per column, and materialises the return
-  value.
+  value. The `records` local is the buffered `[]*neo4j.Record` the
+  seam returned (§5.6).
 
 The 3-line doc-comment quote of the query text is a readability
 affordance for `godoc` browsers — the query is the source of truth,
@@ -667,7 +736,7 @@ package <derived>
 
 import (
     "context"
-    "errors"
+    "fmt"
 
     "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
@@ -687,15 +756,16 @@ func (q *Queries) <Method2>(...) (..., error) { ... }
 ```
 
 - **Imports.** `context` is always present (every method takes
-  `ctx context.Context`). `errors` is present iff at least one
-  `:one` method emits into this file (needed for `errors.Is` on
-  driver-side result-cardinality errors — the driver's `Single`
-  distinguishes empty from multi via typed errors the generated
-  body wraps into `ErrNoRows` / `ErrMultipleResults`). The
-  `github.com/neo4j/neo4j-go-driver/v5/neo4j` import is always
-  present (every method calls `q.db.run` whose signature names
-  `neo4j.AccessMode`, and the collect body uses
-  `neo4j.GetRecordValue`).
+  `ctx context.Context`). `fmt` is always present (every column
+  emits a `fmt.Errorf` decode wrapper — §5.5's row-assembly
+  templates). The `github.com/neo4j/neo4j-go-driver/v5/neo4j`
+  import is always present (every method calls `q.db.run` whose
+  signature names `neo4j.AccessMode` and returns `[]*neo4j.Record`,
+  and the decode body uses `neo4j.GetRecordValue`). `errors` is
+  *not* imported by the per-source file: `ErrNoRows` and
+  `ErrMultipleResults` are emitted from `db.go`, and the empty /
+  multi checks in the row assembly test `len(records)` on the
+  buffered slice rather than driver typed errors.
 - **Query-text consts.** One `const <method>QueryText = "..."` per
   method, using Go's raw-string backtick delimiter to preserve
   interior newlines and quotes byte-for-byte per ADR 0005. A
@@ -716,24 +786,25 @@ func (q *Queries) <Method2>(...) (..., error) { ... }
   `go/format.Source` (C0 §5.7) normalises to gofmt conventions on
   the way out.
 
+Per-query row assembly reads `[]*neo4j.Record` (the seam's return
+shape per §5.6) — empty/multi checks are `len(records)` tests on the
+buffered slice, not driver-error-type checks; `ErrNoRows` /
+`ErrMultipleResults` fire deterministically on slice length.
+
 **Per-query row assembly template — `:one`, single column:**
 
 ```go
-result, err := q.db.run(ctx, <method>QueryText, <paramsMap>, neo4j.AccessModeRead)
+records, err := q.db.run(ctx, <method>QueryText, <paramsMap>, neo4j.AccessModeRead)
 if err != nil {
     return <zero>, err
 }
-record, err := result.Single(ctx)
-if err != nil {
-    if errors.Is(err, io.EOF) || <driver-empty-check> {
-        return <zero>, ErrNoRows
-    }
-    if <driver-multi-check> {
-        return <zero>, ErrMultipleResults
-    }
-    return <zero>, err
+if len(records) == 0 {
+    return <zero>, ErrNoRows
 }
-value, _, err := neo4j.GetRecordValue[<T>](record, "<column-name>")
+if len(records) > 1 {
+    return <zero>, ErrMultipleResults
+}
+value, _, err := neo4j.GetRecordValue[<T>](records[0], "<column-name>")
 if err != nil {
     return <zero>, fmt.Errorf("<method>: decode column %q: %w", "<column-name>", err)
 }
@@ -741,24 +812,17 @@ if err != nil {
 return <value-or-deref>, nil
 ```
 
-The exact spelling of `<driver-empty-check>` / `<driver-multi-check>`
-depends on the neo4j-go-driver v5 error shape — sqlc's analogue is
-`errors.Is(err, sql.ErrNoRows)` for the empty case. The driver's
-`Single(ctx)` returns typed errors; the C1 code cycle (Cycle 2)
-verifies the exact type per the D7 standing instruction. The spec
-pins policy: empty → `ErrNoRows`, multi → `ErrMultipleResults`,
-other-driver-error → wrapped-and-returned.
+The empty and multi cases are simple length tests — the driver has
+already buffered every record inside the callback (§5.6), so the
+generated method reads the exact arity `.Collect` produced. No
+driver-typed-error branching is needed.
 
 **Per-query row assembly template — `:many`, single column:**
 
 ```go
-result, err := q.db.run(ctx, <method>QueryText, <paramsMap>, neo4j.AccessModeRead)
+records, err := q.db.run(ctx, <method>QueryText, <paramsMap>, neo4j.AccessModeRead)
 if err != nil {
     return nil, err
-}
-records, err := result.Collect(ctx)
-if err != nil {
-    return nil, fmt.Errorf("<method>: collect: %w", err)
 }
 out := make([]<T>, 0, len(records))
 for _, record := range records {
@@ -775,17 +839,19 @@ return out, nil
 **Per-query row assembly template — `:one`, two-plus columns:**
 
 ```go
-result, err := q.db.run(ctx, <method>QueryText, <paramsMap>, neo4j.AccessModeRead)
+records, err := q.db.run(ctx, <method>QueryText, <paramsMap>, neo4j.AccessModeRead)
 if err != nil {
     return <Method>Row{}, err
 }
-record, err := result.Single(ctx)
-if err != nil {
-    <same empty/multi/other handling as single-column :one>
+if len(records) == 0 {
+    return <Method>Row{}, ErrNoRows
+}
+if len(records) > 1 {
+    return <Method>Row{}, ErrMultipleResults
 }
 var row <Method>Row
 <per-column decode block, one per column>:
-value1, _, err := neo4j.GetRecordValue[<T1>](record, "<column-name-1>")
+value1, _, err := neo4j.GetRecordValue[<T1>](records[0], "<column-name-1>")
 if err != nil {
     return <Method>Row{}, fmt.Errorf("<method>: decode column %q: %w", "<column-name-1>", err)
 }
@@ -814,19 +880,53 @@ error naming the column. For a nullable column: `isNil == true` → set
 the pointer field to `nil`; `isNil == false` → take the address of a
 local variable holding the value (`v := value; row.X = &v`).
 
-The `fmt` import is added to the file's import block iff at least
-one method emits a decode-error `fmt.Errorf` (which is every method
-with at least one column — so effectively always for C1 fixtures).
+Both `fmt` and `neo4j` are unconditionally imported by every
+per-source file (a C1-admissible per-source file has at least one
+method, and every method emits both a decode-error `fmt.Errorf` and
+a `neo4j.GetRecordValue` call). `errors` is *not* imported: the
+generated sentinels `ErrNoRows` / `ErrMultipleResults` live in
+`db.go` and are visible in the same package, and the length-based
+empty/multi tests use no `errors.Is` branch. Removing `errors`
+from the emission's import block avoids `goimports`-level noise on
+files that don't need it.
 
-The `errors` import is added iff at least one `:one` method emits
-into this file (the `errors.Is` on the empty-check branch); a
-pure-`:many` per-source file omits it.
+### 5.6 The `driverOrTx.run` seam-signature revision and the C1 body
 
-### 5.6 The `driverDB.run` body change
+**Signature revision.** C0 committed
+`run(ctx, cypher, params, access) (neo4j.ResultWithContext, error)`
+on the unexported `driverOrTx` interface (C0 §5.3). That signature is
+invalid on the pinned driver: `neo4j.ResultWithContext` handed back by
+`ManagedTransaction.Run` is only valid inside the callback that
+received the `ManagedTransaction` — `ExecuteRead` closes the
+transaction on callback return, invalidating any result the callback
+hands back. C0's stub `return nil, nil` never exercised the lifetime
+issue, so the invalid shape shipped merged. C1 is the first stage that
+actually calls the seam, so C1 revises it.
 
-C0 emits:
+**New signature** (both `driverDB.run` and `txDB.run`):
 
 ```go
+type driverOrTx interface {
+    run(ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode) ([]*neo4j.Record, error)
+}
+```
+
+`[]*neo4j.Record` is the driver-documented safe-post-close shape:
+`neo4j.Record` values are self-contained snapshots and the slice
+survives transaction close (verified against
+`pkg.go.dev/github.com/neo4j/neo4j-go-driver/v5/neo4j`, 2026-07-11).
+Buffered-consumption discipline: the callback runs the query and
+calls `.Collect(ctx)` inside the transaction, returning the buffered
+slice out through `ExecuteRead`'s generic return-type parameter. The
+generated method decodes over the returned slice outside the callback.
+
+C0 emits (unchanged from merged C0 code — the invalid stub):
+
+```go
+type driverOrTx interface {
+    run(ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode) (neo4j.ResultWithContext, error)
+}
+
 func (d driverDB) run(ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode) (neo4j.ResultWithContext, error) {
     session := d.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: access})
     defer session.Close(ctx)
@@ -836,16 +936,24 @@ func (d driverDB) run(ctx context.Context, cypher string, params map[string]any,
 }
 ```
 
-C1 replaces the body with the read-arm dispatch:
+C1 emits the revised seam + real read-arm body:
 
 ```go
-func (d driverDB) run(ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode) (neo4j.ResultWithContext, error) {
+type driverOrTx interface {
+    run(ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode) ([]*neo4j.Record, error)
+}
+
+func (d driverDB) run(ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode) ([]*neo4j.Record, error) {
     session := d.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: access})
     defer session.Close(ctx)
     switch access {
     case neo4j.AccessModeRead:
-        return session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (neo4j.ResultWithContext, error) {
-            return tx.Run(ctx, cypher, params)
+        return session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) ([]*neo4j.Record, error) {
+            result, err := tx.Run(ctx, cypher, params)
+            if err != nil {
+                return nil, err
+            }
+            return result.Collect(ctx)
         })
     case neo4j.AccessModeWrite:
         // C4 populates the write arm.
@@ -854,36 +962,41 @@ func (d driverDB) run(ctx context.Context, cypher string, params map[string]any,
         return nil, fmt.Errorf("gqlc: unknown access mode %v", access)
     }
 }
+
+func (t txDB) run(ctx context.Context, cypher string, params map[string]any, _ neo4j.AccessMode) ([]*neo4j.Record, error) {
+    result, err := t.tx.Run(ctx, cypher, params)
+    if err != nil {
+        return nil, err
+    }
+    return result.Collect(ctx)
+}
 ```
 
-- **`ExecuteRead[T=neo4j.ResultWithContext]`.** The driver's
-  `ExecuteRead` is generic over the callback's return type
-  (verified against `pkg.go.dev/github.com/neo4j/neo4j-go-driver/v5/neo4j`
-  in the C0 spec cycle; the D7 standing instruction directs a repeat
-  verification at the C1 code cycle). The callback's return type is
-  `neo4j.ResultWithContext`, matching the interface `driverOrTx.run`
-  declares (C0 §5.3).
-- **Result lifetime.** The driver documentation notes results become
-  invalid when the transaction closes. `ExecuteRead` returns the
-  callback's result *after* the transaction closes — so the
-  `neo4j.ResultWithContext` handed back to `driverDB.run`'s caller
-  is a materialised view of the stream. The generated method's
-  `result.Collect(ctx)` / `result.Single(ctx)` calls run *inside*
-  the callback in a truly-streaming variant (spec deferred, `:iter`
-  candidate territory per ADR 0010 D8); at C1, the callback
-  materialises with a single Run, and Collect/Single read the driver's
-  cached result buffer post-close.
-
-  **Grill-worthy correction, C1 code cycle owns.** If the driver's
-  `ResultWithContext` cannot be validly consumed post-close (a shape
-  the C1 code cycle must verify against the driver's exact
-  behaviour), the run body must instead materialise into a
-  driver-agnostic `[]*neo4j.Record` inside the callback and return
-  a small wrapper that hands out the records. The wrapper is a
-  generation-time construct — no runtime package. The spec pins the
-  policy (materialise-inside-tx if streaming-outside-tx doesn't
-  work, decode-outside-tx from the materialised slice) and defers
-  the exact shape to the code cycle.
+- **`ExecuteRead[T=[]*neo4j.Record]`.** The driver's `ExecuteRead` is
+  generic over the callback's return type
+  (`func (s SessionWithContext) ExecuteRead[T](ctx, work
+  ManagedTransactionWorkT[T], ...) (T, error)`; verified against
+  `pkg.go.dev/github.com/neo4j/neo4j-go-driver/v5/neo4j`, 2026-07-11).
+  C1 instantiates `T` as `[]*neo4j.Record` — the callback's Collect
+  buffers everything inside the transaction, the outer function
+  returns the buffered slice.
+- **Result lifetime — resolved.** The driver documents `Record` as a
+  self-contained snapshot; `[]*Record` is safe to consume after
+  `session.ExecuteRead` returns because the transaction close only
+  invalidates the streaming `ResultWithContext`, not the buffered
+  records that `Collect` materialised. Decoding therefore runs in
+  the generated method body over the returned slice, one iteration
+  per record for `:many` and a one-shot arity-1 check for `:one`
+  (§5.5).
+- **`txDB.run` symmetric.** The `ManagedTransaction` handed to
+  `txDB` is caller-owned (via `WithTx` — C0 §5.3); the caller opens
+  and closes it. `txDB.run` still calls `.Collect(ctx)` immediately
+  after `tx.Run` for signature symmetry — the buffered slice shape
+  is the seam contract, uniform across both implementations. In
+  principle a `txDB` caller could stream (the tx is open), but the
+  seam predates that need; C1 does not optimise the tx path
+  independently. If a future stage adds streaming (`:iter`,
+  `gqlc-1a5`), the seam widens at that point; C1 stays uniform.
 - **`neo4j.AccessModeWrite` returns a stub error.** The `WriteQuerier`
   is still empty at C1 (§5.4), so no generated method ever passes
   `AccessModeWrite` to `run` — the arm is unreachable at C1. The
@@ -899,7 +1012,14 @@ func (d driverDB) run(ctx context.Context, cypher string, params map[string]any,
 - **`fmt` import.** The `db.go` template gains `fmt` in its import
   block; the C0 template did not need it.
 
-The txDB.run body is unchanged from C0.
+**Golden regeneration.** The C0 goldens' `db.go`
+(`test/data/codegen/valid/skeleton/golden/db.go` and
+`test/data/codegen/valid/queries_ignored/golden/db.go`) carry the
+old `driverOrTx.run` signature and the old `driverDB.run` / `txDB.run`
+return types. C1 regenerates both under the new template — the byte
+diff is the signature swap plus the real read-arm body plus the
+`fmt` import. The `-update` flag (C0 §6.4) rewrites the goldens; the
+compile fence proves the revised shape type-checks.
 
 ### 5.7 Sentinel set — the C1 additions
 
@@ -1036,7 +1156,7 @@ subdirectory with the complete generated package:
 | `nullable_columns` | Mixes nullable and non-nullable property columns, some nullable-arriving-nil test cases folded into the driver-side response (no assertion at codegen; fixture prose documents intent). |
 | `nullable_parameter` | A nullable parameter (`*int` field on Params); exercises D3 Resolved's symmetric parameter treatment. Encode direction verified at the code cycle. |
 | `multi_source_files` | Two `.cypher` files in one fixture, each declaring one query; goldens include two `<name>.cypher.go` files. Exercises per-source grouping (D4 Resolved). |
-| `alias_bare_variable_ambiguity` | Two queries — one `RETURN p.name`, one `RETURN p.name AS name` — that both derive Row field `Name`. Not a collision (they are in different queries); documents the intentional ambiguity per §4.3 shape 2's alias-and-bare rule. |
+| `alias_bare_variable_ambiguity` | Two queries — one `RETURN p.name, p.age`, one `RETURN p.name AS name, p.age` — that both derive a two-plus-column XRow whose first field is `Name` (property-access shape in query 1; bare-identifier shape from alias in query 2). Not a collision (they are in different queries, so `<Method>Row` names are distinct); each query's Row is separately emitted with identical field-1 name `Name`. Documents the intentional alias-and-bare ambiguity per §4.3 shape 2. The `p.age` second column ensures a Row struct is emitted (single-column queries render bare-value and never exercise Row-field derivation, so a `RETURN p.name` / `RETURN p.name AS name` pair proves nothing). |
 | `all_widths` | One query projecting one column per representable width in §5.1 (STRING, BOOL, INT/INT8/INT16/INT32/INT64, UINT/UINT8/UINT16/UINT32/UINT64, FLOAT/FLOAT32/FLOAT64). Exercises the full type-mapping table. |
 
 Nine new valid fixtures. Each is one or two `.cypher` files, one
@@ -1081,16 +1201,17 @@ single parameter → bare arg. Emitted method:
 
 ```go
 func (q *Queries) PersonName(ctx context.Context, id int64) (string, error) {
-    result, err := q.db.run(ctx, personNameQueryText, map[string]any{"id": id}, neo4j.AccessModeRead)
+    records, err := q.db.run(ctx, personNameQueryText, map[string]any{"id": id}, neo4j.AccessModeRead)
     if err != nil {
         return "", err
     }
-    record, err := result.Single(ctx)
-    if err != nil {
-        // ... driver-specific empty/multi check per §5.5 ...
-        return "", err
+    if len(records) == 0 {
+        return "", ErrNoRows
     }
-    value, _, err := neo4j.GetRecordValue[string](record, "p.name")
+    if len(records) > 1 {
+        return "", ErrMultipleResults
+    }
+    value, _, err := neo4j.GetRecordValue[string](records[0], "p.name")
     if err != nil {
         return "", fmt.Errorf("PersonName: decode column %q: %w", "p.name", err)
     }
@@ -1120,13 +1241,25 @@ Added under `test/data/codegen/invalid/`:
 | `alias_required_function_call` | `ErrAliasRequired`     | `RETURN count(*)` — expression column with no alias. |
 | `alias_required_expression`    | `ErrAliasRequired`     | `RETURN p.age + 1` — arithmetic expression column with no alias. |
 | `identifier_collision_reserved`| `ErrIdentifierCollision`| `// name: New :one ...` — method name collides with C0's `New` constructor. |
-| `identifier_collision_row_row` | `ErrIdentifierCollision`| Two queries whose methods both need a Row struct with the same synthetic name (e.g., two methods named `Widget` won't reach here — that's `ErrDuplicateQueryName`; instead: `// name: Widget :one` producing a `WidgetRow` and a query producing `WidgetRow` from another path — the fixture uses a query whose XRow name synthesises to `WidgetRow` and another query whose method is `Widget` and whose `WidgetQueryText` const path collides; details are best resolved at code cycle, but the sentinel is unambiguous. If the fixture cannot be constructed cleanly, retire this row and rely on `identifier_collision_reserved` for the sweep — the sentinel still fires from the reserved-identifier case). |
 
-Nine invalid fixtures — one per new sentinel plus one for a subtle
-sub-case. Each maps to its sentinel in the C0 `sentinelByName` map.
-The reachability sweep asserts every C1 sentinel has at least one
-fixture; the map assertion asserts every declared fixture maps to a
-known sentinel.
+Eight invalid fixtures — one per new sentinel. Each maps to its
+sentinel in the C0 `sentinelByName` map. The reachability sweep
+asserts every C1 sentinel has at least one fixture; the map
+assertion asserts every declared fixture maps to a known sentinel.
+`ErrIdentifierCollision` is exercised solely by
+`identifier_collision_reserved` at C1; the additional exported-vs-
+exported collision axis (two user-defined identifiers, e.g. a method
+and a Row struct colliding across queries) has no clean single-file
+fixture at C1's scope — the collision only arises when two queries
+produce identifiers along different codegen paths, and the
+constructions currently reachable at C1 (method name from
+annotation, `<Method>Params`, `<Method>Row`) all derive from
+`NamedQuery.Name`, so a cross-query exported-identifier collision
+already fails as `ErrDuplicateQueryName` at C0's front-end gate. C5
+hardens the sweep against entity-struct and decode-helper
+identifiers (ADR 0010 D7), at which point a genuine
+exported-vs-exported collision becomes reachable and a fixture
+lands there.
 
 C0's four invalid fixtures (`duplicate_query_name`,
 `duplicate_source_file`, `invalid_cardinality`, `invalid_package_name`)
@@ -1375,7 +1508,7 @@ out of scope of this document. The spec is done when:
    `ErrRowFieldCollision`, `ErrAliasRequired`,
    `ErrIdentifierCollision`) and confirms the closed set.
 6. §6 designs the fixture set: the nine valid fixtures (§6.2), the
-   nine invalid fixtures (§6.4), and the fixture-per-capability
+   eight invalid fixtures (§6.4), and the fixture-per-capability
    discipline.
 7. §7 states the C1 capability scope in shape terms and lists its
    out-of-scope complement with the sentinel each construct routes
