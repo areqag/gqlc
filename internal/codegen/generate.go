@@ -1288,14 +1288,15 @@ func writeEntityColumnDecodeIndent(b *strings.Builder, p preparedQuery, f prepar
 		carrier = "dbtype.Relationship"
 		decodeArg = "rel"
 	}
-	// Distinct local names per column position (n/r suffix) to avoid
-	// shadowing in multi-column rows; when varName is "value" (single-
-	// column projection), we use "node"/"rel" as the carrier local.
+	// Distinct local names per column position (numbered suffix) avoid
+	// shadowing in multi-column rows; single-column projections use the
+	// bare carrier local ("node" / "rel"), matching spec §5.5's shape.
 	local := decodeArg
-	if strings.HasPrefix(varName, "value") {
-		// Multi-column path — the varName is unique; append the carrier
-		// hint so per-column locals never collide.
-		local = varName + strings.ToUpper(decodeArg[:1]) + decodeArg[1:]
+	if len(p.RowFields) > 1 {
+		// varName is "value0", "value1", …; give the carrier a matching
+		// numeric suffix so multi-column rows never shadow.
+		suffix := strings.TrimPrefix(varName, "value")
+		local = decodeArg + suffix
 	}
 	fmt.Fprintf(b, "%s%s, isNil, err := neo4j.GetRecordValue[%s](%s, %q)\n", indent, local, carrier, recordExpr, f.ColumnName)
 	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
