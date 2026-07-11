@@ -1,0 +1,30 @@
+# Opt-in job that boots a neo4j v5-community testcontainer and drives the
+# generated repositories against it (bd gqlc-73h). Not in the merge-blocking
+# ci.yml because docker startup + image pull dominate wall-time; running it on
+# every PR would tax the fast-loop invariant (feedback-ci-speed-parity). Two
+# triggers: workflow_dispatch (manual) and a nightly cron on master so any
+# regression in the codegen -> driver contract surfaces within one day.
+name: codegen-live
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+jobs:
+  live-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: ./.github/actions/setup-just
+      - run: just test-codegen-live
