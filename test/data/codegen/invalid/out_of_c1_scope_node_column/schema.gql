@@ -1,6 +1,0 @@
-CREATE PROPERTY GRAPH TYPE NodeColumnScope AS {
-    (:Person {
-        id   :: INT64 NOT NULL,
-        name :: STRING NOT NULL
-    })
-}

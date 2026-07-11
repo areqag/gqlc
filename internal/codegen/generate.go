@@ -206,17 +206,17 @@ func phaseAAdmit(queries []NamedQuery) error {
 			return fmt.Errorf("%w: query %q at position %d collides with reserved identifier", ErrIdentifierCollision, q.Name, i)
 		}
 		if q.Cardinality == CardinalityExec {
-			return fmt.Errorf("%w: query %q at position %d has cardinality :exec (C4 owns writes)", ErrOutOfC1Scope, q.Name, i)
+			return fmt.Errorf("%w: query %q at position %d has cardinality :exec (C4 owns writes)", ErrOutOfC2Scope, q.Name, i)
 		}
 		if q.Cardinality != CardinalityOne && q.Cardinality != CardinalityMany {
 			return fmt.Errorf("%w: query %q at position %d has unrecognised cardinality %d", ErrInvalidCardinality, q.Name, i, q.Cardinality)
 		}
 		if len(q.Validated.Columns) == 0 {
 			// C1 admissibility requires a non-empty projection (§7).
-			return fmt.Errorf("%w: query %q at position %d has no projected columns", ErrOutOfC1Scope, q.Name, i)
+			return fmt.Errorf("%w: query %q at position %d has no projected columns", ErrOutOfC2Scope, q.Name, i)
 		}
 		if strings.ContainsRune(q.SourceText, '`') {
-			return fmt.Errorf("%w: query %q at position %d has a backtick in its source text", ErrOutOfC1Scope, q.Name, i)
+			return fmt.Errorf("%w: query %q at position %d has a backtick in its source text", ErrOutOfC2Scope, q.Name, i)
 		}
 		for ci, col := range q.Validated.Columns {
 			// Shape check first (spec §4.3, §6.4): count(*), arithmetic
@@ -229,19 +229,19 @@ func phaseAAdmit(queries []NamedQuery) error {
 			}
 			prop, ok := col.Type.(resolver.ResolvedProperty)
 			if !ok {
-				return fmt.Errorf("%w: query %q column %d %q resolved as %s (C1 projects ResolvedProperty only)", ErrOutOfC1Scope, q.Name, ci, col.Name, col.Type.String())
+				return fmt.Errorf("%w: query %q column %d %q resolved as %s (C1 projects ResolvedProperty only)", ErrOutOfC2Scope, q.Name, ci, col.Name, col.Type.String())
 			}
 			if _, ok := goType(prop.Type); !ok {
-				return fmt.Errorf("%w: query %q column %d %q has unrepresentable property width %s (C3 owns)", ErrOutOfC1Scope, q.Name, ci, col.Name, prop.Type)
+				return fmt.Errorf("%w: query %q column %d %q has unrepresentable property width %s (C3 owns)", ErrOutOfC2Scope, q.Name, ci, col.Name, prop.Type)
 			}
 		}
 		for pi, p := range q.Validated.Parameters {
 			prop, ok := p.Type.(resolver.ResolvedProperty)
 			if !ok {
-				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (C1 projects ResolvedProperty only)", ErrOutOfC1Scope, q.Name, pi, p.Name, p.Type.String())
+				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (C1 projects ResolvedProperty only)", ErrOutOfC2Scope, q.Name, pi, p.Name, p.Type.String())
 			}
 			if _, ok := goType(prop.Type); !ok {
-				return fmt.Errorf("%w: query %q parameter %d $%s has unrepresentable property width %s (C3 owns)", ErrOutOfC1Scope, q.Name, pi, p.Name, prop.Type)
+				return fmt.Errorf("%w: query %q parameter %d $%s has unrepresentable property width %s (C3 owns)", ErrOutOfC2Scope, q.Name, pi, p.Name, prop.Type)
 			}
 		}
 	}
@@ -269,7 +269,7 @@ func phaseBDerive(queries []NamedQuery) ([]preparedQuery, error) {
 			// Phase A guaranteed ResolvedProperty + representable width.
 			prop, ok := param.Type.(resolver.ResolvedProperty)
 			if !ok {
-				return nil, fmt.Errorf("%w: query %q parameter %d $%s: internal invariant — Phase A missed non-property type %s", ErrOutOfC1Scope, q.Name, pi, param.Name, param.Type.String())
+				return nil, fmt.Errorf("%w: query %q parameter %d $%s: internal invariant — Phase A missed non-property type %s", ErrOutOfC2Scope, q.Name, pi, param.Name, param.Type.String())
 			}
 			ty, _ := goType(prop.Type)
 			p.ParamFields = append(p.ParamFields, preparedParam{
@@ -294,7 +294,7 @@ func phaseBDerive(queries []NamedQuery) ([]preparedQuery, error) {
 
 			prop, ok := col.Type.(resolver.ResolvedProperty)
 			if !ok {
-				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC1Scope, q.Name, ci, col.Name, col.Type.String())
+				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC2Scope, q.Name, ci, col.Name, col.Type.String())
 			}
 			ty, _ := goType(prop.Type)
 			p.RowFields = append(p.RowFields, preparedRow{
@@ -870,7 +870,7 @@ func rowFieldName(colText string) (string, bool) {
 
 // goType maps a resolved property type to its native Go emission (spec
 // §5.1). Returns (typeText, ok): ok=false for the widths C3 owns —
-// caller routes to ErrOutOfC1Scope naming the width. Callers append a
+// caller routes to ErrOutOfC2Scope naming the width. Callers append a
 // leading '*' for nullable columns/parameters at emission time.
 func goType(pt graph.PropertyType) (string, bool) {
 	switch pt {
