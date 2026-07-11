@@ -15,12 +15,6 @@ import (
 	"github.com/areqag/gqlc/internal/schema"
 )
 
-// version is the version stamp embedded in every generated file's header.
-// Default "dev" (C0); a -ldflags -X override wires with C6 per ADR 0010
-// D7. The value is a package-level constant so double-run determinism
-// holds across arbitrary invocations of the same binary (§2.3).
-const version = "dev"
-
 // packageIdent is the Go package-identifier grammar (spec §5.1). Digits
 // inside are legal; underscores are legal; digit-leading is not; non-ASCII
 // is not.
