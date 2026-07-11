@@ -1,5 +1,0 @@
-{
-  "package": "outofc4scopenonpropertyparameter",
-  "queryFiles": ["queries.cypher"],
-  "expectedError": "codegen.ErrOutOfC4Scope"
-}

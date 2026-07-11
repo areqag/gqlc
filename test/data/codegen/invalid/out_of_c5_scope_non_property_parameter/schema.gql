@@ -1,0 +1,5 @@
+CREATE PROPERTY GRAPH TYPE OutOfC5ScopeNonPropertyParameter AS {
+    (:Person {
+        id :: INT64 NOT NULL
+    })
+}
