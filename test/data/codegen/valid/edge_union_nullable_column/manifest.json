@@ -1,0 +1,4 @@
+{
+  "package": "edgeunionnullablecolumn",
+  "queryFiles": ["queries.cypher"]
+}
