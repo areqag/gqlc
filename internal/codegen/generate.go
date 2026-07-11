@@ -15,12 +15,6 @@ import (
 	"github.com/areqag/gqlc/internal/schema"
 )
 
-// version is the version stamp embedded in every generated file's header.
-// Default "dev" (C0); a -ldflags -X override wires with C6 per ADR 0010
-// D7. The value is a package-level constant so double-run determinism
-// holds across arbitrary invocations of the same binary (§2.3).
-const version = "dev"
-
 // packageIdent is the Go package-identifier grammar (spec §5.1). Digits
 // inside are legal; underscores are legal; digit-leading is not; non-ASCII
 // is not.
@@ -589,7 +583,7 @@ func phaseAAdmit(queries []NamedQuery, entities []preparedEntity, entityIndex ma
 			return fmt.Errorf("%w: query %q at position %d has cardinality %s but the query is a %s — annotate :exec or add a RETURN clause", ErrCardinalityShapeMismatch, q.Name, i, cardinalityAnnotation(q.Cardinality), shape)
 		}
 		if strings.ContainsRune(q.SourceText, '`') {
-			return fmt.Errorf("%w: query %q at position %d has a backtick in its source text", ErrOutOfC5Scope, q.Name, i)
+			return fmt.Errorf("%w: query %q at position %d has a backtick in its source text", ErrOutOfC6Scope, q.Name, i)
 		}
 		for ci, col := range q.Validated.Columns {
 			// Shape check first (spec §4.3, §6.4): count(*), arithmetic
@@ -609,11 +603,11 @@ func phaseAAdmit(queries []NamedQuery, entities []preparedEntity, entityIndex ma
 				if _, ok := entityIndex[entityLookupKey{Kind: entityNode, Labels: t.Labels}]; !ok {
 					// Unknown node type — the resolver's R0 gate should
 					// have caught this; a synthetic test seam lands here.
-					return fmt.Errorf("%w: query %q column %d %q references unknown node type %q", ErrOutOfC5Scope, q.Name, ci, col.Name, string(t.Labels))
+					return fmt.Errorf("%w: query %q column %d %q references unknown node type %q", ErrOutOfC6Scope, q.Name, ci, col.Name, string(t.Labels))
 				}
 			case resolver.ResolvedEdge:
 				if _, ok := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: t.EdgeKey}]; !ok {
-					return fmt.Errorf("%w: query %q column %d %q references unknown edge type %s -[:%s]-> %s", ErrOutOfC5Scope, q.Name, ci, col.Name, string(t.EdgeKey.Source), string(t.EdgeKey.Label), string(t.EdgeKey.Target))
+					return fmt.Errorf("%w: query %q column %d %q references unknown edge type %s -[:%s]-> %s", ErrOutOfC6Scope, q.Name, ci, col.Name, string(t.EdgeKey.Source), string(t.EdgeKey.Label), string(t.EdgeKey.Target))
 				}
 			case resolver.ResolvedEdgeUnion:
 				// C5 admission (§2.1): defensive gates on the resolver-
@@ -624,11 +618,11 @@ func phaseAAdmit(queries []NamedQuery, entities []preparedEntity, entityIndex ma
 				// must have a Phase Z schema-cache entry — a miss indicates
 				// the resolver committed an edge the schema does not declare.
 				if len(t.EdgeKeys) < 2 {
-					return fmt.Errorf("%w: query %q column %d %q resolved as edgeUnion with only %d candidate(s) — resolver invariant violated (expected >= 2)", ErrOutOfC5Scope, q.Name, ci, col.Name, len(t.EdgeKeys))
+					return fmt.Errorf("%w: query %q column %d %q resolved as edgeUnion with only %d candidate(s) — resolver invariant violated (expected >= 2)", ErrOutOfC6Scope, q.Name, ci, col.Name, len(t.EdgeKeys))
 				}
 				for _, ek := range t.EdgeKeys {
 					if _, ok := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: ek}]; !ok {
-						return fmt.Errorf("%w: query %q column %d %q edgeUnion candidate %s -[:%s]-> %s not declared by schema", ErrOutOfC5Scope, q.Name, ci, col.Name, string(ek.Source), string(ek.Label), string(ek.Target))
+						return fmt.Errorf("%w: query %q column %d %q edgeUnion candidate %s -[:%s]-> %s not declared by schema", ErrOutOfC6Scope, q.Name, ci, col.Name, string(ek.Source), string(ek.Label), string(ek.Target))
 					}
 				}
 			case resolver.ResolvedTemporal:
@@ -656,13 +650,13 @@ func phaseAAdmit(queries []NamedQuery, entities []preparedEntity, entityIndex ma
 					return fmt.Errorf("query %q column %d %q: %w", q.Name, ci, col.Name, err)
 				}
 			default:
-				return fmt.Errorf("%w: query %q column %d %q resolved as %s", ErrOutOfC5Scope, q.Name, ci, col.Name, col.Type.String())
+				return fmt.Errorf("%w: query %q column %d %q resolved as %s", ErrOutOfC6Scope, q.Name, ci, col.Name, col.Type.String())
 			}
 		}
 		for pi, p := range q.Validated.Parameters {
 			prop, ok := p.Type.(resolver.ResolvedProperty)
 			if !ok {
-				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (non-property parameters are post-v1)", ErrOutOfC5Scope, q.Name, pi, p.Name, p.Type.String())
+				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (non-property parameters are post-v1)", ErrOutOfC6Scope, q.Name, pi, p.Name, p.Type.String())
 			}
 			if _, ok := goType(prop.Type); !ok {
 				return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrUnrepresentableWidth, q.Name, pi, p.Name, prop.Type)
@@ -694,7 +688,7 @@ func phaseBDerive(queries []NamedQuery, entities []preparedEntity, entityIndex m
 			// Phase A guaranteed ResolvedProperty + representable width.
 			prop, ok := param.Type.(resolver.ResolvedProperty)
 			if !ok {
-				return nil, fmt.Errorf("%w: query %q parameter %d $%s: internal invariant — Phase A missed non-property type %s", ErrOutOfC5Scope, q.Name, pi, param.Name, param.Type.String())
+				return nil, fmt.Errorf("%w: query %q parameter %d $%s: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, pi, param.Name, param.Type.String())
 			}
 			ty, _ := goType(prop.Type)
 			p.ParamFields = append(p.ParamFields, preparedParam{
@@ -835,7 +829,7 @@ func phaseBDerive(queries []NamedQuery, entities []preparedEntity, entityIndex m
 					ListElem:   t.Element,
 				})
 			default:
-				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC5Scope, q.Name, ci, col.Name, col.Type.String())
+				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, ci, col.Name, col.Type.String())
 			}
 		}
 
@@ -2361,13 +2355,13 @@ func resolvedListGoType(t resolver.ResolvedType, entities []preparedEntity, enti
 	case resolver.ResolvedNode:
 		idx, ok := entityIndex[entityLookupKey{Kind: entityNode, Labels: tt.Labels}]
 		if !ok {
-			return "", fmt.Errorf("%w: list element references unknown node type %q", ErrOutOfC5Scope, string(tt.Labels))
+			return "", fmt.Errorf("%w: list element references unknown node type %q", ErrOutOfC6Scope, string(tt.Labels))
 		}
 		return entities[idx].Name, nil
 	case resolver.ResolvedEdge:
 		idx, ok := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: tt.EdgeKey}]
 		if !ok {
-			return "", fmt.Errorf("%w: list element references unknown edge type %s -[:%s]-> %s", ErrOutOfC5Scope, string(tt.EdgeKey.Source), string(tt.EdgeKey.Label), string(tt.EdgeKey.Target))
+			return "", fmt.Errorf("%w: list element references unknown edge type %s -[:%s]-> %s", ErrOutOfC6Scope, string(tt.EdgeKey.Source), string(tt.EdgeKey.Label), string(tt.EdgeKey.Target))
 		}
 		return entities[idx].Name, nil
 	case resolver.ResolvedEdgeUnion:
@@ -2377,14 +2371,14 @@ func resolvedListGoType(t resolver.ResolvedType, entities []preparedEntity, enti
 		// list-of-edgeUnion at Phase A calls into this recursion path only
 		// for the validity probe, and Phase B repeats the derivation at
 		// emission time — so a schema-cache miss at the leaf indicates a
-		// resolver-produced foreign edge and routes through ErrOutOfC5Scope
+		// resolver-produced foreign edge and routes through ErrOutOfC6Scope
 		// for uniformity with the top-level edgeUnion admission arm.
 		if len(tt.EdgeKeys) < 2 {
-			return "", fmt.Errorf("%w: list element resolved as edgeUnion with only %d candidate(s) — resolver invariant violated (expected >= 2)", ErrOutOfC5Scope, len(tt.EdgeKeys))
+			return "", fmt.Errorf("%w: list element resolved as edgeUnion with only %d candidate(s) — resolver invariant violated (expected >= 2)", ErrOutOfC6Scope, len(tt.EdgeKeys))
 		}
 		for _, ek := range tt.EdgeKeys {
 			if _, ok := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: ek}]; !ok {
-				return "", fmt.Errorf("%w: list element edgeUnion candidate %s -[:%s]-> %s not declared by schema", ErrOutOfC5Scope, string(ek.Source), string(ek.Label), string(ek.Target))
+				return "", fmt.Errorf("%w: list element edgeUnion candidate %s -[:%s]-> %s not declared by schema", ErrOutOfC6Scope, string(ek.Source), string(ek.Label), string(ek.Target))
 			}
 		}
 		return queryName + columnField, nil
@@ -2401,7 +2395,7 @@ func resolvedListGoType(t resolver.ResolvedType, entities []preparedEntity, enti
 		}
 		return "[]" + inner, nil
 	}
-	return "", fmt.Errorf("%w: list element has unknown resolved type %s", ErrOutOfC5Scope, t.String())
+	return "", fmt.Errorf("%w: list element has unknown resolved type %s", ErrOutOfC6Scope, t.String())
 }
 
 // findEdgeUnionCandidates resolves a list-of-edgeUnion leaf's EdgeKeys
