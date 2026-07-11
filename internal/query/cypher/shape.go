@@ -166,25 +166,15 @@ func temporalConstructorType(name string) (query.Type, bool) {
 	return nil, false
 }
 
-// builtinScalarFuncType widens a non-aggregate, non-temporal function call's
-// Stage-6 result type when the (case-insensitive) name and argument shapes
-// match a small closed set of standard openCypher scalar builtins whose
-// return type is settled at the grammar level — the same posture as
-// temporalConstructorType, and by design just as narrow. Motivating entry:
-// `elementId(node|edge) -> string`, which enables the ADR 0010 D3 identity
-// pattern `RETURN p, elementId(p) AS id` to render as a typed Row field.
-//
-// The argument-kind guard is a shape check, not a schema check: it only
-// accepts when the parser's Stage-6 refType has already committed TypeNode
-// or TypeEdge for the argument. Anything else (a property lookup, a call
-// result, an alias whose kind the parser did not commit) falls through so
-// the honest TypeUnknown posture is preserved — no synthetic error, no
-// wrong concrete type. Callers own the table's non-membership case.
-//
-// The name lookup is bare-name only (no namespace); `functionName` returns
-// ok=false for a namespaced call like `foo.elementId`, so a shadowing
-// namespaced call cannot match by accident. Extending the table to another
-// scalar builtin (`id(node|edge) -> int`) is one arm added below.
+// builtinScalarFuncType maps a bare (non-namespaced) openCypher scalar
+// builtin's lowercased name and argument-type shape to its result type
+// (ADR 0010 D3). Same posture as temporalConstructorType: schema-
+// independent, resolver upgrades TypeUnknown into a concrete Go type when
+// this table commits. An unmatched name-or-shape returns nil, false so
+// callers preserve the "function identity below the boundary" default
+// without branching. A variable-length edge binding (TypeList(TypeEdge))
+// does not match — elementId over a list is undefined by openCypher / the
+// neo4j driver.
 func builtinScalarFuncType(name string, argTypes []query.Type) (query.Type, bool) {
 	switch name {
 	case "elementid":
@@ -199,14 +189,6 @@ func builtinScalarFuncType(name string, argTypes []query.Type) (query.Type, bool
 	return nil, false
 }
 
-// isNodeOrEdge reports whether t is a bare TypeNode or TypeEdge — the two
-// argument shapes every entity-identity builtin accepts. A variable-length
-// edge binding types as TypeList(TypeEdge), which is out of scope: neither
-// openCypher nor neo4j define elementId over a list, and inventing a
-// concrete type for it would violate the "wrong concrete is worse than
-// TypeUnknown" posture. A property lookup on a node/edge types as
-// TypeUnknown at the parser boundary (schema-owned), so it also does not
-// match here.
 func isNodeOrEdge(t query.Type) bool {
 	switch t.(type) {
 	case query.TypeNode, query.TypeEdge:

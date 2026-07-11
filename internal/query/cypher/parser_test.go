@@ -963,6 +963,40 @@ var mustParse = map[string]struct {
 			},
 		}),
 	},
+	// gqlc-v5t — elementId used inside a rich expression exercises the
+	// typing.typeAtom builtin-widening arm (the counterpart to
+	// classifyFunction's arm). string + string promotes to string via
+	// promoteBase; the outer projection is an ExprProjection whose
+	// result type is TypeString and whose refs mine the node binding
+	// once. Pins that the two call sites cannot disagree on the same
+	// builtin.
+	"return elementId concatenated with literal": {
+		src: "MATCH (p)\nRETURN elementId(p) + '-suffix' AS x",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("p", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "x", Value: query.NewExprProjection([]query.Ref{{Variable: "p"}}, query.TypeString{})},
+			},
+		}),
+	},
+	// gqlc-v5t — a namespaced call whose bare tail is `elementid`
+	// (`foo.elementid(p)`) must NOT match the builtin table; the
+	// namespaced-name gate on `functionName` is what makes shadowing
+	// impossible. Pin so a future functionName refactor cannot silently
+	// unshadow the table.
+	"return namespaced elementId does not match builtin": {
+		src: "MATCH (p)\nRETURN foo.elementid(p) AS x",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("p", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "x", Value: query.NewFuncProjection([]query.Ref{{Variable: "p"}}, query.TypeUnknown{})},
+			},
+		}),
+	},
 	// Stage 7 — temporal-point minus duration → temporal-point. Spec §1's
 	// subtraction rule is one-way (temporal - duration is legal; the
 	// commutation is not). Rich classifier route, ExprProjection.

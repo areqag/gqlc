@@ -359,13 +359,11 @@ func (l *listener) classifyFunction(fi gen.IOC_FunctionInvocationContext) (query
 	if t, ok := temporalConstructorType(fullFunctionName(fi)); ok {
 		resultType = t
 	} else if name, ok := functionName(fi); ok {
-		// Builtin scalar-function widening (gqlc-v5t): the bare-name lookup
-		// upgrades the honest TypeUnknown to a concrete grammar-level type
-		// when the arg shapes commit. `functionName` returns ok=false for a
-		// namespaced call, so a shadowing `foo.elementId` cannot match.
-		// Arg types are computed from the grammatical argument list — not
-		// the refs slice, which drops scalar-literal args — so a mismatched
-		// arity (`elementId('lit', n)`) does not silently promote.
+		// gqlc-v5t: builtin-widen after the temporal check; functionName
+		// returns ok=false for a namespaced call so a shadowing
+		// `foo.elementId` cannot match. Arg types come from the grammatical
+		// arg list, not the refs slice (which drops scalar-literal args) so
+		// a mismatched arity like `elementId('lit', n)` cannot promote.
 		if t, ok := builtinScalarFuncType(name, l.builtinArgTypes(fi)); ok {
 			resultType = t
 		}
@@ -373,14 +371,11 @@ func (l *listener) classifyFunction(fi gen.IOC_FunctionInvocationContext) (query
 	return query.NewFuncProjection(refs, resultType), true
 }
 
-// builtinArgTypes computes the Stage-6 result type of each grammatical
-// argument of a function invocation, preserving argument order. Only the
-// bare-variable atom shape (Ref{Variable}) participates via l.refType — a
-// scalar-literal, property lookup, expression, or any other atom stays
-// TypeUnknown so the caller's arg-kind check does not silently accept a
-// mismatched shape. The parser has already gated the call through
-// functionArgRefs (§4/§9: bare var / var.prop / scalar literal only), so
-// unreachable atoms cannot appear here.
+// builtinArgTypes returns the parser's per-part type for each grammatical
+// argument of a function invocation, preserving order. Only bare-variable
+// atoms contribute via l.refType; every other atom shape stays TypeUnknown
+// so builtinScalarFuncType's arg-kind guard cannot accept a mismatched
+// shape by accident.
 func (l *listener) builtinArgTypes(fi gen.IOC_FunctionInvocationContext) []query.Type {
 	args := fi.AllOC_Expression()
 	out := make([]query.Type, len(args))
