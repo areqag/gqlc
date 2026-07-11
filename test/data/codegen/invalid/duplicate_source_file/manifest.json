@@ -1,0 +1,5 @@
+{
+  "package": "dupfile",
+  "queryFiles": ["a/queries.cypher", "b/queries.cypher"],
+  "expectedError": "codegen.ErrDuplicateSourceFile"
+}
