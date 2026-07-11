@@ -1,0 +1,5 @@
+CREATE PROPERTY GRAPH TYPE InvalidEntityNameNode AS {
+    NODE TYPE personType (p :Person {
+        id :: INT64 NOT NULL
+    })
+}

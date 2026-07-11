@@ -1,4 +1,4 @@
-CREATE PROPERTY GRAPH TYPE NodeColumnScope AS {
+CREATE PROPERTY GRAPH TYPE EntityNullableNode AS {
     (:Person {
         id   :: INT64 NOT NULL,
         name :: STRING NOT NULL

@@ -1,0 +1,5 @@
+CREATE PROPERTY GRAPH TYPE InvalidEntityNameEdge AS {
+    (:Person { id :: INT64 NOT NULL }),
+    (:Post { id :: INT64 NOT NULL }),
+    DIRECTED EDGE TYPE lowerCaseName (:Person) -[:AUTHORED { since :: INT64 NOT NULL }]-> (:Post)
+}

@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE EntityMultiLabelNamed AS {
+    NODE TYPE PersonEmployee (p :Person&Employee {
+        id     :: INT64 NOT NULL,
+        salary :: INT64 NOT NULL
+    })
+}

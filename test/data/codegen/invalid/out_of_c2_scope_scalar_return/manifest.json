@@ -1,0 +1,5 @@
+{
+  "package": "outofc2scopescalarreturn",
+  "queryFiles": ["queries.cypher"],
+  "expectedError": "codegen.ErrOutOfC2Scope"
+}

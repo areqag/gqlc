@@ -1,0 +1,4 @@
+{
+  "package": "entityexplicitname",
+  "queryFiles": ["queries.cypher"]
+}

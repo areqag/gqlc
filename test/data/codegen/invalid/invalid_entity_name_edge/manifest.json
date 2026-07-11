@@ -1,0 +1,5 @@
+{
+  "package": "invalidentityedge",
+  "queryFiles": [],
+  "expectedError": "codegen.ErrInvalidEntityName"
+}

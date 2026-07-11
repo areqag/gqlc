@@ -1,0 +1,7 @@
+CREATE PROPERTY GRAPH TYPE EntityWithNullableProperty AS {
+    (:Person {
+        id         :: INT64 NOT NULL,
+        name       :: STRING NOT NULL,
+        middleName :: STRING
+    })
+}

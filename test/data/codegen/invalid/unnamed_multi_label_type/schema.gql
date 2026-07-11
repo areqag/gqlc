@@ -1,0 +1,5 @@
+CREATE PROPERTY GRAPH TYPE UnnamedMultiLabel AS {
+    (p :Person&Employee {
+        id :: INT64 NOT NULL
+    })
+}

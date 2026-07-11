@@ -1,0 +1,4 @@
+{
+  "package": "entitynodemany",
+  "queryFiles": ["queries.cypher"]
+}

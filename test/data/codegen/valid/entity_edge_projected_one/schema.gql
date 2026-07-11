@@ -1,0 +1,9 @@
+CREATE PROPERTY GRAPH TYPE EntityEdgeProjectedOne AS {
+    (:Person {
+        id :: INT64 NOT NULL
+    }),
+    (:Movie {
+        id :: INT64 NOT NULL
+    }),
+    (:Person) -[:ACTED_IN { since :: INT64 NOT NULL }]-> (:Movie)
+}

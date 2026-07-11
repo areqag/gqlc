@@ -1,0 +1,4 @@
+{
+  "package": "entitynullablenode",
+  "queryFiles": ["queries.cypher"]
+}

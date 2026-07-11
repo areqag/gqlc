@@ -76,8 +76,8 @@ func sentinelIdent(err error) string {
 		return "ErrInvalidCardinality"
 	case ErrFormatFailure:
 		return "ErrFormatFailure"
-	case ErrOutOfC1Scope:
-		return "ErrOutOfC1Scope"
+	case ErrOutOfC2Scope:
+		return "ErrOutOfC2Scope"
 	case ErrParamNameCollision:
 		return "ErrParamNameCollision"
 	case ErrRowFieldCollision:
@@ -86,6 +86,12 @@ func sentinelIdent(err error) string {
 		return "ErrAliasRequired"
 	case ErrIdentifierCollision:
 		return "ErrIdentifierCollision"
+	case ErrInvalidEntityName:
+		return "ErrInvalidEntityName"
+	case ErrUnnamedMultiLabelType:
+		return "ErrUnnamedMultiLabelType"
+	case ErrPropertyFieldCollision:
+		return "ErrPropertyFieldCollision"
 	case queryfile.ErrMissingAnnotation:
 		return "ErrMissingAnnotation"
 	case queryfile.ErrUnknownCardinality:
