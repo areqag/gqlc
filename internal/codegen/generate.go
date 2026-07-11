@@ -526,17 +526,17 @@ func phaseAAdmit(queries []NamedQuery, entities []preparedEntity, entityIndex ma
 			return fmt.Errorf("%w: query %q at position %d collides with reserved identifier", ErrIdentifierCollision, q.Name, i)
 		}
 		if q.Cardinality == CardinalityExec {
-			return fmt.Errorf("%w: query %q at position %d has cardinality :exec (C4 owns writes)", ErrOutOfC3Scope, q.Name, i)
+			return fmt.Errorf("%w: query %q at position %d has cardinality :exec (C4 owns writes)", ErrOutOfC4Scope, q.Name, i)
 		}
 		if q.Cardinality != CardinalityOne && q.Cardinality != CardinalityMany {
 			return fmt.Errorf("%w: query %q at position %d has unrecognised cardinality %d", ErrInvalidCardinality, q.Name, i, q.Cardinality)
 		}
 		if len(q.Validated.Columns) == 0 {
 			// A projection query must project at least one column (§7).
-			return fmt.Errorf("%w: query %q at position %d has no projected columns", ErrOutOfC3Scope, q.Name, i)
+			return fmt.Errorf("%w: query %q at position %d has no projected columns", ErrOutOfC4Scope, q.Name, i)
 		}
 		if strings.ContainsRune(q.SourceText, '`') {
-			return fmt.Errorf("%w: query %q at position %d has a backtick in its source text", ErrOutOfC3Scope, q.Name, i)
+			return fmt.Errorf("%w: query %q at position %d has a backtick in its source text", ErrOutOfC4Scope, q.Name, i)
 		}
 		for ci, col := range q.Validated.Columns {
 			// Shape check first (spec §4.3, §6.4): count(*), arithmetic
@@ -556,14 +556,14 @@ func phaseAAdmit(queries []NamedQuery, entities []preparedEntity, entityIndex ma
 				if _, ok := entityIndex[entityLookupKey{Kind: entityNode, Labels: t.Labels}]; !ok {
 					// Unknown node type — the resolver's R0 gate should
 					// have caught this; a synthetic test seam lands here.
-					return fmt.Errorf("%w: query %q column %d %q references unknown node type %q", ErrOutOfC3Scope, q.Name, ci, col.Name, string(t.Labels))
+					return fmt.Errorf("%w: query %q column %d %q references unknown node type %q", ErrOutOfC4Scope, q.Name, ci, col.Name, string(t.Labels))
 				}
 			case resolver.ResolvedEdge:
 				if _, ok := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: t.EdgeKey}]; !ok {
-					return fmt.Errorf("%w: query %q column %d %q references unknown edge type %s -[:%s]-> %s", ErrOutOfC3Scope, q.Name, ci, col.Name, string(t.EdgeKey.Source), string(t.EdgeKey.Label), string(t.EdgeKey.Target))
+					return fmt.Errorf("%w: query %q column %d %q references unknown edge type %s -[:%s]-> %s", ErrOutOfC4Scope, q.Name, ci, col.Name, string(t.EdgeKey.Source), string(t.EdgeKey.Label), string(t.EdgeKey.Target))
 				}
 			case resolver.ResolvedEdgeUnion:
-				return fmt.Errorf("%w: query %q column %d %q resolved as edgeUnion (C5 owns)", ErrOutOfC3Scope, q.Name, ci, col.Name)
+				return fmt.Errorf("%w: query %q column %d %q resolved as edgeUnion (C5 owns)", ErrOutOfC4Scope, q.Name, ci, col.Name)
 			case resolver.ResolvedTemporal:
 				// Every temporal kind is representable; the closed enum
 				// maps into the temporal Go type table (§5.1) without a
@@ -583,13 +583,13 @@ func phaseAAdmit(queries []NamedQuery, entities []preparedEntity, entityIndex ma
 					return fmt.Errorf("query %q column %d %q: %w", q.Name, ci, col.Name, err)
 				}
 			default:
-				return fmt.Errorf("%w: query %q column %d %q resolved as %s", ErrOutOfC3Scope, q.Name, ci, col.Name, col.Type.String())
+				return fmt.Errorf("%w: query %q column %d %q resolved as %s", ErrOutOfC4Scope, q.Name, ci, col.Name, col.Type.String())
 			}
 		}
 		for pi, p := range q.Validated.Parameters {
 			prop, ok := p.Type.(resolver.ResolvedProperty)
 			if !ok {
-				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (non-property parameters are post-v1)", ErrOutOfC3Scope, q.Name, pi, p.Name, p.Type.String())
+				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (non-property parameters are post-v1)", ErrOutOfC4Scope, q.Name, pi, p.Name, p.Type.String())
 			}
 			if _, ok := goType(prop.Type); !ok {
 				return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrUnrepresentableWidth, q.Name, pi, p.Name, prop.Type)
@@ -621,7 +621,7 @@ func phaseBDerive(queries []NamedQuery, entities []preparedEntity, entityIndex m
 			// Phase A guaranteed ResolvedProperty + representable width.
 			prop, ok := param.Type.(resolver.ResolvedProperty)
 			if !ok {
-				return nil, fmt.Errorf("%w: query %q parameter %d $%s: internal invariant — Phase A missed non-property type %s", ErrOutOfC3Scope, q.Name, pi, param.Name, param.Type.String())
+				return nil, fmt.Errorf("%w: query %q parameter %d $%s: internal invariant — Phase A missed non-property type %s", ErrOutOfC4Scope, q.Name, pi, param.Name, param.Type.String())
 			}
 			ty, _ := goType(prop.Type)
 			p.ParamFields = append(p.ParamFields, preparedParam{
@@ -714,7 +714,7 @@ func phaseBDerive(queries []NamedQuery, entities []preparedEntity, entityIndex m
 					ListElem:   t.Element,
 				})
 			default:
-				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC3Scope, q.Name, ci, col.Name, col.Type.String())
+				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC4Scope, q.Name, ci, col.Name, col.Type.String())
 			}
 		}
 
@@ -1939,7 +1939,7 @@ func scalarGoType(k resolver.Scalar) string {
 // resolvedListGoType derives the Go type text for a ResolvedType leaf
 // or nested ResolvedList (spec §2.2, §4.7). Returns (text, err):
 // err wraps ErrUnrepresentableWidth for a leaf property width that is
-// unrepresentable; err wraps ErrOutOfC3Scope for a ResolvedEdgeUnion
+// unrepresentable; err wraps ErrOutOfC4Scope for a ResolvedEdgeUnion
 // leaf (C5 owns). A ResolvedList element recurses; every other leaf is
 // one dispatch on the ResolvedType sum.
 func resolvedListGoType(t resolver.ResolvedType, entities []preparedEntity, entityIndex map[entityLookupKey]int) (string, error) {
@@ -1953,17 +1953,17 @@ func resolvedListGoType(t resolver.ResolvedType, entities []preparedEntity, enti
 	case resolver.ResolvedNode:
 		idx, ok := entityIndex[entityLookupKey{Kind: entityNode, Labels: tt.Labels}]
 		if !ok {
-			return "", fmt.Errorf("%w: list element references unknown node type %q", ErrOutOfC3Scope, string(tt.Labels))
+			return "", fmt.Errorf("%w: list element references unknown node type %q", ErrOutOfC4Scope, string(tt.Labels))
 		}
 		return entities[idx].Name, nil
 	case resolver.ResolvedEdge:
 		idx, ok := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: tt.EdgeKey}]
 		if !ok {
-			return "", fmt.Errorf("%w: list element references unknown edge type %s -[:%s]-> %s", ErrOutOfC3Scope, string(tt.EdgeKey.Source), string(tt.EdgeKey.Label), string(tt.EdgeKey.Target))
+			return "", fmt.Errorf("%w: list element references unknown edge type %s -[:%s]-> %s", ErrOutOfC4Scope, string(tt.EdgeKey.Source), string(tt.EdgeKey.Label), string(tt.EdgeKey.Target))
 		}
 		return entities[idx].Name, nil
 	case resolver.ResolvedEdgeUnion:
-		return "", fmt.Errorf("%w: list element resolved as edgeUnion (C5 owns)", ErrOutOfC3Scope)
+		return "", fmt.Errorf("%w: list element resolved as edgeUnion (C5 owns)", ErrOutOfC4Scope)
 	case resolver.ResolvedTemporal:
 		return temporalGoType(tt.Kind), nil
 	case resolver.ResolvedScalar:
@@ -1977,7 +1977,7 @@ func resolvedListGoType(t resolver.ResolvedType, entities []preparedEntity, enti
 		}
 		return "[]" + inner, nil
 	}
-	return "", fmt.Errorf("%w: list element has unknown resolved type %s", ErrOutOfC3Scope, t.String())
+	return "", fmt.Errorf("%w: list element has unknown resolved type %s", ErrOutOfC4Scope, t.String())
 }
 
 // lowerFirstRune lowercases the first rune of s. Used for the

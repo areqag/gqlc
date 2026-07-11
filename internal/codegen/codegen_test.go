@@ -76,8 +76,8 @@ func sentinelIdent(err error) string {
 		return "ErrInvalidCardinality"
 	case ErrFormatFailure:
 		return "ErrFormatFailure"
-	case ErrOutOfC3Scope:
-		return "ErrOutOfC3Scope"
+	case ErrOutOfC4Scope:
+		return "ErrOutOfC4Scope"
 	case ErrUnrepresentableWidth:
 		return "ErrUnrepresentableWidth"
 	case ErrParamNameCollision:

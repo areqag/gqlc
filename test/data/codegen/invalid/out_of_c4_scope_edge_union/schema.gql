@@ -1,4 +1,4 @@
-CREATE PROPERTY GRAPH TYPE OutOfC2ScopeEdgeUnion AS {
+CREATE PROPERTY GRAPH TYPE OutOfC4ScopeEdgeUnion AS {
     (:Person { id :: INT64 NOT NULL }),
     (:Post   { id :: INT64 NOT NULL }),
     (:Person) -[:AUTHORED { since :: INT64 NOT NULL }]-> (:Post),
