@@ -1,0 +1,4 @@
+CREATE PROPERTY GRAPH TYPE WriteExecTwoParams AS {
+    (:Person { id :: INT64 NOT NULL }),
+    (:Person) -[:KNOWS]-> (:Person)
+}

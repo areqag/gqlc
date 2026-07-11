@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE WriteOnlyBatch AS {
+    (:Person {
+        id   :: INT64 NOT NULL,
+        name :: STRING NOT NULL
+    })
+}
