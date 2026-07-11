@@ -42,21 +42,20 @@ var (
 	// user-facing failure mode; the reachability sweep skips it.
 	ErrFormatFailure = errors.New("format failure")
 
-	// ErrOutOfC5Scope is returned when a C5-admissible input carries a
-	// construct C5 does not project: a non-property parameter (post-v1;
+	// ErrOutOfC6Scope is returned when a C6-admissible input carries a
+	// construct C6 does not project: a non-property parameter (post-v1;
 	// whole-node / whole-edge / scalar-literal / list / unknown / bare-
 	// temporal-expression parameter is still out of scope), or a query
 	// text carrying a raw-string-hostile backtick. Category-grained per
-	// C0's precedent. Renamed from ErrOutOfC4Scope at C5 —
-	// ResolvedEdgeUnion retires from the catchment (edgeUnion is now
-	// in-scope via the sealed-interface pattern).
-	ErrOutOfC5Scope = errors.New("out of C5 scope")
+	// C0's precedent. Renamed from ErrOutOfC5Scope at C6; no scope-
+	// widening at C6 (polish stage, no new capability admitted).
+	ErrOutOfC6Scope = errors.New("out of C6 scope")
 
 	// ErrUnrepresentableWidth is returned when a schema property, a query
 	// column, a query parameter, or a list element's leaf has a property
 	// width that has no faithful Go representation on the neo4j-go-driver
 	// v5 target: INT128, INT256, UINT128, UINT256, FLOAT16, FLOAT128,
-	// FLOAT256, DECIMAL. Distinct from ErrOutOfC5Scope: no future stage
+	// FLOAT256, DECIMAL. Distinct from ErrOutOfC6Scope: no future stage
 	// retires the eight widths — the underlying store (neo4j) stores
 	// integers as int64 and floats as float64; the sentinel is a permanent
 	// unrepresentability, not a deferred capability. The fail-message names
@@ -155,7 +154,7 @@ var allSentinels = []error{
 	ErrDuplicateSourceFile,
 	ErrDuplicateQueryName,
 	ErrInvalidCardinality,
-	ErrOutOfC5Scope,
+	ErrOutOfC6Scope,
 	ErrParamNameCollision,
 	ErrRowFieldCollision,
 	ErrAliasRequired,
