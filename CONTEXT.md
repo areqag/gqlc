@@ -457,6 +457,34 @@ that runs after parsing; the parser is schema-agnostic and never produces a
 validated query on its own. Once it passes, every query in the application is
 valid or the application halts.
 
+## Generation language
+
+**Query file**:
+A source file holding one or more **named queries**, each introduced by an
+annotation. Splitting a query file into its named queries — and naming
+them — is the generation front end's job, outside the parser, which
+consumes exactly one query per call (see **Query**).
+
+**Named query**:
+The unit of generation: one query plus what its annotation declares — its
+name and its **cardinality**. The name becomes the generated
+method's identity within the generated repository; a query file may hold
+many named queries.
+_Avoid_: statement (grammar sense), operation.
+
+**Cardinality**:
+The author-declared consumer-side row axis of a **named query** — how many
+result rows the generated method hands its caller: `one` (exactly one
+row), `many` (a list of rows), `exec` (no rows — a projection-less write).
+An open axis: `iter` (streamed rows) is reserved. Declared in the query's
+annotation, never inferred; a declaration that contradicts the query's
+shape (`exec` on a column-producing query, `one`/`many` on a zero-column
+write) is rejected outright.
+_Avoid_: the edge-binding variable-length sense (use **hop range**);
+"result cardinality" (runtime row multiplicity — the **Aggregate** /
+**Union** sense, always qualified); command (sqlc's term — collides with
+CLI vocabulary); arity.
+
 ## Flagged ambiguities
 
 - **"Parsed"** splits into a syntactic step and a schema-checked invariant.
@@ -469,3 +497,7 @@ valid or the application halts.
 - **"Name"** is overloaded across the explicit **type name**, the local
   **alias**, and the **label set**. "A node/edge must have a name" resolves to
   "must have a non-empty label set"; the explicit type name remains optional.
+- **"Cardinality"** unqualified is the **named query** axis (one / many /
+  exec). The edge binding's variable-length axis is **hop range** ("edge
+  cardinality" only informally); runtime row multiplicity is always the
+  qualified "result cardinality" (**Aggregate**, **Union**).
