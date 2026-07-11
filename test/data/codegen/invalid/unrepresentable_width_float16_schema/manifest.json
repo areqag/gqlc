@@ -1,0 +1,5 @@
+{
+  "package": "unrepresentablewidthfloat16schema",
+  "queryFiles": [],
+  "expectedError": "codegen.ErrUnrepresentableWidth"
+}

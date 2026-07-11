@@ -1,5 +1,0 @@
-{
-  "package": "int128scope",
-  "queryFiles": ["queries.cypher"],
-  "expectedError": "codegen.ErrOutOfC2Scope"
-}
