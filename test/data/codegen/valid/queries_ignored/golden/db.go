@@ -4,6 +4,7 @@ package queriesignored
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
 )
@@ -23,28 +24,44 @@ func (q *Queries) WithTx(tx neo4j.ManagedTransaction) *Queries {
 // driverOrTx is the unexported run indirection: every generated query
 // body routes through it, dispatching between the per-call-session
 // path (New) and the caller-owned managed-transaction path (WithTx).
+// C1 returns []*neo4j.Record — driver-documented self-contained value
+// snapshots safe to consume after the transaction closes (§5.6).
 type driverOrTx interface {
-	run(ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode) (neo4j.ResultWithContext, error)
+	run(ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode) ([]*neo4j.Record, error)
 }
 
 type driverDB struct {
 	driver neo4j.DriverWithContext
 }
 
-func (d driverDB) run(ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode) (neo4j.ResultWithContext, error) {
+func (d driverDB) run(ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode) ([]*neo4j.Record, error) {
 	session := d.driver.NewSession(ctx, neo4j.SessionConfig{AccessMode: access})
 	defer session.Close(ctx)
-	// C0: the driverDB.run body dispatches ExecuteRead / ExecuteWrite
-	// by AccessMode. C1 populates the read arm; C4 populates the
-	// write arm.
-	_ = session
-	return nil, nil
+	switch access {
+	case neo4j.AccessModeRead:
+		return neo4j.ExecuteRead(ctx, session, func(tx neo4j.ManagedTransaction) ([]*neo4j.Record, error) {
+			result, err := tx.Run(ctx, cypher, params)
+			if err != nil {
+				return nil, err
+			}
+			return result.Collect(ctx)
+		})
+	case neo4j.AccessModeWrite:
+		// C4 populates the write arm.
+		return nil, fmt.Errorf("gqlc: write path not implemented")
+	default:
+		return nil, fmt.Errorf("gqlc: unknown access mode %v", access)
+	}
 }
 
 type txDB struct {
 	tx neo4j.ManagedTransaction
 }
 
-func (t txDB) run(ctx context.Context, cypher string, params map[string]any, _ neo4j.AccessMode) (neo4j.ResultWithContext, error) {
-	return t.tx.Run(ctx, cypher, params)
+func (t txDB) run(ctx context.Context, cypher string, params map[string]any, _ neo4j.AccessMode) ([]*neo4j.Record, error) {
+	result, err := t.tx.Run(ctx, cypher, params)
+	if err != nil {
+		return nil, err
+	}
+	return result.Collect(ctx)
 }
