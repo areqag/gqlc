@@ -79,6 +79,7 @@
     "aggregate_with_expr_only_grouping.cypher": "social_r7.gql",
     "aggregate_at_with.cypher": "social_r5.gql",
     "demote_cross_with_remerge.cypher": "social_r5.gql",
+    "demote_cross_with_optional_group.cypher": "social_r5.gql",
     "carry_nullable_binding.cypher": "social_r5.gql",
     "distinct_projection.cypher": "social_r5.gql",
     "with_distinct.cypher": "social_r5.gql",

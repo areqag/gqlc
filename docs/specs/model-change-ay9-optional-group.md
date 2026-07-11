@@ -289,6 +289,17 @@ or a hand-constructed legacy nullable binding from the preserved
   a follow-up at close-out. Closing it needs **no further model
   change** — `branchState` is resolver-internal — which is one of
   the two reasons ids are query-scoped (§3.3).
+  **Resolved (2026-07-11, gqlc-984):** `branchState` gained an
+  `exportedOptionalGroup name → int` lane; `demoteNullableInPlace`
+  now seeds its group-membership map from carry as well as local
+  bindings, and any table entry known false (5xg pre-pass or local
+  re-MATCH override) fires the group closure — so proving a
+  WITH-carried OPTIONAL member demotes its cross-Part siblings.
+  Fixture `demote_cross_with_optional_group.cypher`; the same
+  refinement also lifts the conservative boundary noted at
+  `docs/specs/model-change-5xg-required-bare-ref.md §8.4 fixture
+  4`, flipping `demote_bare_reference_composes_with_group.cypher`
+  from Class A under-demote to tight demote.
 - **`Binding` stays sealed at five variants; `Use` at three;
   `Type` at seventeen** — a field is added, not a variant.
 - **Parser sentinels** — no new fail-site; the group id is derived
@@ -877,11 +888,13 @@ note, following the established amendment format:
 > OPTIONAL group exists, every member of that group demotes" —
 > flipping two resolver goldens (`demote_chained_from_required`,
 > `demote_from_anonymous_required_edge`) and adding no sentinel.
-> **Residual**: the resolver's cross-Part carry is name-granular and
-> does not yet carry group ids, so a WITH-carried binding demotes
-> without its co-introduced siblings; closing this needs only a
-> resolver-internal `branchState` extension (no further model
-> change) and is filed as a follow-up bead at close-out. Class B —
+> **Residual (resolved 2026-07-11, gqlc-984)**: the resolver's
+> cross-Part carry was name-granular and did not carry group ids, so
+> a WITH-carried binding demoted without its co-introduced siblings.
+> Closed by gqlc-984 with a resolver-internal `branchState` extension
+> (`exportedOptionalGroup name → int`) and no model change; the
+> group-closure fixed point in `demoteNullableInPlace` now unions
+> carried and local group memberships. Class B —
 > the same-Part second-reference gap (R4 §7.5.3 item 2, Axis 2,
 > gqlc-5xg) — is a missing-witness gap this axis deliberately does
 > not close. See `docs/specs/model-change-ay9-optional-group.md` for the
@@ -1176,7 +1189,7 @@ paragraph gains a dated closure note rather than deletion
 | Out of scope | Where it lives |
 |---|---|
 | Class B same-Part second-reference gap (Axis 2) | gqlc-5xg — separate spec cycle; boundary pinned at top and §2.5 |
-| Cross-Part group carry in `branchState` | follow-up bead filed at close-out (§2.5, §7 residual) |
+| Cross-Part group carry in `branchState` | closed 2026-07-11 (gqlc-984); see §2.5 and §7 residual notes |
 | `PathBinding` group/nullability axis | Stage-8 posture (§2.3) |
 | EXISTS-suppressed OPTIONAL clauses | Stage-11 posture unchanged; no ids minted (§4.2.1) |
 | Codegen consumption of widened nullability | future ADR |
