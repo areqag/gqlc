@@ -166,6 +166,55 @@ func temporalConstructorType(name string) (query.Type, bool) {
 	return nil, false
 }
 
+// builtinScalarFuncType widens a non-aggregate, non-temporal function call's
+// Stage-6 result type when the (case-insensitive) name and argument shapes
+// match a small closed set of standard openCypher scalar builtins whose
+// return type is settled at the grammar level — the same posture as
+// temporalConstructorType, and by design just as narrow. Motivating entry:
+// `elementId(node|edge) -> string`, which enables the ADR 0010 D3 identity
+// pattern `RETURN p, elementId(p) AS id` to render as a typed Row field.
+//
+// The argument-kind guard is a shape check, not a schema check: it only
+// accepts when the parser's Stage-6 refType has already committed TypeNode
+// or TypeEdge for the argument. Anything else (a property lookup, a call
+// result, an alias whose kind the parser did not commit) falls through so
+// the honest TypeUnknown posture is preserved — no synthetic error, no
+// wrong concrete type. Callers own the table's non-membership case.
+//
+// The name lookup is bare-name only (no namespace); `functionName` returns
+// ok=false for a namespaced call like `foo.elementId`, so a shadowing
+// namespaced call cannot match by accident. Extending the table to another
+// scalar builtin (`id(node|edge) -> int`) is one arm added below.
+func builtinScalarFuncType(name string, argTypes []query.Type) (query.Type, bool) {
+	switch name {
+	case "elementid":
+		if len(argTypes) == 1 && isNodeOrEdge(argTypes[0]) {
+			return query.TypeString{}, true
+		}
+	case "id":
+		if len(argTypes) == 1 && isNodeOrEdge(argTypes[0]) {
+			return query.TypeInt{}, true
+		}
+	}
+	return nil, false
+}
+
+// isNodeOrEdge reports whether t is a bare TypeNode or TypeEdge — the two
+// argument shapes every entity-identity builtin accepts. A variable-length
+// edge binding types as TypeList(TypeEdge), which is out of scope: neither
+// openCypher nor neo4j define elementId over a list, and inventing a
+// concrete type for it would violate the "wrong concrete is worse than
+// TypeUnknown" posture. A property lookup on a node/edge types as
+// TypeUnknown at the parser boundary (schema-owned), so it also does not
+// match here.
+func isNodeOrEdge(t query.Type) bool {
+	switch t.(type) {
+	case query.TypeNode, query.TypeEdge:
+		return true
+	}
+	return false
+}
+
 // aggregateFunc maps a lowercased function name to its AggregateFunc, reporting
 // whether the name is an aggregate at all (§4: the openCypher aggregating
 // functions are a closed set). stdev/stdevp and percentilecont/percentiledisc

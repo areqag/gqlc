@@ -896,6 +896,73 @@ var mustParse = map[string]struct {
 			},
 		}}}}},
 	},
+	// gqlc-v5t — elementId(node) is a builtin scalar function whose
+	// grammar-level result type is string. The bare-atom projection is a
+	// FuncProjection whose refs mine the node binding and whose Type()
+	// widens from TypeUnknown to TypeString. Enables ADR 0010 D3's
+	// identity pattern (RETURN p, elementId(p) AS id) to render as a
+	// typed Row field in generated code.
+	"return elementId on node": {
+		src: "MATCH (p)\nRETURN elementId(p) AS id",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("p", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "id", Value: query.NewFuncProjection([]query.Ref{{Variable: "p"}}, query.TypeString{})},
+			},
+		}),
+	},
+	// gqlc-v5t — elementId(edge) is the twin of the node case: same
+	// builtin, same string result. Pins that the arg-kind widening does
+	// not accidentally require node-ness.
+	"return elementId on edge": {
+		src: "MATCH ()-[r]->()\nRETURN elementId(r) AS id",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewEdgeBinding("r", nil,
+					query.NewInlineEndpoint(nil),
+					query.NewInlineEndpoint(nil),
+					true,
+				)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "id", Value: query.NewFuncProjection([]query.Ref{{Variable: "r"}}, query.TypeString{})},
+			},
+		}),
+	},
+	// gqlc-v5t — id(node) is the second table entry, same shape as
+	// elementId but returning TypeInt (the deprecated-but-still-valid
+	// integer identity). Two-entry coverage proves the mechanism is
+	// generic, not glued to a single builtin.
+	"return id on node": {
+		src: "MATCH (p)\nRETURN id(p) AS pid",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("p", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "pid", Value: query.NewFuncProjection([]query.Ref{{Variable: "p"}}, query.TypeInt{})},
+			},
+		}),
+	},
+	// gqlc-v5t — elementId on a property lookup falls through to the
+	// honest TypeUnknown. The property-lookup atom refType returns
+	// TypeUnknown at the parser boundary (schema-owned), so the builtin
+	// table's arg-shape check does not match — the projection carries
+	// TypeUnknown, matching the pre-widening posture for every non-
+	// entity argument.
+	"return elementId on property is unknown": {
+		src: "MATCH (p)\nRETURN elementId(p.id) AS x",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNodeBinding("p", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "x", Value: query.NewFuncProjection([]query.Ref{{Variable: "p", Property: "id"}}, query.TypeUnknown{})},
+			},
+		}),
+	},
 	// Stage 7 — temporal-point minus duration → temporal-point. Spec §1's
 	// subtraction rule is one-way (temporal - duration is legal; the
 	// commutation is not). Rich classifier route, ExprProjection.

@@ -358,8 +358,46 @@ func (l *listener) classifyFunction(fi gen.IOC_FunctionInvocationContext) (query
 	resultType := query.Type(query.TypeUnknown{})
 	if t, ok := temporalConstructorType(fullFunctionName(fi)); ok {
 		resultType = t
+	} else if name, ok := functionName(fi); ok {
+		// Builtin scalar-function widening (gqlc-v5t): the bare-name lookup
+		// upgrades the honest TypeUnknown to a concrete grammar-level type
+		// when the arg shapes commit. `functionName` returns ok=false for a
+		// namespaced call, so a shadowing `foo.elementId` cannot match.
+		// Arg types are computed from the grammatical argument list — not
+		// the refs slice, which drops scalar-literal args — so a mismatched
+		// arity (`elementId('lit', n)`) does not silently promote.
+		if t, ok := builtinScalarFuncType(name, l.builtinArgTypes(fi)); ok {
+			resultType = t
+		}
 	}
 	return query.NewFuncProjection(refs, resultType), true
+}
+
+// builtinArgTypes computes the Stage-6 result type of each grammatical
+// argument of a function invocation, preserving argument order. Only the
+// bare-variable atom shape (Ref{Variable}) participates via l.refType — a
+// scalar-literal, property lookup, expression, or any other atom stays
+// TypeUnknown so the caller's arg-kind check does not silently accept a
+// mismatched shape. The parser has already gated the call through
+// functionArgRefs (§4/§9: bare var / var.prop / scalar literal only), so
+// unreachable atoms cannot appear here.
+func (l *listener) builtinArgTypes(fi gen.IOC_FunctionInvocationContext) []query.Type {
+	args := fi.AllOC_Expression()
+	out := make([]query.Type, len(args))
+	for i, arg := range args {
+		nae := nonArithmeticAtom(arg)
+		if nae == nil {
+			out[i] = query.TypeUnknown{}
+			continue
+		}
+		ref, ok := refFromNonArithmetic(nae)
+		if !ok {
+			out[i] = query.TypeUnknown{}
+			continue
+		}
+		out[i] = l.refType(ref)
+	}
+	return out
 }
 
 // classifyAggregateCall lowers an aggregate function invocation, whether its

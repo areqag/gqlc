@@ -363,6 +363,13 @@ func (l *listener) typeAtom(a gen.IOC_AtomContext, refs *[]query.Ref) query.Type
 				}
 				return aggregateResultType(fn, operand)
 			}
+			// gqlc-v5t: the same builtin scalar-function widening
+			// classifyFunction uses at RETURN/WITH position, applied to the
+			// rich-expression atom path — so `elementId(p) + '-suffix'` and
+			// bare `elementId(p)` cannot type differently on the same call.
+			if t, ok := builtinScalarFuncType(name, l.builtinArgTypes(fi)); ok {
+				return t
+			}
 		}
 		return query.TypeUnknown{}
 	case a.OC_ParenthesizedExpression() != nil:
