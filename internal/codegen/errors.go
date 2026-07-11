@@ -42,17 +42,16 @@ var (
 	// user-facing failure mode; the reachability sweep skips it.
 	ErrFormatFailure = errors.New("format failure")
 
-	// ErrOutOfC1Scope is returned when a C1-admissible input carries a
-	// construct C1 does not project: a column or parameter whose resolved
-	// type is not ResolvedProperty (nodes / edges / edgeUnion / scalars /
-	// temporals / lists / unknowns), an unrepresentable-width property
-	// type (INT128+, UINT128+, FLOAT16, FLOAT128+, DECIMAL), a DATE or
-	// TIMESTAMP property column (C3 owns temporals), a :exec cardinality
-	// (C4 owns writes), or a query-text const carrying a raw-string-
-	// hostile character (backtick). Category-grained per C0's precedent
-	// (mirrors resolver.ErrOutOfR0Scope); C4/C5/C6 retire the sub-cases
-	// as they land. Introduced at C1.
-	ErrOutOfC1Scope = errors.New("out of C1 scope")
+	// ErrOutOfC2Scope is returned when a C2-admissible input carries a
+	// construct C2 does not project: a column whose resolved type is
+	// ResolvedEdgeUnion (C5) or ResolvedScalar / ResolvedTemporal /
+	// ResolvedList / ResolvedUnknown (C3), a ResolvedProperty column or
+	// parameter with an unrepresentable width or a temporal property type
+	// (C3), a non-property parameter (C3), a :exec cardinality (C4), or a
+	// query text carrying a raw-string-hostile backtick. Category-grained
+	// per C0's precedent; C3/C4/C5 retire the sub-cases as they land.
+	// Renamed from ErrOutOfC1Scope at C2 — the entity-column axis retired.
+	ErrOutOfC2Scope = errors.New("out of C2 scope")
 
 	// ErrParamNameCollision is returned when two Parameters mangle to
 	// the same Params-struct field name (§4.2). The fail-message names
@@ -73,12 +72,37 @@ var (
 	ErrAliasRequired = errors.New("alias required")
 
 	// ErrIdentifierCollision is returned when two generated top-level
-	// identifiers in one package collide (§4.4), or a query's method
-	// name matches a reserved identifier the emission owns (§4.1). The
-	// fail-message names both identifier sources. C5 hardens the sweep
-	// as entity structs and decode helpers land (C2/C3). Introduced at
-	// C1.
+	// identifiers in one package collide (§4.4 / §4.6), or a query's
+	// method name matches a reserved identifier the emission owns
+	// (§4.1). C2 adds entity struct names to the swept identifier set.
+	// The fail-message names both identifier sources. C5 hardens the
+	// sweep further as decode-helper names enter the exported surface.
+	// Introduced at C1; C2 widens.
 	ErrIdentifierCollision = errors.New("identifier collision")
+
+	// ErrInvalidEntityName is returned when an explicit NodeType.Name or
+	// EdgeType.Name is set but is not a valid exported Go identifier
+	// (spec §4.5 Rule 1), or when a single-label mangle (Rule 2 / Rule
+	// 3) produces text that fails the exported-Go-identifier grammar.
+	// The fail-message names the schema type (labels for a node,
+	// edge-key triple for an edge) and the offending string. Introduced
+	// at C2.
+	ErrInvalidEntityName = errors.New("invalid entity name")
+
+	// ErrUnnamedMultiLabelType is returned when a multi-label node type,
+	// a multi-label edge type, or a single-label edge type whose Label
+	// is shared across endpoint pairs, has an empty NodeType.Name /
+	// EdgeType.Name — Rule 4 requires an explicit name to avoid
+	// guessing. The fail-message names the schema type and the axis that
+	// made it ambiguous. Checked eagerly regardless of query projection.
+	// Introduced at C2.
+	ErrUnnamedMultiLabelType = errors.New("unnamed multi-label type")
+
+	// ErrPropertyFieldCollision is returned when two properties on the
+	// same entity mangle to the same struct field name (spec §4.5 Rule
+	// 5). The fail-message names both properties and the entity.
+	// Introduced at C2.
+	ErrPropertyFieldCollision = errors.New("property field collision")
 )
 
 // allSentinels is the canonical closed set of user-input-reachable
@@ -97,9 +121,12 @@ var allSentinels = []error{
 	ErrDuplicateSourceFile,
 	ErrDuplicateQueryName,
 	ErrInvalidCardinality,
-	ErrOutOfC1Scope,
+	ErrOutOfC2Scope,
 	ErrParamNameCollision,
 	ErrRowFieldCollision,
 	ErrAliasRequired,
 	ErrIdentifierCollision,
+	ErrInvalidEntityName,
+	ErrUnnamedMultiLabelType,
+	ErrPropertyFieldCollision,
 }

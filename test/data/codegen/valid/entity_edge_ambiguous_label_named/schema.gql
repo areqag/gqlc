@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE EntityEdgeAmbiguousLabelNamed AS {
+    (:Person { id :: INT64 NOT NULL }),
+    (:Company { id :: INT64 NOT NULL }),
+    DIRECTED EDGE TYPE PersonKnows (:Person) -[:KNOWS { since :: INT64 NOT NULL }]-> (:Person),
+    DIRECTED EDGE TYPE CompanyKnows (:Company) -[:KNOWS { since :: INT64 NOT NULL }]-> (:Company)
+}

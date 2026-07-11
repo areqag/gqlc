@@ -1,0 +1,5 @@
+CREATE PROPERTY GRAPH TYPE IdentifierCollisionEntityRow AS {
+    (:Person {
+        id :: INT64 NOT NULL
+    })
+}
