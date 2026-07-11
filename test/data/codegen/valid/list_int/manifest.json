@@ -1,0 +1,4 @@
+{
+  "package": "listint",
+  "queryFiles": ["queries.cypher"]
+}

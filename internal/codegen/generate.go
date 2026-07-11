@@ -85,19 +85,21 @@ type preparedRow struct {
 	Field      string // mangle §4.3
 	GoType     string // §5.1 — a Go type text; for entity columns the entity struct name
 	Nullable   bool
-	Kind       columnKind // property (C1) or entity — property/node/edge
+	Kind       columnKind            // property (C1) or entity — property/node/edge (C2); temporal/list/scalar/any (C3)
+	ListElem   resolver.ResolvedType // populated when Kind == columnList — the element leaf, driving the loop body
 }
 
 // columnKind discriminates the row-assembly template arm to run for a
 // given RowField. C1 always emitted a property arm; C2 adds node/edge
-// entity arms. The kind is derived once at Phase B and carried onto
-// preparedRow so the row-assembly template (§5.5) needs no per-emission
-// re-derivation.
+// entity arms; C3 adds temporal / list / scalar / any arms. The kind is
+// derived once at Phase B and carried onto preparedRow so the row-
+// assembly template (§5.5) needs no per-emission re-derivation.
 type columnKind int
 
 const (
 	// columnProperty is C1's property arm: neo4j.GetRecordValue[<carrier>]
-	// with a narrow-carrier + convert dance.
+	// with a narrow-carrier + convert dance. Extended at C3 to include
+	// DATE / TIMESTAMP passthrough (carrier = Go type).
 	columnProperty columnKind = iota
 	// columnNode is C2's node-entity arm: neo4j.GetRecordValue[dbtype.Node]
 	// followed by a decode<EntityName>(node) call.
@@ -105,6 +107,24 @@ const (
 	// columnEdge is C2's edge-entity arm: neo4j.GetRecordValue[dbtype.Relationship]
 	// followed by a decode<EntityName>(rel) call.
 	columnEdge
+	// columnTemporal is C3's temporal-expression arm:
+	// neo4j.GetRecordValue[<dbtype.Kind or time.Time>] with a passthrough
+	// assign — the carrier is already the emitted Go type.
+	columnTemporal
+	// columnScalar is C3's scalar-expression arm:
+	// neo4j.GetRecordValue[<bool|int64|float64|string|map[string]any>]
+	// with a passthrough assign. ScalarNull and ScalarMap have the same
+	// decode shape (map's carrier is map[string]any; null decodes via
+	// columnAny below).
+	columnScalar
+	// columnList is C3's list-column arm:
+	// neo4j.GetRecordValue[[]any] followed by a per-element loop whose
+	// body dispatches on the element type.
+	columnList
+	// columnAny is C3's honest-any arm: record.Get(key) returning (any,
+	// bool). Used for ResolvedUnknown, ScalarNull, and (per §5.5) any
+	// leaf whose emitted Go type is `any`.
+	columnAny
 )
 
 // entityKind discriminates node from edge in the entity-naming and
@@ -128,6 +148,7 @@ type preparedEntity struct {
 	Fields     []preparedEntityField
 	AnyProp    bool // any property emits (⇒ fmt used)
 	AnyNonNull bool // any non-nullable property emits (⇒ neo4j.GetProperty[T] used)
+	AnyTime    bool // any property emits as time.Time (⇒ time used in models.go); introduced at C3
 }
 
 // preparedEntityField carries one property's derived struct field name
@@ -167,10 +188,12 @@ func generate(in Input) ([]File, error) {
 	}
 
 	// Phase A — batch admission: for each query in slice order, gate on
-	// resolved type / cardinality / reserved-identifier. C2 widens the
-	// admissible column shape to ResolvedNode + ResolvedEdge; parameter
-	// admission stays property-only. First offender wins (spec §2.1).
-	if err := phaseAAdmit(in.Queries, entityIndex); err != nil {
+	// resolved type / cardinality / reserved-identifier. C3 widens the
+	// admissible column shape to the full closed ResolvedType sum minus
+	// ResolvedEdgeUnion; parameter admission stays property-only,
+	// extended to temporal-property widths. First offender wins (spec
+	// §2.1).
+	if err := phaseAAdmit(in.Queries, entities, entityIndex); err != nil {
 		return nil, err
 	}
 
@@ -208,9 +231,10 @@ func generate(in Input) ([]File, error) {
 	// SourceFile basename in first-appearance order (§5.5). Basename
 	// stripped of extension.
 	for _, group := range groupBySource(prepared) {
+		needDbtype, needTime := groupImports(group.queries)
 		files = append(files, File{
 			Path:     group.filename,
-			Contents: renderCypherFile(pkg, group.queries, groupHasEntityColumn(group.queries)),
+			Contents: renderCypherFile(pkg, group.queries, needDbtype, needTime),
 		})
 	}
 
@@ -324,7 +348,7 @@ func phaseZAdmit(sch schema.Schema) ([]preparedEntity, map[entityLookupKey]int, 
 		if err != nil {
 			return nil, nil, err
 		}
-		fields, anyProp, anyNonNull, err := prepareEntityFields(name, nt.Properties)
+		fields, anyProp, anyNonNull, anyTime, err := prepareEntityFields(name, nt.Properties)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -337,6 +361,7 @@ func phaseZAdmit(sch schema.Schema) ([]preparedEntity, map[entityLookupKey]int, 
 			Fields:     fields,
 			AnyProp:    anyProp,
 			AnyNonNull: anyNonNull,
+			AnyTime:    anyTime,
 		}
 		index[entityLookupKey{Kind: entityNode, Labels: nt.Labels}] = len(entities)
 		entities = append(entities, ent)
@@ -349,7 +374,7 @@ func phaseZAdmit(sch schema.Schema) ([]preparedEntity, map[entityLookupKey]int, 
 		if err != nil {
 			return nil, nil, err
 		}
-		fields, anyProp, anyNonNull, err := prepareEntityFields(name, et.Properties)
+		fields, anyProp, anyNonNull, anyTime, err := prepareEntityFields(name, et.Properties)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -362,6 +387,7 @@ func phaseZAdmit(sch schema.Schema) ([]preparedEntity, map[entityLookupKey]int, 
 			Fields:     fields,
 			AnyProp:    anyProp,
 			AnyNonNull: anyNonNull,
+			AnyTime:    anyTime,
 		}
 		index[entityLookupKey{Kind: entityEdge, EdgeKey: et.EdgeKey}] = len(entities)
 		entities = append(entities, ent)
@@ -435,9 +461,15 @@ func entityAxisText(kind entityKind, labels graph.LabelSetKey, edgeKey schema.Ed
 // prepareEntityFields derives an entity's per-property field list in
 // map-key-sorted order (spec §5.2). Returns the fields, the anyProp bit
 // (any property emits, ⇒ fmt used in decode helper), the anyNonNull bit
-// (any non-nullable property emits, ⇒ neo4j.GetProperty[T] used), and a
-// same-entity field-name collision as ErrPropertyFieldCollision.
-func prepareEntityFields(entityName string, props map[string]schema.Property) ([]preparedEntityField, bool, bool, error) {
+// (any non-nullable property emits, ⇒ neo4j.GetProperty[T] used), the
+// anyTime bit (any property decodes as time.Time — TIMESTAMP), and a
+// same-entity field-name collision as ErrPropertyFieldCollision. The
+// C3 eager width sweep (§4.8) folds into this pass: a property whose
+// width has no faithful Go carrier (INT128 / INT256 / UINT128 /
+// UINT256 / FLOAT16 / FLOAT128 / FLOAT256 / DECIMAL) returns
+// ErrUnrepresentableWidth naming the entity, property, and width.
+// First offender wins across the schema-shape axis.
+func prepareEntityFields(entityName string, props map[string]schema.Property) ([]preparedEntityField, bool, bool, bool, error) {
 	keys := make([]string, 0, len(props))
 	for k := range props {
 		keys = append(keys, k)
@@ -447,19 +479,20 @@ func prepareEntityFields(entityName string, props map[string]schema.Property) ([
 	seen := make(map[string]string, len(props))
 	anyProp := false
 	anyNonNull := false
+	anyTime := false
 	for _, k := range keys {
 		p := props[k]
 		field := paramFieldName(p.Name)
 		if first, dup := seen[field]; dup {
-			return nil, false, false, fmt.Errorf("%w: entity %q properties %q and %q both mangle to %q", ErrPropertyFieldCollision, entityName, first, p.Name, field)
+			return nil, false, false, false, fmt.Errorf("%w: entity %q properties %q and %q both mangle to %q", ErrPropertyFieldCollision, entityName, first, p.Name, field)
 		}
 		seen[field] = p.Name
 		ty, ok := goType(p.Type)
 		if !ok {
-			// C3 owns unrepresentable-width and temporal property types
-			// — including on entity properties. Route through the same
-			// scope sentinel as a query column with the same width.
-			return nil, false, false, fmt.Errorf("%w: entity %q property %q has unrepresentable property width %s (C3 owns)", ErrOutOfC2Scope, entityName, p.Name, p.Type)
+			// C3 §4.8 eager width sweep: the eight unrepresentable widths
+			// route through ErrUnrepresentableWidth at Phase Z regardless
+			// of whether any query projects the offending property.
+			return nil, false, false, false, fmt.Errorf("%w: entity %q property %q has %s", ErrUnrepresentableWidth, entityName, p.Name, p.Type)
 		}
 		fields = append(fields, preparedEntityField{
 			PropName: p.Name,
@@ -471,31 +504,39 @@ func prepareEntityFields(entityName string, props map[string]schema.Property) ([
 		if !p.Nullable {
 			anyNonNull = true
 		}
+		if ty == "time.Time" {
+			anyTime = true
+		}
 	}
-	return fields, anyProp, anyNonNull, nil
+	return fields, anyProp, anyNonNull, anyTime, nil
 }
 
 // phaseAAdmit is spec §2.1's Phase A: gates every query on axes Phase B
 // depends on for name derivation. First offender in slice order wins.
-// C2 widens the admissible column shape set to include ResolvedNode and
-// ResolvedEdge; parameter admission stays property-only.
-func phaseAAdmit(queries []NamedQuery, entityIndex map[entityLookupKey]int) error {
+// C3 widens the admissible column shape set to the full closed sum
+// minus ResolvedEdgeUnion (which C5 owns); parameter admission stays
+// property-only, extended to temporal-property widths DATE / TIMESTAMP.
+// Unrepresentable widths on columns and parameters route through
+// ErrUnrepresentableWidth (Phase Z already caught schema-side offenders
+// so a column projecting an unrepresentable-width property is unreachable
+// unless the query declares an unrepresentable width on a parameter).
+func phaseAAdmit(queries []NamedQuery, entities []preparedEntity, entityIndex map[entityLookupKey]int) error {
 	for i, q := range queries {
 		if _, reserved := reservedIdentifiers[q.Name]; reserved {
 			return fmt.Errorf("%w: query %q at position %d collides with reserved identifier", ErrIdentifierCollision, q.Name, i)
 		}
 		if q.Cardinality == CardinalityExec {
-			return fmt.Errorf("%w: query %q at position %d has cardinality :exec (C4 owns writes)", ErrOutOfC2Scope, q.Name, i)
+			return fmt.Errorf("%w: query %q at position %d has cardinality :exec (C4 owns writes)", ErrOutOfC3Scope, q.Name, i)
 		}
 		if q.Cardinality != CardinalityOne && q.Cardinality != CardinalityMany {
 			return fmt.Errorf("%w: query %q at position %d has unrecognised cardinality %d", ErrInvalidCardinality, q.Name, i, q.Cardinality)
 		}
 		if len(q.Validated.Columns) == 0 {
-			// C2 admissibility requires a non-empty projection (§7).
-			return fmt.Errorf("%w: query %q at position %d has no projected columns", ErrOutOfC2Scope, q.Name, i)
+			// A projection query must project at least one column (§7).
+			return fmt.Errorf("%w: query %q at position %d has no projected columns", ErrOutOfC3Scope, q.Name, i)
 		}
 		if strings.ContainsRune(q.SourceText, '`') {
-			return fmt.Errorf("%w: query %q at position %d has a backtick in its source text", ErrOutOfC2Scope, q.Name, i)
+			return fmt.Errorf("%w: query %q at position %d has a backtick in its source text", ErrOutOfC3Scope, q.Name, i)
 		}
 		for ci, col := range q.Validated.Columns {
 			// Shape check first (spec §4.3, §6.4): count(*), arithmetic
@@ -509,29 +550,49 @@ func phaseAAdmit(queries []NamedQuery, entityIndex map[entityLookupKey]int) erro
 			switch t := col.Type.(type) {
 			case resolver.ResolvedProperty:
 				if _, ok := goType(t.Type); !ok {
-					return fmt.Errorf("%w: query %q column %d %q has unrepresentable property width %s (C3 owns)", ErrOutOfC2Scope, q.Name, ci, col.Name, t.Type)
+					return fmt.Errorf("%w: query %q column %d %q has %s", ErrUnrepresentableWidth, q.Name, ci, col.Name, t.Type)
 				}
 			case resolver.ResolvedNode:
 				if _, ok := entityIndex[entityLookupKey{Kind: entityNode, Labels: t.Labels}]; !ok {
 					// Unknown node type — the resolver's R0 gate should
 					// have caught this; a synthetic test seam lands here.
-					return fmt.Errorf("%w: query %q column %d %q references unknown node type %q", ErrOutOfC2Scope, q.Name, ci, col.Name, string(t.Labels))
+					return fmt.Errorf("%w: query %q column %d %q references unknown node type %q", ErrOutOfC3Scope, q.Name, ci, col.Name, string(t.Labels))
 				}
 			case resolver.ResolvedEdge:
 				if _, ok := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: t.EdgeKey}]; !ok {
-					return fmt.Errorf("%w: query %q column %d %q references unknown edge type %s -[:%s]-> %s", ErrOutOfC2Scope, q.Name, ci, col.Name, string(t.EdgeKey.Source), string(t.EdgeKey.Label), string(t.EdgeKey.Target))
+					return fmt.Errorf("%w: query %q column %d %q references unknown edge type %s -[:%s]-> %s", ErrOutOfC3Scope, q.Name, ci, col.Name, string(t.EdgeKey.Source), string(t.EdgeKey.Label), string(t.EdgeKey.Target))
+				}
+			case resolver.ResolvedEdgeUnion:
+				return fmt.Errorf("%w: query %q column %d %q resolved as edgeUnion (C5 owns)", ErrOutOfC3Scope, q.Name, ci, col.Name)
+			case resolver.ResolvedTemporal:
+				// Every temporal kind is representable; the closed enum
+				// maps into the temporal Go type table (§5.1) without a
+				// fallible dispatch.
+			case resolver.ResolvedScalar:
+				// Every scalar kind is representable at C3 — bool /
+				// int64 / float64 / string / any / map[string]any.
+			case resolver.ResolvedUnknown:
+				// Honest-any leaf (§3.3). Fully in-scope; the emission
+				// walks the record.Get path.
+			case resolver.ResolvedList:
+				// Recurse the list-element chain to find unrepresentable
+				// leaves or edgeUnion leaves (§4.7). The Go type text
+				// is derived at Phase B; here we only fail if the recursion
+				// itself rejects.
+				if _, err := resolvedListGoType(t.Element, entities, entityIndex); err != nil {
+					return fmt.Errorf("query %q column %d %q: %w", q.Name, ci, col.Name, err)
 				}
 			default:
-				return fmt.Errorf("%w: query %q column %d %q resolved as %s (C2 projects ResolvedProperty, ResolvedNode, ResolvedEdge only)", ErrOutOfC2Scope, q.Name, ci, col.Name, col.Type.String())
+				return fmt.Errorf("%w: query %q column %d %q resolved as %s", ErrOutOfC3Scope, q.Name, ci, col.Name, col.Type.String())
 			}
 		}
 		for pi, p := range q.Validated.Parameters {
 			prop, ok := p.Type.(resolver.ResolvedProperty)
 			if !ok {
-				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (C2 projects ResolvedProperty parameters only)", ErrOutOfC2Scope, q.Name, pi, p.Name, p.Type.String())
+				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (non-property parameters are post-v1)", ErrOutOfC3Scope, q.Name, pi, p.Name, p.Type.String())
 			}
 			if _, ok := goType(prop.Type); !ok {
-				return fmt.Errorf("%w: query %q parameter %d $%s has unrepresentable property width %s (C3 owns)", ErrOutOfC2Scope, q.Name, pi, p.Name, prop.Type)
+				return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrUnrepresentableWidth, q.Name, pi, p.Name, prop.Type)
 			}
 		}
 	}
@@ -560,7 +621,7 @@ func phaseBDerive(queries []NamedQuery, entities []preparedEntity, entityIndex m
 			// Phase A guaranteed ResolvedProperty + representable width.
 			prop, ok := param.Type.(resolver.ResolvedProperty)
 			if !ok {
-				return nil, fmt.Errorf("%w: query %q parameter %d $%s: internal invariant — Phase A missed non-property type %s", ErrOutOfC2Scope, q.Name, pi, param.Name, param.Type.String())
+				return nil, fmt.Errorf("%w: query %q parameter %d $%s: internal invariant — Phase A missed non-property type %s", ErrOutOfC3Scope, q.Name, pi, param.Name, param.Type.String())
 			}
 			ty, _ := goType(prop.Type)
 			p.ParamFields = append(p.ParamFields, preparedParam{
@@ -611,8 +672,49 @@ func phaseBDerive(queries []NamedQuery, entities []preparedEntity, entityIndex m
 					Nullable:   t.Nullable,
 					Kind:       columnEdge,
 				})
+			case resolver.ResolvedTemporal:
+				p.RowFields = append(p.RowFields, preparedRow{
+					ColumnName: col.Name,
+					Field:      field,
+					GoType:     temporalGoType(t.Kind),
+					Kind:       columnTemporal,
+				})
+			case resolver.ResolvedScalar:
+				ty := scalarGoType(t.Kind)
+				kind := columnScalar
+				// ScalarNull decodes through record.Get (§5.5) — no
+				// GetRecordValue overload for a bare `any`. ScalarMap
+				// has a legitimate GetRecordValue[map[string]any] arm.
+				if t.Kind == resolver.ScalarNull {
+					kind = columnAny
+				}
+				p.RowFields = append(p.RowFields, preparedRow{
+					ColumnName: col.Name,
+					Field:      field,
+					GoType:     ty,
+					Kind:       kind,
+				})
+			case resolver.ResolvedUnknown:
+				p.RowFields = append(p.RowFields, preparedRow{
+					ColumnName: col.Name,
+					Field:      field,
+					GoType:     "any",
+					Kind:       columnAny,
+				})
+			case resolver.ResolvedList:
+				inner, err := resolvedListGoType(t.Element, entities, entityIndex)
+				if err != nil {
+					return nil, fmt.Errorf("query %q column %d %q: %w", q.Name, ci, col.Name, err)
+				}
+				p.RowFields = append(p.RowFields, preparedRow{
+					ColumnName: col.Name,
+					Field:      field,
+					GoType:     "[]" + inner,
+					Kind:       columnList,
+					ListElem:   t.Element,
+				})
 			default:
-				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC2Scope, q.Name, ci, col.Name, col.Type.String())
+				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC3Scope, q.Name, ci, col.Name, col.Type.String())
 			}
 		}
 
@@ -772,8 +874,23 @@ func renderQuerier(pkg string, prepared []preparedQuery) []byte {
 	b.WriteString("package ")
 	b.WriteString(pkg)
 	b.WriteString("\n\n")
+	// Import set: context always (for method signatures); dbtype iff a
+	// method signature names a dbtype.<Kind>; time iff a signature names
+	// time.Time. The signature-search runs over Params and Row types.
+	needDbtype, needTime := querierImports(prepared)
 	if len(prepared) > 0 {
-		b.WriteString("import \"context\"\n\n")
+		if needDbtype || needTime {
+			b.WriteString("import (\n\t\"context\"\n")
+			if needTime {
+				b.WriteString("\t\"time\"\n")
+			}
+			if needDbtype {
+				b.WriteString("\n\t\"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype\"\n")
+			}
+			b.WriteString(")\n\n")
+		} else {
+			b.WriteString("import \"context\"\n\n")
+		}
 	}
 	b.WriteString("type ReadQuerier interface {\n")
 	for _, p := range prepared {
@@ -786,6 +903,37 @@ func renderQuerier(pkg string, prepared []preparedQuery) []byte {
 	b.WriteString("type Querier interface {\n\tReadQuerier\n\tWriteQuerier\n}\n\n")
 	b.WriteString("var _ Querier = (*Queries)(nil)\n")
 	return []byte(b.String())
+}
+
+// querierImports scans every prepared query's method signature (params
+// + return type) for dbtype / time references. Multi-column returns
+// use the MethodNameRow struct name (the struct itself lives in the
+// .cypher.go file, whose imports carry any dbtype / time it needs);
+// single-column returns and every parameter surface the carrier
+// directly in the signature. The querier interface file needs an
+// import when — and only when — its method signature strings contain
+// the carrier.
+func querierImports(prepared []preparedQuery) (needDbtype, needTime bool) {
+	scan := func(ty string) {
+		if strings.Contains(ty, "dbtype.") {
+			needDbtype = true
+		}
+		if strings.Contains(ty, "time.Time") {
+			needTime = true
+		}
+	}
+	for _, p := range prepared {
+		// Parameters appear verbatim in every method signature.
+		for _, param := range p.ParamFields {
+			scan(param.GoType)
+		}
+		// Return type: bare row Go type for single-column projections;
+		// MethodNameRow (no import needed) otherwise.
+		if len(p.RowFields) == 1 {
+			scan(p.RowFields[0].GoType)
+		}
+	}
+	return needDbtype, needTime
 }
 
 // renderModels emits models.go (spec §5.2). At C2 the body carries one
@@ -808,12 +956,16 @@ func renderModels(pkg string, entities []preparedEntity) []byte {
 
 	anyProp := false
 	anyNonNull := false
+	anyTime := false
 	for _, e := range entities {
 		if e.AnyProp {
 			anyProp = true
 		}
 		if e.AnyNonNull {
 			anyNonNull = true
+		}
+		if e.AnyTime {
+			anyTime = true
 		}
 	}
 
@@ -824,10 +976,18 @@ func renderModels(pkg string, entities []preparedEntity) []byte {
 	b.WriteString("\n\n")
 
 	// Imports: dbtype is unconditional (every helper's argument type);
-	// fmt gates on anyProp; neo4j gates on anyNonNull.
+	// fmt gates on anyProp; time gates on anyTime (TIMESTAMP property);
+	// neo4j gates on anyNonNull. Alphabetical: fmt, time, then external
+	// neo4j / dbtype.
 	b.WriteString("import (\n")
 	if anyProp {
-		b.WriteString("\t\"fmt\"\n\n")
+		b.WriteString("\t\"fmt\"\n")
+	}
+	if anyTime {
+		b.WriteString("\t\"time\"\n")
+	}
+	if anyProp || anyTime {
+		b.WriteString("\n")
 	}
 	if anyNonNull {
 		b.WriteString("\t\"github.com/neo4j/neo4j-go-driver/v5/neo4j\"\n")
@@ -891,25 +1051,32 @@ func writeEntityDecodeHelper(b *strings.Builder, e preparedEntity) {
 }
 
 // writeEntityFieldDecode emits one field's decode block. Nullable path:
-// Props lookup + type assertion + address-of-local into a pointer field.
-// Non-nullable path: neo4j.GetProperty[T] + fmt.Errorf wrap. The property
-// key is the source property name (Property.Name), not the derived field
-// name — the driver map is keyed on the schema-side name.
+// Props lookup + type assertion against the driver's carrier + narrow-
+// convert into a local of the emitted Go type + address-of-local into
+// the pointer field. Non-nullable path: neo4j.GetProperty[<carrier>] +
+// narrow-convert. The property key is the source property name
+// (Property.Name), not the derived field name — the driver map is
+// keyed on the schema-side name. Extended at C3 to cover DATE
+// (dbtype.Date carrier) and TIMESTAMP (time.Time carrier); FLOAT32's
+// nullable arm now narrows correctly (was a latent bug, no fixture
+// exercised it before C3).
 func writeEntityFieldDecode(b *strings.Builder, e preparedEntity, f preparedEntityField, arg string) {
+	carrier := driverCarrier(f.GoType)
 	if f.Nullable {
 		fmt.Fprintf(b, "\tif v, ok := %s.Props[%q]; ok {\n", arg, f.PropName)
-		fmt.Fprintf(b, "\t\ts, ok := v.(%s)\n", f.GoType)
+		fmt.Fprintf(b, "\t\ts, ok := v.(%s)\n", carrier)
 		b.WriteString("\t\tif !ok {\n")
-		fmt.Fprintf(b, "\t\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: property %%q: expected %s, got %%T\", %q, v)\n", e.Name, e.Name, f.Field, f.GoType, f.PropName)
+		fmt.Fprintf(b, "\t\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: property %%q: expected %s, got %%T\", %q, v)\n", e.Name, e.Name, f.Field, carrier, f.PropName)
 		b.WriteString("\t\t}\n")
-		fmt.Fprintf(b, "\t\tout.%s = &s\n", f.Field)
+		if carrier != f.GoType {
+			fmt.Fprintf(b, "\t\tnarrowed := %s(s)\n", f.GoType)
+			fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
+		} else {
+			fmt.Fprintf(b, "\t\tout.%s = &s\n", f.Field)
+		}
 		b.WriteString("\t}\n")
 		return
 	}
-	// Non-nullable — use narrow driver carrier + Go conversion (same
-	// narrowing discipline as C1's per-column decode; see §5.1 of C1
-	// spec).
-	carrier := driverCarrier(f.GoType)
 	local := lowerFirstRune(f.Field)
 	fmt.Fprintf(b, "\t%s, err := neo4j.GetProperty[%s](%s, %q)\n", local, carrier, arg, f.PropName)
 	b.WriteString("\tif err != nil {\n")
@@ -958,32 +1125,95 @@ func groupBySource(prepared []preparedQuery) []sourceGroup {
 	return groups
 }
 
-// groupHasEntityColumn reports whether any query in the group projects
-// a node-entity or edge-entity column. Gates the dbtype import in
-// <name>.cypher.go (§5.5).
-func groupHasEntityColumn(queries []preparedQuery) bool {
+// groupImports computes the C3 per-file import gates for one
+// <name>.cypher.go source group. dbtype fires when any column in the
+// group decodes through a dbtype.<Kind> carrier (entity, DATE property,
+// six temporal-column kinds except TemporalDateTime, or a list column
+// whose leaf uses dbtype.<Kind>). time fires when any column decodes
+// as time.Time (TIMESTAMP property, TemporalDateTime column, or a list
+// column whose leaf is either).
+func groupImports(queries []preparedQuery) (needDbtype, needTime bool) {
 	for _, p := range queries {
 		for _, f := range p.RowFields {
-			if f.Kind == columnNode || f.Kind == columnEdge {
-				return true
+			nd, nt := columnNeedsImports(f)
+			if nd {
+				needDbtype = true
+			}
+			if nt {
+				needTime = true
 			}
 		}
 	}
-	return false
+	return needDbtype, needTime
+}
+
+// columnNeedsImports reports whether one prepared row needs dbtype /
+// time in the enclosing file's import block. The list arm walks the
+// row's carried element type recursively; every other arm delegates to
+// a per-kind test on the row's emitted Go type.
+func columnNeedsImports(f preparedRow) (needDbtype, needTime bool) {
+	switch f.Kind {
+	case columnNode, columnEdge:
+		return true, false
+	case columnTemporal, columnProperty:
+		return goTypeNeedsImports(f.GoType)
+	case columnScalar, columnAny:
+		return false, false
+	case columnList:
+		// Walk the element chain for any nested carrier requirement.
+		var walk func(resolver.ResolvedType) (bool, bool)
+		walk = func(t resolver.ResolvedType) (bool, bool) {
+			switch tt := t.(type) {
+			case resolver.ResolvedProperty:
+				ty, ok := goType(tt.Type)
+				if !ok {
+					return false, false
+				}
+				return goTypeNeedsImports(ty)
+			case resolver.ResolvedNode, resolver.ResolvedEdge:
+				return true, false
+			case resolver.ResolvedTemporal:
+				return goTypeNeedsImports(temporalGoType(tt.Kind))
+			case resolver.ResolvedList:
+				return walk(tt.Element)
+			}
+			return false, false
+		}
+		return walk(f.ListElem)
+	}
+	return false, false
+}
+
+// goTypeNeedsImports reports whether a Go type text names dbtype or
+// time. Both are single-string prefix checks; the emitted type text
+// never nests dbtype/time except through the list arm (which walks
+// element-wise above).
+func goTypeNeedsImports(ty string) (bool, bool) {
+	needDbtype := strings.HasPrefix(ty, "dbtype.")
+	needTime := ty == "time.Time"
+	return needDbtype, needTime
 }
 
 // renderCypherFile emits one <name>.cypher.go file (spec §5.5). Per
 // query in order: query-text const, Params struct (if any), Row struct
 // (if any), method. The withDbtype flag toggles the dbtype import; the
-// row-assembly template inlines the entity-column arm when a column's
-// kind is columnNode / columnEdge.
-func renderCypherFile(pkg string, queries []preparedQuery, withDbtype bool) []byte {
+// withTime flag toggles the time-stdlib import (C3, for TIMESTAMP /
+// TemporalDateTime carriers). The row-assembly template inlines the
+// per-kind decode arm.
+func renderCypherFile(pkg string, queries []preparedQuery, withDbtype, withTime bool) []byte {
 	var b strings.Builder
 	b.WriteString(header())
 	b.WriteString("package ")
 	b.WriteString(pkg)
 	b.WriteString("\n\n")
-	b.WriteString("import (\n\t\"context\"\n\t\"fmt\"\n\n\t\"github.com/neo4j/neo4j-go-driver/v5/neo4j\"\n")
+	// Import order per goimports: stdlib first (context, fmt, time),
+	// then third-party (neo4j, dbtype). A single grouped import ()
+	// block keeps gofmt output stable.
+	b.WriteString("import (\n\t\"context\"\n\t\"fmt\"\n")
+	if withTime {
+		b.WriteString("\t\"time\"\n")
+	}
+	b.WriteString("\n\t\"github.com/neo4j/neo4j-go-driver/v5/neo4j\"\n")
 	if withDbtype {
 		b.WriteString("\t\"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype\"\n")
 	}
@@ -1075,23 +1305,41 @@ func returnTypeText(p preparedQuery) string {
 // :many always returns a slice, whose zero value is nil. :one returns
 // T (single column) or MethodRow (multi-column) — the T's zero value
 // (or nil for a nullable pointer T; entity struct's zero-composite for
-// a bare-value entity column).
+// a bare-value entity column). C3 extends the switch to temporals
+// (dbtype.Kind{} / time.Time{}), lists (nil), scalars (bool/int64/
+// float64/string), map (nil), and any (nil).
 func zeroValueText(p preparedQuery) string {
 	if p.Cardinality == CardinalityMany {
 		return "nil"
 	}
 	if len(p.RowFields) == 1 {
-		if p.RowFields[0].Nullable {
+		f := p.RowFields[0]
+		if f.Nullable {
 			return "nil"
 		}
-		if p.RowFields[0].Kind == columnNode || p.RowFields[0].Kind == columnEdge {
-			return p.RowFields[0].GoType + "{}"
+		switch f.Kind {
+		case columnNode, columnEdge:
+			return f.GoType + "{}"
+		case columnTemporal:
+			return f.GoType + "{}"
+		case columnList:
+			return "nil"
+		case columnAny:
+			return "nil"
+		case columnProperty, columnScalar:
+			// Fall through to the per-Go-type dispatch below.
 		}
-		switch p.RowFields[0].GoType {
+		switch f.GoType {
 		case "string":
 			return `""`
 		case "bool":
 			return "false"
+		case "float32", "float64":
+			return "0"
+		case "map[string]any":
+			return "nil"
+		case "any":
+			return "nil"
 		default:
 			return "0"
 		}
@@ -1141,7 +1389,13 @@ func writeRunCall(b *strings.Builder, p preparedQuery) {
 	fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %s, err\n\t}\n", zeroValueText(p))
 }
 
-// paramsMapText composes the driver-binding map literal.
+// paramsMapText composes the driver-binding map literal. C3 extends
+// the per-field expression with the FLOAT32 encode-widen contract:
+// map[string]any{"x": float64(x)} for a float32 parameter, symmetric
+// with the decode-narrow site (§5.5). Narrow-integer parameters keep
+// the widen pattern (int64(v)) — the driver accepts the wider carrier.
+// Nullable parameters go through binParamExpr, which handles the
+// nil-pointer case by binding a bare nil literal.
 func paramsMapText(p preparedQuery) string {
 	if len(p.ParamFields) == 0 {
 		return "nil"
@@ -1152,14 +1406,35 @@ func paramsMapText(p preparedQuery) string {
 		if i > 0 {
 			b.WriteString(", ")
 		}
+		var access string
 		if len(p.ParamFields) == 1 {
-			fmt.Fprintf(&b, "%q: %s", f.RawName, lowerFirstRune(f.Field))
+			access = lowerFirstRune(f.Field)
 		} else {
-			fmt.Fprintf(&b, "%q: arg.%s", f.RawName, f.Field)
+			access = "arg." + f.Field
 		}
+		fmt.Fprintf(&b, "%q: %s", f.RawName, paramBindExpr(f, access))
 	}
 	b.WriteString("}")
 	return b.String()
+}
+
+// paramBindExpr renders the driver-binding expression for one prepared
+// parameter, given its access expression (a bare local for the single-
+// param method form, or arg.Field for the multi-param form). Nullable
+// parameters pass through unchanged (the driver accepts a nil pointer
+// as SQL null). Non-nullable narrow-integer / float32 widen to their
+// driver carrier via a Go conversion. Every other type binds bare.
+func paramBindExpr(f preparedParam, access string) string {
+	if f.Nullable {
+		// Uniform: pass the pointer through as-is. A nil pointer binds
+		// Cypher null via the driver's parameter marshalling.
+		return access
+	}
+	carrier := driverCarrier(f.GoType)
+	if carrier != f.GoType {
+		return fmt.Sprintf("%s(%s)", carrier, access)
+	}
+	return access
 }
 
 // writeOneBody emits the :one arity-check + per-column decode + return.
@@ -1240,10 +1515,23 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p preparedQuery, f prepar
 			}
 		}
 	}
-	if f.Kind == columnNode || f.Kind == columnEdge {
+	switch f.Kind {
+	case columnNode, columnEdge:
 		writeEntityColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
 		return
+	case columnAny:
+		writeAnyColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
+		return
+	case columnList:
+		writeListColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
+		return
+	case columnProperty, columnTemporal, columnScalar:
+		// Fall through to the GetRecordValue + narrow-convert path below.
 	}
+	// columnProperty / columnTemporal / columnScalar all use GetRecordValue
+	// with the driver-carrier + narrow-convert pattern. Temporals /
+	// scalars have carrier == GoType; property FLOAT32 narrows float64 →
+	// float32; property narrow-int narrows int64 → intN.
 	carrier := driverCarrier(f.GoType)
 	fmt.Fprintf(b, "%s%s, isNil, err := neo4j.GetRecordValue[%s](%s, %q)\n", indent, varName, carrier, recordExpr, f.ColumnName)
 	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
@@ -1271,6 +1559,162 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p preparedQuery, f prepar
 	b.WriteString(assignPrefix[len(indent):])
 	b.WriteString(valueExpr)
 	b.WriteString(assignSuffix)
+}
+
+// writeAnyColumnDecodeIndent emits the record.Get lane for a column
+// whose emitted Go type is `any` — ResolvedUnknown or ResolvedScalar
+// {Null} (spec §5.5). The driver's Get returns (any, bool) where bool
+// is "found" (not "null"). The "not-found" branch is a decode error
+// (the resolver committed the column, so the driver must produce it);
+// the "found" branch assigns the value verbatim (a nil value satisfies
+// the `any` field's zero — no pointer wrap per §5.1's table).
+func writeAnyColumnDecodeIndent(b *strings.Builder, p preparedQuery, f preparedRow, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
+	fmt.Fprintf(b, "%s%s, ok := %s.Get(%q)\n", indent, varName, recordExpr, f.ColumnName)
+	fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: key not found\", %q)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	b.WriteString(indent)
+	b.WriteString(assignPrefix[len(indent):])
+	b.WriteString(varName)
+	b.WriteString(assignSuffix)
+}
+
+// writeListColumnDecodeIndent emits the list-column arm (spec §5.5):
+// neo4j.GetRecordValue[[]any] followed by a per-element loop that
+// dispatches on the element type. The loop body is derived by
+// writeListElementDecode, which recurses for nested list elements.
+// Nullable list column produces *[]T via the standard pointer-wrap.
+func writeListColumnDecodeIndent(b *strings.Builder, p preparedQuery, f preparedRow, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
+	fmt.Fprintf(b, "%s%s, isNil, err := neo4j.GetRecordValue[[]any](%s, %q)\n", indent, varName, recordExpr, f.ColumnName)
+	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	// GoType is "[]<inner>"; strip the leading "[]" to get the slice
+	// element Go type.
+	elemGoType := strings.TrimPrefix(f.GoType, "[]")
+	if f.Nullable {
+		// Nullable list: build a *[]T. Nil pointer on null; otherwise
+		// address of the accumulated slice.
+		fmt.Fprintf(b, "%svar %sPtr *%s\n", indent, varName, f.GoType)
+		fmt.Fprintf(b, "%sif !isNil {\n", indent)
+		fmt.Fprintf(b, "%s\tacc := make(%s, 0, len(%s))\n", indent, f.GoType, varName)
+		writeListElementDecode(b, p, f, f.ListElem, elemGoType, "acc", varName, zero, indent+"\t")
+		fmt.Fprintf(b, "%s\t%sPtr = &acc\n", indent, varName)
+		fmt.Fprintf(b, "%s}\n", indent)
+		b.WriteString(indent)
+		b.WriteString(assignPrefix[len(indent):])
+		b.WriteString(varName)
+		b.WriteString("Ptr")
+		b.WriteString(assignSuffix)
+		return
+	}
+	// Non-nullable: error if isNil; else build acc slice + assign.
+	fmt.Fprintf(b, "%sif isNil {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	fmt.Fprintf(b, "%sacc := make(%s, 0, len(%s))\n", indent, f.GoType, varName)
+	writeListElementDecode(b, p, f, f.ListElem, elemGoType, "acc", varName, zero, indent)
+	b.WriteString(indent)
+	b.WriteString(assignPrefix[len(indent):])
+	b.WriteString("acc")
+	b.WriteString(assignSuffix)
+}
+
+// writeListElementDecode emits the per-element loop for a list column
+// (spec §5.5). The loop iterates the driver's []any slice one element
+// at a time; the body dispatches on the element's ResolvedType:
+//
+//   - ResolvedProperty leaf → type-assert the driver carrier + narrow
+//   - ResolvedTemporal leaf → type-assert dbtype.<Kind> / time.Time
+//   - ResolvedScalar leaf → type-assert the carrier (map is a legit assert)
+//   - ResolvedUnknown / ScalarNull leaf → append elem directly (any)
+//   - ResolvedNode / ResolvedEdge leaf → type-assert dbtype.Node /
+//     Relationship + decode<EntityName> helper call
+//   - Nested ResolvedList → recurse with a new inner loop
+//
+// The accumulator name (accVar) accumulates elements at this depth;
+// the source slice name (srcVar) is the raw driver []any at this depth.
+func writeListElementDecode(b *strings.Builder, p preparedQuery, f preparedRow, elem resolver.ResolvedType, elemGoType, accVar, srcVar, zero, indent string) {
+	iterVar := "elem"
+	if strings.Contains(indent, "\t\t\t\t") { // three levels deep — disambiguate
+		iterVar = "elem" + fmt.Sprint(strings.Count(indent, "\t"))
+	}
+	// The index variable is only used by the element-type-assertion fail
+	// message; a bare-append arm (ResolvedUnknown / ScalarNull) does not
+	// use i. Suppress the unused-var warning by ranging with `_` when the
+	// element decode is one of those two arms.
+	indexVar := "i"
+	if listElemUsesBareAppend(elem) {
+		indexVar = "_"
+	}
+	fmt.Fprintf(b, "%sfor %s, %s := range %s {\n", indent, indexVar, iterVar, srcVar)
+	inner := indent + "\t"
+	writeListElementBody(b, p, f, elem, elemGoType, accVar, iterVar, zero, inner)
+	fmt.Fprintf(b, "%s}\n", indent)
+}
+
+// listElemUsesBareAppend reports whether the list-element decode arm
+// for elem emits a bare `acc = append(acc, elem)` (no type assertion,
+// no error path). Applies to ResolvedUnknown and ResolvedScalar{Null} —
+// both surface `any` at the leaf.
+func listElemUsesBareAppend(elem resolver.ResolvedType) bool {
+	switch tt := elem.(type) {
+	case resolver.ResolvedUnknown:
+		return true
+	case resolver.ResolvedScalar:
+		return tt.Kind == resolver.ScalarNull
+	}
+	return false
+}
+
+// writeListElementBody emits the body of one list-element loop
+// iteration. Called by writeListElementDecode with the element's
+// resolved type, its emitted Go type, the accumulator name (into which
+// the decoded element is appended), the loop variable name (the raw
+// `elem` from the driver []any), the enclosing method's zero-return
+// expression, and the current indent (already deepened by one level
+// relative to the loop head).
+func writeListElementBody(b *strings.Builder, p preparedQuery, f preparedRow, elem resolver.ResolvedType, elemGoType, accVar, iterVar, zero, indent string) {
+	switch tt := elem.(type) {
+	case resolver.ResolvedProperty:
+		carrier := driverCarrier(elemGoType)
+		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, carrier)
+		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, carrier, f.ColumnName, iterVar, indent)
+		if carrier != elemGoType {
+			fmt.Fprintf(b, "%s%s = append(%s, %s(v))\n", indent, accVar, accVar, elemGoType)
+		} else {
+			fmt.Fprintf(b, "%s%s = append(%s, v)\n", indent, accVar, accVar)
+		}
+	case resolver.ResolvedTemporal:
+		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, elemGoType)
+		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, elemGoType, f.ColumnName, iterVar, indent)
+		fmt.Fprintf(b, "%s%s = append(%s, v)\n", indent, accVar, accVar)
+	case resolver.ResolvedScalar:
+		if tt.Kind == resolver.ScalarNull {
+			// Bare append — the element is `any`.
+			fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, iterVar)
+			return
+		}
+		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, elemGoType)
+		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, elemGoType, f.ColumnName, iterVar, indent)
+		fmt.Fprintf(b, "%s%s = append(%s, v)\n", indent, accVar, accVar)
+	case resolver.ResolvedUnknown:
+		fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, iterVar)
+	case resolver.ResolvedNode:
+		fmt.Fprintf(b, "%snode, ok := %s.(dbtype.Node)\n", indent, iterVar)
+		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected dbtype.Node, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, iterVar, indent)
+		fmt.Fprintf(b, "%sdecoded, err := decode%s(node)\n", indent, elemGoType)
+		fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+		fmt.Fprintf(b, "%s%s = append(%s, decoded)\n", indent, accVar, accVar)
+	case resolver.ResolvedEdge:
+		fmt.Fprintf(b, "%srel, ok := %s.(dbtype.Relationship)\n", indent, iterVar)
+		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected dbtype.Relationship, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, iterVar, indent)
+		fmt.Fprintf(b, "%sdecoded, err := decode%s(rel)\n", indent, elemGoType)
+		fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+		fmt.Fprintf(b, "%s%s = append(%s, decoded)\n", indent, accVar, accVar)
+	case resolver.ResolvedList:
+		// Nested list: type-assert to []any, then recurse.
+		innerGoType := strings.TrimPrefix(elemGoType, "[]")
+		fmt.Fprintf(b, "%sinner, ok := %s.([]any)\n", indent, iterVar)
+		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected []any, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, iterVar, indent)
+		fmt.Fprintf(b, "%sinnerAcc := make(%s, 0, len(inner))\n", indent, elemGoType)
+		writeListElementDecode(b, p, f, tt.Element, innerGoType, "innerAcc", "inner", zero, indent)
+		fmt.Fprintf(b, "%s%s = append(%s, innerAcc)\n", indent, accVar, accVar)
+	}
 }
 
 // writeEntityColumnDecodeIndent emits the entity-column arm of the row
@@ -1395,9 +1839,14 @@ func rowFieldName(colText string) (string, bool) {
 }
 
 // goType maps a resolved property type to its native Go emission (spec
-// §5.1). Returns (typeText, ok): ok=false for the widths C3 owns —
-// caller routes to ErrOutOfC2Scope naming the width. Callers append a
-// leading '*' for nullable columns/parameters at emission time.
+// §5.1). Returns (typeText, ok): ok=false for the eight unrepresentable
+// widths (INT128 / INT256 / UINT128 / UINT256 / FLOAT16 / FLOAT128 /
+// FLOAT256 / DECIMAL) — caller routes to ErrUnrepresentableWidth naming
+// the width. Callers append a leading '*' for nullable columns and
+// parameters at emission time. DATE / TIMESTAMP are in-scope at C3 and
+// return "dbtype.Date" / "time.Time"; FLOAT32 returns "float32" (the
+// carrier-widens-on-encode / narrow-on-decode contract is enforced at
+// the emission sites, spec §5.5 / §5.7).
 func goType(pt graph.PropertyType) (string, bool) {
 	switch pt {
 	case graph.TypeString:
@@ -1428,15 +1877,107 @@ func goType(pt graph.PropertyType) (string, bool) {
 		return "float64", true
 	case graph.TypeFloat32:
 		return "float32", true
-	case graph.TypeDate, graph.TypeTimestamp,
-		graph.TypeInt128, graph.TypeInt256,
+	case graph.TypeDate:
+		return "dbtype.Date", true
+	case graph.TypeTimestamp:
+		return "time.Time", true
+	case graph.TypeInt128, graph.TypeInt256,
 		graph.TypeUint128, graph.TypeUint256,
 		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,
 		graph.TypeDecimal:
-		// C3 owns temporals and unrepresentable widths (spec §5.1).
+		// The eight unrepresentable widths — no faithful Go carrier on
+		// neo4j-go-driver/v5. Permanent, per §9 (spec).
 		return "", false
 	}
 	return "", false
+}
+
+// temporalGoType maps a resolver Temporal kind to the Go type text C3
+// emits (spec §5.1 column-shape table). Every result is a
+// dbtype.<Kind> or time.Time — one dispatch on the closed enum.
+func temporalGoType(k resolver.Temporal) string {
+	switch k {
+	case resolver.TemporalDate:
+		return "dbtype.Date"
+	case resolver.TemporalTime:
+		return "dbtype.Time"
+	case resolver.TemporalLocalTime:
+		return "dbtype.LocalTime"
+	case resolver.TemporalDateTime:
+		return "time.Time"
+	case resolver.TemporalLocalDateTime:
+		return "dbtype.LocalDateTime"
+	case resolver.TemporalDuration:
+		return "dbtype.Duration"
+	}
+	// Unreachable: Temporal is a closed enum.
+	return "any"
+}
+
+// scalarGoType maps a resolver Scalar kind to the Go type text C3
+// emits (spec §5.1 column-shape table). Bool / Int / Float / String
+// bridge to the driver's native carriers; Null → any (the openCypher
+// null literal is legal-but-pointless projection); Map → map[string]any.
+func scalarGoType(k resolver.Scalar) string {
+	switch k {
+	case resolver.ScalarBool:
+		return "bool"
+	case resolver.ScalarInt:
+		return "int64"
+	case resolver.ScalarFloat:
+		return "float64"
+	case resolver.ScalarString:
+		return "string"
+	case resolver.ScalarNull:
+		return "any"
+	case resolver.ScalarMap:
+		return "map[string]any"
+	}
+	return "any"
+}
+
+// resolvedListGoType derives the Go type text for a ResolvedType leaf
+// or nested ResolvedList (spec §2.2, §4.7). Returns (text, err):
+// err wraps ErrUnrepresentableWidth for a leaf property width that is
+// unrepresentable; err wraps ErrOutOfC3Scope for a ResolvedEdgeUnion
+// leaf (C5 owns). A ResolvedList element recurses; every other leaf is
+// one dispatch on the ResolvedType sum.
+func resolvedListGoType(t resolver.ResolvedType, entities []preparedEntity, entityIndex map[entityLookupKey]int) (string, error) {
+	switch tt := t.(type) {
+	case resolver.ResolvedProperty:
+		ty, ok := goType(tt.Type)
+		if !ok {
+			return "", fmt.Errorf("%w: list element has unrepresentable property width %s", ErrUnrepresentableWidth, tt.Type)
+		}
+		return ty, nil
+	case resolver.ResolvedNode:
+		idx, ok := entityIndex[entityLookupKey{Kind: entityNode, Labels: tt.Labels}]
+		if !ok {
+			return "", fmt.Errorf("%w: list element references unknown node type %q", ErrOutOfC3Scope, string(tt.Labels))
+		}
+		return entities[idx].Name, nil
+	case resolver.ResolvedEdge:
+		idx, ok := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: tt.EdgeKey}]
+		if !ok {
+			return "", fmt.Errorf("%w: list element references unknown edge type %s -[:%s]-> %s", ErrOutOfC3Scope, string(tt.EdgeKey.Source), string(tt.EdgeKey.Label), string(tt.EdgeKey.Target))
+		}
+		return entities[idx].Name, nil
+	case resolver.ResolvedEdgeUnion:
+		return "", fmt.Errorf("%w: list element resolved as edgeUnion (C5 owns)", ErrOutOfC3Scope)
+	case resolver.ResolvedTemporal:
+		return temporalGoType(tt.Kind), nil
+	case resolver.ResolvedScalar:
+		return scalarGoType(tt.Kind), nil
+	case resolver.ResolvedUnknown:
+		return "any", nil
+	case resolver.ResolvedList:
+		inner, err := resolvedListGoType(tt.Element, entities, entityIndex)
+		if err != nil {
+			return "", err
+		}
+		return "[]" + inner, nil
+	}
+	return "", fmt.Errorf("%w: list element has unknown resolved type %s", ErrOutOfC3Scope, t.String())
 }
 
 // lowerFirstRune lowercases the first rune of s. Used for the

@@ -1,0 +1,4 @@
+{
+  "package": "manycolumnsmixedtemporallist",
+  "queryFiles": ["queries.cypher"]
+}

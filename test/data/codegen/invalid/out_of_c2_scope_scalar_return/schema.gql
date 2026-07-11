@@ -1,3 +1,0 @@
-CREATE PROPERTY GRAPH TYPE OutOfC2ScopeScalarReturn AS {
-    (:Person { id :: INT64 NOT NULL })
-}

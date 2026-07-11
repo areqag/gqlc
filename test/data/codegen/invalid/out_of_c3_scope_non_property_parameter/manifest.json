@@ -1,0 +1,5 @@
+{
+  "package": "outofc3scopenonpropertyparameter",
+  "queryFiles": ["queries.cypher"],
+  "expectedError": "codegen.ErrOutOfC3Scope"
+}

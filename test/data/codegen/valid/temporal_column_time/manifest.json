@@ -1,0 +1,4 @@
+{
+  "package": "temporalcolumntime",
+  "queryFiles": ["queries.cypher"]
+}
