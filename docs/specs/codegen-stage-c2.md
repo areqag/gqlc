@@ -610,47 +610,98 @@ func decodeActedIn(edge dbtype.Relationship) (ActedIn, error) {
   lex order (again, `MarshalJSON`'s convention). Property fields
   inside a struct walk the `Properties` map's keys in ascending
   lexical order.
-- **Nullable property emission.** A property with `Nullable == true`
-  emits `*T`; the decode-helper body handles the nil case:
+- **Non-nullable property decode uses `neo4j.GetProperty[T]`.** The
+  driver's `GetProperty[T PropertyValue](entity Entity, key string)
+  (T, error)` returns a plain error when the key is missing or the
+  value type does not satisfy the constraint; a missing key IS a
+  decode error for a non-nullable property, and we wrap it with
+  column context. Verified: `neo4j.GetProperty[T]` exists in
+  neo4j-go-driver v5.28.4 (pkg.go.dev/github.com/neo4j/neo4j-go-
+  driver/v5@v5.28.4/neo4j). Sample non-nullable body:
 
   ```go
-  namePtr, err := neo4j.GetProperty[string](node, "name")  // note: nullable case
-  if err != nil && !errors.Is(err, neo4j.ErrNilProperty) {
-      return Person{}, fmt.Errorf("decode Person.Name: %w", err)
+  id, err := neo4j.GetProperty[int64](node, "id")
+  if err != nil {
+      return Person{}, fmt.Errorf("decode Person.Id: %w", err)
   }
-  if err == nil {
-      v := namePtr
-      out.Name = &v
-  }
+  out.Id = id
   ```
+- **Nullable property decode uses direct `Props` map lookup + type
+  assertion.** `dbtype.Node.Props` and `dbtype.Relationship.Props`
+  are `map[string]any` (verified: `dbtype.Node.Props` is
+  `map[string]any` per neo4j-go-driver v5.28.4 `dbtype` package,
+  pkg.go.dev/github.com/neo4j/neo4j-go-driver/v5@v5.28.4/neo4j/dbtype).
+  The nullable case cannot use `GetProperty[T]` because
+  neo4j-go-driver v5.28.4 does not export a documented sentinel
+  distinguishing "key missing" from "type mismatch" — both fold
+  into a plain wrapped error. Direct `Props` lookup lets nullable-
+  property emission distinguish the three legitimate outcomes:
+  key absent → pointer stays nil (legal for nullable); key present
+  and type matches → address-of local into the pointer field; key
+  present but type mismatch → decode error naming the property and
+  the observed Go type. Sample nullable body:
 
-  where `neo4j.ErrNilProperty` is the driver's documented sentinel
-  for a missing property key (verified against
-  `pkg.go.dev/github.com/neo4j/neo4j-go-driver/v5/neo4j`,
-  2026-07-11 — a `GetProperty` for a missing key returns a
-  zero-value + wrapped `ErrNilProperty`). If the driver's
-  sentinel-shape at v5.28.4 turns out to differ from this
-  reading, the code cycle records the driver's actual missing-key
-  posture (returned error type or a `bool` companion) and revises
-  this template accordingly; the C2 goldens bake the truth once
-  the code compiles. **Non-nullable property arriving nil / missing
-  → decode error naming the property**, uniform with C1's non-
-  nullable column posture at the row-assembly surface.
-- **Imports.** `fmt` is unconditionally imported (every decode
-  helper emits at least one `fmt.Errorf`); `neo4j` is
-  unconditionally imported (`neo4j.GetProperty` lives on the
-  driver-root package); `dbtype` is unconditionally imported (every
-  decode helper's argument type is `dbtype.Node` or
-  `dbtype.Relationship`). A schema with zero node/edge types emits
-  no structs and no imports — `models.go` stays byte-empty at
+  ```go
+  if v, ok := node.Props["middleName"]; ok {
+      if s, ok := v.(string); ok {
+          out.MiddleName = &s
+      } else {
+          return Person{}, fmt.Errorf("decode Person.MiddleName: property %q: expected string, got %T", "middleName", v)
+      }
+  }
+  // absent key leaves out.MiddleName nil — legal for nullable
+  ```
+- **Non-nullable property arriving nil / missing → decode error**
+  via `GetProperty[T]`'s returned wrapped error; the emission
+  attaches `fmt.Errorf("decode <StructName>.<Field>: %w", err)`
+  around it so the fail-message names the property. Uniform with
+  C1's non-nullable column posture at the row-assembly surface.
+- **Rejected alternative — `Props` lookup for both nullable and
+  non-nullable.** Considered for symmetry. Rejected: the
+  non-nullable path already gets a well-shaped error out of
+  `GetProperty[T]` (type-mismatch and missing-key both wrap into
+  one), and `GetProperty[T]`'s generic constraint gives compile-
+  time property-type discipline the `Props` lookup does not.
+  Splitting the two arms keeps the compile-time-safe path for the
+  common case (schema declared non-nullable, driver validated on
+  write) and the runtime-check path only where nullability makes
+  it necessary.
+- **Imports — template invariant.** When at least one entity struct
+  emits, `models.go`'s import block is exactly `fmt` + `neo4j` +
+  `dbtype`, unconditionally. `fmt` is a template invariant — every
+  decode helper emits at least one `fmt.Errorf` (a helper body
+  with zero properties still emits `var out <Name>` / `return out,
+  nil` with no `fmt` use; that case is covered by the zero-
+  property carve-out below). `neo4j` is a template invariant — the
+  non-nullable arm calls `neo4j.GetProperty[T]`, and even an
+  all-nullable schema keeps `neo4j` in the block because at least
+  one struct's non-nullable case is exercised on the common path;
+  the emission pins `neo4j` for shape stability rather than
+  conditioning on the property mix. `dbtype` is a template
+  invariant — every decode helper's argument type is `dbtype.Node`
+  or `dbtype.Relationship`. **Zero-non-nullable-properties carve-
+  out:** a schema in which every property on every entity is
+  nullable would leave `neo4j` unused (the nullable arm uses
+  `Props` lookup only). In that case the emission drops `neo4j`
+  from the block — the linter's unused-import gate would fire
+  otherwise. A schema with zero node/edge types emits no structs
+  and no imports; `models.go` stays byte-empty at
   `package <derived>` (matches C1). The zero-entity case is
-  legitimate for a query-only sub-schema (extreme, but the shape
-  supports it).
-- **`errors` import.** The nullable-property arm above wraps
-  `errors.Is`; the emission includes `errors` in the import block
-  only when the schema contains at least one nullable property.
-  Otherwise `errors` stays absent — the linter's unused-import gate
-  catches drift.
+  legitimate for a query-only sub-schema. A schema with entities
+  but zero properties (only `Marker` node types) also emits no
+  imports because the decode helper body has no `fmt.Errorf` and
+  no property access — `dbtype` is still imported for the argument
+  type. The tightest invariant is therefore: `dbtype` iff any
+  entity struct emits; `fmt` iff any property is decoded; `neo4j`
+  iff any non-nullable property is decoded.
+- **No `errors` import.** The nullable-property arm reads
+  `Props` directly and produces its own wrapped `fmt.Errorf` on
+  type-mismatch; the non-nullable arm wraps `GetProperty[T]`'s
+  returned error. No `errors.Is` branching lives in the decode
+  helpers — the driver does not export a documented missing-key
+  sentinel to branch on. Consequence: `models.go`'s import block
+  is deterministic on schema shape alone (`fmt` + `neo4j` +
+  `dbtype`), independent of the nullable-property mix.
 - **Doc comment on the struct.** Node: `// <Name> corresponds to the
   <labels> node type.` (the `<labels>` verbatim from
   `LabelSetKey.Split()` joined with `&`). Edge: `// <Name>
@@ -933,12 +984,11 @@ Added under `test/data/codegen/invalid/`:
 |---|---|---|
 | `invalid_entity_name_node`         | `ErrInvalidEntityName`     | Schema node type with `Name = "1st"` — starts with a digit, not a valid exported Go identifier. |
 | `invalid_entity_name_edge`         | `ErrInvalidEntityName`     | Schema edge type with `Name = "with-hyphen"` — contains a hyphen. |
-| `unnamed_multi_label_node`         | `ErrUnnamedMultiLabelType` | Schema node type with `Labels = {Person, Employee}` and empty `Name` — Rule 4 fires eagerly, no query needed. |
-| `unnamed_ambiguous_edge_label`     | `ErrUnnamedMultiLabelType` | Schema with two edge types both labelled `KNOWS`, empty `Name` on either — ambiguous label axis fires eagerly. |
+| `unnamed_multi_label_type`         | `ErrUnnamedMultiLabelType` | Schema node type with `Labels = {Person, Employee}` and empty `Name` — Rule 4 fires eagerly, no query needed. (One fixture per sentinel is the reachability requirement; the ambiguous-edge-label axis is tested by code-cycle unit tests, not by fixture.) |
 | `property_field_collision`         | `ErrPropertyFieldCollision`| Schema node type with two properties `min_age` and `minAge` both mangling to `MinAge`. |
 | `out_of_c2_scope_edge_union`       | `ErrOutOfC2Scope`          | A query projecting a multi-candidate edge column (`ResolvedEdgeUnion`) — deferred to C5. |
 | `out_of_c2_scope_scalar_return`    | `ErrOutOfC2Scope`          | A query projecting a `ResolvedScalar` column (e.g., `RETURN 1 AS n :one`) — deferred to C3. |
-| `identifier_collision_entity_row`  | `ErrIdentifierCollision`   | A schema with a `Person` node type and a query with `// name: Person :one MATCH (p:Person) RETURN p.name AS field1, p.age AS field2` — the query's `PersonRow` collides with the entity struct `Person` only when the method name matches — so the fixture uses `RETURN p.name AS name, p.age AS age` in a query `// name: X :one` whose annotated name collides. Specifically: query name `Person` with two-plus columns produces `PersonRow` (no direct collision), but query name `Person` alone collides — the fixture pins the method-vs-entity collision axis: a query named `Person` on a schema with a `Person` node type. |
+| `identifier_collision_entity_row`  | `ErrIdentifierCollision`   | Query `// name: Person :one MATCH (p:Person) RETURN p` against a schema declaring a `Person` node type. The generated method name `Person` collides with the entity struct name `Person` at the package level. |
 
 Seven invalid fixtures — four for the three new C2 sentinels plus
 two for the renamed `ErrOutOfC2Scope` (edge union, scalar) plus one
@@ -1117,16 +1167,19 @@ automatically.
 C0's four sentinels + C1's five sentinels stand at C2 with one
 rename. C2 adds three new sentinels and renames one to reflect the
 retirement of a C1-owned sub-case (the entity-column axis, now
-handled). The rename is deliberate and follows the resolver's
-`ErrOutOfR0Scope` precedent: each stage's out-of-scope sentinel is
-named for the stage that most tightly claims it; when a later
-stage retires sub-cases, the sentinel renames rather than staying
-frozen with an outdated stage marker. The failing surface (the
-sentinel value) is textually different, so `errors.Is` consumers
-against the C1 constant break — this is desirable: a consumer who
-was branching on `ErrOutOfC1Scope` is claiming knowledge of C1's
-scope, and C2 has revised what "out of scope" means for that error
-site.
+handled). The rename is deliberate: each stage's out-of-scope
+sentinel is named for the stage that most tightly claims it; when
+a later stage retires sub-cases, the sentinel renames rather than
+staying frozen with an outdated stage marker. Codegen chooses this
+discipline on its own terms — the resolver, by contrast, keeps a
+stable `ErrOutOfR0Scope` across R0–R7 and retires *fail-sites* per
+stage; codegen's staging axis is exposed at the sentinel identity,
+not at the fail-site set, and §9's defence below explains why. The
+failing surface (the sentinel value) is textually different, so
+`errors.Is` consumers against the C1 constant break — this is
+desirable: a consumer who was branching on `ErrOutOfC1Scope` is
+claiming knowledge of C1's scope, and C2 has revised what "out of
+scope" means for that error site.
 
 **New sentinels at C2:**
 
@@ -1172,20 +1225,40 @@ var ErrPropertyFieldCollision = errors.New("property field collision")
 from the package, the fixtures rename to `out_of_c2_scope_*`, and
 the `sentinelByName` map's entry renames. The retirement is a
 clean cut: no `//nolint:staticcheck` for a lingering alias, no
-deprecation window. The stage renaming precedent (the resolver's
-`ErrOutOfR0Scope` → `ErrOutOfR1Scope` per stage) sets the pattern.
+deprecation window.
 
-**Naming defence — `ErrOutOfC2Scope`, matching the resolver's
-per-stage rename precedent.** Grill option: keep the sentinel
-stable across stages as `ErrOutOfScope`. Rejected: `errors.Is`
-consumers of the codegen sentinel need to know *which* stage claims
-a rejection, because the "how to fix" surface varies by stage
-(entity column → C2 fixed; scalar column → wait for C3; edge union
-column → wait for C5). A per-stage sentinel is a machine-readable
-staging marker; a stable sentinel would push the stage encoding
-into the fail-message string, which `errors.Is` can't inspect. The
-resolver's precedent is exactly this: `ErrOutOfR0Scope` retired for
-`ErrOutOfR1Scope` etc. Match, don't diverge.
+**Naming defence — `ErrOutOfC2Scope`, per-stage rename on its
+own merits.** Grill options: (a) keep the C1 name stable across
+stages (`ErrOutOfC1Scope` becomes a version-tag artifact rather
+than a stage marker); (b) rename to a stage-neutral name
+(`ErrOutOfScope`); (c) rename per stage (`ErrOutOfC1Scope` →
+`ErrOutOfC2Scope`). Picked (c) on its own terms — deliberately
+NOT on the strength of a resolver precedent. The resolver keeps
+one stable `ErrOutOfR0Scope` across R0–R7 and retires *fail-
+sites* per stage; codegen is choosing a different discipline
+here, and the choice needs to defend itself. The defence: an
+`errors.Is` consumer of the codegen sentinel needs to know
+*which* stage claims a rejection, because the "how to fix"
+surface varies by stage (entity column → C2 fixed; scalar column
+→ wait for C3; edge union column → wait for C5). A per-stage
+sentinel is a machine-readable staging marker consumers branch
+on; a stable sentinel pushes the stage encoding into the fail-
+message string, which `errors.Is` can't inspect and `errors.As`
+can't either without an intermediate wrapper type. The cost is
+the `errors.Is` break at every stage boundary — consumers who
+depended on the C1 name relearn the C2 name — which is precisely
+the signal that says "the scope contract has narrowed, revisit
+your caller". Codegen's rejection surface is the whole product's
+staging axis (ADR 0010 D7); a rename per stage makes staging
+observable at the error site. Rejected (a): freezing "C1" in the
+name across C2–C6 turns a stage marker into a misleading
+historical artifact — worse than either alternative. Rejected
+(b): a stage-neutral name still needs the discriminating message
+carrying the stage, so `errors.Is` consumers cannot distinguish
+"deferred to C3, wait" from "deferred to C5, wait" from "will
+never be handled". The per-stage rename buys machine-readable
+discrimination at the cost of stage-boundary source churn; the
+churn is exactly the signal.
 
 **Naming defence — `ErrInvalidEntityName` vs
 `ErrInvalidIdentifier`.** The failure is specifically on an entity
@@ -1358,15 +1431,17 @@ when the spec cycle merges.
   `alias_required_function_call`, `alias_required_expression`,
   `identifier_collision_reserved` stay unchanged.
 - **C2 invalid fixtures added (7):** `invalid_entity_name_node`,
-  `invalid_entity_name_edge`, `unnamed_multi_label_node`,
-  `unnamed_ambiguous_edge_label`, `property_field_collision`,
-  `out_of_c2_scope_edge_union`, `out_of_c2_scope_scalar_return`,
-  `identifier_collision_entity_row`.
+  `invalid_entity_name_edge`, `unnamed_multi_label_type`,
+  `property_field_collision`, `out_of_c2_scope_edge_union`,
+  `out_of_c2_scope_scalar_return`,
+  `identifier_collision_entity_row`. (The ambiguous-edge-label
+  axis of `ErrUnnamedMultiLabelType` is tested by code-cycle unit
+  tests, not by fixture.)
 
 **Totals at C2:**
 - Valid fixtures: 2 (C0) + 9 (C1) + 10 (C2) = 21.
 - Invalid fixtures: 4 (C0) + 7 (C1 kept + renamed; the
-  node-column fixture retires) + 8 (C2 new) = 19.
+  node-column fixture retires) + 7 (C2 new) = 18.
 - Sentinels in `allSentinels`: 12.
 - Every sentinel has ≥1 invalid fixture; the reachability sweep
   passes with the enlarged set.
