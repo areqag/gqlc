@@ -1,5 +1,5 @@
 {
-  "package": "outofc4scopeedgeunion",
+  "package": "outofc5scopenonpropertyparameter",
   "queryFiles": ["queries.cypher"],
   "expectedError": "codegen.ErrOutOfC5Scope"
 }
