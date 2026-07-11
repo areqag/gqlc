@@ -1,0 +1,4 @@
+{
+  "package": "temporalcolumnlocaldatetime",
+  "queryFiles": ["queries.cypher"]
+}

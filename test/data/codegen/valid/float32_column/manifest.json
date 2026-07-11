@@ -1,0 +1,4 @@
+{
+  "package": "float32column",
+  "queryFiles": ["queries.cypher"]
+}

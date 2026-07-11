@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE Float32Column AS {
+    (:Person {
+        id     :: INT64   NOT NULL,
+        height :: FLOAT32 NOT NULL
+    })
+}

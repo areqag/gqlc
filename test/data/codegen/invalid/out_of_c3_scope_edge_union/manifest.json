@@ -1,0 +1,5 @@
+{
+  "package": "outofc2scopeedgeunion",
+  "queryFiles": ["queries.cypher"],
+  "expectedError": "codegen.ErrOutOfC3Scope"
+}

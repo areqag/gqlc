@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE PropertyTimestamp AS {
+    (:Person {
+        id        :: INT64     NOT NULL,
+        updatedAt :: TIMESTAMP
+    })
+}

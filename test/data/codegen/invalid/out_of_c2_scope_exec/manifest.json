@@ -1,5 +1,0 @@
-{
-  "package": "execscope",
-  "queryFiles": ["queries.cypher"],
-  "expectedError": "codegen.ErrOutOfC2Scope"
-}

@@ -1,0 +1,4 @@
+{
+  "package": "temporalcolumnduration",
+  "queryFiles": ["queries.cypher"]
+}

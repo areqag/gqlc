@@ -1,0 +1,5 @@
+CREATE PROPERTY GRAPH TYPE UnrepresentableWidthUint256Schema AS {
+    (:Person { id :: INT64 NOT NULL }),
+    (:Post   { id :: INT64 NOT NULL }),
+    (:Person) -[:LIKES { weight :: UINT256 NOT NULL }]-> (:Post)
+}
