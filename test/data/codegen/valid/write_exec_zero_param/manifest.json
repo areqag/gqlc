@@ -1,0 +1,4 @@
+{
+  "package": "writeexeczeroparam",
+  "queryFiles": ["queries.cypher"]
+}

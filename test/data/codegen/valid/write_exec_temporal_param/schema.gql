@@ -1,0 +1,7 @@
+CREATE PROPERTY GRAPH TYPE WriteExecTemporalParam AS {
+    (:Person {
+        id        :: INT64 NOT NULL,
+        updatedAt :: TIMESTAMP NOT NULL,
+        stale     :: BOOL NOT NULL
+    })
+}

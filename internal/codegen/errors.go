@@ -42,24 +42,24 @@ var (
 	// user-facing failure mode; the reachability sweep skips it.
 	ErrFormatFailure = errors.New("format failure")
 
-	// ErrOutOfC3Scope is returned when a C3-admissible input carries a
-	// construct C3 does not project: a column whose resolved type is
-	// ResolvedEdgeUnion (C5), a non-property parameter (C3 stays property-
-	// widths-only, extended to temporal-property widths DATE / TIMESTAMP;
-	// a whole-node / whole-edge / scalar-literal / list / unknown / bare-
-	// temporal-expression parameter is still out of scope), a :exec
-	// cardinality (C4), or a query text carrying a raw-string-hostile
-	// backtick. Category-grained per C0's precedent; C4/C5 retire the sub-
-	// cases as they land. Renamed from ErrOutOfC2Scope at C3 —
-	// collections, temporals, unrepresentable-width sentinels, and the
-	// honest-`any` fallbacks all retire from the C2 catchment.
-	ErrOutOfC3Scope = errors.New("out of C3 scope")
+	// ErrOutOfC4Scope is returned when a C4-admissible input carries a
+	// construct C4 does not project: a column whose resolved type is
+	// ResolvedEdgeUnion (C5), a non-property parameter (post-v1; whole-
+	// node / whole-edge / scalar-literal / list / unknown / bare-
+	// temporal-expression parameter is still out of scope), or a query
+	// text carrying a raw-string-hostile backtick. Category-grained per
+	// C0's precedent; C5 retires the ResolvedEdgeUnion sub-case as it
+	// lands. Renamed from ErrOutOfC3Scope at C4 — :exec cardinality
+	// retires from the catchment (writes are now in-scope, with the
+	// cardinality × shape rejection axis carved out to the two new
+	// sentinels ErrExecOnProjection and ErrCardinalityShapeMismatch).
+	ErrOutOfC4Scope = errors.New("out of C4 scope")
 
 	// ErrUnrepresentableWidth is returned when a schema property, a query
 	// column, a query parameter, or a list element's leaf has a property
 	// width that has no faithful Go representation on the neo4j-go-driver
 	// v5 target: INT128, INT256, UINT128, UINT256, FLOAT16, FLOAT128,
-	// FLOAT256, DECIMAL. Distinct from ErrOutOfC3Scope: no future stage
+	// FLOAT256, DECIMAL. Distinct from ErrOutOfC4Scope: no future stage
 	// retires the eight widths — the underlying store (neo4j) stores
 	// integers as int64 and floats as float64; the sentinel is a permanent
 	// unrepresentability, not a deferred capability. The fail-message names
@@ -68,6 +68,27 @@ var (
 	// properties; lazily at Phase A for parameters and columns; lazily
 	// during list recursion for list leaves. Introduced at C3.
 	ErrUnrepresentableWidth = errors.New("unrepresentable property width")
+
+	// ErrExecOnProjection is returned when a query annotated :exec has at
+	// least one projected column (len(Validated.Columns) > 0). The caller
+	// either drops the :exec annotation (annotate :one or :many per the
+	// desired arity) or drops the RETURN clause (annotate :exec on the
+	// pure write). sqlc silently allows :exec on a SELECT, discarding
+	// rows; we refuse (ADR 0010 D1 Resolved: reject-don't-guess). The
+	// fail-message names the query, the cardinality (:exec), the projected
+	// column count, and the first column's name. Introduced at C4.
+	ErrExecOnProjection = errors.New("exec cardinality on projection query")
+
+	// ErrCardinalityShapeMismatch is returned when a query annotated :one
+	// or :many has zero projected columns (len(Validated.Columns) == 0).
+	// Zero-column reads and zero-column writes both flag: the caller
+	// either annotates :exec (if no rows are wanted) or adds a RETURN
+	// clause (if rows are wanted). The fail-message names the query, the
+	// cardinality (:one or :many), the statement kind (read or write),
+	// and the shape ("zero-column read" or "zero-column write"). Distinct
+	// from ErrExecOnProjection: the two sentinels address different query
+	// edits (annotation vs clause). Introduced at C4.
+	ErrCardinalityShapeMismatch = errors.New("cardinality-shape mismatch")
 
 	// ErrParamNameCollision is returned when two Parameters mangle to
 	// the same Params-struct field name (§4.2). The fail-message names
@@ -137,7 +158,7 @@ var allSentinels = []error{
 	ErrDuplicateSourceFile,
 	ErrDuplicateQueryName,
 	ErrInvalidCardinality,
-	ErrOutOfC3Scope,
+	ErrOutOfC4Scope,
 	ErrParamNameCollision,
 	ErrRowFieldCollision,
 	ErrAliasRequired,
@@ -146,4 +167,6 @@ var allSentinels = []error{
 	ErrUnnamedMultiLabelType,
 	ErrPropertyFieldCollision,
 	ErrUnrepresentableWidth,
+	ErrExecOnProjection,
+	ErrCardinalityShapeMismatch,
 }

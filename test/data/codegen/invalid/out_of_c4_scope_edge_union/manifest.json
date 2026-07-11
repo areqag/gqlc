@@ -1,0 +1,5 @@
+{
+  "package": "outofc4scopeedgeunion",
+  "queryFiles": ["queries.cypher"],
+  "expectedError": "codegen.ErrOutOfC4Scope"
+}

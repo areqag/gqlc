@@ -1,0 +1,4 @@
+{
+  "package": "writeexectwoparams",
+  "queryFiles": ["queries.cypher"]
+}
