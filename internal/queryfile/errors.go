@@ -60,3 +60,14 @@ var allSentinels = []error{
 	ErrTextBeforeAnnotation,
 	ErrNoQueries,
 }
+
+// AllSentinels returns a copy of the queryfile package's user-input-
+// reachable sentinels. Exported for cross-package harnesses (e.g.
+// codegen's fixture loader) that need to map fully-qualified sentinel
+// names back to values. Callers must not rely on ordering — the slice
+// is copy-returned so a mutation cannot leak into the canonical set.
+func AllSentinels() []error {
+	out := make([]error, len(allSentinels))
+	copy(out, allSentinels)
+	return out
+}

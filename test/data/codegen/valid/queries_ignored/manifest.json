@@ -1,0 +1,4 @@
+{
+  "package": "queriesignored",
+  "queryFiles": ["queries.cypher"]
+}

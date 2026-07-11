@@ -1,0 +1,6 @@
+{
+  "package": "invalidcard",
+  "queryFiles": [],
+  "expectedError": "codegen.ErrInvalidCardinality",
+  "syntheticZeroCardinality": true
+}
