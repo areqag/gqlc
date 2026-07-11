@@ -44,17 +44,30 @@ var (
 
 	// ErrOutOfC3Scope is returned when a C3-admissible input carries a
 	// construct C3 does not project: a column whose resolved type is
-	// ResolvedEdgeUnion (C5) or ResolvedScalar / ResolvedTemporal /
-	// ResolvedList / ResolvedUnknown (widened at C3 — still catchment for
-	// what the widening does not admit), a ResolvedProperty column or
-	// parameter with an unrepresentable width or a temporal property type
-	// (until C3 splits width sentinels out), a non-property parameter, a
-	// :exec cardinality (C4), or a query text carrying a raw-string-hostile
+	// ResolvedEdgeUnion (C5), a non-property parameter (C3 stays property-
+	// widths-only, extended to temporal-property widths DATE / TIMESTAMP;
+	// a whole-node / whole-edge / scalar-literal / list / unknown / bare-
+	// temporal-expression parameter is still out of scope), a :exec
+	// cardinality (C4), or a query text carrying a raw-string-hostile
 	// backtick. Category-grained per C0's precedent; C4/C5 retire the sub-
-	// cases as they land. Renamed from ErrOutOfC2Scope at C3 — the C2
-	// catchment retires; width splits into ErrUnrepresentableWidth in the
-	// following commit.
+	// cases as they land. Renamed from ErrOutOfC2Scope at C3 —
+	// collections, temporals, unrepresentable-width sentinels, and the
+	// honest-`any` fallbacks all retire from the C2 catchment.
 	ErrOutOfC3Scope = errors.New("out of C3 scope")
+
+	// ErrUnrepresentableWidth is returned when a schema property, a query
+	// column, a query parameter, or a list element's leaf has a property
+	// width that has no faithful Go representation on the neo4j-go-driver
+	// v5 target: INT128, INT256, UINT128, UINT256, FLOAT16, FLOAT128,
+	// FLOAT256, DECIMAL. Distinct from ErrOutOfC3Scope: no future stage
+	// retires the eight widths — the underlying store (neo4j) stores
+	// integers as int64 and floats as float64; the sentinel is a permanent
+	// unrepresentability, not a deferred capability. The fail-message names
+	// the fail-site (entity + property; query + column; query + parameter)
+	// and the offending width. Checked eagerly at Phase Z for schema
+	// properties; lazily at Phase A for parameters and columns; lazily
+	// during list recursion for list leaves. Introduced at C3.
+	ErrUnrepresentableWidth = errors.New("unrepresentable property width")
 
 	// ErrParamNameCollision is returned when two Parameters mangle to
 	// the same Params-struct field name (§4.2). The fail-message names
@@ -132,4 +145,5 @@ var allSentinels = []error{
 	ErrInvalidEntityName,
 	ErrUnnamedMultiLabelType,
 	ErrPropertyFieldCollision,
+	ErrUnrepresentableWidth,
 }

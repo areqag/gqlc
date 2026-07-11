@@ -21,11 +21,12 @@ type Person struct {
 func decodePerson(node dbtype.Node) (Person, error) {
 	var out Person
 	if v, ok := node.Props["age"]; ok {
-		s, ok := v.(int)
+		s, ok := v.(int64)
 		if !ok {
-			return Person{}, fmt.Errorf("decode Person.Age: property %q: expected int, got %T", "age", v)
+			return Person{}, fmt.Errorf("decode Person.Age: property %q: expected int64, got %T", "age", v)
 		}
-		out.Age = &s
+		narrowed := int(s)
+		out.Age = &narrowed
 	}
 	id, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
