@@ -1,0 +1,5 @@
+{
+  "package": "dupname",
+  "queryFiles": ["first.cypher", "second.cypher"],
+  "expectedError": "codegen.ErrDuplicateQueryName"
+}

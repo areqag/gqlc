@@ -72,6 +72,18 @@ test: check-hooks
 tidy-check:
     go mod tidy -diff
 
+# runs the codegen goldens' full quality fence inside the nested module:
+# compile (go build), vet, module tidiness (go mod tidy -diff), and
+# golangci-lint against the root config. Generated code must uphold the
+# same linting + formatting standards as gqlc's own CI (owner directive,
+# 2026-07-11); running golangci-lint from within the nested module
+# discovers ../../../.golangci.yml via upward walk, giving parity for
+# free. Used identically locally (post-generate) and in CI.
+test-codegen-fence: ensure-golangci
+    cd test/data/codegen && go build ./... && go vet ./...
+    cd test/data/codegen && go mod tidy -diff
+    cd test/data/codegen && {{golangci}} run
+
 # call-graph-aware vulnerability scan; run on dependency changes and on the
 # weekly CI schedule ("@latest" deliberate: the vuln DB matters more than
 # tool-version reproducibility)
