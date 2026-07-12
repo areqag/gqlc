@@ -103,9 +103,10 @@ func TestLoadCanonical(t *testing.T) {
 }
 
 // TestDecodeValid covers the accepting surface via the stream entry
-// point: with and without the optional procsig key, and an
-// exported-case package name (casing is not enforced — any valid Go
-// identifier is accepted).
+// point: with and without the optional procsig key, an exported-case
+// package name (casing is not enforced — any valid Go identifier is
+// accepted), and the uniform null rule (spec §6.2): a dangling
+// `procsig:` is YAML null, equivalent to omitting the key.
 func TestDecodeValid(t *testing.T) {
 	withoutProcsig := canonicalConfig
 	withoutProcsig.ProcsigPath = ""
@@ -119,6 +120,7 @@ func TestDecodeValid(t *testing.T) {
 	}{
 		{name: "with procsig", body: validDoc, want: canonicalConfig},
 		{name: "without procsig", body: dropKey("procsig"), want: withoutProcsig},
+		{name: "dangling procsig key is null, treated as omitted", body: setKey("procsig", ""), want: withoutProcsig},
 		{name: "exported-case package accepted", body: setKey("package", "Db"), want: exportedPackage},
 	}
 	for _, tc := range cases {
@@ -169,6 +171,36 @@ func TestDecodeRejects(t *testing.T) {
 			name:     "version 2",
 			body:     setKey("version", "2"),
 			wantSubs: []string{"declares version 2; only version 1 is supported"},
+		},
+		{
+			name:     "version quoted string is not coerced",
+			body:     setKey("version", `"1"`),
+			wantSubs: []string{`field "version" must be a YAML integer`, `!!str "1"`},
+		},
+		{
+			name:     "version float 1.0 is not coerced",
+			body:     setKey("version", "1.0"),
+			wantSubs: []string{`field "version" must be a YAML integer`, `!!float "1.0"`},
+		},
+		{
+			name:     "version float 1.5 is not truncated",
+			body:     setKey("version", "1.5"),
+			wantSubs: []string{`field "version" must be a YAML integer`, `!!float "1.5"`},
+		},
+		{
+			name:     "version scientific 1e0 is not coerced",
+			body:     setKey("version", "1e0"),
+			wantSubs: []string{`field "version" must be a YAML integer`, `!!float "1e0"`},
+		},
+		{
+			name:     "non-scalar version",
+			body:     setKey("version", "[1]"),
+			wantSubs: []string{`field "version" must be a YAML integer`, "got a YAML sequence"},
+		},
+		{
+			name:     "non-mapping document cites a readable probe type",
+			body:     "hello\n",
+			wantSubs: []string{"cannot unmarshal !!str `hello`", "config.versionProbe"},
 		},
 		{
 			name:     "unknown field (typo)",
@@ -224,6 +256,26 @@ func TestDecodeRejects(t *testing.T) {
 			name:     "invalid driver",
 			body:     setKey("driver", "neo4j-go-v4"),
 			wantSubs: []string{`line 8: invalid driver "neo4j-go-v4" (valid values: neo4j-go-v5)`},
+		},
+		{
+			name:     "sequence-valued driver named as such",
+			body:     setKey("driver", "[x]"),
+			wantSubs: []string{"line 8: invalid driver: expected a scalar value, got a YAML sequence"},
+		},
+		{
+			name:     "mapping-valued driver named as such",
+			body:     setKey("driver", "{a: b}"),
+			wantSubs: []string{"line 8: invalid driver: expected a scalar value, got a YAML mapping"},
+		},
+		{
+			name:     "sequence-valued path field carries yaml line info",
+			body:     setKey("schema", "[a]"),
+			wantSubs: []string{"line 2", "cannot unmarshal !!seq into string"},
+		},
+		{
+			name:     "duplicate key",
+			body:     validDoc + "driver: neo4j-go-v5\n",
+			wantSubs: []string{`mapping key "driver" already defined`},
 		},
 		{
 			name:     "empty schema",

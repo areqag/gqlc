@@ -47,7 +47,7 @@ canonical `Save` emission order (§7).
 
 | # | key               | type   | required | valid values             | semantics                                                          |
 |---|-------------------|--------|----------|--------------------------|--------------------------------------------------------------------|
-| 1 | `version`         | int    | yes      | `1`                      | on-disk format version; wire-only (§5), never part of `Config`     |
+| 1 | `version`         | int    | yes      | `1`                      | on-disk format version; wire-only (§5), never part of `Config`; must be a true YAML integer scalar (`!!int`) — floats (`1.0`, `1.5`, `1e0`), quoted strings (`"1"`), and non-scalars are rejected, never coerced (§6.2, §6.3) |
 | 2 | `schema`          | string | yes      | non-empty                | path to the schema file (`Config.SchemaPath`)                      |
 | 3 | `queries`         | string | yes      | non-empty                | directory holding query files (`Config.QueryDir`)                  |
 | 4 | `output`          | string | yes      | non-empty                | directory generated code is written to (`Config.OutputDir`)        |
@@ -55,7 +55,7 @@ canonical `Save` emission order (§7).
 | 6 | `schema_language` | enum   | yes      | `gqlc`                   | language the schema file is written in (`Config.SchemaLang`)       |
 | 7 | `query_language`  | enum   | yes      | `opencypher`             | language the query files are written in (`Config.QueryLang`)       |
 | 8 | `driver`          | enum   | yes      | `neo4j-go-v5`            | client library the generated code targets (`Config.Driver`)        |
-| 9 | `procsig`         | string | no       | non-empty when present   | path to a procedure-signature registry file (`Config.ProcsigPath`); omit the key when unused — an explicit `""` is rejected (§6.2) |
+| 9 | `procsig`         | string | no       | non-empty when present   | path to a procedure-signature registry file (`Config.ProcsigPath`); omit the key when unused — an explicit `""` is rejected, while a null value (a dangling `procsig:`) is equivalent to omission (§6.2) |
 
 Each enum axis is a closed vocabulary with an exported Go type
 (`SchemaLang`, `QueryLang`, `Driver`), one constant per member, and a
@@ -108,7 +108,11 @@ result.
 
 Version errors (§6.3) are raised at the probe, before any v1
 strictness applies, so a v2 file with v2-only keys reports "declares
-version 2" rather than a misleading unknown-field error.
+version 2" rather than a misleading unknown-field error. The probe is
+lenient about every other key but **tag-strict about `version`
+itself** (§6.2): only a `!!int` scalar counts, so the one field that
+guards format evolution can never be satisfied — or misreported — by
+yaml coercion.
 
 ## 6. Loader semantics
 
@@ -132,20 +136,35 @@ error above).
 - **Empty input** (zero bytes) is rejected with a dedicated message
   naming the source — a truncation or stub, never a valid config,
   because every field is required.
+- **The version probe is tag-strict.** yaml.v3 coerces numerics by
+  default (`1.5` decodes into an `int` field as 1, `0.9` as 0); the
+  probe's version field requires a `!!int` scalar, so `version: 1.5`,
+  `1.0`, `1e0`, and `"1"` are all rejected with a message naming the
+  actual tag and value — never loaded as a version the file did not
+  declare.
 - **Unknown keys reject.** The v1 decode runs `yaml.Decoder` with
   `KnownFields(true)`, so a typo (`packge:`) surfaces as an error with
   the offending key and line rather than silently dropping the value
-  and then reporting the real key missing.
+  and then reporting the real key missing. Duplicate keys are likewise
+  rejected (yaml.v3's own check).
 - **Omitted vs empty are distinguished.** The wire struct's fields are
   all pointers; an omitted key produces the missing-field error, an
   explicit empty string produces the must-not-be-empty error.
+- **Null equals omission, uniformly.** A key with a YAML null value —
+  a dangling `schema:`, an explicit `~` or `null` — is treated exactly
+  like an omitted key for **every** field: required fields report the
+  missing-field error, and a null `procsig` means no registry. An
+  empty string `""` is different: a present, empty value, rejected as
+  below.
 - **Explicit-empty `procsig` is rejected**, not treated as absent: an
   empty string is ambiguous (a placeholder? a deliberate "none"?), so
   the error tells the user to omit the key when unused.
   Reject-don't-guess.
 - **Enum membership is validated at decode time** by
   `UnmarshalYAML(*yaml.Node)` on the typed strings, so the error
-  carries the offending node's line number.
+  carries the offending node's line number. A non-scalar value (a
+  sequence, a mapping) is named as such — it is not misreported as the
+  empty string, which is what its `Node.Value` would read as.
 
 ### 6.3 Error catalogue
 
@@ -158,9 +177,14 @@ Every message the loader can produce, with `<src>` a file path or
 | stream read failure                      | `config: read <src>: <error>`                                                        |
 | zero-byte input                          | `config: <src> is empty (expected a gqlc config declaring version: 1)`               |
 | malformed YAML                           | `config: <src>: yaml: ...` (yaml.v3's message, which carries line info)              |
-| `version` omitted                        | `config: <src>: missing required field "version" (this gqlc supports version 1)`     |
+| document is not a mapping                | `config: <src>: yaml: unmarshal errors: line <L>: cannot unmarshal <tag> ... into config.versionProbe` |
+| `version` omitted (or null)              | `config: <src>: missing required field "version" (this gqlc supports version 1)`     |
+| `version` not a `!!int` scalar           | `config: <src>: field "version" must be a YAML integer (got !!float "1.5")`; non-scalars read `(got a YAML sequence)` |
 | `version` ≠ 1                            | `config: <src>: declares version <v>; only version 1 is supported`                   |
 | unknown key                              | `config: <src>: yaml: unmarshal errors: line <L>: field <key> not found in type ...` |
+| duplicate key                            | `config: <src>: yaml: unmarshal errors: line <L>: mapping key "<key>" already defined at line <M>` |
+| non-scalar path/package value            | `config: <src>: yaml: unmarshal errors: line <L>: cannot unmarshal <tag> into string` |
+| non-scalar enum value                    | `config: <src>: line <L>: invalid <key>: expected a scalar value, got a YAML <kind>` |
 | required key omitted                     | `config: <src>: missing required field "<key>"`                                      |
 | required enum key omitted                | `config: <src>: missing required field "<key>" (valid values: <list>)`               |
 | invalid enum value                       | `config: <src>: line <L>: invalid <key> "<val>" (valid values: <list>)`              |
@@ -168,9 +192,17 @@ Every message the loader can produce, with `<src>` a file path or
 | `procsig` present but empty              | `config: <src>: field "procsig" is empty; omit the key when no procsig file is used` |
 | `package` not a Go identifier            | `config: <src>: package "<val>" is not a valid Go identifier`                        |
 
-Checks run in the table's order (probe first, then strict decode, then
-required keys in wire order, then values); the loader reports the
-first failure.
+Checks run in **stages**, and the loader reports the first stage that
+fails: the version probe first (so a v2 file reports its version, not
+v1 strictness violations); then the strict v1 decode; then the
+post-decode checks in the field table's order (required keys in wire
+order, then value checks). Within the strict-decode stage, ordering is
+**not** document order: a custom-unmarshal failure (an invalid enum, a
+wrong-typed version) aborts the decode immediately, while unknown-key,
+duplicate-key, and wrong-type errors are accumulated by yaml.v3 and
+reported together only when the decode otherwise runs to completion —
+so a file with both a typo'd key and a bogus enum value reports the
+enum error alone, whichever comes first in the document.
 
 ## 7. Canonical Save form
 

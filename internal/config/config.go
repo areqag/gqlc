@@ -94,15 +94,37 @@ func (d *Driver) UnmarshalYAML(value *yaml.Node) error {
 }
 
 // enumFromNode resolves a YAML scalar into a member of valid, or
-// reports the line, the offending value, and the whole vocabulary.
+// reports the line, the offending value, and the whole vocabulary. A
+// non-scalar node is named as such — its Value is the empty string,
+// which would otherwise misreport a sequence as `invalid driver ""`.
 func enumFromNode[T ~string](value *yaml.Node, wireKey string, valid []T) (T, error) {
+	var zero T
+	if value.Kind != yaml.ScalarNode {
+		return zero, fmt.Errorf("line %d: invalid %s: expected a scalar value, got a YAML %s", value.Line, wireKey, kindName(value.Kind))
+	}
 	for _, v := range valid {
 		if value.Value == string(v) {
 			return v, nil
 		}
 	}
-	var zero T
 	return zero, fmt.Errorf("line %d: invalid %s %q (valid values: %s)", value.Line, wireKey, value.Value, joinValues(valid))
+}
+
+// kindName names a yaml.Node kind for error messages.
+func kindName(k yaml.Kind) string {
+	switch k {
+	case yaml.DocumentNode:
+		return "document"
+	case yaml.SequenceNode:
+		return "sequence"
+	case yaml.MappingNode:
+		return "mapping"
+	case yaml.ScalarNode:
+		return "scalar"
+	case yaml.AliasNode:
+		return "alias"
+	}
+	return fmt.Sprintf("node kind %d", k)
 }
 
 // joinValues renders an enum vocabulary for error messages.
@@ -163,6 +185,36 @@ type wireV1 struct {
 	ProcsigPath   *string     `yaml:"procsig,omitempty"`
 }
 
+// strictInt decodes only a true YAML integer scalar (tag !!int).
+// Without it the version probe would inherit yaml.v3's numeric
+// coercion — `version: 1.5` truncating to 1, `version: 0.9` to 0 — at
+// the one field that guards format evolution.
+type strictInt int
+
+// UnmarshalYAML enforces the !!int tag before decoding the value.
+func (i *strictInt) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind != yaml.ScalarNode {
+		return fmt.Errorf("field \"version\" must be a YAML integer (got a YAML %s)", kindName(value.Kind))
+	}
+	if value.Tag != "!!int" {
+		return fmt.Errorf("field \"version\" must be a YAML integer (got %s %q)", value.Tag, value.Value)
+	}
+	var n int
+	if err := value.Decode(&n); err != nil {
+		return fmt.Errorf("field \"version\": %w", err)
+	}
+	*i = strictInt(n)
+	return nil
+}
+
+// versionProbe is the lenient first-pass decode target (§5): only the
+// version key, read tag-strictly. A named type, so yaml's structural
+// errors on a non-mapping document cite something readable instead of
+// an anonymous struct literal.
+type versionProbe struct {
+	Version *strictInt `yaml:"version"`
+}
+
 // Load reads the config file at path and returns the canonical Config.
 // Open failures wrap the underlying error, so
 // errors.Is(err, fs.ErrNotExist) holds for a missing file — a future
@@ -197,12 +249,11 @@ func decode(r io.Reader, src string) (Config, error) {
 	body := buf.Bytes()
 
 	// Version probe, then dispatch — the versioning seam (§5). The
-	// probe reads only the version key leniently; each accepted version
+	// probe reads only the version key (other keys pass unexamined,
+	// but the version itself is tag-strict); each accepted version
 	// gets its own decoder that normalises into the one Config. There
 	// is deliberately no version interface: one file format, one seam.
-	var probe struct {
-		Version *int `yaml:"version"`
-	}
+	var probe versionProbe
 	if err := yaml.Unmarshal(body, &probe); err != nil {
 		return Config{}, fmt.Errorf("config: %s: %w", src, err)
 	}
