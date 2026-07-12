@@ -668,8 +668,10 @@ func (l *listener) requireAllParametersApproved(e antlr.Tree) {
 // approved. The single chokepoint for parameter dedup-by-Name across both
 // Use variants: every caller (a property predicate, an inline property map,
 // a SKIP/LIMIT clause slot) flows through here so the dedup-and-order
-// discipline lives in exactly one place. Stamps the branch-relative Part index
-// via attributePart at emission time (fvo per ADR 0008 amendment 2026-07-06).
+// discipline lives in exactly one place. Stamps the branch-relative Part
+// index (fvo per ADR 0008 amendment 2026-07-06) and the query-level branch
+// index (gqlc-qcc per ADR 0008 amendment 2026-07-12) via attributeUse at
+// emission time.
 func (l *listener) addParameterUse(name string, node antlr.Tree, use query.Use) {
 	idx, ok := l.byParam[name]
 	if !ok {
@@ -677,7 +679,7 @@ func (l *listener) addParameterUse(name string, node antlr.Tree, use query.Use) 
 		l.byParam[name] = idx
 		l.params = append(l.params, &query.Parameter{Name: name})
 	}
-	l.params[idx].Uses = append(l.params[idx].Uses, attributePart(use, l.currentPartIndex()))
+	l.params[idx].Uses = append(l.params[idx].Uses, attributeUse(use, l.currentPartIndex(), l.currentBranchIndex()))
 	l.approved[node] = true
 }
 
@@ -691,17 +693,26 @@ func (l *listener) currentPartIndex() int {
 	return len(l.curBranch.parts) - 1
 }
 
-// attributePart returns the Use with its part field populated. Sum-preserving:
-// the returned Use has the same variant as u. Used by addParameterUse to
-// stamp the branch-relative Part index onto every Use at emission time.
-func attributePart(u query.Use, part int) query.Use {
+// currentBranchIndex returns the query-level index of the branch collection
+// handlers currently write into — len(branches)-1, well-defined under the
+// same priming discipline as currentPartIndex: curBranch is always the last
+// element of l.branches (EnterOC_SingleQuery and EnterOC_StandaloneCall
+// append-then-point, and EXISTS suppression appends no phantom branch).
+func (l *listener) currentBranchIndex() int {
+	return len(l.branches) - 1
+}
+
+// attributeUse returns the Use with its (branch, part) attribution coordinate
+// populated. Sum-preserving: the returned Use has the same variant as u. Used
+// by addParameterUse to stamp both indices onto every Use at emission time.
+func attributeUse(u query.Use, part, branch int) query.Use {
 	switch uu := u.(type) {
 	case query.PropertyUse:
-		return query.NewPropertyUseAt(uu.Ref(), part)
+		return query.NewPropertyUseAt(uu.Ref(), part, branch)
 	case query.ExprUse:
-		return query.NewExprUseAt(uu.EnclosingType(), uu.Position(), part)
+		return query.NewExprUseAt(uu.EnclosingType(), uu.Position(), part, branch)
 	case query.ClauseSlotUse:
-		return query.NewClauseSlotUseAt(uu.Slot(), part)
+		return query.NewClauseSlotUseAt(uu.Slot(), part, branch)
 	default:
 		return u
 	}

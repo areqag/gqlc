@@ -99,22 +99,23 @@ func TestExprUseMarshalJSON(t *testing.T) {
 }
 
 // TestNewPropertyUse pins the pre-existing constructor's field wiring —
-// the widened constructor delegates to NewPropertyUseAt(ref, 0), so the
-// zero-value Part must round-trip through the accessor. New at fvo per
-// §5.1: PropertyUse had no dedicated constructor unit test at branch base
-// (only ExprUse did); the widening must not leave the zero side of a Use
+// the widened constructor delegates to NewPropertyUseAt(ref, 0, 0), so the
+// zero-value Part and Branch must round-trip through the accessors. New at
+// fvo per §5.1: PropertyUse had no dedicated constructor unit test at branch
+// base (only ExprUse did); the widening must not leave the zero side of a Use
 // variant it touches uncovered.
 func TestNewPropertyUse(t *testing.T) {
 	u := query.NewPropertyUse(query.Ref{Variable: "a", Property: "title"})
 	require.Equal(t, query.Ref{Variable: "a", Property: "title"}, u.Ref())
 	require.Equal(t, 0, u.Part())
+	require.Equal(t, 0, u.Branch())
 	var _ query.Use = u
 }
 
-// TestPropertyUseMarshalJSON pins the wire encoding for the zero-value Part —
-// the "part" key is ABSENT under omit-when-zero. New at fvo per §5.1: same
-// rationale as TestNewPropertyUse; PropertyUse had no MarshalJSON test at
-// branch base.
+// TestPropertyUseMarshalJSON pins the wire encoding for the zero-value
+// attribution coordinate — the "part" and "branch" keys are ABSENT under
+// omit-when-zero. New at fvo per §5.1: same rationale as TestNewPropertyUse;
+// PropertyUse had no MarshalJSON test at branch base.
 func TestPropertyUseMarshalJSON(t *testing.T) {
 	out, err := json.Marshal(query.NewPropertyUse(query.Ref{Variable: "a", Property: "title"}))
 	require.NoError(t, err)
@@ -124,19 +125,21 @@ func TestPropertyUseMarshalJSON(t *testing.T) {
 }
 
 // TestNewClauseSlotUse pins the pre-existing constructor's field wiring —
-// the widened constructor delegates to NewClauseSlotUseAt(slot, 0). New at
+// the widened constructor delegates to NewClauseSlotUseAt(slot, 0, 0). New at
 // fvo per §5.1: ClauseSlotUse had no dedicated constructor unit test at
 // branch base.
 func TestNewClauseSlotUse(t *testing.T) {
 	u := query.NewClauseSlotUse(query.ClauseSlotSkip)
 	require.Equal(t, query.ClauseSlotSkip, u.Slot())
 	require.Equal(t, 0, u.Part())
+	require.Equal(t, 0, u.Branch())
 	var _ query.Use = u
 }
 
 // TestClauseSlotUseMarshalJSON pins the wire encoding for the zero-value
-// Part — the "part" key is ABSENT under omit-when-zero. New at fvo per
-// §5.1: same rationale as TestNewClauseSlotUse.
+// attribution coordinate — the "part" and "branch" keys are ABSENT under
+// omit-when-zero. New at fvo per §5.1: same rationale as
+// TestNewClauseSlotUse.
 func TestClauseSlotUseMarshalJSON(t *testing.T) {
 	out, err := json.Marshal(query.NewClauseSlotUse(query.ClauseSlotSkip))
 	require.NoError(t, err)
@@ -145,48 +148,52 @@ func TestClauseSlotUseMarshalJSON(t *testing.T) {
 		string(out))
 }
 
-// TestNewPropertyUseAt pins the widened Use variant per ADR 0008 amendment
-// 2026-07-06: the Part axis carries through the constructor, the accessor,
-// and the wire shape as an omit-when-zero key (wire convention:
-// additive axes emit omit-when-zero-value).
+// TestNewPropertyUseAt pins the widened Use variant per ADR 0008 amendments
+// 2026-07-06 (Part) and 2026-07-12 (Branch): both attribution axes carry
+// through the constructor, the accessors, and the wire shape as
+// omit-when-zero keys (wire convention: additive axes emit
+// omit-when-zero-value).
 func TestNewPropertyUseAt(t *testing.T) {
-	u := query.NewPropertyUseAt(query.Ref{Variable: "a", Property: "title"}, 1)
+	u := query.NewPropertyUseAt(query.Ref{Variable: "a", Property: "title"}, 1, 2)
 	require.Equal(t, query.Ref{Variable: "a", Property: "title"}, u.Ref())
 	require.Equal(t, 1, u.Part())
+	require.Equal(t, 2, u.Branch())
 
 	out, err := json.Marshal(u)
 	require.NoError(t, err)
 	require.JSONEq(t,
-		`{"kind":"property","variable":"a","property":"title","part":1}`,
+		`{"kind":"property","variable":"a","property":"title","part":1,"branch":2}`,
 		string(out))
 }
 
-// TestNewExprUseAt pins the widened ExprUse variant per ADR 0008 amendment
-// 2026-07-06. Same convention as TestNewPropertyUseAt.
+// TestNewExprUseAt pins the widened ExprUse variant per ADR 0008 amendments
+// 2026-07-06 and 2026-07-12. Same convention as TestNewPropertyUseAt.
 func TestNewExprUseAt(t *testing.T) {
-	u := query.NewExprUseAt(query.TypeBool{}, query.ExprInPredicate, 2)
+	u := query.NewExprUseAt(query.TypeBool{}, query.ExprInPredicate, 2, 1)
 	require.Equal(t, query.TypeBool{}, u.EnclosingType())
 	require.Equal(t, query.ExprInPredicate, u.Position())
 	require.Equal(t, 2, u.Part())
+	require.Equal(t, 1, u.Branch())
 
 	out, err := json.Marshal(u)
 	require.NoError(t, err)
 	require.JSONEq(t,
-		`{"kind":"expr","enclosingType":"bool","position":"predicate","part":2}`,
+		`{"kind":"expr","enclosingType":"bool","position":"predicate","part":2,"branch":1}`,
 		string(out))
 }
 
 // TestNewClauseSlotUseAt pins the widened ClauseSlotUse variant per ADR 0008
-// amendment 2026-07-06. Same convention.
+// amendments 2026-07-06 and 2026-07-12. Same convention.
 func TestNewClauseSlotUseAt(t *testing.T) {
-	u := query.NewClauseSlotUseAt(query.ClauseSlotSkip, 3)
+	u := query.NewClauseSlotUseAt(query.ClauseSlotSkip, 3, 1)
 	require.Equal(t, query.ClauseSlotSkip, u.Slot())
 	require.Equal(t, 3, u.Part())
+	require.Equal(t, 1, u.Branch())
 
 	out, err := json.Marshal(u)
 	require.NoError(t, err)
 	require.JSONEq(t,
-		`{"kind":"clause-slot","slot":"skip","part":3}`,
+		`{"kind":"clause-slot","slot":"skip","part":3,"branch":1}`,
 		string(out))
 }
 
