@@ -1,0 +1,7 @@
+{
+  "package": "writeexectemporalparam",
+  "queryFiles": [
+    "queries.cypher"
+  ],
+  "driverVersion": "v6"
+}

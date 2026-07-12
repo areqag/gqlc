@@ -30,11 +30,33 @@ const fixtureDir = "../../test/data/codegen"
 // ExpectedError (fully-qualified sentinel name) and, for the hand-
 // constructed ErrInvalidCardinality case, SyntheticZeroCardinality —
 // see loadInvalidInput.
+//
+// DriverVersion selects the emission target: "" or "v5" for the
+// default, "v6" for WithDriverVersion(DriverV6). A v6 fixture is a
+// `<base>_v6` sibling of its v5 twin with schema/queries copied
+// verbatim, so the two golden trees diff to exactly the driver-varying
+// lines. The regular valid/* walk picks v6 fixtures up for the golden,
+// double-run, and -update flows with no extra wiring.
 type manifest struct {
 	Package                  string   `json:"package"`
 	QueryFiles               []string `json:"queryFiles"`
+	DriverVersion            string   `json:"driverVersion,omitempty"`
 	ExpectedError            string   `json:"expectedError,omitempty"`
 	SyntheticZeroCardinality bool     `json:"syntheticZeroCardinality,omitempty"`
+}
+
+// generatorFor maps a manifest's driverVersion marker to a configured
+// Codegen. An unknown marker fails the suite — a typo must not silently
+// fall back to v5 and pass against the wrong golden tree.
+func (s *CodegenSuite) generatorFor(m manifest) *Codegen {
+	switch m.DriverVersion {
+	case "", "v5":
+		return New()
+	case "v6":
+		return New(WithDriverVersion(DriverV6))
+	}
+	s.Require().Failf("unknown driverVersion", "manifest declares driverVersion %q; want \"\", \"v5\", or \"v6\"", m.DriverVersion)
+	return nil
 }
 
 // sentinelByName maps the manifest's fully-qualified sentinel string
@@ -230,7 +252,7 @@ func (s *CodegenSuite) TestValid() {
 			sch := s.loadSchema(dir)
 			queries := s.loadNamedQueries(dir, m, sch)
 
-			got, err := New().Generate(Input{Schema: sch, Queries: queries})
+			got, err := s.generatorFor(m).Generate(Input{Schema: sch, Queries: queries})
 			s.Require().NoError(err)
 			s.assertPackage(got, m.Package)
 
@@ -359,9 +381,9 @@ func (s *CodegenSuite) TestDoubleRun() {
 			m := s.loadManifest(dir)
 			sch := s.loadSchema(dir)
 			in := Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
-			first, err := New().Generate(in)
+			first, err := s.generatorFor(m).Generate(in)
 			s.Require().NoError(err)
-			second, err := New().Generate(in)
+			second, err := s.generatorFor(m).Generate(in)
 			s.Require().NoError(err)
 			s.Require().Len(second, len(first))
 			for i := range first {

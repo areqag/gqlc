@@ -1,0 +1,7 @@
+{
+  "package": "allwidths",
+  "queryFiles": [
+    "queries.cypher"
+  ],
+  "driverVersion": "v6"
+}

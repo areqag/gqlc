@@ -1,0 +1,7 @@
+{
+  "package": "temporalcolumndate",
+  "queryFiles": [
+    "queries.cypher"
+  ],
+  "driverVersion": "v6"
+}
