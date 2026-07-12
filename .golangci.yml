@@ -68,9 +68,9 @@ linters:
     forbidigo:
       forbid:
         - pattern: ^(fmt\.Print(|f|ln)|print|println)$
-          msg: use log/slog via internal/logger; direct printing bypasses structured logging
+          msg: route output through cmd.OutOrStdout()/cmd.ErrOrStderr(); direct printing bypasses the command writers
         - pattern: ^log\.(Print|Fatal|Panic)
-          msg: use log/slog via internal/logger, not the legacy log package
+          msg: route output through cmd.OutOrStdout()/cmd.ErrOrStderr(), not the legacy log package
     ireturn:
       # return structs, not interfaces — with two deliberate exceptions: the
       # closed sums of the query model (Binding, Endpoint, Projection, Type, Use)
