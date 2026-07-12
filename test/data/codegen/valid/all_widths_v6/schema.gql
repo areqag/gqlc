@@ -1,0 +1,19 @@
+CREATE PROPERTY GRAPH TYPE AllWidths AS {
+    (:Row {
+        s   :: STRING NOT NULL,
+        b   :: BOOL NOT NULL,
+        i   :: INT NOT NULL,
+        i8  :: INT8 NOT NULL,
+        i16 :: INT16 NOT NULL,
+        i32 :: INT32 NOT NULL,
+        i64 :: INT64 NOT NULL,
+        u   :: UINT NOT NULL,
+        u8  :: UINT8 NOT NULL,
+        u16 :: UINT16 NOT NULL,
+        u32 :: UINT32 NOT NULL,
+        u64 :: UINT64 NOT NULL,
+        f   :: FLOAT NOT NULL,
+        f32 :: FLOAT32 NOT NULL,
+        f64 :: FLOAT64 NOT NULL
+    })
+}

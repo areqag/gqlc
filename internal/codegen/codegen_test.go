@@ -30,11 +30,33 @@ const fixtureDir = "../../test/data/codegen"
 // ExpectedError (fully-qualified sentinel name) and, for the hand-
 // constructed ErrInvalidCardinality case, SyntheticZeroCardinality —
 // see loadInvalidInput.
+//
+// DriverVersion selects the emission target: "" or "v5" for the
+// default, "v6" for WithDriverVersion(DriverV6). A v6 fixture is a
+// `<base>_v6` sibling of its v5 twin with schema/queries copied
+// verbatim, so the two golden trees diff to exactly the driver-varying
+// lines. The regular valid/* walk picks v6 fixtures up for the golden,
+// double-run, and -update flows with no extra wiring.
 type manifest struct {
 	Package                  string   `json:"package"`
 	QueryFiles               []string `json:"queryFiles"`
+	DriverVersion            string   `json:"driverVersion,omitempty"`
 	ExpectedError            string   `json:"expectedError,omitempty"`
 	SyntheticZeroCardinality bool     `json:"syntheticZeroCardinality,omitempty"`
+}
+
+// generatorFor maps a manifest's driverVersion marker to a configured
+// Codegen. An unknown marker fails the suite — a typo must not silently
+// fall back to v5 and pass against the wrong golden tree.
+func (s *CodegenSuite) generatorFor(m manifest) *Codegen {
+	switch m.DriverVersion {
+	case "", "v5":
+		return New()
+	case "v6":
+		return New(WithDriverVersion(DriverV6))
+	}
+	s.Require().Failf("unknown driverVersion", "manifest declares driverVersion %q; want \"\", \"v5\", or \"v6\"", m.DriverVersion)
+	return nil
 }
 
 // sentinelByName maps the manifest's fully-qualified sentinel string
@@ -230,7 +252,7 @@ func (s *CodegenSuite) TestValid() {
 			sch := s.loadSchema(dir)
 			queries := s.loadNamedQueries(dir, m, sch)
 
-			got, err := New().Generate(Input{Schema: sch, Queries: queries})
+			got, err := s.generatorFor(m).Generate(Input{Schema: sch, Queries: queries})
 			s.Require().NoError(err)
 			s.assertPackage(got, m.Package)
 
@@ -287,6 +309,67 @@ func (s *CodegenSuite) loadInvalidInput(dir string, m manifest) Input {
 	return Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
 }
 
+// TestWithDriverVersion pins the driver-target seam at the unit level,
+// independent of the golden corpus: the default (zero-value) Codegen
+// emits the v5 module path and neo4j.DriverWithContext; a
+// WithDriverVersion(DriverV6) Codegen emits the v6 module path and
+// neo4j.Driver (v6 renamed the interface back, keeping the old name as
+// an alias — generated v6 code uses the native name). The skeleton
+// fixture is the probe: db.go is the only file that names the driver
+// interface.
+func (s *CodegenSuite) TestWithDriverVersion() {
+	dir := filepath.Join(fixtureDir, "valid", "skeleton")
+	m := s.loadManifest(dir)
+	sch := s.loadSchema(dir)
+	in := Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
+
+	cases := []struct {
+		name         string
+		gen          *Codegen
+		wantImport   string
+		wantDriver   string
+		bannedDriver string
+	}{
+		{
+			name:         "default is v5",
+			gen:          New(),
+			wantImport:   `"github.com/neo4j/neo4j-go-driver/v5/neo4j"`,
+			wantDriver:   "neo4j.DriverWithContext",
+			bannedDriver: "/v6/",
+		},
+		{
+			name:         "explicit v5",
+			gen:          New(WithDriverVersion(DriverV5)),
+			wantImport:   `"github.com/neo4j/neo4j-go-driver/v5/neo4j"`,
+			wantDriver:   "neo4j.DriverWithContext",
+			bannedDriver: "/v6/",
+		},
+		{
+			name:         "v6",
+			gen:          New(WithDriverVersion(DriverV6)),
+			wantImport:   `"github.com/neo4j/neo4j-go-driver/v6/neo4j"`,
+			wantDriver:   "neo4j.Driver",
+			bannedDriver: "DriverWithContext",
+		},
+	}
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			files, err := tc.gen.Generate(in)
+			s.Require().NoError(err)
+			var db []byte
+			for _, f := range files {
+				s.Require().NotContains(string(f.Contents), tc.bannedDriver, "file %s", f.Path)
+				if f.Path == "db.go" {
+					db = f.Contents
+				}
+			}
+			s.Require().NotNil(db)
+			s.Require().Contains(string(db), tc.wantImport)
+			s.Require().Contains(string(db), "func New(driver "+tc.wantDriver+") *Queries {")
+		})
+	}
+}
+
 // TestDoubleRun asserts Generate is byte-deterministic: same Input in,
 // byte-identical []File out, twice. Independent of the golden
 // comparison — a golden diff catches within-run nondeterminism (map
@@ -298,9 +381,9 @@ func (s *CodegenSuite) TestDoubleRun() {
 			m := s.loadManifest(dir)
 			sch := s.loadSchema(dir)
 			in := Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
-			first, err := New().Generate(in)
+			first, err := s.generatorFor(m).Generate(in)
 			s.Require().NoError(err)
-			second, err := New().Generate(in)
+			second, err := s.generatorFor(m).Generate(in)
 			s.Require().NoError(err)
 			s.Require().Len(second, len(first))
 			for i := range first {

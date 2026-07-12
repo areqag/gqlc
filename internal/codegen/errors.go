@@ -54,7 +54,7 @@ var (
 	// ErrUnrepresentableWidth is returned when a schema property, a query
 	// column, a query parameter, or a list element's leaf has a property
 	// width that has no faithful Go representation on the neo4j-go-driver
-	// v5 target: INT128, INT256, UINT128, UINT256, FLOAT16, FLOAT128,
+	// target (v5 and v6 alike): INT128, INT256, UINT128, UINT256, FLOAT16, FLOAT128,
 	// FLOAT256, DECIMAL. Distinct from ErrOutOfC6Scope: no future stage
 	// retires the eight widths — the underlying store (neo4j) stores
 	// integers as int64 and floats as float64; the sentinel is a permanent

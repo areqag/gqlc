@@ -431,6 +431,22 @@ func prepareEntityFields(entityName string, props map[string]schema.Property) ([
 	return fields, anyProp, anyNonNull, anyTime, nil
 }
 
+// cardinalityAnnotation renders a Cardinality as its ":one" / ":many" /
+// ":exec" annotation text — the caller-visible form Phase A's fail
+// messages use so the error line reads back the exact string the author
+// typed on the // name: line.
+func cardinalityAnnotation(c Cardinality) string {
+	switch c {
+	case CardinalityOne:
+		return ":one"
+	case CardinalityMany:
+		return ":many"
+	case CardinalityExec:
+		return ":exec"
+	}
+	return "<invalid>"
+}
+
 // phaseAAdmit is spec §2.1's Phase A: gates every query on axes Phase B
 // depends on for name derivation. First offender in slice order wins.
 // C4 widens cardinality admission to the full {One, Many, Exec} set and

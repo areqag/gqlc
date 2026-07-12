@@ -1,0 +1,7 @@
+{
+  "package": "edgeuniononetwocandidates",
+  "queryFiles": [
+    "queries.cypher"
+  ],
+  "driverVersion": "v6"
+}
