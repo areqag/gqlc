@@ -43,10 +43,10 @@ var canonicalConfig = config.Config{
 	Driver:        config.DriverNeo4jGoV5,
 }
 
-// dropKey returns doc without the top-level line for key.
-func dropKey(doc, key string) string {
+// dropKey returns validDoc without the top-level line for key.
+func dropKey(key string) string {
 	var out []string
-	for line := range strings.Lines(doc) {
+	for line := range strings.Lines(validDoc) {
 		if strings.HasPrefix(line, key+":") {
 			continue
 		}
@@ -55,10 +55,10 @@ func dropKey(doc, key string) string {
 	return strings.Join(out, "")
 }
 
-// setKey returns doc with key's scalar value replaced by value.
-func setKey(doc, key, value string) string {
+// setKey returns validDoc with key's scalar value replaced by value.
+func setKey(key, value string) string {
 	var out []string
-	for line := range strings.Lines(doc) {
+	for line := range strings.Lines(validDoc) {
 		if strings.HasPrefix(line, key+":") {
 			line = key + ": " + value + "\n"
 		}
@@ -118,8 +118,8 @@ func TestDecodeValid(t *testing.T) {
 		want config.Config
 	}{
 		{name: "with procsig", body: validDoc, want: canonicalConfig},
-		{name: "without procsig", body: dropKey(validDoc, "procsig"), want: withoutProcsig},
-		{name: "exported-case package accepted", body: setKey(validDoc, "package", "Db"), want: exportedPackage},
+		{name: "without procsig", body: dropKey("procsig"), want: withoutProcsig},
+		{name: "exported-case package accepted", body: setKey("package", "Db"), want: exportedPackage},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -157,112 +157,112 @@ func TestDecodeRejects(t *testing.T) {
 		},
 		{
 			name:     "missing version",
-			body:     dropKey(validDoc, "version"),
+			body:     dropKey("version"),
 			wantSubs: []string{`missing required field "version"`, "version 1"},
 		},
 		{
 			name:     "version 0",
-			body:     setKey(validDoc, "version", "0"),
+			body:     setKey("version", "0"),
 			wantSubs: []string{"declares version 0; only version 1 is supported"},
 		},
 		{
 			name:     "version 2",
-			body:     setKey(validDoc, "version", "2"),
+			body:     setKey("version", "2"),
 			wantSubs: []string{"declares version 2; only version 1 is supported"},
 		},
 		{
 			name:     "unknown field (typo)",
-			body:     strings.Replace(validDoc, "package: db", "packge: db", 1),
-			wantSubs: []string{"field packge not found"},
+			body:     strings.Replace(validDoc, "package: db", "packge: db", 1), //nolint:misspell // the typo is the test: unknown keys must reject
+			wantSubs: []string{"field packge not found"},                        //nolint:misspell // the typo is the test: unknown keys must reject
 		},
 		{
 			name:     "missing schema",
-			body:     dropKey(validDoc, "schema"),
+			body:     dropKey("schema"),
 			wantSubs: []string{`missing required field "schema"`},
 		},
 		{
 			name:     "missing queries",
-			body:     dropKey(validDoc, "queries"),
+			body:     dropKey("queries"),
 			wantSubs: []string{`missing required field "queries"`},
 		},
 		{
 			name:     "missing output",
-			body:     dropKey(validDoc, "output"),
+			body:     dropKey("output"),
 			wantSubs: []string{`missing required field "output"`},
 		},
 		{
 			name:     "missing package",
-			body:     dropKey(validDoc, "package"),
+			body:     dropKey("package"),
 			wantSubs: []string{`missing required field "package"`},
 		},
 		{
 			name:     "missing schema_language",
-			body:     dropKey(validDoc, "schema_language"),
+			body:     dropKey("schema_language"),
 			wantSubs: []string{`missing required field "schema_language"`, "valid values: gqlc"},
 		},
 		{
 			name:     "missing query_language",
-			body:     dropKey(validDoc, "query_language"),
+			body:     dropKey("query_language"),
 			wantSubs: []string{`missing required field "query_language"`, "valid values: opencypher"},
 		},
 		{
 			name:     "missing driver",
-			body:     dropKey(validDoc, "driver"),
+			body:     dropKey("driver"),
 			wantSubs: []string{`missing required field "driver"`, "valid values: neo4j-go-v5"},
 		},
 		{
 			name:     "invalid schema_language",
-			body:     setKey(validDoc, "schema_language", "graphql"),
+			body:     setKey("schema_language", "graphql"),
 			wantSubs: []string{`line 6: invalid schema_language "graphql" (valid values: gqlc)`},
 		},
 		{
 			name:     "invalid query_language",
-			body:     setKey(validDoc, "query_language", "sql"),
+			body:     setKey("query_language", "sql"),
 			wantSubs: []string{`line 7: invalid query_language "sql" (valid values: opencypher)`},
 		},
 		{
 			name:     "invalid driver",
-			body:     setKey(validDoc, "driver", "neo4j-go-v4"),
+			body:     setKey("driver", "neo4j-go-v4"),
 			wantSubs: []string{`line 8: invalid driver "neo4j-go-v4" (valid values: neo4j-go-v5)`},
 		},
 		{
 			name:     "empty schema",
-			body:     setKey(validDoc, "schema", `""`),
+			body:     setKey("schema", `""`),
 			wantSubs: []string{`field "schema" must not be empty`},
 		},
 		{
 			name:     "empty queries",
-			body:     setKey(validDoc, "queries", `""`),
+			body:     setKey("queries", `""`),
 			wantSubs: []string{`field "queries" must not be empty`},
 		},
 		{
 			name:     "empty output",
-			body:     setKey(validDoc, "output", `""`),
+			body:     setKey("output", `""`),
 			wantSubs: []string{`field "output" must not be empty`},
 		},
 		{
 			name:     "empty package",
-			body:     setKey(validDoc, "package", `""`),
+			body:     setKey("package", `""`),
 			wantSubs: []string{`field "package" must not be empty`},
 		},
 		{
 			name:     "empty procsig",
-			body:     setKey(validDoc, "procsig", `""`),
+			body:     setKey("procsig", `""`),
 			wantSubs: []string{`field "procsig" is empty`, "omit the key"},
 		},
 		{
 			name:     "package with hyphen",
-			body:     setKey(validDoc, "package", "my-db"),
+			body:     setKey("package", "my-db"),
 			wantSubs: []string{`package "my-db" is not a valid Go identifier`},
 		},
 		{
 			name:     "package is a Go keyword",
-			body:     setKey(validDoc, "package", "func"),
+			body:     setKey("package", "func"),
 			wantSubs: []string{`package "func" is not a valid Go identifier`},
 		},
 		{
 			name:     "package starts with a digit",
-			body:     setKey(validDoc, "package", "123abc"),
+			body:     setKey("package", "123abc"),
 			wantSubs: []string{`package "123abc" is not a valid Go identifier`},
 		},
 	}
@@ -309,7 +309,7 @@ func TestLoadMissingFile(t *testing.T) {
 // with the file path (not "<stream>").
 func TestLoadErrorsNameThePath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bad.gqlc.yaml")
-	if err := os.WriteFile(path, []byte(dropKey(validDoc, "driver")), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(dropKey("driver")), 0o644); err != nil {
 		t.Fatalf("write temp file: %v", err)
 	}
 	_, err := config.Load(path)
