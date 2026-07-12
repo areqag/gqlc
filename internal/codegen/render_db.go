@@ -32,7 +32,7 @@ type Queries struct {
 	db driverOrTx
 }
 
-func New(driver neo4j.DriverWithContext) *Queries {
+func New(driver ` + target.driverIface + `) *Queries {
 	return &Queries{db: driverDB{driver: driver}}
 }
 
@@ -50,7 +50,7 @@ type driverOrTx interface {
 }
 
 type driverDB struct {
-	driver neo4j.DriverWithContext
+	driver ` + target.driverIface + `
 }
 
 func (d driverDB) run(ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode) ([]*neo4j.Record, error) {

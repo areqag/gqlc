@@ -11,7 +11,7 @@ import (
 // slices are walked in their author-defined order; the output slice is
 // sorted by Path before return. First-error short-circuit: (nil, err)
 // on failure.
-func generate(in Input) ([]File, error) {
+func generate(in Input, target driverTarget) ([]File, error) {
 	pkg, err := derivePackage(in.Schema.Name)
 	if err != nil {
 		return nil, err
@@ -67,7 +67,6 @@ func generate(in Input) ([]File, error) {
 		}
 	}
 
-	target := driverV5
 	files := []File{
 		{Path: "db.go", Contents: renderDB(pkg, hasOne, target)},
 		{Path: "querier.go", Contents: renderQuerier(pkg, prepared, target)},

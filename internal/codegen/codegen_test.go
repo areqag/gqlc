@@ -287,6 +287,67 @@ func (s *CodegenSuite) loadInvalidInput(dir string, m manifest) Input {
 	return Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
 }
 
+// TestWithDriverVersion pins the driver-target seam at the unit level,
+// independent of the golden corpus: the default (zero-value) Codegen
+// emits the v5 module path and neo4j.DriverWithContext; a
+// WithDriverVersion(DriverV6) Codegen emits the v6 module path and
+// neo4j.Driver (v6 renamed the interface back, keeping the old name as
+// an alias — generated v6 code uses the native name). The skeleton
+// fixture is the probe: db.go is the only file that names the driver
+// interface.
+func (s *CodegenSuite) TestWithDriverVersion() {
+	dir := filepath.Join(fixtureDir, "valid", "skeleton")
+	m := s.loadManifest(dir)
+	sch := s.loadSchema(dir)
+	in := Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
+
+	cases := []struct {
+		name        string
+		gen         *Codegen
+		wantImport  string
+		wantDriver  string
+		banedDriver string
+	}{
+		{
+			name:        "default is v5",
+			gen:         New(),
+			wantImport:  `"github.com/neo4j/neo4j-go-driver/v5/neo4j"`,
+			wantDriver:  "neo4j.DriverWithContext",
+			banedDriver: "/v6/",
+		},
+		{
+			name:        "explicit v5",
+			gen:         New(WithDriverVersion(DriverV5)),
+			wantImport:  `"github.com/neo4j/neo4j-go-driver/v5/neo4j"`,
+			wantDriver:  "neo4j.DriverWithContext",
+			banedDriver: "/v6/",
+		},
+		{
+			name:        "v6",
+			gen:         New(WithDriverVersion(DriverV6)),
+			wantImport:  `"github.com/neo4j/neo4j-go-driver/v6/neo4j"`,
+			wantDriver:  "neo4j.Driver",
+			banedDriver: "DriverWithContext",
+		},
+	}
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			files, err := tc.gen.Generate(in)
+			s.Require().NoError(err)
+			var db []byte
+			for _, f := range files {
+				s.Require().NotContains(string(f.Contents), tc.banedDriver, "file %s", f.Path)
+				if f.Path == "db.go" {
+					db = f.Contents
+				}
+			}
+			s.Require().NotNil(db)
+			s.Require().Contains(string(db), tc.wantImport)
+			s.Require().Contains(string(db), "func New(driver "+tc.wantDriver+") *Queries {")
+		})
+	}
+}
+
 // TestDoubleRun asserts Generate is byte-deterministic: same Input in,
 // byte-identical []File out, twice. Independent of the golden
 // comparison — a golden diff catches within-run nondeterminism (map
