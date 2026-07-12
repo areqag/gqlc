@@ -1989,15 +1989,14 @@ var mustParse = map[string]struct {
 			query.NewExprUse(query.TypeBool{}, query.ExprInPredicate),
 		}}),
 	},
-	// gqlc-33k.3 (post-freeze Use-precision, ADR 0008 additive) — a $param
-	// occupying LIMIT's clause-slot inside an EXISTS { RegularQuery } body.
-	// Under the Stage 11 §1.2 subqueryDepth suppression, collectProjection
-	// (the only outer path that reaches mineClauseSlotParameter) does not
-	// run, so before this fix EnterOC_ExistentialSubquery's blanket sweep
-	// minted the imprecise ExprUse{TypeBool, ExprInPredicate}. The precise
-	// emission is ClauseSlotUse{ClauseSlotLimit}: the clause slot is a
-	// syntactic property of the enclosing OC_Skip/OC_Limit node, so a $lim
-	// in a nested LIMIT gets the same Use variant as an outer LIMIT.
+	// A $param occupying LIMIT's clause-slot inside an EXISTS { RegularQuery }
+	// body. Under the Stage 11 §1.2 subqueryDepth suppression,
+	// collectProjection (the only outer path that reaches
+	// mineClauseSlotParameter) does not run, so
+	// EnterOC_ExistentialSubquery's own clause-slot pass has to mint the
+	// precise ClauseSlotUse{ClauseSlotLimit} — the clause slot is a syntactic
+	// property of the enclosing OC_Skip/OC_Limit node, so a $lim in a nested
+	// LIMIT gets the same Use variant as an outer LIMIT.
 	"exists body limit clause-slot param": {
 		src: "MATCH (n) WHERE exists { MATCH (m) RETURN m LIMIT $lim }\nRETURN n",
 		want: oneBranch(query.Part{
@@ -2009,9 +2008,9 @@ var mustParse = map[string]struct {
 			query.NewClauseSlotUse(query.ClauseSlotLimit),
 		}}),
 	},
-	// gqlc-33k.3 twin — SKIP inside EXISTS RegularQuery. Same rationale as the
-	// LIMIT case; the two slots share one code path in mineClauseSlotParameter
-	// so the pair asserts the axis is honoured, not the token.
+	// SKIP twin of the LIMIT case above. The two slots share one code path
+	// in mineClauseSlotParameter, so the pair asserts the axis is honoured,
+	// not the token.
 	"exists body skip clause-slot param": {
 		src: "MATCH (n) WHERE exists { MATCH (m) RETURN m SKIP $off }\nRETURN n",
 		want: oneBranch(query.Part{
@@ -2023,8 +2022,8 @@ var mustParse = map[string]struct {
 			query.NewClauseSlotUse(query.ClauseSlotSkip),
 		}}),
 	},
-	// gqlc-33k.3 mixed — both LIMIT and SKIP slots in one EXISTS body, plus a
-	// residual WHERE parameter that still lands on the blanket sweep as
+	// Mixed — both LIMIT and SKIP slots in one EXISTS body, plus a residual
+	// WHERE parameter that still lands on the blanket sweep as
 	// ExprUse{TypeBool, ExprInPredicate}. Pins that slot-classification and
 	// blanket-fallback coexist on the same subquery walk — one $param per
 	// slot, one per residual, no double-recording. Emission order: the
@@ -2049,17 +2048,18 @@ var mustParse = map[string]struct {
 			}},
 		),
 	},
-	// gqlc-33k.3 nested — SKIP $off in the OUTER RegularQuery-form EXISTS, and
-	// LIMIT $lim in an inner EXISTS one level deeper. EnterOC_ExistentialSubquery
-	// fires on the outer subquery first (parent EnterRule precedes child
-	// EnterRule); its clause-slot classification pass walks the whole subtree,
-	// finding both the outer OC_Skip and the inner OC_Limit, and classifies each
-	// against its own precise slot. The inner subquery's own
-	// EnterOC_ExistentialSubquery still fires when the walker descends, but the
-	// approved-tree guard in addParameterUse (and now in mineClauseSlotParameter)
-	// makes both sweeps idempotent, so neither parameter double-records.
-	// Emission order: findSkipNodes runs before findLimitNodes in the outer
-	// sweep, so $off (outer SKIP) is minted before $lim (inner LIMIT).
+	// Nested — SKIP $off in the OUTER RegularQuery-form EXISTS, LIMIT $lim in
+	// an inner EXISTS one level deeper. EnterOC_ExistentialSubquery fires on
+	// the outer subquery first (parent EnterRule precedes child EnterRule);
+	// its clause-slot classification pass walks the whole subtree, finding
+	// both the outer OC_Skip and the inner OC_Limit, classifying each against
+	// its own precise slot. The inner subquery's own
+	// EnterOC_ExistentialSubquery still fires when the walker descends, but
+	// the approved-tree guard in addParameterUse (and in
+	// mineClauseSlotParameter) makes both sweeps idempotent — neither
+	// parameter double-records. Emission order: the SKIP pass runs before the
+	// LIMIT pass in the outer sweep, so $off precedes $lim in the query-wide
+	// Parameters slice.
 	"exists nested with limit skip clause-slot params": {
 		src: "MATCH (n) WHERE exists { MATCH (m) WHERE exists { MATCH (l) RETURN l LIMIT $lim } RETURN m SKIP $off }\nRETURN n",
 		want: oneBranch(query.Part{
