@@ -625,6 +625,44 @@ var mustParse = map[string]struct {
 			Combinators: []query.UnionKind{query.UnionDistinct},
 		},
 	},
+	// gqlc-qcc — UNION branch attribution on Uses (ADR 0008 amendment
+	// 2026-07-12). One shared parameter with a Use in each branch: the first
+	// mines at (part 0, branch 0); the second, behind branch 1's WITH, at
+	// (part 1, branch 1). Pins addParameterUse's currentBranchIndex stamping —
+	// the resolver routes each Use to its branch's scope table by this
+	// coordinate, so a regression here silently mis-witnesses UNION parameters.
+	"union param branch attribution": {
+		src: "MATCH (a) WHERE a.title = $p\nRETURN a\nUNION\nMATCH (b)\nWITH b\nMATCH (c) WHERE c.name = $p\nRETURN c",
+		want: query.Query{
+			Branches: []query.Branch{
+				{Parts: []query.Part{{
+					Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
+					Returns: []query.ReturnItem{
+						{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
+					},
+				}}},
+				{Parts: []query.Part{
+					{
+						Bindings: []query.Binding{must(query.NewNodeBinding("b", nil))},
+						Returns: []query.ReturnItem{
+							{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"}, query.TypeNode{})},
+						},
+					},
+					{
+						Bindings: []query.Binding{must(query.NewNodeBinding("c", nil))},
+						Returns: []query.ReturnItem{
+							{Name: "c", Value: query.NewRefProjection(query.Ref{Variable: "c"}, query.TypeNode{})},
+						},
+					},
+				}},
+			},
+			Combinators: []query.UnionKind{query.UnionDistinct},
+			Parameters: []query.Parameter{{Name: "p", Uses: []query.Use{
+				query.NewPropertyUseAt(query.Ref{Variable: "a", Property: "title"}, 0, 0),
+				query.NewPropertyUseAt(query.Ref{Variable: "c", Property: "name"}, 1, 1),
+			}}},
+		},
+	},
 	// Stage 6 — canonical arithmetic-in-RETURN. "Arithmetic precedence test"
 	// (Mathematical8 [1] verbatim). All operands are integer literals, so the
 	// parser types the result as TypeInt. The projection is an ExprProjection
@@ -1967,7 +2005,7 @@ var mustParse = map[string]struct {
 			// (listener.go:293), so emission-time curPart is Part 1 (fvo, ADR
 			// 0008 amendment 2026-07-06). Part 1's scope carries n via
 			// exportedTypes — resolver-adequate for the EXISTS body's $threshold.
-			query.NewExprUseAt(query.TypeBool{}, query.ExprInPredicate, 1),
+			query.NewExprUseAt(query.TypeBool{}, query.ExprInPredicate, 1, 0),
 		}}}},
 	},
 	// Stage 11 §1.1 — a $param inside a quantifier's filter WHERE body, paired
