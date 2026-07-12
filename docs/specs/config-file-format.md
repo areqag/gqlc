@@ -54,7 +54,7 @@ canonical `Save` emission order (§7).
 | 5 | `package`         | string | yes      | a valid Go identifier    | generated package name (`Config.OutputPackage`); `go/token.IsIdentifier`, so Go keywords are rejected; casing is not policed |
 | 6 | `schema_language` | enum   | yes      | `gqlc`                   | language the schema file is written in (`Config.SchemaLang`)       |
 | 7 | `query_language`  | enum   | yes      | `opencypher`             | language the query files are written in (`Config.QueryLang`)       |
-| 8 | `driver`          | enum   | yes      | `neo4j-go-v5`            | client library the generated code targets (`Config.Driver`)        |
+| 8 | `driver`          | enum   | yes      | `neo4j-go-v5`, `neo4j-go-v6` | client library the generated code targets (`Config.Driver`)        |
 | 9 | `procsig`         | string | no       | non-empty when present   | path to a procedure-signature registry file (`Config.ProcsigPath`); omit the key when unused — an explicit `""` is rejected, while a null value (a dangling `procsig:`) is equivalent to omission (§6.2) |
 
 Each enum axis is a closed vocabulary with an exported Go type
@@ -225,13 +225,16 @@ encoder drift fails visibly.
   flag precedence, or when a missing file is an error. Policy lives in
   the CLI, mechanism lives here — the same boundary `internal/procsig`
   drew, and the reason both are independently testable.
-- **Required single-value enums.** Every axis has exactly one member
-  today, and each is still a required field. Explicit over implicit: a
+- **Required single-value enums.** Every axis started with exactly one
+  member, and each is still a required field. Explicit over implicit: a
   config file states the whole pipeline, so the file is
   self-describing (a reader learns the query language from the file,
   not from gqlc's release notes) and there are no silent default
   semantics to break when a second member arrives — files written
-  today already say what they meant.
+  today already say what they meant. That payoff arrived with
+  gqlc-suj: the driver axis grew to two members (`neo4j-go-v6`), and
+  the required-no-default posture meant zero migration and no
+  implied-default question.
 - **Seam, not interface, for versioning.** One accepted version does
   not justify a `versionDecoder` interface; the probe-then-dispatch
   shape in `decode` is the whole abstraction. Adding v2 is a new
