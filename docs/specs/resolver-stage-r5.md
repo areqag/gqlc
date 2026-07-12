@@ -881,16 +881,18 @@ end-of-query on the collected witnesses.
 
 **Actual rule (post-fvo) — lexical-Part witness.** `query.Query`'s
 `Parameter.Uses` slice carries a Ref (variable + optional
-property) AND a Part index (fvo per ADR 0008 amendment
-2026-07-06 — see `docs/specs/model-change-fvo-use-part.md`). The
-resolver's `witnessAcrossScopes` reads `u.Part()` and witnesses
-against `branchScopes[u.Part()]` — the scope of the Part the
-parser attributed the Use to at emission time. Under UNION the
-`witnessInBranch` dispatcher wraps this call with a
-cross-branch fallback at the same Part index on
-`ErrUnknownProperty` (see fvo spec §7.2.2 for the position
-cursor + fallback machinery that recovers per-Use branch
-attribution from the query model). If the scope does not
+property) AND a (branch, part) attribution coordinate: the Part
+index (fvo per ADR 0008 amendment 2026-07-06 — see
+`docs/specs/model-change-fvo-use-part.md`) and the query-level
+branch index (gqlc-qcc per ADR 0008 amendment 2026-07-12). The
+resolver's `unifyParameterUsesAcrossBranches` routes each Use to
+`tables[u.Branch()]`, and `witnessAcrossScopes` reads `u.Part()`
+and witnesses against `branchScopes[u.Part()]` — the exact scope
+the parser attributed the Use to at emission time. (The interim
+position-cursor + `witnessInBranch` cross-branch fallback that
+recovered branch attribution before the Branch axis — fvo spec
+§7.2.2 — is deleted; see the §7.2.2 closure note for the two
+residuals the axis closed.) If the scope does not
 contain the Ref's variable, the Use contributes zero witnesses
 (treated as ResolvedUnknown by the unifier). If the scope
 contains the variable but the property lookup fails,
@@ -931,8 +933,8 @@ possible later stage; R5 does not do it.
   lexical-Part witness admits, byte-identical to pre-fvo).
 - `parameter_across_union_same_name.cypher` — the P2 shape,
   pins `$p → STRING NOT NULL` (branch 1's `a: Post` has `title`;
-  lexical-Part witness + UNION cross-branch fallback admits,
-  byte-identical to pre-fvo).
+  the Use's Branch attribution routes it to branch 1's scope
+  directly, byte-identical to pre-fvo).
 - `parameter_across_with_multi_part.cypher` — `$p` used consistently
   across Parts (Person.id × AUTHORED.views both `INT NOT NULL`),
   pins `$p → INT NOT NULL` (unification happy path).
@@ -2347,7 +2349,7 @@ R4's out-of-scope table survives with revisions:
 | Nullability upgrades (regime (b), same-Part re-MATCH — Class B: missing-witness model gap) | ~~silently under-demoted~~ **closed** (5xg, 2026-07-10) | ~~gqlc-5xg (model change)~~ **closed** by 5xg change + widening (`docs/specs/model-change-5xg-required-bare-ref.md`); edge-side non-bare missing-witness residual filed as gqlc-0kq |
 | Nullability upgrades (OPTIONAL-clause-sibling — Class A: missing-group-membership model gap) | ~~silently under-demoted~~ **closed** (ay9, 2026-07-10) | ~~gqlc-ay9 (model change)~~ **closed** by ay9 change + widening (`docs/specs/model-change-ay9-optional-group.md`); residual cross-Part carry gap filed as gqlc-984 |
 | `ExprProjection` residual mixed with `AggregateProjection` in the same Part's Returns — grouping-key discrimination gap | silently under-grouped (uniform-exclude posture) | §4.5.3.3 follow-up bead (Shape B `ContainsAggregate` parser-side bit) |
-| Cross-Part parameter Use where the pre-fvo resolver witnesses the Use against every Part's binding tables independently and admits on any scope's success, letting a same-name Part other than the lexical one supply the witness — any-scope-admits gap (§4.2.4) | **closed by gqlc-fvo (2026-07-06)**: `docs/specs/model-change-fvo-use-part.md` threads `Part` on every `Use` and the resolver's `witnessAcrossScopes` witnesses ONLY against `branchScopes[u.Part()]` — the lexical Part. Under UNION the `witnessInBranch` dispatcher wraps this with a same-Part cross-branch fallback (fvo spec §7.2.2, PR #118) — two residuals of that fallback (same-Part UNION boundary ambiguity, UNION-later-Part spurious rejection) are filed as **gqlc-qcc** for a future cycle. Residual WITH-aliased-projection shadow (fvo spec §7.6.1) is filed as **gqlc-4w5** for a future scope-attribution cycle. | closed |
+| Cross-Part parameter Use where the pre-fvo resolver witnesses the Use against every Part's binding tables independently and admits on any scope's success, letting a same-name Part other than the lexical one supply the witness — any-scope-admits gap (§4.2.4) | **closed by gqlc-fvo (2026-07-06)**: `docs/specs/model-change-fvo-use-part.md` threads `Part` on every `Use` and the resolver's `witnessAcrossScopes` witnesses ONLY against `branchScopes[u.Part()]` — the lexical Part. Under UNION the interim `witnessInBranch` dispatcher wrapped this with a same-Part cross-branch fallback (fvo spec §7.2.2, PR #118) — its two residuals (same-Part UNION boundary ambiguity, UNION-later-Part spurious rejection) were filed as **gqlc-qcc** and **closed 2026-07-12**: the `Branch` axis on every `Use` (ADR 0008 amendment 2026-07-12) routes each Use to its emission-time branch's scope table and the cursor + fallback recovery is deleted (fvo spec §7.2.2 closure note). Residual WITH-aliased-projection shadow (fvo spec §7.6.1) is filed as **gqlc-4w5** for a future scope-attribution cycle. | closed |
 
 **Silently accepted (not routed anywhere):**
 

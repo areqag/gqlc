@@ -1,0 +1,25 @@
+{
+  "columns": [
+    {
+      "name": "x",
+      "type": {
+        "kind": "property",
+        "type": "STRING",
+        "nullable": false
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [
+    {
+      "name": "p",
+      "type": {
+        "kind": "property",
+        "type": "STRING",
+        "nullable": false
+      }
+    }
+  ],
+  "statement": "read",
+  "distinct": true
+}

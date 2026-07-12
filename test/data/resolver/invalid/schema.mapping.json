@@ -19,6 +19,7 @@
     "unknown_edge_multi_type_all_miss.cypher": "social.gql",
     "unknown_property_union_missing.cypher": "social_r3.gql",
     "unknown_property_union_type_differs.cypher": "social_r3_typediff.gql",
+    "unknown_property_union_sibling_branch.cypher": "social_r5.gql",
     "untyped_edge.cypher": "social_r3.gql",
     "var_length_edge_property_projection.cypher": "social_r3.gql",
     "union_column_count_mismatch.cypher": "social_r5.gql",

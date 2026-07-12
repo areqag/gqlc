@@ -133,6 +133,7 @@ var invalidFixtures = map[string]error{
 	"unknown_edge_multi_type_all_miss.cypher":              ErrUnknownEdge,
 	"unknown_property_union_missing.cypher":                ErrUnknownProperty,
 	"unknown_property_union_type_differs.cypher":           ErrUnknownProperty,
+	"unknown_property_union_sibling_branch.cypher":         ErrUnknownProperty,
 	"untyped_edge.cypher":                                  ErrOutOfR0Scope,
 	"var_length_edge_property_projection.cypher":           ErrOutOfR0Scope,
 	// R5 additions:

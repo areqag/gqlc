@@ -211,6 +211,38 @@
 > accounting, the reversed alias-shadow discriminating fixture,
 > and the semantic-diff-only fence commands._
 
+> _Amendment (2026-07-12, gqlc-qcc): the Use → Branch attribution
+> axis on `PropertyUse` / `ExprUse` / `ClauseSlotUse` — recorded
+> as the fvo spec §7.2.2 residuals — is added to `query.Query`.
+> The fvo-cycle resolver shipped an honest recovery for the wire's
+> missing branch attribution: a position cursor over Part-index
+> drops plus a `witnessInBranch` cross-branch fallback, with two
+> verified residuals (same-Part UNION boundary ambiguity,
+> UNION-later-Part spurious rejection). Each `Use` variant gains
+> an additive `branch int` field and a new accessor
+> `Branch() int`; the positional constructors (`NewPropertyUseAt`
+> / `NewExprUseAt` / `NewClauseSlotUseAt`) widen to take
+> `(part, branch)`, and the zero-argument constructors delegate
+> with `(0, 0)` so single-branch single-Part callers stay
+> verbatim. The parser populates the axis at `addParameterUse` via
+> `l.currentBranchIndex() = len(l.branches) - 1` — well-defined at
+> every emission site by the same priming discipline as
+> `currentPartIndex()`. The JSON encoding is
+> **omit-when-zero-value** (`,omitempty`); zero goldens
+> rebaseline (no golden carries a Use outside branch 0). The Use
+> interface exposes the attribution coordinate as `Part() int` /
+> `Branch() int` alongside the unexported `isUse()` — sealing is
+> unaffected (the unexported method still closes the sum), and the
+> resolver routes a Use to its scope table without a variant
+> switch. The resolver widening deletes the cursor + fallback
+> recovery outright: `unifyParameterUsesAcrossBranches` witnesses
+> each Use directly against `tables[u.Branch()]`, closing both
+> residuals — pinned by
+> `unknown_property_union_sibling_branch.cypher` (now rejected)
+> and `parameter_union_later_part.cypher` (now admitted), with
+> `parameter_across_union_same_name.cypher` byte-identical. See
+> the fvo spec §7.2.2 closure note._
+
 > _Amendment (2026-07-06, gqlc-hk0): the ContainsAggregate axis
 > on `ExprProjection` — recorded as an escape hatch in the "Later
 > additions" list — is added to `query.Query`. Shape A (promote
@@ -434,6 +466,14 @@ on each additive cycle.
   CLOSED Part) is honestly recorded in the amendment note
   above and filed as a follow-up (§7.6 and §9 in the fvo
   spec).
+- **`Use.Branch` attribution axis on `PropertyUse` / `ExprUse` /
+  `ClauseSlotUse`** — adopted 2026-07-12 (see the amendment note
+  above). Populated parser-side by `addParameterUse` from
+  `l.currentBranchIndex()`; consumed by the resolver's
+  `unifyParameterUsesAcrossBranches` to route each Use to its
+  emission-time branch's scope table, retiring the fvo-cycle
+  position-cursor + `witnessInBranch` fallback recovery and
+  closing its two residuals (fvo spec §7.2.2 closure note).
 - **`CallBinding.Args` axis** — adopted 2026-07-07 (see the
   amendment note above and `docs/specs/model-change-0ig-call-args.md`).
   Populated parser-side by `collectCall`'s existing arg-mining

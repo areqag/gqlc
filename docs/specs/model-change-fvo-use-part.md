@@ -2056,7 +2056,9 @@ in on the wire today. Both moves are speculative.
 **File bead at close-out.** A new bead — `gqlc-fvo` sibling for
 "UNION-with-Uses cross-branch attribution" — records the gap
 without gating the fvo cycle. Follow-up spec cycle only when a
-TCK scenario forces it.
+TCK scenario forces it. (Filed as **gqlc-qcc**; closed 2026-07-12
+via option (a), the `branch int` axis — see the §7.2.2 closure
+note.)
 
 ### 7.3 R5 §4.2.4 prose update — verbatim
 
@@ -2363,6 +2365,24 @@ Closing both requires an additive `branch int` axis on `Use`
 records under the ADR 0008 additions convention (or equivalent
 branch attribution), then deleting the cursor + fallback recovery.
 Filed as **gqlc-qcc** for a future cycle.
+
+**Closure (2026-07-12, gqlc-qcc).** The `branch int` axis landed
+(ADR 0008 amendment 2026-07-12): every `Use` variant now carries
+the query-level branch index, stamped at emission time by
+`addParameterUse` from `currentBranchIndex()` — the same priming
+discipline that makes `currentPartIndex()` well-defined. With
+precise attribution the recovery machinery above is dead weight:
+`unifyParameterUsesAcrossBranches` witnesses each Use directly
+against `tables[u.Branch()]`, and the position cursor, the
+Part-index-drop boundary detection, and the `witnessInBranch`
+cross-branch fallback are DELETED. Both residuals are closed and
+pinned by discriminating fixtures:
+`unknown_property_union_sibling_branch.cypher` (residual (a), now
+rejected with `ErrUnknownProperty`) and
+`parameter_union_later_part.cypher` (residual (b), now admitted).
+`parameter_across_union_same_name.cypher` stays byte-identical —
+its branch-1 Use now routes to branch 1's scope directly instead
+of via the fallback.
 
 ### 7.6 Sentinel discipline — no new sentinel, no message widening
 
@@ -2828,4 +2848,6 @@ resolver reality caught by first-party corroboration.
    recovers from `ErrUnknownProperty`, so a Use genuinely in
    branch 1 Part 1 (with branch 0 shorter) is spuriously rejected.
    Closing both requires a `branch int` axis on `Use` records under
-   ADR 0008 additions convention, filed as **gqlc-qcc**.
+   ADR 0008 additions convention, filed as **gqlc-qcc** — closed
+   2026-07-12: the axis landed and the cursor + fallback recovery
+   was deleted (see the §7.2.2 closure note).
