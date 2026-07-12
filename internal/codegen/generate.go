@@ -11,8 +11,8 @@ import (
 // slices are walked in their author-defined order; the output slice is
 // sorted by Path before return. First-error short-circuit: (nil, err)
 // on failure.
-func generate(in Input, target driverTarget) ([]File, error) {
-	pkg, err := derivePackage(in.Schema.Name)
+func generate(in Input, target driverTarget, packageName string) ([]File, error) {
+	pkg, err := emittedPackage(in.Schema.Name, packageName)
 	if err != nil {
 		return nil, err
 	}
