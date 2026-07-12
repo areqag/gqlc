@@ -178,27 +178,32 @@ func TestDecodeRejects(t *testing.T) {
 		{
 			name:     "version quoted string is not coerced",
 			body:     setKey("version", `"1"`),
-			wantSubs: []string{`field "version" must be a YAML integer`, `!!str "1"`},
+			wantSubs: []string{`line 1: field "version" must be a YAML integer`, `!!str "1"`},
 		},
 		{
 			name:     "version float 1.0 is not coerced",
 			body:     setKey("version", "1.0"),
-			wantSubs: []string{`field "version" must be a YAML integer`, `!!float "1.0"`},
+			wantSubs: []string{`line 1: field "version" must be a YAML integer`, `!!float "1.0"`},
 		},
 		{
 			name:     "version float 1.5 is not truncated",
 			body:     setKey("version", "1.5"),
-			wantSubs: []string{`field "version" must be a YAML integer`, `!!float "1.5"`},
+			wantSubs: []string{`line 1: field "version" must be a YAML integer`, `!!float "1.5"`},
 		},
 		{
 			name:     "version scientific 1e0 is not coerced",
 			body:     setKey("version", "1e0"),
-			wantSubs: []string{`field "version" must be a YAML integer`, `!!float "1e0"`},
+			wantSubs: []string{`line 1: field "version" must be a YAML integer`, `!!float "1e0"`},
 		},
 		{
 			name:     "non-scalar version",
 			body:     setKey("version", "[1]"),
-			wantSubs: []string{`field "version" must be a YAML integer`, "got a YAML sequence"},
+			wantSubs: []string{`line 1: field "version" must be a YAML integer`, "got a YAML sequence"},
+		},
+		{
+			name:     "version overflowing Go int surfaces the yaml error",
+			body:     setKey("version", "9223372036854775808"),
+			wantSubs: []string{`field "version": yaml: unmarshal errors:`, "line 1: cannot unmarshal !!int `9223372...` into int"},
 		},
 		{
 			name:     "non-mapping document cites a readable probe type",

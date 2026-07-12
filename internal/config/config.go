@@ -197,10 +197,10 @@ type strictInt int
 // UnmarshalYAML enforces the !!int tag before decoding the value.
 func (i *strictInt) UnmarshalYAML(value *yaml.Node) error {
 	if value.Kind != yaml.ScalarNode {
-		return fmt.Errorf("field \"version\" must be a YAML integer (got a YAML %s)", kindName(value.Kind))
+		return fmt.Errorf("line %d: field \"version\" must be a YAML integer (got a YAML %s)", value.Line, kindName(value.Kind))
 	}
 	if value.Tag != "!!int" {
-		return fmt.Errorf("field \"version\" must be a YAML integer (got %s %q)", value.Tag, value.Value)
+		return fmt.Errorf("line %d: field \"version\" must be a YAML integer (got %s %q)", value.Line, value.Tag, value.Value)
 	}
 	var n int
 	if err := value.Decode(&n); err != nil {
