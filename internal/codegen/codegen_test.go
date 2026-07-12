@@ -324,31 +324,31 @@ func (s *CodegenSuite) TestWithDriverVersion() {
 	in := Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
 
 	cases := []struct {
-		name        string
-		gen         *Codegen
-		wantImport  string
-		wantDriver  string
+		name         string
+		gen          *Codegen
+		wantImport   string
+		wantDriver   string
 		bannedDriver string
 	}{
 		{
-			name:        "default is v5",
-			gen:         New(),
-			wantImport:  `"github.com/neo4j/neo4j-go-driver/v5/neo4j"`,
-			wantDriver:  "neo4j.DriverWithContext",
+			name:         "default is v5",
+			gen:          New(),
+			wantImport:   `"github.com/neo4j/neo4j-go-driver/v5/neo4j"`,
+			wantDriver:   "neo4j.DriverWithContext",
 			bannedDriver: "/v6/",
 		},
 		{
-			name:        "explicit v5",
-			gen:         New(WithDriverVersion(DriverV5)),
-			wantImport:  `"github.com/neo4j/neo4j-go-driver/v5/neo4j"`,
-			wantDriver:  "neo4j.DriverWithContext",
+			name:         "explicit v5",
+			gen:          New(WithDriverVersion(DriverV5)),
+			wantImport:   `"github.com/neo4j/neo4j-go-driver/v5/neo4j"`,
+			wantDriver:   "neo4j.DriverWithContext",
 			bannedDriver: "/v6/",
 		},
 		{
-			name:        "v6",
-			gen:         New(WithDriverVersion(DriverV6)),
-			wantImport:  `"github.com/neo4j/neo4j-go-driver/v6/neo4j"`,
-			wantDriver:  "neo4j.Driver",
+			name:         "v6",
+			gen:          New(WithDriverVersion(DriverV6)),
+			wantImport:   `"github.com/neo4j/neo4j-go-driver/v6/neo4j"`,
+			wantDriver:   "neo4j.Driver",
 			bannedDriver: "DriverWithContext",
 		},
 	}
