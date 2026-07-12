@@ -46,7 +46,7 @@ Exact user-facing copy:
 Use:   "generate",
 Short: "Generate Go code from the schema and queries the config file declares",
 Long: `generate runs the pipeline the config file declares: parse the schema,
-parse and resolve every named query in the queries directory, and write
+parse and resolve every named query in the query directory, and write
 the generated Go package to the output directory.
 
 The output directory belongs to gqlc alone: each run replaces its
@@ -113,8 +113,10 @@ would be a format contract with no consumer. All diagnostics go to
 stderr via `fmt.Fprintln(cmd.ErrOrStderr(), …)` (forbidigo bans bare
 `fmt.Print*`; the command writers are the test seam).
 
-stderr on failure is **zero or more diagnostic lines followed by
-exactly one `Error: ` line** (cobra's print of the returned error):
+stderr on a `RunE` failure is **zero or more diagnostic lines followed
+by exactly one `Error: ` line** (cobra's print of the returned error).
+A flag or `Args` parse error is outside this shape: cobra prints the
+`Error: ` line and then the usage dump, per §2.2.
 
 - **Singular-stage failure** (§3.1 stages 1–6, 8, 9): no diagnostic
   lines; the stage's error is returned as the `RunE` error and cobra
@@ -124,7 +126,7 @@ exactly one `Error: ` line** (cobra's print of the returned error):
   error is returned. Exact shapes:
 
 ```
-file-diag  = <path>: <message>                      (queryfile.Parse failure)
+file-diag  = <path>: <message>                      (file read or queryfile.Parse failure)
 query-diag = <path>: query <Name>: <message>        (cypher parse or resolution failure)
 summary    = generate: <n> error | generate: <n> errors
 ```
@@ -149,7 +151,7 @@ Singular-stage message catalogue (`Error: ` prefix implied):
 | stage failure                        | shape                                                                                   |
 |--------------------------------------|-----------------------------------------------------------------------------------------|
 | config file absent (`fs.ErrNotExist`)| `no config file at <path> (gqlc init, which creates one, arrives in a later release)`   |
-| any other `config.Load` error        | verbatim (`config: …` — already carries path and line)                                  |
+| any other `config.Load` error        | verbatim (`config: …` — carries the path, and line where applicable)                    |
 | schema file read                     | `schema: <os error>` (the os error carries the path)                                    |
 | schema parse                         | `schema <path>: <message>`                                                              |
 | procsig load                         | verbatim (`procsig: …` — already carries the path)                                      |
@@ -249,9 +251,11 @@ Within stage 7, failures **accumulate across files and queries**; the
 underlying packages short-circuit internally and that is fine — the
 contract is that one broken query never hides another:
 
-- A file whose `queryfile.Parse` fails contributes exactly one
-  `file-diag` and the walk moves to the next file (its queries cannot
-  be enumerated).
+- A file that cannot be read (a dangling symlink named `x.cypher`, a
+  permission failure) or whose `queryfile.Parse` fails contributes
+  exactly one `file-diag` and the walk moves to the next file (its
+  queries cannot be enumerated). One broken file never aborts the
+  walk.
 - A query whose cypher parse fails contributes one `query-diag`;
   resolution is not attempted (it would re-report the same defect).
   A query whose parse succeeds and whose resolution fails contributes
@@ -323,8 +327,9 @@ One clause, one reason:
   later is backward-compatible — it accepts strictly more trees.
 - **No dotfiles**: hidden files are not sources, and editor artefacts
   match the suffix — an emacs lockfile (`.#people.cypher`) is a
-  dangling symlink whose open would fail the whole run. The clause
-  also excludes the degenerate name `.cypher` (empty stem).
+  dangling symlink whose open would pollute the run with a spurious
+  `file-diag` (§3.3). The clause also excludes the degenerate name
+  `.cypher` (empty stem).
 - **Ordering**: `os.ReadDir` guarantees entries sorted by filename,
   so the rule inherits a stdlib determinism guarantee instead of
   defining one.
@@ -343,7 +348,8 @@ Runs only after stage 8 returned its `[]File`. Steps, in order:
 
 1. `os.Stat` the resolved `OutputDir`. Absent → `os.MkdirAll` (0o755)
    and go to step 5. Present but not a directory → abort
-   (`output: <dir> is not a directory`).
+   (`output: <dir> is not a directory`). Any other stat failure →
+   abort (`output: <os error>`).
 2. `os.ReadDir` the directory. Empty → step 5.
 3. Sweep every entry in `ReadDir` order. An entry is **marked** iff
    it is a regular file whose **first line** (the bytes before the
@@ -352,8 +358,11 @@ Runs only after stage 8 returned its `[]File`. Steps, in order:
    the two fixed halves of `render.go`'s marker, version-agnostic in
    the middle so output written by an older gqlc release passes.
    A subdirectory is never marked (a directory cannot carry the
-   marker). The sweep collects **every** offender, not the first —
-   the abort names them all (ADR 0012: "naming the offending files").
+   marker). A read failure during the sweep aborts as
+   `output: <os error>` — the directory's state cannot be proven, so
+   nothing is touched. The sweep collects **every** offender, not the
+   first — the abort names them all (ADR 0012: "naming the offending
+   files").
 4. Offenders present → abort with the §5.3 message. **Nothing is
    deleted.**
 5. Wipe: `os.Remove` every existing entry (after step 3 they are all
@@ -417,8 +426,9 @@ export.
 
 ### 6.2 `internal/logger` deleted
 
-CLI-0 §5 left `internal/logger` caller-less and deferred its fate to
-CLI-1. Disposition: **deleted**. Three facts decide it: the package
+CLI-0 §5 left `internal/logger` caller-less and assigned `generate`
+(CLI-1) ownership of wiring `logger.Init`. CLI-1 exercises that
+ownership by deciding the opposite: **deleted**. Three facts decide it: the package
 has zero importers (its only caller was the root `main.go` harness
 CLI-0 removed — today only a `.golangci.yml` message string names
 it); its JSON handler writes to **stdout**, which §2.3 pins empty;
