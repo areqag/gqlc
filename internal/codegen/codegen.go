@@ -25,9 +25,11 @@ var _ Generator = (*Codegen)(nil)
 
 // Codegen is the concrete generator. The schema and queries arrive on
 // Input, not New; construction-time knobs arrive through the Option
-// surface. The zero value emits against neo4j-go-driver v5.
+// surface. The zero value emits against neo4j-go-driver v5 and derives
+// the package identifier from Schema.Name.
 type Codegen struct {
 	driverVersion DriverVersion
+	packageName   string
 }
 
 // Option configures a Codegen at construction time.
@@ -55,6 +57,13 @@ func WithDriverVersion(v DriverVersion) Option {
 	return func(c *Codegen) { c.driverVersion = v }
 }
 
+// WithPackageName overrides the Schema.Name-derived package
+// identifier with an explicitly configured one. The empty string —
+// the zero value — keeps the derivation.
+func WithPackageName(name string) Option {
+	return func(c *Codegen) { c.packageName = name }
+}
+
 // New returns a Codegen with the given options applied.
 func New(opts ...Option) *Codegen {
 	c := &Codegen{}
@@ -68,5 +77,5 @@ func New(opts ...Option) *Codegen {
 // deterministic, short-circuits on the first error (§2.3). Returns
 // (nil, err) on failure — never a partial slice.
 func (c *Codegen) Generate(in Input) ([]File, error) {
-	return generate(in, c.driverVersion.target())
+	return generate(in, c.driverVersion.target(), c.packageName)
 }

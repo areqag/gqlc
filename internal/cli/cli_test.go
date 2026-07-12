@@ -43,18 +43,18 @@ func TestRootBareInvocation(t *testing.T) {
 	require.Contains(t, stdout, "\n  version ")
 }
 
-// TestRootHelpCommandList fences the CLI-0 command surface: version
-// and cobra's help are the only listed commands; completion exists but
-// is hidden; generate/init have not landed. Matched as "\n  <name> "
-// list entries — the Short/Long prose contains "Generate"/"generates",
-// so a bare substring check would false-positive.
+// TestRootHelpCommandList fences the CLI-1 command surface: generate,
+// version, and cobra's help are the listed commands; completion exists
+// but is hidden; init has not landed. Matched as "\n  <name> " list
+// entries — the Short/Long prose contains "Generate"/"generates", so a
+// bare substring check would false-positive.
 func TestRootHelpCommandList(t *testing.T) {
 	stdout, _, err := executeRoot(t, "--help")
 	require.NoError(t, err)
 	require.Contains(t, stdout, "\n  version ")
 	require.Contains(t, stdout, "\n  help ")
 	require.NotContains(t, stdout, "\n  completion ")
-	require.NotContains(t, stdout, "\n  generate ")
+	require.Contains(t, stdout, "\n  generate ")
 	require.NotContains(t, stdout, "\n  init ")
 }
 

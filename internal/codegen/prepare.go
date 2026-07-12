@@ -170,6 +170,20 @@ type preparedEntityField struct {
 	Nullable bool
 }
 
+// emittedPackage selects the emitted package identifier: a non-empty
+// configured name (CLI-1 spec §3.4, WithPackageName) wins after
+// validation against the same packageIdent grammar the derivation
+// enforces; the empty string keeps the Schema.Name derivation.
+func emittedPackage(schemaName, configured string) (string, error) {
+	if configured == "" {
+		return derivePackage(schemaName)
+	}
+	if !packageIdent.MatchString(configured) {
+		return "", fmt.Errorf("%w: configured package %q", ErrInvalidPackageName, configured)
+	}
+	return configured, nil
+}
+
 // derivePackage lowers Schema.Name into the emitted package identifier
 // (spec §5.1). The mangle is deterministic: verbatim → ToLower → grammar
 // check. A non-conforming result is ErrInvalidPackageName naming the

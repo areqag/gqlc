@@ -38,5 +38,6 @@ schema-language / query-language / driver axes.`,
 	}
 	root.CompletionOptions.HiddenDefaultCmd = true
 	root.AddCommand(newVersionCmd())
+	root.AddCommand(newGenerateCmd())
 	return root
 }
