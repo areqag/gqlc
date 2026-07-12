@@ -370,6 +370,37 @@ func (s *CodegenSuite) TestWithDriverVersion() {
 	}
 }
 
+// TestWithPackageName pins the CLI-1 §3.4 widening at the unit level:
+// a configured name replaces the Schema.Name derivation across every
+// emitted file; the empty string (the zero value) keeps the derivation
+// so the golden corpus stays byte-identical; a value outside the
+// packageIdent grammar is ErrInvalidPackageName naming the configured
+// string, not the schema name.
+func (s *CodegenSuite) TestWithPackageName() {
+	dir := filepath.Join(fixtureDir, "valid", "skeleton")
+	m := s.loadManifest(dir)
+	sch := s.loadSchema(dir)
+	in := Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
+
+	s.Run("configured name wins", func() {
+		files, err := New(WithPackageName("configuredpkg")).Generate(in)
+		s.Require().NoError(err)
+		s.assertPackage(files, "configuredpkg")
+	})
+	s.Run("empty keeps derivation", func() {
+		files, err := New(WithPackageName("")).Generate(in)
+		s.Require().NoError(err)
+		s.assertPackage(files, m.Package)
+	})
+	s.Run("grammar violation names the configured string", func() {
+		files, err := New(WithPackageName("Not_OK")).Generate(in)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, ErrInvalidPackageName)
+		s.Require().ErrorContains(err, `configured package "Not_OK"`)
+	})
+}
+
 // TestDoubleRun asserts Generate is byte-deterministic: same Input in,
 // byte-identical []File out, twice. Independent of the golden
 // comparison — a golden diff catches within-run nondeterminism (map
