@@ -180,6 +180,7 @@ Every message the loader can produce, with `<src>` a file path or
 | document is not a mapping                | `config: <src>: yaml: unmarshal errors: line <L>: cannot unmarshal <tag> ... into config.versionProbe` |
 | `version` omitted (or null)              | `config: <src>: missing required field "version" (this gqlc supports version 1)`     |
 | `version` not a `!!int` scalar           | `config: <src>: line <L>: field "version" must be a YAML integer (got !!float "1.5")`; non-scalars read `(got a YAML sequence)` |
+| `version` a `!!int` that overflows Go `int` | ``config: <src>: field "version": yaml: unmarshal errors: line <L>: cannot unmarshal !!int `9223372...` into int`` (yaml.v3 truncates the literal) |
 | `version` ≠ 1                            | `config: <src>: declares version <v>; only version 1 is supported`                   |
 | unknown key                              | `config: <src>: yaml: unmarshal errors: line <L>: field <key> not found in type ...` |
 | duplicate key                            | `config: <src>: yaml: unmarshal errors: line <L>: mapping key "<key>" already defined at line <M>` |

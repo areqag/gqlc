@@ -201,6 +201,11 @@ func TestDecodeRejects(t *testing.T) {
 			wantSubs: []string{`line 1: field "version" must be a YAML integer`, "got a YAML sequence"},
 		},
 		{
+			name:     "version overflowing Go int surfaces the yaml error",
+			body:     setKey("version", "9223372036854775808"),
+			wantSubs: []string{`field "version": yaml: unmarshal errors:`, "line 1: cannot unmarshal !!int `9223372...` into int"},
+		},
+		{
 			name:     "non-mapping document cites a readable probe type",
 			body:     "hello\n",
 			wantSubs: []string{"cannot unmarshal !!str `hello`", "config.versionProbe"},
