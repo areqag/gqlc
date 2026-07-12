@@ -1,7 +1,6 @@
 package resolver
 
 import (
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -111,10 +110,10 @@ type callBindingSlot struct {
 
 // parameterUseSite is resolveBranch's second-return element (pinned type per
 // R5 §2.2). In this implementation each site carries one Part's resolved-scope
-// snapshot — enough for the top-level unifier to witness every Use whose Ref
-// names a binding in-scope at that Part (§4.2.4). The parser does not attribute
-// Uses to Parts at the wire level, so per-Part witnessing runs at the top-level
-// resolve() after every branch has resolved its Parts.
+// snapshot — enough for the top-level unifier to witness every Use against
+// the scope its emission-time (branch, part) attribution selects (§4.2.4).
+// Witnessing runs at the top-level resolve() after every branch has resolved
+// its Parts, because a Use may live in any branch.
 type parameterUseSite struct {
 	scope partScope
 }
@@ -782,32 +781,11 @@ func computeDistinct(q query.Query) bool {
 	return false
 }
 
-// unifyParameterUsesAcrossBranches walks each parameter's Uses in emission
-// order, attributes each Use to its lexical branch via a position-cursor over
-// Part-index resets, and witnesses against that branch's Part-indexed scope
-// table (fvo per ADR 0008 amendment 2026-07-06). Witnesses are unified via
-// R2's lattice; the first conflict fires ErrParameterTypeConflict.
-//
-// Position-cursor recovery. The parser walks branches in source order and
-// appends every emission via addParameterUse. Within one branch, Part indices
-// on p.Uses are non-decreasing (WITH-swap only advances). A drop in Part index
-// signals a UNION boundary — curBranch increments. Same-Part boundaries
-// (branch-0 emits Part 0 and branch-1's first emission is also Part 0) are
-// ambiguous by index alone: the cursor defaults to the earlier branch, and
-// the cross-branch fallback below covers the case where that guess misses.
-//
-// Cross-branch fallback for the UNION corpus. If the cursor's target scope
-// does not contain the Use's Ref variable, the Use contributes zero witnesses
-// (bottom by unifier — matches pre-fvo behaviour). If the target scope
-// contains the variable but the property lookup fails with ErrUnknownProperty,
-// the resolver tries every OTHER branch's scope-table at the same Use.Part()
-// index; if any produces a witness, it wins. Only when every branch's scope
-// at Use.Part() fails does ErrUnknownProperty surface. This preserves
-// byte-identity for parameter_across_union_same_name.cypher (Class-A per
-// spec §7.5) while retiring any-valid-witness within a single branch. The
-// residual (same-Part UNION boundary + genuine unknown-property) is recorded
-// as a follow-up per §7.7 — closing it needs a Use.Branch axis (§3.5), out
-// of this cycle's scope.
+// unifyParameterUsesAcrossBranches witnesses each parameter Use against its
+// emission-attributed branch's Part-indexed scope table — Use.Branch selects
+// the branch (gqlc-qcc per ADR 0008 amendment 2026-07-12), Use.Part the Part
+// within it (fvo per ADR 0008 amendment 2026-07-06). Witnesses are unified
+// via R2's lattice; the first conflict fires ErrParameterTypeConflict.
 func unifyParameterUsesAcrossBranches(params []query.Parameter, tables [][]partScope, s schema.Schema) ([]ResolvedParameter, error) {
 	if len(params) == 0 {
 		return []ResolvedParameter{}, nil
@@ -819,20 +797,15 @@ func unifyParameterUsesAcrossBranches(params []query.Parameter, tables [][]partS
 	for _, p := range params {
 		var unified ResolvedType
 		seen := false
-		curBranch := 0
-		prevPart := -1
 		for _, u := range p.Uses {
-			// Part-index-drop cursor: a Part decrease within one parameter's
-			// Uses signals a UNION-boundary transition to the next branch.
-			// Guard against overshoot when a query has fewer branches than
-			// naive index growth would suggest.
-			part := usePart(u)
-			if part < prevPart && curBranch+1 < len(tables) {
-				curBranch++
+			b := u.Branch()
+			if b < 0 || b >= len(tables) {
+				// Defensive: the parser attributes to a valid query-level
+				// branch index by construction — same posture as the Part
+				// guard in witnessAcrossScopes.
+				return nil, fmt.Errorf("%w: Use Branch index %d out of range for query with %d branches", ErrOutOfR0Scope, b, len(tables))
 			}
-			prevPart = part
-
-			ws, err := witnessInBranch(u, tables, curBranch, s)
+			ws, err := witnessAcrossScopes(u, tables[b], s)
 			if err != nil {
 				return nil, err
 			}
@@ -855,64 +828,6 @@ func unifyParameterUsesAcrossBranches(params []query.Parameter, tables [][]partS
 		out = append(out, ResolvedParameter{Name: p.Name, Type: unified})
 	}
 	return out, nil
-}
-
-// usePart returns the branch-relative Part index for a Use. PropertyUse,
-// ExprUse, and ClauseSlotUse each carry the axis (fvo). Unknown variants
-// return 0 — the tripwire lives in witnessAcrossScopes.
-func usePart(u query.Use) int {
-	switch uu := u.(type) {
-	case query.PropertyUse:
-		return uu.Part()
-	case query.ExprUse:
-		return uu.Part()
-	case query.ClauseSlotUse:
-		return uu.Part()
-	default:
-		return 0
-	}
-}
-
-// witnessInBranch dispatches a Use to its lexical branch's scope table,
-// applying the cross-branch fallback for the UNION-same-Part shape. For a
-// PropertyUse, if the primary branch's scope at Use.Part() lacks the Ref
-// variable, the caller receives zero witnesses (bottom by unifier). If it
-// contains the variable but the property lookup fails, retry against every
-// other branch's scope at the same Part index; if all fail, the last
-// ErrUnknownProperty surfaces. ClauseSlotUse and ExprUse remain
-// Part-agnostic — witnessAcrossScopes handles them directly.
-func witnessInBranch(u query.Use, tables [][]partScope, primary int, s schema.Schema) ([]ResolvedType, error) {
-	if _, isProp := u.(query.PropertyUse); !isProp {
-		// Non-property Uses ignore the branch table beyond bounds — pass any
-		// non-empty scopes slice; witnessAcrossScopes never indexes into it
-		// for these variants. Use the primary branch's scopes for shape.
-		return witnessAcrossScopes(u, tables[primary], s)
-	}
-	ws, err := witnessAcrossScopes(u, tables[primary], s)
-	if err == nil {
-		return ws, nil
-	}
-	if !errors.Is(err, ErrUnknownProperty) {
-		return nil, err
-	}
-	// Cross-branch fallback: try every other branch at the same Part.
-	// Preserves byte-identity for parameter_across_union_same_name.cypher.
-	lastErr := err
-	for b := range tables {
-		if b == primary {
-			continue
-		}
-		ws, err = witnessAcrossScopes(u, tables[b], s)
-		if err == nil {
-			return ws, nil
-		}
-		if errors.Is(err, ErrUnknownProperty) {
-			lastErr = err
-			continue
-		}
-		return nil, err
-	}
-	return nil, lastErr
 }
 
 // witnessAcrossScopes produces exactly one witness for a Use — the lexical
