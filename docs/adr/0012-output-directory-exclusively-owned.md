@@ -56,7 +56,7 @@ alongside it.
 - `generate` can never destroy hand-written work; the worst outcome of
   a misconfigured output path is an abort that names the files it
   refused to touch.
-- Because generation is pure and errors accumulate before any write, a
+- Because generation is pure, errors surface before any write: a
   failed run performs no wipe and leaves the directory untouched.
 - Methods cannot be attached to generated types from user code; that is
   accepted, not accidental.

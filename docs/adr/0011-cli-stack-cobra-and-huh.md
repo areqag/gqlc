@@ -37,9 +37,10 @@ present) and mousetrap. The strongest signal that no successor exists:
 Charm, the ecosystem's momentum player, chose to *wrap* cobra
 (charmbracelet/fang) rather than replace it.
 
-**Init form: charm.land/huh/v2.** The one actively-maintained,
-first-class form library in Go. GitHub's own `gh` CLI depends on huh v2
-today — it is the modern interactive-init exemplar. The API fit is
+**Init form: charm.land/huh/v2.** Per the same spike, the one
+actively-maintained, first-class form library in Go; GitHub's own `gh`
+CLI depends on huh v2 as of the spike date — the modern
+interactive-init exemplar. The API fit is
 exact: `huh.NewOptions` builds Select fields from the config package's
 `*Values()` slices, per-field `Validate` hooks take the loader's checks,
 and `Value(&v)` pointer binding pre-fills the edit-existing-config flow

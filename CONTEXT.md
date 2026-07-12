@@ -514,7 +514,8 @@ DO NOT EDIT.`), and each generation run replaces its contents wholesale
 deletion — so hand-written extensions live outside the directory,
 wrapping the generated package rather than joining it.
 _Avoid_: gen dir (colloquial); output package (the generated Go
-package's *name* — a related but distinct config key).
+package's *name* — the config file's `package` key, a related but
+distinct axis).
 
 ## Flagged ambiguities
 
