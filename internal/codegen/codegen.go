@@ -23,15 +23,37 @@ type Generator interface {
 // signature typo on Generate before any test runs.
 var _ Generator = (*Codegen)(nil)
 
-// Codegen is the concrete generator. C0 has no compile-time inputs; the
-// schema and queries arrive on Input, not New. Later stages may add
-// knobs — a version-stamp override for goldens, a target-driver
-// selection — through the Option surface.
-type Codegen struct{}
+// Codegen is the concrete generator. The schema and queries arrive on
+// Input, not New; construction-time knobs arrive through the Option
+// surface. The zero value emits against neo4j-go-driver v5.
+type Codegen struct {
+	driverVersion DriverVersion
+}
 
-// Option configures a Codegen at construction time. The surface is empty
-// at C0; later stages add knobs without churning the constructor.
+// Option configures a Codegen at construction time.
 type Option func(*Codegen)
+
+// DriverVersion selects the neo4j-go-driver major version the generated
+// code imports. The two majors expose a name-identical API surface for
+// everything the emission uses, except that v6 renamed
+// DriverWithContext back to Driver (keeping the old name as an alias);
+// generated v6 code uses the native name.
+type DriverVersion int
+
+const (
+	// DriverV5 targets github.com/neo4j/neo4j-go-driver/v5 — the zero
+	// value and the default.
+	DriverV5 DriverVersion = iota
+	// DriverV6 targets github.com/neo4j/neo4j-go-driver/v6 (requires
+	// Go >= 1.24 in the consuming module).
+	DriverV6
+)
+
+// WithDriverVersion selects the driver major the generated package is
+// emitted against.
+func WithDriverVersion(v DriverVersion) Option {
+	return func(c *Codegen) { c.driverVersion = v }
+}
 
 // New returns a Codegen with the given options applied.
 func New(opts ...Option) *Codegen {
@@ -46,5 +68,5 @@ func New(opts ...Option) *Codegen {
 // deterministic, short-circuits on the first error (§2.3). Returns
 // (nil, err) on failure — never a partial slice.
 func (c *Codegen) Generate(in Input) ([]File, error) {
-	return generate(in)
+	return generate(in, c.driverVersion.target())
 }

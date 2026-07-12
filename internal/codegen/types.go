@@ -190,7 +190,7 @@ func goType(pt graph.PropertyType) (string, bool) {
 		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,
 		graph.TypeDecimal:
 		// The eight unrepresentable widths — no faithful Go carrier on
-		// neo4j-go-driver/v5. Permanent, per §9 (spec).
+		// neo4j-go-driver (v5 and v6 alike). Permanent, per §9 (spec).
 		return "", false
 	}
 	return "", false
