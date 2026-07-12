@@ -226,7 +226,7 @@ encoder drift fails visibly.
   flag precedence, or when a missing file is an error. Policy lives in
   the CLI, mechanism lives here — the same boundary `internal/procsig`
   drew, and the reason both are independently testable.
-- **Required single-value enums.** Every axis started with exactly one
+- **Required enums, no defaults.** Every axis started with exactly one
   member, and each is still a required field. Explicit over implicit: a
   config file states the whole pipeline, so the file is
   self-describing (a reader learns the query language from the file,
