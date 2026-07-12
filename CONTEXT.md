@@ -459,6 +459,25 @@ valid or the application halts.
 
 ## Generation language
 
+**Config file**:
+The hand-written YAML manifest (canonically `gqlc.yaml`) that declares a
+project's generation pipeline: the schema file path, the query directory,
+the output directory and generated package name, an optional
+procedure-signature registry path, and the three **tool axes** — the
+**schema language** the schema file is written in, the **query language**
+queries are written in, and the **driver** whose client library the
+generated code targets. Each axis is a closed vocabulary with exactly one
+member today (gqlc; openCypher; the Neo4j Go v5 driver): the axes exist so
+the file states the whole pipeline explicitly, not because there is a
+choice yet. Every field except the procedure-signature path is required —
+omission, an out-of-vocabulary axis value, or an unsupported version is
+rejected with the valid choices spelled out. The file is versioned (only
+version 1 exists); older versions keep loading when newer ones appear.
+Relative paths are relative to the config file's directory, not the
+invoking process's working directory.
+_Avoid_: settings, manifest, project file (colloquial); config (bare — fine
+informally, but the artifact is the **config file**).
+
 **Query file**:
 A source file holding one or more **named queries**, each introduced by an
 annotation. Splitting a query file into its named queries — and naming
@@ -491,9 +510,10 @@ CLI vocabulary); arity.
   Reserve **parsed** for "syntactically lowered into the query model" — what the
   Cypher parser produces, schema-free; use **validated** for "checked against the
   model and supported by it". A parsed query is not yet a validated query.
-- **"Schema"** means two things: the GQL source construct (use **graph type**)
-  and the parsed Go model `schema.Schema` (use **the model**). Keep them
-  distinct.
+- **"Schema"** means three things: the GQL source construct (use **graph
+  type**), the parsed Go model `schema.Schema` (use **the model**), and the
+  **config file**'s `schema:` key, which names the schema *file's path* (say
+  **schema path**). Keep them distinct.
 - **"Name"** is overloaded across the explicit **type name**, the local
   **alias**, and the **label set**. "A node/edge must have a name" resolves to
   "must have a non-empty label set"; the explicit type name remains optional.

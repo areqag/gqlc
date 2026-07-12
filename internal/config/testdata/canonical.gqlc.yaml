@@ -1,0 +1,9 @@
+version: 1
+schema: schema.gql
+queries: queries/
+output: internal/db
+package: db
+schema_language: gqlc
+query_language: opencypher
+driver: neo4j-go-v5
+procsig: procs.procsig.json
