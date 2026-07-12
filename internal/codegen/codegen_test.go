@@ -328,28 +328,28 @@ func (s *CodegenSuite) TestWithDriverVersion() {
 		gen         *Codegen
 		wantImport  string
 		wantDriver  string
-		banedDriver string
+		bannedDriver string
 	}{
 		{
 			name:        "default is v5",
 			gen:         New(),
 			wantImport:  `"github.com/neo4j/neo4j-go-driver/v5/neo4j"`,
 			wantDriver:  "neo4j.DriverWithContext",
-			banedDriver: "/v6/",
+			bannedDriver: "/v6/",
 		},
 		{
 			name:        "explicit v5",
 			gen:         New(WithDriverVersion(DriverV5)),
 			wantImport:  `"github.com/neo4j/neo4j-go-driver/v5/neo4j"`,
 			wantDriver:  "neo4j.DriverWithContext",
-			banedDriver: "/v6/",
+			bannedDriver: "/v6/",
 		},
 		{
 			name:        "v6",
 			gen:         New(WithDriverVersion(DriverV6)),
 			wantImport:  `"github.com/neo4j/neo4j-go-driver/v6/neo4j"`,
 			wantDriver:  "neo4j.Driver",
-			banedDriver: "DriverWithContext",
+			bannedDriver: "DriverWithContext",
 		},
 	}
 	for _, tc := range cases {
@@ -358,7 +358,7 @@ func (s *CodegenSuite) TestWithDriverVersion() {
 			s.Require().NoError(err)
 			var db []byte
 			for _, f := range files {
-				s.Require().NotContains(string(f.Contents), tc.banedDriver, "file %s", f.Path)
+				s.Require().NotContains(string(f.Contents), tc.bannedDriver, "file %s", f.Path)
 				if f.Path == "db.go" {
 					db = f.Contents
 				}
