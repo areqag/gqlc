@@ -78,9 +78,12 @@ type Driver string
 // DriverNeo4jGoV5 is the official Neo4j Go driver, major version 5.
 const DriverNeo4jGoV5 Driver = "neo4j-go-v5"
 
+// DriverNeo4jGoV6 is the official Neo4j Go driver, major version 6.
+const DriverNeo4jGoV6 Driver = "neo4j-go-v6"
+
 // DriverValues lists every valid Driver. Loader errors and future
 // `gqlc init` prompts both derive their choices from this slice.
-func DriverValues() []Driver { return []Driver{DriverNeo4jGoV5} }
+func DriverValues() []Driver { return []Driver{DriverNeo4jGoV5, DriverNeo4jGoV6} }
 
 // UnmarshalYAML validates vocabulary membership at decode time so the
 // error carries the offending node's line.

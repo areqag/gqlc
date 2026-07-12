@@ -85,7 +85,7 @@ func TestEnumValues(t *testing.T) {
 	if got, want := config.QueryLangValues(), []config.QueryLang{config.QueryLangOpenCypher}; !slices.Equal(got, want) {
 		t.Errorf("QueryLangValues() = %v; want %v", got, want)
 	}
-	if got, want := config.DriverValues(), []config.Driver{config.DriverNeo4jGoV5}; !slices.Equal(got, want) {
+	if got, want := config.DriverValues(), []config.Driver{config.DriverNeo4jGoV5, config.DriverNeo4jGoV6}; !slices.Equal(got, want) {
 		t.Errorf("DriverValues() = %v; want %v", got, want)
 	}
 }
@@ -112,6 +112,8 @@ func TestDecodeValid(t *testing.T) {
 	withoutProcsig.ProcsigPath = ""
 	exportedPackage := canonicalConfig
 	exportedPackage.OutputPackage = "Db"
+	v6Driver := canonicalConfig
+	v6Driver.Driver = config.DriverNeo4jGoV6
 
 	cases := []struct {
 		name string
@@ -122,6 +124,7 @@ func TestDecodeValid(t *testing.T) {
 		{name: "without procsig", body: dropKey("procsig"), want: withoutProcsig},
 		{name: "dangling procsig key is null, treated as omitted", body: setKey("procsig", ""), want: withoutProcsig},
 		{name: "exported-case package accepted", body: setKey("package", "Db"), want: exportedPackage},
+		{name: "v6 driver accepted", body: setKey("driver", "neo4j-go-v6"), want: v6Driver},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -240,7 +243,7 @@ func TestDecodeRejects(t *testing.T) {
 		{
 			name:     "missing driver",
 			body:     dropKey("driver"),
-			wantSubs: []string{`missing required field "driver"`, "valid values: neo4j-go-v5"},
+			wantSubs: []string{`missing required field "driver"`, "valid values: neo4j-go-v5, neo4j-go-v6"},
 		},
 		{
 			name:     "invalid schema_language",
@@ -255,7 +258,7 @@ func TestDecodeRejects(t *testing.T) {
 		{
 			name:     "invalid driver",
 			body:     setKey("driver", "neo4j-go-v4"),
-			wantSubs: []string{`line 8: invalid driver "neo4j-go-v4" (valid values: neo4j-go-v5)`},
+			wantSubs: []string{`line 8: invalid driver "neo4j-go-v4" (valid values: neo4j-go-v5, neo4j-go-v6)`},
 		},
 		{
 			name:     "sequence-valued driver named as such",

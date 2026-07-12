@@ -466,10 +466,11 @@ the output directory and generated package name, an optional
 procedure-signature registry path, and the three **tool axes** — the
 **schema language** the schema file is written in, the **query language**
 queries are written in, and the **driver** whose client library the
-generated code targets. Each axis is a closed vocabulary with exactly one
-member today (gqlc; openCypher; the Neo4j Go v5 driver): the axes exist so
-the file states the whole pipeline explicitly, not because there is a
-choice yet. Every field except the procedure-signature path is required —
+generated code targets. Each axis is a closed vocabulary: the schema and
+query language axes have one member today (gqlc; openCypher), the driver
+axis has two (the Neo4j Go v5 and v6 drivers). The axes exist so the file
+states the whole pipeline explicitly, whether or not an axis offers a
+choice. Every field except the procedure-signature path is required —
 omission, an out-of-vocabulary axis value, or an unsupported version is
 rejected with the valid choices spelled out. The file is versioned (only
 version 1 exists); older versions keep loading when newer ones appear.
