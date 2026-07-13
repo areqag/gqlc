@@ -376,10 +376,8 @@ func (l *listener) mintOptionalGroup() int {
 
 // Category E bypass — the un-suppressed accumulator for the reordered
 // EnterOC_ExistentialSubquery mining loops (spec §1.4). Same body as
-// addParameterUse; the ONLY caller after Phase B is the reordered mining
-// path. Wire-in lands in Phase B; gate on addParameterUse lands in Phase D.
-//
-//nolint:unused // Phase A dead code; wired up in Phase B.
+// addParameterUse; the ONLY caller is the reordered mining path's
+// findParameters loop. Gate on addParameterUse lands in Phase D.
 func (l *listener) addParameterUseUnsuppressed(name string, node antlr.Tree, use query.Use) {
 	idx, ok := l.byParam[name]
 	if !ok {
@@ -838,8 +836,15 @@ func (l *listener) EnterOC_Return(c *gen.OC_ReturnContext) {
 // EnterOC_ExistentialSubquery is a no-op on already-approved nodes
 // (byParam dedup + approved-tree guard in addParameterUse), so the outer
 // sweep may cover the entire subtree without double-recording.
+//
+// Phase B ordering (spec docs/specs/cypher-collection-sink.md §1.4): the
+// three mining loops run BEFORE the subqueryDepth increment so the
+// findParameters sweep records at outer scope. The findParameters loop
+// calls addParameterUseUnsuppressed directly (the designated bypass per
+// §1.2 Category E); mineClauseSlotParameter still routes through the
+// existing addParameterUse — pre-increment, l.suppressed() is false, so
+// Phase D's gate on addParameterUse is a no-op check at this call site.
 func (l *listener) EnterOC_ExistentialSubquery(c *gen.OC_ExistentialSubqueryContext) {
-	l.subqueryDepth++
 	for _, s := range findNodesOfType[gen.IOC_SkipContext](c) {
 		l.mineClauseSlotParameter(s.OC_Expression(), query.ClauseSlotSkip)
 		if l.err != nil {
@@ -860,8 +865,9 @@ func (l *listener) EnterOC_ExistentialSubquery(c *gen.OC_ExistentialSubqueryCont
 		if name == "" {
 			continue
 		}
-		l.addParameterUse(name, p, query.NewExprUse(query.TypeBool{}, query.ExprInPredicate))
+		l.addParameterUseUnsuppressed(name, p, query.NewExprUse(query.TypeBool{}, query.ExprInPredicate))
 	}
+	l.subqueryDepth++
 }
 
 func (l *listener) ExitOC_ExistentialSubquery(*gen.OC_ExistentialSubqueryContext) {
