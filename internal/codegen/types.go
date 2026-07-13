@@ -1,7 +1,6 @@
 package codegen
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
 	"unicode"
@@ -22,8 +21,8 @@ var rowPropAccess = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-
 
 // columnNeedsImports reports whether one prepared row needs dbtype /
 // time in the enclosing file's import block. The list arm walks the
-// row's carried element type recursively; every other arm delegates to
-// a per-kind test on the row's emitted Go type.
+// row's committed element plan recursively; every other arm delegates
+// to a per-kind test on the row's emitted Go type.
 func columnNeedsImports(f preparedRow) (needDbtype, needTime bool) {
 	switch f.Kind {
 	case columnNode, columnEdge, columnEdgeUnion:
@@ -34,29 +33,35 @@ func columnNeedsImports(f preparedRow) (needDbtype, needTime bool) {
 		return true, false
 	case columnTemporal, columnProperty:
 		return goTypeNeedsImports(f.GoType)
-	case columnScalar, columnAny:
+	case columnScalar, columnScalarNull, columnAny:
 		return false, false
 	case columnList:
-		// Walk the element chain for any nested carrier requirement.
-		var walk func(resolver.ResolvedType) (bool, bool)
-		walk = func(t resolver.ResolvedType) (bool, bool) {
-			switch tt := t.(type) {
-			case resolver.ResolvedProperty:
-				ty, ok := goType(tt.Type)
-				if !ok {
-					return false, false
-				}
-				return goTypeNeedsImports(ty)
-			case resolver.ResolvedNode, resolver.ResolvedEdge, resolver.ResolvedEdgeUnion:
-				return true, false
-			case resolver.ResolvedTemporal:
-				return goTypeNeedsImports(temporalGoType(tt.Kind))
-			case resolver.ResolvedList:
-				return walk(tt.Element)
-			}
-			return false, false
-		}
-		return walk(f.ListElem)
+		return listElemNeedsImports(f.ListElem)
+	}
+	return false, false
+}
+
+// listElemNeedsImports walks a preparedListElem tree recursively,
+// reporting whether the element decode uses dbtype / time carriers.
+// Called by columnNeedsImports for columnList rows; render never sees
+// a resolver type. Node / Edge / EdgeUnion arms need dbtype
+// unconditionally (dbtype.Node / dbtype.Relationship carriers, §5.5);
+// Property / Temporal delegate to goTypeNeedsImports on the arm's
+// emitted GoType; List recurses; every other arm needs neither.
+func listElemNeedsImports(e *preparedListElem) (needDbtype, needTime bool) {
+	if e == nil {
+		return false, false
+	}
+	switch e.Kind {
+	case columnNode, columnEdge, columnEdgeUnion:
+		return true, false
+	case columnProperty, columnTemporal:
+		return goTypeNeedsImports(e.GoType)
+	case columnList:
+		return listElemNeedsImports(e.Nested)
+	case columnScalar, columnScalarNull, columnAny:
+		// bare `any` / plain scalar carriers — no dbtype / time.
+		return false, false
 	}
 	return false, false
 }
@@ -238,68 +243,6 @@ func scalarGoType(k resolver.Scalar) string {
 		return "map[string]any"
 	}
 	return "any"
-}
-
-// resolvedListGoType derives the Go type text for a ResolvedType leaf
-// or nested ResolvedList (spec §2.2, §4.7). Returns (text, err):
-// err wraps ErrUnrepresentableWidth for a leaf property width that is
-// unrepresentable. A ResolvedList element recurses; every other leaf is
-// one dispatch on the ResolvedType sum. C5 widens the sum to admit
-// ResolvedEdgeUnion leaves — the derived text is the ambient query's
-// synthesised interface name (<queryName><columnField>); the extra
-// parameters are inert for every non-edgeUnion arm.
-func resolvedListGoType(t resolver.ResolvedType, entities []preparedEntity, entityIndex map[entityLookupKey]int, queryName, columnField string) (string, error) {
-	switch tt := t.(type) {
-	case resolver.ResolvedProperty:
-		ty, ok := goType(tt.Type)
-		if !ok {
-			return "", fmt.Errorf("%w: list element has unrepresentable property width %s", ErrUnrepresentableWidth, tt.Type)
-		}
-		return ty, nil
-	case resolver.ResolvedNode:
-		idx, ok := entityIndex[entityLookupKey{Kind: entityNode, Labels: tt.Labels}]
-		if !ok {
-			return "", fmt.Errorf("%w: list element references unknown node type %q", ErrOutOfC6Scope, string(tt.Labels))
-		}
-		return entities[idx].Name, nil
-	case resolver.ResolvedEdge:
-		idx, ok := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: tt.EdgeKey}]
-		if !ok {
-			return "", fmt.Errorf("%w: list element references unknown edge type %s -[:%s]-> %s", ErrOutOfC6Scope, string(tt.EdgeKey.Source), string(tt.EdgeKey.Label), string(tt.EdgeKey.Target))
-		}
-		return entities[idx].Name, nil
-	case resolver.ResolvedEdgeUnion:
-		// C5 recursion arm: leaf synthesises the same interface name the
-		// top-level Row field would emit (§4.7). Phase A already asserted
-		// len(EdgeKeys) >= 2 and cache membership for the top-level column;
-		// list-of-edgeUnion at Phase A calls into this recursion path only
-		// for the validity probe, and Phase B repeats the derivation at
-		// emission time — so a schema-cache miss at the leaf indicates a
-		// resolver-produced foreign edge and routes through ErrOutOfC6Scope
-		// for uniformity with the top-level edgeUnion admission arm.
-		if len(tt.EdgeKeys) < 2 {
-			return "", fmt.Errorf("%w: list element resolved as edgeUnion with only %d candidate(s) — resolver invariant violated (expected >= 2)", ErrOutOfC6Scope, len(tt.EdgeKeys))
-		}
-		for _, ek := range tt.EdgeKeys {
-			if _, ok := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: ek}]; !ok {
-				return "", fmt.Errorf("%w: list element edgeUnion candidate %s -[:%s]-> %s not declared by schema", ErrOutOfC6Scope, string(ek.Source), string(ek.Label), string(ek.Target))
-			}
-		}
-		return queryName + columnField, nil
-	case resolver.ResolvedTemporal:
-		return temporalGoType(tt.Kind), nil
-	case resolver.ResolvedScalar:
-		return scalarGoType(tt.Kind), nil
-	case resolver.ResolvedUnknown:
-		return "any", nil
-	case resolver.ResolvedList:
-		inner, err := resolvedListGoType(tt.Element, entities, entityIndex, queryName, columnField)
-		if err != nil {
-			return "", err
-		}
-		return "[]" + inner, nil
-	}
-	return "", fmt.Errorf("%w: list element has unknown resolved type %s", ErrOutOfC6Scope, t.String())
 }
 
 // lowerFirstRune lowercases the first rune of s. Used for the
