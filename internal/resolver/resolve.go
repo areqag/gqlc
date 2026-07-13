@@ -58,6 +58,9 @@ func resolve(q query.Query, s schema.Schema, r procsig.Registry) (ValidatedQuery
 // Part whose Ref names an in-scope binding. Threaded out of resolveBranch via
 // parameterUseSite (one site per Part; the caller reconstructs scopes at
 // walk time).
+//
+// Methods (Contains, PropertyUseWitness, WitnessUse) live in scope.go
+// alongside partScope's producer (scope.Snapshot).
 type partScope struct {
 	nodeTypes       map[string]schema.NodeType
 	edgeTypes       map[string]schema.EdgeType
@@ -408,7 +411,11 @@ func unifyParameterUsesAcrossBranches(params []query.Parameter, tables [][]partS
 				// guard in witnessAcrossScopes.
 				return nil, fmt.Errorf("%w: Use Branch index %d out of range for query with %d branches", ErrOutOfR0Scope, b, len(tables))
 			}
-			ws, err := witnessAcrossScopes(u, tables[b], s)
+			sc, err := selectPartScope(u, tables[b])
+			if err != nil {
+				return nil, err
+			}
+			ws, err := sc.WitnessUse(u, s)
 			if err != nil {
 				return nil, err
 			}
@@ -433,70 +440,25 @@ func unifyParameterUsesAcrossBranches(params []query.Parameter, tables [][]partS
 	return out, nil
 }
 
-// witnessAcrossScopes produces exactly one witness for a Use — the lexical
-// Part attribution now recorded on the Use record (fvo per ADR 0008 amendment
-// 2026-07-06) selects the scope. A PropertyUse witnesses against
-// branchScopes[u.Part()] only; if that scope does not contain the Ref's
-// variable, the caller receives zero witnesses (bottom by unifier — matches
-// the pre-fvo behaviour for an unattributed Ref). If the scope contains the
-// variable but the property lookup fails, ErrUnknownProperty surfaces
-// immediately — the pre-fvo any-valid-witness swallowing (R5 §4.2.4) is
-// retired. Non-property faults (ErrOutOfR0Scope for out-of-scope edge Refs,
-// var-length edge property projections) surface immediately.
-//
-// ClauseSlotUse and ExprUse remain Part-agnostic in their type witness —
-// the Part axis on their records is a lexical-attribution property for
-// future consumer stages (§7.6), not a witness discriminator today.
-func witnessAcrossScopes(u query.Use, branchScopes []partScope, s schema.Schema) ([]ResolvedType, error) {
-	switch uu := u.(type) {
-	case query.PropertyUse:
-		ref := uu.Ref()
-		idx := uu.Part()
-		if idx < 0 || idx >= len(branchScopes) {
-			// Defensive: the parser attributes to a valid branch-relative
-			// index by construction. An out-of-range index indicates a
-			// decoder or model corruption — surface honestly.
-			return nil, fmt.Errorf("%w: PropertyUse Part index %d out of range for branch with %d Parts", ErrOutOfR0Scope, idx, len(branchScopes))
-		}
-		sc := branchScopes[idx]
-		if !scopeContains(sc, ref.Variable) {
-			return nil, nil
-		}
-		w, err := propertyUseWitness(ref, sc.nodeTypes, sc.edgeTypes, sc.edgeCands, sc.edgeBindings, sc.nullableBinding, s)
-		if err != nil {
-			return nil, err
-		}
-		return []ResolvedType{w}, nil
-	case query.ClauseSlotUse:
-		return []ResolvedType{ResolvedScalar{Kind: ScalarInt}}, nil
-	case query.ExprUse:
-		switch uu.Position() {
-		case query.ExprInProjection, query.ExprInPredicate,
-			query.ExprInSetValue, query.ExprInDeleteTarget:
-			w, err := resolveType(uu.EnclosingType())
-			if err != nil {
-				return nil, err
-			}
-			return []ResolvedType{w}, nil
-		default:
-			return nil, fmt.Errorf("%w: unknown ExprUse position", ErrOutOfR0Scope)
-		}
-	default:
-		return nil, fmt.Errorf("%w: unknown Use variant (%T)", ErrOutOfR0Scope, u)
+// selectPartScope resolves which partScope the unifier should dispatch to
+// for a given Use. PropertyUse needs the Part-attributed scope so its Ref
+// hits the correct binding tables; the range check that used to live inside
+// witnessAcrossScopes moves here (parser attribution is authoritative — an
+// out-of-range index is decoder / model corruption). ClauseSlotUse and
+// ExprUse are Part-agnostic in their type witness (the Part axis is a
+// lexical-attribution property for future consumer stages, not a witness
+// discriminator today), so any scope value works — a zero partScope keeps
+// the WitnessUse receiver argument-typed without touching branchScopes.
+func selectPartScope(u query.Use, branchScopes []partScope) (partScope, error) {
+	pu, ok := u.(query.PropertyUse)
+	if !ok {
+		return partScope{}, nil
 	}
-}
-
-func scopeContains(sc partScope, v string) bool {
-	if _, ok := sc.nodeTypes[v]; ok {
-		return true
+	idx := pu.Part()
+	if idx < 0 || idx >= len(branchScopes) {
+		return partScope{}, fmt.Errorf("%w: PropertyUse Part index %d out of range for branch with %d Parts", ErrOutOfR0Scope, idx, len(branchScopes))
 	}
-	if _, ok := sc.edgeTypes[v]; ok {
-		return true
-	}
-	if _, ok := sc.edgeCands[v]; ok {
-		return true
-	}
-	return false
+	return branchScopes[idx], nil
 }
 
 // r3EdgeAdmissible screens an EdgeBinding against R3's edge shape predicate:
@@ -845,34 +807,6 @@ func resolveType(t query.Type) (ResolvedType, error) {
 	default:
 		panic(fmt.Sprintf("resolver bug: resolveType reached unhandled query.Type %T", t))
 	}
-}
-
-func propertyUseWitness(ref query.Ref, nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, nullableBinding map[string]bool, s schema.Schema) (ResolvedType, error) {
-	if nt, ok := nodeTypes[ref.Variable]; ok {
-		prop, ok := nt.Properties[ref.Property]
-		if !ok {
-			return nil, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
-		}
-		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable || nullableBinding[ref.Variable]}, nil
-	}
-	_, singleCand := edgeTypes[ref.Variable]
-	cands, multiCand := edgeCands[ref.Variable]
-	if !singleCand && !multiCand {
-		return nil, fmt.Errorf("%w: %s", ErrOutOfR0Scope, ref.Variable)
-	}
-	if binding := edgeBindings[ref.Variable]; binding.Hops() != nil {
-		return nil, fmt.Errorf("%w: property projection on variable-length edge binding: reach list elements via list-element access (UNWIND in R5 or later)", ErrOutOfR0Scope)
-	}
-	edgeNullable := nullableBinding[ref.Variable]
-	if singleCand {
-		et := edgeTypes[ref.Variable]
-		prop, ok := et.Properties[ref.Property]
-		if !ok {
-			return nil, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
-		}
-		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable || edgeNullable}, nil
-	}
-	return unionProperty(cands, s, ref.Variable, ref.Property, edgeNullable)
 }
 
 func bindingVariable(b query.Binding) (string, bool) {

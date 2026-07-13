@@ -906,3 +906,99 @@ func (s *scope) Snapshot() partScope {
 	}
 	return sc
 }
+
+// Contains reports whether variable v names an in-scope entity binding
+// (node, single-cand edge, or edge-union). Used by the parameter-Use
+// walker to decide whether a Ref hits this scope's tables. callTypes
+// and carry-only lanes are NOT observable through partScope per §2.3
+// invariant #3 — a CALL YIELD variable does not surface here.
+func (sc partScope) Contains(v string) bool {
+	if _, ok := sc.nodeTypes[v]; ok {
+		return true
+	}
+	if _, ok := sc.edgeTypes[v]; ok {
+		return true
+	}
+	if _, ok := sc.edgeCands[v]; ok {
+		return true
+	}
+	return false
+}
+
+// PropertyUseWitness resolves a Ref against this scope's binding
+// tables and returns the property's ResolvedType. Assumes Contains
+// has already gated the call — an out-of-scope Ref here surfaces
+// ErrOutOfR0Scope. A var-length edge property projection is rejected
+// with the R5-canonical message. The single-cand / union-cand branch
+// mirrors refProjectionType (§4.5.4-adjacent, but for parameter
+// witnessing rather than projection).
+func (sc partScope) PropertyUseWitness(ref query.Ref, s schema.Schema) (ResolvedType, error) {
+	if nt, ok := sc.nodeTypes[ref.Variable]; ok {
+		prop, ok := nt.Properties[ref.Property]
+		if !ok {
+			return nil, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
+		}
+		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable || sc.nullableBinding[ref.Variable]}, nil
+	}
+	_, singleCand := sc.edgeTypes[ref.Variable]
+	cands, multiCand := sc.edgeCands[ref.Variable]
+	if !singleCand && !multiCand {
+		return nil, fmt.Errorf("%w: %s", ErrOutOfR0Scope, ref.Variable)
+	}
+	if binding := sc.edgeBindings[ref.Variable]; binding.Hops() != nil {
+		return nil, fmt.Errorf("%w: property projection on variable-length edge binding: reach list elements via list-element access (UNWIND in R5 or later)", ErrOutOfR0Scope)
+	}
+	edgeNullable := sc.nullableBinding[ref.Variable]
+	if singleCand {
+		et := sc.edgeTypes[ref.Variable]
+		prop, ok := et.Properties[ref.Property]
+		if !ok {
+			return nil, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
+		}
+		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable || edgeNullable}, nil
+	}
+	return unionProperty(cands, s, ref.Variable, ref.Property, edgeNullable)
+}
+
+// WitnessUse produces exactly one witness (or zero) for a Use. The
+// lexical Part attribution recorded on the Use record (fvo per ADR
+// 0008 amendment 2026-07-06) selects which scope this method runs
+// on — the unifier's selectPartScope helper handles that dispatch;
+// range-checking a PropertyUse's Part index lives at the caller
+// (§6.1). A PropertyUse against a scope that doesn't contain its Ref
+// yields zero witnesses (unifier bottom — matches pre-fvo behaviour).
+// If the scope contains the variable but property lookup fails,
+// ErrUnknownProperty surfaces immediately (the pre-fvo any-valid-
+// witness swallowing is retired). ClauseSlotUse and ExprUse are
+// Part-agnostic — their witness ignores the receiver's tables
+// entirely (a zero partScope is a legal receiver from the caller).
+func (sc partScope) WitnessUse(u query.Use, s schema.Schema) ([]ResolvedType, error) {
+	switch uu := u.(type) {
+	case query.PropertyUse:
+		ref := uu.Ref()
+		if !sc.Contains(ref.Variable) {
+			return nil, nil
+		}
+		w, err := sc.PropertyUseWitness(ref, s)
+		if err != nil {
+			return nil, err
+		}
+		return []ResolvedType{w}, nil
+	case query.ClauseSlotUse:
+		return []ResolvedType{ResolvedScalar{Kind: ScalarInt}}, nil
+	case query.ExprUse:
+		switch uu.Position() {
+		case query.ExprInProjection, query.ExprInPredicate,
+			query.ExprInSetValue, query.ExprInDeleteTarget:
+			w, err := resolveType(uu.EnclosingType())
+			if err != nil {
+				return nil, err
+			}
+			return []ResolvedType{w}, nil
+		default:
+			return nil, fmt.Errorf("%w: unknown ExprUse position", ErrOutOfR0Scope)
+		}
+	default:
+		return nil, fmt.Errorf("%w: unknown Use variant (%T)", ErrOutOfR0Scope, u)
+	}
+}
