@@ -321,7 +321,6 @@ func (l *listener) appendEffect(eff query.Effect) {
 
 // Category B — query-wide structural writes (spec §1.1 B).
 
-//nolint:unused // Phase A dead code; wired up in Phase C.
 func (l *listener) openBranch() {
 	if l.suppressed() {
 		return
@@ -420,16 +419,10 @@ func (l *listener) walk(tree antlr.Tree) error {
 // branch (EnterOC_Union runs first and has already recorded the combinator).
 // Stage 11 §1.2: inside EXISTS { oC_RegularQuery } the ANTLR walker fires
 // EnterOC_SingleQuery for the subquery — we skip it so the outer branch/part
-// pointers stay stable and no phantom branch enters l.branches.
+// pointers stay stable and no phantom branch enters l.branches. Branch creation
+// and the EXISTS suppression check both live in openBranch (spec §1.2 Category B).
 func (l *listener) EnterOC_SingleQuery(*gen.OC_SingleQueryContext) {
-	if l.subqueryDepth > 0 {
-		return
-	}
-	part := newRawPart()
-	br := &rawBranch{parts: []*rawPart{part}}
-	l.branches = append(l.branches, br)
-	l.curBranch = br
-	l.curPart = part
+	l.openBranch()
 }
 
 // EnterOC_Union records the combinator joining the branch about to open to the
