@@ -165,43 +165,17 @@ func resolveBranch(branch query.Branch, s schema.Schema, r procsig.Registry) ([]
 // Part), the branchState exported to Part K+1 (§4.2.2), and the parameter-Use
 // witnesses collected inside this Part.
 func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.Registry) ([]Column, branchState, []parameterUseSite, error) {
-	nodeTypes := make(map[string]schema.NodeType)
-	edgeTypes := make(map[string]schema.EdgeType)
-	edgeKeys := make(map[string]schema.EdgeKey)
-	edgeCands := make(map[string][]schema.EdgeKey)
-	edgeBindings := make(map[string]query.EdgeBinding)
-	callTypes := make(map[string]callBindingSlot)
-	// Carry seed happens BEFORE local bindings write in — local shadows carry
-	// per §4.2.3.
-	for name, nt := range carry.exportedNodeTypes {
-		nodeTypes[name] = nt
-	}
-	for name, et := range carry.exportedEdgeTypes {
-		edgeTypes[name] = et
-	}
-	for name, k := range carry.exportedEdgeKeys {
-		edgeKeys[name] = k
-	}
-	for name, cands := range carry.exportedEdgeCands {
-		edgeCands[name] = cands
-	}
-	for name, b := range carry.exportedEdgeBindings {
-		edgeBindings[name] = b
-	}
-	for name, slot := range carry.exportedCallTypes {
-		callTypes[name] = slot
-	}
+	sc := newScope(carry)
+	sc.Ingest(part)
 
-	// Phase A1: local labelled node bindings (shadows carry) + edge admission
-	// screening + CALL binding admission (R7 §4.1). Unlabelled node bindings
-	// defer to Phase B (with a matching call-collision check at commit).
-	var pendingNodes []query.NodeBinding
-	var supportedEdges []query.EdgeBinding
-	for _, b := range part.Bindings {
+	// Phase A1: local labelled-node / edge / call admission. The
+	// unlabelled-node arm defers to Phase B (InferUnlabelled reads
+	// s.bindings and picks them up). Bind* runs the cross-lane shadow
+	// cascade and the R5/R7 conflict checks.
+	for _, b := range sc.bindings {
 		switch bb := b.(type) {
 		case query.NodeBinding:
 			if len(bb.Labels()) == 0 {
-				pendingNodes = append(pendingNodes, bb)
 				continue
 			}
 			key := bb.Labels().Key()
@@ -209,211 +183,94 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.
 			if !ok {
 				return nil, branchState{}, nil, fmt.Errorf("%w: %s", ErrUnknownLabel, key)
 			}
-			// R7 §4.1.2.1: a carried CALL YIELD scalar cannot re-bind as a
-			// labelled node — the shape-posture extension of R5's LabelSetKey
-			// check. Fires BEFORE the R5 arm so the scalar-vs-entity fault is
-			// named correctly, not masked by the node-vs-node message.
-			if _, seenCall := callTypes[bb.Variable()]; seenCall {
-				return nil, branchState{}, nil, fmt.Errorf("%w: variable %q carried as CALL YIELD scalar, re-bound as %s", ErrPartBindingTypeConflict, bb.Variable(), key)
-			}
-			// R5 §6.4: a labelled re-binding of a carried name whose schema-
-			// typed identity differs from the carry is irreconcilable. Same
-			// LabelSetKey = trivial re-binding, admit. Any pre-existing entry
-			// here can only originate from the carry seed (§4.2.3): local
-			// same-Part siblings with the same variable are merged into one
-			// binding at parse time.
-			if prev, seen := nodeTypes[bb.Variable()]; seen && prev.Labels != nt.Labels {
-				return nil, branchState{}, nil, fmt.Errorf("%w: variable %q carried as %s, re-bound as %s", ErrPartBindingTypeConflict, bb.Variable(), prev.Labels, nt.Labels)
-			}
-			nodeTypes[bb.Variable()] = nt
-			// Local binding shadows any carried edge state at the same name;
-			// R5 §4.2.3 shadowing rule.
-			delete(edgeTypes, bb.Variable())
-			delete(edgeKeys, bb.Variable())
-			delete(edgeCands, bb.Variable())
-			delete(edgeBindings, bb.Variable())
-		case query.EdgeBinding:
-			if err := r3EdgeAdmissible(bb); err != nil {
+			if err := sc.BindNode(bb, nt); err != nil {
 				return nil, branchState{}, nil, err
 			}
-			supportedEdges = append(supportedEdges, bb)
-			if v := bb.Variable(); v != "" {
-				// R7 §4.1.2.2: reciprocal call-vs-edge shape-mismatch guard.
-				if _, seenCall := callTypes[v]; seenCall {
-					return nil, branchState{}, nil, fmt.Errorf("%w: variable %q carried as CALL YIELD scalar, re-bound as edge with labels %s", ErrPartBindingTypeConflict, v, bb.Labels().Key())
-				}
-				// R5 §6.4 edge parity: if the carry seed already carried an
-				// edge binding for `v`, and the local re-bind's label set
-				// differs, that is a Part-cross irreconcilable re-typing.
-				// Same label-set key = trivial re-bind, admit (openCypher
-				// semantics for the analogous node case). Different key =
-				// ErrPartBindingTypeConflict, same sentinel as the node arm.
-				if prev, seen := edgeBindings[v]; seen && prev.Labels().Key() != bb.Labels().Key() {
-					return nil, branchState{}, nil, fmt.Errorf("%w: variable %q carried as edge with labels %s, re-bound with labels %s", ErrPartBindingTypeConflict, v, prev.Labels().Key(), bb.Labels().Key())
-				}
-				edgeBindings[v] = bb
-				// Edge shadows any carried node state.
-				delete(nodeTypes, v)
-				// Local edge re-bind resets any carried closed-edge state
-				// for `v` — Phase A2/C's closeEdge is authoritative for the
-				// new binding's source/target endpoints, which may differ
-				// from the carried binding's even under a trivial re-bind.
-				delete(edgeTypes, v)
-				delete(edgeKeys, v)
-				delete(edgeCands, v)
+		case query.EdgeBinding:
+			if err := sc.BindEdge(bb); err != nil {
+				return nil, branchState{}, nil, err
 			}
 		case query.CallBinding:
-			v := bb.Variable()
-			// R7 §4.1: local CallBinding shadows any carried entity state
-			// at the same name (parser-unreachable belt-and-braces, since
-			// build.go:148-150's imported[v] check rejects the collision
-			// direction at parse). Same posture as R5's local-shadows-carry
-			// rule for node/edge (§4.2.3 R5).
-			delete(nodeTypes, v)
-			delete(edgeTypes, v)
-			delete(edgeKeys, v)
-			delete(edgeCands, v)
-			delete(edgeBindings, v)
-			// Same-Part duplicate CallBinding variable is grammar-impossible
-			// (parser Stage 14 §4.7 ErrVariableKindConflict — see
-			// internal/query/cypher/build.go:127-153). Defensive tripwire.
-			if _, seen := callTypes[v]; seen {
-				return nil, branchState{}, nil, fmt.Errorf("%w: variable %q re-CALL-bound in single part", ErrPartBindingTypeConflict, v)
-			}
-			// 0ig: argument-site assignability. Each CallBinding minted
-			// from the same CALL clause carries the SAME args slice by
-			// parser construction (§4.3.1), so the check runs at most
-			// once per CALL — subsequent bindings from the same clause
-			// hit the same slice header and re-verify the same
-			// assignments.
-			//
-			// Sentinel discipline (spec §8.1): ErrCallArgAssignability is
-			// reserved for the per-position lattice check — the sole
-			// resolver-reachable fail mode this axis introduces. The two
-			// drift arms below (registry miss, arity mismatch) are
-			// parser-authoritative pre-conditions (spec §4.4 trust
-			// posture; ErrUnknownProcedure + ErrProcedureArity fire at
-			// parse-time) and unreachable in-corpus; they surface as
-			// plain non-sentinel errors so a drift bug is loud but does
-			// not pollute the assignability sentinel's fixture semantics.
-			// R7 §5.2 retired ErrOutOfR0Scope at the BindingCall fail-site
-			// so it is not reused here either.
-			if args := bb.Args(); len(args) > 0 {
-				sig, ok := r.Lookup(bb.Procedure())
-				if !ok {
-					return nil, branchState{}, nil, fmt.Errorf("resolver: procedure %q missing from registry (parser drift)", bb.Procedure())
-				}
-				if len(args) != len(sig.Params) {
-					return nil, branchState{}, nil, fmt.Errorf("resolver: procedure %q expects %d arguments, got %d (parser drift)", bb.Procedure(), len(sig.Params), len(args))
-				}
-				for i, a := range args {
-					if !argAssignable(sig.Params[i].Token, a.Type()) {
-						return nil, branchState{}, nil, fmt.Errorf("%w: procedure %q argument %d: cannot assign %s to %s", ErrCallArgAssignability, bb.Procedure(), i, a.Type().String(), sig.Params[i].Token)
-					}
-				}
-			}
-			callTypes[v] = callBindingSlot{
-				resultType:  bb.ResultType(),
-				nullable:    bb.Nullable(),
-				procedure:   bb.Procedure(),
-				sourceField: bb.SourceField(),
+			if err := sc.BindCall(bb, r); err != nil {
+				return nil, branchState{}, nil, err
 			}
 		default:
 			return nil, branchState{}, nil, fmt.Errorf("%w: %s binding", ErrOutOfR0Scope, b.Kind())
 		}
 	}
 
-	// Phase A2: R3-admitted edges — attempt candidate-set formation.
-	deferredEdges := make([]query.EdgeBinding, 0, len(supportedEdges))
-	for _, e := range supportedEdges {
-		src, srcOK := endpointLabels(e.Source(), nodeTypes)
-		tgt, tgtOK := endpointLabels(e.Target(), nodeTypes)
-		if !srcOK || !tgtOK {
-			deferredEdges = append(deferredEdges, e)
-			continue
-		}
-		if err := closeEdge(e, src, tgt, s, edgeTypes, edgeKeys, edgeCands); err != nil {
-			return nil, branchState{}, nil, err
-		}
+	// Phase A2 (defer unfulfilled endpoint edges) + Phase B (infer
+	// unlabelled nodes) + Phase C (retry deferred edges). CloseEdges
+	// stores the deferred set on sc for CloseEdgesDeferred to pick up.
+	if err := sc.CloseEdges(s); err != nil {
+		return nil, branchState{}, nil, err
 	}
-
-	// Phase B: unlabelled-node inference over R3-admitted touching edges.
-	// R7 §4.1.2.1 addendum: pass callTypes so an inferred unlabelled node
-	// whose Variable collides with a carried CALL YIELD scalar fails at
-	// commit with ErrPartBindingTypeConflict, mirroring the labelled arm.
-	if err := inferUnlabelled(pendingNodes, supportedEdges, s, nodeTypes, callTypes); err != nil {
+	if err := sc.InferUnlabelled(s); err != nil {
+		return nil, branchState{}, nil, err
+	}
+	if err := sc.CloseEdgesDeferred(s); err != nil {
 		return nil, branchState{}, nil, err
 	}
 
-	// Phase C: close deferred edges against the now-complete node table.
-	for _, e := range deferredEdges {
-		src, srcOK := endpointLabels(e.Source(), nodeTypes)
-		tgt, tgtOK := endpointLabels(e.Target(), nodeTypes)
-		if !srcOK {
-			return nil, branchState{}, nil, fmt.Errorf("%w: cannot infer type of source endpoint of edge %q", ErrUnknownLabel, e.Variable())
-		}
-		if !tgtOK {
-			return nil, branchState{}, nil, fmt.Errorf("%w: cannot infer type of target endpoint of edge %q", ErrUnknownLabel, e.Variable())
-		}
-		if err := closeEdge(e, src, tgt, s, edgeTypes, edgeKeys, edgeCands); err != nil {
-			return nil, branchState{}, nil, err
-		}
-	}
-
 	// Phase D (§4.6): seed with carry, override with local, then demote.
-	nullableBinding := make(map[string]bool)
-	for name, nb := range carry.exportedNullableBinding {
-		nullableBinding[name] = nb
-	}
-	// Local Bindings override the carry with the local Nullable() bit before
-	// demotion runs. This is what makes a Part K+1 that re-MATCHes an
-	// OPTIONAL-carried `b` see nullableBinding["b"] = false.
-	seedLocalNullability(part.Bindings, nullableBinding)
-	demoteNullableInPlace(part.Bindings, nullableBinding, carry.exportedOptionalGroup)
+	// Nullability seed already ran at newScope (the carry's nullable
+	// bindings landed in sc.nullableBinding). Local Bindings override
+	// the carry before demotion runs so Part K+1 that re-MATCHes an
+	// OPTIONAL-carried `b` sees sc.nullableBinding["b"] = false.
+	//
+	// Transitional bridge: Phases D/E/proj-walk still read the raw
+	// maps via sc.foo field access (legal in-package). Step 3 moves
+	// SeedLocalNullability + DemoteNullability onto scope; step 4
+	// moves the projection walk; step 5 replaces exportScope. This is
+	// the honest bridge D4 permits — same-package field access, not a
+	// throwaway accessor method.
+	seedLocalNullability(sc.bindings, sc.nullableBinding)
+	demoteNullableInPlace(sc.bindings, sc.nullableBinding, sc.carriedGroups)
 
 	// Phase E (R6 §4.1): effect validation. Runs after Phase D so effect
-	// targets see the same schema-committed binding tables and effective-
-	// nullability map that the projection walk sees. First failure short-
-	// circuits.
-	if err := validateEffects(part.Effects, nodeTypes, edgeTypes, edgeCands, edgeBindings, carry.exportedResolvedTypes, s); err != nil {
+	// targets see the same schema-committed binding tables and
+	// effective-nullability map that the projection walk sees. First
+	// failure short-circuits.
+	if err := validateEffects(sc.effects, sc.nodeTypes, sc.edgeTypes, sc.edgeCands, sc.edgeBindings, sc.carriedResolvedTypes, s); err != nil {
 		return nil, branchState{}, nil, err
 	}
 
 	// Ordered in-scope name list — used by ReturnsAll expansion (§4.4.1).
 	// R7 §4.3: buildScopeOrder is widened to include CALL YIELD variables.
-	scopeOrder := buildScopeOrder(part.Bindings, carry.exportedOrder, nodeTypes, edgeBindings, callTypes)
+	scopeOrder := buildScopeOrder(sc.bindings, sc.carriedOrder, sc.nodeTypes, sc.edgeBindings, sc.callTypes)
 
-	// Materialise the Part's ReturnItems: either the parser's Returns verbatim,
-	// or the virtual items §4.4.2 constructs for RETURN * / WITH *. R7's
-	// virtualProjection widening synthesises CALL YIELD RefProjections with
-	// the CallBinding's ResultType (§4.7).
-	items, err := materialiseReturns(part, scopeOrder, carry, nodeTypes, edgeBindings, callTypes)
+	// Materialise the Part's ReturnItems: either the parser's Returns
+	// verbatim, or the virtual items §4.4.2 constructs for RETURN * /
+	// WITH *. R7's virtualProjection widening synthesises CALL YIELD
+	// RefProjections with the CallBinding's ResultType (§4.7).
+	items, err := materialiseReturns(part, scopeOrder, carry, sc.nodeTypes, sc.edgeBindings, sc.callTypes)
 	if err != nil {
 		return nil, branchState{}, nil, err
 	}
 
-	// Projection walk — each item to a Column. GroupingKey stays false here;
-	// resolveBranch fills it on the final Part only.
+	// Projection walk — each item to a Column. GroupingKey stays false
+	// here; resolveBranch fills it on the final Part only.
 	columns := make([]Column, 0, len(items))
 	for _, item := range items {
-		colType, err := projectionType(item.Value, nodeTypes, edgeTypes, edgeKeys, edgeCands, edgeBindings, nullableBinding, callTypes, carry.exportedResolvedTypes, s)
+		colType, err := projectionType(item.Value, sc.nodeTypes, sc.edgeTypes, sc.edgeKeys, sc.edgeCands, sc.edgeBindings, sc.nullableBinding, sc.callTypes, sc.carriedResolvedTypes, s)
 		if err != nil {
 			return nil, branchState{}, nil, err
 		}
 		columns = append(columns, Column{Name: item.Name, Type: colType})
 	}
 
-	// Emit this Part's scope snapshot as one parameterUseSite. The top-level
-	// unifier walks every parameter's Uses against every scope; a PropertyUse
-	// witnesses at the scope whose tables contain its Ref's binding (§4.2.4).
-	site := parameterUseSite{scope: snapshotScope(nodeTypes, edgeTypes, edgeCands, edgeBindings, nullableBinding)}
+	// Emit this Part's scope snapshot as one parameterUseSite. The
+	// top-level unifier walks every parameter's Uses against every
+	// scope; a PropertyUse witnesses at the scope whose tables contain
+	// its Ref's binding (§4.2.4).
+	site := parameterUseSite{scope: sc.Snapshot()}
 
 	// Build the exported branchState for Part K+1. R7 §4.6 adds the
-	// exportedCallTypes lane for CALL YIELD carry-forward. Names surviving
-	// WITH keep their Part-K OPTIONAL group id via exportedOptionalGroup
-	// (locally minted, or inherited from carry), so downstream Parts can
-	// close cross-Part group demotion via the ay9 fixed point.
-	exported := exportScope(part, columns, items, scopeOrder, nodeTypes, edgeTypes, edgeKeys, edgeCands, edgeBindings, nullableBinding, callTypes, carry.exportedOptionalGroup)
+	// exportedCallTypes lane for CALL YIELD carry-forward. Names
+	// surviving WITH keep their Part-K OPTIONAL group id via
+	// exportedOptionalGroup, so downstream Parts can close cross-Part
+	// group demotion via the ay9 fixed point.
+	exported := exportScope(part, columns, items, scopeOrder, sc.nodeTypes, sc.edgeTypes, sc.edgeKeys, sc.edgeCands, sc.edgeBindings, sc.nullableBinding, sc.callTypes, sc.carriedGroups)
 
 	return columns, exported, []parameterUseSite{site}, nil
 }
@@ -894,36 +751,6 @@ func scopeContains(sc partScope, v string) bool {
 		return true
 	}
 	return false
-}
-
-// snapshotScope captures the tables in effect at one Part for the top-level
-// parameter walker. Called at the end of resolvePart against the local (post-
-// carry-seed, post-shadow, post-demote) tables so the snapshot represents the
-// exact tables the parser attributed Uses against.
-func snapshotScope(nodeTypes map[string]schema.NodeType, edgeTypes map[string]schema.EdgeType, edgeCands map[string][]schema.EdgeKey, edgeBindings map[string]query.EdgeBinding, nullableBinding map[string]bool) partScope {
-	sc := partScope{
-		nodeTypes:       make(map[string]schema.NodeType, len(nodeTypes)),
-		edgeTypes:       make(map[string]schema.EdgeType, len(edgeTypes)),
-		edgeCands:       make(map[string][]schema.EdgeKey, len(edgeCands)),
-		edgeBindings:    make(map[string]query.EdgeBinding, len(edgeBindings)),
-		nullableBinding: make(map[string]bool, len(nullableBinding)),
-	}
-	for k, v := range nodeTypes {
-		sc.nodeTypes[k] = v
-	}
-	for k, v := range edgeTypes {
-		sc.edgeTypes[k] = v
-	}
-	for k, v := range edgeCands {
-		sc.edgeCands[k] = v
-	}
-	for k, v := range edgeBindings {
-		sc.edgeBindings[k] = v
-	}
-	for k, v := range nullableBinding {
-		sc.nullableBinding[k] = v
-	}
-	return sc
 }
 
 // r3EdgeAdmissible screens an EdgeBinding against R3's edge shape predicate:
