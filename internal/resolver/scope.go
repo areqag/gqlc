@@ -341,6 +341,183 @@ func (s *scope) HasCall(v string) bool {
 	return ok
 }
 
+// SeedLocalNullability writes each binding's own Nullable() bit into the
+// nullable lane, overwriting any carry entry per §4.6 ("local overrides
+// carry"). Reads s.bindings; writes s.nullableBinding. Anonymous
+// bindings (v == "") skip. Runs before DemoteNullability so the fixed
+// point sees the local-authoritative baseline.
+func (s *scope) SeedLocalNullability() {
+	for _, b := range s.bindings {
+		v, ok := bindingVariable(b)
+		if !ok || v == "" {
+			continue
+		}
+		s.nullableBinding[v] = b.Nullable()
+	}
+}
+
+// DemoteNullability runs the ay9+5xg-widened regime-(a) demotion in
+// place: 5xg pre-pass (a required bare re-reference witnesses the
+// re-referenced binding, flipping its table entry), plus ay9 pre-pass
+// (OPTIONAL-group membership scan seeded from s.carriedGroups and
+// unioned with local declarations, so any one group being proven
+// demotes every member), plus the edge-driven fixed point (§4.4). The
+// 5xg pre-pass runs before the group-closure fixed point and does not
+// touch demotedGroups; the two demotion channels are orthogonal (both
+// write false to the same table, both are monotone, composition is
+// order-independent). The subsequent fixed-point loop may observe
+// 5xg's flipped entries and demote co-introduced siblings via (iv),
+// producing the compose-with-group cascade §8.4 fixture 4 witnesses.
+//
+// s.carriedGroups seeds the group-membership maps from the carry: a
+// WITH-carried binding retains its Part-K OPTIONAL-group id, so
+// proving any member in Part K+1 pulls its cross-Part siblings via
+// the same fixed point. Group ids are per-query and unique across the
+// whole parse (§3.3), so carried and local ids share the same numeric
+// space without collision. A local binding at the same name that
+// carries a distinct local group id overrides the carried id — local
+// shadows carry, matching the SeedLocalNullability discipline.
+//
+// Reads s.bindings and s.carriedGroups; writes s.nullableBinding.
+// Parameter-free per §2.2 D1.
+func (s *scope) DemoteNullability() {
+	// 5xg pre-pass: bare-ref demotion. A binding whose parser-time
+	// flag is true was re-referenced in a required bare pattern; the
+	// row-drop witness demotes it. Anonymous bindings (v == "") skip
+	// — they carry no table entry.
+	for _, b := range s.bindings {
+		switch bb := b.(type) {
+		case query.NodeBinding:
+			if bb.ReferencedInRequiredBarePattern() && bb.Variable() != "" {
+				if _, present := s.nullableBinding[bb.Variable()]; present {
+					s.nullableBinding[bb.Variable()] = false
+				}
+			}
+		case query.EdgeBinding:
+			if bb.ReferencedInRequiredBarePattern() && bb.Variable() != "" {
+				if _, present := s.nullableBinding[bb.Variable()]; present {
+					s.nullableBinding[bb.Variable()] = false
+				}
+			}
+		}
+	}
+	// ay9 pre-pass: OPTIONAL-group membership scan. A name may belong to
+	// multiple groups simultaneously — a carried group id from Part K, plus a
+	// fresh local group id if Part K+1 re-declares the name under a new
+	// OPTIONAL MATCH. Any one group being proven demotes the name (and every
+	// other member of that group). Seed from carry first, then union in the
+	// local declarations.
+	members := map[int][]string{}  // group id → named members
+	groupsOf := map[string][]int{} // named member → group ids (may span carry + local)
+	addMember := func(v string, g int) {
+		if v == "" || g <= 0 {
+			return
+		}
+		for _, existing := range groupsOf[v] {
+			if existing == g {
+				return
+			}
+		}
+		groupsOf[v] = append(groupsOf[v], g)
+		members[g] = append(members[g], v)
+	}
+	for name, g := range s.carriedGroups {
+		addMember(name, g)
+	}
+	for _, b := range s.bindings {
+		switch bb := b.(type) {
+		case query.NodeBinding:
+			addMember(bb.Variable(), bb.OptionalGroup())
+		case query.EdgeBinding:
+			addMember(bb.Variable(), bb.OptionalGroup())
+		}
+	}
+	demotedGroups := map[int]bool{}
+	demoteGroup := func(g int) bool {
+		if g == 0 || demotedGroups[g] {
+			return false
+		}
+		demotedGroups[g] = true
+		for _, m := range members[g] {
+			if _, present := s.nullableBinding[m]; present {
+				s.nullableBinding[m] = false
+			}
+		}
+		return true
+	}
+	// A carried binding whose local Nullable() entry in the table is
+	// already false (either from SeedLocalNullability's re-MATCH
+	// override or from the 5xg pre-pass) is a proven witness for its
+	// carried group. Fire that closure before the edge-driven fixed
+	// point so a carried group without a local edge witness still
+	// demotes. Map iteration order is unobservable here: demoteGroup
+	// writes false idempotently to each member's table entry, so any
+	// visit order converges to the same fixed point.
+	for name, gs := range groupsOf {
+		if nb, present := s.nullableBinding[name]; present && !nb {
+			for _, g := range gs {
+				demoteGroup(g)
+			}
+		}
+	}
+	demoteGroupsOf := func(v string) bool {
+		changed := false
+		for _, g := range groupsOf[v] {
+			if demoteGroup(g) {
+				changed = true
+			}
+		}
+		return changed
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, b := range s.bindings {
+			e, ok := b.(query.EdgeBinding)
+			if !ok {
+				continue
+			}
+			// ay9: an OPTIONAL edge whose group is proven is an
+			// effective witness (its existence on surviving rows is
+			// established); the §4.4.3 hop gate applies unchanged.
+			if (e.Nullable() && !demotedGroups[e.OptionalGroup()]) || !qualifiedDemoter(e) {
+				continue
+			}
+			for _, side := range [2]query.Endpoint{e.Source(), e.Target()} {
+				ve, ok := side.(query.VarEndpoint)
+				if !ok {
+					continue
+				}
+				v := ve.Variable()
+				if v == "" {
+					continue
+				}
+				if nb, present := s.nullableBinding[v]; present && nb {
+					s.nullableBinding[v] = false
+					changed = true
+				}
+				if demoteGroupsOf(v) {
+					changed = true
+				}
+			}
+		}
+	}
+}
+
+// ValidateEffects is R6 Phase E: walk s.effects in slice order,
+// dispatch each Effect through its per-variant validator, short-
+// circuit on first failure. Reads from the schema-committed binding
+// tables and the carried resolved types on the receiver; never mutates
+// them. Single public entry; the seven per-variant validators are
+// unexported package-level helpers taking *scope (§2.2 §5 step 3).
+func (s *scope) ValidateEffects(sch schema.Schema) error {
+	for _, e := range s.effects {
+		if err := validateEffect(s, e, sch); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Snapshot returns the parameter-witness partScope this Part
 // contributes: a deep copy of the five witness lanes (nodeTypes,
 // edgeTypes, edgeCands, edgeBindings, nullableBinding). Called once
