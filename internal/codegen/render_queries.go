@@ -4,9 +4,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-
-	"github.com/areqag/gqlc/internal/resolver"
-	"github.com/areqag/gqlc/internal/schema"
 )
 
 // sourceGroup carries one <name>.cypher.go file's worth of prepared
@@ -232,9 +229,12 @@ func zeroValueText(p preparedQuery) string {
 			return f.GoType + "{}"
 		case columnList:
 			return "nil"
-		case columnAny, columnEdgeUnion:
+		case columnAny, columnScalarNull, columnEdgeUnion:
 			// edgeUnion single-column return type is the interface; its
-			// zero value is nil (§3.1 / §5.5).
+			// zero value is nil (§3.1 / §5.5). columnScalarNull is
+			// unreachable at the top level today (Phase B routes
+			// ScalarNull to columnAny) but listed for exhaustive-switch
+			// discipline.
 			return "nil"
 		case columnProperty, columnScalar:
 			// Fall through to the per-Go-type dispatch below.
@@ -452,7 +452,10 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p preparedQuery, f prepar
 	case columnNode, columnEdge:
 		writeEntityColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
 		return
-	case columnAny:
+	case columnAny, columnScalarNull:
+		// columnScalarNull at the top level is unreachable today (Phase B
+		// routes ScalarNull to columnAny), but shares columnAny's
+		// record.Get lane and is listed for exhaustive-switch discipline.
 		writeAnyColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
 		return
 	case columnList:
@@ -516,21 +519,18 @@ func writeAnyColumnDecodeIndent(b *strings.Builder, p preparedQuery, f preparedR
 // writeListColumnDecodeIndent emits the list-column arm (spec §5.5):
 // neo4j.GetRecordValue[[]any] followed by a per-element loop that
 // dispatches on the element type. The loop body is derived by
-// writeListElementDecode, which recurses for nested list elements.
-// Nullable list column produces *[]T via the standard pointer-wrap.
+// walkListElemPlan, which recurses for nested list elements. Nullable
+// list column produces *[]T via the standard pointer-wrap.
 func writeListColumnDecodeIndent(b *strings.Builder, p preparedQuery, f preparedRow, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
 	fmt.Fprintf(b, "%s%s, isNil, err := neo4j.GetRecordValue[[]any](%s, %q)\n", indent, varName, recordExpr, f.ColumnName)
 	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
-	// GoType is "[]<inner>"; strip the leading "[]" to get the slice
-	// element Go type.
-	elemGoType := strings.TrimPrefix(f.GoType, "[]")
 	if f.Nullable {
 		// Nullable list: build a *[]T. Nil pointer on null; otherwise
 		// address of the accumulated slice.
 		fmt.Fprintf(b, "%svar %sPtr *%s\n", indent, varName, f.GoType)
 		fmt.Fprintf(b, "%sif !isNil {\n", indent)
 		fmt.Fprintf(b, "%s\tacc := make(%s, 0, len(%s))\n", indent, f.GoType, varName)
-		writeListElementDecode(b, p, f, f.ListElem, elemGoType, "acc", varName, zero, indent+"\t")
+		walkListElemPlan(b, p, f, f.ListElem, "acc", varName, zero, indent+"\t")
 		fmt.Fprintf(b, "%s\t%sPtr = &acc\n", indent, varName)
 		fmt.Fprintf(b, "%s}\n", indent)
 		b.WriteString(indent)
@@ -543,128 +543,106 @@ func writeListColumnDecodeIndent(b *strings.Builder, p preparedQuery, f prepared
 	// Non-nullable: error if isNil; else build acc slice + assign.
 	fmt.Fprintf(b, "%sif isNil {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
 	fmt.Fprintf(b, "%sacc := make(%s, 0, len(%s))\n", indent, f.GoType, varName)
-	writeListElementDecode(b, p, f, f.ListElem, elemGoType, "acc", varName, zero, indent)
+	walkListElemPlan(b, p, f, f.ListElem, "acc", varName, zero, indent)
 	b.WriteString(indent)
 	b.WriteString(assignPrefix[len(indent):])
 	b.WriteString("acc")
 	b.WriteString(assignSuffix)
 }
 
-// writeListElementDecode emits the per-element loop for a list column
-// (spec §5.5). The loop iterates the driver's []any slice one element
-// at a time; the body dispatches on the element's ResolvedType:
-//
-//   - ResolvedProperty leaf → type-assert the driver carrier + narrow
-//   - ResolvedTemporal leaf → type-assert dbtype.<Kind> / time.Time
-//   - ResolvedScalar leaf → type-assert the carrier (map is a legit assert)
-//   - ResolvedUnknown / ScalarNull leaf → append elem directly (any)
-//   - ResolvedNode / ResolvedEdge leaf → type-assert dbtype.Node /
-//     Relationship + decode<EntityName> helper call
-//   - Nested ResolvedList → recurse with a new inner loop
+// walkListElemPlan emits the per-element loop for a list column
+// (spec §1.3, §5.5). The loop iterates the driver's []any slice one
+// element at a time; the body dispatches on the plan's committed Kind
+// via walkListElemBody. Every future resolver variant lands as a new
+// columnKind arm handled once — prepare's buildListElemPlan and the
+// emission switch below both fail to compile until it is handled.
 //
 // The accumulator name (accVar) accumulates elements at this depth;
 // the source slice name (srcVar) is the raw driver []any at this depth.
-func writeListElementDecode(b *strings.Builder, p preparedQuery, f preparedRow, elem resolver.ResolvedType, elemGoType, accVar, srcVar, zero, indent string) {
+func walkListElemPlan(b *strings.Builder, p preparedQuery, f preparedRow, e *preparedListElem, accVar, srcVar, zero, indent string) {
 	iterVar := "elem"
 	if strings.Contains(indent, "\t\t\t\t") { // three levels deep — disambiguate
 		iterVar = "elem" + fmt.Sprint(strings.Count(indent, "\t"))
 	}
-	// The index variable is only used by the element-type-assertion fail
-	// message; a bare-append arm (ResolvedUnknown / ScalarNull) does not
-	// use i. Suppress the unused-var warning by ranging with `_` when the
-	// element decode is one of those two arms.
+	// The index variable is only used by the element-type-assertion
+	// fail message; the two "bare append" arms (columnAny for Unknown,
+	// columnScalarNull for ScalarNull) never emit an index. Suppress
+	// the unused-var warning by ranging with `_` in those cases.
 	indexVar := "i"
-	if listElemUsesBareAppend(elem) {
+	if e.Kind == columnAny || e.Kind == columnScalarNull {
 		indexVar = "_"
 	}
 	fmt.Fprintf(b, "%sfor %s, %s := range %s {\n", indent, indexVar, iterVar, srcVar)
-	inner := indent + "\t"
-	writeListElementBody(b, p, f, elem, elemGoType, accVar, iterVar, zero, inner)
+	walkListElemBody(b, p, f, e, accVar, iterVar, zero, indent+"\t")
 	fmt.Fprintf(b, "%s}\n", indent)
 }
 
-// listElemUsesBareAppend reports whether the list-element decode arm
-// for elem emits a bare `acc = append(acc, elem)` (no type assertion,
-// no error path). Applies to ResolvedUnknown and ResolvedScalar{Null} —
-// both surface `any` at the leaf.
-func listElemUsesBareAppend(elem resolver.ResolvedType) bool {
-	switch tt := elem.(type) {
-	case resolver.ResolvedUnknown:
-		return true
-	case resolver.ResolvedScalar:
-		return tt.Kind == resolver.ScalarNull
-	}
-	return false
-}
-
-// writeListElementBody emits the body of one list-element loop
-// iteration. Called by writeListElementDecode with the element's
-// resolved type, its emitted Go type, the accumulator name (into which
-// the decoded element is appended), the loop variable name (the raw
-// `elem` from the driver []any), the enclosing method's zero-return
-// expression, and the current indent (already deepened by one level
-// relative to the loop head).
-func writeListElementBody(b *strings.Builder, p preparedQuery, f preparedRow, elem resolver.ResolvedType, elemGoType, accVar, iterVar, zero, indent string) {
-	switch tt := elem.(type) {
-	case resolver.ResolvedProperty:
-		carrier := driverCarrier(elemGoType)
+// walkListElemBody emits the body of one list-element loop iteration
+// (spec §5.5). Every arm is a case on the plan's committed columnKind
+// — the render layer walks committed data only, never a resolver type.
+// accVar is the accumulator to append into at this depth; iterVar is
+// the raw `elem` from the driver []any; zero is the enclosing method's
+// zero-return expression; indent is already deepened by one level
+// relative to the loop head.
+func walkListElemBody(b *strings.Builder, p preparedQuery, f preparedRow, e *preparedListElem, accVar, iterVar, zero, indent string) {
+	switch e.Kind {
+	case columnProperty:
+		carrier := e.Carrier
+		if carrier == "" {
+			carrier = e.GoType
+		}
 		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, carrier)
 		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, carrier, f.ColumnName, iterVar, indent)
-		if carrier != elemGoType {
-			fmt.Fprintf(b, "%s%s = append(%s, %s(v))\n", indent, accVar, accVar, elemGoType)
+		if e.UsesConvert {
+			fmt.Fprintf(b, "%s%s = append(%s, %s(v))\n", indent, accVar, accVar, e.GoType)
 		} else {
 			fmt.Fprintf(b, "%s%s = append(%s, v)\n", indent, accVar, accVar)
 		}
-	case resolver.ResolvedTemporal:
-		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, elemGoType)
-		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, elemGoType, f.ColumnName, iterVar, indent)
+	case columnTemporal:
+		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, e.GoType)
+		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, e.GoType, f.ColumnName, iterVar, indent)
 		fmt.Fprintf(b, "%s%s = append(%s, v)\n", indent, accVar, accVar)
-	case resolver.ResolvedScalar:
-		if tt.Kind == resolver.ScalarNull {
-			// Bare append — the element is `any`.
-			fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, iterVar)
-			return
-		}
-		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, elemGoType)
-		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, elemGoType, f.ColumnName, iterVar, indent)
+	case columnScalar:
+		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, e.GoType)
+		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, e.GoType, f.ColumnName, iterVar, indent)
 		fmt.Fprintf(b, "%s%s = append(%s, v)\n", indent, accVar, accVar)
-	case resolver.ResolvedUnknown:
+	case columnScalarNull, columnAny:
 		fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, iterVar)
-	case resolver.ResolvedNode:
+	case columnNode:
 		fmt.Fprintf(b, "%snode, ok := %s.(dbtype.Node)\n", indent, iterVar)
 		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected dbtype.Node, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, iterVar, indent)
-		fmt.Fprintf(b, "%sdecoded, err := decode%s(node)\n", indent, elemGoType)
+		fmt.Fprintf(b, "%sdecoded, err := decode%s(node)\n", indent, e.EntityName)
 		fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
 		fmt.Fprintf(b, "%s%s = append(%s, decoded)\n", indent, accVar, accVar)
-	case resolver.ResolvedEdge:
+	case columnEdge:
 		fmt.Fprintf(b, "%srel, ok := %s.(dbtype.Relationship)\n", indent, iterVar)
 		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected dbtype.Relationship, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, iterVar, indent)
-		fmt.Fprintf(b, "%sdecoded, err := decode%s(rel)\n", indent, elemGoType)
+		fmt.Fprintf(b, "%sdecoded, err := decode%s(rel)\n", indent, e.EntityName)
 		fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
 		fmt.Fprintf(b, "%s%s = append(%s, decoded)\n", indent, accVar, accVar)
-	case resolver.ResolvedEdgeUnion:
-		// C5 list-of-edgeUnion element arm (§5.5). The element type is
-		// the sealed interface (elemGoType); dispatch on rel.Type in
-		// EdgeKeys slice order, matching the top-level column's
-		// preparedEdgeUnion candidates positionally.
-		candidates := findEdgeUnionCandidates(p, f, tt.EdgeKeys)
+	case columnEdgeUnion:
+		// C5 list-of-edgeUnion element arm (§5.5). Plan carries an
+		// index into the owning preparedQuery.EdgeUnions slice; the
+		// dispatch keys are the committed EdgeKeys' Labels and the
+		// candidates are the committed entity struct names — no
+		// re-derivation.
+		u := p.EdgeUnions[e.UnionIdx]
 		fmt.Fprintf(b, "%srel, ok := %s.(dbtype.Relationship)\n", indent, iterVar)
 		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected dbtype.Relationship, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, iterVar, indent)
 		fmt.Fprintf(b, "%sswitch rel.Type {\n", indent)
-		for i, ek := range tt.EdgeKeys {
+		for i, ek := range u.EdgeKeys {
 			fmt.Fprintf(b, "%scase %q:\n", indent, string(ek.Label))
-			fmt.Fprintf(b, "%s\tentity, err := decode%s(rel)\n", indent, candidates[i])
+			fmt.Fprintf(b, "%s\tentity, err := decode%s(rel)\n", indent, u.Candidates[i])
 			fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)\n%s\t}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
 			fmt.Fprintf(b, "%s\t%s = append(%s, entity)\n", indent, accVar, accVar)
 		}
 		fmt.Fprintf(b, "%sdefault:\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: unexpected relationship type %%q\", %q, i, rel.Type)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
-	case resolver.ResolvedList:
+	case columnList:
 		// Nested list: type-assert to []any, then recurse.
-		innerGoType := strings.TrimPrefix(elemGoType, "[]")
 		fmt.Fprintf(b, "%sinner, ok := %s.([]any)\n", indent, iterVar)
 		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected []any, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, iterVar, indent)
-		fmt.Fprintf(b, "%sinnerAcc := make(%s, 0, len(inner))\n", indent, elemGoType)
-		writeListElementDecode(b, p, f, tt.Element, innerGoType, "innerAcc", "inner", zero, indent)
+		fmt.Fprintf(b, "%sinnerAcc := make(%s, 0, len(inner))\n", indent, e.GoType)
+		walkListElemPlan(b, p, f, e.Nested, "innerAcc", "inner", zero, indent)
 		fmt.Fprintf(b, "%s%s = append(%s, innerAcc)\n", indent, accVar, accVar)
 	}
 }
@@ -815,37 +793,4 @@ func writeEntityColumnDecodeIndent(b *strings.Builder, p preparedQuery, f prepar
 	b.WriteString(assignPrefix[len(indent):])
 	b.WriteString(varName)
 	b.WriteString(assignSuffix)
-}
-
-// findEdgeUnionCandidates resolves a list-of-edgeUnion leaf's EdgeKeys
-// to the emitted entity struct names by looking up the owning query's
-// preparedEdgeUnion entries. Phase B ensures every list-of-edgeUnion
-// column has a preparedEdgeUnion entry with matching keys. Callers
-// pass the leaf's EdgeKeys to disambiguate against different edgeUnion
-// columns on the same query.
-func findEdgeUnionCandidates(p preparedQuery, f preparedRow, keys []schema.EdgeKey) []string {
-	for _, u := range p.EdgeUnions {
-		if u.ColumnName != f.ColumnName || u.FieldName != f.Field {
-			continue
-		}
-		if len(u.EdgeKeys) != len(keys) {
-			continue
-		}
-		match := true
-		for i := range keys {
-			if u.EdgeKeys[i] != keys[i] {
-				match = false
-				break
-			}
-		}
-		if match {
-			return u.Candidates
-		}
-	}
-	// Unreachable: Phase B synthesises a matching preparedEdgeUnion.
-	out := make([]string, len(keys))
-	for i, k := range keys {
-		out[i] = string(k.Label)
-	}
-	return out
 }
