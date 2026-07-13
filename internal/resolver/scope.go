@@ -727,6 +727,139 @@ func (s *scope) refProjectionType(ref query.Ref, sch schema.Schema) (ResolvedTyp
 	return unionProperty(cands, sch, ref.Variable, ref.Property, edgeNullable)
 }
 
+// Export builds the branchState Part K passes to Part K+1 (§4.2.2).
+// For an explicit WITH (s.returnsAll == false), the exported set is
+// exactly s.returns keyed by Name. For WITH * (s.returnsAll == true),
+// the exported set is the full in-scope binding set at the moment
+// WITH ran, in s.scopeOrder. For a final Part (RETURN), the returned
+// branchState is irrelevant (no next Part reads it) but we still
+// build it for symmetry. R7 §4.6 adds the exportedCallTypes lane so
+// CALL YIELD scalars survive a bare `WITH v` carry (aliased carry
+// also lands in exportedResolvedTypes via the R5 path).
+//
+// Parameter-free per §2.2 — reads s.returns / s.returnsAll / s.items
+// / s.columns / s.scopeOrder / s.bindings / the seven live binding
+// lanes / s.carriedGroups off the receiver.
+func (s *scope) Export() branchState {
+	out := branchState{
+		exportedNodeTypes:       make(map[string]schema.NodeType),
+		exportedEdgeTypes:       make(map[string]schema.EdgeType),
+		exportedEdgeKeys:        make(map[string]schema.EdgeKey),
+		exportedEdgeCands:       make(map[string][]schema.EdgeKey),
+		exportedEdgeBindings:    make(map[string]query.EdgeBinding),
+		exportedNullableBinding: make(map[string]bool),
+		exportedOptionalGroup:   make(map[string]int),
+		exportedResolvedTypes:   make(map[string]ResolvedType),
+		exportedCallTypes:       make(map[string]callBindingSlot),
+	}
+	// Build the local group-id lookup up front: a name gets its local
+	// binding's OptionalGroup if declared this Part, otherwise its carried
+	// group id from the incoming carry. Local shadows carry — a local
+	// re-declaration with a distinct (possibly zero) group replaces the
+	// carried id. Only names surviving into exportedNames get promoted to
+	// the outgoing carry below.
+	localGroup := map[string]int{}
+	for _, b := range s.bindings {
+		var v string
+		var g int
+		switch bb := b.(type) {
+		case query.NodeBinding:
+			v = bb.Variable()
+			g = bb.OptionalGroup()
+		case query.EdgeBinding:
+			v = bb.Variable()
+			g = bb.OptionalGroup()
+		default:
+			continue
+		}
+		if v == "" {
+			continue
+		}
+		localGroup[v] = g
+	}
+
+	// Names that leave via WITH — for WITH * that's every scopeOrder name;
+	// for an explicit WITH item that's item.Name (which for a bare `WITH v`
+	// equals v, and for `WITH e.p AS x` equals `x`, not `v`).
+	var exportedNames []string
+	if s.returnsAll {
+		exportedNames = s.scopeOrder
+		for i, item := range s.items {
+			// s.items[i].Name == s.scopeOrder[i] for the wildcard-expanded
+			// case. carried-type entries pass through unchanged; binding-
+			// derived entries populate the binding maps below.
+			out.exportedResolvedTypes[item.Name] = s.columns[i].Type
+		}
+	} else {
+		exportedNames = make([]string, 0, len(s.returns))
+		for i, item := range s.returns {
+			exportedNames = append(exportedNames, item.Name)
+			out.exportedResolvedTypes[item.Name] = s.columns[i].Type
+		}
+	}
+	out.exportedOrder = exportedNames
+
+	// Populate the binding maps for exports whose Name corresponds to an
+	// in-scope binding-name (bare RefProjection{Ref{v, ""}}). An aliased
+	// export like `WITH e.p AS x` puts `x` only in exportedResolvedTypes, not
+	// in any binding map — downstream refs to `x` bypass via §4.5.4.
+	iter := s.returns
+	if s.returnsAll {
+		iter = s.items
+	}
+	for _, item := range iter {
+		alias := item.Name
+		rp, ok := item.Value.(query.RefProjection)
+		if !ok {
+			continue
+		}
+		ref := rp.Ref()
+		// Only export a binding entry when the alias matches the bare
+		// binding-name reference (Ref{Variable: v, Property: ""} named by
+		// its own variable). Anything else — property projection, renamed
+		// alias — lives only in exportedResolvedTypes.
+		if ref.Property != "" || alias != ref.Variable {
+			continue
+		}
+		v := ref.Variable
+		if nt, ok := s.nodeTypes[v]; ok {
+			out.exportedNodeTypes[v] = nt
+		}
+		if et, ok := s.edgeTypes[v]; ok {
+			out.exportedEdgeTypes[v] = et
+			if k, ok := s.edgeKeys[v]; ok {
+				out.exportedEdgeKeys[v] = k
+			}
+		}
+		if cands, ok := s.edgeCands[v]; ok {
+			out.exportedEdgeCands[v] = cands
+		}
+		if b, ok := s.edgeBindings[v]; ok {
+			out.exportedEdgeBindings[v] = b
+		}
+		if nb, ok := s.nullableBinding[v]; ok {
+			out.exportedNullableBinding[v] = nb
+		}
+		if slot, ok := s.callTypes[v]; ok {
+			out.exportedCallTypes[v] = slot
+		}
+		// Group id: local wins over carry. A local binding with
+		// OptionalGroup == 0 (e.g. a re-MATCH of a carried OPTIONAL name
+		// in a required MATCH) drops the carried group id — the name is
+		// no longer OPTIONAL-scoped in this Part. Only propagate a
+		// positive id, so downstream Parts do not have to distinguish
+		// "declared, group 0" from "not declared" (§3.3 semantics).
+		if g, ok := localGroup[v]; ok {
+			if g > 0 {
+				out.exportedOptionalGroup[v] = g
+			}
+		} else if g, ok := s.carriedGroups[v]; ok && g > 0 {
+			out.exportedOptionalGroup[v] = g
+		}
+	}
+	return out
+}
+
 // ValidateEffects is R6 Phase E: walk s.effects in slice order,
 // dispatch each Effect through its per-variant validator, short-
 // circuit on first failure. Reads from the schema-committed binding
