@@ -153,15 +153,15 @@ type scope struct {
     callTypes       map[string]callBindingSlot
 
     // Ingested Part — set once by Ingest, read by every phase method.
+    // Only the fields the phase methods actually consume are captured;
+    // part.Distinct is not on scope because computeDistinct walks
+    // q.Branches at the top level and no scope method reads it. Ingest
+    // captures exactly what is read (per Linus's round-2 remark:
+    // vestigial state weakens the deletion-test guarantee).
     bindings   []query.Binding
     effects    []query.Effect
     returns    []query.ReturnItem
     returnsAll bool
-    // Distinct is a Part-level bit consumed by the top-level
-    // computeDistinct walk; scope carries it for symmetry (Ingest
-    // captures the whole Part shape) but ResolveProjections /
-    // Export do not read it.
-    distinct bool
 
     // Projection-walk outputs — set by ResolveProjections, read by
     // Export.
