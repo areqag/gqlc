@@ -39,6 +39,12 @@ type scope struct {
 	returns    []query.ReturnItem
 	returnsAll bool
 
+	// Projection-walk outputs — set by ResolveProjections, read by
+	// Export (§2.1). Empty until ResolveProjections runs.
+	columns    []Column
+	items      []query.ReturnItem
+	scopeOrder []string
+
 	// Carry-in lanes: seeded from the incoming branchState, read by
 	// downstream phases, never written within this Part.
 	carriedResolvedTypes map[string]ResolvedType
@@ -501,6 +507,224 @@ func (s *scope) DemoteNullability() {
 			}
 		}
 	}
+}
+
+// ResolveProjections runs the full §4.4 projection walk end-to-end:
+// builds s.scopeOrder (§4.4.1), materialises s.items (RETURN * / WITH
+// * expansion at §4.4.2, or verbatim s.returns), types each item via
+// projectionType / refProjectionType into s.columns. GroupingKey stays
+// false — fillGroupingKeys is called by resolveBranch on the final
+// Part only.
+//
+// After a successful call, s.scopeOrder / s.items / s.columns are the
+// authoritative outputs Export reads (§2.1). Reads s.bindings /
+// s.carriedOrder / s.nodeTypes / s.edgeBindings / s.callTypes /
+// s.returns / s.returnsAll / s.carriedResolvedTypes; writes the three
+// projection-output fields. First error short-circuits.
+func (s *scope) ResolveProjections(sch schema.Schema) error {
+	s.scopeOrder = s.buildScopeOrder()
+
+	items, err := s.materialiseReturns()
+	if err != nil {
+		return err
+	}
+	s.items = items
+
+	s.columns = make([]Column, 0, len(items))
+	for _, item := range items {
+		colType, err := s.projectionType(item.Value, sch)
+		if err != nil {
+			return err
+		}
+		s.columns = append(s.columns, Column{Name: item.Name, Type: colType})
+	}
+	return nil
+}
+
+// buildScopeOrder computes the deterministic order for RETURN * / WITH *
+// expansion (§4.4.1): local s.bindings in first-appearance order (named
+// only), then s.carriedOrder names not covered by local, in carry order.
+// Also serves as the deterministic export order for a non-ReturnsAll
+// WITH. R7 §4.3 widens the walk to include CALL YIELD variables so
+// standalone-CALL Parts (parser Stage 14 §4.3 ReturnsAll=true)
+// synthesise their column list.
+func (s *scope) buildScopeOrder() []string {
+	seen := make(map[string]bool)
+	out := make([]string, 0, len(s.bindings)+len(s.carriedOrder))
+	for _, b := range s.bindings {
+		v, ok := bindingVariable(b)
+		if !ok || v == "" || seen[v] {
+			continue
+		}
+		// Only include names that actually resolved (Phase A/B/C committed).
+		// Unresolved names are impossible at this point — Phase C either
+		// resolved or short-circuited — but the guard keeps the invariant
+		// tight.
+		if _, isNode := s.nodeTypes[v]; isNode {
+			seen[v] = true
+			out = append(out, v)
+			continue
+		}
+		if _, isEdge := s.edgeBindings[v]; isEdge {
+			seen[v] = true
+			out = append(out, v)
+			continue
+		}
+		if _, isCall := s.callTypes[v]; isCall {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	for _, v := range s.carriedOrder {
+		if seen[v] {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	return out
+}
+
+// materialiseReturns handles the RETURN * / WITH * expansion (§4.4).
+// When s.returnsAll is false, returns s.returns unchanged. When true,
+// builds the virtual ReturnItem sequence over s.scopeOrder (§4.4.2)
+// — one item per in-scope name in own-Part-first, shadowing-dedup
+// order. R7 threads s.callTypes so CALL YIELD variables synthesise a
+// properly-typed RefProjection (§4.7).
+func (s *scope) materialiseReturns() ([]query.ReturnItem, error) {
+	if !s.returnsAll {
+		return s.returns, nil
+	}
+	// Empty in-scope set → empty column list (§4.4.3). Legal shape.
+	if len(s.scopeOrder) == 0 {
+		return nil, nil
+	}
+	items := make([]query.ReturnItem, 0, len(s.scopeOrder))
+	for _, v := range s.scopeOrder {
+		val, err := s.virtualProjection(v)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, query.ReturnItem{Name: v, Value: val})
+	}
+	return items, nil
+}
+
+// virtualProjection constructs the RefProjection (or carried-alias
+// Value) §4.4.2 assigns to a wildcard-expanded name. R7 §4.7: the
+// callTypes lane (appended at the tail) synthesises a CALL YIELD
+// variable's RefProjection with the CallBinding's bridged ResultType.
+func (s *scope) virtualProjection(name string) (query.Projection, error) {
+	if _, ok := s.nodeTypes[name]; ok {
+		return query.NewRefProjection(query.Ref{Variable: name}, query.TypeNode{}), nil
+	}
+	if b, ok := s.edgeBindings[name]; ok {
+		if b.Hops() != nil {
+			return query.NewRefProjection(query.Ref{Variable: name}, query.TypeList{}), nil
+		}
+		return query.NewRefProjection(query.Ref{Variable: name}, query.TypeEdge{}), nil
+	}
+	if slot, ok := s.callTypes[name]; ok {
+		return query.NewRefProjection(query.Ref{Variable: name}, slot.resultType), nil
+	}
+	// Not a binding — must be a projection-alias carried through WITH; the
+	// §4.5.4 bypass path serves it. Use a placeholder RefProjection whose
+	// Value.Type() the walker will consult via the carried-resolved-types map.
+	if _, ok := s.carriedResolvedTypes[name]; ok {
+		return query.NewRefProjection(query.Ref{Variable: name}, query.TypeUnknown{}), nil
+	}
+	// A name in scopeOrder that resolves to nothing is a resolver-side bug —
+	// the scope builder must not put such names in the list.
+	return nil, fmt.Errorf("%w: wildcard-expanded name %q resolves to no binding or carry", ErrOutOfR0Scope, name)
+}
+
+// projectionType dispatches a Projection to its handler and returns
+// the column's resolved type. R5 admits AggregateProjection (§4.5);
+// carried-alias RefProjections (§4.5.4) route through
+// refProjectionType against s.carriedResolvedTypes.
+func (s *scope) projectionType(p query.Projection, sch schema.Schema) (ResolvedType, error) {
+	switch pp := p.(type) {
+	case query.RefProjection:
+		return s.refProjectionType(pp.Ref(), sch)
+	case query.LiteralProjection:
+		return resolveType(pp.Type())
+	case query.FuncProjection:
+		return resolveType(pp.Type())
+	case query.ExprProjection:
+		return resolveType(pp.Type())
+	case query.AggregateProjection:
+		return resolveType(pp.Type())
+	default:
+		return nil, fmt.Errorf("%w: unknown projection variant (%T)", ErrOutOfR0Scope, p)
+	}
+}
+
+// refProjectionType dispatches a RefProjection's Ref against the
+// resolved node and edge binding tables. §4.5.4 adds the carried-alias
+// bypass — when a name lives ONLY in s.carriedResolvedTypes (e.g.
+// `WITH count(n) AS c` seen downstream), refProjectionType returns
+// the carried type directly. R7 §4.2 adds the callTypes lane BEFORE
+// the carried-alias bypass: a bare Ref against a CALL YIELD variable
+// bridges to ResolvedProperty (or ResolvedUnknown for NUMBER); a
+// property lookup on a CALL YIELD variable fires ErrUnknownProperty
+// with a widened message set.
+func (s *scope) refProjectionType(ref query.Ref, sch schema.Schema) (ResolvedType, error) {
+	if nt, ok := s.nodeTypes[ref.Variable]; ok {
+		if ref.Property == "" {
+			return ResolvedNode{Labels: nt.Labels, Nullable: s.nullableBinding[ref.Variable]}, nil
+		}
+		prop, ok := nt.Properties[ref.Property]
+		if !ok {
+			return nil, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
+		}
+		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable || s.nullableBinding[ref.Variable]}, nil
+	}
+	_, singleCand := s.edgeTypes[ref.Variable]
+	cands, multiCand := s.edgeCands[ref.Variable]
+	if !singleCand && !multiCand {
+		// R7 §4.2 — CALL YIELD lane, fired BEFORE the carried-alias bypass.
+		if slot, ok := s.callTypes[ref.Variable]; ok {
+			return callProjectionType(slot, ref, s.nullableBinding)
+		}
+		// §4.5.4 — carried-alias bypass. A RefProjection whose Variable lives
+		// only in carriedResolvedTypes yields the carried type verbatim
+		// (property lookups on a carried alias are unreachable — parser scope
+		// check rejects Ref{"c", "p"} unless c is a binding-name in scope).
+		if rt, ok := s.carriedResolvedTypes[ref.Variable]; ok && ref.Property == "" {
+			return rt, nil
+		}
+		return nil, fmt.Errorf("%w: %s", ErrOutOfR0Scope, ref.Variable)
+	}
+
+	binding := s.edgeBindings[ref.Variable]
+	varLength := binding.Hops() != nil
+	edgeNullable := s.nullableBinding[ref.Variable]
+
+	if ref.Property == "" {
+		var element ResolvedType
+		if singleCand {
+			element = ResolvedEdge{EdgeKey: s.edgeKeys[ref.Variable], Nullable: edgeNullable}
+		} else {
+			element = ResolvedEdgeUnion{EdgeKeys: cands, Nullable: edgeNullable}
+		}
+		if varLength {
+			return ResolvedList{Element: element}, nil
+		}
+		return element, nil
+	}
+
+	if varLength {
+		return nil, fmt.Errorf("%w: property projection on variable-length edge binding: reach list elements via list-element access (UNWIND in R5 or later)", ErrOutOfR0Scope)
+	}
+	if singleCand {
+		et := s.edgeTypes[ref.Variable]
+		prop, ok := et.Properties[ref.Property]
+		if !ok {
+			return nil, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
+		}
+		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable || edgeNullable}, nil
+	}
+	return unionProperty(cands, sch, ref.Variable, ref.Property, edgeNullable)
 }
 
 // ValidateEffects is R6 Phase E: walk s.effects in slice order,
