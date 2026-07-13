@@ -87,10 +87,20 @@ exported; nothing else is.
 package pipeline
 
 // Result is what a successful or diagnostic-accumulating pipeline run
-// yields: the codegen batch and the ordered per-failure diagnostic
-// lines from stage 7. Both slices preserve pipeline order — the
-// caller writes Diagnostics to stderr in order and writes Files to
-// disk in slice order.
+// yields: the codegen batch, the resolved output directory the caller
+// writes it to, and the ordered per-failure diagnostic lines from
+// stage 7. Both slices preserve pipeline order — the caller writes
+// Diagnostics to stderr in order and writes Files to disk in slice
+// order.
+//
+// OutDir is the config's output path joined against
+// filepath.Dir(cfgPath) — the spec §3.1 stage-2 resolution rule —
+// carried out of the pipeline so the caller does not re-load the
+// config to reach it. Populated whenever config load (stage 1)
+// succeeded, i.e. in every non-ErrConfigMissing branch including
+// stage-7 accumulation and every stage 3–8 singular failure. Empty
+// only when Run returned ErrConfigMissing or any other stage-1
+// failure (config never loaded).
 //
 // Field invariant (package doc, restated): Files is non-nil iff
 // Diagnostics is empty and the corresponding Run call returned a nil
@@ -98,6 +108,7 @@ package pipeline
 type Result struct {
     Files       []codegen.File
     Diagnostics []string
+    OutDir      string
 }
 
 // Run executes stages 1–8 of the generate pipeline (CLI-1 §3.1)
@@ -107,18 +118,19 @@ type Result struct {
 //
 // Return contract, exhaustive:
 //
-//   - err != nil                              → singular-stage failure
-//     (CLI-1 §3.1 stages 1–6, 8, plus any axis-mapping drift). Result
-//     is the zero value (Files nil, Diagnostics nil). A missing
-//     config file surfaces as fs.ErrNotExist wrapped with cfgPath —
-//     the CLI's RunE tests with errors.Is and rewrites to the §2.3
-//     user-facing hint.
-//   - err == nil, len(Diagnostics) > 0        → stage-7 accumulation.
-//     Files is nil. Caller prints each diagnostic line and returns
-//     its own summary error (CLI-1 §2.3).
-//   - err == nil, len(Diagnostics) == 0       → success. Files is
-//     non-nil, sorted by Path (codegen.Generate's contract), ready
-//     for the caller's tripwire-guarded write.
+//   - err != nil, ErrConfigMissing or other stage-1 failure → Result
+//     is the zero value (Files nil, Diagnostics nil, OutDir empty).
+//     Config never loaded, so OutDir cannot be computed.
+//   - err != nil, any stage 3–8 failure → Result carries OutDir (the
+//     stage-2 resolved path); Files and Diagnostics are nil.
+//   - err == nil, len(Diagnostics) > 0 → stage-7 accumulation. Files
+//     is nil; OutDir carries the resolved path. Caller prints each
+//     diagnostic line and returns its own summary error (CLI-1 §2.3);
+//     the tripwire does NOT run.
+//   - err == nil, len(Diagnostics) == 0 → success. Files is non-nil,
+//     sorted by Path (codegen.Generate's contract), OutDir carries
+//     the resolved path, ready for the caller's tripwire-guarded
+//     write.
 //
 // No other combinations exist; the caller may rely on this.
 func Run(cfgPath string) (Result, error)
