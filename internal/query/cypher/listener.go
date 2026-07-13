@@ -195,10 +195,200 @@ func newListener(ts *antlr.CommonTokenStream, registry procsig.Registry) *listen
 
 // fail records the first error and is idempotent thereafter: the error found
 // first in walk order is the one Parse returns, and later failures are dropped.
+// Category D of the sink (spec docs/specs/cypher-collection-sink.md §1.2);
+// gate lands in Phase D.
 func (l *listener) fail(err error) {
 	if l.err == nil {
 		l.err = err
 	}
+}
+
+// --- collection sink (spec docs/specs/cypher-collection-sink.md §1.2) ---
+//
+// suppressed is the ONLY read of subqueryDepth outside its own Enter/Exit
+// after Phase C completes. Every listener-state mutation reachable from a
+// walked EXISTS body routes through a sink method with the same one-line
+// prologue below, so a walked suppressed handler body leaks no outer state.
+//
+// Phase A introduces these as dead code — call sites migrate handler by
+// handler in Phase C, and the forbidigo lint gate enables in Phase E.
+// The per-method //nolint:unused directives lift as callers land.
+
+func (l *listener) suppressed() bool { return l.subqueryDepth > 0 }
+
+// Category A — per-part writes (spec §1.1 A). Every method no-ops under
+// suppression; call sites migrate in Phase C.
+
+//nolint:unused // Phase A dead code; wired up in Phase C.
+func (l *listener) appendBinding(rb *rawBinding) {
+	if l.suppressed() {
+		return
+	}
+	l.curPart.bindings = append(l.curPart.bindings, rb)
+}
+
+//nolint:unused // Phase A dead code; wired up in Phase C.
+func (l *listener) appendPathBinding(pb query.PathBinding) {
+	if l.suppressed() {
+		return
+	}
+	l.curPart.pathBindings = append(l.curPart.pathBindings, pb)
+}
+
+// setPathMemberSink routes both the &pathMembers assignment and the nil
+// clear; sink stays nil under suppression, so recordPathNode/recordPathEdge
+// early-return at their existing nil-check (spec §3.2, BLOCKER 1).
+//
+//nolint:unused // Phase A dead code; wired up in Phase C.
+func (l *listener) setPathMemberSink(sink *[]query.PathMember) {
+	if l.suppressed() {
+		return
+	}
+	l.curPart.pathMemberSink = sink
+}
+
+//nolint:unused // Phase A dead code; wired up in Phase C.
+func (l *listener) appendPathMember(m query.PathMember) {
+	if l.suppressed() {
+		return
+	}
+	*l.curPart.pathMemberSink = append(*l.curPart.pathMemberSink, m)
+}
+
+//nolint:unused // Phase A dead code; wired up in Phase C.
+func (l *listener) appendUnwindBinding(ub query.UnwindBinding) {
+	if l.suppressed() {
+		return
+	}
+	l.curPart.unwindBindings = append(l.curPart.unwindBindings, ub)
+}
+
+//nolint:unused // Phase A dead code; wired up in Phase C.
+func (l *listener) appendCallBinding(cb query.CallBinding) {
+	if l.suppressed() {
+		return
+	}
+	l.curPart.callBindings = append(l.curPart.callBindings, cb)
+}
+
+//nolint:unused // Phase A dead code; wired up in Phase C.
+func (l *listener) setCallStandalone() {
+	if l.suppressed() {
+		return
+	}
+	l.curPart.callStandalone = true
+}
+
+//nolint:unused // Phase A dead code; wired up in Phase C.
+func (l *listener) appendReturnItem(item query.ReturnItem) {
+	if l.suppressed() {
+		return
+	}
+	l.curPart.returns = append(l.curPart.returns, item)
+}
+
+//nolint:unused // Phase A dead code; wired up in Phase C.
+func (l *listener) setReturnsAll() {
+	if l.suppressed() {
+		return
+	}
+	l.curPart.returnsAll = true
+}
+
+//nolint:unused // Phase A dead code; wired up in Phase C.
+func (l *listener) setDistinct() {
+	if l.suppressed() {
+		return
+	}
+	l.curPart.distinct = true
+}
+
+//nolint:unused // Phase A dead code; wired up in Phase C.
+func (l *listener) appendRef(r varRef) {
+	if l.suppressed() {
+		return
+	}
+	l.curPart.refs = append(l.curPart.refs, r)
+}
+
+//nolint:unused // Phase A dead code; wired up in Phase C.
+func (l *listener) appendEffect(eff query.Effect) {
+	if l.suppressed() {
+		return
+	}
+	l.curPart.effects = append(l.curPart.effects, eff)
+}
+
+// Category B — query-wide structural writes (spec §1.1 B).
+
+//nolint:unused // Phase A dead code; wired up in Phase C.
+func (l *listener) openBranch() {
+	if l.suppressed() {
+		return
+	}
+	part := newRawPart()
+	br := &rawBranch{parts: []*rawPart{part}}
+	l.branches = append(l.branches, br)
+	l.curBranch = br
+	l.curPart = part
+}
+
+//nolint:unused // Phase A dead code; wired up in Phase C.
+func (l *listener) recordUnionKind(kind query.UnionKind) {
+	if l.suppressed() {
+		return
+	}
+	l.combinators = append(l.combinators, kind)
+}
+
+//nolint:unused // Phase A dead code; wired up in Phase C.
+func (l *listener) closePartOpenNext(imported map[string]query.Type) {
+	if l.suppressed() {
+		return
+	}
+	part := newRawPart()
+	part.imported = imported
+	l.curBranch.parts = append(l.curBranch.parts, part)
+	l.curPart = part
+}
+
+// Category C — query-wide scope counters (spec §1.1 C).
+
+//nolint:unused // Phase A dead code; wired up in Phase C.
+func (l *listener) markWriteSeen() {
+	if l.suppressed() {
+		return
+	}
+	l.writeSeen = true
+}
+
+// mintOptionalGroup returns 0 under suppression so ay9 §3.3's
+// "suppressed clauses consume no id" invariant holds by construction.
+//
+//nolint:unused // Phase A dead code; wired up in Phase C.
+func (l *listener) mintOptionalGroup() int {
+	if l.suppressed() {
+		return 0
+	}
+	l.optionalGroupSeq++
+	return l.optionalGroupSeq
+}
+
+// Category E bypass — the un-suppressed accumulator for the reordered
+// EnterOC_ExistentialSubquery mining loops (spec §1.4). Same body as
+// addParameterUse; the ONLY caller after Phase B is the reordered mining
+// path. Wire-in lands in Phase B; gate on addParameterUse lands in Phase D.
+//
+//nolint:unused // Phase A dead code; wired up in Phase B.
+func (l *listener) addParameterUseUnsuppressed(name string, node antlr.Tree, use query.Use) {
+	idx, ok := l.byParam[name]
+	if !ok {
+		idx = len(l.params)
+		l.byParam[name] = idx
+		l.params = append(l.params, &query.Parameter{Name: name})
+	}
+	l.params[idx].Uses = append(l.params[idx].Uses, attributeUse(use, l.currentPartIndex(), l.currentBranchIndex()))
+	l.approved[node] = true
 }
 
 // SyntaxError records the first lexer/parser syntax error onto the same l.err

@@ -396,6 +396,9 @@ func (l *listener) recordEndpointRefs(eps ...query.Endpoint) {
 // carries the var-length hop range (nil for single-hop); it is honoured only
 // on first introduction, matching the group/directed discipline.
 func (l *listener) mergeBinding(variable string, kind graph.EntityKind, labels graph.LabelSet, source, target query.Endpoint, group int, undirected bool, hops *query.EdgeHops, bare bool) {
+	if l.suppressed() {
+		return
+	}
 	part := l.curPart
 	idx, ok := part.byVar[variable]
 	if !ok {
