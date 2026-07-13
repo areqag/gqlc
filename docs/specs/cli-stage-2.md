@@ -580,7 +580,7 @@ seam `WithInput`/`WithOutput` feed); tea mode *does* need a terminal
 into `Form.Update` — coupling to huh's keymap internals this suite
 declines); and every prompt helper re-reads from the shared reader
 per call with a fresh `bufio.Scanner` (`PromptString`,
-accessibility.go:129, scanner at :131), so a buffered script reader
+accessibility.go:131, scanner at :138), so a buffered script reader
 would be swallowed by the first prompt's read-ahead — scripted tests
 wrap their input in `iotest.OneByteReader`, which keeps every unread
 script byte available to the next prompt's scanner.
