@@ -203,15 +203,9 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.
 	}
 
 	// Phase A2 (defer unfulfilled endpoint edges) + Phase B (infer
-	// unlabelled nodes) + Phase C (retry deferred edges). CloseEdges
-	// stores the deferred set on sc for CloseEdgesDeferred to pick up.
+	// unlabelled nodes) + Phase C (retry deferred edges), all
+	// scope-internal per spec §2.2.
 	if err := sc.CloseEdges(s); err != nil {
-		return nil, branchState{}, nil, err
-	}
-	if err := sc.InferUnlabelled(s); err != nil {
-		return nil, branchState{}, nil, err
-	}
-	if err := sc.CloseEdgesDeferred(s); err != nil {
 		return nil, branchState{}, nil, err
 	}
 

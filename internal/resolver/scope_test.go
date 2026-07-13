@@ -175,7 +175,6 @@ func TestScopeCloseEdgesWritesOnlyEdgeLanes(t *testing.T) {
 	// Snapshot BEFORE CloseEdges to prove only the edge lanes change.
 	before := sc.Snapshot()
 	require.NoError(t, sc.CloseEdges(sch))
-	require.NoError(t, sc.CloseEdgesDeferred(sch))
 	after := sc.Snapshot()
 
 	require.Equal(t, before.nodeTypes, after.nodeTypes)
@@ -357,8 +356,6 @@ func TestScopeDemoteNullabilityEdgeFixedPointTwoRounds(t *testing.T) {
 	require.NoError(t, sc.BindEdge(e1))
 	require.NoError(t, sc.BindEdge(e2))
 	require.NoError(t, sc.CloseEdges(sch))
-	require.NoError(t, sc.InferUnlabelled(sch))
-	require.NoError(t, sc.CloseEdgesDeferred(sch))
 	sc.SeedLocalNullability()
 	sc.DemoteNullability()
 

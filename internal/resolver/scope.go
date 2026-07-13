@@ -51,11 +51,6 @@ type scope struct {
 	carriedOrder         []string
 	carriedGroups        map[string]int
 
-	// deferredEdges bridges CloseEdges (Phase A2) → CloseEdgesDeferred
-	// (Phase C) across the intervening InferUnlabelled (Phase B) call.
-	// Reset to nil at Phase C's end.
-	deferredEdges []query.EdgeBinding
-
 	// ingested guards Ingest's single-shot contract (§4.1 test #10).
 	ingested bool
 }
@@ -241,17 +236,15 @@ func (s *scope) BindCall(cb query.CallBinding, r procsig.Registry) error {
 	return nil
 }
 
-// CloseEdges runs Phases A2 + C: try every edge admitted this Part;
-// defer unfulfilled ones to Phase B; retry after InferUnlabelled fills
-// the node types. Reads s.bindings for the edge list and s.nodeTypes
-// for endpoint lookups. Writes edgeTypes / edgeKeys / edgeCands via
-// the free-function closeEdge helper.
-//
-// A2 and C were two separate loops in resolvePart. Absorbing both
-// here removes the pendingNodes / deferredEdges / supportedEdges
-// locals from resolvePart entirely.
+// CloseEdges runs Phases A2 + B + C scope-internally: try every edge
+// admitted this Part (A2); self-call InferUnlabelled to fill unlabelled
+// node types (B); retry the deferred edges against the post-B node
+// table (C). Reads s.bindings for the edge list and s.nodeTypes for
+// endpoint lookups. Writes edgeTypes / edgeKeys / edgeCands via the
+// free-function closeEdge helper. An endpoint still missing after C
+// is an ErrUnknownLabel.
 func (s *scope) CloseEdges(sch schema.Schema) error {
-	deferredEdges := make([]query.EdgeBinding, 0, len(s.bindings))
+	var deferred []query.EdgeBinding
 	for _, b := range s.bindings {
 		eb, ok := b.(query.EdgeBinding)
 		if !ok {
@@ -260,40 +253,29 @@ func (s *scope) CloseEdges(sch schema.Schema) error {
 		src, srcOK := endpointLabels(eb.Source(), s.nodeTypes)
 		tgt, tgtOK := endpointLabels(eb.Target(), s.nodeTypes)
 		if !srcOK || !tgtOK {
-			deferredEdges = append(deferredEdges, eb)
+			deferred = append(deferred, eb)
 			continue
 		}
 		if err := closeEdge(eb, src, tgt, sch, s.edgeTypes, s.edgeKeys, s.edgeCands); err != nil {
 			return err
 		}
 	}
-	// Phase C is a re-run of A2 against the post-Phase-B node table.
-	// resolvePart used to call InferUnlabelled between A2 and C; the
-	// caller still does — CloseEdgesDeferred picks up here after
-	// InferUnlabelled has committed the unlabelled types.
-	s.deferredEdges = deferredEdges
-	return nil
-}
-
-// CloseEdgesDeferred runs Phase C: retries the edges CloseEdges
-// (Phase A2) deferred, now that InferUnlabelled has populated the
-// node types they were waiting on. An endpoint still missing here is
-// an ErrUnknownLabel.
-func (s *scope) CloseEdgesDeferred(sch schema.Schema) error {
-	for _, eb := range s.deferredEdges {
+	if err := s.InferUnlabelled(sch); err != nil {
+		return err
+	}
+	for _, eb := range deferred {
 		src, srcOK := endpointLabels(eb.Source(), s.nodeTypes)
 		tgt, tgtOK := endpointLabels(eb.Target(), s.nodeTypes)
-		if !srcOK {
+		switch {
+		case !srcOK:
 			return fmt.Errorf("%w: cannot infer type of source endpoint of edge %q", ErrUnknownLabel, eb.Variable())
-		}
-		if !tgtOK {
+		case !tgtOK:
 			return fmt.Errorf("%w: cannot infer type of target endpoint of edge %q", ErrUnknownLabel, eb.Variable())
 		}
 		if err := closeEdge(eb, src, tgt, sch, s.edgeTypes, s.edgeKeys, s.edgeCands); err != nil {
 			return err
 		}
 	}
-	s.deferredEdges = nil
 	return nil
 }
 
