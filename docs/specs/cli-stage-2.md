@@ -47,12 +47,12 @@ tag.
 Two new direct dependencies:
 
 - **`charm.land/huh/v2` v2.0.3** (ADR 0011). Its own go.mod requires
-  27 modules (9 further direct: bubbles/v2, bubbletea/v2, lipgloss/v2,
+  28 modules (10 further direct: bubbles/v2, bubbletea/v2, lipgloss/v2,
   catppuccin/go, five `charmbracelet/x/*` helpers,
   mitchellh/hashstructure/v2; 18 indirect, including `creack/pty`,
   `golang.org/x/sync`, `golang.org/x/sys`) — all pure Go, none
   overlapping today's tree. ADR 0011's "~29 modules" estimate lands at
-  27 in v2.0.3. This is the accepted exception to the lean-dependency
+  28 in v2.0.3. This is the accepted exception to the lean-dependency
   posture; module pruning keeps the linked set smaller than the go.sum
   set.
 - **`golang.org/x/term`** (latest at code time) for the TTY guard
@@ -237,7 +237,12 @@ The wizard starts from pinned defaults:
 | `procsig`         | *(empty)*      | optional key; empty means omitted (§4, field 5)             |
 
 Path/package defaults mirror `internal/config/testdata/canonical.gqlc.yaml`
-so the docs, the loader fixture, and the wizard tell one story. Enum
+so the docs, the loader fixture, and the wizard tell one story — with
+two disclosed deviations: `queries` drops the fixture's incidental
+trailing slash, and `procsig` defaults to empty (key omitted) where
+the fixture carries `procs.procsig.json`, because the fixture exists
+to pin the optional key's encoding while a fresh project has no
+registry. Enum
 defaults are pinned as a **rule**, not per-axis values: the first
 member of each `*Values()` slice — appending a future vocabulary
 member never silently changes a default.
@@ -254,7 +259,7 @@ value matches no option does not merely land its cursor on index 0 —
 `selectValue`/`selectOption` leave `selected` at its zero value on a
 missed match, and `updateValue()` then writes
 `filteredOptions[0].Value` **back through the accessor** the moment
-the field is constructed (field_select.go:98–104, 188–204, 515–519).
+the field is constructed (field_select.go:98–104, 191–204, 515–519).
 An out-of-vocabulary stored value would be silently rewritten to the
 first vocabulary member.
 
@@ -356,13 +361,13 @@ Pinned copy, defaults (fresh flow), and validation:
   leading/trailing whitespace from all five string answers once —
   pinned because the two display modes otherwise diverge (huh's
   accessible `PromptString` trims its return, tea mode does not;
-  accessibility.go:160).
+  accessibility.go:164).
 - The procsig input takes anything; a blank answer (after the trim)
   means "omit the key", matching `Config.ProcsigPath`'s empty-string
   contract and `Save`'s omitempty. One honest limitation, inherited
   from huh: in accessible **edit** mode a prefilled procsig cannot be
   cleared, because an empty answer means "keep the default"
-  (`cmp.Or(input, defaultValue)`, accessibility.go:160); TTY-mode
+  (`cmp.Or(input, defaultValue)`, accessibility.go:164); TTY-mode
   editing clears it fine. Documented, not worked around (§8).
 
 ### 4.3 Package-name validation
@@ -471,7 +476,7 @@ mode). Overwrite safety beats one keystroke of convenience, and the
 false default buys a structural property for free: huh's accessible
 prompts return the default on input EOF and its form runner discards
 field errors entirely (`_ = field.RunAccessible(w, r)`,
-form.go:720–738; "no way to bubble up errors", accessibility.go:146),
+form.go:720–738; "no way to bubble up errors", accessibility.go:148),
 so an input-starved accessible run cascades defaults to the confirm,
 answers Abort, and **can never write** (§7 pins this as a test).
 
@@ -574,11 +579,11 @@ seam `WithInput`/`WithOutput` feed); tea mode *does* need a terminal
 (and huh's own tests bypass it by pumping `tea.KeyPressMsg` values
 into `Form.Update` — coupling to huh's keymap internals this suite
 declines); and every prompt helper re-reads from the shared reader
-per call with a fresh `bufio.Scanner` (accessibility.go:127ff), so a
-buffered script reader would be swallowed by the first prompt's
-read-ahead — scripted tests wrap their input in
-`iotest.OneByteReader`, which keeps every unread script byte available
-to the next prompt's scanner.
+per call with a fresh `bufio.Scanner` (`PromptString`,
+accessibility.go:129, scanner at :131), so a buffered script reader
+would be swallowed by the first prompt's read-ahead — scripted tests
+wrap their input in `iotest.OneByteReader`, which keeps every unread
+script byte available to the next prompt's scanner.
 
 Strategy, in layers:
 
@@ -588,10 +593,35 @@ Strategy, in layers:
 2. **Accessible-driven end-to-end** — `runInitWizard` called directly
    with `accessible=true`, a `OneByteReader`-wrapped script, an output
    buffer, and a `t.TempDir()` path: real huh forms, real validators,
-   real `config.Save`, everything except cobra and the guard. Empty
-   answers take defaults (huh renders the bound value as each
-   prompt's default; Selects derive a numbered default from the
-   pointer binding, field_select.go:757–763); `y` answers the confirm.
+   real `config.Save`, everything except cobra and the guard.
+
+   The script contract, pinned per prompt type. Empty lines do **not**
+   universally take defaults: `PromptString` runs the field validator
+   on the raw scanned line (accessibility.go:156) *before* the
+   `cmp.Or(strings.TrimSpace(input), defaultValue)` substitution
+   (:164), and accessible Inputs print only their Title, never the
+   bound default (field_input.go:442–445). So:
+
+   - **Validated Inputs (fields 1–4)**: an empty line fails the
+     non-blank validator and re-prompts — consuming the next script
+     line and misaligning everything after it. Scripts send an
+     **explicit value line** for each of the four. Edit-flow scripts
+     re-type the stored values, and the pinned choice is to *derive*
+     those lines from the same `Config` the test asserts against,
+     never hand-copy them, so a fixture edit cannot desynchronise
+     script and assertion.
+   - **procsig Input (no validator)**: an empty line is accepted and
+     the substitution yields the bound default — empty in the fresh
+     flow, the stored value in the edit flow (§4.2's unclearable
+     caveat).
+   - **Selects**: an empty line takes the numbered default —
+     `PromptInt` accepts empty when a default exists
+     (accessibility.go:38–41), and that default derives from the
+     pointer binding (field_select.go:757–763) — exactly the seam the
+     §3.3 prefill fence must exercise, so Select answers stay empty
+     lines by design.
+   - **Confirm**: `y` writes; an empty line or `n` yields the bound
+     `false` default → abort.
 3. **Guard and surface via `executeRoot`** — under `go test` the
    process's stdin is not a terminal, so the in-process guard test is
    deterministic in CI.
@@ -606,14 +636,14 @@ Strategy, in layers:
 | `TestInitWarningsAndEpilogue`       | §5.5 lines exactly, resolved against the config's directory; §5.6 text exactly                 |
 | `TestInitNonTTY`                    | `executeRoot(t, "init")` → pinned guard error, empty stdout                                     |
 | `TestRootHelpCommandList`           | `init` flips to Contains (cli_test.go)                                                          |
-| `TestInitFreshWritesCanonical`      | fresh flow, all defaults, confirm Write → file bytes == `Canonical()` of the §3.2 defaults; `config.Load` round-trips; exit-0 path |
+| `TestInitFreshWritesCanonical`      | fresh flow: script types the four §3.2 path/package defaults, empty-lines procsig and the Selects, `y` at confirm → file bytes == `Canonical()` of the §3.2 defaults; `config.Load` round-trips; exit-0 path |
 | `TestInitFreshDecline`              | confirm Abort → pinned abort error, no file on disk                                             |
-| `TestInitEditPrefillRoundTrip`      | canonical file (v6 driver + procsig) → accept all defaults → byte-identical rewrite             |
-| `TestInitEditVocabularyPrefill`     | table over **every** `SchemaLang`/`QueryLang`/`Driver` member: prefilled value survives an accept-all edit — the §3.3 fence against the Select index-0 clobber |
-| `TestInitCanonicalisesNonCanonical` | v1 file with comments, reordered keys, quoted scalars → edit, accept → canonical bytes; comment notice present (§5.7 migration claim) |
+| `TestInitEditPrefillRoundTrip`      | canonical file (v6 driver + procsig) → script re-types the stored Input values (derived from the fixture `Config`), empty-line-accepts procsig and the Selects → byte-identical rewrite |
+| `TestInitEditVocabularyPrefill`     | table over **every** `SchemaLang`/`QueryLang`/`Driver` member: prefilled value survives an edit whose script empty-line-accepts the Select defaults — the §3.3 fence against the Select index-0 clobber |
+| `TestInitCanonicalisesNonCanonical` | v1 file with comments, reordered keys, quoted scalars → edit per the §7 script contract → canonical bytes; comment notice present (§5.7 migration claim) |
 | `TestInitBrokenAbort`               | malformed file → loader error verbatim in output, default choice (abort) → pinned error, file byte-untouched |
-| `TestInitBrokenFresh`               | choose start-fresh → defaults wizard → confirm → canonical defaults overwrite                   |
-| `TestInitInputStarvation`           | empty input reader, accessible → form completes on defaults, confirm defaults to Abort, nothing written (§5.4 property) |
+| `TestInitBrokenFresh`               | choose start-fresh → defaults wizard (script as in `TestInitFreshWritesCanonical`) → confirm → canonical defaults overwrite |
+| `TestInitInputStarvation`           | empty input reader, accessible → EOF bypasses validation (`PromptString` breaks before validating on a failed scan), defaults cascade, confirm defaults to Abort, nothing written (§5.4 property) |
 | `TestCanonicalMatchesSave` (config) | `Canonical()` bytes == the file `Save` writes; fixture equality intact                          |
 | `TestGenerateConfigMissing`         | updated pinned message (§6.1)                                                                   |
 
