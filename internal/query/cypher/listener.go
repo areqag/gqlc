@@ -332,7 +332,6 @@ func (l *listener) openBranch() {
 	l.curPart = part
 }
 
-//nolint:unused // Phase A dead code; wired up in Phase C.
 func (l *listener) recordUnionKind(kind query.UnionKind) {
 	if l.suppressed() {
 		return
@@ -430,16 +429,14 @@ func (l *listener) EnterOC_SingleQuery(*gen.OC_SingleQueryContext) {
 // before the joined branch's EnterOC_SingleQuery, so the combinator precedes its
 // branch and the i-th entry joins branch i+1 to branch i (spec §2). Stage 11
 // §1.2: a UNION inside an EXISTS subquery is likewise suppressed so no phantom
-// combinator enters the outer query's list.
+// combinator enters the outer query's list. Combinator recording and the EXISTS
+// suppression check both live in recordUnionKind (spec §1.2 Category B).
 func (l *listener) EnterOC_Union(c *gen.OC_UnionContext) {
-	if l.subqueryDepth > 0 {
-		return
-	}
 	kind := query.UnionDistinct
 	if c.ALL() != nil {
 		kind = query.UnionAll
 	}
-	l.combinators = append(l.combinators, kind)
+	l.recordUnionKind(kind)
 }
 
 // --- clause collection / rejections (spec §2/§3, category-grained sentinels) ---
