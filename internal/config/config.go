@@ -345,12 +345,12 @@ func decodeV1(body []byte, src string) (Config, error) {
 	return cfg, nil
 }
 
-// Save writes c to path in canonical form (§7): version first, then the
-// wire keys in canonical order, procsig omitted when empty, two-space
-// indent, trailing newline, mode 0o644. Load(Save(c)) round-trips
-// exactly; testdata/canonical.gqlc.yaml pins the bytes. Save exists to
-// serve a future interactive `gqlc init`.
-func (c Config) Save(path string) error {
+// Canonical returns the exact bytes Save writes: the §7 canonical
+// form — version first, then the wire keys in canonical order,
+// procsig omitted when empty, two-space indent, trailing newline.
+// `gqlc init` previews these bytes before the confirm gate, so the
+// preview/write identity is by construction, not parallel encoders.
+func (c Config) Canonical() ([]byte, error) {
 	version := fileVersion
 	w := wireV1{
 		Version:       &version,
@@ -369,12 +369,23 @@ func (c Config) Save(path string) error {
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
 	if err := enc.Encode(w); err != nil {
-		return fmt.Errorf("config: marshal for save: %w", err)
+		return nil, fmt.Errorf("config: marshal for save: %w", err)
 	}
 	if err := enc.Close(); err != nil {
-		return fmt.Errorf("config: marshal for save: %w", err)
+		return nil, fmt.Errorf("config: marshal for save: %w", err)
 	}
-	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+	return buf.Bytes(), nil
+}
+
+// Save writes c to path in canonical form (§7): Canonical's bytes,
+// mode 0o644. Load(Save(c)) round-trips exactly;
+// testdata/canonical.gqlc.yaml pins the bytes.
+func (c Config) Save(path string) error {
+	b, err := c.Canonical()
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, b, 0o644); err != nil {
 		return fmt.Errorf("config: write %s: %w", path, err)
 	}
 	return nil

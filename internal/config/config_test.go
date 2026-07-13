@@ -406,6 +406,39 @@ func TestSaveEmitsFixtureBytes(t *testing.T) {
 	}
 }
 
+// TestCanonicalMatchesSave: Canonical returns exactly the bytes Save
+// writes (cli-stage-2 §5.2) — `gqlc init`'s preview/write identity is
+// by construction, not parallel encoders — and both still match the
+// fixture.
+func TestCanonicalMatchesSave(t *testing.T) {
+	cfg, err := config.Load(canonicalPath)
+	if err != nil {
+		t.Fatalf("Load fixture: %v", err)
+	}
+	canon, err := cfg.Canonical()
+	if err != nil {
+		t.Fatalf("Canonical: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "out.gqlc.yaml")
+	if err := cfg.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read saved: %v", err)
+	}
+	if string(canon) != string(saved) {
+		t.Fatalf("Canonical drifts from Save:\n--- canonical ---\n%s\n--- saved ---\n%s", canon, saved)
+	}
+	fixture, err := os.ReadFile(canonicalPath)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	if string(canon) != string(fixture) {
+		t.Fatalf("Canonical drifts from fixture:\n--- canonical ---\n%s\n--- fixture ---\n%s", canon, fixture)
+	}
+}
+
 // TestSaveLoadRoundTrip is the from-Go direction (`gqlc init`'s path):
 // a Go-constructed Config must Save and Load back identically, and an
 // empty ProcsigPath must omit the procsig key entirely rather than

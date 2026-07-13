@@ -151,7 +151,7 @@ func TestGenerateConfigMissing(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
 	stdout, stderr, err := executeRoot(t, "generate", "-f", cfgPath)
 	require.Error(t, err)
-	want := "no config file at " + cfgPath + " (gqlc init, which creates one, arrives in a later release)"
+	want := "no config file at " + cfgPath + " (run gqlc init to create one)"
 	require.Equal(t, want, err.Error())
 	require.Equal(t, "Error: "+want+"\n", stderr)
 	require.Empty(t, stdout)
