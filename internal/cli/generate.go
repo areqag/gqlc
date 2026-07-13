@@ -69,7 +69,7 @@ func runGenerate(cmd *cobra.Command, cfgPath string) error {
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("no config file at %s (gqlc init, which creates one, arrives in a later release)", cfgPath)
+			return fmt.Errorf("no config file at %s (run gqlc init to create one)", cfgPath)
 		}
 		return err
 	}
