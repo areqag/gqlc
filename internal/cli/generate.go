@@ -11,15 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/areqag/gqlc/internal/cli/pipeline"
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/config"
-	"github.com/areqag/gqlc/internal/procsig"
-	"github.com/areqag/gqlc/internal/query"
-	"github.com/areqag/gqlc/internal/query/cypher"
-	"github.com/areqag/gqlc/internal/queryfile"
-	"github.com/areqag/gqlc/internal/resolver"
-	"github.com/areqag/gqlc/internal/schema"
-	"github.com/areqag/gqlc/internal/schema/gql"
 )
 
 // Marker halves of the generated-file header (render.go), matched
@@ -60,187 +54,57 @@ directory, not the working directory.`,
 	return cmd
 }
 
-// runGenerate is the nine-stage pipeline (spec §3.1). Stages 1-8
-// perform no filesystem writes; the first write is stage 9, after
-// every check has passed.
+// runGenerate is the CLI adapter around pipeline.Run: it delegates
+// stages 1-8 of the pipeline (spec §3.1) to internal/cli/pipeline,
+// prints accumulated diagnostics, forms the summary error, and — on
+// success — invokes the ADR 0012 tripwire-guarded write. The
+// three-way pipeline.Result contract (see pipeline.Run doc) drives
+// the three branches below.
 func runGenerate(cmd *cobra.Command, cfgPath string) error {
-	// Stage 1 — load config. The fs.ErrNotExist branch is the exact
-	// seam config.Load documents for a missing file (§2.3).
-	cfg, err := config.Load(cfgPath)
+	res, err := pipeline.Run(cfgPath)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
+		// Missing config file: keep the sibling-subcommand hint
+		// CLI-side. The pipeline is subcommand-agnostic; the sentinel
+		// is how the CLI keys off that specific stage-1 case (spec
+		// §2.3).
+		if errors.Is(err, pipeline.ErrConfigMissing) {
 			return fmt.Errorf("no config file at %s (run gqlc init to create one)", cfgPath)
 		}
 		return err
 	}
 
-	// Stage 2 — resolve paths against the config file's directory.
-	// No existence checks here; each consuming stage owns its own
-	// open failure.
-	baseDir := filepath.Dir(cfgPath)
-	schemaPath := resolvePath(baseDir, cfg.SchemaPath)
-	queryDir := resolvePath(baseDir, cfg.QueryDir)
-	outDir := resolvePath(baseDir, cfg.OutputDir)
-
-	// Stage 3 — parse schema per the SchemaLang axis (§3.2).
-	var schemaParser schema.Parser
-	switch cfg.SchemaLang {
-	case config.SchemaLangGQLC:
-		schemaParser = gql.New()
-	default:
-		return fmt.Errorf("internal: no pipeline mapping for schema_language %q", string(cfg.SchemaLang))
-	}
-	schemaBytes, err := os.ReadFile(schemaPath)
-	if err != nil {
-		return fmt.Errorf("schema: %w", err)
-	}
-	sch, err := schemaParser.Parse(bytes.NewReader(schemaBytes))
-	if err != nil {
-		return fmt.Errorf("schema %s: %w", schemaPath, err)
-	}
-
-	// Stage 4 — load procsig. When the key is absent the zero
-	// Registry misses on every Lookup, so a CALL in a registry-less
-	// project fails at cypher parse with ErrUnknownProcedure —
-	// the correct diagnosis (§3.1).
-	var reg procsig.Registry
-	if cfg.ProcsigPath != "" {
-		reg, err = procsig.Load(resolvePath(baseDir, cfg.ProcsigPath))
-		if err != nil {
-			return err
-		}
-	}
-
-	// Stage 5 — construct the front end once, outside the query loop.
-	// The same registry feeds both the parser and the resolver.
-	var queryParser query.Parser
-	switch cfg.QueryLang {
-	case config.QueryLangOpenCypher:
-		queryParser = cypher.New(cypher.WithRegistry(reg))
-	default:
-		return fmt.Errorf("internal: no pipeline mapping for query_language %q", string(cfg.QueryLang))
-	}
-	res := resolver.New(sch, resolver.WithRegistry(reg))
-
-	// Stage 6 — discover query files (§4).
-	names, err := discoverQueryFiles(queryDir)
-	if err != nil {
-		return err
-	}
-
-	// Stage 7 — front-end walk with error accumulation (§3.3).
-	batch, diags := frontEndWalk(queryParser, res, queryDir, names)
-	if len(diags) > 0 {
-		for _, d := range diags {
+	// Stage-7 accumulation: nil error + populated Diagnostics. Print
+	// every line to stderr in pipeline order, then return the
+	// singular/plural summary (spec §2.3). Files is nil in this
+	// branch; nothing is written.
+	if len(res.Diagnostics) > 0 {
+		for _, d := range res.Diagnostics {
 			if _, werr := fmt.Fprintln(cmd.ErrOrStderr(), d); werr != nil {
 				return werr
 			}
 		}
 		noun := "errors"
-		if len(diags) == 1 {
+		if len(res.Diagnostics) == 1 {
 			noun = "error"
 		}
-		return fmt.Errorf("generate: %d %s", len(diags), noun)
+		return fmt.Errorf("generate: %d %s", len(res.Diagnostics), noun)
 	}
 
-	// Stage 8 — generate, with the Driver axis mapping (§3.2) and the
-	// configured package name (§3.4; the loader rejects an empty one).
-	var driverOpt codegen.Option
-	switch cfg.Driver {
-	case config.DriverNeo4jGoV5:
-		driverOpt = codegen.WithDriverVersion(codegen.DriverV5)
-	case config.DriverNeo4jGoV6:
-		driverOpt = codegen.WithDriverVersion(codegen.DriverV6)
-	default:
-		return fmt.Errorf("internal: no pipeline mapping for driver %q", string(cfg.Driver))
-	}
-	files, err := codegen.New(driverOpt, codegen.WithPackageName(cfg.OutputPackage)).
-		Generate(codegen.Input{Schema: sch, Queries: batch})
-	if err != nil {
-		return err
-	}
-
-	// Stage 9 — write output under the ADR 0012 protocol (§5).
-	return writeOutput(outDir, files)
+	// Success: write output under the ADR 0012 protocol (spec §5).
+	// The pipeline resolved OutDir at stage 2 (spec §3.1) — the CLI
+	// takes it verbatim rather than re-loading the config.
+	return writeOutput(res.OutDir, res.Files)
 }
 
 // resolvePath joins a config-file-relative path against the config
-// file's directory (spec §3.1 stage 2); absolute paths pass through
-// unchanged.
+// file's directory (CLI-1 spec §3.1 stage 2); absolute paths pass
+// through unchanged. Shared with init.go (warning-line path checks);
+// pipeline.Run has its own internal copy for stage 2.
 func resolvePath(baseDir, p string) string {
 	if filepath.IsAbs(p) {
 		return p
 	}
 	return filepath.Join(baseDir, p)
-}
-
-// discoverQueryFiles applies the §4 discovery rule: a query file is a
-// non-directory entry of queryDir whose name ends in ".cypher" and
-// does not begin with "."; no recursion. os.ReadDir order (lexical by
-// filename) is the diagnostic order and the codegen batch order.
-func discoverQueryFiles(queryDir string) ([]string, error) {
-	entries, err := os.ReadDir(queryDir)
-	if err != nil {
-		return nil, fmt.Errorf("queries: %w", err)
-	}
-	var names []string
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || strings.HasPrefix(name, ".") || !strings.HasSuffix(name, ".cypher") {
-			continue
-		}
-		names = append(names, name)
-	}
-	if len(names) == 0 {
-		return nil, fmt.Errorf("no query files (*.cypher) in %s", queryDir)
-	}
-	return names, nil
-}
-
-// frontEndWalk runs stage 7 (spec §3.1): queryfile parse → cypher
-// parse → resolve for every discovered file, accumulating one
-// diagnostic per failure (§3.3) — one broken query never hides
-// another. Returns the codegen batch (fully-successful queries only,
-// discovery order × annotation order) and the diagnostics in pipeline
-// order, shaped per §2.3: "<path>: <message>" for a file failure,
-// "<path>: query <Name>: <message>" for a query failure.
-func frontEndWalk(queryParser query.Parser, res *resolver.Resolver, queryDir string, names []string) ([]codegen.NamedQuery, []string) {
-	fileParser := queryfile.New()
-	var batch []codegen.NamedQuery
-	var diags []string
-	for _, name := range names {
-		path := filepath.Join(queryDir, name)
-		src, err := os.ReadFile(path)
-		if err != nil {
-			diags = append(diags, fmt.Sprintf("%s: %s", path, err))
-			continue
-		}
-		annotated, err := fileParser.Parse(bytes.NewReader(src))
-		if err != nil {
-			diags = append(diags, fmt.Sprintf("%s: %s", path, err))
-			continue
-		}
-		for _, aq := range annotated {
-			parsed, err := queryParser.Parse(strings.NewReader(aq.Text))
-			if err != nil {
-				diags = append(diags, fmt.Sprintf("%s: query %s: %s", path, aq.Name, err))
-				continue
-			}
-			vq, err := res.Resolve(parsed)
-			if err != nil {
-				diags = append(diags, fmt.Sprintf("%s: query %s: %s", path, aq.Name, err))
-				continue
-			}
-			batch = append(batch, codegen.NamedQuery{
-				Name:        aq.Name,
-				Cardinality: aq.Cardinality,
-				SourceFile:  name,
-				SourceText:  aq.Text,
-				Validated:   vq,
-			})
-		}
-	}
-	return batch, diags
 }
 
 // writeOutput is the §5.1 tripwire algorithm, steps 1-6 in order. It
