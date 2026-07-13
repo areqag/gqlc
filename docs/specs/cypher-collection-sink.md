@@ -2,153 +2,323 @@
 
 The implementation brief for the `gqlc-ls8.2` architecture deepening in the
 Cypher parser listener: replace the fourteen per-handler
-`if l.subqueryDepth > 0 { return }` guards with a single collection-sink
-seam that decides suppression once. Under the curation discipline of
-ADR 0003 (no-expression-tree, curated `query.Query`) and the resolver-API
-seal of ADR 0008.
+`if l.subqueryDepth > 0 { return }` guards with a single suppression seam
+that decides once, for every category of listener state a walked
+`EXISTS { … }` body could otherwise leak into the outer query. Under the
+curation discipline of ADR 0003 (no-expression-tree, curated
+`query.Query`) and the resolver-API seal of ADR 0008.
 
 The current Cypher listener carries a Stage-11 suppression counter,
-`subqueryDepth`, that is incremented at `EnterOC_ExistentialSubquery` and
-decremented at its Exit. Fourteen clause-collecting `Enter*` handlers open
-with an identical prologue — `if l.subqueryDepth > 0 { return }` — so that
-inner clauses of an `EXISTS { … }` subquery never touch the outer
-`curPart` state. Every existing and future clause-collecting handler must
-independently remember the guard. A single forgotten guard produces the
-Stage-11 §1.2 failure mode ADR 0003's Stage-11 note names: a phantom
-inner binding enters the outer part's `Bindings`, and the resolver types
-it with the wrong scope.
+`subqueryDepth`, incremented at `EnterOC_ExistentialSubquery` and
+decremented at its Exit. Fourteen clause-collecting `Enter*` handlers
+open with `if l.subqueryDepth > 0 { return }` so their bodies do not
+touch the outer part. Every existing and future clause-collecting
+handler must independently remember the guard. A forgotten guard
+produces the Stage-11 §1.2 phantom-binding failure ADR 0003 names.
 
-This document specifies a single mutation-routing seam — a
-**collection sink** — that owns the suppression decision. Handlers write
-through the sink unconditionally; the sink decides whether the write
-lands on `curPart` or is discarded. The Stage-11 invariant moves from
-fourteen call sites into one, and the walker's per-handler prologue
-disappears.
+The deepening: handlers stop guarding. Every listener state write is
+routed through a sink method whose one-line prologue is
+`if l.suppressed() { return }`. The suppression predicate is the only
+read of `subqueryDepth > 0` outside the counter's own Enter/Exit.
+
+Crucially, this is **not just about `curPart` writes**. A walked
+suppressed body can also leak through four other listener state
+categories — `l.err` (via `l.fail`), `l.params` / `l.byParam` /
+`l.approved` (via `addParameterUse`), `l.branches` / `l.combinators`
+(structural), and `l.writeSeen` / `l.optionalGroupSeq` (query-wide
+scope-consuming). Every one of these categories must route through
+the sink, or a walked EXISTS body will flip an outer parse from
+`err == nil` to `err != nil`, mint a spurious parameter Use, or grow
+an outer branch. The spec below enumerates each category site by
+site, proves suppression-preserving parity for the specific
+`l.fail` fail-sites a walked body reaches under EXISTS, and pins the
+`EnterOC_ExistentialSubquery` mining reorder that keeps outer-Enter
+parameter mining un-suppressed.
 
 This is a code-structure change, not a model change. `query.Query`,
-`query.Part`, `query.Binding`, `query.Effect`, and every exported symbol
-in package `query` are unchanged. `cypher.New` and the parser's exported
-API are unchanged. Every golden must be byte-identical without
-regenerating; the TCK acceptance suite's counts (3,459 parse-green /
-438 pending / 0 failed) must not shift.
+`query.Part`, `query.Binding`, `query.Effect`, and every exported
+symbol in package `query` are unchanged. `cypher.New` and the parser's
+exported API are unchanged. Every one of the 3,199 parser goldens must
+be byte-identical without regenerating; the TCK acceptance suite
+counts (3,459 parse-green / 438 pending / 0 failed) must not shift.
 
-Tracking: bead `gqlc-ls8.2` (parent epic `gqlc-ls8`). Blocked-by: none.
-Blocks: `gqlc-ls8.5` (cypher parser test migration), which stacks on
-this branch — history stays clean.
+Tracking: bead `gqlc-ls8.2` (parent epic `gqlc-ls8`). Blocks
+`gqlc-ls8.5` (cypher parser test migration), which stacks on this
+branch — history stays clean.
+
+Revision history:
+- Rev 1 (aeec115): initial spec. Enumeration missing byVar and
+  pathMemberSink; save/restore proof implicit; `l.fail` and
+  `addParameterUse` under suppression not addressed.
+- Rev 2 (this file): rewritten under linus-2 grill. §1.2 becomes a
+  contract; §3 adds a site-by-site parity walk; §4 adds a lint gate.
 
 ---
 
 ## 1. The seam
 
-### 1.1 What the sink owns
+### 1.1 Contract (not inventory)
 
-The sink owns exactly one decision: **should this mutation land on the
-outer `curPart` or be dropped?** It answers with a single predicate —
-`l.suppressed()` today reads `l.subqueryDepth > 0` — and routes on that
-predicate.
+The sink's contract is a single invariant:
 
-The sink does not own:
+> Any listener state write that would, if it landed under
+> `subqueryDepth > 0`, produce observable behaviour different from
+> master's guarded early-return, MUST go through a sink method that
+> gates on `l.suppressed()`.
 
-- Parameter mining. Parameters inside `EXISTS { … }` are mined at
-  `EnterOC_ExistentialSubquery` via `findParameters` and
-  `mineClauseSlotParameter` (listener.go:651–675) and enter the
-  query-wide `l.params` / `l.byParam` maps. That path is unchanged: the
-  sink does not gate parameter accumulation because parameters are
-  query-wide (spec §4 of the branch/part spec), not scoped to a part.
-  The Stage-11 §1.2 posture on parameters — "parameters inside a
-  subquery are recorded once, at Enter of the subquery, not by walking
-  its clauses" — stays intact.
+Concretely, the sink covers **five categories** of write:
 
-- Ordering. The sink preserves the walker's Enter-order semantics
-  exactly: a write in walk order N still lands at position N of its
-  target slice. The sink does not reorder, deduplicate, or coalesce.
+**A. Per-part scope writes** — every mutation of `l.curPart.*`. The
+Stage-11 §1.2 phantom-binding failure ADR 0003 names is the
+leak-into-outer-part class this category prevents. The full list of
+`l.curPart.*` field-writes reachable from a guarded handler's body
+(grep-verified in §2.1):
 
-- Validation. Referential-integrity, kind-conflict, and binding-uniqueness
-  checks stay in `build.go`. The sink is a mutation gate, not a
-  validator.
+- `curPart.bindings` (append)
+- `curPart.byVar` (index-assign; atomic with `bindings` append inside
+  `mergeBinding`)
+- `curPart.pathBindings` (append)
+- `curPart.pathMemberSink` (pointer assignment; the pointed-to slice
+  is a stack local, but the assignment writes onto the part)
+- `*curPart.pathMemberSink` (append to the pointed-to slice; this is
+  the write `recordPathNode` / `recordPathEdge` perform)
+- `curPart.unwindBindings` (append)
+- `curPart.callBindings` (append)
+- `curPart.callStandalone` (bool set)
+- `curPart.returns` (append)
+- `curPart.returnsAll` (bool set)
+- `curPart.distinct` (bool set)
+- `curPart.refs` (append) — including the save/restore idioms in
+  §2.2
+- `curPart.effects` (append; the save/restore around
+  `collectMergeAction` is in §2.2)
 
-- The counter. `subqueryDepth` and the two lines that adjust it
-  (`EnterOC_ExistentialSubquery`, `ExitOC_ExistentialSubquery`) remain
-  on the listener — they are the sink's input, not its concern. The
-  bead's acceptance is "zero remaining `subqueryDepth > 0` guards in
-  `Enter*` handlers"; the counter itself may survive inside the sink.
+**B. Query-wide structural writes** — writes that grow the query
+shape, which a walked EXISTS body must not do:
 
-### 1.2 Sink interface
+- `l.branches` (append) — `EnterOC_SingleQuery`'s open, and the
+  standalone-CALL priming block in `EnterOC_StandaloneCall`
+- `l.curBranch`, `l.curPart` (pointer assign) — the same two paths
+- `l.combinators` (append) — `EnterOC_Union`
+- Part-append onto `l.curBranch.parts` — `EnterOC_With`'s close-open
 
-The sink is a listener-embedded value with one method per curPart
-mutation the guarded handlers currently perform. Every method is
-unconditional at the call site — the handler does not check
-`subqueryDepth`, does not check `curPart != nil`, does not check
-anything else the sink owns. Each method internally consults
-`l.suppressed()` and returns early if true, dropping the mutation.
+**C. Query-wide scope-consuming counters/flags**:
 
-The full method set the sink exposes (an exhaustive enumeration of the
-current `l.curPart.*` mutations reachable from a guarded handler and
-its callees):
+- `l.writeSeen = true` — set by `EnterOC_Create`, `EnterOC_Merge`,
+  `EnterOC_Delete`, `EnterOC_Set`, `EnterOC_Remove`. Stage-12's
+  `writeSeen` comment already says a suppressed write inside EXISTS
+  does not flip the flag; that gate moves to the sink.
+- `l.optionalGroupSeq++` — incremented inside `EnterOC_Match` when
+  OPTIONAL is present. The ay9 §3.3 invariant "suppressed clauses
+  inside EXISTS consume no id" moves to the sink.
 
-Structural (branch/part lifecycle):
-- `openBranch()` — opens a new `rawBranch` with an initial empty part;
-  sets `curBranch` and `curPart`. Replaces `EnterOC_SingleQuery` body
-  and the standalone-CALL priming block. Idempotent under suppression:
-  a suppressed open is a no-op.
-- `recordUnionKind(query.UnionKind)` — appends a combinator to
-  `l.combinators`. Replaces `EnterOC_Union` body.
-- `closePartOpenNext(imported map[string]query.Type)` — closes the
-  current part, opens the next in the current branch, threads the
-  exported-type map into the new part's `imported`. Replaces the
-  three-line body at the tail of `EnterOC_With`.
+**D. Query-wide error** — `l.err` (via `l.fail`):
 
-Binding / return / ref / part-flag writes on `curPart`:
-- `appendBinding(*rawBinding)` — the existing `curPart.bindings` append
-  path in `collectNode` / `collectEdge` / `mergeBinding`.
+- Every `l.fail(err)` call site reachable from a walked
+  currently-guarded handler body. A walked suppressed body must not
+  set `l.err`; master's early-return path never does. §3.2 walks
+  every reachable fail-site and proves either grammatical
+  unreachability or parity via sink-gating.
+
+**E. Query-wide parameter accumulation** — `l.params`, `l.byParam`,
+`l.approved` (via `addParameterUse`):
+
+- Every `addParameterUse` call from within a walked currently-guarded
+  handler body. Master's guarded early-return means the call never
+  fires; a walked suppressed body would fire it with a Use position
+  (e.g. `ExprInSetValue`) different from the ExprInPredicate the
+  outer `EnterOC_ExistentialSubquery` mining assigns.
+- **Exception path**: the mining loops inside
+  `EnterOC_ExistentialSubquery` (listener.go:653-674) are the
+  designated non-suppressed accumulator for EXISTS-scoped parameters
+  (Stage-11 §1.2). They must continue to run un-suppressed. §1.4
+  specifies the reorder that keeps them un-suppressed.
+
+`l.suppressed()` returns `l.subqueryDepth > 0`. It is the ONLY read
+of `subqueryDepth > 0` after this change. Every other historical
+call site becomes a sink-method call.
+
+### 1.2 The seam is a set of methods on `(l *listener)`
+
+The listener continues to own the raw state fields
+(`branches`, `combinators`, `curBranch`, `curPart`, `writeSeen`,
+`optionalGroupSeq`, `subqueryDepth`, `params`, `byParam`, `approved`,
+`err`) because `build.go` reads them directly and every existing
+per-part validation walks the raw shape. Introducing a separate type
+would create a second place that reads the same fields and gain
+nothing.
+
+The seam is **methods** on the listener, each with the single-line
+prologue `if l.suppressed() { return }` (or `return 0` for the
+group-mint). Listing the method set the sink exposes — one per
+write site in §1.1:
+
+Category A (per-part):
+- `appendBinding(*rawBinding)` — used only for anonymous edges
+  (pattern.go:309); named-binding writes go through
+  `mergeBinding` (below), which is itself sink-routed.
+- `mergeBinding(variable, kind, labels, source, target, group,
+  undirected, hops, bare)` — the existing method becomes
+  sink-routed. Owns the ATOMIC `byVar`+`bindings` update; a
+  suppressed call is a no-op for both writes together, so BLOCKER
+  1's phantom `byVar` entry pointing at a non-existent binding is
+  unrepresentable.
 - `appendPathBinding(query.PathBinding)`.
+- `setPathMemberSink(*[]query.PathMember)` — routes the pointer
+  assignment at pattern.go:68 and the nil-clear at pattern.go:71.
+  Under suppression the pointer stays nil, so `recordPathNode` /
+  `recordPathEdge`'s existing `if l.curPart.pathMemberSink == nil
+  { return }` check gates them (BLOCKER 1's pathMemberSink
+  concern).
+- `appendPathMember(query.PathMember)` — the write to
+  `*curPart.pathMemberSink` at pattern.go:106, 114, 127, 135.
+  Sink-routed; also a no-op when the sink is nil.
 - `appendUnwindBinding(query.UnwindBinding)`.
 - `appendCallBinding(query.CallBinding)`.
+- `setCallStandalone()`.
 - `appendReturnItem(query.ReturnItem)`.
 - `setReturnsAll()`.
 - `setDistinct()`.
-- `setCallStandalone()`.
-- `appendRef(varRef)` — the existing `curPart.refs` append path.
-- `appendEffect(query.Effect)` — the existing `curPart.effects` append
-  path.
-- `writeToPathMemberSink(query.PathMember)` — routes into the
-  `*curPart.pathMemberSink` when the sink is engaged; delegates its
-  nil-check discipline to the caller as today.
+- `appendRef(varRef)` — the sole path to `curPart.refs = append`.
+- `appendEffect(query.Effect)`.
 
-Query-wide (non-part):
-- `markWriteSeen()` — sets `l.writeSeen = true` for write clauses.
-  The Stage-12 comment on `writeSeen` is precisely that a suppressed
-  write inside `EXISTS { … }` must not flip the flag; this method
-  centralises that gate.
-- `mintOptionalGroup() int` — increments `l.optionalGroupSeq` and
-  returns it (0 when suppressed). Replaces the two-line group-mint
-  block at the top of `EnterOC_Match`; the ay9 spec's "suppressed
-  clauses inside EXISTS consume no id" invariant becomes a
-  single-site fact.
+Category B (structural):
+- `openBranch()` — appends a fresh `rawBranch` and points
+  `curBranch`/`curPart` at it. Replaces `EnterOC_SingleQuery` body
+  and the standalone-CALL curPart-priming block.
+- `recordUnionKind(query.UnionKind)`.
+- `closePartOpenNext(imported map[string]query.Type)` — closes
+  `curPart`, opens a fresh part in `curBranch.parts`, threads
+  `imported`.
 
-Every method that mutates `curPart` calls `l.suppressed()` first and
-returns early if true. Structural methods (`openBranch`,
-`recordUnionKind`, `closePartOpenNext`, `markWriteSeen`,
-`mintOptionalGroup`) do the same. There is no other code path onto
-`curPart` — the sink's methods are the *only* callers of the raw
-appends after this change.
+Category C (query-wide scope):
+- `markWriteSeen()`.
+- `mintOptionalGroup() int` — returns 0 when suppressed.
 
-### 1.3 What "sink" means concretely
+Category D (error):
+- `fail(err error)` — the existing `l.fail` becomes sink-gated: it
+  writes `l.err` only when NOT suppressed. Under suppression, the
+  fail is dropped. §3.2 proves observable parity for each reachable
+  fail-site.
 
-The sink is not a new package, not a new interface value, not a new
-struct — it is a set of `(l *listener)` methods with a single-line
-prologue calling one predicate. Concretely: `l.appendBinding`,
-`l.appendEffect`, `l.openBranch`, and so on. The listener continues
-to own the raw state fields (`branches`, `combinators`, `curBranch`,
-`curPart`, `writeSeen`, `optionalGroupSeq`, `subqueryDepth`) because
-build() reads them and every existing per-part validation walks the
-raw shape (§2.2). Introducing a separate type would create a second
-place that reads the same fields and gains nothing.
+Category E (parameters):
+- `addParameterUse(name, node, use)` — becomes sink-gated. Under
+  suppression, the call is a no-op (parameters are already covered
+  by the un-suppressed outer `EnterOC_ExistentialSubquery` mining;
+  see §1.4).
+- `addParameterUseUnsuppressed(name, node, use)` — the bypass path
+  called from the `EnterOC_ExistentialSubquery` mining loops after
+  the reorder (§1.4). Same body as `addParameterUse` minus the
+  suppression check. This is the ONLY caller of the unsuppressed
+  variant.
 
-The seam is the **methods**, not a new object. Handlers stop touching
-`l.curPart.bindings`, `l.curPart.effects`, `l.branches`, etc. directly;
-they call the corresponding sink method. That single call convention
-is what makes the suppression check a one-line fact.
+The save/restore idioms (typing.go:455-457, expr.go:167-169,
+expr.go:489-491, listener.go:449-464) stay as direct
+`l.curPart.refs = savedRefs` / `l.curPart.effects = saved`
+assignments; they are not mutations of new content but restorations
+of a captured slice header. §2.2 proves parity for each.
+
+### 1.3 Discipline-enforced, with a lint gate
+
+The seam is **discipline-enforced**: the type system does not
+prevent a future handler author from writing `l.curPart.bindings =
+append(...)` directly. Nothing in Go's semantics stops it.
+
+To make the discipline bite, the migration adds a package-local
+lint rule in `.golangci.yml`: a `forbidigo` entry that fails when a
+`l\.curPart\.` write, an `l\.branches\s*=\s*append`, an `l\.combinators\s*=\s*append`,
+an `l\.writeSeen`/`l\.optionalGroupSeq` assignment, or a bare
+`l\.err\s*=` or `l\.params\s*=\s*append`/`l\.byParam`/`l\.approved`
+write appears outside the sink method definitions in
+`listener.go`. The rule fires at CI (via `just lint`) and locally
+(via the pre-push hook, since `check-hooks` runs at `just test`
+time).
+
+The lint scope is package `cypher`. The sink methods live in
+`listener.go`, and every other `.go` file in the package must
+route through them. `listener.go` itself gets a
+`//nolint:forbidigo` file directive on the sink method
+definitions (or per-line directives where forbidigo's include-glob
+is coarser).
+
+This is the enforcement the bead's "handlers should be UNABLE to
+forget the gate" invariant requires. Method calls alone would decay
+the next time someone under deadline writes a direct append; the
+lint gate makes decay a CI failure. Rev 1 named CI grep as the
+enforcement, which was a wish; Rev 2 pins it to a specific
+golangci-lint rule.
+
+### 1.4 `EnterOC_ExistentialSubquery` mining reorder
+
+Master's `EnterOC_ExistentialSubquery` (listener.go:651-675)
+increments `subqueryDepth` at line 652, THEN mines
+`findNodesOfType[IOC_SkipContext]`, `findNodesOfType[IOC_LimitContext]`,
+and `findParameters(c)`. In master this ordering is safe because
+`mineClauseSlotParameter` and `addParameterUse` are not gated on
+`subqueryDepth`.
+
+Under Rev-2's regime, `addParameterUse` IS gated (Category E,
+required to prevent BLOCKER 5's ExprInSetValue leak). So mining at
+depth>0 would silently drop every parameter in the subquery.
+
+Fix: reorder to **mine first, then increment**. Concretely,
+`EnterOC_ExistentialSubquery` becomes:
+
+```
+func (l *listener) EnterOC_ExistentialSubquery(c *gen.OC_ExistentialSubqueryContext) {
+    // Mine before incrementing so the un-suppressed addParameterUse
+    // path fires. The three loops walk manually (not via the ANTLR
+    // walker) so no clause-collecting Enter runs during this pass.
+    for _, s := range findNodesOfType[gen.IOC_SkipContext](c) {
+        l.mineClauseSlotParameter(s.OC_Expression(), query.ClauseSlotSkip)
+        if l.err != nil { break }
+    }
+    if l.err == nil {
+        for _, lim := range findNodesOfType[gen.IOC_LimitContext](c) {
+            l.mineClauseSlotParameter(lim.OC_Expression(), query.ClauseSlotLimit)
+            if l.err != nil { break }
+        }
+    }
+    if l.err == nil {
+        for _, p := range findParameters(c) {
+            if l.approved[p] { continue }
+            name := parameterName(p)
+            if name == "" { continue }
+            l.addParameterUse(name, p, query.NewExprUse(query.TypeBool{}, query.ExprInPredicate))
+        }
+    }
+    // Now enter the suppressed scope; the walker will descend and
+    // fire clause Enters, whose bodies write through gated sink
+    // methods and produce no outer state.
+    l.subqueryDepth++
+}
+```
+
+Proof this reorder is safe under nesting: `findParameters(c)` walks
+the ENTIRE subtree of the outer subquery, including bodies of
+nested inner `EXISTS { … }`. Its output includes every parameter at
+every nesting level (shape.go:431-448 confirms the recursive walk).
+The `l.approved[p]` dedup at each subsequent Enter idempotently
+skips already-covered parameters. So an inner
+`EnterOC_ExistentialSubquery` mining at outer-post-increment depth
+= 1 IS suppressed (`addParameterUse` no-ops) — and is redundant,
+because the outer's pre-increment sweep already recorded every
+parameter in the inner subtree with `ExprInPredicate` and marked
+them approved. `findNodesOfType[IOC_SkipContext]` and
+`findNodesOfType[IOC_LimitContext]` similarly walk the whole
+subtree, so outer covers every SKIP/LIMIT position too, including
+those inside nested EXISTS.
+
+`mineClauseSlotParameter` calls `addParameterUse` internally (via
+expr.go:450-482); its gating discipline follows the same rule —
+gated by default, but called from the outer un-suppressed
+pre-increment context, it fires. Concretely: since the outer Enter
+mines before incrementing, `l.suppressed()` is false during those
+calls, and `mineClauseSlotParameter → addParameterUse` runs
+normally.
+
+The Exit decrement (listener.go:678) stays unchanged; balance is
+preserved.
 
 ---
 
@@ -160,197 +330,29 @@ Every `Enter*` handler currently guarded — `EnterOC_SingleQuery`,
 `EnterOC_Union`, `EnterOC_Match`, `EnterOC_With`, `EnterOC_Create`,
 `EnterOC_Merge`, `EnterOC_Delete`, `EnterOC_Set`, `EnterOC_Remove`,
 `EnterOC_Unwind`, `EnterOC_InQueryCall`, `EnterOC_StandaloneCall`,
-`EnterOC_Return`, plus the sink's `openBranch` seam that fires from
-`EnterOC_StandaloneCall`'s curPart-priming block — loses the
-`if l.subqueryDepth > 0 { return }` prologue.
+`EnterOC_Return`, plus the standalone-CALL curPart-priming block —
+loses the `if l.subqueryDepth > 0 { return }` prologue.
 
-The handler body is otherwise unchanged. `EnterOC_Match` still mints an
-OPTIONAL group (via `l.mintOptionalGroup()`), still calls
-`collectPattern` and `mineWhere`. `EnterOC_With` still calls
-`collectProjection`, still mines its WHERE, still routes through the
-sink's `closePartOpenNext` to open the next part. `EnterOC_Delete`
-still walks its expressions, still computes `targets` / `refs`, still
-appends a `DeleteEffect` — but through `l.appendEffect(...)` and
-`l.markWriteSeen()`. `EnterOC_StandaloneCall`'s priming block for the
-curPart-nil case becomes `l.openBranch()` (which no-ops if suppressed).
+The handler body is otherwise **structurally** unchanged: same
+control flow, same order of collector calls, same computations. The
+only edits are:
 
-Suppression semantics preserve verbatim: a suppressed
-`EnterOC_Match` does no useful work today (early-return); after the
-change, its calls to `collectPattern` / `mineWhere` still run, but
-every mutation they attempt is a sink call that no-ops. **The observable
-outcome is identical.**
+- Every direct `l.curPart.*`, `l.branches`, `l.combinators`,
+  `l.writeSeen`, `l.optionalGroupSeq`, `l.fail`, `l.approved`,
+  `l.params`, `l.byParam` mutation becomes a call to the
+  corresponding sink method.
+- The `EnterOC_StandaloneCall` curPart-priming block becomes
+  `l.openBranch()` (sink-routed).
+- The `if l.err != nil` short-circuit checks stay; sink-gated
+  `l.fail` still writes `l.err` when un-suppressed, so the loop
+  still short-circuits at outer scope. Under suppression these
+  checks continue to see `l.err == nil` (since fail is gated), so
+  the loop runs to completion — which is fine, because every
+  mutation the loop attempts is a no-op.
 
-### 2.2 What does NOT move
-
-`build.go` is untouched. Its inputs are the raw slices (`l.branches`,
-`l.combinators`, `l.params`, and per-part `rawPart` fields) exactly as
-they exist today. The sink writes into those slices; build reads out
-of them. No indirection is introduced.
-
-`typing.go`, `expr.go`, `pattern.go`, `call.go` keep their public
-surface. Internal mutations (`l.curPart.refs = append(...)`,
-`l.curPart.bindings = append(...)`, etc.) migrate to the sink method
-call, but the collectors' signatures and control flow are unchanged.
-`typeQuantifier`'s save/restore of `curPart.refs` continues to work —
-the sink's `appendRef` writes into the same `curPart.refs` slice
-save/restore observes, so the discard-on-exit idiom is preserved.
-
-The two save/restore idioms — `typeQuantifier`'s in typing.go and
-`collectMergeAction`'s in listener.go — DO stay as direct field access.
-Save/restore is a call-site local pattern that captures the slice
-header, not a mutation, and the sink's job is to route mutations. Both
-sites are load-bearing and correctly scoped to the handler; the sink
-would gain nothing by wrapping them.
-
-`EnterOC_ExistentialSubquery` / `ExitOC_ExistentialSubquery` are not
-guarded handlers. They own the counter itself and their bodies stay
-untouched. The counter's home is here (listener.go); the sink reads
-it via `l.suppressed()`.
-
-Comments referring to "the subqueryDepth guard" survive verbatim in
-comment prose where they explain historical behaviour — the guard is
-gone from the code path but the invariant it enforced is now enforced
-by the sink. Comments that name a specific line's guard get updated
-to say "routed through the sink" so future readers can trace the
-enforcement to one place.
-
----
-
-## 3. Suppression invariant
-
-The single fact the sink enforces:
-
-> When `l.subqueryDepth > 0`, **no** curPart mutation lands, and no
-> query-wide *scope-consuming* mutation lands
-> (`writeSeen`, `optionalGroupSeq`, `combinators`, `branches` grow).
-> Query-wide *deduplicated* mutations (`params`, `byParam`, `approved`)
-> continue to accumulate — parameter mining under `EXISTS { … }` is
-> the Stage-11 §1.2 promise the parser makes.
-
-The `optionalGroupSeq` mint under suppression is a no-op returning 0
-(matching the ay9 §3.3 note). `combinators` under a UNION inside
-`EXISTS { … }` is a no-op (matching the Stage-11 §1.2 note on
-`EnterOC_Union`). `branches` under a `oC_SingleQuery` inside
-`EXISTS { … }` is a no-op (Stage-11 §1.2 note on `EnterOC_SingleQuery`).
-`writeSeen` under a write inside `EXISTS { … }` is a no-op (Stage-12
-note on `writeSeen`).
-
-There is exactly one place in the file that reads `subqueryDepth`
-after this change: `l.suppressed()`. Every other reference is a
-comment.
-
----
-
-## 4. Test plan
-
-The interface is the test surface.
-
-### 4.1 Existing tests are the primary fence
-
-All 3,199 parser goldens must pass byte-identical WITHOUT `-update`.
-The `-update` flag is forbidden by the bead's acceptance criteria; a
-byte-diff on any golden means the change altered observable behaviour
-and must be reverted or root-caused before the branch merges.
-
-TCK acceptance suite counts (assertable via `just test`):
-3,459 parse-green, 438 pending, 0 failed — unchanged.
-
-Referential-integrity property tests (`TestPropertyReferentialIntegrity`
-and its child assertions `assertReferentialIntegrity`,
-`assertNamedBindingsUnique`, `assertParametersDeduped`,
-`assertPathMemberKindAgrees`) — green.
-
-Sentinel reachability sweep (`TestSentinelReachability`) — green.
-
-`TestMustParse`, `TestMustReject`, `TestMustRejectGrammar` — green.
-
-These tests already exercise every one of the fourteen guarded
-handlers, both at outer scope and under `EXISTS { … }`. They are the
-authoritative regression fence. If they all pass byte-identical, the
-change preserves behaviour by construction — the sink is a routing
-seam, not new semantics.
-
-### 4.2 New tests (targeted for the seam)
-
-Two additions, both in `parser_test.go`:
-
-**Grep-verifiable structural test** (source-form assertion, not a
-runtime test): a `//go:generate`-style comment or a note in the
-listener package that the guard pattern is gone. Rather than a
-runtime test, the acceptance criteria's grep — zero remaining
-`if l.subqueryDepth > 0` in Enter handlers — is verified in CI via
-`just lint` (a linter rule) or manually via `grep -n "subqueryDepth > 0"
-internal/query/cypher/listener.go`. The bead names grep-verifiability
-as the acceptance mechanism; no new test file is required for it.
-
-**Behavioural test for the sink's discipline** (already implicit in the
-existing corpus, but pinned by a small direct case):
-one table-driven test that constructs each of the fourteen shapes
-under `EXISTS { … }` (a MATCH, a WITH, a CREATE, a MERGE, a SET, a
-REMOVE, a DELETE, an UNWIND, an in-query CALL, a standalone CALL, a
-RETURN, a UNION, a nested SingleQuery, and a nested EXISTS) and
-asserts, for each, that the outer part carries exactly the outer
-bindings (zero from inside the subquery) and that `StatementKind` is
-`StatementRead` when the inner is a write. This test exists implicitly
-in `parser_test.go` (see e.g. the Stage-11 test cases named around
-lines 1923, 1935, 2031, 2470, 2733). Confirm the fourteen shapes are
-covered before writing; if any shape is missing, add exactly that
-case. Do **not** rewrite existing tests.
-
-### 4.3 What we do NOT test
-
-We do not add a fault-injection test that removes the guard from a
-single handler and checks the failure mode — the bead's whole point
-is that a forgotten guard is now unrepresentable (the sink is the
-only mutation path). There is nothing to inject at.
-
-We do not add a mock sink or a sink-behaviour unit test. The sink is
-methods on the listener; its correctness is observable through the
-listener's outputs (the corpus goldens, the TCK, the property tests).
-
----
-
-## 5. Migration path
-
-TDD, small commits, red-green-refactor. The migration is mechanical
-per site and can be done in phases without breaking the build at any
-step.
-
-**Phase A — Introduce the sink methods (no callers).** Add the sink
-methods on `(l *listener)` — `openBranch`, `recordUnionKind`,
-`closePartOpenNext`, `appendBinding`, `appendPathBinding`,
-`appendUnwindBinding`, `appendCallBinding`, `appendReturnItem`,
-`setReturnsAll`, `setDistinct`, `setCallStandalone`, `appendRef`,
-`appendEffect`, `writeToPathMemberSink`, `markWriteSeen`,
-`mintOptionalGroup`, and `suppressed`. Each method wraps the same
-mutation the guarded handlers do today, guarded by
-`if l.suppressed() { return }`. No caller migrates yet.
-
-Commit: `refactor(cypher): introduce collection-sink methods on listener`.
-Gates: `just test && just fmt-check && just lint` all green — the new
-methods compile and are dead code.
-
-**Phase B — Migrate the fourteen Enter handlers, one at a time.** For
-each guarded handler in turn:
-
-1. Remove the `if l.subqueryDepth > 0 { return }` prologue.
-2. Replace every direct `l.curPart.*` mutation the body performs (and
-   every `l.branches`, `l.combinators`, `l.writeSeen`,
-   `l.optionalGroupSeq` mutation) with the corresponding sink method
-   call.
-3. Run `just test`. All 3,199 goldens byte-identical, TCK unchanged.
-4. Commit: `refactor(cypher): route <ClauseName> through collection sink`.
-
-Handler-by-handler order (stable, mechanical):
-`EnterOC_SingleQuery`, `EnterOC_Union`, `EnterOC_Match`,
-`EnterOC_With`, `EnterOC_Create`, `EnterOC_Merge`, `EnterOC_Delete`,
-`EnterOC_Set`, `EnterOC_Remove`, `EnterOC_Unwind`,
-`EnterOC_InQueryCall`, `EnterOC_StandaloneCall`, `EnterOC_Return`,
-and the standalone-CALL curPart-priming block.
-
-For the collectors called from those handlers (`collectPattern`,
-`collectPatternPart`, `collectPatternElement`, `collectNode`,
-`collectEdge`, `mergeBinding`, `recordEndpointRefs`,
+The collectors called from those handlers migrate the same way:
+`collectPattern`, `collectPatternPart`, `collectPatternElement`,
+`collectNode`, `collectEdge`, `mergeBinding`, `recordEndpointRefs`,
 `collectProjection`, `collectReturnItem`, `collectUnwind`,
 `collectSetItem`, `collectRemoveItem`, `collectMergeAction`,
 `collectCall`, `collectYieldItems`, `expandAllResults`,
@@ -358,57 +360,487 @@ For the collectors called from those handlers (`collectPattern`,
 `mineSortItemParameters`, `mineClauseSlotParameter`,
 `mineComparisons`, `mineComparison`, `mineStringPredicate`,
 `pairOperands`, `pairAddSub`, `mineInlineMap`,
-`requireAllParametersApproved`, `addParameterUse`,
-`recordPathNode`, `recordPathEdge`), migrate their direct-field
-writes to sink calls in the same commit as the caller they migrate
-under. This keeps commit diffs handler-scoped and reviewable.
+`requireAllParametersApproved`, `recordPathNode`, `recordPathEdge`.
+Their direct field writes migrate to sink calls; their signatures
+and control flow are unchanged.
 
-**Phase C — Remove `subqueryDepth` reads outside the sink.** After
-every handler has been migrated, grep should show zero
-`subqueryDepth > 0` outside `l.suppressed()` in
-`Enter*` / `Exit*` handlers. Update comment prose that referred to
-"the guard" to say "routed through the sink" where the guard is what
-they were explaining.
+### 2.2 Save/restore proof (BLOCKER 2)
 
-Commit: `refactor(cypher): centralise EXISTS suppression in one predicate`.
+Three sites capture a slice header, run a walk, and restore. Each
+must be proved a no-op under suppression:
 
-**Phase D — Verify acceptance fences.**
+**Site 1 — `typeQuantifier` (typing.go:455-457)**:
 
-- Grep: `grep -n "subqueryDepth" internal/query/cypher/*.go` — expect
-  only the sink's `suppressed` method, the counter's Enter/Exit
-  adjustments, and comment prose.
-- Golden byte-identity: `just test` with no `-update`. Zero diff.
-- TCK counts: `just test` output shows 3,459/438/0.
-- API surface: `cypher.New` / `cypher.Parser.Parse` signatures
-  unchanged (verifiable by `git diff master -- internal/query/cypher/parser.go`).
-- Quality gates: `just test && just fmt-check && just lint` — green.
+```
+savedOuter := l.curPart.refs
+_, _, params := l.typeExpressionMining(w.OC_Expression())
+l.curPart.refs = savedOuter // discard filter-body refs
+```
 
-Re-run `just fmt-check && just lint` after **any** subsequent edit,
-even one character, per the worktree feedback discipline. LSP
-diagnostics do not track disk state and are unreliable after agent
-edits; fmt-check and lint are authoritative.
+Under suppression: `savedOuter` captures the current
+`l.curPart.refs` slice header. `typeExpressionMining` walks the
+expression tree; every `l.curPart.refs = append(...)` inside is
+routed through `appendRef`, which no-ops under suppression. So
+`l.curPart.refs` is unchanged when the walk returns. The restore
+writes the same header back — a strict no-op. The subsequent
+`addParameterUse` calls in the `for _, p := range params` loop
+no-op (gated). Outcome: `l.curPart.refs`, `l.params`, `l.byParam`,
+`l.approved`, `l.err` all unchanged from before the block. Parity
+preserved.
+
+Un-suppressed (outer scope): behaviour identical to master —
+`appendRef` writes normally, restore discards them, quantifier
+scoping preserved.
+
+**Site 2 — `mineWhere` (expr.go:489-491)**:
+
+```
+savedRefs := l.curPart.refs
+l.typeExpressionMining(w.OC_Expression())
+l.curPart.refs = savedRefs
+```
+
+Same proof as Site 1. Under suppression, `l.curPart.refs` is
+never mutated inside the walk; the restore is a no-op. Parity.
+
+**Site 3 — `mineSortItemParameters` (expr.go:167-169)**:
+
+```
+savedRefs := l.curPart.refs
+l.typeExpressionMining(e)
+l.curPart.refs = savedRefs
+```
+
+Same proof. Parity.
+
+**Site 4 — `collectMergeAction` (listener.go:449-464)**:
+
+This one is subtly different: it sets `l.curPart.effects = nil` at
+the top, then reads it after the walk, then restores. The
+intermediate `nil` set is a direct field write.
+
+Concrete proof under suppression: at entry to `collectMergeAction`
+under suppression, `l.curPart.effects` holds whatever the outer
+part carries. The save (`saved := l.curPart.effects`) captures
+that. `l.curPart.effects = nil` clears the header. `l.collectSetItem`
+runs; every append to `l.curPart.effects` inside is routed through
+`appendEffect` (gated, no-op). The `collected := l.curPart.effects`
+read returns `nil`. The loop over `collected` runs zero iterations.
+Both restore points (the two `l.curPart.effects = saved` lines)
+write the original outer value back. Net effect on the outer part:
+zero. Parity preserved.
+
+The parser is single-threaded within one Parse call (ADR 0001), so
+the intermediate `nil` state is not observable from any concurrent
+reader. Save/restore is bracket-balanced within one function.
+Safe.
+
+### 2.3 What does NOT move at all
+
+`build.go` is untouched. Its inputs are the raw slices as they
+exist today. The sink writes into those slices; build reads out.
+
+`EnterOC_ExistentialSubquery` / `ExitOC_ExistentialSubquery` bodies
+are unchanged EXCEPT for the mining-then-increment reorder in §1.4.
+
+Comments referring to "the guard" get updated where they explain a
+specific line's guard now removed. The Stage-11 §1.2 note and the
+Stage-12 `writeSeen` comment stay; their invariants are now
+enforced by the sink rather than by fourteen prologue lines.
+
+---
+
+## 3. Parity walk
+
+### 3.1 The invariant
+
+> When `l.subqueryDepth > 0`, no listener state write lands EXCEPT
+> parameter accumulation from the un-suppressed pre-increment
+> mining path in `EnterOC_ExistentialSubquery` (§1.4).
+
+Every category A-E write is gated. `l.err` is gated. `l.params` is
+gated except through the mining-path bypass.
+
+### 3.2 Suppression body execution: what runs, what doesn't (BLOCKER 3 proof)
+
+The bead's byte-identity fence is only preserved if every walked
+suppressed handler body produces observably-zero external state.
+This section walks each `l.fail()` call site reachable from a
+guarded handler under suppression and proves the gated fail is
+correct.
+
+**Listener.go fail-sites reachable under suppression:**
+
+- listener.go:421 — `NewMergeEffect` error in `EnterOC_Merge`. In
+  master: unreachable (handler early-returns). In new regime:
+  reachable. Sink-gated fail: no-op. Outer parse unaffected.
+  Concrete example that would trigger without gating:
+  `MATCH (n) WHERE EXISTS { MERGE (m) ON MATCH SET n = m RETURN true }`
+  — if `NewMergeEffect` rejects an invalid effect combination,
+  master never sees it, new regime with gated fail silently drops
+  the error. Parity preserved.
+- listener.go:473 — internal MERGE-ON-non-Set-effect belt-and-braces
+  guard. In master: unreachable. In new: reachable-but-gated.
+  Parity preserved (the belt-and-braces guard exists for a future
+  grammar widening; a walked suppressed body cannot trigger it
+  today because the grammar rules it out).
+
+**Pattern.go fail-sites:**
+
+- pattern.go:84 — `ErrVariableKindConflict` on
+  path-vs-unwind collision inside `collectPatternPart`. Master
+  unreachable under EXISTS. New regime: reachable-but-gated. To
+  trigger without gating: `MATCH (n) WHERE EXISTS { UNWIND [1] AS
+  p MATCH p = ()-->() RETURN true }`. Under gated fail, no error.
+  Parity preserved.
+- pattern.go:90 — `NewPathBinding` constructor error. Same
+  argument. Parity.
+- pattern.go:111, 132 — `NewNamedNodeMember` / `NewNamedEdgeMember`
+  constructor errors from within recordPathNode/recordPathEdge.
+  Under new regime these only fire if `pathMemberSink != nil` (the
+  existing check). Under suppression, `setPathMemberSink` no-ops,
+  so `pathMemberSink` stays nil, so recordPathNode/recordPathEdge
+  early-return at the existing nil-check BEFORE calling
+  NewNamed*Member. **This is the key mechanism** for BLOCKER 1's
+  pathMemberSink concern: the pointer assignment being sink-gated
+  keeps the sink nil, and the existing nil-check inside
+  recordPathNode/recordPathEdge stops the writes downstream. Both
+  the append and the fail are prevented. Parity.
+- pattern.go:292 — invalid hop range (`edgeHopsFromRangeLiteral`
+  error) inside `collectEdge`. To trigger:
+  `WHERE EXISTS { MATCH ()-[r*-1]->() RETURN r }` (negative hop).
+  Master: unreachable (EnterOC_Match early-returns). New regime:
+  `edgeHopsFromRangeLiteral` returns error; sink-gated `l.fail`
+  no-ops; `l.err` stays nil; parse succeeds identically to master.
+  Parity preserved.
+- pattern.go:368 — `NewVarEndpoint` constructor error inside
+  `endpoint`. Sink-gated. Parity.
+- pattern.go:410 — `ErrVariableKindConflict` inside `mergeBinding`
+  when a variable re-appears with a different EntityKind. Under
+  suppression, the sweep never runs because `mergeBinding`'s first
+  action is the sink-gated no-op — the byVar lookup at line 400
+  IS reachable, but the fail at 410 is sink-gated, so no `l.err`.
+  Additionally, `part.byVar[variable]` under suppression reads the
+  OUTER part's byVar; if the inner variable clashes with an outer
+  one, the sweep would find it. Concrete case:
+  `MATCH (x) WHERE EXISTS { MATCH ()-[x]->() RETURN x }` — outer
+  `x` is a node, inner `x` is an edge. Master: EnterOC_Match
+  early-returns, no sweep. New: sweep runs, finds the outer `x`,
+  sees the kind mismatch, tries `l.fail(...)` — sink-gated, no-op.
+  Parity preserved.
+
+**Expr.go fail-sites:**
+
+- expr.go:107, 112, 118 — `ErrVariableKindConflict` sweeps inside
+  `collectUnwind` (byVar/pathBindings/unwindBindings). Under
+  suppression the byVar/pathBindings/unwindBindings the sweep
+  reads are the CURRENT part's — the outer part, which contains
+  no inner-EXISTS bindings (because their appends are gated). The
+  sweep may see a collision against an OUTER binding (e.g.
+  outer `MATCH (x) WHERE EXISTS { UNWIND [1] AS x ...}`).
+  Master: EnterOC_Unwind early-returns, no sweep. New: sweep runs,
+  sees outer `x`, sink-gated fail no-ops. Master and new both
+  parse-succeed at outer. Parity preserved.
+- expr.go:136 — `NewUnwindBinding` constructor error. Sink-gated.
+  Parity.
+- expr.go:196 — `ErrPatternInProjection` inside
+  `collectReturnItem`. To trigger: `WHERE EXISTS { RETURN (n)-->()
+  }` — a pattern predicate as a projection inside EXISTS. Master:
+  EnterOC_Return early-returns, never reaches `collectReturnItem`.
+  New regime: reaches it, sink-gated fail no-ops, parse succeeds
+  identically. Parity preserved.
+  **This deserves emphasis**: master's guarded behavior means a
+  pattern-predicate projection inside EXISTS parses cleanly (the
+  outer parse succeeds); the resolver may reject the query later,
+  or the engine may. New regime with sink-gated fail preserves
+  that same posture. This is the specific BLOCKER 3 counter-example
+  linus-2 named; gating `l.fail` is what closes it.
+- expr.go:462 — `ErrUnsupportedParameter` inside
+  `mineClauseSlotParameter`. This is called from
+  `EnterOC_ExistentialSubquery`'s mining loops (un-suppressed
+  pre-increment) AND from mining paths inside guarded handler
+  bodies. Under suppression from a walked handler body, sink-gated
+  fail no-ops. From the pre-increment mining path, l.suppressed()
+  is false — fail fires normally. Parity.
+- expr.go:614, 627, 643, 660 — `ErrUnsupportedParameter` from
+  `mineInlineMap` and `requireAllParametersApproved`. Under
+  suppression, sink-gated. Parity.
+- expr.go:744, 816 — `ErrNestedPropertyTarget` inside
+  `collectSetItem` / `collectRemoveItem`. To trigger:
+  `WHERE EXISTS { MATCH (n) SET n.a.b = 1 }`. Master: EnterOC_Set
+  early-returns. New: sink-gated fail no-ops. Parity preserved.
+- expr.go:758, 769, 788, 807, 822 — `Effect` constructor errors
+  from within `collectSetItem` / `collectRemoveItem`. Sink-gated.
+  Parity.
+
+**Call.go fail-sites:**
+
+- call.go:43 — `ErrUnknownProcedure`. Called from CALL clauses.
+  Under suppression, sink-gated fail no-ops. Parity.
+- call.go:72 — `ErrProcedureArity`. Sink-gated. Parity.
+- call.go:136 — `ErrUnknownProcedure` on unknown YIELD field.
+  Sink-gated. Parity.
+- call.go:146, 179 — `NewCallBinding` constructor errors.
+  Sink-gated. Parity.
+
+**Listener.go SyntaxError (line 210, 213)**: NOT reachable from
+walked handler bodies; called by ANTLR's error listener during
+parse, not during walk. Not sink-gated (must fire before walk).
+Parity by construction.
+
+Verdict: every `l.fail` call site reachable from a walked
+currently-guarded handler body, when sink-gated, produces
+observable-zero effect on `l.err` under suppression — matching
+master's guarded early-return path. BLOCKER 3 is closed.
+
+### 3.3 BLOCKER 4 proof: ay9 §3.3 under `collectPattern` running with group=0
+
+Under new regime, `EnterOC_Match` calls `l.mintOptionalGroup()`
+which returns 0 under suppression. It then calls
+`collectPattern(pattern, 0)`. `collectPattern` walks and calls
+`mergeBinding` (sink-routed).
+
+`mergeBinding` under suppression is a no-op for BOTH the `byVar`
+index-assign and the `bindings` append (Category A atomicity — the
+sink method wraps both writes; BLOCKER 1). So no `rawBinding` with
+`optionalGroup: 0` enters the outer part. The ay9 §3.3 invariant
+"suppressed clauses inside EXISTS consume no id" holds because
+`optionalGroupSeq` is not incremented (mintOptionalGroup gated)
+AND no binding with optionalGroup=0 is created (mergeBinding
+gated). The invariant is DOUBLE-enforced. Parity preserved.
+
+### 3.4 BLOCKER 5 proof: parameter Use position under gated addParameterUse
+
+Under new regime, `EnterOC_Set` under suppression runs
+`collectSetItem`, which types a value expression and calls
+`addParameterUse(name, p, ExprUse{valueType, ExprInSetValue})`.
+Sink-gated `addParameterUse` no-ops. `l.params`, `l.byParam`,
+`l.approved` unchanged from this call.
+
+The outer `EnterOC_ExistentialSubquery` mining (pre-increment,
+per §1.4) has already fired for this subquery's subtree. If the
+same `$p` node was found by `findParameters(c)`,
+`addParameterUse(name, p, ExprUse{TypeBool, ExprInPredicate})`
+recorded it with `ExprInPredicate` and set `approved[p] = true`.
+
+In master, EnterOC_Set early-returns, so its `addParameterUse` never
+fires; the parameter is recorded solely by the mining path with
+`ExprInPredicate`. New regime with gated addParameterUse: same
+outcome — parameter recorded solely by the mining path with
+`ExprInPredicate`. **Byte-identical param.Uses list.** Parity
+preserved.
+
+The `approved` map ensures the walked-but-gated call would have
+been a no-op even without gating (via the `if l.approved[p] {
+continue }` check inside addParameterUse's caller loops in
+listener.go:666-668). But that check protects only the loop in
+EnterOC_ExistentialSubquery, not the `addParameterUse` call from
+`collectSetItem`. So gating the sink method is what actually closes
+BLOCKER 5. Confirmed.
+
+### 3.5 BLOCKER 2 proof: save/restore
+
+Site-by-site proofs in §2.2. Each save/restore under suppression is
+a no-op because the intervening walk cannot mutate the field
+(every mutation is sink-gated). BLOCKER 2 is closed.
+
+### 3.6 BLOCKER 6 stance: discipline-enforced, with a lint gate
+
+The seam is not structurally-enforced. §1.3 acknowledges this
+explicitly; §4.3 pins a `forbidigo` lint rule that makes decay a
+CI failure. This is the honest answer to BLOCKER 6.
+
+---
+
+## 4. Test plan
+
+### 4.1 Existing tests are the primary fence
+
+All 3,199 parser goldens must pass byte-identical WITHOUT `-update`.
+`-update` is forbidden by the bead's acceptance.
+
+TCK acceptance suite counts: 3,459 parse-green, 438 pending, 0
+failed — unchanged.
+
+Property tests (`TestPropertyReferentialIntegrity`,
+`assertReferentialIntegrity`, `assertNamedBindingsUnique`,
+`assertParametersDeduped`, `assertPathMemberKindAgrees`) — green.
+
+`TestSentinelReachability`, `TestMustParse`, `TestMustReject`,
+`TestMustRejectGrammar` — green.
+
+The existing corpus already exercises every one of the fourteen
+guarded handlers, both at outer scope and under `EXISTS { … }`. If
+they all pass byte-identical, the parity §3.2-§3.5 proves is
+observed at the wire.
+
+### 4.2 New tests — targeted parity cases
+
+Two additions in `parser_test.go`:
+
+**Test A — EXISTS-nested error-triggering shapes parse-succeed at
+the outer:** a table-driven test with one entry per §3.2 fail-site
+that could plausibly be triggered by well-formed source under
+suppression. Each entry is a query with an EXISTS containing a
+shape that would fire a specific `l.fail` at outer scope; the
+assertion is `Parse(query)` returns nil error and the resulting
+`query.Query` is structurally identical to the same query with a
+placeholder EXISTS body (an `EXISTS { MATCH (x) RETURN x }` say).
+This pins the parity §3.2 proves — future refactors that ungate a
+fail-site will fail these tests.
+
+Entries:
+- negative hop inside EXISTS
+- pattern-predicate projection inside EXISTS
+- nested-property-target SET inside EXISTS
+- kind-conflict variable re-use inside EXISTS
+- path-vs-unwind kind conflict inside EXISTS
+- MERGE inside EXISTS (rejects at engine, parses at outer)
+
+**Test B — parameter Use position parity:** a small case pair.
+Query 1: `MATCH (n) SET n.a = $p RETURN n` — records `$p` with
+`ExprInSetValue`. Query 2: `MATCH (n) WHERE EXISTS { MATCH (m)
+SET m.a = $p } RETURN n` — records `$p` with `ExprInPredicate` (via
+the mining path). The assertion: Query 2's `Parameters[0].Uses[0]`
+is `ExprUse{TypeBool, ExprInPredicate}`, NOT
+`ExprUse{_, ExprInSetValue}`. This pins BLOCKER 5's parity.
+
+### 4.3 Lint gate (§1.3)
+
+`.golangci.yml` gains a `forbidigo` rule scoped to package
+`cypher` that rejects any of:
+
+- `l\.curPart\.[a-zA-Z]+\s*=\s*append\(` outside listener.go's sink methods
+- `l\.branches\s*=\s*append\(` outside listener.go's sink methods
+- `l\.combinators\s*=\s*append\(` outside listener.go's sink methods
+- `l\.writeSeen\s*=` outside listener.go
+- `l\.optionalGroupSeq[+]{2}` outside listener.go
+- `l\.err\s*=` outside listener.go's `fail` method
+- `l\.params\s*=\s*append\(` outside listener.go's addParameterUse methods
+
+The forbidigo patterns are narrow: `= append(...)` is forbidden
+outside the sink, but bare `= savedRefs` restore forms are allowed
+(they don't match `append(...)`). This carves out the save/restore
+idiom in §2.2 without special-casing.
+
+`listener.go` sink method definitions get a
+`//nolint:forbidigo` file-level directive at the top of the sink
+method block, or per-line directives where forbidigo's include-glob
+is coarser. If the rule cannot express file-level exclusion for
+sink method definitions, each of the ~15 raw-append sites inside a
+sink method gets a `//nolint:forbidigo // sink method` per-line
+comment. This is a one-time cost paid at Phase E.
+
+Grep-verify in CI: after `just lint` passes, `grep -n "if l\.subqueryDepth
+> 0" internal/query/cypher/*.go | grep -v ExitOC_ExistentialSubquery`
+returns zero hits.
+
+### 4.4 What we do NOT test
+
+We do not add fault-injection or mock-sink tests. Correctness is
+observable through the corpus.
+
+---
+
+## 5. Migration path
+
+TDD, small commits, red-green-refactor. Every step ends
+`just test && just fmt-check && just lint` green.
+
+**Phase A — Introduce sink methods as dead code.** Add the sink
+methods on `(l *listener)` — every method in §1.2, plus
+`suppressed()`. Each method wraps the same mutation the guarded
+handlers do today, with `if l.suppressed() { return }` prologue.
+DO NOT yet enable the forbidigo rule; migrations in Phase C would
+temporarily fail it.
+
+Commit: `refactor(cypher): introduce collection-sink methods on listener`.
+
+**Phase B — `EnterOC_ExistentialSubquery` mining reorder.** Move
+mining before increment per §1.4. Test: existing property tests
+pass (parameter dedup / attribution unchanged); the reorder is
+observably-nil because master's post-increment ordering worked only
+because master's addParameterUse was ungated, and Phase B hasn't
+yet gated it. This is a "no-op prep" commit that sets up Phase D.
+
+Commit: `refactor(cypher): mine EXISTS parameters before incrementing depth`.
+
+**Phase C — Migrate the fourteen Enter handlers, one at a time.**
+For each guarded handler in turn:
+
+1. Remove the `if l.subqueryDepth > 0 { return }` prologue.
+2. Replace every direct Category A / B / C mutation the body
+   performs with the corresponding sink method call.
+3. Run `just test`. All 3,199 goldens byte-identical, TCK
+   unchanged.
+4. Commit: `refactor(cypher): route <ClauseName> through collection sink`.
+
+Handler-by-handler order (mechanical):
+`EnterOC_SingleQuery`, `EnterOC_Union`, `EnterOC_Match`,
+`EnterOC_With`, `EnterOC_Create`, `EnterOC_Merge`, `EnterOC_Delete`,
+`EnterOC_Set`, `EnterOC_Remove`, `EnterOC_Unwind`,
+`EnterOC_InQueryCall`, `EnterOC_StandaloneCall`, `EnterOC_Return`,
+plus the standalone-CALL curPart-priming block.
+
+Callees migrate in the same commit as the caller that reaches them
+(so each commit is handler-scoped and reviewable).
+
+**Phase D — Gate `l.fail` and `addParameterUse`.** With every
+guarded handler now routing curPart / structural / scope writes
+through the sink, gate the last two categories: `l.fail`
+(Category D) and `addParameterUse` (Category E). The
+`addParameterUseUnsuppressed` bypass wires into the reordered
+`EnterOC_ExistentialSubquery` mining.
+
+Commit: `refactor(cypher): gate l.fail and addParameterUse under EXISTS suppression`.
+
+Test at this step: add Test A + Test B from §4.2 in the same commit
+(or a preceding red commit if strict TDD is required — since Test A
+asserts what's true today at master too via the guarded
+early-return, the tests pass on master, so strict red-first is not
+possible; commit them as green-forward instead).
+
+**Phase E — Enable the lint gate.** Turn on the `forbidigo` rule
+scoped to package cypher. Add `//nolint:forbidigo` directives on
+the sink method definitions and the save/restore idiom lines that
+would otherwise match.
+
+Commit: `refactor(cypher): enforce sink-only writes via forbidigo`.
+
+**Phase F — Verify acceptance fences.**
+
+- `grep -n "if l\.subqueryDepth > 0" internal/query/cypher/*.go` —
+  only ExitOC_ExistentialSubquery's balance-safe conditional
+  decrement remains.
+- `git diff master -- internal/query/cypher/testdata/golden/` empty.
+- `just test`: 3,459 / 438 / 0 TCK line unchanged.
+- `just fmt-check && just lint` green (forbidigo enabled).
+- `cypher.New` / `cypher.Parse` signatures unchanged
+  (`git diff master -- internal/query/cypher/parser.go`).
+
+Re-run `just fmt-check && just lint` after **any** subsequent edit
+per the worktree feedback discipline. LSP diagnostics do not track
+disk state and are unreliable after agent edits; fmt-check and
+lint are authoritative.
 
 ---
 
 ## 6. Non-goals
 
-- No change to `query.Query`, `query.Part`, or any sealed sum in
-  package `query`. ADR 0008 records the model surface as pinned; this
-  bead does not touch it.
-- No change to what `EXISTS { … }` observably suppresses. The invariant
-  is preserved; the enforcement moves.
-- No new sentinel errors. `ErrPatternInProjection`,
-  `ErrNestedPropertyTarget`, and the fifteen others remain reachable
-  through the same handlers as today.
-- No performance target. The sink is a per-call `if` on a `bool` (or
-  `int > 0`) — the same instruction the guards perform today, on the
-  same code path. No allocations, no indirection.
-- No renaming of `subqueryDepth`. The counter's name is load-bearing
-  in comments and existing tests; the deepening is that fourteen
-  reads collapse to one, not that the reader is renamed.
-- No absorption of the parameter-mining path into the sink. Parameter
-  mining under `EXISTS { … }` is a separate discipline (§1.1) and
-  moving it would enlarge scope without benefit.
+- No `query.Query` model changes; ADR 0008's seal holds.
+- No new sentinels; the seventeen existing ones remain reachable
+  through the same handlers.
+- No performance target; the sink is a per-call `if` on
+  `subqueryDepth > 0`, the same instruction the guards perform
+  today.
+- No rename of `subqueryDepth`. Fourteen reads collapse to one; the
+  reader is not renamed.
+- No absorption of the `EnterOC_ExistentialSubquery` mining path
+  into the sink. It stays un-suppressed (Category E bypass) — its
+  purpose is precisely to accumulate parameters that clause-body
+  Enters cannot.
+- No structural (type-system) enforcement. The lint gate is the
+  chosen enforcement mechanism (§1.3, §3.6).
 
 ---
 
@@ -416,16 +848,18 @@ edits; fmt-check and lint are authoritative.
 
 Concrete, grep- and gate-verifiable fences:
 
-- `grep -cE "if l\.subqueryDepth > 0" internal/query/cypher/*.go` in
-  `Enter*`/`Exit*` handlers returns 0 for Enter handlers; the Exit
-  handler's conditional-decrement may keep its comparison (it is
-  balance-safe, not a scope guard).
+- `grep -n "if l\.subqueryDepth > 0" internal/query/cypher/*.go`
+  returns one hit: `ExitOC_ExistentialSubquery`'s balance-safe
+  conditional decrement. Zero hits in `Enter*` handlers.
 - `git diff master -- internal/query/cypher/testdata/golden/` empty.
 - `just test` prints the same TCK line as master (3,459 / 438 / 0).
-- `TestPropertyReferentialIntegrity`,
-  `TestSentinelReachability`, `TestMustParse`, `TestMustReject`,
-  `TestMustRejectGrammar` all pass.
-- `just fmt-check` and `just lint` green.
+- Test A (EXISTS-nested error-triggering shapes parse-succeed) and
+  Test B (parameter Use position parity) pass.
+- `TestPropertyReferentialIntegrity`, `TestSentinelReachability`,
+  `TestMustParse`, `TestMustReject`, `TestMustRejectGrammar` all
+  pass.
+- `just fmt-check` and `just lint` green with the `forbidigo` rule
+  enabled.
 - `cypher.New` / `cypher.Parse` signatures byte-identical to master.
 
-When all seven are true, the deepening is done.
+When all eight are true, the deepening is done.
