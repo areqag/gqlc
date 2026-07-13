@@ -42,7 +42,7 @@ func renderModels(pkg string, entities []preparedEntity, prepared []preparedQuer
 	// candidates) or across two per-query columns projecting the same
 	// interface (impossible — per-query-column naming) still emits one
 	// marker per interface participation.
-	var unions []preparedEdgeUnion
+	var unions []*preparedEdgeUnion
 	markersByEntity := make(map[string][]string)
 	seenMarker := make(map[string]struct{})
 	for _, p := range prepared {
