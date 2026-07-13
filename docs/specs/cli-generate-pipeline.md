@@ -13,12 +13,15 @@ picks at stages 3, 5, and 8 stay honest.
 ## 1. Deliverables
 
 - `internal/cli/pipeline/pipeline.go` — the extracted module (§3, §4).
+  Exports: `Run`, `Result`, `ErrConfigMissing`.
 - `internal/cli/pipeline/pipeline_test.go` — in-memory tests (§5.1).
 - `internal/cli/generate.go` — reduced to the cobra surface (§6.1):
-  flags, `SilenceUsage`, calling the pipeline, printing diagnostics,
-  invoking the tripwire-guarded write. The write path (`writeOutput`,
-  `writeFiles`, `markedFile`, marker constants) **stays in
-  `internal/cli`** — ADR 0012 tripwire is CLI-owned.
+  flags, `SilenceUsage`, calling the pipeline, mapping
+  `pipeline.ErrConfigMissing` to the "run gqlc init" hint, printing
+  diagnostics, forming the summary, invoking the tripwire-guarded
+  write. The write path (`writeOutput`, `writeFiles`, `markedFile`,
+  marker constants) **stays in `internal/cli`** — ADR 0012 tripwire
+  is CLI-owned.
 - `internal/cli/generate_test.go` — unchanged in behaviour; may
   shed cases superseded by pipeline tests (§5.2 fence).
 - No changes to `internal/codegen`, `internal/config`, or any other
@@ -66,11 +69,32 @@ Package `pipeline`, import path
 exported; nothing else is.
 
 ```go
+// Package pipeline runs stages 1–8 of the CLI-1 generate pipeline —
+// config load through codegen — and returns the file batch in memory.
+// The package is deliberately subcommand-agnostic: it names no
+// sibling command (the "run gqlc init" hint on a missing config lives
+// in the CLI, which owns UX copy). Callers own all filesystem writes
+// under the ADR 0012 tripwire.
+//
+// Result caller invariant, non-negotiable:
+//
+//   Files is non-nil iff Diagnostics is empty AND err is nil.
+//   Callers MUST NOT write Result.Files when len(Result.Diagnostics)
+//   > 0; that state means "errors accumulated, batch discarded" and
+//   Files is nil in that branch. Ignoring the invariant lets the ADR
+//   0012 tripwire wipe a marked output directory to write zero files
+//   — the exact footgun the split exists to prevent.
+package pipeline
+
 // Result is what a successful or diagnostic-accumulating pipeline run
-// yields: the codegen batch (populated iff Diagnostics is empty) and
-// the ordered per-failure diagnostic lines from stage 7. Both slices
-// preserve pipeline order — the caller writes Diagnostics to stderr in
-// order and writes Files to disk in slice order.
+// yields: the codegen batch and the ordered per-failure diagnostic
+// lines from stage 7. Both slices preserve pipeline order — the
+// caller writes Diagnostics to stderr in order and writes Files to
+// disk in slice order.
+//
+// Field invariant (package doc, restated): Files is non-nil iff
+// Diagnostics is empty and the corresponding Run call returned a nil
+// error.
 type Result struct {
     Files       []codegen.File
     Diagnostics []string
@@ -78,14 +102,25 @@ type Result struct {
 
 // Run executes stages 1–8 of the generate pipeline (CLI-1 §3.1)
 // against the config file at cfgPath. It performs no filesystem
-// writes — the caller writes Result.Files under the ADR 0012 tripwire.
+// writes — the caller writes Result.Files under the ADR 0012
+// tripwire.
 //
-// A non-nil error is a singular-stage failure (CLI-1 §2.3): stages
-// 1–6, 8, plus any axis-mapping drift, surface as the returned error
-// with a Result whose fields are both nil. Stage 7 accumulation is
-// distinct: Run returns nil error, Files nil, and Diagnostics
-// populated; the caller prints each line and returns its own summary
-// error carrying the count.
+// Return contract, exhaustive:
+//
+//   - err != nil                              → singular-stage failure
+//     (CLI-1 §3.1 stages 1–6, 8, plus any axis-mapping drift). Result
+//     is the zero value (Files nil, Diagnostics nil). A missing
+//     config file surfaces as fs.ErrNotExist wrapped with cfgPath —
+//     the CLI's RunE tests with errors.Is and rewrites to the §2.3
+//     user-facing hint.
+//   - err == nil, len(Diagnostics) > 0        → stage-7 accumulation.
+//     Files is nil. Caller prints each diagnostic line and returns
+//     its own summary error (CLI-1 §2.3).
+//   - err == nil, len(Diagnostics) == 0       → success. Files is
+//     non-nil, sorted by Path (codegen.Generate's contract), ready
+//     for the caller's tripwire-guarded write.
+//
+// No other combinations exist; the caller may rely on this.
 func Run(cfgPath string) (Result, error)
 ```
 
@@ -114,18 +149,56 @@ Rationales, one per surface decision:
   own the whole diagnostic surface: it prints the lines and forms the
   summary. If Run formed the summary too, the CLI would either re-emit
   it or the two would drift.
-- **Singular-stage errors returned verbatim.** No wrapping; the spec
-  §2.3 catalogue already names each error's shape and the pipeline
-  produces them as it does today.
+- **Singular-stage errors returned verbatim, with one carve-out.** No
+  wrapping; the spec §2.3 catalogue already names each error's shape
+  and the pipeline produces them as it does today. **Exception**:
+  a missing config file. Today `runGenerate` catches
+  `errors.Is(err, fs.ErrNotExist)` from `config.Load` and rewrites to
+  `no config file at <path> (run gqlc init to create one)` — a
+  message that names a sibling subcommand. The pipeline is
+  subcommand-agnostic (package doc, above), so it returns the raw
+  `fs.ErrNotExist`-wrapped error carrying `cfgPath` (`fmt.Errorf(...,
+  cfgPath, err)`; the wrapped error preserves `errors.Is` matching),
+  and the CLI's `RunE` does the mapping:
+
+  ```go
+  res, err := pipeline.Run(cfgPath)
+  if err != nil {
+      if errors.Is(err, fs.ErrNotExist) && /* from config.Load */ {
+          return fmt.Errorf("no config file at %s (run gqlc init to create one)", cfgPath)
+      }
+      return err
+  }
+  ```
+
+  The "from config.Load" branch is discriminated by a **sentinel
+  error type**, not by string matching: pipeline exports a package
+  var `ErrConfigMissing` used as the wrapping token
+  (`fmt.Errorf("%w: %s: %w", ErrConfigMissing, cfgPath, err)`;
+  `errors.Is` finds both). The CLI matches `errors.Is(err,
+  pipeline.ErrConfigMissing)` — no coupling to the underlying
+  fs.ErrNotExist path. Rationale: schema and queries dir reads can
+  also produce ErrNotExist (spec §2.3 wraps them differently as
+  `schema: <os error>` and `queries: <os error>`); the sentinel
+  distinguishes the config-missing case cleanly. This is the smallest
+  possible seam that keeps the sibling-subcommand string in the CLI
+  where it belongs.
 
 ## 4. Internals — what the module is
 
 `pipeline.go` is `generate.go` today with the last stage (§5 write)
-excised and the diag-printing loop excised. The nine internal helpers
+excised and the diag-printing loop excised. The internal helpers
 (`resolvePath`, `discoverQueryFiles`, `frontEndWalk`) move with it.
-Nothing is renamed; nothing is generalised. The stage numbering in
-comments is preserved — the CLI-1 spec is authoritative and existing
-code comments cross-reference its section numbers, which stay valid.
+Nothing is renamed; nothing is generalised. The one behavioural change
+is at stage 1: `pipeline.Run` wraps `fs.ErrNotExist` from
+`config.Load` as `pipeline.ErrConfigMissing` (see §3), instead of
+rewriting the message inline — so the sibling-subcommand copy stays
+in the CLI.
+
+**Cross-references preserved on move.** Existing code comments name
+CLI-1 spec sections (`§2.3`, `§3.1`, `§3.3`, `§4`, `§5.1`, `§5.3`).
+Every such comment moves with its code and stays valid: no stage
+renumbering, no shape change. The reviewer verifies this in the diff.
 
 No parser registry, no factory, no adapter interface: the two
 axis switches at CLI-1 §3.2 stay as switches (`config.SchemaLangGQLC →
@@ -135,8 +208,10 @@ axis has exactly one member today for schema and query language, two
 for driver; a switch is the honest posture (bead NON-GOAL, restated in
 this spec's opening).
 
-Package doc (a short comment above `package pipeline`) points readers
-back to `docs/specs/cli-stage-1.md` and this spec.
+The package doc above `package pipeline` (§3) states the Result
+invariant and the subcommand-agnostic posture; it also points readers
+back to `docs/specs/cli-stage-1.md` for the authoritative user-facing
+contracts.
 
 ## 5. Test plan
 
@@ -154,7 +229,7 @@ that assert on the returned `Result` and error.
 | `TestRunPackageNameFromConfig`          | `Files["db.go"]` contains the config-declared `package` clause                                            |
 | `TestRunDriverAxis` (table v5/v6)       | driver import in `db.go` matches the config axis                                                          |
 | `TestRunProcsigWiredThroughFrontEnd`    | CALL query resolves with a procsig config; same project sans key surfaces one `query-diag` in `Diagnostics` (unknown procedure) |
-| `TestRunConfigMissing`                  | error carries the exact spec §2.3 message; `Result` is the zero value                                      |
+| `TestRunConfigMissing`                  | `errors.Is(err, pipeline.ErrConfigMissing)` true; `errors.Is(err, fs.ErrNotExist)` true (wrap chain preserved); error message names `cfgPath`; `Result` is the zero value; the CLI-1 "run gqlc init" copy is NOT in the pipeline error — that string lives only in `generate.go`, verified by `generate_test.go`'s existing `TestGenerateConfigMissing` |
 | `TestRunNoQueryFiles`                   | error is the pinned `no query files` string; `Result` is the zero value                                   |
 | `TestRunAccumulatesDiagnostics`         | broken-file + broken-queries + one-good fixture: `Diagnostics` holds every failure in pipeline order (file-then-annotation); `Files` nil; error nil (the CLI turns the accumulation into the summary error) |
 | `TestRunDiagnosticShapes`               | exact-match one `file-diag` and one `query-diag` against spec §2.3                                        |
@@ -194,26 +269,29 @@ per team-lead protocol.
 
 ## 6. Migration path
 
-Six commits, each keeping the working tree buildable, tests green,
-`just fmt-check && just lint` clean:
+Small commits, each keeping the working tree buildable, tests green,
+`just fmt-check && just lint` clean. The empty-package scaffold commit
+is folded into the move so the intermediate state is never a zero-value
+directory.
 
 1. **This spec.** `docs(spec): CLI-1 pipeline extraction (gqlc-ls8.4)`.
    No production change; Linus grills before any code.
-2. **Create the empty pipeline package.** `package pipeline` with the
-   package doc; no exports yet. `refactor(cli/pipeline): scaffold the
-   pipeline package`. Test gate + lint green.
-3. **Move stages 1–8 verbatim into `pipeline.Run` + helpers.**
-   `generate.go`'s `RunE` calls `pipeline.Run` and handles the
-   accumulation by printing `Result.Diagnostics` + returning the summary
-   error, then hands `Result.Files` to the existing `writeOutput`.
+2. **Move stages 1–8 into `pipeline.Run` + helpers, and rewire
+   generate.go.** `generate.go`'s `RunE` calls `pipeline.Run`, maps
+   `pipeline.ErrConfigMissing` to the "run gqlc init" hint, handles
+   the accumulation by printing `Result.Diagnostics` + returning the
+   summary error, then hands `Result.Files` to the existing
+   `writeOutput`. Preserves every stage comment's CLI-1 §-reference
+   at the move site — **the reviewer verifies this in the diff, and
+   the mover confirms it before requesting review.**
    `refactor(cli): extract generate pipeline into internal/cli/pipeline`.
    All CLI-1 tests green byte-identically.
-4. **Add pipeline tests** (§5.1). `test(cli/pipeline): direct in-memory
+3. **Add pipeline tests** (§5.1). `test(cli/pipeline): direct in-memory
    tests for the pipeline seam`. Green.
-5. **Any test-only simplifications in `generate_test.go`** (optional,
+4. **Any test-only simplifications in `generate_test.go`** (optional,
    only if a case's *value* is now trivially subsumed by a pipeline
    test — no coverage shrinkage).
-6. **Final gate + review.** Full `just test && just fmt-check && just
+5. **Final gate + review.** Full `just test && just fmt-check && just
    lint`.
 
 ## 7. Acceptance fences (bead-verbatim, restated)
