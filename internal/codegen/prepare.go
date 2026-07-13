@@ -42,6 +42,17 @@ var reservedIdentifiers = map[string]struct{}{
 	"ErrMultipleResults": {},
 }
 
+// accessMode is the closed prepare-side enum committing the neo4j
+// session AccessMode axis (spec §1.1). Two values only. Kept
+// prepare-local and target-independent — render maps to the emitted
+// token at the single accessModeText call site.
+type accessMode int
+
+const (
+	accessModeRead accessMode = iota
+	accessModeWrite
+)
+
 // preparedQuery bundles the per-query derivations produced by Phase B —
 // the derived method surface, the Params/Row shapes, and the resolved
 // axes Phase A already gate-checked. Kept together so the per-source
@@ -51,6 +62,8 @@ type preparedQuery struct {
 	NamedQuery
 	MethodName  string              // verbatim NamedQuery.Name
 	Bare        string              // lowerCamel first rune of MethodName
+	AccessMode  accessMode          // §1.1 — closed enum committed at Phase B
+	IsWrite     bool                // §1.2 — Validated.Statement == StatementWrite
 	ParamFields []preparedParam     // in Validated.Parameters order
 	RowFields   []preparedRow       // in Validated.Columns order
 	EdgeUnions  []preparedEdgeUnion // in Validated.Columns order (sub-ordered by column position); one per columnEdgeUnion Row field (C5)
@@ -588,6 +601,10 @@ func phaseBDerive(queries []NamedQuery, entities []preparedEntity, entityIndex m
 	out := make([]preparedQuery, 0, len(queries))
 	for _, q := range queries {
 		p := preparedQuery{NamedQuery: q, MethodName: q.Name, Bare: lowerFirstRune(q.Name)}
+		if q.Validated.Statement == resolver.StatementWrite {
+			p.AccessMode = accessModeWrite
+			p.IsWrite = true
+		}
 
 		// Params field derivation.
 		seenParam := make(map[string]int, len(q.Validated.Parameters))

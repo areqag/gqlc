@@ -268,7 +268,7 @@ func writeMethod(b *strings.Builder, p preparedQuery) {
 	b.WriteString(" {\n")
 
 	if p.Cardinality == CardinalityExec {
-		fmt.Fprintf(b, "\t_, err := q.db.run(ctx, %sQueryText, %s, %s)\n", p.Bare, paramsMapText(p), accessModeText(p))
+		fmt.Fprintf(b, "\t_, err := q.db.run(ctx, %sQueryText, %s, %s)\n", p.Bare, paramsMapText(p), accessModeText(p.AccessMode))
 		b.WriteString("\treturn err\n")
 		b.WriteString("}\n")
 		return
@@ -285,13 +285,11 @@ func writeMethod(b *strings.Builder, p preparedQuery) {
 	b.WriteString("}\n")
 }
 
-// accessModeText picks the fourth q.db.run argument for one prepared
-// query — AccessModeWrite iff Validated.Statement == StatementWrite,
-// AccessModeRead otherwise. The dispatch runs once per emitted method
-// at generation time (spec §5.5's access-mode threading rule); the
-// emitted body carries the constant, not a runtime branch.
-func accessModeText(p preparedQuery) string {
-	if p.Validated.Statement == resolver.StatementWrite {
+// accessModeText picks the fourth q.db.run argument from the prepare-
+// side closed enum (spec §1.1). Dispatch is on committed data —
+// preparedQuery.AccessMode — never on Validated.Statement.
+func accessModeText(m accessMode) string {
+	if m == accessModeWrite {
 		return "neo4j.AccessModeWrite"
 	}
 	return "neo4j.AccessModeRead"
@@ -318,7 +316,7 @@ func writeDocComment(b *strings.Builder, p preparedQuery) {
 // C4 threads the access mode dispatch per Validated.Statement (§5.5);
 // the C1 hardcoded neo4j.AccessModeRead retires.
 func writeRunCall(b *strings.Builder, p preparedQuery) {
-	fmt.Fprintf(b, "\trecords, err := q.db.run(ctx, %sQueryText, %s, %s)\n", p.Bare, paramsMapText(p), accessModeText(p))
+	fmt.Fprintf(b, "\trecords, err := q.db.run(ctx, %sQueryText, %s, %s)\n", p.Bare, paramsMapText(p), accessModeText(p.AccessMode))
 	fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %s, err\n\t}\n", zeroValueText(p))
 }
 
