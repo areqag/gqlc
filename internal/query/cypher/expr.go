@@ -572,14 +572,14 @@ func (l *listener) pairAddSub(a, b gen.IOC_AddOrSubtractExpressionContext) {
 	if ref, ok := propertyRefFromAddSub(a); ok {
 		if param, node, ok := parameterFromAddSub(b); ok {
 			l.addParameterUse(param, node, query.NewPropertyUse(query.Ref{Variable: ref.Variable, Property: ref.Property}))
-			l.curPart.refs = append(l.curPart.refs, varRef{name: ref.Variable})
+			l.appendRef(varRef{name: ref.Variable})
 		}
 		return
 	}
 	if ref, ok := propertyRefFromAddSub(b); ok {
 		if param, node, ok := parameterFromAddSub(a); ok {
 			l.addParameterUse(param, node, query.NewPropertyUse(query.Ref{Variable: ref.Variable, Property: ref.Property}))
-			l.curPart.refs = append(l.curPart.refs, varRef{name: ref.Variable})
+			l.appendRef(varRef{name: ref.Variable})
 		}
 	}
 }

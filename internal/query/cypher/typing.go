@@ -321,7 +321,7 @@ func (l *listener) typeAtom(a gen.IOC_AtomContext, refs *[]query.Ref) query.Type
 	switch {
 	case a.OC_Variable() != nil:
 		name := a.OC_Variable().GetText()
-		l.curPart.refs = append(l.curPart.refs, varRef{name: name})
+		l.appendRef(varRef{name: name})
 		*refs = append(*refs, query.Ref{Variable: name})
 		return l.refType(query.Ref{Variable: name})
 	case a.OC_Literal() != nil:

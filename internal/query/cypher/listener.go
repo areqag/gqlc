@@ -219,7 +219,6 @@ func (l *listener) suppressed() bool { return l.subqueryDepth > 0 }
 // Category A — per-part writes (spec §1.1 A). Every method no-ops under
 // suppression; call sites migrate in Phase C.
 
-//nolint:unused // Phase A dead code; wired up in Phase C.
 func (l *listener) appendBinding(rb *rawBinding) {
 	if l.suppressed() {
 		return
@@ -227,7 +226,6 @@ func (l *listener) appendBinding(rb *rawBinding) {
 	l.curPart.bindings = append(l.curPart.bindings, rb)
 }
 
-//nolint:unused // Phase A dead code; wired up in Phase C.
 func (l *listener) appendPathBinding(pb query.PathBinding) {
 	if l.suppressed() {
 		return
@@ -238,8 +236,6 @@ func (l *listener) appendPathBinding(pb query.PathBinding) {
 // setPathMemberSink routes both the &pathMembers assignment and the nil
 // clear; sink stays nil under suppression, so recordPathNode/recordPathEdge
 // early-return at their existing nil-check (spec §3.2, BLOCKER 1).
-//
-//nolint:unused // Phase A dead code; wired up in Phase C.
 func (l *listener) setPathMemberSink(sink *[]query.PathMember) {
 	if l.suppressed() {
 		return
@@ -247,7 +243,6 @@ func (l *listener) setPathMemberSink(sink *[]query.PathMember) {
 	l.curPart.pathMemberSink = sink
 }
 
-//nolint:unused // Phase A dead code; wired up in Phase C.
 func (l *listener) appendPathMember(m query.PathMember) {
 	if l.suppressed() {
 		return
@@ -303,7 +298,6 @@ func (l *listener) setDistinct() {
 	l.curPart.distinct = true
 }
 
-//nolint:unused // Phase A dead code; wired up in Phase C.
 func (l *listener) appendRef(r varRef) {
 	if l.suppressed() {
 		return
@@ -362,8 +356,6 @@ func (l *listener) markWriteSeen() {
 
 // mintOptionalGroup returns 0 under suppression so ay9 §3.3's
 // "suppressed clauses consume no id" invariant holds by construction.
-//
-//nolint:unused // Phase A dead code; wired up in Phase C.
 func (l *listener) mintOptionalGroup() int {
 	if l.suppressed() {
 		return 0
@@ -448,13 +440,9 @@ func (l *listener) EnterOC_Union(c *gen.OC_UnionContext) {
 // way in either case. Collection runs here, in walk order, so first appearance
 // of a variable is the source order within the part.
 func (l *listener) EnterOC_Match(c *gen.OC_MatchContext) {
-	if l.subqueryDepth > 0 {
-		return // Stage 11 §1.2: EXISTS { ... } suppresses inner clause collection.
-	}
 	group := 0
 	if c.OPTIONAL() != nil {
-		l.optionalGroupSeq++
-		group = l.optionalGroupSeq
+		group = l.mintOptionalGroup()
 	}
 	l.collectPattern(c.OC_Pattern(), group)
 	if w := c.OC_Where(); w != nil {
