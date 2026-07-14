@@ -69,7 +69,7 @@ Revision history:
   branch (Rev-3 stack): b5e206d (Phase B.5 sink gate), 764dcd8 (Phase
   C Match migration, previously red, now green), and this spec
   commit that formalises the phasing.
-- Rev 4 (this file): Phase-D-before-final-Phase-C reorder. Rev 3's
+- Rev 4 (1bcaa30): Phase-D-before-final-Phase-C reorder. Rev 3's
   §5 placed Phase D (`l.fail` gate) AFTER all Phase C handler
   migrations. During the commit-12 (`EnterOC_InQueryCall`) review
   cycle, linus-2 flagged that the last-remaining Category-D reach
@@ -100,6 +100,55 @@ Revision history:
   75e6846..1182448), and this spec commit that formalises the
   reorder. Commit-13 (StandaloneCall) then follows under the standing
   Phase-C rule.
+- Rev 5 (this file): Phase E mechanism swap — forbidigo replaced by
+  an AST-based write-fence test. Rev 3 §4.3 specified a `forbidigo`
+  rule scoped to package `cypher` with seven regex patterns like
+  `l\.err\s*=` intended to fence writes to the six listener
+  collection-state fields (`err, branches, combinators, writeSeen,
+  params, optionalGroupSeq`). During Phase E implementation the
+  mechanism was measured first-party: golangci-lint's `forbidigo` v2
+  is *identifier-chain-based*, not source-substring-regex-based. It
+  silently drops the `\s*=` context and matches the selector chain
+  alone, flagging reads as well as writes. Measured surface across
+  package `cypher` (uncapped `--max-issues-per-linter=0
+  --max-same-issues=0`):
+
+  | Identifier | Total | Writes | Reads |
+  |---|---|---|---|
+  | `l.err` | 26 | 1 | 25 (the `if l.err != nil` guard idiom) |
+  | `l.params` | 8 | 2 | 6 |
+  | `l.branches` | 4 | 1 | 3 |
+  | `l.combinators` | 3 | 1 | 2 |
+  | `l.writeSeen` | 2 | 1 | 1 |
+  | `l.optionalGroupSeq` | 2 | 1 | 1 |
+  | **Total** | **45** | 7 | 38 |
+
+  Rev 3 §4.3 anticipated ~15 sink-site `//nolint:forbidigo`
+  directives; the actual surface would have required 38 additional
+  read-site nolints for zero enforcement value (a `read` of `l.err`
+  cannot mutate it). Options considered and rejected: (1) ship
+  spec-literal (38 read-site nolints = comment pollution against
+  house style), (2) narrow forbidigo to five identifiers and drop
+  `l.err` (still 12 read-site nolints AND silently loses the one
+  write forbidigo cannot express anyway), (3) defer to a follow-up
+  bead (risk of polish-bead rot). Team-lead ruled Option 4: replace
+  forbidigo with a Go AST-based test that walks every AssignStmt.LHS
+  and IncDecStmt.X on `*listener`-receiver methods, resolves the
+  selector chain, and asserts the enclosing func is one of seven
+  sanctioned sink methods (`fail, openBranch, recordUnionKind,
+  markWriteSeen, mintOptionalGroup, addParameterUse,
+  addParameterUseUnsuppressed`). Enforcement is STRONGER than any
+  forbidigo option (retains `l.err` write-enforcement); nolint count
+  is ZERO. §5 Phase E is updated in-place to reference the fence
+  test instead of the forbidigo rule; §4.3 becomes a historical
+  paragraph followed by the fence-test description. Intent
+  unchanged: "no direct writes to listener collection state outside
+  the sinks." Ships as one commit on this branch (Rev-5 stack):
+  the commit-14 that installs `sink_fence_test.go` plus this spec
+  edit, plus the two Rev-4-cycle nits (parser_test.go Phase-D pin
+  sentinel-comment tightening + §3.2 stale `[r*-1]` hop-example
+  replacement with the digits-only-overflow shape Test A actually
+  pins).
 
 ---
 
@@ -556,7 +605,14 @@ correct.
   the append and the fail are prevented. Parity.
 - pattern.go:292 — invalid hop range (`edgeHopsFromRangeLiteral`
   error) inside `collectEdge`. To trigger:
-  `WHERE EXISTS { MATCH ()-[r*-1]->() RETURN r }` (negative hop).
+  `WHERE EXISTS { MATCH ()-[r*99999999999999999999]->() RETURN r }`
+  (digits-only overflow: `strconv.Atoi` fails with
+  ErrRange). The negative-hop shape `[r*-1]` initially seemed
+  intuitive but is grammar-blocked (minus is not admitted by
+  IntegerLiteral, so ANTLR rejects it at SyntaxError before
+  EnterOC_Match fires); digits-only overflow is the
+  actually-walker-reachable trigger, and matches what Test A's
+  `exists_fail_parity_—_hop_range_integer_overflow` entry pins.
   Master: unreachable (EnterOC_Match early-returns). New regime:
   `edgeHopsFromRangeLiteral` returns error; sink-gated `l.fail`
   no-ops; `l.err` stays nil; parse succeeds identically to master.
@@ -759,35 +815,53 @@ the mining path). The assertion: Query 2's `Parameters[0].Uses[0]`
 is `ExprUse{TypeBool, ExprInPredicate}`, NOT
 `ExprUse{_, ExprInSetValue}`. This pins BLOCKER 5's parity.
 
-### 4.3 Lint gate (§1.3)
+### 4.3 Write-fence test (§1.3)
 
-`.golangci.yml` gains a `forbidigo` rule scoped to package
-`cypher` that rejects any of:
+Per Rev 5 mechanism swap: package `cypher` gains a Go
+AST-based test (`sink_fence_test.go`) that walks every
+`AssignStmt.LHS` and `IncDecStmt.X` on `*listener`-receiver
+methods, resolves the selector chain, and asserts the enclosing
+function is one of seven sanctioned sink methods:
 
-- `l\.curPart\.[a-zA-Z]+\s*=\s*append\(` outside listener.go's sink methods
-- `l\.branches\s*=\s*append\(` outside listener.go's sink methods
-- `l\.combinators\s*=\s*append\(` outside listener.go's sink methods
-- `l\.writeSeen\s*=` outside listener.go
-- `l\.optionalGroupSeq[+]{2}` outside listener.go
-- `l\.err\s*=` outside listener.go's `fail` method
-- `l\.params\s*=\s*append\(` outside listener.go's addParameterUse methods
+- `fail` (writes `err`)
+- `openBranch` (writes `branches`)
+- `recordUnionKind` (writes `combinators`)
+- `markWriteSeen` (writes `writeSeen`)
+- `mintOptionalGroup` (writes `optionalGroupSeq` via `++`)
+- `addParameterUse` (writes `params`, gated by `l.suppressed()`)
+- `addParameterUseUnsuppressed` (writes `params`, Category-E
+  bypass path per §1.4)
 
-The forbidigo patterns are narrow: `= append(...)` is forbidden
-outside the sink, but bare `= savedRefs` restore forms are allowed
-(they don't match `append(...)`). This carves out the save/restore
-idiom in §2.2 without special-casing.
+Fenced fields: exactly the six listener collection-state fields
+whose sink-routing this spec enforces: `err, branches,
+combinators, writeSeen, params, optionalGroupSeq`. Reads are
+unrestricted — `build.go` materialisers and `if l.err != nil`
+guard idioms are legitimate everywhere.
 
-`listener.go` sink method definitions get a
-`//nolint:forbidigo` file-level directive at the top of the sink
-method block, or per-line directives where forbidigo's include-glob
-is coarser. If the rule cannot express file-level exclusion for
-sink method definitions, each of the ~15 raw-append sites inside a
-sink method gets a `//nolint:forbidigo // sink method` per-line
-comment. This is a one-time cost paid at Phase E.
+Failure message names `file:line: l.<field> written in <func>
+(not a sanctioned sink)`.
 
-Grep-verify in CI: after `just lint` passes, `grep -n "if l\.subqueryDepth
-> 0" internal/query/cypher/*.go | grep -v ExitOC_ExistentialSubquery`
-returns zero hits.
+Save/restore idiom (§2.2) is not a concern: those restore forms
+write to `l.curPart.refs` / `l.curPart.effects`, not to any of
+the six fenced fields. The fence has nothing to say about them.
+
+**Why not `forbidigo`.** Rev 3 §4.3 originally specified a
+`forbidigo` rule with seven regex-shaped patterns. First-party
+measurement during Phase E implementation showed `forbidigo` v2 is
+identifier-chain-based, not source-substring-regex-based: it
+silently drops the `\s*=` context and flags reads as well as
+writes (26 `l.err` hits, 25 of which were `if l.err != nil` read
+sites). Rev 5's revision-history stanza has the full 45/7/38
+measurement and rationale for the mechanism swap. The AST fence
+is strictly stronger: it retains write-enforcement on all six
+fields (including `l.err`, which the narrowest forbidigo option
+would have dropped) and adds zero `//nolint` directives.
+
+Grep-verify in CI: `git grep -nE "l\.subqueryDepth > 0"
+internal/query/cypher/*.go` returns exactly two hits — the
+`suppressed()` seam at listener.go:224 and
+`ExitOC_ExistentialSubquery`'s balance-safe decrement — with
+zero remaining in `Enter*` handlers.
 
 ### 4.4 What we do NOT test
 
@@ -881,12 +955,17 @@ asserts what's true today at master too via the guarded
 early-return, the tests pass on master, so strict red-first is not
 possible; commit them as green-forward instead).
 
-**Phase E — Enable the lint gate.** Turn on the `forbidigo` rule
-scoped to package cypher. Add `//nolint:forbidigo` directives on
-the sink method definitions and the save/restore idiom lines that
-would otherwise match.
+**Phase E — Install the write-fence test.** Per Rev 5 mechanism
+swap: add `sink_fence_test.go` in package `cypher` (external
+`cypher_test` package) implementing the AST fence described in
+§4.3. Enforces the six-field / seven-sink invariant with zero
+`//nolint` directives — reads are unrestricted by construction.
+No `.golangci.yml` change. RED-analogue receipts required (both
+directions: injected non-sink write → fence FAILS naming it;
+sink temporarily removed from whitelist → fence FAILS on the
+sink's own write; byte-identical restore after each experiment).
 
-Commit: `refactor(cypher): enforce sink-only writes via forbidigo`.
+Commit: `refactor(cypher): enforce sink-only writes via AST fence test`.
 
 **Phase F — Verify acceptance fences.**
 

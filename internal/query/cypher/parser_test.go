@@ -3169,10 +3169,23 @@ var mustParse = map[string]struct {
 		}),
 	},
 	"exists fail parity — path vs unwind kind conflict": {
-		// Target: expr.go:107 (collectUnwind pathBindings sweep) or
-		// pattern.go:84 (collectPatternPart path-vs-unwind collision).
-		// Inner UNWIND binds `p`, inner MATCH re-uses `p` as a path
-		// variable — ErrVariableKindConflict fires under suppression.
+		// The `MATCH p = ()-->()` inside EXISTS binds `p` as a path
+		// variable. Three fail-sites are reachable from the inner
+		// walker on this input, in the order the walker hits them:
+		// (1) pattern.go:88 NewPathBinding — "path binding requires
+		// at least one member" fires first for empty-member cases;
+		// this is what actually surfaces on this specific source
+		// (verified first-party by linus-2 in the RED reproduction
+		// on 7af1e6a). (2) expr.go:107 collectUnwind pathBindings
+		// sweep. (3) pattern.go:84 collectPatternPart path-vs-unwind
+		// collision (ErrVariableKindConflict). Any of the three
+		// firing without the Phase D gate would leak an outer
+		// l.err; the pin is protective against all three regardless
+		// of which one wins the race for a given source shape. What
+		// matters for parity is that the outer parse succeeds and
+		// the outer Query shape is the "one MATCH (n), RETURN n"
+		// shape below — that assertion catches an ungated fail on
+		// any of the three sentinels.
 		src: "MATCH (n) WHERE exists { UNWIND [1] AS p MATCH p = ()-->() RETURN p }\nRETURN n",
 		want: oneBranch(query.Part{
 			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
