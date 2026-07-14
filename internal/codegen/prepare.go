@@ -42,6 +42,17 @@ var reservedIdentifiers = map[string]struct{}{
 	"ErrMultipleResults": {},
 }
 
+// accessMode is the closed prepare-side enum committing the neo4j
+// session AccessMode axis (spec §1.1). Two values only. Kept
+// prepare-local and target-independent — render maps to the emitted
+// token at the single accessModeText call site.
+type accessMode int
+
+const (
+	accessModeRead accessMode = iota
+	accessModeWrite
+)
+
 // preparedQuery bundles the per-query derivations produced by Phase B —
 // the derived method surface, the Params/Row shapes, and the resolved
 // axes Phase A already gate-checked. Kept together so the per-source
@@ -49,11 +60,13 @@ var reservedIdentifiers = map[string]struct{}{
 // than re-deriving each field from NamedQuery.Validated.
 type preparedQuery struct {
 	NamedQuery
-	MethodName  string              // verbatim NamedQuery.Name
-	Bare        string              // lowerCamel first rune of MethodName
-	ParamFields []preparedParam     // in Validated.Parameters order
-	RowFields   []preparedRow       // in Validated.Columns order
-	EdgeUnions  []preparedEdgeUnion // in Validated.Columns order (sub-ordered by column position); one per columnEdgeUnion Row field (C5)
+	MethodName  string               // verbatim NamedQuery.Name
+	Bare        string               // lowerCamel first rune of MethodName
+	AccessMode  accessMode           // §1.1 — closed enum committed at Phase B
+	IsWrite     bool                 // §1.2 — Validated.Statement == StatementWrite
+	ParamFields []preparedParam      // in Validated.Parameters order
+	RowFields   []preparedRow        // in Validated.Columns order
+	EdgeUnions  []*preparedEdgeUnion // in Validated.Columns order (sub-ordered by column position); one per columnEdgeUnion Row field (C5). Pointer-stable so a preparedListElem's UnionIdx into this slice survives slice growth (spec §3.1).
 }
 
 type preparedParam struct {
@@ -68,9 +81,48 @@ type preparedRow struct {
 	Field      string // mangle §4.3
 	GoType     string // §5.1 — a Go type text; for entity columns the entity struct name; for edgeUnion columns the synthesised interface name
 	Nullable   bool
-	Kind       columnKind            // property (C1) or entity — property/node/edge (C2); temporal/list/scalar/any (C3); edgeUnion (C5)
-	ListElem   resolver.ResolvedType // populated when Kind == columnList — the element leaf, driving the loop body
-	EdgeKeys   []schema.EdgeKey      // populated when Kind == columnEdgeUnion — the candidate edge keys in resolver-canonical order (§5.5)
+	Kind       columnKind        // property (C1) or entity — property/node/edge (C2); temporal/list/scalar/any (C3); edgeUnion (C5)
+	ListElem   *preparedListElem // non-nil iff Kind == columnList — the committed element decode plan (spec §1.3)
+	EdgeKeys   []schema.EdgeKey  // populated when Kind == columnEdgeUnion — the candidate edge keys in resolver-canonical order (§5.5)
+}
+
+// preparedListElem is Phase B's committed list-element decode plan
+// (spec §1.3). Every list column's ListElem is non-nil; the element's
+// arm — Kind, from the same closed columnKind enum as the top-level
+// row's Kind — plus the derived carrier / entity / union coordinates
+// let the render-side loop body walk one struct per element, never a
+// resolver type. Nested lists carry a Nested plan for the inner
+// iteration.
+type preparedListElem struct {
+	// Kind is the same closed columnKind used at the top level. A future
+	// resolver variant lands in exactly one place — here and at the top
+	// level's Phase B assignment — and both switches fail to compile
+	// until it is handled.
+	Kind columnKind
+	// GoType is the emitted Go type text for one element — a native Go
+	// type (`int64`, `string`), a schema-derived entity struct name, or
+	// a synthesised edgeUnion interface name.
+	GoType string
+	// Carrier is the driver's carry type for a Property arm's
+	// GetRecordValue / type-assert (`int64` for narrow ints, `float64`
+	// for narrow floats). Empty string when Carrier == GoType or the arm
+	// does not use a carrier.
+	Carrier string
+	// UsesConvert reports whether the Property arm must emit a
+	// `GoType(v)` narrow-convert after asserting the carrier.
+	UsesConvert bool
+	// EntityName is the schema-derived struct name for the Node / Edge
+	// arms — feeds the `decode<EntityName>` helper call.
+	EntityName string
+	// UnionIdx is the index into the owning preparedQuery.EdgeUnions
+	// slice for the EdgeUnion arm. Index is chosen over a pointer so a
+	// future Phase B edit that reorders EdgeUnions appends around the
+	// plan-build call cannot leave a stale pointer behind (spec §5.2).
+	// Zero for every non-EdgeUnion arm.
+	UnionIdx int
+	// Nested is the inner element plan for a nested list. Non-nil iff
+	// Kind == columnList.
+	Nested *preparedListElem
 }
 
 // columnKind discriminates the row-assembly template arm to run for a
@@ -101,6 +153,14 @@ const (
 	// decode shape (map's carrier is map[string]any; null decodes via
 	// columnAny below).
 	columnScalar
+	// columnScalarNull is the list-element split of ScalarNull off
+	// columnScalar (spec §1.3). At the top level ScalarNull continues to
+	// route through columnAny (unchanged bytes; both dispatch to
+	// writeAnyColumnDecodeIndent). Inside a list-element plan the arm
+	// distinguishes bare-append `any` from a typed-scalar assertion — the
+	// former needs no index variable and no type check. Kept on the same
+	// closed enum so a new resolver variant lands in exactly one place.
+	columnScalarNull
 	// columnList is C3's list-column arm:
 	// neo4j.GetRecordValue[[]any] followed by a per-element loop whose
 	// body dispatches on the element type.
@@ -550,16 +610,12 @@ func phaseAAdmit(queries []NamedQuery, entities []preparedEntity, entityIndex ma
 				// walks the record.Get path.
 			case resolver.ResolvedList:
 				// Recurse the list-element chain to find unrepresentable
-				// leaves (§4.7). The Go type text is derived at Phase B;
-				// here we only fail if the recursion itself rejects. C5
-				// widens the recursion to synthesise the edgeUnion
-				// interface name for a ResolvedEdgeUnion leaf, threading
-				// the ambient query + column field through so the leaf's
-				// synthesised name matches the top-level Row-field
-				// interface. At Phase A we discard the derived text; the
-				// call is a validity probe.
-				rowField, _ := rowFieldName(col.Name)
-				if _, err := resolvedListGoType(t.Element, entities, entityIndex, q.Name, rowField); err != nil {
+				// leaves (§4.7). Phase B repeats the walk to commit the
+				// plan; here the call is a validity probe — we discard
+				// the returned plan. Threading unionIdx = -1 and an
+				// empty interface name is inert: Phase A never emits,
+				// so neither is read.
+				if _, err := buildListElemPlan(t.Element, entities, entityIndex, -1, ""); err != nil {
 					return fmt.Errorf("query %q column %d %q: %w", q.Name, ci, col.Name, err)
 				}
 			default:
@@ -588,6 +644,10 @@ func phaseBDerive(queries []NamedQuery, entities []preparedEntity, entityIndex m
 	out := make([]preparedQuery, 0, len(queries))
 	for _, q := range queries {
 		p := preparedQuery{NamedQuery: q, MethodName: q.Name, Bare: lowerFirstRune(q.Name)}
+		if q.Validated.Statement == resolver.StatementWrite {
+			p.AccessMode = accessModeWrite
+			p.IsWrite = true
+		}
 
 		// Params field derivation.
 		seenParam := make(map[string]int, len(q.Validated.Parameters))
@@ -692,7 +752,7 @@ func phaseBDerive(queries []NamedQuery, entities []preparedEntity, entityIndex m
 				for i, ek := range t.EdgeKeys {
 					candidates[i] = entities[entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: ek}]].Name
 				}
-				p.EdgeUnions = append(p.EdgeUnions, preparedEdgeUnion{
+				p.EdgeUnions = append(p.EdgeUnions, &preparedEdgeUnion{
 					QueryName:     q.Name,
 					ColumnPos:     ci,
 					ColumnName:    col.Name,
@@ -710,36 +770,41 @@ func phaseBDerive(queries []NamedQuery, entities []preparedEntity, entityIndex m
 					EdgeKeys:   t.EdgeKeys,
 				})
 			case resolver.ResolvedList:
-				inner, err := resolvedListGoType(t.Element, entities, entityIndex, q.Name, field)
-				if err != nil {
-					return nil, fmt.Errorf("query %q column %d %q: %w", q.Name, ci, col.Name, err)
-				}
 				// list-of-edgeUnion at a leaf synthesises a preparedEdgeUnion
 				// so models.go emits the interface + marker methods (§5.2).
 				// The leaf's synthesised interface name matches the top-level
 				// column's field name — every element of the list satisfies
-				// the same sealed sum.
+				// the same sealed sum. Append first so the plan builder
+				// can carry the resolved UnionIdx and interface name
+				// (§5.2 index-not-pointer).
+				unionIdx := -1
+				interfaceName := q.Name + field
 				if leafEK, isEdgeUnion := findEdgeUnionLeaf(t.Element); isEdgeUnion {
 					candidates := make([]string, len(leafEK))
 					for i, ek := range leafEK {
 						candidates[i] = entities[entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: ek}]].Name
 					}
-					p.EdgeUnions = append(p.EdgeUnions, preparedEdgeUnion{
+					unionIdx = len(p.EdgeUnions)
+					p.EdgeUnions = append(p.EdgeUnions, &preparedEdgeUnion{
 						QueryName:     q.Name,
 						ColumnPos:     ci,
 						ColumnName:    col.Name,
 						FieldName:     field,
-						InterfaceName: q.Name + field,
+						InterfaceName: interfaceName,
 						EdgeKeys:      leafEK,
 						Candidates:    candidates,
 					})
 				}
+				plan, err := buildListElemPlan(t.Element, entities, entityIndex, unionIdx, interfaceName)
+				if err != nil {
+					return nil, fmt.Errorf("query %q column %d %q: %w", q.Name, ci, col.Name, err)
+				}
 				p.RowFields = append(p.RowFields, preparedRow{
 					ColumnName: col.Name,
 					Field:      field,
-					GoType:     "[]" + inner,
+					GoType:     "[]" + plan.GoType,
 					Kind:       columnList,
-					ListElem:   t.Element,
+					ListElem:   plan,
 				})
 			default:
 				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, ci, col.Name, col.Type.String())
@@ -844,4 +909,81 @@ func findEdgeUnionLeaf(t resolver.ResolvedType) ([]schema.EdgeKey, bool) {
 		return findEdgeUnionLeaf(tt.Element)
 	}
 	return nil, false
+}
+
+// buildListElemPlan commits one list-element decode step into a
+// preparedListElem, walking the ResolvedType sum exactly once (spec
+// §1.3). Every arm returns a non-nil plan whose Kind is one of the
+// closed columnKind values; render walks the plan alone and never sees
+// resolver.ResolvedType again. On an EdgeUnion arm the plan carries
+// UnionIdx pointing at the entry the caller has already appended (or
+// will append) to preparedQuery.EdgeUnions and GoType carries the
+// synthesised sealed-interface name — Phase B threads both through so
+// pointer stability across slice growth is not required (spec §3.1,
+// §5.2).
+//
+// unrepresentable-width leaves surface ErrUnrepresentableWidth naming
+// the offending width. Unknown resolver variants surface ErrOutOfC6Scope
+// naming the type — the deletion-fence for the failure mode this bead
+// closes (spec §4.1 synthetic-malformed-variant row).
+//
+// The unionInterfaceName argument carries the synthesised edgeUnion
+// interface name (`<QueryName><RowField>`) the caller committed onto
+// preparedQuery.EdgeUnions. Every arm except the EdgeUnion / List
+// recursion ignores it.
+func buildListElemPlan(t resolver.ResolvedType, entities []preparedEntity, entityIndex map[entityLookupKey]int, unionIdx int, unionInterfaceName string) (*preparedListElem, error) {
+	switch tt := t.(type) {
+	case resolver.ResolvedProperty:
+		ty, ok := goType(tt.Type)
+		if !ok {
+			return nil, fmt.Errorf("%w: list element has unrepresentable property width %s", ErrUnrepresentableWidth, tt.Type)
+		}
+		carrier := driverCarrier(ty)
+		convert := carrier != ty
+		if !convert {
+			carrier = ""
+		}
+		return &preparedListElem{Kind: columnProperty, GoType: ty, Carrier: carrier, UsesConvert: convert}, nil
+	case resolver.ResolvedNode:
+		idx, ok := entityIndex[entityLookupKey{Kind: entityNode, Labels: tt.Labels}]
+		if !ok {
+			return nil, fmt.Errorf("%w: list element references unknown node type %q", ErrOutOfC6Scope, string(tt.Labels))
+		}
+		name := entities[idx].Name
+		return &preparedListElem{Kind: columnNode, GoType: name, EntityName: name}, nil
+	case resolver.ResolvedEdge:
+		idx, ok := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: tt.EdgeKey}]
+		if !ok {
+			return nil, fmt.Errorf("%w: list element references unknown edge type %s -[:%s]-> %s", ErrOutOfC6Scope, string(tt.EdgeKey.Source), string(tt.EdgeKey.Label), string(tt.EdgeKey.Target))
+		}
+		name := entities[idx].Name
+		return &preparedListElem{Kind: columnEdge, GoType: name, EntityName: name}, nil
+	case resolver.ResolvedEdgeUnion:
+		if len(tt.EdgeKeys) < 2 {
+			return nil, fmt.Errorf("%w: list element resolved as edgeUnion with only %d candidate(s) — resolver invariant violated (expected >= 2)", ErrOutOfC6Scope, len(tt.EdgeKeys))
+		}
+		for _, ek := range tt.EdgeKeys {
+			if _, ok := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: ek}]; !ok {
+				return nil, fmt.Errorf("%w: list element edgeUnion candidate %s -[:%s]-> %s not declared by schema", ErrOutOfC6Scope, string(ek.Source), string(ek.Label), string(ek.Target))
+			}
+		}
+		return &preparedListElem{Kind: columnEdgeUnion, GoType: unionInterfaceName, UnionIdx: unionIdx}, nil
+	case resolver.ResolvedTemporal:
+		ty := temporalGoType(tt.Kind)
+		return &preparedListElem{Kind: columnTemporal, GoType: ty}, nil
+	case resolver.ResolvedScalar:
+		if tt.Kind == resolver.ScalarNull {
+			return &preparedListElem{Kind: columnScalarNull, GoType: "any"}, nil
+		}
+		return &preparedListElem{Kind: columnScalar, GoType: scalarGoType(tt.Kind)}, nil
+	case resolver.ResolvedUnknown:
+		return &preparedListElem{Kind: columnAny, GoType: "any"}, nil
+	case resolver.ResolvedList:
+		nested, err := buildListElemPlan(tt.Element, entities, entityIndex, unionIdx, unionInterfaceName)
+		if err != nil {
+			return nil, err
+		}
+		return &preparedListElem{Kind: columnList, GoType: "[]" + nested.GoType, Nested: nested}, nil
+	}
+	return nil, fmt.Errorf("%w: list element has unknown resolved type %s", ErrOutOfC6Scope, t.String())
 }

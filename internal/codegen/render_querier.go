@@ -2,14 +2,12 @@ package codegen
 
 import (
 	"strings"
-
-	"github.com/areqag/gqlc/internal/resolver"
 )
 
 // renderQuerier emits querier.go (spec §5.4). ReadQuerier lists every
-// method whose Validated.Statement == StatementRead in Input.Queries
-// order; WriteQuerier lists every StatementWrite method in the same
-// filtered order. A method belongs to exactly one interface — the
+// method whose preparedQuery.IsWrite is false in Input.Queries order;
+// WriteQuerier lists every IsWrite==true method in the same filtered
+// order. A method belongs to exactly one interface — the
 // partition is on Statement, not on Cardinality (a :one write-with-
 // projection lands in WriteQuerier; a :exec on a call-with-no-yield
 // lands in ReadQuerier). The compile-time assertion on the last line
@@ -40,7 +38,7 @@ func renderQuerier(pkg string, prepared []preparedQuery, target driverTarget) []
 	}
 	b.WriteString("type ReadQuerier interface {\n")
 	for _, p := range prepared {
-		if p.Validated.Statement != resolver.StatementRead {
+		if p.IsWrite {
 			continue
 		}
 		b.WriteString("\t")
@@ -50,7 +48,7 @@ func renderQuerier(pkg string, prepared []preparedQuery, target driverTarget) []
 	b.WriteString("}\n\n")
 	b.WriteString("type WriteQuerier interface {\n")
 	for _, p := range prepared {
-		if p.Validated.Statement != resolver.StatementWrite {
+		if !p.IsWrite {
 			continue
 		}
 		b.WriteString("\t")
