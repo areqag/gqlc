@@ -518,9 +518,6 @@ func exportedTypes(closed *rawPart) map[string]query.Type {
 // enter the CreateEffect's variables list — matching the read-side discipline.
 // group is unconditionally 0 (non-nullable): openCypher has no OPTIONAL CREATE.
 func (l *listener) EnterOC_Create(c *gen.OC_CreateContext) {
-	if l.subqueryDepth > 0 {
-		return // Stage 11 §1.6: writes inside EXISTS { ... } parse-accept; bucket-3 engine-side.
-	}
 	before := len(l.curPart.bindings)
 	l.collectPattern(c.OC_Pattern(), 0)
 	if l.err != nil {
@@ -530,8 +527,8 @@ func (l *listener) EnterOC_Create(c *gen.OC_CreateContext) {
 	for i := before; i < len(l.curPart.bindings); i++ {
 		vars = append(vars, l.curPart.bindings[i].variable)
 	}
-	l.curPart.effects = append(l.curPart.effects, query.NewCreateEffect(vars))
-	l.writeSeen = true
+	l.appendEffect(query.NewCreateEffect(vars))
+	l.markWriteSeen()
 }
 
 // EnterOC_Merge collects the MERGE clause: the pattern's single oC_PatternPart

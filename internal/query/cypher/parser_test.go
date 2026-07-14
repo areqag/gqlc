@@ -2267,6 +2267,40 @@ var mustParse = map[string]struct {
 			},
 		}),
 	},
+	// collection-sink Phase C pin — Create entry-point twin. A single CREATE
+	// clause with one fresh node binding (m) inside an EXISTS body exercises
+	// both un-migrated sink classes reachable from EnterOC_Create: the
+	// terminating effects write at listener.go:533 (Cat B, one CreateEffect)
+	// and the terminating writeSeen flip at :534 (Cat C). The pattern-collection
+	// subtree (collectPattern → collectPatternPart → collectPatternElement →
+	// recordEndpointRefs, plus mergeBinding / appendBinding / appendPathBinding
+	// / setPathMemberSink / appendPathMember / appendUnwindBinding) is already
+	// sink-gated on l.suppressed() from Phase B, so refs and bindings writes
+	// from the pattern no-op under suppression regardless of the guard drop.
+	// Under EXISTS suppression with the subqueryDepth guard removed,
+	// collectPattern still runs its full walk but every sink call (endpoint
+	// refs at pattern.go:381, binding appends at listener.go:222-256) short-
+	// circuits at the sink method boundary. `before` and `len(bindings)` are
+	// equal at the delta computation, so `vars` is empty and the resulting
+	// CreateEffect is degenerate (NewCreateEffect(nil)) — but the appendEffect
+	// call itself still no-ops before the leak lands, so outer Effects stays
+	// nil. Without the two migrations, this pin fails: an un-sunk effects
+	// write leaks one CreateEffect{vars=nil} into outer Effects (require.Equal
+	// on Effects shape); an un-sunk markWriteSeen flips outer StatementKind
+	// from StatementRead to StatementWrite (require.Equal on query-level
+	// StatementKind). One pin, two leak-lines, two sinks. CREATE has only
+	// two sink classes in its handler body (no Cat A — the pattern's refs
+	// and bindings writes are already routed through pre-migrated sinks
+	// from Phase B).
+	"exists body create no outer leak": {
+		src: "MATCH (n) WHERE exists { CREATE (m) RETURN m }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
 	// Nested — SKIP $off in the OUTER RegularQuery-form EXISTS, LIMIT $lim in
 	// an inner EXISTS one level deeper. EnterOC_ExistentialSubquery fires on
 	// the outer subquery first (parent EnterRule precedes child EnterRule);
