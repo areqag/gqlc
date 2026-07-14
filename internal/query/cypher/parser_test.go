@@ -2170,6 +2170,37 @@ var mustParse = map[string]struct {
 			},
 		}),
 	},
+	// collection-sink Phase C pin — Set entry-point twin. A single SET clause
+	// with three items (m.p = 1, m:L, m += {x: 2}) inside an EXISTS body
+	// exercises ALL THREE arms of collectSetItem in one construction:
+	// propertyExpression (:750 refs + :764 effects), variable+labels (:768
+	// refs + :775 effects), and variable+expression (:779 refs + :794
+	// effects). Post-guard-drop, each arm's refs write is routed through
+	// appendRef and each arm's effects write through appendEffect; the
+	// terminating writeSeen flag flip in EnterOC_Set is routed through
+	// markWriteSeen. Under EXISTS suppression, all seven routings no-op,
+	// so no SetEffect leaks into outer Effects, no varRef{m} leaks onto
+	// outer refs, and StatementKind stays StatementRead. Without ANY of the
+	// three sink routings, this pin fails: an un-sunk effects write leaks
+	// three SetEffects into outer Effects (require.Equal on Effects shape);
+	// an un-sunk refs write leaks varRef{m} onto outer refs (build's
+	// referential-integrity sweep rejects with ErrUnboundVariable: m —
+	// outer part binds only n); an un-sunk markWriteSeen flips outer
+	// StatementKind from StatementRead to StatementWrite (require.Equal on
+	// query-level StatementKind). One pin, seven leak-lines, three sinks.
+	// The three arms are structurally identical (all follow refs-then-eff-
+	// then-append pattern), so one pin covering all three via multi-item
+	// SET is sufficient coverage — the per-sink temp-revert probe proves
+	// each is independently load-bearing.
+	"exists body set three-arm no outer leak": {
+		src: "MATCH (n) WHERE exists { MATCH (m) SET m.p = 1, m:L, m += {x: 2} RETURN m }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
 	// Nested — SKIP $off in the OUTER RegularQuery-form EXISTS, LIMIT $lim in
 	// an inner EXISTS one level deeper. EnterOC_ExistentialSubquery fires on
 	// the outer subquery first (parent EnterRule precedes child EnterRule);

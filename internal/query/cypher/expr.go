@@ -747,7 +747,7 @@ func (l *listener) collectSetItem(item gen.IOC_SetItemContext) {
 			l.fail(fmt.Errorf("%w: SET %s", ErrNestedPropertyTarget, item.OC_PropertyExpression().GetText()))
 			return
 		}
-		l.curPart.refs = append(l.curPart.refs, varRef{name: target.Variable})
+		l.appendRef(varRef{name: target.Variable})
 		valueType, refs, params := l.typeExpressionMining(item.OC_Expression())
 		for _, p := range params {
 			name := parameterName(p)
@@ -761,22 +761,22 @@ func (l *listener) collectSetItem(item gen.IOC_SetItemContext) {
 			l.fail(err)
 			return
 		}
-		l.curPart.effects = append(l.curPart.effects, eff)
+		l.appendEffect(eff)
 
 	case item.OC_Variable() != nil && item.OC_NodeLabels() != nil:
 		variable := item.OC_Variable().GetText()
-		l.curPart.refs = append(l.curPart.refs, varRef{name: variable})
+		l.appendRef(varRef{name: variable})
 		labels := nodeLabels(item.OC_NodeLabels())
 		eff, err := query.NewSetLabelsEffect(variable, labels)
 		if err != nil {
 			l.fail(err)
 			return
 		}
-		l.curPart.effects = append(l.curPart.effects, eff)
+		l.appendEffect(eff)
 
 	case item.OC_Variable() != nil && item.OC_Expression() != nil:
 		variable := item.OC_Variable().GetText()
-		l.curPart.refs = append(l.curPart.refs, varRef{name: variable})
+		l.appendRef(varRef{name: variable})
 		op := setItemOp(item)
 		valueType, refs, params := l.typeExpressionMining(item.OC_Expression())
 		for _, p := range params {
@@ -791,7 +791,7 @@ func (l *listener) collectSetItem(item gen.IOC_SetItemContext) {
 			l.fail(err)
 			return
 		}
-		l.curPart.effects = append(l.curPart.effects, eff)
+		l.appendEffect(eff)
 	}
 }
 

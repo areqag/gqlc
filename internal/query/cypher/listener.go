@@ -301,7 +301,6 @@ func (l *listener) appendRef(r varRef) {
 	l.curPart.refs = append(l.curPart.refs, r)
 }
 
-//nolint:unused // Phase A dead code; wired up in Phase C.
 func (l *listener) appendEffect(eff query.Effect) {
 	if l.suppressed() {
 		return
@@ -341,7 +340,6 @@ func (l *listener) closePartOpenNext(imported map[string]query.Type) {
 
 // Category C — query-wide scope counters (spec §1.1 C).
 
-//nolint:unused // Phase A dead code; wired up in Phase C.
 func (l *listener) markWriteSeen() {
 	if l.suppressed() {
 		return
@@ -682,9 +680,6 @@ func (l *listener) EnterOC_Delete(c *gen.OC_DeleteContext) {
 // A nested propertyExpression LHS (n.a.b) rejects with
 // ErrNestedPropertyTarget via collectSetItem.
 func (l *listener) EnterOC_Set(c *gen.OC_SetContext) {
-	if l.subqueryDepth > 0 {
-		return
-	}
 	// A SET clause nested inside a MERGE ON action (ON MATCH SET .. / ON
 	// CREATE SET ..) is walked by collectMergeAction, which routes each item
 	// into the parent MergeEffect's OnMatch/OnCreate slot rather than the
@@ -699,7 +694,7 @@ func (l *listener) EnterOC_Set(c *gen.OC_SetContext) {
 			return
 		}
 	}
-	l.writeSeen = true
+	l.markWriteSeen()
 }
 
 // EnterOC_Remove collects one REMOVE clause: one Effect per RemoveItem
