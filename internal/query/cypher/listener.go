@@ -274,7 +274,6 @@ func (l *listener) setCallStandalone() {
 	l.curPart.callStandalone = true
 }
 
-//nolint:unused // Phase A dead code; wired up in Phase C.
 func (l *listener) appendReturnItem(item query.ReturnItem) {
 	if l.suppressed() {
 		return
@@ -282,7 +281,6 @@ func (l *listener) appendReturnItem(item query.ReturnItem) {
 	l.curPart.returns = append(l.curPart.returns, item)
 }
 
-//nolint:unused // Phase A dead code; wired up in Phase C.
 func (l *listener) setReturnsAll() {
 	if l.suppressed() {
 		return
@@ -290,7 +288,6 @@ func (l *listener) setReturnsAll() {
 	l.curPart.returnsAll = true
 }
 
-//nolint:unused // Phase A dead code; wired up in Phase C.
 func (l *listener) setDistinct() {
 	if l.suppressed() {
 		return
@@ -333,7 +330,6 @@ func (l *listener) recordUnionKind(kind query.UnionKind) {
 	l.combinators = append(l.combinators, kind)
 }
 
-//nolint:unused // Phase A dead code; wired up in Phase C.
 func (l *listener) closePartOpenNext(imported map[string]query.Type) {
 	if l.suppressed() {
 		return
@@ -457,9 +453,6 @@ func (l *listener) EnterOC_Match(c *gen.OC_MatchContext) {
 // next part's scope (spec §4); Stage 6 also carries their result types so the
 // next part's classifier can type a bare-alias RefProjection.
 func (l *listener) EnterOC_With(c *gen.OC_WithContext) {
-	if l.subqueryDepth > 0 {
-		return // Stage 11 §1.2: EXISTS { ... } suppresses inner clause collection.
-	}
 	l.collectProjection(c.OC_ProjectionBody())
 	if w := c.OC_Where(); w != nil {
 		l.mineWhere(w)
@@ -467,11 +460,7 @@ func (l *listener) EnterOC_With(c *gen.OC_WithContext) {
 	if l.err != nil {
 		return
 	}
-	closed := l.curPart
-	part := newRawPart()
-	part.imported = exportedTypes(closed)
-	l.curBranch.parts = append(l.curBranch.parts, part)
-	l.curPart = part
+	l.closePartOpenNext(exportedTypes(l.curPart))
 }
 
 // exportedTypes computes the name → Stage-6 result type map the closed part

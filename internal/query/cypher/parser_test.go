@@ -2086,6 +2086,43 @@ var mustParse = map[string]struct {
 			}},
 		),
 	},
+	// collection-sink Phase C pin — an inner WITH inside an EXISTS body
+	// projects a bare variable m (bound only in the inner MATCH). Without the
+	// classifyProjection→appendRef migration, the inner WITH's suppressed
+	// EnterOC_With would still reach classifyProjection's bare-var branch and
+	// leak varRef{m} onto the OUTER part's refs slice, which build()'s
+	// referential-integrity sweep would then reject with ErrUnboundVariable
+	// (m is bound inside the subquery, not on the outer part). The outer part
+	// binds only n. Corpus was blind to this class before the sink migration
+	// because every prior WITH-in-EXISTS shape carried n (outer scope) rather
+	// than an inner-only binding — build() didn't reject, but the outer refs
+	// slice silently grew. This pin turns that latent leak golden-visible.
+	"exists body with-item bare inner var no outer refs leak": {
+		src: "MATCH (n) WHERE exists { MATCH (m) WITH m RETURN m }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
+	// collection-sink Phase C pin — twin of the bare-var case, exercising the
+	// classifyFunction arg-refs loop instead: id(m) inside a WITH body. Without
+	// the classifyFunction→appendRef migration, the suppressed EnterOC_With
+	// would reach classifyFunction's functionArgRefs loop and leak varRef{m}
+	// onto the outer part's refs slice via the append site — same
+	// ErrUnboundVariable rejection as the bare-var case. Two pins (one per
+	// migrated append site) so a future partial regression can't hide behind
+	// the other's coverage.
+	"exists body with-item function arg no outer refs leak": {
+		src: "MATCH (n) WHERE exists { MATCH (m) WITH id(m) AS mid RETURN mid }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
 	// Nested — SKIP $off in the OUTER RegularQuery-form EXISTS, LIMIT $lim in
 	// an inner EXISTS one level deeper. EnterOC_ExistentialSubquery fires on
 	// the outer subquery first (parent EnterRule precedes child EnterRule);

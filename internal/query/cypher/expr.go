@@ -33,13 +33,13 @@ func (l *listener) collectProjection(body gen.IOC_ProjectionBodyContext) {
 		return
 	}
 	if body.DISTINCT() != nil {
-		l.curPart.distinct = true
+		l.setDistinct()
 	}
 	items := body.OC_ProjectionItems()
 	if items == nil || len(items.AllOC_ProjectionItem()) == 0 {
 		// The '*' alternative carries no projection items: a wildcard over the
 		// part's in-scope bindings (spec §3), recorded as ReturnsAll on the part.
-		l.curPart.returnsAll = true
+		l.setReturnsAll()
 		return
 	}
 
@@ -206,7 +206,7 @@ func (l *listener) collectReturnItem(item gen.IOC_ProjectionItemContext) {
 		name = alias.GetText()
 	}
 
-	l.curPart.returns = append(l.curPart.returns, query.ReturnItem{Name: name, Value: value})
+	l.appendReturnItem(query.ReturnItem{Name: name, Value: value})
 }
 
 // classifyProjection maps a RETURN-item expression to a bare-atom Projection
@@ -237,7 +237,7 @@ func (l *listener) classifyProjection(e gen.IOC_ExpressionContext) (query.Projec
 		if !ok {
 			return nil, false
 		}
-		l.curPart.refs = append(l.curPart.refs, varRef{name: ref.Variable})
+		l.appendRef(varRef{name: ref.Variable})
 		return query.NewRefProjection(ref, l.refType(ref)), true
 
 	case atom.COUNT() != nil:
@@ -353,7 +353,7 @@ func (l *listener) classifyFunction(fi gen.IOC_FunctionInvocationContext) (query
 		return nil, false
 	}
 	for _, ref := range refs {
-		l.curPart.refs = append(l.curPart.refs, varRef{name: ref.Variable})
+		l.appendRef(varRef{name: ref.Variable})
 	}
 	resultType := query.Type(query.TypeUnknown{})
 	if t, ok := temporalConstructorType(fullFunctionName(fi)); ok {
