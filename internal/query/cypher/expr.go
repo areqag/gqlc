@@ -33,13 +33,13 @@ func (l *listener) collectProjection(body gen.IOC_ProjectionBodyContext) {
 		return
 	}
 	if body.DISTINCT() != nil {
-		l.curPart.distinct = true
+		l.setDistinct()
 	}
 	items := body.OC_ProjectionItems()
 	if items == nil || len(items.AllOC_ProjectionItem()) == 0 {
 		// The '*' alternative carries no projection items: a wildcard over the
 		// part's in-scope bindings (spec §3), recorded as ReturnsAll on the part.
-		l.curPart.returnsAll = true
+		l.setReturnsAll()
 		return
 	}
 
@@ -121,7 +121,7 @@ func (l *listener) collectUnwind(c gen.IOC_UnwindContext) {
 	}
 	sourceType, refs, params := l.typeExpressionMining(c.OC_Expression())
 	for _, ref := range refs {
-		l.curPart.refs = append(l.curPart.refs, varRef{name: ref.Variable})
+		l.appendRef(varRef{name: ref.Variable})
 	}
 	for _, p := range params {
 		name := parameterName(p)
@@ -136,7 +136,7 @@ func (l *listener) collectUnwind(c gen.IOC_UnwindContext) {
 		l.fail(err)
 		return
 	}
-	l.curPart.unwindBindings = append(l.curPart.unwindBindings, ub)
+	l.appendUnwindBinding(ub)
 }
 
 // unwindElementType extracts the element type from an UNWIND source
@@ -206,7 +206,7 @@ func (l *listener) collectReturnItem(item gen.IOC_ProjectionItemContext) {
 		name = alias.GetText()
 	}
 
-	l.curPart.returns = append(l.curPart.returns, query.ReturnItem{Name: name, Value: value})
+	l.appendReturnItem(query.ReturnItem{Name: name, Value: value})
 }
 
 // classifyProjection maps a RETURN-item expression to a bare-atom Projection
@@ -237,7 +237,7 @@ func (l *listener) classifyProjection(e gen.IOC_ExpressionContext) (query.Projec
 		if !ok {
 			return nil, false
 		}
-		l.curPart.refs = append(l.curPart.refs, varRef{name: ref.Variable})
+		l.appendRef(varRef{name: ref.Variable})
 		return query.NewRefProjection(ref, l.refType(ref)), true
 
 	case atom.COUNT() != nil:
@@ -353,7 +353,7 @@ func (l *listener) classifyFunction(fi gen.IOC_FunctionInvocationContext) (query
 		return nil, false
 	}
 	for _, ref := range refs {
-		l.curPart.refs = append(l.curPart.refs, varRef{name: ref.Variable})
+		l.appendRef(varRef{name: ref.Variable})
 	}
 	resultType := query.Type(query.TypeUnknown{})
 	if t, ok := temporalConstructorType(fullFunctionName(fi)); ok {
@@ -572,14 +572,14 @@ func (l *listener) pairAddSub(a, b gen.IOC_AddOrSubtractExpressionContext) {
 	if ref, ok := propertyRefFromAddSub(a); ok {
 		if param, node, ok := parameterFromAddSub(b); ok {
 			l.addParameterUse(param, node, query.NewPropertyUse(query.Ref{Variable: ref.Variable, Property: ref.Property}))
-			l.curPart.refs = append(l.curPart.refs, varRef{name: ref.Variable})
+			l.appendRef(varRef{name: ref.Variable})
 		}
 		return
 	}
 	if ref, ok := propertyRefFromAddSub(b); ok {
 		if param, node, ok := parameterFromAddSub(a); ok {
 			l.addParameterUse(param, node, query.NewPropertyUse(query.Ref{Variable: ref.Variable, Property: ref.Property}))
-			l.curPart.refs = append(l.curPart.refs, varRef{name: ref.Variable})
+			l.appendRef(varRef{name: ref.Variable})
 		}
 	}
 }
@@ -673,6 +673,9 @@ func (l *listener) requireAllParametersApproved(e antlr.Tree) {
 // index (gqlc-qcc per ADR 0008 amendment 2026-07-12) via attributeUse at
 // emission time.
 func (l *listener) addParameterUse(name string, node antlr.Tree, use query.Use) {
+	if l.suppressed() {
+		return
+	}
 	idx, ok := l.byParam[name]
 	if !ok {
 		idx = len(l.params)
@@ -744,7 +747,7 @@ func (l *listener) collectSetItem(item gen.IOC_SetItemContext) {
 			l.fail(fmt.Errorf("%w: SET %s", ErrNestedPropertyTarget, item.OC_PropertyExpression().GetText()))
 			return
 		}
-		l.curPart.refs = append(l.curPart.refs, varRef{name: target.Variable})
+		l.appendRef(varRef{name: target.Variable})
 		valueType, refs, params := l.typeExpressionMining(item.OC_Expression())
 		for _, p := range params {
 			name := parameterName(p)
@@ -758,22 +761,22 @@ func (l *listener) collectSetItem(item gen.IOC_SetItemContext) {
 			l.fail(err)
 			return
 		}
-		l.curPart.effects = append(l.curPart.effects, eff)
+		l.appendEffect(eff)
 
 	case item.OC_Variable() != nil && item.OC_NodeLabels() != nil:
 		variable := item.OC_Variable().GetText()
-		l.curPart.refs = append(l.curPart.refs, varRef{name: variable})
+		l.appendRef(varRef{name: variable})
 		labels := nodeLabels(item.OC_NodeLabels())
 		eff, err := query.NewSetLabelsEffect(variable, labels)
 		if err != nil {
 			l.fail(err)
 			return
 		}
-		l.curPart.effects = append(l.curPart.effects, eff)
+		l.appendEffect(eff)
 
 	case item.OC_Variable() != nil && item.OC_Expression() != nil:
 		variable := item.OC_Variable().GetText()
-		l.curPart.refs = append(l.curPart.refs, varRef{name: variable})
+		l.appendRef(varRef{name: variable})
 		op := setItemOp(item)
 		valueType, refs, params := l.typeExpressionMining(item.OC_Expression())
 		for _, p := range params {
@@ -788,7 +791,7 @@ func (l *listener) collectSetItem(item gen.IOC_SetItemContext) {
 			l.fail(err)
 			return
 		}
-		l.curPart.effects = append(l.curPart.effects, eff)
+		l.appendEffect(eff)
 	}
 }
 
@@ -800,14 +803,14 @@ func (l *listener) collectSetItem(item gen.IOC_SetItemContext) {
 func (l *listener) collectRemoveItem(item gen.IOC_RemoveItemContext) {
 	if item.OC_Variable() != nil && item.OC_NodeLabels() != nil {
 		variable := item.OC_Variable().GetText()
-		l.curPart.refs = append(l.curPart.refs, varRef{name: variable})
+		l.appendRef(varRef{name: variable})
 		labels := nodeLabels(item.OC_NodeLabels())
 		eff, err := query.NewRemoveLabelsEffect(variable, labels)
 		if err != nil {
 			l.fail(err)
 			return
 		}
-		l.curPart.effects = append(l.curPart.effects, eff)
+		l.appendEffect(eff)
 		return
 	}
 	if pe := item.OC_PropertyExpression(); pe != nil {
@@ -816,12 +819,12 @@ func (l *listener) collectRemoveItem(item gen.IOC_RemoveItemContext) {
 			l.fail(fmt.Errorf("%w: REMOVE %s", ErrNestedPropertyTarget, pe.GetText()))
 			return
 		}
-		l.curPart.refs = append(l.curPart.refs, varRef{name: target.Variable})
+		l.appendRef(varRef{name: target.Variable})
 		eff, err := query.NewRemovePropertyEffect(target)
 		if err != nil {
 			l.fail(err)
 			return
 		}
-		l.curPart.effects = append(l.curPart.effects, eff)
+		l.appendEffect(eff)
 	}
 }

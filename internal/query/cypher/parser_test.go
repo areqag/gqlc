@@ -2086,6 +2086,356 @@ var mustParse = map[string]struct {
 			}},
 		),
 	},
+	// collection-sink Phase C pin — an inner WITH inside an EXISTS body
+	// projects a bare variable m (bound only in the inner MATCH). Without the
+	// classifyProjection→appendRef migration, the inner WITH's suppressed
+	// EnterOC_With would still reach classifyProjection's bare-var branch and
+	// leak varRef{m} onto the OUTER part's refs slice, which build()'s
+	// referential-integrity sweep would then reject with ErrUnboundVariable
+	// (m is bound inside the subquery, not on the outer part). The outer part
+	// binds only n. Corpus was blind to this class before the sink migration
+	// because every prior WITH-in-EXISTS shape carried n (outer scope) rather
+	// than an inner-only binding — build() didn't reject, but the outer refs
+	// slice silently grew. This pin turns that latent leak golden-visible.
+	"exists body with-item bare inner var no outer refs leak": {
+		src: "MATCH (n) WHERE exists { MATCH (m) WITH m RETURN m }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
+	// collection-sink Phase C pin — twin of the bare-var case, exercising the
+	// classifyFunction arg-refs loop instead: id(m) inside a WITH body. Without
+	// the classifyFunction→appendRef migration, the suppressed EnterOC_With
+	// would reach classifyFunction's functionArgRefs loop and leak varRef{m}
+	// onto the outer part's refs slice via the append site — same
+	// ErrUnboundVariable rejection as the bare-var case. Two pins (one per
+	// migrated append site) so a future partial regression can't hide behind
+	// the other's coverage.
+	"exists body with-item function arg no outer refs leak": {
+		src: "MATCH (n) WHERE exists { MATCH (m) WITH id(m) AS mid RETURN mid }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
+	// collection-sink Phase C pin — entry-point twin of the two WITH pins
+	// above, exercising Return's own reach chain. RETURN m inside an EXISTS
+	// body binds inner m via classifyProjection's bare-var arm — the exact
+	// same code path as the WITH bare-var pin, but reached through
+	// EnterOC_Return post-guard-drop instead of EnterOC_With. Because the
+	// 240 and 356 refs sites are already sink-routed under 6f2b2c1, this
+	// guard-drop is safe by pre-clearance; without those sinks (or if this
+	// commit were re-ordered before them), varRef{m} would leak onto the
+	// outer part's refs slice and build()'s referential-integrity sweep
+	// would reject with ErrUnboundVariable (outer part binds only n). One
+	// pin at the entry point is sufficient coverage for both the bare-var
+	// and function-arg site classes — those are proven independently by the
+	// two WITH pins above; this pin proves the Return entry is safe.
+	"exists body return-item bare inner var no outer refs leak": {
+		src: "MATCH (n) WHERE exists { MATCH (m) RETURN m }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
+	// collection-sink Phase C pin — Unwind entry-point twin. UNWIND [m] AS k
+	// inside an EXISTS body reaches TWO Category A/B writes in collectUnwind
+	// via post-guard-drop EnterOC_Unwind: (1) the source-expression refs sweep
+	// mines varRef{m} from the [m] list literal (Category A, expr.go:124), and
+	// (2) the UnwindBinding{k} construction appends to the part's unwind
+	// bindings (Category B, expr.go:139). Both writes now route through the
+	// appendRef / appendUnwindBinding sinks; without either routing, this pin
+	// would fail — an un-sunk refs write leaks varRef{m} onto the outer part
+	// (which only binds n), and build()'s referential-integrity sweep would
+	// reject with ErrUnboundVariable: m; an un-sunk unwindBindings write
+	// leaks UnwindBinding{k} onto the outer part's Bindings, and require.Equal
+	// would reject the Bindings-slice shape. Single pin, both leak classes.
+	// Return here binds only k inside the subquery — the k pin does not exit
+	// EXISTS (commit-5 already proved the Return sink). Outer part binds only
+	// n; a successful parse with Bindings=[n] proves suppression by
+	// construction across both sink routings.
+	"exists body unwind refs and binding no outer leak": {
+		src: "MATCH (n) WHERE exists { MATCH (m) UNWIND [m] AS k RETURN k }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
+	// collection-sink Phase C pin — Set entry-point twin. A single SET clause
+	// with three items (m.p = 1, m:L, m += {x: 2}) inside an EXISTS body
+	// exercises ALL THREE arms of collectSetItem in one construction:
+	// propertyExpression (:750 refs + :764 effects), variable+labels (:768
+	// refs + :775 effects), and variable+expression (:779 refs + :794
+	// effects). Post-guard-drop, each arm's refs write is routed through
+	// appendRef and each arm's effects write through appendEffect; the
+	// terminating writeSeen flag flip in EnterOC_Set is routed through
+	// markWriteSeen. Under EXISTS suppression, all seven routings no-op,
+	// so no SetEffect leaks into outer Effects, no varRef{m} leaks onto
+	// outer refs, and StatementKind stays StatementRead. Without ANY of the
+	// three sink routings, this pin fails: an un-sunk effects write leaks
+	// three SetEffects into outer Effects (require.Equal on Effects shape);
+	// an un-sunk refs write leaks varRef{m} onto outer refs (build's
+	// referential-integrity sweep rejects with ErrUnboundVariable: m —
+	// outer part binds only n); an un-sunk markWriteSeen flips outer
+	// StatementKind from StatementRead to StatementWrite (require.Equal on
+	// query-level StatementKind). One pin, seven leak-lines, three sinks.
+	// The three arms are structurally identical (all follow refs-then-eff-
+	// then-append pattern), so one pin covering all three via multi-item
+	// SET is sufficient coverage — the per-sink temp-revert probe proves
+	// each is independently load-bearing.
+	"exists body set three-arm no outer leak": {
+		src: "MATCH (n) WHERE exists { MATCH (m) SET m.p = 1, m:L, m += {x: 2} RETURN m }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
+	// collection-sink Phase C pin — Delete entry-point twin. A single DELETE
+	// clause with two bare-variable targets (m, o) inside an EXISTS body
+	// exercises all three sink classes reachable from EnterOC_Delete in one
+	// construction: the per-target refs write at listener.go:655 fires twice
+	// (once per bare-variable target that hits the nonArithmeticAtom +
+	// refFromNonArithmetic path), the terminating effects write at :669
+	// fires once (one DeleteEffect{targets=[m,o], detach=true}), and the
+	// terminating writeSeen flip at :670 fires once. DETACH is included to
+	// exercise the detach flag naturally alongside — it toggles a bool on
+	// the effect payload, not a sink surface, but its presence keeps the
+	// pin realistic (DELETE without DETACH on referenced nodes is an
+	// arity/edge error at runtime). Post-guard-drop, refs writes route
+	// through appendRef, effects through appendEffect, writeSeen through
+	// markWriteSeen. Under EXISTS suppression, all four routings no-op:
+	// no DeleteEffect leaks into outer Effects, no varRef{m}/varRef{o}
+	// leaks onto outer refs, and StatementKind stays StatementRead.
+	// Without ANY of the three sink routings, this pin fails: an un-sunk
+	// effects write leaks one DeleteEffect into outer Effects (require.Equal
+	// on Effects shape); an un-sunk refs write leaks varRef{m} and varRef{o}
+	// onto outer refs (build's referential-integrity sweep rejects with
+	// ErrUnboundVariable — outer part binds only n); an un-sunk
+	// markWriteSeen flips outer StatementKind from StatementRead to
+	// StatementWrite (require.Equal on query-level StatementKind). One
+	// pin, four leak-lines, three sinks. Multi-target DELETE covers the
+	// loop's inner refs sink twice, so a single pin is sufficient — the
+	// per-sink temp-revert probe proves each is independently load-bearing.
+	"exists body delete detach two-target no outer leak": {
+		src: "MATCH (n) WHERE exists { MATCH (m)-[]->(o) DETACH DELETE m, o RETURN true }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
+	// collection-sink Phase C pin — Remove entry-point twin. A single REMOVE
+	// clause with two items (m:L for the variable+labels arm, m.p for the
+	// propertyExpression arm) inside an EXISTS body exercises BOTH arms of
+	// collectRemoveItem plus the terminal writeSeen in EnterOC_Remove:
+	// variable+labels arm (expr.go:806 refs + :813 effects), propertyExpression
+	// arm (expr.go:822 refs + :828 effects), terminating markWriteSeen at
+	// listener.go:711. Under EXISTS suppression, all five per-item sink calls
+	// (2×refs + 2×effects) plus the terminal writeSeen no-op: no RemoveEffect
+	// leaks into outer Effects, no varRef{m} leaks onto outer refs, and
+	// StatementKind stays StatementRead. Without ANY of the three sink
+	// routings, this pin fails: an un-sunk effects write leaks two RemoveEffects
+	// into outer Effects (one RemoveLabelsEffect{m, [L]} + one
+	// RemovePropertyEffect{m.p}, require.Equal on Effects shape); an un-sunk
+	// refs write leaks two varRef{m} onto outer refs (build's referential-
+	// integrity sweep rejects with ErrUnboundVariable: m — outer part binds
+	// only n); an un-sunk markWriteSeen flips outer StatementKind from
+	// StatementRead to StatementWrite (require.Equal on query-level
+	// StatementKind). One pin, five leak-lines, three sinks. The two arms are
+	// structurally symmetric (both follow refs-then-eff-then-append after arm-
+	// specific setup), so one pin covering both via multi-item REMOVE is
+	// sufficient coverage — the per-sink temp-revert probe proves each is
+	// independently load-bearing.
+	"exists body remove two-arm no outer leak": {
+		src: "MATCH (n) WHERE exists { MATCH (m) REMOVE m:L, m.p RETURN m }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
+	// collection-sink Phase C pin — Create entry-point twin. A single CREATE
+	// clause with one fresh node binding (m) inside an EXISTS body exercises
+	// both un-migrated sink classes reachable from EnterOC_Create: the
+	// terminating effects write at listener.go:533 (Cat B, one CreateEffect)
+	// and the terminating writeSeen flip at :534 (Cat C). The pattern-collection
+	// subtree (collectPattern → collectPatternPart → collectPatternElement →
+	// recordEndpointRefs, plus mergeBinding / appendBinding / appendPathBinding
+	// / setPathMemberSink / appendPathMember / appendUnwindBinding) is already
+	// sink-gated on l.suppressed() from Phase B, so refs and bindings writes
+	// from the pattern no-op under suppression regardless of the guard drop.
+	// Under EXISTS suppression with the subqueryDepth guard removed,
+	// collectPattern still runs its full walk but every sink call (endpoint
+	// refs at pattern.go:381, binding appends at listener.go:222-256) short-
+	// circuits at the sink method boundary. `before` and `len(bindings)` are
+	// equal at the delta computation, so `vars` is empty and the resulting
+	// CreateEffect is degenerate (NewCreateEffect(nil)) — but the appendEffect
+	// call itself still no-ops before the leak lands, so outer Effects stays
+	// nil. Without the two migrations, this pin fails: an un-sunk effects
+	// write leaks one CreateEffect{vars=nil} into outer Effects (require.Equal
+	// on Effects shape); an un-sunk markWriteSeen flips outer StatementKind
+	// from StatementRead to StatementWrite (require.Equal on query-level
+	// StatementKind). One pin, two leak-lines, two sinks. CREATE has only
+	// two sink classes in its handler body (no Cat A — the pattern's refs
+	// and bindings writes are already routed through pre-migrated sinks
+	// from Phase B).
+	"exists body create no outer leak": {
+		src: "MATCH (n) WHERE exists { CREATE (m) RETURN m }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
+	// collection-sink Phase C pin — Merge entry-point twin. A single MERGE
+	// clause with one fresh node binding (m), an ON MATCH SET arm, and an
+	// ON CREATE SET arm inside an EXISTS body exercises both un-migrated
+	// sink classes reachable from EnterOC_Merge: the terminating effects
+	// write at listener.go:573 (Cat B, one MergeEffect) and the terminating
+	// writeSeen flip at :574 (Cat C). The pattern-collection subtree that
+	// collectPatternPart reaches is already sink-gated on l.suppressed()
+	// from Phase B — same "safe by construction" class as EnterOC_Create.
+	// The ON MATCH / ON CREATE arms are walked via collectMergeAction,
+	// which saves curPart.effects, sets it to nil, walks each SetItem
+	// through collectSetItem (migrated in commit-7 EnterOC_Set — its
+	// appendEffect is l.suppressed()-gated), captures the local slice as
+	// SetEffect payloads, then restores curPart.effects. Under EXISTS
+	// suppression post guard-drop, every SET-item appendEffect call inside
+	// collectSetItem no-ops at the sink boundary, so the transient
+	// curPart.effects slice stays empty, `collected` is nil, and both
+	// onMatch and onCreate payloads on the resulting MergeEffect are nil.
+	// The outer NewMergeEffect(nil, nil, nil) constructor succeeds cleanly
+	// (variables/onMatch/onCreate all skip their len(...) > 0 branches, no
+	// error). The migrated l.appendEffect at :573 no-ops under suppression
+	// before the leak lands; the migrated l.markWriteSeen at :574 no-ops
+	// before the outer StatementKind flip lands. Outer Effects stays nil,
+	// StatementKind stays StatementRead. Without the two migrations, this
+	// pin fails: an un-sunk effects write leaks one MergeEffect{vars=nil,
+	// onMatch=nil, onCreate=nil} into outer Effects (require.Equal on
+	// Effects shape); an un-sunk markWriteSeen flips outer StatementKind
+	// from StatementRead to StatementWrite. One pin, two leak-lines, two
+	// sinks. MERGE has only two sink classes in its handler body (no Cat A
+	// — pattern refs/bindings are already routed through pre-migrated
+	// Phase-B sinks; ON-action SetEffects are payloads captured by
+	// save/restore, not siblings in curPart.effects, so no third leak
+	// channel to the outer part).
+	"exists body merge no outer leak": {
+		src: "MATCH (n) WHERE exists { MERGE (m {p:1}) ON MATCH SET m.q = 2 ON CREATE SET m.r = 3 RETURN m }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
+	// collection-sink Phase C pin — InQueryCall entry-point twin. A single
+	// in-query CALL with YIELD inside an EXISTS body exercises the un-migrated
+	// callBindings sink class reachable from EnterOC_InQueryCall via the
+	// shared collectCall path (call.go:149, the YIELD-items branch that
+	// appends one CallBinding per resolved YIELD item). The other writes
+	// reachable from collectCall are already suppression-safe: addParameterUse
+	// is l.suppressed()-gated at method entry (commit b5e206d, "gate
+	// addParameterUse under EXISTS suppression"); typeExpressionMining returns
+	// its refs to the caller (collectCall discards them via `_` at call.go:57),
+	// so no ref-write reaches curPart.refs; l.fail sets listener error state
+	// (l.err), not curPart content, and is intentionally NOT suppression-gated
+	// — parse-time validation errors surface regardless of EXISTS suppression
+	// per the Rev 3 spec collection/validation split. Standalone-only writes
+	// (l.curPart.callStandalone at call.go:95) never fire from enterInQueryCall
+	// (standalone=false hardcoded at call.go:285). Under EXISTS suppression
+	// with the subqueryDepth guard removed, collectCall runs its full walk,
+	// looks up the procedure, mines args (no-op via addParameterUse's sink
+	// gate), expands YIELD items into CallBinding shapes — and the migrated
+	// l.appendCallBinding call at call.go:149 no-ops at the sink boundary
+	// before the leak lands. Outer callBindings stays empty. Without the
+	// migration, this pin fails: an un-sunk callBindings append leaks one
+	// CallBinding{variable="label", procName="test.labels", ...} into outer
+	// callBindings — visible as either an extra Binding in the outer Part
+	// (buildPart promotes CallBindings to Bindings) or as a CallBinding-shape
+	// entry not matching the pin's oneBranch shape. InQueryCall has one sink
+	// class in this handler body (no Cat A/B/C — refs writes route through
+	// pre-migrated Phase-B sinks; effects and writeSeen aren't reached at all
+	// from a pure CALL clause).
+	"exists body call no outer leak": {
+		src: "MATCH (n) WHERE exists { CALL test.echo(1) YIELD out RETURN out }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+		sigs: []procsig.Signature{{
+			Name: "test.echo",
+			Params: []procsig.Param{
+				{Name: "in", Token: procsig.TokenInteger, Nullable: false},
+			},
+			Results: []procsig.Result{
+				{Name: "out", Token: procsig.TokenString, Nullable: true},
+			},
+		}},
+	},
+	// collection-sink Phase C pin — StandaloneCall closes the sequence.
+	// Unlike every prior Phase-C pin, no "exists body ..." twin exists
+	// for this handler: oC_StandaloneCall sits at the oC_Query level,
+	// NOT under oC_RegularQuery, and oC_ExistentialSubquery admits only
+	// `oC_RegularQuery | oC_Pattern oC_Where?` between its braces (see
+	// Cypher.g4 §oC_ExistentialSubquery). A standalone CALL is therefore
+	// grammar-unreachable inside EXISTS under any input the parser
+	// accepts — l.subqueryDepth is provably 0 whenever EnterOC_StandaloneCall
+	// fires, and the guard-drop is dead-code removal rather than a
+	// runtime leak fix. This pin instead asserts the STRUCTURAL wire:
+	// commit-13 replaced the direct `l.curPart.callStandalone = true`
+	// write at call.go:95 with `l.setCallStandalone()` (activating the
+	// previously `//nolint:unused` sink method at listener.go:274) and
+	// replaced the inlined curPart-priming block at listener.go:748-754
+	// with `l.openBranch()`. Both changes preserve behaviour at top
+	// level and are the last two migrations in the Phase-C sink-routing
+	// pattern. The pin exercises: standalone CALL with implicit YIELD
+	// on a two-result signature produces two CallBindings (proves
+	// collectCall reaches appendCallBinding), ReturnsAll==true (proves
+	// setCallStandalone wired: callStandalone flag flowing through
+	// buildPart's synthetic-Returns branch), and the pair of synthesised
+	// return items in signature declaration order (proves the
+	// expandAllResults path is fully-connected). If the sink swap or
+	// the openBranch swap were reverted mid-migration, this pin's
+	// ReturnsAll assertion + two-Binding shape would break — the same
+	// contextual-anchor pattern the other Phase-C pins use, adapted to
+	// a grammar-unreachable handler.
+	"standalone CALL structural wire — implicit YIELD two results": {
+		src: "CALL test.pair()",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewCallBinding("a", "test.pair", "a", query.TypeString{}, false)),
+				must(query.NewCallBinding("b", "test.pair", "b", query.TypeInt{}, true)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeString{})},
+				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"}, query.TypeInt{})},
+			},
+			ReturnsAll: true,
+		}),
+		sigs: []procsig.Signature{{
+			Name: "test.pair",
+			Results: []procsig.Result{
+				{Name: "a", Token: procsig.TokenString, Nullable: false},
+				{Name: "b", Token: procsig.TokenInteger, Nullable: true},
+			},
+		}},
+	},
 	// Nested — SKIP $off in the OUTER RegularQuery-form EXISTS, LIMIT $lim in
 	// an inner EXISTS one level deeper. EnterOC_ExistentialSubquery fires on
 	// the outer subquery first (parent EnterRule precedes child EnterRule);
@@ -2748,6 +3098,150 @@ var mustParse = map[string]struct {
 			Results: []procsig.Result{
 				{Name: "label", Token: procsig.TokenString, Nullable: true},
 			},
+		}},
+	},
+	// collection-sink Phase D (§4.2 Test A) — parity table for l.fail
+	// sites reachable under EXISTS suppression after the Phase C
+	// guard-drops. Each entry pins a shape that would fire a specific
+	// enumerated fail-site (spec §3.2 BLOCKER 3 proof) at outer scope
+	// if l.fail were NOT sink-gated; with the Phase D gate in place,
+	// the outer parse succeeds cleanly (matching master's pre-Phase-C
+	// guarded-early-return behaviour). Each entry documents its target
+	// fail-site by file:line and the sentinel it would trip. Assertion
+	// shape mirrors "authored CALL inside EXISTS suppression": bare
+	// outer MATCH ... RETURN n. Future refactors that ungate any of
+	// these fail-sites — or that break Phase D's fail-gate — will
+	// regress the corresponding entry.
+	"exists fail parity — hop range integer overflow": {
+		// Target: pattern.go:292 edgeHopsFromRangeLiteral. Grammar accepts
+		// any IntegerLiteral; strconv.Atoi rejects one that overflows int64,
+		// returning the wrapped "invalid integer in hop range" error via
+		// l.fail. (The spec example `[r*-1]` is a grammar-level SyntaxError
+		// — no minus in IntegerLiteral — so it never reaches the walker.
+		// A digits-only overflow is the actual walker-reachable trigger.)
+		src: "MATCH (n) WHERE exists { MATCH ()-[r*99999999999999999999]->() RETURN r }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
+	"exists fail parity — pattern predicate projection": {
+		// Target: expr.go:196 ErrPatternInProjection (pattern-shape
+		// expression appears as a RETURN projection column, which the
+		// model does not admit).
+		src: "MATCH (n) WHERE exists { MATCH (m) RETURN (m)-->() }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
+	"exists fail parity — nested property target SET": {
+		// Target: expr.go:747 ErrNestedPropertyTarget (SET target is a
+		// two-hop property expression `n.a.b`; the model's Ref carries a
+		// single property segment).
+		src: "MATCH (n) WHERE exists { MATCH (m) SET m.a.b = 1 RETURN m }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
+	"exists fail parity — unwind byVar kind conflict against outer entity": {
+		// Target: expr.go:107 ErrVariableKindConflict. Inner UNWIND [1] AS x
+		// under EXISTS runs collectUnwind (no suppression gate on the
+		// handler); its byVar clash sweep reads the OUTER part's byVar,
+		// finds outer `x` (bound as a node by the outer MATCH), and would
+		// fire l.fail at expr.go:107 if not sink-gated. mergeBinding-path
+		// version of this test would hit mergeBinding's own suppression
+		// gate first, so this UNWIND-path trigger is the one that
+		// genuinely exercises the Phase D fail-gate.
+		src: "MATCH (x) WHERE exists { UNWIND [1] AS x RETURN x }\nRETURN x",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("x", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "x", Value: query.NewRefProjection(query.Ref{Variable: "x"}, query.TypeNode{})},
+			},
+		}),
+	},
+	"exists fail parity — path vs unwind kind conflict": {
+		// The `MATCH p = ()-->()` inside EXISTS binds `p` as a path
+		// variable. Three fail-sites are reachable from the inner
+		// walker on this input, in the order the walker hits them:
+		// (1) pattern.go:88 NewPathBinding — "path binding requires
+		// at least one member" fires first for empty-member cases;
+		// this is what actually surfaces on this specific source
+		// (verified first-party by linus-2 in the RED reproduction
+		// on 7af1e6a). (2) expr.go:107 collectUnwind pathBindings
+		// sweep. (3) pattern.go:84 collectPatternPart path-vs-unwind
+		// collision (ErrVariableKindConflict). Any of the three
+		// firing without the Phase D gate would leak an outer
+		// l.err; the pin is protective against all three regardless
+		// of which one wins the race for a given source shape. What
+		// matters for parity is that the outer parse succeeds and
+		// the outer Query shape is the "one MATCH (n), RETURN n"
+		// shape below — that assertion catches an ungated fail on
+		// any of the three sentinels.
+		src: "MATCH (n) WHERE exists { UNWIND [1] AS p MATCH p = ()-->() RETURN p }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
+	"exists fail parity — CALL unknown procedure": {
+		// Target: call.go:43 ErrUnknownProcedure. Unregistered procedure
+		// under EXISTS; registry lookup fails, sink-gated fail no-ops.
+		src: "MATCH (n) WHERE exists { CALL nope.proc() YIELD x RETURN x }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+		sigs: []procsig.Signature{{
+			Name:    "test.echo",
+			Params:  []procsig.Param{{Name: "in", Token: procsig.TokenInteger, Nullable: false}},
+			Results: []procsig.Result{{Name: "out", Token: procsig.TokenString, Nullable: true}},
+		}},
+	},
+	"exists fail parity — CALL arity mismatch": {
+		// Target: call.go:72 ErrProcedureArity. Registered proc expects
+		// 1 arg, call passes 0. Sink-gated fail no-ops.
+		src: "MATCH (n) WHERE exists { CALL test.echo() YIELD out RETURN out }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+		sigs: []procsig.Signature{{
+			Name:    "test.echo",
+			Params:  []procsig.Param{{Name: "in", Token: procsig.TokenInteger, Nullable: false}},
+			Results: []procsig.Result{{Name: "out", Token: procsig.TokenString, Nullable: true}},
+		}},
+	},
+	"exists fail parity — CALL unknown YIELD field": {
+		// Target: call.go:136 ErrUnknownProcedure on unknown YIELD field
+		// (one sentinel covers both name and field miss per Q1 ruling).
+		// Registered proc has `out`, YIELD requests `bogus`. Sink-gated
+		// fail no-ops.
+		src: "MATCH (n) WHERE exists { CALL test.echo(1) YIELD bogus RETURN bogus }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+		sigs: []procsig.Signature{{
+			Name:    "test.echo",
+			Params:  []procsig.Param{{Name: "in", Token: procsig.TokenInteger, Nullable: false}},
+			Results: []procsig.Result{{Name: "out", Token: procsig.TokenString, Nullable: true}},
 		}},
 	},
 	// AUTHORED (Stage 14 §1.8 pin b): bound-var CALL argument
