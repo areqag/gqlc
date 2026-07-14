@@ -195,9 +195,16 @@ func newListener(ts *antlr.CommonTokenStream, registry procsig.Registry) *listen
 
 // fail records the first error and is idempotent thereafter: the error found
 // first in walk order is the one Parse returns, and later failures are dropped.
-// Category D of the sink (spec docs/specs/cypher-collection-sink.md §1.2);
-// gate lands in Phase D.
+// Category D of the sink (spec docs/specs/cypher-collection-sink.md §1.2).
+// Under EXISTS suppression, fail is a no-op — parse-time collection failures
+// reached under a suppressed handler body are dropped, matching master's
+// guarded early-return path per §3.2 BLOCKER 3 proof. SyntaxError fires
+// only outside walker context (pre-walk parse errors, where subqueryDepth
+// is definitionally 0), so this gate never blocks a real syntax error.
 func (l *listener) fail(err error) {
+	if l.suppressed() {
+		return
+	}
 	if l.err == nil {
 		l.err = err
 	}

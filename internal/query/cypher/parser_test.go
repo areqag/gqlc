@@ -3052,6 +3052,137 @@ var mustParse = map[string]struct {
 			},
 		}},
 	},
+	// collection-sink Phase D (§4.2 Test A) — parity table for l.fail
+	// sites reachable under EXISTS suppression after the Phase C
+	// guard-drops. Each entry pins a shape that would fire a specific
+	// enumerated fail-site (spec §3.2 BLOCKER 3 proof) at outer scope
+	// if l.fail were NOT sink-gated; with the Phase D gate in place,
+	// the outer parse succeeds cleanly (matching master's pre-Phase-C
+	// guarded-early-return behaviour). Each entry documents its target
+	// fail-site by file:line and the sentinel it would trip. Assertion
+	// shape mirrors "authored CALL inside EXISTS suppression": bare
+	// outer MATCH ... RETURN n. Future refactors that ungate any of
+	// these fail-sites — or that break Phase D's fail-gate — will
+	// regress the corresponding entry.
+	"exists fail parity — hop range integer overflow": {
+		// Target: pattern.go:292 edgeHopsFromRangeLiteral. Grammar accepts
+		// any IntegerLiteral; strconv.Atoi rejects one that overflows int64,
+		// returning the wrapped "invalid integer in hop range" error via
+		// l.fail. (The spec example `[r*-1]` is a grammar-level SyntaxError
+		// — no minus in IntegerLiteral — so it never reaches the walker.
+		// A digits-only overflow is the actual walker-reachable trigger.)
+		src: "MATCH (n) WHERE exists { MATCH ()-[r*99999999999999999999]->() RETURN r }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
+	"exists fail parity — pattern predicate projection": {
+		// Target: expr.go:196 ErrPatternInProjection (pattern-shape
+		// expression appears as a RETURN projection column, which the
+		// model does not admit).
+		src: "MATCH (n) WHERE exists { MATCH (m) RETURN (m)-->() }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
+	"exists fail parity — nested property target SET": {
+		// Target: expr.go:747 ErrNestedPropertyTarget (SET target is a
+		// two-hop property expression `n.a.b`; the model's Ref carries a
+		// single property segment).
+		src: "MATCH (n) WHERE exists { MATCH (m) SET m.a.b = 1 RETURN m }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
+	"exists fail parity — unwind byVar kind conflict against outer entity": {
+		// Target: expr.go:107 ErrVariableKindConflict. Inner UNWIND [1] AS x
+		// under EXISTS runs collectUnwind (no suppression gate on the
+		// handler); its byVar clash sweep reads the OUTER part's byVar,
+		// finds outer `x` (bound as a node by the outer MATCH), and would
+		// fire l.fail at expr.go:107 if not sink-gated. mergeBinding-path
+		// version of this test would hit mergeBinding's own suppression
+		// gate first, so this UNWIND-path trigger is the one that
+		// genuinely exercises the Phase D fail-gate.
+		src: "MATCH (x) WHERE exists { UNWIND [1] AS x RETURN x }\nRETURN x",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("x", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "x", Value: query.NewRefProjection(query.Ref{Variable: "x"}, query.TypeNode{})},
+			},
+		}),
+	},
+	"exists fail parity — path vs unwind kind conflict": {
+		// Target: expr.go:107 (collectUnwind pathBindings sweep) or
+		// pattern.go:84 (collectPatternPart path-vs-unwind collision).
+		// Inner UNWIND binds `p`, inner MATCH re-uses `p` as a path
+		// variable — ErrVariableKindConflict fires under suppression.
+		src: "MATCH (n) WHERE exists { UNWIND [1] AS p MATCH p = ()-->() RETURN p }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
+	"exists fail parity — CALL unknown procedure": {
+		// Target: call.go:43 ErrUnknownProcedure. Unregistered procedure
+		// under EXISTS; registry lookup fails, sink-gated fail no-ops.
+		src: "MATCH (n) WHERE exists { CALL nope.proc() YIELD x RETURN x }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+		sigs: []procsig.Signature{{
+			Name:    "test.echo",
+			Params:  []procsig.Param{{Name: "in", Token: procsig.TokenInteger, Nullable: false}},
+			Results: []procsig.Result{{Name: "out", Token: procsig.TokenString, Nullable: true}},
+		}},
+	},
+	"exists fail parity — CALL arity mismatch": {
+		// Target: call.go:72 ErrProcedureArity. Registered proc expects
+		// 1 arg, call passes 0. Sink-gated fail no-ops.
+		src: "MATCH (n) WHERE exists { CALL test.echo() YIELD out RETURN out }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+		sigs: []procsig.Signature{{
+			Name:    "test.echo",
+			Params:  []procsig.Param{{Name: "in", Token: procsig.TokenInteger, Nullable: false}},
+			Results: []procsig.Result{{Name: "out", Token: procsig.TokenString, Nullable: true}},
+		}},
+	},
+	"exists fail parity — CALL unknown YIELD field": {
+		// Target: call.go:136 ErrUnknownProcedure on unknown YIELD field
+		// (one sentinel covers both name and field miss per Q1 ruling).
+		// Registered proc has `out`, YIELD requests `bogus`. Sink-gated
+		// fail no-ops.
+		src: "MATCH (n) WHERE exists { CALL test.echo(1) YIELD bogus RETURN bogus }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+		sigs: []procsig.Signature{{
+			Name:    "test.echo",
+			Params:  []procsig.Param{{Name: "in", Token: procsig.TokenInteger, Nullable: false}},
+			Results: []procsig.Result{{Name: "out", Token: procsig.TokenString, Nullable: true}},
+		}},
+	},
 	// AUTHORED (Stage 14 §1.8 pin b): bound-var CALL argument
 	// regression lock. MATCH binds n; CALL uses n.name — the
 	// property expression records `n` on curPart.refs via arg-side
