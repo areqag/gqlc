@@ -91,8 +91,12 @@ func (l *listener) collectCall(
 	if standalone && l.err == nil {
 		// Standalone CALL populates Part.Returns from the CallBindings
 		// at build time (spec §4.3). Set returnsAll so buildPart's
-		// synthetic-Returns branch fires.
-		l.curPart.callStandalone = true
+		// synthetic-Returns branch fires. Routed through the sink for
+		// structural parity with the other Category-A writes (spec §5
+		// Phase C); EXISTS-suppression is grammar-unreachable at this
+		// call site (StandaloneCall parses at oC_Query, not below
+		// oC_RegularQuery — see EnterOC_StandaloneCall doc).
+		l.setCallStandalone()
 	}
 }
 

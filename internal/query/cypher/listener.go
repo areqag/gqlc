@@ -271,7 +271,6 @@ func (l *listener) appendCallBinding(cb query.CallBinding) {
 	l.curPart.callBindings = append(l.curPart.callBindings, cb)
 }
 
-//nolint:unused // Phase A dead code; wired up in Phase C.
 func (l *listener) setCallStandalone() {
 	if l.suppressed() {
 		return
@@ -734,23 +733,28 @@ func (l *listener) EnterOC_InQueryCall(c *gen.OC_InQueryCallContext) {
 }
 
 // EnterOC_StandaloneCall collects one standalone CALL clause. Stage 14
-// §4.1 / §4.2. Suppressed under EXISTS { ... } like every other
-// collecting handler. Grammar quirk: a pure standalone CALL parses via
+// §4.1 / §4.2. Grammar quirk: a pure standalone CALL parses via
 // `oC_Query → oC_StandaloneCall` (see Cypher.g4 §oC_Query), which
 // SKIPS `oC_RegularQuery → oC_SingleQuery`, so EnterOC_SingleQuery
 // never fires and curBranch/curPart stay nil. This handler primes them
-// itself before calling enterStandaloneCall, mirroring what
-// EnterOC_SingleQuery does for the regular-query path.
+// itself via openBranch (which mirrors what EnterOC_SingleQuery does
+// for the regular-query path) before calling enterStandaloneCall.
+//
+// EXISTS reachability: oC_StandaloneCall sits at the oC_Query level,
+// NOT under oC_RegularQuery, whereas oC_ExistentialSubquery admits
+// only `oC_RegularQuery | oC_Pattern oC_Where?` between its braces.
+// A StandaloneCall is therefore grammar-unreachable inside EXISTS
+// under any input the parser accepts; l.subqueryDepth is provably 0
+// whenever this handler fires. The Phase-C sink-routing pattern is
+// preserved for structural consistency (openBranch is Cat-B gated;
+// collectCall reaches only sink-gated Cat-A writes post-commit-13
+// and Cat-D fails post-Phase-D commit-12.5) — the guard-drop here
+// is dead-code removal, not runtime leak prevention. Spec §5 Phase C
+// (final handler); Rev 4 records the Phase-D reorder that closed
+// the last remaining leak-prevention window ahead of this commit.
 func (l *listener) EnterOC_StandaloneCall(c *gen.OC_StandaloneCallContext) {
-	if l.subqueryDepth > 0 {
-		return
-	}
 	if l.curPart == nil {
-		part := newRawPart()
-		br := &rawBranch{parts: []*rawPart{part}}
-		l.branches = append(l.branches, br)
-		l.curBranch = br
-		l.curPart = part
+		l.openBranch()
 	}
 	l.enterStandaloneCall(c)
 }

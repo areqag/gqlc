@@ -2388,6 +2388,54 @@ var mustParse = map[string]struct {
 			},
 		}},
 	},
+	// collection-sink Phase C pin — StandaloneCall closes the sequence.
+	// Unlike every prior Phase-C pin, no "exists body ..." twin exists
+	// for this handler: oC_StandaloneCall sits at the oC_Query level,
+	// NOT under oC_RegularQuery, and oC_ExistentialSubquery admits only
+	// `oC_RegularQuery | oC_Pattern oC_Where?` between its braces (see
+	// Cypher.g4 §oC_ExistentialSubquery). A standalone CALL is therefore
+	// grammar-unreachable inside EXISTS under any input the parser
+	// accepts — l.subqueryDepth is provably 0 whenever EnterOC_StandaloneCall
+	// fires, and the guard-drop is dead-code removal rather than a
+	// runtime leak fix. This pin instead asserts the STRUCTURAL wire:
+	// commit-13 replaced the direct `l.curPart.callStandalone = true`
+	// write at call.go:95 with `l.setCallStandalone()` (activating the
+	// previously `//nolint:unused` sink method at listener.go:274) and
+	// replaced the inlined curPart-priming block at listener.go:748-754
+	// with `l.openBranch()`. Both changes preserve behaviour at top
+	// level and are the last two migrations in the Phase-C sink-routing
+	// pattern. The pin exercises: standalone CALL with implicit YIELD
+	// on a two-result signature produces two CallBindings (proves
+	// collectCall reaches appendCallBinding), ReturnsAll==true (proves
+	// setCallStandalone wired: callStandalone flag flowing through
+	// buildPart's synthetic-Returns branch), and the pair of synthesised
+	// return items in signature declaration order (proves the
+	// expandAllResults path is fully-connected). If the sink swap or
+	// the openBranch swap were reverted mid-migration, this pin's
+	// ReturnsAll assertion + two-Binding shape would break — the same
+	// contextual-anchor pattern the other Phase-C pins use, adapted to
+	// a grammar-unreachable handler.
+	"standalone CALL structural wire — implicit YIELD two results": {
+		src: "CALL test.pair()",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewCallBinding("a", "test.pair", "a", query.TypeString{}, false)),
+				must(query.NewCallBinding("b", "test.pair", "b", query.TypeInt{}, true)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeString{})},
+				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"}, query.TypeInt{})},
+			},
+			ReturnsAll: true,
+		}),
+		sigs: []procsig.Signature{{
+			Name: "test.pair",
+			Results: []procsig.Result{
+				{Name: "a", Token: procsig.TokenString, Nullable: false},
+				{Name: "b", Token: procsig.TokenInteger, Nullable: true},
+			},
+		}},
+	},
 	// Nested — SKIP $off in the OUTER RegularQuery-form EXISTS, LIMIT $lim in
 	// an inner EXISTS one level deeper. EnterOC_ExistentialSubquery fires on
 	// the outer subquery first (parent EnterRule precedes child EnterRule);
