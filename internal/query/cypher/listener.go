@@ -536,13 +536,11 @@ func (l *listener) EnterOC_Create(c *gen.OC_CreateContext) {
 // then each ON MATCH / ON CREATE action's SetEffects via collectMergeAction.
 // Variables mirrors CreateEffect.Variables: the [before..len(bindings)] delta
 // captures the bindings THIS clause introduced. writeSeen flips at outer
-// scope so the query's StatementKind lands StatementWrite; a MERGE inside
-// EXISTS { ... } early-returns at the subqueryDepth guard, so the outer
-// query keeps its read/write kind untouched (Stage 11 §1.6).
+// scope so the query's StatementKind lands StatementWrite. Under EXISTS
+// suppression, the appendEffect and markWriteSeen sinks no-op at the
+// method boundary; the pattern-collection subtree is already sink-gated
+// from Phase B (safe by construction, same class as EnterOC_Create).
 func (l *listener) EnterOC_Merge(c *gen.OC_MergeContext) {
-	if l.subqueryDepth > 0 {
-		return // Stage 11 §1.6: writes inside EXISTS { ... } are suppressed.
-	}
 	before := len(l.curPart.bindings)
 	l.collectPatternPart(c.OC_PatternPart(), 0)
 	if l.err != nil {
@@ -570,8 +568,8 @@ func (l *listener) EnterOC_Merge(c *gen.OC_MergeContext) {
 		l.fail(err)
 		return
 	}
-	l.curPart.effects = append(l.curPart.effects, eff)
-	l.writeSeen = true
+	l.appendEffect(eff)
+	l.markWriteSeen()
 }
 
 type mergeActionKind int

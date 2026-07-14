@@ -2301,6 +2301,47 @@ var mustParse = map[string]struct {
 			},
 		}),
 	},
+	// collection-sink Phase C pin — Merge entry-point twin. A single MERGE
+	// clause with one fresh node binding (m), an ON MATCH SET arm, and an
+	// ON CREATE SET arm inside an EXISTS body exercises both un-migrated
+	// sink classes reachable from EnterOC_Merge: the terminating effects
+	// write at listener.go:573 (Cat B, one MergeEffect) and the terminating
+	// writeSeen flip at :574 (Cat C). The pattern-collection subtree that
+	// collectPatternPart reaches is already sink-gated on l.suppressed()
+	// from Phase B — same "safe by construction" class as EnterOC_Create.
+	// The ON MATCH / ON CREATE arms are walked via collectMergeAction,
+	// which saves curPart.effects, sets it to nil, walks each SetItem
+	// through collectSetItem (migrated in commit-7 EnterOC_Set — its
+	// appendEffect is l.suppressed()-gated), captures the local slice as
+	// SetEffect payloads, then restores curPart.effects. Under EXISTS
+	// suppression post guard-drop, every SET-item appendEffect call inside
+	// collectSetItem no-ops at the sink boundary, so the transient
+	// curPart.effects slice stays empty, `collected` is nil, and both
+	// onMatch and onCreate payloads on the resulting MergeEffect are nil.
+	// The outer NewMergeEffect(nil, nil, nil) constructor succeeds cleanly
+	// (variables/onMatch/onCreate all skip their len(...) > 0 branches, no
+	// error). The migrated l.appendEffect at :573 no-ops under suppression
+	// before the leak lands; the migrated l.markWriteSeen at :574 no-ops
+	// before the outer StatementKind flip lands. Outer Effects stays nil,
+	// StatementKind stays StatementRead. Without the two migrations, this
+	// pin fails: an un-sunk effects write leaks one MergeEffect{vars=nil,
+	// onMatch=nil, onCreate=nil} into outer Effects (require.Equal on
+	// Effects shape); an un-sunk markWriteSeen flips outer StatementKind
+	// from StatementRead to StatementWrite. One pin, two leak-lines, two
+	// sinks. MERGE has only two sink classes in its handler body (no Cat A
+	// — pattern refs/bindings are already routed through pre-migrated
+	// Phase-B sinks; ON-action SetEffects are payloads captured by
+	// save/restore, not siblings in curPart.effects, so no third leak
+	// channel to the outer part).
+	"exists body merge no outer leak": {
+		src: "MATCH (n) WHERE exists { MERGE (m {p:1}) ON MATCH SET m.q = 2 ON CREATE SET m.r = 3 RETURN m }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
 	// Nested — SKIP $off in the OUTER RegularQuery-form EXISTS, LIMIT $lim in
 	// an inner EXISTS one level deeper. EnterOC_ExistentialSubquery fires on
 	// the outer subquery first (parent EnterRule precedes child EnterRule);
