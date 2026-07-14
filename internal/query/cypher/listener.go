@@ -257,7 +257,6 @@ func (l *listener) appendUnwindBinding(ub query.UnwindBinding) {
 	l.curPart.unwindBindings = append(l.curPart.unwindBindings, ub)
 }
 
-//nolint:unused // Phase A dead code; wired up in Phase C.
 func (l *listener) appendCallBinding(cb query.CallBinding) {
 	if l.suppressed() {
 		return
@@ -718,12 +717,12 @@ func (l *listener) EnterOC_Unwind(c *gen.OC_UnwindContext) {
 // are grammar-restricted to explicit invocation (parens present) and to
 // oC_YieldItems (no YIELD *); both restrictions surface as mustReject
 // grammar-level parse errors before this handler runs. Stage 14 §4.1 /
-// §4.2. Suppressed under EXISTS { ... } like every other collecting
-// handler.
+// §4.2. Under EXISTS suppression, the callBindings sink no-ops at the
+// method boundary; addParameterUse is already sink-gated; parse-time
+// validation errors (unknown procedure, arity mismatch) surface
+// regardless of suppression per the Rev 3 spec collection/validation
+// split.
 func (l *listener) EnterOC_InQueryCall(c *gen.OC_InQueryCallContext) {
-	if l.subqueryDepth > 0 {
-		return
-	}
 	l.enterInQueryCall(c)
 }
 

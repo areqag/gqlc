@@ -2342,6 +2342,52 @@ var mustParse = map[string]struct {
 			},
 		}),
 	},
+	// collection-sink Phase C pin — InQueryCall entry-point twin. A single
+	// in-query CALL with YIELD inside an EXISTS body exercises the un-migrated
+	// callBindings sink class reachable from EnterOC_InQueryCall via the
+	// shared collectCall path (call.go:149, the YIELD-items branch that
+	// appends one CallBinding per resolved YIELD item). The other writes
+	// reachable from collectCall are already suppression-safe: addParameterUse
+	// is l.suppressed()-gated at method entry (commit b5e206d, "gate
+	// addParameterUse under EXISTS suppression"); typeExpressionMining returns
+	// its refs to the caller (collectCall discards them via `_` at call.go:57),
+	// so no ref-write reaches curPart.refs; l.fail sets listener error state
+	// (l.err), not curPart content, and is intentionally NOT suppression-gated
+	// — parse-time validation errors surface regardless of EXISTS suppression
+	// per the Rev 3 spec collection/validation split. Standalone-only writes
+	// (l.curPart.callStandalone at call.go:95) never fire from enterInQueryCall
+	// (standalone=false hardcoded at call.go:285). Under EXISTS suppression
+	// with the subqueryDepth guard removed, collectCall runs its full walk,
+	// looks up the procedure, mines args (no-op via addParameterUse's sink
+	// gate), expands YIELD items into CallBinding shapes — and the migrated
+	// l.appendCallBinding call at call.go:149 no-ops at the sink boundary
+	// before the leak lands. Outer callBindings stays empty. Without the
+	// migration, this pin fails: an un-sunk callBindings append leaks one
+	// CallBinding{variable="label", procName="test.labels", ...} into outer
+	// callBindings — visible as either an extra Binding in the outer Part
+	// (buildPart promotes CallBindings to Bindings) or as a CallBinding-shape
+	// entry not matching the pin's oneBranch shape. InQueryCall has one sink
+	// class in this handler body (no Cat A/B/C — refs writes route through
+	// pre-migrated Phase-B sinks; effects and writeSeen aren't reached at all
+	// from a pure CALL clause).
+	"exists body call no outer leak": {
+		src: "MATCH (n) WHERE exists { CALL test.echo(1) YIELD out RETURN out }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+		sigs: []procsig.Signature{{
+			Name: "test.echo",
+			Params: []procsig.Param{
+				{Name: "in", Token: procsig.TokenInteger, Nullable: false},
+			},
+			Results: []procsig.Result{
+				{Name: "out", Token: procsig.TokenString, Nullable: true},
+			},
+		}},
+	},
 	// Nested — SKIP $off in the OUTER RegularQuery-form EXISTS, LIMIT $lim in
 	// an inner EXISTS one level deeper. EnterOC_ExistentialSubquery fires on
 	// the outer subquery first (parent EnterRule precedes child EnterRule);

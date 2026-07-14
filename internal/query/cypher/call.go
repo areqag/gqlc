@@ -146,7 +146,7 @@ func (l *listener) collectYieldItems(
 			l.fail(err)
 			return
 		}
-		l.curPart.callBindings = append(l.curPart.callBindings, cb)
+		l.appendCallBinding(cb)
 	}
 	// Trailing WHERE (grammar-legal, corpus-silent): walk for
 	// parameter mining only. The predicate structure itself lives
@@ -179,7 +179,7 @@ func (l *listener) expandAllResults(procName string, sig procsig.Signature, args
 			l.fail(err)
 			return
 		}
-		l.curPart.callBindings = append(l.curPart.callBindings, cb)
+		l.appendCallBinding(cb)
 	}
 }
 
