@@ -52,7 +52,7 @@ Revision history:
   `addParameterUse` under suppression not addressed.
 - Rev 2 (452c6b7): rewritten under linus-2 grill. §1.2 becomes a
   contract; §3 adds a site-by-site parity walk; §4 adds a lint gate.
-- Rev 3 (this file): Phase-ordering fix. Rev 2's Phase C step 3
+- Rev 3 (9843af7): Phase-ordering fix. Rev 2's Phase C step 3
   promised byte-identical tests after each handler migration, but
   Rev 2's Phase D deferred the `addParameterUse` sink gate to AFTER
   Phase C. Dropping Match's guard mid-Phase-C surfaced the
@@ -69,6 +69,37 @@ Revision history:
   branch (Rev-3 stack): b5e206d (Phase B.5 sink gate), 764dcd8 (Phase
   C Match migration, previously red, now green), and this spec
   commit that formalises the phasing.
+- Rev 4 (this file): Phase-D-before-final-Phase-C reorder. Rev 3's
+  §5 placed Phase D (`l.fail` gate) AFTER all Phase C handler
+  migrations. During the commit-12 (`EnterOC_InQueryCall`) review
+  cycle, linus-2 flagged that the last-remaining Category-D reach
+  paths (call.go `l.fail` at :43/:72/:136/:146/:179) were still
+  ungated at the tip, and every prior Phase-C commit that dropped a
+  handler guard had opened a *latent* Cat-D parity window: any
+  walker-reachable `l.fail` under EXISTS between commit-6 and
+  commit-11 would have leaked an outer `l.err` — a retroactive spec
+  violation the goldens are silent on (goldens cover the
+  no-error path; `l.err`-first-write pins are the assertions that
+  catch this class). Rev 4 records that Phase D landed as commit-12.5
+  (`7af1e6a`) as a **linus-2-imposed review prerequisite** ahead of
+  commit-13 (`EnterOC_StandaloneCall`, the final Phase C handler),
+  same class as the Rev-3 B.5 hoist that pre-dated it. Phase D
+  content itself is unchanged from Rev 3 §5 — this is a *reorder*
+  only, not a content amendment. Justification: close the Cat-D
+  latent parity window (retroactive spec closure over 12 prior
+  commits) before the final handler guard-drop, so commit-13 lands
+  against a spec-conforming stack. SyntaxError-ordering safety:
+  `walk()` at listener.go:390 checks `l.err != nil` before invoking
+  the tree walker, and `subqueryDepth` is definitionally 0 outside
+  walker context (only Enter/ExitOC_ExistentialSubquery mutates it),
+  so `l.suppressed()` returns false when SyntaxError's `l.fail` call
+  fires — the Phase D gate never blocks a real syntax error (§3.2
+  BLOCKER 3 remains authoritative). Ships as two commits on this
+  branch (Rev-4 stack): 7af1e6a (Phase D fail-gate + 8-entry §4.2
+  Test A parity table; retroactive window-close for commits
+  75e6846..1182448), and this spec commit that formalises the
+  reorder. Commit-13 (StandaloneCall) then follows under the standing
+  Phase-C rule.
 
 ---
 
