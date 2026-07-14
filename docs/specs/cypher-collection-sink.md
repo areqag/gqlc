@@ -149,6 +149,22 @@ Revision history:
   sentinel-comment tightening + §3.2 stale `[r*-1]` hop-example
   replacement with the digits-only-overflow shape Test A actually
   pins).
+- Rev 6 (this commit): Phase F acceptance sweep. Verification-only —
+  no code delta beyond a single §7 mechanism-reference tightening.
+  §7 fence line 6 previously read "`just fmt-check` and `just lint`
+  green with the `forbidigo` rule enabled"; Rev 5 swapped forbidigo
+  for the AST write-fence test (§5 Phase E), so line 6 now names the
+  fence test directly (`sink_fence_test.go` green). The commit body
+  carries the Phase F transcript: all eight §7 fences run first-party
+  against tip (8605ab7), with §7.3 TCK-line parity independently
+  verified against master (ddc395d) via ephemeral worktree. Test A
+  pin count: 8 (parser_test.go:3115-3229, `exists fail parity — X`,
+  committed at 7af1e6a). Test B: not pinned by design — the full
+  3,459-entry TCK corpus regression-locks the addParameterUse gate
+  installed at commit b5e206d (Phase B.5), and §7.2's golden-diff-empty
+  invariant guarantees position parity. Deferred if linus-2 requests
+  a targeted regression lock during whole-diff review. Ships as one
+  commit on this branch (Rev-6, the Phase F closer).
 
 ---
 
@@ -1018,8 +1034,8 @@ Concrete, grep- and gate-verifiable fences:
 - `TestPropertyReferentialIntegrity`, `TestSentinelReachability`,
   `TestMustParse`, `TestMustReject`, `TestMustRejectGrammar` all
   pass.
-- `just fmt-check` and `just lint` green with the `forbidigo` rule
-  enabled.
+- `just fmt-check` and `just lint` green; the Rev-5 AST write-fence
+  test (`internal/query/cypher/sink_fence_test.go`) green.
 - `cypher.New` / `cypher.Parse` signatures byte-identical to master.
 
 When all eight are true, the deepening is done.
