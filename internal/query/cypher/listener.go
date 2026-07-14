@@ -773,9 +773,6 @@ func (l *listener) EnterOC_StandaloneCall(c *gen.OC_StandaloneCallContext) {
 // the current branch. RETURN terminates a branch; WITH terminates an
 // intermediate part (both share oC_ProjectionBody via collectProjection).
 func (l *listener) EnterOC_Return(c *gen.OC_ReturnContext) {
-	if l.subqueryDepth > 0 {
-		return
-	}
 	l.collectProjection(c.OC_ProjectionBody())
 }
 

@@ -2123,6 +2123,28 @@ var mustParse = map[string]struct {
 			},
 		}),
 	},
+	// collection-sink Phase C pin — entry-point twin of the two WITH pins
+	// above, exercising Return's own reach chain. RETURN m inside an EXISTS
+	// body binds inner m via classifyProjection's bare-var arm — the exact
+	// same code path as the WITH bare-var pin, but reached through
+	// EnterOC_Return post-guard-drop instead of EnterOC_With. Because the
+	// 240 and 356 refs sites are already sink-routed under 6f2b2c1, this
+	// guard-drop is safe by pre-clearance; without those sinks (or if this
+	// commit were re-ordered before them), varRef{m} would leak onto the
+	// outer part's refs slice and build()'s referential-integrity sweep
+	// would reject with ErrUnboundVariable (outer part binds only n). One
+	// pin at the entry point is sufficient coverage for both the bare-var
+	// and function-arg site classes — those are proven independently by the
+	// two WITH pins above; this pin proves the Return entry is safe.
+	"exists body return-item bare inner var no outer refs leak": {
+		src: "MATCH (n) WHERE exists { MATCH (m) RETURN m }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
 	// Nested — SKIP $off in the OUTER RegularQuery-form EXISTS, LIMIT $lim in
 	// an inner EXISTS one level deeper. EnterOC_ExistentialSubquery fires on
 	// the outer subquery first (parent EnterRule precedes child EnterRule);
