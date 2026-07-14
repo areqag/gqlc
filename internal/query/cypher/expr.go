@@ -673,6 +673,9 @@ func (l *listener) requireAllParametersApproved(e antlr.Tree) {
 // index (gqlc-qcc per ADR 0008 amendment 2026-07-12) via attributeUse at
 // emission time.
 func (l *listener) addParameterUse(name string, node antlr.Tree, use query.Use) {
+	if l.suppressed() {
+		return
+	}
 	idx, ok := l.byParam[name]
 	if !ok {
 		idx = len(l.params)
