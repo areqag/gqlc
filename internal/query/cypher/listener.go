@@ -195,10 +195,186 @@ func newListener(ts *antlr.CommonTokenStream, registry procsig.Registry) *listen
 
 // fail records the first error and is idempotent thereafter: the error found
 // first in walk order is the one Parse returns, and later failures are dropped.
+// Category D of the sink (spec docs/specs/cypher-collection-sink.md §1.2).
+// Under EXISTS suppression, fail is a no-op — parse-time collection failures
+// reached under a suppressed handler body are dropped, matching master's
+// guarded early-return path per §3.2 BLOCKER 3 proof. SyntaxError fires
+// only outside walker context (pre-walk parse errors, where subqueryDepth
+// is definitionally 0), so this gate never blocks a real syntax error.
 func (l *listener) fail(err error) {
+	if l.suppressed() {
+		return
+	}
 	if l.err == nil {
 		l.err = err
 	}
+}
+
+// --- collection sink (spec docs/specs/cypher-collection-sink.md §1.2) ---
+//
+// suppressed is the ONLY read of subqueryDepth outside its own Enter/Exit
+// after Phase C completes. Every listener-state mutation reachable from a
+// walked EXISTS body routes through a sink method with the same one-line
+// prologue below, so a walked suppressed handler body leaks no outer state.
+//
+// Phase A introduces these as dead code — call sites migrate handler by
+// handler in Phase C, and the forbidigo lint gate enables in Phase E.
+// The per-method //nolint:unused directives lift as callers land.
+
+func (l *listener) suppressed() bool { return l.subqueryDepth > 0 }
+
+// Category A — per-part writes (spec §1.1 A). Every method no-ops under
+// suppression; call sites migrate in Phase C.
+
+func (l *listener) appendBinding(rb *rawBinding) {
+	if l.suppressed() {
+		return
+	}
+	l.curPart.bindings = append(l.curPart.bindings, rb)
+}
+
+func (l *listener) appendPathBinding(pb query.PathBinding) {
+	if l.suppressed() {
+		return
+	}
+	l.curPart.pathBindings = append(l.curPart.pathBindings, pb)
+}
+
+// setPathMemberSink routes both the &pathMembers assignment and the nil
+// clear; sink stays nil under suppression, so recordPathNode/recordPathEdge
+// early-return at their existing nil-check (spec §3.2, BLOCKER 1).
+func (l *listener) setPathMemberSink(sink *[]query.PathMember) {
+	if l.suppressed() {
+		return
+	}
+	l.curPart.pathMemberSink = sink
+}
+
+func (l *listener) appendPathMember(m query.PathMember) {
+	if l.suppressed() {
+		return
+	}
+	*l.curPart.pathMemberSink = append(*l.curPart.pathMemberSink, m)
+}
+
+func (l *listener) appendUnwindBinding(ub query.UnwindBinding) {
+	if l.suppressed() {
+		return
+	}
+	l.curPart.unwindBindings = append(l.curPart.unwindBindings, ub)
+}
+
+func (l *listener) appendCallBinding(cb query.CallBinding) {
+	if l.suppressed() {
+		return
+	}
+	l.curPart.callBindings = append(l.curPart.callBindings, cb)
+}
+
+func (l *listener) setCallStandalone() {
+	if l.suppressed() {
+		return
+	}
+	l.curPart.callStandalone = true
+}
+
+func (l *listener) appendReturnItem(item query.ReturnItem) {
+	if l.suppressed() {
+		return
+	}
+	l.curPart.returns = append(l.curPart.returns, item)
+}
+
+func (l *listener) setReturnsAll() {
+	if l.suppressed() {
+		return
+	}
+	l.curPart.returnsAll = true
+}
+
+func (l *listener) setDistinct() {
+	if l.suppressed() {
+		return
+	}
+	l.curPart.distinct = true
+}
+
+func (l *listener) appendRef(r varRef) {
+	if l.suppressed() {
+		return
+	}
+	l.curPart.refs = append(l.curPart.refs, r)
+}
+
+func (l *listener) appendEffect(eff query.Effect) {
+	if l.suppressed() {
+		return
+	}
+	l.curPart.effects = append(l.curPart.effects, eff)
+}
+
+// Category B — query-wide structural writes (spec §1.1 B).
+
+func (l *listener) openBranch() {
+	if l.suppressed() {
+		return
+	}
+	part := newRawPart()
+	br := &rawBranch{parts: []*rawPart{part}}
+	l.branches = append(l.branches, br)
+	l.curBranch = br
+	l.curPart = part
+}
+
+func (l *listener) recordUnionKind(kind query.UnionKind) {
+	if l.suppressed() {
+		return
+	}
+	l.combinators = append(l.combinators, kind)
+}
+
+func (l *listener) closePartOpenNext(imported map[string]query.Type) {
+	if l.suppressed() {
+		return
+	}
+	part := newRawPart()
+	part.imported = imported
+	l.curBranch.parts = append(l.curBranch.parts, part)
+	l.curPart = part
+}
+
+// Category C — query-wide scope counters (spec §1.1 C).
+
+func (l *listener) markWriteSeen() {
+	if l.suppressed() {
+		return
+	}
+	l.writeSeen = true
+}
+
+// mintOptionalGroup returns 0 under suppression so ay9 §3.3's
+// "suppressed clauses consume no id" invariant holds by construction.
+func (l *listener) mintOptionalGroup() int {
+	if l.suppressed() {
+		return 0
+	}
+	l.optionalGroupSeq++
+	return l.optionalGroupSeq
+}
+
+// Category E bypass — the un-suppressed accumulator for the reordered
+// EnterOC_ExistentialSubquery mining loops (spec §1.4). Same body as
+// addParameterUse; the ONLY caller is the reordered mining path's
+// findParameters loop. Gate on addParameterUse lands in Phase D.
+func (l *listener) addParameterUseUnsuppressed(name string, node antlr.Tree, use query.Use) {
+	idx, ok := l.byParam[name]
+	if !ok {
+		idx = len(l.params)
+		l.byParam[name] = idx
+		l.params = append(l.params, &query.Parameter{Name: name})
+	}
+	l.params[idx].Uses = append(l.params[idx].Uses, attributeUse(use, l.currentPartIndex(), l.currentBranchIndex()))
+	l.approved[node] = true
 }
 
 // SyntaxError records the first lexer/parser syntax error onto the same l.err
@@ -232,16 +408,10 @@ func (l *listener) walk(tree antlr.Tree) error {
 // branch (EnterOC_Union runs first and has already recorded the combinator).
 // Stage 11 §1.2: inside EXISTS { oC_RegularQuery } the ANTLR walker fires
 // EnterOC_SingleQuery for the subquery — we skip it so the outer branch/part
-// pointers stay stable and no phantom branch enters l.branches.
+// pointers stay stable and no phantom branch enters l.branches. Branch creation
+// and the EXISTS suppression check both live in openBranch (spec §1.2 Category B).
 func (l *listener) EnterOC_SingleQuery(*gen.OC_SingleQueryContext) {
-	if l.subqueryDepth > 0 {
-		return
-	}
-	part := newRawPart()
-	br := &rawBranch{parts: []*rawPart{part}}
-	l.branches = append(l.branches, br)
-	l.curBranch = br
-	l.curPart = part
+	l.openBranch()
 }
 
 // EnterOC_Union records the combinator joining the branch about to open to the
@@ -249,16 +419,14 @@ func (l *listener) EnterOC_SingleQuery(*gen.OC_SingleQueryContext) {
 // before the joined branch's EnterOC_SingleQuery, so the combinator precedes its
 // branch and the i-th entry joins branch i+1 to branch i (spec §2). Stage 11
 // §1.2: a UNION inside an EXISTS subquery is likewise suppressed so no phantom
-// combinator enters the outer query's list.
+// combinator enters the outer query's list. Combinator recording and the EXISTS
+// suppression check both live in recordUnionKind (spec §1.2 Category B).
 func (l *listener) EnterOC_Union(c *gen.OC_UnionContext) {
-	if l.subqueryDepth > 0 {
-		return
-	}
 	kind := query.UnionDistinct
 	if c.ALL() != nil {
 		kind = query.UnionAll
 	}
-	l.combinators = append(l.combinators, kind)
+	l.recordUnionKind(kind)
 }
 
 // --- clause collection / rejections (spec §2/§3, category-grained sentinels) ---
@@ -270,13 +438,9 @@ func (l *listener) EnterOC_Union(c *gen.OC_UnionContext) {
 // way in either case. Collection runs here, in walk order, so first appearance
 // of a variable is the source order within the part.
 func (l *listener) EnterOC_Match(c *gen.OC_MatchContext) {
-	if l.subqueryDepth > 0 {
-		return // Stage 11 §1.2: EXISTS { ... } suppresses inner clause collection.
-	}
 	group := 0
 	if c.OPTIONAL() != nil {
-		l.optionalGroupSeq++
-		group = l.optionalGroupSeq
+		group = l.mintOptionalGroup()
 	}
 	l.collectPattern(c.OC_Pattern(), group)
 	if w := c.OC_Where(); w != nil {
@@ -291,9 +455,6 @@ func (l *listener) EnterOC_Match(c *gen.OC_MatchContext) {
 // next part's scope (spec §4); Stage 6 also carries their result types so the
 // next part's classifier can type a bare-alias RefProjection.
 func (l *listener) EnterOC_With(c *gen.OC_WithContext) {
-	if l.subqueryDepth > 0 {
-		return // Stage 11 §1.2: EXISTS { ... } suppresses inner clause collection.
-	}
 	l.collectProjection(c.OC_ProjectionBody())
 	if w := c.OC_Where(); w != nil {
 		l.mineWhere(w)
@@ -301,11 +462,7 @@ func (l *listener) EnterOC_With(c *gen.OC_WithContext) {
 	if l.err != nil {
 		return
 	}
-	closed := l.curPart
-	part := newRawPart()
-	part.imported = exportedTypes(closed)
-	l.curBranch.parts = append(l.curBranch.parts, part)
-	l.curPart = part
+	l.closePartOpenNext(exportedTypes(l.curPart))
 }
 
 // exportedTypes computes the name → Stage-6 result type map the closed part
@@ -366,9 +523,6 @@ func exportedTypes(closed *rawPart) map[string]query.Type {
 // enter the CreateEffect's variables list — matching the read-side discipline.
 // group is unconditionally 0 (non-nullable): openCypher has no OPTIONAL CREATE.
 func (l *listener) EnterOC_Create(c *gen.OC_CreateContext) {
-	if l.subqueryDepth > 0 {
-		return // Stage 11 §1.6: writes inside EXISTS { ... } parse-accept; bucket-3 engine-side.
-	}
 	before := len(l.curPart.bindings)
 	l.collectPattern(c.OC_Pattern(), 0)
 	if l.err != nil {
@@ -378,8 +532,8 @@ func (l *listener) EnterOC_Create(c *gen.OC_CreateContext) {
 	for i := before; i < len(l.curPart.bindings); i++ {
 		vars = append(vars, l.curPart.bindings[i].variable)
 	}
-	l.curPart.effects = append(l.curPart.effects, query.NewCreateEffect(vars))
-	l.writeSeen = true
+	l.appendEffect(query.NewCreateEffect(vars))
+	l.markWriteSeen()
 }
 
 // EnterOC_Merge collects the MERGE clause: the pattern's single oC_PatternPart
@@ -387,13 +541,11 @@ func (l *listener) EnterOC_Create(c *gen.OC_CreateContext) {
 // then each ON MATCH / ON CREATE action's SetEffects via collectMergeAction.
 // Variables mirrors CreateEffect.Variables: the [before..len(bindings)] delta
 // captures the bindings THIS clause introduced. writeSeen flips at outer
-// scope so the query's StatementKind lands StatementWrite; a MERGE inside
-// EXISTS { ... } early-returns at the subqueryDepth guard, so the outer
-// query keeps its read/write kind untouched (Stage 11 §1.6).
+// scope so the query's StatementKind lands StatementWrite. Under EXISTS
+// suppression, the appendEffect and markWriteSeen sinks no-op at the
+// method boundary; the pattern-collection subtree is already sink-gated
+// from Phase B (safe by construction, same class as EnterOC_Create).
 func (l *listener) EnterOC_Merge(c *gen.OC_MergeContext) {
-	if l.subqueryDepth > 0 {
-		return // Stage 11 §1.6: writes inside EXISTS { ... } are suppressed.
-	}
 	before := len(l.curPart.bindings)
 	l.collectPatternPart(c.OC_PatternPart(), 0)
 	if l.err != nil {
@@ -421,8 +573,8 @@ func (l *listener) EnterOC_Merge(c *gen.OC_MergeContext) {
 		l.fail(err)
 		return
 	}
-	l.curPart.effects = append(l.curPart.effects, eff)
-	l.writeSeen = true
+	l.appendEffect(eff)
+	l.markWriteSeen()
 }
 
 type mergeActionKind int
@@ -491,16 +643,13 @@ func (l *listener) collectMergeAction(action gen.IOC_MergeActionContext) ([]quer
 // the query names appears in EXACTLY ONE of Targets / Refs — never both, never
 // neither — so no delete the query performs is silently absent from Effects.
 func (l *listener) EnterOC_Delete(c *gen.OC_DeleteContext) {
-	if l.subqueryDepth > 0 {
-		return
-	}
 	detach := c.DETACH() != nil
 	var targets, refs []query.Ref
 	for _, e := range c.AllOC_Expression() {
 		if nae := nonArithmeticAtom(e); nae != nil {
 			if ref, ok := refFromNonArithmetic(nae); ok {
 				targets = append(targets, ref)
-				l.curPart.refs = append(l.curPart.refs, varRef{name: ref.Variable})
+				l.appendRef(varRef{name: ref.Variable})
 				continue
 			}
 		}
@@ -514,8 +663,8 @@ func (l *listener) EnterOC_Delete(c *gen.OC_DeleteContext) {
 			l.addParameterUse(name, p, query.NewExprUse(query.TypeUnknown{}, query.ExprInDeleteTarget))
 		}
 	}
-	l.curPart.effects = append(l.curPart.effects, query.NewDeleteEffect(targets, refs, detach))
-	l.writeSeen = true
+	l.appendEffect(query.NewDeleteEffect(targets, refs, detach))
+	l.markWriteSeen()
 }
 
 // EnterOC_Set collects one SET clause: one Effect per SetItem, dispatched by
@@ -528,9 +677,6 @@ func (l *listener) EnterOC_Delete(c *gen.OC_DeleteContext) {
 // A nested propertyExpression LHS (n.a.b) rejects with
 // ErrNestedPropertyTarget via collectSetItem.
 func (l *listener) EnterOC_Set(c *gen.OC_SetContext) {
-	if l.subqueryDepth > 0 {
-		return
-	}
 	// A SET clause nested inside a MERGE ON action (ON MATCH SET .. / ON
 	// CREATE SET ..) is walked by collectMergeAction, which routes each item
 	// into the parent MergeEffect's OnMatch/OnCreate slot rather than the
@@ -545,7 +691,7 @@ func (l *listener) EnterOC_Set(c *gen.OC_SetContext) {
 			return
 		}
 	}
-	l.writeSeen = true
+	l.markWriteSeen()
 }
 
 // EnterOC_Remove collects one REMOVE clause: one Effect per RemoveItem
@@ -553,16 +699,13 @@ func (l *listener) EnterOC_Set(c *gen.OC_SetContext) {
 // propertyExpression → RemovePropertyEffect. REMOVE takes no value expression,
 // so no parameter mining runs.
 func (l *listener) EnterOC_Remove(c *gen.OC_RemoveContext) {
-	if l.subqueryDepth > 0 {
-		return
-	}
 	for _, item := range c.AllOC_RemoveItem() {
 		l.collectRemoveItem(item)
 		if l.err != nil {
 			return
 		}
 	}
-	l.writeSeen = true
+	l.markWriteSeen()
 }
 
 // EnterOC_Unwind collects the UNWIND clause into the current part as an
@@ -573,9 +716,6 @@ func (l *listener) EnterOC_Remove(c *gen.OC_RemoveContext) {
 // records an ExprUse{sourceType, ExprInProjection}, so no parameter is
 // silently dropped.
 func (l *listener) EnterOC_Unwind(c *gen.OC_UnwindContext) {
-	if l.subqueryDepth > 0 {
-		return
-	}
 	l.collectUnwind(c)
 }
 
@@ -583,33 +723,38 @@ func (l *listener) EnterOC_Unwind(c *gen.OC_UnwindContext) {
 // are grammar-restricted to explicit invocation (parens present) and to
 // oC_YieldItems (no YIELD *); both restrictions surface as mustReject
 // grammar-level parse errors before this handler runs. Stage 14 §4.1 /
-// §4.2. Suppressed under EXISTS { ... } like every other collecting
-// handler.
+// §4.2. Under EXISTS suppression, the callBindings sink no-ops at the
+// method boundary; addParameterUse is already sink-gated; parse-time
+// validation errors (unknown procedure, arity mismatch) surface
+// regardless of suppression per the Rev 3 spec collection/validation
+// split.
 func (l *listener) EnterOC_InQueryCall(c *gen.OC_InQueryCallContext) {
-	if l.subqueryDepth > 0 {
-		return
-	}
 	l.enterInQueryCall(c)
 }
 
 // EnterOC_StandaloneCall collects one standalone CALL clause. Stage 14
-// §4.1 / §4.2. Suppressed under EXISTS { ... } like every other
-// collecting handler. Grammar quirk: a pure standalone CALL parses via
+// §4.1 / §4.2. Grammar quirk: a pure standalone CALL parses via
 // `oC_Query → oC_StandaloneCall` (see Cypher.g4 §oC_Query), which
 // SKIPS `oC_RegularQuery → oC_SingleQuery`, so EnterOC_SingleQuery
 // never fires and curBranch/curPart stay nil. This handler primes them
-// itself before calling enterStandaloneCall, mirroring what
-// EnterOC_SingleQuery does for the regular-query path.
+// itself via openBranch (which mirrors what EnterOC_SingleQuery does
+// for the regular-query path) before calling enterStandaloneCall.
+//
+// EXISTS reachability: oC_StandaloneCall sits at the oC_Query level,
+// NOT under oC_RegularQuery, whereas oC_ExistentialSubquery admits
+// only `oC_RegularQuery | oC_Pattern oC_Where?` between its braces.
+// A StandaloneCall is therefore grammar-unreachable inside EXISTS
+// under any input the parser accepts; l.subqueryDepth is provably 0
+// whenever this handler fires. The Phase-C sink-routing pattern is
+// preserved for structural consistency (openBranch is Cat-B gated;
+// collectCall reaches only sink-gated Cat-A writes post-commit-13
+// and Cat-D fails post-Phase-D commit-12.5) — the guard-drop here
+// is dead-code removal, not runtime leak prevention. Spec §5 Phase C
+// (final handler); Rev 4 records the Phase-D reorder that closed
+// the last remaining leak-prevention window ahead of this commit.
 func (l *listener) EnterOC_StandaloneCall(c *gen.OC_StandaloneCallContext) {
-	if l.subqueryDepth > 0 {
-		return
-	}
 	if l.curPart == nil {
-		part := newRawPart()
-		br := &rawBranch{parts: []*rawPart{part}}
-		l.branches = append(l.branches, br)
-		l.curBranch = br
-		l.curPart = part
+		l.openBranch()
 	}
 	l.enterStandaloneCall(c)
 }
@@ -618,9 +763,6 @@ func (l *listener) EnterOC_StandaloneCall(c *gen.OC_StandaloneCallContext) {
 // the current branch. RETURN terminates a branch; WITH terminates an
 // intermediate part (both share oC_ProjectionBody via collectProjection).
 func (l *listener) EnterOC_Return(c *gen.OC_ReturnContext) {
-	if l.subqueryDepth > 0 {
-		return
-	}
 	l.collectProjection(c.OC_ProjectionBody())
 }
 
@@ -648,8 +790,15 @@ func (l *listener) EnterOC_Return(c *gen.OC_ReturnContext) {
 // EnterOC_ExistentialSubquery is a no-op on already-approved nodes
 // (byParam dedup + approved-tree guard in addParameterUse), so the outer
 // sweep may cover the entire subtree without double-recording.
+//
+// Phase B ordering (spec docs/specs/cypher-collection-sink.md §1.4): the
+// three mining loops run BEFORE the subqueryDepth increment so the
+// findParameters sweep records at outer scope. The findParameters loop
+// calls addParameterUseUnsuppressed directly (the designated bypass per
+// §1.2 Category E); mineClauseSlotParameter still routes through the
+// existing addParameterUse — pre-increment, l.suppressed() is false, so
+// Phase D's gate on addParameterUse is a no-op check at this call site.
 func (l *listener) EnterOC_ExistentialSubquery(c *gen.OC_ExistentialSubqueryContext) {
-	l.subqueryDepth++
 	for _, s := range findNodesOfType[gen.IOC_SkipContext](c) {
 		l.mineClauseSlotParameter(s.OC_Expression(), query.ClauseSlotSkip)
 		if l.err != nil {
@@ -670,8 +819,9 @@ func (l *listener) EnterOC_ExistentialSubquery(c *gen.OC_ExistentialSubqueryCont
 		if name == "" {
 			continue
 		}
-		l.addParameterUse(name, p, query.NewExprUse(query.TypeBool{}, query.ExprInPredicate))
+		l.addParameterUseUnsuppressed(name, p, query.NewExprUse(query.TypeBool{}, query.ExprInPredicate))
 	}
+	l.subqueryDepth++
 }
 
 func (l *listener) ExitOC_ExistentialSubquery(*gen.OC_ExistentialSubqueryContext) {
