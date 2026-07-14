@@ -50,8 +50,25 @@ Revision history:
 - Rev 1 (aeec115): initial spec. Enumeration missing byVar and
   pathMemberSink; save/restore proof implicit; `l.fail` and
   `addParameterUse` under suppression not addressed.
-- Rev 2 (this file): rewritten under linus-2 grill. §1.2 becomes a
+- Rev 2 (452c6b7): rewritten under linus-2 grill. §1.2 becomes a
   contract; §3 adds a site-by-site parity walk; §4 adds a lint gate.
+- Rev 3 (this file): Phase-ordering fix. Rev 2's Phase C step 3
+  promised byte-identical tests after each handler migration, but
+  Rev 2's Phase D deferred the `addParameterUse` sink gate to AFTER
+  Phase C. Dropping Match's guard mid-Phase-C surfaced the
+  `EnterOC_Match → mineWhere → pairAddSub → addParameterUse` reach
+  path under `l.suppressed()` and leaked a spurious PropertyUse into
+  the outer parameter, breaking
+  `TestMustParse/exists_body_mixed_limit_skip_and_where_params`. The
+  same reach exists for With/Set/Delete/Remove. §5 splits Rev 2's
+  Phase D — the `addParameterUse` gate lifts into a new Phase B.5
+  that MUST land before any Phase C handler migration begins; the
+  `l.fail` gate stays as Phase D. §3.4 clarifies that the
+  suppression gate (not the `approved` map) is what actually closes
+  BLOCKER 5 at handler-reach sites. Ships as three commits on this
+  branch (Rev-3 stack): b5e206d (Phase B.5 sink gate), 764dcd8 (Phase
+  C Match migration, previously red, now green), and this spec
+  commit that formalises the phasing.
 
 ---
 
@@ -630,13 +647,19 @@ outcome — parameter recorded solely by the mining path with
 `ExprInPredicate`. **Byte-identical param.Uses list.** Parity
 preserved.
 
-The `approved` map ensures the walked-but-gated call would have
-been a no-op even without gating (via the `if l.approved[p] {
-continue }` check inside addParameterUse's caller loops in
-listener.go:666-668). But that check protects only the loop in
-EnterOC_ExistentialSubquery, not the `addParameterUse` call from
-`collectSetItem`. So gating the sink method is what actually closes
-BLOCKER 5. Confirmed.
+The `approved` map's `if l.approved[p] { continue }` check lives
+inside `EnterOC_ExistentialSubquery`'s own mining loop
+(listener.go:839) — it dedupes within that loop only. It is NOT
+consulted by `addParameterUse` on entry; `addParameterUse` writes
+`approved[node] = true` unconditionally as a side effect. So downstream
+handler-body reach paths — `EnterOC_Match → mineWhere → pairAddSub →
+addParameterUse`, `EnterOC_Set → collectSetItem → addParameterUse`,
+etc. — receive no protection from `approved` and would leak a Use
+into the outer parameter the moment their handler guard is dropped.
+Sink-gating `addParameterUse` with `if l.suppressed() { return }` is
+what actually closes BLOCKER 5. That gate lands in Phase B.5 (§5),
+BEFORE any Phase C handler migration begins, precisely so no
+guard-drop reveals a live suppressed reach path. Confirmed.
 
 ### 3.5 BLOCKER 2 proof: save/restore
 
@@ -757,13 +780,42 @@ temporarily fail it.
 Commit: `refactor(cypher): introduce collection-sink methods on listener`.
 
 **Phase B — `EnterOC_ExistentialSubquery` mining reorder.** Move
-mining before increment per §1.4. Test: existing property tests
-pass (parameter dedup / attribution unchanged); the reorder is
-observably-nil because master's post-increment ordering worked only
-because master's addParameterUse was ungated, and Phase B hasn't
-yet gated it. This is a "no-op prep" commit that sets up Phase D.
+mining before increment per §1.4. The findParameters loop calls
+`addParameterUseUnsuppressed` (Category-E bypass, listener.go:371)
+directly so it stays live once Phase B.5 gates the sink. Test:
+existing property tests pass (parameter dedup / attribution
+unchanged); the reorder is observably-nil because master's
+post-increment ordering worked only because master's addParameterUse
+was ungated, and Phase B hasn't yet gated it. This is a "no-op prep"
+commit that sets up Phase B.5.
 
 Commit: `refactor(cypher): mine EXISTS parameters before incrementing depth`.
+
+**Phase B.5 — Gate `addParameterUse` under EXISTS suppression.** Add
+`if l.suppressed() { return }` as the first line of `addParameterUse`
+(expr.go:675). Observably nil at this stack tip: every reach path
+into `addParameterUse` from a handler body — `mineWhere`,
+`collectSetItem`, `typeExpressionMining`, `mineInlineMap` — sits
+inside a handler that still carries its Phase-A subqueryDepth guard,
+so no live suppressed caller exists. The only live suppressed-reach
+call is `EnterOC_ExistentialSubquery`'s own mining, which already
+routes through `addParameterUseUnsuppressed` per Phase B and is
+unaffected.
+
+This ordering is load-bearing. Rev-2 attempted to defer this gate
+into Phase D (post-migration); dropping any of the five reach-path
+handlers' (Match, With, Set, Delete, Remove) guards would then
+surface `addParameterUse` under `l.suppressed()` and leak a spurious
+PropertyUse / ExprInSetValue / etc. into the outer parameter — a
+parity break asserted directly by `TestMustParse` inline `require.Equal`
+cases (e.g. `exists_body_mixed_limit_skip_and_where_params`) that
+cannot be regenerated. Gating in B.5 keeps every subsequent Phase-C
+migration a pure structural swap with no observable behaviour change.
+
+Test: `just test` remains green; all 3,199 goldens byte-identical;
+TCK line unchanged. This is the second "no-op prep" commit.
+
+Commit: `refactor(cypher): gate addParameterUse under EXISTS suppression (Phase D advance)`.
 
 **Phase C — Migrate the fourteen Enter handlers, one at a time.**
 For each guarded handler in turn:
@@ -785,14 +837,12 @@ plus the standalone-CALL curPart-priming block.
 Callees migrate in the same commit as the caller that reaches them
 (so each commit is handler-scoped and reviewable).
 
-**Phase D — Gate `l.fail` and `addParameterUse`.** With every
-guarded handler now routing curPart / structural / scope writes
-through the sink, gate the last two categories: `l.fail`
-(Category D) and `addParameterUse` (Category E). The
-`addParameterUseUnsuppressed` bypass wires into the reordered
-`EnterOC_ExistentialSubquery` mining.
+**Phase D — Gate `l.fail`.** With every guarded handler now routing
+curPart / structural / scope writes through the sink, gate the last
+remaining category: `l.fail` (Category D). `addParameterUse`
+(Category E) is already gated by Phase B.5; only `l.fail` remains.
 
-Commit: `refactor(cypher): gate l.fail and addParameterUse under EXISTS suppression`.
+Commit: `refactor(cypher): gate l.fail under EXISTS suppression`.
 
 Test at this step: add Test A + Test B from §4.2 in the same commit
 (or a preceding red commit if strict TDD is required — since Test A
