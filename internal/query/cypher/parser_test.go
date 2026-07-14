@@ -2145,6 +2145,31 @@ var mustParse = map[string]struct {
 			},
 		}),
 	},
+	// collection-sink Phase C pin — Unwind entry-point twin. UNWIND [m] AS k
+	// inside an EXISTS body reaches TWO Category A/B writes in collectUnwind
+	// via post-guard-drop EnterOC_Unwind: (1) the source-expression refs sweep
+	// mines varRef{m} from the [m] list literal (Category A, expr.go:124), and
+	// (2) the UnwindBinding{k} construction appends to the part's unwind
+	// bindings (Category B, expr.go:139). Both writes now route through the
+	// appendRef / appendUnwindBinding sinks; without either routing, this pin
+	// would fail — an un-sunk refs write leaks varRef{m} onto the outer part
+	// (which only binds n), and build()'s referential-integrity sweep would
+	// reject with ErrUnboundVariable: m; an un-sunk unwindBindings write
+	// leaks UnwindBinding{k} onto the outer part's Bindings, and require.Equal
+	// would reject the Bindings-slice shape. Single pin, both leak classes.
+	// Return here binds only k inside the subquery — the k pin does not exit
+	// EXISTS (commit-5 already proved the Return sink). Outer part binds only
+	// n; a successful parse with Bindings=[n] proves suppression by
+	// construction across both sink routings.
+	"exists body unwind refs and binding no outer leak": {
+		src: "MATCH (n) WHERE exists { MATCH (m) UNWIND [m] AS k RETURN k }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
 	// Nested — SKIP $off in the OUTER RegularQuery-form EXISTS, LIMIT $lim in
 	// an inner EXISTS one level deeper. EnterOC_ExistentialSubquery fires on
 	// the outer subquery first (parent EnterRule precedes child EnterRule);

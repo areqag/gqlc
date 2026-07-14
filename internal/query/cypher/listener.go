@@ -250,7 +250,6 @@ func (l *listener) appendPathMember(m query.PathMember) {
 	*l.curPart.pathMemberSink = append(*l.curPart.pathMemberSink, m)
 }
 
-//nolint:unused // Phase A dead code; wired up in Phase C.
 func (l *listener) appendUnwindBinding(ub query.UnwindBinding) {
 	if l.suppressed() {
 		return
@@ -728,9 +727,6 @@ func (l *listener) EnterOC_Remove(c *gen.OC_RemoveContext) {
 // records an ExprUse{sourceType, ExprInProjection}, so no parameter is
 // silently dropped.
 func (l *listener) EnterOC_Unwind(c *gen.OC_UnwindContext) {
-	if l.subqueryDepth > 0 {
-		return
-	}
 	l.collectUnwind(c)
 }
 

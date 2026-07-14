@@ -121,7 +121,7 @@ func (l *listener) collectUnwind(c gen.IOC_UnwindContext) {
 	}
 	sourceType, refs, params := l.typeExpressionMining(c.OC_Expression())
 	for _, ref := range refs {
-		l.curPart.refs = append(l.curPart.refs, varRef{name: ref.Variable})
+		l.appendRef(varRef{name: ref.Variable})
 	}
 	for _, p := range params {
 		name := parameterName(p)
@@ -136,7 +136,7 @@ func (l *listener) collectUnwind(c gen.IOC_UnwindContext) {
 		l.fail(err)
 		return
 	}
-	l.curPart.unwindBindings = append(l.curPart.unwindBindings, ub)
+	l.appendUnwindBinding(ub)
 }
 
 // unwindElementType extracts the element type from an UNWIND source
