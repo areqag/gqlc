@@ -2236,6 +2236,37 @@ var mustParse = map[string]struct {
 			},
 		}),
 	},
+	// collection-sink Phase C pin — Remove entry-point twin. A single REMOVE
+	// clause with two items (m:L for the variable+labels arm, m.p for the
+	// propertyExpression arm) inside an EXISTS body exercises BOTH arms of
+	// collectRemoveItem plus the terminal writeSeen in EnterOC_Remove:
+	// variable+labels arm (expr.go:806 refs + :813 effects), propertyExpression
+	// arm (expr.go:822 refs + :828 effects), terminating markWriteSeen at
+	// listener.go:711. Under EXISTS suppression, all five per-item sink calls
+	// (2×refs + 2×effects) plus the terminal writeSeen no-op: no RemoveEffect
+	// leaks into outer Effects, no varRef{m} leaks onto outer refs, and
+	// StatementKind stays StatementRead. Without ANY of the three sink
+	// routings, this pin fails: an un-sunk effects write leaks two RemoveEffects
+	// into outer Effects (one RemoveLabelsEffect{m, [L]} + one
+	// RemovePropertyEffect{m.p}, require.Equal on Effects shape); an un-sunk
+	// refs write leaks two varRef{m} onto outer refs (build's referential-
+	// integrity sweep rejects with ErrUnboundVariable: m — outer part binds
+	// only n); an un-sunk markWriteSeen flips outer StatementKind from
+	// StatementRead to StatementWrite (require.Equal on query-level
+	// StatementKind). One pin, five leak-lines, three sinks. The two arms are
+	// structurally symmetric (both follow refs-then-eff-then-append after arm-
+	// specific setup), so one pin covering both via multi-item REMOVE is
+	// sufficient coverage — the per-sink temp-revert probe proves each is
+	// independently load-bearing.
+	"exists body remove two-arm no outer leak": {
+		src: "MATCH (n) WHERE exists { MATCH (m) REMOVE m:L, m.p RETURN m }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
 	// Nested — SKIP $off in the OUTER RegularQuery-form EXISTS, LIMIT $lim in
 	// an inner EXISTS one level deeper. EnterOC_ExistentialSubquery fires on
 	// the outer subquery first (parent EnterRule precedes child EnterRule);

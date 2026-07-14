@@ -699,16 +699,13 @@ func (l *listener) EnterOC_Set(c *gen.OC_SetContext) {
 // propertyExpression → RemovePropertyEffect. REMOVE takes no value expression,
 // so no parameter mining runs.
 func (l *listener) EnterOC_Remove(c *gen.OC_RemoveContext) {
-	if l.subqueryDepth > 0 {
-		return
-	}
 	for _, item := range c.AllOC_RemoveItem() {
 		l.collectRemoveItem(item)
 		if l.err != nil {
 			return
 		}
 	}
-	l.writeSeen = true
+	l.markWriteSeen()
 }
 
 // EnterOC_Unwind collects the UNWIND clause into the current part as an

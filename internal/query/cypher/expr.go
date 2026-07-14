@@ -803,14 +803,14 @@ func (l *listener) collectSetItem(item gen.IOC_SetItemContext) {
 func (l *listener) collectRemoveItem(item gen.IOC_RemoveItemContext) {
 	if item.OC_Variable() != nil && item.OC_NodeLabels() != nil {
 		variable := item.OC_Variable().GetText()
-		l.curPart.refs = append(l.curPart.refs, varRef{name: variable})
+		l.appendRef(varRef{name: variable})
 		labels := nodeLabels(item.OC_NodeLabels())
 		eff, err := query.NewRemoveLabelsEffect(variable, labels)
 		if err != nil {
 			l.fail(err)
 			return
 		}
-		l.curPart.effects = append(l.curPart.effects, eff)
+		l.appendEffect(eff)
 		return
 	}
 	if pe := item.OC_PropertyExpression(); pe != nil {
@@ -819,12 +819,12 @@ func (l *listener) collectRemoveItem(item gen.IOC_RemoveItemContext) {
 			l.fail(fmt.Errorf("%w: REMOVE %s", ErrNestedPropertyTarget, pe.GetText()))
 			return
 		}
-		l.curPart.refs = append(l.curPart.refs, varRef{name: target.Variable})
+		l.appendRef(varRef{name: target.Variable})
 		eff, err := query.NewRemovePropertyEffect(target)
 		if err != nil {
 			l.fail(err)
 			return
 		}
-		l.curPart.effects = append(l.curPart.effects, eff)
+		l.appendEffect(eff)
 	}
 }
