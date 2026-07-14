@@ -65,10 +65,10 @@ func (l *listener) collectPatternPart(part gen.IOC_PatternPartContext, group int
 		// named path — collectPatternElement records to this slice
 		// alongside the part's raw bindings when non-nil.
 		pathMembers = make([]query.PathMember, 0, 8)
-		l.curPart.pathMemberSink = &pathMembers
+		l.setPathMemberSink(&pathMembers)
 	}
 	l.collectPatternElement(part.OC_AnonymousPatternPart().OC_PatternElement(), group)
-	l.curPart.pathMemberSink = nil
+	l.setPathMemberSink(nil)
 	if l.err != nil {
 		return
 	}
@@ -90,7 +90,7 @@ func (l *listener) collectPatternPart(part gen.IOC_PatternPartContext, group int
 			l.fail(err)
 			return
 		}
-		l.curPart.pathBindings = append(l.curPart.pathBindings, pb)
+		l.appendPathBinding(pb)
 	}
 }
 
@@ -103,7 +103,7 @@ func (l *listener) recordPathNode(variable string) {
 		return
 	}
 	if variable == "" {
-		*l.curPart.pathMemberSink = append(*l.curPart.pathMemberSink, query.AnonNodeMember{})
+		l.appendPathMember(query.AnonNodeMember{})
 		return
 	}
 	m, err := query.NewNamedNodeMember(variable)
@@ -111,7 +111,7 @@ func (l *listener) recordPathNode(variable string) {
 		l.fail(err)
 		return
 	}
-	*l.curPart.pathMemberSink = append(*l.curPart.pathMemberSink, m)
+	l.appendPathMember(m)
 }
 
 // recordPathEdge appends an edge member for the current pattern position onto
@@ -124,7 +124,7 @@ func (l *listener) recordPathEdge(variable string) {
 		return
 	}
 	if variable == "" {
-		*l.curPart.pathMemberSink = append(*l.curPart.pathMemberSink, query.AnonEdgeMember{})
+		l.appendPathMember(query.AnonEdgeMember{})
 		return
 	}
 	m, err := query.NewNamedEdgeMember(variable)
@@ -132,7 +132,7 @@ func (l *listener) recordPathEdge(variable string) {
 		l.fail(err)
 		return
 	}
-	*l.curPart.pathMemberSink = append(*l.curPart.pathMemberSink, m)
+	l.appendPathMember(m)
 }
 
 // collectPatternElement lowers a single pattern element: a head node followed by
@@ -306,7 +306,7 @@ func (l *listener) collectEdge(r gen.IOC_RelationshipPatternContext, prev, next 
 		// observe it.
 		rb := &rawBinding{variable: "", kind: graph.Edge, source: source, target: target, optionalGroup: group, undirected: !directed, hops: hops}
 		rb.mergeLabels(labels)
-		l.curPart.bindings = append(l.curPart.bindings, rb)
+		l.appendBinding(rb)
 		l.recordPathEdge("")
 		return
 	}
@@ -378,7 +378,7 @@ func (l *listener) endpoint(n gen.IOC_NodePatternContext) query.Endpoint {
 func (l *listener) recordEndpointRefs(eps ...query.Endpoint) {
 	for _, ep := range eps {
 		if ve, ok := ep.(query.VarEndpoint); ok {
-			l.curPart.refs = append(l.curPart.refs, varRef{name: ve.Variable(), endpointRef: true})
+			l.appendRef(varRef{name: ve.Variable(), endpointRef: true})
 		}
 	}
 }
@@ -396,6 +396,9 @@ func (l *listener) recordEndpointRefs(eps ...query.Endpoint) {
 // carries the var-length hop range (nil for single-hop); it is honoured only
 // on first introduction, matching the group/directed discipline.
 func (l *listener) mergeBinding(variable string, kind graph.EntityKind, labels graph.LabelSet, source, target query.Endpoint, group int, undirected bool, hops *query.EdgeHops, bare bool) {
+	if l.suppressed() {
+		return
+	}
 	part := l.curPart
 	idx, ok := part.byVar[variable]
 	if !ok {
