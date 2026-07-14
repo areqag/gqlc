@@ -2201,6 +2201,41 @@ var mustParse = map[string]struct {
 			},
 		}),
 	},
+	// collection-sink Phase C pin — Delete entry-point twin. A single DELETE
+	// clause with two bare-variable targets (m, o) inside an EXISTS body
+	// exercises all three sink classes reachable from EnterOC_Delete in one
+	// construction: the per-target refs write at listener.go:655 fires twice
+	// (once per bare-variable target that hits the nonArithmeticAtom +
+	// refFromNonArithmetic path), the terminating effects write at :669
+	// fires once (one DeleteEffect{targets=[m,o], detach=true}), and the
+	// terminating writeSeen flip at :670 fires once. DETACH is included to
+	// exercise the detach flag naturally alongside — it toggles a bool on
+	// the effect payload, not a sink surface, but its presence keeps the
+	// pin realistic (DELETE without DETACH on referenced nodes is an
+	// arity/edge error at runtime). Post-guard-drop, refs writes route
+	// through appendRef, effects through appendEffect, writeSeen through
+	// markWriteSeen. Under EXISTS suppression, all four routings no-op:
+	// no DeleteEffect leaks into outer Effects, no varRef{m}/varRef{o}
+	// leaks onto outer refs, and StatementKind stays StatementRead.
+	// Without ANY of the three sink routings, this pin fails: an un-sunk
+	// effects write leaks one DeleteEffect into outer Effects (require.Equal
+	// on Effects shape); an un-sunk refs write leaks varRef{m} and varRef{o}
+	// onto outer refs (build's referential-integrity sweep rejects with
+	// ErrUnboundVariable — outer part binds only n); an un-sunk
+	// markWriteSeen flips outer StatementKind from StatementRead to
+	// StatementWrite (require.Equal on query-level StatementKind). One
+	// pin, four leak-lines, three sinks. Multi-target DELETE covers the
+	// loop's inner refs sink twice, so a single pin is sufficient — the
+	// per-sink temp-revert probe proves each is independently load-bearing.
+	"exists body delete detach two-target no outer leak": {
+		src: "MATCH (n) WHERE exists { MATCH (m)-[]->(o) DETACH DELETE m, o RETURN true }\nRETURN n",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
+			},
+		}),
+	},
 	// Nested — SKIP $off in the OUTER RegularQuery-form EXISTS, LIMIT $lim in
 	// an inner EXISTS one level deeper. EnterOC_ExistentialSubquery fires on
 	// the outer subquery first (parent EnterRule precedes child EnterRule);

@@ -643,16 +643,13 @@ func (l *listener) collectMergeAction(action gen.IOC_MergeActionContext) ([]quer
 // the query names appears in EXACTLY ONE of Targets / Refs — never both, never
 // neither — so no delete the query performs is silently absent from Effects.
 func (l *listener) EnterOC_Delete(c *gen.OC_DeleteContext) {
-	if l.subqueryDepth > 0 {
-		return
-	}
 	detach := c.DETACH() != nil
 	var targets, refs []query.Ref
 	for _, e := range c.AllOC_Expression() {
 		if nae := nonArithmeticAtom(e); nae != nil {
 			if ref, ok := refFromNonArithmetic(nae); ok {
 				targets = append(targets, ref)
-				l.curPart.refs = append(l.curPart.refs, varRef{name: ref.Variable})
+				l.appendRef(varRef{name: ref.Variable})
 				continue
 			}
 		}
@@ -666,8 +663,8 @@ func (l *listener) EnterOC_Delete(c *gen.OC_DeleteContext) {
 			l.addParameterUse(name, p, query.NewExprUse(query.TypeUnknown{}, query.ExprInDeleteTarget))
 		}
 	}
-	l.curPart.effects = append(l.curPart.effects, query.NewDeleteEffect(targets, refs, detach))
-	l.writeSeen = true
+	l.appendEffect(query.NewDeleteEffect(targets, refs, detach))
+	l.markWriteSeen()
 }
 
 // EnterOC_Set collects one SET clause: one Effect per SetItem, dispatched by
