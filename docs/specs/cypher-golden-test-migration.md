@@ -221,14 +221,14 @@ signature-declaration-order"` pin is a confirmed keep, bounding N at 8.
 **Line-count reduction estimate (headline; full arithmetic in §6):**
 - 34 sig-less Class-A pins @ ~13 lines/pin ≈ 442 lines deleted.
 - 0-8 audit-approved sig-carrying pins @ ~15 lines/pin ≈ up to ~120 more.
-- ~30 lines ADDED for the permanent `TestMustParseGoldenTwins` + `harvestExecutingScenarios` retained past Phase 3.
+- ~55 lines ADDED for the permanent `TestMustParseGoldenTwins` (~45, dual-invariant body per §3.1) + `harvestExecutingScenarios` (~10) retained past Phase 3.
 - Layer-2 preamble rewrite: net ~0. `TestPropertyReadCoreParses` rewrite: net ~+5.
-- Net: 4,151 → 3,619-3,739 (midpoint ~3,670), **a ~11-12% reduction**.
+- Net: 4,151 → 3,649-3,769 (midpoint ~3,710), **a ~10-12% reduction**.
 
 **What the bead's original "materially smaller" framing missed:** the
 authored pins are the load-bearing majority of the file. A shape-
 mirror-only migration cannot approach the 70% reduction the v1 spec
-projected. The honest ~11-12% is the number the acceptance criterion
+projected. The honest ~10-12% is the number the acceptance criterion
 should be measured against (see §6 for the full derivation and why v2's
 ~15% was optimistic).
 
@@ -269,14 +269,43 @@ should be measured against (see §6 for the full derivation and why v2's
 Phase 1 adds `TestMustParseGoldenTwins` (renamed from v2's
 `TestMigrationCensusIntact` to avoid the `-run TestMigrationCensus.*`
 collision with the scratch harness described in §5) as a first-class
-test in `parser_test.go`. It walks the sig-less Class-A key list
-(§1.2) — committed inline in the test as a `[]string` literal — and
-asserts, per key:
+test in `parser_test.go`. The test body carries TWO invariants against
+the same input (`harvestExecutingScenarios(t, dirs)` output) — a
+positive walk over the trimmed keeper list, and a negative walk over
+the current `mustParse` map. Both fire on every run; they catch
+different hazards, and neither subsumes the other.
+
+**Positive invariant** — walks the sig-less Class-A key list (§1.2)
+— committed inline in the test as a `[]string` literal — and asserts,
+per key:
 
 1. The pin exists in `mustParse` at the current HEAD.
 2. The pin's `src` is verbatim in the TCK corpus.
 3. The golden file for the pin's (uri, name, src) triple exists on
    disk at `internal/query/cypher/testdata/golden/`.
+
+**Negative invariant** — walks every pin currently in `mustParse` and
+FAILS if any pin's `src` is verbatim in the TCK corpus AND a golden
+file for its (uri, name, src) triple exists on disk. Read: "no shape-
+mirror duplicate may remain in mustParse." Hazard caught: a future
+edit that reintroduces a Class-A shape-mirror pin (whether by
+accident, by TCK bump promoting a new scenario into the corpus, or by
+someone reverting Phase 2's deletions) fires the negative walk even
+though it was never named in the positive keeper list.
+
+The positive walk catches TCK bumps that DROP a scenario a listed
+keeper depends on (the keeper's golden vanishes, assertion 3 fires
+for that key). The negative walk catches TCK bumps that ADD a
+scenario whose src collides with an authored mustParse pin (the pin
+was legitimately Class-C at bead-close but silently promoted to
+Class-A when the corpus grew, and would count as shape-mirror
+duplication under this bead's doctrine). Neither can substitute for
+the other because the positive walk is bounded by the inline list
+(cannot see new pins) and the negative walk is bounded by the
+current mustParse (cannot see missing keepers). Total body ~45
+lines: ~15 for the positive walk + inline list, ~20 for the negative
+walk + goldenPath call, ~10 for shared setup (`harvestExecutingScenarios`
+call, corpus set construction).
 
 Assertion 3 needs a (uri, name, src) triple; `harvestExecutingQueries`
 returns bare `[]string` (`acceptance_test.go:1078`), so a bare-string
@@ -311,17 +340,20 @@ Between Phase 2 and Phase 3, the sig-carrying-Class-A audit lands
 
 **Phase 3 keeps `TestMustParseGoldenTwins` and
 `harvestExecutingScenarios` as permanent tree residents** (linus-3
-ruling, methodology remit): the invariant outlives the bead. Its
+ruling, methodology remit): both invariants outlive the bead. Their
 job past Phase 3 is not gating the deletion set (which is done) but
-catching future silent coverage regressions. Concrete scenario:
-a TCK bump removes or renames a scenario whose src backed a
-surviving Class-A sig-carrying keeper. Without the test on the tree,
-the golden-file lookup for that pin's (uri, name, src) triple would
-silently return nothing, the pin would move from Class-A to Class-B
-(goldenless), and no test would notice. With the test present, it
-fires on the next `just test`. Cost: ~30 lines of live test code +
-one harvester. Benefit: the coverage-no-shrink gate survives past
-bead close into every future TCK bump.
+catching future silent coverage regressions from opposite directions.
+Positive-walk concrete scenario: a TCK bump removes or renames a
+scenario whose src backed a surviving Class-A sig-carrying keeper —
+the golden-file lookup for that pin's (uri, name, src) triple returns
+nothing, assertion 3 fires. Negative-walk concrete scenario: a TCK
+bump promotes a new scenario whose src collides with an authored
+Class-C pin, silently reintroducing shape-mirror duplication that
+Phase 2 was meant to eliminate — the negative walk catches the new
+in-corpus + golden-exists pair even though it was never in the
+inline list. Cost: ~45 lines of live test code + one harvester.
+Benefit: the coverage-no-shrink gate survives past bead close and
+covers drift in both directions.
 
 Phase 3 therefore retires only the scratch harnesses
 (`sigaudit_test.go`, `census_test.go`) and the sig-audit ledger. The
@@ -388,9 +420,9 @@ test's sample space by that amount.
 iterate `corpusQueries(t)` directly, matching the test's own docstring
 ("every curated read-core query must parse") and the corpus-driven
 posture `TestPropertyReferentialIntegrity` already uses (see
-`parser_test.go:3934`). The rewrite lands in Phase 1 alongside the
-census helper — before any mustParse pin is deleted — so no phase
-silently degrades this test.
+`parser_test.go:3934`). The rewrite lands in Phase 1 alongside
+`TestMustParseGoldenTwins` — before any mustParse pin is deleted — so
+no phase silently degrades this test.
 
 The rewritten test still runs `newParserFor` per pin. The sigs slice
 becomes the union of every scenario's Background-declared signatures,
@@ -439,8 +471,10 @@ narrower scope). The layout under `internal/query/cypher/testdata/
 golden/` is unchanged. `TestGoldenOrphans` invariant preserved.
 
 **Permanent (post-Phase-3) footprint:**
-- `TestMustParseGoldenTwins` in `parser_test.go` (~20 lines including
-  the trimmed inline key list).
+- `TestMustParseGoldenTwins` in `parser_test.go` (~45 lines total —
+  positive walk + trimmed inline keeper list ~15, negative walk over
+  `mustParse` ~20, shared harvest/corpus setup ~10). See §3.1 for
+  the dual-invariant design.
 - `harvestExecutingScenarios(t, dirs) []scenarioMeta` in
   `acceptance_test.go` (~10 lines).
 
@@ -473,9 +507,13 @@ passed, 438 pending; 16006 steps — 15568 passed, 438 pending; 0
 failed`), and keeps every existing golden byte-identical.
 
 **Phase 1 — scaffold + sig-audit artifact + property-test fix.** One commit.
-- Adds `TestMustParseGoldenTwins` with the 34-key sig-less Class-A
-  list as an inline `[]string` (renamed from v2's
-  `TestMigrationCensusIntact` — see naming-collision note below).
+- Adds `TestMustParseGoldenTwins` (renamed from v2's
+  `TestMigrationCensusIntact` — see naming-collision note below) with
+  the dual-invariant body per §3.1: positive walk over the 34-key
+  sig-less Class-A list as an inline `[]string`, plus negative walk
+  over the current `mustParse` map that fails on any pin whose src is
+  in-corpus AND has a golden on disk. Both invariants share the same
+  `harvestExecutingScenarios(t, dirs)` output.
 - Adds the sibling harvester `harvestExecutingScenarios(t, dirs)
   []scenarioMeta` (§3.1) alongside the existing
   `harvestExecutingQueries`.
@@ -561,13 +599,15 @@ alias.
   as permanent tree residents** per §3.1 (linus-3 methodology
   ruling). Not scaffolding — the invariant catches future silent
   coverage regressions from TCK bumps.
-- Updates `TestMustParseGoldenTwins`'s inline key list one final
-  time so it reflects the post-Phase-2 keeper set (Class-A
+- Updates `TestMustParseGoldenTwins`'s positive-walk inline key list
+  one final time so it reflects the post-Phase-2 keeper set (Class-A
   sig-carrying keepers only — sig-less pins all gone, sig-`equal`
-  pins all gone, sig-`divergent` pins retained). The test's assertion
-  becomes "every listed keeper still has a (uri, name, src) triple
-  in the corpus AND a golden on disk" — same three assertions as
-  Phase 1, smaller input.
+  pins all gone, sig-`divergent` pins retained). The positive walk's
+  three assertions are unchanged; only the input list shrinks. The
+  negative walk is unchanged — it walks whatever `mustParse` contains
+  at HEAD and fires if any pin's src is in-corpus AND has a golden
+  on disk (which after Phase 2's deletions should be the empty set,
+  by construction).
 - Deletes any test helpers that phase 2's deletions rendered
   unused (recheck: unlikely, but possible for helpers used only by
   the 34-42 deleted cases).
@@ -582,17 +622,19 @@ fmt-check / lint` gate every commit.
 
 ## 6. What remains in `parser_test.go` when done
 
-**Final size estimate:** 4,151 → ~3,670 lines, a ~11-12% reduction.
+**Final size estimate:** 4,151 → ~3,710 lines, a ~10-12% reduction.
 Arithmetic: 34 sig-less Class-A pins deleted @ ~13 lines/pin ≈ 442
 lines removed, plus 0-8 audit-approved sig-carrying pins @ ~15
-lines/pin (up to ~120 more), minus ~30 lines added for the
-permanent `TestMustParseGoldenTwins` + `harvestExecutingScenarios`
-retained past Phase 3 (see below). Deletion range 442-562 lines;
-addition ~30. Net: 4,151 → 3,619-3,739. Midpoint ~3,680, rounded
-~3,670. The v2 estimate of ~15% (`~3,520`) was optimistic — it
-assumed the full 9 sig-carrying pins deleted and did not budget for
-retaining the coverage-no-shrink gate as permanent scaffolding.
-The honest range is 11-12%; the headline "maintenance outlier"
+lines/pin (up to ~120 more), minus ~55 lines added for the
+permanent `TestMustParseGoldenTwins` (~45, dual-invariant per §3.1)
++ `harvestExecutingScenarios` (~10) retained past Phase 3 (see
+below). Deletion range 442-562 lines; addition ~55 (plus a further
+~5 from the `TestPropertyReadCoreParses` corpus rewrite). Net:
+4,151 → 3,649-3,769. Midpoint ~3,710. The v2 estimate of ~15%
+(`~3,520`) was optimistic — it assumed the full 9 sig-carrying pins
+deleted and did not budget for retaining the dual-invariant
+coverage-no-shrink gate as permanent scaffolding.
+The honest range is 10-12%; the headline "maintenance outlier"
 reduction is only partially closed by this bead, per §6 tail and
 [gqlc-exl](../../).
 
@@ -610,7 +652,7 @@ Composition of the final file:
 | `mustRejectGrammar` (3 entries) + runner | ~70 | Grammar-reject; nothing to outsource |
 | `allSentinels` + `TestSentinelReachability` | ~35 | Unchanged |
 | `corpusQueries` + property tests + assertions | ~240 | Untouched, per bead brief |
-| `TestMustParseGoldenTwins` + `harvestExecutingScenarios` | ~30 | Permanent coverage-no-shrink gate; see §3.1 |
+| `TestMustParseGoldenTwins` + `harvestExecutingScenarios` | ~55 | Permanent coverage-no-shrink gate, dual invariant; see §3.1 |
 
 The four categories earning hand-built status post-migration:
 
@@ -746,12 +788,12 @@ grep -A5 "there exists a procedure" \
 **Q1 (Phase-2 output → §6 residual estimate).** After the sig-
 carrying audit, the residual mustParse count is 116 + (9 - N) where N
 is the number of sig-carrying pins the audit approves for deletion.
-The final line-count estimate in §6 is 3,619-3,739 (midpoint ~3,670,
-~11-12% reduction). N moves the tip within that range: N = 0 lands
-near 3,739 (~10% reduction), N = 8 lands near 3,619 (~12.8%). The
+The final line-count estimate in §6 is 3,649-3,769 (midpoint ~3,710,
+~10-12% reduction). N moves the tip within that range: N = 0 lands
+near 3,769 (~9.2% reduction), N = 8 lands near 3,649 (~12.1%). The
 Phase-3 preamble rewrite absorbs the difference in its own text; the
-~11-12% headline is the honest midpoint, not a floor. Q1 is a note,
-not a decision.
+~10-12% headline is the honest range spanned by the audit outcomes,
+not a floor. Q1 is a note, not a decision.
 
 **Q2 (Class-B semantics naming).** Two of the 4 Class-B pins are
 skiplisted; two are read-side-empty-result. The Phase-3 preamble
