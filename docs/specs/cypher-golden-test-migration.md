@@ -218,18 +218,19 @@ deletions; worst case (every sig-carrying pin fails the sig-match
 audit): 34 deletions. The `"authored CALL standalone Returns
 signature-declaration-order"` pin is a confirmed keep, bounding N at 8.
 
-**Line-count reduction estimate:**
-- 42 pins × ~15 lines each = ~630 lines deleted.
-- Layer-2 preamble rewrite: net ~0 (roughly one paragraph substituted).
-- `TestPropertyReadCoreParses` rewrite: net ~+5 lines.
-- Scaffold add-then-remove: net 0.
-- File shrinks from 4,151 → ~3,520, **a ~15% reduction**.
+**Line-count reduction estimate (headline; full arithmetic in §6):**
+- 34 sig-less Class-A pins @ ~13 lines/pin ≈ 442 lines deleted.
+- 0-8 audit-approved sig-carrying pins @ ~15 lines/pin ≈ up to ~120 more.
+- ~30 lines ADDED for the permanent `TestMustParseGoldenTwins` + `harvestExecutingScenarios` retained past Phase 3.
+- Layer-2 preamble rewrite: net ~0. `TestPropertyReadCoreParses` rewrite: net ~+5.
+- Net: 4,151 → 3,619-3,739 (midpoint ~3,670), **a ~11-12% reduction**.
 
 **What the bead's original "materially smaller" framing missed:** the
 authored pins are the load-bearing majority of the file. A shape-
 mirror-only migration cannot approach the 70% reduction the v1 spec
-projected. The 15% is the honest number the acceptance criterion
-should be measured against.
+projected. The honest ~11-12% is the number the acceptance criterion
+should be measured against (see §6 for the full derivation and why v2's
+~15% was optimistic).
 
 **What the migration buys:**
 
@@ -745,10 +746,12 @@ grep -A5 "there exists a procedure" \
 **Q1 (Phase-2 output → §6 residual estimate).** After the sig-
 carrying audit, the residual mustParse count is 116 + (9 - N) where N
 is the number of sig-carrying pins the audit approves for deletion.
-The final line-count estimate in §6 is 3,520 assuming N ≈ 6. If N is
-materially different (say N = 0 or N = 9), the Phase-3 preamble
-rewrite absorbs the difference in its own text but the ~15% file-
-reduction claim is a floor. Q1 is a note, not a decision.
+The final line-count estimate in §6 is 3,619-3,739 (midpoint ~3,670,
+~11-12% reduction). N moves the tip within that range: N = 0 lands
+near 3,739 (~10% reduction), N = 8 lands near 3,619 (~12.8%). The
+Phase-3 preamble rewrite absorbs the difference in its own text; the
+~11-12% headline is the honest midpoint, not a floor. Q1 is a note,
+not a decision.
 
 **Q2 (Class-B semantics naming).** Two of the 4 Class-B pins are
 skiplisted; two are read-side-empty-result. The Phase-3 preamble
