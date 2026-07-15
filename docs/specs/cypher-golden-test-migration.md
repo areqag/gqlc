@@ -497,6 +497,15 @@ pins can still touch `optionalGroup`, `containsAggregate`,
 mirror pins that were touching every additive axis for zero
 marginal defense.
 
+The residual cost across the 112 Class-C authored pins is
+load-bearing evidence, not a defect to remove: those pins are the
+independent shape record that answers the `-update` silent-rebaseline
+objection. Reduction paths that DO NOT weaken evidence
+(upstream-TCK contribution of authored scenarios, helper/table
+consolidation grouping pins by stage, a safeguarded doctrine-review
+protocol) are tracked in bead **gqlc-exl** (P3, depends on ls8.5).
+Not in scope here.
+
 ---
 
 ## 7. Fence commands + reproduction
@@ -595,14 +604,13 @@ rewrite must name both mechanisms honestly (avoid the "skiplisted"
 label as a superset — it's a proper subset). Language locked in
 Phase 3 with Linus in the loop.
 
-**Q3 (follow-up bead scope).** If the maintenance-outlier headline
-of gqlc-ls8.5 is only partially closed by a ~15% reduction (which it
-is), the natural follow-up is a bead scoped to "authored pin
-consolidation across staged specs" — a doctrine-preserving
-refactor that groups the 112 by stage (Stage 4 UNION pins, Stage 12
-write pins, Stage 14 CALL pins, etc.) so a model-axis change at a
-specific stage touches a contiguous section of the file rather than
-scattered pins. Not in this bead's scope. Filed as follow-up at
-ls8.5 close-out, per lead's ruling on scope discipline.
+**Q3 (residual-cost bead — resolved to a cite).** ls8.5 partially
+closes the bead's maintenance-outlier headline: the 34-42 shape-
+mirror deletions kill the false-flag cost, but the ~112 Class-C
+authored pins retain the per-additive-axis manual-edit cost. That
+residual is tracked as bead **gqlc-exl** (P3, depends on ls8.5;
+covers upstream-TCK contribution, helper/table consolidation, and a
+safeguarded doctrine-review option). Not a question for reviewer —
+the bead is filed. Cross-referenced from §6.
 
 ---
