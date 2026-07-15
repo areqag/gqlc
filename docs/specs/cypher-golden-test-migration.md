@@ -1,450 +1,558 @@
 # Cypher parser tests: migrate hand-built shape expectations into the golden corpus
 
-The implementation brief for `internal/query/cypher/parser_test.go` — a test-topology
-refactor motivated by the 2026-07-12 audit that named the file the maintenance
-outlier of the whole test suite. The parser's non-test source (`build.go`,
-`expr.go`, `listener.go`, `pattern.go`, `shape.go`, `typing.go`, `call.go`,
-`errors.go`) is untouched by this change; test helpers and the acceptance
-harness are fair game.
+The implementation brief for `internal/query/cypher/parser_test.go` — a
+test-topology refactor motivated by the 2026-07-12 audit that named the
+file the maintenance outlier of the whole test suite. The parser's
+non-test source (`build.go`, `expr.go`, `listener.go`, `pattern.go`,
+`shape.go`, `typing.go`, `call.go`, `errors.go`) is untouched by this
+change; test helpers and the acceptance harness are fair game.
 
-This document is a **delta** against ADR 0004 (query parser is built test-first
-against the openCypher TCK) and ADR 0008 (the `query.Query` surface has two
-faces — Go API and JSON wire). Everything not stated here carries over
-verbatim. Tracking: bead `gqlc-ls8.5` (GitHub #285), the fifth of the
-`gqlc-ls8` five-refactor deepening epic.
+This document is a **delta** against ADR 0004 (query parser is built
+test-first against the openCypher TCK) and ADR 0008 (the `query.Query`
+surface has two faces — Go API and JSON wire). Everything not stated here
+carries over verbatim. Tracking: bead `gqlc-ls8.5` (GitHub #285), the
+fifth of the `gqlc-ls8` five-refactor deepening epic.
+
+> **Revision history.** v1 (commit 3538a90) proposed a ~140-case Class-A
+> delete based on a heuristic classifier ("no `authored ` prefix ⇒
+> shape-mirror"). Linus PASS review identified the heuristic as
+> empirically wrong: the corpus-membership-mechanical classifier finds
+> **43** Class-A candidates, not ~140, and 89 pins the heuristic would
+> have migrated are in fact authored inputs the doctrine deliberately
+> preserves. v2 restates every number from the mechanical census, drops
+> the doctrine-amendment ambition (lead ruling: the 112 authored pins
+> stay untouched — hand-derived shape is the independent evidence, and
+> round-tripping through the parser into goldens launders current
+> behavior into "expected"), and refines the delete scope one further
+> layer: 9 of the 43 sig-carrying Class-A candidates need per-case sig-
+> match audits before deletion, because a pin's authored sig may diverge
+> from the TCK Background sig and pin a different shape than the golden.
 
 ---
 
 ## 0. Prior art in the file itself
 
-The file's own preamble (`parser_test.go:15-42`, "Layer-2 rule") argues
-**against** the migration this spec undertakes. It has to be answered squarely
-before design, not around.
+The file's preamble (`parser_test.go:15-42`, "Layer-2 rule") pre-commits
+the mustParse table to a discipline: mustParse cases come **verbatim from
+the corpus**, and the hand-built `want` is the regression layer against
+`-update`'s silent rebaseline. §0 asks whether that discipline still
+holds at HEAD, and — under the mechanical census below — how much of
+the mustParse table's shape-pinning duty can be safely retired to the
+wire-face goldens.
 
-The preamble's claim:
+The preamble's central hazard argument:
 
 > The hand-built `query.Query` in each entry is the regression layer the
 > golden snapshots — which `-update` silently rebaselines — cannot give
 > us.
 
-The preamble is right about a real hazard (a `-update` under a broken parser
-would rebaseline the goldens to the broken output silently) and wrong about
-the remedy. Two facts the preamble does not weigh:
+Where this argument holds: an **authored** input whose shape is derived
+by hand from the model contract. Round-tripping it through the parser
+to mint a golden would launder the parser's *current* behavior into
+"expected", making a subsequent `-update` under a broken parser silently
+rebaseline the authored shape to the broken output. The independent
+evidence is precisely the hand-derived `want` — it was written from the
+model contract, not from parser output.
 
-**Fact 1 — `-update` is a full-file operation, not per-fixture.** Running
-`go test -update ./internal/query/cypher/...` rewrites **every** `.golden.json`
-that changed shape, in a single pass. If a parser regression flipped one
-scenario's output, `-update` flips its golden the same way it flips the other
-3199. The current 159 hand-built mustParse pins guard against exactly 159 of
-those 3199 scenarios — 5% coverage. The **other 95%** ride entirely on the
-golden-diff review that lands in the same PR as the parser change. The
-argument that hand-built pins are an *effective* line of defense against a
-silent-rebaseline hazard requires them to cover the hazard's actual surface;
-they cover a token 5% slice.
+Where this argument does NOT hold: a **verbatim TCK** input whose golden
+already exists on disk. The golden was **already** minted by the parser
+under `-update` (that is the mechanism goldens are minted through — see
+`acceptance_test.go:1038-1060`). Every `-update` run has already
+laundered the parser's current output into the golden's "expected". The
+authored `want` in the mustParse pin was minted the same way (a human
+watched the parser's output while typing the tree) — the two are twin
+recordings of the same parser behavior. In this case the redundancy is
+real; keeping the hand-built pin adds nothing the golden diff at PR
+review time doesn't already carry.
 
-**Fact 2 — the actual defense is the golden diff itself.** Recent additive
-axes (`hk0`: 20 goldens; `0ig`: 28; `ay9`: 100; `5xg` / `qcc` / `fvo`: 0)
-land as amendment notes on ADR 0008 with the golden rebaseline **inventoried
-in the amendment** and reviewed line-by-line. That is where a parser
-regression would be caught: not in a randomly-selected 5% of scenarios
-handwired into `parser_test.go`, but in the PR reviewer looking at the
-diff of the JSON that will be emitted to every future consumer.
-
-The preamble's own commentary weakens the "regression layer" claim in
-another direction. It restricts mustParse cases to **verbatim TCK queries**
-("REJECT-PATH cases … come VERBATIM from the corpus … We add a mustParse
-case only when the corpus supplies one"), which means every case whose
-handbuilt expectation the preamble defends is a query the acceptance suite
-**also parses**, producing a golden. The two files agree on the input; they
-disagree on the expected output only if the parser is broken. In the
-broken-parser world, they will *both* be wrong — one via silent `-update`,
-the other via a manual expectation table the same PR author will hand-edit
-to match.
-
-The preamble is correct that hand-built pins offer *some* value the goldens
-do not: they express the shape in Go source, which is grep-able, diff-able
-against the model surface at review time, and self-documenting through the
-constructor names (`must(query.NewNullableEdgeBindingInGroup(...))`). This
-spec preserves that value where it earns its keep — for shapes that pin
-axes not otherwise visibly asserted in the test surface — and retires it
-where the goldens already carry the exact same shape assertion.
-
-The net effect: the shape-pinning duty consolidates on the wire-face
-goldens (ADR 0008's naming — the "single shape-pinning surface" per the
-bead brief); the Go-face tests shrink to invariants (referential integrity,
-uniqueness, dedup — all already in `TestPropertyReferentialIntegrity`),
-smart-constructor probes (adversarial inputs that must reject), and
-authored kill probes (fail-sites the TCK does not exercise at the pinned
-tag).
+The narrow deletion set this spec defends is exactly the intersection
+of those two properties: (1) src is verbatim from the TCK, and (2) an
+on-disk golden exists that pins the same shape the hand-built `want`
+records. The 112 authored pins are outside that set and stay untouched.
 
 ---
 
-## 1. Census
+## 1. Census — the mechanical numbers
 
-The file has 4,151 lines, three top-level maps of test cases, one property
-test file's worth of invariant assertions, and 26 uses of the string
-"AUTHORED" flagging hand-authored (non-verbatim-TCK) inputs.
-
-| Map | Lines | Entries | Verbatim TCK | Authored (`"authored …"` key) |
-|---|---|---|---|---|
-| `mustParse` | 79-3367 | 159 | 149 | 10 |
-| `mustReject` | 3420-3748 | 25 | ~15 | ~10 (see below) |
-| `mustRejectGrammar` | 3768-3822 | 3 | 3 | 0 |
-
-The 10 named-`authored` mustParse cases (grepped by `^\t"authored`):
+Ran on HEAD (commit 3538a90 at v2 draft time; will re-run at v2 commit
+and again per phase). Reproduction command block in §7.
 
 ```
-authored merge in exists does not flip statement kind        (line 2825)
-authored merge branch-leak kill probe                        (line 2848)
-authored create inline map var prop bound guard              (line 2876)
-authored CALL inside EXISTS suppression                      (line 3086)
-authored CALL bound-var argument regression lock             (line 3253)
-authored CALL standalone Returns signature-declaration-order (line 3278)
-authored CALL YIELD trailing WHERE parameter-mining probe    (line 3343)
+Unique corpus queries harvested from readCoreDirs:  3805
+Corpus queries with an on-disk golden:              3131
+mustParse entries total:                             159
+
+Class A. src verbatim in TCK corpus AND golden exists on disk:   43
+Class B. src verbatim in TCK corpus BUT no golden on disk:        4
+Class C. src NOT in TCK corpus (authored input):                112
 ```
-(+ three more named-`authored` mustReject entries not counted above.)
 
-Beyond the map-key `authored` prefix, some verbatim-TCK-named cases still
-carry semantic content the golden cannot express — they force adjacent
-shapes that would otherwise not co-occur in a single scenario. Two examples:
+### 1.1 Class-A refinement: sig-carrying pins are per-case audits
 
-- `"required chain re-reference does not set bare-ref flag"`
-  (`parser_test.go:435`) is a `5xg` **kill probe** whose *point* is that a
-  specific bit is `false`. Its golden encodes the axis with
-  `,omitempty`, so `false` is byte-identical to "not emitted" — the golden
-  literally cannot distinguish "flag is false" from "field is absent". The
-  Go-face assertion carries a positive-negative axis the wire deliberately
-  drops.
+9 of the 43 Class-A pins carry an authored `sigs` field. An authored
+`sigs` can diverge from the TCK's Background-declared signature for the
+same scenario, in which case the parser produces a **different shape**
+under the two sigs — the pin and the golden then pin different shapes
+even though the src is identical. Deleting such a pin loses the
+authored-sig shape assertion.
 
-- `"5xg spec §5.1.2 kill probe"` cases in the same section
-  (`parser_test.go:411-461`): both are verbatim TCK, but the pin's *point*
-  is that one sets a flag and the other doesn't — a two-case discrimination
-  the golden cannot express in a single pin.
+Confirmed instance (spot-verified during v2 drafting):
 
-Everything else in mustParse is a shape-mirror of exactly one golden:
-`(src, want)` where the golden is `sha1(uri + "\x00" + name + "\x00" +
-src)`. Under the "verbatim TCK" rule, the src is a query the acceptance
-suite is already running, and the golden for its scenario is on disk.
+- Pin `"authored CALL standalone Returns signature-declaration-order"`
+  runs `CALL test.my.proc(42)` against an authored sig with **two**
+  result columns `(a :: INTEGER?, b :: STRING?)` to force a
+  declaration-order test. The TCK's Call3[1] scenario runs the same
+  src against a **one**-result-column sig `(out :: STRING?)`. The golden
+  `Call3_07c57b301e10.golden.json` pins one CallBinding for `out`; the
+  pin's `want` records two CallBindings for `a`, `b`. Deleting the pin
+  loses the sig-declaration-order property.
 
-**Migration classification:**
+Confirmed non-instance (also spot-verified):
 
-| Class | Count | Disposition |
-|---|---|---|
-| A. Shape-mirror of an existing golden | ~140 | **Migrate — delete** |
-| B. Positive-negative discrimination (a bit that must be false / absent) | ~10 | **Keep as hand-built** — the golden cannot express it |
-| C. Named `authored` (no TCK scenario at the pinned tag) | 10 | **Keep as hand-built** — no golden to migrate to |
-| D. mustReject verbatim | ~15 | **Keep** — reject-path asserts absence of a model; nothing to pin |
-| E. mustReject authored | ~10 | **Keep** — same as D, with the additional revisit-on-TCK-bump obligation |
-| F. mustRejectGrammar | 3 | **Keep** — grammar-level assertion |
+- Pin `"CALL NUMBER accepts INTEGER standalone (Call3[1])"` runs the
+  same src with the TCK's `(in :: NUMBER?) :: (out :: STRING?)` sig
+  verbatim. The pin's `want` and the golden agree byte-for-byte on
+  shape. Pin is safely deletable.
 
-Class A is the migration target. Numbers are floor estimates; the actual
-per-case classification lives in the §5 phase logs (each commit reports
-its delta).
+The 9 sig-carrying Class-A pins:
+
+```
+1. CALL NUMBER accepts INTEGER standalone (Call3[1])
+2. CALL in-query YIELD RETURN (Call1[6])
+3. CALL in-query explicit args YIELD RETURN (Call2[1])
+4. CALL in-query no-YIELD RETURN prior-match (Call1[3])
+5. CALL standalone explicit args YIELD * (Call5[8])
+6. CALL standalone explicit args implicit-YIELD (Call2[2])
+7. CALL standalone no-args implicit-YIELD (Call1[5])
+8. CALL then WITH then CALL (Call6[1])
+9. authored CALL standalone Returns signature-declaration-order
+```
+
+Delete-safety verdict for each of the 9 lands in §3.2 (the audit
+step) — one line per pin, gated by comparing the pin's `sigs` to the
+scenario's Background `there exists a procedure` step in the .feature
+file. Estimated safe-deletable: ~6-8 of the 9; the sig-order pin
+above is a confirmed keep. Actual counts land in the Phase-2 commit
+message.
+
+### 1.2 The 34 sig-less Class-A pins
+
+These are the unambiguous shape-mirrors: verbatim TCK src, on-disk
+golden, no authored-sig confounder. The full sorted list, extracted
+from the census in §7:
+
+```
+all quantifier empty list, anonymous edge, arithmetic in return,
+comma pattern with aliases, count distinct, create anonymous node,
+delete node, detach delete node, directed edge whole entities,
+edge inline-labelled endpoints, edge left-pointing canonical,
+merge argument handling across with, merge labelled node returning
+property, merge with both on branches, merge with inline map
+referencing bound var, merge with on create set property, merge with
+on match set labels, node, node inline property, node multi-label,
+none quantifier empty list, optional match reuses prior binding,
+optional match simple, property return no alias, set labels, skip
+parameter, typed edge named endpoints, undirected edge whole
+entities, unwind empty list, unwind null, unwind range function,
+unwind scalar list, where property parameter, with-aggregate-where
+scope snapshot (foaf)
+```
+
+**34 pins.** Delete-safe on the src+golden criterion; per-case
+verification via the census-intact helper in §3.1.
+
+### 1.3 The 4 Class-B pins (verbatim, no golden)
+
+These pins carry TCK-verbatim srcs whose scenarios do not produce
+goldens under the current acceptance harness rules. The mechanism
+differs per pin:
+
+```
+1. limit parameter                          — src: MATCH (p:Person) RETURN p.name AS name LIMIT $_limit
+   Scenario: ReturnSkipLimit2[10] "Negative parameter for LIMIT should fail"
+   Skiplisted at acceptance_test.go:265 as catValueBelowBoundary — the TCK
+   marks this scenario as a runtime fail, the harness routes it through
+   shouldBeRejected, no checkGolden call.
+
+2. aggregate count of count star            — src: RETURN count(count(*))
+   Scenario: Aggregation1[14] "Aggregates in aggregates"
+   Skiplisted at acceptance_test.go:288 as catGroupingKeySemantic — same
+   family (TCK marks as fail; no golden minted).
+
+3. CALL standalone no-args no-yields empty-results (Call1[1])
+   — src: CALL test.doNothing()
+   Scenario: Call1[1] — NOT skiplisted, but the scenario is read-side +
+   Then the result should be empty (line 41). noSideEffects at
+   acceptance_test.go:928 only calls checkGolden for StatementWrite; this
+   is StatementRead, so no golden is minted.
+
+4. CALL standalone implicit no-args empty-results (Call1[2])
+   — src: CALL test.doNothing
+   Same mechanism as #3 (Call1[2]).
+```
+
+**All 4 stay in mustParse.** No golden covers them; deleting them
+would leave the shape unpinned for these scenarios entirely. They are
+Class-B keepers, not Class-B deletables — the "B" label is descriptive
+(verbatim TCK, no golden), not prescriptive.
+
+### 1.4 The 112 Class-C pins (authored, not in corpus)
+
+**Do not touch.** Per lead ruling: for authored inputs the hand-derived
+shape IS the independent evidence; round-tripping them through the
+parser into goldens would launder current behavior into "expected" and
+`-update` would silently rebase them thereafter — exactly the
+circularity the preamble forbids. Doctrine holds for this set.
+
+Number, not name: 112 pins across every clause dir. The count is
+mechanical (extracted by the census); the doctrine's rationale is in
+§0 above.
 
 ---
 
-## 2. What "migration" means, mechanically
+## 2. Deletion arithmetic
 
-The bead brief phrases migration as "shape-pinning cases into the golden
-corpus (new fixtures where an existing golden does not already cover the
-case)". Reading the acceptance harness in detail (`acceptance_test.go:597-660`,
-`checkGolden`, `goldenPath`, `TestGoldenOrphans`) exposes a hard constraint
-the brief's phrasing hides: **new goldens cannot be minted by hand-authored
-Go tests**. Every golden on disk is checked against the TCK feature files
-by `TestGoldenOrphans` (`acceptance_test.go:609`): any file with no
-corresponding `(uri, name, query)` triple in the corpus fails the test.
+**Estimated deletable pins: 34 (sig-less Class-A) + N (sig-carrying
+Class-A after per-case audit), where 0 ≤ N ≤ 8.** Best case: 42
+deletions; worst case (every sig-carrying pin fails the sig-match
+audit): 34 deletions. The `"authored CALL standalone Returns
+signature-declaration-order"` pin is a confirmed keep, bounding N at 8.
 
-So "migrate the case into the golden corpus" resolves to one of two moves,
-not one:
+**Line-count reduction estimate:**
+- 42 pins × ~15 lines each = ~630 lines deleted.
+- Layer-2 preamble rewrite: net ~0 (roughly one paragraph substituted).
+- `TestPropertyReadCoreParses` rewrite: net ~+5 lines.
+- Scaffold add-then-remove: net 0.
+- File shrinks from 4,151 → ~3,520, **a ~15% reduction**.
 
-**Move M1 — delete the mustParse case** (Class A). If the case's `src` is
-verbatim from a TCK scenario, its golden is already on disk and its shape
-is already pinned by `checkGolden`. Deleting the mustParse entry loses only
-the redundant hand-built shape-mirror; the invariant properties in
-`TestPropertyReferentialIntegrity` continue to sample every corpus query
-that parses, so the sampling density does not shrink.
+**What the bead's original "materially smaller" framing missed:** the
+authored pins are the load-bearing majority of the file. A shape-
+mirror-only migration cannot approach the 70% reduction the v1 spec
+projected. The 15% is the honest number the acceptance criterion
+should be measured against.
 
-**Move M2 — keep the case** (Classes B, C, D, E, F). The case pins
-something the golden corpus cannot express (a two-case bit discrimination,
-an authored non-TCK shape, or a reject-path). It stays in `parser_test.go`
-verbatim.
+**What the migration buys:**
 
-There is **no third move** where we mint a hand-authored golden file for a
-non-TCK query. `TestGoldenOrphans` forbids it, and rewriting the orphan
-check would either weaken the check (an orphan golden's decay would go
-silent — the exact hazard the check exists to prevent) or add a second
-golden directory the check partitions, which is more machinery than the
-migration deserves.
+1. **Removes 34-42 pins of confirmed pure duplication** — the wire-face
+   golden and the Go-face `want` for these pins are twin recordings of
+   the same parser output; keeping both doubles the maintenance surface
+   for zero incremental defense against parser regressions (the
+   goldens' 3131-file diff at PR time is the reviewer's actual defense,
+   and adding 42 hand-typed twins to that surface adds nothing).
 
-**Consequence for the bead brief's "new fixtures where an existing golden
-does not already cover the case" clause:** at the pinned TCK tag, we do not
-mint new goldens. Every Class-A case has an existing-golden counterpart
-(that is the enabling property that puts it in Class A); every case
-without one is not Class A and stays hand-built. The migration is
-**subtractive only** on the mustParse table, additive nowhere.
+2. **Truthfully names the model-rebaseline cost for the survivors.**
+   Additive-axis rebaselines (hk0: 20 goldens; 0ig: 28; ay9: 100) touch
+   BOTH sides today — the goldens rebaseline via `-update`, and the
+   hand-built pins get manually edited to match. After this migration,
+   the 34-42 deleted pins are one `-update` away; the 116-125 surviving
+   pins still need manual edits when the axis they pin changes. The
+   ay9 cycle's 100-golden rebaseline would still require touching every
+   authored pin whose shape mentions `OptionalGroup`. The migration
+   does not close that surface; it only closes the false-flag part of
+   it (the twinned mirrors that were rebaselining alongside the goldens
+   for no marginal defense).
+
+3. **Aligns the file with its own preamble.** The preamble's "verbatim
+   TCK only" rule is honored in 43 of 159 pins at HEAD; the other 112
+   are authored exceptions the doctrine survives by way of an implicit
+   "unless the corpus is silent on the shape" carve-out that isn't
+   stated in the preamble text. Phase 3 of the migration rewrites the
+   preamble to name that carve-out explicitly (see §5 phase 3).
 
 ---
 
-## 3. Coverage-no-shrink verification (the crux)
+## 3. Coverage-no-shrink verification
 
-The bead brief calls out this section as "the crux linus-3 will grill
-hardest. Hand-waving dies in review." Fair. The verification is
-mechanical, not narrative:
+### 3.1 The census-intact helper (Phase 1 addition, Phase 3 removal)
 
-### 3.1 The mapping table
+Phase 1 adds `TestMigrationCensusIntact` as a first-class test in
+`parser_test.go`. It walks the sig-less Class-A key list (§1.2) —
+committed inline in the test as a `[]string` literal — and asserts,
+per key:
 
-For every mustParse case in Class A, before deleting it, the migration
-commit adds a row to `docs/specs/cypher-golden-test-migration-census.md`
-(a companion appendix to this spec, not this file) with these five
-columns:
+1. The pin exists in `mustParse` at the current HEAD.
+2. The pin's `src` is verbatim in `harvestExecutingQueries(t,
+   readCoreDirs)` output (using the existing corpus-harvester the
+   property tests already use).
+3. The golden file for the (uri, name, query) triple exists on disk.
 
-| mustParse key | TCK feature file (`uri`) | TCK scenario (`name`) | goldenPath | shape assertion witnessed by |
-|---|---|---|---|---|
-| `"node"` | `Match1.feature` | `Match non-existent nodes returns empty` | `Match1_dbe2f0d6bd84.golden.json` | `checkGolden` step in `resultShouldBe` |
+Phase 2 deletes the 34 sig-less Class-A pins in one commit. The
+per-pin deletion order matches the key list, and each pin's removal
+removes its census-intact row. Phase 2's commit body carries a
+per-pin receipt of the form:
+```
+<key>                          -> testdata/golden/<goldenPath>
+```
 
-The last column names the acceptance harness step that assertion-fires on
-this golden on every `go test` run — proof that the shape is under an
-active assertion after the mustParse entry is deleted, not just present in
-a static file.
+Between Phase 2 and Phase 3, the sig-carrying-Class-A audit lands
+(§3.2 below). Its output is either:
+- an additional per-pin deletion (with receipt), or
+- an in-file comment on the surviving pin naming the sig-divergence
+  reason (see the `"authored CALL standalone Returns signature-
+  declaration-order"` example).
 
-Each row is verifiable in three ways any reviewer can run in seconds
-(commands below):
+Phase 3 deletes `TestMigrationCensusIntact` alongside the Layer-2
+preamble rewrite (both are cleanup — the test's job was to gate the
+Phase-2 deletions; once done, it is scaffolding).
 
-1. The golden file exists on disk at the named path.
-2. The golden's SHA1 hash reproduces from the scenario's URI, name, and
-   query text (via `python -c 'import hashlib; print(hashlib.sha1(...))'`
-   or an equivalent one-liner).
-3. Running just the acceptance suite (`go test ./internal/query/cypher/
-   -run TestReadCoreAcceptance`) with the golden **corrupted** by a
-   single-character edit produces a failing assertion for that scenario
-   name.
+### 3.2 The sig-carrying Class-A audit (Phase 2)
 
-Rows are validated mechanically by a one-shot helper `go test -run
-TestMigrationCensusIntact` added in the first migration commit and removed
-in the final commit (see §5 phasing). The helper reads the census, walks
-each row, and asserts (1) and (2) machine-checkably; (3) is a
-one-per-commit spot check the migration commit's message names.
+For each of the 9 sig-carrying Class-A pins:
 
-### 3.2 The kill-probe residual: what the census cannot witness
+1. Read the pin's `sigs` from `parser_test.go`.
+2. Read the scenario's Background `there exists a procedure` step from
+   the corresponding .feature file (identified by the pin's key
+   suffix, e.g. `Call3[1]` → `test/data/query/cypher/tck/features/
+   clauses/call/Call3.feature`).
+3. Parse both signatures into `procsig.Signature` and compare.
+   - If equal: pin is deletable (like `Call3[1]`).
+   - If unequal: pin stays, with a comment added naming the sig
+     divergence and its shape-assertion purpose (like the sig-order
+     pin).
 
-The kill-probe cases (Class B, ~10 entries) pin the *absence* of a bit
-that the wire's `,omitempty` collapses to "not emitted". These are
-**not migrated**. The census does not list them (they are not Class A).
-Preserved in place, they continue to defend against a parser regression
-that would flip the bit true on the negative case.
+The audit runs as part of Phase 2's commit (not as a phase of its
+own — 9 pins is a small enough set to audit in one sitting). Its
+result is folded into Phase 2's receipts.
 
-### 3.3 What the invariant sweep already covers
+### 3.3 The residual hazard (unchanged from v1 §3.4)
 
-`TestPropertyReferentialIntegrity` (`parser_test.go:3934-3946`) samples
-the entire read-core corpus (every executing-query docstring from every
-feature dir), running `assertReferentialIntegrity`,
-`assertNamedBindingsUnique`, `assertParametersDeduped`. That is a
-mechanically-generated referential-integrity + uniqueness + dedup
-assertion over every corpus query that parses, not just the 149 verbatim
-mustParse pins. **Deleting the Class-A mustParse cases does not shrink
-the invariant sampling density** because the invariant tests were never
-reading the mustParse table — they read the corpus directly. Coverage
-of the *invariant* dimension is unchanged by the migration.
+A parser regression that produces broken output for **every** corpus
+query would flip every golden under `-update`. This migration does
+not close that hazard; it never closed for the ~95% of scenarios with
+no mustParse twin. The defense is the golden-diff review at PR time,
+which we already rely on for those ~3050 scenarios. Extending the
+same defense to the 34-42 that had a redundant twin adds no marginal
+risk.
 
-Coverage of the *exact-shape* dimension is what the goldens carry.
-Coverage of the *positive-negative bit discrimination* dimension is
-what Class B keeps.
+The 116-125 surviving pins (Classes B, C, and any Class-A sig-
+carrying keepers) still act as their own defense: each one records
+the shape independently of the parser's output, so a broken parser
+that rewrote a golden under `-update` would still fail the matching
+mustParse case. The proportion of scenarios with this defense drops
+slightly (from 159/3199 = 5.0% to ~120/3199 = 3.8%), but the specific
+scenarios that lose the defense are precisely those where the golden
+already carries an equivalent assertion — a distinction the preamble
+does not make and this spec does.
 
-### 3.4 The one hazard the migration does not close
+### 3.4 `TestPropertyReadCoreParses` (Blocker-3 fix — Phase 1)
 
-The preamble's stated hazard remains real: a parser regression that
-produces broken output for **every** corpus query would flip every
-golden under `-update`. The migration does not close this hazard; it
-never fully closed for the ~95% of scenarios with no mustParse pin
-already. The defense is the golden-diff review at PR time, which we
-already rely on for the 3050 scenarios that never had a mustParse
-counterpart. We take on no additional risk by extending the same
-defense to the remaining ~140 that had a redundant twin.
+`parser_test.go:3912-3928` today iterates `mustParse` by reference,
+sampling `len(mustParse)` pins for the parser-parses precondition
+check:
+```go
+pins := make([]pin, 0, len(mustParse))
+for _, c := range mustParse { pins = append(pins, ...) }
+```
+Deleting 34-42 mustParse entries silently shrinks the property
+test's sample space by that amount.
 
-The migration is not a claim that the goldens are a *stronger* defense
-than the mustParse pins were. It is a claim that the pins were, in
-Class A, a defense the goldens **also** offered, and the maintenance
-cost of maintaining both was disproportionate to the marginal defense
-the Go-face pins added.
+**Fix (Option 1 from the Linus-3 grill):** rewrite the test to
+iterate `corpusQueries(t)` directly, matching the test's own docstring
+("every curated read-core query must parse") and the corpus-driven
+posture `TestPropertyReferentialIntegrity` already uses (see
+`parser_test.go:3934`). The rewrite lands in Phase 1 alongside the
+census helper — before any mustParse pin is deleted — so no phase
+silently degrades this test.
+
+The rewritten test still runs `newParserFor` per pin; the sigs slice
+becomes the union of every scenario's Background-declared signatures,
+harvested by extending the `thereExistsAProcedure` step handler with
+a query-scope collector (the acceptance test already parses these
+sigs — the collector is an additive helper, not a re-implementation).
+Alternative: build the parser once with an empty registry and skip
+CALL-carrying corpus queries (`isCallCarrying(q)` predicate on the
+harvest side). Phase 1 picks the simpler of the two based on how many
+corpus queries carry CALL clauses (harvest count landing in the
+Phase-1 commit body).
+
+**Options 2 and 3 (rejected):**
+- **Option 2** — rename to `TestPropertyMustParseCorpusParses` and
+  accept the shrink. Rejected: the shrink is silent to future readers
+  and the test's docstring lies.
+- **Option 3** — delete the test. Rejected: `TestPropertyReferential-
+  Integrity` returns nil for corpus queries the parser rejects
+  (`parser_test.go:3939`), which means a regression where every query
+  suddenly rejects would pass vacuously. The parses-precondition
+  guard is a real defense.
 
 ---
 
 ## 4. Fixture naming/layout
 
-No new goldens (§2). The layout under `internal/query/cypher/testdata/golden/`
-is unchanged. No naming convention needs to be introduced.
+No new goldens (§2 v1 argument unchanged and reinforced by the
+narrower scope). The layout under `internal/query/cypher/testdata/
+golden/` is unchanged. `TestGoldenOrphans` invariant preserved.
 
-The one new file this migration adds is the census appendix
-`docs/specs/cypher-golden-test-migration-census.md`, a Markdown table
-serialised in the order the migration commits process it (see §5). The
-census is deleted in the final commit — it is scaffolding for the review,
-not a lasting artefact.
-
-The one new test this migration adds is `TestMigrationCensusIntact` in
-`internal/query/cypher/parser_test.go`, the helper that mechanically
-validates the census against the corpus + on-disk goldens. It lives in
-the tree only for the duration of the migration and is deleted in the
-final commit alongside the census.
+No new file lands from this bead. `TestMigrationCensusIntact` lives
+in `parser_test.go` for the duration of Phases 1-3 and is deleted in
+Phase 3. No companion Markdown census file (v1's proposal) — the
+in-test `[]string` literal is the ledger, and having it live in Go
+gives the compiler + test runner the same visibility a reviewer has
+into the migration.
 
 ---
 
 ## 5. Phasing
 
-Six independently-gated commits. Each commit leaves `just test` +
-`just fmt-check` + `just lint` green, keeps the TCK counts unchanged
-(`3897 scenarios — 3459 passed, 438 pending; 16006 steps — 15568 passed,
-438 pending; 0 failed`), and keeps every existing golden byte-identical.
+Three commits. Each leaves `just test` + `just fmt-check` + `just
+lint` green, keeps TCK counts unchanged (`3897 scenarios — 3459
+passed, 438 pending; 16006 steps — 15568 passed, 438 pending; 0
+failed`), and keeps every existing golden byte-identical.
 
-**Phase 1 — census scaffold (no deletions yet).**
-Adds `docs/specs/cypher-golden-test-migration-census.md` populated with
-every mustParse key + its inferred `(uri, name, query, goldenPath)` row,
-generated by a scratch script committed alongside as
-`internal/query/cypher/gen_census_test.go` (a `_test.go` file so it does
-not enter production builds). Adds `TestMigrationCensusIntact` in
-`parser_test.go` — it walks the census and asserts each row's golden
-exists and hashes correctly. First commit is green because no cases are
-deleted; the census is data, the intact-check is a new test that passes
-against the current tree. Subject: `test(cypher): census the parser
-mustParse pins for golden migration (gqlc-ls8.5 phase 1)`.
+**Phase 1 — scaffold + property-test fix.** One commit.
+- Adds `TestMigrationCensusIntact` with the 34-key sig-less
+  Class-A list as an inline `[]string`.
+- Rewrites `TestPropertyReadCoreParses` per §3.4 to iterate the
+  corpus.
+- Adds a scratch `census_test.go` (excluded via build tag if
+  needed; alternatively runs only in `-run TestMigrationCensus.*`
+  mode) that runs the census probe end-to-end, printing the 3-way
+  bucket counts. This exists so the numbers in this spec are
+  reproducible by any reviewer running one command.
+- No mustParse deletions.
+- Subject: `test(cypher): census scaffold + corpus-driven parses
+  precondition (gqlc-ls8.5 phase 1)`.
 
-**Phase 2 — red receipts for Class A.**
-For a **sample of 5 diverse cases** from Class A (chosen to span
-`Match`, `Return`, `With`, `Create`, `Call` — one per major clause dir),
-add adjacent kill-probe commentary demonstrating each case's shape
-assertion is actually witnessed by its golden. The demonstration is a
-locally-run receipt captured in the commit message: (a) delete the
-mustParse case, (b) perturb the parser to change the shape (single-line
-`git stash`-safe edit), (c) show the acceptance suite's checkGolden
-fails on the named scenario, (d) revert the perturbation. The
-perturbation is NOT committed; the receipts live in the commit message
-prose. This phase's commit removes the 5 sampled cases and updates the
-census. Subject: `test(cypher): migrate 5-way sample of parser mustParse
-pins to goldens (gqlc-ls8.5 phase 2)`.
+**Phase 2 — bulk deletion.** One commit.
+- Runs the 9-pin sig-carrying audit (§3.2), producing 0-8 additional
+  deletable pins (goal: audit result appears in the commit body).
+- Deletes the 34 sig-less Class-A pins + the audit-approved sig-
+  carrying subset.
+- Updates `TestMigrationCensusIntact`'s inline list (removed rows
+  disappear from the list; the test still passes because it now
+  asserts intact-ness over the smaller residual).
+- Prunes unused test helpers only if any go completely unreferenced
+  (the `oneBranch`, `oneWriteBranch`, `must`, `markBareRefNode`
+  helpers are load-bearing for the 116-125 survivors — do not
+  touch).
+- Subject: `test(cypher): delete N shape-mirror parser pins
+  (gqlc-ls8.5 phase 2)`, with N = 34 + audit-approved count landing
+  in the commit body.
 
-The red-receipt phase is deliberately smaller than the bulk phase so the
-technique is validated on a small blast radius before the batch. If the
-sample surfaces a case where the golden does not in fact pin what the
-mustParse pin pinned, that case is reclassified (probably Class B) and
-the spec is amended before phase 3.
+**Phase 3 — preamble rewrite + scaffold retirement.** One commit.
+- Rewrites `parser_test.go:15-42` "Layer-2 rule" preamble to name
+  the honest post-migration doctrine:
+    (a) mustParse pins whose src is verbatim TCK AND whose want
+        equals the golden's shape are DELETED (per this bead's
+        cleanup);
+    (b) mustParse pins whose input is authored (not in the corpus)
+        stay — the hand-derived want is the independent evidence
+        against `-update` silent-rebaseline;
+    (c) mustParse pins whose input is verbatim TCK but whose golden
+        does not exist (skiplisted / read-side-empty-result — the
+        Class-B set) stay by the same argument as (b);
+    (d) mustParse pins whose input is verbatim TCK but whose `sigs`
+        diverge from the TCK Background (a specific case of (b))
+        stay.
+- Deletes `TestMigrationCensusIntact` and the scratch `census_test.go`.
+- Deletes any test helpers that phase 2's deletions rendered
+  unused (recheck: unlikely, but possible for helpers used only by
+  the 34-42 deleted cases).
+- Subject: `docs(cypher): rewrite parser_test Layer-2 preamble
+  post-migration + retire scaffold (gqlc-ls8.5 phase 3)`.
 
-**Phase 3 — bulk migration, clause-dir batches.**
-Delete the remaining Class-A cases in three commits, one per group of
-clause dirs:
-
-- **3a**: `Match`, `Return`, `MatchWhere`, `ReturnSkipLimit` (~60 cases)
-- **3b**: `With`, `Union`, `Unwind`, `ReturnOrderby`, all `expressions/*`
-  aggregate + expression pins (~50 cases)
-- **3c**: `Create`, `Delete`, `Set`, `Remove`, `Merge`, `Call` write &
-  procedure pins (~25 cases)
-
-Each commit deletes its cases, updates the census (removes the migrated
-rows), and re-runs `TestMigrationCensusIntact` to keep the residual
-rows honest. Subjects:
-`test(cypher): migrate read-core parser mustParse pins to goldens
-(gqlc-ls8.5 phase 3a)`, `... expression + WITH ... (phase 3b)`,
-`... write + CALL ... (phase 3c)`.
-
-**Phase 4 — Layer-2 preamble rewrite.**
-The `parser_test.go` preamble (lines 15-42) is the file's design charter
-and now describes a topology this migration retired. It is rewritten to
-name the new rule set (`Class B kill probes stay hand-built`, `Class C
-authored stays hand-built until TCK bump`, `wire-face goldens are the
-shape-pinning surface`), with the historical hazard note preserved as a
-"we deliberately do not close" paragraph pointing at the ADR 0008
-amendment-diff review as the defense. Subject: `docs(cypher): rewrite
-parser_test Layer-2 preamble to reflect post-migration test topology
-(gqlc-ls8.5 phase 4)`.
-
-**Phase 5 — scaffold retirement.**
-Deletes `internal/query/cypher/gen_census_test.go`,
-`TestMigrationCensusIntact`, and
-`docs/specs/cypher-golden-test-migration-census.md`. The census's job
-was to give phases 2 + 3's reviewers a machine-checkable ledger of what
-was being deleted; once the deletions land, the ledger is a rusting
-appendix. Subject: `test(cypher): retire golden-migration scaffold
-(gqlc-ls8.5 phase 5)`.
-
-Each phase is pushed as a stacked commit for incremental Linus review,
-per the workflow-graphite-stacked-branches convention. `just test /
-fmt-check / lint` gate every phase.
-
-The TCK count regression check is trivial: `go test
-./internal/query/cypher/ -run TestReadCoreAcceptance -v 2>&1 | tail -20`
-reports the counters at the end of every run. Any change to those counts
-fails the phase.
+Each phase is pushed as a commit for incremental Linus review, per
+workflow-graphite-stacked-branches convention. `just test /
+fmt-check / lint` gate every commit.
 
 ---
 
 ## 6. What remains in `parser_test.go` when done
 
-**Estimated final size:** ~1,000-1,200 lines (a ~70% reduction from
-4,151). Rough decomposition:
+**Final size estimate:** 4,151 → ~3,520 lines, a ~15% reduction.
 
-| Section | Approx lines | Why hand-built survives |
+Composition of the final file:
+
+| Section | Approx lines | Justification for hand-built survival |
 |---|---|---|
-| Layer-2 preamble (rewritten) | ~40 | Design charter for the file, one paragraph shorter |
-| `oneBranch` / `oneWriteBranch` / `must` / `markBareRefNode` helpers | ~20 | Constructors used by residual pins |
-| `mustParse`: Class B kill probes | ~150 | Positive-negative bit discriminations goldens cannot express |
-| `mustParse`: Class C authored | ~200 | Non-TCK shapes with revisit-on-bump obligation |
+| Layer-2 preamble (rewritten) | ~50 | Design charter — states the four-way keep-vs-delete rules |
+| `oneBranch` / `oneWriteBranch` / `must` / `markBareRefNode` helpers | ~30 | Constructors used by 116-125 residual pins |
+| `mustParse`: Class C (112 authored) | ~2,300 | Load-bearing authored shape assertions; doctrine holds |
+| `mustParse`: Class B (4 verbatim-no-golden) | ~80 | Only shape assertion for these scenarios |
+| `mustParse`: Class-A sig-carrying keepers | 0-160 | Authored sigs distinguish shape from golden |
 | `TestMustParse` runner | ~10 | Unchanged |
-| `mustReject`: verbatim + authored | ~330 | Reject-path pins the sentinel + zero-value Query |
-| `mustRejectGrammar` | ~55 | Grammar-reject pins |
-| `TestSentinelReachability` + `allSentinels` | ~35 | Bidirectional sweep unchanged |
+| `mustReject` (25 entries) + `TestMustReject` | ~340 | Reject-path pins the sentinel; no shape to outsource |
+| `mustRejectGrammar` (3 entries) + runner | ~70 | Grammar-reject; nothing to outsource |
+| `allSentinels` + `TestSentinelReachability` | ~35 | Unchanged |
 | `corpusQueries` + property tests + assertions | ~240 | Untouched, per bead brief |
-| `TestMustReject` / `TestMustRejectGrammar` runners | ~15 | Unchanged |
 
-The four category earners for hand-built status, per the rewritten
-preamble:
+The four categories earning hand-built status post-migration:
 
-1. **Adversarial inputs** (mustReject verbatim + authored, mustRejectGrammar
-   — the reject path has no shape to outsource to a wire assertion, per
-   the current preamble's own argument, which survives the migration
-   verbatim on the reject side).
-2. **Smart-constructor invariants** (Class B kill probes — a
-   positive-negative bit discrimination the wire's `,omitempty`
-   deliberately collapses; the Go-face assertion is the only place the
-   discrimination lives).
-3. **Property tests** (`TestPropertyReadCoreParses`,
-   `TestPropertyReferentialIntegrity` and the four assertion helpers —
-   these sample the corpus and check invariants that are quantifier
-   statements, not shape statements, so they belong in Go source
-   naturally).
-4. **Sentinel-reachability sweep** (`TestSentinelReachability` — a
-   set-theoretic property over the sentinel catalog and the mustReject
-   coverage set; likewise a Go-native concern).
+1. **Class C — authored inputs** (112 pins): the hand-derived shape
+   IS the independent evidence; the doctrine's core case.
+2. **Class B — verbatim-no-golden** (4 pins): no wire-face pin
+   exists, so the hand-built pin is the only shape assertion.
+3. **Class A sig-divergent** (0-8 pins after audit): src matches
+   TCK but the authored `sigs` field produces a shape the golden
+   does not carry.
+4. **Reject-path pins** (25 mustReject + 3 mustRejectGrammar):
+   assertion is emptiness of the model on rejection; nothing to
+   outsource to the golden surface.
 
-A future model-change rebaseline (the recent ay9 cycle rebaselined 100
-goldens, hk0 rebaselined 20, 0ig rebaselined 28) should be exactly one
-`go test -update ./internal/query/cypher/...` plus **zero** manual edits
-to `parser_test.go`'s expectation tables — the maintenance-outlier
-condition the bead named as the acceptance-criteria pass criterion.
-
-Class B and Class C cases may still need manual edits if the model
-change affects the axis they pin (the ay9 cycle almost certainly touched
-`optionalGroup` in the Class B pins at `parser_test.go:411-461`, for
-example). Those edits are load-bearing — the pin exists to assert on
-the axis that changed — and are not a maintenance overhead the
-migration set out to remove.
+A future model-change rebaseline (ay9-style: 100 goldens) still
+requires manual edits to any residual pin whose shape mentions the
+changed axis. The migration does not remove this cost — 116-125
+pins can still touch `optionalGroup`, `containsAggregate`,
+`args[]CallArg`, etc. What it removes is the false-flag cost: 34-42
+mirror pins that were touching every additive axis for zero
+marginal defense.
 
 ---
 
-## 7. Fence commands
+## 7. Fence commands + reproduction
 
-- `go test ./internal/query/cypher/... -run TestReadCoreAcceptance -v
-  2>&1 | tail -20` — reports the TCK counts; must be unchanged from the
-  master baseline (`3897 scenarios — 3459 passed, 438 pending; 16006
-  steps — 15568 passed, 438 pending; 0 failed`) at the end of every
-  phase.
-- `git diff --stat master internal/query/cypher/testdata/golden/`
-  — must show zero changed files at the end of every phase (byte-
-  identical existing goldens; the migration adds no new goldens).
-- `go test ./internal/query/cypher/... -run TestGoldenOrphans` — must
-  pass at every phase; a new orphan is a red-flag misplaced test golden.
-- `just test && just fmt-check && just lint` — gates every commit.
-- `go test ./internal/query/cypher/... -run TestPropertyReferentialIntegrity
-  -v -rapid.checks=1000` — the invariant sweep at 10× the default
-  sample count, spot-run at each phase-3 batch commit to confirm the
-  invariant coverage did not silently shrink.
+**Census reproduction.** Requires the worktree root as cwd:
+```
+go run /tmp/censusprobe/main.go   # Linus's probe, preserved for reference
+                                  # (or the census_test.go added in Phase 1)
+```
+Expected output at HEAD (commit 3538a90):
+```
+Unique corpus queries harvested: 3805
+Corpus queries with an on-disk golden: 3131
+mustParse srcs: 159
+  A. in corpus AND golden exists: 43
+  B. in corpus BUT no golden: 4
+  C. NOT in corpus: 112
+```
+
+**TCK-counts fence.** Must remain unchanged at every phase:
+```
+go test ./internal/query/cypher/ -run TestReadCoreAcceptance -v 2>&1 | tail -20
+# expect: 3897 scenarios (3459 passed, 438 pending, 0 failed);
+#         16006 steps (15568 passed, 438 pending, 0 failed).
+```
+
+**Golden byte-identity fence.** Zero changed files:
+```
+git diff --stat master internal/query/cypher/testdata/golden/
+```
+
+**Orphan-golden fence.** Must pass at every phase:
+```
+go test ./internal/query/cypher/ -run TestGoldenOrphans
+```
+
+**Standard commit gates.** Every commit:
+```
+just test && just fmt-check && just lint
+```
+
+**Invariant sweep sanity.** Spot-run at each phase to confirm
+property coverage did not silently shrink:
+```
+go test ./internal/query/cypher/ -run TestPropertyReferentialIntegrity \
+    -v -rapid.checks=1000
+```
+
+**Sig-audit reference** (Phase 2). For each of the 9 sig-carrying
+Class-A pins, compare pin `sigs` to the scenario's TCK Background:
+```
+# For pin "CALL NUMBER accepts INTEGER standalone (Call3[1])":
+grep -A5 "there exists a procedure" \
+    test/data/query/cypher/tck/features/clauses/call/Call3.feature | head -20
+# Compare textually with the pin's sigs field at parser_test.go.
+```
 
 ---
 
@@ -452,46 +560,49 @@ migration set out to remove.
 
 - No parser source changes (`build.go`, `call.go`, `expr.go`,
   `listener.go`, `parser.go`, `pattern.go`, `shape.go`, `typing.go`,
-  `errors.go`). Test helpers (`oneBranch`, `oneWriteBranch`, `must`,
-  `markBareRefNode`) may be pruned if any go unused after phase 3 but
-  not otherwise edited.
-- No changes to the golden hashing scheme, the orphan check, the
-  scenario-URI keying, or the acceptance harness's outer shape.
-- No changes to the property tests or the sentinel-reachability sweep.
-- No changes to the TCK vendoring or the feature-dir list. No changes
-  to any `.feature` file.
-- No changes to `sink_fence_test.go`.
-- No introduction of hand-authored `.golden.json` files in
-  `testdata/golden/`.
-- No introduction of a second golden directory or a parallel
-  hand-authored fixture format. The `TestGoldenOrphans` invariant is
-  preserved.
+  `errors.go`). Test helpers may be pruned in Phase 3 if any go
+  unused, but only via evidence, not speculation.
+- No doctrine amendment for the 112 Class-C authored pins. Per lead
+  ruling, the doctrine stands.
+- No changes to the golden hashing scheme, orphan check, scenario-
+  URI keying, or acceptance harness's outer shape (aside from the
+  `TestPropertyReadCoreParses` corpus rewrite in Phase 1).
+- No mustReject side migration. `require.Equal(t, query.Query{},
+  got)` asserts emptiness; there is no shape to outsource. This side
+  is not the bead's target.
+- No changes to `sink_fence_test.go`, `TestSentinelReachability`,
+  `TestPropertyReferentialIntegrity`.
+- No introduction of hand-authored `.golden.json` files. No second
+  golden directory.
+- No new TCK vendoring, feature dir, or `.feature` file edit. TCK
+  count baseline is fixed for the duration of this bead.
 
 ---
 
 ## 9. Open questions
 
-**Q1: Should Class B kill-probe cases be lifted into a dedicated
-`TestKillProbes` block with commentary that names the axis they pin,
-instead of surviving amid a shrunk `mustParse` table?**
+**Q1 (Phase-2 output → §6 residual estimate).** After the sig-
+carrying audit, the residual mustParse count is 116 + (9 - N) where N
+is the number of sig-carrying pins the audit approves for deletion.
+The final line-count estimate in §6 is 3,520 assuming N ≈ 6. If N is
+materially different (say N = 0 or N = 9), the Phase-3 preamble
+rewrite absorbs the difference in its own text but the ~15% file-
+reduction claim is a floor. Q1 is a note, not a decision.
 
-Deferred to phase 4's preamble rewrite. Argument for: the shrunk
-mustParse loses its "all read-core corpus samples" character and becomes
-"the axes we pin against the wire's `,omitempty` collapse", which
-deserves its own name. Argument against: gratuitous restructuring that
-churns diffs without changing what runs. Decision made during phase 4
-with Linus in the loop, when the shape of the residual table is
-observable.
+**Q2 (Class-B semantics naming).** Two of the 4 Class-B pins are
+skiplisted; two are read-side-empty-result. The Phase-3 preamble
+rewrite must name both mechanisms honestly (avoid the "skiplisted"
+label as a superset — it's a proper subset). Language locked in
+Phase 3 with Linus in the loop.
 
-**Q2: Should the mustReject side migrate parallel to mustParse?**
-
-Not in this bead. The reject-path pins have no shape to outsource
-(`require.Equal(t, query.Query{}, got, "model must be the zero value on
-error")` — the assertion is *emptiness*), so the "goldens duplicate the
-shape" argument doesn't apply. Some mustReject cases could potentially
-migrate to a "TCK scenario X should reject with sentinel Y" table in
-the acceptance harness, but that is a separate structural question with
-its own coverage-no-shrink proof to construct, and out of scope for a
-bead named "migrate shape expectations".
+**Q3 (follow-up bead scope).** If the maintenance-outlier headline
+of gqlc-ls8.5 is only partially closed by a ~15% reduction (which it
+is), the natural follow-up is a bead scoped to "authored pin
+consolidation across staged specs" — a doctrine-preserving
+refactor that groups the 112 by stage (Stage 4 UNION pins, Stage 12
+write pins, Stage 14 CALL pins, etc.) so a model-axis change at a
+specific stage touches a contiguous section of the file rather than
+scattered pins. Not in this bead's scope. Filed as follow-up at
+ls8.5 close-out, per lead's ruling on scope discipline.
 
 ---
