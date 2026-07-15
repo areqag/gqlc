@@ -265,16 +265,33 @@ should be measured against.
 
 ### 3.1 The census-intact helper (Phase 1 addition, Phase 3 removal)
 
-Phase 1 adds `TestMigrationCensusIntact` as a first-class test in
-`parser_test.go`. It walks the sig-less Class-A key list (§1.2) —
-committed inline in the test as a `[]string` literal — and asserts,
-per key:
+Phase 1 adds `TestMustParseGoldenTwins` (renamed from v2's
+`TestMigrationCensusIntact` to avoid the `-run TestMigrationCensus.*`
+collision with the scratch harness described in §5) as a first-class
+test in `parser_test.go`. It walks the sig-less Class-A key list
+(§1.2) — committed inline in the test as a `[]string` literal — and
+asserts, per key:
 
 1. The pin exists in `mustParse` at the current HEAD.
-2. The pin's `src` is verbatim in `harvestExecutingQueries(t,
-   readCoreDirs)` output (using the existing corpus-harvester the
-   property tests already use).
-3. The golden file for the (uri, name, query) triple exists on disk.
+2. The pin's `src` is verbatim in the TCK corpus.
+3. The golden file for the pin's (uri, name, src) triple exists on
+   disk at `internal/query/cypher/testdata/golden/`.
+
+Assertion 3 needs a (uri, name, src) triple; `harvestExecutingQueries`
+returns bare `[]string` (`acceptance_test.go:1078`), so a bare-string
+harvest can only support the strictly weaker "some golden pins some
+scenario carrying this src" (which fails to catch a rename mismatch
+between two scenarios sharing a src, and passes vacuously for pins
+whose src collides). Path taken: Phase 1 adds a sibling harvester
+`harvestExecutingScenarios(t, dirs) []scenarioMeta` next to
+`harvestExecutingQueries`, returning `{uri, name, query}` triples
+from the same gherkin walk (the existing walker already reads `p.Uri`
+and `p.Name` at line 640 in `TestGoldenOrphans`; the harvester
+just needs to preserve them alongside the query docstring). The test
+then computes `goldenPath(&scenarioState{name, uri, query})` (the
+existing keying function at `acceptance_test.go:1067`) and stats the
+file. This keeps assertion 3 per-pin and per-scenario, matching the
+same key the acceptance harness uses to mint the golden.
 
 Phase 2 deletes the 34 sig-less Class-A pins in one commit. The
 per-pin deletion order matches the key list, and each pin's removal
@@ -291,9 +308,12 @@ Between Phase 2 and Phase 3, the sig-carrying-Class-A audit lands
   reason (see the `"authored CALL standalone Returns signature-
   declaration-order"` example).
 
-Phase 3 deletes `TestMigrationCensusIntact` alongside the Layer-2
-preamble rewrite (both are cleanup — the test's job was to gate the
-Phase-2 deletions; once done, it is scaffolding).
+Phase 3 deletes `TestMustParseGoldenTwins` alongside the Layer-2
+preamble rewrite, and either deletes `harvestExecutingScenarios` (if
+Phase-2 leaves no other caller) or leaves it in place if
+`TestPropertyReadCoreParses`'s Phase-1 rewrite (§3.4) adopts it too.
+Recommendation: keep the sibling harvester, since a (uri, name,
+query) triple is what both callers want.
 
 ### 3.2 The sig-carrying Class-A audit (Phase 2)
 
@@ -310,9 +330,15 @@ For each of the 9 sig-carrying Class-A pins:
      divergence and its shape-assertion purpose (like the sig-order
      pin).
 
-The audit runs as part of Phase 2's commit (not as a phase of its
-own — 9 pins is a small enough set to audit in one sitting). Its
-result is folded into Phase 2's receipts.
+The audit runs in **Phase 1**, not Phase 2. Its output is committed
+as a deterministic scratch artifact:
+`docs/specs/cypher-golden-test-migration-sigaudit.txt`, one line per
+pin, `<key>\t<equal|divergent>\t<goldenPath>[\t<divergence-reason>]`.
+Phase 2 reads this file and applies deletions; the audit is not
+re-computed in the deletion commit. Rationale: pre-computing keeps
+the deletion set deterministic before the commit is written, so a
+Phase-2 reviewer can diff the deleted pins against the ledger by
+line and does not need to re-run the audit to verify the split.
 
 ### 3.3 The residual hazard (unchanged from v1 §3.4)
 
@@ -354,16 +380,33 @@ posture `TestPropertyReferentialIntegrity` already uses (see
 census helper — before any mustParse pin is deleted — so no phase
 silently degrades this test.
 
-The rewritten test still runs `newParserFor` per pin; the sigs slice
+The rewritten test still runs `newParserFor` per pin. The sigs slice
 becomes the union of every scenario's Background-declared signatures,
-harvested by extending the `thereExistsAProcedure` step handler with
-a query-scope collector (the acceptance test already parses these
-sigs — the collector is an additive helper, not a re-implementation).
-Alternative: build the parser once with an empty registry and skip
-CALL-carrying corpus queries (`isCallCarrying(q)` predicate on the
-harvest side). Phase 1 picks the simpler of the two based on how many
-corpus queries carry CALL clauses (harvest count landing in the
-Phase-1 commit body).
+harvested per-scenario at Phase-1 test-init time.
+
+**Path.** `thereExistsAProcedure` at `acceptance_test.go:768` is a
+godog step handler (`func(ctx context.Context, sigText string, _
+*godog.Table) error`) wired into a `godog.ScenarioContext` at line
+714 — not directly callable from a plain harvester. Its useful core,
+however, is already extracted: `parseProcedureSignature(text string)
+(procsig.Signature, error)` at `acceptance_test.go:795` is a discrete
+package-level function that takes plain text and needs neither a
+context nor a table. Phase 1 therefore does NOT run an ephemeral
+godog process and does NOT re-extract the regex — it wires a new
+Background-only walker (a sibling to `harvestExecutingScenarios` from
+§3.1, but keying on the Background `there exists a procedure` step
+instead of the executing-query step) that calls `parseProcedureSignature`
+directly on each match. Each scenario yields zero-or-more sigs; the
+per-scenario slice attaches to the (uri, name, query) triple from
+§3.1's harvester.
+
+Alternative kept in reserve: build the parser once with an empty
+registry and skip CALL-carrying corpus queries via an
+`isCallCarrying(q)` predicate on the harvest side. Phase 1 picks the
+sig-harvest path unless the CALL-carrying subset is small enough
+(<20 scenarios) that the empty-registry alternative pays for itself
+in test-init simplicity; harvest count lands in the Phase-1 commit
+body.
 
 **Options 2 and 3 (rejected):**
 - **Option 2** — rename to `TestPropertyMustParseCorpusParses` and
@@ -383,12 +426,25 @@ No new goldens (§2 v1 argument unchanged and reinforced by the
 narrower scope). The layout under `internal/query/cypher/testdata/
 golden/` is unchanged. `TestGoldenOrphans` invariant preserved.
 
-No new file lands from this bead. `TestMigrationCensusIntact` lives
-in `parser_test.go` for the duration of Phases 1-3 and is deleted in
-Phase 3. No companion Markdown census file (v1's proposal) — the
-in-test `[]string` literal is the ledger, and having it live in Go
-gives the compiler + test runner the same visibility a reviewer has
-into the migration.
+**Permanent (post-Phase-3) footprint:** no new files. Everything
+introduced by this bead deletes by Phase 3.
+
+**Transient (Phase 1 → Phase 3) footprint:**
+- `TestMustParseGoldenTwins` lives in `parser_test.go` (first-class
+  test — deleted Phase 3).
+- Scratch `census_test.go` and `sigaudit_test.go` in
+  `internal/query/cypher/`, both guarded by
+  `//go:build sigaudit_scratch` so `just test` never runs them
+  (deleted Phase 3).
+- Scratch ledger `docs/specs/cypher-golden-test-migration-sigaudit.txt`
+  (deterministic input to Phase 2; deleted Phase 3).
+
+No companion Markdown census file (v1's proposal) — the in-test
+`[]string` literal is the golden-twin ledger, and having it live in
+Go gives the compiler + test runner the same visibility a reviewer
+has into the migration. The sig-audit ledger is text (not Go) because
+its consumer is a human reviewer diffing Phase-2 deletions against
+its lines, not another Go test.
 
 ---
 
@@ -399,35 +455,70 @@ lint` green, keeps TCK counts unchanged (`3897 scenarios — 3459
 passed, 438 pending; 16006 steps — 15568 passed, 438 pending; 0
 failed`), and keeps every existing golden byte-identical.
 
-**Phase 1 — scaffold + property-test fix.** One commit.
-- Adds `TestMigrationCensusIntact` with the 34-key sig-less
-  Class-A list as an inline `[]string`.
+**Phase 1 — scaffold + sig-audit artifact + property-test fix.** One commit.
+- Adds `TestMustParseGoldenTwins` with the 34-key sig-less Class-A
+  list as an inline `[]string` (renamed from v2's
+  `TestMigrationCensusIntact` — see naming-collision note below).
+- Adds the sibling harvester `harvestExecutingScenarios(t, dirs)
+  []scenarioMeta` (§3.1) alongside the existing
+  `harvestExecutingQueries`.
 - Rewrites `TestPropertyReadCoreParses` per §3.4 to iterate the
-  corpus.
-- Adds a scratch `census_test.go` (excluded via build tag if
-  needed; alternatively runs only in `-run TestMigrationCensus.*`
-  mode) that runs the census probe end-to-end, printing the 3-way
-  bucket counts. This exists so the numbers in this spec are
-  reproducible by any reviewer running one command.
+  corpus, adopting the Background-only sig walker.
+- Adds a scratch `sigaudit_test.go` (excluded from `just test` via a
+  `//go:build sigaudit_scratch` build tag; runs on demand via
+  `go test -tags sigaudit_scratch -run TestSigAudit`) that walks the
+  9 sig-carrying pins (§1.1), pairs each with its scenario's
+  Background sig via `parseProcedureSignature`, and prints the
+  9-line audit ledger:
+  ```
+  <pin key>          <equal|divergent>          <goldenPath>
+  ```
+  Sample output committed as `docs/specs/cypher-golden-test-migration-sigaudit.txt`
+  in this same commit — an on-disk deterministic artifact linus-3
+  and Phase 2 can both cite verbatim, so the deletion commit does
+  not perform the audit itself.
+- Adds a scratch `census_test.go` (also `//go:build sigaudit_scratch`
+  gated) that runs the census probe end-to-end, printing the 3-way
+  bucket counts, so §7's numbers are reproducible by one command.
+  Renamed test entrypoint: `TestCensusReport` (was
+  `TestMigrationCensus.*` in v2 — collided with
+  `TestMigrationCensusIntact` under `-run`).
 - No mustParse deletions.
-- Subject: `test(cypher): census scaffold + corpus-driven parses
-  precondition (gqlc-ls8.5 phase 1)`.
+- Subject: `test(cypher): golden-twin harness + sig-audit artifact
+  + corpus-driven parses precondition (gqlc-ls8.5 phase 1)`.
 
-**Phase 2 — bulk deletion.** One commit.
-- Runs the 9-pin sig-carrying audit (§3.2), producing 0-8 additional
-  deletable pins (goal: audit result appears in the commit body).
-- Deletes the 34 sig-less Class-A pins + the audit-approved sig-
-  carrying subset.
-- Updates `TestMigrationCensusIntact`'s inline list (removed rows
+**Phase 2 — bulk deletion (deterministic).** One commit.
+- Reads the Phase-1 audit ledger
+  (`docs/specs/cypher-golden-test-migration-sigaudit.txt`) — no
+  audit computation in this commit; the ledger is treated as an
+  input artifact so the deletion set is deterministic before the
+  commit is written.
+- Deletes the 34 sig-less Class-A pins + every ledger-`equal`
+  sig-carrying pin. Ledger-`divergent` pins stay, each gaining an
+  in-file comment quoting the ledger's `divergent` reason.
+- Updates `TestMustParseGoldenTwins`'s inline list (removed rows
   disappear from the list; the test still passes because it now
   asserts intact-ness over the smaller residual).
 - Prunes unused test helpers only if any go completely unreferenced
   (the `oneBranch`, `oneWriteBranch`, `must`, `markBareRefNode`
   helpers are load-bearing for the 116-125 survivors — do not
   touch).
+- Commit body pastes the Phase-1 ledger verbatim as receipts + adds
+  the per-pin `<key> -> <goldenPath>` lines for the 34 sig-less
+  deletions.
 - Subject: `test(cypher): delete N shape-mirror parser pins
-  (gqlc-ls8.5 phase 2)`, with N = 34 + audit-approved count landing
+  (gqlc-ls8.5 phase 2)`, with N = 34 + ledger-equal count landing
   in the commit body.
+
+**Naming-collision note.** v2 named both the first-class test and
+the scratch harness with a `TestMigrationCensus...` prefix, so
+`go test -run TestMigrationCensus.*` would fire both simultaneously
+and either mask a failure (if the first-class test compiled but the
+scratch failed) or double-run corpus work. v3 gives each a distinct
+prefix (`TestMustParseGoldenTwins` for the first-class test,
+`TestCensusReport` and `TestSigAudit` for the scratch harness — the
+latter two additionally build-tag-gated) so `-run` selectors never
+alias.
 
 **Phase 3 — preamble rewrite + scaffold retirement.** One commit.
 - Rewrites `parser_test.go:15-42` "Layer-2 rule" preamble to name
@@ -444,7 +535,12 @@ failed`), and keeps every existing golden byte-identical.
     (d) mustParse pins whose input is verbatim TCK but whose `sigs`
         diverge from the TCK Background (a specific case of (b))
         stay.
-- Deletes `TestMigrationCensusIntact` and the scratch `census_test.go`.
+- Deletes `TestMustParseGoldenTwins`, the scratch `census_test.go`,
+  and the scratch `sigaudit_test.go`. The audit ledger
+  `docs/specs/cypher-golden-test-migration-sigaudit.txt` also
+  deletes (its job — deterministic input to Phase 2 — is done).
+- Keeps `harvestExecutingScenarios` if `TestPropertyReadCoreParses`
+  still uses it (per §3.4); otherwise deletes it.
 - Deletes any test helpers that phase 2's deletions rendered
   unused (recheck: unlikely, but possible for helpers used only by
   the 34-42 deleted cases).
@@ -512,8 +608,12 @@ Not in scope here.
 
 **Census reproduction.** Requires the worktree root as cwd:
 ```
-go run /tmp/censusprobe/main.go   # Linus's probe, preserved for reference
-                                  # (or the census_test.go added in Phase 1)
+# Linus-3's original probe (preserved for reference at HEAD 3538a90):
+go run /tmp/censusprobe/main.go
+
+# Post-Phase-1 in-tree equivalent (build-tag gated so `just test` skips it):
+go test -tags sigaudit_scratch \
+    ./internal/query/cypher/ -run TestCensusReport -v
 ```
 Expected output at HEAD (commit 3538a90):
 ```
@@ -554,8 +654,21 @@ go test ./internal/query/cypher/ -run TestPropertyReferentialIntegrity \
     -v -rapid.checks=1000
 ```
 
-**Sig-audit reference** (Phase 2). For each of the 9 sig-carrying
-Class-A pins, compare pin `sigs` to the scenario's TCK Background:
+**Sig-audit reproduction** (Phase 1 — produces the deterministic
+ledger consumed by Phase 2):
+```
+go test -tags sigaudit_scratch \
+    ./internal/query/cypher/ -run TestSigAudit -v > \
+    docs/specs/cypher-golden-test-migration-sigaudit.txt
+```
+The ledger format, one line per pin:
+```
+<pin key>\t<equal|divergent>\t<goldenPath>[\t<divergence-reason>]
+```
+
+**Sig-audit manual spot-check** (secondary; useful when a reviewer
+wants to independently verify a ledger row without running the
+scratch harness):
 ```
 # For pin "CALL NUMBER accepts INTEGER standalone (Call3[1])":
 grep -A5 "there exists a procedure" \
