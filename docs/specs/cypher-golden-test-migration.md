@@ -159,7 +159,7 @@ scope snapshot (foaf)
 ```
 
 **34 pins.** Delete-safe on the src+golden criterion; per-case
-verification via the census-intact helper in §3.1.
+verification via `TestMustParseGoldenTwins` (§3.1).
 
 ### 1.3 The 4 Class-B pins (verbatim, no golden)
 
@@ -263,7 +263,7 @@ should be measured against.
 
 ## 3. Coverage-no-shrink verification
 
-### 3.1 The census-intact helper (Phase 1 addition, Phase 3 removal)
+### 3.1 The golden-twin invariant (Phase 1 addition, permanent past Phase 3)
 
 Phase 1 adds `TestMustParseGoldenTwins` (renamed from v2's
 `TestMigrationCensusIntact` to avoid the `-run TestMigrationCensus.*`
@@ -295,8 +295,8 @@ same key the acceptance harness uses to mint the golden.
 
 Phase 2 deletes the 34 sig-less Class-A pins in one commit. The
 per-pin deletion order matches the key list, and each pin's removal
-removes its census-intact row. Phase 2's commit body carries a
-per-pin receipt of the form:
+removes its golden-twin row from `TestMustParseGoldenTwins`'s inline
+list. Phase 2's commit body carries a per-pin receipt of the form:
 ```
 <key>                          -> testdata/golden/<goldenPath>
 ```
@@ -308,12 +308,23 @@ Between Phase 2 and Phase 3, the sig-carrying-Class-A audit lands
   reason (see the `"authored CALL standalone Returns signature-
   declaration-order"` example).
 
-Phase 3 deletes `TestMustParseGoldenTwins` alongside the Layer-2
-preamble rewrite, and either deletes `harvestExecutingScenarios` (if
-Phase-2 leaves no other caller) or leaves it in place if
-`TestPropertyReadCoreParses`'s Phase-1 rewrite (§3.4) adopts it too.
-Recommendation: keep the sibling harvester, since a (uri, name,
-query) triple is what both callers want.
+**Phase 3 keeps `TestMustParseGoldenTwins` and
+`harvestExecutingScenarios` as permanent tree residents** (linus-3
+ruling, methodology remit): the invariant outlives the bead. Its
+job past Phase 3 is not gating the deletion set (which is done) but
+catching future silent coverage regressions. Concrete scenario:
+a TCK bump removes or renames a scenario whose src backed a
+surviving Class-A sig-carrying keeper. Without the test on the tree,
+the golden-file lookup for that pin's (uri, name, src) triple would
+silently return nothing, the pin would move from Class-A to Class-B
+(goldenless), and no test would notice. With the test present, it
+fires on the next `just test`. Cost: ~30 lines of live test code +
+one harvester. Benefit: the coverage-no-shrink gate survives past
+bead close into every future TCK bump.
+
+Phase 3 therefore retires only the scratch harnesses
+(`sigaudit_test.go`, `census_test.go`) and the sig-audit ledger. The
+Layer-2 preamble rewrite lands alongside — see §5 Phase 3.
 
 ### 3.2 The sig-carrying Class-A audit (Phase 2)
 
@@ -426,12 +437,17 @@ No new goldens (§2 v1 argument unchanged and reinforced by the
 narrower scope). The layout under `internal/query/cypher/testdata/
 golden/` is unchanged. `TestGoldenOrphans` invariant preserved.
 
-**Permanent (post-Phase-3) footprint:** no new files. Everything
-introduced by this bead deletes by Phase 3.
+**Permanent (post-Phase-3) footprint:**
+- `TestMustParseGoldenTwins` in `parser_test.go` (~20 lines including
+  the trimmed inline key list).
+- `harvestExecutingScenarios(t, dirs) []scenarioMeta` in
+  `acceptance_test.go` (~10 lines).
+
+Both stay past bead close as the coverage-no-shrink invariant against
+future TCK bumps — see §3.1 for the design argument. No net new file
+lands; both new symbols land in existing test files.
 
 **Transient (Phase 1 → Phase 3) footprint:**
-- `TestMustParseGoldenTwins` lives in `parser_test.go` (first-class
-  test — deleted Phase 3).
 - Scratch `census_test.go` and `sigaudit_test.go` in
   `internal/query/cypher/`, both guarded by
   `//go:build sigaudit_scratch` so `just test` never runs them
@@ -520,7 +536,7 @@ prefix (`TestMustParseGoldenTwins` for the first-class test,
 latter two additionally build-tag-gated) so `-run` selectors never
 alias.
 
-**Phase 3 — preamble rewrite + scaffold retirement.** One commit.
+**Phase 3 — preamble rewrite + scratch retirement.** One commit.
 - Rewrites `parser_test.go:15-42` "Layer-2 rule" preamble to name
   the honest post-migration doctrine:
     (a) mustParse pins whose src is verbatim TCK AND whose want
@@ -535,17 +551,27 @@ alias.
     (d) mustParse pins whose input is verbatim TCK but whose `sigs`
         diverge from the TCK Background (a specific case of (b))
         stay.
-- Deletes `TestMustParseGoldenTwins`, the scratch `census_test.go`,
-  and the scratch `sigaudit_test.go`. The audit ledger
-  `docs/specs/cypher-golden-test-migration-sigaudit.txt` also
-  deletes (its job — deterministic input to Phase 2 — is done).
-- Keeps `harvestExecutingScenarios` if `TestPropertyReadCoreParses`
-  still uses it (per §3.4); otherwise deletes it.
+- Deletes the scratch `census_test.go`, the scratch
+  `sigaudit_test.go`, and the sig-audit ledger
+  `docs/specs/cypher-golden-test-migration-sigaudit.txt` (their
+  jobs — census reproduction + deterministic Phase-2 input — are
+  done).
+- **Keeps `TestMustParseGoldenTwins` and `harvestExecutingScenarios`
+  as permanent tree residents** per §3.1 (linus-3 methodology
+  ruling). Not scaffolding — the invariant catches future silent
+  coverage regressions from TCK bumps.
+- Updates `TestMustParseGoldenTwins`'s inline key list one final
+  time so it reflects the post-Phase-2 keeper set (Class-A
+  sig-carrying keepers only — sig-less pins all gone, sig-`equal`
+  pins all gone, sig-`divergent` pins retained). The test's assertion
+  becomes "every listed keeper still has a (uri, name, src) triple
+  in the corpus AND a golden on disk" — same three assertions as
+  Phase 1, smaller input.
 - Deletes any test helpers that phase 2's deletions rendered
   unused (recheck: unlikely, but possible for helpers used only by
   the 34-42 deleted cases).
 - Subject: `docs(cypher): rewrite parser_test Layer-2 preamble
-  post-migration + retire scaffold (gqlc-ls8.5 phase 3)`.
+  post-migration + retire scratch scaffolds (gqlc-ls8.5 phase 3)`.
 
 Each phase is pushed as a commit for incremental Linus review, per
 workflow-graphite-stacked-branches convention. `just test /
@@ -555,7 +581,19 @@ fmt-check / lint` gate every commit.
 
 ## 6. What remains in `parser_test.go` when done
 
-**Final size estimate:** 4,151 → ~3,520 lines, a ~15% reduction.
+**Final size estimate:** 4,151 → ~3,670 lines, a ~11-12% reduction.
+Arithmetic: 34 sig-less Class-A pins deleted @ ~13 lines/pin ≈ 442
+lines removed, plus 0-8 audit-approved sig-carrying pins @ ~15
+lines/pin (up to ~120 more), minus ~30 lines added for the
+permanent `TestMustParseGoldenTwins` + `harvestExecutingScenarios`
+retained past Phase 3 (see below). Deletion range 442-562 lines;
+addition ~30. Net: 4,151 → 3,619-3,739. Midpoint ~3,680, rounded
+~3,670. The v2 estimate of ~15% (`~3,520`) was optimistic — it
+assumed the full 9 sig-carrying pins deleted and did not budget for
+retaining the coverage-no-shrink gate as permanent scaffolding.
+The honest range is 11-12%; the headline "maintenance outlier"
+reduction is only partially closed by this bead, per §6 tail and
+[gqlc-exl](../../).
 
 Composition of the final file:
 
@@ -571,6 +609,7 @@ Composition of the final file:
 | `mustRejectGrammar` (3 entries) + runner | ~70 | Grammar-reject; nothing to outsource |
 | `allSentinels` + `TestSentinelReachability` | ~35 | Unchanged |
 | `corpusQueries` + property tests + assertions | ~240 | Untouched, per bead brief |
+| `TestMustParseGoldenTwins` + `harvestExecutingScenarios` | ~30 | Permanent coverage-no-shrink gate; see §3.1 |
 
 The four categories earning hand-built status post-migration:
 
