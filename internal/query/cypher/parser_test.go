@@ -1,6 +1,7 @@
 package cypher_test
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -3883,6 +3884,147 @@ func TestSentinelReachability(t *testing.T) {
 	}
 }
 
+// --- golden-twin invariant (gqlc-ls8.5 Phase 1) ---
+
+// goldenTwinKeepers is the sig-less Class-A shape-mirror keeper list per
+// §1.2 of docs/specs/cypher-golden-test-migration.md — pins whose src is
+// verbatim in the TCK corpus AND whose scenario mints a golden AND whose
+// authored shape matches the golden. Phase 2 will delete these pins from
+// mustParse and the list drains alongside; the ledger is the deletion
+// scoreboard. Kept as an inline []string so a reviewer diffing Phase-2's
+// commit against this list can verify the delete set line-by-line.
+var goldenTwinKeepers = []string{
+	"all quantifier empty list",
+	"anonymous edge",
+	"arithmetic in return",
+	"comma pattern with aliases",
+	"count distinct",
+	"create anonymous node",
+	"delete node",
+	"detach delete node",
+	"directed edge whole entities",
+	"edge inline-labelled endpoints",
+	"edge left-pointing canonical",
+	"merge argument handling across with",
+	"merge labelled node returning property",
+	"merge with both on branches",
+	"merge with inline map referencing bound var",
+	"merge with on create set property",
+	"merge with on match set labels",
+	"node",
+	"node inline property",
+	"node multi-label",
+	"none quantifier empty list",
+	"optional match reuses prior binding",
+	"optional match simple",
+	"property return no alias",
+	"set labels",
+	"skip parameter",
+	"typed edge named endpoints",
+	"undirected edge whole entities",
+	"unwind empty list",
+	"unwind null",
+	"unwind range function",
+	"unwind scalar list",
+	"where property parameter",
+	"with-aggregate-where scope snapshot (foaf)",
+}
+
+// TestMustParseGoldenTwins is the dual-invariant coverage-no-shrink gate for
+// the gqlc-ls8.5 golden-test migration (§3.1 of the migration spec).
+//
+// Positive walk (bounded by goldenTwinKeepers): each named keeper must exist
+// in mustParse, its src must appear verbatim in the harvested corpus, and a
+// golden must exist on disk for its (uri, name, src) triple. Catches TCK
+// bumps that DROP a scenario a listed keeper depends on.
+//
+// Negative walk (bounded by current mustParse): no pin may exist whose src
+// is verbatim in the corpus AND has a golden on disk — the shape-mirror
+// duplication pattern Phase 2 exists to delete. Catches TCK bumps that ADD a
+// scenario whose src collides with an authored pin, plus any future PR that
+// reintroduces the pattern.
+//
+// Both invariants share one harvestExecutingScenarios(t, readCoreDirs) input
+// and one corpus-src set derived from it. Positive-walk assertion 3
+// (golden-exists) uses goldenPath(&scenarioState{...}) — the same key the
+// acceptance harness mints against — so a keeper whose triple loses its
+// golden fails immediately.
+//
+// Permanent past Phase 3 (linus-3 methodology ruling); Phase 2 drains the
+// inline keeper list to just the sig-`divergent` Class-A survivors as pins
+// are deleted, but both invariants stay in force.
+func TestMustParseGoldenTwins(t *testing.T) {
+	scenarios := harvestExecutingScenarios(t, readCoreDirs)
+	require.NotEmpty(t, scenarios, "no corpus scenarios harvested — TCK vendoring or paths are wrong")
+
+	// Index scenarios by src for the positive walk's (uri, name) lookup and
+	// build the corpus-src set the negative walk consults.
+	byQuery := make(map[string][]scenarioMeta, len(scenarios))
+	corpusSrcs := make(map[string]bool, len(scenarios))
+	for _, sc := range scenarios {
+		byQuery[sc.query] = append(byQuery[sc.query], sc)
+		corpusSrcs[sc.query] = true
+	}
+
+	// Positive walk: each keeper's src is in the corpus AND its golden exists.
+	for _, key := range goldenTwinKeepers {
+		pin, ok := mustParse[key]
+		require.Truef(t, ok, "keeper %q missing from mustParse", key)
+		matches := byQuery[pin.src]
+		require.NotEmptyf(t, matches, "keeper %q src not in corpus: %q", key, pin.src)
+		// A src may back multiple scenarios (outline expansion); at least one
+		// must mint a golden that resolves on disk.
+		var found bool
+		for _, sc := range matches {
+			path := goldenPath(&scenarioState{name: sc.name, uri: sc.uri, query: sc.query})
+			if _, err := os.Stat(path); err == nil {
+				found = true
+				break
+			}
+		}
+		require.Truef(t, found, "keeper %q: no golden on disk for any (uri, name, src) triple", key)
+	}
+
+	// Negative walk: no mustParse pin has (src-in-corpus AND golden-exists).
+	// A future edit that reintroduces the shape-mirror pattern fires here.
+	// Exemptions: (a) the sig-less Class-A keeper list (Phase-1 scaffold slot;
+	// drained by Phase 2 as pins delete), and (b) any pin carrying sigs —
+	// those go through the per-case sig-audit (§3.2) rather than the blanket
+	// negative walk, and the sig-`divergent` survivors keep their sigs past
+	// Phase 3 with an in-file comment naming the divergence.
+	keepers := keeperSet()
+	for key, pin := range mustParse {
+		if !corpusSrcs[pin.src] {
+			continue
+		}
+		if _, isKeeper := keepers[key]; isKeeper {
+			continue
+		}
+		if len(pin.sigs) > 0 {
+			continue
+		}
+		for _, sc := range byQuery[pin.src] {
+			path := goldenPath(&scenarioState{name: sc.name, uri: sc.uri, query: sc.query})
+			if _, err := os.Stat(path); err != nil {
+				continue
+			}
+			t.Errorf("residual shape-mirror pin: %q → %s (delete the pin or add a sig-divergence comment)", key, path)
+			break
+		}
+	}
+}
+
+// keeperSet materialises goldenTwinKeepers as a set for the negative walk's
+// O(1) exemption check. Package-level cache is not worth it — the list is 34
+// entries and the test runs once per invocation.
+func keeperSet() map[string]struct{} {
+	out := make(map[string]struct{}, len(goldenTwinKeepers))
+	for _, k := range goldenTwinKeepers {
+		out[k] = struct{}{}
+	}
+	return out
+}
+
 // --- corpus harvest for property tests ---
 
 // corpusQueries returns every "When executing query" block in the read-core
@@ -3905,24 +4047,27 @@ func corpusQueries(t *testing.T) []string {
 
 // TestPropertyReadCoreParses is the precondition guard for the richer invariant
 // properties below: every curated read-core query must parse. If it ever fails,
-// the property tests below would pass vacuously, so this is the gate. Stage 14:
-// each pin's per-scenario signature slice is carried through
-// newParserFor so CALL pins parse with the same registry TestMustParse
-// constructs.
+// the property tests below would pass vacuously, so this is the gate.
+// gqlc-ls8.5 Phase 1: input rewritten to iterate the harvested corpus rather
+// than mustParse, per §3.4 of the golden-test migration spec — matches the
+// docstring ("every curated read-core query must parse") and survives Phase 2's
+// mustParse shrinkage. Per-scenario sigs come from the same gherkin walk (Background
+// `there exists a procedure` step, run through parseProcedureSignature).
 func TestPropertyReadCoreParses(t *testing.T) {
-	type pin struct {
-		src  string
-		sigs []procsig.Signature
+	all := harvestExecutingScenarios(t, readCoreDirs)
+	require.NotEmpty(t, all, "no corpus scenarios harvested — TCK vendoring or paths are wrong")
+	positives := make([]scenarioMeta, 0, len(all))
+	for _, sc := range all {
+		if sc.positive {
+			positives = append(positives, sc)
+		}
 	}
-	pins := make([]pin, 0, len(mustParse))
-	for _, c := range mustParse {
-		pins = append(pins, pin{src: c.src, sigs: c.sigs})
-	}
+	require.NotEmpty(t, positives, "no positive-outcome scenarios harvested — outcome regexes may have drifted")
 	rapid.Check(t, func(rt *rapid.T) {
-		p := rapid.SampledFrom(pins).Draw(rt, "pin")
-		parser := newParserFor(t, p.sigs)
-		if _, err := parser.Parse(strings.NewReader(p.src)); err != nil {
-			rt.Fatalf("read-core query did not parse: %q: %v", p.src, err)
+		sc := rapid.SampledFrom(positives).Draw(rt, "scenario")
+		parser := newParserFor(t, sc.sigs)
+		if _, err := parser.Parse(strings.NewReader(sc.query)); err != nil {
+			rt.Fatalf("read-core query did not parse: %q: %v", sc.query, err)
 		}
 	})
 }

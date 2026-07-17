@@ -1112,6 +1112,116 @@ func harvestExecutingQueries(t *testing.T, dirs []string) []string {
 	return out
 }
 
+// scenarioMeta is the per-pickle key harvested by harvestExecutingScenarios:
+// the (uri, name, query) triple goldenPath keys on, plus any Background-
+// declared procedure signatures the pickle inherits, plus the pickle's
+// expected-outcome polarity (positive = result-should-be / no-side-effects,
+// negative = should-be-raised). Sigs may be empty; polarity is determined
+// by matching Then-step text against the harness's step regexes at
+// initScenario. Downstream tests that assert "must parse" filter to
+// positive scenarios.
+type scenarioMeta struct {
+	uri      string
+	name     string
+	query    string
+	sigs     []procsig.Signature
+	positive bool
+}
+
+// procedureBackgroundRE matches the Background step
+// `there exists a procedure NAME(PARAMS) :: (RESULTS):`, mirroring the
+// runtime step regex at initScenario. Kept as a package-var so
+// harvestExecutingScenarios can walk pickle steps without depending on
+// the godog step registry.
+var procedureBackgroundRE = regexp.MustCompile(`^there exists a procedure (.+?)\s*:$`)
+
+// positiveOutcomeRE and negativeOutcomeRE mirror the Then-step regexes at
+// initScenario (see the resultShouldBe / shouldBeRejected registrations).
+// harvestExecutingScenarios uses them to tag each scenario's polarity so
+// downstream tests can filter to just the queries the parser is expected
+// to accept.
+var (
+	positiveOutcomeRE = regexp.MustCompile(`^the result should be(?:, in any order| \(ignoring element order for lists\)|, in order(?: \(ignoring element order for lists\))?)?:$|^the result should be empty$|^no side effects$|^the side effects should be:$`)
+	negativeOutcomeRE = regexp.MustCompile(`^a \w+ should be raised at (?:compile time|runtime|any time)(?:: \S+)?$`)
+)
+
+// harvestExecutingScenarios reads every .feature file under dirs and
+// returns one scenarioMeta per executing-query step, preserving the
+// (uri, name, query) triple goldenPath keys on plus the pickle's
+// Background procedure signatures. The gherkin walk mirrors
+// harvestExecutingQueries (same parser, same pickle expansion) so scenario
+// outlines produce the same expanded scenarios the acceptance suite sees.
+// Sorted by (uri, name, query) for stable order.
+func harvestExecutingScenarios(t *testing.T, dirs []string) []scenarioMeta {
+	t.Helper()
+	var out []scenarioMeta
+	for _, dir := range dirs {
+		files, err := filepath.Glob(filepath.Join(dir, "*.feature"))
+		if err != nil {
+			t.Fatalf("glob %s: %v", dir, err)
+		}
+		for _, path := range files {
+			f, err := os.Open(path)
+			if err != nil {
+				t.Fatalf("open %s: %v", path, err)
+			}
+			doc, err := gherkin.ParseGherkinDocument(f, func() string { return "" })
+			if cerr := f.Close(); cerr != nil {
+				t.Fatalf("close %s: %v", path, cerr)
+			}
+			if err != nil {
+				t.Fatalf("parse %s: %v", path, err)
+			}
+			for _, p := range gherkin.Pickles(*doc, path, newIDGen()) {
+				var sigs []procsig.Signature
+				var positive, negative bool
+				for _, step := range p.Steps {
+					if m := procedureBackgroundRE.FindStringSubmatch(step.Text); m != nil {
+						sig, err := parseProcedureSignature(m[1])
+						if err != nil {
+							t.Fatalf("%s: parse procedure %q: %v", path, m[1], err)
+						}
+						sigs = append(sigs, sig)
+						continue
+					}
+					if positiveOutcomeRE.MatchString(step.Text) {
+						positive = true
+					}
+					if negativeOutcomeRE.MatchString(step.Text) {
+						negative = true
+					}
+				}
+				for _, step := range p.Steps {
+					if !isExecutingQueryStep(step) {
+						continue
+					}
+					// A scenario carrying both a positive and a negative Then
+					// (e.g. write-plus-readback flows) counts as negative for
+					// the parses filter — the parser is not expected to accept
+					// the negative variant.
+					out = append(out, scenarioMeta{
+						uri:      p.Uri,
+						name:     p.Name,
+						query:    step.Argument.DocString.Content,
+						sigs:     sigs,
+						positive: positive && !negative,
+					})
+				}
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].uri != out[j].uri {
+			return out[i].uri < out[j].uri
+		}
+		if out[i].name != out[j].name {
+			return out[i].name < out[j].name
+		}
+		return out[i].query < out[j].query
+	})
+	return out
+}
+
 // isExecutingQueryStep identifies the docstring-bearing "when" step whose
 // content is the query the scenario executes. The two accepted spellings
 // mirror the two Step registrations in initScenario ("executing query" and

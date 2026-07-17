@@ -1,0 +1,9 @@
+CALL NUMBER accepts INTEGER standalone (Call3[1])	equal	testdata/golden/Call3_07c57b301e10.golden.json
+CALL in-query YIELD RETURN (Call1[6])	equal	testdata/golden/Call1_902a8be366be.golden.json
+CALL in-query explicit args YIELD RETURN (Call2[1])	equal	testdata/golden/Call2_aeadf4f8844e.golden.json
+CALL in-query no-YIELD RETURN prior-match (Call1[3])	equal	testdata/golden/Call1_87f94367521c.golden.json
+CALL standalone explicit args YIELD * (Call5[8])	equal	testdata/golden/Call5_dee66ed52bd6.golden.json
+CALL standalone explicit args implicit-YIELD (Call2[2])	equal	testdata/golden/Call2_708fd68c8e95.golden.json
+CALL standalone no-args implicit-YIELD (Call1[5])	equal	testdata/golden/Call1_76a9d5e4baa2.golden.json
+CALL then WITH then CALL (Call6[1])	equal	testdata/golden/Call6_26508cd581f0.golden.json
+authored CALL standalone Returns signature-declaration-order	divergent	testdata/golden/Call3_07c57b301e10.golden.json	sig[0]: pin=test.my.proc(in)::(a,b) corpus=test.my.proc(in)::(out)
