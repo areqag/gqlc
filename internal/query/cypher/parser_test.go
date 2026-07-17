@@ -1,6 +1,7 @@
 package cypher_test
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -15,22 +16,70 @@ import (
 
 // --- Layer 2: targeted sentinel checks (the TCK doesn't encode our taxonomy) ---
 //
-// Layer-2 rule:
+// Layer-2 rule (post gqlc-ls8.5 golden-test migration; see
+// docs/specs/cypher-golden-test-migration.md):
 //
-// ACCEPT-PATH cases (mustParse) come VERBATIM from the corpus. The hand-built
-// query.Query in each entry is the regression layer the golden snapshots —
-// which -update silently rebaselines — cannot give us, but the SHAPE we pin
-// against must come from a committee-authored input — otherwise we would be
-// asserting the shape we want the parser to produce against the input we chose
-// to produce it (evidentiary circularity). We add a mustParse case only when
-// the corpus supplies one.
+// ACCEPT-PATH cases (mustParse) fall into four categories, with an explicit
+// keep-vs-outsource rule for each. The pre-migration doctrine ("mustParse
+// comes VERBATIM from the corpus, always") is retired: it created ~42 pins
+// of pure shape-duplication with the wire-face goldens, retiring their
+// shape-assertion duty to the golden diff at PR review time is what the
+// migration bought.
+//
+//   Class A — src verbatim in TCK corpus AND golden exists on disk:
+//     OUTSOURCED to the wire-face goldens for shape assertion. The
+//     shape-mirror pins that were previously duplicated here have been
+//     deleted (gqlc-ls8.5 Phase 2). The one exception is a sig-carrying
+//     pin whose authored `sigs` field diverges from the corpus scenario's
+//     Background-declared sigs — producing a different shape than the
+//     golden records — kept as the sole member of `sigDivergentKeepers`
+//     with an in-file comment quoting the ledger row that certified the
+//     divergence. Future sig-carrying pins whose sigs happen to equal the
+//     Background sigs must NOT be added; the divergence has to be real
+//     for the pin to earn Class-A survival, and adding one requires
+//     naming it in `sigDivergentKeepers` with an in-file divergence
+//     comment (the `TestMustParseGoldenTwins` negative walk fires
+//     otherwise).
+//
+//   Class B — src verbatim in TCK corpus BUT no golden on disk:
+//     KEPT. Two mechanisms produce this class, both honest:
+//       (i)  skiplisted scenarios — the TCK marks a scenario as a
+//            runtime fail (e.g. catValueBelowBoundary,
+//            catGroupingKeySemantic in acceptance_test.go); the harness
+//            routes them through shouldBeRejected and does not mint a
+//            golden.
+//       (ii) read-side-empty-result scenarios — the CALL harness's
+//            noSideEffects helper mints goldens only for StatementWrite
+//            scenarios; read-side scenarios whose expected result is
+//            empty produce no wire-face pin.
+//     Either way the mustParse pin is the only shape assertion on disk
+//     for that scenario, so it stays.
+//
+//   Class C — src NOT in TCK corpus (authored input): KEPT. The hand-
+//     derived shape IS the independent evidence; round-tripping an
+//     authored input through the parser to mint a golden would launder
+//     the parser's current behaviour into "expected", and a subsequent
+//     `-update` under a broken parser would silently rebaseline the
+//     authored shape to the broken output. The circularity concern the
+//     pre-migration preamble named survives verbatim for this class.
+//
+//   Cluster rules (C2, D2, D1b, ...): NOT exact-shape asserted here.
+//     The openCypher TCK at the pinned tag (justfile: tck_tag) contains
+//     no verbatim read-core query that exercises them — every candidate
+//     uses constructs Stage 0 rejects (WITH, CREATE/MERGE, variable-
+//     length, etc.). The Class-C authoring escape hatch does NOT apply
+//     to cluster rules: we add a case only when the corpus supplies
+//     one. Revisit on every TCK bump. Currently uncovered:
+//       - C2: label union across multiple occurrences of the same variable
+//       - D2: a parameter token used in two value positions (dedup with multiple Uses)
+//       - D1b: an inline property map whose value is a $param ((a {id: $id}))
 //
 // REJECT-PATH cases (mustReject) come VERBATIM from the corpus where the
 // corpus exercises the fail-site; otherwise they are AUTHORED with an inline
 // `// AUTHORED:` marker naming the fail-site by domain. The sentinel taxonomy
 // is ours (the TCK doesn't encode it), and the only assertion is ABSENCE of a
-// model — no shape to outsource — so the accept-path's circularity concern
-// does not apply on this side.
+// model — no shape to outsource — so the Class-A outsourcing above does not
+// apply on this side.
 //
 // Authored mustReject cases are bounded: at most one per fail-site (the same
 // way the corpus provides at most one per scenario), and only when no verbatim
@@ -39,22 +88,19 @@ import (
 // Both rules carry the revisit-on-TCK-bump obligation: when a bump adds a
 // corpus query for an authored case's fail-site, the corpus entry replaces the
 // authored one (the corpus is always preferred when available).
+//
+// The dual-invariant `TestMustParseGoldenTwins` (Phase 1, permanent) enforces
+// this doctrine mechanically: the negative walk fires on any residual
+// Class-A shape-mirror duplication (src-in-corpus AND golden-exists) not
+// exempted by `sigDivergentKeepers`; the positive walk asserts that each
+// named `goldenTwinKeepers` entry exists in mustParse, has a corpus src, and
+// has a golden on disk, catching a TCK bump that DROPS a scenario the pin
+// depends on.
 
 // mustParse pairs each read-core query with the exact query.Query Stage 0 must
 // produce for it, built via the branch-1 model constructors. The test asserts
 // deep equality, so a parser change that shifts the shape must update this
 // hand-built expectation deliberately — there is no -update escape hatch.
-
-// Cluster rules NOT exact-shape asserted here, because the openCypher TCK at the
-// pinned tag (justfile: tck_tag) contains no verbatim read-core query that
-// exercises them — every candidate uses constructs Stage 0 rejects (WITH,
-// CREATE/MERGE, variable-length, etc.) — and the no-authoring-Cypher rule means
-// we add a case only when the corpus supplies one:
-//   - C2: label union across multiple occurrences of the same variable
-//   - D2: a parameter token used in two value positions (dedup with multiple Uses)
-//   - D1b: an inline property map whose value is a $param ((a {id: $id}))
-//
-// Revisit on every TCK bump: a new feature file may close one of these gaps.
 // oneBranch wraps a single part (and query-wide parameters) into the
 // one-branch/one-part Query shape the read-core (WITH-free, UNION-free) queries
 // lower to. The Stage-4 nesting is always present even for the flat common case.
@@ -85,196 +131,6 @@ var mustParse = map[string]struct {
 	// pre-Stage-14 behaviour for queries without CALL.
 	sigs []procsig.Signature
 }{
-	// Match1 [1] Match non-existent nodes returns empty: one node binding,
-	// bare-variable return → Ref{n,""}, column name "n".
-	"node": {
-		src: "MATCH (n)\nRETURN n",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewNodeBinding("n", nil)),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
-			},
-		}),
-	},
-	// Match1 [3] Matching nodes using multiple labels: C2 conjunctive labels in
-	// source order, A then B.
-	"node multi-label": {
-		src: "MATCH (a:A:B)\nRETURN a",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewNodeBinding("a", graph.LabelSet{"A", "B"})),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
-			},
-		}),
-	},
-	// Match1 [4] Simple node inline property predicate: the inline map value is a
-	// literal (not a $param), so no parameter use is mined (D1b).
-	"node inline property": {
-		src: "MATCH (n {name: 'bar'})\nRETURN n",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewNodeBinding("n", nil)),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
-			},
-		}),
-	},
-	// Match1 [5] Use multiple MATCH clauses to do a Cartesian product: two nodes
-	// in textual order [n, m]; explicit AS aliases (E1) become the column names.
-	"comma pattern with aliases": {
-		src: "MATCH (n), (m)\nRETURN n.num AS n, m.num AS m",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewNodeBinding("n", nil)),
-				must(query.NewNodeBinding("m", nil)),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n", Property: "num"}, query.TypeUnknown{})},
-				{Name: "m", Value: query.NewRefProjection(query.Ref{Variable: "m", Property: "num"}, query.TypeUnknown{})},
-			},
-		}),
-	},
-	// Match2 [1] Match non-existent relationships returns empty: C1 anonymous edge
-	// is its own binding; C4 both endpoints are inline-empty (the () case).
-	"anonymous edge": {
-		src: "MATCH ()-[r]->()\nRETURN r",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewEdgeBinding("r", nil,
-					query.NewInlineEndpoint(nil),
-					query.NewInlineEndpoint(nil),
-					true,
-				)),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"}, query.TypeEdge{})},
-			},
-		}),
-	},
-	// Match2 [2] label predicate on both sides: C4 anonymous endpoints carry
-	// inline labels — [A] on the source, [B] on the target.
-	"edge inline-labelled endpoints": {
-		src: "MATCH (:A)-[r]->(:B)\nRETURN r",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewEdgeBinding("r", nil,
-					query.NewInlineEndpoint(graph.LabelSet{"A"}),
-					query.NewInlineEndpoint(graph.LabelSet{"B"}),
-					true,
-				)),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"}, query.TypeEdge{})},
-			},
-		}),
-	},
-	// Match3 [1] Get neighbours: textual first-appearance order [n1, rel, n2];
-	// var endpoints for named nodes (C4 — labels live on their bindings).
-	"typed edge named endpoints": {
-		src: "MATCH (n1)-[rel:KNOWS]->(n2)\nRETURN n1, n2",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewNodeBinding("n1", nil)),
-				must(query.NewEdgeBinding("rel", graph.LabelSet{"KNOWS"},
-					must(query.NewVarEndpoint("n1")),
-					must(query.NewVarEndpoint("n2")),
-					true,
-				)),
-				must(query.NewNodeBinding("n2", nil)),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "n1", Value: query.NewRefProjection(query.Ref{Variable: "n1"}, query.TypeNode{})},
-				{Name: "n2", Value: query.NewRefProjection(query.Ref{Variable: "n2"}, query.TypeNode{})},
-			},
-		}),
-	},
-	// Match3 [2] Directed match of a simple relationship: E3 whole-entity returns
-	// → Ref{var, ""} for each; textual order [a, r, b].
-	"directed edge whole entities": {
-		src: "MATCH (a)-[r]->(b)\nRETURN a, r, b",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewNodeBinding("a", nil)),
-				must(query.NewEdgeBinding("r", nil,
-					must(query.NewVarEndpoint("a")),
-					must(query.NewVarEndpoint("b")),
-					true,
-				)),
-				must(query.NewNodeBinding("b", nil)),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
-				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"}, query.TypeEdge{})},
-				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"}, query.TypeNode{})},
-			},
-		}),
-	},
-	// Match3 [3] "Undirected match on simple relationship graph" — verbatim corpus
-	// query (RETURN a, r, b), the undirected twin of "directed edge whole entities"
-	// (Match3 [2]). Stage 5: directed=false (the trailing false), endpoints in
-	// textual order [a, r, b] with no canonical flip (the resolver tries both).
-	"undirected edge whole entities": {
-		src: "MATCH (a)-[r]-(b)\nRETURN a, r, b",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewNodeBinding("a", nil)),
-				must(query.NewEdgeBinding("r", nil,
-					must(query.NewVarEndpoint("a")),
-					must(query.NewVarEndpoint("b")),
-					false,
-				)),
-				must(query.NewNodeBinding("b", nil)),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
-				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"}, query.TypeEdge{})},
-				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"}, query.TypeNode{})},
-			},
-		}),
-	},
-	// MatchWhere1 [6] parameter in a property predicate: D1a pairs $param with
-	// b.name → one Parameter with Use PropertyUse{Ref{b, name}}.
-	"where property parameter": {
-		src: "MATCH (a)-[r]->(b)\nWHERE b.name = $param\nRETURN r",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewNodeBinding("a", nil)),
-				must(query.NewEdgeBinding("r", nil,
-					must(query.NewVarEndpoint("a")),
-					must(query.NewVarEndpoint("b")),
-					true,
-				)),
-				must(query.NewNodeBinding("b", nil)),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"}, query.TypeEdge{})},
-			},
-		}, query.Parameter{Name: "param", Uses: []query.Use{
-			query.NewPropertyUse(query.Ref{Variable: "b", Property: "name"}),
-		}}),
-	},
-	// ReturnSkipLimit1 [2] "Start the result from second row by param" —
-	// verbatim TCK query. Stage 1: SKIP $p is a clause-slot-typed parameter
-	// use; the parameter carries one Use = ClauseSlotUse{Skip}, not a
-	// property Ref. ORDER BY a bare var.prop is accept-and-ignored (E4).
-	"skip parameter": {
-		src: "MATCH (n)\nRETURN n\nORDER BY n.name ASC\nSKIP $skipAmount",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewNodeBinding("n", nil)),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
-			},
-		}, query.Parameter{Name: "skipAmount", Uses: []query.Use{
-			query.NewClauseSlotUse(query.ClauseSlotSkip),
-		}}),
-	},
 	// ReturnSkipLimit2 [10] "Negative parameter for LIMIT should fail" —
 	// verbatim TCK query. The TCK asserts a runtime NegativeIntegerArgument
 	// (parameter _limit = -1), which is out of scope for a parser; the query
@@ -292,70 +148,6 @@ var mustParse = map[string]struct {
 		}, query.Parameter{Name: "_limit", Uses: []query.Use{
 			query.NewClauseSlotUse(query.ClauseSlotLimit),
 		}}),
-	},
-	// Create2 [4] control query: a left-pointing arc. C-Direction: the canonical
-	// edge is source=b, target=a (the arrow's tail is the source) — independent of
-	// how it was written. The relationship has no variable (anonymous edge, C1).
-	// (TCK uses "When executing control query:" here, not "When executing query:",
-	// so this scenario is outside our godog suite; the verbatim query is still
-	// fair Layer-2 material.)
-	"edge left-pointing canonical": {
-		src: "MATCH (a:A)<-[:R]-(b:B)\nRETURN a, b",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewNodeBinding("a", graph.LabelSet{"A"})),
-				must(query.NewEdgeBinding("", graph.LabelSet{"R"},
-					must(query.NewVarEndpoint("b")),
-					must(query.NewVarEndpoint("a")),
-					true,
-				)),
-				must(query.NewNodeBinding("b", graph.LabelSet{"B"})),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
-				{Name: "b", Value: query.NewRefProjection(query.Ref{Variable: "b"}, query.TypeNode{})},
-			},
-		}),
-	},
-	// Match7 [1] "Simple OPTIONAL MATCH on empty graph" — verbatim TCK query.
-	// The single node binding is introduced in OPTIONAL MATCH, so its nullable
-	// flag is true (ADR 0006) and it carries the clause's group id 1 (ay9).
-	// The RETURN item traces back to it via Ref{n,""}.
-	"optional match simple": {
-		src: "OPTIONAL MATCH (n)\nRETURN n",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewNullableNodeBindingInGroup("n", nil, 1)),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
-			},
-		}),
-	},
-	// Match7 [2] "OPTIONAL MATCH with previously bound nodes" — verbatim TCK
-	// query. Pins the reuse rule (ADR 0006): n is first introduced in the
-	// required MATCH (non-nullable, group 0); the anonymous :NOT_EXIST edge
-	// and x are first introduced in OPTIONAL MATCH (both nullable, sharing
-	// the clause's group id 1 — ay9). The anonymous edge carries the group
-	// uniformly even though no Ref reads it.
-	"optional match reuses prior binding": {
-		src: "MATCH (n)\nOPTIONAL MATCH (n)-[:NOT_EXIST]->(x)\nRETURN n, x",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewNodeBinding("n", nil)),
-				must(query.NewNullableEdgeBindingInGroup("", graph.LabelSet{"NOT_EXIST"},
-					must(query.NewVarEndpoint("n")),
-					must(query.NewVarEndpoint("x")),
-					true,
-					1,
-				)),
-				must(query.NewNullableNodeBindingInGroup("x", nil, 1)),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
-				{Name: "x", Value: query.NewRefProjection(query.Ref{Variable: "x"}, query.TypeNode{})},
-			},
-		}),
 	},
 	// ay9 spec §2.2 — two OPTIONAL MATCH clauses mint distinct group ids: a
 	// takes the first clause's group 1, b the second clause's group 2. A group
@@ -459,19 +251,6 @@ var mustParse = map[string]struct {
 			},
 		}),
 	},
-	// Temporal4 [1] property return with no alias: E1 derives the column name from
-	// the verbatim expression text — "n.created", not "created".
-	"property return no alias": {
-		src: "MATCH (n)\nRETURN n.created",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewNodeBinding("n", nil)),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "n.created", Value: query.NewRefProjection(query.Ref{Variable: "n", Property: "created"}, query.TypeUnknown{})},
-			},
-		}),
-	},
 	// Stage 3 — canonical aggregate. count(*) is the degenerate aggregate: the
 	// count-star atom, AggCount with no referenced bindings (it counts rows, not a
 	// binding). Column name is the verbatim text "count(*)". The aggregate kind is
@@ -553,54 +332,6 @@ var mustParse = map[string]struct {
 			}}},
 		},
 	},
-	// With7 [2] "Multiple WITHs using a predicate and aggregation" — verbatim
-	// TCK query (the "foaf shape"). The regression this locks is at expr.go's
-	// mineWhere: the WHERE that follows a WITH-with-aggregation-alias references
-	// a name (foaf) bound by the WITH projection itself, not by any earlier
-	// pattern binding. The rich-typer sweep inside mineWhere would otherwise
-	// append that alias's refs to curPart.refs and break the referential-
-	// integrity sweep at build; a snapshot/restore of l.curPart.refs around
-	// typeExpressionMining (expr.go:450–452) discards them. The pin catches a
-	// refactor that drops the snapshot restore — Part 1's Returns must be
-	// exactly [otherPerson] (no leaked foaf/count(*) refs), and Parameters must
-	// stay nil (the literal-vs-alias predicate mines nothing).
-	"with-aggregate-where scope snapshot (foaf)": {
-		src: "MATCH (david {name: 'David'})--(otherPerson)-->()\nWITH otherPerson, count(*) AS foaf\nWHERE foaf > 1\nWITH otherPerson\nWHERE otherPerson.name <> 'NotOther'\nRETURN count(*)",
-		want: query.Query{
-			Branches: []query.Branch{{Parts: []query.Part{
-				{
-					Bindings: []query.Binding{
-						must(query.NewNodeBinding("david", nil)),
-						must(query.NewEdgeBinding("", nil,
-							must(query.NewVarEndpoint("david")),
-							must(query.NewVarEndpoint("otherPerson")),
-							false,
-						)),
-						must(query.NewNodeBinding("otherPerson", nil)),
-						must(query.NewEdgeBinding("", nil,
-							must(query.NewVarEndpoint("otherPerson")),
-							query.NewInlineEndpoint(nil),
-							true,
-						)),
-					},
-					Returns: []query.ReturnItem{
-						{Name: "otherPerson", Value: query.NewRefProjection(query.Ref{Variable: "otherPerson"}, query.TypeNode{})},
-						{Name: "foaf", Value: query.NewAggregateProjection(query.AggCount, nil, false, query.TypeInt{})},
-					},
-				},
-				{
-					Returns: []query.ReturnItem{
-						{Name: "otherPerson", Value: query.NewRefProjection(query.Ref{Variable: "otherPerson"}, query.TypeNode{})},
-					},
-				},
-				{
-					Returns: []query.ReturnItem{
-						{Name: "count(*)", Value: query.NewAggregateProjection(query.AggCount, nil, false, query.TypeInt{})},
-					},
-				},
-			}}},
-		},
-	},
 	// Stage 4 — canonical two-branch UNION (distinct). Each branch is one part
 	// with its own binding; Combinators has one entry, UnionDistinct. The branches
 	// are recorded verbatim in source order — the parser does not pre-pick branch 0
@@ -662,19 +393,6 @@ var mustParse = map[string]struct {
 				query.NewPropertyUseAt(query.Ref{Variable: "c", Property: "name"}, 1, 1),
 			}}},
 		},
-	},
-	// Stage 6 — canonical arithmetic-in-RETURN. "Arithmetic precedence test"
-	// (Mathematical8 [1] verbatim). All operands are integer literals, so the
-	// parser types the result as TypeInt. The projection is an ExprProjection
-	// (no bindings touched, so refs are nil). The item's name is the verbatim
-	// expression text.
-	"arithmetic in return": {
-		src: "RETURN 12 / 4 * 3 - 2 * 4",
-		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
-			Returns: []query.ReturnItem{
-				{Name: "12 / 4 * 3 - 2 * 4", Value: query.NewExprProjection(nil, query.TypeInt{})},
-			},
-		}}}}},
 	},
 	// Stage 6 — canonical IS NULL predicate. "Property null check on non-null
 	// node" (Null1 [1] verbatim). n.missing IS NULL is a predicate: result type
@@ -1329,67 +1047,6 @@ var mustParse = map[string]struct {
 			},
 		}),
 	},
-	// Stage 9 — canonical UNWIND of a scalar list. Unwind1 [1] verbatim.
-	// The UnwindBinding carries element type TypeInt (the source list is
-	// list<int>); the RETURN item's type is TypeInt (refType reads the
-	// UnwindBinding's ElementType).
-	"unwind scalar list": {
-		src: "UNWIND [1, 2, 3] AS x\nRETURN x",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewUnwindBinding("x", query.TypeInt{})),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "x", Value: query.NewRefProjection(query.Ref{Variable: "x"}, query.TypeInt{})},
-			},
-		}),
-	},
-	// Stage 9 — UNWIND of a range() function. Unwind1 [2] verbatim.
-	// range() is a bare function call: FuncProjection with TypeUnknown
-	// return type at Stage 6 (function identity below the boundary,
-	// ADR 0005). The source expression types as TypeUnknown, so the
-	// element type collapses to TypeUnknown — the honest posture the
-	// resolver upgrades from the schema.
-	"unwind range function": {
-		src: "UNWIND range(1, 3) AS x\nRETURN x",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewUnwindBinding("x", query.TypeUnknown{})),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "x", Value: query.NewRefProjection(query.Ref{Variable: "x"}, query.TypeUnknown{})},
-			},
-		}),
-	},
-	// Stage 9 — UNWIND of an empty list. Unwind1 [8] verbatim. Empty
-	// list literal types as list<unknown> at Stage 6 (mixed / empty
-	// element unification), so the element type is TypeUnknown. Runtime
-	// yields zero rows — a cardinality fact below the boundary.
-	"unwind empty list": {
-		src: "UNWIND [] AS empty\nRETURN empty",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewUnwindBinding("empty", query.TypeUnknown{})),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "empty", Value: query.NewRefProjection(query.Ref{Variable: "empty"}, query.TypeUnknown{})},
-			},
-		}),
-	},
-	// Stage 9 — UNWIND of the null literal. Unwind1 [9] verbatim. null is
-	// not a list; the element type collapses to TypeUnknown (wrong
-	// concrete type would be strictly worse). Runtime yields zero rows.
-	"unwind null": {
-		src: "UNWIND null AS nil\nRETURN nil",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewUnwindBinding("nil", query.TypeUnknown{})),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "nil", Value: query.NewRefProjection(query.Ref{Variable: "nil"}, query.TypeUnknown{})},
-			},
-		}),
-	},
 	// Stage 9 — UNWIND of a list of lists (double unwind, Unwind1 [7]'s
 	// first UNWIND). WITH exports `lol` as list<list<int>>, so the
 	// UnwindBinding for `x` records element type list<int>. Nested
@@ -1469,24 +1126,6 @@ var mustParse = map[string]struct {
 				},
 			}}},
 		},
-	},
-	// Stage 10 — DISTINCT enters the model as a scalar axis. count(DISTINCT a)
-	// deduplicates its input before counting, so the model preserves the axis;
-	// count still types as TypeInt unconditionally. The aggregate-level DISTINCT
-	// does NOT flip the enclosing part's Distinct axis (part-distinct-axis
-	// spec §1.5): the two grammar sites (oC_FunctionInvocation DISTINCT vs.
-	// oC_ProjectionBody DISTINCT) are read independently, so Part.Distinct
-	// stays false here (zero-valued, elided).
-	"count distinct": {
-		src: "OPTIONAL MATCH (a)\nRETURN count(DISTINCT a)",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewNullableNodeBindingInGroup("a", nil, 1)),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "count(DISTINCT a)", Value: query.NewAggregateProjection(query.AggCount, []query.Ref{{Variable: "a"}}, true, query.TypeInt{})},
-			},
-		}),
 	},
 	// part-distinct-axis spec §1.9 #4 — RETURN DISTINCT n lifts the projection-
 	// body DISTINCT keyword onto Part.Distinct. The projection itself is an
@@ -1870,35 +1509,6 @@ var mustParse = map[string]struct {
 					false,
 					query.TypeInt{},
 				)},
-			},
-		}),
-	},
-	// Stage 11 — ALL quantifier at projection position. Quantifier4 [1]:
-	// the source list is an empty literal, the filter body's iteration
-	// variable never leaks. Every arm types as TypeBool via typeAtom's
-	// Stage-11 quantifier arm. The three columns are three separate
-	// ExprProjection items (source-list refs are nil, filter refs are
-	// discarded per spec §1.1).
-	"all quantifier empty list": {
-		src: "RETURN all(x IN [] WHERE true) AS a, all(x IN [] WHERE false) AS b, all(x IN [] WHERE x) AS c",
-		want: oneBranch(query.Part{
-			Returns: []query.ReturnItem{
-				{Name: "a", Value: query.NewExprProjection(nil, query.TypeBool{})},
-				{Name: "b", Value: query.NewExprProjection(nil, query.TypeBool{})},
-				{Name: "c", Value: query.NewExprProjection(nil, query.TypeBool{})},
-			},
-		}),
-	},
-	// Stage 11 — NONE quantifier at projection position. Quantifier1 [1]:
-	// same shape as ALL — three empty-list quantifiers over a truthy /
-	// falsy / iteration-var predicate, each TypeBool.
-	"none quantifier empty list": {
-		src: "RETURN none(x IN [] WHERE true) AS a, none(x IN [] WHERE false) AS b, none(x IN [] WHERE x) AS c",
-		want: oneBranch(query.Part{
-			Returns: []query.ReturnItem{
-				{Name: "a", Value: query.NewExprProjection(nil, query.TypeBool{})},
-				{Name: "b", Value: query.NewExprProjection(nil, query.TypeBool{})},
-				{Name: "c", Value: query.NewExprProjection(nil, query.TypeBool{})},
 			},
 		}),
 	},
@@ -2466,17 +2076,6 @@ var mustParse = map[string]struct {
 	},
 	// Stage 12 — CREATE, DELETE, SET, REMOVE (write clauses).
 
-	// Create1 [1]: CREATE () — the minimum CREATE. An anonymous node is not a
-	// binding (C3), so bindings is empty; the CreateEffect records the empty
-	// variables slice (no named creation to track). StatementKind flips to
-	// StatementWrite. Projection-less shape: no Returns, no ReturnsAll.
-	"create anonymous node": {
-		src: "CREATE ()",
-		want: oneWriteBranch(query.Part{
-			Effects: []query.Effect{query.NewCreateEffect(nil)},
-		}),
-	},
-
 	// Create2 [?] equivalent: CREATE (n:Label). The CreateEffect records the
 	// named binding, and the NodeBinding enters Part.Bindings verbatim (as if
 	// MATCH had bound it). Projection-less.
@@ -2501,29 +2100,6 @@ var mustParse = map[string]struct {
 				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
 			},
 			Effects: []query.Effect{query.NewCreateEffect([]string{"n"})},
-		}),
-	},
-
-	// Delete1 [1]: MATCH (n) DELETE n — the DeleteEffect targets the MATCH-
-	// bound n; Detach is false. Projection-less write.
-	"delete node": {
-		src: "MATCH (n)\nDELETE n",
-		want: oneWriteBranch(query.Part{
-			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
-			Effects: []query.Effect{
-				query.NewDeleteEffect([]query.Ref{{Variable: "n"}}, nil, false),
-			},
-		}),
-	},
-
-	// Delete1 [2]: MATCH (n) DETACH DELETE n — same shape with Detach=true.
-	"detach delete node": {
-		src: "MATCH (n)\nDETACH DELETE n",
-		want: oneWriteBranch(query.Part{
-			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
-			Effects: []query.Effect{
-				query.NewDeleteEffect([]query.Ref{{Variable: "n"}}, nil, true),
-			},
 		}),
 	},
 
@@ -2556,21 +2132,6 @@ var mustParse = map[string]struct {
 			},
 			Effects: []query.Effect{
 				must(query.NewSetEntityEffect("n", query.SetOpReplace, query.TypeMap{}, nil)),
-			},
-		}),
-	},
-
-	// Set5 shape: MATCH (n) SET n:Foo RETURN n. SetLabelsEffect carries the
-	// variable and labels; no value expression.
-	"set labels": {
-		src: "MATCH (n)\nSET n:Foo\nRETURN n",
-		want: oneWriteBranch(query.Part{
-			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
-			Returns: []query.ReturnItem{
-				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
-			},
-			Effects: []query.Effect{
-				must(query.NewSetLabelsEffect("n", graph.LabelSet{"Foo"})),
 			},
 		}),
 	},
@@ -2687,134 +2248,6 @@ var mustParse = map[string]struct {
 		}),
 	},
 
-	// Merge1 [3] Merge node with label when it exists: MERGE (a:TheLabel)
-	// RETURN a.id — a labelled MERGE feeding a property projection. Still
-	// StatementWrite (a write followed by a read-back is a write for
-	// tx-mode purposes).
-	"merge labelled node returning property": {
-		src: "MERGE (a:TheLabel)\nRETURN a.id",
-		want: oneWriteBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewNodeBinding("a", graph.LabelSet{"TheLabel"})),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "a.id", Value: query.NewRefProjection(query.Ref{Variable: "a", Property: "id"}, query.TypeUnknown{})},
-			},
-			Effects: []query.Effect{
-				must(query.NewMergeEffect([]string{"a"}, nil, nil)),
-			},
-		}),
-	},
-
-	// Merge1 [11] Merge should be able to merge using property of bound node:
-	// MATCH (person:Person) MERGE (city:City {name: person.bornIn}). Pins
-	// the mineInlineMap value-side widening — the MERGE part's refs list
-	// carries `person` (from person.bornIn), and MergeEffect.Variables is
-	// ["city"] (only the newly-introduced binding). Projection-less write.
-	"merge with inline map referencing bound var": {
-		src: "MATCH (person:Person)\nMERGE (city:City {name: person.bornIn})",
-		want: oneWriteBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewNodeBinding("person", graph.LabelSet{"Person"})),
-				must(query.NewNodeBinding("city", graph.LabelSet{"City"})),
-			},
-			Effects: []query.Effect{
-				must(query.NewMergeEffect([]string{"city"}, nil, nil)),
-			},
-		}),
-	},
-
-	// Merge3 [1] Merge should be able to set labels on match: MERGE (a) ON
-	// MATCH SET a:L. One MergeEffect with an OnMatch slice of one
-	// SetLabelsEffect{"a", ["L"]} and empty OnCreate.
-	"merge with on match set labels": {
-		src: "MERGE (a)\n  ON MATCH SET a:L",
-		want: oneWriteBranch(query.Part{
-			Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
-			Effects: []query.Effect{
-				must(query.NewMergeEffect(
-					[]string{"a"},
-					[]query.SetEffect{must(query.NewSetLabelsEffect("a", graph.LabelSet{"L"}))},
-					nil,
-				)),
-			},
-		}),
-	},
-
-	// Merge2 [2] ON CREATE on created nodes: MERGE (b) ON CREATE SET
-	// b.created = 1. Pins the ON CREATE path with a SetPropertyEffect
-	// payload — one MergeEffect with Variables ["b"], empty OnMatch, and
-	// OnCreate carrying a SetPropertyEffect{Ref{b, created}, TypeInt}.
-	// Projection-less write.
-	"merge with on create set property": {
-		src: "MERGE (b)\n  ON CREATE SET b.created = 1",
-		want: oneWriteBranch(query.Part{
-			Bindings: []query.Binding{must(query.NewNodeBinding("b", nil))},
-			Effects: []query.Effect{
-				must(query.NewMergeEffect(
-					[]string{"b"},
-					nil,
-					[]query.SetEffect{must(query.NewSetPropertyEffect(query.Ref{Variable: "b", Property: "created"}, query.TypeInt{}, nil))},
-				)),
-			},
-		}),
-	},
-
-	// Merge4 [1] Merge should be able to set labels on match and on create:
-	// MATCH () MERGE (a:L) ON MATCH SET a:M1 ON CREATE SET a:M2. Both ON
-	// branches populated with distinct SetEffect payloads. MATCH () introduces
-	// no binding (anonymous nodes are pure filters on the read side, C3); the
-	// MERGE introduces `a` as a NodeBinding, and the MergeEffect carries
-	// Variables ["a"] with OnMatch and OnCreate each carrying one
-	// SetLabelsEffect.
-	"merge with both on branches": {
-		src: "MATCH ()\nMERGE (a:L)\n  ON MATCH SET a:M1\n  ON CREATE SET a:M2",
-		want: oneWriteBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewNodeBinding("a", graph.LabelSet{"L"})),
-			},
-			Effects: []query.Effect{
-				must(query.NewMergeEffect(
-					[]string{"a"},
-					[]query.SetEffect{must(query.NewSetLabelsEffect("a", graph.LabelSet{"M1"}))},
-					[]query.SetEffect{must(query.NewSetLabelsEffect("a", graph.LabelSet{"M2"}))},
-				)),
-			},
-		}),
-	},
-
-	// Merge1 [8] Merge should handle argument properly: WITH 42 AS var
-	// MERGE (c:N {var: var}). Two-part query: the WITH exports `var`, the
-	// second part MERGES on a pattern using `var` as an inline-map value.
-	// Pins the inline-map value-side widening on the MERGE side for a
-	// bare-variable value — the MERGE part's refs list carries `var`.
-	"merge argument handling across with": {
-		src: "WITH 42 AS var\nMERGE (c:N {var: var})",
-		want: func() query.Query {
-			q := query.Query{
-				Branches: []query.Branch{{
-					Parts: []query.Part{
-						{
-							Returns: []query.ReturnItem{
-								{Name: "var", Value: query.NewLiteralProjection(query.TypeInt{})},
-							},
-						},
-						{
-							Bindings: []query.Binding{
-								must(query.NewNodeBinding("c", graph.LabelSet{"N"})),
-							},
-							Effects: []query.Effect{
-								must(query.NewMergeEffect([]string{"c"}, nil, nil)),
-							},
-						},
-					},
-				}},
-			}
-			q.StatementKind = query.StatementWrite
-			return q
-		}(),
-	},
-
 	// AUTHORED (Stage 13 §1.8): MERGE inside EXISTS does not flip
 	// StatementKind. The outer EnterOC_Merge early-returns under
 	// subqueryDepth > 0 before markWrite/writeSeen fires, so a query with a
@@ -2912,172 +2345,6 @@ var mustParse = map[string]struct {
 			ReturnsAll: true,
 		}),
 		sigs: []procsig.Signature{{Name: "test.doNothing"}},
-	},
-	// Call1 [3] In-query CALL with no YIELD followed by RETURN n.
-	// MATCH binds n; CALL introduces no CallBinding (in-query no-YIELD
-	// posture, spec §4.2 step 9); RETURN n resolves via the MATCH
-	// binding.
-	"CALL in-query no-YIELD RETURN prior-match (Call1[3])": {
-		src: "MATCH (n)\nCALL test.doNothing()\nRETURN n",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewNodeBinding("n", nil)),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
-			},
-		}),
-		sigs: []procsig.Signature{{Name: "test.doNothing"}},
-	},
-	// Call1 [5] Standalone CALL with no args + implicit YIELD * from
-	// the one-result signature. One CallBinding `label` (STRING?);
-	// Part.Returns is one RefProjection on `label` at TypeString;
-	// ReturnsAll true.
-	"CALL standalone no-args implicit-YIELD (Call1[5])": {
-		src: "CALL test.labels()",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewCallBinding("label", "test.labels", "label", query.TypeString{}, true)),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "label", Value: query.NewRefProjection(query.Ref{Variable: "label"}, query.TypeString{})},
-			},
-			ReturnsAll: true,
-		}),
-		sigs: []procsig.Signature{{
-			Name: "test.labels",
-			Results: []procsig.Result{
-				{Name: "label", Token: procsig.TokenString, Nullable: true},
-			},
-		}},
-	},
-	// Call1 [6] In-query CALL YIELD followed by RETURN. One
-	// CallBinding `label`; Returns is the RETURN clause's
-	// RefProjection on `label`, ReturnsAll false (no `*`).
-	"CALL in-query YIELD RETURN (Call1[6])": {
-		src: "CALL test.labels() YIELD label\nRETURN label",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewCallBinding("label", "test.labels", "label", query.TypeString{}, true)),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "label", Value: query.NewRefProjection(query.Ref{Variable: "label"}, query.TypeString{})},
-			},
-		}),
-		sigs: []procsig.Signature{{
-			Name: "test.labels",
-			Results: []procsig.Result{
-				{Name: "label", Token: procsig.TokenString, Nullable: true},
-			},
-		}},
-	},
-	// Call2 [1] In-query CALL with explicit args + YIELD + RETURN.
-	// Two CallBindings (city, country_code); two args are literals
-	// (no refs), so no ExprUses. RETURN drives the returns slice.
-	"CALL in-query explicit args YIELD RETURN (Call2[1])": {
-		src: "CALL test.my.proc('Stefan', 1) YIELD city, country_code\nRETURN city, country_code",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewCallBindingWithArgs("city", "test.my.proc", "city", query.TypeString{}, true, []query.CallArg{query.NewCallArg(query.TypeString{}), query.NewCallArg(query.TypeInt{})})),
-				must(query.NewCallBindingWithArgs("country_code", "test.my.proc", "country_code", query.TypeInt{}, true, []query.CallArg{query.NewCallArg(query.TypeString{}), query.NewCallArg(query.TypeInt{})})),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "city", Value: query.NewRefProjection(query.Ref{Variable: "city"}, query.TypeString{})},
-				{Name: "country_code", Value: query.NewRefProjection(query.Ref{Variable: "country_code"}, query.TypeInt{})},
-			},
-		}),
-		sigs: []procsig.Signature{{
-			Name: "test.my.proc",
-			Params: []procsig.Param{
-				{Name: "name", Token: procsig.TokenString, Nullable: true},
-				{Name: "id", Token: procsig.TokenInteger, Nullable: true},
-			},
-			Results: []procsig.Result{
-				{Name: "city", Token: procsig.TokenString, Nullable: true},
-				{Name: "country_code", Token: procsig.TokenInteger, Nullable: true},
-			},
-		}},
-	},
-	// Call2 [2] Standalone CALL with explicit args (implicit YIELD).
-	// Two CallBindings (signature order), Part.Returns synthesised
-	// from CallBindings, ReturnsAll true.
-	"CALL standalone explicit args implicit-YIELD (Call2[2])": {
-		src: "CALL test.my.proc('Stefan', 1)",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewCallBindingWithArgs("city", "test.my.proc", "city", query.TypeString{}, true, []query.CallArg{query.NewCallArg(query.TypeString{}), query.NewCallArg(query.TypeInt{})})),
-				must(query.NewCallBindingWithArgs("country_code", "test.my.proc", "country_code", query.TypeInt{}, true, []query.CallArg{query.NewCallArg(query.TypeString{}), query.NewCallArg(query.TypeInt{})})),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "city", Value: query.NewRefProjection(query.Ref{Variable: "city"}, query.TypeString{})},
-				{Name: "country_code", Value: query.NewRefProjection(query.Ref{Variable: "country_code"}, query.TypeInt{})},
-			},
-			ReturnsAll: true,
-		}),
-		sigs: []procsig.Signature{{
-			Name: "test.my.proc",
-			Params: []procsig.Param{
-				{Name: "name", Token: procsig.TokenString, Nullable: true},
-				{Name: "id", Token: procsig.TokenInteger, Nullable: true},
-			},
-			Results: []procsig.Result{
-				{Name: "city", Token: procsig.TokenString, Nullable: true},
-				{Name: "country_code", Token: procsig.TokenInteger, Nullable: true},
-			},
-		}},
-	},
-	// Call5 [8] Standalone CALL with args + YIELD *. Same expansion
-	// as Call2 [2] (implicit YIELD == YIELD * for the standalone
-	// path).
-	"CALL standalone explicit args YIELD * (Call5[8])": {
-		src: "CALL test.my.proc('Stefan', 1) YIELD *",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewCallBindingWithArgs("city", "test.my.proc", "city", query.TypeString{}, true, []query.CallArg{query.NewCallArg(query.TypeString{}), query.NewCallArg(query.TypeInt{})})),
-				must(query.NewCallBindingWithArgs("country_code", "test.my.proc", "country_code", query.TypeInt{}, true, []query.CallArg{query.NewCallArg(query.TypeString{}), query.NewCallArg(query.TypeInt{})})),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "city", Value: query.NewRefProjection(query.Ref{Variable: "city"}, query.TypeString{})},
-				{Name: "country_code", Value: query.NewRefProjection(query.Ref{Variable: "country_code"}, query.TypeInt{})},
-			},
-			ReturnsAll: true,
-		}),
-		sigs: []procsig.Signature{{
-			Name: "test.my.proc",
-			Params: []procsig.Param{
-				{Name: "name", Token: procsig.TokenString, Nullable: true},
-				{Name: "id", Token: procsig.TokenInteger, Nullable: true},
-			},
-			Results: []procsig.Result{
-				{Name: "city", Token: procsig.TokenString, Nullable: true},
-				{Name: "country_code", Token: procsig.TokenInteger, Nullable: true},
-			},
-		}},
-	},
-	// Call3 [1] NUMBER accepts INTEGER — the arg-type check is
-	// bucket-3, so the pin exercises the accept-path structurally
-	// (one CallBinding `out` at TypeString, nullable true). The
-	// argument 42 is a literal, so no refs.
-	"CALL NUMBER accepts INTEGER standalone (Call3[1])": {
-		src: "CALL test.my.proc(42)",
-		want: oneBranch(query.Part{
-			Bindings: []query.Binding{
-				must(query.NewCallBindingWithArgs("out", "test.my.proc", "out", query.TypeString{}, true, []query.CallArg{query.NewCallArg(query.TypeInt{})})),
-			},
-			Returns: []query.ReturnItem{
-				{Name: "out", Value: query.NewRefProjection(query.Ref{Variable: "out"}, query.TypeString{})},
-			},
-			ReturnsAll: true,
-		}),
-		sigs: []procsig.Signature{{
-			Name: "test.my.proc",
-			Params: []procsig.Param{
-				{Name: "in", Token: procsig.TokenNumber, Nullable: true},
-			},
-			Results: []procsig.Result{
-				{Name: "out", Token: procsig.TokenString, Nullable: true},
-			},
-		}},
 	},
 	// AUTHORED (Stage 14 §1.8 pin a): CALL inside EXISTS does not
 	// populate an outer CallBinding. The subqueryDepth counter
@@ -3275,6 +2542,18 @@ var mustParse = map[string]struct {
 	// expansion is deterministic signature-declaration order. Two
 	// results (a: INTEGER, b: STRING); the CALL has no YIELD, so the
 	// expansion follows sig.Results order.
+	//
+	// gqlc-ls8.5 sig-audit keeper — sole member of both goldenTwinKeepers
+	// (positive walk) and sigDivergentKeepers (negative-walk exemption).
+	// Historical ledger row (Phase 1 sig-audit, retired at Phase 3;
+	// pattern in git history + spec §3.2):
+	//   authored CALL standalone Returns signature-declaration-order
+	//     divergent  testdata/golden/Call3_07c57b301e10.golden.json
+	//     sig[0]: pin=test.my.proc(in)::(a,b) corpus=test.my.proc(in)::(out)
+	// Corpus Call3[1]'s Background declares a single result named `out`;
+	// this pin's sigs field declares two results `a`,`b` to exercise
+	// signature-declaration-order Returns expansion, which the golden's
+	// single-column shape cannot assert. Retained permanently.
 	"authored CALL standalone Returns signature-declaration-order": {
 		src: "CALL test.my.proc(42)",
 		want: oneBranch(query.Part{
@@ -3296,42 +2575,6 @@ var mustParse = map[string]struct {
 			Results: []procsig.Result{
 				{Name: "a", Token: procsig.TokenInteger, Nullable: true},
 				{Name: "b", Token: procsig.TokenString, Nullable: true},
-			},
-		}},
-	},
-	// Call6 [1] Two CALLs across WITH. Two parts:
-	//  - Part 1: one CallBinding `label`; Returns is `count(*) AS c`
-	//    (aggregate on the empty-args count).
-	//  - Part 2: fresh CallBinding `label` (this part's own CALL);
-	//    Returns is RETURN * over the in-scope set {c, label}.
-	// Pins the "CallBinding does NOT leak past a WITH's explicit
-	// export" rule: part 2 introduces its own `label` binding, and
-	// buildPart's imported map (from part 1's WITH) carries `c`
-	// only.
-	"CALL then WITH then CALL (Call6[1])": {
-		src: "CALL test.labels() YIELD label\nWITH count(*) AS c\nCALL test.labels() YIELD label\nRETURN *",
-		want: query.Query{
-			Branches: []query.Branch{{Parts: []query.Part{
-				{
-					Bindings: []query.Binding{
-						must(query.NewCallBinding("label", "test.labels", "label", query.TypeString{}, true)),
-					},
-					Returns: []query.ReturnItem{
-						{Name: "c", Value: query.NewAggregateProjection(query.AggCount, nil, false, query.TypeInt{})},
-					},
-				},
-				{
-					Bindings: []query.Binding{
-						must(query.NewCallBinding("label", "test.labels", "label", query.TypeString{}, true)),
-					},
-					ReturnsAll: true,
-				},
-			}}},
-		},
-		sigs: []procsig.Signature{{
-			Name: "test.labels",
-			Results: []procsig.Result{
-				{Name: "label", Token: procsig.TokenString, Nullable: true},
 			},
 		}},
 	},
@@ -3883,6 +3126,137 @@ func TestSentinelReachability(t *testing.T) {
 	}
 }
 
+// --- golden-twin invariant (gqlc-ls8.5 Phase 1; Phase 2 drain + tightening) ---
+
+// goldenTwinKeepers is the Class-A shape-mirror keeper list per §1.2 of
+// docs/specs/cypher-golden-test-migration.md. Drained to empty by Phase 2's
+// mustParse deletions; repopulated at Phase 3 with the single sig-divergent
+// Class-A survivor so the positive walk asserts against the post-migration
+// keeper set — a Phase-3 TCK bump that DROPS the underlying scenario would
+// silently strip the golden out from under this pin's `sigDivergentKeepers`
+// exemption, and the positive walk catches that scenario-DROP failure mode
+// which the negative walk cannot detect by construction. The list intentionally
+// carries the same single key as `sigDivergentKeepers`: they are logically
+// distinct exemption sets (positive-walk assert-target vs negative-walk
+// exemption), and both are load-bearing. Kept as an inline []string so a
+// reviewer diffing any future re-population against §1.2 can verify the
+// additions line-by-line.
+var goldenTwinKeepers = []string{
+	"authored CALL standalone Returns signature-declaration-order",
+}
+
+// sigDivergentKeepers is the closed allowlist of sig-carrying Class-A pins
+// whose (uri, name, src) triple has a corpus scenario with a golden but
+// whose authored `sigs` field diverges from the scenario's Background sigs
+// — legitimately kept to assert the divergent shape the wire-face golden
+// cannot record. The one member was identified by the Phase-1 sig-audit
+// ledger (retired at Phase 3; the ledger pattern lives in git history and
+// spec §3.2) and preserved with an in-file comment quoting the divergence
+// reason at the pin's declaration. Serves as the negative walk's per-pin
+// exemption in place of a `len(pin.sigs) > 0` breadth exemption (which
+// would remain a permanent bypass for future Background-equal sig-carrying
+// duplicates and defeat the point of the negative walk).
+var sigDivergentKeepers = map[string]struct{}{
+	"authored CALL standalone Returns signature-declaration-order": {},
+}
+
+// TestMustParseGoldenTwins is the dual-invariant coverage-no-shrink gate for
+// the gqlc-ls8.5 golden-test migration (§3.1 of the migration spec).
+//
+// Positive walk (bounded by goldenTwinKeepers): each named keeper must exist
+// in mustParse, its src must appear verbatim in the harvested corpus, and a
+// golden must exist on disk for its (uri, name, src) triple. Catches TCK
+// bumps that DROP a scenario a listed keeper depends on.
+//
+// Negative walk (bounded by current mustParse): no pin may exist whose src
+// is verbatim in the corpus AND has a golden on disk — the shape-mirror
+// duplication pattern Phase 2 exists to delete. Catches TCK bumps that ADD a
+// scenario whose src collides with an authored pin, plus any future PR that
+// reintroduces the pattern.
+//
+// Both invariants share one harvestExecutingScenarios(t, readCoreDirs) input
+// and one corpus-src set derived from it. Positive-walk assertion 3
+// (golden-exists) uses goldenPath(&scenarioState{...}) — the same key the
+// acceptance harness mints against — so a keeper whose triple loses its
+// golden fails immediately.
+//
+// Permanent invariant (linus-3 methodology ruling). Phase 2 drained the
+// inline keeper list and tightened the negative walk's sig-carrying
+// exemption from a length check to an explicit sigDivergentKeepers
+// allowlist so no future sig-carrying duplicate slips past; Phase 3
+// repopulated goldenTwinKeepers with the sig-divergent survivor so the
+// positive walk asserts scenario-DROP failure mode against a non-empty
+// keeper set.
+func TestMustParseGoldenTwins(t *testing.T) {
+	scenarios := harvestExecutingScenarios(t, readCoreDirs)
+	require.NotEmpty(t, scenarios, "no corpus scenarios harvested — TCK vendoring or paths are wrong")
+
+	// Index scenarios by src for the positive walk's (uri, name) lookup and
+	// build the corpus-src set the negative walk consults.
+	byQuery := make(map[string][]scenarioMeta, len(scenarios))
+	corpusSrcs := make(map[string]bool, len(scenarios))
+	for _, sc := range scenarios {
+		byQuery[sc.query] = append(byQuery[sc.query], sc)
+		corpusSrcs[sc.query] = true
+	}
+
+	// Positive walk: each keeper's src is in the corpus AND its golden exists.
+	for _, key := range goldenTwinKeepers {
+		pin, ok := mustParse[key]
+		require.Truef(t, ok, "keeper %q missing from mustParse", key)
+		matches := byQuery[pin.src]
+		require.NotEmptyf(t, matches, "keeper %q src not in corpus: %q", key, pin.src)
+		// A src may back multiple scenarios (outline expansion); at least one
+		// must mint a golden that resolves on disk.
+		var found bool
+		for _, sc := range matches {
+			path := goldenPath(&scenarioState{name: sc.name, uri: sc.uri, query: sc.query})
+			if _, err := os.Stat(path); err == nil {
+				found = true
+				break
+			}
+		}
+		require.Truef(t, found, "keeper %q: no golden on disk for any (uri, name, src) triple", key)
+	}
+
+	// Negative walk: no mustParse pin has (src-in-corpus AND golden-exists).
+	// Two exemption sets: goldenTwinKeepers (positive-walk survivors) and
+	// sigDivergentKeepers (the audit-approved sig-carrying survivor whose
+	// authored `sigs` diverges from the corpus Background). Anything else
+	// with (src-in-corpus AND golden-exists) is residual shape-mirror
+	// duplication and fires the walk.
+	for key, pin := range mustParse {
+		if !corpusSrcs[pin.src] {
+			continue
+		}
+		if _, isKeeper := keeperSet()[key]; isKeeper {
+			continue
+		}
+		if _, isDivergent := sigDivergentKeepers[key]; isDivergent {
+			continue
+		}
+		for _, sc := range byQuery[pin.src] {
+			path := goldenPath(&scenarioState{name: sc.name, uri: sc.uri, query: sc.query})
+			if _, err := os.Stat(path); err != nil {
+				continue
+			}
+			t.Errorf("residual shape-mirror pin: %q → %s (delete the pin or add it to sigDivergentKeepers with an in-file comment naming the divergence)", key, path)
+			break
+		}
+	}
+}
+
+// keeperSet materialises goldenTwinKeepers as a set for the negative walk's
+// O(1) exemption check. Rebuilt per call — the list is small and the test
+// runs once per invocation, so caching costs more than it saves.
+func keeperSet() map[string]struct{} {
+	out := make(map[string]struct{}, len(goldenTwinKeepers))
+	for _, k := range goldenTwinKeepers {
+		out[k] = struct{}{}
+	}
+	return out
+}
+
 // --- corpus harvest for property tests ---
 
 // corpusQueries returns every "When executing query" block in the read-core
@@ -3905,24 +3279,27 @@ func corpusQueries(t *testing.T) []string {
 
 // TestPropertyReadCoreParses is the precondition guard for the richer invariant
 // properties below: every curated read-core query must parse. If it ever fails,
-// the property tests below would pass vacuously, so this is the gate. Stage 14:
-// each pin's per-scenario signature slice is carried through
-// newParserFor so CALL pins parse with the same registry TestMustParse
-// constructs.
+// the property tests below would pass vacuously, so this is the gate.
+// gqlc-ls8.5 Phase 1: input rewritten to iterate the harvested corpus rather
+// than mustParse, per §3.4 of the golden-test migration spec — matches the
+// docstring ("every curated read-core query must parse") and survives Phase 2's
+// mustParse shrinkage. Per-scenario sigs come from the same gherkin walk (Background
+// `there exists a procedure` step, run through parseProcedureSignature).
 func TestPropertyReadCoreParses(t *testing.T) {
-	type pin struct {
-		src  string
-		sigs []procsig.Signature
+	all := harvestExecutingScenarios(t, readCoreDirs)
+	require.NotEmpty(t, all, "no corpus scenarios harvested — TCK vendoring or paths are wrong")
+	positives := make([]scenarioMeta, 0, len(all))
+	for _, sc := range all {
+		if sc.positive {
+			positives = append(positives, sc)
+		}
 	}
-	pins := make([]pin, 0, len(mustParse))
-	for _, c := range mustParse {
-		pins = append(pins, pin{src: c.src, sigs: c.sigs})
-	}
+	require.NotEmpty(t, positives, "no positive-outcome scenarios harvested — outcome regexes may have drifted")
 	rapid.Check(t, func(rt *rapid.T) {
-		p := rapid.SampledFrom(pins).Draw(rt, "pin")
-		parser := newParserFor(t, p.sigs)
-		if _, err := parser.Parse(strings.NewReader(p.src)); err != nil {
-			rt.Fatalf("read-core query did not parse: %q: %v", p.src, err)
+		sc := rapid.SampledFrom(positives).Draw(rt, "scenario")
+		parser := newParserFor(t, sc.sigs)
+		if _, err := parser.Parse(strings.NewReader(sc.query)); err != nil {
+			rt.Fatalf("read-core query did not parse: %q: %v", sc.query, err)
 		}
 	})
 }
