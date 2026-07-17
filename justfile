@@ -60,11 +60,15 @@ fmt: ensure-golangci
 fmt-check: ensure-golangci
     {{golangci}} fmt --diff
 
+# unit tests for the master-guard PreToolUse hook (throwaway git repos, ~1s)
+test-hooks:
+    bash .githooks/tests/claude-pre-bash-test.sh
+
 # runs the whole suite (unit, golden snapshots, godog) in one shot. Independent
 # of fetch-tck: the TCK is vendored, so there is no network at test time.
 # -shuffle catches inter-test coupling; go build link-checks package main,
 # which has no tests and is otherwise only compile-checked by lint.
-test: check-hooks
+test: check-hooks test-hooks
     go build ./...
     go test -shuffle=on ./...
 
