@@ -16,22 +16,70 @@ import (
 
 // --- Layer 2: targeted sentinel checks (the TCK doesn't encode our taxonomy) ---
 //
-// Layer-2 rule:
+// Layer-2 rule (post gqlc-ls8.5 golden-test migration; see
+// docs/specs/cypher-golden-test-migration.md):
 //
-// ACCEPT-PATH cases (mustParse) come VERBATIM from the corpus. The hand-built
-// query.Query in each entry is the regression layer the golden snapshots —
-// which -update silently rebaselines — cannot give us, but the SHAPE we pin
-// against must come from a committee-authored input — otherwise we would be
-// asserting the shape we want the parser to produce against the input we chose
-// to produce it (evidentiary circularity). We add a mustParse case only when
-// the corpus supplies one.
+// ACCEPT-PATH cases (mustParse) fall into four categories, with an explicit
+// keep-vs-outsource rule for each. The pre-migration doctrine ("mustParse
+// comes VERBATIM from the corpus, always") is retired: it created ~42 pins
+// of pure shape-duplication with the wire-face goldens, retiring their
+// shape-assertion duty to the golden diff at PR review time is what the
+// migration bought.
+//
+//   Class A — src verbatim in TCK corpus AND golden exists on disk:
+//     OUTSOURCED to the wire-face goldens for shape assertion. The
+//     shape-mirror pins that were previously duplicated here have been
+//     deleted (gqlc-ls8.5 Phase 2). The one exception is a sig-carrying
+//     pin whose authored `sigs` field diverges from the corpus scenario's
+//     Background-declared sigs — producing a different shape than the
+//     golden records — kept as the sole member of `sigDivergentKeepers`
+//     with an in-file comment quoting the ledger row that certified the
+//     divergence. Future sig-carrying pins whose sigs happen to equal the
+//     Background sigs must NOT be added; the divergence has to be real
+//     for the pin to earn Class-A survival, and adding one requires
+//     naming it in `sigDivergentKeepers` with an in-file divergence
+//     comment (the `TestMustParseGoldenTwins` negative walk fires
+//     otherwise).
+//
+//   Class B — src verbatim in TCK corpus BUT no golden on disk:
+//     KEPT. Two mechanisms produce this class, both honest:
+//       (i)  skiplisted scenarios — the TCK marks a scenario as a
+//            runtime fail (e.g. catValueBelowBoundary,
+//            catGroupingKeySemantic in acceptance_test.go); the harness
+//            routes them through shouldBeRejected and does not mint a
+//            golden.
+//       (ii) read-side-empty-result scenarios — the CALL harness's
+//            noSideEffects helper mints goldens only for StatementWrite
+//            scenarios; read-side scenarios whose expected result is
+//            empty produce no wire-face pin.
+//     Either way the mustParse pin is the only shape assertion on disk
+//     for that scenario, so it stays.
+//
+//   Class C — src NOT in TCK corpus (authored input): KEPT. The hand-
+//     derived shape IS the independent evidence; round-tripping an
+//     authored input through the parser to mint a golden would launder
+//     the parser's current behaviour into "expected", and a subsequent
+//     `-update` under a broken parser would silently rebaseline the
+//     authored shape to the broken output. The circularity concern the
+//     pre-migration preamble named survives verbatim for this class.
+//
+//   Cluster rules (C2, D2, D1b, ...): NOT exact-shape asserted here.
+//     The openCypher TCK at the pinned tag (justfile: tck_tag) contains
+//     no verbatim read-core query that exercises them — every candidate
+//     uses constructs Stage 0 rejects (WITH, CREATE/MERGE, variable-
+//     length, etc.). The Class-C authoring escape hatch does NOT apply
+//     to cluster rules: we add a case only when the corpus supplies
+//     one. Revisit on every TCK bump. Currently uncovered:
+//       - C2: label union across multiple occurrences of the same variable
+//       - D2: a parameter token used in two value positions (dedup with multiple Uses)
+//       - D1b: an inline property map whose value is a $param ((a {id: $id}))
 //
 // REJECT-PATH cases (mustReject) come VERBATIM from the corpus where the
 // corpus exercises the fail-site; otherwise they are AUTHORED with an inline
 // `// AUTHORED:` marker naming the fail-site by domain. The sentinel taxonomy
 // is ours (the TCK doesn't encode it), and the only assertion is ABSENCE of a
-// model — no shape to outsource — so the accept-path's circularity concern
-// does not apply on this side.
+// model — no shape to outsource — so the Class-A outsourcing above does not
+// apply on this side.
 //
 // Authored mustReject cases are bounded: at most one per fail-site (the same
 // way the corpus provides at most one per scenario), and only when no verbatim
@@ -40,22 +88,19 @@ import (
 // Both rules carry the revisit-on-TCK-bump obligation: when a bump adds a
 // corpus query for an authored case's fail-site, the corpus entry replaces the
 // authored one (the corpus is always preferred when available).
+//
+// The dual-invariant `TestMustParseGoldenTwins` (Phase 1, permanent) enforces
+// this doctrine mechanically: the negative walk fires on any residual
+// Class-A shape-mirror duplication (src-in-corpus AND golden-exists) not
+// exempted by `sigDivergentKeepers`; the positive walk asserts that each
+// named `goldenTwinKeepers` entry exists in mustParse, has a corpus src, and
+// has a golden on disk, catching a TCK bump that DROPS a scenario the pin
+// depends on.
 
 // mustParse pairs each read-core query with the exact query.Query Stage 0 must
 // produce for it, built via the branch-1 model constructors. The test asserts
 // deep equality, so a parser change that shifts the shape must update this
 // hand-built expectation deliberately — there is no -update escape hatch.
-
-// Cluster rules NOT exact-shape asserted here, because the openCypher TCK at the
-// pinned tag (justfile: tck_tag) contains no verbatim read-core query that
-// exercises them — every candidate uses constructs Stage 0 rejects (WITH,
-// CREATE/MERGE, variable-length, etc.) — and the no-authoring-Cypher rule means
-// we add a case only when the corpus supplies one:
-//   - C2: label union across multiple occurrences of the same variable
-//   - D2: a parameter token used in two value positions (dedup with multiple Uses)
-//   - D1b: an inline property map whose value is a $param ((a {id: $id}))
-//
-// Revisit on every TCK bump: a new feature file may close one of these gaps.
 // oneBranch wraps a single part (and query-wide parameters) into the
 // one-branch/one-part Query shape the read-core (WITH-free, UNION-free) queries
 // lower to. The Stage-4 nesting is always present even for the flat common case.
@@ -2498,15 +2543,17 @@ var mustParse = map[string]struct {
 	// results (a: INTEGER, b: STRING); the CALL has no YIELD, so the
 	// expansion follows sig.Results order.
 	//
-	// gqlc-ls8.5 Phase 2 sig-audit keeper (sigDivergentKeepers member).
-	// Ledger row (docs/specs/cypher-golden-test-migration-sigaudit.txt):
+	// gqlc-ls8.5 sig-audit keeper — sole member of both goldenTwinKeepers
+	// (positive walk) and sigDivergentKeepers (negative-walk exemption).
+	// Historical ledger row (Phase 1 sig-audit, retired at Phase 3;
+	// pattern in git history + spec §3.2):
 	//   authored CALL standalone Returns signature-declaration-order
 	//     divergent  testdata/golden/Call3_07c57b301e10.golden.json
 	//     sig[0]: pin=test.my.proc(in)::(a,b) corpus=test.my.proc(in)::(out)
 	// Corpus Call3[1]'s Background declares a single result named `out`;
 	// this pin's sigs field declares two results `a`,`b` to exercise
 	// signature-declaration-order Returns expansion, which the golden's
-	// single-column shape cannot assert. Retained past Phase 2.
+	// single-column shape cannot assert. Retained permanently.
 	"authored CALL standalone Returns signature-declaration-order": {
 		src: "CALL test.my.proc(42)",
 		want: oneBranch(query.Part{
@@ -3081,25 +3128,34 @@ func TestSentinelReachability(t *testing.T) {
 
 // --- golden-twin invariant (gqlc-ls8.5 Phase 1; Phase 2 drain + tightening) ---
 
-// goldenTwinKeepers is the sig-less Class-A shape-mirror keeper list per
-// §1.2 of docs/specs/cypher-golden-test-migration.md. Drained to empty by
-// Phase 2's mustParse deletions; Phase 3 will repopulate with the sig-
-// divergent Class-A survivors so the positive walk asserts against the
-// post-migration keeper set. Kept as an inline []string so a reviewer
-// diffing any future re-population against §1.2 can verify the additions
-// line-by-line.
-var goldenTwinKeepers = []string{}
+// goldenTwinKeepers is the Class-A shape-mirror keeper list per §1.2 of
+// docs/specs/cypher-golden-test-migration.md. Drained to empty by Phase 2's
+// mustParse deletions; repopulated at Phase 3 with the single sig-divergent
+// Class-A survivor so the positive walk asserts against the post-migration
+// keeper set — a Phase-3 TCK bump that DROPS the underlying scenario would
+// silently strip the golden out from under this pin's `sigDivergentKeepers`
+// exemption, and the positive walk catches that scenario-DROP failure mode
+// which the negative walk cannot detect by construction. The list intentionally
+// carries the same single key as `sigDivergentKeepers`: they are logically
+// distinct exemption sets (positive-walk assert-target vs negative-walk
+// exemption), and both are load-bearing. Kept as an inline []string so a
+// reviewer diffing any future re-population against §1.2 can verify the
+// additions line-by-line.
+var goldenTwinKeepers = []string{
+	"authored CALL standalone Returns signature-declaration-order",
+}
 
 // sigDivergentKeepers is the closed allowlist of sig-carrying Class-A pins
 // whose (uri, name, src) triple has a corpus scenario with a golden but
 // whose authored `sigs` field diverges from the scenario's Background sigs
-// — legitimately kept post-Phase-2 to assert the divergent shape. The
-// sig-audit ledger at Phase 1 identified exactly one member; Phase 2
-// preserves the pin with an in-file comment quoting the divergence reason.
-// Serves as the negative walk's per-pin exemption in place of the
-// Phase-1 `len(pin.sigs) > 0` breadth exemption (which would remain a
-// permanent bypass for future Background-equal sig-carrying duplicates
-// once the sig-audit scaffold retires at Phase 3).
+// — legitimately kept to assert the divergent shape the wire-face golden
+// cannot record. The one member was identified by the Phase-1 sig-audit
+// ledger (retired at Phase 3; the ledger pattern lives in git history and
+// spec §3.2) and preserved with an in-file comment quoting the divergence
+// reason at the pin's declaration. Serves as the negative walk's per-pin
+// exemption in place of a `len(pin.sigs) > 0` breadth exemption (which
+// would remain a permanent bypass for future Background-equal sig-carrying
+// duplicates and defeat the point of the negative walk).
 var sigDivergentKeepers = map[string]struct{}{
 	"authored CALL standalone Returns signature-declaration-order": {},
 }
@@ -3124,10 +3180,13 @@ var sigDivergentKeepers = map[string]struct{}{
 // acceptance harness mints against — so a keeper whose triple loses its
 // golden fails immediately.
 //
-// Permanent past Phase 3 (linus-3 methodology ruling); Phase 2 drains the
-// inline keeper list and tightens the negative walk's sig-carrying
+// Permanent invariant (linus-3 methodology ruling). Phase 2 drained the
+// inline keeper list and tightened the negative walk's sig-carrying
 // exemption from a length check to an explicit sigDivergentKeepers
-// allowlist so no future sig-carrying duplicate slips past.
+// allowlist so no future sig-carrying duplicate slips past; Phase 3
+// repopulated goldenTwinKeepers with the sig-divergent survivor so the
+// positive walk asserts scenario-DROP failure mode against a non-empty
+// keeper set.
 func TestMustParseGoldenTwins(t *testing.T) {
 	scenarios := harvestExecutingScenarios(t, readCoreDirs)
 	require.NotEmpty(t, scenarios, "no corpus scenarios harvested — TCK vendoring or paths are wrong")

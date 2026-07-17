@@ -212,25 +212,52 @@ mechanical (extracted by the census); the doctrine's rationale is in
 
 ## 2. Deletion arithmetic
 
-**Estimated deletable pins: 34 (sig-less Class-A) + N (sig-carrying
-Class-A after per-case audit), where 0 ≤ N ≤ 8.** Best case: 42
-deletions; worst case (every sig-carrying pin fails the sig-match
-audit): 34 deletions. The `"authored CALL standalone Returns
-signature-declaration-order"` pin is a confirmed keep, bounding N at 8.
+**Original estimate (v3/v4/v5 pre-Phase-2): 34 (sig-less Class-A) + N
+(sig-carrying Class-A after per-case audit), where 0 ≤ N ≤ 8.** Best
+case 42 deletions; worst case (every sig-carrying pin fails the
+sig-match audit) 34. The `"authored CALL standalone Returns
+signature-declaration-order"` pin was a confirmed keep, bounding N at 8.
 
-**Line-count reduction estimate (headline; full arithmetic in §6):**
-- 34 sig-less Class-A pins @ ~13 lines/pin ≈ 442 lines deleted.
-- 0-8 audit-approved sig-carrying pins @ ~15 lines/pin ≈ up to ~120 more.
-- ~55 lines ADDED for the permanent `TestMustParseGoldenTwins` (~45, dual-invariant body per §3.1) + `harvestExecutingScenarios` (~10) retained past Phase 3.
-- Layer-2 preamble rewrite: net ~0. `TestPropertyReadCoreParses` rewrite: net ~+5.
-- Net: 4,151 → 3,649-3,769 (midpoint ~3,710), **a ~10-12% reduction**.
+**Phase-2 outturn (commit f7f6ffe): 42 pin deletions — the best-case
+end of the estimate.** The Phase-1 sig-audit ledger (retired at
+Phase 3) certified 8 of the 9 sig-carrying Class-A pins as
+Background-equal (deletable), leaving the one confirmed-divergent pin
+as sole `sigDivergentKeepers` member. So N=8, 34 + 8 = 42 deletions
+exactly.
 
-**What the bead's original "materially smaller" framing missed:** the
-authored pins are the load-bearing majority of the file. A shape-
-mirror-only migration cannot approach the 70% reduction the v1 spec
-projected. The honest ~10-12% is the number the acceptance criterion
-should be measured against (see §6 for the full derivation and why v2's
-~15% was optimistic).
+**Line-count reduction — actuals vs original estimate:**
+
+|                                  | Original estimate     | Actual (git verified)                        |
+|---                               |---                    |---                                           |
+| Deleted pins                     | 34–42                 | **42** (871 lines gross at Phase 2)          |
+| Per-pin line cost                | ~13 (sig-less) / ~15 (sig-carrying) | **~20.7 gross lines/pin**      |
+| Phase-1 net additions            | included in the "+55 additions" estimate | **+145 lines** (4,151 → 4,296) — harness + harvester + preamble + property-test rewrite |
+| Phase-2 net (Phase-2 commit only) | -387 to -507 (deletion range 442-562, additions ~55) | **-827 lines** (`44 insertions, 871 deletions`) |
+| Phase-3 net (Phase-3 commit only) | included above       | **+59 lines** — preamble expansion offsets scratch retirement |
+| Endpoint size (parser_test.go, Phase-3 tip) | 3,649–3,769 (midpoint ~3,710) | **3,528 lines**              |
+| Reduction vs 4,151 baseline      | ~10–12% (midpoint ~10.6%) | **~15.0% (623 lines net)**               |
+
+The outturn beats the estimated floor (3,649) by 121 lines and beats
+the headline reduction band by ~3-5 percentage points. Two drivers:
+(1) sig-carrying deletions ran at the best-case N=8 rather than the
+midpoint; (2) per-pin cost was ~20.7 lines gross vs the ~13–15
+estimate — the sig-less Class-A pins carried more helper-invocation
+lines than a raw pin-body count captures, because many spanned
+multi-line `oneBranch(query.Part{...})` compositions. Phase-3's
+preamble rewrite added ~60 lines of taxonomy prose (Class-A/B/C
+carve-outs + honest Class-B naming per Q2), offsetting the scratch-
+file retirements — the Phase-3 commit is a net +59 lines against
+Phase-2's 3,469 tip, so the true endpoint is 3,528 rather than the
+Phase-2 tip that a mid-Phase-3 read would surface.
+
+**What the bead's original "materially smaller" framing missed** (kept
+here for historical honesty — retracted by v4): the authored pins
+are the load-bearing majority of the file, so a shape-mirror-only
+migration cannot approach the 70% reduction the v1 spec projected.
+The v2/v3 ~15% estimate and the v4 honest ~10-12% floor both
+proved conservative — the ~15.0% outturn (623 lines net against the
+4,151 baseline) is the number to cite going forward. See §6 for the
+full derivation trail (estimate → outturn).
 
 **What the migration buys:**
 
@@ -622,21 +649,46 @@ fmt-check / lint` gate every commit.
 
 ## 6. What remains in `parser_test.go` when done
 
-**Final size estimate:** 4,151 → ~3,710 lines, a ~10-12% reduction.
-Arithmetic: 34 sig-less Class-A pins deleted @ ~13 lines/pin ≈ 442
-lines removed, plus 0-8 audit-approved sig-carrying pins @ ~15
-lines/pin (up to ~120 more), minus ~55 lines added for the
-permanent `TestMustParseGoldenTwins` (~45, dual-invariant per §3.1)
-+ `harvestExecutingScenarios` (~10) retained past Phase 3 (see
-below). Deletion range 442-562 lines; addition ~55 (plus a further
-~5 from the `TestPropertyReadCoreParses` corpus rewrite). Net:
-4,151 → 3,649-3,769. Midpoint ~3,710. The v2 estimate of ~15%
-(`~3,520`) was optimistic — it assumed the full 9 sig-carrying pins
-deleted and did not budget for retaining the dual-invariant
-coverage-no-shrink gate as permanent scaffolding.
-The honest range is 10-12%; the headline "maintenance outlier"
-reduction is only partially closed by this bead, per §6 tail and
-[gqlc-exl](../../).
+**Actual endpoint (git-verified): 4,151 → 3,528 lines — a 623-line net
+reduction, ~15.0%.** Phase 2 alone landed at 3,469 (a lower tip, ~16.4%);
+Phase 3's preamble expansion (Class-A/B/C carve-outs + Q2 Class-B
+honest naming) added +59 lines that offset the scratch-file
+retirements, bringing the durable endpoint to 3,528.
+
+**Trail of estimate → outturn:**
+- v1 spec framing "materially smaller" (implied ~70% reduction) —
+  retracted at v2; incompatible with the load-bearing 112 Class-C
+  authored pins that stay.
+- v2 estimate: ~15% (endpoint ~3,520) — optimistic; assumed all 9
+  sig-carrying pins deleted and did not budget for the permanent
+  dual-invariant coverage-no-shrink gate.
+- v4 honest range: ~10-12% (endpoint 3,649-3,769, midpoint ~3,710) —
+  raised the floor per §6's ~13-15 lines/pin arithmetic.
+- **Outturn: ~15.0% (endpoint 3,528).** The v4 floor was undershot
+  by 121 lines; the v2 estimate of ~3,520 lines was met almost to
+  the line — the drivers below explain why the pin-cost arithmetic
+  drifted from v4's per-pin estimate but the endpoint landed near v2's
+  bottom line.
+
+Why the outturn beat the v4 floor by 121 lines:
+- Per-pin cost was **~20.7 gross lines/pin (871 / 42)** vs the ~13-15
+  line/pin estimate — the sig-less Class-A pins carried more
+  helper-invocation lines than a raw pin-body count captures. Many
+  spanned multi-line `oneBranch(query.Part{...})` compositions with
+  bindings + returns + comments per line.
+- Sig-carrying deletions ran at the best-case N=8 rather than the
+  midpoint N=4.
+- Phase 1 added +145 lines against master (4,151 → 4,296); Phase 2
+  subtracted 827 (4,296 → 3,469); Phase 3 added +59 (3,469 → 3,528).
+  The v2/v4 estimates rolled all these into one "net addition"
+  budget; the actual per-phase trail is preserved above so future
+  readers can walk the arithmetic.
+
+The estimated range remains recorded here for the honest-numbers
+doctrine (falsified projections stay visible, not the headline).
+The residual maintenance-outlier reduction (per-additive-axis rebase
+cost across 112 Class-C authored pins) is only partially closed by
+this bead, per §6 tail and [gqlc-exl](../../).
 
 Composition of the final file:
 
@@ -688,14 +740,19 @@ Not in scope here.
 
 ## 7. Fence commands + reproduction
 
-**Census reproduction.** Requires the worktree root as cwd:
+**Census reproduction (historical, Phase 1 only).** The in-tree scratch
+harness (`census_test.go`, build-tag `sigaudit_scratch`) that produced
+these numbers deterministically was retired at Phase 3 alongside the
+sig-audit scratch. The pattern lives in git history at 5ccd1de (Phase 1
+endpoint) — re-derive by reintroducing a `//go:build sigaudit_scratch`
+scratch file and running:
 ```
 # Linus-3's original probe (preserved for reference at HEAD 3538a90):
 go run /tmp/censusprobe/main.go
 
-# Post-Phase-1 in-tree equivalent (build-tag gated so `just test` skips it):
-go test -tags sigaudit_scratch \
-    ./internal/query/cypher/ -run TestCensusReport -v
+# Phase-1 in-tree equivalent (form as it existed at 5ccd1de):
+go test -tags sigaudit_scratch ./internal/query/cypher/... \
+    -run TestCensusReport -v
 ```
 Expected output at HEAD (commit 3538a90):
 ```
@@ -736,21 +793,32 @@ go test ./internal/query/cypher/ -run TestPropertyReferentialIntegrity \
     -v -rapid.checks=1000
 ```
 
-**Sig-audit reproduction** (Phase 1 — produces the deterministic
-ledger consumed by Phase 2):
+**Sig-audit reproduction (historical, Phase 1 only).** The scratch
+harness (`sigaudit_test.go`, build-tag `sigaudit_scratch`) and the
+on-disk ledger it produced (`cypher-golden-test-migration-sigaudit.txt`)
+were one-shot scaffolding — retired at Phase 3 (linus-3 design-note-3
+ruling) so the tree carries no scratch-tagged files past the migration.
+The Phase-1 form (the corrected phrasing per Q2 phrasing ruling — no
+`-v` redirect; the ledger is written by the test body, not captured
+from stdout):
 ```
-go test -tags sigaudit_scratch \
-    ./internal/query/cypher/ -run TestSigAudit -v > \
-    docs/specs/cypher-golden-test-migration-sigaudit.txt
+go test -tags sigaudit_scratch -run TestSigAudit \
+    ./internal/query/cypher/... && \
+    cat docs/specs/cypher-golden-test-migration-sigaudit.txt
 ```
-The ledger format, one line per pin:
+The ledger format was, one line per pin:
 ```
 <pin key>\t<equal|divergent>\t<goldenPath>[\t<divergence-reason>]
 ```
+The pattern lives in git history at 5ccd1de (Phase 1 endpoint); §3.2
+of this spec records the audit's design. Re-deriving it requires
+reintroducing the scratch file — Phase 2 already consumed its output,
+and the surviving `sigDivergentKeepers` allowlist carries the one
+divergent row forward mechanically.
 
 **Sig-audit manual spot-check** (secondary; useful when a reviewer
-wants to independently verify a ledger row without running the
-scratch harness):
+wants to independently verify a candidate divergence without
+reintroducing the scratch harness):
 ```
 # For pin "CALL NUMBER accepts INTEGER standalone (Call3[1])":
 grep -A5 "there exists a procedure" \
@@ -785,21 +853,25 @@ grep -A5 "there exists a procedure" \
 
 ## 9. Open questions
 
-**Q1 (Phase-2 output → §6 residual estimate).** After the sig-
-carrying audit, the residual mustParse count is 116 + (9 - N) where N
-is the number of sig-carrying pins the audit approves for deletion.
-The final line-count estimate in §6 is 3,649-3,769 (midpoint ~3,710,
-~10-12% reduction). N moves the tip within that range: N = 0 lands
-near 3,769 (~9.2% reduction), N = 8 lands near 3,649 (~12.1%). The
-Phase-3 preamble rewrite absorbs the difference in its own text; the
-~10-12% headline is the honest range spanned by the audit outcomes,
-not a floor. Q1 is a note, not a decision.
+**Q1 (Phase-2 output → §6 residual — CLOSED by outturn).** Original
+framing predicted the tip would land at 116 + (9 - N) mustParse
+entries and 3,649-3,769 lines (midpoint ~3,710, ~10-12% reduction),
+with N moving the tip within that range. **Actuals: N = 8 (all 8
+sig-`equal` sig-carrying pins deleted, 1 sig-`divergent` kept);
+residual mustParse = 117 entries; endpoint (Phase-3 tip) = 3,528
+lines (~15.0% reduction); Phase-2 tip alone was 3,469 (~16.4%),
+with Phase 3's preamble expansion adding +59 lines of taxonomy
+prose against the scratch retirements.** The outturn undershot the
+estimated floor by 121 lines — see §6 for the per-pin-cost analysis
+of why. The ~10-12% headline is retracted in favor of ~15.0%.
 
-**Q2 (Class-B semantics naming).** Two of the 4 Class-B pins are
-skiplisted; two are read-side-empty-result. The Phase-3 preamble
-rewrite must name both mechanisms honestly (avoid the "skiplisted"
-label as a superset — it's a proper subset). Language locked in
-Phase 3 with Linus in the loop.
+**Q2 (Class-B semantics naming — CLOSED at Phase 3).** Two of the 4
+Class-B pins are skiplisted; two are read-side-empty-result. The
+Phase-3 preamble rewrite names both mechanisms honestly (avoid the
+"skiplisted" label as a superset — it's a proper subset). Landed in
+the parser_test.go Layer-2 preamble alongside the Class-A/B/C
+outsource-vs-keep taxonomy; see the "Class B" section of the
+preamble comment for the exact language.
 
 **Q3 (residual-cost bead — resolved to a cite).** ls8.5 partially
 closes the bead's maintenance-outlier headline: the 34-42 shape-
