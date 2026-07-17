@@ -28,6 +28,8 @@ MASTER_REPO="$TMP/on-master";   mkrepo "$MASTER_REPO" master
 MAIN_REPO="$TMP/on-main";       mkrepo "$MAIN_REPO" main
 FEATURE_REPO="$TMP/on-feature"; mkrepo "$FEATURE_REPO" feature-x
 git init -q -b master "$TMP/unborn"   # repo with zero commits, HEAD unborn on master
+DETACHED_REPO="$TMP/detached"; mkrepo "$DETACHED_REPO" master
+git -C "$DETACHED_REPO" checkout -q --detach   # at master's tip, but not ON master
 
 pass=0
 fail=0
@@ -76,6 +78,18 @@ run_case "-c option consumes its arg"          deny  "$MASTER_REPO"  'git -c use
 # --- newline-separated commands (no && between them) must still be seen -----
 run_case "newline-separated cd then commit"    deny  "$FEATURE_REPO" "$(printf 'cd %s\ngit commit -m x' "$MASTER_REPO")"
 run_case "multi-line quoted commit message"    deny  "$MASTER_REPO"  "$(printf 'git commit -m "l1\nl2"')"
+
+# --- quoted << is prose, not a heredoc: must not swallow following lines ----
+run_case "quoted heredoc-lookalike then commit" deny "$MASTER_REPO"  "$(printf 'echo "usage: cmd << EOF"\ngit commit -m x')"
+
+# --- pushd tracks like cd ---------------------------------------------------
+run_case "pushd to feature repo from master"   allow "$MASTER_REPO"  "pushd $FEATURE_REPO && git commit -m x"
+run_case "pushd to master repo from feature"   deny  "$FEATURE_REPO" "pushd $MASTER_REPO && git commit -m x"
+
+# --- branch resolution edges ------------------------------------------------
+run_case "detached HEAD is not master"         allow "$DETACHED_REPO" 'git commit -m x'
+run_case "unbalanced quote falls back, master" deny  "$MASTER_REPO"  "echo 'oops && git commit -m x"
+run_case "unbalanced quote falls back, feature" allow "$FEATURE_REPO" "echo 'oops && git commit -m x"
 
 # --- bug 3: false positive — quoted literals and heredoc prose matched ------
 run_case "quoted literal in echo"              allow "$MASTER_REPO"  'echo "git commit"'

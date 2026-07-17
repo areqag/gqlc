@@ -15,6 +15,7 @@
 # repo pre-commit hooks are the backstop):
 #   - paths that need expansion (cd "$WT", git -C ~/x) are unresolvable
 #     statically -> allow
+#   - cd/pushd with flags (cd -P x) or no argument lose tracking -> allow
 #   - nested interpreters (bash -c '...') are not recursed into
 #   - --git-dir / --work-tree redirection is not resolved -> allow
 # Two deliberate conservative biases:
@@ -51,16 +52,47 @@ def is_op(tok):
     return bool(tok) and all(c in OPERATOR_CHARS for c in tok)
 
 
+def unquoted_positions(line, state):
+    # Bash quote parity, carried across lines (quoted strings span newlines).
+    outside = set()
+    i, n = 0, len(line)
+    while i < n:
+        c = line[i]
+        if state is None:
+            if c == "\\":
+                i += 2
+                continue
+            if c in "'\"":
+                state = c
+            else:
+                outside.add(i)
+        elif state == '"':
+            if c == "\\":
+                i += 2
+                continue
+            if c == '"':
+                state = None
+        elif c == "'":
+            state = None
+        i += 1
+    return outside, state
+
+
 def strip_heredocs(text):
     kept, pending = [], []
+    qstate = None
     for line in text.split("\n"):
         if pending:
             delim, tab_strip = pending[0]
             if (line.lstrip("\t") if tab_strip else line) == delim:
                 pending.pop(0)
             continue
+        # Only arm on << outside quotes: a quoted "<< X" is prose, and arming
+        # on it would strip real commands from the following lines.
+        outside, qstate = unquoted_positions(line, qstate)
         for m in HEREDOC_RE.finditer(line):
-            pending.append((m.group(3), m.group(1) == "-"))
+            if m.start() in outside:
+                pending.append((m.group(3), m.group(1) == "-"))
         kept.append(line)
     return "\n".join(kept)
 
@@ -90,7 +122,7 @@ def scan_tokens(tokens, cwd):
     i, n = 0, len(tokens)
     while i < n:
         tok = tokens[i]
-        if tok == "cd":
+        if tok in ("cd", "pushd"):
             arg = tokens[i + 1] if i + 1 < n else None
             cwd = None if (arg is None or arg.startswith("-")) else resolve(cwd, arg)
             i += 2
