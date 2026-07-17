@@ -10,6 +10,11 @@
 # Run via: just test-hooks
 set -u
 
+# When run under a git hook (pre-push via `just test`), GIT_DIR etc. leak in
+# and redirect every git call — repo setup would re-init the parent repo and
+# the hook under test would resolve the wrong branch. Isolate completely.
+unset "${!GIT_@}"
+
 HOOK="$(cd "$(dirname "$0")/.." && pwd)/claude-pre-bash"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT

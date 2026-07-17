@@ -149,6 +149,9 @@ def commit_targets(text, cwd, depth=0):
 def branch_of(directory):
     if not os.path.isdir(directory):
         return ""
+    # Repo-discovery env (set e.g. inside git hooks) would override -C and
+    # resolve the wrong repo; strip it so the target directory is authoritative.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     for args in (("rev-parse", "--abbrev-ref", "HEAD"), ("symbolic-ref", "--short", "HEAD")):
         try:
             proc = subprocess.run(
@@ -156,6 +159,7 @@ def branch_of(directory):
                 capture_output=True,
                 text=True,
                 timeout=5,
+                env=env,
             )
         except (OSError, subprocess.TimeoutExpired):
             return ""
