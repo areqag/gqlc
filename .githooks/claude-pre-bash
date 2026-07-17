@@ -1,52 +1,204 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
 # Claude Code PreToolUse hook for the Bash tool.
-# Blocks `git commit` invocations when on master/main.
+# Denies `git commit` when the command's EFFECTIVE target repo is on
+# master/main. The target is resolved by analysis, not raw pattern-matching:
+#   - heredoc bodies are stripped (prose there never executes)
+#   - $(...) and `...` substitution bodies are analyzed recursively (they
+#     execute for real, even inside double quotes)
+#   - the rest is shlex-tokenized; quoted prose becomes single tokens and
+#     can never look like a `git commit` invocation
+#   - `cd` chains and `git -C` options fold into an effective directory,
+#     whose branch is read via git rev-parse / symbolic-ref (the latter
+#     covers unborn HEADs)
 #
-# Hook contract: receives JSON on stdin with shape:
-#   { "tool_name": "Bash", "tool_input": { "command": "...", ... }, ... }
-# On block: exit 0 with JSON { hookSpecificOutput: { permissionDecision: "deny", ... } }
-# On allow: exit 0 with no output
+# Accepted limitations, all fail-open (server-side branch protection and
+# repo pre-commit hooks are the backstop):
+#   - paths that need expansion (cd "$WT", git -C ~/x) are unresolvable
+#     statically -> allow
+#   - nested interpreters (bash -c '...') are not recursed into
+#   - --git-dir / --work-tree redirection is not resolved -> allow
+# Two deliberate conservative biases:
+#   - substitution extraction is textual, so $(...) inside single quotes
+#     (which would not execute) is still analyzed
+#   - the token scan is position-agnostic, so UNQUOTED prose like
+#     `echo git commit` still denies (quote it and it will not)
+# If shlex cannot tokenize at all, falls back to the old whole-text regex
+# checked at the hook's own cwd.
+#
+# Hook contract: JSON on stdin { "tool_name": "Bash",
+#   "tool_input": { "command": "..." } }. Deny = exit 0 + JSON with
+# permissionDecision "deny"; allow = exit 0, no output.
+#
+# Tests: .githooks/tests/claude-pre-bash-test.sh (run via `just test-hooks`).
 
-# Read stdin once
-INPUT="$(cat)"
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
 
-# Extract the command field using python3 (avoids jq dependency)
-COMMAND="$(printf '%s' "$INPUT" | python3 -c "
-import sys, json
-try:
+PROTECTED = ("master", "main")
+HEREDOC_RE = re.compile(r"(?<!<)<<(-?)\s*([\"']?)(\w+)\2")
+SUBST_RE = re.compile(r"\$\(([^()]*)\)")
+BACKTICK_RE = re.compile(r"`([^`]*)`")
+FALLBACK_RE = re.compile(r"(?:^|[^A-Za-z-])git\s+commit(?:$|\s)")
+OPERATOR_CHARS = set("();<>|&")
+GIT_OPTS_WITH_ARG = ("-c", "--namespace", "--exec-path", "--super-prefix")
+
+
+def is_op(tok):
+    return bool(tok) and all(c in OPERATOR_CHARS for c in tok)
+
+
+def strip_heredocs(text):
+    kept, pending = [], []
+    for line in text.split("\n"):
+        if pending:
+            delim, tab_strip = pending[0]
+            if (line.lstrip("\t") if tab_strip else line) == delim:
+                pending.pop(0)
+            continue
+        for m in HEREDOC_RE.finditer(line):
+            pending.append((m.group(3), m.group(1) == "-"))
+        kept.append(line)
+    return "\n".join(kept)
+
+
+def substitution_bodies(text):
+    bodies = []
+    while True:
+        m = SUBST_RE.search(text)
+        if m is None:
+            break
+        bodies.append(m.group(1))
+        text = text[: m.start()] + " " + text[m.end() :]
+    bodies.extend(m.group(1) for m in BACKTICK_RE.finditer(text))
+    return bodies
+
+
+def resolve(base, path):
+    if path is None or is_op(path) or "$" in path or "`" in path or path.startswith("~"):
+        return None
+    if os.path.isabs(path):
+        return path
+    return os.path.join(base, path) if base else None
+
+
+def scan_tokens(tokens, cwd):
+    targets = []
+    i, n = 0, len(tokens)
+    while i < n:
+        tok = tokens[i]
+        if tok == "cd":
+            arg = tokens[i + 1] if i + 1 < n else None
+            cwd = None if (arg is None or arg.startswith("-")) else resolve(cwd, arg)
+            i += 2
+            continue
+        if tok == "git" or tok.endswith("/git"):
+            target = cwd
+            j = i + 1
+            sub = None
+            while j < n:
+                opt = tokens[j]
+                if is_op(opt):
+                    break
+                if opt == "-C":
+                    target = resolve(target, tokens[j + 1] if j + 1 < n else None)
+                    j += 2
+                elif opt in GIT_OPTS_WITH_ARG:
+                    j += 2
+                elif opt in ("--git-dir", "--work-tree"):
+                    target = None
+                    j += 2
+                elif opt.startswith(("--git-dir=", "--work-tree=")):
+                    target = None
+                    j += 1
+                elif opt.startswith("-"):
+                    j += 1
+                else:
+                    sub = opt
+                    break
+            if sub == "commit" and target is not None:
+                targets.append(target)
+            i = j + 1
+            continue
+        i += 1
+    return targets
+
+
+def commit_targets(text, cwd, depth=0):
+    if depth > 3:
+        return [], False
+    text = strip_heredocs(text)
+    targets, need_fallback = [], False
+    for body in substitution_bodies(text):
+        sub_targets, sub_fallback = commit_targets(body, cwd, depth + 1)
+        targets.extend(sub_targets)
+        need_fallback = need_fallback or sub_fallback
+    try:
+        lex = shlex.shlex(text, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        tokens = list(lex)
+    except ValueError:
+        return targets, True
+    targets.extend(scan_tokens(tokens, cwd))
+    return targets, need_fallback
+
+
+def branch_of(directory):
+    if not os.path.isdir(directory):
+        return ""
+    for args in (("rev-parse", "--abbrev-ref", "HEAD"), ("symbolic-ref", "--short", "HEAD")):
+        try:
+            proc = subprocess.run(
+                ("git", "-C", directory) + args,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+        name = proc.stdout.strip()
+        if proc.returncode == 0 and name and name != "HEAD":
+            return name
+    return ""
+
+
+def main():
     data = json.load(sys.stdin)
-    print(data.get('tool_input', {}).get('command', ''))
-except Exception:
-    pass
-")"
+    command = (data.get("tool_input") or {}).get("command")
+    if not isinstance(command, str) or not command.strip():
+        return
+    cwd = os.getcwd()
+    targets, need_fallback = commit_targets(command, cwd)
+    if need_fallback and FALLBACK_RE.search(command):
+        targets.append(cwd)
+    for directory in targets:
+        branch = branch_of(directory)
+        if branch in PROTECTED:
+            reason = (
+                "Direct commits to %s are blocked (target: %s). "
+                "Create a feature branch with: git switch -c <branch>" % (branch, directory)
+            )
+            print("ERROR: %s" % reason, file=sys.stderr)
+            print(
+                json.dumps(
+                    {
+                        "hookSpecificOutput": {
+                            "hookEventName": "PreToolUse",
+                            "permissionDecision": "deny",
+                            "permissionDecisionReason": reason,
+                        }
+                    }
+                )
+            )
+            return
 
-# Detect `git commit` but NOT `git commit-tree` or similar substrings.
-# Regex: "git" followed by whitespace then "commit" at end of string or followed by whitespace.
-if printf '%s' "$COMMAND" | grep -qE '(^|[^A-Za-z-])git[[:space:]]+commit($|[[:space:]])'; then
 
-  # Allow test harness to override the branch name for testing
-  if [ -n "${BRANCH_OVERRIDE:-}" ]; then
-    BRANCH="$BRANCH_OVERRIDE"
-  else
-    BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
-  fi
-
-  if [ "$BRANCH" = "master" ] || [ "$BRANCH" = "main" ]; then
-    REASON="Direct commits to ${BRANCH} are blocked. Create a feature branch with: git switch -c <branch>"
-    printf 'ERROR: %s\n' "$REASON" >&2
-    python3 -c "
-import json, sys
-msg = sys.argv[1]
-print(json.dumps({
-    'hookSpecificOutput': {
-        'hookEventName': 'PreToolUse',
-        'permissionDecision': 'deny',
-        'permissionDecisionReason': msg
-    }
-}))
-" "$REASON"
-    exit 0
-  fi
-fi
-
-exit 0
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        pass
+    sys.exit(0)
