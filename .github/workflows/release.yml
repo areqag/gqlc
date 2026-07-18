@@ -1,24 +1,28 @@
 # tagpr opens/updates a rolling Release PR on every master push; merging that PR
 # creates the v* tag, at which point GoReleaser builds and uploads binaries.
 # Never a required status check: master pushes trigger this, feature PRs don't.
+# Uses a GitHub App token so tagpr's Release PR triggers CI checks (the default
+# GITHUB_TOKEN suppresses pull_request events on PRs it authors).
 name: release
 
 on:
   push:
     branches: [master]
 
-permissions:
-  contents: write
-  pull-requests: write
-  issues: write
-
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.TAGPR_APP_ID }}
+          private-key: ${{ secrets.TAGPR_APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
 
       - uses: actions/setup-go@v5
         with:
@@ -27,11 +31,11 @@ jobs:
       - id: tagpr
         uses: Songmu/tagpr@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
 
       - uses: goreleaser/goreleaser-action@v6
         if: steps.tagpr.outputs.tag != ''
         with:
           args: release --clean
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
