@@ -59,6 +59,15 @@ Beads IDs alone don't auto-close linked GitHub issues on merge — GitHub only r
 
 See `bd memories pr-body-closes-gh-issue` for the full note and the incidents that motivated it.
 
+## AI attribution
+
+Do not add AI-authorship attribution to commits or PR bodies:
+
+- **No `Co-Authored-By: Claude ...` trailer** on commits. AI use is a given here; explicit disclosure is noise, and a bot co-author line pollutes GitHub's contributor list on the repo.
+- **No `🤖 Generated with [Claude Code]` footer** in PR bodies.
+
+The commit-trailer half is enforced at commit time by `.githooks/commit-msg`, which rejects any `Co-Authored-By` value mentioning `claude` or an `@anthropic.com` email. The PR-body footer half cannot be hook-enforced (PR bodies bypass local git); follow the rule.
+
 ## Build & Test
 
 _Add your build and test commands here_
