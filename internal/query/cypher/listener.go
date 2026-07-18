@@ -217,9 +217,8 @@ func (l *listener) fail(err error) {
 // walked EXISTS body routes through a sink method with the same one-line
 // prologue below, so a walked suppressed handler body leaks no outer state.
 //
-// Phase A introduces these as dead code — call sites migrate handler by
-// handler in Phase C, and the forbidigo lint gate enables in Phase E.
-// The per-method //nolint:unused directives lift as callers land.
+// Phase A introduced these as dead code — call sites migrated handler by
+// handler in Phase C, and the forbidigo lint gate enabled in Phase E.
 
 func (l *listener) suppressed() bool { return l.subqueryDepth > 0 }
 
