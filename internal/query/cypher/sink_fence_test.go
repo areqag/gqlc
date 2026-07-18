@@ -150,7 +150,13 @@ func TestSinkWriteFence(t *testing.T) {
 		msg.WriteString(v.fn)
 		msg.WriteString(" (not a sanctioned sink)\n")
 	}
-	msg.WriteString("\nsanctioned sinks: fail, openBranch, recordUnionKind, markWriteSeen, mintOptionalGroup, addParameterUse, addParameterUseUnsuppressed")
+	sinks := make([]string, 0, len(sinkFuncs))
+	for name := range sinkFuncs {
+		sinks = append(sinks, name)
+	}
+	sort.Strings(sinks)
+	msg.WriteString("\nsanctioned sinks: ")
+	msg.WriteString(strings.Join(sinks, ", "))
 	t.Fatal(msg.String())
 }
 
