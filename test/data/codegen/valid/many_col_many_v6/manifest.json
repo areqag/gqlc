@@ -1,0 +1,7 @@
+{
+  "package": "manycolmany",
+  "queryFiles": [
+    "queries.cypher"
+  ],
+  "driverVersion": "v6"
+}
