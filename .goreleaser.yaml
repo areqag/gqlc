@@ -1,0 +1,30 @@
+version: 2
+
+project_name: gqlc
+
+builds:
+  - main: ./cmd/gqlc
+    binary: gqlc
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/areqag/gqlc/internal/version.Version={{.Version}}
+
+archives:
+  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+
+checksum:
+  name_template: SHA256SUMS
+  algorithm: sha256
+
+changelog:
+  disable: true
+
+# brews:
+#   - repository:
+#       owner: areqag
+#       name: homebrew-gqlc
+# TODO(gqlc-1dq): uncomment when Homebrew tap ships
