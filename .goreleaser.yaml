@@ -23,6 +23,14 @@ checksum:
 changelog:
   disable: true
 
+# Repo has immutable-releases enabled (GA 2025-10-28). Immutable releases can't
+# accept asset uploads after publish. tagpr therefore creates the release as a
+# draft (drafts aren't immutable yet); goreleaser uploads binaries to that draft
+# and publishes it — at which point immutability locks with assets attached.
+release:
+  use_existing_draft: true
+  draft: false
+
 # brews:
 #   - repository:
 #       owner: areqag
