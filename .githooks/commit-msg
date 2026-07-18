@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Commit-msg hook: reject commits whose message carries a Co-Authored-By
+# trailer attributing authorship to Claude / Anthropic. See CLAUDE.md
+# section "AI attribution" for the rule and rationale.
+# Activated by: git config core.hooksPath .githooks
+# (run `just init` after cloning)
+set -euo pipefail
+
+MSG_FILE="$1"
+
+# During a merge, git may auto-populate the message with trailers copied from
+# the merged branch's HEAD. Those were already screened at commit-time on the
+# source branch; blocking here would only make merges painful and cannot
+# rewrite history. Skip cleanly.
+if git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+    exit 0
+fi
+
+# Extract only the trailer block (folded/interleaved trailers handled by git),
+# then look for Co-Authored-By values that mention `claude` or the
+# `@anthropic.com` email domain. Case-fold both key and value for the match.
+offender="$(
+    git interpret-trailers --parse <"$MSG_FILE" \
+        | awk 'BEGIN{IGNORECASE=1} /^co-authored-by:[[:space:]]/ {
+            v = tolower($0)
+            if (v ~ /claude/ || v ~ /@anthropic\.com/) { print; exit }
+        }'
+)"
+
+if [ -n "$offender" ]; then
+    cat >&2 <<EOF
+ERROR: Co-Authored-By trailer attributes this commit to Claude/Anthropic.
+       Offending line: $offender
+
+Per CLAUDE.md section "AI attribution", commits must not carry
+AI-attribution trailers. Remove the Co-Authored-By line and retry.
+EOF
+    exit 1
+fi
+
+exit 0
