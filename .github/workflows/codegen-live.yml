@@ -1,14 +1,19 @@
-# Opt-in job that boots a neo4j testcontainer and drives the generated
+# PR-blocking merge gate: boots a neo4j testcontainer and drives the generated
 # repositories against it, exercising the v5 and v6 driver arms in parallel
-# (bd gqlc-73h shipped the original v5-only smoke; bd gqlc-5gc added the
-# v6 arm sharing the same image). Not in the merge-blocking ci.yml because
-# docker startup + image pull dominate wall-time; running it on every PR
-# would tax the fast-loop invariant (feedback-ci-speed-parity). Two triggers:
-# workflow_dispatch (manual) and a nightly cron on master so any regression
-# in the codegen -> driver contract surfaces within one day.
+# (bd gqlc-73h shipped the original v5-only smoke; bd gqlc-5gc added the v6
+# arm sharing the same image; bd gqlc-9u5 enabled Go's test cache; bd gqlc-rvw
+# promoted this to blocking). Wall-time is affordable because the Go test
+# cache keeps the average PR cost near-zero — cache-miss only occurs when the
+# test binary is actually invalidated, so only codegen-adjacent PRs pay the
+# ~30s container-boot cost. No paths: filter — Go's test cache is the primary
+# skip mechanism; adding path filters would risk false skips on new
+# codegen-adjacent packages. Nightly cron on master retained as a safety net
+# in case a merge-time race sneaks a codegen change past the PR gate;
+# workflow_dispatch retained for developer-triggered manual iteration.
 name: codegen-live
 
 on:
+  pull_request:
   workflow_dispatch:
   schedule:
     - cron: "17 4 * * *"
