@@ -35,7 +35,10 @@ import (
 )
 
 const (
-	neo4jImage    = "neo4j:5-community"
+	// Pinned by digest, not tag, so an upstream rebuild of neo4j:5-community
+	// cannot serve a stale cached PASS from Go's test cache (bd gqlc-9u5).
+	// Refresh with: curl -sSL https://hub.docker.com/v2/repositories/library/neo4j/tags/5-community/ | jq -r .digest
+	neo4jImage    = "neo4j@sha256:362542416de6c09a971484d1893878016cc3b5cdec166e54b1c824a220ecd6b9"
 	neo4jPassword = "gqlctest1"
 	// wipeCypher DETACHes so any prior sub-test's leftover edges are removed
 	// alongside its nodes; DELETE on an empty graph is a no-op in neo4j 5.
