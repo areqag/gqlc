@@ -11,12 +11,15 @@
 # Design: human works through GitHub issues; agents work through bd.
 #   - pull:  mirror GH state (creates, closes, comments) into bd.
 #            --prefer-github breaks ties toward GH; GH is source of truth.
-#   - push:  mirror bd-created beads that have no GH mirror yet.
+#   - push:  mirror bd-created beads that have no GH mirror yet, AND close
+#            GH issues whose bead was closed locally.
 #            Deliberately does NOT run `bd github sync --push-only` (which
-#            takes ~30s scanning every bead). Filters to beads with no
-#            `external_ref` and calls `bd github push <ids>` per-bead.
-#            Known gap: status/comment updates on already-mirrored beads
-#            do NOT propagate bd → GH here. Human closes those on GH.
+#            takes ~30s scanning every bead) — its close propagation is also
+#            unreliable (memory: bd-github-sync-quirks). Instead:
+#              1. `bd github push <ids>` per new bead (no external_ref).
+#              2. Bulk `gh issue list --state open` intersected with
+#                 closed-bd beads bearing an external_ref; each mismatch
+#                 gets `gh issue close`.
 
 _action="${1:-}"
 case "$_action" in pull|push) ;; *)
@@ -35,7 +38,9 @@ if [ "$_action" = "pull" ]; then
 fi
 
 # push
-_new=$(bd list --status all --limit 0 --json 2>/dev/null | python3 -c '
+_beads=$(bd list --status all --limit 0 --json 2>/dev/null || echo '[]')
+
+_new=$(printf '%s' "$_beads" | python3 -c '
 import json, sys
 try:
     for b in json.load(sys.stdin):
@@ -47,4 +52,43 @@ except Exception:
 if [ -n "$_new" ]; then
   GITHUB_TOKEN="$_token" bd github push $_new || true
 fi
+
+# Close GH mirrors for beads that are closed locally but still open on GH.
+# One bulk `gh issue list` + one `gh issue close` per mismatch; skipped when
+# there are none. Idempotent: closing an already-closed GH issue is a no-op.
+_open_gh=$(GITHUB_TOKEN="$_token" gh issue list --state open --limit 500 --json number 2>/dev/null || echo '[]')
+printf '%s' "$_beads" | GITHUB_TOKEN="$_token" python3 -c '
+import json, sys, re, subprocess
+try:
+    open_nums = {i["number"] for i in json.loads(sys.argv[1])}
+except Exception:
+    open_nums = set()
+if not open_nums:
+    sys.exit(0)
+try:
+    beads = json.load(sys.stdin)
+except Exception:
+    beads = []
+pat = re.compile(r"/issues/(\d+)$")
+for b in beads:
+    if b.get("status") != "closed":
+        continue
+    m = pat.search(b.get("external_ref") or "")
+    if not m:
+        continue
+    n = int(m.group(1))
+    if n not in open_nums:
+        continue
+    tag = ((b.get("close_reason") or "").splitlines() or [""])[0].strip()
+    if len(tag) > 300:
+        tag = tag[:297] + "..."
+    bid = b["id"]
+    body = f"Auto-close: bead {bid} closed locally."
+    if tag:
+        body += f" {tag}"
+    subprocess.run(
+        ["gh", "issue", "close", str(n), "--comment", body],
+        capture_output=True, check=False,
+    )
+' "$_open_gh" >/dev/null 2>&1 || true
 exit 0
