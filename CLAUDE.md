@@ -50,6 +50,27 @@ bd close <id>         # Complete work
 - If push fails, resolve and retry until it succeeds
 <!-- END BEADS INTEGRATION -->
 
+## Working directory
+
+**Every session that will modify files runs in its own sibling git worktree.** The shared repo cwd (`/home/antranig/Developer/gqlc/gqlc`) is only for read-only research work (grep, read, `bd show`, `git log`) — the moment intent shifts to modification (any `bd create/close/update`, any file write, any branch creation), spin up a sibling worktree.
+
+At bead-claim time, before any modification:
+
+```bash
+git worktree add ../<repo>-<bead-slug> -b <branch-name> origin/master
+cd ../<repo>-<bead-slug>
+```
+
+After the PR merges and beads are closed:
+
+```bash
+git worktree remove ../<repo>-<bead-slug>
+```
+
+**Why:** two agent sessions sharing one cwd share one HEAD, one index, one working tree. Whichever ran `git checkout` last wins — the other session's `git status` / `git log --oneline master..HEAD` silently report the wrong branch. Staged files bleed across branches. `MERGE_HEAD` / `CHERRY_PICK_HEAD` state confuses hook logic. All observed 2026-07-18 (bd `gqlc-2fi`).
+
+Nest sibling worktrees at a sibling path (`../<repo>-<slug>`), never nested inside the main cwd — nesting breaks Go tooling paths and creates stale LSP diagnostics.
+
 ## PR & GitHub issue hygiene
 
 Beads IDs alone don't auto-close linked GitHub issues on merge — GitHub only recognises `Closes #N` (or `Fixes` / `Resolves`, case-insensitive) with the **GH issue number**.
