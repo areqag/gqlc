@@ -1,9 +1,11 @@
-# Opt-in job that boots a neo4j v5-community testcontainer and drives the
-# generated repositories against it (bd gqlc-73h). Not in the merge-blocking
-# ci.yml because docker startup + image pull dominate wall-time; running it on
-# every PR would tax the fast-loop invariant (feedback-ci-speed-parity). Two
-# triggers: workflow_dispatch (manual) and a nightly cron on master so any
-# regression in the codegen -> driver contract surfaces within one day.
+# Opt-in job that boots a neo4j testcontainer and drives the generated
+# repositories against it, exercising the v5 and v6 driver arms in parallel
+# (bd gqlc-73h shipped the original v5-only smoke; bd gqlc-5gc added the
+# v6 arm sharing the same image). Not in the merge-blocking ci.yml because
+# docker startup + image pull dominate wall-time; running it on every PR
+# would tax the fast-loop invariant (feedback-ci-speed-parity). Two triggers:
+# workflow_dispatch (manual) and a nightly cron on master so any regression
+# in the codegen -> driver contract surfaces within one day.
 name: codegen-live
 
 on:
@@ -26,5 +28,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            test/data/codegen/go.sum
       - uses: ./.github/actions/setup-just
       - run: just test-codegen-live
