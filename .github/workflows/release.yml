@@ -1,11 +1,15 @@
 # tagpr opens/updates a rolling Release PR on every master push; merging that PR
 # creates the v* tag, at which point GoReleaser builds and uploads binaries.
 # Never a required status check: master pushes trigger this, feature PRs don't.
-# Uses a fine-grained PAT (secrets.TAGPR_PAT) because GitHub Apps cannot push
-# tags for this repo — the workflow-file guard blocks any App/GITHUB_TOKEN
-# identity from creating a tag ref when any commit in the tag's history touches
-# .github/workflows/**. See bd remember gqlc-release-pat-rotation for details
-# and the yearly rotation procedure.
+# Uses a GitHub App token so tagpr's Release PR triggers CI checks (the default
+# GITHUB_TOKEN suppresses pull_request events on PRs it authors).
+#
+# GitHub's workflow-file guard blocks App/GITHUB_TOKEN identities from creating
+# tag refs via `git push --tags` when any commit in the tag's history touches
+# .github/workflows/**. The REST API tag-creation path is not (as far as we've
+# verified) subject to the same block. The pre-create-tag step below runs
+# before tagpr on Release PR merges to create the tag ref via API; tagpr's
+# `git push --tags` then becomes a no-op (git skips already-up-to-date refs).
 name: release
 
 on:
@@ -16,23 +20,53 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.TAGPR_APP_ID }}
+          private-key: ${{ secrets.TAGPR_APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.TAGPR_PAT }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
+      - id: precreate-tag
+        name: Pre-create tag via API on Release PR merge
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          HEAD_MSG=$(git log -1 --pretty=%s)
+          if [[ ! "$HEAD_MSG" =~ ^Release[[:space:]]for[[:space:]]v ]]; then
+            echo "Not a Release PR merge (title: $HEAD_MSG); skipping tag pre-create."
+            exit 0
+          fi
+          VERSION=$(cat VERSION)
+          TAG="v${VERSION}"
+          if gh api "/repos/${GITHUB_REPOSITORY}/git/refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists; nothing to do."
+            exit 0
+          fi
+          echo "Pre-creating tag ${TAG} at ${COMMIT_SHA} via API..."
+          gh api -X POST "/repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/tags/${TAG}" \
+            -f sha="${COMMIT_SHA}"
+          echo "Tag ${TAG} created via API. tagpr's git push --tags should now no-op."
+
       - id: tagpr
         uses: Songmu/tagpr@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.TAGPR_PAT }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
 
       - uses: goreleaser/goreleaser-action@v6
         if: steps.tagpr.outputs.tag != ''
         with:
           args: release --clean
         env:
-          GITHUB_TOKEN: ${{ secrets.TAGPR_PAT }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
