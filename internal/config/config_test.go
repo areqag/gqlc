@@ -25,7 +25,7 @@ schema: schema.gql
 queries: queries/
 output: internal/db
 package: db
-schema_language: gqlc
+schema_language: gql
 query_language: opencypher
 driver: neo4j-go-v5
 procsig: procs.procsig.json
@@ -38,7 +38,7 @@ var canonicalConfig = config.Config{
 	OutputDir:     "internal/db",
 	OutputPackage: "db",
 	ProcsigPath:   "procs.procsig.json",
-	SchemaLang:    config.SchemaLangGQLC,
+	SchemaLang:    config.SchemaLangGQL,
 	QueryLang:     config.QueryLangOpenCypher,
 	Driver:        config.DriverNeo4jGoV5,
 }
@@ -79,7 +79,7 @@ func TestDefaultFilename(t *testing.T) {
 // `gqlc init` prompts derive from these slices, so growing an axis must
 // be a deliberate, test-visible change.
 func TestEnumValues(t *testing.T) {
-	if got, want := config.SchemaLangValues(), []config.SchemaLang{config.SchemaLangGQLC}; !slices.Equal(got, want) {
+	if got, want := config.SchemaLangValues(), []config.SchemaLang{config.SchemaLangGQL}; !slices.Equal(got, want) {
 		t.Errorf("SchemaLangValues() = %v; want %v", got, want)
 	}
 	if got, want := config.QueryLangValues(), []config.QueryLang{config.QueryLangOpenCypher}; !slices.Equal(got, want) {
@@ -238,7 +238,7 @@ func TestDecodeRejects(t *testing.T) {
 		{
 			name:     "missing schema_language",
 			body:     dropKey("schema_language"),
-			wantSubs: []string{`missing required field "schema_language"`, "valid values: gqlc"},
+			wantSubs: []string{`missing required field "schema_language"`, "valid values: gql"},
 		},
 		{
 			name:     "missing query_language",
@@ -253,7 +253,7 @@ func TestDecodeRejects(t *testing.T) {
 		{
 			name:     "invalid schema_language",
 			body:     setKey("schema_language", "graphql"),
-			wantSubs: []string{`line 6: invalid schema_language "graphql" (valid values: gqlc)`},
+			wantSubs: []string{`line 6: invalid schema_language "graphql" (valid values: gql)`},
 		},
 		{
 			name:     "invalid query_language",

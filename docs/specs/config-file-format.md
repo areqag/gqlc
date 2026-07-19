@@ -52,7 +52,7 @@ canonical `Save` emission order (§7).
 | 3 | `queries`         | string | yes      | non-empty                | directory holding query files (`Config.QueryDir`)                  |
 | 4 | `output`          | string | yes      | non-empty                | directory generated code is written to (`Config.OutputDir`)        |
 | 5 | `package`         | string | yes      | a valid Go identifier    | generated package name (`Config.OutputPackage`); `go/token.IsIdentifier`, so Go keywords are rejected; casing is not policed |
-| 6 | `schema_language` | enum   | yes      | `gqlc`                   | language the schema file is written in (`Config.SchemaLang`)       |
+| 6 | `schema_language` | enum   | yes      | `gql`                    | language the schema file is written in (`Config.SchemaLang`)       |
 | 7 | `query_language`  | enum   | yes      | `opencypher`             | language the query files are written in (`Config.QueryLang`)       |
 | 8 | `driver`          | enum   | yes      | `neo4j-go-v5`, `neo4j-go-v6` | client library the generated code targets (`Config.Driver`)        |
 | 9 | `procsig`         | string | no       | non-empty when present   | path to a procedure-signature registry file (`Config.ProcsigPath`); omit the key when unused — an explicit `""` is rejected, while a null value (a dangling `procsig:`) is equivalent to omission (§6.2) |
@@ -74,7 +74,7 @@ schema: schema.gql
 queries: queries/
 output: internal/db
 package: db
-schema_language: gqlc
+schema_language: gql
 query_language: opencypher
 driver: neo4j-go-v5
 procsig: procs.procsig.json

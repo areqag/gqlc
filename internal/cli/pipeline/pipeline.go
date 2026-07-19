@@ -121,7 +121,7 @@ func Run(cfgPath string) (Result, error) {
 	// Stage 3 — parse schema per the SchemaLang axis (spec §3.2).
 	var schemaParser schema.Parser
 	switch cfg.SchemaLang {
-	case config.SchemaLangGQLC:
+	case config.SchemaLangGQL:
 		schemaParser = gql.New()
 	default:
 		return Result{OutDir: outDir}, fmt.Errorf("internal: no pipeline mapping for schema_language %q", string(cfg.SchemaLang))

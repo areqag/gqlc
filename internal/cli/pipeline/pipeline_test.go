@@ -35,7 +35,7 @@ func configYAML(pkg, driver, procsig string) string {
 		"queries: queries\n" +
 		"output: out\n" +
 		"package: " + pkg + "\n" +
-		"schema_language: gqlc\n" +
+		"schema_language: gql\n" +
 		"query_language: opencypher\n" +
 		"driver: " + driver + "\n"
 	if procsig != "" {

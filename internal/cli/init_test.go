@@ -26,7 +26,7 @@ func editFixtureConfig() config.Config {
 		OutputDir:     "gen/graphdb",
 		OutputPackage: "graphdb",
 		ProcsigPath:   "procs.procsig.json",
-		SchemaLang:    config.SchemaLangGQLC,
+		SchemaLang:    config.SchemaLangGQL,
 		QueryLang:     config.QueryLangOpenCypher,
 		Driver:        config.DriverNeo4jGoV6,
 	}
@@ -86,7 +86,7 @@ func TestInitClassifyTarget(t *testing.T) {
 
 	brokenBodies := map[string]string{
 		"malformed yaml":      "version: 1\n\tschema: schema.gql\n",
-		"bad vocabulary":      "version: 1\nschema: s.gql\nqueries: q\noutput: o\npackage: db\nschema_language: gqlc\nquery_language: opencypher\ndriver: neo4j-go-v4\n",
+		"bad vocabulary":      "version: 1\nschema: s.gql\nqueries: q\noutput: o\npackage: db\nschema_language: gql\nquery_language: opencypher\ndriver: neo4j-go-v4\n",
 		"unsupported version": "version: 99\n",
 	}
 	for name, body := range brokenBodies {
@@ -121,7 +121,7 @@ func TestInitDefaults(t *testing.T) {
 		QueryDir:      "queries",
 		OutputDir:     "internal/db",
 		OutputPackage: "db",
-		SchemaLang:    config.SchemaLangGQLC,
+		SchemaLang:    config.SchemaLangGQL,
 		QueryLang:     config.QueryLangOpenCypher,
 		Driver:        config.DriverNeo4jGoV5,
 	}, initDefaults())
@@ -370,7 +370,7 @@ output: 'internal/db'
 queries: queries
 schema: schema.gql # the schema
 query_language: opencypher
-schema_language: gqlc
+schema_language: gql
 `
 	require.NoError(t, os.WriteFile(cfgPath, []byte(nonCanonical), 0o644))
 	loaded, err := config.Load(cfgPath)
@@ -395,7 +395,7 @@ const brokenBody = "version: 1\n" +
 	"queries: queries\n" +
 	"output: internal/db\n" +
 	"package: db\n" +
-	"schema_language: gqlc\n" +
+	"schema_language: gql\n" +
 	"query_language: opencypher\n" +
 	"driver: neo4j-go-v4\n"
 
