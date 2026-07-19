@@ -2,14 +2,19 @@
 # creates the v* tag, at which point GoReleaser builds and uploads binaries.
 # Never a required status check: master pushes trigger this, feature PRs don't.
 #
-# Uses a classic PAT (secrets.TAGPR_PAT, scopes: repo + workflow). GitHub Apps
-# and fine-grained PATs are architecturally blocked from creating tag refs when
-# any commit in the tag's history touches .github/workflows/**, via both git
-# push and the REST API. Only user-class identities (classic PATs, OAuth
-# tokens, SSH deploy keys) bypass this guard. See
-#   bd remember gh-workflow-file-guard-identity-based
-#   bd remember gqlc-release-pat-rotation
-# for the empirical proofs and the yearly rotation procedure.
+# Hybrid auth (rotation-free):
+#   - SSH deploy key (secrets.TAGPR_DEPLOY_KEY) for git operations. GitHub's
+#     workflow-file guard blocks HTTPS-token identities (Apps, GITHUB_TOKEN,
+#     fine-grained PATs, and empirically also classic PATs used within
+#     workflows) from creating tag refs when the tag's history touches
+#     .github/workflows/**. SSH via deploy key routes around the guard.
+#   - GitHub App token (secrets.TAGPR_APP_ID + TAGPR_APP_PRIVATE_KEY) for
+#     REST API operations. tagpr's Release PR is authored by the App identity,
+#     which triggers pull_request workflows (the default GITHUB_TOKEN
+#     suppresses them).
+#
+# See bd remember gh-workflow-file-guard-identity-based and
+# bd remember gqlc-release-auth-architecture for the empirical proofs.
 name: release
 
 on:
@@ -20,10 +25,23 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.TAGPR_APP_ID }}
+          private-key: ${{ secrets.TAGPR_APP_PRIVATE_KEY }}
+
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.TAGPR_DEPLOY_KEY }}
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.TAGPR_PAT }}
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Switch remote to SSH so git push uses the deploy key
+        run: git remote set-url origin git@github.com:${{ github.repository }}.git
 
       - uses: actions/setup-go@v5
         with:
@@ -32,11 +50,11 @@ jobs:
       - id: tagpr
         uses: Songmu/tagpr@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.TAGPR_PAT }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
 
       - uses: goreleaser/goreleaser-action@v6
         if: steps.tagpr.outputs.tag != ''
         with:
           args: release --clean
         env:
-          GITHUB_TOKEN: ${{ secrets.TAGPR_PAT }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
