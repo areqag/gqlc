@@ -1,5 +1,0 @@
-[tagpr]
-	releaseBranch = master
-	versionFile = VERSION
-	vPrefix = true
-	release = draft
