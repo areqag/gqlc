@@ -231,7 +231,7 @@ The wizard starts from pinned defaults:
 | `queries`         | `queries`      | fixture value, sans incidental trailing slash               |
 | `output`          | `internal/db`  | fixture value                                               |
 | `package`         | `db`           | fixture value                                               |
-| `schema_language` | `gqlc`         | first member of `config.SchemaLangValues()`                 |
+| `schema_language` | `gql`          | first member of `config.SchemaLangValues()`                 |
 | `query_language`  | `opencypher`   | first member of `config.QueryLangValues()`                  |
 | `driver`          | `neo4j-go-v5`  | first member of `config.DriverValues()`                     |
 | `procsig`         | *(empty)*      | optional key; empty means omitted (§4, field 5)             |

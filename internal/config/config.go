@@ -31,12 +31,12 @@ const fileVersion = 1
 // the language the schema file is written in.
 type SchemaLang string
 
-// SchemaLangGQLC is gqlc's own graph-type schema language.
-const SchemaLangGQLC SchemaLang = "gqlc"
+// SchemaLangGQL is the ISO GQL graph-type schema language.
+const SchemaLangGQL SchemaLang = "gql"
 
 // SchemaLangValues lists every valid SchemaLang. Loader errors and
 // future `gqlc init` prompts both derive their choices from this slice.
-func SchemaLangValues() []SchemaLang { return []SchemaLang{SchemaLangGQLC} }
+func SchemaLangValues() []SchemaLang { return []SchemaLang{SchemaLangGQL} }
 
 // UnmarshalYAML validates vocabulary membership at decode time so the
 // error carries the offending node's line.

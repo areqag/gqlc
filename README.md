@@ -24,7 +24,7 @@ schema: schema.gql
 queries: queries
 output: internal/db
 package: db
-schema_language: gqlc
+schema_language: gql
 query_language: opencypher
 driver: neo4j-go-v5
 ```

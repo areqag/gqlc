@@ -240,7 +240,7 @@ fires when `internal/config` grows a member before the CLI learns it:
 
 | config value                  | pipeline binding                              |
 |-------------------------------|-----------------------------------------------|
-| `config.SchemaLangGQLC`       | `gql.New()`                                   |
+| `config.SchemaLangGQL`        | `gql.New()`                                   |
 | `config.QueryLangOpenCypher`  | `cypher.New(cypher.WithRegistry(reg))`        |
 | `config.DriverNeo4jGoV5`      | `codegen.WithDriverVersion(codegen.DriverV5)` |
 | `config.DriverNeo4jGoV6`      | `codegen.WithDriverVersion(codegen.DriverV6)` |
