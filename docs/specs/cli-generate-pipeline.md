@@ -213,7 +213,7 @@ Every such comment moves with its code and stays valid: no stage
 renumbering, no shape change. The reviewer verifies this in the diff.
 
 No parser registry, no factory, no adapter interface: the two
-axis switches at CLI-1 §3.2 stay as switches (`config.SchemaLangGQLC →
+axis switches at CLI-1 §3.2 stay as switches (`config.SchemaLangGQL →
 gql.New()`; `config.QueryLangOpenCypher → cypher.New(...)`;
 `config.DriverNeo4jGoV5|V6 → codegen.WithDriverVersion(...)`). Each
 axis has exactly one member today for schema and query language, two
