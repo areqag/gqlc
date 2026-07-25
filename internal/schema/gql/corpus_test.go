@@ -450,18 +450,18 @@ func TestAlternativeExemptions(t *testing.T) {
 	}
 }
 
-// TestExemptionDemands exercises the failure message against exemption list sizes
-// the checked-in list does not have yet. The list is expected to grow during
-// authoring — an alternative is only found unreachable once a file written to take
-// it does not — so the message has to name every affected entry rather than the
-// first, and has to say nothing at all when the thieves are covered.
+// TestExemptionDemands exercises the failure message against exemption list sizes the
+// checked-in list does not have. There is one entry today, so the two-entry cases are
+// the point: the message must name every affected entry rather than the first, and must
+// say nothing at all when the thieves are covered. A second entry arrives with a grammar
+// change adding another ordering conflict rather than during authoring, since every
+// dischargeable alternative already has a probed spelling.
 //
-// notWants is what makes the selection tested rather than just the formatting. An
-// implementation that names every exemption as soon as any one thief is uncovered
-// satisfies every positive assertion here, and is the version with real cost: by
-// mid-authoring it would tell an author that five alternatives are blocked when one
-// is, which is the reading that invites widening the harness. Both single-thief cases
-// are present so no assertion can be satisfied by position alone.
+// notWants is what makes the selection tested rather than the formatting. An
+// implementation naming every exemption as soon as any one thief is uncovered satisfies
+// every positive assertion here, and it is the version with a cost: it reports
+// alternatives as blocked that are not, which reads as a reason to widen the harness.
+// Both single-thief cases are present so no assertion can be satisfied by position.
 func TestExemptionDemands(t *testing.T) {
 	two := []alternativeExemption{
 		{tag: "a#1", stolenBy: "b#2", bead: "bd-1", why: "x"},
