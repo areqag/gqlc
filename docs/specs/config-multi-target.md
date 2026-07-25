@@ -238,15 +238,18 @@ entry, and the scan must leave it alone. The rule changes what the scan
 That it survives the scan is not a promise that it loads. An alias
 copies the whole mapping, `gen.go.out` included, so `- *t` naming an
 earlier entry produces two targets with identical output directories and
-§4.3 rejects the file. No spelling escapes that: the anchor must precede
-the alias, so it sits on an earlier entry (identical `out`), on a
-sub-node (`- *gen` gives `field go not found in type config.wireTarget`),
-or on an unknown top-level key (`KnownFields(true)`). **An element
-aliasing an entire earlier entry can never produce a loadable second
-target** — a property of this format worth stating, because the rule
-above is what makes it fail at §4.3 with an overlap message that names
-the real problem, rather than at §4.4 with a null-entry message that
-would be a lie.
+§4.3 rejects the file. No spelling escapes that, because the anchor must
+precede the alias and every position it can occupy is already answered:
+
+| anchor position | outcome |
+|-----------------|---------|
+| an earlier entry (`- &t`) | decodes, both entries carry the same `out`, §4.3 rejects |
+| a sub-node (`- *gen`) | `field go not found in type config.wireTarget` |
+| an unknown top-level key (`base: &base`) | `field base not found in type config.wireV1` |
+| the document root mapping (`&root` before the first key) | resolves to `!!map`, so the scan leaves it; `field version not found in type config.wireTarget` |
+
+**An element aliasing an entire earlier entry can never produce a
+loadable second target.**
 
 **Key lookup stays literal**, and merge keys (`<<: *anchor`) divide by
 position the same way aliases do:
