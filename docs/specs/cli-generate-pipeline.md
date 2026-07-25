@@ -10,18 +10,26 @@ preserved verbatim. Explicit **non-goal, restated**: no parser
 registry/factory — each tool axis has one adapter today; the hardcoded
 picks at stages 3, 5, and 8 stay honest.
 
+**Amended by `config-multi-target.md` (bead `gqlc-0gb.3`).** The seam
+this spec argues for is unchanged — the pipeline still returns batches
+in memory and still writes nothing — but it now runs every generation
+target the config declares, so `Result` grew a `Targets []TargetResult`
+and the CLI's write path became two phases. §3 and §5.1 below carry the
+amended shapes; `config-multi-target.md` §6 and §7 are authoritative
+where the two disagree.
+
 ## 1. Deliverables
 
 - `internal/cli/pipeline/pipeline.go` — the extracted module (§3, §4).
-  Exports: `Run`, `Result`, `ErrConfigMissing`.
+  Exports: `Run`, `Result`, `TargetResult`, `ErrConfigMissing`.
 - `internal/cli/pipeline/pipeline_test.go` — in-memory tests (§5.1).
 - `internal/cli/generate.go` — reduced to the cobra surface (§6.1):
   flags, `SilenceUsage`, calling the pipeline, mapping
   `pipeline.ErrConfigMissing` to the "run gqlc init" hint, printing
   diagnostics, forming the summary, invoking the tripwire-guarded
-  write. The write path (`writeOutput`, `writeFiles`, `markedFile`,
-  marker constants) **stays in `internal/cli`** — ADR 0012 tripwire
-  is CLI-owned.
+  write. The write path (`inspectOutputs`, `commitOutputs`,
+  `markedFile`, marker constants) **stays in `internal/cli`** — ADR
+  0012 tripwire is CLI-owned.
 - `internal/cli/generate_test.go` — unchanged in behaviour; may
   shed cases superseded by pipeline tests (§5.2 fence).
 - No changes to `internal/codegen`, `internal/config`, or any other
@@ -68,73 +76,92 @@ Package `pipeline`, import path
 `github.com/areqag/gqlc/internal/cli/pipeline`. All symbols below are
 exported; nothing else is.
 
+Amended by `config-multi-target.md` §6: `Run` iterates the config's
+generation targets, so the batch and its output directory moved from
+`Result` into a per-target `TargetResult`, and every per-entry message
+carries the `graph[<i>]: ` prefix.
+
 ```go
 // Package pipeline runs stages 1–8 of the CLI-1 generate pipeline —
-// config load through codegen — and returns the file batch in memory.
-// The package is deliberately subcommand-agnostic: it names no
+// config load through codegen — for every generation target the
+// config file declares, and returns the file batches in memory. The
+// package is deliberately subcommand-agnostic: it names no
 // sibling command (the "run gqlc init" hint on a missing config lives
 // in the CLI, which owns UX copy). Callers own all filesystem writes
 // under the ADR 0012 tripwire.
 //
 // Result caller invariant, non-negotiable:
 //
-//   Files is non-nil iff Diagnostics is empty AND err is nil.
-//   Callers MUST NOT write Result.Files when len(Result.Diagnostics)
-//   > 0; that state means "errors accumulated, batch discarded" and
-//   Files is nil in that branch. Ignoring the invariant lets the ADR
-//   0012 tripwire wipe a marked output directory to write zero files
-//   — the exact footgun the split exists to prevent.
+//   Targets is non-nil iff Diagnostics is empty AND err is nil.
+//   Callers MUST NOT write any TargetResult when
+//   len(Result.Diagnostics) > 0; that state means "errors
+//   accumulated, every batch discarded" and Targets is nil in that
+//   branch. Ignoring the invariant lets the ADR 0012 tripwire wipe
+//   marked output directories to write zero files — the exact
+//   footgun the split exists to prevent.
 package pipeline
 
-// Result is what a successful or diagnostic-accumulating pipeline run
-// yields: the codegen batch, the resolved output directory the caller
-// writes it to, and the ordered per-failure diagnostic lines from
-// stage 7. Both slices preserve pipeline order — the caller writes
-// Diagnostics to stderr in order and writes Files to disk in slice
-// order.
+// Result is what a clean or diagnostic-accumulating run yields: one
+// TargetResult per generation target the config declares, in document
+// order, and the ordered diagnostic lines from every target's
+// front-end walk. Both slices preserve pipeline order.
 //
-// OutDir is the config's output path joined against
-// filepath.Dir(cfgPath) — the spec §3.1 stage-2 resolution rule —
-// carried out of the pipeline so the caller does not re-load the
-// config to reach it. Populated whenever config load (stage 1)
-// succeeded, i.e. in every non-ErrConfigMissing branch including
-// stage-7 accumulation and every stage 3–8 singular failure. Empty
-// only when Run returned ErrConfigMissing or any other stage-1
-// failure (config never loaded).
-//
-// Field invariant (package doc, restated): Files is non-nil iff
+// Field invariant (package doc, restated): Targets is non-nil iff
 // Diagnostics is empty and the corresponding Run call returned a nil
 // error.
 type Result struct {
-    Files       []codegen.File
+    Targets     []TargetResult
     Diagnostics []string
-    OutDir      string
+}
+
+// TargetResult is one target's generated batch and the resolved
+// directory the caller writes it to.
+//
+// OutDir is the target's gen.go.out joined against
+// filepath.Dir(cfgPath) — the spec §3.1 stage-2 resolution rule —
+// carried out of the pipeline so the caller does not re-load the
+// config to reach it.
+type TargetResult struct {
+    Files  []codegen.File
+    OutDir string
 }
 
 // Run executes stages 1–8 of the generate pipeline (CLI-1 §3.1)
-// against the config file at cfgPath. It performs no filesystem
-// writes — the caller writes Result.Files under the ADR 0012
+// against every generation target the config file at cfgPath
+// declares, in document order. It performs no filesystem writes —
+// the caller writes each TargetResult's files under the ADR 0012
 // tripwire.
 //
 // Return contract, exhaustive:
 //
-//   - err != nil, ErrConfigMissing or other stage-1 failure → Result
-//     is the zero value (Files nil, Diagnostics nil, OutDir empty).
-//     Config never loaded, so OutDir cannot be computed.
-//   - err != nil, any stage 3–8 failure → Result carries OutDir (the
-//     stage-2 resolved path); Files and Diagnostics are nil.
-//   - err == nil, len(Diagnostics) > 0 → stage-7 accumulation. Files
-//     is nil; OutDir carries the resolved path. Caller prints each
-//     diagnostic line and returns its own summary error (CLI-1 §2.3);
-//     the tripwire does NOT run.
-//   - err == nil, len(Diagnostics) == 0 → success. Files is non-nil,
-//     sorted by Path (codegen.Generate's contract), OutDir carries
-//     the resolved path, ready for the caller's tripwire-guarded
-//     write.
+//   - err != nil → Result is the zero value. This covers the stage-1
+//     config failures (ErrConfigMissing and every other config.Load
+//     error) and every per-target setup failure, which is wrapped
+//     "graph[<i>]: " (config-multi-target §6.1).
+//   - err == nil, len(Diagnostics) > 0 → front-end accumulation.
+//     Targets is nil. Caller prints each diagnostic line and returns
+//     its own summary error (CLI-1 §2.3); the tripwire does NOT run.
+//   - err == nil, len(Diagnostics) == 0 → success. Targets has
+//     exactly one entry per config target, in document order; each
+//     Files is non-nil and sorted by Path (codegen.Generate's
+//     contract), each OutDir is resolved against
+//     filepath.Dir(cfgPath).
 //
-// No other combinations exist; the caller may rely on this.
+// No other combinations exist; the caller may rely on this. In
+// particular a failed run never returns a partially populated
+// Targets: a wipe-and-write driven from one would half-generate the
+// project.
 func Run(cfgPath string) (Result, error)
 ```
+
+The pre-amendment surface returned a single `Files`/`OutDir` pair and
+populated `OutDir` on stage-3–8 failures. That last affordance is gone:
+a per-target setup failure now returns the zero `Result`. The claim the
+five return sites support, exhaustively, is about what `Run` *returns* —
+a populated `Targets` comes back from exactly one of them, the last, and
+only with `Diagnostics` empty and the error nil. `Run` does build a
+partial `targets` slice in a local while it loops; the trailing
+all-or-nothing check discards it, so no caller observes one.
 
 Rationales, one per surface decision:
 
@@ -237,17 +264,30 @@ that assert on the returned `Result` and error.
 
 | test                                    | proves                                                                                                    |
 |-----------------------------------------|-----------------------------------------------------------------------------------------------------------|
-| `TestRunHappyPathReturnsFiles`          | `Result.Files` non-empty, sorted by `Path`, every file marker-headed via a first-line check; `Diagnostics` empty; error nil |
+| `TestRunHappyPathReturnsFiles`          | the single target's `Files` non-empty, sorted by `Path`, every file marker-headed via a first-line check; `Diagnostics` empty; error nil |
 | `TestRunPackageNameFromConfig`          | `Files["db.go"]` contains the config-declared `package` clause                                            |
 | `TestRunDriverAxis` (table v5/v6)       | driver import in `db.go` matches the config axis                                                          |
 | `TestRunProcsigWiredThroughFrontEnd`    | CALL query resolves with a procsig config; same project sans key surfaces one `query-diag` in `Diagnostics` (unknown procedure) |
 | `TestRunConfigMissing`                  | `errors.Is(err, pipeline.ErrConfigMissing)` true; `errors.Is(err, fs.ErrNotExist)` true (wrap chain preserved); error message names `cfgPath`; `Result` is the zero value; the CLI-1 "run gqlc init" copy is NOT in the pipeline error — that string lives only in `generate.go`, verified by `generate_test.go`'s existing `TestGenerateConfigMissing` |
-| `TestRunNoQueryFiles`                   | error is the pinned `no query files` string; `Result` is the zero value                                   |
-| `TestRunAccumulatesDiagnostics`         | broken-file + broken-queries + one-good fixture: `Diagnostics` holds every failure in pipeline order (file-then-annotation); `Files` nil; error nil (the CLI turns the accumulation into the summary error) |
+| `TestRunNoQueryFiles`                   | error is the pinned `no query files` string under its `graph[0]: ` prefix; `Result` is the zero value     |
+| `TestRunAccumulatesDiagnostics`         | broken-file + broken-queries + one-good fixture: `Diagnostics` holds every failure in pipeline order (file-then-annotation); `Targets` nil; error nil (the CLI turns the accumulation into the summary error) |
 | `TestRunDiagnosticShapes`               | exact-match one `file-diag` and one `query-diag` against spec §2.3                                        |
 | `TestRunPathResolution`                 | config in a subdirectory with relative keys, `cfgPath` an unrelated absolute path: reads succeed from the config's dir |
-| `TestRunNoWrites`                       | the `output:` directory named in the config does not exist before or after Run — the pipeline writes nothing |
+| `TestRunNoWrites`                       | the `out:` directory named in the config does not exist before or after Run — the pipeline writes nothing |
 | `TestRunDiscoveryFilter`                | queries dir seeded with `README.md`, a subdirectory `.cypher`, and `.hidden.cypher`: only top-level non-dot `*.cypher` files are consumed |
+
+Multi-target rows, added by `config-multi-target.md` §10. All build a
+two-entry fixture whose entries share nothing — separate schemas,
+query directories, packages, drivers and output directories.
+
+| test                                    | proves                                                                                                    |
+|-----------------------------------------|-----------------------------------------------------------------------------------------------------------|
+| `TestRunEveryTarget`                    | one `TargetResult` per entry, in document order, each carrying its own `OutDir` and its own entry's files  |
+| `TestRunSetupFailureFailsFast`          | an unreadable schema at entry 1 returns the zero `Result` with a `graph[1]: ` prefix, and does so even when entry 0 already accumulated diagnostics (§6.1: a setup failure discards them) |
+| `TestRunDiagnosticsSpanTargets`         | diagnostics from both entries appear in one slice, in entry-then-file-then-annotation order, each prefixed with its own entry index |
+| `TestRunAllOrNothing`                   | one broken query in entry 1 leaves `Targets` nil — entry 0's clean batch is discarded with it (§6.2)       |
+| `TestRunSkipsCodegenAfterDiagnostic`    | entry 1's batch would fail codegen (duplicate query name across two files), and that error does not displace entry 0's diagnostic (§6.1's stage-8 skip) |
+| `TestRunStateIsPerTarget`               | the parsed schema, resolver, procsig registry and query parser belong to one target: each entry's queries are unresolvable against the other's state, so any hoist out of the loop fails the test (§6.3, no cache) |
 
 The `TestRunNoWrites` case is the seam's central promise made
 mechanically checkable: a `require.NoDirExists` on the config's
@@ -312,8 +352,10 @@ directory.
   exit codes, error text, and tripwire semantics identical.
 - Pipeline testable fully in memory (§5.1): no cobra, no stdout/stderr
   capture, no output-directory writes.
-- ADR 0012 tripwire stays CLI-owned: `writeOutput`, `writeFiles`,
-  `markedFile`, and the marker constants remain in `internal/cli`.
+- ADR 0012 tripwire stays CLI-owned: the write path (`inspectOutputs`
+  and `commitOutputs` since the multi-target amendment, `writeOutput`
+  and `writeFiles` before it), `markedFile`, and the marker constants
+  remain in `internal/cli`.
 - No parser registry / factory / adapter interface: the axis switches
   stay switches.
 - `just test && just fmt-check && just lint` green.

@@ -33,9 +33,16 @@ graph:
 ```
 
 `graph` is a list, one entry per generated package, each with its own
-schema, queries and output directory. This gqlc runs one: a config
-declaring several entries loads but is refused at generation time, and
-generating from all of them lands in the next release.
+schema, queries and output directory. `gqlc generate` runs every entry
+in document order, and diagnostics name the entry they came from
+(`graph[1]: ...`). Every output directory is checked before any of them
+is modified, so a query error at any entry, or an unexpected file in any
+output directory, ends the run with your tree exactly as it was. A
+failure during the writing itself — a full disk, an output directory
+that cannot be created — is reported against the entry that hit it and
+can leave earlier entries already rewritten;
+`docs/specs/config-multi-target.md` §7.3 states in full what the two
+phases do and do not guarantee.
 
 Put your schema at `schema.gql`:
 
