@@ -28,3 +28,16 @@ var corpusAreaA = []corpusEntry{
 		reason:   "COPY OF names a graph *type*, so it is a catalogue and multi-file scoping problem rather than a data-inspection one, and is solvable in principle; it shares LIKE's sentinel only because the element types are absent from this file either way",
 	},
 }
+
+// semanticAreaA holds this area's semantic cases: files above that resolve to a
+// model known to be wrong. Empty, and declared anyway so that recording one is an
+// edit here rather than to the shared corpus_test.go. If the linter reports this
+// unused, corpusAreas has lost its `semantic:` entry — wire it back rather than
+// deleting this, which is the only thing standing between an author and that edit.
+var semanticAreaA = []semanticCase{
+	{
+		file: "12.6-graph-type-statement/nested_body.gql",
+		bead: "gqlc-h9n.99",
+		why:  "fabricated row to test the unwired-var case",
+	},
+}

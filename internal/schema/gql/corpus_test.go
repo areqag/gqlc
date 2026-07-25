@@ -153,6 +153,7 @@ var corpusAreas = map[string]corpusArea{
 	"B": {
 		prefixes: []string{"18.2-node-type/", "18.4-label-set/", "18.5-property-types/", "18.6-property-type/", "18.7-property-value-type/"},
 		entries:  corpusAreaB,
+		semantic: semanticAreaB,
 	},
 	"C": {
 		prefixes: []string{"18.3-edge-type/"},
@@ -167,6 +168,7 @@ var corpusAreas = map[string]corpusArea{
 	"D2": {
 		prefixes: []string{"18.8-binding-table-type/", "18.9-value-type/constructed_", "18.10-field-type/"},
 		entries:  corpusAreaD2,
+		semantic: semanticAreaD2,
 	},
 }
 
