@@ -33,3 +33,13 @@ var corpusAreaC = []corpusEntry{
 		reason:   "the phrase form is the second alternative of edgeTypeSpecification and names its endpoints with CONNECTING instead of an arc, so supporting it is a listener addition with no model change",
 	},
 }
+
+// semanticAreaC holds this area's semantic cases: files above that resolve to a
+// model known to be wrong.
+var semanticAreaC = []semanticCase{
+	{
+		file: "18.3-edge-type/kind_undirected_arc_directed.gql",
+		bead: "gqlc-h9n.3",
+		why:  "an UNDIRECTED edge kind on a directed arc resolves to the same EdgeType as DIRECTED, because EdgeType has no undirectedness field; the corpus cannot detect the reinterpretation",
+	},
+}

@@ -15,3 +15,13 @@ var corpusAreaD1 = []corpusEntry{
 		reason:  "the precision and scale are discarded, so DECIMAL(10,2) resolves to a PropertyType byte-identical to bare DECIMAL; the two are indistinguishable downstream and codegen cannot emit a width",
 	},
 }
+
+// semanticAreaD1 holds this area's semantic cases: files above that resolve to a
+// model known to be wrong.
+var semanticAreaD1 = []semanticCase{
+	{
+		file: "18.9-value-type/scalar_decimal_precision_scale.gql",
+		bead: "gqlc-h9n.16",
+		why:  "DECIMAL(10,2) resolves to the same PropertyType as bare DECIMAL, because PropertyType has no length field; the discarded precision and scale are unrecoverable downstream",
+	},
+}

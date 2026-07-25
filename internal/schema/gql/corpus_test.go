@@ -112,26 +112,17 @@ type corpusEntry struct {
 // undirectedness field, so an UNDIRECTED arc resolves as DIRECTED; PropertyType has
 // no length field, so DECIMAL(10,2) resolves as bare DECIMAL.
 //
-// This list is hand-maintained — there is no mechanical source for it, which is
-// exactly why it is small and each member cites the bead that gives the model
-// somewhere to record the difference.
+// These are hand-maintained — there is no mechanical source for them, which is
+// exactly why they are few and each cites the bead that gives the model somewhere
+// to record the difference. Each is declared in the area that owns its file rather
+// than in one shared list here: TestCorpusManifest requires the two to agree in
+// both directions, so a row landing before its .gql file turns the manifest red in
+// every author's worktree at once, and a shared list would make every semantic case
+// an edit to a file its author does not own.
 type semanticCase struct {
 	file string
 	bead string
 	why  string
-}
-
-var semanticCases = []semanticCase{
-	{
-		file: "18.3-edge-type/kind_undirected_arc_directed.gql",
-		bead: "gqlc-h9n.3",
-		why:  "an UNDIRECTED edge kind on a directed arc resolves to the same EdgeType as DIRECTED, because EdgeType has no undirectedness field; the corpus cannot detect the reinterpretation",
-	},
-	{
-		file: "18.9-value-type/scalar_decimal_precision_scale.gql",
-		bead: "gqlc-h9n.16",
-		why:  "DECIMAL(10,2) resolves to the same PropertyType as bare DECIMAL, because PropertyType has no length field; the discarded precision and scale are unrecoverable downstream",
-	},
 }
 
 // corpusArea is one author's share of the corpus: the path prefixes they own and the
@@ -146,6 +137,7 @@ var semanticCases = []semanticCase{
 type corpusArea struct {
 	prefixes []string
 	entries  []corpusEntry
+	semantic []semanticCase
 }
 
 // corpusAreas partitions the corpus so that authors never edit the same Go file.
@@ -165,15 +157,30 @@ var corpusAreas = map[string]corpusArea{
 	"C": {
 		prefixes: []string{"18.3-edge-type/"},
 		entries:  corpusAreaC,
+		semantic: semanticAreaC,
 	},
 	"D1": {
 		prefixes: []string{"18.9-value-type/scalar_"},
 		entries:  corpusAreaD1,
+		semantic: semanticAreaD1,
 	},
 	"D2": {
 		prefixes: []string{"18.8-binding-table-type/", "18.9-value-type/constructed_", "18.10-field-type/"},
 		entries:  corpusAreaD2,
 	},
+}
+
+// requireOwnedByArea fails unless file matches one of the area's prefixes. Entries
+// and semantic cases share it because an area's claim on a file is one claim, and a
+// semantic case naming a file outside the area is the case nothing else catches: the
+// manifest checks it against the entry that names the same bead, which the owning
+// author wrote in their own area.
+func requireOwnedByArea(t *testing.T, name string, area corpusArea, kind, file string) {
+	t.Helper()
+
+	require.True(t, slices.ContainsFunc(area.prefixes, func(prefix string) bool {
+		return strings.HasPrefix(file, prefix)
+	}), "%s %s declared in area %s must match one of that area's prefixes %v", kind, file, name, area.prefixes)
 }
 
 // corpusManifest flattens corpusAreas into one file-ordered list.
@@ -183,14 +190,28 @@ func corpusManifest(t *testing.T) []corpusEntry {
 	var entries []corpusEntry
 	for name, area := range corpusAreas {
 		for _, entry := range area.entries {
-			require.True(t, slices.ContainsFunc(area.prefixes, func(prefix string) bool {
-				return strings.HasPrefix(entry.file, prefix)
-			}), "entry %s declared in area %s must match one of that area's prefixes %v", entry.file, name, area.prefixes)
+			requireOwnedByArea(t, name, area, "entry", entry.file)
 			entries = append(entries, entry)
 		}
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].file < entries[j].file })
 	return entries
+}
+
+// semanticCases flattens the areas' semantic cases the same way, so that the
+// manifest sees one list regardless of how many areas contributed to it.
+func semanticCases(t *testing.T) []semanticCase {
+	t.Helper()
+
+	var cases []semanticCase
+	for name, area := range corpusAreas {
+		for _, sc := range area.semantic {
+			requireOwnedByArea(t, name, area, "semantic case", sc.file)
+			cases = append(cases, sc)
+		}
+	}
+	sort.Slice(cases, func(i, j int) bool { return cases[i].file < cases[j].file })
+	return cases
 }
 
 // corpusFiles lists every .gql file under corpusDir, relative to it.
@@ -252,9 +273,10 @@ func TestCorpusAreasAreDisjoint(t *testing.T) {
 func TestCorpusManifest(t *testing.T) {
 	entries := corpusManifest(t)
 
-	semanticBeads := make(map[string]string, len(semanticCases))
-	semanticFiles := make([]string, 0, len(semanticCases))
-	for _, sc := range semanticCases {
+	cases := semanticCases(t)
+	semanticBeads := make(map[string]string, len(cases))
+	semanticFiles := make([]string, 0, len(cases))
+	for _, sc := range cases {
 		require.NotEmpty(t, sc.bead, "%s: a semantic case needs the bead that will fix it", sc.file)
 		require.NotEmpty(t, sc.why, "%s: a semantic case needs the reason no gate can catch it", sc.file)
 		require.NotContains(t, semanticBeads, sc.file, "duplicate semantic case")
