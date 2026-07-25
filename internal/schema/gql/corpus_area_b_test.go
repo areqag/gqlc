@@ -22,6 +22,9 @@ var corpusAreaB = []corpusEntry{
 // semanticAreaB holds this area's semantic cases: files above that resolve to a
 // model known to be wrong. Empty, and declared anyway so that recording one is an
 // edit here rather than to the shared corpus_test.go. If the linter reports this
-// unused, corpusAreas has lost its `semantic:` entry — wire it back rather than
-// deleting this, which is the only thing standing between an author and that edit.
+// unused, corpusAreas has lost its `semantic:` entry — TestCorpusManifest says so
+// too, by area name. Wire it back rather than deleting this, which is the only
+// thing standing between an author and that edit. Keep the []semanticCase{}
+// spelling: the manifest requires non-nil, so `var x []semanticCase` reads as a
+// lost wiring.
 var semanticAreaB = []semanticCase{}

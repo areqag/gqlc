@@ -208,6 +208,14 @@ func semanticCases(t *testing.T) []semanticCase {
 
 	var cases []semanticCase
 	for name, area := range corpusAreas {
+		// An area whose `semantic:` is missing gets the zero value, and its cases are
+		// dropped with nothing to notice: unlike `entries:`, whose absence the
+		// file-against-entry match catches because the .gql files are still on disk,
+		// a semantic case is anchored only by the bead on its entry, so an area
+		// carrying no bead leaves nothing on the other side to differ from. Requiring
+		// non-nil costs the nil spelling of an empty list, which is why all five say
+		// []semanticCase{}.
+		require.NotNil(t, area.semantic, "area %s has no `semantic:` entry in corpusAreas, so its semantic cases are silently dropped", name)
 		for _, sc := range area.semantic {
 			requireOwnedByArea(t, name, area, "semantic case", sc.file)
 			cases = append(cases, sc)
