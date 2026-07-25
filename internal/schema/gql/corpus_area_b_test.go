@@ -9,4 +9,12 @@ var corpusAreaB = []corpusEntry{
 		outcome: resolves,
 		feature: "mandatory",
 	},
+	{
+		file:     "18.2-node-type/phrase_form.gql",
+		outcome:  unsupported,
+		sentinel: ErrUnsupportedPhraseForm,
+		feature:  "mandatory",
+		bead:     "gqlc-uhb",
+		reason:   "the phrase form is the second alternative of nodeTypeSpecification and carries the same information as the pattern form, so supporting it is a listener addition with no model change",
+	},
 }

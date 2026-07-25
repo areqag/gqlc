@@ -24,4 +24,12 @@ var corpusAreaC = []corpusEntry{
 		bead:    "gqlc-h9n.3",
 		reason:  "the UNDIRECTED kind is discarded and the edge resolves as if it were DIRECTED",
 	},
+	{
+		file:     "18.3-edge-type/phrase_form.gql",
+		outcome:  unsupported,
+		sentinel: ErrUnsupportedPhraseForm,
+		feature:  "mandatory",
+		bead:     "gqlc-uhb",
+		reason:   "the phrase form is the second alternative of edgeTypeSpecification and names its endpoints with CONNECTING instead of an arc, so supporting it is a listener addition with no model change",
+	},
 }

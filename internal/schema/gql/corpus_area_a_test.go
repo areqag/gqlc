@@ -16,7 +16,15 @@ var corpusAreaA = []corpusEntry{
 		outcome:  unsupported,
 		sentinel: ErrUnsupportedSource,
 		feature:  "GG02",
-		bead:     "wontfix",
-		reason:   "LIKE derives the type from an existing graph, which needs a live catalogue to inspect; gqlc generates from schema text alone",
+		bead:     "gqlc-0ri",
+		reason:   "LIKE derives the type from a graph *instance*, so it cannot be answered without inspecting live data; declined permanently, and conformant because GG02 is an optional Annex D feature",
+	},
+	{
+		file:     "12.6-graph-type-statement/copy_of_source.gql",
+		outcome:  unsupported,
+		sentinel: ErrUnsupportedSource,
+		feature:  "mandatory",
+		bead:     "gqlc-h9n.1",
+		reason:   "COPY OF names a graph *type*, so it is a catalogue and multi-file scoping problem rather than a data-inspection one, and is solvable in principle; it shares LIKE's sentinel only because the element types are absent from this file either way",
 	},
 }

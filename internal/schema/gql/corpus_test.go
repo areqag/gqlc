@@ -43,7 +43,7 @@ import (
 // "HOME_SCHEMA/gt", "./gt", "/a/b/gt", "../a/gt" and "$$gt"; a bare "s/gt" is a
 // syntax error, because an identifier is not a schemaReference (GQL.g4:1469).
 const (
-	wantCorpusEntries   = 6
+	wantCorpusEntries   = 9
 	wantCorpusResolving = 4
 )
 
@@ -75,9 +75,12 @@ type corpusEntry struct {
 	// feature is the ISO GQL Annex D conformance feature id (GG01, GV50, ...), or
 	// "mandatory" for a construct outside the optional features.
 	feature string
-	// bead is the issue that will make an unsupported entry resolve, or "wontfix".
-	// A resolving entry names a bead only when it resolves to a model that is
-	// known to be wrong.
+	// bead is the issue that will make an unsupported entry resolve. A construct
+	// declined permanently names gqlc-0ri, the epic's ADR bead, rather than a
+	// magic string: that bead cannot close without accounting for every entry
+	// pointing at it, which is what stops a decline from becoming the
+	// undocumented rejection this epic exists to close. A resolving entry names a
+	// bead only when it resolves to a model that is known to be wrong.
 	bead string
 	// reason is one line on why an unsupported entry is not supported, or on what
 	// a resolving entry gets wrong.
@@ -239,7 +242,7 @@ func TestCorpusManifest(t *testing.T) {
 		case unsupported:
 			require.Error(t, entry.sentinel, "%s: an unsupported entry must name the sentinel Parse returns", entry.file)
 			require.Contains(t, allSentinels, entry.sentinel, "%s: sentinel is not one of the parser's sentinels", entry.file)
-			require.NotEmpty(t, entry.bead, `%s: an unsupported entry needs the bead that will fix it, or "wontfix"`, entry.file)
+			require.NotEmpty(t, entry.bead, "%s: an unsupported entry needs the bead that will fix it, or gqlc-0ri if it is declined permanently", entry.file)
 			require.NotEmpty(t, entry.reason, "%s: an unsupported entry needs a reason", entry.file)
 		default:
 			t.Fatalf("%s: outcome is %d, must be resolves or unsupported", entry.file, entry.outcome)
