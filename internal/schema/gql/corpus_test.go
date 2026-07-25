@@ -33,6 +33,20 @@ import (
 // Implementing a construct therefore means moving entries from unsupported to
 // resolves and bumping wantCorpusResolving. The two numbers below make
 // "coverage is increasing" a mechanically checkable claim rather than a feeling.
+//
+// One trap when authoring files, because it costs nothing at parse time: a COPY OF
+// source must be spelled without AS. "CREATE GRAPH TYPE t AS COPY OF other" has no
+// syntax error but enters createGraphTypeStatement zero times, because
+// graphSource : AS COPY OF graphExpression (GQL.g4:331) matches it as
+// createGraphStatement (GQL.g4:313) instead — so the file exercises none of the
+// graph type grammar and the corpus asserts nothing about it. Working spellings:
+// "COPY OF CURRENT_SCHEMA/gt", "COPY OF HOME_SCHEMA/gt", "COPY OF ./gt",
+// "COPY OF /a/b/gt", "COPY OF ../a/gt", "COPY OF $$gt". A bare "COPY OF s/gt" is a
+// syntax error either way: an identifier is not a schemaReference (GQL.g4:1469).
+//
+// Note the doubled sigil. A parameter reference is spelled $$name here, because
+// only SUBSTITUTED_PARAMETER_REFERENCE (GQL.g4:3604) is reachable from a schema
+// reference; "$name" lexes as GENERAL_PARAMETER_REFERENCE and is a syntax error.
 const (
 	wantCorpusEntries   = 5
 	wantCorpusResolving = 3
@@ -183,9 +197,7 @@ func TestCorpusManifest(t *testing.T) {
 }
 
 // TestCorpusOutcomes asserts each entry's outcome, and for resolving entries that
-// every element type declaration in the source reached the model. That equality
-// is the direct check on the defect class this corpus exists for: a listener that
-// ignores a grammar alternative drops the declaration and reports nothing.
+// nothing the source declared was dropped from the model.
 func TestCorpusOutcomes(t *testing.T) {
 	for _, entry := range corpusManifest(t) {
 		t.Run(entry.file, func(t *testing.T) {
@@ -197,16 +209,7 @@ func TestCorpusOutcomes(t *testing.T) {
 			switch entry.outcome {
 			case resolves:
 				require.NoError(t, parseErr)
-				want := measureCoverage(t, string(src)).elementTypes
-				// A source declaring no element type at all is COPY OF or LIKE,
-				// where the types come from a graph this parser cannot see. The
-				// equality below holds vacuously for those (0 == 0), so without
-				// this the empty schema they resolve to would pass as correct.
-				require.NotZero(t, want,
-					"a resolving entry must declare at least one element type; a source form that declares none belongs in unsupported")
-				require.Equal(t, want, len(got.Nodes)+len(got.Edges),
-					"%d element type declarations in the source, %d node and edge types in the model",
-					want, len(got.Nodes)+len(got.Edges))
+				assertNothingDropped(t, measureCoverage(t, string(src)), got)
 				if entry.golden {
 					assertGolden(t, filepath.Join(corpusDir, entry.file)+".golden.json", got)
 				}
@@ -218,6 +221,32 @@ func TestCorpusOutcomes(t *testing.T) {
 			}
 		})
 	}
+}
+
+// assertNothingDropped is the direct check on the defect class this corpus exists
+// for: a listener that ignores a grammar alternative drops the declaration and
+// reports nothing, so a nil error alone proves nothing about the model.
+//
+// Which of the two forms applies is read off the parse tree rather than declared
+// per entry, so an entry cannot opt itself into the weaker one.
+func assertNothingDropped(t *testing.T, src *coverage, got schema.Schema) {
+	t.Helper()
+
+	elements := len(got.Nodes) + len(got.Edges)
+	if !src.declaresElements {
+		// COPY OF and LIKE name a graph whose element types are not in this file,
+		// so there is no count to compare. The model must still be non-empty:
+		// resolving one of these to an empty schema is the defect itself, and the
+		// equality below would hold vacuously at 0 == 0 and pass it.
+		require.NotZero(t, elements,
+			"a source that inherits its element types resolved to an empty model")
+		return
+	}
+	require.NotZero(t, src.elementTypes,
+		"a nested graph type body cannot be empty; if this trips, the count is wrong")
+	require.Equal(t, src.elementTypes, elements,
+		"%d element type declarations in the source, %d node and edge types in the model",
+		src.elementTypes, elements)
 }
 
 // assertGolden compares a resolved model against its golden file, regenerating

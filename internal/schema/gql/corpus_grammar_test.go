@@ -19,9 +19,9 @@ const grammarPath = "../../grammar/gql/GQL.g4"
 // The corpus' obligation is their transitive closure, so the obligation tracks
 // the grammar rather than a hand-maintained list of constructs.
 var coverageRoots = []string{
-	"createGraphTypeStatement",
+	statementRule,
 	"graphTypeSource",
-	"nestedGraphTypeSpecification",
+	nestedSpecRule,
 }
 
 // coverageCuts are frontier rules: still required to be covered, but not
