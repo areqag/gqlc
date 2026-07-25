@@ -44,8 +44,8 @@ import (
 // "HOME_SCHEMA/gt", "./gt", "/a/b/gt", "../a/gt" and "$$gt"; a bare "s/gt" is a
 // syntax error, because an identifier is not a schemaReference (GQL.g4:1469).
 const (
-	wantCorpusEntries   = 9
-	wantCorpusResolving = 4
+	wantCorpusEntries   = 10
+	wantCorpusResolving = 5
 )
 
 // featureValues is the closed set the feature field may take. Closed rather than
@@ -99,11 +99,22 @@ type corpusEntry struct {
 	reason string
 }
 
-// semanticCase is a construct no grammar gate can demand, because what is wrong is
-// a combination of alternatives rather than any one of them, and the resolved model
-// has nowhere to record the difference. This list is hand-maintained — there is no
-// mechanical source for it, which is exactly why it is small and each member cites
-// the bead that must change the entry's outcome.
+// semanticCase is a corpus file that parses, resolves, and is still wrong. No
+// grammar gate can catch one, and whether a gate demands the file is beside the
+// point: the undirected-arc case is undemandable, being a wrong combination of
+// alternatives each fine on its own, while the DECIMAL case is demanded loudly,
+// since precision and scale are reachable through no other construct. Coverage
+// proves which alternatives were taken, never that the model they resolved to is
+// right, so both are equally invisible to it.
+//
+// What makes them invisible is that the model has no field for what was discarded,
+// so the wrong result is byte-identical to the right one. EdgeType has no
+// undirectedness field, so an UNDIRECTED arc resolves as DIRECTED; PropertyType has
+// no length field, so DECIMAL(10,2) resolves as bare DECIMAL.
+//
+// This list is hand-maintained — there is no mechanical source for it, which is
+// exactly why it is small and each member cites the bead that gives the model
+// somewhere to record the difference.
 type semanticCase struct {
 	file string
 	bead string
@@ -115,6 +126,11 @@ var semanticCases = []semanticCase{
 		file: "18.3-edge-type/kind_undirected_arc_directed.gql",
 		bead: "gqlc-h9n.3",
 		why:  "an UNDIRECTED edge kind on a directed arc resolves to the same EdgeType as DIRECTED, because EdgeType has no undirectedness field; the corpus cannot detect the reinterpretation",
+	},
+	{
+		file: "18.9-value-type/scalar_decimal_precision_scale.gql",
+		bead: "gqlc-h9n.16",
+		why:  "DECIMAL(10,2) resolves to the same PropertyType as bare DECIMAL, because PropertyType has no length field; the discarded precision and scale are unrecoverable downstream",
 	},
 }
 
@@ -240,7 +256,7 @@ func TestCorpusManifest(t *testing.T) {
 	semanticFiles := make([]string, 0, len(semanticCases))
 	for _, sc := range semanticCases {
 		require.NotEmpty(t, sc.bead, "%s: a semantic case needs the bead that will fix it", sc.file)
-		require.NotEmpty(t, sc.why, "%s: a semantic case needs the reason no gate can demand it", sc.file)
+		require.NotEmpty(t, sc.why, "%s: a semantic case needs the reason no gate can catch it", sc.file)
 		require.NotContains(t, semanticBeads, sc.file, "duplicate semantic case")
 		semanticBeads[sc.file] = sc.bead
 		semanticFiles = append(semanticFiles, sc.file)
