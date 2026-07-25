@@ -34,10 +34,4 @@ var corpusAreaA = []corpusEntry{
 // edit here rather than to the shared corpus_test.go. If the linter reports this
 // unused, corpusAreas has lost its `semantic:` entry — wire it back rather than
 // deleting this, which is the only thing standing between an author and that edit.
-var semanticAreaA = []semanticCase{
-	{
-		file: "12.6-graph-type-statement/nested_body.gql",
-		bead: "gqlc-h9n.99",
-		why:  "fabricated row to test the unwired-var case",
-	},
-}
+var semanticAreaA = []semanticCase{}
