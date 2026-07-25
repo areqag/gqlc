@@ -6,11 +6,11 @@ loader, the pipeline, the output-write protocol and `gqlc init` follow.
 The wire shape, the `graph` key name, the per-entry `schema`, the
 version-1 breaking change, the fail-fast-per-entry error posture, and
 the `init --add` flag are fixed by ADR 0013 and are not re-argued here.
-The design points this spec owns are the old-flat-shape detection
-(§4.2), the output-overlap rule and its honest limit (§4.3), the
-entry-prefix rule (§4.1), the widened pipeline contract (§6), the
-two-phase write (§7), and the branch split that keeps master coherent
-(§9).
+The design points this spec owns are the document scan and what it keeps
+off the version probe (§4), the old-flat-shape detection (§4.2), the
+output-overlap rule and its honest limit (§4.3), the entry-prefix rule
+(§4.1), the widened pipeline contract (§6), the two-phase write and its
+seam (§7), and the branch split that keeps master coherent (§9).
 
 Tracking: epic `gqlc-0gb`, with children `gqlc-0gb.1` (this spec),
 `gqlc-0gb.2` (config loader), `gqlc-0gb.3` (pipeline and the write
@@ -155,12 +155,65 @@ no error sentinels, the `fs.ErrNotExist` wrap on open failures, the
 tag-strict version probe, `KnownFields(true)` on the v1 decode
 (recursive: an unknown key inside an entry or inside `gen.go` rejects
 with the same shape), null-equals-omission for every key, and
-omitted-versus-empty distinguished by pointer-typed wire fields.
+omitted-versus-empty distinguished by pointer-typed wire fields at every
+scalar key.
 
-The wire structs are `wireV1` (document, with `Graph *[]wireTarget` so
-an omitted or null `graph` stays distinguishable from an empty
-sequence), `wireTarget`, `wireGen`, and `wireGo`. Their names reach
-users through yaml's unknown-key messages (§4.5).
+The wire structs are `wireV1` (document), `wireTarget`, `wireGen` and
+`wireGo`. Their names reach users through yaml's unknown-key messages
+(§4.5). `wireV1.Graph` is a plain `[]wireTarget`, not a pointer: the
+scalar keys need one because the strict decode is the only pass that
+sees them, but `graph`'s absent, null, non-sequence and empty cases are
+all settled by the document scan below, before the strict decode runs.
+A pointer there would be a distinction nothing reads.
+
+**The document scan.** The version probe is **unchanged**. It stays the
+lenient pass whose only job is reporting the version before any shape
+complaint (config-file-format §5; config.go `decode`). Immediately
+after the version check passes, the loader parses the same bytes into an
+untyped node:
+
+```go
+var doc yaml.Node
+if err := yaml.Unmarshal(body, &doc); err != nil {
+	return Config{}, fmt.Errorf("config: %s: %w", src, err)
+}
+root := doc.Content[0]
+```
+
+Three checks read that one scan: the old-flat-shape detection (§4.2),
+`graph`'s presence and kind (§4.5), and the null-entry rejection
+(§4.4). A node decode is type-tolerant by construction — every YAML
+document decodes into a `yaml.Node` — so none of the three can degrade
+into a library-worded complaint about a shape the loader has not yet
+described in its own words.
+
+Two properties make the scan safe to write without shape guards of its
+own, both consequences of running it *after* the version check:
+
+- **`root` is a mapping.** The version probe is a struct decode, so a
+  sequence or scalar root has already failed it (`cannot unmarshal
+  !!seq into config.versionProbe`), and a document with no content at
+  all — empty, or comments only — has already failed the
+  `version`-omitted check. Reaching the scan means `version` was found
+  as an `!!int` inside a mapping.
+- **The parse cannot fail here.** The version probe ran the same bytes
+  through the same parser, so malformed YAML surfaced there. The error
+  is wrapped rather than dropped because unreachable is not the same as
+  impossible, but no input reaches it.
+
+The scan is lexical: it reads the keys literally present at `root`. A
+document that supplies keys through a merge key (`<<: *anchor`) is not a
+gap in it — `KnownFields(true)` rejects the key holding the anchor, so
+such a file does not load whatever the scan sees.
+
+Rejected: giving the version probe a typed `graph` field to get the
+same three answers out of one pass. A typed field makes the probe
+type-strict about `graph`, which is precisely what the probe must not
+be: `version: 2` with `graph: nope` then fails with ``cannot unmarshal
+!!str `nope` into []yaml.Node`` *before* the version check, so a v2 file
+stops reporting its version, the §4.5 `graph`-not-a-sequence message can
+never fire, and a library type leaks into user-facing copy. The probe
+guards the version seam and nothing else.
 
 ### 4.1 The entry prefix
 
@@ -193,12 +246,13 @@ which still resolves. The result names each key the file happens to
 carry and never says the format changed. The loader detects the shape
 instead.
 
-**Rule.** After the version probe and before the strict decode: if the
-document has no `graph` key and carries at least one of the eight
-former top-level keys — `schema`, `queries`, `output`, `package`,
+**Rule.** From the document scan, before the strict decode: if `root`
+has no `graph` key and carries at least one of the eight former
+top-level keys — `schema`, `queries`, `output`, `package`,
 `schema_language`, `query_language`, `driver`, `procsig` — the loader
-reports the first of those keys in that order, with the line its value
-sits on:
+reports the first of those keys in that order, at the line of its **key
+node** (the key's line, not the value's, so a block or multi-line value
+still points at the key the user must remove):
 
 ```
 config: <src>: line 2: "schema" is not a top-level key; version 1 declares a "graph" sequence of generation targets, each carrying its own schema, queries, and gen.go block
@@ -224,12 +278,26 @@ just wrote. The loader rejects overlap.
 **Rule.** For each entry in order, compared against every earlier
 entry, on `filepath.Rel(earlier.Out, later.Out)`:
 
-| result                        | verdict                          |
-|-------------------------------|----------------------------------|
-| `.`                           | the same directory — reject      |
-| a path not starting with `..` | later is inside earlier — reject |
-| a path starting with `..`     | disjoint — accept                |
-| an error                      | not comparable — accept (below)  |
+| result                                        | verdict                          |
+|-----------------------------------------------|----------------------------------|
+| `.`                                           | the same directory — reject      |
+| `..`, or a path prefixed `../`                | disjoint — accept                |
+| any other path                                | later is inside earlier — reject |
+| an error                                      | not comparable — accept (below)  |
+
+The disjointness test is on a **path component**, not a string prefix:
+
+```go
+rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+```
+
+Testing `strings.HasPrefix(rel, "..")` instead would be wrong, and
+wrong in the unsafe direction. `filepath.Rel("internal/db",
+"internal/db/..foo")` returns `"..foo"` — a directory *inside*
+`internal/db`, whose relative path begins with the two characters `..`.
+A string-prefix test accepts that pair as disjoint and lets exactly the
+nested configuration through that this check exists to reject.
+`"..foo/x"` is the same trap one level deeper.
 
 The reverse direction (earlier inside later) is covered by running the
 comparison both ways.
@@ -243,25 +311,82 @@ string manipulation with no filesystem access, so config-file-format
 intact. `Config` stores the raw strings; only the comparison sees
 cleaned ones.
 
-**The honest limit.** `Rel` cannot relate an absolute path to a
-relative one, nor a `../`-escaping path to a contained one; those pairs
-return an error and are accepted as disjoint. Symlinked aliases, two
-paths that differ only by case on a case-insensitive filesystem, and
-bind mounts are equally invisible — every one of them needs the
-filesystem, which a loader that is a pure function of the file's bytes
-will not touch. What escapes the check costs generated files, never
-hand-written ones: the tripwire still refuses to delete anything it
-cannot prove gqlc wrote.
+**The rule is exported.** `internal/cli` needs it too: `init --add`
+validates a proposed `out` against the existing entries at the prompt
+(§8.2), and a `Validate` hook in `internal/cli` cannot reach an
+unexported helper here. Rather than let the CLI carry a second copy of a
+rule with a known sharp edge (the `..foo` trap above), `internal/config`
+exports the check the loader itself uses:
+
+```go
+// CheckOutAgainst reports whether out may be added to c as a new
+// generation target's output directory. It returns nil when out overlaps
+// no existing target's, and otherwise an error naming the first target
+// it overlaps and which way — the §4.5 cross-entry text, unprefixed, so
+// the loader can prefix it and a huh Validate hook can render it bare.
+// The comparison is the loader's own: lexical, filesystem-free, and
+// subject to the same limit.
+func (c Config) CheckOutAgainst(out string) error
+```
+
+The loader's cross-entry sweep is this function applied to each entry
+against the entries before it, so there is exactly one implementation of
+overlap in the tree. It joins `SchemaLangValues()`, `QueryLangValues()`
+and `DriverValues()` as vocabulary `internal/cli` borrows rather than
+restates.
+
+**The honest limit.** One class of pair genuinely escapes: an absolute
+path against a relative one. `Rel` cannot relate them in either
+direction, so the sweep accepts them as disjoint even when they name one
+directory. A `../`-escaping path is *not* in that class, despite
+looking like it: `Rel("b", "../a")` succeeds (`"../../a"`, disjoint) and
+`Rel("../a", "../a/b")` succeeds (`"b"`, contained), so escaping paths
+are compared correctly. Only when the *base* escapes does `Rel` fail
+(`Rel("../a", "b")`), and running the comparison both ways means the
+other direction has already answered. Symlinked aliases, two paths
+differing only by case on a case-insensitive filesystem, and bind mounts
+escape too — every one needs the filesystem, which a loader that is a
+pure function of the file's bytes will not touch.
+
+What escapes costs more than a few files, and the spec should not
+pretend otherwise:
+
+- An aliased pair naming the **same** directory yields one directory
+  holding two targets' packages. Files whose names collide (`models.go`)
+  end up as the later target's; the rest coexist, so the directory
+  carries two `package` clauses and does not compile. The run itself
+  succeeds (§7.2 step 7).
+- An aliased pair where one **contains** the other reproduces exactly
+  the permanent failure this check exists to prevent: the parent's sweep
+  finds a subdirectory it cannot prove marked and aborts, on this run
+  and every run after it.
+
+The invariant that does survive: no hand-written file is ever deleted.
+The tripwire refuses to delete anything it cannot prove gqlc wrote,
+whatever the loader missed.
 
 ### 4.4 Null entries
 
 yaml.v3 drops a null sequence element (`- ~`, or a bare `-`) rather
-than decoding it into the zero struct, which would silently shift every
-later entry's index away from the one the error messages print. The
-loader rejects it: the version probe, which already parses the whole
-document leniently, gains a `Graph *[]yaml.Node` field, and any element
-whose tag is `!!null` is reported by its document index before the
-strict decode runs.
+than decoding it into the zero struct, so a document with a null entry
+decodes to a shorter slice and every later entry's index in `Config`
+shifts away from the index the error messages print. The loader rejects
+it from the document scan, before the strict decode: the sequence node's
+`Content` preserves every element, so a null entry has an index and a
+line to report.
+
+**Rule.** For each element of `root`'s `graph` sequence in `Content`
+order, an element whose `Tag` is `!!null` — the spellings `~`, `null`,
+`Null`, `NULL` and an empty value all carry that tag — is reported by
+its `Content` index:
+
+```
+config: <src>: graph[2]: line 5: entry is null
+```
+
+An element that is a non-null scalar (`- ""`, tag `!!str`) is not this
+case: it is a present entry of the wrong type, and the strict decode
+says so with its own line.
 
 ### 4.5 Error catalogue
 
@@ -285,9 +410,14 @@ Document level:
 | old flat shape (no `graph`, a former top-level key present) | `config: <src>: line <L>: "<key>" is not a top-level key; version 1 declares a "graph" sequence of generation targets, each carrying its own schema, queries, and gen.go block` |
 | `graph` omitted (or null)                   | `config: <src>: missing required field "graph"`                                        |
 | `graph` present but an empty sequence       | `config: <src>: field "graph" must not be empty; declare at least one generation target` |
-| `graph` is not a sequence                   | `config: <src>: yaml: unmarshal errors: line <L>: cannot unmarshal <tag> into []config.wireTarget` |
+| `graph` is not a sequence                   | `config: <src>: line <L>: field "graph" must be a sequence of generation targets (got a YAML <kind>)` |
 | a null entry                                | `config: <src>: graph[<i>]: line <L>: entry is null`                                   |
 | an entry is not a mapping                   | ``config: <src>: yaml: unmarshal errors: line <L>: cannot unmarshal !!str `x` into config.wireTarget`` |
+
+The five rows from "old flat shape" through "a null entry" are the
+loader's own, formed from the document scan (§4) before the strict
+decode. None of them can be reached by a yaml.v3 type error about
+`graph`, which is the point of the scan.
 
 Entry level. Every row is prefixed `config: <src>: graph[<i>]: `,
 elided below; nested keys are named by their dotted path:
@@ -314,24 +444,40 @@ Cross-entry (§4.3), prefixed with the *later* entry's index:
 
 | condition                | message shape                                                                                   |
 |--------------------------|---------------------------------------------------------------------------------------------------|
-| two entries share `out`  | `config: <src>: graph[<j>]: out "<p>" is already graph[<i>]'s output directory; each generation target must own its own` |
-| one entry's `out` is inside another's | `config: <src>: graph[<j>]: out "<p>" is inside graph[<i>]'s output directory "<q>"; each generation target must own its own` |
+| two entries share `out`  | `config: <src>: graph[<j>]: out "<p>" is already graph[<i>]'s output directory` |
+| one entry's `out` is inside another's | `config: <src>: graph[<j>]: out "<p>" is inside graph[<i>]'s output directory "<q>"` |
+
+Both are `CheckOutAgainst`'s error text (§4.3) with the loader's
+`config: <src>: graph[<j>]: ` prefix in front and nothing else added.
+Keeping the two forms byte-identical is why the function exists: a
+trailing "each generation target must own its own" would read as
+justification in the config error and as noise at the `init --add`
+prompt (§8.2), and having it in one place and not the other is how one
+message becomes two.
 
 ### 4.6 Check order
 
 Checks run in stages and the loader reports the first stage that fails:
 
-1. the version probe (so a v2 file reports its version, not a shape
-   complaint);
-2. the old-flat-shape check (§4.2, before the strict decode, so the
+1. the version probe, unchanged (so a v2 file reports its version, not
+   a shape complaint);
+2. the document scan — one `yaml.Unmarshal` into a `yaml.Node`, which
+   cannot fail here (§4);
+3. the old-flat-shape check (§4.2, before the strict decode, so the
    targeted message beats the unknown-key wall);
-3. the null-entry check (§4.4);
-4. `graph` present and non-empty;
-5. the strict v1 decode;
-6. per-entry post-decode checks, entries in index order and each
+4. `graph` present, non-null, a sequence, and non-empty — in that
+   order, from the scan;
+5. the null-entry check (§4.4), which needs stage 4's verdict first:
+   there are no elements to index until `graph` is known to be a
+   sequence;
+6. the strict v1 decode;
+7. per-entry post-decode checks, entries in index order and each
    entry's keys in the §2.2/§2.3 wire order;
-7. the cross-entry `out` sweep (§4.3), reporting the first overlap in
+8. the cross-entry `out` sweep (§4.3), reporting the first overlap in
    `(later, earlier)` index order.
+
+Stages 3–5 are three reads of the one node tree from stage 2, not three
+parses.
 
 Within the strict decode, ordering is not document order and is
 yaml.v3's, exactly as config-file-format §6.3 describes: a
@@ -358,9 +504,18 @@ element, and the per-entry axis in one file.
 
 For any `Config` the loader would accept, `Load(Save(c))` returns `c`
 exactly and saving a loaded canonical file reproduces its bytes.
-`Canonical` validates nothing — a zero `Config` emits `graph: []`,
-which `Load` then rejects (§4.5); callers that assemble a `Config` in
-memory own its validity (§8).
+
+`Canonical` validates nothing, and a zero `Config` emits `graph: []` —
+which `Load` rejects with the empty-sequence message (§4.5), the
+accurate complaint about a config that declares no targets. That holds
+because `wireV1.Graph` is a plain `[]wireTarget` (§4): a nil slice
+marshals to `[]`. It would **not** hold for a `*[]wireTarget`, where a
+nil pointer marshals to `graph: null` and `Load` would answer `missing
+required field "graph"` — a message that says the key is absent about a
+`Config` whose field is merely empty. The value type is what makes the
+sentence above true rather than a coincidence of how `Canonical` happens
+to populate the field, and it is one more reason the pointer is wrong
+here. Callers that assemble a `Config` in memory own its validity (§8).
 
 ## 6. Pipeline contract
 
@@ -471,6 +626,43 @@ order, return `generate: <n> error|errors`. The write branch becomes
 two phases over `Result.Targets`. Phase A performs **no filesystem
 mutation**; every step of phase B is a mutation.
 
+The two phases are two functions, and today's `writeOutput`
+(generate.go:113–172, which interleaves stat, read, sweep, wipe and
+write) becomes a call to each:
+
+```go
+// targetPlan is phase A's finding for one target. Producing it mutates
+// nothing, and phase B may do nothing a plan does not authorise.
+type targetPlan struct {
+	dir    string   // the target's resolved OutDir
+	create bool     // dir is absent; phase B must create it
+	wipe   []string // basenames phase A proved marked — the only
+	                // entries phase B is permitted to remove
+}
+
+// inspectOutputs runs §7.1 for every target and returns one plan per
+// target, index-parallel to targets. It performs no filesystem
+// mutation. A non-nil error means no plan is returned and nothing has
+// been touched.
+func inspectOutputs(targets []pipeline.TargetResult) ([]targetPlan, error)
+
+// commitOutputs runs §7.2 against plans from inspectOutputs.
+// len(plans) must equal len(targets).
+func commitOutputs(targets []pipeline.TargetResult, plans []targetPlan) error
+```
+
+This is the seam `TestGenerateWipeListIsPhaseAs` (§10) drives: the test
+lives in `internal/cli`, calls `inspectOutputs`, creates a file in an
+output directory, then calls `commitOutputs` with the plan it already
+holds, and asserts the new file survives. Both functions stay
+unexported; the test is an in-package caller, not a client.
+
+Rejected: a package-level `var betweenPhases = func() {}` for the test
+to swap. It puts a hook in shipped code whose only caller is a test, and
+it proves less — a plan value makes "phase B removes exactly phase A's
+list" a property of the signature, which a hook between two halves of
+one function does not.
+
 ### 7.1 Phase A — inspect
 
 For each target `i` in order, with `dir` its `OutDir`:
@@ -505,9 +697,22 @@ using the plan phase A recorded:
 6. `create` → `os.MkdirAll(dir, 0o755)`; failure aborts
    `graph[<i>]: output: <os error>`.
 7. `os.Remove` each entry on this target's wipe list — **exactly** the
-   entries phase A proved marked, never a superset.
+   entries phase A proved marked, never a superset. A removal that
+   returns `fs.ErrNotExist` is **success, not failure**: the wipe's
+   purpose is that the entry is gone, and it is. Any other error aborts
+   `graph[<i>]: output: <os error>`.
 8. Write each `File` to `filepath.Join(dir, f.Path)`, mode `0o644`, in
    slice order.
+
+The `fs.ErrNotExist` tolerance in step 7 is not defensive padding; the
+§4.3 limit guarantees a path to it. Phase A computes every wipe list
+before any target commits, so an aliased `out` pair the loader cannot
+compare gives two targets overlapping wipe lists: target 0's commit
+deletes files still listed for target 1, and an intolerant `os.Remove`
+would then abort mid-commit with a bare errno and a tree already half
+rewritten. The tolerance is also correct on its own terms — a
+concurrently deleted file, or a wipe list stale for any other reason,
+satisfies the same reasoning.
 
 Wipe and write are interleaved per target rather than wiping every
 target and then writing every target: each directory then spends the
@@ -568,6 +773,29 @@ written:
 The wizard can express one target; prefilling from the first and
 writing the canonical form would silently delete the rest.
 
+**Branch 2 ships a shorter parenthetical.** §9 puts the refusal on
+branch 2 and `--add` on branch 4, so branch 2's binary has no `--add`
+flag and must not name one: a hint whose answer is `unknown flag: --add`
+is worse than no hint. Branch 2 ships
+
+```
+<path> declares <n> generation targets; init edits only a single-target config (edit it by hand)
+```
+
+and branch 4 extends the parenthetical to the form above, as part of
+adding the flag it names. The cost is one string constant and one test
+expectation written twice (§10) — the price of every branch in the stack
+being shippable alone.
+
+Moving `--add` onto branch 2 to avoid that cost was considered and
+rejected. `--add` is wizard work with no dependency on the loader beyond
+the type change, so hosting it on branch 2 would put the widest-blast-
+radius change in the tree (the config rewrite) in the same PR as the
+most user-visible one (a new flag) and leave branch 4 empty — collapsing
+the stack rather than balancing it. The refusal itself cannot move the
+other way: without it, branch 2's `init` silently drops targets from a
+file the loader now accepts (§9.1).
+
 ### 8.2 `--add`
 
 ```go
@@ -596,11 +824,13 @@ for the fields a second target usually shares — `schema`,
 for a directory that must differ from every existing target's; the
 non-blank validators already refuse to let it through.
 
-**Validation.** The `out` input's `Validate` hook gains the §4.3
-overlap check against the existing entries' `out` values, so `--add`
+**Validation.** The `out` input's `Validate` hook calls
+`cfg.CheckOutAgainst(out)` (§4.3) on the loaded config, so `--add`
 cannot write a config the loader would then reject — the same reason
-CLI-2 §4.3 made the wizard enforce codegen's package grammar rather
-than warn. Message shape at the prompt:
+CLI-2 §4.3 made the wizard enforce codegen's package grammar rather than
+warn. It calls the loader's rule rather than restating it: a second
+implementation would drift, and the first thing it would drift on is the
+`..foo` case. Message shape at the prompt:
 
 ```
 out "internal/user/gen" is already graph[0]'s output directory
@@ -626,9 +856,9 @@ behaviour (§8.1), not a stopgap.
 | branch | bead | code | documents |
 |--------|------|------|-----------|
 | 1 | `gqlc-0gb.1` | none | ADR 0013, this spec |
-| 2 | `gqlc-0gb.2` | `internal/config` (§2–§5); consumers adapted mechanically (§9.1) | `config-file-format.md`, the CONTEXT.md "Config file" entry and the new "Generation target" entry |
-| 3 | `gqlc-0gb.3` | `internal/cli/pipeline` (§6) **and** the two-phase write (§7); the single-target guard deleted | `cli-generate-pipeline.md`, `cli-stage-1.md`, `README.md` |
-| 4 | `gqlc-0gb.4` | `init --add` (§8.2) | `cli-stage-2.md` |
+| 2 | `gqlc-0gb.2` | `internal/config` (§2–§5), `CheckOutAgainst` (§4.3); consumers adapted mechanically (§9.1); `classifyTarget` → `classifyConfig` | `config-file-format.md`, `README.md`, `cli-stage-2.md`, CONTEXT.md |
+| 3 | `gqlc-0gb.3` | `internal/cli/pipeline` (§6) **and** the two-phase write (§7); the single-target guard deleted | `cli-generate-pipeline.md`, `cli-stage-1.md` |
+| 4 | `gqlc-0gb.4` | `init --add` (§8.2); the §8.1 refusal message extended | `cli-stage-2.md` |
 
 The N-target pipeline and the two-phase write are one branch because
 neither is shippable without the other. A `Result` carrying N targets
@@ -643,10 +873,43 @@ Branch 4 is `--add` alone. The one-target wizard binding and the
 multi-target-edit refusal (§8.1) sit on branch 2, where they are
 load-bearing rather than deferrable (§9.1).
 
+Branch 2 carries more documents than its code footprint suggests,
+because renaming a wire key invalidates every document that quotes one.
+Specifically:
+
+| document | what branch 2 must change |
+|----------|---------------------------|
+| `config-file-format.md` | the wire table, the canonical form (§7), the §6.3 catalogue, the §5 note on what version 1 means |
+| `README.md` | the `gqlc.yaml` sample (README.md:21–30), which shows the flat `output: internal/db` |
+| `cli-stage-2.md` | the `output` key in the defaults table (:232) and the prompt table (:337), and the flow table (:203–208), which has no refusal path |
+| CONTEXT.md | the "Config file" entry, the "Output directory" entry (:508–518, which names both the `output` and `package` keys), a new "Generation target" entry, and the "Flagged ambiguities" list |
+
+`cli-stage-2.md` appears on branches 2 and 4 because both change it: 2
+for the renamed keys and the refusal path, 4 for the flag. `README.md`
+does not appear on branch 3 — its sample is a config file, not pipeline
+behaviour, and it is already correct once branch 2 lands.
+
+**Terminology.** "Generation target" collides with two existing uses
+inside the code this change touches: `classifyTarget` (init.go:89), whose
+"target" is the config file being classified, and config-file-format §1's
+"the output target" for the `output` key. Branch 2 renames the function
+to `classifyConfig` and drops the phrase from config-file-format, and
+CONTEXT.md's new "Generation target" entry carries an `_Avoid_` clause in
+the house style:
+
+```
+_Avoid_: target (unqualified — collides with the config file being
+classified and with the output directory); output target (the output
+directory's old name); typed repository (ADR 0010 — the generated
+artifact one target produces, not the config entry).
+```
+
 Each behaviour document travels with the branch that makes it true.
-This spec and the ADR land first and describe the whole change; no
-other document is edited on branch 1, so master never carries a spec
-that contradicts its own binary.
+This spec and ADR 0013 land first and describe the whole change ahead of
+the code, which is what a spec is for; the rule is about the *behaviour*
+documents. No merge may leave `README.md`, the CLI specs,
+`config-file-format.md` or CONTEXT.md describing a wire key, a message
+or a flow the merged binary does not have.
 
 ### 9.1 Branch 2's mechanical adaptation
 
@@ -682,16 +945,23 @@ branch's PR carries the full suite in its package's existing style.
 | 2 | `TestLoadPreservesRawPaths`        | trailing slashes and `./` prefixes survive into `Config` unaltered |
 | 2 | `TestRejectOldFlatShape`           | the previous format's canonical file produces the §4.2 message, not an unknown-key list |
 | 2 | `TestRejectionTable`               | every §4.5 row, message-exact, including the `graph[i]:` prefix on entry 1 of a two-entry document |
-| 2 | `TestOutOverlap` (table)           | equal, trailing-slash, `./a/../`-obscured, nested-either-way → rejected naming both indices; sibling, `dbgen`, and abs-vs-relative → accepted |
-| 2 | `TestNullEntryRejected`            | `- ~` between two entries reports index 1, not a shifted index |
-| 2 | `TestInitRefusesMultiTargetEdit`   | pinned §8.1 message, exit 1, file byte-untouched |
+| 2 | `TestOutOverlap` (table)           | equal, trailing-slash, `./a/../`-obscured, nested-either-way, and **`internal/db` vs `internal/db/..foo`** → rejected naming both indices; sibling, `dbgen`, `../`-escaping pairs, and abs-vs-relative → accepted |
+| 2 | `TestCheckOutAgainst`              | the exported §4.3 seam returns the catalogue message for the first overlapping index and nil for a disjoint `out`, and agrees with the loader's sweep on every `TestOutOverlap` row |
+| 2 | `TestVersionProbeUnaffected`       | `version: 2` with `graph: nope` reports `declares version 2`, not a `graph` shape complaint — the failure the document scan exists to avoid (§4) |
+| 2 | `TestGraphNotASequence`            | `graph: nope` under `version: 1` produces the loader's own §4.5 message naming a YAML kind, with no yaml.v3 or Go type name in it |
+| 2 | `TestNullEntryRejected`            | `- ~` between two entries reports index 1, not a shifted index; `~`, `null`, `Null`, `NULL` and a bare `-` all report; `- ""` does not (a wrong-typed entry, not a null one — §4.4) |
+| 2 | `TestInitRefusesMultiTargetEdit`   | pinned §8.1 **branch-2** message (no `--add` hint), exit 1, file byte-untouched |
 | 3 | `TestRunEveryTarget`               | a two-target config yields two `TargetResult`s in document order, each with the right package clause and driver import |
 | 3 | `TestRunSetupFailureFailsFast`     | an unreadable schema at entry 1 → `graph[1]: schema: ...`, zero `Result` |
 | 3 | `TestRunDiagnosticsSpanTargets`    | broken queries in entries 0 and 1 → every line present, in target-then-file-then-annotation order, each `graph[i]:`-prefixed; `Targets` nil |
 | 3 | `TestRunAllOrNothing`              | one broken query in entry 1 → entry 0's files are not returned |
+| 3 | `TestRunStateIsPerTarget`          | **two different schemas**: entry 1's query resolves against entry 1's schema and would fail against entry 0's, and entry 1 has no `procsig` while entry 0 does, so a `CALL` in entry 1 fails `ErrUnknownProcedure`. Fails if `sch`, `reg`, `queryParser` or `res` (pipeline.go:122–159) is hoisted out of the loop |
 | 3 | `TestGenerateMultiTarget`          | both packages written; a second run byte-identical |
 | 3 | `TestGenerateAbortsBeforeAnyWrite` | an unmarked file in entry 1's output directory → entry 0's directory byte-identical after the failed run, entry 1 untouched |
-| 3 | `TestGenerateWipeListIsPhaseAs`    | a file created between inspect and commit survives the wipe (the §7.3 guarantee, driven through the seam) |
+| 3 | `TestGenerateAbortLeavesAbsentDirAbsent` | same abort with entry 0's `out` **not existing** beforehand → it still does not exist afterwards (§12.4's other half; the case §7.3's `MkdirAll` bullet turns on) |
+| 3 | `TestGenerateWipeListIsPhaseAs`    | `inspectOutputs`, then a file created in an output directory, then `commitOutputs` with the held plan → the new file survives (§7's seam, §7.3's guarantee) |
+| 3 | `TestCommitToleratesVanishedEntry` | a wipe-list entry deleted between the two calls → `commitOutputs` succeeds (§7.2 step 7) |
+| 4 | `TestInitRefusalNamesAddFlag`      | the §8.1 refusal message, now extended with the `--add` hint the branch has made real |
 | 4 | `TestInitAdd`                      | append round-trip: prefilled fields carried from the last entry, blank distinguishing fields, preview shows every entry, written file loads |
 | 4 | `TestInitAddOverlapRejectedAtPrompt`| an `out` equal to an existing target's re-prompts with the §8.2 message and never writes |
 | 4 | `TestInitAddNoConfig`              | missing file → the `generate` hint, verbatim, from the shared helper |
@@ -721,7 +991,7 @@ branch's PR carries the full suite in its package's existing style.
 - **Atomic output writes** (§7.3), **file-absolute query positions**,
   **recursive query discovery**, and every other CLI-1 §8 non-goal.
 - **A migration command** for the old flat shape. The §4.2 message
-  states the new shape; the file is nine lines.
+  states the new shape, and the old file is short enough to retype.
 
 ## 12. Acceptance criteria
 
@@ -735,7 +1005,8 @@ branch's PR carries the full suite in its package's existing style.
 3. Two entries whose `out` values are equal or nested are rejected at
    load, naming both entries.
 4. A run that aborts under the tripwire — for any target — leaves every
-   output directory byte-identical, and the abort message names the
+   output directory exactly as the run found it: byte-identical if it
+   existed, still absent if it did not. The abort message names the
    entry and every offending file.
 5. Broken queries in several targets report every diagnostic, each
    prefixed with its entry, and write nothing anywhere.

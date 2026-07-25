@@ -129,10 +129,22 @@ file parse it ten times.
   containment between two paths written in the same style are caught;
   an absolute path and a relative one naming the same directory, or two
   paths joined through a symlink, are not — the loader resolves nothing
-  and touches no filesystem (config-file-format §4). The residue is
-  bounded: a missed pair means the later target's wipe deletes the
-  earlier target's generated files, never hand-written ones, which the
-  tripwire still refuses to delete.
+  and touches no filesystem (config-file-format §4). What a missed pair
+  costs is worth naming precisely rather than calling bounded. Two
+  targets aliased onto *one* directory leave it holding both packages,
+  which does not compile. Two aliased onto a *nested* pair reproduce the
+  permanent abort this check exists to prevent, because the parent's
+  sweep finds a subdirectory it cannot prove marked. Neither is
+  reachable without an alias the loader cannot see — an absolute path
+  against a relative one, a symlink, or a case-insensitive filesystem —
+  and neither deletes a hand-written file, which the tripwire still
+  refuses to do.
+- **"Generation target" displaces two existing uses of "target".**
+  `classifyTarget`'s target is the config file being classified, and
+  config-file-format §1 calls the output directory "the output target".
+  Both are renamed as part of this change, and CONTEXT.md gains a
+  glossary entry with the usual `_Avoid_` clause; a term this central
+  cannot share a word with two neighbours.
 - **`gqlc init` writes one target.** Editing a file that declares more
   than one is refused rather than served by a wizard that can express
   only one; appending is `init --add`.
