@@ -378,6 +378,26 @@ func TestFabricatedTokenDoesNotScore(t *testing.T) {
 	require.False(t, got.tokens["RIGHT_BRACE"], "the invented brace must not score")
 }
 
+// TestFabricatedTokenDoesNotAttribute pins the other half of that defence, the half
+// TestFabricatedTokenDoesNotScore says it cannot reach. This source omits the closing
+// paren of its destination endpoint. Recovery invents a RIGHT_PAREN and hangs an error
+// node where it belongs, which leaves destinationNodeTypeReference holding the child
+// sequence LEFT_PAREN nodeTypeFiller RIGHT_PAREN — an exact match for its second
+// alternative, and a required one. Naming that error node would score an alternative from
+// a file that does not parse, and unlike an over-counted token it would score the very
+// thing an author is being asked to cover.
+//
+// The source is chosen so that both endpoints reach the same shape and only one of them
+// parses, which is what makes this a test of the blanking rather than of the rule being
+// absent from the index.
+func TestFabricatedTokenDoesNotAttribute(t *testing.T) {
+	got, errs := walkCoverage(t, "CREATE GRAPH TYPE t { (:A), (:B), (:A)-[:R]->(:B }")
+
+	require.NotEmpty(t, errs, "the premise is that recovery had to invent the paren")
+	require.True(t, got.alternatives["sourceNodeTypeReference#2"], "the endpoint that does parse must still score")
+	require.False(t, got.alternatives["destinationNodeTypeReference#2"], "the recovered endpoint must not score")
+}
+
 // TestCorpusGrammarCoverage is the gate: every parser rule and token reachable
 // from a CREATE GRAPH TYPE statement must be entered by some corpus file, and every
 // alternative those two cannot demand must be taken by one. It makes an
