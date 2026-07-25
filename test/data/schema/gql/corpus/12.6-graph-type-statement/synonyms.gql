@@ -1,0 +1,8 @@
+-- VERTEX for nodeSynonym alternative 2, RELATIONSHIP for edgeSynonym alternative 2.
+-- The prefix `nodeSynonym TYPE? nodeTypeName` sits *outside* the paren group in
+-- nodeTypePattern (GQL.g4:1507); wrapping it inside the parens is a syntax error.
+CREATE GRAPH TYPE Seed {
+    VERTEX A (a:A),
+    VERTEX B (b:B),
+    DIRECTED RELATIONSHIP R (a)-[:R]->(b)
+}

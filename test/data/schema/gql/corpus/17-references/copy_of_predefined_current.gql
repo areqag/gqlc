@@ -1,0 +1,4 @@
+-- predefinedSchemaReference#3: the bare-PERIOD alternative. `./gt` reaches this
+-- one; alternatives #1 (HOME_SCHEMA) and #2 (CURRENT_SCHEMA) are demanded only
+-- by token coverage and each get their own file.
+CREATE PROPERTY GRAPH TYPE Copied COPY OF ./gt

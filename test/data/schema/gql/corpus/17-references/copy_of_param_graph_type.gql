@@ -1,0 +1,5 @@
+-- graphTypeReference#2: the parameter sits where the *graph type* goes, so this
+-- is `graphTypeReference : referenceParameterSpecification`. Putting the same
+-- $$ pair where the *schema* goes discharges schemaReference#3 instead — one
+-- character of position between the two, see copy_of_param_schema.gql.
+CREATE PROPERTY GRAPH TYPE Copied COPY OF $$gt

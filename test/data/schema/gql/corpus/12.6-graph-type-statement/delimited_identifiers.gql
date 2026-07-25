@@ -1,0 +1,3 @@
+-- Both delimited-identifier tokens in one file: an accent-quoted graph type name
+-- and a double-quoted label name. Both routes go through `identifier`.
+CREATE GRAPH TYPE `Seed` { (:"Person") }
