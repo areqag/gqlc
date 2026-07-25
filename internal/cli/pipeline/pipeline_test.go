@@ -25,23 +25,51 @@ const (
 }
 `
 	fixtureQuery = "// name: AllPersons :many\nMATCH (p:Person) RETURN p\n"
+
+	// The second target's schema declares a label the first one does
+	// not, so a query written against either fails against the other —
+	// what TestRunStateIsPerTarget turns on.
+	invoiceSchema = `CREATE PROPERTY GRAPH TYPE Invoices AS {
+    (:Invoice {
+        id    :: INT64 NOT NULL,
+        total :: INT64 NOT NULL
+    })
+}
+`
+	invoiceQuery = "// name: AllInvoices :many\nMATCH (i:Invoice) RETURN i\n"
+
+	callQuery    = "// name: Labels :many\nCALL test.labels() YIELD label\nRETURN label\n"
+	callRegistry = `{"signatures":[{"name":"test.labels","params":[],` +
+		`"results":[{"name":"label","type":"STRING","nullable":true}]}]}`
 )
 
-// configYAML renders a v1 config wired to the fixture layout. procsig
-// is emitted only when non-empty (the key is optional).
-func configYAML(pkg, driver, procsig string) string {
-	y := "version: 1\n" +
-		"schema: schema.gql\n" +
-		"queries: queries\n" +
-		"output: out\n" +
-		"package: " + pkg + "\n" +
-		"schema_language: gql\n" +
-		"query_language: opencypher\n" +
-		"driver: " + driver + "\n"
-	if procsig != "" {
-		y += "procsig: " + procsig + "\n"
+// targetEntry renders one graph entry. procsig is emitted only when
+// non-empty (the key is optional).
+func targetEntry(schemaPath, queryDir, pkg, out, driver, procsigPath string) string {
+	e := "  - schema: " + schemaPath + "\n" +
+		"    schema_language: gql\n" +
+		"    queries: " + queryDir + "\n" +
+		"    query_language: opencypher\n"
+	if procsigPath != "" {
+		e += "    procsig: " + procsigPath + "\n"
 	}
-	return y
+	return e +
+		"    gen:\n" +
+		"      go:\n" +
+		"        package: " + pkg + "\n" +
+		"        out: " + out + "\n" +
+		"        driver: " + driver + "\n"
+}
+
+// configOf renders a v1 config from rendered graph entries.
+func configOf(entries ...string) string {
+	return "version: 1\ngraph:\n" + strings.Join(entries, "")
+}
+
+// configYAML renders a one-entry v1 config wired to the writeProject
+// layout.
+func configYAML(pkg, driver, procsig string) string {
+	return configOf(targetEntry("schema.gql", "queries", pkg, "out", driver, procsig))
 }
 
 // writeFixtureFile writes contents at path, creating parent dirs as
@@ -64,22 +92,45 @@ func writeProject(t *testing.T) (dir, cfgPath string) {
 	return dir, cfgPath
 }
 
-// findFile returns the first Result.Files entry with the given Path,
-// or fails the test.
-func findFile(t *testing.T, res pipeline.Result, name string) []byte {
+// writeTwoTargetProject extends writeProject with a second target that
+// shares nothing with the first: its own schema, query directory,
+// package, driver and output directory.
+func writeTwoTargetProject(t *testing.T) (dir, cfgPath string) {
 	t.Helper()
-	for _, f := range res.Files {
+	dir, cfgPath = writeProject(t)
+	writeFixtureFile(t, filepath.Join(dir, "invoices.gql"), invoiceSchema)
+	writeFixtureFile(t, filepath.Join(dir, "invoices", "invoices.cypher"), invoiceQuery)
+	writeFixtureFile(t, cfgPath, configOf(
+		targetEntry("schema.gql", "queries", "people", "out", "neo4j-go-v5", ""),
+		targetEntry("invoices.gql", "invoices", "invoicedb", "out2", "neo4j-go-v6", ""),
+	))
+	return dir, cfgPath
+}
+
+// only returns the single TargetResult of a one-target run, failing
+// the test when the run produced any other number.
+func only(t *testing.T, res pipeline.Result) pipeline.TargetResult {
+	t.Helper()
+	require.Len(t, res.Targets, 1)
+	return res.Targets[0]
+}
+
+// findFile returns the first TargetResult.Files entry with the given
+// Path, or fails the test.
+func findFile(t *testing.T, tr pipeline.TargetResult, name string) []byte {
+	t.Helper()
+	for _, f := range tr.Files {
 		if f.Path == name {
 			return f.Contents
 		}
 	}
-	t.Fatalf("no file %q in Result.Files (paths: %v)", name, filePaths(res))
+	t.Fatalf("no file %q in TargetResult.Files (paths: %v)", name, filePaths(tr))
 	return nil
 }
 
-func filePaths(res pipeline.Result) []string {
-	paths := make([]string, 0, len(res.Files))
-	for _, f := range res.Files {
+func filePaths(tr pipeline.TargetResult) []string {
+	paths := make([]string, 0, len(tr.Files))
+	for _, f := range tr.Files {
 		paths = append(paths, f.Path)
 	}
 	return paths
@@ -103,12 +154,12 @@ func TestRunHappyPathReturnsFiles(t *testing.T) {
 	res, err := pipeline.Run(cfgPath)
 	require.NoError(t, err)
 	require.Empty(t, res.Diagnostics)
-	require.NotNil(t, res.Files)
-	require.Equal(t, filepath.Join(dir, "out"), res.OutDir)
+	tr := only(t, res)
+	require.NotNil(t, tr.Files)
+	require.Equal(t, filepath.Join(dir, "out"), tr.OutDir)
 
-	paths := filePaths(res)
-	require.Equal(t, []string{"db.go", "models.go", "people.cypher.go", "querier.go"}, paths)
-	for _, f := range res.Files {
+	require.Equal(t, []string{"db.go", "models.go", "people.cypher.go", "querier.go"}, filePaths(tr))
+	for _, f := range tr.Files {
 		requireMarkerHeaded(t, f.Path, f.Contents)
 	}
 }
@@ -123,9 +174,10 @@ func TestRunPackageNameFromConfig(t *testing.T) {
 	res, err := pipeline.Run(cfgPath)
 	require.NoError(t, err)
 	require.Empty(t, res.Diagnostics)
-	require.Equal(t, filepath.Join(dir, "out"), res.OutDir)
+	tr := only(t, res)
+	require.Equal(t, filepath.Join(dir, "out"), tr.OutDir)
 
-	db := findFile(t, res, "db.go")
+	db := findFile(t, tr, "db.go")
 	require.Contains(t, string(db), "\npackage peopledb\n")
 	require.NotContains(t, string(db), "\npackage people\n")
 }
@@ -148,7 +200,7 @@ func TestRunDriverAxis(t *testing.T) {
 			res, err := pipeline.Run(cfgPath)
 			require.NoError(t, err)
 			require.Empty(t, res.Diagnostics)
-			db := findFile(t, res, "db.go")
+			db := findFile(t, only(t, res), "db.go")
 			require.Contains(t, string(db), tc.wantImport)
 		})
 	}
@@ -159,22 +211,17 @@ func TestRunDriverAxis(t *testing.T) {
 // the key surfaces one query-diag in Diagnostics (unknown procedure
 // — the correct diagnosis, CLI-1 §3.1 stage 4).
 func TestRunProcsigWiredThroughFrontEnd(t *testing.T) {
-	const callQuery = "// name: Labels :many\nCALL test.labels() YIELD label\nRETURN label\n"
-	const registry = `{"signatures":[{"name":"test.labels","params":[],"results":[{"name":"label","type":"STRING","nullable":true}]}]}`
-
 	t.Run("with procsig key", func(t *testing.T) {
 		dir, cfgPath := writeProject(t)
 		writeFixtureFile(t, filepath.Join(dir, "queries", "calls.cypher"), callQuery)
-		writeFixtureFile(t, filepath.Join(dir, "procsig.json"), registry)
+		writeFixtureFile(t, filepath.Join(dir, "procsig.json"), callRegistry)
 		writeFixtureFile(t, cfgPath, configYAML("people", "neo4j-go-v5", "procsig.json"))
 
 		res, err := pipeline.Run(cfgPath)
 		require.NoError(t, err)
 		require.Empty(t, res.Diagnostics)
-		require.NotNil(t, res.Files)
 		// calls.cypher generates a per-source file.
-		paths := filePaths(res)
-		require.Contains(t, paths, "calls.cypher.go")
+		require.Contains(t, filePaths(only(t, res)), "calls.cypher.go")
 	})
 
 	t.Run("without procsig key", func(t *testing.T) {
@@ -183,11 +230,10 @@ func TestRunProcsigWiredThroughFrontEnd(t *testing.T) {
 
 		res, err := pipeline.Run(cfgPath)
 		require.NoError(t, err)
-		require.Nil(t, res.Files)
+		require.Nil(t, res.Targets)
 		require.Len(t, res.Diagnostics, 1)
 		require.Contains(t, res.Diagnostics[0],
-			filepath.Join(dir, "queries", "calls.cypher")+": query Labels: unknown procedure")
-		require.Equal(t, filepath.Join(dir, "out"), res.OutDir)
+			"graph[0]: "+filepath.Join(dir, "queries", "calls.cypher")+": query Labels: unknown procedure")
 	})
 }
 
@@ -208,18 +254,14 @@ func TestRunConfigMissing(t *testing.T) {
 }
 
 // TestRunNoQueryFiles: an empty queries dir → the pinned singular
-// error; Result is zero-except-OutDir (stage 6 failed, but stage 1
-// succeeded so OutDir is populated).
+// error under its entry prefix; Result is the zero value (§6).
 func TestRunNoQueryFiles(t *testing.T) {
 	dir, cfgPath := writeProject(t)
 	require.NoError(t, os.Remove(filepath.Join(dir, "queries", "people.cypher")))
 
 	res, err := pipeline.Run(cfgPath)
-	require.Error(t, err)
-	require.Equal(t, "no query files (*.cypher) in "+filepath.Join(dir, "queries"), err.Error())
-	require.Nil(t, res.Files)
-	require.Nil(t, res.Diagnostics)
-	require.Equal(t, filepath.Join(dir, "out"), res.OutDir)
+	require.EqualError(t, err, "graph[0]: no query files (*.cypher) in "+filepath.Join(dir, "queries"))
+	require.Equal(t, pipeline.Result{}, res)
 }
 
 // TestRunAccumulatesDiagnostics: broken-file + broken-queries +
@@ -235,15 +277,14 @@ func TestRunAccumulatesDiagnostics(t *testing.T) {
 
 	res, err := pipeline.Run(cfgPath)
 	require.NoError(t, err)
-	require.Nil(t, res.Files)
+	require.Nil(t, res.Targets)
 	require.Len(t, res.Diagnostics, 3)
-	require.True(t, strings.HasPrefix(res.Diagnostics[0], filepath.Join(q, "a.cypher")+": "),
+	require.True(t, strings.HasPrefix(res.Diagnostics[0], "graph[0]: "+filepath.Join(q, "a.cypher")+": "),
 		"diag[0]: %q", res.Diagnostics[0])
-	require.True(t, strings.HasPrefix(res.Diagnostics[1], filepath.Join(q, "b.cypher")+": query BadOne: "),
+	require.True(t, strings.HasPrefix(res.Diagnostics[1], "graph[0]: "+filepath.Join(q, "b.cypher")+": query BadOne: "),
 		"diag[1]: %q", res.Diagnostics[1])
-	require.True(t, strings.HasPrefix(res.Diagnostics[2], filepath.Join(q, "b.cypher")+": query BadTwo: "),
+	require.True(t, strings.HasPrefix(res.Diagnostics[2], "graph[0]: "+filepath.Join(q, "b.cypher")+": query BadTwo: "),
 		"diag[2]: %q", res.Diagnostics[2])
-	require.Equal(t, filepath.Join(dir, "out"), res.OutDir)
 }
 
 // TestRunDiagnosticShapes: exact-match one file-diag (malformed
@@ -256,15 +297,15 @@ func TestRunDiagnosticShapes(t *testing.T) {
 
 	res, err := pipeline.Run(cfgPath)
 	require.NoError(t, err)
-	require.Nil(t, res.Files)
+	require.Nil(t, res.Targets)
 	// people.cypher succeeds; broken.cypher and ghost.cypher fail.
 	// Discovery order is lexical: broken, ghost, people.
 	require.Len(t, res.Diagnostics, 2)
 	require.Equal(t,
-		filepath.Join(q, "broken.cypher")+`: malformed query annotation: line 1: "// name: Broken"`,
+		"graph[0]: "+filepath.Join(q, "broken.cypher")+`: malformed query annotation: line 1: "// name: Broken"`,
 		res.Diagnostics[0])
 	require.Equal(t,
-		filepath.Join(q, "ghost.cypher")+": query BadLabel: unknown label: Ghost",
+		"graph[0]: "+filepath.Join(q, "ghost.cypher")+": query BadLabel: unknown label: Ghost",
 		res.Diagnostics[1])
 }
 
@@ -282,8 +323,9 @@ func TestRunPathResolution(t *testing.T) {
 	res, err := pipeline.Run(cfgPath)
 	require.NoError(t, err)
 	require.Empty(t, res.Diagnostics)
-	require.Equal(t, filepath.Join(proj, "out"), res.OutDir)
-	require.NotEmpty(t, res.Files)
+	tr := only(t, res)
+	require.Equal(t, filepath.Join(proj, "out"), tr.OutDir)
+	require.NotEmpty(t, tr.Files)
 }
 
 // TestRunNoWrites: the seam's central promise. The config's output
@@ -298,8 +340,9 @@ func TestRunNoWrites(t *testing.T) {
 
 	res, err := pipeline.Run(cfgPath)
 	require.NoError(t, err)
-	require.NotEmpty(t, res.Files)
-	require.Equal(t, out, res.OutDir)
+	tr := only(t, res)
+	require.NotEmpty(t, tr.Files)
+	require.Equal(t, out, tr.OutDir)
 	require.NoDirExists(t, out, "Run must not create the output directory — that is the CLI's job under ADR 0012")
 }
 
@@ -319,5 +362,160 @@ func TestRunDiscoveryFilter(t *testing.T) {
 	res, err := pipeline.Run(cfgPath)
 	require.NoError(t, err)
 	require.Empty(t, res.Diagnostics)
-	require.Equal(t, []string{"db.go", "models.go", "people.cypher.go", "querier.go"}, filePaths(res))
+	require.Equal(t, []string{"db.go", "models.go", "people.cypher.go", "querier.go"}, filePaths(only(t, res)))
+}
+
+// TestRunEveryTarget: a two-target config yields two TargetResults in
+// document order, each carrying its own package clause, driver import
+// and resolved OutDir (§6).
+func TestRunEveryTarget(t *testing.T) {
+	dir, cfgPath := writeTwoTargetProject(t)
+
+	res, err := pipeline.Run(cfgPath)
+	require.NoError(t, err)
+	require.Empty(t, res.Diagnostics)
+	require.Len(t, res.Targets, 2)
+
+	require.Equal(t, filepath.Join(dir, "out"), res.Targets[0].OutDir)
+	require.Equal(t, []string{"db.go", "models.go", "people.cypher.go", "querier.go"},
+		filePaths(res.Targets[0]))
+	db0 := string(findFile(t, res.Targets[0], "db.go"))
+	require.Contains(t, db0, "\npackage people\n")
+	require.Contains(t, db0, `"github.com/neo4j/neo4j-go-driver/v5/neo4j"`)
+	require.Contains(t, string(findFile(t, res.Targets[0], "models.go")), "type Person struct")
+
+	require.Equal(t, filepath.Join(dir, "out2"), res.Targets[1].OutDir)
+	require.Equal(t, []string{"db.go", "invoices.cypher.go", "models.go", "querier.go"},
+		filePaths(res.Targets[1]))
+	db1 := string(findFile(t, res.Targets[1], "db.go"))
+	require.Contains(t, db1, "\npackage invoicedb\n")
+	require.Contains(t, db1, `"github.com/neo4j/neo4j-go-driver/v6/neo4j"`)
+	require.Contains(t, string(findFile(t, res.Targets[1], "models.go")), "type Invoice struct")
+}
+
+// TestRunSetupFailureFailsFast: a singular failure aborts the whole
+// run at the offending entry, under that entry's prefix and with the
+// zero Result — including when an earlier target already accumulated
+// diagnostics, which the abort discards (§6.1).
+func TestRunSetupFailureFailsFast(t *testing.T) {
+	t.Run("unreadable schema at entry 1", func(t *testing.T) {
+		dir, cfgPath := writeTwoTargetProject(t)
+		require.NoError(t, os.Remove(filepath.Join(dir, "invoices.gql")))
+
+		res, err := pipeline.Run(cfgPath)
+		require.Error(t, err)
+		require.True(t, strings.HasPrefix(err.Error(), "graph[1]: schema: "), "err: %q", err)
+		require.ErrorIs(t, err, fs.ErrNotExist)
+		require.Equal(t, pipeline.Result{}, res)
+	})
+
+	t.Run("discards diagnostics accumulated before it", func(t *testing.T) {
+		dir, cfgPath := writeTwoTargetProject(t)
+		writeFixtureFile(t, filepath.Join(dir, "queries", "ghost.cypher"),
+			"// name: BadLabel :many\nMATCH (g:Ghost) RETURN g\n")
+		require.NoError(t, os.Remove(filepath.Join(dir, "invoices.gql")))
+
+		res, err := pipeline.Run(cfgPath)
+		require.Error(t, err)
+		require.True(t, strings.HasPrefix(err.Error(), "graph[1]: schema: "), "err: %q", err)
+		require.Equal(t, pipeline.Result{}, res)
+	})
+}
+
+// TestRunDiagnosticsSpanTargets: broken queries in both entries report
+// every line, in target-then-file-then-annotation order, each under
+// its own entry prefix; Targets is nil (§6.1, §6.2).
+func TestRunDiagnosticsSpanTargets(t *testing.T) {
+	dir, cfgPath := writeTwoTargetProject(t)
+	q0, q1 := filepath.Join(dir, "queries"), filepath.Join(dir, "invoices")
+	writeFixtureFile(t, filepath.Join(q0, "ghost.cypher"),
+		"// name: BadLabel :many\nMATCH (g:Ghost) RETURN g\n")
+	writeFixtureFile(t, filepath.Join(q1, "broken.cypher"),
+		"// name: Broken\nMATCH (n) RETURN n\n")
+	writeFixtureFile(t, filepath.Join(q1, "wraith.cypher"),
+		"// name: BadOne :many\nMATCH (w:Wraith) RETURN w\n// name: BadTwo :many\nMATCH (s:Spectre) RETURN s\n")
+
+	res, err := pipeline.Run(cfgPath)
+	require.NoError(t, err)
+	require.Nil(t, res.Targets)
+	require.Equal(t, []string{
+		"graph[0]: " + filepath.Join(q0, "ghost.cypher") + ": query BadLabel: unknown label: Ghost",
+		"graph[1]: " + filepath.Join(q1, "broken.cypher") + `: malformed query annotation: line 1: "// name: Broken"`,
+		"graph[1]: " + filepath.Join(q1, "wraith.cypher") + ": query BadOne: unknown label: Wraith",
+		"graph[1]: " + filepath.Join(q1, "wraith.cypher") + ": query BadTwo: unknown label: Spectre",
+	}, res.Diagnostics)
+}
+
+// TestRunAllOrNothing: one broken query in entry 1 discards entry 0's
+// batch too — any diagnostic anywhere means no target is written
+// (§6.2).
+func TestRunAllOrNothing(t *testing.T) {
+	dir, cfgPath := writeTwoTargetProject(t)
+	writeFixtureFile(t, filepath.Join(dir, "invoices", "ghost.cypher"),
+		"// name: BadLabel :many\nMATCH (g:Ghost) RETURN g\n")
+
+	res, err := pipeline.Run(cfgPath)
+	require.NoError(t, err)
+	require.Nil(t, res.Targets, "entry 0's clean batch is discarded with entry 1's")
+	require.Len(t, res.Diagnostics, 1)
+}
+
+// TestRunSkipsCodegenAfterDiagnostic pins the observable half of §6.1's
+// stage-8 skip: entry 1's batch would fail codegen (two files declaring
+// the same query name collide in the batch, though neither file is
+// malformed), and that error must not displace entry 0's diagnostic in
+// a run that is already failing.
+func TestRunSkipsCodegenAfterDiagnostic(t *testing.T) {
+	dir, cfgPath := writeTwoTargetProject(t)
+	writeFixtureFile(t, filepath.Join(dir, "queries", "ghost.cypher"),
+		"// name: BadLabel :many\nMATCH (g:Ghost) RETURN g\n")
+	writeFixtureFile(t, filepath.Join(dir, "invoices", "dup.cypher"), invoiceQuery)
+
+	res, err := pipeline.Run(cfgPath)
+	require.NoError(t, err)
+	require.Nil(t, res.Targets)
+	require.Equal(t, []string{
+		"graph[0]: " + filepath.Join(dir, "queries", "ghost.cypher") + ": query BadLabel: unknown label: Ghost",
+	}, res.Diagnostics)
+}
+
+// TestRunStateIsPerTarget: every front-end value the loop builds —
+// the parsed schema, the procsig registry, the query parser and the
+// resolver — belongs to one target. Both sub-tests fail if any of
+// them is hoisted out of the loop, because each target's queries are
+// unresolvable against the other target's state.
+func TestRunStateIsPerTarget(t *testing.T) {
+	t.Run("schema and resolver", func(t *testing.T) {
+		// Entry 1's :Invoice query would fail with "unknown label:
+		// Invoice" against entry 0's People schema, and entry 0's
+		// :Person query would fail against entry 1's Invoices schema.
+		_, cfgPath := writeTwoTargetProject(t)
+
+		res, err := pipeline.Run(cfgPath)
+		require.Empty(t, res.Diagnostics)
+		require.NoError(t, err)
+		require.Len(t, res.Targets, 2)
+	})
+
+	t.Run("procsig registry and query parser", func(t *testing.T) {
+		// Entry 0 declares a registry holding test.labels; entry 1
+		// declares none, so its CALL to the same procedure must fail
+		// — it would resolve if entry 0's registry leaked into entry
+		// 1's parser.
+		dir, cfgPath := writeTwoTargetProject(t)
+		writeFixtureFile(t, filepath.Join(dir, "procsig.json"), callRegistry)
+		writeFixtureFile(t, filepath.Join(dir, "queries", "calls.cypher"), callQuery)
+		writeFixtureFile(t, filepath.Join(dir, "invoices", "calls.cypher"), callQuery)
+		writeFixtureFile(t, cfgPath, configOf(
+			targetEntry("schema.gql", "queries", "people", "out", "neo4j-go-v5", "procsig.json"),
+			targetEntry("invoices.gql", "invoices", "invoicedb", "out2", "neo4j-go-v6", ""),
+		))
+
+		res, err := pipeline.Run(cfgPath)
+		require.NoError(t, err)
+		require.Nil(t, res.Targets)
+		require.Len(t, res.Diagnostics, 1)
+		require.Contains(t, res.Diagnostics[0],
+			"graph[1]: "+filepath.Join(dir, "invoices", "calls.cypher")+": query Labels: unknown procedure")
+	})
 }

@@ -20,14 +20,29 @@ accepted, `gqlc.yaml` reads:
 
 ```yaml
 version: 1
-schema: schema.gql
-queries: queries
-output: internal/db
-package: db
-schema_language: gql
-query_language: opencypher
-driver: neo4j-go-v5
+graph:
+  - schema: schema.gql
+    schema_language: gql
+    queries: queries
+    query_language: opencypher
+    gen:
+      go:
+        package: db
+        out: internal/db
+        driver: neo4j-go-v5
 ```
+
+`graph` is a list, one entry per generated package, each with its own
+schema, queries and output directory. `gqlc generate` runs every entry
+in document order, and diagnostics name the entry they came from
+(`graph[1]: ...`). Every output directory is checked before any of them
+is modified, so a query error at any entry, or an unexpected file in any
+output directory, ends the run with your tree exactly as it was. A
+failure during the writing itself — a full disk, an output directory
+that cannot be created — is reported against the entry that hit it and
+can leave earlier entries already rewritten;
+`docs/specs/config-multi-target.md` §7.3 states in full what the two
+phases do and do not guarantee.
 
 Put your schema at `schema.gql`:
 

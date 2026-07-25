@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"charm.land/huh/v2"
@@ -33,7 +34,10 @@ var packageIdentPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 // newInitCmd builds the init command: the interactive config wizard
 // (CLI-2 spec). TTY-gated; there is no non-interactive mode (§8).
 func newInitCmd() *cobra.Command {
-	var cfgPath string
+	var (
+		cfgPath string
+		add     bool
+	)
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Create or update the gqlc config file interactively",
@@ -62,7 +66,7 @@ numbered-prompt mode.`,
 			// the caller's job, any non-empty value enabling — the
 			// upstream convention, adopted verbatim (§2.1).
 			accessible := os.Getenv("ACCESSIBLE") != ""
-			err := runInitWizard(cmd.InOrStdin(), cmd.ErrOrStderr(), accessible, cfgPath)
+			err := runInit(cmd.InOrStdin(), cmd.ErrOrStderr(), accessible, add, cfgPath)
 			if errors.Is(err, huh.ErrUserAborted) {
 				return errInitAborted
 			}
@@ -71,7 +75,19 @@ numbered-prompt mode.`,
 	}
 	cmd.Flags().StringVarP(&cfgPath, "file", "f", config.DefaultFilename,
 		"path to the config file to create or update")
+	cmd.Flags().BoolVar(&add, "add", false,
+		"append a generation target to the existing config file")
 	return cmd
+}
+
+// runInit picks the flow the flags ask for. The two differ only in what
+// starting state they accept and what they bind the form to; everything
+// from the form onward is runTargetForm.
+func runInit(in io.Reader, errOut io.Writer, accessible, add bool, cfgPath string) error {
+	if add {
+		return runInitAdd(in, errOut, accessible, cfgPath)
+	}
+	return runInitWizard(in, errOut, accessible, cfgPath)
 }
 
 // initFlow is the §3.1 classification of the wizard's starting state.
@@ -83,10 +99,10 @@ const (
 	flowBroken
 )
 
-// classifyTarget makes the single config.Load attempt that selects
+// classifyConfig makes the single config.Load attempt that selects
 // the flow (§3.1). loadErr is non-nil only for flowBroken; init never
 // second-guesses the loader's verdict.
-func classifyTarget(cfgPath string) (initFlow, config.Config, error) {
+func classifyConfig(cfgPath string) (initFlow, config.Config, error) {
 	cfg, err := config.Load(cfgPath)
 	switch {
 	case err == nil:
@@ -98,31 +114,39 @@ func classifyTarget(cfgPath string) (initFlow, config.Config, error) {
 	}
 }
 
-// initDefaults is the §3.2 fresh-flow Config: path and package
-// defaults mirror the canonical fixture; enum defaults are the first
-// member of each *Values() slice by rule, so appending a vocabulary
-// member never silently changes a default.
+// initDefaults is the §3.2 fresh-flow Config: one generation target,
+// its path and package defaults mirroring the canonical fixture; enum
+// defaults are the first member of each *Values() slice by rule, so
+// appending a vocabulary member never silently changes a default.
 func initDefaults() config.Config {
-	return config.Config{
-		SchemaPath:    "schema.gql",
-		QueryDir:      "queries",
-		OutputDir:     "internal/db",
-		OutputPackage: "db",
-		SchemaLang:    config.SchemaLangValues()[0],
-		QueryLang:     config.QueryLangValues()[0],
-		Driver:        config.DriverValues()[0],
-	}
+	return config.Config{Targets: []config.Target{{
+		SchemaPath: "schema.gql",
+		SchemaLang: config.SchemaLangValues()[0],
+		QueryDir:   "queries",
+		QueryLang:  config.QueryLangValues()[0],
+		Go: config.GoGen{
+			Package: "db",
+			Out:     "internal/db",
+			Driver:  config.DriverValues()[0],
+		},
+	}}}
 }
 
-// runInitWizard is the whole interactive body behind one seam (§2.1):
-// tests drive it directly with accessible=true and a scripted reader.
-// The cfg.Save call is the only filesystem mutation in the command,
-// unreachable except through the confirm gate (§5.4).
+// runInitWizard is the whole interactive body of a bare `init` behind
+// one seam (§2.1): tests drive it directly with accessible=true and a
+// scripted reader.
 func runInitWizard(in io.Reader, errOut io.Writer, accessible bool, cfgPath string) error {
-	flow, cfg, loadErr := classifyTarget(cfgPath)
-	// Raw bytes feed only the §5.3 comment notice; absence or
-	// unreadability simply means no comment scan (§3.1).
-	raw, _ := os.ReadFile(cfgPath) //nolint:errcheck // §3.1: read errors mean no comment scan, nothing more
+	flow, cfg, loadErr := classifyConfig(cfgPath)
+	// Before any form renders (§8.1): the wizard expresses one target,
+	// so prefilling from the first and writing the canonical form would
+	// silently delete the rest. Testing != 1 rather than > 1 is what
+	// carries this path to runTargetForm's index without resting on the
+	// loader's rejection of an empty graph, a cross-package invariant;
+	// --add reaches that index by its own route, where the append
+	// supplies the entry.
+	if len(cfg.Targets) != 1 {
+		return fmt.Errorf("%s declares %d generation targets; init edits only a single-target config (edit it by hand, or run gqlc init --add to append another)", cfgPath, len(cfg.Targets))
+	}
 
 	if flow == flowBroken {
 		fresh, err := runBrokenDialogue(in, errOut, accessible, cfgPath, loadErr)
@@ -133,18 +157,78 @@ func runInitWizard(in io.Reader, errOut io.Writer, accessible bool, cfgPath stri
 			return errInitAborted
 		}
 	}
+	// No prior entries: the file's one target is the one being edited, so
+	// including it would make its own out an operand in its own check —
+	// an unchanged output directory then reads as a collision with
+	// itself (TestInitEditPrefillRoundTrip).
+	return runTargetForm(in, errOut, accessible, cfgPath, cfg, config.Config{})
+}
 
-	if err := runForm(newWizardForm(&cfg), in, errOut, accessible); err != nil {
+// runInitAdd is the §8.2 `--add` flow. Flow selection is stricter than
+// a bare init's because appending presupposes a file that loads: there
+// is no fresh flow, and no broken-config dialogue, whose "start fresh"
+// would replace the file the flag promises to append to.
+func runInitAdd(in io.Reader, errOut io.Writer, accessible bool, cfgPath string) error {
+	loaded, err := config.Load(cfgPath)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return missingConfig(cfgPath)
+	case err != nil:
+		return err
+	}
+	cfg := config.Config{Targets: append(slices.Clone(loaded.Targets), addPrefill(loaded.Targets))}
+	// loaded, not cfg: the appended target must not overlap-check
+	// against itself.
+	return runTargetForm(in, errOut, accessible, cfgPath, cfg, loaded)
+}
+
+// addPrefill is the §8.2 prefill for an appended target: the last
+// entry's values for the fields a second target usually shares, and
+// empty for the three that must distinguish it. Empty is the honest
+// default for a directory that has to differ from the entries already
+// in the file, and the non-blank validators refuse to let it through.
+//
+// With no entry to carry from there is nothing shared to carry, so the
+// §3.2 defaults stand in. The loader rejects a config declaring no
+// target, but that is the loader's invariant to keep rather than one
+// this function indexes on.
+func addPrefill(targets []config.Target) config.Target {
+	t := initDefaults().Targets[0]
+	if n := len(targets); n > 0 {
+		t = targets[n-1]
+	}
+	t.QueryDir = ""
+	t.Go.Out = ""
+	t.Go.Package = ""
+	return t
+}
+
+// runTargetForm is the tail both flows share (§4 through §5.6): the
+// form, the preview of the whole resulting file, the confirm gate, the
+// write, and the trailer. The target a run authors is cfg's last entry
+// either way — the only one under a bare init, the appended one under
+// --add — and it is that target the warnings and the epilogue name.
+//
+// prior holds the entries a proposed output directory must not overlap
+// (§8.2). The cfg.Save call is the only filesystem mutation in the
+// command, unreachable except through the confirm gate (§5.4).
+func runTargetForm(in io.Reader, errOut io.Writer, accessible bool, cfgPath string, cfg, prior config.Config) error {
+	target := &cfg.Targets[len(cfg.Targets)-1]
+	// Raw bytes feed only the §5.3 comment notice; absence or
+	// unreadability simply means no comment scan (§3.1).
+	raw, _ := os.ReadFile(cfgPath) //nolint:errcheck // §3.1: read errors mean no comment scan, nothing more
+
+	if err := runForm(newWizardForm(target, prior), in, errOut, accessible); err != nil {
 		return err
 	}
 	// One post-form trim: huh's accessible prompts trim their returns
 	// and tea mode does not, so without this the two display modes
 	// would diverge (§4.2).
-	cfg.SchemaPath = strings.TrimSpace(cfg.SchemaPath)
-	cfg.QueryDir = strings.TrimSpace(cfg.QueryDir)
-	cfg.OutputDir = strings.TrimSpace(cfg.OutputDir)
-	cfg.OutputPackage = strings.TrimSpace(cfg.OutputPackage)
-	cfg.ProcsigPath = strings.TrimSpace(cfg.ProcsigPath)
+	target.SchemaPath = strings.TrimSpace(target.SchemaPath)
+	target.QueryDir = strings.TrimSpace(target.QueryDir)
+	target.Go.Out = strings.TrimSpace(target.Go.Out)
+	target.Go.Package = strings.TrimSpace(target.Go.Package)
+	target.ProcsigPath = strings.TrimSpace(target.ProcsigPath)
 
 	canonical, err := cfg.Canonical()
 	if err != nil {
@@ -174,7 +258,7 @@ func runInitWizard(in io.Reader, errOut io.Writer, accessible bool, cfgPath stri
 	if err := cfg.Save(cfgPath); err != nil {
 		return err
 	}
-	_, err = fmt.Fprint(errOut, warningsText(cfgPath, cfg)+epilogueText(cfgPath, cfg))
+	_, err = fmt.Fprint(errOut, warningsText(cfgPath, *target)+epilogueText(cfgPath, *target))
 	return err
 }
 
@@ -208,47 +292,47 @@ func runBrokenDialogue(in io.Reader, errOut io.Writer, accessible bool, cfgPath 
 // cannot drift and a new vocabulary member is an option before it can
 // be a stored value — which is why an edit prefill needs no defensive
 // vocabulary re-check (§3.3).
-func newWizardForm(cfg *config.Config) *huh.Form {
+func newWizardForm(t *config.Target, prior config.Config) *huh.Form {
 	return huh.NewForm(
 		huh.NewGroup(
 			huh.NewInput().
 				Title("Schema file").
 				Description("Path to the graph schema. Relative paths resolve against the config file's directory.").
 				Validate(validateNonBlank).
-				Value(&cfg.SchemaPath),
+				Value(&t.SchemaPath),
 			huh.NewInput().
 				Title("Query directory").
 				Description("Directory holding *.cypher query files.").
 				Validate(validateNonBlank).
-				Value(&cfg.QueryDir),
+				Value(&t.QueryDir),
 			huh.NewInput().
 				Title("Output directory").
 				Description("Owned exclusively by gqlc: generate replaces its contents.").
-				Validate(validateNonBlank).
-				Value(&cfg.OutputDir),
+				Validate(validateOut(prior)).
+				Value(&t.Go.Out),
 			huh.NewInput().
 				Title("Package name").
 				Description("Go package name for the generated code.").
 				Validate(validatePackage).
-				Value(&cfg.OutputPackage),
+				Value(&t.Go.Package),
 			huh.NewInput().
 				Title("Procedure registry (optional)").
 				Description("Path to a procsig file; leave empty for none.").
-				Value(&cfg.ProcsigPath),
+				Value(&t.ProcsigPath),
 		),
 		huh.NewGroup(
 			huh.NewSelect[config.SchemaLang]().
 				Title("Schema language").
 				Options(huh.NewOptions(config.SchemaLangValues()...)...).
-				Value(&cfg.SchemaLang),
+				Value(&t.SchemaLang),
 			huh.NewSelect[config.QueryLang]().
 				Title("Query language").
 				Options(huh.NewOptions(config.QueryLangValues()...)...).
-				Value(&cfg.QueryLang),
+				Value(&t.QueryLang),
 			huh.NewSelect[config.Driver]().
 				Title("Driver").
 				Options(huh.NewOptions(config.DriverValues()...)...).
-				Value(&cfg.Driver),
+				Value(&t.Go.Driver),
 		),
 	)
 }
@@ -272,6 +356,22 @@ func validateNonBlank(s string) error {
 		return errors.New("must not be empty")
 	}
 	return nil
+}
+
+// validateOut is the §4.2 non-blank rule plus the §8.2 overlap check
+// against prior's entries. It calls the loader's own rule rather than
+// restating it: a second implementation drifts, and the first thing it
+// drifts on is a nested directory whose relative path opens with the
+// two characters ".." (config-multi-target §4.3).
+func validateOut(prior config.Config) func(string) error {
+	return func(s string) error {
+		if err := validateNonBlank(s); err != nil {
+			return err
+		}
+		// The trimmed value is the one §4.2's post-form trim will write,
+		// so it is the one the check has to see.
+		return prior.CheckOutAgainst(strings.TrimSpace(s))
+	}
 }
 
 // validatePackage enforces the §4.3 gates in order: non-blank, the
@@ -311,14 +411,14 @@ func previewBlock(cfgPath string, canonical, raw []byte) string {
 // to the config file's directory). The output directory (generate
 // creates and owns it, ADR 0012) and the procsig path are
 // deliberately unchecked.
-func warningsText(cfgPath string, cfg config.Config) string {
+func warningsText(cfgPath string, t config.Target) string {
 	baseDir := filepath.Dir(cfgPath)
 	var b strings.Builder
-	schemaPath := resolvePath(baseDir, cfg.SchemaPath)
+	schemaPath := resolvePath(baseDir, t.SchemaPath)
 	if _, err := os.Stat(schemaPath); errors.Is(err, fs.ErrNotExist) {
 		b.WriteString("warning: schema file " + schemaPath + " does not exist yet; create it before running gqlc generate\n")
 	}
-	queryDir := resolvePath(baseDir, cfg.QueryDir)
+	queryDir := resolvePath(baseDir, t.QueryDir)
 	if _, err := os.Stat(queryDir); errors.Is(err, fs.ErrNotExist) {
 		b.WriteString("warning: query directory " + queryDir + " does not exist yet; create it before running gqlc generate\n")
 	}
@@ -328,10 +428,10 @@ func warningsText(cfgPath string, cfg config.Config) string {
 // epilogueText renders the §5.6 epilogue; schema and queries are the
 // config values as written (the user's own words, file-relative), not
 // resolved paths.
-func epilogueText(cfgPath string, cfg config.Config) string {
+func epilogueText(cfgPath string, t config.Target) string {
 	return "wrote " + cfgPath + "\n" +
 		"next steps:\n" +
-		"  1. put your schema at " + cfg.SchemaPath + "\n" +
-		"  2. add *.cypher query files under " + cfg.QueryDir + "\n" +
+		"  1. put your schema at " + t.SchemaPath + "\n" +
+		"  2. add *.cypher query files under " + t.QueryDir + "\n" +
 		"  3. run gqlc generate\n"
 }

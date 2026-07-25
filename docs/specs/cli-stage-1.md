@@ -17,6 +17,20 @@ Tracking: bead `gqlc-m1c.2` (epic `gqlc-m1c`). `init` (CLI-2,
 `gqlc-aqb` is superseded: the registry arrives via the config file's
 `procsig` key (§3.1 stage 4), not a flag.
 
+**Amended by `config-multi-target.md` (beads `gqlc-0gb.2`, `.3`).**
+The config file now declares a `graph` list of generation targets
+rather than one flat set of keys, and `generate` runs every one of
+them. Three consequences run through this document, marked at each
+site below: the per-target fields are `Target.SchemaPath`,
+`.SchemaLang`, `.QueryDir`, `.QueryLang`, `.ProcsigPath`,
+`.Go.Package`, `.Go.Out` and `.Go.Driver` — all three tool axes are
+per-target, so §3.2's axis switches run once per entry (the flat
+`cfg.OutputDir` / `cfg.OutputPackage` are gone); every
+message about one entry is prefixed `graph[<i>]: `; and §5's tripwire
+became a two-phase protocol so no target's directory is mutated before
+every target's directory has been inspected. `config-multi-target.md`
+§6 and §7 are authoritative where the two disagree.
+
 ---
 
 ## 1. Deliverables
@@ -146,7 +160,12 @@ between annotations), because `queryfile.AnnotatedQuery` does not
 record the body's starting line. Translating to file-absolute
 positions needs a queryfile widening — deferred (§8).
 
-Singular-stage message catalogue (`Error: ` prefix implied):
+Singular-stage message catalogue (`Error: ` prefix implied). Amended:
+every row below that describes one generation target's failure — every
+row except the two `config.Load` rows — carries the `graph[<i>]: `
+entry prefix, unconditionally, whatever the entry count
+(`config-multi-target.md` §6.1). The same prefix leads each
+`file-diag` and `query-diag` above.
 
 | stage failure                        | shape                                                                                   |
 |--------------------------------------|-----------------------------------------------------------------------------------------|
@@ -193,10 +212,12 @@ Stage 1: the CLI is version-agnostic — `Load`'s probe-then-dispatch
 seam normalises every accepted on-disk version into the one `Config`,
 so nothing here inspects or branches on the config version.
 
-Stage 2: for each of `SchemaPath`, `QueryDir`, `OutputDir`,
+Stage 2: for each of `SchemaPath`, `QueryDir`, `Go.Out`,
 `ProcsigPath` — absolute paths pass through unchanged; relative paths
 become `filepath.Join(dir(cfgPath), p)` (Join cleans). No existence
-checks here; each consuming stage owns its own open failure.
+checks here; each consuming stage owns its own open failure. Amended:
+stages 2–8 run once per generation target, against that target's
+fields; stage 1 and stage 9 run once for the whole config.
 
 Stage 4: when the `procsig` key is absent the pipeline runs with the
 zero `procsig.Registry` — documented to miss on every `Lookup` — so a
@@ -295,10 +316,10 @@ same loader-is-mechanism / consumer-is-policy split the
 config-file-format spec §8 draws. Zero-value compatibility means no
 existing caller changes and the golden corpus stays byte-identical —
 the fence for this widening. The CLI always passes
-`codegen.WithPackageName(cfg.OutputPackage)` (the loader rejects an
+`codegen.WithPackageName(tgt.Go.Package)` (the loader rejects an
 empty `package`).
 
-Rejected alternative: validating `OutputPackage ==
+Rejected alternative: validating `Go.Package ==
 derivePackage(Schema.Name)` in the CLI — turns a working config into
 an error whenever the schema is renamed, and leaves the config key
 decorative.
@@ -346,7 +367,19 @@ reject-don't-guess posture as `queryfile.ErrNoQueries`).
 
 Runs only after stage 8 returned its `[]File`. Steps, in order:
 
-1. `os.Stat` the resolved `OutputDir`. Absent → `os.MkdirAll` (0o755)
+**Amended by `config-multi-target.md` §7.** The six steps below are
+unchanged as an algorithm, but they are split across two phases and
+run per target: steps 1–4 plus the wipe-list half of step 5 are phase
+A (`inspectOutputs`), which mutates nothing and runs for **every**
+target before phase B (`commitOutputs`) runs for any; the `MkdirAll`
+half of step 1, the removals of step 5 and the writes of step 6 are
+phase B. So a target whose directory is absent stays absent when a
+later target trips the wire, and phase B removes exactly the entries
+phase A proved marked — never a superset, and a listed entry that is
+already gone satisfies the removal. Each phase's failure carries the
+`graph[<i>]: ` prefix of the target it happened at.
+
+1. `os.Stat` the resolved `Go.Out`. Absent → `os.MkdirAll` (0o755)
    and go to step 5. Present but not a directory → abort
    (`output: <dir> is not a directory`). Any other stat failure →
    abort (`output: <os error>`).
@@ -385,6 +418,18 @@ Because `codegen.Generate` is pure (no I/O, full `[]File` in memory),
 before step 5 — a failed run wipes nothing and writes nothing, the
 ADR 0012 consequence restated here as a contract with tests.
 
+**Amended by `config-multi-target.md` §7.3.** With N targets that
+reasoning no longer reaches: `Generate`'s purity orders every *check*
+before every *write* within one target, but it does not order target
+2's checks before target 0's writes. The two-phase split (§5.1's
+amendment) is what restores the guarantee, and it restores it for the
+two causes named below — a diagnostic anywhere and a tripwire abort
+anywhere both land entirely in phase A, so the run ends with the tree
+unchanged, which `TestGenerateAbortsBeforeAnyWrite` and
+`TestGenerateAbortLeavesAbsentDirAbsent` pin in both directions
+(nothing modified, nothing created). It does not extend to a failure
+in phase B itself; those are the last two residual windows below.
+
 The residual windows are stated honestly rather than engineered away:
 
 - Killed between wipe (5) and write (6): only proven-gqlc-generated
@@ -395,8 +440,20 @@ The residual windows are stated honestly rather than engineered away:
   and aborts; the remedy is deleting the named file. Safe but not
   self-healing; an atomic write-and-rename protocol is a non-goal
   (§8).
+- **A commit-phase failure at target `i` leaves targets `0..i-1`
+  rewritten** and target `i` partial. Phase B commits in target order,
+  so what survives is a prefix of the targets, not an arbitrary subset
+  — this window is the one above widened from one directory to a
+  prefix of them, and accepted on the same terms.
+- **An output directory that cannot be created is discovered in phase
+  B**, after earlier targets were rewritten, because `MkdirAll` is a
+  mutation and phase A performs none. Observable with an `out` under a
+  read-only parent: `graph[1]: output: mkdir …: permission denied`,
+  with entry 0's package already on disk. Pre-creating directories in
+  phase A would shrink the window at the cost of the property the
+  split exists for.
 
-A config typo pointing `output` at a source tree — the ADR's
+A config typo pointing `out` at a source tree — the ADR's
 motivating scenario — hits step 3 (unmarked files, subdirectories)
 and produces an abort that names them, never a deletion.
 
@@ -472,6 +529,21 @@ faked.
 Gate: zero changes under `test/data/codegen/` — `WithPackageName`'s
 zero value and the untouched fixtures keep every golden byte.
 
+Multi-target rows, added by `config-multi-target.md` §10. Every
+diagnostic expectation in the table above also gained its
+`graph[<i>]: ` prefix.
+
+| test                                    | proves                                                                                                  |
+|-----------------------------------------|----------------------------------------------------------------------------------------------------------|
+| `TestGenerateMultiTarget`               | a two-entry config generates both packages into their own directories, each with its own package clause and driver import; a second run is byte-identical |
+| `TestGenerateAbortsBeforeAnyWrite`      | the tripwire firing on entry 1's directory leaves entry 0's populated directory byte-identical — phase A inspects every target before phase B mutates any |
+| `TestGenerateAbortLeavesAbsentDirAbsent`| the same abort does not create entry 0's absent output directory — `MkdirAll` is a phase-B mutation      |
+| `TestGenerateWipeListIsPhaseAs`         | driving the seam directly: a marked file that appears between the two phases survives the run, because phase B removes only what phase A listed |
+| `TestCommitToleratesVanishedEntry`      | a wipe-list entry already gone satisfies the removal (§7.2 step 7)                                       |
+| `TestCommitOutputsNamesFailingTarget`   | a phase-B failure carries the entry prefix of the target it happened at                                  |
+| `TestGenerateInspectsInTargetOrder`     | with both targets tripping the wire, phase A aborts at the first — the message names `graph[0]` (§7.1)   |
+| `TestCommitOutputsWritesInTargetOrder`  | phase B commits target `i` before `i+1`, so §5.2's commit-phase residue is a prefix of the targets       |
+
 ## 8. Non-goals
 
 - `gqlc init` (CLI-2) — the missing-config message forward-references
@@ -498,13 +570,14 @@ zero value and the untouched fixtures keep every golden byte.
 ## 9. Acceptance criteria
 
 1. In a configured project, `gqlc generate` exits 0 with empty stdout
-   and stderr and writes the generated package — every file
-   marker-headed, package clause taken from the config `package` key —
-   into the output directory; running it twice yields byte-identical
-   output.
+   and stderr and writes each declared target's generated package —
+   every file marker-headed, package clause taken from that target's
+   `package` key — into that target's output directory; running it
+   twice yields byte-identical output.
 2. A project with several broken queries reports **all** of them —
-   `<path>: query <Name>: <message>` lines in pipeline order, one
-   summary `Error:` line — exits 1, and writes nothing.
+   `graph[<i>]: <path>: query <Name>: <message>` lines in pipeline
+   order, one summary `Error:` line — exits 1, and writes nothing for
+   any target.
 3. An output directory containing any entry without the gqlc marker
    aborts the run with a message naming every offender; no file is
    deleted or modified. A directory of only marked files (any
