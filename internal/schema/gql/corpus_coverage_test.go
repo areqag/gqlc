@@ -155,11 +155,11 @@ func (s *syntaxErrors) SyntaxError(_ antlr.Recognizer, _ any, line, column int, 
 	s.msgs = append(s.msgs, fmt.Sprintf("%d:%d: %s", line, column, msg))
 }
 
-// measureCoverage parses src and walks the resulting tree. It parses
-// independently of Parse because the obligation must be measured against the
-// grammar's tree, not against the part of it the listener under test chose to
-// visit.
-func measureCoverage(t *testing.T, src string) *coverage {
+// walkCoverage parses src and walks the resulting tree, returning what the tree
+// entered and any syntax errors. It parses independently of Parse because the
+// obligation must be measured against the grammar's tree, not against the part of
+// it the listener under test chose to visit.
+func walkCoverage(t *testing.T, src string) (*coverage, []string) {
 	t.Helper()
 
 	lex, p := newGrammarParser(src)
@@ -170,10 +170,18 @@ func measureCoverage(t *testing.T, src string) *coverage {
 	p.AddErrorListener(errs)
 
 	tree := p.GqlProgram()
-	require.Empty(t, errs.msgs, "corpus files must be syntactically valid ISO GQL")
-
 	c := newCoverage(p.GetRuleNames(), p.GetSymbolicNames())
 	antlr.ParseTreeWalkerDefault.Walk(c, tree)
+	return c, errs.msgs
+}
+
+// measureCoverage is walkCoverage plus the two things every corpus file owes: it
+// is valid ISO GQL, and it is a graph type statement.
+func measureCoverage(t *testing.T, src string) *coverage {
+	t.Helper()
+
+	c, errs := walkCoverage(t, src)
+	require.Empty(t, errs, "corpus files must be syntactically valid ISO GQL")
 	require.True(t, c.rules[statementRule],
 		"parsed with no syntax error but as some other statement, so it exercises no graph type grammar; the usual cause is AS before COPY OF")
 	return c

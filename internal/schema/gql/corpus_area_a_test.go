@@ -1,10 +1,11 @@
 package gql
 
-// corpusArea126GraphTypeStatement holds the corpus entries for
-// test/data/schema/gql/corpus/12.6-graph-type-statement/ — ISO GQL clause 12.6
-// <graph type statement>. One area variable per clause so authors never share a
-// file; corpusAreas requires every entry here to live under that directory.
-var corpusArea126GraphTypeStatement = []corpusEntry{
+// corpusAreaA holds the corpus entries for the graph type statement itself, the
+// references that name a source graph type, and the identifier and nested-body
+// grammar every other area builds on. One area variable per author so that two
+// authors never edit the same Go file; corpusAreas fixes the directories these
+// entries may live in.
+var corpusAreaA = []corpusEntry{
 	{
 		file:    "12.6-graph-type-statement/nested_body.gql",
 		outcome: resolves,

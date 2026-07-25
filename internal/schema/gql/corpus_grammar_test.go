@@ -1,6 +1,7 @@
 package gql
 
 import (
+	"fmt"
 	"os"
 	"regexp"
 	"sort"
@@ -49,6 +50,19 @@ var coverageCuts = []string{"graphExpression", "nonReservedWords"}
 const (
 	wantObligationRules  = 133
 	wantObligationTokens = 133
+	// wantFlaggedAlternatives sizes the third obligation set (see
+	// flaggedAlternatives). A grammar change that creates a new blind spot changes
+	// this number.
+	wantFlaggedAlternatives = 17
+)
+
+// What the frontier cuts erase, pinned so that adding a cut has to show its price
+// in the diff rather than quietly shrinking the obligation. The "a cut must still
+// be entered" brake is not proportional: graphExpression is discharged by one
+// three-word file and takes 412 rules with it.
+const (
+	wantElidedRules  = 412
+	wantElidedTokens = 191
 )
 
 // The grammar is scanned as text rather than through the generated parser's ATN
@@ -113,14 +127,19 @@ func isRuleName(id string) bool {
 	return id[0] >= 'a' && id[0] <= 'z'
 }
 
-// grammarRefs splits a rule body into the parser rules and the tokens it names.
-// Quoted literals, alternative labels (`# Alt`), options blocks and element
-// labels (`name=rule`) are not references and are dropped first.
-func grammarRefs(body string, parserRules map[string]string) (rules, tokens map[string]bool) {
+// cleanRuleBody drops everything in a rule body that looks like a reference but
+// is not: quoted literals, alternative labels (`# Alt`) and options blocks. It
+// runs before the body is split on `|` so that a literal `'|'` cannot be mistaken
+// for an alternative separator.
+func cleanRuleBody(body string) string {
 	body = reLiteral.ReplaceAllString(body, " ")
 	body = reAltLabel.ReplaceAllString(body, " ")
-	body = reOptions.ReplaceAllString(body, " ")
+	return reOptions.ReplaceAllString(body, " ")
+}
 
+// grammarRefs splits a cleaned rule body into the parser rules and the tokens it
+// names. Element labels (`name=rule`) name a tree field, not a reference.
+func grammarRefs(body string, parserRules map[string]string) (rules, tokens map[string]bool) {
 	labels := make(map[string]bool)
 	for _, m := range reElementLabel.FindAllStringSubmatch(body, -1) {
 		labels[m[1]] = true
@@ -141,40 +160,36 @@ func grammarRefs(body string, parserRules map[string]string) (rules, tokens map[
 	return rules, tokens
 }
 
-// obligation is what the corpus must enter: every reachable parser rule, and
-// every token named by a reachable non-frontier rule.
+// obligation is what the corpus must enter: every reachable parser rule, every
+// token named by a reachable non-frontier rule, and every flagged alternative.
 type obligation struct {
 	rules  map[string]bool
 	tokens map[string]bool
 	// tokenRefs maps a token to the reachable rules naming it, which is how an
 	// uncovered token is reported against a rule an author can write a file for.
 	tokenRefs map[string][]string
+	// alternatives are the flagged alternatives' tags, grouped by rule in the same
+	// order as nonFrontier and ascending by alternative within a rule.
+	alternatives []string
+	// nonFrontier are the reachable rules that were descended into, so the
+	// alternative scan and the elision counts read the same closure the rule and
+	// token sets came from.
+	nonFrontier []string
 }
 
-// grammarObligation computes the reachability closure from coverageRoots,
-// stopping at coverageCuts.
-func grammarObligation(t *testing.T) obligation {
-	t.Helper()
-
-	parserRules := scanGrammarRules(t)
-
-	cuts := make(map[string]bool, len(coverageCuts))
-	for _, cut := range coverageCuts {
-		require.Contains(t, parserRules, cut, "frontier cut is not a grammar rule")
-		cuts[cut] = true
-	}
-
-	rules := make(map[string]bool, len(coverageRoots))
+// closure walks the reachable rules from coverageRoots, descending into every rule
+// except cuts. cutsReached records which cuts were actually hit.
+func closure(parserRules map[string]string, cuts map[string]bool) (rules, tokens map[string]bool, tokenRefs map[string][]string, nonFrontier []string, cutsReached map[string]bool) {
+	rules = make(map[string]bool, len(coverageRoots))
 	queue := make([]string, 0, len(coverageRoots))
 	for _, root := range coverageRoots {
-		require.Contains(t, parserRules, root, "coverage root is not a grammar rule")
 		rules[root] = true
 		queue = append(queue, root)
 	}
 
-	tokens := make(map[string]bool)
-	tokenRefs := make(map[string][]string)
-	cutsReached := make(map[string]bool, len(cuts))
+	tokens = make(map[string]bool)
+	tokenRefs = make(map[string][]string)
+	cutsReached = make(map[string]bool, len(cuts))
 	for len(queue) > 0 {
 		rule := queue[0]
 		queue = queue[1:]
@@ -182,8 +197,9 @@ func grammarObligation(t *testing.T) obligation {
 			cutsReached[rule] = true
 			continue
 		}
+		nonFrontier = append(nonFrontier, rule)
 
-		refRules, refTokens := grammarRefs(parserRules[rule], parserRules)
+		refRules, refTokens := grammarRefs(cleanRuleBody(parserRules[rule]), parserRules)
 		for token := range refTokens {
 			tokens[token] = true
 			tokenRefs[token] = append(tokenRefs[token], rule)
@@ -195,7 +211,24 @@ func grammarObligation(t *testing.T) obligation {
 			}
 		}
 	}
+	return rules, tokens, tokenRefs, nonFrontier, cutsReached
+}
 
+// grammarObligation computes the reachability closure from coverageRoots,
+// stopping at coverageCuts.
+func grammarObligation(t *testing.T) obligation {
+	t.Helper()
+
+	parserRules := scanGrammarRules(t)
+
+	for _, cut := range coverageCuts {
+		require.Contains(t, parserRules, cut, "frontier cut is not a grammar rule")
+	}
+	for _, root := range coverageRoots {
+		require.Contains(t, parserRules, root, "coverage root is not a grammar rule")
+	}
+
+	rules, tokens, tokenRefs, nonFrontier, cutsReached := closure(parserRules, cutsSet())
 	for _, cut := range coverageCuts {
 		require.True(t, cutsReached[cut],
 			"frontier cut %q is no longer reachable: drop it from coverageCuts", cut)
@@ -203,8 +236,96 @@ func grammarObligation(t *testing.T) obligation {
 	for _, refs := range tokenRefs {
 		sort.Strings(refs)
 	}
+	sort.Strings(nonFrontier)
 
-	return obligation{rules: rules, tokens: tokens, tokenRefs: tokenRefs}
+	return obligation{
+		rules:        rules,
+		tokens:       tokens,
+		tokenRefs:    tokenRefs,
+		alternatives: flaggedAlternatives(parserRules, nonFrontier),
+		nonFrontier:  nonFrontier,
+	}
+}
+
+// flaggedAlternatives returns the tags of reachable alternatives that rule and
+// token coverage provably cannot demand: an alternative naming no rule and no
+// token that its siblings do not also name between them. Covering the siblings
+// satisfies the rule and token gates while that alternative is never parsed, and
+// an unparsed alternative is exactly the blind spot this corpus exists to close —
+// nodeTypeImpliedContent's third alternative is the concatenation of its first two.
+//
+// Tags are `rule#N`, N counting alternatives from 1 in source order, emitted in
+// nonFrontier's order. They are deliberately not sorted afterwards: `#10` sorts
+// before `#3` as a string, and this list is read by hand.
+func flaggedAlternatives(parserRules map[string]string, nonFrontier []string) []string {
+	var flagged []string
+	for _, rule := range nonFrontier {
+		alts := splitAlternatives(cleanRuleBody(parserRules[rule]))
+		if len(alts) < 2 {
+			continue
+		}
+
+		symbols := make([]map[string]bool, len(alts))
+		for i, alt := range alts {
+			refRules, refTokens := grammarRefs(alt, parserRules)
+			symbols[i] = refRules
+			for token := range refTokens {
+				symbols[i][token] = true
+			}
+		}
+
+		for i, own := range symbols {
+			siblings := make(map[string]bool)
+			for j, other := range symbols {
+				if j == i {
+					continue
+				}
+				for symbol := range other {
+					siblings[symbol] = true
+				}
+			}
+			if isSubset(own, siblings) {
+				flagged = append(flagged, fmt.Sprintf("%s#%d", rule, i+1))
+			}
+		}
+	}
+	return flagged
+}
+
+// splitAlternatives splits a cleaned rule body on its top-level `|`, dropping the
+// leading `:` and trailing `;`. Nested `|` inside a group belongs to that group,
+// not to the rule, so only depth zero separates.
+func splitAlternatives(body string) []string {
+	body = strings.TrimSpace(body)
+	body = strings.TrimSuffix(body, ";")
+	body = strings.TrimSpace(body)
+	body = strings.TrimPrefix(body, ":")
+
+	var alts []string
+	depth, start := 0, 0
+	for i, ch := range body {
+		switch ch {
+		case '(', '[', '{':
+			depth++
+		case ')', ']', '}':
+			depth--
+		case '|':
+			if depth == 0 {
+				alts = append(alts, body[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(alts, body[start:])
+}
+
+func isSubset(own, of map[string]bool) bool {
+	for symbol := range own {
+		if !of[symbol] {
+			return false
+		}
+	}
+	return true
 }
 
 var reSectionHeader = regexp.MustCompile(`^//\s*(\d+(?:\.\d+)?\s+\S.*?)\s*$`)
@@ -267,6 +388,34 @@ func TestGrammarObligation(t *testing.T) {
 	for token := range got.tokens {
 		require.True(t, known[token], "scanned token %q is not a token of the generated parser", token)
 	}
+
+	require.Len(t, got.alternatives, wantFlaggedAlternatives,
+		"the set of alternatives rule and token coverage cannot demand changed:\n%s",
+		strings.Join(got.alternatives, "\n"))
+
+	elidedRules, elidedTokens := elidedByCuts(t)
+	t.Logf("frontier cuts erase %d rules and %d tokens", elidedRules, elidedTokens)
+	require.Equal(t, wantElidedRules, elidedRules, "a frontier cut changed what it erases")
+	require.Equal(t, wantElidedTokens, elidedTokens, "a frontier cut changed what it erases")
+}
+
+// elidedByCuts is how many rules and tokens the frontier cuts remove from the
+// obligation, measured by running the same closure with no cuts at all.
+func elidedByCuts(t *testing.T) (rules, tokens int) {
+	t.Helper()
+
+	parserRules := scanGrammarRules(t)
+	cutRules, cutTokens, _, _, _ := closure(parserRules, map[string]bool{})
+	kept, keptTokens, _, _, _ := closure(parserRules, cutsSet())
+	return len(cutRules) - len(kept), len(cutTokens) - len(keptTokens)
+}
+
+func cutsSet() map[string]bool {
+	cuts := make(map[string]bool, len(coverageCuts))
+	for _, cut := range coverageCuts {
+		cuts[cut] = true
+	}
+	return cuts
 }
 
 // parserNameTables returns the generated parser's rule-index and token-type name

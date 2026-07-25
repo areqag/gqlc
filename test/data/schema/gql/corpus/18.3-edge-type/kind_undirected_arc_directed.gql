@@ -1,0 +1,5 @@
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (a :Person { id :: INT NOT NULL }),
+    (b :Post { id :: INT NOT NULL }),
+    UNDIRECTED EDGE Mentions (a) -[:MENTIONS]-> (b)
+}
