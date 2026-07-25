@@ -83,10 +83,10 @@ const (
 	flowBroken
 )
 
-// classifyTarget makes the single config.Load attempt that selects
+// classifyConfig makes the single config.Load attempt that selects
 // the flow (§3.1). loadErr is non-nil only for flowBroken; init never
 // second-guesses the loader's verdict.
-func classifyTarget(cfgPath string) (initFlow, config.Config, error) {
+func classifyConfig(cfgPath string) (initFlow, config.Config, error) {
 	cfg, err := config.Load(cfgPath)
 	switch {
 	case err == nil:
@@ -98,20 +98,22 @@ func classifyTarget(cfgPath string) (initFlow, config.Config, error) {
 	}
 }
 
-// initDefaults is the §3.2 fresh-flow Config: path and package
-// defaults mirror the canonical fixture; enum defaults are the first
-// member of each *Values() slice by rule, so appending a vocabulary
-// member never silently changes a default.
+// initDefaults is the §3.2 fresh-flow Config: one generation target,
+// its path and package defaults mirroring the canonical fixture; enum
+// defaults are the first member of each *Values() slice by rule, so
+// appending a vocabulary member never silently changes a default.
 func initDefaults() config.Config {
-	return config.Config{
-		SchemaPath:    "schema.gql",
-		QueryDir:      "queries",
-		OutputDir:     "internal/db",
-		OutputPackage: "db",
-		SchemaLang:    config.SchemaLangValues()[0],
-		QueryLang:     config.QueryLangValues()[0],
-		Driver:        config.DriverValues()[0],
-	}
+	return config.Config{Targets: []config.Target{{
+		SchemaPath: "schema.gql",
+		SchemaLang: config.SchemaLangValues()[0],
+		QueryDir:   "queries",
+		QueryLang:  config.QueryLangValues()[0],
+		Go: config.GoGen{
+			Package: "db",
+			Out:     "internal/db",
+			Driver:  config.DriverValues()[0],
+		},
+	}}}
 }
 
 // runInitWizard is the whole interactive body behind one seam (§2.1):
@@ -119,7 +121,16 @@ func initDefaults() config.Config {
 // The cfg.Save call is the only filesystem mutation in the command,
 // unreachable except through the confirm gate (§5.4).
 func runInitWizard(in io.Reader, errOut io.Writer, accessible bool, cfgPath string) error {
-	flow, cfg, loadErr := classifyTarget(cfgPath)
+	flow, cfg, loadErr := classifyConfig(cfgPath)
+	// Before any form renders (§8.1): the wizard expresses one target,
+	// so prefilling from the first and writing the canonical form would
+	// silently delete the rest. Only an edit run can reach this — the
+	// loader rejects an empty graph, and both other flows carry
+	// initDefaults.
+	if len(cfg.Targets) > 1 {
+		return fmt.Errorf("%s declares %d generation targets; init edits only a single-target config (edit it by hand)", cfgPath, len(cfg.Targets))
+	}
+	target := &cfg.Targets[0]
 	// Raw bytes feed only the §5.3 comment notice; absence or
 	// unreadability simply means no comment scan (§3.1).
 	raw, _ := os.ReadFile(cfgPath) //nolint:errcheck // §3.1: read errors mean no comment scan, nothing more
@@ -134,17 +145,17 @@ func runInitWizard(in io.Reader, errOut io.Writer, accessible bool, cfgPath stri
 		}
 	}
 
-	if err := runForm(newWizardForm(&cfg), in, errOut, accessible); err != nil {
+	if err := runForm(newWizardForm(target), in, errOut, accessible); err != nil {
 		return err
 	}
 	// One post-form trim: huh's accessible prompts trim their returns
 	// and tea mode does not, so without this the two display modes
 	// would diverge (§4.2).
-	cfg.SchemaPath = strings.TrimSpace(cfg.SchemaPath)
-	cfg.QueryDir = strings.TrimSpace(cfg.QueryDir)
-	cfg.OutputDir = strings.TrimSpace(cfg.OutputDir)
-	cfg.OutputPackage = strings.TrimSpace(cfg.OutputPackage)
-	cfg.ProcsigPath = strings.TrimSpace(cfg.ProcsigPath)
+	target.SchemaPath = strings.TrimSpace(target.SchemaPath)
+	target.QueryDir = strings.TrimSpace(target.QueryDir)
+	target.Go.Out = strings.TrimSpace(target.Go.Out)
+	target.Go.Package = strings.TrimSpace(target.Go.Package)
+	target.ProcsigPath = strings.TrimSpace(target.ProcsigPath)
 
 	canonical, err := cfg.Canonical()
 	if err != nil {
@@ -174,7 +185,7 @@ func runInitWizard(in io.Reader, errOut io.Writer, accessible bool, cfgPath stri
 	if err := cfg.Save(cfgPath); err != nil {
 		return err
 	}
-	_, err = fmt.Fprint(errOut, warningsText(cfgPath, cfg)+epilogueText(cfgPath, cfg))
+	_, err = fmt.Fprint(errOut, warningsText(cfgPath, *target)+epilogueText(cfgPath, *target))
 	return err
 }
 
@@ -208,47 +219,47 @@ func runBrokenDialogue(in io.Reader, errOut io.Writer, accessible bool, cfgPath 
 // cannot drift and a new vocabulary member is an option before it can
 // be a stored value — which is why an edit prefill needs no defensive
 // vocabulary re-check (§3.3).
-func newWizardForm(cfg *config.Config) *huh.Form {
+func newWizardForm(t *config.Target) *huh.Form {
 	return huh.NewForm(
 		huh.NewGroup(
 			huh.NewInput().
 				Title("Schema file").
 				Description("Path to the graph schema. Relative paths resolve against the config file's directory.").
 				Validate(validateNonBlank).
-				Value(&cfg.SchemaPath),
+				Value(&t.SchemaPath),
 			huh.NewInput().
 				Title("Query directory").
 				Description("Directory holding *.cypher query files.").
 				Validate(validateNonBlank).
-				Value(&cfg.QueryDir),
+				Value(&t.QueryDir),
 			huh.NewInput().
 				Title("Output directory").
 				Description("Owned exclusively by gqlc: generate replaces its contents.").
 				Validate(validateNonBlank).
-				Value(&cfg.OutputDir),
+				Value(&t.Go.Out),
 			huh.NewInput().
 				Title("Package name").
 				Description("Go package name for the generated code.").
 				Validate(validatePackage).
-				Value(&cfg.OutputPackage),
+				Value(&t.Go.Package),
 			huh.NewInput().
 				Title("Procedure registry (optional)").
 				Description("Path to a procsig file; leave empty for none.").
-				Value(&cfg.ProcsigPath),
+				Value(&t.ProcsigPath),
 		),
 		huh.NewGroup(
 			huh.NewSelect[config.SchemaLang]().
 				Title("Schema language").
 				Options(huh.NewOptions(config.SchemaLangValues()...)...).
-				Value(&cfg.SchemaLang),
+				Value(&t.SchemaLang),
 			huh.NewSelect[config.QueryLang]().
 				Title("Query language").
 				Options(huh.NewOptions(config.QueryLangValues()...)...).
-				Value(&cfg.QueryLang),
+				Value(&t.QueryLang),
 			huh.NewSelect[config.Driver]().
 				Title("Driver").
 				Options(huh.NewOptions(config.DriverValues()...)...).
-				Value(&cfg.Driver),
+				Value(&t.Go.Driver),
 		),
 	)
 }
@@ -311,14 +322,14 @@ func previewBlock(cfgPath string, canonical, raw []byte) string {
 // to the config file's directory). The output directory (generate
 // creates and owns it, ADR 0012) and the procsig path are
 // deliberately unchecked.
-func warningsText(cfgPath string, cfg config.Config) string {
+func warningsText(cfgPath string, t config.Target) string {
 	baseDir := filepath.Dir(cfgPath)
 	var b strings.Builder
-	schemaPath := resolvePath(baseDir, cfg.SchemaPath)
+	schemaPath := resolvePath(baseDir, t.SchemaPath)
 	if _, err := os.Stat(schemaPath); errors.Is(err, fs.ErrNotExist) {
 		b.WriteString("warning: schema file " + schemaPath + " does not exist yet; create it before running gqlc generate\n")
 	}
-	queryDir := resolvePath(baseDir, cfg.QueryDir)
+	queryDir := resolvePath(baseDir, t.QueryDir)
 	if _, err := os.Stat(queryDir); errors.Is(err, fs.ErrNotExist) {
 		b.WriteString("warning: query directory " + queryDir + " does not exist yet; create it before running gqlc generate\n")
 	}
@@ -328,10 +339,10 @@ func warningsText(cfgPath string, cfg config.Config) string {
 // epilogueText renders the §5.6 epilogue; schema and queries are the
 // config values as written (the user's own words, file-relative), not
 // resolved paths.
-func epilogueText(cfgPath string, cfg config.Config) string {
+func epilogueText(cfgPath string, t config.Target) string {
 	return "wrote " + cfgPath + "\n" +
 		"next steps:\n" +
-		"  1. put your schema at " + cfg.SchemaPath + "\n" +
-		"  2. add *.cypher query files under " + cfg.QueryDir + "\n" +
+		"  1. put your schema at " + t.SchemaPath + "\n" +
+		"  2. add *.cypher query files under " + t.QueryDir + "\n" +
 		"  3. run gqlc generate\n"
 }
