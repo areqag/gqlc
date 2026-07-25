@@ -205,7 +205,11 @@ func runTarget(baseDir string, tgt config.Target, genBatch bool) (TargetResult, 
 	// Run returns nil error + populated Diagnostics in this branch.
 	batch, diags := frontEndWalk(queryParser, res, queryDir, names)
 	if len(diags) > 0 || !genBatch {
-		return TargetResult{OutDir: outDir}, diags, nil
+		// The zero TargetResult, not one carrying outDir: this branch is
+		// reached only when the run already has a diagnostic, and Run
+		// discards every target in that case, so a populated OutDir here
+		// is a value no caller can read.
+		return TargetResult{}, diags, nil
 	}
 
 	// Stage 8 — generate, with the Driver axis mapping (spec §3.2) and

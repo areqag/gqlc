@@ -114,7 +114,7 @@ func resolvePath(baseDir, p string) string {
 
 // targetPlan is phase A's finding for one target
 // (config-multi-target §7). Producing it mutates nothing, and phase B
-// may do nothing a plan does not authorise.
+// deletes nothing a plan does not authorise.
 type targetPlan struct {
 	dir    string   // the target's resolved OutDir
 	create bool     // dir is absent; phase B must create it
@@ -126,6 +126,10 @@ type targetPlan struct {
 // target, index-parallel to targets. It performs no filesystem
 // mutation. A non-nil error means no plan is returned and nothing has
 // been touched.
+//
+// Targets are inspected in order and the first failure aborts, so the
+// entry named in the error is the earliest failing one — user-visible
+// whenever two targets would both trip the wire.
 func inspectOutputs(targets []pipeline.TargetResult) ([]targetPlan, error) {
 	plans := make([]targetPlan, 0, len(targets))
 	for i, t := range targets {
@@ -194,16 +198,14 @@ func inspectOutput(dir string) (targetPlan, error) {
 	return targetPlan{dir: dir, wipe: wipe}, nil
 }
 
-// commitOutputs runs §7.2 against plans from inspectOutputs.
-// len(plans) must equal len(targets).
+// commitOutputs runs §7.2 against plans from inspectOutputs, in target
+// order — target i's directory is rewritten before target i+1's, so an
+// I/O error at i leaves the targets before it already rewritten (§7.3).
 //
 // Every step here is a mutation, and every one of them runs after the
 // last inspection: an abort under the tripwire — for any target —
 // reaches this function not at all.
 func commitOutputs(targets []pipeline.TargetResult, plans []targetPlan) error {
-	if len(plans) != len(targets) {
-		return fmt.Errorf("internal: %d output plans for %d targets", len(plans), len(targets))
-	}
 	for i, t := range targets {
 		if err := commitOutput(plans[i], t.Files); err != nil {
 			return fmt.Errorf("graph[%d]: %w", i, err)
