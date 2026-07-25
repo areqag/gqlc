@@ -1,0 +1,2 @@
+-- Discharges the CURRENT_SCHEMA token via predefinedSchemaReference alt 2.
+CREATE PROPERTY GRAPH TYPE Copied COPY OF CURRENT_SCHEMA/gt
