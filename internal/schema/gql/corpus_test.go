@@ -455,6 +455,13 @@ func TestAlternativeExemptions(t *testing.T) {
 // authoring — an alternative is only found unreachable once a file written to take
 // it does not — so the message has to name every affected entry rather than the
 // first, and has to say nothing at all when the thieves are covered.
+//
+// notWants is what makes the selection tested rather than just the formatting. An
+// implementation that names every exemption as soon as any one thief is uncovered
+// satisfies every positive assertion here, and is the version with real cost: by
+// mid-authoring it would tell an author that five alternatives are blocked when one
+// is, which is the reading that invites widening the harness. Both single-thief cases
+// are present so no assertion can be satisfied by position alone.
 func TestExemptionDemands(t *testing.T) {
 	two := []alternativeExemption{
 		{tag: "a#1", stolenBy: "b#2", bead: "bd-1", why: "x"},
@@ -466,15 +473,24 @@ func TestExemptionDemands(t *testing.T) {
 		exemptions []alternativeExemption
 		uncovered  []string
 		wants      []string
+		notWants   []string
 		empty      bool
 	}{
 		{name: "no exemptions", uncovered: []string{"b#2"}, empty: true},
 		{name: "thieves all covered", exemptions: two, uncovered: []string{"e#5"}, empty: true},
 		{
-			name:       "one thief uncovered names only that entry",
+			name:       "first thief uncovered names only that entry",
+			exemptions: two,
+			uncovered:  []string{"b#2"},
+			wants:      []string{"b#2", "a#1", "bd-1"},
+			notWants:   []string{"c#3", "d#4", "bd-2"},
+		},
+		{
+			name:       "second thief uncovered names only that entry",
 			exemptions: two,
 			uncovered:  []string{"d#4"},
 			wants:      []string{"d#4", "c#3", "bd-2"},
+			notWants:   []string{"a#1", "b#2", "bd-1"},
 		},
 		{
 			name:       "both thieves uncovered names both",
@@ -491,6 +507,9 @@ func TestExemptionDemands(t *testing.T) {
 			}
 			for _, want := range tc.wants {
 				require.Contains(t, got, want)
+			}
+			for _, notWant := range tc.notWants {
+				require.NotContains(t, got, notWant)
 			}
 		})
 	}
