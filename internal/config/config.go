@@ -664,13 +664,15 @@ const anchorSegment = "\x00gqlc-anchor-"
 // "a") errors — while the reverse direction returns an escaping
 // "../..", so both arms of compareOuts fall through and plain
 // containment reads as disjoint. Anchoring is pure string work: the
-// base is fictional, nothing is resolved against the filesystem, and
-// for any operand that names a real directory — which cannot spell an
-// anchor segment — the relation between the joined paths is the
-// relation between the originals under every real working directory. A
-// mixed absolute/relative pair is left alone — relating those needs the
-// working directory, which is the limit config-file-format §4
-// documents.
+// base is fictional and nothing is resolved against the filesystem.
+//
+// It introduces no inexactness of its own. A pair that overlaps under
+// every working directory is rejected; a pair that overlaps under none
+// is accepted; a pair that overlaps under some and not others is
+// accepted, and config-file-format §4 enumerates the two ways that
+// arises. Only an operand spelling an anchor segment departs from this,
+// and only by adding a rejection — the direction bounded above. A mixed
+// absolute/relative pair is left unanchored, as one of those two ways.
 func anchorRelative(a, b string) (string, string) {
 	if filepath.IsAbs(a) || filepath.IsAbs(b) {
 		return a, b

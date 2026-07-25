@@ -909,7 +909,7 @@ var outPairs = []struct {
 	{name: "siblings", earlier: "internal/db", later: "internal/user"},
 	{name: "a name prefix is not a path prefix", earlier: "internal/db", later: "internal/dbgen"},
 	{name: "an escaping path against a rooted one", earlier: "b", later: "../a"},
-	{name: "absolute against relative (the honest limit)", earlier: "/tmp/gqlc/db", later: "internal/db"},
+	{name: "absolute against relative (an honest limit)", earlier: "/tmp/gqlc/db", later: "internal/db"},
 	{
 		// Rebasing a relative path is only sound against another
 		// relative one: joining "internal/db" and "/internal/db" onto a
@@ -924,7 +924,7 @@ var outPairs = []struct {
 		// lexical comparison can see. Rebasing onto a base one segment
 		// deep keeps them apart; a base fixed at the root would report
 		// "../db" and "db" as one directory.
-		name: "re-entry through an unknown ancestor name (the honest limit)", earlier: "../b/db", later: "db",
+		name: "re-entry through an unknown ancestor name (an honest limit)", earlier: "../b/db", later: "db",
 	},
 	{name: "an escaping path beside its rooted namesake", earlier: "../db", later: "db"},
 	{

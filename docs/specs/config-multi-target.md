@@ -8,7 +8,7 @@ version-1 breaking change, the fail-fast-per-entry error posture, and
 the `init --add` flag are fixed by ADR 0013 and are not re-argued here.
 The design points this spec owns are the document scan and what it keeps
 off the version probe (§4), the old-flat-shape detection (§4.2), the
-output-overlap rule and its honest limit (§4.3), the entry-prefix rule
+output-overlap rule and its honest limits (§4.3), the entry-prefix rule
 (§4.1), the widened pipeline contract (§6), the two-phase write and its
 seam (§7), and the branch split that keeps master coherent (§9).
 
@@ -446,11 +446,16 @@ a check for a path no filesystem could hold would exist only to prop up
 the sentence above it.
 
 Anchoring stays pure string manipulation — the base is fictional and
-nothing is resolved against the filesystem — and because neither
-operand references an ancestor by name, the relation between the joined
-paths is the relation between the originals under every real working
-directory. A mixed absolute/relative pair is left unanchored: relating
-those needs the working directory, which is the limit below.
+nothing is resolved against the filesystem — and it introduces no
+inexactness of its own. A pair that overlaps under every working
+directory is rejected; a pair that overlaps under none is accepted; a
+pair that overlaps under some working directories and not others is
+accepted, and the two ways that arises are the two limit classes
+below. Only an operand spelling an anchor segment departs from this,
+and only by adding a rejection — the direction bounded above. Anchoring
+therefore decides strictly more pairs than a bare `Rel` without
+deciding any of them wrongly; a mixed absolute/relative pair is left
+unanchored, as one of those two classes.
 
 `filepath.Rel` cleans both operands, so `internal/db`,
 `internal/db/`, `./internal/db`, `internal//db` and
@@ -485,7 +490,7 @@ overlap in the tree. It joins `SchemaLangValues()`, `QueryLangValues()`
 and `DriverValues()` as vocabulary `internal/cli` borrows rather than
 restates.
 
-**The honest limit.** What escapes is exactly the pairs whose relation
+**The honest limits.** What escapes is exactly the pairs whose relation
 depends on a name the loader cannot see, and there are two classes:
 
 - **An absolute path against a relative one.** `Rel` cannot relate them
@@ -1129,7 +1134,7 @@ branch's PR carries the full suite in its package's existing style.
 | 2 | `TestLoadPreservesRawPaths`        | trailing slashes and `./` prefixes survive into `Config` unaltered |
 | 2 | `TestRejectOldFlatShape`           | the previous format's canonical file produces the §4.2 message, not an unknown-key list |
 | 2 | `TestRejectionTable`               | every §4.5 row a config file can reach, message-exact, including the `graph[i]:` prefix on entry 1 of a two-entry document. The internal count row is the one exception — no known input reaches it, which is the point; `TestEntryCountInvariant` pins its wording instead |
-| 2 | `TestOutOverlap` (table)           | equal, trailing-slash, `./a/../`-obscured, nested-either-way, `../a` vs `../a/b`, and **`internal/db` vs `internal/db/..foo`** → rejected naming both indices; sibling, `dbgen`, and `b` vs `../a` → accepted. The rest of the table is §4.3's rebasing. Rejected, each with the direction the anchored comparison found and each accepted as disjoint by an unanchored `Rel`: `..` vs `a`, `../..` vs `../a`, `..` vs `.`, `a` vs `..`, `.` vs `..`. Accepted, each rejected by a plausible weakening of the anchor: `../db` vs `db` (a base fixed at the root reads it as one directory) and `gqlc-anchor-0` vs `../gqlc-anchor-0` (an anchor segment without its NUL reads it as containment). Both limit classes are pinned as accepted rows too: `/tmp/gqlc/db` vs `internal/db` and `/internal/db` vs `internal/db` (absolute against relative), and `../b/db` vs `db` (re-entry through a name the loader cannot see) |
+| 2 | `TestOutOverlap` (table, 23 rows)  | *Cleaning, all rejected as the same directory:* `internal/db` against itself, `internal/db/`, `./internal/db`, `internal//db`, `./a/../internal/db`. *Nesting, rejected naming both indices:* `internal/db` vs `internal/db/sub` and the reverse, `../a` vs `../a/b`, and the string-prefix trap **`internal/db` vs `internal/db/..foo`** with `internal/db/..foo/x` one level deeper. *Plainly disjoint, accepted:* `internal/db` vs `internal/user`, vs `internal/dbgen`, and `b` vs `../a`. The remaining rows are §4.3's rebasing and its limits. *Rejected, each with the direction the anchored comparison found and each read as disjoint by an unanchored `Rel`:* `..` vs `a`, `../..` vs `../a`, `..` vs `.`, `a` vs `..`, `.` vs `..`. *Accepted, each rejected by a plausible weakening of the anchor:* `../db` vs `db` (a base fixed at the root reads it as one directory) and `gqlc-anchor-0` vs `../gqlc-anchor-0` (an anchor segment without its NUL reads it as containment). *Accepted as the two limit classes:* `/tmp/gqlc/db` vs `internal/db` and `/internal/db` vs `internal/db` (absolute against relative), and `../b/db` vs `db` (re-entry through a name the loader cannot see) |
 | 2 | `TestCheckOutAgainst`              | the exported §4.3 seam returns the catalogue message for the first overlapping index and nil for a disjoint `out`, and agrees with the loader's sweep on every `TestOutOverlap` row |
 | 2 | `TestVersionProbeUnaffected`       | `version: 2` with `graph: nope` reports `declares version 2`, not a `graph` shape complaint — the failure the document scan exists to avoid (§4) |
 | 2 | `TestGraphNotASequence`            | `graph: nope` under `version: 1` produces the loader's own §4.5 message naming a YAML kind, with no yaml.v3 or Go type name in it; `graph: *g` aliasing a scalar reports the **resolved** kind (`scalar`, never `alias`) at the **alias's** line, not the anchor's (§4) |
