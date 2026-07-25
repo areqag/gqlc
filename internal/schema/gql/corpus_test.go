@@ -551,9 +551,9 @@ func worklist(t *testing.T, o obligation, uncoveredRules, uncoveredTokens, uncov
 
 // exemptionDemands says why an uncovered alternative is load-bearing for an
 // exemption, which the clause listing above cannot show: there the thief is one
-// more tag among dozens. It reports every exemption whose thief is uncovered rather
-// than the one known today, because the list grows during authoring — an
-// alternative is only found unreachable when a file written to take it does not.
+// more tag among dozens. It loops rather than reporting the one entry that exists
+// today so that a grammar change adding a second ordering conflict needs an entry
+// and nothing else.
 func exemptionDemands(exemptions []alternativeExemption, uncoveredAlts []string) string {
 	uncovered := make(map[string]bool, len(uncoveredAlts))
 	for _, tag := range uncoveredAlts {
@@ -579,9 +579,12 @@ func exemptionDemands(exemptions []alternativeExemption, uncoveredAlts []string)
 // wrong move is available to them, which is widening the harness until the tag they
 // believe they covered goes green.
 const authoringGuidance = `
-Each name above needs a corpus file that enters or takes it. If one looks already
-covered by a file you wrote, the harness is not the thing to change: send the file
-and the tag to team-lead. An alternative can be unreachable under ALL(*)
-prediction rather than merely uncovered, and that is a grammar finding to record
-as an exemption, with the alternative that takes its input named — not a gate to
-loosen.`
+Each name above needs a corpus file that enters or takes it. Every alternative this
+gate demands was probed one at a time before authoring began and has a spelling that
+provably reaches it, so a name that stays red on a file you believe covers it is
+first evidence about the file: the construct is likely spelled so that prediction
+takes a neighbouring alternative instead. Check the file against the spelling in the
+brief. If it still looks right, send the file and the tag to team-lead — an
+alternative can be unreachable under ALL(*) prediction rather than merely uncovered,
+and that is a grammar finding to record as an exemption naming the alternative that
+takes its input. The harness is not the thing to change either way.`
