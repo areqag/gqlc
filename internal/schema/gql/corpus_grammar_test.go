@@ -64,13 +64,66 @@ var coverageCuts = []string{"graphExpression", "nonReservedWords"}
 const (
 	wantObligationRules  = 133
 	wantObligationTokens = 133
-	// wantInvisibleAlternatives sizes the third obligation set's *candidate* set
-	// (see invisibleAlternatives). A grammar change that creates a new blind spot
-	// changes this number. What the corpus owes is this minus
-	// alternativeExemptions, because being invisible to the other two gates and
-	// being reachable at all are different questions.
-	wantInvisibleAlternatives = 47
 )
+
+// wantInvisibleAlternatives is the third obligation set's *candidate* set (see
+// invisibleAlternatives). What the corpus owes is this minus
+// alternativeExemptions, because being invisible to the other two gates and being
+// reachable at all are different questions.
+//
+// Membership rather than the size, because a size pin passes for any wrong 47, and
+// the failure it is blind to is the one parallel authoring produces: one candidate
+// gained and one lost in the same merge. Ordered as the gate emits it — rule name,
+// then alternative number — so a diff here reads in the order the worklist does.
+var wantInvisibleAlternatives = []string{
+	"absoluteCatalogSchemaReference#1",
+	"catalogObjectParentReference#2",
+	"connectorPointingRight#1",
+	"connectorUndirected#1",
+	"datetimeType#1",
+	"datetimeType#2",
+	"destinationNodeTypeReference#1",
+	"destinationNodeTypeReference#2",
+	"edgeTypeFiller#2",
+	"edgeTypeImpliedContent#1",
+	"edgeTypeImpliedContent#2",
+	"edgeTypeImpliedContent#3",
+	"edgeTypePhraseFiller#1",
+	"edgeTypePhraseFiller#2",
+	"elementTypeSpecification#1",
+	"elementTypeSpecification#2",
+	"emptyType#1",
+	"graphTypeReference#1",
+	"graphTypeReference#2",
+	"identifier#1",
+	"localdatetimeType#1",
+	"localdatetimeType#2",
+	"localtimeType#1",
+	"localtimeType#2",
+	"nodeTypeFiller#2",
+	"nodeTypeImpliedContent#1",
+	"nodeTypeImpliedContent#2",
+	"nodeTypeImpliedContent#3",
+	"nodeTypePhraseFiller#1",
+	"nodeTypePhraseFiller#2",
+	"predefinedSchemaReference#3",
+	"recordType#1",
+	"recordType#2",
+	"schemaReference#3",
+	"sourceNodeTypeReference#1",
+	"sourceNodeTypeReference#2",
+	"timeType#1",
+	"timeType#2",
+	"unsignedInteger#1",
+	"valueType#3",
+	"valueType#4",
+	"valueType#5",
+	"valueType#7",
+	"valueType#8",
+	"valueType#9",
+	"valueType#10",
+	"verboseBinaryExactNumericType#8",
+}
 
 // The grammar is scanned as text rather than through the generated parser's ATN
 // because the ATN has no notion of the source-level rule references this closure
@@ -301,7 +354,7 @@ func grammarObligation(t *testing.T) obligation {
 		"reachable rule count changed; re-read the grammar before repinning")
 	require.Len(t, got.tokens, wantObligationTokens,
 		"reachable token count changed; re-read the grammar before repinning")
-	require.Len(t, got.invisible, wantInvisibleAlternatives,
+	require.ElementsMatch(t, wantInvisibleAlternatives, got.invisible,
 		"the set of alternatives the rule and token gates cannot demand changed:\n%s",
 		strings.Join(got.invisible, "\n"))
 	return got
