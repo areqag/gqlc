@@ -432,14 +432,25 @@ base  := "/" + anchor0 + "/" + ... + anchorDepth-1
 a, b   = filepath.Join(base, a), filepath.Join(base, b)
 ```
 
-The anchor segments carry a NUL byte, which YAML's printable character
-set excludes, so no configured path can name one and no joined pair can
-collide by accident. This stays pure string manipulation — the base is
-fictional and nothing is resolved against the filesystem — and because
-neither operand references an ancestor by name, the relation between
-the joined paths is the relation between the originals under every real
-working directory. A mixed absolute/relative pair is left unanchored:
-relating those needs the working directory, which is the limit below.
+The anchor segments carry a NUL byte, which puts them outside the names
+a real directory can carry, so an `out` naming a directory cannot spell
+one. That is a statement about filesystems, not about YAML: yaml.v3
+rejects a *literal* NUL in the stream but decodes the `\0` and `\x00`
+escapes of a double-quoted scalar into real NUL bytes, so a colliding
+`out` is expressible — just not resolvable to a directory. The bound
+that matters is the direction of the error: an operand naming an anchor
+segment can only add structure *under* the synthetic base, turning a
+disjoint pair into a rejected one and never the reverse, so no overlap
+escapes through a collision. The loader does not validate against NUL;
+a check for a path no filesystem could hold would exist only to prop up
+the sentence above it.
+
+Anchoring stays pure string manipulation — the base is fictional and
+nothing is resolved against the filesystem — and because neither
+operand references an ancestor by name, the relation between the joined
+paths is the relation between the originals under every real working
+directory. A mixed absolute/relative pair is left unanchored: relating
+those needs the working directory, which is the limit below.
 
 `filepath.Rel` cleans both operands, so `internal/db`,
 `internal/db/`, `./internal/db`, `internal//db` and
@@ -614,7 +625,8 @@ Cross-entry (§4.3), prefixed with the *later* entry's index:
 
 All three are `CheckOutAgainst`'s error text (§4.3) with the loader's
 `config: <src>: graph[<j>]: ` prefix in front and nothing else added.
-Keeping the two forms byte-identical is why the function exists: a
+Keeping the loader's wording and the prompt's byte-identical is why the
+function exists: a
 trailing "each generation target must own its own" would read as
 justification in the config error and as noise at the `init --add`
 prompt (§8.2), and having it in one place and not the other is how one
@@ -1117,7 +1129,7 @@ branch's PR carries the full suite in its package's existing style.
 | 2 | `TestLoadPreservesRawPaths`        | trailing slashes and `./` prefixes survive into `Config` unaltered |
 | 2 | `TestRejectOldFlatShape`           | the previous format's canonical file produces the §4.2 message, not an unknown-key list |
 | 2 | `TestRejectionTable`               | every §4.5 row a config file can reach, message-exact, including the `graph[i]:` prefix on entry 1 of a two-entry document. The internal count row is the one exception — no known input reaches it, which is the point; `TestEntryCountInvariant` pins its wording instead |
-| 2 | `TestOutOverlap` (table)           | equal, trailing-slash, `./a/../`-obscured, nested-either-way, and **`internal/db` vs `internal/db/..foo`** → rejected naming both indices; sibling, `dbgen`, `../`-escaping pairs, and abs-vs-relative → accepted |
+| 2 | `TestOutOverlap` (table)           | equal, trailing-slash, `./a/../`-obscured, nested-either-way, `../a` vs `../a/b`, and **`internal/db` vs `internal/db/..foo`** → rejected naming both indices; sibling, `dbgen`, and `b` vs `../a` → accepted. The rest of the table is §4.3's rebasing. Rejected, each with the direction the anchored comparison found and each accepted as disjoint by an unanchored `Rel`: `..` vs `a`, `../..` vs `../a`, `..` vs `.`, `a` vs `..`, `.` vs `..`. Accepted, each rejected by a plausible weakening of the anchor: `../db` vs `db` (a base fixed at the root reads it as one directory) and `gqlc-anchor-0` vs `../gqlc-anchor-0` (an anchor segment without its NUL reads it as containment). Both limit classes are pinned as accepted rows too: `/tmp/gqlc/db` vs `internal/db` and `/internal/db` vs `internal/db` (absolute against relative), and `../b/db` vs `db` (re-entry through a name the loader cannot see) |
 | 2 | `TestCheckOutAgainst`              | the exported §4.3 seam returns the catalogue message for the first overlapping index and nil for a disjoint `out`, and agrees with the loader's sweep on every `TestOutOverlap` row |
 | 2 | `TestVersionProbeUnaffected`       | `version: 2` with `graph: nope` reports `declares version 2`, not a `graph` shape complaint — the failure the document scan exists to avoid (§4) |
 | 2 | `TestGraphNotASequence`            | `graph: nope` under `version: 1` produces the loader's own §4.5 message naming a YAML kind, with no yaml.v3 or Go type name in it; `graph: *g` aliasing a scalar reports the **resolved** kind (`scalar`, never `alias`) at the **alias's** line, not the anchor's (§4) |
