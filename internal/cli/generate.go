@@ -68,7 +68,7 @@ func runGenerate(cmd *cobra.Command, cfgPath string) error {
 		// is how the CLI keys off that specific stage-1 case (spec
 		// §2.3).
 		if errors.Is(err, pipeline.ErrConfigMissing) {
-			return fmt.Errorf("no config file at %s (run gqlc init to create one)", cfgPath)
+			return missingConfig(cfgPath)
 		}
 		return err
 	}
@@ -99,6 +99,14 @@ func runGenerate(cmd *cobra.Command, cfgPath string) error {
 		return err
 	}
 	return commitOutputs(res.Targets, plans)
+}
+
+// missingConfig renders the absent-config-file message (CLI-2 §6.1).
+// Shared with init.go: `init --add` has nothing to append to and
+// reports the same words, so the hint stays one string rather than two
+// that drift (config-multi-target §8.2).
+func missingConfig(cfgPath string) error {
+	return fmt.Errorf("no config file at %s (run gqlc init to create one)", cfgPath)
 }
 
 // resolvePath joins a config-file-relative path against the config
