@@ -124,10 +124,10 @@ func runInitWizard(in io.Reader, errOut io.Writer, accessible bool, cfgPath stri
 	flow, cfg, loadErr := classifyConfig(cfgPath)
 	// Before any form renders (§8.1): the wizard expresses one target,
 	// so prefilling from the first and writing the canonical form would
-	// silently delete the rest. Only an edit run can reach this — the
-	// loader rejects an empty graph, and both other flows carry
-	// initDefaults.
-	if len(cfg.Targets) > 1 {
+	// silently delete the rest. Testing != 1 rather than > 1 makes the
+	// Targets[0] index below locally safe instead of resting on the
+	// loader's rejection of an empty graph, a cross-package invariant.
+	if len(cfg.Targets) != 1 {
 		return fmt.Errorf("%s declares %d generation targets; init edits only a single-target config (edit it by hand)", cfgPath, len(cfg.Targets))
 	}
 	target := &cfg.Targets[0]
