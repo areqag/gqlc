@@ -324,6 +324,25 @@ func TestCorpusSpellingTraps(t *testing.T) {
 	})
 }
 
+// TestFabricatedTokenDoesNotScore pins that a token ANTLR invents during error
+// recovery is not counted as covered. This source omits its closing brace; recovery
+// reports "missing '}'" and hangs an error node in the tree exactly where the
+// RIGHT_BRACE belongs. Visiting that node like any other terminal would score
+// RIGHT_BRACE for a file that never contained one, which is the gate closing on a
+// token no corpus file spells. VisitErrorNode is a no-op for this reason.
+//
+// Blanking the child name in coverage.children does not cover this case, so the two
+// guards are not redundant: nestedGraphTypeSpecification has a single alternative and
+// so is absent from the alternative index, meaning nothing about it is attributed and
+// the invented brace is invisible to attribution either way.
+func TestFabricatedTokenDoesNotScore(t *testing.T) {
+	got, errs := walkCoverage(t, "CREATE GRAPH TYPE t { (:A)")
+
+	require.NotEmpty(t, errs, "the premise is that recovery had to invent the brace")
+	require.True(t, got.tokens["LEFT_BRACE"], "the brace the source does spell must still score")
+	require.False(t, got.tokens["RIGHT_BRACE"], "the invented brace must not score")
+}
+
 // TestCorpusGrammarCoverage is the gate: every parser rule and token reachable
 // from a CREATE GRAPH TYPE statement must be entered by some corpus file, and every
 // alternative those two cannot demand must be taken by one. It makes an
