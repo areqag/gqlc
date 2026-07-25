@@ -1,0 +1,6 @@
+-- closedNodeReferenceValueType : nodeTypeSpecification notNull? — spelled as the
+-- bare parenthesised form (:X). Prefixing NODE (as in NODE (:X)) is a syntax error
+-- because nodeTypePattern requires a nodeTypeName between nodeSynonym and LEFT_PAREN.
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:Ref { n :: (:X) })
+}
