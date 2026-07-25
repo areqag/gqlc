@@ -139,9 +139,11 @@ func runInitWizard(in io.Reader, errOut io.Writer, accessible bool, cfgPath stri
 	flow, cfg, loadErr := classifyConfig(cfgPath)
 	// Before any form renders (§8.1): the wizard expresses one target,
 	// so prefilling from the first and writing the canonical form would
-	// silently delete the rest. Testing != 1 rather than > 1 makes the
-	// index in runTargetForm locally safe instead of resting on the
-	// loader's rejection of an empty graph, a cross-package invariant.
+	// silently delete the rest. Testing != 1 rather than > 1 is what
+	// carries this path to runTargetForm's index without resting on the
+	// loader's rejection of an empty graph, a cross-package invariant;
+	// --add reaches that index by its own route, where the append
+	// supplies the entry.
 	if len(cfg.Targets) != 1 {
 		return fmt.Errorf("%s declares %d generation targets; init edits only a single-target config (edit it by hand, or run gqlc init --add to append another)", cfgPath, len(cfg.Targets))
 	}
