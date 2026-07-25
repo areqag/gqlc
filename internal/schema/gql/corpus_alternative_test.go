@@ -151,21 +151,52 @@ func (idx *alternativeIndex) witness(rule string, alt int) []string {
 	return nil
 }
 
+// wantLabelledAlternatives is the part of the third obligation set that
+// TestAlternativeDistinguishability does not shape-check, because M1 identifies a
+// labelled alternative by its generated context type and there is no shape to
+// confuse. valueType is the only labelled rule the set reaches; the other 25 rules
+// are shaped.
+//
+// Membership rather than the count of what is left, because the count holds at 39
+// across one rule losing its labels while another gains them, and that is a likelier
+// grammar edit than either half alone. Pinning which alternatives M1 owns makes a
+// rule crossing the boundary name itself.
+var wantLabelledAlternatives = []string{
+	"valueType#3",
+	"valueType#4",
+	"valueType#5",
+	"valueType#7",
+	"valueType#8",
+	"valueType#9",
+	"valueType#10",
+}
+
 // TestAlternativeDistinguishability proves the third gate is closeable at all: for
 // every alternative the corpus owes, some child sequence identifies it and no
-// earlier alternative of the same rule. A labelled rule is exempt because the
-// generated context type identifies it exactly, with no shape to confuse.
+// earlier alternative of the same rule.
+//
+// The skipped tags are collected and pinned rather than dropped, because the skip is
+// what this test can be vacuous through: nothing here fails if the loop reaches the
+// assertion zero times, so a predicate that widened to everything would report a
+// clean pass over nothing. Collecting them also catches the case the predicate
+// cannot distinguish — an alternativeSet with a blocked reason has no shapes either,
+// and would otherwise skip silently.
 func TestAlternativeDistinguishability(t *testing.T) {
 	want := grammarObligation(t)
 
+	var labelled []string
 	for _, tag := range want.required {
 		rule, alt := parseTag(t, tag)
 		if want.alternatives.byRule[rule].shapes == nil {
+			labelled = append(labelled, tag)
 			continue
 		}
 		require.NotNil(t, want.alternatives.witness(rule, alt),
 			"every child sequence %s can produce is also matched by an earlier alternative, so no corpus file can discharge it", tag)
 	}
+
+	require.ElementsMatch(t, wantLabelledAlternatives, labelled,
+		"these are the required alternatives no child sequence was checked for; one arriving here unlisted was skipped without being checked by anything")
 }
 
 // TestAlternativeIndex pins the attribution against the real grammar, because the
