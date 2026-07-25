@@ -1,0 +1,24 @@
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:Row {
+        i :: INT,
+        i8 :: INT8 NOT NULL,
+        i16 :: INT16,
+        i32 :: INT32,
+        i64 :: INT64,
+        i128 :: INT128,
+        i256 :: INT256,
+        i_smallint :: SMALLINT,
+        i_bigint :: BIGINT,
+        i_prec :: INT(10),
+        v_int :: INTEGER,
+        v_int8 :: INTEGER8,
+        v_int16 :: INTEGER16,
+        v_int32 :: INTEGER32,
+        v_int64 :: INTEGER64,
+        v_int128 :: INTEGER128,
+        v_int256 :: INTEGER256,
+        v_small :: SMALL INTEGER,
+        v_big :: BIG INTEGER,
+        v_intprec :: INTEGER(10)
+    })
+}

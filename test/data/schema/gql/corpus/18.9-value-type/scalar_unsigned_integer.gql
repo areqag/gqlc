@@ -1,0 +1,14 @@
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:Row {
+        u :: UINT,
+        u8 :: UINT8 NOT NULL,
+        u16 :: UINT16,
+        u32 :: UINT32,
+        u64 :: UINT64,
+        u128 :: UINT128,
+        u256 :: UINT256,
+        u_usmall :: USMALLINT,
+        u_ubig :: UBIGINT,
+        u_prec :: UINT(10)
+    })
+}
