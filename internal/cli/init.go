@@ -155,9 +155,10 @@ func runInitWizard(in io.Reader, errOut io.Writer, accessible bool, cfgPath stri
 			return errInitAborted
 		}
 	}
-	// No prior entries: the file's one target is the one being edited,
-	// and overlap-checking it against itself would reject every run that
-	// left the output directory alone.
+	// No prior entries: the file's one target is the one being edited, so
+	// including it would make its own out an operand in its own check —
+	// an unchanged output directory then reads as a collision with
+	// itself (TestInitEditPrefillRoundTrip).
 	return runTargetForm(in, errOut, accessible, cfgPath, cfg, config.Config{})
 }
 

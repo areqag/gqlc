@@ -36,12 +36,13 @@ func editFixtureConfig() config.Config {
 }
 
 // addFixtureConfig is the config-multi-target §8.2 --add fixture: two
-// entries differing in every field the append prefills
-// from the last one, so an append that read entry 0 — or fell back to
-// the §3.2 defaults — cannot pass. Entry 1 carries the procsig and the
-// v6 driver precisely because those are the two prefilled fields an
-// accessible script observes: both are answered with an empty line, so
-// the value that lands is the prefill.
+// entries whose prefilled fields diverge where an accessible script can
+// observe them. procsig and the driver are the two the script observes —
+// both are answered with an empty line, so the value that lands is the
+// prefill — and entry 1 is the only source of "order.procsig.json" and
+// v6: entry 0 carries neither, and neither do the §3.2 defaults, so an
+// append reading the wrong one is caught. The two language axes hold a
+// single vocabulary value each and discriminate nothing here.
 func addFixtureConfig() config.Config {
 	return config.Config{Targets: []config.Target{
 		{
@@ -72,8 +73,8 @@ func addFixtureConfig() config.Config {
 
 // addedTarget is the target the --add tests author over
 // addFixtureConfig. The four validated Inputs are typed at the prompts,
-// schema included — an accessible Input never displays its bound
-// default, so re-typing the carried value is the only way to answer it,
+// schema included — an accessible Input does not display its bound
+// default, so re-typing the carried value is how the script answers it,
 // and the carry itself is pinned on addPrefill directly. procsig and
 // the three Selects are empty lines, so their values here are the
 // prefill and nothing else.
@@ -541,8 +542,8 @@ func TestInitAdd(t *testing.T) {
 // own overlap rule (config.CheckOutAgainst) against the entries already
 // in the file (§8.2). Each case types an overlapping directory, reads
 // the rejection, and retypes a disjoint one — a rejection that failed to
-// re-prompt would leave that retyped line to the package prompt and
-// misalign every answer after it.
+// re-prompt would leave that retyped line to the package prompt,
+// shifting the answers after it by one.
 func TestInitAddOverlapRejectedAtPrompt(t *testing.T) {
 	cases := []struct{ name, bad, wantMsg string }{
 		{
