@@ -213,6 +213,11 @@ follow `.Alias` until the node is not an alias, test the resolved node,
 and **report the alias node's own `Line`**. The resolved node's `Line`
 is where the anchor was written, which is not where the mistake is.
 
+The loop iterates at most once: anchoring an alias (`&y *x`) is a YAML
+parse error in every syntax, so `.Alias` is never itself an alias. It is
+written as a loop because a single dereference that assumes that is a
+silent bet on it; no fixture can cover a second iteration.
+
 Two positions in the `graph` sequence take an alias, and the rule covers
 both:
 
@@ -226,10 +231,22 @@ both:
   YAML alias" for a document whose `graph` is a scalar.
 
 **Resolving aliases is not the same as rejecting them.** An element
-aliasing a mapping (`- *t`, reusing a target defined earlier) resolves
-to `!!map`, decodes into a full entry, and is legitimate reuse the scan
-must leave alone. The rule changes what the scan *looks at*, never what
-it rejects.
+aliasing a mapping (`- *t`) resolves to `!!map` and decodes into a full
+entry, and the scan must leave it alone. The rule changes what the scan
+*looks at*, never what it rejects.
+
+That it survives the scan is not a promise that it loads. An alias
+copies the whole mapping, `gen.go.out` included, so `- *t` naming an
+earlier entry produces two targets with identical output directories and
+§4.3 rejects the file. No spelling escapes that: the anchor must precede
+the alias, so it sits on an earlier entry (identical `out`), on a
+sub-node (`- *gen` gives `field go not found in type config.wireTarget`),
+or on an unknown top-level key (`KnownFields(true)`). **An element
+aliasing an entire earlier entry can never produce a loadable second
+target** — a property of this format worth stating, because the rule
+above is what makes it fail at §4.3 with an overlap message that names
+the real problem, rather than at §4.4 with a null-entry message that
+would be a lie.
 
 **Key lookup stays literal**, and merge keys (`<<: *anchor`) divide by
 position the same way aliases do:
@@ -238,23 +255,40 @@ position the same way aliases do:
   expands `<<:` *before* field matching, so the element is a mapping to
   the scan and a full entry to the strict decode;
   `KnownFields(true)` raises nothing, and the count check agrees.
-- **At the document root** — `<<:` injecting a former flat key. §4.2
-  looks for `schema` among `root`'s literal keys and does not find it,
-  so the targeted message does not fire. The file is still rejected: the
-  strict decode's unknown-key wall reports `field schema not found in
-  type config.wireV1` at the line the key is written on. Only the
-  wording is lost, and losing it costs nothing — §4.2 exists for files
-  written before this change, and those files have literal keys.
+- **At the document root** — `<<:` taking an inline mapping or an
+  anchor, either way supplying keys the scan cannot see, since `root`'s
+  literal keys are `version` and `<<`. Two sub-cases, and they are not
+  equally benign:
+  - Injecting a **former flat key**: §4.2 looks for `schema` among the
+    literal keys, does not find it, and its targeted message does not
+    fire. The file is still rejected — the strict decode's unknown-key
+    wall reports `field schema not found in type config.wireV1` at the
+    line the key is written on — so only the wording is lost.
+  - Injecting **`graph` itself**: stage 4 finds no `graph` and reports
+    `missing required field "graph"` for a document that declares one
+    and would otherwise have decoded into a valid target. That is a
+    false rejection whose message contradicts the file, not a
+    downgraded wording.
+
+  Both are accepted rather than fixed. §4.2 exists for files written
+  before this change and those files have literal keys; the second case
+  costs a wrong message on a document nobody writes, and the file is
+  rejected either way, so nothing is generated from a config gqlc
+  misread.
 
 Chasing merge keys during the scan to close that would mean
 reimplementing yaml.v3's merge resolution against the node tree, for a
 document nobody writes.
 
 **The scan's element count outlives it.** The loader holds the `graph`
-sequence node past the strict decode and checks
+sequence node past the strict decode and checks it against the decoded
+length through one unexported helper:
 
 ```go
-len(w.Graph) == len(graphSeq.Content)
+// checkEntryCount reports the §4 count invariant: the decoded target
+// count must equal the number of elements the scan saw. No input is
+// known to violate it, so the test drives this directly.
+func checkEntryCount(graphSeq *yaml.Node, decoded int) error
 ```
 
 A mismatch means yaml.v3 dropped an element the scan saw, and is an
@@ -1042,9 +1076,10 @@ branch's PR carries the full suite in its package's existing style.
 | 2 | `TestVersionProbeUnaffected`       | `version: 2` with `graph: nope` reports `declares version 2`, not a `graph` shape complaint — the failure the document scan exists to avoid (§4) |
 | 2 | `TestGraphNotASequence`            | `graph: nope` under `version: 1` produces the loader's own §4.5 message naming a YAML kind, with no yaml.v3 or Go type name in it; `graph: *g` aliasing a scalar reports the **resolved** kind (`scalar`, never `alias`) at the **alias's** line, not the anchor's (§4) |
 | 2 | `TestNullEntryRejected`            | `- ~` between two entries reports index 1, not a shifted index; `~`, `null`, `Null`, `NULL` and a bare `-` all report; `- ""` does not (a wrong-typed entry, not a null one — §4.4) |
-| 2 | `TestAliasEntryToNullRejected`     | `- *none` aliasing a null anchor reports the same §4.4 message at the alias's line, and an alias chain (alias → alias → null) reports too. Fails against a `Tag == "!!null"` test written on the unresolved node, which sees `""` and lets the entry be dropped (§4) |
-| 2 | `TestAliasEntryToMappingAccepted`  | `- *t` aliasing an earlier entry, and an element built with `<<: *base`, both load into full targets — the resolution rule changes what the scan looks at, never what it rejects (§4) |
-| 2 | `TestEntryCountInvariant`          | the §4 count check fires on a hand-built document whose decoded length is short of the scanned one, naming both counts; and does **not** fire on any accepted fixture, including the alias-to-mapping and merge-key ones above |
+| 2 | `TestAliasEntryToNullRejected`     | `- *none` aliasing a null anchor reports the same §4.4 message at the alias's line, not the anchor's. Fails against a `Tag == "!!null"` test written on the unresolved node, which sees `""` and lets the entry be dropped (§4) |
+| 2 | `TestMergeKeyEntryLoads`           | an element built with `<<: *base`, its `out` distinct, loads into a full target — the resolution rule changes what the scan looks at, never what it rejects (§4) |
+| 2 | `TestAliasEntryToMappingReachesOverlap` | `- *t` aliasing an earlier entry is **not** rejected as null and instead fails at §4.3 with the overlap message naming 0 and 1, because the alias copies `out` (§4). Asserting that it loads would be asserting what §4.3 forbids, and the tempting repair — exempting aliased entries from the overlap sweep — is the bug |
+| 2 | `TestEntryCountInvariant`          | the §4 count check, driven through its unexported helper (the sequence node and the decoded length) rather than a document, since §4 establishes that no input reaches it; asserts it names both counts, and does not fire for any accepted fixture |
 | 2 | `TestInitRefusesMultiTargetEdit`   | pinned §8.1 **branch-2** message (no `--add` hint), exit 1, file byte-untouched |
 | 3 | `TestRunEveryTarget`               | a two-target config yields two `TargetResult`s in document order, each with the right package clause and driver import |
 | 3 | `TestRunSetupFailureFailsFast`     | an unreadable schema at entry 1 → `graph[1]: schema: ...`, zero `Result` |
@@ -1102,8 +1137,8 @@ branch's PR carries the full suite in its package's existing style.
 4. Every `graph[i]:` a message prints indexes the entry the file
    declares at that position. No accepted config decodes to fewer
    entries than it wrote, however the dropped one was spelled — written
-   null, alias to a null, or alias chain — and a decode that ever loses
-   one fails loudly instead of renumbering.
+   null or alias to a null — and a decode that ever loses one fails
+   loudly instead of renumbering.
 5. A run that aborts under the tripwire — for any target — leaves every
    output directory exactly as the run found it: byte-identical if it
    existed, still absent if it did not. The abort message names the
