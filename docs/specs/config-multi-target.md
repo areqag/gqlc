@@ -377,14 +377,29 @@ output: the later target's ADR 0012 wipe deletes what the earlier one
 just wrote. The loader rejects overlap.
 
 **Rule.** For each entry in order, compared against every earlier
-entry, on `filepath.Rel(earlier.Out, later.Out)`:
+entry, `filepath.Rel` is run **both ways** and the first direction that
+answers wins. On `filepath.Rel(earlier.Out, later.Out)`:
+
+| result                                        | verdict                          |
+|-----------------------------------------------|----------------------------------|
+| `.`                                           | the same directory — reject      |
+| `..`, or a path prefixed `../`                | fall through to the reverse      |
+| any other path                                | later is inside earlier — reject |
+| an error                                      | fall through to the reverse      |
+
+Then on `filepath.Rel(later.Out, earlier.Out)`:
 
 | result                                        | verdict                          |
 |-----------------------------------------------|----------------------------------|
 | `.`                                           | the same directory — reject      |
 | `..`, or a path prefixed `../`                | disjoint — accept                |
-| any other path                                | later is inside earlier — reject |
+| any other path                                | later contains earlier — reject  |
 | an error                                      | not comparable — accept (below)  |
+
+The two directions are distinct verdicts, not one verdict computed
+twice: `internal/db/sub` then `internal/db` is the later entry
+*containing* the earlier, and reporting it as "is inside" would state
+the containment backwards.
 
 The disjointness test is on a **path component**, not a string prefix:
 
@@ -400,8 +415,31 @@ A string-prefix test accepts that pair as disjoint and lets exactly the
 nested configuration through that this check exists to reject.
 `"..foo/x"` is the same trap one level deeper.
 
-The reverse direction (earlier inside later) is covered by running the
-comparison both ways.
+**Escaping bases are rebased first.** `filepath.Rel` refuses a base
+that escapes its own root — `Rel("..", "a")` errors, because how far
+`..` is from `a` depends on where the working directory sits — and the
+reverse direction returns the escaping `"../.."`. Both arms therefore
+fall through and a plain containment reads as disjoint, which is the
+permanent-failure mode of §7.2 rather than a cosmetic miss. So when
+both operands are relative, they are first rebased onto a shared
+synthetic absolute directory with as many segments as the deeper
+operand has leading `..` components, and the two joined paths are
+compared instead:
+
+```go
+depth := max(leadingParents(a), leadingParents(b))   // "../.." -> 2
+base  := "/" + anchor0 + "/" + ... + anchorDepth-1
+a, b   = filepath.Join(base, a), filepath.Join(base, b)
+```
+
+The anchor segments carry a NUL byte, which YAML's printable character
+set excludes, so no configured path can name one and no joined pair can
+collide by accident. This stays pure string manipulation — the base is
+fictional and nothing is resolved against the filesystem — and because
+neither operand references an ancestor by name, the relation between
+the joined paths is the relation between the originals under every real
+working directory. A mixed absolute/relative pair is left unanchored:
+relating those needs the working directory, which is the limit below.
 
 `filepath.Rel` cleans both operands, so `internal/db`,
 `internal/db/`, `./internal/db`, `internal//db` and
@@ -436,18 +474,22 @@ overlap in the tree. It joins `SchemaLangValues()`, `QueryLangValues()`
 and `DriverValues()` as vocabulary `internal/cli` borrows rather than
 restates.
 
-**The honest limit.** One class of pair genuinely escapes: an absolute
-path against a relative one. `Rel` cannot relate them in either
-direction, so the sweep accepts them as disjoint even when they name one
-directory. A `../`-escaping path is *not* in that class, despite
-looking like it: `Rel("b", "../a")` succeeds (`"../../a"`, disjoint) and
-`Rel("../a", "../a/b")` succeeds (`"b"`, contained), so escaping paths
-are compared correctly. Only when the *base* escapes does `Rel` fail
-(`Rel("../a", "b")`), and running the comparison both ways means the
-other direction has already answered. Symlinked aliases, two paths
-differing only by case on a case-insensitive filesystem, and bind mounts
-escape too — every one needs the filesystem, which a loader that is a
-pure function of the file's bytes will not touch.
+**The honest limit.** What escapes is exactly the pairs whose relation
+depends on a name the loader cannot see, and there are two classes:
+
+- **An absolute path against a relative one.** `Rel` cannot relate them
+  in either direction without the working directory, so the sweep
+  accepts them as disjoint even when they name one directory.
+- **An escaping path that re-enters through the working directory's own
+  name.** `../b/db` and `db` are one directory when the working
+  directory is itself named `b`, and two directories otherwise. Rebasing
+  cannot decide it, because the answer is in a name neither path
+  states.
+
+Symlinked aliases, two paths differing only by case on a
+case-insensitive filesystem, and bind mounts escape too — every one
+needs the filesystem, which a loader that is a pure function of the
+file's bytes will not touch.
 
 What escapes costs more than a few files, and the spec should not
 pretend otherwise:
@@ -567,9 +609,10 @@ Cross-entry (§4.3), prefixed with the *later* entry's index:
 | condition                | message shape                                                                                   |
 |--------------------------|---------------------------------------------------------------------------------------------------|
 | two entries share `out`  | `config: <src>: graph[<j>]: out "<p>" is already graph[<i>]'s output directory` |
-| one entry's `out` is inside another's | `config: <src>: graph[<j>]: out "<p>" is inside graph[<i>]'s output directory "<q>"` |
+| the later entry's `out` is inside an earlier one's | `config: <src>: graph[<j>]: out "<p>" is inside graph[<i>]'s output directory "<q>"` |
+| the later entry's `out` contains an earlier one's  | `config: <src>: graph[<j>]: out "<p>" contains graph[<i>]'s output directory "<q>"` |
 
-Both are `CheckOutAgainst`'s error text (§4.3) with the loader's
+All three are `CheckOutAgainst`'s error text (§4.3) with the loader's
 `config: <src>: graph[<j>]: ` prefix in front and nothing else added.
 Keeping the two forms byte-identical is why the function exists: a
 trailing "each generation target must own its own" would read as

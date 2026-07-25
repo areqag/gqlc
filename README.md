@@ -32,9 +32,10 @@ graph:
         driver: neo4j-go-v5
 ```
 
-`graph` is a list: a project that needs several generated packages adds
-an entry per package, each with its own schema, queries and output
-directory.
+`graph` is a list, one entry per generated package, each with its own
+schema, queries and output directory. This gqlc runs one: a config
+declaring several entries loads but is refused at generation time, and
+generating from all of them lands in the next release.
 
 Put your schema at `schema.gql`:
 

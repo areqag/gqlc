@@ -125,9 +125,16 @@ The one cross-entry rule is the exception that proves it: two entries
 may not write to the same output directory, or to nested ones, because
 each target's ADR 0012 wipe would destroy the other's output. The
 comparison is **lexical** (`filepath.Rel` in both directions, stating
-nothing), so it stays inside the no-filesystem rule and honestly misses
-the one class `Rel` cannot relate — an absolute path against a relative
-one. `Config.CheckOutAgainst(out string) error` exports the rule so
+nothing), so it stays inside the no-filesystem rule. `Rel` refuses a
+base that escapes its own root, so a pair of relative paths is first
+rebased onto a shared synthetic directory deep enough to hold their
+leading `..` components — still pure string work, and it makes `..`
+against `a` the containment it is. What honestly escapes is the pairs
+whose relation depends on a name the loader cannot see: an absolute
+path against a relative one, and an escaping path that re-enters
+through the working directory's own name (`../b/db` and `db` name one
+directory when the working directory is itself named `b`).
+`Config.CheckOutAgainst(out string) error` exports the rule so
 `gqlc init --add` validates at the prompt with the loader's own
 implementation rather than a second one that would drift.
 
