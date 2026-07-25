@@ -224,6 +224,11 @@ type obligation struct {
 // swept in the other direction by TestAlternativeExemptions — an exemption whose tag
 // becomes covered is stale, which is how a grammar fix that revives the alternative
 // gets noticed.
+//
+// Requiring the thief is a necessary condition on an exemption, not a sufficient
+// one: it would be satisfied by naming any alternative the corpus happens to cover.
+// What makes an entry answerable is why, which is prose a reviewer reads, so expect
+// this list to be reviewed rather than merely to pass.
 type alternativeExemption struct {
 	tag      string
 	stolenBy string

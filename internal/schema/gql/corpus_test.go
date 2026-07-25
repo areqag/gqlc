@@ -360,15 +360,65 @@ func TestCorpusGrammarCoverage(t *testing.T) {
 
 // TestAlternativeExemptions sweeps the exemption list for staleness: an alternative
 // claimed unreachable that a corpus file turns out to take is an exemption to delete,
-// which is how a grammar fix reviving it gets noticed. The other direction — that the
-// thief named by stolenBy is itself covered — is TestCorpusGrammarCoverage's, since
-// requiredAlternatives puts it in the required set and so in the authoring worklist.
+// which is how a grammar fix reviving it gets noticed.
+//
+// The other direction — that the thief named by stolenBy is itself covered — is
+// TestCorpusGrammarCoverage's, because requiredAlternatives puts every stolenBy in
+// the required set and exemptionDemands gives it the exemption-specific message
+// there. Asserting it here as well would fail a second test for the one missing
+// file, and the demand belongs in the worklist authors read either way.
 func TestAlternativeExemptions(t *testing.T) {
 	got := corpusCoverage(t)
 
 	for _, ex := range alternativeExemptions {
 		require.False(t, got.alternatives[ex.tag],
 			"%s is exempted as unreachable but a corpus file took it; delete the exemption (%s)", ex.tag, ex.bead)
+	}
+}
+
+// TestExemptionDemands exercises the failure message against exemption list sizes
+// the checked-in list does not have yet. The list is expected to grow during
+// authoring — an alternative is only found unreachable once a file written to take
+// it does not — so the message has to name every affected entry rather than the
+// first, and has to say nothing at all when the thieves are covered.
+func TestExemptionDemands(t *testing.T) {
+	two := []alternativeExemption{
+		{tag: "a#1", stolenBy: "b#2", bead: "bd-1", why: "x"},
+		{tag: "c#3", stolenBy: "d#4", bead: "bd-2", why: "y"},
+	}
+
+	for _, tc := range []struct {
+		name       string
+		exemptions []alternativeExemption
+		uncovered  []string
+		wants      []string
+		empty      bool
+	}{
+		{name: "no exemptions", uncovered: []string{"b#2"}, empty: true},
+		{name: "thieves all covered", exemptions: two, uncovered: []string{"e#5"}, empty: true},
+		{
+			name:       "one thief uncovered names only that entry",
+			exemptions: two,
+			uncovered:  []string{"d#4"},
+			wants:      []string{"d#4", "c#3", "bd-2"},
+		},
+		{
+			name:       "both thieves uncovered names both",
+			exemptions: two,
+			uncovered:  []string{"b#2", "d#4"},
+			wants:      []string{"b#2", "a#1", "bd-1", "d#4", "c#3", "bd-2"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := exemptionDemands(tc.exemptions, tc.uncovered)
+			if tc.empty {
+				require.Empty(t, got)
+				return
+			}
+			for _, want := range tc.wants {
+				require.Contains(t, got, want)
+			}
+		})
 	}
 }
 
@@ -494,5 +544,44 @@ func worklist(t *testing.T, o obligation, uncoveredRules, uncoveredTokens, uncov
 			out.WriteString("    alts:   " + strings.Join(b.alts, ", ") + "\n")
 		}
 	}
+	out.WriteString(exemptionDemands(alternativeExemptions, uncoveredAlts))
+	out.WriteString(authoringGuidance)
 	return out.String()
 }
+
+// exemptionDemands says why an uncovered alternative is load-bearing for an
+// exemption, which the clause listing above cannot show: there the thief is one
+// more tag among dozens. It reports every exemption whose thief is uncovered rather
+// than the one known today, because the list grows during authoring — an
+// alternative is only found unreachable when a file written to take it does not.
+func exemptionDemands(exemptions []alternativeExemption, uncoveredAlts []string) string {
+	uncovered := make(map[string]bool, len(uncoveredAlts))
+	for _, tag := range uncoveredAlts {
+		uncovered[tag] = true
+	}
+
+	var out strings.Builder
+	for _, ex := range exemptions {
+		if !uncovered[ex.stolenBy] {
+			continue
+		}
+		fmt.Fprintf(&out, "    %s takes the input %s is exempted for (%s), so until a file spells it neither alternative is exercised at all\n",
+			ex.stolenBy, ex.tag, ex.bead)
+	}
+	if out.Len() == 0 {
+		return ""
+	}
+	return "exemptions whose thief is itself uncovered:\n" + out.String()
+}
+
+// authoringGuidance rides on the failure message rather than living only in the
+// brief. An author reads the brief once and reads this at the moment the cheapest
+// wrong move is available to them, which is widening the harness until the tag they
+// believe they covered goes green.
+const authoringGuidance = `
+Each name above needs a corpus file that enters or takes it. If one looks already
+covered by a file you wrote, the harness is not the thing to change: send the file
+and the tag to team-lead. An alternative can be unreachable under ALL(*)
+prediction rather than merely uncovered, and that is a grammar finding to record
+as an exemption, with the alternative that takes its input named — not a gate to
+loosen.`
