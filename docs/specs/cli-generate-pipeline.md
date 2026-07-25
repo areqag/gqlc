@@ -156,9 +156,12 @@ func Run(cfgPath string) (Result, error)
 
 The pre-amendment surface returned a single `Files`/`OutDir` pair and
 populated `OutDir` on stage-3–8 failures. That last affordance is gone:
-a per-target setup failure now returns the zero `Result`, because a
-half-populated `Targets` is the state §6.2's all-or-nothing rule exists
-to make unrepresentable.
+a per-target setup failure now returns the zero `Result`. The claim the
+five return sites support, exhaustively, is about what `Run` *returns* —
+a populated `Targets` comes back from exactly one of them, the last, and
+only with `Diagnostics` empty and the error nil. `Run` does build a
+partial `targets` slice in a local while it loops; the trailing
+all-or-nothing check discards it, so no caller observes one.
 
 Rationales, one per surface decision:
 

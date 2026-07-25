@@ -22,8 +22,10 @@ The config file now declares a `graph` list of generation targets
 rather than one flat set of keys, and `generate` runs every one of
 them. Three consequences run through this document, marked at each
 site below: the per-target fields are `Target.SchemaPath`,
-`.QueryDir`, `.ProcsigPath`, `.Go.Package`, `.Go.Out` and `.Go.Driver`
-(the flat `cfg.OutputDir` / `cfg.OutputPackage` are gone); every
+`.SchemaLang`, `.QueryDir`, `.QueryLang`, `.ProcsigPath`,
+`.Go.Package`, `.Go.Out` and `.Go.Driver` — all three tool axes are
+per-target, so §3.2's axis switches run once per entry (the flat
+`cfg.OutputDir` / `cfg.OutputPackage` are gone); every
 message about one entry is prefixed `graph[<i>]: `; and §5's tripwire
 became a two-phase protocol so no target's directory is mutated before
 every target's directory has been inspected. `config-multi-target.md`
@@ -416,6 +418,18 @@ Because `codegen.Generate` is pure (no I/O, full `[]File` in memory),
 before step 5 — a failed run wipes nothing and writes nothing, the
 ADR 0012 consequence restated here as a contract with tests.
 
+**Amended by `config-multi-target.md` §7.3.** With N targets that
+reasoning no longer reaches: `Generate`'s purity orders every *check*
+before every *write* within one target, but it does not order target
+2's checks before target 0's writes. The two-phase split (§5.1's
+amendment) is what restores the guarantee, and it restores it for the
+two causes named below — a diagnostic anywhere and a tripwire abort
+anywhere both land entirely in phase A, so the run ends with the tree
+unchanged, which `TestGenerateAbortsBeforeAnyWrite` and
+`TestGenerateAbortLeavesAbsentDirAbsent` pin in both directions
+(nothing modified, nothing created). It does not extend to a failure
+in phase B itself; those are the last two residual windows below.
+
 The residual windows are stated honestly rather than engineered away:
 
 - Killed between wipe (5) and write (6): only proven-gqlc-generated
@@ -426,6 +440,18 @@ The residual windows are stated honestly rather than engineered away:
   and aborts; the remedy is deleting the named file. Safe but not
   self-healing; an atomic write-and-rename protocol is a non-goal
   (§8).
+- **A commit-phase failure at target `i` leaves targets `0..i-1`
+  rewritten** and target `i` partial. Phase B commits in target order,
+  so what survives is a prefix of the targets, not an arbitrary subset
+  — this window is the one above widened from one directory to a
+  prefix of them, and accepted on the same terms.
+- **An output directory that cannot be created is discovered in phase
+  B**, after earlier targets were rewritten, because `MkdirAll` is a
+  mutation and phase A performs none. Observable with an `out` under a
+  read-only parent: `graph[1]: output: mkdir …: permission denied`,
+  with entry 0's package already on disk. Pre-creating directories in
+  phase A would shrink the window at the cost of the property the
+  split exists for.
 
 A config typo pointing `out` at a source tree — the ADR's
 motivating scenario — hits step 3 (unmarked files, subdirectories)
@@ -515,7 +541,8 @@ diagnostic expectation in the table above also gained its
 | `TestGenerateWipeListIsPhaseAs`         | driving the seam directly: a marked file that appears between the two phases survives the run, because phase B removes only what phase A listed |
 | `TestCommitToleratesVanishedEntry`      | a wipe-list entry already gone satisfies the removal (§7.2 step 7)                                       |
 | `TestCommitOutputsNamesFailingTarget`   | a phase-B failure carries the entry prefix of the target it happened at                                  |
-| `TestCommitOutputsRejectsPlanMismatch`  | `commitOutputs`' documented precondition — one plan per target, index-parallel — is checked, not assumed |
+| `TestGenerateInspectsInTargetOrder`     | with both targets tripping the wire, phase A aborts at the first — the message names `graph[0]` (§7.1)   |
+| `TestCommitOutputsWritesInTargetOrder`  | phase B commits target `i` before `i+1`, so §5.2's commit-phase residue is a prefix of the targets       |
 
 ## 8. Non-goals
 

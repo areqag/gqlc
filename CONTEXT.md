@@ -477,15 +477,22 @@ query directory, an optional procedure-signature registry path, the three
 package; a project needing several generated packages declares several
 targets, which share nothing but the file they are declared in. The
 loader accepts any number, and generation runs every one of them in
-document order, all-or-nothing: any failure at any target means nothing
-is written for any target. Each axis is a closed vocabulary: the schema and query
+document order under a two-phase write: every target's output directory
+is inspected before any target's is modified, so a diagnostic at any
+target, or a tripwire abort at any target, ends the run with the tree
+unchanged. Failures in the commit phase itself are the residue — the
+multi-target spec §7.3 enumerates what each of them can leave behind.
+Each axis is a closed vocabulary: the schema and query
 language axes have one member today (GQL; openCypher), the driver axis
 has two (the Neo4j Go v5 and v6 drivers). The axes exist so each target
 states its whole pipeline explicitly, whether or not an axis offers a
 choice. Every key except the procedure-signature path is required —
 omission, an out-of-vocabulary axis value, or an unsupported version is
 rejected with the valid choices spelled out. The one cross-target rule is
-that no two targets may share, or nest, an **output directory**.
+that no two targets may share, or nest, an **output directory**; the
+loader enforces it lexically, rejecting every overlapping pair the two
+`out` strings decide between them, and config-file-format §4 names the
+two classes they do not.
 _Avoid_: target (unqualified — collides with the config file being
 classified and with the output directory); output target (the output
 directory's old name); typed repository (ADR 0010 — the generated
@@ -526,7 +533,15 @@ wholesale (ADR 0012). A file without the marker found there is an
 error — never a deletion — so hand-written extensions live outside the
 directory, wrapping the generated package rather than joining it. Because
 the wipe is wholesale, two targets may not share an output directory or
-nest one inside another; the config file is rejected at load if they do.
+nest one inside another. The loader enforces this lexically —
+`filepath.Rel` both ways, no filesystem access — so it rejects every pair
+whose overlap the two `out` strings decide between them, and accepts the
+two classes config-file-format §4 enumerates as undecidable without the
+working directory (an absolute path against a relative one; an escaping
+path that re-enters through the working directory's own name). A pair
+that slips through is generated, not diagnosed: both targets write into
+the one directory, where the later one's files land on the same-named
+files the earlier one just wrote.
 _Avoid_: gen dir (colloquial); output package (the generated Go
 package's *name* — the entry's `gen.go.package` key, related but
 distinct); output target (this directory's old name, retired with the
