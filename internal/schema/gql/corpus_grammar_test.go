@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/antlr4-go/antlr/v4"
@@ -16,14 +17,18 @@ import (
 
 const grammarPath = "../../grammar/gql/GQL.g4"
 
-// coverageRoots are the grammar rules a CREATE GRAPH TYPE statement can enter.
-// The corpus' obligation is their transitive closure, so the obligation tracks
-// the grammar rather than a hand-maintained list of constructs.
-var coverageRoots = []string{
-	statementRule,
-	"graphTypeSource",
-	nestedSpecRule,
-}
+// coverageRoots is the one rule every corpus file must enter, and the corpus'
+// obligation is its transitive closure — so the obligation tracks the grammar
+// rather than a hand-maintained list of constructs.
+//
+// Naming graphTypeSource and nestedGraphTypeSpecification as further roots looks
+// harmless and is not: it lets the invisible-alternative criterion suppose a file
+// could enter a body directly, when measureCoverage requires every file to come in
+// through the statement. With the extra roots, deleting `graphTypeSource#3` still
+// reached everything via the body root and so scored as invisible; from the real
+// single entry point it loses 110 of the 133 rules, which is the rule gate
+// demanding it as loudly as anything in the grammar.
+var coverageRoots = []string{statementRule}
 
 // coverageCuts are frontier rules: still required to be covered, but not
 // descended into.
@@ -40,6 +45,15 @@ var coverageRoots = []string{
 // A cut still has to be entered by some corpus file, so a cut that stops being
 // reachable fails rather than silently masking a subtree. Adding a third cut
 // needs the grammar path that justifies it.
+//
+// That brake is not proportional, which is the thing to keep in view when reading
+// the numbers below: with no cuts the closure is 545 of the grammar's 574 rules,
+// and graphExpression alone erases 412 rules and 186 tokens for the price of one
+// three-word file. nonReservedWords erases 0 rules and 30 tokens, so the
+// identifier-lexis cut is genuinely cheap — it names ~200 keyword tokens but only
+// 30 are reachable nowhere else in the schema grammar. The erasure is not pinned
+// separately: wantObligationRules already carries it, since a third cut makes
+// that pin read 133 against an actual 81 and puts "133 -> 81" in the diff.
 var coverageCuts = []string{"graphExpression", "nonReservedWords"}
 
 // The obligation sizes are pinned because the gate below can only catch the
@@ -50,19 +64,12 @@ var coverageCuts = []string{"graphExpression", "nonReservedWords"}
 const (
 	wantObligationRules  = 133
 	wantObligationTokens = 133
-	// wantFlaggedAlternatives sizes the third obligation set (see
-	// flaggedAlternatives). A grammar change that creates a new blind spot changes
-	// this number.
-	wantFlaggedAlternatives = 17
-)
-
-// What the frontier cuts erase, pinned so that adding a cut has to show its price
-// in the diff rather than quietly shrinking the obligation. The "a cut must still
-// be entered" brake is not proportional: graphExpression is discharged by one
-// three-word file and takes 412 rules with it.
-const (
-	wantElidedRules  = 412
-	wantElidedTokens = 191
+	// wantInvisibleAlternatives sizes the third obligation set's *candidate* set
+	// (see invisibleAlternatives). A grammar change that creates a new blind spot
+	// changes this number. What the corpus owes is this minus
+	// alternativeExemptions, because being invisible to the other two gates and
+	// being reachable at all are different questions.
+	wantInvisibleAlternatives = 47
 )
 
 // The grammar is scanned as text rather than through the generated parser's ATN
@@ -84,11 +91,11 @@ var (
 // scanGrammarRules returns every parser rule in GQL.g4 as name -> body text. A
 // rule block is a line holding nothing but the rule name, then body lines up to
 // a line holding nothing but a semicolon.
-func scanGrammarRules(t *testing.T) map[string]string {
-	t.Helper()
-
+func scanGrammarRules() (map[string]string, error) {
 	src, err := os.ReadFile(grammarPath)
-	require.NoError(t, err)
+	if err != nil {
+		return nil, err
+	}
 
 	text := reLineComment.ReplaceAllString(string(src), "")
 	text = reBlockComment.ReplaceAllString(text, "")
@@ -117,8 +124,10 @@ func scanGrammarRules(t *testing.T) map[string]string {
 			parserRules[rule] = ruleBody
 		}
 	}
-	require.NotEmpty(t, parserRules)
-	return parserRules
+	if len(parserRules) == 0 {
+		return nil, fmt.Errorf("%s holds no parser rule; the rule-block scan is broken", grammarPath)
+	}
+	return parserRules, nil
 }
 
 // isRuleName reports whether an identifier is an ANTLR parser rule rather than a
@@ -132,9 +141,29 @@ func isRuleName(id string) bool {
 // runs before the body is split on `|` so that a literal `'|'` cannot be mistaken
 // for an alternative separator.
 func cleanRuleBody(body string) string {
-	body = reLiteral.ReplaceAllString(body, " ")
-	body = reAltLabel.ReplaceAllString(body, " ")
-	return reOptions.ReplaceAllString(body, " ")
+	return reAltLabel.ReplaceAllString(withoutLiterals(body), " ")
+}
+
+func withoutLiterals(body string) string {
+	return reOptions.ReplaceAllString(reLiteral.ReplaceAllString(body, " "), " ")
+}
+
+// ruleAlternatives splits a rule body into its alternatives' element text and
+// their `# AltLabel`s, one entry each per alternative. The two come from a single
+// split so they cannot fall out of step: a label's position in the rule is the
+// alternative number, and that is not derivable from the label text —
+// `#listValueTypeAlt1` is alternative 3.
+func ruleAlternatives(body string) (elements, labels []string) {
+	for _, alt := range splitAlternatives(withoutLiterals(body)) {
+		label := ""
+		if m := reAltLabel.FindString(alt); m != "" {
+			label = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(m), "#"))
+			alt = reAltLabel.ReplaceAllString(alt, " ")
+		}
+		elements = append(elements, alt)
+		labels = append(labels, label)
+	}
+	return elements, labels
 }
 
 // grammarRefs splits a cleaned rule body into the parser rules and the tokens it
@@ -161,20 +190,54 @@ func grammarRefs(body string, parserRules map[string]string) (rules, tokens map[
 }
 
 // obligation is what the corpus must enter: every reachable parser rule, every
-// token named by a reachable non-frontier rule, and every flagged alternative.
+// token named by a reachable non-frontier rule, and every required alternative.
 type obligation struct {
 	rules  map[string]bool
 	tokens map[string]bool
 	// tokenRefs maps a token to the reachable rules naming it, which is how an
 	// uncovered token is reported against a rule an author can write a file for.
 	tokenRefs map[string][]string
-	// alternatives are the flagged alternatives' tags, grouped by rule in the same
-	// order as nonFrontier and ascending by alternative within a rule.
-	alternatives []string
+	// invisible are the tags of alternatives the rule and token gates cannot
+	// demand, grouped by rule in nonFrontier's order and ascending by alternative
+	// within a rule. It is the candidate set, not the obligation.
+	invisible []string
+	// required is invisible minus alternativeExemptions, which is what the corpus
+	// actually owes: being invisible to the other two gates and being reachable at
+	// all are different questions.
+	required []string
+	// alternatives attributes a parse tree node to one of these tags.
+	alternatives *alternativeIndex
 	// nonFrontier are the reachable rules that were descended into, so the
-	// alternative scan and the elision counts read the same closure the rule and
-	// token sets came from.
+	// alternative scan reads the same closure the rule and token sets came from.
 	nonFrontier []string
+}
+
+// alternativeExemption records a candidate alternative no corpus file can take,
+// because ANTLR's ALL(*) hands its input to a lower-numbered alternative at every
+// position it could appear. Ordering makes such an alternative dead, not merely
+// uncovered, so demanding a file for it would make the gate uncloseable.
+//
+// stolenBy names the alternative that wins instead, and joins the required set so
+// that TestCorpusGrammarCoverage demands it by name and the worklist asks an author
+// for it. That is what stops an exemption from excusing an untested construct: if
+// the thief is uncovered too, nothing exercises the spelling at all. The pair is
+// swept in the other direction by TestAlternativeExemptions — an exemption whose tag
+// becomes covered is stale, which is how a grammar fix that revives the alternative
+// gets noticed.
+type alternativeExemption struct {
+	tag      string
+	stolenBy string
+	bead     string
+	why      string
+}
+
+var alternativeExemptions = []alternativeExemption{
+	{
+		tag:      "connectorUndirected#1",
+		stolenBy: "connectorPointingRight#1",
+		bead:     "gqlc-h9n.10",
+		why:      "endpointPair lists endpointPairDirected first (GQL.g4:1637) and endpointPairPhrase is a sibling of edgeTypePhraseFiller, not a child, so prediction for endpointPair never sees the edge kind: `UNDIRECTED EDGE TYPE e ... CONNECTING (a TO b)` yields a directed endpoint pair, and no file can route a bare TO to connectorUndirected",
+	},
 }
 
 // closure walks the reachable rules from coverageRoots, descending into every rule
@@ -214,95 +277,186 @@ func closure(parserRules map[string]string, cuts map[string]bool) (rules, tokens
 	return rules, tokens, tokenRefs, nonFrontier, cutsReached
 }
 
-// grammarObligation computes the reachability closure from coverageRoots,
-// stopping at coverageCuts.
-//
-// The pinned sizes are asserted here rather than in a test of their own because
-// every caller needs the obligation to be non-vacuous, and an empty one fails
-// open: TestCorpusGrammarCoverage would report "rules 0/0" and pass. Failing in
-// the constructor means a broken scanner cannot make any gate green.
+// loadObligation memoises the closure, which every corpus file's walk needs and
+// which costs one recomputation per grammar alternative. It is a pure function of
+// a checked-in file, so one computation per test binary is the whole story.
+var loadObligation = sync.OnceValues(computeObligation)
+
+// grammarObligation is the only way to obtain the obligation, so that the pinned
+// sizes hold for every caller. They are asserted here rather than in a test of
+// their own because an empty obligation fails open: TestCorpusGrammarCoverage
+// would report "rules 0/0" and pass, and a broken scanner would make every gate
+// green.
 func grammarObligation(t *testing.T) obligation {
 	t.Helper()
 
-	parserRules := scanGrammarRules(t)
+	got, err := loadObligation()
+	require.NoError(t, err)
+	require.Len(t, got.rules, wantObligationRules,
+		"reachable rule count changed; re-read the grammar before repinning")
+	require.Len(t, got.tokens, wantObligationTokens,
+		"reachable token count changed; re-read the grammar before repinning")
+	require.Len(t, got.invisible, wantInvisibleAlternatives,
+		"the set of alternatives the rule and token gates cannot demand changed:\n%s",
+		strings.Join(got.invisible, "\n"))
+	return got
+}
 
-	for _, cut := range coverageCuts {
-		require.Contains(t, parserRules, cut, "frontier cut is not a grammar rule")
+// computeObligation walks the reachability closure from coverageRoots, stopping at
+// coverageCuts, and subtracts the exemptions from the candidate alternatives.
+func computeObligation() (obligation, error) {
+	parserRules, err := scanGrammarRules()
+	if err != nil {
+		return obligation{}, err
 	}
-	for _, root := range coverageRoots {
-		require.Contains(t, parserRules, root, "coverage root is not a grammar rule")
+
+	for _, rule := range append(append([]string{}, coverageCuts...), coverageRoots...) {
+		if _, ok := parserRules[rule]; !ok {
+			return obligation{}, fmt.Errorf("%q is named as a cut or a root but is not a grammar rule", rule)
+		}
 	}
 
 	rules, tokens, tokenRefs, nonFrontier, cutsReached := closure(parserRules, cutsSet())
 	for _, cut := range coverageCuts {
-		require.True(t, cutsReached[cut],
-			"frontier cut %q is no longer reachable: drop it from coverageCuts", cut)
+		if !cutsReached[cut] {
+			return obligation{}, fmt.Errorf("frontier cut %q is no longer reachable: drop it from coverageCuts", cut)
+		}
 	}
 	for _, refs := range tokenRefs {
 		sort.Strings(refs)
 	}
 	sort.Strings(nonFrontier)
 
-	got := obligation{
+	invisible := invisibleAlternatives(parserRules, nonFrontier, len(rules), len(tokens))
+	index := newAlternativeIndex(parserRules)
+	required, err := requiredAlternatives(invisible, index)
+	if err != nil {
+		return obligation{}, err
+	}
+
+	return obligation{
 		rules:        rules,
 		tokens:       tokens,
 		tokenRefs:    tokenRefs,
-		alternatives: flaggedAlternatives(parserRules, nonFrontier),
+		invisible:    invisible,
+		required:     required,
+		alternatives: index,
 		nonFrontier:  nonFrontier,
-	}
-	require.Len(t, got.rules, wantObligationRules,
-		"reachable rule count changed; re-read the grammar before repinning")
-	require.Len(t, got.tokens, wantObligationTokens,
-		"reachable token count changed; re-read the grammar before repinning")
-	require.Len(t, got.alternatives, wantFlaggedAlternatives,
-		"the set of alternatives rule and token coverage cannot demand changed:\n%s",
-		strings.Join(got.alternatives, "\n"))
-	return got
+	}, nil
 }
 
-// flaggedAlternatives returns the tags of reachable alternatives that rule and
-// token coverage provably cannot demand: an alternative naming no rule and no
-// token that its siblings do not also name between them. Covering the siblings
-// satisfies the rule and token gates while that alternative is never parsed, and
-// an unparsed alternative is exactly the blind spot this corpus exists to close —
-// nodeTypeImpliedContent's third alternative is the concatenation of its first two.
+// requiredAlternatives subtracts each exemption's tag from the candidate set and
+// adds the alternative that steals its input. An exemption naming a tag that is not
+// a candidate is rejected rather than ignored: the two lists are registries of the
+// same thing, and an exemption that matches nothing silently stops excusing
+// whatever it was written for.
+func requiredAlternatives(invisible []string, index *alternativeIndex) ([]string, error) {
+	candidates := make(map[string]bool, len(invisible))
+	for _, tag := range invisible {
+		candidates[tag] = true
+		if why := index.blocked(ruleOf(tag)); why != "" {
+			return nil, fmt.Errorf("%s cannot be attributed mechanically, so no corpus file can discharge it: %s", tag, why)
+		}
+	}
+
+	exempt := make(map[string]bool, len(alternativeExemptions))
+	for _, ex := range alternativeExemptions {
+		switch {
+		case !candidates[ex.tag]:
+			return nil, fmt.Errorf("exemption %q is not a candidate alternative; delete it", ex.tag)
+		case exempt[ex.tag]:
+			return nil, fmt.Errorf("duplicate exemption %q", ex.tag)
+		case ex.stolenBy == "" || ex.bead == "" || ex.why == "":
+			return nil, fmt.Errorf("exemption %q needs the alternative that takes its input, a bead, and why", ex.tag)
+		case ex.stolenBy == ex.tag:
+			return nil, fmt.Errorf("exemption %q cannot be stolen by itself", ex.tag)
+		}
+		exempt[ex.tag] = true
+	}
+
+	required := make([]string, 0, len(invisible)-len(exempt))
+	demanded := make(map[string]bool, len(invisible))
+	for _, tag := range invisible {
+		if !exempt[tag] {
+			required = append(required, tag)
+			demanded[tag] = true
+		}
+	}
+	// A stolenBy that is itself a candidate is already here, so this is a no-op in the
+	// usual case. It is done anyway so that a grammar change moving the thief out of
+	// the candidate set cannot quietly retire the demand along with it.
+	for _, ex := range alternativeExemptions {
+		if !demanded[ex.stolenBy] {
+			required = append(required, ex.stolenBy)
+			demanded[ex.stolenBy] = true
+		}
+	}
+	return required, nil
+}
+
+// ruleOf splits the rule name off a `rule#N` tag.
+func ruleOf(tag string) string {
+	rule, _, _ := strings.Cut(tag, "#")
+	return rule
+}
+
+// invisibleAlternatives returns the tags of reachable alternatives that the rule
+// and token gates provably cannot demand, by those gates' own definition: delete
+// the alternative from its rule, recompute the closure from the same roots and
+// cuts, and flag it when every reachable rule and token is still reached. If they
+// are, a corpus can satisfy both gates without any file ever taking it — and an
+// alternative no gate can demand is exactly the blind spot that let the listener
+// diverge from the grammar three times.
+//
+// The obligation is grammar-wide, so the test has to be. Comparing an
+// alternative's symbols against its *siblings'* looks equivalent and is not: a
+// symbol unique among siblings can still be reached through an unrelated rule.
+// elementTypeSpecification#1 is the case that matters, and it is not a corner —
+// nodeTypeSpecification is also referenced by the NODE(...) reference value type
+// (GQL.g4:1944), so a corpus of edge declarations plus one NODE-typed property
+// satisfies both gates with a node type declaration in an element list never
+// parsed. The sibling test finds 17 of these; this one finds 48.
 //
 // Tags are `rule#N`, N counting alternatives from 1 in source order, emitted in
 // nonFrontier's order. They are deliberately not sorted afterwards: `#10` sorts
 // before `#3` as a string, and this list is read by hand.
-func flaggedAlternatives(parserRules map[string]string, nonFrontier []string) []string {
-	var flagged []string
+func invisibleAlternatives(parserRules map[string]string, nonFrontier []string, wantRules, wantTokens int) []string {
+	var invisible []string
 	for _, rule := range nonFrontier {
 		alts := splitAlternatives(cleanRuleBody(parserRules[rule]))
 		if len(alts) < 2 {
 			continue
 		}
 
-		symbols := make([]map[string]bool, len(alts))
-		for i, alt := range alts {
-			refRules, refTokens := grammarRefs(alt, parserRules)
-			symbols[i] = refRules
-			for token := range refTokens {
-				symbols[i][token] = true
-			}
-		}
-
-		for i, own := range symbols {
-			siblings := make(map[string]bool)
-			for j, other := range symbols {
-				if j == i {
-					continue
-				}
-				for symbol := range other {
-					siblings[symbol] = true
-				}
-			}
-			if isSubset(own, siblings) {
-				flagged = append(flagged, fmt.Sprintf("%s#%d", rule, i+1))
+		for i := range alts {
+			// Deleting an alternative can only shrink the closure, so counts settle it;
+			// no set comparison is needed.
+			rules, tokens, _, _, _ := closure(withoutAlternative(parserRules, rule, alts, i), cutsSet())
+			if len(rules) == wantRules && len(tokens) == wantTokens {
+				invisible = append(invisible, fmt.Sprintf("%s#%d", rule, i+1))
 			}
 		}
 	}
-	return flagged
+	return invisible
+}
+
+// withoutAlternative copies parserRules with one rule's body replaced by its
+// alternatives minus the i'th. The copy is cleaned text rather than grammar
+// source, which closure tolerates because cleanRuleBody only ever removes.
+func withoutAlternative(parserRules map[string]string, rule string, alts []string, i int) map[string]string {
+	kept := make([]string, 0, len(alts)-1)
+	for j, alt := range alts {
+		if j != i {
+			kept = append(kept, alt)
+		}
+	}
+
+	without := make(map[string]string, len(parserRules))
+	for r, body := range parserRules {
+		without[r] = body
+	}
+	without[rule] = strings.Join(kept, " | ")
+	return without
 }
 
 // splitAlternatives splits a cleaned rule body on its top-level `|`, dropping the
@@ -330,15 +484,6 @@ func splitAlternatives(body string) []string {
 		}
 	}
 	return append(alts, body[start:])
-}
-
-func isSubset(own, of map[string]bool) bool {
-	for symbol := range own {
-		if !of[symbol] {
-			return false
-		}
-	}
-	return true
 }
 
 var reSectionHeader = regexp.MustCompile(`^//\s*(\d+(?:\.\d+)?\s+\S.*?)\s*$`)
@@ -397,22 +542,6 @@ func TestGrammarObligation(t *testing.T) {
 	for token := range got.tokens {
 		require.True(t, known[token], "scanned token %q is not a token of the generated parser", token)
 	}
-
-	elidedRules, elidedTokens := elidedByCuts(t)
-	t.Logf("frontier cuts erase %d rules and %d tokens", elidedRules, elidedTokens)
-	require.Equal(t, wantElidedRules, elidedRules, "a frontier cut changed what it erases")
-	require.Equal(t, wantElidedTokens, elidedTokens, "a frontier cut changed what it erases")
-}
-
-// elidedByCuts is how many rules and tokens the frontier cuts remove from the
-// obligation, measured by running the same closure with no cuts at all.
-func elidedByCuts(t *testing.T) (rules, tokens int) {
-	t.Helper()
-
-	parserRules := scanGrammarRules(t)
-	cutRules, cutTokens, _, _, _ := closure(parserRules, map[string]bool{})
-	kept, keptTokens, _, _, _ := closure(parserRules, cutsSet())
-	return len(cutRules) - len(kept), len(cutTokens) - len(keptTokens)
 }
 
 func cutsSet() map[string]bool {

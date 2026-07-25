@@ -2,6 +2,7 @@ package gql
 
 import (
 	"bytes"
+	"fmt"
 	"io/fs"
 	"os"
 	"path"
@@ -61,10 +62,9 @@ const (
 	unsupported
 )
 
-// corpusEntry classifies one corpus file. Almost nothing here declares what the
-// file covers: coverage is measured from the parse tree, because a declared list
-// drifts from the grammar exactly the way the listener did. The one exception is
-// covers, and its comment says why it has to be an exception.
+// corpusEntry classifies one corpus file. Nothing here declares what the file
+// covers: coverage is measured from the parse tree, because a declared list drifts
+// from the grammar exactly the way the listener did.
 type corpusEntry struct {
 	// file is the path under corpusDir, e.g. "18.2-node-type/pattern_bare.gql".
 	file    string
@@ -85,14 +85,6 @@ type corpusEntry struct {
 	// reason is one line on why an unsupported entry is not supported, or on what
 	// a resolving entry gets wrong.
 	reason string
-	// covers tags the flagged alternatives (`nodeTypeImpliedContent#3`) this file
-	// exercises. It is the one declared obligation in the manifest, and only
-	// because the set of tags is derived from the grammar rather than hand-listed:
-	// see flaggedAlternatives for why rule and token coverage cannot demand these.
-	// The tags a file claims are checked against that derived set, and the file is
-	// required to enter the tagged rule; which alternative of that rule it took is
-	// not machine-checked, so a tag is a claim about a file the author has read.
-	covers []string
 }
 
 // semanticCase is a construct no grammar gate can demand, because what is wrong is
@@ -196,7 +188,6 @@ func corpusFiles(t *testing.T) []string {
 // silently widen the corpus without asserting anything about it.
 func TestCorpusManifest(t *testing.T) {
 	entries := corpusManifest(t)
-	flagged := grammarObligation(t).alternatives
 
 	semanticBeads := make(map[string]string, len(semanticCases))
 	semanticFiles := make([]string, 0, len(semanticCases))
@@ -216,15 +207,6 @@ func TestCorpusManifest(t *testing.T) {
 		files = append(files, entry.file)
 
 		require.NotEmpty(t, entry.feature, `%s: feature is required (Annex D id, or "mandatory")`, entry.file)
-
-		tagged := make(map[string]bool, len(entry.covers))
-		for _, tag := range entry.covers {
-			require.False(t, tagged[tag], "%s: covers %q twice", entry.file, tag)
-			tagged[tag] = true
-			require.Contains(t, flagged, tag,
-				"%s: covers %q, which is not an alternative rule and token coverage fails to demand; tagging one is pointless because the gates already require it",
-				entry.file, tag)
-		}
 
 		switch entry.outcome {
 		case resolves:
@@ -269,7 +251,6 @@ func TestCorpusOutcomes(t *testing.T) {
 			require.NoError(t, err)
 
 			cov := measureCoverage(t, string(src))
-			assertCovers(t, entry, cov)
 
 			got, parseErr := New().Parse(bytes.NewReader(src))
 
@@ -313,20 +294,6 @@ func assertNothingDropped(t *testing.T, src *coverage, got schema.Schema) {
 		src.elementTypes, elements)
 }
 
-// assertCovers checks that a file enters the rule behind every alternative it
-// tags. Which of that rule's alternatives the parse took is not checked — see
-// corpusEntry.covers for why — so this catches only the cheap half of a wrong tag:
-// a tag on a file that never reaches the rule at all.
-func assertCovers(t *testing.T, entry corpusEntry, cov *coverage) {
-	t.Helper()
-
-	for _, tag := range entry.covers {
-		rule, _, ok := strings.Cut(tag, "#")
-		require.True(t, ok, "covers %q, which is not a rule#N tag", tag)
-		require.True(t, cov.rules[rule], "covers %q but never enters %s", tag, rule)
-	}
-}
-
 // TestCorpusSpellingTraps pins the two spellings described in the package comment,
 // because both are silent: one produces a file that parses cleanly and exercises
 // none of the graph type grammar, the other differs from the working spelling by a
@@ -359,7 +326,7 @@ func TestCorpusSpellingTraps(t *testing.T) {
 
 // TestCorpusGrammarCoverage is the gate: every parser rule and token reachable
 // from a CREATE GRAPH TYPE statement must be entered by some corpus file, and every
-// alternative those two cannot demand must be tagged by one. It makes an
+// alternative those two cannot demand must be taken by one. It makes an
 // unclassified grammar branch a build failure, and its failure message is the
 // authoring worklist.
 //
@@ -368,40 +335,92 @@ func TestCorpusSpellingTraps(t *testing.T) {
 // reconcile by hand.
 func TestCorpusGrammarCoverage(t *testing.T) {
 	want := grammarObligation(t)
-
-	got := newCoverage(parserNameTables())
-	for _, file := range corpusFiles(t) {
-		src, err := os.ReadFile(filepath.Join(corpusDir, file))
-		require.NoError(t, err)
-		got.merge(measureCoverage(t, string(src)))
-	}
-
-	tagged := make(map[string]bool)
-	for _, entry := range corpusManifest(t) {
-		for _, tag := range entry.covers {
-			tagged[tag] = true
-		}
-	}
+	got := corpusCoverage(t)
 
 	uncoveredRules := uncovered(want.rules, got.rules)
 	uncoveredTokens := uncovered(want.tokens, got.tokens)
 	var uncoveredAlts []string
-	for _, tag := range want.alternatives {
-		if !tagged[tag] {
+	for _, tag := range want.required {
+		if !got.alternatives[tag] {
 			uncoveredAlts = append(uncoveredAlts, tag)
 		}
 	}
 	t.Logf("grammar coverage: rules %d/%d, tokens %d/%d, alternatives %d/%d",
 		len(want.rules)-len(uncoveredRules), len(want.rules),
 		len(want.tokens)-len(uncoveredTokens), len(want.tokens),
-		len(want.alternatives)-len(uncoveredAlts), len(want.alternatives))
+		len(want.required)-len(uncoveredAlts), len(want.required))
 
 	if len(uncoveredRules) == 0 && len(uncoveredTokens) == 0 && len(uncoveredAlts) == 0 {
 		return
 	}
-	t.Fatalf("%d rules and %d tokens are entered by no corpus file, and %d alternatives are tagged by none:\n%s",
+	t.Fatalf("%d rules and %d tokens are entered by no corpus file, and %d alternatives are taken by none:\n%s",
 		len(uncoveredRules), len(uncoveredTokens), len(uncoveredAlts),
 		worklist(t, want, uncoveredRules, uncoveredTokens, uncoveredAlts))
+}
+
+// TestAlternativeExemptions sweeps the exemption list for staleness: an alternative
+// claimed unreachable that a corpus file turns out to take is an exemption to delete,
+// which is how a grammar fix reviving it gets noticed. The other direction — that the
+// thief named by stolenBy is itself covered — is TestCorpusGrammarCoverage's, since
+// requiredAlternatives puts it in the required set and so in the authoring worklist.
+func TestAlternativeExemptions(t *testing.T) {
+	got := corpusCoverage(t)
+
+	for _, ex := range alternativeExemptions {
+		require.False(t, got.alternatives[ex.tag],
+			"%s is exempted as unreachable but a corpus file took it; delete the exemption (%s)", ex.tag, ex.bead)
+	}
+}
+
+// TestCorpusShapes reports the direct-child sequences the corpus produced per rule.
+// It does not gate: while the corpus is being authored in parallel a new shape is
+// the expected outcome of a new file, so a pinned set would fail on every commit.
+// Promoting it to a gate with a checked-in artefact is gqlc-h9n.10.
+func TestCorpusShapes(t *testing.T) {
+	got := corpusCoverage(t)
+
+	total := 0
+	for _, shapes := range got.shapes {
+		total += len(shapes)
+	}
+	t.Logf("parse tree shapes: %d distinct child sequences across %d rules", total, len(got.shapes))
+
+	path := os.Getenv("GQLC_CORPUS_SHAPES")
+	if path == "" {
+		return
+	}
+	rules := make([]string, 0, len(got.shapes))
+	for rule := range got.shapes {
+		rules = append(rules, rule)
+	}
+	sort.Strings(rules)
+
+	var report strings.Builder
+	for _, rule := range rules {
+		shapes := make([]string, 0, len(got.shapes[rule]))
+		for shape := range got.shapes[rule] {
+			shapes = append(shapes, shape)
+		}
+		sort.Strings(shapes)
+		for _, shape := range shapes {
+			fmt.Fprintf(&report, "%s: %s\n", rule, shape)
+		}
+	}
+	require.NoError(t, os.WriteFile(path, []byte(report.String()), 0o644))
+}
+
+// corpusCoverage is every corpus file's coverage merged.
+func corpusCoverage(t *testing.T) *coverage {
+	t.Helper()
+
+	ruleNames, symbolicNames := parserNameTables()
+	got := newCoverage(ruleNames, symbolicNames, grammarObligation(t).alternatives)
+	for _, file := range corpusFiles(t) {
+		src, err := os.ReadFile(filepath.Join(corpusDir, file))
+		require.NoError(t, err)
+		got.merge(measureCoverage(t, string(src)))
+	}
+	return got
 }
 
 // uncovered returns the sorted names in want that are absent from got.

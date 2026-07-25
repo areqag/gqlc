@@ -2,6 +2,8 @@ package gql
 
 import (
 	"fmt"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/antlr4-go/antlr/v4"
@@ -32,9 +34,20 @@ const (
 type coverage struct {
 	ruleNames     []string
 	symbolicNames []string
+	alts          *alternativeIndex
 
-	rules  map[string]bool
-	tokens map[string]bool
+	rules        map[string]bool
+	tokens       map[string]bool
+	alternatives map[string]bool
+	// shapes are the distinct direct-child sequences seen per rule. Recorded, not
+	// gated: a shape appearing for the first time is usually a new corpus file
+	// doing its job, so this is a report until the corpus stops growing
+	// (gqlc-h9n.10).
+	shapes map[string]map[string]bool
+	// unattributed holds the rules whose alternative could not be identified. A
+	// miss is not benign — it means a file exercised something the harness cannot
+	// account for — so callers that own valid input turn this into a failure.
+	unattributed []string
 
 	// elementTypes is the number of element type declarations belonging to the
 	// statement's own graph type, counted here rather than read back from the
@@ -50,18 +63,34 @@ type coverage struct {
 	declaresElements bool
 }
 
-func newCoverage(ruleNames, symbolicNames []string) *coverage {
+func newCoverage(ruleNames, symbolicNames []string, alts *alternativeIndex) *coverage {
 	return &coverage{
 		ruleNames:     ruleNames,
 		symbolicNames: symbolicNames,
+		alts:          alts,
 		rules:         make(map[string]bool),
 		tokens:        make(map[string]bool),
+		alternatives:  make(map[string]bool),
+		shapes:        make(map[string]map[string]bool),
 	}
 }
 
 func (c *coverage) EnterEveryRule(ctx antlr.ParserRuleContext) {
 	name := c.ruleNames[ctx.GetRuleIndex()]
 	c.rules[name] = true
+
+	children := c.children(ctx)
+	if c.shapes[name] == nil {
+		c.shapes[name] = make(map[string]bool)
+	}
+	c.shapes[name][strings.Join(children, " ")] = true
+
+	switch tag, err := c.alts.tag(name, reflect.TypeOf(ctx).Elem().Name(), children); {
+	case err != nil:
+		c.unattributed = append(c.unattributed, err.Error())
+	case tag != "":
+		c.alternatives[tag] = true
+	}
 
 	switch name {
 	case elementTypeRule:
@@ -73,6 +102,26 @@ func (c *coverage) EnterEveryRule(ctx antlr.ParserRuleContext) {
 			c.declaresElements = true
 		}
 	}
+}
+
+// children is ctx's direct children named the way a grammar alternative names
+// them: a rule name for a subtree, a token's symbolic name for a terminal. An
+// error node deliberately yields no name, so a tree built by error recovery
+// matches no alternative rather than being attributed to a plausible one.
+func (c *coverage) children(ctx antlr.ParserRuleContext) []string {
+	names := make([]string, 0, ctx.GetChildCount())
+	for i := range ctx.GetChildCount() {
+		var name string
+		switch child := ctx.GetChild(i).(type) {
+		case antlr.ErrorNode:
+		case antlr.TerminalNode:
+			name = c.tokenName(child)
+		case antlr.ParserRuleContext:
+			name = c.ruleNames[child.GetRuleIndex()]
+		}
+		names = append(names, name)
+	}
+	return names
 }
 
 // nestingDepth is the number of nestedSpecRule contexts above ctx.
@@ -91,14 +140,24 @@ func (c *coverage) nestingDepth(ctx antlr.ParserRuleContext) int {
 }
 
 func (c *coverage) VisitTerminal(node antlr.TerminalNode) {
-	// EOF is token type -1, and a token defined only as a literal has an empty
-	// symbolic name. Neither is part of the obligation.
-	tokenType := node.GetSymbol().GetTokenType()
-	if tokenType < 0 || tokenType >= len(c.symbolicNames) {
-		return
-	}
-	if name := c.symbolicNames[tokenType]; name != "" {
+	if name := c.tokenName(node); name != "" {
 		c.tokens[name] = true
+	}
+}
+
+// tokenName is the name a grammar rule refers to a terminal by. EOF has token type
+// -1 and so no entry in the symbolic table, but rules do name it, so a child
+// sequence has to as well. A token defined only as a literal has no symbolic name
+// at all and yields "", which no alternative's element text can match either —
+// deliberately, since cleanRuleBody strips literals.
+func (c *coverage) tokenName(node antlr.TerminalNode) string {
+	switch tokenType := node.GetSymbol().GetTokenType(); {
+	case tokenType == antlr.TokenEOF:
+		return "EOF"
+	case tokenType < 0 || tokenType >= len(c.symbolicNames):
+		return ""
+	default:
+		return c.symbolicNames[tokenType]
 	}
 }
 
@@ -115,6 +174,18 @@ func (c *coverage) merge(other *coverage) {
 	for token := range other.tokens {
 		c.tokens[token] = true
 	}
+	for tag := range other.alternatives {
+		c.alternatives[tag] = true
+	}
+	for rule, shapes := range other.shapes {
+		if c.shapes[rule] == nil {
+			c.shapes[rule] = make(map[string]bool, len(shapes))
+		}
+		for shape := range shapes {
+			c.shapes[rule][shape] = true
+		}
+	}
+	c.unattributed = append(c.unattributed, other.unattributed...)
 }
 
 // TestCoverageElementCount pins the measurement every other corpus assertion is
@@ -170,13 +241,15 @@ func walkCoverage(t *testing.T, src string) (*coverage, []string) {
 	p.AddErrorListener(errs)
 
 	tree := p.GqlProgram()
-	c := newCoverage(p.GetRuleNames(), p.GetSymbolicNames())
+	c := newCoverage(p.GetRuleNames(), p.GetSymbolicNames(), grammarObligation(t).alternatives)
 	antlr.ParseTreeWalkerDefault.Walk(c, tree)
 	return c, errs.msgs
 }
 
-// measureCoverage is walkCoverage plus the two things every corpus file owes: it
-// is valid ISO GQL, and it is a graph type statement.
+// measureCoverage is walkCoverage plus the three things every corpus file owes: it
+// is valid ISO GQL, it is a graph type statement, and every alternative it took can
+// be named. The last is what keeps the third gate honest: a rule the index cannot
+// attribute would otherwise contribute nothing and look like an authoring gap.
 func measureCoverage(t *testing.T, src string) *coverage {
 	t.Helper()
 
@@ -184,5 +257,7 @@ func measureCoverage(t *testing.T, src string) *coverage {
 	require.Empty(t, errs, "corpus files must be syntactically valid ISO GQL")
 	require.True(t, c.rules[statementRule],
 		"parsed with no syntax error but as some other statement, so it exercises no graph type grammar; the usual cause is AS before COPY OF")
+	require.Empty(t, c.unattributed,
+		"the alternative index could not name what this file parsed as")
 	return c
 }
