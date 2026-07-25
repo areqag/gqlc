@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -34,16 +35,72 @@ func editFixtureConfig() config.Config {
 	}}}
 }
 
+// addFixtureConfig is the config-multi-target §8.2 --add fixture: two
+// entries differing in every field the append prefills
+// from the last one, so an append that read entry 0 — or fell back to
+// the §3.2 defaults — cannot pass. Entry 1 carries the procsig and the
+// v6 driver precisely because those are the two prefilled fields an
+// accessible script observes: both are answered with an empty line, so
+// the value that lands is the prefill.
+func addFixtureConfig() config.Config {
+	return config.Config{Targets: []config.Target{
+		{
+			SchemaPath: "user.gql",
+			SchemaLang: config.SchemaLangGQL,
+			QueryDir:   "cypher/user",
+			QueryLang:  config.QueryLangOpenCypher,
+			Go: config.GoGen{
+				Package: "userdb",
+				Out:     "gen/user",
+				Driver:  config.DriverNeo4jGoV5,
+			},
+		},
+		{
+			SchemaPath:  "order.gql",
+			SchemaLang:  config.SchemaLangGQL,
+			QueryDir:    "cypher/order",
+			QueryLang:   config.QueryLangOpenCypher,
+			ProcsigPath: "order.procsig.json",
+			Go: config.GoGen{
+				Package: "orderdb",
+				Out:     "gen/order",
+				Driver:  config.DriverNeo4jGoV6,
+			},
+		},
+	}}
+}
+
+// addedTarget is the target the --add tests author over
+// addFixtureConfig. The four validated Inputs are typed at the prompts,
+// schema included — an accessible Input never displays its bound
+// default, so re-typing the carried value is the only way to answer it,
+// and the carry itself is pinned on addPrefill directly. procsig and
+// the three Selects are empty lines, so their values here are the
+// prefill and nothing else.
+func addedTarget() config.Target {
+	return config.Target{
+		SchemaPath:  "order.gql",
+		SchemaLang:  config.SchemaLangGQL,
+		QueryDir:    "cypher/report",
+		QueryLang:   config.QueryLangOpenCypher,
+		ProcsigPath: "order.procsig.json",
+		Go: config.GoGen{
+			Package: "reportdb",
+			Out:     "gen/report",
+			Driver:  config.DriverNeo4jGoV6,
+		},
+	}
+}
+
 // wizardScript renders the §7 per-prompt script contract for one full
 // wizard pass: explicit value lines for the four validated Inputs
-// (derived from the Config the test asserts against, never
+// (derived from the Target the test asserts against, never
 // hand-copied, so a fixture edit cannot desynchronise script and
 // assertion), an empty line for the unvalidated procsig Input, empty
 // lines for the three Selects (the empty line takes the default that
 // derives from the pointer binding — the §3.3 prefill seam), and the
 // confirm answer.
-func wizardScript(cfg config.Config, confirm string) string {
-	t := cfg.Targets[0]
+func wizardScript(t config.Target, confirm string) string {
 	return strings.Join([]string{
 		t.SchemaPath,
 		t.QueryDir,
@@ -66,6 +123,15 @@ func runWizard(t *testing.T, script, cfgPath string) (string, error) {
 	t.Helper()
 	var out strings.Builder
 	err := runInitWizard(iotest.OneByteReader(strings.NewReader(script)), &out, true, cfgPath)
+	return out.String(), err
+}
+
+// runAdd drives the §8.2 append flow the way runWizard drives the bare
+// one, same reader wrapping and same reasons.
+func runAdd(t *testing.T, script, cfgPath string) (string, error) {
+	t.Helper()
+	var out strings.Builder
+	err := runInitAdd(iotest.OneByteReader(strings.NewReader(script)), &out, true, cfgPath)
 	return out.String(), err
 }
 
@@ -271,7 +337,7 @@ func TestInitFreshWritesCanonical(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
 	want := initDefaults()
 
-	out, err := runWizard(t, wizardScript(want, "y"), cfgPath)
+	out, err := runWizard(t, wizardScript(want.Targets[0], "y"), cfgPath)
 	require.NoError(t, err)
 
 	wantBytes, err := want.Canonical()
@@ -301,7 +367,7 @@ func TestInitFreshDecline(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
-			_, err := runWizard(t, wizardScript(initDefaults(), answer), cfgPath)
+			_, err := runWizard(t, wizardScript(initDefaults().Targets[0], answer), cfgPath)
 			require.EqualError(t, err, abortedMsg)
 			require.NoFileExists(t, cfgPath)
 		})
@@ -321,7 +387,7 @@ func TestInitEditPrefillRoundTrip(t *testing.T) {
 	before, err := os.ReadFile(cfgPath)
 	require.NoError(t, err)
 
-	_, err = runWizard(t, wizardScript(fixture, "y"), cfgPath)
+	_, err = runWizard(t, wizardScript(fixture.Targets[0], "y"), cfgPath)
 	require.NoError(t, err)
 
 	after, err := os.ReadFile(cfgPath)
@@ -353,13 +419,244 @@ func TestInitRefusalNamesAddFlag(t *testing.T) {
 	before, err := os.ReadFile(cfgPath)
 	require.NoError(t, err)
 
-	out, err := runWizard(t, wizardScript(cfg, "y"), cfgPath)
+	out, err := runWizard(t, wizardScript(cfg.Targets[0], "y"), cfgPath)
 	require.EqualError(t, err, cfgPath+" declares 2 generation targets; init edits only a single-target config (edit it by hand, or run gqlc init --add to append another)")
 	require.Empty(t, out)
 
 	after, err := os.ReadFile(cfgPath)
 	require.NoError(t, err)
 	require.Equal(t, string(before), string(after))
+}
+
+// TestInitAddFlag pins the §8.2 flag declaration: name, default and
+// usage string. `gqlc init --add` reaching the TTY guard is what proves
+// cobra parses it at all — an unregistered flag fails earlier, at parse
+// time, with a different message.
+func TestInitAddFlag(t *testing.T) {
+	f := newInitCmd().Flags().Lookup("add")
+	require.NotNil(t, f)
+	require.Equal(t, "false", f.DefValue)
+	require.Equal(t, "append a generation target to the existing config file", f.Usage)
+
+	stdout, _, err := executeRoot(t, "init", "--add")
+	require.EqualError(t, err, "init requires an interactive terminal")
+	require.Empty(t, stdout)
+}
+
+// TestInitAdd is the §8.2 append round trip.
+func TestInitAdd(t *testing.T) {
+	t.Run("prefill carries the last entry and blanks the distinguishing three", func(t *testing.T) {
+		require.Equal(t, config.Target{
+			SchemaPath:  "order.gql",
+			SchemaLang:  config.SchemaLangGQL,
+			QueryLang:   config.QueryLangOpenCypher,
+			ProcsigPath: "order.procsig.json",
+			Go:          config.GoGen{Driver: config.DriverNeo4jGoV6},
+		}, addPrefill(addFixtureConfig().Targets))
+	})
+
+	t.Run("nothing to carry from falls back to the fresh defaults", func(t *testing.T) {
+		want := initDefaults().Targets[0]
+		want.QueryDir, want.Go.Out, want.Go.Package = "", "", ""
+		require.Equal(t, want, addPrefill(nil))
+	})
+
+	t.Run("appends to a two-entry file", func(t *testing.T) {
+		cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
+		fixture := addFixtureConfig()
+		require.NoError(t, fixture.Save(cfgPath))
+		want := config.Config{Targets: append(slices.Clone(fixture.Targets), addedTarget())}
+
+		out, err := runAdd(t, wizardScript(addedTarget(), "y"), cfgPath)
+		require.NoError(t, err)
+
+		wantBytes, err := want.Canonical()
+		require.NoError(t, err)
+		got, err := os.ReadFile(cfgPath)
+		require.NoError(t, err)
+		require.Equal(t, string(wantBytes), string(got))
+
+		loaded, err := config.Load(cfgPath)
+		require.NoError(t, err)
+		require.Equal(t, want, loaded)
+
+		// The preview is the whole resulting file, every entry (§8.2).
+		require.Contains(t, out, "gqlc init will write "+cfgPath+":\n\n"+string(wantBytes))
+		// The warnings and the epilogue name the target this run
+		// authored — the appended one, whose query directory is the only
+		// one of the three the fixture does not already declare.
+		require.Contains(t, out, "warning: query directory "+
+			filepath.Join(filepath.Dir(cfgPath), "cypher", "report")+
+			" does not exist yet; create it before running gqlc generate\n")
+		require.Contains(t, out, "wrote "+cfgPath+"\n"+
+			"next steps:\n"+
+			"  1. put your schema at order.gql\n"+
+			"  2. add *.cypher query files under cypher/report\n"+
+			"  3. run gqlc generate\n")
+	})
+
+	t.Run("appends a second target to a one-entry file", func(t *testing.T) {
+		cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
+		fixture := editFixtureConfig()
+		require.NoError(t, fixture.Save(cfgPath))
+		// Derived from the only entry: everything but the three typed
+		// fields is what --add must carry, procsig included — and the
+		// script answers procsig with an empty line, so a prefill that
+		// dropped it would write nothing there.
+		second := fixture.Targets[0]
+		second.QueryDir = "cypher/second"
+		second.Go.Out = "gen/second"
+		second.Go.Package = "seconddb"
+		want := config.Config{Targets: append(slices.Clone(fixture.Targets), second)}
+
+		_, err := runAdd(t, wizardScript(second, "y"), cfgPath)
+		require.NoError(t, err)
+
+		loaded, err := config.Load(cfgPath)
+		require.NoError(t, err)
+		require.Equal(t, want, loaded)
+	})
+
+	t.Run("the seam routes --add to the append flow", func(t *testing.T) {
+		// One file and one script, both flows: bare init refuses a
+		// two-entry config (§8.1) where --add appends to it, so the
+		// dispatch is observable without a terminal.
+		cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
+		require.NoError(t, addFixtureConfig().Save(cfgPath))
+		script := wizardScript(addedTarget(), "y")
+
+		var bare strings.Builder
+		err := runInit(iotest.OneByteReader(strings.NewReader(script)), &bare, true, false, cfgPath)
+		require.ErrorContains(t, err, "init edits only a single-target config")
+
+		var added strings.Builder
+		require.NoError(t, runInit(iotest.OneByteReader(strings.NewReader(script)), &added, true, true, cfgPath))
+		loaded, err := config.Load(cfgPath)
+		require.NoError(t, err)
+		require.Len(t, loaded.Targets, 3)
+	})
+}
+
+// TestInitAddOverlapRejectedAtPrompt: the out prompt runs the loader's
+// own overlap rule (config.CheckOutAgainst) against the entries already
+// in the file (§8.2). Each case types an overlapping directory, reads
+// the rejection, and retypes a disjoint one — a rejection that failed to
+// re-prompt would leave that retyped line to the package prompt and
+// misalign every answer after it.
+func TestInitAddOverlapRejectedAtPrompt(t *testing.T) {
+	cases := []struct{ name, bad, wantMsg string }{
+		{
+			name:    "equal to entry 0",
+			bad:     "gen/user",
+			wantMsg: `out "gen/user" is already graph[0]'s output directory`,
+		},
+		{
+			// Spelled uncleaned, and against the *second* entry: a
+			// string-equality restatement of the rule accepts this, and
+			// the loader then rejects the file the wizard just wrote.
+			name:    "equal to entry 1, spelled differently",
+			bad:     "./gen/order/",
+			wantMsg: `out "./gen/order/" is already graph[1]'s output directory`,
+		},
+		{
+			name:    "inside entry 1",
+			bad:     "gen/order/sub",
+			wantMsg: `out "gen/order/sub" is inside graph[1]'s output directory "gen/order"`,
+		},
+		{
+			// The hook sees the raw line, but §4.2's post-form trim is
+			// what gets written: a check on the untrimmed value accepts
+			// this and writes a file the loader then rejects.
+			name:    "equal to entry 0, padded with the whitespace the form trims",
+			bad:     "  gen/user  ",
+			wantMsg: `out "gen/user" is already graph[0]'s output directory`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
+			fixture := addFixtureConfig()
+			require.NoError(t, fixture.Save(cfgPath))
+			want := config.Config{Targets: append(slices.Clone(fixture.Targets), addedTarget())}
+
+			added := addedTarget()
+			script := strings.Join([]string{
+				added.SchemaPath,
+				added.QueryDir,
+				tc.bad,       // rejected at the prompt
+				added.Go.Out, // consumed by the re-prompt
+				added.Go.Package,
+				"", "", "", "", // procsig and the three Selects
+				"y",
+			}, "\n") + "\n"
+
+			out, err := runAdd(t, script, cfgPath)
+			require.NoError(t, err)
+			require.Contains(t, out, tc.wantMsg+"\n")
+
+			loaded, err := config.Load(cfgPath)
+			require.NoError(t, err)
+			require.Equal(t, want, loaded)
+		})
+	}
+
+	t.Run("input starved after the rejection writes nothing", func(t *testing.T) {
+		// huh's PromptString keeps the last scanned line when the next
+		// Scan hits EOF (internal/accessibility/accessibility.go:145-164),
+		// so the rejected out does reach the bound target; what keeps it
+		// off disk is the §5.4 confirm gate defaulting to Abort.
+		cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
+		require.NoError(t, addFixtureConfig().Save(cfgPath))
+		before, err := os.ReadFile(cfgPath)
+		require.NoError(t, err)
+
+		out, err := runAdd(t, "report.gql\ncypher/report\ngen/user\n", cfgPath)
+		require.EqualError(t, err, abortedMsg)
+		require.Contains(t, out, `out "gen/user" is already graph[0]'s output directory`+"\n")
+
+		after, err := os.ReadFile(cfgPath)
+		require.NoError(t, err)
+		require.Equal(t, string(before), string(after))
+	})
+}
+
+// TestInitAddNoConfig: --add has nothing to append to, so it reports
+// the absent-file message §8.2 borrows from generate — before any
+// prompt renders.
+func TestInitAddNoConfig(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
+
+	out, err := runAdd(t, wizardScript(addedTarget(), "y"), cfgPath)
+	want := "no config file at " + cfgPath + " (run gqlc init to create one)"
+	require.EqualError(t, err, want)
+	require.Empty(t, out)
+	require.NoFileExists(t, cfgPath)
+
+	// The same bytes generate prints for the same condition, which is
+	// the whole point of the shared helper: a second copy of the string
+	// satisfies both commands' own expectations and fails here.
+	_, stderr, gerr := executeRoot(t, "generate", "-f", cfgPath)
+	require.EqualError(t, gerr, want)
+	require.Equal(t, "Error: "+want+"\n", stderr)
+}
+
+// TestInitAddBrokenConfig: a config that does not load is the loader's
+// error verbatim and nothing else. The script opens with the
+// start-fresh choice, so a broken-config dialogue wired into this flow
+// would answer itself and overwrite the file --add exists to extend.
+func TestInitAddBrokenConfig(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
+	require.NoError(t, os.WriteFile(cfgPath, []byte(brokenBody), 0o644))
+	_, wantErr := config.Load(cfgPath)
+	require.Error(t, wantErr)
+
+	out, err := runAdd(t, "2\n"+wizardScript(addedTarget(), "y"), cfgPath)
+	require.EqualError(t, err, wantErr.Error())
+	require.Empty(t, out)
+
+	after, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	require.Equal(t, brokenBody, string(after))
 }
 
 // TestInitEditVocabularyPrefill is the §3.3 fence against the Select
@@ -380,7 +677,7 @@ func TestInitEditVocabularyPrefill(t *testing.T) {
 					cfg.Targets[0].Go.Driver = dr
 					require.NoError(t, cfg.Save(cfgPath))
 
-					_, err := runWizard(t, wizardScript(cfg, "y"), cfgPath)
+					_, err := runWizard(t, wizardScript(cfg.Targets[0], "y"), cfgPath)
 					require.NoError(t, err)
 
 					loaded, err := config.Load(cfgPath)
@@ -415,7 +712,7 @@ version: 1
 	loaded, err := config.Load(cfgPath)
 	require.NoError(t, err)
 
-	out, err := runWizard(t, wizardScript(loaded, "y"), cfgPath)
+	out, err := runWizard(t, wizardScript(loaded.Targets[0], "y"), cfgPath)
 	require.NoError(t, err)
 
 	want, err := loaded.Canonical()
@@ -467,7 +764,7 @@ func TestInitBrokenFresh(t *testing.T) {
 	require.NoError(t, os.WriteFile(cfgPath, []byte(brokenBody), 0o644))
 	want := initDefaults()
 
-	_, err := runWizard(t, "2\n"+wizardScript(want, "y"), cfgPath)
+	_, err := runWizard(t, "2\n"+wizardScript(want.Targets[0], "y"), cfgPath)
 	require.NoError(t, err)
 
 	wantBytes, err := want.Canonical()

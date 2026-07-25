@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"charm.land/huh/v2"
@@ -33,7 +34,10 @@ var packageIdentPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 // newInitCmd builds the init command: the interactive config wizard
 // (CLI-2 spec). TTY-gated; there is no non-interactive mode (§8).
 func newInitCmd() *cobra.Command {
-	var cfgPath string
+	var (
+		cfgPath string
+		add     bool
+	)
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Create or update the gqlc config file interactively",
@@ -62,7 +66,7 @@ numbered-prompt mode.`,
 			// the caller's job, any non-empty value enabling — the
 			// upstream convention, adopted verbatim (§2.1).
 			accessible := os.Getenv("ACCESSIBLE") != ""
-			err := runInitWizard(cmd.InOrStdin(), cmd.ErrOrStderr(), accessible, cfgPath)
+			err := runInit(cmd.InOrStdin(), cmd.ErrOrStderr(), accessible, add, cfgPath)
 			if errors.Is(err, huh.ErrUserAborted) {
 				return errInitAborted
 			}
@@ -71,7 +75,19 @@ numbered-prompt mode.`,
 	}
 	cmd.Flags().StringVarP(&cfgPath, "file", "f", config.DefaultFilename,
 		"path to the config file to create or update")
+	cmd.Flags().BoolVar(&add, "add", false,
+		"append a generation target to the existing config file")
 	return cmd
+}
+
+// runInit picks the flow the flags ask for. The two differ only in what
+// starting state they accept and what they bind the form to; everything
+// from the form onward is runTargetForm.
+func runInit(in io.Reader, errOut io.Writer, accessible, add bool, cfgPath string) error {
+	if add {
+		return runInitAdd(in, errOut, accessible, cfgPath)
+	}
+	return runInitWizard(in, errOut, accessible, cfgPath)
 }
 
 // initFlow is the §3.1 classification of the wizard's starting state.
@@ -116,24 +132,19 @@ func initDefaults() config.Config {
 	}}}
 }
 
-// runInitWizard is the whole interactive body behind one seam (§2.1):
-// tests drive it directly with accessible=true and a scripted reader.
-// The cfg.Save call is the only filesystem mutation in the command,
-// unreachable except through the confirm gate (§5.4).
+// runInitWizard is the whole interactive body of a bare `init` behind
+// one seam (§2.1): tests drive it directly with accessible=true and a
+// scripted reader.
 func runInitWizard(in io.Reader, errOut io.Writer, accessible bool, cfgPath string) error {
 	flow, cfg, loadErr := classifyConfig(cfgPath)
 	// Before any form renders (§8.1): the wizard expresses one target,
 	// so prefilling from the first and writing the canonical form would
 	// silently delete the rest. Testing != 1 rather than > 1 makes the
-	// Targets[0] index below locally safe instead of resting on the
+	// index in runTargetForm locally safe instead of resting on the
 	// loader's rejection of an empty graph, a cross-package invariant.
 	if len(cfg.Targets) != 1 {
 		return fmt.Errorf("%s declares %d generation targets; init edits only a single-target config (edit it by hand, or run gqlc init --add to append another)", cfgPath, len(cfg.Targets))
 	}
-	target := &cfg.Targets[0]
-	// Raw bytes feed only the §5.3 comment notice; absence or
-	// unreadability simply means no comment scan (§3.1).
-	raw, _ := os.ReadFile(cfgPath) //nolint:errcheck // §3.1: read errors mean no comment scan, nothing more
 
 	if flow == flowBroken {
 		fresh, err := runBrokenDialogue(in, errOut, accessible, cfgPath, loadErr)
@@ -144,8 +155,67 @@ func runInitWizard(in io.Reader, errOut io.Writer, accessible bool, cfgPath stri
 			return errInitAborted
 		}
 	}
+	// No prior entries: the file's one target is the one being edited,
+	// and overlap-checking it against itself would reject every run that
+	// left the output directory alone.
+	return runTargetForm(in, errOut, accessible, cfgPath, cfg, config.Config{})
+}
 
-	if err := runForm(newWizardForm(target), in, errOut, accessible); err != nil {
+// runInitAdd is the §8.2 `--add` flow. Flow selection is stricter than
+// a bare init's because appending presupposes a file that loads: there
+// is no fresh flow, and no broken-config dialogue, whose "start fresh"
+// would replace the file the flag promises to append to.
+func runInitAdd(in io.Reader, errOut io.Writer, accessible bool, cfgPath string) error {
+	loaded, err := config.Load(cfgPath)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return missingConfig(cfgPath)
+	case err != nil:
+		return err
+	}
+	cfg := config.Config{Targets: append(slices.Clone(loaded.Targets), addPrefill(loaded.Targets))}
+	// loaded, not cfg: the appended target must not overlap-check
+	// against itself.
+	return runTargetForm(in, errOut, accessible, cfgPath, cfg, loaded)
+}
+
+// addPrefill is the §8.2 prefill for an appended target: the last
+// entry's values for the fields a second target usually shares, and
+// empty for the three that must distinguish it. Empty is the honest
+// default for a directory that has to differ from the entries already
+// in the file, and the non-blank validators refuse to let it through.
+//
+// With no entry to carry from there is nothing shared to carry, so the
+// §3.2 defaults stand in. The loader rejects a config declaring no
+// target, but that is the loader's invariant to keep rather than one
+// this function indexes on.
+func addPrefill(targets []config.Target) config.Target {
+	t := initDefaults().Targets[0]
+	if n := len(targets); n > 0 {
+		t = targets[n-1]
+	}
+	t.QueryDir = ""
+	t.Go.Out = ""
+	t.Go.Package = ""
+	return t
+}
+
+// runTargetForm is the tail both flows share (§4 through §5.6): the
+// form, the preview of the whole resulting file, the confirm gate, the
+// write, and the trailer. The target a run authors is cfg's last entry
+// either way — the only one under a bare init, the appended one under
+// --add — and it is that target the warnings and the epilogue name.
+//
+// prior holds the entries a proposed output directory must not overlap
+// (§8.2). The cfg.Save call is the only filesystem mutation in the
+// command, unreachable except through the confirm gate (§5.4).
+func runTargetForm(in io.Reader, errOut io.Writer, accessible bool, cfgPath string, cfg, prior config.Config) error {
+	target := &cfg.Targets[len(cfg.Targets)-1]
+	// Raw bytes feed only the §5.3 comment notice; absence or
+	// unreadability simply means no comment scan (§3.1).
+	raw, _ := os.ReadFile(cfgPath) //nolint:errcheck // §3.1: read errors mean no comment scan, nothing more
+
+	if err := runForm(newWizardForm(target, prior), in, errOut, accessible); err != nil {
 		return err
 	}
 	// One post-form trim: huh's accessible prompts trim their returns
@@ -219,7 +289,7 @@ func runBrokenDialogue(in io.Reader, errOut io.Writer, accessible bool, cfgPath 
 // cannot drift and a new vocabulary member is an option before it can
 // be a stored value — which is why an edit prefill needs no defensive
 // vocabulary re-check (§3.3).
-func newWizardForm(t *config.Target) *huh.Form {
+func newWizardForm(t *config.Target, prior config.Config) *huh.Form {
 	return huh.NewForm(
 		huh.NewGroup(
 			huh.NewInput().
@@ -235,7 +305,7 @@ func newWizardForm(t *config.Target) *huh.Form {
 			huh.NewInput().
 				Title("Output directory").
 				Description("Owned exclusively by gqlc: generate replaces its contents.").
-				Validate(validateNonBlank).
+				Validate(validateOut(prior)).
 				Value(&t.Go.Out),
 			huh.NewInput().
 				Title("Package name").
@@ -283,6 +353,22 @@ func validateNonBlank(s string) error {
 		return errors.New("must not be empty")
 	}
 	return nil
+}
+
+// validateOut is the §4.2 non-blank rule plus the §8.2 overlap check
+// against prior's entries. It calls the loader's own rule rather than
+// restating it: a second implementation drifts, and the first thing it
+// drifts on is a nested directory whose relative path opens with the
+// two characters ".." (config-multi-target §4.3).
+func validateOut(prior config.Config) func(string) error {
+	return func(s string) error {
+		if err := validateNonBlank(s); err != nil {
+			return err
+		}
+		// The trimmed value is the one §4.2's post-form trim will write,
+		// so it is the one the check has to see.
+		return prior.CheckOutAgainst(strings.TrimSpace(s))
+	}
 }
 
 // validatePackage enforces the §4.3 gates in order: non-blank, the
