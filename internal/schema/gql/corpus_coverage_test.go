@@ -42,7 +42,7 @@ type coverage struct {
 	// shapes are the distinct direct-child sequences seen per rule. Recorded, not
 	// gated: a shape appearing for the first time is usually a new corpus file
 	// doing its job, so this is a report until the corpus stops growing
-	// (gqlc-h9n.10).
+	// (gqlc-h9n.13).
 	shapes map[string]map[string]bool
 	// unattributed holds the rules whose alternative could not be identified. A
 	// miss is not benign — it means a file exercised something the harness cannot

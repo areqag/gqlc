@@ -375,7 +375,7 @@ func TestAlternativeExemptions(t *testing.T) {
 // TestCorpusShapes reports the direct-child sequences the corpus produced per rule.
 // It does not gate: while the corpus is being authored in parallel a new shape is
 // the expected outcome of a new file, so a pinned set would fail on every commit.
-// Promoting it to a gate with a checked-in artefact is gqlc-h9n.10.
+// Promoting it to a gate with a checked-in artefact is gqlc-h9n.13.
 func TestCorpusShapes(t *testing.T) {
 	got := corpusCoverage(t)
 
