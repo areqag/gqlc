@@ -226,11 +226,19 @@ func (s *syntaxErrors) SyntaxError(_ antlr.Recognizer, _ any, line, column int, 
 	s.msgs = append(s.msgs, fmt.Sprintf("%d:%d: %s", line, column, msg))
 }
 
+// coverageT is the part of *testing.T the measurement helpers use. It is an
+// interface only so that TestMeasureCoverageRejects can watch a guard fire; every
+// other caller passes a *testing.T.
+type coverageT interface {
+	require.TestingT
+	Helper()
+}
+
 // walkCoverage parses src and walks the resulting tree, returning what the tree
 // entered and any syntax errors. It parses independently of Parse because the
 // obligation must be measured against the grammar's tree, not against the part of
 // it the listener under test chose to visit.
-func walkCoverage(t *testing.T, src string) (*coverage, []string) {
+func walkCoverage(t coverageT, src string) (*coverage, []string) {
 	t.Helper()
 
 	lex, p := newGrammarParser(src)
@@ -250,7 +258,7 @@ func walkCoverage(t *testing.T, src string) (*coverage, []string) {
 // is valid ISO GQL, it is a graph type statement, and every alternative it took can
 // be named. The last is what keeps the third gate honest: a rule the index cannot
 // attribute would otherwise contribute nothing and look like an authoring gap.
-func measureCoverage(t *testing.T, src string) *coverage {
+func measureCoverage(t coverageT, src string) *coverage {
 	t.Helper()
 
 	c, errs := walkCoverage(t, src)
@@ -261,3 +269,78 @@ func measureCoverage(t *testing.T, src string) *coverage {
 		"the alternative index could not name what this file parsed as")
 	return c
 }
+
+// TestMeasureCoverageRejects pins the two guards above that a corpus file cannot
+// trip today, which is what leaves them free to be deleted without any test
+// noticing. Both reject a source that parses cleanly, so neither is implied by the
+// syntax check, and each witness passes the other guard: nothing but the guard
+// under test can account for the rejection.
+//
+// The statement guard's witness names no graph type, so TYPE is read as the name of
+// a graph and the file is a valid CREATE GRAPH. Every element type it declares is
+// then measured against a statement the corpus is not about. The attribution
+// guard's witness reaches numericValueExpression, whose first alternative is
+// `sign = (PLUS_SIGN | MINUS_SIGN) ...`; parseEBNF refuses that element syntax
+// rather than approximating it, so the index cannot name what the file parsed as.
+func TestMeasureCoverageRejects(t *testing.T) {
+	t.Run("a file that parses as some other statement", func(t *testing.T) {
+		const src = "CREATE GRAPH TYPE { (:A) }"
+
+		got, errs := walkCoverage(t, src)
+		require.Empty(t, errs, "the premise is that this spelling is valid GQL")
+		require.Empty(t, got.unattributed, "so only the statement guard can reject it")
+
+		require.Contains(t, measurementFailure(t, src), "exercises no graph type grammar")
+	})
+
+	t.Run("a file the alternative index cannot name", func(t *testing.T) {
+		const src = "CREATE GRAPH TYPE t LIKE (SQRT(1))"
+
+		got, errs := walkCoverage(t, src)
+		require.Empty(t, errs, "the premise is that this spelling is valid GQL")
+		require.True(t, got.rules[statementRule], "so only the attribution guard can reject it")
+
+		require.Contains(t, measurementFailure(t, src), "could not name what this file parsed as")
+	})
+}
+
+// measurementFailure is what measureCoverage reported when it rejected src, and a
+// failure of t when it accepted it.
+func measurementFailure(t *testing.T, src string) string {
+	t.Helper()
+
+	rec := &recordingT{}
+	func() {
+		defer func() {
+			r := recover()
+			if _, ok := r.(failedNow); r != nil && !ok {
+				panic(r)
+			}
+		}()
+		measureCoverage(rec, src)
+	}()
+
+	require.NotEmpty(t, rec.msgs, "measureCoverage accepted a source that measures nothing it claims to")
+	return strings.Join(rec.msgs, "\n")
+}
+
+// recordingT collects what a require reported instead of failing the test, so that
+// a guard asserting on its caller's behalf can be tested rather than only run.
+//
+// FailNow must not return. It panics rather than calling runtime.Goexit because
+// Goexit needs the measurement on a goroutine of its own, and an assertion inside a
+// goroutine is indistinguishable — to a reader and to testifylint — from the mistake
+// where a failure is reported to a test that has already finished.
+type recordingT struct{ msgs []string }
+
+// failedNow is the panic value, distinct so that a panic from anywhere else in the
+// measurement is re-raised rather than read as a rejection.
+type failedNow struct{}
+
+func (r *recordingT) Errorf(format string, args ...any) {
+	r.msgs = append(r.msgs, fmt.Sprintf(format, args...))
+}
+
+func (r *recordingT) FailNow() { panic(failedNow{}) }
+
+func (r *recordingT) Helper() {}

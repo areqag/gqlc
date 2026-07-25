@@ -345,7 +345,7 @@ var loadObligation = sync.OnceValues(computeObligation)
 // their own because an empty obligation fails open: TestCorpusGrammarCoverage
 // would report "rules 0/0" and pass, and a broken scanner would make every gate
 // green.
-func grammarObligation(t *testing.T) obligation {
+func grammarObligation(t coverageT) obligation {
 	t.Helper()
 
 	got, err := loadObligation()

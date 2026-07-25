@@ -26,12 +26,12 @@ import (
 // Taking the lowest-numbered match is exact only because no alternative this gate
 // requires is shadowed by a lower-numbered sibling that accepts every child sequence
 // it can produce; such an alternative could never be tagged and would sit red on
-// every spelling. All 47 were checked, none is shadowed: see bd memory
-// m2-lowest-numbered-match-unshadowed for the method and the result. It is a fact
-// about today's grammar, not an invariant enforced here, and what guards it is
-// wantInvisibleAlternatives: shadowing can only arrive with a grammar change, and a
-// grammar change to the alternative set trips that pin first. Re-run the check before
-// repinning it.
+// every spelling. TestAlternativeDistinguishability is what holds that: it finds the
+// child sequence identifying each required alternative, so a grammar edit making a
+// sibling subsume one fails there. wantInvisibleAlternatives does not see such an
+// edit — widening datetimeType's first alternative to accept its second's input,
+// keeping every token, leaves the candidate set identical in both membership and
+// size.
 type alternativeIndex struct {
 	// byRule holds one entry per rule with more than one alternative. A rule with
 	// one alternative has nothing to tell apart and is deliberately absent, so a
