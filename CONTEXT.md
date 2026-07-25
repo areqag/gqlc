@@ -476,9 +476,9 @@ query directory, an optional procedure-signature registry path, the three
 **output directory** and its driver. One target produces one generated Go
 package; a project needing several generated packages declares several
 targets, which share nothing but the file they are declared in. The
-loader accepts any number; generation currently refuses a config that
-declares more than one, and running every target in document order
-lands in the next release. Each axis is a closed vocabulary: the schema and query
+loader accepts any number, and generation runs every one of them in
+document order, all-or-nothing: any failure at any target means nothing
+is written for any target. Each axis is a closed vocabulary: the schema and query
 language axes have one member today (GQL; openCypher), the driver axis
 has two (the Neo4j Go v5 and v6 drivers). The axes exist so each target
 states its whole pipeline explicitly, whether or not an axis offers a

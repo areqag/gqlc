@@ -33,9 +33,9 @@ graph:
 ```
 
 `graph` is a list, one entry per generated package, each with its own
-schema, queries and output directory. This gqlc runs one: a config
-declaring several entries loads but is refused at generation time, and
-generating from all of them lands in the next release.
+schema, queries and output directory. `gqlc generate` runs every entry
+in document order, and writes nothing for any entry unless every entry
+succeeds. Diagnostics name the entry they came from: `graph[1]: ...`.
 
 Put your schema at `schema.gql`:
 
