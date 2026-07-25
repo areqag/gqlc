@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -579,9 +580,11 @@ func missingField(key, values string) error {
 // target's ADR 0012 wipe deletes what the earlier one just wrote. The
 // comparison is lexical and filesystem-free (filepath.Rel cleans both
 // operands and stats nothing), so config-file-format §4's rule survives
-// and one class of pair genuinely escapes: an absolute path against a
-// relative one, which Rel cannot relate in either direction and which
-// this therefore accepts (§4.3).
+// and what escapes is exactly the pairs whose relation depends on a
+// name the loader cannot see: an absolute path against a relative one,
+// and an escaping path against one that re-enters through the working
+// directory's own name ("../b/db" and "db" are one directory when the
+// working directory is named b). Both are accepted (§4.3).
 func (c Config) CheckOutAgainst(out string) error {
 	for i, t := range c.Targets {
 		switch compareOuts(t.Go.Out, out) {
@@ -610,6 +613,7 @@ const (
 // compareOuts runs the §4.3 rule in both directions, so containment is
 // caught whichever operand is the parent.
 func compareOuts(earlier, later string) outRelation {
+	earlier, later = anchorRelative(earlier, later)
 	if rel, err := filepath.Rel(earlier, later); err == nil {
 		if rel == "." {
 			return outSame
@@ -637,6 +641,52 @@ func compareOuts(earlier, later string) outRelation {
 // nested pair the overlap check exists to reject.
 func escapesBase(rel string) bool {
 	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// anchorSegment names a synthetic directory no configured path can
+// collide with: YAML's printable character set excludes NUL, so a
+// loaded `out` value cannot contain one.
+const anchorSegment = "\x00gqlc-anchor-"
+
+// anchorRelative rebases a pair of relative paths onto a shared
+// synthetic absolute directory deep enough that neither's leading ".."
+// components are cleaned away at the root.
+//
+// filepath.Rel refuses a base that escapes its own root — Rel("..",
+// "a") errors — while the reverse direction returns an escaping
+// "../..", so both arms of compareOuts fall through and plain
+// containment reads as disjoint. Anchoring is pure string work: the
+// base is fictional, nothing is resolved against the filesystem, and
+// because neither operand can name an anchor segment, the relation
+// between the joined paths is the relation between the originals under
+// every real working directory. A mixed absolute/relative pair is left
+// alone — relating those needs the working directory, which is the
+// limit config-file-format §4 documents.
+func anchorRelative(a, b string) (string, string) {
+	if filepath.IsAbs(a) || filepath.IsAbs(b) {
+		return a, b
+	}
+	depth := max(leadingParents(a), leadingParents(b))
+	base := string(filepath.Separator)
+	for i := range depth {
+		base = filepath.Join(base, anchorSegment+strconv.Itoa(i))
+	}
+	return filepath.Join(base, a), filepath.Join(base, b)
+}
+
+// leadingParents counts the ".." components a cleaned relative path
+// starts with — the depth above the working directory it reaches.
+func leadingParents(p string) int {
+	p = filepath.Clean(p)
+	n := 0
+	for p != ".." && strings.HasPrefix(p, ".."+string(filepath.Separator)) {
+		n++
+		p = p[3:]
+	}
+	if p == ".." {
+		n++
+	}
+	return n
 }
 
 // Canonical returns the exact bytes Save writes: the §7 canonical

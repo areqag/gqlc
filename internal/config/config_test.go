@@ -879,10 +879,54 @@ var outPairs = []struct {
 		name: "escaping paths compare normally", earlier: "../a", later: "../a/b",
 		wantErr: `out "../a/b" is inside graph[0]'s output directory "../a"`,
 	},
+	{
+		// filepath.Rel refuses a base that escapes its own root, so
+		// Rel("..", "a") errors while Rel("a", "..") returns the
+		// escaping "../..": both directions fall through and an
+		// unanchored comparison reads plain containment as disjoint.
+		name: "a rooted path inside an escaping base", earlier: "..", later: "a",
+		wantErr: `out "a" is inside graph[0]'s output directory ".."`,
+	},
+	{
+		name: "both operands escape, one contains the other", earlier: "../..", later: "../a",
+		wantErr: `out "../a" is inside graph[0]'s output directory "../.."`,
+	},
+	{
+		name: "the working directory itself inside an escaping base", earlier: "..", later: ".",
+		wantErr: `out "." is inside graph[0]'s output directory ".."`,
+	},
+	{
+		name: "an escaping base reached the other way round", earlier: "a", later: "..",
+		wantErr: `out ".." contains graph[0]'s output directory "a"`,
+	},
+	{
+		// The rebasing depth is the deeper operand's, not the first
+		// one's: taking it from "." would sink both onto the root and
+		// report these as the same directory.
+		name: "the later entry is the deeper escape", earlier: ".", later: "..",
+		wantErr: `out ".." contains graph[0]'s output directory "."`,
+	},
 	{name: "siblings", earlier: "internal/db", later: "internal/user"},
 	{name: "a name prefix is not a path prefix", earlier: "internal/db", later: "internal/dbgen"},
 	{name: "an escaping path against a rooted one", earlier: "b", later: "../a"},
 	{name: "absolute against relative (the honest limit)", earlier: "/tmp/gqlc/db", later: "internal/db"},
+	{
+		// Rebasing a relative path is only sound against another
+		// relative one: joining "internal/db" and "/internal/db" onto a
+		// shared base makes them one directory, which they are only
+		// when the working directory is the root.
+		name: "a shared suffix does not make absolute meet relative", earlier: "/internal/db", later: "internal/db",
+	},
+	{
+		// The surviving limit that is not abs-vs-rel: both pairs
+		// overlap when the working directory carries a particular
+		// name — "b" for the first, "db" for the second — which no
+		// lexical comparison can see. Rebasing onto a base one segment
+		// deep keeps them apart; a base fixed at the root would report
+		// "../db" and "db" as one directory.
+		name: "re-entry through an unknown ancestor name (the honest limit)", earlier: "../b/db", later: "db",
+	},
+	{name: "an escaping path beside its rooted namesake", earlier: "../db", later: "db"},
 }
 
 // TestOutOverlap drives the §4.3 sweep through the loader: a rejected
