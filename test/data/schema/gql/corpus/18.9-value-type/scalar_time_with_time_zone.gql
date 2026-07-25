@@ -1,0 +1,3 @@
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:Event { p :: TIME WITH TIME ZONE NOT NULL })
+}

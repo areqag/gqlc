@@ -1,0 +1,15 @@
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:Meas {
+        f :: FLOAT,
+        f_prec :: FLOAT(10) NOT NULL,
+        f_prec_scale :: FLOAT(10, 2),
+        f16 :: FLOAT16,
+        f32 :: FLOAT32,
+        f64 :: FLOAT64,
+        f128 :: FLOAT128,
+        f256 :: FLOAT256,
+        r :: REAL,
+        d :: DOUBLE,
+        d_prec :: DOUBLE PRECISION NOT NULL
+    })
+}
