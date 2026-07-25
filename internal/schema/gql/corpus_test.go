@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -106,40 +106,45 @@ var semanticCases = []semanticCase{
 	},
 }
 
-// corpusArea is one author's share of the corpus: the ISO clause directories they
-// own and the entries they have declared. dirs is what makes the areas
-// file-disjoint, and it is the only place a clause directory is named, so a typo in
-// an entry's path fails instead of quietly creating a directory.
+// corpusArea is one author's share of the corpus: the path prefixes they own and the
+// entries they have declared. prefixes is what makes the areas file-disjoint, and it
+// is the only place a clause directory is named, so a typo in an entry's path fails
+// instead of quietly creating a directory.
+//
+// Prefixes rather than whole directories because an oversized clause has to be split
+// between two authors, and a prefix set can be checked for disjointness where a
+// convention on filenames cannot. Nothing in the corpus nests, so the extra reach of
+// HasPrefix over path.Dir equality costs nothing.
 type corpusArea struct {
-	dirs    []string
-	entries []corpusEntry
+	prefixes []string
+	entries  []corpusEntry
 }
 
 // corpusAreas partitions the corpus so that authors never edit the same Go file.
 // The split follows the grammar: each of the reachable rules and tokens belongs to
 // the clause of the rule that first names it, and the areas are those clauses
-// grouped into roughly equal shares. D1 and D2 share 18.9-value-type/ because the
-// value type grammar is half the obligation on its own; they are disjoint by file.
+// grouped into roughly equal shares. D1 and D2 split 18.9-value-type/ between them,
+// because the value type grammar is half the obligation on its own.
 var corpusAreas = map[string]corpusArea{
 	"A": {
-		dirs:    []string{"12.6-graph-type-statement", "17-references", "18.1-nested-graph-type"},
-		entries: corpusAreaA,
+		prefixes: []string{"12.6-graph-type-statement/", "17-references/", "18.1-nested-graph-type/"},
+		entries:  corpusAreaA,
 	},
 	"B": {
-		dirs:    []string{"18.2-node-type", "18.4-label-set", "18.5-property-types", "18.6-property-type", "18.7-property-value-type"},
-		entries: corpusAreaB,
+		prefixes: []string{"18.2-node-type/", "18.4-label-set/", "18.5-property-types/", "18.6-property-type/", "18.7-property-value-type/"},
+		entries:  corpusAreaB,
 	},
 	"C": {
-		dirs:    []string{"18.3-edge-type"},
-		entries: corpusAreaC,
+		prefixes: []string{"18.3-edge-type/"},
+		entries:  corpusAreaC,
 	},
 	"D1": {
-		dirs:    []string{"18.9-value-type"},
-		entries: corpusAreaD1,
+		prefixes: []string{"18.9-value-type/scalar_"},
+		entries:  corpusAreaD1,
 	},
 	"D2": {
-		dirs:    []string{"18.8-binding-table-type", "18.9-value-type", "18.10-field-type"},
-		entries: corpusAreaD2,
+		prefixes: []string{"18.8-binding-table-type/", "18.9-value-type/constructed_", "18.10-field-type/"},
+		entries:  corpusAreaD2,
 	},
 }
 
@@ -150,8 +155,9 @@ func corpusManifest(t *testing.T) []corpusEntry {
 	var entries []corpusEntry
 	for name, area := range corpusAreas {
 		for _, entry := range area.entries {
-			require.Contains(t, area.dirs, path.Dir(entry.file),
-				"entry declared in area %s must live in a directory that area owns", name)
+			require.True(t, slices.ContainsFunc(area.prefixes, func(prefix string) bool {
+				return strings.HasPrefix(entry.file, prefix)
+			}), "entry %s declared in area %s must match one of that area's prefixes %v", entry.file, name, area.prefixes)
 			entries = append(entries, entry)
 		}
 	}
@@ -186,6 +192,35 @@ func corpusFiles(t *testing.T) []string {
 // directions, and checks each entry states everything its outcome requires.
 // Without the file -> manifest half, dropping in an unclassified file would
 // silently widen the corpus without asserting anything about it.
+// TestCorpusAreasAreDisjoint pins that no area can own a file another area owns. The
+// per-entry check in corpusManifest only says an entry matches its own area, which
+// would still hold if two areas' prefixes overlapped: both authors would pass locally
+// and the collision would surface only when the areas are merged, where the only
+// recovery is discarding one author's work. Overlap is a prefix relation between the
+// prefixes themselves, so it is checkable without reference to any file.
+func TestCorpusAreasAreDisjoint(t *testing.T) {
+	type owned struct{ area, prefix string }
+
+	var all []owned
+	for name, area := range corpusAreas {
+		require.NotEmpty(t, area.prefixes, "area %s owns nothing", name)
+		for _, prefix := range area.prefixes {
+			require.NotEmpty(t, prefix, "area %s: an empty prefix owns the whole corpus", name)
+			all = append(all, owned{area: name, prefix: prefix})
+		}
+	}
+
+	for i, a := range all {
+		for _, b := range all[i+1:] {
+			if a.area == b.area {
+				continue
+			}
+			require.False(t, strings.HasPrefix(a.prefix, b.prefix) || strings.HasPrefix(b.prefix, a.prefix),
+				"areas %s and %s both own files under %q / %q", a.area, b.area, a.prefix, b.prefix)
+		}
+	}
+}
+
 func TestCorpusManifest(t *testing.T) {
 	entries := corpusManifest(t)
 
