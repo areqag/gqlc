@@ -21,7 +21,7 @@ var corpusAreaD2 = []corpusEntry{
 		sentinel: ErrUnsupportedType,
 		feature:  "mandatory",
 		bead:     "gqlc-h9n.5",
-		reason:   "LIST/ARRAY needs a parameterised type model; the postfix spelling STRING LIST is valueType alt 4 (listValueTypeAlt2)",
+		reason:   "LIST/ARRAY needs a parameterised type model; STRING LIST[5] is valueType alt 4 (listValueTypeAlt2), and its [5] quantifier is the only reachable carrier of LEFT_BRACKET and RIGHT_BRACKET from a CREATE GRAPH TYPE body",
 	},
 	{
 		file:     "18.9-value-type/constructed_list_bare.gql",

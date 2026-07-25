@@ -1,3 +1,7 @@
+-- STRING LIST[5] rather than bare STRING LIST: the quantifier `[maxLength]` sits
+-- inside listValueTypeAlt2 as `(LEFT_BRACKET maxLength RIGHT_BRACKET)?`, so
+-- appending [5] takes the same alternative and additionally brings LEFT_BRACKET
+-- and RIGHT_BRACKET in — the only path to those tokens from a graph-type body.
 CREATE PROPERTY GRAPH TYPE Seed AS {
-    (:Bag { items :: STRING LIST })
+    (:Bag { items :: STRING LIST[5] })
 }
