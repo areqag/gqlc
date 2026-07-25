@@ -31,17 +31,20 @@ const (
 // is emitted only when non-empty (the key is optional).
 func configYAML(pkg, driver, procsig string) string {
 	y := "version: 1\n" +
-		"schema: schema.gql\n" +
-		"queries: queries\n" +
-		"output: out\n" +
-		"package: " + pkg + "\n" +
-		"schema_language: gql\n" +
-		"query_language: opencypher\n" +
-		"driver: " + driver + "\n"
+		"graph:\n" +
+		"  - schema: schema.gql\n" +
+		"    schema_language: gql\n" +
+		"    queries: queries\n" +
+		"    query_language: opencypher\n"
 	if procsig != "" {
-		y += "procsig: " + procsig + "\n"
+		y += "    procsig: " + procsig + "\n"
 	}
-	return y
+	return y +
+		"    gen:\n" +
+		"      go:\n" +
+		"        package: " + pkg + "\n" +
+		"        out: out\n" +
+		"        driver: " + driver + "\n"
 }
 
 // writeFixtureFile writes contents at path, creating parent dirs as
@@ -111,6 +114,28 @@ func TestRunHappyPathReturnsFiles(t *testing.T) {
 	for _, f := range res.Files {
 		requireMarkerHeaded(t, f.Path, f.Contents)
 	}
+}
+
+// TestRunRefusesMultiTarget pins the temporary single-target guard
+// (config-multi-target §9.1): a config the loader accepts but this
+// write path cannot serve is refused with the zero Result, before any
+// stage that could report a partial one.
+func TestRunRefusesMultiTarget(t *testing.T) {
+	_, cfgPath := writeProject(t)
+	writeFixtureFile(t, cfgPath, configYAML("people", "neo4j-go-v5", "")+
+		"  - schema: schema.gql\n"+
+		"    schema_language: gql\n"+
+		"    queries: queries\n"+
+		"    query_language: opencypher\n"+
+		"    gen:\n"+
+		"      go:\n"+
+		"        package: people2\n"+
+		"        out: out2\n"+
+		"        driver: neo4j-go-v5\n")
+
+	res, err := pipeline.Run(cfgPath)
+	require.EqualError(t, err, "config declares 2 generation targets; this gqlc runs one (multi-target generation lands in the next release)")
+	require.Equal(t, pipeline.Result{}, res)
 }
 
 // TestRunPackageNameFromConfig: db.go's package clause comes from the
