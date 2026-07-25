@@ -881,7 +881,7 @@ Specifically:
 |----------|---------------------------|
 | `config-file-format.md` | the wire table, the canonical form (§7), the §6.3 catalogue, the §5 note on what version 1 means |
 | `README.md` | the `gqlc.yaml` sample (README.md:21–30), which shows the flat `output: internal/db` |
-| `cli-stage-2.md` | the `output` key in the defaults table (:232) and the prompt table (:337), and the flow table (:203–208), which has no refusal path |
+| `cli-stage-2.md` | the `output` key in all three places it is named — the defaults table (:232), the group-1 field list (:319–320) and the prompt table (:337) — and the flow table (:203–208), which has no refusal path |
 | CONTEXT.md | the "Config file" entry, the "Output directory" entry (:508–518, which names both the `output` and `package` keys), a new "Generation target" entry, and the "Flagged ambiguities" list |
 
 `cli-stage-2.md` appears on branches 2 and 4 because both change it: 2
