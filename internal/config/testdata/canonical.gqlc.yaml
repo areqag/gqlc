@@ -1,9 +1,21 @@
 version: 1
-schema: schema.gql
-queries: queries/
-output: internal/db
-package: db
-schema_language: gql
-query_language: opencypher
-driver: neo4j-go-v5
-procsig: procs.procsig.json
+graph:
+  - schema: schema.gql
+    schema_language: gql
+    queries: internal/user/query
+    query_language: opencypher
+    procsig: procs.procsig.json
+    gen:
+      go:
+        package: userdb
+        out: internal/user/gen
+        driver: neo4j-go-v5
+  - schema: schema.gql
+    schema_language: gql
+    queries: internal/order/query
+    query_language: opencypher
+    gen:
+      go:
+        package: orderdb
+        out: internal/order/gen
+        driver: neo4j-go-v6

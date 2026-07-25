@@ -8,7 +8,7 @@ version-1 breaking change, the fail-fast-per-entry error posture, and
 the `init --add` flag are fixed by ADR 0013 and are not re-argued here.
 The design points this spec owns are the document scan and what it keeps
 off the version probe (§4), the old-flat-shape detection (§4.2), the
-output-overlap rule and its honest limit (§4.3), the entry-prefix rule
+output-overlap rule and its honest limits (§4.3), the entry-prefix rule
 (§4.1), the widened pipeline contract (§6), the two-phase write and its
 seam (§7), and the branch split that keeps master coherent (§9).
 
@@ -377,14 +377,29 @@ output: the later target's ADR 0012 wipe deletes what the earlier one
 just wrote. The loader rejects overlap.
 
 **Rule.** For each entry in order, compared against every earlier
-entry, on `filepath.Rel(earlier.Out, later.Out)`:
+entry, `filepath.Rel` is run **both ways** and the first direction that
+answers wins. On `filepath.Rel(earlier.Out, later.Out)`:
+
+| result                                        | verdict                          |
+|-----------------------------------------------|----------------------------------|
+| `.`                                           | the same directory — reject      |
+| `..`, or a path prefixed `../`                | fall through to the reverse      |
+| any other path                                | later is inside earlier — reject |
+| an error                                      | fall through to the reverse      |
+
+Then on `filepath.Rel(later.Out, earlier.Out)`:
 
 | result                                        | verdict                          |
 |-----------------------------------------------|----------------------------------|
 | `.`                                           | the same directory — reject      |
 | `..`, or a path prefixed `../`                | disjoint — accept                |
-| any other path                                | later is inside earlier — reject |
+| any other path                                | later contains earlier — reject  |
 | an error                                      | not comparable — accept (below)  |
+
+The two directions are distinct verdicts, not one verdict computed
+twice: `internal/db/sub` then `internal/db` is the later entry
+*containing* the earlier, and reporting it as "is inside" would state
+the containment backwards.
 
 The disjointness test is on a **path component**, not a string prefix:
 
@@ -400,8 +415,47 @@ A string-prefix test accepts that pair as disjoint and lets exactly the
 nested configuration through that this check exists to reject.
 `"..foo/x"` is the same trap one level deeper.
 
-The reverse direction (earlier inside later) is covered by running the
-comparison both ways.
+**Escaping bases are rebased first.** `filepath.Rel` refuses a base
+that escapes its own root — `Rel("..", "a")` errors, because how far
+`..` is from `a` depends on where the working directory sits — and the
+reverse direction returns the escaping `"../.."`. Both arms therefore
+fall through and a plain containment reads as disjoint, which is the
+permanent-failure mode of §7.2 rather than a cosmetic miss. So when
+both operands are relative, they are first rebased onto a shared
+synthetic absolute directory with as many segments as the deeper
+operand has leading `..` components, and the two joined paths are
+compared instead:
+
+```go
+depth := max(leadingParents(a), leadingParents(b))   // "../.." -> 2
+base  := "/" + anchor0 + "/" + ... + anchorDepth-1
+a, b   = filepath.Join(base, a), filepath.Join(base, b)
+```
+
+The anchor segments carry a NUL byte, which puts them outside the names
+a real directory can carry, so an `out` naming a directory cannot spell
+one. That is a statement about filesystems, not about YAML: yaml.v3
+rejects a *literal* NUL in the stream but decodes the `\0` and `\x00`
+escapes of a double-quoted scalar into real NUL bytes, so a colliding
+`out` is expressible — just not resolvable to a directory. The bound
+that matters is the direction of the error: an operand naming an anchor
+segment can only add structure *under* the synthetic base, turning a
+disjoint pair into a rejected one and never the reverse, so no overlap
+escapes through a collision. The loader does not validate against NUL;
+a check for a path no filesystem could hold would exist only to prop up
+the sentence above it.
+
+Anchoring stays pure string manipulation — the base is fictional and
+nothing is resolved against the filesystem — and it introduces no
+inexactness of its own. A pair that overlaps under every working
+directory is rejected; a pair that overlaps under none is accepted; a
+pair that overlaps under some working directories and not others is
+accepted, and the two ways that arises are the two limit classes
+below. Only an operand spelling an anchor segment departs from this,
+and only by adding a rejection — the direction bounded above. Anchoring
+therefore decides strictly more pairs than a bare `Rel` without
+deciding any of them wrongly; a mixed absolute/relative pair is left
+unanchored, as one of those two classes.
 
 `filepath.Rel` cleans both operands, so `internal/db`,
 `internal/db/`, `./internal/db`, `internal//db` and
@@ -436,18 +490,22 @@ overlap in the tree. It joins `SchemaLangValues()`, `QueryLangValues()`
 and `DriverValues()` as vocabulary `internal/cli` borrows rather than
 restates.
 
-**The honest limit.** One class of pair genuinely escapes: an absolute
-path against a relative one. `Rel` cannot relate them in either
-direction, so the sweep accepts them as disjoint even when they name one
-directory. A `../`-escaping path is *not* in that class, despite
-looking like it: `Rel("b", "../a")` succeeds (`"../../a"`, disjoint) and
-`Rel("../a", "../a/b")` succeeds (`"b"`, contained), so escaping paths
-are compared correctly. Only when the *base* escapes does `Rel` fail
-(`Rel("../a", "b")`), and running the comparison both ways means the
-other direction has already answered. Symlinked aliases, two paths
-differing only by case on a case-insensitive filesystem, and bind mounts
-escape too — every one needs the filesystem, which a loader that is a
-pure function of the file's bytes will not touch.
+**The honest limits.** What escapes is exactly the pairs whose relation
+depends on a name the loader cannot see, and there are two classes:
+
+- **An absolute path against a relative one.** `Rel` cannot relate them
+  in either direction without the working directory, so the sweep
+  accepts them as disjoint even when they name one directory.
+- **An escaping path that re-enters through the working directory's own
+  name.** `../b/db` and `db` are one directory when the working
+  directory is itself named `b`, and two directories otherwise. Rebasing
+  cannot decide it, because the answer is in a name neither path
+  states.
+
+Symlinked aliases, two paths differing only by case on a
+case-insensitive filesystem, and bind mounts escape too — every one
+needs the filesystem, which a loader that is a pure function of the
+file's bytes will not touch.
 
 What escapes costs more than a few files, and the spec should not
 pretend otherwise:
@@ -567,11 +625,13 @@ Cross-entry (§4.3), prefixed with the *later* entry's index:
 | condition                | message shape                                                                                   |
 |--------------------------|---------------------------------------------------------------------------------------------------|
 | two entries share `out`  | `config: <src>: graph[<j>]: out "<p>" is already graph[<i>]'s output directory` |
-| one entry's `out` is inside another's | `config: <src>: graph[<j>]: out "<p>" is inside graph[<i>]'s output directory "<q>"` |
+| the later entry's `out` is inside an earlier one's | `config: <src>: graph[<j>]: out "<p>" is inside graph[<i>]'s output directory "<q>"` |
+| the later entry's `out` contains an earlier one's  | `config: <src>: graph[<j>]: out "<p>" contains graph[<i>]'s output directory "<q>"` |
 
-Both are `CheckOutAgainst`'s error text (§4.3) with the loader's
+All three are `CheckOutAgainst`'s error text (§4.3) with the loader's
 `config: <src>: graph[<j>]: ` prefix in front and nothing else added.
-Keeping the two forms byte-identical is why the function exists: a
+Keeping the loader's wording and the prompt's byte-identical is why the
+function exists: a
 trailing "each generation target must own its own" would read as
 justification in the config error and as noise at the `init --add`
 prompt (§8.2), and having it in one place and not the other is how one
@@ -1074,7 +1134,7 @@ branch's PR carries the full suite in its package's existing style.
 | 2 | `TestLoadPreservesRawPaths`        | trailing slashes and `./` prefixes survive into `Config` unaltered |
 | 2 | `TestRejectOldFlatShape`           | the previous format's canonical file produces the §4.2 message, not an unknown-key list |
 | 2 | `TestRejectionTable`               | every §4.5 row a config file can reach, message-exact, including the `graph[i]:` prefix on entry 1 of a two-entry document. The internal count row is the one exception — no known input reaches it, which is the point; `TestEntryCountInvariant` pins its wording instead |
-| 2 | `TestOutOverlap` (table)           | equal, trailing-slash, `./a/../`-obscured, nested-either-way, and **`internal/db` vs `internal/db/..foo`** → rejected naming both indices; sibling, `dbgen`, `../`-escaping pairs, and abs-vs-relative → accepted |
+| 2 | `TestOutOverlap` (table, 23 rows)  | *Cleaning, all rejected as the same directory:* `internal/db` against itself, `internal/db/`, `./internal/db`, `internal//db`, `./a/../internal/db`. *Nesting, rejected naming both indices:* `internal/db` vs `internal/db/sub` and the reverse, `../a` vs `../a/b`, and the string-prefix trap **`internal/db` vs `internal/db/..foo`** with `internal/db/..foo/x` one level deeper. *Plainly disjoint, accepted:* `internal/db` vs `internal/user` and vs `internal/dbgen`. The remaining rows are §4.3's rebasing and its limits. *Rejected, each with the direction the anchored comparison found and each read as disjoint by an unanchored `Rel`:* `..` vs `a`, `../..` vs `../a`, `..` vs `.`, `a` vs `..`, `.` vs `..`. *Accepted, each rejected by a plausible weakening of the anchor:* `../db` vs `db` (a base fixed at the root reads it as one directory) and `gqlc-anchor-0` vs `../gqlc-anchor-0` (an anchor segment without its NUL reads it as containment). *Accepted as instances of the two limit classes:* `/tmp/gqlc/db` vs `internal/db` and `/internal/db` vs `internal/db` (absolute against relative); `../b/db` vs `db` and `b` vs `../a` (re-entry through a name the loader cannot see — the second overlaps whenever the working directory is itself named `a`) |
 | 2 | `TestCheckOutAgainst`              | the exported §4.3 seam returns the catalogue message for the first overlapping index and nil for a disjoint `out`, and agrees with the loader's sweep on every `TestOutOverlap` row |
 | 2 | `TestVersionProbeUnaffected`       | `version: 2` with `graph: nope` reports `declares version 2`, not a `graph` shape complaint — the failure the document scan exists to avoid (§4) |
 | 2 | `TestGraphNotASequence`            | `graph: nope` under `version: 1` produces the loader's own §4.5 message naming a YAML kind, with no yaml.v3 or Go type name in it; `graph: *g` aliasing a scalar reports the **resolved** kind (`scalar`, never `alias`) at the **alias's** line, not the anchor's (§4) |

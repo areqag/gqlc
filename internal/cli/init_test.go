@@ -20,16 +20,18 @@ const abortedMsg = "init aborted: no file written"
 // procsig present) with non-default paths, so an edit run that
 // silently fell back to the §3.2 defaults cannot pass.
 func editFixtureConfig() config.Config {
-	return config.Config{
-		SchemaPath:    "graph.gql",
-		QueryDir:      "cypher",
-		OutputDir:     "gen/graphdb",
-		OutputPackage: "graphdb",
-		ProcsigPath:   "procs.procsig.json",
-		SchemaLang:    config.SchemaLangGQL,
-		QueryLang:     config.QueryLangOpenCypher,
-		Driver:        config.DriverNeo4jGoV6,
-	}
+	return config.Config{Targets: []config.Target{{
+		SchemaPath:  "graph.gql",
+		SchemaLang:  config.SchemaLangGQL,
+		QueryDir:    "cypher",
+		QueryLang:   config.QueryLangOpenCypher,
+		ProcsigPath: "procs.procsig.json",
+		Go: config.GoGen{
+			Package: "graphdb",
+			Out:     "gen/graphdb",
+			Driver:  config.DriverNeo4jGoV6,
+		},
+	}}}
 }
 
 // wizardScript renders the §7 per-prompt script contract for one full
@@ -41,11 +43,12 @@ func editFixtureConfig() config.Config {
 // derives from the pointer binding — the §3.3 prefill seam), and the
 // confirm answer.
 func wizardScript(cfg config.Config, confirm string) string {
+	t := cfg.Targets[0]
 	return strings.Join([]string{
-		cfg.SchemaPath,
-		cfg.QueryDir,
-		cfg.OutputDir,
-		cfg.OutputPackage,
+		t.SchemaPath,
+		t.QueryDir,
+		t.Go.Out,
+		t.Go.Package,
 		"", // procsig: empty accepts the bound default
 		"", // schema_language: empty accepts the prefilled Select default
 		"", // query_language
@@ -66,9 +69,9 @@ func runWizard(t *testing.T, script, cfgPath string) (string, error) {
 	return out.String(), err
 }
 
-func TestInitClassifyTarget(t *testing.T) {
+func TestInitClassifyConfig(t *testing.T) {
 	t.Run("absent file is fresh with defaults", func(t *testing.T) {
-		flow, cfg, loadErr := classifyTarget(filepath.Join(t.TempDir(), config.DefaultFilename))
+		flow, cfg, loadErr := classifyConfig(filepath.Join(t.TempDir(), config.DefaultFilename))
 		require.Equal(t, flowFresh, flow)
 		require.NoError(t, loadErr)
 		require.Equal(t, initDefaults(), cfg)
@@ -78,7 +81,7 @@ func TestInitClassifyTarget(t *testing.T) {
 		cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
 		want := editFixtureConfig()
 		require.NoError(t, want.Save(cfgPath))
-		flow, cfg, loadErr := classifyTarget(cfgPath)
+		flow, cfg, loadErr := classifyConfig(cfgPath)
 		require.Equal(t, flowEdit, flow)
 		require.NoError(t, loadErr)
 		require.Equal(t, want, cfg)
@@ -86,7 +89,7 @@ func TestInitClassifyTarget(t *testing.T) {
 
 	brokenBodies := map[string]string{
 		"malformed yaml":      "version: 1\n\tschema: schema.gql\n",
-		"bad vocabulary":      "version: 1\nschema: s.gql\nqueries: q\noutput: o\npackage: db\nschema_language: gql\nquery_language: opencypher\ndriver: neo4j-go-v4\n",
+		"bad vocabulary":      brokenBody,
 		"unsupported version": "version: 99\n",
 	}
 	for name, body := range brokenBodies {
@@ -96,7 +99,7 @@ func TestInitClassifyTarget(t *testing.T) {
 			_, wantErr := config.Load(cfgPath)
 			require.Error(t, wantErr)
 
-			flow, cfg, loadErr := classifyTarget(cfgPath)
+			flow, cfg, loadErr := classifyConfig(cfgPath)
 			require.Equal(t, flowBroken, flow)
 			require.EqualError(t, loadErr, wantErr.Error())
 			require.Equal(t, initDefaults(), cfg)
@@ -105,7 +108,7 @@ func TestInitClassifyTarget(t *testing.T) {
 
 	t.Run("directory at path is broken", func(t *testing.T) {
 		dir := t.TempDir()
-		flow, _, loadErr := classifyTarget(dir)
+		flow, _, loadErr := classifyConfig(dir)
 		require.Equal(t, flowBroken, flow)
 		require.Error(t, loadErr)
 		require.Contains(t, loadErr.Error(), dir)
@@ -116,20 +119,22 @@ func TestInitClassifyTarget(t *testing.T) {
 // enum defaults are Values()[0] — a vocabulary reorder must move the
 // default with it, and an appended member must not.
 func TestInitDefaults(t *testing.T) {
-	require.Equal(t, config.Config{
-		SchemaPath:    "schema.gql",
-		QueryDir:      "queries",
-		OutputDir:     "internal/db",
-		OutputPackage: "db",
-		SchemaLang:    config.SchemaLangGQL,
-		QueryLang:     config.QueryLangOpenCypher,
-		Driver:        config.DriverNeo4jGoV5,
-	}, initDefaults())
+	require.Equal(t, config.Config{Targets: []config.Target{{
+		SchemaPath: "schema.gql",
+		SchemaLang: config.SchemaLangGQL,
+		QueryDir:   "queries",
+		QueryLang:  config.QueryLangOpenCypher,
+		Go: config.GoGen{
+			Package: "db",
+			Out:     "internal/db",
+			Driver:  config.DriverNeo4jGoV5,
+		},
+	}}}, initDefaults())
 
-	got := initDefaults()
+	got := initDefaults().Targets[0]
 	require.Equal(t, config.SchemaLangValues()[0], got.SchemaLang)
 	require.Equal(t, config.QueryLangValues()[0], got.QueryLang)
-	require.Equal(t, config.DriverValues()[0], got.Driver)
+	require.Equal(t, config.DriverValues()[0], got.Go.Driver)
 }
 
 // TestInitPackageValidator maps each probe to its §4.3 clause: blank,
@@ -215,7 +220,7 @@ func TestInitWarningsAndEpilogue(t *testing.T) {
 	proj := filepath.Join(t.TempDir(), "proj")
 	require.NoError(t, os.MkdirAll(proj, 0o755))
 	cfgPath := filepath.Join(proj, config.DefaultFilename)
-	cfg := initDefaults()
+	cfg := initDefaults().Targets[0]
 
 	t.Run("both inputs missing", func(t *testing.T) {
 		want := "warning: schema file " + filepath.Join(proj, "schema.gql") +
@@ -328,6 +333,32 @@ func TestInitEditPrefillRoundTrip(t *testing.T) {
 	require.Equal(t, fixture, loaded)
 }
 
+// TestInitRefusesMultiTargetEdit pins the branch-2 §8.1 refusal: the
+// wizard expresses one target, so a multi-target file is refused before
+// any prompt renders — with no --add hint, which this binary has no
+// flag for. The script is a full accept-everything pass: if the refusal
+// ever moved behind the form, the run would reach the confirm and
+// rewrite the file with one entry.
+func TestInitRefusesMultiTargetEdit(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
+	cfg := editFixtureConfig()
+	second := cfg.Targets[0]
+	second.Go.Out = "gen/other"
+	second.Go.Package = "otherdb"
+	cfg.Targets = append(cfg.Targets, second)
+	require.NoError(t, cfg.Save(cfgPath))
+	before, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+
+	out, err := runWizard(t, wizardScript(cfg, "y"), cfgPath)
+	require.EqualError(t, err, cfgPath+" declares 2 generation targets; init edits only a single-target config (edit it by hand)")
+	require.Empty(t, out)
+
+	after, err := os.ReadFile(cfgPath)
+	require.NoError(t, err)
+	require.Equal(t, string(before), string(after))
+}
+
 // TestInitEditVocabularyPrefill is the §3.3 fence against the Select
 // index-0 clobber: every vocabulary member of every axis, stored in a
 // config, survives an edit whose script empty-line-accepts the Select
@@ -341,7 +372,9 @@ func TestInitEditVocabularyPrefill(t *testing.T) {
 				t.Run(name, func(t *testing.T) {
 					cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
 					cfg := initDefaults()
-					cfg.SchemaLang, cfg.QueryLang, cfg.Driver = sl, ql, dr
+					cfg.Targets[0].SchemaLang = sl
+					cfg.Targets[0].QueryLang = ql
+					cfg.Targets[0].Go.Driver = dr
 					require.NoError(t, cfg.Save(cfgPath))
 
 					_, err := runWizard(t, wizardScript(cfg, "y"), cfgPath)
@@ -363,14 +396,17 @@ func TestInitEditVocabularyPrefill(t *testing.T) {
 func TestInitCanonicalisesNonCanonical(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
 	const nonCanonical = `# hand-written config
-driver: "neo4j-go-v6"
+graph:
+  - gen:
+      go:
+        driver: "neo4j-go-v6"
+        out: 'internal/db'
+        package: db
+    queries: queries
+    schema: schema.gql # the schema
+    query_language: opencypher
+    schema_language: gql
 version: 1
-package: db
-output: 'internal/db'
-queries: queries
-schema: schema.gql # the schema
-query_language: opencypher
-schema_language: gql
 `
 	require.NoError(t, os.WriteFile(cfgPath, []byte(nonCanonical), 0o644))
 	loaded, err := config.Load(cfgPath)
@@ -391,13 +427,16 @@ schema_language: gql
 // brokenBody is a §3.4 fixture: loadable YAML, out-of-vocabulary
 // driver — the loader's verdict carries line info and the vocabulary.
 const brokenBody = "version: 1\n" +
-	"schema: schema.gql\n" +
-	"queries: queries\n" +
-	"output: internal/db\n" +
-	"package: db\n" +
-	"schema_language: gql\n" +
-	"query_language: opencypher\n" +
-	"driver: neo4j-go-v4\n"
+	"graph:\n" +
+	"  - schema: schema.gql\n" +
+	"    schema_language: gql\n" +
+	"    queries: queries\n" +
+	"    query_language: opencypher\n" +
+	"    gen:\n" +
+	"      go:\n" +
+	"        package: db\n" +
+	"        out: internal/db\n" +
+	"        driver: neo4j-go-v4\n"
 
 // TestInitBrokenAbort: the loader's error verbatim, then the dialogue
 // whose default — taken here by an empty line — is abort: pinned

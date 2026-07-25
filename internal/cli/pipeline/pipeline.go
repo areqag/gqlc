@@ -108,23 +108,33 @@ func Run(cfgPath string) (Result, error) {
 		return Result{}, err
 	}
 
+	// Temporary: this Result and the caller's write path carry one
+	// target. Multi-target config already loads (config-multi-target
+	// §9.1); the loop and the two-phase write that replace this guard
+	// land together, because a Result of N targets driven through a
+	// single-target write wipes target 0 before target 2 is inspected.
+	if len(cfg.Targets) != 1 {
+		return Result{}, fmt.Errorf("config declares %d generation targets; this gqlc runs one (multi-target generation lands in the next release)", len(cfg.Targets))
+	}
+	tgt := cfg.Targets[0]
+
 	// Stage 2 — resolve paths against the config file's directory.
 	// No existence checks here; each consuming stage owns its own
 	// open failure. outDir is carried on every Result returned after
 	// this point so the caller does not re-load the config to reach
 	// it (see Result doc).
 	baseDir := filepath.Dir(cfgPath)
-	schemaPath := resolvePath(baseDir, cfg.SchemaPath)
-	queryDir := resolvePath(baseDir, cfg.QueryDir)
-	outDir := resolvePath(baseDir, cfg.OutputDir)
+	schemaPath := resolvePath(baseDir, tgt.SchemaPath)
+	queryDir := resolvePath(baseDir, tgt.QueryDir)
+	outDir := resolvePath(baseDir, tgt.Go.Out)
 
 	// Stage 3 — parse schema per the SchemaLang axis (spec §3.2).
 	var schemaParser schema.Parser
-	switch cfg.SchemaLang {
+	switch tgt.SchemaLang {
 	case config.SchemaLangGQL:
 		schemaParser = gql.New()
 	default:
-		return Result{OutDir: outDir}, fmt.Errorf("internal: no pipeline mapping for schema_language %q", string(cfg.SchemaLang))
+		return Result{OutDir: outDir}, fmt.Errorf("internal: no pipeline mapping for schema_language %q", string(tgt.SchemaLang))
 	}
 	schemaBytes, err := os.ReadFile(schemaPath)
 	if err != nil {
@@ -140,8 +150,8 @@ func Run(cfgPath string) (Result, error) {
 	// project fails at cypher parse with ErrUnknownProcedure —
 	// the correct diagnosis (spec §3.1).
 	var reg procsig.Registry
-	if cfg.ProcsigPath != "" {
-		reg, err = procsig.Load(resolvePath(baseDir, cfg.ProcsigPath))
+	if tgt.ProcsigPath != "" {
+		reg, err = procsig.Load(resolvePath(baseDir, tgt.ProcsigPath))
 		if err != nil {
 			return Result{OutDir: outDir}, err
 		}
@@ -150,11 +160,11 @@ func Run(cfgPath string) (Result, error) {
 	// Stage 5 — construct the front end once, outside the query loop.
 	// The same registry feeds both the parser and the resolver.
 	var queryParser query.Parser
-	switch cfg.QueryLang {
+	switch tgt.QueryLang {
 	case config.QueryLangOpenCypher:
 		queryParser = cypher.New(cypher.WithRegistry(reg))
 	default:
-		return Result{OutDir: outDir}, fmt.Errorf("internal: no pipeline mapping for query_language %q", string(cfg.QueryLang))
+		return Result{OutDir: outDir}, fmt.Errorf("internal: no pipeline mapping for query_language %q", string(tgt.QueryLang))
 	}
 	res := resolver.New(sch, resolver.WithRegistry(reg))
 
@@ -176,15 +186,15 @@ func Run(cfgPath string) (Result, error) {
 	// the configured package name (spec §3.4; the loader rejects an
 	// empty one).
 	var driverOpt codegen.Option
-	switch cfg.Driver {
+	switch tgt.Go.Driver {
 	case config.DriverNeo4jGoV5:
 		driverOpt = codegen.WithDriverVersion(codegen.DriverV5)
 	case config.DriverNeo4jGoV6:
 		driverOpt = codegen.WithDriverVersion(codegen.DriverV6)
 	default:
-		return Result{OutDir: outDir}, fmt.Errorf("internal: no pipeline mapping for driver %q", string(cfg.Driver))
+		return Result{OutDir: outDir}, fmt.Errorf("internal: no pipeline mapping for driver %q", string(tgt.Go.Driver))
 	}
-	files, err := codegen.New(driverOpt, codegen.WithPackageName(cfg.OutputPackage)).
+	files, err := codegen.New(driverOpt, codegen.WithPackageName(tgt.Go.Package)).
 		Generate(codegen.Input{Schema: sch, Queries: batch})
 	if err != nil {
 		return Result{OutDir: outDir}, err
