@@ -128,7 +128,7 @@ func runInitWizard(in io.Reader, errOut io.Writer, accessible bool, cfgPath stri
 	// Targets[0] index below locally safe instead of resting on the
 	// loader's rejection of an empty graph, a cross-package invariant.
 	if len(cfg.Targets) != 1 {
-		return fmt.Errorf("%s declares %d generation targets; init edits only a single-target config (edit it by hand)", cfgPath, len(cfg.Targets))
+		return fmt.Errorf("%s declares %d generation targets; init edits only a single-target config (edit it by hand, or run gqlc init --add to append another)", cfgPath, len(cfg.Targets))
 	}
 	target := &cfg.Targets[0]
 	// Raw bytes feed only the §5.3 comment notice; absence or

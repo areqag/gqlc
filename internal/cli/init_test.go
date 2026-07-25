@@ -333,13 +333,16 @@ func TestInitEditPrefillRoundTrip(t *testing.T) {
 	require.Equal(t, fixture, loaded)
 }
 
-// TestInitRefusesMultiTargetEdit pins the branch-2 §8.1 refusal: the
-// wizard expresses one target, so a multi-target file is refused before
-// any prompt renders — with no --add hint, which this binary has no
-// flag for. The script is a full accept-everything pass: if the refusal
+// TestInitRefusalNamesAddFlag pins the §8.1 refusal: the wizard
+// expresses one target, so a multi-target file is refused before any
+// prompt renders, and the parenthetical names the --add flag this
+// binary now has. It replaces branch 2's TestInitRefusesMultiTargetEdit
+// rather than joining it: the two differ only in the expectation, and
+// keeping both would leave the suite asserting two spellings of one
+// message. The script is a full accept-everything pass: if the refusal
 // ever moved behind the form, the run would reach the confirm and
 // rewrite the file with one entry.
-func TestInitRefusesMultiTargetEdit(t *testing.T) {
+func TestInitRefusalNamesAddFlag(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
 	cfg := editFixtureConfig()
 	second := cfg.Targets[0]
@@ -351,7 +354,7 @@ func TestInitRefusesMultiTargetEdit(t *testing.T) {
 	require.NoError(t, err)
 
 	out, err := runWizard(t, wizardScript(cfg, "y"), cfgPath)
-	require.EqualError(t, err, cfgPath+" declares 2 generation targets; init edits only a single-target config (edit it by hand)")
+	require.EqualError(t, err, cfgPath+" declares 2 generation targets; init edits only a single-target config (edit it by hand, or run gqlc init --add to append another)")
 	require.Empty(t, out)
 
 	after, err := os.ReadFile(cfgPath)
