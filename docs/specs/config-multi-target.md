@@ -180,9 +180,11 @@ if err := yaml.Unmarshal(body, &doc); err != nil {
 root := doc.Content[0]
 ```
 
-Three checks read that one scan: the old-flat-shape detection (§4.2),
-`graph`'s presence and kind (§4.5), and the null-entry rejection
-(§4.4). A node decode is type-tolerant by construction — every YAML
+Three checks read that one scan before the strict decode: the
+old-flat-shape detection (§4.2), `graph`'s presence and kind (§4.5),
+and the null-entry rejection (§4.4). A fourth outlives it — the count
+invariant below runs after the decode against the node the scan
+kept. A node decode is type-tolerant by construction — every YAML
 document decodes into a `yaml.Node` — so none of the three can degrade
 into a library-worded complaint about a shape the loader has not yet
 described in its own words.
@@ -201,10 +203,72 @@ own, both consequences of running it *after* the version check:
   is wrapped rather than dropped because unreachable is not the same as
   impossible, but no input reaches it.
 
-The scan is lexical: it reads the keys literally present at `root`. A
-document that supplies keys through a merge key (`<<: *anchor`) is not a
-gap in it — `KnownFields(true)` rejects the key holding the anchor, so
-such a file does not load whatever the scan sees.
+**Every kind or tag test the scan makes resolves aliases first.** An
+alias node (`*anchor`) carries an empty `Tag` and `Kind ==
+yaml.AliasNode`; the node it names is on `.Alias`. A test written
+against the alias node itself therefore sees neither the tag nor the
+kind of the value the document actually supplies, and passes it. The
+rule, stated once here and inherited by §4.2, §4.4 and stage 4 of §4.6:
+follow `.Alias` until the node is not an alias, test the resolved node,
+and **report the alias node's own `Line`**. The resolved node's `Line`
+is where the anchor was written, which is not where the mistake is.
+
+Two positions in the `graph` sequence take an alias, and the rule covers
+both:
+
+- **An element** — `- *none` where `none` anchors a null. Unresolved,
+  its `Tag` is `""`, so §4.4's `!!null` test passes it; yaml.v3 then
+  drops it exactly as it drops a written `~`, and every later entry's
+  `graph[i]:` index silently renumbers.
+- **`graph`'s value** — `graph: *g`. The consequence here is bounded:
+  the sequence still decodes, so no entry is lost. What is wrong is only
+  the message. An unresolved kind test sees `alias` and reports "got a
+  YAML alias" for a document whose `graph` is a scalar.
+
+**Resolving aliases is not the same as rejecting them.** An element
+aliasing a mapping (`- *t`, reusing a target defined earlier) resolves
+to `!!map`, decodes into a full entry, and is legitimate reuse the scan
+must leave alone. The rule changes what the scan *looks at*, never what
+it rejects.
+
+**Key lookup stays literal**, and merge keys (`<<: *anchor`) divide by
+position the same way aliases do:
+
+- **On an entry** — `- <<: *base`. Not a gap in anything. yaml.v3
+  expands `<<:` *before* field matching, so the element is a mapping to
+  the scan and a full entry to the strict decode;
+  `KnownFields(true)` raises nothing, and the count check agrees.
+- **At the document root** — `<<:` injecting a former flat key. §4.2
+  looks for `schema` among `root`'s literal keys and does not find it,
+  so the targeted message does not fire. The file is still rejected: the
+  strict decode's unknown-key wall reports `field schema not found in
+  type config.wireV1` at the line the key is written on. Only the
+  wording is lost, and losing it costs nothing — §4.2 exists for files
+  written before this change, and those files have literal keys.
+
+Chasing merge keys during the scan to close that would mean
+reimplementing yaml.v3's merge resolution against the node tree, for a
+document nobody writes.
+
+**The scan's element count outlives it.** The loader holds the `graph`
+sequence node past the strict decode and checks
+
+```go
+len(w.Graph) == len(graphSeq.Content)
+```
+
+A mismatch means yaml.v3 dropped an element the scan saw, and is an
+internal error naming both counts:
+
+```
+config: <src>: internal: "graph" declares <n> entries but <m> decoded; the entry indices in any further message would be wrong
+```
+
+This is not redundant with §4.4. §4.4 rejects the drop causes the spec
+knows about; the count check states the property those rules exist to
+preserve. Enumerating yaml.v3's drop paths is an enumeration that is
+correct until the next one is found — which is how the alias case above
+was found. Counting is a property, and it cannot go stale.
 
 Rejected: giving the version probe a typed `graph` field to get the
 same three answers out of one pass. A typed field makes the probe
@@ -376,17 +440,25 @@ it from the document scan, before the strict decode: the sequence node's
 line to report.
 
 **Rule.** For each element of `root`'s `graph` sequence in `Content`
-order, an element whose `Tag` is `!!null` — the spellings `~`, `null`,
-`Null`, `NULL` and an empty value all carry that tag — is reported by
-its `Content` index:
+order, an element whose **resolved** `Tag` (§4) is `!!null` — the
+spellings `~`, `null`, `Null`, `NULL` and an empty value all carry that
+tag — is reported by its `Content` index and the element's own line:
 
 ```
 config: <src>: graph[2]: line 5: entry is null
 ```
 
+Resolving matters because an alias to a null anchor (`- *none`) is
+dropped exactly as a written null is, while carrying an empty `Tag` of
+its own. The line reported is the alias's, not the anchor's: the
+anchor may be a legitimate value used elsewhere, and the fault is the
+element that names it here.
+
 An element that is a non-null scalar (`- ""`, tag `!!str`) is not this
 case: it is a present entry of the wrong type, and the strict decode
-says so with its own line.
+says so with its own line. An element that resolves to a mapping is not
+this case either, however it was written (`- *t`, `- <<: *base`, `- {}`)
+— it is an entry, and the entry-level rules judge it.
 
 ### 4.5 Error catalogue
 
@@ -409,15 +481,28 @@ Document level:
 | `version` ≠ 1                               | `config: <src>: declares version <v>; only version 1 is supported` *(unchanged)*        |
 | old flat shape (no `graph`, a former top-level key present) | `config: <src>: line <L>: "<key>" is not a top-level key; version 1 declares a "graph" sequence of generation targets, each carrying its own schema, queries, and gen.go block` |
 | `graph` omitted (or null)                   | `config: <src>: missing required field "graph"`                                        |
-| `graph` present but an empty sequence       | `config: <src>: field "graph" must not be empty; declare at least one generation target` |
+| `graph` present but an empty sequence       | `config: <src>: line <L>: field "graph" must not be empty; declare at least one generation target` |
 | `graph` is not a sequence                   | `config: <src>: line <L>: field "graph" must be a sequence of generation targets (got a YAML <kind>)` |
 | a null entry                                | `config: <src>: graph[<i>]: line <L>: entry is null`                                   |
 | an entry is not a mapping                   | ``config: <src>: yaml: unmarshal errors: line <L>: cannot unmarshal !!str `x` into config.wireTarget`` |
+| decoded entry count ≠ scanned entry count   | `config: <src>: internal: "graph" declares <n> entries but <m> decoded; the entry indices in any further message would be wrong` |
+
+`<kind>` is the **resolved** kind (§4), so `graph: *g` aliasing a scalar
+reports `got a YAML scalar`, naming what the document supplies rather
+than how it was spelled. Every `<L>` in these two rows follows §4's
+other half — the line of the node as written, so the alias's own line
+when `graph`'s value is an alias, and otherwise the sequence node's
+line, which is the line carrying `[]` for both `graph: []` and a `[]`
+written under it.
 
 The five rows from "old flat shape" through "a null entry" are the
 loader's own, formed from the document scan (§4) before the strict
 decode. None of them can be reached by a yaml.v3 type error about
-`graph`, which is the point of the scan.
+`graph`, which is the point of the scan. The count row is the scan's
+too, but it is the only one raised *after* the decode, and the only one
+no config file should be able to produce: it fires when yaml.v3 dropped
+an element the scan saw and no §4.4 rule caught it, and its wording says
+so rather than blaming the document.
 
 Entry level. Every row is prefixed `config: <src>: graph[<i>]: `,
 elided below; nested keys are named by their dotted path:
@@ -466,18 +551,25 @@ Checks run in stages and the loader reports the first stage that fails:
 3. the old-flat-shape check (§4.2, before the strict decode, so the
    targeted message beats the unknown-key wall);
 4. `graph` present, non-null, a sequence, and non-empty — in that
-   order, from the scan;
+   order, from the scan, every kind and tag test resolved through
+   `.Alias` per §4;
 5. the null-entry check (§4.4), which needs stage 4's verdict first:
    there are no elements to index until `graph` is known to be a
    sequence;
 6. the strict v1 decode;
-7. per-entry post-decode checks, entries in index order and each
+7. the count invariant (§4) against the sequence node stage 4
+   accepted — an internal error, and the only stage that can fail with
+   every earlier stage passing;
+8. per-entry post-decode checks, entries in index order and each
    entry's keys in the §2.2/§2.3 wire order;
-8. the cross-entry `out` sweep (§4.3), reporting the first overlap in
+9. the cross-entry `out` sweep (§4.3), reporting the first overlap in
    `(later, earlier)` index order.
 
 Stages 3–5 are three reads of the one node tree from stage 2, not three
-parses.
+parses. Stage 7 is why stage 4 keeps that node rather than discarding it
+after answering: every message stages 8 and 9 print is indexed, and
+stage 7 is what proves those indices refer to the entries the file
+declares.
 
 Within the strict decode, ordering is not document order and is
 yaml.v3's, exactly as config-file-format §6.3 describes: a
@@ -944,12 +1036,15 @@ branch's PR carries the full suite in its package's existing style.
 | 2 | `TestSaveEmitsFixtureBytes`        | `Canonical` reproduces the fixture byte-for-byte (nesting, sequence indent, omitted `procsig`) |
 | 2 | `TestLoadPreservesRawPaths`        | trailing slashes and `./` prefixes survive into `Config` unaltered |
 | 2 | `TestRejectOldFlatShape`           | the previous format's canonical file produces the §4.2 message, not an unknown-key list |
-| 2 | `TestRejectionTable`               | every §4.5 row, message-exact, including the `graph[i]:` prefix on entry 1 of a two-entry document |
+| 2 | `TestRejectionTable`               | every §4.5 row a config file can reach, message-exact, including the `graph[i]:` prefix on entry 1 of a two-entry document. The internal count row is the one exception — no known input reaches it, which is the point; `TestEntryCountInvariant` pins its wording instead |
 | 2 | `TestOutOverlap` (table)           | equal, trailing-slash, `./a/../`-obscured, nested-either-way, and **`internal/db` vs `internal/db/..foo`** → rejected naming both indices; sibling, `dbgen`, `../`-escaping pairs, and abs-vs-relative → accepted |
 | 2 | `TestCheckOutAgainst`              | the exported §4.3 seam returns the catalogue message for the first overlapping index and nil for a disjoint `out`, and agrees with the loader's sweep on every `TestOutOverlap` row |
 | 2 | `TestVersionProbeUnaffected`       | `version: 2` with `graph: nope` reports `declares version 2`, not a `graph` shape complaint — the failure the document scan exists to avoid (§4) |
-| 2 | `TestGraphNotASequence`            | `graph: nope` under `version: 1` produces the loader's own §4.5 message naming a YAML kind, with no yaml.v3 or Go type name in it |
+| 2 | `TestGraphNotASequence`            | `graph: nope` under `version: 1` produces the loader's own §4.5 message naming a YAML kind, with no yaml.v3 or Go type name in it; `graph: *g` aliasing a scalar reports the **resolved** kind (`scalar`, never `alias`) at the **alias's** line, not the anchor's (§4) |
 | 2 | `TestNullEntryRejected`            | `- ~` between two entries reports index 1, not a shifted index; `~`, `null`, `Null`, `NULL` and a bare `-` all report; `- ""` does not (a wrong-typed entry, not a null one — §4.4) |
+| 2 | `TestAliasEntryToNullRejected`     | `- *none` aliasing a null anchor reports the same §4.4 message at the alias's line, and an alias chain (alias → alias → null) reports too. Fails against a `Tag == "!!null"` test written on the unresolved node, which sees `""` and lets the entry be dropped (§4) |
+| 2 | `TestAliasEntryToMappingAccepted`  | `- *t` aliasing an earlier entry, and an element built with `<<: *base`, both load into full targets — the resolution rule changes what the scan looks at, never what it rejects (§4) |
+| 2 | `TestEntryCountInvariant`          | the §4 count check fires on a hand-built document whose decoded length is short of the scanned one, naming both counts; and does **not** fire on any accepted fixture, including the alias-to-mapping and merge-key ones above |
 | 2 | `TestInitRefusesMultiTargetEdit`   | pinned §8.1 **branch-2** message (no `--add` hint), exit 1, file byte-untouched |
 | 3 | `TestRunEveryTarget`               | a two-target config yields two `TargetResult`s in document order, each with the right package clause and driver import |
 | 3 | `TestRunSetupFailureFailsFast`     | an unreadable schema at entry 1 → `graph[1]: schema: ...`, zero `Result` |
@@ -958,7 +1053,7 @@ branch's PR carries the full suite in its package's existing style.
 | 3 | `TestRunStateIsPerTarget`          | **two different schemas**: entry 1's query resolves against entry 1's schema and would fail against entry 0's, and entry 1 has no `procsig` while entry 0 does, so a `CALL` in entry 1 fails `ErrUnknownProcedure`. Fails if `sch`, `reg`, `queryParser` or `res` (pipeline.go:122–159) is hoisted out of the loop |
 | 3 | `TestGenerateMultiTarget`          | both packages written; a second run byte-identical |
 | 3 | `TestGenerateAbortsBeforeAnyWrite` | an unmarked file in entry 1's output directory → entry 0's directory byte-identical after the failed run, entry 1 untouched |
-| 3 | `TestGenerateAbortLeavesAbsentDirAbsent` | same abort with entry 0's `out` **not existing** beforehand → it still does not exist afterwards (§12.4's other half; the case §7.3's `MkdirAll` bullet turns on) |
+| 3 | `TestGenerateAbortLeavesAbsentDirAbsent` | same abort with entry 0's `out` **not existing** beforehand → it still does not exist afterwards (§12.5's other half; the case §7.3's `MkdirAll` bullet turns on) |
 | 3 | `TestGenerateWipeListIsPhaseAs`    | `inspectOutputs`, then a file created in an output directory, then `commitOutputs` with the held plan → the new file survives (§7's seam, §7.3's guarantee) |
 | 3 | `TestCommitToleratesVanishedEntry` | a wipe-list entry deleted between the two calls → `commitOutputs` succeeds (§7.2 step 7) |
 | 4 | `TestInitRefusalNamesAddFlag`      | the §8.1 refusal message, now extended with the `--add` hint the branch has made real |
@@ -1004,15 +1099,20 @@ branch's PR carries the full suite in its package's existing style.
    keys.
 3. Two entries whose `out` values are equal or nested are rejected at
    load, naming both entries.
-4. A run that aborts under the tripwire — for any target — leaves every
+4. Every `graph[i]:` a message prints indexes the entry the file
+   declares at that position. No accepted config decodes to fewer
+   entries than it wrote, however the dropped one was spelled — written
+   null, alias to a null, or alias chain — and a decode that ever loses
+   one fails loudly instead of renumbering.
+5. A run that aborts under the tripwire — for any target — leaves every
    output directory exactly as the run found it: byte-identical if it
    existed, still absent if it did not. The abort message names the
    entry and every offending file.
-5. Broken queries in several targets report every diagnostic, each
+6. Broken queries in several targets report every diagnostic, each
    prefixed with its entry, and write nothing anywhere.
-6. `gqlc init` writes a one-entry file, refuses to edit a multi-target
+7. `gqlc init` writes a one-entry file, refuses to edit a multi-target
    one, and `gqlc init --add` appends a second target whose output
    directory cannot overlap an existing one.
-7. `just test`, `just fmt-check`, `just lint` and `just tidy-check`
+8. `just test`, `just fmt-check`, `just lint` and `just tidy-check`
    green on every branch of the stack; `test/data/codegen/`
    byte-identical to master throughout.
