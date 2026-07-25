@@ -216,6 +216,11 @@ func closure(parserRules map[string]string, cuts map[string]bool) (rules, tokens
 
 // grammarObligation computes the reachability closure from coverageRoots,
 // stopping at coverageCuts.
+//
+// The pinned sizes are asserted here rather than in a test of their own because
+// every caller needs the obligation to be non-vacuous, and an empty one fails
+// open: TestCorpusGrammarCoverage would report "rules 0/0" and pass. Failing in
+// the constructor means a broken scanner cannot make any gate green.
 func grammarObligation(t *testing.T) obligation {
 	t.Helper()
 
@@ -238,13 +243,21 @@ func grammarObligation(t *testing.T) obligation {
 	}
 	sort.Strings(nonFrontier)
 
-	return obligation{
+	got := obligation{
 		rules:        rules,
 		tokens:       tokens,
 		tokenRefs:    tokenRefs,
 		alternatives: flaggedAlternatives(parserRules, nonFrontier),
 		nonFrontier:  nonFrontier,
 	}
+	require.Len(t, got.rules, wantObligationRules,
+		"reachable rule count changed; re-read the grammar before repinning")
+	require.Len(t, got.tokens, wantObligationTokens,
+		"reachable token count changed; re-read the grammar before repinning")
+	require.Len(t, got.alternatives, wantFlaggedAlternatives,
+		"the set of alternatives rule and token coverage cannot demand changed:\n%s",
+		strings.Join(got.alternatives, "\n"))
+	return got
 }
 
 // flaggedAlternatives returns the tags of reachable alternatives that rule and
@@ -360,17 +373,13 @@ func scanRuleSections(t *testing.T) map[string]string {
 	return sections
 }
 
-// TestGrammarObligation pins the closure's size and cross-checks every name in
-// it against the generated parser's own tables. The cross-check is what proves
-// the text scan reads the grammar the way ANTLR does: a scanner that picked up a
-// stray identifier, or missed a rename, produces a name the parser does not know.
+// TestGrammarObligation cross-checks every name in the closure against the
+// generated parser's own tables. That is what proves the text scan reads the
+// grammar the way ANTLR does: a scanner that picked up a stray identifier, or
+// missed a rename, produces a name the parser does not know. The closure's sizes
+// are pinned inside grammarObligation, so they hold for every caller.
 func TestGrammarObligation(t *testing.T) {
 	got := grammarObligation(t)
-
-	require.Len(t, got.rules, wantObligationRules,
-		"reachable rule count changed; re-read the grammar before repinning")
-	require.Len(t, got.tokens, wantObligationTokens,
-		"reachable token count changed; re-read the grammar before repinning")
 
 	ruleNames, symbolicNames := parserNameTables()
 	known := make(map[string]bool, len(ruleNames)+len(symbolicNames))
@@ -388,10 +397,6 @@ func TestGrammarObligation(t *testing.T) {
 	for token := range got.tokens {
 		require.True(t, known[token], "scanned token %q is not a token of the generated parser", token)
 	}
-
-	require.Len(t, got.alternatives, wantFlaggedAlternatives,
-		"the set of alternatives rule and token coverage cannot demand changed:\n%s",
-		strings.Join(got.alternatives, "\n"))
 
 	elidedRules, elidedTokens := elidedByCuts(t)
 	t.Logf("frontier cuts erase %d rules and %d tokens", elidedRules, elidedTokens)
