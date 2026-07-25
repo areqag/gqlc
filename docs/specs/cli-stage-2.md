@@ -202,9 +202,19 @@ attempt on the target path:
 
 ```
 cfg, err := config.Load(cfgPath)
-err == nil                      → EDIT   (wizard prefilled from cfg)
-errors.Is(err, fs.ErrNotExist)  → FRESH  (wizard from defaults)
-any other error                 → BROKEN (report, then dialogue)
+err == nil, one target          → EDIT    (wizard prefilled from that target)
+err == nil, more than one       → REFUSE  (exit 1, nothing written)
+errors.Is(err, fs.ErrNotExist)  → FRESH   (wizard from defaults)
+any other error                 → BROKEN  (report, then dialogue)
+```
+
+The wizard expresses one generation target (ADR 0013). A config that
+declares several is refused outright — before any form renders —
+because prefilling from the first and writing the canonical form would
+silently delete the rest:
+
+```
+<path> declares <n> generation targets; init edits only a single-target config (edit it by hand)
 ```
 
 `errors.Is(err, fs.ErrNotExist)` is the exact seam `Load` documents
@@ -223,35 +233,39 @@ wizard is last-writer-wins (§8).
 
 ### 3.2 Fresh flow — defaults
 
-The wizard starts from pinned defaults:
+The wizard starts from pinned defaults, and writes them as a one-entry
+`graph` list:
 
 | field             | default        | why                                                        |
 |-------------------|----------------|-------------------------------------------------------------|
-| `schema`          | `schema.gql`   | the canonical fixture's value (config-file-format §3)       |
-| `queries`         | `queries`      | fixture value, sans incidental trailing slash               |
-| `output`          | `internal/db`  | fixture value                                               |
-| `package`         | `db`           | fixture value                                               |
+| `schema`          | `schema.gql`   | one schema per target, at the project root                  |
+| `queries`         | `queries`      | one query directory per target                              |
+| `gen.go.out`      | `internal/db`  | the conventional single-target output directory             |
+| `gen.go.package`  | `db`           | the package name that directory implies                     |
 | `schema_language` | `gql`          | first member of `config.SchemaLangValues()`                 |
 | `query_language`  | `opencypher`   | first member of `config.QueryLangValues()`                  |
-| `driver`          | `neo4j-go-v5`  | first member of `config.DriverValues()`                     |
+| `gen.go.driver`   | `neo4j-go-v5`  | first member of `config.DriverValues()`                     |
 | `procsig`         | *(empty)*      | optional key; empty means omitted (§4, field 5)             |
 
-Path/package defaults mirror `internal/config/testdata/canonical.gqlc.yaml`
-so the docs, the loader fixture, and the wizard tell one story — with
-two disclosed deviations: `queries` drops the fixture's incidental
-trailing slash, and `procsig` defaults to empty (key omitted) where
-the fixture carries `procs.procsig.json`, because the fixture exists
-to pin the optional key's encoding while a fresh project has no
-registry. Enum
-defaults are pinned as a **rule**, not per-axis values: the first
-member of each `*Values()` slice — appending a future vocabulary
-member never silently changes a default.
+The path and package defaults are the single-target project's
+conventional layout. They deliberately do **not** mirror
+`internal/config/testdata/canonical.gqlc.yaml`, which since ADR 0013
+carries two entries with per-target directories
+(`internal/user/gen`, `internal/order/gen`) to pin the multi-target
+encoding — a shape a fresh project has no use for. `procsig` likewise
+defaults to empty (key omitted) where the fixture carries
+`procs.procsig.json`, because the fixture exists to pin the optional
+key's encoding while a fresh project has no registry. Enum defaults are
+pinned as a **rule**, not per-axis values: the first member of each
+`*Values()` slice — appending a future vocabulary member never silently
+changes a default.
 
 ### 3.3 Edit flow — prefill and the Select-binding gotcha
 
-An EDIT wizard binds the loaded `Config`'s fields directly via
-`Value(&v)`; every prompt opens showing the file's current value, the
-procsig input included (empty when the key was omitted).
+An EDIT wizard binds the loaded config's one `Target`'s fields directly
+via `Value(&v)`; every prompt opens showing the file's current value,
+the procsig input included (empty when the key was omitted). A config
+with more than one target never reaches this flow (§3.1).
 
 The house research spike flagged a huh gotcha, now verified against
 v2.0.3 source and **worse than reported**: a `Select` whose bound
@@ -317,9 +331,9 @@ One `huh.Form`, two groups (pages); the preview/confirm step is
 deliberately **not** a third group (§5.1 explains why):
 
 - **Group 1 — files and package** (five `Input`s): `schema`,
-  `queries`, `output`, `package`, `procsig`.
+  `queries`, `gen.go.out`, `gen.go.package`, `procsig`.
 - **Group 2 — tool axes** (three `Select`s): `schema_language`,
-  `query_language`, `driver`.
+  `query_language`, `gen.go.driver`.
 
 The order is the canonical wire order (config-file-format §3) with one
 deviation: `procsig`, wire-last, is asked beside the other paths —
@@ -334,12 +348,12 @@ Pinned copy, defaults (fresh flow), and validation:
 |---|-------|-----------|-------|-------------|----------|
 | 1 | `schema`  | `Input` | `Schema file` | `Path to the graph schema. Relative paths resolve against the config file's directory.` | non-blank |
 | 2 | `queries` | `Input` | `Query directory` | `Directory holding *.cypher query files.` | non-blank |
-| 3 | `output`  | `Input` | `Output directory` | `Owned exclusively by gqlc: generate replaces its contents.` | non-blank |
-| 4 | `package` | `Input` | `Package name` | `Go package name for the generated code.` | §4.3 |
+| 3 | `gen.go.out`  | `Input` | `Output directory` | `Owned exclusively by gqlc: generate replaces its contents.` | non-blank |
+| 4 | `gen.go.package` | `Input` | `Package name` | `Go package name for the generated code.` | §4.3 |
 | 5 | `procsig` | `Input` | `Procedure registry (optional)` | `Path to a procsig file; leave empty for none.` | none |
 | 6 | `schema_language` | `Select[config.SchemaLang]` | `Schema language` | — | — |
 | 7 | `query_language`  | `Select[config.QueryLang]`  | `Query language`  | — | — |
-| 8 | `driver`          | `Select[config.Driver]`     | `Driver`          | — | — |
+| 8 | `gen.go.driver`   | `Select[config.Driver]`     | `Driver`          | — | — |
 
 - **Selects source their options from the vocabularies**, mechanically:
   `Options(huh.NewOptions(config.SchemaLangValues()...)...)` and
@@ -363,7 +377,7 @@ Pinned copy, defaults (fresh flow), and validation:
   accessible `PromptString` trims its return, tea mode does not;
   accessibility.go:164).
 - The procsig input takes anything; a blank answer (after the trim)
-  means "omit the key", matching `Config.ProcsigPath`'s empty-string
+  means "omit the key", matching `Target.ProcsigPath`'s empty-string
   contract and `Save`'s omitempty. One honest limitation, inherited
   from huh: in accessible **edit** mode a prefilled procsig cannot be
   cleared, because an empty answer means "keep the default"
@@ -392,7 +406,7 @@ failing at the next `generate`. Both checks 2 and 3 are needed —
 neither subsumes the other: `Db` passes `IsIdentifier` and fails the
 grammar; `func` matches the grammar and fails `IsIdentifier` (keyword).
 Consequence for the edit flow, stated plainly: a hand-written config
-with `package: Db` loads (loader grammar) and prefills, but the wizard
+with `gen.go.package: Db` loads (loader grammar) and prefills, but the wizard
 refuses to proceed until it is fixed — which is the point.
 
 ## 5. Preview-confirm and write
@@ -628,7 +642,8 @@ Strategy, in layers:
 
 | test                                | proves                                                                                       |
 |-------------------------------------|-----------------------------------------------------------------------------------------------|
-| `TestInitClassifyTarget`            | table: absent → fresh; loadable → edit (values); malformed / bad-vocab / directory-at-path → broken with the loader's error |
+| `TestInitClassifyConfig`            | table: absent → fresh; loadable → edit (values); malformed / bad-vocab / directory-at-path → broken with the loader's error |
+| `TestInitRefusesMultiTargetEdit`    | a two-entry config → the §3.1 refusal message, exit 1, file byte-untouched, no prompt rendered |
 | `TestInitDefaults`                  | §3.2 table exactly; enum defaults are `Values()[0]` by rule                                    |
 | `TestInitPackageValidator`          | table: `""`, `db`, `db_1`, `Db`, `func`, `1db`, a Unicode-letter identifier — each mapped to its §4.3 clause and message |
 | `TestInitCommentDetection`          | `#` comment → notice; `#` inside a quoted value → notice (honest false positive); no `#` → none |
@@ -690,9 +705,11 @@ not ours (§8).
    `config.Load` loads and `gqlc generate` consumes without edits.
    stdout is empty; declining at the confirm exits 1 with
    `init aborted: no file written` and creates nothing.
-2. With an existing loadable config (v6 driver, procsig present),
-   `gqlc init` opens every prompt on the stored value and an
-   accept-everything run rewrites the file byte-identically.
+2. With an existing loadable single-target config (v6 driver, procsig
+   present), `gqlc init` opens every prompt on the stored value and an
+   accept-everything run rewrites the file byte-identically. With a
+   config declaring two targets it refuses (§3.1), exit 1, file
+   byte-untouched.
 3. With a malformed config, init prints the loader's error verbatim,
    defaults to abort (file byte-untouched, exit 1), and on start-fresh
    overwrites with the confirmed defaults.

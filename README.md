@@ -20,14 +20,21 @@ accepted, `gqlc.yaml` reads:
 
 ```yaml
 version: 1
-schema: schema.gql
-queries: queries
-output: internal/db
-package: db
-schema_language: gql
-query_language: opencypher
-driver: neo4j-go-v5
+graph:
+  - schema: schema.gql
+    schema_language: gql
+    queries: queries
+    query_language: opencypher
+    gen:
+      go:
+        package: db
+        out: internal/db
+        driver: neo4j-go-v5
 ```
+
+`graph` is a list: a project that needs several generated packages adds
+an entry per package, each with its own schema, queries and output
+directory.
 
 Put your schema at `schema.gql`:
 
