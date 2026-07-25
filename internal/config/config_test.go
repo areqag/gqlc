@@ -927,6 +927,13 @@ var outPairs = []struct {
 		name: "re-entry through an unknown ancestor name (the honest limit)", earlier: "../b/db", later: "db",
 	},
 	{name: "an escaping path beside its rooted namesake", earlier: "../db", later: "db"},
+	{
+		// What the NUL in the anchor segment buys. Spelled without it,
+		// these anchor to "/gqlc-anchor-0/gqlc-anchor-0" and
+		// "/gqlc-anchor-0", which Rel reads as containment — a disjoint
+		// pair rejected because an operand happens to name the base.
+		name: "a directory named like the synthetic anchor", earlier: "gqlc-anchor-0", later: "../gqlc-anchor-0",
+	},
 }
 
 // TestOutOverlap drives the §4.3 sweep through the loader: a rejected

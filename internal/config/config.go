@@ -643,9 +643,17 @@ func escapesBase(rel string) bool {
 	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// anchorSegment names a synthetic directory no configured path can
-// collide with: YAML's printable character set excludes NUL, so a
-// loaded `out` value cannot contain one.
+// anchorSegment names the synthetic directories anchorRelative rebases
+// onto. The NUL puts them outside the names a real directory can carry,
+// so an `out` that names a directory cannot spell one. yaml.v3 does
+// reject a literal NUL in the stream, but it decodes the "\0" and
+// "\x00" escapes in a double-quoted scalar into real NUL bytes, so a
+// collision is reachable — by a path no filesystem could hold.
+//
+// The bound that matters is the direction: an operand that names an
+// anchor segment can only add structure under the synthetic base, which
+// turns a disjoint pair into a rejected one and never the reverse.
+// Overlap stays rejected either way.
 const anchorSegment = "\x00gqlc-anchor-"
 
 // anchorRelative rebases a pair of relative paths onto a shared
@@ -657,11 +665,12 @@ const anchorSegment = "\x00gqlc-anchor-"
 // "../..", so both arms of compareOuts fall through and plain
 // containment reads as disjoint. Anchoring is pure string work: the
 // base is fictional, nothing is resolved against the filesystem, and
-// because neither operand can name an anchor segment, the relation
-// between the joined paths is the relation between the originals under
-// every real working directory. A mixed absolute/relative pair is left
-// alone — relating those needs the working directory, which is the
-// limit config-file-format §4 documents.
+// for any operand that names a real directory — which cannot spell an
+// anchor segment — the relation between the joined paths is the
+// relation between the originals under every real working directory. A
+// mixed absolute/relative pair is left alone — relating those needs the
+// working directory, which is the limit config-file-format §4
+// documents.
 func anchorRelative(a, b string) (string, string) {
 	if filepath.IsAbs(a) || filepath.IsAbs(b) {
 		return a, b
