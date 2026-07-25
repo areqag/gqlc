@@ -1,0 +1,5 @@
+CREATE PROPERTY GRAPH TYPE T AS {
+    (LABEL Person),
+    (LABELS Manager&Employee),
+    (IS Company)
+}
