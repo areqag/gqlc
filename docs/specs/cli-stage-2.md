@@ -89,11 +89,14 @@ numbered-prompt mode.`,
 Args:  cobra.NoArgs,
 ```
 
-One flag, the same shape as generate's:
+One flag the same shape as generate's, and one that selects the §3.5
+append flow:
 
 ```go
 cmd.Flags().StringVarP(&cfgPath, "file", "f", config.DefaultFilename,
 	"path to the config file to create or update")
+cmd.Flags().BoolVar(&add, "add", false,
+	"append a generation target to the existing config file")
 ```
 
 `RunE` runs, in order:
@@ -119,10 +122,12 @@ cmd.Flags().StringVarP(&cfgPath, "file", "f", config.DefaultFilename,
    env var is the caller's job, per huh's own README convention. Any
    non-empty value enables, including `"0"` — the upstream convention,
    adopted verbatim rather than half-improved.
-4. Delegate to the seam `runInitWizard(in io.Reader, errOut io.Writer,
-   accessible bool, cfgPath string) error` with
-   `cmd.InOrStdin()` / `cmd.ErrOrStderr()` — the whole interactive
-   body behind one function tests drive directly (§7).
+4. Delegate to `runInit(in io.Reader, errOut io.Writer, accessible,
+   add bool, cfgPath string) error` with
+   `cmd.InOrStdin()` / `cmd.ErrOrStderr()`. It picks between the two
+   flow entry points — `runInitWizard` (§3.1–§3.4) and `runInitAdd`
+   (§3.5), each carrying the whole interactive body of its flow behind
+   one seam tests drive directly (§7).
 
 ### 2.2 Exit codes and the abort contract
 
@@ -198,7 +203,8 @@ Message catalogue (`Error: ` prefix implied on error rows):
 ### 3.1 Flow selection
 
 One classification, decided before any form renders, from a single
-attempt on the target path:
+attempt on the target path. This is a bare `init`'s; `--add` has its
+own, stricter (§3.5):
 
 ```
 cfg, err := config.Load(cfgPath)
@@ -211,10 +217,11 @@ any other error                 → BROKEN  (report, then dialogue)
 The wizard expresses one generation target (ADR 0013). A config that
 declares several is refused outright — before any form renders —
 because prefilling from the first and writing the canonical form would
-silently delete the rest:
+silently delete the rest, and the parenthetical points at the flow that
+does handle it:
 
 ```
-<path> declares <n> generation targets; init edits only a single-target config (edit it by hand)
+<path> declares <n> generation targets; init edits only a single-target config (edit it by hand, or run gqlc init --add to append another)
 ```
 
 `errors.Is(err, fs.ErrNotExist)` is the exact seam `Load` documents
@@ -323,6 +330,62 @@ There is no salvage decoder (§8): a file the loader rejects has no
 trustworthy values to salvage, and "print the real error, offer fresh
 or abort" is the whole contract.
 
+### 3.5 `--add` flow — append a generation target
+
+`--add` prompts for one target and appends it to the file's existing
+list (config-multi-target §8.2). Flow selection is stricter than §3.1's,
+because appending presupposes a file that loads:
+
+| classification              | behaviour                                               |
+|-----------------------------|---------------------------------------------------------|
+| loadable, any target count  | wizard, append, preview, confirm, write                 |
+| `fs.ErrNotExist`            | the §6.1 missing-config message, exit 1                 |
+| any other load failure      | the `config.Load` error verbatim, exit 1                |
+
+There is no FRESH flow and no BROKEN dialogue: §3.4's "start fresh"
+would replace the file the flag promises to append to. The
+missing-config message is `generate`'s, reached through the one
+unexported helper in `internal/cli` that both commands call — a second
+copy would satisfy both commands' own tests while drifting apart, and
+the hint it carries (`run gqlc init to create one`) is the right advice
+for a project with no config file however the file was asked for.
+
+**Prefill.** The appended target starts from the file's **last** entry
+for the fields a second target usually shares — `schema`,
+`schema_language`, `query_language`, `procsig`, `gen.go.driver` — and
+empty for the three that must distinguish it: `queries`, `gen.go.out`,
+`gen.go.package`. Empty is the honest default for a directory that has
+to differ from the entries already in the file, and §4.2's non-blank
+validators refuse to let it through.
+
+**Output-directory validation.** Under `--add` the `gen.go.out` `Input`
+carries `config.CheckOutAgainst` (config-multi-target §4.3) on top of
+the non-blank rule, applied to the config **as loaded** — the entries
+already in the file, not the appended one, whose own `out` would
+otherwise be an operand in its own check. It calls the loader's rule
+rather than restating it, so the wizard's verdict and the loader's are
+one implementation with one set of limits. The message renders bare at
+the prompt:
+
+```
+out "internal/user/gen" is already graph[0]'s output directory
+out "internal/user/gen/sub" is inside graph[0]'s output directory "internal/user/gen"
+```
+
+The hook sees the raw prompt line and checks the **trimmed** value,
+because §4.2's post-form trim is what the file will carry.
+
+A bare `init` passes no prior entries: its one target is the one being
+edited, so including it would make its own `out` an operand in its own
+check — an unchanged output directory then reads as a collision with
+itself.
+
+**Preview, warnings, epilogue.** The §5.3 preview shows the whole
+resulting file — every entry, canonical — so an append is reviewed in
+the context it lands in, and the comment notice applies as always. The
+§5.5 warnings and the §5.6 epilogue name the target the run authored:
+the appended one under `--add`, the only one under a bare `init`.
+
 ## 4. Wizard form
 
 ### 4.1 Structure and field order
@@ -348,7 +411,7 @@ Pinned copy, defaults (fresh flow), and validation:
 |---|-------|-----------|-------|-------------|----------|
 | 1 | `schema`  | `Input` | `Schema file` | `Path to the graph schema. Relative paths resolve against the config file's directory.` | non-blank |
 | 2 | `queries` | `Input` | `Query directory` | `Directory holding *.cypher query files.` | non-blank |
-| 3 | `gen.go.out`  | `Input` | `Output directory` | `Owned exclusively by gqlc: generate replaces its contents.` | non-blank |
+| 3 | `gen.go.out`  | `Input` | `Output directory` | `Owned exclusively by gqlc: generate replaces its contents.` | non-blank, plus §3.5's overlap check under `--add` |
 | 4 | `gen.go.package` | `Input` | `Package name` | `Go package name for the generated code.` | §4.3 |
 | 5 | `procsig` | `Input` | `Procedure registry (optional)` | `Path to a procsig file; leave empty for none.` | none |
 | 6 | `schema_language` | `Select[config.SchemaLang]` | `Schema language` | — | — |
@@ -562,10 +625,11 @@ and assigned CLI-2 the reword. The new pinned message:
 no config file at <path> (run gqlc init to create one)
 ```
 
-Changes: the message literal in `runGenerate` (generate.go:72) and the
-`want` string in `TestGenerateConfigMissing` (generate_test.go).
-Errata pointer, CLI-0 §4.4 style — the historical spec stays as
-written:
+Changes: the message literal in `runGenerate` and the `want` string in
+`TestGenerateConfigMissing` (generate_test.go). The literal since moved
+into one unexported `internal/cli` helper, because `init --add` reports
+the same condition (§3.5). Errata pointer, CLI-0 §4.4 style — the
+historical spec stays as written:
 
 | CLI-1 statement (cli-stage-1.md)                      | superseded by |
 |--------------------------------------------------------|---------------|
@@ -601,13 +665,14 @@ script byte available to the next prompt's scanner.
 
 Strategy, in layers:
 
-1. **Pure helpers, exhaustively** — flow classification, defaults,
-   validators, comment detection, preview/warning/epilogue text: no
-   forms, no TTY, table tests.
-2. **Accessible-driven end-to-end** — `runInitWizard` called directly
-   with `accessible=true`, a `OneByteReader`-wrapped script, an output
-   buffer, and a `t.TempDir()` path: real huh forms, real validators,
-   real `config.Save`, everything except cobra and the guard.
+1. **Pure helpers, exhaustively** — flow classification, defaults, the
+   §3.5 prefill, validators, comment detection, preview/warning/
+   epilogue text: no forms, no TTY, table tests.
+2. **Accessible-driven end-to-end** — `runInitWizard`, `runInitAdd` or
+   `runInit` called directly with `accessible=true`, a
+   `OneByteReader`-wrapped script, an output buffer, and a
+   `t.TempDir()` path: real huh forms, real validators, real
+   `config.Save`, everything except cobra and the guard.
 
    The script contract, pinned per prompt type. Empty lines do **not**
    universally take defaults: `PromptString` runs the field validator
@@ -643,7 +708,7 @@ Strategy, in layers:
 | test                                | proves                                                                                       |
 |-------------------------------------|-----------------------------------------------------------------------------------------------|
 | `TestInitClassifyConfig`            | table: absent → fresh; loadable → edit (values); malformed / bad-vocab / directory-at-path → broken with the loader's error |
-| `TestInitRefusesMultiTargetEdit`    | a two-entry config → the §3.1 refusal message, exit 1, file byte-untouched, no prompt rendered |
+| `TestInitRefusalNamesAddFlag`       | a two-entry config → the §3.1 refusal message, `--add` hint included, exit 1, file byte-untouched, no prompt rendered |
 | `TestInitDefaults`                  | §3.2 table exactly; enum defaults are `Values()[0]` by rule                                    |
 | `TestInitPackageValidator`          | table: `""`, `db`, `db_1`, `Db`, `func`, `1db`, a Unicode-letter identifier — each mapped to its §4.3 clause and message |
 | `TestInitCommentDetection`          | `#` comment → notice; `#` inside a quoted value → notice (honest false positive); no `#` → none |
@@ -659,6 +724,11 @@ Strategy, in layers:
 | `TestInitBrokenAbort`               | malformed file → loader error verbatim in output, default choice (abort) → pinned error, file byte-untouched |
 | `TestInitBrokenFresh`               | choose start-fresh → defaults wizard (script as in `TestInitFreshWritesCanonical`) → confirm → canonical defaults overwrite |
 | `TestInitInputStarvation`           | empty input reader, accessible → EOF bypasses validation (`PromptString` breaks before validating on a failed scan), defaults cascade, confirm defaults to Abort, nothing written (§5.4 property) |
+| `TestInitAddFlag`                   | §3.5's flag declaration — name, `false` default, usage string — and `init --add` reaching the TTY guard, which an unregistered flag does not reach (cobra fails at parse) |
+| `TestInitAdd`                       | the prefill unit rows (last entry's shared fields carried, the distinguishing three blank, no entries → §3.2 defaults blanked the same way), the append round trip over one- and two-entry files (existing entries untouched, written file loads, preview holds every entry, warnings and epilogue name the appended target), and the `runInit` dispatch — one file and one script where a bare `init` refuses and `--add` appends |
+| `TestInitAddOverlapRejectedAtPrompt`| table: equal to entry 0, equal to entry 1 spelled `./gen/order/` (a string-equality restatement accepts it), nested inside entry 1, and padded with the whitespace §4.2 trims. Each reads the rejection at the prompt and retypes a disjoint directory — a hook that failed to re-prompt would leave that line to the package prompt and misalign the rest. Plus: input starved after a rejection writes nothing |
+| `TestInitAddNoConfig`               | absent file → the §6.1 message before any prompt renders, byte-identical to what `generate` prints for the same path — the assertion a second copy of the string fails |
+| `TestInitAddBrokenConfig`           | unloadable file → the loader's error verbatim, no dialogue rendered (the script opens with the start-fresh answer, so a dialogue wired here would answer itself), file byte-untouched |
 | `TestCanonicalMatchesSave` (config) | `Canonical()` bytes == the file `Save` writes; fixture equality intact                          |
 | `TestGenerateConfigMissing`         | updated pinned message (§6.1)                                                                   |
 
@@ -675,6 +745,9 @@ not ours (§8).
   writes `gqlc.yaml` with an editor.
 - A salvage decoder for broken configs (§3.4) — verbatim error, fresh
   or abort, nothing in between.
+- A multi-target wizard loop: one target per invocation, `init` or
+  `init --add` (config-multi-target §11). Editing an entry other than a
+  single-target file's only one stays an editor's job (§3.1).
 - Comment and formatting preservation on rewrite — `Save` has exactly
   one canonical form; the §5.3 notice is the mitigation.
 - Creating the schema file, query directory, output directory, or the
@@ -725,3 +798,11 @@ not ours (§8).
    as direct dependencies, in the code PR only; `just lint`,
    `just test`, `just tidy-check` green; `test/data/codegen/`
    byte-identical to master.
+9. With an existing loadable config, `gqlc init --add` appends one
+   target: the prompts open on the last entry's shared values, the
+   three distinguishing ones open empty, an output directory the
+   loader's overlap rule finds equal to or nested in an existing
+   entry's is refused at the prompt, the preview shows every entry, and
+   the written file loads with one more target than it had. With no
+   config file at the path it exits 1 with the §6.1 message and prompts
+   for nothing.
