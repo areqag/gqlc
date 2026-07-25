@@ -22,6 +22,13 @@ import (
 // other rule is identified by its ordered direct-child sequence, matched against
 // each alternative's expression, taking the lowest-numbered match because that is
 // the one ALL(*) prefers.
+//
+// Taking the lowest-numbered match is exact only because no alternative this gate
+// requires is shadowed by a lower-numbered sibling that accepts every child sequence
+// it can produce; such an alternative could never be tagged and would sit red on
+// every spelling. All 47 were checked, none is shadowed: see bd memory
+// m2-lowest-numbered-match-unshadowed for the method and the result. It is a fact
+// about today's grammar, not an invariant enforced here.
 type alternativeIndex struct {
 	// byRule holds one entry per rule with more than one alternative. A rule with
 	// one alternative has nothing to tell apart and is deliberately absent, so a
