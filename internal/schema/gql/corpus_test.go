@@ -48,6 +48,11 @@ const (
 	wantCorpusResolving = 4
 )
 
+// featureValues is the closed set the feature field may take. Closed rather than
+// documented, because "do not cite an Annex D id" was a rule with no mechanism, and
+// it was violated three times in nine entries before anyone noticed.
+var featureValues = []string{"mandatory", "unsourced"}
+
 const corpusDir = fixtureDir + "/corpus"
 
 // outcome is what Parse does with a corpus file. It has exactly two values, and
@@ -72,8 +77,15 @@ type corpusEntry struct {
 	// sentinel is required iff outcome is unsupported, and must be one of
 	// allSentinels so the corpus cannot pin to an ad-hoc error.
 	sentinel error
-	// feature is the ISO GQL Annex D conformance feature id (GG01, GV50, ...), or
-	// "mandatory" for a construct outside the optional features.
+	// feature is "mandatory" if declining the construct would be non-conformant, or
+	// "unsourced" if that is not known. Those are the only two values: there is no
+	// Annex D material in the repo to check an id against, so every id written here
+	// was written from memory, and three of the first nine entries carried one.
+	//
+	// "mandatory" on an unsupported entry is not a mistake — it declares a known
+	// conformance gap, and bead is what closes it. "unsourced" is for a construct
+	// declined permanently, where the claim being made is "declining this is still
+	// conformant", which is the one thing nothing in this repo can support.
 	feature string
 	// bead is the issue that will make an unsupported entry resolve. A construct
 	// declined permanently names gqlc-0ri, the epic's ADR bead, rather than a
@@ -241,7 +253,8 @@ func TestCorpusManifest(t *testing.T) {
 		require.NotContains(t, files, entry.file, "duplicate manifest entry")
 		files = append(files, entry.file)
 
-		require.NotEmpty(t, entry.feature, `%s: feature is required (Annex D id, or "mandatory")`, entry.file)
+		require.Contains(t, featureValues, entry.feature,
+			`%s: feature must be "mandatory" or "unsourced"; an Annex D id cannot be checked against anything in this repo`, entry.file)
 
 		switch entry.outcome {
 		case resolves:
@@ -272,6 +285,23 @@ func TestCorpusManifest(t *testing.T) {
 		"a semantic case is a file that resolves to a wrong model, so it must be a resolving entry naming that bead, and nothing else may be")
 
 	t.Logf("corpus: %d entries, %d resolving", len(entries), resolving)
+}
+
+// TestCorpusSize is separate from TestCorpusManifest because the two have different
+// lifetimes. The manifest checks are invariants — every file has an entry, every
+// unsupported entry names a real sentinel — and hold no matter how the corpus grows.
+// These two are regression pins, stale by design the moment anyone adds a file, so an
+// author who adds one must not be told that the manifest is broken.
+func TestCorpusSize(t *testing.T) {
+	entries := corpusManifest(t)
+
+	resolving := 0
+	for _, entry := range entries {
+		if entry.outcome == resolves {
+			resolving++
+		}
+	}
+
 	require.Len(t, entries, wantCorpusEntries, "corpus size changed; repin wantCorpusEntries")
 	require.Equal(t, wantCorpusResolving, resolving,
 		"resolving count changed; repin wantCorpusResolving (a drop is a regression)")

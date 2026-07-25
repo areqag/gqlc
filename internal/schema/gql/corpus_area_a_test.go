@@ -15,9 +15,9 @@ var corpusAreaA = []corpusEntry{
 		file:     "12.6-graph-type-statement/like_graph.gql",
 		outcome:  unsupported,
 		sentinel: ErrUnsupportedSource,
-		feature:  "GG02",
+		feature:  "unsourced",
 		bead:     "gqlc-0ri",
-		reason:   "LIKE derives the type from a graph *instance*, so it cannot be answered without inspecting live data; declined permanently, and conformant because GG02 is an optional Annex D feature",
+		reason:   "LIKE derives the type from a graph *instance*, so it cannot be answered without inspecting live data; declined permanently",
 	},
 	{
 		file:     "12.6-graph-type-statement/copy_of_source.gql",
