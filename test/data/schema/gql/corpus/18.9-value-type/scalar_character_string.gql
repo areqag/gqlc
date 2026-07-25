@@ -2,10 +2,10 @@ CREATE PROPERTY GRAPH TYPE Seed AS {
     (:Doc {
         s_bare :: STRING,
         s_notnull :: STRING NOT NULL,
-        s_range TYPED STRING(1, 10),
+        s_typed TYPED STRING,
         c_bare :: CHAR,
-        c_fixed :: CHAR(5) NOT NULL,
+        c_notnull :: CHAR NOT NULL,
         v_bare :: VARCHAR,
-        v_max :: VARCHAR(10) NOT NULL
+        v_notnull :: VARCHAR NOT NULL
     })
 }
