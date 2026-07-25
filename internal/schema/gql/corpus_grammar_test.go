@@ -2,8 +2,10 @@ package gql
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -52,18 +54,301 @@ var coverageRoots = []string{statementRule}
 // three-word file. nonReservedWords erases 0 rules and 30 tokens, so the
 // identifier-lexis cut is genuinely cheap — it names ~200 keyword tokens but only
 // 30 are reachable nowhere else in the schema grammar. The erasure is not pinned
-// separately: wantObligationRules already carries it, since a third cut makes
-// that pin read 133 against an actual 81 and puts "133 -> 81" in the diff.
+// separately: wantObligationRules and wantObligationTokens already carry it, and
+// being membership goldens rather than counts, they fail a third cut by naming the
+// rules and tokens it erased rather than by reporting a smaller number.
 var coverageCuts = []string{"graphExpression", "nonReservedWords"}
 
-// The obligation sizes are pinned because the gate below can only catch the
-// closure growing (a new rule is uncovered until a corpus file enters it). A
-// closure that shrinks — a rule deleted, a reference dropped, a cut swallowing
-// more than it used to — would otherwise pass silently while testing less. A
-// deliberate grammar change updates these and re-reads the uncovered list.
-const (
-	wantObligationRules  = 133
-	wantObligationTokens = 133
+// The obligation sets are pinned because the gate below can only catch the closure
+// growing (a new rule is uncovered until a corpus file enters it). A closure that
+// shrinks — a rule deleted, a reference dropped, a cut swallowing more than it used
+// to — would otherwise pass silently while testing less. A deliberate grammar change
+// updates these and re-reads the uncovered list.
+//
+// Membership rather than the size, for the same reason as
+// wantInvisibleAlternatives: a size pin passes for any wrong 133, and it cannot
+// answer the question the phase-2 area split asks of it. That split partitions these
+// two sets across five authors, and a partition that names a rule outside the closure
+// while dropping one inside it sums to 133 either way — so every count-based check of
+// the split passes while an author chases a name that does not exist and a real
+// obligation goes unowned. Only the sets themselves can be diffed against it.
+//
+// Sorted, unlike wantInvisibleAlternatives, which is ordered as its gate emits it.
+// These two are collected into maps, so there is no emission order to preserve and
+// Go randomises what is left. ElementsMatch does not care, but the failure message
+// lists the differing names in the order it was handed them, and a diff that reads
+// differently on every run is harder to act on than one that does not.
+var (
+	wantObligationRules = []string{
+		"absoluteCatalogSchemaReference",
+		"absoluteDirectoryPath",
+		"approximateNumericType",
+		"arcTypePointingLeft",
+		"arcTypePointingRight",
+		"arcTypeUndirected",
+		"binaryExactNumericType",
+		"bindingTableReferenceValueType",
+		"bindingTableType",
+		"booleanType",
+		"byteStringType",
+		"catalogGraphTypeParentAndName",
+		"catalogObjectParentReference",
+		"characterStringType",
+		"closedEdgeReferenceValueType",
+		"closedGraphReferenceValueType",
+		"closedNodeReferenceValueType",
+		"connectorPointingRight",
+		"connectorUndirected",
+		"copyOfGraphType",
+		"createGraphTypeStatement",
+		"datetimeType",
+		"dateType",
+		"decimalExactNumericType",
+		"destinationNodeTypeAlias",
+		"destinationNodeTypeReference",
+		"directoryName",
+		"edgeKind",
+		"edgeReferenceValueType",
+		"edgeSynonym",
+		"edgeTypeFiller",
+		"edgeTypeImpliedContent",
+		"edgeTypeKeyLabelSet",
+		"edgeTypeLabelSet",
+		"edgeTypeName",
+		"edgeTypePattern",
+		"edgeTypePatternDirected",
+		"edgeTypePatternPointingLeft",
+		"edgeTypePatternPointingRight",
+		"edgeTypePatternUndirected",
+		"edgeTypePhrase",
+		"edgeTypePhraseFiller",
+		"edgeTypePropertyTypes",
+		"edgeTypeSpecification",
+		"elementTypeList",
+		"elementTypeSpecification",
+		"emptyType",
+		"endpointPair",
+		"endpointPairDirected",
+		"endpointPairPhrase",
+		"endpointPairPointingLeft",
+		"endpointPairPointingRight",
+		"endpointPairUndirected",
+		"exactNumericType",
+		"fieldName",
+		"fieldType",
+		"fieldTypeList",
+		"fieldTypesSpecification",
+		"fixedLength",
+		"graphExpression",
+		"graphReferenceValueType",
+		"graphTypeLikeGraph",
+		"graphTypeName",
+		"graphTypeReference",
+		"graphTypeSource",
+		"graphTypeSpecificationBody",
+		"identifier",
+		"immaterialValueType",
+		"isOrColon",
+		"labelName",
+		"labelSetPhrase",
+		"labelSetSpecification",
+		"listValueTypeName",
+		"listValueTypeNameSynonym",
+		"localdatetimeType",
+		"localNodeTypeAlias",
+		"localtimeType",
+		"maxLength",
+		"minLength",
+		"nestedGraphTypeSpecification",
+		"nodeReferenceValueType",
+		"nodeSynonym",
+		"nodeTypeFiller",
+		"nodeTypeImpliedContent",
+		"nodeTypeKeyLabelSet",
+		"nodeTypeLabelSet",
+		"nodeTypeName",
+		"nodeTypePattern",
+		"nodeTypePhrase",
+		"nodeTypePhraseFiller",
+		"nodeTypePropertyTypes",
+		"nodeTypeSpecification",
+		"nonReservedWords",
+		"notNull",
+		"nullType",
+		"numericType",
+		"objectName",
+		"openEdgeReferenceValueType",
+		"openGraphReferenceValueType",
+		"openNodeReferenceValueType",
+		"pathValueType",
+		"precision",
+		"predefinedSchemaReference",
+		"predefinedType",
+		"propertyName",
+		"propertyType",
+		"propertyTypeList",
+		"propertyTypesSpecification",
+		"propertyValueType",
+		"recordType",
+		"referenceParameterSpecification",
+		"referenceValueType",
+		"regularIdentifier",
+		"relativeCatalogSchemaReference",
+		"relativeDirectoryPath",
+		"scale",
+		"schemaName",
+		"schemaReference",
+		"signedBinaryExactNumericType",
+		"simpleDirectoryPath",
+		"sourceNodeTypeAlias",
+		"sourceNodeTypeReference",
+		"temporalDurationQualifier",
+		"temporalDurationType",
+		"temporalInstantType",
+		"temporalType",
+		"timeType",
+		"typed",
+		"unsignedBinaryExactNumericType",
+		"unsignedDecimalInteger",
+		"unsignedInteger",
+		"valueType",
+		"verboseBinaryExactNumericType",
+	}
+	wantObligationTokens = []string{
+		"ACCENT_QUOTED_CHARACTER_SEQUENCE",
+		"AMPERSAND",
+		"ANY",
+		"ARRAY",
+		"AS",
+		"BIG",
+		"BIGINT",
+		"BINARY",
+		"BINDING",
+		"BOOL",
+		"BOOLEAN",
+		"BRACKET_RIGHT_ARROW",
+		"BYTES",
+		"CHAR",
+		"COLON",
+		"COMMA",
+		"CONNECTING",
+		"COPY",
+		"CREATE",
+		"CURRENT_SCHEMA",
+		"DATE",
+		"DATETIME",
+		"DAY",
+		"DEC",
+		"DECIMAL",
+		"DIRECTED",
+		"DOUBLE",
+		"DOUBLE_COLON",
+		"DOUBLE_PERIOD",
+		"DOUBLE_QUOTED_CHARACTER_SEQUENCE",
+		"DURATION",
+		"EDGE",
+		"EXISTS",
+		"FLOAT",
+		"FLOAT128",
+		"FLOAT16",
+		"FLOAT256",
+		"FLOAT32",
+		"FLOAT64",
+		"GRAPH",
+		"HOME_SCHEMA",
+		"IF",
+		"IMPLIES",
+		"INT",
+		"INT128",
+		"INT16",
+		"INT256",
+		"INT32",
+		"INT64",
+		"INT8",
+		"INTEGER",
+		"INTEGER128",
+		"INTEGER16",
+		"INTEGER256",
+		"INTEGER32",
+		"INTEGER64",
+		"INTEGER8",
+		"IS",
+		"LABEL",
+		"LABELS",
+		"LEFT_ANGLE_BRACKET",
+		"LEFT_ARROW",
+		"LEFT_ARROW_BRACKET",
+		"LEFT_BRACE",
+		"LEFT_BRACKET",
+		"LEFT_PAREN",
+		"LIKE",
+		"LIST",
+		"LOCAL",
+		"MINUS_LEFT_BRACKET",
+		"MONTH",
+		"NODE",
+		"NOT",
+		"NOTHING",
+		"NULL_KW",
+		"OF",
+		"OR",
+		"PATH",
+		"PERIOD",
+		"PRECISION",
+		"PROPERTY",
+		"REAL",
+		"RECORD",
+		"REGULAR_IDENTIFIER",
+		"RELATIONSHIP",
+		"REPLACE",
+		"RIGHT_ANGLE_BRACKET",
+		"RIGHT_ARROW",
+		"RIGHT_BRACE",
+		"RIGHT_BRACKET",
+		"RIGHT_BRACKET_MINUS",
+		"RIGHT_BRACKET_TILDE",
+		"RIGHT_PAREN",
+		"SECOND",
+		"SIGNED",
+		"SMALL",
+		"SMALLINT",
+		"SOLIDUS",
+		"STRING",
+		"SUBSTITUTED_PARAMETER_REFERENCE",
+		"TABLE",
+		"TILDE",
+		"TILDE_LEFT_BRACKET",
+		"TIME",
+		"TIMESTAMP",
+		"TO",
+		"TYPE",
+		"TYPED",
+		"UBIGINT",
+		"UINT",
+		"UINT128",
+		"UINT16",
+		"UINT256",
+		"UINT32",
+		"UINT64",
+		"UINT8",
+		"UNDIRECTED",
+		"UNSIGNED",
+		"UNSIGNED_BINARY_INTEGER",
+		"UNSIGNED_DECIMAL_INTEGER",
+		"UNSIGNED_HEXADECIMAL_INTEGER",
+		"UNSIGNED_OCTAL_INTEGER",
+		"USMALLINT",
+		"VALUE",
+		"VARBINARY",
+		"VARCHAR",
+		"VERTEX",
+		"VERTICAL_BAR",
+		"WITH",
+		"WITHOUT",
+		"YEAR",
+		"ZONE",
+		"ZONED",
+	}
 )
 
 // wantInvisibleAlternatives is the third obligation set's *candidate* set (see
@@ -341,7 +626,7 @@ func closure(parserRules map[string]string, cuts map[string]bool) (rules, tokens
 var loadObligation = sync.OnceValues(computeObligation)
 
 // grammarObligation is the only way to obtain the obligation, so that the pinned
-// sizes hold for every caller. They are asserted here rather than in a test of
+// sets hold for every caller. They are asserted here rather than in a test of
 // their own because an empty obligation fails open: TestCorpusGrammarCoverage
 // would report "rules 0/0" and pass, and a broken scanner would make every gate
 // green.
@@ -350,10 +635,10 @@ func grammarObligation(t coverageT) obligation {
 
 	got, err := loadObligation()
 	require.NoError(t, err)
-	require.Len(t, got.rules, wantObligationRules,
-		"reachable rule count changed; re-read the grammar before repinning")
-	require.Len(t, got.tokens, wantObligationTokens,
-		"reachable token count changed; re-read the grammar before repinning")
+	require.ElementsMatch(t, wantObligationRules, slices.Sorted(maps.Keys(got.rules)),
+		"the reachable rule set changed; re-read the grammar before repinning")
+	require.ElementsMatch(t, wantObligationTokens, slices.Sorted(maps.Keys(got.tokens)),
+		"the reachable token set changed; re-read the grammar before repinning")
 	require.ElementsMatch(t, wantInvisibleAlternatives, got.invisible,
 		"the set of alternatives the rule and token gates cannot demand changed:\n%s",
 		strings.Join(got.invisible, "\n"))
