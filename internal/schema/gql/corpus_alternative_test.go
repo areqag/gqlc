@@ -28,7 +28,10 @@ import (
 // it can produce; such an alternative could never be tagged and would sit red on
 // every spelling. All 47 were checked, none is shadowed: see bd memory
 // m2-lowest-numbered-match-unshadowed for the method and the result. It is a fact
-// about today's grammar, not an invariant enforced here.
+// about today's grammar, not an invariant enforced here, and what guards it is
+// wantInvisibleAlternatives: shadowing can only arrive with a grammar change, and a
+// grammar change to the alternative set trips that pin first. Re-run the check before
+// repinning it.
 type alternativeIndex struct {
 	// byRule holds one entry per rule with more than one alternative. A rule with
 	// one alternative has nothing to tell apart and is deliberately absent, so a
