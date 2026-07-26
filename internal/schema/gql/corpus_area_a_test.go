@@ -27,6 +27,11 @@ var corpusAreaA = []corpusEntry{
 		feature: "mandatory",
 	},
 	{
+		file:    "12.6-graph-type-statement/synonyms_node_edge.gql",
+		outcome: resolves,
+		feature: "mandatory",
+	},
+	{
 		file:    "12.6-graph-type-statement/delimited_identifiers.gql",
 		outcome: resolves,
 		feature: "mandatory",

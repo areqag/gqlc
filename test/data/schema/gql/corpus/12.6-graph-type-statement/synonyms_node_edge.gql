@@ -1,0 +1,9 @@
+-- nodeSynonym#1 (NODE) and edgeSynonym#1 (EDGE), the counterpart to synonyms.gql's
+-- VERTEX and RELATIONSHIP. The 18.2 phrase forms spell NODE too but are rejected, so
+-- this is the only resolving path through an explicit node synonym in nodeTypePattern
+-- (GQL.g4:1507).
+CREATE GRAPH TYPE Seed {
+    NODE A (a:A),
+    NODE B (b:B),
+    DIRECTED EDGE R (a)-[:R]->(b)
+}
