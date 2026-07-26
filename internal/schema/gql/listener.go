@@ -134,9 +134,9 @@ func (l *listener) EnterNodeTypePattern(c *gen.NodeTypePatternContext) {
 
 // EnterNodeTypePhrase collects the phrase form (`NODE TYPE Person :Person { ... }
 // AS p`), the other alternative of nodeTypeSpecification. It carries the same
-// information as the pattern form and differs only in where the parts sit: the
-// name and the filler are both under nodeTypePhraseFiller, and the alias follows
-// AS rather than opening the parens.
+// parts as the pattern form in different places: the name and the filler are both
+// under nodeTypePhraseFiller, and the alias follows AS rather than opening the
+// parens.
 func (l *listener) EnterNodeTypePhrase(c *gen.NodeTypePhraseContext) {
 	filler := c.NodeTypePhraseFiller()
 
@@ -144,8 +144,9 @@ func (l *listener) EnterNodeTypePhrase(c *gen.NodeTypePhraseContext) {
 	if name := filler.NodeTypeName(); name != nil {
 		n.name = name.Identifier().GetText()
 	}
-	// As in the pattern form the alias is optional, and a node without one is
-	// still fully supported — it just cannot be named by an edge endpoint.
+	// As in the pattern form the alias is optional. A node type without one is
+	// still fully supported; it just leaves a CONNECTING endpoint nothing to name
+	// it by, those being alias-only.
 	if alias := c.LocalNodeTypeAlias(); alias != nil {
 		n.alias = alias.GetText()
 	}
@@ -163,11 +164,10 @@ func (l *listener) EnterNodeTypePhrase(c *gen.NodeTypePhraseContext) {
 
 // EnterEdgeTypePhrase collects the phrase form of an edge type (`DIRECTED EDGE
 // TYPE Wrote :WROTE { ... } CONNECTING (a -> b)`). Its endpoints are alias-only:
-// endpointPairPointingRight and its siblings take a bare
-// sourceNodeTypeAlias/destinationNodeTypeAlias where the pattern form's
-// sourceNodeTypeReference also admits an inline nodeTypeFiller, so a CONNECTING
-// endpoint naming a node type rather than an alias it binds is rejected during
-// resolution (ErrEndpointNotAlias).
+// endpointPairPointingRight and its siblings take a bare sourceNodeTypeAlias,
+// where the pattern form's sourceNodeTypeReference also admits an inline
+// nodeTypeFiller. An endpoint that names a node type instead is left for
+// resolution to reject (ErrEndpointNotAlias).
 func (l *listener) EnterEdgeTypePhrase(c *gen.EdgeTypePhraseContext) {
 	directed := c.EndpointPairPhrase().EndpointPair().EndpointPairDirected()
 	if directed == nil {
@@ -224,10 +224,10 @@ func (l *listener) rejectLabelImplication(implies antlr.TerminalNode) {
 	}
 }
 
-// EnterEdgeTypePatternUndirected and EnterEndpointPairUndirected reject the two
-// spellings of an undirected edge — the pattern form's `~[ ]~` arc and the phrase
-// form's `CONNECTING (a ~ b)` — for the same reason: EdgeKey is a source->target
-// triple and an undirected edge has no such orientation to key on.
+// EnterEdgeTypePatternUndirected and EnterEndpointPairUndirected reject an
+// undirected edge written as the pattern form's `~[ ]~` arc or as the phrase
+// form's `CONNECTING (a ~ b)`. Same reason for both: EdgeKey is a source->target
+// triple, and an undirected edge has no such orientation to key on.
 func (l *listener) EnterEdgeTypePatternUndirected(_ *gen.EdgeTypePatternUndirectedContext) {
 	l.fail(ErrUndirectedEdge)
 }

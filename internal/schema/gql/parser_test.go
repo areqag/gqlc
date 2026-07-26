@@ -237,12 +237,12 @@ func graphType(body string) string {
 // TestPhraseFormEquivalence pins the phrase form against the pattern form: the
 // same graph type spelled either way resolves to the same model. Comparing whole
 // models is what makes it worth writing — a spot check on the label set would pass
-// a listener that dropped the type name, the alias or the properties, which is the
-// failure the phrase form shipped with.
+// a listener that collected the labels and dropped the type name, the alias or the
+// properties.
 //
 // The node and edge counts are not redundant with the comparison. Two spellings
-// that both collect nothing are equal, and that is precisely the defect: the
-// counts are what stop the equality holding vacuously.
+// that both collect nothing are equal, and collecting nothing is the defect this
+// bead exists for: the counts are what stop the equality holding vacuously.
 func (s *ParserSuite) TestPhraseFormEquivalence() {
 	cases := []struct {
 		name    string
@@ -339,12 +339,12 @@ func (s *ParserSuite) TestPhraseFormEquivalence() {
 }
 
 // TestEndpointAliasDiagnostics separates the two ways an endpoint can fail to name
-// an alias. Both slots the grammar reads as an alias — the phrase form's
-// CONNECTING pair and the pattern form's parenthesised reference — take a bare
-// identifier, so an author who writes the node type's name there gets a lookup
-// miss for a type that is declared on the screen in front of them. Distinguishing
-// that from a genuine typo is the whole value of ErrEndpointNotAlias, so the
-// undeclared case is here to keep the distinction load-bearing.
+// an alias. The slots the grammar reads as an alias — the phrase form's CONNECTING
+// pair and the pattern form's parenthesised reference — take a bare identifier, so
+// an author who writes the node type's name or label there gets a lookup miss for
+// a type that is declared on the screen in front of them. Distinguishing that from
+// a genuine typo is the whole value of ErrEndpointNotAlias, so the undeclared case
+// is here to keep the distinction load-bearing.
 func (s *ParserSuite) TestEndpointAliasDiagnostics() {
 	cases := []struct {
 		name string

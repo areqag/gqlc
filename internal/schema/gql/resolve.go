@@ -89,11 +89,13 @@ func (r rawSchema) resolve() (schema.Schema, error) {
 // nodeIndex is what an edge endpoint resolves against: the alias table, the
 // identifiers the declared node types answer to, and the node types themselves.
 //
-// declared exists only to sharpen a diagnostic. `CONNECTING (Person TO Person)`
-// puts an identifier in a slot the grammar reads as an alias, so a schema that
-// declares a Person node type without binding an alias to it fails — and reporting
-// that as an undeclared node type sends the author looking for a declaration that
-// is on the screen in front of them.
+// declared exists to sharpen a diagnostic and for nothing else.
+// `CONNECTING (Person TO Person)` puts an identifier where the grammar reads an
+// alias, so it misses unless some declaration bound `Person` as one — and
+// reporting that as an undeclared node type sends an author who wrote the type's
+// own name or label looking for a declaration that is on the screen in front of
+// them. Names and labels go in whether or not their type also binds an alias:
+// naming the type where an alias belongs is the same mistake either way.
 type nodeIndex struct {
 	aliases  map[string]graph.LabelSetKey
 	declared map[string]bool
@@ -106,6 +108,9 @@ type nodeIndex struct {
 func (ref rawEndpoint) resolve(idx nodeIndex) (graph.LabelSetKey, error) {
 	var key graph.LabelSetKey
 	if ref.alias != "" {
+		// The alias table is consulted first because an alias is usually spelled the
+		// same as the label it is bound to (`... AS Person`), and there the alias is
+		// what the endpoint means.
 		k, ok := idx.aliases[ref.alias]
 		if !ok {
 			if idx.declared[ref.alias] {
