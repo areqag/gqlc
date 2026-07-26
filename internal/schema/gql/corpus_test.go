@@ -11,8 +11,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/antlr4-go/antlr/v4"
 	"github.com/stretchr/testify/require"
 
+	"github.com/areqag/gqlc/internal/grammar/gql/gen"
 	"github.com/areqag/gqlc/internal/schema"
 )
 
@@ -289,6 +291,31 @@ func TestCorpusAreasAreDisjoint(t *testing.T) {
 	}
 }
 
+// uncommented blanks GQL comments, preserving every other byte and the offsets of
+// what is left, so a spelling stays matchable exactly as written — including the
+// space in STRING(2, 5).
+//
+// Via the lexer rather than a scan for "--" because GQL has three comment forms
+// (GQL.g4:3746-3750) and the other two are one keystroke away from the one the
+// corpus happens to use. Asking the lexer which spans are comments cannot drift
+// from the grammar; a hand-rolled scan silently stops discriminating the day
+// someone writes // instead.
+func uncommented(src string) string {
+	lex := gen.NewGQLLexer(antlr.NewInputStream(src))
+	lex.RemoveErrorListeners()
+
+	out := []rune(src)
+	for _, tok := range lex.GetAllTokens() {
+		switch tok.GetTokenType() {
+		case gen.GQLLexerBRACKETED_COMMENT, gen.GQLLexerSIMPLE_COMMENT_SOLIDUS, gen.GQLLexerSIMPLE_COMMENT_MINUS:
+			for i := tok.GetStart(); i <= tok.GetStop() && i < len(out); i++ {
+				out[i] = ' '
+			}
+		}
+	}
+	return string(out)
+}
+
 func TestCorpusManifest(t *testing.T) {
 	entries := corpusManifest(t)
 
@@ -301,12 +328,16 @@ func TestCorpusManifest(t *testing.T) {
 		require.NotEmpty(t, sc.spelling, "%s: a semantic case needs the spelling it exists to record", sc.file)
 		require.NotContains(t, semanticBeads, sc.file, "duplicate semantic case")
 
-		// The only check here that reads the file. Everything else about a semantic
-		// case is prose, so without this the construct can be edited out from under
-		// a row that still claims it and nothing goes red.
+		// The only check here that reads the file's GQL. Everything else about a
+		// semantic case is prose, so without this the construct can be edited out
+		// from under a row that still claims it and nothing goes red. Comments are
+		// stripped first because a header quoting the construct would otherwise
+		// satisfy the pin on behalf of GQL that no longer contains it — and 7 of the
+		// 86 corpus files already quote a spelling verbatim in their header, so that
+		// is a convention away, not a contrivance.
 		src, err := os.ReadFile(filepath.Join(corpusDir, sc.file))
 		require.NoError(t, err, "%s: semantic case names a file that does not exist", sc.file)
-		require.Contains(t, string(src), sc.spelling,
+		require.Contains(t, uncommented(string(src)), sc.spelling,
 			"%s: a semantic case is about a construct the model gets wrong, so the file must still spell %q", sc.file, sc.spelling)
 
 		semanticBeads[sc.file] = sc.bead
