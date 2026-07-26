@@ -114,6 +114,7 @@ const fixtureDir = "../../test/data/resolver"
 // stray fixture or missing map entry fails the suite.
 var invalidFixtures = map[string]error{
 	"unknown_label.cypher":                                 ErrUnknownLabel,
+	"label_satisfy_ambiguous.cypher":                       ErrAmbiguousLabel,
 	"unknown_property.cypher":                              ErrUnknownProperty,
 	"unknown_edge.cypher":                                  ErrUnknownEdge,
 	"unknown_edge_property.cypher":                         ErrUnknownProperty,

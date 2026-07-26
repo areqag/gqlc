@@ -181,10 +181,9 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.
 			if len(bb.Labels()) == 0 {
 				continue
 			}
-			key := bb.Labels().Key()
-			nt, ok := s.Nodes[key]
-			if !ok {
-				return nil, branchState{}, nil, fmt.Errorf("%w: %s", ErrUnknownLabel, key)
+			nt, err := resolveNodeLabels(bb.Labels(), s)
+			if err != nil {
+				return nil, branchState{}, nil, err
 			}
 			if err := sc.BindNode(bb, nt); err != nil {
 				return nil, branchState{}, nil, err
@@ -1159,6 +1158,105 @@ func validateDeleteEffect(sc *scope, e query.DeleteEffect, s schema.Schema) erro
 	// Refs walk: parser's referential-integrity sweep covers these; skip per
 	// §4.4 step 2 ("R6 runs no additional check on e.Refs()").
 	return nil
+}
+
+// resolveNodeLabels resolves a query node binding's label set to a declared
+// node type by satisfaction: an exact match on the declared key wins outright,
+// otherwise the satisfying set is the declared types whose label set is a
+// proper superset of `labels`. This mirrors R6's labelDeclared shape (per-label
+// existence) rather than the exact-key match Phase A1 used before gqlc-h9n.7 —
+// a schema author writing NODE TYPE X (:A&B) no longer makes A and B unusable
+// as query labels. Step 1 (this bead) is deliberately singular: exactly-one
+// resolves, zero -> ErrUnknownLabel with per-diagnostic message, more than one
+// -> ErrAmbiguousLabel. Plural property intersection lives in gqlc-h9n.22.
+func resolveNodeLabels(labels graph.LabelSet, s schema.Schema) (schema.NodeType, error) {
+	key := labels.Key()
+	if nt, ok := s.Nodes[key]; ok {
+		return nt, nil
+	}
+	if undeclared := undeclaredLabels(labels, s); len(undeclared) > 0 {
+		return schema.NodeType{}, fmt.Errorf("%w: %s is not declared on any node type", ErrUnknownLabel, strings.Join(undeclared, ", "))
+	}
+	satisfying := satisfyingNodeTypes(labels, s)
+	switch len(satisfying) {
+	case 0:
+		return schema.NodeType{}, fmt.Errorf("%w: no node type satisfies %s; declared types carrying these labels: %s", ErrUnknownLabel, key, formatDeclaredCarrying(labels, s))
+	case 1:
+		return s.Nodes[satisfying[0]], nil
+	default:
+		return schema.NodeType{}, fmt.Errorf("%w: %s satisfied by more than one declared node type: %s", ErrAmbiguousLabel, key, formatKeys(satisfying))
+	}
+}
+
+// undeclaredLabels returns the labels in `labels` that appear as a component
+// of no declared node type's key. Order-preserving so the diagnostic reads in
+// query-source order.
+func undeclaredLabels(labels graph.LabelSet, s schema.Schema) []string {
+	var out []string
+	for _, l := range labels {
+		if !labelDeclared(l, s) {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// satisfyingNodeTypes returns the declared node type keys whose label set is a
+// proper superset of `labels`. The exact-match case is handled by the caller
+// so it never appears here.
+func satisfyingNodeTypes(labels graph.LabelSet, s schema.Schema) []graph.LabelSetKey {
+	want := make(map[string]struct{}, len(labels))
+	for _, l := range labels {
+		want[l] = struct{}{}
+	}
+	var out []graph.LabelSetKey
+	for k := range s.Nodes {
+		declared := make(map[string]struct{})
+		for _, l := range k.Split() {
+			declared[l] = struct{}{}
+		}
+		ok := true
+		for l := range want {
+			if _, has := declared[l]; !has {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			out = append(out, k)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+// formatDeclaredCarrying lists declared node type keys that carry ANY of the
+// queried labels — the "here are the near misses" hint. Used only when the
+// satisfying set is empty but every queried label is declared somewhere.
+func formatDeclaredCarrying(labels graph.LabelSet, s schema.Schema) string {
+	want := make(map[string]struct{}, len(labels))
+	for _, l := range labels {
+		want[l] = struct{}{}
+	}
+	var keys []graph.LabelSetKey
+	for k := range s.Nodes {
+		for _, l := range k.Split() {
+			if _, has := want[l]; has {
+				keys = append(keys, k)
+				break
+			}
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	return formatKeys(keys)
+}
+
+func formatKeys(keys []graph.LabelSetKey) string {
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = string(k)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // labelDeclared reports whether label appears as a component of any declared
