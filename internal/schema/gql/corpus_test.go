@@ -16,6 +16,7 @@ import (
 
 	"github.com/areqag/gqlc/internal/grammar/gql/gen"
 	"github.com/areqag/gqlc/internal/schema"
+	"github.com/areqag/gqlc/internal/schema/gql/annexd"
 )
 
 // The corpus is a third fixture category beside valid/ and invalid/: every file
@@ -50,10 +51,16 @@ const (
 	wantCorpusResolving = 37
 )
 
-// featureValues is the closed set the feature field may take. Closed rather than
-// documented, because "do not cite an Annex D id" was a rule with no mechanism, and
-// it was violated three times in nine entries before anyone noticed.
-var featureValues = []string{"mandatory", "unsourced"}
+// isValidFeature reports whether v is an accepted value of corpusEntry.feature:
+// one of the two special-case tokens, or an Annex D optional-feature code from
+// the vendored ISO list. A closed check rather than a documented one, because
+// "do not cite an Annex D id" was a rule with no mechanism, and it was violated
+// three times in nine entries before anyone noticed. Now an id that is not in
+// annexd.Codes is rejected mechanically, so a fabricated one (e.g. GG99, which
+// is not in the vendored snapshot) cannot land whatever the author intended.
+func isValidFeature(v string) bool {
+	return v == "mandatory" || v == "unsourced" || annexd.Has(v)
+}
 
 const corpusDir = fixtureDir + "/corpus"
 
@@ -79,15 +86,29 @@ type corpusEntry struct {
 	// sentinel is required iff outcome is unsupported, and must be one of
 	// allSentinels so the corpus cannot pin to an ad-hoc error.
 	sentinel error
-	// feature is "mandatory" if declining the construct would be non-conformant, or
-	// "unsourced" if that is not known. Those are the only two values: there is no
-	// Annex D material in the repo to check an id against, so every id written here
-	// was written from memory, and three of the first nine entries carried one.
+	// feature classifies the construct's Annex D status. Three accepted shapes:
 	//
-	// "mandatory" on an unsupported entry is not a mistake — it declares a known
-	// conformance gap, and bead is what closes it. "unsourced" is for a construct
-	// declined permanently, where the claim being made is "declining this is still
-	// conformant", which is the one thing nothing in this repo can support.
+	//   - "mandatory": declining this is non-conformant. On a resolves entry it
+	//     is free; on an unsupported entry it declares a known conformance gap,
+	//     and bead is what closes it.
+	//   - an Annex D optional-feature code (e.g. "GG02", "GH02"): the construct
+	//     is an ISO GQL optional feature, so declining it is conformant. The
+	//     accepted set is annexd.Codes, sourced from ISO's normative XML
+	//     digital-artefact — see internal/schema/gql/annexd/SOURCE.md.
+	//   - "unsourced": we do not know. This is honest ONLY for a construct
+	//     declined permanently, where the claim being made is "declining this
+	//     is still conformant" — the one thing no snapshot of the standard can
+	//     support without knowing the construct.
+	//
+	// isValidFeature is the mechanism. An id not in annexd.Codes (e.g. a
+	// plausible but fabricated "GG99") is rejected, which closes the class where
+	// the fabricator invents a code that does not exist at all. It does NOT
+	// close the class where a real ISO code is applied to the wrong construct —
+	// the earlier fabrications caught both: GG02 was cited on LIKE and GE03 on
+	// undirected patterns; the codes are real but they name different
+	// constructs, and only per-file research against the standard catches that.
+	// So citing a real code on the right construct is on the author, not on
+	// this guard.
 	feature string
 	// bead is the issue that will make an unsupported entry resolve. A construct
 	// declined permanently names gqlc-0ri, the epic's ADR bead, rather than a
@@ -351,8 +372,8 @@ func TestCorpusManifest(t *testing.T) {
 		require.NotContains(t, files, entry.file, "duplicate manifest entry")
 		files = append(files, entry.file)
 
-		require.Contains(t, featureValues, entry.feature,
-			`%s: feature must be "mandatory" or "unsourced"; an Annex D id cannot be checked against anything in this repo`, entry.file)
+		require.True(t, isValidFeature(entry.feature),
+			`%s: feature %q is not accepted; must be "mandatory", "unsourced", or an Annex D optional-feature code from annexd.Codes (see internal/schema/gql/annexd/SOURCE.md)`, entry.file, entry.feature)
 
 		switch entry.outcome {
 		case resolves:
@@ -640,6 +661,21 @@ func TestExemptionDemands(t *testing.T) {
 				require.NotContains(t, got, notWant)
 			}
 		})
+	}
+}
+
+// TestIsValidFeature pins the corpusEntry.feature guard: the two special-case
+// tokens and at least one real Annex D code are accepted, and a plausible-but-
+// fabricated id is rejected. The rejection half is the one that matters — that
+// is the class this bead exists to close (bd gqlc-cfj) and a check that admits
+// any /^G../ shape would restore the fabrication hole with a regex over it.
+func TestIsValidFeature(t *testing.T) {
+	for _, v := range []string{"mandatory", "unsourced", "GG02", "GH02", "G002", "GV90"} {
+		require.True(t, isValidFeature(v), "isValidFeature(%q) is false; a special-case token or real Annex D code must be accepted", v)
+	}
+
+	for _, v := range []string{"GG99", "GX99", "gg02", "GG02 ", "", "Mandatory", "unsourced ", "annexd"} {
+		require.False(t, isValidFeature(v), "isValidFeature(%q) is true; a value outside the accepted set must be rejected", v)
 	}
 }
 
