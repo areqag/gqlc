@@ -119,10 +119,18 @@ type corpusEntry struct {
 // both directions, so a row landing before its .gql file turns the manifest red in
 // every author's worktree at once, and a shared list would make every semantic case
 // an edit to a file its author does not own.
+//
+// spelling is what keeps a case honest. file, bead and why are three strings that
+// describe a construct without being tied to one, so deleting the construct the case
+// exists to record — rewriting CHAR(4) to STRING and leaving the header comment
+// claiming otherwise — leaves the whole package green. Coverage cannot object, since
+// being invisible to coverage is what makes it a semantic case. Requiring the source
+// to contain the spelling is the only thing here that reads the file's content.
 type semanticCase struct {
-	file string
-	bead string
-	why  string
+	file     string
+	bead     string
+	why      string
+	spelling string
 }
 
 // corpusArea is one author's share of the corpus: the path prefixes they own and the
@@ -290,7 +298,17 @@ func TestCorpusManifest(t *testing.T) {
 	for _, sc := range cases {
 		require.NotEmpty(t, sc.bead, "%s: a semantic case needs the bead that will fix it", sc.file)
 		require.NotEmpty(t, sc.why, "%s: a semantic case needs the reason no gate can catch it", sc.file)
+		require.NotEmpty(t, sc.spelling, "%s: a semantic case needs the spelling it exists to record", sc.file)
 		require.NotContains(t, semanticBeads, sc.file, "duplicate semantic case")
+
+		// The only check here that reads the file. Everything else about a semantic
+		// case is prose, so without this the construct can be edited out from under
+		// a row that still claims it and nothing goes red.
+		src, err := os.ReadFile(filepath.Join(corpusDir, sc.file))
+		require.NoError(t, err, "%s: semantic case names a file that does not exist", sc.file)
+		require.Contains(t, string(src), sc.spelling,
+			"%s: a semantic case is about a construct the model gets wrong, so the file must still spell %q", sc.file, sc.spelling)
+
 		semanticBeads[sc.file] = sc.bead
 		semanticFiles = append(semanticFiles, sc.file)
 	}

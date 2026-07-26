@@ -212,28 +212,36 @@ var corpusAreaD1 = []corpusEntry{
 // model known to be wrong.
 var semanticAreaD1 = []semanticCase{
 	{
-		file: "18.9-value-type/scalar_char_fixed_length.gql",
-		bead: "gqlc-h9n.16",
-		why:  "CHAR(4) resolves to the same PropertyType as bare CHAR (and bare STRING), because PropertyType has no length field; the discarded fixedLength is unrecoverable downstream",
+		file:     "18.9-value-type/scalar_char_fixed_length.gql",
+		bead:     "gqlc-h9n.16",
+		why:      "CHAR(4) resolves to the same PropertyType as bare CHAR (and bare STRING), because PropertyType has no length field; the discarded fixedLength is unrecoverable downstream",
+		spelling: "CHAR(4)",
 	},
 	{
-		file: "18.9-value-type/scalar_decimal_precision_scale.gql",
-		bead: "gqlc-h9n.16",
-		why:  "DECIMAL(10,2) resolves to the same PropertyType as bare DECIMAL, because PropertyType has no length field; the discarded precision and scale are unrecoverable downstream",
+		file:     "18.9-value-type/scalar_decimal_precision_scale.gql",
+		bead:     "gqlc-h9n.16",
+		why:      "DECIMAL(10,2) resolves to the same PropertyType as bare DECIMAL, because PropertyType has no length field; the discarded precision and scale are unrecoverable downstream",
+		spelling: "DECIMAL(10,2)",
 	},
 	{
-		file: "18.9-value-type/scalar_string_max_length.gql",
-		bead: "gqlc-h9n.16",
-		why:  "STRING(5) resolves to the same PropertyType as bare STRING, because PropertyType has no length field; the discarded maxLength is unrecoverable downstream",
+		file:     "18.9-value-type/scalar_string_max_length.gql",
+		bead:     "gqlc-h9n.16",
+		why:      "STRING(5) resolves to the same PropertyType as bare STRING, because PropertyType has no length field; the discarded maxLength is unrecoverable downstream",
+		spelling: "STRING(5)",
 	},
 	{
 		file: "18.9-value-type/scalar_string_min_max_length.gql",
 		bead: "gqlc-h9n.16",
-		why:  "STRING(2,5) resolves to the same PropertyType as bare STRING, because PropertyType has no length field; both the discarded minLength and maxLength are unrecoverable downstream",
+		why:  "STRING(2, 5) resolves to the same PropertyType as bare STRING, because PropertyType has no length field; both the discarded minLength and maxLength are unrecoverable downstream",
+		// The file spells this with a space after the comma and the other length
+		// cases do not; ISO allows either, and the point of pinning the exact
+		// spelling is lost if it is normalised to match its neighbours here.
+		spelling: "STRING(2, 5)",
 	},
 	{
-		file: "18.9-value-type/scalar_varchar_max_length.gql",
-		bead: "gqlc-h9n.16",
-		why:  "VARCHAR(10) resolves to the same PropertyType as bare VARCHAR (and bare STRING), because PropertyType has no length field; the discarded maxLength is unrecoverable downstream",
+		file:     "18.9-value-type/scalar_varchar_max_length.gql",
+		bead:     "gqlc-h9n.16",
+		why:      "VARCHAR(10) resolves to the same PropertyType as bare VARCHAR (and bare STRING), because PropertyType has no length field; the discarded maxLength is unrecoverable downstream",
+		spelling: "VARCHAR(10)",
 	},
 }

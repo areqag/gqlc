@@ -94,5 +94,8 @@ var semanticAreaC = []semanticCase{
 		file: "18.3-edge-type/kind_undirected_arc_directed.gql",
 		bead: "gqlc-h9n.3",
 		why:  "an UNDIRECTED edge kind on a directed arc resolves to the same EdgeType as DIRECTED, because EdgeType has no undirectedness field; the corpus cannot detect the reinterpretation",
+		// Both halves, because each alone is a construct the corpus covers elsewhere
+		// and resolves correctly — it is the combination that is the case.
+		spelling: "UNDIRECTED EDGE Mentions (a) -[:MENTIONS]-> (b)",
 	},
 }
