@@ -468,6 +468,162 @@ func (s *ParserSuite) TestEndpointAliasDiagnostics() {
 	}
 }
 
+// TestEdgeKindArcConsistency pins the two halves of gqlc-h9n.3: the decision
+// that an explicit edgeKind must not contradict the arc/connector direction, and
+// the ordering that fires the mismatch sentinel *before* the accepted-subset
+// ErrUndirectedEdge rejection when both would apply. The matrix covers both edge
+// forms — the pattern form (where edgeKind is optional) and the phrase form
+// (where edgeKind is mandatory, GQL.g4:1558) — because EnterEdgeTypePattern and
+// EnterEdgeTypePhrase collect independently and each has to read the kind on
+// its own; dropping the check from either leaves that form silently reinterpreting.
+//
+// The bare-kind rows are what stops a lazier fix passing: they pin that a
+// no-kind pattern still resolves, i.e. the mismatch is a kind-vs-arc check and
+// not just "any UNDIRECTED token forbids a directed arc". The UNDIRECTED+~ and
+// DIRECTED+-> agreement rows pin that consistent kinds are not swept up as
+// mismatches. The DIRECTED+~ row pins the ordering: without the mismatch firing
+// first, that spelling reports ErrUndirectedEdge and names the wrong mistake.
+func TestEdgeKindArcConsistency(t *testing.T) {
+	// Pattern form. edgeTypeName is required whenever any of the prefix is
+	// present (GQL.g4:1553), so kind-with-name is the only pattern-form spelling
+	// that reaches an edge-kind token; the bare-arc rows have no prefix at all.
+	patternCases := []struct {
+		name string
+		src  string
+		want error // nil = expect success
+	}{
+		{
+			// Bare arc, no kind. The common case; regressing this would break
+			// almost every existing corpus file.
+			name: "bare right arrow with no kind",
+			src:  `(a) -[:E]-> (b)`,
+			want: nil,
+		},
+		{
+			// Left arrow with no kind. Canonicalisation invariant from PR #422.
+			name: "bare left arrow with no kind",
+			src:  `(a) <-[:E]- (b)`,
+			want: nil,
+		},
+		{
+			// Bare undirected arc still hits the accepted-subset rejection.
+			name: "bare undirected arc with no kind stays ErrUndirectedEdge",
+			src:  `(a) ~[:E]~ (b)`,
+			want: ErrUndirectedEdge,
+		},
+		{
+			// Kind agrees with arc, redundant but consistent — accept.
+			name: "DIRECTED with right arrow is redundant and accepted",
+			src:  `DIRECTED EDGE TYPE E (a) -[:E]-> (b)`,
+			want: nil,
+		},
+		{
+			// Same, left arrow: canonicalisation still runs.
+			name: "DIRECTED with left arrow is redundant and accepted",
+			src:  `DIRECTED EDGE TYPE E (a) <-[:E]- (b)`,
+			want: nil,
+		},
+		{
+			// Contradiction *and* accepted-subset rejection both apply here. The
+			// mismatch must win — reordering the checks in the listener would
+			// send this to ErrUndirectedEdge, which names the wrong mistake.
+			name: "DIRECTED with undirected arc is the mismatch, not the undirected-arc gap",
+			src:  `DIRECTED EDGE TYPE E (a) ~[:E]~ (b)`,
+			want: ErrEdgeKindArcMismatch,
+		},
+		{
+			// The headline defect from the bead — silent reinterpretation today.
+			name: "UNDIRECTED with right arrow is a mismatch",
+			src:  `UNDIRECTED EDGE TYPE E (a) -[:E]-> (b)`,
+			want: ErrEdgeKindArcMismatch,
+		},
+		{
+			// Left arrow, same mismatch — canonicalisation must not launder it.
+			name: "UNDIRECTED with left arrow is a mismatch",
+			src:  `UNDIRECTED EDGE TYPE E (a) <-[:E]- (b)`,
+			want: ErrEdgeKindArcMismatch,
+		},
+		{
+			// Kind agrees with arc (both say undirected), so *not* a mismatch —
+			// falls through to the accepted-subset rejection.
+			name: "UNDIRECTED with undirected arc is not a mismatch, stays ErrUndirectedEdge",
+			src:  `UNDIRECTED EDGE TYPE E (a) ~[:E]~ (b)`,
+			want: ErrUndirectedEdge,
+		},
+	}
+
+	for _, tc := range patternCases {
+		t.Run("pattern/"+tc.name, func(t *testing.T) {
+			src := `CREATE PROPERTY GRAPH TYPE T AS {
+				(a :A { id :: INT }),
+				(b :B { id :: INT }),
+				` + tc.src + `
+			}`
+			got, err := New().Parse(strings.NewReader(src))
+			if tc.want == nil {
+				require.NoError(t, err)
+				require.Len(t, got.Edges, 1, "consistent kind/arc must yield exactly one edge")
+				return
+			}
+			require.ErrorIs(t, err, tc.want)
+			require.Equal(t, schema.Schema{}, got, "model must be the zero value on error")
+		})
+	}
+
+	// Phrase form. edgeKind is mandatory here, so every phrase-form spelling
+	// carries a kind and can trip the mismatch. The `TO` connector is the same
+	// alternative as `->` (connectorPointingRight) but a separate token — worth
+	// pinning that the mismatch fires against it too, since the listener reads
+	// EndpointPairDirected, not the connector token.
+	phraseCases := []struct {
+		name string
+		src  string
+		want error
+	}{
+		{"DIRECTED CONNECTING right arrow accepted", `DIRECTED EDGE :E CONNECTING (a -> b)`, nil},
+		{"DIRECTED CONNECTING left arrow accepted", `DIRECTED EDGE :E CONNECTING (a <- b)`, nil},
+		{"DIRECTED CONNECTING TO accepted", `DIRECTED EDGE :E CONNECTING (a TO b)`, nil},
+		{
+			"DIRECTED CONNECTING ~ is the mismatch, not ErrUndirectedEdge",
+			`DIRECTED EDGE :E CONNECTING (a ~ b)`, ErrEdgeKindArcMismatch,
+		},
+		{
+			"UNDIRECTED CONNECTING right arrow is a mismatch",
+			`UNDIRECTED EDGE :E CONNECTING (a -> b)`, ErrEdgeKindArcMismatch,
+		},
+		{
+			"UNDIRECTED CONNECTING left arrow is a mismatch",
+			`UNDIRECTED EDGE :E CONNECTING (a <- b)`, ErrEdgeKindArcMismatch,
+		},
+		{
+			"UNDIRECTED CONNECTING TO is a mismatch",
+			`UNDIRECTED EDGE :E CONNECTING (a TO b)`, ErrEdgeKindArcMismatch,
+		},
+		{
+			"UNDIRECTED CONNECTING ~ is not a mismatch, stays ErrUndirectedEdge",
+			`UNDIRECTED EDGE :E CONNECTING (a ~ b)`, ErrUndirectedEdge,
+		},
+	}
+
+	for _, tc := range phraseCases {
+		t.Run("phrase/"+tc.name, func(t *testing.T) {
+			src := `CREATE PROPERTY GRAPH TYPE T AS {
+				(a :A { id :: INT }),
+				(b :B { id :: INT }),
+				` + tc.src + `
+			}`
+			got, err := New().Parse(strings.NewReader(src))
+			if tc.want == nil {
+				require.NoError(t, err)
+				require.Len(t, got.Edges, 1, "consistent kind/connector must yield exactly one edge")
+				return
+			}
+			require.ErrorIs(t, err, tc.want)
+			require.Equal(t, schema.Schema{}, got, "model must be the zero value on error")
+		})
+	}
+}
+
 // TestNestedGraphTypeSpecificationElementsNotCollected pins that an element type
 // declared inside a closedGraphReferenceValueType body (GQL.g4:1926, a whole
 // graph type nested as a property value type) does not enter the outer graph
@@ -601,6 +757,7 @@ var invalidFixtures = map[string]error{
 var allSentinels = []error{
 	ErrLabelImplication,
 	ErrUndirectedEdge,
+	ErrEdgeKindArcMismatch,
 	ErrUnknownEndpoint,
 	ErrEndpointNotAlias,
 	ErrUnsupportedType,

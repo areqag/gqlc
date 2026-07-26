@@ -8,6 +8,7 @@ import "errors"
 var (
 	ErrLabelImplication            = errors.New(`label implication ("=>") is not supported`)
 	ErrUndirectedEdge              = errors.New("undirected edges are not supported")
+	ErrEdgeKindArcMismatch         = errors.New("edge kind contradicts arc direction")
 	ErrUnknownEndpoint             = errors.New("edge endpoint references an undeclared node type")
 	ErrEndpointNotAlias            = errors.New("edge endpoint names a node type instead of a local alias bound to one")
 	ErrEndpointFillerHasProperties = errors.New("edge endpoint filler carries properties: an inline endpoint may only name a node type by its label set")

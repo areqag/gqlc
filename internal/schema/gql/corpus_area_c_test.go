@@ -18,11 +18,12 @@ var corpusAreaC = []corpusEntry{
 		reason:   "an undirected arc has no canonical source -> target identity, which EdgeKey requires",
 	},
 	{
-		file:    "18.3-edge-type/kind_undirected_arc_directed.gql",
-		outcome: resolves,
-		feature: "mandatory",
-		bead:    "gqlc-h9n.3",
-		reason:  "the UNDIRECTED kind is discarded and the edge resolves as if it were DIRECTED",
+		file:     "18.3-edge-type/kind_undirected_arc_directed.gql",
+		outcome:  unsupported,
+		sentinel: ErrEdgeKindArcMismatch,
+		feature:  "mandatory",
+		bead:     "gqlc-h9n.3",
+		reason:   "the declared edgeKind (UNDIRECTED) contradicts the arc direction (->); rejected rather than silently reinterpreted as DIRECTED",
 	},
 	{
 		file:    "18.3-edge-type/phrase_form.gql",
@@ -42,10 +43,10 @@ var corpusAreaC = []corpusEntry{
 	{
 		file:     "18.3-edge-type/phrase_form_undirected_connector.gql",
 		outcome:  unsupported,
-		sentinel: ErrUndirectedEdge,
+		sentinel: ErrEdgeKindArcMismatch,
 		feature:  "mandatory",
 		bead:     "gqlc-h9n.3",
-		reason:   "the `~` connector gives endpointPairUndirected, whose two ends have no canonical source -> target identity — the same reason pattern_undirected.gql is rejected, reached through the phrase door",
+		reason:   "kind=DIRECTED with the `~` (undirected) connector is a contradiction: the mismatch fires before the accepted-subset check that would otherwise report ErrUndirectedEdge for the bare connector",
 	},
 	{
 		file:    "18.3-edge-type/phrase_form_left_arrow.gql",
@@ -76,14 +77,10 @@ var corpusAreaC = []corpusEntry{
 }
 
 // semanticAreaC holds this area's semantic cases: files above that resolve to a
-// model known to be wrong.
-var semanticAreaC = []semanticCase{
-	{
-		file: "18.3-edge-type/kind_undirected_arc_directed.gql",
-		bead: "gqlc-h9n.3",
-		why:  "an UNDIRECTED edge kind on a directed arc resolves to the same EdgeType as DIRECTED, because EdgeType has no undirectedness field; the corpus cannot detect the reinterpretation",
-		// Both halves, because each alone is a construct the corpus covers elsewhere
-		// and resolves correctly — it is the combination that is the case.
-		spelling: "UNDIRECTED EDGE Mentions (a) -[:MENTIONS]-> (b)",
-	},
-}
+// model known to be wrong. Empty today: gqlc-h9n.3 promoted the one entry that
+// lived here from "resolves-but-wrong" to a proper rejection with a sentinel,
+// so the corpus itself now records the outcome and no semantic case is needed.
+// The list stays declared (rather than nil) because corpusManifest requires
+// every area to name its semantic slice, so a future case cannot land here
+// silently — see corpus_test.go.
+var semanticAreaC = []semanticCase{}
