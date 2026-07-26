@@ -47,7 +47,7 @@ import (
 // syntax error, because an identifier is not a schemaReference (GQL.g4:1469).
 const (
 	wantCorpusEntries   = 86
-	wantCorpusResolving = 32
+	wantCorpusResolving = 38
 )
 
 // featureValues is the closed set the feature field may take. Closed rather than

@@ -132,19 +132,76 @@ func (l *listener) EnterNodeTypePattern(c *gen.NodeTypePatternContext) {
 	l.raw.nodes = append(l.raw.nodes, n)
 }
 
-// EnterNodeTypePhrase and EnterEdgeTypePhrase reject the phrase form of an
-// element type (`NODE TYPE Person :Person`) in favour of the pattern form
-// (`(:Person)`). Both are separate grammar alternatives of
-// nodeTypeSpecification / edgeTypeSpecification, so without these handlers a
-// phrase-form declaration parses, collects nothing, and yields an empty schema
-// with a nil error — putting the diagnostic on whatever query later references
-// the missing type instead of on the schema (gqlc-uhb).
-func (l *listener) EnterNodeTypePhrase(_ *gen.NodeTypePhraseContext) {
-	l.fail(ErrUnsupportedPhraseForm)
+// EnterNodeTypePhrase collects the phrase form (`NODE TYPE Person :Person { ... }
+// AS p`), the other alternative of nodeTypeSpecification. It carries the same
+// information as the pattern form and differs only in where the parts sit: the
+// name and the filler are both under nodeTypePhraseFiller, and the alias follows
+// AS rather than opening the parens.
+func (l *listener) EnterNodeTypePhrase(c *gen.NodeTypePhraseContext) {
+	filler := c.NodeTypePhraseFiller()
+
+	n := rawNode{}
+	if name := filler.NodeTypeName(); name != nil {
+		n.name = name.Identifier().GetText()
+	}
+	// As in the pattern form the alias is optional, and a node without one is
+	// still fully supported — it just cannot be named by an edge endpoint.
+	if alias := c.LocalNodeTypeAlias(); alias != nil {
+		n.alias = alias.GetText()
+	}
+
+	labels, props, err := l.nodeContent(filler.NodeTypeFiller())
+	if err != nil {
+		l.fail(err)
+		return
+	}
+	n.labels = labels
+	n.props = props
+
+	l.raw.nodes = append(l.raw.nodes, n)
 }
 
-func (l *listener) EnterEdgeTypePhrase(_ *gen.EdgeTypePhraseContext) {
-	l.fail(ErrUnsupportedPhraseForm)
+// EnterEdgeTypePhrase collects the phrase form of an edge type (`DIRECTED EDGE
+// TYPE Wrote :WROTE { ... } CONNECTING (a -> b)`). Its endpoints are alias-only:
+// endpointPairPointingRight and its siblings take a bare
+// sourceNodeTypeAlias/destinationNodeTypeAlias where the pattern form's
+// sourceNodeTypeReference also admits an inline nodeTypeFiller, so a CONNECTING
+// endpoint naming a node type rather than an alias it binds is rejected during
+// resolution (ErrEndpointNotAlias).
+func (l *listener) EnterEdgeTypePhrase(c *gen.EdgeTypePhraseContext) {
+	directed := c.EndpointPairPhrase().EndpointPair().EndpointPairDirected()
+	if directed == nil {
+		// Not about errors, and the same shape as EnterEdgeTypePattern: this rule
+		// fires for both endpoint pair directions and only the directed one
+		// becomes an edge. The undirected pair is rejected by
+		// EnterEndpointPairUndirected.
+		return
+	}
+
+	e := rawEdge{}
+	filler := c.EdgeTypePhraseFiller()
+	if name := filler.EdgeTypeName(); name != nil {
+		e.name = name.Identifier().GetText()
+	}
+	// Both directed alternatives name their ends by role, so `(b <- a)` needs no
+	// swap here — the grammar already reports a as the source.
+	if r := directed.EndpointPairPointingRight(); r != nil {
+		e.source = rawEndpoint{alias: r.SourceNodeTypeAlias().GetText()}
+		e.target = rawEndpoint{alias: r.DestinationNodeTypeAlias().GetText()}
+	} else if lft := directed.EndpointPairPointingLeft(); lft != nil {
+		e.source = rawEndpoint{alias: lft.SourceNodeTypeAlias().GetText()}
+		e.target = rawEndpoint{alias: lft.DestinationNodeTypeAlias().GetText()}
+	}
+
+	labels, props, err := l.edgeContent(filler.EdgeTypeFiller())
+	if err != nil {
+		l.fail(err)
+		return
+	}
+	e.labels = labels
+	e.props = props
+
+	l.raw.edges = append(l.raw.edges, e)
 }
 
 // EnterNodeTypeKeyLabelSet and EnterEdgeTypeKeyLabelSet reject the
@@ -167,7 +224,15 @@ func (l *listener) rejectLabelImplication(implies antlr.TerminalNode) {
 	}
 }
 
+// EnterEdgeTypePatternUndirected and EnterEndpointPairUndirected reject the two
+// spellings of an undirected edge — the pattern form's `~[ ]~` arc and the phrase
+// form's `CONNECTING (a ~ b)` — for the same reason: EdgeKey is a source->target
+// triple and an undirected edge has no such orientation to key on.
 func (l *listener) EnterEdgeTypePatternUndirected(_ *gen.EdgeTypePatternUndirectedContext) {
+	l.fail(ErrUndirectedEdge)
+}
+
+func (l *listener) EnterEndpointPairUndirected(_ *gen.EndpointPairUndirectedContext) {
 	l.fail(ErrUndirectedEdge)
 }
 

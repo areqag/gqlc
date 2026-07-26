@@ -228,6 +228,152 @@ func (s *ParserSuite) TestEdgeTypeName() {
 	s.Equal("Authorship", e.Name)
 }
 
+// graphType wraps an element type list in the smallest graph type that carries
+// it, so a case below reads as the declarations it is about.
+func graphType(body string) string {
+	return "CREATE PROPERTY GRAPH TYPE T AS {" + body + "}"
+}
+
+// TestPhraseFormEquivalence pins the phrase form against the pattern form: the
+// same graph type spelled either way resolves to the same model. Comparing whole
+// models is what makes it worth writing — a spot check on the label set would pass
+// a listener that dropped the type name, the alias or the properties, which is the
+// failure the phrase form shipped with.
+//
+// The node and edge counts are not redundant with the comparison. Two spellings
+// that both collect nothing are equal, and that is precisely the defect: the
+// counts are what stop the equality holding vacuously.
+func (s *ParserSuite) TestPhraseFormEquivalence() {
+	cases := []struct {
+		name    string
+		pattern string
+		phrase  string
+		nodes   int
+		edges   int
+	}{
+		{
+			name:    "named node with alias and properties",
+			pattern: `NODE TYPE PersonType (p :Person { id :: INT NOT NULL, name :: STRING })`,
+			phrase:  `NODE TYPE PersonType :Person { id :: INT NOT NULL, name :: STRING } AS p`,
+			nodes:   1,
+		},
+		{
+			name:    "node with neither name nor alias",
+			pattern: `(:Person { id :: INT })`,
+			phrase:  `NODE :Person { id :: INT }`,
+			nodes:   1,
+		},
+		{
+			name:    "multi-label node",
+			pattern: `(:Employee&Person { id :: INT })`,
+			phrase:  `NODE TYPE :Employee&Person { id :: INT }`,
+			nodes:   1,
+		},
+		{
+			name:    "node declared by LABEL keyword and no properties",
+			pattern: `NODE TYPE PersonType (LABEL Person)`,
+			phrase:  `NODE TYPE PersonType LABEL Person`,
+			nodes:   1,
+		},
+		{
+			name: "edge with a name, properties and aliased endpoints",
+			pattern: `(a :Person { id :: INT }), (b :Post { id :: INT }),
+				DIRECTED EDGE TYPE Wrote (a) -[:WROTE { since :: TIMESTAMP }]-> (b)`,
+			phrase: `NODE TYPE :Person { id :: INT } AS a, NODE TYPE :Post { id :: INT } AS b,
+				DIRECTED EDGE TYPE Wrote :WROTE { since :: TIMESTAMP } CONNECTING (a -> b)`,
+			nodes: 2,
+			edges: 1,
+		},
+		{
+			// TO and -> are both connectorPointingRight, so this is the same edge as
+			// the case above spelled with the other connector. It also pins that a
+			// bare TO reaches the directed endpoint pair at all: endpointPair lists
+			// endpointPairDirected first and connectorUndirected shares the token, so
+			// were prediction to go the other way this would be ErrUndirectedEdge.
+			pattern: `(a :Person { id :: INT }), (b :Post { id :: INT }),
+				(a) -[:WROTE]-> (b)`,
+			phrase: `NODE :Person { id :: INT } AS a, NODE :Post { id :: INT } AS b,
+				DIRECTED EDGE :WROTE CONNECTING (a TO b)`,
+			name:  "TO connector is the arrow",
+			nodes: 2,
+			edges: 1,
+		},
+		{
+			// Both spellings name their ends by role, so both are the edge Post ->
+			// Person and neither needs the listener to swap anything.
+			name: "left-pointing endpoints canonicalise to source->target",
+			pattern: `(a :Person { id :: INT }), (b :Post { id :: INT }),
+				(a) <-[:CITED]- (b)`,
+			phrase: `NODE :Person { id :: INT } AS a, NODE :Post { id :: INT } AS b,
+				DIRECTED EDGE :CITED CONNECTING (a <- b)`,
+			nodes: 2,
+			edges: 1,
+		},
+	}
+
+	for _, tt := range cases {
+		s.Run(tt.name, func() {
+			pattern, err := New().Parse(strings.NewReader(graphType(tt.pattern)))
+			s.Require().NoError(err)
+			s.Require().Len(pattern.Nodes, tt.nodes)
+			s.Require().Len(pattern.Edges, tt.edges)
+
+			phrase, err := New().Parse(strings.NewReader(graphType(tt.phrase)))
+			s.Require().NoError(err)
+
+			s.Require().Equal(pattern, phrase)
+		})
+	}
+}
+
+// TestEndpointAliasDiagnostics separates the two ways an endpoint can fail to name
+// an alias. Both slots the grammar reads as an alias — the phrase form's
+// CONNECTING pair and the pattern form's parenthesised reference — take a bare
+// identifier, so an author who writes the node type's name there gets a lookup
+// miss for a type that is declared on the screen in front of them. Distinguishing
+// that from a genuine typo is the whole value of ErrEndpointNotAlias, so the
+// undeclared case is here to keep the distinction load-bearing.
+func (s *ParserSuite) TestEndpointAliasDiagnostics() {
+	cases := []struct {
+		name string
+		src  string
+		want error
+	}{
+		{
+			name: "phrase endpoint names a node type that binds no alias",
+			src: `NODE TYPE Person :Person { id :: INT },
+				DIRECTED EDGE :KNOWS CONNECTING (Person TO Person)`,
+			want: ErrEndpointNotAlias,
+		},
+		{
+			name: "phrase endpoint names a node type aliased under another name",
+			src: `NODE TYPE :Person { id :: INT } AS p,
+				DIRECTED EDGE :KNOWS CONNECTING (Person TO Person)`,
+			want: ErrEndpointNotAlias,
+		},
+		{
+			name: "pattern endpoint names a node type that binds no alias",
+			src: `(:Person { id :: INT }),
+				(Person) -[:KNOWS]-> (Person)`,
+			want: ErrEndpointNotAlias,
+		},
+		{
+			name: "phrase endpoint names nothing declared",
+			src: `NODE TYPE :Person { id :: INT } AS p,
+				DIRECTED EDGE :KNOWS CONNECTING (p TO Ghost)`,
+			want: ErrUnknownEndpoint,
+		},
+	}
+
+	for _, tt := range cases {
+		s.Run(tt.name, func() {
+			got, err := New().Parse(strings.NewReader(graphType(tt.src)))
+			s.Require().ErrorIs(err, tt.want)
+			s.Equal(schema.Schema{}, got, "model must be the zero value on error")
+		})
+	}
+}
+
 // TestInvalid asserts each invalid fixture produces its paired sentinel. A nil
 // wantErr means the fixture is a syntax error (no sentinel), so any non-nil
 // error from the syntax error listener satisfies it.
@@ -261,6 +407,7 @@ var invalidFixtures = map[string]error{
 	"label_implication_edge.gql": ErrLabelImplication,
 	"undirected_edge.gql":        ErrUndirectedEdge,
 	"unknown_endpoint.gql":       ErrUnknownEndpoint,
+	"endpoint_not_alias.gql":     ErrEndpointNotAlias,
 	"unsupported_type.gql":       ErrUnsupportedType,
 	"unnamed_node.gql":           ErrUnnamedNodeType,
 	"unnamed_edge.gql":           ErrUnnamedEdgeType,
@@ -278,8 +425,8 @@ var allSentinels = []error{
 	ErrLabelImplication,
 	ErrUndirectedEdge,
 	ErrUnknownEndpoint,
+	ErrEndpointNotAlias,
 	ErrUnsupportedType,
-	ErrUnsupportedPhraseForm,
 	ErrUnnamedNodeType,
 	ErrUnnamedEdgeType,
 	ErrDuplicateNodeType,

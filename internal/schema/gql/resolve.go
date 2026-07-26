@@ -30,7 +30,11 @@ func (r rawSchema) resolve() (schema.Schema, error) {
 		Edges: make(map[schema.EdgeKey]schema.EdgeType),
 	}
 
-	aliases := make(map[string]graph.LabelSetKey)
+	idx := nodeIndex{
+		aliases:  make(map[string]graph.LabelSetKey),
+		declared: make(map[string]bool),
+		types:    s.Nodes,
+	}
 	for _, n := range r.nodes {
 		if len(n.labels) == 0 {
 			return schema.Schema{}, ErrUnnamedNodeType
@@ -45,7 +49,13 @@ func (r rawSchema) resolve() (schema.Schema, error) {
 			Properties: n.props,
 		}
 		if n.alias != "" {
-			aliases[n.alias] = key
+			idx.aliases[n.alias] = key
+		}
+		if n.name != "" {
+			idx.declared[n.name] = true
+		}
+		for _, label := range n.labels {
+			idx.declared[label] = true
 		}
 	}
 
@@ -53,11 +63,11 @@ func (r rawSchema) resolve() (schema.Schema, error) {
 		if len(e.labels) == 0 {
 			return schema.Schema{}, ErrUnnamedEdgeType
 		}
-		source, err := e.source.resolve(aliases, s.Nodes)
+		source, err := e.source.resolve(idx)
 		if err != nil {
 			return schema.Schema{}, err
 		}
-		target, err := e.target.resolve(aliases, s.Nodes)
+		target, err := e.target.resolve(idx)
 		if err != nil {
 			return schema.Schema{}, err
 		}
@@ -76,14 +86,31 @@ func (r rawSchema) resolve() (schema.Schema, error) {
 	return s, nil
 }
 
+// nodeIndex is what an edge endpoint resolves against: the alias table, the
+// identifiers the declared node types answer to, and the node types themselves.
+//
+// declared exists only to sharpen a diagnostic. `CONNECTING (Person TO Person)`
+// puts an identifier in a slot the grammar reads as an alias, so a schema that
+// declares a Person node type without binding an alias to it fails — and reporting
+// that as an undeclared node type sends the author looking for a declaration that
+// is on the screen in front of them.
+type nodeIndex struct {
+	aliases  map[string]graph.LabelSetKey
+	declared map[string]bool
+	types    map[graph.LabelSetKey]schema.NodeType
+}
+
 // resolve maps an edge endpoint to the canonical key of the declared node type it
 // names: an alias via the alias table, or an inline filler via its own label set.
 // Either way the resolved type must have been declared.
-func (ref rawEndpoint) resolve(aliases map[string]graph.LabelSetKey, nodes map[graph.LabelSetKey]schema.NodeType) (graph.LabelSetKey, error) {
+func (ref rawEndpoint) resolve(idx nodeIndex) (graph.LabelSetKey, error) {
 	var key graph.LabelSetKey
 	if ref.alias != "" {
-		k, ok := aliases[ref.alias]
+		k, ok := idx.aliases[ref.alias]
 		if !ok {
+			if idx.declared[ref.alias] {
+				return "", ErrEndpointNotAlias
+			}
 			return "", ErrUnknownEndpoint
 		}
 		key = k
@@ -91,7 +118,7 @@ func (ref rawEndpoint) resolve(aliases map[string]graph.LabelSetKey, nodes map[g
 		key = ref.labels.Key()
 	}
 
-	if _, ok := nodes[key]; !ok {
+	if _, ok := idx.types[key]; !ok {
 		return "", ErrUnknownEndpoint
 	}
 	return key, nil
