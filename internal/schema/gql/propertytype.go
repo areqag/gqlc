@@ -52,13 +52,27 @@ func hasNotNull(t antlr.Tree) bool {
 // verboseBinaryExactNumericType are grammar-accepted (GQL.g4:1803, :1816) but
 // not modelled yet — tracked as gqlc-h9n.4.
 //
-// The parenthesised binary-width spellings (INT(8), UINT(64), FLOAT(32) …)
-// appear as explicit rows because their bit-width identifies a model constant
-// (INT(8) == INT8 per GQL.g4:1801). The length/character/decimal-digit
-// parenthetical (VARCHAR(255), DECIMAL(p,s), STRING(10)) is not a spelling of
-// a type the model already has — it is a qualifier ADR 0002 elects to drop,
-// and it does so via the truncated-spelling fallback in normaliseType.
-// A trailing NOT NULL is stripped before lookup.
+// The parenthesised binary-width spellings for INT / INTEGER / UINT (INT(8),
+// UINT(64) …) appear as explicit rows because their bit-width identifies a
+// model constant: the grammar makes each of them a sibling of an explicit
+// width token (INT(8) alongside INT8 under signedBinaryExactNumericType,
+// GQL.g4:1801; UINT(8) alongside UINT8 under unsignedBinaryExactNumericType,
+// :1814; INTEGER(8) alongside INTEGER8 under verboseBinaryExactNumericType,
+// :1827) and the parenthetical admits no scale.
+//
+// FLOAT(p) is not folded even though its bare form is here. Its parenthetical
+// is (LEFT_PAREN precision (COMMA scale)? RIGHT_PAREN) at GQL.g4:1849 — a
+// scale-bearing shape byte-identical to DECIMAL(p,s) at :1832, not to the
+// scale-free binary integer parentheticals. Nothing in the grammar establishes
+// that FLOAT's precision counts bits, so FLOAT(16) falls through to the
+// truncated-spelling fallback and lands on TypeFloat, exactly as today. Fixing
+// this needs an ISO 39075 citation, not an inference, and is deferred to
+// gqlc-h9n.28.
+//
+// The length/character/decimal-digit parenthetical (VARCHAR(255), DECIMAL(p,s),
+// STRING(10)) is not a spelling of a type the model already has — it is a
+// qualifier ADR 0002 elects to drop, and it does so via the truncated-spelling
+// fallback in normaliseType. A trailing NOT NULL is stripped before lookup.
 var typeSpellings = map[string]graph.PropertyType{
 	"STRING":    graph.TypeString,
 	"CHAR":      graph.TypeString,
@@ -129,11 +143,6 @@ var typeSpellings = map[string]graph.PropertyType{
 	"FLOAT64":          graph.TypeFloat64,
 	"FLOAT128":         graph.TypeFloat128,
 	"FLOAT256":         graph.TypeFloat256,
-	"FLOAT(16)":        graph.TypeFloat16,
-	"FLOAT(32)":        graph.TypeFloat32,
-	"FLOAT(64)":        graph.TypeFloat64,
-	"FLOAT(128)":       graph.TypeFloat128,
-	"FLOAT(256)":       graph.TypeFloat256,
 
 	"DECIMAL": graph.TypeDecimal,
 	"DEC":     graph.TypeDecimal,

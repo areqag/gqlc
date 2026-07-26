@@ -127,11 +127,15 @@ func TestPropertyLengthQualifiersDropped(t *testing.T) {
 }
 
 // TestPropertyBinaryWidthParenthesisedFolds covers the ISO GQL binary-width
-// parenthetical (GQL.g4:1801 `INT (LEFT_PAREN precision RIGHT_PAREN)?`) folding
-// onto the corresponding width constant, so `INT(8)` and `INT8` resolve to the
-// same PropertyType. Distinct from TestPropertyLengthQualifiersDropped, which
-// pins the decimal/character-length parenthetical (a different grammar branch)
-// as still being dropped.
+// parenthetical folding onto the corresponding width constant, so `INT(8)` and
+// `INT8` resolve to the same PropertyType. The fold applies only where the
+// grammar makes the parenthesised form a sibling of an explicit width token
+// AND the parenthetical admits no scale: signedBinaryExactNumericType
+// (GQL.g4:1801), unsignedBinaryExactNumericType (:1814), and
+// verboseBinaryExactNumericType (:1827). It does NOT apply to FLOAT(p), whose
+// parenthetical carries a scale slot (:1849) — that case is pinned in
+// TestPropertyBinaryWidthNonFolds. Distinct from TestPropertyLengthQualifiersDropped,
+// which pins the decimal/character-length parenthetical as still being dropped.
 func TestPropertyBinaryWidthParenthesisedFolds(t *testing.T) {
 	cases := []struct {
 		spelling string
@@ -157,12 +161,6 @@ func TestPropertyBinaryWidthParenthesisedFolds(t *testing.T) {
 		{"UINT(64)", graph.TypeUint64},
 		{"UINT(128)", graph.TypeUint128},
 		{"UINT(256)", graph.TypeUint256},
-
-		{"FLOAT(16)", graph.TypeFloat16},
-		{"FLOAT(32)", graph.TypeFloat32},
-		{"FLOAT(64)", graph.TypeFloat64},
-		{"FLOAT(128)", graph.TypeFloat128},
-		{"FLOAT(256)", graph.TypeFloat256},
 	}
 
 	for _, tt := range cases {
@@ -174,10 +172,24 @@ func TestPropertyBinaryWidthParenthesisedFolds(t *testing.T) {
 	}
 }
 
-// TestPropertyBinaryWidthNonFolds pins the widths that have no exact model
-// counterpart — they fall through to the truncated-spelling lookup and land on
-// the machine-word type. This is lossy (the author said 7 bits, the model says
-// machine int); gqlc-h9n.25 tracks whether that should change.
+// TestPropertyBinaryWidthNonFolds pins the parenthesised spellings that fall
+// through to the truncated-spelling lookup and land on the machine-word or
+// bare type. Three flavours here, kept in one table because they share the
+// fallback path:
+//
+//   - Bit-width binary integers with no exact model counterpart (INT(7),
+//     INT(10)). Lossy — the author said 7 bits, the model says machine int;
+//     gqlc-h9n.25 tracks whether that should change.
+//   - FLOAT(p) and FLOAT(p, s) (:1849). The parenthetical is byte-identical
+//     in shape to DECIMAL(p, s) at :1832, not to the binary integers, and
+//     nothing in the grammar establishes that FLOAT's precision counts bits.
+//     FLOAT(16) therefore resolves to TypeFloat — 64-bit, a safe superset —
+//     rather than the narrower TypeFloat16. gqlc-h9n.28 tracks the ISO
+//     citation that would decide the fold direction.
+//   - Length-qualifier and DECIMAL forms (STRING(5), VARCHAR(255), CHAR(8),
+//     DEC(8), DECIMAL(10, 2)). ADR 0002 drops these; overlap with
+//     TestPropertyLengthQualifiersDropped is intentional — this table pins
+//     that they still land on the fallback even after the width fold.
 func TestPropertyBinaryWidthNonFolds(t *testing.T) {
 	cases := []struct {
 		spelling string
@@ -185,7 +197,10 @@ func TestPropertyBinaryWidthNonFolds(t *testing.T) {
 	}{
 		{"INT(7)", graph.TypeInt},
 		{"INT(10)", graph.TypeInt},
+		{"FLOAT(16)", graph.TypeFloat},
 		{"FLOAT(24)", graph.TypeFloat},
+		{"FLOAT(32)", graph.TypeFloat},
+		{"FLOAT(64)", graph.TypeFloat},
 		{"FLOAT(10, 2)", graph.TypeFloat},
 		{"DEC(8)", graph.TypeDecimal},
 		{"STRING(5)", graph.TypeString},
@@ -234,9 +249,15 @@ func TestPropertyBinaryWidthWhitespaceAndCase(t *testing.T) {
 }
 
 // TestPropertyBinaryWidthSuffixAndParenthesisedEquivalent asserts the property
-// the bead is actually about: the suffix spelling and the parenthesised spelling
-// of the same construct resolve to the same PropertyType. A future edit that
-// breaks the equivalence fails on this test, not on an incidental constant.
+// the bead is actually about: for the binary integer branches whose grammar
+// makes the parenthesised form a sibling of an explicit width token, the two
+// spellings resolve to the same PropertyType. A future edit that breaks the
+// equivalence fails on this test, not on an incidental constant.
+//
+// FLOAT is deliberately excluded: FLOAT(p) does NOT fold onto FLOATp (see
+// TestPropertyBinaryWidthNonFolds and the typeSpellings doc comment). Adding
+// FLOAT pairs here would assert an equivalence the code intentionally does
+// not honour.
 func TestPropertyBinaryWidthSuffixAndParenthesisedEquivalent(t *testing.T) {
 	pairs := []struct{ suffix, parenthesised string }{
 		{"INT8", "INT(8)"},
@@ -259,12 +280,6 @@ func TestPropertyBinaryWidthSuffixAndParenthesisedEquivalent(t *testing.T) {
 		{"UINT64", "UINT(64)"},
 		{"UINT128", "UINT(128)"},
 		{"UINT256", "UINT(256)"},
-
-		{"FLOAT16", "FLOAT(16)"},
-		{"FLOAT32", "FLOAT(32)"},
-		{"FLOAT64", "FLOAT(64)"},
-		{"FLOAT128", "FLOAT(128)"},
-		{"FLOAT256", "FLOAT(256)"},
 	}
 
 	for _, pair := range pairs {
