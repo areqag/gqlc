@@ -67,6 +67,16 @@ var corpusAreaD1 = []corpusEntry{
 		feature: "mandatory",
 	},
 	{
+		file:    "18.9-value-type/scalar_timestamp.gql",
+		outcome: resolves,
+		feature: "mandatory",
+	},
+	{
+		file:    "18.9-value-type/scalar_timestamp_without_time_zone.gql",
+		outcome: resolves,
+		feature: "mandatory",
+	},
+	{
 		file:    "18.9-value-type/scalar_string_length_binary.gql",
 		outcome: resolves,
 		feature: "mandatory",

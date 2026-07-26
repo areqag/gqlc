@@ -44,8 +44,8 @@ import (
 // "HOME_SCHEMA/gt", "./gt", "/a/b/gt", "../a/gt" and "$$gt"; a bare "s/gt" is a
 // syntax error, because an identifier is not a schemaReference (GQL.g4:1469).
 const (
-	wantCorpusEntries   = 83
-	wantCorpusResolving = 29
+	wantCorpusEntries   = 85
+	wantCorpusResolving = 31
 )
 
 // featureValues is the closed set the feature field may take. Closed rather than
