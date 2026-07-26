@@ -43,23 +43,36 @@ func run(ctx context.Context, base string) error {
 	if err != nil {
 		return fmt.Errorf("read head %s: %w", exportPath, err)
 	}
-	head, err := parse(headBytes)
-	if err != nil {
-		return fmt.Errorf("parse head %s: %w", exportPath, err)
-	}
-
 	baseBytes, err := showAtRef(ctx, base, exportPath)
 	if err != nil {
-		// Missing at base is legitimate (repo before bd landed) — treat as empty.
 		if errors.Is(err, errPathAbsentAtRef) {
+			// Missing at base is legitimate (repo before bd landed) — empty.
 			baseBytes = nil
 		} else {
 			return fmt.Errorf("read base %s@%s: %w", exportPath, base, err)
 		}
 	}
-	baseIssues, err := parse(baseBytes)
+	return check(headBytes, baseBytes, base)
+}
+
+// check is the pure comparator: given both files' bytes, decide whether the
+// head regressed vs the base. Kept free of I/O so tests can hit every branch
+// with no `git` shellout — the git-boundary of run() is exercised only by the
+// end-to-end incident replay against the real repo (see PR body).
+func check(headBytes, baseBytes []byte, baseLabel string) error {
+	head, headLines, err := parse(headBytes)
 	if err != nil {
-		return fmt.Errorf("parse base %s@%s: %w", exportPath, base, err)
+		return fmt.Errorf("parse head %s: %w", exportPath, err)
+	}
+	if headLines > 0 && len(head) == 0 {
+		return fmt.Errorf("bdguard: head %s has %d non-blank lines but zero issue records — suspected bd format drift (rename of _type or of the \"issue\" tag). Refusing to run: a silent pass here would be indistinguishable from a clean export", exportPath, headLines)
+	}
+	baseIssues, baseLines, err := parse(baseBytes)
+	if err != nil {
+		return fmt.Errorf("parse base %s@%s: %w", exportPath, baseLabel, err)
+	}
+	if baseLines > 0 && len(baseIssues) == 0 {
+		return fmt.Errorf("bdguard: base %s@%s has %d non-blank lines but zero issue records — suspected bd format drift (rename of _type or of the \"issue\" tag). Refusing to run: a silent pass here would be indistinguishable from a clean export", exportPath, baseLabel, baseLines)
 	}
 
 	var dropped, reopened []string
@@ -80,7 +93,7 @@ func run(ctx context.Context, base string) error {
 	sort.Strings(dropped)
 	sort.Strings(reopened)
 	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "bdguard: %s regressed against %s\n", exportPath, base)
+	fmt.Fprintf(&buf, "bdguard: %s regressed against %s\n", exportPath, baseLabel)
 	if len(dropped) > 0 {
 		fmt.Fprintf(&buf, "  dropped issues (present at base, absent at head):\n")
 		for _, id := range dropped {
@@ -98,27 +111,31 @@ func run(ctx context.Context, base string) error {
 }
 
 // parse extracts {id: status} for _type=="issue" records. Non-issue record
-// types (bd may emit others in future) are ignored so this tool doesn't gate
-// on schema drift outside its scope. Blank lines are skipped.
-func parse(data []byte) (map[string]string, error) {
-	out := make(map[string]string)
+// types (bd may emit others) are ignored. Blank lines are skipped.
+// A non-empty input yielding zero issue records is reported via nonZeroLines
+// so the caller can fail loud on format drift (bd renames _type or "issue"),
+// rather than silently returning "no regressions" — this whole tool exists to
+// catch silently-passing gates.
+func parse(data []byte) (issues map[string]string, nonZeroLines int, err error) {
+	issues = make(map[string]string)
 	for i, line := range bytes.Split(data, []byte("\n")) {
 		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
+		nonZeroLines++
 		var r record
 		if err := json.Unmarshal(line, &r); err != nil {
-			return nil, fmt.Errorf("line %d: %w", i+1, err)
+			return nil, 0, fmt.Errorf("line %d: %w", i+1, err)
 		}
 		if r.Type != "issue" {
 			continue
 		}
 		if r.ID == "" {
-			return nil, fmt.Errorf("line %d: issue record with empty id", i+1)
+			return nil, 0, fmt.Errorf("line %d: issue record with empty id", i+1)
 		}
-		out[r.ID] = r.Status
+		issues[r.ID] = r.Status
 	}
-	return out, nil
+	return issues, nonZeroLines, nil
 }
 
 var errPathAbsentAtRef = errors.New("path absent at ref")
@@ -129,11 +146,13 @@ func showAtRef(ctx context.Context, ref, path string) ([]byte, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		// `git show` prints "fatal: path '...' does not exist in '<ref>'" for
-		// missing paths, and "fatal: bad revision '...'" for unknown refs.
-		// Distinguish so a missing base file is graceful but a missing ref
-		// (usually shallow-clone) is loud.
-		if bytes.Contains(stderr.Bytes(), []byte("does not exist")) {
+		// `git show` prints either "fatal: path '...' does not exist in '<ref>'"
+		// (path never existed at that commit) or "fatal: path '...' exists on
+		// disk, but not in '<ref>'" (path exists in the worktree but not the
+		// commit). Both mean "absent at ref" for our purposes. "fatal: bad
+		// revision" means unknown ref (shallow clone) — bubble that up loud.
+		msg := stderr.Bytes()
+		if bytes.Contains(msg, []byte("does not exist in")) || bytes.Contains(msg, []byte("exists on disk, but not in")) {
 			return nil, errPathAbsentAtRef
 		}
 		return nil, fmt.Errorf("git show %s:%s: %w: %s", ref, path, err, stderr.String())
