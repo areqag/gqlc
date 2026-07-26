@@ -179,6 +179,18 @@ func (l *listener) EnterEdgeTypePhrase(c *gen.EdgeTypePhraseContext) {
 		return
 	}
 	directed := c.EndpointPairPhrase().EndpointPair().EndpointPairDirected()
+	// <edge kind> is mandatory in <edge type phrase> (ISO/IEC 39075:2024 BNF,
+	// standards.iso.org/iso-iec/39075/ed-1/en/), so it is always present here.
+	// Checking kind against the connector direction *before* the directed-only
+	// bail below means a mismatch reports ErrEdgeKindArcMismatch rather than
+	// falling through to EnterEndpointPairUndirected's ErrUndirectedEdge — the
+	// message names the actual authoring mistake (edgeKind vs. connector), not
+	// the accepted-subset gap that both readings of a bare undirected connector
+	// would hit anyway.
+	if edgeKindArcMismatch(c.EdgeKind(), directed != nil) {
+		l.fail(ErrEdgeKindArcMismatch)
+		return
+	}
 	if directed == nil {
 		// Not about errors, and the same shape as EnterEdgeTypePattern: this rule
 		// fires for both endpoint pair directions and only the directed one
@@ -233,6 +245,35 @@ func (l *listener) rejectLabelImplication(implies antlr.TerminalNode) {
 	}
 }
 
+// edgeKindArcMismatch is true iff the declared edgeKind and the arc/connector
+// direction disagree: kind=UNDIRECTED with a directed arc, or kind=DIRECTED with
+// an undirected arc. The nil kind (absent in the pattern form's optional prefix)
+// is not a mismatch — the author has made no claim.
+//
+// The ISO/IEC 39075 BNF (ISO/IEC 39075:2024, <edge type pattern> / <edge type
+// phrase> / <edge kind>, standards.iso.org/iso-iec/39075/ed-1/en/) admits these
+// spellings: <edge kind> and the arc/connector direction sit in independent
+// slots with no cross-constraint in the grammar. Which of the two disagreeing
+// signals prevails is a semantic question, and the normative prose that would
+// answer it lives in the paid PDF, which we do not have. Rejecting rather than
+// silently choosing one is our decision under the no-dialect principle: the
+// alternative — resolving in favour of the arc — silently reinterprets an
+// UNDIRECTED-marked edge as directed, which is the class-2 defect this bead
+// exists to close. Recorded as a deviation under gqlc-0ri pending a citation
+// from the normative prose.
+func edgeKindArcMismatch(kind gen.IEdgeKindContext, arcDirected bool) bool {
+	if kind == nil {
+		return false
+	}
+	if kind.UNDIRECTED() != nil && arcDirected {
+		return true
+	}
+	if kind.DIRECTED() != nil && !arcDirected {
+		return true
+	}
+	return false
+}
+
 // EnterEdgeTypePatternUndirected and EnterEndpointPairUndirected reject an
 // undirected edge written as the pattern form's `~[ ]~` arc or as the phrase
 // form's `CONNECTING (a ~ b)`. Same reason for both: EdgeKey is a source->target
@@ -250,6 +291,19 @@ func (l *listener) EnterEdgeTypePattern(c *gen.EdgeTypePatternContext) {
 		return
 	}
 	directed := c.EdgeTypePatternDirected()
+	// <edge kind> is optional in <edge type pattern> (ISO/IEC 39075:2024 BNF,
+	// standards.iso.org/iso-iec/39075/ed-1/en/): the whole `[<edge kind>
+	// <edge synonym> [TYPE] <edge type name>]` prefix is one optional group, and
+	// a bare `(a)-[:E]->(b)` has no kind. The mismatch check reads that as
+	// "no claim, no contradiction". When a kind IS present it must not
+	// contradict the arc: fire the mismatch sentinel first so
+	// `DIRECTED ... ~[:E]~ ...` reports the kind/arc conflict rather than
+	// falling through to EnterEdgeTypePatternUndirected's ErrUndirectedEdge,
+	// which names the accepted-subset gap instead of the author's actual mistake.
+	if edgeKindArcMismatch(c.EdgeKind(), directed != nil) {
+		l.fail(ErrEdgeKindArcMismatch)
+		return
+	}
 	if directed == nil {
 		// Not about errors: this rule fires for both directions, and we only
 		// build an edge from the directed form. An undirected pattern has no
