@@ -98,6 +98,21 @@ test: check-hooks test-hooks
 tidy-check:
     go mod tidy -diff
 
+# fails when .beads/issues.jsonl regresses vs base (dropped or reopened issues).
+# Motivated by bd gqlc-v2p: PR #422's blanket `git add -A` shipped a stale bd
+# passive export that would have reopened two closed beads and dropped one.
+# Deliberately NOT wired into `just test`: gate is PR-scoped, test runs on master
+# pushes too (gqlc-5fm: a fatal recipe off master would break every CI run).
+# Arg is passed through unchanged, so CI can hand it the exact base SHA and
+# avoid a merge-base walk (which needs deep history).
+bd-export-monotonic base:
+    go run ./internal/tools/bdguard -base {{base}}
+
+# dev-local convenience: compare against the merge-base with origin/master.
+# Requires full history; assumes the dev worktree has it.
+bd-export-monotonic-local:
+    just bd-export-monotonic $(git merge-base HEAD origin/master)
+
 # runs the codegen goldens' full quality fence inside the nested module:
 # compile (go build), vet, module tidiness (go mod tidy -diff), and
 # golangci-lint against the root config. Generated code must uphold the

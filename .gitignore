@@ -5,6 +5,11 @@
 # project-local tool binaries, self-provisioned by just recipes (ensure-golangci)
 .bin/
 
+# internal Go tools built at the repo root leave a same-named binary here
+# (e.g. `go build ./internal/tools/bdguard` produces ./bdguard). Runtime uses
+# `go run`, so no committed binary is ever needed.
+/bdguard
+
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db

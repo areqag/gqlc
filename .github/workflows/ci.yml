@@ -61,6 +61,17 @@ jobs:
           go-version-file: go.mod
       - uses: ./.github/actions/setup-just
       - run: just tidy-check
+      # bd gqlc-v2p: fails when a PR's `.beads/issues.jsonl` drops or reopens
+      # an issue vs its base. Fetch only the base commit (depth 1) so cost is
+      # O(1) in history size, not O(N). Skip on master push — the tip IS the
+      # truth there, nothing to compare against.
+      - name: bd export monotonicity vs base
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --depth=1 origin "$BASE_SHA"
+          just bd-export-monotonic "$BASE_SHA"
 
   codegen-fence:
     runs-on: ubuntu-latest
