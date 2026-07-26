@@ -318,7 +318,7 @@ func TestGenerateDiagnosticShapes(t *testing.T) {
 	require.Error(t, err)
 	require.Empty(t, stdout)
 	want := "graph[0]: " + filepath.Join(q, "broken.cypher") + `: malformed query annotation: line 1: "// name: Broken"` + "\n" +
-		"graph[0]: " + filepath.Join(q, "ghost.cypher") + ": query BadLabel: unknown label: Ghost\n" +
+		"graph[0]: " + filepath.Join(q, "ghost.cypher") + ": query BadLabel: unknown label: Ghost is not declared on any node type\n" +
 		"Error: generate: 2 errors\n"
 	require.Equal(t, want, stderr)
 }
