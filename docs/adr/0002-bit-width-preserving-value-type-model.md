@@ -14,8 +14,15 @@ codegen to emit `int`/`uint` everywhere and discard information the schema
 author explicitly stated.
 
 GQL type spellings are normalised into this enum (e.g. `SMALLINT≈Int16`,
-`BIGINT≈Int64`, `UBIGINT≈Uint64`, `REAL≈Float32`, `DOUBLE≈Float64`); length and
-precision qualifiers (`VARCHAR(255)`, `DECIMAL(p,s)`) are dropped. Value types
+`BIGINT≈Int64`, `UBIGINT≈Uint64`, `REAL≈Float32`, `DOUBLE≈Float64`). A
+parenthesised bit-width on a `binaryExactNumericType` or `approximateNumericType`
+— `INT(8)`, `UINT(64)`, `FLOAT(32)` — is a spelling of a type this enum already
+carries (`GQL.g4:1801` makes it a sibling of `INT8|INT16|…` under
+`binaryExactNumericType`), so it folds onto the corresponding width constant.
+The length/character/decimal-digit parenthetical on other branches
+(`VARCHAR(255)`, `STRING(10)`, `DECIMAL(p,s)`, `CHAR(4)`) is a qualifier on the
+type rather than a spelling of one and is still dropped; whether the model
+should grow a length field to carry it is tracked as `gqlc-5md`. Value types
 outside the supported families (reference, list, record, path, time-only,
 duration) are rejected with `ErrUnsupportedType`.
 
