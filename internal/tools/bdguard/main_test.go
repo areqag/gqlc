@@ -16,6 +16,7 @@ const (
 	issueOpenA    = `{"_type":"issue","id":"a","status":"open"}`
 	issueOpenB    = `{"_type":"issue","id":"b","status":"open"}`
 	issueClosedA  = `{"_type":"issue","id":"a","status":"closed"}`
+	issueEmptyID  = `{"_type":"issue","id":"","status":"open"}`
 	commentRecord = `{"_type":"comment","id":"c1"}`
 )
 
@@ -91,6 +92,22 @@ func TestCheck_FormatDriftInHeadFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "format drift") {
 		t.Errorf("expected format-drift message, got: %v", err)
+	}
+}
+
+func TestParse_EmptyIssueIDFails(t *testing.T) {
+	// An issue record with a missing/empty id would silently collapse into
+	// the same map slot on every ingest — the drop/reopen accounting would
+	// then compare whichever such record appeared last. bd exports are
+	// machine-generated today, but the parser's job is to notice when that
+	// stops being true.
+	data := issueEmptyID + "\n"
+	_, _, err := parse([]byte(data))
+	if err == nil {
+		t.Fatal("expected empty-id failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "empty id") {
+		t.Errorf("expected empty-id message, got: %v", err)
 	}
 }
 

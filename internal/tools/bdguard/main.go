@@ -149,8 +149,10 @@ func showAtRef(ctx context.Context, ref, path string) ([]byte, error) {
 		// `git show` prints either "fatal: path '...' does not exist in '<ref>'"
 		// (path never existed at that commit) or "fatal: path '...' exists on
 		// disk, but not in '<ref>'" (path exists in the worktree but not the
-		// commit). Both mean "absent at ref" for our purposes. "fatal: bad
-		// revision" means unknown ref (shallow clone) — bubble that up loud.
+		// commit). Both mean "absent at ref" for our purposes. Anything else
+		// (unknown ref from a shallow clone emits "fatal: invalid object
+		// name", but we don't match on it — we fall through and bubble it up
+		// loud rather than silently classifying it as absent).
 		msg := stderr.Bytes()
 		if bytes.Contains(msg, []byte("does not exist in")) || bytes.Contains(msg, []byte("exists on disk, but not in")) {
 			return nil, errPathAbsentAtRef
