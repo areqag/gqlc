@@ -1,5 +1,5 @@
--- elementTypeSpecification#2 (the edge branch). check.sh reports this covered
--- because area C's edge files also reach it, but the tag is assigned to area A
--- and would go red if C dropped or rewrote a spelling — so it needs a carrier
--- in this worktree too.
+-- elementTypeSpecification#2, the edge branch. Area C's edge files reach it too,
+-- but the alternative is assigned to area A, so without a carrier here the tag
+-- would rest on spellings another area is free to rewrite. One graph type holding
+-- both branches, and nothing else.
 CREATE GRAPH TYPE Seed { (a:A), (b:B), (a)-[:R]->(b) }
