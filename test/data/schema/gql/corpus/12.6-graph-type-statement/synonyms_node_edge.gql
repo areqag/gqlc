@@ -1,8 +1,7 @@
 -- nodeSynonym#1 (NODE) and edgeSynonym#1 (EDGE), the counterpart to synonyms.gql's
--- VERTEX and RELATIONSHIP. This is the only resolving path that *spells* NODE: the
--- 18.2 phrase forms spell it too but are rejected, so without this file the NODE
--- token is green only on rejected paths. The production itself (nodeTypePattern,
--- GQL.g4:1507) has been covered all along by synonyms.gql's VERTEX spelling.
+-- VERTEX and RELATIONSHIP. The productions themselves (nodeTypePattern, GQL.g4:1507)
+-- have been covered all along by synonyms.gql's VERTEX spelling; what this file adds
+-- is the alternative each synonym rule takes.
 CREATE GRAPH TYPE Seed {
     NODE A (a:A),
     NODE B (b:B),
