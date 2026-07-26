@@ -266,16 +266,31 @@ func (l *listener) EnterEdgeTypePattern(c *gen.EdgeTypePatternContext) {
 	// carries the edge's label set and properties. Both directed alternatives
 	// expose canonical source->target via these accessors (the grammar already
 	// swaps a left-pointing arc's endpoints).
-	var filler gen.IEdgeTypeFillerContext
+	var (
+		filler gen.IEdgeTypeFillerContext
+		src    rawEndpoint
+		dst    rawEndpoint
+		refErr error
+	)
 	if r := directed.EdgeTypePatternPointingRight(); r != nil {
-		e.source = sourceRef(r.SourceNodeTypeReference())
-		e.target = destRef(r.DestinationNodeTypeReference())
+		src, refErr = sourceRef(r.SourceNodeTypeReference())
+		if refErr == nil {
+			dst, refErr = destRef(r.DestinationNodeTypeReference())
+		}
 		filler = r.ArcTypePointingRight().EdgeTypeFiller()
 	} else if lft := directed.EdgeTypePatternPointingLeft(); lft != nil {
-		e.source = sourceRef(lft.SourceNodeTypeReference())
-		e.target = destRef(lft.DestinationNodeTypeReference())
+		src, refErr = sourceRef(lft.SourceNodeTypeReference())
+		if refErr == nil {
+			dst, refErr = destRef(lft.DestinationNodeTypeReference())
+		}
 		filler = lft.ArcTypePointingLeft().EdgeTypeFiller()
 	}
+	if refErr != nil {
+		l.fail(refErr)
+		return
+	}
+	e.source = src
+	e.target = dst
 
 	labels, props, err := l.edgeContent(filler)
 	if err != nil {
@@ -341,8 +356,10 @@ func (l *listener) edgeContent(f gen.IEdgeTypeFillerContext) (graph.LabelSet, ma
 // declared inside a closedGraphReferenceValueType body (GQL.g4:1926, which nests
 // a whole graph type as a property value type) is not collected as an element of
 // the outer graph type. Depth 1 is an element of the outer graph body itself
-// (every valid element type has one enclosing nestedGraphTypeSpecification, the
-// one after AS); depth > 1 means the element sits inside a graph-typed property.
+// (every valid element type has one enclosing nestedGraphTypeSpecification —
+// the outer body; AS is optional in GQL.g4:350 so the threshold does not depend
+// on the keyword being present); depth > 1 means the element sits inside a
+// graph-typed property.
 // Coverage has the same notion (nestingDepth in corpus_coverage_test.go), and
 // the two are deliberately not shared: the corpus coverage gate must measure the
 // parse tree independently of what this listener computed from it, so a bug in a
