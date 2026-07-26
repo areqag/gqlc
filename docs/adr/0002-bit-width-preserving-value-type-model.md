@@ -36,9 +36,12 @@ The length/character/decimal-digit parenthetical on other branches
 (`VARCHAR(255)`, `STRING(10)`, `DECIMAL(p,s)`, `CHAR(4)`) is a qualifier on the
 type rather than a spelling of one and is still dropped; whether the model
 should grow a length field to carry it is tracked as `gqlc-5md`. Value types
-outside the supported families (reference, list, record, path) are rejected
-with `ErrUnsupportedType`. Time-only, byte-string and duration types are
-supported (bead `gqlc-h9n.4`): see the widening below.
+outside the supported families are rejected with `ErrUnsupportedType`; the
+exhaustive set of rejected constructs is enumerated by the corpus fixtures
+under `internal/schema/gql/corpus_area_d2_test.go`, which is the source of
+truth an author should check against before adding a new family here.
+Time-only, byte-string and duration types are supported (bead `gqlc-h9n.4`):
+see the widening below.
 
 ### Widening the qualifier-drop class (bead `gqlc-h9n.4`)
 
@@ -73,7 +76,7 @@ Byte-string types (`BYTES(n)`, `BINARY(n)`, `VARBINARY(n)`) reach a single
 `TypeBytes` under the pre-existing magnitude-qualifier arm — no widening
 required for them.
 
-`ADR 0002 is amended, not superseded.` Future extensions to the class stay
+**ADR 0002 is amended, not superseded.** Future extensions to the class stay
 visible: name the new qualifier kind, state which Go carrier absorbs it, and
 state the fidelity limit.
 
