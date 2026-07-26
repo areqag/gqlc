@@ -1,0 +1,4 @@
+-- catalogObjectParentReference#2: `(objectName PERIOD)+ graphTypeName` — a
+-- dotted-name spelling with no schema reference at the front. `s/gt` with a
+-- slash is a syntax error; only the dot form reaches this alternative.
+CREATE PROPERTY GRAPH TYPE Copied COPY OF s.gt

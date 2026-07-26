@@ -1,0 +1,8 @@
+-- The nodes use the supported pattern form, so the edge phrase form is the only
+-- unsupported construct here. edgeKind is mandatory in edgeTypePhrase, unlike in
+-- edgeTypePattern.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (a :Person { id :: INT NOT NULL }),
+    (b :Post { id :: INT NOT NULL }),
+    DIRECTED EDGE TYPE Wrote :WROTE { since :: TIMESTAMP } CONNECTING (a -> b)
+}

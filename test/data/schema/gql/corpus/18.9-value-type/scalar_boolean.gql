@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:Flag {
+        b1 :: BOOL NOT NULL,
+        b2 :: BOOLEAN
+    })
+}

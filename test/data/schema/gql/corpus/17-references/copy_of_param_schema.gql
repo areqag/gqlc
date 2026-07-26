@@ -1,0 +1,5 @@
+-- schemaReference#3: the parameter sits where the *schema* goes, so the whole
+-- `$$s` is the schemaReference and `gt` is the graphTypeName after SOLIDUS.
+-- One character of position separates this from graphTypeReference#2 (see
+-- copy_of_param_graph_type.gql), and neither discharges the other.
+CREATE PROPERTY GRAPH TYPE Copied COPY OF $$s/gt

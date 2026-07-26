@@ -273,12 +273,13 @@ var invalidFixtures = map[string]error{
 
 // allSentinels is the canonical list of every Parse sentinel — the single source
 // of truth TestSentinelReachability checks against. A new sentinel must be added
-// here (and paired with a fixture); a removed one must be dropped.
+// here (and pinned by a file); a removed one must be dropped.
 var allSentinels = []error{
 	ErrLabelImplication,
 	ErrUndirectedEdge,
 	ErrUnknownEndpoint,
 	ErrUnsupportedType,
+	ErrUnsupportedPhraseForm,
 	ErrUnnamedNodeType,
 	ErrUnnamedEdgeType,
 	ErrDuplicateNodeType,
@@ -288,15 +289,28 @@ var allSentinels = []error{
 	ErrUnsupportedSource,
 }
 
-// TestSentinelReachability is the bidirectional sweep: the set of sentinels the
-// negative fixtures cover must equal the canonical sentinel set. It fails if a
-// sentinel is declared but no fixture exercises it (orphaned), or if a fixture
-// maps to a sentinel missing from the canonical list (stray or renamed).
+// TestSentinelReachability is the bidirectional sweep: the set of sentinels
+// pinned by files must equal the canonical sentinel set. It fails if a sentinel
+// is declared but no file exercises it (orphaned), or if a file pins a sentinel
+// missing from the canonical list (stray or renamed).
+//
+// Both fixture directories count, because both are registries of the same thing
+// and two registries drift. The corpus half also keeps the sweep honest as the
+// epic closes: a sentinel here is temporary by design, so when a construct
+// becomes supported its corpus entries flip to resolves in the same commit and
+// the sentinel's last pin disappears with them. An invalid/ fixture for the same
+// construct would instead survive that commit as an orphan failing for an
+// unrelated reason.
 func TestSentinelReachability(t *testing.T) {
 	covered := make(map[error]bool)
 	for _, sentinel := range invalidFixtures {
 		if sentinel != nil {
 			covered[sentinel] = true
+		}
+	}
+	for _, entry := range corpusManifest(t) {
+		if entry.outcome == unsupported {
+			covered[entry.sentinel] = true
 		}
 	}
 
@@ -306,9 +320,10 @@ func TestSentinelReachability(t *testing.T) {
 	}
 
 	for _, sentinel := range allSentinels {
-		require.True(t, covered[sentinel], "sentinel %q has no negative fixture", sentinel)
+		require.True(t, covered[sentinel],
+			"sentinel %q has no negative fixture or unsupported corpus entry", sentinel)
 	}
 	for sentinel := range covered {
-		require.True(t, canonical[sentinel], "fixture maps to non-canonical sentinel %q", sentinel)
+		require.True(t, canonical[sentinel], "file pins non-canonical sentinel %q", sentinel)
 	}
 }

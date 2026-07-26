@@ -1,0 +1,5 @@
+-- The nested (:X) inside the property type is a depth-2 elementTypeSpecification,
+-- which the silent-drop guard correctly ignores; only depth 1 counts.
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:Ref { g :: GRAPH { (:X) } })
+}

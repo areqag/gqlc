@@ -1,0 +1,6 @@
+-- absoluteCatalogSchemaReference#1: the bare-SOLIDUS alternative, where the
+-- whole schema reference is just `/`. The longer `/a/b/gt` spelling is
+-- alternative 2 (`absoluteDirectoryPath schemaName`) — covered by the seed
+-- copy_of_source.gql — and looks more thorough, which is why it is easy to omit
+-- this file and never notice `#1` is still red.
+CREATE PROPERTY GRAPH TYPE Copied COPY OF /gt

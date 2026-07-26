@@ -1,0 +1,4 @@
+-- graphTypeReference#1 via catalogGraphTypeParentAndName with no schema parent —
+-- just a bare graph type name. Other COPY OF spellings all wrap this same
+-- alternative around a schema reference.
+CREATE PROPERTY GRAPH TYPE Copied COPY OF Source

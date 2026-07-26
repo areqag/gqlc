@@ -1,0 +1,3 @@
+-- IF NOT EXISTS is the first branch's own suffix; OR REPLACE is a mutually
+-- exclusive branch so it needs its own file (GQL.g4:344).
+CREATE PROPERTY GRAPH TYPE IF NOT EXISTS Seed { (:Person) }

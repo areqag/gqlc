@@ -1,0 +1,8 @@
+-- Edge filler with property types but no label. Symmetric to the node case
+-- ({p :: STRING}): resolve() keys every edge type by its label set, so an
+-- edge type with no label has no key. Bead gqlc-0ri (deviation audit).
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Person { id :: INT NOT NULL }),
+    (:Post { id :: INT NOT NULL }),
+    (:Person) -[{ ts :: TIMESTAMP }]-> (:Post)
+}

@@ -1,0 +1,2 @@
+-- Discharges the HOME_SCHEMA token via predefinedSchemaReference alt 1.
+CREATE PROPERTY GRAPH TYPE Copied COPY OF HOME_SCHEMA/gt

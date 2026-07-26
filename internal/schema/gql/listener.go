@@ -81,10 +81,15 @@ func (l *listener) EnterCreateGraphTypeStatement(c *gen.CreateGraphTypeStatement
 	}
 	l.seenGraphType = true
 
-	// A LIKE source (graphTypeLikeGraph) reaches this rule; COPY OF is parsed
-	// as a different statement and never gets here. Only an inline AS { ... }
-	// body (nestedGraphTypeSpecification) is supported.
-	if src := c.GraphTypeSource(); src != nil && src.GraphTypeLikeGraph() != nil {
+	// An inline `AS { ... }` body (nestedGraphTypeSpecification) is the only
+	// supported source. Testing for it rather than enumerating LIKE and COPY OF
+	// means a source alternative added to the grammar later is rejected rather
+	// than silently dropped. Both LIKE and the AS-less `COPY OF` spelling reach
+	// this rule and are rejected here. Of the two COPY OF spellings only the
+	// AS-less one gets this far: `AS COPY OF` matches createGraphStatement
+	// instead, so it surfaces as ErrNoGraphType (both spellings are pinned by
+	// TestCorpusSpellingTraps).
+	if src := c.GraphTypeSource(); src == nil || src.NestedGraphTypeSpecification() == nil {
 		l.fail(ErrUnsupportedSource)
 		return
 	}
@@ -125,6 +130,21 @@ func (l *listener) EnterNodeTypePattern(c *gen.NodeTypePatternContext) {
 	n.props = props
 
 	l.raw.nodes = append(l.raw.nodes, n)
+}
+
+// EnterNodeTypePhrase and EnterEdgeTypePhrase reject the phrase form of an
+// element type (`NODE TYPE Person :Person`) in favour of the pattern form
+// (`(:Person)`). Both are separate grammar alternatives of
+// nodeTypeSpecification / edgeTypeSpecification, so without these handlers a
+// phrase-form declaration parses, collects nothing, and yields an empty schema
+// with a nil error — putting the diagnostic on whatever query later references
+// the missing type instead of on the schema (gqlc-uhb).
+func (l *listener) EnterNodeTypePhrase(_ *gen.NodeTypePhraseContext) {
+	l.fail(ErrUnsupportedPhraseForm)
+}
+
+func (l *listener) EnterEdgeTypePhrase(_ *gen.EdgeTypePhraseContext) {
+	l.fail(ErrUnsupportedPhraseForm)
 }
 
 // EnterNodeTypeKeyLabelSet and EnterEdgeTypeKeyLabelSet reject the

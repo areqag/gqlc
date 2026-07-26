@@ -1,0 +1,5 @@
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:Person { id :: INT NOT NULL }),
+    (:Post { id :: INT NOT NULL }),
+    (:Person) -[:AUTHORED { publishedAt :: TIMESTAMP }]-> (:Post)
+}

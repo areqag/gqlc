@@ -1,0 +1,7 @@
+-- Label implication ("=>") on an edge type filler. edgeTypeKeyLabelSet is
+-- labelSetPhrase? IMPLIES and appears only through edgeTypeFiller alt 1.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Person { id :: INT NOT NULL }),
+    (:Post { id :: INT NOT NULL }),
+    (:Person) -[:AUTHORED => :WROTE { ts :: TIMESTAMP }]-> (:Post)
+}
