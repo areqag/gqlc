@@ -1,0 +1,7 @@
+-- A CONNECTING endpoint is a local node type alias (sourceNodeTypeAlias), and
+-- this node type binds none, so `Person` names the type in a slot that reads it
+-- as an alias.
+CREATE PROPERTY GRAPH TYPE T AS {
+    NODE TYPE Person :Person { id :: INT },
+    DIRECTED EDGE TYPE Knows :KNOWS CONNECTING (Person TO Person)
+}

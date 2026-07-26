@@ -1,5 +1,5 @@
--- The nodes use the supported pattern form, so the edge phrase form is the only
--- unsupported construct here. edgeKind is mandatory in edgeTypePhrase, unlike in
+-- The nodes are in pattern form and the edge in phrase form, so the two spellings
+-- are mixed in one body. edgeKind is mandatory in edgeTypePhrase, unlike in
 -- edgeTypePattern.
 CREATE PROPERTY GRAPH TYPE T AS {
     (a :Person { id :: INT NOT NULL }),
