@@ -1,0 +1,1 @@
+CREATE PROPERTY GRAPH TYPE Seed LIKE SocialNetwork

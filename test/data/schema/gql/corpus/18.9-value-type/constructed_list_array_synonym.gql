@@ -1,0 +1,6 @@
+-- ARRAY is a synonym of LIST throughout, discharging the same alternatives. This
+-- file exists to enter the ARRAY token; the alternative it takes (listValueTypeAlt1)
+-- is already discharged by constructed_list_angle.gql.
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:Bag { items :: ARRAY<STRING> })
+}

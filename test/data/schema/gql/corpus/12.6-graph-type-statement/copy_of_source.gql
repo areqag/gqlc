@@ -1,0 +1,4 @@
+-- COPY OF, in the AS-less spelling. `AS COPY OF` is a different statement
+-- (createGraphStatement) and so cannot be a corpus file at all; it is pinned by
+-- TestCorpusSpellingTraps instead.
+CREATE PROPERTY GRAPH TYPE Copied COPY OF /schemas/base/Source

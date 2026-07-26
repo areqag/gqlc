@@ -1,0 +1,3 @@
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:Account { balance :: DECIMAL(10,2) NOT NULL })
+}

@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:Money {
+        bare :: DEC,
+        prec :: DEC(8)
+    })
+}

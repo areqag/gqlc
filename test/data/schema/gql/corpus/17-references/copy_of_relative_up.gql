@@ -1,0 +1,5 @@
+-- Discharges relativeDirectoryPath and its DOUBLE_PERIOD token. `COPY OF ../gt`
+-- alone does not parse: after the `../` a schemaName is still required (the
+-- relativeDirectoryPath schemaName alternative of relativeCatalogSchemaReference),
+-- and then SOLIDUS + graphTypeName. Hence `../s/gt`.
+CREATE PROPERTY GRAPH TYPE Copied COPY OF ../s/gt

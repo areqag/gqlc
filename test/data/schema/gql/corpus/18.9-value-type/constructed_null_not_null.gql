@@ -1,0 +1,5 @@
+-- NULL NOT NULL is emptyType alt 1: the notNull is mandatory here, unlike the
+-- rest of the value-type grammar. Bare NULL is nullType instead.
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:Nil { p :: NULL NOT NULL })
+}
