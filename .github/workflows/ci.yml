@@ -31,10 +31,12 @@ jobs:
       # does, without giving up `just lint` as the single entrypoint. The
       # binary itself is not cached: just lint self-provisions it in ~3s,
       # about what a cache restore would cost.
+      # Path must match GOLANGCI_LINT_CACHE in the justfile (per-worktree cache
+      # colocated under .bin/, see bd gqlc-6rv). Keep in sync.
       - name: golangci-lint analysis cache
         uses: actions/cache@v4
         with:
-          path: ~/.cache/golangci-lint
+          path: .bin/golangci-cache
           key: golangci-${{ runner.os }}-${{ hashFiles('go.sum', '.golangci.yml') }}-${{ github.run_id }}
           restore-keys: |
             golangci-${{ runner.os }}-${{ hashFiles('go.sum', '.golangci.yml') }}-
