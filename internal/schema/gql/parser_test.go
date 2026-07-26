@@ -9,9 +9,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/antlr4-go/antlr/v4"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/areqag/gqlc/internal/grammar/gql/gen"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/schema"
 )
@@ -388,6 +390,89 @@ func (s *ParserSuite) TestEndpointAliasDiagnostics() {
 			got, err := New().Parse(strings.NewReader(graphType(tt.src)))
 			s.Require().ErrorIs(err, tt.want)
 			s.Equal(schema.Schema{}, got, "model must be the zero value on error")
+		})
+	}
+}
+
+// TestNestedGraphTypeSpecificationElementsNotCollected pins that an element type
+// declared inside a closedGraphReferenceValueType body (GQL.g4:1926, a whole
+// graph type nested as a property value type) does not enter the outer graph
+// type's rawSchema. Asserting on Parse cannot see the defect today: the outer
+// property fails normaliseType with ErrUnsupportedType before resolve() runs, so
+// Parse returns (zero schema, err) whether the nested elements leaked into l.raw
+// or not — the correct-by-accident shape the bead was filed against. Walking the
+// listener directly and reading raw makes the guard visible on its own.
+//
+// The four spellings (pattern/phrase × node/edge) are here because ANTLR calls a
+// separate Enter method for each and the guard has to fire from each of them —
+// dropping the check from any one leaks that spelling. The twice-nested case
+// distinguishes "depth > 1" from "depth == 2": both variants of the guard reject
+// the once-nested case, only "depth > 1" rejects a node three levels deep.
+func TestNestedGraphTypeSpecificationElementsNotCollected(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{
+			// The bead's original witness. Two pattern-form nodes leak from the
+			// nested body into the outer graph type when the guard is absent.
+			name: "pattern-form nodes in a nested body",
+			src: `CREATE PROPERTY GRAPH TYPE T AS {
+				(:Outer { g :: PROPERTY GRAPH { (:Inner1), (:Inner2) } })
+			}`,
+		},
+		{
+			// The nested body carries an edge as well; the edge collector needs
+			// the guard for the same reason the node collector does.
+			name: "pattern-form edge in a nested body",
+			src: `CREATE PROPERTY GRAPH TYPE T AS {
+				(:Outer { g :: GRAPH { (:A), (:B), (:A)-[:R]->(:B) } })
+			}`,
+		},
+		{
+			// EnterNodeTypePhrase collects independently of EnterNodeTypePattern
+			// and needs the guard on its own; a nested phrase-form node in a
+			// pattern-form outer leaks without it.
+			name: "phrase-form node in a pattern-form outer's nested body",
+			src: `CREATE PROPERTY GRAPH TYPE T AS {
+				(:Outer { g :: GRAPH { NODE TYPE Inner :Inner } })
+			}`,
+		},
+		{
+			// EnterEdgeTypePhrase, same reason.
+			name: "phrase-form edge in a nested body",
+			src: `CREATE PROPERTY GRAPH TYPE T AS {
+				(:Outer { g :: GRAPH { (a :A), (b :B), DIRECTED EDGE :R CONNECTING (a -> b) } })
+			}`,
+		},
+		{
+			// depth 2: the innermost (:C) is under two enclosing nested bodies,
+			// so a `depth == 1` guard would let it through where `depth > 1` (the
+			// correct rule) blocks it.
+			name: "twice-nested node",
+			src: `CREATE PROPERTY GRAPH TYPE T AS {
+				(:A { p :: GRAPH { (:B { q :: GRAPH { (:C) } }) } })
+			}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			lex := gen.NewGQLLexer(antlr.NewInputStream(tc.src))
+			ts := antlr.NewCommonTokenStream(lex, antlr.TokenDefaultChannel)
+			p := gen.NewGQLParser(ts)
+			l := &listener{ts: ts}
+			lex.RemoveErrorListeners()
+			lex.AddErrorListener(l)
+			p.RemoveErrorListeners()
+			p.AddErrorListener(l)
+
+			// The walk errors on the outer property's unsupported value type;
+			// pinning that here means a future bead lifting the type rejection
+			// has to update this test rather than silently uncover the leak.
+			require.ErrorIs(t, l.walk(p.GqlProgram()), ErrUnsupportedType)
+
+			require.Empty(t, l.raw.nodes, "nested-body nodes must not be collected as elements of the outer graph type")
+			require.Empty(t, l.raw.edges, "nested-body edges must not be collected as elements of the outer graph type")
 		})
 	}
 }

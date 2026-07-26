@@ -109,6 +109,9 @@ func (l *listener) ExitGqlProgram(_ *gen.GqlProgramContext) {
 }
 
 func (l *listener) EnterNodeTypePattern(c *gen.NodeTypePatternContext) {
+	if nestedDepth(c) > 1 {
+		return
+	}
 	n := rawNode{}
 	if name := c.NodeTypeName(); name != nil {
 		n.name = name.Identifier().GetText()
@@ -138,6 +141,9 @@ func (l *listener) EnterNodeTypePattern(c *gen.NodeTypePatternContext) {
 // under nodeTypePhraseFiller, and the alias follows AS rather than opening the
 // parens.
 func (l *listener) EnterNodeTypePhrase(c *gen.NodeTypePhraseContext) {
+	if nestedDepth(c) > 1 {
+		return
+	}
 	filler := c.NodeTypePhraseFiller()
 
 	n := rawNode{}
@@ -169,6 +175,9 @@ func (l *listener) EnterNodeTypePhrase(c *gen.NodeTypePhraseContext) {
 // nodeTypeFiller. An endpoint that names a node type instead is left for
 // resolution to reject (ErrEndpointNotAlias).
 func (l *listener) EnterEdgeTypePhrase(c *gen.EdgeTypePhraseContext) {
+	if nestedDepth(c) > 1 {
+		return
+	}
 	directed := c.EndpointPairPhrase().EndpointPair().EndpointPairDirected()
 	if directed == nil {
 		// Not about errors, and the same shape as EnterEdgeTypePattern: this rule
@@ -237,6 +246,9 @@ func (l *listener) EnterEndpointPairUndirected(_ *gen.EndpointPairUndirectedCont
 }
 
 func (l *listener) EnterEdgeTypePattern(c *gen.EdgeTypePatternContext) {
+	if nestedDepth(c) > 1 {
+		return
+	}
 	directed := c.EdgeTypePatternDirected()
 	if directed == nil {
 		// Not about errors: this rule fires for both directions, and we only
@@ -322,6 +334,27 @@ func (l *listener) edgeContent(f gen.IEdgeTypeFillerContext) (graph.LabelSet, ma
 	}
 	props, err := l.properties(spec)
 	return labels, props, err
+}
+
+// nestedDepth is the number of enclosing nestedGraphTypeSpecification contexts
+// above ctx. It gates the four element-type collectors so that a node or edge
+// declared inside a closedGraphReferenceValueType body (GQL.g4:1926, which nests
+// a whole graph type as a property value type) is not collected as an element of
+// the outer graph type. Depth 1 is an element of the outer graph body itself
+// (every valid element type has one enclosing nestedGraphTypeSpecification, the
+// one after AS); depth > 1 means the element sits inside a graph-typed property.
+// Coverage has the same notion (nestingDepth in corpus_coverage_test.go), and
+// the two are deliberately not shared: the corpus coverage gate must measure the
+// parse tree independently of what this listener computed from it, so a bug in a
+// shared helper would silently hide from both.
+func nestedDepth(ctx antlr.ParserRuleContext) int {
+	depth := 0
+	for parent := ctx.GetParent(); parent != nil; parent = parent.GetParent() {
+		if _, ok := parent.(gen.INestedGraphTypeSpecificationContext); ok {
+			depth++
+		}
+	}
+	return depth
 }
 
 // properties lowers a property types specification into a map keyed by property
