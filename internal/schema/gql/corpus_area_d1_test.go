@@ -122,26 +122,36 @@ var corpusAreaD1 = []corpusEntry{
 		file:    "18.9-value-type/scalar_binary.gql",
 		outcome: resolves,
 		feature: "mandatory",
+		bead:    "gqlc-5md",
+		reason:  "the fixedLength is discarded, so BINARY(4) resolves to a PropertyType byte-identical to bare BINARY; the two are indistinguishable downstream and codegen cannot emit a width",
 	},
 	{
 		file:    "18.9-value-type/scalar_bytes.gql",
 		outcome: resolves,
 		feature: "mandatory",
+		bead:    "gqlc-5md",
+		reason:  "both minLength and maxLength are discarded, so BYTES(1, 10) resolves to a PropertyType byte-identical to bare BYTES; the two are indistinguishable downstream and codegen cannot emit a width",
 	},
 	{
 		file:    "18.9-value-type/scalar_varbinary.gql",
 		outcome: resolves,
 		feature: "mandatory",
+		bead:    "gqlc-5md",
+		reason:  "the maxLength is discarded, so VARBINARY(8) resolves to a PropertyType byte-identical to bare VARBINARY; the two are indistinguishable downstream and codegen cannot emit a width",
 	},
 	{
 		file:    "18.9-value-type/scalar_duration_day_second.gql",
 		outcome: resolves,
 		feature: "mandatory",
+		bead:    "gqlc-8pe",
+		reason:  "the temporalDurationQualifier is discarded, so DURATION(DAY TO SECOND) resolves to a PropertyType byte-identical to DURATION(YEAR TO MONTH) (both map to TypeDuration with no qualifier); the two are indistinguishable downstream and codegen cannot preserve which fields of dbtype.Duration the value populates",
 	},
 	{
 		file:    "18.9-value-type/scalar_duration_year_month.gql",
 		outcome: resolves,
 		feature: "mandatory",
+		bead:    "gqlc-8pe",
+		reason:  "the temporalDurationQualifier is discarded, so DURATION(YEAR TO MONTH) resolves to a PropertyType byte-identical to DURATION(DAY TO SECOND) (both map to TypeDuration with no qualifier); the two are indistinguishable downstream and codegen cannot preserve which fields of dbtype.Duration the value populates",
 	},
 	{
 		file:    "18.9-value-type/scalar_local_time.gql",
@@ -210,5 +220,38 @@ var semanticAreaD1 = []semanticCase{
 		bead:     "gqlc-5md",
 		why:      "VARCHAR(10) resolves to the same PropertyType as bare VARCHAR (and bare STRING), because PropertyType has no length field; the discarded maxLength is unrecoverable downstream",
 		spelling: "VARCHAR(10)",
+	},
+	{
+		file:     "18.9-value-type/scalar_binary.gql",
+		bead:     "gqlc-5md",
+		why:      "BINARY(4) resolves to the same PropertyType as bare BINARY, because PropertyType has no length field; the discarded fixedLength is unrecoverable downstream",
+		spelling: "BINARY(4)",
+	},
+	{
+		file: "18.9-value-type/scalar_bytes.gql",
+		bead: "gqlc-5md",
+		why:  "BYTES(1, 10) resolves to the same PropertyType as bare BYTES, because PropertyType has no length field; both the discarded minLength and maxLength are unrecoverable downstream",
+		// Matches the file's spelling exactly, comma-space and all — the point of
+		// pinning the exact spelling is lost if it is normalised to match its
+		// neighbours here. Same discipline as scalar_string_min_max_length.
+		spelling: "BYTES(1, 10)",
+	},
+	{
+		file:     "18.9-value-type/scalar_varbinary.gql",
+		bead:     "gqlc-5md",
+		why:      "VARBINARY(8) resolves to the same PropertyType as bare VARBINARY, because PropertyType has no length field; the discarded maxLength is unrecoverable downstream",
+		spelling: "VARBINARY(8)",
+	},
+	{
+		file:     "18.9-value-type/scalar_duration_day_second.gql",
+		bead:     "gqlc-8pe",
+		why:      "DURATION(DAY TO SECOND) resolves to the same PropertyType as DURATION(YEAR TO MONTH), because PropertyType has no temporal-duration-qualifier field; the discarded qualifier selects which fields of dbtype.Duration (Days/Seconds/Nanos vs Months) a value populates at write time, and that selection is unrecoverable downstream",
+		spelling: "DURATION(DAY TO SECOND)",
+	},
+	{
+		file:     "18.9-value-type/scalar_duration_year_month.gql",
+		bead:     "gqlc-8pe",
+		why:      "DURATION(YEAR TO MONTH) resolves to the same PropertyType as DURATION(DAY TO SECOND), because PropertyType has no temporal-duration-qualifier field; the discarded qualifier selects which fields of dbtype.Duration (Months vs Days/Seconds/Nanos) a value populates at write time, and that selection is unrecoverable downstream",
+		spelling: "DURATION(YEAR TO MONTH)",
 	},
 }
