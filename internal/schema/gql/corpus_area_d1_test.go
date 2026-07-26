@@ -16,7 +16,7 @@ var corpusAreaD1 = []corpusEntry{
 		file:    "18.9-value-type/scalar_char_fixed_length.gql",
 		outcome: resolves,
 		feature: "mandatory",
-		bead:    "gqlc-h9n.16",
+		bead:    "gqlc-5md",
 		reason:  "the fixedLength is discarded, so CHAR(4) resolves to a PropertyType byte-identical to bare CHAR (both map to TypeString with no width); the two are indistinguishable downstream and codegen cannot emit a width",
 	},
 	{
@@ -48,7 +48,7 @@ var corpusAreaD1 = []corpusEntry{
 		file:    "18.9-value-type/scalar_decimal_precision_scale.gql",
 		outcome: resolves,
 		feature: "mandatory",
-		bead:    "gqlc-h9n.16",
+		bead:    "gqlc-5md",
 		reason:  "the precision and scale are discarded, so DECIMAL(10,2) resolves to a PropertyType byte-identical to bare DECIMAL; the two are indistinguishable downstream and codegen cannot emit a width",
 	},
 	{
@@ -95,14 +95,14 @@ var corpusAreaD1 = []corpusEntry{
 		file:    "18.9-value-type/scalar_string_max_length.gql",
 		outcome: resolves,
 		feature: "mandatory",
-		bead:    "gqlc-h9n.16",
+		bead:    "gqlc-5md",
 		reason:  "the maxLength is discarded, so STRING(5) resolves to a PropertyType byte-identical to bare STRING; the two are indistinguishable downstream and codegen cannot emit a width",
 	},
 	{
 		file:    "18.9-value-type/scalar_string_min_max_length.gql",
 		outcome: resolves,
 		feature: "mandatory",
-		bead:    "gqlc-h9n.16",
+		bead:    "gqlc-5md",
 		reason:  "both minLength and maxLength are discarded, so STRING(2,5) resolves to a PropertyType byte-identical to bare STRING; the two are indistinguishable downstream and codegen cannot emit a width",
 	},
 	{
@@ -114,7 +114,7 @@ var corpusAreaD1 = []corpusEntry{
 		file:    "18.9-value-type/scalar_varchar_max_length.gql",
 		outcome: resolves,
 		feature: "mandatory",
-		bead:    "gqlc-h9n.16",
+		bead:    "gqlc-5md",
 		reason:  "the maxLength is discarded, so VARCHAR(10) resolves to a PropertyType byte-identical to bare VARCHAR (both map to TypeString with no width); the two are indistinguishable downstream and codegen cannot emit a width",
 	},
 
@@ -213,25 +213,25 @@ var corpusAreaD1 = []corpusEntry{
 var semanticAreaD1 = []semanticCase{
 	{
 		file:     "18.9-value-type/scalar_char_fixed_length.gql",
-		bead:     "gqlc-h9n.16",
+		bead:     "gqlc-5md",
 		why:      "CHAR(4) resolves to the same PropertyType as bare CHAR (and bare STRING), because PropertyType has no length field; the discarded fixedLength is unrecoverable downstream",
 		spelling: "CHAR(4)",
 	},
 	{
 		file:     "18.9-value-type/scalar_decimal_precision_scale.gql",
-		bead:     "gqlc-h9n.16",
+		bead:     "gqlc-5md",
 		why:      "DECIMAL(10,2) resolves to the same PropertyType as bare DECIMAL, because PropertyType has no length field; the discarded precision and scale are unrecoverable downstream",
 		spelling: "DECIMAL(10,2)",
 	},
 	{
 		file:     "18.9-value-type/scalar_string_max_length.gql",
-		bead:     "gqlc-h9n.16",
+		bead:     "gqlc-5md",
 		why:      "STRING(5) resolves to the same PropertyType as bare STRING, because PropertyType has no length field; the discarded maxLength is unrecoverable downstream",
 		spelling: "STRING(5)",
 	},
 	{
 		file: "18.9-value-type/scalar_string_min_max_length.gql",
-		bead: "gqlc-h9n.16",
+		bead: "gqlc-5md",
 		why:  "STRING(2, 5) resolves to the same PropertyType as bare STRING, because PropertyType has no length field; both the discarded minLength and maxLength are unrecoverable downstream",
 		// The file spells this with a space after the comma and the other length
 		// cases do not; ISO allows either, and the point of pinning the exact
@@ -240,7 +240,7 @@ var semanticAreaD1 = []semanticCase{
 	},
 	{
 		file:     "18.9-value-type/scalar_varchar_max_length.gql",
-		bead:     "gqlc-h9n.16",
+		bead:     "gqlc-5md",
 		why:      "VARCHAR(10) resolves to the same PropertyType as bare VARCHAR (and bare STRING), because PropertyType has no length field; the discarded maxLength is unrecoverable downstream",
 		spelling: "VARCHAR(10)",
 	},
