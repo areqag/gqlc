@@ -1,5 +1,6 @@
 {
     "unknown_label.cypher": "social.gql",
+    "label_satisfy_ambiguous.cypher": "satisfy_ambiguous.gql",
     "unknown_property.cypher": "social.gql",
     "unknown_edge.cypher": "social.gql",
     "unknown_edge_property.cypher": "social.gql",

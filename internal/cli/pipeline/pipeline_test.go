@@ -305,7 +305,7 @@ func TestRunDiagnosticShapes(t *testing.T) {
 		"graph[0]: "+filepath.Join(q, "broken.cypher")+`: malformed query annotation: line 1: "// name: Broken"`,
 		res.Diagnostics[0])
 	require.Equal(t,
-		"graph[0]: "+filepath.Join(q, "ghost.cypher")+": query BadLabel: unknown label: Ghost",
+		"graph[0]: "+filepath.Join(q, "ghost.cypher")+": query BadLabel: unknown label: Ghost is not declared on any node type",
 		res.Diagnostics[1])
 }
 
@@ -439,10 +439,10 @@ func TestRunDiagnosticsSpanTargets(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, res.Targets)
 	require.Equal(t, []string{
-		"graph[0]: " + filepath.Join(q0, "ghost.cypher") + ": query BadLabel: unknown label: Ghost",
+		"graph[0]: " + filepath.Join(q0, "ghost.cypher") + ": query BadLabel: unknown label: Ghost is not declared on any node type",
 		"graph[1]: " + filepath.Join(q1, "broken.cypher") + `: malformed query annotation: line 1: "// name: Broken"`,
-		"graph[1]: " + filepath.Join(q1, "wraith.cypher") + ": query BadOne: unknown label: Wraith",
-		"graph[1]: " + filepath.Join(q1, "wraith.cypher") + ": query BadTwo: unknown label: Spectre",
+		"graph[1]: " + filepath.Join(q1, "wraith.cypher") + ": query BadOne: unknown label: Wraith is not declared on any node type",
+		"graph[1]: " + filepath.Join(q1, "wraith.cypher") + ": query BadTwo: unknown label: Spectre is not declared on any node type",
 	}, res.Diagnostics)
 }
 
@@ -475,7 +475,7 @@ func TestRunSkipsCodegenAfterDiagnostic(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, res.Targets)
 	require.Equal(t, []string{
-		"graph[0]: " + filepath.Join(dir, "queries", "ghost.cypher") + ": query BadLabel: unknown label: Ghost",
+		"graph[0]: " + filepath.Join(dir, "queries", "ghost.cypher") + ": query BadLabel: unknown label: Ghost is not declared on any node type",
 	}, res.Diagnostics)
 }
 

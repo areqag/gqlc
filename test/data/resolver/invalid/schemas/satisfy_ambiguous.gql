@@ -1,0 +1,17 @@
+-- Two multi-label node types share the label `Person` but no bare (:Person)
+-- exists. A query for :Person cannot exact-match and its satisfying set has
+-- size 2 -> plural refusal (new sentinel).
+
+CREATE PROPERTY GRAPH TYPE SatisfyAmbiguous AS {
+
+    (:Person&Employee {
+        employeeId :: INT NOT NULL,
+        title      :: STRING
+    }),
+
+    (:Person&Contractor {
+        contractorId :: INT NOT NULL,
+        agency       :: STRING
+    })
+
+}

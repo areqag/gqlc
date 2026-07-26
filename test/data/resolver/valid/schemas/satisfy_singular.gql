@@ -1,0 +1,20 @@
+-- Exercises label satisfaction where the singular case is reachable two ways:
+-- via an exact match on the declared label set, and via subset match onto a
+-- unique declared node type. The bare (:Person ...) plus multi-label
+-- (:Person&Employee ...) shape is the regression case: `MATCH (p:Person)` must
+-- resolve to the bare Person via exact-match precedence, not refuse as a
+-- plural satisfying set.
+
+CREATE PROPERTY GRAPH TYPE SatisfySingular AS {
+
+    (:Person {
+        id   :: INT NOT NULL,
+        name :: STRING NOT NULL
+    }),
+
+    (:Person&Employee {
+        employeeId :: INT NOT NULL,
+        title      :: STRING
+    })
+
+}

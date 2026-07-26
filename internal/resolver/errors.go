@@ -8,11 +8,24 @@ import "errors"
 // fmt.Errorf("%w: %s", …) — the schema/gql and cypher-parser convention (ADR
 // 0009).
 var (
-	// ErrUnknownLabel is returned when a node binding's label set does not
-	// resolve to a declared node type in the schema, or (at R1) an unlabelled
-	// node binding's candidate set from touching edges is empty, or an
-	// anonymous inline endpoint carries no labels the resolver can commit.
+	// ErrUnknownLabel is returned when a node binding's label set names at
+	// least one label declared nowhere in the schema, or (subset-match arm)
+	// every label is declared but no declared node type carries all of them
+	// as a superset — or (at R1) an unlabelled node binding's candidate set
+	// from touching edges is empty, or an anonymous inline endpoint carries
+	// no labels the resolver can commit.
 	ErrUnknownLabel = errors.New("unknown label")
+
+	// ErrAmbiguousLabel is returned when a query's label set has no exact
+	// match on a declared node type key and its proper-superset satisfying
+	// set has more than one element — the author must narrow the label set
+	// (or, at step 2, project properties instead of the whole entity) so a
+	// single node type resolves. Not overloaded onto ErrUnknownLabel because
+	// that sentinel already means "too few match"; this fault is "too many".
+	// Not overloaded onto ErrAmbiguousBinding either, whose documented
+	// meaning is Phase B inference failure at an unlabelled binding — a
+	// different fault at a different phase.
+	ErrAmbiguousLabel = errors.New("ambiguous label")
 
 	// ErrUnknownProperty is returned when a property reference — a property
 	// projection, an inline-map parameter use, or a rich-expression /
@@ -106,6 +119,7 @@ var (
 // one negative fixture; a retired one must be dropped from both.
 var allSentinels = []error{
 	ErrUnknownLabel,
+	ErrAmbiguousLabel,
 	ErrUnknownProperty,
 	ErrOutOfR0Scope,
 	ErrUnknownEdge,
