@@ -4,6 +4,16 @@
 # installs or upgrades the linter by hand.
 golangci_version := "v2.12.2"
 golangci := justfile_directory() + "/.bin/golangci-lint"
+# Per-worktree cache. golangci-lint caches analyzer facts and per-package issue
+# records keyed on module path + relative file path + content hash — the absolute
+# worktree path is NOT in the key. A shared default cache at ~/.cache/golangci-lint
+# therefore returns issues carrying the absolute Pos.Filename of whichever
+# worktree first computed them; when that worktree is removed, subsequent lints
+# in a sibling report phantom paths (bd gqlc-6rv / gqlc-we8). CLAUDE.md mandates
+# a fresh sibling worktree per session, so this is a routine hazard.
+# Colocating the cache under .bin/ (already gitignored) makes `git worktree
+# remove` delete it, and costs one cold lint (~80s) per fresh session.
+export GOLANGCI_LINT_CACHE := justfile_directory() + "/.bin/golangci-cache"
 actionlint_version := "v1.7.7"
 
 # Configures local git settings required after a fresh clone.
