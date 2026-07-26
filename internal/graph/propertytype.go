@@ -8,9 +8,13 @@ type PropertyType string
 // each width-preserving variant its own type (ADR 0002).
 const (
 	TypeString    PropertyType = "STRING"
+	TypeBytes     PropertyType = "BYTES"
 	TypeBool      PropertyType = "BOOL"
 	TypeDate      PropertyType = "DATE"
+	TypeTime      PropertyType = "TIME"
+	TypeLocalTime PropertyType = "LOCALTIME"
 	TypeTimestamp PropertyType = "TIMESTAMP"
+	TypeDuration  PropertyType = "DURATION"
 
 	TypeInt    PropertyType = "INT"
 	TypeInt8   PropertyType = "INT8"
