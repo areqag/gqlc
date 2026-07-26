@@ -299,6 +299,18 @@ func (s *ParserSuite) TestPhraseFormEquivalence() {
 			edges: 1,
 		},
 		{
+			// An alias may be spelled the same as the label it is bound to, which is
+			// how the phrase form is usually written, and the alias table has to win:
+			// `Person` here is the alias, not the node type it names.
+			name: "alias shadowing its own label still resolves",
+			pattern: `(Person :Person { id :: INT }),
+				(Person) -[:KNOWS]-> (Person)`,
+			phrase: `NODE TYPE :Person { id :: INT } AS Person,
+				DIRECTED EDGE :KNOWS CONNECTING (Person TO Person)`,
+			nodes: 1,
+			edges: 1,
+		},
+		{
 			// Both spellings name their ends by role, so both are the edge Post ->
 			// Person and neither needs the listener to swap anything.
 			name: "left-pointing endpoints canonicalise to source->target",
@@ -343,6 +355,12 @@ func (s *ParserSuite) TestEndpointAliasDiagnostics() {
 			name: "phrase endpoint names a node type that binds no alias",
 			src: `NODE TYPE Person :Person { id :: INT },
 				DIRECTED EDGE :KNOWS CONNECTING (Person TO Person)`,
+			want: ErrEndpointNotAlias,
+		},
+		{
+			name: "phrase endpoint names the node type name rather than its label",
+			src: `NODE TYPE PersonType :Person { id :: INT },
+				DIRECTED EDGE :KNOWS CONNECTING (PersonType TO PersonType)`,
 			want: ErrEndpointNotAlias,
 		},
 		{
