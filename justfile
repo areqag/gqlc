@@ -22,15 +22,26 @@ init:
     git config core.hooksPath .githooks
     @echo "git hooks activated (core.hooksPath = .githooks)"
 
-# warns (to stderr, non-fatal) when core.hooksPath drifts from .githooks — the
-# only way local pre-commit/pre-push gates can silently die (CI cannot see local
-# git config). Sub-ms; wired into `test` so developers hit it naturally.
+# fails when core.hooksPath drifts from .githooks — the only way local
+# pre-commit/pre-push gates can silently die (CI cannot see local git config).
+# Sub-ms; wired into `test` so developers hit it naturally.
+#
+# Skipped under CI, which has no local hooks by design and runs the equivalent
+# gates as workflow jobs; without the skip this would fail every CI `just test`.
+#
+# Compares the configured value rather than testing the directory: the drift
+# that actually occurred (bd gqlc-5fm) pointed at .git/hooks, which exists but
+# holds only .sample files that git ignores, so an existence test passes while
+# every hook is dead.
 [private]
 check-hooks:
     #!/usr/bin/env bash
+    [ -n "${CI:-}" ] && exit 0
     got="$(git config --get core.hooksPath || true)"
     if [ "$got" != ".githooks" ]; then
-        echo "warning: core.hooksPath is '${got:-<unset>}', expected '.githooks' — local hooks are inactive. Run 'just init' to fix." >&2
+        echo "error: core.hooksPath is '${got:-<unset>}', expected '.githooks' — local hooks are inactive." >&2
+        echo "       Run 'just init' to fix." >&2
+        exit 1
     fi
 
 # health check for local dev environment; extend as new drift modes emerge
