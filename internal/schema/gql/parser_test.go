@@ -187,6 +187,80 @@ func (s *ParserSuite) TestEdgeInlineEndpoints() {
 	s.True(ok, "inline filler endpoints resolve to the declared node type")
 }
 
+// TestEndpointFillerEmptyBraceAllowed pins that an inline endpoint filler
+// spelled with an empty property-type spec `{}` is NOT rejected — the author
+// wrote no properties, so there is nothing to silently drop. The guard fires
+// only when the property-type list has entries. Keeps a future widening of
+// TestEndpointFillerRejectsProperties honest.
+func (s *ParserSuite) TestEndpointFillerEmptyBraceAllowed() {
+	src := `CREATE PROPERTY GRAPH TYPE T AS {
+		(:Person),
+		(:Post),
+		(:Person) -[:AUTHORED]-> (:Post {})
+	}`
+	got, err := New().Parse(strings.NewReader(src))
+	s.Require().NoError(err)
+	key := schema.EdgeKey{
+		Source: graph.LabelSet{"Person"}.Key(),
+		Label:  graph.LabelSet{"AUTHORED"}.Key(),
+		Target: graph.LabelSet{"Post"}.Key(),
+	}
+	_, ok := got.Edges[key]
+	s.True(ok, "empty-brace endpoint filler resolves to the label-only spelling")
+}
+
+// TestEndpointFillerRejectsProperties pins the h9n.18 semantics: an inline
+// endpoint filler that carries a property-type set is rejected, symmetric on
+// source and destination. Previously the filler's properties were parsed and
+// silently discarded (the model matched the label-only spelling byte for byte,
+// with err=nil), which is the silent-wrong-answer shape the h9n corpus epic
+// exists to eliminate. Symmetry is not incidental: fillerLabels is called from
+// both sides via the same helper, so a source-only or destination-only guard
+// would put the two sides in different behaviours with no principled basis.
+//
+// A label-only inline endpoint (the shape TestEdgeInlineEndpoints already pins)
+// stays green — this test does not regress that case; the guard only fires on
+// a non-empty property-type list (TestEndpointFillerEmptyBraceAllowed pins the
+// empty-brace tolerance).
+func (s *ParserSuite) TestEndpointFillerRejectsProperties() {
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{
+			name: "destination-side filler carries a property (the bead witness)",
+			src: `(:Person),
+				(:Post),
+				(:Person) -[:AUTHORED]-> (:Post { extra :: STRING })`,
+		},
+		{
+			name: "source-side filler carries a property",
+			src: `(:Person),
+				(:Post),
+				(:Person { extra :: STRING }) -[:AUTHORED]-> (:Post)`,
+		},
+		{
+			name: "both sides carry properties",
+			src: `(:Person),
+				(:Post),
+				(:Person { a :: INT }) -[:AUTHORED]-> (:Post { b :: STRING })`,
+		},
+		{
+			name: "left-pointing arc, source-side (canonical) filler carries a property",
+			src: `(:Person),
+				(:Post),
+				(:Person) <-[:AUTHORED]- (:Post { extra :: STRING })`,
+		},
+	}
+	for _, tt := range cases {
+		s.Run(tt.name, func() {
+			got, err := New().Parse(strings.NewReader(graphType(tt.src)))
+			s.Require().ErrorIs(err, ErrEndpointFillerHasProperties)
+			s.Equal(schema.Schema{}, got, "model must be the zero value on error")
+		})
+	}
+}
+
 // TestEdgeLeftPointingCanonicalised covers a left-pointing arc being normalised
 // to source->target: `(a) <-[:R]- (b)` is the edge b -> a, so its identity is
 // independent of the direction it was written in.

@@ -38,24 +38,39 @@ type rawEndpoint struct {
 // sourceRef and destRef read an edge endpoint in either form the grammar allows:
 // a bound alias (preferred when present), or an inline node-type filler whose
 // label set names the endpoint. They differ only in the alias accessor, which the
-// generated source/destination reference types do not share.
-func sourceRef(r gen.ISourceNodeTypeReferenceContext) rawEndpoint {
+// generated source/destination reference types do not share. The error is
+// forwarded from fillerLabels — an inline filler that carries a property-type
+// spec has no consumer for those declarations and is rejected as a sentinel
+// rather than parsed and silently discarded.
+func sourceRef(r gen.ISourceNodeTypeReferenceContext) (rawEndpoint, error) {
 	if a := r.SourceNodeTypeAlias(); a != nil {
-		return rawEndpoint{alias: a.GetText()}
+		return rawEndpoint{alias: a.GetText()}, nil
 	}
-	return rawEndpoint{labels: fillerLabels(r.NodeTypeFiller())}
+	labels, err := fillerLabels(r.NodeTypeFiller())
+	if err != nil {
+		return rawEndpoint{}, err
+	}
+	return rawEndpoint{labels: labels}, nil
 }
 
-func destRef(r gen.IDestinationNodeTypeReferenceContext) rawEndpoint {
+func destRef(r gen.IDestinationNodeTypeReferenceContext) (rawEndpoint, error) {
 	if a := r.DestinationNodeTypeAlias(); a != nil {
-		return rawEndpoint{alias: a.GetText()}
+		return rawEndpoint{alias: a.GetText()}, nil
 	}
-	return rawEndpoint{labels: fillerLabels(r.NodeTypeFiller())}
+	labels, err := fillerLabels(r.NodeTypeFiller())
+	if err != nil {
+		return rawEndpoint{}, err
+	}
+	return rawEndpoint{labels: labels}, nil
 }
 
 // fillerLabels reads just the label set from an inline node-type filler used as
-// an edge endpoint — the only part of the filler that is the endpoint's identity
-// (inline properties on an endpoint are ignored).
+// an edge endpoint. The endpoint is a reference to a node type declared
+// elsewhere in the same graph type (CONTEXT.md: "resolved to the referenced
+// node type's label set"), so the only part of the filler that means anything
+// here is the label set — the property-type declarations that the grammar also
+// admits inside a filler have no consumer, and previously were silently
+// discarded (gqlc-h9n.18).
 //
 // f is nil when the endpoint is written as empty parens `()`: the grammar makes
 // the filler optional (`LEFT_PAREN nodeTypeFiller? RIGHT_PAREN`), so `()` with no
@@ -63,17 +78,24 @@ func destRef(r gen.IDestinationNodeTypeReferenceContext) rawEndpoint {
 // that case is legitimately reachable and already handled: nil labels yield the
 // empty label-set key, which matches no declared node type and surfaces as
 // ErrUnknownEndpoint during resolution.
-func fillerLabels(f gen.INodeTypeFillerContext) graph.LabelSet {
+func fillerLabels(f gen.INodeTypeFillerContext) (graph.LabelSet, error) {
 	if f == nil {
-		return nil
+		return nil, nil
 	}
 	ic := f.NodeTypeImpliedContent()
 	if ic == nil {
-		return nil
+		return nil, nil
+	}
+	if pts := ic.NodeTypePropertyTypes(); pts != nil {
+		if spec := pts.PropertyTypesSpecification(); spec != nil {
+			if list := spec.PropertyTypeList(); list != nil && len(list.AllPropertyType()) > 0 {
+				return nil, ErrEndpointFillerHasProperties
+			}
+		}
 	}
 	ls := ic.NodeTypeLabelSet()
 	if ls == nil {
-		return nil
+		return nil, nil
 	}
-	return labelSet(ls.LabelSetPhrase())
+	return labelSet(ls.LabelSetPhrase()), nil
 }
