@@ -84,9 +84,11 @@ func (l *listener) EnterCreateGraphTypeStatement(c *gen.CreateGraphTypeStatement
 	// An inline `AS { ... }` body (nestedGraphTypeSpecification) is the only
 	// supported source. Testing for it rather than enumerating LIKE and COPY OF
 	// means a source alternative added to the grammar later is rejected rather
-	// than silently dropped. Only the AS-less `COPY OF` spelling reaches here:
-	// `AS COPY OF` matches createGraphStatement instead, so it surfaces as
-	// ErrNoGraphType (both spellings are pinned by TestCorpusSpellingTraps).
+	// than silently dropped. Both LIKE and the AS-less `COPY OF` spelling reach
+	// this rule and are rejected here. Of the two COPY OF spellings only the
+	// AS-less one gets this far: `AS COPY OF` matches createGraphStatement
+	// instead, so it surfaces as ErrNoGraphType (both spellings are pinned by
+	// TestCorpusSpellingTraps).
 	if src := c.GraphTypeSource(); src == nil || src.NestedGraphTypeSpecification() == nil {
 		l.fail(ErrUnsupportedSource)
 		return

@@ -10,7 +10,7 @@ var (
 	ErrUndirectedEdge        = errors.New("undirected edges are not supported")
 	ErrUnknownEndpoint       = errors.New("edge endpoint references an undeclared node type")
 	ErrUnsupportedType       = errors.New("unsupported property value type")
-	ErrUnsupportedPhraseForm = errors.New("the NODE TYPE / EDGE TYPE phrase form is not supported")
+	ErrUnsupportedPhraseForm = errors.New("the phrase form of a node or edge type declaration is not supported; use the pattern form")
 	ErrUnnamedNodeType       = errors.New("node type has no label")
 	ErrUnnamedEdgeType       = errors.New("edge type has no label")
 	ErrDuplicateNodeType     = errors.New("duplicate node type")
