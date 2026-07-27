@@ -155,11 +155,17 @@ func rowFieldName(colText string) (string, bool) {
 // parameters at emission time. DATE / TIMESTAMP are in-scope at C3 and
 // return "dbtype.Date" / "time.Time"; FLOAT32 returns "float32" (the
 // carrier-widens-on-encode / narrow-on-decode contract is enforced at
-// the emission sites, spec §5.5 / §5.7).
+// the emission sites, spec §5.5 / §5.7). BYTES / TIME / LOCAL TIME /
+// DURATION add four dbtype-carrying arms; DURATION collapses its
+// (YEAR TO MONTH) vs (DAY TO SECOND) qualifier onto a single
+// dbtype.Duration, which the driver represents as one struct with
+// Months / Days / Seconds / Nanos fields (see ADR 0002 Consequences).
 func goType(pt graph.PropertyType) (string, bool) {
 	switch pt {
 	case graph.TypeString:
 		return "string", true
+	case graph.TypeBytes:
+		return "[]byte", true
 	case graph.TypeBool:
 		return "bool", true
 	case graph.TypeInt:
@@ -188,8 +194,14 @@ func goType(pt graph.PropertyType) (string, bool) {
 		return "float32", true
 	case graph.TypeDate:
 		return "dbtype.Date", true
+	case graph.TypeTime:
+		return "dbtype.Time", true
+	case graph.TypeLocalTime:
+		return "dbtype.LocalTime", true
 	case graph.TypeTimestamp:
 		return "time.Time", true
+	case graph.TypeDuration:
+		return "dbtype.Duration", true
 	case graph.TypeInt128, graph.TypeInt256,
 		graph.TypeUint128, graph.TypeUint256,
 		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,

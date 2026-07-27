@@ -48,9 +48,7 @@ func hasNotNull(t antlr.Tree) bool {
 // typeSpellings maps a canonicalised GQL value-type spelling to its normalised
 // PropertyType. Only grammar-reachable spellings appear: NUMERIC, CHARACTER
 // and bare DATETIME/LOCALDATETIME are listed in some references but the GQL
-// grammar does not accept them. SIGNED and UNSIGNED prefixes on
-// verboseBinaryExactNumericType are grammar-accepted (GQL.g4:1803, :1816) but
-// not modelled yet — tracked as gqlc-h9n.4.
+// grammar does not accept them.
 //
 // The parenthesised binary-width spellings for INT / INTEGER / UINT (INT(8),
 // UINT(64) …) appear as explicit rows because their bit-width identifies a
@@ -59,6 +57,15 @@ func hasNotNull(t antlr.Tree) bool {
 // GQL.g4:1801; UINT(8) alongside UINT8 under unsignedBinaryExactNumericType,
 // :1814; INTEGER(8) alongside INTEGER8 under verboseBinaryExactNumericType,
 // :1827) and the parenthetical admits no scale.
+//
+// SIGNED and UNSIGNED prefixes on verboseBinaryExactNumericType (GQL.g4:1803
+// for SIGNED?, :1816 for UNSIGNED) are represented as one alias row per bare
+// verbose spelling. Alias rows over a pre-lookup normalisation because
+// alternative-additions to the grammar are grep-visible here — the fact that
+// SIGNED SMALL INTEGER maps to TypeInt16 lands in the same table an author or
+// reviewer reads to find any other spelling. The corresponding
+// TestPropertyVerboseIntegerSignedness rows go red if any alias row is
+// deleted.
 //
 // FLOAT(p) is not folded even though its bare form is here. Its parenthetical
 // is (LEFT_PAREN precision (COMMA scale)? RIGHT_PAREN) at GQL.g4:1849 — a
@@ -69,70 +76,111 @@ func hasNotNull(t antlr.Tree) bool {
 // this needs an ISO 39075 citation, not an inference, and is deferred to
 // gqlc-h9n.28.
 //
+// DURATION is present only as the bare key: the grammar (GQL.g4:1893) makes
+// the `(YEAR TO MONTH)` / `(DAY TO SECOND)` qualifier mandatory, so
+// `DURATION(YEAR TO MONTH)` and `DURATION(DAY TO SECOND)` both reach this
+// table via truncateParenthetical and share a single row. Bare `DURATION`
+// cannot appear in a well-formed source (pinned by
+// TestPropertyBareDurationRejectedAtParse); if a future grammar edit made the
+// qualifier optional, the fallback would silently accept it and that test
+// would tell us.
+//
 // The length/character/decimal-digit parenthetical (VARCHAR(255), DECIMAL(p,s),
 // STRING(10)) is not a spelling of a type the model already has — it is a
 // qualifier ADR 0002 elects to drop, and it does so via the truncated-spelling
-// fallback in normaliseType. A trailing NOT NULL is stripped before lookup.
+// fallback in normaliseType. The duration qualifier drops through the same
+// fallback for a different reason (see ADR 0002 §Consequences and the
+// TypeDuration paragraph above). A trailing NOT NULL is stripped before
+// lookup.
 var typeSpellings = map[string]graph.PropertyType{
 	"STRING":    graph.TypeString,
 	"CHAR":      graph.TypeString,
 	"VARCHAR":   graph.TypeString,
+	"BYTES":     graph.TypeBytes,
+	"BINARY":    graph.TypeBytes,
+	"VARBINARY": graph.TypeBytes,
 	"BOOL":      graph.TypeBool,
 	"BOOLEAN":   graph.TypeBool,
 	"DATE":      graph.TypeDate,
 	"TIMESTAMP": graph.TypeTimestamp,
+
+	"ZONED TIME":          graph.TypeTime,
+	"TIME WITH TIME ZONE": graph.TypeTime,
+
+	"LOCAL TIME":             graph.TypeLocalTime,
+	"TIME WITHOUT TIME ZONE": graph.TypeLocalTime,
 
 	"ZONED DATETIME":              graph.TypeTimestamp,
 	"LOCAL DATETIME":              graph.TypeTimestamp,
 	"TIMESTAMP WITH TIME ZONE":    graph.TypeTimestamp,
 	"TIMESTAMP WITHOUT TIME ZONE": graph.TypeTimestamp,
 
-	"INT":           graph.TypeInt,
-	"INTEGER":       graph.TypeInt,
-	"SMALLINT":      graph.TypeInt16,
-	"SMALL INTEGER": graph.TypeInt16,
-	"BIGINT":        graph.TypeInt64,
-	"BIG INTEGER":   graph.TypeInt64,
-	"INT8":          graph.TypeInt8,
-	"INTEGER8":      graph.TypeInt8,
-	"INT16":         graph.TypeInt16,
-	"INTEGER16":     graph.TypeInt16,
-	"INT32":         graph.TypeInt32,
-	"INTEGER32":     graph.TypeInt32,
-	"INT64":         graph.TypeInt64,
-	"INTEGER64":     graph.TypeInt64,
-	"INT128":        graph.TypeInt128,
-	"INTEGER128":    graph.TypeInt128,
-	"INT256":        graph.TypeInt256,
-	"INTEGER256":    graph.TypeInt256,
-	"INT(8)":        graph.TypeInt8,
-	"INTEGER(8)":    graph.TypeInt8,
-	"INT(16)":       graph.TypeInt16,
-	"INTEGER(16)":   graph.TypeInt16,
-	"INT(32)":       graph.TypeInt32,
-	"INTEGER(32)":   graph.TypeInt32,
-	"INT(64)":       graph.TypeInt64,
-	"INTEGER(64)":   graph.TypeInt64,
-	"INT(128)":      graph.TypeInt128,
-	"INTEGER(128)":  graph.TypeInt128,
-	"INT(256)":      graph.TypeInt256,
-	"INTEGER(256)":  graph.TypeInt256,
+	"DURATION": graph.TypeDuration,
 
-	"UINT":      graph.TypeUint,
-	"USMALLINT": graph.TypeUint16,
-	"UBIGINT":   graph.TypeUint64,
-	"UINT8":     graph.TypeUint8,
-	"UINT16":    graph.TypeUint16,
-	"UINT32":    graph.TypeUint32,
-	"UINT64":    graph.TypeUint64,
-	"UINT128":   graph.TypeUint128,
-	"UINT256":   graph.TypeUint256,
-	"UINT(8)":   graph.TypeUint8,
-	"UINT(16)":  graph.TypeUint16,
-	"UINT(32)":  graph.TypeUint32,
-	"UINT(64)":  graph.TypeUint64,
-	"UINT(128)": graph.TypeUint128,
-	"UINT(256)": graph.TypeUint256,
+	"INT":                  graph.TypeInt,
+	"INTEGER":              graph.TypeInt,
+	"SIGNED INTEGER":       graph.TypeInt,
+	"SMALLINT":             graph.TypeInt16,
+	"SMALL INTEGER":        graph.TypeInt16,
+	"SIGNED SMALL INTEGER": graph.TypeInt16,
+	"BIGINT":               graph.TypeInt64,
+	"BIG INTEGER":          graph.TypeInt64,
+	"SIGNED BIG INTEGER":   graph.TypeInt64,
+	"INT8":                 graph.TypeInt8,
+	"INTEGER8":             graph.TypeInt8,
+	"SIGNED INTEGER8":      graph.TypeInt8,
+	"INT16":                graph.TypeInt16,
+	"INTEGER16":            graph.TypeInt16,
+	"SIGNED INTEGER16":     graph.TypeInt16,
+	"INT32":                graph.TypeInt32,
+	"INTEGER32":            graph.TypeInt32,
+	"SIGNED INTEGER32":     graph.TypeInt32,
+	"INT64":                graph.TypeInt64,
+	"INTEGER64":            graph.TypeInt64,
+	"SIGNED INTEGER64":     graph.TypeInt64,
+	"INT128":               graph.TypeInt128,
+	"INTEGER128":           graph.TypeInt128,
+	"SIGNED INTEGER128":    graph.TypeInt128,
+	"INT256":               graph.TypeInt256,
+	"INTEGER256":           graph.TypeInt256,
+	"SIGNED INTEGER256":    graph.TypeInt256,
+	"INT(8)":               graph.TypeInt8,
+	"INTEGER(8)":           graph.TypeInt8,
+	"INT(16)":              graph.TypeInt16,
+	"INTEGER(16)":          graph.TypeInt16,
+	"INT(32)":              graph.TypeInt32,
+	"INTEGER(32)":          graph.TypeInt32,
+	"INT(64)":              graph.TypeInt64,
+	"INTEGER(64)":          graph.TypeInt64,
+	"INT(128)":             graph.TypeInt128,
+	"INTEGER(128)":         graph.TypeInt128,
+	"INT(256)":             graph.TypeInt256,
+	"INTEGER(256)":         graph.TypeInt256,
+
+	"UINT":                   graph.TypeUint,
+	"UNSIGNED INTEGER":       graph.TypeUint,
+	"USMALLINT":              graph.TypeUint16,
+	"UNSIGNED SMALL INTEGER": graph.TypeUint16,
+	"UBIGINT":                graph.TypeUint64,
+	"UNSIGNED BIG INTEGER":   graph.TypeUint64,
+	"UINT8":                  graph.TypeUint8,
+	"UNSIGNED INTEGER8":      graph.TypeUint8,
+	"UINT16":                 graph.TypeUint16,
+	"UNSIGNED INTEGER16":     graph.TypeUint16,
+	"UINT32":                 graph.TypeUint32,
+	"UNSIGNED INTEGER32":     graph.TypeUint32,
+	"UINT64":                 graph.TypeUint64,
+	"UNSIGNED INTEGER64":     graph.TypeUint64,
+	"UINT128":                graph.TypeUint128,
+	"UNSIGNED INTEGER128":    graph.TypeUint128,
+	"UINT256":                graph.TypeUint256,
+	"UNSIGNED INTEGER256":    graph.TypeUint256,
+	"UINT(8)":                graph.TypeUint8,
+	"UINT(16)":               graph.TypeUint16,
+	"UINT(32)":               graph.TypeUint32,
+	"UINT(64)":               graph.TypeUint64,
+	"UINT(128)":              graph.TypeUint128,
+	"UINT(256)":              graph.TypeUint256,
 
 	"FLOAT":            graph.TypeFloat,
 	"REAL":             graph.TypeFloat32,
