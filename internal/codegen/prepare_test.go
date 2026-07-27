@@ -104,15 +104,15 @@ func listPlanLikesKey() entityLookupKey {
 }
 
 // TestPhaseBCommitsListElemPlan is the mapping-table unit test the
-// deepening acceptance criteria call for (spec §4.1, gqlc-ls8.3). 34
-// positive rows exercise every arm of the ResolvedType sum: 17
+// deepening acceptance criteria call for (spec §4.1, gqlc-ls8.3). 38
+// positive rows exercise every arm of the ResolvedType sum: 21
 // representable property widths, 6 temporal kinds, 6 scalar kinds
 // (with ScalarNull splitting off to columnScalarNull), 1 Unknown, 1
 // Node, 1 Edge, 1 EdgeUnion, 1 nested-list-of-int64. 9 negative rows
 // exercise the failure fence: 8 unrepresentable property widths each
 // expected to route through ErrUnrepresentableWidth, plus 1 synthetic
 // malformed-variant row asserting a foreign ResolvedType returns
-// ErrOutOfC6Scope rather than silent success. Total: 43 rows.
+// ErrOutOfC6Scope rather than silent success. Total: 47 rows.
 func TestPhaseBCommitsListElemPlan(t *testing.T) {
 	entities, index := listPlanTestFixture(t)
 	knowsKey := schema.EdgeKey{
@@ -140,7 +140,7 @@ func TestPhaseBCommitsListElemPlan(t *testing.T) {
 		NestedGoTy  string
 	}
 
-	// 17 representable property widths per internal/graph/propertytype.go.
+	// 21 representable property widths per internal/graph/propertytype.go.
 	propRows := []struct {
 		name    string
 		pt      graph.PropertyType
@@ -149,6 +149,7 @@ func TestPhaseBCommitsListElemPlan(t *testing.T) {
 		convert bool
 	}{
 		{"string", graph.TypeString, "string", "", false},
+		{"bytes", graph.TypeBytes, "[]byte", "", false},
 		{"bool", graph.TypeBool, "bool", "", false},
 		{"int", graph.TypeInt, "int", "int64", true},
 		{"int8", graph.TypeInt8, "int8", "int64", true},
@@ -164,7 +165,10 @@ func TestPhaseBCommitsListElemPlan(t *testing.T) {
 		{"float32", graph.TypeFloat32, "float32", "float64", true},
 		{"float64", graph.TypeFloat64, "float64", "", false},
 		{"date", graph.TypeDate, "dbtype.Date", "", false},
+		{"time", graph.TypeTime, "dbtype.Time", "", false},
+		{"localtime", graph.TypeLocalTime, "dbtype.LocalTime", "", false},
 		{"timestamp", graph.TypeTimestamp, "time.Time", "", false},
+		{"duration", graph.TypeDuration, "dbtype.Duration", "", false},
 	}
 
 	// 6 temporal kinds.
@@ -196,7 +200,7 @@ func TestPhaseBCommitsListElemPlan(t *testing.T) {
 		{"scalar map", resolver.ScalarMap, "map[string]any", columnScalar},
 	}
 
-	// Positive rows: 17 + 6 + 6 + 1 + 1 + 1 + 1 + 1 = 34.
+	// Positive rows: 21 + 6 + 6 + 1 + 1 + 1 + 1 + 1 = 38.
 	positive := []struct {
 		name string
 		in   resolver.ResolvedType
@@ -271,7 +275,7 @@ func TestPhaseBCommitsListElemPlan(t *testing.T) {
 		},
 	)
 
-	require.Len(t, positive, 34, "positive table should have 34 rows (§4.1)")
+	require.Len(t, positive, 38, "positive table should have 38 rows (§4.1)")
 
 	for _, tt := range positive {
 		t.Run("positive/"+tt.name, func(t *testing.T) {

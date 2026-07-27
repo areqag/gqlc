@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE PropertyDuration AS {
+    (:Span {
+        id      :: INT64                    NOT NULL,
+        elapsed :: DURATION(DAY TO SECOND)  NOT NULL
+    })
+}

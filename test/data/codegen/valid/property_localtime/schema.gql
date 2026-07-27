@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE PropertyLocalTime AS {
+    (:Event {
+        id      :: INT64      NOT NULL,
+        atLocal :: LOCAL TIME NOT NULL
+    })
+}

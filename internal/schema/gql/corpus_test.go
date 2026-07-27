@@ -48,7 +48,7 @@ import (
 // syntax error, because an identifier is not a schemaReference (GQL.g4:1469).
 const (
 	wantCorpusEntries   = 86
-	wantCorpusResolving = 37
+	wantCorpusResolving = 48
 )
 
 // isValidFeature reports whether v is an accepted value of corpusEntry.feature:

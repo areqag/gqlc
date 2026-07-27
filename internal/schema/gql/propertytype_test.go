@@ -1,6 +1,7 @@
 package gql
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/antlr4-go/antlr/v4"
@@ -55,15 +56,27 @@ func TestPropertyTypeMapping(t *testing.T) {
 		{"STRING", graph.TypeString},
 		{"CHAR", graph.TypeString},
 		{"VARCHAR", graph.TypeString},
+		{"BYTES", graph.TypeBytes},
+		{"BINARY", graph.TypeBytes},
+		{"VARBINARY", graph.TypeBytes},
 		{"BOOL", graph.TypeBool},
 		{"BOOLEAN", graph.TypeBool},
 		{"DATE", graph.TypeDate},
+
+		{"ZONED TIME", graph.TypeTime},
+		{"TIME WITH TIME ZONE", graph.TypeTime},
+
+		{"LOCAL TIME", graph.TypeLocalTime},
+		{"TIME WITHOUT TIME ZONE", graph.TypeLocalTime},
 
 		{"TIMESTAMP", graph.TypeTimestamp},
 		{"ZONED DATETIME", graph.TypeTimestamp},
 		{"LOCAL DATETIME", graph.TypeTimestamp},
 		{"TIMESTAMP WITH TIME ZONE", graph.TypeTimestamp},
 		{"TIMESTAMP WITHOUT TIME ZONE", graph.TypeTimestamp},
+
+		{"DURATION(YEAR TO MONTH)", graph.TypeDuration},
+		{"DURATION(DAY TO SECOND)", graph.TypeDuration},
 
 		{"INT", graph.TypeInt},
 		{"INTEGER", graph.TypeInt},
@@ -306,14 +319,84 @@ func TestPropertyNullability(t *testing.T) {
 	require.Equal(t, graph.TypeInt, notNull.Type, "NOT NULL must not corrupt the type")
 }
 
+// TestPropertyVerboseIntegerSignedness covers the SIGNED / UNSIGNED prefix on
+// verboseBinaryExactNumericType (GQL.g4:1803 for SIGNED?, :1816 for UNSIGNED).
+// Both signednesses are equivalent to their bare verbose counterpart under the
+// no-dialect principle: SIGNED INTEGER32 is INT32, UNSIGNED INTEGER8 is UINT8,
+// and so on across the six width slots plus the bare / SMALL / BIG spellings.
+// A mutation that drops any single alias row fails the corresponding named
+// subtest here rather than a bulk count.
+//
+// SIGNED is optional in the grammar; UNSIGNED is mandatory. So bare `INTEGER`
+// pins the SIGNED-absent case implicitly (it's already covered by
+// TestPropertyTypeMapping), and the SIGNED-present rows here pin the explicit
+// keyword equivalence.
+func TestPropertyVerboseIntegerSignedness(t *testing.T) {
+	pairs := []struct{ prefixed, bare string }{
+		{"SIGNED INTEGER", "INTEGER"},
+		{"SIGNED INTEGER8", "INTEGER8"},
+		{"SIGNED INTEGER16", "INTEGER16"},
+		{"SIGNED INTEGER32", "INTEGER32"},
+		{"SIGNED INTEGER64", "INTEGER64"},
+		{"SIGNED INTEGER128", "INTEGER128"},
+		{"SIGNED INTEGER256", "INTEGER256"},
+		{"SIGNED SMALL INTEGER", "SMALL INTEGER"},
+		{"SIGNED BIG INTEGER", "BIG INTEGER"},
+
+		{"UNSIGNED INTEGER", "UINT"},
+		{"UNSIGNED INTEGER8", "UINT8"},
+		{"UNSIGNED INTEGER16", "UINT16"},
+		{"UNSIGNED INTEGER32", "UINT32"},
+		{"UNSIGNED INTEGER64", "UINT64"},
+		{"UNSIGNED INTEGER128", "UINT128"},
+		{"UNSIGNED INTEGER256", "UINT256"},
+		{"UNSIGNED SMALL INTEGER", "USMALLINT"},
+		{"UNSIGNED BIG INTEGER", "UBIGINT"},
+	}
+
+	for _, pair := range pairs {
+		t.Run(pair.prefixed+"_equals_"+pair.bare, func(t *testing.T) {
+			pref, err := parseFirstProperty(t, pair.prefixed)
+			require.NoError(t, err)
+			bare, err := parseFirstProperty(t, pair.bare)
+			require.NoError(t, err)
+			require.Equal(t, bare.Type, pref.Type, "%s must resolve to the same PropertyType as %s", pair.prefixed, pair.bare)
+		})
+	}
+}
+
+// TestPropertyBareDurationRejectedAtParse pins the invariant this bead's
+// duration-qualifier drop depends on: bare `DURATION` (without the mandatory
+// `(YEAR TO MONTH)` / `(DAY TO SECOND)` qualifier) cannot reach the schema
+// mapper because the grammar (GQL.g4:1893, `DURATION LEFT_PAREN
+// temporalDurationQualifier RIGHT_PAREN`) requires the parenthetical. If a
+// future grammar edit made the qualifier optional, `truncateParenthetical`
+// would silently accept bare `DURATION` on the strength of the alias row
+// typeSpellings["DURATION"], and this test would tell us — the invariant we
+// rely on to justify a single TypeDuration constant would have shifted under
+// us. Positive assertion: the parser's error listener produced its
+// "syntax error at ..." message, not merely that some error occurred and not
+// merely that the word "unsupported" is absent.
+func TestPropertyBareDurationRejectedAtParse(t *testing.T) {
+	src := `CREATE PROPERTY GRAPH TYPE T AS { (:A { p :: DURATION }) }`
+	_, err := New().Parse(strings.NewReader(src))
+	require.Error(t, err)
+	require.True(t,
+		strings.HasPrefix(err.Error(), "syntax error at "),
+		"bare DURATION must be rejected by the parser's error listener (grammar requires the qualifier); got: %v", err,
+	)
+}
+
 // TestPropertyUnsupportedType covers grammar-valid value types outside the
 // families this model maps; they must surface ErrUnsupportedType (ADR 0002).
+// Scalar time-of-day / byte-string / duration spellings that once lived here
+// are now supported (gqlc-h9n.4) and appear in TestPropertyTypeMapping instead;
+// the remaining shapes are constructed / reference / dynamic types the model
+// does not carry.
 func TestPropertyUnsupportedType(t *testing.T) {
 	for _, spelling := range []string{
-		"TIME WITH TIME ZONE",
 		"LIST<INT>",
 		"ANY",
-		"BYTES",
 	} {
 		t.Run(spelling, func(t *testing.T) {
 			_, err := parseFirstProperty(t, spelling)

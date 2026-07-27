@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE PropertyTime AS {
+    (:Event {
+        id       :: INT64               NOT NULL,
+        happened :: TIME WITH TIME ZONE NOT NULL
+    })
+}
