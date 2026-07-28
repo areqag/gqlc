@@ -154,5 +154,9 @@
     "demote_edge_group_across_with.cypher": "social_r4.gql",
     "carry_edge_union_property.cypher": "social_r4.gql",
     "demote_local_group_shadows_carry.cypher": "social_r4.gql",
-    "delete_bare_multi_type_edge.cypher": "social_r6.gql"
+    "delete_bare_multi_type_edge.cypher": "social_r6.gql",
+    "distinct_in_later_part.cypher": "social_r5.gql",
+    "union_all_distinct_second_branch.cypher": "social_r5.gql",
+    "aggregate_with_literal_grouping_key.cypher": "social_r5.gql",
+    "aggregate_with_func_grouping_key.cypher": "social_r5.gql"
 }
