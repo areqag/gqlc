@@ -875,6 +875,42 @@ func TestNestedGraphTypeSpecificationElementsNotCollected(t *testing.T) {
 	}
 }
 
+// TestSyntaxErrorNamesTheOffendingToken pins the branch of listener.SyntaxError
+// that decides no outcome and exists only to sharpen the message. Nothing read
+// it: TestInvalid maps syntax_error.gql to nil, which it documents as "any
+// non-nil error from the syntax error listener satisfies it", and
+// TestPropertyBareDurationRejectedAtParse asserts the "syntax error at " prefix
+// both branches share. Deleting the branch left every test green.
+//
+// ErrEndpointNotAlias is the same kind of branch — it changes what a rejection
+// is called and never whether it is one — and removing that one is caught. This
+// makes the two consistent.
+//
+// Both cases are here because they fail differently. `fish` is the first token
+// of the input, where line:column alone would nearly do; `}` is reported four
+// tokens past the construct that is actually wrong, which is where naming the
+// token earns its keep.
+func TestSyntaxErrorNamesTheOffendingToken(t *testing.T) {
+	fixture, err := os.ReadFile(filepath.Join(fixtureDir, "invalid", "syntax_error.gql"))
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name  string
+		src   string
+		token string
+	}{
+		{name: "invalid/syntax_error.gql", src: string(fixture), token: "fish"},
+		{name: "bare DURATION", src: `CREATE PROPERTY GRAPH TYPE T AS { (:A { p :: DURATION }) }`, token: "}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := New().Parse(strings.NewReader(tc.src))
+			require.Error(t, err)
+			require.Contains(t, err.Error(), fmt.Sprintf("near %q", tc.token),
+				"a syntax error must name the offending token, not only its line and column; got: %v", err)
+		})
+	}
+}
+
 // TestInvalid asserts each invalid fixture produces its paired sentinel. A nil
 // wantErr means the fixture is a syntax error (no sentinel), so any non-nil
 // error from the syntax error listener satisfies it.
