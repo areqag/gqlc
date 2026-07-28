@@ -158,12 +158,15 @@ var invalidFixtures = map[string]error{
 	"part_binding_type_conflict.cypher":             ErrPartBindingTypeConflict,
 	"part_binding_type_conflict_edge.cypher":        ErrPartBindingTypeConflict,
 	// R6 additions:
-	"create_unknown_label.cypher":                 ErrUnknownLabel,
-	"create_unknown_edge.cypher":                  ErrUnknownEdge,
-	"merge_endpoint_unknown_label.cypher":         ErrUnknownLabel,
-	"merge_unknown_edge.cypher":                   ErrUnknownEdge,
-	"merge_on_match_unknown_property.cypher":      ErrUnknownProperty,
-	"set_property_unknown_property.cypher":        ErrUnknownProperty,
+	"create_unknown_label.cypher":            ErrUnknownLabel,
+	"create_unknown_edge.cypher":             ErrUnknownEdge,
+	"merge_endpoint_unknown_label.cypher":    ErrUnknownLabel,
+	"merge_unknown_edge.cypher":              ErrUnknownEdge,
+	"merge_on_match_unknown_property.cypher": ErrUnknownProperty,
+	"set_property_unknown_property.cypher":   ErrUnknownProperty,
+	// The second of two effects. ValidateEffects walks s.effects in slice
+	// order; with only the first validated, this query resolves clean.
+	"set_second_effect_unknown_property.cypher":   ErrUnknownProperty,
 	"set_property_on_projection_alias.cypher":     ErrInvalidEffectTarget,
 	"set_property_on_var_length_edge.cypher":      ErrInvalidEffectTarget,
 	"set_entity_on_projection_alias.cypher":       ErrInvalidEffectTarget,

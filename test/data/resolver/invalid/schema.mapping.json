@@ -69,5 +69,6 @@
     "parameter_use_on_var_length_edge_property.cypher": "social_r7.gql",
     "parameter_type_conflict_optional_node_nullability.cypher": "social_r7.gql",
     "parameter_type_conflict_optional_edge_nullability.cypher": "social_r7.gql",
-    "parameter_use_unknown_edge_property.cypher": "social_r7.gql"
+    "parameter_use_unknown_edge_property.cypher": "social_r7.gql",
+    "set_second_effect_unknown_property.cypher": "social.gql"
 }
