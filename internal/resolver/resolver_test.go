@@ -137,6 +137,8 @@ var invalidFixtures = map[string]error{
 	"list_of_edges_projection.cypher":                    ErrOutOfR0Scope,
 	"ambiguous_edge_orientation.cypher":                  ErrAmbiguousEdgeOrientation,
 	"ambiguous_edge_orientation_after_inference.cypher":  ErrAmbiguousEdgeOrientation,
+	"path_binding.cypher":                                ErrOutOfR0Scope,
+	"unwind_binding.cypher":                              ErrOutOfR0Scope,
 	"unknown_edge_undirected.cypher":                     ErrUnknownEdge,
 	"unknown_edge_multi_type_all_miss.cypher":            ErrUnknownEdge,
 	"unknown_property_union_missing.cypher":              ErrUnknownProperty,
