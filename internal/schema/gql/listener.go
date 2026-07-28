@@ -344,6 +344,12 @@ func (l *listener) EnterEdgeTypePattern(c *gen.EdgeTypePatternContext) {
 	// carries the edge's label set and properties. Both directed alternatives
 	// expose canonical source->target via these accessors (the grammar already
 	// swaps a left-pointing arc's endpoints).
+	//
+	// Reading the source first is what makes a defective pair report the source's
+	// rejection, and the pick is by role rather than written position — for `<-`
+	// the source is the rightmost endpoint — so respelling an edge in the other
+	// direction does not move its diagnostic to the other end.
+	// TestEndpointFillerMixedRejectionsReportTheSource goes red on either swap.
 	var (
 		filler gen.IEdgeTypeFillerContext
 		src    rawEndpoint
