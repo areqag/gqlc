@@ -105,23 +105,38 @@ func optionalitySymbols(e ebnf) []string {
 //
 // Forcing present keeps `*` repeating as `+` rather than collapsing to one occurrence,
 // so a corpus sequence with three of them still matches the present branch.
+//
+// The optionals enclosing the nth are pinned present too, which is the difference
+// between a file that elided this point and one that never reached it. Leaving them
+// optional admits, on both branches, every parse that dropped the whole enclosing
+// group — so a nested point came out exercised for free. That is the mistake the
+// withElement/withoutElement design was written against, one level up: matching a
+// whole child sequence does not catch it, because the sequence genuinely matches.
+// Only the ancestors move; an optional elsewhere in the alternative stays optional,
+// since the parse that reached this point is free to have taken either branch of it.
 func forceOptional(expr ebnf, n int, present bool) (out ebnf, element []string, ok bool) {
 	seen := 0
-	var rebuild func(ebnf) ebnf
-	rebuild = func(x ebnf) ebnf {
+	// onPath reports whether the rebuilt subtree contains the forced node, which is
+	// how an enclosing optional learns it is an ancestor rather than a bystander.
+	var rebuild func(ebnf) (ebnf, bool)
+	rebuild = func(x ebnf) (ebnf, bool) {
 		switch v := x.(type) {
 		case ebnfSeq:
-			next := make(ebnfSeq, len(v))
+			next, onPath := make(ebnfSeq, len(v)), false
 			for i, item := range v {
-				next[i] = rebuild(item)
+				var hit bool
+				next[i], hit = rebuild(item)
+				onPath = onPath || hit
 			}
-			return next
+			return next, onPath
 		case ebnfChoice:
-			next := make(ebnfChoice, len(v))
+			next, onPath := make(ebnfChoice, len(v)), false
 			for i, item := range v {
-				next[i] = rebuild(item)
+				var hit bool
+				next[i], hit = rebuild(item)
+				onPath = onPath || hit
 			}
-			return next
+			return next, onPath
 		case ebnfRepeat:
 			if v.optional {
 				if seen == n {
@@ -129,17 +144,23 @@ func forceOptional(expr ebnf, n int, present bool) (out ebnf, element []string, 
 					ok = true
 					element = optionalitySymbols(v.inner)
 					if !present {
-						return ebnfSeq{}
+						return ebnfSeq{}, true
 					}
-					return ebnfRepeat{inner: v.inner, repeated: v.repeated}
+					return ebnfRepeat{inner: v.inner, repeated: v.repeated}, true
 				}
 				seen++
+				inner, onPath := rebuild(v.inner)
+				if onPath {
+					return ebnfRepeat{inner: inner, repeated: v.repeated}, true
+				}
+				return ebnfRepeat{inner: inner, optional: true, repeated: v.repeated}, false
 			}
-			return ebnfRepeat{inner: rebuild(v.inner), optional: v.optional, repeated: v.repeated}
+			inner, onPath := rebuild(v.inner)
+			return ebnfRepeat{inner: inner, repeated: v.repeated}, onPath
 		}
-		return x
+		return x, false
 	}
-	out = rebuild(expr)
+	out, _ = rebuild(expr)
 	return out, element, ok
 }
 
@@ -364,6 +385,62 @@ func exemptOptionalityClasses() map[string]bool {
 		exempt[ex.class] = true
 	}
 	return exempt
+}
+
+// TestForceOptionalPinsAncestors witnesses the ancestor forcing directly, because no
+// coverage verdict distinguishes it any more. The one class it moved, 18.3::edgeKind,
+// is discharged by pattern_name_no_kind.gql taking the branch for real — so the
+// shallow forcing that used to credit it for free now reaches the same answer, and
+// dropping the ancestor pass again would go unnoticed until the next nested point
+// arrived. That is the shape of gap this repair is about, so the repair does not get
+// to rely on the corpus to hold it.
+//
+// The expression stands in for edgeTypePattern: an optional group with an optional
+// inside it, and a mandatory element after, which is `(edgeKind? edgeSynonym TYPE?
+// edgeTypeName)? (edgeTypePatternDirected | ...)` with the names shortened.
+func TestForceOptionalPinsAncestors(t *testing.T) {
+	expr, err := parseEBNF("(kind? synonym name)? arc")
+	require.NoError(t, err)
+
+	inner, element, ok := forceOptional(expr, 1, true)
+	require.True(t, ok)
+	require.Equal(t, []string{"kind"}, element, "point 1 is the optional inside the group, point 0 being the group")
+
+	require.True(t, inner.matches([]string{"kind", "synonym", "name", "arc"}),
+		"a parse that entered the group and took the element is what taking this branch means")
+	require.False(t, inner.matches([]string{"arc"}),
+		"a parse that dropped the whole group never reached this point, so it did not take the branch")
+
+	without, _, _ := forceOptional(expr, 1, false)
+	require.True(t, without.matches([]string{"synonym", "name", "arc"}),
+		"a parse that entered the group and left the element out is what eliding it means")
+	require.False(t, without.matches([]string{"arc"}),
+		"and the same parse that took no branch cannot be the one that elided it either; crediting both is how one bare shape used to discharge a class on its own")
+
+	group, element, ok := forceOptional(expr, 0, true)
+	require.True(t, ok)
+	require.Equal(t, []string{"kind", "synonym", "name"}, element)
+	require.True(t, group.matches([]string{"synonym", "name", "arc"}),
+		"the group's own branches stay independent of the optional inside it")
+
+	// A choice and a `+` lie between a point and its optional ancestor nowhere in the
+	// reachable grammar today, so the corpus cannot witness those two hops and the two
+	// spellings below do it instead. They are the shapes that arrive the day a rule
+	// grows an alternation or a repetition around an existing optional, which is a
+	// grammar edit nobody would think to reread this file for.
+	choice, err := parseEBNF("(alpha (beta | gamma?))? delta")
+	require.NoError(t, err)
+	through, _, ok := forceOptional(choice, 1, true)
+	require.True(t, ok)
+	require.True(t, through.matches([]string{"alpha", "gamma", "delta"}))
+	require.False(t, through.matches([]string{"delta"}), "a choice does not hide the point from its ancestor")
+
+	repeated, err := parseEBNF("(alpha (beta gamma?)+)? delta")
+	require.NoError(t, err)
+	through, _, ok = forceOptional(repeated, 1, true)
+	require.True(t, ok)
+	require.True(t, through.matches([]string{"alpha", "beta", "gamma", "delta"}))
+	require.False(t, through.matches([]string{"delta"}), "nor does a repetition")
 }
 
 // TestOptionalityClassGolden pins the classes the grammar defines, and the point count
