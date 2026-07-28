@@ -199,6 +199,29 @@ var invalidFixtures = map[string]error{
 	// property. Covered on the read path (unknown_property_union_*), not the write.
 	"set_property_unknown_on_multi_type_edge.cypher":    ErrUnknownProperty,
 	"remove_property_unknown_on_multi_type_edge.cypher": ErrUnknownProperty,
+	// kq6 additions. ag5 above pinned the SET family; its REMOVE LABELS and
+	// DELETE twins kept the same guards with no fixture behind them, so 13 of
+	// 26 mutations over the validators still survived.
+	//
+	// SET labels had set_labels_on_edge.cypher; REMOVE labels had no twin, so
+	// both its edge rejection and the node-target gate they share were free.
+	"remove_labels_on_edge.cypher": ErrInvalidEffectTarget,
+	// Neither SET nor REMOVE pinned the projection-alias arm.
+	"set_labels_on_projection_alias.cypher":    ErrInvalidEffectTarget,
+	"remove_labels_on_projection_alias.cypher": ErrInvalidEffectTarget,
+	// DELETE is the third property validator. SET and REMOVE each pin the
+	// var-length guard and the property-existence check on both edge shapes;
+	// DELETE pinned neither, on either shape.
+	"delete_property_on_var_length_edge.cypher":            ErrInvalidEffectTarget,
+	"delete_property_on_var_length_multi_type_edge.cypher": ErrInvalidEffectTarget,
+	"delete_edge_property_unknown.cypher":                  ErrUnknownProperty,
+	"delete_property_unknown_on_multi_type_edge.cypher":    ErrUnknownProperty,
+	"delete_property_on_projection_alias.cypher":           ErrInvalidEffectTarget,
+	// Both loops that walk a list of things to validate stopped at the first
+	// element with the suite green: DELETE over its targets, MERGE over its
+	// ON MATCH effects.
+	"delete_second_target_unknown_property.cypher":         ErrUnknownProperty,
+	"merge_on_match_second_effect_unknown_property.cypher": ErrUnknownProperty,
 	// R7 additions:
 	"call_yield_property_lookup.cypher":              ErrUnknownProperty,
 	"part_binding_type_conflict_call_vs_node.cypher": ErrPartBindingTypeConflict,
