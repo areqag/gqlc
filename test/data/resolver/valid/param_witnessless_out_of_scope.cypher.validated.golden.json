@@ -1,0 +1,23 @@
+{
+  "columns": [
+    {
+      "name": "nm",
+      "type": {
+        "kind": "property",
+        "type": "STRING",
+        "nullable": false
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [
+    {
+      "name": "z",
+      "type": {
+        "kind": "unknown"
+      }
+    }
+  ],
+  "statement": "read",
+  "distinct": false
+}
