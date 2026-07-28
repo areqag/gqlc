@@ -149,5 +149,9 @@
     "union_edge_union_same_arity.cypher": "social_edgeunion.gql",
     "returns_all_var_length_edge.cypher": "social_r7.gql",
     "returns_all_carried_alias.cypher": "social_r7.gql",
-    "parameter_optional_nullability_agree.cypher": "social_r7.gql"
+    "parameter_optional_nullability_agree.cypher": "social_r7.gql",
+    "demote_group_across_two_withs.cypher": "social_r4.gql",
+    "demote_edge_group_across_with.cypher": "social_r4.gql",
+    "carry_edge_union_property.cypher": "social_r4.gql",
+    "demote_local_group_shadows_carry.cypher": "social_r4.gql"
 }
