@@ -69,7 +69,15 @@ var corpusAreaD2 = []corpusEntry{
 		sentinel: ErrDynamicUnionType,
 		feature:  "mandatory",
 		bead:     "gqlc-h9n.33",
-		reason:   "a closed union needs the enum to carry its members, which is gqlc-h9n.33's blocker rather than gqlc-h9n.34's, though ADR 0019 keeps both halves under one ISO-named sentinel. ANY VALUE<STRING | INT> discharges valueType alts 9 and 10 in one parse, because the inner STRING | INT is itself a nested closedDynamicUnionTypeAtl2",
+		reason:   "a closed union needs the enum to carry its members, which is gqlc-h9n.33's blocker rather than gqlc-h9n.34's, though ADR 0019 keeps both halves under one ISO-named sentinel. ANY VALUE<STRING | INT> is valueType alt 9 (closedDynamicUnionTypeAtl1) and discharges that alone: declineValueType reads the outermost context and does not descend, so the nested STRING | INT is never dispatched on. Alt 10 is constructed_dyn_closed_union_bare.gql's",
+	},
+	{
+		file:     "18.9-value-type/constructed_dyn_closed_union_bare.gql",
+		outcome:  unsupported,
+		sentinel: ErrDynamicUnionType,
+		feature:  "mandatory",
+		bead:     "gqlc-h9n.33",
+		reason:   "the bare-bar spelling of the same decline, valueType alt 10 (closedDynamicUnionTypeAtl2). The angle-bracket file nests an Atl2 inside its Atl1 and was read as covering both, but declineValueType does not descend — a panic in the Atl2 arm never fired across the suite — so deleting that arm left nothing red. Without this file the spelling still rejects, on the bare ErrUnsupportedType, and the family ADR 0019 assigns it goes unasserted",
 	},
 	{
 		file:     "18.9-value-type/constructed_null.gql",

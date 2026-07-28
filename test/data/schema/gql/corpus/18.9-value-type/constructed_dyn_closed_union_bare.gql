@@ -1,0 +1,15 @@
+-- The bare-bar closed dynamic union: `STRING | INT` with no ANY VALUE<...>
+-- around it. Same ADR 0019 decline as the angle-bracket spelling, and the
+-- alternative that spelling does not reach.
+--
+-- constructed_dyn_closed_union.gql is `ANY VALUE<STRING | INT>`, which nests an
+-- Atl2 inside an Atl1. declineValueType reads the outermost context and does not
+-- descend -- deliberately, so that a RECORD field's family is not reported in
+-- place of the property's -- so only the outer Atl1 is ever dispatched on. Every
+-- other file in this clause is likewise Atl1, an open union, or a property value
+-- type. Deleting the Atl2 arm from declineValueType therefore left the suite
+-- green: without this file the spelling still rejects, but on the bare
+-- ErrUnsupportedType, and the family ADR 0019 assigns it goes unasserted.
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:Bag { p :: STRING | INT })
+}
