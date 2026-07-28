@@ -158,5 +158,7 @@
     "distinct_in_later_part.cypher": "social_r5.gql",
     "union_all_distinct_second_branch.cypher": "social_r5.gql",
     "aggregate_with_literal_grouping_key.cypher": "social_r5.gql",
-    "aggregate_with_func_grouping_key.cypher": "social_r5.gql"
+    "aggregate_with_func_grouping_key.cypher": "social_r5.gql",
+    "infer_via_reverse_orientation.cypher": "social_r5.gql",
+    "infer_ignores_untouched_edge.cypher": "social_r5.gql"
 }

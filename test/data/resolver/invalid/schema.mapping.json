@@ -86,5 +86,8 @@
     "union_node_type_mismatch.cypher": "social_r5.gql",
     "union_edge_union_nullability_mismatch.cypher": "social_r5.gql",
     "union_list_element_mismatch.cypher": "social_r5.gql",
-    "union_edge_union_keys_mismatch.cypher": "edge_union_keys.gql"
+    "union_edge_union_keys_mismatch.cypher": "edge_union_keys.gql",
+    "parameter_type_conflict_two_properties_same_nullability.cypher": "social.gql",
+    "part_binding_type_conflict_call_vs_unlabelled.cypher": "social_r7.gql",
+    "label_satisfy_none.cypher": "satisfy_ambiguous.gql"
 }
