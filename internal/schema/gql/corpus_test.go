@@ -1176,6 +1176,88 @@ func TestRequiredAlternativesDemandsTheThief(t *testing.T) {
 	}
 }
 
+// TestRequiredAlternativesRejectsMalformedExemptions is the rejection half of the
+// test above, and the argument for it is TestIsValidFeature's: a guard on a
+// hand-written registry exists for the entry nobody has written yet, so the
+// rejection is the half that has to be pinned. All four branches were deletable
+// with the suite green, the checked-in list having exactly one well-formed entry.
+//
+// The stale tag is the one that is a fail-open rather than an integrity check.
+// Without it an exemption whose tag stops being a candidate — a grammar change, or
+// a typo — marks something the loop over invisible never matches, so required is
+// unchanged and the exemption quietly stops excusing what it was written for.
+// TestAlternativeExemptions is not the backstop: it asserts no corpus file took the
+// exempted tag, and a tag no file can take is uncovered for a stale entry too.
+//
+// The missing-field disjunction gets a case per disjunct. As one condition it is
+// pinned by any one of them, and the fields are not interchangeable — the bead and
+// the why are what make an exemption reviewable, which is the whole argument
+// alternativeExemptions rests on.
+func TestRequiredAlternativesRejectsMalformedExemptions(t *testing.T) {
+	index := grammarObligation(t).alternatives
+
+	// The checked-in pair, so every tag names a rule the index can resolve and a
+	// case fails for the reason it is named after rather than for an unknown tag.
+	const tag, thief = "connectorUndirected#1", "connectorPointingRight#1"
+	invisible := []string{tag, thief}
+	wellFormed := alternativeExemption{tag: tag, stolenBy: thief, bead: "gqlc-h9n.15", why: "the checked-in exemption"}
+
+	withField := func(mutate func(*alternativeExemption)) []alternativeExemption {
+		ex := wellFormed
+		mutate(&ex)
+		return []alternativeExemption{ex}
+	}
+
+	for _, tc := range []struct {
+		name       string
+		exemptions []alternativeExemption
+		wantErr    string
+	}{
+		{
+			name:       "tag is not a candidate",
+			exemptions: withField(func(ex *alternativeExemption) { ex.tag = "valueType#3" }),
+			wantErr:    "is not a candidate alternative",
+		},
+		{
+			name:       "the same tag exempted twice",
+			exemptions: []alternativeExemption{wellFormed, wellFormed},
+			wantErr:    "duplicate exemption",
+		},
+		{
+			name:       "no thief",
+			exemptions: withField(func(ex *alternativeExemption) { ex.stolenBy = "" }),
+			wantErr:    "needs the alternative that takes its input",
+		},
+		{
+			name:       "no bead",
+			exemptions: withField(func(ex *alternativeExemption) { ex.bead = "" }),
+			wantErr:    "needs the alternative that takes its input",
+		},
+		{
+			name:       "no why",
+			exemptions: withField(func(ex *alternativeExemption) { ex.why = "" }),
+			wantErr:    "needs the alternative that takes its input",
+		},
+		{
+			name:       "stolen by itself",
+			exemptions: withField(func(ex *alternativeExemption) { ex.stolenBy = ex.tag }),
+			wantErr:    "cannot be stolen by itself",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := requiredAlternatives(invisible, index, tc.exemptions)
+			require.ErrorContains(t, err, tc.wantErr)
+			require.Nil(t, got, "a rejected exemption list must yield no required set to act on")
+		})
+	}
+
+	// And the fixture itself is accepted, so no case above passes because the shape
+	// they are all built from was already refused.
+	got, err := requiredAlternatives(invisible, index, []alternativeExemption{wellFormed})
+	require.NoError(t, err)
+	require.Equal(t, []string{thief}, got)
+}
+
 // TestIsValidFeature pins the corpusEntry.feature guard: the two special-case
 // tokens and at least one real Annex D code are accepted, and a plausible-but-
 // fabricated id is rejected. The rejection half is the one that matters — that
