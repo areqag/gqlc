@@ -1,0 +1,5 @@
+-- relativeDirectoryPath's `(SOLIDUS DOUBLE_PERIOD)*` repetition (GQL.g4:1412),
+-- which copy_of_relative_up.gql elides: `../s/gt` climbs one level and takes the
+-- repetition zero times, and no spelling in the corpus took it at all until this
+-- one. The second `..` is the whole difference between the two files.
+CREATE PROPERTY GRAPH TYPE Copied COPY OF ../../s/gt
