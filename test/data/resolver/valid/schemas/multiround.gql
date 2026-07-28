@@ -1,0 +1,21 @@
+CREATE PROPERTY GRAPH TYPE MultiRound AS {
+    (:Hub {
+        id :: INT NOT NULL
+    }),
+    (:Alpha {
+        id :: INT NOT NULL
+    }),
+    (:Beta {
+        id :: INT NOT NULL
+    }),
+    (:Mid {
+        id :: INT NOT NULL
+    }),
+    (:Tail {
+        id :: INT NOT NULL
+    }),
+    (:Hub)   -[:SPANS]->   (:Alpha),
+    (:Hub)   -[:SPANS]->   (:Beta),
+    (:Alpha) -[:FEEDS]->   (:Mid),
+    (:Mid)   -[:ANCHORS]-> (:Tail)
+}

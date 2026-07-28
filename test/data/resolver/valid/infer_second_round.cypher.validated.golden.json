@@ -1,0 +1,25 @@
+{
+  "columns": [
+    {
+      "name": "b1",
+      "type": {
+        "kind": "node",
+        "labels": "Alpha",
+        "nullable": false
+      },
+      "groupingKey": false
+    },
+    {
+      "name": "b2",
+      "type": {
+        "kind": "node",
+        "labels": "Mid",
+        "nullable": false
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "read",
+  "distinct": false
+}
