@@ -149,6 +149,21 @@ var invalidFixtures = map[string]error{
 	"union_column_type_mismatch.cypher":        ErrUnionColumnMismatch,
 	"union_column_nullability_mismatch.cypher": ErrUnionColumnMismatch,
 	"union_unknown_label_branch.cypher":        ErrUnknownLabel,
+	// rlt additions. compareBranchColumns checks name before type and both
+	// raise ErrUnionColumnMismatch, so union_column_name_mismatch.cypher
+	// above — which differs in name AND type — was caught by the type check
+	// and left the name check free. This one differs in name only.
+	"union_column_name_only_mismatch.cypher": ErrUnionColumnMismatch,
+	// No fixture had three branches, so comparing only branch 1 against
+	// branch 0 was free.
+	"union_third_branch_mismatch.cypher": ErrUnionColumnMismatch,
+	// resolvedTypeEqual is reachable only from compareBranchColumns, and no
+	// fixture unioned two branches projecting different whole-entity or list
+	// types under a common column name. One fixture per unpinned arm.
+	"union_node_type_mismatch.cypher":              ErrUnionColumnMismatch,
+	"union_edge_union_nullability_mismatch.cypher": ErrUnionColumnMismatch,
+	"union_edge_union_keys_mismatch.cypher":        ErrUnionColumnMismatch,
+	"union_list_element_mismatch.cypher":           ErrUnionColumnMismatch,
 	// Two edge-union columns where one key list is a strict prefix of the other.
 	// resolvedTypeEqual's arity check is the only thing separating them, and the
 	// two orderings fail differently without it — see the comment on

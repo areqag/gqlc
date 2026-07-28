@@ -252,11 +252,12 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.
 // ExprProjection is a grouping key iff ContainsAggregate() == false
 // (ADR 0008 amendment 2026-07-06).
 func fillGroupingKeys(cols []Column, part query.Part) {
-	// A ReturnsAll-expanded Part's Returns is empty (parser guarantees
-	// mutual exclusion); expanded items are RefProjection over bindings,
-	// which are grouping-key candidates. Since AggregateProjection cannot
-	// appear inside a bare-name RefProjection, a ReturnsAll Part cannot fire
-	// the hasAggregate gate — nothing to do.
+	// ReturnsAll and a non-empty Returns are NOT mutually exclusive: a
+	// standalone CALL ... YIELD sets both, with Returns holding the yielded
+	// items index-aligned to cols. What does hold is the weaker claim —
+	// neither a `RETURN *` expansion (Returns empty) nor a YIELD item list
+	// can carry an AggregateProjection, so the hasAggregate gate below could
+	// not fire for a ReturnsAll Part regardless.
 	if part.ReturnsAll {
 		return
 	}

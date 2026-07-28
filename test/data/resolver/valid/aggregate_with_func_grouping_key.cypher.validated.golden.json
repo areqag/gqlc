@@ -1,0 +1,22 @@
+{
+  "columns": [
+    {
+      "name": "s",
+      "type": {
+        "kind": "unknown"
+      },
+      "groupingKey": true
+    },
+    {
+      "name": "c",
+      "type": {
+        "kind": "scalar",
+        "scalar": "int"
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "read",
+  "distinct": false
+}
