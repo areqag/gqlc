@@ -6,7 +6,7 @@
         "kind": "edge",
         "edgeKey": {
           "source": "Person",
-          "label": "AUTHORED",
+          "key_labels": "AUTHORED",
           "target": "Post"
         },
         "nullable": false

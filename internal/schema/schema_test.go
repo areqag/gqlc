@@ -19,15 +19,15 @@ func TestMarshalJSONIsDeterministic(t *testing.T) {
 	s := schema.Schema{
 		Name: "G",
 		Nodes: map[graph.LabelSetKey]schema.NodeType{
-			"B": {Labels: "B", Properties: map[string]schema.Property{
+			"B": {KeyLabels: "B", CompleteLabels: "B", Properties: map[string]schema.Property{
 				"y": {Name: "y", Type: graph.TypeInt, Nullable: true},
 				"x": {Name: "x", Type: graph.TypeString},
 			}},
-			"A": {Labels: "A"},
+			"A": {KeyLabels: "A", CompleteLabels: "A"},
 		},
 		Edges: map[schema.EdgeKey]schema.EdgeType{
-			{Source: "B", Label: "R", Target: "A"}: {EdgeKey: schema.EdgeKey{Source: "B", Label: "R", Target: "A"}},
-			{Source: "A", Label: "R", Target: "B"}: {EdgeKey: schema.EdgeKey{Source: "A", Label: "R", Target: "B"}},
+			{Source: "B", KeyLabels: "R", Target: "A"}: {EdgeKey: schema.EdgeKey{Source: "B", KeyLabels: "R", Target: "A"}},
+			{Source: "A", KeyLabels: "R", Target: "B"}: {EdgeKey: schema.EdgeKey{Source: "A", KeyLabels: "R", Target: "B"}},
 		},
 	}
 

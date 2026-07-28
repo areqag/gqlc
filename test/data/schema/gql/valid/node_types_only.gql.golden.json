@@ -2,7 +2,8 @@
   "name": "PeopleAndOrgs",
   "nodes": [
     {
-      "labels": "Company",
+      "key_labels": "Company",
+      "complete_labels": "Company",
       "name": "CompanyType",
       "properties": {
         "id": {
@@ -18,7 +19,8 @@
       }
     },
     {
-      "labels": "Employee\u0026Person",
+      "key_labels": "Employee\u0026Person",
+      "complete_labels": "Employee\u0026Person",
       "name": "",
       "properties": {
         "employeeId": {
@@ -34,7 +36,8 @@
       }
     },
     {
-      "labels": "Person",
+      "key_labels": "Person",
+      "complete_labels": "Person",
       "name": "",
       "properties": {
         "email": {
@@ -55,7 +58,8 @@
       }
     },
     {
-      "labels": "Tag",
+      "key_labels": "Tag",
+      "complete_labels": "Tag",
       "name": "",
       "properties": null
     }

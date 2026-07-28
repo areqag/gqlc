@@ -63,12 +63,12 @@ type unknownVariant struct {
 func listPlanTestFixture(t *testing.T) ([]preparedEntity, map[entityLookupKey]int) {
 	t.Helper()
 	person := graph.LabelSetKey("Person")
-	knows := schema.EdgeKey{Source: person, Label: graph.LabelSetKey("KNOWS"), Target: person}
-	likes := schema.EdgeKey{Source: person, Label: graph.LabelSetKey("LIKES"), Target: person}
+	knows := schema.EdgeKey{Source: person, KeyLabels: graph.LabelSetKey("KNOWS"), Target: person}
+	likes := schema.EdgeKey{Source: person, KeyLabels: graph.LabelSetKey("LIKES"), Target: person}
 	sch := schema.Schema{
 		Name: "Test",
 		Nodes: map[graph.LabelSetKey]schema.NodeType{
-			person: {Labels: person, Properties: map[string]schema.Property{}},
+			person: {KeyLabels: person, CompleteLabels: person, Properties: map[string]schema.Property{}},
 		},
 		Edges: map[schema.EdgeKey]schema.EdgeType{
 			knows: {EdgeKey: knows, Properties: map[string]schema.Property{}},
@@ -89,17 +89,17 @@ func listPlanPersonKey() entityLookupKey {
 // candidates.
 func listPlanKnowsKey() entityLookupKey {
 	return entityLookupKey{Kind: entityEdge, EdgeKey: schema.EdgeKey{
-		Source: graph.LabelSetKey("Person"),
-		Label:  graph.LabelSetKey("KNOWS"),
-		Target: graph.LabelSetKey("Person"),
+		Source:    graph.LabelSetKey("Person"),
+		KeyLabels: graph.LabelSetKey("KNOWS"),
+		Target:    graph.LabelSetKey("Person"),
 	}}
 }
 
 func listPlanLikesKey() entityLookupKey {
 	return entityLookupKey{Kind: entityEdge, EdgeKey: schema.EdgeKey{
-		Source: graph.LabelSetKey("Person"),
-		Label:  graph.LabelSetKey("LIKES"),
-		Target: graph.LabelSetKey("Person"),
+		Source:    graph.LabelSetKey("Person"),
+		KeyLabels: graph.LabelSetKey("LIKES"),
+		Target:    graph.LabelSetKey("Person"),
 	}}
 }
 
@@ -116,14 +116,14 @@ func listPlanLikesKey() entityLookupKey {
 func TestPhaseBCommitsListElemPlan(t *testing.T) {
 	entities, index := listPlanTestFixture(t)
 	knowsKey := schema.EdgeKey{
-		Source: graph.LabelSetKey("Person"),
-		Label:  graph.LabelSetKey("KNOWS"),
-		Target: graph.LabelSetKey("Person"),
+		Source:    graph.LabelSetKey("Person"),
+		KeyLabels: graph.LabelSetKey("KNOWS"),
+		Target:    graph.LabelSetKey("Person"),
 	}
 	likesKey := schema.EdgeKey{
-		Source: graph.LabelSetKey("Person"),
-		Label:  graph.LabelSetKey("LIKES"),
-		Target: graph.LabelSetKey("Person"),
+		Source:    graph.LabelSetKey("Person"),
+		KeyLabels: graph.LabelSetKey("LIKES"),
+		Target:    graph.LabelSetKey("Person"),
 	}
 	personName := entities[index[listPlanPersonKey()]].Name
 	knowsName := entities[index[listPlanKnowsKey()]].Name
@@ -350,14 +350,14 @@ func TestPreparedListElemMapsToColumnKind(t *testing.T) {
 	// Sample every arm through the builder and check membership.
 	entities, index := listPlanTestFixture(t)
 	knowsKey := schema.EdgeKey{
-		Source: graph.LabelSetKey("Person"),
-		Label:  graph.LabelSetKey("KNOWS"),
-		Target: graph.LabelSetKey("Person"),
+		Source:    graph.LabelSetKey("Person"),
+		KeyLabels: graph.LabelSetKey("KNOWS"),
+		Target:    graph.LabelSetKey("Person"),
 	}
 	likesKey := schema.EdgeKey{
-		Source: graph.LabelSetKey("Person"),
-		Label:  graph.LabelSetKey("LIKES"),
-		Target: graph.LabelSetKey("Person"),
+		Source:    graph.LabelSetKey("Person"),
+		KeyLabels: graph.LabelSetKey("LIKES"),
+		Target:    graph.LabelSetKey("Person"),
 	}
 	samples := []resolver.ResolvedType{
 		resolver.ResolvedProperty{Type: graph.TypeString},

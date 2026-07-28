@@ -8,7 +8,7 @@
           "kind": "edge",
           "edgeKey": {
             "source": "Person",
-            "label": "LIKES",
+            "key_labels": "LIKES",
             "target": "Post"
           },
           "nullable": false

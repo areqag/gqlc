@@ -2,7 +2,8 @@
   "name": "SocialNetwork",
   "nodes": [
     {
-      "labels": "Comment",
+      "key_labels": "Comment",
+      "complete_labels": "Comment",
       "name": "",
       "properties": {
         "content": {
@@ -28,7 +29,8 @@
       }
     },
     {
-      "labels": "Company",
+      "key_labels": "Company",
+      "complete_labels": "Company",
       "name": "",
       "properties": {
         "id": {
@@ -49,7 +51,8 @@
       }
     },
     {
-      "labels": "Forum",
+      "key_labels": "Forum",
+      "complete_labels": "Forum",
       "name": "",
       "properties": {
         "creationDate": {
@@ -70,7 +73,8 @@
       }
     },
     {
-      "labels": "Person",
+      "key_labels": "Person",
+      "complete_labels": "Person",
       "name": "",
       "properties": {
         "birthday": {
@@ -116,7 +120,8 @@
       }
     },
     {
-      "labels": "Post",
+      "key_labels": "Post",
+      "complete_labels": "Post",
       "name": "",
       "properties": {
         "content": {
@@ -152,7 +157,8 @@
       }
     },
     {
-      "labels": "Tag",
+      "key_labels": "Tag",
+      "complete_labels": "Tag",
       "name": "",
       "properties": {
         "id": {
@@ -173,7 +179,8 @@
       }
     },
     {
-      "labels": "University",
+      "key_labels": "University",
+      "complete_labels": "University",
       "name": "",
       "properties": {
         "id": {
@@ -197,36 +204,41 @@
   "edges": [
     {
       "source": "Comment",
-      "label": "hasCreator",
+      "key_labels": "hasCreator",
       "target": "Person",
+      "complete_labels": "hasCreator",
       "name": "",
       "properties": null
     },
     {
       "source": "Comment",
-      "label": "hasReply",
+      "key_labels": "hasReply",
       "target": "Post",
+      "complete_labels": "hasReply",
       "name": "",
       "properties": null
     },
     {
       "source": "Comment",
-      "label": "replyOf",
+      "key_labels": "replyOf",
       "target": "Post",
+      "complete_labels": "replyOf",
       "name": "",
       "properties": null
     },
     {
       "source": "Forum",
-      "label": "containerOf",
+      "key_labels": "containerOf",
       "target": "Post",
+      "complete_labels": "containerOf",
       "name": "",
       "properties": null
     },
     {
       "source": "Forum",
-      "label": "hasMember",
+      "key_labels": "hasMember",
       "target": "Person",
+      "complete_labels": "hasMember",
       "name": "",
       "properties": {
         "joinDate": {
@@ -238,22 +250,25 @@
     },
     {
       "source": "Forum",
-      "label": "hasTag",
+      "key_labels": "hasTag",
       "target": "Tag",
+      "complete_labels": "hasTag",
       "name": "",
       "properties": null
     },
     {
       "source": "Person",
-      "label": "hasInterest",
+      "key_labels": "hasInterest",
       "target": "Tag",
+      "complete_labels": "hasInterest",
       "name": "",
       "properties": null
     },
     {
       "source": "Person",
-      "label": "knows",
+      "key_labels": "knows",
       "target": "Person",
+      "complete_labels": "knows",
       "name": "",
       "properties": {
         "creationDate": {
@@ -265,8 +280,9 @@
     },
     {
       "source": "Person",
-      "label": "likes",
+      "key_labels": "likes",
       "target": "Post",
+      "complete_labels": "likes",
       "name": "",
       "properties": {
         "creationDate": {
@@ -278,8 +294,9 @@
     },
     {
       "source": "Person",
-      "label": "studyAt",
+      "key_labels": "studyAt",
       "target": "University",
+      "complete_labels": "studyAt",
       "name": "",
       "properties": {
         "classYear": {
@@ -291,8 +308,9 @@
     },
     {
       "source": "Person",
-      "label": "workAt",
+      "key_labels": "workAt",
       "target": "Company",
+      "complete_labels": "workAt",
       "name": "",
       "properties": {
         "workFrom": {
@@ -304,8 +322,9 @@
     },
     {
       "source": "Post",
-      "label": "hasCreator",
+      "key_labels": "hasCreator",
       "target": "Person",
+      "complete_labels": "hasCreator",
       "name": "",
       "properties": null
     }

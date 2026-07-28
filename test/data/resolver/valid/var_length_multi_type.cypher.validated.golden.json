@@ -9,12 +9,12 @@
           "edgeKeys": [
             {
               "source": "Person",
-              "label": "AUTHORED",
+              "key_labels": "AUTHORED",
               "target": "Post"
             },
             {
               "source": "Person",
-              "label": "LIKES",
+              "key_labels": "LIKES",
               "target": "Post"
             }
           ],
