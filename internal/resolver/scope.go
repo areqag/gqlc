@@ -23,6 +23,7 @@ type scope struct {
 	// Live tables — written by Phases A/B/C/D via Bind*/CloseEdges/
 	// InferUnlabelled/SeedLocalNullability/DemoteNullability.
 	nodeTypes       map[string]schema.NodeType
+	nodeCands       map[string][]schema.NodeType
 	edgeTypes       map[string]schema.EdgeType
 	edgeKeys        map[string]schema.EdgeKey
 	edgeCands       map[string][]schema.EdgeKey
@@ -63,6 +64,7 @@ type scope struct {
 func newScope(carry branchState) *scope {
 	s := &scope{
 		nodeTypes:            make(map[string]schema.NodeType),
+		nodeCands:            make(map[string][]schema.NodeType),
 		edgeTypes:            make(map[string]schema.EdgeType),
 		edgeKeys:             make(map[string]schema.EdgeKey),
 		edgeCands:            make(map[string][]schema.EdgeKey),
@@ -78,6 +80,9 @@ func newScope(carry branchState) *scope {
 	// Phase D's local-overrides-carry rule (§4.6) overwrites this.
 	for name, nt := range carry.exportedNodeTypes {
 		s.nodeTypes[name] = nt
+	}
+	for name, nts := range carry.exportedNodeCands {
+		s.nodeCands[name] = nts
 	}
 	for name, et := range carry.exportedEdgeTypes {
 		s.edgeTypes[name] = et
@@ -144,9 +149,43 @@ func (s *scope) BindNode(nb query.NodeBinding, nt schema.NodeType) error {
 	if prev, seen := s.nodeTypes[v]; seen && prev.KeyLabels != nt.KeyLabels {
 		return fmt.Errorf("%w: variable %q carried as %s, re-bound as %s", ErrPartBindingTypeConflict, v, prev.KeyLabels, nt.KeyLabels)
 	}
+	// A binding carried as plural cannot be re-bound as singular.
+	if _, wasCands := s.nodeCands[v]; wasCands {
+		return fmt.Errorf("%w: variable %q carried as plural node types, re-bound as singular %s", ErrPartBindingTypeConflict, v, nt.KeyLabels)
+	}
 	s.nodeTypes[v] = nt
 	// Local binding shadows any carried edge state at the same name;
 	// R5 §4.2.3 shadowing rule.
+	delete(s.edgeTypes, v)
+	delete(s.edgeKeys, v)
+	delete(s.edgeCands, v)
+	delete(s.edgeBindings, v)
+	return nil
+}
+
+// BindNodeCands admits a labelled NodeBinding that satisfies multiple declared
+// node types (plural satisfaction, ADR 0022). Property projections resolve via
+// intersection; whole-entity references are rejected at projection time.
+func (s *scope) BindNodeCands(nb query.NodeBinding, nts []schema.NodeType) error {
+	v := nb.Variable()
+	if _, seenCall := s.callTypes[v]; seenCall {
+		return fmt.Errorf("%w: variable %q carried as CALL YIELD scalar, re-bound as plural node", ErrPartBindingTypeConflict, v)
+	}
+	if _, wasSingular := s.nodeTypes[v]; wasSingular {
+		return fmt.Errorf("%w: variable %q carried as singular node type, re-bound as plural", ErrPartBindingTypeConflict, v)
+	}
+	if prevCands, seen := s.nodeCands[v]; seen {
+		// Consistent re-bind: same cardinality and same key labels in the same order.
+		if len(nts) != len(prevCands) {
+			return fmt.Errorf("%w: variable %q plural re-bind cardinality changed (%d -> %d)", ErrPartBindingTypeConflict, v, len(prevCands), len(nts))
+		}
+		for i := range nts {
+			if nts[i].KeyLabels != prevCands[i].KeyLabels {
+				return fmt.Errorf("%w: variable %q carried as %s, re-bound as %s", ErrPartBindingTypeConflict, v, prevCands[i].KeyLabels, nts[i].KeyLabels)
+			}
+		}
+	}
+	s.nodeCands[v] = nts
 	delete(s.edgeTypes, v)
 	delete(s.edgeKeys, v)
 	delete(s.edgeCands, v)
@@ -178,6 +217,7 @@ func (s *scope) BindEdge(eb query.EdgeBinding) error {
 	s.edgeBindings[v] = eb
 	// Edge shadows any carried node state.
 	delete(s.nodeTypes, v)
+	delete(s.nodeCands, v)
 	// Local edge re-bind resets any carried closed-edge state for v —
 	// Phase A2/C's closeEdge is authoritative for the new binding's
 	// endpoints, which may differ from the carry's.
@@ -196,6 +236,7 @@ func (s *scope) BindCall(cb query.CallBinding, r procsig.Registry) error {
 	// the same name (parser-unreachable belt-and-braces since
 	// build.go's imported[v] check rejects the collision at parse).
 	delete(s.nodeTypes, v)
+	delete(s.nodeCands, v)
 	delete(s.edgeTypes, v)
 	delete(s.edgeKeys, v)
 	delete(s.edgeCands, v)
@@ -250,8 +291,8 @@ func (s *scope) CloseEdges(sch schema.Schema) error {
 		if !ok {
 			continue
 		}
-		src, srcOK := endpointLabels(eb.Source(), s.nodeTypes)
-		tgt, tgtOK := endpointLabels(eb.Target(), s.nodeTypes)
+		src, srcOK := endpointLabels(eb.Source(), s.nodeTypes, s.nodeCands)
+		tgt, tgtOK := endpointLabels(eb.Target(), s.nodeTypes, s.nodeCands)
 		if !srcOK || !tgtOK {
 			deferred = append(deferred, eb)
 			continue
@@ -264,8 +305,8 @@ func (s *scope) CloseEdges(sch schema.Schema) error {
 		return err
 	}
 	for _, eb := range deferred {
-		src, srcOK := endpointLabels(eb.Source(), s.nodeTypes)
-		tgt, tgtOK := endpointLabels(eb.Target(), s.nodeTypes)
+		src, srcOK := endpointLabels(eb.Source(), s.nodeTypes, s.nodeCands)
+		tgt, tgtOK := endpointLabels(eb.Target(), s.nodeTypes, s.nodeCands)
 		switch {
 		case !srcOK:
 			return fmt.Errorf("%w: cannot infer type of source endpoint of edge %q", ErrUnknownLabel, eb.Variable())
@@ -303,7 +344,7 @@ func (s *scope) InferUnlabelled(sch schema.Schema) error {
 	if len(pending) == 0 {
 		return nil
 	}
-	return inferUnlabelled(pending, edges, sch, s.nodeTypes, s.callTypes)
+	return inferUnlabelled(pending, edges, sch, s.nodeTypes, s.nodeCands, s.callTypes)
 }
 
 // HasNode / HasEdge / HasCall are read-only presence predicates for
@@ -312,7 +353,10 @@ func (s *scope) InferUnlabelled(sch schema.Schema) error {
 // (once step 6 lands) by the parameter walker's Contains path.
 
 func (s *scope) HasNode(v string) bool {
-	_, ok := s.nodeTypes[v]
+	if _, ok := s.nodeTypes[v]; ok {
+		return true
+	}
+	_, ok := s.nodeCands[v]
 	return ok
 }
 
@@ -549,6 +593,11 @@ func (s *scope) buildScopeOrder() []string {
 			out = append(out, v)
 			continue
 		}
+		if _, isCand := s.nodeCands[v]; isCand {
+			seen[v] = true
+			out = append(out, v)
+			continue
+		}
 		if _, isEdge := s.edgeBindings[v]; isEdge {
 			seen[v] = true
 			out = append(out, v)
@@ -600,6 +649,9 @@ func (s *scope) materialiseReturns() ([]query.ReturnItem, error) {
 // variable's RefProjection with the CallBinding's bridged ResultType.
 func (s *scope) virtualProjection(name string) (query.Projection, error) {
 	if _, ok := s.nodeTypes[name]; ok {
+		return query.NewRefProjection(query.Ref{Variable: name}, query.TypeNode{}), nil
+	}
+	if _, ok := s.nodeCands[name]; ok {
 		return query.NewRefProjection(query.Ref{Variable: name}, query.TypeNode{}), nil
 	}
 	if b, ok := s.edgeBindings[name]; ok {
@@ -662,6 +714,12 @@ func (s *scope) refProjectionType(ref query.Ref, sch schema.Schema) (ResolvedTyp
 			return nil, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
 		}
 		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable || s.nullableBinding[ref.Variable]}, nil
+	}
+	if nts, ok := s.nodeCands[ref.Variable]; ok {
+		if ref.Property == "" {
+			return nil, fmt.Errorf("%w: %s is satisfied by more than one declared node type: %s", ErrAmbiguousLabel, ref.Variable, formatNodeTypeKeys(nts))
+		}
+		return unionNodeProperty(nts, ref.Variable, ref.Property, s.nullableBinding[ref.Variable])
 	}
 	_, singleCand := s.edgeTypes[ref.Variable]
 	cands, multiCand := s.edgeCands[ref.Variable]
@@ -727,6 +785,7 @@ func (s *scope) refProjectionType(ref query.Ref, sch schema.Schema) (ResolvedTyp
 func (s *scope) Export() branchState {
 	out := branchState{
 		exportedNodeTypes:       make(map[string]schema.NodeType),
+		exportedNodeCands:       make(map[string][]schema.NodeType),
 		exportedEdgeTypes:       make(map[string]schema.EdgeType),
 		exportedEdgeKeys:        make(map[string]schema.EdgeKey),
 		exportedEdgeCands:       make(map[string][]schema.EdgeKey),
@@ -809,6 +868,9 @@ func (s *scope) Export() branchState {
 		if nt, ok := s.nodeTypes[v]; ok {
 			out.exportedNodeTypes[v] = nt
 		}
+		if cands, ok := s.nodeCands[v]; ok {
+			out.exportedNodeCands[v] = cands
+		}
 		if et, ok := s.edgeTypes[v]; ok {
 			out.exportedEdgeTypes[v] = et
 			if k, ok := s.edgeKeys[v]; ok {
@@ -868,6 +930,7 @@ func (s *scope) ValidateEffects(sch schema.Schema) error {
 func (s *scope) Snapshot() partScope {
 	sc := partScope{
 		nodeTypes:       make(map[string]schema.NodeType, len(s.nodeTypes)),
+		nodeCands:       make(map[string][]schema.NodeType, len(s.nodeCands)),
 		edgeTypes:       make(map[string]schema.EdgeType, len(s.edgeTypes)),
 		edgeCands:       make(map[string][]schema.EdgeKey, len(s.edgeCands)),
 		edgeBindings:    make(map[string]query.EdgeBinding, len(s.edgeBindings)),
@@ -875,6 +938,9 @@ func (s *scope) Snapshot() partScope {
 	}
 	for k, v := range s.nodeTypes {
 		sc.nodeTypes[k] = v
+	}
+	for k, v := range s.nodeCands {
+		sc.nodeCands[k] = v
 	}
 	for k, v := range s.edgeTypes {
 		sc.edgeTypes[k] = v
@@ -900,6 +966,9 @@ func (sc partScope) Contains(v string) bool {
 	if _, ok := sc.nodeTypes[v]; ok {
 		return true
 	}
+	if _, ok := sc.nodeCands[v]; ok {
+		return true
+	}
 	if _, ok := sc.edgeTypes[v]; ok {
 		return true
 	}
@@ -923,6 +992,9 @@ func (sc partScope) PropertyUseWitness(ref query.Ref, s schema.Schema) (Resolved
 			return nil, fmt.Errorf("%w: %s.%s", ErrUnknownProperty, ref.Variable, ref.Property)
 		}
 		return ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable || sc.nullableBinding[ref.Variable]}, nil
+	}
+	if nts, ok := sc.nodeCands[ref.Variable]; ok {
+		return unionNodeProperty(nts, ref.Variable, ref.Property, sc.nullableBinding[ref.Variable])
 	}
 	_, singleCand := sc.edgeTypes[ref.Variable]
 	cands, multiCand := sc.edgeCands[ref.Variable]

@@ -63,6 +63,7 @@ func resolve(q query.Query, s schema.Schema, r procsig.Registry) (ValidatedQuery
 // alongside partScope's producer (scope.Snapshot).
 type partScope struct {
 	nodeTypes       map[string]schema.NodeType
+	nodeCands       map[string][]schema.NodeType
 	edgeTypes       map[string]schema.EdgeType
 	edgeCands       map[string][]schema.EdgeKey
 	edgeBindings    map[string]query.EdgeBinding
@@ -90,6 +91,7 @@ func useSitesToScopes(sites []parameterUseSite) []partScope {
 // whole carried group via the ay9 fixed-point in demoteNullableInPlace.
 type branchState struct {
 	exportedNodeTypes       map[string]schema.NodeType
+	exportedNodeCands       map[string][]schema.NodeType
 	exportedEdgeTypes       map[string]schema.EdgeType
 	exportedEdgeKeys        map[string]schema.EdgeKey
 	exportedEdgeCands       map[string][]schema.EdgeKey
@@ -181,12 +183,18 @@ func resolvePart(part query.Part, carry branchState, s schema.Schema, r procsig.
 			if len(bb.Labels()) == 0 {
 				continue
 			}
-			nt, err := resolveNodeLabels(bb.Labels(), s)
+			nts, err := resolveNodeLabels(bb.Labels(), s)
 			if err != nil {
 				return nil, branchState{}, nil, err
 			}
-			if err := sc.BindNode(bb, nt); err != nil {
-				return nil, branchState{}, nil, err
+			if len(nts) == 1 {
+				if err := sc.BindNode(bb, nts[0]); err != nil {
+					return nil, branchState{}, nil, err
+				}
+			} else {
+				if err := sc.BindNodeCands(bb, nts); err != nil {
+					return nil, branchState{}, nil, err
+				}
 			}
 		case query.EdgeBinding:
 			if err := sc.BindEdge(bb); err != nil {
@@ -467,19 +475,25 @@ func r3EdgeAdmissible(e query.EdgeBinding) error {
 }
 
 // edgeCandidates enumerates the closed candidate set for one edge binding
-// whose endpoint keys are already committed.
-func edgeCandidates(e query.EdgeBinding, src, tgt graph.LabelSetKey, s schema.Schema) []schema.EdgeKey {
+// whose endpoint keys are already committed. srcs and tgts are slices to
+// support plural node satisfaction (ADR 0022): each (src, tgt) pair in the
+// cross-product is tried against the schema.
+func edgeCandidates(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey, s schema.Schema) []schema.EdgeKey {
 	out := make([]schema.EdgeKey, 0, len(e.Labels()))
 	for _, L := range e.Labels() {
 		labelKey := graph.LabelSet{L}.Key()
-		orientations := [][2]graph.LabelSetKey{{src, tgt}}
-		if !e.Directed() {
-			orientations = append(orientations, [2]graph.LabelSetKey{tgt, src})
-		}
-		for _, o := range orientations {
-			k := schema.EdgeKey{Source: o[0], KeyLabels: labelKey, Target: o[1]}
-			if _, ok := s.Edges[k]; ok {
-				out = append(out, k)
+		for _, src := range srcs {
+			for _, tgt := range tgts {
+				orientations := [][2]graph.LabelSetKey{{src, tgt}}
+				if !e.Directed() {
+					orientations = append(orientations, [2]graph.LabelSetKey{tgt, src})
+				}
+				for _, o := range orientations {
+					k := schema.EdgeKey{Source: o[0], KeyLabels: labelKey, Target: o[1]}
+					if _, ok := s.Edges[k]; ok {
+						out = append(out, k)
+					}
+				}
 			}
 		}
 	}
@@ -498,43 +512,54 @@ func formatEdgeKeys(keys []schema.EdgeKey) string {
 	return strings.Join(parts, ", ")
 }
 
-// endpointLabels reads the key label set identifying an edge endpoint's node
-// type, at the point EdgeKey formation needs it. EdgeKey.Source and .Target hold
-// node type identities, so this must yield the key label set, never the complete
-// one.
+// endpointLabels reads the key label set(s) identifying an edge endpoint's
+// node type(s), at the point EdgeKey formation needs it. EdgeKey.Source and
+// .Target hold node type identities, so this must yield key label sets, never
+// complete ones.
+//
+// Returns a slice to support plural node satisfaction (ADR 0022): when a
+// VarEndpoint names a plural-candidate binding, all candidate key label sets
+// are returned for cross-product expansion in edgeCandidates.
 //
 // The InlineEndpoint arm is the exception, and a known gap: it keys on the
 // labels the query itself spells, which is an exact match against declared
 // identity rather than a satisfaction test. That predates this function and is
 // gqlc-h9n.23's subject.
-func endpointLabels(e query.Endpoint, resolved map[string]schema.NodeType) (graph.LabelSetKey, bool) {
+func endpointLabels(e query.Endpoint, resolved map[string]schema.NodeType, nodeCands map[string][]schema.NodeType) ([]graph.LabelSetKey, bool) {
 	switch ep := e.(type) {
 	case query.VarEndpoint:
-		nt, ok := resolved[ep.Variable()]
-		if !ok {
-			return "", false
+		if nt, ok := resolved[ep.Variable()]; ok {
+			return []graph.LabelSetKey{nt.KeyLabels}, true
 		}
-		return nt.KeyLabels, true
+		if nts, ok := nodeCands[ep.Variable()]; ok {
+			keys := make([]graph.LabelSetKey, len(nts))
+			for i, nt := range nts {
+				keys[i] = nt.KeyLabels
+			}
+			return keys, true
+		}
+		return nil, false
 	case query.InlineEndpoint:
 		ls := ep.Labels()
 		if len(ls) == 0 {
-			return "", false
+			return nil, false
 		}
-		return ls.Key(), true
+		return []graph.LabelSetKey{ls.Key()}, true
 	default:
-		return "", false
+		return nil, false
 	}
 }
 
 // closeEdge applies edge-candidate closure to one already-endpoint-resolved
-// edge and records the resolved shape.
-func closeEdge(e query.EdgeBinding, src, tgt graph.LabelSetKey, s schema.Schema, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey, edgeCands map[string][]schema.EdgeKey) error {
-	cands := edgeCandidates(e, src, tgt, s)
+// edge and records the resolved shape. srcs and tgts are slices to support
+// plural node satisfaction (ADR 0022).
+func closeEdge(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey, s schema.Schema, edgeTypes map[string]schema.EdgeType, edgeKeys map[string]schema.EdgeKey, edgeCands map[string][]schema.EdgeKey) error {
+	cands := edgeCandidates(e, srcs, tgts, s)
 	v := e.Variable()
 
 	switch len(cands) {
 	case 0:
-		return fmt.Errorf("%w: %s", ErrUnknownEdge, describeTriedEdges(e, src, tgt))
+		return fmt.Errorf("%w: %s", ErrUnknownEdge, describeTriedEdges(e, srcs, tgts))
 	case 1:
 		key := cands[0]
 		et := s.Edges[key]
@@ -554,19 +579,23 @@ func closeEdge(e query.EdgeBinding, src, tgt graph.LabelSetKey, s schema.Schema,
 	}
 }
 
-func describeTriedEdges(e query.EdgeBinding, src, tgt graph.LabelSetKey) string {
-	parts := make([]string, 0, len(e.Labels())*2)
+func describeTriedEdges(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey) string {
+	parts := make([]string, 0)
 	for _, L := range e.Labels() {
 		labelKey := graph.LabelSet{L}.Key()
-		parts = append(parts, formatEdgeKey(schema.EdgeKey{Source: src, KeyLabels: labelKey, Target: tgt}))
-		if !e.Directed() {
-			parts = append(parts, formatEdgeKey(schema.EdgeKey{Source: tgt, KeyLabels: labelKey, Target: src}))
+		for _, src := range srcs {
+			for _, tgt := range tgts {
+				parts = append(parts, formatEdgeKey(schema.EdgeKey{Source: src, KeyLabels: labelKey, Target: tgt}))
+				if !e.Directed() {
+					parts = append(parts, formatEdgeKey(schema.EdgeKey{Source: tgt, KeyLabels: labelKey, Target: src}))
+				}
+			}
 		}
 	}
 	return strings.Join(parts, ", ")
 }
 
-func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, resolved map[string]schema.NodeType, callTypes map[string]callBindingSlot) error {
+func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, resolved map[string]schema.NodeType, nodeCands map[string][]schema.NodeType, callTypes map[string]callBindingSlot) error {
 	if len(pending) == 0 {
 		return nil
 	}
@@ -579,10 +608,13 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 	// per-Part inference (before this guard, whether an unlabelled `(a)`
 	// after `WITH a` got reinferred depended on whether the enclosing
 	// edge's other endpoint had already committed).
-	if len(resolved) > 0 {
+	if len(resolved) > 0 || len(nodeCands) > 0 {
 		filtered := pending[:0]
 		for _, n := range pending {
 			if _, carried := resolved[n.Variable()]; carried {
+				continue
+			}
+			if _, carriedCands := nodeCands[n.Variable()]; carriedCands {
 				continue
 			}
 			filtered = append(filtered, n)
@@ -593,7 +625,7 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 		var next []query.NodeBinding
 		committed := 0
 		for _, n := range pending {
-			cands := candidateTypes(n, edges, s, resolved)
+			cands := candidateTypes(n, edges, s, resolved, nodeCands)
 			switch len(cands) {
 			case 0:
 				return fmt.Errorf("%w: cannot infer type of unlabelled binding %q — no edge in the pattern reaches a compatible schema node type", ErrUnknownLabel, n.Variable())
@@ -617,7 +649,7 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 		}
 		if committed == 0 {
 			n := next[0]
-			cands := candidateTypes(n, edges, s, resolved)
+			cands := candidateTypes(n, edges, s, resolved, nodeCands)
 			return fmt.Errorf("%w: cannot uniquely infer type of unlabelled binding %q — candidate types: %s", ErrAmbiguousBinding, n.Variable(), joinCandidates(cands))
 		}
 		pending = next
@@ -625,7 +657,7 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 	return nil
 }
 
-func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, resolved map[string]schema.NodeType) map[graph.LabelSetKey]struct{} {
+func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, resolved map[string]schema.NodeType, nodeCands map[string][]schema.NodeType) map[graph.LabelSetKey]struct{} {
 	var acc map[graph.LabelSetKey]struct{}
 	for _, e := range edges {
 		side, touches := touchingSide(e, n.Variable())
@@ -636,7 +668,7 @@ func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Sch
 		if side == "source" {
 			other = e.Target()
 		}
-		otherKey, ok := endpointLabels(other, resolved)
+		otherKeys, ok := endpointLabels(other, resolved, nodeCands)
 		if !ok {
 			continue
 		}
@@ -653,11 +685,13 @@ func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Sch
 						continue
 					}
 					nAtSource := (side == "source") == forward
-					if nAtSource && k.Target == otherKey {
-						cand[k.Source] = struct{}{}
-					}
-					if !nAtSource && k.Source == otherKey {
-						cand[k.Target] = struct{}{}
+					for _, otherKey := range otherKeys {
+						if nAtSource && k.Target == otherKey {
+							cand[k.Source] = struct{}{}
+						}
+						if !nAtSource && k.Source == otherKey {
+							cand[k.Target] = struct{}{}
+						}
 					}
 				}
 			}
@@ -754,6 +788,37 @@ func unionProperty(cands []schema.EdgeKey, s schema.Schema, refVar, refProp stri
 	}
 	first.Nullable = first.Nullable || bindingNullable
 	return first, nil
+}
+
+// unionNodeProperty resolves a property reference against a plural node
+// candidate set. The property must exist on every candidate with identical type
+// and nullability — the intersection rule for plural label satisfaction (ADR 0022).
+func unionNodeProperty(nts []schema.NodeType, refVar, refProp string, bindingNullable bool) (ResolvedType, error) {
+	var first ResolvedProperty
+	for i, nt := range nts {
+		prop, ok := nt.Properties[refProp]
+		if !ok {
+			return nil, fmt.Errorf("%w: %s.%s missing on plural-satisfying type %s", ErrUnknownProperty, refVar, refProp, nt.KeyLabels)
+		}
+		hit := ResolvedProperty{Type: prop.Type, Nullable: prop.Nullable}
+		if i == 0 {
+			first = hit
+			continue
+		}
+		if hit.Type != first.Type || hit.Nullable != first.Nullable {
+			return nil, fmt.Errorf("%w: %s.%s type differs across plural-satisfying types: %s vs %s", ErrUnknownProperty, refVar, refProp, first.String(), hit.String())
+		}
+	}
+	first.Nullable = first.Nullable || bindingNullable
+	return first, nil
+}
+
+func formatNodeTypeKeys(nts []schema.NodeType) string {
+	parts := make([]string, len(nts))
+	for i, nt := range nts {
+		parts[i] = string(nt.KeyLabels)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // resolveType maps a parser Type into its ResolvedType. R5 is unchanged from
@@ -919,15 +984,18 @@ func validateEffect(sc *scope, e query.Effect, s schema.Schema) error {
 }
 
 // validateCreateEffect walks e.Variables() and confirms each non-empty name is
-// present in sc.nodeTypes OR sc.edgeBindings. Anonymous edges (v == "") skip
-// per listener.go:349-350. Reachability of the tripwire is zero from parser
-// input.
+// present in sc.nodeTypes OR sc.nodeCands OR sc.edgeBindings. Anonymous edges
+// (v == "") skip per listener.go:349-350. Reachability of the tripwire is zero
+// from parser input.
 func validateCreateEffect(sc *scope, e query.CreateEffect) error {
 	for _, v := range e.Variables() {
 		if v == "" {
 			continue
 		}
 		if _, ok := sc.nodeTypes[v]; ok {
+			continue
+		}
+		if _, ok := sc.nodeCands[v]; ok {
 			continue
 		}
 		if _, ok := sc.edgeBindings[v]; ok {
@@ -948,6 +1016,9 @@ func validateMergeEffect(sc *scope, e query.MergeEffect, s schema.Schema) error 
 			continue
 		}
 		if _, ok := sc.nodeTypes[v]; ok {
+			continue
+		}
+		if _, ok := sc.nodeCands[v]; ok {
 			continue
 		}
 		if _, ok := sc.edgeBindings[v]; ok {
@@ -979,6 +1050,12 @@ func validateSetPropertyEffect(sc *scope, e query.SetPropertyEffect, s schema.Sc
 	if nt, ok := sc.nodeTypes[v]; ok {
 		if _, ok := nt.Properties[p]; !ok {
 			return fmt.Errorf("%w: %s.%s", ErrUnknownProperty, v, p)
+		}
+		return nil
+	}
+	if nts, ok := sc.nodeCands[v]; ok {
+		if _, err := unionNodeProperty(nts, v, p, false); err != nil {
+			return err
 		}
 		return nil
 	}
@@ -1015,6 +1092,9 @@ func validateSetEntityEffect(sc *scope, e query.SetEntityEffect) error {
 	if _, ok := sc.nodeTypes[v]; ok {
 		return nil
 	}
+	if _, ok := sc.nodeCands[v]; ok {
+		return nil
+	}
 	if _, ok := sc.edgeTypes[v]; ok {
 		if sc.edgeBindings[v].Hops() != nil {
 			return fmt.Errorf("%w: SET on variable-length edge %q", ErrInvalidEffectTarget, v)
@@ -1040,13 +1120,15 @@ func validateSetEntityEffect(sc *scope, e query.SetEntityEffect) error {
 func validateSetLabelsEffect(sc *scope, e query.SetLabelsEffect, s schema.Schema) error {
 	v := e.TargetVariable()
 	if _, ok := sc.nodeTypes[v]; !ok {
-		if _, ok := sc.edgeBindings[v]; ok {
-			return fmt.Errorf("%w: SET labels on edge binding %q", ErrInvalidEffectTarget, v)
+		if _, isCand := sc.nodeCands[v]; !isCand {
+			if _, ok := sc.edgeBindings[v]; ok {
+				return fmt.Errorf("%w: SET labels on edge binding %q", ErrInvalidEffectTarget, v)
+			}
+			if _, ok := sc.carriedResolvedTypes[v]; ok {
+				return fmt.Errorf("%w: SET labels on projection alias %q", ErrInvalidEffectTarget, v)
+			}
+			return fmt.Errorf("%w: SET %s: %q not in any Part scope", ErrInvalidEffectTarget, v, v)
 		}
-		if _, ok := sc.carriedResolvedTypes[v]; ok {
-			return fmt.Errorf("%w: SET labels on projection alias %q", ErrInvalidEffectTarget, v)
-		}
-		return fmt.Errorf("%w: SET %s: %q not in any Part scope", ErrInvalidEffectTarget, v, v)
 	}
 	for _, L := range e.Labels() {
 		if !labelDeclared(L, s) {
@@ -1064,6 +1146,12 @@ func validateRemovePropertyEffect(sc *scope, e query.RemovePropertyEffect, s sch
 	if nt, ok := sc.nodeTypes[v]; ok {
 		if _, ok := nt.Properties[p]; !ok {
 			return fmt.Errorf("%w: %s.%s", ErrUnknownProperty, v, p)
+		}
+		return nil
+	}
+	if nts, ok := sc.nodeCands[v]; ok {
+		if _, err := unionNodeProperty(nts, v, p, false); err != nil {
+			return err
 		}
 		return nil
 	}
@@ -1096,13 +1184,15 @@ func validateRemovePropertyEffect(sc *scope, e query.RemovePropertyEffect, s sch
 func validateRemoveLabelsEffect(sc *scope, e query.RemoveLabelsEffect, s schema.Schema) error {
 	v := e.TargetVariable()
 	if _, ok := sc.nodeTypes[v]; !ok {
-		if _, ok := sc.edgeBindings[v]; ok {
-			return fmt.Errorf("%w: REMOVE labels on edge binding %q", ErrInvalidEffectTarget, v)
+		if _, isCand := sc.nodeCands[v]; !isCand {
+			if _, ok := sc.edgeBindings[v]; ok {
+				return fmt.Errorf("%w: REMOVE labels on edge binding %q", ErrInvalidEffectTarget, v)
+			}
+			if _, ok := sc.carriedResolvedTypes[v]; ok {
+				return fmt.Errorf("%w: REMOVE labels on projection alias %q", ErrInvalidEffectTarget, v)
+			}
+			return fmt.Errorf("%w: REMOVE %s: %q not in any Part scope", ErrInvalidEffectTarget, v, v)
 		}
-		if _, ok := sc.carriedResolvedTypes[v]; ok {
-			return fmt.Errorf("%w: REMOVE labels on projection alias %q", ErrInvalidEffectTarget, v)
-		}
-		return fmt.Errorf("%w: REMOVE %s: %q not in any Part scope", ErrInvalidEffectTarget, v, v)
 	}
 	for _, L := range e.Labels() {
 		if !labelDeclared(L, s) {
@@ -1123,6 +1213,9 @@ func validateDeleteEffect(sc *scope, e query.DeleteEffect, s schema.Schema) erro
 			if _, ok := sc.nodeTypes[v]; ok {
 				continue
 			}
+			if _, ok := sc.nodeCands[v]; ok {
+				continue
+			}
 			if _, ok := sc.edgeTypes[v]; ok {
 				continue
 			}
@@ -1137,6 +1230,12 @@ func validateDeleteEffect(sc *scope, e query.DeleteEffect, s schema.Schema) erro
 		if nt, ok := sc.nodeTypes[v]; ok {
 			if _, ok := nt.Properties[p]; !ok {
 				return fmt.Errorf("%w: %s.%s", ErrUnknownProperty, v, p)
+			}
+			continue
+		}
+		if nts, ok := sc.nodeCands[v]; ok {
+			if _, err := unionNodeProperty(nts, v, p, false); err != nil {
+				return err
 			}
 			continue
 		}
@@ -1168,48 +1267,41 @@ func validateDeleteEffect(sc *scope, e query.DeleteEffect, s schema.Schema) erro
 	return nil
 }
 
-// resolveNodeLabels resolves a query node binding's label set to a declared
-// node type by satisfaction: an exact match wins outright, otherwise the
-// satisfying set is the declared types whose label set is a proper superset of
-// `labels`. This mirrors R6's labelDeclared shape (per-label existence) rather
-// than the exact-key match Phase A1 used before gqlc-h9n.7 — a schema author
-// writing NODE TYPE X (:A&B) no longer makes A and B unusable as query labels.
-// Step 1 (that bead) is deliberately singular: exactly-one resolves, zero ->
-// ErrUnknownLabel with per-diagnostic message, more than one ->
-// ErrAmbiguousLabel. Plural property intersection lives in gqlc-h9n.22.
+// resolveNodeLabels resolves a query node binding's label set to the set of
+// declared node types that satisfy it (ISO 39075 §16.8 satisfaction). A type
+// satisfies `labels` when its complete label set is a superset of `labels`
+// — including the case where equality holds. The exact-match fast path that
+// previously gave identity-match precedence is removed (ADR 0022): satisfaction
+// is satisfaction, and every satisfying type is returned.
+//
+// Returns a non-empty slice on success. The caller dispatches:
+//   - len == 1: singular, bind via BindNode.
+//   - len > 1:  plural, bind via BindNodeCands; property projection uses
+//     intersection (unionNodeProperty); whole-entity reference is refused
+//     with ErrAmbiguousLabel.
+//
+// Zero satisfying types with all labels declared returns ErrUnknownLabel
+// (no type carries the full combination). Any undeclared label also returns
+// ErrUnknownLabel (per-label check fires first).
 //
 // The satisfying set tests against each declared type's COMPLETE label set,
 // never its identity. An element carries every label its type implies, so
 // implied labels satisfy a query expression exactly as key labels do; keying
 // satisfaction on identity would make a `=>` declaration unmatchable by the
-// labels it implies. Before gqlc-h9n.8 the two were one field and this could
-// not even be stated; since gqlc-h9n.9 a schema can declare the difference.
-//
-// The fast-path arm above stays keyed on identity. A query naming a type's
-// complete label set but not its identity then falls through to the satisfying
-// set, where the superset test admits it anyway — same answer, one branch
-// later. Whether exact-match precedence should instead be defined on the
-// complete label set is a policy question, and it belongs to gqlc-h9n.22's ADR
-// on precedence; deciding it here would smuggle a matching change into a model
-// change. Scanning for a complete-set match would also have to invent a
-// tie-break for two types that share a complete label set but not an identity.
-func resolveNodeLabels(labels graph.LabelSet, s schema.Schema) (schema.NodeType, error) {
-	key := labels.Key()
-	if nt, ok := s.Nodes[key]; ok {
-		return nt, nil
-	}
+// labels it implies.
+func resolveNodeLabels(labels graph.LabelSet, s schema.Schema) ([]schema.NodeType, error) {
 	if undeclared := undeclaredLabels(labels, s); len(undeclared) > 0 {
-		return schema.NodeType{}, fmt.Errorf("%w: %s is not declared on any node type", ErrUnknownLabel, strings.Join(undeclared, ", "))
+		return nil, fmt.Errorf("%w: %s is not declared on any node type", ErrUnknownLabel, strings.Join(undeclared, ", "))
 	}
 	satisfying := satisfyingNodeTypes(labels, s)
-	switch len(satisfying) {
-	case 0:
-		return schema.NodeType{}, fmt.Errorf("%w: no node type satisfies %s; declared types carrying these labels: %s", ErrUnknownLabel, key, formatDeclaredCarrying(labels, s))
-	case 1:
-		return s.Nodes[satisfying[0]], nil
-	default:
-		return schema.NodeType{}, fmt.Errorf("%w: %s satisfied by more than one declared node type: %s", ErrAmbiguousLabel, key, formatKeys(satisfying))
+	if len(satisfying) == 0 {
+		return nil, fmt.Errorf("%w: no node type satisfies %s; declared types carrying these labels: %s", ErrUnknownLabel, labels.Key(), formatDeclaredCarrying(labels, s))
 	}
+	result := make([]schema.NodeType, len(satisfying))
+	for i, id := range satisfying {
+		result[i] = s.Nodes[id]
+	}
+	return result, nil
 }
 
 // undeclaredLabels returns the labels in `labels` carried by no declared node
