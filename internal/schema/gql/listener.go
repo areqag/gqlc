@@ -198,6 +198,12 @@ func (l *listener) EnterNodeTypePhrase(c *gen.NodeTypePhraseContext) {
 // where the pattern form's sourceNodeTypeReference also admits an inline
 // nodeTypeFiller. An endpoint that names a node type instead is left for
 // resolution to reject (ErrEndpointNotAlias).
+//
+// That rejection is a reading of a slot name, not a fact the grammar states.
+// ISO's own production list distinguishes <source node type alias> from <source
+// node type reference>, which supports it; the Syntax Rules that would settle it
+// are prose we do not have, and TuGraph's draft grammar spells the same slot as
+// a node type name. See internal/grammar/gql/SOURCE.md.
 func (l *listener) EnterEdgeTypePhrase(c *gen.EdgeTypePhraseContext) {
 	if nestedDepth(c) > 1 {
 		return

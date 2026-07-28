@@ -1,6 +1,7 @@
 package gql
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"maps"
 	"os"
@@ -18,6 +19,26 @@ import (
 )
 
 const grammarPath = "../../grammar/gql/GQL.g4"
+
+// grammarSHA256 is the vendored grammar's hash, recorded in
+// internal/grammar/gql/SOURCE.md as byte-identical to upstream
+// antlr/grammars-v4. Every claim in that file — the artefact list, the ISO
+// production-name comparison, the reasons the word "faithful" was withdrawn —
+// is about the upstream file, so an in-place edit here would silently make the
+// note describe a grammar we no longer have.
+const grammarSHA256 = "e1b4a24c6b88dedddc0a1fff97df0fc30bf118cea51539e26d71c717cb737bbf"
+
+// TestVendoredGrammarIsUnmodified fails on any edit to GQL.g4. Editing it is not
+// forbidden — but the change belongs upstream first, and re-pinning here without
+// re-reading SOURCE.md is the failure mode this catches. It cannot see upstream
+// drift; that is a network check, and gqlc-4jm's scope.
+func TestVendoredGrammarIsUnmodified(t *testing.T) {
+	src, err := os.ReadFile(grammarPath)
+	require.NoError(t, err)
+	require.Equal(t, grammarSHA256, fmt.Sprintf("%x", sha256.Sum256(src)),
+		"GQL.g4 no longer matches the hash internal/grammar/gql/SOURCE.md vendors it under: "+
+			"if the edit is intended, re-verify that file's provenance section and re-pin grammarSHA256")
+}
 
 // coverageRoots is the one rule every corpus file must enter, and the corpus'
 // obligation is its transitive closure — so the obligation tracks the grammar
