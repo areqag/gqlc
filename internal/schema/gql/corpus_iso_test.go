@@ -127,31 +127,52 @@ func normalizeISOName(s string) string {
 	return reISOName.ReplaceAllString(strings.ToLower(s), "")
 }
 
-// reGrammarRuleName matches a rule head in either form GQL.g4 uses: parser rules
-// put the name alone on a line with the colon beneath, lexer rules and some
-// fragments put `NAME:` inline. Missing the fragments matters — they are where
-// GQL.g4 implements a third of the lexical productions, and scanning without
-// them reported 36 absent productions where the truth is 14.
-var reGrammarRuleName = regexp.MustCompile(`(?m)^(?:fragment\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(?::|$)`)
+// reGrammarFragment matches an ANTLR fragment declaration. Fragments are the one
+// thing this gate needs that the generated tables cannot supply — a fragment has
+// no token type, so it appears in no name table — and they are not optional:
+// GQL.g4 implements many lexical productions in them, and a scan without them
+// reports 36 absent productions where the truth is 14.
+//
+// A `fragment` keyword can only begin a declaration, so unlike a bare-identifier
+// pattern this cannot match a line inside a rule body.
+var reGrammarFragment = regexp.MustCompile(`(?m)^fragment\s+([A-Za-z_][A-Za-z0-9_]*)`)
 
-// scanGrammarRuleNames returns every rule name GQL.g4 declares, parser and lexer
-// alike. scanGrammarRules is not reused here because it drops lexer rules by
-// design, and for this gate a production implemented as a lexer token is
-// implemented.
-func scanGrammarRuleNames(t *testing.T) map[string]string {
+// grammarRuleNames returns every name GQL.g4 declares: parser rules and tokens
+// from the generated parser's own tables, plus fragments scanned from the .g4.
+//
+// The tables are used in preference to scanning because they are what ANTLR
+// actually built, so no regex can disagree with the grammar about what a rule is.
+// An earlier version scanned the .g4 for every name with a bare-identifier
+// pattern; it admitted one identifier that appears alone on a line inside a rule
+// body (SIMPLE_COMMENT_MINUS). That changed no bucket today, but the defect it
+// invites is a production reported as implemented because some rule body happens
+// to mention its name — a false negative in the one bucket this gate exists to
+// keep honest.
+func grammarRuleNames(t *testing.T) map[string]string {
 	t.Helper()
+
+	names := make(map[string]string)
+	add := func(n string) {
+		if n != "" {
+			names[normalizeISOName(n)] = n
+		}
+	}
+
+	ruleNames, symbolicNames := parserNameTables()
+	for _, n := range ruleNames {
+		add(n)
+	}
+	for _, n := range symbolicNames {
+		add(n)
+	}
 
 	src, err := os.ReadFile(grammarPath)
 	require.NoError(t, err)
-
-	text := reLineComment.ReplaceAllString(string(src), "")
-	text = reBlockComment.ReplaceAllString(text, "")
-
-	names := make(map[string]string)
-	for _, m := range reGrammarRuleName.FindAllStringSubmatch(text, -1) {
-		names[normalizeISOName(m[1])] = m[1]
+	for _, m := range reGrammarFragment.FindAllStringSubmatch(string(src), -1) {
+		add(m[1])
 	}
-	require.NotEmpty(t, names, "no rule names scanned from %s; the scan is broken", grammarPath)
+
+	require.NotEmpty(t, ruleNames, "the generated parser reports no rule names")
 	return names
 }
 
@@ -163,7 +184,7 @@ func scanGrammarRuleNames(t *testing.T) map[string]string {
 // a production that regresses to absent has no entry. Either is a failure, which
 // is what makes the inventory a record rather than a number someone edits.
 func TestISOProductionInventory(t *testing.T) {
-	grammar := scanGrammarRuleNames(t)
+	grammar := grammarRuleNames(t)
 	got := corpusCoverage(t)
 
 	covered := make(map[string]bool, len(got.rules)+len(got.tokens))
