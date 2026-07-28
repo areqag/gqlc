@@ -1,0 +1,31 @@
+{
+  "columns": [
+    {
+      "name": "d",
+      "type": {
+        "kind": "temporal",
+        "temporal": "date"
+      },
+      "groupingKey": false
+    },
+    {
+      "name": "e",
+      "type": {
+        "kind": "temporal",
+        "temporal": "date"
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [
+    {
+      "name": "x",
+      "type": {
+        "kind": "temporal",
+        "temporal": "date"
+      }
+    }
+  ],
+  "statement": "read",
+  "distinct": false
+}
