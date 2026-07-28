@@ -140,6 +140,7 @@
     "call_yield_carry_with_alias.cypher": "social_r7.gql",
     "call_yield_mixed_return.cypher": "social_r7.gql",
     "call_yield_before_match.cypher": "social_r7.gql",
+    "param_witnessless_out_of_scope.cypher": "social_r7.gql",
     "call_arg_int_at_float.cypher": "social_r7.gql",
     "call_arg_int_at_number.cypher": "social_r7.gql",
     "call_arg_float_at_number.cypher": "social_r7.gql",
