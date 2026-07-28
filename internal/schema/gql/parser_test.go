@@ -911,6 +911,37 @@ func TestSyntaxErrorNamesTheOffendingToken(t *testing.T) {
 	}
 }
 
+// TestLexerErrorsAreNotDropped pins the lexer half of Parse's error plumbing.
+// Parse attaches the listener to the lexer as well as the parser, and deleting
+// the lexer half left the whole suite green: every other bad character in
+// invalid/ sits inside a construct, so the parser objects independently and
+// losing the lexer listener only changes the message.
+//
+// Position is what separates the two halves. Here the graph type is complete
+// before the offending token, so the token stream the parser sees ends at EOF
+// with or without it — the parser has nothing to object to, and dropping the
+// lexer listener makes this input parse cleanly to one node type. Silently
+// accepting trailing garbage is the failure; a worse message is not.
+//
+// The without-the-token parse is the assertion that carries the claim. It is
+// what shows the rejection is the lexer's doing rather than the parser's,
+// without pinning ANTLR's wording — if a grammar change ever made `#` mean
+// something, this would fail here rather than quietly stop testing the lexer.
+func TestLexerErrorsAreNotDropped(t *testing.T) {
+	const clean = `CREATE PROPERTY GRAPH TYPE T AS { (:A { p :: INT }) }`
+
+	got, err := New().Parse(strings.NewReader(clean))
+	require.NoError(t, err)
+	require.Len(t, got.Nodes, 1, "the source without the offending token must be valid")
+
+	fixture, err := os.ReadFile(filepath.Join(fixtureDir, "invalid", "lexer_error.gql"))
+	require.NoError(t, err)
+
+	_, err = New().Parse(strings.NewReader(string(fixture)))
+	require.Error(t, err, "a token the lexer cannot recognise must be rejected even where the parser is content")
+	require.Contains(t, err.Error(), "syntax error at ")
+}
+
 // TestInvalid asserts each invalid fixture produces its paired sentinel. A nil
 // wantErr means the fixture is a syntax error (no sentinel), so any non-nil
 // error from the syntax error listener satisfies it.
@@ -940,6 +971,7 @@ func (s *ParserSuite) TestInvalid() {
 // non-nil error from the syntax error listener.
 var invalidFixtures = map[string]error{
 	"syntax_error.gql":         nil,
+	"lexer_error.gql":          nil,
 	"undirected_edge.gql":      ErrUndirectedEdge,
 	"unknown_endpoint.gql":     ErrUnknownEndpoint,
 	"endpoint_not_alias.gql":   ErrEndpointNotAlias,
