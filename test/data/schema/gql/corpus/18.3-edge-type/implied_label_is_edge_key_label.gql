@@ -1,0 +1,14 @@
+-- An edge type implying a label that is another EDGE type's key label. Rejected
+-- by ADR 0015, the same decline implied_key_label.gql covers for node types.
+--
+-- The edge half of that decline had no case of its own. resolve() calls
+-- rejectInheritance once per kind, and 18.3-edge-type/implied_label_is_node_key_label.gql
+-- pins only the outcome that the two vocabularies are separate — an edge implying
+-- a NODE key label resolves. Nothing pinned the outcome that an edge implying an
+-- EDGE key label does not, so the edge call could be deleted with the suite green
+-- and only that file's comment still claiming the rule held both ways.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Person { id :: INT NOT NULL }),
+    (:Person) -[:KNOWS { since :: DATE }]-> (:Person),
+    (:Person) -[:FRIEND => :KNOWS { since :: DATE }]-> (:Person)
+}
