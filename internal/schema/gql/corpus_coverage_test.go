@@ -270,11 +270,10 @@ func measureCoverage(t coverageT, src string) *coverage {
 	return c
 }
 
-// TestMeasureCoverageRejects pins the two guards above that a corpus file cannot
-// trip today, which is what leaves them free to be deleted without any test
-// noticing. Both reject a source that parses cleanly, so neither is implied by the
-// syntax check, and each witness passes the other guard: nothing but the guard
-// under test can account for the rejection.
+// TestMeasureCoverageRejects pins all three guards above, none of which a corpus
+// file can trip today — which is what leaves them free to be deleted without any
+// test noticing. Each witness passes the other two, so nothing but the guard under
+// test can account for the rejection.
 //
 // The statement guard's witness names no graph type, so TYPE is read as the name of
 // a graph and the file is a valid CREATE GRAPH. Every element type it declares is
@@ -282,7 +281,29 @@ func measureCoverage(t coverageT, src string) *coverage {
 // guard's witness reaches numericValueExpression, whose first alternative is
 // `sign = (PLUS_SIGN | MINUS_SIGN) ...`; parseEBNF refuses that element syntax
 // rather than approximating it, so the index cannot name what the file parsed as.
+//
+// The syntax guard is the fail-fast the other two rest on: a file that does not
+// parse still yields a tree, built by ANTLR's error recovery, and measuring it
+// scores grammar the file never contained. TestFabricatedTokenDoesNotScore and
+// TestFabricatedTokenDoesNotAttribute defend the collector against exactly that,
+// and they are the second line — this guard is what keeps a broken file from being
+// measured at all.
 func TestMeasureCoverageRejects(t *testing.T) {
+	t.Run("a file that does not parse", func(t *testing.T) {
+		// An unterminated body: recovery supplies the missing RIGHT_BRACE at EOF, so
+		// everything before it walks and attributes cleanly and the other two guards
+		// pass. Truncating mid-element instead would leave a blanked error node whose
+		// parent matches no alternative, which the attribution guard rejects first.
+		const src = "CREATE PROPERTY GRAPH TYPE t AS { (:A { id :: INT }) "
+
+		got, errs := walkCoverage(t, src)
+		require.NotEmpty(t, errs, "the premise is that this spelling is not valid GQL")
+		require.True(t, got.rules[statementRule], "so only the syntax guard can reject it")
+		require.Empty(t, got.unattributed, "so only the syntax guard can reject it")
+
+		require.Contains(t, measurementFailure(t, src), "must be syntactically valid ISO GQL")
+	})
+
 	t.Run("a file that parses as some other statement", func(t *testing.T) {
 		const src = "CREATE GRAPH TYPE { (:A) }"
 
