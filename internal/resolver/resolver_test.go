@@ -280,6 +280,47 @@ func (s *ResolverSuite) TestInvalid() {
 	}
 }
 
+// TestUnlabelledIntersectionFixtureIsLoadBearing guards the one property that
+// makes valid/unlabelled_via_edge_intersection.cypher worth having: each of its
+// two edges leaves "a" ambiguous on its own, so only the intersection of their
+// candidate sets picks a type.
+//
+// intersect exists to narrow across several edges, but every other unlabelled
+// fixture has exactly one edge touching the unlabelled variable — the
+// accumulator is seeded and never intersected, leaving the function dead for the
+// whole suite. Replacing intersect with the identity, the union, or the empty
+// map all left the suite green before this fixture existed.
+//
+// The golden alone would not keep it that way. Narrow either edge to a single
+// candidate and the query still resolves to Person, the golden still matches,
+// and intersect goes back to being untested silently. So the halves are asserted
+// here rather than left as a property of the fixture text.
+func (s *ResolverSuite) TestUnlabelledIntersectionFixtureIsLoadBearing() {
+	sch := s.loadSchema("valid", "social_r7.gql")
+
+	fixture := filepath.Join(fixtureDir, "valid", "unlabelled_via_edge_intersection.cypher")
+	src, err := os.ReadFile(fixture)
+	s.Require().NoError(err)
+
+	// The fixture's two path patterns, each resolved alone.
+	for _, pattern := range []string{
+		"(a)-[:AUTHORED|KNOWS]->(x:Person)",
+		"(a)-[:EMPLOYS|KNOWS]->(y:Person)",
+	} {
+		s.Run(pattern, func() {
+			s.Require().Contains(string(src), pattern, "the fixture must still contain this pattern")
+
+			q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(
+				bytes.NewReader([]byte("MATCH " + pattern + " RETURN a")))
+			s.Require().NoError(err)
+
+			_, err = New(sch, WithRegistry(regR7)).Resolve(q)
+			s.Require().ErrorIs(err, ErrAmbiguousBinding,
+				"this edge alone must leave the binding ambiguous, or the fixture stops testing intersect")
+		})
+	}
+}
+
 // TestSentinelReachability is the bidirectional sweep: every allSentinels
 // member must have at least one invalid fixture; every mapped sentinel must
 // be in allSentinels.
