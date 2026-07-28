@@ -47,6 +47,14 @@ var corpusAreaB = []corpusEntry{
 		reason:   "implied_key_label.gql with the collision moved off the front of the implied label set. rejectInheritance checks every label a declaration implies rather than only the first, and its comment says so — `(:A&B)` holds both A and B as key labels, so implying either collides — but every other GG21 file collides on the first label, so narrowing the loop to that one left nothing red. Zeta is second as written and in sort order, so the case discriminates however the implied set comes to be ordered",
 	},
 	{
+		file:     "18.2-node-type/implied_key_label_second_implying_declaration.gql",
+		outcome:  unsupported,
+		sentinel: ErrImpliedLabelIsKeyLabel,
+		feature:  "GG21",
+		bead:     "gqlc-0ri",
+		reason:   "implied_key_label_not_first.gql moved out one level: rejectInheritance walks the implying declarations and then each one's implied labels, and the outer loop needed its own case. Manager implies Staff, which nothing holds as a key label, so a check that stops at the first implying declaration accepts a body whose second one collides on Person",
+	},
+	{
 		file:     "18.2-node-type/empty_key_label_set.gql",
 		outcome:  unsupported,
 		sentinel: ErrUnnamedNodeType,
