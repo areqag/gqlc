@@ -72,6 +72,23 @@ jobs:
         run: |
           git fetch --depth=1 origin "$BASE_SHA"
           just bd-export-monotonic "$BASE_SHA"
+      # bd gqlc-nyo: require Closes #N in the PR body for beads that have a GH
+      # mirror. Reads .beads/issues.jsonl (committed export) — no bd in CI.
+      # PASS if: no bead found, bead has no external_ref, bead type is epic.
+      # FAIL if: bead has external_ref and body is missing Closes #N or has
+      # the wrong number.
+      - name: check PR body carries Closes #N for beads with GH mirror
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          bead_id=""
+          bead_id=$(printf '%s' "$PR_BODY" | grep -ioP '(?<=Bead: )gqlc-\S+' | head -1 || true)
+          if [ -z "$bead_id" ]; then
+            bead_id=$(printf '%s' "$BRANCH" | grep -ioP 'gqlc-[a-z0-9.]+' | head -1 || true)
+          fi
+          python3 .github/scripts/check-pr-closes.py .beads/issues.jsonl "$bead_id"
 
   codegen-fence:
     runs-on: ubuntu-latest
