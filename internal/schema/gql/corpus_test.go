@@ -78,8 +78,8 @@ import (
 // be wrong — and TestSemanticCaseCollisions asserts those. Neither reads its
 // expectations off the map under test, which is what keeps them evidence.
 const (
-	wantCorpusEntries   = 98
-	wantCorpusResolving = 54
+	wantCorpusEntries   = 101
+	wantCorpusResolving = 55
 	wantSemanticCases   = 13
 )
 
