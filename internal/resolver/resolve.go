@@ -476,7 +476,7 @@ func edgeCandidates(e query.EdgeBinding, src, tgt graph.LabelSetKey, s schema.Sc
 			orientations = append(orientations, [2]graph.LabelSetKey{tgt, src})
 		}
 		for _, o := range orientations {
-			k := schema.EdgeKey{Source: o[0], Label: labelKey, Target: o[1]}
+			k := schema.EdgeKey{Source: o[0], KeyLabels: labelKey, Target: o[1]}
 			if _, ok := s.Edges[k]; ok {
 				out = append(out, k)
 			}
@@ -486,7 +486,7 @@ func edgeCandidates(e query.EdgeBinding, src, tgt graph.LabelSetKey, s schema.Sc
 }
 
 func formatEdgeKey(k schema.EdgeKey) string {
-	return fmt.Sprintf("%s-[%s]->%s", k.Source, k.Label, k.Target)
+	return fmt.Sprintf("%s-[%s]->%s", k.Source, k.KeyLabels, k.Target)
 }
 
 func formatEdgeKeys(keys []schema.EdgeKey) string {
@@ -497,8 +497,15 @@ func formatEdgeKeys(keys []schema.EdgeKey) string {
 	return strings.Join(parts, ", ")
 }
 
-// endpointLabels reads the labels an edge endpoint carries at the point
-// EdgeKey formation needs them.
+// endpointLabels reads the key label set identifying an edge endpoint's node
+// type, at the point EdgeKey formation needs it. EdgeKey.Source and .Target hold
+// node type identities, so this must yield the key label set, never the complete
+// one.
+//
+// The InlineEndpoint arm is the exception, and a known gap: it keys on the
+// labels the query itself spells, which is an exact match against declared
+// identity rather than a satisfaction test. That predates this function and is
+// gqlc-h9n.23's subject.
 func endpointLabels(e query.Endpoint, resolved map[string]schema.NodeType) (graph.LabelSetKey, bool) {
 	switch ep := e.(type) {
 	case query.VarEndpoint:
@@ -506,7 +513,7 @@ func endpointLabels(e query.Endpoint, resolved map[string]schema.NodeType) (grap
 		if !ok {
 			return "", false
 		}
-		return nt.Labels, true
+		return nt.KeyLabels, true
 	case query.InlineEndpoint:
 		ls := ep.Labels()
 		if len(ls) == 0 {
@@ -550,9 +557,9 @@ func describeTriedEdges(e query.EdgeBinding, src, tgt graph.LabelSetKey) string 
 	parts := make([]string, 0, len(e.Labels())*2)
 	for _, L := range e.Labels() {
 		labelKey := graph.LabelSet{L}.Key()
-		parts = append(parts, formatEdgeKey(schema.EdgeKey{Source: src, Label: labelKey, Target: tgt}))
+		parts = append(parts, formatEdgeKey(schema.EdgeKey{Source: src, KeyLabels: labelKey, Target: tgt}))
 		if !e.Directed() {
-			parts = append(parts, formatEdgeKey(schema.EdgeKey{Source: tgt, Label: labelKey, Target: src}))
+			parts = append(parts, formatEdgeKey(schema.EdgeKey{Source: tgt, KeyLabels: labelKey, Target: src}))
 		}
 	}
 	return strings.Join(parts, ", ")
@@ -641,7 +648,7 @@ func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Sch
 			labelKey := graph.LabelSet{L}.Key()
 			for _, forward := range orientations {
 				for k := range s.Edges {
-					if k.Label != labelKey {
+					if k.KeyLabels != labelKey {
 						continue
 					}
 					nAtSource := (side == "source") == forward
@@ -1161,14 +1168,30 @@ func validateDeleteEffect(sc *scope, e query.DeleteEffect, s schema.Schema) erro
 }
 
 // resolveNodeLabels resolves a query node binding's label set to a declared
-// node type by satisfaction: an exact match on the declared key wins outright,
-// otherwise the satisfying set is the declared types whose label set is a
-// proper superset of `labels`. This mirrors R6's labelDeclared shape (per-label
-// existence) rather than the exact-key match Phase A1 used before gqlc-h9n.7 —
-// a schema author writing NODE TYPE X (:A&B) no longer makes A and B unusable
-// as query labels. Step 1 (this bead) is deliberately singular: exactly-one
-// resolves, zero -> ErrUnknownLabel with per-diagnostic message, more than one
-// -> ErrAmbiguousLabel. Plural property intersection lives in gqlc-h9n.22.
+// node type by satisfaction: an exact match wins outright, otherwise the
+// satisfying set is the declared types whose label set is a proper superset of
+// `labels`. This mirrors R6's labelDeclared shape (per-label existence) rather
+// than the exact-key match Phase A1 used before gqlc-h9n.7 — a schema author
+// writing NODE TYPE X (:A&B) no longer makes A and B unusable as query labels.
+// Step 1 (that bead) is deliberately singular: exactly-one resolves, zero ->
+// ErrUnknownLabel with per-diagnostic message, more than one ->
+// ErrAmbiguousLabel. Plural property intersection lives in gqlc-h9n.22.
+//
+// The satisfying set tests against each declared type's COMPLETE label set,
+// never its identity. An element carries every label its type implies, so
+// implied labels satisfy a query expression exactly as key labels do; keying
+// satisfaction on identity would make a `=>` declaration unmatchable by the
+// labels it implies. Before gqlc-h9n.8 the two were one field and this could
+// not even be stated.
+//
+// The fast-path arm above stays keyed on identity. Under GG21 a query naming a
+// type's complete label set but not its identity then falls through to the
+// satisfying set, where the superset test admits it anyway — same answer, one
+// branch later. Whether exact-match precedence should instead be defined on the
+// complete label set is a policy question, and it belongs to gqlc-h9n.22's ADR
+// on precedence; deciding it here would smuggle a matching change into a model
+// change. Scanning for a complete-set match would also have to invent a
+// tie-break for two types that share a complete label set but not an identity.
 func resolveNodeLabels(labels graph.LabelSet, s schema.Schema) (schema.NodeType, error) {
 	key := labels.Key()
 	if nt, ok := s.Nodes[key]; ok {
@@ -1188,9 +1211,8 @@ func resolveNodeLabels(labels graph.LabelSet, s schema.Schema) (schema.NodeType,
 	}
 }
 
-// undeclaredLabels returns the labels in `labels` that appear as a component
-// of no declared node type's key. Order-preserving so the diagnostic reads in
-// query-source order.
+// undeclaredLabels returns the labels in `labels` carried by no declared node
+// type. Order-preserving so the diagnostic reads in query-source order.
 func undeclaredLabels(labels graph.LabelSet, s schema.Schema) []string {
 	var out []string
 	for _, l := range labels {
@@ -1201,48 +1223,55 @@ func undeclaredLabels(labels graph.LabelSet, s schema.Schema) []string {
 	return out
 }
 
-// satisfyingNodeTypes returns the declared node type keys whose label set is a
-// proper superset of `labels`. The exact-match case is handled by the caller
-// so it never appears here.
+// satisfyingNodeTypes returns the identities of the declared node types whose
+// complete label set is a superset of `labels`. It returns identities because
+// the caller indexes s.Nodes with them; the superset test itself reads the
+// complete label set.
+//
+// The superset is not required to be proper. It could not be reached by an
+// equal set before gqlc-h9n.8, because the caller's identity fast path caught
+// every equality; under GG21 a type whose complete label set equals `labels`
+// but whose identity does not arrives here, and admitting it is the point.
 func satisfyingNodeTypes(labels graph.LabelSet, s schema.Schema) []graph.LabelSetKey {
 	want := make(map[string]struct{}, len(labels))
 	for _, l := range labels {
 		want[l] = struct{}{}
 	}
 	var out []graph.LabelSetKey
-	for k := range s.Nodes {
-		declared := make(map[string]struct{})
-		for _, l := range k.Split() {
-			declared[l] = struct{}{}
+	for id, nt := range s.Nodes {
+		carried := make(map[string]struct{})
+		for _, l := range nt.CompleteLabels.Split() {
+			carried[l] = struct{}{}
 		}
 		ok := true
 		for l := range want {
-			if _, has := declared[l]; !has {
+			if _, has := carried[l]; !has {
 				ok = false
 				break
 			}
 		}
 		if ok {
-			out = append(out, k)
+			out = append(out, id)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
 }
 
-// formatDeclaredCarrying lists declared node type keys that carry ANY of the
-// queried labels — the "here are the near misses" hint. Used only when the
-// satisfying set is empty but every queried label is declared somewhere.
+// formatDeclaredCarrying lists the identities of declared node types that carry
+// ANY of the queried labels — the "here are the near misses" hint. Used only
+// when the satisfying set is empty but every queried label is declared
+// somewhere.
 func formatDeclaredCarrying(labels graph.LabelSet, s schema.Schema) string {
 	want := make(map[string]struct{}, len(labels))
 	for _, l := range labels {
 		want[l] = struct{}{}
 	}
 	var keys []graph.LabelSetKey
-	for k := range s.Nodes {
-		for _, l := range k.Split() {
+	for id, nt := range s.Nodes {
+		for _, l := range nt.CompleteLabels.Split() {
 			if _, has := want[l]; has {
-				keys = append(keys, k)
+				keys = append(keys, id)
 				break
 			}
 		}
@@ -1259,13 +1288,14 @@ func formatKeys(keys []graph.LabelSetKey) string {
 	return strings.Join(parts, ", ")
 }
 
-// labelDeclared reports whether label appears as a component of any declared
-// NodeType's LabelSetKey — the R6 policy per §4.3.3 (per-label existence, not
-// union-existence). Naive O(|s.Nodes| × avg-arity) iteration; schemas are
-// small.
+// labelDeclared reports whether label is carried by any declared NodeType —
+// the R6 policy per §4.3.3 (per-label existence, not union-existence). It reads
+// the complete label set, because an implied label is one an element carries
+// and so is one a query may name. Naive O(|s.Nodes| × avg-arity) iteration;
+// schemas are small.
 func labelDeclared(label string, s schema.Schema) bool {
-	for k := range s.Nodes {
-		for _, lbl := range k.Split() {
+	for _, nt := range s.Nodes {
+		for _, lbl := range nt.CompleteLabels.Split() {
 			if lbl == label {
 				return true
 			}

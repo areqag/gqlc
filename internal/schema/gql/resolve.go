@@ -39,14 +39,19 @@ func (r rawSchema) resolve() (schema.Schema, error) {
 		if len(n.labels) == 0 {
 			return schema.Schema{}, ErrUnnamedNodeType
 		}
+		// GG21 (`=>`) is rejected at parse time, so the declaration carries no
+		// implied content and the key label set is inferred (GG22) from the
+		// whole phrase. Key and complete therefore coincide — set both from the
+		// same source rather than letting one field stand in for both.
 		key := n.labels.Key()
 		if _, dup := s.Nodes[key]; dup {
 			return schema.Schema{}, ErrDuplicateNodeType
 		}
 		s.Nodes[key] = schema.NodeType{
-			Labels:     key,
-			Name:       n.name,
-			Properties: n.props,
+			KeyLabels:      key,
+			CompleteLabels: key,
+			Name:           n.name,
+			Properties:     n.props,
 		}
 		if n.alias != "" {
 			idx.aliases[n.alias] = key
@@ -72,14 +77,17 @@ func (r rawSchema) resolve() (schema.Schema, error) {
 			return schema.Schema{}, err
 		}
 
-		key := schema.EdgeKey{Source: source, Label: e.labels.Key(), Target: target}
+		// Same inference as for node types: no `=>`, so the edge's key label set
+		// is its whole declared phrase and its complete label set coincides.
+		key := schema.EdgeKey{Source: source, KeyLabels: e.labels.Key(), Target: target}
 		if _, dup := s.Edges[key]; dup {
 			return schema.Schema{}, ErrDuplicateEdgeType
 		}
 		s.Edges[key] = schema.EdgeType{
-			EdgeKey:    key,
-			Name:       e.name,
-			Properties: e.props,
+			EdgeKey:        key,
+			CompleteLabels: key.KeyLabels,
+			Name:           e.name,
+			Properties:     e.props,
 		}
 	}
 

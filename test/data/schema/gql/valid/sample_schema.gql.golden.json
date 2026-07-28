@@ -2,7 +2,8 @@
   "name": "SocialNetworkType",
   "nodes": [
     {
-      "labels": "Person",
+      "key_labels": "Person",
+      "complete_labels": "Person",
       "name": "",
       "properties": {
         "active": {
@@ -33,7 +34,8 @@
       }
     },
     {
-      "labels": "Post",
+      "key_labels": "Post",
+      "complete_labels": "Post",
       "name": "",
       "properties": {
         "content": {
@@ -64,7 +66,8 @@
       }
     },
     {
-      "labels": "Tag",
+      "key_labels": "Tag",
+      "complete_labels": "Tag",
       "name": "",
       "properties": {
         "id": {
@@ -83,8 +86,9 @@
   "edges": [
     {
       "source": "Person",
-      "label": "AUTHORED",
+      "key_labels": "AUTHORED",
       "target": "Post",
+      "complete_labels": "AUTHORED",
       "name": "",
       "properties": {
         "publishedAt": {
@@ -96,8 +100,9 @@
     },
     {
       "source": "Person",
-      "label": "KNOWS",
+      "key_labels": "KNOWS",
       "target": "Person",
+      "complete_labels": "KNOWS",
       "name": "",
       "properties": {
         "since": {
@@ -109,8 +114,9 @@
     },
     {
       "source": "Person",
-      "label": "LIKED",
+      "key_labels": "LIKED",
       "target": "Post",
+      "complete_labels": "LIKED",
       "name": "",
       "properties": {
         "likedAt": {
@@ -122,8 +128,9 @@
     },
     {
       "source": "Post",
-      "label": "TAGGED_WITH",
+      "key_labels": "TAGGED_WITH",
       "target": "Tag",
+      "complete_labels": "TAGGED_WITH",
       "name": "",
       "properties": null
     }

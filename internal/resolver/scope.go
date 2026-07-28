@@ -137,12 +137,12 @@ func (s *scope) BindNode(nb query.NodeBinding, nt schema.NodeType) error {
 	// fault is named correctly, not masked by the node-vs-node
 	// message.
 	if _, seenCall := s.callTypes[v]; seenCall {
-		return fmt.Errorf("%w: variable %q carried as CALL YIELD scalar, re-bound as %s", ErrPartBindingTypeConflict, v, nt.Labels)
+		return fmt.Errorf("%w: variable %q carried as CALL YIELD scalar, re-bound as %s", ErrPartBindingTypeConflict, v, nt.KeyLabels)
 	}
 	// R5 §6.4: a labelled re-binding of a carried name whose schema-
 	// typed identity differs from the carry is irreconcilable.
-	if prev, seen := s.nodeTypes[v]; seen && prev.Labels != nt.Labels {
-		return fmt.Errorf("%w: variable %q carried as %s, re-bound as %s", ErrPartBindingTypeConflict, v, prev.Labels, nt.Labels)
+	if prev, seen := s.nodeTypes[v]; seen && prev.KeyLabels != nt.KeyLabels {
+		return fmt.Errorf("%w: variable %q carried as %s, re-bound as %s", ErrPartBindingTypeConflict, v, prev.KeyLabels, nt.KeyLabels)
 	}
 	s.nodeTypes[v] = nt
 	// Local binding shadows any carried edge state at the same name;
@@ -653,7 +653,7 @@ func (s *scope) projectionType(p query.Projection, sch schema.Schema) (ResolvedT
 func (s *scope) refProjectionType(ref query.Ref, sch schema.Schema) (ResolvedType, error) {
 	if nt, ok := s.nodeTypes[ref.Variable]; ok {
 		if ref.Property == "" {
-			return ResolvedNode{Labels: nt.Labels, Nullable: s.nullableBinding[ref.Variable]}, nil
+			return ResolvedNode{Labels: nt.KeyLabels, Nullable: s.nullableBinding[ref.Variable]}, nil
 		}
 		prop, ok := nt.Properties[ref.Property]
 		if !ok {
