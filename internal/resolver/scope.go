@@ -382,6 +382,8 @@ func (s *scope) DemoteNullability() {
 				}
 			}
 		case query.EdgeBinding:
+			// Unreachable today, and so untestable: an edge is never bare, so
+			// the parser passes a constant false here (cypher/pattern.go:314).
 			if bb.ReferencedInRequiredBarePattern() && bb.Variable() != "" {
 				if _, present := s.nullableBinding[bb.Variable()]; present {
 					s.nullableBinding[bb.Variable()] = false

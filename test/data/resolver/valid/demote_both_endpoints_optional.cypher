@@ -1,0 +1,1 @@
+OPTIONAL MATCH (a:Person) OPTIONAL MATCH (b:Post) MATCH (a)-[:AUTHORED]->(b) RETURN a, b
