@@ -1,3 +1,0 @@
--- LIKE source: only an inline AS { ... } body is supported, not deriving
--- the graph type from an existing graph.
-CREATE PROPERTY GRAPH TYPE T LIKE SomeGraph
