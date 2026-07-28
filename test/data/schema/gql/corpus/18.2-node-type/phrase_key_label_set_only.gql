@@ -1,0 +1,15 @@
+-- pattern_key_label_set_only.gql in the other spelling. The two node collectors
+-- are separate methods that each copy fillerContent's four fields by hand, so a
+-- field carried in EnterNodeTypePattern proves nothing about EnterNodeTypePhrase
+-- carrying it. Narrowing the phrase form's `n.hasKeyLabelSet = fc.hasKeyLabelSet`
+-- to a constant false left the whole suite green: every key-label-set file in the
+-- corpus was written in pattern form.
+--
+-- Resolves, to what pattern_key_label_set_only.gql resolves to. `:Person =>`
+-- declares Person as the key label set and implies nothing further; the flag is
+-- what tells resolve() the set was declared rather than absent, and dropping it
+-- sends the type down GG22's inference path with an empty complete label set
+-- instead.
+CREATE PROPERTY GRAPH TYPE T AS {
+    NODE TYPE Person :Person => AS p
+}

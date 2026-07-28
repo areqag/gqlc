@@ -1,0 +1,14 @@
+-- key_label_set_only.gql in the other spelling, and the edge counterpart of
+-- 18.2's phrase_key_label_set_only.gql. EnterEdgeTypePhrase copies
+-- fillerContent's four fields by hand exactly as EnterEdgeTypePattern does, so
+-- the pattern form carrying hasKeyLabelSet proves nothing about the phrase form.
+-- Narrowing the phrase form's copy to a constant false left the suite green:
+-- every edge key-label-set file in the corpus is a pattern-form arc.
+--
+-- Resolves, to what key_label_set_only.gql resolves to. `:WROTE =>` declares
+-- WROTE as the key label set and implies nothing further.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (a :Person { id :: INT NOT NULL }),
+    (b :Post { id :: INT NOT NULL }),
+    DIRECTED EDGE TYPE Wrote :WROTE => CONNECTING (a -> b)
+}

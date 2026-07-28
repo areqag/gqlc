@@ -137,6 +137,28 @@ var corpusAreaC = []corpusEntry{
 		feature: "GG21",
 	},
 	{
+		file:    "18.3-edge-type/phrase_key_label_set_only.gql",
+		outcome: resolves,
+		feature: "GG21",
+		reason:  "the phrase spelling of key_label_set_only.gql, and the edge counterpart of 18.2's phrase_key_label_set_only.gql. The two edge collectors copy fillerContent's fields through separate hand-written assignments, so the pattern file grounds only its own; every other edge key-label-set file is a pattern-form arc, and narrowing EnterEdgeTypePhrase's hasKeyLabelSet copy to a constant false left the suite green",
+	},
+	{
+		file:     "18.3-edge-type/pattern_unsupported_property_type.gql",
+		outcome:  unsupported,
+		sentinel: ErrUnsupportedType,
+		feature:  "mandatory",
+		bead:     "gqlc-h9n.5",
+		reason:   "no corpus file put an unsupported property type on an edge at all, so edgeContent's error arm never returned a non-nil error across the whole suite; deleting the propagation from edgeContent and from EnterEdgeTypePattern's arm both left the tree green, silently dropping the edge and the relationship with it. The value type is incidental — constructed_list_angle.gql pins that LIST declines on a node",
+	},
+	{
+		file:     "18.3-edge-type/phrase_unsupported_property_type.gql",
+		outcome:  unsupported,
+		sentinel: ErrUnsupportedType,
+		feature:  "mandatory",
+		bead:     "gqlc-h9n.5",
+		reason:   "the phrase spelling of pattern_unsupported_property_type.gql. The two edge collectors forward edgeContent's error through separate arms, so the pattern file grounds only its own; dropping the l.fail from EnterEdgeTypePhrase's arm left the suite green even with the pattern-form file present",
+	},
+	{
 		file:     "18.3-edge-type/endpoint_no_filler.gql",
 		outcome:  unsupported,
 		sentinel: ErrUnknownEndpoint,
