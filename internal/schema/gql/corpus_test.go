@@ -57,7 +57,7 @@ import (
 const (
 	wantCorpusEntries   = 90
 	wantCorpusResolving = 50
-	wantSemanticCases   = 10
+	wantSemanticCases   = 13
 )
 
 // isValidFeature reports whether v is an accepted value of corpusEntry.feature:
