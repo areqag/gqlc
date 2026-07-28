@@ -53,9 +53,10 @@ func divergentSchema() schema.Schema {
 func TestSatisfactionReadsCompleteLabels(t *testing.T) {
 	s := divergentSchema()
 
-	nt, err := resolveNodeLabels(graph.LabelSet{"Engineer", "Person"}, s)
+	nts, err := resolveNodeLabels(graph.LabelSet{"Engineer", "Person"}, s)
 	require.NoError(t, err)
-	require.Equal(t, graph.LabelSetKey("Engineer"), nt.KeyLabels)
+	require.Len(t, nts, 1)
+	require.Equal(t, graph.LabelSetKey("Engineer"), nts[0].KeyLabels)
 
 	require.True(t, labelDeclared("Person", s), "an implied label is declared")
 	require.Empty(t, undeclaredLabels(graph.LabelSet{"Person"}, s))
@@ -67,8 +68,10 @@ func TestSatisfactionReadsCompleteLabels(t *testing.T) {
 func TestResolvedNodeTypeIsNamedByItsKeyLabelSet(t *testing.T) {
 	s := divergentSchema()
 
-	nt, err := resolveNodeLabels(graph.LabelSet{"Manager"}, s)
+	nts, err := resolveNodeLabels(graph.LabelSet{"Manager"}, s)
 	require.NoError(t, err)
+	require.Len(t, nts, 1)
+	nt := nts[0]
 
 	back, ok := s.Nodes[nt.KeyLabels]
 	require.True(t, ok, "the key label set indexes Schema.Nodes")
@@ -78,17 +81,22 @@ func TestResolvedNodeTypeIsNamedByItsKeyLabelSet(t *testing.T) {
 	require.False(t, ok, "the complete label set is not an identity")
 }
 
-// A label implied by two declarations is satisfied by both, and the plural case
-// is ErrAmbiguousLabel, not ErrUnknownLabel. Under the pre-gqlc-h9n.8 model this
-// schema was inexpressible, so the arm could not be reached this way.
-func TestImpliedLabelSharedByTwoTypesIsAmbiguous(t *testing.T) {
+// A label implied by two declarations is satisfied by both. Under ADR 0022
+// (option B), resolveNodeLabels returns the plural set rather than erroring.
+// The ErrAmbiguousLabel moves to the projection phase (whole-entity RETURN p).
+func TestImpliedLabelSharedByTwoTypesReturnsPluralSlice(t *testing.T) {
 	s := divergentSchema()
 
-	_, err := resolveNodeLabels(graph.LabelSet{"Person"}, s)
-	require.ErrorIs(t, err, ErrAmbiguousLabel)
-	require.NotErrorIs(t, err, ErrUnknownLabel)
-	require.Contains(t, err.Error(), "Engineer")
-	require.Contains(t, err.Error(), "Manager")
+	nts, err := resolveNodeLabels(graph.LabelSet{"Person"}, s)
+	require.NoError(t, err)
+	require.Len(t, nts, 2)
+	// Both Engineer and Manager must appear.
+	keys := make(map[graph.LabelSetKey]struct{})
+	for _, nt := range nts {
+		keys[nt.KeyLabels] = struct{}{}
+	}
+	require.Contains(t, keys, graph.LabelSetKey("Engineer"))
+	require.Contains(t, keys, graph.LabelSetKey("Manager"))
 }
 
 // EdgeKey.Source and .Target hold node type identities, so endpoint keying must
@@ -97,26 +105,33 @@ func TestImpliedLabelSharedByTwoTypesIsAmbiguous(t *testing.T) {
 func TestEdgeEndpointKeyingUsesTheKeyLabelSet(t *testing.T) {
 	s := divergentSchema()
 
-	src, err := resolveNodeLabels(graph.LabelSet{"Engineer"}, s)
+	nts, err := resolveNodeLabels(graph.LabelSet{"Engineer"}, s)
 	require.NoError(t, err)
-	tgt, err := resolveNodeLabels(graph.LabelSet{"Manager"}, s)
+	require.Len(t, nts, 1)
+	src := nts[0]
+
+	ntst, err := resolveNodeLabels(graph.LabelSet{"Manager"}, s)
 	require.NoError(t, err)
+	require.Len(t, ntst, 1)
+	tgt := ntst[0]
 
 	epSrc, err := query.NewVarEndpoint("a")
 	require.NoError(t, err)
 	resolved := map[string]schema.NodeType{"a": src}
-	got, ok := endpointLabels(epSrc, resolved)
+	nodeCands := map[string][]schema.NodeType{}
+	got, ok := endpointLabels(epSrc, resolved, nodeCands)
 	require.True(t, ok)
-	require.Equal(t, src.KeyLabels, got)
-	require.NotEqual(t, src.CompleteLabels, got)
+	require.Len(t, got, 1)
+	require.Equal(t, src.KeyLabels, got[0])
+	require.NotEqual(t, src.CompleteLabels, got[0])
 
 	eb, err := makeTestEdgeBinding("r")
 	require.NoError(t, err)
 
-	cands := edgeCandidates(eb, src.KeyLabels, tgt.KeyLabels, s)
+	cands := edgeCandidates(eb, []graph.LabelSetKey{src.KeyLabels}, []graph.LabelSetKey{tgt.KeyLabels}, s)
 	require.Len(t, cands, 1)
 	require.Equal(t, graph.LabelSetKey("Engineer"), cands[0].Source)
 
-	require.Empty(t, edgeCandidates(eb, src.CompleteLabels, tgt.CompleteLabels, s),
+	require.Empty(t, edgeCandidates(eb, []graph.LabelSetKey{src.CompleteLabels}, []graph.LabelSetKey{tgt.CompleteLabels}, s),
 		"complete label sets do not key the edge table")
 }
