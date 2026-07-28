@@ -85,6 +85,7 @@ fmt-check: ensure-golangci
 test-hooks:
     bash .githooks/tests/claude-pre-bash-test.sh
     bash .githooks/tests/commit-msg-test.sh
+    bash .githooks/tests/bd-gh-sync-test.sh
 
 # runs the whole suite (unit, golden snapshots, godog) in one shot. Independent
 # of fetch-tck: the TCK is vendored, so there is no network at test time.
