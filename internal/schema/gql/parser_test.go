@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/areqag/gqlc/internal/grammar/gql/gen"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/schema"
+	"github.com/areqag/gqlc/internal/schema/gql/isobnf"
 )
 
 var update = flag.Bool("update", false, "regenerate .golden.json files from parser output")
@@ -701,6 +703,91 @@ func TestGraphTypeSourceErrorsWrapTheClass(t *testing.T) {
 	}
 }
 
+// valueTypeFamilies pairs each declined family's sentinel with the ISO production
+// it is named after and a spelling that reaches it. One row per sentinel, not per
+// spelling: the corpus already covers every alternative, and what this table is
+// for is the claim errors.go makes about the *names*.
+var valueTypeFamilies = []struct {
+	sentinel   error
+	production string
+	spelling   string
+}{
+	{ErrPathValueType, "path value type", "PATH"},
+	{ErrReferenceValueType, "reference value type", "ANY NODE"},
+	{ErrImmaterialValueType, "immaterial value type", "NOTHING"},
+	{ErrRecordValueType, "record type", "RECORD"},
+	{ErrDynamicUnionType, "dynamic union type", "ANY VALUE"},
+}
+
+// TestValueTypeFamiliesAreIsoProductions is what entitles errors.go to say the
+// taxonomy is ISO's rather than one gqlc invented to suit its internals. The
+// claim is cheap to make and would rot silently: a sentinel renamed to describe
+// a Go-side concern would read just as plausibly, and only this notices that the
+// name has stopped matching a production the standard actually has.
+//
+// It checks the DDL closure specifically, not the whole 814-production list, so
+// a family named after a production only reachable from a query would fail here.
+func TestValueTypeFamiliesAreIsoProductions(t *testing.T) {
+	for _, family := range valueTypeFamilies {
+		require.Contains(t, isobnf.DDLClosure, family.production,
+			"%v is named after %q, which is not an ISO production reachable from CREATE GRAPH TYPE", family.sentinel, family.production)
+	}
+}
+
+// TestValueTypeFamilyErrorsWrapTheClass keeps the five leaves matching a caller
+// that asks only whether the property type was rejected. That caller is the
+// reason ADR 0019 could split the sentinel at all: the split widened the public
+// surface rather than narrowing it, so no existing errors.Is stopped working.
+func TestValueTypeFamilyErrorsWrapTheClass(t *testing.T) {
+	for _, family := range valueTypeFamilies {
+		require.ErrorIs(t, family.sentinel, ErrUnsupportedType)
+	}
+}
+
+// TestValueTypeFamilyDeclines pins the family each spelling lands in. The corpus
+// pins the same thing file by file; this exists because the corpus entries are
+// data and would follow a wrong classifier — if declineValueType started
+// answering ErrReferenceValueType for NOTHING, updating the corpus entry to
+// match would be the obvious fix and the register would stay green.
+//
+// The spellings are deliberately the *bare* ones. Every family also has a
+// parameterised spelling in the corpus, and those nest a value type of their own:
+// `RECORD { f :: STRING }` and `BINDING TABLE { id :: STRING }` both carry a
+// predefinedType for the field, so a classifier that descended would answer for
+// the field instead. The corpus catches that; this pins the shape it relies on.
+func TestValueTypeFamilyDeclines(t *testing.T) {
+	for _, family := range valueTypeFamilies {
+		t.Run(family.spelling, func(t *testing.T) {
+			src := fmt.Sprintf(`CREATE PROPERTY GRAPH TYPE T AS {
+				(:N { p :: %s })
+			}`, family.spelling)
+			_, err := New().Parse(strings.NewReader(src))
+			require.ErrorIs(t, err, family.sentinel)
+		})
+	}
+}
+
+// TestListStillReportsTheBareClass pins the boundary ADR 0019 drew. LIST is
+// gqlc-h9n.5's to justify and has no reason of its own recorded, so it keeps
+// landing on the class — which is also what an alternative added to the grammar
+// after ADR 0019 would do, having no justification to name yet.
+//
+// Asserting the *absence* of every family leaf is the point. A classifier that
+// grew a LIST case would otherwise be caught only by whichever corpus entry
+// happened to disagree, and h9n.5's four entries are data that would be updated
+// to match it.
+func TestListStillReportsTheBareClass(t *testing.T) {
+	src := `CREATE PROPERTY GRAPH TYPE T AS {
+		(:N { tags :: LIST<INT> })
+	}`
+	_, err := New().Parse(strings.NewReader(src))
+	require.ErrorIs(t, err, ErrUnsupportedType)
+	for _, family := range valueTypeFamilies {
+		require.NotErrorIs(t, err, family.sentinel,
+			"LIST has no recorded reason of its own; deciding it is gqlc-h9n.5's, and ADR 0019 says so")
+	}
+}
+
 // TestNestedGraphTypeSpecificationElementsNotCollected pins that an element type
 // declared inside a closedGraphReferenceValueType body (GQL.g4:1926, a whole
 // graph type nested as a property value type) does not enter the outer graph
@@ -833,6 +920,11 @@ var invalidFixtures = map[string]error{
 // It lists leaves. ErrUnsupportedSource is absent because it is a class the two
 // graph-type-source leaves wrap, and no file produces it bare — see errors.go and
 // TestGraphTypeSourceErrorsWrapTheClass, which is the pin it gets instead.
+//
+// ErrUnsupportedType is a class too, wrapped by the five value-type families, and
+// is here anyway because it is the one thing that makes those two situations
+// differ: LIST/ARRAY still reports it bare, so it has a file of its own and would
+// be an orphan if removed. Whoever lands gqlc-h9n.5 should expect to take it out.
 var allSentinels = []error{
 	ErrUndirectedEdge,
 	ErrEdgeKindArcMismatch,
@@ -849,6 +941,11 @@ var allSentinels = []error{
 	ErrMultipleGraphTypes,
 	ErrLikeGraphSource,
 	ErrCopyOfSource,
+	ErrPathValueType,
+	ErrReferenceValueType,
+	ErrImmaterialValueType,
+	ErrRecordValueType,
+	ErrDynamicUnionType,
 }
 
 // TestSentinelReachability is the bidirectional sweep: the set of sentinels

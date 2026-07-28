@@ -49,3 +49,28 @@ var (
 	ErrLikeGraphSource = fmt.Errorf("%w: LIKE derives the graph type from a graph expression, which can name session state", ErrUnsupportedSource)
 	ErrCopyOfSource    = fmt.Errorf("%w: COPY OF names a graph type this parser cannot reach, having no catalogue", ErrUnsupportedSource)
 )
+
+// The value-type families gqlc declines, each wrapping ErrUnsupportedType so a
+// caller asking only "was the property type rejected" keeps matching. Unlike
+// ErrUnsupportedSource, the class here is also produced bare and so stays in
+// allSentinels: LIST/ARRAY reports it (gqlc-h9n.5 owns that decline and it has
+// no justification of its own to name yet), as does any predefined scalar
+// spelling typeSpellings does not carry.
+//
+// Each is named after the ISO production it declines, and
+// TestValueTypeFamiliesAreIsoProductions checks those names against
+// isobnf.DDLClosure — so the taxonomy is the standard's rather than one gqlc
+// invented to suit its internals.
+//
+// The split that matters is not five ways but two, and ADR 0019 argues it: the
+// first three say what the construct *is*, and no change to the model or the
+// target store reaches them. The last two say what gqlc has not built, so the
+// "yet" in their messages is load-bearing — gqlc-h9n.33 and gqlc-h9n.34 are the
+// beads that would delete them.
+var (
+	ErrPathValueType       = fmt.Errorf("%w: PATH is a traversal a query produces, not a value an element stores", ErrUnsupportedType)
+	ErrReferenceValueType  = fmt.Errorf("%w: a graph, node, edge or binding table reference is a handle into a graph rather than a value, and a property holding one would be a relationship no traversal can follow", ErrUnsupportedType)
+	ErrImmaterialValueType = fmt.Errorf("%w: NULL admits only null, which the property's own nullability already records, and NOTHING (with NULL NOT NULL) admits nothing at all", ErrUnsupportedType)
+	ErrRecordValueType     = fmt.Errorf("%w: RECORD needs a property type that carries its fields, which this model does not have yet", ErrUnsupportedType)
+	ErrDynamicUnionType    = fmt.Errorf("%w: ANY VALUE and the closed unions need a property type that carries alternatives, which this model does not have yet", ErrUnsupportedType)
+)
