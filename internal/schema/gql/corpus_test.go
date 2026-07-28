@@ -222,6 +222,14 @@ type semanticCase struct {
 // between two authors, and a prefix set can be checked for disjointness where a
 // convention on filenames cannot. Nothing in the corpus nests, so the extra reach of
 // HasPrefix over path.Dir equality costs nothing.
+//
+// The prefixes do a second job, and it runs through a different file, which is what
+// makes it easy to miss: areaPrefixNumbers reduces each prefix to its ISO section
+// number, and areaOwners hands every grammar name in that section to the areas holding
+// it. A prefix is therefore a claim on a clause of the specification and not only on a
+// directory, so one that matches no file is not necessarily dead — dropping it hands
+// that clause's names to nobody, which the carriage gates report as `unowned` rather
+// than as a gap. ownershipOnlyPrefixes registers the prefixes held for that job alone.
 type corpusArea struct {
 	prefixes []string
 	entries  []corpusEntry
@@ -365,6 +373,102 @@ func TestCorpusAreasAreDisjoint(t *testing.T) {
 			}
 			require.False(t, strings.HasPrefix(a.prefix, b.prefix) || strings.HasPrefix(b.prefix, a.prefix),
 				"areas %s and %s both own files under %q / %q", a.area, b.area, a.prefix, b.prefix)
+		}
+	}
+}
+
+// ownershipOnlyPrefix is a prefix held for the ownership half of a prefix's job and
+// not the file half: it owns its clause's grammar names, and holds no corpus file.
+type ownershipOnlyPrefix struct {
+	prefix string
+	area   string
+	why    string
+}
+
+// ownershipOnlyPrefixes are the prefixes that own a clause without owning a file. They
+// are not a backlog (gqlc-h9n.20). Each names a clause whose productions have no
+// surface syntax of their own to write a file against: the syntax is spelled by a
+// parent construct that lives in another clause and is covered there, so a file added
+// here would parse bytes an existing file already parses, and its manifest row would
+// assert nothing the existing row does not.
+//
+// Deleting these four and running TestCorpusAreaParseCarriers reports fieldType,
+// propertyType, propertyTypeList, propertyTypesSpecification and propertyValueType as
+// unowned — names no area answers for. That is strictly weaker than the state this
+// register describes, which is why the empty prefixes stay.
+//
+// The register is not a permanent exemption. An entry whose prefix gains a file fails,
+// and the fix is to delete the entry rather than to widen it, because a file under the
+// prefix is the direct refutation of the reason the entry states.
+var ownershipOnlyPrefixes = []ownershipOnlyPrefix{
+	{
+		prefix: "18.5-property-types/",
+		area:   "B",
+		why: "The braced block itself: propertyTypesSpecification is LEFT_BRACE propertyTypeList? RIGHT_BRACE, and propertyTypeList the comma-separated repetition inside it (GQL.g4:1691-1697). " +
+			"Every element type that declares properties spells both, so 18.2's files carry them already; a file here would be a node type declaration with the clause number changed.",
+	},
+	{
+		prefix: "18.6-property-type/",
+		area:   "B",
+		why: "propertyType is propertyName typed? propertyValueType (GQL.g4:1701-1703) — one row of the block above, and unspellable outside it. " +
+			"Its two interesting choices, the typed? spelling and the value type, are owned by 17-references and by the value-type areas respectively.",
+	},
+	{
+		prefix: "18.7-property-value-type/",
+		area:   "B",
+		why: "propertyValueType : valueType (GQL.g4:1707-1709) is a pure alias with no token of its own. " +
+			"Every spelling that could go in a file here is a value type, and value-type spellings are areas D1 and D2's whole subject.",
+	},
+	{
+		prefix: "18.10-field-type/",
+		area:   "D2",
+		why: "fieldType is fieldName typed? valueType (GQL.g4:1996-1998), reachable only through binding table types and record types. " +
+			"The resolver declines both with ErrUnsupportedType — declinedCarriers files fieldType under that sentinel — so this clause cannot have a resolving carrier at all, and a rejecting file would pin a decline 18.8's files pin already.",
+	},
+}
+
+// TestEveryAreaPrefixIsBacked pins that a prefix matching no corpus file is a decision
+// someone wrote down. The two halves of a prefix's job come apart here: an unbacked
+// prefix is invisible to every file-side check, because those all start from a file and
+// ask which area owns it, and it is invisible to the carriage gates too, because from
+// their side it looks like ordinary ownership. So it reads as an unfinished directory
+// to whoever finds it next, and the cheap repair — delete it — is the one that silently
+// unowns its clause.
+//
+// Registering rather than commenting because the register expires on its own: the gate
+// below fails the day a file lands under a registered prefix, which is exactly the day
+// the entry's reasoning stopped holding.
+func TestEveryAreaPrefixIsBacked(t *testing.T) {
+	files := corpusFiles(t)
+
+	registered := make(map[string]bool, len(ownershipOnlyPrefixes))
+	for _, entry := range ownershipOnlyPrefixes {
+		require.NotEmpty(t, entry.why, "ownership-only prefix %q must state why its clause has no file to write", entry.prefix)
+		area, ok := corpusAreas[entry.area]
+		require.True(t, ok, "ownership-only prefix %q names area %s, which does not exist", entry.prefix, entry.area)
+		require.Contains(t, area.prefixes, entry.prefix,
+			"ownership-only prefix %q is not one of area %s's prefixes, so it owns nothing and registers nothing", entry.prefix, entry.area)
+		require.False(t, registered[entry.prefix], "prefix %q is registered twice", entry.prefix)
+		registered[entry.prefix] = true
+	}
+
+	for name, area := range corpusAreas {
+		for _, prefix := range area.prefixes {
+			backing := 0
+			for _, file := range files {
+				if strings.HasPrefix(file, prefix) {
+					backing++
+				}
+			}
+			if registered[prefix] {
+				require.Zero(t, backing,
+					"prefix %q is registered ownership-only but now backs %d file(s): delete its ownershipOnlyPrefixes entry, because a file under the prefix refutes the reason it states",
+					prefix, backing)
+				continue
+			}
+			require.NotZero(t, backing,
+				"area %s's prefix %q matches no corpus file: either add one, or register it in ownershipOnlyPrefixes with the reason its clause has no surface syntax of its own",
+				name, prefix)
 		}
 	}
 }
