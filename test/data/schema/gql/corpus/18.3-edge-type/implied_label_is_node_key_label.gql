@@ -1,0 +1,15 @@
+-- An edge type implying a label spelled the same as a declared node type's key
+-- label. The spelling is deliberate rather than natural: reusing one name across
+-- the two vocabularies is the only shape that can tell one namespace from two.
+--
+-- Resolves. ADR 0015's decline is per-kind — rejectInheritance is called once for
+-- nodes against node key labels and once for edges against edge key labels
+-- (resolve.go), because the two sets key separate maps and an edge type labelled
+-- Person says nothing about a node type of that name. Every other GG21 file keeps
+-- the vocabularies disjoint by accident, so before this one the decline could have
+-- been widened to a single shared namespace with nothing going red.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Person { id :: INT NOT NULL }),
+    (:Post { id :: INT NOT NULL }),
+    (:Person) -[:AUTHORED => :Person { ts :: TIMESTAMP }]-> (:Post)
+}

@@ -1,0 +1,16 @@
+-- implied_key_label.gql in the other order, which is the only order that tells
+-- the deferral apart from a running check. There `(:Person)` is declared first,
+-- so by the time `(:Engineer => :Person)` is read Person is already a key label
+-- and a per-declaration check would catch it too. Here the implying declaration
+-- comes first, and Person only becomes a key label afterwards.
+--
+-- Unsupported: ErrImpliedLabelIsKeyLabel. A collision is a property of the whole
+-- body rather than of a prefix of it, which is why resolve() defers
+-- rejectInheritance past the node loop instead of checking each declaration as it
+-- goes (resolve.go). Order-independence is what makes a GQL graph type body a set
+-- rather than a sequence; without this file that reading of ADR 0015's decline is
+-- stated in a comment and asserted nowhere.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Engineer => :Person { level :: INT }),
+    (:Person { name :: STRING })
+}

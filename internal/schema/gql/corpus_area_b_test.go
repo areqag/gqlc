@@ -31,6 +31,14 @@ var corpusAreaB = []corpusEntry{
 		reason:   "an implied label that is also a declared type's key label is the one part of GG21 gqlc declines: Fabric inherits that type's properties, Neo4j forbids the schema, and the standard's position is unresolved — see ADR 0015",
 	},
 	{
+		file:     "18.2-node-type/implied_key_label_declared_later.gql",
+		outcome:  unsupported,
+		sentinel: ErrImpliedLabelIsKeyLabel,
+		feature:  "GG21",
+		bead:     "gqlc-0ri",
+		reason:   "implied_key_label.gql in the order that discriminates: the implying declaration comes first, so the key label it collides with is only read afterwards. resolve() defers rejectInheritance past the node loop for exactly this, a collision being a property of the whole body rather than of a prefix of it",
+	},
+	{
 		file:     "18.2-node-type/empty_key_label_set.gql",
 		outcome:  unsupported,
 		sentinel: ErrUnnamedNodeType,
