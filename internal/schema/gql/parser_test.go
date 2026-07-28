@@ -464,9 +464,26 @@ func (s *ParserSuite) TestEndpointAliasDiagnostics() {
 			want: ErrEndpointNotAlias,
 		},
 		{
+			// idx.declared carries the complete label set, not just the key
+			// one, so an implied label is the same mistake as a key label.
+			name: "pattern endpoint names a label the node type only implies",
+			src: `(:Engineer => :Staff { level :: INT }),
+				(Staff) -[:KNOWS]-> (Staff)`,
+			want: ErrEndpointNotAlias,
+		},
+		{
 			name: "phrase endpoint names nothing declared",
 			src: `NODE TYPE :Person { id :: INT } AS p,
 				DIRECTED EDGE :KNOWS CONNECTING (p TO Ghost)`,
+			want: ErrUnknownEndpoint,
+		},
+		{
+			// The target arm and the source arm forward their failures
+			// independently, so a target-only case leaves the source one
+			// free to stop propagating and take the schema with it.
+			name: "phrase endpoint names nothing declared on the source side",
+			src: `NODE TYPE :Person { id :: INT } AS p,
+				DIRECTED EDGE :KNOWS CONNECTING (Ghost TO p)`,
 			want: ErrUnknownEndpoint,
 		},
 	}
