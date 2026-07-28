@@ -809,7 +809,7 @@ var valueTypeFamilies = []struct {
 	{ErrReferenceValueType, "reference value type", "ANY NODE"},
 	{ErrImmaterialValueType, "immaterial value type", "NOTHING"},
 	{ErrRecordValueType, "record type", "RECORD"},
-	{ErrDynamicUnionType, "dynamic union type", "ANY VALUE"},
+	{ErrDynamicUnionType, "dynamic union type", "ANY VALUE<STRING | INT>"},
 }
 
 // TestValueTypeFamiliesAreIsoProductions is what entitles errors.go to say the

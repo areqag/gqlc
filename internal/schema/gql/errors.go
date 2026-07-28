@@ -74,12 +74,13 @@ var (
 // The split that matters is not five ways but two, and ADR 0019 argues it: the
 // first three say what the construct *is*, and no change to the model or the
 // target store reaches them. The last two say what gqlc has not built, so the
-// "yet" in their messages is load-bearing — gqlc-h9n.33 and gqlc-h9n.34 are the
-// beads that would delete them.
+// "yet" in their messages is load-bearing — gqlc-h9n.33 is the bead that
+// deletes ErrRecordValueType; gqlc-h9n.34 (ADR 0020) already deleted the open
+// halves of ErrDynamicUnionType, leaving it to cover only the closed unions.
 var (
 	ErrPathValueType       = fmt.Errorf("%w: PATH is a traversal a query produces, not a value an element stores", ErrUnsupportedType)
 	ErrReferenceValueType  = fmt.Errorf("%w: a graph, node, edge or binding table reference is a handle into a graph rather than a value, and a property holding one would be a relationship no traversal can follow", ErrUnsupportedType)
 	ErrImmaterialValueType = fmt.Errorf("%w: NULL admits only null, which the property's own nullability already records, and NOTHING (with NULL NOT NULL) admits nothing at all", ErrUnsupportedType)
 	ErrRecordValueType     = fmt.Errorf("%w: RECORD needs a property type that carries its fields, which this model does not have yet", ErrUnsupportedType)
-	ErrDynamicUnionType    = fmt.Errorf("%w: ANY VALUE and the closed unions need a property type that carries alternatives, which this model does not have yet", ErrUnsupportedType)
+	ErrDynamicUnionType    = fmt.Errorf("%w: closed dynamic unions (ANY VALUE<A|B> and bare A|B) need a property type that carries their members, which this model does not have yet", ErrUnsupportedType)
 )

@@ -202,6 +202,8 @@ func goType(pt graph.PropertyType) (string, bool) {
 		return "time.Time", true
 	case graph.TypeDuration:
 		return "dbtype.Duration", true
+	case graph.TypeAnyPropertyValue:
+		return "any", true
 	case graph.TypeInt128, graph.TypeInt256,
 		graph.TypeUint128, graph.TypeUint256,
 		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,

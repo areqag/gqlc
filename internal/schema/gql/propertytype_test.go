@@ -123,6 +123,11 @@ var typeMappingPins = []typePin{
 
 	{"DECIMAL", graph.TypeDecimal},
 	{"DEC", graph.TypeDecimal},
+
+	{"ANY VALUE", graph.TypeAnyPropertyValue},
+	{"ANY", graph.TypeAnyPropertyValue},
+	{"PROPERTY VALUE", graph.TypeAnyPropertyValue},
+	{"ANY PROPERTY VALUE", graph.TypeAnyPropertyValue},
 }
 
 func TestPropertyTypeMapping(t *testing.T) {
@@ -481,7 +486,6 @@ func TestPropertyBareDurationRejectedAtParse(t *testing.T) {
 func TestPropertyUnsupportedType(t *testing.T) {
 	for _, spelling := range []string{
 		"LIST<INT>",
-		"ANY",
 	} {
 		t.Run(spelling, func(t *testing.T) {
 			_, err := parseFirstProperty(t, spelling)

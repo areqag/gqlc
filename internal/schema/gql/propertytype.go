@@ -54,8 +54,7 @@ func declineValueType(vt gen.IValueTypeContext) error {
 		return ErrPathValueType
 	case *gen.RecordTypeLabelContext:
 		return ErrRecordValueType
-	case *gen.OpenDynamicUnionTypeLabelContext, *gen.DynamicPropertyValueTypeLabelContext,
-		*gen.ClosedDynamicUnionTypeAtl1Context, *gen.ClosedDynamicUnionTypeAtl2Context:
+	case *gen.ClosedDynamicUnionTypeAtl1Context, *gen.ClosedDynamicUnionTypeAtl2Context:
 		return ErrDynamicUnionType
 	case *gen.PredefinedTypeLabelContext:
 		// ISO files references and the immaterial types under <predefined type>,
@@ -255,6 +254,14 @@ var typeSpellings = map[string]graph.PropertyType{
 
 	"DECIMAL": graph.TypeDecimal,
 	"DEC":     graph.TypeDecimal,
+
+	// Open dynamic union types: ANY VALUE, bare ANY (VALUE elided), and the two
+	// spellings of the narrower ANY? PROPERTY VALUE. All map to TypeAnyPropertyValue
+	// and emit Go's any. (ADR 0020)
+	"ANY VALUE":          graph.TypeAnyPropertyValue,
+	"ANY":                graph.TypeAnyPropertyValue,
+	"PROPERTY VALUE":     graph.TypeAnyPropertyValue,
+	"ANY PROPERTY VALUE": graph.TypeAnyPropertyValue,
 }
 
 // normaliseType looks up the full canonical spelling first so that a

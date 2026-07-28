@@ -299,20 +299,17 @@ var declinedCarriers = []declinedCarriage{
 	{
 		sentinel: ErrDynamicUnionType,
 		bead:     "gqlc-h9n.33",
-		why:      "One sentinel over two different blockers, which ADR 0019 keeps deliberately because the taxonomy is ISO's rather than gqlc's: the closed unions (#9, #10) need the enum to carry members and are gqlc-h9n.33's, while the open ones (#7, #8) are atomic and need only a decision about the generated Go, which is gqlc-h9n.34's. Retires when both land.",
+		why:      "The closed unions (#9, #10) need the enum to carry members and are gqlc-h9n.33's. The open ones (#7, #8) are now implemented (ADR 0020), so valueType#7, valueType#8 and VALUE gained resolving carriers and left this group.",
 		names: []declinedName{
 			{"valueType#10", "alt"},
-			{"valueType#7", "alt"},
-			{"valueType#8", "alt"},
 			{"valueType#9", "alt"},
-			{"VALUE", "token"},
 			{"VERTICAL_BAR", "token"},
 		},
 	},
 	{
 		sentinel: ErrUnsupportedType,
 		bead:     "gqlc-h9n.5",
-		why:      "Two memberships, and the class is what they have in common. LIST/ARRAY reports the class bare because gqlc-h9n.5 has yet to justify it, so its names are here for the ordinary reason. ANY, the field-type rules and the angle brackets are here for a different one: each is carried by two declined families at once, so no leaf accounts for all of its carriers and the class is the most specific sentinel that does.",
+		why:      "Two memberships, and the class is what they have in common. LIST/ARRAY reports the class bare because gqlc-h9n.5 has yet to justify it, so its names are here for the ordinary reason. The field-type rules and the angle brackets are here for a different one: each is carried by two declined families at once, so no leaf accounts for all of its carriers and the class is the most specific sentinel that does. ANY gained a resolving carrier when the open dynamic unions landed (ADR 0020) and is no longer here.",
 		names: []declinedName{
 			{"valueType#3", "alt"},
 			{"valueType#4", "alt"},
@@ -323,7 +320,6 @@ var declinedCarriers = []declinedCarriage{
 			{"fieldTypesSpecification", "rule"},
 			{"listValueTypeName", "rule"},
 			{"listValueTypeNameSynonym", "rule"},
-			{"ANY", "token"},
 			{"ARRAY", "token"},
 			{"LEFT_ANGLE_BRACKET", "token"},
 			{"LEFT_BRACKET", "token"},

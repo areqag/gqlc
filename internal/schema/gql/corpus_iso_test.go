@@ -98,23 +98,23 @@ var isoGaps = []isoGap{
 	},
 	{
 		production: "dynamic union type",
-		bead:       "gqlc-h9n.6",
-		why:        "ANY value type; h9n.6 is the bead that decides whether to implement or ADR the rejection",
+		bead:       "gqlc-h9n.33",
+		why:        "umbrella for open and closed union spellings; the open ones (#7, #8) now resolve to graph.TypeAnyPropertyValue (ADR 0020), but the closed ones (#9, #10) need the enum to carry members, which gqlc-h9n.33 builds. Production name is absent because GQL.g4 uses labelled alternatives of valueType rather than a named rule",
 	},
 	{
 		production: "open dynamic union type",
-		bead:       "gqlc-h9n.6",
-		why:        "the unconstrained ANY spelling; decided with <dynamic union type>",
+		bead:       "gqlc-h9n.34",
+		why:        "implemented: ANY VALUE (and bare ANY) now resolve to graph.TypeAnyPropertyValue → Go any (ADR 0020). Production name is absent because GQL.g4 spells this as a labelled alternative of valueType (openDynamicUnionTypeLabel) rather than a named rule, as with <standard digit> and the other inlined productions",
 	},
 	{
 		production: "closed dynamic union type",
-		bead:       "gqlc-h9n.6",
-		why:        "the ANY<A|B> spelling; decided with <dynamic union type>",
+		bead:       "gqlc-h9n.33",
+		why:        "ANY VALUE<A|B> and bare A|B need the enum to carry members, which graph.PropertyType as a flat string cannot do. Unimplemented; gqlc-h9n.33 is the bead that fixes it",
 	},
 	{
 		production: "dynamic property value type",
-		bead:       "gqlc-h9n.6",
-		why:        "a property typed by a dynamic union; decided with <dynamic union type>",
+		bead:       "gqlc-h9n.34",
+		why:        "implemented: ANY? PROPERTY VALUE now resolves to graph.TypeAnyPropertyValue → Go any (ADR 0020). Production name is absent because GQL.g4 spells this as a labelled alternative (dynamicPropertyValueTypeLabel) rather than a named rule, as with <standard digit>",
 	},
 }
 

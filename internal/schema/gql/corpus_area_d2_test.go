@@ -48,20 +48,14 @@ var corpusAreaD2 = []corpusEntry{
 		reason:   "the same missing field-carrying type as bare RECORD (ADR 0019, gqlc-h9n.33); RECORD { f :: STRING } is recordType alt 2 and also brings the field-type grammar in",
 	},
 	{
-		file:     "18.9-value-type/constructed_dyn_open.gql",
-		outcome:  unsupported,
-		sentinel: ErrDynamicUnionType,
-		feature:  "mandatory",
-		bead:     "gqlc-h9n.34",
-		reason:   "ANY VALUE is atomic, so a TypeAny constant would hold it today: what is missing is a decision about the generated Go, not a model change (ADR 0019, gqlc-h9n.34). ANY VALUE is valueType alt 7 (openDynamicUnionTypeLabel)",
+		file:    "18.9-value-type/constructed_dyn_open.gql",
+		outcome: resolves,
+		feature: "mandatory",
 	},
 	{
-		file:     "18.9-value-type/constructed_dyn_property_value.gql",
-		outcome:  unsupported,
-		sentinel: ErrDynamicUnionType,
-		feature:  "mandatory",
-		bead:     "gqlc-h9n.34",
-		reason:   "the narrower half of the same decision — unlike ANY VALUE it is by construction the union of the storable types, which is why gqlc-h9n.34 may land it alone (ADR 0019). PROPERTY VALUE is valueType alt 8 (dynamicPropertyValueTypeLabel)",
+		file:    "18.9-value-type/constructed_dyn_property_value.gql",
+		outcome: resolves,
+		feature: "mandatory",
 	},
 	{
 		file:     "18.9-value-type/constructed_dyn_closed_union.gql",
@@ -224,12 +218,9 @@ var corpusAreaD2 = []corpusEntry{
 		reason:   "`ANY PROPERTY GRAPH` takes openGraphReferenceValueType's PROPERTY, which both existing graph references elide; same permanent decline as the other references (ADR 0019)",
 	},
 	{
-		file:     "18.9-value-type/constructed_dyn_any_bare.gql",
-		outcome:  unsupported,
-		sentinel: ErrDynamicUnionType,
-		feature:  "mandatory",
-		bead:     "gqlc-h9n.34",
-		reason:   "a bare ANY is openDynamicUnionType with VALUE elided, the same type constructed_dyn_open.gql spells in full; it is not a truncated ANY RECORD or ANY NODE, those being their own alternatives with their own spellings",
+		file:    "18.9-value-type/constructed_dyn_any_bare.gql",
+		outcome: resolves,
+		feature: "mandatory",
 	},
 }
 
