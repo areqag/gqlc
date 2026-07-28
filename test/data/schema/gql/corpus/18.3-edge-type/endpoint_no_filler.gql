@@ -2,16 +2,13 @@
 -- (GQL.g4:1620, 1625): an endpoint spelled `()`. Every other endpoint in the
 -- corpus names a node type, by alias or by inline filler.
 --
--- Two readings of `()` are open, and gqlc takes the first: an endpoint naming the
--- node type whose key label set is empty, which resolve() looks up under the empty
--- key and does not find. It cannot find one — ADR 0018 rejects every declaration
--- of such a type — so this is undeclarable rather than merely undeclared, which
--- ErrUnknownEndpoint's message does not distinguish.
---
--- The second reading is an unconstrained endpoint, "any node type". gqlc declines
--- under that reading too, Schema.Edges being keyed on a source/label/target triple
--- with no wildcard for either end. So the outcome is settled while the reading is
--- not, and only the diagnostic turns on which is right — gqlc-h9n.35.
+-- ADR 0021 settles the reading: `()` names the node type whose key label set is
+-- empty. `nodeTypeFiller` specifies a node type; when it is absent the
+-- specification is empty, i.e. the empty label set. resolve() looks up that key
+-- and does not find it — ADR 0018 rejects every declaration of an empty-label
+-- node type — so the endpoint is undeclarable rather than merely undeclared.
+-- ErrUnknownEndpoint's message ("references an undeclared node type") is
+-- accurate under this reading, if weak in not distinguishing the two cases.
 CREATE PROPERTY GRAPH TYPE T AS {
     (:Person { id :: INT NOT NULL }),
     (:Person) -[:AUTHORED]-> ()

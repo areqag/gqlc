@@ -164,7 +164,7 @@ var corpusAreaC = []corpusEntry{
 		sentinel: ErrUnknownEndpoint,
 		feature:  "mandatory",
 		bead:     "gqlc-0ri",
-		reason:   "the endpoint `()` names the node type with an empty key label set, which ADR 0018 makes undeclarable rather than merely undeclared. The competing reading — an unconstrained endpoint — is declined too, Schema.Edges having no wildcard end, so only the diagnostic turns on which is right; gqlc-h9n.35 holds that question",
+		reason:   "the endpoint `()` names the node type with an empty key label set (ADR 0021: `nodeTypeFiller` absent = empty specification = empty label set). ADR 0018 makes such a type undeclarable, so `resolve()` returns ErrUnknownEndpoint accurately. The competing reading — an unconstrained endpoint — is also declined (Schema.Edges has no wildcard end), and ADR 0021 prefers the grammar-consistent reading 1 while the Syntax Rules remain unavailable",
 	},
 	{
 		file:     "18.3-edge-type/endpoint_property_block_only.gql",
