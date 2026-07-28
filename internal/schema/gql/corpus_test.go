@@ -6,6 +6,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -94,7 +96,7 @@ import (
 const (
 	wantCorpusEntries   = 108
 	wantCorpusResolving = 55
-	wantSemanticCases   = 13
+	wantSemanticCases   = 17
 )
 
 // isValidFeature reports whether v is an accepted value of corpusEntry.feature:
@@ -662,8 +664,98 @@ func TestSemanticCaseCollisions(t *testing.T) {
 	}
 }
 
-// TestCorpusOutcomes asserts each entry's outcome, and for resolving entries that
-// nothing the source declared was dropped from the model.
+// typeArgument matches a parenthesised argument on an uppercase type keyword —
+// STRING(0xFF), DEC(8), DURATION(DAY TO SECOND). It deliberately does not try to know
+// which keywords are types: a stray match is harmless, because the verdict below comes
+// from resolving the file rather than from this pattern. Nested parens are excluded so
+// that a match ends at the first close, which keeps element type patterns like
+// `(:X)-[:R]->(:Y)` from being read as one enormous argument.
+var typeArgument = regexp.MustCompile(`\b([A-Z][A-Z_]*)\(([^()]*)\)`)
+
+// TestNoUndeclaredLossiness closes the direction of the manifest that was open
+// (gqlc-eh4): an entry that resolves and names a bead must carry a semanticCases row,
+// and nothing else may, but an entry that resolved *lossily* and named no bead faced
+// no assertion at all. "I did not think about it" and "I checked, it is lossless" were
+// the same manifest, so silence was a valid answer where it should not have been. PR
+// #439 shipped five entries through that gap in a single commit; this test, written
+// after, found four more that were already in the corpus and had never been noticed.
+//
+// The check is a search, not a proof. For each parenthesised argument in the file it
+// resolves the variant with that argument removed. A variant that resolves to the
+// identical model proves the argument reached nothing, which is exactly lossiness and
+// exactly what semanticCases exists to record. A variant that does not parse yields no
+// verdict — `DECIMAL NOT NULL` is not GQL, because notNull? sits inside the
+// parenthesised group — so this can never certify a file lossless. It can only refuse
+// to let a demonstrated discard go unrecorded, which is the half that was missing.
+//
+// Entries already declaring a bead are skipped, TestSemanticCaseCollisions being the
+// assertion they face instead. Nothing here reads bead or reason on the entries it does
+// check: the verdict is a model comparison, so a wrong declaration cannot buy silence.
+func TestNoUndeclaredLossiness(t *testing.T) {
+	// Two witnesses, because once the corpus is clean every file this test examines
+	// has nothing to report, and a search that reports nothing looks identical to a
+	// search that looks for nothing. The first fails if discardedArguments stops
+	// finding; the second fails if it starts reporting whatever it sees.
+	t.Run("a discarded argument is reported", func(t *testing.T) {
+		const src = "CREATE PROPERTY GRAPH TYPE t AS { (:Doc { s :: STRING(5) }) }"
+		require.Equal(t, []string{"STRING(5)"}, discardedArguments(t, src),
+			"STRING(5) still collides with bare STRING; if it has stopped, gqlc-5md landed and this witness needs a spelling that is still discarded")
+	})
+
+	t.Run("an argument whose removal is not GQL yields no verdict", func(t *testing.T) {
+		// decimalExactNumericType (GQL.g4:1832) puts notNull? inside the parenthesised
+		// group, so DECIMAL NOT NULL is a syntax error and the model comparison never
+		// happens. Reporting this would be reporting a spelling never resolved.
+		const src = "CREATE PROPERTY GRAPH TYPE t AS { (:Doc { d :: DECIMAL(10,2) NOT NULL }) }"
+		require.Empty(t, discardedArguments(t, src))
+	})
+
+	for _, entry := range corpusManifest(t) {
+		if entry.outcome != resolves || entry.bead != "" {
+			continue
+		}
+
+		t.Run(entry.file, func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Join(corpusDir, entry.file))
+			require.NoError(t, err)
+
+			require.Empty(t, discardedArguments(t, uncommented(string(raw))),
+				"the model is the same with these arguments removed, so it discards them. Give the entry the bead that will carry them and a reason, and add a semanticCases row for each")
+		})
+	}
+}
+
+// discardedArguments returns the parenthesised arguments in src whose removal leaves
+// the resolved model unchanged. Every occurrence of a spelling goes at once, so that a
+// source spelling the same argument twice cannot keep the models apart on the copy the
+// substitution did not reach. A variant that does not parse is skipped rather than
+// reported: there is no model to compare, so there is no evidence either way.
+func discardedArguments(t *testing.T, src string) []string {
+	t.Helper()
+
+	want, err := New().Parse(strings.NewReader(src))
+	require.NoError(t, err, "only a source that resolves has a model to compare against")
+
+	var discarded []string
+	seen := make(map[string]bool)
+	for _, match := range typeArgument.FindAllStringSubmatch(src, -1) {
+		spelling, bare := match[0], match[1]
+		if seen[spelling] {
+			continue
+		}
+		seen[spelling] = true
+
+		got, err := New().Parse(strings.NewReader(strings.ReplaceAll(src, spelling, bare)))
+		if err == nil && reflect.DeepEqual(want, got) {
+			discarded = append(discarded, spelling)
+		}
+	}
+	return discarded
+}
+
+// TestCorpusOutcomes asserts each entry's outcome, and for resolving entries that the
+// element types the source declared all reached the model. It is a count, not a model
+// comparison: what a property type discards is TestNoUndeclaredLossiness' subject.
 func TestCorpusOutcomes(t *testing.T) {
 	for _, entry := range corpusManifest(t) {
 		t.Run(entry.file, func(t *testing.T) {

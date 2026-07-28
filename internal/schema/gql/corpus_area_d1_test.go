@@ -28,6 +28,8 @@ var corpusAreaD1 = []corpusEntry{
 		file:    "18.9-value-type/scalar_dec_alias.gql",
 		outcome: resolves,
 		feature: "mandatory",
+		bead:    "gqlc-5md",
+		reason:  "the precision is discarded, so DEC(8) resolves to a PropertyType byte-identical to bare DEC (both map to graph.TypeDecimal, which carries no precision). DEC is DECIMAL's alias and maps to the same constant, so this is scalar_decimal_precision_scale.gql's discard reached through the shorter spelling",
 	},
 	{
 		file:    "18.9-value-type/scalar_date.gql",
@@ -84,16 +86,22 @@ var corpusAreaD1 = []corpusEntry{
 		file:    "18.9-value-type/scalar_string_length_binary.gql",
 		outcome: resolves,
 		feature: "mandatory",
+		bead:    "gqlc-5md",
+		reason:  "the length is discarded whatever base spells it, so STRING(0b101) resolves to a PropertyType byte-identical to bare STRING (both graph.TypeString with no width). The binary literal is what this file is for; that the model cannot tell 5 from unbounded is the same gap scalar_string_max_length.gql records",
 	},
 	{
 		file:    "18.9-value-type/scalar_string_length_hex.gql",
 		outcome: resolves,
 		feature: "mandatory",
+		bead:    "gqlc-5md",
+		reason:  "the length is discarded whatever base spells it, so STRING(0xFF) resolves to a PropertyType byte-identical to bare STRING (both graph.TypeString with no width). The hexadecimal literal is what this file is for, and 255 is the largest of the three bases here — the model keeps none of it",
 	},
 	{
 		file:    "18.9-value-type/scalar_string_length_octal.gql",
 		outcome: resolves,
 		feature: "mandatory",
+		bead:    "gqlc-5md",
+		reason:  "the length is discarded whatever base spells it, so STRING(0o17) resolves to a PropertyType byte-identical to bare STRING (both graph.TypeString with no width). The octal literal is what this file is for; the three base files differ in the lexer and agree in the model, which is the discard stated three ways",
 	},
 	{
 		file:    "18.9-value-type/scalar_string_max_length.gql",
@@ -202,6 +210,13 @@ var semanticAreaD1 = []semanticCase{
 		siblings: []string{"CHAR", "STRING"},
 	},
 	{
+		file:     "18.9-value-type/scalar_dec_alias.gql",
+		bead:     "gqlc-5md",
+		why:      "DEC(8) resolves to the same PropertyType as bare DEC, because PropertyType has no precision field. DEC and DECIMAL both map to graph.TypeDecimal, so this is the alias half of the collision scalar_decimal_precision_scale.gql records, and the file already spells bare DEC beside it",
+		spelling: "DEC(8)",
+		siblings: []string{"DEC"},
+	},
+	{
 		file:     "18.9-value-type/scalar_decimal_precision_scale.gql",
 		bead:     "gqlc-5md",
 		why:      "DECIMAL(10,2) resolves to the same PropertyType as DECIMAL(8), and as bare DECIMAL, because PropertyType has no length field; the discarded precision and scale are unrecoverable downstream",
@@ -213,6 +228,27 @@ var semanticAreaD1 = []semanticCase{
 		// one keyword, two parentheticals, one model — without the unrelated second
 		// difference a DEC alias or a nullability edit would bring with it.
 		siblings: []string{"DECIMAL(8)"},
+	},
+	{
+		file:     "18.9-value-type/scalar_string_length_binary.gql",
+		bead:     "gqlc-5md",
+		why:      "STRING(0b101) resolves to the same PropertyType as bare STRING, because PropertyType has no length field. The three base files exist to exercise the lexer's binary, hexadecimal and octal literals; that all three agree with bare STRING in the model is the discard restated in each base",
+		spelling: "STRING(0b101)",
+		siblings: []string{"STRING"},
+	},
+	{
+		file:     "18.9-value-type/scalar_string_length_hex.gql",
+		bead:     "gqlc-5md",
+		why:      "STRING(0xFF) resolves to the same PropertyType as bare STRING, because PropertyType has no length field; 255 is the largest length the three base files spell and the model keeps none of it",
+		spelling: "STRING(0xFF)",
+		siblings: []string{"STRING"},
+	},
+	{
+		file:     "18.9-value-type/scalar_string_length_octal.gql",
+		bead:     "gqlc-5md",
+		why:      "STRING(0o17) resolves to the same PropertyType as bare STRING, because PropertyType has no length field; the octal literal reaches the same discard as the binary and hexadecimal spellings",
+		spelling: "STRING(0o17)",
+		siblings: []string{"STRING"},
 	},
 	{
 		file:     "18.9-value-type/scalar_string_max_length.gql",
