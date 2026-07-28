@@ -436,6 +436,62 @@ func TestClause21Unowned(t *testing.T) {
 	}
 }
 
+// TestAreaPartitionsAgree is the positive control both carrier gates lack. Each
+// gate asserts an *empty* orphan list, so a partition that credits every area with
+// every file can only remove orphans, and a corpus with real gaps reads exactly
+// like one with none. Measured at 9ddf10a: rewriting either corpusFilesByArea or
+// resolvingFilesByArea to append every file to every area left the whole package
+// green. That is the failure these two files were written to prevent — PR #392's
+// `localdatetimeType#2` and 7217b180's node synonym are both area-attribution
+// defects — undetectable in the instrument that prevents it.
+//
+// A synthetic witness is not needed and would be weaker, because the tree already
+// derives the partition twice and independently: corpusFilesByArea reads the
+// directory prefixes off disk, resolvingFilesByArea reads corpusAreas[name].entries
+// out of the manifest, and requireOwnedByArea pins every manifest entry to its own
+// area's prefixes. Restricted to resolving entries the two must therefore agree
+// exactly, so either rewrite above makes one derivation contradict the other.
+func TestAreaPartitionsAgree(t *testing.T) {
+	byPrefix := corpusFilesByArea(t)
+	byManifest := resolvingFilesByArea(t)
+
+	resolving := make(map[string]bool)
+	for _, area := range corpusAreas {
+		for _, entry := range area.entries {
+			if entry.outcome == resolves {
+				resolving[entry.file] = true
+			}
+		}
+	}
+
+	for name := range corpusAreas {
+		var want []string
+		for _, file := range byPrefix[name] {
+			if resolving[file] {
+				want = append(want, file)
+			}
+		}
+		require.ElementsMatch(t, want, byManifest[name],
+			"area %s holds different resolving files depending on which derivation is asked:\n"+
+				"the directory prefixes say %v, the manifest says %v", name, want, byManifest[name])
+	}
+
+	// And the prefix partition is a function. TestCorpusAreasAreDisjoint asserts the
+	// prefixes do not overlap, which is a statement about the prefixes; this is the
+	// same statement about the mapping they produce, and it is the half that holds
+	// for the corpus files no area declares a resolving entry for.
+	areasHolding := make(map[string]int, len(corpusFiles(t)))
+	for _, files := range byPrefix {
+		for _, file := range files {
+			areasHolding[file]++
+		}
+	}
+	for _, file := range corpusFiles(t) {
+		require.Equal(t, 1, areasHolding[file],
+			"corpus file %s is carried by %d areas; area ownership is what makes an orphan an orphan", file, areasHolding[file])
+	}
+}
+
 // reSectionPrefix pulls the "N" or "N.M" number out of a section heading like
 // "18.3 <edge type specification>" and out of an area prefix like
 // "18.3-edge-type/". The two write the same partition; extracting it consistently
