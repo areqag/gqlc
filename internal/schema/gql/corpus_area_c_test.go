@@ -100,6 +100,27 @@ var corpusAreaC = []corpusEntry{
 		bead:     "gqlc-0ri",
 		reason:   "an inline endpoint names a node type by its key label set, so implied labels there assert something about the referenced declaration that nothing checks; rejected rather than silently discarded, for the reason ErrEndpointFillerHasProperties already is (gqlc-h9n.18)",
 	},
+	{
+		file:     "18.3-edge-type/phrase_name_only.gql",
+		outcome:  unsupported,
+		sentinel: ErrUnnamedEdgeType,
+		feature:  "mandatory",
+		bead:     "gqlc-0ri",
+		reason:   "an edge type phrase that names the type and goes straight to CONNECTING, reaching edgeTypePhraseFiller alternative 1 with no filler. Identity is the key label set together with the endpoints, so good endpoints do not rescue a missing label set — the edge half of 18.2's phrase_name_only.gql",
+	},
+	{
+		file:    "18.3-edge-type/key_label_set_only.gql",
+		outcome: resolves,
+		feature: "GG21",
+	},
+	{
+		file:     "18.3-edge-type/endpoint_no_filler.gql",
+		outcome:  unsupported,
+		sentinel: ErrUnknownEndpoint,
+		feature:  "mandatory",
+		bead:     "gqlc-0ri",
+		reason:   "the endpoint `()` names the node type with an empty key label set, which ADR 0018 makes undeclarable rather than merely undeclared. The competing reading — an unconstrained endpoint — is declined too, Schema.Edges having no wildcard end, so only the diagnostic turns on which is right; gqlc-h9n.35 holds that question",
+	},
 }
 
 // semanticAreaC holds this area's semantic cases: files above that resolve to a
