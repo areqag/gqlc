@@ -1,0 +1,16 @@
+{
+  "columns": [
+    {
+      "name": "r.likedAt",
+      "type": {
+        "kind": "property",
+        "type": "TIMESTAMP",
+        "nullable": true
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "read",
+  "distinct": false
+}
