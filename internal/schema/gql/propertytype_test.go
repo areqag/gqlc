@@ -283,6 +283,43 @@ func TestPropertyBinaryWidthWhitespaceAndCase(t *testing.T) {
 	}
 }
 
+// TestCanonicalSpellingCommaSpacingIrrelevant pins the one clause of
+// collapseParenthetical's contract that no end-to-end fixture can reach: comma
+// spacing inside a parenthetical must not change the lookup key.
+//
+// It asserts on canonicalSpelling directly, which the rest of this file only
+// does through typeSpellingsRowFor, because the behaviour is currently
+// unobservable from property(). The suite already drives every comma-bearing
+// grammar arm — FLOAT(10, 2), DECIMAL(10, 2), DECIMAL(10, 2) NOT NULL, plus
+// STRING(2, 5) and BYTES(1, 10) in corpus_area_d1_test.go — and none of them
+// can see it, because no typeSpellings row holds a comma. Every comma-bearing
+// spelling therefore misses the full lookup and resolves down
+// truncateParenthetical, which discards the parenthetical the collapse just
+// rewrote. Deleting both ReplaceAll calls leaves the tree green.
+//
+// The clause becomes load-bearing the moment a comma-bearing row exists, which
+// is exactly what gqlc-5md adds: DECIMAL(10,2) would start hitting the full
+// lookup, and an uncollapsed DECIMAL(10, 2) would miss it and fall back to bare
+// DECIMAL. Hence a pin now rather than a deletion. gqlc-825 carries the proof
+// that the two lines cannot change any output today.
+//
+// Asserting the equivalence rather than the literal key is deliberate: the
+// canonical form is an internal spelling, and pinning it verbatim would fail on
+// a re-spelling that kept the property that matters. Unlike gqlc-h9n.21, this
+// stays green after gqlc-5md lands.
+func TestCanonicalSpellingCommaSpacingIrrelevant(t *testing.T) {
+	for _, spaced := range []string{
+		"DECIMAL(10, 2)",
+		"DECIMAL(10 ,2)",
+		"DECIMAL(10 , 2)",
+		"DECIMAL( 10,2 )",
+	} {
+		t.Run(spaced, func(t *testing.T) {
+			require.Equal(t, canonicalSpelling("DECIMAL(10,2)"), canonicalSpelling(spaced))
+		})
+	}
+}
+
 // widthSpellingEquivalences pairs each explicit width token with its
 // parenthesised spelling, read suffix-first: {"INT8", "INT(8)"}.
 var widthSpellingEquivalences = []typeEquivalence{
