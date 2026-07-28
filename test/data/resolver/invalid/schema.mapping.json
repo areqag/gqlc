@@ -80,5 +80,11 @@
     "delete_property_unknown_on_multi_type_edge.cypher": "social_r6.gql",
     "delete_property_on_projection_alias.cypher": "social_r6.gql",
     "delete_second_target_unknown_property.cypher": "social_r6.gql",
-    "merge_on_match_second_effect_unknown_property.cypher": "social_r6.gql"
+    "merge_on_match_second_effect_unknown_property.cypher": "social_r6.gql",
+    "union_column_name_only_mismatch.cypher": "social_r5.gql",
+    "union_third_branch_mismatch.cypher": "social_r5.gql",
+    "union_node_type_mismatch.cypher": "social_r5.gql",
+    "union_edge_union_nullability_mismatch.cypher": "social_r5.gql",
+    "union_list_element_mismatch.cypher": "social_r5.gql",
+    "union_edge_union_keys_mismatch.cypher": "edge_union_keys.gql"
 }

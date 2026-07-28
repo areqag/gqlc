@@ -1,0 +1,15 @@
+CREATE PROPERTY GRAPH TYPE EdgeUnionKeys AS {
+    (:Person {
+        id       :: INT NOT NULL
+    }),
+    (:Post {
+        id       :: INT NOT NULL
+    }),
+    (:Note {
+        id       :: INT NOT NULL
+    }),
+    (:Person) -[:AUTHORED { views :: INT NOT NULL }]-> (:Post),
+    (:Person) -[:LIKES    { views :: INT NOT NULL }]-> (:Post),
+    (:Person) -[:AUTHORED { views :: INT NOT NULL }]-> (:Note),
+    (:Person) -[:LIKES    { views :: INT NOT NULL }]-> (:Note)
+}
