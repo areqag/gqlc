@@ -201,6 +201,27 @@ var invalidFixtures = map[string]error{
 	"part_binding_type_conflict_call_vs_edge.cypher": ErrPartBindingTypeConflict,
 	// 0ig addition:
 	"call_arg_type_mismatch.cypher": ErrCallArgAssignability,
+	// 76y additions. scope.go's parameter-witness lane was 4/12 under mutation.
+	//
+	// partScope.Contains gates which Refs get witnessed at all. Its edge-union arm
+	// had no fixture, so a parameter on a multi-type edge property was witnessed by
+	// nothing and conflicts went undetected.
+	"parameter_conflict_via_multi_type_edge_property.cypher": ErrParameterTypeConflict,
+	// The variable-length edge guard exists on both the projection path
+	// (var_length_edge_property_projection.cypher) and the witness path. Only the
+	// projection one was covered.
+	"parameter_use_on_var_length_edge_property.cypher": ErrOutOfR0Scope,
+	// The witness demotes a property to nullable when its binding is optional.
+	// parameter_type_conflict_nullability.cypher conflicts two non-optional
+	// bindings whose *declared* nullability differs, so the demotion term is never
+	// what decides it. These two make it the deciding factor, on a NOT NULL
+	// property behind OPTIONAL MATCH — see parameter_optional_nullability_agree
+	// for the control that keeps the rejection from being blanket.
+	"parameter_type_conflict_optional_node_nullability.cypher": ErrParameterTypeConflict,
+	"parameter_type_conflict_optional_edge_nullability.cypher": ErrParameterTypeConflict,
+	// The witness reports unknown properties for nodes and edges separately; the
+	// node arm was pinned and the edge arm was not.
+	"parameter_use_unknown_edge_property.cypher": ErrUnknownProperty,
 }
 
 type ResolverSuite struct {
