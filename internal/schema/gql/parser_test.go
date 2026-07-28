@@ -1082,6 +1082,7 @@ var invalidFixtures = map[string]error{
 	// Annex D claim about a construct nobody has researched, which isValidFeature
 	// cannot check and which the manifest records being got wrong three times.
 	"endpoint_filler_properties.gql": ErrEndpointFillerHasProperties,
+	"multi_label_edge.gql":           ErrMultiLabelEdgeType,
 }
 
 // allSentinels is the canonical list of every Parse sentinel — the single source
@@ -1112,6 +1113,7 @@ var allSentinels = map[string]error{
 	"ErrUnsupportedType":             ErrUnsupportedType,
 	"ErrUnnamedNodeType":             ErrUnnamedNodeType,
 	"ErrUnnamedEdgeType":             ErrUnnamedEdgeType,
+	"ErrMultiLabelEdgeType":          ErrMultiLabelEdgeType,
 	"ErrDuplicateNodeType":           ErrDuplicateNodeType,
 	"ErrDuplicateEdgeType":           ErrDuplicateEdgeType,
 	"ErrNoGraphType":                 ErrNoGraphType,

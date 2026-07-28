@@ -1,0 +1,5 @@
+CREATE PROPERTY GRAPH TYPE MultiLabelEdge AS {
+    (:A),
+    (:B),
+    (:A)-[:KNOWS&FOLLOWS]->(:B)
+}
