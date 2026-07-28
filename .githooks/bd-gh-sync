@@ -57,8 +57,9 @@ gh_body_by_num = {i["number"]: (i.get("body") or "").strip() for i in gh_issues}
 pat = re.compile(r"/issues/(\d+)$")
 
 for b in bd_beads:
-    # Only open/in-progress beads get description amendments; skip closed ones.
-    if b.get("status") not in ("open", "in_progress"):
+    # Skip only closed beads; blocked/deferred/pinned/hooked are all active
+    # and can receive bd-only amendments that would be silently reverted.
+    if b.get("status") == "closed":
         continue
     ext = b.get("external_ref") or ""
     m = pat.search(ext)
@@ -81,12 +82,13 @@ PYEOF
     echo "bd-gh-sync: Pulling would silently revert the local amendment(s)." >&2
     echo "" >&2
     printf '%s\n' "$_diverged" | while IFS=: read bid n local_len gh_len; do
-      echo "  $bid  local=${local_len}ch  GH #${n}=${gh_len}ch" >&2
-      echo "  Mirror to GH first: bd show $bid | ... > /tmp/${bid}.md" >&2
-      echo "                      gh issue edit $n --body-file /tmp/${bid}.md" >&2
+      echo "  $bid  bd=${local_len}ch  GH #${n}=${gh_len}ch" >&2
+      echo "  Mirror bd→GH: write the bd description to a file, then:" >&2
+      echo "    gh issue edit $n --body-file /tmp/${bid}.md" >&2
+      echo "  To export the description: bd show $bid (look for DESCRIPTION section)" >&2
     done
     echo "" >&2
-    echo "bd-gh-sync: Once GH matches bd, re-run or start a new session." >&2
+    echo "bd-gh-sync: Once GH matches bd, re-run this hook or start a new session." >&2
     exit 0
   fi
 

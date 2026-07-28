@@ -37,7 +37,7 @@ gh_body_by_num = {i["number"]: (i.get("body") or "").strip() for i in gh_issues}
 pat = re.compile(r"/issues/(\d+)$")
 
 for b in bd_beads:
-    if b.get("status") not in ("open", "in_progress"):
+    if b.get("status") == "closed":
         continue
     ext = b.get("external_ref") or ""
     m = pat.search(ext)
@@ -100,6 +100,14 @@ run_case "no external_ref — skip" clean \
 run_case "closed bead — skip even if diverged" clean \
     '[{"id":"gqlc-y3","status":"closed","external_ref":"https://github.com/org/r/issues/11","description":"different text"}]' \
     '[{"number":11,"body":"other text"}]'
+
+run_case "blocked bead — divergence detected (not skipped)" diverged \
+    '[{"id":"gqlc-y3b","status":"blocked","external_ref":"https://github.com/org/r/issues/12","description":"amended text blocked bead"}]' \
+    '[{"number":12,"body":"original shorter"}]'
+
+run_case "deferred bead — divergence detected (not skipped)" diverged \
+    '[{"id":"gqlc-y3c","status":"deferred","external_ref":"https://github.com/org/r/issues/13","description":"deferred bead amendment"}]' \
+    '[{"number":13,"body":"original"}]'
 
 run_case "empty local description — skip" clean \
     '[{"id":"gqlc-y4","status":"open","external_ref":"https://github.com/org/r/issues/3","description":""}]' \
