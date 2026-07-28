@@ -16,6 +16,45 @@ if git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
     exit 0
 fi
 
+# Check author and committer identities for known-bogus patterns.
+# git var GIT_AUTHOR_IDENT / GIT_COMMITTER_IDENT returns:
+#   Name <email> timestamp tz
+# We extract the email (content between the last < and >) and validate it.
+_check_identity() {
+    local label="$1"
+    local ident
+    ident="$(git var "$2" 2>/dev/null)" || return 0   # skip if git var fails
+    # Extract email between < and >
+    local email
+    email="$(printf '%s' "$ident" | sed 's/.*<\(.*\)>.*/\1/')"
+
+    # Denylist: known test-fixture and placeholder addresses
+    case "$email" in
+        test@example.invalid|*@example.com|*@example.org|root@localhost|"")
+            cat >&2 <<ERRMSG
+ERROR: Bogus $label identity: <$email>
+       This address is a known test fixture or placeholder.
+       Fix with: git commit --amend --reset-author
+ERRMSG
+            return 1
+            ;;
+    esac
+
+    # Shape: must contain @ and the domain part must contain a dot
+    local domain="${email##*@}"
+    if [[ "$email" != *@* ]] || [[ "$domain" != *.* ]]; then
+        cat >&2 <<ERRMSG
+ERROR: Implausible $label email: <$email>
+       Expected format: user@host.tld
+       Fix with: git commit --amend --reset-author
+ERRMSG
+        return 1
+    fi
+}
+
+_check_identity "author"    GIT_AUTHOR_IDENT    || exit 1
+_check_identity "committer" GIT_COMMITTER_IDENT || exit 1
+
 # Extract only the trailer block (folded/interleaved trailers handled by git),
 # then look for Co-Authored-By values that mention `claude` or the
 # `@anthropic.com` email domain. Case-fold both key and value for the match.
