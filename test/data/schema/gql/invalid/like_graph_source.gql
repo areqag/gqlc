@@ -1,0 +1,6 @@
+-- LIKE source: `graphTypeLikeGraph : LIKE graphExpression`, and graphExpression
+-- reaches CURRENT_GRAPH and binding variables. A static generator has no session
+-- to resolve those against, so this is declined permanently — unlike COPY OF,
+-- which names a catalogue entry and is resolvable in principle. The two shared
+-- one sentinel until gqlc-h9n.12; see ADR 0016.
+CREATE PROPERTY GRAPH TYPE T LIKE SomeGraph

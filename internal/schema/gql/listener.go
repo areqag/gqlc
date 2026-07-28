@@ -90,11 +90,31 @@ func (l *listener) EnterCreateGraphTypeStatement(c *gen.CreateGraphTypeStatement
 	// instead, so it surfaces as ErrNoGraphType (both spellings are pinned by
 	// TestCorpusSpellingTraps).
 	if src := c.GraphTypeSource(); src == nil || src.NestedGraphTypeSpecification() == nil {
-		l.fail(ErrUnsupportedSource)
+		l.fail(unsupportedSource(src))
 		return
 	}
 
 	l.raw.name = c.CatalogGraphTypeParentAndName().GraphTypeName().Identifier().GetText()
+}
+
+// unsupportedSource names which rejected graphTypeSource alternative was written.
+// The guard above still tests for the supported one, so which error this returns
+// never decides whether to reject — only what the rejection is called.
+//
+// src is nil only under error recovery, and an alternative matching neither LIKE
+// nor COPY OF is one added to the grammar since this was written; both get the
+// bare class error, because neither of the two justifications is theirs.
+func unsupportedSource(src gen.IGraphTypeSourceContext) error {
+	if src == nil {
+		return ErrUnsupportedSource
+	}
+	switch {
+	case src.GraphTypeLikeGraph() != nil:
+		return ErrLikeGraphSource
+	case src.CopyOfGraphType() != nil:
+		return ErrCopyOfSource
+	}
+	return ErrUnsupportedSource
 }
 
 // ExitGqlProgram fires once, at the end of the walk, when graphTypes is final.
@@ -262,8 +282,15 @@ func edgeKindArcMismatch(kind gen.IEdgeKindContext, arcDirected bool) bool {
 
 // EnterEdgeTypePatternUndirected and EnterEndpointPairUndirected reject an
 // undirected edge written as the pattern form's `~[ ]~` arc or as the phrase
-// form's `CONNECTING (a ~ b)`. Same reason for both: EdgeKey is a source->target
-// triple, and an undirected edge has no such orientation to key on.
+// form's `CONNECTING (a ~ b)`. Same reason for both: in GQL's data model an
+// undirected edge is a distinct element kind, not a directed edge matched from
+// either end, so there is nothing for gqlc's directed edge model to hold it in.
+//
+// Note the reason is *not* that EdgeKey wants a source->target triple. Both
+// undirected productions keep their endpoint types in written order, so a
+// canonical-direction encoding is mechanically available — and would be wrong
+// rather than merely lossy, because `IS DIRECTED` (§19.8) and `IS SOURCE OF`
+// (§19.10) make the distinction observable. ADR 0016 has the argument.
 func (l *listener) EnterEdgeTypePatternUndirected(_ *gen.EdgeTypePatternUndirectedContext) {
 	l.fail(ErrUndirectedEdge)
 }

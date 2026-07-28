@@ -1,5 +1,7 @@
--- Undirected edge. Edge types are directed; an undirected arc has no
--- canonical source -> target identity.
+-- Undirected edge. GQL's data model puts undirected edges in a separate set
+-- from directed ones, with unordered endpoints, and `IS DIRECTED` makes the
+-- distinction observable — so this is a kind gqlc does not model, not a directed
+-- edge whose orientation happens to be unrecoverable. See ADR 0016.
 CREATE PROPERTY GRAPH TYPE T AS {
     (a :Person { id :: INT }),
     (b :Person { id :: INT }),
