@@ -25,8 +25,9 @@ productions mean.
 - ISO publishes a free-of-charge digital artefact,
   `ISO_IEC_39075(en).bnf.txt`, under the ISO Customer Licence: 814 productions,
   normative, machine-readable. It is not a draft, not a vendor rendering, and
-  not the community ANTLR adaptation whose provenance `gqlc-h9n.11` exists to
-  correct. This makes the correct denominator available for free.
+  not the community ANTLR adaptation vendored as `internal/grammar/gql/GQL.g4`
+  (provenance: `internal/grammar/gql/SOURCE.md`). This makes the correct
+  denominator available for free.
 - `gqlc-lir` declined to buy the standard itself, so the normative *prose* —
   the Syntax Rules, the General Rules, the conformance clauses — is unavailable.
   `gqlc-h9n.28` and `gqlc-h9n.29` are blocked on exactly that prose.
