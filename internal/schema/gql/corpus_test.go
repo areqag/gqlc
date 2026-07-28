@@ -936,9 +936,14 @@ func TestIsValidFeature(t *testing.T) {
 }
 
 // TestCorpusShapes reports the direct-child sequences the corpus produced per rule.
-// It does not gate: while the corpus is being authored in parallel a new shape is
-// the expected outcome of a new file, so a pinned set would fail on every commit.
-// Promoting it to a gate with a checked-in artefact is gqlc-h9n.13.
+// It still does not gate, and gqlc-h9n.13 settled that it should not: a set of
+// observed shapes grows with every file, so pinning it fails on every commit that
+// adds one, and the artefact stays behind the opt-in flag for reading.
+//
+// What that bead gated instead is the grammar side. corpus_branch_test.go pins the
+// optionality classes GQL.g4 defines — which no corpus file can move — and asks of
+// each whether the shapes below exercise both of its branches. Same measurement,
+// pinned from the end that holds still.
 func TestCorpusShapes(t *testing.T) {
 	got := corpusCoverage(t)
 
