@@ -1,0 +1,10 @@
+-- An inline endpoint filler carrying a property type. The filler only names
+-- which declared node type the endpoint is, so the property has no consumer
+-- here: parsing it would resolve to a model byte-identical to the label-only
+-- spelling, which is the silent discard gqlc-h9n.18 closed. Rejected rather
+-- than dropped, as `(:Person => :Employee)` is for the same reason.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Person),
+    (:Post),
+    (:Person) -[:AUTHORED]-> (:Post { extra :: STRING })
+}

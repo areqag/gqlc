@@ -3,8 +3,12 @@ package gql
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"go/ast"
+	goparser "go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
@@ -911,6 +915,16 @@ var invalidFixtures = map[string]error{
 	"no_graph_type.gql":        ErrNoGraphType,
 	"multiple_graph_types.gql": ErrMultipleGraphTypes,
 	"like_graph_source.gql":    ErrLikeGraphSource,
+
+	// An invalid/ fixture rather than a corpus entry, unlike its sibling
+	// ErrEndpointFillerImpliesLabels. The corpus half is argued below for sentinels
+	// that are temporary by design, so the pin disappears together with the decline;
+	// this rejection is structural — an endpoint filler names a node type, and a
+	// property there has no consumer at any point — so there is no commit that would
+	// flip it to resolves and leave the fixture behind. It also spares the entry an
+	// Annex D claim about a construct nobody has researched, which isValidFeature
+	// cannot check and which the manifest records being got wrong three times.
+	"endpoint_filler_properties.gql": ErrEndpointFillerHasProperties,
 }
 
 // allSentinels is the canonical list of every Parse sentinel — the single source
@@ -925,27 +939,53 @@ var invalidFixtures = map[string]error{
 // is here anyway because it is the one thing that makes those two situations
 // differ: LIST/ARRAY still reports it bare, so it has a file of its own and would
 // be an orphan if removed. Whoever lands gqlc-h9n.5 should expect to take it out.
-var allSentinels = []error{
-	ErrUndirectedEdge,
-	ErrEdgeKindArcMismatch,
-	ErrUnknownEndpoint,
-	ErrEndpointNotAlias,
-	ErrEndpointFillerImpliesLabels,
-	ErrImpliedLabelIsKeyLabel,
-	ErrUnsupportedType,
-	ErrUnnamedNodeType,
-	ErrUnnamedEdgeType,
-	ErrDuplicateNodeType,
-	ErrDuplicateEdgeType,
-	ErrNoGraphType,
-	ErrMultipleGraphTypes,
-	ErrLikeGraphSource,
-	ErrCopyOfSource,
-	ErrPathValueType,
-	ErrReferenceValueType,
-	ErrImmaterialValueType,
-	ErrRecordValueType,
-	ErrDynamicUnionType,
+//
+// Keyed by the identifier rather than a bare slice, because the value alone cannot
+// say what it is called and TestSentinelRegistryIsComplete has to compare these
+// against the names errors.go declares. It also makes this test's failures name the
+// sentinel instead of quoting its whole message.
+var allSentinels = map[string]error{
+	"ErrUndirectedEdge":              ErrUndirectedEdge,
+	"ErrEdgeKindArcMismatch":         ErrEdgeKindArcMismatch,
+	"ErrUnknownEndpoint":             ErrUnknownEndpoint,
+	"ErrEndpointNotAlias":            ErrEndpointNotAlias,
+	"ErrEndpointFillerHasProperties": ErrEndpointFillerHasProperties,
+	"ErrEndpointFillerImpliesLabels": ErrEndpointFillerImpliesLabels,
+	"ErrImpliedLabelIsKeyLabel":      ErrImpliedLabelIsKeyLabel,
+	"ErrUnsupportedType":             ErrUnsupportedType,
+	"ErrUnnamedNodeType":             ErrUnnamedNodeType,
+	"ErrUnnamedEdgeType":             ErrUnnamedEdgeType,
+	"ErrDuplicateNodeType":           ErrDuplicateNodeType,
+	"ErrDuplicateEdgeType":           ErrDuplicateEdgeType,
+	"ErrNoGraphType":                 ErrNoGraphType,
+	"ErrMultipleGraphTypes":          ErrMultipleGraphTypes,
+	"ErrLikeGraphSource":             ErrLikeGraphSource,
+	"ErrCopyOfSource":                ErrCopyOfSource,
+	"ErrPathValueType":               ErrPathValueType,
+	"ErrReferenceValueType":          ErrReferenceValueType,
+	"ErrImmaterialValueType":         ErrImmaterialValueType,
+	"ErrRecordValueType":             ErrRecordValueType,
+	"ErrDynamicUnionType":            ErrDynamicUnionType,
+}
+
+// sentinelsWithoutAFile are the package's error values allSentinels deliberately
+// omits, each with the reason no file can pin it. A register rather than a silent
+// subtraction: an omission with nowhere to write the reason is how
+// ErrEndpointFillerHasProperties went missing for as long as it did.
+var sentinelsWithoutAFile = map[string]string{
+	"ErrUnsupportedSource": "a class the two graph-type-source leaves wrap rather than a leaf; nothing produces it bare, so no file could pin it without first making one that does. TestGraphTypeSourceErrorsWrapTheClass is the pin it gets instead",
+}
+
+// isSentinel reports whether err is one of the parser's sentinels. allSentinels is
+// keyed by name, so membership is a lookup over the values; require.Contains against
+// the map would ask whether an error is a name and pass for nothing.
+func isSentinel(err error) bool {
+	for _, sentinel := range allSentinels {
+		if errors.Is(err, sentinel) {
+			return true
+		}
+	}
+	return false
 }
 
 // TestSentinelReachability is the bidirectional sweep: the set of sentinels
@@ -978,11 +1018,82 @@ func TestSentinelReachability(t *testing.T) {
 		canonical[sentinel] = true
 	}
 
-	for _, sentinel := range allSentinels {
+	for name, sentinel := range allSentinels {
 		require.True(t, covered[sentinel],
-			"sentinel %q has no negative fixture or unsupported corpus entry", sentinel)
+			"sentinel %s has no negative fixture or unsupported corpus entry", name)
 	}
 	for sentinel := range covered {
 		require.True(t, canonical[sentinel], "file pins non-canonical sentinel %q", sentinel)
 	}
+}
+
+// TestSentinelRegistryIsComplete checks the registry against the errors the package
+// declares, which is the half TestSentinelReachability cannot do. That sweep is
+// bidirectional between allSentinels and the files, so it is exact about everything
+// except its own left-hand side: a sentinel missing from allSentinels is missing from
+// both sides at once and the sweep closes over the smaller set, reporting a clean pass.
+//
+// That is not hypothetical. ErrEndpointFillerHasProperties was declared, returned by
+// fillerLabels, and absent here, so nothing ever asked for a file pinning it — the
+// behaviour's only cover was TestEndpointFillerRejectsProperties, a direct unit test
+// the sweep does not count and whose deletion would have been silent. The doc above
+// already said "a new sentinel must be added here"; this is that sentence with a
+// mechanism behind it.
+//
+// errors.go is read as source rather than through reflection because a package's
+// variables are not enumerable at run time, and the alternative — pinning how many
+// there are — passes for any wrong twenty-one.
+func TestSentinelRegistryIsComplete(t *testing.T) {
+	declared := declaredSentinels(t)
+
+	for _, name := range declared {
+		_, pinned := allSentinels[name]
+		_, excused := sentinelsWithoutAFile[name]
+		require.True(t, pinned || excused,
+			"errors.go declares %s, which is in neither allSentinels nor sentinelsWithoutAFile, so nothing asks for a file pinning it", name)
+		require.False(t, pinned && excused,
+			"%s is both pinned and excused from being pinned", name)
+	}
+
+	known := make(map[string]bool, len(declared))
+	for _, name := range declared {
+		known[name] = true
+	}
+	// The other direction is compiler-enforced for allSentinels, whose entries are the
+	// values themselves, but not for sentinelsWithoutAFile, whose keys are strings — so
+	// an excuse can outlive the error it excuses.
+	for name := range sentinelsWithoutAFile {
+		require.True(t, known[name], "sentinelsWithoutAFile excuses %s, which errors.go no longer declares", name)
+	}
+}
+
+// declaredSentinels returns the names of the package-level error variables errors.go
+// declares. Every sentinel lives there; one declared beside the code that returns it
+// would be invisible here, which is why errors.go is named rather than the package
+// walked — a second file to scan is a decision to take deliberately, not one to
+// absorb silently.
+func declaredSentinels(t *testing.T) []string {
+	t.Helper()
+
+	file, err := goparser.ParseFile(token.NewFileSet(), "errors.go", nil, 0)
+	require.NoError(t, err)
+
+	var names []string
+	for _, decl := range file.Decls {
+		decl, ok := decl.(*ast.GenDecl)
+		if !ok || decl.Tok != token.VAR {
+			continue
+		}
+		for _, spec := range decl.Specs {
+			values, ok := spec.(*ast.ValueSpec)
+			require.True(t, ok, "a var declaration in errors.go holds a %T, which this scan does not read", spec)
+			for _, ident := range values.Names {
+				if strings.HasPrefix(ident.Name, "Err") {
+					names = append(names, ident.Name)
+				}
+			}
+		}
+	}
+	require.NotEmpty(t, names, "errors.go declares no sentinel, so the scan is broken and every check below is vacuous")
+	return names
 }

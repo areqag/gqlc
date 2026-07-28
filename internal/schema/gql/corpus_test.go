@@ -579,7 +579,7 @@ func TestCorpusManifest(t *testing.T) {
 			}
 		case unsupported:
 			require.Error(t, entry.sentinel, "%s: an unsupported entry must name the sentinel Parse returns", entry.file)
-			require.Contains(t, allSentinels, entry.sentinel, "%s: sentinel is not one of the parser's sentinels", entry.file)
+			require.True(t, isSentinel(entry.sentinel), "%s: sentinel is not one of the parser's sentinels", entry.file)
 			require.NotEmpty(t, entry.bead, "%s: an unsupported entry needs the bead that will fix it, or gqlc-0ri if it is declined permanently", entry.file)
 			require.NotEmpty(t, entry.reason, "%s: an unsupported entry needs a reason", entry.file)
 		default:
