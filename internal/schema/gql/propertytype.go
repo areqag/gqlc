@@ -101,13 +101,18 @@ func hasNotNull(t antlr.Tree) bool {
 // :1827) and the parenthetical admits no scale.
 //
 // SIGNED and UNSIGNED prefixes on verboseBinaryExactNumericType (GQL.g4:1803
-// for SIGNED?, :1816 for UNSIGNED) are represented as one alias row per bare
-// verbose spelling. Alias rows over a pre-lookup normalisation because
-// alternative-additions to the grammar are grep-visible here — the fact that
-// SIGNED SMALL INTEGER maps to TypeInt16 lands in the same table an author or
-// reviewer reads to find any other spelling. The corresponding
-// TestPropertyVerboseIntegerSignedness rows go red if any alias row is
-// deleted.
+// for SIGNED?, :1816 for UNSIGNED) are represented as one alias row per verbose
+// spelling — INCLUDING the parenthesised widths, since the prefix rule and the
+// parenthetical rule above compose and `SIGNED INTEGER(8)` is admitted by both.
+// It is spelled out because leaving it implicit is what went wrong: every prefix
+// row carried a suffix width and every parenthesised row carried no prefix, so
+// the combination matched no row, fell down truncateParenthetical to
+// `SIGNED INTEGER`, and resolved to TypeInt with its eight declared bits gone.
+// Alias rows over a pre-lookup normalisation because alternative-additions to
+// the grammar are grep-visible here — the fact that SIGNED SMALL INTEGER maps to
+// TypeInt16 lands in the same table an author or reviewer reads to find any
+// other spelling. The corresponding TestPropertyVerboseIntegerSignedness rows go
+// red if any alias row is deleted.
 //
 // FLOAT(p) is not folded even though its bare form is here. Its parenthetical
 // is (LEFT_PAREN precision (COMMA scale)? RIGHT_PAREN) at GQL.g4:1849 — a
@@ -199,6 +204,13 @@ var typeSpellings = map[string]graph.PropertyType{
 	"INT(256)":             graph.TypeInt256,
 	"INTEGER(256)":         graph.TypeInt256,
 
+	"SIGNED INTEGER(8)":   graph.TypeInt8,
+	"SIGNED INTEGER(16)":  graph.TypeInt16,
+	"SIGNED INTEGER(32)":  graph.TypeInt32,
+	"SIGNED INTEGER(64)":  graph.TypeInt64,
+	"SIGNED INTEGER(128)": graph.TypeInt128,
+	"SIGNED INTEGER(256)": graph.TypeInt256,
+
 	"UINT":                   graph.TypeUint,
 	"UNSIGNED INTEGER":       graph.TypeUint,
 	"USMALLINT":              graph.TypeUint16,
@@ -223,6 +235,13 @@ var typeSpellings = map[string]graph.PropertyType{
 	"UINT(64)":               graph.TypeUint64,
 	"UINT(128)":              graph.TypeUint128,
 	"UINT(256)":              graph.TypeUint256,
+
+	"UNSIGNED INTEGER(8)":   graph.TypeUint8,
+	"UNSIGNED INTEGER(16)":  graph.TypeUint16,
+	"UNSIGNED INTEGER(32)":  graph.TypeUint32,
+	"UNSIGNED INTEGER(64)":  graph.TypeUint64,
+	"UNSIGNED INTEGER(128)": graph.TypeUint128,
+	"UNSIGNED INTEGER(256)": graph.TypeUint256,
 
 	"FLOAT":            graph.TypeFloat,
 	"REAL":             graph.TypeFloat32,
