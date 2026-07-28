@@ -94,9 +94,9 @@ import (
 // be wrong — and TestSemanticCaseCollisions asserts those. Neither reads its
 // expectations off the map under test, which is what keeps them evidence.
 const (
-	wantCorpusEntries   = 115
-	wantCorpusResolving = 58
-	wantSemanticCases   = 17
+	wantCorpusEntries   = 116
+	wantCorpusResolving = 59
+	wantSemanticCases   = 18
 )
 
 // isValidFeature reports whether v is an accepted value of corpusEntry.feature:
