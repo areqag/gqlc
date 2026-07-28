@@ -37,9 +37,23 @@ import (
 //
 // The two counts below do something narrower, and it is worth being exact about
 // which: the gates are green with every entry unsupported, so the ratio is not a
-// coverage measure. It makes a support regression fail the build, and support
-// progress legible. Implementing a construct moves entries from unsupported to
-// resolves and bumps wantCorpusResolving.
+// coverage measure. It makes support progress legible — implementing a construct
+// moves entries from unsupported to resolves and bumps wantCorpusResolving.
+//
+// It does not make a support regression fail the build. Both counts are computed
+// from the outcomes the manifest declares and never run the resolver, so no change
+// to resolving code can move either one: forcing the edge type guard in resolve.go
+// to reject, or making propertytype.go accept the RECORD value type it declines,
+// leaves TestCorpusSize green and reddens TestCorpusOutcomes, which is the test that
+// executes each file against the outcome its entry declares. A drop here is an
+// author demoting an entry, not the resolver losing a construct.
+//
+// What wantCorpusEntries does catch, and nothing else does, is a file deleted from
+// disk and from the manifest in one change. TestCorpusManifest's bijection is an
+// ElementsMatch over the two sides, so it stays satisfied when both shrink together,
+// and the coverage gates are content to be discharged by whatever files remain. The
+// count is then the only assertion left that the corpus was ever larger — the same
+// argument wantSemanticCases makes below, holding here for the same reason.
 //
 // Two spellings are traps when authoring files, both pinned by
 // TestCorpusSpellingTraps: a COPY OF source takes no AS, and a parameter reference
@@ -582,8 +596,9 @@ func TestCorpusManifest(t *testing.T) {
 // TestCorpusSize is separate from TestCorpusManifest because the two have different
 // lifetimes. The manifest checks are invariants — every file has an entry, every
 // unsupported entry names a real sentinel — and hold no matter how the corpus grows.
-// These two are regression pins, stale by design the moment anyone adds a file, so an
-// author who adds one must not be told that the manifest is broken.
+// These three are pins to repin, stale by design the moment anyone adds a file, so an
+// author who adds one must not be told that the manifest is broken. They are not
+// regression pins: each reads the manifest, so each moves only when someone edits it.
 func TestCorpusSize(t *testing.T) {
 	entries := corpusManifest(t)
 
@@ -594,9 +609,10 @@ func TestCorpusSize(t *testing.T) {
 		}
 	}
 
-	require.Len(t, entries, wantCorpusEntries, "corpus size changed; repin wantCorpusEntries")
+	require.Len(t, entries, wantCorpusEntries,
+		"corpus size changed; repin wantCorpusEntries (a drop is the one deletion the manifest bijection cannot see, so name the file that went and why)")
 	require.Equal(t, wantCorpusResolving, resolving,
-		"resolving count changed; repin wantCorpusResolving (a drop is a regression)")
+		"declared resolving count changed; repin wantCorpusResolving (a drop is an entry demoted in the manifest — TestCorpusOutcomes is what catches the resolver losing a construct)")
 	require.Len(t, semanticCases(t), wantSemanticCases,
 		"semantic case count changed; repin wantSemanticCases (a drop means a blind spot closed, so say which bead closed it)")
 }
