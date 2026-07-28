@@ -511,10 +511,12 @@ What escapes costs more than a few files, and the spec should not
 pretend otherwise:
 
 - An aliased pair naming the **same** directory yields one directory
-  holding two targets' packages. Files whose names collide (`models.go`)
-  end up as the later target's; the rest coexist, so the directory
-  carries two `package` clauses and does not compile. The run itself
-  succeeds (§7.2 step 7).
+  holding two targets' output. Files whose names collide (`models.go`)
+  end up as the later target's, so the earlier target's package is never
+  intact; its non-colliding files survive only on alternating runs (phase
+  A computes both wipe lists before either commit runs — §7.2). On those
+  runs the directory carries two `package` clauses and does not compile.
+  The run itself succeeds (§7.2 step 7).
 - An aliased pair where one **contains** the other reproduces exactly
   the permanent failure this check exists to prevent: the parent's sweep
   finds a subdirectory it cannot prove marked and aborts, on this run
