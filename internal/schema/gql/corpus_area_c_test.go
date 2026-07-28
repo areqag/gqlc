@@ -10,6 +10,11 @@ var corpusAreaC = []corpusEntry{
 		feature: "mandatory",
 	},
 	{
+		file:    "18.3-edge-type/pattern_endpoint_alias.gql",
+		outcome: resolves,
+		feature: "mandatory",
+	},
+	{
 		file:     "18.3-edge-type/pattern_undirected.gql",
 		outcome:  unsupported,
 		sentinel: ErrUndirectedEdge,

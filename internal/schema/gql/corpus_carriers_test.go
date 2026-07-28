@@ -46,10 +46,11 @@ import (
 // rejected. Non-vacuity check at SHA 22e02c02 (which has the TIMESTAMP fix but
 // lacks the NODE-synonym fix 7217b180) passes this gate: `NODE` is entered by
 // unsupported files in areas B and D2, so parse coverage is satisfied while
-// the resolving path is not. That resolving-time class is gqlc-h9n.26, which
-// needs a distinct instrument (run over files whose outcome is `resolves`
-// only). Do NOT extend this test to try to catch it — the two want different
-// inputs.
+// the resolving path is not. That class is TestCorpusResolvingCarriers, a
+// separate instrument over entries whose outcome is `resolves` (gqlc-h9n.26).
+// Do NOT extend this test to try to catch it — the two want different inputs,
+// and the split is what lets that one drop the ownership requirement for its
+// corpus-wide tier.
 func TestCorpusAreaParseCarriers(t *testing.T) {
 	obligation := grammarObligation(t)
 	sections := scanRuleSections(t)
@@ -143,17 +144,22 @@ var carrierExemptions = []carrierExemption{
 	{name: "COLON", kind: "token", bead: "gqlc-h9n.27", why: "section 16.7 pattern lexis; label-set prefix. Retire when 16.7 declarations move to the area that owns them."},
 	{name: "LIKE", kind: "token", bead: "gqlc-h9n.27", why: "section 12.4 in the grammar but reachable from 12.6 through graphTypeLikeGraph, above. Retire by moving the declaration under // 12.6."},
 
-	// Resolving-path-only carriers: parse-time coverage is satisfied by files
-	// whose outcome is `unsupported` (the listener rejects them post-parse), so
-	// this parse-time gate cannot see whether any resolving path exercises them.
-	// gqlc-h9n.26 is the resolving-path gate that WOULD see it — retire these
-	// once it lands and has its own owner-area check.
-	{name: "nodeSynonym", kind: "rule", bead: "gqlc-h9n.26", why: "section 21.1 vocabulary; the NODE/VERTEX synonym pair. Parse-time carried by unsupported files in areas B and D2 (phrase_form.gql, constructed_node_closed.gql), so this gate cannot distinguish resolving-path presence. Retire once the resolving-path gate lands."},
-	{name: "edgeSynonym", kind: "rule", bead: "gqlc-h9n.26", why: "section 21.1 vocabulary; the EDGE/RELATIONSHIP/DIRECTED synonym set. Same shape as nodeSynonym — parse-time carried by unsupported files. Retire once the resolving-path gate lands."},
-	{name: "NODE", kind: "token", bead: "gqlc-h9n.26", why: "section 21.1 vocabulary; keyword synonym of VERTEX. Parse-time carried by unsupported files; resolving path is what needs the gate. Retire once the resolving-path gate lands."},
-	{name: "VERTEX", kind: "token", bead: "gqlc-h9n.26", why: "section 21.1 vocabulary; keyword synonym of NODE. Parse-time carried by unsupported files; resolving path is what needs the gate. Retire once the resolving-path gate lands."},
-	{name: "EDGE", kind: "token", bead: "gqlc-h9n.26", why: "section 21.1 vocabulary; keyword synonym of RELATIONSHIP. Parse-time carried by unsupported files; resolving path is what needs the gate. Retire once the resolving-path gate lands."},
-	{name: "RELATIONSHIP", kind: "token", bead: "gqlc-h9n.26", why: "section 21.1 vocabulary; keyword synonym of EDGE. Parse-time carried by unsupported files; resolving path is what needs the gate. Retire once the resolving-path gate lands."},
+	// Element-kind vocabulary, section 21.1, unowned by any 18.x construct area
+	// for the same structural reason as the identifier lexis above. These were
+	// filed under gqlc-h9n.26 with a different account — "parse-time carried only
+	// by unsupported files, retire once the resolving-path gate lands" — and both
+	// halves of that were wrong. Ownership is what this gate reports, and section
+	// 21.1 is unowned however the files resolve, so landing the resolving gate
+	// retires nothing here. The concern the old account named is real and is now
+	// answered where it belongs: TestCorpusResolvingCarriers asks it corpus-wide,
+	// which needs no ownership, so these names are pinned as having a resolving
+	// carrier and go red if they lose one. STRUCTURAL: no retirement path.
+	{name: "nodeSynonym", kind: "rule", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 vocabulary; the NODE/VERTEX synonym pair, reachable from node type patterns and phrases in several areas. No retirement path — clause 21 has no corpus directory by design. Resolving-path carriage is pinned by TestCorpusResolvingCarriers."},
+	{name: "edgeSynonym", kind: "rule", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 vocabulary; the EDGE/RELATIONSHIP synonym set. No retirement path — clause 21 has no corpus directory by design. Resolving-path carriage is pinned by TestCorpusResolvingCarriers."},
+	{name: "NODE", kind: "token", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 vocabulary; keyword synonym of VERTEX. No retirement path — clause 21 has no corpus directory by design."},
+	{name: "VERTEX", kind: "token", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 vocabulary; keyword synonym of NODE. No retirement path — clause 21 has no corpus directory by design."},
+	{name: "EDGE", kind: "token", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 vocabulary; keyword synonym of RELATIONSHIP. No retirement path — clause 21 has no corpus directory by design."},
+	{name: "RELATIONSHIP", kind: "token", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 vocabulary; keyword synonym of EDGE. No retirement path — clause 21 has no corpus directory by design."},
 
 	// The query-surface cut has no retirement path from within this gate — the
 	// DDL areas are not meant to own query-side productions.
