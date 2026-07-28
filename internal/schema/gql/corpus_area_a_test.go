@@ -44,23 +44,23 @@ var corpusAreaA = []corpusEntry{
 	{
 		file:     "12.6-graph-type-statement/like_graph.gql",
 		outcome:  unsupported,
-		sentinel: ErrUnsupportedSource,
-		feature:  "unsourced",
+		sentinel: ErrLikeGraphSource,
+		feature:  "GG04",
 		bead:     "gqlc-0ri",
-		reason:   "LIKE derives the type from a graph *instance*, so it cannot be answered without inspecting live data; declined permanently",
+		reason:   "LIKE takes a graphExpression, which reaches CURRENT_GRAPH and binding variables — session state a static generator has none of, so no catalogue would make this resolvable; declined permanently",
 	},
 	{
 		file:     "12.6-graph-type-statement/copy_of_source.gql",
 		outcome:  unsupported,
-		sentinel: ErrUnsupportedSource,
+		sentinel: ErrCopyOfSource,
 		feature:  "mandatory",
 		bead:     "gqlc-h9n.1",
-		reason:   "COPY OF names a graph *type*, so it is a catalogue and multi-file scoping problem rather than a data-inspection one, and is solvable in principle; it shares LIKE's sentinel only because the element types are absent from this file either way",
+		reason:   "COPY OF names a graph *type* in the catalogue, which is statically resolvable and merely unimplemented — the opposite of LIKE's position, which is why the two stopped sharing a sentinel in gqlc-h9n.12",
 	},
 	{
 		file:     "17-references/copy_of_graph_type_bare.gql",
 		outcome:  unsupported,
-		sentinel: ErrUnsupportedSource,
+		sentinel: ErrCopyOfSource,
 		feature:  "mandatory",
 		bead:     "gqlc-h9n.1",
 		reason:   "graphTypeReference alternative 1 with no schema parent — the same COPY OF gap, with only a bare graph type name",
@@ -68,7 +68,7 @@ var corpusAreaA = []corpusEntry{
 	{
 		file:     "17-references/copy_of_param_graph_type.gql",
 		outcome:  unsupported,
-		sentinel: ErrUnsupportedSource,
+		sentinel: ErrCopyOfSource,
 		feature:  "mandatory",
 		bead:     "gqlc-h9n.1",
 		reason:   "graphTypeReference alternative 2 — a parameter reference where the graph type name goes",
@@ -76,7 +76,7 @@ var corpusAreaA = []corpusEntry{
 	{
 		file:     "17-references/copy_of_qualified.gql",
 		outcome:  unsupported,
-		sentinel: ErrUnsupportedSource,
+		sentinel: ErrCopyOfSource,
 		feature:  "mandatory",
 		bead:     "gqlc-h9n.1",
 		reason:   "catalogObjectParentReference alternative 2 — a dotted-name parent with no schema reference",
@@ -84,7 +84,7 @@ var corpusAreaA = []corpusEntry{
 	{
 		file:     "17-references/copy_of_absolute_bare.gql",
 		outcome:  unsupported,
-		sentinel: ErrUnsupportedSource,
+		sentinel: ErrCopyOfSource,
 		feature:  "mandatory",
 		bead:     "gqlc-h9n.1",
 		reason:   "absoluteCatalogSchemaReference alternative 1 — the bare SOLIDUS spelling; alternative 2 is the /a/b/gt form covered by the seed",
@@ -92,7 +92,7 @@ var corpusAreaA = []corpusEntry{
 	{
 		file:     "17-references/copy_of_predefined_current.gql",
 		outcome:  unsupported,
-		sentinel: ErrUnsupportedSource,
+		sentinel: ErrCopyOfSource,
 		feature:  "mandatory",
 		bead:     "gqlc-h9n.1",
 		reason:   "predefinedSchemaReference alternative 3 — the bare PERIOD spelling of the current schema",
@@ -100,7 +100,7 @@ var corpusAreaA = []corpusEntry{
 	{
 		file:     "17-references/copy_of_current_schema.gql",
 		outcome:  unsupported,
-		sentinel: ErrUnsupportedSource,
+		sentinel: ErrCopyOfSource,
 		feature:  "mandatory",
 		bead:     "gqlc-h9n.1",
 		reason:   "CURRENT_SCHEMA keyword form of predefinedSchemaReference — same COPY OF gap",
@@ -108,7 +108,7 @@ var corpusAreaA = []corpusEntry{
 	{
 		file:     "17-references/copy_of_home_schema.gql",
 		outcome:  unsupported,
-		sentinel: ErrUnsupportedSource,
+		sentinel: ErrCopyOfSource,
 		feature:  "mandatory",
 		bead:     "gqlc-h9n.1",
 		reason:   "HOME_SCHEMA keyword form of predefinedSchemaReference — same COPY OF gap",
@@ -116,7 +116,7 @@ var corpusAreaA = []corpusEntry{
 	{
 		file:     "17-references/copy_of_relative_up.gql",
 		outcome:  unsupported,
-		sentinel: ErrUnsupportedSource,
+		sentinel: ErrCopyOfSource,
 		feature:  "mandatory",
 		bead:     "gqlc-h9n.1",
 		reason:   "relativeDirectoryPath form of relativeCatalogSchemaReference — ../s reaches DOUBLE_PERIOD, and bare ../gt does not parse",
@@ -124,7 +124,7 @@ var corpusAreaA = []corpusEntry{
 	{
 		file:     "17-references/copy_of_param_schema.gql",
 		outcome:  unsupported,
-		sentinel: ErrUnsupportedSource,
+		sentinel: ErrCopyOfSource,
 		feature:  "mandatory",
 		bead:     "gqlc-h9n.1",
 		reason:   "schemaReference alternative 3 — a parameter reference where the schema name goes, distinct from graphTypeReference alternative 2",

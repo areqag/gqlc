@@ -625,6 +625,37 @@ func TestEdgeKindArcConsistency(t *testing.T) {
 	}
 }
 
+// TestGraphTypeSourceRejectionsAreDistinguishable pins the split gqlc-h9n.12
+// made. LIKE and COPY OF are both rejected and shared one sentinel, which meant
+// the deviation record carried two justifications against a single error and
+// could not say which applied: LIKE takes a graphExpression that reaches session
+// state, so no amount of implementation makes it resolvable, while COPY OF names
+// a catalogue entry and is resolvable in principle (ADR 0016). Telling "never"
+// from "not yet" apart requires the two errors not to be each other.
+func TestGraphTypeSourceRejectionsAreDistinguishable(t *testing.T) {
+	like, likeErr := New().Parse(strings.NewReader(`CREATE PROPERTY GRAPH TYPE T LIKE SomeGraph`))
+	require.ErrorIs(t, likeErr, ErrLikeGraphSource)
+	require.NotErrorIs(t, likeErr, ErrCopyOfSource)
+	require.Equal(t, schema.Schema{}, like, "model must be the zero value on error")
+
+	copied, copyErr := New().Parse(strings.NewReader(`CREATE PROPERTY GRAPH TYPE T COPY OF SomeType`))
+	require.ErrorIs(t, copyErr, ErrCopyOfSource)
+	require.NotErrorIs(t, copyErr, ErrLikeGraphSource)
+	require.Equal(t, schema.Schema{}, copied, "model must be the zero value on error")
+}
+
+// TestGraphTypeSourceErrorsWrapTheClass pins the relationship that lets
+// ErrUnsupportedSource stay out of allSentinels: it is the class the leaves wrap,
+// not an error any file produces, so the sweep would report it orphaned. What
+// makes that safe is exactly this — a caller asking only "was the graph type
+// source rejected" keeps matching every rejection, so the split widened the
+// public surface rather than narrowing it.
+func TestGraphTypeSourceErrorsWrapTheClass(t *testing.T) {
+	for _, leaf := range []error{ErrLikeGraphSource, ErrCopyOfSource} {
+		require.ErrorIs(t, leaf, ErrUnsupportedSource)
+	}
+}
+
 // TestNestedGraphTypeSpecificationElementsNotCollected pins that an element type
 // declared inside a closedGraphReferenceValueType body (GQL.g4:1926, a whole
 // graph type nested as a property value type) does not enter the outer graph
@@ -747,12 +778,16 @@ var invalidFixtures = map[string]error{
 	"duplicate_edge.gql":       ErrDuplicateEdgeType,
 	"no_graph_type.gql":        ErrNoGraphType,
 	"multiple_graph_types.gql": ErrMultipleGraphTypes,
-	"unsupported_source.gql":   ErrUnsupportedSource,
+	"like_graph_source.gql":    ErrLikeGraphSource,
 }
 
 // allSentinels is the canonical list of every Parse sentinel — the single source
 // of truth TestSentinelReachability checks against. A new sentinel must be added
 // here (and pinned by a file); a removed one must be dropped.
+//
+// It lists leaves. ErrUnsupportedSource is absent because it is a class the two
+// graph-type-source leaves wrap, and no file produces it bare — see errors.go and
+// TestGraphTypeSourceErrorsWrapTheClass, which is the pin it gets instead.
 var allSentinels = []error{
 	ErrUndirectedEdge,
 	ErrEdgeKindArcMismatch,
@@ -767,7 +802,8 @@ var allSentinels = []error{
 	ErrDuplicateEdgeType,
 	ErrNoGraphType,
 	ErrMultipleGraphTypes,
-	ErrUnsupportedSource,
+	ErrLikeGraphSource,
+	ErrCopyOfSource,
 }
 
 // TestSentinelReachability is the bidirectional sweep: the set of sentinels

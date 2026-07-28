@@ -13,9 +13,9 @@ var corpusAreaC = []corpusEntry{
 		file:     "18.3-edge-type/pattern_undirected.gql",
 		outcome:  unsupported,
 		sentinel: ErrUndirectedEdge,
-		feature:  "mandatory",
-		bead:     "gqlc-h9n.3",
-		reason:   "an undirected arc has no canonical source -> target identity, which EdgeKey requires",
+		feature:  "GH02",
+		bead:     "gqlc-0ri",
+		reason:   "an undirected edge is a distinct element kind, and the distinction is observable through IS DIRECTED and IS SOURCE OF, so encoding one with a canonical direction would answer those wrongly rather than imprecisely; declined permanently. The GH02 citation is inferred rather than sourced to a subclause — ADR 0016 states the inference",
 	},
 	{
 		file:     "18.3-edge-type/kind_undirected_arc_directed.gql",
