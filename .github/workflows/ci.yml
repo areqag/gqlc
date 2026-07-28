@@ -41,6 +41,7 @@ jobs:
           restore-keys: |
             golangci-${{ runner.os }}-${{ hashFiles('go.sum', '.golangci.yml') }}-
       - run: just lint
+      - run: just lint-cache-check
 
   test:
     runs-on: ubuntu-latest
