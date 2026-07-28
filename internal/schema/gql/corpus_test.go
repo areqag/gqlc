@@ -681,33 +681,86 @@ var typeArgument = regexp.MustCompile(`\b([A-Z][A-Z_]*)\(([^()]*)\)`)
 // after, found four more that were already in the corpus and had never been noticed.
 //
 // The check is a search, not a proof. For each parenthesised argument in the file it
-// resolves the variant with that argument removed. A variant that resolves to the
-// identical model proves the argument reached nothing, which is exactly lossiness and
-// exactly what semanticCases exists to record. A variant that does not parse yields no
-// verdict — `DECIMAL NOT NULL` is not GQL, because notNull? sits inside the
-// parenthesised group — so this can never certify a file lossless. It can only refuse
-// to let a demonstrated discard go unrecorded, which is the half that was missing.
+// resolves the variant that spells the argument differently. An identical model proves
+// the argument said nothing the model records, which is exactly lossiness and exactly
+// what semanticCases exists to record. An argument with no rewrite, or one whose rewrite
+// does not parse, yields no verdict, so this can never certify a file lossless. It can
+// only refuse to let a demonstrated discard go unrecorded, which is the half that was
+// missing.
+//
+// It rewrites rather than removes (gqlc-w2o). Removal was the first shape and it left a
+// hole, because a bare spelling is not always grammatical and an ungrammatical variant
+// is silence rather than a verdict: `DECIMAL NOT NULL` is not GQL, notNull? sitting
+// inside the parenthesised group decimalExactNumericType spells (GQL.g4:1832), so a file
+// of that shape could discard its precision indefinitely and never be asked about it.
+// A rewrite leaves the argument's syntactic slot alone, so it is grammatical wherever
+// the original was. The technique is not new, only mechanical now —
+// scalar_decimal_precision_scale.gql's semanticCases row already carries DECIMAL(8) as
+// its sibling, hand-picked for exactly this reason.
+//
+// Removal is gone rather than kept alongside: no type in GQL's vocabulary rejects a
+// rewritten argument while accepting a bare one, so it could not reach a case a rewrite
+// misses, and a branch that cannot fire is the theatre this manifest is meant to avoid.
+//
+// What is left is a non-numeric qualifier, whose rewrite nobody can derive — DURATION's
+// field list is the one instance, and both its files are registered already.
 //
 // Entries already declaring a bead are skipped, TestSemanticCaseCollisions being the
 // assertion they face instead. Nothing here reads bead or reason on the entries it does
 // check: the verdict is a model comparison, so a wrong declaration cannot buy silence.
 func TestNoUndeclaredLossiness(t *testing.T) {
-	// Two witnesses, because once the corpus is clean every file this test examines
-	// has nothing to report, and a search that reports nothing looks identical to a
-	// search that looks for nothing. The first fails if discardedArguments stops
-	// finding; the second fails if it starts reporting whatever it sees.
+	// Witnesses, because once the corpus is clean every file this test examines has
+	// nothing to report, and a search that reports nothing looks identical to a search
+	// that looks for nothing. Between them they fail if the search stops finding, if it
+	// starts reporting whatever it sees, and if the rewrite it reports from stops being
+	// a rewrite.
 	t.Run("a discarded argument is reported", func(t *testing.T) {
 		const src = "CREATE PROPERTY GRAPH TYPE t AS { (:Doc { s :: STRING(5) }) }"
 		require.Equal(t, []string{"STRING(5)"}, discardedArguments(t, src),
-			"STRING(5) still collides with bare STRING; if it has stopped, gqlc-5md landed and this witness needs a spelling that is still discarded")
+			"STRING(5) still collides with STRING(1); if it has stopped, gqlc-5md landed and this witness needs a spelling that is still discarded")
 	})
 
-	t.Run("an argument whose removal is not GQL yields no verdict", func(t *testing.T) {
-		// decimalExactNumericType (GQL.g4:1832) puts notNull? inside the parenthesised
-		// group, so DECIMAL NOT NULL is a syntax error and the model comparison never
-		// happens. Reporting this would be reporting a spelling never resolved.
+	t.Run("a discard only a rewrite can reach is reported", func(t *testing.T) {
+		// The case removal could not reach: DECIMAL NOT NULL is a syntax error, so the
+		// bare variant never got as far as a comparison. DECIMAL(1,1) NOT NULL is GQL,
+		// and it resolves to the same model.
 		const src = "CREATE PROPERTY GRAPH TYPE t AS { (:Doc { d :: DECIMAL(10,2) NOT NULL }) }"
+		require.Equal(t, []string{"DECIMAL(10,2)"}, discardedArguments(t, src))
+	})
+
+	t.Run("an argument with no derivable rewrite yields no verdict", func(t *testing.T) {
+		// No rewrite of DAY TO SECOND is derivable, so there is no second model to
+		// compare against and no evidence either way. Reporting it would be reporting
+		// a spelling never resolved.
+		const src = "CREATE PROPERTY GRAPH TYPE t AS { (:Doc { d :: DURATION(DAY TO SECOND) }) }"
 		require.Empty(t, discardedArguments(t, src))
+	})
+
+	// perturb is witnessed directly because the corpus cannot witness it. No type
+	// argument reaches the model at all, so there is no source whose rewrite resolves
+	// to a *different* model — a perturb that returned its input unchanged would report
+	// every argument it saw and no end-to-end case would notice.
+	t.Run("a perturbation differs from what it perturbs", func(t *testing.T) {
+		for argument, want := range map[string]string{
+			"10,2":  "1,1", // one digit throughout, so scale cannot come to exceed precision
+			"1, 1":  "2, 2",
+			"0xFF":  "0x1",
+			"0b101": "0b1",
+			"0o17":  "0o1",
+			"0x1":   "0x2",
+		} {
+			got, ok := perturb(argument)
+			require.True(t, ok, argument)
+			require.Equal(t, want, got)
+		}
+	})
+
+	t.Run("a partly non-numeric argument is declined", func(t *testing.T) {
+		for _, argument := range []string{"DAY TO SECOND", "5 OCTETS", ""} {
+			_, ok := perturb(argument)
+			require.False(t, ok, "%q: rewriting the literals in an argument demonstrates "+
+				"nothing about the rest of it, and the verdict is about the whole argument", argument)
+		}
 	})
 
 	for _, entry := range corpusManifest(t) {
@@ -720,16 +773,18 @@ func TestNoUndeclaredLossiness(t *testing.T) {
 			require.NoError(t, err)
 
 			require.Empty(t, discardedArguments(t, uncommented(string(raw))),
-				"the model is the same with these arguments removed, so it discards them. Give the entry the bead that will carry them and a reason, and add a semanticCases row for each")
+				"the model is the same with these arguments spelled differently, so it discards what they say. Give the entry the bead that will carry them and a reason, and add a semanticCases row for each")
 		})
 	}
 }
 
-// discardedArguments returns the parenthesised arguments in src whose removal leaves
-// the resolved model unchanged. Every occurrence of a spelling goes at once, so that a
-// source spelling the same argument twice cannot keep the models apart on the copy the
-// substitution did not reach. A variant that does not parse is skipped rather than
-// reported: there is no model to compare, so there is no evidence either way.
+// discardedArguments returns the parenthesised arguments in src that say nothing the
+// resolved model records: rewriting the argument to a different one leaves the model
+// identical. Every occurrence of a spelling is rewritten at once, so that a source
+// spelling the same argument twice cannot keep the models apart on the copy the
+// substitution did not reach. An argument with no derivable rewrite, or one whose
+// rewrite does not parse, is skipped rather than reported: there is no model to compare,
+// so there is no evidence either way.
 func discardedArguments(t *testing.T, src string) []string {
 	t.Helper()
 
@@ -739,18 +794,63 @@ func discardedArguments(t *testing.T, src string) []string {
 	var discarded []string
 	seen := make(map[string]bool)
 	for _, match := range typeArgument.FindAllStringSubmatch(src, -1) {
-		spelling, bare := match[0], match[1]
+		spelling, keyword, argument := match[0], match[1], match[2]
 		if seen[spelling] {
 			continue
 		}
 		seen[spelling] = true
 
-		got, err := New().Parse(strings.NewReader(strings.ReplaceAll(src, spelling, bare)))
-		if err == nil && reflect.DeepEqual(want, got) {
+		// Declining here rather than resolving KEYWORD(): that spelling is not GQL
+		// either, so the outcome would be the same today, but by accident of the
+		// grammar rather than because there was nothing to compare.
+		rewritten, ok := perturb(argument)
+		if !ok {
+			continue
+		}
+
+		variant := strings.ReplaceAll(src, spelling, keyword+"("+rewritten+")")
+		if got, err := New().Parse(strings.NewReader(variant)); err == nil && reflect.DeepEqual(want, got) {
 			discarded = append(discarded, spelling)
 		}
 	}
 	return discarded
+}
+
+// numericLiteral matches a literal in every radix GQL spells one: 255, 0xFF, 0b101, 0o17.
+var numericLiteral = regexp.MustCompile(`0[xXbBoO][0-9A-Fa-f]+|[0-9]+`)
+
+// perturb rewrites a type argument into a different argument occupying the same
+// syntactic slot, so that the variant is grammatical wherever the original was. Every
+// literal becomes the same digit — DECIMAL(10,2) becomes DECIMAL(1,1), not
+// DECIMAL(1,2) — because a per-literal rewrite could invert an ordering the type
+// constrains, and DECIMAL(1,2) is rejected for a scale exceeding its precision. The
+// second digit is for arguments already spelling the first, which would otherwise be
+// rewritten to themselves and collide with the original for that reason alone.
+//
+// An argument that is not made only of literals and the separators between them is
+// declined. Perturbing the literals in DURATION(DAY TO SECOND) would demonstrate
+// something about those literals, and the verdict is about the whole argument.
+func perturb(argument string) (string, bool) {
+	if strings.Trim(numericLiteral.ReplaceAllString(argument, ""), ", \t\r\n") != "" {
+		return "", false
+	}
+
+	for _, digit := range []string{"1", "2"} {
+		rewritten := numericLiteral.ReplaceAllStringFunc(argument, func(literal string) string {
+			return radixPrefix(literal) + digit
+		})
+		if rewritten != argument {
+			return rewritten, true
+		}
+	}
+	return "", false
+}
+
+func radixPrefix(literal string) string {
+	if len(literal) > 2 && literal[0] == '0' && strings.ContainsRune("xXbBoO", rune(literal[1])) {
+		return literal[:2]
+	}
+	return ""
 }
 
 // TestCorpusOutcomes asserts each entry's outcome, and for resolving entries that the
