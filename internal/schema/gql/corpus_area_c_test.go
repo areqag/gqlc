@@ -54,6 +54,14 @@ var corpusAreaC = []corpusEntry{
 		reason:   "kind=DIRECTED with the `~` (undirected) connector is a contradiction: the mismatch fires before the accepted-subset check that would otherwise report ErrUndirectedEdge for the bare connector",
 	},
 	{
+		file:     "18.3-edge-type/kind_undirected_connector_to.gql",
+		outcome:  unsupported,
+		sentinel: ErrEdgeKindArcMismatch,
+		feature:  "mandatory",
+		bead:     "gqlc-h9n.10",
+		reason:   "the phrase-form twin of kind_undirected_arc_directed.gql, and it differs in one way that matters: `->` is unambiguously directed, but `TO` is an alternative of both connectorPointingRight and connectorUndirected (GQL.g4:1659-1667). The sentinel here is therefore ANTLR's ordered choice speaking, not a reading of the source — endpointPair lists endpointPairDirected first, so the directed parse wins and contradicts the declared UNDIRECTED. Under the other reading of the same text this file would be ErrUndirectedEdge. Both reject, which is why the ambiguity has never surfaced as a defect; the entry exists so that it cannot start doing so silently",
+	},
+	{
 		file:    "18.3-edge-type/phrase_form_left_arrow.gql",
 		outcome: resolves,
 		feature: "mandatory",
@@ -69,7 +77,7 @@ var corpusAreaC = []corpusEntry{
 		sentinel: ErrUnnamedEdgeType,
 		feature:  "mandatory",
 		bead:     "gqlc-0ri",
-		reason:   "an edge type with property types but no label has no label-set key; deviation-audit bead",
+		reason:   "an edge type with property types but no label has no label-set key, so EdgeKey holds a source and a target with nothing between them to tell two such edges apart. Decided in ADR 0018: declined on gqlc's model, not on a reading of the standard",
 	},
 	{
 		file:    "18.3-edge-type/key_label_set.gql",

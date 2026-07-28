@@ -70,6 +70,11 @@ func (s *ParserSuite) TestValid() {
 // the OR REPLACE / IF NOT EXISTS prefixes. A catalog-qualified type-name keeps
 // only its simple last component, since the grammar already isolates the parent
 // path from the type name.
+//
+// ADR 0018 records both as decisions rather than as what the code happens to do:
+// the modifiers are conditions on a catalogue a static generator does not have,
+// and the truncation is safe only while Schema.Name is a package label and not a
+// lookup key — which COPY OF (gqlc-h9n.1) would change.
 func (s *ParserSuite) TestGraphTypeName() {
 	cases := []struct {
 		name string
@@ -622,6 +627,46 @@ func TestEdgeKindArcConsistency(t *testing.T) {
 			require.ErrorIs(t, err, tc.want)
 			require.Equal(t, schema.Schema{}, got, "model must be the zero value on error")
 		})
+	}
+}
+
+// TestConnectorToResolvesPointingRight pins which way `CONNECTING (a TO b)` runs,
+// and the reason it needs pinning is that the grammar does not say. `TO` is an
+// alternative of both connectorPointingRight and connectorUndirected
+// (GQL.g4:1659-1667), so the text is genuinely ambiguous; what settles it is that
+// endpointPair lists endpointPairDirected before endpointPairUndirected
+// (GQL.g4:1637-1640) and ANTLR takes the first alternative that matches. The
+// direction gqlc reports is therefore a property of rule order in a vendored
+// community grammar (internal/grammar/gql/SOURCE.md), not of anything ISO states
+// here, and reordering those two alternatives — or regenerating from an upstream
+// that has — would flip every `TO` in every schema silently.
+//
+// Asserting the source and target rather than "no error" is the point: a flip
+// makes `DIRECTED ... (a TO b)` a kind/connector contradiction, but it would also
+// make a *kindless* `TO` an undirected edge, and the two endpoints are what a
+// generated repository is built from.
+func TestConnectorToResolvesPointingRight(t *testing.T) {
+	src := `CREATE PROPERTY GRAPH TYPE T AS {
+		(a :A { id :: INT }),
+		(b :B { id :: INT }),
+		DIRECTED EDGE TYPE E LABEL E CONNECTING (a TO b)
+	}`
+	got, err := New().Parse(strings.NewReader(src))
+	require.NoError(t, err)
+	require.Len(t, got.Edges, 1)
+
+	arrow := `CREATE PROPERTY GRAPH TYPE T AS {
+		(a :A { id :: INT }),
+		(b :B { id :: INT }),
+		DIRECTED EDGE TYPE E LABEL E CONNECTING (a -> b)
+	}`
+	viaArrow, err := New().Parse(strings.NewReader(arrow))
+	require.NoError(t, err)
+	require.Equal(t, viaArrow, got, "TO and -> are the same alternative and must resolve identically")
+
+	for key := range got.Edges {
+		require.Equal(t, graph.LabelSetKey("A"), key.Source, "TO must read left-to-right: source is the first endpoint")
+		require.Equal(t, graph.LabelSetKey("B"), key.Target, "TO must read left-to-right: target is the second endpoint")
 	}
 }
 
