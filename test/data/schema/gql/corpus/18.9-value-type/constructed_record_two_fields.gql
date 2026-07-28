@@ -1,0 +1,6 @@
+-- fieldTypeList taking its `(COMMA fieldType)*` repetition (GQL.g4:1993).
+-- constructed_record_fields.gql declares one field and takes it zero times, and no
+-- other file in the corpus lists two.
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:Row { r :: RECORD { f :: STRING, g :: INT } })
+}

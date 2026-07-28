@@ -1,0 +1,10 @@
+-- recordType alternative 2 with its `RECORD?` elided (GQL.g4:1979): a bare braced
+-- field list where the keyword is dropped. constructed_record_fields.gql takes the
+-- same alternative with the keyword.
+--
+-- The brace is what selects the alternative, not the keyword, which is why this
+-- reaches recordType rather than a property block: `{ f :: STRING }` sits where a
+-- value type is expected, and propertyTypesSpecification is not reachable there.
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:Row { r :: { f :: STRING } })
+}

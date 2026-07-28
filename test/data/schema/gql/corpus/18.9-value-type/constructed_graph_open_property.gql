@@ -1,0 +1,7 @@
+-- openGraphReferenceValueType taking its `PROPERTY?` (GQL.g4:1931): `ANY PROPERTY
+-- GRAPH`. constructed_graph_open.gql spells `ANY GRAPH` and constructed_graph_closed.gql
+-- `GRAPH { (:X) }`, so both existing graph references elide the keyword and the
+-- fuller spelling had never been parsed.
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:Ref { g :: ANY PROPERTY GRAPH })
+}

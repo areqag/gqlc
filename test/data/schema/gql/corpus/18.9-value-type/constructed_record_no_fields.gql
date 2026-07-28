@@ -1,0 +1,11 @@
+-- fieldTypesSpecification with its `fieldTypeList?` elided (GQL.g4:1988): the empty
+-- record `RECORD {}`. The braces are written and declare no fields.
+--
+-- It reports ErrRecordValueType like every other record spelling, which is worth
+-- noting because a record with no fields is the one that would NOT need
+-- graph.PropertyType to carry members. The decline is still right: gqlc has no
+-- record type at all to resolve it to, empty or otherwise, and giving the empty
+-- case a special path would land a construct nothing generates code for.
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:Row { r :: RECORD {} })
+}
