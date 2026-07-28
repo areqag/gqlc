@@ -70,5 +70,15 @@
     "parameter_type_conflict_optional_node_nullability.cypher": "social_r7.gql",
     "parameter_type_conflict_optional_edge_nullability.cypher": "social_r7.gql",
     "parameter_use_unknown_edge_property.cypher": "social_r7.gql",
-    "set_second_effect_unknown_property.cypher": "social.gql"
+    "set_second_effect_unknown_property.cypher": "social.gql",
+    "remove_labels_on_edge.cypher": "social_r6.gql",
+    "set_labels_on_projection_alias.cypher": "social_r6.gql",
+    "remove_labels_on_projection_alias.cypher": "social_r6.gql",
+    "delete_property_on_var_length_edge.cypher": "social_r6.gql",
+    "delete_property_on_var_length_multi_type_edge.cypher": "social_r6.gql",
+    "delete_edge_property_unknown.cypher": "social_r6.gql",
+    "delete_property_unknown_on_multi_type_edge.cypher": "social_r6.gql",
+    "delete_property_on_projection_alias.cypher": "social_r6.gql",
+    "delete_second_target_unknown_property.cypher": "social_r6.gql",
+    "merge_on_match_second_effect_unknown_property.cypher": "social_r6.gql"
 }
