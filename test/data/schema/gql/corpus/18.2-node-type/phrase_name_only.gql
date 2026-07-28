@@ -1,0 +1,14 @@
+-- nodeTypePhraseFiller alternative 1 with its `nodeTypeFiller?` elided
+-- (GQL.g4:1516): a node type that gives its name and stops. phrase_form.gql
+-- takes the same alternative with a filler after the name, and phrase_unnamed.gql
+-- takes alternative 2, a filler with no name — so between them the name and the
+-- filler were always accompanied, and this is the first file to drop one.
+--
+-- Rejected, and the pairing with phrase_unnamed.gql is the point: `NODE TYPE
+-- :Person` resolves and `NODE TYPE Person` does not. The name is not discarded —
+-- it reaches NodeType.Name — but Schema.Nodes is keyed on the key label set, so a
+-- named node type is not thereby an identified one, and two of them would collide
+-- on the empty key however different their names.
+CREATE PROPERTY GRAPH TYPE T AS {
+    NODE TYPE Person
+}

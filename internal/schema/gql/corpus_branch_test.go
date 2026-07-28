@@ -299,13 +299,9 @@ type owedBranch struct {
 
 var owedOptionality = []owedBranch{
 	{"18.10 :: typed", "gqlc-h9n.32", "fieldType's `::`-elided spelling, `{ name INT }` (GQL.g4:1997). Reachable only through binding table and record types, so the file records a decline rather than a resolve"},
-	{"18.2 :: nodeTypeFiller", "gqlc-h9n.32", "a node pattern or phrase filler carrying no filler — `()`, `(a)`, or a phrase that names the type and stops"},
-	{"18.2 :: nodeTypeImpliedContent", "gqlc-h9n.32", "a node type filler that is a key label set and nothing else (GQL.g4:1519), with no label set or property types after it"},
 	{"18.3 :: edgeTypeFiller", "gqlc-h9n.32", "an edge type phrase that names the type and stops, with no filler after the name (GQL.g4:1562)"},
 	{"18.3 :: edgeTypeImpliedContent", "gqlc-h9n.32", "an edge type filler that is a key label set and nothing else (GQL.g4:1567)"},
 	{"18.3 :: nodeTypeFiller", "gqlc-h9n.32", "an endpoint reference spelling `()` with no filler. The same element as 18.2's, kept separate because this is the position gqlc-h9n.26 found a live defect in"},
-	{"18.5 :: propertyTypeList", "gqlc-h9n.32", "the empty property block `{}` (GQL.g4:1692)"},
-	{"18.6 :: typed", "gqlc-h9n.32", "propertyType's `::`-elided spelling, `{ id INT NOT NULL }` (GQL.g4:1702), which the grammar admits and no file writes"},
 	{"18.8 :: BINDING", "gqlc-h9n.32", "`TABLE { ... }` without the BINDING keyword (GQL.g4:1714); declined with ErrUnsupportedType, so the file pins the decline"},
 	{"18.9 :: COMMA fieldType", "gqlc-h9n.32", "a record type listing more than one field"},
 	{"18.9 :: PROPERTY", "gqlc-h9n.32", "a graph reference value type spelling GRAPH without the PROPERTY keyword"},
