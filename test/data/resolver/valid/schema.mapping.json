@@ -137,5 +137,6 @@
     "call_arg_int_at_number.cypher": "social_r7.gql",
     "call_arg_float_at_number.cypher": "social_r7.gql",
     "call_arg_null_at_typed.cypher": "social_r7.gql",
-    "unlabelled_via_edge_intersection.cypher": "social_r7.gql"
+    "unlabelled_via_edge_intersection.cypher": "social_r7.gql",
+    "parameter_temporal_same_kind.cypher": "social_r7.gql"
 }
