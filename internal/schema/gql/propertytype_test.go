@@ -382,6 +382,14 @@ func TestPropertyNullability(t *testing.T) {
 
 // verboseSignednessEquivalences pairs each explicitly-signed verbose spelling
 // with its bare counterpart, read prefixed-first: {"SIGNED INTEGER", "INTEGER"}.
+//
+// The parenthesised block at the end is the composition of this table's property
+// with widthSpellingEquivalences', and it is listed rather than left to follow
+// from the two because it did not follow: the prefix rows all used a suffix width
+// and the parenthetical rows all used no prefix, so `SIGNED INTEGER(8)` appeared
+// in neither and resolved to TypeInt, the machine word, with its declared eight
+// bits dropped. Two properties each pinned across a whole width range can still
+// leave their conjunction unpinned, and that is where the defect sat.
 var verboseSignednessEquivalences = []typeEquivalence{
 	{"SIGNED INTEGER", "INTEGER"},
 	{"SIGNED INTEGER8", "INTEGER8"},
@@ -402,6 +410,20 @@ var verboseSignednessEquivalences = []typeEquivalence{
 	{"UNSIGNED INTEGER256", "UINT256"},
 	{"UNSIGNED SMALL INTEGER", "USMALLINT"},
 	{"UNSIGNED BIG INTEGER", "UBIGINT"},
+
+	{"SIGNED INTEGER(8)", "INTEGER(8)"},
+	{"SIGNED INTEGER(16)", "INTEGER(16)"},
+	{"SIGNED INTEGER(32)", "INTEGER(32)"},
+	{"SIGNED INTEGER(64)", "INTEGER(64)"},
+	{"SIGNED INTEGER(128)", "INTEGER(128)"},
+	{"SIGNED INTEGER(256)", "INTEGER(256)"},
+
+	{"UNSIGNED INTEGER(8)", "UINT(8)"},
+	{"UNSIGNED INTEGER(16)", "UINT(16)"},
+	{"UNSIGNED INTEGER(32)", "UINT(32)"},
+	{"UNSIGNED INTEGER(64)", "UINT(64)"},
+	{"UNSIGNED INTEGER(128)", "UINT(128)"},
+	{"UNSIGNED INTEGER(256)", "UINT(256)"},
 }
 
 // TestPropertyVerboseIntegerSignedness covers the SIGNED / UNSIGNED prefix on
