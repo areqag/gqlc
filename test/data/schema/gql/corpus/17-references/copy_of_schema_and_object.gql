@@ -1,0 +1,6 @@
+-- catalogObjectParentReference#1 taking its `(objectName PERIOD)*` repetition
+-- (GQL.g4:1470), where every other COPY OF file takes it zero times. `o.` is the
+-- object path, and it sits *after* a schema reference — which is what separates
+-- this from copy_of_qualified.gql's `s.gt`, alternative 2, where the dotted path
+-- is the whole parent and no schema is named.
+CREATE PROPERTY GRAPH TYPE Copied COPY OF /s/o.gt
