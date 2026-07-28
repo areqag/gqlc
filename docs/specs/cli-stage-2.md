@@ -353,10 +353,10 @@ for a project with no config file however the file was asked for.
 **Prefill.** The appended target starts from the file's **last** entry
 for the fields a second target usually shares — `schema`,
 `schema_language`, `query_language`, `procsig`, `gen.go.driver` — and
-empty for the three that must distinguish it: `queries`, `gen.go.out`,
-`gen.go.package`. Empty is the honest default for a directory that has
-to differ from the entries already in the file, and §4.2's non-blank
-validators refuse to let it through.
+empty for the three fields a second target normally gives its own:
+`queries`, `gen.go.out`, `gen.go.package`. Empty is the honest default;
+only `gen.go.out` is enforced by the loader — shared query directories
+and package names are legal (config-multi-target §11).
 
 **Output-directory validation.** Under `--add` the `gen.go.out` `Input`
 carries `config.CheckOutAgainst` (config-multi-target §4.3) on top of

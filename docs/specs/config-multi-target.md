@@ -1008,10 +1008,10 @@ replace the file the flag promises to append to.
 **Prefill.** The appended target starts from the file's **last** entry
 for the fields a second target usually shares — `schema`,
 `schema_language`, `query_language`, `procsig`, `gen.go.driver` — and
-**empty** for the three that must distinguish it: `queries`,
-`gen.go.out`, `gen.go.package`. An empty prompt is the honest default
-for a directory that must differ from every existing target's; the
-non-blank validators already refuse to let it through.
+**empty** for the three fields a second target normally gives its own:
+`queries`, `gen.go.out`, `gen.go.package`. An empty prompt is the
+honest default; only `gen.go.out` is enforced by the loader — shared
+query directories and package names are legal (§11).
 
 **Validation.** The `out` input's `Validate` hook calls
 `cfg.CheckOutAgainst(out)` (§4.3) on the loaded config, so `--add`
