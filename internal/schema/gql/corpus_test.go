@@ -755,6 +755,26 @@ func TestNoUndeclaredLossiness(t *testing.T) {
 		}
 	})
 
+	// rewriteArguments is witnessed directly for the reason perturb is, and it is the
+	// same reason: no verdict today distinguishes it from a plain string replacement.
+	// No type argument reaches the model, so both halves of a collision are discarded
+	// and the answer comes out right either way. The verdict starts depending on this
+	// when one of them stops being discarded (gqlc-5md), which is also the first point
+	// at which the gate has anything to distinguish.
+	t.Run("a rewrite leaves a longer keyword ending in the same spelling alone", func(t *testing.T) {
+		const src = "CREATE PROPERTY GRAPH TYPE t AS { (:Doc { a :: VARCHAR(10), b :: CHAR(10) }) }"
+		require.Equal(t, "CREATE PROPERTY GRAPH TYPE t AS { (:Doc { a :: VARCHAR(10), b :: CHAR(1) }) }",
+			rewriteArguments(src, "CHAR(10)", "CHAR(1)"),
+			"CHAR(10) occurs inside VARCHAR(10), and only the one typeArgument reported is the argument under test")
+	})
+
+	t.Run("a rewrite reaches every occurrence of the spelling itself", func(t *testing.T) {
+		const src = "CREATE PROPERTY GRAPH TYPE t AS { (:Doc { a :: CHAR(10), b :: CHAR(10) }) }"
+		require.Equal(t, "CREATE PROPERTY GRAPH TYPE t AS { (:Doc { a :: CHAR(1), b :: CHAR(1) }) }",
+			rewriteArguments(src, "CHAR(10)", "CHAR(1)"),
+			"a copy the substitution did not reach would keep the models apart on its own")
+	})
+
 	t.Run("a partly non-numeric argument is declined", func(t *testing.T) {
 		for _, argument := range []string{"DAY TO SECOND", "5 OCTETS", ""} {
 			_, ok := perturb(argument)
@@ -793,8 +813,8 @@ func discardedArguments(t *testing.T, src string) []string {
 
 	var discarded []string
 	seen := make(map[string]bool)
-	for _, match := range typeArgument.FindAllStringSubmatch(src, -1) {
-		spelling, keyword, argument := match[0], match[1], match[2]
+	for _, match := range typeArgument.FindAllStringSubmatchIndex(src, -1) {
+		spelling, keyword, argument := src[match[0]:match[1]], src[match[2]:match[3]], src[match[4]:match[5]]
 		if seen[spelling] {
 			continue
 		}
@@ -808,12 +828,40 @@ func discardedArguments(t *testing.T, src string) []string {
 			continue
 		}
 
-		variant := strings.ReplaceAll(src, spelling, keyword+"("+rewritten+")")
+		variant := rewriteArguments(src, spelling, keyword+"("+rewritten+")")
 		if got, err := New().Parse(strings.NewReader(variant)); err == nil && reflect.DeepEqual(want, got) {
 			discarded = append(discarded, spelling)
 		}
 	}
 	return discarded
+}
+
+// rewriteArguments replaces spelling at every offset the typeArgument scan reported
+// it, and nowhere else.
+//
+// Every reported occurrence rather than the one under test, for the reason above: a
+// source spelling the same argument twice would otherwise keep the models apart on
+// the copy the substitution did not reach. Nowhere else, because a plain string
+// replacement also rewrites the tail of a longer keyword ending in this one. GQL
+// spells CHAR and VARCHAR, and BINARY and VARBINARY, and typeArgument's leading \b
+// makes VARCHAR(10) one match rather than two — so in a file holding both, CHAR(10)
+// occurs inside VARCHAR(10) and the verdict returned under the shorter name would be
+// a verdict about both. The direction that bites is silence: if the neighbour records
+// its argument and the one under test discards it, the variant's model differs and
+// the discard goes unreported, which is the gap gqlc-eh4 opened this test to close.
+func rewriteArguments(src, spelling, replacement string) string {
+	var out strings.Builder
+	end := 0
+	for _, at := range typeArgument.FindAllStringIndex(src, -1) {
+		if src[at[0]:at[1]] != spelling {
+			continue
+		}
+		out.WriteString(src[end:at[0]])
+		out.WriteString(replacement)
+		end = at[1]
+	}
+	out.WriteString(src[end:])
+	return out.String()
 }
 
 // numericLiteral matches a literal in every radix GQL spells one: 255, 0xFF, 0b101, 0o17.
