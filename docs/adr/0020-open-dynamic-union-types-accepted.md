@@ -64,7 +64,7 @@ ISO production it declines.
   loses `ANY` (same reason).
 - The four `dynamic*` entries in `isoGaps` are updated. The two open-family
   entries note the construct is implemented while the ISO production name
-  remains absent from GQL.g4 (labeled alternatives, not named rules — the same
+  remains absent from GQL.g4 (labelled alternatives, not named rules — the same
   structural fact as `<standard digit>` and `<double double quote>`).
 - `wantCorpusResolving` rises from 61 to 64.
 - `isoGapRatchet` is unchanged at 14: the four ISO productions remain absent by

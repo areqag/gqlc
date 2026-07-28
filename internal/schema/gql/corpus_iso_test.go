@@ -99,12 +99,12 @@ var isoGaps = []isoGap{
 	{
 		production: "dynamic union type",
 		bead:       "gqlc-h9n.33",
-		why:        "umbrella for open and closed union spellings; the open ones (#7, #8) now resolve to graph.TypeAnyPropertyValue (ADR 0020), but the closed ones (#9, #10) need the enum to carry members, which gqlc-h9n.33 builds. Production name is absent because GQL.g4 uses labeled alternatives of valueType rather than a named rule",
+		why:        "umbrella for open and closed union spellings; the open ones (#7, #8) now resolve to graph.TypeAnyPropertyValue (ADR 0020), but the closed ones (#9, #10) need the enum to carry members, which gqlc-h9n.33 builds. Production name is absent because GQL.g4 uses labelled alternatives of valueType rather than a named rule",
 	},
 	{
 		production: "open dynamic union type",
 		bead:       "gqlc-h9n.34",
-		why:        "implemented: ANY VALUE (and bare ANY) now resolve to graph.TypeAnyPropertyValue → Go any (ADR 0020). Production name is absent because GQL.g4 spells this as a labeled alternative of valueType (openDynamicUnionTypeLabel) rather than a named rule, as with <standard digit> and the other inlined productions",
+		why:        "implemented: ANY VALUE (and bare ANY) now resolve to graph.TypeAnyPropertyValue → Go any (ADR 0020). Production name is absent because GQL.g4 spells this as a labelled alternative of valueType (openDynamicUnionTypeLabel) rather than a named rule, as with <standard digit> and the other inlined productions",
 	},
 	{
 		production: "closed dynamic union type",
@@ -114,7 +114,7 @@ var isoGaps = []isoGap{
 	{
 		production: "dynamic property value type",
 		bead:       "gqlc-h9n.34",
-		why:        "implemented: ANY? PROPERTY VALUE now resolves to graph.TypeAnyPropertyValue → Go any (ADR 0020). Production name is absent because GQL.g4 spells this as a labeled alternative (dynamicPropertyValueTypeLabel) rather than a named rule, as with <standard digit>",
+		why:        "implemented: ANY? PROPERTY VALUE now resolves to graph.TypeAnyPropertyValue → Go any (ADR 0020). Production name is absent because GQL.g4 spells this as a labelled alternative (dynamicPropertyValueTypeLabel) rather than a named rule, as with <standard digit>",
 	},
 }
 
