@@ -22,7 +22,8 @@ question it raises. This is the same line `annexd/SOURCE.md` draws.
 
 This is the artefact ISO themselves publish as containing the grammar specified
 by ISO/IEC 39075. It is not a draft, not a vendor rendering, and not the
-community ANTLR adaptation whose provenance `gqlc-h9n.11` exists to correct.
+community ANTLR adaptation vendored as `internal/grammar/gql/GQL.g4`, whose
+provenance is recorded in `internal/grammar/gql/SOURCE.md`.
 
 ## Regeneration
 
