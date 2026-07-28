@@ -328,7 +328,17 @@ var owedOptionality = []owedBranch{}
 //
 // As with alternativeExemptions, naming a covered thief is necessary and not sufficient:
 // it would be satisfied by naming any alternative the corpus happens to take. What makes
-// an entry answerable is why, which is prose a reviewer reads against the grammar.
+// an entry answerable is why, which is prose a reviewer reads against the grammar. That
+// this list is written by hand rather than derived is settled there too, under
+// gqlc-h9n.14: the derivation would be a decision procedure for CFL inclusion.
+//
+// The ALL(*) behaviour differs from the one alternativeExemptions' entry rests on, and
+// the difference is worth keeping in view. There a lower-numbered alternative wins by
+// ordered choice. Here the thief is the higher-numbered valueType#10, and it wins
+// because ANTLR rewrites direct left recursion into a loop that consumes the operator
+// before the alternative declaring it as a repetition is ever reached. Two mechanisms,
+// one shape of finding, and an entry that names the wrong one is wrong in the way a
+// reviewer can catch.
 type optionalityExemption struct {
 	class    string
 	stolenBy string

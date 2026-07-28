@@ -588,6 +588,34 @@ type obligation struct {
 // one: it would be satisfied by naming any alternative the corpus happens to cover.
 // What makes an entry answerable is why, which is prose a reviewer reads, so expect
 // this list to be reviewed rather than merely to pass.
+//
+// The list is written by hand and stays so; gqlc-h9n.14 asked whether the partition
+// could be derived instead, and closed on the finding that a sound and complete
+// derivation cannot exist. An exemption is a universal — every input that would take
+// the alternative is taken by another — and deciding it for alternatives whose
+// sub-languages are context-free is CFL inclusion, which is undecidable. The reduction
+// is direct: put two grammars in Greibach normal form, which is left-recursion-free
+// and so within what ANTLR accepts, as alternatives 1 and 2 of a rule anchored at EOF.
+// Prediction then selects alternative 2 on exactly the inputs in L2 \ L1, so the
+// alternative is dead iff L2 is contained in L1.
+//
+// Both mechanisms that were proposed sit on the wrong side of that bound rather than
+// near it. PredictionModeLLExactAmbigDetection reports that two alternatives were
+// ambiguous on one input at one position, which is the existential of the universal an
+// exemption claims, and closing the gap is the undecidable step rather than an
+// engineering one — the ground amendment A10 rejected it on. Graph reachability over
+// the ATN is silent by construction: an alternative's entry state is an epsilon
+// successor of its decision state, so it is reachable exactly when its rule is, and
+// connectorUndirected is in wantObligationRules. It answers "is this alternative in
+// the grammar", which was never in doubt.
+//
+// So what the hand-list gives up is completeness, not honesty. It cannot over-claim,
+// TestAlternativeExemptions failing on an exemption the corpus covers. Under-claiming
+// is the benign direction and announces itself: a dead alternative nobody has exempted
+// is a demand no file satisfies, and authoringGuidance sends the author who hits it to
+// read the grammar rather than widen the harness. That path has since found a second
+// one — optionalityExemptions' entry in corpus_branch_test.go was written after an
+// author's spelling kept landing on the branch already covered.
 type alternativeExemption struct {
 	tag      string
 	stolenBy string
