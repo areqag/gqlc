@@ -67,10 +67,12 @@ func listElemNeedsImports(e *preparedListElem) (needDbtype, needTime bool) {
 }
 
 // goTypeNeedsImports reports whether a Go type text names dbtype or
-// time. Both are single-string prefix checks; the emitted type text
-// never nests dbtype/time except through the list arm (which walks
-// element-wise above).
+// time. Both are single-string prefix checks; list types are walked
+// element-wise by stripping the leading "[]".
 func goTypeNeedsImports(ty string) (bool, bool) {
+	if elem := strings.TrimPrefix(ty, "[]"); elem != ty {
+		return goTypeNeedsImports(elem)
+	}
 	needDbtype := strings.HasPrefix(ty, "dbtype.")
 	needTime := ty == "time.Time"
 	return needDbtype, needTime
@@ -161,6 +163,13 @@ func rowFieldName(colText string) (string, bool) {
 // dbtype.Duration, which the driver represents as one struct with
 // Months / Days / Seconds / Nanos fields (see ADR 0002 Consequences).
 func goType(pt graph.PropertyType) (string, bool) {
+	if pt.Kind() == graph.KindList {
+		elemTy, ok := goType(pt.Elem())
+		if !ok {
+			return "", false
+		}
+		return "[]" + elemTy, true
+	}
 	switch pt {
 	case graph.TypeString:
 		return "string", true
@@ -204,6 +213,10 @@ func goType(pt graph.PropertyType) (string, bool) {
 		return "dbtype.Duration", true
 	case graph.TypeAnyPropertyValue:
 		return "any", true
+	case graph.TypeList:
+		// Intercepted by the Kind() guard above; unreachable here.
+		// Listed so the exhaustive linter sees the full constant set.
+		return "[]any", true
 	case graph.TypeInt128, graph.TypeInt256,
 		graph.TypeUint128, graph.TypeUint256,
 		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,

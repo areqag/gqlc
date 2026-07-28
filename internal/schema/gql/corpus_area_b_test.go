@@ -94,10 +94,10 @@ var corpusAreaB = []corpusEntry{
 	{
 		file:     "18.2-node-type/phrase_unsupported_property_type.gql",
 		outcome:  unsupported,
-		sentinel: ErrUnsupportedType,
+		sentinel: ErrRecordValueType,
 		feature:  "mandatory",
-		bead:     "gqlc-h9n.5",
-		reason:   "the value type is incidental — constructed_list_angle.gql already pins that LIST declines. This file pins that the phrase-form node collector forwards the decline at all: every value-type decline in the corpus is written as a pattern-form node, so dropping the l.fail from EnterNodeTypePhrase's error arm left the suite green, silently discarding a phrase-form node that carries an unsupported property type",
+		bead:     "gqlc-h9n.33",
+		reason:   "the value type is incidental — constructed_record_bare.gql already pins that RECORD declines. This file pins that the phrase-form node collector forwards the decline at all: every value-type decline in the corpus is written as a pattern-form node, so dropping the l.fail from EnterNodeTypePhrase's error arm left the suite green, silently discarding a phrase-form node that carries an unsupported property type",
 	},
 	{
 		file:    "18.2-node-type/pattern_empty_property_block.gql",

@@ -860,24 +860,18 @@ func TestValueTypeFamilyDeclines(t *testing.T) {
 	}
 }
 
-// TestListStillReportsTheBareClass pins the boundary ADR 0019 drew. LIST is
-// gqlc-h9n.5's to justify and has no reason of its own recorded, so it keeps
-// landing on the class — which is also what an alternative added to the grammar
-// after ADR 0019 would do, having no justification to name yet.
-//
-// Asserting the *absence* of every family leaf is the point. A classifier that
-// grew a LIST case would otherwise be caught only by whichever corpus entry
-// happened to disagree, and h9n.5's four entries are data that would be updated
-// to match it.
-func TestListStillReportsTheBareClass(t *testing.T) {
-	src := `CREATE PROPERTY GRAPH TYPE T AS {
-		(:N { tags :: LIST<INT> })
-	}`
-	_, err := New().Parse(strings.NewReader(src))
-	require.ErrorIs(t, err, ErrUnsupportedType)
-	for _, family := range valueTypeFamilies {
-		require.NotErrorIs(t, err, family.sentinel,
-			"LIST has no recorded reason of its own; deciding it is gqlc-h9n.5's, and ADR 0019 says so")
+// TestListPropertyResolves pins that all five LIST/ARRAY spellings are accepted
+// after gqlc-h9n.5. The four corpus entries that previously pinned ErrUnsupportedType
+// for these now have outcome:resolves; this unit pin catches a regression where
+// the parser rejects a list type that the corpus files do not happen to exercise.
+func TestListPropertyResolves(t *testing.T) {
+	for _, src := range []string{
+		`CREATE PROPERTY GRAPH TYPE T AS { (:N { tags :: LIST<INT> }) }`,
+		`CREATE PROPERTY GRAPH TYPE T AS { (:N { tags :: INT LIST }) }`,
+		`CREATE PROPERTY GRAPH TYPE T AS { (:N { tags :: LIST }) }`,
+	} {
+		_, err := New().Parse(strings.NewReader(src))
+		require.NoError(t, err)
 	}
 }
 
@@ -1064,7 +1058,7 @@ var invalidFixtures = map[string]error{
 	"undirected_edge.gql":      ErrUndirectedEdge,
 	"unknown_endpoint.gql":     ErrUnknownEndpoint,
 	"endpoint_not_alias.gql":   ErrEndpointNotAlias,
-	"unsupported_type.gql":     ErrUnsupportedType,
+	"path_value_type.gql":      ErrPathValueType,
 	"unnamed_node.gql":         ErrUnnamedNodeType,
 	"unnamed_edge.gql":         ErrUnnamedEdgeType,
 	"duplicate_node.gql":       ErrDuplicateNodeType,
@@ -1089,14 +1083,9 @@ var invalidFixtures = map[string]error{
 // of truth TestSentinelReachability checks against. A new sentinel must be added
 // here (and pinned by a file); a removed one must be dropped.
 //
-// It lists leaves. ErrUnsupportedSource is absent because it is a class the two
-// graph-type-source leaves wrap, and no file produces it bare — see errors.go and
-// TestGraphTypeSourceErrorsWrapTheClass, which is the pin it gets instead.
-//
-// ErrUnsupportedType is a class too, wrapped by the five value-type families, and
-// is here anyway because it is the one thing that makes those two situations
-// differ: LIST/ARRAY still reports it bare, so it has a file of its own and would
-// be an orphan if removed. Whoever lands gqlc-h9n.5 should expect to take it out.
+// It lists leaves. ErrUnsupportedSource and ErrUnsupportedType are absent
+// because they are classes the leaves wrap, and nothing produces them bare —
+// see errors.go, TestGraphTypeSourceErrorsWrapTheClass, and sentinelsWithoutAFile.
 //
 // Keyed by the identifier rather than a bare slice, because the value alone cannot
 // say what it is called and TestSentinelRegistryIsComplete has to compare these
@@ -1110,7 +1099,6 @@ var allSentinels = map[string]error{
 	"ErrEndpointFillerHasProperties": ErrEndpointFillerHasProperties,
 	"ErrEndpointFillerImpliesLabels": ErrEndpointFillerImpliesLabels,
 	"ErrImpliedLabelIsKeyLabel":      ErrImpliedLabelIsKeyLabel,
-	"ErrUnsupportedType":             ErrUnsupportedType,
 	"ErrUnnamedNodeType":             ErrUnnamedNodeType,
 	"ErrUnnamedEdgeType":             ErrUnnamedEdgeType,
 	"ErrMultiLabelEdgeType":          ErrMultiLabelEdgeType,
@@ -1133,14 +1121,21 @@ var allSentinels = map[string]error{
 // ErrEndpointFillerHasProperties went missing for as long as it did.
 var sentinelsWithoutAFile = map[string]string{
 	"ErrUnsupportedSource": "a class the two graph-type-source leaves wrap rather than a leaf; nothing produces it bare, so no file could pin it without first making one that does. TestGraphTypeSourceErrorsWrapTheClass is the pin it gets instead",
+	"ErrUnsupportedType":   "a class the five value-type families wrap; after gqlc-h9n.5 nothing produces it bare (LIST/ARRAY was the only bare source, and it now resolves). Same posture as ErrUnsupportedSource",
 }
 
 // isSentinel reports whether err is one of the parser's sentinels. allSentinels is
 // keyed by name, so membership is a lookup over the values; require.Contains against
 // the map would ask whether an error is a name and pass for nothing.
+//
+// The reversed check (errors.Is(sentinel, err)) recognises class errors such as
+// ErrUnsupportedType: nothing produces them bare, so they are not in allSentinels,
+// but they are valid sentinels for declined carriage groups that span multiple
+// specific families. A declined group whose sentinel is a class passes this check
+// because some leaf in allSentinels wraps it.
 func isSentinel(err error) bool {
 	for _, sentinel := range allSentinels {
-		if errors.Is(err, sentinel) {
+		if errors.Is(err, sentinel) || errors.Is(sentinel, err) {
 			return true
 		}
 	}

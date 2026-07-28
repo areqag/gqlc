@@ -17,21 +17,55 @@ import (
 // or one of that error's five family leaves where ADR 0019 has named a reason.
 func property(ctx gen.IPropertyTypeContext, ts *antlr.CommonTokenStream) (schema.Property, error) {
 	vt := ctx.PropertyValueType().ValueType()
-
-	if err := declineValueType(vt); err != nil {
+	pt, notNull, err := resolveValueType(vt, ts)
+	if err != nil {
 		return schema.Property{}, err
 	}
-
-	pt, ok := normaliseType(spelling(vt, ts))
-	if !ok {
-		return schema.Property{}, ErrUnsupportedType
-	}
-
 	return schema.Property{
 		Name:     ctx.PropertyName().GetText(),
 		Type:     pt,
-		Nullable: !hasNotNull(vt),
+		Nullable: !notNull,
 	}, nil
+}
+
+// resolveValueType maps a valueType parse-tree node to its normalised
+// PropertyType and the outer NOT NULL qualifier. It handles list alternatives
+// before delegating to declineValueType / normaliseType so that:
+//
+//   - list alternatives are correctly parameterised and their outer notNull?
+//     is read from the direct child rather than by scanning the subtree
+//     (hasNotNull would attribute the element's qualifier to the list itself);
+//   - declined families return their named sentinel;
+//   - scalar spellings resolve via the existing table.
+func resolveValueType(vt gen.IValueTypeContext, ts *antlr.CommonTokenStream) (graph.PropertyType, bool, error) {
+	switch lt := vt.(type) {
+	case *gen.ListValueTypeAlt1Context:
+		// LIST<elemType> (notNull?)
+		elemType, elemNotNull, err := resolveValueType(lt.ValueType(), ts)
+		if err != nil {
+			return "", false, err
+		}
+		return graph.ListOf(elemType, elemNotNull), lt.NotNull() != nil, nil
+	case *gen.ListValueTypeAlt2Context:
+		// elemType LIST (notNull?)  /  elemType ARRAY (notNull?)
+		elemType, elemNotNull, err := resolveValueType(lt.ValueType(), ts)
+		if err != nil {
+			return "", false, err
+		}
+		return graph.ListOf(elemType, elemNotNull), lt.NotNull() != nil, nil
+	case *gen.ListValueTypeAlt3Context:
+		// LIST (notNull?)  /  ARRAY (notNull?)  — bare, no element type
+		return graph.TypeList, lt.NotNull() != nil, nil
+	}
+
+	if err := declineValueType(vt); err != nil {
+		return "", false, err
+	}
+	pt, ok := normaliseType(spelling(vt, ts))
+	if !ok {
+		return "", false, ErrUnsupportedType
+	}
+	return pt, hasNotNull(vt), nil
 }
 
 // declineValueType names the family of a value type gqlc does not model, or nil
@@ -45,9 +79,9 @@ func property(ctx gen.IPropertyTypeContext, ts *antlr.CommonTokenStream) (schema
 // `RECORD { f :: STRING }` both carry a predefinedType for the field — so a
 // subtree search would report the field's family in place of the property's.
 //
-// A value type this does not name falls through, which is deliberate: LIST is
-// gqlc-h9n.5's to justify, and an alternative added to the grammar after this
-// was written has no justification of its own yet. Both land on the bare class.
+// A value type this does not name falls through to the bare ErrUnsupportedType
+// class. List alternatives are dispatched before this is called (see
+// resolveValueType), so they never reach here.
 func declineValueType(vt gen.IValueTypeContext) error {
 	switch t := vt.(type) {
 	case *gen.PathValueTypeLabelContext:

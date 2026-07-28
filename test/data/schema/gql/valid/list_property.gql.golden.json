@@ -1,0 +1,50 @@
+{
+  "name": "ListProperty",
+  "nodes": [
+    {
+      "key_labels": "Event",
+      "complete_labels": "Event",
+      "name": "",
+      "properties": {
+        "all_vals": {
+          "name": "all_vals",
+          "type": "LIST\u003cANY\u003e",
+          "nullable": true
+        },
+        "counts": {
+          "name": "counts",
+          "type": "LIST\u003cINT64\u003e",
+          "nullable": false
+        },
+        "nested": {
+          "name": "nested",
+          "type": "LIST\u003cLIST\u003cINT32\u003e\u003e",
+          "nullable": true
+        },
+        "readings": {
+          "name": "readings",
+          "type": "LIST\u003cFLOAT64\u003e",
+          "nullable": true
+        },
+        "tags": {
+          "name": "tags",
+          "type": "LIST\u003cSTRING\u003e",
+          "nullable": true
+        }
+      }
+    },
+    {
+      "key_labels": "Tag",
+      "complete_labels": "Tag",
+      "name": "",
+      "properties": {
+        "name": {
+          "name": "name",
+          "type": "STRING",
+          "nullable": true
+        }
+      }
+    }
+  ],
+  "edges": []
+}

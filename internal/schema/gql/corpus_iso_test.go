@@ -77,24 +77,24 @@ var isoGaps = []isoGap{
 		why:        "the `` escape inside an accent-quoted identifier; inline literal in the lexer, as with <double double quote>",
 	},
 	{
-		production: "constructed value type",
-		bead:       "gqlc-h9n.5",
-		why:        "the parameterised-type family (LIST/ARRAY and friends); needs the type model h9n.5 exists to build",
-	},
-	{
 		production: "list value type",
 		bead:       "gqlc-h9n.5",
-		why:        "LIST/ARRAY property type; blocked on the parameterised type model",
+		why:        "implemented: LIST<T>, T LIST, T ARRAY, bare LIST and ARRAY all resolve to graph.ListOf (gqlc-h9n.5). Production name is absent because GQL.g4 spells the three spellings as labelled alternatives of valueType (listValueTypeAlt1, listValueTypeAlt2, listValueTypeAlt3) rather than a named rule, as with <standard digit> and <open dynamic union type>",
+	},
+	{
+		production: "constructed value type",
+		bead:       "gqlc-h9n.5",
+		why:        "ISO umbrella for list, record, and dynamic-union types. Lists are implemented (gqlc-h9n.5); records and closed unions are gqlc-h9n.33's. Production name is absent because GQL.g4 implements these as labelled alternatives of valueType rather than a named constructedValueType rule",
 	},
 	{
 		production: "component type",
 		bead:       "gqlc-h9n.5",
-		why:        "the element type of a <list value type>; arrives with the parameterised type model",
+		why:        "implemented: the element type of a list; gqlc-h9n.5 reads it via resolveValueType's recursive call on the element valueType context. Production name is absent because GQL.g4 spells the element type as a recursive valueType argument inside the listValueTypeAlt1/2 alternatives rather than as a named componentType rule",
 	},
 	{
 		production: "component type list",
-		bead:       "gqlc-h9n.5",
-		why:        "the comma-separated form of <component type>; arrives with the parameterised type model",
+		bead:       "gqlc-h9n.33",
+		why:        "the comma-separated member list inside a closed dynamic union (ANY VALUE<A|B>); not implemented because the closed-union family awaits gqlc-h9n.33. Production name is absent because GQL.g4 uses a labelled alternative rather than a named rule — the same pattern as the other value-type productions in this list",
 	},
 	{
 		production: "dynamic union type",

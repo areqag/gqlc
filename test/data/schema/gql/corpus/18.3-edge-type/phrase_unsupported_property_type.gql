@@ -4,11 +4,11 @@
 -- EnterEdgeTypePhrase's arm left the suite green even with the pattern-form file
 -- present.
 --
--- Unsupported: ErrUnsupportedType, for gqlc-h9n.5's reason. The value type is
--- incidental; what this file pins is that the phrase-form edge collector
--- forwards the decline at all.
+-- Unsupported: ErrRecordValueType (gqlc-h9n.33). The value type is incidental;
+-- what this file pins is that the phrase-form edge collector forwards the decline
+-- at all.
 CREATE PROPERTY GRAPH TYPE T AS {
     (a :Person { id :: INT NOT NULL }),
     (b :Post { id :: INT NOT NULL }),
-    DIRECTED EDGE TYPE Wrote :WROTE { items :: LIST<STRING> } CONNECTING (a -> b)
+    DIRECTED EDGE TYPE Wrote :WROTE { items :: RECORD } CONNECTING (a -> b)
 }

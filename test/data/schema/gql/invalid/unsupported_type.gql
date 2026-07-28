@@ -1,6 +1,0 @@
--- Constructed list value type. Outside the supported scalar / numeric /
--- temporal families this model maps (see ADR 0002); every constructedValueType
--- alternative surfaces ErrUnsupportedType.
-CREATE PROPERTY GRAPH TYPE T AS {
-    (:Event { tags :: LIST<INT> })
-}

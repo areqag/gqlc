@@ -8,28 +8,19 @@ package gql
 // fixes the directories these entries may live in.
 var corpusAreaD2 = []corpusEntry{
 	{
-		file:     "18.9-value-type/constructed_list_angle.gql",
-		outcome:  unsupported,
-		sentinel: ErrUnsupportedType,
-		feature:  "mandatory",
-		bead:     "gqlc-h9n.5",
-		reason:   "LIST/ARRAY needs a parameterised type model, which gqlc does not yet have; the angle-bracket spelling is valueType alt 3 (listValueTypeAlt1)",
+		file:    "18.9-value-type/constructed_list_angle.gql",
+		outcome: resolves,
+		feature: "mandatory",
 	},
 	{
-		file:     "18.9-value-type/constructed_list_postfix.gql",
-		outcome:  unsupported,
-		sentinel: ErrUnsupportedType,
-		feature:  "mandatory",
-		bead:     "gqlc-h9n.5",
-		reason:   "LIST/ARRAY needs a parameterised type model; STRING LIST[5] is valueType alt 4 (listValueTypeAlt2), and its [5] quantifier is the only reachable carrier of LEFT_BRACKET and RIGHT_BRACKET from a CREATE GRAPH TYPE body",
+		file:    "18.9-value-type/constructed_list_postfix.gql",
+		outcome: resolves,
+		feature: "mandatory",
 	},
 	{
-		file:     "18.9-value-type/constructed_list_bare.gql",
-		outcome:  unsupported,
-		sentinel: ErrUnsupportedType,
-		feature:  "mandatory",
-		bead:     "gqlc-h9n.5",
-		reason:   "LIST/ARRAY needs a parameterised type model; the bare spelling with no element type is valueType alt 5 (listValueTypeAlt3)",
+		file:    "18.9-value-type/constructed_list_bare.gql",
+		outcome: resolves,
+		feature: "mandatory",
 	},
 	{
 		file:     "18.9-value-type/constructed_record_bare.gql",
@@ -106,12 +97,9 @@ var corpusAreaD2 = []corpusEntry{
 		reason:   "a path is a traversal a query produces, not a value an element stores, so no backend or model change reaches it; declined permanently in ADR 0019. PATH is pathValueType",
 	},
 	{
-		file:     "18.9-value-type/constructed_list_array_synonym.gql",
-		outcome:  unsupported,
-		sentinel: ErrUnsupportedType,
-		feature:  "mandatory",
-		bead:     "gqlc-h9n.5",
-		reason:   "ARRAY is a synonym of LIST throughout, so this file discharges the same alternative as LIST<STRING>; it exists to enter the ARRAY token, which nothing in the LIST spellings does",
+		file:    "18.9-value-type/constructed_list_array_synonym.gql",
+		outcome: resolves,
+		feature: "mandatory",
 	},
 	{
 		file:     "18.9-value-type/constructed_graph_open.gql",

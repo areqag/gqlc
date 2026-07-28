@@ -1,0 +1,12 @@
+-- LIST / ARRAY property type coverage: all five spellings, element nullability,
+-- bare list (no declared element type), and nested lists.
+CREATE PROPERTY GRAPH TYPE ListProperty AS {
+    (:Tag { name :: STRING }),
+    (:Event {
+        tags     :: LIST<STRING>,
+        counts   :: INT64 LIST NOT NULL,
+        readings :: FLOAT64 ARRAY,
+        all_vals :: LIST,
+        nested   :: LIST<LIST<INT32>>
+    })
+}
