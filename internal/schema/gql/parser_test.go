@@ -273,6 +273,78 @@ func (s *ParserSuite) TestEndpointFillerRejectsProperties() {
 	}
 }
 
+// TestEndpointFillerMixedRejectionsReportTheSource pins which end is named when
+// BOTH ends of an arc are defective and the two defects have different sentinels.
+// The endpoints are read source-then-destination and the read short-circuits, so
+// the source's rejection is the one reported.
+//
+// The case above stops one sentinel short of seeing this: it puts a defect on both
+// ends, but the same defect, so the answer is that sentinel whichever end is read
+// first. With one end defective the short-circuit reports that end either way
+// round too. The order is observable only across the two sentinels fillerLabels
+// can return, which is what these cases pair up.
+//
+// The left-pointing rows are the point. `<-` reports the RIGHTMOST written
+// endpoint as the source, so "source first" and "leftmost first" disagree there,
+// and the rule is by role: the same end is named whichever direction the author
+// wrote the arc in, so respelling an edge does not move its diagnostic. That is
+// the property being pinned — not the source-then-destination read order, which is
+// merely how it is currently obtained.
+//
+// Both sentinels are asserted, presence and absence. Asserting only the winner
+// would still pass if the loser were also joined in, which is a different
+// behaviour with the same ErrorIs result.
+func (s *ParserSuite) TestEndpointFillerMixedRejectionsReportTheSource() {
+	cases := []struct {
+		name    string
+		src     string
+		want    error
+		notWant error
+	}{
+		{
+			name: "right arc, source implies labels and destination carries properties",
+			src: `(:Person),
+				(:Post),
+				(:Person => :Employee) -[:AUTHORED]-> (:Post { extra :: STRING })`,
+			want:    ErrEndpointFillerImpliesLabels,
+			notWant: ErrEndpointFillerHasProperties,
+		},
+		{
+			name: "right arc, source carries properties and destination implies labels",
+			src: `(:Person),
+				(:Post),
+				(:Person { extra :: STRING }) -[:AUTHORED]-> (:Post => :Article)`,
+			want:    ErrEndpointFillerHasProperties,
+			notWant: ErrEndpointFillerImpliesLabels,
+		},
+		{
+			name: "left arc, source is written on the right and still wins",
+			src: `(:Post { extra :: STRING }) <-[:AUTHORED]- (:Person => :Employee),
+				(:Person),
+				(:Post)`,
+			want:    ErrEndpointFillerImpliesLabels,
+			notWant: ErrEndpointFillerHasProperties,
+		},
+		{
+			name: "left arc, the other pairing of the same two defects",
+			src: `(:Post => :Article) <-[:AUTHORED]- (:Person { extra :: STRING }),
+				(:Person),
+				(:Post)`,
+			want:    ErrEndpointFillerHasProperties,
+			notWant: ErrEndpointFillerImpliesLabels,
+		},
+	}
+	for _, tt := range cases {
+		s.Run(tt.name, func() {
+			got, err := New().Parse(strings.NewReader(graphType(tt.src)))
+			s.Require().ErrorIs(err, tt.want)
+			s.Require().NotErrorIs(err, tt.notWant,
+				"the destination's rejection must not be reported alongside the source's")
+			s.Equal(schema.Schema{}, got, "model must be the zero value on error")
+		})
+	}
+}
+
 // TestEdgeLeftPointingCanonicalised covers a left-pointing arc being normalised
 // to source->target: `(a) <-[:R]- (b)` is the edge b -> a, so its identity is
 // independent of the direction it was written in.
