@@ -273,7 +273,12 @@ func canonicalSpelling(s string) string {
 // collapseParenthetical removes the space before `(` and the spaces adjacent
 // to `(`, `)` and `,` inside the first parenthetical, so `INT ( 8 )`,
 // `INT (8)` and `FLOAT(10, 2)` share a lookup key with their unspaced
-// spellings.
+// spellings. Only the width forms cash that in: no typeSpellings row holds a
+// comma, so a comma-bearing key misses the full lookup either way and resolves
+// down truncateParenthetical, which discards the parenthetical this rewrote.
+// The comma clause is kept for the row gqlc-5md would add, and
+// TestCanonicalSpellingCommaSpacingIrrelevant is the only thing that can see it
+// until then — gqlc-825 has the proof.
 func collapseParenthetical(s string) string {
 	open := strings.IndexByte(s, '(')
 	if open < 0 {
