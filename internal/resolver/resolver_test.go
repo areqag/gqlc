@@ -228,6 +228,13 @@ var invalidFixtures = map[string]error{
 	"remove_property_on_var_length_multi_type_edge.cypher": ErrInvalidEffectTarget,
 	// Property lookup on a multi-type edge must miss if any union member lacks the
 	// property. Covered on the read path (unknown_property_union_*), not the write.
+	// The single-candidate edge arm of the SET/REMOVE property check was
+	// unpinned: only the multi-candidate (unionProperty) arm had a fixture.
+	"set_property_unknown_on_single_type_edge.cypher":    ErrUnknownProperty,
+	"remove_property_unknown_on_single_type_edge.cypher": ErrUnknownProperty,
+	// Two failing effects with different sentinels: pins that ValidateEffects
+	// reports the FIRST failure, not the last.
+	"effect_order_first_failure_wins.cypher":            ErrUnknownProperty,
 	"set_property_unknown_on_multi_type_edge.cypher":    ErrUnknownProperty,
 	"remove_property_unknown_on_multi_type_edge.cypher": ErrUnknownProperty,
 	// kq6 additions. ag5 above pinned the SET family; its REMOVE LABELS and

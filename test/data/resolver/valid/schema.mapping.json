@@ -166,5 +166,6 @@
     "aggregate_with_literal_grouping_key.cypher": "social_r5.gql",
     "aggregate_with_func_grouping_key.cypher": "social_r5.gql",
     "infer_via_reverse_orientation.cypher": "social_r5.gql",
-    "infer_ignores_untouched_edge.cypher": "social_r5.gql"
+    "infer_ignores_untouched_edge.cypher": "social_r5.gql",
+    "demote_name_in_two_groups.cypher": "social_r4.gql"
 }
