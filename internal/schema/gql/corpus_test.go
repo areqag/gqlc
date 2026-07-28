@@ -46,9 +46,18 @@ import (
 // carries two sigils. Working COPY OF sources are "CURRENT_SCHEMA/gt",
 // "HOME_SCHEMA/gt", "./gt", "/a/b/gt", "../a/gt" and "$$gt"; a bare "s/gt" is a
 // syntax error, because an identifier is not a schemaReference (GQL.g4:1469).
+//
+// wantSemanticCases is the same kind of pin for the third count, and it is the only
+// thing that makes the number of declared blind spots anything other than
+// self-declared: deleting a semanticCase row along with its entry's bead and reason
+// is otherwise green, so a case that was never written and one that was quietly
+// removed look identical. A drop is legitimate exactly once per case — when the bead
+// lands, TestSemanticCaseCollisions goes red, and the row is deleted with this number
+// — which is why it is a pin to repin rather than a lower bound.
 const (
 	wantCorpusEntries   = 90
 	wantCorpusResolving = 50
+	wantSemanticCases   = 10
 )
 
 // isValidFeature reports whether v is an accepted value of corpusEntry.feature:
@@ -149,11 +158,36 @@ type corpusEntry struct {
 // claiming otherwise — leaves the whole package green. Coverage cannot object, since
 // being invisible to coverage is what makes it a semantic case. Requiring the source
 // to contain the spelling is the only thing here that reads the file's content.
+//
+// siblings is what makes the spelling's job checkable rather than merely present.
+// The spelling pin only asks that the construct still appear, so `spelling: "A"` on
+// the CHAR(4) case passes while discriminating nothing; and a case could be added
+// whose collision was never real. siblings names the other spellings this one must
+// currently resolve identically to, and TestSemanticCaseCollisions asserts it. That
+// inverts the signal: today a semantic case is a promise that something is broken,
+// checked by nobody; asserted, it goes red the day the bead lands and the model
+// gains the field, which is when the case should be deleted.
+//
+// It is a slice, not a scalar, because these are equivalence classes rather than
+// pairs. The pre-DURATION rows all pair X(n) against a bare X, which reads as "the
+// un-annotated spelling" and would fit a scalar; DURATION does not, since bare
+// DURATION is a syntax error (TestPropertyBareDurationRejectedAtParse) and the
+// collision is between two qualified spellings. DURATION(DAY TO HOUR) will be a
+// third member of that class, and adding it must not mean revisiting the field's
+// shape.
+//
+// The rule for populating it: every spelling the why claims this one collides with
+// gets a row here, or the why says why it cannot. The why is the claim, siblings is
+// the machine-checkable form of it, and the two drifting apart is the failure mode
+// both exist to prevent. The escape is not hypothetical — the DECIMAL row's bare
+// sibling is unreachable by substitution because ISO puts notNull inside the
+// parenthesised group.
 type semanticCase struct {
 	file     string
 	bead     string
 	why      string
 	spelling string
+	siblings []string
 }
 
 // corpusArea is one author's share of the corpus: the path prefixes they own and the
@@ -349,6 +383,18 @@ func TestCorpusManifest(t *testing.T) {
 		require.NotEmpty(t, sc.spelling, "%s: a semantic case needs the spelling it exists to record", sc.file)
 		require.NotContains(t, semanticBeads, sc.file, "duplicate semantic case")
 
+		// Non-empty rather than optional: an empty slice is the escape hatch that
+		// puts a case back to prose nothing checks, which is what this field exists
+		// to close. Every case today is an X-resolves-equal-to-Y; the one that was
+		// not — kind_undirected_arc_directed, accepted where it should be rejected —
+		// stopped being a semantic case when gqlc-h9n.3 gave it ErrEdgeKindArcMismatch,
+		// so it is now an unsupported entry. Should a sibling-less case ever be
+		// wanted again, it needs a second mode here and a reason for it, not a nil.
+		require.NotEmpty(t, sc.siblings, "%s: a semantic case needs the spellings its model cannot be told apart from", sc.file)
+		for _, sibling := range sc.siblings {
+			require.NotEqual(t, sc.spelling, sibling, "%s: a spelling does not collide with itself", sc.file)
+		}
+
 		// The only check here that reads the file's GQL. Everything else about a
 		// semantic case is prose, so without this the construct can be edited out
 		// from under a row that still claims it and nothing goes red. Comments are
@@ -424,6 +470,53 @@ func TestCorpusSize(t *testing.T) {
 	require.Len(t, entries, wantCorpusEntries, "corpus size changed; repin wantCorpusEntries")
 	require.Equal(t, wantCorpusResolving, resolving,
 		"resolving count changed; repin wantCorpusResolving (a drop is a regression)")
+	require.Len(t, semanticCases(t), wantSemanticCases,
+		"semantic case count changed; repin wantSemanticCases (a drop means a blind spot closed, so say which bead closed it)")
+}
+
+// TestSemanticCaseCollisions asserts the thing a semantic case is about, rather than
+// the spelling it is written in. A case says the model has no field for what the
+// parse discarded, and the observable form of that is a collision: the file and each
+// of its siblings differ in source and not in model. TestCorpusManifest already pins
+// that the file still spells the construct; this pins that spelling it still makes no
+// difference.
+//
+// The sibling source is the case's own file with the spelling substituted, so the two
+// differ in exactly the construct under test and in nothing else — no second corpus
+// file to keep in step, and no bare-STRING carrier to invent for the four byte-string
+// rows that have none. Substituting into the comment-blanked copy rather than the raw
+// bytes keeps a header quoting the spelling from being rewritten into GQL's place;
+// blanked comments are spaces, so the base still resolves to what the file does.
+//
+// Whole-schema equality rather than reaching for the one Property: the claim is that
+// the discarded qualifier is unrecoverable downstream, and downstream sees the model,
+// not the field someone thought to compare. It is also what makes the failure useful
+// when it comes — the diff names the field the model gained.
+func TestSemanticCaseCollisions(t *testing.T) {
+	for _, sc := range semanticCases(t) {
+		t.Run(sc.file, func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Join(corpusDir, sc.file))
+			require.NoError(t, err)
+			src := uncommented(string(raw))
+
+			want, err := New().Parse(strings.NewReader(src))
+			require.NoError(t, err, "a semantic case is a file that resolves")
+
+			for _, sibling := range sc.siblings {
+				t.Run(sibling, func(t *testing.T) {
+					variant := strings.ReplaceAll(src, sc.spelling, sibling)
+					require.NotEqual(t, src, variant,
+						"the spelling is not in the file's GQL, so this compares the file with itself")
+
+					got, err := New().Parse(strings.NewReader(variant))
+					require.NoError(t, err, "the sibling spelling must resolve for there to be a collision")
+					require.Equal(t, want, got,
+						"%s still resolves differently from %s, so the model can tell them apart and %s has closed this blind spot",
+						sc.spelling, sibling, sc.bead)
+				})
+			}
+		})
+	}
 }
 
 // TestCorpusOutcomes asserts each entry's outcome, and for resolving entries that
