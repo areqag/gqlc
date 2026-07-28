@@ -1,0 +1,9 @@
+-- The edge-type half of the explicitly empty key label set: edgeTypeKeyLabelSet
+-- is `labelSetPhrase? IMPLIES`, so "=>" may open the arc content. Rejected for
+-- the reason the node form is — an edge type is identified by its key label set,
+-- and EdgeKey has nothing to hold for an empty one.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Person { id :: INT }),
+    (:Post { id :: INT }),
+    (:Person) -[=> :AUTHORED]-> (:Post)
+}

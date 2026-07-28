@@ -26,11 +26,17 @@ import (
 // complete label set — an element carries its implied labels, so a query label
 // expression is satisfied against CompleteLabels.
 //
-// gqlc does not implement GG21 (explicit key label sets via `=>`), so every type
-// this package builds today has an *inferred* key label set (GG22) that happens
-// to equal its complete one. Representing that coincidence rather than assuming
-// it is the point: the two roles were previously served by one field, and any
-// consumer that picked the wrong one could not be caught.
+// The two coincide unless a declaration opts out of the inference. A type
+// written without `=>` has its key label set inferred (GG22) from the whole
+// phrase, which is nearly every type in practice; one written with `=>` declares
+// the key label set explicitly (GG21) and its complete label set is a proper
+// superset. Representing that as two fields rather than assuming the coincidence
+// is the point: before gqlc-h9n.8 one field served both roles, and a consumer
+// that wanted the other one could not be caught doing it.
+//
+// gqlc implements GG21 except where an implied label is also some declared type's
+// key label — the case whose meaning Fabric and Neo4j disagree about. See ADR
+// 0015.
 type Schema struct {
 	Name  string // graph type name
 	Nodes map[graph.LabelSetKey]NodeType

@@ -124,13 +124,15 @@ func (l *listener) EnterNodeTypePattern(c *gen.NodeTypePatternContext) {
 		n.alias = alias.GetText()
 	}
 
-	labels, props, err := l.nodeContent(c.NodeTypeFiller())
+	fc, err := l.nodeContent(c.NodeTypeFiller())
 	if err != nil {
 		l.fail(err)
 		return
 	}
-	n.labels = labels
-	n.props = props
+	n.hasKeyLabelSet = fc.hasKeyLabelSet
+	n.keyLabels = fc.keyLabels
+	n.impliedLabels = fc.impliedLabels
+	n.props = fc.props
 
 	l.raw.nodes = append(l.raw.nodes, n)
 }
@@ -157,13 +159,15 @@ func (l *listener) EnterNodeTypePhrase(c *gen.NodeTypePhraseContext) {
 		n.alias = alias.GetText()
 	}
 
-	labels, props, err := l.nodeContent(filler.NodeTypeFiller())
+	fc, err := l.nodeContent(filler.NodeTypeFiller())
 	if err != nil {
 		l.fail(err)
 		return
 	}
-	n.labels = labels
-	n.props = props
+	n.hasKeyLabelSet = fc.hasKeyLabelSet
+	n.keyLabels = fc.keyLabels
+	n.impliedLabels = fc.impliedLabels
+	n.props = fc.props
 
 	l.raw.nodes = append(l.raw.nodes, n)
 }
@@ -214,35 +218,17 @@ func (l *listener) EnterEdgeTypePhrase(c *gen.EdgeTypePhraseContext) {
 		e.target = rawEndpoint{alias: lft.DestinationNodeTypeAlias().GetText()}
 	}
 
-	labels, props, err := l.edgeContent(filler.EdgeTypeFiller())
+	fc, err := l.edgeContent(filler.EdgeTypeFiller())
 	if err != nil {
 		l.fail(err)
 		return
 	}
-	e.labels = labels
-	e.props = props
+	e.hasKeyLabelSet = fc.hasKeyLabelSet
+	e.keyLabels = fc.keyLabels
+	e.impliedLabels = fc.impliedLabels
+	e.props = fc.props
 
 	l.raw.edges = append(l.raw.edges, e)
-}
-
-// EnterNodeTypeKeyLabelSet and EnterEdgeTypeKeyLabelSet reject the
-// label-implication form of a key label set; see rejectLabelImplication.
-func (l *listener) EnterNodeTypeKeyLabelSet(c *gen.NodeTypeKeyLabelSetContext) {
-	l.rejectLabelImplication(c.IMPLIES())
-}
-
-func (l *listener) EnterEdgeTypeKeyLabelSet(c *gen.EdgeTypeKeyLabelSetContext) {
-	l.rejectLabelImplication(c.IMPLIES())
-}
-
-// rejectLabelImplication fails on the label-implication form of a key label set
-// (`=> :Label`, the "implied label" syntax). We support only the plain key label
-// set (`:Label`); the IMPLIES token ("=>") appears only in the rejected form, so
-// its presence is the whole signal. Node and edge key label sets share this.
-func (l *listener) rejectLabelImplication(implies antlr.TerminalNode) {
-	if implies != nil {
-		l.fail(ErrLabelImplication)
-	}
 }
 
 // edgeKindArcMismatch is true iff the declared edgeKind and the arc/connector
@@ -346,63 +332,103 @@ func (l *listener) EnterEdgeTypePattern(c *gen.EdgeTypePatternContext) {
 	e.source = src
 	e.target = dst
 
-	labels, props, err := l.edgeContent(filler)
+	fc, err := l.edgeContent(filler)
 	if err != nil {
 		l.fail(err)
 		return
 	}
-	e.labels = labels
-	e.props = props
+	e.hasKeyLabelSet = fc.hasKeyLabelSet
+	e.keyLabels = fc.keyLabels
+	e.impliedLabels = fc.impliedLabels
+	e.props = fc.props
 
 	l.raw.edges = append(l.raw.edges, e)
 }
 
-// nodeContent reads the label set and property types carried by a node type
-// filler — the `:Label { ... }` after an optional alias. A node with no filler or
-// no implied content contributes neither labels nor properties.
-func (l *listener) nodeContent(f gen.INodeTypeFillerContext) (graph.LabelSet, map[string]schema.Property, error) {
+// fillerContent is a node or edge type filler read off the parse tree, split at
+// `=>` the way the grammar splits it. It is the return of nodeContent and
+// edgeContent, which have four results between them and read better named than
+// positional.
+type fillerContent struct {
+	hasKeyLabelSet bool
+	keyLabels      graph.LabelSet
+	impliedLabels  graph.LabelSet
+	props          map[string]schema.Property
+}
+
+// nodeContent reads a node type filler — the `:Key => :Implied { ... }` after an
+// optional alias — into its key label set, its implied label set and its property
+// types. A node with no filler contributes none of the three.
+//
+// The two label sets are kept apart rather than unioned here because resolve()
+// needs both: the key one becomes the type's identity and the union becomes its
+// complete label set, and inferring an absent key label set (GG22) is a semantic
+// rule that belongs in the pure-Go pass, not in a tree read.
+//
+// Note the property types live under the *implied* content in the grammar
+// (nodeTypeImpliedContent alternatives 2 and 3), so there is no such thing as a
+// property declared on the key side. A type's properties are its own either way.
+func (l *listener) nodeContent(f gen.INodeTypeFillerContext) (fillerContent, error) {
 	if f == nil {
-		return nil, nil, nil
-	}
-	ic := f.NodeTypeImpliedContent()
-	if ic == nil {
-		return nil, nil, nil
+		return fillerContent{}, nil
 	}
 
-	var labels graph.LabelSet
+	var fc fillerContent
+	if kls := f.NodeTypeKeyLabelSet(); kls != nil {
+		fc.hasKeyLabelSet = true
+		fc.keyLabels = labelSet(kls.LabelSetPhrase())
+	}
+
+	ic := f.NodeTypeImpliedContent()
+	if ic == nil {
+		return fc, nil
+	}
 	if ls := ic.NodeTypeLabelSet(); ls != nil {
-		labels = labelSet(ls.LabelSetPhrase())
+		fc.impliedLabels = labelSet(ls.LabelSetPhrase())
 	}
 	var spec gen.IPropertyTypesSpecificationContext
 	if pts := ic.NodeTypePropertyTypes(); pts != nil {
 		spec = pts.PropertyTypesSpecification()
 	}
 	props, err := l.properties(spec)
-	return labels, props, err
+	if err != nil {
+		return fillerContent{}, err
+	}
+	fc.props = props
+	return fc, nil
 }
 
-// edgeContent is the edge-type counterpart of nodeContent: it reads the label set
-// and property types from an edge type filler. The two cannot share one helper
-// because the grammar gives node and edge fillers distinct generated types.
-func (l *listener) edgeContent(f gen.IEdgeTypeFillerContext) (graph.LabelSet, map[string]schema.Property, error) {
+// edgeContent is the edge-type counterpart of nodeContent, splitting an edge type
+// filler at `=>` on the same terms. The two cannot share one helper because the
+// grammar gives node and edge fillers distinct generated types.
+func (l *listener) edgeContent(f gen.IEdgeTypeFillerContext) (fillerContent, error) {
 	if f == nil {
-		return nil, nil, nil
-	}
-	ic := f.EdgeTypeImpliedContent()
-	if ic == nil {
-		return nil, nil, nil
+		return fillerContent{}, nil
 	}
 
-	var labels graph.LabelSet
+	var fc fillerContent
+	if kls := f.EdgeTypeKeyLabelSet(); kls != nil {
+		fc.hasKeyLabelSet = true
+		fc.keyLabels = labelSet(kls.LabelSetPhrase())
+	}
+
+	ic := f.EdgeTypeImpliedContent()
+	if ic == nil {
+		return fc, nil
+	}
 	if ls := ic.EdgeTypeLabelSet(); ls != nil {
-		labels = labelSet(ls.LabelSetPhrase())
+		fc.impliedLabels = labelSet(ls.LabelSetPhrase())
 	}
 	var spec gen.IPropertyTypesSpecificationContext
 	if pts := ic.EdgeTypePropertyTypes(); pts != nil {
 		spec = pts.PropertyTypesSpecification()
 	}
 	props, err := l.properties(spec)
-	return labels, props, err
+	if err != nil {
+		return fillerContent{}, err
+	}
+	fc.props = props
+	return fc, nil
 }
 
 // nestedDepth is the number of enclosing nestedGraphTypeSpecification contexts

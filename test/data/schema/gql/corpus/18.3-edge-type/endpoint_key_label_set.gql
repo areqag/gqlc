@@ -1,0 +1,10 @@
+-- An inline edge endpoint written with a key label set and implied labels.
+-- sourceNodeTypeReference admits a whole nodeTypeFiller, so "=>" reaches here
+-- too. The endpoint only names which declared node type it refers to, and it
+-- names it by key label set, so ":Employee" asserts something about the Person
+-- declaration that nothing checks. Rejected rather than discarded.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Person { id :: INT }),
+    (:Post { id :: INT }),
+    (:Person => :Employee) -[:AUTHORED]-> (:Post)
+}

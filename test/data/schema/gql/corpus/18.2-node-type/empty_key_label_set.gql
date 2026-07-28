@@ -1,0 +1,8 @@
+-- An explicitly empty key label set: nodeTypeKeyLabelSet is `labelSetPhrase?
+-- IMPLIES`, so the phrase before "=>" may be omitted. Rejected: a node type is
+-- identified by its key label set, and an empty one leaves nothing to key
+-- Schema.Nodes on. GG22's inference does not rescue it — a key label set was
+-- declared, just an empty one.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (=> :Thing)
+}
