@@ -40,8 +40,10 @@ import (
 //     clause is also the unit the corpus is already partitioned by, so a class names a
 //     clause an author owns — which is what makes the report a worklist.
 //
-// That takes 137 points to 49 classes. 32 are already exercised both ways by the
-// corpus and cost nothing; owedOptionality registers the other 17.
+// That takes 137 points to 49 classes. 48 are exercised both ways by the corpus. The
+// 49th cannot be, its present branch being unreachable under ALL(*) prediction rather
+// than merely unwritten, so optionalityExemptions records it — and owedOptionality, the
+// worklist the other 16 passed through, is empty.
 //
 // What this deliberately does not catch: two rules in one clause that the resolver
 // handles separately. `TYPE?` elides in both nodeTypePhrase and nodeTypePattern, which
@@ -291,14 +293,67 @@ var optionalityClassGolden = []string{
 // fix is to delete the entry. That is the only direction this list is allowed to move
 // without a grammar change, and it is what stops the register from becoming the place
 // unexercised spellings go to be forgotten.
+//
+// An entry here is the claim that a file is owed, so a class no file can discharge does
+// not belong in it: such an entry can never be deleted, and a worklist with a permanent
+// item on it is the log this register was written against. Those go to
+// optionalityExemptions, which asks for the reason no file can be written instead of the
+// bead that will write one.
 type owedBranch struct {
 	class string
 	bead  string
 	why   string
 }
 
-var owedOptionality = []owedBranch{
-	{"18.9 :: VERTICAL_BAR valueType", "gqlc-h9n.32", "a closed dynamic union listing more than one member, `ANY VALUE<A|B>` (GQL.g4:1731)"},
+// Empty today, every registered class having been discharged by a file except the one
+// that moved to optionalityExemptions. It stays declared rather than nil so that the
+// gate's message can keep naming it, and so the next one-sided class has somewhere
+// obvious to land.
+var owedOptionality = []owedBranch{}
+
+// optionalityExemption records an optionality class whose missing branch no corpus file
+// can take, because ALL(*) prediction hands that branch's input to another alternative
+// at every position it could appear. Such a branch is dead rather than unwritten, and
+// demanding a file for it would make the gate uncloseable — the same argument
+// alternativeExemptions makes for alternatives, in the vocabulary of branches.
+//
+// stolenBy names the alternative that takes the input instead, as a `rule#N` tag, and
+// TestOptionalityExemptions asserts that a corpus file covers it. That is what stops an
+// exemption from excusing an untested construct: if nothing takes the thief either, then
+// nothing exercises the spelling at all, and the exemption has excused the whole
+// construct rather than one unreachable branch of it. The demand is made here rather
+// than routed through the alternative obligation the way alternativeExemptions routes
+// its, because classes and tags are different vocabularies and nothing carries a
+// stolenBy from one into the other.
+//
+// As with alternativeExemptions, naming a covered thief is necessary and not sufficient:
+// it would be satisfied by naming any alternative the corpus happens to take. What makes
+// an entry answerable is why, which is prose a reviewer reads against the grammar.
+type optionalityExemption struct {
+	class    string
+	stolenBy string
+	bead     string
+	why      string
+}
+
+var optionalityExemptions = []optionalityExemption{
+	{
+		class:    "18.9 :: VERTICAL_BAR valueType",
+		stolenBy: "valueType#10",
+		bead:     "gqlc-h9n.32",
+		why:      "the `(VERTICAL_BAR valueType)*` repetition in closedDynamicUnionTypeAtl1 (GQL.g4:1731) is never entered, because atl2 is the left-recursive `valueType VERTICAL_BAR valueType` (GQL.g4:1732) and binds any `A | B` inside the angle brackets before the repetition is consulted. `ANY VALUE<STRING | INT>` parses as atl1 over a single valueType child that is itself an atl2, and `<A | B | C>` nests two of them left-associated, so the repetition takes zero iterations however many members are listed. constructed_dyn_closed_union.gql is the file, and its manifest entry already described the nesting without drawing the consequence",
+	},
+}
+
+// exemptOptionalityClasses indexes the exemption list by class for the coverage gate. It
+// validates nothing: TestOptionalityExemptions does that, so a malformed entry fails the
+// test that owns the register rather than the gate that consults it.
+func exemptOptionalityClasses() map[string]bool {
+	exempt := make(map[string]bool, len(optionalityExemptions))
+	for _, ex := range optionalityExemptions {
+		exempt[ex.class] = true
+	}
+	return exempt
 }
 
 // TestOptionalityClassGolden pins the classes the grammar defines, and the point count
@@ -340,12 +395,14 @@ func TestOptionalityCoverage(t *testing.T) {
 			"class %q is registered as owed but the corpus now parses it both ways: delete the entry", entry.class)
 	}
 
+	exempt := exemptOptionalityClasses()
+
 	var undischarged []string
 	for class, state := range classes {
 		if state.present && state.absent {
 			continue
 		}
-		if owed[class] {
+		if owed[class] || exempt[class] {
 			continue
 		}
 		missing := "eliding the element"
@@ -356,5 +413,43 @@ func TestOptionalityCoverage(t *testing.T) {
 	}
 	sort.Strings(undischarged)
 	require.Empty(t, undischarged,
-		"an optionality class is exercised on one branch only: write the missing spelling under the named clause, or register it in owedOptionality with the bead that will")
+		"an optionality class is exercised on one branch only: write the missing spelling under the named clause, or register it in owedOptionality with the bead that will. If the spelling you write keeps landing on the branch already covered, that is evidence about the grammar rather than the file — a branch can be unreachable under ALL(*) prediction, which goes in optionalityExemptions naming the alternative that takes its input")
+}
+
+// TestOptionalityExemptions owns the exemption register: it checks the entries are
+// well-formed, sweeps them for staleness, and demands the thief.
+//
+// Staleness is the predicate owedOptionality is held to, a class the corpus exercises
+// both ways, and it means something stronger here. An owed class that becomes covered is
+// a worklist item someone completed; an exempted one that becomes covered is a claim the
+// corpus has refuted, since the entry says no file can reach the branch. That is how a
+// grammar change reviving it gets noticed rather than keeping an excuse it no longer
+// needs.
+func TestOptionalityExemptions(t *testing.T) {
+	classes, _ := optionalityCoverage(t)
+	covered := corpusCoverage(t).alternatives
+
+	owed := make(map[string]bool, len(owedOptionality))
+	for _, entry := range owedOptionality {
+		owed[entry.class] = true
+	}
+
+	seen := make(map[string]bool, len(optionalityExemptions))
+	for _, ex := range optionalityExemptions {
+		require.NotEmpty(t, ex.why, "exempt class %q must say why no file can take the branch", ex.class)
+		require.NotEmpty(t, ex.bead, "exempt class %q must name the bead holding the finding", ex.class)
+		require.NotEmpty(t, ex.stolenBy, "exempt class %q must name the alternative that takes its input", ex.class)
+		require.Contains(t, optionalityClassGolden, ex.class,
+			"exempt class %q is not a class the grammar defines, so it excuses nothing; delete the entry", ex.class)
+		require.False(t, seen[ex.class], "class %q is exempted twice", ex.class)
+		require.False(t, owed[ex.class],
+			"class %q is both owed and exempted: it is either a file someone will write or a branch nobody can reach", ex.class)
+		seen[ex.class] = true
+
+		require.False(t, classes[ex.class].present && classes[ex.class].absent,
+			"class %q is exempted as unreachable but the corpus now parses it both ways; delete the exemption (%s)", ex.class, ex.bead)
+		require.True(t, covered[ex.stolenBy],
+			"class %q is excused because %s takes its input, but no corpus file takes %s either, so nothing exercises the spelling at all",
+			ex.class, ex.stolenBy, ex.stolenBy)
+	}
 }
