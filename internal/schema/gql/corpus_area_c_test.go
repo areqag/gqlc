@@ -31,6 +31,11 @@ var corpusAreaC = []corpusEntry{
 		reason:   "the declared edgeKind (UNDIRECTED) contradicts the arc direction (->); rejected rather than silently reinterpreted as DIRECTED",
 	},
 	{
+		file:    "18.3-edge-type/pattern_name_no_kind.gql",
+		outcome: resolves,
+		feature: "mandatory",
+	},
+	{
 		file:    "18.3-edge-type/phrase_form.gql",
 		outcome: resolves,
 		feature: "mandatory",

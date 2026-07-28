@@ -1,0 +1,15 @@
+-- edgeTypePattern's `edgeKind?` elided while the naming group around it is present
+-- (GQL.g4:1546): an edge type pattern that names the type and lets the arc say which
+-- way it points. kind_undirected_arc_directed.gql is the same shape with the kind
+-- written, and it is the only other file that enters this group at all — every other
+-- pattern-form file drops the whole `(edgeKind? edgeSynonym TYPE? edgeTypeName)?`, so
+-- until this one no parse had ever reached the `edgeKind?` inside it to elide it.
+--
+-- Resolves: the name reaches EdgeType.Name and the direction comes from `->`, which
+-- is the reconciliation ErrEdgeKindArcMismatch guards when both are written and
+-- disagree. Here only one of them speaks, so there is nothing to reconcile.
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (a :Person { id :: INT NOT NULL }),
+    (b :Post { id :: INT NOT NULL }),
+    EDGE Mentions (a) -[:MENTIONS]-> (b)
+}
