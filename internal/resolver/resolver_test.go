@@ -148,8 +148,14 @@ var invalidFixtures = map[string]error{
 	"union_column_type_mismatch.cypher":        ErrUnionColumnMismatch,
 	"union_column_nullability_mismatch.cypher": ErrUnionColumnMismatch,
 	"union_unknown_label_branch.cypher":        ErrUnknownLabel,
-	"part_binding_type_conflict.cypher":        ErrPartBindingTypeConflict,
-	"part_binding_type_conflict_edge.cypher":   ErrPartBindingTypeConflict,
+	// Two edge-union columns where one key list is a strict prefix of the other.
+	// resolvedTypeEqual's arity check is the only thing separating them, and the
+	// two orderings fail differently without it — see the comment on
+	// TestEdgeUnionArityFixturesAreLoadBearing.
+	"union_edge_union_arity_prefix.cypher":          ErrUnionColumnMismatch,
+	"union_edge_union_arity_prefix_reversed.cypher": ErrUnionColumnMismatch,
+	"part_binding_type_conflict.cypher":             ErrPartBindingTypeConflict,
+	"part_binding_type_conflict_edge.cypher":        ErrPartBindingTypeConflict,
 	// R6 additions:
 	"create_unknown_label.cypher":                 ErrUnknownLabel,
 	"create_unknown_edge.cypher":                  ErrUnknownEdge,
@@ -323,6 +329,57 @@ func (s *ResolverSuite) TestUnlabelledIntersectionFixtureIsLoadBearing() {
 			s.Require().ErrorIs(err, ErrAmbiguousBinding,
 				"this edge alone must leave the binding ambiguous, or the fixture stops testing intersect")
 		})
+	}
+}
+
+// TestEdgeUnionArityFixturesAreLoadBearing guards the property the two
+// union_edge_union_arity_prefix fixtures rest on: one branch's edge-key list is
+// a strict PREFIX of the other's, so only resolvedTypeEqual's arity check
+// separates them.
+//
+// Prefix-ness is the whole point. The obvious mismatched pair — directed
+// AUTHORED|LIKES against its undirected form — differs at index 1 because the
+// reverse-direction key is interleaved, so the element-wise loop rejects it with
+// the arity check already deleted. Nothing in the corpus was a prefix pair,
+// which is why deleting that check left the suite green.
+//
+// Ordering matters too, and the two fixtures cover one case each. The call is
+// resolvedTypeEqual(other, base), so with the arity check gone: branch 0 longer
+// makes the loop run over the shorter list, match, and return true — two
+// different edge-union types declared equal, and the model emits branch 0's type
+// for a query whose other branch cannot produce it. Branch 0 shorter runs the
+// loop off the end of base and panics on user input.
+func (s *ResolverSuite) TestEdgeUnionArityFixturesAreLoadBearing() {
+	sch := s.loadSchema("invalid", "social_edgeunion.gql")
+
+	resolveKeys := func(pattern string) []schema.EdgeKey {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(
+			bytes.NewReader([]byte("MATCH " + pattern + " RETURN r")))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		s.Require().NoError(err)
+		u, ok := vq.Columns[0].Type.(ResolvedEdgeUnion)
+		s.Require().True(ok, "%s must resolve r to an edge union, not %T", pattern, vq.Columns[0].Type)
+		return u.EdgeKeys
+	}
+
+	short := resolveKeys("(p:Person)-[r:AUTHORED|LIKES]->(post:Post)")
+	long := resolveKeys("(p:Person)-[r:AUTHORED|LIKES|SHARED]->(post:Post)")
+
+	s.Require().Less(len(short), len(long), "the two branches must differ in arity")
+	s.Require().Equal(long[:len(short)], short,
+		"the shorter key list must be a strict prefix of the longer, or the element-wise loop catches the mismatch on its own and the arity check goes untested")
+
+	// And both fixtures really do pair those two branches, so the assertion above
+	// is about the queries under test rather than a pattern nothing uses.
+	for _, name := range []string{
+		"union_edge_union_arity_prefix.cypher",
+		"union_edge_union_arity_prefix_reversed.cypher",
+	} {
+		src, err := os.ReadFile(filepath.Join(fixtureDir, "invalid", name))
+		s.Require().NoError(err)
+		s.Require().Contains(string(src), "[r:AUTHORED|LIKES]->", name)
+		s.Require().Contains(string(src), "[r:AUTHORED|LIKES|SHARED]->", name)
 	}
 }
 

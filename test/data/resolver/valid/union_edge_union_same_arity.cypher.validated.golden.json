@@ -1,0 +1,32 @@
+{
+  "columns": [
+    {
+      "name": "r",
+      "type": {
+        "kind": "edgeUnion",
+        "edgeKeys": [
+          {
+            "source": "Person",
+            "key_labels": "AUTHORED",
+            "target": "Post"
+          },
+          {
+            "source": "Person",
+            "key_labels": "LIKES",
+            "target": "Post"
+          },
+          {
+            "source": "Person",
+            "key_labels": "SHARED",
+            "target": "Post"
+          }
+        ],
+        "nullable": false
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "read",
+  "distinct": true
+}
