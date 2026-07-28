@@ -1,0 +1,10 @@
+-- sourceNodeTypeReference#1 and destinationNodeTypeReference#1: the endpoint
+-- naming a node type by a local alias, rather than by an inline filler as every
+-- other resolving file in this area does. Both alternatives resolved only under
+-- areas A and 18.1 before this file, so the tag rested on spellings this area
+-- does not own — the shape gqlc-h9n.26's resolving-path gate reports.
+CREATE PROPERTY GRAPH TYPE Seed {
+    (author:Person { id :: INT NOT NULL }),
+    (post:Post { id :: INT NOT NULL }),
+    (author) -[:AUTHORED { publishedAt :: TIMESTAMP }]-> (post)
+}
