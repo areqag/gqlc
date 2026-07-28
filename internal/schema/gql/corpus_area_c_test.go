@@ -27,8 +27,8 @@ var corpusAreaC = []corpusEntry{
 		outcome:  unsupported,
 		sentinel: ErrEdgeKindArcMismatch,
 		feature:  "mandatory",
-		bead:     "gqlc-h9n.3",
-		reason:   "the declared edgeKind (UNDIRECTED) contradicts the arc direction (->); rejected rather than silently reinterpreted as DIRECTED",
+		bead:     "gqlc-xtq",
+		reason:   "the declared edgeKind (UNDIRECTED) contradicts the arc direction (->); rejected rather than silently reinterpreted as DIRECTED. Provisional deviation: whether ISO Syntax Rules permit or forbid this is undecided without the paid PDF; implementation-defined.xml does not list it (127 items checked). See gqlc-xtq",
 	},
 	{
 		file:    "18.3-edge-type/pattern_name_no_kind.gql",
@@ -55,8 +55,8 @@ var corpusAreaC = []corpusEntry{
 		outcome:  unsupported,
 		sentinel: ErrEdgeKindArcMismatch,
 		feature:  "mandatory",
-		bead:     "gqlc-h9n.3",
-		reason:   "kind=DIRECTED with the `~` (undirected) connector is a contradiction: the mismatch fires before the accepted-subset check that would otherwise report ErrUndirectedEdge for the bare connector",
+		bead:     "gqlc-xtq",
+		reason:   "kind=DIRECTED with the `~` (undirected) connector is a contradiction: the mismatch fires before the accepted-subset check that would otherwise report ErrUndirectedEdge for the bare connector. Provisional deviation: whether ISO Syntax Rules permit or forbid this is undecided without the paid PDF. See gqlc-xtq",
 	},
 	{
 		file:     "18.3-edge-type/kind_undirected_connector_to.gql",
