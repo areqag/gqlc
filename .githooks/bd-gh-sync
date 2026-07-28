@@ -33,6 +33,63 @@ _token=$(gh auth token 2>/dev/null) || exit 0
 [ -n "$_token" ] || exit 0
 
 if [ "$_action" = "pull" ]; then
+  # Guard: --prefer-github makes the GH issue body authoritative for bead
+  # descriptions, so a bd-only amendment is silently reverted on the next pull.
+  # Detect divergence BEFORE the sync and skip the pull with actionable
+  # instructions rather than letting the overwrite happen without notice.
+  # One bulk `gh issue list` call keeps overhead O(1) across all beads.
+  _bd_beads=$(bd list --status all --limit 0 --json 2>/dev/null || echo '[]')
+  _gh_bodies=$(GITHUB_TOKEN="$_token" gh issue list \
+    --state all --limit 1000 --json number,body 2>/dev/null || echo '[]')
+  _diverged=$(BD_BEADS="$_bd_beads" GH_BODIES="$_gh_bodies" python3 - <<'PYEOF'
+import json, re, os, sys
+
+try:
+    bd_beads = json.loads(os.environ["BD_BEADS"])
+except Exception:
+    bd_beads = []
+try:
+    gh_issues = json.loads(os.environ["GH_BODIES"])
+except Exception:
+    gh_issues = []
+
+gh_body_by_num = {i["number"]: (i.get("body") or "").strip() for i in gh_issues}
+pat = re.compile(r"/issues/(\d+)$")
+
+for b in bd_beads:
+    # Only open/in-progress beads get description amendments; skip closed ones.
+    if b.get("status") not in ("open", "in_progress"):
+        continue
+    ext = b.get("external_ref") or ""
+    m = pat.search(ext)
+    if not m:
+        continue
+    n = int(m.group(1))
+    local_desc = (b.get("description") or "").strip()
+    if not local_desc:
+        continue
+    remote_body = gh_body_by_num.get(n)
+    if remote_body is None:
+        continue  # GH issue not in bulk list (>1000); skip safely
+    if local_desc != remote_body:
+        print(f"{b['id']}:{n}:{len(local_desc)}:{len(remote_body)}")
+PYEOF
+)
+
+  if [ -n "$_diverged" ]; then
+    echo "bd-gh-sync: SKIPPING pull — bd description differs from GH issue body." >&2
+    echo "bd-gh-sync: Pulling would silently revert the local amendment(s)." >&2
+    echo "" >&2
+    printf '%s\n' "$_diverged" | while IFS=: read bid n local_len gh_len; do
+      echo "  $bid  local=${local_len}ch  GH #${n}=${gh_len}ch" >&2
+      echo "  Mirror to GH first: bd show $bid | ... > /tmp/${bid}.md" >&2
+      echo "                      gh issue edit $n --body-file /tmp/${bid}.md" >&2
+    done
+    echo "" >&2
+    echo "bd-gh-sync: Once GH matches bd, re-run or start a new session." >&2
+    exit 0
+  fi
+
   GITHUB_TOKEN="$_token" bd github sync --pull-only --prefer-github || true
   exit 0
 fi
