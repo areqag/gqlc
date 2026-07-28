@@ -1,0 +1,16 @@
+-- implied_key_label_not_first.gql moved out one level: there the collision sits
+-- off the front of a single declaration's implied label set, here it sits off the
+-- front of the list of implying declarations. rejectInheritance walks two nested
+-- loops and each needs its own case — narrowing the outer one to its first entry
+-- left the suite green, because every other GG21 file has exactly one `=>`
+-- declaration or puts the colliding one first.
+--
+-- Unsupported: ErrImpliedLabelIsKeyLabel, for ADR 0015's reason. Manager implies
+-- Staff, which no declaration holds as a key label, so the first entry passes and
+-- a check that stops there accepts the body. Engineer implies Person, which the
+-- third declaration does hold.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Manager => :Staff { rank :: INT }),
+    (:Engineer => :Person { level :: INT }),
+    (:Person { name :: STRING })
+}
