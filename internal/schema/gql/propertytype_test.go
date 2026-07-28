@@ -1,6 +1,7 @@
 package gql
 
 import (
+	"sort"
 	"strings"
 	"testing"
 
@@ -48,64 +49,84 @@ func (c *propertyCollector) EnterPropertyType(ctx *gen.PropertyTypeContext) {
 	}
 }
 
+// typePin is one spelling asserted to resolve, end to end through the real
+// grammar, to a named model constant. typeEquivalence is one pair asserted to
+// resolve to the same constant as each other, whichever that turns out to be —
+// order carries no meaning, since the relation it feeds is symmetric.
+//
+// Both exist as package-level tables rather than literals inside their tests so
+// that TestTypeSpellingsEveryRowPinned can range over them. That gate is what
+// stops a typeSpellings row from being added, or silently repointed, with no
+// end-to-end assertion behind it; see its doc comment for why the grounding is
+// computed from these two shapes rather than read off typeSpellings itself.
+type typePin struct {
+	spelling string
+	want     graph.PropertyType
+}
+
+type typeEquivalence struct{ a, b string }
+
+// typeMappingPins is the base of the grounding relation: spellings whose
+// resolved constant is written out by hand here, independently of the map under
+// test.
+var typeMappingPins = []typePin{
+	{"STRING", graph.TypeString},
+	{"CHAR", graph.TypeString},
+	{"VARCHAR", graph.TypeString},
+	{"BYTES", graph.TypeBytes},
+	{"BINARY", graph.TypeBytes},
+	{"VARBINARY", graph.TypeBytes},
+	{"BOOL", graph.TypeBool},
+	{"BOOLEAN", graph.TypeBool},
+	{"DATE", graph.TypeDate},
+
+	{"ZONED TIME", graph.TypeTime},
+	{"TIME WITH TIME ZONE", graph.TypeTime},
+
+	{"LOCAL TIME", graph.TypeLocalTime},
+	{"TIME WITHOUT TIME ZONE", graph.TypeLocalTime},
+
+	{"TIMESTAMP", graph.TypeTimestamp},
+	{"ZONED DATETIME", graph.TypeTimestamp},
+	{"LOCAL DATETIME", graph.TypeTimestamp},
+	{"TIMESTAMP WITH TIME ZONE", graph.TypeTimestamp},
+	{"TIMESTAMP WITHOUT TIME ZONE", graph.TypeTimestamp},
+
+	{"DURATION(YEAR TO MONTH)", graph.TypeDuration},
+	{"DURATION(DAY TO SECOND)", graph.TypeDuration},
+
+	{"INT", graph.TypeInt},
+	{"INTEGER", graph.TypeInt},
+	{"SMALLINT", graph.TypeInt16},
+	{"SMALL INTEGER", graph.TypeInt16},
+	{"BIGINT", graph.TypeInt64},
+	{"BIG INTEGER", graph.TypeInt64},
+	{"INT8", graph.TypeInt8},
+	{"INTEGER8", graph.TypeInt8},
+	{"INT256", graph.TypeInt256},
+
+	{"UINT", graph.TypeUint},
+	{"USMALLINT", graph.TypeUint16},
+	{"UBIGINT", graph.TypeUint64},
+	{"UINT8", graph.TypeUint8},
+	{"UINT256", graph.TypeUint256},
+
+	{"FLOAT", graph.TypeFloat},
+	{"REAL", graph.TypeFloat32},
+	{"DOUBLE", graph.TypeFloat64},
+	{"DOUBLE PRECISION", graph.TypeFloat64},
+	{"FLOAT16", graph.TypeFloat16},
+	{"FLOAT32", graph.TypeFloat32},
+	{"FLOAT64", graph.TypeFloat64},
+	{"FLOAT128", graph.TypeFloat128},
+	{"FLOAT256", graph.TypeFloat256},
+
+	{"DECIMAL", graph.TypeDecimal},
+	{"DEC", graph.TypeDecimal},
+}
+
 func TestPropertyTypeMapping(t *testing.T) {
-	cases := []struct {
-		spelling string
-		want     graph.PropertyType
-	}{
-		{"STRING", graph.TypeString},
-		{"CHAR", graph.TypeString},
-		{"VARCHAR", graph.TypeString},
-		{"BYTES", graph.TypeBytes},
-		{"BINARY", graph.TypeBytes},
-		{"VARBINARY", graph.TypeBytes},
-		{"BOOL", graph.TypeBool},
-		{"BOOLEAN", graph.TypeBool},
-		{"DATE", graph.TypeDate},
-
-		{"ZONED TIME", graph.TypeTime},
-		{"TIME WITH TIME ZONE", graph.TypeTime},
-
-		{"LOCAL TIME", graph.TypeLocalTime},
-		{"TIME WITHOUT TIME ZONE", graph.TypeLocalTime},
-
-		{"TIMESTAMP", graph.TypeTimestamp},
-		{"ZONED DATETIME", graph.TypeTimestamp},
-		{"LOCAL DATETIME", graph.TypeTimestamp},
-		{"TIMESTAMP WITH TIME ZONE", graph.TypeTimestamp},
-		{"TIMESTAMP WITHOUT TIME ZONE", graph.TypeTimestamp},
-
-		{"DURATION(YEAR TO MONTH)", graph.TypeDuration},
-		{"DURATION(DAY TO SECOND)", graph.TypeDuration},
-
-		{"INT", graph.TypeInt},
-		{"INTEGER", graph.TypeInt},
-		{"SMALLINT", graph.TypeInt16},
-		{"SMALL INTEGER", graph.TypeInt16},
-		{"BIGINT", graph.TypeInt64},
-		{"BIG INTEGER", graph.TypeInt64},
-		{"INT8", graph.TypeInt8},
-		{"INTEGER8", graph.TypeInt8},
-		{"INT256", graph.TypeInt256},
-
-		{"UINT", graph.TypeUint},
-		{"USMALLINT", graph.TypeUint16},
-		{"UBIGINT", graph.TypeUint64},
-		{"UINT8", graph.TypeUint8},
-		{"UINT256", graph.TypeUint256},
-
-		{"FLOAT", graph.TypeFloat},
-		{"REAL", graph.TypeFloat32},
-		{"DOUBLE", graph.TypeFloat64},
-		{"DOUBLE PRECISION", graph.TypeFloat64},
-		{"FLOAT16", graph.TypeFloat16},
-		{"FLOAT256", graph.TypeFloat256},
-
-		{"DECIMAL", graph.TypeDecimal},
-		{"DEC", graph.TypeDecimal},
-	}
-
-	for _, tt := range cases {
+	for _, tt := range typeMappingPins {
 		t.Run(tt.spelling, func(t *testing.T) {
 			got, err := parseFirstProperty(t, tt.spelling)
 			require.NoError(t, err)
@@ -139,6 +160,32 @@ func TestPropertyLengthQualifiersDropped(t *testing.T) {
 	}
 }
 
+// widthFoldPins is the second base of the grounding relation: parenthesised
+// widths whose folded constant is written out by hand, so a typeSpellings row
+// reached only through truncateParenthetical still counts as pinned.
+var widthFoldPins = []typePin{
+	{"INT(8)", graph.TypeInt8},
+	{"INT(16)", graph.TypeInt16},
+	{"INT(32)", graph.TypeInt32},
+	{"INT(64)", graph.TypeInt64},
+	{"INT(128)", graph.TypeInt128},
+	{"INT(256)", graph.TypeInt256},
+
+	{"INTEGER(8)", graph.TypeInt8},
+	{"INTEGER(16)", graph.TypeInt16},
+	{"INTEGER(32)", graph.TypeInt32},
+	{"INTEGER(64)", graph.TypeInt64},
+	{"INTEGER(128)", graph.TypeInt128},
+	{"INTEGER(256)", graph.TypeInt256},
+
+	{"UINT(8)", graph.TypeUint8},
+	{"UINT(16)", graph.TypeUint16},
+	{"UINT(32)", graph.TypeUint32},
+	{"UINT(64)", graph.TypeUint64},
+	{"UINT(128)", graph.TypeUint128},
+	{"UINT(256)", graph.TypeUint256},
+}
+
 // TestPropertyBinaryWidthParenthesisedFolds covers the ISO GQL binary-width
 // parenthetical folding onto the corresponding width constant, so `INT(8)` and
 // `INT8` resolve to the same PropertyType. The fold applies only where the
@@ -150,33 +197,7 @@ func TestPropertyLengthQualifiersDropped(t *testing.T) {
 // TestPropertyBinaryWidthNonFolds. Distinct from TestPropertyLengthQualifiersDropped,
 // which pins the decimal/character-length parenthetical as still being dropped.
 func TestPropertyBinaryWidthParenthesisedFolds(t *testing.T) {
-	cases := []struct {
-		spelling string
-		want     graph.PropertyType
-	}{
-		{"INT(8)", graph.TypeInt8},
-		{"INT(16)", graph.TypeInt16},
-		{"INT(32)", graph.TypeInt32},
-		{"INT(64)", graph.TypeInt64},
-		{"INT(128)", graph.TypeInt128},
-		{"INT(256)", graph.TypeInt256},
-
-		{"INTEGER(8)", graph.TypeInt8},
-		{"INTEGER(16)", graph.TypeInt16},
-		{"INTEGER(32)", graph.TypeInt32},
-		{"INTEGER(64)", graph.TypeInt64},
-		{"INTEGER(128)", graph.TypeInt128},
-		{"INTEGER(256)", graph.TypeInt256},
-
-		{"UINT(8)", graph.TypeUint8},
-		{"UINT(16)", graph.TypeUint16},
-		{"UINT(32)", graph.TypeUint32},
-		{"UINT(64)", graph.TypeUint64},
-		{"UINT(128)", graph.TypeUint128},
-		{"UINT(256)", graph.TypeUint256},
-	}
-
-	for _, tt := range cases {
+	for _, tt := range widthFoldPins {
 		t.Run(tt.spelling, func(t *testing.T) {
 			got, err := parseFirstProperty(t, tt.spelling)
 			require.NoError(t, err)
@@ -262,6 +283,31 @@ func TestPropertyBinaryWidthWhitespaceAndCase(t *testing.T) {
 	}
 }
 
+// widthSpellingEquivalences pairs each explicit width token with its
+// parenthesised spelling, read suffix-first: {"INT8", "INT(8)"}.
+var widthSpellingEquivalences = []typeEquivalence{
+	{"INT8", "INT(8)"},
+	{"INT16", "INT(16)"},
+	{"INT32", "INT(32)"},
+	{"INT64", "INT(64)"},
+	{"INT128", "INT(128)"},
+	{"INT256", "INT(256)"},
+
+	{"INTEGER8", "INTEGER(8)"},
+	{"INTEGER16", "INTEGER(16)"},
+	{"INTEGER32", "INTEGER(32)"},
+	{"INTEGER64", "INTEGER(64)"},
+	{"INTEGER128", "INTEGER(128)"},
+	{"INTEGER256", "INTEGER(256)"},
+
+	{"UINT8", "UINT(8)"},
+	{"UINT16", "UINT(16)"},
+	{"UINT32", "UINT(32)"},
+	{"UINT64", "UINT(64)"},
+	{"UINT128", "UINT(128)"},
+	{"UINT256", "UINT(256)"},
+}
+
 // TestPropertyBinaryWidthSuffixAndParenthesisedEquivalent asserts the property
 // the bead is actually about: for the binary integer branches whose grammar
 // makes the parenthesised form a sibling of an explicit width token, the two
@@ -273,36 +319,13 @@ func TestPropertyBinaryWidthWhitespaceAndCase(t *testing.T) {
 // FLOAT pairs here would assert an equivalence the code intentionally does
 // not honour.
 func TestPropertyBinaryWidthSuffixAndParenthesisedEquivalent(t *testing.T) {
-	pairs := []struct{ suffix, parenthesised string }{
-		{"INT8", "INT(8)"},
-		{"INT16", "INT(16)"},
-		{"INT32", "INT(32)"},
-		{"INT64", "INT(64)"},
-		{"INT128", "INT(128)"},
-		{"INT256", "INT(256)"},
-
-		{"INTEGER8", "INTEGER(8)"},
-		{"INTEGER16", "INTEGER(16)"},
-		{"INTEGER32", "INTEGER(32)"},
-		{"INTEGER64", "INTEGER(64)"},
-		{"INTEGER128", "INTEGER(128)"},
-		{"INTEGER256", "INTEGER(256)"},
-
-		{"UINT8", "UINT(8)"},
-		{"UINT16", "UINT(16)"},
-		{"UINT32", "UINT(32)"},
-		{"UINT64", "UINT(64)"},
-		{"UINT128", "UINT(128)"},
-		{"UINT256", "UINT(256)"},
-	}
-
-	for _, pair := range pairs {
-		t.Run(pair.suffix+"_vs_"+pair.parenthesised, func(t *testing.T) {
-			suf, err := parseFirstProperty(t, pair.suffix)
+	for _, pair := range widthSpellingEquivalences {
+		t.Run(pair.a+"_vs_"+pair.b, func(t *testing.T) {
+			suf, err := parseFirstProperty(t, pair.a)
 			require.NoError(t, err)
-			par, err := parseFirstProperty(t, pair.parenthesised)
+			par, err := parseFirstProperty(t, pair.b)
 			require.NoError(t, err)
-			require.Equal(t, suf.Type, par.Type, "%s and %s must resolve to the same PropertyType", pair.suffix, pair.parenthesised)
+			require.Equal(t, suf.Type, par.Type, "%s and %s must resolve to the same PropertyType", pair.a, pair.b)
 		})
 	}
 }
@@ -320,6 +343,30 @@ func TestPropertyNullability(t *testing.T) {
 	require.Equal(t, graph.TypeInt, notNull.Type, "NOT NULL must not corrupt the type")
 }
 
+// verboseSignednessEquivalences pairs each explicitly-signed verbose spelling
+// with its bare counterpart, read prefixed-first: {"SIGNED INTEGER", "INTEGER"}.
+var verboseSignednessEquivalences = []typeEquivalence{
+	{"SIGNED INTEGER", "INTEGER"},
+	{"SIGNED INTEGER8", "INTEGER8"},
+	{"SIGNED INTEGER16", "INTEGER16"},
+	{"SIGNED INTEGER32", "INTEGER32"},
+	{"SIGNED INTEGER64", "INTEGER64"},
+	{"SIGNED INTEGER128", "INTEGER128"},
+	{"SIGNED INTEGER256", "INTEGER256"},
+	{"SIGNED SMALL INTEGER", "SMALL INTEGER"},
+	{"SIGNED BIG INTEGER", "BIG INTEGER"},
+
+	{"UNSIGNED INTEGER", "UINT"},
+	{"UNSIGNED INTEGER8", "UINT8"},
+	{"UNSIGNED INTEGER16", "UINT16"},
+	{"UNSIGNED INTEGER32", "UINT32"},
+	{"UNSIGNED INTEGER64", "UINT64"},
+	{"UNSIGNED INTEGER128", "UINT128"},
+	{"UNSIGNED INTEGER256", "UINT256"},
+	{"UNSIGNED SMALL INTEGER", "USMALLINT"},
+	{"UNSIGNED BIG INTEGER", "UBIGINT"},
+}
+
 // TestPropertyVerboseIntegerSignedness covers the SIGNED / UNSIGNED prefix on
 // verboseBinaryExactNumericType (GQL.g4:1803 for SIGNED?, :1816 for UNSIGNED).
 // Both signednesses are equivalent to their bare verbose counterpart under the
@@ -333,35 +380,13 @@ func TestPropertyNullability(t *testing.T) {
 // TestPropertyTypeMapping), and the SIGNED-present rows here pin the explicit
 // keyword equivalence.
 func TestPropertyVerboseIntegerSignedness(t *testing.T) {
-	pairs := []struct{ prefixed, bare string }{
-		{"SIGNED INTEGER", "INTEGER"},
-		{"SIGNED INTEGER8", "INTEGER8"},
-		{"SIGNED INTEGER16", "INTEGER16"},
-		{"SIGNED INTEGER32", "INTEGER32"},
-		{"SIGNED INTEGER64", "INTEGER64"},
-		{"SIGNED INTEGER128", "INTEGER128"},
-		{"SIGNED INTEGER256", "INTEGER256"},
-		{"SIGNED SMALL INTEGER", "SMALL INTEGER"},
-		{"SIGNED BIG INTEGER", "BIG INTEGER"},
-
-		{"UNSIGNED INTEGER", "UINT"},
-		{"UNSIGNED INTEGER8", "UINT8"},
-		{"UNSIGNED INTEGER16", "UINT16"},
-		{"UNSIGNED INTEGER32", "UINT32"},
-		{"UNSIGNED INTEGER64", "UINT64"},
-		{"UNSIGNED INTEGER128", "UINT128"},
-		{"UNSIGNED INTEGER256", "UINT256"},
-		{"UNSIGNED SMALL INTEGER", "USMALLINT"},
-		{"UNSIGNED BIG INTEGER", "UBIGINT"},
-	}
-
-	for _, pair := range pairs {
-		t.Run(pair.prefixed+"_equals_"+pair.bare, func(t *testing.T) {
-			pref, err := parseFirstProperty(t, pair.prefixed)
+	for _, pair := range verboseSignednessEquivalences {
+		t.Run(pair.a+"_equals_"+pair.b, func(t *testing.T) {
+			pref, err := parseFirstProperty(t, pair.a)
 			require.NoError(t, err)
-			bare, err := parseFirstProperty(t, pair.bare)
+			bare, err := parseFirstProperty(t, pair.b)
 			require.NoError(t, err)
-			require.Equal(t, bare.Type, pref.Type, "%s must resolve to the same PropertyType as %s", pair.prefixed, pair.bare)
+			require.Equal(t, bare.Type, pref.Type, "%s must resolve to the same PropertyType as %s", pair.a, pair.b)
 		})
 	}
 }
@@ -404,4 +429,83 @@ func TestPropertyUnsupportedType(t *testing.T) {
 			require.ErrorIs(t, err, ErrUnsupportedType)
 		})
 	}
+}
+
+// typeSpellingsRowFor resolves a spelling to the typeSpellings key normaliseType
+// would read for it, mirroring that function's two-step lookup so that a row
+// reached only through truncateParenthetical still counts. This is the one place
+// the completeness gate touches the map under test, and the split matters: the
+// map decides only *which* row a pin covers, never *whether* the pin is right,
+// because every typePin's want is written out by hand.
+func typeSpellingsRowFor(spelling string) (string, bool) {
+	full := canonicalSpelling(spelling)
+	if _, ok := typeSpellings[full]; ok {
+		return full, true
+	}
+	truncated := truncateParenthetical(full)
+	if _, ok := typeSpellings[truncated]; ok {
+		return truncated, true
+	}
+	return "", false
+}
+
+// TestTypeSpellingsEveryRowPinned is the completeness gate: every row of
+// typeSpellings must be grounded in a hand-written end-to-end assertion. A row
+// is grounded if some typePin resolves to it, or if an equivalence pair links it
+// to a row that is — the relation is symmetric and closed to a fixpoint, so
+// `UNSIGNED INTEGER32` inherits its grounding from `UINT32` inheriting it from
+// `TestPropertyTypeMapping`.
+//
+// The grounding is computed from the pin and equivalence tables rather than read
+// off typeSpellings, because reading the expected constants off the map would
+// make the gate agree with any repointing of it — the evidentiary circularity
+// gqlc-exl rules out for golden snapshots, in a smaller form. What this catches
+// instead is the silent failure mode of the status quo: a row added, or
+// repointed onto an existing row, with no assertion behind it. A corpus entry
+// saying the fixture "resolves" cannot catch that, which is the decision
+// recorded next to the manifest in corpus_test.go.
+//
+// DURATION is grounded without an exemption: bare DURATION is a syntax error
+// (TestPropertyBareDurationRejectedAtParse), but DURATION(YEAR TO MONTH) is
+// pinned and reaches the row down the same fallback the production code takes.
+func TestTypeSpellingsEveryRowPinned(t *testing.T) {
+	grounded := make(map[string]bool, len(typeSpellings))
+	row := func(spelling string) string {
+		got, ok := typeSpellingsRowFor(spelling)
+		require.True(t, ok, "pinned spelling %q reaches no typeSpellings row, so it grounds nothing", spelling)
+		return got
+	}
+
+	for _, table := range [][]typePin{typeMappingPins, widthFoldPins} {
+		for _, pin := range table {
+			grounded[row(pin.spelling)] = true
+		}
+	}
+
+	var linked [][2]string
+	for _, table := range [][]typeEquivalence{widthSpellingEquivalences, verboseSignednessEquivalences} {
+		for _, pair := range table {
+			linked = append(linked, [2]string{row(pair.a), row(pair.b)})
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, pair := range linked {
+			if grounded[pair[0]] != grounded[pair[1]] {
+				grounded[pair[0]], grounded[pair[1]] = true, true
+				changed = true
+			}
+		}
+	}
+
+	ungrounded := make([]string, 0, len(typeSpellings))
+	for key := range typeSpellings {
+		if !grounded[key] {
+			ungrounded = append(ungrounded, key)
+		}
+	}
+	sort.Strings(ungrounded)
+	require.Empty(t, ungrounded,
+		"every typeSpellings row needs an end-to-end pin: add the spelling to typeMappingPins or widthFoldPins with the constant you expect, "+
+			"or to an equivalence table if it is an alias of a row that already has one")
 }

@@ -54,6 +54,29 @@ import (
 // removed look identical. A drop is legitimate exactly once per case — when the bead
 // lands, TestSemanticCaseCollisions goes red, and the row is deleted with this number
 // — which is why it is a pin to repin rather than a lower bound.
+//
+// What the manifest deliberately does NOT do (gqlc-h9n.24). `resolves` says the
+// file produced a schema and no error. It does not say which schema, so a change
+// that makes a fixture resolve to a different but still plausible model — INT(8)
+// moving off TypeInt8, an alias repointed — leaves every count here green. Two
+// beads have now independently expected otherwise, so this is written down: the
+// corpus is a coverage instrument, not a model-identity instrument, and that is
+// on purpose rather than unfinished.
+//
+// The alternative was a `model:` field, or golden model snapshots per file.
+// Golden snapshots are ruled out on evidence, not cost — gqlc-exl's standing
+// argument is that round-tripping launders current behaviour into "expected", and
+// -update silently rebases thereafter, which is a worse instrument than none. A
+// `model:` field is opt-in, so it is only as good as the rows that opt in, and the
+// row that matters is the one whose author did not think identity was at stake.
+//
+// So model identity is pinned where the model lives, by hand-written tables next
+// to the code that produces it, and the discipline that used to rely on the author
+// remembering is mechanical: TestTypeSpellingsEveryRowPinned fails if a
+// typeSpellings row is added or repointed with no end-to-end pin behind it.
+// semanticCase covers the other half — a fixture that resolves to a model known to
+// be wrong — and TestSemanticCaseCollisions asserts those. Neither reads its
+// expectations off the map under test, which is what keeps them evidence.
 const (
 	wantCorpusEntries   = 90
 	wantCorpusResolving = 50
