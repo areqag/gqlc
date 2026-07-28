@@ -1,0 +1,9 @@
+-- A token the lexer cannot recognise, placed where the parser is already
+-- content. syntax_error.gql is the parser's half of the same plumbing; this is
+-- the lexer's, and the position is what separates them: every other bad
+-- character in this directory sits inside a construct, so the parser objects to
+-- it too and the lexer listener only changes the message. Here the graph type is
+-- complete before the `#`, the token stream the parser sees ends at EOF either
+-- way, and removing lex.AddErrorListener leaves this parsing cleanly to one node
+-- type (gqlc-1us).
+CREATE PROPERTY GRAPH TYPE T AS { (:A { p :: INT }) } #
