@@ -20,6 +20,8 @@
     "list_of_edges_projection.cypher": "social.gql",
     "ambiguous_edge_orientation.cypher": "social_r3.gql",
     "ambiguous_edge_orientation_after_inference.cypher": "social_r3.gql",
+    "path_binding.cypher": "social_r3.gql",
+    "unwind_binding.cypher": "social_r3.gql",
     "unknown_edge_undirected.cypher": "social_r3.gql",
     "unknown_edge_multi_type_all_miss.cypher": "social.gql",
     "unknown_property_union_missing.cypher": "social_r3.gql",
