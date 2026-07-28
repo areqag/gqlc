@@ -1,0 +1,19 @@
+-- Schema shared with valid/schemas/satisfy_singular.gql.
+-- Used by invalid fixtures that test plural label satisfaction behaviour
+-- (ADR 0022): property not present on all satisfying types → ErrUnknownProperty,
+-- whole-entity reference to a plural satisfying set → ErrAmbiguousLabel.
+
+CREATE PROPERTY GRAPH TYPE SatisfySingular AS {
+
+    (:Person {
+        id   :: INT NOT NULL,
+        name :: STRING NOT NULL
+    }),
+
+    (:Person&Employee {
+        id         :: INT NOT NULL,
+        employeeId :: INT NOT NULL,
+        title      :: STRING
+    })
+
+}

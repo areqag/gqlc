@@ -97,5 +97,7 @@
     "label_satisfy_none.cypher": "satisfy_ambiguous.gql",
     "set_property_unknown_on_single_type_edge.cypher": "social_r6.gql",
     "remove_property_unknown_on_single_type_edge.cypher": "social_r6.gql",
-    "effect_order_first_failure_wins.cypher": "social_r6.gql"
+    "effect_order_first_failure_wins.cypher": "social_r6.gql",
+    "label_satisfy_plural_property.cypher": "satisfy_singular.gql",
+    "label_satisfy_plural_entity.cypher": "satisfy_singular.gql"
 }

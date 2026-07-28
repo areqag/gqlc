@@ -1,10 +1,10 @@
 {
   "columns": [
     {
-      "name": "p.name",
+      "name": "p.id",
       "type": {
         "kind": "property",
-        "type": "STRING",
+        "type": "INT",
         "nullable": false
       },
       "groupingKey": false

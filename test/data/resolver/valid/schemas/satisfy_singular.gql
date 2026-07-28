@@ -1,9 +1,8 @@
--- Exercises label satisfaction where the singular case is reachable two ways:
--- via an exact match on the declared label set, and via subset match onto a
--- unique declared node type. The bare (:Person ...) plus multi-label
--- (:Person&Employee ...) shape is the regression case: `MATCH (p:Person)` must
--- resolve to the bare Person via exact-match precedence, not refuse as a
--- plural satisfying set.
+-- Exercises label satisfaction under ADR 0022 (option B): satisfaction is
+-- satisfaction, so `MATCH (p:Person)` satisfies both (:Person) and
+-- (:Person&Employee). Property intersection requires a shared property on both.
+-- The `id` property is shared (same type and nullability) to allow
+-- label_satisfy_plural_intersection.cypher to pass.
 
 CREATE PROPERTY GRAPH TYPE SatisfySingular AS {
 
@@ -13,6 +12,7 @@ CREATE PROPERTY GRAPH TYPE SatisfySingular AS {
     }),
 
     (:Person&Employee {
+        id         :: INT NOT NULL,
         employeeId :: INT NOT NULL,
         title      :: STRING
     })

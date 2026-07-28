@@ -293,6 +293,12 @@ var invalidFixtures = map[string]error{
 	// The witness reports unknown properties for nodes and edges separately; the
 	// node arm was pinned and the edge arm was not.
 	"parameter_use_unknown_edge_property.cypher": ErrUnknownProperty,
+	// h9n.22 additions. Plural label satisfaction (ADR 0022): a query label set
+	// that satisfies more than one declared node type is permitted, but property
+	// projection requires the property on every satisfying type (intersection),
+	// and whole-entity reference is refused.
+	"label_satisfy_plural_property.cypher": ErrUnknownProperty,
+	"label_satisfy_plural_entity.cypher":   ErrAmbiguousLabel,
 }
 
 type ResolverSuite struct {
