@@ -172,6 +172,21 @@ var invalidFixtures = map[string]error{
 	"union_edge_union_arity_prefix_reversed.cypher": ErrUnionColumnMismatch,
 	"part_binding_type_conflict.cypher":             ErrPartBindingTypeConflict,
 	"part_binding_type_conflict_edge.cypher":        ErrPartBindingTypeConflict,
+	// oou additions. unify checks property type and nullability side by side
+	// and both raise ErrParameterTypeConflict, so
+	// parameter_type_conflict_two_properties.cypher — STRING NOT NULL against
+	// a nullable INT — was caught by the nullability check and left the type
+	// check free. Both properties here are NOT NULL.
+	"parameter_type_conflict_two_properties_same_nullability.cypher": ErrParameterTypeConflict,
+	// The unlabelled twin of part_binding_type_conflict_call_vs_node.cypher.
+	// The labelled arm's collision check fires at Phase A1; inferUnlabelled
+	// carries its own copy for bindings that reach it, and that copy had no
+	// fixture.
+	"part_binding_type_conflict_call_vs_unlabelled.cypher": ErrPartBindingTypeConflict,
+	// resolveNodeLabels' empty-satisfying-set arm. Every label here is
+	// declared somewhere, so the undeclared-label arm above does not fire,
+	// but no declared type carries both.
+	"label_satisfy_none.cypher": ErrUnknownLabel,
 	// R6 additions:
 	"create_unknown_label.cypher":            ErrUnknownLabel,
 	"create_unknown_edge.cypher":             ErrUnknownEdge,
