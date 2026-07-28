@@ -672,7 +672,7 @@ func computeObligation() (obligation, error) {
 
 	invisible := invisibleAlternatives(parserRules, nonFrontier, len(rules), len(tokens))
 	index := newAlternativeIndex(parserRules)
-	required, err := requiredAlternatives(invisible, index)
+	required, err := requiredAlternatives(invisible, index, alternativeExemptions)
 	if err != nil {
 		return obligation{}, err
 	}
@@ -693,7 +693,13 @@ func computeObligation() (obligation, error) {
 // a candidate is rejected rather than ignored: the two lists are registries of the
 // same thing, and an exemption that matches nothing silently stops excusing
 // whatever it was written for.
-func requiredAlternatives(invisible []string, index *alternativeIndex) ([]string, error) {
+//
+// exemptions is a parameter rather than a read of the package-level list so that
+// TestRequiredAlternativesDemandsTheThief can supply one whose thief is outside the
+// candidate set. Today's only exemption has a thief that is itself a candidate, so
+// the append below is a no-op against the real list and unpinnable through it.
+// Every caller outside that test passes alternativeExemptions.
+func requiredAlternatives(invisible []string, index *alternativeIndex, exemptions []alternativeExemption) ([]string, error) {
 	candidates := make(map[string]bool, len(invisible))
 	for _, tag := range invisible {
 		candidates[tag] = true
@@ -702,8 +708,8 @@ func requiredAlternatives(invisible []string, index *alternativeIndex) ([]string
 		}
 	}
 
-	exempt := make(map[string]bool, len(alternativeExemptions))
-	for _, ex := range alternativeExemptions {
+	exempt := make(map[string]bool, len(exemptions))
+	for _, ex := range exemptions {
 		switch {
 		case !candidates[ex.tag]:
 			return nil, fmt.Errorf("exemption %q is not a candidate alternative; delete it", ex.tag)
@@ -728,7 +734,7 @@ func requiredAlternatives(invisible []string, index *alternativeIndex) ([]string
 	// A stolenBy that is itself a candidate is already here, so this is a no-op in the
 	// usual case. It is done anyway so that a grammar change moving the thief out of
 	// the candidate set cannot quietly retire the demand along with it.
-	for _, ex := range alternativeExemptions {
+	for _, ex := range exemptions {
 		if !demanded[ex.stolenBy] {
 			required = append(required, ex.stolenBy)
 			demanded[ex.stolenBy] = true

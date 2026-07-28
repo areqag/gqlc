@@ -664,6 +664,42 @@ func TestExemptionDemands(t *testing.T) {
 	}
 }
 
+// TestRequiredAlternativesDemandsTheThief pins the append at the end of
+// requiredAlternatives, which puts every exemption's stolenBy in the required set.
+// Against the checked-in list that append is a no-op — today's one thief is itself
+// a candidate, so it is already there — which left it deletable with no test
+// noticing. That is the case it exists for: if a grammar change moves the thief out
+// of the candidate set, the demand must survive the move, or an exemption would
+// excuse a spelling nothing exercises at all.
+//
+// The two cases differ only in whether the thief is a candidate, and expect the same
+// required set. That is the assertion: the demand does not depend on the thief being
+// invisible, and it is made once either way.
+func TestRequiredAlternativesDemandsTheThief(t *testing.T) {
+	index := grammarObligation(t).alternatives
+	exemptions := []alternativeExemption{{
+		tag:      "connectorUndirected#1",
+		stolenBy: "connectorPointingRight#1",
+		bead:     "gqlc-h9n.15",
+		why:      "the checked-in exemption, reused so the tags name real rules the index can resolve",
+	}}
+
+	for _, tc := range []struct {
+		name      string
+		invisible []string
+	}{
+		{"thief outside the candidate set", []string{"connectorUndirected#1"}},
+		{"thief inside it", []string{"connectorUndirected#1", "connectorPointingRight#1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := requiredAlternatives(tc.invisible, index, exemptions)
+			require.NoError(t, err)
+			require.Equal(t, []string{"connectorPointingRight#1"}, got,
+				"the exempted tag drops out and its thief is demanded exactly once in its place")
+		})
+	}
+}
+
 // TestIsValidFeature pins the corpusEntry.feature guard: the two special-case
 // tokens and at least one real Annex D code are accepted, and a plausible-but-
 // fabricated id is rejected. The rejection half is the one that matters — that
