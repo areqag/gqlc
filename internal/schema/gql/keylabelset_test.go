@@ -112,6 +112,38 @@ func TestElementTypesAreKeyedByTheirKeyLabelSet(t *testing.T) {
 	}
 }
 
+// TestLabelSetsDoesNotWriteThroughItsInput pins labelSets' purity with respect to
+// the key label set it is handed. Building the complete set appends the implied
+// labels to the key ones, and appending to a slice with spare capacity writes into
+// the caller's backing array — so the clone at resolve.go:149 is load-bearing for
+// any caller whose LabelSet has room to spare.
+//
+// Today no caller does: every LabelSet reaching labelSets comes from labelSet()
+// (nodetype.go:36-53), which returns either a one-element literal or a make() sized
+// exactly to the label count, both len == cap. That invariant lives in a different
+// file from the clone that depends on it, is not stated anywhere, and would be
+// undone by any future collector that accumulates labels with append. Dropping the
+// clone leaves the whole suite green, which is why this asserts the contract at the
+// function rather than through a fixture.
+//
+// The assertion is on the backing array, not on key itself: appending past len
+// leaves the caller's slice header untouched, so `key` still reads as one element
+// either way and only the sentinel beyond it moves.
+func TestLabelSetsDoesNotWriteThroughItsInput(t *testing.T) {
+	backing := graph.LabelSet{"Person", "SENTINEL"}
+	key := backing[:1]
+	require.Equal(t, 2, cap(key), "the test needs spare capacity to write into")
+
+	keyKey, complete, ok := labelSets(true, key, graph.LabelSet{"Employee"})
+
+	require.True(t, ok)
+	require.Equal(t, graph.LabelSetKey("Person"), keyKey)
+	requireCarries(t, complete, keyKey)
+	require.Equal(t, graph.LabelSet{"Person"}, key, "the input slice is unchanged")
+	require.Equal(t, "SENTINEL", backing[1],
+		"labelSets appended through the caller's backing array instead of a clone")
+}
+
 // requireCarries asserts every label of key appears in complete.
 func requireCarries(t *testing.T, complete, key graph.LabelSetKey) {
 	t.Helper()
