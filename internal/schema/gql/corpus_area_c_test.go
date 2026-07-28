@@ -90,6 +90,11 @@ var corpusAreaC = []corpusEntry{
 		feature: "GG21",
 	},
 	{
+		file:    "18.3-edge-type/implied_label_is_node_key_label.gql",
+		outcome: resolves,
+		feature: "GG21",
+	},
+	{
 		file:     "18.3-edge-type/empty_key_label_set.gql",
 		outcome:  unsupported,
 		sentinel: ErrUnnamedEdgeType,
