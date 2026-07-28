@@ -57,7 +57,7 @@ func TestScopeBindNodeShadowCascade(t *testing.T) {
 
 	nb, err := query.NewNodeBinding("r", graph.LabelSet{"Person"})
 	require.NoError(t, err)
-	nt := schema.NodeType{Labels: graph.LabelSet{"Person"}.Key()}
+	nt := schema.NodeType{KeyLabels: graph.LabelSet{"Person"}.Key(), CompleteLabels: graph.LabelSet{"Person"}.Key()}
 	require.NoError(t, sc.BindNode(nb, nt))
 
 	require.True(t, sc.HasNode("r"))
@@ -72,7 +72,7 @@ func TestScopeBindEdgeShadowCascade(t *testing.T) {
 	// Seed the scope with a carried node binding at variable "x" so
 	// BindEdge's node/edgeClosed shadow arm has something to erase.
 	carry := branchState{
-		exportedNodeTypes: map[string]schema.NodeType{"x": {Labels: graph.LabelSet{"Person"}.Key()}},
+		exportedNodeTypes: map[string]schema.NodeType{"x": {KeyLabels: graph.LabelSet{"Person"}.Key(), CompleteLabels: graph.LabelSet{"Person"}.Key()}},
 	}
 	sc := newScope(carry)
 	sc.Ingest(query.Part{})
@@ -95,7 +95,7 @@ func TestScopeBindCallShadowCascade(t *testing.T) {
 	carriedEdge, err := makeTestEdgeBinding("c")
 	require.NoError(t, err)
 	carry := branchState{
-		exportedNodeTypes:    map[string]schema.NodeType{"c": {Labels: graph.LabelSet{"Person"}.Key()}},
+		exportedNodeTypes:    map[string]schema.NodeType{"c": {KeyLabels: graph.LabelSet{"Person"}.Key(), CompleteLabels: graph.LabelSet{"Person"}.Key()}},
 		exportedEdgeBindings: map[string]query.EdgeBinding{"c": carriedEdge},
 	}
 	sc := newScope(carry)
@@ -147,10 +147,10 @@ func TestScopeCloseEdgesWritesOnlyEdgeLanes(t *testing.T) {
 	edgeLabel := graph.LabelSet{"KNOWS"}.Key()
 	sch := schema.Schema{
 		Nodes: map[graph.LabelSetKey]schema.NodeType{
-			nodeLabels: {Labels: nodeLabels},
+			nodeLabels: {KeyLabels: nodeLabels, CompleteLabels: nodeLabels},
 		},
 		Edges: map[schema.EdgeKey]schema.EdgeType{
-			{Source: nodeLabels, Label: edgeLabel, Target: nodeLabels}: {},
+			{Source: nodeLabels, KeyLabels: edgeLabel, Target: nodeLabels}: {},
 		},
 	}
 
@@ -168,8 +168,8 @@ func TestScopeCloseEdgesWritesOnlyEdgeLanes(t *testing.T) {
 
 	sc := newScope(branchState{})
 	sc.Ingest(query.Part{Bindings: []query.Binding{na, nb, eb}})
-	require.NoError(t, sc.BindNode(na, schema.NodeType{Labels: nodeLabels}))
-	require.NoError(t, sc.BindNode(nb, schema.NodeType{Labels: nodeLabels}))
+	require.NoError(t, sc.BindNode(na, schema.NodeType{KeyLabels: nodeLabels, CompleteLabels: nodeLabels}))
+	require.NoError(t, sc.BindNode(nb, schema.NodeType{KeyLabels: nodeLabels, CompleteLabels: nodeLabels}))
 	require.NoError(t, sc.BindEdge(eb))
 
 	// Snapshot BEFORE CloseEdges to prove only the edge lanes change.
@@ -201,11 +201,11 @@ func TestScopeIngestSingleShot(t *testing.T) {
 // test fail.
 func TestScopeCarryForwardRoundTrip(t *testing.T) {
 	nodeKey := graph.LabelSet{"Person"}.Key()
-	edgeKey := schema.EdgeKey{Source: nodeKey, Label: graph.LabelSet{"KNOWS"}.Key(), Target: nodeKey}
+	edgeKey := schema.EdgeKey{Source: nodeKey, KeyLabels: graph.LabelSet{"KNOWS"}.Key(), Target: nodeKey}
 	carriedEdge, err := makeTestEdgeBinding("r")
 	require.NoError(t, err)
 	c1 := branchState{
-		exportedNodeTypes:       map[string]schema.NodeType{"a": {Labels: nodeKey}},
+		exportedNodeTypes:       map[string]schema.NodeType{"a": {KeyLabels: nodeKey, CompleteLabels: nodeKey}},
 		exportedEdgeTypes:       map[string]schema.EdgeType{"r": {}},
 		exportedEdgeKeys:        map[string]schema.EdgeKey{"r": edgeKey},
 		exportedEdgeBindings:    map[string]query.EdgeBinding{"r": carriedEdge},
@@ -215,7 +215,7 @@ func TestScopeCarryForwardRoundTrip(t *testing.T) {
 	}
 	// Empty schema is fine — ResolveProjections doesn't consult it for
 	// bare-name RefProjections against in-scope bindings.
-	sch := schema.Schema{Nodes: map[graph.LabelSetKey]schema.NodeType{nodeKey: {Labels: nodeKey}}}
+	sch := schema.Schema{Nodes: map[graph.LabelSetKey]schema.NodeType{nodeKey: {KeyLabels: nodeKey, CompleteLabels: nodeKey}}}
 	sc := newScope(c1)
 	sc.Ingest(query.Part{ReturnsAll: true})
 	sc.SeedLocalNullability() // no local bindings → no-op
@@ -283,12 +283,12 @@ func TestScopeDemoteNullabilityAy9CrossPart(t *testing.T) {
 	}
 	sc0 := newScope(branchState{})
 	sc0.Ingest(part0)
-	nt := schema.NodeType{Labels: graph.LabelSet{"Person"}.Key()}
+	nt := schema.NodeType{KeyLabels: graph.LabelSet{"Person"}.Key(), CompleteLabels: graph.LabelSet{"Person"}.Key()}
 	require.NoError(t, sc0.BindNode(nbA0, nt))
 	require.NoError(t, sc0.BindNode(nbB0, nt))
 	sc0.SeedLocalNullability()
 	sc0.DemoteNullability()
-	sch := schema.Schema{Nodes: map[graph.LabelSetKey]schema.NodeType{nt.Labels: nt}}
+	sch := schema.Schema{Nodes: map[graph.LabelSetKey]schema.NodeType{nt.KeyLabels: nt}}
 	require.NoError(t, sc0.ResolveProjections(sch))
 	c1 := sc0.Export()
 	require.Equal(t, g, c1.exportedOptionalGroup["a"])
@@ -323,9 +323,9 @@ func TestScopeDemoteNullabilityEdgeFixedPointTwoRounds(t *testing.T) {
 	nodeLabels := graph.LabelSet{"Person"}
 	nodeKey := nodeLabels.Key()
 	edgeLabel := graph.LabelSet{"KNOWS"}
-	edgeKey := schema.EdgeKey{Source: nodeKey, Label: edgeLabel.Key(), Target: nodeKey}
+	edgeKey := schema.EdgeKey{Source: nodeKey, KeyLabels: edgeLabel.Key(), Target: nodeKey}
 	sch := schema.Schema{
-		Nodes: map[graph.LabelSetKey]schema.NodeType{nodeKey: {Labels: nodeKey}},
+		Nodes: map[graph.LabelSetKey]schema.NodeType{nodeKey: {KeyLabels: nodeKey, CompleteLabels: nodeKey}},
 		Edges: map[schema.EdgeKey]schema.EdgeType{edgeKey: {}},
 	}
 	nbA, err := query.NewNullableNodeBindingInGroup("a", nodeLabels, G)
@@ -349,7 +349,7 @@ func TestScopeDemoteNullabilityEdgeFixedPointTwoRounds(t *testing.T) {
 
 	sc := newScope(branchState{})
 	sc.Ingest(query.Part{Bindings: []query.Binding{nbA, nbB, nbC, e1, e2}})
-	nt := schema.NodeType{Labels: nodeKey}
+	nt := schema.NodeType{KeyLabels: nodeKey, CompleteLabels: nodeKey}
 	require.NoError(t, sc.BindNode(nbA, nt))
 	require.NoError(t, sc.BindNode(nbB, nt))
 	require.NoError(t, sc.BindNode(nbC, nt))
@@ -374,8 +374,8 @@ func TestScopeDemoteNullabilityEdgeFixedPointTwoRounds(t *testing.T) {
 func TestScopeExportWildcardVsExplicit(t *testing.T) {
 	nodeLabels := graph.LabelSet{"Person"}
 	nodeKey := nodeLabels.Key()
-	nt := schema.NodeType{Labels: nodeKey, Properties: map[string]schema.Property{"name": {Type: graph.TypeString}}}
-	sch := schema.Schema{Nodes: map[graph.LabelSetKey]schema.NodeType{nodeKey: {Labels: nodeKey, Properties: nt.Properties}}}
+	nt := schema.NodeType{KeyLabels: nodeKey, CompleteLabels: nodeKey, Properties: map[string]schema.Property{"name": {Type: graph.TypeString}}}
+	sch := schema.Schema{Nodes: map[graph.LabelSetKey]schema.NodeType{nodeKey: {KeyLabels: nodeKey, CompleteLabels: nodeKey, Properties: nt.Properties}}}
 
 	// Wildcard: WITH * over a single node binding v.
 	nbV, err := query.NewNodeBinding("v", nodeLabels)

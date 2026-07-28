@@ -105,7 +105,8 @@ func (s *ParserSuite) TestNodeTypeAssembly() {
 
 	n, ok := got.Nodes[graph.LabelSet{"Person"}.Key()]
 	s.Require().True(ok, "node keyed by canonical label set")
-	s.Equal(graph.LabelSet{"Person"}.Key(), n.Labels)
+	s.Equal(graph.LabelSet{"Person"}.Key(), n.KeyLabels)
+	s.Equal(graph.LabelSet{"Person"}.Key(), n.CompleteLabels, "no `=>`, so the key label set is inferred and coincides with the complete one")
 	s.Empty(n.Name)
 	s.Equal(map[string]schema.Property{
 		"id":   {Name: "id", Type: graph.TypeInt, Nullable: false},
@@ -153,9 +154,9 @@ func (s *ParserSuite) TestEdgeTypeAssembly() {
 	s.Require().Len(got.Edges, 1)
 
 	key := schema.EdgeKey{
-		Source: graph.LabelSet{"Person"}.Key(),
-		Label:  graph.LabelSet{"AUTHORED"}.Key(),
-		Target: graph.LabelSet{"Post"}.Key(),
+		Source:    graph.LabelSet{"Person"}.Key(),
+		KeyLabels: graph.LabelSet{"AUTHORED"}.Key(),
+		Target:    graph.LabelSet{"Post"}.Key(),
 	}
 	e, ok := got.Edges[key]
 	s.Require().True(ok, "edge keyed by (source, label, target) triple")
@@ -179,9 +180,9 @@ func (s *ParserSuite) TestEdgeInlineEndpoints() {
 	s.Require().NoError(err)
 
 	key := schema.EdgeKey{
-		Source: graph.LabelSet{"Person"}.Key(),
-		Label:  graph.LabelSet{"KNOWS"}.Key(),
-		Target: graph.LabelSet{"Person"}.Key(),
+		Source:    graph.LabelSet{"Person"}.Key(),
+		KeyLabels: graph.LabelSet{"KNOWS"}.Key(),
+		Target:    graph.LabelSet{"Person"}.Key(),
 	}
 	_, ok := got.Edges[key]
 	s.True(ok, "inline filler endpoints resolve to the declared node type")
@@ -201,9 +202,9 @@ func (s *ParserSuite) TestEndpointFillerEmptyBraceAllowed() {
 	got, err := New().Parse(strings.NewReader(src))
 	s.Require().NoError(err)
 	key := schema.EdgeKey{
-		Source: graph.LabelSet{"Person"}.Key(),
-		Label:  graph.LabelSet{"AUTHORED"}.Key(),
-		Target: graph.LabelSet{"Post"}.Key(),
+		Source:    graph.LabelSet{"Person"}.Key(),
+		KeyLabels: graph.LabelSet{"AUTHORED"}.Key(),
+		Target:    graph.LabelSet{"Post"}.Key(),
 	}
 	_, ok := got.Edges[key]
 	s.True(ok, "empty-brace endpoint filler resolves to the label-only spelling")
@@ -275,9 +276,9 @@ func (s *ParserSuite) TestEdgeLeftPointingCanonicalised() {
 	s.Require().NoError(err)
 
 	key := schema.EdgeKey{
-		Source: graph.LabelSet{"Post"}.Key(),
-		Label:  graph.LabelSet{"WRITTEN_BY"}.Key(),
-		Target: graph.LabelSet{"Person"}.Key(),
+		Source:    graph.LabelSet{"Post"}.Key(),
+		KeyLabels: graph.LabelSet{"WRITTEN_BY"}.Key(),
+		Target:    graph.LabelSet{"Person"}.Key(),
 	}
 	_, ok := got.Edges[key]
 	s.True(ok, "left-pointing arc canonicalised so source is the arrow's tail (Post)")
@@ -295,9 +296,9 @@ func (s *ParserSuite) TestEdgeTypeName() {
 	s.Require().NoError(err)
 
 	key := schema.EdgeKey{
-		Source: graph.LabelSet{"Person"}.Key(),
-		Label:  graph.LabelSet{"AUTHORED"}.Key(),
-		Target: graph.LabelSet{"Post"}.Key(),
+		Source:    graph.LabelSet{"Person"}.Key(),
+		KeyLabels: graph.LabelSet{"AUTHORED"}.Key(),
+		Target:    graph.LabelSet{"Post"}.Key(),
 	}
 	e, ok := got.Edges[key]
 	s.Require().True(ok)

@@ -8,7 +8,7 @@
           "kind": "edge",
           "edgeKey": {
             "source": "Person",
-            "label": "KNOWS",
+            "key_labels": "KNOWS",
             "target": "Person"
           },
           "nullable": false

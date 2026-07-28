@@ -631,7 +631,7 @@ func walkListElemBody(b *strings.Builder, p preparedQuery, f preparedRow, e *pre
 		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected dbtype.Relationship, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, iterVar, indent)
 		fmt.Fprintf(b, "%sswitch rel.Type {\n", indent)
 		for i, ek := range u.EdgeKeys {
-			fmt.Fprintf(b, "%scase %q:\n", indent, string(ek.Label))
+			fmt.Fprintf(b, "%scase %q:\n", indent, string(ek.KeyLabels))
 			fmt.Fprintf(b, "%s\tentity, err := decode%s(rel)\n", indent, u.Candidates[i])
 			fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)\n%s\t}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
 			fmt.Fprintf(b, "%s\t%s = append(%s, entity)\n", indent, accVar, accVar)
@@ -705,7 +705,7 @@ func writeEdgeUnionColumnDecodeIndent(b *strings.Builder, p preparedQuery, f pre
 // writeEdgeUnionDispatchBody emits the type-assert + type-switch
 // dispatch that owns the edgeUnion column's decode arm. Factored out
 // so the nullable arm can reuse the same body inside an `else` branch
-// (skipping the non-null raw gate). The dispatch keys are EdgeKey.Label
+// (skipping the non-null raw gate). The dispatch keys are EdgeKey.KeyLabels
 // strings — the driver's wire labels — not the mangled entity struct
 // names. assignBody writes one `<indent><extraIndent><prefix><value><suffix>`
 // assignment line; the callback keeps the raw assignPrefix / assignSuffix
@@ -718,7 +718,7 @@ func writeEdgeUnionDispatchBody(b *strings.Builder, p preparedQuery, f preparedR
 	fmt.Fprintf(b, "%sswitch %s.Type {\n", dispatchIndent, relLocal)
 	for i, ek := range f.EdgeKeys {
 		entityName := edgeKeyToEntityName(p, f, i)
-		fmt.Fprintf(b, "%scase %q:\n", dispatchIndent, string(ek.Label))
+		fmt.Fprintf(b, "%scase %q:\n", dispatchIndent, string(ek.KeyLabels))
 		fmt.Fprintf(b, "%s\t%s, err := decode%s(%s)\n", dispatchIndent, entityLocal, entityName, relLocal)
 		fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s\t}\n", dispatchIndent, dispatchIndent, zero, p.MethodName, f.ColumnName, dispatchIndent)
 		assignBody(extraIndent+"\t", entityLocal)
@@ -742,7 +742,7 @@ func edgeKeyToEntityName(p preparedQuery, f preparedRow, i int) string {
 	// every columnEdgeUnion Row field. Returning the bare label keeps
 	// the emission textually distinct so a regression surfaces at the
 	// nested-module compile fence rather than silently miscompiling.
-	return string(f.EdgeKeys[i].Label)
+	return string(f.EdgeKeys[i].KeyLabels)
 }
 
 // writeEntityColumnDecodeIndent emits the entity-column arm of the row

@@ -82,11 +82,13 @@ type ResolvedType interface {
 }
 
 // ResolvedNode is a whole-entity projection whose Ref names a node binding,
-// keyed by the resolved node type's canonical label set. R4 adds Nullable:
+// keyed by the resolved node type's identity. R4 adds Nullable:
 // the binding's effective nullability after R4 regime-(a) demotion — true iff
 // the binding was first introduced in an OPTIONAL MATCH clause AND no
 // non-nullable edge in the pattern proves its existence.
 type ResolvedNode struct {
+	// Labels is the resolved node type's KEY label set — its identity, and
+	// the axis codegen indexes its entity table on. Never the complete one.
 	Labels   graph.LabelSetKey `json:"labels"`
 	Nullable bool              `json:"nullable"`
 }

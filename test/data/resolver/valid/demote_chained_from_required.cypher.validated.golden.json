@@ -15,7 +15,7 @@
         "kind": "edge",
         "edgeKey": {
           "source": "Person",
-          "label": "AUTHORED",
+          "key_labels": "AUTHORED",
           "target": "Post"
         },
         "nullable": false
@@ -37,7 +37,7 @@
         "kind": "edge",
         "edgeKey": {
           "source": "Post",
-          "label": "AUTHORED",
+          "key_labels": "AUTHORED",
           "target": "Person"
         },
         "nullable": false

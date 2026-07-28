@@ -179,7 +179,7 @@ const (
 )
 
 // entityKind discriminates node from edge in the entity-naming and
-// emission passes. Node reads NodeType.Labels; edge reads EdgeType.EdgeKey.
+// emission passes. Node reads NodeType.KeyLabels; edge reads EdgeType.EdgeKey.
 type entityKind int
 
 const (
@@ -211,9 +211,9 @@ type preparedEdgeUnion struct {
 type preparedEntity struct {
 	Kind       entityKind
 	Name       string            // derived struct name (spec §4.5)
-	Labels     graph.LabelSetKey // node-only source axis (empty for edge)
+	Labels     graph.LabelSetKey // node-only source axis: the KEY label set, its identity (empty for edge)
 	EdgeKey    schema.EdgeKey    // edge-only source axis (zero for node)
-	DocAxis    string            // "<labels>" or "<label> edge (<src> -> <tgt>)" for doc
+	DocAxis    string            // "<complete labels>" or "<label> edge (<src> -> <tgt>)" for doc
 	Fields     []preparedEntityField
 	AnyProp    bool // any property emits (⇒ fmt used)
 	AnyNonNull bool // any non-nullable property emits (⇒ neo4j.GetProperty[T] used)
@@ -297,7 +297,7 @@ func validateQueries(queries []NamedQuery) error {
 // in a Go map key directly.
 type entityLookupKey struct {
 	Kind    entityKind
-	Labels  graph.LabelSetKey // node axis; zero for edge
+	Labels  graph.LabelSetKey // node axis: the type's KEY label set, its identity; zero for edge
 	EdgeKey schema.EdgeKey    // edge axis; zero for node
 }
 
@@ -321,7 +321,7 @@ func phaseZAdmit(sch schema.Schema) ([]preparedEntity, map[entityLookupKey]int, 
 	slices.SortFunc(edgeKeys, func(a, b schema.EdgeKey) int {
 		return cmp.Or(
 			cmp.Compare(a.Source, b.Source),
-			cmp.Compare(a.Label, b.Label),
+			cmp.Compare(a.KeyLabels, b.KeyLabels),
 			cmp.Compare(a.Target, b.Target),
 		)
 	})
@@ -330,7 +330,7 @@ func phaseZAdmit(sch schema.Schema) ([]preparedEntity, map[entityLookupKey]int, 
 	// ambiguous even when the two endpoint pairs differ (spec §4.5 Rule 4).
 	labelCount := make(map[graph.LabelSetKey]int, len(sch.Edges))
 	for _, k := range edgeKeys {
-		labelCount[k.Label]++
+		labelCount[k.KeyLabels]++
 	}
 
 	entities := make([]preparedEntity, 0, len(sch.Nodes)+len(sch.Edges))
@@ -338,7 +338,7 @@ func phaseZAdmit(sch schema.Schema) ([]preparedEntity, map[entityLookupKey]int, 
 
 	for _, k := range nodeKeys {
 		nt := sch.Nodes[k]
-		name, err := entityStructName(entityNode, nt.Labels, schema.EdgeKey{}, nt.Name, false)
+		name, err := entityStructName(entityNode, nt.KeyLabels, schema.EdgeKey{}, nt.Name, false)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -346,24 +346,24 @@ func phaseZAdmit(sch schema.Schema) ([]preparedEntity, map[entityLookupKey]int, 
 		if err != nil {
 			return nil, nil, err
 		}
-		labels := strings.Join(nt.Labels.Split(), "&")
+		labels := strings.Join(nt.CompleteLabels.Split(), "&")
 		ent := preparedEntity{
 			Kind:       entityNode,
 			Name:       name,
-			Labels:     nt.Labels,
+			Labels:     nt.KeyLabels,
 			DocAxis:    labels,
 			Fields:     fields,
 			AnyProp:    anyProp,
 			AnyNonNull: anyNonNull,
 			AnyTime:    anyTime,
 		}
-		index[entityLookupKey{Kind: entityNode, Labels: nt.Labels}] = len(entities)
+		index[entityLookupKey{Kind: entityNode, Labels: nt.KeyLabels}] = len(entities)
 		entities = append(entities, ent)
 	}
 
 	for _, k := range edgeKeys {
 		et := sch.Edges[k]
-		ambig := labelCount[et.Label] > 1
+		ambig := labelCount[et.KeyLabels] > 1
 		name, err := entityStructName(entityEdge, "", et.EdgeKey, et.Name, ambig)
 		if err != nil {
 			return nil, nil, err
@@ -372,7 +372,7 @@ func phaseZAdmit(sch schema.Schema) ([]preparedEntity, map[entityLookupKey]int, 
 		if err != nil {
 			return nil, nil, err
 		}
-		docAxis := fmt.Sprintf("%s edge type (%s -> %s)", string(et.Label), string(et.Source), string(et.Target))
+		docAxis := fmt.Sprintf("%s edge type (%s -> %s)", string(et.KeyLabels), string(et.Source), string(et.Target))
 		ent := preparedEntity{
 			Kind:       entityEdge,
 			Name:       name,
@@ -418,19 +418,19 @@ func entityStructName(kind entityKind, labels graph.LabelSetKey, edgeKey schema.
 	}
 
 	// Edge.
-	labelParts := edgeKey.Label.Split()
+	labelParts := edgeKey.KeyLabels.Split()
 	if len(labelParts) > 1 {
-		return "", fmt.Errorf("%w: multi-label edge type (%s -[:%s]-> %s) requires an explicit Name", ErrUnnamedMultiLabelType, string(edgeKey.Source), string(edgeKey.Label), string(edgeKey.Target))
+		return "", fmt.Errorf("%w: multi-label edge type (%s -[:%s]-> %s) requires an explicit Name", ErrUnnamedMultiLabelType, string(edgeKey.Source), string(edgeKey.KeyLabels), string(edgeKey.Target))
 	}
 	if len(labelParts) == 0 {
 		return "", fmt.Errorf("%w: edge type with empty label requires an explicit Name", ErrUnnamedMultiLabelType)
 	}
 	if ambiguousEdgeLabel {
-		return "", fmt.Errorf("%w: edge label %q is shared across endpoint pairs — (%s -[:%s]-> %s) requires an explicit Name", ErrUnnamedMultiLabelType, string(edgeKey.Label), string(edgeKey.Source), string(edgeKey.Label), string(edgeKey.Target))
+		return "", fmt.Errorf("%w: edge label %q is shared across endpoint pairs — (%s -[:%s]-> %s) requires an explicit Name", ErrUnnamedMultiLabelType, string(edgeKey.KeyLabels), string(edgeKey.Source), string(edgeKey.KeyLabels), string(edgeKey.Target))
 	}
 	name := paramFieldName(labelParts[0])
 	if !exportedGoIdent(name) {
-		return "", fmt.Errorf("%w: edge type label %q mangles to %q, not a valid exported Go identifier", ErrInvalidEntityName, string(edgeKey.Label), name)
+		return "", fmt.Errorf("%w: edge type label %q mangles to %q, not a valid exported Go identifier", ErrInvalidEntityName, string(edgeKey.KeyLabels), name)
 	}
 	return name, nil
 }
@@ -449,7 +449,7 @@ func entityAxisText(kind entityKind, labels graph.LabelSetKey, edgeKey schema.Ed
 	if kind == entityNode {
 		return fmt.Sprintf("node type %q", string(labels))
 	}
-	return fmt.Sprintf("edge type (%s -[:%s]-> %s)", string(edgeKey.Source), string(edgeKey.Label), string(edgeKey.Target))
+	return fmt.Sprintf("edge type (%s -[:%s]-> %s)", string(edgeKey.Source), string(edgeKey.KeyLabels), string(edgeKey.Target))
 }
 
 // prepareEntityFields derives an entity's per-property field list in
@@ -580,7 +580,7 @@ func phaseAAdmit(queries []NamedQuery, entities []preparedEntity, entityIndex ma
 				}
 			case resolver.ResolvedEdge:
 				if _, ok := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: t.EdgeKey}]; !ok {
-					return fmt.Errorf("%w: query %q column %d %q references unknown edge type %s -[:%s]-> %s", ErrOutOfC6Scope, q.Name, ci, col.Name, string(t.EdgeKey.Source), string(t.EdgeKey.Label), string(t.EdgeKey.Target))
+					return fmt.Errorf("%w: query %q column %d %q references unknown edge type %s -[:%s]-> %s", ErrOutOfC6Scope, q.Name, ci, col.Name, string(t.EdgeKey.Source), string(t.EdgeKey.KeyLabels), string(t.EdgeKey.Target))
 				}
 			case resolver.ResolvedEdgeUnion:
 				// C5 admission (§2.1): defensive gates on the resolver-
@@ -595,7 +595,7 @@ func phaseAAdmit(queries []NamedQuery, entities []preparedEntity, entityIndex ma
 				}
 				for _, ek := range t.EdgeKeys {
 					if _, ok := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: ek}]; !ok {
-						return fmt.Errorf("%w: query %q column %d %q edgeUnion candidate %s -[:%s]-> %s not declared by schema", ErrOutOfC6Scope, q.Name, ci, col.Name, string(ek.Source), string(ek.Label), string(ek.Target))
+						return fmt.Errorf("%w: query %q column %d %q edgeUnion candidate %s -[:%s]-> %s not declared by schema", ErrOutOfC6Scope, q.Name, ci, col.Name, string(ek.Source), string(ek.KeyLabels), string(ek.Target))
 					}
 				}
 			case resolver.ResolvedTemporal:
@@ -851,7 +851,7 @@ func sweepIdentifiers(entities []preparedEntity, prepared []preparedQuery) error
 		if e.Kind == entityNode {
 			srcAxis = fmt.Sprintf("entity struct %q (schema labels %q)", e.Name, string(e.Labels))
 		} else {
-			srcAxis = fmt.Sprintf("entity struct %q (schema edge %s -[:%s]-> %s)", e.Name, string(e.EdgeKey.Source), string(e.EdgeKey.Label), string(e.EdgeKey.Target))
+			srcAxis = fmt.Sprintf("entity struct %q (schema edge %s -[:%s]-> %s)", e.Name, string(e.EdgeKey.Source), string(e.EdgeKey.KeyLabels), string(e.EdgeKey.Target))
 		}
 		if err := insert(e.Name, srcAxis); err != nil {
 			return err
@@ -954,7 +954,7 @@ func buildListElemPlan(t resolver.ResolvedType, entities []preparedEntity, entit
 	case resolver.ResolvedEdge:
 		idx, ok := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: tt.EdgeKey}]
 		if !ok {
-			return nil, fmt.Errorf("%w: list element references unknown edge type %s -[:%s]-> %s", ErrOutOfC6Scope, string(tt.EdgeKey.Source), string(tt.EdgeKey.Label), string(tt.EdgeKey.Target))
+			return nil, fmt.Errorf("%w: list element references unknown edge type %s -[:%s]-> %s", ErrOutOfC6Scope, string(tt.EdgeKey.Source), string(tt.EdgeKey.KeyLabels), string(tt.EdgeKey.Target))
 		}
 		name := entities[idx].Name
 		return &preparedListElem{Kind: columnEdge, GoType: name, EntityName: name}, nil
@@ -964,7 +964,7 @@ func buildListElemPlan(t resolver.ResolvedType, entities []preparedEntity, entit
 		}
 		for _, ek := range tt.EdgeKeys {
 			if _, ok := entityIndex[entityLookupKey{Kind: entityEdge, EdgeKey: ek}]; !ok {
-				return nil, fmt.Errorf("%w: list element edgeUnion candidate %s -[:%s]-> %s not declared by schema", ErrOutOfC6Scope, string(ek.Source), string(ek.Label), string(ek.Target))
+				return nil, fmt.Errorf("%w: list element edgeUnion candidate %s -[:%s]-> %s not declared by schema", ErrOutOfC6Scope, string(ek.Source), string(ek.KeyLabels), string(ek.Target))
 			}
 		}
 		return &preparedListElem{Kind: columnEdgeUnion, GoType: unionInterfaceName, UnionIdx: unionIdx}, nil

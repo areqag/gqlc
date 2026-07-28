@@ -2,7 +2,8 @@
   "name": "Measurements",
   "nodes": [
     {
-      "labels": "Gauge",
+      "key_labels": "Gauge",
+      "complete_labels": "Gauge",
       "name": "",
       "properties": {
         "id": {
@@ -18,7 +19,8 @@
       }
     },
     {
-      "labels": "Sample",
+      "key_labels": "Sample",
+      "complete_labels": "Sample",
       "name": "",
       "properties": {
         "b": {
@@ -117,8 +119,9 @@
   "edges": [
     {
       "source": "Sample",
-      "label": "CALIBRATES",
+      "key_labels": "CALIBRATES",
       "target": "Gauge",
+      "complete_labels": "CALIBRATES",
       "name": "",
       "properties": {
         "recordedAt": {
@@ -130,8 +133,9 @@
     },
     {
       "source": "Sample",
-      "label": "FEEDS",
+      "key_labels": "FEEDS",
       "target": "Gauge",
+      "complete_labels": "FEEDS",
       "name": "",
       "properties": null
     }
