@@ -129,6 +129,22 @@ var corpusAreaA = []corpusEntry{
 		bead:     "gqlc-h9n.1",
 		reason:   "schemaReference alternative 3 — a parameter reference where the schema name goes, distinct from graphTypeReference alternative 2",
 	},
+	{
+		file:     "17-references/copy_of_relative_up_twice.gql",
+		outcome:  unsupported,
+		sentinel: ErrCopyOfSource,
+		feature:  "mandatory",
+		bead:     "gqlc-h9n.1",
+		reason:   "relativeDirectoryPath climbing two levels — the repetition copy_of_relative_up.gql takes zero times, same COPY OF gap",
+	},
+	{
+		file:     "17-references/copy_of_schema_and_object.gql",
+		outcome:  unsupported,
+		sentinel: ErrCopyOfSource,
+		feature:  "mandatory",
+		bead:     "gqlc-h9n.1",
+		reason:   "catalogObjectParentReference alternative 1 with a dotted object path after the schema reference, which alternative 2 reaches without one",
+	},
 }
 
 // semanticAreaA holds this area's semantic cases: files above that resolve to a

@@ -298,8 +298,6 @@ type owedBranch struct {
 }
 
 var owedOptionality = []owedBranch{
-	{"17.1 :: SOLIDUS DOUBLE_PERIOD", "gqlc-h9n.32", "no COPY OF source climbs more than one level, so the `(SOLIDUS DOUBLE_PERIOD)*` repetition in relativeDirectoryPath (GQL.g4:1412) never fires: `../../gt` is unwritten"},
-	{"17.6 :: objectName PERIOD", "gqlc-h9n.32", "no COPY OF source qualifies the name with a dotted object path, so the `(objectName PERIOD)` repetition in catalogObjectParentReference (GQL.g4:1470) never fires"},
 	{"18.10 :: typed", "gqlc-h9n.32", "fieldType's `::`-elided spelling, `{ name INT }` (GQL.g4:1997). Reachable only through binding table and record types, so the file records a decline rather than a resolve"},
 	{"18.2 :: nodeTypeFiller", "gqlc-h9n.32", "a node pattern or phrase filler carrying no filler — `()`, `(a)`, or a phrase that names the type and stops"},
 	{"18.2 :: nodeTypeImpliedContent", "gqlc-h9n.32", "a node type filler that is a key label set and nothing else (GQL.g4:1519), with no label set or property types after it"},
