@@ -91,6 +91,9 @@ func (r rawSchema) resolve() (schema.Schema, error) {
 		if !ok {
 			return schema.Schema{}, ErrUnnamedEdgeType
 		}
+		if len(key.Split()) > 1 {
+			return schema.Schema{}, ErrMultiLabelEdgeType
+		}
 		source, err := e.source.resolve(idx)
 		if err != nil {
 			return schema.Schema{}, err
