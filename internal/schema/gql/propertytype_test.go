@@ -191,8 +191,9 @@ func TestPropertyBinaryWidthParenthesisedFolds(t *testing.T) {
 // fallback path:
 //
 //   - Bit-width binary integers with no exact model counterpart (INT(7),
-//     INT(10)). Lossy — the author said 7 bits, the model says machine int;
-//     gqlc-h9n.25 tracks whether that should change.
+//     INT(10)). Lossy — the author said 7 bits, the model says machine int.
+//     ADR 0017 decides that this is accepted rather than rejected or rounded
+//     up, so these rows pin a decision; gqlc-h9n.31 is what would change them.
 //   - FLOAT(p) and FLOAT(p, s) (:1849). The parenthetical is byte-identical
 //     in shape to DECIMAL(p, s) at :1832, not to the binary integers, and
 //     nothing in the grammar establishes that FLOAT's precision counts bits.

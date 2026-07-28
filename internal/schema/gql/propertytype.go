@@ -201,8 +201,11 @@ var typeSpellings = map[string]graph.PropertyType{
 // on a miss it falls back to the truncated spelling, which is what keeps
 // length/character/decimal-digit qualifiers (STRING(10), DECIMAL(10,2))
 // resolving to the bare type per ADR 0002. The fallback is lossy for widths
-// with no exact model counterpart — INT(7) lands on TypeInt; gqlc-h9n.25
-// tracks whether that should reject instead.
+// with no exact model counterpart — INT(7) lands on TypeInt, a 64-bit machine
+// int, and the declared seven bits are gone. That is decided, not pending:
+// ADR 0017 accepts the loss rather than rejecting a valid ISO GQL schema over
+// one qualifier, and gqlc-h9n.31 is the bead that would give the model
+// somewhere to keep it.
 func normaliseType(spelling string) (graph.PropertyType, bool) {
 	full := canonicalSpelling(spelling)
 	if pt, ok := typeSpellings[full]; ok {
