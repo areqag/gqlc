@@ -736,31 +736,30 @@ func (s *ParserSuite) TestInvalid() {
 // A nil value means the fixture is a syntax error (no sentinel), satisfied by any
 // non-nil error from the syntax error listener.
 var invalidFixtures = map[string]error{
-	"syntax_error.gql":           nil,
-	"label_implication_node.gql": ErrLabelImplication,
-	"label_implication_edge.gql": ErrLabelImplication,
-	"undirected_edge.gql":        ErrUndirectedEdge,
-	"unknown_endpoint.gql":       ErrUnknownEndpoint,
-	"endpoint_not_alias.gql":     ErrEndpointNotAlias,
-	"unsupported_type.gql":       ErrUnsupportedType,
-	"unnamed_node.gql":           ErrUnnamedNodeType,
-	"unnamed_edge.gql":           ErrUnnamedEdgeType,
-	"duplicate_node.gql":         ErrDuplicateNodeType,
-	"duplicate_edge.gql":         ErrDuplicateEdgeType,
-	"no_graph_type.gql":          ErrNoGraphType,
-	"multiple_graph_types.gql":   ErrMultipleGraphTypes,
-	"unsupported_source.gql":     ErrUnsupportedSource,
+	"syntax_error.gql":         nil,
+	"undirected_edge.gql":      ErrUndirectedEdge,
+	"unknown_endpoint.gql":     ErrUnknownEndpoint,
+	"endpoint_not_alias.gql":   ErrEndpointNotAlias,
+	"unsupported_type.gql":     ErrUnsupportedType,
+	"unnamed_node.gql":         ErrUnnamedNodeType,
+	"unnamed_edge.gql":         ErrUnnamedEdgeType,
+	"duplicate_node.gql":       ErrDuplicateNodeType,
+	"duplicate_edge.gql":       ErrDuplicateEdgeType,
+	"no_graph_type.gql":        ErrNoGraphType,
+	"multiple_graph_types.gql": ErrMultipleGraphTypes,
+	"unsupported_source.gql":   ErrUnsupportedSource,
 }
 
 // allSentinels is the canonical list of every Parse sentinel — the single source
 // of truth TestSentinelReachability checks against. A new sentinel must be added
 // here (and pinned by a file); a removed one must be dropped.
 var allSentinels = []error{
-	ErrLabelImplication,
 	ErrUndirectedEdge,
 	ErrEdgeKindArcMismatch,
 	ErrUnknownEndpoint,
 	ErrEndpointNotAlias,
+	ErrEndpointFillerImpliesLabels,
+	ErrImpliedLabelIsKeyLabel,
 	ErrUnsupportedType,
 	ErrUnnamedNodeType,
 	ErrUnnamedEdgeType,

@@ -47,8 +47,8 @@ import (
 // "HOME_SCHEMA/gt", "./gt", "/a/b/gt", "../a/gt" and "$$gt"; a bare "s/gt" is a
 // syntax error, because an identifier is not a schemaReference (GQL.g4:1469).
 const (
-	wantCorpusEntries   = 86
-	wantCorpusResolving = 48
+	wantCorpusEntries   = 90
+	wantCorpusResolving = 50
 )
 
 // isValidFeature reports whether v is an accepted value of corpusEntry.feature:

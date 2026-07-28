@@ -1,5 +1,0 @@
--- Label implication "=>" on a node type. Unsupported: a node type's
--- labels are declared with the colon form, not implied content.
-CREATE PROPERTY GRAPH TYPE T AS {
-    ( :Person => { id :: INT } )
-}

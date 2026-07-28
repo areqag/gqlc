@@ -11,15 +11,17 @@ import (
 )
 
 // Every declared type in this fixture has a key label set that differs from its
-// complete label set. No fixture file can produce one: gqlc rejects GG21 (`=>`)
-// at parse time, so the GQL builder always infers a key label set (GG22) equal
-// to the complete one. Building the divergence directly is the only way to
-// observe which of the two each consumer reads, and without it gqlc-h9n.8's
-// split would be a rename indistinguishable from the single-field model it
-// replaced.
+// complete label set. It reads as NODE TYPE (:Engineer => :Person), NODE TYPE
+// (:Manager => :Person), plus a KNOWS edge between the two — a legal graph type
+// since gqlc-h9n.9 implemented GG21, and one no fixture file could express before
+// it, when `=>` was rejected at parse time and every built key label set was
+// therefore inferred (GG22) equal to its complete one.
 //
-// Reads as: NODE TYPE Engineer (:Engineer => :Person), NODE TYPE Manager
-// (:Manager => :Person), plus a KNOWS edge between the two.
+// It stays built in Go rather than parsed now that it could be parsed, because
+// these tests state a resolver contract: which of the two label sets each
+// consumer reads. Routing the setup through the GQL parser would let a parser
+// change quietly gut the assertions, and a unit test of resolver behaviour should
+// not need a schema file to say what it means.
 func divergentSchema() schema.Schema {
 	engineer := schema.NodeType{
 		KeyLabels:      graph.LabelSet{"Engineer"}.Key(),

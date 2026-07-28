@@ -1,0 +1,46 @@
+-- Explicit key label sets: optional feature GG21, the "=>" form. The phrase
+-- before "=>" is the key label set (the type's identity, and its key in
+-- Schema.Nodes); everything after is implied content the elements also carry.
+--
+-- This is the only fixture whose types have a key label set that differs from
+-- their complete one. Every other valid fixture omits "=>", so GG22 infers the
+-- key label set from the whole phrase and the two coincide — which makes this
+-- golden the one place the distinction is visible in serialised form.
+--
+-- No implied label here is any declared type's key label: Employee, Author and
+-- Content are implied only. That is the subset Fabric and Neo4j agree on, and
+-- the part gqlc implements (ADR 0015).
+
+CREATE PROPERTY GRAPH TYPE Publishing AS {
+
+    -- Implied labels and implied properties together. Identity is Engineer
+    -- alone; the elements carry Engineer & Employee.
+    (:Engineer => :Employee {
+        name  :: STRING NOT NULL,
+        level :: INT
+    }),
+
+    -- Two key labels, one implied. Identity is Manager&Staff.
+    (:Manager&Staff => :Employee {
+        name    :: STRING NOT NULL,
+        reports :: INT
+    }),
+
+    -- A key label set implying properties but no labels. Legal, and the
+    -- complete label set collapses back onto the key one — the same model
+    -- (:Article { ... }) builds without the "=>".
+    (:Article => {
+        title :: STRING NOT NULL
+    }),
+
+    -- Inline endpoints name a declared node type by its KEY label set, so the
+    -- source here is Engineer and not Engineer&Employee.
+    (:Engineer)-[:WROTE => :Author { since :: UINT64 }]->(:Article),
+    (:Manager&Staff)-[:REVIEWED]->(:Article),
+
+    -- An endpoint may spell its key label set out too — nodeTypeImpliedContent
+    -- is optional after "=>", so `(:Engineer =>)` names the same type as
+    -- `(:Engineer)`. Both spellings must land on the identity Engineer.
+    (:Engineer =>)-[:MENTORS]->(:Manager&Staff)
+
+}

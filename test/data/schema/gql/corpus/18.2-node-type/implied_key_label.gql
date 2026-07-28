@@ -1,0 +1,7 @@
+-- An implied label that is also a declared node type's key label. Rejected:
+-- Fabric inherits Person's properties onto Engineer, Neo4j forbids a label
+-- being both identifying and implied, and the standard does not settle it.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Person { name :: STRING }),
+    (:Engineer => :Person { level :: INT })
+}

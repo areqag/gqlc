@@ -1,6 +1,9 @@
 package gql
 
 import (
+	"fmt"
+	"slices"
+
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/schema"
 )
@@ -35,23 +38,24 @@ func (r rawSchema) resolve() (schema.Schema, error) {
 		declared: make(map[string]bool),
 		types:    s.Nodes,
 	}
+	nodeKeyLabels := make(map[string]bool)
+	nodeImplied := make([]graph.LabelSet, 0, len(r.nodes))
 	for _, n := range r.nodes {
-		if len(n.labels) == 0 {
+		key, complete, ok := labelSets(n.hasKeyLabelSet, n.keyLabels, n.impliedLabels)
+		if !ok {
 			return schema.Schema{}, ErrUnnamedNodeType
 		}
-		// GG21 (`=>`) is rejected at parse time, so the declaration carries no
-		// implied content and the key label set is inferred (GG22) from the
-		// whole phrase. Key and complete therefore coincide — set both from the
-		// same source rather than letting one field stand in for both.
-		key := n.labels.Key()
 		if _, dup := s.Nodes[key]; dup {
 			return schema.Schema{}, ErrDuplicateNodeType
 		}
 		s.Nodes[key] = schema.NodeType{
 			KeyLabels:      key,
-			CompleteLabels: key,
+			CompleteLabels: complete,
 			Name:           n.name,
 			Properties:     n.props,
+		}
+		for _, label := range key.Split() {
+			nodeKeyLabels[label] = true
 		}
 		if n.alias != "" {
 			idx.aliases[n.alias] = key
@@ -59,13 +63,32 @@ func (r rawSchema) resolve() (schema.Schema, error) {
 		if n.name != "" {
 			idx.declared[n.name] = true
 		}
-		for _, label := range n.labels {
+		// Every label the type answers to, implied ones included: idx.declared
+		// exists to tell "you named a type where an alias belongs" apart from
+		// "no such type", and an author who writes an implied label has made
+		// that same mistake.
+		for _, label := range complete.Split() {
 			idx.declared[label] = true
 		}
+		if n.hasKeyLabelSet {
+			nodeImplied = append(nodeImplied, n.impliedLabels)
+		}
+	}
+	// Only a `=>` declaration has genuinely implied labels. Without one the
+	// implied content IS the key label set under GG22, so feeding it in would
+	// make every ordinary declaration collide with itself.
+	//
+	// Deferred past the loop because a collision is order-independent: a later
+	// declaration's key label can collide with an earlier one's implied label.
+	if err := rejectInheritance(nodeImplied, nodeKeyLabels); err != nil {
+		return schema.Schema{}, err
 	}
 
+	edgeKeyLabels := make(map[string]bool)
+	edgeImplied := make([]graph.LabelSet, 0, len(r.edges))
 	for _, e := range r.edges {
-		if len(e.labels) == 0 {
+		key, complete, ok := labelSets(e.hasKeyLabelSet, e.keyLabels, e.impliedLabels)
+		if !ok {
 			return schema.Schema{}, ErrUnnamedEdgeType
 		}
 		source, err := e.source.resolve(idx)
@@ -77,21 +100,85 @@ func (r rawSchema) resolve() (schema.Schema, error) {
 			return schema.Schema{}, err
 		}
 
-		// Same inference as for node types: no `=>`, so the edge's key label set
-		// is its whole declared phrase and its complete label set coincides.
-		key := schema.EdgeKey{Source: source, KeyLabels: e.labels.Key(), Target: target}
-		if _, dup := s.Edges[key]; dup {
+		edgeKey := schema.EdgeKey{Source: source, KeyLabels: key, Target: target}
+		if _, dup := s.Edges[edgeKey]; dup {
 			return schema.Schema{}, ErrDuplicateEdgeType
 		}
-		s.Edges[key] = schema.EdgeType{
-			EdgeKey:        key,
-			CompleteLabels: key.KeyLabels,
+		s.Edges[edgeKey] = schema.EdgeType{
+			EdgeKey:        edgeKey,
+			CompleteLabels: complete,
 			Name:           e.name,
 			Properties:     e.props,
 		}
+		for _, label := range key.Split() {
+			edgeKeyLabels[label] = true
+		}
+		if e.hasKeyLabelSet {
+			edgeImplied = append(edgeImplied, e.impliedLabels)
+		}
+	}
+	if err := rejectInheritance(edgeImplied, edgeKeyLabels); err != nil {
+		return schema.Schema{}, err
 	}
 
 	return s, nil
+}
+
+// labelSets turns a declaration's two raw label sets into the pair the model
+// stores: the key label set that identifies the type, and the complete label set
+// its elements carry. ok is false when the key label set comes out empty, which
+// leaves the type with no identity — the caller supplies the node or edge
+// sentinel for that.
+//
+// hasKey distinguishes the two ways a key label set can be empty, and they do not
+// resolve alike. Without a `=>` there is no declared key label set at all, so one
+// is inferred from the whole phrase (optional feature GG22) and coincides with the
+// complete set. With a `=>` the author declared the key label set explicitly
+// (GG21) and an empty one is an empty identity, so `(=> :Thing)` is rejected
+// rather than quietly re-inferred from the content it implies — that would
+// contradict what was written.
+func labelSets(hasKey bool, key, implied graph.LabelSet) (keyKey, complete graph.LabelSetKey, ok bool) {
+	if !hasKey {
+		inferred := implied.Key()
+		return inferred, inferred, inferred != ""
+	}
+	keyKey = key.Key()
+	if keyKey == "" {
+		return "", "", false
+	}
+	return keyKey, append(slices.Clone(key), implied...).Key(), true
+}
+
+// rejectInheritance refuses any declaration that implies a label some declaration
+// also holds as a key label. It is the one part of GG21 gqlc declines, and the
+// reason is that the two implementations of the syntax disagree about what it
+// means: given `(:Person {name STRING})` beside `(:Engineer => :Person)`,
+// Microsoft Fabric inherits Person's properties onto Engineer while Neo4j
+// forbids the schema outright, a label there being identifying or implied but
+// never both. Whether ISO/IEC 39075:2024 mandates the inheritance is unresolved —
+// the normative prose is in the paid PDF, which gqlc-lir declined to buy — so
+// accepting the schema means picking a vendor's answer and calling it the
+// standard. Rejecting is the same move ErrEdgeKindArcMismatch makes for the same
+// reason, under the no-dialect principle. See ADR 0015.
+//
+// The check is per-label rather than per-label-set: `(:A&B)` holds both A and B
+// as key labels, so implying either collides. Node and edge labels are checked
+// against their own kind only — they are separate namespaces, keying separate
+// maps, and an edge type labelled KNOWS says nothing about a node type's Person.
+//
+// Everything else GG21 admits is implemented, because the implied content is
+// declared inline (nodeTypeImpliedContent, GQL.g4:1526-1530) and needs no
+// cross-declaration reading to interpret. Where no key label is implied, the two
+// vendors agree, and that is exactly the subset this leaves standing.
+func rejectInheritance(implied []graph.LabelSet, keyLabels map[string]bool) error {
+	for _, set := range implied {
+		for _, label := range set {
+			if keyLabels[label] {
+				return fmt.Errorf("%w: %s", ErrImpliedLabelIsKeyLabel, label)
+			}
+		}
+	}
+	return nil
 }
 
 // nodeIndex is what an edge endpoint resolves against: the alias table, the

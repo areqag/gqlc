@@ -17,12 +17,18 @@ import (
 // type is known (see resolve.go). source and target are already in canonical
 // source->target order — the grammar normalises a left-pointing arc, exposing the
 // arrow's tail as the source.
+//
+// Its two label fields split at `=>` exactly as [rawNode]'s do; see there for why
+// the key/implied split is preserved into the raw form instead of being collapsed
+// during the walk.
 type rawEdge struct {
-	labels graph.LabelSet
-	name   string
-	props  map[string]schema.Property
-	source rawEndpoint
-	target rawEndpoint
+	hasKeyLabelSet bool
+	keyLabels      graph.LabelSet
+	impliedLabels  graph.LabelSet
+	name           string
+	props          map[string]schema.Property
+	source         rawEndpoint
+	target         rawEndpoint
 }
 
 // rawEndpoint is one end of a [rawEdge] before resolution: either an alias bound
@@ -64,13 +70,21 @@ func destRef(r gen.IDestinationNodeTypeReferenceContext) (rawEndpoint, error) {
 	return rawEndpoint{labels: labels}, nil
 }
 
-// fillerLabels reads just the label set from an inline node-type filler used as
-// an edge endpoint. The endpoint is a reference to a node type declared
-// elsewhere in the same graph type (CONTEXT.md: "resolved to the referenced
-// node type's label set"), so the only part of the filler that means anything
-// here is the label set — the property-type declarations that the grammar also
-// admits inside a filler have no consumer, and previously were silently
-// discarded (gqlc-h9n.18).
+// fillerLabels reads the label set that names the node type an inline endpoint
+// refers to. The endpoint is a reference to a node type declared elsewhere in the
+// same graph type (CONTEXT.md: "resolved to the referenced node type's label
+// set"), and since gqlc-h9n.8 a node type is named by its KEY label set — so an
+// endpoint written with `=>` is identified by the phrase before it, and only a
+// `=>`-less one falls back to the implied content under GG22.
+//
+// Everything else the grammar admits inside a filler is rejected rather than
+// dropped. Property types have no consumer here and were silently discarded until
+// gqlc-h9n.18; implied labels are the same defect wearing GG21's syntax, because
+// `(:Person => :Employee)` as an endpoint asserts the referenced type carries
+// Employee and nothing checks that against the actual declaration. Both are
+// rejected so the assertion cannot be quietly ignored. Note the implied-label
+// rejection needs the key label set to be present: without one the implied
+// content IS the endpoint's label set, which is the ordinary `(:Person)` spelling.
 //
 // f is nil when the endpoint is written as empty parens `()`: the grammar makes
 // the filler optional (`LEFT_PAREN nodeTypeFiller? RIGHT_PAREN`), so `()` with no
@@ -82,20 +96,30 @@ func fillerLabels(f gen.INodeTypeFillerContext) (graph.LabelSet, error) {
 	if f == nil {
 		return nil, nil
 	}
-	ic := f.NodeTypeImpliedContent()
-	if ic == nil {
-		return nil, nil
-	}
-	if pts := ic.NodeTypePropertyTypes(); pts != nil {
-		if spec := pts.PropertyTypesSpecification(); spec != nil {
-			if list := spec.PropertyTypeList(); list != nil && len(list.AllPropertyType()) > 0 {
-				return nil, ErrEndpointFillerHasProperties
+
+	var impliedLabels gen.INodeTypeLabelSetContext
+	// The implied content is absent for a key-label-set-only filler such as
+	// `(:Person =>)`, which still names a node type — so read the key label set
+	// outside this block rather than bailing here.
+	if ic := f.NodeTypeImpliedContent(); ic != nil {
+		if pts := ic.NodeTypePropertyTypes(); pts != nil {
+			if spec := pts.PropertyTypesSpecification(); spec != nil {
+				if list := spec.PropertyTypeList(); list != nil && len(list.AllPropertyType()) > 0 {
+					return nil, ErrEndpointFillerHasProperties
+				}
 			}
 		}
+		impliedLabels = ic.NodeTypeLabelSet()
 	}
-	ls := ic.NodeTypeLabelSet()
-	if ls == nil {
+
+	if kls := f.NodeTypeKeyLabelSet(); kls != nil {
+		if impliedLabels != nil {
+			return nil, ErrEndpointFillerImpliesLabels
+		}
+		return labelSet(kls.LabelSetPhrase()), nil
+	}
+	if impliedLabels == nil {
 		return nil, nil
 	}
-	return labelSet(ls.LabelSetPhrase()), nil
+	return labelSet(impliedLabels.LabelSetPhrase()), nil
 }

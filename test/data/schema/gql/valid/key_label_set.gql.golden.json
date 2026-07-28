@@ -1,0 +1,83 @@
+{
+  "name": "Publishing",
+  "nodes": [
+    {
+      "key_labels": "Article",
+      "complete_labels": "Article",
+      "name": "",
+      "properties": {
+        "title": {
+          "name": "title",
+          "type": "STRING",
+          "nullable": false
+        }
+      }
+    },
+    {
+      "key_labels": "Engineer",
+      "complete_labels": "Employee\u0026Engineer",
+      "name": "",
+      "properties": {
+        "level": {
+          "name": "level",
+          "type": "INT",
+          "nullable": true
+        },
+        "name": {
+          "name": "name",
+          "type": "STRING",
+          "nullable": false
+        }
+      }
+    },
+    {
+      "key_labels": "Manager\u0026Staff",
+      "complete_labels": "Employee\u0026Manager\u0026Staff",
+      "name": "",
+      "properties": {
+        "name": {
+          "name": "name",
+          "type": "STRING",
+          "nullable": false
+        },
+        "reports": {
+          "name": "reports",
+          "type": "INT",
+          "nullable": true
+        }
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "Engineer",
+      "key_labels": "MENTORS",
+      "target": "Manager\u0026Staff",
+      "complete_labels": "MENTORS",
+      "name": "",
+      "properties": null
+    },
+    {
+      "source": "Engineer",
+      "key_labels": "WROTE",
+      "target": "Article",
+      "complete_labels": "Author\u0026WROTE",
+      "name": "",
+      "properties": {
+        "since": {
+          "name": "since",
+          "type": "UINT64",
+          "nullable": true
+        }
+      }
+    },
+    {
+      "source": "Manager\u0026Staff",
+      "key_labels": "REVIEWED",
+      "target": "Article",
+      "complete_labels": "REVIEWED",
+      "name": "",
+      "properties": null
+    }
+  ]
+}
