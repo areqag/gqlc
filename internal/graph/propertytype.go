@@ -40,4 +40,10 @@ const (
 	TypeFloat256 PropertyType = "FLOAT256"
 
 	TypeDecimal PropertyType = "DECIMAL"
+
+	// TypeAnyPropertyValue is the open dynamic union of storable property value
+	// types — ISO GQL's ANY VALUE and ANY? PROPERTY VALUE. Both spellings are the
+	// same type: a property whose value the author did not or could not constrain
+	// further. Emitted as Go's any. (ADR 0020)
+	TypeAnyPropertyValue PropertyType = "ANY"
 )
