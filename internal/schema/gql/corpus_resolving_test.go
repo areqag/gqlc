@@ -150,14 +150,22 @@ type declinedCarriage struct {
 // still listed, because the list is the pin — a name that gains a resolving
 // carrier must be deleted from here or the gate goes red, which is the red-green
 // signal that a decline was lifted. requireDeclinedCarriers checks the account
-// too, not just the membership: every parse-time carrier of a listed name must
-// be an unsupported entry bearing that exact sentinel, so a name cannot be
-// parked under a decline that does not actually explain it.
+// too, not just the membership: a name is filed under the most specific sentinel
+// that accounts for every one of its carriers, so a name cannot be parked under a
+// decline that does not actually explain it.
+//
+// "Most specific" became a real question when ADR 0019 split ErrUnsupportedType
+// five ways. Most names have one family and are filed there. A few do not: ANY
+// spells both ANY VALUE and ANY NODE, the field-type rules serve RECORD and
+// BINDING TABLE alike, and the angle brackets are shared by LIST and the closed
+// unions. Those are filed under the class, and the class is the honest answer —
+// they are genuinely carried by more than one declined family, and saying so is
+// the fact about the grammar that a per-family filing would suppress.
 var declinedCarriers = []declinedCarriage{
 	{
 		sentinel: ErrUndirectedEdge,
-		bead:     "gqlc-h9n.6",
-		why:      "graph.EdgeType has no undirectedness field, so an undirected arc cannot resolve to anything but a lie. Retire when gqlc-h9n.6 decides whether to model it.",
+		bead:     "gqlc-0ri",
+		why:      "graph.EdgeType has no undirectedness field, so an undirected arc cannot resolve to anything but a lie. ADR 0016 declined it permanently rather than deferring it: an undirected edge is a distinct element kind and the distinction is observable through IS DIRECTED, so a canonical direction would answer those queries wrongly rather than imprecisely. No retirement path.",
 		names: []declinedName{
 			{"arcTypeUndirected", "rule"},
 			{"edgeTypePatternUndirected", "rule"},
@@ -167,8 +175,8 @@ var declinedCarriers = []declinedCarriage{
 	},
 	{
 		sentinel: ErrEdgeKindArcMismatch,
-		bead:     "gqlc-h9n.6",
-		why:      "The undirected connector spellings are reachable only through an edge type whose declared kind contradicts the arc, or through ErrUndirectedEdge above; either way the listener rejects before a model exists. Retire when gqlc-h9n.6 decides whether undirectedness is modelled.",
+		bead:     "gqlc-0ri",
+		why:      "The undirected connector spellings are reachable only through an edge type whose declared kind contradicts the arc, or through ErrUndirectedEdge above; either way the listener rejects before a model exists. Inherits that group's permanence — these names have no resolving path while undirectedness is unmodelled, and ADR 0016 settled that it stays so.",
 		names: []declinedName{
 			{"connectorUndirected", "rule"},
 			{"endpointPairUndirected", "rule"},
@@ -239,57 +247,92 @@ var declinedCarriers = []declinedCarriage{
 		},
 	},
 	{
-		sentinel: ErrUnsupportedType,
-		bead:     "gqlc-h9n.5",
-		why:      "Reference, list, record, path and binding-table value types are outside graph.PropertyType. The group most likely to shrink: each value type the model grows deletes rows from here, and gqlc-h9n.5 (LIST/ARRAY) moves the most.",
+		sentinel: ErrPathValueType,
+		bead:     "gqlc-0ri",
+		why:      "A path is a traversal a query produces, not a value an element stores, so no model or backend change reaches it (ADR 0019). No retirement path - this group is expected to stay.",
 		names: []declinedName{
-			{"emptyType#1", "alt"},
-			{"recordType#1", "alt"},
-			{"recordType#2", "alt"},
-			{"valueType#10", "alt"},
-			{"valueType#3", "alt"},
-			{"valueType#4", "alt"},
-			{"valueType#5", "alt"},
-			{"valueType#7", "alt"},
-			{"valueType#8", "alt"},
-			{"valueType#9", "alt"},
+			{"pathValueType", "rule"},
+			{"PATH", "token"},
+		},
+	},
+	{
+		sentinel: ErrReferenceValueType,
+		bead:     "gqlc-0ri",
+		why:      "A reference is a handle into a graph rather than a value, and a property holding one would be a relationship no traversal can follow - graph.EdgeType is where gqlc keeps those. The binding table is here because it is ISO's fourth referenceValueType alternative, and a query result rather than stored data either way. Permanent (ADR 0019).",
+		names: []declinedName{
 			{"bindingTableReferenceValueType", "rule"},
 			{"bindingTableType", "rule"},
 			{"closedEdgeReferenceValueType", "rule"},
 			{"closedGraphReferenceValueType", "rule"},
 			{"closedNodeReferenceValueType", "rule"},
 			{"edgeReferenceValueType", "rule"},
+			{"graphReferenceValueType", "rule"},
+			{"nodeReferenceValueType", "rule"},
+			{"openEdgeReferenceValueType", "rule"},
+			{"openGraphReferenceValueType", "rule"},
+			{"openNodeReferenceValueType", "rule"},
+			{"referenceValueType", "rule"},
+			{"BINDING", "token"},
+			{"TABLE", "token"},
+		},
+	},
+	{
+		sentinel: ErrImmaterialValueType,
+		bead:     "gqlc-0ri",
+		why:      "NULL admits only null, which schema.Property.Nullable already records, and the empty type admits nothing at all - a property of it could never be written or read. Permanent on the shape of the types themselves (ADR 0019).",
+		names: []declinedName{
+			{"emptyType#1", "alt"},
 			{"emptyType", "rule"},
+			{"immaterialValueType", "rule"},
+			{"nullType", "rule"},
+			{"NOTHING", "token"},
+		},
+	},
+	{
+		sentinel: ErrRecordValueType,
+		bead:     "gqlc-h9n.33",
+		why:      "A record is structured and graph.PropertyType is a flat enum, so there is nowhere to put the fields. Unimplemented rather than declined: gqlc-h9n.33 retires this group, and would retire the closed unions with it.",
+		names: []declinedName{
+			{"recordType#1", "alt"},
+			{"recordType#2", "alt"},
+			{"recordType", "rule"},
+			{"RECORD", "token"},
+		},
+	},
+	{
+		sentinel: ErrDynamicUnionType,
+		bead:     "gqlc-h9n.33",
+		why:      "One sentinel over two different blockers, which ADR 0019 keeps deliberately because the taxonomy is ISO's rather than gqlc's: the closed unions (#9, #10) need the enum to carry members and are gqlc-h9n.33's, while the open ones (#7, #8) are atomic and need only a decision about the generated Go, which is gqlc-h9n.34's. Retires when both land.",
+		names: []declinedName{
+			{"valueType#10", "alt"},
+			{"valueType#7", "alt"},
+			{"valueType#8", "alt"},
+			{"valueType#9", "alt"},
+			{"VALUE", "token"},
+			{"VERTICAL_BAR", "token"},
+		},
+	},
+	{
+		sentinel: ErrUnsupportedType,
+		bead:     "gqlc-h9n.5",
+		why:      "Two memberships, and the class is what they have in common. LIST/ARRAY reports the class bare because gqlc-h9n.5 has yet to justify it, so its names are here for the ordinary reason. ANY, the field-type rules and the angle brackets are here for a different one: each is carried by two declined families at once, so no leaf accounts for all of its carriers and the class is the most specific sentinel that does.",
+		names: []declinedName{
+			{"valueType#3", "alt"},
+			{"valueType#4", "alt"},
+			{"valueType#5", "alt"},
 			{"fieldName", "rule"},
 			{"fieldType", "rule"},
 			{"fieldTypeList", "rule"},
 			{"fieldTypesSpecification", "rule"},
-			{"graphReferenceValueType", "rule"},
-			{"immaterialValueType", "rule"},
 			{"listValueTypeName", "rule"},
 			{"listValueTypeNameSynonym", "rule"},
-			{"nodeReferenceValueType", "rule"},
-			{"nullType", "rule"},
-			{"openEdgeReferenceValueType", "rule"},
-			{"openGraphReferenceValueType", "rule"},
-			{"openNodeReferenceValueType", "rule"},
-			{"pathValueType", "rule"},
-			{"recordType", "rule"},
-			{"referenceValueType", "rule"},
 			{"ANY", "token"},
 			{"ARRAY", "token"},
-			{"BINDING", "token"},
 			{"LEFT_ANGLE_BRACKET", "token"},
 			{"LEFT_BRACKET", "token"},
 			{"LIST", "token"},
-			{"NOTHING", "token"},
-			{"PATH", "token"},
-			{"RECORD", "token"},
 			{"RIGHT_ANGLE_BRACKET", "token"},
 			{"RIGHT_BRACKET", "token"},
-			{"TABLE", "token"},
-			{"VALUE", "token"},
-			{"VERTICAL_BAR", "token"},
 		},
 	},
 }
@@ -326,14 +369,30 @@ func requireDeclinedCarriers(t *testing.T, obligation obligation, measured []dec
 			files := carriers[entry.name]
 			require.NotEmpty(t, files,
 				"declined name %q is reached by no corpus file at all, so no sentinel accounts for it; the coverage gate is what should be failing", entry.name)
+
+			exact := make(map[error]bool, len(files))
 			for _, file := range files {
 				got := sentinels[file]
 				require.Error(t, got,
 					"declined name %q is filed under %v, but %s carries it and resolves; a name with a resolving carrier belongs in neither this register nor any other",
 					entry.name, group.sentinel, file)
-				require.Equal(t, group.sentinel, got,
+				require.ErrorIs(t, got, group.sentinel,
 					"declined name %q is filed under %v, but %s carries it and rejects with %v",
 					entry.name, group.sentinel, file, got)
+				exact[got] = true
+			}
+			// A name every carrier rejects with the same sentinel must be filed
+			// under that sentinel, not under a class wrapping it. Without this the
+			// register would satisfy itself by parking everything under
+			// ErrUnsupportedType, which is the undifferentiated state ADR 0019 was
+			// filed against. A name carried by two families has no such home, and
+			// the class is then the honest answer rather than a lazy one.
+			if len(exact) == 1 {
+				for got := range exact {
+					require.Equal(t, group.sentinel, got,
+						"declined name %q is carried only by files rejecting with %v, so file it there rather than under %v",
+						entry.name, got, group.sentinel)
+				}
 			}
 		}
 	}

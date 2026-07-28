@@ -13,9 +13,14 @@ import (
 
 // property lowers a propertyType context into a schema.Property: name, the
 // normalised value type, and nullability. It returns ErrUnsupportedType for a
-// grammar-valid value type outside the families this model maps (ADR 0002).
+// grammar-valid value type outside the families this model maps (ADR 0002),
+// or one of that error's five family leaves where ADR 0019 has named a reason.
 func property(ctx gen.IPropertyTypeContext, ts *antlr.CommonTokenStream) (schema.Property, error) {
 	vt := ctx.PropertyValueType().ValueType()
+
+	if err := declineValueType(vt); err != nil {
+		return schema.Property{}, err
+	}
 
 	pt, ok := normaliseType(spelling(vt, ts))
 	if !ok {
@@ -27,6 +32,43 @@ func property(ctx gen.IPropertyTypeContext, ts *antlr.CommonTokenStream) (schema
 		Type:     pt,
 		Nullable: !hasNotNull(vt),
 	}, nil
+}
+
+// declineValueType names the family of a value type gqlc does not model, or nil
+// to let normaliseType try the spelling. Deciding on the parse tree rather than
+// the spelling is what makes the family knowable at all: `(:X)` and `NOTHING`
+// share no text with each other or with anything in typeSpellings, so a lookup
+// miss can say only that the lookup missed.
+//
+// It reads the outermost context and does not descend. Two declined families
+// nest a value type inside themselves — `BINDING TABLE { id :: STRING }` and
+// `RECORD { f :: STRING }` both carry a predefinedType for the field — so a
+// subtree search would report the field's family in place of the property's.
+//
+// A value type this does not name falls through, which is deliberate: LIST is
+// gqlc-h9n.5's to justify, and an alternative added to the grammar after this
+// was written has no justification of its own yet. Both land on the bare class.
+func declineValueType(vt gen.IValueTypeContext) error {
+	switch t := vt.(type) {
+	case *gen.PathValueTypeLabelContext:
+		return ErrPathValueType
+	case *gen.RecordTypeLabelContext:
+		return ErrRecordValueType
+	case *gen.OpenDynamicUnionTypeLabelContext, *gen.DynamicPropertyValueTypeLabelContext,
+		*gen.ClosedDynamicUnionTypeAtl1Context, *gen.ClosedDynamicUnionTypeAtl2Context:
+		return ErrDynamicUnionType
+	case *gen.PredefinedTypeLabelContext:
+		// ISO files references and the immaterial types under <predefined type>,
+		// alongside BOOL and STRING, rather than under <constructed value type> —
+		// so reaching them means going through this alternative, not past it.
+		switch pt := t.PredefinedType(); {
+		case pt.ReferenceValueType() != nil:
+			return ErrReferenceValueType
+		case pt.ImmaterialValueType() != nil:
+			return ErrImmaterialValueType
+		}
+	}
+	return nil
 }
 
 // spelling returns the value type's source text via the token stream so internal
