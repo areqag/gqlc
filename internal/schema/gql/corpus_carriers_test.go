@@ -66,6 +66,12 @@ func TestCorpusAreaParseCarriers(t *testing.T) {
 	// out-of-tree detector was written to find. requireCarrierExemptions verifies
 	// this shape and the metadata on each entry.
 	exempt := requireCarrierExemptions(t, owners, obligation)
+	// The clause-21 class is exempt for one reason rather than 29, so it is held
+	// as a golden instead of as entries here. TestClause21Unowned is what keeps it
+	// honest; this only consumes it.
+	for _, name := range clause21Unowned {
+		exempt[name] = true
+	}
 
 	orphans := findOrphans(obligation, owners, carried)
 	unowned := findUnowned(owners, exempt, obligation)
@@ -97,44 +103,18 @@ type carrierExemption struct {
 }
 
 // carrierExemptions lists the names whose ownership does not fall to any area by
-// the section-prefix rule. Every entry needs a bead pointing at the work that
-// would let the entry be deleted, and a reason a reviewer can weigh; the question
-// the reader must answer is "would I rather do that work than keep this here".
-// Structural entries (section 21 identifier lexis; the section-11.1 query surface
-// cut) have no retirement path by design — the `why:` must say so, or a future
-// reader burns time hunting for the bead that removes them.
+// the section-prefix rule *and* whose reason is particular to them. Every entry
+// needs a bead pointing at the work that would let the entry be deleted, and a
+// reason a reviewer can weigh; the question the reader must answer is "would I
+// rather do that work than keep this here".
 //
 // If this list grows past a handful the ownership model is wrong, not the
-// exemptions — file the finding rather than adding a tenth entry.
+// exemptions — file the finding rather than adding a tenth entry. That threshold
+// was breached and the finding is gqlc-ii8: the list had reached 35 entries, 29 of
+// them clause-21 names carrying one sentence copied 29 times. Prose repeated 29
+// times is not the reviewer's checklist this list claims to be, so that class
+// moved to clause21Unowned below, where its reason is stated once.
 var carrierExemptions = []carrierExemption{
-	// Identifier lexis, section 21.1, unowned by any of the ISO 18.x construct
-	// areas — every corpus file names an identifier somewhere, so requiring a
-	// specific area to carry these adds nothing. STRUCTURAL: no retirement path;
-	// ISO clause 21 has no corpus directory by design.
-	{name: "identifier", kind: "rule", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 identifier lexis; reached from every construct in every area, so ownership is spurious. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "regularIdentifier", kind: "rule", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 identifier lexis; reached from every construct in every area. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "nonReservedWords", kind: "rule", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 identifier lexis; a coverage cut in coverageCuts, referenced by regularIdentifier. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "objectName", kind: "rule", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 identifier lexis; naming productions reach it from every area. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "schemaName", kind: "rule", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 identifier lexis; the schema-reference chain reaches it. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "labelName", kind: "rule", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 identifier lexis; every label set in every area reaches it. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "propertyName", kind: "rule", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 identifier lexis; every property spelling in every area reaches it. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "fieldName", kind: "rule", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 identifier lexis; reached by 18.10-field-type field lists. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "directoryName", kind: "rule", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 identifier lexis; reached by 17-references directory paths. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "graphTypeName", kind: "rule", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 identifier lexis; every CREATE GRAPH TYPE names one, so every area reaches it. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "edgeTypeName", kind: "rule", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 identifier lexis; edge type declarations name it. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "nodeTypeName", kind: "rule", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 identifier lexis; node type declarations name it. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "unsignedInteger", kind: "rule", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.2 literal; length/precision/scale spellings reach it from every area with sized types. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "unsignedDecimalInteger", kind: "rule", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.2 literal; alias of unsignedInteger. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "unsignedInteger#1", kind: "alt", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.2 literal; alternative of unsignedInteger, above. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "identifier#1", kind: "alt", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 identifier lexis; alternative of identifier, above. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "REGULAR_IDENTIFIER", kind: "token", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 identifier lexis; identifier terminal. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "ACCENT_QUOTED_CHARACTER_SEQUENCE", kind: "token", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 identifier lexis; delimited-identifier terminal. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "DOUBLE_QUOTED_CHARACTER_SEQUENCE", kind: "token", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 identifier lexis; delimited-identifier terminal. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "UNSIGNED_DECIMAL_INTEGER", kind: "token", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.2 literal; unsigned integer terminal. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "UNSIGNED_BINARY_INTEGER", kind: "token", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.2 literal; unsigned integer alternate radix. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "UNSIGNED_HEXADECIMAL_INTEGER", kind: "token", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.2 literal; unsigned integer alternate radix. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "UNSIGNED_OCTAL_INTEGER", kind: "token", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.2 literal; unsigned integer alternate radix. No retirement path — clause 21 has no corpus directory by design."},
-
 	// Section-heading misfits: declared under a section number that no area owns
 	// by prefix, but semantically belong to one that does. Moving the declarations
 	// under the right heading in GQL.g4 retires these — that is gqlc-h9n.27.
@@ -144,26 +124,75 @@ var carrierExemptions = []carrierExemption{
 	{name: "COLON", kind: "token", bead: "gqlc-h9n.27", why: "section 16.7 pattern lexis; label-set prefix. Retire when 16.7 declarations move to the area that owns them."},
 	{name: "LIKE", kind: "token", bead: "gqlc-h9n.27", why: "section 12.4 in the grammar but reachable from 12.6 through graphTypeLikeGraph, above. Retire by moving the declaration under // 12.6."},
 
-	// Element-kind vocabulary, section 21.1, unowned by any 18.x construct area
-	// for the same structural reason as the identifier lexis above. These were
-	// filed under gqlc-h9n.26 with a different account — "parse-time carried only
-	// by unsupported files, retire once the resolving-path gate lands" — and both
-	// halves of that were wrong. Ownership is what this gate reports, and section
-	// 21.1 is unowned however the files resolve, so landing the resolving gate
-	// retires nothing here. The concern the old account named is real and is now
-	// answered where it belongs: TestCorpusResolvingCarriers asks it corpus-wide,
-	// which needs no ownership, so these names are pinned as having a resolving
-	// carrier and go red if they lose one. STRUCTURAL: no retirement path.
-	{name: "nodeSynonym", kind: "rule", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 vocabulary; the NODE/VERTEX synonym pair, reachable from node type patterns and phrases in several areas. No retirement path — clause 21 has no corpus directory by design. Resolving-path carriage is pinned by TestCorpusResolvingCarriers."},
-	{name: "edgeSynonym", kind: "rule", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 vocabulary; the EDGE/RELATIONSHIP synonym set. No retirement path — clause 21 has no corpus directory by design. Resolving-path carriage is pinned by TestCorpusResolvingCarriers."},
-	{name: "NODE", kind: "token", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 vocabulary; keyword synonym of VERTEX. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "VERTEX", kind: "token", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 vocabulary; keyword synonym of NODE. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "EDGE", kind: "token", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 vocabulary; keyword synonym of RELATIONSHIP. No retirement path — clause 21 has no corpus directory by design."},
-	{name: "RELATIONSHIP", kind: "token", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 21.1 vocabulary; keyword synonym of EDGE. No retirement path — clause 21 has no corpus directory by design."},
-
 	// The query-surface cut has no retirement path from within this gate — the
-	// DDL areas are not meant to own query-side productions.
+	// DDL areas are not meant to own query-side productions. It stays here rather
+	// than joining clause21Unowned because its reason is its own: section 11.1 is
+	// a coverage cut, not identifier lexis.
 	{name: "graphExpression", kind: "rule", bead: "gqlc-h9n.17", why: "STRUCTURAL: section 11.1 query surface; a coverageCut and unowned by any of the DDL areas by design. No retirement path — the DDL areas do not own the query surface."},
+}
+
+// clause21Unowned is every obligation name ISO declares under clause 21 — 21.1
+// identifier lexis, 21.2 literals and element-kind vocabulary. One reason covers
+// all of them, so it is stated here once rather than copied onto each:
+//
+//	Clause 21 is the lexis every construct in every area reaches. labelName is
+//	named by every label set, UNSIGNED_DECIMAL_INTEGER by every sized type, NODE
+//	by every node type pattern. Asking which one 18.x area carries them is a
+//	question with no true answer, and clause 21 has no corpus directory to answer
+//	it from — a deliberate shape of the corpus, not a gap in it. So these have no
+//	retirement path, and no bead that would close one.
+//
+// It is a membership golden and not a rule reading "skip clause 21", because a
+// rule would be invisible: a name declared under clause 21 would be exempted the
+// moment it was written, with nobody asked. TestClause21Unowned matches this list
+// against the grammar as an exact set, so adding a name, removing one, or moving
+// one across the clause boundary each redden the build and land in the diff.
+//
+// It is a golden and not a count for the reason the corpus prefers goldens
+// generally: a count lets one name silently replace another.
+//
+// It is deliberately not ratcheted, unlike isoGaps. An unimplemented ISO
+// production is debt and a ratchet is what stops debt growing. A clause-21 name is
+// not debt — it is the grammar having named another identifier production — so a
+// cap here would be a number someone raises, which is the opposite of a guard.
+//
+// nodeSynonym, edgeSynonym and the four element-kind keywords were once filed
+// under gqlc-h9n.26 as "parse-time carried only by unsupported files, retire once
+// the resolving-path gate lands". Both halves of that were wrong: ownership is
+// what this gate reports, and clause 21 is unowned however the files resolve, so
+// landing the resolving gate retires nothing here. The concern was real and is
+// answered where it belongs — TestCorpusResolvingCarriers asks it corpus-wide,
+// needing no ownership, and goes red if any of them loses a resolving carrier.
+var clause21Unowned = []string{
+	"ACCENT_QUOTED_CHARACTER_SEQUENCE",
+	"DOUBLE_QUOTED_CHARACTER_SEQUENCE",
+	"EDGE",
+	"NODE",
+	"REGULAR_IDENTIFIER",
+	"RELATIONSHIP",
+	"UNSIGNED_BINARY_INTEGER",
+	"UNSIGNED_DECIMAL_INTEGER",
+	"UNSIGNED_HEXADECIMAL_INTEGER",
+	"UNSIGNED_OCTAL_INTEGER",
+	"VERTEX",
+	"directoryName",
+	"edgeSynonym",
+	"edgeTypeName",
+	"fieldName",
+	"graphTypeName",
+	"identifier",
+	"identifier#1",
+	"labelName",
+	"nodeSynonym",
+	"nodeTypeName",
+	"nonReservedWords",
+	"objectName",
+	"propertyName",
+	"regularIdentifier",
+	"schemaName",
+	"unsignedDecimalInteger",
+	"unsignedInteger",
+	"unsignedInteger#1",
 }
 
 // requireCarrierExemptions rejects entries that shelter something an area owns, or
@@ -218,7 +247,7 @@ func areaOwners(t *testing.T, sections map[string]string, obligation obligation)
 	areaPrefixNums := areaPrefixNumbers(t)
 
 	owners := make(map[string][]string)
-	setOwners := func(name, sectionNum string) {
+	for name, sectionNum := range obligationSections(sections, obligation) {
 		var areas []string
 		for area, nums := range areaPrefixNums {
 			for _, num := range nums {
@@ -231,17 +260,77 @@ func areaOwners(t *testing.T, sections map[string]string, obligation obligation)
 		sort.Strings(areas)
 		owners[name] = areas
 	}
+	return owners
+}
 
+// obligationSections maps every obligation name to the ISO section number of the
+// declaration it belongs to: a rule's own heading, a token's first referencing rule
+// (as in worklist), an alternative's rule. areaOwners and clause21Names both
+// partition the obligation by this, so deriving it once is what keeps the two
+// partitioning the same thing.
+//
+// The first-reference rule for tokens is unpinned, and gqlc-1uf is the finding:
+// taking the last reference instead moves 9 tokens to a different section (TYPE
+// from 12.6 to 18.2, COMMA from 18.9 to 18.5, and so on) and every gate stays
+// green. Attribution only bites for a token one area carries and another does not,
+// and these are all reached from both — so nothing is wrong today, but the rule is
+// a choice no test is currently defending.
+func obligationSections(sections map[string]string, obligation obligation) map[string]string {
+	out := make(map[string]string, len(obligation.rules)+len(obligation.tokenRefs)+len(obligation.required))
 	for rule := range obligation.rules {
-		setOwners(rule, sectionNumber(sections[rule]))
+		out[rule] = sectionNumber(sections[rule])
 	}
 	for token, refs := range obligation.tokenRefs {
-		setOwners(token, sectionNumber(sections[refs[0]]))
+		out[token] = sectionNumber(sections[refs[0]])
 	}
 	for _, tag := range obligation.required {
-		setOwners(tag, sectionNumber(sections[ruleOf(tag)]))
+		out[tag] = sectionNumber(sections[ruleOf(tag)])
 	}
-	return owners
+	return out
+}
+
+// clause21Names is every obligation name declared under ISO clause 21. It uses the
+// same predicate the ownership rule uses, so "under clause 21" here and "owned by
+// an area whose prefix is 21" cannot come to mean different things.
+func clause21Names(sections map[string]string, obligation obligation) []string {
+	var names []string
+	for name, section := range obligationSections(sections, obligation) {
+		if sectionMatchesArea(section, "21") {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// TestClause21Unowned matches clause21Unowned against the grammar as an exact set,
+// which is what stops the clause-21 class being a rule nobody sees applied. Every
+// direction is a failure: a name newly declared under clause 21 is absent from the
+// golden, a name that moved out of clause 21 is stale in it, and a name renamed is
+// both at once.
+func TestClause21Unowned(t *testing.T) {
+	sections := scanRuleSections(t)
+	obligation := grammarObligation(t)
+
+	require.True(t, sort.StringsAreSorted(clause21Unowned),
+		"clause21Unowned is not sorted; a golden's whole value is that a change to it is a readable diff")
+	require.Len(t, slices.Compact(slices.Clone(clause21Unowned)), len(clause21Unowned),
+		"clause21Unowned has a duplicate")
+
+	require.ElementsMatch(t, clause21Names(sections, obligation), clause21Unowned,
+		"the obligation names under ISO clause 21 changed.\n"+
+			"A name added there needs a line in clause21Unowned — it is exempt from area ownership, and this list is where that is visible.\n"+
+			"A name that left needs its line deleted, or it silently exempts nothing.")
+
+	// The list claims these have no owning area. If an area ever takes a clause-21
+	// prefix that stops being true, and the exemption would then hide a real orphan
+	// — the same guard requireCarrierExemptions applies to its own entries.
+	owners := areaOwners(t, sections, obligation)
+	for _, name := range clause21Unowned {
+		require.Empty(t, owners[name],
+			"clause21Unowned entry %q is owned by area(s) %v; it belongs to the orphan check, not to an exemption",
+			name, owners[name])
+	}
 }
 
 // reSectionPrefix pulls the "N" or "N.M" number out of a section heading like
