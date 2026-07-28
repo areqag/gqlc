@@ -1,0 +1,4 @@
+-- PATH is a traversal result type, not a storable property value type.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Route { traversal :: PATH })
+}

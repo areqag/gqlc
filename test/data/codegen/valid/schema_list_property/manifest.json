@@ -1,0 +1,4 @@
+{
+  "package": "schemalistproperty",
+  "queryFiles": ["queries.cypher"]
+}

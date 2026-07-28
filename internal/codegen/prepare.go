@@ -686,6 +686,28 @@ func phaseBDerive(queries []NamedQuery, entities []preparedEntity, entityIndex m
 
 			switch t := col.Type.(type) {
 			case resolver.ResolvedProperty:
+				if t.Type.Kind() == graph.KindList {
+					// Schema list property: build a columnList plan so the
+					// render layer uses the element-by-element []any decode
+					// path rather than GetRecordValue[[]T] (§4.7).
+					elemResolved := resolver.ResolvedProperty{
+						Type:     t.Type.Elem(),
+						Nullable: !t.Type.ElemNotNull(),
+					}
+					plan, err := buildListElemPlan(elemResolved, entities, entityIndex, -1, "")
+					if err != nil {
+						return nil, fmt.Errorf("query %q column %d %q: %w", q.Name, ci, col.Name, err)
+					}
+					p.RowFields = append(p.RowFields, preparedRow{
+						ColumnName: col.Name,
+						Field:      field,
+						GoType:     "[]" + plan.GoType,
+						Nullable:   t.Nullable,
+						Kind:       columnList,
+						ListElem:   plan,
+					})
+					break
+				}
 				ty, _ := goType(t.Type)
 				p.RowFields = append(p.RowFields, preparedRow{
 					ColumnName: col.Name,

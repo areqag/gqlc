@@ -481,11 +481,12 @@ func TestPropertyBareDurationRejectedAtParse(t *testing.T) {
 // families this model maps; they must surface ErrUnsupportedType (ADR 0002).
 // Scalar time-of-day / byte-string / duration spellings that once lived here
 // are now supported (gqlc-h9n.4) and appear in TestPropertyTypeMapping instead;
+// list spellings are now supported (gqlc-h9n.5) and appear in TestListPropertyResolves;
 // the remaining shapes are constructed / reference / dynamic types the model
 // does not carry.
 func TestPropertyUnsupportedType(t *testing.T) {
 	for _, spelling := range []string{
-		"LIST<INT>",
+		"RECORD",
 	} {
 		t.Run(spelling, func(t *testing.T) {
 			_, err := parseFirstProperty(t, spelling)

@@ -5,9 +5,9 @@
 -- an unsupported property type would have been silently discarded, taking its
 -- node out of the schema without a diagnostic.
 --
--- Unsupported: ErrUnsupportedType, for gqlc-h9n.5's reason. The value type is
--- incidental — constructed_list_angle.gql already pins that LIST declines. What
+-- Unsupported: ErrRecordValueType (gqlc-h9n.33). The value type is incidental —
+-- 18.9-value-type/constructed_record_bare.gql pins that RECORD declines. What
 -- this file pins is that the phrase-form collector forwards the decline at all.
 CREATE PROPERTY GRAPH TYPE T AS {
-    NODE TYPE Bag :Bag { items :: LIST<STRING> } AS b
+    NODE TYPE Bag :Bag { items :: RECORD } AS b
 }

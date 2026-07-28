@@ -5,11 +5,11 @@
 -- the tree green. An edge carrying an unsupported property type was silently
 -- dropped from the schema, taking the relationship with it.
 --
--- Unsupported: ErrUnsupportedType, for gqlc-h9n.5's reason. The value type is
--- incidental — constructed_list_angle.gql pins that LIST declines on a node.
+-- Unsupported: ErrRecordValueType (gqlc-h9n.33). The value type is incidental —
+-- 18.9-value-type/constructed_record_bare.gql pins that RECORD declines on a node.
 -- What this file pins is that the edge lane forwards the decline at all.
 CREATE PROPERTY GRAPH TYPE T AS {
     (:Person { id :: INT NOT NULL }),
     (:Post { id :: INT NOT NULL }),
-    (:Person) -[:AUTHORED { items :: LIST<STRING> }]-> (:Post)
+    (:Person) -[:AUTHORED { items :: RECORD }]-> (:Post)
 }

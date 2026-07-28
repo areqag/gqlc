@@ -95,7 +95,7 @@ import (
 // expectations off the map under test, which is what keeps them evidence.
 const (
 	wantCorpusEntries   = 123
-	wantCorpusResolving = 64
+	wantCorpusResolving = 68
 	wantSemanticCases   = 18
 )
 
