@@ -1,6 +1,7 @@
 package gql
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -183,7 +184,7 @@ var declinedCarriers = []declinedCarriage{
 	{
 		sentinel: ErrUnnamedNodeType,
 		bead:     "gqlc-0ri",
-		why:      "Same shape as the edge case below - a node type with no key label has no identity to record.",
+		why:      "Same shape as the edge case below - a node type with no key label has no identity to record. The alternative below is reached in endpoint position too, where the same missing identity surfaces as ErrUnknownEndpoint instead; see declinedAlso.",
 		names: []declinedName{
 			{"nodeTypeImpliedContent#2", "alt"},
 		},
@@ -333,6 +334,30 @@ var declinedCarriers = []declinedCarriage{
 	},
 }
 
+// declinedAlso is the escape the paragraph above leaves open for a name whose
+// carriers span two declined families with NO class wrapping them. The five
+// value-type families have ErrUnsupportedType and are filed there; these two have
+// nothing, because they are not two readings of one rejection — they are one
+// rejection reported from the two sides it can be seen from.
+//
+// nodeTypeImpliedContent#2 is a filler that is a property block and nothing else.
+// Written as a node type declaration (18.2-node-type/pattern_properties_only.gql)
+// it declares a type with no key label set, and ErrUnnamedNodeType says an
+// unlabelled node type has no identity. Written as an edge endpoint
+// (18.3-edge-type/endpoint_property_block_only.gql) it REFERENCES the type with
+// the empty key label set, which by ADR 0018 no declaration can ever create, and
+// ErrUnknownEndpoint says the referent does not exist. Same missing identity, one
+// sentinel per side of it.
+//
+// A map keyed by name rather than a field on declinedName, so the fifty-odd
+// entries above stay two-field literals and this stays visibly an exception: it
+// should have one row, and a second should be argued rather than appended.
+// requireDeclinedCarriers demands every sentinel here be exercised by a carrier,
+// so a row cannot launder a filing that is simply wrong.
+var declinedAlso = map[string][]error{
+	"nodeTypeImpliedContent#2": {ErrUnknownEndpoint},
+}
+
 // requireDeclinedCarriers checks the register against what was measured, in both
 // directions, and checks each entry's account. Bidirectional because the two
 // failures are opposite and both silent: a name missing from the register is a
@@ -366,16 +391,43 @@ func requireDeclinedCarriers(t *testing.T, obligation obligation, measured []dec
 			require.NotEmpty(t, files,
 				"declined name %q is reached by no corpus file at all, so no sentinel accounts for it; the coverage gate is what should be failing", entry.name)
 
+			also := declinedAlso[entry.name]
+			for _, other := range also {
+				require.True(t, isSentinel(other),
+					"declined name %q lists %v in declinedAlso, which is not in allSentinels", entry.name, other)
+				require.NotEqual(t, group.sentinel, other,
+					"declined name %q lists its own group's sentinel in declinedAlso", entry.name)
+			}
+
 			exact := make(map[error]bool, len(files))
 			for _, file := range files {
 				got := sentinels[file]
 				require.Error(t, got,
 					"declined name %q is filed under %v, but %s carries it and resolves; a name with a resolving carrier belongs in neither this register nor any other",
 					entry.name, group.sentinel, file)
-				require.ErrorIs(t, got, group.sentinel,
+				accounted := errors.Is(got, group.sentinel)
+				for _, other := range also {
+					accounted = accounted || errors.Is(got, other)
+				}
+				require.True(t, accounted,
 					"declined name %q is filed under %v, but %s carries it and rejects with %v",
 					entry.name, group.sentinel, file, got)
 				exact[got] = true
+			}
+
+			// An unexercised declinedAlso row is the failure mode that register
+			// invites: it would let any name be filed anywhere by naming enough
+			// sentinels. Each row has to be a carrier's actual rejection.
+			for _, other := range also {
+				carried := false
+				for got := range exact {
+					if errors.Is(got, other) {
+						carried = true
+					}
+				}
+				require.True(t, carried,
+					"declined name %q lists %v in declinedAlso, but no carrier rejects with it; delete the row",
+					entry.name, other)
 			}
 			// A name every carrier rejects with the same sentinel must be filed
 			// under that sentinel, not under a class wrapping it. Without this the
@@ -391,6 +443,15 @@ func requireDeclinedCarriers(t *testing.T, obligation obligation, measured []dec
 				}
 			}
 		}
+	}
+
+	// The per-name checks above only reach a declinedAlso row whose name the
+	// register still lists, so without this a row for anything else would sit
+	// there unread — including one left behind by a name that gained a resolving
+	// carrier and was deleted, which is the moment its exemption stops being true.
+	for name := range declinedAlso {
+		require.True(t, seen[name],
+			"declinedAlso has a row for %q, which no declined-carriage group names; it accounts for nothing", name)
 	}
 
 	require.ElementsMatch(t, measured, declared,
