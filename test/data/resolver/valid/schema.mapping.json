@@ -55,6 +55,7 @@
     "demote_var_length_min_one.cypher": "social_r4.gql",
     "demote_var_length_unbounded_lower.cypher": "social_r4.gql",
     "demote_from_anonymous_required_edge.cypher": "social_r4.gql",
+    "no_demote_disjoint_anonymous_required_edge.cypher": "social_r4.gql",
     "demote_group_arity_five.cypher": "social_r4.gql",
     "demote_two_groups_one_proven.cypher": "social_r4.gql",
     "no_demote_unproven_group.cypher": "social_r4.gql",
