@@ -1,0 +1,9 @@
+-- openDynamicUnionType with its `VALUE?` elided (GQL.g4:1728): a bare `ANY`.
+-- constructed_dyn_open.gql writes `ANY VALUE`, which is the same type.
+--
+-- `ANY` alone is not `ANY RECORD` or `ANY NODE` with the second word forgotten —
+-- those are their own alternatives and reached by their own spellings. Prediction
+-- has nothing after ANY to look at here, so the open dynamic union is what is left.
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:Bag { p :: ANY })
+}

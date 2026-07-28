@@ -298,14 +298,7 @@ type owedBranch struct {
 }
 
 var owedOptionality = []owedBranch{
-	{"18.10 :: typed", "gqlc-h9n.32", "fieldType's `::`-elided spelling, `{ name INT }` (GQL.g4:1997). Reachable only through binding table and record types, so the file records a decline rather than a resolve"},
-	{"18.8 :: BINDING", "gqlc-h9n.32", "`TABLE { ... }` without the BINDING keyword (GQL.g4:1714); declined with ErrUnsupportedType, so the file pins the decline"},
-	{"18.9 :: COMMA fieldType", "gqlc-h9n.32", "a record type listing more than one field"},
-	{"18.9 :: PROPERTY", "gqlc-h9n.32", "a graph reference value type spelling GRAPH without the PROPERTY keyword"},
-	{"18.9 :: RECORD", "gqlc-h9n.32", "the RECORD-elided record type: a bare `{ f :: INT }` where the keyword is dropped (GQL.g4:1979)"},
-	{"18.9 :: VALUE", "gqlc-h9n.32", "a dynamic union type spelled `ANY` rather than `ANY VALUE` (GQL.g4:1728, 1731)"},
 	{"18.9 :: VERTICAL_BAR valueType", "gqlc-h9n.32", "a closed dynamic union listing more than one member, `ANY VALUE<A|B>` (GQL.g4:1731)"},
-	{"18.9 :: fieldTypeList", "gqlc-h9n.32", "the empty record type `RECORD {}` (GQL.g4:1983)"},
 }
 
 // TestOptionalityClassGolden pins the classes the grammar defines, and the point count

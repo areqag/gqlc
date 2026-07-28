@@ -1,0 +1,11 @@
+-- bindingTableType with its `BINDING?` elided (GQL.g4:1713): `TABLE { ... }`.
+-- binding_table.gql writes the keyword, so the shorter spelling ISO also admits
+-- had never been parsed. The two are the same type, BINDING being optional rather
+-- than distinguishing.
+--
+-- Declined for the reason binding_table.gql is: a binding table is a query result,
+-- and a property holding one would be a handle into a graph rather than a value.
+-- ADR 0019 files it with the other reference types.
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:View { rows :: TABLE { id :: STRING } })
+}
