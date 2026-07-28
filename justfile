@@ -69,6 +69,12 @@ ensure-golangci:
 lint: ensure-golangci
     {{golangci}} run
 
+# Guard: the golangci-lint analysis cache must be non-empty after lint.
+# Fails if GOLANGCI_LINT_CACHE in the justfile diverges from the path: in ci.yml (gqlc-b63).
+lint-cache-check:
+    @test -d .bin/golangci-cache && test -n "$(ls -A .bin/golangci-cache 2>/dev/null)" \
+        || { echo "error: GOLANGCI_LINT_CACHE (.bin/golangci-cache) is empty or missing — justfile and ci.yml paths diverged"; exit 1; }
+
 # lints only lines changed since the given rev — the fast pre-push variant
 lint-new rev="origin/master": ensure-golangci
     {{golangci}} run --new-from-rev {{rev}}
