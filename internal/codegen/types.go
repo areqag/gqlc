@@ -213,6 +213,10 @@ func goType(pt graph.PropertyType) (string, bool) {
 		return "dbtype.Duration", true
 	case graph.TypeAnyPropertyValue:
 		return "any", true
+	case graph.TypeList:
+		// Intercepted by the Kind() guard above; unreachable here.
+		// Listed so the exhaustive linter sees the full constant set.
+		return "[]any", true
 	case graph.TypeInt128, graph.TypeInt256,
 		graph.TypeUint128, graph.TypeUint256,
 		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,
