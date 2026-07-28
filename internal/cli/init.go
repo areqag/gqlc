@@ -184,9 +184,9 @@ func runInitAdd(in io.Reader, errOut io.Writer, accessible bool, cfgPath string)
 
 // addPrefill is the §8.2 prefill for an appended target: the last
 // entry's values for the fields a second target usually shares, and
-// empty for the three that must distinguish it. Empty is the honest
-// default for a directory that has to differ from the entries already
-// in the file, and the non-blank validators refuse to let it through.
+// empty for the three fields a second target normally gives its own.
+// Only gen.go.out is enforced; shared query directories and package
+// names are legal.
 //
 // With no entry to carry from there is nothing shared to carry, so the
 // §3.2 defaults stand in. The loader rejects a config declaring no
