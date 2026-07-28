@@ -67,12 +67,25 @@ var corpusAreaC = []corpusEntry{
 		reason:   "an edge type with property types but no label has no label-set key; deviation-audit bead",
 	},
 	{
-		file:     "18.3-edge-type/key_label_set.gql",
+		file:    "18.3-edge-type/key_label_set.gql",
+		outcome: resolves,
+		feature: "GG21",
+	},
+	{
+		file:     "18.3-edge-type/empty_key_label_set.gql",
 		outcome:  unsupported,
-		sentinel: ErrLabelImplication,
-		feature:  "mandatory",
-		bead:     "gqlc-h9n.9",
-		reason:   `edgeTypeKeyLabelSet ("=>" label implication) is rejected; supporting it needs a listener addition that folds implied labels into the key`,
+		sentinel: ErrUnnamedEdgeType,
+		feature:  "GG21",
+		bead:     "gqlc-0ri",
+		reason:   "`-[=> :AUTHORED]->` declares an explicitly empty key label set on an edge type, leaving EdgeKey.KeyLabels nothing to hold; the node form is rejected for the same reason",
+	},
+	{
+		file:     "18.3-edge-type/endpoint_key_label_set.gql",
+		outcome:  unsupported,
+		sentinel: ErrEndpointFillerImpliesLabels,
+		feature:  "GG21",
+		bead:     "gqlc-0ri",
+		reason:   "an inline endpoint names a node type by its key label set, so implied labels there assert something about the referenced declaration that nothing checks; rejected rather than silently discarded, for the reason ErrEndpointFillerHasProperties already is (gqlc-h9n.18)",
 	},
 }
 

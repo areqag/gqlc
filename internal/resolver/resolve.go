@@ -1182,12 +1182,12 @@ func validateDeleteEffect(sc *scope, e query.DeleteEffect, s schema.Schema) erro
 // implied labels satisfy a query expression exactly as key labels do; keying
 // satisfaction on identity would make a `=>` declaration unmatchable by the
 // labels it implies. Before gqlc-h9n.8 the two were one field and this could
-// not even be stated.
+// not even be stated; since gqlc-h9n.9 a schema can declare the difference.
 //
-// The fast-path arm above stays keyed on identity. Under GG21 a query naming a
-// type's complete label set but not its identity then falls through to the
-// satisfying set, where the superset test admits it anyway — same answer, one
-// branch later. Whether exact-match precedence should instead be defined on the
+// The fast-path arm above stays keyed on identity. A query naming a type's
+// complete label set but not its identity then falls through to the satisfying
+// set, where the superset test admits it anyway — same answer, one branch
+// later. Whether exact-match precedence should instead be defined on the
 // complete label set is a policy question, and it belongs to gqlc-h9n.22's ADR
 // on precedence; deciding it here would smuggle a matching change into a model
 // change. Scanning for a complete-set match would also have to invent a
@@ -1230,8 +1230,8 @@ func undeclaredLabels(labels graph.LabelSet, s schema.Schema) []string {
 //
 // The superset is not required to be proper. It could not be reached by an
 // equal set before gqlc-h9n.8, because the caller's identity fast path caught
-// every equality; under GG21 a type whose complete label set equals `labels`
-// but whose identity does not arrives here, and admitting it is the point.
+// every equality; a `=>` type whose complete label set equals `labels` but whose
+// identity does not arrives here, and admitting it is the point.
 func satisfyingNodeTypes(labels graph.LabelSet, s schema.Schema) []graph.LabelSetKey {
 	want := make(map[string]struct{}, len(labels))
 	for _, l := range labels {
