@@ -121,6 +121,7 @@ var invalidFixtures = map[string]error{
 	"ambiguous_unlabelled_binding.cypher":                  ErrAmbiguousBinding,
 	"unlabelled_binding_no_edge.cypher":                    ErrUnknownLabel,
 	"empty_inline_endpoint.cypher":                         ErrUnknownLabel,
+	"anonymous_source_endpoint.cypher":                     ErrUnknownLabel,
 	"parameter_type_conflict_two_properties.cypher":        ErrParameterTypeConflict,
 	"parameter_type_conflict_clause_slot_vs_string.cypher": ErrParameterTypeConflict,
 	"parameter_type_conflict_property_vs_expr_bool.cypher": ErrParameterTypeConflict,
