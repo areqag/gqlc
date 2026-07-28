@@ -1,0 +1,13 @@
+CREATE PROPERTY GRAPH TYPE SocialEdgeUnion AS {
+    (:Person {
+        id       :: INT NOT NULL,
+        name     :: STRING NOT NULL
+    }),
+    (:Post {
+        id       :: INT NOT NULL,
+        title    :: STRING NOT NULL
+    }),
+    (:Person) -[:AUTHORED { views :: INT NOT NULL }]-> (:Post),
+    (:Person) -[:LIKES { likedAt :: TIMESTAMP }]-> (:Post),
+    (:Person) -[:SHARED { sharedAt :: TIMESTAMP }]-> (:Post)
+}
