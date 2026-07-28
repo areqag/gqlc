@@ -144,5 +144,8 @@
     "call_arg_null_at_typed.cypher": "social_r7.gql",
     "unlabelled_via_edge_intersection.cypher": "social_r7.gql",
     "parameter_temporal_same_kind.cypher": "social_r7.gql",
-    "union_edge_union_same_arity.cypher": "social_edgeunion.gql"
+    "union_edge_union_same_arity.cypher": "social_edgeunion.gql",
+    "returns_all_var_length_edge.cypher": "social_r7.gql",
+    "returns_all_carried_alias.cypher": "social_r7.gql",
+    "parameter_optional_nullability_agree.cypher": "social_r7.gql"
 }
