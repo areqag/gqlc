@@ -18,6 +18,7 @@ var (
 	ErrUnsupportedType             = errors.New("unsupported property value type")
 	ErrUnnamedNodeType             = errors.New("node type has an empty key label set: node types are identified by that set, so an unlabelled one has no identity and no two of them could be told apart")
 	ErrUnnamedEdgeType             = errors.New("edge type has an empty key label set: edge types are identified by that set together with their endpoints, so an unlabelled one has no identity of its own")
+	ErrMultiLabelEdgeType          = errors.New("edge type has a multi-label key set: no Cypher conjunction syntax exists for edge labels, so no query can ever reference this type")
 	ErrDuplicateNodeType           = errors.New("duplicate node type")
 	ErrDuplicateEdgeType           = errors.New("duplicate edge type")
 	ErrNoGraphType                 = errors.New("no graph type declaration")
