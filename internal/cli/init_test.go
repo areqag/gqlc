@@ -234,6 +234,32 @@ func TestInitPackageValidator(t *testing.T) {
 	}
 }
 
+// TestInitOutValidator pins the §4.2 non-blank rule order in validateOut:
+// validateNonBlank runs before CheckOutAgainst, so a blank or whitespace-only out
+// gets "must not be empty" rather than a misleading overlap message or nil.
+func TestInitOutValidator(t *testing.T) {
+	prior := addFixtureConfig()
+	cases := []struct {
+		out     string
+		wantErr string // empty means valid
+	}{
+		{out: "", wantErr: "must not be empty"},
+		{out: "   ", wantErr: "must not be empty"},
+		{out: "gen/newdir", wantErr: ""},
+	}
+	validate := validateOut(prior)
+	for _, tc := range cases {
+		t.Run("out "+tc.out, func(t *testing.T) {
+			err := validate(tc.out)
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.EqualError(t, err, tc.wantErr)
+		})
+	}
+}
+
 // TestInitCommentDetection pins the §5.3 byte scan: any '#' in the old
 // file's raw bytes triggers the notice — a '#' inside a quoted scalar
 // is the honest false positive, one harmless line.
