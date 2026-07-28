@@ -1,0 +1,16 @@
+-- propertyType with its `typed?` elided (GQL.g4:1702): `id INT NOT NULL` rather
+-- than `id :: INT NOT NULL`. Every other property in the corpus writes the
+-- separator — `::` almost everywhere, `TYPED` once in scalar_character_string.gql
+-- — so the juxtaposed spelling the grammar also admits had never been parsed.
+--
+-- Here rather than under 18.6, which owns no files: propertyType is one row of a
+-- property block and unspellable outside one. See ownershipOnlyPrefixes.
+--
+-- Resolves identically to pattern_multi_label.gql's `id :: INT NOT NULL`. `typed`
+-- is `DOUBLE_COLON | TYPED` (GQL.g4:1735), a separator with no meaning of its own,
+-- so the two spellings are the same declaration and the model cannot tell them
+-- apart. Nothing here is owed a semanticCase: there is no discarded difference,
+-- only a discarded token.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Person { id INT NOT NULL })
+}

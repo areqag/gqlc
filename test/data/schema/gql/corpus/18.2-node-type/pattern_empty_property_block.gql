@@ -1,0 +1,14 @@
+-- propertyTypesSpecification with its `propertyTypeList?` elided (GQL.g4:1692):
+-- the braces are written and nothing is inside them. Every other file that opens a
+-- brace puts at least one property in it.
+--
+-- The file lives here rather than under 18.5, which owns no files: the block has no
+-- surface syntax of its own, so the only way to write one is to hang it off an
+-- element type. See ownershipOnlyPrefixes.
+--
+-- Resolves, to the same node type `(:Person)` resolves to. That is not a defect —
+-- an empty property block declares that the type has no properties, which is what
+-- omitting the block declares too.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Person {})
+}

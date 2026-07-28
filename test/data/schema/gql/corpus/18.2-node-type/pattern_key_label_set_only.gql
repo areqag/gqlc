@@ -1,0 +1,11 @@
+-- nodeTypeFiller alternative 1 with its `nodeTypeImpliedContent?` elided
+-- (GQL.g4:1519): a key label set and nothing after it. pattern_label_implication.gql
+-- takes the same alternative with implied content, `(:Person => :Employee)`.
+--
+-- Distinct from `(:Person)`, which reaches alternative 2 — implied content with no
+-- key label set — and leans on GG22 to infer that the label set is the key one.
+-- Here the key label set is declared, so nothing is inferred; both resolve to a
+-- node type keyed on Person, by different routes.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Person =>)
+}

@@ -49,6 +49,29 @@ var corpusAreaB = []corpusEntry{
 		feature: "mandatory",
 	},
 	{
+		file:     "18.2-node-type/phrase_name_only.gql",
+		outcome:  unsupported,
+		sentinel: ErrUnnamedNodeType,
+		feature:  "mandatory",
+		bead:     "gqlc-0ri",
+		reason:   "`NODE TYPE Person` names the type and declares no labels, so it lands where every unlabelled type lands. The name reaches NodeType.Name and still confers no identity, Schema.Nodes being keyed on the key label set — ADR 0018's argument, reached through nodeTypePhraseFiller alternative 1 rather than through a pattern",
+	},
+	{
+		file:    "18.2-node-type/pattern_key_label_set_only.gql",
+		outcome: resolves,
+		feature: "GG21",
+	},
+	{
+		file:    "18.2-node-type/pattern_empty_property_block.gql",
+		outcome: resolves,
+		feature: "mandatory",
+	},
+	{
+		file:    "18.2-node-type/pattern_property_typed_elided.gql",
+		outcome: resolves,
+		feature: "mandatory",
+	},
+	{
 		file:    "18.4-label-set/label_forms.gql",
 		outcome: resolves,
 		feature: "mandatory",
