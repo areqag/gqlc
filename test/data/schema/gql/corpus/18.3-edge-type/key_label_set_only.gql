@@ -1,0 +1,15 @@
+-- edgeTypeFiller alternative 1 with its `edgeTypeImpliedContent?` elided
+-- (GQL.g4:1567): a key label set closing the arc content immediately.
+-- key_label_set.gql takes the same alternative with implied content after the
+-- "=>", and empty_key_label_set.gql drops the label set before it; this drops what
+-- follows instead.
+--
+-- Resolves, to the edge type pattern_directed.gql resolves to. `:AUTHORED =>`
+-- declares AUTHORED as the key label set and implies nothing further, which under
+-- GG21 is what `:AUTHORED` alone means under GG22 — the same reading the node form
+-- gets in 18.2's pattern_key_label_set_only.gql.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Person { id :: INT NOT NULL }),
+    (:Post { id :: INT NOT NULL }),
+    (:Person) -[:AUTHORED =>]-> (:Post)
+}

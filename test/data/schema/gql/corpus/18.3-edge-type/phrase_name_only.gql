@@ -1,0 +1,15 @@
+-- edgeTypePhraseFiller alternative 1 with its `edgeTypeFiller?` elided
+-- (GQL.g4:1562): an edge type phrase that gives its name and goes straight to
+-- CONNECTING. phrase_form.gql takes the same alternative with a filler, and
+-- phrase_form_no_name.gql takes alternative 2, a filler with no name — so the two
+-- parts were always written together until this file.
+--
+-- Rejected for the reason the node twin phrase_name_only.gql is: `Wrote` is a name
+-- and an edge type's identity is its key label set plus its endpoints, so an
+-- edge type carrying only a name has nothing for EdgeKey to hold. The endpoints
+-- here are perfectly good and do not rescue it, identity needing all three parts.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (a :Person { id :: INT NOT NULL }),
+    (b :Post { id :: INT NOT NULL }),
+    DIRECTED EDGE TYPE Wrote CONNECTING (a -> b)
+}
