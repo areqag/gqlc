@@ -349,7 +349,7 @@ func requireDeclinedCarriers(t *testing.T, obligation obligation, measured []dec
 	var declared []declinedName
 	for _, group := range declinedCarriers {
 		require.Error(t, group.sentinel, "declined carriage group needs the sentinel accounting for it")
-		require.Contains(t, allSentinels, group.sentinel,
+		require.True(t, isSentinel(group.sentinel),
 			"declined carriage group names %v, which is not in allSentinels", group.sentinel)
 		require.NotEmpty(t, group.bead, "declined carriage group %v needs a bead", group.sentinel)
 		require.NotEmpty(t, group.why, "declined carriage group %v needs a reason a reviewer can weigh", group.sentinel)
