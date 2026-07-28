@@ -1,0 +1,23 @@
+-- nodeTypeImpliedContent alternative 2 reached inside an endpoint filler
+-- (GQL.g4:1528-1531): `({ })`, a filler that is a property block and nothing
+-- else, so it carries no label set and names no node type.
+--
+-- The block has to be empty. A non-empty one is rejected earlier and for a
+-- different reason — invalid/endpoint_filler_properties.gql pins that — so `({ })`
+-- is the only spelling that reaches fillerLabels' trailing bail with no labels to
+-- return.
+--
+-- The outcome is endpoint_no_filler.gql's, by the same argument: no label set
+-- means the empty key, which ADR 0018 makes undeclarable rather than merely
+-- undeclared, and the competing "any node type" reading is declined too. This is
+-- the sibling spelling of `()`, reached through a different arm — `()` elides the
+-- filler entirely, this one supplies a filler that says nothing — so the two run
+-- through different code and only this one exercises the arm that survives the
+-- filler being present.
+--
+-- Its label-bearing sibling is endpoint_empty_property_block.gql, which resolves:
+-- `(:Person { })` names a node type and the empty block is merely inert.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Person { id :: INT NOT NULL }),
+    (:Person) -[:AUTHORED]-> ({ })
+}
