@@ -27,9 +27,9 @@ import (
 // files, subtracts the red set from the obligation, and calls the result
 // carried(area). A required name whose owning area is not among its carriers is
 // an orphan. Ownership is derived from the ISO clause heading the grammar rule
-// (or the rule first naming a token or alternative) is declared under — the
-// directory prefixes an area owns already carry that clause number, so the two
-// register the same partition. This is the mechanism the out-of-tree detector
+// (or, for a token, every rule naming it) is declared under — the directory
+// prefixes an area owns already carry that clause number, so the two register the
+// same partition. This is the mechanism the out-of-tree detector
 // used (/tmp/lead/orphans.sh, never checked in) — moving it here is what makes
 // the check reproducible from the tree.
 //
@@ -199,7 +199,7 @@ var clause21Unowned = []string{
 // that name something not in the obligation, or that are missing metadata. The two
 // registers must stay in step: an exemption that matches nothing silently stops
 // excusing whatever it was written for.
-func requireCarrierExemptions(t *testing.T, owners map[string][]string, obligation obligation) map[string]bool {
+func requireCarrierExemptions(t *testing.T, owners map[string][]ownerGroup, obligation obligation) map[string]bool {
 	t.Helper()
 
 	inObligation := func(name, kind string) bool {
@@ -227,80 +227,183 @@ func requireCarrierExemptions(t *testing.T, owners map[string][]string, obligati
 		require.True(t, inObligation(ex.name, ex.kind),
 			"carrier exemption %q (%s) is not in the obligation; delete it", ex.name, ex.kind)
 		require.Empty(t, owners[ex.name],
-			"carrier exemption %q is owned by area(s) %v; this exemption would hide a real orphan", ex.name, owners[ex.name])
+			"carrier exemption %q is owned at %v; this exemption would hide a real orphan", ex.name, owners[ex.name])
 		exempt[ex.name] = true
 		seen[ex.name] = true
 	}
 	return exempt
 }
 
-// areaOwners maps every name in the obligation to the areas whose prefixes cover
-// its ISO section. A name with no owning area is neither an orphan nor covered by
-// this gate: it lands in `unowned` and requires a carrier exemption naming it.
-//
-// Tokens are attributed to the first rule referencing them (as in worklist), and
-// alternatives to the rule they are numbered against. The obligation supplies both
-// mappings, so nothing here re-derives them.
-func areaOwners(t *testing.T, sections map[string]string, obligation obligation) map[string][]string {
+// ownerGroup is one ISO section a name appears under, together with the areas whose
+// prefixes cover that section. A name is required of each group separately: the
+// areas within a group are alternatives to each other because they split one
+// section between them (D1 and D2 both hold 18.9), but two groups are two different
+// constructs naming the same name, and one carrying it says nothing about the other.
+type ownerGroup struct {
+	section string
+	areas   []string
+}
+
+func (g ownerGroup) String() string { return g.section + ":" + strings.Join(g.areas, "+") }
+
+// areaOwners maps every name in the obligation to its owner groups, dropping the
+// sections no area's prefix covers. So a name with no group at all is the unowned
+// case: neither an orphan nor covered by this gate, it lands in `unowned` and
+// requires a carrier exemption naming it.
+func areaOwners(t *testing.T, sections map[string]string, obligation obligation) map[string][]ownerGroup {
 	t.Helper()
 
 	areaPrefixNums := areaPrefixNumbers(t)
 
-	owners := make(map[string][]string)
-	for name, sectionNum := range obligationSections(sections, obligation) {
-		var areas []string
-		for area, nums := range areaPrefixNums {
-			for _, num := range nums {
-				if sectionMatchesArea(sectionNum, num) {
-					areas = append(areas, area)
-					break
+	owners := make(map[string][]ownerGroup)
+	for name, nameSections := range obligationSections(sections, obligation) {
+		var groups []ownerGroup
+		for _, sectionNum := range nameSections {
+			var areas []string
+			for area, nums := range areaPrefixNums {
+				for _, num := range nums {
+					if sectionMatchesArea(sectionNum, num) {
+						areas = append(areas, area)
+						break
+					}
 				}
 			}
+			if len(areas) == 0 {
+				continue
+			}
+			sort.Strings(areas)
+			groups = append(groups, ownerGroup{section: sectionNum, areas: areas})
 		}
-		sort.Strings(areas)
-		owners[name] = areas
+		owners[name] = groups
 	}
 	return owners
 }
 
-// obligationSections maps every obligation name to the ISO section number of the
-// declaration it belongs to: a rule's own heading, a token's first referencing rule
-// (as in worklist), an alternative's rule. areaOwners and clause21Names both
-// partition the obligation by this, so deriving it once is what keeps the two
-// partitioning the same thing.
+// obligationSections maps every obligation name to the ISO sections it is declared
+// or named under: a rule's own heading, an alternative's rule, and for a token every
+// rule that references it. areaOwners and clause21Names both partition the
+// obligation by this, so deriving it once is what keeps the two partitioning the
+// same thing.
 //
-// The first-reference rule for tokens is unpinned, and gqlc-1uf is the finding:
-// taking the last reference instead moves 9 tokens to a different section (TYPE
-// from 12.6 to 18.2, COMMA from 18.9 to 18.5, and so on) and every gate stays
-// green. Attribution only bites for a token one area carries and another does not,
-// and these are all reached from both — so nothing is wrong today, but the rule is
-// a choice no test is currently defending.
-func obligationSections(sections map[string]string, obligation obligation) map[string]string {
-	out := make(map[string]string, len(obligation.rules)+len(obligation.tokenRefs)+len(obligation.required))
+// A token gets every referencing section rather than the first, which is what
+// gqlc-1uf found: with one attributed section, a token named by rules in two
+// clauses was demanded only of the first clause's areas, and the choice of which
+// was undefended — taking the last reference instead moved 9 tokens to a different
+// section with every gate still green. Every referencing section is not a tie-break
+// between those two readings but the removal of the question: a token is part of
+// each construct that names it, so each construct's area has to carry it.
+func obligationSections(sections map[string]string, obligation obligation) map[string][]string {
+	out := make(map[string][]string, len(obligation.rules)+len(obligation.tokenRefs)+len(obligation.required))
 	for rule := range obligation.rules {
-		out[rule] = sectionNumber(sections[rule])
+		out[rule] = []string{sectionNumber(sections[rule])}
 	}
 	for token, refs := range obligation.tokenRefs {
-		out[token] = sectionNumber(sections[refs[0]])
+		seen := make(map[string]bool, len(refs))
+		for _, ref := range refs {
+			seen[sectionNumber(sections[ref])] = true
+		}
+		out[token] = slices.Sorted(maps.Keys(seen))
 	}
 	for _, tag := range obligation.required {
-		out[tag] = sectionNumber(sections[ruleOf(tag)])
+		out[tag] = []string{sectionNumber(sections[ruleOf(tag)])}
 	}
 	return out
 }
 
-// clause21Names is every obligation name declared under ISO clause 21. It uses the
-// same predicate the ownership rule uses, so "under clause 21" here and "owned by
-// an area whose prefix is 21" cannot come to mean different things.
+// clause21Names is every obligation name declared under ISO clause 21 and nowhere
+// else. It uses the same predicate the ownership rule uses, so "under clause 21"
+// here and "owned by an area whose prefix is 21" cannot come to mean different
+// things.
+//
+// Every section rather than any, because the golden's companion assertion is that
+// these names have no owning area. A token named by both a clause-21 rule and a
+// clause-12 one is owned by clause 12's area and belongs in that area's carriage,
+// not in an exemption; under "any" it would be demanded of the golden and rejected
+// by the owners check at once, which reports a contradiction instead of a fact. No
+// name is mixed today — this decides what happens when one is.
 func clause21Names(sections map[string]string, obligation obligation) []string {
 	var names []string
-	for name, section := range obligationSections(sections, obligation) {
-		if sectionMatchesArea(section, "21") {
+	for name, nameSections := range obligationSections(sections, obligation) {
+		clause21 := true
+		for _, section := range nameSections {
+			if !sectionMatchesArea(section, "21") {
+				clause21 = false
+				break
+			}
+		}
+		if clause21 {
 			names = append(names, name)
 		}
 	}
 	sort.Strings(names)
 	return names
+}
+
+// TestTokenSectionsSpanEveryReferencingRule witnesses the half of gqlc-1uf the
+// corpus cannot: today no token is named from two clauses where one carries it and
+// the other does not, so the grammar alone cannot show that attributing a token to
+// one section loses something. Synthetic input can.
+//
+// The order-independence case is the finding restated as a property. Under the
+// first-reference rule the answer depended on which rule the worklist happened to
+// reach first; here the two orders have to agree, so there is no first to pick.
+func TestTokenSectionsSpanEveryReferencingRule(t *testing.T) {
+	sections := map[string]string{
+		"graphTypeRule": "12.6 <create graph type statement>",
+		"nodeTypeRule":  "18.2 <node type specification>",
+	}
+
+	for _, refs := range [][]string{
+		{"graphTypeRule", "nodeTypeRule", "graphTypeRule"},
+		{"nodeTypeRule", "graphTypeRule", "nodeTypeRule"},
+	} {
+		got := obligationSections(sections, obligation{
+			tokens:    map[string]bool{"TYPE": true},
+			tokenRefs: map[string][]string{"TYPE": refs},
+		})
+		require.Equal(t, []string{"12.6", "18.2"}, got["TYPE"],
+			"a token named by rules in two clauses belongs to both, deduplicated and in a fixed order regardless of which rule was reached first")
+	}
+}
+
+// TestUnmetGroups witnesses the demand the per-section rule adds: a token named by
+// two clauses is owed by each of them, so the clause whose areas carry it cannot
+// excuse the clause whose areas do not. Both carrier gates are green on the corpus
+// as it stands — no token is named by two clauses where only one carries it — which
+// is why these cases are built rather than found, and why they are put to
+// unmetGroups, the one function both gates route through.
+func TestUnmetGroups(t *testing.T) {
+	tokens := func(c carriedSets) map[string]bool { return c.tokens }
+	carried := map[string]carriedSets{
+		"A":  {tokens: map[string]bool{"TYPE": true}},
+		"C":  {tokens: map[string]bool{}},
+		"D1": {tokens: map[string]bool{"TYPE": true}},
+		"D2": {tokens: map[string]bool{}},
+	}
+
+	t.Run("a section whose areas do not carry the token is an orphan of that section", func(t *testing.T) {
+		got := unmetGroups("TYPE", "token", []ownerGroup{
+			{section: "12.6", areas: []string{"A"}},
+			{section: "18.2", areas: []string{"C"}},
+		}, tokens, carried)
+		require.Equal(t, []orphan{{
+			name:  "TYPE",
+			kind:  "token",
+			group: ownerGroup{section: "18.2", areas: []string{"C"}},
+		}}, got,
+			"area A carrying TYPE for clause 12.6 says nothing about clause 18.2, whose only area carries nothing")
+	})
+
+	t.Run("one area of a split section carrying the token satisfies that section", func(t *testing.T) {
+		require.Empty(t, unmetGroups("TYPE", "token", []ownerGroup{
+			{section: "18.9", areas: []string{"D1", "D2"}},
+		}, tokens, carried),
+			"D1 and D2 split one section between them, so they are alternatives to each other rather than two separate demands")
+	})
+
+	t.Run("a name no area owns is left to the unowned report", func(t *testing.T) {
+		require.Empty(t, unmetGroups("TYPE", "token", nil, tokens, carried))
+	})
 }
 
 // TestClause21Unowned matches clause21Unowned against the grammar as an exact set,
@@ -328,7 +431,7 @@ func TestClause21Unowned(t *testing.T) {
 	owners := areaOwners(t, sections, obligation)
 	for _, name := range clause21Unowned {
 		require.Empty(t, owners[name],
-			"clause21Unowned entry %q is owned by area(s) %v; it belongs to the orphan check, not to an exemption",
+			"clause21Unowned entry %q is owned at %v; it belongs to the orphan check, not to an exemption",
 			name, owners[name])
 	}
 }
@@ -436,24 +539,17 @@ type carriedSets struct {
 	alternatives map[string]bool
 }
 
-// findOrphans returns required names whose owning areas exist but none carry the
-// name. An empty owners set is skipped — that is either an exemption (which
-// requireCarrierExemptions already rejects unless owners is empty) or an unowned
-// name findUnowned reports separately.
-func findOrphans(obligation obligation, owners map[string][]string, carried map[string]carriedSets) []orphan {
+// findOrphans returns required names one of whose owner groups carries them
+// nowhere. Each group is checked on its own, so a token named by two clauses is an
+// orphan of the clause whose areas do not carry it even while the other clause
+// does. A name with no owner group is skipped — that is either an exemption (which
+// requireCarrierExemptions already rejects unless the name is unowned) or an
+// unowned name findUnowned reports separately.
+func findOrphans(obligation obligation, owners map[string][]ownerGroup, carried map[string]carriedSets) []orphan {
 	var orphans []orphan
 
 	check := func(name, kind string, sel func(carriedSets) map[string]bool) {
-		areas := owners[name]
-		if len(areas) == 0 {
-			return
-		}
-		for _, area := range areas {
-			if sel(carried[area])[name] {
-				return
-			}
-		}
-		orphans = append(orphans, orphan{name: name, kind: kind, owners: areas})
+		orphans = append(orphans, unmetGroups(name, kind, owners[name], sel, carried)...)
 	}
 
 	for rule := range obligation.rules {
@@ -465,22 +561,48 @@ func findOrphans(obligation obligation, owners map[string][]string, carried map[
 	for _, tag := range obligation.required {
 		check(tag, "alt", func(c carriedSets) map[string]bool { return c.alternatives })
 	}
-	sort.Slice(orphans, func(i, j int) bool { return orphans[i].name < orphans[j].name })
+	sort.Slice(orphans, func(i, j int) bool {
+		if orphans[i].name != orphans[j].name {
+			return orphans[i].name < orphans[j].name
+		}
+		return orphans[i].group.section < orphans[j].group.section
+	})
 	return orphans
 }
 
-// orphan is a required name whose owning area does not carry it.
+// unmetGroups returns one orphan per owner group of name that no area in the group
+// carries. Both carrier gates ask this of a different corpus — the parse gate of
+// every file, the resolving gate of the files that resolve — so asking it in one
+// place is what stops the two drifting into different rules.
+func unmetGroups(name, kind string, owners []ownerGroup, sel func(carriedSets) map[string]bool, carried map[string]carriedSets) []orphan {
+	var orphans []orphan
+	for _, group := range owners {
+		carries := false
+		for _, area := range group.areas {
+			if sel(carried[area])[name] {
+				carries = true
+				break
+			}
+		}
+		if !carries {
+			orphans = append(orphans, orphan{name: name, kind: kind, group: group})
+		}
+	}
+	return orphans
+}
+
+// orphan is a required name that one of the sections naming it does not carry.
 type orphan struct {
-	name   string
-	kind   string
-	owners []string
+	name  string
+	kind  string
+	group ownerGroup
 }
 
 // findUnowned returns obligation names with no owning area that are also not
 // exempted. Every such name needs an entry in carrierExemptions or the ownership
 // model is wrong — see the note on that list. The exemption list rejects entries
 // naming owned names, so the two failure modes cannot coincide.
-func findUnowned(owners map[string][]string, exempt map[string]bool, obligation obligation) []string {
+func findUnowned(owners map[string][]ownerGroup, exempt map[string]bool, obligation obligation) []string {
 	var unowned []string
 	consider := func(name string) {
 		if exempt[name] {
@@ -511,8 +633,9 @@ func orphanReport(orphans []orphan, filesByArea map[string][]string) string {
 	var out strings.Builder
 	out.WriteString("orphans (a required name whose owning area carries no file for it):\n")
 	for _, o := range orphans {
-		fmt.Fprintf(&out, "  %s (%s) owned by %s\n", o.name, o.kind, strings.Join(o.owners, ", "))
-		for _, area := range o.owners {
+		fmt.Fprintf(&out, "  %s (%s) named under section %s, owned there by %s\n",
+			o.name, o.kind, o.group.section, strings.Join(o.group.areas, ", "))
+		for _, area := range o.group.areas {
 			fmt.Fprintf(&out, "    area %s has %d files under %v\n", area, len(filesByArea[area]), corpusAreas[area].prefixes)
 		}
 	}

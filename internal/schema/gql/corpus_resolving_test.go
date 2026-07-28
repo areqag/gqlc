@@ -59,16 +59,7 @@ func TestCorpusResolvingCarriers(t *testing.T) {
 			noResolvingCarrier = append(noResolvingCarrier, declinedName{name, kind})
 			return
 		}
-		areas := owners[name]
-		if len(areas) == 0 {
-			return
-		}
-		for _, area := range areas {
-			if sel(perArea[area])[name] {
-				return
-			}
-		}
-		areaOrphans = append(areaOrphans, orphan{name: name, kind: kind, owners: areas})
+		areaOrphans = append(areaOrphans, unmetGroups(name, kind, owners[name], sel, perArea)...)
 	}
 	for rule := range obligation.rules {
 		check(rule, "rule", func(c carriedSets) map[string]bool { return c.rules })
@@ -82,7 +73,12 @@ func TestCorpusResolvingCarriers(t *testing.T) {
 
 	requireDeclinedCarriers(t, obligation, noResolvingCarrier)
 
-	sort.Slice(areaOrphans, func(i, j int) bool { return areaOrphans[i].name < areaOrphans[j].name })
+	sort.Slice(areaOrphans, func(i, j int) bool {
+		if areaOrphans[i].name != areaOrphans[j].name {
+			return areaOrphans[i].name < areaOrphans[j].name
+		}
+		return areaOrphans[i].group.section < areaOrphans[j].group.section
+	})
 	require.Empty(t, areaOrphans, "%s", resolvingOrphanReport(areaOrphans, byArea))
 }
 
@@ -455,8 +451,9 @@ func resolvingOrphanReport(orphans []orphan, byArea map[string][]string) string 
 	fmt.Fprintf(&out, "%d name(s) reached by a resolving file in some other area, but by no resolving file in the area that owns them.\n", len(orphans))
 	out.WriteString("A resolving path exists, so no decline explains this: the owning area needs a file that exercises the construct and resolves.\n")
 	for _, o := range orphans {
-		fmt.Fprintf(&out, "  %s (%s) owned by %s\n", o.name, o.kind, strings.Join(o.owners, ", "))
-		for _, area := range o.owners {
+		fmt.Fprintf(&out, "  %s (%s) named under section %s, owned there by %s\n",
+			o.name, o.kind, o.group.section, strings.Join(o.group.areas, ", "))
+		for _, area := range o.group.areas {
 			fmt.Fprintf(&out, "    area %s has %d resolving files under %v\n",
 				area, len(byArea[area]), corpusAreas[area].prefixes)
 		}
