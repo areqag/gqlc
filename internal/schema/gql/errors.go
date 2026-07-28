@@ -11,7 +11,6 @@ import (
 var (
 	ErrImpliedLabelIsKeyLabel      = errors.New("implied label is also a declared element type's key label: whether it inherits that type's properties is not settled by the standard")
 	ErrUndirectedEdge              = errors.New("undirected edges are a distinct element kind, which gqlc does not model")
-	ErrEdgeKindArcMismatch         = errors.New("edge kind contradicts arc direction")
 	ErrUnknownEndpoint             = errors.New("edge endpoint references an undeclared node type")
 	ErrEndpointNotAlias            = errors.New("edge endpoint names a node type instead of a local alias bound to one")
 	ErrEndpointFillerHasProperties = errors.New("edge endpoint filler carries properties: an inline endpoint may only name a node type by its label set")
@@ -24,6 +23,16 @@ var (
 	ErrNoGraphType                 = errors.New("no graph type declaration")
 	ErrMultipleGraphTypes          = errors.New("more than one graph type declaration")
 )
+
+// ErrEdgeKindArcMismatch is returned when a declaration's edgeKind
+// (UNDIRECTED or DIRECTED) contradicts the arc connector direction
+// (->, <-, ~, or TO). This is a provisional deviation: ISO/IEC 39075
+// Syntax Rules may forbid the combination (outcome 1) or specify which
+// wins (outcome 2); the implementation-defined.xml has no item for it.
+// Rejection is the interim posture — it fails loudly rather than
+// silently picking a reading. Revisit when the Syntax Rules are available.
+// Tracked as gqlc-xtq.
+var ErrEdgeKindArcMismatch = errors.New("edge kind contradicts arc direction")
 
 // ErrUnsupportedSource is the class of rejected <graph type source> alternatives
 // rather than a leaf sentinel: the two reachable rejections below wrap it, so a
