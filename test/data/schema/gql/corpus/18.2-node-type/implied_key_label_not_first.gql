@@ -1,0 +1,14 @@
+-- implied_key_label.gql with the collision moved off the front of the implied
+-- label set. Rejected for the same ADR 0015 reason.
+--
+-- rejectInheritance checks every label a declaration implies, not just the one it
+-- implies first, and its comment says so: `(:A&B)` holds both A and B as key
+-- labels, so implying either collides. Every other GG21 file happens to collide on
+-- the first label, so narrowing the loop to that one label left the suite green.
+--
+-- Zeta is second both as written and in sort order, so the case discriminates
+-- however the implied set comes to be ordered.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (:Zeta { id :: INT NOT NULL }),
+    (:Engineer => :Alpha&Zeta { level :: INT })
+}

@@ -95,6 +95,14 @@ var corpusAreaC = []corpusEntry{
 		feature: "GG21",
 	},
 	{
+		file:     "18.3-edge-type/implied_label_is_edge_key_label.gql",
+		outcome:  unsupported,
+		sentinel: ErrImpliedLabelIsKeyLabel,
+		feature:  "GG21",
+		bead:     "gqlc-0ri",
+		reason:   "the edge half of ADR 0015's decline, which had no case of its own. resolve() calls rejectInheritance once per kind, and implied_label_is_node_key_label.gql pins only the half that resolves — an edge implying a NODE key label, the two vocabularies being separate. Nothing pinned that an edge implying an EDGE key label does not, so the edge call could be deleted with the suite green and only that file's comment still claiming the rule ran both ways",
+	},
+	{
 		file:     "18.3-edge-type/empty_key_label_set.gql",
 		outcome:  unsupported,
 		sentinel: ErrUnnamedEdgeType,
