@@ -454,3 +454,58 @@ func TestScopeExportWildcardVsExplicit(t *testing.T) {
 	require.Contains(t, outRenamed.exportedResolvedTypes, "w")
 	require.Empty(t, outRenamed.exportedNodeTypes, "a renamed bare projection exports no binding lane, under either name")
 }
+
+// TestScopeGroupZeroIsNotAnOptionalGroup pins the one contract three
+// separate guards in DemoteNullability and Export each state: group id 0
+// means "not in an OPTIONAL group", not "in the group numbered zero".
+//
+// addMember's `g <= 0` (scope.go:403) and demoteGroup's `g == 0`
+// (scope.go:427) mask each other exactly — drop either alone and the
+// other still blocks the cascade, so a mutation sweep sees both survive
+// and neither looks load-bearing. This test discriminates the pair
+// jointly: with both dropped, b's proven non-nullability demotes "group
+// 0", which sweeps up every other group-0 name including a.
+//
+// Export's `g > 0` (scope.go:837) is the third statement of the same
+// contract, and downstream it is inert — a zero id in the carry is
+// rejected by addMember on arrival. The assertion on exportedOptionalGroup
+// pins it directly rather than through that masked path.
+//
+// The binding shape here is parser-unreachable: cypher/listener.go:159-162
+// records the invariant nullable <=> optionalGroup >= 1, and build.go:280-290
+// reaches the nullable constructors only when optionalGroup > 0. As with
+// the shadow-cascade tests above, parser-reachability is a separate
+// question — this pins the invariant at the scope layer, where the
+// test-only constructors can express the violation.
+func TestScopeGroupZeroIsNotAnOptionalGroup(t *testing.T) {
+	nodeLabels := graph.LabelSet{"Person"}
+	nodeKey := nodeLabels.Key()
+	nt := schema.NodeType{KeyLabels: nodeKey, CompleteLabels: nodeKey}
+	sch := schema.Schema{Nodes: map[graph.LabelSetKey]schema.NodeType{nodeKey: nt}}
+
+	// a is nullable and carries no group; b is a plain required binding,
+	// also groupless, and so is already proven non-nullable.
+	nbA, err := query.NewNullableNodeBinding("a", nodeLabels)
+	require.NoError(t, err)
+	nbB, err := query.NewNodeBinding("b", nodeLabels)
+	require.NoError(t, err)
+	require.Zero(t, nbA.OptionalGroup(), "a must carry group 0 for this case to discriminate")
+	require.Zero(t, nbB.OptionalGroup(), "b must carry group 0 for this case to discriminate")
+
+	sc := newScope(branchState{})
+	sc.Ingest(query.Part{Bindings: []query.Binding{nbA, nbB}, ReturnsAll: true})
+	require.NoError(t, sc.BindNode(nbA, nt))
+	require.NoError(t, sc.BindNode(nbB, nt))
+	sc.SeedLocalNullability()
+	sc.DemoteNullability()
+
+	// b being proven says nothing about a: they share no group, because
+	// group 0 is not a group.
+	require.True(t, sc.nullableBinding["a"], "a shares no OPTIONAL group with b, so b's witness must not demote it")
+	require.False(t, sc.nullableBinding["b"])
+
+	require.NoError(t, sc.ResolveProjections(sch))
+	out := sc.Export()
+	require.NotContains(t, out.exportedOptionalGroup, "a", "a zero group id is absence, and must not travel in the carry")
+	require.NotContains(t, out.exportedOptionalGroup, "b")
+}
