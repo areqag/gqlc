@@ -24,6 +24,12 @@ parenthetical admits no scale — that is, `INT(p)` under
 parenthetical is a spelling of a type this enum already carries, and the fold
 matches the sibling width token (`INT(8)`≈`INT8`).
 
+That criterion is written in terms of what this enum can express, so a declared
+width it cannot express — `INT(7)`, `INT(10)` — falls through to the unqualified
+type and is lost. ADR 0017 decides that this is accepted rather than rejected or
+rounded up, and states the fidelity limit; `gqlc-h9n.31` is the bead that would
+close it.
+
 `FLOAT(p)` is not folded. Its parenthetical is `(LEFT_PAREN precision (COMMA
 scale)? RIGHT_PAREN)` at `:1849` — the same scale-bearing shape as
 `DECIMAL(p,s)` at `:1832`, not a bit-width spelling — and nothing in the
