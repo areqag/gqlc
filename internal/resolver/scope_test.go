@@ -69,10 +69,17 @@ func TestScopeBindNodeShadowCascade(t *testing.T) {
 }
 
 func TestScopeBindEdgeShadowCascade(t *testing.T) {
-	// Seed the scope with a carried node binding at variable "x" so
-	// BindEdge's node/edgeClosed shadow arm has something to erase.
+	// BindEdge has two arms, and each needs its own seed: the node shadow
+	// (carried nodeTypes) and the closed-edge reset (carried edgeTypes /
+	// edgeKeys / edgeCands, which Phase A2/C recomputes for the new
+	// binding's endpoints). Seeding only the node lane left the reset arm
+	// unpinned — dropping the edgeKeys or edgeCands delete kept the whole
+	// tree green.
 	carry := branchState{
 		exportedNodeTypes: map[string]schema.NodeType{"x": {KeyLabels: graph.LabelSet{"Person"}.Key(), CompleteLabels: graph.LabelSet{"Person"}.Key()}},
+		exportedEdgeTypes: map[string]schema.EdgeType{"x": {}},
+		exportedEdgeKeys:  map[string]schema.EdgeKey{"x": {}},
+		exportedEdgeCands: map[string][]schema.EdgeKey{"x": nil},
 	}
 	sc := newScope(carry)
 	sc.Ingest(query.Part{})
@@ -83,19 +90,29 @@ func TestScopeBindEdgeShadowCascade(t *testing.T) {
 
 	require.False(t, sc.HasNode("x"))
 	require.NotContains(t, sc.nodeTypes, "x")
+	require.NotContains(t, sc.edgeTypes, "x")
+	require.NotContains(t, sc.edgeKeys, "x")
+	require.NotContains(t, sc.edgeCands, "x")
 	_, ok := sc.edgeBindings["x"]
 	require.True(t, ok)
 }
 
 func TestScopeBindCallShadowCascade(t *testing.T) {
-	// Belt-and-braces: seed carried node + edge state so BindCall's
-	// shadow cascade drops both when a call binding lands at the same
-	// name. Parser-reachability is a separate question; this pins the
-	// invariant at the scope layer.
+	// Belt-and-braces: seed every carried entity lane so each of
+	// BindCall's five deletes has something to drop, and assert on the
+	// maps rather than through HasNode/HasEdge. HasEdge reads edgeTypes
+	// and edgeCands only, so seeding edgeBindings and asserting HasEdge
+	// tests nothing about either — the seeded lane and the read lanes did
+	// not intersect, and all four edge deletes could be removed together
+	// with the whole tree green. Parser-reachability is a separate
+	// question; this pins the invariant at the scope layer.
 	carriedEdge, err := makeTestEdgeBinding("c")
 	require.NoError(t, err)
 	carry := branchState{
 		exportedNodeTypes:    map[string]schema.NodeType{"c": {KeyLabels: graph.LabelSet{"Person"}.Key(), CompleteLabels: graph.LabelSet{"Person"}.Key()}},
+		exportedEdgeTypes:    map[string]schema.EdgeType{"c": {}},
+		exportedEdgeKeys:     map[string]schema.EdgeKey{"c": {}},
+		exportedEdgeCands:    map[string][]schema.EdgeKey{"c": nil},
 		exportedEdgeBindings: map[string]query.EdgeBinding{"c": carriedEdge},
 	}
 	sc := newScope(carry)
@@ -107,8 +124,11 @@ func TestScopeBindCallShadowCascade(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, sc.BindCall(cb, reg))
 
-	require.False(t, sc.HasNode("c"))
-	require.False(t, sc.HasEdge("c"))
+	require.NotContains(t, sc.nodeTypes, "c")
+	require.NotContains(t, sc.edgeTypes, "c")
+	require.NotContains(t, sc.edgeKeys, "c")
+	require.NotContains(t, sc.edgeCands, "c")
+	require.NotContains(t, sc.edgeBindings, "c")
 	require.True(t, sc.HasCall("c"))
 }
 
@@ -410,4 +430,27 @@ func TestScopeExportWildcardVsExplicit(t *testing.T) {
 	require.Contains(t, outExpl.exportedResolvedTypes, "x")
 	require.Contains(t, outExpl.exportedNodeTypes, "v", "bare v export populates node binding lane")
 	require.NotContains(t, outExpl.exportedNodeTypes, "x", "aliased property projection stays out of binding lanes")
+
+	// Renamed bare binding: WITH v AS w. Export's alias guard has two
+	// halves — the projection must be bare AND named by its own variable
+	// — and `v.name AS x` above only exercises the first. A rename keeps
+	// the binding lanes empty under both names: "w" names a projection
+	// rather than a binding, and "v" no longer leaves this Part at all,
+	// so downstream refs to w take the §4.5.4 carried-alias bypass.
+	// Without this case the alias half could be dropped with the tree
+	// green, exporting v's node type under a name nothing carries.
+	nbV3, err := query.NewNodeBinding("v", nodeLabels)
+	require.NoError(t, err)
+	scRenamed := newScope(branchState{})
+	scRenamed.Ingest(query.Part{
+		Bindings: []query.Binding{nbV3},
+		Returns:  []query.ReturnItem{{Name: "w", Value: query.NewRefProjection(query.Ref{Variable: "v"}, query.TypeNode{})}},
+	})
+	require.NoError(t, scRenamed.BindNode(nbV3, nt))
+	scRenamed.SeedLocalNullability()
+	scRenamed.DemoteNullability()
+	require.NoError(t, scRenamed.ResolveProjections(sch))
+	outRenamed := scRenamed.Export()
+	require.Contains(t, outRenamed.exportedResolvedTypes, "w")
+	require.Empty(t, outRenamed.exportedNodeTypes, "a renamed bare projection exports no binding lane, under either name")
 }
