@@ -174,6 +174,27 @@ var invalidFixtures = map[string]error{
 	"delete_projection_alias.cypher":              ErrInvalidEffectTarget,
 	"delete_bare_property_unknown.cypher":         ErrUnknownProperty,
 	"union_writes_vs_returns_column_count.cypher": ErrUnionColumnMismatch,
+	// ag5 additions. The write-effect validators were 4/15 under mutation. These
+	// nine pin the reachable fail-opens — each query below is rejected today and
+	// accepted under the corresponding mutation.
+	//
+	// ON CREATE effects were validated by code that no test reached: ON MATCH had
+	// merge_on_match_unknown_property.cypher, ON CREATE had nothing, so the whole
+	// arm could be deleted silently.
+	"merge_on_create_unknown_property.cypher": ErrUnknownProperty,
+	"merge_on_create_undeclared_label.cypher": ErrUnknownLabel,
+	// The variable-length edge guard appears in three validators and was pinned in
+	// one of them (set_property_on_var_length_edge.cypher, single-type). Multi-type
+	// edges take a different branch to reach it, so both edge shapes are covered.
+	"set_property_on_var_length_multi_type_edge.cypher":    ErrInvalidEffectTarget,
+	"set_entity_on_var_length_edge.cypher":                 ErrInvalidEffectTarget,
+	"set_entity_on_var_length_multi_type_edge.cypher":      ErrInvalidEffectTarget,
+	"remove_property_on_var_length_edge.cypher":            ErrInvalidEffectTarget,
+	"remove_property_on_var_length_multi_type_edge.cypher": ErrInvalidEffectTarget,
+	// Property lookup on a multi-type edge must miss if any union member lacks the
+	// property. Covered on the read path (unknown_property_union_*), not the write.
+	"set_property_unknown_on_multi_type_edge.cypher":    ErrUnknownProperty,
+	"remove_property_unknown_on_multi_type_edge.cypher": ErrUnknownProperty,
 	// R7 additions:
 	"call_yield_property_lookup.cypher":              ErrUnknownProperty,
 	"part_binding_type_conflict_call_vs_node.cypher": ErrPartBindingTypeConflict,
