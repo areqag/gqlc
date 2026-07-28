@@ -1,0 +1,13 @@
+-- Every value-type decline in the corpus is written as a pattern-form node, so
+-- the whole of 18.9's unsupported-type coverage lands on EnterNodeTypePattern's
+-- error arm. EnterNodeTypePhrase has its own `if err != nil { l.fail(err) }`, and
+-- dropping the l.fail from it left the suite green — a phrase-form node carrying
+-- an unsupported property type would have been silently discarded, taking its
+-- node out of the schema without a diagnostic.
+--
+-- Unsupported: ErrUnsupportedType, for gqlc-h9n.5's reason. The value type is
+-- incidental — constructed_list_angle.gql already pins that LIST declines. What
+-- this file pins is that the phrase-form collector forwards the decline at all.
+CREATE PROPERTY GRAPH TYPE T AS {
+    NODE TYPE Bag :Bag { items :: LIST<STRING> } AS b
+}

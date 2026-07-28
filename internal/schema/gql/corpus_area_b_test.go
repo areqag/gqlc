@@ -86,6 +86,20 @@ var corpusAreaB = []corpusEntry{
 		feature: "GG21",
 	},
 	{
+		file:    "18.2-node-type/phrase_key_label_set_only.gql",
+		outcome: resolves,
+		feature: "GG21",
+		reason:  "the phrase spelling of pattern_key_label_set_only.gql. The two node collectors copy fillerContent's fields through separate hand-written assignments, so the pattern file grounds only its own; every other key-label-set file is pattern form, and narrowing EnterNodeTypePhrase's hasKeyLabelSet copy to a constant false left the suite green",
+	},
+	{
+		file:     "18.2-node-type/phrase_unsupported_property_type.gql",
+		outcome:  unsupported,
+		sentinel: ErrUnsupportedType,
+		feature:  "mandatory",
+		bead:     "gqlc-h9n.5",
+		reason:   "the value type is incidental — constructed_list_angle.gql already pins that LIST declines. This file pins that the phrase-form node collector forwards the decline at all: every value-type decline in the corpus is written as a pattern-form node, so dropping the l.fail from EnterNodeTypePhrase's error arm left the suite green, silently discarding a phrase-form node that carries an unsupported property type",
+	},
+	{
 		file:    "18.2-node-type/pattern_empty_property_block.gql",
 		outcome: resolves,
 		feature: "mandatory",

@@ -1,0 +1,14 @@
+-- pattern_unsupported_property_type.gql in the other spelling. The two edge
+-- collectors forward edgeContent's error through separate `if err != nil` arms,
+-- so the pattern-form file grounds only its own; dropping the l.fail from
+-- EnterEdgeTypePhrase's arm left the suite green even with the pattern-form file
+-- present.
+--
+-- Unsupported: ErrUnsupportedType, for gqlc-h9n.5's reason. The value type is
+-- incidental; what this file pins is that the phrase-form edge collector
+-- forwards the decline at all.
+CREATE PROPERTY GRAPH TYPE T AS {
+    (a :Person { id :: INT NOT NULL }),
+    (b :Post { id :: INT NOT NULL }),
+    DIRECTED EDGE TYPE Wrote :WROTE { items :: LIST<STRING> } CONNECTING (a -> b)
+}
