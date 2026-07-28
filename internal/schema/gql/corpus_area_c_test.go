@@ -166,6 +166,14 @@ var corpusAreaC = []corpusEntry{
 		bead:     "gqlc-0ri",
 		reason:   "the endpoint `()` names the node type with an empty key label set, which ADR 0018 makes undeclarable rather than merely undeclared. The competing reading — an unconstrained endpoint — is declined too, Schema.Edges having no wildcard end, so only the diagnostic turns on which is right; gqlc-h9n.35 holds that question",
 	},
+	{
+		file:     "18.3-edge-type/endpoint_property_block_only.gql",
+		outcome:  unsupported,
+		sentinel: ErrUnknownEndpoint,
+		feature:  "mandatory",
+		bead:     "gqlc-0ri",
+		reason:   "`({ })` reaches endpoint_no_filler.gql's outcome through the other arm: the filler is present but says nothing, so fillerLabels runs its whole nil-guard chain and returns no labels from the trailing bail rather than from the f == nil one. Nothing exercised that bail — neutralising it left the suite green, where any file taking this path would have panicked on a nil LabelSetPhrase. The block being empty is load-bearing: a non-empty one is rejected earlier as ErrEndpointFillerHasProperties",
+	},
 }
 
 // semanticAreaC holds this area's semantic cases: files above that resolve to a
