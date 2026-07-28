@@ -88,6 +88,13 @@ var corpusAreaB = []corpusEntry{
 		feature: "mandatory",
 	},
 	{
+		file:    "18.2-node-type/property_name_repeated.gql",
+		outcome: resolves,
+		feature: "mandatory",
+		bead:    "gqlc-4np",
+		reason:  "the second `id` overwrites the first in listener.properties' name-keyed map, so the declared INT and its NOT NULL are gone from the model with no diagnostic. gqlc rejects a duplicate node type and a duplicate edge type on the same reasoning and does not reject this one. Whether the answer is a sentinel or a decided precedence is gqlc-4np's ADR; the entry exists so the accidental last-wins cannot flip to first-wins with the suite green",
+	},
+	{
 		file:    "18.4-label-set/label_forms.gql",
 		outcome: resolves,
 		feature: "mandatory",
@@ -95,11 +102,17 @@ var corpusAreaB = []corpusEntry{
 }
 
 // semanticAreaB holds this area's semantic cases: files above that resolve to a
-// model known to be wrong. Empty, and declared anyway so that recording one is an
-// edit here rather than to the shared corpus_test.go. If the linter reports this
-// unused, corpusAreas has lost its `semantic:` entry — TestCorpusManifest says so
-// too, by area name. Wire it back rather than deleting this, which is the only
-// thing standing between an author and that edit. Keep the []semanticCase{}
-// spelling: the manifest requires non-nil, so `var x []semanticCase` reads as a
-// lost wiring.
-var semanticAreaB = []semanticCase{}
+// model known to be wrong. If the linter reports this unused, corpusAreas has lost
+// its `semantic:` entry — TestCorpusManifest says so too, by area name. Wire it
+// back rather than deleting this. Should the list ever empty out again, keep the
+// []semanticCase{} spelling: the manifest requires non-nil, so
+// `var x []semanticCase` reads as a lost wiring.
+var semanticAreaB = []semanticCase{
+	{
+		file:     "18.2-node-type/property_name_repeated.gql",
+		bead:     "gqlc-4np",
+		why:      "two declarations of `id` resolve to one property carrying only the second's type and nullability; the first is discarded, so the model cannot be told apart from one that never declared it",
+		spelling: "id :: INT NOT NULL, id :: STRING",
+		siblings: []string{"id :: STRING"},
+	},
+}
