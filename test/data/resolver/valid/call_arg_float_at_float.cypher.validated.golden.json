@@ -1,0 +1,16 @@
+{
+  "columns": [
+    {
+      "name": "reading",
+      "type": {
+        "kind": "property",
+        "type": "FLOAT",
+        "nullable": true
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "read",
+  "distinct": false
+}

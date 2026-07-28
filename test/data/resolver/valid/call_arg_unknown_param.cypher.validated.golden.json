@@ -1,0 +1,23 @@
+{
+  "columns": [
+    {
+      "name": "city",
+      "type": {
+        "kind": "property",
+        "type": "STRING",
+        "nullable": true
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [
+    {
+      "name": "n",
+      "type": {
+        "kind": "unknown"
+      }
+    }
+  ],
+  "statement": "read",
+  "distinct": false
+}
