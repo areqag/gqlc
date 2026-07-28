@@ -104,7 +104,11 @@ func fillerLabels(f gen.INodeTypeFillerContext) (graph.LabelSet, error) {
 	if ic := f.NodeTypeImpliedContent(); ic != nil {
 		if pts := ic.NodeTypePropertyTypes(); pts != nil {
 			if spec := pts.PropertyTypesSpecification(); spec != nil {
-				if list := spec.PropertyTypeList(); list != nil && len(list.AllPropertyType()) > 0 {
+				// The nil check carries the whole test. `{ }` yields a nil list
+				// rather than an empty one: propertyTypeList is optional inside
+				// the braces and requires at least one propertyType when present
+				// (GQL.g4:1691-1697), so a non-nil list can never be empty.
+				if list := spec.PropertyTypeList(); list != nil {
 					return nil, ErrEndpointFillerHasProperties
 				}
 			}

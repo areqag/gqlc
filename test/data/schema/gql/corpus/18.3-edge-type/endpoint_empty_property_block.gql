@@ -1,0 +1,15 @@
+-- An inline endpoint carrying an empty property block, on both ends. Accepted:
+-- it declares no properties, so there is nothing for gqlc-h9n.18's rejection to
+-- be about.
+--
+-- Written on the destination as well as the source because fillerLabels is
+-- reached through two accessors, sourceRef and destRef, which the generated
+-- reference types do not let share a helper.
+--
+-- The node-type half of this spelling is 18.2-node-type/pattern_empty_property_block.gql.
+-- The endpoint half runs through fillerLabels instead of nodeContent and had no
+-- file of its own.
+CREATE PROPERTY GRAPH TYPE Seed AS {
+    (:Person { id :: INT NOT NULL }),
+    (:Person { }) -[:KNOWS]-> (:Person { })
+}

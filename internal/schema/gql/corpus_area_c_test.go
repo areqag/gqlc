@@ -119,6 +119,11 @@ var corpusAreaC = []corpusEntry{
 		reason:   "an inline endpoint names a node type by its key label set, so implied labels there assert something about the referenced declaration that nothing checks; rejected rather than silently discarded, for the reason ErrEndpointFillerHasProperties already is (gqlc-h9n.18)",
 	},
 	{
+		file:    "18.3-edge-type/endpoint_empty_property_block.gql",
+		outcome: resolves,
+		feature: "mandatory",
+	},
+	{
 		file:     "18.3-edge-type/phrase_name_only.gql",
 		outcome:  unsupported,
 		sentinel: ErrUnnamedEdgeType,
