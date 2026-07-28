@@ -145,17 +145,17 @@ var corpusAreaC = []corpusEntry{
 	{
 		file:     "18.3-edge-type/pattern_unsupported_property_type.gql",
 		outcome:  unsupported,
-		sentinel: ErrUnsupportedType,
+		sentinel: ErrRecordValueType,
 		feature:  "mandatory",
-		bead:     "gqlc-h9n.5",
-		reason:   "no corpus file put an unsupported property type on an edge at all, so edgeContent's error arm never returned a non-nil error across the whole suite; deleting the propagation from edgeContent and from EnterEdgeTypePattern's arm both left the tree green, silently dropping the edge and the relationship with it. The value type is incidental — constructed_list_angle.gql pins that LIST declines on a node",
+		bead:     "gqlc-h9n.33",
+		reason:   "no corpus file put an unsupported property type on an edge at all, so edgeContent's error arm never returned a non-nil error across the whole suite; deleting the propagation from edgeContent and from EnterEdgeTypePattern's arm both left the tree green, silently dropping the edge and the relationship with it. The value type is incidental — constructed_record_bare.gql pins that RECORD declines on a node",
 	},
 	{
 		file:     "18.3-edge-type/phrase_unsupported_property_type.gql",
 		outcome:  unsupported,
-		sentinel: ErrUnsupportedType,
+		sentinel: ErrRecordValueType,
 		feature:  "mandatory",
-		bead:     "gqlc-h9n.5",
+		bead:     "gqlc-h9n.33",
 		reason:   "the phrase spelling of pattern_unsupported_property_type.gql. The two edge collectors forward edgeContent's error through separate arms, so the pattern file grounds only its own; dropping the l.fail from EnterEdgeTypePhrase's arm left the suite green even with the pattern-form file present",
 	},
 	{
