@@ -94,6 +94,11 @@ func (l *listener) EnterCreateGraphTypeStatement(c *gen.CreateGraphTypeStatement
 		return
 	}
 
+	// The parent path of a catalogue-qualified name is discarded: Schema.Name's
+	// one consumer is derivePackage, which needs a Go identifier, and /a/b/G is
+	// not one. ADR 0018 decides that; it also records that COPY OF (gqlc-h9n.1)
+	// references a graph type *by* catalogue path, at which point /a/b/G and
+	// /c/d/G stop being distinguishable here.
 	l.raw.name = c.CatalogGraphTypeParentAndName().GraphTypeName().Identifier().GetText()
 }
 
