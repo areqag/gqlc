@@ -56,5 +56,9 @@ implementation cost.
 - `required_status_checks.strict` remains false on master.
 - The merge loop's reviewer step (human or agent) must check for path overlap
   before merging any PR where another PR has merged since this PR's last CI run.
+  The check is: `git diff <base-sha>...HEAD --name-only` on the second PR's
+  branch, compared against the changed paths in the first PR's merge commit
+  (`git show <merge-sha> --name-only`); or equivalently via GitHub's compare UI
+  at `github.com/<owner>/<repo>/compare/<first-pr-merge-sha>...<second-pr-head>`.
 - If throughput drops (e.g., loop slows to one merge per hour), the case for
   turning strict on strengthens and this ADR should be revisited.
