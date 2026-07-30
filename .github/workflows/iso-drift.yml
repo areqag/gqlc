@@ -1,0 +1,26 @@
+# ISO artefact drift check: re-fetches both ISO/IEC 39075 free artefacts and
+# compares their SHA-256 against the values pinned in the source tree. A
+# mismatch means ISO published a new edition or corrigendum; the vendored
+# snapshots in isobnf/ and annexd/ need to be re-derived from the new artefact.
+#
+# NOT a merge gate: ISO outages must not block PR merges. Schedule-only (plus
+# workflow_dispatch for on-demand re-runs). A failed run surfaces in the
+# Actions UI as a failed scheduled workflow.
+name: iso-drift
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  iso-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-just
+      - name: check ISO artefact checksums
+        run: just iso-drift-check
