@@ -448,11 +448,11 @@ var mustParse = map[string]struct {
 	// TypeList(TypeInt); no bindings are touched.
 	"list literal in return": {
 		src: "RETURN [1, 2, 3]",
-		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+		want: oneBranch(query.Part{
 			Returns: []query.ReturnItem{
 				{Name: "[1, 2, 3]", Value: query.NewExprProjection(nil, query.NewTypeList(query.TypeInt{}))},
 			},
-		}}}}},
+		}),
 	},
 	// Stage 6 — parameter inside a rich projection: RETURN $x. Authored to
 	// pin the spec §4 "no parameter is silently dropped" rule at projection
@@ -462,18 +462,13 @@ var mustParse = map[string]struct {
 	// below the boundary at parse time) and position is projection.
 	"return bare param": {
 		src: "RETURN $x",
-		want: query.Query{
-			Branches: []query.Branch{{Parts: []query.Part{{
-				Returns: []query.ReturnItem{
-					{Name: "$x", Value: query.NewExprProjection(nil, query.TypeUnknown{})},
-				},
-			}}}},
-			Parameters: []query.Parameter{
-				{Name: "x", Uses: []query.Use{
-					query.NewExprUse(query.TypeUnknown{}, query.ExprInProjection),
-				}},
+		want: oneBranch(query.Part{
+			Returns: []query.ReturnItem{
+				{Name: "$x", Value: query.NewExprProjection(nil, query.TypeUnknown{})},
 			},
-		},
+		}, query.Parameter{Name: "x", Uses: []query.Use{
+			query.NewExprUse(query.TypeUnknown{}, query.ExprInProjection),
+		}}),
 	},
 	// Stage 6 — parameter inside a rich arithmetic projection: RETURN a.n + $delta.
 	// mineComparisons doesn't fire (no comparison; RETURN never runs
@@ -483,22 +478,17 @@ var mustParse = map[string]struct {
 	// integrity.
 	"return rich param": {
 		src: "MATCH (a)\nRETURN a.n + $delta",
-		want: query.Query{
-			Branches: []query.Branch{{Parts: []query.Part{{
-				Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
-				Returns: []query.ReturnItem{
-					{Name: "a.n + $delta", Value: query.NewExprProjection(
-						[]query.Ref{{Variable: "a", Property: "n"}},
-						query.TypeUnknown{},
-					)},
-				},
-			}}}},
-			Parameters: []query.Parameter{
-				{Name: "delta", Uses: []query.Use{
-					query.NewExprUse(query.TypeUnknown{}, query.ExprInProjection),
-				}},
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "a.n + $delta", Value: query.NewExprProjection(
+					[]query.Ref{{Variable: "a", Property: "n"}},
+					query.TypeUnknown{},
+				)},
 			},
-		},
+		}, query.Parameter{Name: "delta", Uses: []query.Use{
+			query.NewExprUse(query.TypeUnknown{}, query.ExprInProjection),
+		}}),
 	},
 	// Stage 6 — parameter inside a rich WHERE predicate: a.n + $x > 5. The
 	// pair miner catches neither `a.n + $x` (arithmetic, not bare) nor `5`
@@ -508,19 +498,14 @@ var mustParse = map[string]struct {
 	// commits to WHERE-side ExprUse.
 	"where rich param": {
 		src: "MATCH (a)\nWHERE a.n + $x > 5\nRETURN a",
-		want: query.Query{
-			Branches: []query.Branch{{Parts: []query.Part{{
-				Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
-				Returns: []query.ReturnItem{
-					{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
-				},
-			}}}},
-			Parameters: []query.Parameter{
-				{Name: "x", Uses: []query.Use{
-					query.NewExprUse(query.TypeBool{}, query.ExprInPredicate),
-				}},
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("a", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "a", Value: query.NewRefProjection(query.Ref{Variable: "a"}, query.TypeNode{})},
 			},
-		},
+		}, query.Parameter{Name: "x", Uses: []query.Use{
+			query.NewExprUse(query.TypeBool{}, query.ExprInPredicate),
+		}}),
 	},
 	// Stage 6 — parameter directly inside a list literal in RETURN:
 	// RETURN [1, $x, 3]. The rich typer walks each element expression via
@@ -530,19 +515,14 @@ var mustParse = map[string]struct {
 	// type at ExprInProjection.
 	"return list literal with param": {
 		src: "RETURN [1, $x, 3]",
-		want: query.Query{
-			Branches: []query.Branch{{Parts: []query.Part{{
-				Returns: []query.ReturnItem{
-					{Name: "[1, $x, 3]", Value: query.NewExprProjection(nil,
-						query.NewTypeList(query.TypeUnknown{}))},
-				},
-			}}}},
-			Parameters: []query.Parameter{
-				{Name: "x", Uses: []query.Use{
-					query.NewExprUse(query.NewTypeList(query.TypeUnknown{}), query.ExprInProjection),
-				}},
+		want: oneBranch(query.Part{
+			Returns: []query.ReturnItem{
+				{Name: "[1, $x, 3]", Value: query.NewExprProjection(nil,
+					query.NewTypeList(query.TypeUnknown{}))},
 			},
-		},
+		}, query.Parameter{Name: "x", Uses: []query.Use{
+			query.NewExprUse(query.NewTypeList(query.TypeUnknown{}), query.ExprInProjection),
+		}}),
 	},
 	// Stage 6 — CASE WHEN … THEN … ELSE … END. Pins that WHEN predicates
 	// contribute refs only, never arm-type: the boolean WHEN is walked but
@@ -552,11 +532,11 @@ var mustParse = map[string]struct {
 	// into arm-type unification).
 	"case when-then-else types by arms only": {
 		src: "RETURN CASE WHEN true THEN 'a' ELSE 'b' END",
-		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+		want: oneBranch(query.Part{
 			Returns: []query.ReturnItem{
 				{Name: "CASE WHEN true THEN 'a' ELSE 'b' END", Value: query.NewExprProjection(nil, query.TypeString{})},
 			},
-		}}}}},
+		}),
 	},
 	// Stage 4 — UNION ALL variant. Same two-branch shape; the combinator is
 	// UnionAll (the ALL token is present), the cardinality-preserving join.
@@ -586,21 +566,21 @@ var mustParse = map[string]struct {
 	// FuncProjection's Type() to TypeDate (Stage 7 spec §4).
 	"return date constructor": {
 		src: "RETURN date('2024-01-01') AS d",
-		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+		want: oneBranch(query.Part{
 			Returns: []query.ReturnItem{
 				{Name: "d", Value: query.NewFuncProjection(nil, query.TypeDate{})},
 			},
-		}}}}},
+		}),
 	},
 	// Stage 7 — bare duration constructor. Same shape as the date pin above;
 	// the duration name maps to TypeDuration.
 	"return duration constructor": {
 		src: "RETURN duration('P1D') AS d",
-		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+		want: oneBranch(query.Part{
 			Returns: []query.ReturnItem{
 				{Name: "d", Value: query.NewFuncProjection(nil, query.TypeDuration{})},
 			},
-		}}}}},
+		}),
 	},
 	// Stage 7 — temporal arithmetic: date + duration → date. Not a bare
 	// atom (arithmetic), so falls through to the rich classifier's
@@ -610,21 +590,21 @@ var mustParse = map[string]struct {
 	// only).
 	"return date plus duration": {
 		src: "RETURN date() + duration('P1D') AS d",
-		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+		want: oneBranch(query.Part{
 			Returns: []query.ReturnItem{
 				{Name: "d", Value: query.NewExprProjection(nil, query.TypeDate{})},
 			},
-		}}}}},
+		}),
 	},
 	// Stage 7 — duration times a scalar: duration * int → duration. Rich
 	// classifier route; promoteMulDiv yields TypeDuration.
 	"return duration times scalar": {
 		src: "RETURN duration('P1D') * 3 AS d",
-		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+		want: oneBranch(query.Part{
 			Returns: []query.ReturnItem{
 				{Name: "d", Value: query.NewExprProjection(nil, query.TypeDuration{})},
 			},
-		}}}}},
+		}),
 	},
 	// Stage 7 — property lookup on a temporally-typed atom. The
 	// typeNonArithmetic property-lookup arm collapses to TypeUnknown
@@ -634,11 +614,11 @@ var mustParse = map[string]struct {
 	// ExprProjection. No bindings, no refs.
 	"return temporal accessor": {
 		src: "RETURN date().year AS y",
-		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+		want: oneBranch(query.Part{
 			Returns: []query.ReturnItem{
 				{Name: "y", Value: query.NewExprProjection(nil, query.TypeUnknown{})},
 			},
-		}}}}},
+		}),
 	},
 	// Stage 7 — namespaced constructor: duration.between(t1, t2) yields
 	// TypeDuration. Bare-atom shape (a single function invocation atom),
@@ -646,11 +626,11 @@ var mustParse = map[string]struct {
 	// is a bare literal, so no refs are mined.
 	"return duration between": {
 		src: "RETURN duration.between('P1D', 'P2D') AS d",
-		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+		want: oneBranch(query.Part{
 			Returns: []query.ReturnItem{
 				{Name: "d", Value: query.NewFuncProjection(nil, query.TypeDuration{})},
 			},
-		}}}}},
+		}),
 	},
 	// gqlc-v5t — elementId(node) is a builtin scalar function whose
 	// grammar-level result type is string. The bare-atom projection is a
@@ -758,32 +738,32 @@ var mustParse = map[string]struct {
 	// commutation is not). Rich classifier route, ExprProjection.
 	"return date minus duration": {
 		src: "RETURN date() - duration('P1D') AS d",
-		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+		want: oneBranch(query.Part{
 			Returns: []query.ReturnItem{
 				{Name: "d", Value: query.NewExprProjection(nil, query.TypeDate{})},
 			},
-		}}}}},
+		}),
 	},
 	// Stage 7 — duration minus duration → duration. Spec §1 rule table
 	// commits the same-kind subtraction as duration-producing.
 	"return duration minus duration": {
 		src: "RETURN duration('P1D') - duration('PT1H') AS d",
-		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+		want: oneBranch(query.Part{
 			Returns: []query.ReturnItem{
 				{Name: "d", Value: query.NewExprProjection(nil, query.TypeDuration{})},
 			},
-		}}}}},
+		}),
 	},
 	// Stage 7 — duration divided by a scalar → duration. Spec §1 commits
 	// division only with duration on the left; the reverse is TypeUnknown
 	// (see the reject pin below).
 	"return duration divided by scalar": {
 		src: "RETURN duration('P1D') / 3 AS d",
-		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+		want: oneBranch(query.Part{
 			Returns: []query.ReturnItem{
 				{Name: "d", Value: query.NewExprProjection(nil, query.TypeDuration{})},
 			},
-		}}}}},
+		}),
 	},
 	// Stage 7 — duration - <temporal-point> is out of scope of the spec's
 	// rule table (subtraction is one-way; there is no "duration - date"
@@ -792,22 +772,22 @@ var mustParse = map[string]struct {
 	// can upgrade). Rich classifier route, TypeUnknown result.
 	"return duration minus date is unknown": {
 		src: "RETURN duration('P1D') - date() AS d",
-		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+		want: oneBranch(query.Part{
 			Returns: []query.ReturnItem{
 				{Name: "d", Value: query.NewExprProjection(nil, query.TypeUnknown{})},
 			},
-		}}}}},
+		}),
 	},
 	// Stage 7 — scalar divided by a duration is out of scope of the spec's
 	// rule table (division is one-way; number / duration has no committed
 	// result type and is left honestly TypeUnknown).
 	"return scalar divided by duration is unknown": {
 		src: "RETURN 3 / duration('P1D') AS d",
-		want: query.Query{Branches: []query.Branch{{Parts: []query.Part{{
+		want: oneBranch(query.Part{
 			Returns: []query.ReturnItem{
 				{Name: "d", Value: query.NewExprProjection(nil, query.TypeUnknown{})},
 			},
-		}}}}},
+		}),
 	},
 	// Stage 8 — named path projected. `MATCH p = (a)-[r]->(b) RETURN p`: the
 	// pattern element is collected as three bindings (a, r, b) in textual
@@ -1081,19 +1061,14 @@ var mustParse = map[string]struct {
 	// column). The RETURN item itself is a bare RefProjection.
 	"return order by param": {
 		src: "MATCH (n)\nRETURN n\nORDER BY $p",
-		want: query.Query{
-			Branches: []query.Branch{{Parts: []query.Part{{
-				Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
-				Returns: []query.ReturnItem{
-					{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
-				},
-			}}}},
-			Parameters: []query.Parameter{
-				{Name: "p", Uses: []query.Use{
-					query.NewExprUse(query.TypeUnknown{}, query.ExprInProjection),
-				}},
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "n", Value: query.NewRefProjection(query.Ref{Variable: "n"}, query.TypeNode{})},
 			},
-		},
+		}, query.Parameter{Name: "p", Uses: []query.Use{
+			query.NewExprUse(query.TypeUnknown{}, query.ExprInProjection),
+		}}),
 	},
 	// Stage 9 — MATCH-after-UNWIND with a list-of-nodes source: the
 	// legitimate reuse path (a WITH collect(n) AS ns yields a
@@ -1409,24 +1384,19 @@ var mustParse = map[string]struct {
 	// projection-kind axis.
 	"aggregate sum on arithmetic parameter arg": {
 		src: "MATCH (n)\nRETURN sum($p + 1)",
-		want: query.Query{
-			Branches: []query.Branch{{Parts: []query.Part{{
-				Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
-				Returns: []query.ReturnItem{
-					{Name: "sum($p + 1)", Value: query.NewAggregateProjection(
-						query.AggSum,
-						nil,
-						false,
-						query.TypeUnknown{},
-					)},
-				},
-			}}}},
-			Parameters: []query.Parameter{
-				{Name: "p", Uses: []query.Use{
-					query.NewExprUse(query.TypeUnknown{}, query.ExprInProjection),
-				}},
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{must(query.NewNodeBinding("n", nil))},
+			Returns: []query.ReturnItem{
+				{Name: "sum($p + 1)", Value: query.NewAggregateProjection(
+					query.AggSum,
+					nil,
+					false,
+					query.TypeUnknown{},
+				)},
 			},
-		},
+		}, query.Parameter{Name: "p", Uses: []query.Use{
+			query.NewExprUse(query.TypeUnknown{}, query.ExprInProjection),
+		}}),
 	},
 	// aggregate-kind-rich-exprs spec §4.5 pin #9 — bare parameter as
 	// aggregate argument (Blocker 1). Today: functionArgRefs rejects
@@ -1443,23 +1413,18 @@ var mustParse = map[string]struct {
 	// on projection-kind only.
 	"aggregate count on bare parameter arg": {
 		src: "RETURN count($p)",
-		want: query.Query{
-			Branches: []query.Branch{{Parts: []query.Part{{
-				Returns: []query.ReturnItem{
-					{Name: "count($p)", Value: query.NewAggregateProjection(
-						query.AggCount,
-						nil,
-						false,
-						query.TypeInt{},
-					)},
-				},
-			}}}},
-			Parameters: []query.Parameter{
-				{Name: "p", Uses: []query.Use{
-					query.NewExprUse(query.TypeInt{}, query.ExprInProjection),
-				}},
+		want: oneBranch(query.Part{
+			Returns: []query.ReturnItem{
+				{Name: "count($p)", Value: query.NewAggregateProjection(
+					query.AggCount,
+					nil,
+					false,
+					query.TypeInt{},
+				)},
 			},
-		},
+		}, query.Parameter{Name: "p", Uses: []query.Use{
+			query.NewExprUse(query.TypeInt{}, query.ExprInProjection),
+		}}),
 	},
 	// aggregate-kind-rich-exprs spec §4.5 pin #10 — bare-arg
 	// regression / bit-identity guard (Blocker 3(b)). Today's bare
@@ -2329,10 +2294,8 @@ var mustParse = map[string]struct {
 	// projection-less part — the Stage-14 shape most similar to a
 	// projection-less write.
 	"CALL standalone no-args no-yields empty-results (Call1[1])": {
-		src: "CALL test.doNothing()",
-		want: oneBranch(query.Part{
-			ReturnsAll: true,
-		}),
+		src:  "CALL test.doNothing()",
+		want: oneBranch(query.Part{ReturnsAll: true}),
 		sigs: []procsig.Signature{{Name: "test.doNothing"}},
 	},
 	// Call1 [2] Standalone CALL implicit invocation (no parens).
@@ -2340,10 +2303,8 @@ var mustParse = map[string]struct {
 	// distinction (implicit args come from parameters at runtime),
 	// invisible at the type-interface boundary.
 	"CALL standalone implicit no-args empty-results (Call1[2])": {
-		src: "CALL test.doNothing",
-		want: oneBranch(query.Part{
-			ReturnsAll: true,
-		}),
+		src:  "CALL test.doNothing",
+		want: oneBranch(query.Part{ReturnsAll: true}),
 		sigs: []procsig.Signature{{Name: "test.doNothing"}},
 	},
 	// AUTHORED (Stage 14 §1.8 pin a): CALL inside EXISTS does not
