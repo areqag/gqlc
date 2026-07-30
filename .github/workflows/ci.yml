@@ -1,6 +1,7 @@
-# The always-run merge-blocking checks: lint / test / tidy / actionlint, all
-# parallel, all invoking just recipes so CI runs exactly what a developer runs
-# locally. Tool versions are pinned once, in the justfile.
+# The always-run merge-blocking checks: lint / test / tidy / actionlint.
+# tidy and actionlint are fast (< 30 s); they gate the slow jobs (lint, test,
+# codegen-fence) so a trivial formatting miss cancels expensive work early.
+# Tool versions are pinned once, in the justfile.
 name: ci
 
 on:
@@ -19,6 +20,7 @@ concurrency:
 
 jobs:
   lint:
+    needs: [actionlint, tidy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,6 +46,7 @@ jobs:
       - run: just lint-cache-check
 
   test:
+    needs: [actionlint, tidy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -92,6 +95,7 @@ jobs:
           python3 .github/scripts/check-pr-closes.py .beads/issues.jsonl "$bead_id"
 
   codegen-fence:
+    needs: [actionlint, tidy]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
