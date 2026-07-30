@@ -65,10 +65,12 @@ func renderQuerier(pkg string, prepared []preparedQuery, target driverTarget) []
 // + return type) for dbtype / time references. Multi-column returns
 // use the MethodNameRow struct name (the struct itself lives in the
 // .cypher.go file, whose imports carry any dbtype / time it needs);
-// single-column returns and every parameter surface the carrier
-// directly in the signature. The querier interface file needs an
-// import when — and only when — its method signature strings contain
-// the carrier.
+// single-column returns surface the Go type directly. Multi-param
+// queries use arg MethodNameParams (a struct), so their field types
+// never appear in the querier interface and need no import here;
+// single-param queries surface the Go type directly. The querier
+// interface file needs an import when — and only when — its method
+// signature strings contain the carrier.
 func querierImports(prepared []preparedQuery) (needDbtype, needTime bool) {
 	scan := func(ty string) {
 		if strings.Contains(ty, "dbtype.") {
@@ -79,9 +81,11 @@ func querierImports(prepared []preparedQuery) (needDbtype, needTime bool) {
 		}
 	}
 	for _, p := range prepared {
-		// Parameters appear verbatim in every method signature.
-		for _, param := range p.ParamFields {
-			scan(param.GoType)
+		// Only 1-param methods surface the Go type directly in the signature;
+		// multi-param methods use arg MethodNameParams, so field types are
+		// not imported in querier.go.
+		if len(p.ParamFields) == 1 {
+			scan(p.ParamFields[0].GoType)
 		}
 		// Return type: bare row Go type for single-column projections;
 		// MethodNameRow (no import needed) otherwise.
