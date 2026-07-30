@@ -1,0 +1,4 @@
+{
+  "package": "twodateparams",
+  "queryFiles": ["queries.cypher"]
+}
