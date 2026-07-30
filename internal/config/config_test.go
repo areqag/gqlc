@@ -401,9 +401,14 @@ func TestRejectionTable(t *testing.T) {
 			want: `config: <stream>: line 1: field "version" must be a YAML integer (got a YAML sequence)`,
 		},
 		{
-			name:     "version overflowing Go int surfaces the yaml error",
+			name:     "version overflowing Go int surfaces the yaml unmarshal error",
 			body:     "version: 9223372036854775808\ngraph: []\n",
 			wantSubs: []string{`field "version": yaml: unmarshal errors:`, "line 1: cannot unmarshal !!int `9223372...` into int"},
+		},
+		{
+			name:     "version explicitly tagged !!int with a non-integer value surfaces the yaml decode error",
+			body:     "version: !!int abc\ngraph: []\n",
+			wantSubs: []string{`field "version":`, "cannot decode !!str `abc` as a !!int"},
 		},
 		{
 			name: "graph omitted",
