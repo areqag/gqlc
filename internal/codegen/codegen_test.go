@@ -554,7 +554,7 @@ func syncGoldenDir(dir string, got []File) error {
 func TestGoldenBuild(t *testing.T) {
 	abs, err := filepath.Abs(fixtureDir)
 	require.NoError(t, err)
-	cmd := exec.Command("go", "build", "./...")
+	cmd := exec.CommandContext(t.Context(), "go", "build", "./...")
 	cmd.Dir = abs
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "generated golden packages do not compile:\n%s", out)
