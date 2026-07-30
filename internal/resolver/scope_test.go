@@ -282,6 +282,36 @@ func TestScopeDemoteNullability5xg(t *testing.T) {
 	require.False(t, sc.nullableBinding["a"])
 }
 
+// TestScopeDemoteNullability0kq is §4.1 #4b. An OPTIONAL-introduced edge
+// binding whose parser-time referencedInRequiredChain flag is true is demoted
+// to non-nullable on DemoteNullability even though its own Nullable() bit is
+// true. This mirrors the 5xg bare-ref axis on nodes but for edge chain
+// re-references (0kq).
+func TestScopeDemoteNullability0kq(t *testing.T) {
+	epA, err := query.NewVarEndpoint("a")
+	require.NoError(t, err)
+	epB, err := query.NewVarEndpoint("b")
+	require.NoError(t, err)
+	eb, err := query.NewNullableEdgeBindingInGroup("r", graph.LabelSet{"R"}, epA, epB, true, 1)
+	require.NoError(t, err)
+	query.MarkEdgeBindingReferencedInRequiredChain(&eb)
+	require.True(t, eb.ReferencedInRequiredChain())
+	require.True(t, eb.Nullable())
+
+	sc := newScope(branchState{})
+	sc.Ingest(query.Part{Bindings: []query.Binding{eb}})
+	sc.SeedLocalNullability()
+	require.True(t, sc.nullableBinding["r"], "SeedLocalNullability seeds r's own Nullable() = true")
+	sc.DemoteNullability()
+	require.False(t, sc.nullableBinding["r"], "0kq pre-pass demotes chain-ref-flagged edge binding")
+
+	// Idempotence: re-seeding restores true, re-demoting drops it back.
+	sc.SeedLocalNullability()
+	require.True(t, sc.nullableBinding["r"])
+	sc.DemoteNullability()
+	require.False(t, sc.nullableBinding["r"])
+}
+
 // TestScopeDemoteNullabilityAy9CrossPart is §4.1 #5. Part 0
 // introduces two OPTIONAL-group siblings a, b at group g > 0, both
 // nullable. Part 1 re-MATCHes a in a required clause. Group closure

@@ -312,5 +312,16 @@ func (rb *rawBinding) toBinding() (query.Binding, error) {
 			b = bb
 		}
 	}
+	if rb.referencedInRequiredChain {
+		// 0kq: parallel to the 5xg post-mutation above, but for the edge-chain
+		// witness axis. Only EdgeBinding carries this flag (nodes are never
+		// detected via collectEdge's chain logic); the NodeBinding arm is a
+		// defensive no-op. See ADR 0008 5xg amendment 2026-07-11 for the
+		// pattern; this field follows the same discipline.
+		if bb, ok := b.(query.EdgeBinding); ok {
+			query.MarkEdgeBindingReferencedInRequiredChain(&bb)
+			b = bb
+		}
+	}
 	return b, nil
 }

@@ -397,9 +397,19 @@ func (s *scope) DemoteNullability() {
 				}
 			}
 		case query.EdgeBinding:
-			// Unreachable today, and so untestable: an edge is never bare, so
-			// the parser passes a constant false here (cypher/pattern.go:314).
+			// ReferencedInRequiredBarePattern: unreachable in practice — an edge is
+			// never bare (the parser passes bare=false at every collectEdge call site).
+			// The arm is kept for symmetry with NodeBinding.
 			if bb.ReferencedInRequiredBarePattern() && bb.Variable() != "" {
+				if _, present := s.nullableBinding[bb.Variable()]; present {
+					s.nullableBinding[bb.Variable()] = false
+				}
+			}
+			// 0kq: an OPTIONAL-introduced edge variable that is re-referenced in a
+			// required chain witnesses its own non-nullness; demote it here, before
+			// the group-closure fixed point runs, so the group closure can also
+			// propagate to co-introduced siblings if any.
+			if bb.ReferencedInRequiredChain() && bb.Variable() != "" {
 				if _, present := s.nullableBinding[bb.Variable()]; present {
 					s.nullableBinding[bb.Variable()] = false
 				}
