@@ -243,8 +243,8 @@ func (s Scalar) String() string {
 // MarshalJSON renders a Scalar as its wire string.
 func (s Scalar) MarshalJSON() ([]byte, error) { return json.Marshal(s.String()) }
 
-// String is the wire tag "scalar".
-func (ResolvedScalar) String() string { return "scalar" }
+// String includes the scalar kind so conflict messages name the exact subtype.
+func (r ResolvedScalar) String() string { return "scalar(" + r.Kind.String() + ")" }
 
 // MarshalJSON emits a tagged-union object with a "kind" discriminator plus the
 // scalar kind.
@@ -252,7 +252,7 @@ func (r ResolvedScalar) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Kind   string `json:"kind"`
 		Scalar Scalar `json:"scalar"`
-	}{Kind: r.String(), Scalar: r.Kind})
+	}{Kind: "scalar", Scalar: r.Kind})
 }
 
 func (ResolvedScalar) isResolvedType() {}
@@ -306,8 +306,8 @@ func (t Temporal) String() string {
 // MarshalJSON renders a Temporal as its wire string.
 func (t Temporal) MarshalJSON() ([]byte, error) { return json.Marshal(t.String()) }
 
-// String is the wire tag "temporal".
-func (ResolvedTemporal) String() string { return "temporal" }
+// String includes the temporal kind so conflict messages name the exact subtype.
+func (r ResolvedTemporal) String() string { return "temporal(" + r.Kind.String() + ")" }
 
 // MarshalJSON emits a tagged-union object with a "kind" discriminator plus the
 // temporal kind.
@@ -315,7 +315,7 @@ func (r ResolvedTemporal) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Kind     string   `json:"kind"`
 		Temporal Temporal `json:"temporal"`
-	}{Kind: r.String(), Temporal: r.Kind})
+	}{Kind: "temporal", Temporal: r.Kind})
 }
 
 func (ResolvedTemporal) isResolvedType() {}
