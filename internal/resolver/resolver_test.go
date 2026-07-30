@@ -316,6 +316,10 @@ var invalidFixtureContains = map[string]string{
 	"remove_labels_on_edge.cypher":               "edge binding",
 	"delete_projection_alias.cypher":             "projection alias",
 	"delete_property_on_projection_alias.cypher": "projection alias",
+	// ErrOutOfR0Scope: path/unwind binding arm (resolve.go:204) vs
+	// refProjectionType arm (scope.go:706) — distinguished by "binding" suffix.
+	"path_binding.cypher":   "path binding",
+	"unwind_binding.cypher": "unwind binding",
 }
 
 type ResolverSuite struct {

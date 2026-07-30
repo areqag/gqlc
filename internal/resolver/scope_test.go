@@ -60,9 +60,9 @@ func TestScopeBindNodeShadowCascade(t *testing.T) {
 	nt := schema.NodeType{KeyLabels: graph.LabelSet{"Person"}.Key(), CompleteLabels: graph.LabelSet{"Person"}.Key()}
 	require.NoError(t, sc.BindNode(nb, nt))
 
-	require.True(t, sc.HasNode("r"))
-	require.False(t, sc.HasEdge("r"))
+	require.Contains(t, sc.nodeTypes, "r")
 	require.NotContains(t, sc.edgeTypes, "r")
+	require.NotContains(t, sc.edgeCands, "r")
 	require.NotContains(t, sc.edgeKeys, "r")
 	require.NotContains(t, sc.edgeCands, "r")
 	require.NotContains(t, sc.edgeBindings, "r")
@@ -88,7 +88,6 @@ func TestScopeBindEdgeShadowCascade(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, sc.BindEdge(eb))
 
-	require.False(t, sc.HasNode("x"))
 	require.NotContains(t, sc.nodeTypes, "x")
 	require.NotContains(t, sc.edgeTypes, "x")
 	require.NotContains(t, sc.edgeKeys, "x")
@@ -129,7 +128,7 @@ func TestScopeBindCallShadowCascade(t *testing.T) {
 	require.NotContains(t, sc.edgeKeys, "c")
 	require.NotContains(t, sc.edgeCands, "c")
 	require.NotContains(t, sc.edgeBindings, "c")
-	require.True(t, sc.HasCall("c"))
+	require.Contains(t, sc.callTypes, "c")
 }
 
 func TestScopeSnapshotNarrowing(t *testing.T) {
@@ -137,7 +136,7 @@ func TestScopeSnapshotNarrowing(t *testing.T) {
 	// carriedResolvedTypes, carriedGroups, and the ingested Part are
 	// not observable through partScope. §2.3 invariant #3.
 	carry := branchState{
-		exportedCallTypes:     map[string]callBindingSlot{"c": {procedure: "test.proc"}},
+		exportedCallTypes:     map[string]callBindingSlot{"c": {resultType: query.TypeUnknown{}}},
 		exportedResolvedTypes: map[string]ResolvedType{"alias": ResolvedUnknown{}},
 		exportedOptionalGroup: map[string]int{"opt": 7},
 	}
@@ -156,7 +155,7 @@ func TestScopeSnapshotNarrowing(t *testing.T) {
 	require.Empty(t, snap.edgeBindings)
 	require.Empty(t, snap.nullableBinding)
 	// callTypes, carried lanes stay on scope, not on partScope.
-	require.True(t, sc.HasCall("c"))
+	require.Contains(t, sc.callTypes, "c")
 	require.Equal(t, ResolvedUnknown{}, sc.carriedResolvedTypes["alias"])
 	require.Equal(t, 7, sc.carriedGroups["opt"])
 }

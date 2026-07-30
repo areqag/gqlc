@@ -104,13 +104,9 @@ type branchState struct {
 }
 
 // callBindingSlot carries the resolver-side view of a CallBinding at a Part's
-// Phase A1: bridged Stage-6 type, nullability, and the two identity strings
-// codegen may consult on the query.Query side (spec §4.1).
+// Phase A1: the bridged Stage-6 result type (spec §4.1).
 type callBindingSlot struct {
-	resultType  query.Type
-	nullable    bool
-	procedure   string
-	sourceField string
+	resultType query.Type
 }
 
 // parameterUseSite is resolveBranch's second-return element (pinned type per

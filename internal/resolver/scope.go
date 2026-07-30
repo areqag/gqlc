@@ -269,10 +269,7 @@ func (s *scope) BindCall(cb query.CallBinding, r procsig.Registry) error {
 		}
 	}
 	s.callTypes[v] = callBindingSlot{
-		resultType:  cb.ResultType(),
-		nullable:    cb.Nullable(),
-		procedure:   cb.Procedure(),
-		sourceField: cb.SourceField(),
+		resultType: cb.ResultType(),
 	}
 	return nil
 }
@@ -345,32 +342,6 @@ func (s *scope) InferUnlabelled(sch schema.Schema) error {
 		return nil
 	}
 	return inferUnlabelled(pending, edges, sch, s.nodeTypes, s.nodeCands, s.callTypes)
-}
-
-// HasNode / HasEdge / HasCall are read-only presence predicates for
-// callers that need to know whether a name is currently in a live
-// lane without reaching for the map itself (§2.4). Used by tests and
-// (once step 6 lands) by the parameter walker's Contains path.
-
-func (s *scope) HasNode(v string) bool {
-	if _, ok := s.nodeTypes[v]; ok {
-		return true
-	}
-	_, ok := s.nodeCands[v]
-	return ok
-}
-
-func (s *scope) HasEdge(v string) bool {
-	if _, ok := s.edgeTypes[v]; ok {
-		return true
-	}
-	_, ok := s.edgeCands[v]
-	return ok
-}
-
-func (s *scope) HasCall(v string) bool {
-	_, ok := s.callTypes[v]
-	return ok
 }
 
 // SeedLocalNullability writes each binding's own Nullable() bit into the
@@ -649,16 +620,13 @@ func (s *scope) materialiseReturns() ([]query.ReturnItem, error) {
 // variable's RefProjection with the CallBinding's bridged ResultType.
 func (s *scope) virtualProjection(name string) (query.Projection, error) {
 	if _, ok := s.nodeTypes[name]; ok {
-		return query.NewRefProjection(query.Ref{Variable: name}, query.TypeNode{}), nil
+		return query.NewRefProjection(query.Ref{Variable: name}, query.TypeUnknown{}), nil
 	}
 	if _, ok := s.nodeCands[name]; ok {
-		return query.NewRefProjection(query.Ref{Variable: name}, query.TypeNode{}), nil
+		return query.NewRefProjection(query.Ref{Variable: name}, query.TypeUnknown{}), nil
 	}
-	if b, ok := s.edgeBindings[name]; ok {
-		if b.Hops() != nil {
-			return query.NewRefProjection(query.Ref{Variable: name}, query.TypeList{}), nil
-		}
-		return query.NewRefProjection(query.Ref{Variable: name}, query.TypeEdge{}), nil
+	if _, ok := s.edgeBindings[name]; ok {
+		return query.NewRefProjection(query.Ref{Variable: name}, query.TypeUnknown{}), nil
 	}
 	if slot, ok := s.callTypes[name]; ok {
 		return query.NewRefProjection(query.Ref{Variable: name}, slot.resultType), nil
@@ -999,6 +967,11 @@ func (sc partScope) PropertyUseWitness(ref query.Ref, s schema.Schema) (Resolved
 	_, singleCand := sc.edgeTypes[ref.Variable]
 	cands, multiCand := sc.edgeCands[ref.Variable]
 	if !singleCand && !multiCand {
+		// unreachable: WitnessUse gates on Contains() before calling here;
+		// Contains() requires nodeTypes, nodeCands, edgeTypes, or edgeCands.
+		// Having passed the nodeTypes and nodeCands arms above, the variable
+		// must be in edgeTypes or edgeCands — so this arm can only be reached
+		// if that gate is relaxed.
 		return nil, fmt.Errorf("%w: %s", ErrOutOfR0Scope, ref.Variable)
 	}
 	if binding := sc.edgeBindings[ref.Variable]; binding.Hops() != nil {
