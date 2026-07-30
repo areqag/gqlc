@@ -381,9 +381,9 @@ oracles §4's unit tests pin.
 ### 2.4 What is deliberately not on the interface
 
 - **No public getters returning the maps themselves.** Callers that want
-  a "is `v` a node in scope?" read use `scope.HasNode(v)` (a bool).
-  Handing out `map[string]schema.NodeType` re-opens the deletion-test
-  failure the refactor exists to fix.
+  to check scope membership read the underlying maps directly (e.g.,
+  `_, ok := sc.nodeTypes[v]`). Handing out `map[string]schema.NodeType`
+  re-opens the deletion-test failure the refactor exists to fix.
 - **No batch `Merge(other *scope)` operation.** The one merge shape the
   resolver needs — carry → local — is `newScope(carry)`; there is no
   cross-Part scope union anywhere, and speculating one would be
@@ -465,7 +465,7 @@ Export, or a targeted read-only predicate).
 3. **BindNode shadow cascade.** Seed a scope with
    `c.exportedEdgeBindings["r"]` populated; Ingest a Part whose
    Bindings contain one `NodeBinding{Variable: "r", ...}`; call
-   `s.BindNode(nb, nt)`. Post-condition: `HasNode("r")` true;
+   `s.BindNode(nb, nt)`. Post-condition: `_, ok := sc.nodeTypes["r"]; ok` true;
    `HasEdgeBinding("r")` false. Every one of the five shadow lanes
    the current `:229-234` block deletes is checked via targeted
    `HasX` predicates. Symmetric tests for `BindEdge` (shadow
@@ -655,11 +655,9 @@ Down from 14 in the initial draft. The collapse:
   `DemoteNullability(bindings, carriedGroups)` → parameter-free
   versions reading receiver state (D1 + D2).
 
-Read-only predicates like `HasNode(v)`, `HasEdge(v)`,
-`HasCall(v)` — used inside `resolvePart`'s conflict-detection
-arms today — are unexported helper methods, not counted as
-public interface; they exist because §2.4 rejects handing out
-the raw maps.
+Scope membership is checked by reading the underlying maps directly
+(`nodeTypes`, `edgeCands`, `callTypes`, etc.) — the `Has*` predicates
+were removed as dead code (no production callers).
 
 **On `partScope`** (3 methods, moved in step 6):
 
@@ -687,8 +685,7 @@ where I made judgement calls:
   `unionProperty` similarly stay as free functions
   (schema-driven, scope-agnostic) or move to methods.
   Preferred: free functions, same reasoning.
-- Whether `HasNode` / `HasEdge` / `HasCall` are the only
-  read-only predicates that need to exist, or whether
-  `resolvePart` still has a case that reaches for a map value
-  (not just presence). Answered by inspection during
-  implementation of step 2.
+- Whether read-only presence predicates (`HasNode` / `HasEdge` /
+  `HasCall`) need to exist, or whether `resolvePart` reads map values
+  directly. Answered: the `Has*` methods had zero production callers
+  and were deleted; `resolvePart` reads the maps directly.
