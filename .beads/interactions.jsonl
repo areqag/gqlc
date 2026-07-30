@@ -112,3 +112,5 @@
 {"id":"int-82151672","kind":"field_change","created_at":"2026-07-28T19:35:15.472806506Z","actor":"areqag","issue_id":"gqlc-h9n.22","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-a3f32d54","kind":"field_change","created_at":"2026-07-28T19:47:50.358785668Z","actor":"areqag","issue_id":"gqlc-h9n.23","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
 {"id":"int-b7f4f21d","kind":"field_change","created_at":"2026-07-28T20:28:27.436650314Z","actor":"areqag","issue_id":"gqlc-h9n.5","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-fe7c6df6","kind":"field_change","created_at":"2026-07-30T00:58:38.975921778Z","actor":"areqag","issue_id":"gqlc-fex","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
+{"id":"int-5a5babe7","kind":"field_change","created_at":"2026-07-30T00:59:35.011334395Z","actor":"areqag","issue_id":"gqlc-fex","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
