@@ -174,6 +174,7 @@ type rawBinding struct {
 	undirected                      bool            // zero value false == directed; set true only on the undirected branch (inverted to keep existing literals zero-value-safe, see §4)
 	hops                            *query.EdgeHops // Stage 8: non-nil for a variable-length edge
 	referencedInRequiredBarePattern bool            // 5xg: set by mergeBinding's merge arm on a required (non-OPTIONAL) bare-pattern re-reference of an already-introduced variable
+	referencedInRequiredChain       bool            // 0kq: set by collectEdge when a required (non-OPTIONAL) chain re-reference of an already-introduced edge variable is detected
 }
 
 // varRef is a use of a variable name that build() must resolve to a binding. An
