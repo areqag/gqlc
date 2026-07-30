@@ -181,3 +181,46 @@ build-grammar:
     sudo docker run --rm -v {{invocation_directory()}}:/work -w /work/internal/grammar/gql antlr-tool -package gen -visitor -o gen GQL.g4
     @echo "Generating Go files from Cypher.g4..."
     sudo docker run --rm -v {{invocation_directory()}}:/work -w /work/internal/grammar/cypher antlr-tool -package gen -visitor -o gen Cypher.g4
+
+# re-fetches both ISO/IEC 39075 free artefacts and compares their SHA-256
+# against the values pinned in isobnf/productions.go and annexd/SOURCE.md.
+# Fails loudly on mismatch — ISO published a new edition; re-vendor the
+# snapshots and regenerate the derived files (see SOURCE.md in each package).
+# Network required; not wired into `just test`.
+iso-drift-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "fetch date: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    BNF_URL='https://standards.iso.org/iso-iec/39075/ed-1/en/ISO_IEC_39075(en).bnf.txt'
+    FEAT_URL='https://standards.iso.org/iso-iec/39075/ed-1/en/ISO_IEC_39075(en)-features.xml'
+
+    PINNED_BNF=$(grep -oP '(?<=SourceSHA256 = ")[0-9a-f]+' internal/schema/gql/isobnf/productions.go)
+    PINNED_FEAT=$(grep -oP '(?<=`)[0-9a-f]{64}(?=`$)' internal/schema/gql/annexd/SOURCE.md | head -1)
+
+    echo "pinned BNF SHA-256:      $PINNED_BNF"
+    echo "pinned features SHA-256: $PINNED_FEAT"
+
+    LIVE_BNF=$(curl -sSfL "$BNF_URL" | sha256sum | cut -d' ' -f1)
+    LIVE_FEAT=$(curl -sSfL "$FEAT_URL" | sha256sum | cut -d' ' -f1)
+
+    echo "live BNF SHA-256:        $LIVE_BNF"
+    echo "live features SHA-256:   $LIVE_FEAT"
+
+    fail=0
+    if [ "$LIVE_BNF" != "$PINNED_BNF" ]; then
+        echo "MISMATCH: BNF artefact has changed" >&2
+        echo "  pinned: $PINNED_BNF" >&2
+        echo "  live:   $LIVE_BNF" >&2
+        fail=1
+    fi
+    if [ "$LIVE_FEAT" != "$PINNED_FEAT" ]; then
+        echo "MISMATCH: features XML artefact has changed" >&2
+        echo "  pinned: $PINNED_FEAT" >&2
+        echo "  live:   $LIVE_FEAT" >&2
+        fail=1
+    fi
+    if [ "$fail" -eq 0 ]; then
+        echo "ok: both artefacts match their pinned checksums"
+    fi
+    exit "$fail"
