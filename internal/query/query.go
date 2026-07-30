@@ -451,6 +451,7 @@ type EdgeBinding struct {
 	hops                            *EdgeHops      // Stage 8: nil for single-hop; non-nil for variable-length
 	optionalGroup                   int            // ≥1: id of the introducing OPTIONAL clause (ay9); 0: not OPTIONAL-introduced
 	referencedInRequiredBarePattern bool           // set by mergeBinding when a later same-Part occurrence is a required bare pattern (5xg)
+	referencedInRequiredChain       bool           // set by collectEdge when a later same-Part occurrence is a required (non-OPTIONAL) chain re-reference (0kq)
 }
 
 // NewEdgeBinding builds a single-hop EdgeBinding, rejecting a missing endpoint:
@@ -608,6 +609,39 @@ func (b *EdgeBinding) markReferencedInRequiredBarePattern() {
 // always sits inside `-[...]-` between two node positions).
 func MarkEdgeBindingReferencedInRequiredBarePattern(b *EdgeBinding) {
 	b.markReferencedInRequiredBarePattern()
+}
+
+// ReferencedInRequiredChain reports whether at least one non-first occurrence
+// of this edge variable in the same Part was a required (non-OPTIONAL) chain
+// re-reference (0kq). An edge occurrence always sits inside `-[...]-` between
+// two node positions, so re-reference here means the edge variable appears
+// again in a required MATCH clause's chain. The resolver's 0kq pre-pass reads
+// this to demote the binding non-nullable in the local table (parallel to the
+// 5xg bare-ref axis on nodes, orthogonal in its edge-chain trigger condition).
+func (b EdgeBinding) ReferencedInRequiredChain() bool {
+	return b.referencedInRequiredChain
+}
+
+// markReferencedInRequiredChain sets the flag on a binding whose raw form
+// recorded a same-Part required chain re-reference (0kq). The mutator body is
+// a single field write; it is the package-private anchor for the axis's
+// post-introduction mutation, wrapped by MarkEdgeBindingReferencedInRequiredChain
+// for the parser's build.go (the only legitimate caller).
+func (b *EdgeBinding) markReferencedInRequiredChain() {
+	b.referencedInRequiredChain = true
+}
+
+// MarkEdgeBindingReferencedInRequiredChain is the parser-side wrapper for
+// EdgeBinding.markReferencedInRequiredChain (0kq). The wrapper is exported to
+// admit a single cross-package caller: the cypher parser's toBinding routine,
+// which owns the raw binding whose referencedInRequiredChain flag was set on
+// collectEdge's re-reference detection arm. It has no other legitimate caller:
+// an EdgeBinding value obtained via any public constructor has flag false, and
+// the "did this edge variable get re-referenced in a required chain later in
+// the same Part" fact is only observable during parse. External code should
+// read the flag via ReferencedInRequiredChain, never write it.
+func MarkEdgeBindingReferencedInRequiredChain(b *EdgeBinding) {
+	b.markReferencedInRequiredChain()
 }
 
 func (EdgeBinding) isBinding() {}
@@ -1817,9 +1851,10 @@ func (b NodeBinding) MarshalJSON() ([]byte, error) {
 // "optionalGroup" is omit-when-zero-value per the wire convention
 // (ay9 per ADR 0008 amendment 2026-07-07).
 // "referencedInRequiredBarePattern" is omit-when-false per the same
-// convention (5xg per ADR 0008 amendment 2026-07-11). Its true
-// side is grammatically-unreachable on edges (§2.3); the field ships for wire
-// symmetry with NodeBinding.
+// convention (5xg per ADR 0008 amendment 2026-07-11). Its true side is
+// grammatically-unreachable on edges (§2.3); the field ships for wire symmetry
+// with NodeBinding. "referencedInRequiredChain" is omit-when-false (0kq);
+// it is the edge-side demotion witness for required chain re-references.
 func (b EdgeBinding) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Kind                            string         `json:"kind"`
@@ -1832,7 +1867,8 @@ func (b EdgeBinding) MarshalJSON() ([]byte, error) {
 		Hops                            *EdgeHops      `json:"hops"`
 		OptionalGroup                   int            `json:"optionalGroup,omitempty"`
 		ReferencedInRequiredBarePattern bool           `json:"referencedInRequiredBarePattern,omitempty"`
-	}{Kind: b.Kind().String(), Variable: b.variable, Labels: b.labels, Source: b.source, Target: b.target, Nullable: b.nullable, Directed: b.directed, Hops: b.hops, OptionalGroup: b.optionalGroup, ReferencedInRequiredBarePattern: b.referencedInRequiredBarePattern})
+		ReferencedInRequiredChain       bool           `json:"referencedInRequiredChain,omitempty"`
+	}{Kind: b.Kind().String(), Variable: b.variable, Labels: b.labels, Source: b.source, Target: b.target, Nullable: b.nullable, Directed: b.directed, Hops: b.hops, OptionalGroup: b.optionalGroup, ReferencedInRequiredBarePattern: b.referencedInRequiredBarePattern, ReferencedInRequiredChain: b.referencedInRequiredChain})
 }
 
 // MarshalJSON renders a VarEndpoint as a tagged union member discriminated by

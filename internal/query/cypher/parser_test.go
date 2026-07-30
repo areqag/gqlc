@@ -251,6 +251,74 @@ var mustParse = map[string]struct {
 			},
 		}),
 	},
+	// 0kq §6.1.1 — a required (non-OPTIONAL) chain re-reference of an
+	// OPTIONAL-introduced edge variable sets referencedInRequiredChain on the
+	// existing binding. `r` is introduced in the OPTIONAL clause and then appears
+	// again as the edge variable in a required MATCH chain: the flag must be true.
+	"required chain re-reference sets flag on optional edge": {
+		src: "OPTIONAL MATCH (a)-[r:R]->(b)\nMATCH (c)-[r]->(d)\nRETURN r",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNullableNodeBindingInGroup("a", nil, 1)),
+				markChainRefEdge(must(query.NewNullableEdgeBindingInGroup("r", graph.LabelSet{"R"},
+					must(query.NewVarEndpoint("a")),
+					must(query.NewVarEndpoint("b")),
+					true,
+					1,
+				))),
+				must(query.NewNullableNodeBindingInGroup("b", nil, 1)),
+				must(query.NewNodeBinding("c", nil)),
+				must(query.NewNodeBinding("d", nil)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"}, query.TypeEdge{})},
+			},
+		}),
+	},
+	// 0kq §6.1.2 — kill-probe: a single OPTIONAL MATCH with no re-reference
+	// leaves referencedInRequiredChain false. The flag must stay false when the
+	// edge variable appears in only one clause.
+	"optional-only edge has chain-ref flag false": {
+		src: "OPTIONAL MATCH (a)-[r:R]->(b)\nRETURN r",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNullableNodeBindingInGroup("a", nil, 1)),
+				must(query.NewNullableEdgeBindingInGroup("r", graph.LabelSet{"R"},
+					must(query.NewVarEndpoint("a")),
+					must(query.NewVarEndpoint("b")),
+					true,
+					1,
+				)),
+				must(query.NewNullableNodeBindingInGroup("b", nil, 1)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"}, query.TypeEdge{})},
+			},
+		}),
+	},
+	// 0kq §6.1.3 — kill-probe: an edge variable re-referenced in a second
+	// OPTIONAL MATCH clause must NOT set the flag — the witness is optional,
+	// so it does not prove r is non-null.
+	"optional chain re-reference does not set chain-ref flag": {
+		src: "OPTIONAL MATCH (a)-[r:R]->(b)\nOPTIONAL MATCH (c)-[r]->(d)\nRETURN r",
+		want: oneBranch(query.Part{
+			Bindings: []query.Binding{
+				must(query.NewNullableNodeBindingInGroup("a", nil, 1)),
+				must(query.NewNullableEdgeBindingInGroup("r", graph.LabelSet{"R"},
+					must(query.NewVarEndpoint("a")),
+					must(query.NewVarEndpoint("b")),
+					true,
+					1,
+				)),
+				must(query.NewNullableNodeBindingInGroup("b", nil, 1)),
+				must(query.NewNullableNodeBindingInGroup("c", nil, 2)),
+				must(query.NewNullableNodeBindingInGroup("d", nil, 2)),
+			},
+			Returns: []query.ReturnItem{
+				{Name: "r", Value: query.NewRefProjection(query.Ref{Variable: "r"}, query.TypeEdge{})},
+			},
+		}),
+	},
 	// Stage 3 — canonical aggregate. count(*) is the degenerate aggregate: the
 	// count-star atom, AggCount with no referenced bindings (it counts rows, not a
 	// binding). Column name is the verbatim text "count(*)". The aggregate kind is
@@ -2589,6 +2657,18 @@ func must[T any](v T, err error) T {
 // the axis's true side (§5.1.1); every non-5xg pin stays byte-identical.
 func markBareRefNode(b query.NodeBinding) query.NodeBinding {
 	query.MarkNodeBindingReferencedInRequiredBarePattern(&b)
+	return b
+}
+
+// markChainRefEdge is the 0kq parser-test bridge to the unexported
+// markReferencedInRequiredChain mutator. It captures the value in an
+// addressable local, flips the flag through the exported parser wrapper
+// (query.MarkEdgeBindingReferencedInRequiredChain — the same symbol
+// build.go uses), and returns the mutated value so it can sit inline in a
+// struct-literal Bindings slice. Only used from mustParse pins that exercise
+// the 0kq axis's true side (§6.1.1); every non-0kq pin stays byte-identical.
+func markChainRefEdge(b query.EdgeBinding) query.EdgeBinding {
+	query.MarkEdgeBindingReferencedInRequiredChain(&b)
 	return b
 }
 

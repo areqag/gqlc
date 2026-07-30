@@ -311,10 +311,25 @@ func (l *listener) collectEdge(r gen.IOC_RelationshipPatternContext, prev, next 
 		return
 	}
 	if !l.nameBoundAsUnwind(variable) {
+		// 0kq: detect a required chain re-reference of an OPTIONAL-introduced edge
+		// variable. A re-reference in a required clause (group == 0) on an edge that
+		// was previously introduced as OPTIONAL (optionalGroup > 0) witnesses that
+		// the edge is non-null on all surviving rows. Set the flag monotonically on
+		// the raw binding after mergeBinding updates it.
+		part := l.curPart
+		priorIdx, alreadyBound := part.byVar[variable]
+		isOptionalIntroduced := alreadyBound && part.bindings[priorIdx].optionalGroup > 0
 		// 5xg: an edge is grammatically never bare — it always sits inside
 		// -[...]- between two node positions — so the parameter is a
 		// compile-time constant false at this site.
 		l.mergeBinding(variable, graph.Edge, labels, source, target, group, !directed, hops, false)
+		if isOptionalIntroduced && group == 0 {
+			// The variable was OPTIONAL-introduced and this occurrence is in a
+			// required (non-OPTIONAL) clause — mark the binding as chain-witnessed.
+			if idx, ok := part.byVar[variable]; ok {
+				part.bindings[idx].referencedInRequiredChain = true
+			}
+		}
 	}
 	l.recordPathEdge(variable)
 }
