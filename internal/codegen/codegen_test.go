@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -545,6 +546,18 @@ func syncGoldenDir(dir string, got []File) error {
 		}
 	}
 	return nil
+}
+
+// TestGoldenBuild compiles the nested test/data/codegen module so that
+// spurious or missing imports in generated golden packages are caught by
+// go test ./internal/codegen/... rather than only by just test-codegen-fence.
+func TestGoldenBuild(t *testing.T) {
+	abs, err := filepath.Abs(fixtureDir)
+	require.NoError(t, err)
+	cmd := exec.CommandContext(t.Context(), "go", "build", "./...")
+	cmd.Dir = abs
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "generated golden packages do not compile:\n%s", out)
 }
 
 // TestGeneratedHeaderFormat fences the emitted-file header format (spec

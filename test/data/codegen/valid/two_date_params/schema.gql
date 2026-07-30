@@ -1,0 +1,7 @@
+CREATE PROPERTY GRAPH TYPE TwoDateParams AS {
+    (:Event {
+        id      :: INT64 NOT NULL,
+        name    :: STRING NOT NULL,
+        created :: DATE NOT NULL
+    })
+}
