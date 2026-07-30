@@ -301,6 +301,23 @@ var invalidFixtures = map[string]error{
 	"label_satisfy_plural_entity.cypher":   ErrAmbiguousLabel,
 }
 
+// invalidFixtureContains pins the message arm for fixtures where errors.Is
+// alone cannot distinguish which branch of a validator fired. Only entries
+// where arm discrimination matters are listed; absent entries skip the check.
+var invalidFixtureContains = map[string]string{
+	// Effect validators: alias arm vs edge arm vs scope-miss arm all return
+	// ErrInvalidEffectTarget, so errors.Is does not distinguish them.
+	"set_property_on_projection_alias.cypher":    "projection alias",
+	"set_entity_on_projection_alias.cypher":      "projection alias",
+	"set_labels_on_projection_alias.cypher":      "projection alias",
+	"set_labels_on_edge.cypher":                  "edge binding",
+	"remove_property_on_projection_alias.cypher": "projection alias",
+	"remove_labels_on_projection_alias.cypher":   "projection alias",
+	"remove_labels_on_edge.cypher":               "edge binding",
+	"delete_projection_alias.cypher":             "projection alias",
+	"delete_property_on_projection_alias.cypher": "projection alias",
+}
+
 type ResolverSuite struct {
 	suite.Suite
 }
@@ -406,6 +423,9 @@ func (s *ResolverSuite) TestInvalid() {
 			s.Require().Error(err)
 			s.Equal(ValidatedQuery{}, vq, "model must be the zero value on error")
 			s.Require().ErrorIs(err, wantErr)
+			if substr, ok := invalidFixtureContains[name]; ok {
+				s.Require().ErrorContains(err, substr)
+			}
 		})
 	}
 }
