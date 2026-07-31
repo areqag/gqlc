@@ -3,6 +3,11 @@
 // closures pass, so `chore(bd)` sync PRs need no exemption. Motivated by
 // bd gqlc-v2p (PR #422 pre-fix carried a stale export that would have
 // reopened two closed beads and dropped one).
+//
+// Deleting a bead on purpose (bd gqlc-w29n: a sync bug minted a duplicate
+// ghost bead) is declared by listing its id in `.beads/allowed-drops.txt`,
+// which exempts that id from the dropped arm alone. That file is read at the
+// PR head, so the exemption arrives in the diff a reviewer already reads.
 package main
 
 import (
@@ -17,7 +22,10 @@ import (
 	"sort"
 )
 
-const exportPath = ".beads/issues.jsonl"
+const (
+	exportPath       = ".beads/issues.jsonl"
+	allowedDropsPath = ".beads/allowed-drops.txt"
+)
 
 type record struct {
 	Type   string `json:"_type"`
@@ -52,14 +60,55 @@ func run(ctx context.Context, base string) error {
 			return fmt.Errorf("read base %s@%s: %w", exportPath, base, err)
 		}
 	}
-	return check(headBytes, baseBytes, base)
+	allowedDrops, err := readAllowedDrops(allowedDropsPath)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", allowedDropsPath, err)
+	}
+	return check(headBytes, baseBytes, base, allowedDrops)
+}
+
+// readAllowedDrops treats an absent file as an empty allowlist: most branches
+// delete no bead and carry no such file. Any other read failure is returned
+// rather than folded into "absent", so a file that exists but cannot be read
+// surfaces as itself instead of as an unexplained drop.
+func readAllowedDrops(path string) (map[string]bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return parseAllowedDrops(data), nil
+}
+
+// parseAllowedDrops reads one bead id per line, ignoring blank lines and lines
+// whose first non-blank byte is '#'. Ids are matched exactly: an entry exempts
+// that one id, with no wildcard or prefix form that could exempt a set.
+func parseAllowedDrops(data []byte) map[string]bool {
+	allowed := make(map[string]bool)
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		id := bytes.TrimSpace(line)
+		if len(id) == 0 || id[0] == '#' {
+			continue
+		}
+		allowed[string(id)] = true
+	}
+	return allowed
 }
 
 // check is the pure comparator: given both files' bytes, decide whether the
 // head regressed vs the base. Kept free of I/O so tests can hit every branch
 // with no `git` shellout — the git-boundary of run() is exercised only by the
 // end-to-end incident replay against the real repo (see PR body).
-func check(headBytes, baseBytes []byte, baseLabel string) error {
+//
+// allowedDrops exempts ids from the dropped arm only: a bead still present but
+// no longer closed is a status regression, not the deletion the list declares.
+// A listed id that was not dropped is inert rather than an error — once the
+// deletion lands on master the id is absent at base and head alike, so entries
+// go stale by design, and failing on them would fail every later PR until
+// someone pruned the file.
+func check(headBytes, baseBytes []byte, baseLabel string, allowedDrops map[string]bool) error {
 	head, headLines, err := parse(headBytes)
 	if err != nil {
 		return fmt.Errorf("parse head %s: %w", exportPath, err)
@@ -79,7 +128,9 @@ func check(headBytes, baseBytes []byte, baseLabel string) error {
 	for id, baseStatus := range baseIssues {
 		headStatus, ok := head[id]
 		if !ok {
-			dropped = append(dropped, id)
+			if !allowedDrops[id] {
+				dropped = append(dropped, id)
+			}
 			continue
 		}
 		if baseStatus == "closed" && headStatus != "closed" {
@@ -107,6 +158,9 @@ func check(headBytes, baseBytes []byte, baseLabel string) error {
 		}
 	}
 	fmt.Fprintf(&buf, "hint: %s is a passive bd export; if a real sync, run bd commands and stage only that file", exportPath)
+	if len(dropped) > 0 {
+		fmt.Fprintf(&buf, "\nhint: a deliberate deletion is declared by listing the exact id in %s (drops only — a reopen is not exempted there)", allowedDropsPath)
+	}
 	return errors.New(buf.String())
 }
 
