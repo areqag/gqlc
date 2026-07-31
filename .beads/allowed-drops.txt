@@ -1,0 +1,13 @@
+# Bead ids deliberately deleted from the bd DB, exempted from bdguard's
+# dropped-issue check. Drops only: a reopen is never exempted here.
+#
+# An entry goes stale once the deletion lands on master (the id is then absent
+# at base and at head alike). Stale entries are ignored, not an error — see
+# internal/tools/bdguard/main.go.
+
+# gqlc-w29n: sync-manufactured ghost. gqlc-fex acquired two GH mirrors (#597,
+# #598); #598 stayed canonical, so the --prefer-github pull saw #597 as an
+# unmirrored issue and minted a bead for it. Raw-timestamp ids of this shape
+# are the tell for a sync-created bead. #597 is now closed as a DUPLICATE of
+# #598, and the bead is deleted.
+gqlc-1785373131289-1-b6686b0c

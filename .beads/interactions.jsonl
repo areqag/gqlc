@@ -126,3 +126,4 @@
 {"id":"int-edf934fd","kind":"field_change","created_at":"2026-07-30T03:14:38.521124256Z","actor":"areqag","issue_id":"gqlc-4jm","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-46b62b32","kind":"field_change","created_at":"2026-07-30T03:17:21.022878125Z","actor":"areqag","issue_id":"gqlc-0kq","extra":{"field":"status","new_value":"closed","old_value":"in_progress","reason":"Closed"}}
 {"id":"int-e4342225","kind":"field_change","created_at":"2026-07-30T23:27:00.681854745Z","actor":"areqag","issue_id":"gqlc-4np","extra":{"field":"status","new_value":"open","old_value":"in_progress"}}
+{"id":"int-61ff585a","kind":"field_change","created_at":"2026-07-31T00:09:52.665802543Z","actor":"areqag","issue_id":"gqlc-4np","extra":{"field":"status","new_value":"blocked","old_value":"in_progress"}}
