@@ -138,17 +138,39 @@ test-codegen-fence: ensure-golangci
     cd test/data/codegen && go mod tidy -diff
     cd test/data/codegen && {{golangci}} run
 
-# runs the codegen live-smoke battery against a real neo4j testcontainer:
-# every scenario against every arm (TestLiveSmoke/neo4j-go-v5 and
-# TestLiveSmoke/neo4j-go-v6), the arms in parallel against the same
-# neo4j:5-community image.
+# runs every live test in the codegen module against real testcontainers:
+# the smoke battery on all three arms plus the AGE session-init contract.
 # Opt-in: PR CI runs the fence recipe above; this recipe wires the docker-
-# gated satellite (bd gqlc-73h, v6 arm added by bd gqlc-5gc) that proves
-# generated repositories actually query a live driver. Requires docker
-# (or a compatible runtime honouring the DOCKER_HOST env var); set
-# GQLC_SKIP_LIVE=1 to short-circuit on hosts without a container runtime.
+# gated satellite (bd gqlc-73h, v6 arm added by bd gqlc-5gc, AGE arm by bd
+# gqlc-35yu.8) that proves generated repositories actually query a live
+# driver. Requires docker (or a compatible runtime honouring the DOCKER_HOST
+# env var); set GQLC_SKIP_LIVE=1 to short-circuit on hosts without a
+# container runtime.
+#
+# The two recipes below are the same battery split by backend, because CI runs
+# the halves on different triggers. Arms are split by subtracting the other
+# half's arms from TestLiveSmoke with -skip, so an arm added to the arms table
+# runs in both halves until it is named there. Top-level tests are split by each
+# recipe's -run allowlist — TestAGESessionInit reaches only the AGE half because
+# the neo4j half's -run omits it — so a new top-level live test runs in no half
+# until the recipes name it.
+#
+# -count=1 so a developer asking for a live run gets containers, not the cache.
 test-codegen-live:
-    cd test/data/codegen && go test -tags codegen_live -run TestLiveSmoke ./...
+    cd test/data/codegen && go test -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit' ./...
+
+# the neo4j half: both driver arms in parallel against one neo4j:5-community
+# image. This is the half PR CI blocks on, so its wall time is a PR's wall time.
+test-codegen-live-neo4j:
+    cd test/data/codegen && go test -tags codegen_live -run TestLiveSmoke -skip 'TestLiveSmoke/apache-age' ./...
+
+# the Apache AGE half: the smoke battery's AGE arm and the session-init
+# contract, each on its own apache/age container. Nightly and manual only —
+# these containers are cost this project does not charge to a pull request.
+# -count=1 because this is the AGE arm's only gate and no pull request pays for
+# it, so the run it reports on has to be a real one.
+test-codegen-live-age:
+    cd test/data/codegen && go test -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit' -skip 'TestLiveSmoke/neo4j' ./...
 
 # call-graph-aware vulnerability scan; run on dependency changes and on the
 # weekly CI schedule ("@latest" deliberate: the vuln DB matters more than

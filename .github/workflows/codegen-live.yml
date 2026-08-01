@@ -1,15 +1,22 @@
-# PR-blocking merge gate: boots a neo4j testcontainer and drives the generated
-# repositories against it, exercising the v5 and v6 driver arms in parallel
-# (bd gqlc-73h shipped the original v5-only smoke; bd gqlc-5gc added the v6
-# arm sharing the same image; bd gqlc-9u5 enabled Go's test cache; bd gqlc-rvw
-# promoted this to blocking). Wall-time is affordable because the Go test
-# cache keeps the average PR cost near-zero — cache-miss only occurs when the
-# test binary is actually invalidated, so only codegen-adjacent PRs pay the
-# ~30s container-boot cost. No paths: filter — Go's test cache is the primary
-# skip mechanism; adding path filters would risk false skips on new
-# codegen-adjacent packages. Nightly cron on master retained as a safety net
-# in case a merge-time race sneaks a codegen change past the PR gate;
-# workflow_dispatch retained for developer-triggered manual iteration.
+# Boots real backends and drives the generated repositories against them.
+# Split into one job per backend because the two are on different triggers.
+#
+# live-smoke is PR-blocking (bd gqlc-73h shipped the original v5-only smoke; bd
+# gqlc-5gc added the v6 arm sharing the same image; bd gqlc-9u5 enabled Go's
+# test cache; bd gqlc-rvw promoted it to blocking). Wall-time is affordable
+# because the Go test cache keeps the average PR cost near-zero — cache-miss
+# only occurs when the test binary is actually invalidated, so only
+# codegen-adjacent PRs pay the ~30s container-boot cost. No paths: filter —
+# Go's test cache is the primary skip mechanism; adding path filters would
+# risk false skips on new codegen-adjacent packages.
+#
+# live-smoke-age is nightly and manual only (bd gqlc-35yu.8): its containers
+# are additional wall-time that a pull request is deliberately not charged for,
+# so the AGE arm's regressions are caught on master rather than at review time.
+#
+# Nightly cron on master is retained for both as a safety net in case a
+# merge-time race sneaks a codegen change past the PR gate; workflow_dispatch
+# is retained for developer-triggered manual iteration.
 name: codegen-live
 
 on:
@@ -26,6 +33,8 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 jobs:
+  # This id is the check context master's branch protection requires, so
+  # renaming the job detaches the merge gate silently.
   live-smoke:
     runs-on: ubuntu-latest
     steps:
@@ -37,4 +46,20 @@ jobs:
             go.sum
             test/data/codegen/go.sum
       - uses: ./.github/actions/setup-just
-      - run: just test-codegen-live
+      - run: just test-codegen-live-neo4j
+
+  # Skipped on pull requests, and GitHub counts a skipped check as satisfying a
+  # required context, so this id must stay off master's required-check list.
+  live-smoke-age:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            test/data/codegen/go.sum
+      - uses: ./.github/actions/setup-just
+      - run: just test-codegen-live-age

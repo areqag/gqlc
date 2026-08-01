@@ -108,7 +108,7 @@ linters:
         # scenario, and the generated handles bound to that view are each
         # reachable only as the interface the body is written against. Listed
         # per type, so ireturn keeps full strength on the rest of that module.
-        - github.com/areqag/gqlc/test/data/codegen\.(harness|backend|mixedReadWriteBatchQuerier|manyColManyQuerier)$
+        - github.com/areqag/gqlc/test/data/codegen\.(harness|backend|writeBackend|oneColOneParamOneQuerier|manyColManyQuerier|mixedReadWriteBatchQuerier)$
     misspell:
       # the codebase is written in British English (see CONTEXT.md: canonicalised,
       # modelled, serialise); UK locale enforces that consistently
