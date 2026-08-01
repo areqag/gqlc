@@ -188,44 +188,24 @@ func (s *ConformanceSuite) loadSchema(dir string) schema.Schema {
 // loadNamedQueries walks the manifest's queryFiles and turns each into
 // NamedQueries. C1 threads the cypher parser and the resolver into the
 // pipeline so every read query carries a real Validated shape — Phase A
-// and Phase B key on it (spec §2.1). A fixture whose queries fail
-// resolution earlier than codegen fails the suite via
-// s.Require().NoError below.
+// and Phase B key on it (spec §2.1). Every fixture in the corpus, valid
+// and invalid alike, must reach codegen: a fixture whose queries fail
+// earlier fails the suite here.
 func (s *ConformanceSuite) loadNamedQueries(dir string, m manifest, sch schema.Schema) []codegen.NamedQuery {
-	out, err := loadNamedQueries(dir, m, sch)
-	s.Require().NoError(err)
-	return out
-}
-
-// loadNamedQueries is the shared load path used by both TestValid and
-// TestInvalid. Returns the first resolution error verbatim so the
-// invalid arm can decide whether to accept it (a fixture may target a
-// non-codegen sentinel that fires upstream of codegen).
-func loadNamedQueries(dir string, m manifest, sch schema.Schema) ([]codegen.NamedQuery, error) {
 	emptyReg, err := procsig.NewRegistry(nil)
-	if err != nil {
-		return nil, err
-	}
+	s.Require().NoError(err)
 	res := resolver.New(sch, resolver.WithRegistry(emptyReg))
 	var out []codegen.NamedQuery
 	for _, qf := range m.QueryFiles {
 		src, err := os.ReadFile(filepath.Join(dir, qf))
-		if err != nil {
-			return nil, err
-		}
+		s.Require().NoError(err)
 		parsed, err := queryfile.New().Parse(bytes.NewReader(src))
-		if err != nil {
-			return nil, err
-		}
+		s.Require().NoError(err, "query file %s", qf)
 		for _, aq := range parsed {
 			q, err := cypher.New(cypher.WithRegistry(emptyReg)).Parse(bytes.NewReader([]byte(aq.Text)))
-			if err != nil {
-				return nil, err
-			}
+			s.Require().NoError(err, "query %s in %s", aq.Name, qf)
 			vq, err := res.Resolve(q)
-			if err != nil {
-				return nil, err
-			}
+			s.Require().NoError(err, "query %s in %s", aq.Name, qf)
 			out = append(out, codegen.NamedQuery{
 				Name:        aq.Name,
 				Cardinality: aq.Cardinality,
@@ -235,7 +215,7 @@ func loadNamedQueries(dir string, m manifest, sch schema.Schema) ([]codegen.Name
 			})
 		}
 	}
-	return out, nil
+	return out
 }
 
 // validFixtures walks valid/*/.
@@ -268,26 +248,32 @@ func (s *ConformanceSuite) TestValid() {
 			queries := s.loadNamedQueries(dir, m, sch)
 
 			goldenRoot := filepath.Join(dir, "golden")
-			if *update {
-				// The whole root goes, so a target dropped from the manifest
-				// leaves no subtree behind.
-				s.Require().NoError(os.RemoveAll(goldenRoot))
-			} else {
-				s.assertGoldenTargets(goldenRoot, m.Targets)
-			}
+			in := codegen.Input{Schema: sch, Queries: queries}
 
-			for _, target := range m.Targets {
-				s.Run(target, func() {
-					got, err := s.generate(target, codegen.Input{Schema: sch, Queries: queries})
+			// -update rewrites the fixture's whole golden root from one
+			// emission per declared target, and does so here rather than in
+			// the per-target subtests below: those are what `go test -run`
+			// filters, and a rewrite that narrowed with the filter while the
+			// wipe did not would delete an unselected target's goldens.
+			if *update {
+				byTarget := make(map[string][]codegen.File, len(m.Targets))
+				for _, target := range m.Targets {
+					got, err := s.generate(target, in)
 					s.Require().NoError(err)
 					s.assertPackage(got, m.Package)
+					byTarget[target] = got
+				}
+				s.Require().NoError(syncGoldenRoot(goldenRoot, byTarget))
+				return
+			}
 
-					goldenDir := filepath.Join(goldenRoot, target)
-					if *update {
-						s.Require().NoError(writeGoldenDir(goldenDir, got))
-						return
-					}
-					s.assertGoldenTree(goldenDir, got)
+			s.assertGoldenTargets(goldenRoot, m.Targets)
+			for _, target := range m.Targets {
+				s.Run(target, func() {
+					got, err := s.generate(target, in)
+					s.Require().NoError(err)
+					s.assertPackage(got, m.Package)
+					s.assertGoldenTree(filepath.Join(goldenRoot, target), got)
 				})
 			}
 		})
@@ -469,10 +455,13 @@ func (s *ConformanceSuite) assertGoldenTree(dir string, got []codegen.File) {
 	}
 
 	entries, err := os.ReadDir(dir)
-	s.Require().NoError(err)
+	s.Require().NoError(err, "missing golden dir %s; run go test -update", dir)
 
 	diskByPath := make(map[string][]byte, len(entries))
 	for _, e := range entries {
+		s.Require().False(e.IsDir(),
+			"golden dir %s holds subdirectory %q; a target's goldens are a flat set of emitted files",
+			dir, e.Name())
 		contents, err := os.ReadFile(filepath.Join(dir, e.Name()))
 		s.Require().NoError(err)
 		diskByPath[e.Name()] = contents
@@ -491,16 +480,26 @@ func (s *ConformanceSuite) assertGoldenTree(dir string, got []codegen.File) {
 	}
 }
 
-// writeGoldenDir writes got into one target's golden directory. It
-// assumes the caller has already wiped the fixture's golden root: that
-// wipe is what removes the .cypher.go of a query deleted from the input.
-func writeGoldenDir(dir string, got []codegen.File) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+// syncGoldenRoot rewrites root to hold exactly one subdirectory per key
+// of byTarget, containing that target's emitted files and nothing else.
+//
+// The caller must pass every target the fixture declares: root is wiped
+// first, so a target missing from the map loses its goldens. That wipe
+// is what makes a dropped target's subtree, and a deleted query's stale
+// .cypher.go, disappear in one step.
+func syncGoldenRoot(root string, byTarget map[string][]codegen.File) error {
+	if err := os.RemoveAll(root); err != nil {
 		return err
 	}
-	for _, f := range got {
-		if err := os.WriteFile(filepath.Join(dir, f.Path), f.Contents, 0o644); err != nil {
+	for target, files := range byTarget {
+		dir := filepath.Join(root, target)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
+		}
+		for _, f := range files {
+			if err := os.WriteFile(filepath.Join(dir, f.Path), f.Contents, 0o644); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -518,6 +517,60 @@ func TestGoldenBuild(t *testing.T) {
 	require.NoError(t, err, "generated golden packages do not compile:\n%s", out)
 }
 
+// TestUpdateIgnoresTheTargetFilter pins the blast radius of -update: a
+// run narrowed to one target must leave the fixture's other targets
+// byte-for-byte alone. The hazard is real and was shipped once — a
+// rewrite driven by the per-target subtests narrows with `go test -run`
+// while a wipe in the fixture body does not, so the run exits 0 having
+// deleted the unselected target's goldens.
+//
+// Runs the suite as a subprocess because nothing else exercises the
+// interaction between -run's filtering and the update path. Comparing
+// the whole golden tree, not just the unselected target, makes the test
+// double as a check that -update is a no-op on a clean corpus: a drift
+// that this run rewrote fails here rather than passing silently.
+func TestUpdateIgnoresTheTargetFilter(t *testing.T) {
+	const fixture = "many_col_many"
+	root := filepath.Join(fixtureDir, "valid", fixture, "golden")
+	selected := "neo4j-go-v5"
+
+	before := snapshotTree(t, root)
+	require.Contains(t, before, filepath.Join("neo4j-go-v6", "db.go"),
+		"fixture %s must be enrolled in a second target for this test to mean anything", fixture)
+
+	cmd := exec.CommandContext(t.Context(), "go", "test", ".", "-count=1", "-update",
+		"-run", "TestConformanceSuite/TestValid/"+fixture+"/"+selected)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "filtered -update run failed:\n%s", out)
+
+	require.Equal(t, before, snapshotTree(t, root),
+		"-update narrowed to %q changed %s's golden tree", selected, fixture)
+}
+
+// snapshotTree reads every file under root into a map keyed by path
+// relative to root.
+func snapshotTree(t *testing.T, root string) map[string]string {
+	t.Helper()
+	out := make(map[string]string)
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		contents, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		out[rel] = string(contents)
+		return nil
+	})
+	require.NoError(t, err)
+	return out
+}
+
 // TestGeneratedHeaderFormat fences the emitted-file header format (spec
 // §5.2, §6.1) byte-level: fixed prefix, one non-whitespace version token,
 // fixed suffix, LF, blank line. Walks every valid fixture's golden .go
@@ -526,11 +579,6 @@ func TestGoldenBuild(t *testing.T) {
 // the package clause fails at unit-test time — not at the golden-diff
 // review surface. Regex-anchored: pathological version overrides with
 // embedded whitespace (`v1.0 dev`) fail the match.
-//
-// The regex is test-local per spec §6.1 rejected-alternative: exposing it
-// as a package-level codegen.HeaderRegex var would invite consumers to
-// depend on it and freeze the format under a public contract. The test
-// carries the invariant without the surface cost.
 func TestGeneratedHeaderFormat(t *testing.T) {
 	headerRe := regexp.MustCompile(`^// Code generated by gqlc \S+\. DO NOT EDIT\.\n\n`)
 
@@ -538,14 +586,19 @@ func TestGeneratedHeaderFormat(t *testing.T) {
 	// form; assert the exact byte layout the current binary's "dev" default
 	// produces so a template regression that dropped the trailing blank
 	// line or the LF still fails even if the regex accidentally accepts.
+	// Every target the fixture is enrolled in gets the same treatment.
 	const skeletonExpected = "// Code generated by gqlc dev. DO NOT EDIT.\n\n"
-	skeletonDB := filepath.Join(fixtureDir, "valid", "skeleton", "golden", "neo4j-go-v5", "db.go")
-	skeletonBytes, err := os.ReadFile(skeletonDB)
-	require.NoError(t, err, "skeleton golden must exist")
-	require.True(t,
-		strings.HasPrefix(string(skeletonBytes), skeletonExpected),
-		"skeleton db.go must open with byte-exact header %q; got %q",
-		skeletonExpected, string(skeletonBytes[:min(len(skeletonBytes), len(skeletonExpected))]))
+	skeletonDBs, err := filepath.Glob(filepath.Join(fixtureDir, "valid", "skeleton", "golden", "*", "db.go"))
+	require.NoError(t, err)
+	require.NotEmpty(t, skeletonDBs, "skeleton golden must exist")
+	for _, path := range skeletonDBs {
+		skeletonBytes, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.True(t,
+			strings.HasPrefix(string(skeletonBytes), skeletonExpected),
+			"%s must open with byte-exact header %q; got %q",
+			path, skeletonExpected, string(skeletonBytes[:min(len(skeletonBytes), len(skeletonExpected))]))
+	}
 
 	// Walk every valid fixture's golden tree. Every .go file in every
 	// golden subtree carries the header; a fixture with no .go file
