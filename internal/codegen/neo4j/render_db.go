@@ -1,4 +1,8 @@
-package codegen
+package neo4j
+
+import (
+	"github.com/areqag/gqlc/internal/codegen"
+)
 
 // renderDB emits db.go (spec §5.3, §5.6). The template is the spec's
 // snippet verbatim; format.Source normalises whitespace on the way out.
@@ -25,7 +29,7 @@ var ErrMultipleResults = errors.New("gqlc: multiple rows in :one result set")
 	}
 	importsBlock += "\n\t\"" + target.neo4jImport + "\"\n)\n"
 
-	return []byte(header() + `package ` + pkg + `
+	return []byte(codegen.Header() + `package ` + pkg + `
 
 ` + importsBlock + sentinelBlock + `
 type Queries struct {

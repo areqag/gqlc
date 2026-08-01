@@ -27,7 +27,7 @@ import (
 var errInitAborted = errors.New("init aborted: no file written")
 
 // packageIdentPattern is codegen's emission grammar
-// (internal/codegen/prepare.go packageIdent); the wizard enforces it
+// (internal/codegen/names.go packageIdent); the wizard enforces it
 // so a config it writes is never one gqlc generate rejects (§4.3).
 var packageIdentPattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 

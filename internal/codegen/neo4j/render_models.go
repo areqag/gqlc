@@ -1,8 +1,10 @@
-package codegen
+package neo4j
 
 import (
 	"fmt"
 	"strings"
+
+	"github.com/areqag/gqlc/internal/codegen"
 )
 
 // renderModels emits models.go (spec §5.2). C2 emits one exported
@@ -28,9 +30,9 @@ import (
 // live in this package; no cross-package reference emerges). A schema
 // with zero entity types emits an empty body — package clause only —
 // matching C1's byte-empty models.go (§7 "silently accepted").
-func renderModels(pkg string, entities []preparedEntity, prepared []preparedQuery, target driverTarget) []byte {
+func renderModels(pkg string, entities []codegen.Entity, prepared []codegen.Query, target driverTarget) []byte {
 	if len(entities) == 0 {
-		return []byte(header() + `package ` + pkg + `
+		return []byte(codegen.Header() + `package ` + pkg + `
 `)
 	}
 
@@ -42,7 +44,7 @@ func renderModels(pkg string, entities []preparedEntity, prepared []preparedQuer
 	// candidates) or across two per-query columns projecting the same
 	// interface (impossible — per-query-column naming) still emits one
 	// marker per interface participation.
-	var unions []*preparedEdgeUnion
+	var unions []*codegen.EdgeUnion
 	markersByEntity := make(map[string][]string)
 	seenMarker := make(map[string]struct{})
 	for _, p := range prepared {
@@ -63,19 +65,19 @@ func renderModels(pkg string, entities []preparedEntity, prepared []preparedQuer
 	anyNonNull := false
 	anyTime := false
 	for _, e := range entities {
-		if e.AnyProp {
+		for _, f := range e.Fields {
 			anyProp = true
-		}
-		if e.AnyNonNull {
-			anyNonNull = true
-		}
-		if e.AnyTime {
-			anyTime = true
+			if !f.Nullable {
+				anyNonNull = true
+			}
+			if f.GoType == "time.Time" {
+				anyTime = true
+			}
 		}
 	}
 
 	var b strings.Builder
-	b.WriteString(header())
+	b.WriteString(codegen.Header())
 	b.WriteString("package ")
 	b.WriteString(pkg)
 	b.WriteString("\n\n")
@@ -127,8 +129,8 @@ func renderModels(pkg string, entities []preparedEntity, prepared []preparedQuer
 // writeEntityStruct emits the exported struct declaration for one entity.
 // Zero-property entities emit an empty struct declaration (§7 "silently
 // accepted"). Doc comment names the source-side axis (labels or edge key).
-func writeEntityStruct(b *strings.Builder, e preparedEntity) {
-	if e.Kind == entityNode {
+func writeEntityStruct(b *strings.Builder, e codegen.Entity) {
+	if e.Kind == codegen.EntityNode {
 		fmt.Fprintf(b, "// %s corresponds to the %s node type.\n", e.Name, e.DocAxis)
 	} else {
 		fmt.Fprintf(b, "// %s corresponds to the %s.\n", e.Name, e.DocAxis)
@@ -148,9 +150,9 @@ func writeEntityStruct(b *strings.Builder, e preparedEntity) {
 // one entity. Nullable properties go through direct Props lookup + type
 // assertion (three-way outcome); non-nullable properties go through
 // neo4j.GetProperty[T] (missing key is a decode error).
-func writeEntityDecodeHelper(b *strings.Builder, e preparedEntity) {
+func writeEntityDecodeHelper(b *strings.Builder, e codegen.Entity) {
 	var carrier, arg string
-	if e.Kind == entityNode {
+	if e.Kind == codegen.EntityNode {
 		carrier = "dbtype.Node"
 		arg = "node"
 	} else {
@@ -178,7 +180,7 @@ func writeEntityDecodeHelper(b *strings.Builder, e preparedEntity) {
 // (dbtype.Date carrier) and TIMESTAMP (time.Time carrier); FLOAT32's
 // nullable arm now narrows correctly (was a latent bug, no fixture
 // exercised it before C3).
-func writeEntityFieldDecode(b *strings.Builder, e preparedEntity, f preparedEntityField, arg string) {
+func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, f codegen.EntityField, arg string) {
 	carrier := driverCarrier(f.GoType)
 	if f.Nullable {
 		fmt.Fprintf(b, "\tif v, ok := %s.Props[%q]; ok {\n", arg, f.PropName)
@@ -195,7 +197,7 @@ func writeEntityFieldDecode(b *strings.Builder, e preparedEntity, f preparedEnti
 		b.WriteString("\t}\n")
 		return
 	}
-	local := lowerFirstRune(f.Field)
+	local := codegen.LowerFirstRune(f.Field)
 	fmt.Fprintf(b, "\t%s, err := neo4j.GetProperty[%s](%s, %q)\n", local, carrier, arg, f.PropName)
 	b.WriteString("\tif err != nil {\n")
 	fmt.Fprintf(b, "\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: %%w\", err)\n", e.Name, e.Name, f.Field)

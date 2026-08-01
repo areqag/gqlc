@@ -1,4 +1,4 @@
-package codegen
+package neo4j
 
 import (
 	"os"
@@ -13,7 +13,7 @@ import (
 // boundary: no render_*.go file (production or test) is allowed to
 // reference the resolver package (spec §4.3, gqlc-ls8.3 acceptance).
 // Prepare + types.go are the sole home of the mapping table; render
-// walks committed data on preparedQuery / preparedRow / preparedListElem
+// walks committed data on codegen.Query / codegen.Row / codegen.ListElem
 // alone.
 //
 // Grep pattern is bare `resolver.` — catches every symbol, not just
@@ -24,6 +24,7 @@ func TestRenderBoundaryNoResolverRef(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	require.NoError(t, err)
 	var offenders []string
+	sawAny := false
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -43,12 +44,14 @@ func TestRenderBoundaryNoResolverRef(t *testing.T) {
 		}
 		body, err := os.ReadFile(filepath.Clean(name))
 		require.NoError(t, err)
+		sawAny = true
 		for lineNo, line := range strings.Split(string(body), "\n") {
 			if strings.Contains(line, "resolver.") {
 				offenders = append(offenders, name+":"+itoa(lineNo+1)+": "+strings.TrimSpace(line))
 			}
 		}
 	}
+	require.True(t, sawAny, "walk must encounter at least one render_*.go file; a fence that examines nothing passes vacuously")
 	require.Empty(t, offenders, "render_*.go files must not reference the resolver package (spec §4.3)")
 }
 
