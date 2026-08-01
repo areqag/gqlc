@@ -92,6 +92,21 @@ func TestTypeMapProperty(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, "[]any", got)
 	})
+
+	// graph.PropertyType is a string type, so a width with no row above
+	// costs nothing to construct and compiles. It must reject: the caller
+	// turns that into ErrUnrepresentableWidth naming the width.
+	t.Run("width outside the table is rejected", func(t *testing.T) {
+		got, ok := typeMap{}.Property(graph.PropertyType("QUATERNION"))
+		require.False(t, ok)
+		require.Empty(t, got)
+	})
+
+	t.Run("list of a width outside the table is rejected", func(t *testing.T) {
+		got, ok := typeMap{}.Property(graph.ListOf("QUATERNION", false))
+		require.False(t, ok)
+		require.Empty(t, got)
+	})
 }
 
 // TestTypeMapPropertyRejectionReachesTheCaller pins the contract the
@@ -175,4 +190,11 @@ func TestTypeMapScalar(t *testing.T) {
 			require.Equal(t, tt.want, typeMap{}.Scalar(tt.k))
 		})
 	}
+
+	// The compiler requires a return past the last arm of a closed-enum
+	// switch, so the backstop exists whether or not the resolver can
+	// reach it. Pinned so its value is a decision and not an accident.
+	t.Run("kind outside the vocabulary projects undecoded", func(t *testing.T) {
+		require.Equal(t, "any", typeMap{}.Scalar(resolver.ScalarMap+1))
+	})
 }

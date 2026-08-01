@@ -74,6 +74,11 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 		graph.TypeDecimal:
 		return "", false
 	}
+	// PropertyType is an open string type, so a width internal/graph gains
+	// without a row above arrives here rather than failing to compile.
+	// Rejecting it routes the caller to ErrUnrepresentableWidth naming the
+	// width: generation fails loudly instead of emitting a field no
+	// decoder can fill.
 	return "", false
 }
 
@@ -104,5 +109,9 @@ func (typeMap) Scalar(k resolver.Scalar) string {
 	case resolver.ScalarMap:
 		return "map[string]any"
 	}
+	// Scalar is a closed enum and the exhaustive linter holds the switch
+	// to its full membership, so only a value converted in from outside
+	// that vocabulary lands here. It projects undecoded rather than
+	// guessing a Go type for a kind the resolver never named.
 	return "any"
 }
