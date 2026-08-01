@@ -2,330 +2,44 @@ package neo4j_test
 
 import (
 	"bytes"
-	"encoding/json"
-	"flag"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"regexp"
-	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/areqag/gqlc/internal/cli/backends"
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/neo4j"
-	"github.com/areqag/gqlc/internal/config"
-	"github.com/areqag/gqlc/internal/procsig"
-	"github.com/areqag/gqlc/internal/query/cypher"
-	"github.com/areqag/gqlc/internal/queryfile"
-	"github.com/areqag/gqlc/internal/resolver"
-	"github.com/areqag/gqlc/internal/schema"
 	"github.com/areqag/gqlc/internal/schema/gql"
 )
 
-var update = flag.Bool("update", false, "regenerate codegen golden files")
+const (
+	// skeletonSchema is the golden corpus's minimal valid input: one node
+	// type and no queries, so db.go is the only emitted file that names
+	// the driver interface.
+	skeletonSchema = "../../../test/data/codegen/valid/skeleton/schema.gql"
+	// skeletonPackage is the name Schema.Name derivation produces for
+	// that schema's `CREATE PROPERTY GRAPH TYPE Skeleton`.
+	skeletonPackage = "skeleton"
+)
 
-const fixtureDir = "../../../test/data/codegen"
-
-// manifest is the on-disk descriptor per fixture directory. Present in
-// both valid and invalid fixtures; the invalid arm additionally carries
-// ExpectedError (fully-qualified sentinel name) and, for the hand-
-// constructed codegen.ErrInvalidCardinality case, SyntheticZeroCardinality —
-// see loadInvalidInput.
-//
-// Driver is the config wire key naming the emission target, absent on
-// every fixture that takes the corpus default (see loadManifest). A
-// non-default fixture is a `<base>_v6` sibling of its v5 twin with
-// schema/queries copied verbatim, so the two golden trees diff to
-// exactly the driver-varying lines. The regular valid/* walk picks such
-// fixtures up for the golden, double-run, and -update flows with no
-// extra wiring.
-type manifest struct {
-	Package                  string   `json:"package"`
-	QueryFiles               []string `json:"queryFiles"`
-	Driver                   string   `json:"driver,omitempty"`
-	ExpectedError            string   `json:"expectedError,omitempty"`
-	SyntheticZeroCardinality bool     `json:"syntheticZeroCardinality,omitempty"`
-}
-
-// generate emits in through the backend the fixture's driver key
-// resolves to in the composed registry. A key no backend is registered
-// under fails the suite: a typo must not silently fall back to another
-// backend and pass against the wrong golden tree.
-func (s *CodegenSuite) generate(m manifest, in codegen.Input) ([]codegen.File, error) {
-	newGen, ok := s.backends.Lookup(m.Driver)
-	s.Require().True(ok, "manifest declares driver %q, which no backend is registered under", m.Driver)
-	return newGen("").Generate(in)
-}
-
-// codegenSentinels is the core package's canonical reachable set,
-// resolved once so the name map, the sweep, and the identity test all
-// read the same slice.
-var codegenSentinels = codegen.AllSentinels()
-
-// sentinelByName maps the manifest's fully-qualified sentinel string
-// back to the actual error value at load time. Built from the two
-// packages' sentinel sets — a change there without a fixture update
-// fails the queryfile / codegen reachability sweeps, and a fixture that
-// names a non-canonical sentinel fails invalidFixtures' map lookup.
-var sentinelByName = func() map[string]error {
-	m := make(map[string]error)
-	pairs := []struct {
-		prefix string
-		set    []error
-	}{
-		{"codegen.", codegenSentinels},
-		{"queryfile.", queryfile.AllSentinels()},
-	}
-	for _, p := range pairs {
-		for _, s := range p.set {
-			m[p.prefix+sentinelIdent(s)] = s
-		}
-	}
-	return m
-}()
-
-// sentinelIdent recovers the exported symbol name of a sentinel. Kept
-// internal to the test so the production types do not need to expose a
-// reflection helper. Identity comparison is intentional: fixture-lookup
-// callers register the raw package-level values, never wrapped errors.
-//
-//nolint:errorlint // identity match on package-level sentinels is intended
-func sentinelIdent(err error) string {
-	switch err {
-	case codegen.ErrInvalidPackageName:
-		return "ErrInvalidPackageName"
-	case codegen.ErrDuplicateSourceFile:
-		return "ErrDuplicateSourceFile"
-	case codegen.ErrDuplicateQueryName:
-		return "ErrDuplicateQueryName"
-	case codegen.ErrInvalidCardinality:
-		return "ErrInvalidCardinality"
-	case codegen.ErrFormatFailure:
-		return "ErrFormatFailure"
-	case codegen.ErrOutOfC6Scope:
-		return "ErrOutOfC6Scope"
-	case codegen.ErrExecOnProjection:
-		return "ErrExecOnProjection"
-	case codegen.ErrCardinalityShapeMismatch:
-		return "ErrCardinalityShapeMismatch"
-	case codegen.ErrUnrepresentableWidth:
-		return "ErrUnrepresentableWidth"
-	case codegen.ErrParamNameCollision:
-		return "ErrParamNameCollision"
-	case codegen.ErrRowFieldCollision:
-		return "ErrRowFieldCollision"
-	case codegen.ErrAliasRequired:
-		return "ErrAliasRequired"
-	case codegen.ErrIdentifierCollision:
-		return "ErrIdentifierCollision"
-	case codegen.ErrInvalidEntityName:
-		return "ErrInvalidEntityName"
-	case codegen.ErrUnnamedMultiLabelType:
-		return "ErrUnnamedMultiLabelType"
-	case codegen.ErrPropertyFieldCollision:
-		return "ErrPropertyFieldCollision"
-	case queryfile.ErrMissingAnnotation:
-		return "ErrMissingAnnotation"
-	case queryfile.ErrUnknownCardinality:
-		return "ErrUnknownCardinality"
-	case queryfile.ErrInvalidQueryName:
-		return "ErrInvalidQueryName"
-	case queryfile.ErrDuplicateQueryName:
-		return "ErrDuplicateQueryName"
-	case queryfile.ErrMalformedAnnotation:
-		return "ErrMalformedAnnotation"
-	case queryfile.ErrTextBeforeAnnotation:
-		return "ErrTextBeforeAnnotation"
-	case queryfile.ErrNoQueries:
-		return "ErrNoQueries"
-	default:
-		return "unknown"
-	}
-}
-
-// CodegenSuite is the testify suite for the codegen tests.
-type CodegenSuite struct {
+// OptionsSuite pins the construction options this backend's New owns.
+// The fixture-driven golden corpus lives in internal/codegen/conformance.
+type OptionsSuite struct {
 	suite.Suite
 
-	backends codegen.Registry
+	in codegen.Input
 }
 
-func TestCodegenSuite(t *testing.T) {
-	suite.Run(t, new(CodegenSuite))
+func TestOptionsSuite(t *testing.T) {
+	suite.Run(t, new(OptionsSuite))
 }
 
-func (s *CodegenSuite) SetupSuite() {
-	reg, err := backends.Registry()
-	s.Require().NoError(err)
-	s.backends = reg
-}
-
-// loadManifest reads a manifest.json from the given fixture directory.
-// The corpus was authored against neo4j-go-v5, so a fixture names a
-// driver only where it departs from that.
-func (s *CodegenSuite) loadManifest(dir string) manifest {
-	src, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
-	s.Require().NoError(err)
-	var m manifest
-	s.Require().NoError(json.Unmarshal(src, &m))
-	if m.Driver == "" {
-		m.Driver = string(config.DriverNeo4jGoV5)
-	}
-	return m
-}
-
-// loadSchema parses schema.gql in the given fixture directory.
-func (s *CodegenSuite) loadSchema(dir string) schema.Schema {
-	src, err := os.ReadFile(filepath.Join(dir, "schema.gql"))
+func (s *OptionsSuite) SetupSuite() {
+	src, err := os.ReadFile(skeletonSchema)
 	s.Require().NoError(err)
 	sch, err := gql.New().Parse(bytes.NewReader(src))
 	s.Require().NoError(err)
-	return sch
-}
-
-// loadNamedQueries walks the manifest's queryFiles and turns each into
-// NamedQueries. C1 threads the cypher parser and the resolver into the
-// pipeline so every read query carries a real Validated shape — Phase A
-// and Phase B key on it (spec §2.1). A fixture whose queries fail
-// resolution earlier than codegen fails the suite via
-// s.Require().NoError below; the invalid-arm variant
-// (loadNamedQueriesAllowing) permits pre-codegen errors when the
-// fixture declares a non-codegen expected sentinel.
-func (s *CodegenSuite) loadNamedQueries(dir string, m manifest, sch schema.Schema) []codegen.NamedQuery {
-	out, err := loadNamedQueries(dir, m, sch)
-	s.Require().NoError(err)
-	return out
-}
-
-// loadNamedQueries is the shared load path used by both TestValid and
-// TestInvalid. Returns the first resolution error verbatim so the
-// invalid arm can decide whether to accept it (a fixture may target a
-// non-codegen sentinel that fires upstream of codegen).
-func loadNamedQueries(dir string, m manifest, sch schema.Schema) ([]codegen.NamedQuery, error) {
-	emptyReg, err := procsig.NewRegistry(nil)
-	if err != nil {
-		return nil, err
-	}
-	res := resolver.New(sch, resolver.WithRegistry(emptyReg))
-	var out []codegen.NamedQuery
-	for _, qf := range m.QueryFiles {
-		src, err := os.ReadFile(filepath.Join(dir, qf))
-		if err != nil {
-			return nil, err
-		}
-		parsed, err := queryfile.New().Parse(bytes.NewReader(src))
-		if err != nil {
-			return nil, err
-		}
-		for _, aq := range parsed {
-			q, err := cypher.New(cypher.WithRegistry(emptyReg)).Parse(bytes.NewReader([]byte(aq.Text)))
-			if err != nil {
-				return nil, err
-			}
-			vq, err := res.Resolve(q)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, codegen.NamedQuery{
-				Name:        aq.Name,
-				Cardinality: aq.Cardinality,
-				SourceFile:  qf,
-				SourceText:  aq.Text,
-				Validated:   vq,
-			})
-		}
-	}
-	return out, nil
-}
-
-// validFixtures walks valid/*/.
-func (s *CodegenSuite) validFixtures() []string {
-	dirs, err := filepath.Glob(filepath.Join(fixtureDir, "valid", "*"))
-	s.Require().NoError(err)
-	s.Require().NotEmpty(dirs)
-	return dirs
-}
-
-// invalidFixtures walks invalid/*/.
-func (s *CodegenSuite) invalidFixtures() []string {
-	dirs, err := filepath.Glob(filepath.Join(fixtureDir, "invalid", "*"))
-	s.Require().NoError(err)
-	s.Require().NotEmpty(dirs)
-	return dirs
-}
-
-// TestValid walks valid/*/ and either writes the golden directory
-// (-update) or asserts byte-equality against every file it contains.
-// The comparison is bytes.Equal, not JSONEq: the output is Go source,
-// and every whitespace character matters (gofmt normalises, but the
-// tree it produces is stable).
-func (s *CodegenSuite) TestValid() {
-	for _, dir := range s.validFixtures() {
-		name := filepath.Base(dir)
-		s.Run(name, func() {
-			m := s.loadManifest(dir)
-			sch := s.loadSchema(dir)
-			queries := s.loadNamedQueries(dir, m, sch)
-
-			got, err := s.generate(m, codegen.Input{Schema: sch, Queries: queries})
-			s.Require().NoError(err)
-			s.assertPackage(got, m.Package)
-
-			goldenDir := filepath.Join(dir, "golden")
-			if *update {
-				s.Require().NoError(syncGoldenDir(goldenDir, got))
-				return
-			}
-			s.assertGoldenTree(goldenDir, got)
-		})
-	}
-}
-
-// TestInvalid walks invalid/*/, resolves the manifest's ExpectedError
-// to a sentinel, calls the pipeline, and asserts (a) the returned
-// []codegen.File is nil and (b) errors.Is(err, wantErr).
-func (s *CodegenSuite) TestInvalid() {
-	dirs := s.invalidFixtures()
-	for _, dir := range dirs {
-		name := filepath.Base(dir)
-		s.Run(name, func() {
-			m := s.loadManifest(dir)
-			s.Require().NotEmpty(m.ExpectedError, "invalid fixture %q must declare expectedError", name)
-
-			wantErr, ok := sentinelByName[m.ExpectedError]
-			s.Require().True(ok, "unknown sentinel name %q in fixture %q", m.ExpectedError, name)
-
-			in := s.loadInvalidInput(dir, m)
-			got, err := s.generate(m, in)
-			s.Require().Error(err)
-			s.Require().Nil(got, "files must be nil on error")
-			s.Require().ErrorIs(err, wantErr)
-		})
-	}
-}
-
-// loadInvalidInput assembles the codegen.Input for an invalid fixture. Two
-// paths: normal (schema + queryFiles pipeline) and synthetic (a hand-
-// constructed codegen.NamedQuery with a zero-valued Cardinality, the only way
-// to reach codegen.ErrInvalidCardinality — the queryfile front end never emits
-// one).
-func (s *CodegenSuite) loadInvalidInput(dir string, m manifest) codegen.Input {
-	sch := s.loadSchema(dir)
-	if m.SyntheticZeroCardinality {
-		return codegen.Input{
-			Schema: sch,
-			Queries: []codegen.NamedQuery{{
-				Name:       "ZeroCardinality",
-				SourceFile: "synthetic.cypher",
-				SourceText: "MATCH (n) RETURN n",
-			}},
-		}
-	}
-	return codegen.Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
+	s.in = codegen.Input{Schema: sch}
 }
 
 // TestWithDriverVersion pins the driver-target seam at the unit level,
@@ -333,15 +47,8 @@ func (s *CodegenSuite) loadInvalidInput(dir string, m manifest) codegen.Input {
 // emits the v5 module path and neo4j.DriverWithContext; a
 // WithDriverVersion(DriverV6) Codegen emits the v6 module path and
 // neo4j.Driver (v6 renamed the interface back, keeping the old name as
-// an alias — generated v6 code uses the native name). The skeleton
-// fixture is the probe: db.go is the only file that names the driver
-// interface.
-func (s *CodegenSuite) TestWithDriverVersion() {
-	dir := filepath.Join(fixtureDir, "valid", "skeleton")
-	m := s.loadManifest(dir)
-	sch := s.loadSchema(dir)
-	in := codegen.Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
-
+// an alias — generated v6 code uses the native name).
+func (s *OptionsSuite) TestWithDriverVersion() {
 	cases := []struct {
 		name         string
 		gen          *neo4j.Codegen
@@ -373,7 +80,7 @@ func (s *CodegenSuite) TestWithDriverVersion() {
 	}
 	for _, tc := range cases {
 		s.Run(tc.name, func() {
-			files, err := tc.gen.Generate(in)
+			files, err := tc.gen.Generate(s.in)
 			s.Require().NoError(err)
 			var db []byte
 			for _, f := range files {
@@ -395,24 +102,19 @@ func (s *CodegenSuite) TestWithDriverVersion() {
 // so the golden corpus stays byte-identical; a value outside the
 // packageIdent grammar is codegen.ErrInvalidPackageName naming the configured
 // string, not the schema name.
-func (s *CodegenSuite) TestWithPackageName() {
-	dir := filepath.Join(fixtureDir, "valid", "skeleton")
-	m := s.loadManifest(dir)
-	sch := s.loadSchema(dir)
-	in := codegen.Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
-
+func (s *OptionsSuite) TestWithPackageName() {
 	s.Run("configured name wins", func() {
-		files, err := neo4j.New(neo4j.WithPackageName("configuredpkg")).Generate(in)
+		files, err := neo4j.New(neo4j.WithPackageName("configuredpkg")).Generate(s.in)
 		s.Require().NoError(err)
 		s.assertPackage(files, "configuredpkg")
 	})
 	s.Run("empty keeps derivation", func() {
-		files, err := neo4j.New(neo4j.WithPackageName("")).Generate(in)
+		files, err := neo4j.New(neo4j.WithPackageName("")).Generate(s.in)
 		s.Require().NoError(err)
-		s.assertPackage(files, m.Package)
+		s.assertPackage(files, skeletonPackage)
 	})
 	s.Run("grammar violation names the configured string", func() {
-		files, err := neo4j.New(neo4j.WithPackageName("Not_OK")).Generate(in)
+		files, err := neo4j.New(neo4j.WithPackageName("Not_OK")).Generate(s.in)
 		s.Require().Error(err)
 		s.Require().Nil(files)
 		s.Require().ErrorIs(err, codegen.ErrInvalidPackageName)
@@ -420,88 +122,8 @@ func (s *CodegenSuite) TestWithPackageName() {
 	})
 }
 
-// TestDoubleRun asserts Generate is byte-deterministic: same codegen.Input in,
-// byte-identical []codegen.File out, twice. Independent of the golden
-// comparison — a golden diff catches within-run nondeterminism (map
-// iteration) only flakily; this test catches it in a single run.
-func (s *CodegenSuite) TestDoubleRun() {
-	for _, dir := range s.validFixtures() {
-		name := filepath.Base(dir)
-		s.Run(name, func() {
-			m := s.loadManifest(dir)
-			sch := s.loadSchema(dir)
-			in := codegen.Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
-			first, err := s.generate(m, in)
-			s.Require().NoError(err)
-			second, err := s.generate(m, in)
-			s.Require().NoError(err)
-			s.Require().Len(second, len(first))
-			for i := range first {
-				s.Require().Equal(first[i].Path, second[i].Path, "file %d path drift", i)
-				s.Require().True(bytes.Equal(first[i].Contents, second[i].Contents),
-					"file %s contents drift: %d vs %d bytes",
-					first[i].Path, len(first[i].Contents), len(second[i].Contents))
-			}
-		})
-	}
-}
-
-// TestSentinelReachability is the bidirectional sweep: every
-// codegenSentinels member has at least one invalid fixture; every
-// mapped codegen sentinel is in codegenSentinels. Queryfile sentinels
-// have their own sweep in internal/queryfile — this one is codegen-
-// only, matching the two-disjoint-sets discipline (spec §9.3).
-func TestSentinelReachability(t *testing.T) {
-	dirs, err := filepath.Glob(filepath.Join(fixtureDir, "invalid", "*"))
-	require.NoError(t, err)
-
-	covered := make(map[error]bool)
-	for _, dir := range dirs {
-		src, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
-		require.NoError(t, err)
-		var m manifest
-		require.NoError(t, json.Unmarshal(src, &m))
-		if m.ExpectedError == "" {
-			continue
-		}
-		sentinel, ok := sentinelByName[m.ExpectedError]
-		require.True(t, ok, "unknown sentinel name %q in fixture %q", m.ExpectedError, dir)
-		// Sweep only codegen-side sentinels here.
-		if !isCodegenSentinel(sentinel) {
-			continue
-		}
-		covered[sentinel] = true
-	}
-	canonical := make(map[error]bool, len(codegenSentinels))
-	for _, sentinel := range codegenSentinels {
-		canonical[sentinel] = true
-	}
-	for _, sentinel := range codegenSentinels {
-		require.True(t, covered[sentinel], "sentinel %q has no negative fixture", sentinel)
-	}
-	for sentinel := range covered {
-		require.True(t, canonical[sentinel], "fixture maps to non-canonical sentinel %q", sentinel)
-	}
-}
-
-// isCodegenSentinel reports whether err is one of the codegen package's
-// user-input-reachable sentinels (i.e. in codegenSentinels). Identity
-// match is intentional — see sentinelIdent.
-//
-//nolint:errorlint // identity match on package-level sentinels is intended
-func isCodegenSentinel(err error) bool {
-	for _, s := range codegenSentinels {
-		if s == err {
-			return true
-		}
-	}
-	return false
-}
-
-// assertPackage checks every emitted file's package clause matches the
-// manifest's declared package. Cheap; catches a template regression
-// that swaps package names between files.
-func (s *CodegenSuite) assertPackage(files []codegen.File, want string) {
+// assertPackage checks every emitted file's package clause matches want.
+func (s *OptionsSuite) assertPackage(files []codegen.File, want string) {
 	for _, f := range files {
 		lines := bytes.SplitN(f.Contents, []byte{'\n'}, 4)
 		s.Require().GreaterOrEqual(len(lines), 3, "file %s too short for header + package", f.Path)
@@ -509,131 +131,4 @@ func (s *CodegenSuite) assertPackage(files []codegen.File, want string) {
 		s.Require().Equal([]byte("package "+want), lines[2],
 			"file %s has wrong package clause: %q", f.Path, lines[2])
 	}
-}
-
-// assertGoldenTree walks the golden directory and asserts every file
-// there is present in got with byte-identical contents, and every file
-// in got is present on disk. On mismatch, the assertion reports the
-// file path and a diff-shaped message.
-func (s *CodegenSuite) assertGoldenTree(dir string, got []codegen.File) {
-	gotByPath := make(map[string][]byte, len(got))
-	for _, f := range got {
-		gotByPath[f.Path] = f.Contents
-	}
-
-	entries, err := os.ReadDir(dir)
-	s.Require().NoError(err, "missing golden dir; run go test -update")
-
-	diskByPath := make(map[string][]byte, len(entries))
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		contents, err := os.ReadFile(filepath.Join(dir, e.Name()))
-		s.Require().NoError(err)
-		diskByPath[e.Name()] = contents
-	}
-
-	for path, want := range diskByPath {
-		gotBytes, ok := gotByPath[path]
-		s.Require().True(ok, "golden %q has no emitted counterpart", path)
-		s.Require().True(bytes.Equal(want, gotBytes),
-			"golden %q mismatch\n--- want (%d bytes) ---\n%s\n--- got (%d bytes) ---\n%s",
-			path, len(want), want, len(gotBytes), gotBytes)
-	}
-	for path := range gotByPath {
-		_, ok := diskByPath[path]
-		s.Require().True(ok, "emitted file %q missing from golden dir; run go test -update", path)
-	}
-}
-
-// syncGoldenDir wipes and rewrites the golden directory from got.
-// Equivalent to what the future CLI's out-dir sync will do: delete not-
-// in-output, write all-in-output. A query removed from the input must
-// not leave its old .cypher.go in the golden dir.
-func syncGoldenDir(dir string, got []codegen.File) error {
-	if err := os.RemoveAll(dir); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	for _, f := range got {
-		if err := os.WriteFile(filepath.Join(dir, f.Path), f.Contents, 0o644); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// TestGoldenBuild compiles the nested test/data/codegen module so that
-// spurious or missing imports in generated golden packages are caught by
-// go test ./internal/codegen/... rather than only by just test-codegen-fence.
-func TestGoldenBuild(t *testing.T) {
-	abs, err := filepath.Abs(fixtureDir)
-	require.NoError(t, err)
-	cmd := exec.CommandContext(t.Context(), "go", "build", "./...")
-	cmd.Dir = abs
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "generated golden packages do not compile:\n%s", out)
-}
-
-// TestGeneratedHeaderFormat fences the emitted-file header format (spec
-// §5.2, §6.1) byte-level: fixed prefix, one non-whitespace version token,
-// fixed suffix, LF, blank line. Walks every valid fixture's golden .go
-// files so a future template regression that smuggled a build timestamp,
-// UUID, hostname, doc comment, or //go:build line between the header and
-// the package clause fails at unit-test time — not at the golden-diff
-// review surface. Regex-anchored: pathological version overrides with
-// embedded whitespace (`v1.0 dev`) fail the match.
-//
-// The regex is test-local per spec §6.1 rejected-alternative: exposing it
-// as a package-level codegen.HeaderRegex var would invite consumers to
-// depend on it and freeze the format under a public contract. The test
-// carries the invariant without the surface cost.
-func TestGeneratedHeaderFormat(t *testing.T) {
-	headerRe := regexp.MustCompile(`^// Code generated by gqlc \S+\. DO NOT EDIT\.\n\n`)
-
-	// The skeleton fixture's db.go carries the header at its most minimal
-	// form; assert the exact byte layout the current binary's "dev" default
-	// produces so a template regression that dropped the trailing blank
-	// line or the LF still fails even if the regex accidentally accepts.
-	const skeletonExpected = "// Code generated by gqlc dev. DO NOT EDIT.\n\n"
-	skeletonDB := filepath.Join(fixtureDir, "valid", "skeleton", "golden", "db.go")
-	skeletonBytes, err := os.ReadFile(skeletonDB)
-	require.NoError(t, err, "skeleton golden must exist")
-	require.True(t,
-		strings.HasPrefix(string(skeletonBytes), skeletonExpected),
-		"skeleton db.go must open with byte-exact header %q; got %q",
-		skeletonExpected, string(skeletonBytes[:min(len(skeletonBytes), len(skeletonExpected))]))
-
-	// Walk every valid fixture's golden tree. Every .go file in every
-	// golden dir carries the header; a fixture with no .go file (unlikely
-	// but not forbidden) just contributes nothing.
-	validDirs, err := filepath.Glob(filepath.Join(fixtureDir, "valid", "*"))
-	require.NoError(t, err)
-	require.NotEmpty(t, validDirs, "valid fixtures must exist")
-
-	sawAny := false
-	for _, dir := range validDirs {
-		goldenGlob := filepath.Join(dir, "golden", "*.go")
-		goldens, err := filepath.Glob(goldenGlob)
-		require.NoError(t, err)
-		for _, path := range goldens {
-			sawAny = true
-			contents, err := os.ReadFile(path)
-			require.NoError(t, err, "reading %s", path)
-			// Longest expected header comfortably under 128 bytes:
-			// `// Code generated by gqlc v0.0.0-20260711-<40chars>. DO NOT EDIT.\n\n`
-			// weighs ~85; 128 gives slack for future release-recipe forms.
-			window := contents
-			if len(window) > 128 {
-				window = window[:128]
-			}
-			require.True(t, headerRe.Match(window),
-				"golden %s does not match header regex; first 128 bytes: %q",
-				path, string(window))
-		}
-	}
-	require.True(t, sawAny, "walk must encounter at least one golden .go file")
 }

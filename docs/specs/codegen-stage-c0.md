@@ -41,15 +41,18 @@ do not anticipate them here.
   corpus at `valid/` and `invalid/`.
 - `test/data/codegen/valid/<name>/` — one directory per valid fixture,
   each holding a schema `.gql`, one or more `.cypher` query files (the
-  annotated form), and a `golden/` subdirectory containing the complete
-  generated package (`db.go`, `querier.go`, `models.go`, and per-source
-  `<name>.cypher.go` files) exactly as `Generate` returns them.
+  annotated form), and a `golden/<target>/` subdirectory per enrolled
+  emission target containing the complete generated package (`db.go`,
+  `querier.go`, `models.go`, and per-source `<name>.cypher.go` files)
+  exactly as `Generate` returns them for that target.
 - `test/data/codegen/invalid/<name>/` — one directory per negative
   fixture: schema + query file(s) + a `manifest.json` naming the
   expected sentinel from either package.
-- `internal/codegen/codegen_test.go` — the testify suite (§6): golden
-  round-trip, invalid-fixture map totality, double-run determinism
-  (§8), sentinel-reachability sweep (§9).
+- `internal/codegen/conformance/conformance_test.go` — the testify
+  suite (§6): golden round-trip, invalid-fixture map totality,
+  double-run determinism (§8), sentinel-reachability sweep (§9). It
+  lives above the backend packages, not inside one, because it drives
+  every enrolled target through the registry.
 - `internal/queryfile/queryfile_test.go` — the queryfile front-end
   suite (§4, §9): `AnnotatedQuery` round-trip plus queryfile sentinel
   reachability.
@@ -726,19 +729,26 @@ test/data/codegen/
     empty_input/
       social.gql            // schema fixture
       queries.cypher        // annotated queries (or absent if no queries)
-      manifest.json         // pins expected package name; §6.3
+      manifest.json         // pins expected package name and the
+                            // targets enrolled below; §6.3
       golden/
-        db.go
-        querier.go
-        models.go
+        neo4j-go-v5/        // one subdirectory per enrolled target
+          db.go
+          querier.go
+          models.go
     single_query_front_end/
       social.gql
       people.cypher
       manifest.json
       golden/
-        db.go
-        querier.go
-        models.go
+        neo4j-go-v5/
+          db.go
+          querier.go
+          models.go
+        neo4j-go-v6/
+          db.go
+          querier.go
+          models.go
   invalid/
     invalid_package_name/
       3movies.gql
@@ -764,14 +774,19 @@ test/data/codegen/
   even without the nested-module skip, defense in depth.
 - **Per-fixture files.** Schema `.gql`(s), one or more `.cypher` query
   files (annotated form), and `manifest.json`. Valid fixtures also
-  hold a `golden/` subdirectory containing the exact file set
-  `Generate` returned. Empty-input fixtures still hold a `queries.cypher`
-  when the queryfile front end is under test — the file may declare
-  queries the emission ignores.
-- **`golden/`** is the byte-comparison target. Sub-package of the
-  fixture directory but *not* imported by anything in the nested
-  module (nothing imports goldens); it exists to be built as part of
-  the module's `./...` walk, which is the compile fence (§7).
+  hold a `golden/` subdirectory holding one subdirectory per emission
+  target the fixture's manifest enrols it in, each containing the
+  exact file set `Generate` returned for that target. Empty-input
+  fixtures still hold a `queries.cypher` when the queryfile front end
+  is under test — the file may declare queries the emission ignores.
+- **`golden/<target>/`** is the byte-comparison target, and is where
+  every golden file lives: `golden/` itself holds only these
+  subdirectories. A fixture's inputs are therefore stated once and
+  compared against as many emissions as it is enrolled in, so adding a
+  target cannot silently fork the input corpus. Each is a sub-package
+  of the fixture directory but *not* imported by anything in the
+  nested module (nothing imports goldens); it exists to be built as
+  part of the module's `./...` walk, which is the compile fence (§7).
 - **No shared `schemas/` subdirectory.** The resolver harness shared
   one schema across many query files by pairing via `schema.mapping.json`;
   the codegen harness has multiple *files* per fixture (schema + query
@@ -787,6 +802,7 @@ Per-fixture manifest, structured to serve both valid and invalid cases:
 {
   "package": "movies",
   "queryFiles": ["people.cypher", "movies.cypher"],
+  "targets": ["neo4j-go-v5", "neo4j-go-v6"],
   "expectedError": "queryfile.ErrUnknownCardinality"
 }
 ```
@@ -799,6 +815,16 @@ Per-fixture manifest, structured to serve both valid and invalid cases:
   fixture directory to load, in the order they enter `Input.Queries`.
   The order matters because it is the caller's first-appearance
   ordering for deterministic output.
+- **`targets`** is the list of registry wire keys this fixture is
+  enrolled in, and is **required on every fixture, valid and invalid,
+  with no default**. A backend reaches a fixture only by being named
+  here, so registering a backend does not enrol it across the corpus
+  and an omitted or empty list fails the suite rather than quietly
+  generating nothing. On a valid fixture each key must have a matching
+  `golden/<target>/` subtree and each subtree a matching key: the two
+  sets are compared, so enrolling a target without generating its
+  goldens (or dropping one without deleting them) goes red instead of
+  silently skipping.
 - **`expectedError`** is present on invalid fixtures only. The string
   names the fully-qualified sentinel identifier
   (`queryfile.ErrUnknownCardinality` or `codegen.ErrInvalidPackageName`);
@@ -810,29 +836,52 @@ Per-fixture manifest, structured to serve both valid and invalid cases:
 ### 6.4 The `-update` flag
 
 A test-local `var update = flag.Bool("update", false, "regenerate
-codegen goldens")` in `codegen_test.go`. When set, the valid-fixture
-sub-test *deletes and rewrites* the fixture's `golden/` directory
-from `Generate`'s output. Unlike the JSON-single-file goldens
-elsewhere, the golden here is a tree, and stale files must not linger
-— a query removed from the input must not leave its old `.cypher.go`
-in the golden dir. `-update` runs the same directory-sync the future
-CLI will run: delete not-in-output, write all-in-output.
+codegen golden files")` in `conformance_test.go`. When set, the
+valid-fixture sub-test *deletes and rewrites* the fixture's whole
+`golden/` root from one `Generate` call per target the manifest
+declares. Unlike the JSON-single-file goldens elsewhere, the golden
+here is a tree, and stale files must not linger — a query removed
+from the input must not leave its old `.cypher.go`, and a target
+dropped from the manifest must not leave its subtree. `-update` runs
+the same directory-sync the future CLI will run: delete
+not-in-output, write all-in-output.
+
+**The rewrite belongs in the fixture sub-test, above the per-target
+sub-tests, and this is a contract rather than an implementation
+detail.** `go test -run` filters the fixture scope and the target
+scope independently. A wipe at fixture scope paired with rewrites at
+target scope means a run narrowed to one target wipes every target
+and rewrites one — deleting tracked goldens and exiting 0. Keeping
+both halves at fixture scope leaves nothing for `-run` to narrow
+between them. For the same reason the corpus is only ever written by
+a run that passed `-update`: a run that did not ask to regenerate
+must leave the tree byte-identical, because the golden diff is the
+review surface these fixtures exist to provide.
 
 ### 6.5 The suite
 
-`codegen_test.go` — testify `suite.Suite`, one test per concern:
+`internal/codegen/conformance/conformance_test.go` — testify
+`suite.Suite`, one test per concern. The suite sits above the backend
+packages and reaches each through the composed registry, so it
+imports none of them directly:
 
-- **`TestValid`** — walks `valid/*/`, loads each fixture (schema via
-  `schema/gql`, each query file via `queryfile`, resolves each query via
-  `resolver`), calls `Generate`, and either writes the golden
-  (`-update`) or asserts byte-equality against every file in the
-  fixture's `golden/`. Byte-equality, not `JSONEq` — the output is Go
-  source, and every whitespace character matters (gofmt normalises,
-  but the tree it produces is stable).
-- **`TestInvalid`** — walks `invalid/*/`, resolves the manifest's
-  `expectedError` string to a sentinel, calls the full pipeline, and
-  asserts (a) the returned `[]File` is nil and (b) `errors.Is(err,
-  wantErr)`. Map totality asserted at the top of the test.
+- **`TestValid`** — walks `valid/*/` and, within each, the targets
+  that fixture's manifest declares. Loads the fixture once (schema via
+  `schema/gql`, each query file via `queryfile`, resolves each query
+  via `resolver`), then per target calls `Generate` and asserts
+  byte-equality against every file in `golden/<target>/`; under
+  `-update` it instead rewrites the golden root as described in §6.4.
+  Byte-equality, not `JSONEq` — the output is Go source, and every
+  whitespace character matters (gofmt normalises, but the tree it
+  produces is stable). The set of subdirectories under `golden/` is
+  asserted to equal the manifest's target list, so enrolling a target
+  without generating its goldens, or dropping one without deleting
+  them, is a failure rather than a silent skip.
+- **`TestInvalid`** — walks `invalid/*/` and its declared targets,
+  resolves the manifest's `expectedError` string to a sentinel, calls
+  the full pipeline, and asserts (a) the returned `[]File` is nil and
+  (b) `errors.Is(err, wantErr)`. Map totality asserted at the top of
+  the test.
 - **`TestDoubleRun`** — the determinism test (§8).
 - **`TestSentinelReachability`** — the bidirectional sweep (§9).
 

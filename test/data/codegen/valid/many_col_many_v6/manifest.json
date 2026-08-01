@@ -1,7 +1,0 @@
-{
-  "package": "manycolmany",
-  "queryFiles": [
-    "queries.cypher"
-  ],
-  "driver": "neo4j-go-v6"
-}

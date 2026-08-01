@@ -1,7 +1,0 @@
-CREATE PROPERTY GRAPH TYPE ManyColMany AS {
-    (:Person {
-        name   :: STRING NOT NULL,
-        age    :: INT64 NOT NULL,
-        locale :: STRING NOT NULL
-    })
-}
