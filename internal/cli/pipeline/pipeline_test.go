@@ -9,9 +9,20 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/areqag/gqlc/internal/cli/backends"
 	"github.com/areqag/gqlc/internal/cli/pipeline"
+	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/config"
 )
+
+// backendRegistry is the composed backend table a config file's driver
+// axis resolves against.
+func backendRegistry(t *testing.T) codegen.Registry {
+	t.Helper()
+	reg, err := backends.Registry()
+	require.NoError(t, err)
+	return reg
+}
 
 // Minimal fixture: mirrors the CLI-1 §7 project shape but callable
 // without cobra. One node type, one :many query. Schema name "People"
@@ -151,7 +162,7 @@ func requireMarkerHeaded(t *testing.T, name string, contents []byte) {
 func TestRunHappyPathReturnsFiles(t *testing.T) {
 	dir, cfgPath := writeProject(t)
 
-	res, err := pipeline.Run(cfgPath)
+	res, err := pipeline.Run(cfgPath, backendRegistry(t))
 	require.NoError(t, err)
 	require.Empty(t, res.Diagnostics)
 	tr := only(t, res)
@@ -171,7 +182,7 @@ func TestRunPackageNameFromConfig(t *testing.T) {
 	dir, cfgPath := writeProject(t)
 	writeFixtureFile(t, cfgPath, configYAML("peopledb", "neo4j-go-v5", ""))
 
-	res, err := pipeline.Run(cfgPath)
+	res, err := pipeline.Run(cfgPath, backendRegistry(t))
 	require.NoError(t, err)
 	require.Empty(t, res.Diagnostics)
 	tr := only(t, res)
@@ -197,13 +208,26 @@ func TestRunDriverAxis(t *testing.T) {
 			_, cfgPath := writeProject(t)
 			writeFixtureFile(t, cfgPath, configYAML("people", tc.driver, ""))
 
-			res, err := pipeline.Run(cfgPath)
+			res, err := pipeline.Run(cfgPath, backendRegistry(t))
 			require.NoError(t, err)
 			require.Empty(t, res.Diagnostics)
 			db := findFile(t, only(t, res), "db.go")
 			require.Contains(t, string(db), tc.wantImport)
 		})
 	}
+}
+
+// TestRunUnregisteredDriver: the driver axis resolves through the
+// registry the caller passes, so a value the config vocabulary admits
+// but the registry does not carry fails its target — entry-prefixed,
+// with the zero Result the caller must not write.
+func TestRunUnregisteredDriver(t *testing.T) {
+	_, cfgPath := writeProject(t)
+	writeFixtureFile(t, cfgPath, configYAML("people", "neo4j-go-v6", ""))
+
+	res, err := pipeline.Run(cfgPath, codegen.Registry{})
+	require.ErrorContains(t, err, `graph[0]: internal: no pipeline mapping for driver "neo4j-go-v6"`)
+	require.Equal(t, pipeline.Result{}, res)
 }
 
 // TestRunProcsigWiredThroughFrontEnd: a CALL query resolves when the
@@ -217,7 +241,7 @@ func TestRunProcsigWiredThroughFrontEnd(t *testing.T) {
 		writeFixtureFile(t, filepath.Join(dir, "procsig.json"), callRegistry)
 		writeFixtureFile(t, cfgPath, configYAML("people", "neo4j-go-v5", "procsig.json"))
 
-		res, err := pipeline.Run(cfgPath)
+		res, err := pipeline.Run(cfgPath, backendRegistry(t))
 		require.NoError(t, err)
 		require.Empty(t, res.Diagnostics)
 		// calls.cypher generates a per-source file.
@@ -228,7 +252,7 @@ func TestRunProcsigWiredThroughFrontEnd(t *testing.T) {
 		dir, cfgPath := writeProject(t)
 		writeFixtureFile(t, filepath.Join(dir, "queries", "calls.cypher"), callQuery)
 
-		res, err := pipeline.Run(cfgPath)
+		res, err := pipeline.Run(cfgPath, backendRegistry(t))
 		require.NoError(t, err)
 		require.Nil(t, res.Targets)
 		require.Len(t, res.Diagnostics, 1)
@@ -244,7 +268,7 @@ func TestRunProcsigWiredThroughFrontEnd(t *testing.T) {
 func TestRunConfigMissing(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), config.DefaultFilename)
 
-	res, err := pipeline.Run(cfgPath)
+	res, err := pipeline.Run(cfgPath, backendRegistry(t))
 	require.Error(t, err)
 	require.ErrorIs(t, err, pipeline.ErrConfigMissing)
 	require.ErrorIs(t, err, fs.ErrNotExist, "fs.ErrNotExist must remain in the wrap chain")
@@ -259,7 +283,7 @@ func TestRunNoQueryFiles(t *testing.T) {
 	dir, cfgPath := writeProject(t)
 	require.NoError(t, os.Remove(filepath.Join(dir, "queries", "people.cypher")))
 
-	res, err := pipeline.Run(cfgPath)
+	res, err := pipeline.Run(cfgPath, backendRegistry(t))
 	require.EqualError(t, err, "graph[0]: no query files (*.cypher) in "+filepath.Join(dir, "queries"))
 	require.Equal(t, pipeline.Result{}, res)
 }
@@ -275,7 +299,7 @@ func TestRunAccumulatesDiagnostics(t *testing.T) {
 	writeFixtureFile(t, filepath.Join(q, "b.cypher"),
 		"// name: BadOne :many\nMATCH (g:Ghost) RETURN g\n// name: BadTwo :many\nMATCH (w:Wraith) RETURN w\n")
 
-	res, err := pipeline.Run(cfgPath)
+	res, err := pipeline.Run(cfgPath, backendRegistry(t))
 	require.NoError(t, err)
 	require.Nil(t, res.Targets)
 	require.Len(t, res.Diagnostics, 3)
@@ -295,7 +319,7 @@ func TestRunDiagnosticShapes(t *testing.T) {
 	writeFixtureFile(t, filepath.Join(q, "broken.cypher"), "// name: Broken\nMATCH (n) RETURN n\n")
 	writeFixtureFile(t, filepath.Join(q, "ghost.cypher"), "// name: BadLabel :many\nMATCH (g:Ghost) RETURN g\n")
 
-	res, err := pipeline.Run(cfgPath)
+	res, err := pipeline.Run(cfgPath, backendRegistry(t))
 	require.NoError(t, err)
 	require.Nil(t, res.Targets)
 	// people.cypher succeeds; broken.cypher and ghost.cypher fail.
@@ -320,7 +344,7 @@ func TestRunPathResolution(t *testing.T) {
 	cfgPath := filepath.Join(proj, config.DefaultFilename)
 	writeFixtureFile(t, cfgPath, configYAML("people", "neo4j-go-v5", ""))
 
-	res, err := pipeline.Run(cfgPath)
+	res, err := pipeline.Run(cfgPath, backendRegistry(t))
 	require.NoError(t, err)
 	require.Empty(t, res.Diagnostics)
 	tr := only(t, res)
@@ -338,7 +362,7 @@ func TestRunNoWrites(t *testing.T) {
 	out := filepath.Join(dir, "out")
 	require.NoDirExists(t, out, "precondition: out must not exist before Run")
 
-	res, err := pipeline.Run(cfgPath)
+	res, err := pipeline.Run(cfgPath, backendRegistry(t))
 	require.NoError(t, err)
 	tr := only(t, res)
 	require.NotEmpty(t, tr.Files)
@@ -359,7 +383,7 @@ func TestRunDiscoveryFilter(t *testing.T) {
 	writeFixtureFile(t, filepath.Join(q, "sub", "nested.cypher"), poison)
 	writeFixtureFile(t, filepath.Join(q, ".hidden.cypher"), poison)
 
-	res, err := pipeline.Run(cfgPath)
+	res, err := pipeline.Run(cfgPath, backendRegistry(t))
 	require.NoError(t, err)
 	require.Empty(t, res.Diagnostics)
 	require.Equal(t, []string{"db.go", "models.go", "people.cypher.go", "querier.go"}, filePaths(only(t, res)))
@@ -371,7 +395,7 @@ func TestRunDiscoveryFilter(t *testing.T) {
 func TestRunEveryTarget(t *testing.T) {
 	dir, cfgPath := writeTwoTargetProject(t)
 
-	res, err := pipeline.Run(cfgPath)
+	res, err := pipeline.Run(cfgPath, backendRegistry(t))
 	require.NoError(t, err)
 	require.Empty(t, res.Diagnostics)
 	require.Len(t, res.Targets, 2)
@@ -402,7 +426,7 @@ func TestRunSetupFailureFailsFast(t *testing.T) {
 		dir, cfgPath := writeTwoTargetProject(t)
 		require.NoError(t, os.Remove(filepath.Join(dir, "invoices.gql")))
 
-		res, err := pipeline.Run(cfgPath)
+		res, err := pipeline.Run(cfgPath, backendRegistry(t))
 		require.Error(t, err)
 		require.True(t, strings.HasPrefix(err.Error(), "graph[1]: schema: "), "err: %q", err)
 		require.ErrorIs(t, err, fs.ErrNotExist)
@@ -415,7 +439,7 @@ func TestRunSetupFailureFailsFast(t *testing.T) {
 			"// name: BadLabel :many\nMATCH (g:Ghost) RETURN g\n")
 		require.NoError(t, os.Remove(filepath.Join(dir, "invoices.gql")))
 
-		res, err := pipeline.Run(cfgPath)
+		res, err := pipeline.Run(cfgPath, backendRegistry(t))
 		require.Error(t, err)
 		require.True(t, strings.HasPrefix(err.Error(), "graph[1]: schema: "), "err: %q", err)
 		require.Equal(t, pipeline.Result{}, res)
@@ -435,7 +459,7 @@ func TestRunDiagnosticsSpanTargets(t *testing.T) {
 	writeFixtureFile(t, filepath.Join(q1, "wraith.cypher"),
 		"// name: BadOne :many\nMATCH (w:Wraith) RETURN w\n// name: BadTwo :many\nMATCH (s:Spectre) RETURN s\n")
 
-	res, err := pipeline.Run(cfgPath)
+	res, err := pipeline.Run(cfgPath, backendRegistry(t))
 	require.NoError(t, err)
 	require.Nil(t, res.Targets)
 	require.Equal(t, []string{
@@ -454,7 +478,7 @@ func TestRunAllOrNothing(t *testing.T) {
 	writeFixtureFile(t, filepath.Join(dir, "invoices", "ghost.cypher"),
 		"// name: BadLabel :many\nMATCH (g:Ghost) RETURN g\n")
 
-	res, err := pipeline.Run(cfgPath)
+	res, err := pipeline.Run(cfgPath, backendRegistry(t))
 	require.NoError(t, err)
 	require.Nil(t, res.Targets, "entry 0's clean batch is discarded with entry 1's")
 	require.Len(t, res.Diagnostics, 1)
@@ -471,7 +495,7 @@ func TestRunSkipsCodegenAfterDiagnostic(t *testing.T) {
 		"// name: BadLabel :many\nMATCH (g:Ghost) RETURN g\n")
 	writeFixtureFile(t, filepath.Join(dir, "invoices", "dup.cypher"), invoiceQuery)
 
-	res, err := pipeline.Run(cfgPath)
+	res, err := pipeline.Run(cfgPath, backendRegistry(t))
 	require.NoError(t, err)
 	require.Nil(t, res.Targets)
 	require.Equal(t, []string{
@@ -491,7 +515,7 @@ func TestRunStateIsPerTarget(t *testing.T) {
 		// :Person query would fail against entry 1's Invoices schema.
 		_, cfgPath := writeTwoTargetProject(t)
 
-		res, err := pipeline.Run(cfgPath)
+		res, err := pipeline.Run(cfgPath, backendRegistry(t))
 		require.Empty(t, res.Diagnostics)
 		require.NoError(t, err)
 		require.Len(t, res.Targets, 2)
@@ -511,7 +535,7 @@ func TestRunStateIsPerTarget(t *testing.T) {
 			targetEntry("invoices.gql", "invoices", "invoicedb", "out2", "neo4j-go-v6", ""),
 		))
 
-		res, err := pipeline.Run(cfgPath)
+		res, err := pipeline.Run(cfgPath, backendRegistry(t))
 		require.NoError(t, err)
 		require.Nil(t, res.Targets)
 		require.Len(t, res.Diagnostics, 1)

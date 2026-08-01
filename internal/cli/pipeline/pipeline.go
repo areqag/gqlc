@@ -31,7 +31,6 @@ import (
 	"strings"
 
 	"github.com/areqag/gqlc/internal/codegen"
-	"github.com/areqag/gqlc/internal/codegen/neo4j"
 	"github.com/areqag/gqlc/internal/config"
 	"github.com/areqag/gqlc/internal/procsig"
 	"github.com/areqag/gqlc/internal/query"
@@ -83,6 +82,9 @@ type TargetResult struct {
 // in document order. It performs no filesystem writes — the caller
 // writes each TargetResult's files under the ADR 0012 tripwire.
 //
+// backends resolves a target's driver at stage 8, so a key the config
+// vocabulary admits but backends does not carry fails that target.
+//
 // Return contract, exhaustive:
 //
 //   - err != nil → Result is the zero value. This covers the stage-1
@@ -100,7 +102,7 @@ type TargetResult struct {
 // No other combinations exist; the caller may rely on this. In
 // particular a failed run never returns a partially populated Targets:
 // a wipe-and-write driven from one would half-generate the project.
-func Run(cfgPath string) (Result, error) {
+func Run(cfgPath string, backends codegen.Registry) (Result, error) {
 	// Stage 1 — load config. The fs.ErrNotExist branch is the exact
 	// seam config.Load documents for a missing file (spec §2.3). We
 	// wrap into ErrConfigMissing so the CLI's UX copy (the "run gqlc
@@ -120,7 +122,7 @@ func Run(cfgPath string) (Result, error) {
 	for i, tgt := range cfg.Targets {
 		// A setup failure aborts the whole run at this entry and
 		// discards whatever earlier targets accumulated (§6.1).
-		tr, tdiags, err := runTarget(baseDir, tgt, len(diags) == 0)
+		tr, tdiags, err := runTarget(baseDir, tgt, backends, len(diags) == 0)
 		if err != nil {
 			return Result{}, fmt.Errorf("graph[%d]: %w", i, err)
 		}
@@ -147,7 +149,7 @@ func Run(cfgPath string) (Result, error) {
 // genBatch false skips stage 8. An earlier target already accumulated
 // a diagnostic, so every batch is discarded (§6.2) and generating this
 // one could only add a codegen error to a run that is already failing.
-func runTarget(baseDir string, tgt config.Target, genBatch bool) (TargetResult, []string, error) {
+func runTarget(baseDir string, tgt config.Target, backends codegen.Registry, genBatch bool) (TargetResult, []string, error) {
 	// Stage 2 — resolve paths against the config file's directory.
 	// No existence checks here; each consuming stage owns its own
 	// open failure.
@@ -213,20 +215,14 @@ func runTarget(baseDir string, tgt config.Target, genBatch bool) (TargetResult, 
 		return TargetResult{}, diags, nil
 	}
 
-	// Stage 8 — generate, with the Driver axis mapping (spec §3.2) and
-	// the configured package name (spec §3.4; the loader rejects an
-	// empty one).
-	var driverOpt neo4j.Option
-	switch tgt.Go.Driver {
-	case config.DriverNeo4jGoV5:
-		driverOpt = neo4j.WithDriverVersion(neo4j.DriverV5)
-	case config.DriverNeo4jGoV6:
-		driverOpt = neo4j.WithDriverVersion(neo4j.DriverV6)
-	default:
+	// Stage 8 — generate, with the Driver axis resolved through the
+	// registry (spec §3.2) and the configured package name (spec §3.4;
+	// the loader rejects an empty one).
+	newGen, ok := backends.Lookup(string(tgt.Go.Driver))
+	if !ok {
 		return TargetResult{}, nil, fmt.Errorf("internal: no pipeline mapping for driver %q", string(tgt.Go.Driver))
 	}
-	files, err := neo4j.New(driverOpt, neo4j.WithPackageName(tgt.Go.Package)).
-		Generate(codegen.Input{Schema: sch, Queries: batch})
+	files, err := newGen(tgt.Go.Package).Generate(codegen.Input{Schema: sch, Queries: batch})
 	if err != nil {
 		return TargetResult{}, nil, err
 	}

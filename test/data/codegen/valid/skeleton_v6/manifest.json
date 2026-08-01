@@ -1,5 +1,5 @@
 {
   "package": "skeleton",
   "queryFiles": [],
-  "driverVersion": "v6"
+  "driver": "neo4j-go-v6"
 }

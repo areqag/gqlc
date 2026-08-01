@@ -3,5 +3,5 @@
   "queryFiles": [
     "queries.cypher"
   ],
-  "driverVersion": "v6"
+  "driver": "neo4j-go-v6"
 }
