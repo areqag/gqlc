@@ -1,5 +1,8 @@
 //go:build codegen_live
 
+// The neo4j arms: the container helper both driver majors share, and one
+// adapter per major. The battery they serve is in live_test.go.
+
 package fixtures
 
 import (
@@ -51,16 +54,17 @@ func startNeo4jContainer(ctx context.Context, t *testing.T) string {
 	return boltURI
 }
 
-// neo4jV5 runs the battery against the neo4j-go-v5 target. Scenarios share
-// the arm's container and are isolated by a DETACH-wipe on entry, which holds
-// because the battery runs an arm's scenarios sequentially.
+// neo4jV5 is the neo4j-go-v5 arm: one container, one driver, and the handles
+// built on it. Every scenario sees the single graph the server exposes, so
+// isolation is a DETACH-wipe as the scenario opens and scenarios must not
+// overlap.
 type neo4jV5 struct {
 	driver neo4jv5.DriverWithContext
 	mixed  mixedReadWriteBatchV5
 	many   manyColManyV5
 }
 
-func startNeo4jV5(ctx context.Context, t *testing.T) backend {
+func startNeo4jV5(ctx context.Context, t *testing.T) harness {
 	t.Helper()
 	boltURI := startNeo4jContainer(ctx, t)
 
@@ -80,14 +84,22 @@ func startNeo4jV5(ctx context.Context, t *testing.T) backend {
 	}
 }
 
-func (b *neo4jV5) isolate(ctx context.Context, t *testing.T) {
+func (h *neo4jV5) parallelScenarios() bool { return false }
+
+func (h *neo4jV5) scenario(ctx context.Context, t *testing.T) backend {
 	t.Helper()
-	b.seed(ctx, t, wipeCypher)
+	s := neo4jV5Scenario{arm: h}
+	s.seed(ctx, t, wipeCypher)
+	return s
 }
 
-func (b *neo4jV5) seed(ctx context.Context, t *testing.T, cypher string) {
+// neo4jV5Scenario is one scenario's view of the neo4jV5 arm: the server's
+// single graph, wiped as the scenario opened.
+type neo4jV5Scenario struct{ arm *neo4jV5 }
+
+func (s neo4jV5Scenario) seed(ctx context.Context, t *testing.T, cypher string) {
 	t.Helper()
-	session := b.driver.NewSession(ctx, neo4jv5.SessionConfig{AccessMode: neo4jv5.AccessModeWrite})
+	session := s.arm.driver.NewSession(ctx, neo4jv5.SessionConfig{AccessMode: neo4jv5.AccessModeWrite})
 	defer func() {
 		if err := session.Close(ctx); err != nil {
 			t.Logf("close session: %v", err)
@@ -103,9 +115,9 @@ func (b *neo4jV5) seed(ctx context.Context, t *testing.T, cypher string) {
 	require.NoError(t, err, "seed: %s", cypher)
 }
 
-func (b *neo4jV5) mixedReadWriteBatch() mixedReadWriteBatchQuerier { return b.mixed }
+func (s neo4jV5Scenario) mixedReadWriteBatch() mixedReadWriteBatchQuerier { return s.arm.mixed }
 
-func (b *neo4jV5) manyColMany() manyColManyQuerier { return b.many }
+func (s neo4jV5Scenario) manyColMany() manyColManyQuerier { return s.arm.many }
 
 type mixedReadWriteBatchV5 struct{ q *mixedv5.Queries }
 
@@ -131,6 +143,10 @@ func (a manyColManyV5) peopleByAgeAndLocale(ctx context.Context, minAge int64, l
 	if err != nil {
 		return nil, err
 	}
+	// Nil and empty are different :many answers; a scenario pins which one.
+	if rows == nil {
+		return nil, nil
+	}
 	out := make([]person, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, person{Name: row.Name, Age: row.Age})
@@ -138,17 +154,15 @@ func (a manyColManyV5) peopleByAgeAndLocale(ctx context.Context, minAge int64, l
 	return out, nil
 }
 
-// neo4jV6 runs the battery against the neo4j-go-v6 target on the same image,
-// isolated the same way as neo4jV5. The v6 driver renamed the v5
-// DriverWithContext interface to Driver and the NewDriverWithContext
-// constructor to NewDriver.
+// neo4jV6 is the neo4j-go-v6 arm on the same image, isolated the same way as
+// neo4jV5.
 type neo4jV6 struct {
 	driver neo4jv6.Driver
 	mixed  mixedReadWriteBatchV6
 	many   manyColManyV6
 }
 
-func startNeo4jV6(ctx context.Context, t *testing.T) backend {
+func startNeo4jV6(ctx context.Context, t *testing.T) harness {
 	t.Helper()
 	boltURI := startNeo4jContainer(ctx, t)
 
@@ -168,14 +182,22 @@ func startNeo4jV6(ctx context.Context, t *testing.T) backend {
 	}
 }
 
-func (b *neo4jV6) isolate(ctx context.Context, t *testing.T) {
+func (h *neo4jV6) parallelScenarios() bool { return false }
+
+func (h *neo4jV6) scenario(ctx context.Context, t *testing.T) backend {
 	t.Helper()
-	b.seed(ctx, t, wipeCypher)
+	s := neo4jV6Scenario{arm: h}
+	s.seed(ctx, t, wipeCypher)
+	return s
 }
 
-func (b *neo4jV6) seed(ctx context.Context, t *testing.T, cypher string) {
+// neo4jV6Scenario is one scenario's view of the neo4jV6 arm: the server's
+// single graph, wiped as the scenario opened.
+type neo4jV6Scenario struct{ arm *neo4jV6 }
+
+func (s neo4jV6Scenario) seed(ctx context.Context, t *testing.T, cypher string) {
 	t.Helper()
-	session := b.driver.NewSession(ctx, neo4jv6.SessionConfig{AccessMode: neo4jv6.AccessModeWrite})
+	session := s.arm.driver.NewSession(ctx, neo4jv6.SessionConfig{AccessMode: neo4jv6.AccessModeWrite})
 	defer func() {
 		if err := session.Close(ctx); err != nil {
 			t.Logf("close session: %v", err)
@@ -191,9 +213,9 @@ func (b *neo4jV6) seed(ctx context.Context, t *testing.T, cypher string) {
 	require.NoError(t, err, "seed: %s", cypher)
 }
 
-func (b *neo4jV6) mixedReadWriteBatch() mixedReadWriteBatchQuerier { return b.mixed }
+func (s neo4jV6Scenario) mixedReadWriteBatch() mixedReadWriteBatchQuerier { return s.arm.mixed }
 
-func (b *neo4jV6) manyColMany() manyColManyQuerier { return b.many }
+func (s neo4jV6Scenario) manyColMany() manyColManyQuerier { return s.arm.many }
 
 type mixedReadWriteBatchV6 struct{ q *mixedv6.Queries }
 
@@ -218,6 +240,10 @@ func (a manyColManyV6) peopleByAgeAndLocale(ctx context.Context, minAge int64, l
 	})
 	if err != nil {
 		return nil, err
+	}
+	// Nil and empty are different :many answers; a scenario pins which one.
+	if rows == nil {
+		return nil, nil
 	}
 	out := make([]person, 0, len(rows))
 	for _, row := range rows {

@@ -17,10 +17,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// person is a row of the many_col_many fixture in a shape this package owns.
-// Every target emits its own PeopleByAgeAndLocaleRow into its own package, so
-// a single scenario body can only read the columns through a type declared
-// here.
+// person is a many_col_many row. Every target emits its own
+// PeopleByAgeAndLocaleRow into its own package; this is the shape the battery
+// reads columns from.
 type person struct {
 	Name string
 	Age  int64
@@ -38,34 +37,42 @@ type mixedReadWriteBatchQuerier interface {
 	errMultipleResults() error
 }
 
-// manyColManyQuerier is one arm's many_col_many handle, with the generated
-// Params struct flattened into arguments and the generated Row struct mapped
-// onto person.
+// manyColManyQuerier is one arm's many_col_many handle. The generated Params
+// and Row types are package-local to each target, so they stop here.
 type manyColManyQuerier interface {
 	peopleByAgeAndLocale(ctx context.Context, minAge int64, locale string) ([]person, error)
 }
 
-// backend is one live arm: a running container, a connected driver, and the
-// generated handles built on it.
+// harness is one arm for the length of the battery: a running container and a
+// connection to it. Handing out scenarios is its whole surface, so a querier
+// is unobtainable outside the isolation it belongs to.
 //
-// isolate establishes the empty graph every scenario starts from. seed runs
-// cypher straight at the driver rather than through generated code, so a bug
-// in a generated method cannot shape the data that would expose it; seed
-// cypher stays inside the openCypher dialect intersection so one string
-// serves every arm.
+// parallelScenarios reports whether the arm's isolation admits concurrent
+// scenarios; an arm whose scenarios share one graph reports false. scenario
+// establishes one scenario's isolation, binds the generated handles to it,
+// and registers any teardown on t.
+type harness interface {
+	parallelScenarios() bool
+	scenario(ctx context.Context, t *testing.T) backend
+}
+
+// backend is one scenario's isolated view of an arm: a graph no other
+// scenario observes, and the generated handles bound to it.
+//
+// seed writes through the driver, never through generated code, so seeded
+// data is independent of the surface under test. Its cypher stays inside the
+// openCypher dialect intersection so one string serves every arm.
 type backend interface {
-	isolate(ctx context.Context, t *testing.T)
 	seed(ctx context.Context, t *testing.T, cypher string)
 	mixedReadWriteBatch() mixedReadWriteBatchQuerier
 	manyColMany() manyColManyQuerier
 }
 
 // arms are the backends the battery runs against. Each adapter owns its
-// container, its connection, and its isolation strategy; enrolling a backend
-// is one row here plus one adapter.
+// container, its connection, and its isolation strategy.
 var arms = []struct {
 	name  string
-	start func(ctx context.Context, t *testing.T) backend
+	start func(ctx context.Context, t *testing.T) harness
 }{
 	{name: "neo4j-go-v5", start: startNeo4jV5},
 	{name: "neo4j-go-v6", start: startNeo4jV6},
@@ -85,8 +92,8 @@ var scenarios = []struct {
 
 // TestLiveSmoke runs every scenario against every arm. Arms call t.Parallel()
 // so their container boots overlap: two containers, ~4GB peak, well within a
-// standard CI runner. Scenarios within an arm share that arm's container and
-// re-isolate on entry, amortising the ~15s startup across all of them.
+// standard CI runner. Scenarios share their arm's container, amortising the
+// ~15s startup, and run concurrently or not as that arm's isolation allows.
 //
 // Skips when GQLC_SKIP_LIVE is set so a developer without docker can still
 // run `go test -tags codegen_live ./...` without a hard failure.
@@ -100,14 +107,20 @@ func TestLiveSmoke(t *testing.T) {
 			// One timeout per arm keeps a stuck container from hanging the
 			// whole test binary indefinitely. Neo4j 5-community typically
 			// starts in <15s; 120s covers a cold image pull on a slow runner.
+			// Cleanups run last-registered-first, so cancelling here rather
+			// than on return leaves the container and driver teardown the arm
+			// is about to register a live context to close over.
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-			defer cancel()
+			t.Cleanup(cancel)
 
-			b := arm.start(ctx, t)
-			for _, scenario := range scenarios {
-				t.Run(scenario.name, func(t *testing.T) {
-					b.isolate(ctx, t)
-					scenario.run(ctx, t, b)
+			h := arm.start(ctx, t)
+			parallelScenarios := h.parallelScenarios()
+			for _, sc := range scenarios {
+				t.Run(sc.name, func(t *testing.T) {
+					if parallelScenarios {
+						t.Parallel()
+					}
+					sc.run(ctx, t, h.scenario(ctx, t))
 				})
 			}
 		})
@@ -164,5 +177,6 @@ func manyWithParams(ctx context.Context, t *testing.T, b backend) {
 	// from :one's ErrNoRows contract.
 	rows, err = q.peopleByAgeAndLocale(ctx, 100, "en")
 	require.NoError(t, err)
+	require.NotNil(t, rows, "empty :many result must be an empty slice, not nil")
 	require.Empty(t, rows)
 }
