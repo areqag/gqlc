@@ -1,11 +1,11 @@
 //go:build codegen_live
 
 // Live smoke battery for the generated repositories: every scenario runs
-// against every backend arm, driving a real container (gqlc-73h, gqlc-5gc).
-// Opt-in via -tags codegen_live so PR CI stays fast; the manual / nightly CI
-// job runs it. Lives in the nested test/data/codegen module so testcontainers
-// and its ~50 transitive deps stay out of gqlc's root go.mod and the compiler
-// binary.
+// against every backend arm, driving a real container (gqlc-73h, gqlc-5gc,
+// gqlc-35yu.8). Opt-in via -tags codegen_live so PR CI stays fast; the manual
+// / nightly CI job runs it. Lives in the nested test/data/codegen module so
+// testcontainers and its ~50 transitive deps stay out of gqlc's root go.mod
+// and the compiler binary.
 package fixtures
 
 import (
@@ -25,14 +25,13 @@ type person struct {
 	Age  int64
 }
 
-// mixedReadWriteBatchQuerier is one arm's mixed_read_write_batch handle.
+// oneColOneParamOneQuerier is one arm's one_col_one_param_one handle.
 // errNoRows and errMultipleResults report the sentinels of the package these
 // methods are generated into: each generated package declares its own
 // errors.New values, so errors.Is only holds against the pair that arrived
 // with the handle.
-type mixedReadWriteBatchQuerier interface {
-	getPersonName(ctx context.Context, id int64) (string, error)
-	removePerson(ctx context.Context, id int64) error
+type oneColOneParamOneQuerier interface {
+	personName(ctx context.Context, id int64) (string, error)
 	errNoRows() error
 	errMultipleResults() error
 }
@@ -41,6 +40,13 @@ type mixedReadWriteBatchQuerier interface {
 // and Row types are package-local to each target, so they stop here.
 type manyColManyQuerier interface {
 	peopleByAgeAndLocale(ctx context.Context, minAge int64, locale string) ([]person, error)
+}
+
+// mixedReadWriteBatchQuerier is one arm's mixed_read_write_batch handle.
+type mixedReadWriteBatchQuerier interface {
+	getPersonName(ctx context.Context, id int64) (string, error)
+	removePerson(ctx context.Context, id int64) error
+	errNoRows() error
 }
 
 // harness is one arm for the length of the battery: a running container and a
@@ -56,6 +62,13 @@ type harness interface {
 	scenario(ctx context.Context, t *testing.T) backend
 }
 
+// writeHarness is an arm whose target emits :exec methods, so the write
+// scenarios have a handle to run against.
+type writeHarness interface {
+	harness
+	writeScenario(ctx context.Context, t *testing.T) writeBackend
+}
+
 // backend is one scenario's isolated view of an arm: a graph no other
 // scenario observes, and the generated handles bound to it.
 //
@@ -64,36 +77,57 @@ type harness interface {
 // openCypher dialect intersection so one string serves every arm.
 type backend interface {
 	seed(ctx context.Context, t *testing.T, cypher string)
-	mixedReadWriteBatch() mixedReadWriteBatchQuerier
+	oneColOneParamOne() oneColOneParamOneQuerier
 	manyColMany() manyColManyQuerier
+}
+
+// writeBackend is a scenario's view of a writeHarness.
+type writeBackend interface {
+	backend
+	mixedReadWriteBatch() mixedReadWriteBatchQuerier
 }
 
 // arms are the backends the battery runs against. Each adapter owns its
 // container, its connection, and its isolation strategy.
+//
+// writes records that the arm's target emits the write fixture. TestLiveSmoke
+// holds the harness to it, so an arm that stops satisfying writeHarness fails
+// the battery rather than dropping the write scenarios unremarked.
 var arms = []struct {
-	name  string
-	start func(ctx context.Context, t *testing.T) harness
+	name   string
+	start  func(ctx context.Context, t *testing.T) harness
+	writes bool
 }{
-	{name: "neo4j-go-v5", start: startNeo4jV5},
-	{name: "neo4j-go-v6", start: startNeo4jV6},
+	{name: "neo4j-go-v5", start: startNeo4jV5, writes: true},
+	{name: "neo4j-go-v6", start: startNeo4jV6, writes: true},
+	{name: "apache-age-pgx-v5", start: startAGE, writes: false},
 }
 
-// scenarios are the battery. Each body is written once against backend and
-// runs against every arm. A body must not call t.Helper(): its own frame is
-// where the assertions live, so marking it a helper attributes every failure
-// to the loop in TestLiveSmoke instead of to the line that failed.
-var scenarios = []struct {
+// scalarScenarios are the battery every arm runs. Each body is written once
+// against backend. A body must not call t.Helper(): its own frame is where
+// the assertions live, so marking it a helper attributes every failure to the
+// loop in TestLiveSmoke instead of to the line that failed.
+var scalarScenarios = []struct {
 	name string
 	run  func(ctx context.Context, t *testing.T, b backend)
 }{
-	{name: "mixed_read_write_batch: one + exec", run: oneAndExec},
+	{name: "one_col_one_param_one: one + sentinels", run: oneAndSentinels},
 	{name: "many_col_many: many + params", run: manyWithParams},
 }
 
+// writeScenarios are the battery an arm runs once its target emits :exec
+// methods, written against writeBackend under the same rules.
+var writeScenarios = []struct {
+	name string
+	run  func(ctx context.Context, t *testing.T, b writeBackend)
+}{
+	{name: "mixed_read_write_batch: exec + re-read", run: execWrite},
+}
+
 // TestLiveSmoke runs every scenario against every arm. Arms call t.Parallel()
-// so their container boots overlap: two containers, ~4GB peak, well within a
-// standard CI runner. Scenarios share their arm's container, amortising the
-// ~15s startup, and run concurrently or not as that arm's isolation allows.
+// so their container boots overlap: three containers, ~4GB peak, well within
+// a standard CI runner. Scenarios share their arm's container, amortising the
+// startup, and run concurrently or not as that arm's isolation allows.
 //
 // Skips when GQLC_SKIP_LIVE is set so a developer without docker can still
 // run `go test -tags codegen_live ./...` without a hard failure.
@@ -101,6 +135,7 @@ func TestLiveSmoke(t *testing.T) {
 	if os.Getenv("GQLC_SKIP_LIVE") != "" {
 		t.Skip("GQLC_SKIP_LIVE set; skipping live backend containers")
 	}
+	t.Parallel()
 	for _, arm := range arms {
 		t.Run(arm.name, func(t *testing.T) {
 			t.Parallel()
@@ -115,7 +150,7 @@ func TestLiveSmoke(t *testing.T) {
 
 			h := arm.start(ctx, t)
 			parallelScenarios := h.parallelScenarios()
-			for _, sc := range scenarios {
+			for _, sc := range scalarScenarios {
 				t.Run(sc.name, func(t *testing.T) {
 					if parallelScenarios {
 						t.Parallel()
@@ -123,36 +158,45 @@ func TestLiveSmoke(t *testing.T) {
 					sc.run(ctx, t, h.scenario(ctx, t))
 				})
 			}
+
+			wh, servesWrites := h.(writeHarness)
+			require.Equal(t, arm.writes, servesWrites,
+				"the arm's write capability must match the arms table; a target that gained or lost :exec emission updates both")
+			if !servesWrites {
+				return
+			}
+			for _, sc := range writeScenarios {
+				t.Run(sc.name, func(t *testing.T) {
+					if parallelScenarios {
+						t.Parallel()
+					}
+					sc.run(ctx, t, wh.writeScenario(ctx, t))
+				})
+			}
 		})
 	}
 }
 
-// oneAndExec drives the :one contract end to end — both sentinels, a
-// single-row read, and a :exec write observed by a re-read.
-func oneAndExec(ctx context.Context, t *testing.T, b backend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
-	q := b.mixedReadWriteBatch()
+// oneAndSentinels drives the scalar :one contract — both sentinels and a
+// single-row read.
+func oneAndSentinels(ctx context.Context, t *testing.T, b backend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	q := b.oneColOneParamOne()
 
 	// errors.Is (via require.ErrorIs) confirms the sentinel is
 	// identity-matchable so callers can branch generically.
-	_, err := q.getPersonName(ctx, 1)
+	_, err := q.personName(ctx, 1)
 	require.ErrorIs(t, err, q.errNoRows(), "empty graph must return ErrNoRows")
 
 	b.seed(ctx, t, "CREATE (:Person {id: 1, name: 'Alice'})")
 
-	name, err := q.getPersonName(ctx, 1)
+	name, err := q.personName(ctx, 1)
 	require.NoError(t, err)
 	require.Equal(t, "Alice", name)
 
 	// Two rows for the same id triggers ErrMultipleResults.
 	b.seed(ctx, t, "CREATE (:Person {id: 1, name: 'AliceTwin'})")
-	_, err = q.getPersonName(ctx, 1)
+	_, err = q.personName(ctx, 1)
 	require.ErrorIs(t, err, q.errMultipleResults(), "two matching rows must return ErrMultipleResults")
-
-	// :exec write path: delete both rows, then re-query and confirm
-	// ErrNoRows — proves the :exec method actually mutated the graph.
-	require.NoError(t, q.removePerson(ctx, 1))
-	_, err = q.getPersonName(ctx, 1)
-	require.ErrorIs(t, err, q.errNoRows(), "after :exec delete, :one must see empty result")
 }
 
 // manyWithParams drives the :many contract — parameter binding narrows the
@@ -179,4 +223,24 @@ func manyWithParams(ctx context.Context, t *testing.T, b backend) { //nolint:the
 	require.NoError(t, err)
 	require.NotNil(t, rows, "empty :many result must be an empty slice, not nil")
 	require.Empty(t, rows)
+}
+
+// execWrite drives the :exec contract — the write reaches the graph, and the
+// bound parameter narrows what it reaches.
+func execWrite(ctx context.Context, t *testing.T, b writeBackend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	q := b.mixedReadWriteBatch()
+
+	b.seed(ctx, t, `
+		CREATE (:Person {id: 1, name: 'Alice'})
+		CREATE (:Person {id: 2, name: 'Bob'})
+	`)
+
+	require.NoError(t, q.removePerson(ctx, 1))
+
+	_, err := q.getPersonName(ctx, 1)
+	require.ErrorIs(t, err, q.errNoRows(), "after :exec delete, :one must see empty result")
+
+	survivor, err := q.getPersonName(ctx, 2)
+	require.NoError(t, err, "the delete must be narrowed by its parameter")
+	require.Equal(t, "Bob", survivor)
 }

@@ -19,6 +19,8 @@ import (
 	manycolmanyv6 "github.com/areqag/gqlc/test/data/codegen/valid/many_col_many/golden/neo4j-go-v6"
 	mixedv5 "github.com/areqag/gqlc/test/data/codegen/valid/mixed_read_write_batch/golden/neo4j-go-v5"
 	mixedv6 "github.com/areqag/gqlc/test/data/codegen/valid/mixed_read_write_batch/golden/neo4j-go-v6"
+	onecolonev5 "github.com/areqag/gqlc/test/data/codegen/valid/one_col_one_param_one/golden/neo4j-go-v5"
+	onecolonev6 "github.com/areqag/gqlc/test/data/codegen/valid/one_col_one_param_one/golden/neo4j-go-v6"
 )
 
 const (
@@ -60,6 +62,7 @@ func startNeo4jContainer(ctx context.Context, t *testing.T) string {
 // overlap.
 type neo4jV5 struct {
 	driver neo4jv5.DriverWithContext
+	one    oneColOneParamOneV5
 	mixed  mixedReadWriteBatchV5
 	many   manyColManyV5
 }
@@ -79,6 +82,7 @@ func startNeo4jV5(ctx context.Context, t *testing.T) harness {
 
 	return &neo4jV5{
 		driver: driver,
+		one:    oneColOneParamOneV5{q: onecolonev5.New(driver)},
 		mixed:  mixedReadWriteBatchV5{q: mixedv5.New(driver)},
 		many:   manyColManyV5{q: manycolmanyv5.New(driver)},
 	}
@@ -87,6 +91,16 @@ func startNeo4jV5(ctx context.Context, t *testing.T) harness {
 func (h *neo4jV5) parallelScenarios() bool { return false }
 
 func (h *neo4jV5) scenario(ctx context.Context, t *testing.T) backend {
+	t.Helper()
+	return h.newScenario(ctx, t)
+}
+
+func (h *neo4jV5) writeScenario(ctx context.Context, t *testing.T) writeBackend {
+	t.Helper()
+	return h.newScenario(ctx, t)
+}
+
+func (h *neo4jV5) newScenario(ctx context.Context, t *testing.T) neo4jV5Scenario {
 	t.Helper()
 	s := neo4jV5Scenario{arm: h}
 	s.seed(ctx, t, wipeCypher)
@@ -115,9 +129,21 @@ func (s neo4jV5Scenario) seed(ctx context.Context, t *testing.T, cypher string) 
 	require.NoError(t, err, "seed: %s", cypher)
 }
 
+func (s neo4jV5Scenario) oneColOneParamOne() oneColOneParamOneQuerier { return s.arm.one }
+
 func (s neo4jV5Scenario) mixedReadWriteBatch() mixedReadWriteBatchQuerier { return s.arm.mixed }
 
 func (s neo4jV5Scenario) manyColMany() manyColManyQuerier { return s.arm.many }
+
+type oneColOneParamOneV5 struct{ q *onecolonev5.Queries }
+
+func (a oneColOneParamOneV5) personName(ctx context.Context, id int64) (string, error) {
+	return a.q.PersonName(ctx, id)
+}
+
+func (a oneColOneParamOneV5) errNoRows() error { return onecolonev5.ErrNoRows }
+
+func (a oneColOneParamOneV5) errMultipleResults() error { return onecolonev5.ErrMultipleResults }
 
 type mixedReadWriteBatchV5 struct{ q *mixedv5.Queries }
 
@@ -130,8 +156,6 @@ func (a mixedReadWriteBatchV5) removePerson(ctx context.Context, id int64) error
 }
 
 func (a mixedReadWriteBatchV5) errNoRows() error { return mixedv5.ErrNoRows }
-
-func (a mixedReadWriteBatchV5) errMultipleResults() error { return mixedv5.ErrMultipleResults }
 
 type manyColManyV5 struct{ q *manycolmanyv5.Queries }
 
@@ -158,6 +182,7 @@ func (a manyColManyV5) peopleByAgeAndLocale(ctx context.Context, minAge int64, l
 // neo4jV5.
 type neo4jV6 struct {
 	driver neo4jv6.Driver
+	one    oneColOneParamOneV6
 	mixed  mixedReadWriteBatchV6
 	many   manyColManyV6
 }
@@ -177,6 +202,7 @@ func startNeo4jV6(ctx context.Context, t *testing.T) harness {
 
 	return &neo4jV6{
 		driver: driver,
+		one:    oneColOneParamOneV6{q: onecolonev6.New(driver)},
 		mixed:  mixedReadWriteBatchV6{q: mixedv6.New(driver)},
 		many:   manyColManyV6{q: manycolmanyv6.New(driver)},
 	}
@@ -185,6 +211,16 @@ func startNeo4jV6(ctx context.Context, t *testing.T) harness {
 func (h *neo4jV6) parallelScenarios() bool { return false }
 
 func (h *neo4jV6) scenario(ctx context.Context, t *testing.T) backend {
+	t.Helper()
+	return h.newScenario(ctx, t)
+}
+
+func (h *neo4jV6) writeScenario(ctx context.Context, t *testing.T) writeBackend {
+	t.Helper()
+	return h.newScenario(ctx, t)
+}
+
+func (h *neo4jV6) newScenario(ctx context.Context, t *testing.T) neo4jV6Scenario {
 	t.Helper()
 	s := neo4jV6Scenario{arm: h}
 	s.seed(ctx, t, wipeCypher)
@@ -213,9 +249,21 @@ func (s neo4jV6Scenario) seed(ctx context.Context, t *testing.T, cypher string) 
 	require.NoError(t, err, "seed: %s", cypher)
 }
 
+func (s neo4jV6Scenario) oneColOneParamOne() oneColOneParamOneQuerier { return s.arm.one }
+
 func (s neo4jV6Scenario) mixedReadWriteBatch() mixedReadWriteBatchQuerier { return s.arm.mixed }
 
 func (s neo4jV6Scenario) manyColMany() manyColManyQuerier { return s.arm.many }
+
+type oneColOneParamOneV6 struct{ q *onecolonev6.Queries }
+
+func (a oneColOneParamOneV6) personName(ctx context.Context, id int64) (string, error) {
+	return a.q.PersonName(ctx, id)
+}
+
+func (a oneColOneParamOneV6) errNoRows() error { return onecolonev6.ErrNoRows }
+
+func (a oneColOneParamOneV6) errMultipleResults() error { return onecolonev6.ErrMultipleResults }
 
 type mixedReadWriteBatchV6 struct{ q *mixedv6.Queries }
 
@@ -228,8 +276,6 @@ func (a mixedReadWriteBatchV6) removePerson(ctx context.Context, id int64) error
 }
 
 func (a mixedReadWriteBatchV6) errNoRows() error { return mixedv6.ErrNoRows }
-
-func (a mixedReadWriteBatchV6) errMultipleResults() error { return mixedv6.ErrMultipleResults }
 
 type manyColManyV6 struct{ q *manycolmanyv6.Queries }
 
