@@ -1,4 +1,4 @@
-package codegen
+package neo4j
 
 // driverTarget owns every text fragment written into generated files
 // that varies across neo4j-go-driver major versions: the module import

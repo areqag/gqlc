@@ -31,6 +31,7 @@ import (
 	"strings"
 
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/codegen/neo4j"
 	"github.com/areqag/gqlc/internal/config"
 	"github.com/areqag/gqlc/internal/procsig"
 	"github.com/areqag/gqlc/internal/query"
@@ -215,16 +216,16 @@ func runTarget(baseDir string, tgt config.Target, genBatch bool) (TargetResult, 
 	// Stage 8 — generate, with the Driver axis mapping (spec §3.2) and
 	// the configured package name (spec §3.4; the loader rejects an
 	// empty one).
-	var driverOpt codegen.Option
+	var driverOpt neo4j.Option
 	switch tgt.Go.Driver {
 	case config.DriverNeo4jGoV5:
-		driverOpt = codegen.WithDriverVersion(codegen.DriverV5)
+		driverOpt = neo4j.WithDriverVersion(neo4j.DriverV5)
 	case config.DriverNeo4jGoV6:
-		driverOpt = codegen.WithDriverVersion(codegen.DriverV6)
+		driverOpt = neo4j.WithDriverVersion(neo4j.DriverV6)
 	default:
 		return TargetResult{}, nil, fmt.Errorf("internal: no pipeline mapping for driver %q", string(tgt.Go.Driver))
 	}
-	files, err := codegen.New(driverOpt, codegen.WithPackageName(tgt.Go.Package)).
+	files, err := neo4j.New(driverOpt, neo4j.WithPackageName(tgt.Go.Package)).
 		Generate(codegen.Input{Schema: sch, Queries: batch})
 	if err != nil {
 		return TargetResult{}, nil, err

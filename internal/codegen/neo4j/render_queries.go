@@ -1,9 +1,11 @@
-package codegen
+package neo4j
 
 import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/areqag/gqlc/internal/codegen"
 )
 
 // sourceGroup carries one <name>.cypher.go file's worth of prepared
@@ -11,14 +13,14 @@ import (
 // extension, in first-appearance order.
 type sourceGroup struct {
 	filename string
-	queries  []preparedQuery
+	queries  []codegen.Query
 }
 
 // groupBySource groups prepared queries by SourceFile basename in
 // first-appearance order (spec §5.5). A query with no SourceFile is
 // unreachable at C1 (queryfile always records one) but defensively
 // grouped under "queries" so the emission is uniform.
-func groupBySource(prepared []preparedQuery) []sourceGroup {
+func groupBySource(prepared []codegen.Query) []sourceGroup {
 	seen := make(map[string]int)
 	var groups []sourceGroup
 	for _, p := range prepared {
@@ -36,7 +38,7 @@ func groupBySource(prepared []preparedQuery) []sourceGroup {
 		seen[key] = len(groups)
 		groups = append(groups, sourceGroup{
 			filename: stem + ".cypher.go",
-			queries:  []preparedQuery{p},
+			queries:  []codegen.Query{p},
 		})
 	}
 	return groups
@@ -53,9 +55,9 @@ func groupBySource(prepared []preparedQuery) []sourceGroup {
 // (`fmt.Errorf`) — every :one / :many method does, and every write-
 // with-projection method does; the C4 :exec three-line body does not
 // (spec §5.5).
-func groupImports(queries []preparedQuery) (needDbtype, needTime, needFmt bool) {
+func groupImports(queries []codegen.Query) (needDbtype, needTime, needFmt bool) {
 	for _, p := range queries {
-		if p.Cardinality != CardinalityExec {
+		if p.Cardinality != codegen.CardinalityExec {
 			// Row-assembly bodies emit fmt.Errorf decode wrappers.
 			needFmt = true
 		}
@@ -81,6 +83,65 @@ func groupImports(queries []preparedQuery) (needDbtype, needTime, needFmt bool) 
 	return needDbtype, needTime, needFmt
 }
 
+// columnNeedsImports reports whether one prepared row needs dbtype /
+// time in the enclosing file's import block. The list arm walks the
+// row's committed element plan recursively; every other arm delegates
+// to a per-kind test on the row's emitted Go type.
+func columnNeedsImports(f codegen.Row) (needDbtype, needTime bool) {
+	switch f.Kind {
+	case codegen.ColumnNode, codegen.ColumnEdge, codegen.ColumnEdgeUnion:
+		// edgeUnion decode type-asserts dbtype.Relationship (§5.5); the
+		// column's emitted Go type is the sealed interface (not a
+		// dbtype.* text), so goTypeNeedsImports does not fire and the
+		// need is declared here.
+		return true, false
+	case codegen.ColumnTemporal, codegen.ColumnProperty:
+		return goTypeNeedsImports(f.GoType)
+	case codegen.ColumnScalar, codegen.ColumnScalarNull, codegen.ColumnAny:
+		return false, false
+	case codegen.ColumnList:
+		return listElemNeedsImports(f.ListElem)
+	}
+	return false, false
+}
+
+// listElemNeedsImports walks a codegen.ListElem tree recursively,
+// reporting whether the element decode uses dbtype / time carriers.
+// Called by columnNeedsImports for codegen.ColumnList rows; render never sees
+// a resolver type. Node / Edge / EdgeUnion arms need dbtype
+// unconditionally (dbtype.Node / dbtype.Relationship carriers, §5.5);
+// Property / Temporal delegate to goTypeNeedsImports on the arm's
+// emitted GoType; List recurses; every other arm needs neither.
+func listElemNeedsImports(e *codegen.ListElem) (needDbtype, needTime bool) {
+	if e == nil {
+		return false, false
+	}
+	switch e.Kind {
+	case codegen.ColumnNode, codegen.ColumnEdge, codegen.ColumnEdgeUnion:
+		return true, false
+	case codegen.ColumnProperty, codegen.ColumnTemporal:
+		return goTypeNeedsImports(e.GoType)
+	case codegen.ColumnList:
+		return listElemNeedsImports(e.Nested)
+	case codegen.ColumnScalar, codegen.ColumnScalarNull, codegen.ColumnAny:
+		// bare `any` / plain scalar carriers — no dbtype / time.
+		return false, false
+	}
+	return false, false
+}
+
+// goTypeNeedsImports reports whether a Go type text names dbtype or
+// time. Both are single-string prefix checks; list types are walked
+// element-wise by stripping the leading "[]".
+func goTypeNeedsImports(ty string) (bool, bool) {
+	if elem := strings.TrimPrefix(ty, "[]"); elem != ty {
+		return goTypeNeedsImports(elem)
+	}
+	needDbtype := strings.HasPrefix(ty, "dbtype.")
+	needTime := ty == "time.Time"
+	return needDbtype, needTime
+}
+
 // renderCypherFile emits one <name>.cypher.go file (spec §5.5). Per
 // query in order: query-text const, Params struct (if any), Row struct
 // (if any), method. The withDbtype flag toggles the dbtype import; the
@@ -89,9 +150,9 @@ func groupImports(queries []preparedQuery) (needDbtype, needTime, needFmt bool) 
 // (C4: a write-only file whose queries are all :exec emits no
 // fmt.Errorf wrapper, so fmt is elided). The row-assembly template
 // inlines the per-kind decode arm.
-func renderCypherFile(pkg string, queries []preparedQuery, withDbtype, withTime, withFmt bool, target driverTarget) []byte {
+func renderCypherFile(pkg string, queries []codegen.Query, withDbtype, withTime, withFmt bool, target driverTarget) []byte {
 	var b strings.Builder
-	b.WriteString(header())
+	b.WriteString(codegen.Header())
 	b.WriteString("package ")
 	b.WriteString(pkg)
 	b.WriteString("\n\n")
@@ -138,7 +199,7 @@ func renderCypherFile(pkg string, queries []preparedQuery, withDbtype, withTime,
 				b.WriteString(" ")
 				// EdgeUnion columns emit the bare interface, never
 				// pointer-to-interface — even when nullable (§3.3).
-				if f.Nullable && f.Kind != columnEdgeUnion {
+				if f.Nullable && f.Kind != codegen.ColumnEdgeUnion {
 					b.WriteString("*")
 				}
 				b.WriteString(f.GoType)
@@ -156,14 +217,14 @@ func renderCypherFile(pkg string, queries []preparedQuery, withDbtype, withTime,
 // querier.go and by the method definition in <name>.cypher.go. C4
 // adds the :exec arm: the return list collapses to a bare `error`
 // (no rows-to-decode).
-func writeMethodSignature(b *strings.Builder, p preparedQuery) {
+func writeMethodSignature(b *strings.Builder, p codegen.Query) {
 	b.WriteString(p.MethodName)
 	b.WriteString("(ctx context.Context")
 	switch len(p.ParamFields) {
 	case 0:
 		// bare arg
 	case 1:
-		fmt.Fprintf(b, ", %s ", lowerFirstRune(p.ParamFields[0].Field))
+		fmt.Fprintf(b, ", %s ", codegen.LowerFirstRune(p.ParamFields[0].Field))
 		if p.ParamFields[0].Nullable {
 			b.WriteString("*")
 		}
@@ -171,7 +232,7 @@ func writeMethodSignature(b *strings.Builder, p preparedQuery) {
 	default:
 		fmt.Fprintf(b, ", arg %sParams", p.MethodName)
 	}
-	if p.Cardinality == CardinalityExec {
+	if p.Cardinality == codegen.CardinalityExec {
 		b.WriteString(") error")
 		return
 	}
@@ -183,7 +244,7 @@ func writeMethodSignature(b *strings.Builder, p preparedQuery) {
 // returnTypeText composes the return-type text for a prepared query.
 // :one → T or MethodRow; :many → []T or []MethodRow. Bare-value shape
 // used for single-column projections; struct shape otherwise.
-func returnTypeText(p preparedQuery) string {
+func returnTypeText(p codegen.Query) string {
 	var elem string
 	if len(p.RowFields) == 1 {
 		elem = ""
@@ -192,14 +253,14 @@ func returnTypeText(p preparedQuery) string {
 		// nil is the natural absence value for an interface, and
 		// pointer-to-interface is the Go anti-pattern ADR 0010 D3
 		// Resolved (lines 343–345) forbids (§3.3).
-		if p.RowFields[0].Nullable && p.RowFields[0].Kind != columnEdgeUnion {
+		if p.RowFields[0].Nullable && p.RowFields[0].Kind != codegen.ColumnEdgeUnion {
 			elem = "*"
 		}
 		elem += p.RowFields[0].GoType
 	} else {
 		elem = p.MethodName + "Row"
 	}
-	if p.Cardinality == CardinalityMany {
+	if p.Cardinality == codegen.CardinalityMany {
 		return "[]" + elem
 	}
 	return elem
@@ -213,8 +274,8 @@ func returnTypeText(p preparedQuery) string {
 // a bare-value entity column). C3 extends the switch to temporals
 // (dbtype.Kind{} / time.Time{}), lists (nil), scalars (bool/int64/
 // float64/string), map (nil), and any (nil).
-func zeroValueText(p preparedQuery) string {
-	if p.Cardinality == CardinalityMany {
+func zeroValueText(p codegen.Query) string {
+	if p.Cardinality == codegen.CardinalityMany {
 		return "nil"
 	}
 	if len(p.RowFields) == 1 {
@@ -223,20 +284,20 @@ func zeroValueText(p preparedQuery) string {
 			return "nil"
 		}
 		switch f.Kind {
-		case columnNode, columnEdge:
+		case codegen.ColumnNode, codegen.ColumnEdge:
 			return f.GoType + "{}"
-		case columnTemporal:
+		case codegen.ColumnTemporal:
 			return f.GoType + "{}"
-		case columnList:
+		case codegen.ColumnList:
 			return "nil"
-		case columnAny, columnScalarNull, columnEdgeUnion:
+		case codegen.ColumnAny, codegen.ColumnScalarNull, codegen.ColumnEdgeUnion:
 			// edgeUnion single-column return type is the interface; its
-			// zero value is nil (§3.1 / §5.5). columnScalarNull is
+			// zero value is nil (§3.1 / §5.5). codegen.ColumnScalarNull is
 			// unreachable at the top level today (Phase B routes
-			// ScalarNull to columnAny) but listed for exhaustive-switch
+			// ScalarNull to codegen.ColumnAny) but listed for exhaustive-switch
 			// discipline.
 			return "nil"
-		case columnProperty, columnScalar:
+		case codegen.ColumnProperty, codegen.ColumnScalar:
 			// Fall through to the per-Go-type dispatch below.
 		}
 		switch f.GoType {
@@ -260,15 +321,15 @@ func zeroValueText(p preparedQuery) string {
 // writeMethod writes the method definition + body (spec §5.3 / §5.5).
 // C4 adds the :exec arm: three-line body (run, discard rows, return
 // error) with no Row-struct decoding.
-func writeMethod(b *strings.Builder, p preparedQuery) {
+func writeMethod(b *strings.Builder, p codegen.Query) {
 	// Doc comment: first 3 lines of query text, prefixed "//   ".
 	writeDocComment(b, p)
 	b.WriteString("func (q *Queries) ")
 	writeMethodSignature(b, p)
 	b.WriteString(" {\n")
 
-	if p.Cardinality == CardinalityExec {
-		fmt.Fprintf(b, "\t_, err := q.db.run(ctx, %sQueryText, %s, %s)\n", p.Bare, paramsMapText(p), accessModeText(p.AccessMode))
+	if p.Cardinality == codegen.CardinalityExec {
+		fmt.Fprintf(b, "\t_, err := q.db.run(ctx, %sQueryText, %s, %s)\n", p.Bare, paramsMapText(p), accessModeText(p.IsWrite))
 		b.WriteString("\treturn err\n")
 		b.WriteString("}\n")
 		return
@@ -277,7 +338,7 @@ func writeMethod(b *strings.Builder, p preparedQuery) {
 	// Body: build the params map, call run, decode.
 	writeRunCall(b, p)
 
-	if p.Cardinality == CardinalityOne {
+	if p.Cardinality == codegen.CardinalityOne {
 		writeOneBody(b, p)
 	} else {
 		writeManyBody(b, p)
@@ -285,11 +346,11 @@ func writeMethod(b *strings.Builder, p preparedQuery) {
 	b.WriteString("}\n")
 }
 
-// accessModeText picks the fourth q.db.run argument from the prepare-
-// side closed enum (spec §1.1). Dispatch is on committed data —
-// preparedQuery.AccessMode — never on Validated.Statement.
-func accessModeText(m accessMode) string {
-	if m == accessModeWrite {
+// accessModeText picks the fourth q.db.run argument (spec §1.1).
+// Dispatch is on committed data — codegen.Query.IsWrite — never on
+// Validated.Statement.
+func accessModeText(isWrite bool) string {
+	if isWrite {
 		return "neo4j.AccessModeWrite"
 	}
 	return "neo4j.AccessModeRead"
@@ -297,7 +358,7 @@ func accessModeText(m accessMode) string {
 
 // writeDocComment emits the per-method doc comment: the method name
 // and the first 3 lines of the query text, prefixed //   .
-func writeDocComment(b *strings.Builder, p preparedQuery) {
+func writeDocComment(b *strings.Builder, p codegen.Query) {
 	fmt.Fprintf(b, "// %s executes the %s query.\n//\n", p.MethodName, p.MethodName)
 	lines := strings.Split(strings.TrimRight(p.SourceText, "\n"), "\n")
 	limit := 3
@@ -315,8 +376,8 @@ func writeDocComment(b *strings.Builder, p preparedQuery) {
 // writeRunCall emits the `records, err := q.db.run(...)` prelude.
 // C4 threads the access mode dispatch per Validated.Statement (§5.5);
 // the C1 hardcoded neo4j.AccessModeRead retires.
-func writeRunCall(b *strings.Builder, p preparedQuery) {
-	fmt.Fprintf(b, "\trecords, err := q.db.run(ctx, %sQueryText, %s, %s)\n", p.Bare, paramsMapText(p), accessModeText(p.AccessMode))
+func writeRunCall(b *strings.Builder, p codegen.Query) {
+	fmt.Fprintf(b, "\trecords, err := q.db.run(ctx, %sQueryText, %s, %s)\n", p.Bare, paramsMapText(p), accessModeText(p.IsWrite))
 	fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %s, err\n\t}\n", zeroValueText(p))
 }
 
@@ -327,7 +388,7 @@ func writeRunCall(b *strings.Builder, p preparedQuery) {
 // the widen pattern (int64(v)) — the driver accepts the wider carrier.
 // Nullable parameters go through binParamExpr, which handles the
 // nil-pointer case by binding a bare nil literal.
-func paramsMapText(p preparedQuery) string {
+func paramsMapText(p codegen.Query) string {
 	if len(p.ParamFields) == 0 {
 		return "nil"
 	}
@@ -339,7 +400,7 @@ func paramsMapText(p preparedQuery) string {
 		}
 		var access string
 		if len(p.ParamFields) == 1 {
-			access = lowerFirstRune(f.Field)
+			access = codegen.LowerFirstRune(f.Field)
 		} else {
 			access = "arg." + f.Field
 		}
@@ -355,7 +416,7 @@ func paramsMapText(p preparedQuery) string {
 // parameters pass through unchanged (the driver accepts a nil pointer
 // as SQL null). Non-nullable narrow-integer / float32 widen to their
 // driver carrier via a Go conversion. Every other type binds bare.
-func paramBindExpr(f preparedParam, access string) string {
+func paramBindExpr(f codegen.Param, access string) string {
 	if f.Nullable {
 		// Uniform: pass the pointer through as-is. A nil pointer binds
 		// Cypher null via the driver's parameter marshalling.
@@ -369,7 +430,7 @@ func paramBindExpr(f preparedParam, access string) string {
 }
 
 // writeOneBody emits the :one arity-check + per-column decode + return.
-func writeOneBody(b *strings.Builder, p preparedQuery) {
+func writeOneBody(b *strings.Builder, p codegen.Query) {
 	zero := zeroValueText(p)
 	fmt.Fprintf(b, "\tif len(records) == 0 {\n\t\treturn %s, ErrNoRows\n\t}\n", zero)
 	fmt.Fprintf(b, "\tif len(records) > 1 {\n\t\treturn %s, ErrMultipleResults\n\t}\n", zero)
@@ -388,12 +449,12 @@ func writeOneBody(b *strings.Builder, p preparedQuery) {
 }
 
 // writeManyBody emits the :many loop + per-column decode + return.
-func writeManyBody(b *strings.Builder, p preparedQuery) {
+func writeManyBody(b *strings.Builder, p codegen.Query) {
 	var elem string
 	if len(p.RowFields) == 1 {
 		// EdgeUnion columns emit the bare interface, never
 		// pointer-to-interface — even when nullable (§3.3).
-		if p.RowFields[0].Nullable && p.RowFields[0].Kind != columnEdgeUnion {
+		if p.RowFields[0].Nullable && p.RowFields[0].Kind != codegen.ColumnEdgeUnion {
 			elem = "*"
 		}
 		elem += p.RowFields[0].GoType
@@ -421,7 +482,7 @@ func writeManyBody(b *strings.Builder, p preparedQuery) {
 // writeSingleColumnDecode emits one column's GetRecordValue call + err
 // handling + nullability check + assign/return line, at the standard
 // method-body indent level.
-func writeSingleColumnDecode(b *strings.Builder, p preparedQuery, f preparedRow, recordExpr, zero, assignPrefix, assignSuffix string) {
+func writeSingleColumnDecode(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr, zero, assignPrefix, assignSuffix string) {
 	writeSingleColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, "\t")
 }
 
@@ -438,7 +499,7 @@ func writeSingleColumnDecode(b *strings.Builder, p preparedQuery, f preparedRow,
 // (its Int64 carrier + cast). Widening is safe; narrowing is the
 // caller's contract per the schema author's declared width (FLOAT32
 // schema-width contract is C3's business per §5.1).
-func writeSingleColumnDecodeIndent(b *strings.Builder, p preparedQuery, f preparedRow, recordExpr, zero, assignPrefix, assignSuffix, indent string) {
+func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr, zero, assignPrefix, assignSuffix, indent string) {
 	varName := "value"
 	if len(p.RowFields) > 1 {
 		for i, r := range p.RowFields {
@@ -449,25 +510,25 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p preparedQuery, f prepar
 		}
 	}
 	switch f.Kind {
-	case columnNode, columnEdge:
+	case codegen.ColumnNode, codegen.ColumnEdge:
 		writeEntityColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
 		return
-	case columnAny, columnScalarNull:
-		// columnScalarNull at the top level is unreachable today (Phase B
-		// routes ScalarNull to columnAny), but shares columnAny's
+	case codegen.ColumnAny, codegen.ColumnScalarNull:
+		// codegen.ColumnScalarNull at the top level is unreachable today (Phase B
+		// routes ScalarNull to codegen.ColumnAny), but shares codegen.ColumnAny's
 		// record.Get lane and is listed for exhaustive-switch discipline.
 		writeAnyColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
 		return
-	case columnList:
+	case codegen.ColumnList:
 		writeListColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
 		return
-	case columnEdgeUnion:
+	case codegen.ColumnEdgeUnion:
 		writeEdgeUnionColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
 		return
-	case columnProperty, columnTemporal, columnScalar:
+	case codegen.ColumnProperty, codegen.ColumnTemporal, codegen.ColumnScalar:
 		// Fall through to the GetRecordValue + narrow-convert path below.
 	}
-	// columnProperty / columnTemporal / columnScalar all use GetRecordValue
+	// codegen.ColumnProperty / codegen.ColumnTemporal / codegen.ColumnScalar all use GetRecordValue
 	// with the driver-carrier + narrow-convert pattern. Temporals /
 	// scalars have carrier == GoType; property FLOAT32 narrows float64 →
 	// float32; property narrow-int narrows int64 → intN.
@@ -507,7 +568,7 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p preparedQuery, f prepar
 // (the resolver committed the column, so the driver must produce it);
 // the "found" branch assigns the value verbatim (a nil value satisfies
 // the `any` field's zero — no pointer wrap per §5.1's table).
-func writeAnyColumnDecodeIndent(b *strings.Builder, p preparedQuery, f preparedRow, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
+func writeAnyColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
 	fmt.Fprintf(b, "%s%s, ok := %s.Get(%q)\n", indent, varName, recordExpr, f.ColumnName)
 	fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: key not found\", %q)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
 	b.WriteString(indent)
@@ -521,7 +582,7 @@ func writeAnyColumnDecodeIndent(b *strings.Builder, p preparedQuery, f preparedR
 // dispatches on the element type. The loop body is derived by
 // walkListElemPlan, which recurses for nested list elements. Nullable
 // list column produces *[]T via the standard pointer-wrap.
-func writeListColumnDecodeIndent(b *strings.Builder, p preparedQuery, f preparedRow, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
+func writeListColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
 	fmt.Fprintf(b, "%s%s, isNil, err := neo4j.GetRecordValue[[]any](%s, %q)\n", indent, varName, recordExpr, f.ColumnName)
 	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
 	if f.Nullable {
@@ -554,22 +615,22 @@ func writeListColumnDecodeIndent(b *strings.Builder, p preparedQuery, f prepared
 // (spec §1.3, §5.5). The loop iterates the driver's []any slice one
 // element at a time; the body dispatches on the plan's committed Kind
 // via walkListElemBody. Every future resolver variant lands as a new
-// columnKind arm handled once — prepare's buildListElemPlan and the
+// codegen.ColumnKind arm handled once — prepare's buildListElemPlan and the
 // emission switch below both fail to compile until it is handled.
 //
 // The accumulator name (accVar) accumulates elements at this depth;
 // the source slice name (srcVar) is the raw driver []any at this depth.
-func walkListElemPlan(b *strings.Builder, p preparedQuery, f preparedRow, e *preparedListElem, accVar, srcVar, zero, indent string) {
+func walkListElemPlan(b *strings.Builder, p codegen.Query, f codegen.Row, e *codegen.ListElem, accVar, srcVar, zero, indent string) {
 	iterVar := "elem"
 	if strings.Contains(indent, "\t\t\t\t") { // three levels deep — disambiguate
 		iterVar = "elem" + fmt.Sprint(strings.Count(indent, "\t"))
 	}
 	// The index variable is only used by the element-type-assertion
-	// fail message; the two "bare append" arms (columnAny for Unknown,
-	// columnScalarNull for ScalarNull) never emit an index. Suppress
+	// fail message; the two "bare append" arms (codegen.ColumnAny for Unknown,
+	// codegen.ColumnScalarNull for ScalarNull) never emit an index. Suppress
 	// the unused-var warning by ranging with `_` in those cases.
 	indexVar := "i"
-	if e.Kind == columnAny || e.Kind == columnScalarNull {
+	if e.Kind == codegen.ColumnAny || e.Kind == codegen.ColumnScalarNull {
 		indexVar = "_"
 	}
 	fmt.Fprintf(b, "%sfor %s, %s := range %s {\n", indent, indexVar, iterVar, srcVar)
@@ -578,51 +639,48 @@ func walkListElemPlan(b *strings.Builder, p preparedQuery, f preparedRow, e *pre
 }
 
 // walkListElemBody emits the body of one list-element loop iteration
-// (spec §5.5). Every arm is a case on the plan's committed columnKind
+// (spec §5.5). Every arm is a case on the plan's committed codegen.ColumnKind
 // — the render layer walks committed data only, never a resolver type.
 // accVar is the accumulator to append into at this depth; iterVar is
 // the raw `elem` from the driver []any; zero is the enclosing method's
 // zero-return expression; indent is already deepened by one level
 // relative to the loop head.
-func walkListElemBody(b *strings.Builder, p preparedQuery, f preparedRow, e *preparedListElem, accVar, iterVar, zero, indent string) {
+func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *codegen.ListElem, accVar, iterVar, zero, indent string) {
 	switch e.Kind {
-	case columnProperty:
-		carrier := e.Carrier
-		if carrier == "" {
-			carrier = e.GoType
-		}
+	case codegen.ColumnProperty:
+		carrier := driverCarrier(e.GoType)
 		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, carrier)
 		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, carrier, f.ColumnName, iterVar, indent)
-		if e.UsesConvert {
+		if carrier != e.GoType {
 			fmt.Fprintf(b, "%s%s = append(%s, %s(v))\n", indent, accVar, accVar, e.GoType)
 		} else {
 			fmt.Fprintf(b, "%s%s = append(%s, v)\n", indent, accVar, accVar)
 		}
-	case columnTemporal:
+	case codegen.ColumnTemporal:
 		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, e.GoType)
 		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, e.GoType, f.ColumnName, iterVar, indent)
 		fmt.Fprintf(b, "%s%s = append(%s, v)\n", indent, accVar, accVar)
-	case columnScalar:
+	case codegen.ColumnScalar:
 		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, e.GoType)
 		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, e.GoType, f.ColumnName, iterVar, indent)
 		fmt.Fprintf(b, "%s%s = append(%s, v)\n", indent, accVar, accVar)
-	case columnScalarNull, columnAny:
+	case codegen.ColumnScalarNull, codegen.ColumnAny:
 		fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, iterVar)
-	case columnNode:
+	case codegen.ColumnNode:
 		fmt.Fprintf(b, "%snode, ok := %s.(dbtype.Node)\n", indent, iterVar)
 		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected dbtype.Node, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, iterVar, indent)
 		fmt.Fprintf(b, "%sdecoded, err := decode%s(node)\n", indent, e.EntityName)
 		fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
 		fmt.Fprintf(b, "%s%s = append(%s, decoded)\n", indent, accVar, accVar)
-	case columnEdge:
+	case codegen.ColumnEdge:
 		fmt.Fprintf(b, "%srel, ok := %s.(dbtype.Relationship)\n", indent, iterVar)
 		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected dbtype.Relationship, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, iterVar, indent)
 		fmt.Fprintf(b, "%sdecoded, err := decode%s(rel)\n", indent, e.EntityName)
 		fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: %%w\", %q, i, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
 		fmt.Fprintf(b, "%s%s = append(%s, decoded)\n", indent, accVar, accVar)
-	case columnEdgeUnion:
+	case codegen.ColumnEdgeUnion:
 		// C5 list-of-edgeUnion element arm (§5.5). Plan carries an
-		// index into the owning preparedQuery.EdgeUnions slice; the
+		// index into the owning codegen.Query.EdgeUnions slice; the
 		// dispatch keys are the committed EdgeKeys' Labels and the
 		// candidates are the committed entity struct names — no
 		// re-derivation.
@@ -637,7 +695,7 @@ func walkListElemBody(b *strings.Builder, p preparedQuery, f preparedRow, e *pre
 			fmt.Fprintf(b, "%s\t%s = append(%s, entity)\n", indent, accVar, accVar)
 		}
 		fmt.Fprintf(b, "%sdefault:\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: unexpected relationship type %%q\", %q, i, rel.Type)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
-	case columnList:
+	case codegen.ColumnList:
 		// Nested list: type-assert to []any, then recurse.
 		fmt.Fprintf(b, "%sinner, ok := %s.([]any)\n", indent, iterVar)
 		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected []any, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, iterVar, indent)
@@ -658,7 +716,7 @@ func walkListElemBody(b *strings.Builder, p preparedQuery, f preparedRow, e *pre
 // or assigns to the Row field (multi-column). Nullable columns skip
 // the raw==nil non-null gate and let the nil interface propagate as
 // the natural absence value (§3.3, ADR 0010 D3 Resolved lines 343–345).
-func writeEdgeUnionColumnDecodeIndent(b *strings.Builder, p preparedQuery, f preparedRow, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
+func writeEdgeUnionColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
 	// Distinct per-column locals for the raw / rel bindings so
 	// multi-column Row-assembly bodies never shadow. Single-column
 	// projections keep the bare "raw" / "rel" locals matching spec
@@ -711,7 +769,7 @@ func writeEdgeUnionColumnDecodeIndent(b *strings.Builder, p preparedQuery, f pre
 // assignment line; the callback keeps the raw assignPrefix / assignSuffix
 // out of the dispatch-body inner loop so the indent arithmetic is done
 // in exactly one place.
-func writeEdgeUnionDispatchBody(b *strings.Builder, p preparedQuery, f preparedRow, rawLocal, relLocal, okLocal, entityLocal, zero string, assignBody func(extraIndent, valueExpr string), indent, extraIndent string) {
+func writeEdgeUnionDispatchBody(b *strings.Builder, p codegen.Query, f codegen.Row, rawLocal, relLocal, okLocal, entityLocal, zero string, assignBody func(extraIndent, valueExpr string), indent, extraIndent string) {
 	dispatchIndent := indent + extraIndent
 	fmt.Fprintf(b, "%s%s, %s := %s.(dbtype.Relationship)\n", dispatchIndent, relLocal, okLocal, rawLocal)
 	fmt.Fprintf(b, "%sif !%s {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q: expected dbtype.Relationship, got %%T\", %q, %s)\n%s}\n", dispatchIndent, okLocal, dispatchIndent, zero, p.MethodName, f.ColumnName, rawLocal, dispatchIndent)
@@ -726,20 +784,20 @@ func writeEdgeUnionDispatchBody(b *strings.Builder, p preparedQuery, f preparedR
 	fmt.Fprintf(b, "%sdefault:\n%s\treturn %s, fmt.Errorf(\"%s: column %%q: unexpected relationship type %%q\", %q, %s.Type)\n%s}\n", dispatchIndent, dispatchIndent, zero, p.MethodName, f.ColumnName, relLocal, dispatchIndent)
 }
 
-// edgeKeyToEntityName resolves an EdgeKey position in a preparedRow's
+// edgeKeyToEntityName resolves an EdgeKey position in a codegen.Row's
 // EdgeKeys slice to the emitted entity struct name. The lookup walks
-// the owning query's preparedEdgeUnion entries, matching on ColumnName
+// the owning query's codegen.EdgeUnion entries, matching on ColumnName
 // (unique per query), then indexes Candidates by the position. Every
 // call site has a Phase B guarantee that the row's edgeUnion entry
 // exists.
-func edgeKeyToEntityName(p preparedQuery, f preparedRow, i int) string {
+func edgeKeyToEntityName(p codegen.Query, f codegen.Row, i int) string {
 	for _, u := range p.EdgeUnions {
 		if u.ColumnName == f.ColumnName && u.FieldName == f.Field {
 			return u.Candidates[i]
 		}
 	}
-	// Unreachable: Phase B guarantees a matching preparedEdgeUnion for
-	// every columnEdgeUnion Row field. Returning the bare label keeps
+	// Unreachable: Phase B guarantees a matching codegen.EdgeUnion for
+	// every codegen.ColumnEdgeUnion Row field. Returning the bare label keeps
 	// the emission textually distinct so a regression surfaces at the
 	// nested-module compile fence rather than silently miscompiling.
 	return string(f.EdgeKeys[i].KeyLabels)
@@ -751,9 +809,9 @@ func edgeKeyToEntityName(p preparedQuery, f preparedRow, i int) string {
 // value and returns the entity struct. Nullable columns produce a
 // *EntityName pointer field via a local +address-of; non-nullable
 // columns are a decode error when the driver value arrived null.
-func writeEntityColumnDecodeIndent(b *strings.Builder, p preparedQuery, f preparedRow, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
+func writeEntityColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
 	var carrier, decodeArg string
-	if f.Kind == columnNode {
+	if f.Kind == codegen.ColumnNode {
 		carrier = "dbtype.Node"
 		decodeArg = "node"
 	} else {

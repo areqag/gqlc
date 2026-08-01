@@ -1,6 +1,9 @@
 package codegen
 
-import "errors"
+import (
+	"errors"
+	"slices"
+)
 
 // Sentinels returned by Generate. Package-level values so callers branch
 // with errors.Is; fail-sites wrap them with detail (fmt.Errorf("%w:
@@ -53,16 +56,15 @@ var (
 
 	// ErrUnrepresentableWidth is returned when a schema property, a query
 	// column, a query parameter, or a list element's leaf has a property
-	// width that has no faithful Go representation on the neo4j-go-driver
-	// target (v5 and v6 alike): INT128, INT256, UINT128, UINT256, FLOAT16, FLOAT128,
-	// FLOAT256, DECIMAL. Distinct from ErrOutOfC6Scope: no future stage
-	// retires the eight widths — the underlying store (neo4j) stores
-	// integers as int64 and floats as float64; the sentinel is a permanent
-	// unrepresentability, not a deferred capability. The fail-message names
-	// the fail-site (entity + property; query + column; query + parameter)
-	// and the offending width. Checked eagerly at Phase Z for schema
-	// properties; lazily at Phase A for parameters and columns; lazily
-	// during list recursion for list leaves. Introduced at C3.
+	// width the target's TypeMap reports no faithful Go carrier for.
+	// Distinct from ErrOutOfC6Scope: the refused widths follow from what
+	// the store can hold and what the driver can carry, so no future
+	// stage retires them — a permanent unrepresentability, not a deferred
+	// capability. The fail-message names the fail-site (entity +
+	// property; query + column; query + parameter) and the offending
+	// width. Checked eagerly at Phase Z for schema properties; lazily at
+	// Phase A for parameters and columns; lazily during list recursion
+	// for list leaves. Introduced at C3.
 	ErrUnrepresentableWidth = errors.New("unrepresentable property width")
 
 	// ErrExecOnProjection is returned when a query annotated :exec has at
@@ -139,7 +141,7 @@ var (
 )
 
 // allSentinels is the canonical closed set of user-input-reachable
-// sentinels Generate may return, kept in one place so
+// sentinels Generate may return, kept in one place so a backend's
 // TestSentinelReachability can sweep it against the invalid-fixture
 // map. A sentinel added here must be paired with at least one negative
 // fixture; a retired one must be dropped from both.
@@ -166,3 +168,10 @@ var allSentinels = []error{
 	ErrExecOnProjection,
 	ErrCardinalityShapeMismatch,
 }
+
+// AllSentinels returns a copy of the codegen package's user-input-
+// reachable sentinels. Exported for cross-package harnesses (a backend's
+// fixture loader) that need to map fully-qualified sentinel names back
+// to values. Callers must not rely on ordering — the slice is
+// copy-returned so a mutation cannot leak into the canonical set.
+func AllSentinels() []error { return slices.Clone(allSentinels) }

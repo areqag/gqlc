@@ -1,4 +1,4 @@
-package codegen
+package neo4j
 
 import (
 	"bytes"
@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/procsig"
 	"github.com/areqag/gqlc/internal/query/cypher"
 	"github.com/areqag/gqlc/internal/queryfile"
@@ -24,12 +25,12 @@ import (
 
 var update = flag.Bool("update", false, "regenerate codegen golden files")
 
-const fixtureDir = "../../test/data/codegen"
+const fixtureDir = "../../../test/data/codegen"
 
 // manifest is the on-disk descriptor per fixture directory. Present in
 // both valid and invalid fixtures; the invalid arm additionally carries
 // ExpectedError (fully-qualified sentinel name) and, for the hand-
-// constructed ErrInvalidCardinality case, SyntheticZeroCardinality —
+// constructed codegen.ErrInvalidCardinality case, SyntheticZeroCardinality —
 // see loadInvalidInput.
 //
 // DriverVersion selects the emission target: "" or "v5" for the
@@ -60,19 +61,23 @@ func (s *CodegenSuite) generatorFor(m manifest) *Codegen {
 	return nil
 }
 
+// codegenSentinels is the core package's canonical reachable set,
+// resolved once so the name map, the sweep, and the identity test all
+// read the same slice.
+var codegenSentinels = codegen.AllSentinels()
+
 // sentinelByName maps the manifest's fully-qualified sentinel string
 // back to the actual error value at load time. Built from the two
-// package's allSentinels slices — a change there without a fixture
-// update fails the queryfile / codegen reachability sweeps, and a
-// fixture that names a non-canonical sentinel fails invalidFixtures'
-// map lookup.
+// packages' sentinel sets — a change there without a fixture update
+// fails the queryfile / codegen reachability sweeps, and a fixture that
+// names a non-canonical sentinel fails invalidFixtures' map lookup.
 var sentinelByName = func() map[string]error {
 	m := make(map[string]error)
 	pairs := []struct {
 		prefix string
 		set    []error
 	}{
-		{"codegen.", allSentinels},
+		{"codegen.", codegenSentinels},
 		{"queryfile.", queryfile.AllSentinels()},
 	}
 	for _, p := range pairs {
@@ -91,37 +96,37 @@ var sentinelByName = func() map[string]error {
 //nolint:errorlint // identity match on package-level sentinels is intended
 func sentinelIdent(err error) string {
 	switch err {
-	case ErrInvalidPackageName:
+	case codegen.ErrInvalidPackageName:
 		return "ErrInvalidPackageName"
-	case ErrDuplicateSourceFile:
+	case codegen.ErrDuplicateSourceFile:
 		return "ErrDuplicateSourceFile"
-	case ErrDuplicateQueryName:
+	case codegen.ErrDuplicateQueryName:
 		return "ErrDuplicateQueryName"
-	case ErrInvalidCardinality:
+	case codegen.ErrInvalidCardinality:
 		return "ErrInvalidCardinality"
-	case ErrFormatFailure:
+	case codegen.ErrFormatFailure:
 		return "ErrFormatFailure"
-	case ErrOutOfC6Scope:
+	case codegen.ErrOutOfC6Scope:
 		return "ErrOutOfC6Scope"
-	case ErrExecOnProjection:
+	case codegen.ErrExecOnProjection:
 		return "ErrExecOnProjection"
-	case ErrCardinalityShapeMismatch:
+	case codegen.ErrCardinalityShapeMismatch:
 		return "ErrCardinalityShapeMismatch"
-	case ErrUnrepresentableWidth:
+	case codegen.ErrUnrepresentableWidth:
 		return "ErrUnrepresentableWidth"
-	case ErrParamNameCollision:
+	case codegen.ErrParamNameCollision:
 		return "ErrParamNameCollision"
-	case ErrRowFieldCollision:
+	case codegen.ErrRowFieldCollision:
 		return "ErrRowFieldCollision"
-	case ErrAliasRequired:
+	case codegen.ErrAliasRequired:
 		return "ErrAliasRequired"
-	case ErrIdentifierCollision:
+	case codegen.ErrIdentifierCollision:
 		return "ErrIdentifierCollision"
-	case ErrInvalidEntityName:
+	case codegen.ErrInvalidEntityName:
 		return "ErrInvalidEntityName"
-	case ErrUnnamedMultiLabelType:
+	case codegen.ErrUnnamedMultiLabelType:
 		return "ErrUnnamedMultiLabelType"
-	case ErrPropertyFieldCollision:
+	case codegen.ErrPropertyFieldCollision:
 		return "ErrPropertyFieldCollision"
 	case queryfile.ErrMissingAnnotation:
 		return "ErrMissingAnnotation"
@@ -177,7 +182,7 @@ func (s *CodegenSuite) loadSchema(dir string) schema.Schema {
 // s.Require().NoError below; the invalid-arm variant
 // (loadNamedQueriesAllowing) permits pre-codegen errors when the
 // fixture declares a non-codegen expected sentinel.
-func (s *CodegenSuite) loadNamedQueries(dir string, m manifest, sch schema.Schema) []NamedQuery {
+func (s *CodegenSuite) loadNamedQueries(dir string, m manifest, sch schema.Schema) []codegen.NamedQuery {
 	out, err := loadNamedQueries(dir, m, sch)
 	s.Require().NoError(err)
 	return out
@@ -187,13 +192,13 @@ func (s *CodegenSuite) loadNamedQueries(dir string, m manifest, sch schema.Schem
 // TestInvalid. Returns the first resolution error verbatim so the
 // invalid arm can decide whether to accept it (a fixture may target a
 // non-codegen sentinel that fires upstream of codegen).
-func loadNamedQueries(dir string, m manifest, sch schema.Schema) ([]NamedQuery, error) {
+func loadNamedQueries(dir string, m manifest, sch schema.Schema) ([]codegen.NamedQuery, error) {
 	emptyReg, err := procsig.NewRegistry(nil)
 	if err != nil {
 		return nil, err
 	}
 	res := resolver.New(sch, resolver.WithRegistry(emptyReg))
-	var out []NamedQuery
+	var out []codegen.NamedQuery
 	for _, qf := range m.QueryFiles {
 		src, err := os.ReadFile(filepath.Join(dir, qf))
 		if err != nil {
@@ -212,7 +217,7 @@ func loadNamedQueries(dir string, m manifest, sch schema.Schema) ([]NamedQuery, 
 			if err != nil {
 				return nil, err
 			}
-			out = append(out, NamedQuery{
+			out = append(out, codegen.NamedQuery{
 				Name:        aq.Name,
 				Cardinality: aq.Cardinality,
 				SourceFile:  qf,
@@ -253,7 +258,7 @@ func (s *CodegenSuite) TestValid() {
 			sch := s.loadSchema(dir)
 			queries := s.loadNamedQueries(dir, m, sch)
 
-			got, err := s.generatorFor(m).Generate(Input{Schema: sch, Queries: queries})
+			got, err := s.generatorFor(m).Generate(codegen.Input{Schema: sch, Queries: queries})
 			s.Require().NoError(err)
 			s.assertPackage(got, m.Package)
 
@@ -269,7 +274,7 @@ func (s *CodegenSuite) TestValid() {
 
 // TestInvalid walks invalid/*/, resolves the manifest's ExpectedError
 // to a sentinel, calls the pipeline, and asserts (a) the returned
-// []File is nil and (b) errors.Is(err, wantErr).
+// []codegen.File is nil and (b) errors.Is(err, wantErr).
 func (s *CodegenSuite) TestInvalid() {
 	dirs := s.invalidFixtures()
 	for _, dir := range dirs {
@@ -290,24 +295,24 @@ func (s *CodegenSuite) TestInvalid() {
 	}
 }
 
-// loadInvalidInput assembles the Input for an invalid fixture. Two
+// loadInvalidInput assembles the codegen.Input for an invalid fixture. Two
 // paths: normal (schema + queryFiles pipeline) and synthetic (a hand-
-// constructed NamedQuery with a zero-valued Cardinality, the only way
-// to reach ErrInvalidCardinality — the queryfile front end never emits
+// constructed codegen.NamedQuery with a zero-valued Cardinality, the only way
+// to reach codegen.ErrInvalidCardinality — the queryfile front end never emits
 // one).
-func (s *CodegenSuite) loadInvalidInput(dir string, m manifest) Input {
+func (s *CodegenSuite) loadInvalidInput(dir string, m manifest) codegen.Input {
 	sch := s.loadSchema(dir)
 	if m.SyntheticZeroCardinality {
-		return Input{
+		return codegen.Input{
 			Schema: sch,
-			Queries: []NamedQuery{{
+			Queries: []codegen.NamedQuery{{
 				Name:       "ZeroCardinality",
 				SourceFile: "synthetic.cypher",
 				SourceText: "MATCH (n) RETURN n",
 			}},
 		}
 	}
-	return Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
+	return codegen.Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
 }
 
 // TestWithDriverVersion pins the driver-target seam at the unit level,
@@ -322,7 +327,7 @@ func (s *CodegenSuite) TestWithDriverVersion() {
 	dir := filepath.Join(fixtureDir, "valid", "skeleton")
 	m := s.loadManifest(dir)
 	sch := s.loadSchema(dir)
-	in := Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
+	in := codegen.Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
 
 	cases := []struct {
 		name         string
@@ -375,13 +380,13 @@ func (s *CodegenSuite) TestWithDriverVersion() {
 // a configured name replaces the Schema.Name derivation across every
 // emitted file; the empty string (the zero value) keeps the derivation
 // so the golden corpus stays byte-identical; a value outside the
-// packageIdent grammar is ErrInvalidPackageName naming the configured
+// packageIdent grammar is codegen.ErrInvalidPackageName naming the configured
 // string, not the schema name.
 func (s *CodegenSuite) TestWithPackageName() {
 	dir := filepath.Join(fixtureDir, "valid", "skeleton")
 	m := s.loadManifest(dir)
 	sch := s.loadSchema(dir)
-	in := Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
+	in := codegen.Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
 
 	s.Run("configured name wins", func() {
 		files, err := New(WithPackageName("configuredpkg")).Generate(in)
@@ -397,13 +402,13 @@ func (s *CodegenSuite) TestWithPackageName() {
 		files, err := New(WithPackageName("Not_OK")).Generate(in)
 		s.Require().Error(err)
 		s.Require().Nil(files)
-		s.Require().ErrorIs(err, ErrInvalidPackageName)
+		s.Require().ErrorIs(err, codegen.ErrInvalidPackageName)
 		s.Require().ErrorContains(err, `configured package "Not_OK"`)
 	})
 }
 
-// TestDoubleRun asserts Generate is byte-deterministic: same Input in,
-// byte-identical []File out, twice. Independent of the golden
+// TestDoubleRun asserts Generate is byte-deterministic: same codegen.Input in,
+// byte-identical []codegen.File out, twice. Independent of the golden
 // comparison — a golden diff catches within-run nondeterminism (map
 // iteration) only flakily; this test catches it in a single run.
 func (s *CodegenSuite) TestDoubleRun() {
@@ -412,7 +417,7 @@ func (s *CodegenSuite) TestDoubleRun() {
 		s.Run(name, func() {
 			m := s.loadManifest(dir)
 			sch := s.loadSchema(dir)
-			in := Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
+			in := codegen.Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
 			first, err := s.generatorFor(m).Generate(in)
 			s.Require().NoError(err)
 			second, err := s.generatorFor(m).Generate(in)
@@ -429,8 +434,8 @@ func (s *CodegenSuite) TestDoubleRun() {
 }
 
 // TestSentinelReachability is the bidirectional sweep: every
-// codegen.allSentinels member has at least one invalid fixture; every
-// mapped codegen sentinel is in allSentinels. Queryfile sentinels
+// codegenSentinels member has at least one invalid fixture; every
+// mapped codegen sentinel is in codegenSentinels. Queryfile sentinels
 // have their own sweep in internal/queryfile — this one is codegen-
 // only, matching the two-disjoint-sets discipline (spec §9.3).
 func TestSentinelReachability(t *testing.T) {
@@ -454,11 +459,11 @@ func TestSentinelReachability(t *testing.T) {
 		}
 		covered[sentinel] = true
 	}
-	canonical := make(map[error]bool, len(allSentinels))
-	for _, sentinel := range allSentinels {
+	canonical := make(map[error]bool, len(codegenSentinels))
+	for _, sentinel := range codegenSentinels {
 		canonical[sentinel] = true
 	}
-	for _, sentinel := range allSentinels {
+	for _, sentinel := range codegenSentinels {
 		require.True(t, covered[sentinel], "sentinel %q has no negative fixture", sentinel)
 	}
 	for sentinel := range covered {
@@ -467,12 +472,12 @@ func TestSentinelReachability(t *testing.T) {
 }
 
 // isCodegenSentinel reports whether err is one of the codegen package's
-// user-input-reachable sentinels (i.e. in allSentinels). Identity match
-// is intentional — see sentinelIdent.
+// user-input-reachable sentinels (i.e. in codegenSentinels). Identity
+// match is intentional — see sentinelIdent.
 //
 //nolint:errorlint // identity match on package-level sentinels is intended
 func isCodegenSentinel(err error) bool {
-	for _, s := range allSentinels {
+	for _, s := range codegenSentinels {
 		if s == err {
 			return true
 		}
@@ -483,7 +488,7 @@ func isCodegenSentinel(err error) bool {
 // assertPackage checks every emitted file's package clause matches the
 // manifest's declared package. Cheap; catches a template regression
 // that swaps package names between files.
-func (s *CodegenSuite) assertPackage(files []File, want string) {
+func (s *CodegenSuite) assertPackage(files []codegen.File, want string) {
 	for _, f := range files {
 		lines := bytes.SplitN(f.Contents, []byte{'\n'}, 4)
 		s.Require().GreaterOrEqual(len(lines), 3, "file %s too short for header + package", f.Path)
@@ -497,7 +502,7 @@ func (s *CodegenSuite) assertPackage(files []File, want string) {
 // there is present in got with byte-identical contents, and every file
 // in got is present on disk. On mismatch, the assertion reports the
 // file path and a diff-shaped message.
-func (s *CodegenSuite) assertGoldenTree(dir string, got []File) {
+func (s *CodegenSuite) assertGoldenTree(dir string, got []codegen.File) {
 	gotByPath := make(map[string][]byte, len(got))
 	for _, f := range got {
 		gotByPath[f.Path] = f.Contents
@@ -533,7 +538,7 @@ func (s *CodegenSuite) assertGoldenTree(dir string, got []File) {
 // Equivalent to what the future CLI's out-dir sync will do: delete not-
 // in-output, write all-in-output. A query removed from the input must
 // not leave its old .cypher.go in the golden dir.
-func syncGoldenDir(dir string, got []File) error {
+func syncGoldenDir(dir string, got []codegen.File) error {
 	if err := os.RemoveAll(dir); err != nil {
 		return err
 	}
