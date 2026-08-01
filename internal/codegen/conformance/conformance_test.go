@@ -34,12 +34,11 @@ var update = flag.Bool("update", false, "regenerate codegen golden files")
 const (
 	// trackedFixtureDir is the committed golden corpus.
 	trackedFixtureDir = "../../../test/data/codegen"
-	// childRootEnv names the corpus a spawned conformance run reads.
-	// TestUpdateIgnoresTheTargetFilter sets it, and nothing else does, so
-	// its presence identifies a process as that test's child. That single
-	// fact carries both properties the child needs: it reads a throwaway
-	// copy rather than the committed corpus, and it declines to spawn a
-	// grandchild however wide the inherited -run pattern is.
+	// childRootEnv names the corpus this process reads, overriding the
+	// committed one. Only updateCopy sets it, on the run it spawns, so
+	// that run's writes land on a throwaway copy. Recursion is not a
+	// concern: updateCopy narrows -run to a TestValid subtest path it
+	// builds itself, which no top-level test can match.
 	childRootEnv = "GQLC_CONFORMANCE_CHILD_ROOT"
 )
 
@@ -537,10 +536,10 @@ func TestGoldenBuild(t *testing.T) {
 
 // TestUpdateIgnoresTheTargetFilter pins the blast radius of -update: a
 // run narrowed to one target must leave the fixture's other targets
-// byte-for-byte alone. The hazard is real and was shipped once — a
-// rewrite driven by the per-target subtests narrows with `go test -run`
-// while a wipe in the fixture body does not, so the run exits 0 having
-// deleted the unselected target's goldens.
+// byte-for-byte alone. A rewrite driven by the per-target subtests
+// narrows with `go test -run` while a wipe in the fixture body does
+// not, so such a run exits 0 having deleted the unselected target's
+// goldens.
 //
 // Runs the suite as a subprocess because nothing else exercises the
 // interaction between -run's filtering and the update path, and points
@@ -555,10 +554,6 @@ func TestUpdateIgnoresTheTargetFilter(t *testing.T) {
 		fixture  = "many_col_many"
 		selected = "neo4j-go-v5"
 	)
-	if os.Getenv(childRootEnv) != "" {
-		t.Skip("child conformance run: spawning another would not terminate")
-	}
-
 	root := t.TempDir()
 	require.NoError(t, os.CopyFS(root, os.DirFS(trackedFixtureDir)))
 	golden := filepath.Join(root, "valid", fixture, "golden")
