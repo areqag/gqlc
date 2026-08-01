@@ -1,19 +1,11 @@
 //go:build codegen_live
 
-// Live smoke test for generated repositories against real neo4j drivers
-// (gqlc-73h, gqlc-5gc). Opt-in via -tags codegen_live so PR CI stays fast;
-// the manual / nightly CI job runs it. Lives in the nested
-// test/data/codegen module so testcontainers and its ~50 transitive deps
-// stay out of gqlc's root go.mod and the compiler binary.
-//
-// Two top-level arms — TestLiveSmokeV5 and TestLiveSmokeV6 — exercise the
-// same neo4j:5-community image against their respective driver majors
-// (v5 keeps the DriverWithContext surface; v6 renamed the interface to
-// Driver and the constructor to NewDriver). Both call t.Parallel() so
-// go test runs them concurrently: two containers, ~4GB peak, well within
-// a standard CI runner. Within each arm the two golden fixtures share
-// the arm's container and DETACH-wipe between sub-tests, so container
-// startup is amortised across both sub-tests.
+// Live smoke battery for the generated repositories: every scenario runs
+// against every backend arm, driving a real container (gqlc-73h, gqlc-5gc).
+// Opt-in via -tags codegen_live so PR CI stays fast; the manual / nightly CI
+// job runs it. Lives in the nested test/data/codegen module so testcontainers
+// and its ~50 transitive deps stay out of gqlc's root go.mod and the compiler
+// binary.
 package fixtures
 
 import (
@@ -22,254 +14,169 @@ import (
 	"testing"
 	"time"
 
-	neo4jv5 "github.com/neo4j/neo4j-go-driver/v5/neo4j"
-	neo4jv6 "github.com/neo4j/neo4j-go-driver/v6/neo4j"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	tcneo4j "github.com/testcontainers/testcontainers-go/modules/neo4j"
-
-	manycolmanyv5 "github.com/areqag/gqlc/test/data/codegen/valid/many_col_many/golden/neo4j-go-v5"
-	manycolmanyv6 "github.com/areqag/gqlc/test/data/codegen/valid/many_col_many/golden/neo4j-go-v6"
-	mixedv5 "github.com/areqag/gqlc/test/data/codegen/valid/mixed_read_write_batch/golden/neo4j-go-v5"
-	mixedv6 "github.com/areqag/gqlc/test/data/codegen/valid/mixed_read_write_batch/golden/neo4j-go-v6"
 )
 
-const (
-	// Pinned by digest, not tag, so an upstream rebuild of neo4j:5-community
-	// cannot serve a stale cached PASS from Go's test cache (bd gqlc-9u5).
-	// Refresh with: curl -sSL https://hub.docker.com/v2/repositories/library/neo4j/tags/5-community/ | jq -r .digest
-	neo4jImage    = "neo4j@sha256:362542416de6c09a971484d1893878016cc3b5cdec166e54b1c824a220ecd6b9"
-	neo4jPassword = "gqlctest1"
-	// wipeCypher DETACHes so any prior sub-test's leftover edges are removed
-	// alongside its nodes; DELETE on an empty graph is a no-op in neo4j 5.
-	wipeCypher = "MATCH (n) DETACH DELETE n"
-)
-
-// startContainer boots one neo4j:5-community container and returns its
-// bolt URI. Cleanup is registered on t; the caller does not terminate.
-// Shared between the v5 and v6 arms because testcontainers is driver-
-// version-agnostic — a single helper avoids drift between the two
-// arms' container setup.
-func startContainer(ctx context.Context, t *testing.T) string {
-	t.Helper()
-	container, err := tcneo4j.Run(ctx,
-		neo4jImage,
-		tcneo4j.WithAdminPassword(neo4jPassword),
-	)
-	require.NoError(t, err, "start neo4j testcontainer")
-	t.Cleanup(func() {
-		if err := testcontainers.TerminateContainer(container); err != nil {
-			t.Logf("terminate neo4j: %v", err)
-		}
-	})
-	boltURI, err := container.BoltUrl(ctx)
-	require.NoError(t, err, "read bolt uri")
-	return boltURI
+// person is a many_col_many row. Every target emits its own
+// PeopleByAgeAndLocaleRow into its own package; this is the shape the battery
+// reads columns from.
+type person struct {
+	Name string
+	Age  int64
 }
 
-// TestLiveSmokeV5 runs the generated repositories' :one, :many, and
-// :exec paths against the v5 driver. A single container amortises the
-// ~15s startup across every sub-test. Skips when GQLC_SKIP_LIVE is set
-// so a developer without docker can still run
-// `go test -tags codegen_live ./...` without a hard failure.
-func TestLiveSmokeV5(t *testing.T) {
-	t.Parallel()
+// mixedReadWriteBatchQuerier is one arm's mixed_read_write_batch handle.
+// errNoRows and errMultipleResults report the sentinels of the package these
+// methods are generated into: each generated package declares its own
+// errors.New values, so errors.Is only holds against the pair that arrived
+// with the handle.
+type mixedReadWriteBatchQuerier interface {
+	getPersonName(ctx context.Context, id int64) (string, error)
+	removePerson(ctx context.Context, id int64) error
+	errNoRows() error
+	errMultipleResults() error
+}
+
+// manyColManyQuerier is one arm's many_col_many handle. The generated Params
+// and Row types are package-local to each target, so they stop here.
+type manyColManyQuerier interface {
+	peopleByAgeAndLocale(ctx context.Context, minAge int64, locale string) ([]person, error)
+}
+
+// harness is one arm for the length of the battery: a running container and a
+// connection to it. Handing out scenarios is its whole surface, so a querier
+// is unobtainable outside the isolation it belongs to.
+//
+// parallelScenarios reports whether the arm's isolation admits concurrent
+// scenarios; an arm whose scenarios share one graph reports false. scenario
+// establishes one scenario's isolation, binds the generated handles to it,
+// and registers any teardown on t.
+type harness interface {
+	parallelScenarios() bool
+	scenario(ctx context.Context, t *testing.T) backend
+}
+
+// backend is one scenario's isolated view of an arm: a graph no other
+// scenario observes, and the generated handles bound to it.
+//
+// seed writes through the driver, never through generated code, so seeded
+// data is independent of the surface under test. Its cypher stays inside the
+// openCypher dialect intersection so one string serves every arm.
+type backend interface {
+	seed(ctx context.Context, t *testing.T, cypher string)
+	mixedReadWriteBatch() mixedReadWriteBatchQuerier
+	manyColMany() manyColManyQuerier
+}
+
+// arms are the backends the battery runs against. Each adapter owns its
+// container, its connection, and its isolation strategy.
+var arms = []struct {
+	name  string
+	start func(ctx context.Context, t *testing.T) harness
+}{
+	{name: "neo4j-go-v5", start: startNeo4jV5},
+	{name: "neo4j-go-v6", start: startNeo4jV6},
+}
+
+// scenarios are the battery. Each body is written once against backend and
+// runs against every arm. A body must not call t.Helper(): its own frame is
+// where the assertions live, so marking it a helper attributes every failure
+// to the loop in TestLiveSmoke instead of to the line that failed.
+var scenarios = []struct {
+	name string
+	run  func(ctx context.Context, t *testing.T, b backend)
+}{
+	{name: "mixed_read_write_batch: one + exec", run: oneAndExec},
+	{name: "many_col_many: many + params", run: manyWithParams},
+}
+
+// TestLiveSmoke runs every scenario against every arm. Arms call t.Parallel()
+// so their container boots overlap: two containers, ~4GB peak, well within a
+// standard CI runner. Scenarios share their arm's container, amortising the
+// ~15s startup, and run concurrently or not as that arm's isolation allows.
+//
+// Skips when GQLC_SKIP_LIVE is set so a developer without docker can still
+// run `go test -tags codegen_live ./...` without a hard failure.
+func TestLiveSmoke(t *testing.T) {
 	if os.Getenv("GQLC_SKIP_LIVE") != "" {
-		t.Skip("GQLC_SKIP_LIVE set; skipping neo4j testcontainer")
+		t.Skip("GQLC_SKIP_LIVE set; skipping live backend containers")
 	}
-	// A single top-level timeout keeps a stuck container from hanging the
-	// whole test binary indefinitely. Neo4j 5-community typically starts in
-	// <15s; 120s covers a cold image pull on a slow runner.
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
+	for _, arm := range arms {
+		t.Run(arm.name, func(t *testing.T) {
+			t.Parallel()
+			// One timeout per arm keeps a stuck container from hanging the
+			// whole test binary indefinitely. Neo4j 5-community typically
+			// starts in <15s; 120s covers a cold image pull on a slow runner.
+			// Cleanups run last-registered-first, so cancelling here rather
+			// than on return leaves the container and driver teardown the arm
+			// is about to register a live context to close over.
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			t.Cleanup(cancel)
 
-	boltURI := startContainer(ctx, t)
-
-	driver, err := neo4jv5.NewDriverWithContext(boltURI, neo4jv5.BasicAuth("neo4j", neo4jPassword, ""))
-	require.NoError(t, err, "construct neo4j v5 driver")
-	t.Cleanup(func() {
-		if err := driver.Close(ctx); err != nil {
-			t.Logf("close driver: %v", err)
-		}
-	})
-	require.NoError(t, driver.VerifyConnectivity(ctx), "verify neo4j connectivity")
-
-	// Sub-test bodies are inlined so require-failures point at the assertion,
-	// not at a helper wrapper. Each sub-test wipes the graph on entry.
-
-	t.Run("mixed_read_write_batch: one + exec", func(t *testing.T) {
-		seedV5(ctx, t, driver, wipeCypher)
-		q := mixedv5.New(driver)
-
-		// ErrNoRows on empty graph — errors.Is (via require.ErrorIs) confirms
-		// the sentinel is identity-matchable so callers can branch generically.
-		_, err := q.GetPersonName(ctx, 1)
-		require.ErrorIs(t, err, mixedv5.ErrNoRows, "empty graph must return ErrNoRows")
-
-		seedV5(ctx, t, driver, "CREATE (:Person {id: 1, name: 'Alice'})")
-
-		name, err := q.GetPersonName(ctx, 1)
-		require.NoError(t, err)
-		require.Equal(t, "Alice", name)
-
-		// Two rows for the same id triggers ErrMultipleResults.
-		seedV5(ctx, t, driver, "CREATE (:Person {id: 1, name: 'AliceTwin'})")
-		_, err = q.GetPersonName(ctx, 1)
-		require.ErrorIs(t, err, mixedv5.ErrMultipleResults, "two matching rows must return ErrMultipleResults")
-
-		// :exec write path: delete both rows, then re-query and confirm
-		// ErrNoRows — proves the :exec method actually mutated the graph.
-		require.NoError(t, q.RemovePerson(ctx, 1))
-		_, err = q.GetPersonName(ctx, 1)
-		require.ErrorIs(t, err, mixedv5.ErrNoRows, "after :exec delete, :one must see empty result")
-	})
-
-	t.Run("many_col_many: many + params", func(t *testing.T) {
-		seedV5(ctx, t, driver, wipeCypher)
-		q := manycolmanyv5.New(driver)
-
-		// Two locales, three ages: only Alice satisfies age > 25 AND locale = 'en'.
-		seedV5(ctx, t, driver, `
-			CREATE (:Person {name: 'Alice', age: 30, locale: 'en'})
-			CREATE (:Person {name: 'Bob',   age: 20, locale: 'en'})
-			CREATE (:Person {name: 'Cara',  age: 40, locale: 'fr'})
-		`)
-
-		rows, err := q.PeopleByAgeAndLocale(ctx, manycolmanyv5.PeopleByAgeAndLocaleParams{
-			MinAge: 25,
-			Locale: "en",
+			h := arm.start(ctx, t)
+			parallelScenarios := h.parallelScenarios()
+			for _, sc := range scenarios {
+				t.Run(sc.name, func(t *testing.T) {
+					if parallelScenarios {
+						t.Parallel()
+					}
+					sc.run(ctx, t, h.scenario(ctx, t))
+				})
+			}
 		})
-		require.NoError(t, err)
-		require.Len(t, rows, 1)
-		require.Equal(t, "Alice", rows[0].Name)
-		require.Equal(t, int64(30), rows[0].Age)
-
-		// Empty result set on :many is (empty slice, nil error) — distinct
-		// from :one's ErrNoRows contract.
-		rows, err = q.PeopleByAgeAndLocale(ctx, manycolmanyv5.PeopleByAgeAndLocaleParams{
-			MinAge: 100,
-			Locale: "en",
-		})
-		require.NoError(t, err)
-		require.Empty(t, rows)
-	})
-}
-
-// TestLiveSmokeV6 mirrors V5 against the v6 driver. Its own container
-// runs in parallel with V5's (t.Parallel() on both arms), so the two
-// container boots overlap.
-func TestLiveSmokeV6(t *testing.T) {
-	t.Parallel()
-	if os.Getenv("GQLC_SKIP_LIVE") != "" {
-		t.Skip("GQLC_SKIP_LIVE set; skipping neo4j testcontainer")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	boltURI := startContainer(ctx, t)
-
-	driver, err := neo4jv6.NewDriver(boltURI, neo4jv6.BasicAuth("neo4j", neo4jPassword, ""))
-	require.NoError(t, err, "construct neo4j v6 driver")
-	t.Cleanup(func() {
-		if err := driver.Close(ctx); err != nil {
-			t.Logf("close driver: %v", err)
-		}
-	})
-	require.NoError(t, driver.VerifyConnectivity(ctx), "verify neo4j connectivity")
-
-	t.Run("mixed_read_write_batch: one + exec", func(t *testing.T) {
-		seedV6(ctx, t, driver, wipeCypher)
-		q := mixedv6.New(driver)
-
-		_, err := q.GetPersonName(ctx, 1)
-		require.ErrorIs(t, err, mixedv6.ErrNoRows, "empty graph must return ErrNoRows")
-
-		seedV6(ctx, t, driver, "CREATE (:Person {id: 1, name: 'Alice'})")
-
-		name, err := q.GetPersonName(ctx, 1)
-		require.NoError(t, err)
-		require.Equal(t, "Alice", name)
-
-		seedV6(ctx, t, driver, "CREATE (:Person {id: 1, name: 'AliceTwin'})")
-		_, err = q.GetPersonName(ctx, 1)
-		require.ErrorIs(t, err, mixedv6.ErrMultipleResults, "two matching rows must return ErrMultipleResults")
-
-		require.NoError(t, q.RemovePerson(ctx, 1))
-		_, err = q.GetPersonName(ctx, 1)
-		require.ErrorIs(t, err, mixedv6.ErrNoRows, "after :exec delete, :one must see empty result")
-	})
-
-	t.Run("many_col_many: many + params", func(t *testing.T) {
-		seedV6(ctx, t, driver, wipeCypher)
-		q := manycolmanyv6.New(driver)
-
-		seedV6(ctx, t, driver, `
-			CREATE (:Person {name: 'Alice', age: 30, locale: 'en'})
-			CREATE (:Person {name: 'Bob',   age: 20, locale: 'en'})
-			CREATE (:Person {name: 'Cara',  age: 40, locale: 'fr'})
-		`)
-
-		rows, err := q.PeopleByAgeAndLocale(ctx, manycolmanyv6.PeopleByAgeAndLocaleParams{
-			MinAge: 25,
-			Locale: "en",
-		})
-		require.NoError(t, err)
-		require.Len(t, rows, 1)
-		require.Equal(t, "Alice", rows[0].Name)
-		require.Equal(t, int64(30), rows[0].Age)
-
-		rows, err = q.PeopleByAgeAndLocale(ctx, manycolmanyv6.PeopleByAgeAndLocaleParams{
-			MinAge: 100,
-			Locale: "en",
-		})
-		require.NoError(t, err)
-		require.Empty(t, rows)
-	})
 }
 
-// seedV5 executes the given cypher against a fresh v5 session in write
-// mode. Uses the driver directly (not the generated code) so the seed
-// path is independent of the surface under test — a bug in a generated
-// method cannot mask itself by shaping the seed. Multi-CREATE statements
-// are idiomatic Cypher; the test relies on that shape. Kept separate
-// from seedV6 because neo4j v5's DriverWithContext and v6's Driver are
-// distinct types from distinct packages — parameterising would need a
-// generic constraint that both interfaces satisfy, which isn't cheaper
-// than two forks of the same 15-line helper.
-func seedV5(ctx context.Context, t *testing.T, driver neo4jv5.DriverWithContext, cypher string) {
-	t.Helper()
-	session := driver.NewSession(ctx, neo4jv5.SessionConfig{AccessMode: neo4jv5.AccessModeWrite})
-	defer func() {
-		if err := session.Close(ctx); err != nil {
-			t.Logf("close session: %v", err)
-		}
-	}()
-	_, err := neo4jv5.ExecuteWrite(ctx, session, func(tx neo4jv5.ManagedTransaction) (any, error) {
-		result, err := tx.Run(ctx, cypher, nil)
-		if err != nil {
-			return nil, err
-		}
-		return result.Consume(ctx)
-	})
-	require.NoError(t, err, "seed: %s", cypher)
+// oneAndExec drives the :one contract end to end — both sentinels, a
+// single-row read, and a :exec write observed by a re-read.
+func oneAndExec(ctx context.Context, t *testing.T, b backend) {
+	q := b.mixedReadWriteBatch()
+
+	// errors.Is (via require.ErrorIs) confirms the sentinel is
+	// identity-matchable so callers can branch generically.
+	_, err := q.getPersonName(ctx, 1)
+	require.ErrorIs(t, err, q.errNoRows(), "empty graph must return ErrNoRows")
+
+	b.seed(ctx, t, "CREATE (:Person {id: 1, name: 'Alice'})")
+
+	name, err := q.getPersonName(ctx, 1)
+	require.NoError(t, err)
+	require.Equal(t, "Alice", name)
+
+	// Two rows for the same id triggers ErrMultipleResults.
+	b.seed(ctx, t, "CREATE (:Person {id: 1, name: 'AliceTwin'})")
+	_, err = q.getPersonName(ctx, 1)
+	require.ErrorIs(t, err, q.errMultipleResults(), "two matching rows must return ErrMultipleResults")
+
+	// :exec write path: delete both rows, then re-query and confirm
+	// ErrNoRows — proves the :exec method actually mutated the graph.
+	require.NoError(t, q.removePerson(ctx, 1))
+	_, err = q.getPersonName(ctx, 1)
+	require.ErrorIs(t, err, q.errNoRows(), "after :exec delete, :one must see empty result")
 }
 
-// seedV6 is seedV5 against the v6 driver. See seedV5's doc for the
-// rationale on keeping the two helpers separate.
-func seedV6(ctx context.Context, t *testing.T, driver neo4jv6.Driver, cypher string) {
-	t.Helper()
-	session := driver.NewSession(ctx, neo4jv6.SessionConfig{AccessMode: neo4jv6.AccessModeWrite})
-	defer func() {
-		if err := session.Close(ctx); err != nil {
-			t.Logf("close session: %v", err)
-		}
-	}()
-	_, err := neo4jv6.ExecuteWrite(ctx, session, func(tx neo4jv6.ManagedTransaction) (any, error) {
-		result, err := tx.Run(ctx, cypher, nil)
-		if err != nil {
-			return nil, err
-		}
-		return result.Consume(ctx)
-	})
-	require.NoError(t, err, "seed: %s", cypher)
+// manyWithParams drives the :many contract — parameter binding narrows the
+// result set, and an empty result is (empty, nil) rather than a sentinel.
+func manyWithParams(ctx context.Context, t *testing.T, b backend) {
+	q := b.manyColMany()
+
+	// Two locales, three ages: only Alice satisfies age > 25 AND locale = 'en'.
+	b.seed(ctx, t, `
+		CREATE (:Person {name: 'Alice', age: 30, locale: 'en'})
+		CREATE (:Person {name: 'Bob',   age: 20, locale: 'en'})
+		CREATE (:Person {name: 'Cara',  age: 40, locale: 'fr'})
+	`)
+
+	rows, err := q.peopleByAgeAndLocale(ctx, 25, "en")
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "Alice", rows[0].Name)
+	require.Equal(t, int64(30), rows[0].Age)
+
+	// Empty result set on :many is (empty slice, nil error) — distinct
+	// from :one's ErrNoRows contract.
+	rows, err = q.peopleByAgeAndLocale(ctx, 100, "en")
+	require.NoError(t, err)
+	require.NotNil(t, rows, "empty :many result must be an empty slice, not nil")
+	require.Empty(t, rows)
 }
