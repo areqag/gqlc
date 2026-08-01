@@ -348,9 +348,12 @@ func newWizardForm(t *config.Target, prior config.Config) *huh.Form {
 // picker withholds. Their backends emit no query methods, so generate
 // fails any batch carrying a query and query discovery fails a batch
 // carrying none: a project the wizard wrote with one of these could not
-// be generated. Delete an entry when its backend gains query emission —
-// TestWizardWithholdsOnlyDriversThatCannotGenerate fails until it goes.
-var driversWithoutQueryEmission = []config.Driver{config.DriverApacheAgePgxV5}
+// be generated. Every registered backend now emits query methods, so
+// the list is empty and the picker offers the whole vocabulary; a
+// backend registered ahead of its emission belongs here until it lands.
+// TestWizardWithholdsOnlyDriversThatCannotGenerate fails on an entry
+// that no longer earns its place.
+var driversWithoutQueryEmission []config.Driver
 
 // noCurrentDriver is the current value to pass for a target that has
 // none: one being authored rather than edited, which sees the withheld
