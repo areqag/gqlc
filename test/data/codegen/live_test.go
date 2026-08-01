@@ -129,7 +129,7 @@ func TestLiveSmoke(t *testing.T) {
 
 // oneAndExec drives the :one contract end to end — both sentinels, a
 // single-row read, and a :exec write observed by a re-read.
-func oneAndExec(ctx context.Context, t *testing.T, b backend) {
+func oneAndExec(ctx context.Context, t *testing.T, b backend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
 	q := b.mixedReadWriteBatch()
 
 	// errors.Is (via require.ErrorIs) confirms the sentinel is
@@ -157,7 +157,7 @@ func oneAndExec(ctx context.Context, t *testing.T, b backend) {
 
 // manyWithParams drives the :many contract — parameter binding narrows the
 // result set, and an empty result is (empty, nil) rather than a sentinel.
-func manyWithParams(ctx context.Context, t *testing.T, b backend) {
+func manyWithParams(ctx context.Context, t *testing.T, b backend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
 	q := b.manyColMany()
 
 	// Two locales, three ages: only Alice satisfies age > 25 AND locale = 'en'.

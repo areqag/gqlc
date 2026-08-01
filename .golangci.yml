@@ -1,5 +1,15 @@
 version: "2"
 
+run:
+  # Files behind //go:build codegen_live are outside the default build
+  # configuration, so without this the linter never loads them and reports
+  # success on code it has not read. The tag lives here so every entry point
+  # that loads packages — `just lint`, `just lint-new`, the hooks, the nested
+  # module's fence — agrees on which files exist. `just fmt` is unaffected:
+  # golangci-lint fmt works per file and never needed the tag.
+  build-tags:
+    - codegen_live
+
 linters:
   default: none
   enable:
@@ -93,6 +103,12 @@ linters:
         # depguard already restricts who may import these packages at all.
         - github.com/areqag/gqlc/internal/grammar/
         - github.com/antlr4-go/antlr/
+        # The live battery's seam: a scenario body is written once and runs
+        # against every backend arm, so an arm, the isolated view it hands a
+        # scenario, and the generated handles bound to that view are each
+        # reachable only as the interface the body is written against. Listed
+        # per type, so ireturn keeps full strength on the rest of that module.
+        - github.com/areqag/gqlc/test/data/codegen\.(harness|backend|mixedReadWriteBatchQuerier|manyColManyQuerier)$
     misspell:
       # the codebase is written in British English (see CONTEXT.md: canonicalised,
       # modelled, serialise); UK locale enforces that consistently
