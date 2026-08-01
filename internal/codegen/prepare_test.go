@@ -333,17 +333,18 @@ func TestPhaseBCommitsIsWrite(t *testing.T) {
 }
 
 // TestReservedIdentifiersAreUniformAcrossBackends pins the reserved set
-// (spec §4.1) as a whole: every name a generated package declares at
-// package scope collides, whichever backend is selected. The graph
-// lifecycle pair is declared only by the Apache AGE emission, but a name
-// that is free on one backend and taken on another is the renaming
-// scheme D2 refused — so the set stays uniform.
+// (spec §4.1) as a whole: every exported name a generated package
+// declares at package scope collides, whichever backend is selected.
+// DBTX, SessionInit and the graph lifecycle pair are declared only by
+// the Apache AGE emission, but a name that is free on one backend and
+// taken on another is the renaming scheme D2 refused — so the set stays
+// uniform.
 func TestReservedIdentifiersAreUniformAcrossBackends(t *testing.T) {
 	want := []string{
 		"Queries", "New", "WithTx",
 		"ReadQuerier", "WriteQuerier", "Querier",
 		"ErrNoRows", "ErrMultipleResults",
-		"EnsureGraph", "DropGraph",
+		"DBTX", "SessionInit", "EnsureGraph", "DropGraph",
 	}
 	got := make([]string, 0, len(reservedIdentifiers))
 	for name := range reservedIdentifiers {
