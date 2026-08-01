@@ -5,12 +5,24 @@
 #   - .claude/settings.json     (pull, on Claude Code session start)
 #
 # Args: pull | push
-# Silent to stdout/stderr — caller decides whether to redirect or tail.
-# Never fails: exits 0 on any error so the git/session operation continues.
+# Exits 0 on any error so the git/session operation continues; diagnostics go
+# to stderr, so a caller that wants silence must redirect it explicitly.
 #
 # Design: human works through GitHub issues; agents work through bd.
-#   - pull:  mirror GH state (creates, closes, comments) into bd.
-#            --prefer-github breaks ties toward GH; GH is source of truth.
+#   - pull:  mirror GH state into bd for the beads where GitHub is capable of
+#            holding the local value and is not behind it. `bd github sync`
+#            offers no field-level exclusion, so scope is the only lever: the
+#            eligible bead ids are passed as --issues and everything else is
+#            left untouched. A bead is eligible only when
+#              * it carries an external_ref present in the bulk GH listing,
+#              * its status is open or closed — GitHub's issue state is a
+#                two-value domain, so in_progress/blocked/deferred have no
+#                representable counterpart and any pull reverts them,
+#              * it is not closed locally while still open on GH, and
+#              * its description carries no line the GH body lacks.
+#            The last three conditions are one rule: never pull where GH is
+#            behind bd. Selection failing for any reason yields an empty
+#            allowlist and no pull at all.
 #   - push:  mirror bd-created beads that have no GH mirror yet, AND close
 #            GH issues whose bead was closed locally.
 #            Deliberately does NOT run `bd github sync --push-only` (which
@@ -20,6 +32,10 @@
 #              2. Bulk `gh issue list --state open` intersected with
 #                 closed-bd beads bearing an external_ref; each mismatch
 #                 gets `gh issue close`.
+#
+# Payloads reach python through temp files, never argv or the environment. The
+# bead listing alone is ~1MB, and execve caps any single argument or
+# environment string at 128KB (MAX_ARG_STRLEN) — a limit no ulimit raises.
 
 _action="${1:-}"
 case "$_action" in pull|push) ;; *)
@@ -29,105 +45,229 @@ esac
 
 command -v bd >/dev/null 2>&1 || exit 0
 command -v gh >/dev/null 2>&1 || exit 0
+command -v python3 >/dev/null 2>&1 || {
+  echo "bd-gh-sync: python3 not found — skipping ${_action}." >&2
+  exit 0
+}
 _token=$(gh auth token 2>/dev/null) || exit 0
 [ -n "$_token" ] || exit 0
 
+_tmp=$(mktemp -d) || exit 0
+trap 'rm -rf "$_tmp"' EXIT
+
+# `bd github sync --issues` takes its list on argv. Batch it so a growing
+# corpus cannot walk into the same 128KB argument cap that this script already
+# hit once by passing payloads through the environment.
+_batch=100
+
 if [ "$_action" = "pull" ]; then
-  # Guard: --prefer-github makes the GH issue body authoritative for bead
-  # descriptions, so a bd-only amendment is silently reverted on the next pull.
-  # Detect divergence BEFORE the sync and skip the pull with actionable
-  # instructions rather than letting the overwrite happen without notice.
-  # One bulk `gh issue list` call keeps overhead O(1) across all beads.
-  _bd_beads=$(bd list --status all --limit 0 --json 2>/dev/null || echo '[]')
-  _gh_bodies=$(GITHUB_TOKEN="$_token" gh issue list \
-    --state all --limit 1000 --json number,body 2>/dev/null || echo '[]')
-  _diverged=$(BD_BEADS="$_bd_beads" GH_BODIES="$_gh_bodies" python3 - <<'PYEOF'
-import json, re, os, sys
+  bd list --status all --limit 0 --json >"$_tmp/beads.json" 2>/dev/null \
+    || : >"$_tmp/beads.json"
+  GITHUB_TOKEN="$_token" gh issue list --state all --limit 1000 \
+    --json number,state,body >"$_tmp/gh.json" 2>/dev/null \
+    || : >"$_tmp/gh.json"
 
-try:
-    bd_beads = json.loads(os.environ["BD_BEADS"])
-except Exception:
-    bd_beads = []
-try:
-    gh_issues = json.loads(os.environ["GH_BODIES"])
-except Exception:
-    gh_issues = []
+  # Emits ALLOW/HOLD/ORPHAN records terminated by DONE. That sentinel is what
+  # separates "selection ran and chose nothing" from "selection did not run";
+  # without it an empty result is indistinguishable from a crash, which is how
+  # the previous guard fell through into an unscoped pull.
+  python3 - "$_tmp/beads.json" "$_tmp/gh.json" \
+    >"$_tmp/plan.txt" 2>"$_tmp/plan.err" <<'PYEOF'
+import json, re, sys
 
-gh_body_by_num = {i["number"]: (i.get("body") or "").strip() for i in gh_issues}
+def load(path):
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
+
+beads = load(sys.argv[1])
+issues = load(sys.argv[2])
+
+gh = {i["number"]: ((i.get("state") or "").lower(), (i.get("body") or "").strip())
+      for i in issues}
 pat = re.compile(r"/issues/(\d+)$")
 
-for b in bd_beads:
-    # Skip only closed beads; blocked/deferred/pinned/hooked are all active
-    # and can receive bd-only amendments that would be silently reverted.
-    if b.get("status") == "closed":
-        continue
-    ext = b.get("external_ref") or ""
-    m = pat.search(ext)
+# GitHub holds exactly these two. Every other bd status is unrepresentable
+# there, so a pull reads back a value the mirror never carried.
+REPRESENTABLE = {"open", "closed"}
+
+mirrored = set()
+out = []
+for b in beads:
+    m = pat.search(b.get("external_ref") or "")
     if not m:
         continue
     n = int(m.group(1))
-    local_desc = (b.get("description") or "").strip()
-    if not local_desc:
-        continue
-    remote_body = gh_body_by_num.get(n)
-    if remote_body is None:
-        continue  # GH issue not in bulk list (>1000); skip safely
-    if local_desc != remote_body:
-        print(f"{b['id']}:{n}:{len(local_desc)}:{len(remote_body)}")
-PYEOF
-)
+    mirrored.add(n)
+    bid = b["id"]
+    status = (b.get("status") or "").lower()
 
-  if [ -n "$_diverged" ]; then
-    echo "bd-gh-sync: SKIPPING pull — bd description differs from GH issue body." >&2
-    echo "bd-gh-sync: Pulling would silently revert the local amendment(s)." >&2
-    echo "" >&2
-    printf '%s\n' "$_diverged" | while IFS=: read bid n local_len gh_len; do
-      echo "  $bid  bd=${local_len}ch  GH #${n}=${gh_len}ch" >&2
-      echo "  Mirror bd→GH: write the bd description to a file, then:" >&2
-      echo "    gh issue edit $n --body-file /tmp/${bid}.md" >&2
-      echo "  To export the description: bd show $bid (look for DESCRIPTION section)" >&2
-    done
-    echo "" >&2
-    echo "bd-gh-sync: Once GH matches bd, re-run this hook or start a new session." >&2
+    if n not in gh:
+        out.append(f"HOLD {bid} {n} not-in-listing")
+        continue
+    gh_state, gh_body = gh[n]
+
+    if status not in REPRESENTABLE:
+        out.append(f"HOLD {bid} {n} status-{status}-unrepresentable-on-gh")
+        continue
+    if status == "closed" and gh_state == "open":
+        out.append(f"HOLD {bid} {n} closed-locally-still-open-on-gh")
+        continue
+
+    # "GH ahead of bd" is the case --prefer-github exists to serve. The
+    # data-loss shape is bd carrying content GH lacks, which neither an
+    # equality nor a length test can separate from it.
+    desc = (b.get("description") or "").strip()
+    local = {ln.strip() for ln in desc.splitlines() if ln.strip()}
+    remote = {ln.strip() for ln in gh_body.splitlines() if ln.strip()}
+    missing = local - remote
+    if missing:
+        out.append(f"HOLD {bid} {n} bd-only-lines-{len(missing)}")
+        continue
+
+    # Naming a bead in --issues syncs it whether or not GitHub moved, so the
+    # recency watermark that bounds an unscoped pull no longer applies. Without
+    # this, every merge rewrites the whole mirrored corpus.
+    if desc == gh_body and status == gh_state:
+        continue
+
+    out.append(f"ALLOW {bid}")
+
+# An unscoped pull silently minted a bead for any unmirrored issue in its
+# update window. Scoping stops that, so report them rather than create them.
+for n, (state, _) in sorted(gh.items()):
+    if n not in mirrored and state == "open":
+        out.append(f"ORPHAN {n}")
+
+for line in out:
+    print(line)
+print("DONE")
+PYEOF
+  _rc=$?
+
+  if [ "$_rc" -ne 0 ] || [ "$(tail -n 1 "$_tmp/plan.txt" 2>/dev/null)" != "DONE" ]; then
+    echo "bd-gh-sync: SKIPPING pull — could not decide which beads are safe to pull." >&2
+    echo "bd-gh-sync: selection exited ${_rc}; an unscoped pull would let GitHub" >&2
+    echo "bd-gh-sync: overwrite local state it cannot represent. Refusing." >&2
+    sed 's/^/bd-gh-sync:   /' "$_tmp/plan.err" >&2 2>/dev/null
     exit 0
   fi
 
-  GITHUB_TOKEN="$_token" bd github sync --pull-only --prefer-github || true
+  while read -r _ bid n reason; do
+    echo "bd-gh-sync: holding $bid (GH #$n) out of the pull — $reason" >&2
+  done < <(grep '^HOLD ' "$_tmp/plan.txt")
+  while read -r _ n; do
+    echo "bd-gh-sync: GH #$n has no bead; not creating one. Adopt it with 'bd github pull $n'." >&2
+  done < <(grep '^ORPHAN ' "$_tmp/plan.txt")
+
+  grep '^ALLOW ' "$_tmp/plan.txt" | cut -d' ' -f2 >"$_tmp/allow.txt"
+  if [ ! -s "$_tmp/allow.txt" ]; then
+    echo "bd-gh-sync: no bead is eligible for a --prefer-github pull; nothing done." >&2
+    exit 0
+  fi
+
+  # An empty --issues would widen the pull back to everything, so the argument
+  # is only ever built from a file already known to be non-empty.
+  while IFS= read -r _ids; do
+    [ -n "$_ids" ] || continue
+    GITHUB_TOKEN="$_token" bd github sync --pull-only --prefer-github \
+      --issues "$_ids" || true
+  done < <(xargs -n "$_batch" <"$_tmp/allow.txt" | tr ' ' ',')
+
+  # Postcondition: a bead held out of scope must come back unchanged. Scoping
+  # is an argument about what --issues means, and this measures whether the
+  # argument held. It catches a reverted claim whatever moved it, including the
+  # JSONL replay in `bd hooks run post-merge` — that reverts in_progress to
+  # open through a path this script never calls.
+  bd list --status all --limit 0 --json >"$_tmp/beads_post.json" 2>/dev/null \
+    || : >"$_tmp/beads_post.json"
+  python3 - "$_tmp/beads.json" "$_tmp/beads_post.json" "$_tmp/allow.txt" >&2 <<'PYEOF' || true
+import json, sys
+
+def statuses(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return {b["id"]: (b.get("status") or "") for b in json.load(fh)}
+    except Exception:
+        return {}
+
+before = statuses(sys.argv[1])
+after = statuses(sys.argv[2])
+if not before or not after:
+    sys.exit(0)
+try:
+    with open(sys.argv[3], encoding="utf-8") as fh:
+        allowed = {ln.strip() for ln in fh if ln.strip()}
+except Exception:
+    allowed = set()
+
+for bid, was in sorted(before.items()):
+    if bid in allowed or bid not in after:
+        continue
+    now = after[bid]
+    if now != was:
+        print(f"bd-gh-sync: WARNING {bid} was held out of the pull but changed "
+              f"{was} -> {now}. Re-assert with "
+              f"'bd update {bid} --status {was}'.")
+PYEOF
+
+  # Last line, so a caller that keeps only the tail still learns the shape of
+  # the run (.claude/settings.json pipes this through `tail -1`).
+  echo "bd-gh-sync: pulled $(wc -l <"$_tmp/allow.txt") bead(s), held $(grep -c '^HOLD ' "$_tmp/plan.txt"), left $(grep -c '^ORPHAN ' "$_tmp/plan.txt") unmirrored GH issue(s) alone." >&2
   exit 0
 fi
 
 # push
-_beads=$(bd list --status all --limit 0 --json 2>/dev/null || echo '[]')
+bd list --status all --limit 0 --json >"$_tmp/beads.json" 2>/dev/null \
+  || : >"$_tmp/beads.json"
 
-_new=$(printf '%s' "$_beads" | python3 -c '
+python3 - "$_tmp/beads.json" >"$_tmp/new.txt" 2>/dev/null <<'PYEOF'
 import json, sys
 try:
-    for b in json.load(sys.stdin):
-        if not b.get("external_ref"):
-            print(b["id"])
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        beads = json.load(fh)
 except Exception:
-    pass
-' 2>/dev/null)
-if [ -n "$_new" ]; then
-  GITHUB_TOKEN="$_token" bd github push $_new || true
+    beads = []
+for b in beads:
+    if not b.get("external_ref"):
+        print(b["id"])
+PYEOF
+
+if [ -s "$_tmp/new.txt" ]; then
+  while IFS= read -r _ids; do
+    [ -n "$_ids" ] || continue
+    # shellcheck disable=SC2086 # deliberate split: one bead id per argument
+    GITHUB_TOKEN="$_token" bd github push $_ids || true
+  done < <(xargs -n "$_batch" <"$_tmp/new.txt")
 fi
+
+# Re-read the beads: `bd github push` assigns external_ref to everything it
+# mirrors, and the close pass keys on external_ref. Reusing the pre-push
+# snapshot skips exactly the beads that were closed before their first push,
+# leaving the mirror it just minted open forever.
+bd list --status all --limit 0 --json >"$_tmp/beads_after.json" 2>/dev/null \
+  || : >"$_tmp/beads_after.json"
 
 # Close GH mirrors for beads that are closed locally but still open on GH.
 # One bulk `gh issue list` + one `gh issue close` per mismatch; skipped when
 # there are none. Idempotent: closing an already-closed GH issue is a no-op.
-_open_gh=$(GITHUB_TOKEN="$_token" gh issue list --state open --limit 500 --json number 2>/dev/null || echo '[]')
-printf '%s' "$_beads" | GITHUB_TOKEN="$_token" python3 -c '
+GITHUB_TOKEN="$_token" gh issue list --state open --limit 500 --json number \
+  >"$_tmp/open_gh.json" 2>/dev/null || : >"$_tmp/open_gh.json"
+
+GITHUB_TOKEN="$_token" python3 - "$_tmp/beads_after.json" "$_tmp/open_gh.json" \
+  <<'PYEOF' >/dev/null 2>&1 || true
 import json, sys, re, subprocess
-try:
-    open_nums = {i["number"] for i in json.loads(sys.argv[1])}
-except Exception:
-    open_nums = set()
+
+def load(path, fallback):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception:
+        return fallback
+
+open_nums = {i["number"] for i in load(sys.argv[2], [])}
 if not open_nums:
     sys.exit(0)
-try:
-    beads = json.load(sys.stdin)
-except Exception:
-    beads = []
+beads = load(sys.argv[1], [])
 pat = re.compile(r"/issues/(\d+)$")
 for b in beads:
     if b.get("status") != "closed":
@@ -149,5 +289,5 @@ for b in beads:
         ["gh", "issue", "close", str(n), "--comment", body],
         capture_output=True, check=False,
     )
-' "$_open_gh" >/dev/null 2>&1 || true
+PYEOF
 exit 0
