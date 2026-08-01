@@ -18,11 +18,11 @@ type Person struct {
 // enforcing per-property nullability against the schema.
 func decodePerson(node dbtype.Node) (Person, error) {
 	var out Person
-	id, err := neo4j.GetProperty[int64](node, "id")
+	value0, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Person{}, fmt.Errorf("decode Person.Id: %w", err)
 	}
-	out.Id = id
+	out.Id = value0
 	return out, nil
 }
 
@@ -37,11 +37,11 @@ func (Likes) isGetLinkR() {}
 // enforcing per-property nullability against the schema.
 func decodeLikes(rel dbtype.Relationship) (Likes, error) {
 	var out Likes
-	since, err := neo4j.GetProperty[int64](rel, "since")
+	value0, err := neo4j.GetProperty[int64](rel, "since")
 	if err != nil {
 		return Likes{}, fmt.Errorf("decode Likes.Since: %w", err)
 	}
-	out.Since = since
+	out.Since = value0
 	return out, nil
 }
 
@@ -56,11 +56,11 @@ func (Wrote) isGetLinkR() {}
 // enforcing per-property nullability against the schema.
 func decodeWrote(rel dbtype.Relationship) (Wrote, error) {
 	var out Wrote
-	written, err := neo4j.GetProperty[int64](rel, "written")
+	value0, err := neo4j.GetProperty[int64](rel, "written")
 	if err != nil {
 		return Wrote{}, fmt.Errorf("decode Wrote.Written: %w", err)
 	}
-	out.Written = written
+	out.Written = value0
 	return out, nil
 }
 

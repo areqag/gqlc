@@ -18,11 +18,11 @@ type Movie struct {
 // enforcing per-property nullability against the schema.
 func decodeMovie(node dbtype.Node) (Movie, error) {
 	var out Movie
-	id, err := neo4j.GetProperty[int64](node, "id")
+	value0, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Movie{}, fmt.Errorf("decode Movie.Id: %w", err)
 	}
-	out.Id = id
+	out.Id = value0
 	return out, nil
 }
 
@@ -35,11 +35,11 @@ type Person struct {
 // enforcing per-property nullability against the schema.
 func decodePerson(node dbtype.Node) (Person, error) {
 	var out Person
-	id, err := neo4j.GetProperty[int64](node, "id")
+	value0, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Person{}, fmt.Errorf("decode Person.Id: %w", err)
 	}
-	out.Id = id
+	out.Id = value0
 	return out, nil
 }
 
@@ -52,10 +52,10 @@ type ACTEDIN struct {
 // enforcing per-property nullability against the schema.
 func decodeACTEDIN(rel dbtype.Relationship) (ACTEDIN, error) {
 	var out ACTEDIN
-	since, err := neo4j.GetProperty[int64](rel, "since")
+	value0, err := neo4j.GetProperty[int64](rel, "since")
 	if err != nil {
 		return ACTEDIN{}, fmt.Errorf("decode ACTEDIN.Since: %w", err)
 	}
-	out.Since = since
+	out.Since = value0
 	return out, nil
 }

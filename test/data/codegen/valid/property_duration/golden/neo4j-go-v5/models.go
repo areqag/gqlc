@@ -19,15 +19,15 @@ type Span struct {
 // enforcing per-property nullability against the schema.
 func decodeSpan(node dbtype.Node) (Span, error) {
 	var out Span
-	elapsed, err := neo4j.GetProperty[dbtype.Duration](node, "elapsed")
+	value0, err := neo4j.GetProperty[dbtype.Duration](node, "elapsed")
 	if err != nil {
 		return Span{}, fmt.Errorf("decode Span.Elapsed: %w", err)
 	}
-	out.Elapsed = elapsed
-	id, err := neo4j.GetProperty[int64](node, "id")
+	out.Elapsed = value0
+	value1, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Span{}, fmt.Errorf("decode Span.Id: %w", err)
 	}
-	out.Id = id
+	out.Id = value1
 	return out, nil
 }

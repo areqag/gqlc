@@ -19,15 +19,15 @@ type Blob struct {
 // enforcing per-property nullability against the schema.
 func decodeBlob(node dbtype.Node) (Blob, error) {
 	var out Blob
-	id, err := neo4j.GetProperty[int64](node, "id")
+	value0, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Blob{}, fmt.Errorf("decode Blob.Id: %w", err)
 	}
-	out.Id = id
-	payload, err := neo4j.GetProperty[[]byte](node, "payload")
+	out.Id = value0
+	value1, err := neo4j.GetProperty[[]byte](node, "payload")
 	if err != nil {
 		return Blob{}, fmt.Errorf("decode Blob.Payload: %w", err)
 	}
-	out.Payload = payload
+	out.Payload = value1
 	return out, nil
 }
