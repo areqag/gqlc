@@ -1,4 +1,4 @@
-package neo4j
+package neo4j_test
 
 import (
 	"bytes"
@@ -14,7 +14,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/areqag/gqlc/internal/cli/backends"
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/codegen/neo4j"
+	"github.com/areqag/gqlc/internal/config"
 	"github.com/areqag/gqlc/internal/procsig"
 	"github.com/areqag/gqlc/internal/query/cypher"
 	"github.com/areqag/gqlc/internal/queryfile"
@@ -33,32 +36,31 @@ const fixtureDir = "../../../test/data/codegen"
 // constructed codegen.ErrInvalidCardinality case, SyntheticZeroCardinality —
 // see loadInvalidInput.
 //
-// DriverVersion selects the emission target: "" or "v5" for the
-// default, "v6" for WithDriverVersion(DriverV6). A v6 fixture is a
-// `<base>_v6` sibling of its v5 twin with schema/queries copied
-// verbatim, so the two golden trees diff to exactly the driver-varying
-// lines. The regular valid/* walk picks v6 fixtures up for the golden,
-// double-run, and -update flows with no extra wiring.
+// Driver is the config wire key naming the emission target, absent on
+// every fixture that takes the corpus default (see loadManifest). A
+// non-default fixture is a `<base>_v6` sibling of its v5 twin with
+// schema/queries copied verbatim, so the two golden trees diff to
+// exactly the driver-varying lines. The regular valid/* walk picks such
+// fixtures up for the golden, double-run, and -update flows with no
+// extra wiring.
 type manifest struct {
 	Package                  string   `json:"package"`
 	QueryFiles               []string `json:"queryFiles"`
-	DriverVersion            string   `json:"driverVersion,omitempty"`
+	Driver                   string   `json:"driver,omitempty"`
 	ExpectedError            string   `json:"expectedError,omitempty"`
 	SyntheticZeroCardinality bool     `json:"syntheticZeroCardinality,omitempty"`
 }
 
-// generatorFor maps a manifest's driverVersion marker to a configured
-// Codegen. An unknown marker fails the suite — a typo must not silently
-// fall back to v5 and pass against the wrong golden tree.
-func (s *CodegenSuite) generatorFor(m manifest) *Codegen {
-	switch m.DriverVersion {
-	case "", "v5":
-		return New()
-	case "v6":
-		return New(WithDriverVersion(DriverV6))
-	}
-	s.Require().Failf("unknown driverVersion", "manifest declares driverVersion %q; want \"\", \"v5\", or \"v6\"", m.DriverVersion)
-	return nil
+// generate emits in through the backend the fixture's driver key
+// resolves to in the composed registry. A key no backend is registered
+// under fails the suite: a typo must not silently fall back to another
+// backend and pass against the wrong golden tree.
+func (s *CodegenSuite) generate(m manifest, in codegen.Input) ([]codegen.File, error) {
+	reg, err := backends.Registry()
+	s.Require().NoError(err)
+	newGen, ok := reg.Lookup(m.Driver)
+	s.Require().True(ok, "manifest declares driver %q, which no backend is registered under", m.Driver)
+	return newGen("").Generate(in)
 }
 
 // codegenSentinels is the core package's canonical reachable set,
@@ -157,11 +159,16 @@ func TestCodegenSuite(t *testing.T) {
 }
 
 // loadManifest reads a manifest.json from the given fixture directory.
+// The corpus was authored against neo4j-go-v5, so a fixture names a
+// driver only where it departs from that.
 func (s *CodegenSuite) loadManifest(dir string) manifest {
 	src, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
 	s.Require().NoError(err)
 	var m manifest
 	s.Require().NoError(json.Unmarshal(src, &m))
+	if m.Driver == "" {
+		m.Driver = string(config.DriverNeo4jGoV5)
+	}
 	return m
 }
 
@@ -258,7 +265,7 @@ func (s *CodegenSuite) TestValid() {
 			sch := s.loadSchema(dir)
 			queries := s.loadNamedQueries(dir, m, sch)
 
-			got, err := s.generatorFor(m).Generate(codegen.Input{Schema: sch, Queries: queries})
+			got, err := s.generate(m, codegen.Input{Schema: sch, Queries: queries})
 			s.Require().NoError(err)
 			s.assertPackage(got, m.Package)
 
@@ -287,7 +294,7 @@ func (s *CodegenSuite) TestInvalid() {
 			s.Require().True(ok, "unknown sentinel name %q in fixture %q", m.ExpectedError, name)
 
 			in := s.loadInvalidInput(dir, m)
-			got, err := New().Generate(in)
+			got, err := s.generate(m, in)
 			s.Require().Error(err)
 			s.Require().Nil(got, "files must be nil on error")
 			s.Require().ErrorIs(err, wantErr)
@@ -331,28 +338,28 @@ func (s *CodegenSuite) TestWithDriverVersion() {
 
 	cases := []struct {
 		name         string
-		gen          *Codegen
+		gen          *neo4j.Codegen
 		wantImport   string
 		wantDriver   string
 		bannedDriver string
 	}{
 		{
 			name:         "default is v5",
-			gen:          New(),
+			gen:          neo4j.New(),
 			wantImport:   `"github.com/neo4j/neo4j-go-driver/v5/neo4j"`,
 			wantDriver:   "neo4j.DriverWithContext",
 			bannedDriver: "/v6/",
 		},
 		{
 			name:         "explicit v5",
-			gen:          New(WithDriverVersion(DriverV5)),
+			gen:          neo4j.New(neo4j.WithDriverVersion(neo4j.DriverV5)),
 			wantImport:   `"github.com/neo4j/neo4j-go-driver/v5/neo4j"`,
 			wantDriver:   "neo4j.DriverWithContext",
 			bannedDriver: "/v6/",
 		},
 		{
 			name:         "v6",
-			gen:          New(WithDriverVersion(DriverV6)),
+			gen:          neo4j.New(neo4j.WithDriverVersion(neo4j.DriverV6)),
 			wantImport:   `"github.com/neo4j/neo4j-go-driver/v6/neo4j"`,
 			wantDriver:   "neo4j.Driver",
 			bannedDriver: "DriverWithContext",
@@ -389,17 +396,17 @@ func (s *CodegenSuite) TestWithPackageName() {
 	in := codegen.Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
 
 	s.Run("configured name wins", func() {
-		files, err := New(WithPackageName("configuredpkg")).Generate(in)
+		files, err := neo4j.New(neo4j.WithPackageName("configuredpkg")).Generate(in)
 		s.Require().NoError(err)
 		s.assertPackage(files, "configuredpkg")
 	})
 	s.Run("empty keeps derivation", func() {
-		files, err := New(WithPackageName("")).Generate(in)
+		files, err := neo4j.New(neo4j.WithPackageName("")).Generate(in)
 		s.Require().NoError(err)
 		s.assertPackage(files, m.Package)
 	})
 	s.Run("grammar violation names the configured string", func() {
-		files, err := New(WithPackageName("Not_OK")).Generate(in)
+		files, err := neo4j.New(neo4j.WithPackageName("Not_OK")).Generate(in)
 		s.Require().Error(err)
 		s.Require().Nil(files)
 		s.Require().ErrorIs(err, codegen.ErrInvalidPackageName)
@@ -418,9 +425,9 @@ func (s *CodegenSuite) TestDoubleRun() {
 			m := s.loadManifest(dir)
 			sch := s.loadSchema(dir)
 			in := codegen.Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
-			first, err := s.generatorFor(m).Generate(in)
+			first, err := s.generate(m, in)
 			s.Require().NoError(err)
-			second, err := s.generatorFor(m).Generate(in)
+			second, err := s.generate(m, in)
 			s.Require().NoError(err)
 			s.Require().Len(second, len(first))
 			for i := range first {
