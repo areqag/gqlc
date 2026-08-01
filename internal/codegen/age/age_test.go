@@ -2,8 +2,10 @@ package age_test
 
 import (
 	"bytes"
+	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/age"
+	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/resolver"
 	"github.com/areqag/gqlc/internal/schema/gql"
 )
@@ -145,20 +148,87 @@ func (s *EmissionSuite) TestWithPackageName() {
 	})
 }
 
-// TestRejectsQueriesItCannotServe pins the capability gate. C0 emits no
-// query methods, so generating for a batch that carries queries would
-// hand the author a Querier that silently omits them; the error names
-// every dropped query so they can see which.
-func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
-	query := func(name string) codegen.NamedQuery {
-		return codegen.NamedQuery{
-			Name:        name,
-			Cardinality: codegen.CardinalityExec,
-			SourceFile:  "q.cypher",
-			SourceText:  "MATCH (n) DELETE n",
-			Validated:   resolver.ValidatedQuery{Statement: resolver.StatementWrite},
-		}
+// scalarColumn is a resolved column of the shape the read path decodes:
+// a schema property of scalar width.
+func scalarColumn(name string, pt graph.PropertyType) resolver.Column {
+	return resolver.Column{Name: name, Type: resolver.ResolvedProperty{Type: pt}}
+}
+
+// readQuery is a batch entry this backend serves — a scalar read whose
+// columns and parameters all land on the decode arms the read path
+// emits. Every rejection case below is this shape with one axis moved.
+func readQuery(name string, cols ...resolver.Column) codegen.NamedQuery {
+	return codegen.NamedQuery{
+		Name:        name,
+		Cardinality: codegen.CardinalityMany,
+		SourceFile:  "q.cypher",
+		SourceText:  "MATCH (p:Person) RETURN p.name\n",
+		Validated:   resolver.ValidatedQuery{Columns: cols},
 	}
+}
+
+// servedQuery binds a parameter and projects one column of each agtype
+// scalar width, so a batch holding it reaches every helper the emission
+// gates on demand and every decode arm the read path can take.
+var servedQuery = func() codegen.NamedQuery {
+	q := readQuery("Names",
+		scalarColumn("p.name", graph.TypeString),
+		scalarColumn("p.age", graph.TypeInt),
+		scalarColumn("p.height", graph.TypeFloat),
+		scalarColumn("p.active", graph.TypeBool),
+	)
+	q.Validated.Parameters = []resolver.ResolvedParameter{
+		{Name: "id", Type: resolver.ResolvedProperty{Type: graph.TypeInt}},
+	}
+	return q
+}()
+
+// TestRejectsQueriesItCannotServe pins the capability gate. The read
+// path decodes agtype's scalar vocabulary, so a batch carrying a query
+// outside it would hand the author a Querier that silently omits the
+// query — or, worse, a method built on a decode arm that does not exist.
+// The error names every dropped query and the axis that dropped it.
+func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
+	served := servedQuery
+
+	moved := func(name string, mutate func(*codegen.NamedQuery)) codegen.NamedQuery {
+		q := readQuery(name, scalarColumn("p.name", graph.TypeString))
+		mutate(&q)
+		return q
+	}
+	write := moved("Wipe", func(q *codegen.NamedQuery) {
+		q.Validated.Statement = resolver.StatementWrite
+	})
+	exec := moved("Purge", func(q *codegen.NamedQuery) {
+		q.Cardinality = codegen.CardinalityExec
+	})
+	node := moved("Whole", func(q *codegen.NamedQuery) {
+		q.Validated.Columns = []resolver.Column{{Name: "p", Type: resolver.ResolvedNode{}}}
+	})
+	temporal := moved("When", func(q *codegen.NamedQuery) {
+		q.Validated.Columns = []resolver.Column{{
+			Name: "t", Type: resolver.ResolvedTemporal{Kind: resolver.TemporalDate},
+		}}
+	})
+	list := moved("Tags", func(q *codegen.NamedQuery) {
+		q.Validated.Columns = []resolver.Column{{
+			Name: "t", Type: resolver.ResolvedList{Element: resolver.ResolvedScalar{Kind: resolver.ScalarString}},
+		}}
+	})
+	mapCol := moved("Bag", func(q *codegen.NamedQuery) {
+		q.Validated.Columns = []resolver.Column{{
+			Name: "m", Type: resolver.ResolvedScalar{Kind: resolver.ScalarMap},
+		}}
+	})
+	unknown := moved("Opaque", func(q *codegen.NamedQuery) {
+		q.Validated.Columns = []resolver.Column{{Name: "u", Type: resolver.ResolvedUnknown{}}}
+	})
+	listParam := moved("Batch", func(q *codegen.NamedQuery) {
+		q.Validated.Parameters = []resolver.ResolvedParameter{{
+			Name: "ids", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeInt, true)},
+		}}
+	})
+
 	cases := []struct {
 		name      string
 		queries   []codegen.NamedQuery
@@ -166,20 +236,79 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 		wantError bool
 	}{
 		{
-			name:      "no queries generates",
-			queries:   nil,
-			wantError: false,
+			name:    "no queries generates",
+			queries: nil,
 		},
 		{
-			name:      "one query is rejected and named",
-			queries:   []codegen.NamedQuery{query("Wipe")},
-			wantSub:   "1 query would be dropped: Wipe",
+			name:    "a scalar read generates",
+			queries: []codegen.NamedQuery{served},
+		},
+		{
+			name: "a scalar read with a scalar parameter generates",
+			queries: []codegen.NamedQuery{moved("ByID", func(q *codegen.NamedQuery) {
+				q.Validated.Parameters = []resolver.ResolvedParameter{{
+					Name: "id", Type: resolver.ResolvedProperty{Type: graph.TypeInt},
+				}}
+			})},
+		},
+		{
+			name:      "a write is dropped",
+			queries:   []codegen.NamedQuery{write},
+			wantSub:   `1 query would be dropped: Wipe (writes to the graph)`,
 			wantError: true,
 		},
 		{
-			name:      "every query is named, in batch order",
-			queries:   []codegen.NamedQuery{query("Wipe"), query("Purge"), query("Reset")},
-			wantSub:   "3 queries would be dropped: Wipe, Purge, Reset",
+			name:      "an exec is dropped",
+			queries:   []codegen.NamedQuery{exec},
+			wantSub:   `1 query would be dropped: Purge (:exec returns no rows to decode)`,
+			wantError: true,
+		},
+		{
+			name:      "a whole-entity column is dropped",
+			queries:   []codegen.NamedQuery{node},
+			wantSub:   `1 query would be dropped: Whole (column "p" projects node)`,
+			wantError: true,
+		},
+		{
+			name:      "a temporal column is dropped",
+			queries:   []codegen.NamedQuery{temporal},
+			wantSub:   `1 query would be dropped: When (column "t" projects temporal(date))`,
+			wantError: true,
+		},
+		{
+			name:      "a list column is dropped",
+			queries:   []codegen.NamedQuery{list},
+			wantSub:   `1 query would be dropped: Tags (column "t" projects list)`,
+			wantError: true,
+		},
+		{
+			name:      "a map column is dropped",
+			queries:   []codegen.NamedQuery{mapCol},
+			wantSub:   `1 query would be dropped: Bag (column "m" projects scalar(map))`,
+			wantError: true,
+		},
+		{
+			name:      "an unresolved column is dropped",
+			queries:   []codegen.NamedQuery{unknown},
+			wantSub:   `1 query would be dropped: Opaque (column "u" projects unknown)`,
+			wantError: true,
+		},
+		{
+			name:      "a list parameter is dropped",
+			queries:   []codegen.NamedQuery{listParam},
+			wantSub:   `1 query would be dropped: Batch (parameter $ids is a list)`,
+			wantError: true,
+		},
+		{
+			name:      "every dropped query is named, in batch order",
+			queries:   []codegen.NamedQuery{write, exec, node},
+			wantSub:   "3 queries would be dropped: Wipe (writes to the graph), Purge (:exec returns no rows to decode), Whole (column \"p\" projects node)",
+			wantError: true,
+		},
+		{
+			name:      "a served query alongside a dropped one still fails",
+			queries:   []codegen.NamedQuery{served, write},
+			wantSub:   "1 query would be dropped: Wipe (writes to the graph)",
 			wantError: true,
 		},
 	}
@@ -202,8 +331,7 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 }
 
 // ageIdentifiers are the extension-owned names that must never appear
-// unqualified. cypher( has no emission until the read path lands; it is
-// swept now so the fence is already standing when it does.
+// unqualified.
 var ageIdentifiers = []string{"agtype", "cypher(", "create_graph", "drop_graph", "ag_graph"}
 
 // qualifier matches both spellings PostgreSQL accepts for the schema
@@ -217,14 +345,15 @@ var qualifier = regexp.MustCompile(`(?i)(ag_catalog|"ag_catalog")\.$`)
 // whatever the caller's search_path happens to hold.
 //
 // The sweep runs over two populations: freshly emitted bytes for every
-// schema in the corpus, and every golden file committed for this target.
-// The second is what makes the cypher( needle bite as later stages enrol
-// query-bearing fixtures — the first cannot, because a batch carrying
-// queries has no C0 emission at all.
+// schema in the corpus, each emitted twice — once as the corpus holds
+// it and once carrying servedQuery, which is what puts the read path's
+// statement text in front of the sweep — and every golden file committed
+// for this target. The freshly emitted population is the one that bites
+// on an edit to the emission, because regenerating goldens rewrites the
+// second to match whatever the emission now says.
 //
-// Comments are blanked before the sweep. Only an identifier the server
-// parses can misresolve, and generated prose has to be free to name the
-// types it is explaining.
+// The sweep runs over the string literals that reach a parser, which is
+// where the whole of this package's SQL lives.
 func (s *EmissionSuite) TestEveryAgeIdentifierIsSchemaQualified() {
 	schemas, err := filepath.Glob(filepath.Join(corpusRoot, "valid", "*", "schema.gql"))
 	s.Require().NoError(err)
@@ -232,18 +361,23 @@ func (s *EmissionSuite) TestEveryAgeIdentifierIsSchemaQualified() {
 
 	swept := 0
 	for _, path := range schemas {
-		files, err := age.New().Generate(s.inputFrom(path))
-		// A schema whose widths this backend cannot carry is rejected by
-		// the type table, so there is nothing to sweep.
-		if err != nil {
-			continue
+		fixture := filepath.Base(filepath.Dir(path))
+		in := s.inputFrom(path)
+		for _, queries := range [][]codegen.NamedQuery{nil, {servedQuery}} {
+			in.Queries = queries
+			files, err := age.New().Generate(in)
+			// A schema whose widths this backend cannot carry is rejected
+			// by the type table, so there is nothing to sweep.
+			if err != nil {
+				continue
+			}
+			for _, f := range files {
+				s.assertQualified(fixture+"/"+f.Path, string(f.Contents))
+			}
+			swept++
 		}
-		for _, f := range files {
-			s.assertQualified(filepath.Base(filepath.Dir(path))+"/"+f.Path, string(f.Contents))
-		}
-		swept++
 	}
-	s.Require().Greater(swept, 10, "too few corpus schemas produced emission to sweep")
+	s.Require().Greater(swept, 20, "too few corpus schemas produced emission to sweep")
 
 	goldens, err := filepath.Glob(filepath.Join(corpusRoot, "valid", "*", "golden", ageTarget, "*.go"))
 	s.Require().NoError(err)
@@ -256,7 +390,7 @@ func (s *EmissionSuite) TestEveryAgeIdentifierIsSchemaQualified() {
 }
 
 func (s *EmissionSuite) assertQualified(label, body string) {
-	body = s.blankComments(label, body)
+	body = s.keepServerText(label, body)
 	hay := strings.ToLower(body)
 	for _, ident := range ageIdentifiers {
 		for off := 0; ; {
@@ -282,14 +416,68 @@ func (s *EmissionSuite) blankComments(label, body string) string {
 	b := []byte(body)
 	for _, group := range f.Comments {
 		for _, c := range group.List {
-			for i := fset.Position(c.Pos()).Offset; i < fset.Position(c.End()).Offset; i++ {
-				if b[i] != '\n' {
-					b[i] = ' '
-				}
-			}
+			blank(b, fset.Position(c.Pos()).Offset, fset.Position(c.End()).Offset)
 		}
 	}
 	return string(b)
+}
+
+// errorConstructors build a value whose string is read by a person.
+var errorConstructors = map[string]bool{"fmt.Errorf": true, "fmt.Sprintf": true, "errors.New": true}
+
+// keepServerText reduces an emitted file to the string literals that
+// reach a parser: literals stay where they are, so a lookbehind still
+// reads the bytes preceding a needle inside its own literal and cannot
+// run off into the declaration around it, and everything else — syntax,
+// comments, and the literals building error text — becomes blanks.
+//
+// The two exclusions are the two ways a name can appear without being a
+// name. A Go declaration called after an agtype helper is an identifier
+// no parser but Go's sees, and an error explaining that a value is not
+// an agtype string has to be free to say so.
+func (s *EmissionSuite) keepServerText(label, body string) string {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, label, body, parser.SkipObjectResolution)
+	s.Require().NoError(err, "emitted file %s does not parse", label)
+	offset := func(p token.Pos) int { return fset.Position(p).Offset }
+
+	var prose [][2]int
+	ast.Inspect(f, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if ok && errorConstructors[types.ExprString(call.Fun)] {
+			prose = append(prose, [2]int{offset(call.Pos()), offset(call.End())})
+		}
+		return true
+	})
+
+	src := []byte(body)
+	kept := []byte(body)
+	blank(kept, 0, len(kept))
+	ast.Inspect(f, func(n ast.Node) bool {
+		lit, ok := n.(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			return true
+		}
+		from, to := offset(lit.Pos()), offset(lit.End())
+		for _, p := range prose {
+			if from >= p[0] && to <= p[1] {
+				return true
+			}
+		}
+		copy(kept[from:to], src[from:to])
+		return true
+	})
+	return string(kept)
+}
+
+// blank overwrites b[from:to] with spaces, leaving newlines in place so
+// byte offsets and line numbers both survive.
+func blank(b []byte, from, to int) {
+	for i := from; i < to; i++ {
+		if b[i] != '\n' {
+			b[i] = ' '
+		}
+	}
 }
 
 // window returns a readable slice around an offset for failure output.
@@ -356,7 +544,7 @@ func (s *EmissionSuite) TestNewBindsTheGraph() {
 	for _, name := range []string{"EnsureGraph", "DropGraph"} {
 		s.Require().Contains(graph, "func (q *Queries) "+name+"(ctx context.Context) error {")
 	}
-	s.Require().Contains(graph, "q.db.Exec(ctx, stmt, q.graph)")
+	s.Require().Contains(graph, "q.db.Exec(ctx, stmt, graph)")
 }
 
 // TestGraphNameIsAgesToJudge fences the emission against a client-side
@@ -379,29 +567,230 @@ func (s *EmissionSuite) TestGraphNameIsAgesToJudge() {
 	s.Require().NotContains(db, "panic(")
 
 	s.Require().Contains(s.files["graph.go"],
-		`fmt.Errorf("gqlc: ensure graph %q (the name bound at New): %w", q.graph, err)`)
+		`fmt.Errorf("gqlc: ensure graph %q (the name bound at New): %w", graph, err)`)
 }
 
-// TestLifecycleRejectsANameTheCastWouldShorten pins the one graph-name
-// constraint this backend does own. $1::name is a cast this emission
-// chose, and PostgreSQL's name type holds NAMEDATALEN-1 = 63 bytes and
-// drops the rest without raising. Two handles whose names differ only
-// past byte 63 then address one graph: the second EnsureGraph finds it
-// already there and reports nothing, and either handle's DropGraph
-// cascades away the other's labels and data. The limit is a static
-// property of the type, so unlike AGE's validity grammar it is knowable
-// here and cannot drift underneath us.
-func (s *EmissionSuite) TestLifecycleRejectsANameTheCastWouldShorten() {
-	graph := s.files["graph.go"]
-	s.Require().Contains(graph, "const maxGraphNameBytes = 63")
-	s.Require().Contains(graph, "if len(graph) > maxGraphNameBytes {")
+// nameBearers are the emitted functions that put the bound graph name
+// into a statement the server parses.
+var nameBearers = []string{"EnsureGraph", "DropGraph", "cypherStmt"}
 
-	// Ahead of the statement in both helpers: a guard on one of them
-	// still leaves the other free to alias.
-	for _, name := range []string{"EnsureGraph", "DropGraph"} {
-		s.Require().Contains(graph,
-			"func (q *Queries) "+name+"(ctx context.Context) error {\n\tif err := checkGraphName(q.graph); err != nil {\n\t\treturn err\n\t}\n\tconst stmt = ",
-			"%s must reject an over-length name before it reaches the ::name cast", name)
+// TestTheGraphNameReachesTheServerThroughOneCheck pins the one
+// graph-name constraint this backend owns, and pins it to a single site.
+// PostgreSQL's name type holds NAMEDATALEN-1 = 63 bytes and drops the
+// rest without raising, so two handles whose names differ only past byte
+// 63 address one graph: the second EnsureGraph finds it already there
+// and reports nothing, a read returns the first's rows, and either
+// handle's DropGraph cascades away the other's labels and data.
+//
+// Three functions carry the name to the server and each acquired the
+// check separately would be three copies to keep in step; the third
+// reaches it on the read path, where a name that has drifted past a
+// stale copy of the limit returns another graph's rows. So the field is
+// readable from one accessor, that accessor holds the check, and the
+// bearers take what it returns.
+func (s *EmissionSuite) TestTheGraphNameReachesTheServerThroughOneCheck() {
+	files := s.emitReadBatch()
+
+	db := files["db.go"]
+	s.Require().Contains(db, "const maxGraphNameBytes = 63")
+	s.Require().Contains(db,
+		"func (q *Queries) boundGraph() (string, error) {\n\tif len(q.graph) > maxGraphNameBytes {")
+
+	var readers, bearers []string
+	for path, body := range files {
+		readers = append(readers, s.functionsSelecting(path, body, "q", "graph")...)
+		bearers = append(bearers, s.functionsCalling(path, body, "q", "boundGraph")...)
+	}
+	s.Require().ElementsMatch([]string{"WithTx", "boundGraph"}, readers,
+		"the graph field is readable outside the accessor that checks it")
+	s.Require().ElementsMatch(nameBearers, bearers,
+		"a function carrying the name to the server does not take it from boundGraph")
+}
+
+// emitReadBatch generates the skeleton schema carrying one served query,
+// so the sweeps above see the read path's files as well as the lifecycle
+// ones. Keyed by path, as SetupSuite keys the query-free emission.
+func (s *EmissionSuite) emitReadBatch(opts ...age.Option) map[string]string {
+	in := s.in
+	in.Queries = []codegen.NamedQuery{servedQuery}
+	files, err := age.New(opts...).Generate(in)
+	s.Require().NoError(err)
+	out := make(map[string]string, len(files))
+	for _, f := range files {
+		out[f.Path] = string(f.Contents)
+	}
+	return out
+}
+
+// functionsSelecting names every emitted function whose body reads the
+// field recv.field.
+func (s *EmissionSuite) functionsSelecting(label, body, recv, field string) []string {
+	return s.functionsWhere(label, body, func(n ast.Node) bool {
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != field {
+			return false
+		}
+		x, ok := sel.X.(*ast.Ident)
+		return ok && x.Name == recv
+	})
+}
+
+// functionsCalling names every emitted function whose body calls the
+// method recv.method.
+func (s *EmissionSuite) functionsCalling(label, body, recv, method string) []string {
+	return s.functionsWhere(label, body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return false
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != method {
+			return false
+		}
+		x, ok := sel.X.(*ast.Ident)
+		return ok && x.Name == recv
+	})
+}
+
+// functionsWhere names every emitted function holding a node match
+// accepts, once per function however many it holds.
+func (s *EmissionSuite) functionsWhere(label, body string, match func(ast.Node) bool) []string {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, label, body, parser.SkipObjectResolution)
+	s.Require().NoError(err, "emitted file %s does not parse", label)
+	var found []string
+	for _, decl := range f.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			if n == nil || !match(n) {
+				return true
+			}
+			if len(found) == 0 || found[len(found)-1] != fn.Name.Name {
+				found = append(found, fn.Name.Name)
+			}
+			return true
+		})
+	}
+	return found
+}
+
+// TestNoQueryArgumentReachesTheStatementText pins the property that
+// makes a bound parameter a value rather than syntax. AGE takes a query
+// argument only as a placeholder — it rejects every composed third
+// argument to cypher() — so a statement assembled around a caller's
+// value is not merely unsafe here, it is a statement the server refuses.
+//
+// The fence is structural rather than a search for the shapes that go
+// wrong: the statement a query method runs is a name, the arguments it
+// hands the composer are names and literals, and the composer is the one
+// emitted function that builds a string by concatenation. Nothing a
+// caller supplies can travel along any of those.
+func (s *EmissionSuite) TestNoQueryArgumentReachesTheStatementText() {
+	files := s.emitReadBatch()
+
+	var concatenating []string
+	for path, body := range files {
+		s.Require().NotContains(body, "fmt.Sprintf", "%s composes text a caller can reach", path)
+
+		for _, call := range s.calls(path, body) {
+			var args []ast.Expr
+			switch s.callee(call) {
+			case "q.db.Query", "q.db.Exec", "conn.Exec", "conn.QueryRow":
+				// The statement is the argument after the context.
+				args = call.Args[1:2]
+			case "q.cypherStmt":
+				args = call.Args
+			default:
+				continue
+			}
+			for i, arg := range args {
+				switch arg.(type) {
+				case *ast.Ident, *ast.BasicLit:
+				default:
+					s.Failf("composed statement argument",
+						"%s: %s argument %d is %T, so the text it runs is assembled at the call site",
+						path, s.callee(call), i, arg)
+				}
+			}
+		}
+		concatenating = append(concatenating, s.functionsWhere(path, body, func(n ast.Node) bool {
+			bin, ok := n.(*ast.BinaryExpr)
+			if !ok || bin.Op != token.ADD {
+				return false
+			}
+			return isStringLit(bin.X) || isStringLit(bin.Y)
+		})...)
+	}
+	s.Require().ElementsMatch([]string{"cypherStmt"}, concatenating,
+		"a function outside the statement composer builds text by concatenation")
+}
+
+// isStringLit reports whether e is a string literal, which is as much as
+// a syntax tree can say about the type of an operand.
+func isStringLit(e ast.Expr) bool {
+	lit, ok := e.(*ast.BasicLit)
+	return ok && lit.Kind == token.STRING
+}
+
+// calls returns every call expression in an emitted file.
+func (s *EmissionSuite) calls(label, body string) []*ast.CallExpr {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, label, body, parser.SkipObjectResolution)
+	s.Require().NoError(err, "emitted file %s does not parse", label)
+	var out []*ast.CallExpr
+	ast.Inspect(f, func(n ast.Node) bool {
+		if call, ok := n.(*ast.CallExpr); ok {
+			out = append(out, call)
+		}
+		return true
+	})
+	return out
+}
+
+// callee is the source spelling of what a call invokes.
+func (s *EmissionSuite) callee(call *ast.CallExpr) string {
+	return types.ExprString(call.Fun)
+}
+
+// TestOneMethodsReturnMatchableSentinels pins the two outcomes a :one
+// method has beyond its row, and pins them to package-level values: a
+// caller distinguishes "no such person" from a transport failure by
+// identity, and text carried in a wrapped error is not something
+// errors.Is can compare.
+//
+// They are emitted only for a batch that has a :one query, because an
+// exported sentinel no method in the package can return is a promise
+// with nothing behind it.
+func (s *EmissionSuite) TestOneMethodsReturnMatchableSentinels() {
+	sentinels := map[string]string{
+		"ErrNoRows":          `var ErrNoRows = errors.New("gqlc: no rows in result set")`,
+		"ErrMultipleResults": `var ErrMultipleResults = errors.New("gqlc: multiple rows in :one result set")`,
+	}
+
+	one := servedQuery
+	one.Name = "Solo"
+	one.Cardinality = codegen.CardinalityOne
+	in := s.in
+	in.Queries = []codegen.NamedQuery{one}
+	files, err := age.New().Generate(in)
+	s.Require().NoError(err)
+
+	byPath := make(map[string]string, len(files))
+	for _, f := range files {
+		byPath[f.Path] = string(f.Contents)
+	}
+	for name, decl := range sentinels {
+		s.Require().Contains(byPath["db.go"], decl)
+		s.Require().Contains(byPath["q.cypher.go"], "return SoloRow{}, "+name,
+			"the :one method never returns %s", name)
+	}
+
+	// servedQuery is :many, so its emission is the negative case.
+	for name := range sentinels {
+		s.Require().NotContains(s.emitReadBatch()["db.go"], name)
 	}
 }
 

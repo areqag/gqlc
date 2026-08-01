@@ -1,22 +1,46 @@
 package age
 
 import (
+	"strings"
+
 	"github.com/areqag/gqlc/internal/codegen"
 )
 
-// renderDB emits db.go: the Queries handle and the pgx seam every
-// generated method runs against.
-func renderDB(pkg string) []byte {
-	return []byte(codegen.Header() + `package ` + pkg + `
+// renderDB emits db.go: the Queries handle, the pgx seam every generated
+// method runs against, the one place the bound graph name is checked,
+// and the statement composer every query method calls.
+//
+// withQueries gates the composer, and withOneSentinels the :one
+// sentinels, on the batch reaching for them: an emitted-but-uncalled
+// declaration is a lint failure in the generated module.
+func renderDB(pkg string, withQueries, withOneSentinels bool) []byte {
+	var b strings.Builder
+	b.WriteString(codegen.Header())
+	b.WriteString("package " + pkg + "\n\n")
 
-import (
-	"context"
+	b.WriteString("import (\n\t\"context\"\n")
+	if withOneSentinels {
+		b.WriteString("\t\"errors\"\n")
+	}
+	b.WriteString("\t\"fmt\"\n")
+	if withQueries {
+		b.WriteString("\t\"strings\"\n")
+	}
+	b.WriteString("\n\t\"" + pgxModule + "\"\n\t\"" + pgxModule + "/pgconn\"\n)\n\n")
 
-	"` + pgxModule + `"
-	"` + pgxModule + `/pgconn"
-)
+	if withOneSentinels {
+		b.WriteString(`// ErrNoRows is returned by a :one method when the query produced zero
+// rows. Callers branch with errors.Is.
+var ErrNoRows = errors.New("gqlc: no rows in result set")
 
-// DBTX is the pgx surface the generated methods run against.
+// ErrMultipleResults is returned by a :one method when the query
+// produced more than one row. Callers branch with errors.Is.
+var ErrMultipleResults = errors.New("gqlc: multiple rows in :one result set")
+
+`)
+	}
+
+	b.WriteString(`// DBTX is the pgx surface the generated methods run against.
 // *pgxpool.Pool, *pgx.Conn and pgx.Tx all satisfy it, so the caller
 // chooses the scope without this package naming a concrete type.
 type DBTX interface {
@@ -33,9 +57,8 @@ type Queries struct {
 // the handle's identity: every method on it addresses that graph. Every
 // connection db hands out must have been through SessionInit.
 //
-// The name is not read here. EnsureGraph and DropGraph are where it
-// reaches the server, and where both AGE's verdict on it and the length
-// the name type imposes are reported.
+// The name is not judged here. AGE's verdict on it arrives from the
+// server, at EnsureGraph.
 func New(db DBTX, graph string) *Queries {
 	return &Queries{db: db, graph: graph}
 }
@@ -43,5 +66,61 @@ func New(db DBTX, graph string) *Queries {
 func (q *Queries) WithTx(tx pgx.Tx) *Queries {
 	return &Queries{db: tx, graph: q.graph}
 }
-`)
+
+// maxGraphNameBytes is the capacity of PostgreSQL's name type,
+// NAMEDATALEN - 1. It is a compile-time property of the server's type,
+// not of AGE.
+const maxGraphNameBytes = 63
+
+// boundGraph returns the name New bound, once it is short enough to
+// reach the server whole. PostgreSQL's name type keeps the leading
+// maxGraphNameBytes bytes and drops the rest without raising, so two
+// handles whose names differ only past that point address one graph: the
+// second EnsureGraph finds it already there and reports nothing, a read
+// returns the first's rows, and either handle's DropGraph takes both.
+// The limit counts bytes because that is what the type truncates on, so
+// a name of 63 multi-byte characters is over it.
+//
+// Every statement carrying the name is built from this return value, so
+// the length is established once and no call site holds a name that has
+// not been through it.
+func (q *Queries) boundGraph() (string, error) {
+	if len(q.graph) > maxGraphNameBytes {
+		return "", fmt.Errorf("gqlc: graph name %q is %d bytes, over the %d that PostgreSQL's name type holds: the rest would be dropped silently and this handle could address another graph",
+			q.graph, len(q.graph), maxGraphNameBytes)
+	}
+	return q.graph, nil
 }
+`)
+
+	if withQueries {
+		b.WriteString(`
+// cypherStmt composes the statement one query method runs: the bound
+// graph name, the query text between the delimiters tag opens and
+// closes, and the record shape a set-returning cypher() call declares.
+//
+// The name travels inside the statement text because AGE resolves
+// cypher()'s graph argument during parse analysis and accepts a constant
+// there and nothing else. An E-string is the literal form whose escapes
+// mean the same thing whatever standard_conforming_strings is set to,
+// and escaping the backslash and the quote holds an arbitrary name to
+// one literal at the SQL layer; AGE refuses both characters in a graph
+// name at create_graph, so the two barriers stand independently. Query
+// arguments never travel this way: they bind to $1.
+func (q *Queries) cypherStmt(tag, text, record string) (string, error) {
+	graph, err := q.boundGraph()
+	if err != nil {
+		return "", err
+	}
+	escaped := strings.ReplaceAll(strings.ReplaceAll(graph, ` + backtick(`\`) + `, ` + backtick(`\\`) + `), ` + backtick(`'`) + `, ` + backtick(`\'`) + `)
+	return "SELECT * FROM ag_catalog.cypher(E'" + escaped + "', " + tag + text + tag + ", $1) AS (" + record + ")", nil
+}
+`)
+	}
+	return []byte(b.String())
+}
+
+// backtick wraps a fragment in Go raw-string quotes. The emitted escape
+// pairs are backslashes, and a raw string is the one Go literal form
+// that carries them at face value.
+func backtick(s string) string { return "`" + s + "`" }
