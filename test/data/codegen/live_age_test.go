@@ -4,7 +4,7 @@
 // pool in this package logs in as, and the adapter that binds the generated
 // handles to a graph of their own. The battery it serves is in live_test.go.
 
-package fixtures
+package fixtures_test
 
 import (
 	"context"

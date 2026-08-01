@@ -5,7 +5,7 @@
 // happy-path run establishes is that the hook is harmless, not that it
 // discriminates (gqlc-35yu.6, gqlc-35yu.8).
 
-package fixtures
+package fixtures_test
 
 import (
 	"context"

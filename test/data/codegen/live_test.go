@@ -6,7 +6,13 @@
 // / nightly CI job runs it. Lives in the nested test/data/codegen module so
 // testcontainers and its ~50 transitive deps stay out of gqlc's root go.mod
 // and the compiler binary.
-package fixtures
+//
+// The battery must stay an external test package: govulncheck keys the
+// packages it loads by import path, and an in-package test variant loses that
+// collision to the non-test package, taking every dependency only it imports
+// out of the scan with no diagnostic (bd gqlc-rohp). test-codegen-fence
+// enforces this.
+package fixtures_test
 
 import (
 	"context"

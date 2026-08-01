@@ -133,10 +133,21 @@ bd-export-monotonic-local:
 # because the tagged files are all _test.go and go build never compiles those
 # — the tag there would be inert, and vet already builds what it analyses.
 # golangci-lint reads the tag from .golangci.yml.
+#
+# The last line holds the live battery to an external test package. govulncheck
+# keys the packages it loads by import path, so an in-package test variant
+# shares a path with the non-test package of the same name and loses to it:
+# everything only that variant imports — the driver, testcontainers and docker
+# trees — drops out of the scanned module set with no diagnostic, and `just
+# vuln` goes green over code it never looked at (bd gqlc-rohp). This is the
+# only always-run gate over the nested module, so it is where the convention
+# can actually be held.
 test-codegen-fence: ensure-golangci
     cd test/data/codegen && go build ./... && go vet -tags codegen_live ./...
     cd test/data/codegen && go mod tidy -diff
     cd test/data/codegen && {{golangci}} run
+    @cd test/data/codegen && ! grep -qx 'package fixtures' ./*_test.go \
+        || { echo "error: live battery test files must declare 'package fixtures_test' — an in-package variant silently drops the live dependency tree from 'just vuln' (bd gqlc-rohp)"; exit 1; }
 
 # runs every live test in the codegen module against real testcontainers:
 # the smoke battery on all three arms plus the AGE session-init contract.
@@ -175,8 +186,19 @@ test-codegen-live-age:
 # call-graph-aware vulnerability scan; run on dependency changes and on the
 # weekly CI schedule ("@latest" deliberate: the vuln DB matters more than
 # tool-version reproducibility)
+#
+# Two invocations because the scan has two blind spots that neither the tool
+# nor .golangci.yml closes for it (bd gqlc-rohp). -test: without it govulncheck
+# loads no test files at all, so every test-only dependency is unscanned —
+# godog and testify at root, and everything the live battery reaches in the
+# nested module. The nested module needs its own invocation because it is a
+# separate module: `go list ./...` at root emits none of its packages, so its
+# driver, testcontainers and docker trees are outside a root-rooted scan by
+# module boundary. It also needs the codegen_live tag, which is where the
+# container-driving code enters the build.
 vuln:
-    go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+    go run golang.org/x/vuln/cmd/govulncheck@latest -test ./...
+    cd test/data/codegen && go run golang.org/x/vuln/cmd/govulncheck@latest -tags codegen_live -test ./...
 
 # lints the GitHub Actions workflow files
 actionlint:
