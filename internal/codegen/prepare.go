@@ -595,20 +595,8 @@ func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entity
 					return fmt.Errorf("%w: query %q column %d %q references unknown edge type %s -[:%s]-> %s", ErrOutOfC6Scope, q.Name, ci, col.Name, string(t.EdgeKey.Source), string(t.EdgeKey.KeyLabels), string(t.EdgeKey.Target))
 				}
 			case resolver.ResolvedEdgeUnion:
-				// C5 admission (§2.1): defensive gates on the resolver-
-				// guaranteed invariants. The resolver commits len(EdgeKeys)
-				// >= 2 (single-candidate collapses to ResolvedEdge) per R3
-				// spec §4.4; codegen reads defensively so a synthetic test
-				// seam fails at generation, not downstream. Every candidate
-				// must have a Phase Z schema-cache entry — a miss indicates
-				// the resolver committed an edge the schema does not declare.
-				if len(t.EdgeKeys) < 2 {
-					return fmt.Errorf("%w: query %q column %d %q resolved as edgeUnion with only %d candidate(s) — resolver invariant violated (expected >= 2)", ErrOutOfC6Scope, q.Name, ci, col.Name, len(t.EdgeKeys))
-				}
-				for _, ek := range t.EdgeKeys {
-					if _, ok := entityIndex[entityLookupKey{Kind: EntityEdge, EdgeKey: ek}]; !ok {
-						return fmt.Errorf("%w: query %q column %d %q edgeUnion candidate %s -[:%s]-> %s not declared by schema", ErrOutOfC6Scope, q.Name, ci, col.Name, string(ek.Source), string(ek.KeyLabels), string(ek.Target))
-					}
+				if err := admitEdgeUnionCandidates(t.EdgeKeys, entities, entityIndex, columnSite(q.Name, ci, col.Name)); err != nil {
+					return err
 				}
 			case resolver.ResolvedTemporal:
 				// Every temporal kind is representable; the closed enum
@@ -643,6 +631,46 @@ func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entity
 				return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrUnrepresentableWidth, q.Name, pi, p.Name, prop.Type)
 			}
 		}
+	}
+	return nil
+}
+
+// listElemSite is the fail-site text for an edge union reached through a
+// list-element chain. The chain's own recursion carries no position, and
+// the caller wraps the message with the query and column the chain hangs
+// off (§4.7).
+const listElemSite = "list element"
+
+func columnSite(queryName string, pos int, columnName string) string {
+	return fmt.Sprintf("query %q column %d %q", queryName, pos, columnName)
+}
+
+// admitEdgeUnionCandidates gates one resolved edge-union candidate set,
+// naming site in whatever it refuses. Shared by the two fail-sites so
+// their answers cannot drift.
+//
+// The first two gates are defensive: the resolver commits at least two
+// candidates (a single one collapses to ResolvedEdge, R3 spec §4.4) and
+// commits only edges the schema declares, so a synthetic seam fails at
+// generation rather than downstream. The third follows from what arrives
+// — the emitted dispatch reads the value's label to pick a candidate,
+// which two candidates carrying one label give it no way to do. First
+// offender in candidate order wins across all three.
+func admitEdgeUnionCandidates(edgeKeys []schema.EdgeKey, entities []Entity, entityIndex map[entityLookupKey]int, site string) error {
+	if len(edgeKeys) < 2 {
+		return fmt.Errorf("%w: %s resolved as edgeUnion with only %d candidate(s) — resolver invariant violated (expected >= 2)", ErrOutOfC6Scope, site, len(edgeKeys))
+	}
+	firstByLabel := make(map[graph.LabelSetKey]string, len(edgeKeys))
+	for _, ek := range edgeKeys {
+		idx, ok := entityIndex[entityLookupKey{Kind: EntityEdge, EdgeKey: ek}]
+		if !ok {
+			return fmt.Errorf("%w: %s edgeUnion candidate %s -[:%s]-> %s not declared by schema", ErrOutOfC6Scope, site, string(ek.Source), string(ek.KeyLabels), string(ek.Target))
+		}
+		name := entities[idx].Name
+		if first, dup := firstByLabel[ek.KeyLabels]; dup {
+			return fmt.Errorf("%w: %s candidates %s and %s both carry edge label %q — an edge value carries its label and its properties, not its endpoint types, so nothing in it tells the two apart; constrain the pattern's endpoints or direction so that at most one candidate carries the label", ErrUnrepresentableEdgeUnion, site, first, name, string(ek.KeyLabels))
+		}
+		firstByLabel[ek.KeyLabels] = name
 	}
 	return nil
 }
@@ -985,13 +1013,8 @@ func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex m
 		name := entities[idx].Name
 		return &ListElem{Kind: ColumnEdge, GoType: name, EntityName: name}, nil
 	case resolver.ResolvedEdgeUnion:
-		if len(tt.EdgeKeys) < 2 {
-			return nil, fmt.Errorf("%w: list element resolved as edgeUnion with only %d candidate(s) — resolver invariant violated (expected >= 2)", ErrOutOfC6Scope, len(tt.EdgeKeys))
-		}
-		for _, ek := range tt.EdgeKeys {
-			if _, ok := entityIndex[entityLookupKey{Kind: EntityEdge, EdgeKey: ek}]; !ok {
-				return nil, fmt.Errorf("%w: list element edgeUnion candidate %s -[:%s]-> %s not declared by schema", ErrOutOfC6Scope, string(ek.Source), string(ek.KeyLabels), string(ek.Target))
-			}
+		if err := admitEdgeUnionCandidates(tt.EdgeKeys, entities, entityIndex, listElemSite); err != nil {
+			return nil, err
 		}
 		return &ListElem{Kind: ColumnEdgeUnion, GoType: unionInterfaceName, UnionIdx: unionIdx}, nil
 	case resolver.ResolvedTemporal:

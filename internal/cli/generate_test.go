@@ -29,9 +29,9 @@ const (
 	// walked against a single project.
 	fixtureQuery = "// name: AllPersonNames :many\nMATCH (p:Person) RETURN p.name\n"
 
-	// entityQuery projects a whole node, which the Apache AGE backend
-	// does not yet decode.
-	entityQuery = "// name: AllPersons :many\nMATCH (p:Person) RETURN p\n"
+	// writeQuery mutates the graph, which the Apache AGE backend has
+	// no emission for.
+	writeQuery = "// name: WipePersons :exec\nMATCH (p:Person) DETACH DELETE p\n"
 
 	// The second target's schema and query, sharing no label with the
 	// first's.
@@ -264,13 +264,13 @@ func TestGenerateDriverAxis(t *testing.T) {
 // axis that dropped it, which is what the author acts on.
 func TestGenerateApacheAgeRejectsQueriesItCannotServe(t *testing.T) {
 	dir := writeProject(t)
-	writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), entityQuery)
+	writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), writeQuery)
 	writeFixtureFile(t, filepath.Join(dir, config.DefaultFilename), configYAML("people", "apache-age-pgx-v5", ""))
 
 	_, stderr, err := runGenerateIn(t, dir)
 	require.ErrorContains(t, err, "graph[0]: unsupported query: ")
-	require.ErrorContains(t, err, `1 query would be dropped: AllPersons (column "p" projects node)`)
-	require.Contains(t, stderr, "1 query would be dropped: AllPersons")
+	require.ErrorContains(t, err, `1 query would be dropped: WipePersons (writes to the graph)`)
+	require.Contains(t, stderr, "1 query would be dropped: WipePersons")
 	require.NoDirExists(t, filepath.Join(dir, "out"))
 }
 

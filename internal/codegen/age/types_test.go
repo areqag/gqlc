@@ -13,10 +13,11 @@ import (
 
 // TestTypeMapProperty pins the property axis of the Go-type table (spec
 // §5.1). agtype's scalar vocabulary is narrower than the neo4j driver's,
-// so the boundary sits in a different place: BYTES and the five temporal
-// widths join the eight oversized numeric widths on the reject side, and
-// a caller hitting any of the fourteen gets ErrUnrepresentableWidth
-// naming the width. The rows pin each width's mapping; the constant set
+// so the boundary sits in a different place: BYTES, the five temporal
+// widths, and the two structured widths join the eight oversized numeric
+// widths on the reject side, and a caller hitting any of them gets
+// ErrUnrepresentableWidth naming the width. The rows pin each width's
+// mapping; the constant set
 // they range over is held by Property's switch, which has no default
 // arm and so fails the exhaustive linter when internal/graph grows one.
 func TestTypeMapProperty(t *testing.T) {
@@ -39,7 +40,6 @@ func TestTypeMapProperty(t *testing.T) {
 		{graph.TypeFloat, "float64"},
 		{graph.TypeFloat32, "float32"},
 		{graph.TypeFloat64, "float64"},
-		{graph.TypeAnyPropertyValue, "any"},
 	}
 	for _, tt := range representable {
 		t.Run("representable/"+string(tt.pt), func(t *testing.T) {
@@ -61,6 +61,11 @@ func TestTypeMapProperty(t *testing.T) {
 		graph.TypeUint128, graph.TypeUint256,
 		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,
 		graph.TypeDecimal,
+		// The decode vocabulary is one helper per agtype scalar, so a
+		// property whose value is a list or is of no declared shape at
+		// all would reach a struct field with no helper to fill it.
+		graph.TypeList,
+		graph.TypeAnyPropertyValue,
 	}
 	for _, pt := range unrepresentable {
 		t.Run("unrepresentable/"+string(pt), func(t *testing.T) {
@@ -70,26 +75,12 @@ func TestTypeMapProperty(t *testing.T) {
 		})
 	}
 
-	t.Run("list recurses element-wise", func(t *testing.T) {
-		got, ok := typeMap{}.Property(graph.ListOf(graph.TypeInt32, false))
-		require.True(t, ok)
-		require.Equal(t, "[]int32", got)
-	})
-
-	t.Run("list of unrepresentable element fails", func(t *testing.T) {
-		_, ok := typeMap{}.Property(graph.ListOf(graph.TypeDecimal, false))
-		require.False(t, ok)
-	})
-
-	t.Run("list of temporal element fails", func(t *testing.T) {
-		_, ok := typeMap{}.Property(graph.ListOf(graph.TypeTimestamp, false))
-		require.False(t, ok)
-	})
-
-	t.Run("bare list width", func(t *testing.T) {
-		got, ok := typeMap{}.Property(graph.TypeList)
-		require.True(t, ok)
-		require.Equal(t, "[]any", got)
+	t.Run("a list is rejected whatever its element", func(t *testing.T) {
+		for _, elem := range []graph.PropertyType{graph.TypeInt32, graph.TypeDecimal, graph.TypeTimestamp} {
+			got, ok := typeMap{}.Property(graph.ListOf(elem, false))
+			require.False(t, ok, "element %s", elem)
+			require.Empty(t, got)
+		}
 	})
 
 	// graph.PropertyType is a string type, so a width with no row above
@@ -110,17 +101,18 @@ func TestTypeMapProperty(t *testing.T) {
 
 // TestTypeMapPropertyRejectionReachesTheCaller pins the contract the
 // ok=false half of the table exists for: generation fails with
-// ErrUnrepresentableWidth naming the entity, the property and the width,
-// rather than emitting a field nothing can decode. The two widths here
-// are the ones AGE rejects and neo4j accepts — the divergence that has
-// no corpus fixture, because a fixture directory is valid or invalid for
-// every target at once.
+// ErrUnrepresentableWidth naming the entity, the property, the width, and
+// the backend with no carrier for it, rather than emitting a field
+// nothing can decode. The widths here are ones AGE rejects and neo4j
+// accepts, so a config declaring both targets fails on one of them and
+// the backend name is what says which.
 func TestTypeMapPropertyRejectionReachesTheCaller(t *testing.T) {
-	for _, pt := range []graph.PropertyType{graph.TypeBytes, graph.TypeTimestamp} {
+	for _, pt := range []graph.PropertyType{graph.TypeBytes, graph.TypeTimestamp, graph.ListOf(graph.TypeString, false)} {
 		t.Run(string(pt), func(t *testing.T) {
 			files, err := generate(codegen.Input{Schema: schemaWithPayload(pt)}, "age")
 			require.ErrorIs(t, err, codegen.ErrUnrepresentableWidth)
-			require.ErrorContains(t, err, `entity "Blob" property "payload" has `+string(pt))
+			require.ErrorContains(t, err,
+				`entity "Blob" property "payload" has `+string(pt)+`, which the Apache AGE backend has no carrier for`)
 			require.Nil(t, files)
 		})
 	}

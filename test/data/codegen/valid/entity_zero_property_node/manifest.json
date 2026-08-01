@@ -1,5 +1,5 @@
 {
   "package": "entityzeropropertynode",
   "queryFiles": [],
-  "targets": ["neo4j-go-v5"]
+  "targets": ["neo4j-go-v5", "apache-age-pgx-v5"]
 }

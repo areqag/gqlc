@@ -1,0 +1,5 @@
+CREATE PROPERTY GRAPH TYPE EdgeUnionUndirectedSelfLoop AS {
+    (:Person { id :: INT64 NOT NULL }),
+    DIRECTED EDGE TYPE Likes (:Person) -[:LIKES { since   :: INT64 NOT NULL }]-> (:Person),
+    DIRECTED EDGE TYPE Wrote (:Person) -[:WROTE { written :: INT64 NOT NULL }]-> (:Person)
+}

@@ -33,6 +33,11 @@ const (
 	// golden subtree under each enrolled fixture.
 	ageTarget = "apache-age-pgx-v5"
 
+	// personLabel is the one node type valid/skeleton declares. Phase Z
+	// names its entity struct after it, so the label and the struct name
+	// are the same text here.
+	personLabel = "Person"
+
 	// wantCanary is an independent copy of the operator-resolution probe
 	// SessionInit runs. Verified against apache/age 1.7.0: with
 	// ag_catalog off the search_path, `+` on two agtype operands has no
@@ -114,14 +119,18 @@ func (s *EmissionSuite) inputFrom(path string) codegen.Input {
 }
 
 // TestFileSet pins the C0 file set: the pgx handle, the graph lifecycle,
-// the Querier interfaces, and an empty models file.
+// the Querier interfaces, and the models file. The models file carries
+// the schema's entity surface whether or not a query in the batch
+// projects one — the entity table is the schema's, not the batch's, so
+// the same schema emits the same structs for every backend.
 func (s *EmissionSuite) TestFileSet() {
 	paths := make([]string, 0, len(s.files))
 	for p := range s.files {
 		paths = append(paths, p)
 	}
 	s.Require().ElementsMatch([]string{"db.go", "graph.go", "models.go", "querier.go"}, paths)
-	s.Require().Equal(codegen.Header()+"package "+skeletonPackage+"\n", s.files["models.go"])
+	s.Require().Contains(s.files["models.go"], "type "+personLabel+" struct {")
+	s.Require().Contains(s.files["models.go"], "func decode"+personLabel+"(raw []byte) ("+personLabel+", error) {")
 }
 
 // TestWithPackageName pins the CLI-1 §3.4 widening: a configured name
@@ -184,10 +193,11 @@ var servedQuery = func() codegen.NamedQuery {
 }()
 
 // TestRejectsQueriesItCannotServe pins the capability gate. The read
-// path decodes agtype's scalar vocabulary, so a batch carrying a query
-// outside it would hand the author a Querier that silently omits the
-// query — or, worse, a method built on a decode arm that does not exist.
-// The error names every dropped query and the axis that dropped it.
+// path decodes agtype's scalar vocabulary and the vertices and edges
+// built out of it, so a batch carrying a query outside that would hand
+// the author a Querier that silently omits the query — or, worse, a
+// method built on a decode arm that does not exist. The error names
+// every dropped query and the axis that dropped it.
 func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 	served := servedQuery
 
@@ -203,7 +213,9 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 		q.Cardinality = codegen.CardinalityExec
 	})
 	node := moved("Whole", func(q *codegen.NamedQuery) {
-		q.Validated.Columns = []resolver.Column{{Name: "p", Type: resolver.ResolvedNode{}}}
+		q.Validated.Columns = []resolver.Column{{
+			Name: "p", Type: resolver.ResolvedNode{Labels: graph.LabelSetKey(personLabel)},
+		}}
 	})
 	temporal := moved("When", func(q *codegen.NamedQuery) {
 		q.Validated.Columns = []resolver.Column{{
@@ -264,10 +276,8 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 			wantError: true,
 		},
 		{
-			name:      "a whole-entity column is dropped",
-			queries:   []codegen.NamedQuery{node},
-			wantSub:   `1 query would be dropped: Whole (column "p" projects node)`,
-			wantError: true,
+			name:    "a whole-entity column generates",
+			queries: []codegen.NamedQuery{node},
 		},
 		{
 			name:      "a temporal column is dropped",
@@ -301,8 +311,8 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 		},
 		{
 			name:      "every dropped query is named, in batch order",
-			queries:   []codegen.NamedQuery{write, exec, node},
-			wantSub:   "3 queries would be dropped: Wipe (writes to the graph), Purge (:exec returns no rows to decode), Whole (column \"p\" projects node)",
+			queries:   []codegen.NamedQuery{write, exec, temporal},
+			wantSub:   "3 queries would be dropped: Wipe (writes to the graph), Purge (:exec returns no rows to decode), When (column \"t\" projects temporal(date))",
 			wantError: true,
 		},
 		{
@@ -328,6 +338,24 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 			s.Require().ErrorContains(err, tc.wantSub)
 		})
 	}
+}
+
+// TestRejectsMultiLabelSchema pins the schema gate. AGE stamps exactly
+// one label on a vertex or an edge and its parser has no syntax for a
+// second, so an entity the schema keys on two labels names a shape no
+// graph this backend can address ever holds. Rejecting the schema is
+// what stops the emission producing a struct and a decoder whose label
+// check nothing could ever satisfy.
+//
+// The gate is on the schema's whole entity table rather than on the
+// columns a batch projects, which is why a query-free batch fails too.
+func (s *EmissionSuite) TestRejectsMultiLabelSchema() {
+	in := s.inputFrom(filepath.Join(corpusRoot, "valid", "entity_multi_label_named", "schema.gql"))
+	files, err := age.New().Generate(in)
+	s.Require().Error(err)
+	s.Require().Nil(files, "a rejected schema must not return a partial file set")
+	s.Require().ErrorIs(err, age.ErrUnsupportedSchema)
+	s.Require().ErrorContains(err, "1 type cannot be represented: PersonEmployee (Employee&Person)")
 }
 
 // ageIdentifiers are the extension-owned names that must never appear
