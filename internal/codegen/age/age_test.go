@@ -328,24 +328,24 @@ func (s *EmissionSuite) TestNewBindsTheGraph() {
 	s.Require().Contains(graph, "q.db.Exec(ctx, stmt, q.graph)")
 }
 
-// TestNewRejectsAGraphNameAgeWillNot pins the construction-time guard.
-// The binding is the handle's identity, so a name AGE refuses yields a
-// handle whose every call fails at the server; New has no error return,
-// so the guard panics at the one point where the name is chosen.
+// TestGraphNameIsAgesToJudge fences the emission against a client-side
+// graph-name check. AGE's rule is not one this side can restate:
+// verified against apache/age 1.7.0, create_graph takes 中中 (2 runes,
+// 6 bytes) and refuses ab (2 runes, 2 bytes), takes a-b and refuses ab-,
+// takes " ab" and refuses "ab " — so neither a rune count nor a byte
+// count nor any characterisation reached over ~44 samples separates the
+// two sets. A check would panic on names AGE creates.
 //
-// The count is in runes. Verified against apache/age 1.7.0: create_graph
-// takes the three-rune, nine-byte name 中中中 and refuses the one-rune,
-// three-byte name 中, so a byte count would refuse a name AGE accepts.
-// AGE refuses more than these two rules cover — punctuation and embedded
-// spaces among them — and the guard encodes only what was verified, so
-// it can never refuse a name AGE would take.
-func (s *EmissionSuite) TestNewRejectsAGraphNameAgeWillNot() {
+// New therefore binds and nothing else, and EnsureGraph reports AGE's
+// own verdict with the value and its origin attached, since AGE's
+// message carries neither.
+func (s *EmissionSuite) TestGraphNameIsAgesToJudge() {
 	db := s.files["db.go"]
-	s.Require().Contains(db, "if !validGraphName(graph) {")
-	s.Require().Contains(db, `panic(fmt.Sprintf("gqlc: invalid AGE graph name %q`)
-	s.Require().Contains(db, "utf8.RuneCountInString(name) < 3")
-	s.Require().Contains(db, "utf8.DecodeRuneInString(name)")
-	s.Require().Contains(db, "return first < '0' || first > '9'")
+	s.Require().Contains(db, "func New(db DBTX, graph string) *Queries {\n\treturn &Queries{db: db, graph: graph}\n}")
+	s.Require().NotContains(db, "panic(")
+
+	s.Require().Contains(s.files["graph.go"],
+		`fmt.Errorf("gqlc: ensure graph %q (the name bound at New): %w", q.graph, err)`)
 }
 
 // TestGraphLifecycleIsOffTheQuerierInterfaces pins the exclusion: the

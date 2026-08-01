@@ -55,10 +55,15 @@ func SessionInit(ctx context.Context, conn *pgx.Conn) error {
 // repeated call is a no-op. The catalogue check and the create are not
 // atomic: two sessions racing on the same new name can both pass the
 // guard, and the loser gets AGE's duplicate-graph error.
+//
+// This is the first call that puts the bound name in front of AGE, so a
+// name AGE will not have arrives here as its own "graph name is
+// invalid". The wrap names the value and where it was bound, because
+// AGE's message says neither.
 func (q *Queries) EnsureGraph(ctx context.Context) error {
 	const stmt = "SELECT ag_catalog.create_graph($1::name) WHERE NOT EXISTS (SELECT 1 FROM ag_catalog.ag_graph WHERE name = $1::name)"
 	if _, err := q.db.Exec(ctx, stmt, q.graph); err != nil {
-		return fmt.Errorf("gqlc: ensure graph %q: %w", q.graph, err)
+		return fmt.Errorf("gqlc: ensure graph %q (the name bound at New): %w", q.graph, err)
 	}
 	return nil
 }
