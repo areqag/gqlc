@@ -171,6 +171,10 @@ var (
 // map. A sentinel added here must be paired with at least one negative
 // fixture; a retired one must be dropped from both.
 //
+// docs/specs/codegen-sentinel-taxonomy.md indexes this set and the
+// constructs that route to each member; TestSentinelTaxonomy holds the
+// two against each other, so an edit here needs the matching rows there.
+//
 // ErrFormatFailure is intentionally excluded: it is defensive-only,
 // unreachable via any legitimate fixture (well-formed emission cannot
 // fail formatting), so a fixture that fires it would require synthetic

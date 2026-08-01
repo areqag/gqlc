@@ -729,7 +729,10 @@ build-recipe concern, and `TestGeneratedHeaderFormat` (§6.1)
 catches the drift at test time, not at generation time. The
 generator writes the string it is given.
 
-**Closed set for the C6 sweep.** `allSentinels` at C6:
+**Closed set for the C6 sweep.** `allSentinels` at C6. This is the set
+as C6 shipped it and takes no further edit; C6 being the last stage, the
+live index moved to `docs/specs/codegen-sentinel-taxonomy.md`, where
+`TestSentinelTaxonomy` holds it against the code.
 
 ```go
 var allSentinels = []error{
