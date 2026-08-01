@@ -16,8 +16,9 @@ import (
 // so the boundary sits in a different place: BYTES and the five temporal
 // widths join the eight oversized numeric widths on the reject side, and
 // a caller hitting any of the fourteen gets ErrUnrepresentableWidth
-// naming the width. A width added to internal/graph without a row here
-// leaves the table silently unswept.
+// naming the width. The rows pin each width's mapping; the constant set
+// they range over is held by Property's switch, which has no default
+// arm and so fails the exhaustive linter when internal/graph grows one.
 func TestTypeMapProperty(t *testing.T) {
 	representable := []struct {
 		pt   graph.PropertyType
@@ -40,7 +41,6 @@ func TestTypeMapProperty(t *testing.T) {
 		{graph.TypeFloat64, "float64"},
 		{graph.TypeAnyPropertyValue, "any"},
 	}
-	require.Len(t, representable, 16)
 	for _, tt := range representable {
 		t.Run("representable/"+string(tt.pt), func(t *testing.T) {
 			got, ok := typeMap{}.Property(tt.pt)
@@ -62,7 +62,6 @@ func TestTypeMapProperty(t *testing.T) {
 		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,
 		graph.TypeDecimal,
 	}
-	require.Len(t, unrepresentable, 14)
 	for _, pt := range unrepresentable {
 		t.Run("unrepresentable/"+string(pt), func(t *testing.T) {
 			got, ok := typeMap{}.Property(pt)
@@ -148,8 +147,9 @@ func schemaWithPayload(pt graph.PropertyType) schema.Schema {
 
 // TestTypeMapTemporal pins the temporal column-shape row (spec §5.1).
 // agtype has no temporal scalar, so every kind projects undecoded until
-// the temporal arm commits an encoding — one row per kind so that
-// commitment cannot land silently.
+// the temporal arm commits an encoding. Temporal returns without
+// branching, so the rows exist to make that commitment land as six
+// failures rather than a quiet change of column type.
 func TestTypeMapTemporal(t *testing.T) {
 	tests := []struct {
 		k    resolver.Temporal
@@ -162,7 +162,6 @@ func TestTypeMapTemporal(t *testing.T) {
 		{resolver.TemporalLocalDateTime, "any"},
 		{resolver.TemporalDuration, "any"},
 	}
-	require.Len(t, tests, 6)
 	for _, tt := range tests {
 		t.Run(tt.k.String(), func(t *testing.T) {
 			require.Equal(t, tt.want, typeMap{}.Temporal(tt.k))
@@ -184,7 +183,6 @@ func TestTypeMapScalar(t *testing.T) {
 		{resolver.ScalarNull, "any"},
 		{resolver.ScalarMap, "map[string]any"},
 	}
-	require.Len(t, tests, 6)
 	for _, tt := range tests {
 		t.Run(tt.k.String(), func(t *testing.T) {
 			require.Equal(t, tt.want, typeMap{}.Scalar(tt.k))
