@@ -269,6 +269,7 @@ key:
 | `config.QueryLangOpenCypher`  | `cypher.New(cypher.WithRegistry(reg))` |
 | `config.DriverNeo4jGoV5`      | registry entry `neo4j-go-v5`           |
 | `config.DriverNeo4jGoV6`      | registry entry `neo4j-go-v6`           |
+| `config.DriverApacheAgePgxV5` | registry entry `apache-age-pgx-v5`     |
 
 The registry's entries are composed at the command layer's composition
 root (`internal/cli/backends`), and a parity test holds its key set

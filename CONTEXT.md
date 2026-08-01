@@ -484,7 +484,7 @@ unchanged. Failures in the commit phase itself are the residue — the
 multi-target spec §7.3 enumerates what each of them can leave behind.
 Each axis is a closed vocabulary: the schema and query
 language axes have one member today (GQL; openCypher), the driver axis
-has two (the Neo4j Go v5 and v6 drivers). The axes exist so each target
+has three (the Neo4j Go v5 and v6 drivers, and Apache AGE over pgx v5). The axes exist so each target
 states its whole pipeline explicitly, whether or not an axis offers a
 choice. Every key except the procedure-signature path is required —
 omission, an out-of-vocabulary axis value, or an unsupported version is

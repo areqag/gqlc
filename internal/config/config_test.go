@@ -175,7 +175,7 @@ func TestEnumValues(t *testing.T) {
 	if got, want := config.QueryLangValues(), []config.QueryLang{config.QueryLangOpenCypher}; !slices.Equal(got, want) {
 		t.Errorf("QueryLangValues() = %v; want %v", got, want)
 	}
-	if got, want := config.DriverValues(), []config.Driver{config.DriverNeo4jGoV5, config.DriverNeo4jGoV6}; !slices.Equal(got, want) {
+	if got, want := config.DriverValues(), []config.Driver{config.DriverNeo4jGoV5, config.DriverNeo4jGoV6, config.DriverApacheAgePgxV5}; !slices.Equal(got, want) {
 		t.Errorf("DriverValues() = %v; want %v", got, want)
 	}
 }
@@ -495,7 +495,7 @@ func TestRejectionTable(t *testing.T) {
 		{
 			name: "missing gen.go.driver",
 			body: "version: 1\ngraph:\n  -\n    schema: s.gql\n    schema_language: gql\n    queries: q\n    query_language: opencypher\n    gen:\n      go:\n        package: db\n        out: internal/db\n",
-			want: `config: <stream>: graph[0]: missing required field "gen.go.driver" (valid values: neo4j-go-v5, neo4j-go-v6)`,
+			want: `config: <stream>: graph[0]: missing required field "gen.go.driver" (valid values: neo4j-go-v5, neo4j-go-v6, apache-age-pgx-v5)`,
 		},
 		{
 			name: "empty schema",
@@ -592,7 +592,7 @@ func TestRejectionTable(t *testing.T) {
 		{
 			name:     "invalid driver",
 			body:     setEntryKey("driver", "neo4j-go-v4"),
-			wantSubs: []string{`line 13: invalid driver "neo4j-go-v4" (valid values: neo4j-go-v5, neo4j-go-v6)`},
+			wantSubs: []string{`line 13: invalid driver "neo4j-go-v4" (valid values: neo4j-go-v5, neo4j-go-v6, apache-age-pgx-v5)`},
 		},
 		{
 			name:     "sequence-valued driver named as such",

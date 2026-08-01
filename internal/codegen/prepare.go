@@ -14,10 +14,12 @@ import (
 
 // reservedIdentifiers is the C1 exported-identifier reserved set (spec
 // §4.1). A NamedQuery.Name matching any of these routes to
-// ErrIdentifierCollision at Phase A. ErrNoRows / ErrMultipleResults are
-// included even in batches that would not emit them so the check stays
-// uniform — a rename that works in one batch but not another is exactly
-// the "renaming scheme" D2 Resolved refused.
+// ErrIdentifierCollision at Phase A. The set is the union across
+// backends and batches — ErrNoRows / ErrMultipleResults are reserved in
+// batches that would not emit them, EnsureGraph / DropGraph in batches
+// targeting a backend that has no graph lifecycle. A rename that works
+// in one batch or against one backend but not another is exactly the
+// "renaming scheme" D2 Resolved refused.
 var reservedIdentifiers = map[string]struct{}{
 	"Queries":            {},
 	"New":                {},
@@ -27,6 +29,8 @@ var reservedIdentifiers = map[string]struct{}{
 	"Querier":            {},
 	"ErrNoRows":          {},
 	"ErrMultipleResults": {},
+	"EnsureGraph":        {},
+	"DropGraph":          {},
 }
 
 // Prepared is the batch derivation the shared phases commit: the emitted

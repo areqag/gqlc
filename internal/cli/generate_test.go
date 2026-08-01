@@ -236,6 +236,7 @@ func TestGenerateDriverAxis(t *testing.T) {
 	}{
 		{driver: "neo4j-go-v5", wantImport: `"github.com/neo4j/neo4j-go-driver/v5/neo4j"`},
 		{driver: "neo4j-go-v6", wantImport: `"github.com/neo4j/neo4j-go-driver/v6/neo4j"`},
+		{driver: "apache-age-pgx-v5", wantImport: `"github.com/jackc/pgx/v5"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.driver, func(t *testing.T) {

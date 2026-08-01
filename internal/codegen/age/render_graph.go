@@ -1,0 +1,69 @@
+package age
+
+import (
+	"github.com/areqag/gqlc/internal/codegen"
+)
+
+// renderGraph emits graph.go: the pgxpool.Config.AfterConnect hook and
+// the two graph lifecycle helpers. These are methods on *Queries but not
+// query methods, so they stay off the Querier interfaces — those list
+// the batch's queries and nothing else.
+func renderGraph(pkg string) []byte {
+	return []byte(codegen.Header() + `package ` + pkg + `
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"` + pgxModule + `"
+)
+
+// SessionInit prepares a freshly opened connection for AGE. Assign it to
+// pgxpool.Config.AfterConnect: a connection that fails here is discarded
+// instead of entering the pool.
+func SessionInit(ctx context.Context, conn *pgx.Conn) error {
+	if _, err := conn.Exec(ctx, "LOAD 'age'"); err != nil {
+		return fmt.Errorf("gqlc: load age: %w", err)
+	}
+	if _, err := conn.Exec(ctx, "SELECT set_config('search_path', 'ag_catalog, ' || current_setting('search_path'), false)"); err != nil {
+		return fmt.Errorf("gqlc: put ag_catalog on the search_path: %w", err)
+	}
+	// AGE expands a query into bare operators, so schema-qualifying every
+	// call site is necessary but not sufficient — operator resolution
+	// still runs through the search_path. Exercising one operator here
+	// turns a misconfigured session into a pool-acquisition failure
+	// rather than a failure at the first WHERE clause.
+	var ok bool
+	err := conn.QueryRow(ctx, "SELECT '1'::ag_catalog.agtype = '1'::ag_catalog.agtype").Scan(&ok)
+	if err != nil {
+		return fmt.Errorf("gqlc: AGE operator canary: %w", err)
+	}
+	if !ok {
+		return errors.New("gqlc: AGE operator canary returned false")
+	}
+	return nil
+}
+
+// EnsureGraph creates the named graph unless it already exists. AGE
+// raises on an existing name, so the catalogue guard is what makes a
+// repeated call a no-op.
+func (q *Queries) EnsureGraph(ctx context.Context, name string) error {
+	const stmt = "SELECT ag_catalog.create_graph($1::name) WHERE NOT EXISTS (SELECT 1 FROM ag_catalog.ag_graph WHERE name = $1::name)"
+	if _, err := q.db.Exec(ctx, stmt, name); err != nil {
+		return fmt.Errorf("gqlc: ensure graph %q: %w", name, err)
+	}
+	return nil
+}
+
+// DropGraph removes the named graph and every label in it. An absent
+// graph is not an error, so teardown is repeatable.
+func (q *Queries) DropGraph(ctx context.Context, name string) error {
+	const stmt = "SELECT ag_catalog.drop_graph($1::name, true) WHERE EXISTS (SELECT 1 FROM ag_catalog.ag_graph WHERE name = $1::name)"
+	if _, err := q.db.Exec(ctx, stmt, name); err != nil {
+		return fmt.Errorf("gqlc: drop graph %q: %w", name, err)
+	}
+	return nil
+}
+`)
+}
