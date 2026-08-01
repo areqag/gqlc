@@ -171,5 +171,8 @@
     "demote_name_in_two_groups.cypher": "social_r4.gql",
     "infer_second_round.cypher": "multiround.gql",
     "undirected_self_loop_single_label.cypher": "social_r3.gql",
-    "undirected_self_loop_edge_union.cypher": "social_selfloop.gql"
+    "undirected_self_loop_edge_union.cypher": "social_selfloop.gql",
+    "plural_endpoint_undirected_closes_singular.cypher": "satisfy_plural_edges.gql",
+    "plural_endpoint_undirected_edge_union.cypher": "satisfy_plural_edges.gql",
+    "plural_endpoint_directed_edge_union.cypher": "satisfy_plural_edges.gql"
 }

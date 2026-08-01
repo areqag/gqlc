@@ -595,13 +595,38 @@ func closeEdge(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey, s schema.Sch
 		return nil
 	default:
 		if !e.Directed() && len(e.Labels()) == 1 {
-			return fmt.Errorf("%w: edge %q matches both %s", ErrAmbiguousEdgeOrientation, v, formatEdgeKeys(cands))
+			if fwd, rev, swapped := swappedEndpoints(cands); swapped {
+				return fmt.Errorf("%w: edge %q matches both %s", ErrAmbiguousEdgeOrientation, v, formatEdgeKeys([]schema.EdgeKey{fwd, rev}))
+			}
 		}
 		if v != "" {
 			edgeCands[v] = cands
 		}
 		return nil
 	}
+}
+
+// swappedEndpoints returns the first pair of candidates that disagree on which
+// of the pattern's two endpoints is the source: (A, L, B) alongside (B, L, A).
+// Precondition: every candidate carries the same label, which the single-type
+// guard at the call site supplies.
+//
+// This is what ErrAmbiguousEdgeOrientation names. Candidate-set size alone
+// stopped being that question once a node binding could satisfy several
+// declared types (ADR 0022): plural endpoints multiply the candidates without
+// moving either endpoint off the side the pattern puts it on, and refusing
+// those would report an orientation the schema never declared in both
+// directions. Pairs are scanned in candidate order, so the reported pair is
+// deterministic (§4.4).
+func swappedEndpoints(cands []schema.EdgeKey) (schema.EdgeKey, schema.EdgeKey, bool) {
+	for i, a := range cands {
+		for _, b := range cands[i+1:] {
+			if a.Source == b.Target && a.Target == b.Source {
+				return a, b, true
+			}
+		}
+	}
+	return schema.EdgeKey{}, schema.EdgeKey{}, false
 }
 
 // describeTriedEdges is ErrUnknownEdge's fail-message body: every EdgeKey

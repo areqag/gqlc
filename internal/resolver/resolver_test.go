@@ -300,6 +300,21 @@ var invalidFixtures = map[string]error{
 	// and whole-entity reference is refused.
 	"label_satisfy_plural_property.cypher": ErrUnknownProperty,
 	"label_satisfy_plural_entity.cypher":   ErrAmbiguousLabel,
+	// kph4 additions. Plural endpoints reach edge closure only on a schema
+	// that both declares edges and declares more than one node type
+	// satisfying the pattern's label expression; no fixture combined the two.
+	//
+	// Committing one edge type names the node type on each of its ends, but
+	// the endpoints are not narrowed to it: WORKS_AT closes to the single key
+	// Employee&Person-[WORKS_AT]->Company and `p` stays plural, so ADR 0022's
+	// whole-entity refusal still fires on a binding the schema pins. Refusing
+	// is the safe half of the answer; widening it is gqlc-0tft.
+	"plural_endpoint_whole_entity_after_edge_closure.cypher": ErrAmbiguousLabel,
+	// Three candidates of which only the second and third put the pattern's
+	// endpoints on opposite sides. The two case-C fixtures above close to a
+	// two-candidate set that IS the swapped pair, so the scan that finds it
+	// never advances past the first pair.
+	"ambiguous_edge_orientation_plural_endpoints.cypher": ErrAmbiguousEdgeOrientation,
 }
 
 // invalidFixtureContains pins the message arm for fixtures where errors.Is
@@ -321,6 +336,11 @@ var invalidFixtureContains = map[string]string{
 	// refProjectionType arm (scope.go:706) — distinguished by "binding" suffix.
 	"path_binding.cypher":   "path binding",
 	"unwind_binding.cypher": "unwind binding",
+	// The message must name the two candidates that actually swap the
+	// pattern's endpoints, in candidate order, and leave the third — which
+	// plural satisfaction widened the set with — out of a diagnostic about
+	// orientation. errors.Is passes on any pair.
+	"ambiguous_edge_orientation_plural_endpoints.cypher": `matches both Person-[REVIEWED]->Company, Company-[REVIEWED]->Person`,
 }
 
 type ResolverSuite struct {
