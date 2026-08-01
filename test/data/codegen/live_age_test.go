@@ -18,6 +18,8 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
+	entityedgeage "github.com/areqag/gqlc/test/data/codegen/valid/entity_edge_projected_one/golden/apache-age-pgx-v5"
+	entitynodeage "github.com/areqag/gqlc/test/data/codegen/valid/entity_node_projected_one/golden/apache-age-pgx-v5"
 	manycolmanyage "github.com/areqag/gqlc/test/data/codegen/valid/many_col_many/golden/apache-age-pgx-v5"
 	onecoloneage "github.com/areqag/gqlc/test/data/codegen/valid/one_col_one_param_one/golden/apache-age-pgx-v5"
 )
@@ -170,10 +172,12 @@ func (h *ageArm) scenario(ctx context.Context, t *testing.T) backend {
 	t.Logf("scenario graph: %s", graph)
 
 	s := ageScenario{
-		pool:  h.pool,
-		graph: graph,
-		one:   oneColOneParamOneAGE{q: onecoloneage.New(h.pool, graph)},
-		many:  manyColManyAGE{q: manycolmanyage.New(h.pool, graph)},
+		pool:       h.pool,
+		graph:      graph,
+		one:        oneColOneParamOneAGE{q: onecoloneage.New(h.pool, graph)},
+		many:       manyColManyAGE{q: manycolmanyage.New(h.pool, graph)},
+		entityNode: entityNodeAGE{q: entitynodeage.New(h.pool, graph)},
+		entityEdge: entityEdgeAGE{q: entityedgeage.New(h.pool, graph)},
 	}
 	// Created through one package's helper and dropped through another's:
 	// each target emits its own lifecycle pair, and both handles have to
@@ -188,10 +192,12 @@ func (h *ageArm) scenario(ctx context.Context, t *testing.T) backend {
 // ageScenario is one scenario's view of the ageArm: a graph of its own, and
 // the generated handles bound to it.
 type ageScenario struct {
-	pool  *pgxpool.Pool
-	graph string
-	one   oneColOneParamOneAGE
-	many  manyColManyAGE
+	pool       *pgxpool.Pool
+	graph      string
+	one        oneColOneParamOneAGE
+	many       manyColManyAGE
+	entityNode entityNodeAGE
+	entityEdge entityEdgeAGE
 }
 
 func (s ageScenario) seed(ctx context.Context, t *testing.T, cypher string) {
@@ -208,6 +214,10 @@ func (s ageScenario) oneColOneParamOne() oneColOneParamOneQuerier { return s.one
 
 func (s ageScenario) manyColMany() manyColManyQuerier { return s.many }
 
+func (s ageScenario) entityNodeProjectedOne() entityNodeQuerier { return s.entityNode }
+
+func (s ageScenario) entityEdgeProjectedOne() entityEdgeQuerier { return s.entityEdge }
+
 type oneColOneParamOneAGE struct{ q *onecoloneage.Queries }
 
 func (a oneColOneParamOneAGE) personName(ctx context.Context, id int64) (string, error) {
@@ -217,6 +227,30 @@ func (a oneColOneParamOneAGE) personName(ctx context.Context, id int64) (string,
 func (a oneColOneParamOneAGE) errNoRows() error { return onecoloneage.ErrNoRows }
 
 func (a oneColOneParamOneAGE) errMultipleResults() error { return onecoloneage.ErrMultipleResults }
+
+type entityNodeAGE struct{ q *entitynodeage.Queries }
+
+func (a entityNodeAGE) onePerson(ctx context.Context) (personEntity, error) {
+	p, err := a.q.OnePerson(ctx)
+	if err != nil {
+		return personEntity{}, err
+	}
+	return personEntity{ID: p.Id, MiddleName: p.MiddleName, Name: p.Name}, nil
+}
+
+func (a entityNodeAGE) errNoRows() error { return entitynodeage.ErrNoRows }
+
+type entityEdgeAGE struct{ q *entityedgeage.Queries }
+
+func (a entityEdgeAGE) oneActedIn(ctx context.Context) (actedInEntity, error) {
+	r, err := a.q.OneActedIn(ctx)
+	if err != nil {
+		return actedInEntity{}, err
+	}
+	return actedInEntity{Since: r.Since}, nil
+}
+
+func (a entityEdgeAGE) errNoRows() error { return entityedgeage.ErrNoRows }
 
 type manyColManyAGE struct{ q *manycolmanyage.Queries }
 

@@ -11,8 +11,9 @@ import (
 
 // Person corresponds to the Person node type.
 type Person struct {
-	Id   int64
-	Name string
+	Id         int64
+	MiddleName *string
+	Name       string
 }
 
 // decodePerson decodes a driver dbtype.Node into a Person struct,
@@ -24,6 +25,13 @@ func decodePerson(node dbtype.Node) (Person, error) {
 		return Person{}, fmt.Errorf("decode Person.Id: %w", err)
 	}
 	out.Id = id
+	if v, ok := node.Props["middleName"]; ok {
+		s, ok := v.(string)
+		if !ok {
+			return Person{}, fmt.Errorf("decode Person.MiddleName: property %q: expected string, got %T", "middleName", v)
+		}
+		out.MiddleName = &s
+	}
 	name, err := neo4j.GetProperty[string](node, "name")
 	if err != nil {
 		return Person{}, fmt.Errorf("decode Person.Name: %w", err)

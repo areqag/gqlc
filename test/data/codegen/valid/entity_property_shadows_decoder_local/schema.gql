@@ -1,0 +1,10 @@
+CREATE PROPERTY GRAPH TYPE EntityPropertyShadowsDecoderLocal AS {
+    (:Marker {
+        err      :: STRING NOT NULL,
+        label    :: STRING NOT NULL,
+        narrowed :: FLOAT32,
+        out      :: STRING NOT NULL,
+        props    :: STRING NOT NULL,
+        raw      :: STRING NOT NULL
+    })
+}

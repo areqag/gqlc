@@ -10,12 +10,19 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/age"
 )
 
 // corpusPackage is the name the emission is asked for, so the extracted
 // declarations and the hand-written driver share a package clause.
 const corpusPackage = "agecorpus"
+
+// corpusSchema declares the entity shapes the driver decodes into. It is
+// this package's own schema rather than a corpus fixture because the
+// driver names the structs and the decode helpers the emission derives
+// from it, so what it declares is fixed by what the driver exercises.
+const corpusSchema = "corpus_schema.gql"
 
 // corpusModule is dependency-free by construction: the driver exercises
 // declarations that import only the standard library, so the module
@@ -29,19 +36,29 @@ const corpusModule = "module " + corpusPackage + "\n\ngo 1.26.2\n"
 const graphStub = "package " + corpusPackage + "\n\nimport (\n\t\"fmt\"\n\t\"strings\"\n)\n\ntype Queries struct{ graph string }\n\n"
 
 // TestEmittedHelpersDecodeTheAgtypeCorpus runs the emitted agtype
-// helpers, the emitted graph-name check and the emitted statement
-// composer against captured agtype text and against the names and query
-// texts that make composition hard. All are pure functions over their
-// arguments and none can be exercised by reading the emission: an
-// assertion on the source says the helper was written, not that the
-// value it produces from `1.5::numeric` is 1.5, nor that a name carrying
-// a quote arrives as one SQL literal.
+// helpers, the emitted entity decoders, the emitted graph-name check and
+// the emitted statement composer against captured agtype text and
+// against the names and query texts that make composition hard. All are
+// pure functions over their arguments and none can be exercised by
+// reading the emission: an assertion on the source says the helper was
+// written, not that the value it produces from `1.5::numeric` is 1.5,
+// that a vertex whose string property carries a brace splits at the
+// right byte, nor that a name carrying a quote arrives as one SQL
+// literal.
 //
 // The bytes under test come from Generate rather than from the golden
 // tree, so regenerating goldens cannot make a decode or composition bug
 // agree with itself.
 func (s *EmissionSuite) TestEmittedHelpersDecodeTheAgtypeCorpus() {
-	files := s.emitReadBatch(age.WithPackageName(corpusPackage))
+	in := s.inputFrom(filepath.Join("testdata", corpusSchema))
+	in.Queries = []codegen.NamedQuery{servedQuery}
+	emitted, err := age.New(age.WithPackageName(corpusPackage)).Generate(in)
+	s.Require().NoError(err)
+	files := make(map[string]string, len(emitted))
+	for _, f := range emitted {
+		files[f.Path] = string(f.Contents)
+	}
+
 	driver, err := os.ReadFile(filepath.Join("testdata", "corpus_test.go.txt"))
 	s.Require().NoError(err)
 

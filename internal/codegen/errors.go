@@ -67,6 +67,16 @@ var (
 	// for list leaves. Introduced at C3.
 	ErrUnrepresentableWidth = errors.New("unrepresentable property width")
 
+	// ErrUnrepresentableEdgeUnion is returned when a query column, or a
+	// list element's leaf, resolves to an edge union two of whose
+	// candidates carry the same label. An edge value carries its label
+	// and its properties, never its endpoint types, so the label is the
+	// whole of what the dispatch has to choose a candidate by, and two
+	// candidates sharing one are indistinguishable once the value has
+	// arrived. The fail-message names the fail-site, the two candidate
+	// entities, and the label they share.
+	ErrUnrepresentableEdgeUnion = errors.New("unrepresentable edge union")
+
 	// ErrExecOnProjection is returned when a query annotated :exec has at
 	// least one projected column (len(Validated.Columns) > 0). The caller
 	// either drops the :exec annotation (annotate :one or :many per the
@@ -165,6 +175,7 @@ var allSentinels = []error{
 	ErrUnnamedMultiLabelType,
 	ErrPropertyFieldCollision,
 	ErrUnrepresentableWidth,
+	ErrUnrepresentableEdgeUnion,
 	ErrExecOnProjection,
 	ErrCardinalityShapeMismatch,
 }

@@ -6,6 +6,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -429,6 +430,121 @@ func (s *ResolverSuite) TestInvalid() {
 			s.Require().ErrorIs(err, wantErr)
 			if substr, ok := invalidFixtureContains[name]; ok {
 				s.Require().ErrorContains(err, substr)
+			}
+		})
+	}
+}
+
+// TestEdgeUnionKeysAreASet asserts ResolvedEdgeUnion.EdgeKeys carries each
+// schema EdgeKey at most once, over the whole valid corpus.
+//
+// The goldens cannot carry this: they are machine-written, so a regression
+// that reintroduces a repeat is absorbed by the next -update run and the
+// suite stays green. Everything downstream reads the candidate count as the
+// count of distinct schema edge types — §4.6's verdict table dispatches on
+// it, and codegen emits one dispatch branch per member, which a repeat turns
+// into a duplicate case that does not compile.
+func (s *ResolverSuite) TestEdgeUnionKeysAreASet() {
+	files, err := filepath.Glob(filepath.Join(fixtureDir, "valid", "*.cypher"))
+	s.Require().NoError(err)
+	s.Require().NotEmpty(files)
+
+	mapping := s.loadMapping("valid")
+	seenUnion := false
+
+	for _, path := range files {
+		name := filepath.Base(path)
+		schemaName, ok := mapping[name]
+		s.Require().True(ok, "unmapped valid fixture %q", name)
+
+		vq, err := New(s.loadSchema("valid", schemaName), WithRegistry(regR7)).Resolve(s.loadQuery(path))
+		s.Require().NoError(err)
+
+		for _, col := range vq.Columns {
+			for _, u := range collectEdgeUnions(col.Type) {
+				seenUnion = true
+				seenKey := make(map[schema.EdgeKey]struct{}, len(u.EdgeKeys))
+				for _, k := range u.EdgeKeys {
+					_, dup := seenKey[k]
+					s.Require().Falsef(dup, "%s column %q: edge key %s appears twice in %v", name, col.Name, formatEdgeKey(k), u.EdgeKeys)
+					seenKey[k] = struct{}{}
+				}
+			}
+		}
+	}
+	s.Require().True(seenUnion, "no fixture projects an edge union — the assertion above is vacuous")
+}
+
+// collectEdgeUnions gathers every ResolvedEdgeUnion reachable from a column
+// type, descending list-element chains (a var-length multi-type edge nests
+// the union one or more levels down).
+func collectEdgeUnions(t ResolvedType) []ResolvedEdgeUnion {
+	switch tt := t.(type) {
+	case ResolvedEdgeUnion:
+		return []ResolvedEdgeUnion{tt}
+	case ResolvedList:
+		return collectEdgeUnions(tt.Element)
+	default:
+		return nil
+	}
+}
+
+// edgeKeyInMessage matches one formatEdgeKey rendering inside a fail-message.
+var edgeKeyInMessage = regexp.MustCompile(`[^\s,]+-\[[^\]]+\]->[^\s,]+`)
+
+// TestEdgeFailMessagesListEachTriedKeyOnce holds both edge fail-messages that
+// enumerate EdgeKeys to one entry per key. A message reading "matches both
+// Person-[KNOWS]->Person, Person-[KNOWS]->Person" tells the reader their query
+// is ambiguous between a thing and itself, and the remedy it prescribes —
+// constrain the endpoints — cannot be followed when the endpoints are already
+// equal. No corpus fixture covers either message on that input: every
+// undirected fixture in invalid/ runs between two different node types.
+//
+// The rows brace edgeProbes' dedupe from both sides, so it cannot be widened
+// or narrowed silently. The self-loop row fails if the dedupe is dropped —
+// nothing else pins describeTriedEdges, which enumerates probes the schema
+// rejected and so never reaches the candidate set. The two-node-type row is
+// the genuine §4.6 case C, and it fails if the dedupe keys on the label
+// instead of the whole EdgeKey: the two orientations collapse to one, the
+// candidate count drops to 1, and an ambiguous query resolves as case B.
+func (s *ResolverSuite) TestEdgeFailMessagesListEachTriedKeyOnce() {
+	tests := []struct {
+		name    string
+		schema  string
+		query   string
+		wantErr error
+	}{
+		{
+			name:    "unknown edge names each tried orientation once",
+			schema:  "social_r3.gql",
+			query:   "MATCH (a:Person)-[r:MISSING]-(b:Person) RETURN r",
+			wantErr: ErrUnknownEdge,
+		},
+		{
+			name:    "ambiguous orientation names each matched key once",
+			schema:  "social_r3.gql",
+			query:   "MATCH (a:Person)-[r:AUTHORED]-(b:Post) RETURN r",
+			wantErr: ErrAmbiguousEdgeOrientation,
+		},
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(tt.query)))
+			s.Require().NoError(err)
+
+			_, err = New(s.loadSchema("valid", tt.schema), WithRegistry(regR7)).Resolve(q)
+			s.Require().ErrorIs(err, tt.wantErr)
+
+			// Match the keys out of the prose rather than splitting on the
+			// separator: both messages glue their first key to a sentinel
+			// prefix, which would make an exact repeat compare unequal.
+			keys := edgeKeyInMessage.FindAllString(err.Error(), -1)
+			s.Require().NotEmpty(keys, "message enumerated no edge keys — the assertion below is vacuous")
+			seen := make(map[string]struct{}, len(keys))
+			for _, k := range keys {
+				_, dup := seen[k]
+				s.Require().Falsef(dup, "edge key %q listed twice in %q", k, err.Error())
+				seen[k] = struct{}{}
 			}
 		})
 	}

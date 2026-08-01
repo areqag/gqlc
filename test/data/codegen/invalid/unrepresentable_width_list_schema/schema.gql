@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE UnrepresentableWidthListSchema AS {
+    (:Event {
+        id   :: INT64 NOT NULL,
+        tags :: LIST<STRING>
+    })
+}

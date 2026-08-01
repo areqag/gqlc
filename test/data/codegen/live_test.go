@@ -25,6 +25,22 @@ type person struct {
 	Age  int64
 }
 
+// personEntity is an entity_node_projected_one row and actedInEntity an
+// entity_edge_projected_one row. Every target emits its own Person and
+// ACTEDIN struct into its own package; these are the shapes the battery
+// reads fields from, and they are the same fields whichever arm produced
+// them — that the Go surface does not vary by backend is the property the
+// entity scenarios are here to hold.
+type personEntity struct {
+	ID         int64
+	MiddleName *string
+	Name       string
+}
+
+type actedInEntity struct {
+	Since int64
+}
+
 // oneColOneParamOneQuerier is one arm's one_col_one_param_one handle.
 // errNoRows and errMultipleResults report the sentinels of the package these
 // methods are generated into: each generated package declares its own
@@ -40,6 +56,20 @@ type oneColOneParamOneQuerier interface {
 // and Row types are package-local to each target, so they stop here.
 type manyColManyQuerier interface {
 	peopleByAgeAndLocale(ctx context.Context, minAge int64, locale string) ([]person, error)
+}
+
+// entityNodeQuerier is one arm's entity_node_projected_one handle and
+// entityEdgeQuerier its entity_edge_projected_one one. Each declares
+// errNoRows for the same reason the scalar handle does: the sentinel
+// belongs to the package the method was generated into.
+type entityNodeQuerier interface {
+	onePerson(ctx context.Context) (personEntity, error)
+	errNoRows() error
+}
+
+type entityEdgeQuerier interface {
+	oneActedIn(ctx context.Context) (actedInEntity, error)
+	errNoRows() error
 }
 
 // mixedReadWriteBatchQuerier is one arm's mixed_read_write_batch handle.
@@ -79,6 +109,8 @@ type backend interface {
 	seed(ctx context.Context, t *testing.T, cypher string)
 	oneColOneParamOne() oneColOneParamOneQuerier
 	manyColMany() manyColManyQuerier
+	entityNodeProjectedOne() entityNodeQuerier
+	entityEdgeProjectedOne() entityEdgeQuerier
 }
 
 // writeBackend is a scenario's view of a writeHarness.
@@ -103,16 +135,18 @@ var arms = []struct {
 	{name: "apache-age-pgx-v5", start: startAGE, writes: false},
 }
 
-// scalarScenarios are the battery every arm runs. Each body is written once
+// readScenarios are the battery every arm runs. Each body is written once
 // against backend. A body must not call t.Helper(): its own frame is where
 // the assertions live, so marking it a helper attributes every failure to the
 // loop in TestLiveSmoke instead of to the line that failed.
-var scalarScenarios = []struct {
+var readScenarios = []struct {
 	name string
 	run  func(ctx context.Context, t *testing.T, b backend)
 }{
 	{name: "one_col_one_param_one: one + sentinels", run: oneAndSentinels},
 	{name: "many_col_many: many + params", run: manyWithParams},
+	{name: "entity_node_projected_one: whole vertex", run: nodeEntityRead},
+	{name: "entity_edge_projected_one: whole edge", run: edgeEntityRead},
 }
 
 // writeScenarios are the battery an arm runs once its target emits :exec
@@ -150,7 +184,7 @@ func TestLiveSmoke(t *testing.T) {
 
 			h := arm.start(ctx, t)
 			parallelScenarios := h.parallelScenarios()
-			for _, sc := range scalarScenarios {
+			for _, sc := range readScenarios {
 				t.Run(sc.name, func(t *testing.T) {
 					if parallelScenarios {
 						t.Parallel()
@@ -223,6 +257,55 @@ func manyWithParams(ctx context.Context, t *testing.T, b backend) { //nolint:the
 	require.NoError(t, err)
 	require.NotNil(t, rows, "empty :many result must be an empty slice, not nil")
 	require.Empty(t, rows)
+}
+
+// nodeEntityRead drives the node-entity contract — a whole vertex arrives
+// as the struct the schema names, carrying every property it declares.
+//
+// The middleName arm holds what a nullable property does on the wire. A
+// writer says "no value" with an explicit null, and both stores answer by
+// keeping no property at all: neither AGE nor neo4j has a stored null, so
+// the write below and a write that omitted the key entirely are the same
+// vertex, and the decoder's nullable path is reached by absence in both
+// arms. That is asserted here rather than assumed, because it is the
+// premise the emitted agtypeNullableProperty rests on.
+func nodeEntityRead(ctx context.Context, t *testing.T, b backend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	q := b.entityNodeProjectedOne()
+
+	_, err := q.onePerson(ctx)
+	require.ErrorIs(t, err, q.errNoRows(), "empty graph must return ErrNoRows")
+
+	b.seed(ctx, t, "CREATE (:Person {id: 7, name: 'Alice', middleName: null})")
+
+	got, err := q.onePerson(ctx)
+	require.NoError(t, err)
+	require.Equal(t, personEntity{ID: 7, Name: "Alice"}, got,
+		"an explicitly null property must decode as nil, not as an error")
+
+	b.seed(ctx, t, "MATCH (p:Person {id: 7}) SET p.middleName = 'Q'")
+
+	middleName := "Q"
+	got, err = q.onePerson(ctx)
+	require.NoError(t, err)
+	require.Equal(t, personEntity{ID: 7, Name: "Alice", MiddleName: &middleName}, got)
+}
+
+// edgeEntityRead drives the edge-entity contract — a whole edge arrives as
+// its own struct carrying the property declared on the edge, not one
+// gathered from either vertex it joins.
+func edgeEntityRead(ctx context.Context, t *testing.T, b backend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	q := b.entityEdgeProjectedOne()
+
+	_, err := q.oneActedIn(ctx)
+	require.ErrorIs(t, err, q.errNoRows(), "empty graph must return ErrNoRows")
+
+	// The vertices carry an id the edge does not, so a decode that read the
+	// wrong end of the relationship has nowhere to find 2019.
+	b.seed(ctx, t, "CREATE (:Person {id: 1})-[:ACTED_IN {since: 2019}]->(:Movie {id: 2})")
+
+	got, err := q.oneActedIn(ctx)
+	require.NoError(t, err)
+	require.Equal(t, actedInEntity{Since: 2019}, got)
 }
 
 // execWrite drives the :exec contract — the write reaches the graph, and the

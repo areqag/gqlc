@@ -41,9 +41,9 @@ const (
 	// whole vocabulary against a single project.
 	fixtureQuery = "// name: AllPersonNames :many\nMATCH (p:Person) RETURN p.name\n"
 
-	// entityQuery projects a whole node, which the Apache AGE backend
-	// does not yet decode.
-	entityQuery = "// name: AllPersons :many\nMATCH (p:Person) RETURN p\n"
+	// writeQuery mutates the graph, which the Apache AGE backend has
+	// no emission for.
+	writeQuery = "// name: WipePersons :exec\nMATCH (p:Person) DETACH DELETE p\n"
 
 	// The second target's schema declares a label the first one does
 	// not, so a query written against either fails against the other —
@@ -243,13 +243,13 @@ func TestRunDriverAxis(t *testing.T) {
 // without reading the message.
 func TestRunApacheAgeRejectionIsASentinel(t *testing.T) {
 	dir, cfgPath := writeProject(t)
-	writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), entityQuery)
+	writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), writeQuery)
 	writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverApacheAgePgxV5), ""))
 
 	res, err := pipeline.Run(cfgPath, backendRegistry(t))
 	require.ErrorIs(t, err, age.ErrUnsupportedQuery)
 	require.ErrorContains(t, err, "graph[0]: unsupported query: ")
-	require.ErrorContains(t, err, `1 query would be dropped: AllPersons (column "p" projects node)`)
+	require.ErrorContains(t, err, `1 query would be dropped: WipePersons (writes to the graph)`)
 	require.Equal(t, pipeline.Result{}, res)
 }
 

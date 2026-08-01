@@ -1,6 +1,7 @@
 CREATE PROPERTY GRAPH TYPE EntityNodeProjectedOne AS {
     (:Person {
-        id   :: INT64 NOT NULL,
-        name :: STRING NOT NULL
+        id         :: INT64 NOT NULL,
+        middleName :: STRING,
+        name       :: STRING NOT NULL
     })
 }

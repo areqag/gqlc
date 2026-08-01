@@ -8,6 +8,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"go/ast"
+	"go/parser"
+	"go/printer"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -131,6 +135,8 @@ func sentinelIdent(err error) string {
 		return "ErrCardinalityShapeMismatch"
 	case codegen.ErrUnrepresentableWidth:
 		return "ErrUnrepresentableWidth"
+	case codegen.ErrUnrepresentableEdgeUnion:
+		return "ErrUnrepresentableEdgeUnion"
 	case codegen.ErrParamNameCollision:
 		return "ErrParamNameCollision"
 	case codegen.ErrRowFieldCollision:
@@ -520,6 +526,168 @@ func syncGoldenRoot(root string, byTarget map[string][]codegen.File) error {
 		}
 	}
 	return nil
+}
+
+// connectionSurface names the emitted files that hold a handle and what
+// it talks to: a pgx pool and a bound graph on one backend, a driver and
+// a managed transaction on the other. Those differ by construction.
+// Every other emitted file is compared across targets, so a file some
+// future backend adds is held invariant until it is named here on
+// purpose.
+var connectionSurface = map[string]bool{"db.go": true, "graph.go": true}
+
+// TestBackendInvariantSurface pins the property the multi-backend design
+// rests on: the Go a caller writes against does not vary by backend. A
+// fixture enrolled in more than one target must declare the same types
+// under each — fields with their names, types and tags in declaration
+// order, interfaces with their method sets, and the marker methods that
+// make an edge-union sum type closed — so that porting a program from
+// one backend to another is a change of import and constructor and
+// nothing else.
+//
+// Declarations only, never bodies: decoding agtype and reading a
+// dbtype.Node is the one thing that must differ, and comparing whole
+// files would only assert they are the same backend.
+//
+// This is the invariant the corpus exists to protect and the one nothing
+// else checks. TestValid compares each target against its own golden, so
+// a divergence introduced on one backend is regenerated into its golden
+// and passes; only a comparison across targets sees it.
+func TestBackendInvariantSurface(t *testing.T) {
+	goldens, err := filepath.Glob(filepath.Join(fixtureRoot(), "valid", "*", "golden"))
+	require.NoError(t, err)
+	require.NotEmpty(t, goldens, "valid goldens must exist")
+
+	compared := 0
+	for _, golden := range goldens {
+		targets, err := os.ReadDir(golden)
+		require.NoError(t, err)
+		if len(targets) < 2 {
+			continue
+		}
+		compared++
+		fixture := filepath.Base(filepath.Dir(golden))
+		t.Run(fixture, func(t *testing.T) {
+			ref := targets[0].Name()
+			// A surface read as empty would agree with every other
+			// empty one, so an extractor that stopped seeing
+			// declarations would pass the corpus silently.
+			want := declaredSurface(t, filepath.Join(golden, ref))
+			require.NotEmpty(t, want, "%s/%s declares nothing outside the connection surface", fixture, ref)
+			for _, target := range targets[1:] {
+				got := declaredSurface(t, filepath.Join(golden, target.Name()))
+				require.Equal(t, want, got,
+					"%s declares a different Go surface under %s than under %s",
+					fixture, target.Name(), ref)
+			}
+		})
+	}
+	require.NotZero(t, compared, "no fixture is enrolled in two targets, so this test holds nothing")
+}
+
+// declaredSurface is one golden target's declared Go surface: every type
+// declaration and every method signature outside the connection surface,
+// keyed by what declares it and valued as rendered source. The doc
+// comment is part of the value so that a directive such as
+// //sumtype:decl, which is what makes an exhaustiveness check bind,
+// counts as surface rather than as prose.
+func declaredSurface(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(dir, "*.go"))
+	require.NoError(t, err)
+	require.NotEmpty(t, paths, "%s holds no Go", dir)
+
+	out := make(map[string]string)
+	fset := token.NewFileSet()
+	for _, path := range paths {
+		if connectionSurface[filepath.Base(path)] {
+			continue
+		}
+		file, err := parser.ParseFile(fset, path, nil, parser.ParseComments|parser.SkipObjectResolution)
+		require.NoError(t, err, "parsing %s", path)
+		for _, decl := range file.Decls {
+			switch d := decl.(type) {
+			case *ast.GenDecl:
+				// A const or a var declares no surface a caller
+				// writes against: the query texts are unexported
+				// and the interface assertions are compile-time.
+				if d.Tok != token.TYPE {
+					continue
+				}
+				for _, spec := range d.Specs {
+					ts, ok := spec.(*ast.TypeSpec)
+					require.True(t, ok, "%s: type declaration holds a %T", path, spec)
+					doc := ts.Doc
+					if doc == nil && len(d.Specs) == 1 {
+						doc = d.Doc
+					}
+					addDeclaration(t, out, path, "type "+ts.Name.Name, docLines(doc)+render(t, fset, ts))
+				}
+			case *ast.FuncDecl:
+				// A receiver-less function is a decode helper. Passing
+				// over it is sound only while it stays unexported: an
+				// exported one is surface a caller writes against, and
+				// one skipped here could diverge between backends with
+				// nothing to see it.
+				if d.Recv == nil {
+					require.False(t, ast.IsExported(d.Name.Name),
+						"%s: package-level func %s is exported, so it is caller-facing surface this comparison skips",
+						path, d.Name.Name)
+					continue
+				}
+				doc := d.Doc
+				d.Doc, d.Body = nil, nil
+				addDeclaration(t, out, path, "method "+receiverName(t, path, d)+"."+d.Name.Name, docLines(doc)+render(t, fset, d))
+			}
+		}
+	}
+	return out
+}
+
+// addDeclaration records one declaration, failing a name declared twice:
+// two entries under one key would compare as whichever landed last.
+func addDeclaration(t *testing.T, out map[string]string, path, key, body string) {
+	t.Helper()
+	_, dup := out[key]
+	require.False(t, dup, "%s: %s is declared twice in one target", path, key)
+	out[key] = body
+}
+
+// render prints a node as source, so that comparison is over what the
+// declaration says and not over the byte offsets it says it at.
+func render(t *testing.T, fset *token.FileSet, node ast.Node) string {
+	t.Helper()
+	var b strings.Builder
+	require.NoError(t, printer.Fprint(&b, fset, node))
+	return b.String()
+}
+
+// docLines is a doc comment as written. Built by hand rather than with
+// CommentGroup.Text, which drops directive lines — exactly the lines
+// that carry meaning to a linter.
+func docLines(c *ast.CommentGroup) string {
+	if c == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, line := range c.List {
+		b.WriteString(line.Text)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+// receiverName is the base type a method hangs off, pointer receiver or
+// not: the two forms name the same method set to a caller.
+func receiverName(t *testing.T, path string, d *ast.FuncDecl) string {
+	t.Helper()
+	expr := d.Recv.List[0].Type
+	if star, ok := expr.(*ast.StarExpr); ok {
+		expr = star.X
+	}
+	ident, ok := expr.(*ast.Ident)
+	require.True(t, ok, "%s: %s hangs off a %T", path, d.Name.Name, expr)
+	return ident.Name
 }
 
 // TestGoldenBuild compiles the nested test/data/codegen module so that

@@ -17,12 +17,17 @@ func generate(in codegen.Input, packageName string) ([]codegen.File, error) {
 	}
 	prepared, err := codegen.Prepare(in, typeMap{}, packageName)
 	if err != nil {
+		return nil, nameBackend(err)
+	}
+	entities, err := wireEntities(prepared.Entities)
+	if err != nil {
 		return nil, err
 	}
 
 	pkg := prepared.Package
 	hasOne := false
 	var h helpers
+	h.forEntities(entities)
 	for _, p := range prepared.Queries {
 		if p.Cardinality == codegen.CardinalityOne {
 			hasOne = true
@@ -39,7 +44,7 @@ func generate(in codegen.Input, packageName string) ([]codegen.File, error) {
 		{Path: "db.go", Contents: renderDB(pkg, len(prepared.Queries) > 0, hasOne)},
 		{Path: "graph.go", Contents: renderGraph(pkg)},
 		{Path: "querier.go", Contents: renderQuerier(pkg, prepared.Queries)},
-		{Path: "models.go", Contents: renderModels(pkg, h)},
+		{Path: "models.go", Contents: renderModels(pkg, entities, prepared.Queries, h)},
 	}
 	// Per-source `<name>.cypher.go` emission — grouped by SourceFile
 	// basename in first-appearance order (§5.5).

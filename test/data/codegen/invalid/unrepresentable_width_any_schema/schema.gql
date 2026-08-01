@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE UnrepresentableWidthAnySchema AS {
+    (:Event {
+        id      :: INT64 NOT NULL,
+        payload :: ANY VALUE
+    })
+}

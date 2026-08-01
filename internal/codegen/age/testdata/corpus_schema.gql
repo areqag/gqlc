@@ -1,0 +1,20 @@
+// The schema the emitted-helper corpus runs against. One emission has to
+// reach every decode arm the helpers carry, so between them these types
+// declare each agtype scalar, a width that narrows from its carrier, a
+// nullable property, an entity with no properties at all, and an edge.
+CREATE PROPERTY GRAPH TYPE AgeCorpus AS {
+    (:Person {
+        id         :: INT64 NOT NULL,
+        name       :: STRING NOT NULL,
+        score      :: FLOAT NOT NULL,
+        active     :: BOOL NOT NULL,
+        rank       :: INT32 NOT NULL,
+        middleName :: STRING,
+        weight     :: FLOAT32
+    }),
+    (:Marker),
+    (:Tricky {
+        name :: STRING NOT NULL
+    }),
+    (:Person) -[:ACTED_IN { since :: INT64 NOT NULL }]-> (:Person)
+}

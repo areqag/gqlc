@@ -16,6 +16,56 @@ import (
 // schema/gql convention.
 var ErrUnsupportedQuery = errors.New("unsupported query")
 
+// ErrUnsupportedSchema is returned when a schema declares a shape this
+// backend has no representation for. Package-level so callers branch
+// with errors.Is; the fail-site wraps it with the offending names.
+var ErrUnsupportedSchema = errors.New("unsupported schema")
+
+// wireEntities pairs every entity with the form it takes on the wire,
+// failing a schema that declares a node or edge type under more than one
+// label. AGE stamps exactly one label on a vertex or an edge and its
+// parser has no syntax for a second, so a graph matching such a type
+// cannot be written through this backend and no value matching it can
+// arrive to be decoded.
+//
+// It runs over the whole entity surface: Phase Z names an entity for
+// every type in the schema and the emitted surface is backend-invariant,
+// so a struct that no query could ever fill is still a struct this
+// package declares.
+func wireEntities(entities []codegen.Entity) ([]wiredEntity, error) {
+	wired := make([]wiredEntity, 0, len(entities))
+	var multi []string
+	for _, e := range entities {
+		w, ok := wireEntity(e)
+		if !ok {
+			multi = append(multi, fmt.Sprintf("%s (%s)", e.Name, e.DocAxis))
+			continue
+		}
+		wired = append(wired, w)
+	}
+	if len(multi) == 0 {
+		return wired, nil
+	}
+	noun := "types"
+	if len(multi) == 1 {
+		noun = "type"
+	}
+	return nil, fmt.Errorf("%w: Apache AGE stamps one label on a vertex or an edge, so %d %s cannot be represented: %s",
+		ErrUnsupportedSchema, len(multi), noun, strings.Join(multi, ", "))
+}
+
+// nameBackend adds this backend's name to a width the shared phases
+// refused. The type table those phases consult is this package's, so the
+// refusal is this backend's answer and not a property of the schema: a
+// run emitting several targets has to say which of them has no carrier
+// for the width it names.
+func nameBackend(err error) error {
+	if !errors.Is(err, codegen.ErrUnrepresentableWidth) {
+		return err
+	}
+	return fmt.Errorf("%w, which the Apache AGE backend has no carrier for", err)
+}
+
 // rejectUnservedQueries fails a batch whose queries this backend cannot
 // emit methods for, naming each one and the axis that dropped it. A
 // generated package accounts for every query in its batch, and a query
@@ -38,7 +88,7 @@ func rejectUnservedQueries(queries []codegen.NamedQuery) error {
 	if len(dropped) == 1 {
 		noun = "query"
 	}
-	return fmt.Errorf("%w: the Apache AGE backend serves scalar reads, so %d %s would be dropped: %s",
+	return fmt.Errorf("%w: the Apache AGE backend serves scalar and entity reads, so %d %s would be dropped: %s",
 		ErrUnsupportedQuery, len(dropped), noun, strings.Join(dropped, ", "))
 }
 
@@ -69,11 +119,12 @@ func unservedReason(q codegen.NamedQuery) string {
 }
 
 // unservedColumn names why a resolved column type has no decode arm, or
-// "" when it has one. Served are a schema property of scalar width and a
-// bool / integer / float / string expression: one agtype scalar token
-// each. Every other member of the surface arrives as a shape with
-// internal structure — an annotated vertex or edge, a bracketed list, a
-// brace-delimited map — or as a value whose shape is not known until it
+// "" when it has one. Served are a schema property of scalar width, a
+// bool / integer / float / string expression, and a whole vertex or edge
+// — the last of these because its label and its properties are together
+// enough to fill the entity struct the schema declares. What remains
+// arrives either as a shape whose members the emitted helpers have no
+// declared widths for, or as a value whose shape is not known until it
 // arrives.
 func unservedColumn(t resolver.ResolvedType) string {
 	switch ct := t.(type) {
@@ -93,8 +144,9 @@ func unservedColumn(t resolver.ResolvedType) string {
 			return "projects " + ct.String()
 		}
 		return "projects " + ct.String()
-	case resolver.ResolvedNode, resolver.ResolvedEdge, resolver.ResolvedEdgeUnion,
-		resolver.ResolvedTemporal, resolver.ResolvedList, resolver.ResolvedUnknown:
+	case resolver.ResolvedNode, resolver.ResolvedEdge, resolver.ResolvedEdgeUnion:
+		return ""
+	case resolver.ResolvedTemporal, resolver.ResolvedList, resolver.ResolvedUnknown:
 		return "projects " + ct.String()
 	}
 	// ResolvedType is a sealed interface, so the switch above is its
@@ -123,12 +175,10 @@ func unservedParam(t resolver.ResolvedType) string {
 }
 
 // scalarWidth reports whether a property width lands on a Go scalar the
-// emitted helpers encode and decode. The type table is the authority on
-// which widths have a Go carrier at all; this narrows that to the ones
-// whose carrier is a single agtype scalar. ANY is the width it excludes:
-// its value can be any agtype shape, so `any` is the only carrier it has
-// and no scalar helper fills one.
+// emitted helpers encode and decode. The type table admits exactly those
+// widths, so asking it is the whole check, and asking it here is what
+// keeps the two answers from drifting apart.
 func scalarWidth(pt graph.PropertyType) bool {
-	ty, ok := typeMap{}.Property(pt)
-	return ok && ty != "any"
+	_, ok := typeMap{}.Property(pt)
+	return ok
 }

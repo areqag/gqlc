@@ -332,6 +332,93 @@ func TestPhaseBCommitsIsWrite(t *testing.T) {
 	}
 }
 
+// sharedEdgeLabelFixture is a schema whose LikesFwd and LikesRev edge
+// types carry one label across two endpoint pairs, alongside a Wrote
+// under a label of its own. It returns the keys as (fwd, wrote, rev),
+// so a caller passing them straight through gets the two label-sharing
+// candidates separated by one that shares with neither.
+//
+// The explicit Names are load-bearing: Phase Z's Rule 4 refuses an
+// unnamed edge type whose label is shared across endpoint pairs, so
+// without them nothing here reaches per-column admission.
+func sharedEdgeLabelFixture() (schema.Schema, schema.EdgeKey, schema.EdgeKey, schema.EdgeKey) {
+	person := graph.LabelSetKey("Person")
+	post := graph.LabelSetKey("Post")
+	likes := graph.LabelSetKey("LIKES")
+	fwd := schema.EdgeKey{Source: person, KeyLabels: likes, Target: post}
+	rev := schema.EdgeKey{Source: post, KeyLabels: likes, Target: person}
+	wrote := schema.EdgeKey{Source: person, KeyLabels: graph.LabelSetKey("WROTE"), Target: post}
+	sch := schema.Schema{
+		Name: "Test",
+		Nodes: map[graph.LabelSetKey]schema.NodeType{
+			person: {KeyLabels: person, CompleteLabels: person, Properties: map[string]schema.Property{}},
+			post:   {KeyLabels: post, CompleteLabels: post, Properties: map[string]schema.Property{}},
+		},
+		Edges: map[schema.EdgeKey]schema.EdgeType{
+			fwd:   {EdgeKey: fwd, Name: "LikesFwd", Properties: map[string]schema.Property{}},
+			rev:   {EdgeKey: rev, Name: "LikesRev", Properties: map[string]schema.Property{}},
+			wrote: {EdgeKey: wrote, Name: "Wrote", Properties: map[string]schema.Property{}},
+		},
+	}
+	return sch, fwd, wrote, rev
+}
+
+// TestEdgeUnionCandidatesMustCarryDistinctLabels pins the refusal of an
+// edge union two of whose candidates carry one label, at both fail-sites
+// and in the words the caller reads. The last row is what holds the gate
+// on the column rather than on the schema: one schema serves all three,
+// and a candidate set the label tells apart still generates.
+func TestEdgeUnionCandidatesMustCarryDistinctLabels(t *testing.T) {
+	sch, fwd, wrote, rev := sharedEdgeLabelFixture()
+
+	tests := []struct {
+		name    string
+		column  resolver.ResolvedType
+		wantErr string
+	}{
+		{
+			name:   "column projects two candidates under one label",
+			column: resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{fwd, wrote, rev}},
+			wantErr: `unrepresentable edge union: query "GetAction" column 0 "r" candidates LikesFwd and LikesRev ` +
+				`both carry edge label "LIKES" — an edge value carries its label and its properties, not its ` +
+				`endpoint types, so nothing in it tells the two apart; constrain the pattern's endpoints or ` +
+				`direction so that at most one candidate carries the label`,
+		},
+		{
+			name:   "list element projects two candidates under one label",
+			column: resolver.ResolvedList{Element: resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{fwd, wrote, rev}}},
+			wantErr: `query "GetAction" column 0 "r": unrepresentable edge union: list element candidates ` +
+				`LikesFwd and LikesRev both carry edge label "LIKES" — an edge value carries its label and its ` +
+				`properties, not its endpoint types, so nothing in it tells the two apart; constrain the ` +
+				`pattern's endpoints or direction so that at most one candidate carries the label`,
+		},
+		{
+			name:   "candidates under distinct labels are admitted",
+			column: resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{fwd, wrote}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := Input{
+				Schema: sch,
+				Queries: []NamedQuery{{
+					Name:        "GetAction",
+					Cardinality: CardinalityOne,
+					SourceText:  "MATCH (x:Person)-[r:LIKES|WROTE]-(y:Post) RETURN r",
+					Validated:   resolver.ValidatedQuery{Columns: []resolver.Column{{Name: "r", Type: tt.column}}},
+				}},
+			}
+			_, err := Prepare(in, stubTypeMap{}, "")
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, ErrUnrepresentableEdgeUnion)
+			require.EqualError(t, err, tt.wantErr)
+		})
+	}
+}
+
 // TestReservedIdentifiersAreUniformAcrossBackends pins the reserved set
 // (spec §4.1) as a whole: every exported name a generated package
 // declares at package scope collides, whichever backend is selected.

@@ -1,0 +1,8 @@
+CREATE PROPERTY GRAPH TYPE SocialSelfLoop AS {
+    (:Person {
+        id       :: INT NOT NULL,
+        name     :: STRING NOT NULL
+    }),
+    (:Person) -[:KNOWS { since :: INT NOT NULL }]-> (:Person),
+    (:Person) -[:BLOCKED { since :: INT NOT NULL }]-> (:Person)
+}
