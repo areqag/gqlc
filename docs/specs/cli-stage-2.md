@@ -423,7 +423,8 @@ Pinned copy, defaults (fresh flow), and validation:
   likewise for the other two axes. `NewOptions` renders each option's
   key via `fmt.Sprint` (option.go:13–22), which for the `~string`
   vocabulary types is the wire string (`gqlc`, `opencypher`,
-  `neo4j-go-v5`, `neo4j-go-v6`) — display and wire value cannot drift.
+  `neo4j-go-v5`, `neo4j-go-v6`, `apache-age-pgx-v5`) — display and wire
+  value cannot drift.
   The `Value(&…)` binding is typed (`Select[config.Driver]` etc.); no
   string round-trip.
 - **Single-member vocabularies still get a Select** (schema and query

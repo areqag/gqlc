@@ -13,11 +13,19 @@ import (
 )
 
 // reservedIdentifiers is the C1 exported-identifier reserved set (spec
-// §4.1). A NamedQuery.Name matching any of these routes to
-// ErrIdentifierCollision at Phase A. ErrNoRows / ErrMultipleResults are
-// included even in batches that would not emit them so the check stays
-// uniform — a rename that works in one batch but not another is exactly
-// the "renaming scheme" D2 Resolved refused.
+// §4.1): the exported names a generated package declares because the
+// emitter fixes them, whatever the batch contains. A NamedQuery.Name
+// matching any of these routes to ErrIdentifierCollision at Phase A.
+// Exported names derived from the batch — entity structs, method names,
+// <Method>Params, <Method>Row — vary with the input and are caught by
+// sweepIdentifiers instead.
+//
+// The set is the union across backends and batches: ErrNoRows /
+// ErrMultipleResults are reserved in batches that would not emit them,
+// DBTX / SessionInit / EnsureGraph / DropGraph in batches targeting a
+// backend with neither a connection seam nor a graph lifecycle. A rename
+// that works in one batch or against one backend but not another is
+// exactly the "renaming scheme" D2 Resolved refused.
 var reservedIdentifiers = map[string]struct{}{
 	"Queries":            {},
 	"New":                {},
@@ -27,6 +35,10 @@ var reservedIdentifiers = map[string]struct{}{
 	"Querier":            {},
 	"ErrNoRows":          {},
 	"ErrMultipleResults": {},
+	"DBTX":               {},
+	"SessionInit":        {},
+	"EnsureGraph":        {},
+	"DropGraph":          {},
 }
 
 // Prepared is the batch derivation the shared phases commit: the emitted
@@ -848,10 +860,9 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 //  5. `<Method>Row` for two-plus-column queries (C1)
 //  6. edgeUnion interface names, per-query-column (C5)
 //
-// First insertion-order duplicate wins. C0 skeleton identifiers
-// (Queries / New / WithTx / ReadQuerier / WriteQuerier / Querier) and
-// the ErrNoRows / ErrMultipleResults sentinels are gate-checked by
-// Phase A's reserved-identifier match, so they never appear here.
+// First insertion-order duplicate wins. Every emitter-fixed name is in
+// reservedIdentifiers and gate-checked by Phase A, so none of them
+// reaches this sweep — this pass sees only names derived from the batch.
 // Marker method names (source 6's per-candidate satisfier) and
 // <methodName>QueryText consts are unexported and stay off the sweep
 // (§4.6 defence): a marker collision is caught by the interface-name
