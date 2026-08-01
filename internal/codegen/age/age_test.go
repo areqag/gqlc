@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -785,6 +786,133 @@ func (s *EmissionSuite) TestNoQueryArgumentReachesTheStatementText() {
 	}
 	s.Require().ElementsMatch([]string{"cypherStmt"}, concatenating,
 		"a function outside the statement composer builds text by concatenation")
+}
+
+// TestNoBodyLocalTakesAQueryParameterName pins the one identifier an
+// emitted method's signature does not choose. The single-parameter form
+// names its argument after the parameter the author wrote, so a body
+// local of the same name lands in the same scope as the caller's value.
+// That is not reliably a compile error: against a STRING property the
+// widths agree, the statement composition assigns the SQL text over the
+// argument, and the query binds its own statement as the value it
+// searches for — generation exits 0 and every gate stays green.
+//
+// The names are read off an emission rather than listed here, so a local
+// a body gains later is held by this without anyone remembering to add
+// it. Each one is then fed back as the parameter's own name: the
+// signature must still carry it, because that half is the
+// backend-invariant surface and cannot move to buy the body room.
+func (s *EmissionSuite) TestNoBodyLocalTakesAQueryParameterName() {
+	declared := s.bodyLocalsOf(s.emitParamBatch("id"))
+	s.Require().NotEmpty(declared, "the emission declares no body locals to check")
+
+	for _, name := range declared {
+		s.Run(name, func() {
+			body := s.emitParamBatch(name)
+			s.Require().Contains(body, ", "+name+" string",
+				"the signature must still name its argument after the query's parameter")
+			s.Require().NotContains(s.bodyLocalsOf(body), name,
+				"a body local shadows the caller's argument")
+		})
+	}
+}
+
+// emitParamBatch emits one cypher file whose every query binds a single
+// string parameter under the given name. All three cardinalities are in
+// it, and the :one query's column is a nullable narrow width, so the
+// batch reaches the composition, the cursor walk, the scan, the null
+// branch and the narrowing conversion — every place a body declares
+// something.
+func (s *EmissionSuite) emitParamBatch(param string) string {
+	bind := []resolver.ResolvedParameter{
+		{Name: param, Type: resolver.ResolvedProperty{Type: graph.TypeString}},
+	}
+
+	many := readQuery("Many", scalarColumn("p.name", graph.TypeString))
+	many.Validated.Parameters = bind
+
+	one := readQuery("One", resolver.Column{
+		Name: "p.height",
+		Type: resolver.ResolvedProperty{Type: graph.TypeFloat32, Nullable: true},
+	})
+	one.Cardinality = codegen.CardinalityOne
+	one.Validated.Parameters = bind
+
+	purge := execQuery("Purge")
+	purge.Validated.Parameters = bind
+
+	in := s.in
+	in.Queries = []codegen.NamedQuery{many, one, purge}
+	files, err := age.New().Generate(in)
+	s.Require().NoError(err)
+	for _, f := range files {
+		if f.Path == "q.cypher.go" {
+			return string(f.Contents)
+		}
+	}
+	s.Require().Fail("no q.cypher.go in the emission")
+	return ""
+}
+
+// bodyLocalsOf names every identifier the method bodies in an emitted
+// file declare, deduplicated and ordered. The blank identifier is not
+// one: it binds nothing and cannot collide.
+func (s *EmissionSuite) bodyLocalsOf(body string) []string {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "q.cypher.go", body, parser.SkipObjectResolution)
+	s.Require().NoError(err, "the emitted file does not parse")
+
+	seen := make(map[string]bool)
+	for _, decl := range f.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			for _, id := range declaredIdents(n) {
+				if id.Name != "_" {
+					seen[id.Name] = true
+				}
+			}
+			return true
+		})
+	}
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// declaredIdents returns the identifiers a statement binds. Short
+// variable declarations, var declarations and range clauses are the
+// whole of what an emitted body uses to introduce a name.
+func declaredIdents(n ast.Node) []*ast.Ident {
+	var out []*ast.Ident
+	switch stmt := n.(type) {
+	case *ast.AssignStmt:
+		if stmt.Tok != token.DEFINE {
+			return nil
+		}
+		for _, lhs := range stmt.Lhs {
+			if id, ok := lhs.(*ast.Ident); ok {
+				out = append(out, id)
+			}
+		}
+	case *ast.ValueSpec:
+		out = append(out, stmt.Names...)
+	case *ast.RangeStmt:
+		if stmt.Tok != token.DEFINE {
+			return nil
+		}
+		for _, e := range []ast.Expr{stmt.Key, stmt.Value} {
+			if id, ok := e.(*ast.Ident); ok {
+				out = append(out, id)
+			}
+		}
+	}
+	return out
 }
 
 // isStringLit reports whether e is a string literal, which is as much as
