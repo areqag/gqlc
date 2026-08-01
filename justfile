@@ -127,8 +127,14 @@ bd-export-monotonic-local:
 # 2026-07-11); running golangci-lint from within the nested module
 # discovers ../../../.golangci.yml via upward walk, giving parity for
 # free. Used identically locally (post-generate) and in CI.
+#
+# go vet takes the codegen_live tag so its analysers reach the live battery;
+# untagged it silently skips those files (bd gqlc-3eyw). go build does not,
+# because the tagged files are all _test.go and go build never compiles those
+# — the tag there would be inert, and vet already builds what it analyses.
+# golangci-lint reads the tag from .golangci.yml.
 test-codegen-fence: ensure-golangci
-    cd test/data/codegen && go build ./... && go vet ./...
+    cd test/data/codegen && go build ./... && go vet -tags codegen_live ./...
     cd test/data/codegen && go mod tidy -diff
     cd test/data/codegen && {{golangci}} run
 
