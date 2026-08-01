@@ -1,4 +1,4 @@
-CREATE PROPERTY GRAPH TYPE QueryParamShadowsBodyLocal AS {
+CREATE PROPERTY GRAPH TYPE QueryParamShadowsEmittedName AS {
     (:Person {
         id   :: INT64 NOT NULL,
         name :: STRING NOT NULL

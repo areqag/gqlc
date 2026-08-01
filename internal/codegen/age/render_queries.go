@@ -96,7 +96,7 @@ func renderCypherFile(pkg string, queries []codegen.Query) []byte {
 		if i > 0 {
 			b.WriteString("\n")
 		}
-		fmt.Fprintf(&b, "const %sQueryText = `%s`\n\n", p.Bare, p.SourceText)
+		fmt.Fprintf(&b, "const %s = `%s`\n\n", codegen.QueryTextConst(p), p.SourceText)
 		if len(p.ParamFields) >= 2 {
 			fmt.Fprintf(&b, "type %sParams struct {\n", p.MethodName)
 			for _, f := range p.ParamFields {
@@ -248,38 +248,13 @@ func writeDocComment(b *strings.Builder, p codegen.Query) {
 	}
 }
 
-// paramLocal is the one identifier in an emitted method's signature the
-// query text chose: a single-parameter method names its argument after
-// the parameter the author wrote. Everything else in the signature — the
-// receiver, ctx, the Params struct of the two-or-more form — is this
-// package's own name, so this is the whole of what a body local has to
-// keep clear of.
-func paramLocal(p codegen.Query) string {
-	if len(p.ParamFields) != 1 {
-		return ""
-	}
-	return codegen.LowerFirstRune(p.ParamFields[0].Field)
-}
-
 // bodyLocal names one local an emitted query body declares, kept clear
-// of paramLocal. A collision is not reliably a compile error: for
-// MATCH (p:Person) WHERE p.name = $stmt the caller's argument is a
-// string named stmt, and the statement composition assigns the SQL text
-// over it and then binds that text as the value of $stmt, so the query
-// searches for a person named after its own statement while every gate
-// stays green. The same shadowing against an INT64 property is only a
-// build failure, which is to say the property's width decided whether
-// the defect was loud.
-//
-// Underscores are appended until the name is free. That terminates on
-// the first pass, because a signature contributes at most one
-// query-chosen identifier — but the loop is what makes the result
-// unconditionally clear of it rather than clear by that argument.
+// of the identifier the query text chose. Declaring is not what makes a
+// name vulnerable — resolving it is. The package-level query-text const
+// this file emits is referenced and never declared by a body, and it
+// goes through codegen.QueryTextConst for exactly the same reason.
 func bodyLocal(p codegen.Query, name string) string {
-	for name == paramLocal(p) {
-		name += "_"
-	}
-	return name
+	return codegen.Unshadowed(p, name)
 }
 
 // failPrefix is what a body's error returns place before the error
@@ -301,7 +276,7 @@ func failPrefix(p codegen.Query) string {
 func writeStatement(b *strings.Builder, p codegen.Query) string {
 	fail := failPrefix(p)
 	stmt, errv := bodyLocal(p, "stmt"), bodyLocal(p, "err")
-	fmt.Fprintf(b, "\t%s, %s := q.cypherStmt(%q, %sQueryText, %q)\n", stmt, errv, dollarTag(p.SourceText), p.Bare, recordShape(p))
+	fmt.Fprintf(b, "\t%s, %s := q.cypherStmt(%q, %s, %q)\n", stmt, errv, dollarTag(p.SourceText), codegen.QueryTextConst(p), recordShape(p))
 	fmt.Fprintf(b, "\tif %s != nil {\n\t\treturn %s%s\n\t}\n", errv, fail, errv)
 
 	argsExpr := `"{}"`

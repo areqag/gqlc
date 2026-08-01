@@ -788,33 +788,229 @@ func (s *EmissionSuite) TestNoQueryArgumentReachesTheStatementText() {
 		"a function outside the statement composer builds text by concatenation")
 }
 
-// TestNoBodyLocalTakesAQueryParameterName pins the one identifier an
+// TestNoEmittedNameTakesAQueryParameterName pins the one identifier an
 // emitted method's signature does not choose. The single-parameter form
-// names its argument after the parameter the author wrote, so a body
-// local of the same name lands in the same scope as the caller's value.
-// That is not reliably a compile error: against a STRING property the
-// widths agree, the statement composition assigns the SQL text over the
-// argument, and the query binds its own statement as the value it
-// searches for — generation exits 0 and every gate stays green.
+// names its argument after the parameter the author wrote, so anything
+// the method resolves under that name resolves to the caller's value
+// instead. Declaring a name is not what puts it at risk — resolving it
+// is, and a body resolves the package-level query-text const without
+// ever declaring it.
 //
-// The names are read off an emission rather than listed here, so a local
-// a body gains later is held by this without anyone remembering to add
-// it. Each one is then fed back as the parameter's own name: the
-// signature must still carry it, because that half is the
-// backend-invariant surface and cannot move to buy the body room.
-func (s *EmissionSuite) TestNoBodyLocalTakesAQueryParameterName() {
-	declared := s.bodyLocalsOf(s.emitParamBatch("id"))
-	s.Require().NotEmpty(declared, "the emission declares no body locals to check")
+// Neither half is reliably a compile error. A shadowed body local
+// against a STRING property lets the composition assign the SQL text
+// over the argument; a shadowed query-text const is worse, because the
+// argument silently becomes the statement — $<bare>QueryText makes
+// Method(ctx, "MATCH (n) DETACH DELETE n") run that text, with no
+// concatenation anywhere to find.
+//
+// The candidate names are every identifier the emission mentions, read
+// off the syntax tree rather than listed here, so a name the emitter
+// starts using later is covered without anyone remembering to add it.
+// Each is fed back as the parameter's own name and the emission has to
+// come out intact.
+func (s *EmissionSuite) TestNoEmittedNameTakesAQueryParameterName() {
+	candidates := s.identsOf(s.emitParamBatch("id"))
+	s.Require().NotEmpty(candidates, "the emission mentions no identifiers to check")
 
-	for _, name := range declared {
+	for _, name := range candidates {
 		s.Run(name, func() {
 			body := s.emitParamBatch(name)
-			s.Require().Contains(body, ", "+name+" string",
-				"the signature must still name its argument after the query's parameter")
+
+			// The surface cannot move to buy the emission room. Only
+			// names the mangle leaves alone can be compared directly:
+			// it splits on underscores and capitalises, so those are
+			// the ones a query text can put in scope verbatim.
+			if !strings.Contains(name, "_") && name == codegen.LowerFirstRune(name) {
+				for _, local := range s.paramLocalsOf(body) {
+					s.Require().Equal(name, local,
+						"the signature must still name its argument after the query's parameter")
+				}
+			}
 			s.Require().NotContains(s.bodyLocalsOf(body), name,
 				"a body local shadows the caller's argument")
+			s.requireNothingDeclaredIsCaptured(body)
 		})
 	}
+}
+
+// requireNothingDeclaredIsCaptured holds every package-level name the
+// emitted file declares to being resolvable from some method that needs
+// it. Capture has one signature and this is it: the const stays in the
+// file, the body still reads a name spelled the same way, and that name
+// now resolves to the parameter — leaving the declaration referenced by
+// nobody. Asserting reachability rather than comparing name lists is
+// what keeps this closed, because it never has to know what the emitter
+// chose to call anything.
+//
+// Names the file does not declare are out of scope here and tracked by
+// gqlc-ni66: fmt, agtypeArgs and the rest arrive from an import or
+// another file of the package, and capturing one is a compile failure of
+// the generated package — a string has no method Errorf and cannot be
+// called. The query-text const is the only silent one, because it is
+// string-typed and lands where a string is expected.
+func (s *EmissionSuite) requireNothingDeclaredIsCaptured(body string) {
+	file := s.parseEmission(body)
+
+	var free []map[string]bool
+	for _, decl := range file.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok {
+			free = append(free, freeIdents(fn))
+		}
+	}
+
+	for _, name := range packageDecls(file) {
+		reachable := false
+		for _, f := range free {
+			if f[name] {
+				reachable = true
+				break
+			}
+		}
+		s.Require().True(reachable,
+			"package-level %q is declared but no method resolves it: the caller's argument captured it", name)
+	}
+}
+
+// freeIdents names the identifiers a function resolves outside itself —
+// every identifier it mentions, less every name it binds. Flat rather
+// than block-scoped, which errs towards calling a name bound: an
+// emission that captures one therefore fails rather than slips through.
+func freeIdents(fn *ast.FuncDecl) map[string]bool {
+	bound := make(map[string]bool)
+	for _, l := range []*ast.FieldList{fn.Recv, fn.Type.Params, fn.Type.Results} {
+		if l == nil {
+			continue
+		}
+		for _, f := range l.List {
+			for _, n := range f.Names {
+				bound[n.Name] = true
+			}
+		}
+	}
+	ast.Inspect(fn, func(n ast.Node) bool {
+		for _, id := range declaredIdents(n) {
+			bound[id.Name] = true
+		}
+		return true
+	})
+
+	free := make(map[string]bool)
+	for _, name := range referencedIdents(fn) {
+		if !bound[name] {
+			free[name] = true
+		}
+	}
+	return free
+}
+
+// referencedIdents names every identifier a node mentions in a position
+// where scope resolution applies. Selector suffixes and struct-literal
+// keys are excluded: those resolve against a type, not against the
+// scope the parameter is bound in, so no argument name can capture them.
+func referencedIdents(n ast.Node) []string {
+	var out []string
+	ast.Inspect(n, func(n ast.Node) bool {
+		switch e := n.(type) {
+		case *ast.SelectorExpr:
+			ast.Inspect(e.X, func(inner ast.Node) bool {
+				if id, ok := inner.(*ast.Ident); ok {
+					out = append(out, id.Name)
+				}
+				return true
+			})
+			return false
+		case *ast.KeyValueExpr:
+			ast.Inspect(e.Value, func(inner ast.Node) bool {
+				if id, ok := inner.(*ast.Ident); ok {
+					out = append(out, id.Name)
+				}
+				return true
+			})
+			return false
+		case *ast.Ident:
+			out = append(out, e.Name)
+		}
+		return true
+	})
+	return out
+}
+
+// packageDecls names what an emitted file declares at package level:
+// the query-text consts, and the Params and Row structs. Read off the
+// file so a declaration the emitter adds later is held by the same
+// assertion.
+func packageDecls(file *ast.File) []string {
+	var out []string
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok == token.IMPORT {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			switch sp := spec.(type) {
+			case *ast.ValueSpec:
+				for _, n := range sp.Names {
+					if n.Name != "_" {
+						out = append(out, n.Name)
+					}
+				}
+			case *ast.TypeSpec:
+				out = append(out, sp.Name.Name)
+			}
+		}
+	}
+	return out
+}
+
+// identsOf names every identifier an emitted file mentions, declared or
+// referenced, deduplicated and ordered. This is the candidate set the
+// shadowing sweep draws from, and it is deliberately the widest one the
+// syntax tree offers rather than a list of names anyone thought of.
+//
+// The blank identifier is not a candidate: a query cannot usefully be
+// written against it and generation fails on $_ with a gofmt error that
+// names the wrong thing, which is gqlc-ni66's.
+func (s *EmissionSuite) identsOf(body string) []string {
+	file := s.parseEmission(body)
+	seen := make(map[string]bool)
+	ast.Inspect(file, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok && id.Name != "_" {
+			seen[id.Name] = true
+		}
+		return true
+	})
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// paramLocalsOf names the argument each emitted method takes after ctx.
+// The batch binds one parameter per query, so every method carries
+// exactly the receiver, ctx and that argument.
+func (s *EmissionSuite) paramLocalsOf(body string) []string {
+	var out []string
+	for _, decl := range s.parseEmission(body).Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+		params := fn.Type.Params.List
+		s.Require().Len(params, 2, "method %s should take ctx and one argument", fn.Name.Name)
+		s.Require().Len(params[1].Names, 1, "method %s should name its argument once", fn.Name.Name)
+		out = append(out, params[1].Names[0].Name)
+	}
+	return out
+}
+
+// parseEmission parses an emitted file, which must always parse.
+func (s *EmissionSuite) parseEmission(body string) *ast.File {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "q.cypher.go", body, parser.SkipObjectResolution)
+	s.Require().NoError(err, "the emitted file does not parse")
+	return f
 }
 
 // emitParamBatch emits one cypher file whose every query binds a single
@@ -858,9 +1054,7 @@ func (s *EmissionSuite) emitParamBatch(param string) string {
 // file declare, deduplicated and ordered. The blank identifier is not
 // one: it binds nothing and cannot collide.
 func (s *EmissionSuite) bodyLocalsOf(body string) []string {
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "q.cypher.go", body, parser.SkipObjectResolution)
-	s.Require().NoError(err, "the emitted file does not parse")
+	f := s.parseEmission(body)
 
 	seen := make(map[string]bool)
 	for _, decl := range f.Decls {
@@ -887,7 +1081,9 @@ func (s *EmissionSuite) bodyLocalsOf(body string) []string {
 
 // declaredIdents returns the identifiers a statement binds. Short
 // variable declarations, var declarations and range clauses are the
-// whole of what an emitted body uses to introduce a name.
+// whole of what an emitted body uses to introduce a name. Binding is
+// only half of what a parameter can capture, though — see
+// referencedIdents for the other half.
 func declaredIdents(n ast.Node) []*ast.Ident {
 	var out []*ast.Ident
 	switch stmt := n.(type) {
