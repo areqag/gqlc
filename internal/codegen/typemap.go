@@ -7,11 +7,9 @@ import (
 
 // TypeMap is a backend's Go-type table (spec §5.1): the mapping from the
 // resolved type surface onto the Go type text the generated package
-// spells. The shared phases read the table instead of a fixed switch, so
-// the driver carrier types one backend names never leak into another's
-// emission. Every returned string is opaque to the phases — they carry
-// it onto the prepared surface and hand it back to the backend's render
-// layer.
+// spells. Every returned string is opaque to the phases — they carry it
+// onto the prepared surface verbatim and hand it back to the backend's
+// render layer.
 type TypeMap interface {
 	// Property maps a schema property width to its Go type text. ok is
 	// false for a width the backend has no faithful carrier for; the

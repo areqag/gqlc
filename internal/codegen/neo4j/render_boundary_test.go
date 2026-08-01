@@ -24,6 +24,7 @@ func TestRenderBoundaryNoResolverRef(t *testing.T) {
 	entries, err := os.ReadDir(".")
 	require.NoError(t, err)
 	var offenders []string
+	sawAny := false
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -43,12 +44,14 @@ func TestRenderBoundaryNoResolverRef(t *testing.T) {
 		}
 		body, err := os.ReadFile(filepath.Clean(name))
 		require.NoError(t, err)
+		sawAny = true
 		for lineNo, line := range strings.Split(string(body), "\n") {
 			if strings.Contains(line, "resolver.") {
 				offenders = append(offenders, name+":"+itoa(lineNo+1)+": "+strings.TrimSpace(line))
 			}
 		}
 	}
+	require.True(t, sawAny, "walk must encounter at least one render_*.go file; a fence that examines nothing passes vacuously")
 	require.Empty(t, offenders, "render_*.go files must not reference the resolver package (spec §4.3)")
 }
 

@@ -147,9 +147,12 @@ func TestDriverCarrier(t *testing.T) {
 		{"string", "string"},
 		{"bool", "bool"},
 		{"[]byte", "[]byte"},
+		{"any", "any"},
+		{"map[string]any", "map[string]any"},
 		{"dbtype.Date", "dbtype.Date"},
 		{"time.Time", "time.Time"},
 	}
+	require.Len(t, tests, 19)
 	for _, tt := range tests {
 		t.Run(tt.goType, func(t *testing.T) {
 			require.Equal(t, tt.want, driverCarrier(tt.goType))
