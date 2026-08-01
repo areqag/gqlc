@@ -120,15 +120,22 @@ func TestTypeMapPropertyRejectionReachesTheCaller(t *testing.T) {
 
 // TestUnservedQueriesOutrankUnrepresentableWidths pins which of the two
 // rejections a batch failing both reports. The width sweep would send
-// the author to a schema that was never the obstacle: a write stays
-// unserved whatever the schema's widths are, so repairing them leaves
-// the batch exactly where it was. Only the query rejection says so.
+// the author to a schema that was never the obstacle: a query projecting
+// a list stays unserved whatever the schema's widths are, so repairing
+// them leaves the batch exactly where it was. Only the query rejection
+// says so.
 func TestUnservedQueriesOutrankUnrepresentableWidths(t *testing.T) {
 	files, err := generate(codegen.Input{
 		Schema: schemaWithPayload(graph.TypeTimestamp),
 		Queries: []codegen.NamedQuery{{
-			Name:      "Wipe",
-			Validated: resolver.ValidatedQuery{Statement: resolver.StatementWrite},
+			Name: "Wipe",
+			Validated: resolver.ValidatedQuery{
+				Statement: resolver.StatementRead,
+				Columns: []resolver.Column{{
+					Name: "t",
+					Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeString, false)},
+				}},
+			},
 		}},
 	}, "age")
 	require.ErrorIs(t, err, ErrUnsupportedQuery)

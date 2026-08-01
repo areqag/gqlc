@@ -88,23 +88,18 @@ func rejectUnservedQueries(queries []codegen.NamedQuery) error {
 	if len(dropped) == 1 {
 		noun = "query"
 	}
-	return fmt.Errorf("%w: the Apache AGE backend serves scalar and entity reads, so %d %s would be dropped: %s",
+	return fmt.Errorf("%w: the Apache AGE backend serves scalar and entity columns, so %d %s would be dropped: %s",
 		ErrUnsupportedQuery, len(dropped), noun, strings.Join(dropped, ", "))
 }
 
-// unservedReason names the axis on which a query falls outside the read
-// path, or "" when every axis is served. A served query only reads, has
-// a row axis with rows on it, and carries nothing across its columns and
-// parameters that the scalar arms cannot encode or decode. Reported in
-// the resolver's own type vocabulary, so the reason names the shape the
-// author will find in their query.
+// unservedReason names the axis on which a query falls outside what this
+// backend emits, or "" when every axis is served. Reading and writing
+// both have an emission, and so does every cardinality either of them
+// carries, so what is left to ask about is what the query carries across
+// its columns and its parameters. Reported in the resolver's own type
+// vocabulary, so the reason names the shape the author will find in
+// their query.
 func unservedReason(q codegen.NamedQuery) string {
-	if q.Validated.Statement == resolver.StatementWrite {
-		return "writes to the graph"
-	}
-	if q.Cardinality == codegen.CardinalityExec {
-		return ":exec returns no rows to decode"
-	}
 	for _, col := range q.Validated.Columns {
 		if reason := unservedColumn(col.Type); reason != "" {
 			return fmt.Sprintf("column %q %s", col.Name, reason)

@@ -132,7 +132,7 @@ var arms = []struct {
 }{
 	{name: "neo4j-go-v5", start: startNeo4jV5, writes: true},
 	{name: "neo4j-go-v6", start: startNeo4jV6, writes: true},
-	{name: "apache-age-pgx-v5", start: startAGE, writes: false},
+	{name: "apache-age-pgx-v5", start: startAGE, writes: true},
 }
 
 // readScenarios are the battery every arm runs. Each body is written once

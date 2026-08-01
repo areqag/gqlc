@@ -65,7 +65,17 @@ func dollarTag(text string) string {
 // declares: one agtype column per projected column, positionally named.
 // The names are positional because a projection's own column name is an
 // expression like p.name, which is not an SQL identifier.
+//
+// A body that projects nothing still declares exactly one agtype column.
+// Measured against AGE 1.7.0: omitting the AS clause is PostgreSQL's "a
+// column definition list is required for functions returning record",
+// writing AS () is a SQL syntax error, and any list that is not a single
+// agtype attribute is AGE's own 42804. One column is the only shape the
+// server accepts, and it yields no rows.
 func recordShape(p codegen.Query) string {
+	if len(p.RowFields) == 0 {
+		return "v0 ag_catalog.agtype"
+	}
 	cols := make([]string, len(p.RowFields))
 	for i := range p.RowFields {
 		cols[i] = fmt.Sprintf("v%d ag_catalog.agtype", i)
@@ -130,6 +140,10 @@ func writeMethodSignature(b *strings.Builder, p codegen.Query) {
 		b.WriteString(p.ParamFields[0].GoType)
 	default:
 		fmt.Fprintf(b, ", arg %sParams", p.MethodName)
+	}
+	if p.Cardinality == codegen.CardinalityExec {
+		b.WriteString(") error")
+		return
 	}
 	b.WriteString(") (" + returnTypeText(p) + ", error)")
 }
@@ -207,10 +221,14 @@ func writeMethod(b *strings.Builder, p codegen.Query) {
 	b.WriteString("func (q *Queries) ")
 	writeMethodSignature(b, p)
 	b.WriteString(" {\n")
-	writeQueryCall(b, p)
-	if p.Cardinality == codegen.CardinalityOne {
+	switch p.Cardinality {
+	case codegen.CardinalityExec:
+		writeExecBody(b, p)
+	case codegen.CardinalityOne:
+		writeQueryCall(b, p)
 		writeOneBody(b, p)
-	} else {
+	default:
+		writeQueryCall(b, p)
 		writeManyBody(b, p)
 	}
 	b.WriteString("}\n")
@@ -230,22 +248,60 @@ func writeDocComment(b *strings.Builder, p codegen.Query) {
 	}
 }
 
-// writeQueryCall emits the statement composition, the parameter
-// encoding, and the q.db.Query call every body opens with.
-func writeQueryCall(b *strings.Builder, p codegen.Query) {
-	zero := zeroValueText(p)
+// failPrefix is what a body's error returns place before the error
+// itself. An :exec method returns error alone and so has nothing before
+// it; every other cardinality returns the zero of its row type first.
+func failPrefix(p codegen.Query) string {
+	if p.Cardinality == codegen.CardinalityExec {
+		return ""
+	}
+	return zeroValueText(p) + ", "
+}
+
+// writeStatement emits the statement composition and the parameter
+// encoding both bodies open with, returning the expression holding the
+// agtype argument object. Shared so a read and a write reach the server
+// through the same composed text and the same bound argument: the graph
+// name is the only thing this backend ever interpolates, and it is
+// escaped and length-checked inside cypherStmt.
+func writeStatement(b *strings.Builder, p codegen.Query) string {
+	fail := failPrefix(p)
 	fmt.Fprintf(b, "\tstmt, err := q.cypherStmt(%q, %sQueryText, %q)\n", dollarTag(p.SourceText), p.Bare, recordShape(p))
-	fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %s, err\n\t}\n", zero)
+	fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %serr\n\t}\n", fail)
 
 	argsExpr := `"{}"`
 	if len(p.ParamFields) > 0 {
 		fmt.Fprintf(b, "\targs, err := agtypeArgs(%s)\n", argsMapText(p))
-		fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %s, err\n\t}\n", zero)
+		fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %serr\n\t}\n", fail)
 		argsExpr = "args"
 	}
+	return argsExpr
+}
+
+// writeQueryCall emits the statement composition, the parameter
+// encoding, and the q.db.Query call every decoding body opens with.
+func writeQueryCall(b *strings.Builder, p codegen.Query) {
+	argsExpr := writeStatement(b, p)
+	zero := zeroValueText(p)
 	fmt.Fprintf(b, "\trows, err := q.db.Query(ctx, stmt, %s)\n", argsExpr)
 	fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %s, fmt.Errorf(%q, err)\n\t}\n", zero, p.MethodName+": %w")
 	b.WriteString("\tdefer rows.Close()\n")
+}
+
+// writeExecBody emits the whole of an :exec method: compose, encode,
+// execute, report. The command tag is discarded rather than reported.
+// Measured against AGE 1.7.0: the tag a cypher() call returns is the
+// enclosing SELECT's, so its RowsAffected counts projected rows and is
+// zero for every write that projects nothing — a CREATE of three
+// vertices and a DELETE that matched none both report "SELECT 0". A
+// count that cannot tell those apart is not a count of anything, and
+// returning error alone is also what keeps this method's signature
+// identical to the one the Neo4j targets emit.
+func writeExecBody(b *strings.Builder, p codegen.Query) {
+	argsExpr := writeStatement(b, p)
+	fmt.Fprintf(b, "\tif _, err := q.db.Exec(ctx, stmt, %s); err != nil {\n\t\treturn fmt.Errorf(%q, err)\n\t}\n",
+		argsExpr, p.MethodName+": %w")
+	b.WriteString("\treturn nil\n")
 }
 
 // argsMapText composes the map literal agtypeArgs encodes. Keys are the

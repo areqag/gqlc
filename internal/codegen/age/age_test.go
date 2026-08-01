@@ -176,6 +176,20 @@ func readQuery(name string, cols ...resolver.Column) codegen.NamedQuery {
 	}
 }
 
+// execQuery is the other batch entry this backend serves — a write that
+// projects nothing. Shared admission holds :exec and a column list
+// mutually exclusive, so the zero-column shape is the only one an
+// emission ever sees under this cardinality.
+func execQuery(name string) codegen.NamedQuery {
+	return codegen.NamedQuery{
+		Name:        name,
+		Cardinality: codegen.CardinalityExec,
+		SourceFile:  "q.cypher",
+		SourceText:  "MATCH (p:Person) DELETE p\n",
+		Validated:   resolver.ValidatedQuery{Statement: resolver.StatementWrite},
+	}
+}
+
 // servedQuery binds a parameter and projects one column of each agtype
 // scalar width, so a batch holding it reaches every helper the emission
 // gates on demand and every decode arm the read path can take.
@@ -192,12 +206,13 @@ var servedQuery = func() codegen.NamedQuery {
 	return q
 }()
 
-// TestRejectsQueriesItCannotServe pins the capability gate. The read
-// path decodes agtype's scalar vocabulary and the vertices and edges
-// built out of it, so a batch carrying a query outside that would hand
-// the author a Querier that silently omits the query — or, worse, a
-// method built on a decode arm that does not exist. The error names
-// every dropped query and the axis that dropped it.
+// TestRejectsQueriesItCannotServe pins the capability gate. The emitted
+// arms cover agtype's scalar vocabulary, the vertices and edges built
+// out of it, and a statement that writes with or without projecting, so
+// a batch carrying a query outside that would hand the author a Querier
+// that silently omits the query — or, worse, a method built on a decode
+// arm that does not exist. The error names every dropped query and the
+// axis that dropped it.
 func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 	served := servedQuery
 
@@ -209,9 +224,13 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 	write := moved("Wipe", func(q *codegen.NamedQuery) {
 		q.Validated.Statement = resolver.StatementWrite
 	})
-	exec := moved("Purge", func(q *codegen.NamedQuery) {
-		q.Cardinality = codegen.CardinalityExec
-	})
+	execListParam := func() codegen.NamedQuery {
+		q := execQuery("Batch")
+		q.Validated.Parameters = []resolver.ResolvedParameter{{
+			Name: "ids", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeInt, true)},
+		}}
+		return q
+	}()
 	node := moved("Whole", func(q *codegen.NamedQuery) {
 		q.Validated.Columns = []resolver.Column{{
 			Name: "p", Type: resolver.ResolvedNode{Labels: graph.LabelSetKey(personLabel)},
@@ -264,15 +283,27 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 			})},
 		},
 		{
-			name:      "a write is dropped",
-			queries:   []codegen.NamedQuery{write},
-			wantSub:   `1 query would be dropped: Wipe (writes to the graph)`,
-			wantError: true,
+			name:    "a write that projects generates",
+			queries: []codegen.NamedQuery{write},
 		},
 		{
-			name:      "an exec is dropped",
-			queries:   []codegen.NamedQuery{exec},
-			wantSub:   `1 query would be dropped: Purge (:exec returns no rows to decode)`,
+			name:    "a write that projects nothing generates",
+			queries: []codegen.NamedQuery{execQuery("Purge")},
+		},
+		{
+			name: "an exec binding a scalar parameter generates",
+			queries: []codegen.NamedQuery{func() codegen.NamedQuery {
+				q := execQuery("PurgeByID")
+				q.Validated.Parameters = []resolver.ResolvedParameter{{
+					Name: "id", Type: resolver.ResolvedProperty{Type: graph.TypeInt},
+				}}
+				return q
+			}()},
+		},
+		{
+			name:      "an exec binding a list parameter is dropped",
+			queries:   []codegen.NamedQuery{execListParam},
+			wantSub:   `1 query would be dropped: Batch (parameter $ids is a list)`,
 			wantError: true,
 		},
 		{
@@ -311,14 +342,14 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 		},
 		{
 			name:      "every dropped query is named, in batch order",
-			queries:   []codegen.NamedQuery{write, exec, temporal},
-			wantSub:   "3 queries would be dropped: Wipe (writes to the graph), Purge (:exec returns no rows to decode), When (column \"t\" projects temporal(date))",
+			queries:   []codegen.NamedQuery{execListParam, temporal, list},
+			wantSub:   "3 queries would be dropped: Batch (parameter $ids is a list), When (column \"t\" projects temporal(date)), Tags (column \"t\" projects list)",
 			wantError: true,
 		},
 		{
 			name:      "a served query alongside a dropped one still fails",
-			queries:   []codegen.NamedQuery{served, write},
-			wantSub:   "1 query would be dropped: Wipe (writes to the graph)",
+			queries:   []codegen.NamedQuery{served, temporal},
+			wantSub:   `1 query would be dropped: When (column "t" projects temporal(date))`,
 			wantError: true,
 		},
 	}

@@ -21,6 +21,7 @@ import (
 	entityedgeage "github.com/areqag/gqlc/test/data/codegen/valid/entity_edge_projected_one/golden/apache-age-pgx-v5"
 	entitynodeage "github.com/areqag/gqlc/test/data/codegen/valid/entity_node_projected_one/golden/apache-age-pgx-v5"
 	manycolmanyage "github.com/areqag/gqlc/test/data/codegen/valid/many_col_many/golden/apache-age-pgx-v5"
+	mixedage "github.com/areqag/gqlc/test/data/codegen/valid/mixed_read_write_batch/golden/apache-age-pgx-v5"
 	onecoloneage "github.com/areqag/gqlc/test/data/codegen/valid/one_col_one_param_one/golden/apache-age-pgx-v5"
 )
 
@@ -168,6 +169,16 @@ func (h *ageArm) parallelScenarios() bool { return true }
 
 func (h *ageArm) scenario(ctx context.Context, t *testing.T) backend {
 	t.Helper()
+	return h.newScenario(ctx, t)
+}
+
+func (h *ageArm) writeScenario(ctx context.Context, t *testing.T) writeBackend {
+	t.Helper()
+	return h.newScenario(ctx, t)
+}
+
+func (h *ageArm) newScenario(ctx context.Context, t *testing.T) ageScenario {
+	t.Helper()
 	graph := fmt.Sprintf("gqlc_live_%d", h.graphs.Add(1))
 	t.Logf("scenario graph: %s", graph)
 
@@ -178,6 +189,7 @@ func (h *ageArm) scenario(ctx context.Context, t *testing.T) backend {
 		many:       manyColManyAGE{q: manycolmanyage.New(h.pool, graph)},
 		entityNode: entityNodeAGE{q: entitynodeage.New(h.pool, graph)},
 		entityEdge: entityEdgeAGE{q: entityedgeage.New(h.pool, graph)},
+		mixed:      mixedReadWriteBatchAGE{q: mixedage.New(h.pool, graph)},
 	}
 	// Created through one package's helper and dropped through another's:
 	// each target emits its own lifecycle pair, and both handles have to
@@ -198,6 +210,7 @@ type ageScenario struct {
 	many       manyColManyAGE
 	entityNode entityNodeAGE
 	entityEdge entityEdgeAGE
+	mixed      mixedReadWriteBatchAGE
 }
 
 func (s ageScenario) seed(ctx context.Context, t *testing.T, cypher string) {
@@ -217,6 +230,8 @@ func (s ageScenario) manyColMany() manyColManyQuerier { return s.many }
 func (s ageScenario) entityNodeProjectedOne() entityNodeQuerier { return s.entityNode }
 
 func (s ageScenario) entityEdgeProjectedOne() entityEdgeQuerier { return s.entityEdge }
+
+func (s ageScenario) mixedReadWriteBatch() mixedReadWriteBatchQuerier { return s.mixed }
 
 type oneColOneParamOneAGE struct{ q *onecoloneage.Queries }
 
@@ -251,6 +266,23 @@ func (a entityEdgeAGE) oneActedIn(ctx context.Context) (actedInEntity, error) {
 }
 
 func (a entityEdgeAGE) errNoRows() error { return entityedgeage.ErrNoRows }
+
+// mixedReadWriteBatchAGE binds the mixed read/write batch. The :exec
+// method returns error alone on every arm: the command tag a cypher()
+// call answers with is the enclosing SELECT's, so its RowsAffected
+// counts projected rows and reports zero for every write that projects
+// nothing, whatever the write touched.
+type mixedReadWriteBatchAGE struct{ q *mixedage.Queries }
+
+func (a mixedReadWriteBatchAGE) getPersonName(ctx context.Context, id int64) (string, error) {
+	return a.q.GetPersonName(ctx, id)
+}
+
+func (a mixedReadWriteBatchAGE) removePerson(ctx context.Context, id int64) error {
+	return a.q.RemovePerson(ctx, id)
+}
+
+func (a mixedReadWriteBatchAGE) errNoRows() error { return mixedage.ErrNoRows }
 
 type manyColManyAGE struct{ q *manycolmanyage.Queries }
 
