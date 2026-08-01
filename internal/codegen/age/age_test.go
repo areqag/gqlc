@@ -329,12 +329,15 @@ func (s *EmissionSuite) TestNewBindsTheGraph() {
 }
 
 // TestGraphNameIsAgesToJudge fences the emission against a client-side
-// graph-name check. AGE's rule is not one this side can restate:
-// verified against apache/age 1.7.0, create_graph takes 中中 (2 runes,
-// 6 bytes) and refuses ab (2 runes, 2 bytes), takes a-b and refuses ab-,
-// takes " ab" and refuses "ab " — so neither a rune count nor a byte
-// count nor any characterisation reached over ~44 samples separates the
-// two sets. A check would panic on names AGE creates.
+// graph-name check. AGE's grammar is AGE's to change: a copy of it here
+// is correct only against the version it was read from, and a client
+// that refuses a name the server would take has to be upgraded in step
+// with the server to stay correct.
+//
+// The length axis is characterisable — apache/age 1.7.0 takes a name of
+// at least 2 characters and at least 3 bytes, which is why 中中 and ér
+// pass while 中 and ab do not — so the argument is not that the rule
+// cannot be learnt. It is that knowing it today is not owning it.
 //
 // New therefore binds and nothing else, and EnsureGraph reports AGE's
 // own verdict with the value and its origin attached, since AGE's
