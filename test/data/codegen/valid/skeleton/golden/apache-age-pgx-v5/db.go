@@ -26,8 +26,9 @@ type Queries struct {
 // the handle's identity: every method on it addresses that graph. Every
 // connection db hands out must have been through SessionInit.
 //
-// AGE owns the rule for which graph names it accepts. A name it refuses
-// is reported by EnsureGraph, in AGE's own words.
+// The name is not read here. EnsureGraph and DropGraph are where it
+// reaches the server, and where both AGE's verdict on it and the length
+// the name type imposes are reported.
 func New(db DBTX, graph string) *Queries {
 	return &Queries{db: db, graph: graph}
 }

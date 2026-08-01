@@ -61,6 +61,25 @@ func SessionInit(ctx context.Context, conn *pgx.Conn) error {
 	return nil
 }
 
+// maxGraphNameBytes is the capacity of PostgreSQL's name type,
+// NAMEDATALEN - 1. It is a compile-time property of the server's type,
+// not of AGE.
+const maxGraphNameBytes = 63
+
+// checkGraphName rejects a bound name the $1::name cast would shorten.
+// Past maxGraphNameBytes the cast keeps the leading bytes and discards
+// the rest without raising, so two handles built on names that differ
+// only past the limit resolve to the same graph: the second EnsureGraph
+// finds it already there and reports nothing, and either handle's
+// DropGraph takes the other's labels and data with it.
+func checkGraphName(graph string) error {
+	if len(graph) > maxGraphNameBytes {
+		return fmt.Errorf("gqlc: graph name %q is %d bytes, over the %d that PostgreSQL's name type holds: the rest would be dropped silently and this handle could address another graph",
+			graph, len(graph), maxGraphNameBytes)
+	}
+	return nil
+}
+
 // EnsureGraph creates the bound graph unless it already exists, so a
 // repeated call is a no-op. The catalogue check and the create are not
 // atomic: two sessions racing on the same new name can both pass the
@@ -71,6 +90,9 @@ func SessionInit(ctx context.Context, conn *pgx.Conn) error {
 // invalid". The wrap names the value and where it was bound, because
 // AGE's message says neither.
 func (q *Queries) EnsureGraph(ctx context.Context) error {
+	if err := checkGraphName(q.graph); err != nil {
+		return err
+	}
 	const stmt = "SELECT ag_catalog.create_graph($1::name) WHERE NOT EXISTS (SELECT 1 FROM ag_catalog.ag_graph WHERE name = $1::name)"
 	if _, err := q.db.Exec(ctx, stmt, q.graph); err != nil {
 		return fmt.Errorf("gqlc: ensure graph %q (the name bound at New): %w", q.graph, err)
@@ -81,6 +103,9 @@ func (q *Queries) EnsureGraph(ctx context.Context) error {
 // DropGraph removes the bound graph and every label in it. An absent
 // graph is not an error, so teardown is repeatable.
 func (q *Queries) DropGraph(ctx context.Context) error {
+	if err := checkGraphName(q.graph); err != nil {
+		return err
+	}
 	const stmt = "SELECT ag_catalog.drop_graph($1::name, true) WHERE EXISTS (SELECT 1 FROM ag_catalog.ag_graph WHERE name = $1::name)"
 	if _, err := q.db.Exec(ctx, stmt, q.graph); err != nil {
 		return fmt.Errorf("gqlc: drop graph %q: %w", q.graph, err)

@@ -382,6 +382,29 @@ func (s *EmissionSuite) TestGraphNameIsAgesToJudge() {
 		`fmt.Errorf("gqlc: ensure graph %q (the name bound at New): %w", q.graph, err)`)
 }
 
+// TestLifecycleRejectsANameTheCastWouldShorten pins the one graph-name
+// constraint this backend does own. $1::name is a cast this emission
+// chose, and PostgreSQL's name type holds NAMEDATALEN-1 = 63 bytes and
+// drops the rest without raising. Two handles whose names differ only
+// past byte 63 then address one graph: the second EnsureGraph finds it
+// already there and reports nothing, and either handle's DropGraph
+// cascades away the other's labels and data. The limit is a static
+// property of the type, so unlike AGE's validity grammar it is knowable
+// here and cannot drift underneath us.
+func (s *EmissionSuite) TestLifecycleRejectsANameTheCastWouldShorten() {
+	graph := s.files["graph.go"]
+	s.Require().Contains(graph, "const maxGraphNameBytes = 63")
+	s.Require().Contains(graph, "if len(graph) > maxGraphNameBytes {")
+
+	// Ahead of the statement in both helpers: a guard on one of them
+	// still leaves the other free to alias.
+	for _, name := range []string{"EnsureGraph", "DropGraph"} {
+		s.Require().Contains(graph,
+			"func (q *Queries) "+name+"(ctx context.Context) error {\n\tif err := checkGraphName(q.graph); err != nil {\n\t\treturn err\n\t}\n\tconst stmt = ",
+			"%s must reject an over-length name before it reaches the ::name cast", name)
+	}
+}
+
 // TestGraphLifecycleIsOffTheQuerierInterfaces pins the exclusion: the
 // lifecycle helpers are declared by this backend alone, so listing them
 // on Querier would make the interface a moving target across backends.
