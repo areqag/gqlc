@@ -24,7 +24,14 @@ const (
     })
 }
 `
-	fixtureQuery = "// name: AllPersons :many\nMATCH (p:Person) RETURN p\n"
+	// The projection is a scalar property because every registered
+	// backend serves one, which is what lets the driver vocabulary be
+	// walked against a single project.
+	fixtureQuery = "// name: AllPersonNames :many\nMATCH (p:Person) RETURN p.name\n"
+
+	// entityQuery projects a whole node, which the Apache AGE backend
+	// does not yet decode.
+	entityQuery = "// name: AllPersons :many\nMATCH (p:Person) RETURN p\n"
 
 	// The second target's schema and query, sharing no label with the
 	// first's.
@@ -250,21 +257,33 @@ func TestGenerateDriverAxis(t *testing.T) {
 	}
 }
 
-// TestGenerateApacheAgeRejectsQueries pins the whole CLI surface of the
-// apache-age-pgx-v5 driver until the query arm lands: the backend emits
-// no query methods, and query discovery rejects a directory with none,
-// so every project the CLI accepts fails its entry. The message names
-// the query that would have been dropped, which is what the author acts
-// on.
-func TestGenerateApacheAgeRejectsQueries(t *testing.T) {
+// TestGenerateApacheAgeRejectsQueriesItCannotServe pins the CLI surface
+// of the apache-age-pgx-v5 driver's narrower query vocabulary: a batch
+// carrying a query outside it fails its entry rather than generating a
+// Querier the query is missing from. The message names the query and the
+// axis that dropped it, which is what the author acts on.
+func TestGenerateApacheAgeRejectsQueriesItCannotServe(t *testing.T) {
 	dir := writeProject(t)
+	writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), entityQuery)
 	writeFixtureFile(t, filepath.Join(dir, config.DefaultFilename), configYAML("people", "apache-age-pgx-v5", ""))
 
 	_, stderr, err := runGenerateIn(t, dir)
 	require.ErrorContains(t, err, "graph[0]: unsupported query: ")
-	require.ErrorContains(t, err, "1 query would be dropped: AllPersons")
+	require.ErrorContains(t, err, `1 query would be dropped: AllPersons (column "p" projects node)`)
 	require.Contains(t, stderr, "1 query would be dropped: AllPersons")
 	require.NoDirExists(t, filepath.Join(dir, "out"))
+}
+
+// TestGenerateApacheAgeScalarProject pins the other half: the wizard's
+// own project shape generates, so the driver the picker now offers is
+// one an author can actually run.
+func TestGenerateApacheAgeScalarProject(t *testing.T) {
+	dir := writeProject(t)
+	writeFixtureFile(t, filepath.Join(dir, config.DefaultFilename), configYAML("people", "apache-age-pgx-v5", ""))
+
+	_, _, err := runGenerateIn(t, dir)
+	require.NoError(t, err)
+	require.FileExists(t, filepath.Join(dir, "out", "people.cypher.go"))
 }
 
 // TestGenerateProcsigWiring: a CALL query generates when the config

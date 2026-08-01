@@ -36,7 +36,14 @@ const (
     })
 }
 `
-	fixtureQuery = "// name: AllPersons :many\nMATCH (p:Person) RETURN p\n"
+	// The projection is a scalar property because every registered
+	// backend serves one, which is what lets the driver axis hold the
+	// whole vocabulary against a single project.
+	fixtureQuery = "// name: AllPersonNames :many\nMATCH (p:Person) RETURN p.name\n"
+
+	// entityQuery projects a whole node, which the Apache AGE backend
+	// does not yet decode.
+	entityQuery = "// name: AllPersons :many\nMATCH (p:Person) RETURN p\n"
 
 	// The second target's schema declares a label the first one does
 	// not, so a query written against either fails against the other —
@@ -194,35 +201,14 @@ func TestRunPackageNameFromConfig(t *testing.T) {
 	require.NotContains(t, string(db), "\npackage people\n")
 }
 
-// driverOutcome is what one driver value is expected to do to a
-// wizard-shaped project: emit its client-library import, or fail the
-// entry. Exactly one field is set.
-type driverOutcome struct {
-	// wantImport is the client-library import the target's db.go must
-	// carry (CLI-1 §3.2).
-	wantImport string
-	// wantErrSubs are the substrings the entry's failure must carry,
-	// for a driver whose backend cannot serve the project at all.
-	wantErrSubs []string
-}
-
-// driverAxis records the outcome of every member of the driver
-// vocabulary. TestRunDriverAxis walks config.DriverValues() against it,
-// so registering a backend without recording what it does fails here
-// rather than passing unobserved.
-var driverAxis = map[config.Driver]driverOutcome{
-	config.DriverNeo4jGoV5: {wantImport: `"github.com/neo4j/neo4j-go-driver/v5/neo4j"`},
-	config.DriverNeo4jGoV6: {wantImport: `"github.com/neo4j/neo4j-go-driver/v6/neo4j"`},
-	// The Apache AGE backend emits no query methods yet, so a target
-	// carrying one fails its entry — entry-prefixed like every other
-	// target failure, with the zero Result the caller must not write.
-	// Query discovery rejects a directory with no query files, so this
-	// is the whole of the driver's pipeline surface until the query arm
-	// lands.
-	config.DriverApacheAgePgxV5: {wantErrSubs: []string{
-		"graph[0]: unsupported query: ",
-		"1 query would be dropped: AllPersons",
-	}},
+// driverAxis is the client-library import each driver's db.go must
+// carry (CLI-1 §3.2). TestRunDriverAxis walks config.DriverValues()
+// against it, so registering a backend without recording what it emits
+// fails here rather than passing unobserved.
+var driverAxis = map[config.Driver]string{
+	config.DriverNeo4jGoV5:      `"github.com/neo4j/neo4j-go-driver/v5/neo4j"`,
+	config.DriverNeo4jGoV6:      `"github.com/neo4j/neo4j-go-driver/v6/neo4j"`,
+	config.DriverApacheAgePgxV5: `"github.com/jackc/pgx/v5"`,
 }
 
 // TestRunDriverAxis walks the driver vocabulary rather than a hardcoded
@@ -233,7 +219,7 @@ func TestRunDriverAxis(t *testing.T) {
 		"every driver in config.DriverValues() needs a driverAxis entry saying what it does")
 
 	for _, d := range drivers {
-		want, recorded := driverAxis[d]
+		wantImport, recorded := driverAxis[d]
 		require.Truef(t, recorded, "driver %q has no recorded outcome", d)
 
 		t.Run(string(d), func(t *testing.T) {
@@ -241,31 +227,30 @@ func TestRunDriverAxis(t *testing.T) {
 			writeFixtureFile(t, cfgPath, configYAML("people", string(d), ""))
 
 			res, err := pipeline.Run(cfgPath, backendRegistry(t))
-			if want.wantImport != "" {
-				require.NoError(t, err)
-				require.Empty(t, res.Diagnostics)
-				db := findFile(t, only(t, res), "db.go")
-				require.Contains(t, string(db), want.wantImport)
-				return
-			}
-			require.Error(t, err)
-			for _, sub := range want.wantErrSubs {
-				require.ErrorContains(t, err, sub)
-			}
-			require.Equal(t, pipeline.Result{}, res)
+			require.NoError(t, err)
+			require.Empty(t, res.Diagnostics)
+			db := findFile(t, only(t, res), "db.go")
+			require.Contains(t, string(db), wantImport)
 		})
 	}
 }
 
-// TestRunApacheAgeRejectionIsASentinel pins what the driver-axis
-// substrings cannot: the failure is matchable with errors.Is, so a
-// caller can branch on it without reading the message.
+// TestRunApacheAgeRejectionIsASentinel pins the shape of the Apache AGE
+// backend's narrower vocabulary at the pipeline seam: a query it cannot
+// serve fails the entry — entry-prefixed like every other target
+// failure, with the zero Result the caller must not write — and the
+// failure is matchable with errors.Is, so a caller can branch on it
+// without reading the message.
 func TestRunApacheAgeRejectionIsASentinel(t *testing.T) {
-	_, cfgPath := writeProject(t)
+	dir, cfgPath := writeProject(t)
+	writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), entityQuery)
 	writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverApacheAgePgxV5), ""))
 
-	_, err := pipeline.Run(cfgPath, backendRegistry(t))
+	res, err := pipeline.Run(cfgPath, backendRegistry(t))
 	require.ErrorIs(t, err, age.ErrUnsupportedQuery)
+	require.ErrorContains(t, err, "graph[0]: unsupported query: ")
+	require.ErrorContains(t, err, `1 query would be dropped: AllPersons (column "p" projects node)`)
+	require.Equal(t, pipeline.Result{}, res)
 }
 
 // TestRunUnregisteredDriver: the driver axis resolves through the

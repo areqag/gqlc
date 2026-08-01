@@ -813,6 +813,15 @@ func TestInitInputStarvation(t *testing.T) {
 	require.NoFileExists(t, cfgPath)
 }
 
+// TestAppendedTargetHasADriverToFallBackOn pins the invariant
+// addPrefill's offerable[0] indexes. A target being authored has no
+// stored driver for the picker to retain, so the withheld set comes off
+// the vocabulary whole and that is the one call whose result can be
+// empty.
+func TestAppendedTargetHasADriverToFallBackOn(t *testing.T) {
+	require.NotEmpty(t, offerableDrivers(noCurrentDriver))
+}
+
 // TestWizardWithholdsOnlyDriversThatCannotGenerate ties the picker's
 // exclusion list to the behaviour that justifies it. A withheld driver
 // must actually fail on a wizard-shaped project — schema, query

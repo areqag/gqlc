@@ -1,0 +1,340 @@
+package agecorpus
+
+import (
+	"math"
+	"strings"
+	"testing"
+)
+
+// The text on the right of every case below was captured from apache/age
+// 1.7.0 and cross-checked byte-for-byte against what pgx v5 scans
+// (gqlc-35yu.5, corpus sections C1-C11). These bytes are what the
+// helpers under test will actually be handed.
+
+func TestAgtypeString(t *testing.T) {
+	accepts := map[string]string{
+		`"plain"`:            "plain",
+		`""`:                 "",
+		`"has \"quote\""`:    `has "quote"`,
+		`"back\\slash"`:      `back\slash`,
+		`"tab\there"`:        "tab\there",
+		`"new\nline"`:        "new\nline",
+		`"café ☕"`:           "café ☕",
+		`"1.5"`:              "1.5",
+		`"null"`:             "null",
+		`"a$$, $1) AS (v)"`:  "a$$, $1) AS (v)",
+		`"é"`:           "é",
+	}
+	for raw, want := range accepts {
+		got, err := agtypeString([]byte(raw))
+		if err != nil {
+			t.Errorf("agtypeString(%s) = error %v, want %q", raw, err, want)
+			continue
+		}
+		if got != want {
+			t.Errorf("agtypeString(%s) = %q, want %q", raw, got, want)
+		}
+	}
+
+	// Every other agtype shape. A projection that resolved to a string
+	// and arrives as one of these is a mis-shaped result, and taking it
+	// would hand the caller a plausible value built from the wrong thing.
+	for _, raw := range []string{
+		``,
+		`plain`,
+		`"unterminated`,
+		`42`,
+		`1.5`,
+		`true`,
+		`null`,
+		`NaN`,
+		`Infinity`,
+		`1.5::numeric`,
+		`[1, "a"]`,
+		`{"a": 1}`,
+		`"Alice"::vertex`,
+		`{"id": 844424930131969, "label": "Person", "properties": {"name": "Alice"}}::vertex`,
+		`"a" "b"`,
+	} {
+		if got, err := agtypeString([]byte(raw)); err == nil {
+			t.Errorf("agtypeString(%s) = %q, want an error", raw, got)
+		}
+	}
+}
+
+func TestAgtypeBool(t *testing.T) {
+	for raw, want := range map[string]bool{`true`: true, `false`: false} {
+		got, err := agtypeBool([]byte(raw))
+		if err != nil {
+			t.Errorf("agtypeBool(%s) = error %v, want %v", raw, err, want)
+			continue
+		}
+		if got != want {
+			t.Errorf("agtypeBool(%s) = %v, want %v", raw, got, want)
+		}
+	}
+
+	// The two spellings above are agtype's whole boolean vocabulary. The
+	// abbreviated and numeric forms belong to other parsers.
+	for _, raw := range []string{
+		``,
+		`t`,
+		`f`,
+		`T`,
+		`TRUE`,
+		`True`,
+		`FALSE`,
+		`1`,
+		`0`,
+		`yes`,
+		`"true"`,
+		`null`,
+		` true`,
+		`true `,
+		`[true]`,
+	} {
+		if got, err := agtypeBool([]byte(raw)); err == nil {
+			t.Errorf("agtypeBool(%s) = %v, want an error", raw, got)
+		}
+	}
+}
+
+func TestAgtypeInt64(t *testing.T) {
+	accepts := map[string]int64{
+		`0`:                     0,
+		`42`:                    42,
+		`-42`:                   -42,
+		`9223372036854775807`:   math.MaxInt64,
+		`-9223372036854775808`:  math.MinInt64,
+		`253402300799000000`:    253402300799000000,
+		`-2208988800000000`:     -2208988800000000,
+		`3::numeric`:            3,
+		`-3::numeric`:           -3,
+	}
+	for raw, want := range accepts {
+		got, err := agtypeInt64([]byte(raw))
+		if err != nil {
+			t.Errorf("agtypeInt64(%s) = error %v, want %d", raw, err, want)
+			continue
+		}
+		if got != want {
+			t.Errorf("agtypeInt64(%s) = %d, want %d", raw, got, want)
+		}
+	}
+
+	// 9223372036854775808 is the value AGE itself turns into a float on
+	// overflow, so it arrives as 9.223372036854776e+18 — either spelling
+	// is out of an int64 column's range and neither may be truncated
+	// into one.
+	for _, raw := range []string{
+		``,
+		`1.5`,
+		`1.0`,
+		`1.5::numeric`,
+		`9223372036854775808`,
+		`-9223372036854775809`,
+		`9.223372036854776e+18`,
+		`1e100`,
+		`NaN`,
+		`Infinity`,
+		`-Infinity`,
+		`"42"`,
+		`true`,
+		`null`,
+		`[42]`,
+		`42 43`,
+		`0x2a`,
+		`4_2`,
+	} {
+		if got, err := agtypeInt64([]byte(raw)); err == nil {
+			t.Errorf("agtypeInt64(%s) = %d, want an error", raw, got)
+		}
+	}
+}
+
+func TestAgtypeFloat64(t *testing.T) {
+	accepts := map[string]float64{
+		`1.5`:                  1.5,
+		`-1.5`:                 -1.5,
+		`1.0`:                  1,
+		`0.30000000000000004`:  0.30000000000000004,
+		`0.3333333333333333`:   0.3333333333333333,
+		`1e+100`:               1e100,
+		`42`:                   42,
+		`-42`:                  -42,
+		`9223372036854775807`:  9223372036854775807,
+		`1.5::numeric`:         1.5,
+		`9.223372036854776e+18`: 9.223372036854776e+18,
+	}
+	for raw, want := range accepts {
+		got, err := agtypeFloat64([]byte(raw))
+		if err != nil {
+			t.Errorf("agtypeFloat64(%s) = error %v, want %v", raw, err, want)
+			continue
+		}
+		if got != want {
+			t.Errorf("agtypeFloat64(%s) = %v, want %v", raw, got, want)
+		}
+	}
+
+	// NaN, Infinity and -Infinity are agtype's float vocabulary and JSON
+	// has no spelling for any of them, which is why the float parser
+	// reads these bytes and the JSON decoder does not.
+	nan, err := agtypeFloat64([]byte(`NaN`))
+	if err != nil || !math.IsNaN(nan) {
+		t.Errorf("agtypeFloat64(NaN) = %v, %v, want NaN", nan, err)
+	}
+	for raw, sign := range map[string]int{`Infinity`: 1, `-Infinity`: -1} {
+		got, err := agtypeFloat64([]byte(raw))
+		if err != nil || !math.IsInf(got, sign) {
+			t.Errorf("agtypeFloat64(%s) = %v, %v, want %+d infinity", raw, got, err, sign)
+		}
+	}
+
+	// -0.0 is a value AGE emits and it is not 0.0: a caller comparing
+	// signs sees the difference.
+	neg, err := agtypeFloat64([]byte(`-0.0`))
+	if err != nil || !math.Signbit(neg) {
+		t.Errorf("agtypeFloat64(-0.0) = %v, %v, want negative zero", neg, err)
+	}
+
+	for _, raw := range []string{
+		``,
+		`"1.5"`,
+		`true`,
+		`null`,
+		`[1.5]`,
+		`{"a": 1.5}`,
+		`1.5 2.5`,
+		`1.5::vertex`,
+	} {
+		if got, err := agtypeFloat64([]byte(raw)); err == nil {
+			t.Errorf("agtypeFloat64(%s) = %v, want an error", raw, got)
+		}
+	}
+}
+
+func TestAgtypeArgs(t *testing.T) {
+	// The encoder's output is the whole of what AGE parses as the query's
+	// parameter map, so a value carrying agtype's own delimiters has to
+	// come back out inside the JSON string it went in as.
+	cases := map[string]struct {
+		args map[string]any
+		want string
+	}{
+		"empty":     {map[string]any{}, `{}`},
+		"scalars":   {map[string]any{"id": int64(1), "ok": true}, `{"id":1,"ok":true}`},
+		"null":      {map[string]any{"minAge": (*int64)(nil)}, `{"minAge":null}`},
+		"delimiter": {map[string]any{"n": `a$$, $1) AS (v ag_catalog.agtype)`}, `{"n":"a$$, $1) AS (v ag_catalog.agtype)"}`},
+		"quote":     {map[string]any{"n": `'; DROP TABLE canary; --`}, `{"n":"'; DROP TABLE canary; --"}`},
+		"backslash": {map[string]any{"n": `back\slash`}, `{"n":"back\\slash"}`},
+		"unicode":   {map[string]any{"n": "café"}, `{"n":"café"}`},
+	}
+	for name, tc := range cases {
+		got, err := agtypeArgs(tc.args)
+		if err != nil {
+			t.Errorf("%s: agtypeArgs = error %v", name, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("%s: agtypeArgs = %s, want %s", name, got, tc.want)
+		}
+	}
+
+	// A value the encoder cannot render must fail rather than produce
+	// text AGE would read as something else.
+	if got, err := agtypeArgs(map[string]any{"n": make(chan int)}); err == nil {
+		t.Errorf("agtypeArgs(chan) = %s, want an error", got)
+	}
+}
+
+// The graph name is the one value that reaches the server inside the
+// statement text rather than bound to a placeholder, so the escaping is
+// what keeps a name carrying SQL's or agtype's own delimiters a single
+// literal. AGE refuses a quote or a backslash in a graph name of its own
+// accord at create_graph; the two barriers stand independently and this
+// pins the SQL-layer one. The tag rows carry both the first candidate
+// and an escalated one, since the composed body has to bracket the query
+// text either way.
+func TestCypherStmtComposesOneStatement(t *testing.T) {
+	const text = "MATCH (p:Person) WHERE p.id = $id RETURN p.name"
+	const record = "v0 ag_catalog.agtype"
+
+	cases := map[string]struct {
+		graph string
+		tag   string
+		want  string
+	}{
+		"plain":     {"people", "$gqlc$", `E'people'`},
+		"quote":     {`o'brien`, "$gqlc$", `E'o\'brien'`},
+		"backslash": {`back\slash`, "$gqlc$", `E'back\\slash'`},
+		"both":      {`a\'b`, "$gqlc$", `E'a\\\'b'`},
+		"statement break": {
+			`x', $q$ $q$) AS (n ag_catalog.agtype); DROP TABLE victim; --`,
+			"$gqlc$",
+			`E'x\', $q$ $q$) AS (n ag_catalog.agtype); DROP TABLE victim; --'`,
+		},
+		"escalated tag": {"people", "$gqlc1$", `E'people'`},
+	}
+	for name, tc := range cases {
+		got, err := (&Queries{graph: tc.graph}).cypherStmt(tc.tag, text, record)
+		if err != nil {
+			t.Errorf("%s: cypherStmt = error %v", name, err)
+			continue
+		}
+		want := "SELECT * FROM ag_catalog.cypher(" + tc.want + ", " + tc.tag + text + tc.tag + ", $1) AS (" + record + ")"
+		if got != want {
+			t.Errorf("%s: cypherStmt =\n\t%s\nwant\n\t%s", name, got, want)
+		}
+	}
+}
+
+// A name the server would shorten produces no statement at all, so there
+// is nothing for a caller to run against whichever graph the truncation
+// would have landed on.
+func TestCypherStmtRefusesAnOverlongName(t *testing.T) {
+	got, err := (&Queries{graph: strings.Repeat("g", 64)}).cypherStmt("$gqlc$", "RETURN 1", "v0 ag_catalog.agtype")
+	if err == nil {
+		t.Errorf("cypherStmt = %s, want an error", got)
+	}
+	if got != "" {
+		t.Errorf("cypherStmt returned %q alongside its error", got)
+	}
+}
+
+func TestBoundGraphCountsBytes(t *testing.T) {
+	// 63 is PostgreSQL's name capacity in BYTES, so the boundary a
+	// multi-byte name crosses is not the one its character count
+	// suggests: 32 two-byte characters is 64 bytes and over the limit
+	// while 63 one-byte characters is exactly at it.
+	cases := map[string]struct {
+		graph string
+		want  bool
+	}{
+		"empty":                {"", true},
+		"ascii at the limit":   {strings.Repeat("a", 63), true},
+		"ascii over by one":    {strings.Repeat("a", 64), false},
+		"two-byte at the limit": {strings.Repeat("é", 31) + "a", true},
+		"two-byte over by one": {strings.Repeat("é", 32), false},
+		"characters under, bytes over": {strings.Repeat("é", 40), false},
+		"three-byte over":      {strings.Repeat("中", 22), false},
+	}
+	for name, tc := range cases {
+		got, err := (&Queries{graph: tc.graph}).boundGraph()
+		if tc.want {
+			if err != nil {
+				t.Errorf("%s: boundGraph() = error %v, want the name back", name, err)
+			} else if got != tc.graph {
+				t.Errorf("%s: boundGraph() = %q, want %q", name, got, tc.graph)
+			}
+			continue
+		}
+		if err == nil {
+			t.Errorf("%s: boundGraph() = %q, want an error", name, got)
+			continue
+		}
+		if got != "" {
+			t.Errorf("%s: boundGraph() returned %q alongside its error", name, got)
+		}
+	}
+}
