@@ -15,11 +15,15 @@ import (
 // instead of entering the pool, so a misconfigured session surfaces at
 // pool acquisition and not at the first WHERE clause.
 //
-// Sharp edge: this hook runs once, when pgx opens the connection, and
-// what it sets is session state on the backend it opened. Session state
-// set at connect time survives only under session pooling — any mode
-// that does not give this connection a backend of its own for its
-// lifetime routes later queries to a backend the hook never ran on.
+// Sharp edge: this runs once, at connection open, and what it sets is
+// session state on whichever backend runs these statements. That state
+// holds for as long as the connection keeps that backend. A direct
+// connection keeps one for its whole lifetime, so it needs nothing
+// further. An intermediary that multiplexes many client connections
+// over a shared set of backends — pgbouncer in transaction or statement
+// mode — routes later queries to a backend SessionInit never ran on;
+// behind one, configure session mode, so each connection owns a backend
+// for as long as it holds it.
 func SessionInit(ctx context.Context, conn *pgx.Conn) error {
 	// concat_ws drops the NULL, so a role whose search_path is empty
 	// yields "ag_catalog" rather than a trailing empty element —
