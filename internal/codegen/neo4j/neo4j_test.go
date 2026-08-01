@@ -56,9 +56,7 @@ type manifest struct {
 // under fails the suite: a typo must not silently fall back to another
 // backend and pass against the wrong golden tree.
 func (s *CodegenSuite) generate(m manifest, in codegen.Input) ([]codegen.File, error) {
-	reg, err := backends.Registry()
-	s.Require().NoError(err)
-	newGen, ok := reg.Lookup(m.Driver)
+	newGen, ok := s.backends.Lookup(m.Driver)
 	s.Require().True(ok, "manifest declares driver %q, which no backend is registered under", m.Driver)
 	return newGen("").Generate(in)
 }
@@ -152,10 +150,18 @@ func sentinelIdent(err error) string {
 // CodegenSuite is the testify suite for the codegen tests.
 type CodegenSuite struct {
 	suite.Suite
+
+	backends codegen.Registry
 }
 
 func TestCodegenSuite(t *testing.T) {
 	suite.Run(t, new(CodegenSuite))
+}
+
+func (s *CodegenSuite) SetupSuite() {
+	reg, err := backends.Registry()
+	s.Require().NoError(err)
+	s.backends = reg
 }
 
 // loadManifest reads a manifest.json from the given fixture directory.

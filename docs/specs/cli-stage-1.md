@@ -257,9 +257,11 @@ rule pins the output bytes.
 The language axes map through an exhaustive switch and the driver axis
 through the `codegen.Registry` the caller passes `Run`. Both carry the
 same drift guard (`internal: no pipeline mapping for <axis>
-"<value>"`) — the loader guarantees vocabulary membership, so the guard
-only fires when `internal/config` grows a member before the CLI learns
-it:
+"<value>"`). The loader guarantees vocabulary membership, so on the
+language axes the guard fires only when `internal/config` grows a
+member before the CLI learns it; on the driver axis it fires for that
+reason or when the caller passes a registry that does not carry the
+key:
 
 | config value                  | pipeline binding                       |
 |-------------------------------|----------------------------------------|

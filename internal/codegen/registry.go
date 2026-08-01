@@ -28,7 +28,7 @@ type Registry struct {
 // NewRegistry validates entries and returns the immutable Registry. It
 // rejects an empty Key, a nil New, and a Key registered twice, returning
 // the zero Registry and an error naming the offender. No entries yields
-// the zero Registry without error.
+// an empty Registry without error.
 func NewRegistry(entries ...Entry) (Registry, error) {
 	byKey := make(map[string]func(pkg string) Generator, len(entries))
 	for _, e := range entries {
@@ -46,8 +46,7 @@ func NewRegistry(entries ...Entry) (Registry, error) {
 	return Registry{byKey: byKey}, nil
 }
 
-// Lookup returns the constructor registered under key and true, or nil
-// and false when the key is not registered.
+// Lookup resolves a driver wire key drawn from the config vocabulary.
 func (r Registry) Lookup(key string) (func(pkg string) Generator, bool) {
 	newGen, ok := r.byKey[key]
 	return newGen, ok

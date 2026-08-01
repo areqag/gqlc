@@ -37,5 +37,6 @@ func TestRegistryParityWithDriverVocabulary(t *testing.T) {
 	for _, driver := range drivers {
 		require.Contains(t, keys, driver, "config.Driver %q has no registry entry", driver)
 	}
-	require.Len(t, keys, len(drivers))
+	require.Len(t, keys, len(drivers),
+		"the sweeps above both pass when config.DriverValues repeats a member; NewRegistry rejects a duplicate key, so the counts diverge only when the vocabulary carries one")
 }
