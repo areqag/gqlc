@@ -27,19 +27,16 @@ import (
 
 // SessionInit prepares a freshly opened connection for AGE. Assign it to
 // pgxpool.Config.AfterConnect: a connection that fails here is discarded
-// instead of entering the pool.
+// instead of entering the pool, so a misconfigured session surfaces at
+// pool acquisition and not at the first WHERE clause.
 //
-// Sharp edge: the loaded extension and the search_path are session
-// state. Behind a pooler in transaction or statement mode a reset
-// between checkouts — pgbouncer's default server_reset_query is
-// DISCARD ALL — drops both, and a later query reaches a bare session
-// AfterConnect never sees again. Point the pool at a session-mode
-// connection, or put the two statements below into the pooler's
-// server_reset_query.
+// Sharp edge: search_path is session state. Behind a pooler in
+// transaction or statement mode a reset between checkouts — pgbouncer's
+// default server_reset_query is DISCARD ALL — drops it, and a later
+// query reaches a bare session AfterConnect never sees again. Point the
+// pool at a session-mode connection, or add the statement below to the
+// pooler's server_reset_query.
 func SessionInit(ctx context.Context, conn *pgx.Conn) error {
-	if _, err := conn.Exec(ctx, "LOAD 'age'"); err != nil {
-		return fmt.Errorf("gqlc: load age: %w", err)
-	}
 	// concat_ws drops the NULL, so a role whose search_path is empty
 	// yields "ag_catalog" rather than a trailing empty element —
 	// PostgreSQL rejects the latter as invalid list syntax.
@@ -51,9 +48,13 @@ func SessionInit(ctx context.Context, conn *pgx.Conn) error {
 	// still runs through the search_path. The probe is arithmetic
 	// because agtype has no implicit cast to a numeric type: with
 	// ag_catalog off the path, + has no candidate at all and resolution
-	// fails whatever the literals are. Running it here turns a
-	// misconfigured session into a pool-acquisition failure rather than
-	// a failure at the first WHERE clause.
+	// fails whatever the literals are.
+	//
+	// Evaluating the probe is also what loads AGE: + is a C function in
+	// the extension's library, so PostgreSQL loads that library and runs
+	// its _PG_init here, ahead of any user query. LOAD 'age' is
+	// superuser-only and would discard every connection a
+	// least-privilege role opens.
 	var ok bool
 	err := conn.QueryRow(ctx, "` + canaryStmt + `").Scan(&ok)
 	if err != nil {

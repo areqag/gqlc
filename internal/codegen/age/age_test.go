@@ -36,8 +36,8 @@ const (
 	// candidate operator whatever the literals are, so resolution fails.
 	// Equality alone lacks that property — agtype casts implicitly to
 	// boolean, so `=` falls back to pg_catalog's boolean equality and a
-	// misconfigured connection can pass. Copied rather than referenced so
-	// an edit to the emission has to be an edit here too.
+	// misconfigured connection can pass. This is the test's own copy of
+	// the text, so an edit to the emission has to be an edit here too.
 	wantCanary = `"SELECT '1'::ag_catalog.agtype + '1'::ag_catalog.agtype = '2'::ag_catalog.agtype"`
 )
 
@@ -264,23 +264,32 @@ func window(body string, at int) string {
 	return body[max(at-24, 0):min(at+24, len(body))]
 }
 
-// TestSessionInitOrdersLoadSearchPathCanary pins the AfterConnect
+// TestSessionInitOrdersSearchPathThenCanary pins the AfterConnect
 // contract. AGE emits bare operators resolved through search_path, so
-// loading the extension and qualifying every call site is necessary but
-// not sufficient: the canary exercises operator resolution and fails the
-// hook, which keeps the misconfigured connection out of the pool instead
-// of surfacing at the first WHERE clause.
-func (s *EmissionSuite) TestSessionInitOrdersLoadSearchPathCanary() {
+// qualifying every call site is necessary but not sufficient: the canary
+// exercises operator resolution and fails the hook, which keeps the
+// misconfigured connection out of the pool instead of surfacing at the
+// first WHERE clause.
+//
+// LOAD stays out of the hook. Evaluating the canary calls an AGE C
+// function, which is what makes PostgreSQL load the library and run its
+// _PG_init; LOAD 'age' adds only a round trip and a privilege
+// requirement. Verified against apache/age 1.7.0: a non-superuser
+// running it gets "access to library age is not allowed", and an error
+// out of AfterConnect discards the connection — so a hook carrying LOAD
+// leaves a least-privilege role with a pool that never yields one.
+// Comments are blanked first: the emission explains the absence in prose
+// that necessarily names the statement.
+func (s *EmissionSuite) TestSessionInitOrdersSearchPathThenCanary() {
 	graph := s.files["graph.go"]
 	s.Require().Contains(graph, "func SessionInit(ctx context.Context, conn *pgx.Conn) error {")
+	s.Require().NotContains(s.blankComments("graph.go", graph), "LOAD ",
+		"LOAD is superuser-only and the canary already forces the library load")
 
-	load := strings.Index(graph, "LOAD 'age'")
 	path := strings.Index(graph, "set_config('search_path'")
 	canary := strings.Index(graph, wantCanary)
-	s.Require().Positive(load, "graph.go does not LOAD the extension")
 	s.Require().Positive(path, "graph.go does not set search_path")
 	s.Require().Positive(canary, "graph.go does not run the pinned canary statement")
-	s.Require().Less(load, path, "search_path is set before the extension loads")
 	s.Require().Less(path, canary, "the canary runs before search_path is set")
 
 	// The canary is only a gate if its failure and its false result both
