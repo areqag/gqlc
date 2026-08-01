@@ -802,6 +802,7 @@ Per-fixture manifest, structured to serve both valid and invalid cases:
 {
   "package": "movies",
   "queryFiles": ["people.cypher", "movies.cypher"],
+  "targets": ["neo4j-go-v5", "neo4j-go-v6"],
   "expectedError": "queryfile.ErrUnknownCardinality"
 }
 ```
@@ -814,6 +815,16 @@ Per-fixture manifest, structured to serve both valid and invalid cases:
   fixture directory to load, in the order they enter `Input.Queries`.
   The order matters because it is the caller's first-appearance
   ordering for deterministic output.
+- **`targets`** is the list of registry wire keys this fixture is
+  enrolled in, and is **required on every fixture, valid and invalid,
+  with no default**. A backend reaches a fixture only by being named
+  here, so registering a backend does not enrol it across the corpus
+  and an omitted or empty list fails the suite rather than quietly
+  generating nothing. On a valid fixture each key must have a matching
+  `golden/<target>/` subtree and each subtree a matching key: the two
+  sets are compared, so enrolling a target without generating its
+  goldens (or dropping one without deleting them) goes red instead of
+  silently skipping.
 - **`expectedError`** is present on invalid fixtures only. The string
   names the fully-qualified sentinel identifier
   (`queryfile.ErrUnknownCardinality` or `codegen.ErrInvalidPackageName`);
