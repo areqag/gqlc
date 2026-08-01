@@ -1,0 +1,47 @@
+package age
+
+import (
+	"github.com/areqag/gqlc/internal/codegen"
+)
+
+// renderDB emits db.go: the Queries handle and the pgx seam every
+// generated method runs against.
+func renderDB(pkg string) []byte {
+	return []byte(codegen.Header() + `package ` + pkg + `
+
+import (
+	"context"
+
+	"` + pgxModule + `"
+	"` + pgxModule + `/pgconn"
+)
+
+// DBTX is the pgx surface the generated methods run against.
+// *pgxpool.Pool, *pgx.Conn and pgx.Tx all satisfy it, so the caller
+// chooses the scope without this package naming a concrete type.
+type DBTX interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+type Queries struct {
+	db    DBTX
+	graph string
+}
+
+// New returns a Queries bound to db and to one AGE graph. The binding is
+// the handle's identity: every method on it addresses that graph. Every
+// connection db hands out must have been through SessionInit.
+//
+// The name is not read here. EnsureGraph and DropGraph are where it
+// reaches the server, and where both AGE's verdict on it and the length
+// the name type imposes are reported.
+func New(db DBTX, graph string) *Queries {
+	return &Queries{db: db, graph: graph}
+}
+
+func (q *Queries) WithTx(tx pgx.Tx) *Queries {
+	return &Queries{db: tx, graph: q.graph}
+}
+`)
+}

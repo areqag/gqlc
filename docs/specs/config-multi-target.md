@@ -75,7 +75,7 @@ key and rejects.
 |---|-----------|--------|----------|------------------------------|----------------------------------------------------------------------------------|
 | 1 | `package` | string | yes      | a valid Go identifier        | generated package name (`Target.Go.Package`); `go/token.IsIdentifier`, so Go keywords are rejected; casing is not policed |
 | 2 | `out`     | string | yes      | non-empty; §4.3              | directory generated code is written to (`Target.Go.Out`), owned exclusively by gqlc (ADR 0012) |
-| 3 | `driver`  | enum   | yes      | `neo4j-go-v5`, `neo4j-go-v6` | client library the generated code targets (`Target.Go.Driver`)                  |
+| 3 | `driver`  | enum   | yes      | `neo4j-go-v5`, `neo4j-go-v6`, `apache-age-pgx-v5` | client library the generated code targets (`Target.Go.Driver`)                  |
 
 The three enum axes keep their exported Go types (`SchemaLang`,
 `QueryLang`, `Driver`), their constants, and their `XxxValues()`

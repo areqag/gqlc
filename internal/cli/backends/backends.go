@@ -7,6 +7,7 @@ package backends
 
 import (
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/codegen/age"
 	"github.com/areqag/gqlc/internal/codegen/neo4j"
 	"github.com/areqag/gqlc/internal/config"
 )
@@ -27,6 +28,12 @@ func Registry() (codegen.Registry, error) {
 			Key: string(config.DriverNeo4jGoV6),
 			New: func(pkg string) codegen.Generator {
 				return neo4j.New(neo4j.WithDriverVersion(neo4j.DriverV6), neo4j.WithPackageName(pkg))
+			},
+		},
+		codegen.Entry{
+			Key: string(config.DriverApacheAgePgxV5),
+			New: func(pkg string) codegen.Generator {
+				return age.New(age.WithPackageName(pkg))
 			},
 		},
 	)
