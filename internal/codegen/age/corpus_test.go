@@ -24,19 +24,22 @@ const corpusModule = "module " + corpusPackage + "\n\ngo 1.26.2\n"
 
 // graphStub stands in for the emitted Queries, which carries a pgx
 // handle this module has no dependency on. The field name and the method
-// body under test are the emitted ones; only the surrounding struct is
+// bodies under test are the emitted ones; only the surrounding struct is
 // written here.
-const graphStub = "package " + corpusPackage + "\n\nimport \"fmt\"\n\ntype Queries struct{ graph string }\n\n"
+const graphStub = "package " + corpusPackage + "\n\nimport (\n\t\"fmt\"\n\t\"strings\"\n)\n\ntype Queries struct{ graph string }\n\n"
 
 // TestEmittedHelpersDecodeTheAgtypeCorpus runs the emitted agtype
-// helpers and the emitted graph-name check against captured agtype text.
-// Both are pure functions over bytes and neither can be exercised by
-// reading the emission: an assertion on the source says the helper was
-// written, not that the value it produces from `1.5::numeric` is 1.5.
+// helpers, the emitted graph-name check and the emitted statement
+// composer against captured agtype text and against the names and query
+// texts that make composition hard. All are pure functions over their
+// arguments and none can be exercised by reading the emission: an
+// assertion on the source says the helper was written, not that the
+// value it produces from `1.5::numeric` is 1.5, nor that a name carrying
+// a quote arrives as one SQL literal.
 //
 // The bytes under test come from Generate rather than from the golden
-// tree, so regenerating goldens cannot make a decode bug agree with
-// itself.
+// tree, so regenerating goldens cannot make a decode or composition bug
+// agree with itself.
 func (s *EmissionSuite) TestEmittedHelpersDecodeTheAgtypeCorpus() {
 	files := s.emitReadBatch(age.WithPackageName(corpusPackage))
 	driver, err := os.ReadFile(filepath.Join("testdata", "corpus_test.go.txt"))
@@ -46,7 +49,7 @@ func (s *EmissionSuite) TestEmittedHelpersDecodeTheAgtypeCorpus() {
 	for name, body := range map[string]string{
 		"go.mod":         corpusModule,
 		"models.go":      files["models.go"],
-		"boundgraph.go":  graphStub + s.declarations(files["db.go"], "maxGraphNameBytes", "boundGraph"),
+		"boundgraph.go":  graphStub + s.declarations(files["db.go"], "maxGraphNameBytes", "boundGraph", "cypherStmt"),
 		"corpus_test.go": string(driver),
 	} {
 		s.Require().NoError(os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644))

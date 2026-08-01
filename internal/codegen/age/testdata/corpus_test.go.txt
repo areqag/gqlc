@@ -248,6 +248,60 @@ func TestAgtypeArgs(t *testing.T) {
 	}
 }
 
+// The graph name is the one value that reaches the server inside the
+// statement text rather than bound to a placeholder, so the escaping is
+// what keeps a name carrying SQL's or agtype's own delimiters a single
+// literal. AGE refuses a quote or a backslash in a graph name of its own
+// accord at create_graph; the two barriers stand independently and this
+// pins the SQL-layer one. The tag rows carry both the first candidate
+// and an escalated one, since the composed body has to bracket the query
+// text either way.
+func TestCypherStmtComposesOneStatement(t *testing.T) {
+	const text = "MATCH (p:Person) WHERE p.id = $id RETURN p.name"
+	const record = "v0 ag_catalog.agtype"
+
+	cases := map[string]struct {
+		graph string
+		tag   string
+		want  string
+	}{
+		"plain":     {"people", "$gqlc$", `E'people'`},
+		"quote":     {`o'brien`, "$gqlc$", `E'o\'brien'`},
+		"backslash": {`back\slash`, "$gqlc$", `E'back\\slash'`},
+		"both":      {`a\'b`, "$gqlc$", `E'a\\\'b'`},
+		"statement break": {
+			`x', $q$ $q$) AS (n ag_catalog.agtype); DROP TABLE victim; --`,
+			"$gqlc$",
+			`E'x\', $q$ $q$) AS (n ag_catalog.agtype); DROP TABLE victim; --'`,
+		},
+		"escalated tag": {"people", "$gqlc1$", `E'people'`},
+	}
+	for name, tc := range cases {
+		got, err := (&Queries{graph: tc.graph}).cypherStmt(tc.tag, text, record)
+		if err != nil {
+			t.Errorf("%s: cypherStmt = error %v", name, err)
+			continue
+		}
+		want := "SELECT * FROM ag_catalog.cypher(" + tc.want + ", " + tc.tag + text + tc.tag + ", $1) AS (" + record + ")"
+		if got != want {
+			t.Errorf("%s: cypherStmt =\n\t%s\nwant\n\t%s", name, got, want)
+		}
+	}
+}
+
+// A name the server would shorten produces no statement at all, so there
+// is nothing for a caller to run against whichever graph the truncation
+// would have landed on.
+func TestCypherStmtRefusesAnOverlongName(t *testing.T) {
+	got, err := (&Queries{graph: strings.Repeat("g", 64)}).cypherStmt("$gqlc$", "RETURN 1", "v0 ag_catalog.agtype")
+	if err == nil {
+		t.Errorf("cypherStmt = %s, want an error", got)
+	}
+	if got != "" {
+		t.Errorf("cypherStmt returned %q alongside its error", got)
+	}
+}
+
 func TestBoundGraphCountsBytes(t *testing.T) {
 	// 63 is PostgreSQL's name capacity in BYTES, so the boundary a
 	// multi-byte name crosses is not the one its character count

@@ -70,10 +70,11 @@ func (q *Queries) boundGraph() (string, error) {
 // The name travels inside the statement text because AGE resolves
 // cypher()'s graph argument during parse analysis and accepts a constant
 // there and nothing else. An E-string is the literal form whose escapes
-// mean the same thing whatever standard_conforming_strings is set to, so
-// escaping the backslash and the quote is the whole of what makes an
-// arbitrary bound name arrive as itself. Query arguments never travel
-// this way: they bind to $1.
+// mean the same thing whatever standard_conforming_strings is set to,
+// and escaping the backslash and the quote holds an arbitrary name to
+// one literal at the SQL layer; AGE refuses both characters in a graph
+// name at create_graph, so the two barriers stand independently. Query
+// arguments never travel this way: they bind to $1.
 func (q *Queries) cypherStmt(tag, text, record string) (string, error) {
 	graph, err := q.boundGraph()
 	if err != nil {
