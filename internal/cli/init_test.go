@@ -812,3 +812,37 @@ func TestInitInputStarvation(t *testing.T) {
 	require.EqualError(t, err, abortedMsg)
 	require.NoFileExists(t, cfgPath)
 }
+
+// TestWizardWithholdsOnlyDriversThatCannotGenerate ties the picker's
+// exclusion list to the behaviour that justifies it. A withheld driver
+// must actually fail on a wizard-shaped project — schema, query
+// directory, one query — and an offered one must succeed. A backend that
+// gains query emission fails here until its entry comes off
+// driversWithoutQueryEmission.
+func TestWizardWithholdsOnlyDriversThatCannotGenerate(t *testing.T) {
+	// A fresh target carries the default driver, so this is the
+	// vocabulary a first-time init is offered.
+	offered := offerableDrivers(initDefaults().Targets[0].Go.Driver)
+	require.NotEmpty(t, offered, "the picker must offer something")
+	require.Subset(t, config.DriverValues(), offered)
+
+	for _, d := range config.DriverValues() {
+		t.Run(string(d), func(t *testing.T) {
+			dir := writeProject(t)
+			writeFixtureFile(t, filepath.Join(dir, config.DefaultFilename), configYAML("people", string(d), ""))
+			_, _, err := runGenerateIn(t, dir)
+
+			if slices.Contains(offered, d) {
+				require.NoError(t, err, "offered driver %q must generate", d)
+				return
+			}
+			require.Errorf(t, err, "withheld driver %q now generates — take it off driversWithoutQueryEmission", d)
+
+			// A stored driver is never withheld from its own edit: huh
+			// resolves a value absent from the options to index 0, so
+			// withholding one would rewrite it on an accepted default.
+			require.Contains(t, offerableDrivers(d), d,
+				"an edit of a config already on %q must still offer it", d)
+		})
+	}
+}

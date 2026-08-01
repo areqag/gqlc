@@ -331,10 +331,29 @@ func newWizardForm(t *config.Target, prior config.Config) *huh.Form {
 				Value(&t.QueryLang),
 			huh.NewSelect[config.Driver]().
 				Title("Driver").
-				Options(huh.NewOptions(config.DriverValues()...)...).
+				Options(huh.NewOptions(offerableDrivers(t.Go.Driver)...)...).
 				Value(&t.Go.Driver),
 		),
 	)
+}
+
+// driversWithoutQueryEmission are the vocabulary members the Driver
+// picker withholds. Their backends emit no query methods, so generate
+// fails any batch carrying a query and query discovery fails a batch
+// carrying none: a project the wizard wrote with one of these could not
+// be generated. Delete an entry when its backend gains query emission —
+// TestWizardWithholdsOnlyDriversThatCannotGenerate fails until it goes.
+var driversWithoutQueryEmission = []config.Driver{config.DriverApacheAgePgxV5}
+
+// offerableDrivers is the Driver picker's vocabulary: the full driver
+// vocabulary less the withheld members, plus current. Retaining current
+// keeps the §3.3 prefill total — a huh Select whose value is absent from
+// its options falls back to index 0, so withholding a stored driver
+// would have an empty-line-accepted edit rewrite it in silence.
+func offerableDrivers(current config.Driver) []config.Driver {
+	return slices.DeleteFunc(config.DriverValues(), func(d config.Driver) bool {
+		return d != current && slices.Contains(driversWithoutQueryEmission, d)
+	})
 }
 
 // runForm applies the §2.3 wiring to every form: input and output
