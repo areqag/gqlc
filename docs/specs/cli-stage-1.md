@@ -254,17 +254,25 @@ rule pins the output bytes.
 
 ### 3.2 Axis mapping
 
-Each config axis maps through an exhaustive switch with a drift-guard
-default (`internal: no pipeline mapping for <axis> "<value>"`) — the
-loader guarantees vocabulary membership, so the default arm only
-fires when `internal/config` grows a member before the CLI learns it:
+The language axes map through an exhaustive switch and the driver axis
+through the `codegen.Registry` the caller passes `Run`. Both carry the
+same drift guard (`internal: no pipeline mapping for <axis>
+"<value>"`). The loader guarantees vocabulary membership, so on the
+language axes the guard fires only when `internal/config` grows a
+member before the CLI learns it; on the driver axis it fires for that
+reason or when the caller passes a registry that does not carry the
+key:
 
-| config value                  | pipeline binding                              |
-|-------------------------------|-----------------------------------------------|
-| `config.SchemaLangGQL`        | `gql.New()`                                   |
-| `config.QueryLangOpenCypher`  | `cypher.New(cypher.WithRegistry(reg))`        |
-| `config.DriverNeo4jGoV5`      | `codegen.WithDriverVersion(codegen.DriverV5)` |
-| `config.DriverNeo4jGoV6`      | `codegen.WithDriverVersion(codegen.DriverV6)` |
+| config value                  | pipeline binding                       |
+|-------------------------------|----------------------------------------|
+| `config.SchemaLangGQL`        | `gql.New()`                            |
+| `config.QueryLangOpenCypher`  | `cypher.New(cypher.WithRegistry(reg))` |
+| `config.DriverNeo4jGoV5`      | registry entry `neo4j-go-v5`           |
+| `config.DriverNeo4jGoV6`      | registry entry `neo4j-go-v6`           |
+
+The registry's entries are composed at the command layer's composition
+root (`internal/cli/backends`), and a parity test holds its key set
+equal to `config.DriverValues()`.
 
 ### 3.3 Error accumulation semantics
 

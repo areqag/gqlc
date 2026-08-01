@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/areqag/gqlc/internal/cli/backends"
 	"github.com/areqag/gqlc/internal/cli/pipeline"
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/config"
@@ -54,14 +55,19 @@ directory, not the working directory.`,
 	return cmd
 }
 
-// runGenerate is the CLI adapter around pipeline.Run: it delegates
-// stages 1-8 of the pipeline (spec §3.1) to internal/cli/pipeline,
-// prints accumulated diagnostics, forms the summary error, and — on
-// success — invokes the ADR 0012 tripwire-guarded write. The
-// three-way pipeline.Result contract (see pipeline.Run doc) drives
-// the three branches below.
+// runGenerate is the CLI adapter around pipeline.Run: it composes the
+// backend registry, delegates stages 1-8 of the pipeline (spec §3.1) to
+// internal/cli/pipeline, prints accumulated diagnostics, forms the
+// summary error, and — on success — invokes the ADR 0012
+// tripwire-guarded write. The three-way pipeline.Result contract (see
+// pipeline.Run doc) drives the three branches below.
 func runGenerate(cmd *cobra.Command, cfgPath string) error {
-	res, err := pipeline.Run(cfgPath)
+	reg, err := backends.Registry()
+	if err != nil {
+		return err
+	}
+
+	res, err := pipeline.Run(cfgPath, reg)
 	if err != nil {
 		// Missing config file: keep the sibling-subcommand hint
 		// CLI-side. The pipeline is subcommand-agnostic; the sentinel
