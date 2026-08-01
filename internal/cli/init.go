@@ -200,6 +200,13 @@ func addPrefill(targets []config.Target) config.Target {
 	t.QueryDir = ""
 	t.Go.Out = ""
 	t.Go.Package = ""
+	// An appended target is being authored, not edited, so it has no
+	// stored driver for the picker to preserve. Carrying a withheld one
+	// from the last entry would offer it as a fresh choice.
+	offerable := offerableDrivers(noCurrentDriver)
+	if !slices.Contains(offerable, t.Go.Driver) {
+		t.Go.Driver = offerable[0]
+	}
 	return t
 }
 
@@ -345,11 +352,18 @@ func newWizardForm(t *config.Target, prior config.Config) *huh.Form {
 // TestWizardWithholdsOnlyDriversThatCannotGenerate fails until it goes.
 var driversWithoutQueryEmission = []config.Driver{config.DriverApacheAgePgxV5}
 
-// offerableDrivers is the Driver picker's vocabulary: the full driver
-// vocabulary less the withheld members, plus current. Retaining current
-// keeps the §3.3 prefill total — a huh Select whose value is absent from
-// its options falls back to index 0, so withholding a stored driver
-// would have an empty-line-accepted edit rewrite it in silence.
+// noCurrentDriver is the current value to pass for a target that has
+// none: one being authored rather than edited, which sees the withheld
+// members withheld.
+const noCurrentDriver config.Driver = ""
+
+// offerableDrivers is the Driver picker's vocabulary for a target whose
+// stored driver is current: the full driver vocabulary less the withheld
+// members, plus current itself. Retaining current keeps the §3.3 prefill
+// total — a huh Select whose value is absent from its options falls back
+// to index 0, so withholding a stored driver would have an
+// empty-line-accepted edit rewrite it in silence. It is the value on the
+// target being edited, never one carried from a sibling.
 func offerableDrivers(current config.Driver) []config.Driver {
 	return slices.DeleteFunc(config.DriverValues(), func(d config.Driver) bool {
 		return d != current && slices.Contains(driversWithoutQueryEmission, d)
