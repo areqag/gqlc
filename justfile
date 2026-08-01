@@ -132,9 +132,10 @@ test-codegen-fence: ensure-golangci
     cd test/data/codegen && go mod tidy -diff
     cd test/data/codegen && {{golangci}} run
 
-# runs the codegen live-smoke test against a real neo4j testcontainer,
-# exercising the v5 and v6 driver arms (TestLiveSmokeV5, TestLiveSmokeV6)
-# in parallel against the same neo4j:5-community image.
+# runs the codegen live-smoke battery against a real neo4j testcontainer:
+# every scenario against every arm (TestLiveSmoke/neo4j-go-v5 and
+# TestLiveSmoke/neo4j-go-v6), the arms in parallel against the same
+# neo4j:5-community image.
 # Opt-in: PR CI runs the fence recipe above; this recipe wires the docker-
 # gated satellite (bd gqlc-73h, v6 arm added by bd gqlc-5gc) that proves
 # generated repositories actually query a live driver. Requires docker
