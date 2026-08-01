@@ -11,6 +11,8 @@ func renderDB(pkg string) []byte {
 
 import (
 	"context"
+	"fmt"
+	"unicode/utf8"
 
 	"` + pgxModule + `"
 	"` + pgxModule + `/pgconn"
@@ -30,12 +32,30 @@ type Queries struct {
 }
 
 // New returns a Queries bound to db and to one AGE graph — the analogue
-// of selecting a neo4j database. The graph is bound here rather than
-// passed per call so a handle cannot reach a graph its owner never
-// named. Every connection db hands out must have been through
-// SessionInit.
+// of selecting a neo4j database. The binding is the handle's identity:
+// every method on it addresses that graph. Every connection db hands out
+// must have been through SessionInit.
+//
+// Panics when graph is a name AGE will not accept: New has no error
+// return, and an unaccepted name yields a handle whose every call fails
+// with AGE's "graph name is invalid".
 func New(db DBTX, graph string) *Queries {
+	if !validGraphName(graph) {
+		panic(fmt.Sprintf("gqlc: invalid AGE graph name %q: need at least three characters, not starting with a digit", graph))
+	}
 	return &Queries{db: db, graph: graph}
+}
+
+// validGraphName reports whether AGE's create_graph will accept name.
+// Verified against apache/age 1.7.0: fewer than three characters, or a
+// leading digit, raises "graph name is invalid". The count is in
+// characters, not bytes — a single three-byte rune is rejected.
+func validGraphName(name string) bool {
+	if utf8.RuneCountInString(name) < 3 {
+		return false
+	}
+	first, _ := utf8.DecodeRuneInString(name)
+	return first < '0' || first > '9'
 }
 
 func (q *Queries) WithTx(tx pgx.Tx) *Queries {

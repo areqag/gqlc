@@ -328,6 +328,26 @@ func (s *EmissionSuite) TestNewBindsTheGraph() {
 	s.Require().Contains(graph, "q.db.Exec(ctx, stmt, q.graph)")
 }
 
+// TestNewRejectsAGraphNameAgeWillNot pins the construction-time guard.
+// The binding is the handle's identity, so a name AGE refuses yields a
+// handle whose every call fails at the server; New has no error return,
+// so the guard panics at the one point where the name is chosen.
+//
+// The count is in runes. Verified against apache/age 1.7.0: create_graph
+// takes the three-rune, nine-byte name 中中中 and refuses the one-rune,
+// three-byte name 中, so a byte count would refuse a name AGE accepts.
+// AGE refuses more than these two rules cover — punctuation and embedded
+// spaces among them — and the guard encodes only what was verified, so
+// it can never refuse a name AGE would take.
+func (s *EmissionSuite) TestNewRejectsAGraphNameAgeWillNot() {
+	db := s.files["db.go"]
+	s.Require().Contains(db, "if !validGraphName(graph) {")
+	s.Require().Contains(db, `panic(fmt.Sprintf("gqlc: invalid AGE graph name %q`)
+	s.Require().Contains(db, "utf8.RuneCountInString(name) < 3")
+	s.Require().Contains(db, "utf8.DecodeRuneInString(name)")
+	s.Require().Contains(db, "return first < '0' || first > '9'")
+}
+
 // TestGraphLifecycleIsOffTheQuerierInterfaces pins the exclusion: the
 // lifecycle helpers are declared by this backend alone, so listing them
 // on Querier would make the interface a moving target across backends.
