@@ -1,5 +1,6 @@
 {
   "package": "dupfile",
   "queryFiles": ["a/queries.cypher", "b/queries.cypher"],
+  "targets": ["neo4j-go-v5", "neo4j-go-v6"],
   "expectedError": "codegen.ErrDuplicateSourceFile"
 }

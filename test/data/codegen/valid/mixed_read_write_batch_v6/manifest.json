@@ -1,7 +1,0 @@
-{
-  "package": "mixedreadwritebatch",
-  "queryFiles": [
-    "queries.cypher"
-  ],
-  "driver": "neo4j-go-v6"
-}
