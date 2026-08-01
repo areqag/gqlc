@@ -8,11 +8,15 @@ import (
 // slice is sorted by Path before return. First-error short-circuit:
 // (nil, err) on failure.
 func generate(in codegen.Input, packageName string) ([]codegen.File, error) {
-	prepared, err := codegen.Prepare(in, typeMap{}, packageName)
-	if err != nil {
+	// Ahead of Prepare: a batch this backend cannot serve at all is not
+	// improved by first being told which of its property widths do not
+	// map, and that report sends the author to fix a schema that was
+	// never the obstacle.
+	if err := rejectUnservedQueries(in.Queries); err != nil {
 		return nil, err
 	}
-	if err := rejectUnservedQueries(prepared.Queries); err != nil {
+	prepared, err := codegen.Prepare(in, typeMap{}, packageName)
+	if err != nil {
 		return nil, err
 	}
 	pkg := prepared.Package

@@ -21,13 +21,13 @@ var ErrUnsupportedQuery = errors.New("unsupported query")
 //
 // The predicate keys on the backend's capability, not on the stage: C0
 // serves no query at all. A stage that serves some narrows it here.
-func rejectUnservedQueries(queries []codegen.Query) error {
+func rejectUnservedQueries(queries []codegen.NamedQuery) error {
 	if len(queries) == 0 {
 		return nil
 	}
 	names := make([]string, len(queries))
 	for i, q := range queries {
-		names[i] = q.MethodName
+		names[i] = q.Name
 	}
 	noun := "queries"
 	if len(queries) == 1 {

@@ -126,6 +126,21 @@ func TestTypeMapPropertyRejectionReachesTheCaller(t *testing.T) {
 	}
 }
 
+// TestUnservedQueriesOutrankUnrepresentableWidths pins which of the two
+// rejections a batch failing both reports. The width sweep would send
+// the author to a schema that was never the obstacle: at C0 no schema
+// makes this batch generate, because no schema makes this backend serve
+// a query. Only the query rejection says so.
+func TestUnservedQueriesOutrankUnrepresentableWidths(t *testing.T) {
+	files, err := generate(codegen.Input{
+		Schema:  schemaWithPayload(graph.TypeTimestamp),
+		Queries: []codegen.NamedQuery{{Name: "Wipe"}},
+	}, "age")
+	require.ErrorIs(t, err, ErrUnsupportedQuery)
+	require.NotErrorIs(t, err, codegen.ErrUnrepresentableWidth)
+	require.Nil(t, files)
+}
+
 // schemaWithPayload is a one-node schema whose single property carries
 // pt, so the width sweep is the only thing that can fail.
 func schemaWithPayload(pt graph.PropertyType) schema.Schema {
