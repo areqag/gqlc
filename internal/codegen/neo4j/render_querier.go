@@ -1,20 +1,22 @@
-package codegen
+package neo4j
 
 import (
 	"strings"
+
+	"github.com/areqag/gqlc/internal/codegen"
 )
 
 // renderQuerier emits querier.go (spec §5.4). ReadQuerier lists every
-// method whose preparedQuery.IsWrite is false in Input.Queries order;
+// method whose codegen.Query.IsWrite is false in Input.Queries order;
 // WriteQuerier lists every IsWrite==true method in the same filtered
 // order. A method belongs to exactly one interface — the
 // partition is on Statement, not on Cardinality (a :one write-with-
 // projection lands in WriteQuerier; a :exec on a call-with-no-yield
 // lands in ReadQuerier). The compile-time assertion on the last line
 // catches method-name drift.
-func renderQuerier(pkg string, prepared []preparedQuery, target driverTarget) []byte {
+func renderQuerier(pkg string, prepared []codegen.Query, target driverTarget) []byte {
 	var b strings.Builder
-	b.WriteString(header())
+	b.WriteString(codegen.Header())
 	b.WriteString("package ")
 	b.WriteString(pkg)
 	b.WriteString("\n\n")
@@ -71,7 +73,7 @@ func renderQuerier(pkg string, prepared []preparedQuery, target driverTarget) []
 // single-param queries surface the Go type directly. The querier
 // interface file needs an import when — and only when — its method
 // signature strings contain the carrier.
-func querierImports(prepared []preparedQuery) (needDbtype, needTime bool) {
+func querierImports(prepared []codegen.Query) (needDbtype, needTime bool) {
 	scan := func(ty string) {
 		if strings.Contains(ty, "dbtype.") {
 			needDbtype = true

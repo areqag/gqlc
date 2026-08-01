@@ -1,4 +1,4 @@
-package codegen
+package neo4j
 
 import (
 	"os"
@@ -13,7 +13,7 @@ import (
 // boundary: no render_*.go file (production or test) is allowed to
 // reference the resolver package (spec §4.3, gqlc-ls8.3 acceptance).
 // Prepare + types.go are the sole home of the mapping table; render
-// walks committed data on preparedQuery / preparedRow / preparedListElem
+// walks committed data on codegen.Query / codegen.Row / codegen.ListElem
 // alone.
 //
 // Grep pattern is bare `resolver.` — catches every symbol, not just
