@@ -15,13 +15,12 @@ import (
 var ErrUnsupportedQuery = errors.New("unsupported query")
 
 // rejectUnservedQueries fails a batch whose queries this backend cannot
-// emit methods for. Emitting anyway would hand the author a Querier that
-// silently omits queries they wrote — the generated package would be
-// wrong about its own input, and nothing downstream could tell.
+// emit methods for, naming each one. A generated package accounts for
+// every query in its batch, and a query with no emission is one it
+// cannot account for.
 //
-// The predicate is the backend's capability, not the stage: C0 serves no
-// query at all, so it rejects every one. A stage that serves some
-// narrows the predicate here.
+// The predicate keys on the backend's capability, not on the stage: C0
+// serves no query at all. A stage that serves some narrows it here.
 func rejectUnservedQueries(queries []codegen.Query) error {
 	if len(queries) == 0 {
 		return nil
