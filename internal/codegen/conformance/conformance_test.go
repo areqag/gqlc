@@ -31,7 +31,25 @@ import (
 
 var update = flag.Bool("update", false, "regenerate codegen golden files")
 
-const fixtureDir = "../../../test/data/codegen"
+const (
+	// trackedFixtureDir is the committed golden corpus.
+	trackedFixtureDir = "../../../test/data/codegen"
+	// childRootEnv names the corpus a spawned conformance run reads.
+	// TestUpdateIgnoresTheTargetFilter sets it, and nothing else does, so
+	// its presence identifies a process as that test's child. That single
+	// fact carries both properties the child needs: it reads a throwaway
+	// copy rather than the committed corpus, and it declines to spawn a
+	// grandchild however wide the inherited -run pattern is.
+	childRootEnv = "GQLC_CONFORMANCE_CHILD_ROOT"
+)
+
+// fixtureRoot is the corpus root this process reads.
+func fixtureRoot() string {
+	if root := os.Getenv(childRootEnv); root != "" {
+		return root
+	}
+	return trackedFixtureDir
+}
 
 // manifest is the on-disk descriptor per fixture directory. Present in
 // both valid and invalid fixtures; the invalid arm additionally carries
@@ -220,7 +238,7 @@ func (s *ConformanceSuite) loadNamedQueries(dir string, m manifest, sch schema.S
 
 // validFixtures walks valid/*/.
 func (s *ConformanceSuite) validFixtures() []string {
-	dirs, err := filepath.Glob(filepath.Join(fixtureDir, "valid", "*"))
+	dirs, err := filepath.Glob(filepath.Join(fixtureRoot(), "valid", "*"))
 	s.Require().NoError(err)
 	s.Require().NotEmpty(dirs)
 	return dirs
@@ -228,7 +246,7 @@ func (s *ConformanceSuite) validFixtures() []string {
 
 // invalidFixtures walks invalid/*/.
 func (s *ConformanceSuite) invalidFixtures() []string {
-	dirs, err := filepath.Glob(filepath.Join(fixtureDir, "invalid", "*"))
+	dirs, err := filepath.Glob(filepath.Join(fixtureRoot(), "invalid", "*"))
 	s.Require().NoError(err)
 	s.Require().NotEmpty(dirs)
 	return dirs
@@ -363,7 +381,7 @@ func (s *ConformanceSuite) TestDoubleRun() {
 // have their own sweep in internal/queryfile — this one is codegen-
 // only, matching the two-disjoint-sets discipline (spec §9.3).
 func TestSentinelReachability(t *testing.T) {
-	dirs, err := filepath.Glob(filepath.Join(fixtureDir, "invalid", "*"))
+	dirs, err := filepath.Glob(filepath.Join(fixtureRoot(), "invalid", "*"))
 	require.NoError(t, err)
 
 	covered := make(map[error]bool)
@@ -509,7 +527,7 @@ func syncGoldenRoot(root string, byTarget map[string][]codegen.File) error {
 // spurious or missing imports in generated golden packages are caught by
 // go test ./internal/codegen/... rather than only by just test-codegen-fence.
 func TestGoldenBuild(t *testing.T) {
-	abs, err := filepath.Abs(fixtureDir)
+	abs, err := filepath.Abs(fixtureRoot())
 	require.NoError(t, err)
 	cmd := exec.CommandContext(t.Context(), "go", "build", "./...")
 	cmd.Dir = abs
@@ -525,26 +543,46 @@ func TestGoldenBuild(t *testing.T) {
 // deleted the unselected target's goldens.
 //
 // Runs the suite as a subprocess because nothing else exercises the
-// interaction between -run's filtering and the update path. Comparing
-// the whole golden tree, not just the unselected target, makes the test
-// double as a check that -update is a no-op on a clean corpus: a drift
-// that this run rewrote fails here rather than passing silently.
+// interaction between -run's filtering and the update path, and points
+// that subprocess at a throwaway copy: -update writes, and a test run
+// that did not ask for -update must leave the committed corpus alone.
+// The copy is brought into sync before the measurement so that corpus
+// drift, whose regeneration is legitimate, cannot present as a target-
+// filter failure. Whether -update is a no-op on the committed corpus is
+// TestValid's question, not this one's.
 func TestUpdateIgnoresTheTargetFilter(t *testing.T) {
-	const fixture = "many_col_many"
-	root := filepath.Join(fixtureDir, "valid", fixture, "golden")
-	selected := "neo4j-go-v5"
+	const (
+		fixture  = "many_col_many"
+		selected = "neo4j-go-v5"
+	)
+	if os.Getenv(childRootEnv) != "" {
+		t.Skip("child conformance run: spawning another would not terminate")
+	}
 
-	before := snapshotTree(t, root)
+	root := t.TempDir()
+	require.NoError(t, os.CopyFS(root, os.DirFS(trackedFixtureDir)))
+	golden := filepath.Join(root, "valid", fixture, "golden")
+
+	updateCopy(t, root, fixture)
+	before := snapshotTree(t, golden)
 	require.Contains(t, before, filepath.Join("neo4j-go-v6", "db.go"),
 		"fixture %s must be enrolled in a second target for this test to mean anything", fixture)
 
-	cmd := exec.CommandContext(t.Context(), "go", "test", ".", "-count=1", "-update",
-		"-run", "TestConformanceSuite/TestValid/"+fixture+"/"+selected)
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "filtered -update run failed:\n%s", out)
+	updateCopy(t, root, fixture+"/"+selected)
 
-	require.Equal(t, before, snapshotTree(t, root),
+	require.Equal(t, before, snapshotTree(t, golden),
 		"-update narrowed to %q changed %s's golden tree", selected, fixture)
+}
+
+// updateCopy runs the suite under -update against the corpus at root,
+// narrowed to the named TestValid subtest path.
+func updateCopy(t *testing.T, root, subtest string) {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), "go", "test", ".", "-count=1", "-update",
+		"-run", "TestConformanceSuite/TestValid/"+subtest)
+	cmd.Env = append(os.Environ(), childRootEnv+"="+root)
+	out, err := cmd.CombinedOutput()
+	require.NoError(t, err, "-update run over %q failed:\n%s", subtest, out)
 }
 
 // snapshotTree reads every file under root into a map keyed by path
@@ -588,7 +626,7 @@ func TestGeneratedHeaderFormat(t *testing.T) {
 	// line or the LF still fails even if the regex accidentally accepts.
 	// Every target the fixture is enrolled in gets the same treatment.
 	const skeletonExpected = "// Code generated by gqlc dev. DO NOT EDIT.\n\n"
-	skeletonDBs, err := filepath.Glob(filepath.Join(fixtureDir, "valid", "skeleton", "golden", "*", "db.go"))
+	skeletonDBs, err := filepath.Glob(filepath.Join(fixtureRoot(), "valid", "skeleton", "golden", "*", "db.go"))
 	require.NoError(t, err)
 	require.NotEmpty(t, skeletonDBs, "skeleton golden must exist")
 	for _, path := range skeletonDBs {
@@ -603,7 +641,7 @@ func TestGeneratedHeaderFormat(t *testing.T) {
 	// Walk every valid fixture's golden tree. Every .go file in every
 	// golden subtree carries the header; a fixture with no .go file
 	// (unlikely but not forbidden) just contributes nothing.
-	validDirs, err := filepath.Glob(filepath.Join(fixtureDir, "valid", "*"))
+	validDirs, err := filepath.Glob(filepath.Join(fixtureRoot(), "valid", "*"))
 	require.NoError(t, err)
 	require.NotEmpty(t, validDirs, "valid fixtures must exist")
 
