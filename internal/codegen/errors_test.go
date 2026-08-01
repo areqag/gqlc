@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -20,13 +21,14 @@ import (
 // renamed.
 const taxonomyDoc = "../../docs/specs/codegen-sentinel-taxonomy.md"
 
-// The document's three tables, keyed by the heading each sits under.
+// The document's four tables, keyed by the heading each sits under.
 // Every table carries the sentinel in its first column, so one parser
-// serves all three.
+// serves all four.
 const (
-	indexHeading    = "## 1. Index — the reachable set"
-	taxonomyHeading = "## 2. Refusal taxonomy — construct to sentinel"
-	excludedHeading = "## 3. Declared and deliberately unreachable"
+	indexHeading     = "## 1. Index — the reachable set"
+	taxonomyHeading  = "## 2. Refusal taxonomy — construct to sentinel"
+	unreachedHeading = "## 3. Branches no input reaches"
+	excludedHeading  = "## 4. Declared and deliberately unreachable"
 )
 
 // sentinelCell matches a first-column cell naming a sentinel.
@@ -40,18 +42,19 @@ var sentinelCell = regexp.MustCompile("^`(Err[A-Za-z0-9]+)`$")
 type SentinelTaxonomySuite struct {
 	suite.Suite
 
-	// declared pairs every Err* value errors.go declares with the
-	// message it was constructed from.
+	// declared pairs every Err* value the package's non-test sources
+	// declare with the message it was constructed from.
 	declared map[string]string
 	// identOf names each allSentinels member. Sentinels are opaque
 	// values at run time; the errors.New argument is the only text the
 	// slice and the document share.
 	identOf map[error]string
-	// reachable, indexed, taxonomised and excluded are the four sets the
-	// assertions below compare.
+	// reachable is the set of allSentinels members by name; the rest are
+	// the document's four tables, in document order.
 	reachable   map[string]bool
 	indexed     []string
 	taxonomised []string
+	unreached   []string
 	excluded    []string
 }
 
@@ -85,6 +88,7 @@ func (s *SentinelTaxonomySuite) SetupSuite() {
 	doc := s.readDoc()
 	s.indexed = s.tableColumn(doc, indexHeading)
 	s.taxonomised = s.tableColumn(doc, taxonomyHeading)
+	s.unreached = s.tableColumn(doc, unreachedHeading)
 	s.excluded = s.tableColumn(doc, excludedHeading)
 }
 
@@ -124,8 +128,20 @@ func (s *SentinelTaxonomySuite) TestTaxonomyCoversTheIndex() {
 	for _, sentinel := range allSentinels {
 		ident := s.identOf[sentinel]
 		s.Require().True(covered[ident],
-			"%s is in allSentinels but no row under %q in %s names a construct that reaches it; a sentinel nothing routes to cannot be chosen from the table",
-			ident, taxonomyHeading, taxonomyDoc)
+			"%s is in allSentinels but no row under %q in %s names a construct that reaches it; a sentinel nothing routes to cannot be chosen from the table, and a sentinel whose every branch belongs under %q does not belong in the slice",
+			ident, taxonomyHeading, taxonomyDoc, unreachedHeading)
+	}
+}
+
+// TestUnreachedBranchesNameRealSentinels holds §3 against the code.
+// Its rows carry no coverage obligation — nothing can fire them — so the
+// only claim to check is that the sentinel each would carry still
+// exists and is still one the front end can return.
+func (s *SentinelTaxonomySuite) TestUnreachedBranchesNameRealSentinels() {
+	for _, ident := range s.unreached {
+		s.Require().True(s.reachable[ident],
+			"%s %s carries a branch under %s, which is not in allSentinels; a branch nothing reaches still fails with a sentinel the slice must hold",
+			taxonomyDoc, unreachedHeading, ident)
 	}
 }
 
@@ -148,24 +164,47 @@ func (s *SentinelTaxonomySuite) TestDeclaredSentinelsAreAccounted() {
 
 	for ident := range s.declared {
 		s.Require().True(accounted[ident],
-			"errors.go declares %s, which %s documents nowhere; add it to allSentinels and to %q, or leave it out of the slice and say why under %q",
+			"package codegen declares %s, which %s documents nowhere; add it to allSentinels and to %q, or leave it out of the slice and say why under %q",
 			ident, taxonomyDoc, indexHeading, excludedHeading)
 	}
 	for ident := range accounted {
 		_, ok := s.declared[ident]
-		s.Require().True(ok, "%s documents %s, which errors.go no longer declares", taxonomyDoc, ident)
+		s.Require().True(ok, "%s documents %s, which package codegen no longer declares", taxonomyDoc, ident)
 	}
 }
 
-// declaredSentinels reads errors.go and pairs every package-level Err*
-// value with its errors.New argument. Read from source rather than
-// through a hand-written name table because such a table is one more
+// declaredSentinels pairs every package-level Err* value in the package's
+// non-test sources with its errors.New argument. Read from source rather
+// than through a hand-written name table because such a table is one more
 // mirror of the same set, and would drift the way the document did.
+//
+// Every source file, not just errors.go: nothing stops a sentinel being
+// declared beside the code that returns it, and a sweep that reads one
+// file would call such a sentinel undeclared and pass.
 func (s *SentinelTaxonomySuite) declaredSentinels() map[string]string {
-	file, err := parser.ParseFile(token.NewFileSet(), "errors.go", nil, 0)
+	entries, err := os.ReadDir(".")
 	s.Require().NoError(err)
 
 	out := make(map[string]string)
+	files := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		files++
+		s.collectSentinels(name, out)
+	}
+	s.Require().NotZero(files, "no non-test .go files found; the fence ran from the wrong directory and would pass vacuously")
+	s.Require().NotEmpty(out, "no Err* declarations found in package codegen — the fence would pass vacuously")
+	return out
+}
+
+// collectSentinels adds one file's package-level Err* declarations to out.
+func (s *SentinelTaxonomySuite) collectSentinels(path string, out map[string]string) {
+	file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	s.Require().NoError(err)
+
 	for _, decl := range file.Decls {
 		gen, ok := decl.(*ast.GenDecl)
 		if !ok || gen.Tok != token.VAR {
@@ -173,21 +212,26 @@ func (s *SentinelTaxonomySuite) declaredSentinels() map[string]string {
 		}
 		for _, spec := range gen.Specs {
 			value, ok := spec.(*ast.ValueSpec)
-			if !ok || len(value.Names) != 1 || len(value.Values) != 1 {
+			s.Require().True(ok, "%s: a var declaration the fence cannot read", path)
+			if !slices.ContainsFunc(value.Names, isSentinelIdent) {
 				continue
 			}
-			ident := value.Names[0].Name
-			if !strings.HasPrefix(ident, "Err") {
-				continue
+			s.Require().Len(value.Values, len(value.Names),
+				"%s: a sentinel is declared in a spec whose names and values do not pair up one to one; the fence reads each name's own errors.New message",
+				path)
+			for i, ident := range value.Names {
+				if !isSentinelIdent(ident) {
+					continue
+				}
+				msg, ok := errorsNewArgument(value.Values[i])
+				s.Require().True(ok, "%s: %s is declared as something other than errors.New(<string literal>); the fence reads that literal to name the value", path, ident.Name)
+				out[ident.Name] = msg
 			}
-			msg, ok := errorsNewArgument(value.Values[0])
-			s.Require().True(ok, "%s is declared as something other than errors.New(<string literal>); the fence reads that literal to name the value", ident)
-			out[ident] = msg
 		}
 	}
-	s.Require().NotEmpty(out, "no Err* declarations found in errors.go — the fence read the wrong file and would pass vacuously")
-	return out
 }
+
+func isSentinelIdent(ident *ast.Ident) bool { return strings.HasPrefix(ident.Name, "Err") }
 
 // errorsNewArgument returns the string literal an errors.New call was
 // given.
