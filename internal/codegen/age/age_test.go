@@ -288,8 +288,8 @@ func (s *EmissionSuite) TestSessionInitOrdersSearchPathThenCanary() {
 
 	path := strings.Index(graph, "set_config('search_path'")
 	canary := strings.Index(graph, wantCanary)
-	s.Require().Positive(path, "graph.go does not set search_path")
-	s.Require().Positive(canary, "graph.go does not run the pinned canary statement")
+	s.Require().NotEqual(-1, path, "graph.go does not set search_path")
+	s.Require().NotEqual(-1, canary, "graph.go does not run the pinned canary statement")
 	s.Require().Less(path, canary, "the canary runs before search_path is set")
 
 	// The canary is only a gate if its failure and its false result both
@@ -372,6 +372,8 @@ func (s *EmissionSuite) TestPgxImportsAreMajorOnly() {
 			s.Require().Regexp(`^github\.com/jackc/pgx/v5(/[a-z0-9]+)*$`, m, "file %s", path)
 		}
 	}
+	// found counts matches, so Positive is the assertion: a sweep that
+	// matched nothing passes every Regexp above it vacuously.
 	s.Require().Positive(found, "no pgx import in the emitted package")
 }
 
