@@ -39,7 +39,40 @@ const (
 	// misconfigured connection can pass. This is the test's own copy of
 	// the text, so an edit to the emission has to be an edit here too.
 	wantCanary = `"SELECT '1'::ag_catalog.agtype + '1'::ag_catalog.agtype = '2'::ag_catalog.agtype"`
+
+	// wantSearchPath is the other statement SessionInit runs, copied on
+	// the same terms.
+	wantSearchPath = `"SELECT set_config('search_path', concat_ws(', ', 'ag_catalog', nullif(current_setting('search_path'), '')), false)"`
 )
+
+// wantAborts is SessionInit's three failure exits, each with the branch
+// that reaches it and the statement it guards. The hook exists so that a
+// connection failing any of them is discarded instead of pooled, so an
+// exit that returns nil hands out a connection whose AGE probe never
+// succeeded and moves the failure to some later query with no context
+// left to diagnose it.
+//
+// The text is pinned, not the shape: `if err != nil { return … }`
+// matches `return nil` as readily as it matches the error, so a shape
+// assertion passes on precisely the mutation that matters. These bytes
+// come from Generate, not from the golden tree, so regenerating goldens
+// cannot quiet them.
+var wantAborts = []string{
+	`	if _, err := conn.Exec(ctx, ` + wantSearchPath + `); err != nil {
+		return fmt.Errorf("gqlc: put ag_catalog on the search_path: %w", err)
+	}
+`,
+	`	err := conn.QueryRow(ctx, ` + wantCanary + `).Scan(&ok)
+	if err != nil {
+		return fmt.Errorf("gqlc: AGE operator canary: %w", err)
+	}
+	if !ok {
+		return errors.New("gqlc: AGE operator canary returned false")
+	}
+	return nil
+}
+`,
+}
 
 // EmissionSuite pins this backend's C0 emission contract: the file set,
 // the construction options, the batch-rejection path, and the properties
@@ -292,11 +325,10 @@ func (s *EmissionSuite) TestSessionInitOrdersSearchPathThenCanary() {
 	s.Require().NotEqual(-1, canary, "graph.go does not run the pinned canary statement")
 	s.Require().Less(path, canary, "the canary runs before search_path is set")
 
-	// The canary is only a gate if its failure and its false result both
-	// abort the hook.
-	tail := graph[canary:]
-	s.Require().Contains(tail, "if err != nil {")
-	s.Require().Regexp(`if !\w+ \{\n\t\treturn `, tail)
+	for _, abort := range wantAborts {
+		s.Require().Contains(graph, abort,
+			"SessionInit must abort on this failure, not fall through it")
+	}
 }
 
 // TestSearchPathSurvivesAnEmptySetting pins the empty-search_path arm: a
@@ -305,8 +337,7 @@ func (s *EmissionSuite) TestSessionInitOrdersSearchPathThenCanary() {
 // syntax — failing SessionInit on exactly the connection the statement
 // exists to repair.
 func (s *EmissionSuite) TestSearchPathSurvivesAnEmptySetting() {
-	s.Require().Contains(s.files["graph.go"],
-		`"SELECT set_config('search_path', concat_ws(', ', 'ag_catalog', nullif(current_setting('search_path'), '')), false)"`)
+	s.Require().Contains(s.files["graph.go"], wantSearchPath)
 }
 
 // TestNewBindsTheGraph pins the handle contract: the graph is a
