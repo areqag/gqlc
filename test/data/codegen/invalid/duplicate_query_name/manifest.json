@@ -1,5 +1,6 @@
 {
   "package": "dupname",
   "queryFiles": ["first.cypher", "second.cypher"],
+  "targets": ["neo4j-go-v5", "neo4j-go-v6"],
   "expectedError": "codegen.ErrDuplicateQueryName"
 }

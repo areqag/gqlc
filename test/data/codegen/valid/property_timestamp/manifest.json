@@ -1,4 +1,5 @@
 {
   "package": "propertytimestamp",
-  "queryFiles": []
+  "queryFiles": [],
+  "targets": ["neo4j-go-v5"]
 }

@@ -28,10 +28,10 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	tcneo4j "github.com/testcontainers/testcontainers-go/modules/neo4j"
 
-	manycolmanyv5 "github.com/areqag/gqlc/test/data/codegen/valid/many_col_many/golden"
-	manycolmanyv6 "github.com/areqag/gqlc/test/data/codegen/valid/many_col_many_v6/golden"
-	mixedv5 "github.com/areqag/gqlc/test/data/codegen/valid/mixed_read_write_batch/golden"
-	mixedv6 "github.com/areqag/gqlc/test/data/codegen/valid/mixed_read_write_batch_v6/golden"
+	manycolmanyv5 "github.com/areqag/gqlc/test/data/codegen/valid/many_col_many/golden/neo4j-go-v5"
+	manycolmanyv6 "github.com/areqag/gqlc/test/data/codegen/valid/many_col_many/golden/neo4j-go-v6"
+	mixedv5 "github.com/areqag/gqlc/test/data/codegen/valid/mixed_read_write_batch/golden/neo4j-go-v5"
+	mixedv6 "github.com/areqag/gqlc/test/data/codegen/valid/mixed_read_write_batch/golden/neo4j-go-v6"
 )
 
 const (

@@ -1013,8 +1013,8 @@ func (t txDB) run(ctx context.Context, cypher string, params map[string]any, _ n
   block; the C0 template did not need it.
 
 **Golden regeneration.** The C0 goldens' `db.go`
-(`test/data/codegen/valid/skeleton/golden/db.go` and
-`test/data/codegen/valid/queries_ignored/golden/db.go`) carry the
+(`test/data/codegen/valid/skeleton/golden/<target>/db.go` and
+`test/data/codegen/valid/queries_ignored/golden/<target>/db.go`) carry the
 old `driverOrTx.run` signature and the old `driverDB.run` / `txDB.run`
 return types. C1 regenerates both under the new template — the byte
 diff is the signature swap plus the real read-arm body plus the
@@ -1397,7 +1397,7 @@ against the pinned driver. Failure modes:
 
 - **A template regression producing a type-check error.** The fence
   fails with the standard Go compiler error naming the file
-  (`test/data/codegen/valid/<fixture>/golden/<name>.cypher.go:12: ...`),
+  (`test/data/codegen/valid/<fixture>/golden/<target>/<name>.cypher.go:12: ...`),
   pointing at the exact fixture and line — one-hop diagnostic from
   fence failure to fix site.
 - **A driver-version drift.** Bumping `neo4j-go-driver/v5` (a

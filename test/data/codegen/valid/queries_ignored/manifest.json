@@ -1,4 +1,5 @@
 {
   "package": "queriesignored",
-  "queryFiles": ["queries.cypher"]
+  "queryFiles": ["queries.cypher"],
+  "targets": ["neo4j-go-v5"]
 }

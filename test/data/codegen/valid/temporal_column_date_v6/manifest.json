@@ -1,7 +1,0 @@
-{
-  "package": "temporalcolumndate",
-  "queryFiles": [
-    "queries.cypher"
-  ],
-  "driver": "neo4j-go-v6"
-}
