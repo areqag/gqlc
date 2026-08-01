@@ -22,10 +22,9 @@ type Queries struct {
 	graph string
 }
 
-// New returns a Queries bound to db and to one AGE graph — the analogue
-// of selecting a neo4j database. The binding is the handle's identity:
-// every method on it addresses that graph. Every connection db hands out
-// must have been through SessionInit.
+// New returns a Queries bound to db and to one AGE graph. The binding is
+// the handle's identity: every method on it addresses that graph. Every
+// connection db hands out must have been through SessionInit.
 //
 // AGE owns the rule for which graph names it accepts. A name it refuses
 // is reported by EnsureGraph, in AGE's own words.

@@ -15,12 +15,11 @@ import (
 // instead of entering the pool, so a misconfigured session surfaces at
 // pool acquisition and not at the first WHERE clause.
 //
-// Sharp edge: search_path is session state. Behind a pooler in
-// transaction or statement mode a reset between checkouts — pgbouncer's
-// default server_reset_query is DISCARD ALL — drops it, and a later
-// query reaches a bare session AfterConnect never sees again. Point the
-// pool at a session-mode connection, or add the statement below to the
-// pooler's server_reset_query.
+// Sharp edge: this hook runs once, when pgx opens the connection, and
+// what it sets is session state on the backend it opened. Session state
+// set at connect time survives only under session pooling — any mode
+// that does not give this connection a backend of its own for its
+// lifetime routes later queries to a backend the hook never ran on.
 func SessionInit(ctx context.Context, conn *pgx.Conn) error {
 	// concat_ws drops the NULL, so a role whose search_path is empty
 	// yields "ag_catalog" rather than a trailing empty element —
@@ -37,9 +36,7 @@ func SessionInit(ctx context.Context, conn *pgx.Conn) error {
 	//
 	// Evaluating the probe is also what loads AGE: + is a C function in
 	// the extension's library, so PostgreSQL loads that library and runs
-	// its _PG_init here, ahead of any user query. LOAD 'age' is
-	// superuser-only and would discard every connection a
-	// least-privilege role opens.
+	// its _PG_init here, ahead of any user query.
 	var ok bool
 	err := conn.QueryRow(ctx, "SELECT '1'::ag_catalog.agtype + '1'::ag_catalog.agtype = '2'::ag_catalog.agtype").Scan(&ok)
 	if err != nil {
