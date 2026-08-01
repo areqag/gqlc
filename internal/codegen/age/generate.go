@@ -12,6 +12,9 @@ func generate(in codegen.Input, packageName string) ([]codegen.File, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := rejectUnservedQueries(prepared.Queries); err != nil {
+		return nil, err
+	}
 	pkg := prepared.Package
 	return codegen.Finalise([]codegen.File{
 		{Path: "db.go", Contents: renderDB(pkg)},

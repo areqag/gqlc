@@ -12,6 +12,7 @@ import (
 	"github.com/areqag/gqlc/internal/cli/backends"
 	"github.com/areqag/gqlc/internal/cli/pipeline"
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/codegen/age"
 	"github.com/areqag/gqlc/internal/config"
 )
 
@@ -202,7 +203,6 @@ func TestRunDriverAxis(t *testing.T) {
 	}{
 		{driver: "neo4j-go-v5", wantImport: `"github.com/neo4j/neo4j-go-driver/v5/neo4j"`},
 		{driver: "neo4j-go-v6", wantImport: `"github.com/neo4j/neo4j-go-driver/v6/neo4j"`},
-		{driver: "apache-age-pgx-v5", wantImport: `"github.com/jackc/pgx/v5"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.driver, func(t *testing.T) {
@@ -216,6 +216,23 @@ func TestRunDriverAxis(t *testing.T) {
 			require.Contains(t, string(db), tc.wantImport)
 		})
 	}
+}
+
+// TestRunApacheAgeRejectsQueries: the Apache AGE backend emits no query
+// methods yet, so a target carrying one fails its entry — entry-prefixed
+// like every other target failure, with the zero Result the caller must
+// not write. Query discovery rejects a directory with no query files, so
+// this is the whole of the driver's pipeline surface until the query arm
+// lands.
+func TestRunApacheAgeRejectsQueries(t *testing.T) {
+	_, cfgPath := writeProject(t)
+	writeFixtureFile(t, cfgPath, configYAML("people", "apache-age-pgx-v5", ""))
+
+	res, err := pipeline.Run(cfgPath, backendRegistry(t))
+	require.ErrorIs(t, err, age.ErrUnsupportedQuery)
+	require.ErrorContains(t, err, "graph[0]: unsupported query: ")
+	require.ErrorContains(t, err, "1 query would be dropped: AllPersons")
+	require.Equal(t, pipeline.Result{}, res)
 }
 
 // TestRunUnregisteredDriver: the driver axis resolves through the

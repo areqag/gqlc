@@ -18,15 +18,19 @@ type DBTX interface {
 }
 
 type Queries struct {
-	db DBTX
+	db    DBTX
+	graph string
 }
 
-// New returns a Queries bound to db. Every connection db hands out must
-// have been through SessionInit.
-func New(db DBTX) *Queries {
-	return &Queries{db: db}
+// New returns a Queries bound to db and to one AGE graph — the analogue
+// of selecting a neo4j database. The graph is bound here rather than
+// passed per call so a handle cannot reach a graph its owner never
+// named. Every connection db hands out must have been through
+// SessionInit.
+func New(db DBTX, graph string) *Queries {
+	return &Queries{db: db, graph: graph}
 }
 
 func (q *Queries) WithTx(tx pgx.Tx) *Queries {
-	return &Queries{db: tx}
+	return &Queries{db: tx, graph: q.graph}
 }

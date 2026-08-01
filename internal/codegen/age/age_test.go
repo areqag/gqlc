@@ -2,7 +2,10 @@ package age_test
 
 import (
 	"bytes"
+	"go/parser"
+	"go/token"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -11,25 +14,39 @@ import (
 
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/age"
+	"github.com/areqag/gqlc/internal/resolver"
 	"github.com/areqag/gqlc/internal/schema/gql"
 )
 
 const (
-	// skeletonSchema is the golden corpus's minimal valid input: one node
-	// type and no queries.
-	skeletonSchema = "../../../test/data/codegen/valid/skeleton/schema.gql"
+	// corpusRoot is the golden corpus. The suite reads its schemas rather
+	// than inlining fixtures so the emission sweeps run over every input
+	// the corpus actually carries.
+	corpusRoot = "../../../test/data/codegen"
 	// skeletonPackage is the name Schema.Name derivation produces for
-	// that schema's `CREATE PROPERTY GRAPH TYPE Skeleton`.
+	// valid/skeleton's `CREATE PROPERTY GRAPH TYPE Skeleton`.
 	skeletonPackage = "skeleton"
+	// ageTarget is this backend's registry key, and so the name of its
+	// golden subtree under each enrolled fixture.
+	ageTarget = "apache-age-pgx-v5"
+
+	// wantCanary is an independent copy of the operator-resolution probe
+	// SessionInit runs. Verified against apache/age 1.7.0: with
+	// ag_catalog off the search_path, `+` on two agtype operands has no
+	// candidate operator whatever the literals are, so resolution fails.
+	// Equality alone lacks that property — agtype casts implicitly to
+	// boolean, so `=` falls back to pg_catalog's boolean equality and a
+	// misconfigured connection can pass. Copied rather than referenced so
+	// an edit to the emission has to be an edit here too.
+	wantCanary = `"SELECT '1'::ag_catalog.agtype + '1'::ag_catalog.agtype = '2'::ag_catalog.agtype"`
 )
 
 // EmissionSuite pins this backend's C0 emission contract: the file set,
-// the construction options, and the four properties the generated text
-// must hold for AGE to work at all — every AGE identifier schema-
-// qualified, the search_path canary ordered ahead of first use, the
-// graph lifecycle off the Querier interfaces, and pgx named by major
-// only. The fixture-driven golden corpus lives in
-// internal/codegen/conformance.
+// the construction options, the batch-rejection path, and the properties
+// the generated text must hold for AGE to work at all — every AGE
+// identifier schema-qualified, the search_path canary ordered ahead of
+// first use, the graph bound to the handle, and pgx named by major only.
+// The fixture-driven golden corpus lives in internal/codegen/conformance.
 type EmissionSuite struct {
 	suite.Suite
 
@@ -42,18 +59,22 @@ func TestEmissionSuite(t *testing.T) {
 }
 
 func (s *EmissionSuite) SetupSuite() {
-	src, err := os.ReadFile(skeletonSchema)
-	s.Require().NoError(err)
-	sch, err := gql.New().Parse(bytes.NewReader(src))
-	s.Require().NoError(err)
-	s.in = codegen.Input{Schema: sch}
-
+	s.in = s.inputFrom(filepath.Join(corpusRoot, "valid", "skeleton", "schema.gql"))
 	files, err := age.New().Generate(s.in)
 	s.Require().NoError(err)
 	s.files = make(map[string]string, len(files))
 	for _, f := range files {
 		s.files[f.Path] = string(f.Contents)
 	}
+}
+
+// inputFrom parses a corpus schema into a query-free batch.
+func (s *EmissionSuite) inputFrom(path string) codegen.Input {
+	src, err := os.ReadFile(path)
+	s.Require().NoError(err)
+	sch, err := gql.New().Parse(bytes.NewReader(src))
+	s.Require().NoError(err, "schema %s", path)
+	return codegen.Input{Schema: sch}
 }
 
 // TestFileSet pins the C0 file set: the pgx handle, the graph lifecycle,
@@ -91,28 +112,156 @@ func (s *EmissionSuite) TestWithPackageName() {
 	})
 }
 
-// TestEveryAgeIdentifierIsSchemaQualified sweeps the emitted bytes for
-// AGE's extension-owned identifiers and requires each to carry the
-// ag_catalog. prefix. An unqualified one compiles and then resolves
-// against whatever the caller's search_path happens to hold.
+// TestRejectsQueriesItCannotServe pins the capability gate. C0 emits no
+// query methods, so generating for a batch that carries queries would
+// hand the author a Querier that silently omits them; the error names
+// every dropped query so they can see which.
+func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
+	query := func(name string) codegen.NamedQuery {
+		return codegen.NamedQuery{
+			Name:        name,
+			Cardinality: codegen.CardinalityExec,
+			SourceFile:  "q.cypher",
+			SourceText:  "MATCH (n) DELETE n",
+			Validated:   resolver.ValidatedQuery{Statement: resolver.StatementWrite},
+		}
+	}
+	cases := []struct {
+		name      string
+		queries   []codegen.NamedQuery
+		wantSub   string
+		wantError bool
+	}{
+		{
+			name:      "no queries generates",
+			queries:   nil,
+			wantError: false,
+		},
+		{
+			name:      "one query is rejected and named",
+			queries:   []codegen.NamedQuery{query("Wipe")},
+			wantSub:   "1 query would be dropped: Wipe",
+			wantError: true,
+		},
+		{
+			name:      "every query is named, in batch order",
+			queries:   []codegen.NamedQuery{query("Wipe"), query("Purge"), query("Reset")},
+			wantSub:   "3 queries would be dropped: Wipe, Purge, Reset",
+			wantError: true,
+		},
+	}
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			in := s.in
+			in.Queries = tc.queries
+			files, err := age.New().Generate(in)
+			if !tc.wantError {
+				s.Require().NoError(err)
+				s.Require().NotEmpty(files)
+				return
+			}
+			s.Require().Error(err)
+			s.Require().Nil(files, "a rejected batch must not return a partial file set")
+			s.Require().ErrorIs(err, age.ErrUnsupportedQuery)
+			s.Require().ErrorContains(err, tc.wantSub)
+		})
+	}
+}
+
+// ageIdentifiers are the extension-owned names that must never appear
+// unqualified. cypher( has no emission until the read path lands; it is
+// swept now so the fence is already standing when it does.
+var ageIdentifiers = []string{"agtype", "cypher(", "create_graph", "drop_graph", "ag_graph"}
+
+// qualifier matches both spellings PostgreSQL accepts for the schema
+// prefix, case-insensitively — an unquoted identifier folds to lower
+// case, and a delimited one does not have to.
+var qualifier = regexp.MustCompile(`(?i)(ag_catalog|"ag_catalog")\.$`)
+
+// TestEveryAgeIdentifierIsSchemaQualified sweeps for AGE's
+// extension-owned identifiers and requires each to carry an ag_catalog
+// qualifier. An unqualified one compiles and then resolves against
+// whatever the caller's search_path happens to hold.
+//
+// The sweep runs over two populations: freshly emitted bytes for every
+// schema in the corpus, and every golden file committed for this target.
+// The second is what makes the cypher( needle bite as later stages enrol
+// query-bearing fixtures — the first cannot, because a batch carrying
+// queries has no C0 emission at all.
+//
+// Comments are blanked before the sweep. Only an identifier the server
+// parses can misresolve, and generated prose has to be free to name the
+// types it is explaining.
 func (s *EmissionSuite) TestEveryAgeIdentifierIsSchemaQualified() {
-	const qualifier = "ag_catalog."
-	for _, ident := range []string{"agtype", "cypher(", "create_graph", "drop_graph", "ag_graph"} {
-		for path, body := range s.files {
-			for off := 0; ; {
-				i := strings.Index(body[off:], ident)
-				if i < 0 {
-					break
+	schemas, err := filepath.Glob(filepath.Join(corpusRoot, "valid", "*", "schema.gql"))
+	s.Require().NoError(err)
+	s.Require().Greater(len(schemas), 10, "corpus glob found too few schemas")
+
+	swept := 0
+	for _, path := range schemas {
+		files, err := age.New().Generate(s.inputFrom(path))
+		// A schema whose widths this backend cannot carry is rejected by
+		// the type table, so there is nothing to sweep.
+		if err != nil {
+			continue
+		}
+		for _, f := range files {
+			s.assertQualified(filepath.Base(filepath.Dir(path))+"/"+f.Path, string(f.Contents))
+		}
+		swept++
+	}
+	s.Require().Greater(swept, 10, "too few corpus schemas produced emission to sweep")
+
+	goldens, err := filepath.Glob(filepath.Join(corpusRoot, "valid", "*", "golden", ageTarget, "*.go"))
+	s.Require().NoError(err)
+	s.Require().NotEmpty(goldens, "no golden files committed for target %s", ageTarget)
+	for _, path := range goldens {
+		body, err := os.ReadFile(path)
+		s.Require().NoError(err)
+		s.assertQualified(path, string(body))
+	}
+}
+
+func (s *EmissionSuite) assertQualified(label, body string) {
+	body = s.blankComments(label, body)
+	hay := strings.ToLower(body)
+	for _, ident := range ageIdentifiers {
+		for off := 0; ; {
+			i := strings.Index(hay[off:], ident)
+			if i < 0 {
+				break
+			}
+			at := off + i
+			s.Require().Truef(qualifier.MatchString(body[:at]),
+				"%s: %q at offset %d is not schema-qualified: %q", label, ident, at, window(body, at))
+			off = at + len(ident)
+		}
+	}
+}
+
+// blankComments overwrites every comment with spaces, preserving byte
+// offsets so the qualifier lookbehind and the failure window still
+// address the original text.
+func (s *EmissionSuite) blankComments(label, body string) string {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, label, body, parser.ParseComments|parser.SkipObjectResolution)
+	s.Require().NoError(err, "emitted file %s does not parse", label)
+	b := []byte(body)
+	for _, group := range f.Comments {
+		for _, c := range group.List {
+			for i := fset.Position(c.Pos()).Offset; i < fset.Position(c.End()).Offset; i++ {
+				if b[i] != '\n' {
+					b[i] = ' '
 				}
-				at := off + i
-				s.Require().GreaterOrEqual(at, len(qualifier),
-					"%s: %q at offset %d is unqualified", path, ident, at)
-				s.Require().Equal(qualifier, body[at-len(qualifier):at],
-					"%s: %q at offset %d is unqualified", path, ident, at)
-				off = at + len(ident)
 			}
 		}
 	}
+	return string(b)
+}
+
+// window returns a readable slice around an offset for failure output.
+func window(body string, at int) string {
+	return body[max(at-24, 0):min(at+24, len(body))]
 }
 
 // TestSessionInitOrdersLoadSearchPathCanary pins the AfterConnect
@@ -127,10 +276,10 @@ func (s *EmissionSuite) TestSessionInitOrdersLoadSearchPathCanary() {
 
 	load := strings.Index(graph, "LOAD 'age'")
 	path := strings.Index(graph, "set_config('search_path'")
-	canary := strings.Index(graph, "::ag_catalog.agtype")
+	canary := strings.Index(graph, wantCanary)
 	s.Require().Positive(load, "graph.go does not LOAD the extension")
 	s.Require().Positive(path, "graph.go does not set search_path")
-	s.Require().Positive(canary, "graph.go does not exercise an operator")
+	s.Require().Positive(canary, "graph.go does not run the pinned canary statement")
 	s.Require().Less(load, path, "search_path is set before the extension loads")
 	s.Require().Less(path, canary, "the canary runs before search_path is set")
 
@@ -141,15 +290,42 @@ func (s *EmissionSuite) TestSessionInitOrdersLoadSearchPathCanary() {
 	s.Require().Regexp(`if !\w+ \{\n\t\treturn `, tail)
 }
 
-// TestGraphLifecycleIsOffTheQuerierInterfaces pins the exclusion: the
-// lifecycle helpers are methods on *Queries but are not query methods,
-// so listing them on Querier would make the interface a moving target
-// across backends.
-func (s *EmissionSuite) TestGraphLifecycleIsOffTheQuerierInterfaces() {
+// TestSearchPathSurvivesAnEmptySetting pins the empty-search_path arm: a
+// role whose search_path is the empty string would otherwise produce a
+// trailing empty list element, which PostgreSQL rejects as invalid list
+// syntax — failing SessionInit on exactly the connection the statement
+// exists to repair.
+func (s *EmissionSuite) TestSearchPathSurvivesAnEmptySetting() {
+	s.Require().Contains(s.files["graph.go"],
+		`"SELECT set_config('search_path', concat_ws(', ', 'ag_catalog', nullif(current_setting('search_path'), '')), false)"`)
+}
+
+// TestNewBindsTheGraph pins the handle contract: the graph is a
+// construction argument held on Queries, so no call site can name a
+// different one. The lifecycle helpers take only a context.
+func (s *EmissionSuite) TestNewBindsTheGraph() {
+	db := s.files["db.go"]
+	s.Require().Contains(db, "func New(db DBTX, graph string) *Queries {")
+	s.Require().Contains(db, "graph string\n}")
+	s.Require().Contains(db, "return &Queries{db: db, graph: graph}")
+	// WithTx must carry the binding across, or the transactional handle
+	// would silently address a different graph.
+	s.Require().Contains(db, "return &Queries{db: tx, graph: q.graph}")
+
 	graph := s.files["graph.go"]
-	querier := s.files["querier.go"]
 	for _, name := range []string{"EnsureGraph", "DropGraph"} {
-		s.Require().Contains(graph, "func (q *Queries) "+name+"(ctx context.Context, name string) error {")
+		s.Require().Contains(graph, "func (q *Queries) "+name+"(ctx context.Context) error {")
+	}
+	s.Require().Contains(graph, "q.db.Exec(ctx, stmt, q.graph)")
+}
+
+// TestGraphLifecycleIsOffTheQuerierInterfaces pins the exclusion: the
+// lifecycle helpers are declared by this backend alone, so listing them
+// on Querier would make the interface a moving target across backends.
+func (s *EmissionSuite) TestGraphLifecycleIsOffTheQuerierInterfaces() {
+	querier := s.files["querier.go"]
+	for _, name := range []string{"EnsureGraph", "DropGraph", "SessionInit"} {
+		s.Require().Contains(s.files["graph.go"], name)
 		s.Require().NotContains(querier, name)
 	}
 	s.Require().Contains(querier, "var _ Querier = (*Queries)(nil)")

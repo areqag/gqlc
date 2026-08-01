@@ -236,7 +236,6 @@ func TestGenerateDriverAxis(t *testing.T) {
 	}{
 		{driver: "neo4j-go-v5", wantImport: `"github.com/neo4j/neo4j-go-driver/v5/neo4j"`},
 		{driver: "neo4j-go-v6", wantImport: `"github.com/neo4j/neo4j-go-driver/v6/neo4j"`},
-		{driver: "apache-age-pgx-v5", wantImport: `"github.com/jackc/pgx/v5"`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.driver, func(t *testing.T) {
@@ -249,6 +248,23 @@ func TestGenerateDriverAxis(t *testing.T) {
 			require.Contains(t, string(db), tc.wantImport)
 		})
 	}
+}
+
+// TestGenerateApacheAgeRejectsQueries pins the whole CLI surface of the
+// apache-age-pgx-v5 driver until the query arm lands: the backend emits
+// no query methods, and query discovery rejects a directory with none,
+// so every project the CLI accepts fails its entry. The message names
+// the query that would have been dropped, which is what the author acts
+// on.
+func TestGenerateApacheAgeRejectsQueries(t *testing.T) {
+	dir := writeProject(t)
+	writeFixtureFile(t, filepath.Join(dir, config.DefaultFilename), configYAML("people", "apache-age-pgx-v5", ""))
+
+	_, stderr, err := runGenerateIn(t, dir)
+	require.ErrorContains(t, err, "graph[0]: unsupported query: ")
+	require.ErrorContains(t, err, "1 query would be dropped: AllPersons")
+	require.Contains(t, stderr, "1 query would be dropped: AllPersons")
+	require.NoDirExists(t, filepath.Join(dir, "out"))
 }
 
 // TestGenerateProcsigWiring: a CALL query generates when the config
