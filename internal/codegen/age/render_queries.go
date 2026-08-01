@@ -39,17 +39,23 @@ func groupBySource(prepared []codegen.Query) []sourceGroup {
 
 // dollarTag picks the delimiter that carries a query's text through the
 // SQL parser to AGE, which reads cypher()'s query argument as a
-// dollar-quoted constant and nothing else. The tag is the first
-// candidate the text does not contain, so the text can hold any quote,
-// backslash or dollar sign an author writes and still close where the
-// emission says it closes.
+// dollar-quoted constant and nothing else. The chosen tag closes the
+// literal exactly once, at the far end, so the text can hold any quote,
+// backslash or dollar sign an author writes.
+//
+// A candidate is judged on the text with the candidate appended, because
+// what the scanner matches is the closing delimiter, and an occurrence
+// of it can begin in the text's final bytes and finish in the tag: text
+// ending $gqlc composes to a body ending $gqlc$gqlc$, whose first match
+// is five bytes early. A first match at exactly len(text) is the
+// delimiter the emission placed and no other.
 func dollarTag(text string) string {
 	for i := 0; ; i++ {
 		tag := "$gqlc$"
 		if i > 0 {
 			tag = fmt.Sprintf("$gqlc%d$", i)
 		}
-		if !strings.Contains(text, tag) {
+		if strings.Index(text+tag, tag) == len(text) {
 			return tag
 		}
 	}
