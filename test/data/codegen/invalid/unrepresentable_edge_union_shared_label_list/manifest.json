@@ -1,0 +1,6 @@
+{
+  "package": "unrepresentableedgeunionsharedlabellist",
+  "queryFiles": ["queries.cypher"],
+  "targets": ["neo4j-go-v5"],
+  "expectedError": "codegen.ErrUnrepresentableEdgeUnion"
+}

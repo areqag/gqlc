@@ -1,0 +1,5 @@
+{
+  "package": "edgeunionundirectedselfloop",
+  "queryFiles": ["queries.cypher"],
+  "targets": ["apache-age-pgx-v5", "neo4j-go-v5"]
+}

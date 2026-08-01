@@ -1,0 +1,7 @@
+CREATE PROPERTY GRAPH TYPE UnrepresentableEdgeUnionSharedLabel AS {
+    (:Person { id :: INT64 NOT NULL }),
+    (:Post   { id :: INT64 NOT NULL }),
+    DIRECTED EDGE TYPE LikesFwd (:Person) -[:LIKES { since  :: INT64 NOT NULL }]-> (:Post),
+    DIRECTED EDGE TYPE LikesRev (:Post)   -[:LIKES { weight :: INT64 NOT NULL }]-> (:Person),
+    DIRECTED EDGE TYPE Wrote    (:Person) -[:WROTE { written :: INT64 NOT NULL }]-> (:Post)
+}

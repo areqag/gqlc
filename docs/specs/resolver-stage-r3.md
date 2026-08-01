@@ -401,9 +401,10 @@ Signature and semantics:
 // edge). Each candidate is retained iff the schema declares it
 // (present in s.Edges). The return slice is deterministically
 // ordered: outer loop label-first-appearance, inner loop orientation
-// (source->target before target->source when both apply). Duplicate
-// EdgeKeys are impossible by construction — the same (label,
-// orientation) pair generates the same key exactly once.
+// (source->target before target->source when both apply). The return
+// slice holds each EdgeKey at most once: distinct probes can name one
+// key (an undirected self-loop reverses to itself), so a repeat is
+// dropped and first occurrence keeps its position.
 func edgeCandidates(
     e query.EdgeBinding,
     src, tgt graph.LabelSetKey,
@@ -433,9 +434,15 @@ for each label L in e.Labels():        # first-appearance order
 - **Undirected × multi-type** (N labels): N × 2 candidates attempted
   → up to 2N matches.
 
-`edgeCandidates` never returns duplicates: an `(A, L, B)` key can be
-generated at most once because the outer loop iterates each label once
-and the inner loop attempts each orientation once per label.
+`edgeCandidates` returns a set: an `(A, L, B)` key appears at most
+once. The loop shape alone does not give this. The orientation pair
+`(S, T)` and `(T, S)` is two probes but one key whenever `S == T`, so
+an undirected edge between endpoints of one node type matches the same
+declared type twice — §4.6 case C's rationale names that key as
+unambiguous, and §4.6 dispatches on the candidate count, so a repeat
+would be read as a second distinct declared type. The membership test
+is therefore load-bearing, not an optimisation. Retention is by first
+occurrence, which leaves the ordering below intact.
 
 **Determinism.** Ranging `e.Labels()` iterates in first-appearance
 order (the underlying `[]string` slice, populated in textual order per
@@ -964,6 +971,14 @@ mapping row is needed for the union-property fixture.
   golden as `self_loop_directed` (single `ResolvedEdge` column with
   `EdgeKey{Person, KNOWS, Person}`), reached through the same-
   binding code path rather than the two-distinct-bindings one.
+- `undirected_self_loop_single_label` — §4.4's set property where the
+  two orientations collapse to one key. Without the membership test
+  the candidate count reaches 2 and §4.6 answers case C, so the
+  golden's single `ResolvedEdge` is what separates case B from a
+  spurious `ErrAmbiguousEdgeOrientation`.
+- `undirected_self_loop_edge_union` — the same collapse under two
+  labels: four probes, two keys, so the golden's union has two
+  members and case D emits one dispatch branch per declared type.
 - `unlabelled_via_undirected` — Phase B through an undirected edge
   (§4.5's widened touching set); the schema's asymmetry (only
   Person→LIKES→Post, not the reverse) collapses `a`'s candidate set

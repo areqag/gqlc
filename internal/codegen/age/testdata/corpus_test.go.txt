@@ -10,6 +10,13 @@ import (
 // 1.7.0 and cross-checked byte-for-byte against what pgx v5 scans
 // (gqlc-35yu.5, corpus sections C1-C11). These bytes are what the
 // helpers under test will actually be handed.
+//
+// This file is compiled in a throwaway module whose go.mod requires
+// nothing, run with GOPROXY=off so that a corpus run cannot reach the
+// network (see corpus_test.go). testify is therefore unavailable, and
+// the repo's require/table-driven rule is suspended here of necessity:
+// what these tests may use is the standard library and the emitted
+// helpers, nothing else.
 
 func TestAgtypeString(t *testing.T) {
 	accepts := map[string]string{
@@ -210,6 +217,141 @@ func TestAgtypeFloat64(t *testing.T) {
 	} {
 		if got, err := agtypeFloat64([]byte(raw)); err == nil {
 			t.Errorf("agtypeFloat64(%s) = %v, want an error", raw, got)
+		}
+	}
+}
+
+// The vertex and edge texts below were captured the same way the scalars
+// above were, by writing the value through cypher() and reading back what
+// pgx scans (gqlc-35yu.5 C7-C9). Two properties of the wire form the
+// decoders have to survive are visible in them: jsonb orders an object's
+// keys by length and then lexicographically, so a property's position is
+// not the schema's or the author's, and a null property arrives as no key
+// at all rather than as a key holding null.
+const (
+	alice  = `{"id": 844424930131969, "label": "Person", "properties": {"id": 1, "rank": 3, "name": "Alice", "score": 9.5, "active": true}}::vertex`
+	bob    = `{"id": 844424930131970, "label": "Person", "properties": {"id": 2, "rank": 4, "name": "Bob", "score": 1.0, "weight": 0.5, "active": false, "middleName": "Q"}}::vertex`
+	marker = `{"id": 1407374883553281, "label": "Marker", "properties": {}}::vertex`
+	actedIn = `{"id": 1125899906842625, "label": "ACTED_IN", "end_id": 844424930131970, "start_id": 844424930131969, "properties": {"since": 2019}}::edge`
+
+	// AGE stores whatever a writer wrote, so a vertex carrying the KEY
+	// label a query matched on may hold properties the schema never
+	// declared, of shapes it never declares. Reaching `name` here means
+	// stepping over a list and a nested map, and the value itself holds a
+	// comma, a closing brace, an escaped quote and a colon.
+	tricky = `{"id": 1688849860263937, "label": "Tricky", "properties": {"big": 1.5, "huge": 9223372036854775807, "name": "a, b} c\": {d", "tags": ["x", "y"], "nested": {"x": 1, "y": [1, 2]}}}::vertex`
+)
+
+func TestDecodeVertex(t *testing.T) {
+	got, err := decodePerson([]byte(alice))
+	if err != nil {
+		t.Fatalf("decodePerson(alice) = error %v", err)
+	}
+	want := Person{Active: true, Id: 1, Name: "Alice", Rank: 3, Score: 9.5}
+	if got != want {
+		t.Errorf("decodePerson(alice) = %+v, want %+v", got, want)
+	}
+
+	// A property AGE did not send is the schema's null, and the pointer
+	// is what carries that to the caller: a zero value would report
+	// "no middle name" as a middle name of "".
+	if got.MiddleName != nil {
+		t.Errorf("decodePerson(alice).MiddleName = %q, want nil", *got.MiddleName)
+	}
+	if got.Weight != nil {
+		t.Errorf("decodePerson(alice).Weight = %v, want nil", *got.Weight)
+	}
+}
+
+func TestDecodeVertexReadsNullableProperties(t *testing.T) {
+	got, err := decodePerson([]byte(bob))
+	if err != nil {
+		t.Fatalf("decodePerson(bob) = error %v", err)
+	}
+	if got.MiddleName == nil || *got.MiddleName != "Q" {
+		t.Errorf("decodePerson(bob).MiddleName = %v, want a pointer to \"Q\"", got.MiddleName)
+	}
+	// FLOAT32 rides agtype's float64 and narrows at the field, so the
+	// pointer has to address a float32 and not the carrier.
+	if got.Weight == nil || *got.Weight != float32(0.5) {
+		t.Errorf("decodePerson(bob).Weight = %v, want a pointer to 0.5", got.Weight)
+	}
+	if got.Rank != 4 {
+		t.Errorf("decodePerson(bob).Rank = %d, want 4", got.Rank)
+	}
+}
+
+func TestDecodeVertexStepsOverStructuredProperties(t *testing.T) {
+	got, err := decodeTricky([]byte(tricky))
+	if err != nil {
+		t.Fatalf("decodeTricky = error %v", err)
+	}
+	const want = `a, b} c": {d`
+	if got.Name != want {
+		t.Errorf("decodeTricky().Name = %q, want %q", got.Name, want)
+	}
+}
+
+func TestDecodeZeroPropertyVertex(t *testing.T) {
+	if _, err := decodeMarker([]byte(marker)); err != nil {
+		t.Errorf("decodeMarker(marker) = error %v", err)
+	}
+	// The label is the whole of a zero-property entity's identity, so it
+	// is the whole of what its decoder can check.
+	if got, err := decodeMarker([]byte(alice)); err == nil {
+		t.Errorf("decodeMarker(alice) = %+v, want an error", got)
+	}
+}
+
+func TestDecodeEdge(t *testing.T) {
+	got, err := decodeACTEDIN([]byte(actedIn))
+	if err != nil {
+		t.Fatalf("decodeACTEDIN = error %v", err)
+	}
+	if want := (ACTEDIN{Since: 2019}); got != want {
+		t.Errorf("decodeACTEDIN = %+v, want %+v", got, want)
+	}
+}
+
+// A vertex and an edge are the same object but for the annotation, so the
+// annotation is the only thing standing between an edge decoder and a
+// vertex whose label happens to match. Both directions are checked.
+func TestEntityDecodersRefuseTheOtherAnnotation(t *testing.T) {
+	edgeShapedAsVertex := strings.Replace(actedIn, "::edge", "::vertex", 1)
+	if got, err := decodeACTEDIN([]byte(edgeShapedAsVertex)); err == nil {
+		t.Errorf("decodeACTEDIN(vertex) = %+v, want an error", got)
+	}
+	vertexShapedAsEdge := strings.Replace(alice, "::vertex", "::edge", 1)
+	if got, err := decodePerson([]byte(vertexShapedAsEdge)); err == nil {
+		t.Errorf("decodePerson(edge) = %+v, want an error", got)
+	}
+}
+
+// Every shape that is not the vertex the decoder was emitted for. A
+// decoder that took any of these would hand the caller a struct built
+// from something other than the entity its type names.
+func TestDecodeVertexRefusesMisshapenText(t *testing.T) {
+	cases := map[string]string{
+		"empty":                 ``,
+		"agtype null":           `null`,
+		"a bare scalar":         `42`,
+		"a bare object":         `{"id": 1, "label": "Person", "properties": {"id": 1, "rank": 3, "name": "Alice", "score": 9.5, "active": true}}`,
+		"the wrong label":       `{"id": 1, "label": "Movie", "properties": {"id": 1, "rank": 3, "name": "Alice", "score": 9.5, "active": true}}::vertex`,
+		"no label":              `{"id": 1, "properties": {"id": 1, "rank": 3, "name": "Alice", "score": 9.5, "active": true}}::vertex`,
+		"a non-string label":    `{"id": 1, "label": 7, "properties": {"id": 1, "rank": 3, "name": "Alice", "score": 9.5, "active": true}}::vertex`,
+		"no properties":         `{"id": 1, "label": "Person"}::vertex`,
+		"non-object properties": `{"id": 1, "label": "Person", "properties": [1, 2]}::vertex`,
+		"a missing property":    `{"id": 1, "label": "Person", "properties": {"id": 1, "rank": 3, "score": 9.5, "active": true}}::vertex`,
+		"a property of the wrong shape": `{"id": 1, "label": "Person", "properties": {"id": 1, "rank": 3, "name": 42, "score": 9.5, "active": true}}::vertex`,
+		"an out-of-range property":      `{"id": 1, "label": "Person", "properties": {"id": 9.5, "rank": 3, "name": "Alice", "score": 9.5, "active": true}}::vertex`,
+		"an unterminated string":        `{"id": 1, "label": "Person", "properties": {"name": "Alice}}::vertex`,
+		"an unbalanced brace":           `{"id": 1, "label": "Person", "properties": {"name": "Alice"}::vertex`,
+		"a member with no value":        `{"id": 1, "label": "Person", "properties": {"name"}}::vertex`,
+		"the annotation alone":          `::vertex`,
+	}
+	for name, raw := range cases {
+		if got, err := decodePerson([]byte(raw)); err == nil {
+			t.Errorf("%s: decodePerson(%s) = %+v, want an error", name, raw, got)
 		}
 	}
 }

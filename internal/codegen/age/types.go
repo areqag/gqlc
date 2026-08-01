@@ -22,13 +22,13 @@ type typeMap struct{}
 // temporal arm owns, so admitting them here would emit a column no
 // decoder can fill. The eight oversized numeric widths have no faithful
 // carrier anywhere and are permanently out (§9).
-func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
+//
+// LIST and ANY are refused on the same grounds. This backend's decode
+// vocabulary is one helper per agtype scalar, so a property of either
+// width would reach a struct field with no helper to fill it.
+func (typeMap) Property(pt graph.PropertyType) (string, bool) {
 	if pt.Kind() == graph.KindList {
-		elemTy, ok := t.Property(pt.Elem())
-		if !ok {
-			return "", false
-		}
-		return "[]" + elemTy, true
+		return "", false
 	}
 	switch pt {
 	case graph.TypeString:
@@ -59,13 +59,9 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 		return "float64", true
 	case graph.TypeFloat32:
 		return "float32", true
-	case graph.TypeAnyPropertyValue:
-		return "any", true
-	case graph.TypeList:
-		// Intercepted by the Kind() guard above; unreachable here.
-		// Listed so the exhaustive linter sees the full constant set.
-		return "[]any", true
-	case graph.TypeBytes,
+	case graph.TypeAnyPropertyValue,
+		graph.TypeList,
+		graph.TypeBytes,
 		graph.TypeDate, graph.TypeTime, graph.TypeLocalTime,
 		graph.TypeTimestamp, graph.TypeDuration,
 		graph.TypeInt128, graph.TypeInt256,

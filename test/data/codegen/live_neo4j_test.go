@@ -15,6 +15,10 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	tcneo4j "github.com/testcontainers/testcontainers-go/modules/neo4j"
 
+	entityedgev5 "github.com/areqag/gqlc/test/data/codegen/valid/entity_edge_projected_one/golden/neo4j-go-v5"
+	entityedgev6 "github.com/areqag/gqlc/test/data/codegen/valid/entity_edge_projected_one/golden/neo4j-go-v6"
+	entitynodev5 "github.com/areqag/gqlc/test/data/codegen/valid/entity_node_projected_one/golden/neo4j-go-v5"
+	entitynodev6 "github.com/areqag/gqlc/test/data/codegen/valid/entity_node_projected_one/golden/neo4j-go-v6"
 	manycolmanyv5 "github.com/areqag/gqlc/test/data/codegen/valid/many_col_many/golden/neo4j-go-v5"
 	manycolmanyv6 "github.com/areqag/gqlc/test/data/codegen/valid/many_col_many/golden/neo4j-go-v6"
 	mixedv5 "github.com/areqag/gqlc/test/data/codegen/valid/mixed_read_write_batch/golden/neo4j-go-v5"
@@ -61,10 +65,12 @@ func startNeo4jContainer(ctx context.Context, t *testing.T) string {
 // isolation is a DETACH-wipe as the scenario opens and scenarios must not
 // overlap.
 type neo4jV5 struct {
-	driver neo4jv5.DriverWithContext
-	one    oneColOneParamOneV5
-	mixed  mixedReadWriteBatchV5
-	many   manyColManyV5
+	driver     neo4jv5.DriverWithContext
+	one        oneColOneParamOneV5
+	mixed      mixedReadWriteBatchV5
+	many       manyColManyV5
+	entityNode entityNodeV5
+	entityEdge entityEdgeV5
 }
 
 func startNeo4jV5(ctx context.Context, t *testing.T) harness {
@@ -81,10 +87,12 @@ func startNeo4jV5(ctx context.Context, t *testing.T) harness {
 	require.NoError(t, driver.VerifyConnectivity(ctx), "verify neo4j connectivity")
 
 	return &neo4jV5{
-		driver: driver,
-		one:    oneColOneParamOneV5{q: onecolonev5.New(driver)},
-		mixed:  mixedReadWriteBatchV5{q: mixedv5.New(driver)},
-		many:   manyColManyV5{q: manycolmanyv5.New(driver)},
+		driver:     driver,
+		one:        oneColOneParamOneV5{q: onecolonev5.New(driver)},
+		mixed:      mixedReadWriteBatchV5{q: mixedv5.New(driver)},
+		many:       manyColManyV5{q: manycolmanyv5.New(driver)},
+		entityNode: entityNodeV5{q: entitynodev5.New(driver)},
+		entityEdge: entityEdgeV5{q: entityedgev5.New(driver)},
 	}
 }
 
@@ -135,6 +143,34 @@ func (s neo4jV5Scenario) mixedReadWriteBatch() mixedReadWriteBatchQuerier { retu
 
 func (s neo4jV5Scenario) manyColMany() manyColManyQuerier { return s.arm.many }
 
+func (s neo4jV5Scenario) entityNodeProjectedOne() entityNodeQuerier { return s.arm.entityNode }
+
+func (s neo4jV5Scenario) entityEdgeProjectedOne() entityEdgeQuerier { return s.arm.entityEdge }
+
+type entityNodeV5 struct{ q *entitynodev5.Queries }
+
+func (a entityNodeV5) onePerson(ctx context.Context) (personEntity, error) {
+	p, err := a.q.OnePerson(ctx)
+	if err != nil {
+		return personEntity{}, err
+	}
+	return personEntity{ID: p.Id, MiddleName: p.MiddleName, Name: p.Name}, nil
+}
+
+func (a entityNodeV5) errNoRows() error { return entitynodev5.ErrNoRows }
+
+type entityEdgeV5 struct{ q *entityedgev5.Queries }
+
+func (a entityEdgeV5) oneActedIn(ctx context.Context) (actedInEntity, error) {
+	r, err := a.q.OneActedIn(ctx)
+	if err != nil {
+		return actedInEntity{}, err
+	}
+	return actedInEntity{Since: r.Since}, nil
+}
+
+func (a entityEdgeV5) errNoRows() error { return entityedgev5.ErrNoRows }
+
 type oneColOneParamOneV5 struct{ q *onecolonev5.Queries }
 
 func (a oneColOneParamOneV5) personName(ctx context.Context, id int64) (string, error) {
@@ -181,10 +217,12 @@ func (a manyColManyV5) peopleByAgeAndLocale(ctx context.Context, minAge int64, l
 // neo4jV6 is the neo4j-go-v6 arm on the same image, isolated the same way as
 // neo4jV5.
 type neo4jV6 struct {
-	driver neo4jv6.Driver
-	one    oneColOneParamOneV6
-	mixed  mixedReadWriteBatchV6
-	many   manyColManyV6
+	driver     neo4jv6.Driver
+	one        oneColOneParamOneV6
+	mixed      mixedReadWriteBatchV6
+	many       manyColManyV6
+	entityNode entityNodeV6
+	entityEdge entityEdgeV6
 }
 
 func startNeo4jV6(ctx context.Context, t *testing.T) harness {
@@ -201,10 +239,12 @@ func startNeo4jV6(ctx context.Context, t *testing.T) harness {
 	require.NoError(t, driver.VerifyConnectivity(ctx), "verify neo4j connectivity")
 
 	return &neo4jV6{
-		driver: driver,
-		one:    oneColOneParamOneV6{q: onecolonev6.New(driver)},
-		mixed:  mixedReadWriteBatchV6{q: mixedv6.New(driver)},
-		many:   manyColManyV6{q: manycolmanyv6.New(driver)},
+		driver:     driver,
+		one:        oneColOneParamOneV6{q: onecolonev6.New(driver)},
+		mixed:      mixedReadWriteBatchV6{q: mixedv6.New(driver)},
+		many:       manyColManyV6{q: manycolmanyv6.New(driver)},
+		entityNode: entityNodeV6{q: entitynodev6.New(driver)},
+		entityEdge: entityEdgeV6{q: entityedgev6.New(driver)},
 	}
 }
 
@@ -254,6 +294,34 @@ func (s neo4jV6Scenario) oneColOneParamOne() oneColOneParamOneQuerier { return s
 func (s neo4jV6Scenario) mixedReadWriteBatch() mixedReadWriteBatchQuerier { return s.arm.mixed }
 
 func (s neo4jV6Scenario) manyColMany() manyColManyQuerier { return s.arm.many }
+
+func (s neo4jV6Scenario) entityNodeProjectedOne() entityNodeQuerier { return s.arm.entityNode }
+
+func (s neo4jV6Scenario) entityEdgeProjectedOne() entityEdgeQuerier { return s.arm.entityEdge }
+
+type entityNodeV6 struct{ q *entitynodev6.Queries }
+
+func (a entityNodeV6) onePerson(ctx context.Context) (personEntity, error) {
+	p, err := a.q.OnePerson(ctx)
+	if err != nil {
+		return personEntity{}, err
+	}
+	return personEntity{ID: p.Id, MiddleName: p.MiddleName, Name: p.Name}, nil
+}
+
+func (a entityNodeV6) errNoRows() error { return entitynodev6.ErrNoRows }
+
+type entityEdgeV6 struct{ q *entityedgev6.Queries }
+
+func (a entityEdgeV6) oneActedIn(ctx context.Context) (actedInEntity, error) {
+	r, err := a.q.OneActedIn(ctx)
+	if err != nil {
+		return actedInEntity{}, err
+	}
+	return actedInEntity{Since: r.Since}, nil
+}
+
+func (a entityEdgeV6) errNoRows() error { return entityedgev6.ErrNoRows }
 
 type oneColOneParamOneV6 struct{ q *onecolonev6.Queries }
 

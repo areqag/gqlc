@@ -470,12 +470,26 @@ func r3EdgeAdmissible(e query.EdgeBinding) error {
 	return nil
 }
 
-// edgeCandidates enumerates the closed candidate set for one edge binding
-// whose endpoint keys are already committed. srcs and tgts are slices to
-// support plural node satisfaction (ADR 0022): each (src, tgt) pair in the
-// cross-product is tried against the schema.
-func edgeCandidates(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey, s schema.Schema) []schema.EdgeKey {
+// edgeProbes enumerates the EdgeKeys one edge binding could name: its
+// labels × the endpoint cross-product × the orientations its Directed()
+// marker admits. srcs and tgts are slices to support plural node
+// satisfaction (ADR 0022).
+//
+// The result is a set, not a bag. Distinct probes can name one key — for
+// an undirected edge with src == tgt the reversed orientation reproduces
+// the forward one — and both consumers read the result as "the distinct
+// edge types in play": §4.6's verdict table dispatches on the count, and
+// the fail-message enumerates them for a reader who must tell them apart.
+// A repeat makes the first claim a second edge type and the second claim
+// that an edge is ambiguous against itself.
+//
+// Order is first occurrence. The probe order is fixed by the query's label
+// order, the endpoint slices, and the constant orientation pair; the seen
+// set is membership-only and never iterated, so the result is
+// deterministic across runs (§4.4).
+func edgeProbes(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey) []schema.EdgeKey {
 	out := make([]schema.EdgeKey, 0, len(e.Labels()))
+	seen := make(map[schema.EdgeKey]struct{}, len(e.Labels()))
 	for _, L := range e.Labels() {
 		labelKey := graph.LabelSet{L}.Key()
 		for _, src := range srcs {
@@ -486,11 +500,26 @@ func edgeCandidates(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey, s schem
 				}
 				for _, o := range orientations {
 					k := schema.EdgeKey{Source: o[0], KeyLabels: labelKey, Target: o[1]}
-					if _, ok := s.Edges[k]; ok {
-						out = append(out, k)
+					if _, dup := seen[k]; dup {
+						continue
 					}
+					seen[k] = struct{}{}
+					out = append(out, k)
 				}
 			}
+		}
+	}
+	return out
+}
+
+// edgeCandidates is the closed candidate set for one edge binding whose
+// endpoint keys are already committed: the probes the schema declares,
+// in probe order.
+func edgeCandidates(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey, s schema.Schema) []schema.EdgeKey {
+	out := make([]schema.EdgeKey, 0, len(e.Labels()))
+	for _, k := range edgeProbes(e, srcs, tgts) {
+		if _, ok := s.Edges[k]; ok {
+			out = append(out, k)
 		}
 	}
 	return out
@@ -575,20 +604,12 @@ func closeEdge(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey, s schema.Sch
 	}
 }
 
+// describeTriedEdges is ErrUnknownEdge's fail-message body: every EdgeKey
+// the binding could have named, none of which the schema declares. It reads
+// the same enumeration the candidate set is filtered from, so the message
+// cannot list a key the resolver did not try, nor omit one it did.
 func describeTriedEdges(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey) string {
-	parts := make([]string, 0)
-	for _, L := range e.Labels() {
-		labelKey := graph.LabelSet{L}.Key()
-		for _, src := range srcs {
-			for _, tgt := range tgts {
-				parts = append(parts, formatEdgeKey(schema.EdgeKey{Source: src, KeyLabels: labelKey, Target: tgt}))
-				if !e.Directed() {
-					parts = append(parts, formatEdgeKey(schema.EdgeKey{Source: tgt, KeyLabels: labelKey, Target: src}))
-				}
-			}
-		}
-	}
-	return strings.Join(parts, ", ")
+	return formatEdgeKeys(edgeProbes(e, srcs, tgts))
 }
 
 func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, resolved map[string]schema.NodeType, nodeCands map[string][]schema.NodeType, callTypes map[string]callBindingSlot) error {
