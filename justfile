@@ -261,18 +261,83 @@ test-codegen-live-age:
 # weekly CI schedule ("@latest" deliberate: the vuln DB matters more than
 # tool-version reproducibility)
 #
-# Two invocations because the scan has two blind spots that neither the tool
-# nor .golangci.yml closes for it (bd gqlc-rohp). -test: without it govulncheck
-# loads no test files at all, so every test-only dependency is unscanned —
-# godog and testify at root, and everything the live battery reaches in the
-# nested module. The nested module needs its own invocation because it is a
-# separate module: `go list ./...` at root emits none of its packages, so its
-# driver, testcontainers and docker trees are outside a root-rooted scan by
-# module boundary. It also needs the codegen_live tag, which is where the
+# Two invocations, because a root-rooted untagged scan without -test misses
+# three separate things (bd gqlc-rohp). -test: without it govulncheck loads no
+# test files at all, so every test-only dependency is unscanned — godog and
+# testify at root, and everything the live battery reaches in the nested module.
+# The nested module needs its own invocation because it is a separate module:
+# `go list ./...` at root emits none of its packages, so its driver,
+# testcontainers and docker trees are outside a root-rooted scan by module
+# boundary. It also needs the codegen_live tag, which is where the
 # container-driving code enters the build.
-vuln:
+#
+# WHAT THIS GATE STILL DOES NOT SEE. govulncheck does not analyse the in-package
+# test variant of a package: its graph is keyed by PkgPath and the variant
+# `p [p.test]` shares PkgPath `p` with the plain package, which is added first,
+# so the variant is skipped along with everything only it imports
+# (PackageGraph.AddPackages, x/vuln internal/vulncheck/packages.go). rohp closed
+# that in the nested module by making the battery an external test package. The
+# ROOT module — the one that ships the compiler — still has it: 34 in-package
+# test files against 16 external, with third-party imports in the in-package
+# tests of ten packages, internal/cli, internal/codegen{,/age,/neo4j},
+# internal/config, internal/queryfile, internal/resolver and
+# internal/schema/gql{,/annexd,/isobnf}. A called vulnerability reachable only
+# from one of those files exits 0 here. Measured, not assumed: planting a
+# yaml.Unmarshal call into internal/schema/gql/propertytype_test.go
+# (`package gql`) reports nothing; the identical call in a `package gql_test`
+# file reports it with a trace.
+#
+# The trap is that -test DOES raise the root module count 31 → 42, and the
+# module set is in fact complete — modelling the visible closure with `go list`
+# and diffing it against the full -test closure leaves no residual module and no
+# residual package. So every symptom you would think to look for says the gate
+# is closed. What is missing is only call edges, which nothing in the output
+# reports. bd gqlc-m5rc converts those files; vuln-root-residual below is the
+# number in the meantime.
+vuln: vuln-root-residual
     go run golang.org/x/vuln/cmd/govulncheck@latest -test ./...
     cd test/data/codegen && go run golang.org/x/vuln/cmd/govulncheck@latest -tags codegen_live -test ./...
+
+# Prints the root module's residual blindness to `just vuln`, so it is a number
+# measured on every scan rather than a claim in a comment that rots (bd
+# gqlc-m5rc). Reports, does not fail: the residual is the repo's existing house
+# style, and turning it into a ratchet would fail every branch that adds an
+# in-package test — a policy call that belongs to the conversion bead, not to
+# CI plumbing. Deliberately counts files and packages rather than modules: the
+# module and package sets are already complete (verified by set-differencing the
+# visible closure against the full -test closure), so a module-level metric here
+# would report a reassuring zero over the real gap.
+#
+# "Third-party" is anything outside the main module whose first path element
+# contains a dot, which is what puts a package in a vulnerability database at
+# all; .TestImports is exactly the in-package test variant's import set.
+vuln-root-residual:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    module="$(go list -m)"
+    inpackage=0
+    external=0
+    while IFS= read -r f; do
+        pkg="$(sed -n 's/^package[[:space:]]\{1,\}\([A-Za-z_][A-Za-z0-9_]*\).*$/\1/p' "$f" | head -1)"
+        case "$pkg" in
+            *_test) external=$((external + 1)) ;;
+            *) inpackage=$((inpackage + 1)) ;;
+        esac
+    done < <(git ls-files '*_test.go' | grep -v '^test/data/codegen/')
+    blind="$(go list -f '{{{{.ImportPath}} {{{{join .TestImports " "}}' ./... |
+        while read -r pkg imports; do
+            for i in ${imports}; do
+                case "$i" in "$module" | "$module"/*) continue ;; esac
+                case "${i%%/*}" in *.*)
+                    echo "${pkg#"$module"/}"
+                    break
+                    ;;
+                esac
+            done
+        done | sort -u)"
+    echo "root module test-file packaging (bd gqlc-m5rc): ${inpackage} in-package, ${external} external"
+    echo "  in-package tests import third-party code in $(echo "${blind}" | grep -c .) packages — those call edges are outside govulncheck's call graph:"
+    echo "${blind}" | sed 's/^/    /'
 
 # lints the GitHub Actions workflow files
 actionlint:

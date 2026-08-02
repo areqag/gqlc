@@ -7,11 +7,23 @@
 // testcontainers and its ~50 transitive deps stay out of gqlc's root go.mod
 // and the compiler binary.
 //
-// The battery must stay an external test package: govulncheck keys the
-// packages it loads by import path, and an in-package test variant loses that
-// collision to the non-test package, taking every dependency only it imports
-// out of the scan with no diagnostic (bd gqlc-rohp). test-codegen-fence
-// enforces this.
+// The battery must stay an external test package. govulncheck builds its
+// package graph keyed by PkgPath and skips any package whose PkgPath is already
+// present, without descending into that package's imports
+// (PackageGraph.AddPackages, x/vuln internal/vulncheck/packages.go). An
+// in-package test variant p [p.test] carries PkgPath p, the same key as the
+// plain package, which is added first — so the variant and every dependency
+// only it imports drop out of the scan with no diagnostic. That is not
+// conditional on there being any non-test source to lose to: a directory of
+// nothing but in-package _test.go files still yields an empty plain entry that
+// takes the key. An external test package survives because PkgPath p_test
+// collides with nothing. `just test-codegen-fence` enforces the packaging and
+// separately asserts that testcontainers-go is still in the closure govulncheck
+// loads (bd gqlc-rohp).
+//
+// The same defect is still open in the root module — 34 in-package test files
+// there, so a called vulnerability reachable only from one of them exits 0.
+// `just vuln` prints the current number; bd gqlc-m5rc closes it.
 package fixtures_test
 
 import (
