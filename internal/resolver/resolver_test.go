@@ -356,6 +356,12 @@ var invalidFixtures = map[string]error{
 	// nor labels can reach: an anonymous edge closes over it, so the `()` end
 	// has to be describable too.
 	"anonymous_edge_uninferable_endpoint.cypher": ErrUnknownLabel,
+	// A 2x2 endpoint cross-product with all four keys declared, so the candidate
+	// set holds TWO disjoint swapped pairs rather than one. Every undirected
+	// fixture before this one has exactly one pair, which makes "the first
+	// witness on each side" indistinguishable from "the only witness on each
+	// side" — the choice is unobservable until a second pair exists to lose to.
+	"ambiguous_edge_orientation_two_swapped_pairs.cypher": ErrAmbiguousEdgeOrientation,
 }
 
 // invalidFixtureContains pins the message arm for fixtures where errors.Is
@@ -402,6 +408,12 @@ var invalidFixtureContains = map[string]string{
 	// candidate list.
 	"ambiguous_edge_orientation_overlapping_endpoints.cypher":          `matches Employee&Person-[REVIEWED]->Person left-to-right and Person-[REVIEWED]->Employee&Person right-to-left`,
 	"ambiguous_edge_orientation_overlapping_endpoints_reversed.cypher": `matches Person-[REVIEWED]->Employee&Person left-to-right and Employee&Person-[REVIEWED]->Person right-to-left`,
+	// Two swapped pairs in one candidate set: both pairs would be a correct
+	// answer to "which two candidates disagree", so the pin says *which* the
+	// first-witness-per-side scan picks. See
+	// TestTwoSwappedPairsReportsTheFirstInCandidateOrder for why the set really
+	// holds two.
+	"ambiguous_edge_orientation_two_swapped_pairs.cypher": `matches Employee&Person-[REVIEWED]->Company&Startup left-to-right and Company&Startup-[REVIEWED]->Employee&Person right-to-left`,
 }
 
 type ResolverSuite struct {
@@ -752,6 +764,74 @@ func (s *ResolverSuite) TestAmbiguousOrientationRemedyIsTheArrow() {
 				"the arrow must close the set to one candidate — case B, not a union case D would type")
 		})
 	}
+}
+
+// TestTwoSwappedPairsReportsTheFirstInCandidateOrder holds §4.4's determinism
+// claim on the only input that can observe it: a candidate set carrying two
+// disjoint swapped pairs, where each pair on its own is a truthful answer to
+// "which two candidates disagree" and nothing but the scan order picks between
+// them.
+//
+// Every undirected fixture that shipped before this one carries exactly one
+// pair, so on all of them "the first witness on each side" and "the only
+// witness on each side" are the same sentence, and the message pins say nothing
+// about order. Here they come apart: a scan that kept the last witness on
+// either side, or that walked the two sides independently, reports the other
+// pair while still reporting a true disagreement.
+//
+// The two directed twins are the guard against this covering nothing. A schema
+// that in fact produced one pair would satisfy the message pin just as well, so
+// the claim "two pairs" is asserted rather than assumed: each twin must close
+// to two candidates, each of the forward twin's keys must have its mirror in
+// the reverse twin's, and the four together must be four distinct keys. That is
+// two swapped pairs, stated as the property rather than as a count.
+//
+// The message is read with edgeKeyInMessage and matched as a set, because one
+// key's rendering is a substring of another's — Person-[REVIEWED]->Company sits
+// inside Employee&Person-[REVIEWED]->Company&Startup — so a Contains/NotContains
+// pair would silently be answering a different question.
+func (s *ResolverSuite) TestTwoSwappedPairsReportsTheFirstInCandidateOrder() {
+	sch := s.loadSchema("invalid", "satisfy_plural_edges_two_swapped_pairs.gql")
+
+	unionKeys := func(src string) []schema.EdgeKey {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		s.Require().NoError(err)
+		s.Require().Len(vq.Columns, 1)
+		u, ok := vq.Columns[0].Type.(ResolvedEdgeUnion)
+		s.Require().Truef(ok, "%s: want an edge union, got %T", src, vq.Columns[0].Type)
+		return u.EdgeKeys
+	}
+	mirror := func(k schema.EdgeKey) schema.EdgeKey {
+		return schema.EdgeKey{Source: k.Target, KeyLabels: k.KeyLabels, Target: k.Source}
+	}
+
+	l2r := unionKeys("MATCH (a:Person)-[r:REVIEWED]->(b:Company) RETURN r")
+	r2l := unionKeys("MATCH (a:Company)-[r:REVIEWED]->(b:Person) RETURN r")
+	s.Require().Len(l2r, 2, "the left-to-right reading must contribute two candidates")
+	s.Require().Len(r2l, 2, "the right-to-left reading must contribute two candidates")
+	distinct := make(map[schema.EdgeKey]struct{}, 4)
+	for _, k := range l2r {
+		s.Require().Containsf(r2l, mirror(k),
+			"%s has no counterparty, so it is not half of a swapped pair", formatEdgeKey(k))
+		distinct[k] = struct{}{}
+	}
+	for _, k := range r2l {
+		distinct[k] = struct{}{}
+	}
+	s.Require().Len(distinct, 4, "the two pairs must be disjoint, or there is only one pair here")
+
+	_, err := New(sch, WithRegistry(regR7)).Resolve(s.loadQuery(
+		filepath.Join(fixtureDir, "invalid", "ambiguous_edge_orientation_two_swapped_pairs.cypher")))
+	s.Require().ErrorIs(err, ErrAmbiguousEdgeOrientation)
+	s.Require().ElementsMatch(
+		[]string{
+			"Employee&Person-[REVIEWED]->Company&Startup",
+			"Company&Startup-[REVIEWED]->Employee&Person",
+		},
+		edgeKeyInMessage.FindAllString(err.Error(), -1),
+		"the reported pair must be the first witness on each side, in candidate order")
 }
 
 // TestEdgeUnionKeysAreASet asserts ResolvedEdgeUnion.EdgeKeys carries each

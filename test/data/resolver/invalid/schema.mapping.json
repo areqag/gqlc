@@ -108,5 +108,6 @@
     "ambiguous_edge_orientation_overlapping_endpoints_reversed.cypher": "satisfy_plural_edges_overlapping.gql",
     "ambiguous_edge_orientation_anonymous.cypher": "social_r3.gql",
     "ambiguous_edge_orientation_anonymous_inline_endpoint.cypher": "social_r3.gql",
-    "anonymous_edge_uninferable_endpoint.cypher": "social_r3.gql"
+    "anonymous_edge_uninferable_endpoint.cypher": "social_r3.gql",
+    "ambiguous_edge_orientation_two_swapped_pairs.cypher": "satisfy_plural_edges_two_swapped_pairs.gql"
 }
