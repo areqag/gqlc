@@ -134,20 +134,94 @@ bd-export-monotonic-local:
 # — the tag there would be inert, and vet already builds what it analyses.
 # golangci-lint reads the tag from .golangci.yml.
 #
-# The last line holds the live battery to an external test package. govulncheck
-# keys the packages it loads by import path, so an in-package test variant
-# shares a path with the non-test package of the same name and loses to it:
-# everything only that variant imports — the driver, testcontainers and docker
-# trees — drops out of the scanned module set with no diagnostic, and `just
-# vuln` goes green over code it never looked at (bd gqlc-rohp). This is the
-# only always-run gate over the nested module, so it is where the convention
-# can actually be held.
-test-codegen-fence: ensure-golangci
+# check-codegen-external-tests runs FIRST, before the linter. Ordering is
+# load-bearing: reverting the battery to `package fixtures` also trips the
+# ireturn allowlist in .golangci.yml (22 issues), so with the linter ahead of it
+# the guard was never reached on the one regression it exists to catch, and the
+# failure a developer saw named ireturn rather than the scan. The allowlist is
+# doing that job by accident and only while those eight interface types exist;
+# the guard has to be able to report on its own terms.
+test-codegen-fence: ensure-golangci check-codegen-external-tests
     cd test/data/codegen && go build ./... && go vet -tags codegen_live ./...
     cd test/data/codegen && go mod tidy -diff
     cd test/data/codegen && {{golangci}} run
-    @cd test/data/codegen && ! grep -qx 'package fixtures' ./*_test.go \
-        || { echo "error: live battery test files must declare 'package fixtures_test' — an in-package variant silently drops the live dependency tree from 'just vuln' (bd gqlc-rohp)"; exit 1; }
+
+# Holds the nested module to the packaging that keeps it inside govulncheck's
+# call graph. This is the only always-run required gate over that module, so it
+# is the only place the convention can be held (bd gqlc-rohp).
+#
+# The mechanism, precisely, because a wrong account of it is how someone
+# reasons their way back into the bug. govulncheck builds its package graph
+# keyed by PkgPath and skips any package whose PkgPath is already present,
+# *without descending into that package's imports* — PackageGraph.AddPackages,
+# x/vuln internal/vulncheck/packages.go. The in-package test variant
+# `p [p.test]` carries PkgPath `p`, the same key as the plain package `p`, which
+# go/packages returns first; so the variant and everything only it imports are
+# discarded with no diagnostic. It is not a contest that a richer package wins:
+# a directory holding nothing but in-package _test.go files still produces a
+# plain `p` entry with no Go files and no imports, and that empty entry takes
+# the key just the same (measured). An external test package survives only
+# because PkgPath `p_test` collides with nothing.
+#
+# Two assertions. The first is the convention; the second is the consequence
+# that actually matters, because a guard that only pins today's spelling is not
+# a guard:
+#
+#  1. every _test.go anywhere under the module declares an external test
+#     package. Whole subtree rather than a top-level glob, and the package name
+#     is parsed out of the clause rather than matched as a whole line — the
+#     previous `grep -qx 'package fixtures'` form was defeated by a trailing
+#     comment, by any file below the module root, and by matching nothing at all
+#     (grep exits 2, `!` turns that into success). Empty file set is a failure
+#     here, not a pass.
+#  2. the package closure govulncheck will actually load still reaches
+#     testcontainers-go. That closure is the non-test deps plus the deps of
+#     every external test package — the set AddPackages ends up with — and
+#     modelling it with `go list` reproduces govulncheck's own count exactly: 54
+#     modules today, against 9 for the non-test build alone. This catches what
+#     (1) cannot: a dropped codegen_live tag, a deleted or renamed battery, a
+#     move of the container code behind a different tag.
+[private]
+check-codegen-external-tests:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd test/data/codegen
+
+    mapfile -t tests < <(find . -type f -name '*_test.go' | sort)
+    if [ "${#tests[@]}" -eq 0 ]; then
+        echo "error: no _test.go files found under test/data/codegen." >&2
+        echo "       The live battery has moved and this guard is checking nothing (bd gqlc-rohp)." >&2
+        exit 1
+    fi
+
+    inpackage=()
+    for f in "${tests[@]}"; do
+        pkg="$(sed -n 's/^package[[:space:]]\{1,\}\([A-Za-z_][A-Za-z0-9_]*\).*$/\1/p' "$f" | head -1)"
+        case "$pkg" in
+            *_test) ;;
+            "") inpackage+=("$f (no package clause)") ;;
+            *)  inpackage+=("$f (package $pkg)") ;;
+        esac
+    done
+    if [ "${#inpackage[@]}" -ne 0 ]; then
+        echo "error: every _test.go under test/data/codegen must declare an external test package." >&2
+        echo "       govulncheck drops the in-package test variant together with everything only it" >&2
+        echo "       imports, so 'just vuln' goes green over the driver, testcontainers and docker" >&2
+        echo "       trees it never loaded (bd gqlc-rohp). Offending files:" >&2
+        printf '         %s\n' "${inpackage[@]}" >&2
+        exit 1
+    fi
+
+    xtest="$(go list -tags codegen_live -f '{{{{range .XTestImports}}{{{{println .}}{{{{end}}' ./... | sort -u)"
+    if ! go list -deps -tags codegen_live ./... ${xtest} \
+        | grep -qx 'github.com/testcontainers/testcontainers-go'; then
+        echo "error: github.com/testcontainers/testcontainers-go is not in the package closure" >&2
+        echo "       govulncheck will load for test/data/codegen, so the live battery's dependency" >&2
+        echo "       tree is unscanned again (bd gqlc-rohp). The closure is the non-test deps plus" >&2
+        echo "       every external test package's deps; check the codegen_live tag still reaches" >&2
+        echo "       the container code and that the battery is still an external test package." >&2
+        exit 1
+    fi
 
 # runs every live test in the codegen module against real testcontainers:
 # the smoke battery on all three arms plus the AGE session-init contract.
