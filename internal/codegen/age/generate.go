@@ -44,7 +44,7 @@ func generate(in codegen.Input, packageName string) ([]codegen.File, error) {
 		{Path: "db.go", Contents: renderDB(pkg, len(prepared.Queries) > 0, hasOne)},
 		{Path: "graph.go", Contents: renderGraph(pkg)},
 		{Path: "querier.go", Contents: renderQuerier(pkg, prepared.Queries)},
-		{Path: "models.go", Contents: renderModels(pkg, entities, prepared.Queries, h)},
+		{Path: "models.go", Contents: renderModels(pkg, entities, h)},
 	}
 	// Per-source `<name>.cypher.go` emission — grouped by SourceFile
 	// basename in first-appearance order (§5.5).

@@ -93,14 +93,15 @@ func agtypeCarrier(goType string) string {
 }
 
 // renderModels emits models.go (spec §5.2): one exported struct per
-// schema node and edge type with the decoder that fills it, the sealed
-// interfaces a multi-candidate edge column resolves to, and the agtype
-// helpers all of them and the query methods are built on.
+// schema node and edge type with the decoder that fills it, and the
+// agtype helpers those and the query methods are built on.
 //
 // The entity surface is the same surface every other backend emits for
 // the same schema — same struct names, same fields, same nullability.
 // Only what the decoders read differs, because only the wire differs.
-func renderModels(pkg string, entities []wiredEntity, prepared []codegen.Query, h helpers) []byte {
+// The sealed edge-union interfaces those backends also emit have no
+// counterpart here: this one refuses the column that would name them.
+func renderModels(pkg string, entities []wiredEntity, h helpers) []byte {
 	var b strings.Builder
 	b.WriteString(codegen.Header())
 	b.WriteString("package " + pkg + "\n")
@@ -121,7 +122,7 @@ func renderModels(pkg string, entities []wiredEntity, prepared []codegen.Query, 
 	}
 	b.WriteString(")\n")
 
-	writeEntities(&b, entities, prepared)
+	writeEntities(&b, entities)
 
 	if h.args {
 		b.WriteString(`
@@ -360,51 +361,22 @@ func agtypeNullableProperty[T any](props map[string][]byte, key string, decode f
 }
 
 // writeEntities emits the schema's entity surface: one exported struct
-// per node and edge type in Phase Z order, the marker methods each
-// satisfies, the decoder that fills it, and then the sealed interfaces a
-// multi-candidate edge column resolves to.
-func writeEntities(b *strings.Builder, entities []wiredEntity, prepared []codegen.Query) {
-	unions, markers := edgeUnionSurface(prepared)
+// per node and edge type in Phase Z order, followed by the decoder that
+// fills it.
+//
+// No sealed edge-union interface comes out here, and no marker method.
+// Those belong to a column binding more than one candidate edge type,
+// which this backend refuses ahead of Prepare (edgeUnionReason), so a
+// batch reaching emission carries none: a prepared query's EdgeUnions
+// is filled only from a ResolvedEdgeUnion column or from a list with
+// one at its leaf, and unservedColumn refuses both.
+func writeEntities(b *strings.Builder, entities []wiredEntity) {
 	for _, e := range entities {
 		b.WriteString("\n")
 		writeEntityStruct(b, e.Entity)
-		if len(markers[e.Name]) > 0 {
-			b.WriteString("\n")
-		}
-		for _, iface := range markers[e.Name] {
-			fmt.Fprintf(b, "func (%s) is%s() {}\n", e.Name, iface)
-		}
 		b.WriteString("\n")
 		writeEntityDecoder(b, e)
 	}
-	for _, u := range unions {
-		fmt.Fprintf(b, "\n//sumtype:decl\ntype %s interface{ is%s() }\n", u.InterfaceName, u.InterfaceName)
-	}
-}
-
-// edgeUnionSurface collects the batch's edgeUnion interfaces in emission
-// order along with, per entity struct name, the interfaces it is a
-// candidate for. An entity that is a candidate for the same interface
-// twice takes one marker method: the same method declared twice does not
-// compile.
-func edgeUnionSurface(prepared []codegen.Query) ([]*codegen.EdgeUnion, map[string][]string) {
-	var unions []*codegen.EdgeUnion
-	markers := make(map[string][]string)
-	seen := make(map[[2]string]struct{})
-	for _, p := range prepared {
-		for _, u := range p.EdgeUnions {
-			unions = append(unions, u)
-			for _, cand := range u.Candidates {
-				key := [2]string{cand, u.InterfaceName}
-				if _, dup := seen[key]; dup {
-					continue
-				}
-				seen[key] = struct{}{}
-				markers[cand] = append(markers[cand], u.InterfaceName)
-			}
-		}
-	}
-	return unions, markers
 }
 
 // writeEntityStruct emits one entity's exported struct declaration. A
