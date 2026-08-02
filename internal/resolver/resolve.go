@@ -2,6 +2,7 @@ package resolver
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -595,7 +596,7 @@ func closeEdge(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey, s schema.Sch
 		return nil
 	default:
 		if !e.Directed() && len(e.Labels()) == 1 {
-			if fwd, rev, swapped := swappedEndpoints(cands); swapped {
+			if fwd, rev, ambiguous := orientationDisagreement(cands, srcs, tgts); ambiguous {
 				return fmt.Errorf("%w: edge %q matches both %s", ErrAmbiguousEdgeOrientation, v, formatEdgeKeys([]schema.EdgeKey{fwd, rev}))
 			}
 		}
@@ -606,24 +607,69 @@ func closeEdge(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey, s schema.Sch
 	}
 }
 
-// swappedEndpoints returns the first pair of candidates that disagree on which
-// of the pattern's two endpoints is the source: (A, L, B) alongside (B, L, A).
-// Precondition: every candidate carries the same label, which the single-type
-// guard at the call site supplies.
+// orientationDisagreement reports whether the candidate set contains two
+// candidates that disagree about which of the pattern's two endpoints the edge
+// runs *from*, and returns one witness per side. srcs and tgts are the endpoint
+// keys the pattern puts on the left and on the right, the same slices the
+// candidates were enumerated from.
 //
-// This is what ErrAmbiguousEdgeOrientation names. Candidate-set size alone
-// stopped being that question once a node binding could satisfy several
-// declared types (ADR 0022): plural endpoints multiply the candidates without
-// moving either endpoint off the side the pattern puts it on, and refusing
-// those would report an orientation the schema never declared in both
-// directions. Pairs are scanned in candidate order, so the reported pair is
-// deterministic (§4.4).
-func swappedEndpoints(cands []schema.EdgeKey) (schema.EdgeKey, schema.EdgeKey, bool) {
-	for i, a := range cands {
-		for _, b := range cands[i+1:] {
-			if a.Source == b.Target && a.Target == b.Source {
-				return a, b, true
-			}
+// Each candidate is classified by where its Source key came from: a Source
+// drawn from srcs runs left-to-right, a Source drawn from tgts runs
+// right-to-left. Both classes non-empty means the schema declares this edge
+// type running both ways across the pattern, and an undirected pattern carries
+// nothing that says which was meant — that is exactly what
+// ErrAmbiguousEdgeOrientation names, and writing the arrow is a remedy that
+// works, because a directed close drops one of the two classes entirely.
+//
+// Candidate-set size alone stopped being this question once a node binding
+// could satisfy several declared types (ADR 0022): plural endpoints multiply
+// the candidates *along one side*, and refusing those would report an
+// orientation the schema never declared. An exact mirror — {A, L, B} alongside
+// {B, L, A} — is one shape the disagreement takes, not the only one: when the
+// reverse declaration lands on a subtype of the node type the forward one uses,
+// the two candidates cross the pattern in opposite directions while being
+// nobody's mirror.
+//
+// A candidate whose Source sits on both sides of the pattern carries no
+// orientation signal and is skipped — a self-loop, or endpoints whose
+// satisfying types overlap, read the same either way.
+//
+// Only candidates carrying the same label are compared. Two *different* edge
+// types running opposite ways is the multi-type union of §4.6 case D, and the
+// sentinel's message would be false of it. The single-type guard at the call
+// site makes this vacuous today; the grouping is here so the answer is true of
+// whatever set the function is handed rather than true only where it is called.
+//
+// Candidates are scanned in candidate order and the first witness on each side
+// is kept, so the reported pair is deterministic (§4.4).
+func orientationDisagreement(cands []schema.EdgeKey, srcs, tgts []graph.LabelSetKey) (schema.EdgeKey, schema.EdgeKey, bool) {
+	type sides struct {
+		fwd, rev       schema.EdgeKey
+		hasFwd, hasRev bool
+	}
+	byLabel := make(map[graph.LabelSetKey]*sides, len(cands))
+	for _, k := range cands {
+		onLeft := slices.Contains(srcs, k.Source)
+		onRight := slices.Contains(tgts, k.Source)
+		// Equal means either both (no orientation signal) or neither, which
+		// edgeProbes cannot produce — every candidate Source is drawn from one
+		// of the two slices.
+		if onLeft == onRight {
+			continue
+		}
+		s, ok := byLabel[k.KeyLabels]
+		if !ok {
+			s = &sides{}
+			byLabel[k.KeyLabels] = s
+		}
+		if onLeft && !s.hasFwd {
+			s.fwd, s.hasFwd = k, true
+		}
+		if onRight && !s.hasRev {
+			s.rev, s.hasRev = k, true
+		}
+		if s.hasFwd && s.hasRev {
+			return s.fwd, s.rev, true
 		}
 	}
 	return schema.EdgeKey{}, schema.EdgeKey{}, false

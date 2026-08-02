@@ -1,0 +1,36 @@
+-- Plural label satisfaction (ADR 0022) where the reverse declaration of an
+-- edge lands on a *subtype* of the endpoint the forward one uses.
+--
+-- `(:Author)` is satisfied by both declared author types. REVIEWED is declared
+-- `Author -> Book` forward and `Book -> Author&Editor` reverse, so the closed
+-- candidate set for `(a:Author)-[r:REVIEWED]-(b:Book)` is
+--   { Author-[REVIEWED]->Book , Book-[REVIEWED]->Author&Editor }
+-- — two candidates that put the pattern's endpoints on opposite sides without
+-- being exact mirrors of each other. The schema does declare REVIEWED both
+-- ways, so this is orientation ambiguity in the sense §4.6 names: does the
+-- pattern mean authors reviewing books, or books reviewing authors? The
+-- directed twin closes to one candidate, so writing the arrow is a remedy that
+-- works — the fact case C's advice depends on.
+
+CREATE PROPERTY GRAPH TYPE SatisfyPluralEdgesReversedSubtype AS {
+
+    (:Author {
+        id   :: INT NOT NULL,
+        name :: STRING NOT NULL
+    }),
+
+    (:Author&Editor {
+        id   :: INT NOT NULL,
+        name :: STRING NOT NULL,
+        desk :: INT NOT NULL
+    }),
+
+    (:Book {
+        id    :: INT NOT NULL,
+        title :: STRING NOT NULL
+    }),
+
+    (:Author) -[:REVIEWED { rating :: INT NOT NULL }]-> (:Book),
+    (:Book)   -[:REVIEWED { rating :: INT NOT NULL }]-> (:Author&Editor)
+
+}

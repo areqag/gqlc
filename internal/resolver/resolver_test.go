@@ -310,11 +310,18 @@ var invalidFixtures = map[string]error{
 	// whole-entity refusal still fires on a binding the schema pins. Refusing
 	// is the safe half of the answer; widening it is gqlc-0tft.
 	"plural_endpoint_whole_entity_after_edge_closure.cypher": ErrAmbiguousLabel,
-	// Three candidates of which only the second and third put the pattern's
-	// endpoints on opposite sides. The two case-C fixtures above close to a
-	// two-candidate set that IS the swapped pair, so the scan that finds it
-	// never advances past the first pair.
+	// Three candidates of which only the first and third disagree about which
+	// of the pattern's endpoints is the source; the second is a plural-endpoint
+	// duplicate of the first's side and carries no orientation signal.
 	"ambiguous_edge_orientation_plural_endpoints.cypher": ErrAmbiguousEdgeOrientation,
+	// The reverse declaration lands on a SUBTYPE of the endpoint the forward
+	// one uses, so the two candidates cross the pattern in opposite directions
+	// without being exact mirrors of each other. A guard that tests for the
+	// mirror {A,L,B}/{B,L,A} admits both of these — the whole-entity form is
+	// then bounced by codegen's same-label union guard one stage later, but the
+	// property form (below) is caught by nothing and generates compiling code.
+	"ambiguous_edge_orientation_reversed_subtype.cypher":          ErrAmbiguousEdgeOrientation,
+	"ambiguous_edge_orientation_reversed_subtype_property.cypher": ErrAmbiguousEdgeOrientation,
 }
 
 // invalidFixtureContains pins the message arm for fixtures where errors.Is
@@ -336,11 +343,15 @@ var invalidFixtureContains = map[string]string{
 	// refProjectionType arm (scope.go:706) — distinguished by "binding" suffix.
 	"path_binding.cypher":   "path binding",
 	"unwind_binding.cypher": "unwind binding",
-	// The message must name the two candidates that actually swap the
-	// pattern's endpoints, in candidate order, and leave the third — which
-	// plural satisfaction widened the set with — out of a diagnostic about
-	// orientation. errors.Is passes on any pair.
-	"ambiguous_edge_orientation_plural_endpoints.cypher": `matches both Person-[REVIEWED]->Company, Company-[REVIEWED]->Person`,
+	// The message must name one candidate from each side of the disagreement,
+	// first-in-candidate-order per side, and leave out the third — which plural
+	// satisfaction widened the set with on a side already represented.
+	// errors.Is passes on any pair.
+	"ambiguous_edge_orientation_plural_endpoints.cypher": `matches both Employee&Person-[REVIEWED]->Company, Company-[REVIEWED]->Person`,
+	// Neither key is the other's mirror; the message must still name both
+	// sides, so it cannot be produced by a mirror test.
+	"ambiguous_edge_orientation_reversed_subtype.cypher":          `matches both Author-[REVIEWED]->Book, Book-[REVIEWED]->Author&Editor`,
+	"ambiguous_edge_orientation_reversed_subtype_property.cypher": `matches both Author-[REVIEWED]->Book, Book-[REVIEWED]->Author&Editor`,
 }
 
 type ResolverSuite struct {
