@@ -271,6 +271,13 @@ test-codegen-live-age:
 # boundary. It also needs the codegen_live tag, which is where the
 # container-driving code enters the build.
 #
+# -show verbose because the scan runs at symbol level: package- and module-level
+# findings never change its exit status, and without verbose they are only ever
+# counted, so a reader of a CI log cannot tell which advisories this gate is
+# exiting 0 over or see that set change (bd gqlc-k22l). It also prints the
+# packages and modules each invocation matched, which is the standing evidence
+# that the widened scan still covers both modules.
+#
 # WHAT THIS GATE STILL DOES NOT SEE. govulncheck does not analyse the in-package
 # test variant of a package: its graph is keyed by PkgPath and the variant
 # `p [p.test]` shares PkgPath `p` with the plain package, which is added first,
@@ -300,8 +307,8 @@ test-codegen-live-age:
 # reports. bd gqlc-m5rc converts those files; vuln-root-residual below is the
 # number in the meantime.
 vuln: vuln-root-residual
-    go run golang.org/x/vuln/cmd/govulncheck@latest -test ./...
-    cd test/data/codegen && go run golang.org/x/vuln/cmd/govulncheck@latest -tags codegen_live -test ./...
+    go run golang.org/x/vuln/cmd/govulncheck@latest -test -show verbose ./...
+    cd test/data/codegen && go run golang.org/x/vuln/cmd/govulncheck@latest -tags codegen_live -test -show verbose ./...
 
 # Measures the root module's residual blindness, so it is a number taken on
 # every run rather than a claim in a comment that rots (bd gqlc-m5rc). Wired
