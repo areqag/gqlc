@@ -675,11 +675,11 @@ func orientationDisagreement(cands []schema.EdgeKey, srcs, tgts []graph.LabelSet
 	}
 	byLabel := make(map[graph.LabelSetKey]*sides, len(cands))
 	for _, k := range cands {
-		onLeft, onRight := readsFwd(k), readsRev(k)
+		l2r, r2l := readsFwd(k), readsRev(k)
 		// Equal means either both readings hold (no orientation signal) or
 		// neither, which edgeProbes cannot produce — every candidate comes from
 		// an (src, tgt) pair drawn from the two slices in one order or the other.
-		if onLeft == onRight {
+		if l2r == r2l {
 			continue
 		}
 		s, ok := byLabel[k.KeyLabels]
@@ -687,10 +687,10 @@ func orientationDisagreement(cands []schema.EdgeKey, srcs, tgts []graph.LabelSet
 			s = &sides{}
 			byLabel[k.KeyLabels] = s
 		}
-		if onLeft && !s.hasFwd {
+		if l2r && !s.hasFwd {
 			s.fwd, s.hasFwd = k, true
 		}
-		if onRight && !s.hasRev {
+		if r2l && !s.hasRev {
 			s.rev, s.hasRev = k, true
 		}
 		if s.hasFwd && s.hasRev {
