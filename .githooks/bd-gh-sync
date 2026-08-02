@@ -90,10 +90,24 @@ def load(path):
     with open(path, encoding="utf-8") as fh:
         return json.load(fh)
 
+# The eligibility rule below is a byte-for-byte prefix test, so it has to be
+# told which byte differences are not content. GitHub's web editor stores CRLF
+# and bd stores LF; a no-break space arrives by copy-paste out of rendered
+# markdown. Neither is an edit anyone made, and treating one as an edit holds
+# the bead back for good: the GH append becomes unreachable and the hold notice
+# reprints on every merge forever. Measured on the live corpus, 188 of 289
+# bodies are multi-line, so a single edit through the GitHub UI is the whole
+# distance to that state. (A pull of an append does rewrite the bead's copy to
+# GitHub's encoding — that is what --prefer-github means, and it is a
+# whitespace-level change riding along with an append that was asked for.)
+def norm(s):
+    return ((s or "").replace("\r\n", "\n").replace("\r", "\n")
+            .replace("\u00a0", " ").strip())
+
 beads = load(sys.argv[1])
 issues = load(sys.argv[2])
 
-gh = {i["number"]: ((i.get("state") or "").lower(), (i.get("body") or "").strip())
+gh = {i["number"]: ((i.get("state") or "").lower(), norm(i.get("body")))
       for i in issues}
 pat = re.compile(r"/issues/(\d+)$")
 
@@ -116,7 +130,7 @@ for b in beads:
         out.append(f"HOLD {bid} {n} not-in-listing")
         continue
     gh_state, gh_body = gh[n]
-    desc = (b.get("description") or "").strip()
+    desc = norm(b.get("description"))
 
     if status not in REPRESENTABLE:
         # `status == gh_state` is false by construction here, so these can

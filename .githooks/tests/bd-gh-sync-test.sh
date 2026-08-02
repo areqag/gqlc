@@ -264,6 +264,45 @@ else
         "held out — b-ahead, the same bytes, must pull"
 fi
 
+# A byte-for-byte prefix test has to say which bytes. GitHub's web editor stores
+# CRLF; bd stores LF. On the live corpus 188 of 289 bodies are multi-line and
+# none carry CR today, so one edit through the GitHub UI is all it takes — and
+# the effect is not a one-off: the bead is held forever, the notice prints on
+# every merge forever, and the legitimate GH append is never pulled. Fails
+# closed, but it is still a permanent hold created by an invisible byte.
+run_sync pull \
+    "[{\"id\":\"b-crlf\",\"status\":\"open\",\"external_ref\":\"$ISSUE/15\",\"description\":\"line one\nline two\"}]" \
+    '[{"number":15,"state":"OPEN","body":"line one\r\nline two\r\nline three added on GH"}]'
+if scoped_ids | grep -qx b-crlf; then
+    ok "a CRLF GH body still counts as extending an LF bead description"
+else
+    bad "a CRLF GH body still counts as extending an LF bead description" \
+        "held out — the append is unreachable until someone rewrites the body"
+fi
+
+# ...and normalising the line endings must not normalise away the rule. The bd
+# side is still longer; the GH body still does not extend it.
+run_sync pull \
+    "[{\"id\":\"b-crlf-amend\",\"status\":\"open\",\"external_ref\":\"$ISSUE/16\",\"description\":\"line one\nline two\nbd only amendment\"}]" \
+    '[{"number":16,"state":"OPEN","body":"line one\r\nline two"}]'
+if scoped_ids | grep -qx b-crlf-amend; then
+    bad "CRLF normalisation does not admit a bd-side amendment" "it was pulled"
+else
+    ok "a bd-only amendment is still held out when the GH body is CRLF"
+fi
+
+# The same class with an invisible character instead of an invisible byte: a
+# no-break space arrives by copy-paste out of rendered markdown. Same permanent
+# hold, same cost, same fix — compare text, not encodings.
+run_sync pull \
+    "[{\"id\":\"b-nbsp\",\"status\":\"open\",\"external_ref\":\"$ISSUE/17\",\"description\":\"line\\u00a0one\"}]" \
+    '[{"number":17,"state":"OPEN","body":"line one\nline two added on GH"}]'
+if scoped_ids | grep -qx b-nbsp; then
+    ok "a no-break space in the bead description does not block the pull"
+else
+    bad "a no-break space in the bead description does not block the pull" "held out"
+fi
+
 run_sync pull \
     "[{\"id\":\"b-closed\",\"status\":\"closed\",\"external_ref\":\"$ISSUE/5\",\"description\":\"same\"}]" \
     '[{"number":5,"state":"OPEN","body":"same"}]'
