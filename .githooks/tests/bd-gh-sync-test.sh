@@ -801,7 +801,11 @@ run_sync pull "[$ELIGIBLE,$HELDBACK,$CLAIMED]" \
     "[$ELIGIBLE,$HELDBACK,{\"id\":\"b-claim\",\"status\":\"open\",\"external_ref\":\"$ISSUE/7\",\"description\":\"same\"}]"
 SYNC_RC=0
 _l="$(last_line)"
-if [ -n "${_l##*FAILED*}" ]; then
+# ${_l##*X*} is empty both when _l contains X and when _l is empty, so an absent
+# summary line would satisfy all four checks below and report ok.
+if [ -z "$_l" ]; then
+    bad "the summary reports every condition at once" "no summary line at all"
+elif [ -n "${_l##*FAILED*}" ]; then
     bad "the summary reports every condition at once" "no failure: $_l"
 elif [ -n "${_l##*held 1*}" ]; then
     bad "the summary reports every condition at once" "hold count lost: $_l"
