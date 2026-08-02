@@ -31,10 +31,27 @@ if [ "$1 ${2:-}" = "github sync" ] && [ "${FAKE_SYNC_RC:-0}" != 0 ]; then
     exit "$FAKE_SYNC_RC"
 fi
 if [ "$1" = "list" ]; then
+    # Keyed by call ordinal, because the pull path calls `bd list` twice and
+    # the two calls fail differently: the first is fail-closed and loud, the
+    # second used to be fail-open and mute. A stub that can only answer the
+    # same way every time cannot express that difference, which is how three
+    # rounds of review found defects the suite was structurally unable to
+    # represent. `bd_list_fails` / `bd_list_emits` drive these files.
     n=0
     [ -f "$STUBTMP/bd_list_count" ] && n=$(cat "$STUBTMP/bd_list_count")
-    printf '%s' "$((n + 1))" >"$STUBTMP/bd_list_count"
-    if [ "$n" -ge 1 ] && [ -n "${FAKE_BEADS_AFTER:-}" ]; then
+    n=$((n + 1))
+    printf '%s' "$n" >"$STUBTMP/bd_list_count"
+    if [ -f "$STUBTMP/bd_list_rc_$n" ]; then
+        echo "bd: error: database is locked by another process" >&2
+        exit "$(cat "$STUBTMP/bd_list_rc_$n")"
+    fi
+    if [ -f "$STUBTMP/bd_list_out_$n" ]; then
+        # Verbatim, so empty/truncated/non-JSON output is expressible. The
+        # FAKE_BEADS fixtures below can only ever be valid JSON.
+        cat "$STUBTMP/bd_list_out_$n"
+        exit 0
+    fi
+    if [ "$n" -ge 2 ] && [ -n "${FAKE_BEADS_AFTER:-}" ]; then
         cat "$FAKE_BEADS_AFTER"
     else
         cat "$FAKE_BEADS"
@@ -65,6 +82,18 @@ fail=0
 ok()  { pass=$((pass + 1)); printf 'ok   - %s\n' "$1"; }
 bad() { fail=$((fail + 1)); printf 'FAIL - %s: %s\n' "$1" "$2"; }
 
+# Per-invocation control over the `bd list` stub, keyed by call ordinal (the
+# pull path calls it twice: the before snapshot, then the after snapshot the
+# postcondition compares against). Both are consumed by the next run_sync and
+# cleared by it, so an override cannot leak into a later test.
+#
+#   bd_list_fails 2      -> the 2nd `bd list` exits 1 with nothing on stdout
+#   bd_list_fails 2 3    -> ...exits 3
+#   bd_list_emits 2 ''   -> the 2nd `bd list` succeeds with empty output
+#   bd_list_emits 2 '[{' -> ...succeeds with truncated JSON
+bd_list_fails() { printf '%s' "${2:-1}" >"$TMP/bd_list_rc_$1"; }
+bd_list_emits() { printf '%s' "$2" >"$TMP/bd_list_out_$1"; }
+
 # $1=action $2=beads $3=gh_all [$4=gh_open] [$5=beads_after]
 # Leaves the invocation log in $TMP/calls and the script's stderr in $TMP/err.
 run_sync() {
@@ -83,6 +112,7 @@ run_sync() {
         FAKE_GH_OPEN="$TMP/gh_open.json" FAKE_BEADS_AFTER="$after" \
         FAKE_SYNC_RC="${SYNC_RC:-0}" \
         "$SYNC" "$1" >"$TMP/out" 2>"$TMP/err"
+    rm -f "$TMP"/bd_list_rc_* "$TMP"/bd_list_out_*
 }
 
 # Exit status the `bd github sync` stub reports; 0 unless a test sets it.
@@ -91,6 +121,9 @@ SYNC_RC=0
 scoped_ids() { grep -o -- '--issues [^ ]*' "$TMP/calls" | cut -d' ' -f2 | tr ',' '\n'; }
 pull_ran()   { grep -q -- 'bd github sync' "$TMP/calls"; }
 last_line()  { tail -n 1 "$TMP/err"; }
+# How many `bd github sync` batches were actually issued. The summary reports a
+# count of pulled beads, and the only evidence for that count is this.
+sync_batches() { grep -c -- 'bd github sync' "$TMP/calls"; }
 
 ISSUE=https://github.com/org/r/issues
 
