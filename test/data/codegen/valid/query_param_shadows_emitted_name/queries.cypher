@@ -1,48 +1,21 @@
 // Every parameter here is named after something an emitted method
-// resolves, so this batch is where the corpus holds the emitted Go
-// argument to a name the generator owns. The single-parameter form used
-// to name its argument after the parameter the author wrote, which put
-// that name in the scope the method's own identifiers resolve in; it
-// binds `arg` now, so none of these reaches the emission at all.
+// resolves, and the invariant is that none of them reaches the emission:
+// the Go argument is `arg` whatever the query text says.
 //
-// The four groups are the four things that scope used to hold, and each
-// of them broke differently.
+// The names cover the four things that scope holds — a local the body
+// declares, the package-level query-text const a body references and
+// never declares, what the signature itself binds, and a package-level
+// name the body resolves but no emitted declaration introduces (an
+// import, a decoder). The const-named ones reproduce their own const,
+// which derives from the method name; HelperShadow returns the entity so
+// the decoder is actually called, and names its parameter after that
+// decoder, which derives from the schema and so could never have been
+// held by a reserved-name list.
 //
-// The first group is a local the body declares. $stmt against a STRING
-// property was the silent one: the widths agree, so the composition
-// assigned the SQL text over the caller's argument and then bound it as
-// the value of $stmt. Nothing failed — the query looked for a person
-// named after its own statement.
-//
-// The second group is the package-level query-text const, which a body
-// references and never declares. That one was worse: the const is a
-// string and the composer takes a string, so the caller's argument did
-// not merely get overwritten, it *became* the statement.
-// ConstShadowOne(ctx, "MATCH (n) DETACH DELETE n") would have run that
-// text with no concatenation anywhere to find. The const name derives
-// from the method name, so each of these is named to reproduce its own.
-//
-// The third group is what the signature itself binds — the receiver and
-// the context argument — and the fourth is a package-level name the body
-// resolves but no emitted declaration introduces: an import, and a
-// decoder. HelperShadow returns the entity so that the decoder is
-// actually called, and its parameter is named to reproduce the decoder's
-// own name, which derives from the schema — so this is the member of the
-// class that a reserved-name list could not have held, since the set of
-// decoders varies with the graph type. Those four did not compile, and
-// generation reported none of them, because the format gate parses the
-// emission and does not type-check it. $_ is the odd one out: it mangled
-// to the empty string and reached gofmt as a parameter with no name, so
-// it was the only member of the class that failed loudly, and it failed
-// pointing at a column in querier.go rather than at the parameter.
-//
-// These are here so the corpus compiles them: this fixture is enrolled
-// in all three targets, so TestGoldenBuild type-checks every one of
-// these methods, which is the check the format gate cannot do.
-//
-// Both cardinalities that reach the composition are in the first two
-// groups, because a read and an :exec share it — and on the Neo4j
-// targets they are two separate reference sites.
+// The fixture is enrolled in all three targets so TestGoldenBuild
+// type-checks every one of these methods. That is the point of it: the
+// format gate parses the emission and does not type-check it, so a
+// capture that still parses is invisible everywhere else.
 
 // name: PersonByStmt :one
 MATCH (p:Person) WHERE p.name = $stmt RETURN p.name
