@@ -55,6 +55,22 @@ const (
 `
 	listQuery = "// name: PersonTags :one\nMATCH (p:Person) RETURN p.tags AS tags\n"
 
+	// unionSchema and unionQuery project an edge that binds to more than
+	// one candidate edge type. openCypher spells that a relationship-type
+	// alternation and has no other syntax for it (Cypher.g4
+	// oC_RelationshipTypes), and Apache AGE 1.7.0's parser refuses the
+	// alternation, so the query text the emitted code would carry could
+	// never reach that server. On a schema of their own for the reason
+	// listSchema has one.
+	unionSchema = `CREATE PROPERTY GRAPH TYPE People AS {
+    (:Person { id :: INT64 NOT NULL }),
+    (:Post   { id :: INT64 NOT NULL }),
+    (:Person) -[:AUTHORED { since :: INT64 NOT NULL }]-> (:Post),
+    (:Person) -[:LIKES]-> (:Post)
+}
+`
+	unionQuery = "// name: GetAction :one\nMATCH (:Person)-[r:AUTHORED|LIKES]->(:Post) RETURN r\n"
+
 	// The second target's schema declares a label the first one does
 	// not, so a query written against either fails against the other —
 	// what TestRunStateIsPerTarget turns on.
@@ -262,6 +278,41 @@ func TestRunApacheAgeRejectionIsASentinel(t *testing.T) {
 	require.ErrorContains(t, err, "graph[0]: unsupported query: ")
 	require.ErrorContains(t, err, `1 query would be dropped: PersonTags (column "tags" projects a list property)`)
 	require.Equal(t, pipeline.Result{}, res)
+}
+
+// TestRunApacheAgeRefusesEdgeUnions pins the other half of that
+// vocabulary at the same seam, for the one column kind whose refusal is
+// a property of the server's parser rather than of the wire format.
+//
+// An edge column with more than one candidate edge type is reachable in
+// openCypher only through a relationship-type alternation, and Apache
+// AGE 1.7.0 answers `-[r:AUTHORED|LIKES]->` with `ERROR: syntax error at
+// or near "|"` (SQLSTATE 42601), measured against the image
+// test/data/codegen pins. Generated code runs the author's query text
+// verbatim (ADR 0005), so emitting for this column would hand back a
+// package that compiles and whose every call fails at the server.
+// Refusing at generation is what turns that into an answer the author
+// gets before they ship.
+func TestRunApacheAgeRefusesEdgeUnions(t *testing.T) {
+	dir, cfgPath := writeProject(t)
+	writeFixtureFile(t, filepath.Join(dir, "schema.gql"), unionSchema)
+	writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), unionQuery)
+	writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverApacheAgePgxV5), ""))
+
+	res, err := pipeline.Run(cfgPath, backendRegistry(t))
+	require.ErrorIs(t, err, age.ErrUnsupportedQuery)
+	require.ErrorContains(t, err, `1 query would be dropped: GetAction (column "r" `+
+		`binds to more than one candidate edge type, which openCypher expresses only as a `+
+		`relationship-type alternation and Apache AGE's parser refuses)`)
+	require.Equal(t, pipeline.Result{}, res)
+
+	// The same project on a driver whose server parses the alternation
+	// generates, so what failed above is this backend's answer and not
+	// the schema, the query or the resolver.
+	writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverNeo4jGoV5), ""))
+	res, err = pipeline.Run(cfgPath, backendRegistry(t))
+	require.NoError(t, err)
+	require.Empty(t, res.Diagnostics)
 }
 
 // TestRunUnregisteredDriver: the driver axis resolves through the

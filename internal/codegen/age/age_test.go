@@ -20,6 +20,7 @@ import (
 	"github.com/areqag/gqlc/internal/codegen/age"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/resolver"
+	"github.com/areqag/gqlc/internal/schema"
 	"github.com/areqag/gqlc/internal/schema/gql"
 )
 
@@ -208,6 +209,66 @@ var servedQuery = func() codegen.NamedQuery {
 	return q
 }()
 
+// corpusEdgeKey is the one edge type testdata/corpus_schema.gql declares.
+var corpusEdgeKey = schema.EdgeKey{Source: personLabel, KeyLabels: "ACTED_IN", Target: personLabel}
+
+// twoCandidateEdgeUnion is the resolved shape of an edge binding the
+// resolver could not narrow to one candidate. Its candidates are not
+// corpus edge types: the gate under test runs ahead of Prepare, so what
+// it refuses it refuses without consulting the schema.
+var twoCandidateEdgeUnion = resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{
+	{Source: personLabel, KeyLabels: "AUTHORED", Target: "Post"},
+	{Source: personLabel, KeyLabels: "LIKES", Target: "Post"},
+}}
+
+// wantEdgeUnionReason is this test's own copy of the reason the gate
+// gives for an edge-union column, so a change to the emission's wording
+// has to be a change here too.
+const wantEdgeUnionReason = "binds to more than one candidate edge type, which openCypher expresses only " +
+	"as a relationship-type alternation and Apache AGE's parser refuses"
+
+// TestRejectsEdgeUnionColumns pins the narrowest of this backend's
+// refusals against the column it is one step away from: an edge column
+// the resolver narrowed to a single candidate is served, and the same
+// column with a second candidate is not.
+//
+// The refusal is not about decoding. The candidates carry distinct
+// labels — shared admission has already refused the ones that do not —
+// so a dispatch on the label would pick correctly. It is about the query
+// text: an edge binding with more than one candidate is reachable in
+// openCypher only through a relationship-type alternation (Cypher.g4
+// oC_RelationshipTypes admits a second type after '|' and nowhere else),
+// and Apache AGE 1.7.0 answers `-[r:AUTHORED|LIKES]->` with `ERROR:
+// syntax error at or near "|"`. Generated code runs the author's query
+// text verbatim (ADR 0005), so every call on such a method would fail at
+// the server. Emitting it would hand the author a package that compiles
+// and cannot run.
+func (s *EmissionSuite) TestRejectsEdgeUnionColumns() {
+	in := s.inputFrom(filepath.Join("testdata", corpusSchema))
+
+	s.Run("one candidate is served", func() {
+		batch := in
+		batch.Queries = []codegen.NamedQuery{readQuery("OneAction", resolver.Column{
+			Name: "r", Type: resolver.ResolvedEdge{EdgeKey: corpusEdgeKey},
+		})}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().NoError(err)
+		s.Require().NotEmpty(files)
+	})
+
+	s.Run("two candidates are refused", func() {
+		batch := in
+		batch.Queries = []codegen.NamedQuery{readQuery("TwoActions", resolver.Column{
+			Name: "r", Type: twoCandidateEdgeUnion,
+		})}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files, "a rejected batch must not return a partial file set")
+		s.Require().ErrorIs(err, age.ErrUnsupportedQuery)
+		s.Require().ErrorContains(err, `TwoActions (column "r" `+wantEdgeUnionReason+`)`)
+	})
+}
+
 // TestRejectsQueriesItCannotServe pins the capability gate. The emitted
 // arms cover agtype's scalar vocabulary, the vertices and edges built
 // out of it, and a statement that writes with or without projecting, so
@@ -237,6 +298,9 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 		q.Validated.Columns = []resolver.Column{{
 			Name: "p", Type: resolver.ResolvedNode{Labels: graph.LabelSetKey(personLabel)},
 		}}
+	})
+	edgeUnion := moved("Action", func(q *codegen.NamedQuery) {
+		q.Validated.Columns = []resolver.Column{{Name: "r", Type: twoCandidateEdgeUnion}}
 	})
 	temporal := moved("When", func(q *codegen.NamedQuery) {
 		q.Validated.Columns = []resolver.Column{{
@@ -338,6 +402,12 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 			name:      "a map column is dropped",
 			queries:   []codegen.NamedQuery{mapCol},
 			wantSub:   `1 query would be dropped: Bag (column "m" projects scalar(map))`,
+			wantError: true,
+		},
+		{
+			name:      "an edge-union column is dropped",
+			queries:   []codegen.NamedQuery{edgeUnion},
+			wantSub:   `1 query would be dropped: Action (column "r" ` + wantEdgeUnionReason + `)`,
 			wantError: true,
 		},
 		{

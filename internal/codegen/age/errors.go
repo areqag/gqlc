@@ -114,14 +114,40 @@ func unservedReason(q codegen.NamedQuery) string {
 	return ""
 }
 
+// edgeUnionReason is why an edge column with more than one candidate is
+// not served. It is the one refusal here that is not about the wire: the
+// candidates carry distinct labels — shared admission refuses the ones
+// that do not (codegen.ErrUnrepresentableEdgeUnion) — so an agtype edge
+// value would tell a dispatch which candidate it is. What fails is the
+// statement, before any value exists to decode.
+//
+// A binding with more than one candidate is reachable in openCypher only
+// through a relationship-type alternation: oC_RelationshipTypes admits a
+// second type after '|' and nowhere else, and with one type in the
+// pattern every candidate the closure yields carries that same label, so
+// the union is either singular or already refused for a shared label.
+// Apache AGE 1.7.0 has no '|' in its relationship detail — it answers
+// `-[r:AUTHORED|LIKES]->` with `ERROR: syntax error at or near "|"`,
+// SQLSTATE 42601, whatever surrounds the pattern (verified against the
+// image test/data/codegen pins; TestAGERefusesRelationshipTypeAlternation
+// re-measures it on every live run and fails when it stops holding).
+//
+// Generated code runs the author's query text verbatim (ADR 0005), so
+// emitting for such a column would produce a package that compiles and
+// whose every call fails at the server. Refusing here is what turns that
+// into an answer the author gets from `gqlc generate`.
+const edgeUnionReason = "binds to more than one candidate edge type, which openCypher expresses only " +
+	"as a relationship-type alternation and Apache AGE's parser refuses"
+
 // unservedColumn names why a resolved column type has no decode arm, or
 // "" when it has one. Served are a schema property of scalar width, a
 // bool / integer / float / string expression, and a whole vertex or edge
 // — the last of these because its label and its properties are together
 // enough to fill the entity struct the schema declares. What remains
 // arrives either as a shape whose members the emitted helpers have no
-// declared widths for, or as a value whose shape is not known until it
-// arrives.
+// declared widths for, as a value whose shape is not known until it
+// arrives, or — for the edge union — in answer to a statement this
+// server will not parse.
 func unservedColumn(t resolver.ResolvedType) string {
 	switch ct := t.(type) {
 	case resolver.ResolvedProperty:
@@ -140,8 +166,10 @@ func unservedColumn(t resolver.ResolvedType) string {
 			return "projects " + ct.String()
 		}
 		return "projects " + ct.String()
-	case resolver.ResolvedNode, resolver.ResolvedEdge, resolver.ResolvedEdgeUnion:
+	case resolver.ResolvedNode, resolver.ResolvedEdge:
 		return ""
+	case resolver.ResolvedEdgeUnion:
+		return edgeUnionReason
 	case resolver.ResolvedTemporal:
 		// Answered by the type table instead: the shared phase asks it and
 		// refuses with ErrUnrepresentableTemporal naming the kind, which
