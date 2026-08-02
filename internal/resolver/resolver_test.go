@@ -368,18 +368,18 @@ var invalidFixtureContains = map[string]string{
 	// first-in-candidate-order per side, and leave out the third — which plural
 	// satisfaction widened the set with on a side already represented.
 	// errors.Is passes on any pair.
-	"ambiguous_edge_orientation_plural_endpoints.cypher": `matches both Employee&Person-[REVIEWED]->Company, Company-[REVIEWED]->Person`,
+	"ambiguous_edge_orientation_plural_endpoints.cypher": `matches Employee&Person-[REVIEWED]->Company left-to-right and Company-[REVIEWED]->Person right-to-left`,
 	// Neither key is the other's mirror; the message must still name both
 	// sides, so it cannot be produced by a mirror test.
-	"ambiguous_edge_orientation_reversed_subtype.cypher":          `matches both Author-[REVIEWED]->Book, Book-[REVIEWED]->Author&Editor`,
-	"ambiguous_edge_orientation_reversed_subtype_property.cypher": `matches both Author-[REVIEWED]->Book, Book-[REVIEWED]->Author&Editor`,
+	"ambiguous_edge_orientation_reversed_subtype.cypher":          `matches Author-[REVIEWED]->Book left-to-right and Book-[REVIEWED]->Author&Editor right-to-left`,
+	"ambiguous_edge_orientation_reversed_subtype_property.cypher": `matches Author-[REVIEWED]->Book left-to-right and Book-[REVIEWED]->Author&Editor right-to-left`,
 	// The same two keys in both fixtures, on one schema, reported in opposite
 	// orders: which candidate is the left-to-right witness is decided by the
 	// pattern's endpoints and not by the schema's declaration order, so the two
 	// pins together say the message is read off the query rather than the
 	// candidate list.
-	"ambiguous_edge_orientation_overlapping_endpoints.cypher":          `matches both Employee&Person-[REVIEWED]->Person, Person-[REVIEWED]->Employee&Person`,
-	"ambiguous_edge_orientation_overlapping_endpoints_reversed.cypher": `matches both Person-[REVIEWED]->Employee&Person, Employee&Person-[REVIEWED]->Person`,
+	"ambiguous_edge_orientation_overlapping_endpoints.cypher":          `matches Employee&Person-[REVIEWED]->Person left-to-right and Person-[REVIEWED]->Employee&Person right-to-left`,
+	"ambiguous_edge_orientation_overlapping_endpoints_reversed.cypher": `matches Person-[REVIEWED]->Employee&Person left-to-right and Employee&Person-[REVIEWED]->Person right-to-left`,
 }
 
 type ResolverSuite struct {
@@ -631,8 +631,9 @@ func collectEdgeUnions(t ResolvedType) []ResolvedEdgeUnion {
 var edgeKeyInMessage = regexp.MustCompile(`[^\s,]+-\[[^\]]+\]->[^\s,]+`)
 
 // TestEdgeFailMessagesListEachTriedKeyOnce holds both edge fail-messages that
-// enumerate EdgeKeys to one entry per key. A message reading "matches both
-// Person-[KNOWS]->Person, Person-[KNOWS]->Person" tells the reader their query
+// enumerate EdgeKeys to one entry per key. A message reading "matches
+// Person-[KNOWS]->Person left-to-right and Person-[KNOWS]->Person
+// right-to-left" tells the reader their query
 // is ambiguous between a thing and itself, and the remedy it prescribes —
 // constrain the endpoints — cannot be followed when the endpoints are already
 // equal. No corpus fixture covers either message on that input: every

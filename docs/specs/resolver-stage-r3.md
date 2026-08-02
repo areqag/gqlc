@@ -876,16 +876,39 @@ sweep extends transparently.
 // ErrAmbiguousEdgeOrientation is returned when an undirected single-type
 // single-hop edge binding's candidate set contains two candidates that
 // disagree about which of the pattern's two endpoints the edge runs
-// from: one sourced at a key the pattern puts on the left, one sourced
-// at a key it puts on the right. The schema declares this label running
+// from: one whose Source is a key the pattern puts on the left and whose
+// Target is one it puts on the right, and one for which the same holds
+// with the two sides exchanged. The schema declares this label running
 // both ways across the pattern, and the author's undirected pattern
 // (which carries no `|` union-of-types opt-in) cannot commit to one
 // without erasing the other. Introduced at R3; the test became the side
 // disagreement rather than the candidate count at R3+ADR 0022, when
-// plural endpoints made the count answer a different question. See
-// §4.6's verdict-C rationale.
+// plural endpoints made the count answer a different question. The
+// message names one witness per side and says which side each runs
+// along; it does not enumerate the candidate set, which can be larger.
+// See §4.6's verdict-C rationale.
 var ErrAmbiguousEdgeOrientation = errors.New("ambiguous edge orientation")
 ```
+
+**Fail-message shape.**
+
+```
+ambiguous edge orientation: edge "r" matches
+  Employee&Person-[REVIEWED]->Company left-to-right and
+  Company-[REVIEWED]->Person right-to-left
+```
+
+Two keys, one per side, each labelled with the side it runs along —
+which is also the arrow the author must write to pick it. The
+truncation to two is deliberate: the set can hold three or more once a
+plural endpoint widens a side that is already represented
+(`invalid/ambiguous_edge_orientation_plural_endpoints` holds three), and
+the extras are not things a reader must tell apart. The message
+therefore must not read as an enumeration. An earlier revision said
+"matches both X, Y", which claims exactly that totality and was false of
+that very fixture; "both" is gone for that reason and must not come
+back while the truncation stays. Pinned per fixture by
+`invalidFixtureContains`.
 
 **Naming defence — `ErrAmbiguousEdgeOrientation`, not
 `ErrDoubleOrientationMatch` or `ErrUndirectedEdgeAmbiguity`.** The

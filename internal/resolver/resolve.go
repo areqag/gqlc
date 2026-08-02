@@ -597,7 +597,15 @@ func closeEdge(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey, s schema.Sch
 	default:
 		if !e.Directed() && len(e.Labels()) == 1 {
 			if fwd, rev, ambiguous := orientationDisagreement(cands, srcs, tgts); ambiguous {
-				return fmt.Errorf("%w: edge %q matches both %s", ErrAmbiguousEdgeOrientation, v, formatEdgeKeys([]schema.EdgeKey{fwd, rev}))
+				// One witness per side, never the whole candidate set: the set
+				// can hold three or more (a plural endpoint widens a side that
+				// is already represented) and the extras add nothing a reader
+				// must tell apart. So the message names the two sides rather
+				// than claiming to enumerate the matches — "matches both X, Y"
+				// read as a totality claim, and was false of exactly the
+				// three-candidate fixture that pins this arm.
+				return fmt.Errorf("%w: edge %q matches %s left-to-right and %s right-to-left",
+					ErrAmbiguousEdgeOrientation, v, formatEdgeKey(fwd), formatEdgeKey(rev))
 			}
 		}
 		if v != "" {

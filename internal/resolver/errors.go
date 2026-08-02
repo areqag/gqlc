@@ -67,13 +67,16 @@ var (
 	// ErrAmbiguousEdgeOrientation is returned when an undirected single-type
 	// single-hop edge binding's candidate set contains two candidates that
 	// disagree about which of the pattern's two endpoints the edge runs from:
-	// one sourced at a key the pattern puts on the left, one sourced at a key
-	// it puts on the right. The schema declares this label running both ways
+	// one whose Source is a key the pattern puts on the left and whose Target
+	// is one it puts on the right, and one for which the same holds with the
+	// two sides exchanged. The schema declares this label running both ways
 	// across the pattern, and the author's undirected pattern (no `|` union
 	// opt-in) cannot commit to one without erasing the other. Introduced at R3;
 	// the test became the side disagreement rather than the candidate count at
 	// R3+ADR 0022, when plural endpoints made the count answer a different
-	// question. See R3 spec §4.6 verdict-C.
+	// question. The message names one witness per side and says which side each
+	// runs along; it does not enumerate the candidate set, which can be larger.
+	// See R3 spec §4.6 verdict-C.
 	ErrAmbiguousEdgeOrientation = errors.New("ambiguous edge orientation")
 
 	// ErrUnionColumnMismatch is returned when a UNION query has branches whose
