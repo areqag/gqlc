@@ -573,6 +573,165 @@ func (s *ResolverSuite) TestOrientationDisagreementComparesOnlySameLabelCandidat
 		"the assertion above must fail on the label, not on the sides")
 }
 
+// TestOrientationDisagreementSkipsOnlyWhatReadsBothWays states the property
+// that licenses the skip arm, on the slice shapes that separate it from the
+// weaker test it is easy to write instead.
+//
+// The skip exists because a candidate that reads the same whichever way it is
+// read carries no orientation signal, and reporting it would name one key as
+// its own counterparty. Reading BOTH ways is a claim about both endpoints. A
+// candidate whose SOURCE happens to sit in both slices is a strictly weaker
+// condition, and the two come apart the moment the endpoints' satisfying sets
+// overlap without being equal — the ordinary shape of a subtype schema, which
+// is what ADR 0022 exists to serve.
+//
+// The overlap rows below are not reachable through the invalid corpus alone in
+// the sense that matters: a Source-only test does not merely misjudge one
+// candidate on them, it classifies EVERY candidate as signal-free, so the
+// function can never return true for any query whose srcs is contained in its
+// tgts. The rows say that directly, where the justification for the skip lives.
+func (s *ResolverSuite) TestOrientationDisagreementSkipsOnlyWhatReadsBothWays() {
+	key := func(src, label, tgt string) schema.EdgeKey {
+		return schema.EdgeKey{
+			Source:    graph.LabelSetKey(src),
+			KeyLabels: graph.LabelSetKey(label),
+			Target:    graph.LabelSetKey(tgt),
+		}
+	}
+	mirror := []schema.EdgeKey{
+		key("Employee&Person", "REVIEWED", "Person"),
+		key("Person", "REVIEWED", "Employee&Person"),
+	}
+	tests := []struct {
+		name string
+		srcs []graph.LabelSetKey
+		tgts []graph.LabelSetKey
+		want bool
+		why  string
+	}{
+		{
+			name: "srcs is a strict subset of tgts",
+			srcs: []graph.LabelSetKey{"Employee&Person"},
+			tgts: []graph.LabelSetKey{"Person", "Employee&Person"},
+			want: true,
+			why:  "every Source sits in both slices, but the Targets still separate the two readings",
+		},
+		{
+			name: "tgts is a strict subset of srcs",
+			srcs: []graph.LabelSetKey{"Person", "Employee&Person"},
+			tgts: []graph.LabelSetKey{"Employee&Person"},
+			want: true,
+			why:  "the mirror image of the row above; the witnesses swap sides, the verdict does not",
+		},
+		{
+			name: "srcs and tgts are equal",
+			srcs: []graph.LabelSetKey{"Person", "Employee&Person"},
+			tgts: []graph.LabelSetKey{"Person", "Employee&Person"},
+			want: false,
+			why:  "the directed twin probes the same set, so the arrow is inert and the refusal would be advice the author cannot act on",
+		},
+		{
+			name: "srcs and tgts are disjoint",
+			srcs: []graph.LabelSetKey{"Employee&Person"},
+			tgts: []graph.LabelSetKey{"Person"},
+			want: true,
+			why:  "no overlap at all — the shape that worked before ADR 0022, kept as the control",
+		},
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			fwd, rev, got := orientationDisagreement(mirror, tt.srcs, tt.tgts)
+			s.Require().Equalf(tt.want, got, "%s", tt.why)
+			if got {
+				s.Require().NotEqual(fwd, rev, "the two witnesses must be different keys")
+			}
+		})
+	}
+
+	// The self-loop the equal-slices row generalises: one key that is its own
+	// counterparty, which is why the skip is not merely permitted but required.
+	_, _, selfLoop := orientationDisagreement(
+		[]schema.EdgeKey{key("Person", "KNOWS", "Person")},
+		[]graph.LabelSetKey{"Person"}, []graph.LabelSetKey{"Person"})
+	s.Require().False(selfLoop,
+		"a self-loop key read as a disagreement would name itself on both sides")
+}
+
+// TestAmbiguousOrientationRemedyIsTheArrow holds the claim case C's whole
+// rationale rests on: the resolver refuses and tells the author to write an
+// arrow, so on every schema where it refuses, writing the arrow must decide the
+// question. A refusal whose prescribed remedy leaves the query equally
+// ambiguous is advice the author cannot act on, and §4.6's plural-endpoint
+// carve-out exists precisely to avoid emitting one.
+//
+// One schema per row, both forms resolved against it. That is what the
+// valid/invalid fixture pairs cannot state: the directed control lives in
+// valid/ with its own copy of the schema, so nothing says the schema the
+// control resolves against is the schema the refusal fires on. Here it is the
+// same parsed value, and the directed answer is asserted down to the committed
+// EdgeKey rather than left to a machine-written golden.
+func (s *ResolverSuite) TestAmbiguousOrientationRemedyIsTheArrow() {
+	tests := []struct {
+		name       string
+		schema     string
+		undirected string
+		directed   string
+		wantKey    schema.EdgeKey
+	}{
+		{
+			name:       "exact mirror between two node types",
+			schema:     "social_r3.gql",
+			undirected: "MATCH (p:Person)-[r:AUTHORED]-(post:Post) RETURN r",
+			directed:   "MATCH (p:Person)-[r:AUTHORED]->(post:Post) RETURN r",
+			wantKey:    schema.EdgeKey{Source: "Person", KeyLabels: "AUTHORED", Target: "Post"},
+		},
+		{
+			name:       "reverse declaration lands on a subtype (§4.6.1)",
+			schema:     "satisfy_plural_edges_reversed_subtype.gql",
+			undirected: "MATCH (a:Author)-[r:REVIEWED]-(b:Book) RETURN r",
+			directed:   "MATCH (a:Author)-[r:REVIEWED]->(b:Book) RETURN r",
+			wantKey:    schema.EdgeKey{Source: "Author", KeyLabels: "REVIEWED", Target: "Book"},
+		},
+		{
+			name:       "endpoints' satisfying sets overlap, srcs inside tgts",
+			schema:     "satisfy_plural_edges_overlapping.gql",
+			undirected: "MATCH (a:Employee)-[r:REVIEWED]-(b:Person) RETURN r",
+			directed:   "MATCH (a:Employee)-[r:REVIEWED]->(b:Person) RETURN r",
+			wantKey:    schema.EdgeKey{Source: "Employee&Person", KeyLabels: "REVIEWED", Target: "Person"},
+		},
+		{
+			name:       "endpoints' satisfying sets overlap, tgts inside srcs",
+			schema:     "satisfy_plural_edges_overlapping.gql",
+			undirected: "MATCH (a:Person)-[r:REVIEWED]-(b:Employee) RETURN r",
+			directed:   "MATCH (a:Person)-[r:REVIEWED]->(b:Employee) RETURN r",
+			wantKey:    schema.EdgeKey{Source: "Person", KeyLabels: "REVIEWED", Target: "Employee&Person"},
+		},
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			// invalid/ on purpose: the refusal is what the schema is for, so
+			// that is where the one authoritative copy lives.
+			sch := s.loadSchema("invalid", tt.schema)
+
+			parse := func(src string) query.Query {
+				q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+				s.Require().NoError(err)
+				return q
+			}
+
+			_, err := New(sch, WithRegistry(regR7)).Resolve(parse(tt.undirected))
+			s.Require().ErrorIs(err, ErrAmbiguousEdgeOrientation,
+				"the undirected form must be the one that refuses")
+
+			vq, err := New(sch, WithRegistry(regR7)).Resolve(parse(tt.directed))
+			s.Require().NoError(err, "writing the arrow must be a remedy that works")
+			s.Require().Len(vq.Columns, 1)
+			s.Require().Equal(ResolvedEdge{EdgeKey: tt.wantKey}, vq.Columns[0].Type,
+				"the arrow must close the set to one candidate — case B, not a union case D would type")
+		})
+	}
+}
+
 // TestEdgeUnionKeysAreASet asserts ResolvedEdgeUnion.EdgeKeys carries each
 // schema EdgeKey at most once, over the whole valid corpus.
 //

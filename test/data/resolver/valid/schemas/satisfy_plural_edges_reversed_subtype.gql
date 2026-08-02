@@ -1,16 +1,20 @@
--- Plural label satisfaction (ADR 0022) where the reverse declaration of an
--- edge lands on a *subtype* of the endpoint the forward one uses.
+-- The valid-corpus copy of the §4.6.1 reversed-subtype schema. The harness
+-- resolves schemas per fixture subdir (loadSchema(subdir, name)), so valid/ and
+-- invalid/ each hold their own; the invalid/ copy carries the refusal's
+-- rationale. This header describes what the copy in THIS directory is for.
 --
--- `(:Author)` is satisfied by both declared author types. REVIEWED is declared
--- `Author -> Book` forward and `Book -> Author&Editor` reverse, so the closed
--- candidate set for `(a:Author)-[r:REVIEWED]-(b:Book)` is
---   { Author-[REVIEWED]->Book , Book-[REVIEWED]->Author&Editor }
--- — two candidates that put the pattern's endpoints on opposite sides without
--- being exact mirrors of each other. The schema does declare REVIEWED both
--- ways, so this is orientation ambiguity in the sense §4.6 names: does the
--- pattern mean authors reviewing books, or books reviewing authors? The
--- directed twin closes to one candidate, so writing the arrow is a remedy that
--- works — the fact case C's advice depends on.
+-- `(:Author)` is satisfied by both declared author types, and REVIEWED is
+-- declared `Author -> Book` forward and `Book -> Author&Editor` reverse. The
+-- one fixture here is the DIRECTED twin:
+--   `(a:Author)-[r:REVIEWED]->(b:Book)`
+-- which drops the right-to-left probe and closes to the single key
+-- `Author-[REVIEWED]->Book`, so §4.6 case B types it. That is the fact case C's
+-- advice depends on — if the arrow closed to two candidates as well, refusing
+-- the undirected form would be advice the author cannot act on.
+--
+-- The undirected form on this same schema is refused; that claim is asserted
+-- against ONE parsed schema by TestAmbiguousOrientationRemedyIsTheArrow, so it
+-- does not rest on these two files staying byte-identical.
 
 CREATE PROPERTY GRAPH TYPE SatisfyPluralEdgesReversedSubtype AS {
 
