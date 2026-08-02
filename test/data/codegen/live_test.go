@@ -41,6 +41,21 @@ type actedInEntity struct {
 	Since int64
 }
 
+// edgeUnionAction is an edge_union_undeclared_relationship_type row flattened.
+// The column's Go type is a sealed interface each target emits into its own
+// package, with its own AUTHORED and LIKES members, so an adapter narrows the
+// arriving member to this shape and the scenario asserts on it.
+//
+// Kind is the candidate the emitted dispatch chose, and the property carried
+// alongside it belongs to that candidate and to no other: AUTHORED declares
+// since and LIKES declares rating, so a dispatch that ran the wrong arm is
+// visible in the value rather than hidden behind two structurally equal ones.
+type edgeUnionAction struct {
+	Kind   string
+	Since  int64
+	Rating int64
+}
+
 // oneColOneParamOneQuerier is one arm's one_col_one_param_one handle.
 // errNoRows and errMultipleResults report the sentinels of the package these
 // methods are generated into: each generated package declares its own
@@ -79,6 +94,14 @@ type mixedReadWriteBatchQuerier interface {
 	errNoRows() error
 }
 
+// edgeUnionQuerier is one arm's edge_union_undeclared_relationship_type
+// handle. The label a candidate carries is narrowed away by the adapter, so
+// what the scenario sees is which arm of the emitted dispatch ran.
+type edgeUnionQuerier interface {
+	actionOnPost(ctx context.Context, postID int64) (edgeUnionAction, error)
+	errNoRows() error
+}
+
 // harness is one arm for the length of the battery: a running container and a
 // connection to it. Handing out scenarios is its whole surface, so a querier
 // is unobtainable outside the isolation it belongs to.
@@ -97,6 +120,17 @@ type harness interface {
 type writeHarness interface {
 	harness
 	writeScenario(ctx context.Context, t *testing.T) writeBackend
+}
+
+// edgeUnionHarness is an arm whose target emits an edge-union dispatch. Not
+// every arm does: the shape is reachable in openCypher only through a
+// relationship-type alternation, which Apache AGE's parser refuses, so that
+// backend refuses the column at generation instead of emitting a dispatch
+// behind a statement no author could send. TestAGERefusesRelationshipTypeAlternation
+// measures the refusal that this split rests on.
+type edgeUnionHarness interface {
+	harness
+	edgeUnionScenario(ctx context.Context, t *testing.T) edgeUnionBackend
 }
 
 // backend is one scenario's isolated view of an arm: a graph no other
@@ -119,19 +153,29 @@ type writeBackend interface {
 	mixedReadWriteBatch() mixedReadWriteBatchQuerier
 }
 
+// edgeUnionBackend is a scenario's view of an edgeUnionHarness.
+type edgeUnionBackend interface {
+	backend
+	edgeUnionUndeclared() edgeUnionQuerier
+}
+
 // arms are the backends the battery runs against. Each adapter owns its
 // container, its connection, and its isolation strategy.
 //
-// writes records that the arm's target emits the write fixture. TestLiveSmoke
-// holds the harness to it, so an arm that stops satisfying writeHarness fails
-// the battery rather than dropping the write scenarios unremarked.
+// writes records that the arm's target emits the write fixture, and edgeUnions
+// that it emits an edge-union dispatch. TestLiveSmoke holds each harness to its
+// column, so an arm that stops satisfying writeHarness or edgeUnionHarness
+// fails the battery rather than dropping those scenarios unremarked — and an
+// arm that starts satisfying one fails it too, which is what would happen if
+// Apache AGE gained the alternation and the backend's refusal were lifted.
 var arms = []struct {
-	name   string
-	start  func(ctx context.Context, t *testing.T) harness
-	writes bool
+	name       string
+	start      func(ctx context.Context, t *testing.T) harness
+	writes     bool
+	edgeUnions bool
 }{
-	{name: "neo4j-go-v5", start: startNeo4jV5, writes: true},
-	{name: "neo4j-go-v6", start: startNeo4jV6, writes: true},
+	{name: "neo4j-go-v5", start: startNeo4jV5, writes: true, edgeUnions: true},
+	{name: "neo4j-go-v6", start: startNeo4jV6, writes: true, edgeUnions: true},
 	{name: "apache-age-pgx-v5", start: startAGE, writes: true},
 }
 
@@ -156,6 +200,15 @@ var writeScenarios = []struct {
 	run  func(ctx context.Context, t *testing.T, b writeBackend)
 }{
 	{name: "mixed_read_write_batch: exec + re-read", run: execWrite},
+}
+
+// edgeUnionScenarios are the battery an arm runs once its target emits an
+// edge-union dispatch, written against edgeUnionBackend under the same rules.
+var edgeUnionScenarios = []struct {
+	name string
+	run  func(ctx context.Context, t *testing.T, b edgeUnionBackend)
+}{
+	{name: "edge_union_undeclared_relationship_type: label dispatch", run: edgeUnionDispatch},
 }
 
 // TestLiveSmoke runs every scenario against every arm. Arms call t.Parallel()
@@ -191,6 +244,20 @@ func TestLiveSmoke(t *testing.T) {
 					}
 					sc.run(ctx, t, h.scenario(ctx, t))
 				})
+			}
+
+			eh, servesEdgeUnions := h.(edgeUnionHarness)
+			require.Equal(t, arm.edgeUnions, servesEdgeUnions,
+				"the arm's edge-union capability must match the arms table; a target that gained or lost the dispatch updates both")
+			if servesEdgeUnions {
+				for _, sc := range edgeUnionScenarios {
+					t.Run(sc.name, func(t *testing.T) {
+						if parallelScenarios {
+							t.Parallel()
+						}
+						sc.run(ctx, t, eh.edgeUnionScenario(ctx, t))
+					})
+				}
 			}
 
 			wh, servesWrites := h.(writeHarness)
@@ -306,6 +373,56 @@ func edgeEntityRead(ctx context.Context, t *testing.T, b backend) { //nolint:the
 	got, err := q.oneActedIn(ctx)
 	require.NoError(t, err)
 	require.Equal(t, actedInEntity{Since: 2019}, got)
+}
+
+// edgeUnionDispatch drives the edge-union contract — the label off the wire
+// chooses which candidate's decoder fills the column, and a label outside the
+// candidate set fails the row rather than picking an arm at random.
+//
+// The default arm is reachable only because the query names a relationship
+// type the schema does not declare. gqlc narrows the candidate set to the two
+// it does declare and leaves the query text alone (ADR 0005), so the server
+// matches FLAGGED edges that the sealed interface has no member for. That is
+// schema drift, not a contrivance: it is what an author has the moment their
+// graph grows a relationship type ahead of their GQL schema, and it is the
+// only shape in which the emitted default arm ever runs.
+func edgeUnionDispatch(ctx context.Context, t *testing.T, b edgeUnionBackend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	q := b.edgeUnionUndeclared()
+
+	_, err := q.actionOnPost(ctx, 10)
+	require.ErrorIs(t, err, q.errNoRows(), "empty graph must return ErrNoRows")
+
+	// One post per relationship type, so the bound parameter selects which
+	// label the single row carries and each call exercises one arm.
+	b.seed(ctx, t, `
+		CREATE (author:Person {id: 1})
+		CREATE (authored:Post {id: 10})
+		CREATE (liked:Post {id: 20})
+		CREATE (flagged:Post {id: 30})
+		CREATE (author)-[:AUTHORED {since: 2019}]->(authored)
+		CREATE (author)-[:LIKES {rating: 5}]->(liked)
+		CREATE (author)-[:FLAGGED]->(flagged)
+	`)
+
+	// Each candidate carries a property the other does not, so an arm that
+	// decoded through the wrong candidate cannot produce this value.
+	got, err := q.actionOnPost(ctx, 10)
+	require.NoError(t, err)
+	require.Equal(t, edgeUnionAction{Kind: "AUTHORED", Since: 2019}, got)
+
+	got, err = q.actionOnPost(ctx, 20)
+	require.NoError(t, err)
+	require.Equal(t, edgeUnionAction{Kind: "LIKES", Rating: 5}, got)
+
+	// The label outside the candidate set. The generated dispatch has no case
+	// for it and the sealed interface no member, so the row fails and names
+	// what arrived — a nil interface returned without an error would be
+	// indistinguishable to a caller from a column that was legitimately absent.
+	got, err = q.actionOnPost(ctx, 30)
+	require.Error(t, err, "a label outside the candidate set must fail the row")
+	require.ErrorContains(t, err, `unexpected relationship type "FLAGGED"`,
+		"the failure must name the label that arrived")
+	require.Equal(t, edgeUnionAction{}, got)
 }
 
 // execWrite drives the :exec contract — the write reaches the graph, and the
