@@ -553,19 +553,27 @@ for every deferred edge, and applies the **verdict table**:
 
 **The side disagreement, defined.** Phase C holds the two endpoint key
 slices it enumerated the candidates from: `srcs`, the keys the pattern
-puts on the left, and `tgts`, the keys it puts on the right. Classify
-each candidate by where its `Source` key came from:
+puts on the left, and `tgts`, the keys it puts on the right. A candidate
+`k` has two *readings*, and each is a claim about **both** its endpoints:
 
-- `Source ∈ srcs` and `Source ∉ tgts` — the candidate runs
-  left-to-right.
-- `Source ∈ tgts` and `Source ∉ srcs` — it runs right-to-left.
-- `Source` in **both** — it carries no orientation signal and is
-  skipped. A self-loop key, or an endpoint key that both sides of the
-  pattern satisfy, reads the same whichever way it is read.
-- `Source` in neither — unreachable: `edgeProbes` draws every candidate
-  `Source` from one of the two slices.
+- `k` **reads left-to-right** when `k.Source ∈ srcs` and
+  `k.Target ∈ tgts`.
+- `k` **reads right-to-left** when `k.Source ∈ tgts` and
+  `k.Target ∈ srcs`.
 
-The set contains a **side disagreement** when both of the first two
+Classify each candidate by which readings hold:
+
+- exactly one reading — the candidate belongs to that side.
+- **both** readings — it carries no orientation signal and is skipped.
+  The pattern can bind its endpoints either way round and get the same
+  key, so the candidate is its own counterparty; reporting it would name
+  one key on both sides of the message. A self-loop key is the
+  degenerate instance.
+- neither reading — unreachable: `edgeProbes` builds every candidate
+  from an `(src, tgt)` pair taken from the two slices in one order or
+  the other.
+
+The set contains a **side disagreement** when both of the one-reading
 classes are non-empty *for the same label*. Only same-label candidates
 are compared: two different edge types running opposite ways is case
 D's multi-type union, and the sentinel's message would be false of it.
@@ -576,6 +584,39 @@ than borrowing it.
 An exact mirror — `{A, L, B}` alongside `{B, L, A}` — is **one shape**
 the disagreement takes, not the definition of it. §4.6.1 works the
 counterexample.
+
+**Why the skip arm is about both endpoints.** It is tempting to write
+the skip as "`Source` sits in both slices" — a self-loop satisfies it,
+and so does the symmetric case below. It is strictly weaker, and it
+fails on the ordinary shape of a subtype schema, which is what ADR 0022
+exists to serve. Take
+
+```gql
+(:Person&Employee) -[:REVIEWED { rating::INT NOT NULL }]-> (:Person),
+(:Person)          -[:REVIEWED { rating::INT NOT NULL }]-> (:Person&Employee)
+```
+
+and `(a:Employee)-[r:REVIEWED]-(b:Person)`. Here
+`srcs = {Employee&Person}` and `tgts = {Person, Employee&Person}`, so
+`srcs ⊂ tgts` and **every** candidate `Source` sits in both slices — a
+`Source`-only skip classifies nothing, for any query on any schema of
+this shape, and the check silently cannot fire. Yet the candidate set is
+`{ Employee&Person-[REVIEWED]->Person , Person-[REVIEWED]->Employee&Person }`,
+the exact mirror, and the `Target`s do separate the two readings. Corpus:
+`invalid/ambiguous_edge_orientation_overlapping_endpoints` and its
+`_reversed` twin, one per subset direction.
+
+The property that licenses skipping is not overlap, it is **symmetry**:
+a candidate the pattern reads the same either way. `srcs == tgts` makes
+every candidate symmetric — and that is the case where the arrow is
+genuinely inert, because the directed twin's probe set `srcs × tgts` is
+then the same set as the undirected one's
+`(srcs × tgts) ∪ (tgts × srcs)`. Nothing weaker earns the skip: with any
+other overlap the arrow still drops probes, so it is still a remedy, so
+refusing is still advice the author can act on. Held by
+`TestOrientationDisagreementSkipsOnlyWhatReadsBothWays` (the four slice
+shapes) and `TestAmbiguousOrientationRemedyIsTheArrow` (the remedy, on
+one parsed schema per row).
 
 **Rationale — case C (the double-match decision).** A side
 disagreement in the candidate set of a **single-type undirected edge**
@@ -653,9 +694,19 @@ The mirror is therefore a *witness shape* and not the predicate.
 `invalid/ambiguous_edge_orientation_reversed_subtype` pins the
 non-mirror, and `valid/plural_endpoint_symmetric_endpoints_edge_union`
 pins the skip: both endpoints carrying the same label expression makes
-every candidate `Source` sit on both sides, so a set holding
-`Person-[KNOWS]->Person` has no disagreement to report and read as one
-would name that key as its own counterparty.
+`srcs` and `tgts` equal, so every candidate reads both ways and a set
+holding `Person-[KNOWS]->Person` has no disagreement to report — read as
+one it would name that key as its own counterparty.
+
+Widening in the other direction has the same failure mode and a worse
+blast radius, which the skip arm's own history shows: replacing the
+mirror test with a `Source`-only side test fixed the shape above and
+re-admitted the mirror on every schema whose endpoint sets overlap
+(`invalid/ambiguous_edge_orientation_overlapping_endpoints`). Neither
+revision was caught by the corpus that shipped it. The lesson recorded
+here is procedural: this predicate has two failure directions, so a
+change to it needs a fixture in the direction it *widens*, not only in
+the direction it fixes.
 
 **Rationale — case D (multi-type is union).** The `|` operator in
 `[r:A|B]` is Cypher's union-of-edge-types syntax. An author who
@@ -679,14 +730,40 @@ value tells them apart — is refused where it becomes unrepresentable,
 at code generation (`codegen.ErrUnrepresentableEdgeUnion`), which can
 name the endpoint constraint that fixes it.
 
-That staging is load-bearing and it is the *whole* answer for this
-class: every union case D admits under the single-type guard has
-same-label members by construction, so none of them can be code
-generated. Pinned by the conformance fixture
+That staging is load-bearing, and it covers exactly one projection
+shape. Every union case D admits under the single-type guard has
+same-label members by construction, so **whole-entity** `RETURN r` on
+any of them is refused at code generation. Pinned by the conformance
+fixture
 `test/data/codegen/invalid/plural_endpoint_edge_union_shared_label`,
 which is red from both ends — a resolver that goes back to refusing the
 class fails the fixture's load on the wrong sentinel, and a codegen
 that drops the same-label guard generates instead of refusing.
+
+**Property projection on the same union is not refused anywhere, and
+must not be read as if it were.** On that fixture's own schema,
+
+```
+// name: GetFoundedYear :many
+MATCH (p:Person)-[r:FOUNDED]-(c:Company) RETURN r.foundedYear
+```
+
+generates `GetFoundedYear(ctx) ([]int64, error)` and the CLI exits 0 —
+§4.8's union-property rule finds `INT NOT NULL` on every member and
+agrees. That is correct here: the members differ only in an endpoint
+type the author's pattern already permits, so every member's
+`foundedYear` is a `foundedYear` the query asked for, and one column
+type answers for all of them.
+
+The distinction is what makes it safe, and it is the same distinction
+§4.6.1 turns on in the opposite direction. Case D's members agree about
+which way the edge crosses the pattern; a case C set does not, so its
+property column would silently answer a question the author never
+stated. Codegen's guard is about *representability* — an edge value
+carries no endpoint types — and only whole-entity projection needs to
+carry them. It is therefore not a backstop for orientation ambiguity
+and cannot be cited as one. Anything case C lets through on a property
+projection reaches a backend.
 
 **Rejected verdicts considered and recorded.**
 
@@ -1170,14 +1247,26 @@ mapping row is needed for the union-property fixture.
   case C's remedy on it: writing the arrow drops the right-to-left
   candidate and case B types what is left. If this closed to two
   candidates instead, refusing the undirected form would be advice the
-  author cannot act on.
+  author cannot act on. That the schema it resolves against is the one
+  the undirected form is refused on is asserted by
+  `TestAmbiguousOrientationRemedyIsTheArrow`, against a single parsed
+  value: `valid/` and `invalid/` hold separate copies of every schema
+  (the harness resolves them per subdir), so the pairing is otherwise a
+  relation between two files that nothing checks. That test carries the
+  remedy claim for every case C shape, so a new refusing schema owes it
+  a row rather than a second copy in `valid/`.
 - `plural_endpoint_symmetric_endpoints_edge_union` — both endpoints
   carry the same label expression, so `srcs` and `tgts` are equal and
-  every candidate `Source` sits on both sides. §4.6's third
-  classification arm — no orientation signal, skip — is the whole
-  fixture: without it `Person-[KNOWS]->Person` is read as disagreeing
-  with itself and the fail-message names one key twice, which
-  `TestEdgeFailMessagesListEachTriedKeyOnce` exists to forbid.
+  every candidate reads both ways across the pattern. §4.6's
+  both-readings classification arm — no orientation signal, skip — is
+  the whole fixture: without it `Person-[KNOWS]->Person` is read as
+  disagreeing with itself and the fail-message names one key twice,
+  which `TestEdgeFailMessagesListEachTriedKeyOnce` exists to forbid.
+  Equal slices is the *only* overlap that earns the skip; the fixture
+  cannot say that on its own, because it is one point of a predicate,
+  so `TestOrientationDisagreementSkipsOnlyWhatReadsBothWays` states it
+  over the four slice shapes and `invalid/ambiguous_edge_orientation_
+  overlapping_endpoints` pins the two the skip must not swallow.
 
 ### 6.4 R3 invalid fixtures — updated `invalidFixtures` map
 
