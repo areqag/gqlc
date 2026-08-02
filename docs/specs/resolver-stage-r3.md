@@ -250,8 +250,9 @@ those is why a *single*-type binding can also produce a union, whose
 members then all carry one label. `len(EdgeKeys) >= 2` is a
 constructor invariant (the single-candidate case stays `ResolvedEdge`,
 the zero-candidate case fails `ErrUnknownEdge`, the single-type
-undirected case whose candidates swap the pattern's endpoints fails
-`ErrAmbiguousEdgeOrientation` — see §4.6's verdict table).
+undirected case whose candidates disagree about which of the pattern's
+endpoints the edge runs from fails `ErrAmbiguousEdgeOrientation` — see
+§4.6's verdict table).
 
 **Ordering.** `EdgeKeys` is emitted in **§4.4's canonical order**: outer
 loop iterates `e.Labels()` in first-appearance order (parser Stage 8's
@@ -306,17 +307,17 @@ schema must declare the property with structurally-equal `Type` and
 ### 3.5 The double-match decision, recorded
 
 For an **undirected single-type single-hop edge** whose candidate set
-contains a swapped pair (`s.Edges` contains both `{A, L, B}` and
-`{B, L, A}` as distinct entries, and both are candidates), the resolver
-**errors** with `ErrAmbiguousEdgeOrientation` (§5.1). The
-fail-message lists both matched keys and names the offending binding
-variable. The decision and its considered alternatives are recorded
-in §4.6's verdict table and its rationale block. The resolved shape
-of every other case (single-match, zero-match, multi-type,
-var-length) is determined without ambiguity error; the only
-double-match arm that raises `ErrAmbiguousEdgeOrientation` is the
-single-type single-hop undirected × double-schema-match arm — every
-other multi-candidate case emits `ResolvedEdgeUnion`.
+contains a **side disagreement** — two candidates that do not agree
+about which of the pattern's two endpoints the edge runs *from* — the
+resolver **errors** with `ErrAmbiguousEdgeOrientation` (§5.1). The
+fail-message lists one witness from each side and names the offending
+binding variable. The decision and its considered alternatives are
+recorded in §4.6's verdict table and its rationale block. The resolved
+shape of every other case (single-match, zero-match, multi-type,
+var-length) is determined without ambiguity error; the only arm that
+raises `ErrAmbiguousEdgeOrientation` is the single-type single-hop
+undirected × side-disagreement arm — every other multi-candidate case
+emits `ResolvedEdgeUnion`.
 
 The consequence for `ValidatedQuery` shape: `ResolvedEdge` retains a
 single `EdgeKey`, and the "which orientation matched" question is
@@ -547,41 +548,114 @@ for every deferred edge, and applies the **verdict table**:
 |---|---|---|---|
 | A | 0 | any | `ErrUnknownEdge` (fail-msg lists tried (label, orientation) pairs) |
 | B | 1 | any | `ResolvedEdge{EdgeKey: cands[0]}`; record in `resolvedEdgeType` / `resolvedEdgeKey` |
-| C | ≥ 2 | `!e.Directed() && len(e.Labels()) == 1` (single-type undirected) **and** the set contains a swapped pair | **`ErrAmbiguousEdgeOrientation`** (§5.1); fail-msg lists the two swapped keys |
+| C | ≥ 2 | `!e.Directed() && len(e.Labels()) == 1` (single-type undirected) **and** the set contains a side disagreement | **`ErrAmbiguousEdgeOrientation`** (§5.1); fail-msg lists one witness per side |
 | D | ≥ 2 | any other R3 shape (multi-type; multi-type × undirected; directed multi-type; single-type whose candidates plural endpoints multiplied) | `ResolvedEdgeUnion{EdgeKeys: cands}`; record in `resolvedEdgeCand` |
 
-A **swapped pair** is two candidates `{A, L, B}` and `{B, L, A}`: the
-two disagree on which of the pattern's endpoints is the source.
+**The side disagreement, defined.** Phase C holds the two endpoint key
+slices it enumerated the candidates from: `srcs`, the keys the pattern
+puts on the left, and `tgts`, the keys it puts on the right. Classify
+each candidate by where its `Source` key came from:
 
-**Rationale — case C (the double-match decision).** A swapped pair in
-the candidate set of a **single-type undirected edge** arises exactly
-when the schema declares both `{A, L, B}` and `{B, L, A}` as *distinct*
-edge types with the same label. In every practical schema this is a
-modelling choice with meaning — the two directions are distinct
-concepts (`Person → FOLLOWS → Person` where the reciprocal
-`Person → FOLLOWS → Person` in the other direction is also declared:
-the same key, so there is no ambiguity). The genuine double-match
-case requires distinct source/target label sets in the two
-directions (`Author → REVIEWED → Book` and `Book → REVIEWED →
-Author`, if a schema authored that pair). Under those conditions,
-the author's undirected `[:REVIEWED]` is genuinely ambiguous: does
-the pattern refer to authors reviewing books, or books reviewing
-authors? The resolver cannot infer intent; it forces the author to
-disambiguate by writing a directed arrow, and it says so.
+- `Source ∈ srcs` and `Source ∉ tgts` — the candidate runs
+  left-to-right.
+- `Source ∈ tgts` and `Source ∉ srcs` — it runs right-to-left.
+- `Source` in **both** — it carries no orientation signal and is
+  skipped. A self-loop key, or an endpoint key that both sides of the
+  pattern satisfy, reads the same whichever way it is read.
+- `Source` in neither — unreachable: `edgeProbes` draws every candidate
+  `Source` from one of the two slices.
 
-**Why the swapped-pair test and not the candidate count.** The count
-answered this question only while an endpoint resolved to one node
-type. Under ADR 0022 an endpoint can bind plural, and the endpoint
-cross-product then multiplies the candidates without moving either
-endpoint off the side the pattern puts it on: a schema declaring
+The set contains a **side disagreement** when both of the first two
+classes are non-empty *for the same label*. Only same-label candidates
+are compared: two different edge types running opposite ways is case
+D's multi-type union, and the sentinel's message would be false of it.
+Case C's `len(e.Labels()) == 1` guard already makes this vacuous at the
+call site; it is stated here because the predicate carries it rather
+than borrowing it.
+
+An exact mirror — `{A, L, B}` alongside `{B, L, A}` — is **one shape**
+the disagreement takes, not the definition of it. §4.6.1 works the
+counterexample.
+
+**Rationale — case C (the double-match decision).** A side
+disagreement in the candidate set of a **single-type undirected edge**
+means the schema declares that label running both ways across the
+pattern. In every practical schema this is a modelling choice with
+meaning — the two directions are distinct concepts. Note it is not
+implied by a reciprocal declaration: `Person → FOLLOWS → Person`
+declared "both ways" is the same key with `Source` on both sides, no
+disagreement, no ambiguity. The genuine case requires the two
+directions to land on distinct node types — `Author → REVIEWED → Book`
+alongside `Book → REVIEWED → Author`. Under those conditions the
+author's undirected `[:REVIEWED]` is genuinely ambiguous: does the
+pattern refer to authors reviewing books, or books reviewing authors?
+The resolver cannot infer intent; it forces the author to disambiguate
+by writing a directed arrow, and it says so.
+
+**Why the side test and not the candidate count.** The count answered
+this question only while an endpoint resolved to one node type. Under
+ADR 0022 an endpoint can bind plural, and the endpoint cross-product
+then multiplies the candidates *along one side*: a schema declaring
 `Person → FOUNDED → Company` and `Person&Employee → FOUNDED → Company`
 answers `(p:Person)-[r:FOUNDED]-(c:Company)` with two candidates that
 both run from a person type to `Company`. Refusing that as an
 orientation ambiguity would name a direction the schema never declared
 in both ways, and would hand the author advice — write the arrow —
-that changes nothing about the candidate set: the directed twin of the
-pattern closes to those same two candidates and case D types it. The
-test therefore asks for the thing the sentinel names.
+that changes nothing: the directed twin closes to those same two
+candidates and case D types it. Corpus:
+`valid/plural_endpoint_undirected_edge_union` with its directed
+control.
+
+#### 4.6.1 Why the side test and not the swapped pair
+
+The first revision of case C under ADR 0022 tested for the mirror
+directly: refuse when the set holds `{A, L, B}` alongside `{B, L, A}`.
+That is strictly narrower than the class case C names, and the gap is
+reachable. When the reverse declaration lands on a **subtype** of the
+node type the forward one uses, the two candidates cross the pattern in
+opposite directions while being nobody's mirror:
+
+```gql
+(:Author { id::INT NOT NULL, name::STRING NOT NULL }),
+(:Author&Editor { id::INT NOT NULL, name::STRING NOT NULL, desk::INT NOT NULL }),
+(:Book { id::INT NOT NULL, title::STRING NOT NULL }),
+(:Author) -[:REVIEWED { rating::INT NOT NULL }]-> (:Book),
+(:Book)   -[:REVIEWED { rating::INT NOT NULL }]-> (:Author&Editor)
+```
+
+`(a:Author)-[r:REVIEWED]-(b:Book)` closes to
+`{ Author-[REVIEWED]->Book , Book-[REVIEWED]->Author&Editor }`. Neither
+key is the other's mirror, so the mirror test admits both. But `Book`
+is on the pattern's right and sources the second candidate, so this is
+the §4.6 question verbatim — authors reviewing books, or books
+reviewing authors — and both halves of case C's rationale hold on it:
+
+- The endpoint cross-product **did** move an endpoint off the side the
+  pattern puts it on, which is the thing the plural-endpoint carve-out
+  above is careful not to do.
+- The prescribed remedy works. The directed twin
+  `(a:Author)-[r:REVIEWED]->(b:Book)` closes to **one** candidate and
+  case B types it, so writing the arrow really does decide the
+  question. Corpus:
+  `valid/plural_endpoint_reversed_subtype_directed_closes_singular`.
+
+Admitting it was not a widening the author asked for. Whole-entity
+`RETURN r` is bounced one stage later by
+`codegen.ErrUnrepresentableEdgeUnion` (both members carry `REVIEWED`),
+but `RETURN r.rating` reaches nothing that objects: §4.7's union
+property agrees on `INT NOT NULL` and generates compiling code for a
+pattern whose meaning the author never stated. Corpus:
+`invalid/ambiguous_edge_orientation_reversed_subtype` and its
+`_property` twin.
+
+The mirror is therefore a *witness shape* and not the predicate.
+`invalid/ambiguous_edge_orientation` pins the mirror,
+`invalid/ambiguous_edge_orientation_reversed_subtype` pins the
+non-mirror, and `valid/plural_endpoint_symmetric_endpoints_edge_union`
+pins the skip: both endpoints carrying the same label expression makes
+every candidate `Source` sit on both sides, so a set holding
+`Person-[KNOWS]->Person` has no disagreement to report and read as one
+would name that key as its own counterparty.
 
 **Rationale — case D (multi-type is union).** The `|` operator in
 `[r:A|B]` is Cypher's union-of-edge-types syntax. An author who
@@ -604,6 +678,15 @@ express — a union whose members share a label, so nothing in an edge
 value tells them apart — is refused where it becomes unrepresentable,
 at code generation (`codegen.ErrUnrepresentableEdgeUnion`), which can
 name the endpoint constraint that fixes it.
+
+That staging is load-bearing and it is the *whole* answer for this
+class: every union case D admits under the single-type guard has
+same-label members by construction, so none of them can be code
+generated. Pinned by the conformance fixture
+`test/data/codegen/invalid/plural_endpoint_edge_union_shared_label`,
+which is red from both ends — a resolver that goes back to refusing the
+class fails the fixture's load on the wrong sentinel, and a codegen
+that drops the same-label guard generates instead of refusing.
 
 **Rejected verdicts considered and recorded.**
 
@@ -791,13 +874,16 @@ sweep extends transparently.
 
 ```go
 // ErrAmbiguousEdgeOrientation is returned when an undirected single-type
-// single-hop edge binding's candidate set contains a swapped pair — the
-// schema declares both {A, L, B} and {B, L, A} as distinct edge types
-// with the same label, so the two candidates disagree on which of the
-// pattern's endpoints is the source, and the author's undirected
-// pattern (which carries no `|` union-of-types opt-in) cannot commit to
-// one without erasing the other. Introduced at R3. See §4.6's verdict-C
-// rationale.
+// single-hop edge binding's candidate set contains two candidates that
+// disagree about which of the pattern's two endpoints the edge runs
+// from: one sourced at a key the pattern puts on the left, one sourced
+// at a key it puts on the right. The schema declares this label running
+// both ways across the pattern, and the author's undirected pattern
+// (which carries no `|` union-of-types opt-in) cannot commit to one
+// without erasing the other. Introduced at R3; the test became the side
+// disagreement rather than the candidate count at R3+ADR 0022, when
+// plural endpoints made the count answer a different question. See
+// §4.6's verdict-C rationale.
 var ErrAmbiguousEdgeOrientation = errors.New("ambiguous edge orientation")
 ```
 
@@ -1050,7 +1136,25 @@ mapping row is needed for the union-property fixture.
   The pair is one fixture and its control: both close to the same two
   candidates, so the two goldens being identical is what says the
   direction marker no longer decides the verdict on a candidate set it
-  does not change.
+  does not change. That identity is asserted by
+  `TestDirectionMarkerIsInertOnAPluralOnlyUnion`, not left as a fact
+  about the committed bytes — both goldens are machine-written from one
+  run, so a divergence would otherwise be absorbed by the next `-update`
+  and the suite would stay green. The assertion is on a *relation*
+  between the two files, which `-update` rewrites but cannot repair.
+- `plural_endpoint_reversed_subtype_directed_closes_singular` — the
+  directed twin of §4.6.1's counterexample, and the fixture that earns
+  case C's remedy on it: writing the arrow drops the right-to-left
+  candidate and case B types what is left. If this closed to two
+  candidates instead, refusing the undirected form would be advice the
+  author cannot act on.
+- `plural_endpoint_symmetric_endpoints_edge_union` — both endpoints
+  carry the same label expression, so `srcs` and `tgts` are equal and
+  every candidate `Source` sits on both sides. §4.6's third
+  classification arm — no orientation signal, skip — is the whole
+  fixture: without it `Person-[KNOWS]->Person` is read as disagreeing
+  with itself and the fail-message names one key twice, which
+  `TestEdgeFailMessagesListEachTriedKeyOnce` exists to forbid.
 
 ### 6.4 R3 invalid fixtures — updated `invalidFixtures` map
 

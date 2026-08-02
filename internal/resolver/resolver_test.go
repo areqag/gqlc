@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/procsig"
 	"github.com/areqag/gqlc/internal/query"
 	"github.com/areqag/gqlc/internal/query/cypher"
@@ -464,6 +465,85 @@ func (s *ResolverSuite) TestInvalid() {
 			}
 		})
 	}
+}
+
+// TestDirectionMarkerIsInertOnAPluralOnlyUnion holds the claim the
+// plural_endpoint_*_edge_union pair exists to make: on a candidate set the
+// direction marker does not change, the marker does not change the verdict
+// either. The undirected pattern's two extra probes (`Company -> Person`
+// orientations of FOUNDED) are declared by nothing, so undirected and directed
+// close to the same two keys, and §4.6 case D must type both.
+//
+// Neither golden can carry this on its own. Both are machine-written by the
+// code under test from the same run, so a change that made the marker decide
+// the verdict — an orientation guard that fires on a set with no orientation
+// disagreement in it — writes two now-different goldens on the next -update
+// and the suite stays green. Byte-equality between them is a relation -update
+// cannot repair: it rewrites the files, not the fact that they must match.
+//
+// Read from disk rather than resolved here on purpose. The committed bytes are
+// what a reviewer diffs, and this is the assertion that says a diff touching
+// one of them and not the other is a regression.
+func (s *ResolverSuite) TestDirectionMarkerIsInertOnAPluralOnlyUnion() {
+	golden := func(name string) []byte {
+		src, err := os.ReadFile(filepath.Join(fixtureDir, "valid", name+".cypher.validated.golden.json"))
+		s.Require().NoError(err)
+		return src
+	}
+	undirected := golden("plural_endpoint_undirected_edge_union")
+	directed := golden("plural_endpoint_directed_edge_union")
+
+	// Vacuity guard: byte-equality says nothing unless both goldens really do
+	// hold the multi-candidate shape the claim is about.
+	s.Require().Contains(string(undirected), `"kind": "edgeUnion"`)
+
+	s.Require().Equal(string(undirected), string(directed),
+		"the undirected fixture and its directed control close to the same candidate set, so their goldens must be byte-identical")
+}
+
+// TestOrientationDisagreementComparesOnlySameLabelCandidates holds
+// orientationDisagreement to the precondition its doc comment states, rather
+// than to the one its caller happens to supply.
+//
+// Case C's `len(e.Labels()) == 1` guard means every set the function is handed
+// today carries one label, so no corpus fixture can reach the arm below — a
+// predicate that ignored the label would pass the whole suite. That is the
+// shape the previous revision shipped, and 25 lines of distance between a
+// stated precondition and the guard that supplies it is not a guarantee.
+//
+// The arm matters because the two answers are different verdicts, not two
+// spellings of one. Two DIFFERENT edge types running opposite ways across the
+// pattern is §4.6 case D's multi-type union — the author wrote `|` and opted
+// in — and ErrAmbiguousEdgeOrientation's message ("cannot commit to one
+// without erasing the other") would be false of it.
+//
+// Called directly: the point is the function's answer on a set the resolver
+// cannot currently build, so there is no query to write.
+func (s *ResolverSuite) TestOrientationDisagreementComparesOnlySameLabelCandidates() {
+	key := func(src, label, tgt string) schema.EdgeKey {
+		return schema.EdgeKey{
+			Source:    graph.LabelSetKey(src),
+			KeyLabels: graph.LabelSetKey(label),
+			Target:    graph.LabelSetKey(tgt),
+		}
+	}
+	srcs := []graph.LabelSetKey{"Author"}
+	tgts := []graph.LabelSetKey{"Book"}
+
+	_, _, differentLabels := orientationDisagreement([]schema.EdgeKey{
+		key("Author", "REVIEWED", "Book"),
+		key("Book", "EDITED", "Author"),
+	}, srcs, tgts)
+	s.Require().False(differentLabels,
+		"REVIEWED one way and EDITED the other is a multi-type union (§4.6 case D), not one edge type whose direction is undecided")
+
+	// Control: the same two sides, one label, is the disagreement.
+	_, _, sameLabel := orientationDisagreement([]schema.EdgeKey{
+		key("Author", "REVIEWED", "Book"),
+		key("Book", "REVIEWED", "Author"),
+	}, srcs, tgts)
+	s.Require().True(sameLabel,
+		"the assertion above must fail on the label, not on the sides")
 }
 
 // TestEdgeUnionKeysAreASet asserts ResolvedEdgeUnion.EdgeKeys carries each
