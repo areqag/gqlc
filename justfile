@@ -157,20 +157,21 @@ test-codegen-fence: ensure-golangci
 #
 # -count=1 so a developer asking for a live run gets containers, not the cache.
 test-codegen-live:
-    cd test/data/codegen && go test -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit' ./...
+    cd test/data/codegen && go test -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation' ./...
 
 # the neo4j half: both driver arms in parallel against one neo4j:5-community
 # image. This is the half PR CI blocks on, so its wall time is a PR's wall time.
 test-codegen-live-neo4j:
     cd test/data/codegen && go test -tags codegen_live -run TestLiveSmoke -skip 'TestLiveSmoke/apache-age' ./...
 
-# the Apache AGE half: the smoke battery's AGE arm and the session-init
-# contract, each on its own apache/age container. Nightly and manual only —
-# these containers are cost this project does not charge to a pull request.
-# -count=1 because this is the AGE arm's only gate and no pull request pays for
-# it, so the run it reports on has to be a real one.
+# the Apache AGE half: the smoke battery's AGE arm, the session-init contract
+# and the dialect fact the AGE backend's edge-union refusal rests on, each on
+# its own apache/age container. Nightly and manual only — these containers are
+# cost this project does not charge to a pull request. -count=1 because this is
+# the AGE arm's only gate and no pull request pays for it, so the run it reports
+# on has to be a real one.
 test-codegen-live-age:
-    cd test/data/codegen && go test -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit' -skip 'TestLiveSmoke/neo4j' ./...
+    cd test/data/codegen && go test -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation' -skip 'TestLiveSmoke/neo4j' ./...
 
 # call-graph-aware vulnerability scan; run on dependency changes and on the
 # weekly CI schedule ("@latest" deliberate: the vuln DB matters more than
