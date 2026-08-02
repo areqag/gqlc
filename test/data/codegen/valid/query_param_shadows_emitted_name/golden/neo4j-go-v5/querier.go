@@ -15,7 +15,7 @@ type ReadQuerier interface {
 	ReceiverShadow(ctx context.Context, arg string) (string, error)
 	ContextShadow(ctx context.Context, arg string) (string, error)
 	ImportShadow(ctx context.Context, arg string) (string, error)
-	HelperShadow(ctx context.Context, arg string) (string, error)
+	HelperShadow(ctx context.Context, arg string) (Person, error)
 	ErrShadow(ctx context.Context, arg string) (string, error)
 	RecordsShadow(ctx context.Context, arg string) ([]string, error)
 	OutShadow(ctx context.Context, arg string) ([]string, error)

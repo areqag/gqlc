@@ -502,47 +502,47 @@ func (q *Queries) ImportShadow(ctx context.Context, arg string) (string, error) 
 	return value0, nil
 }
 
-const helperShadowQueryText = `MATCH (p:Person) WHERE p.name = $agtypeArgs RETURN p.name`
+const helperShadowQueryText = `MATCH (p:Person) WHERE p.name = $decodePerson RETURN p`
 
 // HelperShadow executes the HelperShadow query.
 //
-//	MATCH (p:Person) WHERE p.name = $agtypeArgs RETURN p.name
-func (q *Queries) HelperShadow(ctx context.Context, arg string) (string, error) {
+//	MATCH (p:Person) WHERE p.name = $decodePerson RETURN p
+func (q *Queries) HelperShadow(ctx context.Context, arg string) (Person, error) {
 	stmt, err := q.cypherStmt("$gqlc$", helperShadowQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
-		return "", err
+		return Person{}, err
 	}
-	args, err := agtypeArgs(map[string]any{"agtypeArgs": arg})
+	args, err := agtypeArgs(map[string]any{"decodePerson": arg})
 	if err != nil {
-		return "", err
+		return Person{}, err
 	}
 	rows, err := q.db.Query(ctx, stmt, args)
 	if err != nil {
-		return "", fmt.Errorf("HelperShadow: %w", err)
+		return Person{}, fmt.Errorf("HelperShadow: %w", err)
 	}
 	defer rows.Close()
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
-			return "", fmt.Errorf("HelperShadow: %w", err)
+			return Person{}, fmt.Errorf("HelperShadow: %w", err)
 		}
-		return "", ErrNoRows
+		return Person{}, ErrNoRows
 	}
 	var raw0 []byte
 	if err := rows.Scan(&raw0); err != nil {
-		return "", fmt.Errorf("HelperShadow: scan row: %w", err)
+		return Person{}, fmt.Errorf("HelperShadow: scan row: %w", err)
 	}
 	if rows.Next() {
-		return "", ErrMultipleResults
+		return Person{}, ErrMultipleResults
 	}
 	if err := rows.Err(); err != nil {
-		return "", fmt.Errorf("HelperShadow: %w", err)
+		return Person{}, fmt.Errorf("HelperShadow: %w", err)
 	}
 	if raw0 == nil {
-		return "", fmt.Errorf("HelperShadow: column %q is non-nullable but arrived null", "p.name")
+		return Person{}, fmt.Errorf("HelperShadow: column %q is non-nullable but arrived null", "p")
 	}
-	value0, err := agtypeString(raw0)
+	value0, err := decodePerson(raw0)
 	if err != nil {
-		return "", fmt.Errorf("HelperShadow: decode column %q: %w", "p.name", err)
+		return Person{}, fmt.Errorf("HelperShadow: decode column %q: %w", "p", err)
 	}
 	return value0, nil
 }

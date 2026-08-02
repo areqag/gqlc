@@ -25,12 +25,16 @@
 // The third group is what the signature itself binds — the receiver and
 // the context argument — and the fourth is a package-level name the body
 // resolves but no emitted declaration introduces: an import, and a
-// helper. Those four did not compile, and generation reported none of
-// them, because the format gate parses the emission and does not
-// type-check it. $Blank is the odd one out: it mangled to the empty
-// string and reached gofmt as a parameter with no name, so it was the
-// only member of the class that failed loudly, and it failed pointing at
-// a column in querier.go rather than at the parameter.
+// decoder. HelperShadow returns the entity so that the decoder is
+// actually called, and its parameter is named to reproduce the decoder's
+// own name, which derives from the schema — so this is the member of the
+// class that a reserved-name list could not have held, since the set of
+// decoders varies with the graph type. Those four did not compile, and
+// generation reported none of them, because the format gate parses the
+// emission and does not type-check it. $_ is the odd one out: it mangled
+// to the empty string and reached gofmt as a parameter with no name, so
+// it was the only member of the class that failed loudly, and it failed
+// pointing at a column in querier.go rather than at the parameter.
 //
 // These are here so the corpus compiles them: this fixture is enrolled
 // in all three targets, so TestGoldenBuild type-checks every one of
@@ -80,7 +84,7 @@ MATCH (p:Person) WHERE p.name = $ctx RETURN p.name
 MATCH (p:Person) WHERE p.name = $fmt RETURN p.name
 
 // name: HelperShadow :one
-MATCH (p:Person) WHERE p.name = $agtypeArgs RETURN p.name
+MATCH (p:Person) WHERE p.name = $decodePerson RETURN p
 
 // name: ErrShadow :one
 MATCH (p:Person) WHERE p.name = $err RETURN p.name

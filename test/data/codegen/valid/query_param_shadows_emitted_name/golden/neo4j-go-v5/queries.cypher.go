@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
 const personByStmtQueryText = `MATCH (p:Person) WHERE p.name = $stmt RETURN p.name`
@@ -293,28 +294,32 @@ func (q *Queries) ImportShadow(ctx context.Context, arg string) (string, error) 
 	return value, nil
 }
 
-const helperShadowQueryText = `MATCH (p:Person) WHERE p.name = $agtypeArgs RETURN p.name`
+const helperShadowQueryText = `MATCH (p:Person) WHERE p.name = $decodePerson RETURN p`
 
 // HelperShadow executes the HelperShadow query.
 //
-//	MATCH (p:Person) WHERE p.name = $agtypeArgs RETURN p.name
-func (q *Queries) HelperShadow(ctx context.Context, arg string) (string, error) {
-	records, err := q.db.run(ctx, helperShadowQueryText, map[string]any{"agtypeArgs": arg}, neo4j.AccessModeRead)
+//	MATCH (p:Person) WHERE p.name = $decodePerson RETURN p
+func (q *Queries) HelperShadow(ctx context.Context, arg string) (Person, error) {
+	records, err := q.db.run(ctx, helperShadowQueryText, map[string]any{"decodePerson": arg}, neo4j.AccessModeRead)
 	if err != nil {
-		return "", err
+		return Person{}, err
 	}
 	if len(records) == 0 {
-		return "", ErrNoRows
+		return Person{}, ErrNoRows
 	}
 	if len(records) > 1 {
-		return "", ErrMultipleResults
+		return Person{}, ErrMultipleResults
 	}
-	value, isNil, err := neo4j.GetRecordValue[string](records[0], "p.name")
+	node, isNil, err := neo4j.GetRecordValue[dbtype.Node](records[0], "p")
 	if err != nil {
-		return "", fmt.Errorf("HelperShadow: decode column %q: %w", "p.name", err)
+		return Person{}, fmt.Errorf("HelperShadow: decode column %q: %w", "p", err)
 	}
 	if isNil {
-		return "", fmt.Errorf("HelperShadow: column %q is non-nullable but arrived null", "p.name")
+		return Person{}, fmt.Errorf("HelperShadow: column %q is non-nullable but arrived null", "p")
+	}
+	value, err := decodePerson(node)
+	if err != nil {
+		return Person{}, fmt.Errorf("HelperShadow: decode column %q: %w", "p", err)
 	}
 	return value, nil
 }
