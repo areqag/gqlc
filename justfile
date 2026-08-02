@@ -346,29 +346,45 @@ vuln-root-residual:
     #!/usr/bin/env bash
     set -euo pipefail
     module="$(go list -m)"
+    # Emits one line per entry, and nothing at all for an empty set — an empty
+    # `echo` would feed `comm` a phantom entry and make the ratchet compare
+    # against a set it never measured.
+    lines() { [ -n "${1}" ] && printf '%s\n' "${1}" || true; }
+
+    # One `go list` feeds both halves, so the counts and the blind set can never
+    # disagree about which files are in the tree, and both read the build
+    # govulncheck itself loads rather than the checkout.
+    listing="$(go list -f '{{{{.ImportPath}} {{{{len .TestGoFiles}} {{{{len .XTestGoFiles}} {{{{join .TestImports " "}}' ./...)"
+    if [ -z "${listing}" ]; then
+        echo "error: 'go list ./...' matched no packages in the root module, so this" >&2
+        echo "       recipe is measuring nothing (bd gqlc-m5rc)." >&2
+        exit 1
+    fi
+
     inpackage=0
     external=0
-    while IFS= read -r f; do
-        pkg="$(sed -n 's/^package[[:space:]]\{1,\}\([A-Za-z_][A-Za-z0-9_]*\).*$/\1/p' "$f" | head -1)"
-        case "$pkg" in
-            *_test) external=$((external + 1)) ;;
-            *) inpackage=$((inpackage + 1)) ;;
-        esac
-    done < <(git ls-files '*_test.go' | grep -v '^test/data/codegen/')
-    blind="$(go list -f '{{{{.ImportPath}} {{{{join .TestImports " "}}' ./... |
-        while read -r pkg imports; do
-            for i in ${imports}; do
-                case "$i" in "$module" | "$module"/*) continue ;; esac
-                case "${i%%/*}" in *.*)
-                    echo "${pkg#"$module"/}"
-                    break
-                    ;;
-                esac
-            done
-        done | sort -u)"
+    blind=""
+    while read -r pkg intest xtest imports; do
+        inpackage=$((inpackage + intest))
+        external=$((external + xtest))
+        for i in ${imports}; do
+            case "$i" in "$module" | "$module"/*) continue ;; esac
+            case "${i%%/*}" in *.*)
+                blind+="${pkg#"$module"/}"$'\n'
+                break
+                ;;
+            esac
+        done
+    done <<<"${listing}"
+    blind="$(printf '%s' "${blind}" | sort -u)"
+    if [ "$((inpackage + external))" -eq 0 ]; then
+        echo "error: the root module has no test files at all, so this recipe and the" >&2
+        echo "       ratchet below are measuring nothing (bd gqlc-m5rc)." >&2
+        exit 1
+    fi
     echo "root module test-file packaging (bd gqlc-m5rc): ${inpackage} in-package, ${external} external"
-    echo "  in-package tests import third-party code in $(echo "${blind}" | grep -c .) packages — those call edges are outside govulncheck's call graph:"
-    echo "${blind}" | sed 's/^/    /'
+    echo "  in-package tests import third-party code in $(lines "${blind}" | grep -c . || true) packages — those call edges are outside govulncheck's call graph:"
+    lines "${blind}" | sed 's/^/    /'
 
     # The ratchet baseline. Every entry is a package whose in-package tests
     # already import third-party code; the list shrinks as bd gqlc-m5rc converts
@@ -386,8 +402,8 @@ vuln-root-residual:
     internal/schema/gql/isobnf
     BLIND
     )"
-    grew="$(comm -23 <(echo "${blind}" | grep -v '^$') <(echo "${baseline}" | grep -v '^$') || true)"
-    shrank="$(comm -13 <(echo "${blind}" | grep -v '^$') <(echo "${baseline}" | grep -v '^$') || true)"
+    grew="$(comm -23 <(lines "${blind}") <(lines "${baseline}") || true)"
+    shrank="$(comm -13 <(lines "${blind}") <(lines "${baseline}") || true)"
     if [ -n "${grew}" ]; then
         echo "error: a package just went blind to govulncheck (bd gqlc-m5rc):" >&2
         echo "${grew}" | sed 's/^/         /' >&2
