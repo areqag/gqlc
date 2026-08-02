@@ -122,23 +122,26 @@ Phase-B-resolvable node binding before Phase C closes deferred edges.
 
 Three helpers in `resolve.go`:
 
-- **`edgeCandidates(e query.EdgeBinding, src, tgt graph.LabelSetKey,
+- **`edgeCandidates(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey,
   s schema.Schema) []schema.EdgeKey`** (new). Enumerates the closed
   candidate set for one edge binding whose endpoints are already
-  committed: it forms **one candidate `EdgeKey` per (label, orientation)
-  pair** and returns only the pairs the schema declares. Ordering is
-  deterministic — see §4.4. Callable from both Phase A2 (labelled
-  endpoints) and Phase C (Phase-B-inferred endpoints); the caller
-  supplies the endpoint keys. The candidate set is closed against the
-  schema at construction: an entry in the return slice is *by
-  construction* a key present in `s.Edges`.
+  committed: it forms **one candidate `EdgeKey` per (label, source key,
+  target key, orientation) tuple** and returns only the ones the schema
+  declares. Ordering is deterministic — see §4.4. Callable from both
+  Phase A2 (labelled endpoints) and Phase C (Phase-B-inferred
+  endpoints); the caller supplies the endpoint keys, plural where the
+  label expression is satisfied by several declared node types (ADR
+  0022). The candidate set is closed against the schema at
+  construction: an entry in the return slice is *by construction* a key
+  present in `s.Edges`.
 
 - **`closeEdge`** (revised). R1's `closeEdge` formed a single candidate
   `EdgeKey`, looked it up, and either recorded or failed with
   `ErrUnknownEdge`. R3's `closeEdge` calls `edgeCandidates`, applies the
   §4.6 verdict (zero → `ErrUnknownEdge`; one → `ResolvedEdge`; two+ →
-  `ResolvedEdgeUnion` for multi-type, `ErrAmbiguousEdgeOrientation` for
-  single-type undirected), and records the resolved shape against the
+  `ErrAmbiguousEdgeOrientation` for a single-type undirected binding
+  whose candidates swap the pattern's endpoints, `ResolvedEdgeUnion`
+  otherwise), and records the resolved shape against the
   binding's variable — as a new companion table
   (`resolvedEdgeCand map[string][]schema.EdgeKey`) alongside R1's
   `resolvedEdgeType map[string]schema.EdgeType` and `resolvedEdgeKey
@@ -211,14 +214,14 @@ information.
 
 ```go
 // ResolvedEdgeUnion is a multi-candidate edge whole-entity projection:
-// the closed set of schema EdgeKeys the resolver committed for a
-// multi-type edge binding whose labels (or the label × orientation
-// cross-product for an undirected multi-type edge) resolve to more than
-// one edge in the schema. Produced by R3 for a RefProjection whose Ref
-// names an EdgeBinding with a multi-candidate committed set (§4.6). The
-// single-candidate case stays ResolvedEdge (§3.1). EdgeKeys is
-// deterministic — the ordering is per §4.4 — and non-empty; the empty
-// case is ErrUnknownEdge, the single case is ResolvedEdge.
+// the closed set of schema EdgeKeys the resolver committed for an edge
+// binding whose labels × endpoints × orientations cross-product (§4.4)
+// resolves to more than one edge in the schema. Produced by R3 for a
+// RefProjection whose Ref names an EdgeBinding with a multi-candidate
+// committed set (§4.6). The single-candidate case stays ResolvedEdge
+// (§3.1). EdgeKeys is deterministic — the ordering is per §4.4 — and
+// non-empty; the empty case is ErrUnknownEdge, the single case is
+// ResolvedEdge.
 type ResolvedEdgeUnion struct {
     EdgeKeys []schema.EdgeKey `json:"edgeKeys"`
 }
@@ -239,13 +242,17 @@ func (ResolvedEdgeUnion) isResolvedType() {}
 ```
 
 **Producer surface.** `ResolvedEdgeUnion` is produced only in the
-multi-candidate case, exactly per the ADR 0009 R3 line ("multi-type
-edges as one candidate key per type") extended with the orientation
-cross-product for undirected patterns. `len(EdgeKeys) >= 2` is a
+multi-candidate case, per the ADR 0009 R3 line ("multi-type edges as
+one candidate key per type") extended with the orientation
+cross-product for undirected patterns and with the endpoint
+cross-product for endpoints that bind plural (ADR 0022). The last of
+those is why a *single*-type binding can also produce a union, whose
+members then all carry one label. `len(EdgeKeys) >= 2` is a
 constructor invariant (the single-candidate case stays `ResolvedEdge`,
-the zero-candidate case fails `ErrUnknownEdge`, the ambiguous-single-
-type-undirected case fails `ErrAmbiguousEdgeOrientation` — see §4.6's
-verdict table).
+the zero-candidate case fails `ErrUnknownEdge`, the single-type
+undirected case whose candidates disagree about which of the pattern's
+endpoints the edge runs from fails `ErrAmbiguousEdgeOrientation` — see
+§4.6's verdict table).
 
 **Ordering.** `EdgeKeys` is emitted in **§4.4's canonical order**: outer
 loop iterates `e.Labels()` in first-appearance order (parser Stage 8's
@@ -299,18 +306,18 @@ schema must declare the property with structurally-equal `Type` and
 
 ### 3.5 The double-match decision, recorded
 
-For an **undirected single-type single-hop edge** whose two candidate
-`EdgeKey`s both resolve against the schema (`s.Edges` contains both
-`{A, L, B}` and `{B, L, A}` as distinct entries), the resolver
-**errors** with `ErrAmbiguousEdgeOrientation` (§5.1). The
-fail-message lists both matched keys and names the offending binding
-variable. The decision and its considered alternatives are recorded
-in §4.6's verdict table and its rationale block. The resolved shape
-of every other case (single-match, zero-match, multi-type,
-var-length) is determined without ambiguity error; the only
-double-match arm that raises `ErrAmbiguousEdgeOrientation` is the
-single-type single-hop undirected × double-schema-match arm — every
-other multi-candidate case emits `ResolvedEdgeUnion`.
+For an **undirected single-type single-hop edge** whose candidate set
+contains a **side disagreement** — two candidates that do not agree
+about which of the pattern's two endpoints the edge runs *from* — the
+resolver **errors** with `ErrAmbiguousEdgeOrientation` (§5.1). The
+fail-message lists one witness from each side and names the offending
+binding variable. The decision and its considered alternatives are
+recorded in §4.6's verdict table and its rationale block. The resolved
+shape of every other case (single-match, zero-match, multi-type,
+var-length) is determined without ambiguity error; the only arm that
+raises `ErrAmbiguousEdgeOrientation` is the single-type single-hop
+undirected × side-disagreement arm — every other multi-candidate case
+emits `ResolvedEdgeUnion`.
 
 The consequence for `ValidatedQuery` shape: `ResolvedEdge` retains a
 single `EdgeKey`, and the "which orientation matched" question is
@@ -386,7 +393,7 @@ passes §4.2:
 of R1 (source-side and target-side keys read once) still holds — the
 orientation *trial* is inside `edgeCandidates`, not `endpointLabels`.
 
-### 4.4 `edgeCandidates` — the labels × orientations × schema cross-product
+### 4.4 `edgeCandidates` — the labels × endpoints × orientations × schema cross-product
 
 Signature and semantics:
 
@@ -396,59 +403,70 @@ Signature and semantics:
 // binding's Labels() in first-appearance order (parser guarantees this
 // via LabelSet's slice-backed representation — iterate with a plain
 // `for _, L := range e.Labels()`); for each label it emits one
-// candidate EdgeKey per orientation admitted by the binding's
-// Directed() marker (one for a directed edge, two for an undirected
-// edge). Each candidate is retained iff the schema declares it
-// (present in s.Edges). The return slice is deterministically
-// ordered: outer loop label-first-appearance, inner loop orientation
-// (source->target before target->source when both apply). The return
-// slice holds each EdgeKey at most once: distinct probes can name one
-// key (an undirected self-loop reverses to itself), so a repeat is
-// dropped and first occurrence keeps its position.
+// candidate EdgeKey per (source key, target key) pair and per
+// orientation admitted by the binding's Directed() marker (one for a
+// directed edge, two for an undirected edge). Each candidate is
+// retained iff the schema declares it (present in s.Edges). The return
+// slice is deterministically ordered: outer loop
+// label-first-appearance, then source key, then target key, innermost
+// loop orientation (source->target before target->source when both
+// apply). The return slice holds each EdgeKey at most once: distinct
+// probes can name one key, so a repeat is dropped and first occurrence
+// keeps its position.
 func edgeCandidates(
     e query.EdgeBinding,
-    src, tgt graph.LabelSetKey,
+    srcs, tgts []graph.LabelSetKey,
     s schema.Schema,
 ) []schema.EdgeKey
 ```
 
+`srcs` and `tgts` are slices because a label expression can be
+satisfied by more than one declared node type (ADR 0022), and an
+endpoint that binds plural reaches edge closure carrying every key it
+satisfies.
+
 **Loop shape.**
 
 ```
-for each label L in e.Labels():        # first-appearance order
-    tryOrientations := [(src, tgt)]    # directed default
-    if !e.Directed():
-        tryOrientations = [(src, tgt), (tgt, src)]
-    for each (S, T) in tryOrientations:
-        k := schema.EdgeKey{Source: S, Label: graph.LabelSet{L}.Key(), Target: T}
-        if _, ok := s.Edges[k]; ok:
-            append k to result
+for each label L in e.Labels():            # first-appearance order
+  for each src in srcs:
+    for each tgt in tgts:
+        tryOrientations := [(src, tgt)]    # directed default
+        if !e.Directed():
+            tryOrientations = [(src, tgt), (tgt, src)]
+        for each (S, T) in tryOrientations:
+            k := schema.EdgeKey{Source: S, Label: graph.LabelSet{L}.Key(), Target: T}
+            if _, ok := s.Edges[k]; ok:
+                append k to result
 ```
 
-- **Directed × single-type**: one iteration → one candidate key
-  attempted → at most one match.
-- **Directed × multi-type** (N labels): N iterations, one candidate
-  attempted each → up to N matches.
-- **Undirected × single-type**: one label, two orientations
-  attempted → up to two matches (the double-match case, §4.6 verdict).
-- **Undirected × multi-type** (N labels): N × 2 candidates attempted
-  → up to 2N matches.
+For N labels, S source keys, T target keys and O orientations (1 when
+directed, 2 when not), the loop attempts N × S × T × O candidates and
+matches at most that many distinct keys. Singular endpoints (S = T = 1)
+give R3's original four shapes: directed × single-type attempts one,
+directed × multi-type N, undirected × single-type two (the double-match
+case, §4.6 verdict), undirected × multi-type 2N.
 
 `edgeCandidates` returns a set: an `(A, L, B)` key appears at most
-once. The loop shape alone does not give this. The orientation pair
-`(S, T)` and `(T, S)` is two probes but one key whenever `S == T`, so
-an undirected edge between endpoints of one node type matches the same
-declared type twice — §4.6 case C's rationale names that key as
-unambiguous, and §4.6 dispatches on the candidate count, so a repeat
+once. The loop shape alone does not give this, and there are two ways a
+repeat arises. The orientation pair `(S, T)` and `(T, S)` is two probes
+but one key whenever `S == T`, so an undirected edge between endpoints
+of one node type matches the same declared type twice. Independently,
+`srcs` and `tgts` that share a key produce the pair `(A, B)` from two
+different points of the endpoint cross-product. Both consumers read the
+result as the distinct declared edge types in play — §4.6 dispatches on
+it and the `ErrUnknownEdge` fail-message enumerates it — so a repeat
 would be read as a second distinct declared type. The membership test
 is therefore load-bearing, not an optimisation. Retention is by first
 occurrence, which leaves the ordering below intact.
 
 **Determinism.** Ranging `e.Labels()` iterates in first-appearance
 order (the underlying `[]string` slice, populated in textual order per
-`internal/graph/labelset.go` and parser Stage 8). The orientation
-inner loop is fixed at `(src, tgt)` then `(tgt, src)`. Both orders
-are stable across runs; the return slice is deterministic.
+`internal/graph/labelset.go` and parser Stage 8). The endpoint loops
+range slices, whose order the caller fixes (`satisfyingNodeTypes`
+sorts). The orientation inner loop is fixed at `(src, tgt)` then
+`(tgt, src)`. All orders are stable across runs; the return slice is
+deterministic.
 
 **Var-length interaction.** `edgeCandidates` does not read `e.Hops()`
 — the hop range is a runtime axis (ADR 0005: the original text runs),
@@ -530,24 +548,168 @@ for every deferred edge, and applies the **verdict table**:
 |---|---|---|---|
 | A | 0 | any | `ErrUnknownEdge` (fail-msg lists tried (label, orientation) pairs) |
 | B | 1 | any | `ResolvedEdge{EdgeKey: cands[0]}`; record in `resolvedEdgeType` / `resolvedEdgeKey` |
-| C | ≥ 2 | `!e.Directed() && len(e.Labels()) == 1` (single-type undirected) | **`ErrAmbiguousEdgeOrientation`** (§5.1); fail-msg lists both matched keys |
-| D | ≥ 2 | any other R3 shape (multi-type; multi-type × undirected; directed multi-type) | `ResolvedEdgeUnion{EdgeKeys: cands}`; record in `resolvedEdgeCand` |
+| C | ≥ 2 | `!e.Directed() && len(e.Labels()) == 1` (single-type undirected) **and** the set contains a side disagreement | **`ErrAmbiguousEdgeOrientation`** (§5.1); fail-msg lists one witness per side |
+| D | ≥ 2 | any other R3 shape (multi-type; multi-type × undirected; directed multi-type; single-type whose candidates plural endpoints multiplied) | `ResolvedEdgeUnion{EdgeKeys: cands}`; record in `resolvedEdgeCand` |
 
-**Rationale — case C (the double-match decision).** The candidate set
-of size 2 for a **single-type undirected edge** arises exactly when
-the schema declares both `{A, L, B}` and `{B, L, A}` as *distinct*
-edge types with the same label. In every practical schema this is a
-modelling choice with meaning — the two directions are distinct
-concepts (`Person → FOLLOWS → Person` where the reciprocal
-`Person → FOLLOWS → Person` in the other direction is also declared:
-the same key, so there is no ambiguity). The genuine double-match
-case requires distinct source/target label sets in the two
-directions (`Author → REVIEWED → Book` and `Book → REVIEWED →
-Author`, if a schema authored that pair). Under those conditions,
-the author's undirected `[:REVIEWED]` is genuinely ambiguous: does
-the pattern refer to authors reviewing books, or books reviewing
-authors? The resolver cannot infer intent; it forces the author to
-disambiguate by writing a directed arrow, and it says so.
+**The side disagreement, defined.** Phase C holds the two endpoint key
+slices it enumerated the candidates from: `srcs`, the keys the pattern
+puts on the left, and `tgts`, the keys it puts on the right. A candidate
+`k` has two *readings*, and each is a claim about **both** its endpoints:
+
+- `k` **reads left-to-right** when `k.Source ∈ srcs` and
+  `k.Target ∈ tgts`.
+- `k` **reads right-to-left** when `k.Source ∈ tgts` and
+  `k.Target ∈ srcs`.
+
+Classify each candidate by which readings hold:
+
+- exactly one reading — the candidate belongs to that side.
+- **both** readings — it carries no orientation signal and is skipped.
+  The pattern can bind its endpoints either way round and get the same
+  key, so the candidate is its own counterparty; reporting it would name
+  one key on both sides of the message. A self-loop key is the
+  degenerate instance.
+- neither reading — unreachable: `edgeProbes` builds every candidate
+  from an `(src, tgt)` pair taken from the two slices in one order or
+  the other.
+
+The set contains a **side disagreement** when both of the one-reading
+classes are non-empty *for the same label*. Only same-label candidates
+are compared: two different edge types running opposite ways is case
+D's multi-type union, and the sentinel's message would be false of it.
+Case C's `len(e.Labels()) == 1` guard already makes this vacuous at the
+call site; it is stated here because the predicate carries it rather
+than borrowing it.
+
+An exact mirror — `{A, L, B}` alongside `{B, L, A}` — is **one shape**
+the disagreement takes, not the definition of it. §4.6.1 works the
+counterexample.
+
+**Why the skip arm is about both endpoints.** It is tempting to write
+the skip as "`Source` sits in both slices" — a self-loop satisfies it,
+and so does the symmetric case below. It is strictly weaker, and it
+fails on the ordinary shape of a subtype schema, which is what ADR 0022
+exists to serve. Take
+
+```gql
+(:Person&Employee) -[:REVIEWED { rating::INT NOT NULL }]-> (:Person),
+(:Person)          -[:REVIEWED { rating::INT NOT NULL }]-> (:Person&Employee)
+```
+
+and `(a:Employee)-[r:REVIEWED]-(b:Person)`. Here
+`srcs = {Employee&Person}` and `tgts = {Person, Employee&Person}`, so
+`srcs ⊂ tgts` and **every** candidate `Source` sits in both slices — a
+`Source`-only skip classifies nothing, for any query on any schema of
+this shape, and the check silently cannot fire. Yet the candidate set is
+`{ Employee&Person-[REVIEWED]->Person , Person-[REVIEWED]->Employee&Person }`,
+the exact mirror, and the `Target`s do separate the two readings. Corpus:
+`invalid/ambiguous_edge_orientation_overlapping_endpoints` and its
+`_reversed` twin, one per subset direction.
+
+The property that licenses skipping is not overlap, it is **symmetry**:
+a candidate the pattern reads the same either way. `srcs == tgts` makes
+every candidate symmetric — and that is the case where the arrow is
+genuinely inert, because the directed twin's probe set `srcs × tgts` is
+then the same set as the undirected one's
+`(srcs × tgts) ∪ (tgts × srcs)`. The skip is applied per candidate, not
+per query: under weaker overlap a symmetric candidate is still skipped
+individually, but at least one asymmetric candidate survives to decide
+the verdict, and against that one the arrow still drops probes — so it
+is still a remedy, so refusing is still advice the author can act on.
+Held by
+`TestOrientationDisagreementSkipsOnlyWhatReadsBothWays` (the four slice
+shapes) and `TestAmbiguousOrientationRemedyIsTheArrow` (the remedy, on
+one parsed schema per row).
+
+**Rationale — case C (the double-match decision).** A side
+disagreement in the candidate set of a **single-type undirected edge**
+means the schema declares that label running both ways across the
+pattern. In every practical schema this is a modelling choice with
+meaning — the two directions are distinct concepts. Note it is not
+implied by a reciprocal declaration: `Person → FOLLOWS → Person`
+declared "both ways" is the same key with `Source` on both sides, no
+disagreement, no ambiguity. The genuine case requires the two
+directions to land on distinct node types — `Author → REVIEWED → Book`
+alongside `Book → REVIEWED → Author`. Under those conditions the
+author's undirected `[:REVIEWED]` is genuinely ambiguous: does the
+pattern refer to authors reviewing books, or books reviewing authors?
+The resolver cannot infer intent; it forces the author to disambiguate
+by writing a directed arrow, and it says so.
+
+**Why the side test and not the candidate count.** The count answered
+this question only while an endpoint resolved to one node type. Under
+ADR 0022 an endpoint can bind plural, and the endpoint cross-product
+then multiplies the candidates *along one side*: a schema declaring
+`Person → FOUNDED → Company` and `Person&Employee → FOUNDED → Company`
+answers `(p:Person)-[r:FOUNDED]-(c:Company)` with two candidates that
+both run from a person type to `Company`. Refusing that as an
+orientation ambiguity would name a direction the schema never declared
+in both ways, and would hand the author advice — write the arrow —
+that changes nothing: the directed twin closes to those same two
+candidates and case D types it. Corpus:
+`valid/plural_endpoint_undirected_edge_union` with its directed
+control.
+
+#### 4.6.1 Why the side test and not the swapped pair
+
+The first revision of case C under ADR 0022 tested for the mirror
+directly: refuse when the set holds `{A, L, B}` alongside `{B, L, A}`.
+That is strictly narrower than the class case C names, and the gap is
+reachable. When the reverse declaration lands on a **subtype** of the
+node type the forward one uses, the two candidates cross the pattern in
+opposite directions while being nobody's mirror:
+
+```gql
+(:Author { id::INT NOT NULL, name::STRING NOT NULL }),
+(:Author&Editor { id::INT NOT NULL, name::STRING NOT NULL, desk::INT NOT NULL }),
+(:Book { id::INT NOT NULL, title::STRING NOT NULL }),
+(:Author) -[:REVIEWED { rating::INT NOT NULL }]-> (:Book),
+(:Book)   -[:REVIEWED { rating::INT NOT NULL }]-> (:Author&Editor)
+```
+
+`(a:Author)-[r:REVIEWED]-(b:Book)` closes to
+`{ Author-[REVIEWED]->Book , Book-[REVIEWED]->Author&Editor }`. Neither
+key is the other's mirror, so the mirror test admits both. But `Book`
+is on the pattern's right and sources the second candidate, so this is
+the §4.6 question verbatim — authors reviewing books, or books
+reviewing authors — and both halves of case C's rationale hold on it:
+
+- The endpoint cross-product **did** move an endpoint off the side the
+  pattern puts it on, which is the thing the plural-endpoint carve-out
+  above is careful not to do.
+- The prescribed remedy works. The directed twin
+  `(a:Author)-[r:REVIEWED]->(b:Book)` closes to **one** candidate and
+  case B types it, so writing the arrow really does decide the
+  question. Corpus:
+  `valid/plural_endpoint_reversed_subtype_directed_closes_singular`.
+
+Admitting it was not a widening the author asked for. Whole-entity
+`RETURN r` is bounced one stage later by
+`codegen.ErrUnrepresentableEdgeUnion` (both members carry `REVIEWED`),
+but `RETURN r.rating` reaches nothing that objects: §4.7's union
+property agrees on `INT NOT NULL` and generates compiling code for a
+pattern whose meaning the author never stated. Corpus:
+`invalid/ambiguous_edge_orientation_reversed_subtype` and its
+`_property` twin.
+
+The mirror is therefore a *witness shape* and not the predicate.
+`invalid/ambiguous_edge_orientation` pins the mirror,
+`invalid/ambiguous_edge_orientation_reversed_subtype` pins the
+non-mirror, and `valid/plural_endpoint_symmetric_endpoints_edge_union`
+pins the skip: both endpoints carrying the same label expression makes
+`srcs` and `tgts` equal, so every candidate reads both ways and a set
+holding `Person-[KNOWS]->Person` has no disagreement to report — read as
+one it would name that key as its own counterparty.
+
+Widening in the other direction has the same failure mode and a worse
+blast radius, which the skip arm's own history shows: replacing the
+mirror test with a `Source`-only side test fixed the shape above and
+re-admitted the mirror on every schema whose endpoint sets overlap
+(`invalid/ambiguous_edge_orientation_overlapping_endpoints`). Neither
+revision was caught by the corpus that shipped it. The lesson recorded
+here is procedural: this predicate has two failure directions, so a
+change to it needs a fixture in the direction it *widens*, not only in
+the direction it fixes.
 
 **Rationale — case D (multi-type is union).** The `|` operator in
 `[r:A|B]` is Cypher's union-of-edge-types syntax. An author who
@@ -558,6 +720,53 @@ the operator. The same posture extends to undirected multi-type:
 if the author writes `-[:A|B]-` and the schema supplies four
 matching (label, orientation) pairs, all four join the union — the
 author already opted into the union semantics by writing `|`.
+
+Case D also takes the single-type candidate set that plural endpoints
+multiplied, where the author opted into nothing. The opt-in there came
+from the label expression: ADR 0022 rules that satisfaction is
+satisfaction, so a `(p:Person)` several declared types satisfy really
+does stand for a node of any of them, and the edge types reachable from
+it really are several. The union is the honest reading of the pattern
+rather than a licence the author granted. What the resolver may not
+express — a union whose members share a label, so nothing in an edge
+value tells them apart — is refused where it becomes unrepresentable,
+at code generation (`codegen.ErrUnrepresentableEdgeUnion`), which can
+name the endpoint constraint that fixes it.
+
+That staging is load-bearing, and it covers exactly one projection
+shape. Every union case D admits under the single-type guard has
+same-label members by construction, so **whole-entity** `RETURN r` on
+any of them is refused at code generation. Pinned by the conformance
+fixture
+`test/data/codegen/invalid/plural_endpoint_edge_union_shared_label`,
+which is red from both ends — a resolver that goes back to refusing the
+class fails the fixture's load on the wrong sentinel, and a codegen
+that drops the same-label guard generates instead of refusing.
+
+**Property projection on the same union is not refused anywhere, and
+must not be read as if it were.** On that fixture's own schema,
+
+```
+// name: GetFoundedYear :many
+MATCH (p:Person)-[r:FOUNDED]-(c:Company) RETURN r.foundedYear
+```
+
+generates `GetFoundedYear(ctx) ([]int64, error)` and the CLI exits 0 —
+§4.8's union-property rule finds `INT NOT NULL` on every member and
+agrees. That is correct here: the members differ only in an endpoint
+type the author's pattern already permits, so every member's
+`foundedYear` is a `foundedYear` the query asked for, and one column
+type answers for all of them.
+
+The distinction is what makes it safe, and it is the same distinction
+§4.6.1 turns on in the opposite direction. Case D's members agree about
+which way the edge crosses the pattern; a case C set does not, so its
+property column would silently answer a question the author never
+stated. Codegen's guard is about *representability* — an edge value
+carries no endpoint types — and only whole-entity projection needs to
+carry them. It is therefore not a backstop for orientation ambiguity
+and cannot be cited as one. Anything case C lets through on a property
+projection reaches a backend.
 
 **Rejected verdicts considered and recorded.**
 
@@ -745,14 +954,41 @@ sweep extends transparently.
 
 ```go
 // ErrAmbiguousEdgeOrientation is returned when an undirected single-type
-// single-hop edge binding's two-orientation trial matches TWO distinct
-// EdgeKeys against the schema — the schema declares both
-// {A, L, B} and {B, L, A} as distinct edge types with the same label,
-// and the author's undirected pattern (which carries no `|` union-of-
-// types opt-in) cannot commit to one without erasing the other.
-// Introduced at R3. See §4.6's verdict-C rationale.
+// single-hop edge binding's candidate set contains two candidates that
+// disagree about which of the pattern's two endpoints the edge runs
+// from: one whose Source is a key the pattern puts on the left and whose
+// Target is one it puts on the right, and one for which the same holds
+// with the two sides exchanged. The schema declares this label running
+// both ways across the pattern, and the author's undirected pattern
+// (which carries no `|` union-of-types opt-in) cannot commit to one
+// without erasing the other. Introduced at R3; the test became the side
+// disagreement rather than the candidate count at R3+ADR 0022, when
+// plural endpoints made the count answer a different question. The
+// message names one witness per side and says which side each runs
+// along; it does not enumerate the candidate set, which can be larger.
+// See §4.6's verdict-C rationale.
 var ErrAmbiguousEdgeOrientation = errors.New("ambiguous edge orientation")
 ```
+
+**Fail-message shape.**
+
+```
+ambiguous edge orientation: edge "r" matches
+  Employee&Person-[REVIEWED]->Company left-to-right and
+  Company-[REVIEWED]->Person right-to-left
+```
+
+Two keys, one per side, each labelled with the side it runs along —
+which is also the arrow the author must write to pick it. The
+truncation to two is deliberate: the set can hold three or more once a
+plural endpoint widens a side that is already represented
+(`invalid/ambiguous_edge_orientation_plural_endpoints` holds three), and
+the extras are not things a reader must tell apart. The message
+therefore must not read as an enumeration. An earlier revision said
+"matches both X, Y", which claims exactly that totality and was false of
+that very fixture; "both" is gone for that reason and must not come
+back while the truncation stays. Pinned per fixture by
+`invalidFixtureContains`.
 
 **Naming defence — `ErrAmbiguousEdgeOrientation`, not
 `ErrDoubleOrientationMatch` or `ErrUndirectedEdgeAmbiguity`.** The
@@ -991,6 +1227,49 @@ mapping row is needed for the union-property fixture.
   path).
 - `undirected_var_length_multi_type_property` — combined case (all
   three R3 axes) whole-entity projection.
+- `plural_endpoint_undirected_closes_singular` — §4.6 case B reached
+  through an endpoint that binds plural (ADR 0022): the four probes of
+  the endpoint × orientation cross-product close to the one key the
+  schema declares. The endpoints are **not** narrowed to the node types
+  that key names — see `invalid/plural_endpoint_whole_entity_after_edge_closure`
+  for the half of that answer the corpus refuses, and gqlc-0tft.
+- `plural_endpoint_undirected_edge_union` and
+  `plural_endpoint_directed_edge_union` — §4.6 case D on a
+  **single-type** binding, which only a plural endpoint can produce.
+  The pair is one fixture and its control: both close to the same two
+  candidates, so the two goldens being identical is what says the
+  direction marker no longer decides the verdict on a candidate set it
+  does not change. That identity is asserted by
+  `TestDirectionMarkerIsInertOnAPluralOnlyUnion`, not left as a fact
+  about the committed bytes — both goldens are machine-written from one
+  run, so a divergence would otherwise be absorbed by the next `-update`
+  and the suite would stay green. The assertion is on a *relation*
+  between the two files, which `-update` rewrites but cannot repair.
+- `plural_endpoint_reversed_subtype_directed_closes_singular` — the
+  directed twin of §4.6.1's counterexample, and the fixture that earns
+  case C's remedy on it: writing the arrow drops the right-to-left
+  candidate and case B types what is left. If this closed to two
+  candidates instead, refusing the undirected form would be advice the
+  author cannot act on. That the schema it resolves against is the one
+  the undirected form is refused on is asserted by
+  `TestAmbiguousOrientationRemedyIsTheArrow`, against a single parsed
+  value: `valid/` and `invalid/` hold separate copies of every schema
+  (the harness resolves them per subdir), so the pairing is otherwise a
+  relation between two files that nothing checks. That test carries the
+  remedy claim for every case C shape, so a new refusing schema owes it
+  a row rather than a second copy in `valid/`.
+- `plural_endpoint_symmetric_endpoints_edge_union` — both endpoints
+  carry the same label expression, so `srcs` and `tgts` are equal and
+  every candidate reads both ways across the pattern. §4.6's
+  both-readings classification arm — no orientation signal, skip — is
+  the whole fixture: without it `Person-[KNOWS]->Person` is read as
+  disagreeing with itself and the fail-message names one key twice,
+  which `TestEdgeFailMessagesListEachTriedKeyOnce` exists to forbid.
+  Equal slices is the *only* overlap that earns the skip; the fixture
+  cannot say that on its own, because it is one point of a predicate,
+  so `TestOrientationDisagreementSkipsOnlyWhatReadsBothWays` states it
+  over the four slice shapes and `invalid/ambiguous_edge_orientation_
+  overlapping_endpoints` pins the two the skip must not swallow.
 
 ### 6.4 R3 invalid fixtures — updated `invalidFixtures` map
 

@@ -1,0 +1,27 @@
+{
+  "columns": [
+    {
+      "name": "r",
+      "type": {
+        "kind": "edgeUnion",
+        "edgeKeys": [
+          {
+            "source": "Employee\u0026Person",
+            "key_labels": "FOUNDED",
+            "target": "Company"
+          },
+          {
+            "source": "Person",
+            "key_labels": "FOUNDED",
+            "target": "Company"
+          }
+        ],
+        "nullable": false
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "read",
+  "distinct": false
+}

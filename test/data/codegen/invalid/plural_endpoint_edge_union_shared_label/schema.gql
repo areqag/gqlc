@@ -1,0 +1,10 @@
+CREATE PROPERTY GRAPH TYPE PluralEndpointEdgeUnionSharedLabel AS {
+    (:Person  { id :: INT64 NOT NULL }),
+    (:Company { id :: INT64 NOT NULL }),
+    NODE TYPE PersonEmployee (:Person&Employee {
+        id         :: INT64 NOT NULL,
+        employeeId :: INT64 NOT NULL
+    }),
+    DIRECTED EDGE TYPE FoundedByPerson   (:Person)          -[:FOUNDED { foundedYear :: INT64 NOT NULL }]-> (:Company),
+    DIRECTED EDGE TYPE FoundedByEmployee (:Person&Employee) -[:FOUNDED { foundedYear :: INT64 NOT NULL }]-> (:Company)
+}

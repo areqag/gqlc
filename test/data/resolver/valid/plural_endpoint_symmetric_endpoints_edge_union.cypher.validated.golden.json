@@ -1,0 +1,27 @@
+{
+  "columns": [
+    {
+      "name": "r",
+      "type": {
+        "kind": "edgeUnion",
+        "edgeKeys": [
+          {
+            "source": "Person",
+            "key_labels": "KNOWS",
+            "target": "Employee\u0026Person"
+          },
+          {
+            "source": "Person",
+            "key_labels": "KNOWS",
+            "target": "Person"
+          }
+        ],
+        "nullable": false
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "read",
+  "distinct": false
+}

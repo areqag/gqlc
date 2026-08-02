@@ -1,0 +1,41 @@
+-- Plural label satisfaction (ADR 0022) where one endpoint's satisfying set is
+-- a strict SUBSET of the other's, and the schema declares the edge both ways
+-- between the two node types.
+--
+-- `(:Person)` is satisfied by both declared types; `(:Employee)` by one of
+-- them. So `(a:Employee)-[r:REVIEWED]-(b:Person)` has
+--   srcs = { Employee&Person }
+--   tgts = { Person, Employee&Person }
+-- and srcs is contained in tgts. Every candidate's Source key therefore sits on
+-- BOTH sides of the pattern, while the candidate set is the exact mirror
+--   { Employee&Person-[REVIEWED]->Person , Person-[REVIEWED]->Employee&Person }
+-- — the textbook orientation ambiguity R3 §4.6 case C names. Classifying a
+-- candidate by its Source alone reads every candidate here as carrying no
+-- orientation signal, so no candidate is ever classified forward and the
+-- disagreement can never be reported; classifying by BOTH endpoints separates
+-- them. Swapping the two label expressions makes tgts the subset instead and
+-- reverses which candidate is the forward witness.
+--
+-- The skip arm this schema defeats is licensed by srcs and tgts being EQUAL —
+-- only then are the directed twin's probes the same set as the undirected
+-- one's, so only then is the arrow inert. Here the arrow is a real remedy:
+-- the directed twin closes to one candidate and case B types it, which
+-- TestAmbiguousOrientationRemedyIsTheArrow asserts on this schema.
+
+CREATE PROPERTY GRAPH TYPE SatisfyPluralEdgesOverlapping AS {
+
+    (:Person {
+        id   :: INT NOT NULL,
+        name :: STRING NOT NULL
+    }),
+
+    (:Person&Employee {
+        id         :: INT NOT NULL,
+        name       :: STRING NOT NULL,
+        employeeId :: INT NOT NULL
+    }),
+
+    (:Person&Employee) -[:REVIEWED { rating :: INT NOT NULL }]-> (:Person),
+    (:Person)          -[:REVIEWED { rating :: INT NOT NULL }]-> (:Person&Employee)
+
+}

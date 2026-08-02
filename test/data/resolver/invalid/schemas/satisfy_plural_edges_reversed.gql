@@ -1,0 +1,36 @@
+-- Plural label satisfaction (ADR 0022) with declared edges, one of which is
+-- also declared in the opposite direction.
+--
+-- `(:Person)` is satisfied by both declared person types, so an edge binding
+-- with `(p:Person)` at one end closes over a cross-product of endpoint keys.
+-- WORKS_AT is declared on one member of that cross-product; REVIEWED on two,
+-- plus the Company -> Person reverse. An undirected `[:REVIEWED]` therefore
+-- closes to three candidates of which only the last two swap the pattern's
+-- endpoints — the arm that separates a genuine orientation ambiguity from a
+-- candidate set that plural satisfaction merely widened.
+
+CREATE PROPERTY GRAPH TYPE SatisfyPluralEdgesReversed AS {
+
+    (:Person {
+        id   :: INT NOT NULL,
+        name :: STRING NOT NULL
+    }),
+
+    (:Person&Employee {
+        id         :: INT NOT NULL,
+        name       :: STRING NOT NULL,
+        employeeId :: INT NOT NULL
+    }),
+
+    (:Company {
+        id   :: INT NOT NULL,
+        name :: STRING NOT NULL
+    }),
+
+    (:Person&Employee) -[:WORKS_AT { since :: INT NOT NULL }]-> (:Company),
+
+    (:Person)          -[:REVIEWED { rating :: INT NOT NULL }]-> (:Company),
+    (:Person&Employee) -[:REVIEWED { rating :: INT NOT NULL }]-> (:Company),
+    (:Company)         -[:REVIEWED { rating :: INT NOT NULL }]-> (:Person)
+
+}

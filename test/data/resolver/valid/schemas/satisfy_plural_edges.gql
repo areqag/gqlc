@@ -1,0 +1,34 @@
+-- Plural label satisfaction (ADR 0022) with declared edges: `(:Person)` is
+-- satisfied by both declared node types, so an edge binding whose endpoint is
+-- `(p:Person)` closes over a cross-product of endpoint keys rather than one.
+--
+-- WORKS_AT is declared on one member of that cross-product and FOUNDED on two,
+-- which puts the two sides of the R3 §4.6 candidate-count dispatch on the same
+-- schema. `id` and `name` are shared with identical type and nullability so
+-- property projection through the plural binding survives the ADR 0022
+-- intersection.
+
+CREATE PROPERTY GRAPH TYPE SatisfyPluralEdges AS {
+
+    (:Person {
+        id   :: INT NOT NULL,
+        name :: STRING NOT NULL
+    }),
+
+    (:Person&Employee {
+        id         :: INT NOT NULL,
+        name       :: STRING NOT NULL,
+        employeeId :: INT NOT NULL
+    }),
+
+    (:Company {
+        id   :: INT NOT NULL,
+        name :: STRING NOT NULL
+    }),
+
+    (:Person&Employee) -[:WORKS_AT { since :: INT NOT NULL }]-> (:Company),
+
+    (:Person)          -[:FOUNDED { foundedYear :: INT NOT NULL }]-> (:Company),
+    (:Person&Employee) -[:FOUNDED { foundedYear :: INT NOT NULL }]-> (:Company)
+
+}

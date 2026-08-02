@@ -1,0 +1,34 @@
+-- Plural label satisfaction (ADR 0022) where BOTH endpoints of the pattern
+-- carry the same label expression, so the two endpoint key slices are equal.
+--
+-- `(:Person)` is satisfied by both declared person types, so
+-- `(a:Person)-[r:KNOWS]-(b:Person)` closes over a 2 x 2 endpoint
+-- cross-product and matches the two declared KNOWS keys
+--   { Person-[KNOWS]->Employee&Person , Person-[KNOWS]->Person }
+-- Every candidate's source key sits on BOTH sides of the pattern, so no
+-- candidate says which of the pattern's endpoints the edge runs from. There is
+-- no orientation to disagree about: the directed twin of the pattern closes to
+-- the same two candidates, so the arrow that §4.6 case C prescribes would
+-- change nothing. §4.6 case D types it.
+--
+-- `Person-[KNOWS]->Person` is the shape that makes the "no orientation signal"
+-- skip load-bearing rather than merely correct: read as a disagreement it is
+-- its own counterparty, and the fail-message would name one key twice.
+
+CREATE PROPERTY GRAPH TYPE SatisfyPluralEdgesSymmetric AS {
+
+    (:Person {
+        id   :: INT NOT NULL,
+        name :: STRING NOT NULL
+    }),
+
+    (:Person&Employee {
+        id         :: INT NOT NULL,
+        name       :: STRING NOT NULL,
+        employeeId :: INT NOT NULL
+    }),
+
+    (:Person) -[:KNOWS { since :: INT NOT NULL }]-> (:Person),
+    (:Person) -[:KNOWS { since :: INT NOT NULL }]-> (:Person&Employee)
+
+}
