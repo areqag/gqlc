@@ -451,6 +451,58 @@ case "$(last_line)" in
     *) bad "the summary line carries the postcondition warning" "got: $(last_line)" ;;
 esac
 
+# --- ...and a detector that could not run must say so ------------------------
+# The first `bd list` failing is fail-closed and loud (SKIPPING pull). The
+# second was fail-open and mute: `|| : >beads_post.json` fed the detector an
+# empty file, `if not after: sys.exit(0)` swallowed it, and `|| true` swallowed
+# the rest, so the run came out byte-identical to a healthy one.
+#
+# That is worse than it sounds, because the second call fails exactly when
+# something else holds the Dolt lock — which is the scenario (`bd hooks run
+# post-merge` replaying JSONL over newer DB state) the detector exists to
+# catch. The detector was disarmed by the very event it detects. A blind run
+# must never be mistakable for an armed one on the line a `tail -1` caller
+# keeps.
+
+GH7='[{"number":7,"state":"OPEN","body":"same"}]'
+
+# The control: same fixture, healthy second snapshot, nothing moved. The blind
+# notice must not be a thing that just always prints.
+run_sync pull "[$CLAIMED]" "$GH7" '[]' "[$CLAIMED]"
+case "$(last_line)" in
+    *"held-bead check did not run"*)
+        bad "an armed postcondition is quiet" "cried blind on a healthy run: $(last_line)" ;;
+    *) ok "a postcondition that ran does not claim it was skipped" ;;
+esac
+
+blind_case() { # $1=name; the stub knob is set by the caller
+    run_sync pull "[$CLAIMED]" "$GH7" '[]' "[$CLAIMED]"
+    case "$(last_line)" in
+        *"held-bead check did not run"*)
+            ok "an unusable post-pull snapshot is reported ($1)" ;;
+        *)
+            bad "an unusable post-pull snapshot is reported ($1)" \
+                "indistinguishable from a healthy run: $(last_line)" ;;
+    esac
+}
+
+bd_list_fails 2;                              blind_case "'bd list' exits non-zero"
+bd_list_emits 2 '';                           blind_case "no output"
+bd_list_emits 2 ' ';                          blind_case "whitespace only"
+bd_list_emits 2 '[]';                         blind_case "empty bead list"
+bd_list_emits 2 '[{"id":"b-claim","stat';     blind_case "truncated JSON"
+bd_list_emits 2 'bd: fatal: not a workspace'; blind_case "not JSON at all"
+
+# ...naming which of the two it was, because they call for different actions:
+# a non-zero `bd list` is contention on the database (wait and re-run), output
+# that parsed to nothing is corruption (go look).
+bd_list_fails 2 3
+run_sync pull "[$CLAIMED]" "$GH7" '[]' "[$CLAIMED]"
+case "$(last_line)" in
+    *"'bd list' exited 3"*) ok "the blind notice names the exit status it saw" ;;
+    *) bad "the blind notice names the exit status it saw" "got: $(last_line)" ;;
+esac
+
 # --- the summary line must report the outcome, not the intent ----------------
 # .claude/settings.json keeps only the last stderr line, so it has to carry the
 # shape of the run rather than whatever notice happened to print last.

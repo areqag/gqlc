@@ -210,11 +210,21 @@ PYEOF
   # things that revert a claim behind this script's back are conditional on
   # some other bead happening to be pullable. Arming the detector only when a
   # pull runs disarms it permanently.
+  #
+  # The detector also has to report its own liveness. The second snapshot fails
+  # exactly when something else holds the bd database — which is the same event
+  # (`bd hooks run post-merge` replaying JSONL) the detector exists to catch —
+  # so a swallowed failure here means the detector is disarmed by its own
+  # trigger, and the run reads byte-for-byte like a healthy one. The status file
+  # is written by the python below and starts empty, so "the check did not run
+  # at all" is as visible as "the check ran and could not see".
   : >"$_tmp/moved.txt"
+  : >"$_tmp/post_status.txt"
+  _post_rc=0
   bd list --status all --limit 0 --json >"$_tmp/beads_post.json" 2>/dev/null \
-    || : >"$_tmp/beads_post.json"
+    || { _post_rc=$?; : >"$_tmp/beads_post.json"; }
   python3 - "$_tmp/beads.json" "$_tmp/beads_post.json" "$_tmp/allow.txt" \
-    "$_tmp/moved.txt" >&2 <<'PYEOF' || true
+    "$_tmp/moved.txt" "$_tmp/post_status.txt" >&2 <<'PYEOF' || true
 import json, sys
 
 def statuses(path):
@@ -224,10 +234,22 @@ def statuses(path):
     except Exception:
         return {}
 
+def status(text):
+    with open(sys.argv[5], "w", encoding="utf-8") as fh:
+        fh.write(text + "\n")
+
 before = statuses(sys.argv[1])
 after = statuses(sys.argv[2])
-if not before or not after:
+if not before:
+    # No baseline to compare against, so there is nothing this check could have
+    # caught and nothing to warn about. Unreachable in practice: an unreadable
+    # first snapshot already took the SKIPPING branch above.
+    status("VACUOUS")
     sys.exit(0)
+if not after:
+    status("BLIND post-pull bead list unreadable")
+    sys.exit(0)
+status("OK")
 try:
     with open(sys.argv[3], encoding="utf-8") as fh:
         allowed = {ln.strip() for ln in fh if ln.strip()}
@@ -252,6 +274,25 @@ with open(sys.argv[4], "w", encoding="utf-8") as fh:
         fh.write(bid + "\n")
 PYEOF
 
+  # A check that could not run is a finding in its own right: the operator is
+  # owed the difference between "nothing moved" and "nobody looked". An empty
+  # status file means the python itself never got far enough to write one.
+  _blind=""
+  case "$(cat "$_tmp/post_status.txt" 2>/dev/null)" in
+    OK | VACUOUS) ;;
+    BLIND*) _blind="the post-pull bead list was unreadable" ;;
+    *) _blind="the check itself did not run" ;;
+  esac
+  if [ -n "$_blind" ] && [ "$_post_rc" -ne 0 ]; then
+    _blind="'bd list' exited ${_post_rc}"
+  fi
+  if [ -n "$_blind" ]; then
+    echo "bd-gh-sync: could not re-read the bead list after the pull (${_blind})." >&2
+    echo "bd-gh-sync: that usually means something else holds the bd database — which" >&2
+    echo "bd-gh-sync: is also what reverts a claim behind this script's back. Re-run" >&2
+    echo "bd-gh-sync: 'git pull' once it is free, or check claims with 'bd list'." >&2
+  fi
+
   # Last line, and the only line a `tail -1` caller keeps
   # (.claude/settings.json). It therefore has to report what happened rather
   # than what was intended: a failed `bd github sync` writes its own error
@@ -267,6 +308,9 @@ PYEOF
     _names=$(head -n 3 "$_tmp/moved.txt" | tr '\n' ' ' | sed 's/ $//;s/ /, /g')
     [ "$_moved" -gt 3 ] && _names="${_names}, +$((_moved - 3)) more"
     _summary="${_summary} WARNING: ${_moved} bead(s) held out of the pull changed anyway (${_names}); see the WARNING lines above for the command to re-assert them."
+  fi
+  if [ -n "$_blind" ]; then
+    _summary="${_summary} WARNING: the held-bead check did not run (${_blind}); a bead reverted behind this script's back would not have been reported."
   fi
   echo "$_summary" >&2
   exit 0
