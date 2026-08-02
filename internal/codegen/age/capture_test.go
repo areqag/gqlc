@@ -325,10 +325,21 @@ func (s *EmissionSuite) emitCapturing(fx ageFixture, param string) map[string]st
 }
 
 // emitQueryFiles generates a fixture's batch and returns the
-// <name>.cypher.go files by path. Those are the files a query parameter
-// is in scope in: a name declared in another file of the package is
-// reachable from a method body too, but capturing one is a hard failure
-// of the generated package rather than a silent one (gqlc-ni66).
+// <name>.cypher.go files by path. That is the whole of this guard's
+// parse set, and it is narrower than the scope a query parameter is
+// bound in: the generated package is one Go package, so a method body
+// also resolves what db.go and models.go declare, and none of those
+// declarations is swept here.
+//
+// Nothing structural closes that gap. It is closed only by how the
+// current cross-file set happens to be typed — ErrNoRows and
+// ErrMultipleResults are error-typed, DBTX and Queries are types, New is
+// a func, maxGraphNameBytes is an untyped int no .cypher.go body reads —
+// so a STRING parameter shadowing any of them fails to compile rather
+// than silently taking its place. A string-typed cross-file declaration
+// referenced from a method body would be the silent case, and this guard
+// would not see it. Widening the parse set to the whole emitted package
+// is gqlc-dfcb.
 func (s *EmissionSuite) emitQueryFiles(fx ageFixture, queries []codegen.NamedQuery, label string) map[string]string {
 	files, err := age.New(age.WithPackageName(fx.pkg)).Generate(codegen.Input{Schema: fx.schema, Queries: queries})
 	s.Require().NoError(err, "fixture %s under %s", fx.name, label)
