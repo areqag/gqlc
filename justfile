@@ -279,15 +279,20 @@ test-codegen-live-age:
 # that in the nested module by making the battery an external test package. The
 # ROOT module — the one that ships the compiler — still has it: 34 in-package
 # test files against 16 external, with third-party imports in the in-package
-# tests of ten packages, internal/cli, internal/codegen{,/age,/neo4j},
-# internal/config, internal/queryfile, internal/resolver and
-# internal/schema/gql{,/annexd,/isobnf}. A called vulnerability reachable only
-# from one of those files exits 0 here. Measured, not assumed: planting a
-# yaml.Unmarshal call into internal/schema/gql/propertytype_test.go
-# (`package gql`) reports nothing; the identical call in a `package gql_test`
-# file reports it with a trace.
+# tests of ten packages (vuln-root-residual below enumerates and ratchets them).
+# A called vulnerability reachable only from one of those files exits 0 here.
 #
-# The trap is that -test DOES raise the root module count 31 → 42, and the
+# Measured, not assumed. Single-variable A/B at root, only the package clause
+# changed: pin golang.org/x/text@v0.37.0 and put a norm.NFC.String call in
+# internal/schema/gql. Under `package gql` the scan prints "No vulnerabilities
+# found" and exits 0; under `package gql_test` it exits 3 (`go run` relays that
+# as "exit status 3") reporting GO-2026-5970 with the trace
+# "gql_test.TestRVPlant calls norm.Form.String". The pin is what gives the A/B
+# its discriminating power — the gopkg.in/yaml.v3 v3.0.1 this module already
+# requires carries no advisory at all, so an A/B built on it reports nothing in
+# either arm and would "pass" against a gate that saw everything.
+#
+# The trap is that -test DOES raise the root module count 32 → 43, and the
 # module set is in fact complete — modelling the visible closure with `go list`
 # and diffing it against the full -test closure leaves no residual module and no
 # residual package. So every symptom you would think to look for says the gate
@@ -298,15 +303,27 @@ vuln: vuln-root-residual
     go run golang.org/x/vuln/cmd/govulncheck@latest -test ./...
     cd test/data/codegen && go run golang.org/x/vuln/cmd/govulncheck@latest -tags codegen_live -test ./...
 
-# Prints the root module's residual blindness to `just vuln`, so it is a number
-# measured on every scan rather than a claim in a comment that rots (bd
-# gqlc-m5rc). Reports, does not fail: the residual is the repo's existing house
-# style, and turning it into a ratchet would fail every branch that adds an
-# in-package test — a policy call that belongs to the conversion bead, not to
-# CI plumbing. Deliberately counts files and packages rather than modules: the
-# module and package sets are already complete (verified by set-differencing the
-# visible closure against the full -test closure), so a module-level metric here
-# would report a reassuring zero over the real gap.
+# Measures the root module's residual blindness, so it is a number taken on
+# every run rather than a claim in a comment that rots (bd gqlc-m5rc). Wired
+# into `just vuln` and, as a step in ci.yml's lint job, into every pull request.
+# Reachability is the point: the residual moves on PRs that add a test file, and
+# vuln.yml scans nothing unless a go.mod changed, so a residual reported only
+# from `just vuln` is a residual nobody ever sees move.
+#
+# The two halves are graded differently on purpose. The file counts REPORT — a
+# new in-package test is this repo's house style, and failing on it would be
+# churn with no risk behind it. The blind set RATCHETS: a package whose
+# in-package tests import third-party code has those call edges outside
+# govulncheck's graph, and the set grows only on the risk event itself, a package
+# acquiring an import it cannot be scanned through. The baseline is the set
+# rather than the count so that a trip can name the package that went blind, and
+# it is checked in both directions — a package that leaves the set has to leave
+# the baseline too, or the ratchet quietly regains the slack it just won.
+#
+# Deliberately counts files and packages rather than modules: the module and
+# package sets are already complete (verified by set-differencing the visible
+# closure against the full -test closure), so a module-level metric here would
+# report a reassuring zero over the real gap.
 #
 # "Third-party" is anything outside the main module whose first path element
 # contains a dot, which is what puts a package in a vulnerability database at
@@ -345,6 +362,43 @@ vuln-root-residual:
     echo "root module test-file packaging (bd gqlc-m5rc): ${inpackage} in-package, ${external} external"
     echo "  in-package tests import third-party code in $(echo "${blind}" | grep -c .) packages — those call edges are outside govulncheck's call graph:"
     echo "${blind}" | sed 's/^/    /'
+
+    # The ratchet baseline. Every entry is a package whose in-package tests
+    # already import third-party code; the list shrinks as bd gqlc-m5rc converts
+    # them and must never grow.
+    baseline="$(sort <<'BLIND'
+    internal/cli
+    internal/codegen
+    internal/codegen/age
+    internal/codegen/neo4j
+    internal/config
+    internal/queryfile
+    internal/resolver
+    internal/schema/gql
+    internal/schema/gql/annexd
+    internal/schema/gql/isobnf
+    BLIND
+    )"
+    grew="$(comm -23 <(echo "${blind}" | grep -v '^$') <(echo "${baseline}" | grep -v '^$') || true)"
+    shrank="$(comm -13 <(echo "${blind}" | grep -v '^$') <(echo "${baseline}" | grep -v '^$') || true)"
+    if [ -n "${grew}" ]; then
+        echo "error: a package just went blind to govulncheck (bd gqlc-m5rc):" >&2
+        echo "${grew}" | sed 's/^/         /' >&2
+        echo "       Its in-package tests now import third-party code, and govulncheck discards" >&2
+        echo "       the in-package test variant together with everything only it imports — so a" >&2
+        echo "       vulnerability called through that import reports nothing and 'just vuln'" >&2
+        echo "       exits 0. Move the importing test to an external test package (package" >&2
+        echo "       <pkg>_test); only add the package to the baseline in this recipe if the test" >&2
+        echo "       genuinely needs unexported state, and say why in the commit message." >&2
+        exit 1
+    fi
+    if [ -n "${shrank}" ]; then
+        echo "error: these packages are no longer blind, so the baseline in this recipe is stale:" >&2
+        echo "${shrank}" | sed 's/^/         /' >&2
+        echo "       Delete them from it. A baseline left above the measured set is slack the" >&2
+        echo "       ratchet will hand back to the next package that goes blind (bd gqlc-m5rc)." >&2
+        exit 1
+    fi
 
 # lints the GitHub Actions workflow files
 actionlint:
