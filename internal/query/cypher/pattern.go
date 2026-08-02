@@ -3,6 +3,7 @@ package cypher
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/antlr4-go/antlr/v4"
 
@@ -399,12 +400,23 @@ func (l *listener) recordEndpointRefs(eps ...query.Endpoint) {
 }
 
 // mergeBinding records a binding for variable in the current part, deduping the
-// part's named bindings by variable in first-appearance order and unioning their
+// part's named bindings by variable in first-appearance order and combining their
 // labels (ordered, first appearance, C2). Dedup is per-part: a name re-MATCHed in
 // a later part is a fresh binding there (spec §3). A variable seen as both a node
 // and an edge within a part is a kind conflict (recorded for build()). For an
-// edge's first occurrence the endpoints are set; later occurrences merge labels
-// only. group is honoured only on first introduction (ADR 0006; ay9): a
+// edge's first occurrence the endpoints are set; later occurrences combine labels
+// only.
+//
+// How labels combine depends on the kind, because the two entity kinds carry
+// labels differently. A node holds any number of labels at once, so occurrences
+// conjoin to the union: (n:Person) and (n:Employee) demand a node carrying both.
+// A relationship holds exactly one type, so an occurrence's types are
+// alternatives and occurrences conjoin to the intersection of those candidate
+// sets; an empty intersection admits no relationship at all and is refused as
+// ErrUnsatisfiableRelationshipType rather than widened into the union a single
+// `[r:A|B]` occurrence would produce.
+//
+// group is honoured only on first introduction (ADR 0006; ay9): a
 // binding's nullability and OPTIONAL-group membership are static facts about
 // its *introducing* clause; a later non-OPTIONAL occurrence neither sets nor
 // clears them — that demotion is the resolver's job (gqlc-lqm). Stage 8: hops
@@ -428,7 +440,16 @@ func (l *listener) mergeBinding(variable string, kind graph.EntityKind, labels g
 		l.fail(fmt.Errorf("%w: %q", ErrVariableKindConflict, variable))
 		return
 	}
-	rb.mergeLabels(labels)
+	if kind == graph.Edge {
+		prior := rb.labels
+		if !rb.intersectLabels(labels) {
+			l.fail(fmt.Errorf("%w: relationship variable %q is constrained to %s by an earlier occurrence and to %s here, and a relationship has exactly one type, so no relationship satisfies both",
+				ErrUnsatisfiableRelationshipType, variable, strings.Join(prior, "|"), strings.Join(labels, "|")))
+			return
+		}
+	} else {
+		rb.mergeLabels(labels)
+	}
 	if group == 0 && bare {
 		// 5xg: the current occurrence is a required (non-OPTIONAL) bare
 		// pattern re-reference of a binding that was previously introduced.
@@ -452,6 +473,44 @@ func (rb *rawBinding) mergeLabels(labels graph.LabelSet) {
 		rb.seen[label] = true
 		rb.labels = append(rb.labels, label)
 	}
+}
+
+// intersectLabels narrows an edge binding's candidate relationship types by one
+// further occurrence of the same variable, and reports whether any candidate
+// survives. Survivors keep the accumulated set's first-appearance order (C2).
+//
+// An occurrence that names no type (-[r]-) is the identity element: it excludes
+// nothing, so it must leave the set alone rather than empty it. That makes an
+// empty label set unambiguous — it means no occurrence has constrained the
+// binding yet, never that every candidate has been excluded, because the
+// exclusion case returns false instead of storing the empty set.
+func (rb *rawBinding) intersectLabels(labels graph.LabelSet) bool {
+	if len(labels) == 0 {
+		return true
+	}
+	if len(rb.labels) == 0 {
+		rb.mergeLabels(labels)
+		return true
+	}
+	admitted := make(map[string]bool, len(labels))
+	for _, label := range labels {
+		admitted[label] = true
+	}
+	survivors := make(graph.LabelSet, 0, len(rb.labels))
+	for _, label := range rb.labels {
+		if admitted[label] {
+			survivors = append(survivors, label)
+		}
+	}
+	if len(survivors) == 0 {
+		return false
+	}
+	rb.labels = survivors
+	rb.seen = make(map[string]bool, len(survivors))
+	for _, label := range survivors {
+		rb.seen[label] = true
+	}
+	return true
 }
 
 // nodeLabels reads a node's conjunctive labels in source order.

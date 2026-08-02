@@ -3029,6 +3029,19 @@ var mustReject = map[string]struct {
 		query: "CREATE (a {name: b.c})",
 		want:  cypher.ErrUnboundVariable,
 	},
+	// AUTHORED (gqlc-rrtl): one relationship variable re-bound to two
+	// disjoint type sets in one part. The TCK has no scenario for it —
+	// the shape is legal openCypher that simply matches nothing, so no
+	// TCK error class covers it — and the sentinel taxonomy is ours.
+	// Fail-site: mergeBinding's edge arm, where the occurrences'
+	// candidate sets intersect to empty. The full behavioural table
+	// (which shapes reach it, what the surviving set is when the
+	// intersection is non-empty) lives in pattern_test.go; this pin
+	// exists so the sentinel is reachable from the canonical sweep.
+	"relationship variable re-bound to a disjoint type": {
+		query: "MATCH (:Person)-[r:AUTHORED]->(:Post), (:Person)-[r:LIKES]->(:Post) RETURN r",
+		want:  cypher.ErrUnsatisfiableRelationshipType,
+	},
 }
 
 func TestMustReject(t *testing.T) {
@@ -3116,29 +3129,17 @@ func TestMustRejectGrammar(t *testing.T) {
 	}
 }
 
-// allSentinels is the canonical list of the seven Parse sentinels — the
-// single source of truth TestSentinelReachability checks against. A new
-// sentinel must be added here (and exercised by a mustReject case); a
-// removed one must be dropped. errNotImplemented is deliberately absent:
-// it is the run-A stub, not a contract sentinel. Stage 6 retired
-// ErrUnsupportedProjection: the projection classifier now accepts every
-// scalar expression at RETURN / WITH position. Stage 8 retired
-// ErrUnsupportedPattern. Stage 11 added ErrPatternInProjection. Stage 12
-// added ErrNestedPropertyTarget. Stage 14 retires ErrUnsupportedClause
-// entirely (its last fail-site was CALL, which is supported after
-// Stage 14) and adds ErrUnknownProcedure and ErrProcedureArity.
-// The internal model-invariant sentinel ErrEmptyPart lives on the query
-// package (not cypher) and is NOT included here — it is unreachable via
-// parse, so a reachability sweep would fail.
-var allSentinels = []error{
-	cypher.ErrUnsupportedParameter,
-	cypher.ErrUnboundVariable,
-	cypher.ErrVariableKindConflict,
-	cypher.ErrPatternInProjection,
-	cypher.ErrNestedPropertyTarget,
-	cypher.ErrUnknownProcedure,
-	cypher.ErrProcedureArity,
-}
+// allSentinels is the canonical list of Parse sentinels TestSentinelReachability
+// sweeps against, read from the package under test so this list cannot drift
+// from the one the codegen fixture loader resolves fully-qualified names
+// against. A new sentinel must be exercised by a mustReject case; a removed one
+// must be dropped from both. Stage 6 retired ErrUnsupportedProjection: the
+// projection classifier now accepts every scalar expression at RETURN / WITH
+// position. Stage 8 retired ErrUnsupportedPattern. Stage 11 added
+// ErrPatternInProjection. Stage 12 added ErrNestedPropertyTarget. Stage 14
+// retires ErrUnsupportedClause entirely (its last fail-site was CALL, which is
+// supported after Stage 14) and adds ErrUnknownProcedure and ErrProcedureArity.
+var allSentinels = cypher.AllSentinels()
 
 // TestSentinelReachability is the bidirectional sweep (mirroring schema/gql): the
 // set of sentinels the mustReject cases cover must be a subset of the canonical
