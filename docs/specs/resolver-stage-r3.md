@@ -611,9 +611,12 @@ a candidate the pattern reads the same either way. `srcs == tgts` makes
 every candidate symmetric — and that is the case where the arrow is
 genuinely inert, because the directed twin's probe set `srcs × tgts` is
 then the same set as the undirected one's
-`(srcs × tgts) ∪ (tgts × srcs)`. Nothing weaker earns the skip: with any
-other overlap the arrow still drops probes, so it is still a remedy, so
-refusing is still advice the author can act on. Held by
+`(srcs × tgts) ∪ (tgts × srcs)`. The skip is applied per candidate, not
+per query: under weaker overlap a symmetric candidate is still skipped
+individually, but at least one asymmetric candidate survives to decide
+the verdict, and against that one the arrow still drops probes — so it
+is still a remedy, so refusing is still advice the author can act on.
+Held by
 `TestOrientationDisagreementSkipsOnlyWhatReadsBothWays` (the four slice
 shapes) and `TestAmbiguousOrientationRemedyIsTheArrow` (the remedy, on
 one parsed schema per row).
