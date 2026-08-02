@@ -9,7 +9,7 @@
 # test/data/codegen one, so a bump confined to the nested go.mod has to trigger
 # the scan too — otherwise the live battery's driver and container dependencies
 # can be upgraded into a known vulnerability with no PR ever scanning them
-# (bd gqlc-rohp).
+# (ADR 0026, bd gqlc-rohp).
 name: vuln
 
 on:

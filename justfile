@@ -134,53 +134,24 @@ bd-export-monotonic-local:
 # — the tag there would be inert, and vet already builds what it analyses.
 # golangci-lint reads the tag from .golangci.yml.
 #
-# check-codegen-external-tests runs FIRST, before the linter. Ordering is
-# load-bearing: reverting the battery to `package fixtures` also trips the
-# ireturn allowlist in .golangci.yml (22 issues), so with the linter ahead of it
-# the guard was never reached on the one regression it exists to catch, and the
-# failure a developer saw named ireturn rather than the scan. The allowlist is
-# doing that job by accident and only while those eight interface types exist;
-# the guard has to be able to report on its own terms.
+# check-codegen-external-tests runs ahead of the linter: both fail on the same
+# regression, and only the guard names the scan it protects (ADR 0026).
 test-codegen-fence: ensure-golangci check-codegen-external-tests
     cd test/data/codegen && go build ./... && go vet -tags codegen_live ./...
     cd test/data/codegen && go mod tidy -diff
     cd test/data/codegen && {{golangci}} run
 
 # Holds the nested module to the packaging that keeps it inside govulncheck's
-# call graph. This is the only always-run required gate over that module, so it
-# is the only place the convention can be held (bd gqlc-rohp).
+# call graph (ADR 0026, bd gqlc-rohp). This is the only always-run required gate
+# over that module, so it is the only place the convention can be held.
 #
-# The mechanism, precisely, because a wrong account of it is how someone
-# reasons their way back into the bug. govulncheck builds its package graph
-# keyed by PkgPath and skips any package whose PkgPath is already present,
-# *without descending into that package's imports* — PackageGraph.AddPackages,
-# x/vuln internal/vulncheck/packages.go. The in-package test variant
-# `p [p.test]` carries PkgPath `p`, the same key as the plain package `p`, which
-# go/packages returns first; so the variant and everything only it imports are
-# discarded with no diagnostic. It is not a contest that a richer package wins:
-# a directory holding nothing but in-package _test.go files still produces a
-# plain `p` entry with no Go files and no imports, and that empty entry takes
-# the key just the same (measured). An external test package survives only
-# because PkgPath `p_test` collides with nothing.
-#
-# Two assertions. The first is the convention; the second is the consequence
-# that actually matters, because a guard that only pins today's spelling is not
-# a guard:
-#
-#  1. every _test.go anywhere under the module declares an external test
-#     package. Whole subtree rather than a top-level glob, and the package name
-#     is parsed out of the clause rather than matched as a whole line — the
-#     previous `grep -qx 'package fixtures'` form was defeated by a trailing
-#     comment, by any file below the module root, and by matching nothing at all
-#     (grep exits 2, `!` turns that into success). Empty file set is a failure
-#     here, not a pass.
-#  2. the package closure govulncheck will actually load still reaches
-#     testcontainers-go. That closure is the non-test deps plus the deps of
-#     every external test package — the set AddPackages ends up with — and
-#     modelling it with `go list` reproduces govulncheck's own count exactly: 54
-#     modules today, against 9 for the non-test build alone. This catches what
-#     (1) cannot: a dropped codegen_live tag, a deleted or renamed battery, a
-#     move of the container code behind a different tag.
+# Two assertions, because a guard that only pins today's spelling is not a
+# guard. The first is the convention: every _test.go anywhere under the module
+# declares an external test package. The second is the consequence that
+# actually matters: the package closure govulncheck will load — the non-test
+# deps plus every external test package's deps — still reaches
+# testcontainers-go. It catches what the first cannot, a dropped codegen_live
+# tag or a move of the container code behind a different one.
 [private]
 check-codegen-external-tests:
     #!/usr/bin/env bash
@@ -278,70 +249,38 @@ test-codegen-live-age:
 # packages and modules each invocation matched, which is the standing evidence
 # that the widened scan still covers both modules.
 #
-# WHAT THIS GATE STILL DOES NOT SEE. govulncheck does not analyse the in-package
-# test variant of a package: its graph is keyed by PkgPath and the variant
-# `p [p.test]` shares PkgPath `p` with the plain package, which is added first,
-# so the variant is skipped along with everything only it imports
-# (PackageGraph.AddPackages, x/vuln internal/vulncheck/packages.go). rohp closed
-# that in the nested module by making the battery an external test package. The
-# ROOT module — the one that ships the compiler — still has it: 34 in-package
-# test files against 16 external, with third-party imports in the in-package
-# tests of ten packages (vuln-root-residual below enumerates and ratchets them).
-# A called vulnerability reachable only from one of those files exits 0 here.
-#
-# Measured, not assumed. Single-variable A/B at root, only the package clause
-# changed: pin golang.org/x/text@v0.37.0 and put a norm.NFC.String call in
-# internal/schema/gql. Under `package gql` the scan prints "No vulnerabilities
-# found" and exits 0; under `package gql_test` it exits 3 (`go run` relays that
-# as "exit status 3") reporting GO-2026-5970 with the trace
-# "gql_test.TestRVPlant calls norm.Form.String". The pin is what gives the A/B
-# its discriminating power — the gopkg.in/yaml.v3 v3.0.1 this module already
-# requires carries no advisory at all, so an A/B built on it reports nothing in
-# either arm and would "pass" against a gate that saw everything.
-#
-# The trap is that -test DOES raise the root module count 32 → 43, and the
-# module set is in fact complete — modelling the visible closure with `go list`
-# and diffing it against the full -test closure leaves no residual module and no
-# residual package. So every symptom you would think to look for says the gate
-# is closed. What is missing is only call edges, which nothing in the output
-# reports. bd gqlc-m5rc converts those files; vuln-root-residual below is the
-# number in the meantime.
+# WHAT THIS GATE STILL DOES NOT SEE: the root module's in-package tests, whose
+# imports govulncheck discards, so a called vulnerability reachable only from
+# one of those files exits 0 here (ADR 0026). vuln-root-residual below measures
+# and ratchets that blind spot; bd gqlc-m5rc closes it.
 vuln: vuln-root-residual
     go run golang.org/x/vuln/cmd/govulncheck@latest -test -show verbose ./...
     cd test/data/codegen && go run golang.org/x/vuln/cmd/govulncheck@latest -tags codegen_live -test -show verbose ./...
 
-# Measures the root module's residual blindness, so it is a number taken on
-# every run rather than a claim in a comment that rots (bd gqlc-m5rc). Wired
-# into `just vuln` and, as a step in ci.yml's lint job, into every pull request.
-# Reachability is the point: the residual moves on PRs that add a test file, and
-# vuln.yml scans nothing unless a go.mod changed, so a residual reported only
-# from `just vuln` is a residual nobody ever sees move.
+# Measures the root module's residual blindness (ADR 0026), so it is a number
+# taken on every run rather than a claim in a comment that rots (bd gqlc-m5rc).
+# Wired into `just vuln` and, as a step in ci.yml's lint job, into every pull
+# request. Reachability is the point: the residual moves on PRs that add a test
+# file, and vuln.yml scans nothing unless a go.mod changed, so a residual
+# reported only from `just vuln` is a residual nobody ever sees move.
 #
 # The two halves are graded differently on purpose. The file counts REPORT — a
 # new in-package test is this repo's house style, and failing on it would be
-# churn with no risk behind it. The blind set RATCHETS: a package whose
-# in-package tests import third-party code has those call edges outside
-# govulncheck's graph, and the set grows only on the risk event itself, a package
-# acquiring an import it cannot be scanned through. The baseline is the set
-# rather than the count so that a trip can name the package that went blind, and
-# it is checked in both directions — a package that leaves the set has to leave
-# the baseline too, or the ratchet quietly regains the slack it just won.
+# churn with no risk behind it. The blind set RATCHETS: it grows only on the risk
+# event itself, a package acquiring a third-party import it cannot be scanned
+# through. The baseline is the set rather than the count so that a trip can name
+# the package that went blind, and it is checked in both directions — a package
+# that leaves the set has to leave the baseline too, or the ratchet quietly
+# regains the slack it just won.
 #
-# Deliberately counts files and packages rather than modules: the module and
-# package sets are already complete (verified by set-differencing the visible
-# closure against the full -test closure), so a module-level metric here would
-# report a reassuring zero over the real gap.
+# Files and packages rather than modules: no third-party module or package is
+# missing from the closure govulncheck loads, only call edges are, so a
+# module-level metric here would report a reassuring zero over the real gap
+# (ADR 0026).
 #
 # "Third-party" is anything outside the main module whose first path element
 # contains a dot, which is what puts a package in a vulnerability database at
 # all; .TestImports is exactly the in-package test variant's import set.
-#
-# The number is not one sed away, which is why it is a bead and not a chore:
-# mechanically renaming all 34 clauses to a _test suffix breaks 11 packages with
-# 138 distinct undefined identifiers, 53 of them unexported. Some of those tests
-# want unexported state for good reasons and should stay in-package; the goal is
-# to shrink the residual and know its size, not to reach zero by exporting
-# things that should stay private.
 vuln-root-residual:
     #!/usr/bin/env bash
     set -euo pipefail

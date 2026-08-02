@@ -31,9 +31,9 @@ Write new tests in an **external** test package (`package foo_test`) wherever
 the test does not need unexported access. govulncheck does not analyse the
 in-package test variant, so a dependency only an in-package test imports is
 outside its call graph and a *called* vulnerability there does not fail the
-gate. `just vuln` prints how much of the root module is currently in that blind
-spot; bd gqlc-m5rc is shrinking it, and `just test-codegen-fence` already holds
-the nested `test/data/codegen` module at zero.
+gate (ADR 0026). `just vuln` prints how much of the root module is currently in
+that blind spot; bd gqlc-m5rc is shrinking it, and `just test-codegen-fence`
+already holds the nested `test/data/codegen` module at zero.
 
 The hooks split the same checks by budget: pre-commit blocks master commits and
 gates formatting (sub-second); pre-push runs the suite and diff-scoped lint
