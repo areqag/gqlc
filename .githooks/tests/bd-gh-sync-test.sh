@@ -451,6 +451,52 @@ case "$(last_line)" in
     *) bad "the summary line carries the postcondition warning" "got: $(last_line)" ;;
 esac
 
+# The claim is that a held bead comes back *unchanged*, and description
+# clobbering is the entire threat model this scoping exists to address — a
+# check that watches only `status` watches the wrong column. b-amend2 below is
+# exactly the shape the append-only rule holds back: a bd-only amendment that a
+# --prefer-github pull would revert.
+AMENDED="{\"id\":\"b-amend3\",\"status\":\"in_progress\",\"external_ref\":\"$ISSUE/7\",\"description\":\"line one\nbd only amendment\"}"
+run_sync pull "[$AMENDED]" '[{"number":7,"state":"OPEN","body":"line one"}]' '[]' \
+    "[{\"id\":\"b-amend3\",\"status\":\"in_progress\",\"external_ref\":\"$ISSUE/7\",\"description\":\"line one\"}]"
+if ! grep -q 'WARNING b-amend3' "$TMP/err"; then
+    bad "a held bead whose description was clobbered is reported" \
+        "silent; last line: $(last_line)"
+elif ! grep -q 'description' "$TMP/err"; then
+    bad "a held bead whose description was clobbered is reported" \
+        "warned without naming the field: $(grep WARNING "$TMP/err" | head -n 1)"
+else
+    ok "a held bead whose description was clobbered is reported"
+fi
+case "$(last_line)" in
+    *WARNING*b-amend3*) ok "a clobbered description reaches the tail -1 caller" ;;
+    *) bad "a clobbered description reaches the tail -1 caller" "got: $(last_line)" ;;
+esac
+
+# Both fields at once must read as one warning about one bead, not two beads.
+run_sync pull "[$AMENDED]" '[{"number":7,"state":"OPEN","body":"line one"}]' '[]' \
+    "[{\"id\":\"b-amend3\",\"status\":\"open\",\"external_ref\":\"$ISSUE/7\",\"description\":\"clobbered\"}]"
+if [ "$(grep -c 'WARNING b-amend3' "$TMP/err")" -ne 1 ]; then
+    bad "status and description moving together is one warning" \
+        "$(grep -c 'WARNING b-amend3' "$TMP/err") warnings"
+elif ! grep -q 'WARNING b-amend3 was held out of the pull but changed in_progress -> open, description' "$TMP/err"; then
+    bad "status and description moving together is one warning" \
+        "got: $(grep 'WARNING b-amend3' "$TMP/err")"
+else
+    ok "a bead whose status and description both moved warns once, naming both"
+fi
+
+# Trailing-whitespace churn is not a clobber, and a check that cries wolf gets
+# `2>/dev/null` bolted onto it.
+run_sync pull "[$AMENDED]" '[{"number":7,"state":"OPEN","body":"line one"}]' '[]' \
+    "[{\"id\":\"b-amend3\",\"status\":\"in_progress\",\"external_ref\":\"$ISSUE/7\",\"description\":\"line one\nbd only amendment\n\"}]"
+if grep -q 'WARNING' "$TMP/err"; then
+    bad "trailing whitespace is not a description change" \
+        "$(grep WARNING "$TMP/err" | head -n 1)"
+else
+    ok "a held bead whose description only gained trailing whitespace is quiet"
+fi
+
 # --- ...and a detector that could not run must say so ------------------------
 # The first `bd list` failing is fail-closed and loud (SKIPPING pull). The
 # second was fail-open and mute: `|| : >beads_post.json` fed the detector an

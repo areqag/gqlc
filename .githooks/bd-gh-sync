@@ -28,7 +28,8 @@
 #            Selection failing for any reason yields an empty allowlist and no
 #            pull at all.
 #            Whatever the allowlist, the run ends by re-reading the bead list
-#            and reporting any out-of-scope bead whose status moved — the
+#            and reporting any out-of-scope bead whose status or description
+#            moved, plus the fact that it could not look if it could not — the
 #            allowlist is empty in the steady state, so a postcondition
 #            conditional on a pull would never run. The last stderr line
 #            carries the outcome, warnings included, because the session-start
@@ -237,10 +238,11 @@ PYEOF
     echo "bd-gh-sync: no bead is eligible for a --prefer-github pull; no pull issued." >&2
   fi
 
-  # Postcondition: a bead held out of scope must come back unchanged. Scoping
-  # is an argument about what --issues means, and this measures whether the
-  # argument held. It catches a reverted claim whatever moved it, including the
-  # JSONL replay in `bd hooks run post-merge` — that reverts in_progress to
+  # Postcondition: a bead held out of scope must come back with the same status
+  # and the same description — the two fields a --prefer-github pull rewrites.
+  # Scoping is an argument about what --issues means, and this measures whether
+  # the argument held. It catches a reverted claim whatever moved it, including
+  # the JSONL replay in `bd hooks run post-merge` — that reverts in_progress to
   # open through a path this script never calls.
   #
   # Deliberately above no bail-out: an empty allowlist is the steady state (the
@@ -265,10 +267,17 @@ PYEOF
     "$_tmp/moved.txt" "$_tmp/post_status.txt" >&2 <<'PYEOF' || true
 import json, sys
 
-def statuses(path):
+# status *and* description: "held out of the pull" is a claim about the whole
+# bead, and a --prefer-github pull that reaches a held bead overwrites its body.
+# Watching only the status column would miss exactly the loss this scoping
+# exists to prevent. Stripped, because trailing-whitespace churn is not a
+# clobber and a check that cries wolf gets `2>/dev/null` bolted onto it.
+def beads(path):
     try:
         with open(path, encoding="utf-8") as fh:
-            return {b["id"]: (b.get("status") or "") for b in json.load(fh)}
+            return {b["id"]: ((b.get("status") or ""),
+                              (b.get("description") or "").strip())
+                    for b in json.load(fh)}
     except Exception:
         return {}
 
@@ -276,8 +285,8 @@ def status(text):
     with open(sys.argv[5], "w", encoding="utf-8") as fh:
         fh.write(text + "\n")
 
-before = statuses(sys.argv[1])
-after = statuses(sys.argv[2])
+before = beads(sys.argv[1])
+after = beads(sys.argv[2])
 if not before:
     # No baseline to compare against, so there is nothing this check could have
     # caught and nothing to warn about. Unreachable in practice: an unreadable
@@ -299,11 +308,18 @@ for bid, was in sorted(before.items()):
     if bid in allowed or bid not in after:
         continue
     now = after[bid]
-    if now != was:
-        moved.append(bid)
-        print(f"bd-gh-sync: WARNING {bid} was held out of the pull but changed "
-              f"{was} -> {now}. Re-assert with "
-              f"'bd update {bid} --status {was}'.")
+    if now == was:
+        continue
+    moved.append(bid)
+    what, how = [], []
+    if now[0] != was[0]:
+        what.append(f"{was[0]} -> {now[0]}")
+        how.append(f"Re-assert the status with 'bd update {bid} --status {was[0]}'.")
+    if now[1] != was[1]:
+        what.append("description")
+        how.append("The pre-pull description survives only in bd's own history.")
+    print(f"bd-gh-sync: WARNING {bid} was held out of the pull but changed "
+          f"{', '.join(what)}. " + " ".join(how))
 
 # Read back by the summary line: a warning printed here is above the summary
 # and a `tail -1` caller never sees it.
