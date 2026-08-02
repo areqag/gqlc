@@ -87,30 +87,58 @@ func (s *ConformanceSuite) generate(target string, in codegen.Input) ([]codegen.
 // read the same slice.
 var codegenSentinels = codegen.AllSentinels()
 
+// sentinelLanes is every pipeline package a fixture may name a sentinel
+// from, paired with the prefix its manifest entries carry. The cypher
+// lane covers fixtures the query parser refuses outright: those never
+// reach a backend, so their refusal is the whole assertion.
+var sentinelLanes = []struct {
+	prefix string
+	set    []error
+}{
+	{"codegen.", codegenSentinels},
+	{"queryfile.", queryfile.AllSentinels()},
+	{"cypher.", cypher.AllSentinels()},
+}
+
 // sentinelByName maps the manifest's fully-qualified sentinel string
-// back to the actual error value at load time. Built from the pipeline
-// packages' sentinel sets — a change there without a fixture update
-// fails the queryfile / codegen reachability sweeps, and a fixture that
-// names a non-canonical sentinel fails invalidFixtures' map lookup. The
-// cypher lane covers fixtures the query parser refuses outright: those
-// never reach a backend, so their refusal is the whole assertion.
+// back to the actual error value at load time. A change to a lane's set
+// without a fixture update fails the queryfile / codegen reachability
+// sweeps, and a fixture that names a non-canonical sentinel fails
+// invalidFixtures' map lookup.
 var sentinelByName = func() map[string]error {
 	m := make(map[string]error)
-	pairs := []struct {
-		prefix string
-		set    []error
-	}{
-		{"codegen.", codegenSentinels},
-		{"queryfile.", queryfile.AllSentinels()},
-		{"cypher.", cypher.AllSentinels()},
-	}
-	for _, p := range pairs {
-		for _, s := range p.set {
-			m[p.prefix+sentinelIdent(s)] = s
+	for _, lane := range sentinelLanes {
+		for _, s := range lane.set {
+			m[lane.prefix+sentinelIdent(s)] = s
 		}
 	}
 	return m
 }()
+
+// TestSentinelNameMapIsTotal holds sentinelIdent in step with the lanes
+// it is asked about. A sentinel it does not know answers "unknown", so
+// the lane's entry is keyed "<pkg>.unknown" — a name no fixture would
+// write, which makes the sentinel unnameable rather than misnamed. Two
+// such sentinels in one lane collide on that key and the map silently
+// holds whichever landed last.
+//
+// Only the codegen lane is forced by anything else: its reachability
+// sweep demands a fixture per sentinel, and a fixture resolves through
+// this map. The queryfile and cypher lanes carry entries no fixture
+// names, so nothing but this test keeps them honest.
+func TestSentinelNameMapIsTotal(t *testing.T) {
+	total := 0
+	for _, lane := range sentinelLanes {
+		require.NotEmpty(t, lane.set, "lane %q contributes no sentinel, so this sweep holds nothing for it", lane.prefix)
+		total += len(lane.set)
+		for _, s := range lane.set {
+			require.NotEqual(t, "unknown", sentinelIdent(s),
+				"sentinelIdent does not know %s sentinel %q, so no fixture can name it", lane.prefix, s)
+		}
+	}
+	require.Len(t, sentinelByName, total,
+		"two sentinels resolved to one name; the map holds whichever was built last")
+}
 
 // sentinelIdent recovers the exported symbol name of a sentinel. Kept
 // internal to the test so the production types do not need to expose a

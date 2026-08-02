@@ -110,13 +110,26 @@ sentinel-reachability sweep (as in `internal/schema/gql`) guards the set.
 - **C1 — dedup & order.** One `Binding` per named variable, keyed by `Variable`,
   in first-appearance order. Each anonymous edge (no variable) is its own
   `Binding` (`Variable==""`).
-- **C2 — label merge.** Repeated occurrences of a variable union their labels
-  (`(a:Person) … (a:Employee)` → `[Employee, Person]`) — openCypher treats them as
-  additional conjunctive constraints. Merge as an **ordered union** (first
-  appearance), never via a map, for deterministic golden output. (Stage 1 note:
-  the conjunctive interpretation is faithful to openCypher's semantics, not a
-  parser limitation; checking whether a label-union resolves against the
-  schema is the resolver's responsibility per ADR 0003.)
+- **C2 — label merge.** Repeated occurrences of a variable are **conjunctive**:
+  the one entity the variable denotes must satisfy every occurrence. What that
+  conjunction computes differs by kind, because the two kinds carry labels
+  differently.
+  - A **node** carries any number of labels at once, so the occurrences'
+    constraints accumulate: `(a:Person) … (a:Employee)` → `[Person, Employee]`,
+    an **ordered union** in first-appearance order.
+  - A **relationship** carries exactly one type, so an occurrence's types are
+    alternatives (`[r:A|B]` is a disjunction over a candidate set) and the
+    occurrences conjoin to the **intersection** of those sets, again ordered by
+    first appearance. An occurrence naming no type (`-[r]-`) is the identity
+    element and narrows nothing. An empty intersection admits no relationship at
+    all, so the query is refused with `ErrUnsatisfiableRelationshipType` rather
+    than widened into the union a single `[r:A|B]` would produce (`gqlc-rrtl`).
+
+  Merge in first-appearance order, never via a map, for deterministic golden
+  output. (Stage 1 note: the conjunctive interpretation is faithful to
+  openCypher's semantics, not a parser limitation; checking whether the merged
+  label set resolves against the schema is the resolver's responsibility per
+  ADR 0003.)
 - **C3 — anonymous nodes are not bindings.** Only anonymous *edges* become
   bindings. An anonymous node inside a relationship contributes its labels inline
   on the edge endpoint; a standalone anonymous node (`MATCH (:Person)`) is a pure
@@ -220,7 +233,7 @@ targets a full engine). We are a parser. So:
   **parsed**, and snapshot the resulting `query.Query` to a golden (structural
   check; `-update` to regenerate, human-reviewed). `query.Query` itself needs no
   custom `MarshalJSON` — its members are order-preserving slices/strings,
-  deterministic given first-appearance ordering and ordered label-union (C2). Its
+  deterministic given first-appearance ordering and ordered label merge (C2). Its
   `Binding`/`Endpoint` sum types, however, each carry a deterministic tagged-union
   `MarshalJSON` (a `"kind"` discriminator): the model was restructured to sum
   types to make illegal states unrepresentable — same capability, type-safe

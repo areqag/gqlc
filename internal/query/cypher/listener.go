@@ -155,7 +155,8 @@ func newRawPart() *rawPart {
 }
 
 // rawBinding is a binding under construction: its variable, accumulated labels
-// (ordered union, first appearance), kind, and — for an edge — its endpoints.
+// (ordered by first appearance, combined across occurrences per the binding's
+// kind — see mergeBinding), kind, and — for an edge — its endpoints.
 // optionalGroup records the static, parser-time fact that the binding was
 // first introduced inside an OPTIONAL MATCH clause and which clause it was
 // (ADR 0006; ay9: ≥1 is the introducing clause's query-scoped id, 0 means a
@@ -166,7 +167,7 @@ func newRawPart() *rawPart {
 type rawBinding struct {
 	variable                        string
 	labels                          graph.LabelSet
-	seen                            map[string]bool // labels already merged, for the ordered union
+	seen                            map[string]bool // membership index over labels, kept in step with it
 	kind                            graph.EntityKind
 	source                          query.Endpoint
 	target                          query.Endpoint
