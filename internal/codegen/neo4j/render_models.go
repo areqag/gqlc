@@ -163,24 +163,30 @@ func writeEntityDecodeHelper(b *strings.Builder, e codegen.Entity) {
 	b.WriteString("// enforcing per-property nullability against the schema.\n")
 	fmt.Fprintf(b, "func decode%s(%s %s) (%s, error) {\n", e.Name, arg, carrier, e.Name)
 	fmt.Fprintf(b, "\tvar out %s\n", e.Name)
-	for _, f := range e.Fields {
-		writeEntityFieldDecode(b, e, f, arg)
+	for i, f := range e.Fields {
+		writeEntityFieldDecode(b, e, i, f, arg)
 	}
 	b.WriteString("\treturn out, nil\n")
 	b.WriteString("}\n")
 }
 
-// writeEntityFieldDecode emits one field's decode block. Nullable path:
-// Props lookup + type assertion against the driver's carrier + narrow-
-// convert into a local of the emitted Go type + address-of-local into
-// the pointer field. Non-nullable path: neo4j.GetProperty[<carrier>] +
-// narrow-convert. The property key is the source property name
-// (Property.Name), not the derived field name — the driver map is
-// keyed on the schema-side name. Extended at C3 to cover DATE
-// (dbtype.Date carrier) and TIMESTAMP (time.Time carrier); FLOAT32's
-// nullable arm now narrows correctly (was a latent bug, no fixture
-// exercised it before C3).
-func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, f codegen.EntityField, arg string) {
+// writeEntityFieldDecode emits the decode of the property at index i.
+// Nullable path: Props lookup + type assertion against the driver's
+// carrier + narrow-convert into a local of the emitted Go type +
+// address-of-local into the pointer field. Non-nullable path:
+// neo4j.GetProperty[<carrier>] + narrow-convert. The property key is the
+// source property name (Property.Name), not the derived field name — the
+// driver map is keyed on the schema-side name. Extended at C3 to cover
+// DATE (dbtype.Date carrier) and TIMESTAMP (time.Time carrier);
+// FLOAT32's nullable arm now narrows correctly (was a latent bug, no
+// fixture exercised it before C3).
+//
+// The local the value lands in is positional. A name derived from the
+// property is any identifier the schema author chose, including one this
+// scope already holds: a property named out, err, or after the carrier
+// argument itself would emit a redeclaration, and generation would still
+// exit 0 because the format gate only parses.
+func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codegen.EntityField, arg string) {
 	carrier := driverCarrier(f.GoType)
 	if f.Nullable {
 		fmt.Fprintf(b, "\tif v, ok := %s.Props[%q]; ok {\n", arg, f.PropName)
@@ -197,14 +203,14 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, f codegen.Enti
 		b.WriteString("\t}\n")
 		return
 	}
-	local := codegen.LowerFirstRune(f.Field)
-	fmt.Fprintf(b, "\t%s, err := neo4j.GetProperty[%s](%s, %q)\n", local, carrier, arg, f.PropName)
+	value := valueName(i)
+	fmt.Fprintf(b, "\t%s, err := neo4j.GetProperty[%s](%s, %q)\n", value, carrier, arg, f.PropName)
 	b.WriteString("\tif err != nil {\n")
 	fmt.Fprintf(b, "\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: %%w\", err)\n", e.Name, e.Name, f.Field)
 	b.WriteString("\t}\n")
 	if carrier != f.GoType {
-		fmt.Fprintf(b, "\tout.%s = %s(%s)\n", f.Field, f.GoType, local)
+		fmt.Fprintf(b, "\tout.%s = %s(%s)\n", f.Field, f.GoType, value)
 	} else {
-		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, local)
+		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, value)
 	}
 }

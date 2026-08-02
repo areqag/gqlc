@@ -19,15 +19,15 @@ type PersonEmployee struct {
 // enforcing per-property nullability against the schema.
 func decodePersonEmployee(node dbtype.Node) (PersonEmployee, error) {
 	var out PersonEmployee
-	id, err := neo4j.GetProperty[int64](node, "id")
+	value0, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return PersonEmployee{}, fmt.Errorf("decode PersonEmployee.Id: %w", err)
 	}
-	out.Id = id
-	salary, err := neo4j.GetProperty[int64](node, "salary")
+	out.Id = value0
+	value1, err := neo4j.GetProperty[int64](node, "salary")
 	if err != nil {
 		return PersonEmployee{}, fmt.Errorf("decode PersonEmployee.Salary: %w", err)
 	}
-	out.Salary = salary
+	out.Salary = value1
 	return out, nil
 }

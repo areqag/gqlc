@@ -2,7 +2,14 @@ package neo4j_test
 
 import (
 	"bytes"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"maps"
 	"os"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -131,4 +138,160 @@ func (s *OptionsSuite) assertPackage(files []codegen.File, want string) {
 		s.Require().Equal([]byte("package "+want), lines[2],
 			"file %s has wrong package clause: %q", f.Path, lines[2])
 	}
+}
+
+// decoderProbeSchema is one schema spelled around a single property
+// name, placed in every arm a decode helper has: required and nullable,
+// each at the driver's own width and at a narrower one, and the same
+// again on an edge type, whose decoder takes the other carrier. %[1]s is
+// the property name under test.
+const decoderProbeSchema = `CREATE PROPERTY GRAPH TYPE DecoderProbe AS {
+    (:Required { %[1]s :: STRING NOT NULL }),
+    (:Nullable { %[1]s :: STRING }),
+    (:Narrow { %[1]s :: FLOAT32 NOT NULL }),
+    (:NarrowNullable { %[1]s :: FLOAT32 }),
+    (:Required) -[:LINKS { %[1]s :: STRING NOT NULL }]-> (:Nullable)
+}`
+
+// unclaimedProperty is a property name no emitted decoder holds, so an
+// emission spelled with it is the reference the probes are measured
+// against.
+const unclaimedProperty = "alpha"
+
+// DecoderSuite pins what an emitted decode<Name> may name. The fixture-
+// driven golden corpus lives in internal/codegen/conformance.
+type DecoderSuite struct {
+	suite.Suite
+}
+
+func TestDecoderSuite(t *testing.T) {
+	suite.Run(t, new(DecoderSuite))
+}
+
+// TestNoDecoderLocalTakesAPropertyName pins the decoder's scope against
+// the one thing in it a schema author chooses. A property name reaches
+// the emission as a Props key and a struct field; a local named after it
+// as well lands in the same scope as the accumulator, the error and the
+// carrier the helper was handed, and `err :: STRING NOT NULL` emits
+// `err, err :=`. Generation exits 0 over that, because the format gate
+// parses the emission and does not type-check it.
+//
+// The names are read off an emission rather than listed here, so a local
+// a decoder gains later is held by this without anyone remembering to
+// add it. Each one is then fed back as a property name, and what must
+// not move is the set itself: the decoder's identifiers are the
+// generator's own, so they are the same whatever the schema declares.
+func (s *DecoderSuite) TestNoDecoderLocalTakesAPropertyName() {
+	models, err := s.emitModels(unclaimedProperty)
+	s.Require().NoError(err)
+	declared := s.decoderScopeOf(models)
+	s.Require().NotEmpty(declared, "the emitted decoders bind no identifiers to check")
+
+	for _, name := range declared {
+		s.Run(name, func() {
+			models, err := s.emitModels(name)
+			if err != nil {
+				// A word the GQL grammar reserves is one no schema can
+				// spell a property after, and so one no decoder can
+				// collide with.
+				s.T().Skipf("no property can be named %q: %v", name, err)
+			}
+			s.Require().Contains(models, "\t"+exportedField(name)+" ",
+				"the struct no longer carries the property under the name the schema gave it")
+			s.Require().Equal(declared, s.decoderScopeOf(models),
+				"a property name reached the decoder's scope")
+		})
+	}
+}
+
+// emitModels emits models.go for a schema whose every entity declares
+// one property named prop. The error is the schema parse's alone: a
+// generation that failed would be this suite's business, and a parse
+// that failed is the caller's.
+func (s *DecoderSuite) emitModels(prop string) (string, error) {
+	sch, err := gql.New().Parse(strings.NewReader(fmt.Sprintf(decoderProbeSchema, prop)))
+	if err != nil {
+		return "", err
+	}
+	files, err := neo4j.New().Generate(codegen.Input{Schema: sch})
+	s.Require().NoError(err)
+	for _, f := range files {
+		if f.Path == "models.go" {
+			return string(f.Contents), nil
+		}
+	}
+	s.Require().Fail("no models.go in the emission")
+	return "", nil
+}
+
+// decoderScopeOf names every identifier the emitted decode helpers bind,
+// deduplicated and ordered. The carrier argument counts: a parameter
+// shares the body's outermost scope, so a local of that name is not a
+// declaration but an assignment over the value the helper was handed.
+func (s *DecoderSuite) decoderScopeOf(models string) []string {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "models.go", models, parser.SkipObjectResolution)
+	s.Require().NoError(err, "the emitted file does not parse")
+
+	seen := make(map[string]bool)
+	for _, decl := range f.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		// The methods models.go declares are edge-union markers, which
+		// take no argument and hold no body; the decode helpers are what
+		// is left.
+		if !ok || fn.Recv != nil || fn.Body == nil {
+			continue
+		}
+		for _, param := range fn.Type.Params.List {
+			for _, id := range param.Names {
+				seen[id.Name] = true
+			}
+		}
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			for _, id := range declaredIdents(n) {
+				if id.Name != "_" {
+					seen[id.Name] = true
+				}
+			}
+			return true
+		})
+	}
+	return slices.Sorted(maps.Keys(seen))
+}
+
+// declaredIdents returns the identifiers a node binds. Short variable
+// declarations, var declarations and range clauses are the whole of what
+// an emitted body uses to introduce a name.
+func declaredIdents(n ast.Node) []*ast.Ident {
+	var out []*ast.Ident
+	switch stmt := n.(type) {
+	case *ast.AssignStmt:
+		if stmt.Tok != token.DEFINE {
+			return nil
+		}
+		for _, lhs := range stmt.Lhs {
+			if id, ok := lhs.(*ast.Ident); ok {
+				out = append(out, id)
+			}
+		}
+	case *ast.ValueSpec:
+		out = append(out, stmt.Names...)
+	case *ast.RangeStmt:
+		if stmt.Tok != token.DEFINE {
+			return nil
+		}
+		for _, e := range []ast.Expr{stmt.Key, stmt.Value} {
+			if id, ok := e.(*ast.Ident); ok {
+				out = append(out, id)
+			}
+		}
+	}
+	return out
+}
+
+// exportedField is the struct field a property named name lands on. The
+// names this suite probes are ASCII and carry no underscore, which is
+// the whole of what the §4.2 mangle does to them.
+func exportedField(name string) string {
+	return strings.ToUpper(name[:1]) + name[1:]
 }

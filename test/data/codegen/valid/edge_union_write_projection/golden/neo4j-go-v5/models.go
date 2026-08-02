@@ -18,11 +18,11 @@ type Person struct {
 // enforcing per-property nullability against the schema.
 func decodePerson(node dbtype.Node) (Person, error) {
 	var out Person
-	id, err := neo4j.GetProperty[int64](node, "id")
+	value0, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Person{}, fmt.Errorf("decode Person.Id: %w", err)
 	}
-	out.Id = id
+	out.Id = value0
 	return out, nil
 }
 
@@ -35,11 +35,11 @@ type Post struct {
 // enforcing per-property nullability against the schema.
 func decodePost(node dbtype.Node) (Post, error) {
 	var out Post
-	id, err := neo4j.GetProperty[int64](node, "id")
+	value0, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Post{}, fmt.Errorf("decode Post.Id: %w", err)
 	}
-	out.Id = id
+	out.Id = value0
 	return out, nil
 }
 
@@ -54,11 +54,11 @@ func (AUTHORED) isMergeActionR() {}
 // enforcing per-property nullability against the schema.
 func decodeAUTHORED(rel dbtype.Relationship) (AUTHORED, error) {
 	var out AUTHORED
-	since, err := neo4j.GetProperty[int64](rel, "since")
+	value0, err := neo4j.GetProperty[int64](rel, "since")
 	if err != nil {
 		return AUTHORED{}, fmt.Errorf("decode AUTHORED.Since: %w", err)
 	}
-	out.Since = since
+	out.Since = value0
 	return out, nil
 }
 

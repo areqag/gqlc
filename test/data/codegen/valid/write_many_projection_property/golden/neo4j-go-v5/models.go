@@ -21,25 +21,25 @@ type Person struct {
 // enforcing per-property nullability against the schema.
 func decodePerson(node dbtype.Node) (Person, error) {
 	var out Person
-	age, err := neo4j.GetProperty[int64](node, "age")
+	value0, err := neo4j.GetProperty[int64](node, "age")
 	if err != nil {
 		return Person{}, fmt.Errorf("decode Person.Age: %w", err)
 	}
-	out.Age = age
-	checked, err := neo4j.GetProperty[bool](node, "checked")
+	out.Age = value0
+	value1, err := neo4j.GetProperty[bool](node, "checked")
 	if err != nil {
 		return Person{}, fmt.Errorf("decode Person.Checked: %w", err)
 	}
-	out.Checked = checked
-	id, err := neo4j.GetProperty[int64](node, "id")
+	out.Checked = value1
+	value2, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Person{}, fmt.Errorf("decode Person.Id: %w", err)
 	}
-	out.Id = id
-	name, err := neo4j.GetProperty[string](node, "name")
+	out.Id = value2
+	value3, err := neo4j.GetProperty[string](node, "name")
 	if err != nil {
 		return Person{}, fmt.Errorf("decode Person.Name: %w", err)
 	}
-	out.Name = name
+	out.Name = value3
 	return out, nil
 }

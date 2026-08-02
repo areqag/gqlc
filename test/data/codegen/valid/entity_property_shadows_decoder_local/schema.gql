@@ -3,8 +3,19 @@ CREATE PROPERTY GRAPH TYPE EntityPropertyShadowsDecoderLocal AS {
         err      :: STRING NOT NULL,
         label    :: STRING NOT NULL,
         narrowed :: FLOAT32,
+        node     :: STRING NOT NULL,
+        ok       :: STRING NOT NULL,
         out      :: STRING NOT NULL,
         props    :: STRING NOT NULL,
-        raw      :: STRING NOT NULL
-    })
+        raw      :: STRING NOT NULL,
+        s        :: STRING NOT NULL,
+        v        :: STRING NOT NULL,
+        value0   :: STRING NOT NULL
+    }),
+    (:Marker) -[:LINKS {
+        err    :: STRING NOT NULL,
+        out    :: STRING NOT NULL,
+        rel    :: STRING NOT NULL,
+        value0 :: STRING NOT NULL
+    }]-> (:Marker)
 }

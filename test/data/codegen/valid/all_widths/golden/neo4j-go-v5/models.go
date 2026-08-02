@@ -32,80 +32,80 @@ type Row struct {
 // enforcing per-property nullability against the schema.
 func decodeRow(node dbtype.Node) (Row, error) {
 	var out Row
-	b, err := neo4j.GetProperty[bool](node, "b")
+	value0, err := neo4j.GetProperty[bool](node, "b")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.B: %w", err)
 	}
-	out.B = b
-	f, err := neo4j.GetProperty[float64](node, "f")
+	out.B = value0
+	value1, err := neo4j.GetProperty[float64](node, "f")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.F: %w", err)
 	}
-	out.F = f
-	f32, err := neo4j.GetProperty[float64](node, "f32")
+	out.F = value1
+	value2, err := neo4j.GetProperty[float64](node, "f32")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.F32: %w", err)
 	}
-	out.F32 = float32(f32)
-	f64, err := neo4j.GetProperty[float64](node, "f64")
+	out.F32 = float32(value2)
+	value3, err := neo4j.GetProperty[float64](node, "f64")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.F64: %w", err)
 	}
-	out.F64 = f64
-	i, err := neo4j.GetProperty[int64](node, "i")
+	out.F64 = value3
+	value4, err := neo4j.GetProperty[int64](node, "i")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.I: %w", err)
 	}
-	out.I = int(i)
-	i16, err := neo4j.GetProperty[int64](node, "i16")
+	out.I = int(value4)
+	value5, err := neo4j.GetProperty[int64](node, "i16")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.I16: %w", err)
 	}
-	out.I16 = int16(i16)
-	i32, err := neo4j.GetProperty[int64](node, "i32")
+	out.I16 = int16(value5)
+	value6, err := neo4j.GetProperty[int64](node, "i32")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.I32: %w", err)
 	}
-	out.I32 = int32(i32)
-	i64, err := neo4j.GetProperty[int64](node, "i64")
+	out.I32 = int32(value6)
+	value7, err := neo4j.GetProperty[int64](node, "i64")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.I64: %w", err)
 	}
-	out.I64 = i64
-	i8, err := neo4j.GetProperty[int64](node, "i8")
+	out.I64 = value7
+	value8, err := neo4j.GetProperty[int64](node, "i8")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.I8: %w", err)
 	}
-	out.I8 = int8(i8)
-	s, err := neo4j.GetProperty[string](node, "s")
+	out.I8 = int8(value8)
+	value9, err := neo4j.GetProperty[string](node, "s")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.S: %w", err)
 	}
-	out.S = s
-	u, err := neo4j.GetProperty[int64](node, "u")
+	out.S = value9
+	value10, err := neo4j.GetProperty[int64](node, "u")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.U: %w", err)
 	}
-	out.U = uint(u)
-	u16, err := neo4j.GetProperty[int64](node, "u16")
+	out.U = uint(value10)
+	value11, err := neo4j.GetProperty[int64](node, "u16")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.U16: %w", err)
 	}
-	out.U16 = uint16(u16)
-	u32, err := neo4j.GetProperty[int64](node, "u32")
+	out.U16 = uint16(value11)
+	value12, err := neo4j.GetProperty[int64](node, "u32")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.U32: %w", err)
 	}
-	out.U32 = uint32(u32)
-	u64, err := neo4j.GetProperty[int64](node, "u64")
+	out.U32 = uint32(value12)
+	value13, err := neo4j.GetProperty[int64](node, "u64")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.U64: %w", err)
 	}
-	out.U64 = uint64(u64)
-	u8, err := neo4j.GetProperty[int64](node, "u8")
+	out.U64 = uint64(value13)
+	value14, err := neo4j.GetProperty[int64](node, "u8")
 	if err != nil {
 		return Row{}, fmt.Errorf("decode Row.U8: %w", err)
 	}
-	out.U8 = uint8(u8)
+	out.U8 = uint8(value14)
 	return out, nil
 }

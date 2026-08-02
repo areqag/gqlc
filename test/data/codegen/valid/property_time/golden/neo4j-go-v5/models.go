@@ -19,15 +19,15 @@ type Event struct {
 // enforcing per-property nullability against the schema.
 func decodeEvent(node dbtype.Node) (Event, error) {
 	var out Event
-	happened, err := neo4j.GetProperty[dbtype.Time](node, "happened")
+	value0, err := neo4j.GetProperty[dbtype.Time](node, "happened")
 	if err != nil {
 		return Event{}, fmt.Errorf("decode Event.Happened: %w", err)
 	}
-	out.Happened = happened
-	id, err := neo4j.GetProperty[int64](node, "id")
+	out.Happened = value0
+	value1, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Event{}, fmt.Errorf("decode Event.Id: %w", err)
 	}
-	out.Id = id
+	out.Id = value1
 	return out, nil
 }

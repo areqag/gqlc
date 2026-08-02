@@ -18,11 +18,11 @@ type Company struct {
 // enforcing per-property nullability against the schema.
 func decodeCompany(node dbtype.Node) (Company, error) {
 	var out Company
-	id, err := neo4j.GetProperty[int64](node, "id")
+	value0, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Company{}, fmt.Errorf("decode Company.Id: %w", err)
 	}
-	out.Id = id
+	out.Id = value0
 	return out, nil
 }
 
@@ -35,11 +35,11 @@ type Person struct {
 // enforcing per-property nullability against the schema.
 func decodePerson(node dbtype.Node) (Person, error) {
 	var out Person
-	id, err := neo4j.GetProperty[int64](node, "id")
+	value0, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Person{}, fmt.Errorf("decode Person.Id: %w", err)
 	}
-	out.Id = id
+	out.Id = value0
 	return out, nil
 }
 
@@ -52,11 +52,11 @@ type CompanyKnows struct {
 // enforcing per-property nullability against the schema.
 func decodeCompanyKnows(rel dbtype.Relationship) (CompanyKnows, error) {
 	var out CompanyKnows
-	since, err := neo4j.GetProperty[int64](rel, "since")
+	value0, err := neo4j.GetProperty[int64](rel, "since")
 	if err != nil {
 		return CompanyKnows{}, fmt.Errorf("decode CompanyKnows.Since: %w", err)
 	}
-	out.Since = since
+	out.Since = value0
 	return out, nil
 }
 
@@ -69,10 +69,10 @@ type PersonKnows struct {
 // enforcing per-property nullability against the schema.
 func decodePersonKnows(rel dbtype.Relationship) (PersonKnows, error) {
 	var out PersonKnows
-	since, err := neo4j.GetProperty[int64](rel, "since")
+	value0, err := neo4j.GetProperty[int64](rel, "since")
 	if err != nil {
 		return PersonKnows{}, fmt.Errorf("decode PersonKnows.Since: %w", err)
 	}
-	out.Since = since
+	out.Since = value0
 	return out, nil
 }

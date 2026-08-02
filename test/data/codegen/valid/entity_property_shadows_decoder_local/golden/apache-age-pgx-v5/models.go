@@ -15,9 +15,14 @@ type Marker struct {
 	Err      string
 	Label    string
 	Narrowed *float32
+	Node     string
+	Ok       string
 	Out      string
 	Props    string
 	Raw      string
+	S        string
+	V        string
+	Value0   string
 }
 
 // decodeMarker decodes an agtype vertex into a Marker struct, enforcing
@@ -49,21 +54,88 @@ func decodeMarker(raw []byte) (Marker, error) {
 		narrowed := float32(*value2)
 		out.Narrowed = &narrowed
 	}
-	value3, err := agtypeProperty(props, "out", agtypeString)
+	value3, err := agtypeProperty(props, "node", agtypeString)
+	if err != nil {
+		return Marker{}, fmt.Errorf("decode Marker.Node: %w", err)
+	}
+	out.Node = value3
+	value4, err := agtypeProperty(props, "ok", agtypeString)
+	if err != nil {
+		return Marker{}, fmt.Errorf("decode Marker.Ok: %w", err)
+	}
+	out.Ok = value4
+	value5, err := agtypeProperty(props, "out", agtypeString)
 	if err != nil {
 		return Marker{}, fmt.Errorf("decode Marker.Out: %w", err)
 	}
-	out.Out = value3
-	value4, err := agtypeProperty(props, "props", agtypeString)
+	out.Out = value5
+	value6, err := agtypeProperty(props, "props", agtypeString)
 	if err != nil {
 		return Marker{}, fmt.Errorf("decode Marker.Props: %w", err)
 	}
-	out.Props = value4
-	value5, err := agtypeProperty(props, "raw", agtypeString)
+	out.Props = value6
+	value7, err := agtypeProperty(props, "raw", agtypeString)
 	if err != nil {
 		return Marker{}, fmt.Errorf("decode Marker.Raw: %w", err)
 	}
-	out.Raw = value5
+	out.Raw = value7
+	value8, err := agtypeProperty(props, "s", agtypeString)
+	if err != nil {
+		return Marker{}, fmt.Errorf("decode Marker.S: %w", err)
+	}
+	out.S = value8
+	value9, err := agtypeProperty(props, "v", agtypeString)
+	if err != nil {
+		return Marker{}, fmt.Errorf("decode Marker.V: %w", err)
+	}
+	out.V = value9
+	value10, err := agtypeProperty(props, "value0", agtypeString)
+	if err != nil {
+		return Marker{}, fmt.Errorf("decode Marker.Value0: %w", err)
+	}
+	out.Value0 = value10
+	return out, nil
+}
+
+// LINKS corresponds to the LINKS edge type (Marker -> Marker).
+type LINKS struct {
+	Err    string
+	Out    string
+	Rel    string
+	Value0 string
+}
+
+// decodeLINKS decodes an agtype edge into a LINKS struct, enforcing
+// the label and the per-property nullability the schema declares.
+func decodeLINKS(raw []byte) (LINKS, error) {
+	label, props, err := agtypeEntity(raw, "::edge")
+	if err != nil {
+		return LINKS{}, fmt.Errorf("decode LINKS: %w", err)
+	}
+	if label != "LINKS" {
+		return LINKS{}, fmt.Errorf("decode LINKS: expected label %q, got %q", "LINKS", label)
+	}
+	var out LINKS
+	value0, err := agtypeProperty(props, "err", agtypeString)
+	if err != nil {
+		return LINKS{}, fmt.Errorf("decode LINKS.Err: %w", err)
+	}
+	out.Err = value0
+	value1, err := agtypeProperty(props, "out", agtypeString)
+	if err != nil {
+		return LINKS{}, fmt.Errorf("decode LINKS.Out: %w", err)
+	}
+	out.Out = value1
+	value2, err := agtypeProperty(props, "rel", agtypeString)
+	if err != nil {
+		return LINKS{}, fmt.Errorf("decode LINKS.Rel: %w", err)
+	}
+	out.Rel = value2
+	value3, err := agtypeProperty(props, "value0", agtypeString)
+	if err != nil {
+		return LINKS{}, fmt.Errorf("decode LINKS.Value0: %w", err)
+	}
+	out.Value0 = value3
 	return out, nil
 }
 
