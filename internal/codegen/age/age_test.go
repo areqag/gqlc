@@ -419,8 +419,17 @@ func (s *EmissionSuite) TestRejectsMultiLabelSchema() {
 }
 
 // ageIdentifiers are the extension-owned names that must never appear
-// unqualified.
-var ageIdentifiers = []string{"agtype", "cypher(", "create_graph", "drop_graph", "ag_graph"}
+// unqualified. Each matches on a word boundary: a longer name that
+// merely begins with one is a different name, which AGE neither owns nor
+// resolves through the search_path — a query parameter called
+// $agtypeArgs reaches an emitted map key spelled exactly that.
+var ageIdentifiers = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\bagtype\b`),
+	regexp.MustCompile(`(?i)\bcypher\(`),
+	regexp.MustCompile(`(?i)\bcreate_graph\b`),
+	regexp.MustCompile(`(?i)\bdrop_graph\b`),
+	regexp.MustCompile(`(?i)\bag_graph\b`),
+}
 
 // qualifier matches both spellings PostgreSQL accepts for the schema
 // prefix, case-insensitively — an unquoted identifier folds to lower
@@ -459,9 +468,12 @@ func (s *EmissionSuite) TestEveryAgeIdentifierIsSchemaQualified() {
 			if err != nil {
 				continue
 			}
+			qualified := 0
 			for _, f := range files {
-				s.assertQualified(fixture+"/"+f.Path, string(f.Contents))
+				qualified += s.assertQualified(fixture+"/"+f.Path, string(f.Contents))
 			}
+			s.Require().Positive(qualified,
+				"%s: the sweep found no AGE identifier at all, so it proved nothing about this emission", fixture)
 			swept++
 		}
 	}
@@ -470,28 +482,121 @@ func (s *EmissionSuite) TestEveryAgeIdentifierIsSchemaQualified() {
 	goldens, err := filepath.Glob(filepath.Join(corpusRoot, "valid", "*", "golden", ageTarget, "*.go"))
 	s.Require().NoError(err)
 	s.Require().NotEmpty(goldens, "no golden files committed for target %s", ageTarget)
+	qualified := 0
 	for _, path := range goldens {
 		body, err := os.ReadFile(path)
 		s.Require().NoError(err)
-		s.assertQualified(path, string(body))
+		qualified += s.assertQualified(path, string(body))
+	}
+	s.Require().Positive(qualified, "the sweep found no AGE identifier in the whole golden tree")
+}
+
+// sweptWitnesses are qualified occurrences the emission is known to
+// place, per file that carries any SQL at all. They are spelled here
+// rather than read off the emission, so the region and the bytes it has
+// to hold cannot drift together.
+var sweptWitnesses = map[string][]string{
+	"db.go":       {"ag_catalog.cypher("},
+	"graph.go":    {"'1'::ag_catalog.agtype", "ag_catalog.create_graph", "ag_catalog.drop_graph", "ag_catalog.ag_graph"},
+	"q.cypher.go": {"ag_catalog.agtype"},
+}
+
+// TestTheSweptRegionStillHoldsWhatItPolices is the qualification sweep's
+// own guard. The sweep judges a region rather than a file — comments,
+// error prose and the author's query text are all cut out of it — and
+// every cut is one edit away from cutting everything, at which point the
+// sweep passes vacuously and the defect it exists to catch ships. So the
+// region is held to still carrying the qualified occurrences the
+// emission is known to place, named here by their bytes.
+func (s *EmissionSuite) TestTheSweptRegionStillHoldsWhatItPolices() {
+	files := s.emitReadBatch()
+	for path, witnesses := range sweptWitnesses {
+		s.Require().Contains(files, path)
+		region := s.keepServerText(path, files[path])
+		s.Require().NotEmpty(strings.TrimSpace(region), "%s: the swept region is empty", path)
+		for _, w := range witnesses {
+			s.Require().Contains(region, w,
+				"%s: the swept region no longer holds the emission's own %q", path, w)
+		}
+		s.Require().Positive(s.assertQualified(path, files[path]),
+			"%s: the sweep found no AGE identifier in a file that carries SQL", path)
+	}
+	// Closing the table the other way keeps it from going stale: a file
+	// that acquires SQL has to be named above, or it could be emptied out
+	// of the region with nothing to notice.
+	for path := range files {
+		if _, named := sweptWitnesses[path]; named {
+			continue
+		}
+		s.Require().Zero(s.assertQualified(path, files[path]),
+			"%s carries an AGE identifier but names no witness", path)
 	}
 }
 
-func (s *EmissionSuite) assertQualified(label, body string) {
-	body = s.keepServerText(label, body)
-	hay := strings.ToLower(body)
-	for _, ident := range ageIdentifiers {
-		for off := 0; ; {
-			i := strings.Index(hay[off:], ident)
-			if i < 0 {
-				break
+// TestTheSweepJudgesGeneratedIdentifiersOnly holds the qualification
+// sweep to text the generator chose. An author's query text is copied
+// into the emission verbatim (ADR 0005) and an author's parameter name
+// reaches an emitted identifier and an emitted map key, so both can put
+// AGE's own spellings in front of the sweep — and neither is the
+// generator's to qualify. A guard that reddens on them turns a legal
+// batch into a build failure.
+func (s *EmissionSuite) TestTheSweepJudgesGeneratedIdentifiersOnly() {
+	cases := []struct {
+		name  string
+		param string
+		text  string
+	}{
+		{
+			name:  "a parameter name an AGE identifier prefixes",
+			param: "agtypeArgs",
+			text:  "MATCH (p:Person) RETURN p.name\n",
+		},
+		{
+			name:  "query text naming an AGE identifier",
+			param: "id",
+			text:  "MATCH (p:Person) WHERE p.agtype = 'v' RETURN p.name\n",
+		},
+		{
+			name:  "both, as the author who hits this writes it",
+			param: "agtypeArgs",
+			text:  "MATCH (p:Person) WHERE p.agtype = $agtypeArgs RETURN p.name\n",
+		},
+	}
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			q := servedQuery
+			q.SourceText = tc.text
+			q.Validated.Parameters = []resolver.ResolvedParameter{
+				{Name: tc.param, Type: resolver.ResolvedProperty{Type: graph.TypeInt}},
 			}
-			at := off + i
-			s.Require().Truef(qualifier.MatchString(body[:at]),
-				"%s: %q at offset %d is not schema-qualified: %q", label, ident, at, window(body, at))
-			off = at + len(ident)
+			in := s.in
+			in.Queries = []codegen.NamedQuery{q}
+			files, err := age.New().Generate(in)
+			s.Require().NoError(err)
+			qualified := 0
+			for _, f := range files {
+				qualified += s.assertQualified(f.Path, string(f.Contents))
+			}
+			s.Require().Positive(qualified, "the sweep found no AGE identifier at all")
+		})
+	}
+}
+
+// assertQualified requires every AGE identifier in body's swept region
+// to carry an ag_catalog qualifier, and returns how many it accepted. A
+// caller that gets zero has swept a region proving nothing.
+func (s *EmissionSuite) assertQualified(label, body string) int {
+	region := s.keepServerText(label, body)
+	qualified := 0
+	for _, ident := range ageIdentifiers {
+		for _, at := range ident.FindAllStringIndex(region, -1) {
+			s.Require().Truef(qualifier.MatchString(region[:at[0]]),
+				"%s: %q at offset %d is not schema-qualified: %q",
+				label, region[at[0]:at[1]], at[0], window(region, at[0]))
+			qualified++
 		}
 	}
+	return qualified
 }
 
 // blankComments overwrites every comment with spaces, preserving byte
@@ -513,21 +618,32 @@ func (s *EmissionSuite) blankComments(label, body string) string {
 // errorConstructors build a value whose string is read by a person.
 var errorConstructors = map[string]bool{"fmt.Errorf": true, "fmt.Sprintf": true, "errors.New": true}
 
+// statementComposer is the emitted function a query method hands its
+// text to. Its second argument is that text, and the guards below locate
+// the author's bytes through it rather than by the const's name, so the
+// emission is free to call the const whatever Unshadowed makes of it.
+const statementComposer = "q.cypherStmt"
+
 // keepServerText reduces an emitted file to the string literals that
-// reach a parser: literals stay where they are, so a lookbehind still
-// reads the bytes preceding a needle inside its own literal and cannot
-// run off into the declaration around it, and everything else — syntax,
-// comments, and the literals building error text — becomes blanks.
+// reach a parser as the generator's own: literals stay where they are,
+// so a lookbehind still reads the bytes preceding a needle inside its
+// own literal and cannot run off into the declaration around it, and
+// everything else — syntax, comments, the literals building error text,
+// and the author's query text — becomes blanks.
 //
-// The two exclusions are the two ways a name can appear without being a
-// name. A Go declaration called after an agtype helper is an identifier
-// no parser but Go's sees, and an error explaining that a value is not
-// an agtype string has to be free to say so.
+// The exclusions are the ways a name can appear in an emitted file
+// without being a name the generator chose. A Go declaration called
+// after an agtype helper is an identifier no parser but Go's sees; an
+// error explaining that a value is not an agtype string has to be free
+// to say so; and a query's text is copied through verbatim (ADR 0005),
+// so whatever it spells is the author's and not this emission's to
+// qualify.
 func (s *EmissionSuite) keepServerText(label, body string) string {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, label, body, parser.SkipObjectResolution)
 	s.Require().NoError(err, "emitted file %s does not parse", label)
 	offset := func(p token.Pos) int { return fset.Position(p).Offset }
+	verbatim := verbatimQueryText(f)
 
 	var prose [][2]int
 	ast.Inspect(f, func(n ast.Node) bool {
@@ -543,7 +659,7 @@ func (s *EmissionSuite) keepServerText(label, body string) string {
 	blank(kept, 0, len(kept))
 	ast.Inspect(f, func(n ast.Node) bool {
 		lit, ok := n.(*ast.BasicLit)
-		if !ok || lit.Kind != token.STRING {
+		if !ok || lit.Kind != token.STRING || verbatim[lit] {
 			return true
 		}
 		from, to := offset(lit.Pos()), offset(lit.End())
@@ -556,6 +672,55 @@ func (s *EmissionSuite) keepServerText(label, body string) string {
 		return true
 	})
 	return string(kept)
+}
+
+// verbatimQueryText identifies the literals holding an author's query
+// text: whatever the statement composer is handed as its text argument,
+// whether that is the literal itself or the package-level const the
+// emission binds it to. Resolution is by reference from the call site
+// and stops at the file, which is where both the const and its only
+// caller are emitted; a name the composer never reads stays in the swept
+// region however it is spelled.
+func verbatimQueryText(f *ast.File) map[*ast.BasicLit]bool {
+	bound := make(map[string]*ast.BasicLit)
+	for _, decl := range f.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for i, name := range vs.Names {
+				if i >= len(vs.Values) {
+					continue
+				}
+				if lit, ok := vs.Values[i].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+					bound[name.Name] = lit
+				}
+			}
+		}
+	}
+
+	out := make(map[*ast.BasicLit]bool)
+	ast.Inspect(f, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok || types.ExprString(call.Fun) != statementComposer || len(call.Args) < 2 {
+			return true
+		}
+		switch arg := call.Args[1].(type) {
+		case *ast.Ident:
+			if lit := bound[arg.Name]; lit != nil {
+				out[lit] = true
+			}
+		case *ast.BasicLit:
+			out[arg] = true
+		}
+		return true
+	})
+	return out
 }
 
 // blank overwrites b[from:to] with spaces, leaving newlines in place so
@@ -698,10 +863,10 @@ func (s *EmissionSuite) TestTheGraphNameReachesTheServerThroughOneCheck() {
 // emitReadBatch generates the skeleton schema carrying one served query,
 // so the sweeps above see the read path's files as well as the lifecycle
 // ones. Keyed by path, as SetupSuite keys the query-free emission.
-func (s *EmissionSuite) emitReadBatch(opts ...age.Option) map[string]string {
+func (s *EmissionSuite) emitReadBatch() map[string]string {
 	in := s.in
 	in.Queries = []codegen.NamedQuery{servedQuery}
-	files, err := age.New(opts...).Generate(in)
+	files, err := age.New().Generate(in)
 	s.Require().NoError(err)
 	out := make(map[string]string, len(files))
 	for _, f := range files {
