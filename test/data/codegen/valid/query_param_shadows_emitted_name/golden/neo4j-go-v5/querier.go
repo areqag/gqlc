@@ -12,6 +12,14 @@ type ReadQuerier interface {
 	PersonByValue0(ctx context.Context, arg string) (string, error)
 	ConstShadowOne(ctx context.Context, arg string) (string, error)
 	ConstShadowMany(ctx context.Context, arg string) ([]string, error)
+	ReceiverShadow(ctx context.Context, arg string) (string, error)
+	ContextShadow(ctx context.Context, arg string) (string, error)
+	ImportShadow(ctx context.Context, arg string) (string, error)
+	HelperShadow(ctx context.Context, arg string) (string, error)
+	ErrShadow(ctx context.Context, arg string) (string, error)
+	RecordsShadow(ctx context.Context, arg string) ([]string, error)
+	OutShadow(ctx context.Context, arg string) ([]string, error)
+	BlankShadow(ctx context.Context, arg string) (string, error)
 }
 
 type WriteQuerier interface {

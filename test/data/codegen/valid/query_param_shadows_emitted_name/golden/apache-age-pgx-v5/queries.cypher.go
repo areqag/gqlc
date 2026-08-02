@@ -366,3 +366,353 @@ func (q *Queries) ConstShadowExec(ctx context.Context, arg string) error {
 	}
 	return nil
 }
+
+const receiverShadowQueryText = `MATCH (p:Person) WHERE p.name = $q RETURN p.name`
+
+// ReceiverShadow executes the ReceiverShadow query.
+//
+//	MATCH (p:Person) WHERE p.name = $q RETURN p.name
+func (q *Queries) ReceiverShadow(ctx context.Context, arg string) (string, error) {
+	stmt, err := q.cypherStmt("$gqlc$", receiverShadowQueryText, "v0 ag_catalog.agtype")
+	if err != nil {
+		return "", err
+	}
+	args, err := agtypeArgs(map[string]any{"q": arg})
+	if err != nil {
+		return "", err
+	}
+	rows, err := q.db.Query(ctx, stmt, args)
+	if err != nil {
+		return "", fmt.Errorf("ReceiverShadow: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return "", fmt.Errorf("ReceiverShadow: %w", err)
+		}
+		return "", ErrNoRows
+	}
+	var raw0 []byte
+	if err := rows.Scan(&raw0); err != nil {
+		return "", fmt.Errorf("ReceiverShadow: scan row: %w", err)
+	}
+	if rows.Next() {
+		return "", ErrMultipleResults
+	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("ReceiverShadow: %w", err)
+	}
+	if raw0 == nil {
+		return "", fmt.Errorf("ReceiverShadow: column %q is non-nullable but arrived null", "p.name")
+	}
+	value0, err := agtypeString(raw0)
+	if err != nil {
+		return "", fmt.Errorf("ReceiverShadow: decode column %q: %w", "p.name", err)
+	}
+	return value0, nil
+}
+
+const contextShadowQueryText = `MATCH (p:Person) WHERE p.name = $ctx RETURN p.name`
+
+// ContextShadow executes the ContextShadow query.
+//
+//	MATCH (p:Person) WHERE p.name = $ctx RETURN p.name
+func (q *Queries) ContextShadow(ctx context.Context, arg string) (string, error) {
+	stmt, err := q.cypherStmt("$gqlc$", contextShadowQueryText, "v0 ag_catalog.agtype")
+	if err != nil {
+		return "", err
+	}
+	args, err := agtypeArgs(map[string]any{"ctx": arg})
+	if err != nil {
+		return "", err
+	}
+	rows, err := q.db.Query(ctx, stmt, args)
+	if err != nil {
+		return "", fmt.Errorf("ContextShadow: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return "", fmt.Errorf("ContextShadow: %w", err)
+		}
+		return "", ErrNoRows
+	}
+	var raw0 []byte
+	if err := rows.Scan(&raw0); err != nil {
+		return "", fmt.Errorf("ContextShadow: scan row: %w", err)
+	}
+	if rows.Next() {
+		return "", ErrMultipleResults
+	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("ContextShadow: %w", err)
+	}
+	if raw0 == nil {
+		return "", fmt.Errorf("ContextShadow: column %q is non-nullable but arrived null", "p.name")
+	}
+	value0, err := agtypeString(raw0)
+	if err != nil {
+		return "", fmt.Errorf("ContextShadow: decode column %q: %w", "p.name", err)
+	}
+	return value0, nil
+}
+
+const importShadowQueryText = `MATCH (p:Person) WHERE p.name = $fmt RETURN p.name`
+
+// ImportShadow executes the ImportShadow query.
+//
+//	MATCH (p:Person) WHERE p.name = $fmt RETURN p.name
+func (q *Queries) ImportShadow(ctx context.Context, arg string) (string, error) {
+	stmt, err := q.cypherStmt("$gqlc$", importShadowQueryText, "v0 ag_catalog.agtype")
+	if err != nil {
+		return "", err
+	}
+	args, err := agtypeArgs(map[string]any{"fmt": arg})
+	if err != nil {
+		return "", err
+	}
+	rows, err := q.db.Query(ctx, stmt, args)
+	if err != nil {
+		return "", fmt.Errorf("ImportShadow: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return "", fmt.Errorf("ImportShadow: %w", err)
+		}
+		return "", ErrNoRows
+	}
+	var raw0 []byte
+	if err := rows.Scan(&raw0); err != nil {
+		return "", fmt.Errorf("ImportShadow: scan row: %w", err)
+	}
+	if rows.Next() {
+		return "", ErrMultipleResults
+	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("ImportShadow: %w", err)
+	}
+	if raw0 == nil {
+		return "", fmt.Errorf("ImportShadow: column %q is non-nullable but arrived null", "p.name")
+	}
+	value0, err := agtypeString(raw0)
+	if err != nil {
+		return "", fmt.Errorf("ImportShadow: decode column %q: %w", "p.name", err)
+	}
+	return value0, nil
+}
+
+const helperShadowQueryText = `MATCH (p:Person) WHERE p.name = $agtypeArgs RETURN p.name`
+
+// HelperShadow executes the HelperShadow query.
+//
+//	MATCH (p:Person) WHERE p.name = $agtypeArgs RETURN p.name
+func (q *Queries) HelperShadow(ctx context.Context, arg string) (string, error) {
+	stmt, err := q.cypherStmt("$gqlc$", helperShadowQueryText, "v0 ag_catalog.agtype")
+	if err != nil {
+		return "", err
+	}
+	args, err := agtypeArgs(map[string]any{"agtypeArgs": arg})
+	if err != nil {
+		return "", err
+	}
+	rows, err := q.db.Query(ctx, stmt, args)
+	if err != nil {
+		return "", fmt.Errorf("HelperShadow: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return "", fmt.Errorf("HelperShadow: %w", err)
+		}
+		return "", ErrNoRows
+	}
+	var raw0 []byte
+	if err := rows.Scan(&raw0); err != nil {
+		return "", fmt.Errorf("HelperShadow: scan row: %w", err)
+	}
+	if rows.Next() {
+		return "", ErrMultipleResults
+	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("HelperShadow: %w", err)
+	}
+	if raw0 == nil {
+		return "", fmt.Errorf("HelperShadow: column %q is non-nullable but arrived null", "p.name")
+	}
+	value0, err := agtypeString(raw0)
+	if err != nil {
+		return "", fmt.Errorf("HelperShadow: decode column %q: %w", "p.name", err)
+	}
+	return value0, nil
+}
+
+const errShadowQueryText = `MATCH (p:Person) WHERE p.name = $err RETURN p.name`
+
+// ErrShadow executes the ErrShadow query.
+//
+//	MATCH (p:Person) WHERE p.name = $err RETURN p.name
+func (q *Queries) ErrShadow(ctx context.Context, arg string) (string, error) {
+	stmt, err := q.cypherStmt("$gqlc$", errShadowQueryText, "v0 ag_catalog.agtype")
+	if err != nil {
+		return "", err
+	}
+	args, err := agtypeArgs(map[string]any{"err": arg})
+	if err != nil {
+		return "", err
+	}
+	rows, err := q.db.Query(ctx, stmt, args)
+	if err != nil {
+		return "", fmt.Errorf("ErrShadow: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return "", fmt.Errorf("ErrShadow: %w", err)
+		}
+		return "", ErrNoRows
+	}
+	var raw0 []byte
+	if err := rows.Scan(&raw0); err != nil {
+		return "", fmt.Errorf("ErrShadow: scan row: %w", err)
+	}
+	if rows.Next() {
+		return "", ErrMultipleResults
+	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("ErrShadow: %w", err)
+	}
+	if raw0 == nil {
+		return "", fmt.Errorf("ErrShadow: column %q is non-nullable but arrived null", "p.name")
+	}
+	value0, err := agtypeString(raw0)
+	if err != nil {
+		return "", fmt.Errorf("ErrShadow: decode column %q: %w", "p.name", err)
+	}
+	return value0, nil
+}
+
+const recordsShadowQueryText = `MATCH (p:Person) WHERE p.name = $records RETURN p.name`
+
+// RecordsShadow executes the RecordsShadow query.
+//
+//	MATCH (p:Person) WHERE p.name = $records RETURN p.name
+func (q *Queries) RecordsShadow(ctx context.Context, arg string) ([]string, error) {
+	stmt, err := q.cypherStmt("$gqlc$", recordsShadowQueryText, "v0 ag_catalog.agtype")
+	if err != nil {
+		return nil, err
+	}
+	args, err := agtypeArgs(map[string]any{"records": arg})
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.db.Query(ctx, stmt, args)
+	if err != nil {
+		return nil, fmt.Errorf("RecordsShadow: %w", err)
+	}
+	defer rows.Close()
+	out := make([]string, 0)
+	for rows.Next() {
+		var raw0 []byte
+		if err := rows.Scan(&raw0); err != nil {
+			return nil, fmt.Errorf("RecordsShadow: scan row: %w", err)
+		}
+		if raw0 == nil {
+			return nil, fmt.Errorf("RecordsShadow: column %q is non-nullable but arrived null", "p.name")
+		}
+		value0, err := agtypeString(raw0)
+		if err != nil {
+			return nil, fmt.Errorf("RecordsShadow: decode column %q: %w", "p.name", err)
+		}
+		out = append(out, value0)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("RecordsShadow: %w", err)
+	}
+	return out, nil
+}
+
+const outShadowQueryText = `MATCH (p:Person) WHERE p.name = $out RETURN p.name`
+
+// OutShadow executes the OutShadow query.
+//
+//	MATCH (p:Person) WHERE p.name = $out RETURN p.name
+func (q *Queries) OutShadow(ctx context.Context, arg string) ([]string, error) {
+	stmt, err := q.cypherStmt("$gqlc$", outShadowQueryText, "v0 ag_catalog.agtype")
+	if err != nil {
+		return nil, err
+	}
+	args, err := agtypeArgs(map[string]any{"out": arg})
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.db.Query(ctx, stmt, args)
+	if err != nil {
+		return nil, fmt.Errorf("OutShadow: %w", err)
+	}
+	defer rows.Close()
+	out := make([]string, 0)
+	for rows.Next() {
+		var raw0 []byte
+		if err := rows.Scan(&raw0); err != nil {
+			return nil, fmt.Errorf("OutShadow: scan row: %w", err)
+		}
+		if raw0 == nil {
+			return nil, fmt.Errorf("OutShadow: column %q is non-nullable but arrived null", "p.name")
+		}
+		value0, err := agtypeString(raw0)
+		if err != nil {
+			return nil, fmt.Errorf("OutShadow: decode column %q: %w", "p.name", err)
+		}
+		out = append(out, value0)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("OutShadow: %w", err)
+	}
+	return out, nil
+}
+
+const blankShadowQueryText = `MATCH (p:Person) WHERE p.name = $_ RETURN p.name`
+
+// BlankShadow executes the BlankShadow query.
+//
+//	MATCH (p:Person) WHERE p.name = $_ RETURN p.name
+func (q *Queries) BlankShadow(ctx context.Context, arg string) (string, error) {
+	stmt, err := q.cypherStmt("$gqlc$", blankShadowQueryText, "v0 ag_catalog.agtype")
+	if err != nil {
+		return "", err
+	}
+	args, err := agtypeArgs(map[string]any{"_": arg})
+	if err != nil {
+		return "", err
+	}
+	rows, err := q.db.Query(ctx, stmt, args)
+	if err != nil {
+		return "", fmt.Errorf("BlankShadow: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return "", fmt.Errorf("BlankShadow: %w", err)
+		}
+		return "", ErrNoRows
+	}
+	var raw0 []byte
+	if err := rows.Scan(&raw0); err != nil {
+		return "", fmt.Errorf("BlankShadow: scan row: %w", err)
+	}
+	if rows.Next() {
+		return "", ErrMultipleResults
+	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("BlankShadow: %w", err)
+	}
+	if raw0 == nil {
+		return "", fmt.Errorf("BlankShadow: column %q is non-nullable but arrived null", "p.name")
+	}
+	value0, err := agtypeString(raw0)
+	if err != nil {
+		return "", fmt.Errorf("BlankShadow: decode column %q: %w", "p.name", err)
+	}
+	return value0, nil
+}
