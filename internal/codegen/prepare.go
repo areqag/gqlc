@@ -679,13 +679,9 @@ func admitEdgeUnionCandidates(edgeKeys []schema.EdgeKey, entities []Entity, enti
 // Params fields, and Row fields; runs per-query collision checks. Phase A
 // guarantees columns are ResolvedProperty / ResolvedNode / ResolvedEdge
 // with a resolved entity index entry (for the latter two), so lookups
-// cannot fail here.
-//
-// The temporal arm is the exception, and deliberately so: which temporal
-// kinds a backend carries is the TypeMap's answer and Phase A does not
-// ask it, so a kind with no carrier is refused here with
-// ErrUnrepresentableTemporal rather than being carried onto the prepared
-// surface as whatever placeholder the table happened to name.
+// cannot fail here. Temporal columns are the exception: Phase A does not
+// consult the TypeMap, so a kind it has no carrier for is refused here
+// with ErrUnrepresentableTemporal (ADR 0025).
 func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entityLookupKey]int, tm TypeMap) ([]Query, error) {
 	out := make([]Query, 0, len(queries))
 	for _, q := range queries {
@@ -992,12 +988,11 @@ func findEdgeUnionLeaf(t resolver.ResolvedType) ([]schema.EdgeKey, bool) {
 // stability across slice growth is not required (spec §3.1, §5.2).
 //
 // Widths the TypeMap has no carrier for surface ErrUnrepresentableWidth
-// naming the offending width, and temporal kinds it has no carrier for
-// surface ErrUnrepresentableTemporal naming the offending kind — one
-// refusal per construct, because the edit each asks of the author is a
-// different one. Unknown resolver variants surface ErrOutOfC6Scope
-// naming the type — the deletion-fence for the failure mode this bead
-// closes (spec §4.1 synthetic-malformed-variant row).
+// naming the offending width; temporal kinds it has no carrier for
+// surface ErrUnrepresentableTemporal naming the offending kind. Unknown
+// resolver variants surface ErrOutOfC6Scope naming the type — the
+// deletion-fence for the failure mode this bead closes (spec §4.1
+// synthetic-malformed-variant row).
 //
 // The unionInterfaceName argument carries the synthesised edgeUnion
 // interface name (`<QueryName><RowField>`) the caller committed onto

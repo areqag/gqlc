@@ -55,15 +55,11 @@ func wireEntities(entities []codegen.Entity) ([]wiredEntity, error) {
 }
 
 // nameBackend adds this backend's name to a width or a temporal kind the
-// shared phases refused. The type table those phases consult is this
-// package's, so the refusal is this backend's answer and not a property
-// of the schema or of the query: a run emitting several targets has to
-// say which of them has no carrier for the width or the kind it names.
-//
-// These two sentinels and no others, because they are the two the shared
-// phases reach by asking this package's table. Every other refusal
-// follows from the input alone and would read as this backend's opinion
-// if it were wrapped here.
+// shared phases refused. Both refusals come from asking this package's
+// type table, so they are this backend's answer and not a property of the
+// schema or of the query: a run emitting several targets has to say which
+// of them has no carrier. Every other refusal follows from the input
+// alone, so wrapping it here would misattribute it.
 func nameBackend(err error) error {
 	if !errors.Is(err, codegen.ErrUnrepresentableWidth) && !errors.Is(err, codegen.ErrUnrepresentableTemporal) {
 		return err
@@ -147,13 +143,9 @@ func unservedColumn(t resolver.ResolvedType) string {
 	case resolver.ResolvedNode, resolver.ResolvedEdge, resolver.ResolvedEdgeUnion:
 		return ""
 	case resolver.ResolvedTemporal:
-		// Not answered here. Whether a temporal kind has a carrier is the
-		// type table's answer, and the shared phase asks it and refuses
-		// with ErrUnrepresentableTemporal naming the kind — a sentinel
-		// this gate has no way to raise, since it reports one reason for
-		// a whole query. Answering it in both places would be two tables
-		// to keep in step, and the arm that commits an encoding per kind
-		// (bd gqlc-35yu.11) would have to move both.
+		// Answered by the type table instead: the shared phase asks it and
+		// refuses with ErrUnrepresentableTemporal naming the kind, which
+		// this gate cannot do — it reports one reason per query (ADR 0025).
 		return ""
 	case resolver.ResolvedList, resolver.ResolvedUnknown:
 		return "projects " + ct.String()

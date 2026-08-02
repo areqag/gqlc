@@ -85,12 +85,11 @@ var (
 	// ResolvedProperty's DATE / TIMESTAMP families, ADR 0002), so the two
 	// sentinels address different edits — a schema for that one, a
 	// query's RETURN clause for this one. Permanent on the same terms:
-	// which kinds refuse follows from what the store can hold, so it is a
-	// backend's answer and not a stage's — Apache AGE refuses kinds the
-	// neo4j driver carries. Refusal is per kind, so a backend admitting
-	// part of the enum still fails on the rest. The fail-message names
-	// the fail-site (query + column; list element), the temporal kind,
-	// and — once the backend has wrapped it — itself.
+	// which kinds refuse follows from what the target can hold, so it is
+	// a target's answer and not a stage's, and it is per kind, so a
+	// target admitting part of the enum still fails on the rest
+	// (ADR 0025). The fail-message names the fail-site (query + column;
+	// list element) and the temporal kind.
 	ErrUnrepresentableTemporal = errors.New("unrepresentable temporal kind")
 
 	// ErrExecOnProjection is returned when a query annotated :exec has at

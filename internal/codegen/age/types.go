@@ -82,20 +82,11 @@ func (typeMap) Property(pt graph.PropertyType) (string, bool) {
 // this backend emits. Returns (typeText, ok): ok=false routes the caller
 // to ErrUnrepresentableTemporal naming the kind.
 //
-// agtype has no temporal value — no temporal scalar in its vocabulary,
-// no cast reaching one — so no kind here has a native carrier and every
-// arm refuses. The encoding that gives them one is a storage decision
-// the temporal arm owns (bd gqlc-35yu.11, against the encoding table its
-// spike settled), and each kind is admitted by its own arm on the run
-// that commits its encoding: the spike found faithful encodings for some
-// kinds and none for a calendar duration, so the arms do not move
-// together.
-//
-// One arm per kind rather than one refusal for all of them, for the same
-// reason Property and Scalar switch: the exhaustive linter holds a
-// switch to the enum's full membership, so a kind the resolver gains
-// fails to build here instead of silently inheriting an answer chosen
-// for the kinds that came before it.
+// agtype has no temporal value in its vocabulary and no cast reaching
+// one, so every arm refuses. Encoding them is a storage decision (bd
+// gqlc-35yu.11); its spike found a faithful encoding for some kinds and
+// none for a calendar duration, so arms are admitted one at a time
+// (ADR 0025).
 func (typeMap) Temporal(k resolver.Temporal) (string, bool) {
 	switch k {
 	case resolver.TemporalDate:
@@ -111,27 +102,26 @@ func (typeMap) Temporal(k resolver.Temporal) (string, bool) {
 	case resolver.TemporalDuration:
 		return "", false
 	}
-	// Temporal is a closed enum and the linter holds the switch above to
-	// its full membership, so only a value converted in from outside that
-	// vocabulary lands here. Refusing is the same answer the arms give,
-	// and it is the answer that stays right if the vocabulary grows in a
-	// build this file was not recompiled against.
+	// Only a value converted in from outside resolver.Temporal's
+	// vocabulary reaches here. Refusing stays right if that vocabulary
+	// grows in a build this file was not recompiled against.
 	return "", false
 }
 
 // Scalar maps a resolved scalar-expression kind to the Go type text this
-// backend emits (spec §5.1 column-shape table), one arm per agtype
-// scalar. Null → any: the openCypher null literal is a legal-but-
-// pointless projection.
+// backend emits (spec §5.1 column-shape table). Null → any: the
+// openCypher null literal is a legal-but-pointless projection.
 //
-// Total, and on a ground that can be checked: resolver.Scalar's
-// vocabulary (bool / int / float / string / null / map) is contained in
-// agtype's own (null, boolean, integer, float, string, list, map), so
-// each kind names a value agtype holds natively and every arm below is
-// that value's Go shape rather than a stand-in for an encoding not yet
-// chosen. Temporal is where the containment fails: agtype has no
-// temporal value at all, which is why that row refuses and this one
-// does not.
+// The bool / int / float / string arms are the Go shape of an agtype
+// scalar a decode helper reads. The null and map arms are not: decodeFunc
+// has no agtypeNull or agtypeMap arm, so unservedColumn refuses a column
+// of either kind and no emitted code reaches them. They name what a
+// helper would fill, not a carrier that exists (ADR 0025).
+//
+// Sharp edge for the day agtypeMap lands: agtype arrives as JSON, so an
+// integer inside a map decodes to float64 where the neo4j driver yields
+// int64. Same declared type on both backends, different runtime type,
+// and TestBackendInvariantSurface compares declarations.
 func (typeMap) Scalar(k resolver.Scalar) string {
 	switch k {
 	case resolver.ScalarBool:
@@ -147,9 +137,8 @@ func (typeMap) Scalar(k resolver.Scalar) string {
 	case resolver.ScalarMap:
 		return "map[string]any"
 	}
-	// Scalar is a closed enum and the exhaustive linter holds the switch
-	// to its full membership, so only a value converted in from outside
-	// that vocabulary lands here. It projects undecoded rather than
-	// guessing a Go type for a kind the resolver never named.
+	// Only a value converted in from outside resolver.Scalar's vocabulary
+	// reaches here; projecting it undecoded beats guessing a Go type for
+	// a kind the resolver never named.
 	return "any"
 }
