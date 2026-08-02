@@ -19,10 +19,20 @@
 #                two-value domain, so in_progress/blocked/deferred have no
 #                representable counterpart and any pull reverts them,
 #              * it is not closed locally while still open on GH, and
-#              * its description carries no line the GH body lacks.
+#              * the GH body extends the bead description verbatim, i.e.
+#                gh_body.startswith(description) — append-only.
 #            The last three conditions are one rule: never pull where GH is
-#            behind bd. Selection failing for any reason yields an empty
-#            allowlist and no pull at all.
+#            behind bd. Only an append witnesses "GH ahead"; every other edit
+#            (deletion, re-indent, reorder, de-dup) is bd-side work a pull
+#            would revert, and a per-line set comparison sees none of them.
+#            Selection failing for any reason yields an empty allowlist and no
+#            pull at all.
+#            Whatever the allowlist, the run ends by re-reading the bead list
+#            and reporting any out-of-scope bead whose status moved — the
+#            allowlist is empty in the steady state, so a postcondition
+#            conditional on a pull would never run. The last stderr line
+#            carries the outcome, warnings included, because the session-start
+#            caller keeps only that line.
 #   - push:  mirror bd-created beads that have no GH mirror yet, AND close
 #            GH issues whose bead was closed locally.
 #            Deliberately does NOT run `bd github sync --push-only` (which
@@ -105,23 +115,32 @@ for b in beads:
         out.append(f"HOLD {bid} {n} not-in-listing")
         continue
     gh_state, gh_body = gh[n]
+    desc = (b.get("description") or "").strip()
 
     if status not in REPRESENTABLE:
+        # `status == gh_state` is false by construction here, so these can
+        # never reach the in-sync drop below and the notice would print on
+        # every merge forever — seven of them against two actionable ones on
+        # the live corpus. A ratio like that is how `2>/dev/null` comes back.
+        # An identical body under an open mirror means GitHub is not behind bd
+        # in any respect GitHub can express: nothing is withheld, nothing to
+        # say. A *closed* mirror is a real disagreement and still reported.
+        if desc == gh_body and gh_state == "open":
+            continue
         out.append(f"HOLD {bid} {n} status-{status}-unrepresentable-on-gh")
         continue
     if status == "closed" and gh_state == "open":
         out.append(f"HOLD {bid} {n} closed-locally-still-open-on-gh")
         continue
 
-    # "GH ahead of bd" is the case --prefer-github exists to serve. The
-    # data-loss shape is bd carrying content GH lacks, which neither an
-    # equality nor a length test can separate from it.
-    desc = (b.get("description") or "").strip()
-    local = {ln.strip() for ln in desc.splitlines() if ln.strip()}
-    remote = {ln.strip() for ln in gh_body.splitlines() if ln.strip()}
-    missing = local - remote
-    if missing:
-        out.append(f"HOLD {bid} {n} bd-only-lines-{len(missing)}")
+    # "GH ahead of bd" is the case --prefer-github exists to serve, and the
+    # only witness that GitHub is ahead is the GH body carrying the whole bead
+    # description and then some. Anything else is a bd-side edit that a pull
+    # reverts. A set-subset test over stripped lines is not that witness: it
+    # admits deletion, re-indent, reorder and de-dup, three of which add no
+    # content at all. Append-only, byte for byte.
+    if not gh_body.startswith(desc):
+        out.append(f"HOLD {bid} {n} bd-description-not-a-prefix-of-gh-body")
         continue
 
     # Naming a bead in --issues syncs it whether or not GitHub moved, so the
@@ -160,27 +179,42 @@ PYEOF
   done < <(grep '^ORPHAN ' "$_tmp/plan.txt")
 
   grep '^ALLOW ' "$_tmp/plan.txt" | cut -d' ' -f2 >"$_tmp/allow.txt"
-  if [ ! -s "$_tmp/allow.txt" ]; then
-    echo "bd-gh-sync: no bead is eligible for a --prefer-github pull; nothing done." >&2
-    exit 0
-  fi
+  _eligible=$(grep -c '^ALLOW ' "$_tmp/plan.txt")
+  _batches=0
+  _failed=0
 
-  # An empty --issues would widen the pull back to everything, so the argument
-  # is only ever built from a file already known to be non-empty.
-  while IFS= read -r _ids; do
-    [ -n "$_ids" ] || continue
-    GITHUB_TOKEN="$_token" bd github sync --pull-only --prefer-github \
-      --issues "$_ids" || true
-  done < <(xargs -n "$_batch" <"$_tmp/allow.txt" | tr ' ' ',')
+  if [ -s "$_tmp/allow.txt" ]; then
+    # An empty --issues would widen the pull back to everything, so the
+    # argument is only ever built from a file already known to be non-empty.
+    while IFS= read -r _ids; do
+      [ -n "$_ids" ] || continue
+      _batches=$((_batches + 1))
+      if ! GITHUB_TOKEN="$_token" bd github sync --pull-only --prefer-github \
+        --issues "$_ids"; then
+        _failed=$((_failed + 1))
+        echo "bd-gh-sync: 'bd github sync' exited non-zero on batch ${_batches}; those beads may not have been pulled." >&2
+      fi
+    done < <(xargs -n "$_batch" <"$_tmp/allow.txt" | tr ' ' ',')
+  else
+    echo "bd-gh-sync: no bead is eligible for a --prefer-github pull; no pull issued." >&2
+  fi
 
   # Postcondition: a bead held out of scope must come back unchanged. Scoping
   # is an argument about what --issues means, and this measures whether the
   # argument held. It catches a reverted claim whatever moved it, including the
   # JSONL replay in `bd hooks run post-merge` — that reverts in_progress to
   # open through a path this script never calls.
+  #
+  # Deliberately above no bail-out: an empty allowlist is the steady state (the
+  # live corpus has nothing eligible on an ordinary merge), and none of the
+  # things that revert a claim behind this script's back are conditional on
+  # some other bead happening to be pullable. Arming the detector only when a
+  # pull runs disarms it permanently.
+  : >"$_tmp/moved.txt"
   bd list --status all --limit 0 --json >"$_tmp/beads_post.json" 2>/dev/null \
     || : >"$_tmp/beads_post.json"
-  python3 - "$_tmp/beads.json" "$_tmp/beads_post.json" "$_tmp/allow.txt" >&2 <<'PYEOF' || true
+  python3 - "$_tmp/beads.json" "$_tmp/beads_post.json" "$_tmp/allow.txt" \
+    "$_tmp/moved.txt" >&2 <<'PYEOF' || true
 import json, sys
 
 def statuses(path):
@@ -200,19 +234,41 @@ try:
 except Exception:
     allowed = set()
 
+moved = []
 for bid, was in sorted(before.items()):
     if bid in allowed or bid not in after:
         continue
     now = after[bid]
     if now != was:
+        moved.append(bid)
         print(f"bd-gh-sync: WARNING {bid} was held out of the pull but changed "
               f"{was} -> {now}. Re-assert with "
               f"'bd update {bid} --status {was}'.")
+
+# Read back by the summary line: a warning printed here is above the summary
+# and a `tail -1` caller never sees it.
+with open(sys.argv[4], "w", encoding="utf-8") as fh:
+    for bid in moved:
+        fh.write(bid + "\n")
 PYEOF
 
-  # Last line, so a caller that keeps only the tail still learns the shape of
-  # the run (.claude/settings.json pipes this through `tail -1`).
-  echo "bd-gh-sync: pulled $(wc -l <"$_tmp/allow.txt") bead(s), held $(grep -c '^HOLD ' "$_tmp/plan.txt"), left $(grep -c '^ORPHAN ' "$_tmp/plan.txt") unmirrored GH issue(s) alone." >&2
+  # Last line, and the only line a `tail -1` caller keeps
+  # (.claude/settings.json). It therefore has to report what happened rather
+  # than what was intended: a failed `bd github sync` writes its own error
+  # above this point, where the same tail discards it.
+  if [ "$_failed" -gt 0 ]; then
+    _summary="bd-gh-sync: PULL FAILED — ${_failed} of ${_batches} 'bd github sync' batch(es) exited non-zero; up to ${_eligible} bead(s) not pulled"
+  else
+    _summary="bd-gh-sync: pulled ${_eligible} bead(s)"
+  fi
+  _summary="${_summary}, held $(grep -c '^HOLD ' "$_tmp/plan.txt"), left $(grep -c '^ORPHAN ' "$_tmp/plan.txt") unmirrored GH issue(s) alone."
+  if [ -s "$_tmp/moved.txt" ]; then
+    _moved=$(wc -l <"$_tmp/moved.txt")
+    _names=$(head -n 3 "$_tmp/moved.txt" | tr '\n' ' ' | sed 's/ $//;s/ /, /g')
+    [ "$_moved" -gt 3 ] && _names="${_names}, +$((_moved - 3)) more"
+    _summary="${_summary} WARNING: ${_moved} bead(s) held out of the pull changed anyway (${_names}); see the WARNING lines above for the command to re-assert them."
+  fi
+  echo "$_summary" >&2
   exit 0
 fi
 

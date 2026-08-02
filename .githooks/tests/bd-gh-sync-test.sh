@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests for .githooks/bd-gh-sync (gqlc-63y, gqlc-w318, gqlc-onji).
+# Tests for .githooks/bd-gh-sync (gqlc-63y, gqlc-w318, gqlc-onji, gqlc-jwuw).
 #
 # These execute the real script with `bd` and `gh` stubbed on PATH, and assert
 # on the commands it issues. The previous version of this file re-implemented
@@ -26,6 +26,10 @@ mkdir -p "$BIN"
 cat >"$BIN/bd" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "bd $*" >>"$CALLS"
+if [ "$1 ${2:-}" = "github sync" ] && [ "${FAKE_SYNC_RC:-0}" != 0 ]; then
+    echo "bd: error: connection refused" >&2
+    exit "$FAKE_SYNC_RC"
+fi
 if [ "$1" = "list" ]; then
     n=0
     [ -f "$STUBTMP/bd_list_count" ] && n=$(cat "$STUBTMP/bd_list_count")
@@ -77,11 +81,16 @@ run_sync() {
     PATH="$BIN:$PATH" CALLS="$TMP/calls" STUBTMP="$TMP" \
         FAKE_BEADS="$TMP/beads.json" FAKE_GH="$TMP/gh.json" \
         FAKE_GH_OPEN="$TMP/gh_open.json" FAKE_BEADS_AFTER="$after" \
+        FAKE_SYNC_RC="${SYNC_RC:-0}" \
         "$SYNC" "$1" >"$TMP/out" 2>"$TMP/err"
 }
 
+# Exit status the `bd github sync` stub reports; 0 unless a test sets it.
+SYNC_RC=0
+
 scoped_ids() { grep -o -- '--issues [^ ]*' "$TMP/calls" | cut -d' ' -f2 | tr ',' '\n'; }
 pull_ran()   { grep -q -- 'bd github sync' "$TMP/calls"; }
+last_line()  { tail -n 1 "$TMP/err"; }
 
 ISSUE=https://github.com/org/r/issues
 
@@ -92,16 +101,51 @@ ISSUE=https://github.com/org/r/issues
 
 for st in in_progress blocked deferred; do
     run_sync pull \
-        "[{\"id\":\"b-$st\",\"status\":\"$st\",\"external_ref\":\"$ISSUE/1\",\"description\":\"same\"}]" \
-        '[{"number":1,"state":"OPEN","body":"same"}]'
+        "[{\"id\":\"b-$st\",\"status\":\"$st\",\"external_ref\":\"$ISSUE/1\",\"description\":\"local\"}]" \
+        '[{"number":1,"state":"OPEN","body":"local\nadded on GH"}]'
     if scoped_ids | grep -qx "b-$st"; then
         bad "$st bead held out of pull scope" "it was passed to --issues"
     elif ! grep -q "holding b-$st" "$TMP/err"; then
         bad "$st bead held out of pull scope" "no notice on stderr"
     else
-        ok "$st bead is held out of pull scope and reported"
+        ok "$st bead with GH content to lose is held and reported"
     fi
 done
+
+# ...but the notice is only worth printing when there is something to act on.
+# `status == gh_state` is false by construction for a status GitHub cannot
+# represent, so these can never fall into the in-sync drop and the notice is
+# structurally unconditional: the live corpus emits seven of them on every
+# single `git pull`, forever, against two actionable ones. That ratio is how
+# `2>/dev/null` gets added back. When the body is byte-identical and GitHub
+# holds the only state it can, GitHub is not behind bd in any respect GitHub
+# can express — nothing is being withheld and there is nothing to say.
+for st in in_progress blocked deferred; do
+    run_sync pull \
+        "[{\"id\":\"b-$st-quiet\",\"status\":\"$st\",\"external_ref\":\"$ISSUE/1\",\"description\":\"same\"}]" \
+        '[{"number":1,"state":"OPEN","body":"same"}]'
+    if scoped_ids | grep -qx "b-$st-quiet"; then
+        bad "$st bead identical to its mirror stays out of scope" "it was pulled"
+    elif grep -q "holding b-$st-quiet" "$TMP/err"; then
+        bad "$st bead identical to its mirror is quiet" "notice printed anyway"
+    else
+        ok "$st bead byte-identical to an open mirror is held silently"
+    fi
+done
+
+# The exception that keeps the two live signals: GitHub closing an issue whose
+# bead is still blocked/in_progress is a real disagreement, identical body or
+# not (gqlc-23e is exactly this shape).
+run_sync pull \
+    "[{\"id\":\"b-blocked-closed\",\"status\":\"blocked\",\"external_ref\":\"$ISSUE/1\",\"description\":\"same\"}]" \
+    '[{"number":1,"state":"CLOSED","body":"same"}]'
+if scoped_ids | grep -qx b-blocked-closed; then
+    bad "blocked bead closed on GH is reported" "it was pulled"
+elif ! grep -q 'holding b-blocked-closed' "$TMP/err"; then
+    bad "blocked bead closed on GH is reported" "silenced with the routine ones"
+else
+    ok "blocked bead whose mirror was closed on GH is still reported"
+fi
 
 # --- gqlc-63y: the pull that is still wanted must still happen ---------------
 
@@ -132,6 +176,59 @@ if scoped_ids | grep -qx b-amended; then
     bad "bd-only amendment held out" "it was pulled and would be reverted"
 else
     ok "bd-only amendment is held out of pull scope"
+fi
+
+# "Never pull where GitHub is behind bd" has to hold for every shape of bd-side
+# edit, not only added lines. A set-subset test over stripped lines admits
+# three edits that add no content at all, and --prefer-github reverts each.
+# Eligibility is therefore append-only: the GH body must extend the bead
+# description verbatim, which is exactly the case --prefer-github serves.
+
+# Re-indent: per-line .strip() discards the nesting, so the sets match.
+run_sync pull \
+    "[{\"id\":\"b-indent\",\"status\":\"open\",\"external_ref\":\"$ISSUE/10\",\"description\":\"- a\n  - b\"}]" \
+    '[{"number":10,"state":"OPEN","body":"- a\n- b"}]'
+if scoped_ids | grep -qx b-indent; then
+    bad "bd-side re-indent held out" "pulled; the nesting would be flattened"
+else
+    ok "bd-side re-indent is held out of pull scope"
+fi
+
+# Reorder: sets are order-blind.
+run_sync pull \
+    "[{\"id\":\"b-reorder\",\"status\":\"open\",\"external_ref\":\"$ISSUE/11\",\"description\":\"step two\nstep one\"}]" \
+    '[{"number":11,"state":"OPEN","body":"step one\nstep two"}]'
+if scoped_ids | grep -qx b-reorder; then
+    bad "bd-side reorder held out" "pulled; the ordering would be reverted"
+else
+    ok "bd-side reorder is held out of pull scope"
+fi
+
+# De-dup: sets collapse duplicates, so removing one of two identical lines is
+# invisible to a subset test.
+run_sync pull \
+    "[{\"id\":\"b-dedup\",\"status\":\"open\",\"external_ref\":\"$ISSUE/12\",\"description\":\"x\nx\"}]" \
+    '[{"number":12,"state":"OPEN","body":"x"}]'
+if scoped_ids | grep -qx b-dedup; then
+    bad "GH body shorter than the bead held out" "pulled; the de-dup reverted"
+else
+    ok "GH body that does not extend the bead description is held out"
+fi
+
+# A bd-side deletion of a trailing block is byte-identical to a GH-side append
+# and is admitted. This is the residual the append-only rule does not close and
+# cannot close from the two bodies alone: the fixture below differs from
+# b-ahead above only in the wording of the line, and b-ahead must pull. Pinned
+# so a future rule change has to confront the collision rather than rediscover
+# it. Closing it needs a third input (edit times or a common ancestor).
+run_sync pull \
+    "[{\"id\":\"b-trailing-cut\",\"status\":\"open\",\"external_ref\":\"$ISSUE/13\",\"description\":\"line one\"}]" \
+    '[{"number":13,"state":"OPEN","body":"line one\nline two deleted in bd"}]'
+if scoped_ids | grep -qx b-trailing-cut; then
+    ok "trailing-block deletion is indistinguishable from a GH append (known)"
+else
+    bad "trailing-block deletion is treated as a GH append" \
+        "held out — b-ahead, the same bytes, must pull"
 fi
 
 run_sync pull \
@@ -298,13 +395,61 @@ else
     ok "held bead that did not move produces no warning"
 fi
 
+# The detector cannot be armed by another bead happening to be pullable. On the
+# live corpus the allowlist is empty in the steady state — 277 beads, 289
+# issues, nine held and nothing eligible — so a postcondition that runs only
+# after a pull is a postcondition that never runs. This is the shipped shape:
+# one claimed bead, nothing to pull, reverted anyway.
+run_sync pull "[$CLAIMED]" '[{"number":7,"state":"OPEN","body":"same"}]' '[]' \
+    "[{\"id\":\"b-claim\",\"status\":\"open\",\"external_ref\":\"$ISSUE/7\",\"description\":\"same\"}]"
+if pull_ran; then
+    bad "postcondition runs with an empty allowlist" "a pull was issued"
+elif ! grep -q 'WARNING b-claim was held out of the pull but changed in_progress -> open' "$TMP/err"; then
+    bad "postcondition runs with an empty allowlist" "no warning; last line: $(last_line)"
+else
+    ok "a reverted claim is reported even when no bead was eligible to pull"
+fi
+
+# ...and the tail -1 caller has to see it. A WARNING printed above the summary
+# is dropped by `tail -1` in .claude/settings.json, which is the same
+# discarded-output failure the postcondition exists to end.
+case "$(last_line)" in
+    *WARNING*b-claim*) ok "the summary line carries the postcondition warning" ;;
+    *) bad "the summary line carries the postcondition warning" "got: $(last_line)" ;;
+esac
+
+# --- the summary line must report the outcome, not the intent ----------------
 # .claude/settings.json keeps only the last stderr line, so it has to carry the
 # shape of the run rather than whatever notice happened to print last.
-if [ "$(tail -n 1 "$TMP/err")" = "bd-gh-sync: pulled 1 bead(s), held 1, left 0 unmirrored GH issue(s) alone." ]; then
+
+HELDBACK="{\"id\":\"b-amend2\",\"status\":\"open\",\"external_ref\":\"$ISSUE/14\",\"description\":\"keep\nbd only\"}"
+GH_SUMMARY='[{"number":8,"state":"OPEN","body":"same\nadded on GH"},
+             {"number":14,"state":"OPEN","body":"keep"},
+             {"number":99,"state":"OPEN","body":"orphan"}]'
+
+run_sync pull "[$ELIGIBLE,$HELDBACK]" "$GH_SUMMARY"
+if [ "$(last_line)" = "bd-gh-sync: pulled 1 bead(s), held 1, left 1 unmirrored GH issue(s) alone." ]; then
     ok "final stderr line summarises the run for a tail -1 caller"
 else
-    bad "final stderr line summarises the run" "got: $(tail -n 1 "$TMP/err")"
+    bad "final stderr line summarises the run" "got: $(last_line)"
 fi
+
+# `bd github sync` failing is the shape the summary must not paper over: its
+# own error goes to stderr and is dropped by `tail -1`, so a summary that
+# reports the allowlist length instead of what happened leaves the operator
+# reading a success line for a pull that never landed.
+SYNC_RC=1
+run_sync pull "[$ELIGIBLE,$HELDBACK]" "$GH_SUMMARY"
+SYNC_RC=0
+case "$(last_line)" in
+    *"pulled 1 bead(s)"*)
+        bad "a failed sync is visible to a tail -1 caller" \
+            "reported success: $(last_line)" ;;
+    *FAILED*)
+        ok "a failed sync is reported on the line a tail -1 caller keeps" ;;
+    *)
+        bad "a failed sync is visible to a tail -1 caller" "got: $(last_line)" ;;
+esac
 
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
