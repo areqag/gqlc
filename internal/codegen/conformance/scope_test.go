@@ -7,6 +7,7 @@ import (
 	"go/parser"
 	"go/token"
 	"maps"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/areqag/gqlc/internal/cli/backends"
 	"github.com/areqag/gqlc/internal/codegen"
+	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/procsig"
 	"github.com/areqag/gqlc/internal/query/cypher"
 	"github.com/areqag/gqlc/internal/queryfile"
@@ -24,44 +26,123 @@ import (
 	"github.com/areqag/gqlc/internal/schema/gql"
 )
 
-// scopeProbeSchema is the smallest graph type that reaches every body an
-// emitted query method has: a scalar property to project bare, a second
-// one to widen a row struct, and the node itself to project as an entity.
-const scopeProbeSchema = `CREATE PROPERTY GRAPH TYPE ScopeProbe AS {
-    (:Person {
-        name :: STRING NOT NULL,
-        age  :: INT64 NOT NULL
-    })
-}`
+// The graph-type elements the probe shapes are written against. Held one
+// per constant rather than as a single schema because a shape names the
+// elements its query needs: a target with no carrier for one of them
+// drops that shape, and the element goes with it.
+//
+// Person carries a nullable property and a narrow width alongside their
+// non-null wide counterparts, so one node type reaches the pointer-wrap
+// and the narrowing-conversion arms as well as the plain one.
+const (
+	probePersonElement = `(:Person {
+        name     :: STRING NOT NULL,
+        age      :: INT NOT NULL,
+        nickname :: STRING,
+        score    :: INT
+    })`
+	probeDocElement = `(:Doc {
+        title :: STRING NOT NULL,
+        tags  :: LIST<STRING>
+    })`
+	probePostElement     = `(:Post { id :: INT64 NOT NULL })`
+	probeAuthoredElement = `(:Person) -[:AUTHORED { since :: INT64 NOT NULL }]-> (:Post)`
+	probeLikesElement    = `(:Person) -[:LIKES]-> (:Post)`
+)
 
-// scopeProbeQueries is one single-parameter query per emitted body shape:
-// a bare column at each read cardinality, a multi-column row, an entity
-// column, and a write. %[1]s is the parameter name under test — every
-// query binds exactly one parameter, because the single-parameter form is
-// the only one whose Go argument was ever derived from the query text.
-const scopeProbeQueries = `// name: ProbeOne :one
-MATCH (p:Person) WHERE p.name = $%[1]s RETURN p.name
+// scopeProbeShape is one emitted body the sweep has to reach: the
+// graph-type elements its query needs, and the query.
+type scopeProbeShape struct {
+	// name is the query's own method name, so a shape a backend refuses
+	// is logged under the name that backend's refusal already reports.
+	name     string
+	elements []string
+	// query is one whole annotated query. %[1]s is the parameter name
+	// under test — every shape binds exactly one parameter, because the
+	// single-parameter form is the only one whose Go argument was ever
+	// derived from the query text.
+	query string
+}
 
-// name: ProbeMany :many
-MATCH (p:Person) WHERE p.name = $%[1]s RETURN p.name
+// probeShapeName reads a shape's name off its own annotation, so the two
+// cannot drift apart.
+var probeShapeName = regexp.MustCompile(`^// name: (\w+) `)
 
-// name: ProbeColumns :many
-MATCH (p:Person) WHERE p.name = $%[1]s RETURN p.name, p.age
+// shapesOver is the probe shapes that share one set of graph-type
+// elements. Grouping by element set rather than repeating it per shape
+// keeps the census below readable as the census it is.
+func shapesOver(elements []string, queries ...string) []scopeProbeShape {
+	out := make([]scopeProbeShape, len(queries))
+	for i, q := range queries {
+		m := probeShapeName.FindStringSubmatch(q)
+		if m == nil {
+			panic("probe shape does not open with a name annotation: " + q)
+		}
+		out[i] = scopeProbeShape{name: m[1], elements: elements, query: q}
+	}
+	return out
+}
 
-// name: ProbeEntity :one
-MATCH (p:Person) WHERE p.name = $%[1]s RETURN p
-
-// name: ProbeExec :exec
-MATCH (p:Person) WHERE p.name = $%[1]s DELETE p
-`
+// scopeProbeShapes reaches every decode arm codegen commits a column to,
+// at both read cardinalities, single-column and inside a row struct,
+// nullable and not, plus the write and :exec bodies. Coverage of the arms
+// is asserted rather than claimed — see TestScopeProbeReachesEveryDecodeArm.
+//
+// Breadth is the whole point: a body the probe never emits declares
+// locals the sweep never sees, so a parameter named after one of them is
+// never probed. That is a proper subset of the scope masquerading as the
+// whole of it, which is the one thing this file must not be.
+var scopeProbeShapes = slices.Concat(
+	shapesOver([]string{probePersonElement},
+		"// name: ProbeScalarOne :one\nMATCH (p:Person) WHERE p.name = $%[1]s RETURN p.name",
+		"// name: ProbeScalarMany :many\nMATCH (p:Person) WHERE p.name = $%[1]s RETURN p.name",
+		"// name: ProbeScalarRow :many\nMATCH (p:Person) WHERE p.name = $%[1]s RETURN p.name, p.age",
+		"// name: ProbeNullableColumn :one\nMATCH (p:Person) WHERE p.name = $%[1]s RETURN p.nickname",
+		"// name: ProbeNullableRow :many\nMATCH (p:Person) WHERE p.name = $%[1]s RETURN p.nickname, p.score",
+		"// name: ProbeNarrowParam :one\nMATCH (p:Person) WHERE p.age = $%[1]s RETURN p.name",
+		"// name: ProbeNullableParam :one\nMATCH (p:Person) WHERE p.score = $%[1]s RETURN p.name",
+		"// name: ProbeNodeColumn :one\nMATCH (p:Person) WHERE p.name = $%[1]s RETURN p",
+		"// name: ProbeNullableNodeColumn :one\nOPTIONAL MATCH (p:Person) WHERE p.name = $%[1]s RETURN p",
+		"// name: ProbeNodeColumnRow :many\nMATCH (p:Person) WHERE p.name = $%[1]s RETURN p, p.age",
+		"// name: ProbeNestedList :many\nMATCH (p:Person) WHERE p.name = $%[1]s RETURN [[[1]]] AS xs",
+		"// name: ProbeListOfNull :one\nMATCH (p:Person) WHERE p.name = $%[1]s RETURN [null] AS xs",
+		"// name: ProbeListOfUnknown :one\nMATCH (p:Person) WHERE p.name = $%[1]s RETURN [foo(p.age)] AS xs",
+		"// name: ProbeListOfTemporal :one\nMATCH (p:Person) WHERE p.name = $%[1]s RETURN [date()] AS xs",
+		"// name: ProbeTemporalColumn :one\nMATCH (p:Person) WHERE p.name = $%[1]s RETURN datetime() AS now",
+		"// name: ProbeTemporalCarrierColumn :one\nMATCH (p:Person) WHERE p.name = $%[1]s RETURN date() AS d",
+		"// name: ProbeMapColumn :one\nMATCH (p:Person) WHERE p.name = $%[1]s RETURN {a: 1} AS m",
+		"// name: ProbeAnyColumn :many\nMATCH (p:Person) WHERE p.name = $%[1]s RETURN foo(p.age) AS r",
+		"// name: ProbeNullColumn :one\nMATCH (p:Person) WHERE p.name = $%[1]s RETURN null AS n",
+		"// name: ProbeExec :exec\nMATCH (p:Person) WHERE p.name = $%[1]s DELETE p",
+		"// name: ProbeWriteProjectionOne :one\nCREATE (p:Person {name: $%[1]s}) RETURN p",
+		"// name: ProbeWriteProjectionMany :many\nMATCH (p:Person) WHERE p.name = $%[1]s SET p.age = 1 RETURN p.name",
+	),
+	// The list property lives on its own node type: a backend with no
+	// carrier for LIST refuses the whole graph type at admission, which
+	// would drop every shape above with it.
+	shapesOver([]string{probeDocElement},
+		"// name: ProbeNullableListProperty :one\nMATCH (d:Doc) WHERE d.title = $%[1]s RETURN d.tags",
+	),
+	shapesOver([]string{probePersonElement, probePostElement, probeAuthoredElement},
+		"// name: ProbeEdgeColumn :one\nMATCH (p:Person)-[r:AUTHORED]->(:Post) WHERE p.name = $%[1]s RETURN r",
+		"// name: ProbeListOfEdge :one\nMATCH (p:Person)-[r:AUTHORED*]->(:Post) WHERE p.name = $%[1]s RETURN r",
+	),
+	shapesOver([]string{probePersonElement, probePostElement, probeAuthoredElement, probeLikesElement},
+		"// name: ProbeEdgeUnionOne :one\nMATCH (p:Person)-[r:AUTHORED|LIKES]->(:Post) WHERE p.name = $%[1]s RETURN r",
+		"// name: ProbeEdgeUnionMany :many\nMATCH (p:Person)-[r:AUTHORED|LIKES]->(:Post) WHERE p.name = $%[1]s RETURN r",
+		"// name: ProbeEdgeUnionRow :one\nMATCH (p:Person)-[r:AUTHORED|LIKES]->(:Post) WHERE p.name = $%[1]s RETURN p, r",
+		"// name: ProbeNullableEdgeUnion :one\nMATCH (p:Person) WHERE p.name = $%[1]s\nOPTIONAL MATCH (p)-[r:AUTHORED|LIKES]->(:Post)\nRETURN r",
+		"// name: ProbeListOfEdgeUnion :one\nMATCH (p:Person)-[r:AUTHORED|LIKES*]->(:Post) WHERE p.name = $%[1]s RETURN r",
+	),
+)
 
 // unclaimedParam is a parameter name no emission mentions, so the scopes
 // read off an emission spelled with it are the reference every other
 // spelling is measured against.
 const unclaimedParam = "alpha"
 
-// TestEmittedScopeIsGeneratorOwned pins the whole of what a query author
-// can put into an emitted method's scope, which is nothing.
+// TestEmittedScopeIsGeneratorOwned pins what a query author can put into
+// an emitted method's scope, which is nothing.
 //
 // A generated query method carries exactly one identifier the author
 // chose: the single-parameter form used to name its Go argument after the
@@ -83,14 +164,19 @@ const unclaimedParam = "alpha"
 // the same ones, so an emitter change that let an author-chosen name back
 // in fails here whatever the emitter chose to call anything.
 //
-// The candidate names are likewise read off an emission rather than
-// listed, and the sweep runs per target, so each backend is probed with
-// its own vocabulary. Nothing here reads the golden corpus: -update
-// cannot make this test pass.
+// What is pinned is bounded by what the probe emits, so the probe emits
+// every decode arm the target serves: the shapes it drops are the ones
+// that target refuses to generate at all, and the arms the shapes reach
+// are asserted whole in TestScopeProbeReachesEveryDecodeArm. The
+// candidate names are likewise read off an emission rather than listed,
+// and the sweep runs per target, so each backend is probed with its own
+// vocabulary. Nothing here reads the golden corpus: -update cannot make
+// this test pass.
 func TestEmittedScopeIsGeneratorOwned(t *testing.T) {
 	probe := newScopeProbe(t)
 	for _, target := range probe.targets {
 		t.Run(target, func(t *testing.T) {
+			batch := probe.batch(target)
 			reference := probe.emit(t, target, unclaimedParam)
 			want := boundScopes(t, reference)
 			require.NotEmpty(t, want, "the emission binds no identifiers to compare")
@@ -100,7 +186,7 @@ func TestEmittedScopeIsGeneratorOwned(t *testing.T) {
 
 			for _, name := range candidates {
 				t.Run(name, func(t *testing.T) {
-					in, err := probe.input(name)
+					in, err := batch.input(name)
 					if err != nil {
 						// A name the query grammar cannot spell after a
 						// dollar sign is one no author can reach.
@@ -116,15 +202,131 @@ func TestEmittedScopeIsGeneratorOwned(t *testing.T) {
 	}
 }
 
-// scopeProbe emits the probe batch through every registered backend. The
-// schema is parsed once and the resolver built once: only the query text
-// changes between emissions, and re-parsing a graph type per candidate
-// would dominate the sweep.
+// TestScopeProbeReachesEveryDecodeArm holds the probe to the claim the
+// sweep rests on. An arm no shape reaches is a body whose locals never
+// enter the candidate set, so a parameter named after one of them is
+// never swept and the sweep's silence about it means nothing.
+//
+// The arms are read off Phase B rather than off any one backend, because
+// what a shape reaches is a property of the resolved column and not of
+// the target that renders it; a target that refuses an arm drops the
+// shape at newScopeProbe instead.
+func TestScopeProbeReachesEveryDecodeArm(t *testing.T) {
+	for i, arm := range probeDecodeArms {
+		require.Equal(t, codegen.ColumnKind(i), arm,
+			"probeDecodeArms is not codegen.ColumnKind in declaration order")
+		require.NotEmpty(t, decodeArmName(arm), "arm %d has no name", i)
+	}
+	require.Empty(t, decodeArmName(codegen.ColumnKind(len(probeDecodeArms))),
+		"codegen.ColumnKind holds a member past the end of probeDecodeArms: name it there and add a probe shape that reaches it")
+
+	sch, res := probeGraph(t, scopeProbeShapes)
+	queries := make([]codegen.NamedQuery, 0, len(scopeProbeShapes))
+	for _, shape := range scopeProbeShapes {
+		lowered, err := lowerProbeQueries(res, shape.query, unclaimedParam)
+		require.NoError(t, err, "shape %q does not lower", shape.name)
+		queries = append(queries, lowered...)
+	}
+	prepared, err := codegen.Prepare(codegen.Input{Schema: sch, Queries: queries}, probeTypeMap{}, "probe")
+	require.NoError(t, err)
+
+	reached := make(map[codegen.ColumnKind]string)
+	for _, q := range prepared.Queries {
+		for _, f := range q.RowFields {
+			reached[f.Kind] = q.MethodName
+			for e := f.ListElem; e != nil; e = e.Nested {
+				reached[e.Kind] = q.MethodName
+			}
+		}
+	}
+	for _, arm := range probeDecodeArms {
+		require.Contains(t, reached, arm, "no probe shape reaches the %s arm", decodeArmName(arm))
+	}
+}
+
+// probeDecodeArms is every arm codegen commits a column to. Go cannot
+// enumerate an iota enum, so the membership is written out and then
+// proved whole: decodeArmName names each of these and nothing past them,
+// which for a contiguous enum is the whole of it.
+var probeDecodeArms = []codegen.ColumnKind{
+	codegen.ColumnProperty,
+	codegen.ColumnNode,
+	codegen.ColumnEdge,
+	codegen.ColumnTemporal,
+	codegen.ColumnScalar,
+	codegen.ColumnScalarNull,
+	codegen.ColumnList,
+	codegen.ColumnAny,
+	codegen.ColumnEdgeUnion,
+}
+
+// decodeArmName names one committed column kind for a failure message.
+// The switch carries no default, so a kind added to codegen.ColumnKind
+// fails the exhaustiveness check here; the empty fallback is what makes a
+// value past the end of the enum nameless, which is how
+// TestScopeProbeReachesEveryDecodeArm proves probeDecodeArms holds all of it.
+func decodeArmName(k codegen.ColumnKind) string {
+	switch k {
+	case codegen.ColumnProperty:
+		return "schema property"
+	case codegen.ColumnNode:
+		return "node entity"
+	case codegen.ColumnEdge:
+		return "edge entity"
+	case codegen.ColumnTemporal:
+		return "temporal expression"
+	case codegen.ColumnScalar:
+		return "scalar expression"
+	case codegen.ColumnScalarNull:
+		return "null list element"
+	case codegen.ColumnList:
+		return "list"
+	case codegen.ColumnAny:
+		return "undecided"
+	case codegen.ColumnEdgeUnion:
+		return "edge union"
+	}
+	return ""
+}
+
+// probeTypeMap admits every width, so the arm a column lands on is Phase
+// B's answer alone. A backend's own table refuses widths it has no
+// carrier for, which would drop shapes from the arm census and hide the
+// very gap the census exists to find.
+type probeTypeMap struct{}
+
+func (probeTypeMap) Property(pt graph.PropertyType) (string, bool) { return string(pt), true }
+func (probeTypeMap) Temporal(k resolver.Temporal) string           { return fmt.Sprintf("temporal%d", k) }
+func (probeTypeMap) Scalar(k resolver.Scalar) string               { return fmt.Sprintf("scalar%d", k) }
+
+// scopeProbe emits the probe batch through every registered backend.
 type scopeProbe struct {
 	targets []string
 	lookup  func(string) (func(pkg string) codegen.Generator, bool)
-	schema  schema.Schema
-	res     *resolver.Resolver
+	// byTarget maps a target onto the batch it emits. Targets that serve
+	// the same shapes share one batch, so the schema is parsed once and
+	// the lowered inputs are memoised across them.
+	byTarget map[string]*scopeProbeBatch
+}
+
+// scopeProbeBatch is the shapes one target emits, the graph type they
+// need, and the lowered inputs read off them. The resolver is built once
+// and the lowering memoised per parameter name: only the query text
+// changes between emissions, and re-parsing a graph type per candidate
+// would dominate the sweep.
+type scopeProbeBatch struct {
+	shapes []scopeProbeShape
+	schema schema.Schema
+	res    *resolver.Resolver
+	inputs map[string]probeLowering
+}
+
+// probeLowering is one memoised lowering. The error is the front end's
+// alone — a name the query grammar rejects is not this test's business —
+// so a caller skips on it rather than failing.
+type probeLowering struct {
+	in  codegen.Input
+	err error
 }
 
 func newScopeProbe(t *testing.T) *scopeProbe {
@@ -134,57 +336,67 @@ func newScopeProbe(t *testing.T) *scopeProbe {
 	targets := reg.Keys()
 	require.NotEmpty(t, targets, "no backend is registered, so this test holds nothing")
 
-	sch, err := gql.New().Parse(strings.NewReader(scopeProbeSchema))
-	require.NoError(t, err)
-	procs, err := procsig.NewRegistry(nil)
-	require.NoError(t, err)
-
-	return &scopeProbe{
-		targets: targets,
-		lookup:  reg.Lookup,
-		schema:  sch,
-		res:     resolver.New(sch, resolver.WithRegistry(procs)),
+	p := &scopeProbe{targets: targets, lookup: reg.Lookup, byTarget: make(map[string]*scopeProbeBatch, len(targets))}
+	byShapes := make(map[string]*scopeProbeBatch)
+	served := make(map[string]bool, len(scopeProbeShapes))
+	for _, target := range targets {
+		shapes := p.servedShapes(t, target, served)
+		require.NotEmpty(t, shapes, "target %q emits none of the probe shapes", target)
+		key := strings.Join(shapeNames(shapes), ",")
+		batch, ok := byShapes[key]
+		if !ok {
+			sch, res := probeGraph(t, shapes)
+			batch = &scopeProbeBatch{shapes: shapes, schema: sch, res: res, inputs: make(map[string]probeLowering)}
+			byShapes[key] = batch
+		}
+		p.byTarget[target] = batch
+		// The assembled batch must emit even though every shape in it
+		// emitted alone: a refusal that only fires on the whole batch
+		// would otherwise drop the sweep to whatever still generated.
+		in, err := batch.input(unclaimedParam)
+		require.NoError(t, err, "the probe batch for %q does not lower", target)
+		p.generate(t, target, in)
 	}
+	for _, shape := range scopeProbeShapes {
+		require.True(t, served[shape.name],
+			"no registered target emits shape %q, so it contributes nothing to any sweep", shape.name)
+	}
+	return p
 }
 
-// input lowers the probe batch spelled around one parameter name. The
-// error is the front end's alone — a name the query grammar rejects is
-// not this test's business — so a caller skips on it rather than failing.
-func (p *scopeProbe) input(param string) (codegen.Input, error) {
-	src := fmt.Sprintf(scopeProbeQueries, param)
-	annotated, err := queryfile.New().Parse(strings.NewReader(src))
-	if err != nil {
-		return codegen.Input{}, err
-	}
-	procs, err := procsig.NewRegistry(nil)
-	if err != nil {
-		return codegen.Input{}, err
-	}
-	queries := make([]codegen.NamedQuery, 0, len(annotated))
-	for _, aq := range annotated {
-		q, err := cypher.New(cypher.WithRegistry(procs)).Parse(bytes.NewReader([]byte(aq.Text)))
+// servedShapes is the shapes target emits, each judged on its own: a
+// shape that generates alone is in, and one the backend refuses is out
+// along with the graph-type elements only it needed. Judging by the
+// backend's own admission rather than by a per-target list is what keeps
+// the sweep as wide as the backend is, without this file having to know
+// which widths each one carries.
+func (p *scopeProbe) servedShapes(t *testing.T, target string, served map[string]bool) []scopeProbeShape {
+	t.Helper()
+	newGen, ok := p.lookup(target)
+	require.True(t, ok, "no backend is registered under %q", target)
+	var out []scopeProbeShape
+	for _, shape := range scopeProbeShapes {
+		sch, res := probeGraph(t, []scopeProbeShape{shape})
+		queries, err := lowerProbeQueries(res, shape.query, unclaimedParam)
+		require.NoError(t, err, "shape %q does not lower", shape.name)
+		files, err := newGen("probe").Generate(codegen.Input{Schema: sch, Queries: queries})
 		if err != nil {
-			return codegen.Input{}, err
+			require.Nil(t, files, "target %q refused shape %q and still returned files", target, shape.name)
+			t.Logf("target %q does not emit shape %q: %v", target, shape.name, err)
+			continue
 		}
-		vq, err := p.res.Resolve(q)
-		if err != nil {
-			return codegen.Input{}, err
-		}
-		queries = append(queries, codegen.NamedQuery{
-			Name:        aq.Name,
-			Cardinality: aq.Cardinality,
-			SourceFile:  "queries.cypher",
-			SourceText:  aq.Text,
-			Validated:   vq,
-		})
+		served[shape.name] = true
+		out = append(out, shape)
 	}
-	return codegen.Input{Schema: p.schema, Queries: queries}, nil
+	return out
 }
+
+func (p *scopeProbe) batch(target string) *scopeProbeBatch { return p.byTarget[target] }
 
 // emit is input plus generate for a parameter name the batch must accept.
 func (p *scopeProbe) emit(t *testing.T, target, param string) []codegen.File {
 	t.Helper()
-	in, err := p.input(param)
+	in, err := p.byTarget[target].input(param)
 	require.NoError(t, err, "the probe batch does not lower under parameter %q", param)
 	return p.generate(t, target, in)
 }
@@ -201,6 +413,91 @@ func (p *scopeProbe) generate(t *testing.T, target string, in codegen.Input) []c
 	require.NoError(t, err, "generation failed for target %q", target)
 	require.NotEmpty(t, files, "target %q emitted nothing", target)
 	return files
+}
+
+// input lowers the batch spelled around one parameter name.
+func (b *scopeProbeBatch) input(param string) (codegen.Input, error) {
+	if got, ok := b.inputs[param]; ok {
+		return got.in, got.err
+	}
+	queries := make([]codegen.NamedQuery, 0, len(b.shapes))
+	var lowered probeLowering
+	for _, shape := range b.shapes {
+		qs, err := lowerProbeQueries(b.res, shape.query, param)
+		if err != nil {
+			lowered = probeLowering{err: err}
+			b.inputs[param] = lowered
+			return lowered.in, lowered.err
+		}
+		queries = append(queries, qs...)
+	}
+	lowered = probeLowering{in: codegen.Input{Schema: b.schema, Queries: queries}}
+	b.inputs[param] = lowered
+	return lowered.in, nil
+}
+
+// probeGraph parses the graph type the given shapes need, in
+// first-appearance order and once per element, and builds the resolver
+// over it.
+func probeGraph(t *testing.T, shapes []scopeProbeShape) (schema.Schema, *resolver.Resolver) {
+	t.Helper()
+	var elements []string
+	for _, shape := range shapes {
+		for _, e := range shape.elements {
+			if !slices.Contains(elements, e) {
+				elements = append(elements, e)
+			}
+		}
+	}
+	src := "CREATE PROPERTY GRAPH TYPE ScopeProbe AS {\n    " + strings.Join(elements, ",\n    ") + "\n}"
+	sch, err := gql.New().Parse(strings.NewReader(src))
+	require.NoError(t, err, "the probe graph type does not parse:\n%s", src)
+	procs, err := procsig.NewRegistry(nil)
+	require.NoError(t, err)
+	return sch, resolver.New(sch, resolver.WithRegistry(procs))
+}
+
+// lowerProbeQueries runs one shape's query text through the front end
+// spelled around param.
+func lowerProbeQueries(res *resolver.Resolver, query, param string) ([]codegen.NamedQuery, error) {
+	annotated, err := queryfile.New().Parse(strings.NewReader(fmt.Sprintf(query, param)))
+	if err != nil {
+		return nil, err
+	}
+	procs, err := procsig.NewRegistry(nil)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]codegen.NamedQuery, 0, len(annotated))
+	for _, aq := range annotated {
+		q, err := cypher.New(cypher.WithRegistry(procs)).Parse(bytes.NewReader([]byte(aq.Text)))
+		if err != nil {
+			return nil, err
+		}
+		vq, err := res.Resolve(q)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, codegen.NamedQuery{
+			Name:        aq.Name,
+			Cardinality: aq.Cardinality,
+			SourceFile:  "queries.cypher",
+			SourceText:  aq.Text,
+			Validated:   vq,
+		})
+	}
+	return out, nil
+}
+
+// shapeNames is a shape slice's names, which identify the slice: the
+// shapes are drawn from one ordered set, so equal name lists mean equal
+// batches.
+func shapeNames(shapes []scopeProbeShape) []string {
+	out := make([]string, len(shapes))
+	for i, s := range shapes {
+		out[i] = s.name
+	}
+	return out
 }
 
 // requireParameterReachesTheWire holds the half of the parameter name
