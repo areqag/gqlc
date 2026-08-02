@@ -311,6 +311,13 @@ vuln: vuln-root-residual
 # "Third-party" is anything outside the main module whose first path element
 # contains a dot, which is what puts a package in a vulnerability database at
 # all; .TestImports is exactly the in-package test variant's import set.
+#
+# The number is not one sed away, which is why it is a bead and not a chore:
+# mechanically renaming all 34 clauses to a _test suffix breaks 11 packages with
+# 138 distinct undefined identifiers, 53 of them unexported. Some of those tests
+# want unexported state for good reasons and should stay in-package; the goal is
+# to shrink the residual and know its size, not to reach zero by exporting
+# things that should stay private.
 vuln-root-residual:
     #!/usr/bin/env bash
     set -euo pipefail
