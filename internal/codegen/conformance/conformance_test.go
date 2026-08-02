@@ -137,6 +137,8 @@ func sentinelIdent(err error) string {
 		return "ErrUnrepresentableWidth"
 	case codegen.ErrUnrepresentableEdgeUnion:
 		return "ErrUnrepresentableEdgeUnion"
+	case codegen.ErrUnrepresentableTemporal:
+		return "ErrUnrepresentableTemporal"
 	case codegen.ErrParamNameCollision:
 		return "ErrParamNameCollision"
 	case codegen.ErrRowFieldCollision:

@@ -24,9 +24,31 @@ func (stubTypeMap) Property(pt graph.PropertyType) (string, bool) {
 	return "property:" + string(pt), true
 }
 
-func (stubTypeMap) Temporal(k resolver.Temporal) string { return "temporal:" + k.String() }
+func (stubTypeMap) Temporal(k resolver.Temporal) (string, bool) {
+	return "temporal:" + k.String(), true
+}
 
 func (stubTypeMap) Scalar(k resolver.Scalar) string { return "scalar:" + k.String() }
+
+// partialTemporalTypeMap refuses exactly one temporal kind and admits
+// the other five. This is the shape a real backend takes: agtype has no
+// temporal value, so its encodings are committed kind by kind, and the
+// spike behind bd gqlc-35yu.11 found faithful ones for some kinds and
+// none for a calendar duration — so a table that could only refuse the
+// whole enum or admit the whole enum would have nowhere to put that
+// answer. Wrapping stubTypeMap keeps the other two axes identical to
+// every other plan assertion in this file.
+type partialTemporalTypeMap struct {
+	stubTypeMap
+	refuse resolver.Temporal
+}
+
+func (m partialTemporalTypeMap) Temporal(k resolver.Temporal) (string, bool) {
+	if k == m.refuse {
+		return "", false
+	}
+	return m.stubTypeMap.Temporal(k)
+}
 
 // unknownVariant is a test-local ResolvedType stub satisfying the
 // sealed interface by embedding a real ResolvedType (any variant) so
@@ -165,10 +187,12 @@ func TestPhaseBCommitsListElemPlan(t *testing.T) {
 		want: wantPlan{Kind: ColumnProperty, GoType: "property:INT32"},
 	}}
 	for _, r := range temporalRows {
+		goType, ok := tm.Temporal(r.k)
+		require.True(t, ok, "the stub table carries every temporal kind")
 		positive = append(positive, positiveRow{
 			name: r.name,
 			in:   resolver.ResolvedTemporal{Kind: r.k},
-			want: wantPlan{Kind: ColumnTemporal, GoType: tm.Temporal(r.k)},
+			want: wantPlan{Kind: ColumnTemporal, GoType: goType},
 		})
 	}
 	for _, r := range scalarRows {
@@ -414,6 +438,96 @@ func TestEdgeUnionCandidatesMustCarryDistinctLabels(t *testing.T) {
 				return
 			}
 			require.ErrorIs(t, err, ErrUnrepresentableEdgeUnion)
+			require.EqualError(t, err, tt.wantErr)
+		})
+	}
+}
+
+// TestTemporalKindRefusalReachesTheCaller pins the contract the ok=false
+// half of the temporal row exists for, at both fail-sites and in the
+// words the caller reads. Without it the phase has no way to be told
+// "no carrier" and carries the table's answer onto the prepared surface
+// whatever it is, so a backend with nothing to say emits a column no
+// decoder can fill, at no error.
+//
+// The admitted rows are the load-bearing half: the type map refuses one
+// kind and every other kind still generates, which is what a backend
+// committing its encodings one at a time needs (bd gqlc-35yu.11 —
+// faithful encodings for some kinds, none for a calendar duration). A
+// design refusing the enum whole would pass the first two rows and fail
+// these.
+func TestTemporalKindRefusalReachesTheCaller(t *testing.T) {
+	refused := resolver.TemporalDuration
+
+	tests := []struct {
+		name    string
+		column  resolver.ResolvedType
+		wantErr string
+	}{
+		{
+			name:    "column projects a kind with no carrier",
+			column:  resolver.ResolvedTemporal{Kind: refused},
+			wantErr: `unrepresentable temporal kind: query "GetWhen" column 0 "t" projects temporal(duration)`,
+		},
+		{
+			name:   "list element projects a kind with no carrier",
+			column: resolver.ResolvedList{Element: resolver.ResolvedTemporal{Kind: refused}},
+			wantErr: `query "GetWhen" column 0 "t": unrepresentable temporal kind: ` +
+				`list element projects temporal(duration)`,
+		},
+		{
+			name:   "nested list element projects a kind with no carrier",
+			column: resolver.ResolvedList{Element: resolver.ResolvedList{Element: resolver.ResolvedTemporal{Kind: refused}}},
+			wantErr: `query "GetWhen" column 0 "t": unrepresentable temporal kind: ` +
+				`list element projects temporal(duration)`,
+		},
+	}
+	for _, k := range []resolver.Temporal{
+		resolver.TemporalDate,
+		resolver.TemporalTime,
+		resolver.TemporalLocalTime,
+		resolver.TemporalDateTime,
+		resolver.TemporalLocalDateTime,
+	} {
+		tests = append(tests,
+			struct {
+				name    string
+				column  resolver.ResolvedType
+				wantErr string
+			}{
+				name:   "column projects " + k.String() + ", which has a carrier",
+				column: resolver.ResolvedTemporal{Kind: k},
+			},
+			struct {
+				name    string
+				column  resolver.ResolvedType
+				wantErr string
+			}{
+				name:   "list element projects " + k.String() + ", which has a carrier",
+				column: resolver.ResolvedList{Element: resolver.ResolvedTemporal{Kind: k}},
+			},
+		)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := Input{
+				Schema: schema.Schema{Name: "Test"},
+				Queries: []NamedQuery{{
+					Name:        "GetWhen",
+					Cardinality: CardinalityOne,
+					SourceText:  "MATCH (n) RETURN duration({days: 1}) AS t",
+					Validated:   resolver.ValidatedQuery{Columns: []resolver.Column{{Name: "t", Type: tt.column}}},
+				}},
+			}
+			tm := partialTemporalTypeMap{refuse: refused}
+			prepared, err := Prepare(in, tm, "")
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				require.NotEmpty(t, prepared.Queries[0].RowFields[0].GoType)
+				return
+			}
+			require.ErrorIs(t, err, ErrUnrepresentableTemporal)
 			require.EqualError(t, err, tt.wantErr)
 		})
 	}

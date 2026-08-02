@@ -79,17 +79,49 @@ func (typeMap) Property(pt graph.PropertyType) (string, bool) {
 }
 
 // Temporal maps a resolved temporal-expression kind to the Go type text
-// this backend emits. agtype carries no temporal scalar, so every kind
-// projects as the undecoded value until the temporal arm commits an
-// encoding.
-func (typeMap) Temporal(resolver.Temporal) string {
-	return "any"
+// this backend emits. Returns (typeText, ok): ok=false routes the caller
+// to ErrUnrepresentableTemporal naming the kind.
+//
+// agtype has no temporal value in its vocabulary and no cast reaching
+// one, so every arm refuses. Encoding them is a storage decision (bd
+// gqlc-35yu.11); its spike found a faithful encoding for some kinds and
+// none for a calendar duration, so arms are admitted one at a time
+// (ADR 0025).
+func (typeMap) Temporal(k resolver.Temporal) (string, bool) {
+	switch k {
+	case resolver.TemporalDate:
+		return "", false
+	case resolver.TemporalTime:
+		return "", false
+	case resolver.TemporalLocalTime:
+		return "", false
+	case resolver.TemporalDateTime:
+		return "", false
+	case resolver.TemporalLocalDateTime:
+		return "", false
+	case resolver.TemporalDuration:
+		return "", false
+	}
+	// Only a value converted in from outside resolver.Temporal's
+	// vocabulary reaches here. Refusing stays right if that vocabulary
+	// grows in a build this file was not recompiled against.
+	return "", false
 }
 
 // Scalar maps a resolved scalar-expression kind to the Go type text this
-// backend emits (spec §5.1 column-shape table), one arm per agtype
-// scalar. Null → any: the openCypher null literal is a legal-but-
-// pointless projection.
+// backend emits (spec §5.1 column-shape table). Null → any: the
+// openCypher null literal is a legal-but-pointless projection.
+//
+// The bool / int / float / string arms are the Go shape of an agtype
+// scalar a decode helper reads. The null and map arms are not: decodeFunc
+// has no agtypeNull or agtypeMap arm, so unservedColumn refuses a column
+// of either kind and no emitted code reaches them. They name what a
+// helper would fill, not a carrier that exists (ADR 0025).
+//
+// Sharp edge for the day agtypeMap lands: agtype arrives as JSON, so an
+// integer inside a map decodes to float64 where the neo4j driver yields
+// int64. Same declared type on both backends, different runtime type,
+// and TestBackendInvariantSurface compares declarations.
 func (typeMap) Scalar(k resolver.Scalar) string {
 	switch k {
 	case resolver.ScalarBool:
@@ -105,9 +137,8 @@ func (typeMap) Scalar(k resolver.Scalar) string {
 	case resolver.ScalarMap:
 		return "map[string]any"
 	}
-	// Scalar is a closed enum and the exhaustive linter holds the switch
-	// to its full membership, so only a value converted in from outside
-	// that vocabulary lands here. It projects undecoded rather than
-	// guessing a Go type for a kind the resolver never named.
+	// Only a value converted in from outside resolver.Scalar's vocabulary
+	// reaches here; projecting it undecoded beats guessing a Go type for
+	// a kind the resolver never named.
 	return "any"
 }
