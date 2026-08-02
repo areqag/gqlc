@@ -766,6 +766,50 @@ func (s *ResolverSuite) TestAmbiguousOrientationRemedyIsTheArrow() {
 	}
 }
 
+// TestMixedSymmetryIsAcceptedAndTheMarkerNarrows holds §4.6's third shape: a
+// candidate that reads both ways alongside candidates that read exactly one
+// way, all on the same side. Nothing disagrees, so the verdict table accepts —
+// and unlike the shape where *every* candidate reads both ways, the arrow is
+// not inert, because the one-way candidates sit outside the directed probe set.
+// So the author's choice of marker decides the result type: a two-key union
+// undirected, a single edge directed.
+//
+// Both arities are hand-written. The corpus fixtures for this shape carry
+// machine-written goldens, so a change that collapsed the two arities into one
+// would be absorbed by the next -update run with the goldens still agreeing
+// with themselves; the difference between them is the whole claim, so it is
+// stated somewhere -update cannot reach.
+//
+// The three resolves are also what says the shape is mixed rather than either
+// pure one, without restating the classification predicate in the test: a
+// candidate that reads both ways is in *both* directed twins' candidate sets, a
+// candidate that reads one way is in exactly one, and the undirected set is
+// their union.
+func (s *ResolverSuite) TestMixedSymmetryIsAcceptedAndTheMarkerNarrows() {
+	sch := s.loadSchema("valid", "satisfy_plural_edges_mixed_symmetry.gql")
+	bothWays := schema.EdgeKey{Source: "Manager&Person&Staff", KeyLabels: "MENTORS", Target: "Engineer&Person&Staff"}
+	oneWay := schema.EdgeKey{Source: "Person", KeyLabels: "MENTORS", Target: "Engineer&Person&Staff"}
+
+	resolve := func(src string) ResolvedType {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		s.Require().NoErrorf(err, "%s: mixed symmetry is accepted, not refused", src)
+		s.Require().Len(vq.Columns, 1)
+		return vq.Columns[0].Type
+	}
+
+	s.Require().Equal(ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{bothWays, oneWay}},
+		resolve("MATCH (a:Staff)-[r:MENTORS]-(b:Person) RETURN r"),
+		"undirected admits both readings, so both candidates join the union")
+	s.Require().Equal(ResolvedEdge{EdgeKey: bothWays},
+		resolve("MATCH (a:Staff)-[r:MENTORS]->(b:Person) RETURN r"),
+		"the arrow drops the one-way candidate, so the marker is not inert on this shape")
+	s.Require().Equal(ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{bothWays, oneWay}},
+		resolve("MATCH (a:Person)-[r:MENTORS]->(b:Staff) RETURN r"),
+		"the reversed arrow keeps both, which is what makes the surviving candidate the symmetric one")
+}
+
 // TestTwoSwappedPairsReportsTheFirstInCandidateOrder holds §4.4's determinism
 // claim on the only input that can observe it: a candidate set carrying two
 // disjoint swapped pairs, where each pair on its own is a truthful answer to
