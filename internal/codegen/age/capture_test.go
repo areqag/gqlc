@@ -203,10 +203,10 @@ func (s *EmissionSuite) ageFixtures() []ageFixture {
 //
 // Every query in the batch is rebound to a single parameter, because the
 // single-parameter form is the only one that puts an author-chosen
-// identifier in a method's scope at all — TestOnlyTheSingleParameterForm
-// PutsAQueryChosenNameInScope is what holds that true rather than
-// assumed. Rebinding leaves each query's row shape exactly as the corpus
-// wrote it, which is the axis under test here.
+// identifier in a method's scope at all. The perturbation test below is
+// what holds that true rather than assumed. Rebinding leaves each
+// query's row shape exactly as the corpus wrote it, which is the axis
+// under test here.
 func (s *EmissionSuite) TestNoEmittedNameTakesAQueryParameterName() {
 	multiColumn := 0
 	for _, fx := range s.ageFixtures() {
@@ -217,7 +217,7 @@ func (s *EmissionSuite) TestNoEmittedNameTakesAQueryParameterName() {
 			// by the conformance corpus, not here.
 			continue
 		}
-		multiColumn += declaredTypeCount(s, baseline)
+		multiColumn += s.declaredTypeCount(baseline)
 
 		s.Run(fx.name, func() {
 			candidates := s.candidateNames(baseline)
@@ -282,7 +282,7 @@ func (s *EmissionSuite) candidateNames(files map[string]string) []string {
 
 // declaredTypeCount counts the package-level type declarations across an
 // emitted batch's query files.
-func declaredTypeCount(s *EmissionSuite, files map[string]string) int {
+func (s *EmissionSuite) declaredTypeCount(files map[string]string) int {
 	count := 0
 	for _, body := range files {
 		for _, decl := range s.parseEmission(body).Decls {
@@ -348,7 +348,7 @@ func (s *EmissionSuite) emitQueryFiles(fx ageFixture, queries []codegen.NamedQue
 // happened to be called, and so would a body local derived from a
 // parameter name — neither has to be predicted here to be caught.
 func (s *EmissionSuite) TestOnlyTheSingleParameterFormPutsAQueryChosenNameInScope() {
-	arities := make(map[int]int)
+	singleParam, multiParam := 0, 0
 	for _, fx := range s.ageFixtures() {
 		if len(fx.queries) == 0 {
 			continue
@@ -357,7 +357,12 @@ func (s *EmissionSuite) TestOnlyTheSingleParameterFormPutsAQueryChosenNameInScop
 		// corpus rather than whatever `go test -run` selected from it.
 		params := parameterCounts(fx.queries)
 		for _, count := range params {
-			arities[min(count, 2)]++
+			switch {
+			case count == 1:
+				singleParam++
+			case count >= 2:
+				multiParam++
+			}
 		}
 
 		s.Run(fx.name, func() {
@@ -392,17 +397,14 @@ func (s *EmissionSuite) TestOnlyTheSingleParameterFormPutsAQueryChosenNameInScop
 		})
 	}
 
-	// Each arity has to be present or the corresponding half of the
-	// assertion above held nothing: no zero-or-multi-parameter method
-	// means the invariant is unmeasured, and no single-parameter method
-	// means the sweep's premise is untested.
-	for arity, label := range map[int]string{
-		0: "no method in the corpus binds zero parameters",
-		1: "no method in the corpus binds exactly one parameter",
-		2: "no method in the corpus binds two or more parameters",
-	} {
-		s.Require().Positive(arities[arity], label)
-	}
+	// Both arities have to be present or half the assertion above held
+	// nothing. A zero-parameter method is not counted: renaming a batch
+	// that spells no parameter moves nothing by construction, so it
+	// satisfies the invariant without measuring it.
+	s.Require().Positive(singleParam,
+		"no method in the corpus binds exactly one parameter, so the sweep's premise is untested")
+	s.Require().Positive(multiParam,
+		"no method in the corpus binds two or more parameters, so the Params shape is unmeasured")
 }
 
 // methodScopes maps each emitted method to the sorted set of identifiers
