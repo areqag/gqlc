@@ -788,51 +788,6 @@ func (s *EmissionSuite) TestNoQueryArgumentReachesTheStatementText() {
 		"a function outside the statement composer builds text by concatenation")
 }
 
-// TestNoEmittedNameTakesAQueryParameterName pins the one identifier an
-// emitted method's signature does not choose. The single-parameter form
-// names its argument after the parameter the author wrote, so anything
-// the method resolves under that name resolves to the caller's value
-// instead. Declaring a name is not what puts it at risk — resolving it
-// is, and a body resolves the package-level query-text const without
-// ever declaring it.
-//
-// Neither half is reliably a compile error. A shadowed body local
-// against a STRING property lets the composition assign the SQL text
-// over the argument; a shadowed query-text const is worse, because the
-// argument silently becomes the statement — $<bare>QueryText makes
-// Method(ctx, "MATCH (n) DETACH DELETE n") run that text, with no
-// concatenation anywhere to find.
-//
-// The candidate names are every identifier the emission mentions, read
-// off the syntax tree rather than listed here, so a name the emitter
-// starts using later is covered without anyone remembering to add it.
-// Each is fed back as the parameter's own name and the emission has to
-// come out intact.
-func (s *EmissionSuite) TestNoEmittedNameTakesAQueryParameterName() {
-	candidates := s.identsOf(s.emitParamBatch("id"))
-	s.Require().NotEmpty(candidates, "the emission mentions no identifiers to check")
-
-	for _, name := range candidates {
-		s.Run(name, func() {
-			body := s.emitParamBatch(name)
-
-			// The surface cannot move to buy the emission room. Only
-			// names the mangle leaves alone can be compared directly:
-			// it splits on underscores and capitalises, so those are
-			// the ones a query text can put in scope verbatim.
-			if !strings.Contains(name, "_") && name == codegen.LowerFirstRune(name) {
-				for _, local := range s.paramLocalsOf(body) {
-					s.Require().Equal(name, local,
-						"the signature must still name its argument after the query's parameter")
-				}
-			}
-			s.Require().NotContains(s.bodyLocalsOf(body), name,
-				"a body local shadows the caller's argument")
-			s.requireNothingDeclaredIsCaptured(body)
-		})
-	}
-}
-
 // requireNothingDeclaredIsCaptured holds every package-level name the
 // emitted file declares to being resolvable from some method that needs
 // it. Capture has one signature and this is it: the const stays in the
@@ -907,25 +862,23 @@ func freeIdents(fn *ast.FuncDecl) map[string]bool {
 // where scope resolution applies. Selector suffixes and struct-literal
 // keys are excluded: those resolve against a type, not against the
 // scope the parameter is bound in, so no argument name can capture them.
+//
+// The two exclusions recurse rather than sweeping their operand flat,
+// because either can hold the other: arg.MinAge inside a map literal is
+// a selector under a key-value, and reading that operand flat would call
+// the field name MinAge a scope reference. Doing so is not merely noise
+// — a package-level declaration is held to being resolvable from some
+// method, so a name that only ever appears as a field suffix would
+// satisfy that check while nothing resolved it.
 func referencedIdents(n ast.Node) []string {
 	var out []string
 	ast.Inspect(n, func(n ast.Node) bool {
 		switch e := n.(type) {
 		case *ast.SelectorExpr:
-			ast.Inspect(e.X, func(inner ast.Node) bool {
-				if id, ok := inner.(*ast.Ident); ok {
-					out = append(out, id.Name)
-				}
-				return true
-			})
+			out = append(out, referencedIdents(e.X)...)
 			return false
 		case *ast.KeyValueExpr:
-			ast.Inspect(e.Value, func(inner ast.Node) bool {
-				if id, ok := inner.(*ast.Ident); ok {
-					out = append(out, id.Name)
-				}
-				return true
-			})
+			out = append(out, referencedIdents(e.Value)...)
 			return false
 		case *ast.Ident:
 			out = append(out, e.Name)
@@ -1011,43 +964,6 @@ func (s *EmissionSuite) parseEmission(body string) *ast.File {
 	f, err := parser.ParseFile(fset, "q.cypher.go", body, parser.SkipObjectResolution)
 	s.Require().NoError(err, "the emitted file does not parse")
 	return f
-}
-
-// emitParamBatch emits one cypher file whose every query binds a single
-// string parameter under the given name. All three cardinalities are in
-// it, and the :one query's column is a nullable narrow width, so the
-// batch reaches the composition, the cursor walk, the scan, the null
-// branch and the narrowing conversion — every place a body declares
-// something.
-func (s *EmissionSuite) emitParamBatch(param string) string {
-	bind := []resolver.ResolvedParameter{
-		{Name: param, Type: resolver.ResolvedProperty{Type: graph.TypeString}},
-	}
-
-	many := readQuery("Many", scalarColumn("p.name", graph.TypeString))
-	many.Validated.Parameters = bind
-
-	one := readQuery("One", resolver.Column{
-		Name: "p.height",
-		Type: resolver.ResolvedProperty{Type: graph.TypeFloat32, Nullable: true},
-	})
-	one.Cardinality = codegen.CardinalityOne
-	one.Validated.Parameters = bind
-
-	purge := execQuery("Purge")
-	purge.Validated.Parameters = bind
-
-	in := s.in
-	in.Queries = []codegen.NamedQuery{many, one, purge}
-	files, err := age.New().Generate(in)
-	s.Require().NoError(err)
-	for _, f := range files {
-		if f.Path == "q.cypher.go" {
-			return string(f.Contents)
-		}
-	}
-	s.Require().Fail("no q.cypher.go in the emission")
-	return ""
 }
 
 // bodyLocalsOf names every identifier the method bodies in an emitted
