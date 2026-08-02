@@ -217,7 +217,7 @@ func (s *EmissionSuite) TestNoEmittedNameTakesAQueryParameterName() {
 			// by the conformance corpus, not here.
 			continue
 		}
-		multiColumn += s.declaredTypeCount(baseline)
+		multiColumn += multiColumnQueries(fx.queries)
 
 		s.Run(fx.name, func() {
 			candidates := s.candidateNames(baseline)
@@ -233,11 +233,19 @@ func (s *EmissionSuite) TestNoEmittedNameTakesAQueryParameterName() {
 		})
 	}
 
-	// With one parameter bound per query, a Params struct cannot be
-	// emitted, so a package-level type in a .cypher.go file is a Row
-	// struct and a Row struct is the `len(p.RowFields) >= 2` branch. A
-	// sweep that never reaches it is the hole this test was widened to
-	// close, and it would otherwise close silently.
+	// A sweep that never reaches the `len(p.RowFields) >= 2` branch is
+	// the hole this test was widened to close, and it would otherwise
+	// close silently — so the count above is that branch's own condition,
+	// and it is read off the batch rather than off the emission.
+	//
+	// Counting package-level types in the emitted files says the same
+	// thing today — under one parameter per query a Params struct cannot
+	// be emitted, so a type in a .cypher.go file is a Row struct — and
+	// stops saying it the day the emitter adds a package-level type for
+	// any other reason. A census an unrelated emitter change can satisfy
+	// without bringing a multi-column fixture with it is a census
+	// satisfied vacuously, which is the failure this whole test exists to
+	// close, reappearing inside the fix.
 	s.Require().Positive(multiColumn,
 		"no swept fixture projects two columns, so the multi-column emission branch is unswept")
 }
@@ -280,21 +288,21 @@ func (s *EmissionSuite) candidateNames(files map[string]string) []string {
 	return out
 }
 
-// declaredTypeCount counts the package-level type declarations across an
-// emitted batch's query files.
-func (s *EmissionSuite) declaredTypeCount(files map[string]string) int {
+// multiColumnQueries counts the queries in a batch that project two or
+// more columns.
+//
+// This is `len(p.RowFields) >= 2` — the condition the multi-column
+// emission branch keys on — evaluated on the branch's own input: Phase B
+// appends exactly one RowField per entry in Validated.Columns and fails
+// the whole batch rather than dropping one, so a query's column count is
+// its prepared row-field count. Measuring the input is what makes the
+// census unsatisfiable by anything the emitter does, which counting the
+// emission's own declarations is not.
+func multiColumnQueries(queries []codegen.NamedQuery) int {
 	count := 0
-	for _, body := range files {
-		for _, decl := range s.parseEmission(body).Decls {
-			gen, ok := decl.(*ast.GenDecl)
-			if !ok {
-				continue
-			}
-			for _, spec := range gen.Specs {
-				if _, ok := spec.(*ast.TypeSpec); ok {
-					count++
-				}
-			}
+	for _, q := range queries {
+		if len(q.Validated.Columns) >= 2 {
+			count++
 		}
 	}
 	return count
