@@ -344,6 +344,18 @@ var invalidFixtures = map[string]error{
 	// generates silently wrong code if this verdict is lost.
 	"ambiguous_edge_orientation_overlapping_endpoints.cypher":          ErrAmbiguousEdgeOrientation,
 	"ambiguous_edge_orientation_overlapping_endpoints_reversed.cypher": ErrAmbiguousEdgeOrientation,
+	// ejn0 additions. An anonymous edge is its own binding, so it reaches the
+	// orientation refusal with no variable to name it by — and every undirected
+	// fixture that shipped before these binds one. The two differ in what the
+	// endpoints are: named bindings on one, an inline label expression on the
+	// other, which are the two things a pattern's ends can be.
+	"ambiguous_edge_orientation_anonymous.cypher":                 ErrAmbiguousEdgeOrientation,
+	"ambiguous_edge_orientation_anonymous_inline_endpoint.cypher": ErrAmbiguousEdgeOrientation,
+	// The endpoint-inference refusal is the other fail-site that names the edge
+	// binding, and it is the only one an endpoint carrying neither a variable
+	// nor labels can reach: an anonymous edge closes over it, so the `()` end
+	// has to be describable too.
+	"anonymous_edge_uninferable_endpoint.cypher": ErrUnknownLabel,
 }
 
 // invalidFixtureContains pins the message arm for fixtures where errors.Is
@@ -365,6 +377,15 @@ var invalidFixtureContains = map[string]string{
 	// refProjectionType arm (scope.go:706) — distinguished by "binding" suffix.
 	"path_binding.cypher":   "path binding",
 	"unwind_binding.cypher": "unwind binding",
+	// The three ways the refusal can name the edge it refuses. A named binding
+	// is quoted; an anonymous one has no name, so it is placed by the label it
+	// carries and the two ends it runs between — which are themselves either a
+	// bound variable or an inline label expression. errors.Is passes on all
+	// three, and so does a message that has gone back to naming `edge ""`.
+	"ambiguous_edge_orientation.cypher":                           `edge "r" matches`,
+	"ambiguous_edge_orientation_anonymous.cypher":                 `the [:AUTHORED] edge between p and post matches`,
+	"ambiguous_edge_orientation_anonymous_inline_endpoint.cypher": `the [:AUTHORED] edge between p and (:Post) matches`,
+	"anonymous_edge_uninferable_endpoint.cypher":                  `of the [:AUTHORED] edge between p and ()`,
 	// The message must name one candidate from each side of the disagreement,
 	// first-in-candidate-order per side, and leave out the third — which plural
 	// satisfaction widened the set with on a side already represented.

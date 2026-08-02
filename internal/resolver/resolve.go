@@ -641,8 +641,8 @@ func closeEdge(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey, s schema.Sch
 				// than claiming to enumerate the matches — "matches both X, Y"
 				// read as a totality claim, and was false of exactly the
 				// three-candidate fixture that pins this arm.
-				return fmt.Errorf("%w: edge %q matches %s left-to-right and %s right-to-left",
-					ErrAmbiguousEdgeOrientation, v, formatEdgeKey(fwd), formatEdgeKey(rev))
+				return fmt.Errorf("%w: %s matches %s left-to-right and %s right-to-left",
+					ErrAmbiguousEdgeOrientation, describeEdgeBinding(e), formatEdgeKey(fwd), formatEdgeKey(rev))
 			}
 		}
 		if v != "" {
@@ -650,6 +650,33 @@ func closeEdge(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey, s schema.Sch
 		}
 		return nil
 	}
+}
+
+// describeEdgeBinding names an edge binding in text the author can find in
+// their own query. A named binding is its variable. An anonymous edge is still
+// its own binding but has no name to quote, so it is placed by the label
+// alternation it carries and the two ends it runs between — the quoted empty
+// string reads as a defect in gqlc rather than as a description of the pattern.
+func describeEdgeBinding(e query.EdgeBinding) string {
+	if v := e.Variable(); v != "" {
+		return fmt.Sprintf("edge %q", v)
+	}
+	return fmt.Sprintf("the [:%s] edge between %s and %s",
+		strings.Join(e.Labels(), "|"), describeEndpoint(e.Source()), describeEndpoint(e.Target()))
+}
+
+// describeEndpoint names one end of a pattern as the author wrote it: the
+// variable where one is bound, and the inline label expression otherwise.
+func describeEndpoint(e query.Endpoint) string {
+	switch ep := e.(type) {
+	case query.VarEndpoint:
+		return ep.Variable()
+	case query.InlineEndpoint:
+		if len(ep.Labels()) > 0 {
+			return "(:" + string(ep.Labels().Key()) + ")"
+		}
+	}
+	return "()"
 }
 
 // orientationDisagreement reports whether the candidate set contains two
