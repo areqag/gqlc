@@ -79,17 +79,59 @@ func (typeMap) Property(pt graph.PropertyType) (string, bool) {
 }
 
 // Temporal maps a resolved temporal-expression kind to the Go type text
-// this backend emits. agtype carries no temporal scalar, so every kind
-// projects as the undecoded value until the temporal arm commits an
-// encoding.
-func (typeMap) Temporal(resolver.Temporal) string {
-	return "any"
+// this backend emits. Returns (typeText, ok): ok=false routes the caller
+// to ErrUnrepresentableTemporal naming the kind.
+//
+// agtype has no temporal value — no temporal scalar in its vocabulary,
+// no cast reaching one — so no kind here has a native carrier and every
+// arm refuses. The encoding that gives them one is a storage decision
+// the temporal arm owns (bd gqlc-35yu.11, against the encoding table its
+// spike settled), and each kind is admitted by its own arm on the run
+// that commits its encoding: the spike found faithful encodings for some
+// kinds and none for a calendar duration, so the arms do not move
+// together.
+//
+// One arm per kind rather than one refusal for all of them, for the same
+// reason Property and Scalar switch: the exhaustive linter holds a
+// switch to the enum's full membership, so a kind the resolver gains
+// fails to build here instead of silently inheriting an answer chosen
+// for the kinds that came before it.
+func (typeMap) Temporal(k resolver.Temporal) (string, bool) {
+	switch k {
+	case resolver.TemporalDate:
+		return "", false
+	case resolver.TemporalTime:
+		return "", false
+	case resolver.TemporalLocalTime:
+		return "", false
+	case resolver.TemporalDateTime:
+		return "", false
+	case resolver.TemporalLocalDateTime:
+		return "", false
+	case resolver.TemporalDuration:
+		return "", false
+	}
+	// Temporal is a closed enum and the linter holds the switch above to
+	// its full membership, so only a value converted in from outside that
+	// vocabulary lands here. Refusing is the same answer the arms give,
+	// and it is the answer that stays right if the vocabulary grows in a
+	// build this file was not recompiled against.
+	return "", false
 }
 
 // Scalar maps a resolved scalar-expression kind to the Go type text this
 // backend emits (spec §5.1 column-shape table), one arm per agtype
 // scalar. Null → any: the openCypher null literal is a legal-but-
 // pointless projection.
+//
+// Total, and on a ground that can be checked: resolver.Scalar's
+// vocabulary (bool / int / float / string / null / map) is contained in
+// agtype's own (null, boolean, integer, float, string, list, map), so
+// each kind names a value agtype holds natively and every arm below is
+// that value's Go shape rather than a stand-in for an encoding not yet
+// chosen. Temporal is where the containment fails: agtype has no
+// temporal value at all, which is why that row refuses and this one
+// does not.
 func (typeMap) Scalar(k resolver.Scalar) string {
 	switch k {
 	case resolver.ScalarBool:

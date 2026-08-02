@@ -80,7 +80,10 @@ func TestTypeMapProperty(t *testing.T) {
 
 // TestTypeMapTemporal pins the temporal column-shape row of the table
 // (spec §5.1): five dbtype carriers plus time.Time for the zoned
-// datetime.
+// datetime, each answering ok=true. The driver ships a carrier per kind,
+// so this backend never takes the refusal channel — a fact about this
+// driver rather than about the table, pinned here so it stays one that
+// was checked rather than one that was assumed.
 func TestTypeMapTemporal(t *testing.T) {
 	tests := []struct {
 		k    resolver.Temporal
@@ -96,9 +99,21 @@ func TestTypeMapTemporal(t *testing.T) {
 	require.Len(t, tests, 6)
 	for _, tt := range tests {
 		t.Run(tt.k.String(), func(t *testing.T) {
-			require.Equal(t, tt.want, typeMap{}.Temporal(tt.k))
+			got, ok := typeMap{}.Temporal(tt.k)
+			require.True(t, ok)
+			require.Equal(t, tt.want, got)
 		})
 	}
+
+	// The compiler requires a return past the last arm of a closed-enum
+	// switch. It refuses rather than naming a carrier, so a kind added
+	// upstream and left without an arm here fails generation instead of
+	// arriving as some other kind's dbtype.
+	t.Run("kind outside the vocabulary is refused", func(t *testing.T) {
+		got, ok := typeMap{}.Temporal(resolver.TemporalDuration + 1)
+		require.False(t, ok)
+		require.Empty(t, got)
+	})
 }
 
 // TestTypeMapScalar pins the scalar column-shape row of the table
@@ -121,6 +136,13 @@ func TestTypeMapScalar(t *testing.T) {
 			require.Equal(t, tt.want, typeMap{}.Scalar(tt.k))
 		})
 	}
+
+	// The compiler requires a return past the last arm of a closed-enum
+	// switch, so the backstop exists whether or not the resolver can
+	// reach it. Pinned so its value is a decision and not an accident.
+	t.Run("kind outside the vocabulary projects undecoded", func(t *testing.T) {
+		require.Equal(t, "any", typeMap{}.Scalar(resolver.ScalarMap+1))
+	})
 }
 
 // TestDriverCarrier pins the widen-on-decode contract: every integer

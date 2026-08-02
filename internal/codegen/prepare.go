@@ -680,6 +680,12 @@ func admitEdgeUnionCandidates(edgeKeys []schema.EdgeKey, entities []Entity, enti
 // guarantees columns are ResolvedProperty / ResolvedNode / ResolvedEdge
 // with a resolved entity index entry (for the latter two), so lookups
 // cannot fail here.
+//
+// The temporal arm is the exception, and deliberately so: which temporal
+// kinds a backend carries is the TypeMap's answer and Phase A does not
+// ask it, so a kind with no carrier is refused here with
+// ErrUnrepresentableTemporal rather than being carried onto the prepared
+// surface as whatever placeholder the table happened to name.
 func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entityLookupKey]int, tm TypeMap) ([]Query, error) {
 	out := make([]Query, 0, len(queries))
 	for _, q := range queries {
@@ -774,10 +780,14 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 					Kind:       ColumnEdge,
 				})
 			case resolver.ResolvedTemporal:
+				ty, ok := tm.Temporal(t.Kind)
+				if !ok {
+					return nil, fmt.Errorf("%w: query %q column %d %q projects %s", ErrUnrepresentableTemporal, q.Name, ci, col.Name, t)
+				}
 				p.RowFields = append(p.RowFields, Row{
 					ColumnName: col.Name,
 					Field:      field,
-					GoType:     tm.Temporal(t.Kind),
+					GoType:     ty,
 					Kind:       ColumnTemporal,
 				})
 			case resolver.ResolvedScalar:
@@ -982,9 +992,12 @@ func findEdgeUnionLeaf(t resolver.ResolvedType) ([]schema.EdgeKey, bool) {
 // stability across slice growth is not required (spec §3.1, §5.2).
 //
 // Widths the TypeMap has no carrier for surface ErrUnrepresentableWidth
-// naming the offending width. Unknown resolver variants surface
-// ErrOutOfC6Scope naming the type — the deletion-fence for the failure
-// mode this bead closes (spec §4.1 synthetic-malformed-variant row).
+// naming the offending width, and temporal kinds it has no carrier for
+// surface ErrUnrepresentableTemporal naming the offending kind — one
+// refusal per construct, because the edit each asks of the author is a
+// different one. Unknown resolver variants surface ErrOutOfC6Scope
+// naming the type — the deletion-fence for the failure mode this bead
+// closes (spec §4.1 synthetic-malformed-variant row).
 //
 // The unionInterfaceName argument carries the synthesised edgeUnion
 // interface name (`<QueryName><RowField>`) the caller committed onto
@@ -1018,7 +1031,11 @@ func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex m
 		}
 		return &ListElem{Kind: ColumnEdgeUnion, GoType: unionInterfaceName, UnionIdx: unionIdx}, nil
 	case resolver.ResolvedTemporal:
-		return &ListElem{Kind: ColumnTemporal, GoType: tm.Temporal(tt.Kind)}, nil
+		ty, ok := tm.Temporal(tt.Kind)
+		if !ok {
+			return nil, fmt.Errorf("%w: list element projects %s", ErrUnrepresentableTemporal, tt)
+		}
+		return &ListElem{Kind: ColumnTemporal, GoType: ty}, nil
 	case resolver.ResolvedScalar:
 		if tt.Kind == resolver.ScalarNull {
 			return &ListElem{Kind: ColumnScalarNull, GoType: "any"}, nil

@@ -54,13 +54,18 @@ func wireEntities(entities []codegen.Entity) ([]wiredEntity, error) {
 		ErrUnsupportedSchema, len(multi), noun, strings.Join(multi, ", "))
 }
 
-// nameBackend adds this backend's name to a width the shared phases
-// refused. The type table those phases consult is this package's, so the
-// refusal is this backend's answer and not a property of the schema: a
-// run emitting several targets has to say which of them has no carrier
-// for the width it names.
+// nameBackend adds this backend's name to a width or a temporal kind the
+// shared phases refused. The type table those phases consult is this
+// package's, so the refusal is this backend's answer and not a property
+// of the schema or of the query: a run emitting several targets has to
+// say which of them has no carrier for the width or the kind it names.
+//
+// These two sentinels and no others, because they are the two the shared
+// phases reach by asking this package's table. Every other refusal
+// follows from the input alone and would read as this backend's opinion
+// if it were wrapped here.
 func nameBackend(err error) error {
-	if !errors.Is(err, codegen.ErrUnrepresentableWidth) {
+	if !errors.Is(err, codegen.ErrUnrepresentableWidth) && !errors.Is(err, codegen.ErrUnrepresentableTemporal) {
 		return err
 	}
 	return fmt.Errorf("%w, which the Apache AGE backend has no carrier for", err)
@@ -141,7 +146,16 @@ func unservedColumn(t resolver.ResolvedType) string {
 		return "projects " + ct.String()
 	case resolver.ResolvedNode, resolver.ResolvedEdge, resolver.ResolvedEdgeUnion:
 		return ""
-	case resolver.ResolvedTemporal, resolver.ResolvedList, resolver.ResolvedUnknown:
+	case resolver.ResolvedTemporal:
+		// Not answered here. Whether a temporal kind has a carrier is the
+		// type table's answer, and the shared phase asks it and refuses
+		// with ErrUnrepresentableTemporal naming the kind — a sentinel
+		// this gate has no way to raise, since it reports one reason for
+		// a whole query. Answering it in both places would be two tables
+		// to keep in step, and the arm that commits an encoding per kind
+		// (bd gqlc-35yu.11) would have to move both.
+		return ""
+	case resolver.ResolvedList, resolver.ResolvedUnknown:
 		return "projects " + ct.String()
 	}
 	// ResolvedType is a sealed interface, so the switch above is its
