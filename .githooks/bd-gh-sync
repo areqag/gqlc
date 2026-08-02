@@ -230,9 +230,12 @@ PYEOF
     # The id becomes a shell argument. bd mints ids like `gqlc-4np` and
     # `gqlc-35yu.8`, so this refuses corruption only — and corruption is worth
     # a line of its own rather than a silent drop, because a bead that cannot
-    # be named cannot be pulled, ever.
+    # be named cannot be pulled, ever. A leading dash is refused separately
+    # from the charset: `--issues` is a legal-looking id that would arrive as
+    # `--issues --issues`, which is the empty-scope pull this file exists to
+    # make unreachable.
     case "$_bid" in
-      "" | *[!A-Za-z0-9._-]*)
+      "" | -* | *[!A-Za-z0-9._-]*)
         _unusable=$((_unusable + 1))
         echo "bd-gh-sync: bead id '${_bid}' is unusable — it cannot be passed to 'bd github sync', so it was not pulled." >&2
         continue

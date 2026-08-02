@@ -112,8 +112,10 @@ run_sync() {
         FAKE_GH_OPEN="$TMP/gh_open.json" FAKE_BEADS_AFTER="$after" \
         FAKE_SYNC_RC="${SYNC_RC:-0}" \
         "$SYNC" "$1" >"$TMP/out" 2>"$TMP/err"
+    RC=$?
     rm -f "$TMP"/bd_list_rc_* "$TMP"/bd_list_out_*
 }
+RC=0
 
 # Exit status the `bd github sync` stub reports; 0 unless a test sets it.
 SYNC_RC=0
@@ -369,6 +371,39 @@ if pull_ran; then
 else
     ok "no eligible bead means bd github sync is not invoked"
 fi
+
+# The property under all of it: whatever comes back from `bd` or `gh`, no path
+# may reach `bd github sync` with an empty or absent --issues, because that
+# widens the pull back to every bead — the failure this whole file exists to
+# prevent. Held as a sweep rather than one fixture at a time, so a new door has
+# to be argued about rather than discovered later. Exit status is checked with
+# it: the script runs from git hooks and a non-zero exit aborts the merge.
+hostile_case() { # $1=name $2=beads $3=gh
+    run_sync pull "$2" "$3"
+    if grep -qE -- '--issues( +--|[[:space:]]*$)' "$TMP/calls"; then
+        bad "no unscoped pull from a hostile payload ($1)" \
+            "empty --issues: $(grep 'github sync' "$TMP/calls")"
+    elif [ "$RC" -ne 0 ]; then
+        bad "no unscoped pull from a hostile payload ($1)" "exited $RC"
+    else
+        ok "hostile payload reaches no unscoped pull ($1)"
+    fi
+}
+
+hostile_case "both empty"       '[]' '[]'
+hostile_case "beads malformed"  '{'  '[]'
+hostile_case "gh malformed"     '[]' '{'
+hostile_case "both null"        'null' 'null'
+hostile_case "empty strings"    '' ''
+hostile_case "bead id empty" \
+    "[{\"id\":\"\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"a\"}]" \
+    '[{"number":1,"state":"OPEN","body":"a\nmore"}]'
+hostile_case "bead id flag-shaped" \
+    "[{\"id\":\"--issues\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"a\"}]" \
+    '[{"number":1,"state":"OPEN","body":"a\nmore"}]'
+hostile_case "gh fields null" \
+    "[{\"id\":\"b-n\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"a\"}]" \
+    '[{"number":1,"state":null,"body":null}]'
 
 # --- gqlc-63y: the payload must survive execve -------------------------------
 # The shipped guard died with "Argument list too long" on ~1MB of beads because
