@@ -5,19 +5,19 @@ package queryparamshadowsemittedname
 import "context"
 
 type ReadQuerier interface {
-	PersonByStmt(ctx context.Context, stmt string) (string, error)
-	PersonByArgs(ctx context.Context, args string) ([]string, error)
-	PersonByRows(ctx context.Context, rows string) ([]string, error)
-	PersonByRaw0(ctx context.Context, raw0 string) (string, error)
-	PersonByValue0(ctx context.Context, value0 string) (string, error)
-	ConstShadowOne(ctx context.Context, constShadowOneQueryText string) (string, error)
-	ConstShadowMany(ctx context.Context, constShadowManyQueryText string) ([]string, error)
+	PersonByStmt(ctx context.Context, arg string) (string, error)
+	PersonByArgs(ctx context.Context, arg string) ([]string, error)
+	PersonByRows(ctx context.Context, arg string) ([]string, error)
+	PersonByRaw0(ctx context.Context, arg string) (string, error)
+	PersonByValue0(ctx context.Context, arg string) (string, error)
+	ConstShadowOne(ctx context.Context, arg string) (string, error)
+	ConstShadowMany(ctx context.Context, arg string) ([]string, error)
 }
 
 type WriteQuerier interface {
-	DeleteByStmt(ctx context.Context, stmt string) error
-	DeleteByArgs(ctx context.Context, args string) error
-	ConstShadowExec(ctx context.Context, constShadowExecQueryText string) error
+	DeleteByStmt(ctx context.Context, arg string) error
+	DeleteByArgs(ctx context.Context, arg string) error
+	ConstShadowExec(ctx context.Context, arg string) error
 }
 
 type Querier interface {

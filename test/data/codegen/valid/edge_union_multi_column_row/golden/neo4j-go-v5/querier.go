@@ -5,7 +5,7 @@ package edgeunionmulticolumnrow
 import "context"
 
 type ReadQuerier interface {
-	PersonAction(ctx context.Context, id int64) (PersonActionRow, error)
+	PersonAction(ctx context.Context, arg int64) (PersonActionRow, error)
 }
 
 type WriteQuerier interface {

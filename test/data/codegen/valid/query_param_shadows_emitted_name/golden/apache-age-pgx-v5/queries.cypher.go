@@ -12,16 +12,16 @@ const personByStmtQueryText = `MATCH (p:Person) WHERE p.name = $stmt RETURN p.na
 // PersonByStmt executes the PersonByStmt query.
 //
 //	MATCH (p:Person) WHERE p.name = $stmt RETURN p.name
-func (q *Queries) PersonByStmt(ctx context.Context, stmt string) (string, error) {
-	stmt_, err := q.cypherStmt("$gqlc$", personByStmtQueryText, "v0 ag_catalog.agtype")
+func (q *Queries) PersonByStmt(ctx context.Context, arg string) (string, error) {
+	stmt, err := q.cypherStmt("$gqlc$", personByStmtQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return "", err
 	}
-	args, err := agtypeArgs(map[string]any{"stmt": stmt})
+	args, err := agtypeArgs(map[string]any{"stmt": arg})
 	if err != nil {
 		return "", err
 	}
-	rows, err := q.db.Query(ctx, stmt_, args)
+	rows, err := q.db.Query(ctx, stmt, args)
 	if err != nil {
 		return "", fmt.Errorf("PersonByStmt: %w", err)
 	}
@@ -57,16 +57,16 @@ const personByArgsQueryText = `MATCH (p:Person) WHERE p.name = $args RETURN p.na
 // PersonByArgs executes the PersonByArgs query.
 //
 //	MATCH (p:Person) WHERE p.name = $args RETURN p.name
-func (q *Queries) PersonByArgs(ctx context.Context, args string) ([]string, error) {
+func (q *Queries) PersonByArgs(ctx context.Context, arg string) ([]string, error) {
 	stmt, err := q.cypherStmt("$gqlc$", personByArgsQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
 	}
-	args_, err := agtypeArgs(map[string]any{"args": args})
+	args, err := agtypeArgs(map[string]any{"args": arg})
 	if err != nil {
 		return nil, err
 	}
-	rows, err := q.db.Query(ctx, stmt, args_)
+	rows, err := q.db.Query(ctx, stmt, args)
 	if err != nil {
 		return nil, fmt.Errorf("PersonByArgs: %w", err)
 	}
@@ -97,24 +97,24 @@ const personByRowsQueryText = `MATCH (p:Person) WHERE p.name = $rows RETURN p.na
 // PersonByRows executes the PersonByRows query.
 //
 //	MATCH (p:Person) WHERE p.name = $rows RETURN p.name
-func (q *Queries) PersonByRows(ctx context.Context, rows string) ([]string, error) {
+func (q *Queries) PersonByRows(ctx context.Context, arg string) ([]string, error) {
 	stmt, err := q.cypherStmt("$gqlc$", personByRowsQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
 	}
-	args, err := agtypeArgs(map[string]any{"rows": rows})
+	args, err := agtypeArgs(map[string]any{"rows": arg})
 	if err != nil {
 		return nil, err
 	}
-	rows_, err := q.db.Query(ctx, stmt, args)
+	rows, err := q.db.Query(ctx, stmt, args)
 	if err != nil {
 		return nil, fmt.Errorf("PersonByRows: %w", err)
 	}
-	defer rows_.Close()
+	defer rows.Close()
 	out := make([]string, 0)
-	for rows_.Next() {
+	for rows.Next() {
 		var raw0 []byte
-		if err := rows_.Scan(&raw0); err != nil {
+		if err := rows.Scan(&raw0); err != nil {
 			return nil, fmt.Errorf("PersonByRows: scan row: %w", err)
 		}
 		if raw0 == nil {
@@ -126,7 +126,7 @@ func (q *Queries) PersonByRows(ctx context.Context, rows string) ([]string, erro
 		}
 		out = append(out, value0)
 	}
-	if err := rows_.Err(); err != nil {
+	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("PersonByRows: %w", err)
 	}
 	return out, nil
@@ -137,12 +137,12 @@ const personByRaw0QueryText = `MATCH (p:Person) WHERE p.name = $raw0 RETURN p.na
 // PersonByRaw0 executes the PersonByRaw0 query.
 //
 //	MATCH (p:Person) WHERE p.name = $raw0 RETURN p.name
-func (q *Queries) PersonByRaw0(ctx context.Context, raw0 string) (string, error) {
+func (q *Queries) PersonByRaw0(ctx context.Context, arg string) (string, error) {
 	stmt, err := q.cypherStmt("$gqlc$", personByRaw0QueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return "", err
 	}
-	args, err := agtypeArgs(map[string]any{"raw0": raw0})
+	args, err := agtypeArgs(map[string]any{"raw0": arg})
 	if err != nil {
 		return "", err
 	}
@@ -157,8 +157,8 @@ func (q *Queries) PersonByRaw0(ctx context.Context, raw0 string) (string, error)
 		}
 		return "", ErrNoRows
 	}
-	var raw0_ []byte
-	if err := rows.Scan(&raw0_); err != nil {
+	var raw0 []byte
+	if err := rows.Scan(&raw0); err != nil {
 		return "", fmt.Errorf("PersonByRaw0: scan row: %w", err)
 	}
 	if rows.Next() {
@@ -167,10 +167,10 @@ func (q *Queries) PersonByRaw0(ctx context.Context, raw0 string) (string, error)
 	if err := rows.Err(); err != nil {
 		return "", fmt.Errorf("PersonByRaw0: %w", err)
 	}
-	if raw0_ == nil {
+	if raw0 == nil {
 		return "", fmt.Errorf("PersonByRaw0: column %q is non-nullable but arrived null", "p.name")
 	}
-	value0, err := agtypeString(raw0_)
+	value0, err := agtypeString(raw0)
 	if err != nil {
 		return "", fmt.Errorf("PersonByRaw0: decode column %q: %w", "p.name", err)
 	}
@@ -182,12 +182,12 @@ const personByValue0QueryText = `MATCH (p:Person) WHERE p.name = $value0 RETURN 
 // PersonByValue0 executes the PersonByValue0 query.
 //
 //	MATCH (p:Person) WHERE p.name = $value0 RETURN p.name
-func (q *Queries) PersonByValue0(ctx context.Context, value0 string) (string, error) {
+func (q *Queries) PersonByValue0(ctx context.Context, arg string) (string, error) {
 	stmt, err := q.cypherStmt("$gqlc$", personByValue0QueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return "", err
 	}
-	args, err := agtypeArgs(map[string]any{"value0": value0})
+	args, err := agtypeArgs(map[string]any{"value0": arg})
 	if err != nil {
 		return "", err
 	}
@@ -215,11 +215,11 @@ func (q *Queries) PersonByValue0(ctx context.Context, value0 string) (string, er
 	if raw0 == nil {
 		return "", fmt.Errorf("PersonByValue0: column %q is non-nullable but arrived null", "p.name")
 	}
-	value0_, err := agtypeString(raw0)
+	value0, err := agtypeString(raw0)
 	if err != nil {
 		return "", fmt.Errorf("PersonByValue0: decode column %q: %w", "p.name", err)
 	}
-	return value0_, nil
+	return value0, nil
 }
 
 const deleteByStmtQueryText = `MATCH (p:Person) WHERE p.name = $stmt DELETE p`
@@ -227,16 +227,16 @@ const deleteByStmtQueryText = `MATCH (p:Person) WHERE p.name = $stmt DELETE p`
 // DeleteByStmt executes the DeleteByStmt query.
 //
 //	MATCH (p:Person) WHERE p.name = $stmt DELETE p
-func (q *Queries) DeleteByStmt(ctx context.Context, stmt string) error {
-	stmt_, err := q.cypherStmt("$gqlc$", deleteByStmtQueryText, "v0 ag_catalog.agtype")
+func (q *Queries) DeleteByStmt(ctx context.Context, arg string) error {
+	stmt, err := q.cypherStmt("$gqlc$", deleteByStmtQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return err
 	}
-	args, err := agtypeArgs(map[string]any{"stmt": stmt})
+	args, err := agtypeArgs(map[string]any{"stmt": arg})
 	if err != nil {
 		return err
 	}
-	if _, err := q.db.Exec(ctx, stmt_, args); err != nil {
+	if _, err := q.db.Exec(ctx, stmt, args); err != nil {
 		return fmt.Errorf("DeleteByStmt: %w", err)
 	}
 	return nil
@@ -247,32 +247,32 @@ const deleteByArgsQueryText = `MATCH (p:Person) WHERE p.name = $args DELETE p`
 // DeleteByArgs executes the DeleteByArgs query.
 //
 //	MATCH (p:Person) WHERE p.name = $args DELETE p
-func (q *Queries) DeleteByArgs(ctx context.Context, args string) error {
+func (q *Queries) DeleteByArgs(ctx context.Context, arg string) error {
 	stmt, err := q.cypherStmt("$gqlc$", deleteByArgsQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return err
 	}
-	args_, err := agtypeArgs(map[string]any{"args": args})
+	args, err := agtypeArgs(map[string]any{"args": arg})
 	if err != nil {
 		return err
 	}
-	if _, err := q.db.Exec(ctx, stmt, args_); err != nil {
+	if _, err := q.db.Exec(ctx, stmt, args); err != nil {
 		return fmt.Errorf("DeleteByArgs: %w", err)
 	}
 	return nil
 }
 
-const constShadowOneQueryText_ = `MATCH (p:Person) WHERE p.name = $constShadowOneQueryText RETURN p.name`
+const constShadowOneQueryText = `MATCH (p:Person) WHERE p.name = $constShadowOneQueryText RETURN p.name`
 
 // ConstShadowOne executes the ConstShadowOne query.
 //
 //	MATCH (p:Person) WHERE p.name = $constShadowOneQueryText RETURN p.name
-func (q *Queries) ConstShadowOne(ctx context.Context, constShadowOneQueryText string) (string, error) {
-	stmt, err := q.cypherStmt("$gqlc$", constShadowOneQueryText_, "v0 ag_catalog.agtype")
+func (q *Queries) ConstShadowOne(ctx context.Context, arg string) (string, error) {
+	stmt, err := q.cypherStmt("$gqlc$", constShadowOneQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return "", err
 	}
-	args, err := agtypeArgs(map[string]any{"constShadowOneQueryText": constShadowOneQueryText})
+	args, err := agtypeArgs(map[string]any{"constShadowOneQueryText": arg})
 	if err != nil {
 		return "", err
 	}
@@ -307,17 +307,17 @@ func (q *Queries) ConstShadowOne(ctx context.Context, constShadowOneQueryText st
 	return value0, nil
 }
 
-const constShadowManyQueryText_ = `MATCH (p:Person) WHERE p.name = $constShadowManyQueryText RETURN p.name`
+const constShadowManyQueryText = `MATCH (p:Person) WHERE p.name = $constShadowManyQueryText RETURN p.name`
 
 // ConstShadowMany executes the ConstShadowMany query.
 //
 //	MATCH (p:Person) WHERE p.name = $constShadowManyQueryText RETURN p.name
-func (q *Queries) ConstShadowMany(ctx context.Context, constShadowManyQueryText string) ([]string, error) {
-	stmt, err := q.cypherStmt("$gqlc$", constShadowManyQueryText_, "v0 ag_catalog.agtype")
+func (q *Queries) ConstShadowMany(ctx context.Context, arg string) ([]string, error) {
+	stmt, err := q.cypherStmt("$gqlc$", constShadowManyQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
 	}
-	args, err := agtypeArgs(map[string]any{"constShadowManyQueryText": constShadowManyQueryText})
+	args, err := agtypeArgs(map[string]any{"constShadowManyQueryText": arg})
 	if err != nil {
 		return nil, err
 	}
@@ -347,17 +347,17 @@ func (q *Queries) ConstShadowMany(ctx context.Context, constShadowManyQueryText 
 	return out, nil
 }
 
-const constShadowExecQueryText_ = `MATCH (p:Person) WHERE p.name = $constShadowExecQueryText DELETE p`
+const constShadowExecQueryText = `MATCH (p:Person) WHERE p.name = $constShadowExecQueryText DELETE p`
 
 // ConstShadowExec executes the ConstShadowExec query.
 //
 //	MATCH (p:Person) WHERE p.name = $constShadowExecQueryText DELETE p
-func (q *Queries) ConstShadowExec(ctx context.Context, constShadowExecQueryText string) error {
-	stmt, err := q.cypherStmt("$gqlc$", constShadowExecQueryText_, "v0 ag_catalog.agtype")
+func (q *Queries) ConstShadowExec(ctx context.Context, arg string) error {
+	stmt, err := q.cypherStmt("$gqlc$", constShadowExecQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return err
 	}
-	args, err := agtypeArgs(map[string]any{"constShadowExecQueryText": constShadowExecQueryText})
+	args, err := agtypeArgs(map[string]any{"constShadowExecQueryText": arg})
 	if err != nil {
 		return err
 	}

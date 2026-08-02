@@ -12,12 +12,12 @@ const getPersonNameQueryText = `MATCH (p:Person) WHERE p.id = $id RETURN p.name 
 // GetPersonName executes the GetPersonName query.
 //
 //	MATCH (p:Person) WHERE p.id = $id RETURN p.name AS name
-func (q *Queries) GetPersonName(ctx context.Context, id int64) (string, error) {
+func (q *Queries) GetPersonName(ctx context.Context, arg int64) (string, error) {
 	stmt, err := q.cypherStmt("$gqlc$", getPersonNameQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return "", err
 	}
-	args, err := agtypeArgs(map[string]any{"id": id})
+	args, err := agtypeArgs(map[string]any{"id": arg})
 	if err != nil {
 		return "", err
 	}
@@ -57,12 +57,12 @@ const removePersonQueryText = `MATCH (p:Person) WHERE p.id = $id DELETE p`
 // RemovePerson executes the RemovePerson query.
 //
 //	MATCH (p:Person) WHERE p.id = $id DELETE p
-func (q *Queries) RemovePerson(ctx context.Context, id int64) error {
+func (q *Queries) RemovePerson(ctx context.Context, arg int64) error {
 	stmt, err := q.cypherStmt("$gqlc$", removePersonQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return err
 	}
-	args, err := agtypeArgs(map[string]any{"id": id})
+	args, err := agtypeArgs(map[string]any{"id": arg})
 	if err != nil {
 		return err
 	}

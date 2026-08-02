@@ -19,8 +19,8 @@ RETURN r`
 //	MATCH (p:Person) WHERE p.id = $id
 //	OPTIONAL MATCH (p)-[r:AUTHORED|LIKES]->(:Post)
 //	RETURN r
-func (q *Queries) MaybeAction(ctx context.Context, id int64) (MaybeActionR, error) {
-	records, err := q.db.run(ctx, maybeActionQueryText, map[string]any{"id": id}, neo4j.AccessModeRead)
+func (q *Queries) MaybeAction(ctx context.Context, arg int64) (MaybeActionR, error) {
+	records, err := q.db.run(ctx, maybeActionQueryText, map[string]any{"id": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
 	}

@@ -20,8 +20,8 @@ type PersonActionRow struct {
 // PersonAction executes the PersonAction query.
 //
 //	MATCH (p:Person)-[r:AUTHORED|LIKES]->(:Post) WHERE p.id = $id RETURN p, r
-func (q *Queries) PersonAction(ctx context.Context, id int64) (PersonActionRow, error) {
-	records, err := q.db.run(ctx, personActionQueryText, map[string]any{"id": id}, neo4j.AccessModeRead)
+func (q *Queries) PersonAction(ctx context.Context, arg int64) (PersonActionRow, error) {
+	records, err := q.db.run(ctx, personActionQueryText, map[string]any{"id": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return PersonActionRow{}, err
 	}

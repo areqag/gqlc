@@ -5,7 +5,7 @@ package edgeunionnullablecolumn
 import "context"
 
 type ReadQuerier interface {
-	MaybeAction(ctx context.Context, id int64) (MaybeActionR, error)
+	MaybeAction(ctx context.Context, arg int64) (MaybeActionR, error)
 }
 
 type WriteQuerier interface {
