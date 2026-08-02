@@ -175,6 +175,15 @@ var (
 // constructs that route to each member; TestSentinelTaxonomy holds the
 // two against each other, so an edit here needs the matching rows there.
 //
+// A handful of fail-sites in this package carry a sentinel but cannot
+// fire on any schema, query or CLI option — shadowed by an earlier check
+// on the same input, or defensive over an upstream invariant. Each is
+// tagged `//gqlc:unreachable <site>` above its return and recorded in
+// that document's §3 under the same site name. The tag is not a comment
+// the fence trusts: TestSentinelTaxonomy runs the corpus under coverage
+// of this package and fails if a tagged branch executes, so tagging a
+// branch a fixture reaches turns the suite red rather than silencing it.
+//
 // ErrFormatFailure is intentionally excluded: it is defensive-only,
 // unreachable via any legitimate fixture (well-formed emission cannot
 // fail formatting), so a fixture that fires it would require synthetic

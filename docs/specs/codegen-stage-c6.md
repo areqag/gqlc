@@ -670,6 +670,11 @@ C5's §6.6 invariants stand. C6 adds:
 
 ## 7. Sentinel set delta — the C6 view
 
+*Historical: what this stage shipped, sentinel names included; it takes
+no further edit. The current answer is
+[docs/specs/codegen-sentinel-taxonomy.md](codegen-sentinel-taxonomy.md),
+which `TestSentinelTaxonomy` holds against the code.*
+
 C5's fifteen sentinels stand at C6 with one rename and zero
 additions or retirements. C6 renames `ErrOutOfC5Scope` →
 `ErrOutOfC6Scope` for the same reason C5 renamed from C4 (per-stage

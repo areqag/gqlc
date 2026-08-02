@@ -582,16 +582,19 @@ func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entity
 			switch t := col.Type.(type) {
 			case resolver.ResolvedProperty:
 				if _, ok := tm.Property(t.Type); !ok {
+					//gqlc:unreachable column-width
 					return fmt.Errorf("%w: query %q column %d %q has %s", ErrUnrepresentableWidth, q.Name, ci, col.Name, t.Type)
 				}
 			case resolver.ResolvedNode:
 				if _, ok := entityIndex[entityLookupKey{Kind: EntityNode, Labels: t.Labels}]; !ok {
 					// Unknown node type — the resolver's R0 gate should
 					// have caught this; a synthetic test seam lands here.
+					//gqlc:unreachable column-unknown-node
 					return fmt.Errorf("%w: query %q column %d %q references unknown node type %q", ErrOutOfC6Scope, q.Name, ci, col.Name, string(t.Labels))
 				}
 			case resolver.ResolvedEdge:
 				if _, ok := entityIndex[entityLookupKey{Kind: EntityEdge, EdgeKey: t.EdgeKey}]; !ok {
+					//gqlc:unreachable column-unknown-edge
 					return fmt.Errorf("%w: query %q column %d %q references unknown edge type %s -[:%s]-> %s", ErrOutOfC6Scope, q.Name, ci, col.Name, string(t.EdgeKey.Source), string(t.EdgeKey.KeyLabels), string(t.EdgeKey.Target))
 				}
 			case resolver.ResolvedEdgeUnion:
@@ -619,6 +622,7 @@ func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entity
 					return fmt.Errorf("query %q column %d %q: %w", q.Name, ci, col.Name, err)
 				}
 			default:
+				//gqlc:unreachable column-unknown-variant
 				return fmt.Errorf("%w: query %q column %d %q resolved as %s", ErrOutOfC6Scope, q.Name, ci, col.Name, col.Type.String())
 			}
 		}
@@ -628,6 +632,7 @@ func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entity
 				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (non-property parameters are post-v1)", ErrOutOfC6Scope, q.Name, pi, p.Name, p.Type.String())
 			}
 			if _, ok := tm.Property(prop.Type); !ok {
+				//gqlc:unreachable param-width
 				return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrUnrepresentableWidth, q.Name, pi, p.Name, prop.Type)
 			}
 		}
@@ -658,12 +663,14 @@ func columnSite(queryName string, pos int, columnName string) string {
 // offender in candidate order wins across all three.
 func admitEdgeUnionCandidates(edgeKeys []schema.EdgeKey, entities []Entity, entityIndex map[entityLookupKey]int, site string) error {
 	if len(edgeKeys) < 2 {
+		//gqlc:unreachable edge-union-arity
 		return fmt.Errorf("%w: %s resolved as edgeUnion with only %d candidate(s) — resolver invariant violated (expected >= 2)", ErrOutOfC6Scope, site, len(edgeKeys))
 	}
 	firstByLabel := make(map[graph.LabelSetKey]string, len(edgeKeys))
 	for _, ek := range edgeKeys {
 		idx, ok := entityIndex[entityLookupKey{Kind: EntityEdge, EdgeKey: ek}]
 		if !ok {
+			//gqlc:unreachable edge-union-undeclared
 			return fmt.Errorf("%w: %s edgeUnion candidate %s -[:%s]-> %s not declared by schema", ErrOutOfC6Scope, site, string(ek.Source), string(ek.KeyLabels), string(ek.Target))
 		}
 		name := entities[idx].Name
@@ -702,6 +709,7 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 			// Phase A guaranteed ResolvedProperty + representable width.
 			prop, ok := param.Type.(resolver.ResolvedProperty)
 			if !ok {
+				//gqlc:unreachable param-type-invariant
 				return nil, fmt.Errorf("%w: query %q parameter %d $%s: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, pi, param.Name, param.Type.String())
 			}
 			ty, _ := tm.Property(prop.Type)
@@ -718,6 +726,7 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 		for ci, col := range q.Validated.Columns {
 			field, ok := rowFieldName(col.Name)
 			if !ok {
+				//gqlc:unreachable row-field-alias
 				return nil, fmt.Errorf("%w: query %q column %d %q is neither a bare identifier nor a property access — add an explicit AS alias", ErrAliasRequired, q.Name, ci, col.Name)
 			}
 			if first, dup := seenRow[field]; dup {
@@ -874,6 +883,7 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 					ListElem:   plan,
 				})
 			default:
+				//gqlc:unreachable column-type-invariant
 				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, ci, col.Name, col.Type.String())
 			}
 		}
@@ -1010,6 +1020,7 @@ func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex m
 	case resolver.ResolvedProperty:
 		ty, ok := tm.Property(tt.Type)
 		if !ok {
+			//gqlc:unreachable list-elem-width
 			return nil, fmt.Errorf("%w: list element has unrepresentable property width %s", ErrUnrepresentableWidth, tt.Type)
 		}
 		// A list element that is itself a list gets a nested plan, the same
@@ -1033,6 +1044,7 @@ func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex m
 	case resolver.ResolvedNode:
 		idx, ok := entityIndex[entityLookupKey{Kind: EntityNode, Labels: tt.Labels}]
 		if !ok {
+			//gqlc:unreachable list-elem-unknown-node
 			return nil, fmt.Errorf("%w: list element references unknown node type %q", ErrOutOfC6Scope, string(tt.Labels))
 		}
 		name := entities[idx].Name
@@ -1040,6 +1052,7 @@ func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex m
 	case resolver.ResolvedEdge:
 		idx, ok := entityIndex[entityLookupKey{Kind: EntityEdge, EdgeKey: tt.EdgeKey}]
 		if !ok {
+			//gqlc:unreachable list-elem-unknown-edge
 			return nil, fmt.Errorf("%w: list element references unknown edge type %s -[:%s]-> %s", ErrOutOfC6Scope, string(tt.EdgeKey.Source), string(tt.EdgeKey.KeyLabels), string(tt.EdgeKey.Target))
 		}
 		name := entities[idx].Name
@@ -1069,5 +1082,6 @@ func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex m
 		}
 		return &ListElem{Kind: ColumnList, GoType: "[]" + nested.GoType, Nested: nested}, nil
 	}
+	//gqlc:unreachable list-elem-unknown-variant
 	return nil, fmt.Errorf("%w: list element has unknown resolved type %s", ErrOutOfC6Scope, t.String())
 }
