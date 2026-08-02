@@ -178,24 +178,62 @@ PYEOF
     echo "bd-gh-sync: GH #$n has no bead; not creating one. Adopt it with 'bd github pull $n'." >&2
   done < <(grep '^ORPHAN ' "$_tmp/plan.txt")
 
-  grep '^ALLOW ' "$_tmp/plan.txt" | cut -d' ' -f2 >"$_tmp/allow.txt"
+  # Whole remainder of the line, not `cut -f2`: an id carrying a space would be
+  # silently truncated to its first token and a *different* bead would be named
+  # in --issues. Taking it whole lets the gate below see it and refuse it.
+  grep '^ALLOW ' "$_tmp/plan.txt" | sed 's/^ALLOW //' >"$_tmp/allow.txt"
   _eligible=$(grep -c '^ALLOW ' "$_tmp/plan.txt")
   _batches=0
   _failed=0
+  _pulled=0
+  _unusable=0
 
-  if [ -s "$_tmp/allow.txt" ]; then
-    # An empty --issues would widen the pull back to everything, so the
-    # argument is only ever built from a file already known to be non-empty.
-    while IFS= read -r _ids; do
-      [ -n "$_ids" ] || continue
-      _batches=$((_batches + 1))
-      if ! GITHUB_TOKEN="$_token" bd github sync --pull-only --prefer-github \
-        --issues "$_ids"; then
-        _failed=$((_failed + 1))
-        echo "bd-gh-sync: 'bd github sync' exited non-zero on batch ${_batches}; those beads may not have been pulled." >&2
-      fi
-    done < <(xargs -n "$_batch" <"$_tmp/allow.txt" | tr ' ' ',')
-  else
+  # Batched here rather than by `xargs -n`, because xargs parses quotes: a
+  # single bead id containing an apostrophe aborted the whole construction with
+  # "unmatched single quote", so zero batches ran, the error printed above the
+  # summary where `tail -1` drops it, and the summary still reported the
+  # allowlist length as beads pulled. _pulled counts only ids handed to a batch
+  # that exited 0, which is the only evidence the summary has any right to.
+  _run_batch() {
+    _batches=$((_batches + 1))
+    if GITHUB_TOKEN="$_token" bd github sync --pull-only --prefer-github \
+      --issues "$1"; then
+      _pulled=$((_pulled + $2))
+    else
+      _failed=$((_failed + 1))
+      echo "bd-gh-sync: 'bd github sync' exited non-zero on batch ${_batches}; those beads may not have been pulled." >&2
+    fi
+  }
+
+  _ids=""
+  _n=0
+  while IFS= read -r _bid; do
+    # The id becomes a shell argument. bd mints ids like `gqlc-4np` and
+    # `gqlc-35yu.8`, so this refuses corruption only — and corruption is worth
+    # a line of its own rather than a silent drop, because a bead that cannot
+    # be named cannot be pulled, ever.
+    case "$_bid" in
+      "" | *[!A-Za-z0-9._-]*)
+        _unusable=$((_unusable + 1))
+        echo "bd-gh-sync: bead id '${_bid}' is unusable — it cannot be passed to 'bd github sync', so it was not pulled." >&2
+        continue
+        ;;
+    esac
+    if [ -n "$_ids" ]; then _ids="${_ids},${_bid}"; else _ids="$_bid"; fi
+    _n=$((_n + 1))
+    if [ "$_n" -ge "$_batch" ]; then
+      _run_batch "$_ids" "$_n"
+      _ids=""
+      _n=0
+    fi
+  done <"$_tmp/allow.txt"
+  # An empty --issues would widen the pull back to everything, so a batch is
+  # only ever issued from a non-empty accumulator.
+  if [ -n "$_ids" ]; then
+    _run_batch "$_ids" "$_n"
+  fi
+
+  if [ "$_eligible" -eq 0 ]; then
     echo "bd-gh-sync: no bead is eligible for a --prefer-github pull; no pull issued." >&2
   fi
 
@@ -297,10 +335,22 @@ PYEOF
   # (.claude/settings.json). It therefore has to report what happened rather
   # than what was intended: a failed `bd github sync` writes its own error
   # above this point, where the same tail discards it.
-  if [ "$_failed" -gt 0 ]; then
-    _summary="bd-gh-sync: PULL FAILED — ${_failed} of ${_batches} 'bd github sync' batch(es) exited non-zero; up to ${_eligible} bead(s) not pulled"
+  #
+  # The test is _pulled against _eligible, not _failed against zero. _failed is
+  # only ever incremented inside the batch loop, so every way of losing beads
+  # *before* the loop body runs — an id that cannot be passed, a batch list
+  # that came out empty — left _failed at 0 and reported the allowlist length
+  # as a success. Intent is not outcome; the gap between them is the finding.
+  if [ "$_pulled" -lt "$_eligible" ]; then
+    _summary="bd-gh-sync: PULL FAILED — ${_pulled} of ${_eligible} eligible bead(s) pulled"
+    [ "$_failed" -gt 0 ] &&
+      _summary="${_summary}; ${_failed} of ${_batches} 'bd github sync' batch(es) exited non-zero"
+    [ "$_unusable" -gt 0 ] &&
+      _summary="${_summary}; ${_unusable} bead id(s) unusable"
+    [ "$_batches" -eq 0 ] &&
+      _summary="${_summary}; no batch ran at all"
   else
-    _summary="bd-gh-sync: pulled ${_eligible} bead(s)"
+    _summary="bd-gh-sync: pulled ${_pulled} bead(s)"
   fi
   _summary="${_summary}, held $(grep -c '^HOLD ' "$_tmp/plan.txt"), left $(grep -c '^ORPHAN ' "$_tmp/plan.txt") unmirrored GH issue(s) alone."
   if [ -s "$_tmp/moved.txt" ]; then

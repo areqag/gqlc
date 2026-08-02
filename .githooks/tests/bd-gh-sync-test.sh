@@ -536,5 +536,106 @@ case "$(last_line)" in
         bad "a failed sync is visible to a tail -1 caller" "got: $(last_line)" ;;
 esac
 
+# The count on that line is a claim about what `bd github sync` was handed, and
+# the allowlist length is not evidence for it. A bead id that cannot survive the
+# trip to argv — empty, or carrying a quote that splits it — used to be counted
+# as pulled while zero batches ran: `pulled 1 bead(s)` with no sync at all, and
+# the xargs error printed *above* the summary where `tail -1` drops it.
+
+run_sync pull \
+    "[{\"id\":\"\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"a\"}]" \
+    '[{"number":1,"state":"OPEN","body":"a\nadded on GH"}]'
+if [ "$(sync_batches)" -eq 0 ]; then
+    ok "an empty bead id reaches no 'bd github sync' batch"
+else
+    bad "an empty bead id reaches no 'bd github sync' batch" \
+        "$(grep 'github sync' "$TMP/calls")"
+fi
+case "$(last_line)" in
+    *"pulled 1 bead(s)"*) bad "zero batches cannot report a pulled bead" "got: $(last_line)" ;;
+    *FAILED*)             ok "zero batches run is reported as a failed pull" ;;
+    *)                    bad "zero batches cannot report a pulled bead" "got: $(last_line)" ;;
+esac
+
+# A quote is the other door: `xargs` parses quotes, so one bad id takes the
+# whole batch down with it (`xargs: unmatched single quote`) and the good bead
+# beside it is never pulled either.
+run_sync pull \
+    "[{\"id\":\"b'q\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"a\"},
+      {\"id\":\"b-good\",\"status\":\"open\",\"external_ref\":\"$ISSUE/2\",\"description\":\"a\"}]" \
+    '[{"number":1,"state":"OPEN","body":"a\nadded on GH"},
+      {"number":2,"state":"OPEN","body":"a\nadded on GH"}]'
+if scoped_ids | grep -qx b-good; then
+    ok "one unusable bead id does not take the batch down with it"
+else
+    bad "one unusable bead id does not take the batch down with it" \
+        "b-good was never passed to --issues"
+fi
+if scoped_ids | grep -q "'"; then
+    bad "an unusable bead id never reaches argv" "it was passed to --issues"
+else
+    ok "a bead id carrying a quote is refused rather than passed to argv"
+fi
+case "$(last_line)" in
+    *"pulled 2 bead(s)"*)
+        bad "the summary counts what was pulled, not what was eligible" \
+            "counted the refused id: $(last_line)" ;;
+    *"pulled 1 of 2"* | *FAILED*)
+        ok "the summary counts what was pulled, not what was eligible" ;;
+    *)
+        bad "the summary counts what was pulled, not what was eligible" "got: $(last_line)" ;;
+esac
+if grep -q 'unusable' "$TMP/err"; then
+    ok "the refused bead id is named on stderr"
+else
+    bad "the refused bead id is named on stderr" "silently dropped"
+fi
+
+# A space is the quiet one: the plan file is space-delimited, so an id carrying
+# one is truncated to its first token and a *different*, possibly real, bead is
+# named in --issues. Refusing beats guessing.
+run_sync pull \
+    "[{\"id\":\"b two\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"a\"}]" \
+    '[{"number":1,"state":"OPEN","body":"a\nadded on GH"}]'
+if [ "$(sync_batches)" -eq 0 ]; then
+    ok "a bead id carrying a space is refused, not truncated to its first token"
+else
+    bad "a bead id carrying a space is refused, not truncated to its first token" \
+        "synced $(scoped_ids | tr '\n' ' ')"
+fi
+
+# Whatever the shape of the failure, the invariant that has held through three
+# rounds of review must hold: no path reaches an empty or absent --issues,
+# because that widens the pull back to every bead.
+if grep -qE -- '--issues( +--|[[:space:]]*$)' "$TMP/calls"; then
+    bad "no batch is issued with an empty --issues" "$(grep 'github sync' "$TMP/calls")"
+else
+    ok "no batch is issued with an empty --issues"
+fi
+
+# Several conditions at once, on one line: a failed batch, a held bead, an
+# orphan issue and a bead that moved behind the script's back. Nothing may win
+# silently — the tail -1 caller gets one line and it has to carry all four.
+SYNC_RC=1
+run_sync pull "[$ELIGIBLE,$HELDBACK,$CLAIMED]" \
+    '[{"number":7,"state":"OPEN","body":"same"},
+      {"number":8,"state":"OPEN","body":"same\nadded on GH"},
+      {"number":14,"state":"OPEN","body":"keep"},
+      {"number":99,"state":"OPEN","body":"orphan"}]' '[]' \
+    "[$ELIGIBLE,$HELDBACK,{\"id\":\"b-claim\",\"status\":\"open\",\"external_ref\":\"$ISSUE/7\",\"description\":\"same\"}]"
+SYNC_RC=0
+_l="$(last_line)"
+if [ -n "${_l##*FAILED*}" ]; then
+    bad "the summary reports every condition at once" "no failure: $_l"
+elif [ -n "${_l##*held 1*}" ]; then
+    bad "the summary reports every condition at once" "hold count lost: $_l"
+elif [ -n "${_l##*left 1*}" ]; then
+    bad "the summary reports every condition at once" "orphan count lost: $_l"
+elif [ -n "${_l##*WARNING*b-claim*}" ]; then
+    bad "the summary reports every condition at once" "moved bead lost: $_l"
+else
+    ok "a failed batch, a hold, an orphan and a moved bead share one summary line"
+fi
+
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
