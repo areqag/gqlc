@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -937,6 +938,93 @@ func (s *ResolverSuite) TestEdgeUnionArityFixturesAreLoadBearing() {
 		s.Require().NoError(err)
 		s.Require().Contains(string(src), "[r:AUTHORED|LIKES]->", name)
 		s.Require().Contains(string(src), "[r:AUTHORED|LIKES|SHARED]->", name)
+	}
+}
+
+// TestUnionColumnMismatchNamesEachArm holds ErrUnionColumnMismatch's type arm
+// to naming what each branch projected, branch 0 first.
+//
+// The renderings the message is built from are ResolvedType's Stringers, and
+// those are wire tags: every ResolvedNode is "node" whichever type it holds,
+// every ResolvedEdgeUnion is "edgeUnion" whichever keys it committed. So on
+// each row below — one per resolvedTypeEqual arm that can fail on two values
+// sharing a tag — the message read "has type edgeUnion; branch 0 has type
+// edgeUnion", which tells the author the arms disagree and nothing about how.
+//
+// Each row hand-writes both renderings rather than deriving them from the
+// resolved value, so the row fails if the renderer stops carrying the axis that
+// separates the two branches. The assertions are the three claims: both
+// projections appear, they are different text, and branch 0's comes first —
+// the order the author wrote the arms in. Nothing here reads a golden, so
+// -update cannot bless a regression.
+func (s *ResolverSuite) TestUnionColumnMismatchNamesEachArm() {
+	tests := []struct {
+		fixture string
+		first   string // what branch 0 projected
+		second  string // what the branch that failed the comparison projected
+	}{
+		{
+			fixture: "union_node_type_mismatch.cypher",
+			first:   "node Person (not null)",
+			second:  "node Post (not null)",
+		},
+		{
+			fixture: "union_edge_union_keys_mismatch.cypher",
+			first:   "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (not null)",
+			second:  "edgeUnion {Person-[AUTHORED]->Note, Person-[LIKES]->Note} (not null)",
+		},
+		{
+			// Same keys on both sides: nullability is the only axis that
+			// separates them, so a rendering that drops it re-collapses the two.
+			fixture: "union_edge_union_nullability_mismatch.cypher",
+			first:   "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (not null)",
+			second:  "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (nullable)",
+		},
+		{
+			// One key list is a strict prefix of the other, so the delimiters
+			// have to close the list: without them the shorter rendering is a
+			// substring of the longer and the two are no longer told apart.
+			fixture: "union_edge_union_arity_prefix.cypher",
+			first:   "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post, Person-[SHARED]->Post} (not null)",
+			second:  "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (not null)",
+		},
+		{
+			fixture: "union_edge_union_arity_prefix_reversed.cypher",
+			first:   "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (not null)",
+			second:  "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post, Person-[SHARED]->Post} (not null)",
+		},
+		{
+			fixture: "union_column_nullability_mismatch.cypher",
+			first:   "property:STRING (not null)",
+			second:  "property:STRING (nullable)",
+		},
+		{
+			fixture: "union_list_element_mismatch.cypher",
+			first:   "list of edge Person-[KNOWS]->Person (not null)",
+			second:  "list of edge Person-[AUTHORED]->Post (not null)",
+		},
+	}
+
+	mapping := s.loadMapping("invalid")
+	for _, tt := range tests {
+		s.Run(tt.fixture, func() {
+			schemaName, ok := mapping[tt.fixture]
+			s.Require().True(ok, "unmapped invalid fixture %q", tt.fixture)
+
+			_, err := New(s.loadSchema("invalid", schemaName), WithRegistry(regR7)).
+				Resolve(s.loadQuery(filepath.Join(fixtureDir, "invalid", tt.fixture)))
+			s.Require().ErrorIs(err, ErrUnionColumnMismatch)
+			msg := err.Error()
+
+			s.Require().NotEqual(tt.first, tt.second,
+				"the two renderings must differ, or this row asserts nothing")
+			first := strings.Index(msg, tt.first)
+			second := strings.Index(msg, tt.second)
+			s.Require().GreaterOrEqualf(first, 0, "branch 0 projected %q, absent from %q", tt.first, msg)
+			s.Require().GreaterOrEqualf(second, 0, "the failing branch projected %q, absent from %q", tt.second, msg)
+			s.Require().Lessf(first, second,
+				"branch 0 was written first, so its projection must be named first, in %q", msg)
+		})
 	}
 }
 

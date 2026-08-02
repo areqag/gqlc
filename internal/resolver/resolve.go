@@ -316,11 +316,48 @@ func compareBranchColumns(branchCols [][]Column) error {
 				return fmt.Errorf("%w: branch %d column %d named %q; branch 0 column %d named %q", ErrUnionColumnMismatch, b, i, other[i].Name, i, base[i].Name)
 			}
 			if !resolvedTypeEqual(other[i].Type, base[i].Type) {
-				return fmt.Errorf("%w: branch %d column %q has type %s; branch 0 has type %s", ErrUnionColumnMismatch, b, other[i].Name, other[i].Type.String(), base[i].Type.String())
+				return fmt.Errorf("%w: column %q projects %s in branch 0 but %s in branch %d", ErrUnionColumnMismatch, base[i].Name, describeColumnType(base[i].Type), describeColumnType(other[i].Type), b)
 			}
 		}
 	}
 	return nil
+}
+
+// describeColumnType renders a resolved column type for a fail-message that
+// has to tell two of them apart: the variant's tag, plus every axis
+// resolvedTypeEqual compares it on.
+//
+// The Stringers alone cannot do this. They are wire tags — the "kind"
+// discriminator each MarshalJSON emits — so every ResolvedNode renders "node"
+// whichever type it holds and every ResolvedEdgeUnion renders "edgeUnion"
+// whichever keys it committed, and a message built from them prints the same
+// text on both sides of a mismatch. The union key list is delimited because one
+// candidate list can be a strict prefix of another.
+func describeColumnType(t ResolvedType) string {
+	switch v := t.(type) {
+	case ResolvedNode:
+		return v.String() + " " + string(v.Labels) + nullabilityNote(v.Nullable)
+	case ResolvedEdge:
+		return v.String() + " " + formatEdgeKey(v.EdgeKey) + nullabilityNote(v.Nullable)
+	case ResolvedEdgeUnion:
+		return v.String() + " {" + formatEdgeKeys(v.EdgeKeys) + "}" + nullabilityNote(v.Nullable)
+	case ResolvedProperty:
+		return v.String() + nullabilityNote(v.Nullable)
+	case ResolvedList:
+		return v.String() + " of " + describeColumnType(v.Element)
+	default:
+		return t.String()
+	}
+}
+
+// nullabilityNote spells the nullability axis on both settings rather than
+// annotating only the nullable one: two column types that differ on nothing
+// else must render as different text.
+func nullabilityNote(nullable bool) string {
+	if nullable {
+		return " (nullable)"
+	}
+	return " (not null)"
 }
 
 // resolvedTypeEqual is Go-value equality for ResolvedType. Rendering to their
