@@ -17,10 +17,22 @@ type TypeMap interface {
 	Property(pt graph.PropertyType) (goType string, ok bool)
 
 	// Temporal maps a resolved temporal-expression kind to its Go type
-	// text. Total over the closed enum.
-	Temporal(k resolver.Temporal) string
+	// text. ok is false for a kind the backend has no faithful carrier
+	// for; the phase routes that to ErrUnrepresentableTemporal naming
+	// the kind. Partial per kind rather than per backend: a store may
+	// carry part of the enum and not the rest (ADR 0025).
+	Temporal(k resolver.Temporal) (goType string, ok bool)
 
 	// Scalar maps a resolved scalar-expression kind to its Go type text.
-	// Total over the closed enum.
+	// Total over the closed enum: resolver.Scalar's membership (bool /
+	// int / float / string / null / map) is the openCypher literal
+	// vocabulary, and a store a Cypher query runs against accepts a value
+	// of each written into a query, so every backend has an answer. A
+	// kind added here with no such value behind it falsifies that ground
+	// and needs the rejection channel Temporal carries.
+	//
+	// Answering does not oblige a backend to emit the column: whether a
+	// kind reaches emission is the backend's own gate, and one may answer
+	// here and refuse there (ADR 0025).
 	Scalar(k resolver.Scalar) string
 }

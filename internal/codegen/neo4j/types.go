@@ -89,31 +89,36 @@ func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 }
 
 // Temporal maps a resolver Temporal kind to the Go type text C3 emits
-// (spec §5.1 column-shape table). Every result is a dbtype.<Kind> or
-// time.Time — one dispatch on the closed enum.
-func (typeMap) Temporal(k resolver.Temporal) string {
+// (spec §5.1 column-shape table). Returns (typeText, ok): ok=false
+// routes the caller to ErrUnrepresentableTemporal naming the kind. The
+// driver ships a temporal carrier for every kind of the enum, so every
+// arm answers ok=true and this backend never takes that channel.
+func (typeMap) Temporal(k resolver.Temporal) (string, bool) {
 	switch k {
 	case resolver.TemporalDate:
-		return "dbtype.Date"
+		return "dbtype.Date", true
 	case resolver.TemporalTime:
-		return "dbtype.Time"
+		return "dbtype.Time", true
 	case resolver.TemporalLocalTime:
-		return "dbtype.LocalTime"
+		return "dbtype.LocalTime", true
 	case resolver.TemporalDateTime:
-		return "time.Time"
+		return "time.Time", true
 	case resolver.TemporalLocalDateTime:
-		return "dbtype.LocalDateTime"
+		return "dbtype.LocalDateTime", true
 	case resolver.TemporalDuration:
-		return "dbtype.Duration"
+		return "dbtype.Duration", true
 	}
-	// Unreachable: Temporal is a closed enum.
-	return "any"
+	// Only a value converted in from outside resolver.Temporal's
+	// vocabulary reaches here; refusing beats guessing a carrier for a
+	// kind the resolver never named.
+	return "", false
 }
 
 // Scalar maps a resolver Scalar kind to the Go type text C3 emits (spec
 // §5.1 column-shape table). Bool / Int / Float / String bridge to the
 // driver's native carriers; Null → any (the openCypher null literal is
-// legal-but-pointless projection); Map → map[string]any.
+// legal-but-pointless projection); Map → map[string]any. Every arm is the
+// Go shape of a value the driver's record vocabulary already carries.
 func (typeMap) Scalar(k resolver.Scalar) string {
 	switch k {
 	case resolver.ScalarBool:
@@ -129,6 +134,9 @@ func (typeMap) Scalar(k resolver.Scalar) string {
 	case resolver.ScalarMap:
 		return "map[string]any"
 	}
+	// Only a value converted in from outside resolver.Scalar's vocabulary
+	// reaches here; projecting it undecoded beats guessing a Go type for
+	// a kind the resolver never named.
 	return "any"
 }
 

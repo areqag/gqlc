@@ -261,11 +261,19 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 		}}
 	})
 
+	// wantSentinel is the error a rejecting row expects, defaulting to
+	// this backend's unserved-query sentinel. A temporal column takes a
+	// different one: whether a kind has a carrier is the type table's
+	// answer, and the shared phase asks it and refuses with
+	// codegen.ErrUnrepresentableTemporal naming the kind — a sentinel
+	// this gate cannot raise, since it reports one reason per query and
+	// not one per column type.
 	cases := []struct {
-		name      string
-		queries   []codegen.NamedQuery
-		wantSub   string
-		wantError bool
+		name         string
+		queries      []codegen.NamedQuery
+		wantSub      string
+		wantSentinel error
+		wantError    bool
 	}{
 		{
 			name:    "no queries generates",
@@ -312,9 +320,11 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 			queries: []codegen.NamedQuery{node},
 		},
 		{
-			name:      "a temporal column is dropped",
-			queries:   []codegen.NamedQuery{temporal},
-			wantSub:   `1 query would be dropped: When (column "t" projects temporal(date))`,
+			name:         "a temporal column is refused by the type table, naming the kind",
+			queries:      []codegen.NamedQuery{temporal},
+			wantSentinel: codegen.ErrUnrepresentableTemporal,
+			wantSub: `unrepresentable temporal kind: query "When" column 0 "t" projects temporal(date), ` +
+				`which the Apache AGE backend has no carrier for`,
 			wantError: true,
 		},
 		{
@@ -343,14 +353,28 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 		},
 		{
 			name:      "every dropped query is named, in batch order",
-			queries:   []codegen.NamedQuery{execListParam, temporal, list},
-			wantSub:   "3 queries would be dropped: Batch (parameter $ids is a list), When (column \"t\" projects temporal(date)), Tags (column \"t\" projects list)",
+			queries:   []codegen.NamedQuery{execListParam, mapCol, list},
+			wantSub:   "3 queries would be dropped: Batch (parameter $ids is a list), Bag (column \"m\" projects scalar(map)), Tags (column \"t\" projects list)",
 			wantError: true,
 		},
 		{
-			name:      "a served query alongside a dropped one still fails",
-			queries:   []codegen.NamedQuery{served, temporal},
-			wantSub:   `1 query would be dropped: When (column "t" projects temporal(date))`,
+			// The gate runs ahead of the shared phases, so it answers
+			// first even though the batch also carries a kind the type
+			// table refuses: a batch with a query this backend emits no
+			// method for is not improved by first being told about a
+			// column type, and repairing the column would leave the batch
+			// exactly where it was.
+			name:      "an unserved query outranks a refused temporal kind",
+			queries:   []codegen.NamedQuery{temporal, list},
+			wantSub:   `1 query would be dropped: Tags (column "t" projects list)`,
+			wantError: true,
+		},
+		{
+			name:         "a served query alongside a refused one still fails",
+			queries:      []codegen.NamedQuery{served, temporal},
+			wantSentinel: codegen.ErrUnrepresentableTemporal,
+			wantSub: `unrepresentable temporal kind: query "When" column 0 "t" projects temporal(date), ` +
+				`which the Apache AGE backend has no carrier for`,
 			wantError: true,
 		},
 	}
@@ -366,7 +390,11 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 			}
 			s.Require().Error(err)
 			s.Require().Nil(files, "a rejected batch must not return a partial file set")
-			s.Require().ErrorIs(err, age.ErrUnsupportedQuery)
+			wantSentinel := tc.wantSentinel
+			if wantSentinel == nil {
+				wantSentinel = age.ErrUnsupportedQuery
+			}
+			s.Require().ErrorIs(err, wantSentinel)
 			s.Require().ErrorContains(err, tc.wantSub)
 		})
 	}

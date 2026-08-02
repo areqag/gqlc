@@ -54,13 +54,14 @@ func wireEntities(entities []codegen.Entity) ([]wiredEntity, error) {
 		ErrUnsupportedSchema, len(multi), noun, strings.Join(multi, ", "))
 }
 
-// nameBackend adds this backend's name to a width the shared phases
-// refused. The type table those phases consult is this package's, so the
-// refusal is this backend's answer and not a property of the schema: a
-// run emitting several targets has to say which of them has no carrier
-// for the width it names.
+// nameBackend adds this backend's name to a width or a temporal kind the
+// shared phases refused. Both refusals come from asking this package's
+// type table, so they are this backend's answer and not a property of the
+// schema or of the query: a run emitting several targets has to say which
+// of them has no carrier. Every other refusal follows from the input
+// alone, so wrapping it here would misattribute it.
 func nameBackend(err error) error {
-	if !errors.Is(err, codegen.ErrUnrepresentableWidth) {
+	if !errors.Is(err, codegen.ErrUnrepresentableWidth) && !errors.Is(err, codegen.ErrUnrepresentableTemporal) {
 		return err
 	}
 	return fmt.Errorf("%w, which the Apache AGE backend has no carrier for", err)
@@ -141,7 +142,12 @@ func unservedColumn(t resolver.ResolvedType) string {
 		return "projects " + ct.String()
 	case resolver.ResolvedNode, resolver.ResolvedEdge, resolver.ResolvedEdgeUnion:
 		return ""
-	case resolver.ResolvedTemporal, resolver.ResolvedList, resolver.ResolvedUnknown:
+	case resolver.ResolvedTemporal:
+		// Answered by the type table instead: the shared phase asks it and
+		// refuses with ErrUnrepresentableTemporal naming the kind, which
+		// this gate cannot do — it reports one reason per query (ADR 0025).
+		return ""
+	case resolver.ResolvedList, resolver.ResolvedUnknown:
 		return "projects " + ct.String()
 	}
 	// ResolvedType is a sealed interface, so the switch above is its

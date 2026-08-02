@@ -1,0 +1,137 @@
+# The type map answers whether a backend carries a kind, one arm per kind
+
+`TypeMap.Temporal` returns `(goType string, ok bool)`. A backend with no
+faithful Go carrier for a temporal kind answers `ok=false`, and the shared phase
+turns that into `ErrUnrepresentableTemporal` naming the query, the column and the
+kind. The answer is given per kind, in its own switch arm, not per backend and
+not in the backend's unserved-query gate.
+
+`TypeMap.Scalar` keeps a total signature. `TypeMap.Property` already had the same
+`(string, bool)` shape; this aligns `Temporal` with it.
+
+## Context
+
+`Temporal` was documented "total over the closed enum", which was true while
+neo4j was the only backend: the driver ships a `dbtype` carrier for every kind.
+Apache AGE falsifies it. `agtype` has no temporal value and no cast reaches one
+(spike `gqlc-35yu.5`, empirically confirmed against the `pg_cast` table), so
+there is no kind AGE can carry natively.
+
+With no way to refuse, AGE's table returned `"any"` for every kind — a column no
+emitted decoder can fill, written at exit 0 with no diagnostic. That is the
+opposite disposition from the one the `Property` path takes for a width the
+backend cannot hold, and the difference came from the interface's shape rather
+than from a decision.
+
+### Why the type map and not the backend's gate
+
+AGE already has a per-query gate (`rejectUnservedQueries`) that drops a query
+whose columns it has no emission for. Answering temporal there would work, and
+was rejected on two counts.
+
+The gate reports **one reason for a whole query**, so it cannot name the kind, and
+the message an author needs is the kind — `RETURN d.created` fails differently
+from `RETURN duration(...)` once the encodings land one at a time. And the type
+map is already the place that answers "does this backend carry X" for widths;
+putting temporal somewhere else means two tables that have to agree, with nothing
+holding them together.
+
+### Why per kind and not per backend
+
+A single `Temporal(k) bool` on the backend, or one blanket refusal, would be
+smaller. It would also be wrong by the time the encodings land: the spike found
+faithful encodings for instants, dates, durations and zoned datetimes, and **no
+faithful encoding for a calendar duration** (months and years are not a fixed
+micro count). So the enum splits, and the split has to be expressible.
+
+One arm per kind buys a second thing. `exhaustive` holds a switch to its enum's
+full membership, so a kind the resolver gains fails the build in every backend
+table rather than inheriting the answer chosen for the kinds before it. The
+previous AGE implementation ignored its argument entirely, which left the linter
+nothing to hold — the only type-map entry in the tree with no growth fence.
+
+### Why a new sentinel rather than `ErrUnrepresentableWidth`
+
+A temporal expression carries no property width at all: the resolver keeps
+`ResolvedTemporal` apart from `ResolvedProperty`'s `DATE` / `TIMESTAMP` families
+(ADR 0002). The two sentinels therefore ask for different edits — a schema change
+for a width, a `RETURN` clause change for a kind — and folding them would make the
+message name a width that does not exist.
+
+### Why `Scalar` keeps a total signature
+
+`resolver.Scalar`'s membership — bool, int, float, string, null, map — is the
+openCypher literal vocabulary. A store a Cypher query runs against accepts a
+value of each written into a query, so every backend has something to answer with
+and the signature admits no refusal. A kind added to that enum with no such value
+behind it would falsify the ground, and would need the channel `Temporal` now
+carries.
+
+That is a claim about the **store**, and it is narrower than it looks. It does not
+say a backend can decode every kind it can name, and on AGE it does not: see
+below.
+
+## Considered options
+
+**Leave `Temporal` total and let AGE return `"any"`.** Rejected: it emits a
+column no decoder can fill at exit 0. Generate-time refusal is this codebase's
+posture for "this backend cannot represent that", and temporal escaped it by
+accident of interface shape.
+
+**Refuse temporal in AGE's unserved-query gate.** Rejected: the gate reports one
+reason per query and cannot name the kind, and it duplicates an answer the type
+map already owns for widths.
+
+**One blanket refusal per backend rather than one arm per kind.** Rejected: the
+encodings land per kind and one of them never will, so the enum splits; and a
+switch is what gives `exhaustive` a fence against the resolver growing a kind.
+
+**Reuse `ErrUnrepresentableWidth`.** Rejected: it would name a width a temporal
+expression does not have, and point the author at the schema rather than the
+query.
+
+**Give `Scalar` the same channel for symmetry.** Rejected: nothing in it is
+unrepresentable in the store sense, and a refusal channel no implementation takes
+is surface that reads as a capability. What AGE actually lacks for two of its
+scalar kinds is a decode helper, which is a different fix — below.
+
+## Consequences
+
+- The shared phases fail on a temporal kind at two sites, `phaseBDerive` for a
+  column and `buildListElemPlan` for a list element's leaf, each naming the kind.
+  Both are fenced independently.
+
+- AGE refuses every temporal kind today, so no fixture may enrol an
+  `apache-age-pgx-v5` target on a query projecting a temporal column until
+  `gqlc-35yu.11` commits the encodings. It admits kinds one arm at a time as that
+  bead lands; the calendar duration arm is expected to stay refused permanently.
+
+- **The AGE `Scalar` table is answered in two places and the two answers
+  disagree.** The table names `any` for `ScalarNull` and `map[string]any` for
+  `ScalarMap`; `unservedColumn` refuses a column of either kind before emission.
+  The refusal is what makes the table's answer inert, and it is load-bearing:
+  `decodeFunc` has no `agtypeNull` or `agtypeMap` arm, so both route to
+  `agtypeString`. Lifting the gate arm alone emits a `map[string]any` field
+  filled from a `string`-returning helper — **the generated package does not
+  compile** — and an `any` field filled from a helper that rejects `null` at
+  runtime. The fix is the two missing helpers, not a change to this interface;
+  until they exist, those two arms are placeholders and this ADR is the record
+  that they are.
+
+- The declared Go surface is backend-invariant and the runtime types behind it
+  are not, in one place this ADR should name rather than leave to be discovered.
+  A `map[string]any` decoded from `agtype` arrives as JSON, so an integer inside
+  it lands as `float64`, where the neo4j driver yields `int64`.
+  `TestBackendInvariantSurface` compares declarations, so it would not see the
+  divergence. Reachable only once an `agtypeMap` helper exists.
+
+- Only the AGE generator wraps `ErrUnrepresentableTemporal` (and
+  `ErrUnrepresentableWidth`) with its own name. Neither neo4j backend does, so a
+  multi-target run that failed on a neo4j table would not say which target
+  failed. Inert today — neo4j refuses no temporal kind and no width the shared
+  phases reach — and pre-existing for the width sentinel. The sentinel's doc
+  states only what holds.
+
+- `gqlc-yr3n` records the separate gap that AGE's served `Scalar` arms have no
+  corpus reach: they are checked by a hand-written mirror of the table rather
+  than by a golden diff.

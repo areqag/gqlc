@@ -77,6 +77,21 @@ var (
 	// entities, and the label they share.
 	ErrUnrepresentableEdgeUnion = errors.New("unrepresentable edge union")
 
+	// ErrUnrepresentableTemporal is returned when a query column, or a
+	// list element's leaf, is a temporal expression of a kind the
+	// target's TypeMap reports no faithful Go carrier for. Distinct from
+	// ErrUnrepresentableWidth: a temporal expression carries no property
+	// width at all (resolver keeps ResolvedTemporal apart from
+	// ResolvedProperty's DATE / TIMESTAMP families, ADR 0002), so the two
+	// sentinels address different edits — a schema for that one, a
+	// query's RETURN clause for this one. Permanent on the same terms:
+	// which kinds refuse follows from what the target can hold, so it is
+	// a target's answer and not a stage's, and it is per kind, so a
+	// target admitting part of the enum still fails on the rest
+	// (ADR 0025). The fail-message names the fail-site (query + column;
+	// list element) and the temporal kind.
+	ErrUnrepresentableTemporal = errors.New("unrepresentable temporal kind")
+
 	// ErrExecOnProjection is returned when a query annotated :exec has at
 	// least one projected column (len(Validated.Columns) > 0). The caller
 	// either drops the :exec annotation (annotate :one or :many per the
@@ -176,6 +191,7 @@ var allSentinels = []error{
 	ErrPropertyFieldCollision,
 	ErrUnrepresentableWidth,
 	ErrUnrepresentableEdgeUnion,
+	ErrUnrepresentableTemporal,
 	ErrExecOnProjection,
 	ErrCardinalityShapeMismatch,
 }
