@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/procsig"
 	"github.com/areqag/gqlc/internal/query"
 	"github.com/areqag/gqlc/internal/query/cypher"
@@ -300,6 +301,48 @@ var invalidFixtures = map[string]error{
 	// and whole-entity reference is refused.
 	"label_satisfy_plural_property.cypher": ErrUnknownProperty,
 	"label_satisfy_plural_entity.cypher":   ErrAmbiguousLabel,
+	// kph4 additions. Plural endpoints reach edge closure only on a schema
+	// that both declares edges and declares more than one node type
+	// satisfying the pattern's label expression; no fixture combined the two.
+	//
+	// Committing one edge type names the node type on each of its ends, but
+	// the endpoints are not narrowed to it: WORKS_AT closes to the single key
+	// Employee&Person-[WORKS_AT]->Company and `p` stays plural, so ADR 0022's
+	// whole-entity refusal still fires on a binding the schema pins. Refusing
+	// is the safe half of the answer; widening it is gqlc-0tft.
+	"plural_endpoint_whole_entity_after_edge_closure.cypher": ErrAmbiguousLabel,
+	// Three candidates of which only the first and third disagree about which
+	// of the pattern's endpoints is the source; the second is a plural-endpoint
+	// duplicate of the first's side and carries no orientation signal.
+	"ambiguous_edge_orientation_plural_endpoints.cypher": ErrAmbiguousEdgeOrientation,
+	// The reverse declaration lands on a SUBTYPE of the endpoint the forward
+	// one uses, so the two candidates cross the pattern in opposite directions
+	// without being exact mirrors of each other. A guard that tests for the
+	// mirror {A,L,B}/{B,L,A} admits both of these — the whole-entity form is
+	// then bounced by codegen's same-label union guard one stage later, but the
+	// property form (below) is caught by nothing and generates compiling code.
+	"ambiguous_edge_orientation_reversed_subtype.cypher":          ErrAmbiguousEdgeOrientation,
+	"ambiguous_edge_orientation_reversed_subtype_property.cypher": ErrAmbiguousEdgeOrientation,
+	// The two endpoints' satisfying sets OVERLAP — one is a strict subset of
+	// the other — which is the ordinary shape of a subtype schema and the shape
+	// ADR 0022 exists to serve. Classifying a candidate by its Source alone
+	// then reads every candidate as sitting on both sides of the pattern, so
+	// none is ever classified forward and the disagreement cannot be reported;
+	// these two are the exact mirror {A,L,B}/{B,L,A} that the *narrowest*
+	// possible guard catches, admitted by a broader one. Neither is reachable
+	// by the corpus that shipped before them: every other undirected fixture
+	// runs between endpoint sets that are equal or disjoint.
+	//
+	// Both subset directions are here because they classify different
+	// candidates as the forward witness, so they pin the witness order (§4.4)
+	// as well as the verdict — see invalidFixtureContains.
+	//
+	// Property projection, not whole-entity: `RETURN r` is bounced one stage
+	// later by codegen.ErrUnrepresentableEdgeUnion, and `RETURN r.rating`
+	// reaches nothing that objects (§4.6.1). The property form is the one that
+	// generates silently wrong code if this verdict is lost.
+	"ambiguous_edge_orientation_overlapping_endpoints.cypher":          ErrAmbiguousEdgeOrientation,
+	"ambiguous_edge_orientation_overlapping_endpoints_reversed.cypher": ErrAmbiguousEdgeOrientation,
 }
 
 // invalidFixtureContains pins the message arm for fixtures where errors.Is
@@ -321,6 +364,22 @@ var invalidFixtureContains = map[string]string{
 	// refProjectionType arm (scope.go:706) — distinguished by "binding" suffix.
 	"path_binding.cypher":   "path binding",
 	"unwind_binding.cypher": "unwind binding",
+	// The message must name one candidate from each side of the disagreement,
+	// first-in-candidate-order per side, and leave out the third — which plural
+	// satisfaction widened the set with on a side already represented.
+	// errors.Is passes on any pair.
+	"ambiguous_edge_orientation_plural_endpoints.cypher": `matches Employee&Person-[REVIEWED]->Company left-to-right and Company-[REVIEWED]->Person right-to-left`,
+	// Neither key is the other's mirror; the message must still name both
+	// sides, so it cannot be produced by a mirror test.
+	"ambiguous_edge_orientation_reversed_subtype.cypher":          `matches Author-[REVIEWED]->Book left-to-right and Book-[REVIEWED]->Author&Editor right-to-left`,
+	"ambiguous_edge_orientation_reversed_subtype_property.cypher": `matches Author-[REVIEWED]->Book left-to-right and Book-[REVIEWED]->Author&Editor right-to-left`,
+	// The same two keys in both fixtures, on one schema, reported in opposite
+	// orders: which candidate is the left-to-right witness is decided by the
+	// pattern's endpoints and not by the schema's declaration order, so the two
+	// pins together say the message is read off the query rather than the
+	// candidate list.
+	"ambiguous_edge_orientation_overlapping_endpoints.cypher":          `matches Employee&Person-[REVIEWED]->Person left-to-right and Person-[REVIEWED]->Employee&Person right-to-left`,
+	"ambiguous_edge_orientation_overlapping_endpoints_reversed.cypher": `matches Person-[REVIEWED]->Employee&Person left-to-right and Employee&Person-[REVIEWED]->Person right-to-left`,
 }
 
 type ResolverSuite struct {
@@ -435,6 +494,244 @@ func (s *ResolverSuite) TestInvalid() {
 	}
 }
 
+// TestDirectionMarkerIsInertOnAPluralOnlyUnion holds the claim the
+// plural_endpoint_*_edge_union pair exists to make: on a candidate set the
+// direction marker does not change, the marker does not change the verdict
+// either. The undirected pattern's two extra probes (`Company -> Person`
+// orientations of FOUNDED) are declared by nothing, so undirected and directed
+// close to the same two keys, and §4.6 case D must type both.
+//
+// Neither golden can carry this on its own. Both are machine-written by the
+// code under test from the same run, so a change that made the marker decide
+// the verdict — an orientation guard that fires on a set with no orientation
+// disagreement in it — writes two now-different goldens on the next -update
+// and the suite stays green. Byte-equality between them is a relation -update
+// cannot repair: it rewrites the files, not the fact that they must match.
+//
+// Read from disk rather than resolved here on purpose. The committed bytes are
+// what a reviewer diffs, and this is the assertion that says a diff touching
+// one of them and not the other is a regression.
+func (s *ResolverSuite) TestDirectionMarkerIsInertOnAPluralOnlyUnion() {
+	golden := func(name string) []byte {
+		src, err := os.ReadFile(filepath.Join(fixtureDir, "valid", name+".cypher.validated.golden.json"))
+		s.Require().NoError(err)
+		return src
+	}
+	undirected := golden("plural_endpoint_undirected_edge_union")
+	directed := golden("plural_endpoint_directed_edge_union")
+
+	// Vacuity guard: byte-equality says nothing unless both goldens really do
+	// hold the multi-candidate shape the claim is about.
+	s.Require().Contains(string(undirected), `"kind": "edgeUnion"`)
+
+	s.Require().Equal(string(undirected), string(directed),
+		"the undirected fixture and its directed control close to the same candidate set, so their goldens must be byte-identical")
+}
+
+// TestOrientationDisagreementComparesOnlySameLabelCandidates holds
+// orientationDisagreement to the precondition its doc comment states, rather
+// than to the one its caller happens to supply.
+//
+// Case C's `len(e.Labels()) == 1` guard means every set the function is handed
+// today carries one label, so no corpus fixture can reach the arm below — a
+// predicate that ignored the label would pass the whole suite. That is the
+// shape the previous revision shipped, and 25 lines of distance between a
+// stated precondition and the guard that supplies it is not a guarantee.
+//
+// The arm matters because the two answers are different verdicts, not two
+// spellings of one. Two DIFFERENT edge types running opposite ways across the
+// pattern is §4.6 case D's multi-type union — the author wrote `|` and opted
+// in — and ErrAmbiguousEdgeOrientation's message ("cannot commit to one
+// without erasing the other") would be false of it.
+//
+// Called directly: the point is the function's answer on a set the resolver
+// cannot currently build, so there is no query to write.
+func (s *ResolverSuite) TestOrientationDisagreementComparesOnlySameLabelCandidates() {
+	key := func(src, label, tgt string) schema.EdgeKey {
+		return schema.EdgeKey{
+			Source:    graph.LabelSetKey(src),
+			KeyLabels: graph.LabelSetKey(label),
+			Target:    graph.LabelSetKey(tgt),
+		}
+	}
+	srcs := []graph.LabelSetKey{"Author"}
+	tgts := []graph.LabelSetKey{"Book"}
+
+	_, _, differentLabels := orientationDisagreement([]schema.EdgeKey{
+		key("Author", "REVIEWED", "Book"),
+		key("Book", "EDITED", "Author"),
+	}, srcs, tgts)
+	s.Require().False(differentLabels,
+		"REVIEWED one way and EDITED the other is a multi-type union (§4.6 case D), not one edge type whose direction is undecided")
+
+	// Control: the same two sides, one label, is the disagreement.
+	_, _, sameLabel := orientationDisagreement([]schema.EdgeKey{
+		key("Author", "REVIEWED", "Book"),
+		key("Book", "REVIEWED", "Author"),
+	}, srcs, tgts)
+	s.Require().True(sameLabel,
+		"the assertion above must fail on the label, not on the sides")
+}
+
+// TestOrientationDisagreementSkipsOnlyWhatReadsBothWays states the property
+// that licenses the skip arm, on the slice shapes that separate it from the
+// weaker test it is easy to write instead.
+//
+// The skip exists because a candidate that reads the same whichever way it is
+// read carries no orientation signal, and reporting it would name one key as
+// its own counterparty. Reading BOTH ways is a claim about both endpoints. A
+// candidate whose SOURCE happens to sit in both slices is a strictly weaker
+// condition, and the two come apart the moment the endpoints' satisfying sets
+// overlap without being equal — the ordinary shape of a subtype schema, which
+// is what ADR 0022 exists to serve.
+//
+// The overlap rows below are not reachable through the invalid corpus alone in
+// the sense that matters: a Source-only test does not merely misjudge one
+// candidate on them, it classifies EVERY candidate as signal-free, so the
+// function can never return true for any query whose srcs is contained in its
+// tgts. The rows say that directly, where the justification for the skip lives.
+func (s *ResolverSuite) TestOrientationDisagreementSkipsOnlyWhatReadsBothWays() {
+	key := func(src, label, tgt string) schema.EdgeKey {
+		return schema.EdgeKey{
+			Source:    graph.LabelSetKey(src),
+			KeyLabels: graph.LabelSetKey(label),
+			Target:    graph.LabelSetKey(tgt),
+		}
+	}
+	mirror := []schema.EdgeKey{
+		key("Employee&Person", "REVIEWED", "Person"),
+		key("Person", "REVIEWED", "Employee&Person"),
+	}
+	tests := []struct {
+		name string
+		srcs []graph.LabelSetKey
+		tgts []graph.LabelSetKey
+		want bool
+		why  string
+	}{
+		{
+			name: "srcs is a strict subset of tgts",
+			srcs: []graph.LabelSetKey{"Employee&Person"},
+			tgts: []graph.LabelSetKey{"Person", "Employee&Person"},
+			want: true,
+			why:  "every Source sits in both slices, but the Targets still separate the two readings",
+		},
+		{
+			name: "tgts is a strict subset of srcs",
+			srcs: []graph.LabelSetKey{"Person", "Employee&Person"},
+			tgts: []graph.LabelSetKey{"Employee&Person"},
+			want: true,
+			why:  "the mirror image of the row above; the witnesses swap sides, the verdict does not",
+		},
+		{
+			name: "srcs and tgts are equal",
+			srcs: []graph.LabelSetKey{"Person", "Employee&Person"},
+			tgts: []graph.LabelSetKey{"Person", "Employee&Person"},
+			want: false,
+			why:  "the directed twin probes the same set, so the arrow is inert and the refusal would be advice the author cannot act on",
+		},
+		{
+			name: "srcs and tgts are disjoint",
+			srcs: []graph.LabelSetKey{"Employee&Person"},
+			tgts: []graph.LabelSetKey{"Person"},
+			want: true,
+			why:  "no overlap at all — the shape that worked before ADR 0022, kept as the control",
+		},
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			fwd, rev, got := orientationDisagreement(mirror, tt.srcs, tt.tgts)
+			s.Require().Equalf(tt.want, got, "%s", tt.why)
+			if got {
+				s.Require().NotEqual(fwd, rev, "the two witnesses must be different keys")
+			}
+		})
+	}
+
+	// The self-loop the equal-slices row generalises: one key that is its own
+	// counterparty, which is why the skip is not merely permitted but required.
+	_, _, selfLoop := orientationDisagreement(
+		[]schema.EdgeKey{key("Person", "KNOWS", "Person")},
+		[]graph.LabelSetKey{"Person"}, []graph.LabelSetKey{"Person"})
+	s.Require().False(selfLoop,
+		"a self-loop key read as a disagreement would name itself on both sides")
+}
+
+// TestAmbiguousOrientationRemedyIsTheArrow holds the claim case C's whole
+// rationale rests on: the resolver refuses and tells the author to write an
+// arrow, so on every schema where it refuses, writing the arrow must decide the
+// question. A refusal whose prescribed remedy leaves the query equally
+// ambiguous is advice the author cannot act on, and §4.6's plural-endpoint
+// carve-out exists precisely to avoid emitting one.
+//
+// One schema per row, both forms resolved against it. That is what the
+// valid/invalid fixture pairs cannot state: the directed control lives in
+// valid/ with its own copy of the schema, so nothing says the schema the
+// control resolves against is the schema the refusal fires on. Here it is the
+// same parsed value, and the directed answer is asserted down to the committed
+// EdgeKey rather than left to a machine-written golden.
+func (s *ResolverSuite) TestAmbiguousOrientationRemedyIsTheArrow() {
+	tests := []struct {
+		name       string
+		schema     string
+		undirected string
+		directed   string
+		wantKey    schema.EdgeKey
+	}{
+		{
+			name:       "exact mirror between two node types",
+			schema:     "social_r3.gql",
+			undirected: "MATCH (p:Person)-[r:AUTHORED]-(post:Post) RETURN r",
+			directed:   "MATCH (p:Person)-[r:AUTHORED]->(post:Post) RETURN r",
+			wantKey:    schema.EdgeKey{Source: "Person", KeyLabels: "AUTHORED", Target: "Post"},
+		},
+		{
+			name:       "reverse declaration lands on a subtype (§4.6.1)",
+			schema:     "satisfy_plural_edges_reversed_subtype.gql",
+			undirected: "MATCH (a:Author)-[r:REVIEWED]-(b:Book) RETURN r",
+			directed:   "MATCH (a:Author)-[r:REVIEWED]->(b:Book) RETURN r",
+			wantKey:    schema.EdgeKey{Source: "Author", KeyLabels: "REVIEWED", Target: "Book"},
+		},
+		{
+			name:       "endpoints' satisfying sets overlap, srcs inside tgts",
+			schema:     "satisfy_plural_edges_overlapping.gql",
+			undirected: "MATCH (a:Employee)-[r:REVIEWED]-(b:Person) RETURN r",
+			directed:   "MATCH (a:Employee)-[r:REVIEWED]->(b:Person) RETURN r",
+			wantKey:    schema.EdgeKey{Source: "Employee&Person", KeyLabels: "REVIEWED", Target: "Person"},
+		},
+		{
+			name:       "endpoints' satisfying sets overlap, tgts inside srcs",
+			schema:     "satisfy_plural_edges_overlapping.gql",
+			undirected: "MATCH (a:Person)-[r:REVIEWED]-(b:Employee) RETURN r",
+			directed:   "MATCH (a:Person)-[r:REVIEWED]->(b:Employee) RETURN r",
+			wantKey:    schema.EdgeKey{Source: "Person", KeyLabels: "REVIEWED", Target: "Employee&Person"},
+		},
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			// invalid/ on purpose: the refusal is what the schema is for, so
+			// that is where the one authoritative copy lives.
+			sch := s.loadSchema("invalid", tt.schema)
+
+			parse := func(src string) query.Query {
+				q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+				s.Require().NoError(err)
+				return q
+			}
+
+			_, err := New(sch, WithRegistry(regR7)).Resolve(parse(tt.undirected))
+			s.Require().ErrorIs(err, ErrAmbiguousEdgeOrientation,
+				"the undirected form must be the one that refuses")
+
+			vq, err := New(sch, WithRegistry(regR7)).Resolve(parse(tt.directed))
+			s.Require().NoError(err, "writing the arrow must be a remedy that works")
+			s.Require().Len(vq.Columns, 1)
+			s.Require().Equal(ResolvedEdge{EdgeKey: tt.wantKey}, vq.Columns[0].Type,
+				"the arrow must close the set to one candidate — case B, not a union case D would type")
+		})
+	}
+}
+
 // TestEdgeUnionKeysAreASet asserts ResolvedEdgeUnion.EdgeKeys carries each
 // schema EdgeKey at most once, over the whole valid corpus.
 //
@@ -493,8 +790,9 @@ func collectEdgeUnions(t ResolvedType) []ResolvedEdgeUnion {
 var edgeKeyInMessage = regexp.MustCompile(`[^\s,]+-\[[^\]]+\]->[^\s,]+`)
 
 // TestEdgeFailMessagesListEachTriedKeyOnce holds both edge fail-messages that
-// enumerate EdgeKeys to one entry per key. A message reading "matches both
-// Person-[KNOWS]->Person, Person-[KNOWS]->Person" tells the reader their query
+// enumerate EdgeKeys to one entry per key. A message reading "matches
+// Person-[KNOWS]->Person left-to-right and Person-[KNOWS]->Person
+// right-to-left" tells the reader their query
 // is ambiguous between a thing and itself, and the remedy it prescribes —
 // constrain the endpoints — cannot be followed when the endpoints are already
 // equal. No corpus fixture covers either message on that input: every
