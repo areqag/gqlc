@@ -176,7 +176,7 @@ func renderCypherFile(pkg string, queries []codegen.Query, withDbtype, withTime,
 		if i > 0 {
 			b.WriteString("\n")
 		}
-		fmt.Fprintf(&b, "const %sQueryText = `%s`\n\n", p.Bare, p.SourceText)
+		fmt.Fprintf(&b, "const %s = `%s`\n\n", codegen.QueryTextConst(p), p.SourceText)
 		if len(p.ParamFields) >= 2 {
 			fmt.Fprintf(&b, "type %sParams struct {\n", p.MethodName)
 			for _, f := range p.ParamFields {
@@ -329,7 +329,7 @@ func writeMethod(b *strings.Builder, p codegen.Query) {
 	b.WriteString(" {\n")
 
 	if p.Cardinality == codegen.CardinalityExec {
-		fmt.Fprintf(b, "\t_, err := q.db.run(ctx, %sQueryText, %s, %s)\n", p.Bare, paramsMapText(p), accessModeText(p.IsWrite))
+		fmt.Fprintf(b, "\t_, err := q.db.run(ctx, %s, %s, %s)\n", codegen.QueryTextConst(p), paramsMapText(p), accessModeText(p.IsWrite))
 		b.WriteString("\treturn err\n")
 		b.WriteString("}\n")
 		return
@@ -377,7 +377,7 @@ func writeDocComment(b *strings.Builder, p codegen.Query) {
 // C4 threads the access mode dispatch per Validated.Statement (§5.5);
 // the C1 hardcoded neo4j.AccessModeRead retires.
 func writeRunCall(b *strings.Builder, p codegen.Query) {
-	fmt.Fprintf(b, "\trecords, err := q.db.run(ctx, %sQueryText, %s, %s)\n", p.Bare, paramsMapText(p), accessModeText(p.IsWrite))
+	fmt.Fprintf(b, "\trecords, err := q.db.run(ctx, %s, %s, %s)\n", codegen.QueryTextConst(p), paramsMapText(p), accessModeText(p.IsWrite))
 	fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %s, err\n\t}\n", zeroValueText(p))
 }
 
