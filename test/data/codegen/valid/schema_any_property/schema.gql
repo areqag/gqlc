@@ -1,0 +1,7 @@
+CREATE PROPERTY GRAPH TYPE SchemaAnyProperty AS {
+    (:Event {
+        id      :: INT64 NOT NULL,
+        payload :: ANY VALUE,
+        tag     :: ANY PROPERTY VALUE
+    })
+}

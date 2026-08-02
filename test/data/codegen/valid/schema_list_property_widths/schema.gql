@@ -1,0 +1,9 @@
+CREATE PROPERTY GRAPH TYPE SchemaListPropertyWidths AS {
+    (:Reading {
+        id     :: INT64 NOT NULL,
+        tags   :: LIST<STRING>,
+        ranks  :: LIST<INT32>,
+        flags  :: LIST<BOOL>,
+        matrix :: LIST<LIST<FLOAT32>>
+    })
+}

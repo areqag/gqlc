@@ -115,20 +115,18 @@ func unservedReason(q codegen.NamedQuery) string {
 }
 
 // unservedColumn names why a resolved column type has no decode arm, or
-// "" when it has one. Served are a schema property of scalar width, a
-// bool / integer / float / string expression, and a whole vertex or edge
-// — the last of these because its label and its properties are together
-// enough to fill the entity struct the schema declares. What remains
-// arrives either as a shape whose members the emitted helpers have no
-// declared widths for, or as a value whose shape is not known until it
-// arrives.
+// "" when it has one. Served are a schema property of any width the type
+// table carries — which is every scalar width with an agtype scalar, a
+// list of one at whatever depth, and a property of no declared shape — a
+// bool / integer / float / string expression, and a whole vertex or edge,
+// the last of these because its label and its properties are together
+// enough to fill the entity struct the schema declares. What remains is a
+// width no emitted helper can fill, or an expression the resolver typed
+// as something other than a property.
 func unservedColumn(t resolver.ResolvedType) string {
 	switch ct := t.(type) {
 	case resolver.ResolvedProperty:
-		if ct.Type.Kind() == graph.KindList {
-			return "projects a list property"
-		}
-		if !scalarWidth(ct.Type) {
+		if !carriedWidth(ct.Type) {
 			return "projects " + ct.String()
 		}
 		return ""
@@ -161,25 +159,26 @@ func unservedColumn(t resolver.ResolvedType) string {
 // into the agtype argument, or "" when it can. Parameters reach here as
 // schema properties only — the shared admission phase rejects every
 // other resolved type before emission — so width is the whole question.
+// The argument object is JSON, whose syntax agtype's input function
+// reads, so a width with a Go carrier has an encoding: a slice crosses
+// as an agtype list and a value of no declared shape as whatever shape
+// it holds.
 func unservedParam(t resolver.ResolvedType) string {
 	prop, ok := t.(resolver.ResolvedProperty)
 	if !ok {
 		return "is " + t.String()
 	}
-	if prop.Type.Kind() == graph.KindList {
-		return "is a list"
-	}
-	if !scalarWidth(prop.Type) {
+	if !carriedWidth(prop.Type) {
 		return "is " + prop.String()
 	}
 	return ""
 }
 
-// scalarWidth reports whether a property width lands on a Go scalar the
+// carriedWidth reports whether a property width lands on a Go type the
 // emitted helpers encode and decode. The type table admits exactly those
 // widths, so asking it is the whole check, and asking it here is what
 // keeps the two answers from drifting apart.
-func scalarWidth(pt graph.PropertyType) bool {
+func carriedWidth(pt graph.PropertyType) bool {
 	_, ok := typeMap{}.Property(pt)
 	return ok
 }

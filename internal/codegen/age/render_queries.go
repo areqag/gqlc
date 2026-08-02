@@ -198,18 +198,24 @@ func zeroValueText(p codegen.Query) string {
 	case codegen.ColumnEdgeUnion:
 		return "nil"
 	default:
-		return scalarZeroText(f.GoType)
+		return zeroLiteral(f.GoType)
 	}
 }
 
-// scalarZeroText is the zero literal of a Go scalar the emission
-// produces.
-func scalarZeroText(goType string) string {
+// zeroLiteral is the zero value of a non-entity Go type the emission
+// produces. A slice, an interface and a map are all nil; what is left is
+// a Go scalar, and the numeric widths share a literal.
+func zeroLiteral(goType string) string {
+	if strings.HasPrefix(goType, "[]") {
+		return "nil"
+	}
 	switch goType {
 	case "string":
 		return `""`
 	case "bool":
 		return "false"
+	case "any", "map[string]any":
+		return "nil"
 	default:
 		return "0"
 	}
@@ -541,12 +547,25 @@ func columnDecoder(f codegen.Row) string {
 	if f.Kind == codegen.ColumnNode || f.Kind == codegen.ColumnEdge {
 		return "decode" + f.GoType
 	}
-	return decodeFunc(agtypeCarrier(f.GoType))
+	return decodeFunc(f.GoType)
 }
 
-// decodeFunc names the models.go helper for a carrier type.
-func decodeFunc(carrier string) string {
-	switch carrier {
+// decodeFunc names the models.go helper that decodes one value of an
+// emitted Go type. A slice goes through the named wrapper emitted for
+// it, a type of no declared shape through the agtype value vocabulary,
+// and everything else through the helper for the agtype scalar its
+// carrier is — the caller narrows.
+func decodeFunc(goType string) string {
+	if strings.HasPrefix(goType, "[]") {
+		return listHelperName(goType)
+	}
+	switch goType {
+	case "any":
+		return "agtypeValue"
+	case "map[string]any":
+		return "agtypeMap"
+	}
+	switch agtypeCarrier(goType) {
 	case "bool":
 		return "agtypeBool"
 	case "int64":
