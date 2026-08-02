@@ -65,7 +65,17 @@ func dollarTag(text string) string {
 // declares: one agtype column per projected column, positionally named.
 // The names are positional because a projection's own column name is an
 // expression like p.name, which is not an SQL identifier.
+//
+// A body that projects nothing still declares exactly one agtype column.
+// Measured against AGE 1.7.0: omitting the AS clause is PostgreSQL's "a
+// column definition list is required for functions returning record",
+// writing AS () is a SQL syntax error, and any list that is not a single
+// agtype attribute is AGE's own 42804. One column is the only shape the
+// server accepts, and it yields no rows.
 func recordShape(p codegen.Query) string {
+	if len(p.RowFields) == 0 {
+		return "v0 ag_catalog.agtype"
+	}
 	cols := make([]string, len(p.RowFields))
 	for i := range p.RowFields {
 		cols[i] = fmt.Sprintf("v%d ag_catalog.agtype", i)
@@ -86,7 +96,7 @@ func renderCypherFile(pkg string, queries []codegen.Query) []byte {
 		if i > 0 {
 			b.WriteString("\n")
 		}
-		fmt.Fprintf(&b, "const %sQueryText = `%s`\n\n", p.Bare, p.SourceText)
+		fmt.Fprintf(&b, "const %s = `%s`\n\n", codegen.QueryTextConst(p), p.SourceText)
 		if len(p.ParamFields) >= 2 {
 			fmt.Fprintf(&b, "type %sParams struct {\n", p.MethodName)
 			for _, f := range p.ParamFields {
@@ -130,6 +140,10 @@ func writeMethodSignature(b *strings.Builder, p codegen.Query) {
 		b.WriteString(p.ParamFields[0].GoType)
 	default:
 		fmt.Fprintf(b, ", arg %sParams", p.MethodName)
+	}
+	if p.Cardinality == codegen.CardinalityExec {
+		b.WriteString(") error")
+		return
 	}
 	b.WriteString(") (" + returnTypeText(p) + ", error)")
 }
@@ -207,10 +221,14 @@ func writeMethod(b *strings.Builder, p codegen.Query) {
 	b.WriteString("func (q *Queries) ")
 	writeMethodSignature(b, p)
 	b.WriteString(" {\n")
-	writeQueryCall(b, p)
-	if p.Cardinality == codegen.CardinalityOne {
+	switch p.Cardinality {
+	case codegen.CardinalityExec:
+		writeExecBody(b, p)
+	case codegen.CardinalityOne:
+		writeQueryCall(b, p)
 		writeOneBody(b, p)
-	} else {
+	default:
+		writeQueryCall(b, p)
 		writeManyBody(b, p)
 	}
 	b.WriteString("}\n")
@@ -230,22 +248,73 @@ func writeDocComment(b *strings.Builder, p codegen.Query) {
 	}
 }
 
-// writeQueryCall emits the statement composition, the parameter
-// encoding, and the q.db.Query call every body opens with.
-func writeQueryCall(b *strings.Builder, p codegen.Query) {
-	zero := zeroValueText(p)
-	fmt.Fprintf(b, "\tstmt, err := q.cypherStmt(%q, %sQueryText, %q)\n", dollarTag(p.SourceText), p.Bare, recordShape(p))
-	fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %s, err\n\t}\n", zero)
+// bodyLocal names one local an emitted query body declares, kept clear
+// of the identifier the query text chose. Declaring is not what makes a
+// name vulnerable — resolving it is. The package-level query-text const
+// this file emits is referenced and never declared by a body, and it
+// goes through codegen.QueryTextConst for exactly the same reason.
+func bodyLocal(p codegen.Query, name string) string {
+	return codegen.Unshadowed(p, name)
+}
+
+// failPrefix is what a body's error returns place before the error
+// itself. An :exec method returns error alone and so has nothing before
+// it; every other cardinality returns the zero of its row type first.
+func failPrefix(p codegen.Query) string {
+	if p.Cardinality == codegen.CardinalityExec {
+		return ""
+	}
+	return zeroValueText(p) + ", "
+}
+
+// writeStatement emits the statement composition and the parameter
+// encoding both bodies open with, returning the expression holding the
+// agtype argument object. Shared so a read and a write reach the server
+// through the same composed text and the same bound argument: the graph
+// name is the only thing this backend ever interpolates, and it is
+// escaped and length-checked inside cypherStmt.
+func writeStatement(b *strings.Builder, p codegen.Query) string {
+	fail := failPrefix(p)
+	stmt, errv := bodyLocal(p, "stmt"), bodyLocal(p, "err")
+	fmt.Fprintf(b, "\t%s, %s := q.cypherStmt(%q, %s, %q)\n", stmt, errv, dollarTag(p.SourceText), codegen.QueryTextConst(p), recordShape(p))
+	fmt.Fprintf(b, "\tif %s != nil {\n\t\treturn %s%s\n\t}\n", errv, fail, errv)
 
 	argsExpr := `"{}"`
 	if len(p.ParamFields) > 0 {
-		fmt.Fprintf(b, "\targs, err := agtypeArgs(%s)\n", argsMapText(p))
-		fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %s, err\n\t}\n", zero)
-		argsExpr = "args"
+		args := bodyLocal(p, "args")
+		fmt.Fprintf(b, "\t%s, %s := agtypeArgs(%s)\n", args, errv, argsMapText(p))
+		fmt.Fprintf(b, "\tif %s != nil {\n\t\treturn %s%s\n\t}\n", errv, fail, errv)
+		argsExpr = args
 	}
-	fmt.Fprintf(b, "\trows, err := q.db.Query(ctx, stmt, %s)\n", argsExpr)
-	fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %s, fmt.Errorf(%q, err)\n\t}\n", zero, p.MethodName+": %w")
-	b.WriteString("\tdefer rows.Close()\n")
+	return argsExpr
+}
+
+// writeQueryCall emits the statement composition, the parameter
+// encoding, and the q.db.Query call every decoding body opens with.
+func writeQueryCall(b *strings.Builder, p codegen.Query) {
+	argsExpr := writeStatement(b, p)
+	zero := zeroValueText(p)
+	stmt, rows, errv := bodyLocal(p, "stmt"), bodyLocal(p, "rows"), bodyLocal(p, "err")
+	fmt.Fprintf(b, "\t%s, %s := q.db.Query(ctx, %s, %s)\n", rows, errv, stmt, argsExpr)
+	fmt.Fprintf(b, "\tif %s != nil {\n\t\treturn %s, fmt.Errorf(%q, %s)\n\t}\n", errv, zero, p.MethodName+": %w", errv)
+	fmt.Fprintf(b, "\tdefer %s.Close()\n", rows)
+}
+
+// writeExecBody emits the whole of an :exec method: compose, encode,
+// execute, report. The command tag is discarded rather than reported.
+// Measured against AGE 1.7.0: the tag a cypher() call returns is the
+// enclosing SELECT's, so its RowsAffected counts projected rows and is
+// zero for every write that projects nothing — a CREATE of three
+// vertices and a DELETE that matched none both report "SELECT 0". A
+// count that cannot tell those apart is not a count of anything, and
+// returning error alone is also what keeps this method's signature
+// identical to the one the Neo4j targets emit.
+func writeExecBody(b *strings.Builder, p codegen.Query) {
+	argsExpr := writeStatement(b, p)
+	stmt, errv := bodyLocal(p, "stmt"), bodyLocal(p, "err")
+	fmt.Fprintf(b, "\tif _, %s := q.db.Exec(ctx, %s, %s); %s != nil {\n\t\treturn fmt.Errorf(%q, %s)\n\t}\n",
+		errv, stmt, argsExpr, errv, p.MethodName+": %w", errv)
+	b.WriteString("\treturn nil\n")
 }
 
 // argsMapText composes the map literal agtypeArgs encodes. Keys are the
@@ -274,21 +343,23 @@ func argsMapText(p codegen.Query) string {
 // and reporting it is worth one more round of the cursor.
 func writeOneBody(b *strings.Builder, p codegen.Query) {
 	zero := zeroValueText(p)
-	fmt.Fprintf(b, "\tif !rows.Next() {\n\t\tif err := rows.Err(); err != nil {\n\t\t\treturn %s, fmt.Errorf(%q, err)\n\t\t}\n\t\treturn %s, ErrNoRows\n\t}\n",
-		zero, p.MethodName+": %w", zero)
+	rows, errv := bodyLocal(p, "rows"), bodyLocal(p, "err")
+	fmt.Fprintf(b, "\tif !%s.Next() {\n\t\tif %s := %s.Err(); %s != nil {\n\t\t\treturn %s, fmt.Errorf(%q, %s)\n\t\t}\n\t\treturn %s, ErrNoRows\n\t}\n",
+		rows, errv, rows, errv, zero, p.MethodName+": %w", errv, zero)
 	writeScan(b, p, "\t", zero)
-	fmt.Fprintf(b, "\tif rows.Next() {\n\t\treturn %s, ErrMultipleResults\n\t}\n", zero)
-	fmt.Fprintf(b, "\tif err := rows.Err(); err != nil {\n\t\treturn %s, fmt.Errorf(%q, err)\n\t}\n", zero, p.MethodName+": %w")
+	fmt.Fprintf(b, "\tif %s.Next() {\n\t\treturn %s, ErrMultipleResults\n\t}\n", rows, zero)
+	fmt.Fprintf(b, "\tif %s := %s.Err(); %s != nil {\n\t\treturn %s, fmt.Errorf(%q, %s)\n\t}\n",
+		errv, rows, errv, zero, p.MethodName+": %w", errv)
 	for i, f := range p.RowFields {
 		writeColumnDecode(b, p, i, f, "\t", zero)
 	}
 	if len(p.RowFields) == 1 {
-		fmt.Fprintf(b, "\treturn %s, nil\n", valueExpr(0, p.RowFields[0]))
+		fmt.Fprintf(b, "\treturn %s, nil\n", valueExpr(p, 0, p.RowFields[0]))
 		return
 	}
 	fmt.Fprintf(b, "\treturn %sRow{\n", p.MethodName)
 	for i, f := range p.RowFields {
-		fmt.Fprintf(b, "\t\t%s: %s,\n", f.Field, valueExpr(i, f))
+		fmt.Fprintf(b, "\t\t%s: %s,\n", f.Field, valueExpr(p, i, f))
 	}
 	b.WriteString("\t}, nil\n")
 }
@@ -297,24 +368,26 @@ func writeOneBody(b *strings.Builder, p codegen.Query) {
 // return. The slice is allocated empty rather than left nil so a query
 // that matched nothing returns the same shape as one that matched.
 func writeManyBody(b *strings.Builder, p codegen.Query) {
-	fmt.Fprintf(b, "\tout := make([]%s, 0)\n", rowElemText(p))
-	b.WriteString("\tfor rows.Next() {\n")
+	out, rows, errv := bodyLocal(p, "out"), bodyLocal(p, "rows"), bodyLocal(p, "err")
+	fmt.Fprintf(b, "\t%s := make([]%s, 0)\n", out, rowElemText(p))
+	fmt.Fprintf(b, "\tfor %s.Next() {\n", rows)
 	writeScan(b, p, "\t\t", "nil")
 	for i, f := range p.RowFields {
 		writeColumnDecode(b, p, i, f, "\t\t", "nil")
 	}
 	if len(p.RowFields) == 1 {
-		fmt.Fprintf(b, "\t\tout = append(out, %s)\n", valueExpr(0, p.RowFields[0]))
+		fmt.Fprintf(b, "\t\t%s = append(%s, %s)\n", out, out, valueExpr(p, 0, p.RowFields[0]))
 	} else {
-		fmt.Fprintf(b, "\t\tout = append(out, %sRow{\n", p.MethodName)
+		fmt.Fprintf(b, "\t\t%s = append(%s, %sRow{\n", out, out, p.MethodName)
 		for i, f := range p.RowFields {
-			fmt.Fprintf(b, "\t\t\t%s: %s,\n", f.Field, valueExpr(i, f))
+			fmt.Fprintf(b, "\t\t\t%s: %s,\n", f.Field, valueExpr(p, i, f))
 		}
 		b.WriteString("\t\t})\n")
 	}
 	b.WriteString("\t}\n")
-	fmt.Fprintf(b, "\tif err := rows.Err(); err != nil {\n\t\treturn nil, fmt.Errorf(%q, err)\n\t}\n", p.MethodName+": %w")
-	b.WriteString("\treturn out, nil\n")
+	fmt.Fprintf(b, "\tif %s := %s.Err(); %s != nil {\n\t\treturn nil, fmt.Errorf(%q, %s)\n\t}\n",
+		errv, rows, errv, p.MethodName+": %w", errv)
+	fmt.Fprintf(b, "\treturn %s, nil\n", out)
 }
 
 // writeScan emits the row scan. Every column lands in a []byte because
@@ -322,37 +395,45 @@ func writeManyBody(b *strings.Builder, p codegen.Query) {
 // agtype's text is never empty, so a nil slice is the null and nothing
 // else is.
 func writeScan(b *strings.Builder, p codegen.Query, indent, zero string) {
+	rows, errv := bodyLocal(p, "rows"), bodyLocal(p, "err")
 	targets := make([]string, len(p.RowFields))
 	for i := range p.RowFields {
-		fmt.Fprintf(b, "%svar %s []byte\n", indent, rawName(i))
-		targets[i] = "&" + rawName(i)
+		fmt.Fprintf(b, "%svar %s []byte\n", indent, rawName(p, i))
+		targets[i] = "&" + rawName(p, i)
 	}
-	fmt.Fprintf(b, "%sif err := rows.Scan(%s); err != nil {\n%s\treturn %s, fmt.Errorf(%q, err)\n%s}\n",
-		indent, strings.Join(targets, ", "), indent, zero, p.MethodName+": scan row: %w", indent)
+	fmt.Fprintf(b, "%sif %s := %s.Scan(%s); %s != nil {\n%s\treturn %s, fmt.Errorf(%q, %s)\n%s}\n",
+		indent, errv, rows, strings.Join(targets, ", "), errv, indent, zero, p.MethodName+": scan row: %w", errv, indent)
 }
 
 // rawName is the scan target for the column at index i.
-func rawName(i int) string { return fmt.Sprintf("raw%d", i) }
+func rawName(p codegen.Query, i int) string { return bodyLocal(p, fmt.Sprintf("raw%d", i)) }
 
 // valueName is the decoded local at index i — a projected column in a
 // query method, a property in an entity decoder. Every local an emitted
 // body declares is positional: a name taken from the query text or the
 // schema is any Go identifier the author chose, including one the body
-// already holds.
+// already holds. Positional is not on its own enough in a query body,
+// where the signature can carry an identifier from the same text —
+// $value0 is a parameter an author may write — so a query body takes
+// its columns through columnName rather than through this directly.
 func valueName(i int) string { return fmt.Sprintf("value%d", i) }
+
+// columnName is valueName for a query body, kept clear of the
+// identifier that body's signature took from the query text.
+func columnName(p codegen.Query, i int) string { return bodyLocal(p, valueName(i)) }
 
 // labelName is the local holding the label read off the column at index
 // i, positional so it matches its scan target.
-func labelName(i int) string { return fmt.Sprintf("label%d", i) }
+func labelName(p codegen.Query, i int) string { return bodyLocal(p, fmt.Sprintf("label%d", i)) }
 
 // valueExpr is what a column contributes to the returned row. A narrow
 // width rides its wide carrier through the decode and converts here; a
 // nullable column already holds a pointer of the declared width.
-func valueExpr(i int, f codegen.Row) string {
+func valueExpr(p codegen.Query, i int, f codegen.Row) string {
 	if !f.Nullable && agtypeCarrier(f.GoType) != f.GoType {
-		return f.GoType + "(" + valueName(i) + ")"
+		return f.GoType + "(" + columnName(p, i) + ")"
 	}
-	return valueName(i)
+	return columnName(p, i)
 }
 
 // writeColumnDecode emits one column's null handling and decode. A
@@ -364,26 +445,27 @@ func writeColumnDecode(b *strings.Builder, p codegen.Query, idx int, f codegen.R
 		writeEdgeUnionDecode(b, p, idx, f, indent, zero)
 		return
 	}
-	raw, value := rawName(idx), valueName(idx)
+	raw, value := rawName(p, idx), columnName(p, idx)
+	errv, decoded, narrowed := bodyLocal(p, "err"), bodyLocal(p, "decoded"), bodyLocal(p, "narrowed")
 	decodeErr := fmt.Sprintf("%s: decode column %%q: %%w", p.MethodName)
 
 	if !f.Nullable {
 		writeNonNullGate(b, p, f, raw, indent, zero)
-		fmt.Fprintf(b, "%s%s, err := %s(%s)\n", indent, value, columnDecoder(f), raw)
-		fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(%q, %q, err)\n%s}\n",
-			indent, indent, zero, decodeErr, f.ColumnName, indent)
+		fmt.Fprintf(b, "%s%s, %s := %s(%s)\n", indent, value, errv, columnDecoder(f), raw)
+		fmt.Fprintf(b, "%sif %s != nil {\n%s\treturn %s, fmt.Errorf(%q, %q, %s)\n%s}\n",
+			indent, errv, indent, zero, decodeErr, f.ColumnName, errv, indent)
 		return
 	}
 
 	fmt.Fprintf(b, "%svar %s *%s\n", indent, value, f.GoType)
 	fmt.Fprintf(b, "%sif %s != nil {\n", indent, raw)
-	fmt.Fprintf(b, "%s\tdecoded, err := %s(%s)\n", indent, columnDecoder(f), raw)
-	fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\treturn %s, fmt.Errorf(%q, %q, err)\n%s\t}\n",
-		indent, indent, zero, decodeErr, f.ColumnName, indent)
+	fmt.Fprintf(b, "%s\t%s, %s := %s(%s)\n", indent, decoded, errv, columnDecoder(f), raw)
+	fmt.Fprintf(b, "%s\tif %s != nil {\n%s\t\treturn %s, fmt.Errorf(%q, %q, %s)\n%s\t}\n",
+		indent, errv, indent, zero, decodeErr, f.ColumnName, errv, indent)
 	if carrier := agtypeCarrier(f.GoType); carrier != f.GoType {
-		fmt.Fprintf(b, "%s\tnarrowed := %s(decoded)\n%s\t%s = &narrowed\n", indent, f.GoType, indent, value)
+		fmt.Fprintf(b, "%s\t%s := %s(%s)\n%s\t%s = &%s\n", indent, narrowed, f.GoType, decoded, indent, value, narrowed)
 	} else {
-		fmt.Fprintf(b, "%s\t%s = &decoded\n", indent, value)
+		fmt.Fprintf(b, "%s\t%s = &%s\n", indent, value, decoded)
 	}
 	fmt.Fprintf(b, "%s}\n", indent)
 }
@@ -394,7 +476,8 @@ func writeColumnDecode(b *strings.Builder, p codegen.Query, idx int, f codegen.R
 // candidate set fails the row, because the sealed interface has no
 // member to carry it.
 func writeEdgeUnionDecode(b *strings.Builder, p codegen.Query, idx int, f codegen.Row, indent, zero string) {
-	raw, value, label := rawName(idx), valueName(idx), labelName(idx)
+	raw, value, label := rawName(p, idx), columnName(p, idx), labelName(p, idx)
+	errv, decoded := bodyLocal(p, "err"), bodyLocal(p, "decoded")
 	decodeErr := fmt.Sprintf("%s: decode column %%q: %%w", p.MethodName)
 
 	fmt.Fprintf(b, "%svar %s %s\n", indent, value, f.GoType)
@@ -406,16 +489,16 @@ func writeEdgeUnionDecode(b *strings.Builder, p codegen.Query, idx int, f codege
 		writeNonNullGate(b, p, f, raw, indent, zero)
 	}
 
-	fmt.Fprintf(b, "%s%s, _, err := agtypeEntity(%s, %q)\n", body, label, raw, edgeAnnotation)
-	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(%q, %q, err)\n%s}\n",
-		body, body, zero, decodeErr, f.ColumnName, body)
+	fmt.Fprintf(b, "%s%s, _, %s := agtypeEntity(%s, %q)\n", body, label, errv, raw, edgeAnnotation)
+	fmt.Fprintf(b, "%sif %s != nil {\n%s\treturn %s, fmt.Errorf(%q, %q, %s)\n%s}\n",
+		body, errv, body, zero, decodeErr, f.ColumnName, errv, body)
 	fmt.Fprintf(b, "%sswitch %s {\n", body, label)
 	for i, ek := range f.EdgeKeys {
 		fmt.Fprintf(b, "%scase %q:\n", body, string(ek.KeyLabels))
-		fmt.Fprintf(b, "%s\tdecoded, err := decode%s(%s)\n", body, edgeKeyToEntityName(p, f, i), raw)
-		fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\treturn %s, fmt.Errorf(%q, %q, err)\n%s\t}\n",
-			body, body, zero, decodeErr, f.ColumnName, body)
-		fmt.Fprintf(b, "%s\t%s = decoded\n", body, value)
+		fmt.Fprintf(b, "%s\t%s, %s := decode%s(%s)\n", body, decoded, errv, edgeKeyToEntityName(p, f, i), raw)
+		fmt.Fprintf(b, "%s\tif %s != nil {\n%s\t\treturn %s, fmt.Errorf(%q, %q, %s)\n%s\t}\n",
+			body, errv, body, zero, decodeErr, f.ColumnName, errv, body)
+		fmt.Fprintf(b, "%s\t%s = %s\n", body, value, decoded)
 	}
 	fmt.Fprintf(b, "%sdefault:\n%s\treturn %s, fmt.Errorf(%q, %q, %s)\n%s}\n",
 		body, body, zero, fmt.Sprintf("%s: column %%q: unexpected edge label %%q", p.MethodName),

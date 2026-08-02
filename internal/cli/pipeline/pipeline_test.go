@@ -41,9 +41,19 @@ const (
 	// whole vocabulary against a single project.
 	fixtureQuery = "// name: AllPersonNames :many\nMATCH (p:Person) RETURN p.name\n"
 
-	// writeQuery mutates the graph, which the Apache AGE backend has
-	// no emission for.
-	writeQuery = "// name: WipePersons :exec\nMATCH (p:Person) DETACH DELETE p\n"
+	// listSchema and listQuery project a list property, which the Apache
+	// AGE backend has no decode arm for. The list lives on a schema of
+	// its own rather than on fixtureSchema, because every target shares
+	// that one and a list on it would fail the AGE arm of the driver
+	// axis too.
+	listSchema = `CREATE PROPERTY GRAPH TYPE People AS {
+    (:Person {
+        id   :: INT64 NOT NULL,
+        tags :: LIST<STRING>
+    })
+}
+`
+	listQuery = "// name: PersonTags :one\nMATCH (p:Person) RETURN p.tags AS tags\n"
 
 	// The second target's schema declares a label the first one does
 	// not, so a query written against either fails against the other —
@@ -243,13 +253,14 @@ func TestRunDriverAxis(t *testing.T) {
 // without reading the message.
 func TestRunApacheAgeRejectionIsASentinel(t *testing.T) {
 	dir, cfgPath := writeProject(t)
-	writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), writeQuery)
+	writeFixtureFile(t, filepath.Join(dir, "schema.gql"), listSchema)
+	writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), listQuery)
 	writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverApacheAgePgxV5), ""))
 
 	res, err := pipeline.Run(cfgPath, backendRegistry(t))
 	require.ErrorIs(t, err, age.ErrUnsupportedQuery)
 	require.ErrorContains(t, err, "graph[0]: unsupported query: ")
-	require.ErrorContains(t, err, `1 query would be dropped: WipePersons (writes to the graph)`)
+	require.ErrorContains(t, err, `1 query would be dropped: PersonTags (column "tags" projects a list property)`)
 	require.Equal(t, pipeline.Result{}, res)
 }
 
