@@ -504,7 +504,7 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 	if len(p.RowFields) > 1 {
 		for i, r := range p.RowFields {
 			if r.ColumnName == f.ColumnName && r.Field == f.Field {
-				varName = fmt.Sprintf("value%d", i)
+				varName = valueName(i)
 				break
 			}
 		}
@@ -560,6 +560,11 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 	b.WriteString(valueExpr)
 	b.WriteString(assignSuffix)
 }
+
+// valueName is the decoded local at position i. Positional, and so the
+// generator's own: no identifier a schema or a query text chose reaches
+// a body's scope through one.
+func valueName(i int) string { return fmt.Sprintf("value%d", i) }
 
 // writeAnyColumnDecodeIndent emits the record.Get lane for a column
 // whose emitted Go type is `any` — ResolvedUnknown or ResolvedScalar
