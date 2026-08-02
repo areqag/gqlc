@@ -137,8 +137,16 @@ func LowerFirstRune(s string) string {
 const ParamArg = "arg"
 
 // QueryTextConst names the package-level const holding a query's source
-// text. Derived from the method name, which the author declares in the
-// //  name: annotation and which is already unique across the package.
+// text, derived from the method name the author declares in the
+// //  name: annotation.
+//
+// Method names are unique across the package; the names derived from them
+// are not. This one lands in the unexported namespace the decode<Entity>
+// helpers occupy, and those derive from schema labels rather than from
+// method names, so the two can meet: a node label FooQueryText alongside
+// a query named DecodeFoo emits decodeFooQueryText as both a const and a
+// func. The const is off sweepIdentifiers, so generation exits 0 and the
+// redeclaration surfaces at go build.
 func QueryTextConst(p Query) string {
 	return p.Bare + "QueryText"
 }
