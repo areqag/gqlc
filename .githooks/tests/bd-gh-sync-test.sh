@@ -405,6 +405,36 @@ hostile_case "gh fields null" \
     "[{\"id\":\"b-n\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"a\"}]" \
     '[{"number":1,"state":null,"body":null}]'
 
+# Batching exists because --issues travels on argv and execve caps a single
+# argument at 128KB, so it has to survive an allowlist bigger than one batch:
+# every id passed exactly once, no id invented, and the count reported equal to
+# the count sent. Hand-rolled since xargs parses quotes, which means nothing
+# else checks the arithmetic.
+run_sync pull \
+    "$(python3 -c '
+import json
+print(json.dumps([{"id": "b-%03d" % i, "status": "open",
+                   "external_ref": "https://github.com/org/r/issues/%d" % i,
+                   "description": "d"} for i in range(250)]))')" \
+    "$(python3 -c '
+import json
+print(json.dumps([{"number": i, "state": "OPEN", "body": "d\nadded on GH"}
+                  for i in range(250)]))')"
+if [ "$(sync_batches)" -ne 3 ]; then
+    bad "an allowlist past one batch is split, not truncated" \
+        "$(sync_batches) batches for 250 ids at 100 per batch"
+elif [ "$(scoped_ids | sort -u | wc -l)" -ne 250 ]; then
+    bad "an allowlist past one batch is split, not truncated" \
+        "$(scoped_ids | sort -u | wc -l) distinct ids reached --issues"
+elif [ "$(scoped_ids | wc -l)" -ne 250 ]; then
+    bad "an allowlist past one batch is split, not truncated" \
+        "$(scoped_ids | wc -l) ids sent — some were sent twice"
+elif [ "$(last_line)" != "bd-gh-sync: pulled 250 bead(s), held 0, left 0 unmirrored GH issue(s) alone." ]; then
+    bad "an allowlist past one batch is split, not truncated" "got: $(last_line)"
+else
+    ok "250 eligible beads are split into 3 batches, each id sent once"
+fi
+
 # --- gqlc-63y: the payload must survive execve -------------------------------
 # The shipped guard died with "Argument list too long" on ~1MB of beads because
 # it passed them in the environment. execve caps any single argument or
@@ -600,6 +630,17 @@ fi
 # keeps.
 
 GH7='[{"number":7,"state":"OPEN","body":"same"}]'
+
+# The detector needs two snapshots, and a `bd list` deduplicated away for
+# performance would disarm it without changing a line of the comparison. Pin
+# the call count.
+run_sync pull "[$CLAIMED]" "$GH7" '[]' "[$CLAIMED]"
+if [ "$(grep -c 'bd list' "$TMP/calls")" -eq 2 ]; then
+    ok "the pull takes a before and an after snapshot of the bead list"
+else
+    bad "the pull takes a before and an after snapshot of the bead list" \
+        "$(grep -c 'bd list' "$TMP/calls") 'bd list' call(s)"
+fi
 
 # The control: same fixture, healthy second snapshot, nothing moved. The blind
 # notice must not be a thing that just always prints.
