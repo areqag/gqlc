@@ -103,5 +103,7 @@
     "plural_endpoint_whole_entity_after_edge_closure.cypher": "satisfy_plural_edges_reversed.gql",
     "ambiguous_edge_orientation_plural_endpoints.cypher": "satisfy_plural_edges_reversed.gql",
     "ambiguous_edge_orientation_reversed_subtype.cypher": "satisfy_plural_edges_reversed_subtype.gql",
-    "ambiguous_edge_orientation_reversed_subtype_property.cypher": "satisfy_plural_edges_reversed_subtype.gql"
+    "ambiguous_edge_orientation_reversed_subtype_property.cypher": "satisfy_plural_edges_reversed_subtype.gql",
+    "ambiguous_edge_orientation_overlapping_endpoints.cypher": "satisfy_plural_edges_overlapping.gql",
+    "ambiguous_edge_orientation_overlapping_endpoints_reversed.cypher": "satisfy_plural_edges_overlapping.gql"
 }

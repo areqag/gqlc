@@ -323,6 +323,26 @@ var invalidFixtures = map[string]error{
 	// property form (below) is caught by nothing and generates compiling code.
 	"ambiguous_edge_orientation_reversed_subtype.cypher":          ErrAmbiguousEdgeOrientation,
 	"ambiguous_edge_orientation_reversed_subtype_property.cypher": ErrAmbiguousEdgeOrientation,
+	// The two endpoints' satisfying sets OVERLAP — one is a strict subset of
+	// the other — which is the ordinary shape of a subtype schema and the shape
+	// ADR 0022 exists to serve. Classifying a candidate by its Source alone
+	// then reads every candidate as sitting on both sides of the pattern, so
+	// none is ever classified forward and the disagreement cannot be reported;
+	// these two are the exact mirror {A,L,B}/{B,L,A} that the *narrowest*
+	// possible guard catches, admitted by a broader one. Neither is reachable
+	// by the corpus that shipped before them: every other undirected fixture
+	// runs between endpoint sets that are equal or disjoint.
+	//
+	// Both subset directions are here because they classify different
+	// candidates as the forward witness, so they pin the witness order (§4.4)
+	// as well as the verdict — see invalidFixtureContains.
+	//
+	// Property projection, not whole-entity: `RETURN r` is bounced one stage
+	// later by codegen.ErrUnrepresentableEdgeUnion, and `RETURN r.rating`
+	// reaches nothing that objects (§4.6.1). The property form is the one that
+	// generates silently wrong code if this verdict is lost.
+	"ambiguous_edge_orientation_overlapping_endpoints.cypher":          ErrAmbiguousEdgeOrientation,
+	"ambiguous_edge_orientation_overlapping_endpoints_reversed.cypher": ErrAmbiguousEdgeOrientation,
 }
 
 // invalidFixtureContains pins the message arm for fixtures where errors.Is
@@ -353,6 +373,13 @@ var invalidFixtureContains = map[string]string{
 	// sides, so it cannot be produced by a mirror test.
 	"ambiguous_edge_orientation_reversed_subtype.cypher":          `matches both Author-[REVIEWED]->Book, Book-[REVIEWED]->Author&Editor`,
 	"ambiguous_edge_orientation_reversed_subtype_property.cypher": `matches both Author-[REVIEWED]->Book, Book-[REVIEWED]->Author&Editor`,
+	// The same two keys in both fixtures, on one schema, reported in opposite
+	// orders: which candidate is the left-to-right witness is decided by the
+	// pattern's endpoints and not by the schema's declaration order, so the two
+	// pins together say the message is read off the query rather than the
+	// candidate list.
+	"ambiguous_edge_orientation_overlapping_endpoints.cypher":          `matches both Employee&Person-[REVIEWED]->Person, Person-[REVIEWED]->Employee&Person`,
+	"ambiguous_edge_orientation_overlapping_endpoints_reversed.cypher": `matches both Person-[REVIEWED]->Employee&Person, Employee&Person-[REVIEWED]->Person`,
 }
 
 type ResolverSuite struct {

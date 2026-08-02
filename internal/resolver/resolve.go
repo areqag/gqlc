@@ -613,13 +613,15 @@ func closeEdge(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey, s schema.Sch
 // keys the pattern puts on the left and on the right, the same slices the
 // candidates were enumerated from.
 //
-// Each candidate is classified by where its Source key came from: a Source
-// drawn from srcs runs left-to-right, a Source drawn from tgts runs
-// right-to-left. Both classes non-empty means the schema declares this edge
-// type running both ways across the pattern, and an undirected pattern carries
-// nothing that says which was meant — that is exactly what
-// ErrAmbiguousEdgeOrientation names, and writing the arrow is a remedy that
-// works, because a directed close drops one of the two classes entirely.
+// Each candidate is classified by *both* its endpoints, against both endpoint
+// slices. A candidate reads left-to-right when its Source is a key the pattern
+// puts on the left and its Target one it puts on the right; right-to-left when
+// the same holds with the slices exchanged. Both classes non-empty means the
+// schema declares this edge type running both ways across the pattern, and an
+// undirected pattern carries nothing that says which was meant — that is
+// exactly what ErrAmbiguousEdgeOrientation names, and writing the arrow is a
+// remedy that works, because a directed close drops one of the two classes
+// entirely.
 //
 // Candidate-set size alone stopped being this question once a node binding
 // could satisfy several declared types (ADR 0022): plural endpoints multiply
@@ -630,9 +632,19 @@ func closeEdge(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey, s schema.Sch
 // the two candidates cross the pattern in opposite directions while being
 // nobody's mirror.
 //
-// A candidate whose Source sits on both sides of the pattern carries no
-// orientation signal and is skipped — a self-loop, or endpoints whose
-// satisfying types overlap, read the same either way.
+// A candidate that reads both ways carries no orientation signal and is
+// skipped: a self-loop key, or any key whose Source and Target each satisfy
+// both of the pattern's endpoints, is its own counterparty, and reading it as a
+// disagreement would name one key twice.
+//
+// Classifying on the Source alone is not that test and is strictly weaker. When
+// the endpoints' satisfying sets overlap without being equal — an (:Employee)
+// endpoint against a (:Person) one, the ordinary shape of a subtype schema —
+// every candidate Source can sit in both slices while the Targets still
+// separate the two readings, and a Source-only skip exempts the whole schema
+// from the check. Corpus:
+// invalid/ambiguous_edge_orientation_overlapping_endpoints and its _reversed
+// twin, which cover both subset directions.
 //
 // Only candidates carrying the same label are compared. Two *different* edge
 // types running opposite ways is the multi-type union of §4.6 case D, and the
@@ -647,13 +659,18 @@ func orientationDisagreement(cands []schema.EdgeKey, srcs, tgts []graph.LabelSet
 		fwd, rev       schema.EdgeKey
 		hasFwd, hasRev bool
 	}
+	readsFwd := func(k schema.EdgeKey) bool {
+		return slices.Contains(srcs, k.Source) && slices.Contains(tgts, k.Target)
+	}
+	readsRev := func(k schema.EdgeKey) bool {
+		return slices.Contains(tgts, k.Source) && slices.Contains(srcs, k.Target)
+	}
 	byLabel := make(map[graph.LabelSetKey]*sides, len(cands))
 	for _, k := range cands {
-		onLeft := slices.Contains(srcs, k.Source)
-		onRight := slices.Contains(tgts, k.Source)
-		// Equal means either both (no orientation signal) or neither, which
-		// edgeProbes cannot produce — every candidate Source is drawn from one
-		// of the two slices.
+		onLeft, onRight := readsFwd(k), readsRev(k)
+		// Equal means either both readings hold (no orientation signal) or
+		// neither, which edgeProbes cannot produce — every candidate comes from
+		// an (src, tgt) pair drawn from the two slices in one order or the other.
 		if onLeft == onRight {
 			continue
 		}
