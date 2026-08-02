@@ -110,7 +110,14 @@ linters:
         # per type, so ireturn keeps full strength on the rest of that module.
         # The `_test` suffix is the package path of an external test package,
         # which is what the battery has to be for govulncheck to scan what it
-        # imports (bd gqlc-rohp) — not a typo.
+        # imports (bd gqlc-rohp) — not a typo, and not optional: without it the
+        # allowlist matches nothing and the fence fails with 22 ireturn issues.
+        # That coupling is why test-codegen-fence runs its packaging guard
+        # before golangci-lint. Reverting the battery to `package fixtures`
+        # breaks this regex too, so with the linter first the developer saw an
+        # ireturn failure and the guard never spoke — the allowlist was doing
+        # the guard's job by accident, and only for as long as these eight
+        # interface types exist.
         - github.com/areqag/gqlc/test/data/codegen_test\.(harness|backend|writeBackend|oneColOneParamOneQuerier|manyColManyQuerier|mixedReadWriteBatchQuerier|entityNodeQuerier|entityEdgeQuerier)$
     misspell:
       # the codebase is written in British English (see CONTEXT.md: canonicalised,
