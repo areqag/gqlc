@@ -179,10 +179,14 @@ PYEOF
   _rc=$?
 
   if [ "$_rc" -ne 0 ] || [ "$(tail -n 1 "$_tmp/plan.txt" 2>/dev/null)" != "DONE" ]; then
-    echo "bd-gh-sync: SKIPPING pull — could not decide which beads are safe to pull." >&2
+    # Detail first, verdict last. This is the one exit that produces no summary
+    # line, so the refusal itself has to be what a `tail -1` caller keeps —
+    # echoing the traceback below it handed .claude/settings.json a bare
+    # JSONDecodeError and no hint that a pull had been refused at all.
+    sed 's/^/bd-gh-sync:   /' "$_tmp/plan.err" >&2 2>/dev/null
     echo "bd-gh-sync: selection exited ${_rc}; an unscoped pull would let GitHub" >&2
     echo "bd-gh-sync: overwrite local state it cannot represent. Refusing." >&2
-    sed 's/^/bd-gh-sync:   /' "$_tmp/plan.err" >&2 2>/dev/null
+    echo "bd-gh-sync: SKIPPING pull — could not decide which beads are safe to pull." >&2
     exit 0
   fi
 

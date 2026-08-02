@@ -339,6 +339,21 @@ else
     ok "unreadable bead payload blocks the pull and says so"
 fi
 
+# ...on the line the caller keeps. The python traceback was echoed *below* the
+# verdict, so `tail -1` in .claude/settings.json got
+# `json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)` and
+# the session started with no idea the pull had been refused. Detail first,
+# verdict last: this is the only bail-out that produces no summary line.
+case "$(last_line)" in
+    *"SKIPPING pull"*) ok "the refusal is the last line a tail -1 caller keeps" ;;
+    *) bad "the refusal is the last line a tail -1 caller keeps" "got: $(last_line)" ;;
+esac
+if ! grep -q 'JSONDecodeError' "$TMP/err"; then
+    bad "the underlying error is still on stderr" "the traceback was dropped"
+else
+    ok "the selection's own error is still reported, above the verdict"
+fi
+
 run_sync pull "[{\"id\":\"b-1\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"x\"}]" 'not json either'
 if pull_ran; then
     bad "unreadable GH payload blocks the pull" "the pull ran anyway"
