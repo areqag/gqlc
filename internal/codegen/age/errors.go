@@ -8,6 +8,7 @@ import (
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/resolver"
+	"github.com/areqag/gqlc/internal/schema"
 )
 
 // ErrUnsupportedQuery is returned when a batch carries a query this
@@ -115,29 +116,104 @@ func unservedReason(q codegen.NamedQuery) string {
 }
 
 // edgeUnionReason is why an edge column with more than one candidate is
-// not served. It is the one refusal here that is not about the wire: the
-// candidates carry distinct labels — shared admission refuses the ones
-// that do not (codegen.ErrUnrepresentableEdgeUnion) — so an agtype edge
-// value would tell a dispatch which candidate it is. What fails is the
+// not served, or "" when the reason is not this backend's to give. It is
+// the one refusal here that is not about the wire: an agtype edge carries
+// its label spelled exactly as the schema spells it, so a dispatch on
+// that label would pick the right candidate. What fails is the
 // statement, before any value exists to decode.
 //
-// A binding with more than one candidate is reachable in openCypher only
-// through a relationship-type alternation: oC_RelationshipTypes admits a
-// second type after '|' and nowhere else, and with one type in the
-// pattern every candidate the closure yields carries that same label, so
-// the union is either singular or already refused for a shared label.
-// Apache AGE 1.7.0 has no '|' in its relationship detail — it answers
-// `-[r:AUTHORED|LIKES]->` with `ERROR: syntax error at or near "|"`,
-// SQLSTATE 42601, whatever surrounds the pattern (verified against the
-// image test/data/codegen pins; TestAGERefusesRelationshipTypeAlternation
-// re-measures it on every live run and fails when it stops holding).
+// Which half applies is read off the candidates, because that is what
+// says which pattern the author wrote. A refusal has to describe the
+// query in front of it, and a single sentence about '|' printed over
+// both halves was false of the second.
 //
-// Generated code runs the author's query text verbatim (ADR 0005), so
-// emitting for such a column would produce a package that compiles and
-// whose every call fails at the server. Refusing here is what turns that
-// into an answer the author gets from `gqlc generate`.
-const edgeUnionReason = "binds to more than one candidate edge type, which openCypher expresses only " +
-	"as a relationship-type alternation and Apache AGE's parser refuses"
+// Candidates carrying DISTINCT labels can only have come from a pattern
+// naming more than one relationship type, and openCypher writes that
+// exactly one way. Cypher.g4's oC_RelationshipTypes admits a second type
+// only after '|', and a re-bound relationship variable's occurrences
+// intersect rather than accumulate (internal/query/cypher/pattern.go), so
+// no run of single-type occurrences widens one either. Apache AGE 1.7.0
+// has no '|' in its relationship detail — it answers such a pattern with
+// `ERROR: syntax error at or near "|"`, SQLSTATE 42601, whatever
+// surrounds it (verified against the image test/data/codegen pins;
+// TestAGERefusesRelationshipTypeAlternation re-measures it on every live
+// run and fails when it stops holding). Generated code runs the author's
+// query text verbatim (ADR 0005), so emitting for the column would
+// produce a package that compiles and whose every call is a server-side
+// syntax error. Refusing here turns that into an answer the author gets
+// from `gqlc generate`.
+//
+// Candidates SHARING a label are a different failure and not this
+// backend's. The pattern that produces them names one relationship type
+// whose endpoints the schema satisfies more than one way (ADR 0022) —
+// `(p:Person)-[r:FOUNDED]-(c:Company)`, with no alternation anywhere —
+// and Apache AGE parses it as readily as any other server. What defeats
+// it is that an edge value carries its label and its properties and never
+// its endpoint types, which is true on every backend alike and is what
+// codegen.ErrUnrepresentableEdgeUnion says. Standing aside lets that
+// answer through instead of overwriting it with a claim about '|' the
+// author's query does not contain.
+//
+// The split is read off the resolved candidates and never off the query
+// text, because '|' is not a witness to anything on its own: Cypher.g4
+// spells it in three productions — oC_RelationshipTypes (line 255),
+// the list/filter comprehension (395) and the pattern comprehension
+// (398) — so `[x IN xs | x.n]` carries one and names no relationship
+// type, and a scan for the character would refuse it. Candidate labels
+// are downstream of the parse and say which production ran.
+//
+// Nothing after this point catches a re-admission. Loosening the gate
+// compile-validly leaves `gqlc generate` exiting 0 over Go that does not
+// build: this package emits no sealed interface and no marker method for
+// the column (render_models.go, writeEntities), so the querier references
+// a type nothing declares. The corpus cannot see it either — the fence
+// module compiles goldens, and with AGE un-enrolled from every
+// edge_union_* fixture there is no AGE golden here to compile. What
+// holds the refusal instead is the refusal itself, asserted at three
+// seams: TestRejectsEdgeUnionColumns and TestRejectsQueriesItCannotServe
+// on the gate, and TestRunApacheAgeRefusesEdgeUnions through the CLI.
+// Restoring the emission means restoring a golden with it, or the
+// compile fence stays out of reach.
+func edgeUnionReason(u resolver.ResolvedEdgeUnion) string {
+	labels := distinctEdgeLabels(u.EdgeKeys)
+	// A duplicate label, or a candidate count the resolver never emits,
+	// belongs to shared admission: it refuses both and names the pair or
+	// the invariant, which this gate has nothing to add to.
+	if len(u.EdgeKeys) < 2 || len(labels) != len(u.EdgeKeys) {
+		return ""
+	}
+	return fmt.Sprintf(
+		`names relationship types %s, which openCypher writes only as the alternation %q — `+
+			`Apache AGE 1.7.0's parser has no "|" in a relationship pattern and answers it with `+
+			`%q (SQLSTATE 42601)`,
+		formatLabelList(labels), ":"+strings.Join(labels, "|"), `syntax error at or near "|"`)
+}
+
+// distinctEdgeLabels is the candidates' edge labels in candidate order —
+// which is probe order, which is the order the pattern names them (R3
+// §4.4) — with repeats dropped so the caller can compare the count
+// against the candidate count.
+func distinctEdgeLabels(keys []schema.EdgeKey) []string {
+	out := make([]string, 0, len(keys))
+	seen := make(map[graph.LabelSetKey]struct{}, len(keys))
+	for _, k := range keys {
+		if _, dup := seen[k.KeyLabels]; dup {
+			continue
+		}
+		seen[k.KeyLabels] = struct{}{}
+		out = append(out, string(k.KeyLabels))
+	}
+	return out
+}
+
+// formatLabelList renders a label list as English prose: "A and B",
+// "A, B and C". Callers reach it with at least two.
+func formatLabelList(labels []string) string {
+	if len(labels) < 2 {
+		return strings.Join(labels, "")
+	}
+	return strings.Join(labels[:len(labels)-1], ", ") + " and " + labels[len(labels)-1]
+}
 
 // unservedColumn names why a resolved column type has no decode arm, or
 // "" when it has one. Served are a schema property of scalar width, a
@@ -169,7 +245,7 @@ func unservedColumn(t resolver.ResolvedType) string {
 	case resolver.ResolvedNode, resolver.ResolvedEdge:
 		return ""
 	case resolver.ResolvedEdgeUnion:
-		return edgeUnionReason
+		return edgeUnionReason(ct)
 	case resolver.ResolvedTemporal:
 		// Answered by the type table instead: the shared phase asks it and
 		// refuses with ErrUnrepresentableTemporal naming the kind, which

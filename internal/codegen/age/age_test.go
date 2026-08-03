@@ -221,28 +221,55 @@ var twoCandidateEdgeUnion = resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKe
 	{Source: personLabel, KeyLabels: "LIKES", Target: "Post"},
 }}
 
+// sharedLabelSchema declares the two same-label edge types
+// sharedLabelEdgeUnion's candidates name. A shared-label union is
+// refused inside Prepare, which resolves candidates against the entity
+// index, so unlike twoCandidateEdgeUnion this one has to be a shape the
+// schema actually declares.
+const sharedLabelSchema = "shared_label_schema.gql"
+
+// sharedLabelEdgeUnion is the other resolved edge-union shape: two
+// candidates carrying ONE label. The pattern that produces it names a
+// single relationship type whose source endpoint the schema satisfies
+// more than one way (ADR 0022) — `(p)-[r:FOUNDED]->(c:Company)`, with no
+// '|' anywhere. Apache AGE parses that statement, so it is not this
+// backend's to refuse.
+var sharedLabelEdgeUnion = resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{
+	{Source: personLabel, KeyLabels: "FOUNDED", Target: "Company"},
+	{Source: "Investor", KeyLabels: "FOUNDED", Target: "Company"},
+}}
+
 // wantEdgeUnionReason is this test's own copy of the reason the gate
 // gives for an edge-union column, so a change to the emission's wording
-// has to be a change here too.
-const wantEdgeUnionReason = "binds to more than one candidate edge type, which openCypher expresses only " +
-	"as a relationship-type alternation and Apache AGE's parser refuses"
+// has to be a change here too. It names the relationship types the
+// author's pattern spells, because a refusal that described a shape the
+// query does not have was the defect that put this here.
+const wantEdgeUnionReason = "names relationship types AUTHORED and LIKES, which openCypher writes only as " +
+	`the alternation ":AUTHORED|LIKES" — Apache AGE 1.7.0's parser has no "|" in a relationship ` +
+	`pattern and answers it with "syntax error at or near \"|\"" (SQLSTATE 42601)`
 
 // TestRejectsEdgeUnionColumns pins the narrowest of this backend's
 // refusals against the column it is one step away from: an edge column
 // the resolver narrowed to a single candidate is served, and the same
-// column with a second candidate is not.
+// column with a second candidate carrying a second label is not.
 //
 // The refusal is not about decoding. The candidates carry distinct
 // labels — shared admission has already refused the ones that do not —
 // so a dispatch on the label would pick correctly. It is about the query
-// text: an edge binding with more than one candidate is reachable in
-// openCypher only through a relationship-type alternation (Cypher.g4
-// oC_RelationshipTypes admits a second type after '|' and nowhere else),
-// and Apache AGE 1.7.0 answers `-[r:AUTHORED|LIKES]->` with `ERROR:
-// syntax error at or near "|"`. Generated code runs the author's query
-// text verbatim (ADR 0005), so every call on such a method would fail at
-// the server. Emitting it would hand the author a package that compiles
-// and cannot run.
+// text: candidates carrying distinct labels can only have come from a
+// pattern naming more than one relationship type, and openCypher writes
+// that only as an alternation (Cypher.g4 oC_RelationshipTypes admits a
+// second type after '|' and nowhere else; a re-bound relationship
+// variable's occurrences intersect rather than accumulate). Apache AGE
+// 1.7.0 answers `-[r:AUTHORED|LIKES]->` with `ERROR: syntax error at or
+// near "|"`. Generated code runs the author's query text verbatim
+// (ADR 0005), so every call on such a method would fail at the server.
+// Emitting it would hand the author a package that compiles and cannot
+// run.
+//
+// The third subtest is the boundary in the other direction: a union
+// whose candidates share a label is a pattern AGE parses, so this gate
+// stands aside and lets the shared, backend-independent refusal answer.
 func (s *EmissionSuite) TestRejectsEdgeUnionColumns() {
 	in := s.inputFrom(filepath.Join("testdata", corpusSchema))
 
@@ -266,6 +293,21 @@ func (s *EmissionSuite) TestRejectsEdgeUnionColumns() {
 		s.Require().Nil(files, "a rejected batch must not return a partial file set")
 		s.Require().ErrorIs(err, age.ErrUnsupportedQuery)
 		s.Require().ErrorContains(err, `TwoActions (column "r" `+wantEdgeUnionReason+`)`)
+	})
+
+	s.Run("candidates sharing a label are not this backend's refusal", func() {
+		batch := s.inputFrom(filepath.Join("testdata", sharedLabelSchema))
+		batch.Queries = []codegen.NamedQuery{readQuery("Founded", resolver.Column{
+			Name: "r", Type: sharedLabelEdgeUnion,
+		})}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, codegen.ErrUnrepresentableEdgeUnion,
+			"a shared-label union is unrepresentable on every backend; this one must not overwrite that answer")
+		s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
+		s.Require().NotContains(err.Error(), "alternation",
+			"the pattern that produces a shared-label union names one relationship type and spells no '|'")
 	})
 }
 

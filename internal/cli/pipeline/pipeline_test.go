@@ -71,6 +71,27 @@ const (
 `
 	unionQuery = "// name: GetAction :one\nMATCH (:Person)-[r:AUTHORED|LIKES]->(:Post) RETURN r\n"
 
+	// sharedLabelSchema and sharedLabelQuery reach an edge column with
+	// more than one candidate the other way: one relationship type whose
+	// source endpoint the schema satisfies twice (ADR 0022). There is no
+	// alternation in the query, Apache AGE parses it, and what defeats it
+	// — an edge value carries its label and never its endpoint types — is
+	// true of every backend. Here so that the AGE refusal above has to be
+	// the answer to a pattern AGE cannot be sent, and not to every
+	// multi-candidate column indiscriminately.
+	sharedLabelSchema = `CREATE PROPERTY GRAPH TYPE Founders AS {
+    (:Person  { id :: INT64 NOT NULL }),
+    (:Company { id :: INT64 NOT NULL }),
+    NODE TYPE PersonEmployee (:Person&Employee {
+        id         :: INT64 NOT NULL,
+        employeeId :: INT64 NOT NULL
+    }),
+    DIRECTED EDGE TYPE FoundedByPerson   (:Person)          -[:FOUNDED { foundedYear :: INT64 NOT NULL }]-> (:Company),
+    DIRECTED EDGE TYPE FoundedByEmployee (:Person&Employee) -[:FOUNDED { foundedYear :: INT64 NOT NULL }]-> (:Company)
+}
+`
+	sharedLabelQuery = "// name: GetFounded :one\nMATCH (p:Person)-[r:FOUNDED]-(c:Company) RETURN r\n"
+
 	// The second target's schema declares a label the first one does
 	// not, so a query written against either fails against the other —
 	// what TestRunStateIsPerTarget turns on.
@@ -284,7 +305,7 @@ func TestRunApacheAgeRejectionIsASentinel(t *testing.T) {
 // vocabulary at the same seam, for the one column kind whose refusal is
 // a property of the server's parser rather than of the wire format.
 //
-// An edge column with more than one candidate edge type is reachable in
+// An edge column whose candidates carry distinct labels is reachable in
 // openCypher only through a relationship-type alternation, and Apache
 // AGE 1.7.0 answers `-[r:AUTHORED|LIKES]->` with `ERROR: syntax error at
 // or near "|"` (SQLSTATE 42601), measured against the image
@@ -293,6 +314,11 @@ func TestRunApacheAgeRejectionIsASentinel(t *testing.T) {
 // package that compiles and whose every call fails at the server.
 // Refusing at generation is what turns that into an answer the author
 // gets before they ship.
+//
+// The whole message is asserted, not a substring of it, because the
+// defect this replaced was in what the sentence claimed rather than in
+// which query it fired on: it told an author who wrote no '|' that their
+// query was an alternation.
 func TestRunApacheAgeRefusesEdgeUnions(t *testing.T) {
 	dir, cfgPath := writeProject(t)
 	writeFixtureFile(t, filepath.Join(dir, "schema.gql"), unionSchema)
@@ -302,8 +328,9 @@ func TestRunApacheAgeRefusesEdgeUnions(t *testing.T) {
 	res, err := pipeline.Run(cfgPath, backendRegistry(t))
 	require.ErrorIs(t, err, age.ErrUnsupportedQuery)
 	require.ErrorContains(t, err, `1 query would be dropped: GetAction (column "r" `+
-		`binds to more than one candidate edge type, which openCypher expresses only as a `+
-		`relationship-type alternation and Apache AGE's parser refuses)`)
+		`names relationship types AUTHORED and LIKES, which openCypher writes only as the `+
+		`alternation ":AUTHORED|LIKES" — Apache AGE 1.7.0's parser has no "|" in a relationship `+
+		`pattern and answers it with "syntax error at or near \"|\"" (SQLSTATE 42601))`)
 	require.Equal(t, pipeline.Result{}, res)
 
 	// The same project on a driver whose server parses the alternation
@@ -313,6 +340,37 @@ func TestRunApacheAgeRefusesEdgeUnions(t *testing.T) {
 	res, err = pipeline.Run(cfgPath, backendRegistry(t))
 	require.NoError(t, err)
 	require.Empty(t, res.Diagnostics)
+}
+
+// TestRunApacheAgeLeavesSharedLabelUnionsToSharedAdmission is the bound
+// on the refusal above. A multi-candidate edge column is reachable
+// without any alternation — one relationship type whose endpoint the
+// schema satisfies twice (ADR 0022) — and Apache AGE parses that
+// statement. So the query must fail on what is actually wrong with it,
+// in the same words every other backend uses, and the author must not be
+// told their query contains a '|' it does not contain.
+//
+// Asserted against neo4j-go-v5 as well as AGE: the two must give the
+// same answer, because the obstacle is a property of what a Go edge value
+// can carry and not of any server.
+func TestRunApacheAgeLeavesSharedLabelUnionsToSharedAdmission(t *testing.T) {
+	dir, cfgPath := writeProject(t)
+	writeFixtureFile(t, filepath.Join(dir, "schema.gql"), sharedLabelSchema)
+	writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), sharedLabelQuery)
+
+	for _, driver := range []config.Driver{config.DriverApacheAgePgxV5, config.DriverNeo4jGoV5} {
+		t.Run(string(driver), func(t *testing.T) {
+			writeFixtureFile(t, cfgPath, configYAML("people", string(driver), ""))
+
+			res, err := pipeline.Run(cfgPath, backendRegistry(t))
+			require.ErrorIs(t, err, codegen.ErrUnrepresentableEdgeUnion)
+			require.NotErrorIs(t, err, age.ErrUnsupportedQuery)
+			require.ErrorContains(t, err, `both carry edge label "FOUNDED"`)
+			require.NotContains(t, err.Error(), "alternation",
+				"the query names one relationship type and spells no '|'")
+			require.Equal(t, pipeline.Result{}, res)
+		})
+	}
 }
 
 // TestRunUnregisteredDriver: the driver axis resolves through the

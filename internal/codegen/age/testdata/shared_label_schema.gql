@@ -1,0 +1,15 @@
+// Two edge types under one label, running from different sources. A
+// pattern naming that single type closes to both when the schema
+// satisfies its source endpoint more than one way (ADR 0022), which is
+// how an edge-union column arises with no '|' anywhere in the query.
+//
+// Apache AGE parses such a pattern, so the column is refused by shared
+// admission — an edge value carries its label and its properties, never
+// its endpoint types — and not by this backend's capability gate.
+CREATE PROPERTY GRAPH TYPE AgeSharedLabel AS {
+    (:Person   { id :: INT64 NOT NULL }),
+    (:Investor { id :: INT64 NOT NULL }),
+    (:Company  { id :: INT64 NOT NULL }),
+    DIRECTED EDGE TYPE FoundedByPerson   (:Person)   -[:FOUNDED { foundedYear :: INT64 NOT NULL }]-> (:Company),
+    DIRECTED EDGE TYPE FoundedByInvestor (:Investor) -[:FOUNDED { foundedYear :: INT64 NOT NULL }]-> (:Company)
+}
