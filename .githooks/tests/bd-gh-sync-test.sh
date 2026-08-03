@@ -23,9 +23,16 @@ mkdir -p "$BIN"
 
 # The stubs read their canned payloads from files named by the environment, so
 # the fixtures themselves never travel on argv or in the environment block.
+#
+# Each call logs a flattened `bd $*` line and then one `  ARG=[...]` line per
+# argument. The flattened line cannot show where one argument ends and the next
+# begins, so `bd github push b-1 b-2` and `bd github push "b-1 b-2"` — two ids
+# and one nonexistent one — log byte-identically. This branch is a quoting fix;
+# a harness that cannot see argument boundaries cannot fence one.
 cat >"$BIN/bd" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "bd $*" >>"$CALLS"
+if [ "$#" -gt 0 ]; then printf '  ARG=[%s]\n' "$@" >>"$CALLS"; fi
 if [ "$1 ${2:-}" = "github sync" ] && [ "${FAKE_SYNC_RC:-0}" != 0 ]; then
     echo "bd: error: connection refused" >&2
     exit "$FAKE_SYNC_RC"
@@ -67,6 +74,7 @@ STUB
 cat >"$BIN/gh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "gh $*" >>"$CALLS"
+if [ "$#" -gt 0 ]; then printf '  ARG=[%s]\n' "$@" >>"$CALLS"; fi
 case "$1 ${2:-}" in
     "auth token") echo faketoken ;;
     "issue list")
@@ -140,10 +148,28 @@ last_line()  { tail -n 1 "$TMP/err"; }
 # count of pulled beads, and the only evidence for that count is this.
 sync_batches() { grep -c -- 'bd github sync' "$TMP/calls"; }
 
+# Reads the per-argument records the stubs log, so an assertion sees argument
+# boundaries rather than a space-joined line. $1 is the flattened prefix that
+# selects the call; $2 is how many leading argv words that prefix already names
+# and therefore drops, per call, so several batches concatenate cleanly.
+argv_after() {
+    awk -v want="$1" -v skip="$2" '
+        substr($0, 1, 7) == "  ARG=[" {
+            if (on && ++n > skip) print substr($0, 8, length($0) - 8)
+            next
+        }
+        { on = (substr($0, 1, length(want)) == want); n = 0 }
+    ' "$TMP/calls"
+}
+argv_of() { argv_after "$1" 0; }
+
 # The push-side equivalents. `bd github push` takes its ids as separate argv
 # words, so one call is one batch and its arguments are the ids it was handed.
-pushed_ids()   { sed -n 's/^bd github push //p' "$TMP/calls" | tr ' ' '\n' | grep -v '^$'; }
-push_batches() { grep -c -- 'bd github push' "$TMP/calls"; }
+# Read from argv rather than by splitting the flattened line on spaces: that
+# split reconstructs the boundaries it is meant to be checking, so an id list
+# passed as one argument comes back looking exactly like ids passed as several.
+pushed_ids()   { argv_after 'bd github push' 2; }
+push_batches() { grep -c -- '^bd github push' "$TMP/calls"; }
 
 ISSUE=https://github.com/org/r/issues
 
@@ -678,6 +704,42 @@ elif [ "$(last_line)" != "bd-gh-sync: pushed 250 new bead(s), closed 0 stale GH 
     bad "an unmirrored set past one batch is split, not truncated" "got: $(last_line)"
 else
     ok "250 unmirrored beads are split into 3 batches, each id sent once"
+fi
+
+# ...and "sent once" is a claim about argv, so it has to be read off argv. Every
+# assertion above this one would hold just as well if the script had passed the
+# whole batch as a single argument — `bd github push "b-a1 b-a2"`, one bead id
+# nobody minted — because the flattened log line is identical either way and
+# splitting it on spaces puts the boundaries back. The gate this branch adds is
+# a quoting gate; nothing fences it unless the harness can see where one
+# argument stops.
+run_sync push \
+    '[{"id":"b-a1","status":"open","external_ref":""},
+      {"id":"b-a2","status":"open","external_ref":""}]' '[]' '[]'
+if [ "$(argv_of 'bd github push' | tr '\n' '|')" != "github|push|b-a1|b-a2|" ]; then
+    bad "each bead id is its own argv word to 'bd github push'" \
+        "argv was: $(argv_of 'bd github push' | tr '\n' '|')"
+else
+    ok "each bead id reaches 'bd github push' as an argv word of its own"
+fi
+
+# Same blindness on the other mutating command. `gh issue close` takes the
+# comment body as one argument; a body that split into several would still log a
+# line beginning `gh issue close 500`, which is all any assertion here checked.
+run_sync push \
+    "[{\"id\":\"b-c\",\"status\":\"closed\",\"close_reason\":\"superseded by gqlc-x\",\"external_ref\":\"$ISSUE/500\"}]" \
+    '[]' '[{"number":500}]'
+if [ "$(argv_of 'gh issue close' | wc -l)" -ne 5 ]; then
+    bad "the close comment reaches 'gh' as a single argument" \
+        "$(argv_of 'gh issue close' | wc -l) argv words: $(argv_of 'gh issue close' | tr '\n' '|')"
+elif [ "$(argv_of 'gh issue close' | sed -n 4p)" != "--comment" ]; then
+    bad "the close comment reaches 'gh' as a single argument" \
+        "argv[4] was $(argv_of 'gh issue close' | sed -n 4p), not --comment"
+elif [ "$(argv_of 'gh issue close' | sed -n 5p)" != "Auto-close: bead b-c closed locally. superseded by gqlc-x" ]; then
+    bad "the close comment reaches 'gh' as a single argument" \
+        "body was: $(argv_of 'gh issue close' | sed -n 5p)"
+else
+    ok "'gh issue close' gets the issue number and the whole comment as one argument each"
 fi
 
 # A bead list that will not load means push cannot know which beads have no
