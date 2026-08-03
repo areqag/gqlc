@@ -120,6 +120,14 @@ func (s *EmissionSuite) inputFrom(path string) codegen.Input {
 	return codegen.Input{Schema: sch}
 }
 
+// inputFromText is inputFrom over a schema written in the test, for the
+// sweeps whose rows differ by one property width apiece.
+func (s *EmissionSuite) inputFromText(src string) codegen.Input {
+	sch, err := gql.New().Parse(strings.NewReader(src))
+	s.Require().NoError(err, "schema %s", src)
+	return codegen.Input{Schema: sch}
+}
+
 // TestFileSet pins the C0 file set: the pgx handle, the graph lifecycle,
 // the Querier interfaces, and the models file. The models file carries
 // the schema's entity surface whether or not a query in the batch
@@ -491,6 +499,49 @@ func (s *EmissionSuite) TestRejectsMultiLabelSchema() {
 	s.Require().Error(genErr)
 	s.Require().Nil(files, "a refused schema must not return a partial file set")
 	s.Require().ErrorIs(genErr, age.ErrUnsupportedSchema)
+}
+
+// sidecarSchema is one node type carrying an instant and a second
+// property of the given width under the name this backend derives for
+// the instant's zone.
+func sidecarSchema(width string) string {
+	return `CREATE PROPERTY GRAPH TYPE Sidecar AS {
+    (:Photo {
+        takenAt       :: TIMESTAMP NOT NULL,
+        takenAtOffset :: ` + width + ` NOT NULL
+    })
+}`
+}
+
+// TestRejectsAnAuthorOwnedOffsetSidecar pins the derived-name gate. A
+// TIMESTAMP property's zone is stored in a second property named
+// <property>Offset and read out of the same map the declared properties
+// come from, so a schema declaring that name gives one key two readers.
+// Both widths below are wrong in a different way and neither is
+// detectable from the emitted Go: with an integer the decoder compiles
+// and hands back an instant re-zoned by the author's own value, and with
+// anything else it compiles and no vertex of that type ever decodes.
+//
+// The refusal is the whole file set, before any of it is written.
+func (s *EmissionSuite) TestRejectsAnAuthorOwnedOffsetSidecar() {
+	for _, width := range []string{"INT64", "STRING"} {
+		s.Run(width, func() {
+			files, err := age.New().Generate(s.inputFromText(sidecarSchema(width)))
+			s.Require().Nil(files, "a rejected schema must not return a partial file set")
+			s.Require().ErrorIs(err, codegen.ErrPropertyFieldCollision)
+			s.Require().ErrorContains(err, `entity "Photo" declares property "takenAtOffset"`)
+			s.Require().ErrorContains(err, `property "takenAt"`)
+		})
+	}
+
+	// The name is derived from an instant and from nothing else, so the
+	// same pair of names with no instant between them is a schema this
+	// backend serves.
+	s.Run("no instant derives no name", func() {
+		files, err := age.New().Generate(s.inputFromText(strings.Replace(sidecarSchema("INT64"), "TIMESTAMP", "STRING   ", 1)))
+		s.Require().NoError(err)
+		s.Require().NotEmpty(files)
+	})
 }
 
 // ageIdentifiers are the extension-owned names that must never appear

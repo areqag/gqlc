@@ -28,6 +28,20 @@ const goInstant = "time.Time"
 // offset in seconds. Flat rather than a member of a map so the instant
 // stays the property itself and an author's ORDER BY over it needs no
 // rewriting.
+//
+// The emitted code READS this property and never WRITES it. That is the
+// whole of the asymmetry and it is deliberate: the sidecar is an interop
+// affordance for a graph some other tool wrote, so that a zone already
+// in the graph survives a read through gqlc. Writing one would mean
+// gqlc adding a parameter to the author's CREATE, which ADR 0005
+// forbids; a graph written through gqlc therefore carries no sidecar and
+// reads back in UTC, at the instant it was written. A read path with no
+// write path is not dead code here — nothing gqlc emits can reach it,
+// and everything else that writes the graph can.
+//
+// The name is derived rather than declared, so it can collide with a
+// property the author owns; rejectOffsetSidecarCollisions refuses such a
+// schema rather than letting one key have two readers.
 func offsetProperty(prop string) string { return prop + "Offset" }
 
 // helpers records which agtype encode / decode helpers a batch reaches

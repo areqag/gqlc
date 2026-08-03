@@ -23,6 +23,9 @@ func generate(in codegen.Input, packageName string) ([]codegen.File, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := rejectOffsetSidecarCollisions(prepared.Entities); err != nil {
+		return nil, err
+	}
 
 	pkg := prepared.Package
 	hasOne := false

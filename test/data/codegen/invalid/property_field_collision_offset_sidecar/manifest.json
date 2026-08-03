@@ -1,0 +1,6 @@
+{
+  "package": "propertyfieldcollisionoffsetsidecar",
+  "queryFiles": [],
+  "targets": ["apache-age-pgx-v5"],
+  "expectedError": "codegen.ErrPropertyFieldCollision"
+}

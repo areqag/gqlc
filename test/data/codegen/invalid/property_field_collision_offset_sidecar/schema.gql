@@ -1,0 +1,13 @@
+// The Apache AGE target stores a TIMESTAMP property's zone in a second
+// property named <property>Offset, so a schema that already declares
+// that name has two writers for one key: the decoder would read takenAt
+// twice and re-zone the instant by whatever the author's own property
+// holds. Only this target derives the name, so only this target is
+// enrolled — the neo4j targets carry a datetime natively and generate
+// this schema happily.
+CREATE PROPERTY GRAPH TYPE PropertyFieldCollisionOffsetSidecar AS {
+    (:Photo {
+        takenAt       :: TIMESTAMP NOT NULL,
+        takenAtOffset :: INT64 NOT NULL
+    })
+}
