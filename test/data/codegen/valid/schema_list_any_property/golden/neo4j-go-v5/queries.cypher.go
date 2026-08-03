@@ -43,8 +43,8 @@ const binByIdQueryText = `MATCH (b:Bin {id: $id}) RETURN b`
 // BinById executes the BinById query.
 //
 //	MATCH (b:Bin {id: $id}) RETURN b
-func (q *Queries) BinById(ctx context.Context, id int64) (Bin, error) {
-	records, err := q.db.run(ctx, binByIdQueryText, map[string]any{"id": id}, neo4j.AccessModeRead)
+func (q *Queries) BinById(ctx context.Context, arg int64) (Bin, error) {
+	records, err := q.db.run(ctx, binByIdQueryText, map[string]any{"id": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return Bin{}, err
 	}
