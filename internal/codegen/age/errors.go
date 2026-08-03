@@ -296,10 +296,15 @@ func distinctEdgeLabels(keys []schema.EdgeKey) []string {
 }
 
 // formatLabelList renders two or more labels as English prose: "A and
-// B", "A, B and C". The first two are named parameters because one label
-// is the input this has no rendering for and the refusal it serves has
-// no meaning for — a signature that cannot express it is one that needs
-// no arm for it.
+// B", "A, B and C", "A, B, C and D". The first two are named parameters
+// because one label is the input this has no rendering for and the
+// refusal it serves has no meaning for.
+//
+// The signature refuses a caller holding no labels at all; it does not
+// refuse one holding a single-element slice, which spreads into the
+// first parameter and panics on the second. What keeps that away is
+// edgeUnionReason's own `len(u.EdgeKeys) < 2` arm, and the subtest that
+// exercises it is TestRejectsEdgeUnionColumns/a_single_candidate.
 func formatLabelList(first, second string, rest ...string) string {
 	all := append([]string{first, second}, rest...)
 	return strings.Join(all[:len(all)-1], ", ") + " and " + all[len(all)-1]

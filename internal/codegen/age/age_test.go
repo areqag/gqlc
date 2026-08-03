@@ -346,6 +346,15 @@ func (s *EmissionSuite) TestRejectsEdgeUnionColumns() {
 			union: edgeUnionOn("AUTHORED", "LIKES", "REPOSTED"),
 			names: "AUTHORED, LIKES and REPOSTED",
 		},
+		{
+			// Four is where a formatter correct only to three comes
+			// apart: a list joined as "A, B and C and D" satisfies every
+			// shorter row. edgeCandidates iterates all of e.Labels(), so
+			// the pattern that produces this is `-[r:A|B|C|D]->`.
+			name:  "four candidates are all named, with one 'and'",
+			union: edgeUnionOn("AUTHORED", "LIKES", "REPOSTED", "FLAGGED"),
+			names: "AUTHORED, LIKES, REPOSTED and FLAGGED",
+		},
 	} {
 		s.Run(tc.name, func() {
 			batch := in
@@ -359,6 +368,20 @@ func (s *EmissionSuite) TestRejectsEdgeUnionColumns() {
 			s.Require().ErrorContains(err, `TwoActions (column "r" `+wantEdgeUnionReason(tc.names)+`)`)
 		})
 	}
+
+	s.Run("a single candidate is not this backend's refusal either", func() {
+		batch := in
+		batch.Queries = []codegen.NamedQuery{readQuery("OneCandidate", resolver.Column{
+			Name: "r", Type: resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{corpusEdgeKey}},
+		})}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, codegen.ErrOutOfC6Scope,
+			"a union the resolver never emits is a broken invariant, which shared admission names and this gate cannot")
+		s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
+		s.Require().ErrorContains(err, "resolved as edgeUnion with only 1 candidate(s)")
+	})
 
 	s.Run("candidates sharing a label are not this backend's refusal", func() {
 		batch := s.inputFrom(filepath.Join("testdata", sharedLabelSchema))
