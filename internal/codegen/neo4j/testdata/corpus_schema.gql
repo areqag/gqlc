@@ -1,0 +1,33 @@
+// The schema the emitted-decoder corpus runs against. One emission has to
+// reach every arm the entity decoders carry, so between them these types
+// declare a width that narrows from its driver carrier, a nullable
+// property, a list at two nesting depths, a list over a narrow element
+// width, a list over each of the two slice shapes the driver hands back
+// as themselves, a list of no declared element shape, and a property of
+// no declared shape at all.
+CREATE PROPERTY GRAPH TYPE Neo4jCorpus AS {
+    (:Scalar {
+        id     :: INT64 NOT NULL,
+        rank   :: INT32 NOT NULL,
+        active :: BOOL NOT NULL,
+        name   :: STRING,
+        weight :: FLOAT32
+    }),
+    (:Listy {
+        tags   :: LIST<STRING> NOT NULL,
+        ranks  :: LIST<INT32> NOT NULL,
+        matrix :: LIST<LIST<INT64>> NOT NULL,
+        blobs  :: LIST<BYTES> NOT NULL,
+        stamps :: LIST<TIMESTAMP> NOT NULL,
+        depths :: LIST<FLOAT32>
+    }),
+    (:Bin {
+        loose :: LIST NOT NULL,
+        bag   :: LIST<ANY VALUE>,
+        piles :: LIST<LIST<ANY VALUE>>
+    }),
+    (:Anything {
+        payload :: ANY VALUE NOT NULL,
+        maybe   :: ANY VALUE
+    })
+}

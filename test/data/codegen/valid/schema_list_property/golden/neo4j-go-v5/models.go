@@ -25,11 +25,19 @@ func decodeEvent(node dbtype.Node) (Event, error) {
 	}
 	out.Id = value0
 	if v, ok := node.Props["tags"]; ok {
-		s, ok := v.([]string)
+		s, ok := v.([]any)
 		if !ok {
-			return Event{}, fmt.Errorf("decode Event.Tags: property %q: expected []string, got %T", "tags", v)
+			return Event{}, fmt.Errorf("decode Event.Tags: property %q: expected []any, got %T", "tags", v)
 		}
-		out.Tags = &s
+		narrowed := make([]string, 0, len(s))
+		for i0, elem0 := range s {
+			v0, ok := elem0.(string)
+			if !ok {
+				return Event{}, fmt.Errorf("decode Event.Tags: property %q element %d: expected string, got %T", "tags", i0, elem0)
+			}
+			narrowed = append(narrowed, v0)
+		}
+		out.Tags = &narrowed
 	}
 	return out, nil
 }

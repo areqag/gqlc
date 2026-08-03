@@ -23,12 +23,21 @@ type typeMap struct{}
 // decoder can fill. The eight oversized numeric widths have no faithful
 // carrier anywhere and are permanently out (§9).
 //
-// LIST and ANY are refused on the same grounds. This backend's decode
-// vocabulary is one helper per agtype scalar, so a property of either
-// width would reach a struct field with no helper to fill it.
-func (typeMap) Property(pt graph.PropertyType) (string, bool) {
+// LIST and ANY are admitted. agtype's own vocabulary has a list and a
+// map alongside the scalars, so both widths have something on the wire
+// to decode from, and both emit the text every other backend emits for
+// them — the Go a caller writes against does not vary by backend. A list
+// rides its element's carrier, at whatever nesting depth, so it is
+// admitted exactly when its element width is; ANY is Go's any (ADR
+// 0020), decoded through the agtype value vocabulary rather than through
+// one declared width.
+func (t typeMap) Property(pt graph.PropertyType) (string, bool) {
 	if pt.Kind() == graph.KindList {
-		return "", false
+		elemTy, ok := t.Property(pt.Elem())
+		if !ok {
+			return "", false
+		}
+		return "[]" + elemTy, true
 	}
 	switch pt {
 	case graph.TypeString:
@@ -59,9 +68,15 @@ func (typeMap) Property(pt graph.PropertyType) (string, bool) {
 		return "float64", true
 	case graph.TypeFloat32:
 		return "float32", true
-	case graph.TypeAnyPropertyValue,
-		graph.TypeList,
-		graph.TypeBytes,
+	case graph.TypeAnyPropertyValue:
+		return "any", true
+	case graph.TypeList:
+		// LIST<ANY> spelled out, so the Kind() guard above intercepts it
+		// and this arm is unreachable. Listed so the exhaustive linter
+		// sees the full constant set, and answering "[]any" keeps it
+		// agreeing with the arm that does the work.
+		return "[]any", true
+	case graph.TypeBytes,
 		graph.TypeDate, graph.TypeTime, graph.TypeLocalTime,
 		graph.TypeTimestamp, graph.TypeDuration,
 		graph.TypeInt128, graph.TypeInt256,

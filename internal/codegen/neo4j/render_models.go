@@ -23,8 +23,11 @@ import (
 //
 //   - dbtype: unconditional (decode helpers take dbtype.Node /
 //     dbtype.Relationship)
-//   - fmt iff any property is decoded (decode-error wrapping)
-//   - neo4j iff any non-nullable property is decoded (neo4j.GetProperty[T])
+//   - fmt iff any decode can fail, which every property can except a
+//     nullable one of no declared shape: that arm is a Props lookup
+//     whose miss is the schema's null, not an error to report
+//   - neo4j iff any non-nullable property of a declared shape is decoded
+//     (neo4j.GetProperty[T]); a property typed `any` never reaches it
 //
 // EdgeUnion emission adds no new import (the interface + marker methods
 // live in this package; no cross-package reference emerges). A schema
@@ -66,11 +69,29 @@ func renderModels(pkg string, entities []codegen.Entity, prepared []codegen.Quer
 	anyTime := false
 	for _, e := range entities {
 		for _, f := range e.Fields {
-			anyProp = true
-			if !f.Nullable {
+			// fmt is emitted for the decode failures and neo4j for
+			// GetProperty, and a property of no declared shape moves
+			// both: it never reaches GetProperty at all
+			// (ridesADriverCarrier), and on the nullable arm its read
+			// is a Props lookup whose miss is the schema's null rather
+			// than a failure to report. A schema of nothing but those
+			// imports neither package, and an import nothing names
+			// does not compile.
+			if !f.Nullable || ridesADriverCarrier(f.GoType) {
+				anyProp = true
+			}
+			if !f.Nullable && ridesADriverCarrier(f.GoType) {
 				anyNonNull = true
 			}
-			if f.GoType == "time.Time" {
+			// A list property names its leaf type, not its slice
+			// type, so an exact "time.Time" match misses
+			// LIST<TIMESTAMP> ([]time.Time) and its nestings and
+			// emits a struct field plus a decode assertion against
+			// an unimported package. goTypeNeedsImports strips the
+			// "[]" prefixes to the leaf; the dbtype half of its
+			// answer is discarded because this file's dbtype import
+			// is unconditional.
+			if _, needTime := goTypeNeedsImports(f.GoType); needTime {
 				anyTime = true
 			}
 		}
@@ -147,9 +168,11 @@ func writeEntityStruct(b *strings.Builder, e codegen.Entity) {
 }
 
 // writeEntityDecodeHelper emits the unexported decode<Name> helper for
-// one entity. Nullable properties go through direct Props lookup + type
-// assertion (three-way outcome); non-nullable properties go through
-// neo4j.GetProperty[T] (missing key is a decode error).
+// one entity. A property of a declared shape reads through the driver:
+// nullable ones by direct Props lookup + type assertion (three-way
+// outcome), non-nullable ones through neo4j.GetProperty[T] (missing key
+// is a decode error). A property of no declared shape reads through the
+// Props map on both arms — see writeShapelessFieldDecode.
 func writeEntityDecodeHelper(b *strings.Builder, e codegen.Entity) {
 	var carrier, arg string
 	if e.Kind == codegen.EntityNode {
@@ -171,7 +194,9 @@ func writeEntityDecodeHelper(b *strings.Builder, e codegen.Entity) {
 }
 
 // writeEntityFieldDecode emits the decode of the property at index i.
-// Nullable path: Props lookup + type assertion against the driver's
+// Three paths. A property of no declared shape has no carrier to assert
+// against and is delegated to writeShapelessFieldDecode. Otherwise —
+// nullable path: Props lookup + type assertion against the driver's
 // carrier + narrow-convert into a local of the emitted Go type +
 // address-of-local into the pointer field. Non-nullable path:
 // neo4j.GetProperty[<carrier>] + narrow-convert. The property key is the
@@ -187,6 +212,10 @@ func writeEntityDecodeHelper(b *strings.Builder, e codegen.Entity) {
 // argument itself would emit a redeclaration, and generation would still
 // exit 0 because the format gate only parses.
 func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codegen.EntityField, arg string) {
+	if !ridesADriverCarrier(f.GoType) {
+		writeShapelessFieldDecode(b, e, i, f, arg)
+		return
+	}
 	carrier := driverCarrier(f.GoType)
 	if f.Nullable {
 		fmt.Fprintf(b, "\tif v, ok := %s.Props[%q]; ok {\n", arg, f.PropName)
@@ -194,10 +223,14 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 		b.WriteString("\t\tif !ok {\n")
 		fmt.Fprintf(b, "\t\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: property %%q: expected %s, got %%T\", %q, v)\n", e.Name, e.Name, f.Field, carrier, f.PropName)
 		b.WriteString("\t\t}\n")
-		if carrier != f.GoType {
+		switch {
+		case isSliceType(f.GoType):
+			writeSliceNarrow(b, e, f, f.GoType, "s", "narrowed", "\t\t", 0)
+			fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
+		case carrier != f.GoType:
 			fmt.Fprintf(b, "\t\tnarrowed := %s(s)\n", f.GoType)
 			fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
-		} else {
+		default:
 			fmt.Fprintf(b, "\t\tout.%s = &s\n", f.Field)
 		}
 		b.WriteString("\t}\n")
@@ -208,9 +241,119 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 	b.WriteString("\tif err != nil {\n")
 	fmt.Fprintf(b, "\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: %%w\", err)\n", e.Name, e.Name, f.Field)
 	b.WriteString("\t}\n")
-	if carrier != f.GoType {
+	switch {
+	case isSliceType(f.GoType):
+		narrowed := value + "s"
+		writeSliceNarrow(b, e, f, f.GoType, value, narrowed, "\t", 0)
+		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, narrowed)
+	case carrier != f.GoType:
 		fmt.Fprintf(b, "\tout.%s = %s(%s)\n", f.Field, f.GoType, value)
-	} else {
+	default:
 		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, value)
 	}
+}
+
+// writeShapelessFieldDecode emits the read of a property of no declared
+// shape — ANY VALUE, whose emitted Go type is `any`. It is the one width
+// that takes neither of the driver's two entry points, so it goes
+// through the Props map directly (see ridesADriverCarrier).
+//
+// Absence is the schema's null on the nullable arm and a decode failure
+// on the non-nullable one, worded the way neo4j.GetProperty words its
+// own miss so that a caller cannot tell which arm reported it.
+func writeShapelessFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codegen.EntityField, arg string) {
+	if f.Nullable {
+		fmt.Fprintf(b, "\tif v, ok := %s.Props[%q]; ok {\n", arg, f.PropName)
+		fmt.Fprintf(b, "\t\tout.%s = &v\n", f.Field)
+		b.WriteString("\t}\n")
+		return
+	}
+	value := valueName(i)
+	fmt.Fprintf(b, "\t%s, ok := %s.Props[%q]\n", value, arg, f.PropName)
+	b.WriteString("\tif !ok {\n")
+	fmt.Fprintf(b, "\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: could not find any property named %%s\", %q)\n", e.Name, e.Name, f.Field, f.PropName)
+	b.WriteString("\t}\n")
+	fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, value)
+}
+
+// isSliceType reports whether an emitted Go type is a slice this package
+// has to walk element by element. Two are excluded, and they are exactly
+// the two slice shapes neo4j.PropertyValue admits, so each arrives as
+// itself and asserting straight to it is correct:
+//
+//   - []byte, because BYTES is the one width the driver hands back as a
+//     Go slice of its own;
+//   - []any, because that is the driver's carrier for every other array,
+//     so a property declared LIST<ANY VALUE> (or bare LIST) is already
+//     the value the caller is handed.
+//
+// The []any exclusion is not an optimisation. The walk narrows by
+// asserting each element to its carrier, and the carrier of an `any`
+// element is `any`: a type assertion on a nil interface value is false
+// whatever type it names, so walking a []any would fail the whole decode
+// on exactly the null element that width exists to carry — while AGE,
+// whose agtypeValue maps null to nil, hands the same graph value back
+// intact. Not walking is what keeps the two backends decoding the same
+// value.
+func isSliceType(goType string) bool {
+	return strings.HasPrefix(goType, "[]") && goType != "[]byte" && goType != "[]any"
+}
+
+// ridesADriverCarrier reports whether a property's decode reaches the
+// driver's constrained generics at all. A property of no declared shape
+// does not. `any` is a member of neither neo4j.PropertyValue nor
+// neo4j.RecordValue, so neo4j.GetProperty[any] does not compile; and
+// `v.(any)` is false for exactly the null such a property is allowed to
+// hold. What is left is the Props map itself, whose value is already the
+// `any` the caller is handed — which is why this also moves the fmt and
+// neo4j import gates.
+func ridesADriverCarrier(goType string) bool {
+	return driverCarrier(goType) != "any"
+}
+
+// writeSliceNarrow emits the walk that turns the driver's []any into the
+// slice type the schema declared, binding it to dst.
+//
+// The driver has no narrower carrier to offer. neo4j.PropertyValue admits
+// []byte and []any and nothing else with a slice shape, and the hydrator
+// builds every non-byte array as []any whatever the elements turned out
+// to be, so a LIST<STRING> property arrives as []any of string and the
+// []string the caller reads is this package's to build. Recursion handles
+// a list of lists, which arrives as []any of []any.
+//
+// Locals are suffixed by depth rather than named after anything in the
+// schema, so a property whose name collides with one of them cannot emit
+// a redeclaration.
+func writeSliceNarrow(b *strings.Builder, e codegen.Entity, f codegen.EntityField, sliceType, src, dst, indent string, depth int) {
+	elem := strings.TrimPrefix(sliceType, "[]")
+	item := fmt.Sprintf("elem%d", depth)
+	idx := fmt.Sprintf("i%d", depth)
+	fail := fmt.Sprintf("return %s{}, fmt.Errorf(\"decode %s.%s: property %%q", e.Name, e.Name, f.Field)
+
+	fmt.Fprintf(b, "%s%s := make(%s, 0, len(%s))\n", indent, dst, sliceType, src)
+	fmt.Fprintf(b, "%sfor %s, %s := range %s {\n", indent, idx, item, src)
+	body := indent + "\t"
+	if isSliceType(elem) {
+		inner := fmt.Sprintf("nested%d", depth)
+		acc := fmt.Sprintf("acc%d", depth)
+		fmt.Fprintf(b, "%s%s, ok := %s.([]any)\n", body, inner, item)
+		fmt.Fprintf(b, "%sif !ok {\n", body)
+		fmt.Fprintf(b, "%s\t%s element %%d: expected []any, got %%T\", %q, %s, %s)\n", body, fail, f.PropName, idx, item)
+		fmt.Fprintf(b, "%s}\n", body)
+		writeSliceNarrow(b, e, f, elem, inner, acc, body, depth+1)
+		fmt.Fprintf(b, "%s%s = append(%s, %s)\n", body, dst, dst, acc)
+		fmt.Fprintf(b, "%s}\n", indent)
+		return
+	}
+	carrier := driverCarrier(elem)
+	fmt.Fprintf(b, "%sv%d, ok := %s.(%s)\n", body, depth, item, carrier)
+	fmt.Fprintf(b, "%sif !ok {\n", body)
+	fmt.Fprintf(b, "%s\t%s element %%d: expected %s, got %%T\", %q, %s, %s)\n", body, fail, carrier, f.PropName, idx, item)
+	fmt.Fprintf(b, "%s}\n", body)
+	if carrier != elem {
+		fmt.Fprintf(b, "%s%s = append(%s, %s(v%d))\n", body, dst, dst, elem, depth)
+	} else {
+		fmt.Fprintf(b, "%s%s = append(%s, v%d)\n", body, dst, dst, depth)
+	}
+	fmt.Fprintf(b, "%s}\n", indent)
 }

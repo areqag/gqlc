@@ -1,7 +1,9 @@
 package age
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/areqag/gqlc/internal/codegen"
@@ -20,33 +22,33 @@ const (
 // for. Each is emitted only when something calls it: an unreferenced
 // unexported function is a lint failure in the generated module, so the
 // set the batch uses is the set the file carries.
+//
+// agtypeEntity, agtypeObject, agtypeSpan and agtypeString are not among
+// them. A graph type's element type list is one-or-more (GQL.g4
+// elementTypeList), so every schema declares at least one entity, every
+// entity decoder splits the wire value and reads its label, and those
+// four are in every emission this package can produce. A field standing
+// for a condition that cannot be false would report nothing.
 type helpers struct {
 	args     bool // agtypeArgs — some query binds at least one parameter
-	str      bool
 	boolean  bool
 	integer  bool
 	float    bool
-	entity   bool // agtypeSpan / agtypeObject / agtypeEntity — the schema has an entity type
+	list     bool // agtypeList — something decodes an agtype list
+	value    bool // agtypeValue / agtypeMap — something decodes a value of no declared shape
 	prop     bool // agtypeProperty — some entity declares a non-nullable property
 	nullProp bool // agtypeNullableProperty — some entity declares a nullable property
+
+	// lists holds every Go slice type the batch decodes into, each of
+	// which takes a named wrapper around the generic walk. A nested list
+	// registers its element type too, because the outer wrapper's element
+	// decoder is the inner wrapper.
+	lists []string
 }
 
-// any reports whether the batch reaches for any helper at all, which is
-// what decides whether models.go carries an import block.
-func (h helpers) any() bool {
-	return h.args || h.str || h.boolean || h.integer || h.float || h.entity || h.prop || h.nullProp
-}
-
-// forEntities marks the helpers an entity emission reaches. Every entity
-// decoder splits the wire value and reads the label out of it, so one
-// entity anywhere in the schema puts the whole entity trio and the string
-// helper in the file.
+// forEntities marks the helpers an entity emission reaches beyond the
+// four every emission carries.
 func (h *helpers) forEntities(entities []wiredEntity) {
-	if len(entities) == 0 {
-		return
-	}
-	h.entity = true
-	h.str = true
 	for _, e := range entities {
 		for _, f := range e.Fields {
 			h.need(f.GoType)
@@ -62,11 +64,23 @@ func (h *helpers) forEntities(entities []wiredEntity) {
 // need marks the helper one emitted Go type decodes through. Narrow
 // integer and float widths ride the wide carrier and narrow through a Go
 // conversion at the call site, so they mark the same helper their
-// carrier does.
+// carrier does. A slice marks the generic list walk plus a named wrapper
+// of its own, and recurses so the element's helper is marked too; a Go
+// type of no declared shape marks the agtype value vocabulary.
 func (h *helpers) need(goType string) {
+	if elem, ok := strings.CutPrefix(goType, "[]"); ok {
+		h.list = true
+		if !slices.Contains(h.lists, goType) {
+			h.lists = append(h.lists, goType)
+		}
+		h.need(elem)
+		return
+	}
+	if goType == "any" || goType == "map[string]any" {
+		h.needValue()
+		return
+	}
 	switch agtypeCarrier(goType) {
-	case "string":
-		h.str = true
 	case "bool":
 		h.boolean = true
 	case "int64":
@@ -74,6 +88,59 @@ func (h *helpers) need(goType string) {
 	case "float64":
 		h.float = true
 	}
+}
+
+// needValue marks agtypeValue and the helpers it dispatches into. A value
+// of no declared shape is read through agtype's own vocabulary, so every
+// arm of that vocabulary has to be in the file whatever the rest of the
+// batch declares.
+func (h *helpers) needValue() {
+	h.value = true
+	h.integer, h.float, h.list = true, true, true
+}
+
+// listHelpers is the batch's named list wrappers, shallowest first and
+// then by name. The order the batch reaches them is already a function
+// of the schema, so this is not what makes the emission deterministic:
+// it is what makes it readable, since a wrapper's element decoder is the
+// wrapper one level in and reading inner before outer follows the decode.
+func (h helpers) listHelpers() []string {
+	out := slices.Clone(h.lists)
+	slices.SortFunc(out, func(a, b string) int {
+		if d := cmp.Compare(listDepth(a), listDepth(b)); d != 0 {
+			return d
+		}
+		return cmp.Compare(a, b)
+	})
+	return out
+}
+
+// listDepth counts a Go slice type's nesting.
+func listDepth(goType string) int {
+	depth := 0
+	for {
+		elem, ok := strings.CutPrefix(goType, "[]")
+		if !ok {
+			return depth
+		}
+		depth, goType = depth+1, elem
+	}
+}
+
+// listHelperName is the wrapper emitted for one Go slice type:
+// agtypeListOf per level of nesting, then the element type exported.
+// Every type that reaches here came out of the property table, whose
+// leaves are Go identifiers.
+func listHelperName(goType string) string {
+	name := "agtype"
+	for {
+		elem, ok := strings.CutPrefix(goType, "[]")
+		if !ok {
+			break
+		}
+		name, goType = name+"ListOf", elem
+	}
+	return name + strings.ToUpper(goType[:1]) + goType[1:]
 }
 
 // agtypeCarrier picks the decode helper's return type for a Go type the
@@ -104,17 +171,10 @@ func renderModels(pkg string, entities []wiredEntity, prepared []codegen.Query, 
 	var b strings.Builder
 	b.WriteString(codegen.Header())
 	b.WriteString("package " + pkg + "\n")
-	if !h.any() {
-		return []byte(b.String())
-	}
 
 	b.WriteString("\nimport (\n")
-	if h.entity {
-		b.WriteString("\t\"bytes\"\n")
-	}
-	if h.args || h.str {
-		b.WriteString("\t\"encoding/json\"\n")
-	}
+	b.WriteString("\t\"bytes\"\n")
+	b.WriteString("\t\"encoding/json\"\n")
 	b.WriteString("\t\"fmt\"\n")
 	if h.integer || h.float {
 		b.WriteString("\t\"strconv\"\n\t\"strings\"\n")
@@ -140,8 +200,7 @@ func agtypeArgs(args map[string]any) (string, error) {
 }
 `)
 	}
-	if h.str {
-		b.WriteString(`
+	b.WriteString(`
 // agtypeString decodes an agtype string scalar. AGE renders one as a
 // JSON string, escapes included, so the JSON decoder reads it back
 // exactly; it also refuses every other agtype scalar, which is what
@@ -162,7 +221,6 @@ func agtypeString(raw []byte) (string, error) {
 	return *out, nil
 }
 `)
-	}
 	if h.boolean {
 		b.WriteString(`
 // agtypeBool decodes an agtype boolean scalar. The two spellings are the
@@ -213,8 +271,7 @@ func agtypeFloat64(raw []byte) (float64, error) {
 }
 `)
 	}
-	if h.entity {
-		b.WriteString(`
+	b.WriteString(`
 // agtypeSpan reports where the value at the front of b ends: the offset
 // of the first stop byte outside any nested structure, or len(b) when
 // there is none. A string, a nested map and a nested list are each
@@ -251,7 +308,8 @@ func agtypeSpan(b []byte, stop byte) (int, error) {
 	}
 	return len(b), nil
 }
-
+`)
+	b.WriteString(`
 // agtypeObject splits an agtype map into its members, each key holding
 // the undecoded text of its value. A map carries more than the schema
 // declares: AGE stores whatever a writer wrote, so a value here may be of
@@ -287,7 +345,8 @@ func agtypeObject(raw []byte) (map[string][]byte, error) {
 	}
 	return out, nil
 }
-
+`)
+	b.WriteString(`
 // agtypeEntity splits an agtype vertex or edge into the label it carries
 // and the undecoded text of each of its properties. A vertex and an edge
 // are the same object but for the annotation, so requiring the one the
@@ -319,6 +378,123 @@ func agtypeEntity(raw []byte, annotation string) (string, map[string][]byte, err
 		return "", nil, err
 	}
 	return label, props, nil
+}
+`)
+	if h.list {
+		b.WriteString(`
+// agtypeList decodes an agtype list, reading each element through the
+// decoder the caller supplies. The split steps over a nested string, map
+// or list whole, so a comma inside one separates nothing; an element the
+// decoder refuses fails the whole list rather than being dropped or
+// zeroed, because a slice one element short is not the value the graph
+// holds.
+//
+// The empty list decodes to a slice of length zero and not to nil: AGE
+// stores it as a value, and a nil slice is what an absent property
+// reaches the caller as.
+func agtypeList[T any](raw []byte, decode func([]byte) (T, error)) ([]T, error) {
+	body := bytes.TrimSpace(raw)
+	if len(body) < 2 || body[0] != '[' || body[len(body)-1] != ']' {
+		return nil, fmt.Errorf("gqlc: %q is not an agtype list", raw)
+	}
+	body = bytes.TrimSpace(body[1 : len(body)-1])
+	out := make([]T, 0)
+	for len(body) > 0 {
+		end, err := agtypeSpan(body, ',')
+		if err != nil {
+			return nil, err
+		}
+		elem := bytes.TrimSpace(body[:end])
+		body = bytes.TrimSpace(body[min(end+1, len(body)):])
+		value, err := decode(elem)
+		if err != nil {
+			return nil, fmt.Errorf("gqlc: element %d of %q: %w", len(out), raw, err)
+		}
+		out = append(out, value)
+	}
+	return out, nil
+}
+`)
+	}
+	for _, goType := range h.listHelpers() {
+		writeListHelper(&b, goType)
+	}
+	if h.value {
+		b.WriteString(`
+// agtypeValue decodes a value of no declared shape through agtype's own
+// vocabulary: its string, integer, float, boolean, list and map land on
+// Go's string, int64, float64, bool, []any and map[string]any, and the
+// null it carries inline lands on nil. The first byte chooses the arm,
+// which is enough because agtype's structured values are self-delimiting
+// and its scalars share no opening byte.
+//
+// Text outside that vocabulary is refused rather than carried through as
+// a string: a value of unknown shape is still a value, and reading
+// something that is not one as a value would put a fabricated Go value
+// in a caller's hands.
+func agtypeValue(raw []byte) (any, error) {
+	body := bytes.TrimSpace(raw)
+	if len(body) == 0 {
+		return nil, fmt.Errorf("gqlc: %q is not an agtype value", raw)
+	}
+	switch body[0] {
+	case '"':
+		out, err := agtypeString(body)
+		if err != nil {
+			return nil, err
+		}
+		return out, nil
+	case '[':
+		out, err := agtypeList(body, agtypeValue)
+		if err != nil {
+			return nil, err
+		}
+		return out, nil
+	case '{':
+		out, err := agtypeMap(body)
+		if err != nil {
+			return nil, err
+		}
+		return out, nil
+	}
+	switch string(body) {
+	case "null":
+		return nil, nil
+	case "true":
+		return true, nil
+	case "false":
+		return false, nil
+	}
+	// An integer is tried first and a float second, so a value AGE wrote
+	// without a fractional part keeps the width agtype held it at. A value
+	// outside int64's range is one AGE evaluated as a float, and reaches
+	// the caller as the float it is.
+	if out, err := agtypeInt64(body); err == nil {
+		return out, nil
+	}
+	out, err := agtypeFloat64(body)
+	if err != nil {
+		return nil, fmt.Errorf("gqlc: %q is not an agtype value", raw)
+	}
+	return out, nil
+}
+
+// agtypeMap decodes an agtype map whose members are of no declared
+// shape, each read through agtypeValue.
+func agtypeMap(raw []byte) (map[string]any, error) {
+	members, err := agtypeObject(raw)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]any, len(members))
+	for key, member := range members {
+		value, err := agtypeValue(member)
+		if err != nil {
+			return nil, fmt.Errorf("gqlc: member %q: %w", key, err)
+		}
+		out[key] = value
+	}
+	return out, nil
 }
 `)
 	}
@@ -357,6 +533,30 @@ func agtypeNullableProperty[T any](props map[string][]byte, key string, decode f
 `)
 	}
 	return []byte(b.String())
+}
+
+// writeListHelper emits the named wrapper for one Go slice type: the
+// generic walk with this type's element decoder bound in. A named
+// wrapper rather than the generic at each call site because a nested
+// list's element decoder is the wrapper one level in, and a function
+// value is what agtypeList takes.
+func writeListHelper(b *strings.Builder, goType string) {
+	elem := strings.TrimPrefix(goType, "[]")
+	fmt.Fprintf(b, "\n// %s decodes an agtype list of %s elements.\n", listHelperName(goType), elem)
+	fmt.Fprintf(b, "func %s(raw []byte) (%s, error) {\n", listHelperName(goType), goType)
+	fmt.Fprintf(b, "\treturn agtypeList(raw, %s)\n}\n", elemDecoder(elem))
+}
+
+// elemDecoder is the decode function one list element goes through. A
+// width narrower than the agtype scalar it rides in has no helper of its
+// own, so it takes a conversion wrapped around its carrier's — the same
+// narrowing an entity field does, done per element.
+func elemDecoder(elem string) string {
+	if agtypeCarrier(elem) == elem {
+		return decodeFunc(elem)
+	}
+	return fmt.Sprintf("func(elem []byte) (%s, error) {\n\t\tout, err := %s(elem)\n\t\treturn %s(out), err\n\t}",
+		elem, decodeFunc(elem), elem)
 }
 
 // writeEntities emits the schema's entity surface: one exported struct
@@ -463,7 +663,7 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 	if f.Nullable {
 		reader = "agtypeNullableProperty"
 	}
-	fmt.Fprintf(b, "\t%s, err := %s(props, %q, %s)\n", value, reader, f.PropName, decodeFunc(carrier))
+	fmt.Fprintf(b, "\t%s, err := %s(props, %q, %s)\n", value, reader, f.PropName, decodeFunc(f.GoType))
 	fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %s{}, fmt.Errorf(%q, err)\n\t}\n",
 		e.Name, "decode "+e.Name+"."+f.Field+": %w")
 	switch {

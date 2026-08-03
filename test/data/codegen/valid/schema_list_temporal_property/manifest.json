@@ -1,0 +1,5 @@
+{
+  "package": "schemalisttemporalproperty",
+  "queryFiles": ["queries.cypher"],
+  "targets": ["neo4j-go-v5", "neo4j-go-v6"]
+}

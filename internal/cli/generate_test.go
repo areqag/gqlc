@@ -29,19 +29,19 @@ const (
 	// walked against a single project.
 	fixtureQuery = "// name: AllPersonNames :many\nMATCH (p:Person) RETURN p.name\n"
 
-	// listSchema and listQuery project a list property, which the Apache
-	// AGE backend has no decode arm for. The list lives on a schema of
-	// its own rather than on fixtureSchema, because every target shares
-	// that one and a list on it would fail the AGE arm of the driver
-	// vocabulary sweep too.
-	listSchema = `CREATE PROPERTY GRAPH TYPE People AS {
+	// uncarriedSchema and uncarriedQuery project a list whose element
+	// width the Apache AGE backend has no carrier for. The property
+	// lives on a schema of its own rather than on fixtureSchema, because
+	// every target shares that one and this property would fail the AGE
+	// arm of the driver vocabulary sweep too.
+	uncarriedSchema = `CREATE PROPERTY GRAPH TYPE People AS {
     (:Person {
-        id   :: INT64 NOT NULL,
-        tags :: LIST<STRING>
+        id     :: INT64 NOT NULL,
+        stamps :: LIST<TIMESTAMP>
     })
 }
 `
-	listQuery = "// name: PersonTags :one\nMATCH (p:Person) RETURN p.tags AS tags\n"
+	uncarriedQuery = "// name: PersonStamps :one\nMATCH (p:Person) RETURN p.stamps AS stamps\n"
 
 	// The second target's schema and query, sharing no label with the
 	// first's.
@@ -274,14 +274,14 @@ func TestGenerateDriverAxis(t *testing.T) {
 // axis that dropped it, which is what the author acts on.
 func TestGenerateApacheAgeRejectsQueriesItCannotServe(t *testing.T) {
 	dir := writeProject(t)
-	writeFixtureFile(t, filepath.Join(dir, "schema.gql"), listSchema)
-	writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), listQuery)
+	writeFixtureFile(t, filepath.Join(dir, "schema.gql"), uncarriedSchema)
+	writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), uncarriedQuery)
 	writeFixtureFile(t, filepath.Join(dir, config.DefaultFilename), configYAML("people", "apache-age-pgx-v5", ""))
 
 	_, stderr, err := runGenerateIn(t, dir)
 	require.ErrorContains(t, err, "graph[0]: unsupported query: ")
-	require.ErrorContains(t, err, `1 query would be dropped: PersonTags (column "tags" projects a list property)`)
-	require.Contains(t, stderr, "1 query would be dropped: PersonTags")
+	require.ErrorContains(t, err, `1 query would be dropped: PersonStamps (column "stamps" projects property:LIST<TIMESTAMP>)`)
+	require.Contains(t, stderr, "1 query would be dropped: PersonStamps")
 	require.NoDirExists(t, filepath.Join(dir, "out"))
 }
 

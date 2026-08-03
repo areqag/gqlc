@@ -1005,6 +1005,23 @@ func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex m
 		if !ok {
 			return nil, fmt.Errorf("%w: list element has unrepresentable property width %s", ErrUnrepresentableWidth, tt.Type)
 		}
+		// A list element that is itself a list gets a nested plan, the same
+		// shape the ResolvedList arm below builds. Without it the element
+		// carries the whole slice type on a ColumnProperty plan, and the
+		// render layer's scalar arm asserts a driver value straight to it —
+		// `elem.([]float32)` for LIST<LIST<FLOAT32>>, which no Bolt driver
+		// ever satisfies. The width is the same either way, so this changes
+		// what the decode walks and not what the caller is handed.
+		if tt.Type.Kind() == graph.KindList {
+			nested, err := buildListElemPlan(resolver.ResolvedProperty{
+				Type:     tt.Type.Elem(),
+				Nullable: !tt.Type.ElemNotNull(),
+			}, entities, entityIndex, tm, unionIdx, unionInterfaceName)
+			if err != nil {
+				return nil, err
+			}
+			return &ListElem{Kind: ColumnList, GoType: ty, Nested: nested}, nil
+		}
 		return &ListElem{Kind: ColumnProperty, GoType: ty}, nil
 	case resolver.ResolvedNode:
 		idx, ok := entityIndex[entityLookupKey{Kind: EntityNode, Labels: tt.Labels}]

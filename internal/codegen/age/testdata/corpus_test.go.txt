@@ -303,6 +303,349 @@ func TestDecodeZeroPropertyVertex(t *testing.T) {
 	}
 }
 
+// The list and open-shape texts below were captured the same way the
+// scalars and entities above were, by writing the values through
+// cypher() and reading back what pgx scans (apache/age 1.7.0). Three
+// things visible in them shape the decoders: AGE separates elements with
+// a comma and a space, a string element is JSON-escaped so a delimiter
+// inside one ends nothing, and a list-valued property that is null
+// arrives as no key at all — listyNulls carries no "depths".
+const (
+	listy      = `{"id": 844424930131969, "label": "Listy", "properties": {"tags": ["x", "y"], "ranks": [1, -2, 2147483647], "depths": [0.5, 1.5], "matrix": [[1], [2, 3]]}}::vertex`
+	listyEmpty = `{"id": 844424930131970, "label": "Listy", "properties": {"tags": [], "ranks": [], "depths": [], "matrix": [[]]}}::vertex`
+	listyNulls = `{"id": 844424930131971, "label": "Listy", "properties": {"tags": ["a, b] c\": {d", ""], "ranks": [0], "matrix": []}}::vertex`
+
+	anyInt = `{"id": 1125899906842625, "label": "Anything", "properties": {"other": "text", "payload": 42}}::vertex`
+	anyMap = `{"id": 1125899906842626, "label": "Anything", "properties": {"payload": {"a": 1, "b": [true, null, "z"], "c": {"d": 1.5}}}}::vertex`
+	anyList = `{"id": 1125899906842627, "label": "Anything", "properties": {"payload": [1, "two", 3.5, true, null, [1, 2], {"k": "v"}]}}::vertex`
+)
+
+func TestAgtypeListOfString(t *testing.T) {
+	accepts := map[string][]string{
+		`["x", "y"]`: {"x", "y"},
+		// The want here is an empty slice and not nil, and slicesEqual holds
+		// the difference: AGE sent a list, so what reaches the caller has to
+		// be one.
+		`[]`:                     {},
+		`["a"]`:                  {"a"},
+		`[""]`:                   {""},
+		// A delimiter inside an element ends nothing: the element is
+		// stepped over whole before the split looks for the next comma.
+		`["a, b] c\": {d", ""]`: {`a, b] c": {d`, ""},
+	}
+	for raw, want := range accepts {
+		got, err := agtypeListOfString([]byte(raw))
+		if err != nil {
+			t.Errorf("agtypeListOfString(%s) = error %v, want %v", raw, err, want)
+			continue
+		}
+		if !slicesEqual(got, want) {
+			t.Errorf("agtypeListOfString(%s) = %#v, want %#v", raw, got, want)
+		}
+	}
+
+	// Every shape that is not an agtype list. Taking any of them would
+	// hand the caller a slice built from something the graph does not
+	// hold as one.
+	for _, raw := range []string{
+		``,
+		`null`,
+		`42`,
+		`"x"`,
+		`true`,
+		`{"a": 1}`,
+		`[1, 2`,
+		`1, 2]`,
+		`["x"] ["y"]`,
+		`{"id": 1, "label": "Listy", "properties": {}}::vertex`,
+	} {
+		if got, err := agtypeListOfString([]byte(raw)); err == nil {
+			t.Errorf("agtypeListOfString(%s) = %#v, want an error", raw, got)
+		}
+	}
+}
+
+// AGE stores whatever a writer wrote, so a property the schema declares
+// LIST<STRING> can arrive holding an element of any other agtype shape —
+// a number, a boolean, a nested structure, or the null that a list, unlike
+// a property, does carry inline. An element decoder that took one would
+// build a []string out of something else.
+func TestAgtypeListRefusesAnElementOfTheWrongScalar(t *testing.T) {
+	for _, raw := range []string{
+		`[42]`,
+		`["x", 42]`,
+		`["a", null, "c"]`,
+		`[true]`,
+		`[["x"]]`,
+		`[{"a": 1}]`,
+		`[1.5]`,
+		`[x]`,
+		`[, "x"]`,
+	} {
+		if got, err := agtypeListOfString([]byte(raw)); err == nil {
+			t.Errorf("agtypeListOfString(%s) = %#v, want an error", raw, got)
+		}
+	}
+	for _, raw := range []string{`["1"]`, `[1.5]`, `[true]`, `[null]`, `[[1]]`} {
+		if got, err := agtypeListOfInt32([]byte(raw)); err == nil {
+			t.Errorf("agtypeListOfInt32(%s) = %#v, want an error", raw, got)
+		}
+	}
+}
+
+// A nested list decodes through the decoder emitted for its own element
+// type, so the depth the schema declared is the depth the walk goes to
+// and an element one short of it fails rather than flattening.
+func TestAgtypeNestedList(t *testing.T) {
+	got, err := agtypeListOfListOfInt64([]byte(`[[1], [2, 3]]`))
+	if err != nil {
+		t.Fatalf("agtypeListOfListOfInt64([[1], [2, 3]]) = error %v", err)
+	}
+	if len(got) != 2 || !slicesEqual(got[0], []int64{1}) || !slicesEqual(got[1], []int64{2, 3}) {
+		t.Errorf("agtypeListOfListOfInt64([[1], [2, 3]]) = %#v, want [[1] [2 3]]", got)
+	}
+
+	// An empty outer list and a list holding one empty inner list are
+	// different values, and the wire spells them differently.
+	outer, err := agtypeListOfListOfInt64([]byte(`[]`))
+	if err != nil || outer == nil || len(outer) != 0 {
+		t.Errorf("agtypeListOfListOfInt64([]) = %#v, %v, want an empty slice", outer, err)
+	}
+	inner, err := agtypeListOfListOfInt64([]byte(`[[]]`))
+	if err != nil || len(inner) != 1 || inner[0] == nil || len(inner[0]) != 0 {
+		t.Errorf("agtypeListOfListOfInt64([[]]) = %#v, %v, want one empty slice", inner, err)
+	}
+
+	for _, raw := range []string{`[1]`, `[[1], 2]`, `[[1], null]`, `[["a"]]`, `[[[1]]]`} {
+		if bad, err := agtypeListOfListOfInt64([]byte(raw)); err == nil {
+			t.Errorf("agtypeListOfListOfInt64(%s) = %#v, want an error", raw, bad)
+		}
+	}
+}
+
+// A narrow element width rides the agtype scalar its carrier is and
+// converts per element, so the slice holds the width the schema declared
+// and not the carrier's.
+func TestAgtypeListOfNarrowElementWidth(t *testing.T) {
+	ranks, err := agtypeListOfInt32([]byte(`[1, -2, 2147483647]`))
+	if err != nil {
+		t.Fatalf("agtypeListOfInt32 = error %v", err)
+	}
+	if !slicesEqual(ranks, []int32{1, -2, 2147483647}) {
+		t.Errorf("agtypeListOfInt32([1, -2, 2147483647]) = %#v", ranks)
+	}
+
+	depths, err := agtypeListOfFloat32([]byte(`[0.5, 1.5]`))
+	if err != nil {
+		t.Fatalf("agtypeListOfFloat32 = error %v", err)
+	}
+	if !slicesEqual(depths, []float32{0.5, 1.5}) {
+		t.Errorf("agtypeListOfFloat32([0.5, 1.5]) = %#v", depths)
+	}
+}
+
+func TestDecodeVertexWithListProperties(t *testing.T) {
+	got, err := decodeListy([]byte(listy))
+	if err != nil {
+		t.Fatalf("decodeListy(listy) = error %v", err)
+	}
+	if !slicesEqual(got.Tags, []string{"x", "y"}) {
+		t.Errorf("decodeListy(listy).Tags = %#v", got.Tags)
+	}
+	if !slicesEqual(got.Ranks, []int32{1, -2, 2147483647}) {
+		t.Errorf("decodeListy(listy).Ranks = %#v", got.Ranks)
+	}
+	if len(got.Matrix) != 2 || !slicesEqual(got.Matrix[0], []int64{1}) || !slicesEqual(got.Matrix[1], []int64{2, 3}) {
+		t.Errorf("decodeListy(listy).Matrix = %#v", got.Matrix)
+	}
+	if got.Depths == nil || !slicesEqual(*got.Depths, []float32{0.5, 1.5}) {
+		t.Errorf("decodeListy(listy).Depths = %#v", got.Depths)
+	}
+
+	empty, err := decodeListy([]byte(listyEmpty))
+	if err != nil {
+		t.Fatalf("decodeListy(listyEmpty) = error %v", err)
+	}
+	// An empty list is a value the graph holds, and it is not the absence a
+	// nullable property reports. Both halves are checked: the pointer is
+	// non-nil, and the slice it addresses is an empty slice rather than the
+	// nil one an absent property would reach the caller as.
+	if empty.Depths == nil || *empty.Depths == nil || len(*empty.Depths) != 0 {
+		t.Errorf("decodeListy(listyEmpty).Depths = %#v, want a pointer to an empty slice", empty.Depths)
+	}
+	if empty.Tags == nil || len(empty.Tags) != 0 {
+		t.Errorf("decodeListy(listyEmpty).Tags = %#v, want an empty slice", empty.Tags)
+	}
+	if empty.Ranks == nil || len(empty.Ranks) != 0 {
+		t.Errorf("decodeListy(listyEmpty).Ranks = %#v, want an empty slice", empty.Ranks)
+	}
+	if len(empty.Matrix) != 1 || empty.Matrix[0] == nil || len(empty.Matrix[0]) != 0 {
+		t.Errorf("decodeListy(listyEmpty).Matrix = %#v, want one empty slice", empty.Matrix)
+	}
+
+	// AGE drops a property whose value is null, so a nullable list that
+	// is null arrives as no key — the same absence a nullable scalar
+	// arrives as.
+	nulls, err := decodeListy([]byte(listyNulls))
+	if err != nil {
+		t.Fatalf("decodeListy(listyNulls) = error %v", err)
+	}
+	if nulls.Depths != nil {
+		t.Errorf("decodeListy(listyNulls).Depths = %#v, want nil", nulls.Depths)
+	}
+	if !slicesEqual(nulls.Tags, []string{`a, b] c": {d`, ""}) {
+		t.Errorf("decodeListy(listyNulls).Tags = %#v", nulls.Tags)
+	}
+}
+
+// A property of no declared shape decodes through agtype's own value
+// vocabulary rather than through one width, so what the caller gets is
+// the shape the graph holds: agtype's integer and float land on Go's
+// int64 and float64, its list on []any and its map on map[string]any,
+// and the null it carries inline lands on nil.
+func TestAgtypeValue(t *testing.T) {
+	scalars := map[string]any{
+		`42`:           int64(42),
+		`-42`:          int64(-42),
+		`3::numeric`:   int64(3),
+		`1.5`:          1.5,
+		`1.0`:          1.0,
+		`1e+100`:       1e100,
+		`1.5::numeric`: 1.5,
+		`"two"`:        "two",
+		`""`:           "",
+		`"42"`:         "42",
+		`true`:         true,
+		`false`:        false,
+		`null`:         nil,
+	}
+	for raw, want := range scalars {
+		got, err := agtypeValue([]byte(raw))
+		if err != nil {
+			t.Errorf("agtypeValue(%s) = error %v, want %v", raw, err, want)
+			continue
+		}
+		if got != want {
+			t.Errorf("agtypeValue(%s) = %#v, want %#v", raw, got, want)
+		}
+	}
+
+	// A value out of int64's range is one AGE itself turned into a float,
+	// and it reaches the caller as the float it is rather than failing or
+	// truncating.
+	big, err := agtypeValue([]byte(`9.223372036854776e+18`))
+	if err != nil || big != 9.223372036854776e18 {
+		t.Errorf("agtypeValue(9.223372036854776e+18) = %#v, %v", big, err)
+	}
+	nan, err := agtypeValue([]byte(`NaN`))
+	if f, ok := nan.(float64); err != nil || !ok || !math.IsNaN(f) {
+		t.Errorf("agtypeValue(NaN) = %#v, %v, want NaN", nan, err)
+	}
+
+	list, err := agtypeValue([]byte(`[1, "two", 3.5, true, null, [1, 2], {"k": "v"}]`))
+	if err != nil {
+		t.Fatalf("agtypeValue(list) = error %v", err)
+	}
+	xs, ok := list.([]any)
+	if !ok || len(xs) != 7 {
+		t.Fatalf("agtypeValue(list) = %#v, want a []any of 7", list)
+	}
+	if xs[0] != int64(1) || xs[1] != "two" || xs[2] != 3.5 || xs[3] != true || xs[4] != nil {
+		t.Errorf("agtypeValue(list) = %#v", xs)
+	}
+	if nested, ok := xs[5].([]any); !ok || len(nested) != 2 || nested[0] != int64(1) {
+		t.Errorf("agtypeValue(list)[5] = %#v, want []any{1, 2}", xs[5])
+	}
+	if member, ok := xs[6].(map[string]any); !ok || member["k"] != "v" {
+		t.Errorf("agtypeValue(list)[6] = %#v, want map[k:v]", xs[6])
+	}
+
+	object, err := agtypeValue([]byte(`{"a": 1, "b": [true, null, "z"], "c": {"d": 1.5}}`))
+	if err != nil {
+		t.Fatalf("agtypeValue(map) = error %v", err)
+	}
+	m, ok := object.(map[string]any)
+	if !ok || len(m) != 3 || m["a"] != int64(1) {
+		t.Fatalf("agtypeValue(map) = %#v", object)
+	}
+	if b, ok := m["b"].([]any); !ok || len(b) != 3 || b[0] != true || b[1] != nil || b[2] != "z" {
+		t.Errorf("agtypeValue(map)[b] = %#v", m["b"])
+	}
+	if c, ok := m["c"].(map[string]any); !ok || c["d"] != 1.5 {
+		t.Errorf("agtypeValue(map)[c] = %#v", m["c"])
+	}
+
+	// Text outside agtype's value vocabulary is not a value of unknown
+	// shape, it is not a value: reading it as one would put a fabricated
+	// Go value in a caller's hands.
+	for _, raw := range []string{
+		``,
+		`  `,
+		`plain`,
+		`"unterminated`,
+		`[1, 2`,
+		`{"a": 1`,
+		`{"a"}`,
+		`1 2`,
+	} {
+		if got, err := agtypeValue([]byte(raw)); err == nil {
+			t.Errorf("agtypeValue(%s) = %#v, want an error", raw, got)
+		}
+	}
+}
+
+func TestDecodeVertexWithAnyProperty(t *testing.T) {
+	got, err := decodeAnything([]byte(anyInt))
+	if err != nil {
+		t.Fatalf("decodeAnything(anyInt) = error %v", err)
+	}
+	if got.Payload != int64(42) {
+		t.Errorf("decodeAnything(anyInt).Payload = %#v, want int64(42)", got.Payload)
+	}
+	// The property the schema declares nullable is absent here, and the
+	// pointer is what carries that: a non-nil pointer to a nil any would
+	// say the graph holds an untyped null.
+	if got.Maybe != nil {
+		t.Errorf("decodeAnything(anyInt).Maybe = %#v, want nil", got.Maybe)
+	}
+
+	object, err := decodeAnything([]byte(anyMap))
+	if err != nil {
+		t.Fatalf("decodeAnything(anyMap) = error %v", err)
+	}
+	if m, ok := object.Payload.(map[string]any); !ok || m["a"] != int64(1) {
+		t.Errorf("decodeAnything(anyMap).Payload = %#v", object.Payload)
+	}
+
+	list, err := decodeAnything([]byte(anyList))
+	if err != nil {
+		t.Fatalf("decodeAnything(anyList) = error %v", err)
+	}
+	if xs, ok := list.Payload.([]any); !ok || len(xs) != 7 {
+		t.Errorf("decodeAnything(anyList).Payload = %#v", list.Payload)
+	}
+}
+
+// slicesEqual is the corpus module's own comparison: the module requires
+// nothing, so testify is unavailable and this is one line rather than a
+// dependency. A nil slice and an empty one are not equal here: the graph
+// holding an empty list and the graph holding nothing are different
+// answers, and length alone cannot tell them apart.
+func slicesEqual[T comparable](got, want []T) bool {
+	if (got == nil) != (want == nil) {
+		return false
+	}
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestDecodeEdge(t *testing.T) {
 	got, err := decodeACTEDIN([]byte(actedIn))
 	if err != nil {

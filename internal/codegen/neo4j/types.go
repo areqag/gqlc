@@ -144,7 +144,20 @@ func (typeMap) Scalar(k resolver.Scalar) string {
 // the emission wants to produce. Integer widths widen to int64; float
 // widths widen to float64; string / bool pass through. The caller
 // narrows via a Go conversion.
+//
+// A slice widens to []any, which is the only shape a Bolt driver has for
+// one. neo4j.PropertyValue admits []byte and []any and no other slice,
+// GetProperty's own doc says "any property array value other than byte
+// array is typed as []any", and the hydrator builds exactly that:
+// `func (h *hydrator) array() []any`. So the element widths the schema
+// declared are not on the wire to be asserted — a LIST<STRING> arrives
+// as []any holding strings, and narrowing it is per element rather than
+// whole. []byte is the exception because BYTES is the one width the
+// driver does hand back as a Go slice of its own.
 func driverCarrier(goType string) string {
+	if isSliceType(goType) {
+		return "[]any"
+	}
 	switch goType {
 	case "int", "int8", "int16", "int32", "int64",
 		"uint", "uint8", "uint16", "uint32", "uint64":

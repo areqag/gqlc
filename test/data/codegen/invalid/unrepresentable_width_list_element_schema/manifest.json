@@ -1,5 +1,5 @@
 {
-  "package": "unrepresentablewidthanyschema",
+  "package": "unrepresentablewidthlistelementschema",
   "queryFiles": ["queries.cypher"],
   "targets": ["apache-age-pgx-v5"],
   "expectedError": "codegen.ErrUnrepresentableWidth"

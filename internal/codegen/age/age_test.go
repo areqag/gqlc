@@ -233,6 +233,13 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 		}}
 		return q
 	}()
+	execUncarriedParam := func() codegen.NamedQuery {
+		q := execQuery("Batch")
+		q.Validated.Parameters = []resolver.ResolvedParameter{{
+			Name: "at", Type: resolver.ResolvedProperty{Type: graph.TypeTimestamp},
+		}}
+		return q
+	}()
 	node := moved("Whole", func(q *codegen.NamedQuery) {
 		q.Validated.Columns = []resolver.Column{{
 			Name: "p", Type: resolver.ResolvedNode{Labels: graph.LabelSetKey(personLabel)},
@@ -259,6 +266,21 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 	listParam := moved("Batch", func(q *codegen.NamedQuery) {
 		q.Validated.Parameters = []resolver.ResolvedParameter{{
 			Name: "ids", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeInt, true)},
+		}}
+	})
+	listProp := moved("Tagged", func(q *codegen.NamedQuery) {
+		q.Validated.Columns = []resolver.Column{{
+			Name: "t", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.ListOf(graph.TypeString, true), true)},
+		}}
+	})
+	anyProp := moved("Payload", func(q *codegen.NamedQuery) {
+		q.Validated.Columns = []resolver.Column{{
+			Name: "p", Type: resolver.ResolvedProperty{Type: graph.TypeAnyPropertyValue},
+		}}
+	})
+	uncarriedProp := moved("Stamp", func(q *codegen.NamedQuery) {
+		q.Validated.Columns = []resolver.Column{{
+			Name: "t", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeTimestamp, false)},
 		}}
 	})
 
@@ -311,9 +333,15 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 			}()},
 		},
 		{
-			name:      "an exec binding a list parameter is dropped",
-			queries:   []codegen.NamedQuery{execListParam},
-			wantSub:   `1 query would be dropped: Batch (parameter $ids is a list)`,
+			// The argument object is JSON, whose syntax agtype reads, so a
+			// slice crosses as the agtype list AGE substitutes.
+			name:    "an exec binding a list parameter generates",
+			queries: []codegen.NamedQuery{execListParam},
+		},
+		{
+			name:      "an exec binding an uncarried parameter width is dropped",
+			queries:   []codegen.NamedQuery{execUncarriedParam},
+			wantSub:   `1 query would be dropped: Batch (parameter $at is property:TIMESTAMP)`,
 			wantError: true,
 		},
 		{
@@ -347,15 +375,32 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 			wantError: true,
 		},
 		{
-			name:      "a list parameter is dropped",
-			queries:   []codegen.NamedQuery{listParam},
-			wantSub:   `1 query would be dropped: Batch (parameter $ids is a list)`,
+			name:    "a list parameter generates",
+			queries: []codegen.NamedQuery{listParam},
+		},
+		{
+			// A list property is served exactly when its element width is,
+			// at whatever depth, and a property of no declared shape is
+			// served through agtype's own value vocabulary.
+			name:    "a nested list-property column generates",
+			queries: []codegen.NamedQuery{listProp},
+		},
+		{
+			name:    "a column of no declared shape generates",
+			queries: []codegen.NamedQuery{anyProp},
+		},
+		{
+			// The declared width is what the report names, not the element's:
+			// LIST<TIMESTAMP> is the line the author can go and find.
+			name:      "a list of an uncarried element width is dropped",
+			queries:   []codegen.NamedQuery{uncarriedProp},
+			wantSub:   `1 query would be dropped: Stamp (column "t" projects property:LIST<TIMESTAMP>)`,
 			wantError: true,
 		},
 		{
 			name:      "every dropped query is named, in batch order",
-			queries:   []codegen.NamedQuery{execListParam, mapCol, list},
-			wantSub:   "3 queries would be dropped: Batch (parameter $ids is a list), Bag (column \"m\" projects scalar(map)), Tags (column \"t\" projects list)",
+			queries:   []codegen.NamedQuery{execUncarriedParam, mapCol, list},
+			wantSub:   "3 queries would be dropped: Batch (parameter $at is property:TIMESTAMP), Bag (column \"m\" projects scalar(map)), Tags (column \"t\" projects list)",
 			wantError: true,
 		},
 		{
