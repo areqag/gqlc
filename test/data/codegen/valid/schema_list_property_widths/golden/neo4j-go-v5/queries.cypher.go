@@ -89,11 +89,19 @@ func (q *Queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, erro
 		if !isNil {
 			acc := make([][]float32, 0, len(value3))
 			for i, elem := range value3 {
-				v, ok := elem.([]float32)
+				inner, ok := elem.([]any)
 				if !ok {
-					return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected []float32, got %T", "matrix", i, elem)
+					return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected []any, got %T", "matrix", i, elem)
 				}
-				acc = append(acc, v)
+				innerAcc := make([]float32, 0, len(inner))
+				for i, elem4 := range inner {
+					v, ok := elem4.(float64)
+					if !ok {
+						return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected float64, got %T", "matrix", i, elem4)
+					}
+					innerAcc = append(innerAcc, float32(v))
+				}
+				acc = append(acc, innerAcc)
 			}
 			value3Ptr = &acc
 		}

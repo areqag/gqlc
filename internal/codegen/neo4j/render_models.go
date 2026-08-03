@@ -194,10 +194,14 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 		b.WriteString("\t\tif !ok {\n")
 		fmt.Fprintf(b, "\t\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: property %%q: expected %s, got %%T\", %q, v)\n", e.Name, e.Name, f.Field, carrier, f.PropName)
 		b.WriteString("\t\t}\n")
-		if carrier != f.GoType {
+		switch {
+		case isSliceType(f.GoType):
+			writeSliceNarrow(b, e, f, f.GoType, "s", "narrowed", "\t\t", 0)
+			fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
+		case carrier != f.GoType:
 			fmt.Fprintf(b, "\t\tnarrowed := %s(s)\n", f.GoType)
 			fmt.Fprintf(b, "\t\tout.%s = &narrowed\n", f.Field)
-		} else {
+		default:
 			fmt.Fprintf(b, "\t\tout.%s = &s\n", f.Field)
 		}
 		b.WriteString("\t}\n")
@@ -208,9 +212,69 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 	b.WriteString("\tif err != nil {\n")
 	fmt.Fprintf(b, "\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: %%w\", err)\n", e.Name, e.Name, f.Field)
 	b.WriteString("\t}\n")
-	if carrier != f.GoType {
+	switch {
+	case isSliceType(f.GoType):
+		narrowed := value + "s"
+		writeSliceNarrow(b, e, f, f.GoType, value, narrowed, "\t", 0)
+		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, narrowed)
+	case carrier != f.GoType:
 		fmt.Fprintf(b, "\tout.%s = %s(%s)\n", f.Field, f.GoType, value)
-	} else {
+	default:
 		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, value)
 	}
+}
+
+// isSliceType reports whether an emitted Go type is a slice this package
+// has to walk element by element. []byte is excluded: BYTES is the one
+// width the driver hands back as a Go slice of its own, so it arrives
+// already narrowed and asserting straight to it is correct.
+func isSliceType(goType string) bool {
+	return strings.HasPrefix(goType, "[]") && goType != "[]byte"
+}
+
+// writeSliceNarrow emits the walk that turns the driver's []any into the
+// slice type the schema declared, binding it to dst.
+//
+// The driver has no narrower carrier to offer. neo4j.PropertyValue admits
+// []byte and []any and nothing else with a slice shape, and the hydrator
+// builds every non-byte array as []any whatever the elements turned out
+// to be, so a LIST<STRING> property arrives as []any of string and the
+// []string the caller reads is this package's to build. Recursion handles
+// a list of lists, which arrives as []any of []any.
+//
+// Locals are suffixed by depth rather than named after anything in the
+// schema, so a property whose name collides with one of them cannot emit
+// a redeclaration.
+func writeSliceNarrow(b *strings.Builder, e codegen.Entity, f codegen.EntityField, sliceType, src, dst, indent string, depth int) {
+	elem := strings.TrimPrefix(sliceType, "[]")
+	item := fmt.Sprintf("elem%d", depth)
+	idx := fmt.Sprintf("i%d", depth)
+	fail := fmt.Sprintf("return %s{}, fmt.Errorf(\"decode %s.%s: property %%q", e.Name, e.Name, f.Field)
+
+	fmt.Fprintf(b, "%s%s := make(%s, 0, len(%s))\n", indent, dst, sliceType, src)
+	fmt.Fprintf(b, "%sfor %s, %s := range %s {\n", indent, idx, item, src)
+	body := indent + "\t"
+	if isSliceType(elem) {
+		inner := fmt.Sprintf("nested%d", depth)
+		acc := fmt.Sprintf("acc%d", depth)
+		fmt.Fprintf(b, "%s%s, ok := %s.([]any)\n", body, inner, item)
+		fmt.Fprintf(b, "%sif !ok {\n", body)
+		fmt.Fprintf(b, "%s\t%s element %%d: expected []any, got %%T\", %q, %s, %s)\n", body, fail, f.PropName, idx, item)
+		fmt.Fprintf(b, "%s}\n", body)
+		writeSliceNarrow(b, e, f, elem, inner, acc, body, depth+1)
+		fmt.Fprintf(b, "%s%s = append(%s, %s)\n", body, dst, dst, acc)
+		fmt.Fprintf(b, "%s}\n", indent)
+		return
+	}
+	carrier := driverCarrier(elem)
+	fmt.Fprintf(b, "%sv%d, ok := %s.(%s)\n", body, depth, item, carrier)
+	fmt.Fprintf(b, "%sif !ok {\n", body)
+	fmt.Fprintf(b, "%s\t%s element %%d: expected %s, got %%T\", %q, %s, %s)\n", body, fail, carrier, f.PropName, idx, item)
+	fmt.Fprintf(b, "%s}\n", body)
+	if carrier != elem {
+		fmt.Fprintf(b, "%s%s = append(%s, %s(v%d))\n", body, dst, dst, elem, depth)
+	} else {
+		fmt.Fprintf(b, "%s%s = append(%s, v%d)\n", body, dst, dst, depth)
+	}
+	fmt.Fprintf(b, "%s}\n", indent)
 }

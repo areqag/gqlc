@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/printer"
@@ -788,6 +789,71 @@ func receiverName(t *testing.T, path string, d *ast.FuncDecl) string {
 	ident, ok := expr.(*ast.Ident)
 	require.True(t, ok, "%s: %s hangs off a %T", path, d.Name.Name, expr)
 	return ident.Name
+}
+
+// driverSliceCarriers is every slice type a Bolt driver can hand back
+// for a property or a list element. neo4j.PropertyValue is
+//
+//	bool | int64 | float64 | string | Point2D | Point3D |
+//	Date | LocalTime | LocalDateTime | Time | Duration | time.Time |
+//	[]byte | []any
+//
+// under v5 (neo4j/graph.go:25) and the same plus the Vector and UUID
+// named types under v6, and GetProperty's own doc says "any property
+// array value other than byte array is typed as []any". The hydrator
+// builds one: `func (h *hydrator) array() []any` (internal/bolt/
+// hydrator.go). So these two are the whole set, whatever the schema
+// declared the element width to be.
+var driverSliceCarriers = map[string]bool{"[]any": true, "[]byte": true}
+
+// TestNeo4jGoldensAssertOnlyDriverCarriers pins the emitted decode
+// against the driver's type set rather than against the schema's. A
+// property declared LIST<STRING> is a []string in the struct the caller
+// writes against, but it never arrives as one: Bolt hydrates every
+// array but a byte array into []any and narrows nothing, so `v.([]string)`
+// is an assertion that is false for every value the driver can produce.
+// Such an assertion is not a decode, it is a decode that always fails,
+// and the emission has to walk the []any and convert element by element
+// instead.
+//
+// Swept syntactically over every neo4j golden rather than checked on one
+// fixture, because the defect is a missing arm and a missing arm is
+// invisible wherever no fixture reaches it. The sweep asserts a property
+// of the text and not equality with a stored blob, so -update cannot
+// bless a violation: regeneration rewrites the goldens from the same
+// emission, and an emission that still names []string still fails here.
+func TestNeo4jGoldensAssertOnlyDriverCarriers(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join(fixtureRoot(), "valid", "*", "golden", "neo4j-go-v*", "*.go"))
+	require.NoError(t, err)
+	require.NotEmpty(t, paths, "no neo4j golden was swept, so this test holds nothing")
+
+	var offenders []string
+	asserted := 0
+	fset := token.NewFileSet()
+	for _, path := range paths {
+		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		require.NoError(t, err, "parsing %s", path)
+		ast.Inspect(file, func(n ast.Node) bool {
+			assertion, ok := n.(*ast.TypeAssertExpr)
+			if !ok || assertion.Type == nil {
+				return true
+			}
+			asserted++
+			if _, isSlice := assertion.Type.(*ast.ArrayType); !isSlice {
+				return true
+			}
+			named := render(t, fset, assertion.Type)
+			if driverSliceCarriers[named] {
+				return true
+			}
+			offenders = append(offenders, fmt.Sprintf("%s:%d: %s",
+				path, fset.Position(assertion.Pos()).Line, render(t, fset, assertion)))
+			return true
+		})
+	}
+	require.NotZero(t, asserted, "no type assertion was examined, so the sweep passed vacuously")
+	require.Empty(t, offenders,
+		"a Bolt driver hands back []any for every property array but a byte array, so these assertions are false for every value it can produce")
 }
 
 // TestGoldenBuild compiles the nested test/data/codegen module so that

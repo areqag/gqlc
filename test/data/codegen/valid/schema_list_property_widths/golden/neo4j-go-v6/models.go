@@ -23,11 +23,19 @@ type Reading struct {
 func decodeReading(node dbtype.Node) (Reading, error) {
 	var out Reading
 	if v, ok := node.Props["flags"]; ok {
-		s, ok := v.([]bool)
+		s, ok := v.([]any)
 		if !ok {
-			return Reading{}, fmt.Errorf("decode Reading.Flags: property %q: expected []bool, got %T", "flags", v)
+			return Reading{}, fmt.Errorf("decode Reading.Flags: property %q: expected []any, got %T", "flags", v)
 		}
-		out.Flags = &s
+		narrowed := make([]bool, 0, len(s))
+		for i0, elem0 := range s {
+			v0, ok := elem0.(bool)
+			if !ok {
+				return Reading{}, fmt.Errorf("decode Reading.Flags: property %q element %d: expected bool, got %T", "flags", i0, elem0)
+			}
+			narrowed = append(narrowed, v0)
+		}
+		out.Flags = &narrowed
 	}
 	value1, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
@@ -35,25 +43,57 @@ func decodeReading(node dbtype.Node) (Reading, error) {
 	}
 	out.Id = value1
 	if v, ok := node.Props["matrix"]; ok {
-		s, ok := v.([][]float32)
+		s, ok := v.([]any)
 		if !ok {
-			return Reading{}, fmt.Errorf("decode Reading.Matrix: property %q: expected [][]float32, got %T", "matrix", v)
+			return Reading{}, fmt.Errorf("decode Reading.Matrix: property %q: expected []any, got %T", "matrix", v)
 		}
-		out.Matrix = &s
+		narrowed := make([][]float32, 0, len(s))
+		for i0, elem0 := range s {
+			nested0, ok := elem0.([]any)
+			if !ok {
+				return Reading{}, fmt.Errorf("decode Reading.Matrix: property %q element %d: expected []any, got %T", "matrix", i0, elem0)
+			}
+			acc0 := make([]float32, 0, len(nested0))
+			for i1, elem1 := range nested0 {
+				v1, ok := elem1.(float64)
+				if !ok {
+					return Reading{}, fmt.Errorf("decode Reading.Matrix: property %q element %d: expected float64, got %T", "matrix", i1, elem1)
+				}
+				acc0 = append(acc0, float32(v1))
+			}
+			narrowed = append(narrowed, acc0)
+		}
+		out.Matrix = &narrowed
 	}
 	if v, ok := node.Props["ranks"]; ok {
-		s, ok := v.([]int32)
+		s, ok := v.([]any)
 		if !ok {
-			return Reading{}, fmt.Errorf("decode Reading.Ranks: property %q: expected []int32, got %T", "ranks", v)
+			return Reading{}, fmt.Errorf("decode Reading.Ranks: property %q: expected []any, got %T", "ranks", v)
 		}
-		out.Ranks = &s
+		narrowed := make([]int32, 0, len(s))
+		for i0, elem0 := range s {
+			v0, ok := elem0.(int64)
+			if !ok {
+				return Reading{}, fmt.Errorf("decode Reading.Ranks: property %q element %d: expected int64, got %T", "ranks", i0, elem0)
+			}
+			narrowed = append(narrowed, int32(v0))
+		}
+		out.Ranks = &narrowed
 	}
 	if v, ok := node.Props["tags"]; ok {
-		s, ok := v.([]string)
+		s, ok := v.([]any)
 		if !ok {
-			return Reading{}, fmt.Errorf("decode Reading.Tags: property %q: expected []string, got %T", "tags", v)
+			return Reading{}, fmt.Errorf("decode Reading.Tags: property %q: expected []any, got %T", "tags", v)
 		}
-		out.Tags = &s
+		narrowed := make([]string, 0, len(s))
+		for i0, elem0 := range s {
+			v0, ok := elem0.(string)
+			if !ok {
+				return Reading{}, fmt.Errorf("decode Reading.Tags: property %q element %d: expected string, got %T", "tags", i0, elem0)
+			}
+			narrowed = append(narrowed, v0)
+		}
+		out.Tags = &narrowed
 	}
 	return out, nil
 }
