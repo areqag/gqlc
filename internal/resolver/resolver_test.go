@@ -843,10 +843,16 @@ func (s *ResolverSuite) TestMixedSymmetryIsAcceptedAndTheMarkerNarrows() {
 //
 // The twins are *read off the fixture's own pattern* (undirectedEdgePattern),
 // not written out here. A guard built from its own hard-coded endpoints proves
-// two pairs exist somewhere in the schema and says nothing about the query under
-// test: narrowing the fixture's right endpoint to a single satisfying type
+// two pairs exist somewhere in the schema and holds nothing against the query
+// under test: narrowing the fixture's right endpoint to a single satisfying type
 // leaves one pair and a message pin that still passes, which is the
 // green-because-it-is-looking-at-nothing mode this fixture exists to close.
+//
+// What is read off is each endpoint's label expression as written, which the
+// twins put back through node satisfaction. On this fixture's two VarEndpoints
+// that is the relation the resolver used too, so the twins probe the set the
+// fixture closed over; on an inline endpoint it would not be. See
+// endpointLabels below.
 //
 // The message is read with edgeKeyInMessage and matched as a set, because one
 // key's rendering is a substring of another's — Person-[REVIEWED]->Company sits
@@ -930,7 +936,8 @@ func (p edgePattern) directed(from, to graph.LabelSetKey) string {
 // longer has the shape the guard reports.
 //
 // An endpoint's labels live on the NodeBinding it names, or inline on the
-// endpoint itself; both are the same thing to the closure, so both are read.
+// endpoint itself, and both are read — but they are not the same thing to the
+// closure, which is endpointLabels' subject.
 func (s *ResolverSuite) undirectedEdgePattern(q query.Query) edgePattern {
 	var (
 		got   edgePattern
@@ -965,7 +972,20 @@ func (s *ResolverSuite) undirectedEdgePattern(q query.Query) edgePattern {
 }
 
 // endpointLabels is the label expression one end of a pattern was written with:
-// the labels of the NodeBinding a variable endpoint names, or the inline set.
+// the labels of the NodeBinding a variable endpoint names, or the inline set. It
+// is the spelled expression, not the key the resolver closed the edge over, and
+// directed() re-spells it as `(x:Labels)` — so the twin puts it back through
+// node satisfaction.
+//
+// For a VarEndpoint that is faithful: the resolver reaches its key by satisfying
+// the same spelled labels, so the twin probes the set the fixture closed over.
+// For an InlineEndpoint it is not. The resolver's own endpointLabels keys an
+// inline end on the labels as spelled — an exact match against declared
+// identity rather than a satisfaction test, a known gap tracked as gqlc-h9n.23 —
+// so a twin of an inline endpoint can probe a strictly wider candidate set than
+// the fixture itself saw. No fixture reaching here carries one today; rewriting
+// an end to the inline form would need this helper reconciled with the resolver
+// first, or the twins stop reporting on the query under test.
 func (s *ResolverSuite) endpointLabels(e query.Endpoint, nodes map[string]graph.LabelSetKey) graph.LabelSetKey {
 	switch ep := e.(type) {
 	case query.VarEndpoint:
