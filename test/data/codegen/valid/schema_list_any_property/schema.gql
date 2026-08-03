@@ -1,0 +1,8 @@
+CREATE PROPERTY GRAPH TYPE SchemaListAnyProperty AS {
+    (:Bin {
+        id    :: INT64 NOT NULL,
+        bag   :: LIST<ANY VALUE>,
+        loose :: LIST NOT NULL,
+        piles :: LIST<LIST<ANY VALUE>>
+    })
+}

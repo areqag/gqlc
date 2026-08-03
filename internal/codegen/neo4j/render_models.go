@@ -66,8 +66,18 @@ func renderModels(pkg string, entities []codegen.Entity, prepared []codegen.Quer
 	anyTime := false
 	for _, e := range entities {
 		for _, f := range e.Fields {
-			anyProp = true
-			if !f.Nullable {
+			// fmt is emitted for the decode failures and neo4j for
+			// GetProperty, and a property of no declared shape moves
+			// both: it never reaches GetProperty at all
+			// (ridesADriverCarrier), and on the nullable arm its read
+			// is a Props lookup whose miss is the schema's null rather
+			// than a failure to report. A schema of nothing but those
+			// imports neither package, and an import nothing names
+			// does not compile.
+			if !f.Nullable || ridesADriverCarrier(f.GoType) {
+				anyProp = true
+			}
+			if !f.Nullable && ridesADriverCarrier(f.GoType) {
 				anyNonNull = true
 			}
 			// A list property names its leaf type, not its slice
@@ -195,6 +205,10 @@ func writeEntityDecodeHelper(b *strings.Builder, e codegen.Entity) {
 // argument itself would emit a redeclaration, and generation would still
 // exit 0 because the format gate only parses.
 func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codegen.EntityField, arg string) {
+	if !ridesADriverCarrier(f.GoType) {
+		writeShapelessFieldDecode(b, e, i, f, arg)
+		return
+	}
 	carrier := driverCarrier(f.GoType)
 	if f.Nullable {
 		fmt.Fprintf(b, "\tif v, ok := %s.Props[%q]; ok {\n", arg, f.PropName)
@@ -232,12 +246,62 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 	}
 }
 
+// writeShapelessFieldDecode emits the read of a property of no declared
+// shape — ANY VALUE, whose emitted Go type is `any`. It is the one width
+// that takes neither of the driver's two entry points, so it goes
+// through the Props map directly (see ridesADriverCarrier).
+//
+// Absence is the schema's null on the nullable arm and a decode failure
+// on the non-nullable one, worded the way neo4j.GetProperty words its
+// own miss so that a caller cannot tell which arm reported it.
+func writeShapelessFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codegen.EntityField, arg string) {
+	if f.Nullable {
+		fmt.Fprintf(b, "\tif v, ok := %s.Props[%q]; ok {\n", arg, f.PropName)
+		fmt.Fprintf(b, "\t\tout.%s = &v\n", f.Field)
+		b.WriteString("\t}\n")
+		return
+	}
+	value := valueName(i)
+	fmt.Fprintf(b, "\t%s, ok := %s.Props[%q]\n", value, arg, f.PropName)
+	b.WriteString("\tif !ok {\n")
+	fmt.Fprintf(b, "\t\treturn %s{}, fmt.Errorf(\"decode %s.%s: could not find any property named %%s\", %q)\n", e.Name, e.Name, f.Field, f.PropName)
+	b.WriteString("\t}\n")
+	fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, value)
+}
+
 // isSliceType reports whether an emitted Go type is a slice this package
-// has to walk element by element. []byte is excluded: BYTES is the one
-// width the driver hands back as a Go slice of its own, so it arrives
-// already narrowed and asserting straight to it is correct.
+// has to walk element by element. Two are excluded, and they are exactly
+// the two slice shapes neo4j.PropertyValue admits, so each arrives as
+// itself and asserting straight to it is correct:
+//
+//   - []byte, because BYTES is the one width the driver hands back as a
+//     Go slice of its own;
+//   - []any, because that is the driver's carrier for every other array,
+//     so a property declared LIST<ANY VALUE> (or bare LIST) is already
+//     the value the caller is handed.
+//
+// The []any exclusion is not an optimisation. The walk narrows by
+// asserting each element to its carrier, and the carrier of an `any`
+// element is `any`: a type assertion on a nil interface value is false
+// whatever type it names, so walking a []any would fail the whole decode
+// on exactly the null element that width exists to carry — while AGE,
+// whose agtypeValue maps null to nil, hands the same graph value back
+// intact. Not walking is what keeps the two backends decoding the same
+// value.
 func isSliceType(goType string) bool {
-	return strings.HasPrefix(goType, "[]") && goType != "[]byte"
+	return strings.HasPrefix(goType, "[]") && goType != "[]byte" && goType != "[]any"
+}
+
+// ridesADriverCarrier reports whether a property's decode reaches the
+// driver's constrained generics at all. A property of no declared shape
+// does not. `any` is a member of neither neo4j.PropertyValue nor
+// neo4j.RecordValue, so neo4j.GetProperty[any] does not compile; and
+// `v.(any)` is false for exactly the null such a property is allowed to
+// hold. What is left is the Props map itself, whose value is already the
+// `any` the caller is handed — which is why this also moves the fmt and
+// neo4j import gates.
+func ridesADriverCarrier(goType string) bool {
+	return driverCarrier(goType) != "any"
 }
 
 // writeSliceNarrow emits the walk that turns the driver's []any into the
