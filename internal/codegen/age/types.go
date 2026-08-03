@@ -56,7 +56,16 @@ type typeMap struct{}
 // encodings for them are settled and recorded on gqlc-35yu.11 against
 // the day a backend-invariant carrier exists. DATE is the zero-padded
 // ISO 'YYYY-MM-DD' string, the one temporal spelling whose lexical order
-// is its chronological order at fixed width. DURATION is total
+// is its chronological order — across [0001-01-01, 9999-12-31] and
+// nowhere else, which is the whole of where the encoding is defined.
+// Outside it the width stops being fixed and the ordering goes with it:
+// year 10000 needs a fifth digit and sorts under 2024 because '1' <
+// '2', and a proleptic year before 1 CE needs a sign, which sorts under
+// every digit and so files the whole era at the front, ascending.
+// Whoever admits this width owes the encoder a range check that fails
+// the value rather than storing a string the database will mis-sort;
+// the fixed width is a precondition here, not a property of the type.
+// DURATION is total
 // microseconds in the integer scalar. TIME and LOCAL TIME are
 // microseconds since midnight in the integer scalar, in [0, 86_400e6):
 // same argument as TIMESTAMP, one width down, and the count is
