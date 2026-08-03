@@ -5,7 +5,7 @@ package float32parameter
 import "context"
 
 type ReadQuerier interface {
-	PeopleAtHeight(ctx context.Context, h float32) ([]string, error)
+	PeopleAtHeight(ctx context.Context, arg float32) ([]string, error)
 }
 
 type WriteQuerier interface {

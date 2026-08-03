@@ -190,7 +190,7 @@ const dropTaggedQueryText = `MATCH (r:Reading {tags: $tags}) DELETE r`
 // DropTagged executes the DropTagged query.
 //
 //	MATCH (r:Reading {tags: $tags}) DELETE r
-func (q *Queries) DropTagged(ctx context.Context, tags *[]string) error {
-	_, err := q.db.run(ctx, dropTaggedQueryText, map[string]any{"tags": tags}, neo4j.AccessModeWrite)
+func (q *Queries) DropTagged(ctx context.Context, arg *[]string) error {
+	_, err := q.db.run(ctx, dropTaggedQueryText, map[string]any{"tags": arg}, neo4j.AccessModeWrite)
 	return err
 }

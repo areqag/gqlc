@@ -91,8 +91,7 @@ func rowFieldName(colText string) (string, bool) {
 }
 
 // LowerFirstRune lowercases the first rune of s. Used for the
-// package-internal query-text const name (Query.Bare) and for
-// single-parameter argument names.
+// package-internal query-text const name (Query.Bare).
 func LowerFirstRune(s string) string {
 	if s == "" {
 		return ""
@@ -102,51 +101,52 @@ func LowerFirstRune(s string) string {
 	return string(runes)
 }
 
-// ParamLocal names the one identifier in an emitted method's signature
-// that the query text chose. A single-parameter method names its
-// argument after the parameter the author wrote; everything else in the
-// signature — the receiver, ctx, the Params struct of the two-or-more
-// form — is the generator's own name. Shared rather than per backend
-// because the signature it describes is backend-invariant surface: every
-// target emits this form, so every target inherits the collision.
-func ParamLocal(p Query) string {
-	if len(p.ParamFields) != 1 {
-		return ""
-	}
-	return LowerFirstRune(p.ParamFields[0].Field)
-}
-
-// Unshadowed adapts one generator-owned identifier so that the caller's
-// argument cannot capture it. Every identifier an emitted method body
-// resolves has to go through this — the locals it declares and the
-// package-level names it references alike, because Go resolves both in
-// the scope the parameter is bound in.
+// ParamArg is the identifier an emitted query method binds its
+// parameters to, whatever their number. The two-or-more form has always
+// bound a generated *Params struct under this name; the single-parameter
+// form binds the value itself under it, rather than under the name the
+// query author wrote after the dollar sign.
 //
-// A collision is not reliably a compile error. For
-// MATCH (p:Person) WHERE p.name = $stmt the argument is a string named
-// stmt and the statement composition assigns the composed SQL over it;
-// for $<bare>QueryText the argument silently *becomes* the statement,
-// since the const it displaces is a string and the composer takes a
-// string. The same shadowing against an INT64 property is only a build
-// failure, which is to say the property's width decided whether the
-// defect was loud.
+// Deriving that argument from the query text put an author-chosen
+// identifier into the same scope as the receiver, the context argument,
+// every local the emitted body declares and every package-level name it
+// resolves. $q and $ctx redeclared the two the signature binds itself;
+// $err, $records, $out, $stmt and $rows displaced a body local; $fmt and
+// $agtypeArgs displaced an import and a helper; $_ mangled to the empty
+// string and reached gofmt as a parameter with no name. Generation
+// reported none of it, because the format gate parses the emission and
+// does not type-check it.
 //
-// Underscores are appended until the name is free. That terminates on
-// the first pass, because a signature contributes at most one
-// query-chosen identifier — but the loop is what makes the result
-// unconditionally clear of it rather than clear by that argument.
-func Unshadowed(p Query, name string) string {
-	for name == ParamLocal(p) {
-		name += "_"
-	}
-	return name
-}
+// Renaming the generator's own names out of the way instead would need a
+// reserved set kept in sync with every future change to the emitted
+// body, and that set is not enumerable: fmt cannot be renamed without
+// aliasing the import, and the decode<Entity> helpers vary with the
+// user's schema. One generator-owned argument name closes the class
+// instead of shrinking it.
+//
+// Nothing the author wrote is lost. The parameter name stays the
+// driver-binding key, so the server still substitutes what the query
+// says; it stays the *Params and *Row field name, which is exported and
+// reached qualified (arg.MinAge) and so cannot be captured by anything;
+// and the Go argument is positional at every call site, so only godoc
+// and an editor hint ever read it.
+//
+// Shared rather than per backend because the signature it appears in is
+// backend-invariant surface (TestBackendInvariantSurface): every target
+// emits the same one.
+const ParamArg = "arg"
 
 // QueryTextConst names the package-level const holding a query's source
-// text. LowerFirstRune derives it and the single-parameter argument name
-// both, so $<bare>QueryText reproduces it exactly; the const is the side
-// that is free to move, being generator-owned and no part of the surface
-// a caller writes against.
+// text, derived from the method name the author declares in the
+// //  name: annotation.
+//
+// Method names are unique across the package; the names derived from them
+// are not. This one lands in the unexported namespace the decode<Entity>
+// helpers occupy, and those derive from schema labels rather than from
+// method names, so the two can meet: a node label FooQueryText alongside
+// a query named DecodeFoo emits decodeFooQueryText as both a const and a
+// func. The const is off sweepIdentifiers, so generation exits 0 and the
+// redeclaration surfaces at go build. That collision is gqlc-igs4.
 func QueryTextConst(p Query) string {
-	return Unshadowed(p, p.Bare+"QueryText")
+	return p.Bare + "QueryText"
 }

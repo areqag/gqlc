@@ -15,8 +15,8 @@ const markAdultsQueryText = `MATCH (p:Person) WHERE p.age >= $minAge SET p.check
 // MarkAdults executes the MarkAdults query.
 //
 //	MATCH (p:Person) WHERE p.age >= $minAge SET p.checked = true RETURN p
-func (q *Queries) MarkAdults(ctx context.Context, minAge int64) ([]Person, error) {
-	records, err := q.db.run(ctx, markAdultsQueryText, map[string]any{"minAge": minAge}, neo4j.AccessModeWrite)
+func (q *Queries) MarkAdults(ctx context.Context, arg int64) ([]Person, error) {
+	records, err := q.db.run(ctx, markAdultsQueryText, map[string]any{"minAge": arg}, neo4j.AccessModeWrite)
 	if err != nil {
 		return nil, err
 	}

@@ -48,12 +48,12 @@ const binByIdQueryText = `MATCH (b:Bin {id: $id}) RETURN b`
 // BinById executes the BinById query.
 //
 //	MATCH (b:Bin {id: $id}) RETURN b
-func (q *Queries) BinById(ctx context.Context, id int64) (Bin, error) {
+func (q *Queries) BinById(ctx context.Context, arg int64) (Bin, error) {
 	stmt, err := q.cypherStmt("$gqlc$", binByIdQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return Bin{}, err
 	}
-	args, err := agtypeArgs(map[string]any{"id": id})
+	args, err := agtypeArgs(map[string]any{"id": arg})
 	if err != nil {
 		return Bin{}, err
 	}

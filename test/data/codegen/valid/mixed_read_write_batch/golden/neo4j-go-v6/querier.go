@@ -5,11 +5,11 @@ package mixedreadwritebatch
 import "context"
 
 type ReadQuerier interface {
-	GetPersonName(ctx context.Context, id int64) (string, error)
+	GetPersonName(ctx context.Context, arg int64) (string, error)
 }
 
 type WriteQuerier interface {
-	RemovePerson(ctx context.Context, id int64) error
+	RemovePerson(ctx context.Context, arg int64) error
 }
 
 type Querier interface {

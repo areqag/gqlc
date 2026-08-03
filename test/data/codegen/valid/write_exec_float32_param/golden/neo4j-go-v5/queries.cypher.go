@@ -13,7 +13,7 @@ const markTallQueryText = `MATCH (p:Person) WHERE p.height >= $minHeight SET p.t
 // MarkTall executes the MarkTall query.
 //
 //	MATCH (p:Person) WHERE p.height >= $minHeight SET p.tall = true
-func (q *Queries) MarkTall(ctx context.Context, minHeight float32) error {
-	_, err := q.db.run(ctx, markTallQueryText, map[string]any{"minHeight": float64(minHeight)}, neo4j.AccessModeWrite)
+func (q *Queries) MarkTall(ctx context.Context, arg float32) error {
+	_, err := q.db.run(ctx, markTallQueryText, map[string]any{"minHeight": float64(arg)}, neo4j.AccessModeWrite)
 	return err
 }

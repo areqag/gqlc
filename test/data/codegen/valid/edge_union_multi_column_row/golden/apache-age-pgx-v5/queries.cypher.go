@@ -17,12 +17,12 @@ type PersonActionRow struct {
 // PersonAction executes the PersonAction query.
 //
 //	MATCH (p:Person)-[r:AUTHORED|LIKES]->(:Post) WHERE p.id = $id RETURN p, r
-func (q *Queries) PersonAction(ctx context.Context, id int64) (PersonActionRow, error) {
+func (q *Queries) PersonAction(ctx context.Context, arg int64) (PersonActionRow, error) {
 	stmt, err := q.cypherStmt("$gqlc$", personActionQueryText, "v0 ag_catalog.agtype, v1 ag_catalog.agtype")
 	if err != nil {
 		return PersonActionRow{}, err
 	}
-	args, err := agtypeArgs(map[string]any{"id": id})
+	args, err := agtypeArgs(map[string]any{"id": arg})
 	if err != nil {
 		return PersonActionRow{}, err
 	}

@@ -8,7 +8,7 @@ type ReadQuerier interface {
 }
 
 type WriteQuerier interface {
-	RemovePerson(ctx context.Context, id int64) error
+	RemovePerson(ctx context.Context, arg int64) error
 }
 
 type Querier interface {

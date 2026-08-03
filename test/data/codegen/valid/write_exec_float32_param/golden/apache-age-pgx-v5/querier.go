@@ -8,7 +8,7 @@ type ReadQuerier interface {
 }
 
 type WriteQuerier interface {
-	MarkTall(ctx context.Context, minHeight float32) error
+	MarkTall(ctx context.Context, arg float32) error
 }
 
 type Querier interface {

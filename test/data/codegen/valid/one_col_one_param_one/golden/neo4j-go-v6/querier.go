@@ -5,7 +5,7 @@ package onecoloneparamone
 import "context"
 
 type ReadQuerier interface {
-	PersonName(ctx context.Context, id int64) (string, error)
+	PersonName(ctx context.Context, arg int64) (string, error)
 }
 
 type WriteQuerier interface {

@@ -151,12 +151,12 @@ const dropTaggedQueryText = `MATCH (r:Reading {tags: $tags}) DELETE r`
 // DropTagged executes the DropTagged query.
 //
 //	MATCH (r:Reading {tags: $tags}) DELETE r
-func (q *Queries) DropTagged(ctx context.Context, tags *[]string) error {
+func (q *Queries) DropTagged(ctx context.Context, arg *[]string) error {
 	stmt, err := q.cypherStmt("$gqlc$", dropTaggedQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return err
 	}
-	args, err := agtypeArgs(map[string]any{"tags": tags})
+	args, err := agtypeArgs(map[string]any{"tags": arg})
 	if err != nil {
 		return err
 	}

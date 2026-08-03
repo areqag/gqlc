@@ -14,8 +14,8 @@ const getPersonNameQueryText = `MATCH (p:Person) WHERE p.id = $id RETURN p.name 
 // GetPersonName executes the GetPersonName query.
 //
 //	MATCH (p:Person) WHERE p.id = $id RETURN p.name AS name
-func (q *Queries) GetPersonName(ctx context.Context, id int64) (string, error) {
-	records, err := q.db.run(ctx, getPersonNameQueryText, map[string]any{"id": id}, neo4j.AccessModeRead)
+func (q *Queries) GetPersonName(ctx context.Context, arg int64) (string, error) {
+	records, err := q.db.run(ctx, getPersonNameQueryText, map[string]any{"id": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return "", err
 	}
@@ -40,7 +40,7 @@ const removePersonQueryText = `MATCH (p:Person) WHERE p.id = $id DELETE p`
 // RemovePerson executes the RemovePerson query.
 //
 //	MATCH (p:Person) WHERE p.id = $id DELETE p
-func (q *Queries) RemovePerson(ctx context.Context, id int64) error {
-	_, err := q.db.run(ctx, removePersonQueryText, map[string]any{"id": id}, neo4j.AccessModeWrite)
+func (q *Queries) RemovePerson(ctx context.Context, arg int64) error {
+	_, err := q.db.run(ctx, removePersonQueryText, map[string]any{"id": arg}, neo4j.AccessModeWrite)
 	return err
 }

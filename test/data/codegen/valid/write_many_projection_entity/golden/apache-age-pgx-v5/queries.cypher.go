@@ -12,12 +12,12 @@ const markAdultsQueryText = `MATCH (p:Person) WHERE p.age >= $minAge SET p.check
 // MarkAdults executes the MarkAdults query.
 //
 //	MATCH (p:Person) WHERE p.age >= $minAge SET p.checked = true RETURN p
-func (q *Queries) MarkAdults(ctx context.Context, minAge int64) ([]Person, error) {
+func (q *Queries) MarkAdults(ctx context.Context, arg int64) ([]Person, error) {
 	stmt, err := q.cypherStmt("$gqlc$", markAdultsQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
 	}
-	args, err := agtypeArgs(map[string]any{"minAge": minAge})
+	args, err := agtypeArgs(map[string]any{"minAge": arg})
 	if err != nil {
 		return nil, err
 	}

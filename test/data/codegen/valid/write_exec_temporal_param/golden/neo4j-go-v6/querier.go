@@ -11,7 +11,7 @@ type ReadQuerier interface {
 }
 
 type WriteQuerier interface {
-	MarkStale(ctx context.Context, since time.Time) error
+	MarkStale(ctx context.Context, arg time.Time) error
 }
 
 type Querier interface {

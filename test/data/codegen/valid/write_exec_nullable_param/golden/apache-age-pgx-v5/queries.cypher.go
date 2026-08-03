@@ -12,12 +12,12 @@ const removeByTagQueryText = `MATCH (p:Person {optionalTag: $tag}) DELETE p`
 // RemoveByTag executes the RemoveByTag query.
 //
 //	MATCH (p:Person {optionalTag: $tag}) DELETE p
-func (q *Queries) RemoveByTag(ctx context.Context, tag *string) error {
+func (q *Queries) RemoveByTag(ctx context.Context, arg *string) error {
 	stmt, err := q.cypherStmt("$gqlc$", removeByTagQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return err
 	}
-	args, err := agtypeArgs(map[string]any{"tag": tag})
+	args, err := agtypeArgs(map[string]any{"tag": arg})
 	if err != nil {
 		return err
 	}

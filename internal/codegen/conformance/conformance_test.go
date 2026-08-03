@@ -7,6 +7,7 @@ package conformance_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"go/ast"
@@ -362,15 +363,18 @@ func (s *ConformanceSuite) TestValid() {
 			// the per-target subtests below: those are what `go test -run`
 			// filters, and a rewrite that narrowed with the filter while the
 			// wipe did not would delete an unselected target's goldens.
+			//
+			// The wipe precedes the generation it feeds, so a target that
+			// fails to generate leaves a hole rather than its previous
+			// emission (TestUpdateCannotPreserveGoldensOnFailure).
 			if *update {
-				byTarget := make(map[string][]codegen.File, len(m.Targets))
+				s.Require().NoError(os.RemoveAll(goldenRoot))
 				for _, target := range m.Targets {
 					got, err := s.generate(target, in)
 					s.Require().NoError(err)
 					s.assertPackage(got, m.Package)
-					byTarget[target] = got
+					s.Require().NoError(writeGoldenTarget(goldenRoot, target, got))
 				}
-				s.Require().NoError(syncGoldenRoot(goldenRoot, byTarget))
 				return
 			}
 
@@ -604,26 +608,21 @@ func (s *ConformanceSuite) assertGoldenTree(dir string, got []codegen.File) {
 	}
 }
 
-// syncGoldenRoot rewrites root to hold exactly one subdirectory per key
-// of byTarget, containing that target's emitted files and nothing else.
+// writeGoldenTarget writes one target's emitted files under root.
 //
-// The caller must pass every target the fixture declares: root is wiped
-// first, so a target missing from the map loses its goldens. That wipe
-// is what makes a dropped target's subtree, and a deleted query's stale
-// .cypher.go, disappear in one step.
-func syncGoldenRoot(root string, byTarget map[string][]codegen.File) error {
-	if err := os.RemoveAll(root); err != nil {
+// It adds to root rather than replacing it, because the caller wipes root
+// once before generating any target: that single wipe is what makes a
+// dropped target's subtree, and a deleted query's stale .cypher.go,
+// disappear, and doing it up front is what stops a failed regeneration
+// from leaving the previous emission behind.
+func writeGoldenTarget(root, target string, files []codegen.File) error {
+	dir := filepath.Join(root, target)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	for target, files := range byTarget {
-		dir := filepath.Join(root, target)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+	for _, f := range files {
+		if err := os.WriteFile(filepath.Join(dir, f.Path), f.Contents, 0o644); err != nil {
 			return err
-		}
-		for _, f := range files {
-			if err := os.WriteFile(filepath.Join(dir, f.Path), f.Contents, 0o644); err != nil {
-				return err
-			}
 		}
 	}
 	return nil
@@ -960,22 +959,80 @@ func TestUpdateIgnoresTheTargetFilter(t *testing.T) {
 		"-update narrowed to %q changed %s's golden tree", selected, fixture)
 }
 
+// TestUpdateCannotPreserveGoldensOnFailure pins the other half of
+// -update's blast radius: a run that fails to generate must not leave a
+// golden tree behind that a later run will accept.
+//
+// Regenerating into memory and writing only once every target succeeded
+// looks like the safe ordering and is the dangerous one. Generation
+// aborts the fixture before anything is written, so the previous
+// emission survives intact — and the corpus's compile gate then builds
+// those stale goldens and passes. The evidence for a change lives in the
+// golden diff, so a change whose regeneration failed presents as a change
+// with no diff: indistinguishable from one that legitimately emits the
+// same bytes.
+//
+// Wiping first makes the failure visible in the corpus instead. A fixture
+// whose regeneration did not finish has no goldens, so the next ordinary
+// run fails on the missing tree rather than passing on the old one.
+//
+// Runs as a subprocess for the same reason the target-filter test does:
+// -update writes, and it must write to a throwaway copy.
+func TestUpdateCannotPreserveGoldensOnFailure(t *testing.T) {
+	const fixture = "many_col_many"
+	root := t.TempDir()
+	require.NoError(t, os.CopyFS(root, os.DirFS(trackedFixtureDir)))
+	golden := filepath.Join(root, "valid", fixture, "golden")
+
+	updateCopy(t, root, fixture)
+	require.NotEmpty(t, snapshotTree(t, golden),
+		"fixture %s must have goldens for this test to mean anything", fixture)
+
+	// An unaliased expression column: it parses and resolves, so the
+	// failure lands in generation rather than in the fixture loader, which
+	// is the case the ordering has to survive.
+	queries := filepath.Join(root, "valid", fixture, "queries.cypher")
+	text, err := os.ReadFile(queries)
+	require.NoError(t, err)
+	broken := string(text) + "\n// name: ProbeUngeneratable :one\nMATCH (p:Person) RETURN p.age + 1\n"
+	require.NoError(t, os.WriteFile(queries, []byte(broken), 0o644))
+
+	out, err := runUpdate(t, root, fixture)
+	require.Error(t, err, "-update accepted a fixture it cannot generate:\n%s", out)
+
+	require.Empty(t, snapshotTree(t, golden),
+		"-update failed and left %s's previous goldens in place, so the corpus still compiles and diffs clean", fixture)
+}
+
 // updateCopy runs the suite under -update against the corpus at root,
-// narrowed to the named TestValid subtest path.
+// narrowed to the named TestValid subtest path, and requires it to
+// succeed.
 func updateCopy(t *testing.T, root, subtest string) {
+	t.Helper()
+	out, err := runUpdate(t, root, subtest)
+	require.NoError(t, err, "-update run over %q failed:\n%s", subtest, out)
+}
+
+// runUpdate is updateCopy without the verdict, for the caller that wants
+// the failure.
+func runUpdate(t *testing.T, root, subtest string) ([]byte, error) {
 	t.Helper()
 	cmd := exec.CommandContext(t.Context(), "go", "test", ".", "-count=1", "-update",
 		"-run", "TestConformanceSuite/TestValid/"+subtest)
 	cmd.Env = append(os.Environ(), childRootEnv+"="+root)
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "-update run over %q failed:\n%s", subtest, out)
+	return cmd.CombinedOutput()
 }
 
 // snapshotTree reads every file under root into a map keyed by path
-// relative to root.
+// relative to root. A root that does not exist is the empty tree, so that
+// "these goldens are gone" and "these goldens are empty" are the same
+// answer to a caller comparing trees.
 func snapshotTree(t *testing.T, root string) map[string]string {
 	t.Helper()
 	out := make(map[string]string)
+	if _, err := os.Stat(root); errors.Is(err, os.ErrNotExist) {
+		return out
+	}
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
