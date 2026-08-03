@@ -484,8 +484,17 @@ func (c coverCounts) blockFor(file string, line int) (int, bool) {
 	return c[best], found
 }
 
-// tighter reports whether a is the narrower of two blocks over the same
-// line, ordering them totally.
+// tighter reports whether a is the narrower of two blocks in the same
+// file, ordering them totally. Same file is the caller's job: blockFor
+// filters on it before comparing and tighter never reads the field, so
+// two blocks with equal coordinates in different files are incomparable
+// and must not be handed here.
+//
+// Three steps, and the third is the last one that can run. Equal line
+// spans plus equal startLines give equal endLines, so a fourth step
+// comparing endLine would be dead — TestTighterOrdersTotally is what
+// says so, by varying all four coordinates independently and finding the
+// order total without it.
 func tighter(a, b coverBlock) bool {
 	if a.endLine-a.startLine != b.endLine-b.startLine {
 		return a.endLine-a.startLine < b.endLine-b.startLine
@@ -496,10 +505,76 @@ func tighter(a, b coverBlock) bool {
 	if a.startCol != b.startCol {
 		return a.startCol > b.startCol
 	}
-	if a.endLine != b.endLine {
-		return a.endLine < b.endLine
-	}
 	return a.endCol < b.endCol
+}
+
+// TestTighterOrdersTotally holds tighter to the property blockFor rests
+// on: over any two distinct blocks in one file, exactly one direction is
+// true. coverCounts is a map, so a pair tighter leaves incomparable
+// resolves by iteration order, and the fence would then report different
+// counts on different runs — a flake that reads as a taxonomy failure
+// rather than as the ordering bug it is.
+//
+// The generator varies all four coordinates independently, so the set
+// includes the pairs the retired fourth step claimed to separate: blocks
+// with equal spans and equal startLines, whose endLines it compared.
+// Those pairs are exactly the ones the earlier steps have already
+// settled, which is why the step was dead and why the order stays total
+// without it.
+func (s *SentinelTaxonomySuite) TestTighterOrdersTotally() {
+	var blocks []coverBlock
+	for startLine := 1; startLine <= 3; startLine++ {
+		for span := 0; span <= 2; span++ {
+			for startCol := 1; startCol <= 3; startCol++ {
+				for endCol := 1; endCol <= 3; endCol++ {
+					blocks = append(blocks, coverBlock{
+						file:      "prepare.go",
+						startLine: startLine,
+						startCol:  startCol,
+						endLine:   startLine + span,
+						endCol:    endCol,
+					})
+				}
+			}
+		}
+	}
+	s.Require().Len(blocks, 81, "generator shape changed; the pair sweep below assumes every coordinate varies")
+
+	for _, a := range blocks {
+		s.False(tighter(a, a), "irreflexive: %+v", a)
+		for _, b := range blocks {
+			if a == b {
+				continue
+			}
+			ab, ba := tighter(a, b), tighter(b, a)
+			s.NotEqual(ab, ba, "not total: %+v vs %+v both compare %v", a, b, ab)
+		}
+	}
+
+	// Transitivity, which totality alone does not give: blockFor keeps a
+	// running best rather than sorting, so an intransitive order would
+	// make the winner depend on the order candidates arrive in.
+	for _, a := range blocks {
+		for _, b := range blocks {
+			if !tighter(a, b) {
+				continue
+			}
+			for _, c := range blocks {
+				if tighter(b, c) {
+					s.True(tighter(a, c), "not transitive: %+v < %+v < %+v", a, b, c)
+				}
+			}
+		}
+	}
+
+	// The ordering's direction, which the properties above do not pin:
+	// blockFor wants the innermost block, so a narrower span wins over a
+	// wider one and a later start wins within an equal span.
+	wide := coverBlock{file: "prepare.go", startLine: 10, startCol: 1, endLine: 20, endCol: 1}
+	narrow := coverBlock{file: "prepare.go", startLine: 12, startCol: 1, endLine: 14, endCol: 1}
+	s.True(tighter(narrow, wide), "a narrower span must win")
+	later := coverBlock{file: "prepare.go", startLine: 14, startCol: 1, endLine: 16, endCol: 1}
+	s.True(tighter(later, narrow), "within an equal span, the later start must win")
 }
 
 // corpusCoverage runs every package that depends on internal/codegen

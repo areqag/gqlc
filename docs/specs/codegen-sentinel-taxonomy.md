@@ -77,6 +77,18 @@ Every row here is a construct some input reaches. The branches that
 carry a sentinel but that nothing can fire are in §3, kept apart so a
 contributor does not try to write a fixture for one.
 
+Input arrives two ways and both count, per §5.1. Most rows are reached
+by a schema, a query file or a CLI option, and their fixture lives under
+`test/data/codegen/invalid`. The rest are reached only by an `Input` a
+consumer of this package assembles and hands to `Generate` — a
+`Cardinality` outside its constant set, a `schema.Schema` no GQL parse
+would produce, a `Validated` shape the resolver did not build. Those
+have no on-disk form, so they are reached from
+`internal/codegen/conformance/assembled_input_test.go` instead, and
+their rows say so. The distinction is worth carrying because it names
+the edit each row's refusal asks for: the first kind asks a user to
+change a file, the second asks a caller to fix its own code.
+
 **That claim is measured too, and by the same sweep §3 is.** Every
 fail-site in the package that is *not* tagged `//gqlc:unreachable` must
 be executed by the corpus at least once; a fail-site the corpus never
@@ -99,6 +111,9 @@ dead, and that no dead site hides in it.
 | `ErrInvalidPackageName` | A schema name whose lowercase mangle is not a valid Go package identifier. | package identifier |
 | `ErrUnnamedMultiLabelType` | A multi-label node type carrying no explicit `Name`. | Phase Z |
 | `ErrUnnamedMultiLabelType` | An edge label shared across endpoint pairs, on an edge type carrying no explicit `Name`. | Phase Z |
+| `ErrUnnamedMultiLabelType` | A node type with an empty label set and no explicit `Name`. Assembled: `Schema.Nodes` keyed by the empty `LabelSetKey`. A GQL parse cannot carry one — `schema/gql` refuses it with `ErrUnnamedNodeType` — but `Input.Schema` is a `schema.Schema` a caller fills in directly. | Phase Z |
+| `ErrUnnamedMultiLabelType` | A multi-label edge type carrying no explicit `Name`. Assembled: an `EdgeKey` whose `KeyLabels` is a conjunction. A parse cannot carry one — Cypher has no conjunction syntax for edge labels and `schema/gql` refuses the key with `ErrMultiLabelEdgeType`. | Phase Z |
+| `ErrUnnamedMultiLabelType` | An edge type with an empty label and no explicit `Name`. Assembled: an `EdgeKey` whose `KeyLabels` is empty; `schema/gql` refuses one with `ErrUnnamedEdgeType`. | Phase Z |
 | `ErrInvalidEntityName` | An explicit `NodeType.Name` or `EdgeType.Name` that is not a valid exported Go identifier. | Phase Z |
 | `ErrInvalidEntityName` | A node label set, or an edge label, whose mangle is not a valid exported Go identifier. | Phase Z |
 | `ErrPropertyFieldCollision` | Two properties on one entity mangling to one struct field. | Phase Z |
@@ -114,6 +129,13 @@ dead, and that no dead site hides in it.
 | `ErrOutOfC6Scope` | A non-property parameter — whole node, whole edge, scalar literal, list, temporal expression, or unknown. Post-v1. | Phase A |
 | `ErrUnrepresentableEdgeUnion` | An edge-union column two of whose candidates carry the same label. | Phase A |
 | `ErrUnrepresentableEdgeUnion` | An edge union reached through a list element chain, two of whose candidates carry the same label. | Phase A |
+| `ErrInvalidCardinality` | A query whose `Cardinality` is neither the zero value nor a member of the closed set. Assembled: `Cardinality(7)`. `queryfile.parseCardinality` yields only the three members or refuses the annotation, so no parse produces a fourth. | Phase A |
+| `ErrUnrepresentableWidth` | A projected column whose property width the target's type table has no carrier for. Assembled: a `Validated.Columns` entry carrying a width no schema property declares — Phase Z walks the schema, so a column backed by a declared property loses there first. | Phase A |
+| `ErrUnrepresentableWidth` | A query parameter whose property width the target's type table has no carrier for. Assembled, on the same argument: the resolver draws a parameter's `ResolvedProperty` from a schema property or from `callProjectionType`, and both yield widths Phase Z has already passed. | Phase A |
+| `ErrUnrepresentableWidth` | A list element whose leaf carries a property width the target's type table has no carrier for. Assembled: a `ResolvedList` over a `ResolvedProperty`, a shape `resolveType` has no arm for. Phase B repeats the walk over the element it splits off a schema LIST property; that element's width is one Phase Z has already passed. | Phase A |
+| `ErrOutOfC6Scope` | A column, or a list element leaf, referencing a node or edge type the schema does not declare. Assembled: the resolver resolves against the same schema Phase Z indexed and commits only declared types. | Phase A |
+| `ErrOutOfC6Scope` | An edge union with fewer than two candidates, or one naming a candidate the schema does not declare. Assembled: the resolver collapses a lone candidate to `ResolvedEdge` and commits only declared edges. | Phase A |
+| `ErrUnrepresentableTemporal` | A list element whose temporal kind the target's type table has no carrier for. Assembled: a `resolver.Temporal` outside its own constant set, on the same footing as the out-of-set `Cardinality` above. No *query* reaches it, and would need a backend that both refuses a kind and serves list columns: only Apache AGE refuses a kind, and `age.rejectUnservedQueries` drops a query carrying a list column three lines before `age.generate` calls `codegen.Prepare`. Phase Z is not what stops it — Phase Z walks schema property widths, and a `collect(...)` element comes from an expression. | Phase A |
 | `ErrParamNameCollision` | Two parameters of one query mangling to one `Params` field. | Phase B |
 | `ErrRowFieldCollision` | Two columns of one query deriving one `Row` field. | Phase B |
 | `ErrUnrepresentableTemporal` | A projected column whose temporal kind the target's type table has no carrier for. Phase B, not Phase A: Phase A does not ask the type table about temporal kinds, so the refusal lands at the row-field derivation site. | Phase B |
@@ -123,12 +145,29 @@ dead, and that no dead site hides in it.
 
 Checks that carry a sentinel but that no schema, no query, no CLI option
 and no `Input` an out-of-package caller can assemble will fire — §5.1
-gives the full rule. Two reasons, and the difference matters when
-reading a fail-site: a *shadowed* branch applies a predicate an earlier
-check already applied to the same input, so the earlier one always wins;
-a *defensive* branch holds an invariant an upstream layer maintains, so
-reaching it takes a regression above or a value fabricated outside the
-grammar that produces it.
+gives the full rule. Three reasons, and which one applies matters when
+reading a fail-site:
+
+- **Shadowed.** An earlier check applies the same predicate to the same
+  value, so the earlier one always answers first. The row names the
+  winner and the input it wins on.
+- **Total.** The branch is the default arm of a switch whose cases
+  already name every member of a sealed type, so only a value outside
+  that membership reaches it. The row names the type and the count.
+- **Faulting.** The branch *is* reached, but cannot return its sentinel:
+  an expression inside the `return` panics first. That is a bug, not a
+  property, and the row carries the bead tracking it.
+
+An invariant a layer above merely *maintains* is not on that list, and
+this is the correction `gqlc-h4ug` made. `Input`, `NamedQuery` and every
+`resolver.Resolved*` variant are exported structs with exported fields,
+so a caller assembles one without going through the parser or the
+resolver at all; "the resolver would never build this" therefore says
+nothing about what a branch can be handed. Fourteen rows were measured
+from outside the package, found live, and moved to §2 — thirteen resting
+on that argument, and one (`list-elem-temporal`) on a shadow that turned
+out to be a different backend's pre-gate and to cover the query path
+only.
 
 They are listed because §2 claims to carry every construct in each
 sentinel's catchment, and a reader matching a fail-site in `prepare.go`
@@ -140,35 +179,34 @@ Each branch is named rather than described: the site name in column two
 is the `//gqlc:unreachable <site>` tag above that branch's `return`, and
 the tags and this table are held equal in both directions. The site name
 replaces §2's phase column here because several of these branches are
-reached from more than one phase — `list-elem-width` hangs off both Phase
-A's probe and Phase B's plan build — so a single phase name would be
-false.
+reached from more than one phase — `list-elem-unknown-variant` hangs off
+both Phase A's probe and Phase B's plan build — so a single phase name
+would be false.
 
-**The claims below are measured, not asserted.** `TestSentinelTaxonomy`
-runs the fixture conformance suite, the two backend suites and the CLI
-under coverage of `internal/codegen` and fails if any tagged branch
-executes; §5.1 gives the rule and the reason the sweep excludes this
-package's own tests.
-The "why" column therefore has one job the fence cannot do: name the
-facts the claim rests on, so a reader who changes one of them knows what
-they are changing. It does not have to be trusted — if a fact moves and
-the branch becomes live, the coverage assertion goes red and names the
-row.
+**The claims below are measured, but the measurement is weaker than the
+claim.** `TestSentinelTaxonomy` runs the fixture conformance suite, the
+assembled-`Input` suite, the two backend suites and the CLI under
+coverage of `internal/codegen`, and fails if any tagged branch executes;
+§5.1 gives the rule and the reason the sweep excludes this package's own
+tests. What that establishes is that *no test binary outside this
+package reaches the branch today* — which is not *no input reaches it*,
+and the gap is satisfiable by omission: a row whose reaching input nobody
+has thought to write down measures exactly the zero a genuinely dead
+branch measures. The sweep is a tripwire on these rows, not a proof of
+them.
+
+So the "why" column does the work the fence cannot: name the facts the
+claim rests on, so a reader who changes one knows what they are changing,
+and so a reviewer has an argument to attack rather than a number. If a
+fact moves and the branch goes live, the coverage assertion goes red and
+names the row — that half the fence does hold.
 
 | Sentinel | Fail-site | Branch | Why it cannot fire |
 |---|---|---|---|
-| `ErrUnrepresentableWidth` | `column-width` | A projected column whose property width the target's type table has no carrier for. | Shadowed by Phase Z. A column's `ResolvedProperty.Type` is a schema property's type, and `phaseZAdmit` runs `tm.Property` over every property of every node and edge type before Phase A, first offender winning. |
-| `ErrUnrepresentableWidth` | `param-width` | A query parameter whose property width the target's type table has no carrier for. | Shadowed by Phase Z, on the same argument, plus one fact: a parameter's `ResolvedProperty` comes either from a schema property lookup (`resolver/scope.go`, `resolver/resolve.go`) or from `callProjectionType`, which yields only INT / FLOAT / STRING — widths both type tables carry. `unify` never synthesises a third source. |
-| `ErrUnrepresentableWidth` | `list-elem-width` | A list element whose leaf is a property width the target's type table has no carrier for. | Shadowed, and the argument rests on three facts. (1) No resolver-built `ResolvedList` bottoms out in a `ResolvedProperty`: `resolveType` has no such arm, and the variable-length-edge arm yields `ResolvedEdge` / `ResolvedEdgeUnion`. (2) The one `ResolvedProperty` element that exists is the one Phase B splits off a schema LIST property, and `neo4j`'s `Property(LIST<X>)` succeeds exactly when `Property(X)` does. (3) `age` refuses every LIST outright, so an AGE batch loses at Phase Z. Widening either backend's LIST admission is what would make this live. |
-| `ErrOutOfC6Scope` | `column-unknown-node`, `column-unknown-edge`, `list-elem-unknown-node`, `list-elem-unknown-edge` | A column, or a list element leaf, referencing a node or edge type the schema does not declare. | Defensive: the resolver resolves against the same schema Phase Z indexed and commits only declared types. |
-| `ErrOutOfC6Scope` | `column-unknown-variant`, `list-elem-unknown-variant` | A column, or a list element, whose resolved type matches no arm of the closed sum. | Defensive: a deletion fence over the membership of `resolver.ResolvedType`, which is sealed by an unexported method and has eight implementations, all eight of which both switches handle. The two sites are the same construct at two depths. |
-| `ErrOutOfC6Scope` | `edge-union-arity`, `edge-union-undeclared` | An edge union with fewer than two candidates, or one naming a candidate the schema does not declare. | Defensive: the resolver collapses a lone candidate to `ResolvedEdge` and commits only declared edges. |
-| `ErrAliasRequired` | `row-field-alias` | A column whose text yields no row-field name at derivation. | Shadowed: Phase A applies `rowFieldName` to the same columns first, and returns the same message. |
-| `ErrOutOfC6Scope` | `param-type-invariant`, `column-type-invariant` | A parameter or column type Phase A admits only in its representable form. | Defensive: a Phase A regression fails loudly here rather than emitting a field nothing can fill. |
-| `ErrUnnamedMultiLabelType` | `entity-empty-node-labels` | A node type with an empty label set and no explicit `Name`. | Shadowed by the schema layer, one package below. `internal/schema/gql` refuses an unlabelled node type outright with `ErrUnnamedNodeType` (`schema/gql/errors.go`), so no `schema.Schema` a parse produces carries one. Rule 4's node arm therefore only ever sees the multi-label case, which is §2's row. |
-| `ErrUnnamedMultiLabelType` | `entity-multi-label-edge`, `entity-empty-edge-label` | A multi-label edge type, or one with an empty label, carrying no explicit `Name`. | Shadowed by the schema layer, on the same argument and for a stated reason rather than an accident: `ErrMultiLabelEdgeType` refuses a multi-label edge key because no Cypher conjunction syntax exists for edge labels, so no query could reference such a type; `ErrUnnamedEdgeType` refuses an unlabelled one because an edge type is identified by its label set plus its endpoints. Rule 4's edge arm therefore only ever reaches its third test, the shared-label one, which is §2's row. |
-| `ErrInvalidCardinality` | `cardinality-not-in-set` | A query whose `Cardinality` is neither `:one`, `:many` nor `:exec`. | Shadowed, then defensive. The only producer of a `Cardinality` in the pipeline is `queryfile.parseCardinality`, which returns exactly those three or refuses the annotation with `ErrUnknownCardinality`; the one remaining out-of-set value, the zero one a caller reaches by leaving the field unset, is refused a phase earlier at batch admission, which is §2's row. So reaching this branch takes a caller fabricating a `Cardinality` outside its own constant set. |
-| `ErrUnrepresentableTemporal` | `list-elem-temporal` | A list element leaf whose temporal kind the target's type table has no carrier for. | Shadowed by backend capability rather than by an earlier phase: the only target that refuses a temporal kind is Apache AGE, and AGE refuses every LIST outright, so an AGE batch carrying a list column loses at Phase Z. The neo4j targets carry every kind. Becomes reachable the moment one backend both refuses a kind and serves list columns. |
+| `ErrOutOfC6Scope` | `column-unknown-variant`, `list-elem-unknown-variant` | A column, or a list element, whose resolved type matches no arm of the closed sum. | **Faulting, not dead** — `gqlc-edze`, and the weakest row here. `resolver.ResolvedType` is sealed by an unexported method and has eight implementations, all eight of which both switches name, so a nil interface is the only value that falls through — and a caller produces one by leaving `Column.Type` unset, so both arms are entered. What does not happen is the refusal: each `return` calls `String()` on that nil and panics before the `fmt.Errorf` naming the sentinel is evaluated. The tag therefore measures the absence of a test nobody can usefully write, not the absence of an input. Both sites move to §2 when `gqlc-edze` lands; a case written before then turns the fence red, which is the correct answer and not a regression. |
+| `ErrOutOfC6Scope` | `param-type-invariant` | A parameter type Phase B admits only in its representable form. | Shadowed. Phase A's parameter loop applies the same `ResolvedProperty` type assertion to the same `q.Validated.Parameters` slice and refuses with the same sentinel, so a non-property parameter never reaches Phase B — measured: an assembled `Input` carrying a `ResolvedScalar` parameter returns Phase A's message, not this one. A nil parameter type also meets Phase A's assertion first, and panics there for `gqlc-edze`'s reason. |
+| `ErrAliasRequired` | `row-field-alias` | A column whose text yields no row-field name at derivation. | Shadowed. Phase A calls `rowFieldName` over the same `q.Validated.Columns` slice and refuses with the same sentinel and the same message. The two calls take one argument, `col.Name`, and `rowFieldName` is a pure function of it, so no column can be admitted by the first call and refused by the second. |
+| `ErrOutOfC6Scope` | `column-type-invariant` | A column type matching no arm of Phase B's plan switch. | Total, then shadowed. Phase B's switch names all eight members of the sealed `resolver.ResolvedType`, so only a nil reaches its default; and a nil meets Phase A's default arm first, where it panics (`gqlc-edze`). Unlike `column-unknown-variant` this site does not go live when that bead lands — Phase A answers either way. It goes live only if Phase B's switch loses an arm the sum still has, which is the deletion it fences. |
 
 ## 4. Declared and deliberately unreachable
 
@@ -192,10 +230,12 @@ short. In full:
    saying why.
 3. Add a §2 row per construct that routes to it, and a negative fixture
    under `test/data/codegen/invalid` for at least one of them, which is
-   what `TestSentinelReachability` asks for. A branch no input can reach
-   goes in §3 instead, tagged and fenced per §5.1 — if every construct
-   you can name for a new sentinel belongs in §3, the sentinel does not
-   belong in `allSentinels`.
+   what `TestSentinelReachability` asks for. A construct with no on-disk
+   form — one an `Input` carries rather than a file — takes a case in
+   `internal/codegen/conformance/assembled_input_test.go` instead, and
+   its row says so. A branch no input can reach goes in §3, tagged and
+   fenced per §5.1 — if every construct you can name for a new sentinel
+   belongs in §3, the sentinel does not belong in `allSentinels`.
 4. A rename is the same three edits with the old name removed; a
    retirement drops the rows, the slice entry and the fixture together.
 
@@ -212,17 +252,29 @@ set at all: `Input` and `NamedQuery` are exported, so the checks that
 guard their fields are this package's contract with its callers rather
 than internal invariants, and `internal/cli/pipeline` is not the only
 caller such a contract can have. It is what makes the zero-`Cardinality`
-row in §2 legitimate — a caller reaches it by leaving a field unset, and
-the corpus reaches it through the conformance harness's synthetic seam.
+row in §2 legitimate — a caller reaches it by leaving a field unset — and
+the same clause carries the fourteen rows `gqlc-h4ug` moved out of §3,
+each reached by an `Input` no parse produces but any caller can build.
+A row of that kind names its reaching value in the "assembled" clause of
+its §2 entry, and its coverage is paid by
+`internal/codegen/conformance/assembled_input_test.go` rather than by a
+fixture on disk, because it has no on-disk form.
 
-It does not mean "some test executes the line". A test inside
-`package codegen` can call an unexported function with a hand-built
-`resolver` value and reach a branch no parser can produce; classifying
-by test-presence is what put
-three unreachable branches into §2 before `gqlc-h4ug`, including one
-whose twin — the identical default arm over the same sealed sum, one
-level up — sat in §3 the whole time because it happened to have no unit
-test.
+It does not mean "some test executes the line", and it does not mean
+"the resolver would never build this". The first classifies by
+test-presence: a test inside `package codegen` can call an unexported
+function with a hand-built `resolver` value and reach a branch no input
+can, which is what put three unreachable branches into §2 before
+`gqlc-h4ug`, including one whose twin — the identical default arm over
+the same sealed sum, one level up — sat in §3 the whole time because it
+happened to have no unit test. The second classifies by upstream habit:
+`resolver.ValidatedQuery`, `resolver.Column` and all eight `Resolved*`
+variants are exported structs with exported fields, so what the resolver
+does or does not construct constrains the pipeline and not the contract.
+Thirteen §3 rows argued that way, and all thirteen fired the first time
+anyone assembled the value by hand. A fourteenth argued a shadow that
+held for queries and not for assembled `Input`s, which is the same
+mistake read from the other side.
 
 So the measurement is taken from outside the package.
 `TestSentinelTaxonomy` asks `go list -test` which packages' test
@@ -268,14 +320,25 @@ To classify a branch:
    `test/data/codegen/invalid`, and run it. Instrument the fail-site if
    the sentinel alone does not tell you which branch answered — several
    branches share a sentinel, and two of them share a message.
-2. If the fixture fires the branch, it is a §2 row and that fixture is
-   the one step 3 above asks for.
-3. If an earlier check answers instead, the branch is **shadowed**. Say
-   which check wins and on what input.
-4. If no input can be constructed at all, the branch is **defensive**.
-   Say which upstream invariant would have to break first.
-5. For 3 and 4: tag the `return` with `//gqlc:unreachable <site>`, add a
-   §3 row naming the same site, and write the "why" so it names the
+2. If no fixture reaches it, assemble the `Input` that does and add a
+   case to `assembled_input_test.go`. Reach for the smallest value that
+   fires it: an out-of-set `Cardinality`, a `Schema` map keyed by hand, a
+   `Validated` shape the resolver has no arm for. Do not stop at "the
+   resolver would never build this" — that is a fact about the pipeline,
+   and the question is about the contract.
+3. If either fires the branch, it is a §2 row, and the test you wrote is
+   the coverage step 3 above asks for.
+4. If an earlier check answers instead, the branch is **shadowed**. Say
+   which check wins, on what input, and why nothing can slip past the
+   first and be caught by the second.
+5. If the branch is a default arm whose switch already names every
+   member of a sealed type, it is **total**. Say which type and how many
+   members, so a reader adding a ninth knows the arm is now live.
+6. If the branch runs but faults before its `return` completes, it is
+   **faulting** — a bug, not a classification. File it, cite the bead in
+   the row, and say what the row becomes once it lands.
+7. For 4, 5 and 6: tag the `return` with `//gqlc:unreachable <site>`, add
+   a §3 row naming the same site, and write the "why" so it names the
    facts it depends on rather than asserting a conclusion. The fence
    holds tags and rows equal in both directions and holds both against
    the coverage measurement, so a branch tagged without the row, a row

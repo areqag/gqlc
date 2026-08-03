@@ -445,7 +445,6 @@ func entityStructName(kind EntityKind, labels graph.LabelSetKey, edgeKey schema.
 			return "", fmt.Errorf("%w: node type with multi-label set %q requires an explicit Name", ErrUnnamedMultiLabelType, string(labels))
 		}
 		if len(parts) == 0 {
-			//gqlc:unreachable entity-empty-node-labels
 			return "", fmt.Errorf("%w: node type with empty label set requires an explicit Name", ErrUnnamedMultiLabelType)
 		}
 		name := paramFieldName(parts[0])
@@ -458,11 +457,9 @@ func entityStructName(kind EntityKind, labels graph.LabelSetKey, edgeKey schema.
 	// Edge.
 	labelParts := edgeKey.KeyLabels.Split()
 	if len(labelParts) > 1 {
-		//gqlc:unreachable entity-multi-label-edge
 		return "", fmt.Errorf("%w: multi-label edge type (%s -[:%s]-> %s) requires an explicit Name", ErrUnnamedMultiLabelType, string(edgeKey.Source), string(edgeKey.KeyLabels), string(edgeKey.Target))
 	}
 	if len(labelParts) == 0 {
-		//gqlc:unreachable entity-empty-edge-label
 		return "", fmt.Errorf("%w: edge type with empty label requires an explicit Name", ErrUnnamedMultiLabelType)
 	}
 	if ambiguousEdgeLabel {
@@ -544,17 +541,16 @@ func cardinalityAnnotation(c Cardinality) string {
 // :many on a zero-column query routes through ErrCardinalityShapeMismatch.
 // Column and parameter admission unchanged from C3 (property-widths on
 // parameters, full closed sum minus ResolvedEdgeUnion on columns);
-// unrepresentable widths route through ErrUnrepresentableWidth (Phase Z
-// already caught schema-side offenders so a column projecting an
-// unrepresentable-width property is unreachable unless the query declares
-// an unrepresentable width on a parameter).
+// unrepresentable widths route through ErrUnrepresentableWidth. Phase Z
+// has already refused every width the schema declares, so what reaches
+// the column and parameter gates here is a width no schema property
+// carries — which is to say a Validated shape the resolver did not build.
 func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entityLookupKey]int, tm TypeMap) error {
 	for i, q := range queries {
 		if _, reserved := reservedIdentifiers[q.Name]; reserved {
 			return fmt.Errorf("%w: query %q at position %d collides with reserved identifier", ErrIdentifierCollision, q.Name, i)
 		}
 		if q.Cardinality != CardinalityOne && q.Cardinality != CardinalityMany && q.Cardinality != CardinalityExec {
-			//gqlc:unreachable cardinality-not-in-set
 			return fmt.Errorf("%w: query %q at position %d has unrecognised cardinality %d", ErrInvalidCardinality, q.Name, i, q.Cardinality)
 		}
 		// Cardinality × shape gate (spec §4.9). Runs before the column-type
@@ -586,19 +582,14 @@ func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entity
 			switch t := col.Type.(type) {
 			case resolver.ResolvedProperty:
 				if _, ok := tm.Property(t.Type); !ok {
-					//gqlc:unreachable column-width
 					return fmt.Errorf("%w: query %q column %d %q has %s", ErrUnrepresentableWidth, q.Name, ci, col.Name, t.Type)
 				}
 			case resolver.ResolvedNode:
 				if _, ok := entityIndex[entityLookupKey{Kind: EntityNode, Labels: t.Labels}]; !ok {
-					// Unknown node type — the resolver's R0 gate should
-					// have caught this; a synthetic test seam lands here.
-					//gqlc:unreachable column-unknown-node
 					return fmt.Errorf("%w: query %q column %d %q references unknown node type %q", ErrOutOfC6Scope, q.Name, ci, col.Name, string(t.Labels))
 				}
 			case resolver.ResolvedEdge:
 				if _, ok := entityIndex[entityLookupKey{Kind: EntityEdge, EdgeKey: t.EdgeKey}]; !ok {
-					//gqlc:unreachable column-unknown-edge
 					return fmt.Errorf("%w: query %q column %d %q references unknown edge type %s -[:%s]-> %s", ErrOutOfC6Scope, q.Name, ci, col.Name, string(t.EdgeKey.Source), string(t.EdgeKey.KeyLabels), string(t.EdgeKey.Target))
 				}
 			case resolver.ResolvedEdgeUnion:
@@ -636,7 +627,6 @@ func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entity
 				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (non-property parameters are post-v1)", ErrOutOfC6Scope, q.Name, pi, p.Name, p.Type.String())
 			}
 			if _, ok := tm.Property(prop.Type); !ok {
-				//gqlc:unreachable param-width
 				return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrUnrepresentableWidth, q.Name, pi, p.Name, prop.Type)
 			}
 		}
@@ -658,23 +648,22 @@ func columnSite(queryName string, pos int, columnName string) string {
 // naming site in whatever it refuses. Shared by the two fail-sites so
 // their answers cannot drift.
 //
-// The first two gates are defensive: the resolver commits at least two
-// candidates (a single one collapses to ResolvedEdge, R3 spec §4.4) and
-// commits only edges the schema declares, so a synthetic seam fails at
+// The first two gates hold the resolver's invariants at this package's
+// boundary: the resolver commits at least two candidates (a single one
+// collapses to ResolvedEdge, R3 spec §4.4) and commits only edges the
+// schema declares, so a Validated shape it did not build fails at
 // generation rather than downstream. The third follows from what arrives
 // — the emitted dispatch reads the value's label to pick a candidate,
 // which two candidates carrying one label give it no way to do. First
 // offender in candidate order wins across all three.
 func admitEdgeUnionCandidates(edgeKeys []schema.EdgeKey, entities []Entity, entityIndex map[entityLookupKey]int, site string) error {
 	if len(edgeKeys) < 2 {
-		//gqlc:unreachable edge-union-arity
 		return fmt.Errorf("%w: %s resolved as edgeUnion with only %d candidate(s) — resolver invariant violated (expected >= 2)", ErrOutOfC6Scope, site, len(edgeKeys))
 	}
 	firstByLabel := make(map[graph.LabelSetKey]string, len(edgeKeys))
 	for _, ek := range edgeKeys {
 		idx, ok := entityIndex[entityLookupKey{Kind: EntityEdge, EdgeKey: ek}]
 		if !ok {
-			//gqlc:unreachable edge-union-undeclared
 			return fmt.Errorf("%w: %s edgeUnion candidate %s -[:%s]-> %s not declared by schema", ErrOutOfC6Scope, site, string(ek.Source), string(ek.KeyLabels), string(ek.Target))
 		}
 		name := entities[idx].Name
@@ -1024,7 +1013,6 @@ func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex m
 	case resolver.ResolvedProperty:
 		ty, ok := tm.Property(tt.Type)
 		if !ok {
-			//gqlc:unreachable list-elem-width
 			return nil, fmt.Errorf("%w: list element has unrepresentable property width %s", ErrUnrepresentableWidth, tt.Type)
 		}
 		// A list element that is itself a list gets a nested plan, the same
@@ -1048,7 +1036,6 @@ func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex m
 	case resolver.ResolvedNode:
 		idx, ok := entityIndex[entityLookupKey{Kind: EntityNode, Labels: tt.Labels}]
 		if !ok {
-			//gqlc:unreachable list-elem-unknown-node
 			return nil, fmt.Errorf("%w: list element references unknown node type %q", ErrOutOfC6Scope, string(tt.Labels))
 		}
 		name := entities[idx].Name
@@ -1056,7 +1043,6 @@ func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex m
 	case resolver.ResolvedEdge:
 		idx, ok := entityIndex[entityLookupKey{Kind: EntityEdge, EdgeKey: tt.EdgeKey}]
 		if !ok {
-			//gqlc:unreachable list-elem-unknown-edge
 			return nil, fmt.Errorf("%w: list element references unknown edge type %s -[:%s]-> %s", ErrOutOfC6Scope, string(tt.EdgeKey.Source), string(tt.EdgeKey.KeyLabels), string(tt.EdgeKey.Target))
 		}
 		name := entities[idx].Name
@@ -1069,7 +1055,6 @@ func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex m
 	case resolver.ResolvedTemporal:
 		ty, ok := tm.Temporal(tt.Kind)
 		if !ok {
-			//gqlc:unreachable list-elem-temporal
 			return nil, fmt.Errorf("%w: list element projects %s", ErrUnrepresentableTemporal, tt)
 		}
 		return &ListElem{Kind: ColumnTemporal, GoType: ty}, nil
