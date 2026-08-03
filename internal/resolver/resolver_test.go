@@ -417,6 +417,14 @@ var invalidFixtureContains = map[string]string{
 	// TestTwoSwappedPairsReportsTheFirstInCandidateOrder for why the set really
 	// holds two.
 	"ambiguous_edge_orientation_two_swapped_pairs.cypher": `matches Employee&Person-[REVIEWED]->Company&Startup left-to-right and Company&Startup-[REVIEWED]->Employee&Person right-to-left`,
+	// ErrUnionColumnMismatch's type arm, and the one literal copy of
+	// unionColumnTypeArm in the repo. The arm's surrounding frame is already
+	// pinned by unionTypeArmMessage, but that regexp is BUILT FROM the constant,
+	// so it admits the same fixture set whatever the phrase says — rewriting the
+	// constant to " zzz " left the whole suite green. The trailing space is the
+	// constant's own; the phrase is spelled here in full so a change to it has
+	// to be a change someone made on purpose.
+	"union_column_type_mismatch.cypher": `column "x" projects `,
 }
 
 type ResolverSuite struct {

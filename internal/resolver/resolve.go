@@ -302,8 +302,15 @@ func fillGroupingKeys(cols []Column, part query.Part) {
 // arm from its count and name arms. All three carry the same sentinel, so
 // errors.Is cannot tell them apart, and the resolver test derives which invalid
 // fixtures reach the type arm by matching this phrase in the message. It is
-// spliced into the format string below rather than transcribed into the test, so
-// the two cannot drift apart and leave the coverage sweep matching nothing.
+// spliced into the format string below rather than transcribed into the sweep's
+// regexp, so the two cannot drift apart and leave the coverage sweep matching
+// nothing.
+//
+// That same splice is why the sweep cannot also be what pins the phrase: built
+// from this constant, it admits the same fixture set whatever the phrase says,
+// and rewriting this line to " zzz " once left the entire suite green. The one
+// literal copy is invalidFixtureContains["union_column_type_mismatch.cypher"] —
+// an invalid fixture, so it carries no golden and -update cannot reach it.
 const unionColumnTypeArm = " projects "
 
 // compareBranchColumns runs the R5 UNION column compatibility check (§4.3).
