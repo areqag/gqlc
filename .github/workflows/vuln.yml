@@ -35,10 +35,13 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
+          # Not `git diff ... | grep -q .`: a pipeline reports grep's status, so a
+          # git failure would be indistinguishable from "no dependency changed" and
+          # would skip the scan on exactly the PR that needed it.
           git fetch --no-tags --depth=1 origin "$BASE_SHA"
-          if git diff --name-only "$BASE_SHA" HEAD \
-              -- go.mod go.sum test/data/codegen/go.mod test/data/codegen/go.sum \
-              | grep -q .; then
+          changed=$(git diff --name-only "$BASE_SHA" HEAD \
+              -- go.mod go.sum test/data/codegen/go.mod test/data/codegen/go.sum)
+          if [ -n "$changed" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"

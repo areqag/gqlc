@@ -107,7 +107,7 @@ real gap.
 
 **Grep for the expected package clause.** Rejected. A whole-line match is
 defeated by a trailing comment, by any file below the module root, and by
-matching nothing at all — `grep` exits 2 on no match, which `!` turns into
+matching nothing at all — `grep` exits 1 on no match, which `!` turns into
 success. The guard parses the package name out of the clause and treats an empty
 file set as a failure.
 
