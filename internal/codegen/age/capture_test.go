@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -475,6 +476,18 @@ func (s *EmissionSuite) TestNoParameterArityPutsAQueryChosenNameInScope() {
 			s.Require().Equal(sortedKeys(before), sortedKeys(after),
 				"renaming parameters changed which files the batch emits")
 
+			// The scope comparison below reads what a rename moved, so the
+			// rename has to have moved something first. A fixture spelling
+			// no parameter cannot move anything by construction, and it
+			// contributes to neither arity census, so it is skipped rather
+			// than asserted on.
+			if renamed := renamedParameterNames(fx.queries); len(renamed) > 0 {
+				s.Require().NotEqual(before, after,
+					"renaming every parameter changed nothing in the emission, so the "+
+						"perturbation never reached it and the scope comparison below holds vacuously")
+				s.requireParametersReachTheWire(after, renamed)
+			}
+
 			for _, path := range sortedKeys(before) {
 				scopesBefore, scopesAfter := s.methodScopes(before[path]), s.methodScopes(after[path])
 				for _, method := range sortedKeys(scopesBefore) {
@@ -771,6 +784,43 @@ func renameParameters(queries []codegen.NamedQuery) []codegen.NamedQuery {
 		out[i].Validated.Parameters = renamed
 	}
 	return out
+}
+
+// renamedParameterNames is the set of names renameParameters puts on a
+// batch, which is empty exactly when the batch spells no parameter.
+func renamedParameterNames(queries []codegen.NamedQuery) []string {
+	var out []string
+	for _, q := range renameParameters(queries) {
+		for _, p := range q.Validated.Parameters {
+			out = append(out, p.Name)
+		}
+	}
+	sort.Strings(out)
+	return slices.Compact(out)
+}
+
+// requireParametersReachTheWire holds the half of a parameter name that
+// must NOT become generator-owned. The Go argument is free to be renamed
+// because it is positional, but the name the query text wrote is the key
+// the driver substitutes on, and an emitter that stopped spelling it
+// would satisfy every scope comparison in this file while silently
+// unbinding the query.
+func (s *EmissionSuite) requireParametersReachTheWire(files map[string]string, params []string) {
+	s.T().Helper()
+	for _, param := range params {
+		quoted := strconv.Quote(param)
+		found := false
+		for _, path := range sortedKeys(files) {
+			if strings.Contains(files[path], quoted) {
+				found = true
+				break
+			}
+		}
+		s.Require().True(found,
+			"parameter %s is spelled nowhere in the emitted query files, so the batch no longer "+
+				"binds it and the scope comparison reads an emission the rename never reached",
+			quoted)
+	}
 }
 
 // parameterCounts maps each query's name — which is verbatim the name of
