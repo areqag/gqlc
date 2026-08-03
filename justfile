@@ -232,37 +232,110 @@ test-codegen-live-age:
 # weekly CI schedule ("@latest" deliberate: the vuln DB matters more than
 # tool-version reproducibility)
 #
-# Two invocations, because a root-rooted untagged scan without -test misses
-# three separate things (bd gqlc-rohp). -test: without it govulncheck loads no
-# test files at all, so every test-only dependency is unscanned — godog and
-# testify at root, and everything the live battery reaches in the nested module.
-# The nested module needs its own invocation because it is a separate module:
-# `go list ./...` at root emits none of its packages, so its driver,
-# testcontainers and docker trees are outside a root-rooted scan by module
-# boundary. It also needs the codegen_live tag, which is where the
-# container-driving code enters the build.
+# One invocation per module, because govulncheck is scoped to a module: `go list
+# ./...` at the root emits none of a nested module's packages, so the nested
+# module's driver, testcontainers and docker trees are outside a root-rooted scan
+# by module boundary (bd gqlc-rohp). -test as well, because without it
+# govulncheck loads no test files at all and every test-only dependency is
+# unscanned — godog and testify at root, and everything the live battery reaches
+# in the nested module.
+#
+# The module set and each module's build tags are DISCOVERED, not declared (bd
+# gqlc-pig9). A list written out here is a list a third module can be added
+# without: it would go unscanned with no diagnostic and no failing gate, which is
+# this gate's own defect class. Every go.mod under the checkout is scanned, with
+# every build tag its own packages constrain themselves by — the tag is where
+# code enters the build, so a module scanned without its tags is a module
+# partly scanned. `ignore` is excluded because that tag's whole meaning is
+# "not part of any build". Deriving the tags removes one way to be green over
+# unscanned code and adds another — a tag walk that came back empty — so each
+# module's scan is preceded by the derivation's postcondition: no Go file of
+# that module may be outside the build the scan is about to load.
 #
 # -show verbose because the scan runs at symbol level: package- and module-level
 # findings never change its exit status, and without verbose they are only ever
 # counted, so a reader of a CI log cannot tell which advisories this gate is
 # exiting 0 over or see that set change (bd gqlc-k22l). It also prints the
 # packages and modules each invocation matched, which is the standing evidence
-# that the widened scan still covers both modules.
+# that the widened scan still covers every module.
 #
 # WHAT THIS GATE STILL DOES NOT SEE: the root module's in-package tests, whose
 # imports govulncheck discards, so a called vulnerability reachable only from
 # one of those files exits 0 here (ADR 0026). vuln-root-residual below measures
 # and ratchets that blind spot; bd gqlc-m5rc closes it.
 vuln: vuln-root-residual
-    go run golang.org/x/vuln/cmd/govulncheck@latest -test -show verbose ./...
-    cd test/data/codegen && go run golang.org/x/vuln/cmd/govulncheck@latest -tags codegen_live -test -show verbose ./...
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # Every build tag a module's own packages constrain themselves by. The
+    # directory list comes from `go list` inside the module, which is the
+    # authority on which files belong to it and never crosses into a nested
+    # module; -e so a package whose files are all excluded by constraints is
+    # still located rather than aborting the scan.
+    build_tags() {
+        (cd "${1}" && go list -e -f '{{{{.Dir}}' ./... | while IFS= read -r d; do
+            grep -hs '^//go:build' "${d}"/*.go || true
+        done) \
+            | sed 's|^//go:build||' \
+            | tr '()!|&' '     ' \
+            | tr -s ' \t' '\n\n' \
+            | sed -e '/^$/d' -e '/^ignore$/d' \
+            | sort -u | paste -sd,
+    }
+
+    mapfile -t modules < <(find . -name go.mod -not -path './.git/*' -printf '%h\n' | sort)
+    if [ "${#modules[@]}" -eq 0 ]; then
+        echo "error: no go.mod found under the checkout, so this recipe would scan nothing" >&2
+        echo "       and exit 0 (bd gqlc-pig9). Discovery is broken." >&2
+        exit 1
+    fi
+    case " ${modules[*]} " in
+        *" . "*) ;;
+        *)  echo "error: discovery did not find the root module's go.mod, so the main module" >&2
+            echo "       is unscanned (bd gqlc-pig9). Found: ${modules[*]}" >&2
+            exit 1
+            ;;
+    esac
+
+    for dir in "${modules[@]}"; do
+        tags="$(build_tags "${dir}")"
+        tagflag=()
+        if [ -n "${tags}" ]; then tagflag=(-tags "${tags}"); fi
+
+        # The derived tag set is CHECKED against the build it produces, not
+        # trusted. A tag derivation that silently came back empty would leave
+        # the tagged files out of the scan and change nothing else: the scan
+        # would run, report on what was left, and exit 0 — green because it was
+        # looking at less. `IgnoredGoFiles` is go/build's own list of the files
+        # it dropped for build constraints, so an empty one is a direct
+        # statement that no Go file in this module is outside the build
+        # govulncheck is about to load. It is the tag derivation's postcondition
+        # rather than a second copy of it, so it cannot go stale with it.
+        excluded="$(cd "${dir}" \
+            && go list -e "${tagflag[@]}" \
+                -f '{{{{if .IgnoredGoFiles}}{{{{.ImportPath}}: {{{{join .IgnoredGoFiles " "}}{{{{end}}' ./... \
+            | sed '/^$/d')"
+        if [ -n "${excluded}" ]; then
+            echo "error: build constraints exclude these files from ${dir}, so govulncheck cannot" >&2
+            echo "       see them and the scan below would be green over unscanned code (bd gqlc-pig9):" >&2
+            printf '%s\n' "${excluded}" | sed 's/^/         /' >&2
+            echo "       Derived tags were [${tags:-none}]. Either the tag derivation above missed a" >&2
+            echo "       constraint, or these files are excluded by something -tags cannot enable —" >&2
+            echo "       a GOOS/GOARCH filename suffix, or //go:build ignore. Neither has ever" >&2
+            echo "       existed in this tree; the first one to needs a deliberate decision here," >&2
+            echo "       not a silently narrower scan." >&2
+            exit 1
+        fi
+
+        echo "govulncheck: $(cd "${dir}" && go list -m) at ${dir}, tags [${tags:-none}]"
+        (cd "${dir}" && go run golang.org/x/vuln/cmd/govulncheck@latest "${tagflag[@]}" -test -show verbose ./...)
+    done
 
 # Measures the root module's residual blindness (ADR 0026), so it is a number
 # taken on every run rather than a claim in a comment that rots (bd gqlc-m5rc).
 # Wired into `just vuln` and, as a step in ci.yml's lint job, into every pull
 # request. Reachability is the point: the residual moves on PRs that add a test
-# file, and vuln.yml scans nothing unless a go.mod changed, so a residual
-# reported only from `just vuln` is a residual nobody ever sees move.
+# file, and lint is the job that runs on all of them.
 #
 # The two halves are graded differently on purpose. The file counts REPORT — a
 # new in-package test is this repo's house style, and failing on it would be

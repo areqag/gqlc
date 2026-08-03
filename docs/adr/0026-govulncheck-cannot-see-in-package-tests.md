@@ -94,9 +94,39 @@ today, which is exactly why the walk carries a fixture it checks itself against
 on every run: a recursion with nothing live to walk can be lost without any
 measurement moving.
 
-The recipe rides ci.yml's `lint` job rather than the `govulncheck` job, because
-the vuln job scans only when a `go.mod` changes and the residual moves on PRs
-that add a test file.
+The recipe rides ci.yml's `lint` job rather than the `govulncheck` job. The
+residual moves on any PR that adds a test file, and `lint` is the job that runs
+on all of them unconditionally.
+
+**The module set, each module's build tags, and the CI trigger are all derived,
+not declared** (bd gqlc-pig9). `just vuln` scans every `go.mod` under the
+checkout, with every build tag that module's own packages constrain themselves
+by — a tag is where code enters the build, so a module scanned without its tags
+is a module partly scanned, and `ignore` is excluded because that tag's whole
+meaning is "not part of any build". vuln.yml arms on any `.go` file, any
+`go.mod`/`go.sum` anywhere, the recipe, or itself. Each list this replaces was a
+proxy for the real condition: a module list omits the third module the day it is
+added, and a `go.mod`-only trigger misses a PR that newly imports or newly calls
+an already-required module, which is the state `GO-2026-5841` sits in today
+(bd gqlc-k22l).
+
+**A derivation gets a postcondition, because a derivation can also come back
+empty.** Deriving the tags rather than listing them removes one way to be green
+over unscanned code and introduces another: a tag walk that silently found
+nothing would produce a narrower build, a scan that ran, and an exit 0. So
+before each module is scanned the recipe asserts that `go list`'s own
+`IgnoredGoFiles` is empty under the derived tags — a direct statement that no Go
+file in the module is outside the build govulncheck is about to load. It is the
+derivation's postcondition rather than a second copy of it, so the two cannot
+drift. Measured: with the tag walk broken, the nested module's advisory count
+goes from three to zero and the recipe still exits 0 without this assertion, and
+fails naming the four excluded files with it.
+
+The same grading applies to vuln.yml's filter. `grep` exiting 1 means "no match"
+and may be read as "nothing relevant changed"; any higher status is `grep`
+failing, and the `|| true` that keeps `bash -e` from aborting on the first would
+turn the second into a silent skip of the scan. The status is compared rather
+than discarded.
 
 **`just vuln` runs with `-show verbose`.** The scan is at symbol level, so
 package- and module-level findings do not change its exit status; without
@@ -126,6 +156,12 @@ file set as a failure.
 advisories in modules nothing in the tree imports, including one with no fix
 available.
 
+**Keep the module list literal and add a check that it matches discovery.**
+Rejected as a fallback that was not needed: nothing about the scan requires a
+static list — the recipe iterates and vuln.yml decides in-job rather than through
+GitHub's static `paths:` filter, so both sides can discover directly. A
+mismatch check would only reintroduce the list in order to guard it.
+
 ## Consequences
 
 - A `_test.go` added under `test/data/codegen` must declare an external test
@@ -137,6 +173,18 @@ available.
   reason in the commit message.
 - A test behind a non-default build tag is invisible to the ratchet, as it is to
   `go test ./...`. No root test file carries a build constraint today.
+- A module added anywhere under the checkout is scanned, and its build tags are
+  picked up, with no list to edit. A build tag added to an existing module widens
+  that module's scan on the next run — including a tag whose files do not
+  compile under it, which will fail the gate rather than be skipped.
+- A Go file that `-tags` cannot reach fails `just vuln` rather than being quietly
+  dropped from the scan: a GOOS/GOARCH filename suffix, or `//go:build ignore`.
+  Neither exists in this tree today, and the first one to should be a decision
+  recorded here, not a narrower scan nobody noticed.
+- Nearly every pull request now runs the scan, because nearly every pull request
+  touches a `.go` file. That is the intended cost: govulncheck answers at symbol
+  level, so a call graph edge is as much an input to the answer as a version in a
+  manifest.
 - `just vuln` output is longer, and includes the package and module inventory
   each scan matched. That inventory is the standing evidence that widening the
   scan to both modules is still in effect.
