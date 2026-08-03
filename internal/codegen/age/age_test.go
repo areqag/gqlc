@@ -517,20 +517,78 @@ func sidecarSchema(width string) string {
 // TIMESTAMP property's zone is stored in a second property named
 // <property>Offset and read out of the same map the declared properties
 // come from, so a schema declaring that name gives one key two readers.
-// Both widths below are wrong in a different way and neither is
-// detectable from the emitted Go: with an integer the decoder compiles
-// and hands back an instant re-zoned by the author's own value, and with
-// anything else it compiles and no vertex of that type ever decodes.
 //
 // The refusal is the whole file set, before any of it is written.
+//
+// Every row here is a collision the gate must find, and each moves one
+// axis the gate could be blind along. The two widths establish that it
+// is blind to width, which it has to be: the two are wrong in different
+// ways and neither is detectable from the emitted Go — with an integer
+// the decoder compiles and hands back an instant re-zoned by the
+// author's own value, and with anything else it compiles and no vertex
+// of that type ever decodes. The remaining rows move where the
+// collision sits: fields arrive map-key sorted and entities arrive as
+// nodes and edges together, so a row whose instant is the entity's first
+// field, or whose entity is a node, leaves a gate reading only the first
+// field or only the node table indistinguishable from the real one.
 func (s *EmissionSuite) TestRejectsAnAuthorOwnedOffsetSidecar() {
-	for _, width := range []string{"INT64", "STRING"} {
-		s.Run(width, func() {
-			files, err := age.New().Generate(s.inputFromText(sidecarSchema(width)))
+	cases := []struct {
+		name    string
+		schema  string
+		entity  string
+		instant string
+	}{
+		{
+			name:    "the sidecar is an integer, so the decoder re-zones",
+			schema:  sidecarSchema("INT64"),
+			entity:  "Photo",
+			instant: "takenAt",
+		},
+		{
+			name:    "the sidecar is a string, so no vertex decodes",
+			schema:  sidecarSchema("STRING"),
+			entity:  "Photo",
+			instant: "takenAt",
+		},
+		{
+			// The instant sorts after a property that does not collide, so
+			// the entity's first field is not the offender.
+			name: "the colliding instant is not the entity's first field",
+			schema: `CREATE PROPERTY GRAPH TYPE Sidecar AS {
+    (:Photo {
+        album          :: STRING    NOT NULL,
+        zTakenAt       :: TIMESTAMP NOT NULL,
+        zTakenAtOffset :: INT64     NOT NULL
+    })
+}`,
+			entity:  "Photo",
+			instant: "zTakenAt",
+		},
+		{
+			// AGE stamps properties on an edge as readily as on a vertex,
+			// and the emitted edge decoder reads the sidecar out of the
+			// same map, so the collision is the same collision.
+			name: "the colliding entity is an edge",
+			schema: `CREATE PROPERTY GRAPH TYPE Sidecar AS {
+    (:Photo { id :: INT64 NOT NULL }),
+    (:Photo) -[:SAW {
+        takenAt       :: TIMESTAMP NOT NULL,
+        takenAtOffset :: INT64     NOT NULL
+    }]-> (:Photo)
+}`,
+			entity:  "SAW",
+			instant: "takenAt",
+		},
+	}
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			files, err := age.New().Generate(s.inputFromText(tc.schema))
+			s.Require().ErrorIs(err, codegen.ErrPropertyFieldCollision,
+				"the gate did not see the collision on %s.%s", tc.entity, tc.instant)
+			s.Require().ErrorContains(err,
+				`entity "`+tc.entity+`" declares property "`+tc.instant+`Offset"`)
+			s.Require().ErrorContains(err, `property "`+tc.instant+`"`)
 			s.Require().Nil(files, "a rejected schema must not return a partial file set")
-			s.Require().ErrorIs(err, codegen.ErrPropertyFieldCollision)
-			s.Require().ErrorContains(err, `entity "Photo" declares property "takenAtOffset"`)
-			s.Require().ErrorContains(err, `property "takenAt"`)
 		})
 	}
 
