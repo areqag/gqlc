@@ -28,6 +28,13 @@ jobs:
         with:
           go-version-file: go.mod
       - uses: ./.github/actions/setup-just
+      # Ratchets the set of packages govulncheck cannot see through (ADR 0026,
+      # bd gqlc-m5rc). It rides the lint job, the root module's always-run static
+      # gate, because the vuln job scans only when a go.mod changes — so it would
+      # never run on the PRs that add a test file and move this number. Ahead of
+      # the lint because it is one `go list`, and there is no point spending a
+      # lint on a PR that fails it.
+      - run: just vuln-root-residual
       # golangci-lint's per-package analysis cache. Save under a unique key
       # every run, restore by prefix: the same rotation the official action
       # does, without giving up `just lint` as the single entrypoint. The

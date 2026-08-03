@@ -1,9 +1,15 @@
 # Vulnerabilities arrive with dependency changes, not parser code, so the real
-# scan runs only when go.mod/go.sum change, plus a weekly sweep on master for
+# scan runs only when a go.mod/go.sum changes, plus a weekly sweep on master for
 # newly published advisories. govulncheck is a required check, and required
 # checks are matched by name with no conditional primitive — so the job runs on
 # every PR and decides in-job: no dependency changes means instant success
 # without scanning.
+#
+# Both modules arm it. `just vuln` scans the root module and the nested
+# test/data/codegen one, so a bump confined to the nested go.mod has to trigger
+# the scan too — otherwise the live battery's driver and container dependencies
+# can be upgraded into a known vulnerability with no PR ever scanning them
+# (ADR 0026, bd gqlc-rohp).
 name: vuln
 
 on:
@@ -29,8 +35,13 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
+          # Not `git diff ... | grep -q .`: a pipeline reports grep's status, so a
+          # git failure would be indistinguishable from "no dependency changed" and
+          # would skip the scan on exactly the PR that needed it.
           git fetch --no-tags --depth=1 origin "$BASE_SHA"
-          if git diff --name-only "$BASE_SHA" HEAD -- go.mod go.sum | grep -q .; then
+          changed=$(git diff --name-only "$BASE_SHA" HEAD \
+              -- go.mod go.sum test/data/codegen/go.mod test/data/codegen/go.sum)
+          if [ -n "$changed" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
