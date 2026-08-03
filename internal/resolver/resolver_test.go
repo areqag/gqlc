@@ -3,10 +3,14 @@ package resolver
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -343,6 +347,24 @@ var invalidFixtures = map[string]error{
 	// generates silently wrong code if this verdict is lost.
 	"ambiguous_edge_orientation_overlapping_endpoints.cypher":          ErrAmbiguousEdgeOrientation,
 	"ambiguous_edge_orientation_overlapping_endpoints_reversed.cypher": ErrAmbiguousEdgeOrientation,
+	// ejn0 additions. An anonymous edge is its own binding, so it reaches the
+	// orientation refusal with no variable to name it by — and every undirected
+	// fixture that shipped before these binds one. The two differ in what the
+	// endpoints are: named bindings on one, an inline label expression on the
+	// other, which are the two things a pattern's ends can be.
+	"ambiguous_edge_orientation_anonymous.cypher":                 ErrAmbiguousEdgeOrientation,
+	"ambiguous_edge_orientation_anonymous_inline_endpoint.cypher": ErrAmbiguousEdgeOrientation,
+	// The endpoint-inference refusal is the other fail-site that names the edge
+	// binding, and it is the only one an endpoint carrying neither a variable
+	// nor labels can reach: an anonymous edge closes over it, so the `()` end
+	// has to be describable too.
+	"anonymous_edge_uninferable_endpoint.cypher": ErrUnknownLabel,
+	// A 2x2 endpoint cross-product with all four keys declared, so the candidate
+	// set holds TWO disjoint swapped pairs rather than one. Every undirected
+	// fixture before this one has exactly one pair, which makes "the first
+	// witness on each side" indistinguishable from "the only witness on each
+	// side" — the choice is unobservable until a second pair exists to lose to.
+	"ambiguous_edge_orientation_two_swapped_pairs.cypher": ErrAmbiguousEdgeOrientation,
 }
 
 // invalidFixtureContains pins the message arm for fixtures where errors.Is
@@ -364,6 +386,15 @@ var invalidFixtureContains = map[string]string{
 	// refProjectionType arm (scope.go:706) — distinguished by "binding" suffix.
 	"path_binding.cypher":   "path binding",
 	"unwind_binding.cypher": "unwind binding",
+	// The three ways the refusal can name the edge it refuses. A named binding
+	// is quoted; an anonymous one has no name, so it is placed by the label it
+	// carries and the two ends it runs between — which are themselves either a
+	// bound variable or an inline label expression. errors.Is passes on all
+	// three, and so does a message that has gone back to naming `edge ""`.
+	"ambiguous_edge_orientation.cypher":                           `edge "r" matches`,
+	"ambiguous_edge_orientation_anonymous.cypher":                 `the [:AUTHORED] edge between p and post matches`,
+	"ambiguous_edge_orientation_anonymous_inline_endpoint.cypher": `the [:AUTHORED] edge between p and (:Post) matches`,
+	"anonymous_edge_uninferable_endpoint.cypher":                  `of the [:AUTHORED] edge between p and ()`,
 	// The message must name one candidate from each side of the disagreement,
 	// first-in-candidate-order per side, and leave out the third — which plural
 	// satisfaction widened the set with on a side already represented.
@@ -380,6 +411,20 @@ var invalidFixtureContains = map[string]string{
 	// candidate list.
 	"ambiguous_edge_orientation_overlapping_endpoints.cypher":          `matches Employee&Person-[REVIEWED]->Person left-to-right and Person-[REVIEWED]->Employee&Person right-to-left`,
 	"ambiguous_edge_orientation_overlapping_endpoints_reversed.cypher": `matches Person-[REVIEWED]->Employee&Person left-to-right and Employee&Person-[REVIEWED]->Person right-to-left`,
+	// Two swapped pairs in one candidate set: both pairs would be a correct
+	// answer to "which two candidates disagree", so the pin says *which* the
+	// first-witness-per-side scan picks. See
+	// TestTwoSwappedPairsReportsTheFirstInCandidateOrder for why the set really
+	// holds two.
+	"ambiguous_edge_orientation_two_swapped_pairs.cypher": `matches Employee&Person-[REVIEWED]->Company&Startup left-to-right and Company&Startup-[REVIEWED]->Employee&Person right-to-left`,
+	// ErrUnionColumnMismatch's type arm, and the one literal copy of
+	// unionColumnTypeArm in the repo. The arm's surrounding frame is already
+	// pinned by unionTypeArmMessage, but that regexp is BUILT FROM the constant,
+	// so it admits the same fixture set whatever the phrase says — rewriting the
+	// constant to " zzz " left the whole suite green. The trailing space is the
+	// constant's own; the phrase is spelled here in full so a change to it has
+	// to be a change someone made on purpose.
+	"union_column_type_mismatch.cypher": `column "x" projects `,
 }
 
 type ResolverSuite struct {
@@ -732,6 +777,232 @@ func (s *ResolverSuite) TestAmbiguousOrientationRemedyIsTheArrow() {
 	}
 }
 
+// TestMixedSymmetryIsAcceptedAndTheMarkerNarrows holds §4.6's third shape: a
+// candidate that reads both ways alongside candidates that read exactly one
+// way, all on the same side. Nothing disagrees, so the verdict table accepts —
+// and unlike the shape where *every* candidate reads both ways, the arrow is
+// not inert, because the one-way candidates sit outside the directed probe set.
+// So the author's choice of marker decides the result type: a two-key union
+// undirected, a single edge directed.
+//
+// Both arities are hand-written. The corpus fixtures for this shape carry
+// machine-written goldens, so a change that collapsed the two arities into one
+// would be absorbed by the next -update run with the goldens still agreeing
+// with themselves; the difference between them is the whole claim, so it is
+// stated somewhere -update cannot reach.
+//
+// The three resolves are also what says the shape is mixed rather than either
+// pure one, without restating the classification predicate in the test: a
+// candidate that reads both ways is in *both* directed twins' candidate sets, a
+// candidate that reads one way is in exactly one, and the undirected set is
+// their union.
+func (s *ResolverSuite) TestMixedSymmetryIsAcceptedAndTheMarkerNarrows() {
+	sch := s.loadSchema("valid", "satisfy_plural_edges_mixed_symmetry.gql")
+	bothWays := schema.EdgeKey{Source: "Manager&Person&Staff", KeyLabels: "MENTORS", Target: "Engineer&Person&Staff"}
+	oneWay := schema.EdgeKey{Source: "Person", KeyLabels: "MENTORS", Target: "Engineer&Person&Staff"}
+
+	resolve := func(src string) ResolvedType {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		s.Require().NoErrorf(err, "%s: mixed symmetry is accepted, not refused", src)
+		s.Require().Len(vq.Columns, 1)
+		return vq.Columns[0].Type
+	}
+
+	s.Require().Equal(ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{bothWays, oneWay}},
+		resolve("MATCH (a:Staff)-[r:MENTORS]-(b:Person) RETURN r"),
+		"undirected admits both readings, so both candidates join the union")
+	s.Require().Equal(ResolvedEdge{EdgeKey: bothWays},
+		resolve("MATCH (a:Staff)-[r:MENTORS]->(b:Person) RETURN r"),
+		"the arrow drops the one-way candidate, so the marker is not inert on this shape")
+	s.Require().Equal(ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{bothWays, oneWay}},
+		resolve("MATCH (a:Person)-[r:MENTORS]->(b:Staff) RETURN r"),
+		"the reversed arrow keeps both, which is what makes the surviving candidate the symmetric one")
+}
+
+// TestTwoSwappedPairsReportsTheFirstInCandidateOrder holds §4.4's determinism
+// claim on the only input that can observe it: a candidate set carrying two
+// disjoint swapped pairs, where each pair on its own is a truthful answer to
+// "which two candidates disagree" and nothing but the scan order picks between
+// them.
+//
+// Every undirected fixture that shipped before this one carries exactly one
+// pair, so on all of them "the first witness on each side" and "the only
+// witness on each side" are the same sentence, and the message pins say nothing
+// about order. Here they come apart: a scan that kept the last witness on
+// either side, or that walked the two sides independently, reports the other
+// pair while still reporting a true disagreement.
+//
+// The two directed twins are the guard against this covering nothing. A schema
+// that in fact produced one pair would satisfy the message pin just as well, so
+// the claim "two pairs" is asserted rather than assumed: each twin must close
+// to two candidates, each of the forward twin's keys must have its mirror in
+// the reverse twin's, and the four together must be four distinct keys. That is
+// two swapped pairs, stated as the property rather than as a count.
+//
+// The twins are *read off the fixture's own pattern* (undirectedEdgePattern),
+// not written out here. A guard built from its own hard-coded endpoints proves
+// two pairs exist somewhere in the schema and holds nothing against the query
+// under test: narrowing the fixture's right endpoint to a single satisfying type
+// leaves one pair and a message pin that still passes, which is the
+// green-because-it-is-looking-at-nothing mode this fixture exists to close.
+//
+// What is read off is each endpoint's label expression as written, which the
+// twins put back through node satisfaction. On this fixture's two VarEndpoints
+// that is the relation the resolver used too, so the twins probe the set the
+// fixture closed over; on an inline endpoint it would not be. See
+// endpointLabels below.
+//
+// The message is read with edgeKeyInMessage and matched as a set, because one
+// key's rendering is a substring of another's — Person-[REVIEWED]->Company sits
+// inside Employee&Person-[REVIEWED]->Company&Startup — so a Contains/NotContains
+// pair would silently be answering a different question.
+func (s *ResolverSuite) TestTwoSwappedPairsReportsTheFirstInCandidateOrder() {
+	const fixture = "ambiguous_edge_orientation_two_swapped_pairs.cypher"
+
+	mapping := s.loadMapping("invalid")
+	schemaName, ok := mapping[fixture]
+	s.Require().True(ok, "unmapped invalid fixture %q", fixture)
+	sch := s.loadSchema("invalid", schemaName)
+	q := s.loadQuery(filepath.Join(fixtureDir, "invalid", fixture))
+
+	pattern := s.undirectedEdgePattern(q)
+
+	unionKeys := func(src string) []schema.EdgeKey {
+		pq, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(pq)
+		s.Require().NoErrorf(err, "%s: the directed twin of the fixture's pattern must resolve", src)
+		s.Require().Len(vq.Columns, 1)
+		u, ok := vq.Columns[0].Type.(ResolvedEdgeUnion)
+		s.Require().Truef(ok, "%s: want an edge union, got %T — this reading contributes fewer than two candidates, so the fixture carries at most one swapped pair", src, vq.Columns[0].Type)
+		return u.EdgeKeys
+	}
+	mirror := func(k schema.EdgeKey) schema.EdgeKey {
+		return schema.EdgeKey{Source: k.Target, KeyLabels: k.KeyLabels, Target: k.Source}
+	}
+
+	l2r := unionKeys(pattern.directed(pattern.source, pattern.target))
+	r2l := unionKeys(pattern.directed(pattern.target, pattern.source))
+	s.Require().Len(l2r, 2, "the left-to-right reading must contribute two candidates")
+	s.Require().Len(r2l, 2, "the right-to-left reading must contribute two candidates")
+	distinct := make(map[schema.EdgeKey]struct{}, 4)
+	for _, k := range l2r {
+		s.Require().Containsf(r2l, mirror(k),
+			"%s has no counterparty, so it is not half of a swapped pair", formatEdgeKey(k))
+		distinct[k] = struct{}{}
+	}
+	for _, k := range r2l {
+		distinct[k] = struct{}{}
+	}
+	s.Require().Len(distinct, 4, "the two pairs must be disjoint, or there is only one pair here")
+
+	_, err := New(sch, WithRegistry(regR7)).Resolve(q)
+	s.Require().ErrorIs(err, ErrAmbiguousEdgeOrientation)
+	s.Require().ElementsMatch(
+		[]string{
+			"Employee&Person-[REVIEWED]->Company&Startup",
+			"Company&Startup-[REVIEWED]->Employee&Person",
+		},
+		edgeKeyInMessage.FindAllString(err.Error(), -1),
+		"the reported pair must be the first witness on each side, in candidate order")
+}
+
+// edgePattern is one undirected edge pattern reduced to the three label
+// expressions a directed twin can be rebuilt from: the two ends as the author
+// wrote them and the edge's own alternation.
+type edgePattern struct {
+	source graph.LabelSetKey
+	edge   string // the alternation, "|"-joined as written
+	target graph.LabelSetKey
+}
+
+// directed spells a single-column query running from one end to the other with
+// an explicit arrow. Fresh variable names: the twin is a probe of the schema,
+// not a rewrite of the fixture, and the fixture's own names are irrelevant to
+// which candidates close.
+func (p edgePattern) directed(from, to graph.LabelSetKey) string {
+	return fmt.Sprintf("MATCH (x:%s)-[e:%s]->(y:%s) RETURN e", from, p.edge, to)
+}
+
+// undirectedEdgePattern reads the one undirected edge binding out of a parsed
+// query and returns its two endpoints' label expressions plus its own.
+//
+// This is what keeps a fixture's guard pointed at that fixture. A guard that
+// names its endpoints itself is a second copy of the fixture, and the two drift
+// on the next edit to either — the fixture narrows, the guard keeps resolving
+// the twins it was born with, and the suite stays green over a query that no
+// longer has the shape the guard reports.
+//
+// An endpoint's labels live on the NodeBinding it names, or inline on the
+// endpoint itself, and both are read — but they are not the same thing to the
+// closure, which is endpointLabels' subject.
+func (s *ResolverSuite) undirectedEdgePattern(q query.Query) edgePattern {
+	var (
+		got   edgePattern
+		found bool
+	)
+	for _, branch := range q.Branches {
+		for _, part := range branch.Parts {
+			nodes := make(map[string]graph.LabelSetKey, len(part.Bindings))
+			for _, b := range part.Bindings {
+				if nb, ok := b.(query.NodeBinding); ok {
+					nodes[nb.Variable()] = nb.Labels().Key()
+				}
+			}
+			for _, b := range part.Bindings {
+				eb, ok := b.(query.EdgeBinding)
+				if !ok || eb.Directed() {
+					continue
+				}
+				s.Require().False(found, "the fixture must carry exactly one undirected edge binding")
+				found = true
+				got = edgePattern{
+					source: s.endpointLabels(eb.Source(), nodes),
+					edge:   strings.Join(eb.Labels(), "|"),
+					target: s.endpointLabels(eb.Target(), nodes),
+				}
+			}
+		}
+	}
+	s.Require().True(found, "the fixture must carry an undirected edge binding, or there is no orientation to be ambiguous about")
+	s.Require().NotEmpty(got.edge, "the edge must carry a label alternation")
+	return got
+}
+
+// endpointLabels is the label expression one end of a pattern was written with:
+// the labels of the NodeBinding a variable endpoint names, or the inline set. It
+// is the spelled expression, not the key the resolver closed the edge over, and
+// directed() re-spells it as `(x:Labels)` — so the twin puts it back through
+// node satisfaction.
+//
+// For a VarEndpoint that is faithful: the resolver reaches its key by satisfying
+// the same spelled labels, so the twin probes the set the fixture closed over.
+// For an InlineEndpoint it is not. The resolver's own endpointLabels keys an
+// inline end on the labels as spelled — an exact match against declared
+// identity rather than a satisfaction test, a known gap tracked as gqlc-h9n.23 —
+// so a twin of an inline endpoint can probe a strictly wider candidate set than
+// the fixture itself saw. No fixture reaching here carries one today; rewriting
+// an end to the inline form would need this helper reconciled with the resolver
+// first, or the twins stop reporting on the query under test.
+func (s *ResolverSuite) endpointLabels(e query.Endpoint, nodes map[string]graph.LabelSetKey) graph.LabelSetKey {
+	switch ep := e.(type) {
+	case query.VarEndpoint:
+		labels, ok := nodes[ep.Variable()]
+		s.Require().Truef(ok, "endpoint %q names no node binding in this part", ep.Variable())
+		s.Require().NotEmptyf(labels, "endpoint %q carries no labels, so it has no directed twin to probe", ep.Variable())
+		return labels
+	case query.InlineEndpoint:
+		labels := ep.Labels().Key()
+		s.Require().NotEmpty(labels, "an inline endpoint with no labels has no directed twin to probe")
+		return labels
+	default:
+		s.Require().Failf("unhandled endpoint", "%T", e)
+		return ""
+	}
+}
+
 // TestEdgeUnionKeysAreASet asserts ResolvedEdgeUnion.EdgeKeys carries each
 // schema EdgeKey at most once, over the whole valid corpus.
 //
@@ -975,6 +1246,205 @@ func (s *ResolverSuite) TestRelationshipTypeConflictIsRefusedOnBothSidesOfWITH()
 	_, err = New(sch, WithRegistry(regR7)).Resolve(q)
 	s.Require().ErrorIs(err, ErrPartBindingTypeConflict,
 		"the cross-part conflict is the resolver's: only it carries the type across the WITH")
+}
+
+// unionTypeArmRow is one invalid fixture that reaches ErrUnionColumnMismatch's
+// type arm, with both projections written out by hand.
+type unionTypeArmRow struct {
+	fixture string
+	failing string // what the branch that failed the comparison projected
+	branch0 string // what branch 0 projected
+}
+
+// unionTypeArmRows is the hand-written expectation for every invalid fixture
+// that reaches the type arm. TestUnionColumnMismatchTypeArmRowsCoverTheArm
+// holds it total against the corpus, so a fixture that starts reaching the arm
+// cannot slip in unpinned.
+//
+// The renderings are hand-written rather than derived from the resolved value:
+// a derived expectation passes whatever the renderer emits, which is the defect
+// this table exists to catch.
+var unionTypeArmRows = []unionTypeArmRow{
+	{
+		fixture: "union_node_type_mismatch.cypher",
+		failing: "node Post (not null)",
+		branch0: "node Person (not null)",
+	},
+	{
+		fixture: "union_edge_union_keys_mismatch.cypher",
+		failing: "edgeUnion {Person-[AUTHORED]->Note, Person-[LIKES]->Note} (not null)",
+		branch0: "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (not null)",
+	},
+	{
+		// Same keys on both sides: nullability is the only axis that
+		// separates them, so a rendering that drops it re-collapses the two.
+		fixture: "union_edge_union_nullability_mismatch.cypher",
+		failing: "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (nullable)",
+		branch0: "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (not null)",
+	},
+	{
+		// One key list is a strict prefix of the other. The two still render
+		// apart without the braces — nullabilityNote terminates the list — so
+		// these two rows pin the arity axis, not the delimiters.
+		fixture: "union_edge_union_arity_prefix.cypher",
+		failing: "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (not null)",
+		branch0: "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post, Person-[SHARED]->Post} (not null)",
+	},
+	{
+		fixture: "union_edge_union_arity_prefix_reversed.cypher",
+		failing: "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post, Person-[SHARED]->Post} (not null)",
+		branch0: "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (not null)",
+	},
+	{
+		// Nullability is the separating axis; the scalar token agrees.
+		fixture: "union_column_nullability_mismatch.cypher",
+		failing: "property:STRING (nullable)",
+		branch0: "property:STRING (not null)",
+	},
+	{
+		// The scalar token is the separating axis; nullability agrees on one
+		// side and disagrees on the other, so between this row and the one
+		// above neither axis can be dropped without a row noticing.
+		fixture: "union_column_type_mismatch.cypher",
+		failing: "property:INT (nullable)",
+		branch0: "property:STRING (not null)",
+	},
+	{
+		// Three branches, and the mismatch is against branch 2 — the only row
+		// where the failing branch is not branch 1. Both sides are NOT NULL, so
+		// the scalar token is the *only* thing telling them apart: this is the
+		// fixture that collides outright if ResolvedProperty stops rendering it.
+		fixture: "union_third_branch_mismatch.cypher",
+		failing: "property:INT (not null)",
+		branch0: "property:STRING (not null)",
+	},
+	{
+		fixture: "union_list_element_mismatch.cypher",
+		failing: "list of edge Person-[AUTHORED]->Post (not null)",
+		branch0: "list of edge Person-[KNOWS]->Person (not null)",
+	},
+}
+
+// unionTypeArmMessage matches ErrUnionColumnMismatch's type arm and captures the
+// two renderings it names. The frame is built from unionColumnTypeArm, the same
+// constant resolve.go splices into the format string, so the match cannot drift
+// from the message.
+var unionTypeArmMessage = regexp.MustCompile(
+	`column "[^"]*"` + regexp.QuoteMeta(unionColumnTypeArm) + `(.+?) in branch \d+ but (.+) in branch 0`)
+
+// TestUnionColumnMismatchNamesEachArm holds ErrUnionColumnMismatch's type arm
+// to naming what each branch projected, the failing branch first.
+//
+// The renderings the message is built from are ResolvedType's Stringers, and
+// those are wire tags: every ResolvedNode is "node" whichever type it holds,
+// every ResolvedEdgeUnion is "edgeUnion" whichever keys it committed. So on
+// each row — one per resolvedTypeEqual arm that can fail on two values sharing
+// a tag — the message read "has type edgeUnion; branch 0 has type edgeUnion",
+// which tells the author the arms disagree and nothing about how.
+//
+// Two things are asserted per row, and they fail for different reasons. The
+// transcription check says the message names exactly the text this table
+// predicts, in the arm order the other two arms use. The collision check reads
+// the two renderings back *out of the message* and requires them to differ
+// there — so a renderer that makes two mismatching types print alike fails on
+// the defect itself, not merely on a hand-written string going stale.
+//
+// Nothing here reads a golden, so -update cannot bless a regression.
+func (s *ResolverSuite) TestUnionColumnMismatchNamesEachArm() {
+	mapping := s.loadMapping("invalid")
+	for _, tt := range unionTypeArmRows {
+		s.Run(tt.fixture, func() {
+			schemaName, ok := mapping[tt.fixture]
+			s.Require().True(ok, "unmapped invalid fixture %q", tt.fixture)
+
+			_, err := New(s.loadSchema("invalid", schemaName), WithRegistry(regR7)).
+				Resolve(s.loadQuery(filepath.Join(fixtureDir, "invalid", tt.fixture)))
+			s.Require().ErrorIs(err, ErrUnionColumnMismatch)
+			msg := err.Error()
+
+			s.Require().NotEqual(tt.failing, tt.branch0,
+				"the two renderings must differ, or this row asserts nothing")
+			failing := strings.Index(msg, tt.failing)
+			branch0 := strings.Index(msg, tt.branch0)
+			s.Require().GreaterOrEqualf(failing, 0, "the failing branch projected %q, absent from %q", tt.failing, msg)
+			s.Require().GreaterOrEqualf(branch0, 0, "branch 0 projected %q, absent from %q", tt.branch0, msg)
+			s.Require().Lessf(failing, branch0,
+				"the count and name arms lead with the failing branch, so this one must too, in %q", msg)
+
+			// The collision check: the two renderings as the message actually
+			// carries them, not as this table transcribes them.
+			m := unionTypeArmMessage.FindStringSubmatch(msg)
+			s.Require().Lenf(m, 3, "the type arm's message must still parse: %q", msg)
+			s.Require().NotEqualf(m[1], m[2],
+				"the two branches rendered as the same text, so the message says they disagree and nothing about how: %q", msg)
+		})
+	}
+}
+
+// TestUnionColumnMismatchTypeArmRowsCoverTheArm holds unionTypeArmRows total
+// against the corpus: every invalid fixture that reaches ErrUnionColumnMismatch's
+// type arm has a row, and every row names a fixture that still reaches it.
+//
+// The table is hand-maintained, which is what makes it worth the rows — a
+// derived expectation would pass whatever the renderer emitted. But a
+// hand-maintained table silently falls behind the corpus, and it had: two of the
+// nine fixtures that reach this arm had no row, including the one that collides
+// outright when ResolvedProperty stops rendering its scalar token. A fixture can
+// start reaching this arm without anyone editing this file — adding a UNION
+// fixture for some other sentinel is enough — so totality is asserted rather
+// than remembered.
+//
+// The reached set is derived by resolving every invalid fixture and matching the
+// type arm's own message frame; nothing here is a count. A count is satisfiable
+// by the wrong nine, and this repo has been bitten by exactly that (declaredTypeCount,
+// TestStageSpecsReadAsHistory's NotZero). Set equality also makes its own
+// vacuity guard: if the sweep matched nothing, every row would be reported extra.
+func (s *ResolverSuite) TestUnionColumnMismatchTypeArmRowsCoverTheArm() {
+	files, err := filepath.Glob(filepath.Join(fixtureDir, "invalid", "*.cypher"))
+	s.Require().NoError(err)
+	s.Require().NotEmpty(files)
+	mapping := s.loadMapping("invalid")
+
+	reaches := make(map[string]bool, len(files))
+	for _, path := range files {
+		name := filepath.Base(path)
+		schemaName, ok := mapping[name]
+		s.Require().True(ok, "unmapped invalid fixture %q", name)
+
+		_, err := New(s.loadSchema("invalid", schemaName), WithRegistry(regR7)).
+			Resolve(s.loadQuery(path))
+		if err == nil || !errors.Is(err, ErrUnionColumnMismatch) {
+			continue
+		}
+		if unionTypeArmMessage.MatchString(err.Error()) {
+			reaches[name] = true
+		}
+	}
+
+	tabled := make(map[string]bool, len(unionTypeArmRows))
+	for _, row := range unionTypeArmRows {
+		s.Require().Falsef(tabled[row.fixture], "duplicate row for %q", row.fixture)
+		tabled[row.fixture] = true
+	}
+
+	var missing, stale []string
+	for name := range reaches {
+		if !tabled[name] {
+			missing = append(missing, name)
+		}
+	}
+	for name := range tabled {
+		if !reaches[name] {
+			stale = append(stale, name)
+		}
+	}
+	slices.Sort(missing)
+	slices.Sort(stale)
+
+	s.Require().Emptyf(missing,
+		"these invalid fixtures reach ErrUnionColumnMismatch's type arm with no row in unionTypeArmRows, so nothing pins what the message says about them: %v", missing)
+	s.Require().Emptyf(stale,
+		"these unionTypeArmRows rows name a fixture that no longer reaches the type arm, so the row asserts nothing: %v", stale)
 }
 
 // TestSentinelReachability is the bidirectional sweep: every allSentinels

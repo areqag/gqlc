@@ -621,6 +621,32 @@ Held by
 shapes) and `TestAmbiguousOrientationRemedyIsTheArrow` (the remedy, on
 one parsed schema per row).
 
+**The three shapes an undirected candidate set takes.** Classification
+admits exactly three, and the direction marker does something different
+in each:
+
+| Shape | Candidates | Verdict | What writing the arrow does |
+|---|---|---|---|
+| Symmetric | every candidate reads both ways | verdict table on the whole set | nothing — `srcs == tgts`, so the directed probe set *is* the undirected one |
+| Mixed symmetry | at least one reads both ways; every one-reading candidate falls on the same side | verdict table on the whole set | narrows the set, so it decides the result type |
+| Disagreement | both one-reading classes non-empty for one label | case C, `ErrAmbiguousEdgeOrientation` | resolves the refusal — it drops one class entirely |
+
+**Mixed symmetry.** A set with no disagreement is accepted, and mixed
+symmetry is accepted for that reason: refusing would demand an arrow to
+settle a question no two candidates are asking. It is not the symmetric
+shape, though, and must not be read as it: `srcs != tgts`, so the
+directed probe set is a strict subset of the undirected one and the
+one-reading candidates lie outside it. The marker therefore selects the
+**result type** — undirected gives a `ResolvedEdgeUnion` over every
+candidate, directed the `ResolvedEdge` the symmetric candidate alone
+closes to. Each is the honest reading of the pattern it was written for,
+so neither arity is evidence against the other. Corpus:
+`valid/plural_endpoint_mixed_symmetry_undirected_edge_union` and
+`valid/plural_endpoint_mixed_symmetry_directed_closes_singular`, one
+schema and one marker apart; the arities are also held hand-written by
+`TestMixedSymmetryIsAcceptedAndTheMarkerNarrows`, because a golden pair
+that collapsed to one arity would still agree with itself.
+
 **Rationale — case C (the double-match decision).** A side
 disagreement in the candidate set of a **single-type undirected edge**
 means the schema declares that label running both ways across the

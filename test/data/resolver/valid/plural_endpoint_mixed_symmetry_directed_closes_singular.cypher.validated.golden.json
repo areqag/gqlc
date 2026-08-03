@@ -1,0 +1,20 @@
+{
+  "columns": [
+    {
+      "name": "r",
+      "type": {
+        "kind": "edge",
+        "edgeKey": {
+          "source": "Manager\u0026Person\u0026Staff",
+          "key_labels": "MENTORS",
+          "target": "Engineer\u0026Person\u0026Staff"
+        },
+        "nullable": false
+      },
+      "groupingKey": false
+    }
+  ],
+  "parameters": [],
+  "statement": "read",
+  "distinct": false
+}

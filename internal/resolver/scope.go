@@ -306,9 +306,9 @@ func (s *scope) CloseEdges(sch schema.Schema) error {
 		tgt, tgtOK := endpointLabels(eb.Target(), s.nodeTypes, s.nodeCands)
 		switch {
 		case !srcOK:
-			return fmt.Errorf("%w: cannot infer type of source endpoint of edge %q", ErrUnknownLabel, eb.Variable())
+			return fmt.Errorf("%w: cannot infer type of source endpoint of %s", ErrUnknownLabel, describeEdgeBinding(eb))
 		case !tgtOK:
-			return fmt.Errorf("%w: cannot infer type of target endpoint of edge %q", ErrUnknownLabel, eb.Variable())
+			return fmt.Errorf("%w: cannot infer type of target endpoint of %s", ErrUnknownLabel, describeEdgeBinding(eb))
 		}
 		if err := closeEdge(eb, src, tgt, sch, s.edgeTypes, s.edgeKeys, s.edgeCands); err != nil {
 			return err
