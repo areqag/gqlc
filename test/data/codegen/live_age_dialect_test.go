@@ -8,8 +8,9 @@
 // in a relationship detail. The backend refuses such a column at generation
 // (internal/codegen/age/errors.go, edgeUnionReason) rather than emit a label
 // dispatch behind a statement the server will not parse. Candidates sharing a
-// label arrive by another route entirely and are refused before any backend
-// sees them; edgeUnionReason says which is which and why.
+// label are a different failure, refused for a reason no parser is party to by
+// the shared admission this gate stands aside for; edgeUnionReason says which
+// is which and why.
 //
 // That refusal is a claim about a server this repo pins by digest, so it is
 // measured here on every live run instead of asserted in a comment. If AGE ever
@@ -166,7 +167,7 @@ func TestAGERefusesRelationshipTypeAlternation(t *testing.T) {
 				require.Error(t, err, "AGE must refuse this pattern")
 				var pgErr *pgconn.PgError
 				require.ErrorAs(t, err, &pgErr, "the refusal must be the server's")
-				require.Equal(t, alternationSQLSTATE, pgErr.Code)
+				require.Equal(t, tc.sqlstate, pgErr.Code)
 				require.Contains(t, pgErr.Message, `syntax error at or near "|"`,
 					"the alternation's pipe is what the parser must name")
 				return

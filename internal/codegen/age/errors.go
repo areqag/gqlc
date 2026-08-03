@@ -122,10 +122,9 @@ func unservedReason(q codegen.NamedQuery) string {
 // that label would pick the right candidate. What fails is the
 // statement, before any value exists to decode.
 //
-// Which half applies is read off the candidates, because that is what
-// says which pattern the author wrote. A refusal has to describe the
-// query in front of it, and a single sentence about '|' printed over
-// both halves was false of the second.
+// Which half applies is read off the candidates, because a refusal has
+// to describe the column in front of it, and a single sentence about '|'
+// printed over both halves was false of the second.
 //
 // Candidates carrying DISTINCT labels can only have come from a pattern
 // naming more than one relationship type, and openCypher writes that
@@ -143,16 +142,28 @@ func unservedReason(q codegen.NamedQuery) string {
 // syntax error. Refusing here turns that into an answer the author gets
 // from `gqlc generate`.
 //
-// Candidates SHARING a label are a different failure and not this
-// backend's. The pattern that produces them names one relationship type
-// whose endpoints the schema satisfies more than one way (ADR 0022) —
-// `(p:Person)-[r:FOUNDED]-(c:Company)`, with no alternation anywhere —
-// and Apache AGE parses it as readily as any other server. What defeats
-// it is that an edge value carries its label and its properties and never
-// its endpoint types, which is true on every backend alike and is what
-// codegen.ErrUnrepresentableEdgeUnion says. Standing aside lets that
-// answer through instead of overwriting it with a claim about '|' the
-// author's query does not contain.
+// The labels are named as what they are — the candidates the schema
+// declares for the pattern — and no alternation is quoted back, because
+// the candidate set is a SUBSET of the types the pattern names: a type
+// the schema does not declare is dropped during resolution
+// (internal/resolver, edgeCandidates) and never reaches here (gqlc-1dmu
+// is the missing diagnostic for that). Reconstructing ":A|B" from the
+// survivors and calling it the author's alternation printed a query
+// nobody wrote — the same defect as the sentence above, one layer in.
+//
+// A DUPLICATE label is a different failure and not this backend's. Two
+// candidates under one label leave the emitted dispatch nothing to tell
+// them apart, because an edge value carries its label and its properties
+// and never its endpoint types; that is true on every backend alike and
+// is what codegen.ErrUnrepresentableEdgeUnion says, so standing aside
+// lets the portable answer through. The carve-out is the duplicate and
+// not the absence of '|': one relationship type over a plural endpoint
+// (ADR 0022) reaches it with no alternation at all, and
+// `-[r:LIKES|WROTE]-` over an endpoint pair the schema declares both ways
+// reaches it with one (invalid/unrepresentable_edge_union_shared_label,
+// enrolled for this backend). Claiming the alternation on the second is true
+// of the query and useless as advice: rewriting it leaves the repeated
+// label, and the column stays unrepresentable however AGE parses.
 //
 // The split is read off the resolved candidates and never off the query
 // text, because '|' is not a witness to anything on its own: Cypher.g4
@@ -183,10 +194,11 @@ func edgeUnionReason(u resolver.ResolvedEdgeUnion) string {
 		return ""
 	}
 	return fmt.Sprintf(
-		`names relationship types %s, which openCypher writes only as the alternation %q — `+
-			`Apache AGE 1.7.0's parser has no "|" in a relationship pattern and answers it with `+
-			`%q (SQLSTATE 42601)`,
-		formatLabelList(labels), ":"+strings.Join(labels, "|"), `syntax error at or near "|"`)
+		`binds more than one relationship type — %s, the candidates the schema declares for `+
+			`its pattern — which openCypher spells only as an alternation, and Apache AGE `+
+			`1.7.0's parser has no "|" in a relationship pattern: it answers one with %q `+
+			`(SQLSTATE 42601)`,
+		formatLabelList(labels[0], labels[1], labels[2:]...), `syntax error at or near "|"`)
 }
 
 // distinctEdgeLabels is the candidates' edge labels in candidate order —
@@ -206,13 +218,14 @@ func distinctEdgeLabels(keys []schema.EdgeKey) []string {
 	return out
 }
 
-// formatLabelList renders a label list as English prose: "A and B",
-// "A, B and C". Callers reach it with at least two.
-func formatLabelList(labels []string) string {
-	if len(labels) < 2 {
-		return strings.Join(labels, "")
-	}
-	return strings.Join(labels[:len(labels)-1], ", ") + " and " + labels[len(labels)-1]
+// formatLabelList renders two or more labels as English prose: "A and
+// B", "A, B and C". The first two are named parameters because one label
+// is the input this has no rendering for and the refusal it serves has
+// no meaning for — a signature that cannot express it is one that needs
+// no arm for it.
+func formatLabelList(first, second string, rest ...string) string {
+	all := append([]string{first, second}, rest...)
+	return strings.Join(all[:len(all)-1], ", ") + " and " + all[len(all)-1]
 }
 
 // unservedColumn names why a resolved column type has no decode arm, or

@@ -2,8 +2,11 @@
 // pattern naming that single type closes to both when the schema
 // satisfies its source endpoint more than one way (ADR 0022), which is
 // how an edge-union column arises with no '|' anywhere in the query.
+// BACKED is the third label, so a pattern naming two types over the same
+// plural endpoint closes to three candidates of which two repeat a label
+// — the same obstacle reached through an alternation.
 //
-// Apache AGE parses such a pattern, so the column is refused by shared
+// Apache AGE parses both patterns, so the column is refused by shared
 // admission — an edge value carries its label and its properties, never
 // its endpoint types — and not by this backend's capability gate.
 CREATE PROPERTY GRAPH TYPE AgeSharedLabel AS {
@@ -11,5 +14,6 @@ CREATE PROPERTY GRAPH TYPE AgeSharedLabel AS {
     (:Investor { id :: INT64 NOT NULL }),
     (:Company  { id :: INT64 NOT NULL }),
     DIRECTED EDGE TYPE FoundedByPerson   (:Person)   -[:FOUNDED { foundedYear :: INT64 NOT NULL }]-> (:Company),
-    DIRECTED EDGE TYPE FoundedByInvestor (:Investor) -[:FOUNDED { foundedYear :: INT64 NOT NULL }]-> (:Company)
+    DIRECTED EDGE TYPE FoundedByInvestor (:Investor) -[:FOUNDED { foundedYear :: INT64 NOT NULL }]-> (:Company),
+    DIRECTED EDGE TYPE BackedByPerson    (:Person)   -[:BACKED  { round       :: INT64 NOT NULL }]-> (:Company)
 }

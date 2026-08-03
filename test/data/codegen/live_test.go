@@ -123,11 +123,14 @@ type writeHarness interface {
 }
 
 // edgeUnionHarness is an arm whose target emits an edge-union dispatch. Not
-// every arm does: the shape is reachable in openCypher only through a
-// relationship-type alternation, which Apache AGE's parser refuses, so that
-// backend refuses the column at generation instead of emitting a dispatch
-// behind a statement no author could send. TestAGERefusesRelationshipTypeAlternation
-// measures the refusal that this split rests on.
+// every arm does: this fixture's candidates carry distinct labels, and a
+// pattern naming several relationship types is a relationship-type
+// alternation, which Apache AGE's parser refuses — so that backend refuses
+// the column at generation instead of emitting a dispatch behind a statement
+// no author could send. TestAGERefusesRelationshipTypeAlternation measures the
+// refusal that this split rests on. (A multi-candidate column whose candidates
+// repeat a label needs no alternation and is refused by the shared admission
+// every backend runs, so it never reaches this split on any arm.)
 type edgeUnionHarness interface {
 	harness
 	edgeUnionScenario(ctx context.Context, t *testing.T) edgeUnionBackend
@@ -418,11 +421,18 @@ func edgeUnionDispatch(ctx context.Context, t *testing.T, b edgeUnionBackend) { 
 	// for it and the sealed interface no member, so the row fails and names
 	// what arrived — a nil interface returned without an error would be
 	// indistinguishable to a caller from a column that was legitimately absent.
-	got, err = q.actionOnPost(ctx, 30)
+	//
+	// Which failure it is matters as much as that it is one: the row EXISTS,
+	// so reporting it as ErrNoRows would send the author looking for a post
+	// their graph has. The returned value is not asserted — every adapter
+	// returns the zero action on every error path, so an assertion on it
+	// would hold whatever the dispatch did.
+	_, err = q.actionOnPost(ctx, 30)
 	require.Error(t, err, "a label outside the candidate set must fail the row")
+	require.NotErrorIs(t, err, q.errNoRows(),
+		"the row arrived and could not be decoded; that is not an absent row")
 	require.ErrorContains(t, err, `unexpected relationship type "FLAGGED"`,
 		"the failure must name the label that arrived")
-	require.Equal(t, edgeUnionAction{}, got)
 }
 
 // execWrite drives the :exec contract — the write reaches the graph, and the

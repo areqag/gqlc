@@ -212,20 +212,26 @@ var servedQuery = func() codegen.NamedQuery {
 // corpusEdgeKey is the one edge type testdata/corpus_schema.gql declares.
 var corpusEdgeKey = schema.EdgeKey{Source: personLabel, KeyLabels: "ACTED_IN", Target: personLabel}
 
-// twoCandidateEdgeUnion is the resolved shape of an edge binding the
-// resolver could not narrow to one candidate. Its candidates are not
-// corpus edge types: the gate under test runs ahead of Prepare, so what
-// it refuses it refuses without consulting the schema.
-var twoCandidateEdgeUnion = resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{
-	{Source: personLabel, KeyLabels: "AUTHORED", Target: "Post"},
-	{Source: personLabel, KeyLabels: "LIKES", Target: "Post"},
-}}
+// edgeUnionOn is the resolved shape of an edge binding the resolver
+// could not narrow to one candidate: one candidate per label, between
+// one pair of endpoints. Its candidates are not corpus edge types: the
+// gate under test runs ahead of Prepare, so what it refuses it refuses
+// without consulting the schema.
+func edgeUnionOn(labels ...graph.LabelSetKey) resolver.ResolvedEdgeUnion {
+	keys := make([]schema.EdgeKey, len(labels))
+	for i, l := range labels {
+		keys[i] = schema.EdgeKey{Source: personLabel, KeyLabels: l, Target: "Post"}
+	}
+	return resolver.ResolvedEdgeUnion{EdgeKeys: keys}
+}
 
-// sharedLabelSchema declares the two same-label edge types
-// sharedLabelEdgeUnion's candidates name. A shared-label union is
+var twoCandidateEdgeUnion = edgeUnionOn("AUTHORED", "LIKES")
+
+// sharedLabelSchema declares the edge types sharedLabelEdgeUnion and
+// mixedLabelEdgeUnion name. A union carrying a duplicate label is
 // refused inside Prepare, which resolves candidates against the entity
-// index, so unlike twoCandidateEdgeUnion this one has to be a shape the
-// schema actually declares.
+// index, so unlike edgeUnionOn's shapes these have to be ones the schema
+// actually declares.
 const sharedLabelSchema = "shared_label_schema.gql"
 
 // sharedLabelEdgeUnion is the other resolved edge-union shape: two
@@ -239,14 +245,36 @@ var sharedLabelEdgeUnion = resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey
 	{Source: "Investor", KeyLabels: "FOUNDED", Target: "Company"},
 }}
 
+// mixedLabelEdgeUnion carries both shapes at once: three candidates
+// under two labels, one of which repeats. `(p)-[r:FOUNDED|BACKED]->(c)`
+// over a source endpoint the schema satisfies twice reaches it, so the
+// query DOES spell an alternation — and the gate still stands aside,
+// because a repeated label is an obstacle no server-side parser has
+// anything to do with and no rewrite of the alternation removes.
+var mixedLabelEdgeUnion = resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{
+	{Source: personLabel, KeyLabels: "FOUNDED", Target: "Company"},
+	{Source: personLabel, KeyLabels: "BACKED", Target: "Company"},
+	{Source: "Investor", KeyLabels: "FOUNDED", Target: "Company"},
+}}
+
 // wantEdgeUnionReason is this test's own copy of the reason the gate
 // gives for an edge-union column, so a change to the emission's wording
-// has to be a change here too. It names the relationship types the
-// author's pattern spells, because a refusal that described a shape the
-// query does not have was the defect that put this here.
-const wantEdgeUnionReason = "names relationship types AUTHORED and LIKES, which openCypher writes only as " +
-	`the alternation ":AUTHORED|LIKES" — Apache AGE 1.7.0's parser has no "|" in a relationship ` +
-	`pattern and answers it with "syntax error at or near \"|\"" (SQLSTATE 42601)`
+// has to be a change here too. names is the prose label list, written
+// out per case rather than derived, so a gate that stopped reading the
+// column's own candidates cannot satisfy two cases at once.
+//
+// It claims nothing about the author's query text. The candidates are
+// the relationship types the SCHEMA declares for the pattern, and a
+// pattern may name types it does not declare — the resolver drops those
+// (internal/resolver, edgeCandidates), so the label list is a subset of
+// what the author wrote and quoting it back as their alternation was the
+// defect that put this here.
+func wantEdgeUnionReason(names string) string {
+	return "binds more than one relationship type — " + names + ", the candidates the schema " +
+		"declares for its pattern — which openCypher spells only as an alternation, and Apache " +
+		`AGE 1.7.0's parser has no "|" in a relationship pattern: it answers one with ` +
+		`"syntax error at or near \"|\"" (SQLSTATE 42601)`
+}
 
 // TestRejectsEdgeUnionColumns pins the narrowest of this backend's
 // refusals against the column it is one step away from: an edge column
@@ -254,8 +282,11 @@ const wantEdgeUnionReason = "names relationship types AUTHORED and LIKES, which 
 // column with a second candidate carrying a second label is not.
 //
 // The refusal is not about decoding. The candidates carry distinct
-// labels — shared admission has already refused the ones that do not —
-// so a dispatch on the label would pick correctly. It is about the query
+// labels, so a dispatch on the label would pick correctly — and where
+// they do not, this gate stands aside for the shared refusal that
+// answers a repeated label on every backend (the last subtests below;
+// this gate runs ahead of Prepare, so standing aside is what lets that
+// refusal be reached at all). It is about the query
 // text: candidates carrying distinct labels can only have come from a
 // pattern naming more than one relationship type, and openCypher writes
 // that only as an alternation (Cypher.g4 oC_RelationshipTypes admits a
@@ -267,9 +298,16 @@ const wantEdgeUnionReason = "names relationship types AUTHORED and LIKES, which 
 // Emitting it would hand the author a package that compiles and cannot
 // run.
 //
-// The third subtest is the boundary in the other direction: a union
-// whose candidates share a label is a pattern AGE parses, so this gate
-// stands aside and lets the shared, backend-independent refusal answer.
+// The refused rows carry label sets that differ from each other, because
+// the message is built from the column's own candidates and a message
+// built from a fixed list would satisfy one row while failing the rest.
+// The three-label row is also the only one whose prose list has a serial
+// comma in it.
+//
+// The last two subtests are the boundary in the other direction: a union
+// carrying a duplicate label is refused for a reason no parser is party
+// to, so this gate stands aside and lets the shared, backend-independent
+// refusal answer — whether or not an alternation is what produced it.
 func (s *EmissionSuite) TestRejectsEdgeUnionColumns() {
 	in := s.inputFrom(filepath.Join("testdata", corpusSchema))
 
@@ -283,17 +321,40 @@ func (s *EmissionSuite) TestRejectsEdgeUnionColumns() {
 		s.Require().NotEmpty(files)
 	})
 
-	s.Run("two candidates are refused", func() {
-		batch := in
-		batch.Queries = []codegen.NamedQuery{readQuery("TwoActions", resolver.Column{
-			Name: "r", Type: twoCandidateEdgeUnion,
-		})}
-		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
-		s.Require().Error(err)
-		s.Require().Nil(files, "a rejected batch must not return a partial file set")
-		s.Require().ErrorIs(err, age.ErrUnsupportedQuery)
-		s.Require().ErrorContains(err, `TwoActions (column "r" `+wantEdgeUnionReason+`)`)
-	})
+	for _, tc := range []struct {
+		name  string
+		union resolver.ResolvedEdgeUnion
+		// names is the prose label list the refusal must carry.
+		names string
+	}{
+		{
+			name:  "two candidates are refused",
+			union: twoCandidateEdgeUnion,
+			names: "AUTHORED and LIKES",
+		},
+		{
+			name:  "two candidates under other labels name those",
+			union: edgeUnionOn("FOUNDED", "BACKED"),
+			names: "FOUNDED and BACKED",
+		},
+		{
+			name:  "three candidates are all named",
+			union: edgeUnionOn("AUTHORED", "LIKES", "REPOSTED"),
+			names: "AUTHORED, LIKES and REPOSTED",
+		},
+	} {
+		s.Run(tc.name, func() {
+			batch := in
+			batch.Queries = []codegen.NamedQuery{readQuery("TwoActions", resolver.Column{
+				Name: "r", Type: tc.union,
+			})}
+			files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+			s.Require().Error(err)
+			s.Require().Nil(files, "a rejected batch must not return a partial file set")
+			s.Require().ErrorIs(err, age.ErrUnsupportedQuery)
+			s.Require().ErrorContains(err, `TwoActions (column "r" `+wantEdgeUnionReason(tc.names)+`)`)
+		})
+	}
 
 	s.Run("candidates sharing a label are not this backend's refusal", func() {
 		batch := s.inputFrom(filepath.Join("testdata", sharedLabelSchema))
@@ -308,6 +369,20 @@ func (s *EmissionSuite) TestRejectsEdgeUnionColumns() {
 		s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
 		s.Require().NotContains(err.Error(), "alternation",
 			"the pattern that produces a shared-label union names one relationship type and spells no '|'")
+	})
+
+	s.Run("a duplicate label stands the gate aside even under an alternation", func() {
+		batch := s.inputFrom(filepath.Join("testdata", sharedLabelSchema))
+		batch.Queries = []codegen.NamedQuery{readQuery("FoundedOrBacked", resolver.Column{
+			Name: "r", Type: mixedLabelEdgeUnion,
+		})}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, codegen.ErrUnrepresentableEdgeUnion,
+			"a repeated label defeats the dispatch on every backend, and rewriting the alternation does not remove it")
+		s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
+		s.Require().ErrorContains(err, `both carry edge label "FOUNDED"`)
 	})
 }
 
@@ -449,7 +524,7 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 		{
 			name:      "an edge-union column is dropped",
 			queries:   []codegen.NamedQuery{edgeUnion},
-			wantSub:   `1 query would be dropped: Action (column "r" ` + wantEdgeUnionReason + `)`,
+			wantSub:   `1 query would be dropped: Action (column "r" ` + wantEdgeUnionReason("AUTHORED and LIKES") + `)`,
 			wantError: true,
 		},
 		{

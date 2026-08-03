@@ -56,20 +56,37 @@ const (
 	listQuery = "// name: PersonTags :one\nMATCH (p:Person) RETURN p.tags AS tags\n"
 
 	// unionSchema and unionQuery project an edge that binds to more than
-	// one candidate edge type. openCypher spells that a relationship-type
-	// alternation and has no other syntax for it (Cypher.g4
-	// oC_RelationshipTypes), and Apache AGE 1.7.0's parser refuses the
-	// alternation, so the query text the emitted code would carry could
-	// never reach that server. On a schema of their own for the reason
-	// listSchema has one.
+	// one candidate edge type, each carrying a distinct label. Only a
+	// relationship-type alternation names several types on one pattern
+	// (Cypher.g4 oC_RelationshipTypes), and Apache AGE 1.7.0's parser
+	// refuses the alternation, so the query text the emitted code would
+	// carry could never reach that server. Three types, so the refusal's
+	// label list has to reach past its first two. On a schema of their own
+	// for the reason listSchema has one.
 	unionSchema = `CREATE PROPERTY GRAPH TYPE People AS {
+    (:Person  { id :: INT64 NOT NULL }),
+    (:Company { id :: INT64 NOT NULL }),
+    (:Person) -[:FOUNDED { foundedYear :: INT64 NOT NULL }]-> (:Company),
+    (:Person) -[:BACKED]-> (:Company),
+    (:Person) -[:ADVISED]-> (:Company)
+}
+`
+	unionQuery = "// name: GetAction :one\nMATCH (:Person)-[r:FOUNDED|BACKED|ADVISED]->(:Company) RETURN r\n"
+
+	// narrowedSchema and narrowedQuery are the same shape with one of the
+	// pattern's relationship types left undeclared. The resolver drops an
+	// undeclared type from the candidate set, so the column binds two of
+	// the three the author wrote — which is why the refusal names the
+	// candidates rather than reconstructing the author's alternation from
+	// them.
+	narrowedSchema = `CREATE PROPERTY GRAPH TYPE People AS {
     (:Person { id :: INT64 NOT NULL }),
     (:Post   { id :: INT64 NOT NULL }),
     (:Person) -[:AUTHORED { since :: INT64 NOT NULL }]-> (:Post),
     (:Person) -[:LIKES]-> (:Post)
 }
 `
-	unionQuery = "// name: GetAction :one\nMATCH (:Person)-[r:AUTHORED|LIKES]->(:Post) RETURN r\n"
+	narrowedQuery = "// name: GetAction :one\nMATCH (:Person)-[r:AUTHORED|LIKES|FLAGGED]->(:Post) RETURN r\n"
 
 	// sharedLabelSchema and sharedLabelQuery reach an edge column with
 	// more than one candidate the other way: one relationship type whose
@@ -307,7 +324,7 @@ func TestRunApacheAgeRejectionIsASentinel(t *testing.T) {
 //
 // An edge column whose candidates carry distinct labels is reachable in
 // openCypher only through a relationship-type alternation, and Apache
-// AGE 1.7.0 answers `-[r:AUTHORED|LIKES]->` with `ERROR: syntax error at
+// AGE 1.7.0 answers `-[r:FOUNDED|BACKED]->` with `ERROR: syntax error at
 // or near "|"` (SQLSTATE 42601), measured against the image
 // test/data/codegen pins. Generated code runs the author's query text
 // verbatim (ADR 0005), so emitting for this column would hand back a
@@ -319,27 +336,68 @@ func TestRunApacheAgeRejectionIsASentinel(t *testing.T) {
 // defect this replaced was in what the sentence claimed rather than in
 // which query it fired on: it told an author who wrote no '|' that their
 // query was an alternation.
+//
+// The rows run the front end for real, so the labels the message carries
+// are the ones the resolver committed for the author's pattern. The
+// second row is where those two things come apart: a pattern may name a
+// relationship type the schema does not declare, the resolver drops it
+// from the candidate set, and a message reconstructing ":A|B" from the
+// survivors quotes an alternation nobody wrote. Its labels also differ
+// from the first row's, so a message built from a fixed list fails one
+// of them.
 func TestRunApacheAgeRefusesEdgeUnions(t *testing.T) {
-	dir, cfgPath := writeProject(t)
-	writeFixtureFile(t, filepath.Join(dir, "schema.gql"), unionSchema)
-	writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), unionQuery)
-	writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverApacheAgePgxV5), ""))
+	for _, tc := range []struct {
+		name   string
+		schema string
+		query  string
+		// names is the prose label list the refusal must carry.
+		names string
+		// absent is a relationship type the pattern names and the
+		// message must not, because the column does not bind it.
+		absent string
+	}{
+		{
+			name:   "every candidate the column binds is named",
+			schema: unionSchema,
+			query:  unionQuery,
+			names:  "FOUNDED, BACKED and ADVISED",
+		},
+		{
+			name:   "a relationship type the schema does not declare is not among them",
+			schema: narrowedSchema,
+			query:  narrowedQuery,
+			names:  "AUTHORED and LIKES",
+			absent: "FLAGGED",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir, cfgPath := writeProject(t)
+			writeFixtureFile(t, filepath.Join(dir, "schema.gql"), tc.schema)
+			writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), tc.query)
+			writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverApacheAgePgxV5), ""))
 
-	res, err := pipeline.Run(cfgPath, backendRegistry(t))
-	require.ErrorIs(t, err, age.ErrUnsupportedQuery)
-	require.ErrorContains(t, err, `1 query would be dropped: GetAction (column "r" `+
-		`names relationship types AUTHORED and LIKES, which openCypher writes only as the `+
-		`alternation ":AUTHORED|LIKES" — Apache AGE 1.7.0's parser has no "|" in a relationship `+
-		`pattern and answers it with "syntax error at or near \"|\"" (SQLSTATE 42601))`)
-	require.Equal(t, pipeline.Result{}, res)
+			res, err := pipeline.Run(cfgPath, backendRegistry(t))
+			require.ErrorIs(t, err, age.ErrUnsupportedQuery)
+			require.ErrorContains(t, err, `1 query would be dropped: GetAction (column "r" `+
+				`binds more than one relationship type — `+tc.names+`, the candidates the schema `+
+				`declares for its pattern — which openCypher spells only as an alternation, and `+
+				`Apache AGE 1.7.0's parser has no "|" in a relationship pattern: it answers one `+
+				`with "syntax error at or near \"|\"" (SQLSTATE 42601))`)
+			require.Equal(t, pipeline.Result{}, res)
+			if tc.absent != "" {
+				require.NotContains(t, err.Error(), tc.absent,
+					"the message must not name a type the column does not bind; the missing diagnostic for the drop is gqlc-1dmu")
+			}
 
-	// The same project on a driver whose server parses the alternation
-	// generates, so what failed above is this backend's answer and not
-	// the schema, the query or the resolver.
-	writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverNeo4jGoV5), ""))
-	res, err = pipeline.Run(cfgPath, backendRegistry(t))
-	require.NoError(t, err)
-	require.Empty(t, res.Diagnostics)
+			// The same project on a driver whose server parses the
+			// alternation generates, so what failed above is this backend's
+			// answer and not the schema, the query or the resolver.
+			writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverNeo4jGoV5), ""))
+			res, err = pipeline.Run(cfgPath, backendRegistry(t))
+			require.NoError(t, err)
+			require.Empty(t, res.Diagnostics)
+		})
+	}
 }
 
 // TestRunApacheAgeLeavesSharedLabelUnionsToSharedAdmission is the bound
@@ -349,6 +407,14 @@ func TestRunApacheAgeRefusesEdgeUnions(t *testing.T) {
 // statement. So the query must fail on what is actually wrong with it,
 // in the same words every other backend uses, and the author must not be
 // told their query contains a '|' it does not contain.
+//
+// What stands the AGE gate aside is the repeated label and not the
+// absent '|': a pattern that does spell one still lands here when its
+// candidates repeat a label, which is
+// invalid/unrepresentable_edge_union_shared_label (`-[r:LIKES|WROTE]-`,
+// enrolled for this backend in the corpus) and the age package's own
+// mixed-label case. This query is the no-alternation end of that range,
+// which is the end where the message can be checked for the word.
 //
 // Asserted against neo4j-go-v5 as well as AGE: the two must give the
 // same answer, because the obstacle is a property of what a Go edge value

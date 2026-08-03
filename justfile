@@ -161,6 +161,21 @@ test-codegen-live:
 
 # the neo4j half: both driver arms in parallel against one neo4j:5-community
 # image. This is the half PR CI blocks on, so its wall time is a PR's wall time.
+#
+# No -count=1, unlike the two recipes either side, and that is what keeps the
+# per-PR cost near zero (.github/workflows/codegen-live.yml). It is sound here
+# because every input that could change this battery's answer is inside the
+# test binary: the scenario bodies, the generated packages they drive, the
+# driver dependencies, and the neo4j image — pinned by digest as a constant in
+# live_neo4j_test.go, not resolved at run time. A cache hit therefore means
+# this exact binary already passed against this exact server, and any edit that
+# could move either invalidates it. What a cache hit cannot re-check is the
+# container runtime underneath, which is not a property of this repo.
+#
+# The AGE half takes -count=1 for a reason that does not apply here: it carries
+# TestAGERefusesRelationshipTypeAlternation, which measures a fact about a
+# server's parser rather than about anything in the binary, on a cadence. A
+# cached pass would report a measurement nobody took.
 test-codegen-live-neo4j:
     cd test/data/codegen && go test -tags codegen_live -run TestLiveSmoke -skip 'TestLiveSmoke/apache-age' ./...
 
