@@ -1,6 +1,6 @@
 module github.com/areqag/gqlc/test/data/codegen
 
-go 1.26.2
+go 1.26.5
 
 require (
 	github.com/jackc/pgx/v5 v5.10.0
