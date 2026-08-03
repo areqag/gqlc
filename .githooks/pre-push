@@ -17,4 +17,8 @@ else
 fi
 
 # GH↔bd sync: push locally-created beads to GH.
-"$(dirname "$0")/bd-gh-sync" push >/dev/null 2>&1 || true
+# Non-blocking — never fail the underlying `git push`. Progress chatter is
+# dropped, but stderr survives: the sync ends by reporting what reached GitHub
+# and what did not, and discarding that is what let a push that mirrored nothing
+# read exactly like one with nothing to mirror.
+"$(dirname "$0")/bd-gh-sync" push >/dev/null || true

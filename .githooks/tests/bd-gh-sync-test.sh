@@ -10,6 +10,24 @@
 # logic.
 #
 # Run via: just test-hooks
+#
+# How many assertions this file makes is a number worth quoting in a review, so
+# here is the command that produces it rather than a figure that goes stale the
+# next time someone adds a case:
+#
+#   .githooks/tests/bd-gh-sync-test.sh | grep -cE '^(ok|FAIL) '
+#
+# And how many of them a given older bd-gh-sync fails — the measure of what a
+# change to that script is actually worth — by running this file against it:
+#
+#   d=$(mktemp -d) && mkdir -p "$d/tests" &&
+#     git show <rev>:.githooks/bd-gh-sync >"$d/bd-gh-sync" &&
+#     cp .githooks/tests/bd-gh-sync-test.sh "$d/tests/" &&
+#     chmod +x "$d/bd-gh-sync" "$d/tests/bd-gh-sync-test.sh" &&
+#     "$d/tests/bd-gh-sync-test.sh" | grep -cE '^FAIL '
+#
+# The script under test is resolved relative to this file, which is what makes
+# that second one work at all.
 set -u
 
 unset "${!GIT_@}"
@@ -23,12 +41,23 @@ mkdir -p "$BIN"
 
 # The stubs read their canned payloads from files named by the environment, so
 # the fixtures themselves never travel on argv or in the environment block.
+#
+# Each call logs a flattened `bd $*` line and then one `  ARG=[...]` line per
+# argument. The flattened line cannot show where one argument ends and the next
+# begins, so `bd github push b-1 b-2` and `bd github push "b-1 b-2"` — two ids
+# and one nonexistent one — log byte-identically. This branch is a quoting fix;
+# a harness that cannot see argument boundaries cannot fence one.
 cat >"$BIN/bd" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "bd $*" >>"$CALLS"
+if [ "$#" -gt 0 ]; then printf '  ARG=[%s]\n' "$@" >>"$CALLS"; fi
 if [ "$1 ${2:-}" = "github sync" ] && [ "${FAKE_SYNC_RC:-0}" != 0 ]; then
     echo "bd: error: connection refused" >&2
     exit "$FAKE_SYNC_RC"
+fi
+if [ "$1 ${2:-}" = "github push" ] && [ "${FAKE_PUSH_RC:-0}" != 0 ]; then
+    echo "bd: error: connection refused" >&2
+    exit "$FAKE_PUSH_RC"
 fi
 if [ "$1" = "list" ]; then
     # Keyed by call ordinal, because the pull path calls `bd list` twice and
@@ -63,6 +92,7 @@ STUB
 cat >"$BIN/gh" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "gh $*" >>"$CALLS"
+if [ "$#" -gt 0 ]; then printf '  ARG=[%s]\n' "$@" >>"$CALLS"; fi
 case "$1 ${2:-}" in
     "auth token") echo faketoken ;;
     "issue list")
@@ -71,11 +101,31 @@ case "$1 ${2:-}" in
             *"--state open"*) cat "$FAKE_GH_OPEN" ;;
         esac
         ;;
+    "issue close")
+        if [ "${FAKE_CLOSE_RC:-0}" != 0 ]; then
+            echo "gh: HTTP 403: Resource not accessible by integration" >&2
+            exit "$FAKE_CLOSE_RC"
+        fi
+        ;;
 esac
 exit 0
 STUB
 
-chmod +x "$BIN/bd" "$BIN/gh"
+# Every payload this script hands python travels through the directory `mktemp
+# -d` makes, so the run cannot proceed without one — and it is the one early
+# exit that is a fault rather than a configuration. Resolved before $BIN joins
+# PATH, or the stub execs itself.
+REAL_MKTEMP="$(command -v mktemp)"
+cat >"$BIN/mktemp" <<'STUB'
+#!/usr/bin/env bash
+if [ "${FAKE_MKTEMP_RC:-0}" != 0 ]; then
+    echo "mktemp: failed to create directory via template: Read-only file system" >&2
+    exit "$FAKE_MKTEMP_RC"
+fi
+exec "$REAL_MKTEMP" "$@"
+STUB
+
+chmod +x "$BIN/bd" "$BIN/gh" "$BIN/mktemp"
 
 pass=0
 fail=0
@@ -110,15 +160,20 @@ run_sync() {
     PATH="$BIN:$PATH" CALLS="$TMP/calls" STUBTMP="$TMP" \
         FAKE_BEADS="$TMP/beads.json" FAKE_GH="$TMP/gh.json" \
         FAKE_GH_OPEN="$TMP/gh_open.json" FAKE_BEADS_AFTER="$after" \
-        FAKE_SYNC_RC="${SYNC_RC:-0}" \
+        FAKE_SYNC_RC="${SYNC_RC:-0}" FAKE_PUSH_RC="${PUSH_RC:-0}" \
+        FAKE_CLOSE_RC="${CLOSE_RC:-0}" FAKE_MKTEMP_RC="${MKTEMP_RC:-0}" \
+        REAL_MKTEMP="$REAL_MKTEMP" \
         "$SYNC" "$1" >"$TMP/out" 2>"$TMP/err"
     RC=$?
     rm -f "$TMP"/bd_list_rc_* "$TMP"/bd_list_out_*
 }
 RC=0
 
-# Exit status the `bd github sync` stub reports; 0 unless a test sets it.
+# Exit statuses the mutating stubs report; 0 unless a test sets one.
 SYNC_RC=0
+PUSH_RC=0
+CLOSE_RC=0
+MKTEMP_RC=0
 
 scoped_ids() { grep -o -- '--issues [^ ]*' "$TMP/calls" | cut -d' ' -f2 | tr ',' '\n'; }
 pull_ran()   { grep -q -- 'bd github sync' "$TMP/calls"; }
@@ -126,6 +181,29 @@ last_line()  { tail -n 1 "$TMP/err"; }
 # How many `bd github sync` batches were actually issued. The summary reports a
 # count of pulled beads, and the only evidence for that count is this.
 sync_batches() { grep -c -- 'bd github sync' "$TMP/calls"; }
+
+# Reads the per-argument records the stubs log, so an assertion sees argument
+# boundaries rather than a space-joined line. $1 is the flattened prefix that
+# selects the call; $2 is how many leading argv words that prefix already names
+# and therefore drops, per call, so several batches concatenate cleanly.
+argv_after() {
+    awk -v want="$1" -v skip="$2" '
+        substr($0, 1, 7) == "  ARG=[" {
+            if (on && ++n > skip) print substr($0, 8, length($0) - 8)
+            next
+        }
+        { on = (substr($0, 1, length(want)) == want); n = 0 }
+    ' "$TMP/calls"
+}
+argv_of() { argv_after "$1" 0; }
+
+# The push-side equivalents. `bd github push` takes its ids as separate argv
+# words, so one call is one batch and its arguments are the ids it was handed.
+# Read from argv rather than by splitting the flattened line on spaces: that
+# split reconstructs the boundaries it is meant to be checking, so an id list
+# passed as one argument comes back looking exactly like ids passed as several.
+pushed_ids()   { argv_after 'bd github push' 2; }
+push_batches() { grep -c -- '^bd github push' "$TMP/calls"; }
 
 ISSUE=https://github.com/org/r/issues
 
@@ -522,6 +600,356 @@ else
     ok "open bead's mirror is left alone"
 fi
 
+# --- gqlc-w4q9: the push path has to report what it did to GitHub ------------
+# push is the arm that *mutates* GitHub, and it used to say nothing at all:
+# `bd github push $_ids || true` under xargs, plus a close pass whose entire
+# output went to /dev/null. So every way of pushing nothing — an id xargs
+# re-parsed, a batch that exited non-zero, a bead list that would not load —
+# came out byte-identical to a healthy steady-state run and there was nothing an
+# assertion could hold on to.
+#
+# The contract these tests pin: the last stderr line summarises the run, and the
+# exit status is 0 iff every new bead reached GitHub and every stale mirror was
+# closed. pull cannot use its exit status (post-merge and session start ride on
+# it), but pre-push already invokes push behind `|| true`, so here a non-zero is
+# free to carry the outcome.
+
+run_sync push \
+    "[{\"id\":\"b-mirrored\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\"}]" '[]' '[]'
+if [ "$(last_line)" = "bd-gh-sync: pushed 0 new bead(s), closed 0 stale GH mirror(s)." ]; then
+    ok "a push with nothing to do still says so on the line a caller keeps"
+else
+    bad "a push with nothing to do still says so on the line a caller keeps" \
+        "got: $(last_line)"
+fi
+if [ "$RC" -eq 0 ]; then
+    ok "a push that did everything it set out to do exits 0"
+else
+    bad "a push that did everything it set out to do exits 0" "exited $RC"
+fi
+
+# Both arms mutate GitHub, so both are in the count. A summary that reported only
+# the beads it mirrored would leave the close pass exactly as unobservable as the
+# whole path used to be.
+run_sync push \
+    "[{\"id\":\"b-fresh\",\"status\":\"open\",\"external_ref\":\"\"},
+      {\"id\":\"b-done\",\"status\":\"closed\",\"external_ref\":\"$ISSUE/500\"}]" \
+    '[]' '[{"number":500}]'
+if [ "$(last_line)" = "bd-gh-sync: pushed 1 new bead(s), closed 1 stale GH mirror(s)." ]; then
+    ok "the summary counts both arms: beads mirrored and mirrors closed"
+else
+    bad "the summary counts both arms: beads mirrored and mirrors closed" \
+        "got: $(last_line)"
+fi
+
+# The pull path stopped batching through xargs because xargs parses quotes. push
+# kept it, on the arm that creates issues: one apostrophe aborts the whole
+# construction, `|| true` eats the non-zero, and the run reports success having
+# mirrored nothing. A space splits one id into two, and a leading dash arrives as
+# a flag. Same gate as pull, and the bead beside the bad one still has to go.
+push_hostile_id() { # $1=label $2=the bead id, as it appears inside a JSON string
+    run_sync push \
+        "[{\"id\":\"$2\",\"status\":\"open\",\"external_ref\":\"\"},
+          {\"id\":\"b-ok\",\"status\":\"open\",\"external_ref\":\"\"}]" '[]' '[]'
+    if ! pushed_ids | grep -qx 'b-ok'; then
+        bad "an unusable bead id is refused, the bead beside it pushed ($1)" \
+            "b-ok never reached 'bd github push' either"
+    elif [ "$(pushed_ids | wc -l)" -ne 1 ]; then
+        bad "an unusable bead id is refused, the bead beside it pushed ($1)" \
+            "argv also carried: $(pushed_ids | grep -vx b-ok | tr '\n' ' ')"
+    elif ! grep -q 'is unusable' "$TMP/err"; then
+        bad "an unusable bead id is refused, the bead beside it pushed ($1)" \
+            "it was dropped without a word"
+    else
+        ok "an unusable bead id is refused and named, the bead beside it pushed ($1)"
+    fi
+    # The count alone is not the finding: "1 of 2" with no reason leaves the
+    # operator to guess whether GitHub refused the bead or the script did.
+    case "$RC:$(last_line)" in
+        0:*) bad "a refused bead id makes the push fail loudly ($1)" \
+            "exited 0: $(last_line)" ;;
+        *"PUSH FAILED"*"1 of 2 new bead(s) mirrored"*"1 bead id(s) unusable"*)
+            ok "a refused bead id makes the push fail loudly ($1)" ;;
+        *) bad "a refused bead id makes the push fail loudly ($1)" \
+            "rc=$RC, last line: $(last_line)" ;;
+    esac
+}
+
+push_hostile_id "apostrophe"   "b'q"
+push_hostile_id "space"        "b two"
+push_hostile_id "leading dash" "-b"
+push_hostile_id "newline"      "b\ntrash"
+push_hostile_id "empty"        ""
+
+# "pushed nothing because every batch aborted" is the shape the summary has to
+# separate from "nothing needed pushing", and it is exactly what one re-parsed
+# id used to produce: xargs dies, the loop body never runs, and `|| true` makes
+# it a clean exit. `_failed` cannot see it — nothing incremented it — so the
+# line has to be built from what reached a batch, plus why the rest did not.
+run_sync push "[{\"id\":\"b'q\",\"status\":\"open\",\"external_ref\":\"\"}]" '[]' '[]'
+if [ "$(push_batches)" -ne 0 ]; then
+    bad "a push where every id was refused says no batch ran" \
+        "$(grep 'github push' "$TMP/calls")"
+elif [ "$(last_line)" != "bd-gh-sync: PUSH FAILED — 0 of 1 new bead(s) mirrored, 0 of 0 stale GH mirror(s) closed; 1 bead id(s) unusable; no batch ran at all." ]; then
+    bad "a push where every id was refused says no batch ran" "got: $(last_line)"
+else
+    ok "a push that mirrored nothing because every id was refused says exactly that"
+fi
+
+# ...and a batch that ran and was rejected by GitHub is a different line, because
+# it calls for a different response: one is a corrupt id to go and look at, the
+# other is a retry. `|| true` collapsed both into the steady-state line.
+PUSH_RC=1
+run_sync push '[{"id":"b-n1","status":"open","external_ref":""}]' '[]' '[]'
+PUSH_RC=0
+case "$(last_line)" in
+    *"pushed 1 new bead(s)"*)
+        bad "a batch that exited non-zero is not counted as mirrored" \
+            "reported success: $(last_line)" ;;
+    "bd-gh-sync: PUSH FAILED — 0 of 1 new bead(s) mirrored, 0 of 0 stale GH mirror(s) closed; 1 of 1 'bd github push' batch(es) exited non-zero.")
+        ok "a batch that exited non-zero is named as a failed batch, not a bad id" ;;
+    *) bad "a batch that exited non-zero is named as a failed batch, not a bad id" \
+        "got: $(last_line)" ;;
+esac
+if [ "$RC" -ne 0 ]; then
+    ok "a failed batch makes the push exit non-zero"
+else
+    bad "a failed batch makes the push exit non-zero" "exited 0"
+fi
+
+# Ids travel on argv here too, so the same 128KB execve cap applies and the
+# batching has to be arithmetic anyone can check: every id sent exactly once,
+# none invented, and the reported count equal to the count sent.
+run_sync push \
+    "$(python3 -c '
+import json
+print(json.dumps([{"id": "b-%03d" % i, "status": "open", "external_ref": ""}
+                  for i in range(250)]))')" '[]' '[]'
+if [ "$(push_batches)" -ne 3 ]; then
+    bad "an unmirrored set past one batch is split, not truncated" \
+        "$(push_batches) batches for 250 ids at 100 per batch"
+elif [ "$(pushed_ids | sort -u | wc -l)" -ne 250 ]; then
+    bad "an unmirrored set past one batch is split, not truncated" \
+        "$(pushed_ids | sort -u | wc -l) distinct ids reached argv"
+elif [ "$(pushed_ids | wc -l)" -ne 250 ]; then
+    bad "an unmirrored set past one batch is split, not truncated" \
+        "$(pushed_ids | wc -l) ids sent — some were sent twice"
+elif [ "$(last_line)" != "bd-gh-sync: pushed 250 new bead(s), closed 0 stale GH mirror(s)." ]; then
+    bad "an unmirrored set past one batch is split, not truncated" "got: $(last_line)"
+else
+    ok "250 unmirrored beads are split into 3 batches, each id sent once"
+fi
+
+# ...and "sent once" is a claim about argv, so it has to be read off argv. Every
+# assertion above this one would hold just as well if the script had passed the
+# whole batch as a single argument — `bd github push "b-a1 b-a2"`, one bead id
+# nobody minted — because the flattened log line is identical either way and
+# splitting it on spaces puts the boundaries back. The gate this branch adds is
+# a quoting gate; nothing fences it unless the harness can see where one
+# argument stops.
+run_sync push \
+    '[{"id":"b-a1","status":"open","external_ref":""},
+      {"id":"b-a2","status":"open","external_ref":""}]' '[]' '[]'
+if [ "$(argv_of 'bd github push' | tr '\n' '|')" != "github|push|b-a1|b-a2|" ]; then
+    bad "each bead id is its own argv word to 'bd github push'" \
+        "argv was: $(argv_of 'bd github push' | tr '\n' '|')"
+else
+    ok "each bead id reaches 'bd github push' as an argv word of its own"
+fi
+
+# Same blindness on the other mutating command. `gh issue close` takes the
+# comment body as one argument; a body that split into several would still log a
+# line beginning `gh issue close 500`, which is all any assertion here checked.
+run_sync push \
+    "[{\"id\":\"b-c\",\"status\":\"closed\",\"close_reason\":\"superseded by gqlc-x\",\"external_ref\":\"$ISSUE/500\"}]" \
+    '[]' '[{"number":500}]'
+if [ "$(argv_of 'gh issue close' | wc -l)" -ne 5 ]; then
+    bad "the close comment reaches 'gh' as a single argument" \
+        "$(argv_of 'gh issue close' | wc -l) argv words: $(argv_of 'gh issue close' | tr '\n' '|')"
+elif [ "$(argv_of 'gh issue close' | sed -n 4p)" != "--comment" ]; then
+    bad "the close comment reaches 'gh' as a single argument" \
+        "argv[4] was $(argv_of 'gh issue close' | sed -n 4p), not --comment"
+elif [ "$(argv_of 'gh issue close' | sed -n 5p)" != "Auto-close: bead b-c closed locally. superseded by gqlc-x" ]; then
+    bad "the close comment reaches 'gh' as a single argument" \
+        "body was: $(argv_of 'gh issue close' | sed -n 5p)"
+else
+    ok "'gh issue close' gets the issue number and the whole comment as one argument each"
+fi
+
+# A bead list that will not load means push cannot know which beads have no
+# mirror yet. Swallowing that produced the steady-state line exactly — the same
+# fail-open-into-silence the pull path's DONE sentinel exists to end.
+push_selection_case() { # $1=name; the stub knob is set by the caller
+    run_sync push '[{"id":"b-n","status":"open","external_ref":""}]' '[]' '[]'
+    case "$(last_line)" in
+        *"SKIPPING push"*)
+            if [ "$RC" -eq 0 ]; then
+                bad "an unusable bead list refuses the push and says so ($1)" \
+                    "refused, then exited 0"
+            else
+                ok "an unusable bead list refuses the push and says so ($1)"
+            fi ;;
+        *) bad "an unusable bead list refuses the push and says so ($1)" \
+            "indistinguishable from a healthy run: $(last_line)" ;;
+    esac
+}
+
+bd_list_fails 1;                              push_selection_case "'bd list' exits non-zero"
+bd_list_emits 1 '';                           push_selection_case "no output"
+bd_list_emits 1 ' ';                          push_selection_case "whitespace only"
+bd_list_emits 1 '[{"id":"b-n","exter';        push_selection_case "truncated JSON"
+bd_list_emits 1 'bd: fatal: not a workspace'; push_selection_case "not JSON at all"
+
+# The close pass keys on the *second* snapshot, because `bd github push` mints
+# the external_ref it matches on. That snapshot failing leaves every stale mirror
+# open, and `|| : >beads_after.json` turned it into an empty list the pass walked
+# without complaint.
+bd_list_fails 2
+run_sync push "[{\"id\":\"b-c\",\"status\":\"closed\",\"external_ref\":\"$ISSUE/500\"}]" \
+    '[]' '[{"number":500}]'
+case "$RC:$(last_line)" in
+    0:*) bad "an unreadable post-push snapshot is reported" "exited 0: $(last_line)" ;;
+    *"stale-mirror pass could not run"*)
+        ok "an unreadable post-push snapshot is reported, not walked as empty" ;;
+    *) bad "an unreadable post-push snapshot is reported" "got: $(last_line)" ;;
+esac
+
+# Same hole on the other input: `gh issue list` failing produced an empty set of
+# open issues, which reads as "nothing is stale" rather than "nobody looked".
+run_sync push "[{\"id\":\"b-c\",\"status\":\"closed\",\"external_ref\":\"$ISSUE/500\"}]" \
+    '[]' 'not json'
+case "$RC:$(last_line)" in
+    0:*) bad "an unreadable open-issue listing is reported" "exited 0: $(last_line)" ;;
+    *"stale-mirror pass could not run"*)
+        ok "an unreadable open-issue listing is reported, not read as nothing stale" ;;
+    *) bad "an unreadable open-issue listing is reported" "got: $(last_line)" ;;
+esac
+
+# ...and the case above both: the close pass dying before it reaches a verdict
+# at all. A list of bare integers loads as JSON and then breaks on `.get`, so no
+# status is written and the only evidence left is the file's absence. This is
+# what says the status file needs no pre-truncation to be readable as "no
+# verdict" — an empty file and a missing one are the same string to the shell,
+# so the `: >` that used to precede the pass could not have been the difference.
+bd_list_emits 2 '[1,2,3]'
+run_sync push "[{\"id\":\"b-c\",\"status\":\"closed\",\"external_ref\":\"$ISSUE/500\"}]" \
+    '[]' '[{"number":500}]'
+case "$RC:$(last_line)" in
+    0:*) bad "a close pass that never reached a verdict is reported" \
+        "exited 0: $(last_line)" ;;
+    *"stale-mirror pass could not run (the stale-mirror pass did not run at all)"*)
+        ok "a close pass that wrote no verdict reads as blind, not as nothing stale" ;;
+    *) bad "a close pass that never reached a verdict is reported" "got: $(last_line)" ;;
+esac
+
+# --- gqlc-w4q9 review: never print a count that was not measured -------------
+# Every guard above catches a snapshot that would not *load*. A snapshot that
+# loads and comes back `[]` takes the same fail-open one step further in: the
+# close pass enumerates an empty list, finds nothing stale, and reports "0 stale
+# mirrors" — a count of a set nobody looked at, byte-identical to a healthy
+# steady state. It is also the reachable shape, because `bd list` answering `[]`
+# with exit 0 is what the wrong workspace looks like; `bd list` failing outright
+# already had a guard.
+#
+# The rule these three pin is one rule: a count reaches the summary only if the
+# script enumerated the set behind it. Where it did not, the summary says so
+# instead of printing a number.
+
+# The post-push snapshot is the close pass's entire evidence, and this run
+# pushed beads rather than deleting any — so an empty list here after a
+# non-empty one there is a snapshot that was lost, not a tracker that emptied.
+bd_list_emits 2 '[]'
+run_sync push "[{\"id\":\"b-c\",\"status\":\"closed\",\"external_ref\":\"$ISSUE/500\"}]" \
+    '[]' '[{"number":500}]'
+if [ "$RC" -eq 0 ]; then
+    bad "an empty post-push snapshot is blind, not zero-and-fine" \
+        "exited 0: $(last_line)"
+else
+    case "$(last_line)" in
+        *"of 0 stale GH mirror(s) closed"*)
+            bad "an empty post-push snapshot is blind, not zero-and-fine" \
+                "printed a stale count off an empty list: $(last_line)" ;;
+        *"stale-mirror pass could not run"*"post-push bead list came back empty"*)
+            ok "an empty post-push snapshot reads as blind, not as nothing stale" ;;
+        *) bad "an empty post-push snapshot is blind, not zero-and-fine" \
+            "got: $(last_line)" ;;
+    esac
+fi
+
+# Both empty is the same hole with the witness gone too. There is no way to tell
+# a repository with no beads from a bd database nobody could read, so the honest
+# answer is that neither arm was measured — not two zeroes and exit 0.
+bd_list_emits 1 '[]'
+bd_list_emits 2 '[]'
+run_sync push '[{"id":"b-n","status":"open","external_ref":""}]' '[]' '[{"number":500}]'
+if [ "$RC" -eq 0 ]; then
+    bad "two empty snapshots are blind, not an empty repository" \
+        "exited 0: $(last_line)"
+else
+    case "$(last_line)" in
+        *"of 0 stale GH mirror(s) closed"* | *"0 of 0 new bead(s)"*)
+            bad "two empty snapshots are blind, not an empty repository" \
+                "printed counts off two empty lists: $(last_line)" ;;
+        *"both bead lists came back empty"*)
+            ok "two empty snapshots read as blind, not as an empty repository" ;;
+        *) bad "two empty snapshots are blind, not an empty repository" \
+            "got: $(last_line)" ;;
+    esac
+fi
+
+# And the first snapshot alone. `_new` — the denominator of "N of M new bead(s)
+# mirrored" — is counted off it, and the post-push snapshot is the witness that
+# contradicts it: this run pushed nothing, so beads that exist after the push
+# existed before it and the selection never saw them.
+bd_list_emits 1 '[]'
+run_sync push '[{"id":"b-n","status":"open","external_ref":""}]' '[]' '[]'
+if [ "$RC" -eq 0 ]; then
+    bad "an empty pre-push snapshot is blind, not nothing to push" \
+        "exited 0: $(last_line)"
+else
+    case "$(last_line)" in
+        *"of 0 new bead(s) mirrored"*)
+            bad "an empty pre-push snapshot is blind, not nothing to push" \
+                "printed a new-bead count off an empty list: $(last_line)" ;;
+        *"pre-push bead list came back empty"*)
+            ok "an empty pre-push snapshot reads as blind, not as nothing to push" ;;
+        *) bad "an empty pre-push snapshot is blind, not nothing to push" \
+            "got: $(last_line)" ;;
+    esac
+fi
+
+# ...and the control the three above would otherwise be free to pass by refusing
+# everything: a run where both snapshots hold beads still reports its two counts
+# as numbers and exits 0.
+run_sync push \
+    "[{\"id\":\"b-mir\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\"}]" '[]' '[]'
+if [ "$RC" -eq 0 ] &&
+   [ "$(last_line)" = "bd-gh-sync: pushed 0 new bead(s), closed 0 stale GH mirror(s)." ]; then
+    ok "a run with both snapshots readable still prints both counts and exits 0"
+else
+    bad "a run with both snapshots readable still prints both counts and exits 0" \
+        "rc=$RC: $(last_line)"
+fi
+
+# `subprocess.run(..., check=False)` with the return code discarded: a mirror
+# GitHub refused to close is the one outcome the operator has to act on, and it
+# was the one the close pass could not express.
+CLOSE_RC=1
+run_sync push "[{\"id\":\"b-c\",\"status\":\"closed\",\"external_ref\":\"$ISSUE/500\"}]" \
+    '[]' '[{"number":500}]'
+CLOSE_RC=0
+if ! grep -q 'could not close GH #500' "$TMP/err"; then
+    bad "a mirror that would not close is named and counted" "silently swallowed"
+elif [ "$RC" -eq 0 ]; then
+    bad "a mirror that would not close is named and counted" "exited 0"
+else
+    case "$(last_line)" in
+        *"0 of 1 stale GH mirror(s) closed"*)
+            ok "a mirror that would not close is named and counted" ;;
+        *) bad "a mirror that would not close is named and counted" "got: $(last_line)" ;;
+    esac
+fi
+
 # --- gqlc-jwuw: a held bead that moves anyway must be reported ---------------
 # Scoping keeps this script's own pull off a claimed bead, but it cannot stop
 # `bd hooks run post-merge` replaying the exported JSONL over newer DB state,
@@ -789,6 +1217,79 @@ else
     ok "no batch is issued with an empty --issues"
 fi
 
+# --- gqlc-icsd: a newline in a bead id must not split the plan record --------
+# "Taking it whole lets the gate below see it and refuse it" is true for a space
+# and false for a newline: the plan file is line-delimited, so an `ALLOW <id>`
+# record carrying one becomes two records before `sed 's/^ALLOW //'` runs. The
+# gate is then handed two halves it finds unobjectionable and never examines the
+# id it was meant to refuse.
+#
+# The fixture is the round-4 reviewer's: `b-held` must be held out of the pull,
+# and `b-held\ntrash` is eligible. Splitting the second record reconstitutes the
+# first id inside the allowlist, so the run announces a hold, pulls the held
+# bead, and reports success — a single run contradicting itself.
+
+NL_BEADS="[{\"id\":\"b-held\",\"status\":\"in_progress\",\"external_ref\":\"$ISSUE/1\",\"description\":\"local\"},
+           {\"id\":\"b-held\ntrash\",\"status\":\"open\",\"external_ref\":\"$ISSUE/2\",\"description\":\"a\"}]"
+NL_GH='[{"number":1,"state":"OPEN","body":"local\nadded on GH"},
+        {"number":2,"state":"OPEN","body":"a\nadded on GH"}]'
+
+run_sync pull "$NL_BEADS" "$NL_GH"
+if ! grep -q 'holding b-held' "$TMP/err"; then
+    bad "a hold and a pull cannot name the same bead in one run" \
+        "b-held was not held at all, so the fixture proves nothing"
+elif scoped_ids | grep -qx 'b-held'; then
+    bad "a hold and a pull cannot name the same bead in one run" \
+        "announced the hold then pulled it: $(grep 'github sync' "$TMP/calls")"
+else
+    ok "a hold and a pull cannot name the same bead in one run"
+fi
+
+# Refused by name, like every other hostile shape — and named in a form that
+# does not itself split the diagnostic across two stderr lines.
+if grep -qF 'b-held\ntrash' "$TMP/err"; then
+    ok "a bead id carrying a newline is refused by name, escaped"
+else
+    bad "a bead id carrying a newline is refused by name, escaped" \
+        "no diagnostic names it: $(grep unusable "$TMP/err" | head -n 1)"
+fi
+
+case "$(last_line)" in
+    *FAILED*) ok "a bead id that cannot be passed is a failed pull, not a success" ;;
+    *) bad "a bead id that cannot be passed is a failed pull, not a success" \
+        "got: $(last_line)" ;;
+esac
+
+# The split blinds the postcondition as well: the reconstituted `b-held` lands in
+# allow.txt, and the moved-bead check skips everything in allow.txt. So the one
+# detector that would have caught the contradiction is disarmed by it.
+run_sync pull "$NL_BEADS" "$NL_GH" '[]' \
+    "[{\"id\":\"b-held\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"local\"},
+      {\"id\":\"b-held\ntrash\",\"status\":\"open\",\"external_ref\":\"$ISSUE/2\",\"description\":\"a\"}]"
+if grep -q 'WARNING b-held was held out of the pull but changed in_progress -> open' "$TMP/err"; then
+    ok "a split id does not blind the held-bead check for the id it collides with"
+else
+    bad "a split id does not blind the held-bead check for the id it collides with" \
+        "no warning; last line: $(last_line)"
+fi
+
+# Without a collision the same split is quieter and no less wrong: `grep '^ALLOW '`
+# keeps the head of the record and discards the tail, so --issues names `b-nl` —
+# a bead id nobody minted — while the bead that was actually eligible is dropped
+# without a word and still counted as pulled.
+run_sync pull \
+    "[{\"id\":\"b-nl\ntrash\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"a\"}]" \
+    '[{"number":1,"state":"OPEN","body":"a\nadded on GH"}]'
+if [ "$(sync_batches)" -ne 0 ]; then
+    bad "the head of a split bead id is not pulled as a bead of its own" \
+        "$(grep 'github sync' "$TMP/calls")"
+elif [ "$(last_line)" != "bd-gh-sync: PULL FAILED — 0 of 1 eligible bead(s) pulled; 1 bead id(s) unusable; no batch ran at all, held 0, left 0 unmirrored GH issue(s) alone." ]; then
+    bad "the head of a split bead id is not pulled as a bead of its own" \
+        "got: $(last_line)"
+else
+    ok "a bead id that splits its record reaches no batch and is counted as unpulled"
+fi
+
 # Several conditions at once, on one line: a failed batch, a held bead, an
 # orphan issue and a bead that moved behind the script's back. Nothing may win
 # silently — the tail -1 caller gets one line and it has to carry all four.
@@ -815,6 +1316,40 @@ elif [ -n "${_l##*WARNING*b-claim*}" ]; then
     bad "the summary reports every condition at once" "moved bead lost: $_l"
 else
     ok "a failed batch, a hold, an orphan and a moved bead share one summary line"
+fi
+
+# --- gqlc-w4q9 review: the header's claim has to hold on every exit ----------
+# "Both actions end by writing their verdict to the last stderr line" is what
+# .claude/settings.json and pre-push are built on, and `mktemp -d` failing broke
+# it: a bare `|| exit 0` with nothing said. Both callers keep only that line, so
+# a run that produced none is indistinguishable from one that had nothing to do
+# — the same silence the rest of this file exists to remove, on the one early
+# exit that is a fault rather than a repository where sync is not configured.
+for act in pull push; do
+    MKTEMP_RC=1
+    run_sync "$act" '[{"id":"b-n","status":"open","external_ref":""}]' '[]' '[]'
+    MKTEMP_RC=0
+    if [ -z "$(last_line)" ]; then
+        bad "a temp directory that cannot be made is reported ($act)" \
+            "exited $RC without a word"
+    else
+        case "$(last_line)" in
+            *"SKIPPING $act"*)
+                ok "a temp directory that cannot be made is reported ($act)" ;;
+            *) bad "a temp directory that cannot be made is reported ($act)" \
+                "got: $(last_line)" ;;
+        esac
+    fi
+done
+
+# ...and the control: the stub is only ever a stub when the knob is set, so a
+# run with it unset has to reach GitHub exactly as before. Without this the two
+# cases above would pass just as well against a stub that always failed.
+run_sync push '[{"id":"b-n","status":"open","external_ref":""}]' '[]' '[]'
+if [ "$(last_line)" = "bd-gh-sync: pushed 1 new bead(s), closed 0 stale GH mirror(s)." ]; then
+    ok "the mktemp stub is transparent when its knob is unset"
+else
+    bad "the mktemp stub is transparent when its knob is unset" "got: $(last_line)"
 fi
 
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"
