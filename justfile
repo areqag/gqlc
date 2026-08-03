@@ -281,6 +281,12 @@ vuln: vuln-root-residual
 # "Third-party" is anything outside the main module whose first path element
 # contains a dot, which is what puts a package in a vulnerability database at
 # all; .TestImports is exactly the in-package test variant's import set.
+#
+# Reaching third-party code is transitive through own-module packages, not
+# direct (bd gqlc-nsq4). What govulncheck loses is the variant's outgoing edges,
+# so an own-module package that only the variant pulls in is lost along with
+# everything it imports; stopping the walk at the module boundary would report a
+# residual smaller than the real one, in the reassuring direction.
 vuln-root-residual:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -289,6 +295,83 @@ vuln-root-residual:
     # `echo` would feed `comm` a phantom entry and make the ratchet compare
     # against a set it never measured.
     lines() { [ -n "${1}" ] && printf '%s\n' "${1}" || true; }
+
+    # Every own-module package's non-test imports, which is what makes the walk
+    # in blind_packages transitive. `-deps -test` rather than a plain `./...`
+    # listing so a helper under testdata — which `./...` never matches but an
+    # in-package test can still import — has its imports on file too. Bracketed
+    # test variants are dropped: their import path is the plain package's, so
+    # keeping them would file the test build's imports under the non-test key
+    # and mark packages blind through edges govulncheck has not lost.
+    declare -A imports_of=()
+    while IFS= read -r entry; do
+        case "${entry}" in *'['*) continue ;; esac
+        pkg="${entry%% *}"
+        case "${pkg}" in "$module" | "$module"/*) imports_of["${pkg}"]="${entry#"${pkg}"}" ;; esac
+    done < <(go list -deps -test -f '{{{{.ImportPath}} {{{{join .Imports " "}}' ./...)
+
+    # Reads the listing below on stdin and names each package whose in-package
+    # test variant reaches third-party code, walking own-module imports rather
+    # than stopping at them. Reads imports_of from the caller's scope, which is
+    # what lets selftest_blind_packages substitute a fixture for the real tree.
+    blind_packages() {
+        local module="$1" pkg intest xtest imports i
+        local -A seen
+        local -a frontier extra
+        while read -r pkg intest xtest imports; do
+            seen=()
+            read -r -a frontier <<<"${imports}"
+            while [ "${#frontier[@]}" -gt 0 ]; do
+                i="${frontier[0]}"
+                frontier=("${frontier[@]:1}")
+                if [ -n "${seen[$i]+set}" ]; then continue; fi
+                seen["$i"]=1
+                case "$i" in "$module" | "$module"/*)
+                    read -r -a extra <<<"${imports_of[$i]-}"
+                    frontier+=("${extra[@]}")
+                    continue
+                    ;;
+                esac
+                case "${i%%/*}" in *.*)
+                    printf '%s\n' "${pkg#"$module"/}"
+                    break
+                    ;;
+                esac
+            done
+        done
+    }
+
+    # No package in this tree has the transitive shape today, so the recursion
+    # above has nothing live to walk and could be lost without any measurement
+    # moving. The fixture is the only thing that exercises it: m/indirect is
+    # blind through two own-module hops, m/inert reaches only stdlib through
+    # one, and m/direct pins the direct case the recursion must not break.
+    selftest_blind_packages() {
+        local -A imports_of=(
+            [m/helper]="m/deeper"
+            [m/deeper]="example.com/vuln/pkg"
+            [m/leaf]="strings"
+        )
+        local want got
+        want=$'direct\nindirect'
+        got="$(blind_packages m <<'FIXTURE'
+    m/direct 1 0 example.com/vuln/pkg testing
+    m/indirect 1 0 m/helper testing
+    m/inert 1 0 m/leaf fmt
+    m/stdlib 1 0 testing
+    m/notests 0 1
+    FIXTURE
+        )"
+        if [ "${got}" != "${want}" ]; then
+            echo "error: this recipe's own blind-package walk is broken, so every number" >&2
+            echo "       below is unreliable (bd gqlc-nsq4). Fixture expected:" >&2
+            lines "${want}" | sed 's/^/         /' >&2
+            echo "       got:" >&2
+            lines "${got}" | sed 's/^/         /' >&2
+            exit 1
+        fi
+    }
+    selftest_blind_packages
 
     # One `go list` feeds both halves, so the counts and the blind set can never
     # disagree about which files are in the tree, and both read the build
@@ -302,20 +385,11 @@ vuln-root-residual:
 
     inpackage=0
     external=0
-    blind=""
-    while read -r pkg intest xtest imports; do
+    while read -r _ intest xtest _; do
         inpackage=$((inpackage + intest))
         external=$((external + xtest))
-        for i in ${imports}; do
-            case "$i" in "$module" | "$module"/*) continue ;; esac
-            case "${i%%/*}" in *.*)
-                blind+="${pkg#"$module"/}"$'\n'
-                break
-                ;;
-            esac
-        done
     done <<<"${listing}"
-    blind="$(printf '%s' "${blind}" | sort -u)"
+    blind="$(blind_packages "${module}" <<<"${listing}" | sort -u)"
     if [ "$((inpackage + external))" -eq 0 ]; then
         echo "error: the root module has no test files at all, so this recipe and the" >&2
         echo "       ratchet below are measuring nothing (bd gqlc-m5rc)." >&2

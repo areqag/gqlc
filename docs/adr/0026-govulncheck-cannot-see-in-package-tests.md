@@ -74,7 +74,7 @@ those interface types exist.
 
 **The root module's residual is measured and ratcheted, not fixed.**
 `just vuln-root-residual` prints the in-package/external test-file split and the
-set of packages whose in-package tests import third-party code, and fails when
+set of packages whose in-package tests reach third-party code, and fails when
 that set grows. The file counts only report: a new in-package test is this
 repo's house style and failing on it would be churn with no risk behind it. The
 blind set ratchets, because it grows only on the risk event itself — a package
@@ -82,6 +82,17 @@ acquiring a third-party import it cannot be scanned through. The baseline is the
 set rather than its size so a trip can name the package that went blind, and it
 is checked in both directions: a package that leaves the set has to leave the
 baseline too, or the ratchet quietly regains the slack it just won.
+
+**Reach is transitive through own-module packages.** What `AddPackages` loses is
+the variant's outgoing edges, not any particular importer's, so an own-module
+package that only the discarded variant pulls in is lost with everything *it*
+imports. A test importing an own-module helper that imports third-party code is
+therefore as blind as one importing that code directly, and a walk that stops at
+the module boundary reports a residual smaller than the real one — in the
+reassuring direction (bd gqlc-nsq4). No package in the tree has that shape
+today, which is exactly why the walk carries a fixture it checks itself against
+on every run: a recursion with nothing live to walk can be lost without any
+measurement moving.
 
 The recipe rides ci.yml's `lint` job rather than the `govulncheck` job, because
 the vuln job scans only when a `go.mod` changes and the residual moves on PRs
