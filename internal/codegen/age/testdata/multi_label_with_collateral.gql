@@ -1,0 +1,20 @@
+// A schema whose multi-label node type is not what any query in the
+// batch projects. The single-label types beside it are what the batch
+// reads, so the AGE refusal reaching this schema is the refusal reaching
+// past the columns the batch names.
+//
+// Staffer shares no substring with Person or Employee, and that is
+// load-bearing: a diagnostic naming the type but not its labels would
+// satisfy a substring sweep for "Person" if the type were called
+// PersonEmployee. The sweep asserts the disjointness rather than trusting
+// it.
+CREATE PROPERTY GRAPH TYPE MultiLabelWithCollateral AS {
+    NODE TYPE Staffer (p :Person&Employee {
+        id     :: INT64 NOT NULL,
+        salary :: INT64 NOT NULL
+    }),
+    (:Team {
+        name :: STRING NOT NULL
+    }),
+    (:Team) -[:OWNS { since :: INT64 NOT NULL }]-> (:Team)
+}

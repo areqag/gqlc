@@ -19,7 +19,7 @@ func generate(in codegen.Input, packageName string) ([]codegen.File, error) {
 	if err != nil {
 		return nil, nameBackend(err)
 	}
-	entities, err := wireEntities(prepared.Entities)
+	entities, err := wireEntities(prepared.Entities, len(prepared.Queries))
 	if err != nil {
 		return nil, err
 	}
