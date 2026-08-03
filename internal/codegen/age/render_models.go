@@ -22,15 +22,18 @@ const (
 // for. Each is emitted only when something calls it: an unreferenced
 // unexported function is a lint failure in the generated module, so the
 // set the batch uses is the set the file carries.
+//
+// agtypeEntity, agtypeObject, agtypeSpan and agtypeString are not among
+// them. A graph type's element type list is one-or-more (GQL.g4
+// elementTypeList), so every schema declares at least one entity, every
+// entity decoder splits the wire value and reads its label, and those
+// four are in every emission this package can produce. A field standing
+// for a condition that cannot be false would report nothing.
 type helpers struct {
 	args     bool // agtypeArgs — some query binds at least one parameter
-	str      bool
 	boolean  bool
 	integer  bool
 	float    bool
-	span     bool // agtypeSpan — something splits a structure into parts
-	object   bool // agtypeObject — something splits an agtype map into members
-	entity   bool // agtypeEntity — the schema has an entity type
 	list     bool // agtypeList — something decodes an agtype list
 	value    bool // agtypeValue / agtypeMap — something decodes a value of no declared shape
 	prop     bool // agtypeProperty — some entity declares a non-nullable property
@@ -43,29 +46,9 @@ type helpers struct {
 	lists []string
 }
 
-// any reports whether the batch reaches for any helper at all, which is
-// what decides whether models.go carries an import block.
-func (h helpers) any() bool {
-	return h.args || h.str || h.boolean || h.integer || h.float ||
-		h.span || h.object || h.entity || h.list || h.value || h.prop || h.nullProp
-}
-
-// needsBytes reports whether the emitted helpers reach for the bytes
-// package, which every helper that walks a structure's text does.
-func (h helpers) needsBytes() bool {
-	return h.object || h.entity || h.list || h.value
-}
-
-// forEntities marks the helpers an entity emission reaches. Every entity
-// decoder splits the wire value and reads the label out of it, so one
-// entity anywhere in the schema puts the whole entity trio and the string
-// helper in the file.
+// forEntities marks the helpers an entity emission reaches beyond the
+// four every emission carries.
 func (h *helpers) forEntities(entities []wiredEntity) {
-	if len(entities) == 0 {
-		return
-	}
-	h.entity, h.object, h.span = true, true, true
-	h.str = true
 	for _, e := range entities {
 		for _, f := range e.Fields {
 			h.need(f.GoType)
@@ -86,7 +69,7 @@ func (h *helpers) forEntities(entities []wiredEntity) {
 // type of no declared shape marks the agtype value vocabulary.
 func (h *helpers) need(goType string) {
 	if elem, ok := strings.CutPrefix(goType, "[]"); ok {
-		h.list, h.span = true, true
+		h.list = true
 		if !slices.Contains(h.lists, goType) {
 			h.lists = append(h.lists, goType)
 		}
@@ -98,8 +81,6 @@ func (h *helpers) need(goType string) {
 		return
 	}
 	switch agtypeCarrier(goType) {
-	case "string":
-		h.str = true
 	case "bool":
 		h.boolean = true
 	case "int64":
@@ -115,16 +96,14 @@ func (h *helpers) need(goType string) {
 // batch declares.
 func (h *helpers) needValue() {
 	h.value = true
-	h.str, h.integer, h.float = true, true, true
-	h.span, h.object, h.list = true, true, true
+	h.integer, h.float, h.list = true, true, true
 }
 
-// listHelpers is the batch's named list wrappers in emission order:
-// shallowest first, then by name. A wrapper's element decoder is the
-// wrapper one level in, so emitting inner before outer reads in the
-// order the decode runs, and ordering on the type text rather than on
-// the order the batch happened to reach them keeps the emission a
-// function of the schema.
+// listHelpers is the batch's named list wrappers, shallowest first and
+// then by name. The order the batch reaches them is already a function
+// of the schema, so this is not what makes the emission deterministic:
+// it is what makes it readable, since a wrapper's element decoder is the
+// wrapper one level in and reading inner before outer follows the decode.
 func (h helpers) listHelpers() []string {
 	out := slices.Clone(h.lists)
 	slices.SortFunc(out, func(a, b string) int {
@@ -192,17 +171,10 @@ func renderModels(pkg string, entities []wiredEntity, prepared []codegen.Query, 
 	var b strings.Builder
 	b.WriteString(codegen.Header())
 	b.WriteString("package " + pkg + "\n")
-	if !h.any() {
-		return []byte(b.String())
-	}
 
 	b.WriteString("\nimport (\n")
-	if h.needsBytes() {
-		b.WriteString("\t\"bytes\"\n")
-	}
-	if h.args || h.str {
-		b.WriteString("\t\"encoding/json\"\n")
-	}
+	b.WriteString("\t\"bytes\"\n")
+	b.WriteString("\t\"encoding/json\"\n")
 	b.WriteString("\t\"fmt\"\n")
 	if h.integer || h.float {
 		b.WriteString("\t\"strconv\"\n\t\"strings\"\n")
@@ -228,8 +200,7 @@ func agtypeArgs(args map[string]any) (string, error) {
 }
 `)
 	}
-	if h.str {
-		b.WriteString(`
+	b.WriteString(`
 // agtypeString decodes an agtype string scalar. AGE renders one as a
 // JSON string, escapes included, so the JSON decoder reads it back
 // exactly; it also refuses every other agtype scalar, which is what
@@ -250,7 +221,6 @@ func agtypeString(raw []byte) (string, error) {
 	return *out, nil
 }
 `)
-	}
 	if h.boolean {
 		b.WriteString(`
 // agtypeBool decodes an agtype boolean scalar. The two spellings are the
@@ -301,8 +271,7 @@ func agtypeFloat64(raw []byte) (float64, error) {
 }
 `)
 	}
-	if h.span {
-		b.WriteString(`
+	b.WriteString(`
 // agtypeSpan reports where the value at the front of b ends: the offset
 // of the first stop byte outside any nested structure, or len(b) when
 // there is none. A string, a nested map and a nested list are each
@@ -340,9 +309,7 @@ func agtypeSpan(b []byte, stop byte) (int, error) {
 	return len(b), nil
 }
 `)
-	}
-	if h.object {
-		b.WriteString(`
+	b.WriteString(`
 // agtypeObject splits an agtype map into its members, each key holding
 // the undecoded text of its value. A map carries more than the schema
 // declares: AGE stores whatever a writer wrote, so a value here may be of
@@ -379,9 +346,7 @@ func agtypeObject(raw []byte) (map[string][]byte, error) {
 	return out, nil
 }
 `)
-	}
-	if h.entity {
-		b.WriteString(`
+	b.WriteString(`
 // agtypeEntity splits an agtype vertex or edge into the label it carries
 // and the undecoded text of each of its properties. A vertex and an edge
 // are the same object but for the annotation, so requiring the one the
@@ -415,7 +380,6 @@ func agtypeEntity(raw []byte, annotation string) (string, map[string][]byte, err
 	return label, props, nil
 }
 `)
-	}
 	if h.list {
 		b.WriteString(`
 // agtypeList decodes an agtype list, reading each element through the

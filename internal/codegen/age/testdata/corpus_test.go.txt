@@ -322,7 +322,10 @@ const (
 
 func TestAgtypeListOfString(t *testing.T) {
 	accepts := map[string][]string{
-		`["x", "y"]`:             {"x", "y"},
+		`["x", "y"]`: {"x", "y"},
+		// The want here is an empty slice and not nil, and slicesEqual holds
+		// the difference: AGE sent a list, so what reaches the caller has to
+		// be one.
 		`[]`:                     {},
 		`["a"]`:                  {"a"},
 		`[""]`:                   {""},
@@ -405,11 +408,11 @@ func TestAgtypeNestedList(t *testing.T) {
 	// An empty outer list and a list holding one empty inner list are
 	// different values, and the wire spells them differently.
 	outer, err := agtypeListOfListOfInt64([]byte(`[]`))
-	if err != nil || len(outer) != 0 {
+	if err != nil || outer == nil || len(outer) != 0 {
 		t.Errorf("agtypeListOfListOfInt64([]) = %#v, %v, want an empty slice", outer, err)
 	}
 	inner, err := agtypeListOfListOfInt64([]byte(`[[]]`))
-	if err != nil || len(inner) != 1 || len(inner[0]) != 0 {
+	if err != nil || len(inner) != 1 || inner[0] == nil || len(inner[0]) != 0 {
 		t.Errorf("agtypeListOfListOfInt64([[]]) = %#v, %v, want one empty slice", inner, err)
 	}
 
@@ -463,13 +466,20 @@ func TestDecodeVertexWithListProperties(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeListy(listyEmpty) = error %v", err)
 	}
-	// An empty list is a value the graph holds, and it is not the absence
-	// a nullable property reports: the pointer is non-nil and addresses a
-	// slice of length zero.
-	if empty.Depths == nil || len(*empty.Depths) != 0 {
+	// An empty list is a value the graph holds, and it is not the absence a
+	// nullable property reports. Both halves are checked: the pointer is
+	// non-nil, and the slice it addresses is an empty slice rather than the
+	// nil one an absent property would reach the caller as.
+	if empty.Depths == nil || *empty.Depths == nil || len(*empty.Depths) != 0 {
 		t.Errorf("decodeListy(listyEmpty).Depths = %#v, want a pointer to an empty slice", empty.Depths)
 	}
-	if len(empty.Matrix) != 1 || len(empty.Matrix[0]) != 0 {
+	if empty.Tags == nil || len(empty.Tags) != 0 {
+		t.Errorf("decodeListy(listyEmpty).Tags = %#v, want an empty slice", empty.Tags)
+	}
+	if empty.Ranks == nil || len(empty.Ranks) != 0 {
+		t.Errorf("decodeListy(listyEmpty).Ranks = %#v, want an empty slice", empty.Ranks)
+	}
+	if len(empty.Matrix) != 1 || empty.Matrix[0] == nil || len(empty.Matrix[0]) != 0 {
 		t.Errorf("decodeListy(listyEmpty).Matrix = %#v, want one empty slice", empty.Matrix)
 	}
 
@@ -618,8 +628,13 @@ func TestDecodeVertexWithAnyProperty(t *testing.T) {
 
 // slicesEqual is the corpus module's own comparison: the module requires
 // nothing, so testify is unavailable and this is one line rather than a
-// dependency.
+// dependency. A nil slice and an empty one are not equal here: the graph
+// holding an empty list and the graph holding nothing are different
+// answers, and length alone cannot tell them apart.
 func slicesEqual[T comparable](got, want []T) bool {
+	if (got == nil) != (want == nil) {
+		return false
+	}
 	if len(got) != len(want) {
 		return false
 	}
