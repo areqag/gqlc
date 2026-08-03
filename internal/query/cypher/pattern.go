@@ -484,6 +484,13 @@ func (rb *rawBinding) mergeLabels(labels graph.LabelSet) {
 // empty label set unambiguous — it means no occurrence has constrained the
 // binding yet, never that every candidate has been excluded, because the
 // exclusion case returns false instead of storing the empty set.
+//
+// Narrowing deliberately does not rebuild rb.seen from the survivors, so seen
+// is a superset of labels from here on. seen is mergeLabels' dedup index and
+// nothing else reads it, and the only route back into mergeLabels for an edge
+// binding is the len(rb.labels) == 0 arm below — which a narrowed binding can
+// never take, because survivors are non-empty and rb.labels never shrinks to
+// empty afterwards. A rebuild would be a correction no caller could observe.
 func (rb *rawBinding) intersectLabels(labels graph.LabelSet) bool {
 	if len(labels) == 0 {
 		return true
@@ -506,10 +513,6 @@ func (rb *rawBinding) intersectLabels(labels graph.LabelSet) bool {
 		return false
 	}
 	rb.labels = survivors
-	rb.seen = make(map[string]bool, len(survivors))
-	for _, label := range survivors {
-		rb.seen[label] = true
-	}
 	return true
 }
 

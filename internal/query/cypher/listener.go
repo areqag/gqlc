@@ -167,7 +167,7 @@ func newRawPart() *rawPart {
 type rawBinding struct {
 	variable                        string
 	labels                          graph.LabelSet
-	seen                            map[string]bool // membership index over labels, kept in step with it
+	seen                            map[string]bool // mergeLabels' dedup index; a superset of labels once intersectLabels has narrowed them (see intersectLabels)
 	kind                            graph.EntityKind
 	source                          query.Endpoint
 	target                          query.Endpoint
