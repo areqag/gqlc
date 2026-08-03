@@ -71,8 +71,13 @@ if [ "$1" = "list" ]; then
     n=$((n + 1))
     printf '%s' "$n" >"$STUBTMP/bd_list_count"
     if [ -f "$STUBTMP/bd_list_rc_$n" ]; then
+        # Defaulted, not inlined: `exit ""` is not fatal in bash — it reports
+        # "numeric argument required" and carries on to the next line — so an
+        # empty knob file would leave this stub succeeding while looking as
+        # though it failed.
+        _rc="$(cat "$STUBTMP/bd_list_rc_$n")"
         echo "bd: error: database is locked by another process" >&2
-        exit "$(cat "$STUBTMP/bd_list_rc_$n")"
+        exit "${_rc:-1}"
     fi
     if [ -f "$STUBTMP/bd_list_out_$n" ]; then
         # Verbatim, so empty/truncated/non-JSON output is expressible. The
@@ -96,6 +101,14 @@ if [ "$#" -gt 0 ]; then printf '  ARG=[%s]\n' "$@" >>"$CALLS"; fi
 case "$1 ${2:-}" in
     "auth token") echo faketoken ;;
     "issue list")
+        # Every branch in the script that turns on this command's exit status
+        # was unreachable from here until this knob existed: a stub that can
+        # only succeed makes the whole error path dead code as far as the suite
+        # is concerned, however carefully the script handles it.
+        if [ "${FAKE_GH_LIST_RC:-0}" != 0 ]; then
+            echo "gh: HTTP 502 Bad Gateway (https://api.github.com/graphql)" >&2
+            exit "$FAKE_GH_LIST_RC"
+        fi
         case "$*" in
             *"--state all"*) cat "$FAKE_GH" ;;
             *"--state open"*) cat "$FAKE_GH_OPEN" ;;
@@ -125,7 +138,31 @@ fi
 exec "$REAL_MKTEMP" "$@"
 STUB
 
-chmod +x "$BIN/bd" "$BIN/gh" "$BIN/mktemp"
+# "the check ran and could not see" and "the check never ran" are different
+# findings the script reports differently, and the second is reachable only if
+# the interpreter itself can fail. Keyed by call ordinal like `bd list`, because
+# each action runs two of these and they fail to different effect: a selection
+# that dies refuses the whole run, a postcondition that dies leaves it blind.
+# Resolved before $BIN joins PATH, or the stub execs itself.
+REAL_PYTHON3="$(command -v python3)"
+cat >"$BIN/python3" <<'STUB'
+#!/usr/bin/env bash
+n=0
+[ -f "$STUBTMP/py_count" ] && n=$(cat "$STUBTMP/py_count")
+n=$((n + 1))
+printf '%s' "$n" >"$STUBTMP/py_count"
+if [ -f "$STUBTMP/py_rc_$n" ]; then
+    # Defaulted for the same reason as `bd list` above: `exit ""` falls through
+    # to the exec below, which would hand the script a working interpreter out
+    # of a stub that had announced its own death.
+    _rc="$(cat "$STUBTMP/py_rc_$n")"
+    echo "python3: can't open file '<stdin>': [Errno 13] Permission denied" >&2
+    exit "${_rc:-1}"
+fi
+exec "$REAL_PYTHON3" "$@"
+STUB
+
+chmod +x "$BIN/bd" "$BIN/gh" "$BIN/mktemp" "$BIN/python3"
 
 pass=0
 fail=0
@@ -141,14 +178,17 @@ bad() { fail=$((fail + 1)); printf 'FAIL - %s: %s\n' "$1" "$2"; }
 #   bd_list_fails 2 3    -> ...exits 3
 #   bd_list_emits 2 ''   -> the 2nd `bd list` succeeds with empty output
 #   bd_list_emits 2 '[{' -> ...succeeds with truncated JSON
+#   py_fails 2         -> the 2nd python3 invocation exits 1 having run nothing
+#   py_fails 2 9       -> ...exits 9
 bd_list_fails() { printf '%s' "${2:-1}" >"$TMP/bd_list_rc_$1"; }
 bd_list_emits() { printf '%s' "$2" >"$TMP/bd_list_out_$1"; }
+py_fails()      { printf '%s' "${2:-1}" >"$TMP/py_rc_$1"; }
 
 # $1=action $2=beads $3=gh_all [$4=gh_open] [$5=beads_after]
 # Leaves the invocation log in $TMP/calls and the script's stderr in $TMP/err.
 run_sync() {
     : >"$TMP/calls"
-    rm -f "$TMP/bd_list_count"
+    rm -f "$TMP/bd_list_count" "$TMP/py_count"
     printf '%s' "$2" >"$TMP/beads.json"
     printf '%s' "$3" >"$TMP/gh.json"
     printf '%s' "${4:-[]}" >"$TMP/gh_open.json"
@@ -162,10 +202,11 @@ run_sync() {
         FAKE_GH_OPEN="$TMP/gh_open.json" FAKE_BEADS_AFTER="$after" \
         FAKE_SYNC_RC="${SYNC_RC:-0}" FAKE_PUSH_RC="${PUSH_RC:-0}" \
         FAKE_CLOSE_RC="${CLOSE_RC:-0}" FAKE_MKTEMP_RC="${MKTEMP_RC:-0}" \
-        REAL_MKTEMP="$REAL_MKTEMP" \
+        FAKE_GH_LIST_RC="${GH_LIST_RC:-0}" \
+        REAL_MKTEMP="$REAL_MKTEMP" REAL_PYTHON3="$REAL_PYTHON3" \
         "$SYNC" "$1" >"$TMP/out" 2>"$TMP/err"
     RC=$?
-    rm -f "$TMP"/bd_list_rc_* "$TMP"/bd_list_out_*
+    rm -f "$TMP"/bd_list_rc_* "$TMP"/bd_list_out_* "$TMP"/py_rc_*
 }
 RC=0
 
@@ -174,6 +215,7 @@ SYNC_RC=0
 PUSH_RC=0
 CLOSE_RC=0
 MKTEMP_RC=0
+GH_LIST_RC=0
 
 scoped_ids() { grep -o -- '--issues [^ ]*' "$TMP/calls" | cut -d' ' -f2 | tr ',' '\n'; }
 pull_ran()   { grep -q -- 'bd github sync' "$TMP/calls"; }
@@ -1316,6 +1358,179 @@ elif [ -n "${_l##*WARNING*b-claim*}" ]; then
     bad "the summary reports every condition at once" "moved bead lost: $_l"
 else
     ok "a failed batch, a hold, an orphan and a moved bead share one summary line"
+fi
+
+# --- gqlc-oaxm: the diagnostic lines have to be reachable, and reached --------
+# Six lines existed only to tell a human *why* a run went blind, and none of
+# them was under an assertion: each was deletable or invertible with the suite
+# still green. A blind run that names the wrong reason is worse than one that
+# names none, because it sends the reader to the wrong place.
+#
+# The worst of the six was not merely untested but untestable: every path that
+# turns on `gh` exiting non-zero was unreachable by construction, because the
+# stub could only succeed. A stub that cannot fail cannot test a failure path.
+
+# `gh issue list` failing is the more precise diagnosis than the python's view
+# that the file was merely unreadable, and it is the one the operator acts on.
+GH_LIST_RC=4
+run_sync push "[{\"id\":\"b-c\",\"status\":\"closed\",\"external_ref\":\"$ISSUE/500\"}]" \
+    '[]' '[{"number":500}]'
+GH_LIST_RC=0
+case "$RC:$(last_line)" in
+    0:*) bad "the push blind notice names the 'gh issue list' status it saw" \
+        "exited 0: $(last_line)" ;;
+    *"'gh issue list' exited 4"*)
+        ok "the push blind notice names the 'gh issue list' exit status it saw" ;;
+    *) bad "the push blind notice names the 'gh issue list' status it saw" \
+        "got: $(last_line)" ;;
+esac
+
+# ...and the control the case above would otherwise pass against a stub that
+# always failed: with the knob unset the listing has to come back and be used.
+run_sync push "[{\"id\":\"b-c\",\"status\":\"closed\",\"external_ref\":\"$ISSUE/500\"}]" \
+    '[]' '[{"number":500}]'
+if [ "$RC" -eq 0 ] &&
+   [ "$(last_line)" = "bd-gh-sync: pushed 0 new bead(s), closed 1 stale GH mirror(s)." ]; then
+    ok "the 'gh issue list' stub is transparent when its knob is unset"
+else
+    bad "the 'gh issue list' stub is transparent when its knob is unset" \
+        "rc=$RC: $(last_line)"
+fi
+
+# The `bd list` twin on the push side. The pull side has had this assertion
+# since gqlc-jwuw; push had the line and nothing watching it.
+bd_list_fails 2 3
+run_sync push "[{\"id\":\"b-c\",\"status\":\"closed\",\"external_ref\":\"$ISSUE/500\"}]" \
+    '[]' '[{"number":500}]'
+case "$RC:$(last_line)" in
+    0:*) bad "the push blind notice names the 'bd list' status it saw" \
+        "exited 0: $(last_line)" ;;
+    *"'bd list' exited 3"*)
+        ok "the push blind notice names the 'bd list' exit status it saw" ;;
+    *) bad "the push blind notice names the 'bd list' status it saw" \
+        "got: $(last_line)" ;;
+esac
+
+# The refusal path's own diagnosis. A selection that would not run is already
+# reported, but "the bead list would not load" and "bd would not answer" call
+# for different responses — wait for the database, or go and look at what came
+# back — and only the exit status separates them.
+bd_list_fails 1 5
+run_sync push '[{"id":"b-n","status":"open","external_ref":""}]' '[]' '[]'
+_ll="$(last_line)"
+if ! grep -q "'bd list' exited 5" "$TMP/err"; then
+    bad "a refused push names the 'bd list' exit status behind it" \
+        "no line names it: $(grep 'bd list' "$TMP/err" | head -n 1)"
+elif [ -z "$_ll" ]; then
+    bad "a refused push names the 'bd list' exit status behind it" "no verdict line at all"
+elif [ -n "${_ll##*SKIPPING push*}" ]; then
+    bad "a refused push names the 'bd list' exit status behind it" \
+        "the detail displaced the verdict from the last line: $_ll"
+else
+    ok "a refused push names the 'bd list' exit status, verdict still last"
+fi
+
+# --- ...and the pull side's third blind reason -------------------------------
+# `bd list` answering and the check *running* are different failures. The two
+# reasons above both mean the check ran and could not see; this one means the
+# interpreter never got as far as a verdict, which is why the status file's
+# absence — not its contents — is what says so.
+
+py_fails 2
+run_sync pull "[$CLAIMED]" "$GH7" '[]' "[$CLAIMED]"
+case "$(last_line)" in
+    *"the check itself did not run"*)
+        ok "a postcondition whose interpreter died says the check did not run" ;;
+    *) bad "a postcondition whose interpreter died says the check did not run" \
+        "got: $(last_line)" ;;
+esac
+
+# ...distinct from the reason beside it, or the notice sends the reader to the
+# wrong place: this one means nobody looked, that one means the list would not
+# parse.
+bd_list_emits 2 '[]'
+run_sync pull "[$CLAIMED]" "$GH7" '[]' "[$CLAIMED]"
+case "$(last_line)" in
+    *"the post-pull bead list was unreadable"*)
+        ok "an unreadable post-pull list is named as unreadable, not as not-run" ;;
+    *) bad "an unreadable post-pull list is named as unreadable, not as not-run" \
+        "got: $(last_line)" ;;
+esac
+
+# ...and the control: the python3 stub must be transparent with its knob unset,
+# or every case above it passes against an interpreter that never ran at all.
+# Pinned to the whole healthy summary rather than to the absence of the blind
+# notice: an interpreter dead from its first call refuses the run long before
+# the postcondition, and "never said it was blind" is true of that refusal too.
+run_sync pull "[$CLAIMED]" "$GH7" '[]' "[$CLAIMED]"
+_ll="$(last_line)"
+if [ "$_ll" = "bd-gh-sync: pulled 0 bead(s), held 0, left 0 unmirrored GH issue(s) alone." ]; then
+    ok "the python3 stub is transparent when its knob is unset"
+else
+    bad "the python3 stub is transparent when its knob is unset" \
+        "a healthy run did not reach its summary: $_ll"
+fi
+
+# --- ...and the close comment the operator reads on GitHub -------------------
+# The comment is this script's only trace on an issue it closed. Its bead id
+# goes through the same escaping the plan records use, for the same reason: the
+# comment travels as one argv word, and a raw newline in an id splits it.
+
+run_sync push \
+    "[{\"id\":\"b-c\ntrash\",\"status\":\"closed\",\"close_reason\":\"done\",\"external_ref\":\"$ISSUE/500\"}]" \
+    '[]' '[{"number":500}]'
+if [ "$(argv_of 'gh issue close' | wc -l)" -ne 5 ]; then
+    bad "a newline in a bead id does not split the close comment" \
+        "$(argv_of 'gh issue close' | wc -l) argv words: $(argv_of 'gh issue close' | tr '\n' '|')"
+elif [ "$(argv_of 'gh issue close' | sed -n 5p)" != 'Auto-close: bead b-c\ntrash closed locally. done' ]; then
+    bad "a newline in a bead id does not split the close comment" \
+        "body was: $(argv_of 'gh issue close' | sed -n 5p)"
+else
+    ok "a bead id carrying a newline reaches the close comment escaped, one argv word"
+fi
+
+# The other half of the same line. A bead with no id at all must not have the
+# comment name a bead called `None`, which is the string python's own repr
+# supplies when the fallback is dropped.
+run_sync push \
+    "[{\"id\":null,\"status\":\"closed\",\"close_reason\":\"done\",\"external_ref\":\"$ISSUE/501\"}]" \
+    '[]' '[{"number":501}]'
+if [ "$(argv_of 'gh issue close' | sed -n 5p)" != "Auto-close: bead  closed locally. done" ]; then
+    bad "a bead with no id does not become a bead named None" \
+        "body was: $(argv_of 'gh issue close' | sed -n 5p)"
+else
+    ok "a bead with no id leaves the close comment's bead name empty, not 'None'"
+fi
+
+# `close_reason` is free text a human wrote, and it lands in a GitHub comment.
+# Only its first line goes, because a multi-paragraph reason turns one comment
+# into a wall, and the comment is meant to be the pointer rather than the record.
+run_sync push \
+    "[{\"id\":\"b-c\",\"status\":\"closed\",\"close_reason\":\"superseded by gqlc-x\nplus three\nmore paragraphs\",\"external_ref\":\"$ISSUE/500\"}]" \
+    '[]' '[{"number":500}]'
+if [ "$(argv_of 'gh issue close' | wc -l)" -ne 5 ]; then
+    bad "only the first line of close_reason reaches the comment" \
+        "$(argv_of 'gh issue close' | wc -l) argv words: $(argv_of 'gh issue close' | tr '\n' '|')"
+elif [ "$(argv_of 'gh issue close' | sed -n 5p)" != "Auto-close: bead b-c closed locally. superseded by gqlc-x" ]; then
+    bad "only the first line of close_reason reaches the comment" \
+        "body was: $(argv_of 'gh issue close' | sed -n 5p)"
+else
+    ok "a multi-line close_reason contributes only its first line to the comment"
+fi
+
+# ...and that first line is clamped, because nothing bounds what a human typed
+# on it and GitHub's comment body is not a place to discover a limit.
+run_sync push \
+    "[{\"id\":\"b-c\",\"status\":\"closed\",\"close_reason\":\"$(printf 'y%.0s' $(seq 1 400))\",\"external_ref\":\"$ISSUE/500\"}]" \
+    '[]' '[{"number":500}]'
+_body="$(argv_of 'gh issue close' | sed -n 5p)"
+_tag="${_body#Auto-close: bead b-c closed locally. }"
+if [ "${#_tag}" -ne 300 ]; then
+    bad "an overlong close_reason is clamped" "the tag was ${#_tag} characters, not 300"
+elif [ -n "${_tag%...}" ] && [ "${_tag%...}" = "$_tag" ]; then
+    bad "an overlong close_reason is clamped" "clamped without an ellipsis: ${_tag}"
+else
+    ok "a close_reason past 300 characters is clamped to 300 with an ellipsis"
 fi
 
 # --- gqlc-w4q9 review: the header's claim has to hold on every exit ----------
