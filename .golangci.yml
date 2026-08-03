@@ -108,7 +108,10 @@ linters:
         # scenario, and the generated handles bound to that view are each
         # reachable only as the interface the body is written against. Listed
         # per type, so ireturn keeps full strength on the rest of that module.
-        - github.com/areqag/gqlc/test/data/codegen\.(harness|backend|writeBackend|oneColOneParamOneQuerier|manyColManyQuerier|mixedReadWriteBatchQuerier|entityNodeQuerier|entityEdgeQuerier)$
+        # The `_test` suffix is the package path of an external test package,
+        # which is what the battery has to be to stay inside govulncheck's call
+        # graph (ADR 0026) — not a typo.
+        - github.com/areqag/gqlc/test/data/codegen_test\.(harness|backend|writeBackend|oneColOneParamOneQuerier|manyColManyQuerier|mixedReadWriteBatchQuerier|entityNodeQuerier|entityEdgeQuerier)$
     misspell:
       # the codebase is written in British English (see CONTEXT.md: canonicalised,
       # modelled, serialise); UK locale enforces that consistently

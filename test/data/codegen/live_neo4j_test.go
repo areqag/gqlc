@@ -3,7 +3,7 @@
 // The neo4j arms: the container helper both driver majors share, and one
 // adapter per major. The battery they serve is in live_test.go.
 
-package fixtures
+package fixtures_test
 
 import (
 	"context"
