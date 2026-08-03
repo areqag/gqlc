@@ -236,7 +236,17 @@ func (s *ConformanceSuite) SetupSuite() {
 	s.backends = reg
 }
 
-// loadManifest reads a manifest.json from the given fixture directory.
+// loadManifest reads a manifest.json from the given fixture directory and
+// holds its targets to the registry.
+//
+// The registration check lives here, not at generate(), because generate() is
+// on the emitting path and not every fixture reaches it: a fixture the front
+// end refuses returns from TestInvalid before any target is looked up, so a
+// misspelled target on such a fixture would never be read by anything. That
+// is a typo hole, not a missing refusal — the target is exercised the instant
+// the front end stops refusing — and it is one every future lane that loads a
+// manifest without emitting would re-open. Validating at load time closes it
+// for every fixture in every lane at once.
 func (s *ConformanceSuite) loadManifest(dir string) manifest {
 	src, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
 	s.Require().NoError(err)
@@ -245,6 +255,12 @@ func (s *ConformanceSuite) loadManifest(dir string) manifest {
 	s.Require().NotEmpty(m.Targets,
 		"fixture %q declares no targets; every fixture must name the emission targets it is enrolled in "+
 			"(one of %v), because there is no default enrolment", dir, s.backends.Keys())
+	for _, target := range m.Targets {
+		_, ok := s.backends.Lookup(target)
+		s.Require().True(ok,
+			"fixture %q enrols target %q, which no backend is registered under (registered: %v)",
+			dir, target, s.backends.Keys())
+	}
 	return m
 }
 
