@@ -1,0 +1,6 @@
+{
+  "package": "unnamedambiguousedgelabel",
+  "queryFiles": [],
+  "targets": ["neo4j-go-v5", "neo4j-go-v6"],
+  "expectedError": "codegen.ErrUnnamedMultiLabelType"
+}

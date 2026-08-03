@@ -1,0 +1,8 @@
+-- The edge-side twin of invalid_entity_name_node_label_mangle: Rule 3
+-- mangles the single edge label, and a digit-leading one lands outside
+-- the exported-Go-identifier grammar.
+CREATE PROPERTY GRAPH TYPE InvalidEntityNameEdgeLabelMangle AS {
+    (a :Person { id :: INT64 NOT NULL }),
+    (b :Post { id :: INT64 NOT NULL }),
+    DIRECTED EDGE TYPE LABEL "1AUTHORED" CONNECTING (a -> b)
+}
