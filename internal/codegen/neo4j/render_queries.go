@@ -224,13 +224,13 @@ func writeMethodSignature(b *strings.Builder, p codegen.Query) {
 	case 0:
 		// bare arg
 	case 1:
-		fmt.Fprintf(b, ", %s ", codegen.LowerFirstRune(p.ParamFields[0].Field))
+		fmt.Fprintf(b, ", %s ", codegen.ParamArg)
 		if p.ParamFields[0].Nullable {
 			b.WriteString("*")
 		}
 		b.WriteString(p.ParamFields[0].GoType)
 	default:
-		fmt.Fprintf(b, ", arg %sParams", p.MethodName)
+		fmt.Fprintf(b, ", %s %sParams", codegen.ParamArg, p.MethodName)
 	}
 	if p.Cardinality == codegen.CardinalityExec {
 		b.WriteString(") error")
@@ -398,11 +398,9 @@ func paramsMapText(p codegen.Query) string {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		var access string
-		if len(p.ParamFields) == 1 {
-			access = codegen.LowerFirstRune(f.Field)
-		} else {
-			access = "arg." + f.Field
+		access := codegen.ParamArg
+		if len(p.ParamFields) > 1 {
+			access = codegen.ParamArg + "." + f.Field
 		}
 		fmt.Fprintf(&b, "%q: %s", f.RawName, paramBindExpr(f, access))
 	}

@@ -5,7 +5,7 @@ package nullablecolumns
 import "context"
 
 type ReadQuerier interface {
-	PersonProfile(ctx context.Context, id int64) (PersonProfileRow, error)
+	PersonProfile(ctx context.Context, arg int64) (PersonProfileRow, error)
 }
 
 type WriteQuerier interface {

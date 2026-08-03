@@ -814,7 +814,7 @@ var errorConstructors = map[string]bool{"fmt.Errorf": true, "fmt.Sprintf": true,
 // statementComposer is the emitted function a query method hands its
 // text to. Its second argument is that text, and the guards below locate
 // the author's bytes through it rather than by the const's name, so the
-// emission is free to call the const whatever Unshadowed makes of it.
+// emission is free to call the const whatever QueryTextConst makes of it.
 const statementComposer = "q.cypherStmt"
 
 // argsEncoder is the emitted function a query method hands its bound

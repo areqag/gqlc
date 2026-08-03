@@ -1,25 +1,21 @@
 // Every parameter here is named after something an emitted method
-// resolves. The single-parameter form names its argument after the
-// parameter the author wrote, so each of these puts that name in the
-// scope the method's own identifiers resolve in.
+// resolves, and the invariant is that none of them reaches the emission:
+// the Go argument is `arg` whatever the query text says.
 //
-// The first group shadows a local the body declares. $stmt against a
-// STRING property is the silent one: the widths agree, so the
-// composition assigns the SQL text over the caller's argument and then
-// binds it as the value of $stmt. Nothing fails — the query looks for a
-// person named after its own statement.
+// The names cover the four things that scope holds — a local the body
+// declares, the package-level query-text const a body references and
+// never declares, what the signature itself binds, and a package-level
+// name the body resolves but no emitted declaration introduces (an
+// import, a decoder). The const-named ones reproduce their own const,
+// which derives from the method name; HelperShadow returns the entity so
+// the decoder is actually called, and names its parameter after that
+// decoder, which derives from the schema and so could never have been
+// held by a reserved-name list.
 //
-// The second group shadows the package-level query-text const, which a
-// body references and never declares. That one is worse: the const is a
-// string and the composer takes a string, so the caller's argument does
-// not merely get overwritten, it *becomes* the statement.
-// ConstShadowOne(ctx, "MATCH (n) DETACH DELETE n") would run that text
-// with no concatenation anywhere to find. The const name is derived from
-// the method name, so each of these is named to reproduce its own.
-//
-// Both cardinalities that reach the composition are in each group,
-// because a read and an :exec share it — and on the Neo4j targets they
-// are two separate reference sites.
+// The fixture is enrolled in all three targets so TestGoldenBuild
+// type-checks every one of these methods. That is the point of it: the
+// format gate parses the emission and does not type-check it, so a
+// capture that still parses is invisible everywhere else.
 
 // name: PersonByStmt :one
 MATCH (p:Person) WHERE p.name = $stmt RETURN p.name
@@ -50,3 +46,27 @@ MATCH (p:Person) WHERE p.name = $constShadowManyQueryText RETURN p.name
 
 // name: ConstShadowExec :exec
 MATCH (p:Person) WHERE p.name = $constShadowExecQueryText DELETE p
+
+// name: ReceiverShadow :one
+MATCH (p:Person) WHERE p.name = $q RETURN p.name
+
+// name: ContextShadow :one
+MATCH (p:Person) WHERE p.name = $ctx RETURN p.name
+
+// name: ImportShadow :one
+MATCH (p:Person) WHERE p.name = $fmt RETURN p.name
+
+// name: HelperShadow :one
+MATCH (p:Person) WHERE p.name = $decodePerson RETURN p
+
+// name: ErrShadow :one
+MATCH (p:Person) WHERE p.name = $err RETURN p.name
+
+// name: RecordsShadow :many
+MATCH (p:Person) WHERE p.name = $records RETURN p.name
+
+// name: OutShadow :many
+MATCH (p:Person) WHERE p.name = $out RETURN p.name
+
+// name: BlankShadow :one
+MATCH (p:Person) WHERE p.name = $_ RETURN p.name

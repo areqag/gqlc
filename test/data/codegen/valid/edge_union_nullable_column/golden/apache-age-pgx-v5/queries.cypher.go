@@ -16,12 +16,12 @@ RETURN r`
 //	MATCH (p:Person) WHERE p.id = $id
 //	OPTIONAL MATCH (p)-[r:AUTHORED|LIKES]->(:Post)
 //	RETURN r
-func (q *Queries) MaybeAction(ctx context.Context, id int64) (MaybeActionR, error) {
+func (q *Queries) MaybeAction(ctx context.Context, arg int64) (MaybeActionR, error) {
 	stmt, err := q.cypherStmt("$gqlc$", maybeActionQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
 	}
-	args, err := agtypeArgs(map[string]any{"id": id})
+	args, err := agtypeArgs(map[string]any{"id": arg})
 	if err != nil {
 		return nil, err
 	}

@@ -14,8 +14,8 @@ const markAdultsReturnNamesQueryText = `MATCH (p:Person) WHERE p.age >= $minAge 
 // MarkAdultsReturnNames executes the MarkAdultsReturnNames query.
 //
 //	MATCH (p:Person) WHERE p.age >= $minAge SET p.checked = true RETURN p.name AS name
-func (q *Queries) MarkAdultsReturnNames(ctx context.Context, minAge int64) ([]string, error) {
-	records, err := q.db.run(ctx, markAdultsReturnNamesQueryText, map[string]any{"minAge": minAge}, neo4j.AccessModeWrite)
+func (q *Queries) MarkAdultsReturnNames(ctx context.Context, arg int64) ([]string, error) {
+	records, err := q.db.run(ctx, markAdultsReturnNamesQueryText, map[string]any{"minAge": arg}, neo4j.AccessModeWrite)
 	if err != nil {
 		return nil, err
 	}

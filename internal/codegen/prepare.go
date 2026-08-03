@@ -899,9 +899,16 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 // reaches this sweep — this pass sees only names derived from the batch.
 // Marker method names (source 6's per-candidate satisfier) and
 // <methodName>QueryText consts are unexported and stay off the sweep
-// (§4.6 defence): a marker collision is caught by the interface-name
-// axis first, and a QueryText collision is caught by the method-name
-// axis first.
+// (§4.6 defence). A marker collision is caught by the interface-name axis
+// first. A QueryText collision is not, and the omission is a real hole:
+// the const shares the unexported namespace with source 2's
+// decode<Entity> helpers, which derive from schema labels rather than
+// from method names, so a node label FooQueryText alongside a query named
+// DecodeFoo emits decodeFooQueryText from both axes and neither insert
+// below sees the other. Generation exits 0 and go build reports the
+// redeclaration. The hole is gqlc-igs4: both colliding names are
+// generator-owned, so the capture guards — which police author-chosen
+// identifiers against generator-owned ones — are structurally blind to it.
 func sweepIdentifiers(entities []Entity, prepared []Query) error {
 	seen := make(map[string]string, len(entities)*2+len(prepared)*3)
 	insert := func(ident, source string) error {

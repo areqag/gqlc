@@ -5,7 +5,7 @@ package nullableparameter
 import "context"
 
 type ReadQuerier interface {
-	PeopleOverAge(ctx context.Context, minAge *int64) ([]string, error)
+	PeopleOverAge(ctx context.Context, arg *int64) ([]string, error)
 }
 
 type WriteQuerier interface {
