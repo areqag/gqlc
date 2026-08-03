@@ -135,6 +135,8 @@ dead, and that no dead site hides in it.
 | `ErrUnrepresentableWidth` | A list element whose leaf carries a property width the target's type table has no carrier for. Assembled: a `ResolvedList` over a `ResolvedProperty`, a shape `resolveType` has no arm for. Phase B repeats the walk over the element it splits off a schema LIST property; that element's width is one Phase Z has already passed. | Phase A |
 | `ErrOutOfC6Scope` | A column, or a list element leaf, referencing a node or edge type the schema does not declare. Assembled: the resolver resolves against the same schema Phase Z indexed and commits only declared types. | Phase A |
 | `ErrOutOfC6Scope` | An edge union with fewer than two candidates, or one naming a candidate the schema does not declare. Assembled: the resolver collapses a lone candidate to `ResolvedEdge` and commits only declared edges. | Phase A |
+| `ErrOutOfC6Scope` | A column whose resolved type matches no arm of the closed-sum switch. Assembled: the pointer form of a variant, `&resolver.ResolvedNode{}`. `resolver.ResolvedType`'s unexported marker seals it against *new implementations*, not against the pointer forms of the eight it has — the marker and every variant's `String` take value receivers, so `*ResolvedNode` satisfies the interface while `case resolver.ResolvedNode:` does not match it. Sixteen forms inhabit the sum; the switch names eight. The nil interface reaches this same arm and panics in the `String()` call inside the `return` rather than refusing (`gqlc-edze`); the pointer form is what pays this row's coverage. | Phase A |
+| `ErrOutOfC6Scope` | A list element whose resolved type matches no arm of `buildListElemPlan`'s switch. Assembled: the same pointer form under a `ResolvedList`, on the same argument — that switch names the same eight, and its arm carries the same nil panic. | Phase A |
 | `ErrUnrepresentableTemporal` | A list element whose temporal kind the target's type table has no carrier for. Assembled: a `resolver.Temporal` outside its own constant set, on the same footing as the out-of-set `Cardinality` above. No *query* reaches it, and would need a backend that both refuses a kind and serves list columns: only Apache AGE refuses a kind, and `age.rejectUnservedQueries` drops a query carrying a list column three lines before `age.generate` calls `codegen.Prepare`. Phase Z is not what stops it — Phase Z walks schema property widths, and a `collect(...)` element comes from an expression. | Phase A |
 | `ErrParamNameCollision` | Two parameters of one query mangling to one `Params` field. | Phase B |
 | `ErrRowFieldCollision` | Two columns of one query deriving one `Row` field. | Phase B |
@@ -145,29 +147,39 @@ dead, and that no dead site hides in it.
 
 Checks that carry a sentinel but that no schema, no query, no CLI option
 and no `Input` an out-of-package caller can assemble will fire — §5.1
-gives the full rule. Three reasons, and which one applies matters when
+gives the full rule. Two reasons, and which one applies matters when
 reading a fail-site:
 
 - **Shadowed.** An earlier check applies the same predicate to the same
   value, so the earlier one always answers first. The row names the
-  winner and the input it wins on.
+  winner and the input it wins on. Every row below is one of these.
 - **Total.** The branch is the default arm of a switch whose cases
-  already name every member of a sealed type, so only a value outside
-  that membership reaches it. The row names the type and the count.
-- **Faulting.** The branch *is* reached, but cannot return its sentinel:
-  an expression inside the `return` panics first. That is a bug, not a
-  property, and the row carries the bead tracking it.
+  already name every *inhabitant* of a closed sum, so no value of the
+  switched type reaches it. The row names the type and the count. No row
+  carries this today, and §5.1 step 5 says why the count is harder than
+  it looks: a Go interface sealed by an unexported marker is closed
+  against new implementations and not against the pointer forms of the
+  ones it has.
+
+A branch that *is* reached but faults before its `return` completes is
+neither. It is reached, so its row belongs in §2 with the input that
+reaches it, and the fault is a bug to file against that site — not a
+reason to record the branch as dead. A tag there measures the absence of
+a working test, which is the fail-open move this section exists to make
+expensive.
 
 An invariant a layer above merely *maintains* is not on that list, and
 this is the correction `gqlc-h4ug` made. `Input`, `NamedQuery` and every
 `resolver.Resolved*` variant are exported structs with exported fields,
 so a caller assembles one without going through the parser or the
 resolver at all; "the resolver would never build this" therefore says
-nothing about what a branch can be handed. Fourteen rows were measured
+nothing about what a branch can be handed. Sixteen rows were measured
 from outside the package, found live, and moved to §2 — thirteen resting
-on that argument, and one (`list-elem-temporal`) on a shadow that turned
-out to be a different backend's pre-gate and to cover the query path
-only.
+on that argument, one (`list-elem-temporal`) on a shadow that turned out
+to be a different backend's pre-gate and to cover the query path only,
+and two (`column-unknown-variant`, `list-elem-unknown-variant`) on a
+totality claim that counted the sum's eight declarations rather than its
+sixteen inhabitants.
 
 They are listed because §2 claims to carry every construct in each
 sentinel's catchment, and a reader matching a fail-site in `prepare.go`
@@ -203,10 +215,9 @@ names the row — that half the fence does hold.
 
 | Sentinel | Fail-site | Branch | Why it cannot fire |
 |---|---|---|---|
-| `ErrOutOfC6Scope` | `column-unknown-variant`, `list-elem-unknown-variant` | A column, or a list element, whose resolved type matches no arm of the closed sum. | **Faulting, not dead** — `gqlc-edze`, and the weakest row here. `resolver.ResolvedType` is sealed by an unexported method and has eight implementations, all eight of which both switches name, so a nil interface is the only value that falls through — and a caller produces one by leaving `Column.Type` unset, so both arms are entered. What does not happen is the refusal: each `return` calls `String()` on that nil and panics before the `fmt.Errorf` naming the sentinel is evaluated. The tag therefore measures the absence of a test nobody can usefully write, not the absence of an input. Both sites move to §2 when `gqlc-edze` lands; a case written before then turns the fence red, which is the correct answer and not a regression. |
-| `ErrOutOfC6Scope` | `param-type-invariant` | A parameter type Phase B admits only in its representable form. | Shadowed. Phase A's parameter loop applies the same `ResolvedProperty` type assertion to the same `q.Validated.Parameters` slice and refuses with the same sentinel, so a non-property parameter never reaches Phase B — measured: an assembled `Input` carrying a `ResolvedScalar` parameter returns Phase A's message, not this one. A nil parameter type also meets Phase A's assertion first, and panics there for `gqlc-edze`'s reason. |
+| `ErrOutOfC6Scope` | `param-type-invariant` | A parameter type Phase B admits only in its representable form. | Shadowed. `Prepare` runs `phaseAAdmit` unconditionally before `phaseBDerive`, and Phase A's parameter loop applies the same `ResolvedProperty` type assertion to the same `q.Validated.Parameters` slice, refusing with the same sentinel. That assertion admits the value form alone, so everything Phase B's would refuse — every other variant, every variant's pointer form, and the nil interface — meets Phase A's first. Measured: an assembled `Input` carrying a `ResolvedScalar` parameter returns Phase A's message, and so does one carrying a `*resolver.ResolvedProperty`. A nil parameter type reaches Phase A's site too and panics there (`gqlc-edze`); that is a fact about Phase A's fail-site, not a second reason this one is dead. |
 | `ErrAliasRequired` | `row-field-alias` | A column whose text yields no row-field name at derivation. | Shadowed. Phase A calls `rowFieldName` over the same `q.Validated.Columns` slice and refuses with the same sentinel and the same message. The two calls take one argument, `col.Name`, and `rowFieldName` is a pure function of it, so no column can be admitted by the first call and refused by the second. |
-| `ErrOutOfC6Scope` | `column-type-invariant` | A column type matching no arm of Phase B's plan switch. | Total, then shadowed. Phase B's switch names all eight members of the sealed `resolver.ResolvedType`, so only a nil reaches its default; and a nil meets Phase A's default arm first, where it panics (`gqlc-edze`). Unlike `column-unknown-variant` this site does not go live when that bead lands — Phase A answers either way. It goes live only if Phase B's switch loses an arm the sum still has, which is the deletion it fences. |
+| `ErrOutOfC6Scope` | `column-type-invariant` | A column type matching no arm of Phase B's plan switch. | Shadowed, exactly. `Prepare` runs `phaseAAdmit` unconditionally before `phaseBDerive`, and Phase A's column switch names the same eight variants Phase B's does over the same `q.Validated.Columns` slice — so whatever falls through Phase B's default falls through Phase A's, and Phase A answers first. That set is wider than the nil interface: `resolver.ResolvedType`'s marker and every variant's `String` take value receivers, so `*resolver.ResolvedNode` inhabits the sum and no `case resolver.ResolvedNode:` arm matches it. Measured: a `*resolver.ResolvedNode` column returns Phase A's message (the §2 `column-unknown-variant` row), and a nil column panics at that same Phase A site (`gqlc-edze`). This branch goes live only if Phase B's switch loses an arm Phase A's keeps, which is the deletion it fences. |
 
 ## 4. Declared and deliberately unreachable
 
@@ -253,7 +264,7 @@ guard their fields are this package's contract with its callers rather
 than internal invariants, and `internal/cli/pipeline` is not the only
 caller such a contract can have. It is what makes the zero-`Cardinality`
 row in §2 legitimate — a caller reaches it by leaving a field unset — and
-the same clause carries the fourteen rows `gqlc-h4ug` moved out of §3,
+the same clause carries the sixteen rows `gqlc-h4ug` moved out of §3,
 each reached by an `Input` no parse produces but any caller can build.
 A row of that kind names its reaching value in the "assembled" clause of
 its §2 entry, and its coverage is paid by
@@ -274,7 +285,10 @@ does or does not construct constrains the pipeline and not the contract.
 Thirteen §3 rows argued that way, and all thirteen fired the first time
 anyone assembled the value by hand. A fourteenth argued a shadow that
 held for queries and not for assembled `Input`s, which is the same
-mistake read from the other side.
+mistake read from the other side. Two more argued totality over a sum
+whose inhabitants they had undercounted, which is that mistake one level
+down: `resolver.ResolvedType`'s unexported marker is a fact about who may
+implement it, and the question is again what a caller can hand over.
 
 So the measurement is taken from outside the package.
 `TestSentinelTaxonomy` asks `go list -test` which packages' test
@@ -332,12 +346,23 @@ To classify a branch:
    which check wins, on what input, and why nothing can slip past the
    first and be caught by the second.
 5. If the branch is a default arm whose switch already names every
-   member of a sealed type, it is **total**. Say which type and how many
-   members, so a reader adding a ninth knows the arm is now live.
+   member of a sealed type, it is **total** — but count the type's
+   inhabitants, not its declarations. An interface sealed by an
+   unexported marker method is closed against new implementations and
+   *not* against the pointer forms of the ones it has: a variant whose
+   marker and `String` take value receivers is satisfied by `*Variant`
+   too, and a `case Variant:` arm does not match it, so an eight-variant
+   sum has sixteen inhabitants and a nil besides. Say which type, how
+   many inhabitants, and which arms cover them, so a reader who adds a
+   ninth variant — or a ninth arm — knows the count moved. If the count
+   does not come out total, the branch is not: fall back to 4, or write
+   the case that reaches it.
 6. If the branch runs but faults before its `return` completes, it is
-   **faulting** — a bug, not a classification. File it, cite the bead in
-   the row, and say what the row becomes once it lands.
-7. For 4, 5 and 6: tag the `return` with `//gqlc:unreachable <site>`, add
+   not a §3 row at all. It is reached, so it belongs in §2 with the input
+   that reaches it, and the fault is a bug to file against that site.
+   Tagging it records the absence of a working test as the absence of an
+   input, which is the fail-open move this section is built to price.
+7. For 4 and 5: tag the `return` with `//gqlc:unreachable <site>`, add
    a §3 row naming the same site, and write the "why" so it names the
    facts it depends on rather than asserting a conclusion. The fence
    holds tags and rows equal in both directions and holds both against

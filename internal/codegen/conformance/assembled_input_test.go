@@ -17,13 +17,17 @@ import (
 // hands to Generate directly, carrying a value no .gql schema, no
 // .cypher query and no CLI option produces.
 //
-// These rows sat in §3 until gqlc-h4ug, argued as "the resolver would
-// never build this". That argument is about the pipeline, and §5.1's
-// criterion is about the contract: Input, NamedQuery, ValidatedQuery,
-// Column and every resolver.Resolved* variant are exported structs with
-// exported fields, so what the resolver builds does not bound what a
-// caller can hand over. Each case below is one such hand-off, and every
-// one fired the first time it was written.
+// These rows sat in §3 until gqlc-h4ug, most of them argued as "the
+// resolver would never build this". That argument is about the pipeline,
+// and §5.1's criterion is about the contract: Input, NamedQuery,
+// ValidatedQuery, Column and every resolver.Resolved* variant are
+// exported structs with exported fields, so what the resolver builds does
+// not bound what a caller can hand over. The last two rows to move were
+// argued the same way one level down — a switch over resolver.ResolvedType
+// is not total because the interface is sealed, since the seal is against
+// new implementations and not against the pointer forms of the eight it
+// has. Each case below is one such hand-off, and every one fired the
+// first time it was written.
 //
 // The suite is the coverage §5 step 3 asks for on those rows, and it is
 // half of what TestSentinelTaxonomy measures: it links internal/codegen
@@ -53,20 +57,30 @@ func (s *AssembledInputSuite) SetupSuite() {
 // the case would measure the wrong refusal.
 const assembledTarget = "neo4j-go-v5"
 
-// temporalKinds is resolver.Temporal's declared membership, written out
-// so the list-elem-temporal case can name the first value past the end
-// rather than hard-coding one. It is also how that case stays honest if
-// the enum grows: a seventh member added upstream and not added here
-// would make Temporal(6) a declared kind, every backend carries those,
-// and the case would stop reaching its fail-site —
-// TestReachableBranchesAreReached names the site that went dark.
-var temporalKinds = []resolver.Temporal{
-	resolver.TemporalDate,
-	resolver.TemporalTime,
-	resolver.TemporalLocalTime,
-	resolver.TemporalDateTime,
-	resolver.TemporalLocalDateTime,
-	resolver.TemporalDuration,
+// temporalScanLimit bounds firstUndeclaredTemporal's scan. An enum that
+// outgrows it is one the list-elem-temporal case wants rewriting for, and
+// TestTemporalScanFindsTheEnumEnd is where that shows.
+const temporalScanLimit = 64
+
+// firstUndeclaredTemporal is the lowest resolver.Temporal past the end of
+// the declared enum, derived from the only membership signal the type
+// exports: Temporal is an int with no count and no iteration, so its
+// Stringer's default arm — which answers for every value the constant
+// block does not name — is what marks the end. The scan starts at 1
+// because TemporalDate is the zero value and shares that arm.
+//
+// Derived rather than mirrored. A written-out list of the six kinds read
+// through len() yields the same 6 and cannot disagree with the enum: add
+// a seventh kind upstream and the list still says six, so the case below
+// would name a declared kind and quietly stop testing what it claims to.
+func firstUndeclaredTemporal() resolver.Temporal {
+	undeclared := resolver.Temporal(-1).String() // no iota member is negative
+	for k := resolver.Temporal(1); k < temporalScanLimit; k++ {
+		if k.String() == undeclared {
+			return k
+		}
+	}
+	return -1
 }
 
 // probeSchema is the smallest schema that indexes one node type and one
@@ -113,7 +127,7 @@ func (s *AssembledInputSuite) TestAssembledInput() {
 		// name is the §3-style fail-site name the case reaches. It is
 		// not a tag any more — these sites carry no //gqlc:unreachable —
 		// but naming the site keeps a failing subtest pointing at one
-		// return statement rather than at one sentinel shared by seven.
+		// return statement rather than at one sentinel shared by eight.
 		name string
 		in   codegen.Input
 		is   error
@@ -200,6 +214,16 @@ func (s *AssembledInputSuite) TestAssembledInput() {
 			msg: `out of C6 scope: query "Fetch" column 0 "e" references unknown edge type Ghost -[:GHOSTED]-> Ghost`,
 		},
 		{
+			name: "column-unknown-variant",
+			why:  "The pointer form of a variant. resolver.ResolvedType is sealed against new implementations by an unexported marker method, but every variant declares that marker and String with value receivers, so *ResolvedNode satisfies the interface — while `case resolver.ResolvedNode:` does not match it. The same labels in their value form are admitted.",
+			in: codegen.Input{
+				Schema:  probeSchema(),
+				Queries: []codegen.NamedQuery{probeQuery(resolver.Column{Name: "n", Type: &resolver.ResolvedNode{Labels: "Person"}})},
+			},
+			is:  codegen.ErrOutOfC6Scope,
+			msg: `out of C6 scope: query "Fetch" column 0 "n" resolved as node`,
+		},
+		{
 			name: "param-width",
 			why:  "A parameter carrying a width no schema property declares. The resolver draws a parameter's ResolvedProperty from a schema property or from callProjectionType, and both yield widths Phase Z has passed.",
 			in: codegen.Input{
@@ -261,7 +285,7 @@ func (s *AssembledInputSuite) TestAssembledInput() {
 				Schema: probeSchema(),
 				Queries: []codegen.NamedQuery{probeQuery(resolver.Column{
 					Name: "xs",
-					Type: resolver.ResolvedList{Element: resolver.ResolvedTemporal{Kind: resolver.Temporal(len(temporalKinds))}},
+					Type: resolver.ResolvedList{Element: resolver.ResolvedTemporal{Kind: firstUndeclaredTemporal()}},
 				})},
 			},
 			is: codegen.ErrUnrepresentableTemporal,
@@ -297,6 +321,19 @@ func (s *AssembledInputSuite) TestAssembledInput() {
 			is:  codegen.ErrOutOfC6Scope,
 			msg: `query "Fetch" column 0 "xs": out of C6 scope: list element references unknown edge type Ghost -[:GHOSTED]-> Ghost`,
 		},
+		{
+			name: "list-elem-unknown-variant",
+			why:  "The same pointer form one level down: buildListElemPlan's switch names the same eight value forms, so the element falls past every arm.",
+			in: codegen.Input{
+				Schema: probeSchema(),
+				Queries: []codegen.NamedQuery{probeQuery(resolver.Column{
+					Name: "xs",
+					Type: resolver.ResolvedList{Element: &resolver.ResolvedNode{Labels: "Person"}},
+				})},
+			},
+			is:  codegen.ErrOutOfC6Scope,
+			msg: `query "Fetch" column 0 "xs": out of C6 scope: list element has unknown resolved type node`,
+		},
 	}
 
 	newGen, ok := s.backends.Lookup(assembledTarget)
@@ -308,13 +345,31 @@ func (s *AssembledInputSuite) TestAssembledInput() {
 			s.Nil(files, "a refused Input must emit nothing")
 			s.Require().Error(err, "reaching input: %s", tc.why)
 			s.Require().ErrorIs(err, tc.is)
-			// The exact message, not just the sentinel: seven of these
-			// sites share ErrOutOfC6Scope and two share a message with a
-			// site in another phase, so errors.Is alone cannot tell the
-			// suite which return answered.
+			// Change-detection on the user-facing text, and not what
+			// tells these cases apart: eight of them share
+			// ErrOutOfC6Scope, and the discriminator is
+			// TestReachableBranchesAreReached's line-level measurement,
+			// which names a distinct prepare.go line per case and
+			// reddens when one goes dark. What this pins is the wording,
+			// which is contract — list-elem-temporal's message names a
+			// kind the value is not, and that is the resolver's
+			// off-the-end Stringer showing through rather than a typo.
 			s.EqualError(err, tc.msg)
 		})
 	}
+}
+
+// TestTemporalScanFindsTheEnumEnd holds firstUndeclaredTemporal's scan
+// against the constant block's last member. The two read the enum by
+// different routes — the scan through Temporal.String's default arm, this
+// assertion through the name of the last declared kind — so they can
+// disagree, which is the point a list read through len() cannot serve. A
+// seventh kind added upstream moves the scan and not this line, and
+// list-elem-temporal learns here that the value it used to name is now a
+// kind the resolver declares.
+func (s *AssembledInputSuite) TestTemporalScanFindsTheEnumEnd() {
+	s.Equal(resolver.TemporalDuration+1, firstUndeclaredTemporal(),
+		"the scan and resolver.Temporal's constant block disagree about where the enum ends; if a kind was added, name it here and check that list-elem-temporal still reaches its fail-site")
 }
 
 // TestAgeGateAnswersBeforePrepare pins the claim §2's list-elem-temporal

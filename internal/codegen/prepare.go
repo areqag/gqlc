@@ -617,7 +617,6 @@ func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entity
 					return fmt.Errorf("query %q column %d %q: %w", q.Name, ci, col.Name, err)
 				}
 			default:
-				//gqlc:unreachable column-unknown-variant
 				return fmt.Errorf("%w: query %q column %d %q resolved as %s", ErrOutOfC6Scope, q.Name, ci, col.Name, col.Type.String())
 			}
 		}
@@ -1072,6 +1071,5 @@ func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex m
 		}
 		return &ListElem{Kind: ColumnList, GoType: "[]" + nested.GoType, Nested: nested}, nil
 	}
-	//gqlc:unreachable list-elem-unknown-variant
 	return nil, fmt.Errorf("%w: list element has unknown resolved type %s", ErrOutOfC6Scope, t.String())
 }

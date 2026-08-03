@@ -177,15 +177,18 @@ var (
 //
 // A handful of fail-sites in this package carry a sentinel but no
 // schema, query, CLI option or Input an out-of-package caller can
-// assemble reaches — shadowed by an earlier check applying the same
-// predicate to the same value, or the default arm of a switch already
-// naming every member of a sealed type. Each is tagged
+// assemble reaches: each is shadowed by an earlier check applying the
+// same predicate to the same value. Each is tagged
 // `//gqlc:unreachable <site>` above its return and recorded in
 // that document's §3 under the same site name, with the argument it
-// rests on. "The resolver would never build this" is not one of the
-// available arguments: Input, NamedQuery and every resolver.Resolved*
-// variant are exported structs with exported fields, so a caller
-// assembles one without the resolver's help. The tag is not a comment
+// rests on. Two arguments are not available there. "The resolver would
+// never build this" is about the pipeline: Input, NamedQuery and every
+// resolver.Resolved* variant are exported structs with exported fields,
+// so a caller assembles one without the resolver's help. "The switch
+// names every variant of a sealed interface" is about implementations:
+// the marker seals resolver.ResolvedType against new ones, not against
+// the pointer forms of the eight it has, which a `case Variant:` arm
+// does not match. The tag is not a comment
 // the fence trusts: TestSentinelTaxonomy runs the corpus under coverage
 // of this package and fails if a tagged branch executes, so tagging a
 // branch anything reaches turns the suite red rather than silencing it.
