@@ -317,10 +317,12 @@ const unionColumnTypeArm = " projects "
 // Every branch's column list must equal branch 0's index-wise on count, name,
 // and type (strict Go-value equality; no lattice widening across branches).
 //
-// All three arms lead with the branch that failed the comparison and name
-// branch 0 second. The direction is arbitrary; the consistency is not, because
-// one error that reads in two directions makes the reader re-derive which
-// number is the culprit on every arm.
+// All three arms name the failing side of the comparison before branch 0. The
+// count and name arms lead with it outright; the type arm leads with the column,
+// which is the one thing the two branches agree on, and then gives the failing
+// branch's projection first. The direction is arbitrary; the consistency is not,
+// because one error that reads in two directions makes the reader re-derive
+// which number is the culprit on every arm.
 func compareBranchColumns(branchCols [][]Column) error {
 	if len(branchCols) < 2 {
 		return nil
