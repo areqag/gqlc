@@ -11,8 +11,11 @@ import (
 
 // Reading corresponds to the Reading node type.
 type Reading struct {
+	Codes  []int32
 	Flags  *[]bool
+	Grid   *[][]int16
 	Id     int64
+	Marks  *[]string
 	Matrix *[][]float32
 	Ranks  *[]int32
 	Tags   *[]string
@@ -22,6 +25,19 @@ type Reading struct {
 // enforcing per-property nullability against the schema.
 func decodeReading(node dbtype.Node) (Reading, error) {
 	var out Reading
+	value0, err := neo4j.GetProperty[[]any](node, "codes")
+	if err != nil {
+		return Reading{}, fmt.Errorf("decode Reading.Codes: %w", err)
+	}
+	value0s := make([]int32, 0, len(value0))
+	for i0, elem0 := range value0 {
+		v0, ok := elem0.(int64)
+		if !ok {
+			return Reading{}, fmt.Errorf("decode Reading.Codes: property %q element %d: expected int64, got %T", "codes", i0, elem0)
+		}
+		value0s = append(value0s, int32(v0))
+	}
+	out.Codes = value0s
 	if v, ok := node.Props["flags"]; ok {
 		s, ok := v.([]any)
 		if !ok {
@@ -37,11 +53,49 @@ func decodeReading(node dbtype.Node) (Reading, error) {
 		}
 		out.Flags = &narrowed
 	}
-	value1, err := neo4j.GetProperty[int64](node, "id")
+	if v, ok := node.Props["grid"]; ok {
+		s, ok := v.([]any)
+		if !ok {
+			return Reading{}, fmt.Errorf("decode Reading.Grid: property %q: expected []any, got %T", "grid", v)
+		}
+		narrowed := make([][]int16, 0, len(s))
+		for i0, elem0 := range s {
+			nested0, ok := elem0.([]any)
+			if !ok {
+				return Reading{}, fmt.Errorf("decode Reading.Grid: property %q element %d: expected []any, got %T", "grid", i0, elem0)
+			}
+			acc0 := make([]int16, 0, len(nested0))
+			for i1, elem1 := range nested0 {
+				v1, ok := elem1.(int64)
+				if !ok {
+					return Reading{}, fmt.Errorf("decode Reading.Grid: property %q element %d: expected int64, got %T", "grid", i1, elem1)
+				}
+				acc0 = append(acc0, int16(v1))
+			}
+			narrowed = append(narrowed, acc0)
+		}
+		out.Grid = &narrowed
+	}
+	value3, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Reading{}, fmt.Errorf("decode Reading.Id: %w", err)
 	}
-	out.Id = value1
+	out.Id = value3
+	if v, ok := node.Props["marks"]; ok {
+		s, ok := v.([]any)
+		if !ok {
+			return Reading{}, fmt.Errorf("decode Reading.Marks: property %q: expected []any, got %T", "marks", v)
+		}
+		narrowed := make([]string, 0, len(s))
+		for i0, elem0 := range s {
+			v0, ok := elem0.(string)
+			if !ok {
+				return Reading{}, fmt.Errorf("decode Reading.Marks: property %q element %d: expected string, got %T", "marks", i0, elem0)
+			}
+			narrowed = append(narrowed, v0)
+		}
+		out.Marks = &narrowed
+	}
 	if v, ok := node.Props["matrix"]; ok {
 		s, ok := v.([]any)
 		if !ok {

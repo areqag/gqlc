@@ -10,18 +10,20 @@ import (
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
-const readingColumnsQueryText = `MATCH (r:Reading) RETURN r.tags AS tags, r.ranks AS ranks, r.flags AS flags, r.matrix AS matrix`
+const readingColumnsQueryText = `MATCH (r:Reading) RETURN r.tags AS tags, r.ranks AS ranks, r.flags AS flags, r.matrix AS matrix, r.marks AS marks, r.grid AS grid`
 
 type ReadingColumnsRow struct {
 	Tags   *[]string
 	Ranks  *[]int32
 	Flags  *[]bool
 	Matrix *[][]float32
+	Marks  *[]string
+	Grid   *[][]int16
 }
 
 // ReadingColumns executes the ReadingColumns query.
 //
-//	MATCH (r:Reading) RETURN r.tags AS tags, r.ranks AS ranks, r.flags AS flags, r.matrix AS matrix
+//	MATCH (r:Reading) RETURN r.tags AS tags, r.ranks AS ranks, r.flags AS flags, r.matrix AS matrix, r.marks AS marks, r.grid AS grid
 func (q *Queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, error) {
 	records, err := q.db.run(ctx, readingColumnsQueryText, nil, neo4j.AccessModeRead)
 	if err != nil {
@@ -106,6 +108,48 @@ func (q *Queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, erro
 			value3Ptr = &acc
 		}
 		row.Matrix = value3Ptr
+		value4, isNil, err := neo4j.GetRecordValue[[]any](record, "marks")
+		if err != nil {
+			return nil, fmt.Errorf("ReadingColumns: decode column %q: %w", "marks", err)
+		}
+		var value4Ptr *[]string
+		if !isNil {
+			acc := make([]string, 0, len(value4))
+			for i, elem := range value4 {
+				v, ok := elem.(string)
+				if !ok {
+					return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected string, got %T", "marks", i, elem)
+				}
+				acc = append(acc, v)
+			}
+			value4Ptr = &acc
+		}
+		row.Marks = value4Ptr
+		value5, isNil, err := neo4j.GetRecordValue[[]any](record, "grid")
+		if err != nil {
+			return nil, fmt.Errorf("ReadingColumns: decode column %q: %w", "grid", err)
+		}
+		var value5Ptr *[][]int16
+		if !isNil {
+			acc := make([][]int16, 0, len(value5))
+			for i, elem := range value5 {
+				inner, ok := elem.([]any)
+				if !ok {
+					return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected []any, got %T", "grid", i, elem)
+				}
+				innerAcc := make([]int16, 0, len(inner))
+				for i, elem4 := range inner {
+					v, ok := elem4.(int64)
+					if !ok {
+						return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected int64, got %T", "grid", i, elem4)
+					}
+					innerAcc = append(innerAcc, int16(v))
+				}
+				acc = append(acc, innerAcc)
+			}
+			value5Ptr = &acc
+		}
+		row.Grid = value5Ptr
 		out = append(out, row)
 	}
 	return out, nil

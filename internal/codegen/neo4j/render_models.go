@@ -70,7 +70,15 @@ func renderModels(pkg string, entities []codegen.Entity, prepared []codegen.Quer
 			if !f.Nullable {
 				anyNonNull = true
 			}
-			if f.GoType == "time.Time" {
+			// A list property names its leaf type, not its slice
+			// type, so an exact "time.Time" match misses
+			// LIST<TIMESTAMP> ([]time.Time) and its nestings and
+			// emits a struct field plus a decode assertion against
+			// an unimported package. goTypeNeedsImports strips the
+			// "[]" prefixes to the leaf; the dbtype half of its
+			// answer is discarded because this file's dbtype import
+			// is unconditional.
+			if _, needTime := goTypeNeedsImports(f.GoType); needTime {
 				anyTime = true
 			}
 		}
