@@ -114,10 +114,10 @@ func rejectUnservedQueries(queries []codegen.NamedQuery) error {
 // parser has no '|' in a relationship detail — it answers one with
 // `ERROR: syntax error at or near "|"`, SQLSTATE 42601, whatever
 // surrounds it (verified against the image test/data/codegen pins;
-// TestAGERefusesRelationshipTypeAlternation re-measures it on every live
-// run and fails when it stops holding) — and generated code runs the
-// author's query text verbatim (ADR 0005). So the offending thing is the
-// text, and the predicate reads the text.
+// TestAGERefusesRelationshipTypeAlternation re-measures it on every run
+// of the AGE live half and fails when it stops holding) — and generated
+// code runs the author's query text verbatim (ADR 0005). So the
+// offending thing is the text, and the predicate reads the text.
 //
 // It is a separate gate from rejectUnservedQueries and not a column
 // reason inside it, because most of what it catches reaches no column.
@@ -211,12 +211,13 @@ func unservedReason(q codegen.NamedQuery) string {
 // has no '|' in its relationship detail — it answers such a pattern with
 // `ERROR: syntax error at or near "|"`, SQLSTATE 42601, whatever
 // surrounds it (verified against the image test/data/codegen pins;
-// TestAGERefusesRelationshipTypeAlternation re-measures it on every live
-// run and fails when it stops holding). Generated code runs the author's
-// query text verbatim (ADR 0005), so emitting for the column would
-// produce a package that compiles and whose every call is a server-side
-// syntax error. Refusing here turns that into an answer the author gets
-// from `gqlc generate`.
+// TestAGERefusesRelationshipTypeAlternation re-measures it on every run
+// of the AGE live half and fails when it stops holding). Generated code
+// runs the author's query text verbatim (ADR 0005), so emitting for the
+// column would produce a package that compiles and whose every call is a
+// server-side syntax error. Refusing here turns that into an answer the
+// author gets from `gqlc generate` — for this column shape. The text
+// shapes that reach no such column are rejectRelationshipTypeAlternation's.
 //
 // The labels are named as what they are — the candidates the schema
 // declares for the pattern — and no alternation is quoted back, because

@@ -172,10 +172,16 @@ test-codegen-live:
 # could move either invalidates it. What a cache hit cannot re-check is the
 # container runtime underneath, which is not a property of this repo.
 #
-# The AGE half takes -count=1 for a reason that does not apply here: it carries
-# TestAGERefusesRelationshipTypeAlternation, which measures a fact about a
-# server's parser rather than about anything in the binary, on a cadence. A
-# cached pass would report a measurement nobody took.
+# That argument covers this half's server facts too, and it does have them —
+# edgeUnionDispatch asserts what a live neo4j returns for a relationship type
+# outside the candidate set. A digest-pinned image makes those as cacheable as
+# anything else compiled in.
+#
+# It would equally cover the AGE half, whose image is pinned the same way in
+# live_age_test.go, so that half's -count=1 does not follow from
+# TestAGERefusesRelationshipTypeAlternation being a measurement. It rests on the
+# reason given at that recipe instead: nightly and manual are its only runs. The
+# asymmetry errs safe and is left standing.
 test-codegen-live-neo4j:
     cd test/data/codegen && go test -tags codegen_live -run TestLiveSmoke -skip 'TestLiveSmoke/apache-age' ./...
 
