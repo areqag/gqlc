@@ -2,6 +2,7 @@ package age_test
 
 import (
 	"bytes"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -419,8 +420,39 @@ func (s *EmissionSuite) TestRejectsMultiLabelSchema() {
 }
 
 // ageIdentifiers are the extension-owned names that must never appear
-// unqualified.
-var ageIdentifiers = []string{"agtype", "cypher(", "create_graph", "drop_graph", "ag_graph"}
+// unqualified. Each matches on a word boundary: a longer name that
+// merely begins with one is a different name, which AGE neither owns nor
+// resolves through the search_path — a query parameter called
+// $agtypeArgs reaches an emitted map key spelled exactly that.
+//
+// agtype carries an optional snake_case tail because ag_catalog owns a
+// whole family under that stem, not just the type: agtype_build_map,
+// agtype_build_list, agtype_access_operator, the agtype_typecast_* arms,
+// agtype_in and agtype_out. Every one of them resolves through the
+// search_path exactly as the bare type does, and `_` is a word
+// character, so a bare \bagtype\b would let the whole family through —
+// the boundary never fires between agtype and _build_map. The tail is
+// what keeps the false positive out rather than trading it back: AGE's
+// C-level names are all snake_case and the trailing \b has to fire, so
+// the camelCase agtypeArgs matches neither arm.
+//
+// A snake_case name the author chose does reach this — $agtype_args is a
+// legal parameter name and the args encoder keys its map on the author's
+// spelling — which is why keepServerText cuts those keys out of the
+// region alongside the query text. The pattern judges spelling; the
+// region judges provenance, and this family needs both.
+//
+// The array type is spelled agtype[] in SQL, which the bare arm matches
+// on the boundary before the bracket. Its pg_type-internal name _agtype
+// is not matched and does not need to be: no emitter composes a type
+// name out of pg_type, so that spelling is unreachable in emitted SQL.
+var ageIdentifiers = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\bagtype(_\w+)?\b`),
+	regexp.MustCompile(`(?i)\bcypher\(`),
+	regexp.MustCompile(`(?i)\bcreate_graph\b`),
+	regexp.MustCompile(`(?i)\bdrop_graph\b`),
+	regexp.MustCompile(`(?i)\bag_graph\b`),
+}
 
 // qualifier matches both spellings PostgreSQL accepts for the schema
 // prefix, case-insensitively — an unquoted identifier folds to lower
@@ -459,9 +491,12 @@ func (s *EmissionSuite) TestEveryAgeIdentifierIsSchemaQualified() {
 			if err != nil {
 				continue
 			}
+			qualified := 0
 			for _, f := range files {
-				s.assertQualified(fixture+"/"+f.Path, string(f.Contents))
+				qualified += s.assertQualified(fixture+"/"+f.Path, string(f.Contents))
 			}
+			s.Require().Positive(qualified,
+				"%s: the sweep found no AGE identifier at all, so it proved nothing about this emission", fixture)
 			swept++
 		}
 	}
@@ -470,28 +505,246 @@ func (s *EmissionSuite) TestEveryAgeIdentifierIsSchemaQualified() {
 	goldens, err := filepath.Glob(filepath.Join(corpusRoot, "valid", "*", "golden", ageTarget, "*.go"))
 	s.Require().NoError(err)
 	s.Require().NotEmpty(goldens, "no golden files committed for target %s", ageTarget)
+	qualified := 0
 	for _, path := range goldens {
 		body, err := os.ReadFile(path)
 		s.Require().NoError(err)
-		s.assertQualified(path, string(body))
+		qualified += s.assertQualified(path, string(body))
+	}
+	s.Require().Positive(qualified, "the sweep found no AGE identifier in the whole golden tree")
+}
+
+// sweptWitnesses are qualified occurrences the emission is known to
+// place, per file that carries any SQL at all. They are spelled here
+// rather than read off the emission, so the region and the bytes it has
+// to hold cannot drift together.
+var sweptWitnesses = map[string][]string{
+	"db.go":       {"ag_catalog.cypher("},
+	"graph.go":    {"'1'::ag_catalog.agtype", "ag_catalog.create_graph", "ag_catalog.drop_graph", "ag_catalog.ag_graph"},
+	"q.cypher.go": {"ag_catalog.agtype"},
+}
+
+// TestTheSweptRegionStillHoldsWhatItPolices is the qualification sweep's
+// own guard. The sweep judges a region rather than a file — comments,
+// error prose and the author's query text are all cut out of it — and
+// every cut is one edit away from cutting everything, at which point the
+// sweep passes vacuously and the defect it exists to catch ships. So the
+// region is held to still carrying the qualified occurrences the
+// emission is known to place, named here by their bytes.
+func (s *EmissionSuite) TestTheSweptRegionStillHoldsWhatItPolices() {
+	files := s.emitReadBatch()
+	for path, witnesses := range sweptWitnesses {
+		s.Require().Contains(files, path)
+		region := s.keepServerText(path, files[path])
+		s.Require().NotEmpty(strings.TrimSpace(region), "%s: the swept region is empty", path)
+		for _, w := range witnesses {
+			s.Require().Contains(region, w,
+				"%s: the swept region no longer holds the emission's own %q", path, w)
+		}
+		s.Require().Positive(s.assertQualified(path, files[path]),
+			"%s: the sweep found no AGE identifier in a file that carries SQL", path)
+	}
+	// Closing the table the other way keeps it from going stale: a file
+	// that acquires SQL has to be named above, or it could be emptied out
+	// of the region with nothing to notice.
+	for path := range files {
+		if _, named := sweptWitnesses[path]; named {
+			continue
+		}
+		s.Require().Zero(s.assertQualified(path, files[path]),
+			"%s carries an AGE identifier but names no witness", path)
 	}
 }
 
-func (s *EmissionSuite) assertQualified(label, body string) {
-	body = s.keepServerText(label, body)
-	hay := strings.ToLower(body)
-	for _, ident := range ageIdentifiers {
-		for off := 0; ; {
-			i := strings.Index(hay[off:], ident)
-			if i < 0 {
-				break
+// TestTheSweepJudgesGeneratedIdentifiersOnly holds the qualification
+// sweep to text the generator chose. An author's query text is copied
+// into the emission verbatim (ADR 0005) and an author's parameter name
+// reaches an emitted identifier and an emitted map key, so both can put
+// AGE's own spellings in front of the sweep — and neither is the
+// generator's to qualify. A guard that reddens on them turns a legal
+// batch into a build failure.
+func (s *EmissionSuite) TestTheSweepJudgesGeneratedIdentifiersOnly() {
+	cases := []struct {
+		name  string
+		param string
+		text  string
+	}{
+		{
+			name:  "a parameter name an AGE identifier prefixes",
+			param: "agtypeArgs",
+			text:  "MATCH (p:Person) RETURN p.name\n",
+		},
+		{
+			name:  "query text naming an AGE identifier",
+			param: "id",
+			text:  "MATCH (p:Person) WHERE p.agtype = 'v' RETURN p.name\n",
+		},
+		{
+			name:  "both, as the author who hits this writes it",
+			param: "agtypeArgs",
+			text:  "MATCH (p:Person) WHERE p.agtype = $agtypeArgs RETURN p.name\n",
+		},
+		{
+			name:  "a snake_case parameter name an AGE function prefixes",
+			param: "agtype_args",
+			text:  "MATCH (p:Person) WHERE p.id = $agtype_args RETURN p.name\n",
+		},
+		{
+			name:  "a parameter named for the family, spelled as AGE spells it",
+			param: "agtype_build_map",
+			text:  "MATCH (p:Person) WHERE p.id = $agtype_build_map RETURN p.name\n",
+		},
+	}
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			q := servedQuery
+			q.SourceText = tc.text
+			q.Validated.Parameters = []resolver.ResolvedParameter{
+				{Name: tc.param, Type: resolver.ResolvedProperty{Type: graph.TypeInt}},
 			}
-			at := off + i
-			s.Require().Truef(qualifier.MatchString(body[:at]),
-				"%s: %q at offset %d is not schema-qualified: %q", label, ident, at, window(body, at))
-			off = at + len(ident)
+			in := s.in
+			in.Queries = []codegen.NamedQuery{q}
+			files, err := age.New().Generate(in)
+			s.Require().NoError(err)
+			qualified := 0
+			for _, f := range files {
+				qualified += s.assertQualified(f.Path, string(f.Contents))
+			}
+			s.Require().Positive(qualified, "the sweep found no AGE identifier at all")
+		})
+	}
+}
+
+// agCatalogOwned is every ag_catalog-owned spelling that reaches, or
+// could reach, this backend's emitted SQL, written as SQL writes it. The
+// emission composes the first group today — the type, the record shape's
+// column type, the statement wrapper and the graph lifecycle. The
+// agtype_* group it does not, and that is exactly why the group is here:
+// each is a function ag_catalog owns and the search_path resolves, so
+// the first emitter to reach for one must find the sweep already
+// waiting. A guard whose reach is the current emission's reach only ever
+// catches what is already caught.
+//
+// The array type appears as agtype[], which is how SQL spells it. Its
+// pg_type-internal name _agtype is deliberately absent: nothing composes
+// a type name out of pg_type, so no emitter can produce that spelling.
+var agCatalogOwned = []string{
+	"agtype",
+	"agtype[]",
+	"agtype_build_map(",
+	"agtype_build_list(",
+	"agtype_access_operator(",
+	"agtype_typecast_numeric(",
+	"agtype_in(",
+	"agtype_out(",
+	"cypher(",
+	"create_graph(",
+	"drop_graph(",
+	"ag_graph",
+}
+
+// TestTheSweepRecognisesEveryAgCatalogOwnedSpelling pins the sweep's
+// recall. The sweep matches on a word boundary so that a name merely
+// beginning with an AGE identifier is a different name, and `_` is a
+// word character — so the boundary that keeps agtypeArgs out also keeps
+// agtype_build_map out unless the pattern says otherwise. That failure
+// is silent: the sweep reports nothing and passes, and an unqualified
+// agtype_build_map ships to resolve against whatever search_path the
+// caller happens to hold.
+//
+// So each spelling is planted twice in a file shaped like an emission —
+// once bare, where the sweep has to name it, and once qualified, where
+// the sweep has to accept it and count it. Narrowing the agtype pattern
+// back to \bagtype\b reddens the bare half of every agtype_* row for the
+// reason that matters: the sweep does not see the identifier at all.
+func (s *EmissionSuite) TestTheSweepRecognisesEveryAgCatalogOwnedSpelling() {
+	for _, name := range agCatalogOwned {
+		s.Run(name, func() {
+			planted := func(prefix string) string {
+				return "package p\n\nconst stmt = \"SELECT " + prefix + name + " FROM t\"\n"
+			}
+
+			unqualified, qualified := s.sweep("planted.go", planted(""))
+			s.Require().Len(unqualified, 1,
+				"the sweep does not recognise the unqualified %q", name)
+			s.Require().Zero(qualified)
+
+			unqualified, qualified = s.sweep("planted.go", planted("ag_catalog."))
+			s.Require().Empty(unqualified,
+				"the sweep rejects %q even qualified", name)
+			s.Require().Equal(1, qualified,
+				"the sweep does not count the qualified %q", name)
+		})
+	}
+}
+
+// notAgCatalogOwned are spellings the sweep must let through: a name that
+// merely begins with, ends with or contains an AGE identifier is a
+// different name, which ag_catalog neither owns nor resolves. The first
+// three are the emitted helpers themselves — Go declarations no parser
+// but Go's sees, and names a query parameter can be spelled after, which
+// is how $agtypeArgs turned a legal batch into a build failure.
+var notAgCatalogOwned = []string{
+	"agtypeArgs",
+	"agtypeString",
+	"agtypeEntity",
+	"myagtype",
+	"cypherStmt(",
+	"create_graphql(",
+}
+
+// TestTheSweepPassesNamesAgCatalogDoesNotOwn is the recall table's
+// mirror, and it is what holds the word boundaries in place. Every
+// exclusion keepServerText applies is a second line of defence for the
+// boundaries, so once the author's parameter names leave the region the
+// boundaries can be deleted from the pattern with every emission test
+// still green — there is nothing left in the region for them to save.
+// Planting the near misses directly leaves the pattern answerable for
+// its own precision whatever the region happens to hold.
+func (s *EmissionSuite) TestTheSweepPassesNamesAgCatalogDoesNotOwn() {
+	for _, name := range notAgCatalogOwned {
+		s.Run(name, func() {
+			body := "package p\n\nconst stmt = \"SELECT " + name + " FROM t\"\n"
+			unqualified, qualified := s.sweep("planted.go", body)
+			s.Require().Empty(unqualified,
+				"the sweep demands a qualifier on %q, which ag_catalog does not own", name)
+			s.Require().Zero(qualified,
+				"the sweep counts %q as an AGE identifier it accepted", name)
+		})
+	}
+}
+
+// sweep reports body's swept region: the AGE identifiers in it carrying
+// no ag_catalog qualifier, each already written out as the failure a
+// caller would print, and the count of those that carried one.
+//
+// It is separate from assertQualified so that the sweep's own recall can
+// be tested — an assertion that stops the test cannot be asked whether
+// it fired.
+func (s *EmissionSuite) sweep(label, body string) (unqualified []string, qualified int) {
+	region := s.keepServerText(label, body)
+	for _, ident := range ageIdentifiers {
+		for _, at := range ident.FindAllStringIndex(region, -1) {
+			if qualifier.MatchString(region[:at[0]]) {
+				qualified++
+				continue
+			}
+			unqualified = append(unqualified, fmt.Sprintf("%q at offset %d is not schema-qualified: %q",
+				region[at[0]:at[1]], at[0], window(region, at[0])))
 		}
 	}
+	return unqualified, qualified
+}
+
+// assertQualified requires every AGE identifier in body's swept region
+// to carry an ag_catalog qualifier, and returns how many it accepted. A
+// caller that gets zero has swept a region proving nothing.
+func (s *EmissionSuite) assertQualified(label, body string) int {
+	unqualified, qualified := s.sweep(label, body)
+	for _, u := range unqualified {
+		s.Require().Fail("unqualified AGE identifier", "%s: %s", label, u)
+	}
+	return qualified
 }
 
 // blankComments overwrites every comment with spaces, preserving byte
@@ -513,21 +766,38 @@ func (s *EmissionSuite) blankComments(label, body string) string {
 // errorConstructors build a value whose string is read by a person.
 var errorConstructors = map[string]bool{"fmt.Errorf": true, "fmt.Sprintf": true, "errors.New": true}
 
+// statementComposer is the emitted function a query method hands its
+// text to. Its second argument is that text, and the guards below locate
+// the author's bytes through it rather than by the const's name, so the
+// emission is free to call the const whatever Unshadowed makes of it.
+const statementComposer = "q.cypherStmt"
+
+// argsEncoder is the emitted function a query method hands its bound
+// parameters to. Its only argument is the map literal, whose keys are
+// the names the author wrote after the dollar sign, so the guards below
+// locate those bytes through the call site on the same terms.
+const argsEncoder = "agtypeArgs"
+
 // keepServerText reduces an emitted file to the string literals that
-// reach a parser: literals stay where they are, so a lookbehind still
-// reads the bytes preceding a needle inside its own literal and cannot
-// run off into the declaration around it, and everything else — syntax,
-// comments, and the literals building error text — becomes blanks.
+// reach a parser as the generator's own: literals stay where they are,
+// so a lookbehind still reads the bytes preceding a needle inside its
+// own literal and cannot run off into the declaration around it, and
+// everything else — syntax, comments, the literals building error text,
+// and the author's query text — becomes blanks.
 //
-// The two exclusions are the two ways a name can appear without being a
-// name. A Go declaration called after an agtype helper is an identifier
-// no parser but Go's sees, and an error explaining that a value is not
-// an agtype string has to be free to say so.
+// The exclusions are the ways a name can appear in an emitted file
+// without being a name the generator chose. A Go declaration called
+// after an agtype helper is an identifier no parser but Go's sees; an
+// error explaining that a value is not an agtype string has to be free
+// to say so; and a query's text and its parameter names are copied
+// through verbatim (ADR 0005), so whatever they spell is the author's
+// and not this emission's to qualify.
 func (s *EmissionSuite) keepServerText(label, body string) string {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, label, body, parser.SkipObjectResolution)
 	s.Require().NoError(err, "emitted file %s does not parse", label)
 	offset := func(p token.Pos) int { return fset.Position(p).Offset }
+	verbatim := verbatimAuthorText(f)
 
 	var prose [][2]int
 	ast.Inspect(f, func(n ast.Node) bool {
@@ -543,7 +813,7 @@ func (s *EmissionSuite) keepServerText(label, body string) string {
 	blank(kept, 0, len(kept))
 	ast.Inspect(f, func(n ast.Node) bool {
 		lit, ok := n.(*ast.BasicLit)
-		if !ok || lit.Kind != token.STRING {
+		if !ok || lit.Kind != token.STRING || verbatim[lit] {
 			return true
 		}
 		from, to := offset(lit.Pos()), offset(lit.End())
@@ -556,6 +826,89 @@ func (s *EmissionSuite) keepServerText(label, body string) string {
 		return true
 	})
 	return string(kept)
+}
+
+// verbatimAuthorText identifies the literals the emission copies from
+// the author rather than composes. There are two: whatever the statement
+// composer is handed as its text argument, whether that is the literal
+// itself or the package-level const the emission binds it to; and the
+// keys of the map literal the args encoder is handed, which are the
+// names the author wrote after the dollar sign so that what AGE
+// substitutes is what the author wrote.
+//
+// The parameter names matter for the same reason the query text does and
+// no boundary rule reaches them: a GQL name may hold underscores, so an
+// author is free to bind $agtype_args, and that spelling is
+// indistinguishable from ag_catalog's own snake_case family by shape
+// alone. Provenance is the only thing that separates them.
+//
+// Resolution is by reference from the call site and stops at the file,
+// which is where both the const and its only caller are emitted; a name
+// neither composer reads stays in the swept region however it is
+// spelled.
+func verbatimAuthorText(f *ast.File) map[*ast.BasicLit]bool {
+	bound := make(map[string]*ast.BasicLit)
+	for _, decl := range f.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			vs, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			for i, name := range vs.Names {
+				if i >= len(vs.Values) {
+					continue
+				}
+				if lit, ok := vs.Values[i].(*ast.BasicLit); ok && lit.Kind == token.STRING {
+					bound[name.Name] = lit
+				}
+			}
+		}
+	}
+
+	out := make(map[*ast.BasicLit]bool)
+	ast.Inspect(f, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		switch types.ExprString(call.Fun) {
+		case statementComposer:
+			if len(call.Args) < 2 {
+				return true
+			}
+			switch arg := call.Args[1].(type) {
+			case *ast.Ident:
+				if lit := bound[arg.Name]; lit != nil {
+					out[lit] = true
+				}
+			case *ast.BasicLit:
+				out[arg] = true
+			}
+		case argsEncoder:
+			if len(call.Args) < 1 {
+				return true
+			}
+			m, ok := call.Args[0].(*ast.CompositeLit)
+			if !ok {
+				return true
+			}
+			for _, elt := range m.Elts {
+				kv, ok := elt.(*ast.KeyValueExpr)
+				if !ok {
+					continue
+				}
+				if key, ok := kv.Key.(*ast.BasicLit); ok && key.Kind == token.STRING {
+					out[key] = true
+				}
+			}
+		}
+		return true
+	})
+	return out
 }
 
 // blank overwrites b[from:to] with spaces, leaving newlines in place so
@@ -698,10 +1051,10 @@ func (s *EmissionSuite) TestTheGraphNameReachesTheServerThroughOneCheck() {
 // emitReadBatch generates the skeleton schema carrying one served query,
 // so the sweeps above see the read path's files as well as the lifecycle
 // ones. Keyed by path, as SetupSuite keys the query-free emission.
-func (s *EmissionSuite) emitReadBatch(opts ...age.Option) map[string]string {
+func (s *EmissionSuite) emitReadBatch() map[string]string {
 	in := s.in
 	in.Queries = []codegen.NamedQuery{servedQuery}
-	files, err := age.New(opts...).Generate(in)
+	files, err := age.New().Generate(in)
 	s.Require().NoError(err)
 	out := make(map[string]string, len(files))
 	for _, f := range files {
