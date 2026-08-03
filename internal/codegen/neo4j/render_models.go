@@ -23,8 +23,11 @@ import (
 //
 //   - dbtype: unconditional (decode helpers take dbtype.Node /
 //     dbtype.Relationship)
-//   - fmt iff any property is decoded (decode-error wrapping)
-//   - neo4j iff any non-nullable property is decoded (neo4j.GetProperty[T])
+//   - fmt iff any decode can fail, which every property can except a
+//     nullable one of no declared shape: that arm is a Props lookup
+//     whose miss is the schema's null, not an error to report
+//   - neo4j iff any non-nullable property of a declared shape is decoded
+//     (neo4j.GetProperty[T]); a property typed `any` never reaches it
 //
 // EdgeUnion emission adds no new import (the interface + marker methods
 // live in this package; no cross-package reference emerges). A schema
@@ -165,9 +168,11 @@ func writeEntityStruct(b *strings.Builder, e codegen.Entity) {
 }
 
 // writeEntityDecodeHelper emits the unexported decode<Name> helper for
-// one entity. Nullable properties go through direct Props lookup + type
-// assertion (three-way outcome); non-nullable properties go through
-// neo4j.GetProperty[T] (missing key is a decode error).
+// one entity. A property of a declared shape reads through the driver:
+// nullable ones by direct Props lookup + type assertion (three-way
+// outcome), non-nullable ones through neo4j.GetProperty[T] (missing key
+// is a decode error). A property of no declared shape reads through the
+// Props map on both arms — see writeShapelessFieldDecode.
 func writeEntityDecodeHelper(b *strings.Builder, e codegen.Entity) {
 	var carrier, arg string
 	if e.Kind == codegen.EntityNode {
@@ -189,7 +194,9 @@ func writeEntityDecodeHelper(b *strings.Builder, e codegen.Entity) {
 }
 
 // writeEntityFieldDecode emits the decode of the property at index i.
-// Nullable path: Props lookup + type assertion against the driver's
+// Three paths. A property of no declared shape has no carrier to assert
+// against and is delegated to writeShapelessFieldDecode. Otherwise —
+// nullable path: Props lookup + type assertion against the driver's
 // carrier + narrow-convert into a local of the emitted Go type +
 // address-of-local into the pointer field. Non-nullable path:
 // neo4j.GetProperty[<carrier>] + narrow-convert. The property key is the
