@@ -2,17 +2,32 @@
 
 // The one dialect fact the Apache AGE backend's capability gate is built on.
 //
-// An edge column binding more than one candidate edge type is reachable in
+// An edge column whose candidates carry DISTINCT labels is reachable in
 // openCypher only through a relationship-type alternation — oC_RelationshipTypes
 // admits a second type after '|' and nowhere else — and AGE's parser has no '|'
 // in a relationship detail. The backend refuses such a column at generation
 // (internal/codegen/age/errors.go, edgeUnionReason) rather than emit a label
-// dispatch behind a statement the server will not parse.
+// dispatch behind a statement the server will not parse. Candidates sharing a
+// label arrive by another route entirely and are refused before any backend
+// sees them; edgeUnionReason says which is which and why.
 //
 // That refusal is a claim about a server this repo pins by digest, so it is
 // measured here on every live run instead of asserted in a comment. If AGE ever
 // learns the alternation, this test goes red and the refusal is what should be
 // reconsidered (gqlc-35yu.14).
+//
+// A live run is nightly on master and manual, not per-PR (.github/workflows/
+// codegen-live.yml), so the measurement lags a change by up to a day. That is
+// the right cadence for what this asserts. The subject is the pinned image,
+// which no PR in this repo can alter except by editing the digest — and a PR
+// that does is a PR about the image, where running the battery by hand is the
+// obvious move. Nothing else a PR can touch changes AGE's parser. The risk the
+// nightly covers is therefore a digest bump landing unmeasured, and it covers
+// it within one cycle, with the refusal message naming SQLSTATE 42601 so that
+// the failure reads as a dialect change rather than as flake. Per-PR would buy
+// earlier notice of a fact that changes only when someone edits one line, at
+// the price of a container start on every PR — which is the trade gqlc-35yu.8
+// already made for this job.
 
 package fixtures
 

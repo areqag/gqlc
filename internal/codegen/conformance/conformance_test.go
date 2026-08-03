@@ -653,6 +653,18 @@ var connectionSurface = map[string]bool{"db.go": true, "graph.go": true}
 // else checks. TestValid compares each target against its own golden, so
 // a divergence introduced on one backend is regenerated into its golden
 // and passes; only a comparison across targets sees it.
+//
+// It holds nothing about a multi-candidate edge column, and cannot. The
+// edge_union_* fixtures enrolled in two targets are enrolled in
+// neo4j-go-v5 and neo4j-go-v6, which are one emitter under two version
+// options (internal/cli/backends), so the comparison is a golden against
+// itself; Apache AGE refuses the column ahead of emission and has no
+// golden to enrol. Even enrolled it would add nothing here: the sealed
+// interface and its marker methods are declarations and would match,
+// while the label dispatch that decides which candidate fills the column
+// is a body, which this test does not read by design. A dispatch that
+// picked the wrong candidate is a live-run question, and that is where it
+// is asked (test/data/codegen, edgeUnionDispatch).
 func TestBackendInvariantSurface(t *testing.T) {
 	goldens, err := filepath.Glob(filepath.Join(fixtureRoot(), "valid", "*", "golden"))
 	require.NoError(t, err)
