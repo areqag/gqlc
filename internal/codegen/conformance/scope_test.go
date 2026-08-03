@@ -57,10 +57,11 @@ type scopeProbeShape struct {
 	// is logged under the name that backend's refusal already reports.
 	name     string
 	elements []string
-	// query is one whole annotated query. %[1]s is the parameter name
-	// under test — every shape binds exactly one parameter, because the
-	// single-parameter form is the only one whose Go argument was ever
-	// derived from the query text.
+	// query is one whole annotated query, binding exactly one parameter.
+	// %[1]s is the name under test. The parameter list the emitter
+	// actually sees is widened from this one by probeParamPlans, so the
+	// arity a shape is emitted at is an axis of the census rather than a
+	// property of the text — see the comment there.
 	query string
 }
 
@@ -141,6 +142,88 @@ var scopeProbeShapes = slices.Concat(
 // spelling is measured against.
 const unclaimedParam = "alpha"
 
+// probeParamPlan is one parameter-list shape a probe query is emitted
+// under: how many parameters the method binds, and which of them carries
+// the name under test.
+//
+// Arity is an axis because the emitter decides the argument's name
+// differently at each of it. writeMethodSignature switches on
+// len(ParamFields) — no argument, a bare typed argument, or a *Params
+// struct — and paramsMapText / argsMapText branch on len > 1 for the
+// access expression. A census whose every query binds one parameter
+// reaches one of those three arms, so a change to either of the others
+// is unobserved: a Params binder named after the first parameter the
+// author wrote reintroduces this whole class on the multi-parameter path
+// and moves nothing a single-parameter census can see.
+//
+// Position is an axis for the same reason one level down. A name derived
+// from ParamFields[0] and a name derived from ParamFields[len-1] are
+// different mistakes, and a census that only ever puts the swept name
+// first sees only the first of them.
+type probeParamPlan struct {
+	// suffix distinguishes the method this plan emits, so every plan of
+	// every shape is its own query with its own consts and structs.
+	suffix string
+	// arity is how many parameters the method binds.
+	arity int
+	// swept is the position the name under test occupies, or -1 when the
+	// plan binds nothing the author named.
+	swept int
+}
+
+// probeParamPlans covers all three arms of writeMethodSignature's switch
+// and both ends of a parameter list. Held to that by
+// TestScopeProbeReachesEveryDecodeArm, which reads the arities and the
+// swept positions off the prepared batch — the emitter's own input —
+// rather than off this table, so growing the table is not what makes the
+// census claim to be wide.
+var probeParamPlans = []probeParamPlan{
+	{suffix: "NoParam", arity: 0, swept: -1},
+	{suffix: "OneParam", arity: 1, swept: 0},
+	{suffix: "FirstOfTwo", arity: 2, swept: 0},
+	{suffix: "LastOfThree", arity: 3, swept: 2},
+}
+
+// probeFillers pad a plan's parameter list around the swept position.
+// Two widths rather than one so a multi-parameter list carries a
+// nullable parameter as well as a plain one, which is the branch the
+// signature's pointer star hangs off.
+//
+// Their names never enter the candidate set: a filler reaches the
+// emission as a *Params field declaration, as the suffix of an arg.Field
+// selector and as a quoted map key, and probeCandidates drops all three
+// as positions no parameter can be captured in.
+var probeFillers = []resolver.ResolvedParameter{
+	{Name: "probeFillerText", Type: resolver.ResolvedProperty{Type: graph.TypeString}},
+	{Name: "probeFillerCount", Type: resolver.ResolvedProperty{Type: graph.TypeInt64, Nullable: true}},
+}
+
+// apply widens one lowered query onto this plan, spelling the swept
+// position with param and padding the rest.
+//
+// The swept parameter keeps the type the front end resolved for it, so
+// the width and nullability each shape encodes survive the widening —
+// ProbeNullableParam still binds a nullable parameter, at whatever
+// position and arity the plan puts it.
+func (plan probeParamPlan) apply(q codegen.NamedQuery, param string) codegen.NamedQuery {
+	q.Name += plan.suffix
+	authored := q.Validated.Parameters
+	params := make([]resolver.ResolvedParameter, 0, plan.arity)
+	for i := range plan.arity {
+		if i == plan.swept {
+			swept := authored[0]
+			swept.Name = param
+			params = append(params, swept)
+			continue
+		}
+		filler := probeFillers[i%len(probeFillers)]
+		filler.Name = fmt.Sprintf("%s%d", filler.Name, i)
+		params = append(params, filler)
+	}
+	q.Validated.Parameters = params
+	return q
+}
+
 // TestEmittedScopeIsGeneratorOwned pins what a query author can put into
 // an emitted method's scope, which is nothing.
 //
@@ -165,11 +248,13 @@ const unclaimedParam = "alpha"
 // in fails here whatever the emitter chose to call anything.
 //
 // What is pinned is bounded by what the probe emits, so the probe emits
-// every decode arm the target serves: the shapes it drops are the ones
-// that target refuses to generate at all, and the arms the shapes reach
-// are asserted whole in TestScopeProbeReachesEveryDecodeArm. The
-// candidate names are likewise read off an emission rather than listed,
-// and the sweep runs per target, so each backend is probed with its own
+// every decode arm the target serves at every arity the signature has an
+// arm for, with the swept name at either end of the parameter list: the
+// shapes it drops are the ones that target refuses to generate at all,
+// and the arms, the arities and the positions the shapes reach are
+// asserted whole in TestScopeProbeReachesEveryDecodeArm. The candidate
+// names are likewise read off an emission rather than listed, and the
+// sweep runs per target, so each backend is probed with its own
 // vocabulary. Nothing here reads the golden corpus: -update cannot make
 // this test pass.
 func TestEmittedScopeIsGeneratorOwned(t *testing.T) {
@@ -177,16 +262,36 @@ func TestEmittedScopeIsGeneratorOwned(t *testing.T) {
 	for _, target := range probe.targets {
 		t.Run(target, func(t *testing.T) {
 			batch := probe.batch(target)
-			reference := probe.emit(t, target, unclaimedParam)
+			reference := probe.emit(t, target, unclaimedParam, probeParamPlans)
 			want := boundScopes(t, reference)
 			require.NotEmpty(t, want, "the emission binds no identifiers to compare")
 
-			candidates := mentionedIdents(t, reference)
+			candidates := probeCandidates(t, reference)
 			require.NotEmpty(t, candidates, "the emission mentions no identifiers to probe")
+
+			// Every name the emission binds is a name the sweep feeds
+			// back. That is what makes "a parameter named after a
+			// generator-owned local" true of the whole census rather than
+			// of whichever locals someone thought to list, and it is the
+			// half probeCandidates' narrowing could otherwise cost: a
+			// binding wrongly classed as uncapturable would leave the
+			// sweep silent about the name it binds.
+			for decl, names := range want {
+				require.Subset(t, candidates, names,
+					"%s binds names the sweep never feeds back as a parameter", decl)
+			}
 
 			for _, name := range candidates {
 				t.Run(name, func(t *testing.T) {
-					in, err := batch.input(name)
+					if name == blankParam {
+						// Not a scope result: $_ has no Go field name at
+						// all, so the multi-parameter plans emit a *Params
+						// field with an empty one and never reach a scope
+						// to compare. Both halves of that are held by
+						// TestBlankParameterReachesOnlyTheSingleParameterForm.
+						t.Skip("$_ is swept there, over the arities it has a Go spelling at")
+					}
+					in, err := batch.input(name, probeParamPlans)
 					if err != nil {
 						// A name the query grammar cannot spell after a
 						// dollar sign is one no author can reach.
@@ -202,15 +307,174 @@ func TestEmittedScopeIsGeneratorOwned(t *testing.T) {
 	}
 }
 
+// blankParam is the parameter name with no Go spelling. paramFieldName
+// splits on underscores and drops the empty segments, so $_ mangles to
+// the empty string — the one candidate the sweep above cannot carry
+// through every plan.
+const blankParam = "_"
+
+// TestBlankParameterReachesOnlyTheSingleParameterForm holds both halves
+// of the residue $_ leaves, so neither can move unnoticed.
+//
+// The first half is this bead's, and it is swept: over the arities whose
+// signature spells no field name — no parameter, and the bare typed
+// argument — $_ has to bind exactly what every other name binds. That is
+// the case that used to reach gofmt as a parameter with an empty name,
+// and it is closed because the argument stopped deriving from the query
+// text.
+//
+// The second half is gqlc-2m2v's and is pinned rather than fixed: the
+// two-or-more form still spells the *Params struct's field names from
+// the parameter names, and an empty one emits `arg.,` — a generate-time
+// format failure on all three targets, not a silent capture. Requiring
+// the refusal rather than skipping past it is what stops this being an
+// exclusion that quietly widens: the day 2m2v lands, this test fails and
+// says to fold $_ back into the sweep above.
+func TestBlankParameterReachesOnlyTheSingleParameterForm(t *testing.T) {
+	spellable := plansUpToArity(1)
+	require.NotEmpty(t, spellable, "no plan binds fewer than two parameters")
+	require.Less(t, len(spellable), len(probeParamPlans),
+		"no plan binds two or more parameters, so the residue below is unmeasured")
+
+	probe := newScopeProbe(t)
+	for _, target := range probe.targets {
+		t.Run(target, func(t *testing.T) {
+			batch := probe.batch(target)
+			want := boundScopes(t, probe.emit(t, target, unclaimedParam, spellable))
+			require.NotEmpty(t, want, "the emission binds no identifiers to compare")
+
+			in, err := batch.input(blankParam, spellable)
+			require.NoError(t, err, "a query parameter cannot be named %q", blankParam)
+			files := probe.generate(t, target, in)
+			requireParameterReachesTheWire(t, files, blankParam)
+			require.Equal(t, want, boundScopes(t, files),
+				"a query parameter named %q changed what the emission binds", blankParam)
+
+			all, err := batch.input(blankParam, probeParamPlans)
+			require.NoError(t, err)
+			_, err = probe.tryGenerate(t, target, all)
+			require.Error(t, err,
+				"the two-or-more form now emits for a $_ parameter: gqlc-2m2v is fixed, so drop this arm and sweep $_ with every other candidate in TestEmittedScopeIsGeneratorOwned")
+		})
+	}
+}
+
+// probeColumnPrefix is prepended to every column a probe query projects
+// when the emission is perturbed. A common prefix cannot make two column
+// texts that differed collide, so the rename never turns a served batch
+// into a duplicate row field.
+const probeColumnPrefix = "renamed"
+
+// TestColumnNamesBindNothing closes the second axis a query author
+// writes on. Everything above varies the parameter, because the
+// parameter is what the signature carries — but a return clause names
+// its columns, and those names are the author's just as much.
+//
+// The column names do reach the emission's identifiers: Phase B builds
+// an edge-union sum type as `q.Name + rowFieldName(col.Name)`, so
+// `RETURN r` yields a package-level interface whose name is half method
+// and half author-chosen column, along with a marker method named after
+// it. That residue is not silent — it can only produce a duplicate
+// package-level declaration, which the Go compiler rejects — and closing
+// it means renaming a generated public type, which is an API change and
+// not this branch's. internal/codegen/age bounds it exactly, by holding
+// the emission equal modulo the package-level declarations that moved.
+//
+// What is asserted here is the half that belongs to this bead's class,
+// and it is asserted exactly, on all three targets: renaming every
+// column must not move a single name the emission BINDS. A method
+// argument, a receiver, a result, a body local — those are the positions
+// a capture occupies, and boundScopes is exactly them. Phase B is
+// shared, but the decode locals are each backend's own, so a decoder
+// that started naming its local after the column it decodes is a
+// per-target regression and needs a per-target census to see it.
+func TestColumnNamesBindNothing(t *testing.T) {
+	probe := newScopeProbe(t)
+	for _, target := range probe.targets {
+		t.Run(target, func(t *testing.T) {
+			in, err := probe.batch(target).input(unclaimedParam, probeParamPlans)
+			require.NoError(t, err, "the probe batch does not lower")
+
+			before := probe.generate(t, target, in)
+			after := probe.generate(t, target, renamedProbeColumns(in))
+			require.NotEqual(t, fileTexts(before), fileTexts(after),
+				"renaming every column changed nothing in the emission, so the perturbation "+
+					"never reached it and the assertion below holds vacuously")
+
+			want, got := boundScopes(t, before), boundScopes(t, after)
+			require.NotEmpty(t, want, "the emission binds no identifiers to compare")
+			require.Len(t, got, len(want),
+				"renaming the columns changed how many declarations the emission makes")
+			require.Equal(t, boundNames(want), boundNames(got),
+				"renaming the columns moved a name the emission binds, so a generated argument "+
+					"or body local follows an author-chosen column name")
+		})
+	}
+}
+
+// renamedProbeColumns returns the batch with every column every query
+// projects renamed, leaving the parameters, the arities and the shapes
+// as the probe built them. Clones down to the column slice so the
+// batch's memoised input is not perturbed under the caller.
+func renamedProbeColumns(in codegen.Input) codegen.Input {
+	queries := slices.Clone(in.Queries)
+	for i := range queries {
+		columns := slices.Clone(queries[i].Validated.Columns)
+		for j := range columns {
+			columns[j].Name = probeColumnPrefix + columns[j].Name
+		}
+		queries[i].Validated.Columns = columns
+	}
+	in.Queries = queries
+	return in
+}
+
+// boundNames flattens a scope map to the set of names the emission binds
+// anywhere. Deliberately drops the keys: a declaration's own name is not
+// a name its body binds, and the sum-type residue above lives entirely
+// in the keys.
+func boundNames(scopes map[string][]string) []string {
+	bound := make(map[string]bool)
+	for _, names := range scopes {
+		for _, name := range names {
+			bound[name] = true
+		}
+	}
+	return sortedNames(bound)
+}
+
+// fileTexts is the emission as path-to-contents, for asking whether a
+// perturbation reached it at all.
+func fileTexts(files []codegen.File) map[string]string {
+	out := make(map[string]string, len(files))
+	for _, f := range files {
+		out[f.Path] = string(f.Contents)
+	}
+	return out
+}
+
 // TestScopeProbeReachesEveryDecodeArm holds the probe to the claim the
 // sweep rests on. An arm no shape reaches is a body whose locals never
 // enter the candidate set, so a parameter named after one of them is
-// never swept and the sweep's silence about it means nothing.
+// never swept and the sweep's silence about it means nothing. The same
+// goes for an arity: the emitter names the method's argument by a
+// different rule at each of the three the signature switches on, and a
+// census that reaches one of them observes one of them.
 //
-// The arms are read off Phase B rather than off any one backend, because
-// what a shape reaches is a property of the resolved column and not of
-// the target that renders it; a target that refuses an arm drops the
-// shape at newScopeProbe instead.
+// So the census is held on both axes at once — every decode arm, at
+// every signature arity, with the swept parameter at either end of the
+// list — rather than to their totals separately. Arm coverage summed
+// over all arities and arity coverage summed over all arms would both be
+// satisfied by a census that never crossed the two, which is the shape
+// the census had when a Params binder named after the author's first
+// parameter passed it.
+//
+// Everything here is read off Phase B rather than off any one backend or
+// off the plan table: what a shape reaches is a property of the resolved
+// column and not of the target that renders it, and the arity and the
+// swept position are read off the prepared parameter list, which is the
+// emitter's own input. A target that refuses an arm drops the shape at
+// newScopeProbe instead.
 func TestScopeProbeReachesEveryDecodeArm(t *testing.T) {
 	for i, arm := range probeDecodeArms {
 		require.Equal(t, codegen.ColumnKind(i), arm,
@@ -221,27 +485,82 @@ func TestScopeProbeReachesEveryDecodeArm(t *testing.T) {
 		"codegen.ColumnKind holds a member past the end of probeDecodeArms: name it there and add a probe shape that reaches it")
 
 	sch, res := probeGraph(t, scopeProbeShapes)
-	queries := make([]codegen.NamedQuery, 0, len(scopeProbeShapes))
+	queries := make([]codegen.NamedQuery, 0, len(scopeProbeShapes)*len(probeParamPlans))
 	for _, shape := range scopeProbeShapes {
-		lowered, err := lowerProbeQueries(res, shape.query, unclaimedParam)
+		lowered, err := lowerProbeQueries(res, shape.query, unclaimedParam, probeParamPlans)
 		require.NoError(t, err, "shape %q does not lower", shape.name)
 		queries = append(queries, lowered...)
 	}
 	prepared, err := codegen.Prepare(codegen.Input{Schema: sch, Queries: queries}, probeTypeMap{}, "probe")
 	require.NoError(t, err)
 
-	reached := make(map[codegen.ColumnKind]string)
+	reached := make(map[codegen.ColumnKind]map[string]string)
 	for _, q := range prepared.Queries {
-		for _, f := range q.RowFields {
-			reached[f.Kind] = q.MethodName
-			for e := f.ListElem; e != nil; e = e.Nested {
-				reached[e.Kind] = q.MethodName
+		for _, form := range paramForms(q) {
+			for _, f := range q.RowFields {
+				recordReach(reached, f.Kind, form, q.MethodName)
+				for e := f.ListElem; e != nil; e = e.Nested {
+					recordReach(reached, e.Kind, form, q.MethodName)
+				}
 			}
 		}
 	}
 	for _, arm := range probeDecodeArms {
-		require.Contains(t, reached, arm, "no probe shape reaches the %s arm", decodeArmName(arm))
+		forms, ok := reached[arm]
+		require.True(t, ok, "no probe shape reaches the %s arm", decodeArmName(arm))
+		for _, form := range probeParamForms {
+			require.Contains(t, forms, form,
+				"no probe shape reaches the %s arm with %s", decodeArmName(arm), form)
+		}
 	}
+}
+
+// probeParamForms is every way the emitted signature can spell its
+// parameters, crossed with where the swept name sits when it can sit
+// anywhere. The first three are writeMethodSignature's own switch — no
+// argument, a bare typed argument, a *Params struct — and the last two
+// split the struct arm by the position a name derived from the parameter
+// list would be taken from.
+var probeParamForms = []string{
+	"no parameter",
+	"one parameter",
+	"the swept parameter first of two or more",
+	"the swept parameter last of two or more",
+}
+
+// paramForms is the forms one prepared query exhibits. Read off
+// ParamFields — the slice writeMethodSignature switches on and
+// paramsMapText indexes — so a form is claimed only when the emitter is
+// actually handed it.
+func paramForms(q codegen.Query) []string {
+	if len(q.ParamFields) == 0 {
+		return []string{"no parameter"}
+	}
+	if len(q.ParamFields) == 1 {
+		return []string{"one parameter"}
+	}
+	swept := slices.IndexFunc(q.ParamFields, func(p codegen.Param) bool {
+		return p.RawName == unclaimedParam
+	})
+	switch swept {
+	case 0:
+		return []string{"the swept parameter first of two or more"}
+	case len(q.ParamFields) - 1:
+		return []string{"the swept parameter last of two or more"}
+	default:
+		return nil
+	}
+}
+
+// recordReach notes that one arm was reached under one parameter form,
+// naming the query that did it for the failure message.
+func recordReach(reached map[codegen.ColumnKind]map[string]string, k codegen.ColumnKind, form, method string) {
+	forms, ok := reached[k]
+	if !ok {
+		forms = make(map[string]string)
+		reached[k] = forms
+	}
+	forms[form] = method
 }
 
 // probeDecodeArms is every arm codegen commits a column to. Go cannot
@@ -296,8 +615,10 @@ func decodeArmName(k codegen.ColumnKind) string {
 type probeTypeMap struct{}
 
 func (probeTypeMap) Property(pt graph.PropertyType) (string, bool) { return string(pt), true }
-func (probeTypeMap) Temporal(k resolver.Temporal) string           { return fmt.Sprintf("temporal%d", k) }
-func (probeTypeMap) Scalar(k resolver.Scalar) string               { return fmt.Sprintf("scalar%d", k) }
+func (probeTypeMap) Temporal(k resolver.Temporal) (string, bool) {
+	return fmt.Sprintf("temporal%d", k), true
+}
+func (probeTypeMap) Scalar(k resolver.Scalar) string { return fmt.Sprintf("scalar%d", k) }
 
 // scopeProbe emits the probe batch through every registered backend.
 type scopeProbe struct {
@@ -311,9 +632,9 @@ type scopeProbe struct {
 
 // scopeProbeBatch is the shapes one target emits, the graph type they
 // need, and the lowered inputs read off them. The resolver is built once
-// and the lowering memoised per parameter name: only the query text
-// changes between emissions, and re-parsing a graph type per candidate
-// would dominate the sweep.
+// and the lowering memoised per parameter name and plan set: only the
+// query text changes between emissions, and re-parsing a graph type per
+// candidate would dominate the sweep.
 type scopeProbeBatch struct {
 	shapes []scopeProbeShape
 	schema schema.Schema
@@ -353,7 +674,7 @@ func newScopeProbe(t *testing.T) *scopeProbe {
 		// The assembled batch must emit even though every shape in it
 		// emitted alone: a refusal that only fires on the whole batch
 		// would otherwise drop the sweep to whatever still generated.
-		in, err := batch.input(unclaimedParam)
+		in, err := batch.input(unclaimedParam, probeParamPlans)
 		require.NoError(t, err, "the probe batch for %q does not lower", target)
 		p.generate(t, target, in)
 	}
@@ -377,7 +698,7 @@ func (p *scopeProbe) servedShapes(t *testing.T, target string, served map[string
 	var out []scopeProbeShape
 	for _, shape := range scopeProbeShapes {
 		sch, res := probeGraph(t, []scopeProbeShape{shape})
-		queries, err := lowerProbeQueries(res, shape.query, unclaimedParam)
+		queries, err := lowerProbeQueries(res, shape.query, unclaimedParam, probeParamPlans)
 		require.NoError(t, err, "shape %q does not lower", shape.name)
 		files, err := newGen("probe").Generate(codegen.Input{Schema: sch, Queries: queries})
 		if err != nil {
@@ -394,9 +715,9 @@ func (p *scopeProbe) servedShapes(t *testing.T, target string, served map[string
 func (p *scopeProbe) batch(target string) *scopeProbeBatch { return p.byTarget[target] }
 
 // emit is input plus generate for a parameter name the batch must accept.
-func (p *scopeProbe) emit(t *testing.T, target, param string) []codegen.File {
+func (p *scopeProbe) emit(t *testing.T, target, param string, plans []probeParamPlan) []codegen.File {
 	t.Helper()
-	in, err := p.byTarget[target].input(param)
+	in, err := p.byTarget[target].input(param, plans)
 	require.NoError(t, err, "the probe batch does not lower under parameter %q", param)
 	return p.generate(t, target, in)
 }
@@ -407,33 +728,67 @@ func (p *scopeProbe) emit(t *testing.T, target, param string) []codegen.File {
 // rather than the parameter that caused it.
 func (p *scopeProbe) generate(t *testing.T, target string, in codegen.Input) []codegen.File {
 	t.Helper()
-	newGen, ok := p.lookup(target)
-	require.True(t, ok, "no backend is registered under %q", target)
-	files, err := newGen("probe").Generate(in)
+	files, err := p.tryGenerate(t, target, in)
 	require.NoError(t, err, "generation failed for target %q", target)
 	require.NotEmpty(t, files, "target %q emitted nothing", target)
 	return files
 }
 
-// input lowers the batch spelled around one parameter name.
-func (b *scopeProbeBatch) input(param string) (codegen.Input, error) {
-	if got, ok := b.inputs[param]; ok {
+// tryGenerate is generate with the backend's refusal handed back rather
+// than failed on, for the one caller whose subject is the refusal.
+func (p *scopeProbe) tryGenerate(t *testing.T, target string, in codegen.Input) ([]codegen.File, error) {
+	t.Helper()
+	newGen, ok := p.lookup(target)
+	require.True(t, ok, "no backend is registered under %q", target)
+	return newGen("probe").Generate(in)
+}
+
+// input lowers the batch spelled around one parameter name, over one set
+// of parameter plans.
+func (b *scopeProbeBatch) input(param string, plans []probeParamPlan) (codegen.Input, error) {
+	key := param + "\x00" + planKey(plans)
+	if got, ok := b.inputs[key]; ok {
 		return got.in, got.err
 	}
-	queries := make([]codegen.NamedQuery, 0, len(b.shapes))
+	queries := make([]codegen.NamedQuery, 0, len(b.shapes)*len(plans))
 	var lowered probeLowering
 	for _, shape := range b.shapes {
-		qs, err := lowerProbeQueries(b.res, shape.query, param)
+		qs, err := lowerProbeQueries(b.res, shape.query, param, plans)
 		if err != nil {
 			lowered = probeLowering{err: err}
-			b.inputs[param] = lowered
+			b.inputs[key] = lowered
 			return lowered.in, lowered.err
 		}
 		queries = append(queries, qs...)
 	}
 	lowered = probeLowering{in: codegen.Input{Schema: b.schema, Queries: queries}}
-	b.inputs[param] = lowered
+	b.inputs[key] = lowered
 	return lowered.in, nil
+}
+
+// planKey identifies a plan set for the lowering memo. The suffixes are
+// what distinguish the emitted methods, so equal suffix lists are equal
+// batches.
+func planKey(plans []probeParamPlan) string {
+	parts := make([]string, len(plans))
+	for i, p := range plans {
+		parts[i] = p.suffix
+	}
+	return strings.Join(parts, ",")
+}
+
+// plansUpToArity is the plans binding at most n parameters, in
+// probeParamPlans order. Derived rather than written out a second time:
+// a plan added later joins whichever side of the cut its own arity puts
+// it on.
+func plansUpToArity(n int) []probeParamPlan {
+	var out []probeParamPlan
+	for _, plan := range probeParamPlans {
+		if plan.arity <= n {
+			out = append(out, plan)
+		}
+	}
+	return out
 }
 
 // probeGraph parses the graph type the given shapes need, in
@@ -458,8 +813,21 @@ func probeGraph(t *testing.T, shapes []scopeProbeShape) (schema.Schema, *resolve
 }
 
 // lowerProbeQueries runs one shape's query text through the front end
-// spelled around param.
-func lowerProbeQueries(res *resolver.Resolver, query, param string) ([]codegen.NamedQuery, error) {
+// spelled around param, and returns it once per entry in
+// probeParamPlans.
+//
+// The widening happens after the front end rather than in the query
+// text. Arity is a property of the parameter list the emitter is handed,
+// and writing a second and a third parameter into each of thirty Cypher
+// shapes would vary the column shape and the MATCH pattern along with it
+// — the two axes would stop being separable, and a shape that stopped
+// reaching its decode arm would look like an arity result. This is the
+// same technique internal/codegen/age's capture sweep uses to rebind a
+// corpus fixture's parameters, and nothing downstream reads the
+// parameter list off the source text: Phase B derives the Params fields
+// from Validated.Parameters, and both emitters key their map literal on
+// those.
+func lowerProbeQueries(res *resolver.Resolver, query, param string, plans []probeParamPlan) ([]codegen.NamedQuery, error) {
 	annotated, err := queryfile.New().Parse(strings.NewReader(fmt.Sprintf(query, param)))
 	if err != nil {
 		return nil, err
@@ -468,7 +836,7 @@ func lowerProbeQueries(res *resolver.Resolver, query, param string) ([]codegen.N
 	if err != nil {
 		return nil, err
 	}
-	out := make([]codegen.NamedQuery, 0, len(annotated))
+	out := make([]codegen.NamedQuery, 0, len(annotated)*len(plans))
 	for _, aq := range annotated {
 		q, err := cypher.New(cypher.WithRegistry(procs)).Parse(bytes.NewReader([]byte(aq.Text)))
 		if err != nil {
@@ -478,13 +846,19 @@ func lowerProbeQueries(res *resolver.Resolver, query, param string) ([]codegen.N
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, codegen.NamedQuery{
+		if len(vq.Parameters) != 1 {
+			return nil, fmt.Errorf("probe shape %q binds %d parameters, not the one every plan widens from", aq.Name, len(vq.Parameters))
+		}
+		lowered := codegen.NamedQuery{
 			Name:        aq.Name,
 			Cardinality: aq.Cardinality,
 			SourceFile:  "queries.cypher",
 			SourceText:  aq.Text,
 			Validated:   vq,
-		})
+		}
+		for _, plan := range plans {
+			out = append(out, plan.apply(lowered, param))
+		}
 	}
 	return out, nil
 }
@@ -633,12 +1007,31 @@ func collectInterfaceScopes(out map[string][]string, path string, d *ast.GenDecl
 	}
 }
 
-// mentionedIdents is every identifier the emission spells anywhere, plus
-// blank. These are the candidate parameter names: a name the emitter
-// never writes cannot be captured by one, and blank is included because
-// it is the one candidate that never appears as a name — it appeared as
-// an empty one.
-func mentionedIdents(t *testing.T, files []codegen.File) []string {
+// probeCandidates is every identifier the emission spells in a position
+// scope resolution reaches, plus blank. These are the candidate
+// parameter names: a name the emitter never writes cannot be captured by
+// one, and blank is included because it is the one candidate that never
+// appears as a name — it appeared as an empty one.
+//
+// Three positions are dropped, all for the same reason boundScopes drops
+// struct fields: they resolve against a type rather than against the
+// scope a parameter is bound in, so no argument name can capture them. A
+// struct field declaration, the suffix of a selector, and a composite
+// literal's key are exactly those positions, and the two composite forms
+// recurse into their operand rather than being skipped whole, because
+// arg.Field inside a map literal is a selector under a key-value.
+//
+// Dropping them is also what keeps the census's own scaffolding out of
+// the sweep. probeFillers reach the emission in all three positions and
+// nowhere else, so they are never fed back as a parameter name — which
+// they could not be anyway, since a filler and a candidate that mangled
+// to the same Params field would be ErrParamNameCollision rather than a
+// scope result.
+//
+// TestEmittedScopeIsGeneratorOwned holds this set to covering every name
+// the emission binds, so no generator-owned local is left unswept by the
+// narrowing.
+func probeCandidates(t *testing.T, files []codegen.File) []string {
 	t.Helper()
 	seen := map[string]bool{"_": true}
 	fset := token.NewFileSet()
@@ -648,14 +1041,36 @@ func mentionedIdents(t *testing.T, files []codegen.File) []string {
 		}
 		file, err := parser.ParseFile(fset, f.Path, f.Contents, parser.SkipObjectResolution)
 		require.NoError(t, err, "emitted %s does not parse", f.Path)
-		ast.Inspect(file, func(n ast.Node) bool {
-			if id, ok := n.(*ast.Ident); ok {
-				seen[id.Name] = true
-			}
-			return true
-		})
+		for _, name := range resolvableIdents(file) {
+			seen[name] = true
+		}
 	}
 	return slices.Sorted(maps.Keys(seen))
+}
+
+// resolvableIdents is every identifier under n that sits where scope
+// resolution applies.
+func resolvableIdents(n ast.Node) []string {
+	var out []string
+	ast.Inspect(n, func(n ast.Node) bool {
+		switch e := n.(type) {
+		case *ast.SelectorExpr:
+			out = append(out, resolvableIdents(e.X)...)
+			return false
+		case *ast.KeyValueExpr:
+			out = append(out, resolvableIdents(e.Value)...)
+			return false
+		case *ast.StructType:
+			for _, field := range e.Fields.List {
+				out = append(out, resolvableIdents(field.Type)...)
+			}
+			return false
+		case *ast.Ident:
+			out = append(out, e.Name)
+		}
+		return true
+	})
+	return out
 }
 
 // addFieldNames records the names a signature's field lists bind. A nil
