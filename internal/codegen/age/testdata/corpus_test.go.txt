@@ -1,9 +1,12 @@
 package agecorpus
 
 import (
+	"context"
 	"math"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The text on the right of every case below was captured from apache/age
@@ -784,6 +787,284 @@ func TestCypherStmtRefusesAnOverlongName(t *testing.T) {
 	}
 	if got != "" {
 		t.Errorf("cypherStmt returned %q alongside its error", got)
+	}
+}
+
+// The TIMESTAMP encoding. agtype has no temporal value and AGE has no
+// temporal function but timestamp(), which answers in MILLIseconds, so
+// what an instant means on this wire is settled by the emitted helpers
+// and by nothing else: a count of MICROseconds since the Unix epoch in
+// the integer scalar, with the zone — when the graph carries one — in a
+// separate property named <property>Offset holding SECONDS.
+//
+// These counts are not captured the way the scalars above are: no AGE
+// build ever produced a temporal value to capture. They are computed
+// from the encoding the spike settled (gqlc-35yu.5), and every row below
+// is a different number under a different unit, a different epoch or a
+// different zone rule — which is the whole reason to assert the numbers
+// rather than the shape of the code that produces them.
+//
+// The rows are the values an encoding fails on rather than a comfortable
+// middle: one before the epoch, so a count that cannot go negative
+// breaks; the epoch itself; one carrying microseconds, so a coarser
+// resolution loses them; and one at the far end of the range, so a unit
+// off by a thousand overflows.
+var instants = []struct {
+	name   string
+	micros int64
+	at     time.Time
+}{
+	{"pre-epoch", -14182940000000, time.Date(1969, 7, 20, 20, 17, 40, 0, time.UTC)},
+	{"the epoch", 0, time.Unix(0, 0).UTC()},
+	{"sub-second", 1704112496123456, time.Date(2024, 1, 1, 12, 34, 56, 123456000, time.UTC)},
+	{"year 9999", 253402300799999999, time.Date(9999, 12, 31, 23, 59, 59, 999999000, time.UTC)},
+}
+
+// tehran is the sub-second instant above spelled in a zone 3.5 hours
+// ahead. The same moment under two spellings has to encode to one count,
+// which is what makes a range predicate over the stored property answer
+// by instant and not by wall clock.
+var tehran = time.Date(2024, 1, 1, 16, 4, 56, 123456000, time.FixedZone("", 12600))
+
+func TestAgtypeInstantCountsMicrosecondsFromTheEpoch(t *testing.T) {
+	for _, tc := range instants {
+		raw := strconv.FormatInt(tc.micros, 10)
+		got, err := agtypeInstant([]byte(raw))
+		if err != nil {
+			t.Errorf("%s: agtypeInstant(%s) = error %v", tc.name, raw, err)
+			continue
+		}
+		if !got.Equal(tc.at) {
+			t.Errorf("%s: agtypeInstant(%s) = %s, want %s", tc.name, raw, got.Format(time.RFC3339Nano), tc.at.Format(time.RFC3339Nano))
+		}
+		// The count names an instant and no zone, so what comes back is
+		// UTC — not the zone the host running this happens to be in.
+		if got.Location() != time.UTC {
+			t.Errorf("%s: agtypeInstant(%s) is in %s, want UTC", tc.name, raw, got.Location())
+		}
+	}
+
+	// A count is the whole encoding, so every other spelling of a time —
+	// the ISO text an author might expect, a float, a quoted count — is a
+	// value this column cannot hold.
+	for _, raw := range []string{
+		``,
+		`1.5`,
+		`"1704112496123456"`,
+		`"2024-01-01T12:34:56.123456Z"`,
+		`null`,
+		`true`,
+		`[1704112496123456]`,
+	} {
+		if got, err := agtypeInstant([]byte(raw)); err == nil {
+			t.Errorf("agtypeInstant(%s) = %s, want an error", raw, got.Format(time.RFC3339Nano))
+		}
+	}
+}
+
+func TestAgtypeMicrosEncodesTheInstantAndNotTheWallClock(t *testing.T) {
+	for _, tc := range instants {
+		if got := agtypeMicros(tc.at); got != tc.micros {
+			t.Errorf("%s: agtypeMicros(%s) = %d, want %d", tc.name, tc.at.Format(time.RFC3339Nano), got, tc.micros)
+		}
+	}
+
+	// Encode and decode are one encoding read from either end, so a value
+	// that survives one and not the other is a bug neither test sees
+	// alone.
+	for _, tc := range instants {
+		back, err := agtypeInstant([]byte(strconv.FormatInt(agtypeMicros(tc.at), 10)))
+		if err != nil || !back.Equal(tc.at) {
+			t.Errorf("%s: round trip = %s, %v, want %s", tc.name, back.Format(time.RFC3339Nano), err, tc.at.Format(time.RFC3339Nano))
+		}
+	}
+
+	if got := agtypeMicros(tehran); got != instants[2].micros {
+		t.Errorf("agtypeMicros(%s) = %d, want %d — the same moment in another zone is the same count",
+			tehran.Format(time.RFC3339Nano), got, instants[2].micros)
+	}
+}
+
+func TestAgtypeNullableMicrosCarriesAbsence(t *testing.T) {
+	if got := agtypeNullableMicros(nil); got != nil {
+		t.Errorf("agtypeNullableMicros(nil) = %d, want nil", *got)
+	}
+	for _, tc := range instants {
+		at := tc.at
+		got := agtypeNullableMicros(&at)
+		if got == nil {
+			t.Errorf("%s: agtypeNullableMicros = nil, want %d", tc.name, tc.micros)
+			continue
+		}
+		if *got != tc.micros {
+			t.Errorf("%s: agtypeNullableMicros = %d, want %d", tc.name, *got, tc.micros)
+		}
+	}
+}
+
+func TestAgtypeZoneReadsAnOffsetInSeconds(t *testing.T) {
+	at := instants[2].at
+
+	// 12600 is +03:30 and -18000 is -05:00. Read as minutes instead of
+	// seconds the first is 210 hours and the second 300 hours back, so a
+	// unit confusion here cannot land on a plausible zone.
+	cases := map[string]struct {
+		raw    string
+		offset int
+	}{
+		"utc":            {`0`, 0},
+		"ahead":          {`12600`, 12600},
+		"behind":         {`-18000`, -18000},
+		"a whole degree": {`3600`, 3600},
+	}
+	for name, tc := range cases {
+		got, err := agtypeZone(map[string][]byte{"occurredAtOffset": []byte(tc.raw)}, "occurredAtOffset", at)
+		if err != nil {
+			t.Errorf("%s: agtypeZone = error %v", name, err)
+			continue
+		}
+		// The sidecar moves the zone and not the instant: a value stored
+		// under one offset and read under another is the same moment.
+		if !got.Equal(at) {
+			t.Errorf("%s: agtypeZone moved the instant to %s, want %s", name, got.Format(time.RFC3339Nano), at.Format(time.RFC3339Nano))
+		}
+		if _, off := got.Zone(); off != tc.offset {
+			t.Errorf("%s: agtypeZone offset = %d seconds, want %d", name, off, tc.offset)
+		}
+	}
+
+	// An absent sidecar is not a failure. The count is complete without
+	// one, and gqlc's own write path never writes one — the sidecar is
+	// there so a zone some other writer put in the graph survives a read.
+	plain, err := agtypeZone(map[string][]byte{}, "occurredAtOffset", at)
+	if err != nil {
+		t.Errorf("agtypeZone with no sidecar = error %v", err)
+	} else if plain.Location() != time.UTC || !plain.Equal(at) {
+		t.Errorf("agtypeZone with no sidecar = %s in %s, want %s in UTC",
+			plain.Format(time.RFC3339Nano), plain.Location(), at.Format(time.RFC3339Nano))
+	}
+
+	// A sidecar of any other shape fails the read rather than being taken
+	// as no offset at all, which would hand back a plausible time.
+	for _, raw := range []string{`"+03:30"`, `1.5`, `null`, `"12600"`} {
+		if got, err := agtypeZone(map[string][]byte{"occurredAtOffset": []byte(raw)}, "occurredAtOffset", at); err == nil {
+			t.Errorf("agtypeZone(%s) = %s, want an error", raw, got.Format(time.RFC3339Nano))
+		}
+	}
+}
+
+// Event vertices in the wire shape the captured texts above establish —
+// jsonb key order, an absent key for a null — carrying the encoded
+// instant and, beside it, the offset sidecar. Flat rather than nested,
+// so the property a user's ORDER BY names is the integer itself.
+const (
+	eventPlain = `{"id": 1970324836974593, "label": "Event", "properties": {"id": 1, "occurredAt": 1704112496123456}}::vertex`
+	eventZoned = `{"id": 1970324836974594, "label": "Event", "properties": {"id": 2, "occurredAt": 1704112496123456, "occurredAtOffset": 12600}}::vertex`
+	eventSeen  = `{"id": 1970324836974595, "label": "Event", "properties": {"id": 3, "seenAt": 0, "occurredAt": 1704112496123456, "seenAtOffset": -18000}}::vertex`
+)
+
+func TestDecodeVertexReadsTheOffsetSidecarBesideItsInstant(t *testing.T) {
+	want := instants[2].at
+
+	plain, err := decodeEvent([]byte(eventPlain))
+	if err != nil {
+		t.Fatalf("decodeEvent(eventPlain) = error %v", err)
+	}
+	if !plain.OccurredAt.Equal(want) {
+		t.Errorf("decodeEvent(eventPlain).OccurredAt = %s, want %s", plain.OccurredAt.Format(time.RFC3339Nano), want.Format(time.RFC3339Nano))
+	}
+	if _, off := plain.OccurredAt.Zone(); off != 0 {
+		t.Errorf("decodeEvent(eventPlain).OccurredAt is at offset %d, want UTC — no sidecar was stored", off)
+	}
+	if plain.SeenAt != nil {
+		t.Errorf("decodeEvent(eventPlain).SeenAt = %s, want nil", plain.SeenAt.Format(time.RFC3339Nano))
+	}
+
+	// The sidecar is read from the vertex the instant came out of, under
+	// the name the instant's own property name derives. Same moment, and
+	// a wall clock 3.5 hours ahead of the UTC one.
+	zoned, err := decodeEvent([]byte(eventZoned))
+	if err != nil {
+		t.Fatalf("decodeEvent(eventZoned) = error %v", err)
+	}
+	if !zoned.OccurredAt.Equal(want) {
+		t.Errorf("decodeEvent(eventZoned).OccurredAt = %s, want the same instant %s",
+			zoned.OccurredAt.Format(time.RFC3339Nano), want.Format(time.RFC3339Nano))
+	}
+	if _, off := zoned.OccurredAt.Zone(); off != 12600 {
+		t.Errorf("decodeEvent(eventZoned).OccurredAt is at offset %d seconds, want 12600", off)
+	}
+	if h, m, _ := zoned.OccurredAt.Clock(); h != 16 || m != 4 {
+		t.Errorf("decodeEvent(eventZoned).OccurredAt reads %02d:%02d locally, want 16:04", h, m)
+	}
+
+	// The nullable arm zones too, and does it without disturbing the
+	// absence a nil pointer carries.
+	seen, err := decodeEvent([]byte(eventSeen))
+	if err != nil {
+		t.Fatalf("decodeEvent(eventSeen) = error %v", err)
+	}
+	if seen.SeenAt == nil {
+		t.Fatalf("decodeEvent(eventSeen).SeenAt = nil, want the epoch")
+	}
+	if !seen.SeenAt.Equal(instants[1].at) {
+		t.Errorf("decodeEvent(eventSeen).SeenAt = %s, want %s", seen.SeenAt.Format(time.RFC3339Nano), instants[1].at.Format(time.RFC3339Nano))
+	}
+	if _, off := seen.SeenAt.Zone(); off != -18000 {
+		t.Errorf("decodeEvent(eventSeen).SeenAt is at offset %d seconds, want -18000", off)
+	}
+
+	// A sidecar the vertex holds under a shape no offset takes fails the
+	// whole decode rather than yielding a vertex zoned by a guess.
+	broken := strings.Replace(eventZoned, `"occurredAtOffset": 12600`, `"occurredAtOffset": "+03:30"`, 1)
+	if got, err := decodeEvent([]byte(broken)); err == nil {
+		t.Errorf("decodeEvent(broken sidecar) = %+v, want an error", got)
+	}
+}
+
+// The emitted query method is the only place a bound instant is encoded,
+// and the string it hands the driver is the whole of what AGE parses as
+// the query's parameter map. Nothing about the encoding is visible in
+// the method's Go signature, which takes and returns time.Time exactly
+// as the neo4j targets do.
+func TestEmittedMethodBindsAnInstantAsMicroseconds(t *testing.T) {
+	seen := instants[1].at
+
+	cases := []struct {
+		name string
+		arg  WriteEventParams
+		want string
+	}{
+		{
+			name: "an absent nullable instant is the agtype null",
+			arg:  WriteEventParams{OccurredAt: instants[2].at, SeenAt: nil},
+			want: `{"occurredAt":1704112496123456,"seenAt":null}`,
+		},
+		{
+			name: "both instants cross as counts",
+			arg:  WriteEventParams{OccurredAt: instants[2].at, SeenAt: &seen},
+			want: `{"occurredAt":1704112496123456,"seenAt":0}`,
+		},
+		{
+			name: "a zoned argument crosses as its instant",
+			arg:  WriteEventParams{OccurredAt: tehran, SeenAt: nil},
+			want: `{"occurredAt":1704112496123456,"seenAt":null}`,
+		},
+		{
+			name: "a pre-epoch instant crosses negative",
+			arg:  WriteEventParams{OccurredAt: instants[0].at, SeenAt: nil},
+			want: `{"occurredAt":-14182940000000,"seenAt":null}`,
+		},
+	}
+	for _, tc := range cases {
+		db := &recordingDB{}
+		if err := (&Queries{db: db, graph: "corpus"}).WriteEvent(context.Background(), tc.arg); err != nil {
+			t.Errorf("%s: WriteEvent = error %v", tc.name, err)
+			continue
+		}
+		if db.args != tc.want {
+			t.Errorf("%s: bound arguments =\n\t%s\nwant\n\t%s", tc.name, db.args, tc.want)
+		}
 	}
 }
 

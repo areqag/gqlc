@@ -208,6 +208,24 @@ var servedQuery = func() codegen.NamedQuery {
 	return q
 }()
 
+// instantParamQuery binds an instant in both nullabilities and projects
+// nothing, so its emission is the parameter-encoding path alone. It
+// carries its own source file: emission groups by source basename, and
+// the corpus module compiles this file and no other query file.
+var instantParamQuery = codegen.NamedQuery{
+	Name:        "WriteEvent",
+	Cardinality: codegen.CardinalityExec,
+	SourceFile:  temporalSource,
+	SourceText:  "CREATE (e:Event {occurredAt: $occurredAt, seenAt: $seenAt})\n",
+	Validated: resolver.ValidatedQuery{
+		Statement: resolver.StatementWrite,
+		Parameters: []resolver.ResolvedParameter{
+			{Name: "occurredAt", Type: resolver.ResolvedProperty{Type: graph.TypeTimestamp}},
+			{Name: "seenAt", Type: resolver.ResolvedProperty{Type: graph.TypeTimestamp, Nullable: true}},
+		},
+	},
+}
+
 // TestRejectsQueriesItCannotServe pins the capability gate. The emitted
 // arms cover agtype's scalar vocabulary, the vertices and edges built
 // out of it, and a statement that writes with or without projecting, so
