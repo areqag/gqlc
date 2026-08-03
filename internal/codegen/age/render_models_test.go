@@ -111,17 +111,18 @@ func undeclaredAgtypeIdents(t *testing.T, src []byte) []string {
 	seen := map[string]struct{}{}
 	record := func(n ast.Node) bool {
 		id, ok := n.(*ast.Ident)
-		if !ok || !strings.HasPrefix(id.Name, "agtype") {
+		if !ok {
 			return true
 		}
-		if _, isDeclared := declared[id.Name]; isDeclared {
-			return true
+		// An identifier is a leaf, so the walk stops here either way.
+		if _, isDeclared := declared[id.Name]; isDeclared || !strings.HasPrefix(id.Name, "agtype") {
+			return false
 		}
 		if _, dup := seen[id.Name]; !dup {
 			seen[id.Name] = struct{}{}
 			missing = append(missing, id.Name)
 		}
-		return true
+		return false
 	}
 	ast.Inspect(file, func(n ast.Node) bool {
 		fn, ok := n.(*ast.FuncDecl)
