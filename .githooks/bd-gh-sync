@@ -5,8 +5,20 @@
 #   - .claude/settings.json     (pull, on Claude Code session start)
 #
 # Args: pull | push
-# Exits 0 on any error so the git/session operation continues; diagnostics go
-# to stderr, so a caller that wants silence must redirect it explicitly.
+#
+# Both actions end by writing their verdict to the *last* stderr line, because
+# both callers keep only that one: a summary line on a run that got as far as
+# choosing what to do, a SKIPPING line on one that refused. pull always exits 0:
+# it rides on `git pull` and on session start, where a non-zero aborts the
+# operation underneath it. push runs from pre-push behind `|| true`, so its exit
+# status is free to carry the same verdict the summary line does — 0 iff every
+# new bead reached GitHub and every stale mirror was closed. The silent exits
+# are exactly the ones meaning "sync is not configured here" (no bd, gh or
+# token): nothing was attempted and nothing is wrong. Every other early exit —
+# no python3, no writable temp directory — is a fault and says so on the line
+# the caller keeps, because a run that produced no line at all is
+# indistinguishable from one that had nothing to do.
+# Diagnostics go to stderr, so a caller that wants silence must redirect it.
 #
 # Design: human works through GitHub issues; agents work through bd.
 #   - pull:  mirror GH state into bd for the beads where GitHub is capable of
@@ -43,6 +55,11 @@
 #              2. Bulk `gh issue list --state open` intersected with
 #                 closed-bd beads bearing an external_ref; each mismatch
 #                 gets `gh issue close`.
+#            Both arms mutate GitHub, so both are counted and both are in the
+#            summary. Every way of mutating nothing — an id that cannot be
+#            passed, a batch that exited non-zero, an input that would not
+#            load — is reported and makes the run non-zero, because otherwise
+#            it is byte-for-byte a steady-state run with nothing to do.
 #
 # Payloads reach python through temp files, never argv or the environment. The
 # bead listing alone is ~1MB, and execve caps any single argument or
@@ -63,12 +80,25 @@ command -v python3 >/dev/null 2>&1 || {
 _token=$(gh auth token 2>/dev/null) || exit 0
 [ -n "$_token" ] || exit 0
 
-_tmp=$(mktemp -d) || exit 0
+# Every payload below reaches python through a file in here, so there is no
+# reduced service to fall back to. Said out loud rather than exited quietly:
+# both callers keep only the last stderr line, and mktemp's own message on it
+# names a failed command without naming what was abandoned.
+_tmp=$(mktemp -d) || {
+  # Detail first, verdict last, as at every other refusal here: the callers keep
+  # the last line and mktemp's own message is not on it by the time this runs.
+  echo "bd-gh-sync: mktemp could not create a working directory, and every" >&2
+  echo "bd-gh-sync: payload this script hands python travels through one." >&2
+  echo "bd-gh-sync: Nothing was read from bd or GitHub, nothing was mutated." >&2
+  echo "bd-gh-sync: SKIPPING ${_action} — no writable temporary directory." >&2
+  exit 0
+}
 trap 'rm -rf "$_tmp"' EXIT
 
-# `bd github sync --issues` takes its list on argv. Batch it so a growing
-# corpus cannot walk into the same 128KB argument cap that this script already
-# hit once by passing payloads through the environment.
+# `bd github sync --issues` and `bd github push` both take their bead ids on
+# argv. Batch them so a growing corpus cannot walk into the same 128KB argument
+# cap that this script already hit once by passing payloads through the
+# environment.
 _batch=100
 
 if [ "$_action" = "pull" ]; then
@@ -104,6 +134,16 @@ def norm(s):
     return ((s or "").replace("\r\n", "\n").replace("\r", "\n")
             .replace("\u00a0", " ").strip())
 
+# Records below are line-delimited and read back line by line, so an id carrying
+# a newline would split its record in two and the charset gate downstream would
+# be handed two halves it finds unobjectionable \u2014 never examining the id it was
+# meant to refuse, and free to reconstitute the name of a bead the same run
+# declared held. Escaping keeps the record whole and hands the gate something
+# that still fails its test. Every id the gate accepts is ASCII
+# [A-Za-z0-9._-], which this leaves byte-for-byte alone.
+def one_line(s):
+    return str(s).encode("unicode_escape").decode("ascii")
+
 beads = load(sys.argv[1])
 issues = load(sys.argv[2])
 
@@ -123,7 +163,7 @@ for b in beads:
         continue
     n = int(m.group(1))
     mirrored.add(n)
-    bid = b["id"]
+    bid = one_line(b["id"])
     status = (b.get("status") or "").lower()
 
     if n not in gh:
@@ -277,10 +317,10 @@ PYEOF
   # (`bd hooks run post-merge` replaying JSONL) the detector exists to catch —
   # so a swallowed failure here means the detector is disarmed by its own
   # trigger, and the run reads byte-for-byte like a healthy one. The status file
-  # is written by the python below and starts empty, so "the check did not run
-  # at all" is as visible as "the check ran and could not see".
+  # is only ever created by status() below, in a directory this run made, so its
+  # absence is what says "the check did not run at all" — distinct from the
+  # BLIND it writes for "the check ran and could not see".
   : >"$_tmp/moved.txt"
-  : >"$_tmp/post_status.txt"
   _post_rc=0
   bd list --status all --limit 0 --json >"$_tmp/beads_post.json" 2>/dev/null \
     || { _post_rc=$?; : >"$_tmp/beads_post.json"; }
@@ -404,77 +444,278 @@ PYEOF
 fi
 
 # push
-bd list --status all --limit 0 --json >"$_tmp/beads.json" 2>/dev/null \
-  || : >"$_tmp/beads.json"
+_pushed=0
+_batches=0
+_failed=0
+_unusable=0
 
-python3 - "$_tmp/beads.json" >"$_tmp/new.txt" 2>/dev/null <<'PYEOF'
+_list_rc=0
+bd list --status all --limit 0 --json >"$_tmp/beads.json" 2>/dev/null \
+  || { _list_rc=$?; : >"$_tmp/beads.json"; }
+
+# The DONE sentinel serves the same purpose it serves on the pull side: a bead
+# list that would not load used to become an empty selection, and an empty
+# selection is byte-for-byte the steady state. "Nothing needs a mirror" and
+# "which beads need a mirror is unknowable" are different runs.
+python3 - "$_tmp/beads.json" >"$_tmp/plan.txt" 2>"$_tmp/plan.err" <<'PYEOF'
 import json, sys
-try:
-    with open(sys.argv[1], encoding="utf-8") as fh:
-        beads = json.load(fh)
-except Exception:
-    beads = []
+
+# Escaped for the reason the pull selection escapes: the records below are
+# line-delimited, and an id carrying a newline splits into two the charset gate
+# waves through.
+def one_line(s):
+    return str(s).encode("unicode_escape").decode("ascii")
+
+with open(sys.argv[1], encoding="utf-8") as fh:
+    beads = json.load(fh)
 for b in beads:
     if not b.get("external_ref"):
-        print(b["id"])
+        print("NEW " + one_line(b["id"]))
+# How many beads the selection actually walked. "No bead needs a mirror" and
+# "the list this ran on was empty" both emit zero NEW records, and only the
+# first of them is a measurement of anything.
+print("COUNT " + str(len(beads)))
+print("DONE")
 PYEOF
+_rc=$?
 
-if [ -s "$_tmp/new.txt" ]; then
-  while IFS= read -r _ids; do
-    [ -n "$_ids" ] || continue
-    # shellcheck disable=SC2086 # deliberate split: one bead id per argument
-    GITHUB_TOKEN="$_token" bd github push $_ids || true
-  done < <(xargs -n "$_batch" <"$_tmp/new.txt")
+if [ "$_rc" -ne 0 ] || [ "$(tail -n 1 "$_tmp/plan.txt" 2>/dev/null)" != "DONE" ]; then
+  # Detail first, verdict last: this exit produces no summary line, so the
+  # refusal itself has to be what a `tail -1` caller keeps.
+  sed 's/^/bd-gh-sync:   /' "$_tmp/plan.err" >&2 2>/dev/null
+  if [ "$_list_rc" -ne 0 ]; then
+    echo "bd-gh-sync: 'bd list' exited ${_list_rc} — usually something else holds the bd database." >&2
+  fi
+  echo "bd-gh-sync: selection exited ${_rc}; which beads still need a GitHub" >&2
+  echo "bd-gh-sync: mirror cannot be decided, and pushing an unknown set of" >&2
+  echo "bd-gh-sync: beads creates issues nobody asked for. Refusing." >&2
+  echo "bd-gh-sync: SKIPPING push — could not decide which beads to push." >&2
+  exit 1
+fi
+
+_new=$(grep -c '^NEW ' "$_tmp/plan.txt")
+_before_n=$(sed -n 's/^COUNT //p' "$_tmp/plan.txt")
+# Whole remainder of the line, for the reason the pull path takes it whole: an
+# id cut at its first token names a different, possibly real, bead.
+grep '^NEW ' "$_tmp/plan.txt" | sed 's/^NEW //' >"$_tmp/new.txt"
+
+# Batched by hand rather than through `xargs -n`, because xargs parses quotes:
+# one bead id carrying an apostrophe aborted the whole construction, so no batch
+# ran at all, and `|| true` reported that as a clean push. _pushed counts only
+# ids handed to a batch that exited 0.
+_push_batch() {
+  _batches=$((_batches + 1))
+  # shellcheck disable=SC2086 # deliberate split: one bead id per argument, and
+  # every id in $1 has cleared the gate below
+  if GITHUB_TOKEN="$_token" bd github push $1; then
+    _pushed=$((_pushed + $2))
+  else
+    _failed=$((_failed + 1))
+    echo "bd-gh-sync: 'bd github push' exited non-zero on batch ${_batches}; those beads may still have no GitHub mirror." >&2
+  fi
+}
+
+_ids=""
+_n=0
+while IFS= read -r _bid; do
+  # The id becomes a shell argument, so this is the pull path's gate verbatim,
+  # for the same reasons: bd mints ids like `gqlc-4np`, so it refuses corruption
+  # only; a leading dash is refused separately from the charset because an id
+  # shaped like a flag arrives as one.
+  case "$_bid" in
+    "" | -* | *[!A-Za-z0-9._-]*)
+      _unusable=$((_unusable + 1))
+      echo "bd-gh-sync: bead id '${_bid}' is unusable — it cannot be passed to 'bd github push', so no GitHub mirror was created for it." >&2
+      continue
+      ;;
+  esac
+  _ids="${_ids:+${_ids} }${_bid}"
+  _n=$((_n + 1))
+  if [ "$_n" -ge "$_batch" ]; then
+    _push_batch "$_ids" "$_n"
+    _ids=""
+    _n=0
+  fi
+done <"$_tmp/new.txt"
+if [ -n "$_ids" ]; then
+  _push_batch "$_ids" "$_n"
 fi
 
 # Re-read the beads: `bd github push` assigns external_ref to everything it
 # mirrors, and the close pass keys on external_ref. Reusing the pre-push
 # snapshot skips exactly the beads that were closed before their first push,
 # leaving the mirror it just minted open forever.
+_post_rc=0
 bd list --status all --limit 0 --json >"$_tmp/beads_after.json" 2>/dev/null \
-  || : >"$_tmp/beads_after.json"
+  || { _post_rc=$?; : >"$_tmp/beads_after.json"; }
 
 # Close GH mirrors for beads that are closed locally but still open on GH.
-# One bulk `gh issue list` + one `gh issue close` per mismatch; skipped when
-# there are none. Idempotent: closing an already-closed GH issue is a no-op.
+# One bulk `gh issue list` + one `gh issue close` per mismatch. Idempotent:
+# closing an already-closed GH issue is a no-op.
+_gh_rc=0
 GITHUB_TOKEN="$_token" gh issue list --state open --limit 500 --json number \
-  >"$_tmp/open_gh.json" 2>/dev/null || : >"$_tmp/open_gh.json"
+  >"$_tmp/open_gh.json" 2>/dev/null || { _gh_rc=$?; : >"$_tmp/open_gh.json"; }
 
-GITHUB_TOKEN="$_token" python3 - "$_tmp/beads_after.json" "$_tmp/open_gh.json" \
-  <<'PYEOF' >/dev/null 2>&1 || true
-import json, sys, re, subprocess
+# Either input failing yields an empty set, which reads as "nothing is stale"
+# rather than "nobody looked" — and the beads it would have named are the ones
+# whose mirror stays open forever. Both bead snapshots go in, because an input
+# that *loads* and comes back `[]` walks the same fail-open one step further:
+# the pass enumerates nothing, finds nothing stale, and "0 stale" is then a
+# count of a set nobody looked at. `bd list` answering `[]` with exit 0 is the
+# ordinary shape of the wrong workspace, so it is the reachable one. The status
+# file is only ever created by status() below, so its absence is what says the
+# pass did not get far enough to have a verdict.
+GITHUB_TOKEN="$_token" python3 - "$_tmp/beads.json" "$_tmp/beads_after.json" \
+  "$_tmp/open_gh.json" "$_tmp/close_status.txt" >/dev/null <<'PYEOF' || true
+import json, re, subprocess, sys
 
-def load(path, fallback):
-    try:
-        with open(path, encoding="utf-8") as fh:
-            return json.load(fh)
-    except Exception:
-        return fallback
+def load(path):
+    with open(path, encoding="utf-8") as fh:
+        return json.load(fh)
 
-open_nums = {i["number"] for i in load(sys.argv[2], [])}
-if not open_nums:
+def status(text):
+    with open(sys.argv[4], "w", encoding="utf-8") as fh:
+        fh.write(text + "\n")
+
+def one_line(s):
+    return str(s).encode("unicode_escape").decode("ascii")
+
+try:
+    open_nums = {i["number"] for i in load(sys.argv[3])}
+except Exception:
+    status("BLIND the open-issue listing was unreadable")
     sys.exit(0)
-beads = load(sys.argv[1], [])
+try:
+    beads = load(sys.argv[2])
+except Exception:
+    status("BLIND the post-push bead list was unreadable")
+    sys.exit(0)
+# Unreadable is already an exit above, via the selection's own refusal; -1 keeps
+# "nobody could read it" from arriving downstream as the number 0.
+try:
+    before = load(sys.argv[1])
+    before_n = len(before)
+except Exception:
+    before_n = -1
+
+# This run pushed beads and deleted none, so a post-push list holding fewer than
+# the pre-push one is a snapshot that was lost rather than a tracker that
+# emptied. With both empty there is no witness either way, and "a repository
+# with no beads" and "a bd database nobody could read" are the same bytes.
+if not beads:
+    if before_n > 0:
+        status("BLIND the post-push bead list came back empty, and the pre-push "
+               f"one held {before_n} bead(s)")
+    else:
+        status("BLIND both bead lists came back empty, which is what an empty "
+               "repository and an unreadable bd database look like alike")
+    sys.exit(0)
+
 pat = re.compile(r"/issues/(\d+)$")
+stale = []
 for b in beads:
     if b.get("status") != "closed":
         continue
     m = pat.search(b.get("external_ref") or "")
-    if not m:
-        continue
-    n = int(m.group(1))
-    if n not in open_nums:
-        continue
+    if m and int(m.group(1)) in open_nums:
+        stale.append((int(m.group(1)), b))
+
+closed = 0
+for n, b in stale:
     tag = ((b.get("close_reason") or "").splitlines() or [""])[0].strip()
     if len(tag) > 300:
         tag = tag[:297] + "..."
-    bid = b["id"]
+    bid = one_line(b.get("id") or "")
     body = f"Auto-close: bead {bid} closed locally."
     if tag:
         body += f" {tag}"
-    subprocess.run(
-        ["gh", "issue", "close", str(n), "--comment", body],
-        capture_output=True, check=False,
-    )
+    r = subprocess.run(["gh", "issue", "close", str(n), "--comment", body],
+                       capture_output=True, check=False)
+    if r.returncode == 0:
+        closed += 1
+        continue
+    # The one outcome the operator has to act on by hand, and the one the
+    # discarded return code could not express.
+    detail = r.stderr.decode("utf-8", "replace").strip().splitlines()
+    print(f"bd-gh-sync: could not close GH #{n} (bead {bid}); it stays open while "
+          f"the bead is closed." + (f" {detail[-1]}" if detail else ""),
+          file=sys.stderr)
+status(f"OK {len(stale)} {closed}")
 PYEOF
-exit 0
+
+_stale=0
+_closed=0
+_blind=""
+_uncounted=""
+_close_status=$(cat "$_tmp/close_status.txt" 2>/dev/null)
+case "$_close_status" in
+  "OK "*)
+    _stale=$(echo "$_close_status" | cut -d' ' -f2)
+    _closed=$(echo "$_close_status" | cut -d' ' -f3)
+    ;;
+  "BLIND "*) _blind="${_close_status#BLIND }" ;;
+  *) _blind="the stale-mirror pass did not run at all" ;;
+esac
+# A non-zero from either input is the more precise diagnosis, so it wins over
+# the python's view that the file was merely unreadable.
+[ -n "$_blind" ] && [ "$_post_rc" -ne 0 ] && _blind="'bd list' exited ${_post_rc}"
+[ -n "$_blind" ] && [ "$_gh_rc" -ne 0 ] && _blind="'gh issue list' exited ${_gh_rc}"
+if [ -n "$_blind" ]; then
+  echo "bd-gh-sync: could not work out which GH mirrors are stale (${_blind})." >&2
+  echo "bd-gh-sync: a bead closed locally may still show open on GitHub. Re-run" >&2
+  echo "bd-gh-sync: 'git push' once the database is free, or close it by hand." >&2
+fi
+
+# The same reading applied to the other count. _new is the denominator of "N of
+# M new bead(s) mirrored", and it is counted off the pre-push snapshot: zero NEW
+# records out of zero beads is not the measurement "nothing needed a mirror",
+# it is the absence of one. Kept separate from _blind, and outside its guard,
+# because it is a separate finding about a separate snapshot — the stale-mirror
+# pass runs fine on a post-push list that came back populated.
+if [ "$_before_n" -eq 0 ]; then
+  _uncounted="the pre-push bead list came back empty"
+  echo "bd-gh-sync: the bead list was empty when this run chose what to push, so" >&2
+  echo "bd-gh-sync: how many beads needed a GitHub mirror was never established —" >&2
+  echo "bd-gh-sync: an empty repository and an unreadable bd database read alike" >&2
+  echo "bd-gh-sync: here. Re-run 'git push' once the database is free." >&2
+fi
+
+# Last line, and the only line a `tail -1` caller keeps. It reports what reached
+# GitHub rather than what was intended: `bd github push` writes its own error
+# above this point, where the same tail discards it.
+#
+# The exit status carries the same verdict for a caller that checks it instead.
+# _failed is not the test, for the reason it is not the test on the pull side:
+# every way of losing a bead before the batch body runs — an id that cannot be
+# passed, a batch list that came out empty — leaves it at 0.
+#
+# Neither arm prints a number it did not measure. "0 of 0" off a snapshot that
+# came back empty is the fail-open this whole guard exists to close, and writing
+# it into the failure line would hand it back on the one line the caller keeps.
+_rc=0
+_new_arm="${_pushed} of ${_new} new bead(s) mirrored"
+[ -n "$_uncounted" ] &&
+  _new_arm="${_pushed} new bead(s) mirrored out of a number that was never established"
+_close_arm="${_closed} of ${_stale} stale GH mirror(s) closed"
+[ -n "$_blind" ] &&
+  _close_arm="an unknown number of stale GH mirror(s) left open"
+if [ "$_pushed" -lt "$_new" ] || [ "$_closed" -lt "$_stale" ] ||
+   [ -n "$_blind" ] || [ -n "$_uncounted" ]; then
+  _rc=1
+  _summary="bd-gh-sync: PUSH FAILED — ${_new_arm}, ${_close_arm}"
+  [ "$_failed" -gt 0 ] &&
+    _summary="${_summary}; ${_failed} of ${_batches} 'bd github push' batch(es) exited non-zero"
+  [ "$_unusable" -gt 0 ] &&
+    _summary="${_summary}; ${_unusable} bead id(s) unusable"
+  [ "$_new" -gt 0 ] && [ "$_batches" -eq 0 ] &&
+    _summary="${_summary}; no batch ran at all"
+  [ -n "$_blind" ] &&
+    _summary="${_summary}; the stale-mirror pass could not run (${_blind})"
+  [ -n "$_uncounted" ] &&
+    _summary="${_summary}; which beads needed a mirror could not be counted (${_uncounted})"
+  _summary="${_summary}."
+else
+  _summary="bd-gh-sync: pushed ${_pushed} new bead(s), closed ${_closed} stale GH mirror(s)."
+fi
+echo "$_summary" >&2
+exit "$_rc"
