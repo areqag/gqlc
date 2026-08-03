@@ -35,6 +35,7 @@ func generate(in codegen.Input, packageName string) ([]codegen.File, error) {
 		if len(p.ParamFields) > 0 {
 			h.args = true
 		}
+		h.forParams(p.ParamFields)
 		for _, f := range p.RowFields {
 			h.need(f.GoType)
 		}

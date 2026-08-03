@@ -18,6 +18,18 @@ const (
 	edgeAnnotation   = "::edge"
 )
 
+// goInstant is the Go type text every temporal this backend carries is
+// emitted as, and the token the render layer dispatches the encoding on
+// — the type table is the only thing that decides which resolved types
+// reach it (ADR 0025).
+const goInstant = "time.Time"
+
+// offsetProperty names the sidecar holding one instant property's UTC
+// offset in seconds. Flat rather than a member of a map so the instant
+// stays the property itself and an author's ORDER BY over it needs no
+// rewriting.
+func offsetProperty(prop string) string { return prop + "Offset" }
+
 // helpers records which agtype encode / decode helpers a batch reaches
 // for. Each is emitted only when something calls it: an unreferenced
 // unexported function is a lint failure in the generated module, so the
@@ -39,11 +51,23 @@ type helpers struct {
 	prop     bool // agtypeProperty — some entity declares a non-nullable property
 	nullProp bool // agtypeNullableProperty — some entity declares a nullable property
 
+	instant    bool // agtypeInstant — some column or property decodes an encoded instant
+	zone       bool // agtypeZone — one of those is an entity property, so the offset sidecar is beside it
+	micros     bool // agtypeMicros — some query binds a non-nullable instant parameter
+	nullMicros bool // agtypeNullableMicros — some query binds a nullable one
+
 	// lists holds every Go slice type the batch decodes into, each of
 	// which takes a named wrapper around the generic walk. A nested list
 	// registers its element type too, because the outer wrapper's element
 	// decoder is the inner wrapper.
 	lists []string
+}
+
+// temporal reports whether the batch encodes a temporal at all, which is
+// what puts the encoding's description in the package doc and the time
+// import in models.go.
+func (h helpers) temporal() bool {
+	return h.instant || h.zone || h.micros || h.nullMicros
 }
 
 // forEntities marks the helpers an entity emission reaches beyond the
@@ -52,11 +76,32 @@ func (h *helpers) forEntities(entities []wiredEntity) {
 	for _, e := range entities {
 		for _, f := range e.Fields {
 			h.need(f.GoType)
+			// The offset sidecar is a second property of the same
+			// vertex, so only an entity decode has it in hand.
+			if f.GoType == goInstant {
+				h.zone = true
+			}
 			if f.Nullable {
 				h.nullProp = true
 			} else {
 				h.prop = true
 			}
+		}
+	}
+}
+
+// forParams marks the helpers one query's bound parameters encode
+// through. Only an instant needs one: every other emitted Go type is
+// already a shape the JSON encoder writes as the agtype scalar it rides.
+func (h *helpers) forParams(params []codegen.Param) {
+	for _, p := range params {
+		if p.GoType != goInstant {
+			continue
+		}
+		if p.Nullable {
+			h.nullMicros = true
+		} else {
+			h.micros = true
 		}
 	}
 }
@@ -87,6 +132,11 @@ func (h *helpers) need(goType string) {
 		h.integer = true
 	case "float64":
 		h.float = true
+	case goInstant:
+		// The instant rides the integer scalar, so its helper is built
+		// on the integer one.
+		h.instant = true
+		h.integer = true
 	}
 }
 
@@ -179,6 +229,9 @@ func renderModels(pkg string, entities []wiredEntity, prepared []codegen.Query, 
 	if h.integer || h.float {
 		b.WriteString("\t\"strconv\"\n\t\"strings\"\n")
 	}
+	if h.temporal() {
+		b.WriteString("\t\"time\"\n")
+	}
 	b.WriteString(")\n")
 
 	writeEntities(&b, entities, prepared)
@@ -268,6 +321,80 @@ func agtypeFloat64(raw []byte) (float64, error) {
 		return 0, fmt.Errorf("gqlc: %q is not an agtype float: %w", raw, err)
 	}
 	return out, nil
+}
+`)
+	}
+	if h.instant {
+		b.WriteString(`
+// agtypeInstant decodes an encoded instant: agtype has no temporal
+// value, so gqlc stores one as the integer scalar, counting
+// microseconds since the Unix epoch. Microseconds are the finest
+// resolution that spans the range without overflowing an int64, and the
+// count is the whole of the instant — the offset sidecar beside a
+// stored property decides only how it prints.
+//
+// The zone is UTC because that is what the count alone determines.
+func agtypeInstant(raw []byte) (time.Time, error) {
+	micros, err := agtypeInt64(raw)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.UnixMicro(micros).UTC(), nil
+}
+`)
+	}
+	if h.zone {
+		b.WriteString(`
+// agtypeZone puts a decoded instant back in the zone it was written in,
+// reading the offset-seconds sidecar stored beside it. An absent sidecar
+// leaves the instant in UTC: the count is complete without it, so the
+// property is readable by anything that never wrote one — including this
+// package, which binds the instant alone. Where the sidecar goes is the
+// author's query text, and gqlc runs that text as written.
+//
+// Flat rather than a member of a map so the instant stays the property
+// itself: ORDER BY n.at and WHERE n.at > $since are then answered by
+// agtype's integer ordering, with nothing for gqlc to rewrite.
+func agtypeZone(props map[string][]byte, key string, at time.Time) (time.Time, error) {
+	raw, ok := props[key]
+	if !ok {
+		return at, nil
+	}
+	offset, err := agtypeInt64(raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("gqlc: offset %q: %w", key, err)
+	}
+	return at.In(time.FixedZone("", int(offset))), nil
+}
+`)
+	}
+	if h.micros {
+		b.WriteString(`
+// agtypeMicros encodes an instant into the integer a query binds it as,
+// the same count agtypeInstant reads back. The parameter crosses as the
+// bare integer rather than as a structure holding the offset too, which
+// is what lets a comparison an author writes against the property be
+// answered by agtype's own integer ordering.
+//
+// The zone does not cross with it. A value stored through a parameter
+// therefore reads back in UTC, at the same instant it was written; a
+// graph that wants the original zone back carries it in the sidecar
+// agtypeZone reads, which is a property the query text has to name.
+func agtypeMicros(at time.Time) int64 {
+	return at.UnixMicro()
+}
+`)
+	}
+	if h.nullMicros {
+		b.WriteString(`
+// agtypeNullableMicros is agtypeMicros over an absent instant, which
+// crosses as the agtype null a nullable property holds.
+func agtypeNullableMicros(at *time.Time) *int64 {
+	if at == nil {
+		return nil
+	}
+	micros := at.UnixMicro()
+	return &micros
 }
 `)
 	}
@@ -666,6 +793,10 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 	fmt.Fprintf(b, "\t%s, err := %s(props, %q, %s)\n", value, reader, f.PropName, decodeFunc(f.GoType))
 	fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %s{}, fmt.Errorf(%q, err)\n\t}\n",
 		e.Name, "decode "+e.Name+"."+f.Field+": %w")
+	if f.GoType == goInstant {
+		writeInstantZoning(b, e, i, f)
+		return
+	}
 	switch {
 	case carrier == f.GoType:
 		fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, value)
@@ -675,6 +806,25 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 	default:
 		fmt.Fprintf(b, "\tout.%s = %s(%s)\n", f.Field, f.GoType, value)
 	}
+}
+
+// writeInstantZoning emits the read of one instant property's offset
+// sidecar and the assignment of the zoned value. It runs only inside an
+// entity decoder: the sidecar is a second property of the same vertex,
+// which a projection of the instant alone does not carry.
+func writeInstantZoning(b *strings.Builder, e codegen.Entity, i int, f codegen.EntityField) {
+	value, sidecar := valueName(i), offsetProperty(f.PropName)
+	fail := fmt.Sprintf("\t\treturn %s{}, fmt.Errorf(%q, err)\n", e.Name, "decode "+e.Name+"."+f.Field+": %w")
+	if !f.Nullable {
+		fmt.Fprintf(b, "\tout.%s, err = agtypeZone(props, %q, %s)\n", f.Field, sidecar, value)
+		fmt.Fprintf(b, "\tif err != nil {\n%s\t}\n", fail)
+		return
+	}
+	fmt.Fprintf(b, "\tif %s != nil {\n", value)
+	fmt.Fprintf(b, "\t\tzoned, err := agtypeZone(props, %q, *%s)\n", sidecar, value)
+	fmt.Fprintf(b, "\t\tif err != nil {\n\t%s\t\t}\n", fail)
+	fmt.Fprintf(b, "\t\t%s = &zoned\n\t}\n", value)
+	fmt.Fprintf(b, "\tout.%s = %s\n", f.Field, value)
 }
 
 // wiredEntity is an entity together with the form it takes on the wire:

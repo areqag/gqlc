@@ -236,7 +236,7 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 	execUncarriedParam := func() codegen.NamedQuery {
 		q := execQuery("Batch")
 		q.Validated.Parameters = []resolver.ResolvedParameter{{
-			Name: "at", Type: resolver.ResolvedProperty{Type: graph.TypeTimestamp},
+			Name: "for", Type: resolver.ResolvedProperty{Type: graph.TypeDuration},
 		}}
 		return q
 	}()
@@ -341,7 +341,7 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 		{
 			name:      "an exec binding an uncarried parameter width is dropped",
 			queries:   []codegen.NamedQuery{execUncarriedParam},
-			wantSub:   `1 query would be dropped: Batch (parameter $at is property:TIMESTAMP)`,
+			wantSub:   `1 query would be dropped: Batch (parameter $for is property:DURATION)`,
 			wantError: true,
 		},
 		{
@@ -400,7 +400,7 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 		{
 			name:      "every dropped query is named, in batch order",
 			queries:   []codegen.NamedQuery{execUncarriedParam, mapCol, list},
-			wantSub:   "3 queries would be dropped: Batch (parameter $at is property:TIMESTAMP), Bag (column \"m\" projects scalar(map)), Tags (column \"t\" projects list)",
+			wantSub:   "3 queries would be dropped: Batch (parameter $for is property:DURATION), Bag (column \"m\" projects scalar(map)), Tags (column \"t\" projects list)",
 			wantError: true,
 		},
 		{
