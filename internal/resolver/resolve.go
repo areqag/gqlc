@@ -298,9 +298,22 @@ func fillGroupingKeys(cols []Column, part query.Part) {
 	}
 }
 
+// unionColumnTypeArm is the phrase that separates ErrUnionColumnMismatch's type
+// arm from its count and name arms. All three carry the same sentinel, so
+// errors.Is cannot tell them apart, and the resolver test derives which invalid
+// fixtures reach the type arm by matching this phrase in the message. It is
+// spliced into the format string below rather than transcribed into the test, so
+// the two cannot drift apart and leave the coverage sweep matching nothing.
+const unionColumnTypeArm = " projects "
+
 // compareBranchColumns runs the R5 UNION column compatibility check (§4.3).
 // Every branch's column list must equal branch 0's index-wise on count, name,
 // and type (strict Go-value equality; no lattice widening across branches).
+//
+// All three arms lead with the branch that failed the comparison and name
+// branch 0 second. The direction is arbitrary; the consistency is not, because
+// one error that reads in two directions makes the reader re-derive which
+// number is the culprit on every arm.
 func compareBranchColumns(branchCols [][]Column) error {
 	if len(branchCols) < 2 {
 		return nil
@@ -316,7 +329,7 @@ func compareBranchColumns(branchCols [][]Column) error {
 				return fmt.Errorf("%w: branch %d column %d named %q; branch 0 column %d named %q", ErrUnionColumnMismatch, b, i, other[i].Name, i, base[i].Name)
 			}
 			if !resolvedTypeEqual(other[i].Type, base[i].Type) {
-				return fmt.Errorf("%w: column %q projects %s in branch 0 but %s in branch %d", ErrUnionColumnMismatch, base[i].Name, describeColumnType(base[i].Type), describeColumnType(other[i].Type), b)
+				return fmt.Errorf("%w: column %q"+unionColumnTypeArm+"%s in branch %d but %s in branch 0", ErrUnionColumnMismatch, base[i].Name, describeColumnType(other[i].Type), b, describeColumnType(base[i].Type))
 			}
 		}
 	}
@@ -331,8 +344,12 @@ func compareBranchColumns(branchCols [][]Column) error {
 // discriminator each MarshalJSON emits — so every ResolvedNode renders "node"
 // whichever type it holds and every ResolvedEdgeUnion renders "edgeUnion"
 // whichever keys it committed, and a message built from them prints the same
-// text on both sides of a mismatch. The union key list is delimited because one
-// candidate list can be a strict prefix of another.
+// text on both sides of a mismatch.
+//
+// The braces around the union key list are readability, not distinctness: a
+// strict prefix is never equal to its extension, and nullabilityNote already
+// terminates the list, so removing them collides nothing. They are here so the
+// reader can see where one branch's key list ends.
 func describeColumnType(t ResolvedType) string {
 	switch v := t.(type) {
 	case ResolvedNode:

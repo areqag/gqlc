@@ -3,10 +3,13 @@ package resolver
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -830,29 +833,44 @@ func (s *ResolverSuite) TestMixedSymmetryIsAcceptedAndTheMarkerNarrows() {
 // the reverse twin's, and the four together must be four distinct keys. That is
 // two swapped pairs, stated as the property rather than as a count.
 //
+// The twins are *read off the fixture's own pattern* (undirectedEdgePattern),
+// not written out here. A guard built from its own hard-coded endpoints proves
+// two pairs exist somewhere in the schema and says nothing about the query under
+// test: narrowing the fixture's right endpoint to a single satisfying type
+// leaves one pair and a message pin that still passes, which is the
+// green-because-it-is-looking-at-nothing mode this fixture exists to close.
+//
 // The message is read with edgeKeyInMessage and matched as a set, because one
 // key's rendering is a substring of another's — Person-[REVIEWED]->Company sits
 // inside Employee&Person-[REVIEWED]->Company&Startup — so a Contains/NotContains
 // pair would silently be answering a different question.
 func (s *ResolverSuite) TestTwoSwappedPairsReportsTheFirstInCandidateOrder() {
-	sch := s.loadSchema("invalid", "satisfy_plural_edges_two_swapped_pairs.gql")
+	const fixture = "ambiguous_edge_orientation_two_swapped_pairs.cypher"
+
+	mapping := s.loadMapping("invalid")
+	schemaName, ok := mapping[fixture]
+	s.Require().True(ok, "unmapped invalid fixture %q", fixture)
+	sch := s.loadSchema("invalid", schemaName)
+	q := s.loadQuery(filepath.Join(fixtureDir, "invalid", fixture))
+
+	pattern := s.undirectedEdgePattern(q)
 
 	unionKeys := func(src string) []schema.EdgeKey {
-		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		pq, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
 		s.Require().NoError(err)
-		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
-		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(pq)
+		s.Require().NoErrorf(err, "%s: the directed twin of the fixture's pattern must resolve", src)
 		s.Require().Len(vq.Columns, 1)
 		u, ok := vq.Columns[0].Type.(ResolvedEdgeUnion)
-		s.Require().Truef(ok, "%s: want an edge union, got %T", src, vq.Columns[0].Type)
+		s.Require().Truef(ok, "%s: want an edge union, got %T — this reading contributes fewer than two candidates, so the fixture carries at most one swapped pair", src, vq.Columns[0].Type)
 		return u.EdgeKeys
 	}
 	mirror := func(k schema.EdgeKey) schema.EdgeKey {
 		return schema.EdgeKey{Source: k.Target, KeyLabels: k.KeyLabels, Target: k.Source}
 	}
 
-	l2r := unionKeys("MATCH (a:Person)-[r:REVIEWED]->(b:Company) RETURN r")
-	r2l := unionKeys("MATCH (a:Company)-[r:REVIEWED]->(b:Person) RETURN r")
+	l2r := unionKeys(pattern.directed(pattern.source, pattern.target))
+	r2l := unionKeys(pattern.directed(pattern.target, pattern.source))
 	s.Require().Len(l2r, 2, "the left-to-right reading must contribute two candidates")
 	s.Require().Len(r2l, 2, "the right-to-left reading must contribute two candidates")
 	distinct := make(map[schema.EdgeKey]struct{}, 4)
@@ -866,8 +884,7 @@ func (s *ResolverSuite) TestTwoSwappedPairsReportsTheFirstInCandidateOrder() {
 	}
 	s.Require().Len(distinct, 4, "the two pairs must be disjoint, or there is only one pair here")
 
-	_, err := New(sch, WithRegistry(regR7)).Resolve(s.loadQuery(
-		filepath.Join(fixtureDir, "invalid", "ambiguous_edge_orientation_two_swapped_pairs.cypher")))
+	_, err := New(sch, WithRegistry(regR7)).Resolve(q)
 	s.Require().ErrorIs(err, ErrAmbiguousEdgeOrientation)
 	s.Require().ElementsMatch(
 		[]string{
@@ -876,6 +893,86 @@ func (s *ResolverSuite) TestTwoSwappedPairsReportsTheFirstInCandidateOrder() {
 		},
 		edgeKeyInMessage.FindAllString(err.Error(), -1),
 		"the reported pair must be the first witness on each side, in candidate order")
+}
+
+// edgePattern is one undirected edge pattern reduced to the three label
+// expressions a directed twin can be rebuilt from: the two ends as the author
+// wrote them and the edge's own alternation.
+type edgePattern struct {
+	source graph.LabelSetKey
+	edge   string // the alternation, "|"-joined as written
+	target graph.LabelSetKey
+}
+
+// directed spells a single-column query running from one end to the other with
+// an explicit arrow. Fresh variable names: the twin is a probe of the schema,
+// not a rewrite of the fixture, and the fixture's own names are irrelevant to
+// which candidates close.
+func (p edgePattern) directed(from, to graph.LabelSetKey) string {
+	return fmt.Sprintf("MATCH (x:%s)-[e:%s]->(y:%s) RETURN e", from, p.edge, to)
+}
+
+// undirectedEdgePattern reads the one undirected edge binding out of a parsed
+// query and returns its two endpoints' label expressions plus its own.
+//
+// This is what keeps a fixture's guard pointed at that fixture. A guard that
+// names its endpoints itself is a second copy of the fixture, and the two drift
+// on the next edit to either — the fixture narrows, the guard keeps resolving
+// the twins it was born with, and the suite stays green over a query that no
+// longer has the shape the guard reports.
+//
+// An endpoint's labels live on the NodeBinding it names, or inline on the
+// endpoint itself; both are the same thing to the closure, so both are read.
+func (s *ResolverSuite) undirectedEdgePattern(q query.Query) edgePattern {
+	var (
+		got   edgePattern
+		found bool
+	)
+	for _, branch := range q.Branches {
+		for _, part := range branch.Parts {
+			nodes := make(map[string]graph.LabelSetKey, len(part.Bindings))
+			for _, b := range part.Bindings {
+				if nb, ok := b.(query.NodeBinding); ok {
+					nodes[nb.Variable()] = nb.Labels().Key()
+				}
+			}
+			for _, b := range part.Bindings {
+				eb, ok := b.(query.EdgeBinding)
+				if !ok || eb.Directed() {
+					continue
+				}
+				s.Require().False(found, "the fixture must carry exactly one undirected edge binding")
+				found = true
+				got = edgePattern{
+					source: s.endpointLabels(eb.Source(), nodes),
+					edge:   strings.Join(eb.Labels(), "|"),
+					target: s.endpointLabels(eb.Target(), nodes),
+				}
+			}
+		}
+	}
+	s.Require().True(found, "the fixture must carry an undirected edge binding, or there is no orientation to be ambiguous about")
+	s.Require().NotEmpty(got.edge, "the edge must carry a label alternation")
+	return got
+}
+
+// endpointLabels is the label expression one end of a pattern was written with:
+// the labels of the NodeBinding a variable endpoint names, or the inline set.
+func (s *ResolverSuite) endpointLabels(e query.Endpoint, nodes map[string]graph.LabelSetKey) graph.LabelSetKey {
+	switch ep := e.(type) {
+	case query.VarEndpoint:
+		labels, ok := nodes[ep.Variable()]
+		s.Require().Truef(ok, "endpoint %q names no node binding in this part", ep.Variable())
+		s.Require().NotEmptyf(labels, "endpoint %q carries no labels, so it has no directed twin to probe", ep.Variable())
+		return labels
+	case query.InlineEndpoint:
+		labels := ep.Labels().Key()
+		s.Require().NotEmpty(labels, "an inline endpoint with no labels has no directed twin to probe")
+		return labels
+	default:
+		s.Require().Failf("unhandled endpoint", "%T", e)
+		return ""
+	}
 }
 
 // TestEdgeUnionKeysAreASet asserts ResolvedEdgeUnion.EdgeKeys carries each
@@ -1123,72 +1220,111 @@ func (s *ResolverSuite) TestRelationshipTypeConflictIsRefusedOnBothSidesOfWITH()
 		"the cross-part conflict is the resolver's: only it carries the type across the WITH")
 }
 
+// unionTypeArmRow is one invalid fixture that reaches ErrUnionColumnMismatch's
+// type arm, with both projections written out by hand.
+type unionTypeArmRow struct {
+	fixture string
+	failing string // what the branch that failed the comparison projected
+	branch0 string // what branch 0 projected
+}
+
+// unionTypeArmRows is the hand-written expectation for every invalid fixture
+// that reaches the type arm. TestUnionColumnMismatchTypeArmRowsCoverTheArm
+// holds it total against the corpus, so a fixture that starts reaching the arm
+// cannot slip in unpinned.
+//
+// The renderings are hand-written rather than derived from the resolved value:
+// a derived expectation passes whatever the renderer emits, which is the defect
+// this table exists to catch.
+var unionTypeArmRows = []unionTypeArmRow{
+	{
+		fixture: "union_node_type_mismatch.cypher",
+		failing: "node Post (not null)",
+		branch0: "node Person (not null)",
+	},
+	{
+		fixture: "union_edge_union_keys_mismatch.cypher",
+		failing: "edgeUnion {Person-[AUTHORED]->Note, Person-[LIKES]->Note} (not null)",
+		branch0: "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (not null)",
+	},
+	{
+		// Same keys on both sides: nullability is the only axis that
+		// separates them, so a rendering that drops it re-collapses the two.
+		fixture: "union_edge_union_nullability_mismatch.cypher",
+		failing: "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (nullable)",
+		branch0: "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (not null)",
+	},
+	{
+		// One key list is a strict prefix of the other. The two still render
+		// apart without the braces — nullabilityNote terminates the list — so
+		// these two rows pin the arity axis, not the delimiters.
+		fixture: "union_edge_union_arity_prefix.cypher",
+		failing: "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (not null)",
+		branch0: "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post, Person-[SHARED]->Post} (not null)",
+	},
+	{
+		fixture: "union_edge_union_arity_prefix_reversed.cypher",
+		failing: "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post, Person-[SHARED]->Post} (not null)",
+		branch0: "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (not null)",
+	},
+	{
+		// Nullability is the separating axis; the scalar token agrees.
+		fixture: "union_column_nullability_mismatch.cypher",
+		failing: "property:STRING (nullable)",
+		branch0: "property:STRING (not null)",
+	},
+	{
+		// The scalar token is the separating axis; nullability agrees on one
+		// side and disagrees on the other, so between this row and the one
+		// above neither axis can be dropped without a row noticing.
+		fixture: "union_column_type_mismatch.cypher",
+		failing: "property:INT (nullable)",
+		branch0: "property:STRING (not null)",
+	},
+	{
+		// Three branches, and the mismatch is against branch 2 — the only row
+		// where the failing branch is not branch 1. Both sides are NOT NULL, so
+		// the scalar token is the *only* thing telling them apart: this is the
+		// fixture that collides outright if ResolvedProperty stops rendering it.
+		fixture: "union_third_branch_mismatch.cypher",
+		failing: "property:INT (not null)",
+		branch0: "property:STRING (not null)",
+	},
+	{
+		fixture: "union_list_element_mismatch.cypher",
+		failing: "list of edge Person-[AUTHORED]->Post (not null)",
+		branch0: "list of edge Person-[KNOWS]->Person (not null)",
+	},
+}
+
+// unionTypeArmMessage matches ErrUnionColumnMismatch's type arm and captures the
+// two renderings it names. The frame is built from unionColumnTypeArm, the same
+// constant resolve.go splices into the format string, so the match cannot drift
+// from the message.
+var unionTypeArmMessage = regexp.MustCompile(
+	`column "[^"]*"` + regexp.QuoteMeta(unionColumnTypeArm) + `(.+?) in branch \d+ but (.+) in branch 0`)
+
 // TestUnionColumnMismatchNamesEachArm holds ErrUnionColumnMismatch's type arm
-// to naming what each branch projected, branch 0 first.
+// to naming what each branch projected, the failing branch first.
 //
 // The renderings the message is built from are ResolvedType's Stringers, and
 // those are wire tags: every ResolvedNode is "node" whichever type it holds,
 // every ResolvedEdgeUnion is "edgeUnion" whichever keys it committed. So on
-// each row below — one per resolvedTypeEqual arm that can fail on two values
-// sharing a tag — the message read "has type edgeUnion; branch 0 has type
-// edgeUnion", which tells the author the arms disagree and nothing about how.
+// each row — one per resolvedTypeEqual arm that can fail on two values sharing
+// a tag — the message read "has type edgeUnion; branch 0 has type edgeUnion",
+// which tells the author the arms disagree and nothing about how.
 //
-// Each row hand-writes both renderings rather than deriving them from the
-// resolved value, so the row fails if the renderer stops carrying the axis that
-// separates the two branches. The assertions are the three claims: both
-// projections appear, they are different text, and branch 0's comes first —
-// the order the author wrote the arms in. Nothing here reads a golden, so
-// -update cannot bless a regression.
+// Two things are asserted per row, and they fail for different reasons. The
+// transcription check says the message names exactly the text this table
+// predicts, in the arm order the other two arms use. The collision check reads
+// the two renderings back *out of the message* and requires them to differ
+// there — so a renderer that makes two mismatching types print alike fails on
+// the defect itself, not merely on a hand-written string going stale.
+//
+// Nothing here reads a golden, so -update cannot bless a regression.
 func (s *ResolverSuite) TestUnionColumnMismatchNamesEachArm() {
-	tests := []struct {
-		fixture string
-		first   string // what branch 0 projected
-		second  string // what the branch that failed the comparison projected
-	}{
-		{
-			fixture: "union_node_type_mismatch.cypher",
-			first:   "node Person (not null)",
-			second:  "node Post (not null)",
-		},
-		{
-			fixture: "union_edge_union_keys_mismatch.cypher",
-			first:   "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (not null)",
-			second:  "edgeUnion {Person-[AUTHORED]->Note, Person-[LIKES]->Note} (not null)",
-		},
-		{
-			// Same keys on both sides: nullability is the only axis that
-			// separates them, so a rendering that drops it re-collapses the two.
-			fixture: "union_edge_union_nullability_mismatch.cypher",
-			first:   "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (not null)",
-			second:  "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (nullable)",
-		},
-		{
-			// One key list is a strict prefix of the other, so the delimiters
-			// have to close the list: without them the shorter rendering is a
-			// substring of the longer and the two are no longer told apart.
-			fixture: "union_edge_union_arity_prefix.cypher",
-			first:   "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post, Person-[SHARED]->Post} (not null)",
-			second:  "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (not null)",
-		},
-		{
-			fixture: "union_edge_union_arity_prefix_reversed.cypher",
-			first:   "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post} (not null)",
-			second:  "edgeUnion {Person-[AUTHORED]->Post, Person-[LIKES]->Post, Person-[SHARED]->Post} (not null)",
-		},
-		{
-			fixture: "union_column_nullability_mismatch.cypher",
-			first:   "property:STRING (not null)",
-			second:  "property:STRING (nullable)",
-		},
-		{
-			fixture: "union_list_element_mismatch.cypher",
-			first:   "list of edge Person-[KNOWS]->Person (not null)",
-			second:  "list of edge Person-[AUTHORED]->Post (not null)",
-		},
-	}
-
 	mapping := s.loadMapping("invalid")
-	for _, tt := range tests {
+	for _, tt := range unionTypeArmRows {
 		s.Run(tt.fixture, func() {
 			schemaName, ok := mapping[tt.fixture]
 			s.Require().True(ok, "unmapped invalid fixture %q", tt.fixture)
@@ -1198,16 +1334,89 @@ func (s *ResolverSuite) TestUnionColumnMismatchNamesEachArm() {
 			s.Require().ErrorIs(err, ErrUnionColumnMismatch)
 			msg := err.Error()
 
-			s.Require().NotEqual(tt.first, tt.second,
+			s.Require().NotEqual(tt.failing, tt.branch0,
 				"the two renderings must differ, or this row asserts nothing")
-			first := strings.Index(msg, tt.first)
-			second := strings.Index(msg, tt.second)
-			s.Require().GreaterOrEqualf(first, 0, "branch 0 projected %q, absent from %q", tt.first, msg)
-			s.Require().GreaterOrEqualf(second, 0, "the failing branch projected %q, absent from %q", tt.second, msg)
-			s.Require().Lessf(first, second,
-				"branch 0 was written first, so its projection must be named first, in %q", msg)
+			failing := strings.Index(msg, tt.failing)
+			branch0 := strings.Index(msg, tt.branch0)
+			s.Require().GreaterOrEqualf(failing, 0, "the failing branch projected %q, absent from %q", tt.failing, msg)
+			s.Require().GreaterOrEqualf(branch0, 0, "branch 0 projected %q, absent from %q", tt.branch0, msg)
+			s.Require().Lessf(failing, branch0,
+				"the count and name arms lead with the failing branch, so this one must too, in %q", msg)
+
+			// The collision check: the two renderings as the message actually
+			// carries them, not as this table transcribes them.
+			m := unionTypeArmMessage.FindStringSubmatch(msg)
+			s.Require().Lenf(m, 3, "the type arm's message must still parse: %q", msg)
+			s.Require().NotEqualf(m[1], m[2],
+				"the two branches rendered as the same text, so the message says they disagree and nothing about how: %q", msg)
 		})
 	}
+}
+
+// TestUnionColumnMismatchTypeArmRowsCoverTheArm holds unionTypeArmRows total
+// against the corpus: every invalid fixture that reaches ErrUnionColumnMismatch's
+// type arm has a row, and every row names a fixture that still reaches it.
+//
+// The table is hand-maintained, which is what makes it worth the rows — a
+// derived expectation would pass whatever the renderer emitted. But a
+// hand-maintained table silently falls behind the corpus, and it had: two of the
+// nine fixtures that reach this arm had no row, including the one that collides
+// outright when ResolvedProperty stops rendering its scalar token. A fixture can
+// start reaching this arm without anyone editing this file — adding a UNION
+// fixture for some other sentinel is enough — so totality is asserted rather
+// than remembered.
+//
+// The reached set is derived by resolving every invalid fixture and matching the
+// type arm's own message frame; nothing here is a count. A count is satisfiable
+// by the wrong nine, and this repo has been bitten by exactly that (declaredTypeCount,
+// TestStageSpecsReadAsHistory's NotZero). Set equality also makes its own
+// vacuity guard: if the sweep matched nothing, every row would be reported extra.
+func (s *ResolverSuite) TestUnionColumnMismatchTypeArmRowsCoverTheArm() {
+	files, err := filepath.Glob(filepath.Join(fixtureDir, "invalid", "*.cypher"))
+	s.Require().NoError(err)
+	s.Require().NotEmpty(files)
+	mapping := s.loadMapping("invalid")
+
+	reaches := make(map[string]bool, len(files))
+	for _, path := range files {
+		name := filepath.Base(path)
+		schemaName, ok := mapping[name]
+		s.Require().True(ok, "unmapped invalid fixture %q", name)
+
+		_, err := New(s.loadSchema("invalid", schemaName), WithRegistry(regR7)).
+			Resolve(s.loadQuery(path))
+		if err == nil || !errors.Is(err, ErrUnionColumnMismatch) {
+			continue
+		}
+		if unionTypeArmMessage.MatchString(err.Error()) {
+			reaches[name] = true
+		}
+	}
+
+	tabled := make(map[string]bool, len(unionTypeArmRows))
+	for _, row := range unionTypeArmRows {
+		s.Require().Falsef(tabled[row.fixture], "duplicate row for %q", row.fixture)
+		tabled[row.fixture] = true
+	}
+
+	var missing, stale []string
+	for name := range reaches {
+		if !tabled[name] {
+			missing = append(missing, name)
+		}
+	}
+	for name := range tabled {
+		if !reaches[name] {
+			stale = append(stale, name)
+		}
+	}
+	slices.Sort(missing)
+	slices.Sort(stale)
+
+	s.Require().Emptyf(missing,
+		"these invalid fixtures reach ErrUnionColumnMismatch's type arm with no row in unionTypeArmRows, so nothing pins what the message says about them: %v", missing)
+	s.Require().Emptyf(stale,
+		"these unionTypeArmRows rows name a fixture that no longer reaches the type arm, so the row asserts nothing: %v", stale)
 }
 
 // TestSentinelReachability is the bidirectional sweep: every allSentinels
