@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/printer"
@@ -788,6 +789,128 @@ func receiverName(t *testing.T, path string, d *ast.FuncDecl) string {
 	ident, ok := expr.(*ast.Ident)
 	require.True(t, ok, "%s: %s hangs off a %T", path, d.Name.Name, expr)
 	return ident.Name
+}
+
+// The Bolt driver's own carrier vocabulary, split by the shape the
+// emitted assertion takes. neo4j.PropertyValue is
+//
+//	bool | int64 | float64 | string | Point2D | Point3D |
+//	Date | LocalTime | LocalDateTime | Time | Duration | time.Time |
+//	[]byte | []any
+//
+// (neo4j/graph.go:25 under v5, the same plus the Vector and UUID named
+// types under v6) and neo4j.RecordValue (neo4j/record.go:25) is that
+// set plus map[string]any, Node, Relationship and Path. A value the
+// driver hands to generated code came off one of those two constraints,
+// so a type assertion on it can only be true for a member of them —
+// every other name is an assertion that is false for every value the
+// driver can produce, which is not a decode but a decode that always
+// fails.
+//
+// Two sets rather than one because the two axes fail differently and
+// each has to be observed to be non-empty on its own (see
+// TestNeo4jGoldensAssertOnlyDriverCarriers).
+//
+// Slice axis: GetProperty's own doc says "any property array value other
+// than byte array is typed as []any", and the hydrator builds exactly
+// that — `func (h *hydrator) array() []any` (internal/bolt/hydrator.go).
+// So these two are the whole set, whatever the schema declared the
+// element width to be.
+var driverSliceCarriers = map[string]bool{"[]any": true, "[]byte": true}
+
+// Scalar axis: the named types of the two constraints, spelled as the
+// emission spells them. `any` is deliberately absent. It is a member of
+// neither constraint, and `x.(any)` is not a widening no-op: a type
+// assertion on a nil interface value is false whatever type it names, so
+// asserting to `any` fails on exactly the null the property or element
+// was declared able to hold. The emission has to omit the assertion
+// rather than name `any` in one.
+var driverScalarCarriers = map[string]bool{
+	"bool":                 true,
+	"int64":                true,
+	"float64":              true,
+	"string":               true,
+	"time.Time":            true,
+	"map[string]any":       true,
+	"dbtype.Point2D":       true,
+	"dbtype.Point3D":       true,
+	"dbtype.Date":          true,
+	"dbtype.LocalTime":     true,
+	"dbtype.LocalDateTime": true,
+	"dbtype.Time":          true,
+	"dbtype.Duration":      true,
+	"dbtype.Node":          true,
+	"dbtype.Relationship":  true,
+	"dbtype.Path":          true,
+}
+
+// TestNeo4jGoldensAssertOnlyDriverCarriers pins the emitted decode
+// against the driver's type set rather than against the schema's. A
+// property declared LIST<STRING> is a []string in the struct the caller
+// writes against, but it never arrives as one: Bolt hydrates every
+// array but a byte array into []any and narrows nothing, so `v.([]string)`
+// is an assertion that is false for every value the driver can produce.
+// Such an assertion is not a decode, it is a decode that always fails,
+// and the emission has to walk the []any and convert element by element
+// instead.
+//
+// The same defect lands one axis over, on the element the walk reaches:
+// `elem.(int32)` for a LIST<INT32> is as false as `v.([]int32)` was, and
+// nothing but this sweep can see it. The slice arm is held up by the
+// compiler wherever a wrong carrier reaches neo4j.GetProperty[T], whose
+// PropertyValue constraint refuses it; inside the walk there is no such
+// constraint, because a []any element is an `any` and asserting an `any`
+// to anything at all compiles. So both axes are swept and each is
+// required to have examined something: a single total would let one axis
+// go empty behind the other, and report in its own message that it did
+// not.
+//
+// Swept syntactically over every neo4j golden rather than checked on one
+// fixture, because the defect is a missing arm and a missing arm is
+// invisible wherever no fixture reaches it. The sweep asserts a property
+// of the text and not equality with a stored blob, so -update cannot
+// bless a violation: regeneration rewrites the goldens from the same
+// emission, and an emission that still names []string still fails here.
+func TestNeo4jGoldensAssertOnlyDriverCarriers(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join(fixtureRoot(), "valid", "*", "golden", "neo4j-go-v*", "*.go"))
+	require.NoError(t, err)
+	require.NotEmpty(t, paths, "no neo4j golden was swept, so this test holds nothing")
+
+	var offenders []string
+	sliceAxis, scalarAxis := 0, 0
+	fset := token.NewFileSet()
+	for _, path := range paths {
+		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		require.NoError(t, err, "parsing %s", path)
+		ast.Inspect(file, func(n ast.Node) bool {
+			assertion, ok := n.(*ast.TypeAssertExpr)
+			if !ok || assertion.Type == nil {
+				return true
+			}
+			named := render(t, fset, assertion.Type)
+			// The counter for an axis is incremented only once the
+			// assertion is known to be on it, so what each NotZero below
+			// reports is how many assertions its own set was asked about.
+			if _, isSlice := assertion.Type.(*ast.ArrayType); isSlice {
+				sliceAxis++
+				if driverSliceCarriers[named] {
+					return true
+				}
+			} else {
+				scalarAxis++
+				if driverScalarCarriers[named] {
+					return true
+				}
+			}
+			offenders = append(offenders, fmt.Sprintf("%s:%d: %s",
+				path, fset.Position(assertion.Pos()).Line, render(t, fset, assertion)))
+			return true
+		})
+	}
+	require.NotZero(t, sliceAxis, "no slice-typed assertion was examined, so the slice axis passed vacuously")
+	require.NotZero(t, scalarAxis, "no scalar-typed assertion was examined, so the scalar axis passed vacuously")
+	require.Empty(t, offenders,
+		"a Bolt driver hands back only what neo4j.PropertyValue and neo4j.RecordValue name, so these assertions are false for every value it can produce")
 }
 
 // TestGoldenBuild compiles the nested test/data/codegen module so that

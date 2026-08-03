@@ -1,6 +1,7 @@
 package age_test
 
 import (
+	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/printer"
@@ -9,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/age"
@@ -72,11 +75,77 @@ func (s *EmissionSuite) TestEmittedHelpersDecodeTheAgtypeCorpus() {
 		s.Require().NoError(os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644))
 	}
 
-	cmd := exec.CommandContext(s.T().Context(), "go", "test", "-count=1", ".")
+	passed, log, err := s.runCorpus(dir)
+	s.Require().NoError(err, "the emitted helpers do not satisfy the captured corpus:\n%s", log)
+	s.Require().ElementsMatch(s.declaredTests(string(driver)), passed,
+		"the corpus module did not run every test its template declares:\n%s", log)
+}
+
+// runCorpus runs the assembled corpus module's own tests, reporting the
+// top-level tests that passed alongside the run's output as a reader
+// sees it.
+//
+// The pass set is read from `go test -json`, whose Test field the testing
+// framework fills in, rather than from "--- PASS" lines, which a subtest
+// name or anything a test writes to stdout can also spell.
+func (s *EmissionSuite) runCorpus(dir string) (passed []string, log string, err error) {
+	cmd := exec.CommandContext(s.T().Context(), "go", "test", "-json", "-count=1", ".")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOFLAGS=", "GOPROXY=off")
 	out, err := cmd.CombinedOutput()
-	s.Require().NoError(err, "the emitted helpers do not satisfy the captured corpus:\n%s", out)
+
+	var text strings.Builder
+	for line := range strings.Lines(string(out)) {
+		var event struct {
+			Action string `json:"Action"`
+			Test   string `json:"Test"`
+			Output string `json:"Output"`
+		}
+		if !strings.HasPrefix(line, "{") || json.Unmarshal([]byte(line), &event) != nil {
+			text.WriteString(line)
+			continue
+		}
+		text.WriteString(event.Output)
+		if event.Action == "pass" && event.Test != "" && !strings.Contains(event.Test, "/") {
+			passed = append(passed, event.Test)
+		}
+	}
+	return passed, text.String(), err
+}
+
+// declaredTests names the top-level tests a corpus template declares.
+// Requiring that every one of them passed is what separates a corpus the
+// emission satisfies from a corpus that is not there: `go test` exits 0
+// on a _test.go file declaring no tests, so a harness that reads only the
+// child's exit status reports success on an emptied template.
+func (s *EmissionSuite) declaredTests(src string) []string {
+	file, err := parser.ParseFile(token.NewFileSet(), "corpus_test.go", src, parser.SkipObjectResolution)
+	s.Require().NoError(err)
+
+	var names []string
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Recv == nil && isTestName(fn.Name.Name) {
+			names = append(names, fn.Name.Name)
+		}
+	}
+	s.Require().NotEmpty(names, "the corpus template declares no tests, so a child run of it proves nothing")
+	return names
+}
+
+// isTestName reports whether `go test` runs a function of this name,
+// following testing's own rule: Test, then anything that does not begin
+// with a lower-case letter. TestMain is the entry point, not a test.
+func isTestName(name string) bool {
+	rest, ok := strings.CutPrefix(name, "Test")
+	if !ok || name == "TestMain" {
+		return false
+	}
+	if rest == "" {
+		return true
+	}
+	first, _ := utf8.DecodeRuneInString(rest)
+	return !unicode.IsLower(first)
 }
 
 // declarations prints the named top-level declarations of an emitted

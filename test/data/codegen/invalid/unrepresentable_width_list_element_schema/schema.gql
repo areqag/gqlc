@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE UnrepresentableWidthListElementSchema AS {
+    (:Event {
+        id     :: INT64 NOT NULL,
+        stamps :: LIST<TIMESTAMP> NOT NULL
+    })
+}
