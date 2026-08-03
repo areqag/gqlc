@@ -6,13 +6,18 @@
 #
 # Args: pull | push
 #
-# Both actions end by writing one summary line to stderr, because both callers
-# keep only the last one. pull always exits 0: it rides on `git pull` and on
-# session start, where a non-zero aborts the operation underneath it. push runs
-# from pre-push behind `|| true`, so its exit status is free to carry the same
-# verdict the summary line does — 0 iff every new bead reached GitHub and every
-# stale mirror was closed. Preconditions meaning "sync is not configured here"
-# (no bd, gh, python3 or token) exit 0 for both: nothing was attempted.
+# Both actions end by writing their verdict to the *last* stderr line, because
+# both callers keep only that one: a summary line on a run that got as far as
+# choosing what to do, a SKIPPING line on one that refused. pull always exits 0:
+# it rides on `git pull` and on session start, where a non-zero aborts the
+# operation underneath it. push runs from pre-push behind `|| true`, so its exit
+# status is free to carry the same verdict the summary line does — 0 iff every
+# new bead reached GitHub and every stale mirror was closed. The silent exits
+# are exactly the ones meaning "sync is not configured here" (no bd, gh or
+# token): nothing was attempted and nothing is wrong. Every other early exit —
+# no python3, no writable temp directory — is a fault and says so on the line
+# the caller keeps, because a run that produced no line at all is
+# indistinguishable from one that had nothing to do.
 # Diagnostics go to stderr, so a caller that wants silence must redirect it.
 #
 # Design: human works through GitHub issues; agents work through bd.
@@ -75,7 +80,19 @@ command -v python3 >/dev/null 2>&1 || {
 _token=$(gh auth token 2>/dev/null) || exit 0
 [ -n "$_token" ] || exit 0
 
-_tmp=$(mktemp -d) || exit 0
+# Every payload below reaches python through a file in here, so there is no
+# reduced service to fall back to. Said out loud rather than exited quietly:
+# both callers keep only the last stderr line, and mktemp's own message on it
+# names a failed command without naming what was abandoned.
+_tmp=$(mktemp -d) || {
+  # Detail first, verdict last, as at every other refusal here: the callers keep
+  # the last line and mktemp's own message is not on it by the time this runs.
+  echo "bd-gh-sync: mktemp could not create a working directory, and every" >&2
+  echo "bd-gh-sync: payload this script hands python travels through one." >&2
+  echo "bd-gh-sync: Nothing was read from bd or GitHub, nothing was mutated." >&2
+  echo "bd-gh-sync: SKIPPING ${_action} — no writable temporary directory." >&2
+  exit 0
+}
 trap 'rm -rf "$_tmp"' EXIT
 
 # `bd github sync --issues` and `bd github push` both take their bead ids on
@@ -300,10 +317,10 @@ PYEOF
   # (`bd hooks run post-merge` replaying JSONL) the detector exists to catch —
   # so a swallowed failure here means the detector is disarmed by its own
   # trigger, and the run reads byte-for-byte like a healthy one. The status file
-  # is written by the python below and starts empty, so "the check did not run
-  # at all" is as visible as "the check ran and could not see".
+  # is only ever created by status() below, in a directory this run made, so its
+  # absence is what says "the check did not run at all" — distinct from the
+  # BLIND it writes for "the check ran and could not see".
   : >"$_tmp/moved.txt"
-  : >"$_tmp/post_status.txt"
   _post_rc=0
   bd list --status all --limit 0 --json >"$_tmp/beads_post.json" 2>/dev/null \
     || { _post_rc=$?; : >"$_tmp/beads_post.json"; }
@@ -454,6 +471,10 @@ with open(sys.argv[1], encoding="utf-8") as fh:
 for b in beads:
     if not b.get("external_ref"):
         print("NEW " + one_line(b["id"]))
+# How many beads the selection actually walked. "No bead needs a mirror" and
+# "the list this ran on was empty" both emit zero NEW records, and only the
+# first of them is a measurement of anything.
+print("COUNT " + str(len(beads)))
 print("DONE")
 PYEOF
 _rc=$?
@@ -473,6 +494,7 @@ if [ "$_rc" -ne 0 ] || [ "$(tail -n 1 "$_tmp/plan.txt" 2>/dev/null)" != "DONE" ]
 fi
 
 _new=$(grep -c '^NEW ' "$_tmp/plan.txt")
+_before_n=$(sed -n 's/^COUNT //p' "$_tmp/plan.txt")
 # Whole remainder of the line, for the reason the pull path takes it whole: an
 # id cut at its first token names a different, possibly real, bead.
 grep '^NEW ' "$_tmp/plan.txt" | sed 's/^NEW //' >"$_tmp/new.txt"
@@ -536,11 +558,15 @@ GITHUB_TOKEN="$_token" gh issue list --state open --limit 500 --json number \
 
 # Either input failing yields an empty set, which reads as "nothing is stale"
 # rather than "nobody looked" — and the beads it would have named are the ones
-# whose mirror stays open forever. The status file starts empty so "the pass
-# never ran" is as visible as "it ran blind".
-: >"$_tmp/close_status.txt"
-GITHUB_TOKEN="$_token" python3 - "$_tmp/beads_after.json" "$_tmp/open_gh.json" \
-  "$_tmp/close_status.txt" >/dev/null <<'PYEOF' || true
+# whose mirror stays open forever. Both bead snapshots go in, because an input
+# that *loads* and comes back `[]` walks the same fail-open one step further:
+# the pass enumerates nothing, finds nothing stale, and "0 stale" is then a
+# count of a set nobody looked at. `bd list` answering `[]` with exit 0 is the
+# ordinary shape of the wrong workspace, so it is the reachable one. The status
+# file is only ever created by status() below, so its absence is what says the
+# pass did not get far enough to have a verdict.
+GITHUB_TOKEN="$_token" python3 - "$_tmp/beads.json" "$_tmp/beads_after.json" \
+  "$_tmp/open_gh.json" "$_tmp/close_status.txt" >/dev/null <<'PYEOF' || true
 import json, re, subprocess, sys
 
 def load(path):
@@ -548,21 +574,41 @@ def load(path):
         return json.load(fh)
 
 def status(text):
-    with open(sys.argv[3], "w", encoding="utf-8") as fh:
+    with open(sys.argv[4], "w", encoding="utf-8") as fh:
         fh.write(text + "\n")
 
 def one_line(s):
     return str(s).encode("unicode_escape").decode("ascii")
 
 try:
-    open_nums = {i["number"] for i in load(sys.argv[2])}
+    open_nums = {i["number"] for i in load(sys.argv[3])}
 except Exception:
     status("BLIND the open-issue listing was unreadable")
     sys.exit(0)
 try:
-    beads = load(sys.argv[1])
+    beads = load(sys.argv[2])
 except Exception:
     status("BLIND the post-push bead list was unreadable")
+    sys.exit(0)
+# Unreadable is already an exit above, via the selection's own refusal; -1 keeps
+# "nobody could read it" from arriving downstream as the number 0.
+try:
+    before = load(sys.argv[1])
+    before_n = len(before)
+except Exception:
+    before_n = -1
+
+# This run pushed beads and deleted none, so a post-push list holding fewer than
+# the pre-push one is a snapshot that was lost rather than a tracker that
+# emptied. With both empty there is no witness either way, and "a repository
+# with no beads" and "a bd database nobody could read" are the same bytes.
+if not beads:
+    if before_n > 0:
+        status("BLIND the post-push bead list came back empty, and the pre-push "
+               f"one held {before_n} bead(s)")
+    else:
+        status("BLIND both bead lists came back empty, which is what an empty "
+               "repository and an unreadable bd database look like alike")
     sys.exit(0)
 
 pat = re.compile(r"/issues/(\d+)$")
@@ -600,6 +646,7 @@ PYEOF
 _stale=0
 _closed=0
 _blind=""
+_uncounted=""
 _close_status=$(cat "$_tmp/close_status.txt" 2>/dev/null)
 case "$_close_status" in
   "OK "*)
@@ -619,6 +666,20 @@ if [ -n "$_blind" ]; then
   echo "bd-gh-sync: 'git push' once the database is free, or close it by hand." >&2
 fi
 
+# The same reading applied to the other count. _new is the denominator of "N of
+# M new bead(s) mirrored", and it is counted off the pre-push snapshot: zero NEW
+# records out of zero beads is not the measurement "nothing needed a mirror",
+# it is the absence of one. Kept separate from _blind, and outside its guard,
+# because it is a separate finding about a separate snapshot — the stale-mirror
+# pass runs fine on a post-push list that came back populated.
+if [ "$_before_n" -eq 0 ]; then
+  _uncounted="the pre-push bead list came back empty"
+  echo "bd-gh-sync: the bead list was empty when this run chose what to push, so" >&2
+  echo "bd-gh-sync: how many beads needed a GitHub mirror was never established —" >&2
+  echo "bd-gh-sync: an empty repository and an unreadable bd database read alike" >&2
+  echo "bd-gh-sync: here. Re-run 'git push' once the database is free." >&2
+fi
+
 # Last line, and the only line a `tail -1` caller keeps. It reports what reached
 # GitHub rather than what was intended: `bd github push` writes its own error
 # above this point, where the same tail discards it.
@@ -627,10 +688,21 @@ fi
 # _failed is not the test, for the reason it is not the test on the pull side:
 # every way of losing a bead before the batch body runs — an id that cannot be
 # passed, a batch list that came out empty — leaves it at 0.
+#
+# Neither arm prints a number it did not measure. "0 of 0" off a snapshot that
+# came back empty is the fail-open this whole guard exists to close, and writing
+# it into the failure line would hand it back on the one line the caller keeps.
 _rc=0
-if [ "$_pushed" -lt "$_new" ] || [ "$_closed" -lt "$_stale" ] || [ -n "$_blind" ]; then
+_new_arm="${_pushed} of ${_new} new bead(s) mirrored"
+[ -n "$_uncounted" ] &&
+  _new_arm="${_pushed} new bead(s) mirrored out of a number that was never established"
+_close_arm="${_closed} of ${_stale} stale GH mirror(s) closed"
+[ -n "$_blind" ] &&
+  _close_arm="an unknown number of stale GH mirror(s) left open"
+if [ "$_pushed" -lt "$_new" ] || [ "$_closed" -lt "$_stale" ] ||
+   [ -n "$_blind" ] || [ -n "$_uncounted" ]; then
   _rc=1
-  _summary="bd-gh-sync: PUSH FAILED — ${_pushed} of ${_new} new bead(s) mirrored, ${_closed} of ${_stale} stale GH mirror(s) closed"
+  _summary="bd-gh-sync: PUSH FAILED — ${_new_arm}, ${_close_arm}"
   [ "$_failed" -gt 0 ] &&
     _summary="${_summary}; ${_failed} of ${_batches} 'bd github push' batch(es) exited non-zero"
   [ "$_unusable" -gt 0 ] &&
@@ -639,6 +711,8 @@ if [ "$_pushed" -lt "$_new" ] || [ "$_closed" -lt "$_stale" ] || [ -n "$_blind" 
     _summary="${_summary}; no batch ran at all"
   [ -n "$_blind" ] &&
     _summary="${_summary}; the stale-mirror pass could not run (${_blind})"
+  [ -n "$_uncounted" ] &&
+    _summary="${_summary}; which beads needed a mirror could not be counted (${_uncounted})"
   _summary="${_summary}."
 else
   _summary="bd-gh-sync: pushed ${_pushed} new bead(s), closed ${_closed} stale GH mirror(s)."

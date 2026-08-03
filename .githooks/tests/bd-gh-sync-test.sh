@@ -10,6 +10,24 @@
 # logic.
 #
 # Run via: just test-hooks
+#
+# How many assertions this file makes is a number worth quoting in a review, so
+# here is the command that produces it rather than a figure that goes stale the
+# next time someone adds a case:
+#
+#   .githooks/tests/bd-gh-sync-test.sh | grep -cE '^(ok|FAIL) '
+#
+# And how many of them a given older bd-gh-sync fails — the measure of what a
+# change to that script is actually worth — by running this file against it:
+#
+#   d=$(mktemp -d) && mkdir -p "$d/tests" &&
+#     git show <rev>:.githooks/bd-gh-sync >"$d/bd-gh-sync" &&
+#     cp .githooks/tests/bd-gh-sync-test.sh "$d/tests/" &&
+#     chmod +x "$d/bd-gh-sync" "$d/tests/bd-gh-sync-test.sh" &&
+#     "$d/tests/bd-gh-sync-test.sh" | grep -cE '^FAIL '
+#
+# The script under test is resolved relative to this file, which is what makes
+# that second one work at all.
 set -u
 
 unset "${!GIT_@}"
@@ -93,7 +111,21 @@ esac
 exit 0
 STUB
 
-chmod +x "$BIN/bd" "$BIN/gh"
+# Every payload this script hands python travels through the directory `mktemp
+# -d` makes, so the run cannot proceed without one — and it is the one early
+# exit that is a fault rather than a configuration. Resolved before $BIN joins
+# PATH, or the stub execs itself.
+REAL_MKTEMP="$(command -v mktemp)"
+cat >"$BIN/mktemp" <<'STUB'
+#!/usr/bin/env bash
+if [ "${FAKE_MKTEMP_RC:-0}" != 0 ]; then
+    echo "mktemp: failed to create directory via template: Read-only file system" >&2
+    exit "$FAKE_MKTEMP_RC"
+fi
+exec "$REAL_MKTEMP" "$@"
+STUB
+
+chmod +x "$BIN/bd" "$BIN/gh" "$BIN/mktemp"
 
 pass=0
 fail=0
@@ -129,7 +161,8 @@ run_sync() {
         FAKE_BEADS="$TMP/beads.json" FAKE_GH="$TMP/gh.json" \
         FAKE_GH_OPEN="$TMP/gh_open.json" FAKE_BEADS_AFTER="$after" \
         FAKE_SYNC_RC="${SYNC_RC:-0}" FAKE_PUSH_RC="${PUSH_RC:-0}" \
-        FAKE_CLOSE_RC="${CLOSE_RC:-0}" \
+        FAKE_CLOSE_RC="${CLOSE_RC:-0}" FAKE_MKTEMP_RC="${MKTEMP_RC:-0}" \
+        REAL_MKTEMP="$REAL_MKTEMP" \
         "$SYNC" "$1" >"$TMP/out" 2>"$TMP/err"
     RC=$?
     rm -f "$TMP"/bd_list_rc_* "$TMP"/bd_list_out_*
@@ -140,6 +173,7 @@ RC=0
 SYNC_RC=0
 PUSH_RC=0
 CLOSE_RC=0
+MKTEMP_RC=0
 
 scoped_ids() { grep -o -- '--issues [^ ]*' "$TMP/calls" | cut -d' ' -f2 | tr ',' '\n'; }
 pull_ran()   { grep -q -- 'bd github sync' "$TMP/calls"; }
@@ -766,19 +800,6 @@ bd_list_emits 1 ' ';                          push_selection_case "whitespace on
 bd_list_emits 1 '[{"id":"b-n","exter';        push_selection_case "truncated JSON"
 bd_list_emits 1 'bd: fatal: not a workspace'; push_selection_case "not JSON at all"
 
-# ...and the control, which is where push differs from pull: an empty *first*
-# snapshot is a repository with no beads, not a snapshot nobody could read. The
-# pull path treats an empty second snapshot as blind because it has a non-empty
-# first one to contradict it; push has no such witness and must not invent one.
-bd_list_emits 1 '[]'
-run_sync push '[{"id":"b-n","status":"open","external_ref":""}]' '[]' '[]'
-if [ "$RC" -eq 0 ] &&
-   [ "$(last_line)" = "bd-gh-sync: pushed 0 new bead(s), closed 0 stale GH mirror(s)." ]; then
-    ok "an empty bead list is nothing to push, not a refusal"
-else
-    bad "an empty bead list is nothing to push, not a refusal" "rc=$RC: $(last_line)"
-fi
-
 # The close pass keys on the *second* snapshot, because `bd github push` mints
 # the external_ref it matches on. That snapshot failing leaves every stale mirror
 # open, and `|| : >beads_after.json` turned it into an empty list the pass walked
@@ -803,6 +824,112 @@ case "$RC:$(last_line)" in
         ok "an unreadable open-issue listing is reported, not read as nothing stale" ;;
     *) bad "an unreadable open-issue listing is reported" "got: $(last_line)" ;;
 esac
+
+# ...and the case above both: the close pass dying before it reaches a verdict
+# at all. A list of bare integers loads as JSON and then breaks on `.get`, so no
+# status is written and the only evidence left is the file's absence. This is
+# what says the status file needs no pre-truncation to be readable as "no
+# verdict" — an empty file and a missing one are the same string to the shell,
+# so the `: >` that used to precede the pass could not have been the difference.
+bd_list_emits 2 '[1,2,3]'
+run_sync push "[{\"id\":\"b-c\",\"status\":\"closed\",\"external_ref\":\"$ISSUE/500\"}]" \
+    '[]' '[{"number":500}]'
+case "$RC:$(last_line)" in
+    0:*) bad "a close pass that never reached a verdict is reported" \
+        "exited 0: $(last_line)" ;;
+    *"stale-mirror pass could not run (the stale-mirror pass did not run at all)"*)
+        ok "a close pass that wrote no verdict reads as blind, not as nothing stale" ;;
+    *) bad "a close pass that never reached a verdict is reported" "got: $(last_line)" ;;
+esac
+
+# --- gqlc-w4q9 review: never print a count that was not measured -------------
+# Every guard above catches a snapshot that would not *load*. A snapshot that
+# loads and comes back `[]` takes the same fail-open one step further in: the
+# close pass enumerates an empty list, finds nothing stale, and reports "0 stale
+# mirrors" — a count of a set nobody looked at, byte-identical to a healthy
+# steady state. It is also the reachable shape, because `bd list` answering `[]`
+# with exit 0 is what the wrong workspace looks like; `bd list` failing outright
+# already had a guard.
+#
+# The rule these three pin is one rule: a count reaches the summary only if the
+# script enumerated the set behind it. Where it did not, the summary says so
+# instead of printing a number.
+
+# The post-push snapshot is the close pass's entire evidence, and this run
+# pushed beads rather than deleting any — so an empty list here after a
+# non-empty one there is a snapshot that was lost, not a tracker that emptied.
+bd_list_emits 2 '[]'
+run_sync push "[{\"id\":\"b-c\",\"status\":\"closed\",\"external_ref\":\"$ISSUE/500\"}]" \
+    '[]' '[{"number":500}]'
+if [ "$RC" -eq 0 ]; then
+    bad "an empty post-push snapshot is blind, not zero-and-fine" \
+        "exited 0: $(last_line)"
+else
+    case "$(last_line)" in
+        *"of 0 stale GH mirror(s) closed"*)
+            bad "an empty post-push snapshot is blind, not zero-and-fine" \
+                "printed a stale count off an empty list: $(last_line)" ;;
+        *"stale-mirror pass could not run"*"post-push bead list came back empty"*)
+            ok "an empty post-push snapshot reads as blind, not as nothing stale" ;;
+        *) bad "an empty post-push snapshot is blind, not zero-and-fine" \
+            "got: $(last_line)" ;;
+    esac
+fi
+
+# Both empty is the same hole with the witness gone too. There is no way to tell
+# a repository with no beads from a bd database nobody could read, so the honest
+# answer is that neither arm was measured — not two zeroes and exit 0.
+bd_list_emits 1 '[]'
+bd_list_emits 2 '[]'
+run_sync push '[{"id":"b-n","status":"open","external_ref":""}]' '[]' '[{"number":500}]'
+if [ "$RC" -eq 0 ]; then
+    bad "two empty snapshots are blind, not an empty repository" \
+        "exited 0: $(last_line)"
+else
+    case "$(last_line)" in
+        *"of 0 stale GH mirror(s) closed"* | *"0 of 0 new bead(s)"*)
+            bad "two empty snapshots are blind, not an empty repository" \
+                "printed counts off two empty lists: $(last_line)" ;;
+        *"both bead lists came back empty"*)
+            ok "two empty snapshots read as blind, not as an empty repository" ;;
+        *) bad "two empty snapshots are blind, not an empty repository" \
+            "got: $(last_line)" ;;
+    esac
+fi
+
+# And the first snapshot alone. `_new` — the denominator of "N of M new bead(s)
+# mirrored" — is counted off it, and the post-push snapshot is the witness that
+# contradicts it: this run pushed nothing, so beads that exist after the push
+# existed before it and the selection never saw them.
+bd_list_emits 1 '[]'
+run_sync push '[{"id":"b-n","status":"open","external_ref":""}]' '[]' '[]'
+if [ "$RC" -eq 0 ]; then
+    bad "an empty pre-push snapshot is blind, not nothing to push" \
+        "exited 0: $(last_line)"
+else
+    case "$(last_line)" in
+        *"of 0 new bead(s) mirrored"*)
+            bad "an empty pre-push snapshot is blind, not nothing to push" \
+                "printed a new-bead count off an empty list: $(last_line)" ;;
+        *"pre-push bead list came back empty"*)
+            ok "an empty pre-push snapshot reads as blind, not as nothing to push" ;;
+        *) bad "an empty pre-push snapshot is blind, not nothing to push" \
+            "got: $(last_line)" ;;
+    esac
+fi
+
+# ...and the control the three above would otherwise be free to pass by refusing
+# everything: a run where both snapshots hold beads still reports its two counts
+# as numbers and exits 0.
+run_sync push \
+    "[{\"id\":\"b-mir\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\"}]" '[]' '[]'
+if [ "$RC" -eq 0 ] &&
+   [ "$(last_line)" = "bd-gh-sync: pushed 0 new bead(s), closed 0 stale GH mirror(s)." ]; then
+    ok "a run with both snapshots readable still prints both counts and exits 0"
+else
+    bad "a run with both snapshots readable still prints both counts and exits 0" \
+        "rc=$RC: $(last_line)"
+fi
 
 # `subprocess.run(..., check=False)` with the return code discarded: a mirror
 # GitHub refused to close is the one outcome the operator has to act on, and it
@@ -1189,6 +1316,40 @@ elif [ -n "${_l##*WARNING*b-claim*}" ]; then
     bad "the summary reports every condition at once" "moved bead lost: $_l"
 else
     ok "a failed batch, a hold, an orphan and a moved bead share one summary line"
+fi
+
+# --- gqlc-w4q9 review: the header's claim has to hold on every exit ----------
+# "Both actions end by writing their verdict to the last stderr line" is what
+# .claude/settings.json and pre-push are built on, and `mktemp -d` failing broke
+# it: a bare `|| exit 0` with nothing said. Both callers keep only that line, so
+# a run that produced none is indistinguishable from one that had nothing to do
+# — the same silence the rest of this file exists to remove, on the one early
+# exit that is a fault rather than a repository where sync is not configured.
+for act in pull push; do
+    MKTEMP_RC=1
+    run_sync "$act" '[{"id":"b-n","status":"open","external_ref":""}]' '[]' '[]'
+    MKTEMP_RC=0
+    if [ -z "$(last_line)" ]; then
+        bad "a temp directory that cannot be made is reported ($act)" \
+            "exited $RC without a word"
+    else
+        case "$(last_line)" in
+            *"SKIPPING $act"*)
+                ok "a temp directory that cannot be made is reported ($act)" ;;
+            *) bad "a temp directory that cannot be made is reported ($act)" \
+                "got: $(last_line)" ;;
+        esac
+    fi
+done
+
+# ...and the control: the stub is only ever a stub when the knob is set, so a
+# run with it unset has to reach GitHub exactly as before. Without this the two
+# cases above would pass just as well against a stub that always failed.
+run_sync push '[{"id":"b-n","status":"open","external_ref":""}]' '[]' '[]'
+if [ "$(last_line)" = "bd-gh-sync: pushed 1 new bead(s), closed 0 stale GH mirror(s)." ]; then
+    ok "the mktemp stub is transparent when its knob is unset"
+else
+    bad "the mktemp stub is transparent when its knob is unset" "got: $(last_line)"
 fi
 
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"
