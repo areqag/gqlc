@@ -128,8 +128,7 @@ binding's labels accumulate to their union while an edge binding's types
 narrow to their intersection, a relationship having exactly one type; an
 empty intersection is refused as unsatisfiable. Labels may be empty: an
 unlabelled binding's type is inferred from the edges that touch it. An edge
-binding
-also carries a **direction** marker (a directed edge stores its endpoints
+binding also carries a **direction** marker (a directed edge stores its endpoints
 canonically source→target; an undirected edge stores them in textual order
 with the resolver trying both orientations, see **Direction**, query side)
 and an **edge cardinality** axis (see **Hop range**) distinguishing
