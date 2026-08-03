@@ -15,8 +15,8 @@ const samplesSeenAfterQueryText = `MATCH (s:Sample) WHERE s.seenAt > $seenAfter 
 // SamplesSeenAfter executes the SamplesSeenAfter query.
 //
 //	MATCH (s:Sample) WHERE s.seenAt > $seenAfter RETURN s.id AS id ORDER BY s.seenAt
-func (q *Queries) SamplesSeenAfter(ctx context.Context, seenAfter *time.Time) ([]int64, error) {
-	records, err := q.db.run(ctx, samplesSeenAfterQueryText, map[string]any{"seenAfter": seenAfter}, neo4j.AccessModeRead)
+func (q *Queries) SamplesSeenAfter(ctx context.Context, arg *time.Time) ([]int64, error) {
+	records, err := q.db.run(ctx, samplesSeenAfterQueryText, map[string]any{"seenAfter": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
 	}

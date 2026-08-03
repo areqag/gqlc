@@ -8,8 +8,8 @@ import (
 )
 
 type ReadQuerier interface {
-	ReadingAt(ctx context.Context, id int64) (time.Time, error)
-	OneReading(ctx context.Context, id int64) (Reading, error)
+	ReadingAt(ctx context.Context, arg int64) (time.Time, error)
+	OneReading(ctx context.Context, arg int64) (Reading, error)
 	AllReadings(ctx context.Context) ([]time.Time, error)
 }
 

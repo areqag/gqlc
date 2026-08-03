@@ -8,7 +8,7 @@ import (
 )
 
 type ReadQuerier interface {
-	SamplesSeenAfter(ctx context.Context, seenAfter *time.Time) ([]int64, error)
+	SamplesSeenAfter(ctx context.Context, arg *time.Time) ([]int64, error)
 }
 
 type WriteQuerier interface {

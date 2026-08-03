@@ -13,12 +13,12 @@ const readingAtQueryText = `MATCH (r:Reading) WHERE r.id = $id RETURN r.takenAt 
 // ReadingAt executes the ReadingAt query.
 //
 //	MATCH (r:Reading) WHERE r.id = $id RETURN r.takenAt AS takenAt
-func (q *Queries) ReadingAt(ctx context.Context, id int64) (time.Time, error) {
+func (q *Queries) ReadingAt(ctx context.Context, arg int64) (time.Time, error) {
 	stmt, err := q.cypherStmt("$gqlc$", readingAtQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return time.Time{}, err
 	}
-	args, err := agtypeArgs(map[string]any{"id": id})
+	args, err := agtypeArgs(map[string]any{"id": arg})
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -58,12 +58,12 @@ const oneReadingQueryText = `MATCH (r:Reading) WHERE r.id = $id RETURN r`
 // OneReading executes the OneReading query.
 //
 //	MATCH (r:Reading) WHERE r.id = $id RETURN r
-func (q *Queries) OneReading(ctx context.Context, id int64) (Reading, error) {
+func (q *Queries) OneReading(ctx context.Context, arg int64) (Reading, error) {
 	stmt, err := q.cypherStmt("$gqlc$", oneReadingQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return Reading{}, err
 	}
-	args, err := agtypeArgs(map[string]any{"id": id})
+	args, err := agtypeArgs(map[string]any{"id": arg})
 	if err != nil {
 		return Reading{}, err
 	}

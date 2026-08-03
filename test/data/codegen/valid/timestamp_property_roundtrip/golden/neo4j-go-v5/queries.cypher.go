@@ -31,8 +31,8 @@ const eventsAfterQueryText = `MATCH (e:Event) WHERE e.occurredAt > $since RETURN
 // EventsAfter executes the EventsAfter query.
 //
 //	MATCH (e:Event) WHERE e.occurredAt > $since RETURN e.id AS id ORDER BY e.occurredAt
-func (q *Queries) EventsAfter(ctx context.Context, since time.Time) ([]int64, error) {
-	records, err := q.db.run(ctx, eventsAfterQueryText, map[string]any{"since": since}, neo4j.AccessModeRead)
+func (q *Queries) EventsAfter(ctx context.Context, arg time.Time) ([]int64, error) {
+	records, err := q.db.run(ctx, eventsAfterQueryText, map[string]any{"since": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
 	}
@@ -55,8 +55,8 @@ const eventsSeenAfterQueryText = `MATCH (e:Event) WHERE e.seenAt > $seenAfter RE
 // EventsSeenAfter executes the EventsSeenAfter query.
 //
 //	MATCH (e:Event) WHERE e.seenAt > $seenAfter RETURN e.id AS id ORDER BY e.seenAt
-func (q *Queries) EventsSeenAfter(ctx context.Context, seenAfter *time.Time) ([]int64, error) {
-	records, err := q.db.run(ctx, eventsSeenAfterQueryText, map[string]any{"seenAfter": seenAfter}, neo4j.AccessModeRead)
+func (q *Queries) EventsSeenAfter(ctx context.Context, arg *time.Time) ([]int64, error) {
+	records, err := q.db.run(ctx, eventsSeenAfterQueryText, map[string]any{"seenAfter": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
 	}
@@ -79,8 +79,8 @@ const eventAtQueryText = `MATCH (e:Event) WHERE e.id = $id RETURN e.occurredAt A
 // EventAt executes the EventAt query.
 //
 //	MATCH (e:Event) WHERE e.id = $id RETURN e.occurredAt AS occurredAt
-func (q *Queries) EventAt(ctx context.Context, id int64) (time.Time, error) {
-	records, err := q.db.run(ctx, eventAtQueryText, map[string]any{"id": id}, neo4j.AccessModeRead)
+func (q *Queries) EventAt(ctx context.Context, arg int64) (time.Time, error) {
+	records, err := q.db.run(ctx, eventAtQueryText, map[string]any{"id": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -105,8 +105,8 @@ const eventSeenAtQueryText = `MATCH (e:Event) WHERE e.id = $id RETURN e.seenAt A
 // EventSeenAt executes the EventSeenAt query.
 //
 //	MATCH (e:Event) WHERE e.id = $id RETURN e.seenAt AS seenAt
-func (q *Queries) EventSeenAt(ctx context.Context, id int64) (*time.Time, error) {
-	records, err := q.db.run(ctx, eventSeenAtQueryText, map[string]any{"id": id}, neo4j.AccessModeRead)
+func (q *Queries) EventSeenAt(ctx context.Context, arg int64) (*time.Time, error) {
+	records, err := q.db.run(ctx, eventSeenAtQueryText, map[string]any{"id": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
 	}
@@ -133,8 +133,8 @@ const oneEventQueryText = `MATCH (e:Event) WHERE e.id = $id RETURN e`
 // OneEvent executes the OneEvent query.
 //
 //	MATCH (e:Event) WHERE e.id = $id RETURN e
-func (q *Queries) OneEvent(ctx context.Context, id int64) (Event, error) {
-	records, err := q.db.run(ctx, oneEventQueryText, map[string]any{"id": id}, neo4j.AccessModeRead)
+func (q *Queries) OneEvent(ctx context.Context, arg int64) (Event, error) {
+	records, err := q.db.run(ctx, oneEventQueryText, map[string]any{"id": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return Event{}, err
 	}

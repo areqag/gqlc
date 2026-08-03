@@ -8,11 +8,11 @@ import (
 )
 
 type ReadQuerier interface {
-	EventsAfter(ctx context.Context, since time.Time) ([]int64, error)
-	EventsSeenAfter(ctx context.Context, seenAfter *time.Time) ([]int64, error)
-	EventAt(ctx context.Context, id int64) (time.Time, error)
-	EventSeenAt(ctx context.Context, id int64) (*time.Time, error)
-	OneEvent(ctx context.Context, id int64) (Event, error)
+	EventsAfter(ctx context.Context, arg time.Time) ([]int64, error)
+	EventsSeenAfter(ctx context.Context, arg *time.Time) ([]int64, error)
+	EventAt(ctx context.Context, arg int64) (time.Time, error)
+	EventSeenAt(ctx context.Context, arg int64) (*time.Time, error)
+	OneEvent(ctx context.Context, arg int64) (Event, error)
 }
 
 type WriteQuerier interface {

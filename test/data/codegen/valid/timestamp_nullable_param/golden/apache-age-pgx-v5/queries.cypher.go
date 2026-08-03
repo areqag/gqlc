@@ -13,12 +13,12 @@ const samplesSeenAfterQueryText = `MATCH (s:Sample) WHERE s.seenAt > $seenAfter 
 // SamplesSeenAfter executes the SamplesSeenAfter query.
 //
 //	MATCH (s:Sample) WHERE s.seenAt > $seenAfter RETURN s.id AS id ORDER BY s.seenAt
-func (q *Queries) SamplesSeenAfter(ctx context.Context, seenAfter *time.Time) ([]int64, error) {
+func (q *Queries) SamplesSeenAfter(ctx context.Context, arg *time.Time) ([]int64, error) {
 	stmt, err := q.cypherStmt("$gqlc$", samplesSeenAfterQueryText, "v0 ag_catalog.agtype")
 	if err != nil {
 		return nil, err
 	}
-	args, err := agtypeArgs(map[string]any{"seenAfter": agtypeNullableMicros(seenAfter)})
+	args, err := agtypeArgs(map[string]any{"seenAfter": agtypeNullableMicros(arg)})
 	if err != nil {
 		return nil, err
 	}
