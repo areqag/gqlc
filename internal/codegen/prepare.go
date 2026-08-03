@@ -445,6 +445,7 @@ func entityStructName(kind EntityKind, labels graph.LabelSetKey, edgeKey schema.
 			return "", fmt.Errorf("%w: node type with multi-label set %q requires an explicit Name", ErrUnnamedMultiLabelType, string(labels))
 		}
 		if len(parts) == 0 {
+			//gqlc:unreachable entity-empty-node-labels
 			return "", fmt.Errorf("%w: node type with empty label set requires an explicit Name", ErrUnnamedMultiLabelType)
 		}
 		name := paramFieldName(parts[0])
@@ -457,9 +458,11 @@ func entityStructName(kind EntityKind, labels graph.LabelSetKey, edgeKey schema.
 	// Edge.
 	labelParts := edgeKey.KeyLabels.Split()
 	if len(labelParts) > 1 {
+		//gqlc:unreachable entity-multi-label-edge
 		return "", fmt.Errorf("%w: multi-label edge type (%s -[:%s]-> %s) requires an explicit Name", ErrUnnamedMultiLabelType, string(edgeKey.Source), string(edgeKey.KeyLabels), string(edgeKey.Target))
 	}
 	if len(labelParts) == 0 {
+		//gqlc:unreachable entity-empty-edge-label
 		return "", fmt.Errorf("%w: edge type with empty label requires an explicit Name", ErrUnnamedMultiLabelType)
 	}
 	if ambiguousEdgeLabel {
@@ -551,6 +554,7 @@ func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entity
 			return fmt.Errorf("%w: query %q at position %d collides with reserved identifier", ErrIdentifierCollision, q.Name, i)
 		}
 		if q.Cardinality != CardinalityOne && q.Cardinality != CardinalityMany && q.Cardinality != CardinalityExec {
+			//gqlc:unreachable cardinality-not-in-set
 			return fmt.Errorf("%w: query %q at position %d has unrecognised cardinality %d", ErrInvalidCardinality, q.Name, i, q.Cardinality)
 		}
 		// Cardinality × shape gate (spec §4.9). Runs before the column-type
@@ -1065,6 +1069,7 @@ func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex m
 	case resolver.ResolvedTemporal:
 		ty, ok := tm.Temporal(tt.Kind)
 		if !ok {
+			//gqlc:unreachable list-elem-temporal
 			return nil, fmt.Errorf("%w: list element projects %s", ErrUnrepresentableTemporal, tt)
 		}
 		return &ListElem{Kind: ColumnTemporal, GoType: ty}, nil

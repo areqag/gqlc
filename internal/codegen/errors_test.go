@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode"
 
 	"github.com/stretchr/testify/suite"
 )
@@ -36,6 +37,11 @@ const (
 
 // moduleRoot is the repository root, relative to this package.
 const moduleRoot = "../.."
+
+// errorsFile declares allSentinels. The source scan reads every non-test
+// file in the package, not just this one, but names it as the member
+// whose absence the scan cannot otherwise report.
+const errorsFile = "errors.go"
 
 // codegenPkgPath is this package's import path. The coverage sweep needs
 // it as a -coverpkg argument and as the prefix a profile line carries.
@@ -72,14 +78,37 @@ var (
 		"which `TestSentinelTaxonomy` holds against the code.*"
 )
 
-// failSite is one //gqlc:unreachable tag: where it sits, and which
-// sentinel the return it guards carries. The sentinel is read off the
-// AST rather than written into the tag — a tag that named its own
-// sentinel would be one more hand-maintained mirror.
+// stageSpecAnchors is every place in the C0–C6 series that reads as
+// current and is not: each stage's sentinel-set section, and each
+// construct-to-sentinel table. Twelve of them, written out rather than
+// counted — see TestStageSpecsReadAsHistory for why a count is not
+// enough.
+var stageSpecAnchors = []string{
+	"codegen-stage-c0.md | ## 9. Sentinel sets",
+	"codegen-stage-c1.md | **Out of scope, routed to the appropriate sentinel:**",
+	"codegen-stage-c1.md | ## 10. Sentinel set delta — the C1 view",
+	"codegen-stage-c2.md | **Out of scope, routed to the appropriate sentinel:**",
+	"codegen-stage-c2.md | ## 9. Sentinel set delta — the C2 view",
+	"codegen-stage-c3.md | **Out of scope, routed to the appropriate sentinel:**",
+	"codegen-stage-c3.md | ## 9. Sentinel set delta — the C3 view",
+	"codegen-stage-c4.md | **Out of scope, routed to the appropriate sentinel:**",
+	"codegen-stage-c4.md | ## 9. Sentinel set delta — the C4 view",
+	"codegen-stage-c5.md | **Out of scope, routed to the appropriate sentinel:**",
+	"codegen-stage-c5.md | ## 9. Sentinel set delta — the C5 view",
+	"codegen-stage-c6.md | ## 7. Sentinel set delta — the C6 view",
+}
+
+// failSite is one branch that returns a sentinel: where it is, which
+// sentinel it carries, and the //gqlc:unreachable site name above it —
+// empty when the branch carries no tag, which is what puts it in §2's
+// catchment rather than §3's. The sentinel is read off the AST rather
+// than written into the tag: a tag naming its own sentinel would be one
+// more hand-maintained mirror.
 type failSite struct {
 	file     string
-	line     int // the tagged return statement's line
+	line     int // the returning statement's line
 	sentinel string
+	site     string
 }
 
 // SentinelTaxonomySuite fences the documented taxonomy against the code.
@@ -106,10 +135,17 @@ type SentinelTaxonomySuite struct {
 	excluded    []string
 
 	// unreachedSites maps each fail-site named in §3's second column to
-	// the sentinel of the row that names it, and tagged holds the
-	// //gqlc:unreachable tags the package's sources carry.
+	// the sentinel of the row that names it; failSites holds every
+	// sentinel-returning branch the package's sources carry, in file and
+	// line order, and tagged is the subset of those carrying a
+	// //gqlc:unreachable tag, keyed by site name.
 	unreachedSites map[string]string
+	failSites      []failSite
 	tagged         map[string]failSite
+
+	// corpusCov memoises the corpus coverage sweep. Two tests read it and
+	// it is the expensive part of this suite.
+	corpusCov coverCounts
 }
 
 func TestSentinelTaxonomy(t *testing.T) {
@@ -117,7 +153,17 @@ func TestSentinelTaxonomy(t *testing.T) {
 }
 
 func (s *SentinelTaxonomySuite) SetupSuite() {
-	s.declared, s.tagged = s.scanSources()
+	s.declared, s.failSites = s.scanSources()
+
+	s.tagged = make(map[string]failSite)
+	for _, site := range s.failSites {
+		if site.site == "" {
+			continue
+		}
+		first, dup := s.tagged[site.site]
+		s.Require().False(dup, "fail-site %s is tagged twice (%s:%d and %s:%d); site names are the fence's keys and must be unique", site.site, first.file, first.line, site.file, site.line)
+		s.tagged[site.site] = site
+	}
 
 	byMessage := make(map[string]string, len(s.declared))
 	for ident, msg := range s.declared {
@@ -242,26 +288,16 @@ func (s *SentinelTaxonomySuite) TestUnreachedBranchesAreTagged() {
 	}
 }
 
-// TestUnreachedBranchesAreUnreached is the measurement behind §3. Every
-// tagged branch must go unexecuted when the corpus runs: the fixture
-// conformance suite, the backend suites and the CLI, i.e. every package
-// whose test binary links this one.
+// TestUnreachedBranchesAreUnreached is the measurement behind §3: every
+// tagged branch must go unexecuted when the corpus runs. Its mirror is
+// TestReachableBranchesAreReached, which asserts the opposite of every
+// untagged one.
 //
-// The set is derived from `go list` rather than listed, so a new consumer
-// joins it by existing. This package is excluded on purpose and it is the
-// whole point of the exclusion: a test inside package codegen can call an
-// unexported function with a hand-built resolver value and reach a branch
-// no parser can produce, and counting that as reachability is exactly how
-// three unreachable branches came to sit in §2 — one of them the twin of
-// a branch that had sat in §3 all along, the two differing in nothing but
-// which had attracted a unit test. Excluding this package's own tests is
-// what stops that difference from being expressible.
-//
-// The measurement is one-directional by design. A tagged branch the
-// corpus reaches fails; an untagged branch the corpus misses does not,
-// because "no fixture covers it yet" and "no input can reach it" are
-// different claims and only the second is what a tag asserts. So the
-// error it cannot make is the fail-open one: silencing a live refusal.
+// The corpus is every package whose test binary links this one, minus
+// this one — an in-package test can hand-build a resolver value and
+// reach a branch no parser can produce, which is how three unreachable
+// branches came to sit in §2. §5.1 of the taxonomy document carries the
+// argument.
 func (s *SentinelTaxonomySuite) TestUnreachedBranchesAreUnreached() {
 	counts := s.corpusCoverage()
 
@@ -283,35 +319,111 @@ func (s *SentinelTaxonomySuite) TestUnreachedBranchesAreUnreached() {
 	}
 }
 
+// TestReachableBranchesAreReached is the measurement behind §2, and the
+// mirror of the one behind §3. Every sentinel-returning branch that
+// carries no //gqlc:unreachable tag falls in §2's catchment, so §2
+// claims some input reaches it — and that claim is paid for here, in the
+// same corpus profile, with the opposite comparison.
+//
+// Without it §2 is the only unfenced table in a document whose whole
+// premise is that unfenced tables drift. It shipped a row for a branch
+// nothing had ever executed, and three more halves of rows besides;
+// none of them were visible to a fence that only ever asked whether the
+// branches claiming to be dead were dead.
+//
+// The exemption is a sentinel outside allSentinels — which is to say one
+// with a §4 row, since TestDeclaredSentinelsAreAccounted admits no third
+// option. That set is read off the document rather than listed here, so
+// widening it costs the row that says why.
+func (s *SentinelTaxonomySuite) TestReachableBranchesAreReached() {
+	counts := s.corpusCoverage()
+
+	excluded := make(map[string]bool, len(s.excluded))
+	for _, ident := range s.excluded {
+		excluded[ident] = true
+	}
+
+	for _, site := range s.failSites {
+		if site.site != "" {
+			continue // §3's, and TestUnreachedBranchesAreUnreached owns it.
+		}
+		if !s.reachable[site.sentinel] {
+			s.Require().True(excluded[site.sentinel],
+				"%s:%d returns %s, which is neither in allSentinels nor documented under %q in %s; only a sentinel documented as deliberately unreachable is exempt from the corpus-reach measurement",
+				site.file, site.line, site.sentinel, excludedHeading, taxonomyDoc)
+			continue
+		}
+		count, ok := counts.blockFor(codegenPkgPath+"/"+site.file, site.line)
+		s.Require().True(ok,
+			"the corpus coverage profile has no block covering %s:%d, which returns %s; the fence cannot measure a line the profile does not carry",
+			site.file, site.line, site.sentinel)
+		s.Require().NotZero(count,
+			"%s:%d returns %s and carries no //gqlc:unreachable tag, so %s %s claims an input reaches it — but no test binary in the corpus executes it. Either add a negative fixture under test/data/codegen/invalid that fires this branch, or tag the return //gqlc:unreachable <site> and add a row under %q saying which earlier check shadows it or which invariant would have to break",
+			site.file, site.line, site.sentinel, taxonomyDoc, taxonomyHeading, unreachedHeading)
+	}
+}
+
 // TestStageSpecsReadAsHistory holds the C0–C6 stage specs' sentinel
 // sections and construct-to-sentinel tables against the note that says
 // they are history. The tables are frozen by design, so nothing else can
 // tell a reader grepping for a construct that they have landed in the
 // past — C5's table is the series' last and nineteen of its twenty rows
 // carry no self-signal at all.
+//
+// The anchors are enumerated, not counted. A count is satisfiable by the
+// wrong set of the right size: a heading renamed out from under
+// stageSentinelHead and a second one added elsewhere would keep twelve
+// and change which twelve, and a glob that lost a spec would keep the
+// specs it did find. Set equality names the anchor that moved.
 func (s *SentinelTaxonomySuite) TestStageSpecsReadAsHistory() {
 	specs, err := filepath.Glob(stageSpecGlob)
 	s.Require().NoError(err)
-	s.Require().NotEmpty(specs, "no stage specs matched %s; the fence would pass vacuously", stageSpecGlob)
 
+	var found []string
 	for _, spec := range specs {
 		src, err := os.ReadFile(spec) //nolint:gosec // fixed glob under docs/specs
 		s.Require().NoError(err)
 		lines := strings.Split(string(src), "\n")
 
-		anchors := 0
 		for i, line := range lines {
 			trimmed := strings.TrimSpace(line)
 			if !stageSentinelHead.MatchString(trimmed) && trimmed != stageTableHead {
 				continue
 			}
-			anchors++
+			found = append(found, filepath.Base(spec)+" | "+trimmed)
 			s.Require().Equal(historicalNote, paragraphAfter(lines, i),
 				"%s:%d — %q is a snapshot the fence deliberately does not hold against the code, so it must carry the note that says so, verbatim and as the paragraph directly below it",
 				spec, i+1, trimmed)
 		}
-		s.Require().NotZero(anchors, "%s carries no sentinel section; the fence keys off %q and %q", spec, stageSentinelHead, stageTableHead)
 	}
+
+	missing, extra := setDiff(stageSpecAnchors, found)
+	s.Require().Empty(missing,
+		"%s no longer carry these historical anchors, each of which is a place in the C0–C6 series that reads as current and is not:\n  %s\nA renamed heading, a deleted section or a glob that lost a spec all look like this. Restore the anchor, or drop it from stageSpecAnchors and say in the commit why that place no longer misleads.",
+		stageSpecGlob, strings.Join(missing, "\n  "))
+	s.Require().Empty(extra,
+		"the stage specs carry historical anchors stageSpecAnchors does not name:\n  %s\nA new sentinel section or construct table in a frozen spec is a place a reader can land and read the past as the present; add it to stageSpecAnchors along with the note.",
+		strings.Join(extra, "\n  "))
+}
+
+// setDiff returns the elements of want that got lacks and the elements of
+// got that want lacks, both sorted. Two sets are equal when both are
+// empty, and a caller that prints them tells the reader which element
+// moved rather than by how many the two counts differ.
+func setDiff(want, got []string) (missing, extra []string) {
+	for _, w := range want {
+		if !slices.Contains(got, w) {
+			missing = append(missing, w)
+		}
+	}
+	for _, g := range got {
+		if !slices.Contains(want, g) {
+			extra = append(extra, g)
+		}
+	}
+	slices.Sort(missing)
+	slices.Sort(extra)
+	return missing, extra
 }
 
 // paragraphAfter returns the first non-empty paragraph below lines[i],
@@ -351,6 +463,12 @@ type coverBlock struct {
 // file:line. Innermost because a fail-site's own basic block is the
 // tightest range over it, and it is that block's count — not the
 // function's — that answers whether the branch ran.
+//
+// The ordering is total, and it has to be: coverCounts is a map, so a
+// tie-break that left two candidates incomparable would resolve by
+// iteration order and the fence would report a different count on
+// different runs. Line span first, then column span, then the block's
+// own coordinates so that no two distinct blocks compare equal.
 func (c coverCounts) blockFor(file string, line int) (int, bool) {
 	var best coverBlock
 	found := false
@@ -358,7 +476,7 @@ func (c coverCounts) blockFor(file string, line int) (int, bool) {
 		if block.file != file || line < block.startLine || line > block.endLine {
 			continue
 		}
-		if found && block.endLine-block.startLine >= best.endLine-best.startLine {
+		if found && !tighter(block, best) {
 			continue
 		}
 		best, found = block, true
@@ -366,9 +484,32 @@ func (c coverCounts) blockFor(file string, line int) (int, bool) {
 	return c[best], found
 }
 
+// tighter reports whether a is the narrower of two blocks over the same
+// line, ordering them totally.
+func tighter(a, b coverBlock) bool {
+	if a.endLine-a.startLine != b.endLine-b.startLine {
+		return a.endLine-a.startLine < b.endLine-b.startLine
+	}
+	if a.startLine != b.startLine {
+		return a.startLine > b.startLine
+	}
+	if a.startCol != b.startCol {
+		return a.startCol > b.startCol
+	}
+	if a.endLine != b.endLine {
+		return a.endLine < b.endLine
+	}
+	return a.endCol < b.endCol
+}
+
 // corpusCoverage runs every package that depends on internal/codegen
 // under coverage of internal/codegen, and returns the merged profile.
+// Memoised: it is the expensive half of this suite and both coverage
+// assertions read it.
 func (s *SentinelTaxonomySuite) corpusCoverage() coverCounts {
+	if s.corpusCov != nil {
+		return s.corpusCov
+	}
 	pkgs := s.corpusPackages()
 	profile := filepath.Join(s.T().TempDir(), "corpus.cov")
 
@@ -395,6 +536,7 @@ func (s *SentinelTaxonomySuite) corpusCoverage() coverCounts {
 		counts[block] += s.atoi(m[7])
 	}
 	s.Require().NotEmpty(counts, "the corpus coverage profile is empty; the measurement behind %s would pass vacuously", unreachedHeading)
+	s.corpusCov = counts
 	return counts
 }
 
@@ -409,20 +551,15 @@ func (s *SentinelTaxonomySuite) atoi(field string) int {
 }
 
 // corpusPackages asks the toolchain which packages link this one, minus
-// this one. The set is derived so that a consumer joins it by existing;
-// hand-kept, it would shrink silently every time one was added, and a
-// smaller sweep finds more branches unreached.
+// this one. Derived rather than listed so a consumer joins it by
+// existing; hand-kept, it would shrink silently and a smaller sweep
+// finds more branches unreached.
 //
-// `-test` is what makes the answer complete, and its absence is not
-// visible from the result. Without it `go list` reports only what a
-// package's non-test build imports, and `internal/codegen/conformance`
-// — the package that runs every fixture under test/data/codegen,
-// including all twenty-nine negative ones — holds nothing but
-// conformance_test.go. It would drop out of the sweep, taking the whole
-// negative corpus with it and leaving a fence that measures the
-// backends and the CLI while reporting that it measured the fixtures.
-// With `-test` the listing gains the synthesised test binaries, whose
-// dependency closure is the one the measurement needs.
+// `-test` is load-bearing and its absence does not show in the result:
+// without it `go list` reports only non-test imports, and
+// internal/codegen/conformance — which runs the whole negative corpus —
+// holds nothing but conformance_test.go and would drop out. Hence the
+// named-member check below.
 func (s *SentinelTaxonomySuite) corpusPackages() []string {
 	out := s.run("list", "-test", "-f", "{{.ImportPath}}|{{join .Deps \" \"}}", "./...")
 
@@ -505,36 +642,48 @@ func (s *SentinelTaxonomySuite) TestDeclaredSentinelsAreAccounted() {
 
 // scanSources reads the package's non-test sources once, returning every
 // package-level Err* value paired with its errors.New argument, and every
-// //gqlc:unreachable tag keyed by fail-site name. Read from source rather
-// than through hand-written tables because such a table is one more
-// mirror of the same set, and would drift the way the document did.
+// sentinel-returning branch. Read from source rather than through
+// hand-written tables because such a table is one more mirror of the same
+// set, and would drift the way the document did.
 //
 // Every source file, not just errors.go: nothing stops a sentinel being
 // declared beside the code that returns it, and a sweep that reads one
-// file would call such a sentinel undeclared and pass. The tags are
+// file would call such a sentinel undeclared and pass. The fail-sites are
 // spread across the package by nature.
-func (s *SentinelTaxonomySuite) scanSources() (map[string]string, map[string]failSite) {
+func (s *SentinelTaxonomySuite) scanSources() (map[string]string, []failSite) {
 	entries, err := os.ReadDir(".")
 	s.Require().NoError(err)
 
 	declared := make(map[string]string)
-	tagged := make(map[string]failSite)
-	files := 0
+	var sites []failSite
+	var scanned []string
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		files++
+		scanned = append(scanned, name)
 		fset := token.NewFileSet()
 		file, err := parser.ParseFile(fset, name, nil, parser.ParseComments)
 		s.Require().NoError(err)
 		s.collectSentinels(name, file, declared)
-		s.collectUnreachableTags(name, fset, file, tagged)
+		sites = append(sites, s.collectFailSites(name, fset, file)...)
 	}
-	s.Require().NotZero(files, "no non-test .go files found; the fence ran from the wrong directory and would pass vacuously")
+	// errorsFile is named rather than counted for the same reason
+	// conformancePkgPath is: a scan that lost it still finds files, still
+	// finds declarations, and still passes. Nothing else in the sweep is
+	// specific enough to notice.
+	s.Require().Contains(scanned, errorsFile,
+		"the source scan read %v, which does not include %s; the fence ran from the wrong directory, and a scan that misses the file declaring allSentinels reports every sentinel undeclared or none",
+		scanned, errorsFile)
 	s.Require().NotEmpty(declared, "no Err* declarations found in package codegen — the fence would pass vacuously")
-	return declared, tagged
+	slices.SortFunc(sites, func(a, b failSite) int {
+		if a.file != b.file {
+			return strings.Compare(a.file, b.file)
+		}
+		return a.line - b.line
+	})
+	return declared, sites
 }
 
 // collectSentinels adds one file's package-level Err* declarations to out.
@@ -565,67 +714,92 @@ func (s *SentinelTaxonomySuite) collectSentinels(path string, file *ast.File, ou
 	}
 }
 
-// isSentinelIdent recognises a sentinel by name: "Err" followed by an
-// upper-case rune, which is how all sixteen are written.
+// isSentinelIdent recognises a sentinel by name: "Err" followed by
+// anything that is not a lower-case letter.
 //
-// Narrower than the bare "Err" prefix on purpose. That prefix also
-// matches the "Error…" family — an ErrorContext, an ErrorFormat, an
-// Errors slice — none of which are errors.New calls, so each would
-// reach the hard Require below and fail the suite. The effect would be a
-// documentation fence forbidding a name in production code it does not
-// document. Requiring the upper-case rune costs nothing on this side:
-// it still admits every sentinel, and a sentinel that ever were named
-// otherwise would be caught anyway, one loop up, as an allSentinels
-// member whose message no declaration constructs.
+// Narrower than the bare "Err" prefix on purpose, and wider than "Err"
+// plus an ASCII capital. The bare prefix also matches the "Error…"
+// family — an ErrorContext, an ErrorFormat, an Errors slice — none of
+// which are errors.New calls, so each would reach the hard Require in
+// collectSentinels and fail the suite: a documentation fence forbidding
+// a name in production code it does not document. Excluding a
+// lower-case continuation excludes exactly that family.
+//
+// It is the complement that matters, though. Testing for an ASCII
+// capital instead would let ErrX where X is a digit, an underscore or a
+// non-ASCII capital slip through unseen, and "unseen" is the failure
+// this predicate feeds: a declared sentinel the scan does not recognise
+// is one the document is never asked to carry. The allSentinels loop
+// catches such a name only if it is in the slice, and the whole point of
+// the third direction is the sentinel that is not.
 func isSentinelIdent(ident *ast.Ident) bool {
 	rest, ok := strings.CutPrefix(ident.Name, "Err")
 	if !ok || rest == "" {
 		return false
 	}
-	return rest[0] >= 'A' && rest[0] <= 'Z'
+	first := []rune(rest)[0]
+	return !unicode.IsLower(first)
 }
 
-// collectUnreachableTags adds one file's //gqlc:unreachable tags to out,
-// resolving each to the return statement on the line below it and to the
-// sentinel that return carries.
-func (s *SentinelTaxonomySuite) collectUnreachableTags(path string, fset *token.FileSet, file *ast.File, out map[string]failSite) {
-	returns := make(map[int]*ast.ReturnStmt)
-	ast.Inspect(file, func(n ast.Node) bool {
-		if ret, ok := n.(*ast.ReturnStmt); ok {
-			returns[fset.Position(ret.Pos()).Line] = ret
+// collectFailSites returns one file's sentinel-returning branches: every
+// return statement naming an Err* value, paired with the
+// //gqlc:unreachable site tagging it, if any.
+//
+// Both kinds are collected by one walk because the fence's two coverage
+// assertions are complements of each other — a tagged branch must measure
+// zero, an untagged one non-zero — and reading them from two different
+// scans is how the untagged half came to be unmeasured in the first
+// place.
+func (s *SentinelTaxonomySuite) collectFailSites(path string, fset *token.FileSet, file *ast.File) []failSite {
+	tagAt := make(map[int]string)
+	for _, group := range file.Comments {
+		for _, comment := range group.List {
+			if m := unreachableTag.FindStringSubmatch(comment.Text); m != nil {
+				tagAt[fset.Position(comment.End()).Line+1] = m[1]
+			}
 		}
+	}
+
+	var sites []failSite
+	returnLines := make(map[int]bool)
+	ast.Inspect(file, func(n ast.Node) bool {
+		ret, ok := n.(*ast.ReturnStmt)
+		if !ok {
+			return true
+		}
+		line := fset.Position(ret.Pos()).Line
+		returnLines[line] = true
+
+		var sentinel string
+		ast.Inspect(ret, func(n ast.Node) bool {
+			if ident, ok := n.(*ast.Ident); ok && sentinel == "" && isSentinelIdent(ident) {
+				sentinel = ident.Name
+			}
+			return sentinel == ""
+		})
+		if sentinel == "" {
+			return true
+		}
+		sites = append(sites, failSite{file: path, line: line, sentinel: sentinel, site: tagAt[line]})
 		return true
 	})
 
-	for _, group := range file.Comments {
-		for _, comment := range group.List {
-			m := unreachableTag.FindStringSubmatch(comment.Text)
-			if m == nil {
-				continue
-			}
-			site := m[1]
-			line := fset.Position(comment.End()).Line + 1
-			ret, ok := returns[line]
-			s.Require().True(ok,
-				"%s:%d: //gqlc:unreachable %s does not sit directly above a return statement; the fence reads the return on the next line to learn which sentinel the branch carries",
-				path, fset.Position(comment.Pos()).Line, site)
-
-			var sentinel string
-			ast.Inspect(ret, func(n ast.Node) bool {
-				if ident, ok := n.(*ast.Ident); ok && sentinel == "" && isSentinelIdent(ident) {
-					sentinel = ident.Name
-				}
-				return sentinel == ""
-			})
-			s.Require().NotEmpty(sentinel,
-				"%s:%d: //gqlc:unreachable %s tags a return that names no sentinel; %s %s records which sentinel each unreachable branch would fail with",
-				path, line, site, taxonomyDoc, unreachedHeading)
-
-			first, dup := out[site]
-			s.Require().False(dup, "fail-site %s is tagged twice (%s:%d and %s:%d); site names are the fence's keys and must be unique", site, first.file, first.line, path, line)
-			out[site] = failSite{file: path, line: line, sentinel: sentinel}
+	// A tag that landed on nothing is silent otherwise: it would drop out
+	// of s.tagged, §3's row for it would read as untagged, and the row
+	// would fail with a message pointing at the document rather than at
+	// the tag that moved.
+	for line, site := range tagAt {
+		if slices.ContainsFunc(sites, func(f failSite) bool { return f.line == line }) {
+			continue
 		}
+		s.Require().False(returnLines[line],
+			"%s:%d: //gqlc:unreachable %s tags a return that names no sentinel; %s %s records which sentinel each unreachable branch would fail with",
+			path, line, site, taxonomyDoc, unreachedHeading)
+		s.Require().Fail("misplaced //gqlc:unreachable tag",
+			"%s:%d: //gqlc:unreachable %s does not sit directly above a return statement; the fence reads the return on the next line to learn which sentinel the branch carries",
+			path, line-1, site)
 	}
+	return sites
 }
 
 // errorsNewArgument returns the string literal an errors.New call was
