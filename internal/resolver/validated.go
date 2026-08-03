@@ -281,6 +281,20 @@ const (
 	TemporalLocalDateTime
 	// TemporalDuration is the openCypher DURATION.
 	TemporalDuration
+
+	// TemporalCount is how many members the vocabulary has, taken from
+	// iota one line past the last of them rather than from that member's
+	// ordinal. The difference is the whole point: a kind appended above
+	// leaves the last member's ordinal alone, so `int(TemporalDuration)+1`
+	// stays 6 and a sweep sized by it goes on claiming to be whole while
+	// missing the new kind. This moves.
+	//
+	// Typed int rather than Temporal so it is a count and not a value: an
+	// untyped constant here would be assignable to Temporal, which is the
+	// one thing a successor sentinel must never be. It is also therefore
+	// not a member of the enum, so an exhaustive switch over Temporal
+	// neither needs an arm for it nor may have one.
+	TemporalCount int = iota
 )
 
 // String is the wire tag ("date" / "time" / "localtime" / "datetime" /

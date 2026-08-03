@@ -96,7 +96,8 @@ func TestTypeMapTemporal(t *testing.T) {
 		{resolver.TemporalLocalDateTime, "dbtype.LocalDateTime"},
 		{resolver.TemporalDuration, "dbtype.Duration"},
 	}
-	require.Len(t, tests, 6)
+	require.Len(t, tests, resolver.TemporalCount,
+		"the sweep must cover the resolver's whole temporal vocabulary")
 	for _, tt := range tests {
 		t.Run(tt.k.String(), func(t *testing.T) {
 			got, ok := typeMap{}.Temporal(tt.k)
@@ -110,7 +111,7 @@ func TestTypeMapTemporal(t *testing.T) {
 	// upstream and left without an arm here fails generation instead of
 	// arriving as some other kind's dbtype.
 	t.Run("kind outside the vocabulary is refused", func(t *testing.T) {
-		got, ok := typeMap{}.Temporal(resolver.TemporalDuration + 1)
+		got, ok := typeMap{}.Temporal(resolver.Temporal(resolver.TemporalCount))
 		require.False(t, ok)
 		require.Empty(t, got)
 	})

@@ -205,8 +205,9 @@ func schemaWithPayload(pt graph.PropertyType) schema.Schema {
 
 // temporalKinds is the resolver's whole temporal vocabulary, written out
 // so the sweeps below range over every kind rather than a sample. The
-// length check is what keeps it whole: a kind the resolver gains is a
-// compile failure in the type table's switch and a failure here.
+// length check against resolver.TemporalCount is what keeps it whole: a
+// kind the resolver gains is a compile failure in the type table's
+// switch and a failure here.
 var temporalKinds = []resolver.Temporal{
 	resolver.TemporalDate,
 	resolver.TemporalTime,
@@ -223,7 +224,7 @@ var temporalKinds = []resolver.Temporal{
 // none to call. The rows exist so admitting one lands as a failure
 // rather than as a quiet change of column type.
 func TestTypeMapTemporal(t *testing.T) {
-	require.Len(t, temporalKinds, int(resolver.TemporalDuration)+1,
+	require.Len(t, temporalKinds, resolver.TemporalCount,
 		"the sweep must cover the resolver's whole temporal vocabulary")
 
 	for _, k := range temporalKinds {
@@ -240,7 +241,7 @@ func TestTypeMapTemporal(t *testing.T) {
 	// refusing is what stops a kind added upstream from inheriting an
 	// answer chosen for the kinds that came before it.
 	t.Run("kind outside the vocabulary is refused", func(t *testing.T) {
-		got, ok := typeMap{}.Temporal(resolver.TemporalDuration + 1)
+		got, ok := typeMap{}.Temporal(resolver.Temporal(resolver.TemporalCount))
 		require.False(t, ok)
 		require.Empty(t, got)
 	})
