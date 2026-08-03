@@ -87,3 +87,67 @@ func (q *Queries) BinById(ctx context.Context, arg int64) (Bin, error) {
 	}
 	return value0, nil
 }
+
+const binColumnsQueryText = `MATCH (b:Bin) RETURN b.bag AS bag, b.loose AS loose, b.piles AS piles`
+
+type BinColumnsRow struct {
+	Bag   *[]any
+	Loose []any
+	Piles *[][]any
+}
+
+// BinColumns executes the BinColumns query.
+//
+//	MATCH (b:Bin) RETURN b.bag AS bag, b.loose AS loose, b.piles AS piles
+func (q *Queries) BinColumns(ctx context.Context) ([]BinColumnsRow, error) {
+	stmt, err := q.cypherStmt("$gqlc$", binColumnsQueryText, "v0 ag_catalog.agtype, v1 ag_catalog.agtype, v2 ag_catalog.agtype")
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.db.Query(ctx, stmt, "{}")
+	if err != nil {
+		return nil, fmt.Errorf("BinColumns: %w", err)
+	}
+	defer rows.Close()
+	out := make([]BinColumnsRow, 0)
+	for rows.Next() {
+		var raw0 []byte
+		var raw1 []byte
+		var raw2 []byte
+		if err := rows.Scan(&raw0, &raw1, &raw2); err != nil {
+			return nil, fmt.Errorf("BinColumns: scan row: %w", err)
+		}
+		var value0 *[]any
+		if raw0 != nil {
+			decoded, err := agtypeListOfAny(raw0)
+			if err != nil {
+				return nil, fmt.Errorf("BinColumns: decode column %q: %w", "bag", err)
+			}
+			value0 = &decoded
+		}
+		if raw1 == nil {
+			return nil, fmt.Errorf("BinColumns: column %q is non-nullable but arrived null", "loose")
+		}
+		value1, err := agtypeListOfAny(raw1)
+		if err != nil {
+			return nil, fmt.Errorf("BinColumns: decode column %q: %w", "loose", err)
+		}
+		var value2 *[][]any
+		if raw2 != nil {
+			decoded, err := agtypeListOfListOfAny(raw2)
+			if err != nil {
+				return nil, fmt.Errorf("BinColumns: decode column %q: %w", "piles", err)
+			}
+			value2 = &decoded
+		}
+		out = append(out, BinColumnsRow{
+			Bag:   value0,
+			Loose: value1,
+			Piles: value2,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("BinColumns: %w", err)
+	}
+	return out, nil
+}

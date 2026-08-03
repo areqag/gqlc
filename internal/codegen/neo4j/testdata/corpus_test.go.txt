@@ -1,6 +1,7 @@
 package neo4jcorpus
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
@@ -17,6 +18,30 @@ import (
 // float64, and an array of anything but bytes as []any.
 func node(props map[string]any) dbtype.Node {
 	return dbtype.Node{Id: 1, ElementId: "4:corpus:1", Labels: []string{"Corpus"}, Props: props}
+}
+
+// recordTx is the record shape the driver hands a query method, bound
+// through the seam the emission offers for one: Queries.WithTx takes a
+// caller-owned transaction, so a method body can be run with no
+// connection, no session and no driver behind it.
+type recordTx struct{ records []*neo4j.Record }
+
+func (t recordTx) Run(context.Context, string, map[string]any) (neo4j.ResultWithContext, error) {
+	return recordResult{records: t.records}, nil
+}
+
+type recordResult struct{ records []*neo4j.Record }
+
+func (r recordResult) Collect(context.Context) ([]*neo4j.Record, error) { return r.records, nil }
+
+// queriesOver binds a Queries whose every method reads the given rows,
+// one []any of column values per row against the shared key order.
+func queriesOver(keys []string, rows ...[]any) *Queries {
+	records := make([]*neo4j.Record, 0, len(rows))
+	for _, values := range rows {
+		records = append(records, &neo4j.Record{Keys: keys, Values: values})
+	}
+	return new(Queries).WithTx(recordTx{records: records})
 }
 
 // A list of no declared element shape is the one list whose elements the
@@ -277,5 +302,97 @@ func TestScalarNarrows(t *testing.T) {
 	}
 	if absent.Name != nil || absent.Weight != nil {
 		t.Errorf("decodeScalar(absent) = %#v, want nil nullables", absent)
+	}
+}
+
+// A query column carrying a list of no declared element shape is the
+// same claim as TestBinCarriesNullElements, one emission over: a column
+// is decoded through neo4j.GetRecordValue and a property through the
+// Props map, so the two paths narrow independently and a null that
+// survives one can still fail the other.
+func TestBinColumnsCarryNullElements(t *testing.T) {
+	q := queriesOver([]string{"loose", "bag", "piles"}, []any{
+		[]any{true, nil, 3.5},
+		[]any{int64(1), nil, "x"},
+		[]any{[]any{int64(1), nil}, []any{}},
+	})
+	got, err := q.BinColumns(t.Context())
+	if err != nil {
+		t.Fatalf("BinColumns(nulls) = error %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("BinColumns(nulls) returned %d rows, want 1", len(got))
+	}
+	row := got[0]
+	if want := []any{true, nil, 3.5}; !reflect.DeepEqual(row.Loose, want) {
+		t.Errorf("BinColumns(nulls)[0].Loose = %#v, want %#v", row.Loose, want)
+	}
+	if row.Bag == nil {
+		t.Fatalf("BinColumns(nulls)[0].Bag = nil, want a list")
+	}
+	if want := []any{int64(1), nil, "x"}; !reflect.DeepEqual(*row.Bag, want) {
+		t.Errorf("BinColumns(nulls)[0].Bag = %#v, want %#v", *row.Bag, want)
+	}
+	if row.Piles == nil {
+		t.Fatalf("BinColumns(nulls)[0].Piles = nil, want a list")
+	}
+	if want := [][]any{{int64(1), nil}, {}}; !reflect.DeepEqual(*row.Piles, want) {
+		t.Errorf("BinColumns(nulls)[0].Piles = %#v, want %#v", *row.Piles, want)
+	}
+}
+
+// The control on the test above: a column whose elements do have a
+// declared width still narrows to it, so "carry the element as it
+// arrived" is the rule for the one width that has no narrower carrier
+// and not a rule the emission applies everywhere. Both directions are
+// here — []byte arrives as itself and is kept, float64 arrives wider
+// than the declared float32 and is narrowed — because a decoder that
+// carried everything bare would pass on the first alone.
+func TestListyColumnsNarrowEachElement(t *testing.T) {
+	q := queriesOver([]string{"blobs", "depths"}, []any{
+		[]any{[]byte{1, 2}, []byte{}},
+		[]any{0.5, 1.5},
+	})
+	got, err := q.ListyColumns(t.Context())
+	if err != nil {
+		t.Fatalf("ListyColumns = error %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("ListyColumns returned %d rows, want 1", len(got))
+	}
+	row := got[0]
+	if want := [][]byte{{1, 2}, {}}; !reflect.DeepEqual(row.Blobs, want) {
+		t.Errorf("ListyColumns()[0].Blobs = %#v, want %#v", row.Blobs, want)
+	}
+	if row.Depths == nil {
+		t.Fatalf("ListyColumns()[0].Depths = nil, want a list")
+	}
+	if want := []float32{0.5, 1.5}; !reflect.DeepEqual(*row.Depths, want) {
+		t.Errorf("ListyColumns()[0].Depths = %#v, want %#v", *row.Depths, want)
+	}
+
+	// A null column and an empty list stay distinguishable here too, and
+	// on this path the distinction is the driver's own: GetRecordValue
+	// reports a held null through its second result rather than through
+	// the value, so a decoder reading only the value cannot tell them
+	// apart.
+	null, err := queriesOver([]string{"blobs", "depths"}, []any{[]any{}, nil}).ListyColumns(t.Context())
+	if err != nil {
+		t.Fatalf("ListyColumns(depths: null) = error %v", err)
+	}
+	if len(null) != 1 {
+		t.Fatalf("ListyColumns(depths: null) returned %d rows, want 1", len(null))
+	}
+	if null[0].Blobs == nil || len(null[0].Blobs) != 0 {
+		t.Errorf("ListyColumns(depths: null)[0].Blobs = %#v, want an empty list", null[0].Blobs)
+	}
+	if null[0].Depths != nil {
+		t.Errorf("ListyColumns(depths: null)[0].Depths = %#v, want nil", null[0].Depths)
+	}
+
+	if _, err := queriesOver([]string{"blobs", "depths"}, []any{
+		[]any{"no"}, []any{},
+	}).ListyColumns(t.Context()); err == nil {
+		t.Errorf("ListyColumns(blobs: [string]) = no error, want a refusal")
 	}
 }
