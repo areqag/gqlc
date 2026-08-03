@@ -1,0 +1,81 @@
+// Package dbtype stands in for the driver's dbtype package so the
+// emitted decoders can be run rather than only read. Every declaration
+// here is copied from
+// neo4j-go-driver/v5@v5.28.4/neo4j/dbtype/{graph,temporal,spatial}.go.
+//
+// Fidelity is not left to this copy alone: `just test-codegen-fence`
+// compiles the same emitted shapes against the real driver, so a drift
+// that mattered to compilation is caught there. What this stub buys is
+// behaviour — what a decoder does with the values a driver puts in the
+// Props map, which no amount of compiling can show.
+package dbtype
+
+import "time"
+
+type Entity interface {
+	GetId() int64
+	GetElementId() string
+	GetProperties() map[string]any
+}
+
+type Node struct {
+	Id        int64
+	ElementId string
+	Labels    []string
+	Props     map[string]any
+}
+
+func (n Node) GetId() int64 { return n.Id }
+
+func (n Node) GetElementId() string { return n.ElementId }
+
+func (n Node) GetProperties() map[string]any { return n.Props }
+
+type Relationship struct {
+	Id             int64
+	ElementId      string
+	StartId        int64
+	StartElementId string
+	EndId          int64
+	EndElementId   string
+	Type           string
+	Props          map[string]any
+}
+
+func (r Relationship) GetId() int64 { return r.Id }
+
+func (r Relationship) GetElementId() string { return r.ElementId }
+
+func (r Relationship) GetProperties() map[string]any { return r.Props }
+
+type Path struct {
+	Nodes         []Node
+	Relationships []Relationship
+}
+
+type (
+	Time          time.Time
+	Date          time.Time
+	LocalTime     time.Time
+	LocalDateTime time.Time
+)
+
+type Duration struct {
+	Months  int64
+	Days    int64
+	Seconds int64
+	Nanos   int
+}
+
+type Point2D struct {
+	X            float64
+	Y            float64
+	SpatialRefId uint32
+}
+
+type Point3D struct {
+	X            float64
+	Y            float64
+	Z            float64
+	SpatialRefId uint32
+}

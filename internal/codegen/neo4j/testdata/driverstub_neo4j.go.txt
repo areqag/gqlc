@@ -1,0 +1,55 @@
+// Package neo4j stands in for the driver's root package so the emitted
+// decoders can be run rather than only read. The aliases are copied from
+// neo4j-go-driver/v5@v5.28.4/neo4j/aliases.go and PropertyValue and
+// GetProperty verbatim from that release's neo4j/graph.go — the
+// constraint is the whole point of the stub, because it is what decides
+// which assertions the emission is allowed to make.
+package neo4j
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
+)
+
+type (
+	Point2D       = dbtype.Point2D
+	Point3D       = dbtype.Point3D
+	Date          = dbtype.Date
+	LocalTime     = dbtype.LocalTime
+	LocalDateTime = dbtype.LocalDateTime
+	Time          = dbtype.Time
+	OffsetTime    = dbtype.Time
+	Duration      = dbtype.Duration
+	Entity        = dbtype.Entity
+	Node          = dbtype.Node
+	Relationship  = dbtype.Relationship
+	Path          = dbtype.Path
+)
+
+type PropertyValue interface {
+	bool | int64 | float64 | string |
+		Point2D | Point3D |
+		Date | LocalTime | LocalDateTime | Time | Duration | time.Time | /* OffsetTime == Time == dbtype.Time */
+		[]byte | []any
+}
+
+// GetProperty returns the value matching the property of the given neo4j.Node or neo4j.Relationship
+// The property type T must adhere to neo4j.PropertyValue
+// If the property does not exist, an error is returned
+// If the property type does not match the type specification, an error is returned
+//
+// Note: due to the current limited generics support, any property array value other than byte array is typed as []any.
+func GetProperty[T PropertyValue](entity Entity, key string) (T, error) {
+	rawValue, found := entity.GetProperties()[key]
+	if !found {
+		return *new(T), fmt.Errorf("could not find any property named %s", key)
+	}
+	value, ok := rawValue.(T)
+	if !ok {
+		zeroValue := *new(T)
+		return zeroValue, fmt.Errorf("expected value to have type %T but found type %T", zeroValue, rawValue)
+	}
+	return value, nil
+}
