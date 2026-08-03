@@ -146,7 +146,7 @@ const ParamArg = "arg"
 // method names, so the two can meet: a node label FooQueryText alongside
 // a query named DecodeFoo emits decodeFooQueryText as both a const and a
 // func. The const is off sweepIdentifiers, so generation exits 0 and the
-// redeclaration surfaces at go build.
+// redeclaration surfaces at go build. That collision is gqlc-igs4.
 func QueryTextConst(p Query) string {
 	return p.Bare + "QueryText"
 }

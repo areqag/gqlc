@@ -542,7 +542,7 @@ func (s *EmissionSuite) methodScopes(body string) map[string][]string {
 // so the failure mode left is two queries whose name-plus-column mangle
 // coincides, and that is a duplicate declaration the Go compiler
 // rejects. Closing it means renaming a generated public type, which is
-// an API change and not this branch's.
+// an API change and so is scheduled as gqlc-vac9 rather than done here.
 //
 // So the assertion is in two halves, and the strong half is exact.
 //

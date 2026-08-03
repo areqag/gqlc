@@ -906,7 +906,9 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 // from method names, so a node label FooQueryText alongside a query named
 // DecodeFoo emits decodeFooQueryText from both axes and neither insert
 // below sees the other. Generation exits 0 and go build reports the
-// redeclaration.
+// redeclaration. The hole is gqlc-igs4: both colliding names are
+// generator-owned, so the capture guards — which police author-chosen
+// identifiers against generator-owned ones — are structurally blind to it.
 func sweepIdentifiers(entities []Entity, prepared []Query) error {
 	seen := make(map[string]string, len(entities)*2+len(prepared)*3)
 	insert := func(ident, source string) error {

@@ -157,9 +157,17 @@ const unclaimedParam = "alpha"
 // and moves nothing a single-parameter census can see.
 //
 // Position is an axis for the same reason one level down. A name derived
-// from ParamFields[0] and a name derived from ParamFields[len-1] are
-// different mistakes, and a census that only ever puts the swept name
-// first sees only the first of them.
+// from ParamFields[0], one derived from ParamFields[len-1] and one
+// derived from an index in between are three different mistakes, and a
+// census that only ever puts the swept name first sees one of them.
+//
+// Position is an axis of this table but it is not the whole of how the
+// positional class is closed, and it cannot be: an enumerated position is
+// a position somebody thought of, and the next index along is open again.
+// TestParameterNamesBindNothing perturbs every position at once and needs
+// no enumeration; what these plans buy is the ability to say WHICH
+// position a failure sits at, and to reach every decode arm at each of
+// them.
 type probeParamPlan struct {
 	// suffix distinguishes the method this plan emits, so every plan of
 	// every shape is its own query with its own consts and structs.
@@ -172,15 +180,21 @@ type probeParamPlan struct {
 }
 
 // probeParamPlans covers all three arms of writeMethodSignature's switch
-// and both ends of a parameter list. Held to that by
-// TestScopeProbeReachesEveryDecodeArm, which reads the arities and the
-// swept positions off the prepared batch — the emitter's own input —
+// and both ends of a parameter list plus an index interior to it. Held to
+// that by TestScopeProbeReachesEveryDecodeArm, which reads the arities and
+// the swept positions off the prepared batch — the emitter's own input —
 // rather than off this table, so growing the table is not what makes the
 // census claim to be wide.
+//
+// A plan added here whose form paramForm does not name, or names and
+// probeParamForms does not claim, fails that test rather than joining the
+// sweep silently: a plan contributing nothing to the coverage claim is
+// the same defect as an arm nothing reaches.
 var probeParamPlans = []probeParamPlan{
 	{suffix: "NoParam", arity: 0, swept: -1},
 	{suffix: "OneParam", arity: 1, swept: 0},
 	{suffix: "FirstOfTwo", arity: 2, swept: 0},
+	{suffix: "MidOfThree", arity: 3, swept: 1},
 	{suffix: "LastOfThree", arity: 3, swept: 2},
 }
 
@@ -249,14 +263,22 @@ func (plan probeParamPlan) apply(q codegen.NamedQuery, param string) codegen.Nam
 //
 // What is pinned is bounded by what the probe emits, so the probe emits
 // every decode arm the target serves at every arity the signature has an
-// arm for, with the swept name at either end of the parameter list: the
-// shapes it drops are the ones that target refuses to generate at all,
-// and the arms, the arities and the positions the shapes reach are
-// asserted whole in TestScopeProbeReachesEveryDecodeArm. The candidate
-// names are likewise read off an emission rather than listed, and the
-// sweep runs per target, so each backend is probed with its own
-// vocabulary. Nothing here reads the golden corpus: -update cannot make
-// this test pass.
+// arm for, with the swept name at either end of the parameter list and at
+// an index inside it: the shapes it drops are the ones that target
+// refuses to generate at all, and the arms, the arities and the positions
+// the shapes reach are asserted whole in
+// TestScopeProbeReachesEveryDecodeArm. The candidate names are likewise
+// read off an emission rather than listed, and the sweep runs per target,
+// so each backend is probed with its own vocabulary. Nothing here reads
+// the golden corpus: -update cannot make this test pass.
+//
+// What it is NOT is positionally closed, and it cannot be made so by
+// enumeration. Being differential, it moves one parameter at a time: the
+// unswept positions are fillers spelled identically in both emissions, so
+// an emitted name derived from one of them is identical on both sides and
+// this comparison is blind to it. Every index probeParamPlans does not
+// enumerate is such a position. TestParameterNamesBindNothing is what
+// closes the positional class, by perturbing every position at once.
 func TestEmittedScopeIsGeneratorOwned(t *testing.T) {
 	probe := newScopeProbe(t)
 	for _, target := range probe.targets {
@@ -359,6 +381,81 @@ func TestBlankParameterReachesOnlyTheSingleParameterForm(t *testing.T) {
 	}
 }
 
+// probeParamPrefix is prepended to every parameter every probe query
+// binds when the emission is perturbed. A common prefix cannot make two
+// parameter names that differed collide under the §4.2 mangle, so the
+// rename never turns a served batch into ErrParamNameCollision.
+const probeParamPrefix = "renamed"
+
+// TestParameterNamesBindNothing closes every position in the parameter
+// list at once, which the sweep above closes one enumerated position at a
+// time.
+//
+// TestEmittedScopeIsGeneratorOwned is differential: it holds an emission
+// spelled with the candidate name against a reference emission spelled
+// with unclaimedParam, and every parameter the plan did not sweep is a
+// filler spelled identically on both sides. An emitted identifier derived
+// from an unswept position therefore does not move between the two
+// emissions, and a comparison of the two cannot see it. A body local
+// named after ParamFields[1] survives that sweep at every arity — no plan
+// puts the swept name at an interior position — and the only artefact
+// that moves is the golden corpus, which -update blesses.
+//
+// Renaming EVERY parameter is what closes that, and closes it whole
+// rather than index by index: every position is perturbed at the same
+// time, so there is no position left for a mistake to sit at, including
+// the ones probeParamPlans does not enumerate and the ones a later arity
+// would introduce. That is the same reason TestColumnNamesBindNothing
+// renames every column rather than one of them.
+//
+// The assertion is exact and total, keys as well as values. Unlike a
+// column name, a parameter name reaches no package-level declaration —
+// the Params struct is named after the method, and its fields are
+// exported and reached qualified — so renaming every parameter must move
+// nothing boundScopes reports at all.
+func TestParameterNamesBindNothing(t *testing.T) {
+	probe := newScopeProbe(t)
+	for _, target := range probe.targets {
+		t.Run(target, func(t *testing.T) {
+			in, err := probe.batch(target).input(unclaimedParam, probeParamPlans)
+			require.NoError(t, err, "the probe batch does not lower")
+
+			before := probe.generate(t, target, in)
+			after := probe.generate(t, target, renamedProbeParameters(in))
+			require.NotEqual(t, fileTexts(before), fileTexts(after),
+				"renaming every parameter changed nothing in the emission, so the perturbation "+
+					"never reached it and the assertion below holds vacuously")
+			// The renamed name still has to reach the driver: an emitter
+			// that stopped spelling the author's parameter at all would
+			// move nothing the comparison below reads.
+			requireParameterReachesTheWire(t, after, probeParamPrefix+unclaimedParam)
+
+			want, got := boundScopes(t, before), boundScopes(t, after)
+			require.NotEmpty(t, want, "the emission binds no identifiers to compare")
+			require.Equal(t, want, got,
+				"renaming the parameters moved a name the emission binds, so a generated argument, "+
+					"result or body local follows an author-chosen parameter name")
+		})
+	}
+}
+
+// renamedProbeParameters returns the batch with every parameter every
+// query binds renamed, leaving the columns, the arities and the shapes as
+// the probe built them. Clones down to the parameter slice so the batch's
+// memoised input is not perturbed under the caller.
+func renamedProbeParameters(in codegen.Input) codegen.Input {
+	queries := slices.Clone(in.Queries)
+	for i := range queries {
+		params := slices.Clone(queries[i].Validated.Parameters)
+		for j := range params {
+			params[j].Name = probeParamPrefix + params[j].Name
+		}
+		queries[i].Validated.Parameters = params
+	}
+	in.Queries = queries
+	return in
+}
+
 // probeColumnPrefix is prepended to every column a probe query projects
 // when the emission is perturbed. A common prefix cannot make two column
 // texts that differed collide, so the rename never turns a served batch
@@ -377,8 +474,9 @@ const probeColumnPrefix = "renamed"
 // it. That residue is not silent — it can only produce a duplicate
 // package-level declaration, which the Go compiler rejects — and closing
 // it means renaming a generated public type, which is an API change and
-// not this branch's. internal/codegen/age bounds it exactly, by holding
-// the emission equal modulo the package-level declarations that moved.
+// so is scheduled as gqlc-vac9 rather than done here.
+// internal/codegen/age bounds it exactly, by holding the emission equal
+// modulo the package-level declarations that moved.
 //
 // What is asserted here is the half that belongs to this bead's class,
 // and it is asserted exactly, on all three targets: renaming every
@@ -463,11 +561,16 @@ func fileTexts(files []codegen.File) map[string]string {
 //
 // So the census is held on both axes at once — every decode arm, at
 // every signature arity, with the swept parameter at either end of the
-// list — rather than to their totals separately. Arm coverage summed
-// over all arities and arity coverage summed over all arms would both be
-// satisfied by a census that never crossed the two, which is the shape
-// the census had when a Params binder named after the author's first
-// parameter passed it.
+// list and at an index inside it — rather than to their totals
+// separately. Arm coverage summed over all arities and arity coverage
+// summed over all arms would both be satisfied by a census that never
+// crossed the two, which is the shape the census had when a Params binder
+// named after the author's first parameter passed it.
+//
+// The cross is held to equality rather than to containment, on the same
+// reasoning: a plan whose form nothing claims is a plan the coverage
+// statement does not include, and this test exists to stop a coverage
+// statement being wider than what is measured — in either direction.
 //
 // Everything here is read off Phase B rather than off any one backend or
 // off the plan table: what a shape reaches is a property of the resolved
@@ -496,59 +599,85 @@ func TestScopeProbeReachesEveryDecodeArm(t *testing.T) {
 
 	reached := make(map[codegen.ColumnKind]map[string]string)
 	for _, q := range prepared.Queries {
-		for _, form := range paramForms(q) {
-			for _, f := range q.RowFields {
-				recordReach(reached, f.Kind, form, q.MethodName)
-				for e := f.ListElem; e != nil; e = e.Nested {
-					recordReach(reached, e.Kind, form, q.MethodName)
-				}
+		form, err := paramForm(q)
+		require.NoError(t, err, "query %s exhibits no parameter form", q.MethodName)
+		for _, f := range q.RowFields {
+			recordReach(reached, f.Kind, form, q.MethodName)
+			for e := f.ListElem; e != nil; e = e.Nested {
+				recordReach(reached, e.Kind, form, q.MethodName)
 			}
 		}
 	}
+	// Equality, not containment. Containment holds an arm to reaching
+	// every form the census claims and says nothing about a form the
+	// census reaches without claiming — which is a plan that widened the
+	// batch, cost a run, and contributed nothing to what this test
+	// asserts. Both directions are failures and both are reported here.
 	for _, arm := range probeDecodeArms {
 		forms, ok := reached[arm]
 		require.True(t, ok, "no probe shape reaches the %s arm", decodeArmName(arm))
-		for _, form := range probeParamForms {
-			require.Contains(t, forms, form,
-				"no probe shape reaches the %s arm with %s", decodeArmName(arm), form)
-		}
+		require.ElementsMatch(t, probeParamForms, slices.Sorted(maps.Keys(forms)),
+			"the %s arm is not reached under exactly the parameter forms the census claims: a form "+
+				"claimed but not reached needs a plan in probeParamPlans, and a form reached but not "+
+				"claimed needs naming in probeParamForms", decodeArmName(arm))
 	}
 }
 
 // probeParamForms is every way the emitted signature can spell its
 // parameters, crossed with where the swept name sits when it can sit
-// anywhere. The first three are writeMethodSignature's own switch — no
-// argument, a bare typed argument, a *Params struct — and the last two
-// split the struct arm by the position a name derived from the parameter
-// list would be taken from.
+// anywhere. The first two are two of writeMethodSignature's own switch
+// arms — no argument, and a bare typed argument — and the last three are
+// its third, the *Params struct, split by the position a name derived
+// from the parameter list would be taken from.
+//
+// Each multi-parameter form carries the arity it is realised at rather
+// than a "two or more" class, because a class is a claim about plans that
+// may not exist: this list used to report covering "the swept parameter
+// last of two or more" while the only plan realising it bound three. A
+// form spelled by paramForm from the prepared parameter list cannot
+// overstate its own arity that way.
 var probeParamForms = []string{
 	"no parameter",
 	"one parameter",
-	"the swept parameter first of two or more",
-	"the swept parameter last of two or more",
+	"the swept parameter first of 2",
+	"the swept parameter at 1 of 3",
+	"the swept parameter last of 3",
 }
 
-// paramForms is the forms one prepared query exhibits. Read off
+// paramForm is the form one prepared query exhibits. Read off
 // ParamFields — the slice writeMethodSignature switches on and
 // paramsMapText indexes — so a form is claimed only when the emitter is
 // actually handed it.
-func paramForms(q codegen.Query) []string {
-	if len(q.ParamFields) == 0 {
-		return []string{"no parameter"}
-	}
-	if len(q.ParamFields) == 1 {
-		return []string{"one parameter"}
+//
+// The classification is total over the positions a swept name can occupy:
+// first, last, and every index between them. It used to be first and last
+// alone, returning no form at all for an interior index, so a plan added
+// with the swept name in the middle of its list joined every sweep in
+// this file, widened every emission, and contributed nothing to the
+// coverage claim — with nothing anywhere saying so. The one case left
+// unclassifiable is a multi-parameter list that does not carry the swept
+// name anywhere, which is not a position but a plan that lost it, and
+// that is an error rather than a silent omission.
+func paramForm(q codegen.Query) (string, error) {
+	n := len(q.ParamFields)
+	switch n {
+	case 0:
+		return "no parameter", nil
+	case 1:
+		return "one parameter", nil
 	}
 	swept := slices.IndexFunc(q.ParamFields, func(p codegen.Param) bool {
 		return p.RawName == unclaimedParam
 	})
-	switch swept {
-	case 0:
-		return []string{"the swept parameter first of two or more"}
-	case len(q.ParamFields) - 1:
-		return []string{"the swept parameter last of two or more"}
+	switch {
+	case swept < 0:
+		return "", fmt.Errorf("binds %d parameters and none of them is the swept name %q", n, unclaimedParam)
+	case swept == 0:
+		return fmt.Sprintf("the swept parameter first of %d", n), nil
+	case swept == n-1:
+		return fmt.Sprintf("the swept parameter last of %d", n), nil
 	default:
-		return nil
+		return fmt.Sprintf("the swept parameter at %d of %d", swept, n), nil
 	}
 }
 
@@ -901,6 +1030,17 @@ func requireParameterReachesTheWire(t *testing.T, files []codegen.File, param st
 //
 // Blank is dropped: `_` binds nothing, and an emitted `_, err := ...` is
 // not a name anything can resolve.
+//
+// Bindings only, deliberately, and this is where the census is narrower
+// than internal/codegen/age's: methodScopes there records what a body
+// RESOLVES as well as what it binds. For the parameter axis binding is
+// the whole question — a parameter is a binding, and capture is one
+// binding displacing another — but it means a package-level name that
+// started following author-chosen text is invisible here and visible
+// there. That is exactly the residue class gqlc-vac9 holds, and it is
+// bounded on the AGE side by TestOnlyPackageLevelNamesFollowAColumnName
+// rather than here. Widening this to resolved identifiers would make the
+// column axis fail on that known residue, which is the trade being made.
 func boundScopes(t *testing.T, files []codegen.File) map[string][]string {
 	t.Helper()
 	out := make(map[string][]string)
