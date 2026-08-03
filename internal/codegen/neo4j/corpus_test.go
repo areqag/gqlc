@@ -2,11 +2,17 @@ package neo4j_test
 
 import (
 	"bytes"
+	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 
@@ -90,12 +96,13 @@ func TestEmittedDecodersRunOnDriverValues(t *testing.T) {
 	require.Equal(t, v5, strings.ReplaceAll(models(neo4j.DriverV6), "neo4j-go-driver/v6", "neo4j-go-driver/v5"),
 		"the driver targets no longer emit the same decoders modulo the module path, so a v5 run no longer covers v6")
 
+	driver := corpusFile(t, "corpus_test.go.txt")
 	dir := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(dir, "driverstub", "neo4j", "dbtype"), 0o755))
 	for name, body := range map[string]string{
 		"go.mod":                              corpusModule,
 		"models.go":                           v5,
-		"corpus_test.go":                      corpusFile(t, "corpus_test.go.txt"),
+		"corpus_test.go":                      driver,
 		filepath.Join("driverstub", "go.mod"): stubModule,
 		filepath.Join("driverstub", "neo4j", "graph.go"):            corpusFile(t, "driverstub_neo4j.go.txt"),
 		filepath.Join("driverstub", "neo4j", "dbtype", "dbtype.go"): corpusFile(t, "driverstub_dbtype.go.txt"),
@@ -103,11 +110,81 @@ func TestEmittedDecodersRunOnDriverValues(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644))
 	}
 
-	cmd := exec.CommandContext(t.Context(), "go", "test", "-count=1", ".")
+	passed, log, err := runCorpus(t, dir)
+	require.NoError(t, err, "the emitted decoders do not satisfy the driver-value corpus:\n%s", log)
+	require.ElementsMatch(t, declaredTests(t, driver), passed,
+		"the corpus module did not run every test its template declares:\n%s", log)
+}
+
+// runCorpus runs the assembled corpus module's own tests, reporting the
+// top-level tests that passed alongside the run's output as a reader
+// sees it.
+//
+// The pass set is read from `go test -json`, whose Test field the testing
+// framework fills in, rather than from "--- PASS" lines, which a subtest
+// name or anything a test writes to stdout can also spell.
+func runCorpus(t *testing.T, dir string) (passed []string, log string, err error) {
+	t.Helper()
+
+	cmd := exec.CommandContext(t.Context(), "go", "test", "-json", "-count=1", ".")
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GOFLAGS=", "GOPROXY=off")
 	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "the emitted decoders do not satisfy the driver-value corpus:\n%s", out)
+
+	var text strings.Builder
+	for line := range strings.Lines(string(out)) {
+		var event struct {
+			Action string `json:"Action"`
+			Test   string `json:"Test"`
+			Output string `json:"Output"`
+		}
+		if !strings.HasPrefix(line, "{") || json.Unmarshal([]byte(line), &event) != nil {
+			text.WriteString(line)
+			continue
+		}
+		text.WriteString(event.Output)
+		if event.Action == "pass" && event.Test != "" && !strings.Contains(event.Test, "/") {
+			passed = append(passed, event.Test)
+		}
+	}
+	return passed, text.String(), err
+}
+
+// declaredTests names the top-level tests a corpus template declares.
+// Requiring that every one of them passed is what separates a corpus the
+// emission satisfies from a corpus that is not there: `go test` exits 0
+// on a _test.go file declaring no tests, so a harness that reads only the
+// child's exit status reports success on an emptied template.
+func declaredTests(t *testing.T, src string) []string {
+	t.Helper()
+
+	file, err := parser.ParseFile(token.NewFileSet(), "corpus_test.go", src, parser.SkipObjectResolution)
+	require.NoError(t, err)
+
+	var names []string
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Recv == nil && isTestName(fn.Name.Name) {
+			names = append(names, fn.Name.Name)
+		}
+	}
+	require.NotEmpty(t, names, "the corpus template declares no tests, so a child run of it proves nothing")
+	return names
+}
+
+// isTestName reports whether `go test` runs a function of this name,
+// following testing's own rule: Test, then anything that does not begin
+// with a lower-case letter. TestMain is the entry point, not a test.
+func isTestName(name string) bool {
+	rest, ok := strings.CutPrefix(name, "Test")
+	if !ok || name == "TestMain" {
+		return false
+	}
+	if rest == "" {
+		return true
+	}
+	first, _ := utf8.DecodeRuneInString(rest)
+	return !unicode.IsLower(first)
 }
 
 // corpusFile reads one of the hand-written sources the corpus module is
