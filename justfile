@@ -15,6 +15,9 @@ golangci := justfile_directory() + "/.bin/golangci-lint"
 # remove` delete it, and costs one cold lint (~80s) per fresh session.
 export GOLANGCI_LINT_CACHE := justfile_directory() + "/.bin/golangci-cache"
 actionlint_version := "v1.7.7"
+# Same self-heal contract as golangci-lint above, for the hooks tree.
+shellcheck_version := "v0.10.0"
+shellcheck := justfile_directory() + "/.bin/shellcheck"
 
 # Configures local git settings required after a fresh clone.
 # Idempotent: safe to run multiple times.
@@ -65,8 +68,90 @@ ensure-golangci:
         "https://raw.githubusercontent.com/golangci/golangci-lint/$want/install.sh" \
         | sh -s -- -b {{quote(justfile_directory() + "/.bin")}} "$want"
 
-# full static analysis (.golangci.yml): linters + formatter diffs as issues
-lint: ensure-golangci
+# provisions the pinned shellcheck into the gitignored .bin/ when missing or
+# version-mismatched, exactly as ensure-golangci does: the happy path is a
+# ~10ms version check and nobody installs the linter by hand. Upstream ships
+# only release binaries, so this is a download rather than a build.
+[private]
+ensure-shellcheck:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    want="{{shellcheck_version}}"
+    have="$({{quote(shellcheck)}} --version 2>/dev/null | sed -n 's/^version: //p' || true)"
+    if [ "$have" = "${want#v}" ]; then
+        exit 0
+    fi
+    echo "provisioning shellcheck $want into .bin/" >&2
+    mkdir -p {{quote(justfile_directory() + "/.bin")}}
+    stage="$(mktemp -d)"
+    trap 'rm -rf "$stage"' EXIT
+    curl --proto '=https' --tlsv1.2 -sSfL --retry 5 --retry-all-errors --retry-delay 2 \
+        "https://github.com/koalaman/shellcheck/releases/download/$want/shellcheck-$want.linux.$(uname -m).tar.xz" \
+        | tar -xJ -C "$stage"
+    install -m 0755 "$stage/shellcheck-$want/shellcheck" {{quote(shellcheck)}}
+
+# shellcheck over the hooks tree (bd gqlc-jhi2). The hooks carry `# shellcheck
+# disable=` directives over deliberate exceptions (bd-gh-sync:510 splits a bead
+# id list into argv words on purpose); with no linter in the tree those read as
+# enforced and are comments, and every SC-class defect the exception is carved
+# out of goes unchecked with them. This repo has shipped three of that class.
+#
+# Files are selected by shebang rather than by a list, so a hook added tomorrow
+# is linted without anyone remembering to name it here — and the two ways that
+# selection can quietly shrink are both fatal rather than silent: a tree that
+# yields no shell script at all, and a file whose shebang the test does not
+# recognise. Skipping the latter is how a gate ends up green over a set nobody
+# looked at, which is the defect this recipe exists to close.
+#
+# The directory is an argument so the recipe can be exercised over a throwaway
+# tree (.githooks/tests/lint-hooks-test.sh); CI and developers take the default.
+lint-hooks dir=".githooks": ensure-shellcheck
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dir="{{dir}}"
+    if [ ! -d "$dir" ]; then
+        echo "error: '$dir' is not a directory, so shellcheck has nothing to lint" >&2
+        echo "       and this gate is watching nothing (bd gqlc-jhi2)." >&2
+        exit 1
+    fi
+
+    scripts=()
+    unclassified=()
+    while IFS= read -r f; do
+        head=""
+        IFS= read -r head <"$f" || true
+        case "$head" in
+            "#!"*[\ /]sh | "#!"*[\ /]bash | "#!"*[\ /]dash | "#!"*[\ /]ksh)
+                scripts+=("$f") ;;
+            # shellcheck only supports shell; SC1071 on a python hook would have
+            # to be silenced globally, which turns it off for the shell files too.
+            "#!"*python*) ;;
+            *) unclassified+=("$f") ;;
+        esac
+    done < <(find "$dir" -type f | sort)
+
+    if [ "${#unclassified[@]}" -ne 0 ]; then
+        echo "error: these files under $dir carry no shebang this recipe recognises, so it" >&2
+        echo "       cannot say whether shellcheck should be watching them (bd gqlc-jhi2):" >&2
+        printf '         %s\n' "${unclassified[@]}" >&2
+        echo "       Give the file a shell or python shebang, or teach the case above about it." >&2
+        exit 1
+    fi
+    if [ "${#scripts[@]}" -eq 0 ]; then
+        echo "error: no shell script found under $dir, so shellcheck ran over nothing and" >&2
+        echo "       this gate is watching nothing (bd gqlc-jhi2)." >&2
+        exit 1
+    fi
+
+    # Printed, not just counted: the standing evidence in a CI log that the set
+    # under the gate is the set anyone reviewing it expects.
+    echo "shellcheck {{shellcheck_version}} over ${#scripts[@]} shell script(s) under $dir:"
+    printf '  %s\n' "${scripts[@]}"
+    {{shellcheck}} -- "${scripts[@]}"
+
+# full static analysis: golangci-lint over the Go tree (.golangci.yml) and
+# shellcheck over the hooks tree, as linters + formatter diffs as issues
+lint: ensure-golangci lint-hooks
     {{golangci}} run
 
 # Guard: the golangci-lint analysis cache must be non-empty after lint.
@@ -92,6 +177,7 @@ test-hooks:
     bash .githooks/tests/claude-pre-bash-test.sh
     bash .githooks/tests/commit-msg-test.sh
     bash .githooks/tests/bd-gh-sync-test.sh
+    bash .githooks/tests/lint-hooks-test.sh
 
 # runs the whole suite (unit, golden snapshots, godog) in one shot. Independent
 # of fetch-tck: the TCK is vendored, so there is no network at test time.

@@ -70,8 +70,15 @@ run_case "cd to feature repo from master cwd"  allow "$MASTER_REPO"  "cd $FEATUR
 run_case "cd then -C overrides tracked cwd"    allow "$MASTER_REPO"  "cd $TMP && git -C $FEATURE_REPO commit -m x"
 
 # --- command substitution executes for real: must still be checked ----------
+# The three below are the exception SC2016 exists to flag: the substitution is
+# the fixture, and it has to reach the hook unevaluated or the case tests
+# nothing. Taken one line at a time rather than file-wide, so a *stray*
+# unexpanded expansion in a later case is still reported.
+# shellcheck disable=SC2016 # the substitution is the hook's input, not this file's code
 run_case "commit inside \$() on master cwd"    deny  "$MASTER_REPO"  'X="$(git commit -m x)" && echo "$X"'
+# shellcheck disable=SC2016 # ditto
 run_case "commit inside \$() on feature cwd"   allow "$FEATURE_REPO" 'X="$(git commit -m x)" && echo "$X"'
+# shellcheck disable=SC2016 # ditto
 run_case "commit inside backticks on master"   deny  "$MASTER_REPO"  'X=`git commit -m x`'
 run_case "-c option consumes its arg"          deny  "$MASTER_REPO"  'git -c user.email=x@x commit -m y'
 
