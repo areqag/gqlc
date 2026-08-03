@@ -80,8 +80,12 @@ type helpers struct {
 // temporal reports whether the batch encodes a temporal at all, which is
 // what puts the encoding's description in the package doc and the time
 // import in models.go.
+//
+// zone is not a disjunct. It is marked on an entity field whose Go type
+// is the instant, which is the same condition that marks instant, so a
+// batch reaching the sidecar read has already answered true here.
 func (h helpers) temporal() bool {
-	return h.instant || h.zone || h.micros || h.nullMicros
+	return h.instant || h.micros || h.nullMicros
 }
 
 // forEntities marks the helpers an entity emission reaches beyond the
