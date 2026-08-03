@@ -940,6 +940,43 @@ func (s *ResolverSuite) TestEdgeUnionArityFixturesAreLoadBearing() {
 	}
 }
 
+// TestRelationshipTypeConflictIsRefusedOnBothSidesOfWITH pins the division of
+// labour between the two stages that can see a relationship variable re-bound
+// to a conflicting type (gqlc-rrtl). The verdict is the same either way —
+// refusal, because a relationship has exactly one type — but the fail-site is
+// not, and neither stage can take the other's case.
+//
+// Within one part the parser owns it: byVar dedup is per-part by design (spec
+// §3), so the parser is the only stage that still sees the separate
+// occurrences. It collapses them into one binding, which is precisely why the
+// resolver cannot re-derive the conflict downstream.
+//
+// Across a WITH the resolver owns it: the parser deliberately treats a name
+// re-MATCHed in a later part as a fresh binding, and the carried type lives in
+// the resolver's branchState. Making the parser reach that would mean
+// duplicating branchState in the listener.
+//
+// The negative half is the load-bearing one: the parser must NOT refuse the
+// cross-part twin. If it started to, the resolver's cross-part guard would go
+// dark with the suite green, because the query would never reach it.
+func (s *ResolverSuite) TestRelationshipTypeConflictIsRefusedOnBothSidesOfWITH() {
+	sch := s.loadSchema("invalid", "social_edgeunion.gql")
+
+	const withinPart = "MATCH (:Person)-[r:AUTHORED]->(:Post), (:Person)-[r:LIKES]->(:Post) RETURN r"
+	const acrossWITH = "MATCH (:Person)-[r:AUTHORED]->(:Post) WITH r MATCH (:Person)-[r:LIKES]->(:Post) RETURN r"
+
+	_, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(withinPart)))
+	s.Require().ErrorIs(err, cypher.ErrUnsatisfiableRelationshipType,
+		"the within-part conflict is the parser's: it is the last stage that sees two occurrences")
+
+	q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(acrossWITH)))
+	s.Require().NoError(err,
+		"the parser must leave the cross-part conflict alone, or the resolver's guard below stops being reached")
+	_, err = New(sch, WithRegistry(regR7)).Resolve(q)
+	s.Require().ErrorIs(err, ErrPartBindingTypeConflict,
+		"the cross-part conflict is the resolver's: only it carries the type across the WITH")
+}
+
 // TestSentinelReachability is the bidirectional sweep: every allSentinels
 // member must have at least one invalid fixture; every mapped sentinel must
 // be in allSentinels.

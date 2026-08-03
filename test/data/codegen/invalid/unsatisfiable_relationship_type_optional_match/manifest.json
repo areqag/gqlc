@@ -1,0 +1,6 @@
+{
+  "package": "unsatisfiablerelationshiptypeoptionalmatch",
+  "queryFiles": ["queries.cypher"],
+  "targets": ["neo4j-go-v5"],
+  "expectedError": "cypher.ErrUnsatisfiableRelationshipType"
+}

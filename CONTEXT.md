@@ -122,9 +122,13 @@ that part's preceding `WITH` carries its variable forward (a binding not
 carried by a `WITH` is out of scope downstream). Re-`MATCH`ing a carried
 name in a later part is a fresh binding in that part, distinct from the
 original — which is the per-part structure the resolver uses to flow-type
-nullability across a `WITH` (ADR 0006). Labels may be empty: an unlabelled
-binding's type is inferred from the edges that touch it. An edge binding
-also carries a **direction** marker (a directed edge stores its endpoints
+nullability across a `WITH` (ADR 0006). Several occurrences of one variable
+in one part are conjunctive — they describe the same entity — so a node
+binding's labels accumulate to their union while an edge binding's types
+narrow to their intersection, a relationship having exactly one type; an
+empty intersection is refused as unsatisfiable. Labels may be empty: an
+unlabelled binding's type is inferred from the edges that touch it. An edge
+binding also carries a **direction** marker (a directed edge stores its endpoints
 canonically source→target; an undirected edge stores them in textual order
 with the resolver trying both orientations, see **Direction**, query side)
 and an **edge cardinality** axis (see **Hop range**) distinguishing

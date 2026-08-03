@@ -1,6 +1,9 @@
 package cypher
 
-import "errors"
+import (
+	"errors"
+	"slices"
+)
 
 // The category-grained sentinels Parse returns for valid openCypher that
 // affects the type interface but the current model cannot faithfully
@@ -97,4 +100,41 @@ var (
 	// detect. Call1 [7]-[10] exercise the sentinel across the standalone-vs-
 	// in-query axis and the too-few / too-many arity axis.
 	ErrProcedureArity = errors.New("procedure arity mismatch")
+
+	// ErrUnsatisfiableRelationshipType rejects a part that re-binds one
+	// relationship variable to disjoint sets of relationship types. Within a
+	// single pattern occurrence the types are alternatives (`[r:A|B]` matches
+	// either); across occurrences of the same variable they are conjunctive —
+	// one relationship must satisfy them all — and openCypher gives a
+	// relationship exactly one type. Requiring two therefore admits no
+	// relationship at all, so the query returns no rows on every backend and
+	// the type interface would describe candidates the query excludes. The
+	// wrapped message names both conflicting type sets. The sentinel is
+	// durable: the constraint is a fact about the language, not a gap in this
+	// model.
+	ErrUnsatisfiableRelationshipType = errors.New("unsatisfiable relationship type")
 )
+
+// allSentinels is the canonical closed set of sentinels Parse may return
+// for user input. errNotImplemented is deliberately absent — it is a stub,
+// not a contract sentinel — as is the query package's ErrEmptyPart, which
+// guards a model invariant no parse can violate. A sentinel added here must
+// be paired with at least one negative case; a retired one must be dropped
+// from both.
+var allSentinels = []error{
+	ErrUnsupportedParameter,
+	ErrUnboundVariable,
+	ErrVariableKindConflict,
+	ErrPatternInProjection,
+	ErrNestedPropertyTarget,
+	ErrUnknownProcedure,
+	ErrProcedureArity,
+	ErrUnsatisfiableRelationshipType,
+}
+
+// AllSentinels returns a copy of the cypher package's user-input-reachable
+// sentinels. Exported for cross-package harnesses (e.g. codegen's fixture
+// loader) that need to map fully-qualified sentinel names back to values.
+// Callers must not rely on ordering — the slice is copy-returned so a
+// mutation cannot leak into the canonical set.
+func AllSentinels() []error { return slices.Clone(allSentinels) }

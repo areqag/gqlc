@@ -87,27 +87,58 @@ func (s *ConformanceSuite) generate(target string, in codegen.Input) ([]codegen.
 // read the same slice.
 var codegenSentinels = codegen.AllSentinels()
 
+// sentinelLanes is every pipeline package a fixture may name a sentinel
+// from, paired with the prefix its manifest entries carry. The cypher
+// lane covers fixtures the query parser refuses outright: those never
+// reach a backend, so their refusal is the whole assertion.
+var sentinelLanes = []struct {
+	prefix string
+	set    []error
+}{
+	{"codegen.", codegenSentinels},
+	{"queryfile.", queryfile.AllSentinels()},
+	{"cypher.", cypher.AllSentinels()},
+}
+
 // sentinelByName maps the manifest's fully-qualified sentinel string
-// back to the actual error value at load time. Built from the two
-// packages' sentinel sets — a change there without a fixture update
-// fails the queryfile / codegen reachability sweeps, and a fixture that
-// names a non-canonical sentinel fails invalidFixtures' map lookup.
+// back to the actual error value at load time. A change to a lane's set
+// without a fixture update fails the queryfile / codegen reachability
+// sweeps, and a fixture that names a non-canonical sentinel fails
+// invalidFixtures' map lookup.
 var sentinelByName = func() map[string]error {
 	m := make(map[string]error)
-	pairs := []struct {
-		prefix string
-		set    []error
-	}{
-		{"codegen.", codegenSentinels},
-		{"queryfile.", queryfile.AllSentinels()},
-	}
-	for _, p := range pairs {
-		for _, s := range p.set {
-			m[p.prefix+sentinelIdent(s)] = s
+	for _, lane := range sentinelLanes {
+		for _, s := range lane.set {
+			m[lane.prefix+sentinelIdent(s)] = s
 		}
 	}
 	return m
 }()
+
+// TestSentinelNameMapIsTotal holds sentinelIdent in step with the lanes
+// it is asked about. A sentinel it does not know answers "unknown", so
+// the lane's entry is keyed "<pkg>.unknown" — a name no fixture would
+// write, which makes the sentinel unnameable rather than misnamed. Two
+// such sentinels in one lane collide on that key and the map silently
+// holds whichever landed last.
+//
+// Only the codegen lane is forced by anything else: its reachability
+// sweep demands a fixture per sentinel, and a fixture resolves through
+// this map. The queryfile and cypher lanes carry entries no fixture
+// names, so nothing but this test keeps them honest.
+func TestSentinelNameMapIsTotal(t *testing.T) {
+	total := 0
+	for _, lane := range sentinelLanes {
+		require.NotEmpty(t, lane.set, "lane %q contributes no sentinel, so this sweep holds nothing for it", lane.prefix)
+		total += len(lane.set)
+		for _, s := range lane.set {
+			require.NotEqual(t, "unknown", sentinelIdent(s),
+				"sentinelIdent does not know %s sentinel %q, so no fixture can name it", lane.prefix, s)
+		}
+	}
+	require.Len(t, sentinelByName, total,
+		"two sentinels resolved to one name; the map holds whichever was built last")
+}
 
 // sentinelIdent recovers the exported symbol name of a sentinel. Kept
 // internal to the test so the production types do not need to expose a
@@ -167,6 +198,22 @@ func sentinelIdent(err error) string {
 		return "ErrTextBeforeAnnotation"
 	case queryfile.ErrNoQueries:
 		return "ErrNoQueries"
+	case cypher.ErrUnsupportedParameter:
+		return "ErrUnsupportedParameter"
+	case cypher.ErrUnboundVariable:
+		return "ErrUnboundVariable"
+	case cypher.ErrVariableKindConflict:
+		return "ErrVariableKindConflict"
+	case cypher.ErrPatternInProjection:
+		return "ErrPatternInProjection"
+	case cypher.ErrNestedPropertyTarget:
+		return "ErrNestedPropertyTarget"
+	case cypher.ErrUnknownProcedure:
+		return "ErrUnknownProcedure"
+	case cypher.ErrProcedureArity:
+		return "ErrProcedureArity"
+	case cypher.ErrUnsatisfiableRelationshipType:
+		return "ErrUnsatisfiableRelationshipType"
 	default:
 		return "unknown"
 	}
@@ -189,7 +236,17 @@ func (s *ConformanceSuite) SetupSuite() {
 	s.backends = reg
 }
 
-// loadManifest reads a manifest.json from the given fixture directory.
+// loadManifest reads a manifest.json from the given fixture directory and
+// holds its targets to the registry.
+//
+// The registration check lives here, not at generate(), because generate() is
+// on the emitting path and not every fixture reaches it: a fixture the front
+// end refuses returns from TestInvalid before any target is looked up, so a
+// misspelled target on such a fixture would never be read by anything. That
+// is a typo hole, not a missing refusal — the target is exercised the instant
+// the front end stops refusing — and it is one every future lane that loads a
+// manifest without emitting would re-open. Validating at load time closes it
+// for every fixture in every lane at once.
 func (s *ConformanceSuite) loadManifest(dir string) manifest {
 	src, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
 	s.Require().NoError(err)
@@ -198,6 +255,12 @@ func (s *ConformanceSuite) loadManifest(dir string) manifest {
 	s.Require().NotEmpty(m.Targets,
 		"fixture %q declares no targets; every fixture must name the emission targets it is enrolled in "+
 			"(one of %v), because there is no default enrolment", dir, s.backends.Keys())
+	for _, target := range m.Targets {
+		_, ok := s.backends.Lookup(target)
+		s.Require().True(ok,
+			"fixture %q enrols target %q, which no backend is registered under (registered: %v)",
+			dir, target, s.backends.Keys())
+	}
 	return m
 }
 
@@ -210,13 +273,17 @@ func (s *ConformanceSuite) loadSchema(dir string) schema.Schema {
 	return sch
 }
 
-// loadNamedQueries walks the manifest's queryFiles and turns each into
-// NamedQueries. C1 threads the cypher parser and the resolver into the
+// buildNamedQueries walks the manifest's queryFiles through the front end
+// — queryfile split, cypher parse, resolve — and turns each into a
+// NamedQuery. C1 threads the cypher parser and the resolver into the
 // pipeline so every read query carries a real Validated shape — Phase A
-// and Phase B key on it (spec §2.1). Every fixture in the corpus, valid
-// and invalid alike, must reach codegen: a fixture whose queries fail
-// earlier fails the suite here.
-func (s *ConformanceSuite) loadNamedQueries(dir string, m manifest, sch schema.Schema) []codegen.NamedQuery {
+// and Phase B key on it (spec §2.1).
+//
+// A front-end refusal is returned, not asserted: an invalid fixture may
+// name a front-end sentinel, in which case being refused here is the
+// whole point of the fixture. Missing or unreadable files stay fatal —
+// those are harness faults, not fixture verdicts.
+func (s *ConformanceSuite) buildNamedQueries(dir string, m manifest, sch schema.Schema) ([]codegen.NamedQuery, error) {
 	emptyReg, err := procsig.NewRegistry(nil)
 	s.Require().NoError(err)
 	res := resolver.New(sch, resolver.WithRegistry(emptyReg))
@@ -225,12 +292,18 @@ func (s *ConformanceSuite) loadNamedQueries(dir string, m manifest, sch schema.S
 		src, err := os.ReadFile(filepath.Join(dir, qf))
 		s.Require().NoError(err)
 		parsed, err := queryfile.New().Parse(bytes.NewReader(src))
-		s.Require().NoError(err, "query file %s", qf)
+		if err != nil {
+			return nil, err
+		}
 		for _, aq := range parsed {
 			q, err := cypher.New(cypher.WithRegistry(emptyReg)).Parse(bytes.NewReader([]byte(aq.Text)))
-			s.Require().NoError(err, "query %s in %s", aq.Name, qf)
+			if err != nil {
+				return nil, err
+			}
 			vq, err := res.Resolve(q)
-			s.Require().NoError(err, "query %s in %s", aq.Name, qf)
+			if err != nil {
+				return nil, err
+			}
 			out = append(out, codegen.NamedQuery{
 				Name:        aq.Name,
 				Cardinality: aq.Cardinality,
@@ -240,6 +313,14 @@ func (s *ConformanceSuite) loadNamedQueries(dir string, m manifest, sch schema.S
 			})
 		}
 	}
+	return out, nil
+}
+
+// loadNamedQueries is the accept-path entry to the front end: a fixture
+// in valid/ must reach codegen, so a refusal fails the suite here.
+func (s *ConformanceSuite) loadNamedQueries(dir string, m manifest, sch schema.Schema) []codegen.NamedQuery {
+	out, err := s.buildNamedQueries(dir, m, sch)
+	s.Require().NoError(err, "fixture %s must reach codegen", dir)
 	return out
 }
 
@@ -305,10 +386,19 @@ func (s *ConformanceSuite) TestValid() {
 	}
 }
 
-// TestInvalid walks invalid/*/ x its enrolled targets, resolves the
-// manifest's ExpectedError to a sentinel, calls the pipeline, and
-// asserts (a) the returned []codegen.File is nil and (b)
-// errors.Is(err, wantErr).
+// TestInvalid walks invalid/*/, resolves the manifest's ExpectedError to
+// a sentinel, and asserts the pipeline refuses the fixture with it.
+//
+// A fixture is refused at one of two stages. The front end (queryfile,
+// cypher, resolver) rejects before any backend runs, and that verdict is
+// one per fixture — the query never reaches a target, so there is nothing
+// per-target to assert. Otherwise the input reaches codegen and each
+// enrolled target must refuse it, returning nil files.
+//
+// The stage is not declared in the manifest; it follows from where the
+// refusal actually happens, so a fixture that starts being refused
+// earlier (or later) than its sentinel expects fails on the sentinel
+// match rather than silently changing which assertion ran.
 func (s *ConformanceSuite) TestInvalid() {
 	for _, dir := range s.invalidFixtures() {
 		name := filepath.Base(dir)
@@ -319,7 +409,11 @@ func (s *ConformanceSuite) TestInvalid() {
 			wantErr, ok := sentinelByName[m.ExpectedError]
 			s.Require().True(ok, "unknown sentinel name %q in fixture %q", m.ExpectedError, name)
 
-			in := s.loadInvalidInput(dir, m)
+			in, frontEndErr := s.loadInvalidInput(dir, m)
+			if frontEndErr != nil {
+				s.Require().ErrorIs(frontEndErr, wantErr)
+				return
+			}
 			for _, target := range m.Targets {
 				s.Run(target, func() {
 					got, err := s.generate(target, in)
@@ -332,12 +426,12 @@ func (s *ConformanceSuite) TestInvalid() {
 	}
 }
 
-// loadInvalidInput assembles the codegen.Input for an invalid fixture. Two
-// paths: normal (schema + queryFiles pipeline) and synthetic (a hand-
-// constructed codegen.NamedQuery with a zero-valued Cardinality, the only way
-// to reach codegen.ErrInvalidCardinality — the queryfile front end never emits
-// one).
-func (s *ConformanceSuite) loadInvalidInput(dir string, m manifest) codegen.Input {
+// loadInvalidInput assembles the codegen.Input for an invalid fixture, or
+// returns the front end's refusal. Two paths: normal (schema + queryFiles
+// pipeline) and synthetic (a hand-constructed codegen.NamedQuery with a
+// zero-valued Cardinality, the only way to reach
+// codegen.ErrInvalidCardinality — the queryfile front end never emits one).
+func (s *ConformanceSuite) loadInvalidInput(dir string, m manifest) (codegen.Input, error) {
 	sch := s.loadSchema(dir)
 	if m.SyntheticZeroCardinality {
 		return codegen.Input{
@@ -347,9 +441,13 @@ func (s *ConformanceSuite) loadInvalidInput(dir string, m manifest) codegen.Inpu
 				SourceFile: "synthetic.cypher",
 				SourceText: "MATCH (n) RETURN n",
 			}},
-		}
+		}, nil
 	}
-	return codegen.Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
+	queries, err := s.buildNamedQueries(dir, m, sch)
+	if err != nil {
+		return codegen.Input{}, err
+	}
+	return codegen.Input{Schema: sch, Queries: queries}, nil
 }
 
 // TestDoubleRun asserts Generate is byte-deterministic: same codegen.Input in,
