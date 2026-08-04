@@ -1,0 +1,19 @@
+// Two node types keyed on more than one label, one of them on three,
+// beside a single-label type that is representable. A diagnostic that
+// names one offender, that loses a label from a set wider than two, or
+// that sweeps the representable type in with them is visible here and in
+// no single-offender schema.
+//
+// Each type name is disjoint from its labels for the reason recorded in
+// multi_label_with_collateral.gql.
+CREATE PROPERTY GRAPH TYPE MultiLabelPair AS {
+    NODE TYPE Staffer (p :Person&Employee {
+        id :: INT64 NOT NULL
+    }),
+    NODE TYPE Supplier (c :Contractor&Vendor&Reseller {
+        id :: INT64 NOT NULL
+    }),
+    (:Team {
+        name :: STRING NOT NULL
+    })
+}
