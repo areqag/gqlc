@@ -1230,6 +1230,57 @@ else
     ok "a pulled bead missing from the second snapshot is not a held-bead finding"
 fi
 
+# ...and the other half of that distinction, which the control above cannot see
+# because its pull succeeded. The exemption is read from allow.txt, so it is the
+# set this run *intended* to pull, and `_pulled` — the number on the summary
+# line — counts only ids a batch that exited 0 was handed. Two different sets,
+# and the detector took the wrong one: a bead the run announces on stderr as not
+# pulled was exempted anyway, so the detector went blind on precisely the beads
+# whose handling had already gone wrong. This file's own summary comment says
+# intent is not outcome; the gap between them is the finding.
+#
+# First shape: an id the charset gate refuses. It reaches no batch at all, so
+# there is no hypothesis under which a pull touched it.
+UNUSABLE="{\"id\":\"b bad\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"x\"}"
+NOMIRROR='{"id":"b-keep","status":"open","external_ref":"","description":"y"}'
+run_sync pull "[$UNUSABLE,$NOMIRROR]" \
+    '[{"number":1,"state":"OPEN","body":"x\nadded on GH"}]' '[]' "[$NOMIRROR]"
+if ! grep -q "bead id 'b bad' is unusable" "$TMP/err"; then
+    bad "an id the gate refused is watched, not exempt" \
+        "the fixture never refused the id, so it proves nothing: $(last_line)"
+elif [ "$(sync_batches)" -ne 0 ]; then
+    bad "an id the gate refused is watched, not exempt" \
+        "it reached a batch after all: $(grep 'github sync' "$TMP/calls")"
+elif ! grep -q 'WARNING b bad was held out of the pull but is gone from the bead list' \
+        "$TMP/err"; then
+    bad "an id the gate refused is watched, not exempt" \
+        "the run said it was not pulled and then let it be deleted in silence: $(last_line)"
+else
+    ok "an id the gate refused is watched by the held-bead detector"
+fi
+
+# Second shape: the batch itself exited non-zero. `_pulled` does not count these
+# ids and the summary says so, so neither may the exemption — the summary and
+# the detector have to be describing one run. A partially applied batch is the
+# price: a bead that failed batch did move can draw a warning naming a change
+# the pull made, and that only ever happens under a summary that already reads
+# PULL FAILED and names the batch. An unwitnessed exemption is the worse half of
+# that trade, because the transition it hides is the one no re-assert undoes.
+SYNC_RC=1
+run_sync pull "[$PULLABLE,$NOMIRROR]" \
+    '[{"number":8,"state":"OPEN","body":"same\nadded on GH"}]' '[]' "[$NOMIRROR]"
+SYNC_RC=0
+if [ "$(sync_batches)" -ne 1 ]; then
+    bad "a bead in a batch that failed is watched, not exempt" \
+        "the fixture issued $(sync_batches) batch(es), so it proves nothing"
+elif ! grep -q 'WARNING b-pulled was held out of the pull but is gone from the bead list' \
+        "$TMP/err"; then
+    bad "a bead in a batch that failed is watched, not exempt" \
+        "counted as unpulled by the summary and as pulled by the detector: $(last_line)"
+else
+    ok "a bead in a batch that exited non-zero is watched by the held-bead detector"
+fi
+
 # ...and the interaction the bead was filed with. A second snapshot that came
 # back empty makes every held bead absent at once, which under a naive fix reads
 # as the whole tracker being deleted. That run is blind, not a mass deletion,
@@ -2103,6 +2154,8 @@ the blind notice names the exit status it saw
 a held bead deleted between the snapshots is reported as gone
 the summary line names the deleted held bead and says it was deleted
 a pulled bead missing from the second snapshot is not a held-bead finding
+an id the gate refused is watched by the held-bead detector
+a bead in a batch that exited non-zero is watched by the held-bead detector
 an empty second snapshot stays blind rather than reading as deletions
 final stderr line summarises the run for a tail -1 caller
 a failed sync is reported on the line a tail -1 caller keeps
@@ -2149,14 +2202,24 @@ the assertion census matches the assertions that ran
 CENSUS
 
 # The census names itself: this assertion is running, so it is executed by
-# construction, and a reader of the list below sees the whole inventory rather
+# construction, and a reader of the list above sees the whole inventory rather
 # than all of it but one.
 { cat "$TMP/ran.txt"; printf '%s\n' "$_census"; } | LC_ALL=C sort >"$TMP/ran_sorted.txt"
 uniq "$TMP/ran_sorted.txt" >"$TMP/ran_uniq.txt"
 _dup="$(uniq -d "$TMP/ran_sorted.txt" | tr '\n' '|' | sed 's/|$//')"
 _lost="$(LC_ALL=C comm -23 "$TMP/census.txt" "$TMP/ran_uniq.txt" | tr '\n' '|' | sed 's/|$//')"
 _uncensused="$(LC_ALL=C comm -13 "$TMP/census.txt" "$TMP/ran_uniq.txt" | tr '\n' '|' | sed 's/|$//')"
-if [ -n "$_dup" ]; then
+if [ "$fail" -ne 0 ]; then
+    # Not read on a run that is already red, and said out loud rather than
+    # passed quietly. Several blocks in this file word `bad` differently from
+    # `ok` — a failing block logs "…is reported" where a passing one logs "…is
+    # reported as gone" — so a genuine failure would come back through here as a
+    # missing name too, and a census that cries wolf on every red run is a
+    # census nobody reads. The suite is failing already; fix that and the
+    # roll-call speaks again on the next run, which is the only run whose
+    # silence this exists to distrust.
+    printf -- 'note - the assertion census is not read on a red run (%d failed above)\n' "$fail"
+elif [ -n "$_dup" ]; then
     bad "$_census" \
         "two assertions answer to one name, so either could be deleted under cover of the other: $_dup"
 elif [ -n "$_lost" ]; then

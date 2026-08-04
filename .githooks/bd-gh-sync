@@ -298,6 +298,11 @@ PYEOF
   _failed=0
   _pulled=0
   _unusable=0
+  # The ids behind _pulled, kept rather than only counted: the postcondition
+  # below exempts from its held-bead check exactly the beads a pull could have
+  # rewritten, and this is that set. Created here so an empty one is a run that
+  # pulled nothing rather than a file nobody wrote.
+  : >"$_tmp/pulled.txt"
 
   # Batched here rather than by `xargs -n`, because xargs parses quotes: a
   # single bead id containing an apostrophe aborted the whole construction with
@@ -310,6 +315,10 @@ PYEOF
     if GITHUB_TOKEN="$_token" bd github sync --pull-only --prefer-github \
       --issues "$1"; then
       _pulled=$((_pulled + $2))
+      # Ids reach here only past the charset gate, which admits neither a comma
+      # nor a newline, so the accumulator splits back into exactly the ids that
+      # went into it and each lands on a line of its own.
+      printf '%s\n' "$1" | tr ',' '\n' >>"$_tmp/pulled.txt"
     else
       _failed=$((_failed + 1))
       echo "bd-gh-sync: 'bd github sync' exited non-zero on batch ${_batches}; those beads may not have been pulled." >&2
@@ -364,6 +373,14 @@ PYEOF
   # some other bead happening to be pullable. Arming the detector only when a
   # pull runs disarms it permanently.
   #
+  # What it exempts is the ids a batch that exited 0 was handed, not the
+  # allowlist. The allowlist is what this run intended to pull; the summary
+  # above counts as pulled only what a batch that exited 0 carried, and the two
+  # sets differ on exactly the beads whose handling went wrong — an id the
+  # charset gate refused, a batch that died. Exempting those left the detector
+  # blind where it is most needed, on a run that had already announced them as
+  # unpulled. The summary and the detector now describe one run.
+  #
   # The detector also has to report its own liveness. The second snapshot fails
   # exactly when something else holds the bd database — which is the same event
   # (`bd hooks run post-merge` replaying JSONL) the detector exists to catch —
@@ -376,7 +393,7 @@ PYEOF
   _post_rc=0
   bd list --status all --limit 0 --json >"$_tmp/beads_post.json" 2>/dev/null \
     || { _post_rc=$?; : >"$_tmp/beads_post.json"; }
-  python3 - "$_tmp/beads.json" "$_tmp/beads_post.json" "$_tmp/allow.txt" \
+  python3 - "$_tmp/beads.json" "$_tmp/beads_post.json" "$_tmp/pulled.txt" \
     "$_tmp/moved.txt" "$_tmp/post_status.txt" >&2 <<'PYEOF' || true
 import json, sys
 
@@ -410,14 +427,20 @@ if not after:
     status("BLIND post-pull bead list unreadable")
     sys.exit(0)
 status("OK")
+# The ids a batch that exited 0 was handed — the beads a pull could have
+# rewritten, and the same set the summary line counts as pulled. Not the
+# allowlist: that is what the run intended to pull, and it still names an id the
+# charset gate refused and an id whose batch died, both of which this run
+# reported as unpulled on stderr. Exempting a bead the run says it did not pull
+# takes the detector off duty exactly where the run already went wrong.
 try:
     with open(sys.argv[3], encoding="utf-8") as fh:
-        allowed = {ln.strip() for ln in fh if ln.strip()}
+        pulled = {ln.strip() for ln in fh if ln.strip()}
 except Exception:
-    allowed = set()
+    pulled = set()
 
-# The set this run actually held: every bead the first snapshot saw that was not
-# named in --issues. Stated as a set rather than left implicit in the loop
+# The set this run actually held: every bead the first snapshot saw that no
+# batch reported pulling. Stated as a set rather than left implicit in the loop
 # below, because the finding turns on it. A bead absent from the second snapshot
 # used to be skipped outright, which made deletion — the one change no re-assert
 # undoes — the single transition the detector could not see. Absence is only
@@ -430,7 +453,7 @@ except Exception:
 # and still holds beads, and a held bead missing from it was deleted.
 moved = []
 for bid, was in sorted(before.items()):
-    if bid in allowed:
+    if bid in pulled:
         continue
     if bid not in after:
         moved.append("GONE " + bid)
