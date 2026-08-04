@@ -4,7 +4,10 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -72,9 +75,9 @@ func (s *AssembledInputSuite) SetupSuite() {
 // the case would measure the wrong refusal.
 const assembledTarget = "neo4j-go-v5"
 
-// resolverSource declares resolver.Temporal. This suite reads it off disk
-// because the fact it needs is the one compilation erases: a Go constant
-// has no run-time footprint, so a kind the const block names and
+// resolverDir is the package declaring resolver.Temporal. This suite reads
+// it off disk because the fact it needs is the one compilation erases: a Go
+// constant has no run-time footprint, so a kind the source names and
 // Temporal.String has no arm for is, to anything running, identical to a
 // value nobody ever declared.
 //
@@ -87,13 +90,31 @@ const assembledTarget = "neo4j-go-v5"
 // while its `why` still said otherwise — the whole repo green. Behaviour
 // cannot see a missing switch arm, and a missing switch arm is the
 // commonest Go enum bug there is.
-const resolverSource = "../../resolver/validated.go"
+const resolverDir = "../../resolver"
+
+// resolverAnchorFile declares the type Temporal, its iota run and
+// Temporal.String. It is where this suite expects the enum to live, and
+// what the sweep below requires to be among the files it read — but it is
+// no longer the only file the sweep looks in, so it is not what failures
+// name. Each names the file its kind was found in.
+const resolverAnchorFile = "validated.go"
+
+// resolverPath is the swept file called name, spelled the way a reader of
+// a failure message opens it.
+func resolverPath(name string) string { return filepath.Join(resolverDir, name) }
 
 // temporalMember is one constant of type resolver.Temporal: the name it
-// is declared under, and the value it holds.
+// is declared under, the value it holds, and the file of resolverDir it is
+// declared in.
+//
+// The file belongs to the member rather than to the suite because the
+// sweep reads the whole package. A failure has to send its reader to the
+// file the kind is actually in, and a message that reasons correctly to
+// the wrong file is worse than one that names none.
 type temporalMember struct {
 	Name  string
 	Value int
+	File  string
 }
 
 // temporalKinds is resolver.Temporal's vocabulary as this suite believes
@@ -105,13 +126,18 @@ type temporalMember struct {
 // not — six was six whatever the enum said. A member added, removed,
 // renamed or renumbered moves the derivation and not this, and the
 // failure names which.
+//
+// The file is written out on the same argument. All six live in the anchor
+// today; a kind that appears anywhere else in the package is the escape
+// the sweep was widened to catch, and pinning the file is what makes the
+// diff say where it appeared rather than only that it did.
 var temporalKinds = []temporalMember{
-	{"TemporalDate", 0},
-	{"TemporalTime", 1},
-	{"TemporalLocalTime", 2},
-	{"TemporalDateTime", 3},
-	{"TemporalLocalDateTime", 4},
-	{"TemporalDuration", 5},
+	{"TemporalDate", 0, resolverAnchorFile},
+	{"TemporalTime", 1, resolverAnchorFile},
+	{"TemporalLocalTime", 2, resolverAnchorFile},
+	{"TemporalDateTime", 3, resolverAnchorFile},
+	{"TemporalLocalDateTime", 4, resolverAnchorFile},
+	{"TemporalDuration", 5, resolverAnchorFile},
 }
 
 // temporalTypeName is the type a constant must carry to be a kind. It is
@@ -122,61 +148,119 @@ var temporalKinds = []temporalMember{
 // may not have one.
 const temporalTypeName = "Temporal"
 
-// temporalScanLimit bounds the sweep over values the constant block does
-// not name in TestTemporalStringerAnswersForDeclaredKindsAlone. Nothing
+// temporalScanLimit bounds the sweep over values the package names no
+// constant at in TestTemporalStringerAnswersForDeclaredKindsAlone. Nothing
 // derives from it; it is how far that test looks for an arm that should
 // not be there.
 const temporalScanLimit = 64
 
-// temporalFallback is what resolver.Temporal.String renders a value its
-// constant block does not name as. Asserted in both directions — no
+// temporalFallback is what resolver.Temporal.String renders a value the
+// package names no constant at as. Asserted in both directions — no
 // declared kind may render it, every undeclared one must — so this
 // mirroring the resolver's format is what the assertions are for rather
 // than something they rest on.
 func temporalFallback(v int) string { return "Temporal(" + strconv.Itoa(v) + ")" }
 
 // declaredTemporals returns every constant of type resolver.Temporal the
-// source declares, with the value each holds, in declaration order.
+// package declares, with the value each holds and the file each is
+// declared in.
 //
-// Every const declaration in the file is swept, not just the iota run:
-// a `TemporalWeek Temporal = 6` written below the block is as much a kind
-// as the six inside it, and a derivation that read only the block would
-// leave it with no arm in Temporal.String and nothing to say so.
+// Every const declaration is swept, not just the iota run: a
+// `TemporalWeek Temporal = 6` written below the block is as much a kind as
+// the six inside it, and a derivation that read only the block would leave
+// it with no arm in Temporal.String and nothing to say so.
+//
+// Every non-test source file of the package is swept, not just the anchor,
+// and for the same reason one word further out. Nothing stops a kind being
+// declared beside the code that switches on it, and a sweep that read one
+// file would call such a kind undeclared and pass — which is what
+// internal/codegen's sentinel sweep already says about reading only
+// errors.go. It was not hypothetical here either: appending
+// `TemporalWeek Temporal = 6` to scope.go with no arm in Temporal.String
+// left the whole repo green, firstUndeclaredTemporal handing the
+// list-elem-temporal case a value the resolver declares.
+//
+// Order is the anchor file's members in declaration order, then every
+// other file's, in the filename order os.ReadDir returns. Two rules
+// because there are two things to order: inside a file the source has a
+// declaration order and it is the one a reader sees, while between files
+// no such order exists and only the sweep's own does. Anchoring first
+// rather than sorting the lot by filename is what keeps the enum's own run
+// at the front — validated.go sorts last of this package's files — so a
+// stray kind reads against temporalKinds as one appended member instead of
+// displacing all six.
 func (s *AssembledInputSuite) declaredTemporals() []temporalMember {
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, resolverSource, nil, 0)
+	entries, err := os.ReadDir(resolverDir)
 	s.Require().NoError(err,
-		"cannot parse %s, where resolver.Temporal's constant block lives; this suite derives the enum's members from that block because compilation erases them",
-		resolverSource)
+		"cannot read %s, the package declaring resolver.Temporal; this suite derives the enum's members from its source because compilation erases them",
+		resolverDir)
 
-	var members []temporalMember
+	var scanned []string
+	var anchorMembers, otherMembers []temporalMember
 	anchored := false
-	for _, decl := range file.Decls {
-		gen, ok := decl.(*ast.GenDecl)
-		if !ok || gen.Tok != token.CONST {
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		found, isRun := s.temporalsOf(gen)
-		anchored = anchored || isRun
-		members = append(members, found...)
-	}
-	s.Require().True(anchored,
-		"%s declares no `<name> Temporal = iota` const block; this suite derives the enum's members from it, and a derivation that found nothing would report an empty enum",
-		resolverSource)
+		scanned = append(scanned, name)
 
-	held := make(map[int]string, len(members))
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, resolverPath(name), nil, 0)
+		s.Require().NoError(err,
+			"cannot parse %s, a source file of the package declaring resolver.Temporal; this suite derives the enum's members from that source because compilation erases them",
+			resolverPath(name))
+
+		var found []temporalMember
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.CONST {
+				continue
+			}
+			members, isRun := s.temporalsOf(gen, name)
+			anchored = anchored || isRun
+			found = append(found, members...)
+		}
+		if name == resolverAnchorFile {
+			anchorMembers = append(anchorMembers, found...)
+			continue
+		}
+		otherMembers = append(otherMembers, found...)
+	}
+	// resolverAnchorFile is named rather than counted, on internal/codegen's
+	// argument for naming errors.go in its own sweep: a sweep that lost it
+	// still finds files, still finds const declarations, and — the moment
+	// any second file of the package declares a kind — is still anchored and
+	// still passes, reporting an enum with its whole run missing. Nothing
+	// else here is specific enough to notice. It is also what separates this
+	// failure from the anchored one below, which the two fixes are opposite
+	// for: swept the wrong directory, versus swept the right one and found
+	// no enum in it.
+	s.Require().Contains(scanned, resolverAnchorFile,
+		"the temporal sweep read %v under %s, which does not include %s; the sweep ran against the wrong directory, and one that cannot see the file declaring resolver.Temporal derives the enum from whatever it did see",
+		scanned, resolverDir, resolverAnchorFile)
+	s.Require().True(anchored,
+		"no file of %s declares a `<name> Temporal = iota` const block; this suite derives the enum's members from that block, and a derivation that found nothing would report an empty enum",
+		resolverDir)
+
+	members := make([]temporalMember, 0, len(anchorMembers)+len(otherMembers))
+	members = append(members, anchorMembers...)
+	members = append(members, otherMembers...)
+
+	held := make(map[int]temporalMember, len(members))
 	for _, m := range members {
 		first, dup := held[m.Value]
 		s.Require().False(dup,
-			"%s: resolver.%s and resolver.%s are both Temporal(%d), so a value no longer names one kind",
-			resolverSource, first, m.Name, m.Value)
-		held[m.Value] = m.Name
+			"%s: resolver.%s and %s: resolver.%s are both Temporal(%d), so a value no longer names one kind",
+			resolverPath(first.File), first.Name, resolverPath(m.File), m.Name, m.Value)
+		held[m.Value] = m
 	}
 	return members
 }
 
 // temporalsOf returns the resolver.Temporal constants one const
-// declaration holds, and reports whether it anchors the enum's iota run.
+// declaration of file holds, and reports whether it anchors the enum's
+// iota run.
 //
 // A constant's type is what decides membership, and it is not always
 // written on its own line: a spec carrying no type of its own inherits
@@ -204,12 +288,13 @@ func (s *AssembledInputSuite) declaredTemporals() []temporalMember {
 // is the one thing validated.go says a successor sentinel must never be.
 // No other assertion here can see it: the difference between the two is
 // in no value, only in the type the line declines to write.
-func (s *AssembledInputSuite) temporalsOf(gen *ast.GenDecl) (members []temporalMember, anchored bool) {
+func (s *AssembledInputSuite) temporalsOf(gen *ast.GenDecl, file string) (members []temporalMember, anchored bool) {
+	path := resolverPath(file)
 	runType, runFromIota := "", false
 	var untyped []string
 	for i, raw := range gen.Specs {
 		spec, ok := raw.(*ast.ValueSpec)
-		s.Require().True(ok, "%s: const spec %d is a shape the derivation cannot read", resolverSource, i)
+		s.Require().True(ok, "%s: const spec %d is a shape the derivation cannot read", path, i)
 
 		declType, fromIota := runType, runFromIota
 		if len(spec.Values) > 0 {
@@ -228,7 +313,7 @@ func (s *AssembledInputSuite) temporalsOf(gen *ast.GenDecl) (members []temporalM
 
 		s.Require().Len(spec.Names, 1,
 			"%s: a Temporal is declared on a line holding %d names; the derivation reads each kind's value off its own line",
-			resolverSource, len(spec.Names))
+			path, len(spec.Names))
 		name := spec.Names[0].Name
 		if name == "_" {
 			continue // names no constant, and still spends its position
@@ -237,15 +322,15 @@ func (s *AssembledInputSuite) temporalsOf(gen *ast.GenDecl) (members []temporalM
 		if !fromIota {
 			s.Require().NotEmpty(spec.Values,
 				"%s: %s inherits its value from a line that is not `= iota`, so its position in the block is not its value",
-				resolverSource, name)
-			val = s.intValue(spec.Values[0], name)
+				path, name)
+			val = s.intValue(spec.Values[0], name, path)
 		}
-		members = append(members, temporalMember{Name: name, Value: val})
+		members = append(members, temporalMember{Name: name, Value: val, File: file})
 	}
 	if anchored && len(untyped) > 0 {
 		s.Require().Empty(untyped,
 			"%s: %v share resolver.Temporal's const block and name no type, so each is an untyped constant assignable to Temporal; `case %s:` would compile inside a switch over the enum while this derivation reads it as no member of one. Give the line a type — int if it is a count, Temporal if it is a kind",
-			resolverSource, untyped, untyped[0])
+			path, untyped, untyped[0])
 	}
 	return members, anchored
 }
@@ -253,8 +338,8 @@ func (s *AssembledInputSuite) temporalsOf(gen *ast.GenDecl) (members []temporalM
 // typeName is the name of the type a const spec declares, or "" when it
 // declares none or declares one the derivation cannot read. It answers
 // rather than asserting because the sweep visits every const declaration
-// in the file, and one that is not about Temporal is none of this suite's
-// business.
+// of every file it reads, and one that is not about Temporal is none of
+// this suite's business.
 func typeName(expr ast.Expr) string {
 	ident, ok := expr.(*ast.Ident)
 	if !ok {
@@ -269,14 +354,15 @@ func isIdent(expr ast.Expr, name string) bool {
 	return ok && ident.Name == name
 }
 
-// intValue reads the integer literal a Temporal is declared at.
-func (s *AssembledInputSuite) intValue(expr ast.Expr, name string) int {
+// intValue reads the integer literal the Temporal named name is declared
+// at in the file at path.
+func (s *AssembledInputSuite) intValue(expr ast.Expr, name, path string) int {
 	lit, ok := expr.(*ast.BasicLit)
 	s.Require().True(ok && lit.Kind == token.INT,
 		"%s: resolver.%s is a Temporal declared at neither iota nor an integer literal; the derivation reads a kind's value to ask whether Temporal.String has an arm for it",
-		resolverSource, name)
+		path, name)
 	v, err := strconv.Atoi(lit.Value)
-	s.Require().NoError(err, "%s: resolver.%s is declared at %s, which the derivation cannot read as a value", resolverSource, name, lit.Value)
+	s.Require().NoError(err, "%s: resolver.%s is declared at %s, which the derivation cannot read as a value", path, name, lit.Value)
 	return v
 }
 
@@ -670,10 +756,16 @@ func (s *AssembledInputSuite) TestMarkerSealDoesNotCloseTheSum() {
 // and a kind declared outside the iota run has a value its position does
 // not give. A count tells none of them apart; this names the member that
 // moved and what it moved to.
+//
+// The hint reads the gap rather than the count. They agree only while the
+// kinds run 0..n-1 with nothing outside the run, which is the very
+// assumption a member declared away from the iota run breaks — and such a
+// member is the case this test exists for, so a hint sized by len() would
+// print the wrong rendering exactly when it is read.
 func (s *AssembledInputSuite) TestTemporalEnumIsTheOneThisSuiteKnows() {
 	s.Equal(temporalKinds, s.declaredTemporals(),
 		"resolver.Temporal's constants are no longer the enum this suite was written against; update temporalKinds, then check that list-elem-temporal still reaches its fail-site and that its expected message still names %q",
-		temporalFallback(len(temporalKinds)))
+		temporalFallback(int(s.firstUndeclaredTemporal())))
 }
 
 // TestTemporalStringerAnswersForDeclaredKindsAlone holds Temporal.String's
@@ -696,17 +788,18 @@ func (s *AssembledInputSuite) TestTemporalEnumIsTheOneThisSuiteKnows() {
 func (s *AssembledInputSuite) TestTemporalStringerAnswersForDeclaredKindsAlone() {
 	declared := s.declaredTemporals()
 
-	tagOf := make(map[string]string, len(declared))
+	tagOf := make(map[string]temporalMember, len(declared))
 	held := make(map[int]bool, len(declared))
 	for _, m := range declared {
 		held[m.Value] = true
 		tag := resolver.Temporal(m.Value).String()
 		s.NotEqual(temporalFallback(m.Value), tag,
-			"resolver.%s is declared but resolver.Temporal.String has no arm for it, so it renders as the form reserved for undeclared values; add the case",
-			m.Name)
+			"%s: resolver.%s is declared but resolver.Temporal.String has no arm for it, so it renders as the form reserved for undeclared values; add the case",
+			resolverPath(m.File), m.Name)
 		first, dup := tagOf[tag]
-		s.False(dup, "resolver.%s and resolver.%s both render %q, so the wire tag no longer identifies the kind", first, m.Name, tag)
-		tagOf[tag] = m.Name
+		s.False(dup, "%s: resolver.%s and %s: resolver.%s both render %q, so the wire tag no longer identifies the kind",
+			resolverPath(first.File), first.Name, resolverPath(m.File), m.Name, tag)
+		tagOf[tag] = m
 	}
 
 	for v := range temporalScanLimit {
