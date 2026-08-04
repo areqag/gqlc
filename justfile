@@ -253,11 +253,14 @@ test-codegen-live-age:
 # that module may be outside the build the scan is about to load.
 #
 # -show verbose because the scan runs at symbol level: package- and module-level
-# findings never change its exit status, and without verbose they are only ever
-# counted, so a reader of a CI log cannot tell which advisories this gate is
-# exiting 0 over or see that set change (bd gqlc-k22l). It also prints the
-# packages and modules each invocation matched, which is the standing evidence
-# that the widened scan still covers every module.
+# findings never change its exit status, so without verbose they are only ever
+# counted and the set this gate is exiting 0 over is never named. Naming them is
+# not only for a reader — the ids are read back out of the output and checked
+# against a register of accepted advisories, so "someone will notice the set
+# change in the log" is a decision the recipe takes rather than a hope (bd
+# gqlc-k22l). Verbose also prints the packages and modules each invocation
+# matched, which is the standing evidence that the widened scan still covers
+# every module.
 #
 # WHAT THIS GATE STILL DOES NOT SEE: the root module's in-package tests, whose
 # imports govulncheck discards, so a called vulnerability reachable only from
@@ -266,6 +269,11 @@ test-codegen-live-age:
 vuln: vuln-root-residual
     #!/usr/bin/env bash
     set -euo pipefail
+
+    # comm needs a stream, and printf on an empty string still emits one empty
+    # line, which comm would read as a member. Without this a trip could be
+    # reported against a set that was never measured.
+    lines() { [ -n "${1}" ] && printf '%s\n' "${1}" || true; }
 
     # Every build tag a module's own packages constrain themselves by. The
     # directory list comes from `go list` inside the module, which is the
@@ -296,6 +304,10 @@ vuln: vuln-root-residual
             exit 1
             ;;
     esac
+
+    log="$(mktemp)"
+    trap 'rm -f "${log}"' EXIT
+    reported=""
 
     for dir in "${modules[@]}"; do
         tags="$(build_tags "${dir}")"
@@ -328,8 +340,83 @@ vuln: vuln-root-residual
         fi
 
         echo "govulncheck: $(cd "${dir}" && go list -m) at ${dir}, tags [${tags:-none}]"
-        (cd "${dir}" && go run golang.org/x/vuln/cmd/govulncheck@latest "${tagflag[@]}" -test -show verbose ./...)
+        rc=0
+        (cd "${dir}" && go run golang.org/x/vuln/cmd/govulncheck@latest "${tagflag[@]}" -test -show verbose ./...) \
+            2>&1 | tee "${log}" || rc=$?
+        if [ "${rc}" -ne 0 ]; then
+            echo "error: the scan of ${dir} exited ${rc}. govulncheck exits non-zero when this tree" >&2
+            echo "       CALLS a known vulnerability, and when it cannot load the module at all —" >&2
+            echo "       the output above says which. Neither belongs in the register below: that" >&2
+            echo "       is for advisories nothing calls (bd gqlc-k22l)." >&2
+            exit "${rc}"
+        fi
+        reported+="$(grep -oE 'GO-[0-9]{4}-[0-9]+' "${log}" || true)"$'\n'
     done
+    reported="$(lines "${reported}" | sed '/^$/d' | sort -u)"
+
+    # The advisories this gate deliberately exits 0 over, and why (bd gqlc-k22l).
+    # Every one is uncalled — govulncheck's symbol-level result is empty, which
+    # is what keeps the exit status 0 and is re-established on every run above.
+    #
+    # This is a REGISTER, not a suppression list. It is compared against what the
+    # scan actually reported, in both directions: an advisory that turns up
+    # without a recorded decision fails the gate, and an entry the scan no longer
+    # reports fails it too until the line is deleted. Both halves matter. Without
+    # the first, "-show verbose so a reader can see the set change" is a guard
+    # nobody executes, because nobody reads the log of a green job. Without the
+    # second the register accumulates entries that describe nothing, and quietly
+    # pre-accepts an id that comes back.
+    #
+    # The ids are read back out of govulncheck's own output rather than tracked
+    # beside it, so the register cannot describe a scan that did not happen: if
+    # the output format moves and the extraction stops matching, the measured set
+    # empties and the second comparison fails rather than the first one passing.
+    #
+    # None of the three below is bumped, and the reason is a version rather than
+    # a preference. Both fixable ones are indirect dependencies of
+    # testcontainers-go, whose latest published release is v0.43.0 — exactly what
+    # test/data/codegen already requires. Pinning an indirect dependency ahead of
+    # the module that requires it is churn `go mod tidy` can undo, bought with no
+    # reduction in exposure, since none of the three is reachable. Revisit when
+    # testcontainers-go itself moves; `go list -m -u` in test/data/codegen is the
+    # check.
+    accepted="$(sed -e 's/#.*//' -e 's/[[:space:]]//g' -e '/^$/d' <<'ACCEPTED' | sort -u
+    # go.opentelemetry.io/otel v1.41.0 in test/data/codegen: baggage parsing no
+    # longer caps raw header length. Imported, not called. Fixed in v1.42.0, and
+    # v1.45.0 is out, but it is testcontainers-go v0.43.0's indirect.
+    GO-2026-5158
+    # github.com/klauspost/compress v1.18.5 in test/data/codegen: OOB read in
+    # .../s2. Required, not imported — nothing in the tree names the package.
+    # Fixed in v1.18.7; again testcontainers-go v0.43.0's indirect.
+    GO-2026-5841
+    # golang.org/x/crypto/openpgp: unmaintained and unsafe by design, no fix
+    # available and none coming. Required, not imported. This one is permanent
+    # unless x/crypto drops the package, and bumping x/crypto cannot clear it.
+    GO-2026-5932
+    ACCEPTED
+    )"
+
+    unregistered="$(comm -23 <(lines "${reported}") <(lines "${accepted}") || true)"
+    stale="$(comm -13 <(lines "${reported}") <(lines "${accepted}") || true)"
+    if [ -n "${unregistered}" ]; then
+        echo "error: the scan reported advisories this gate has no recorded decision about" >&2
+        echo "       (bd gqlc-k22l):" >&2
+        lines "${unregistered}" | sed 's|^|         https://pkg.go.dev/vuln/|' >&2
+        echo "       They are uncalled, so govulncheck exited 0 and this gate would have gone" >&2
+        echo "       green over them. Upgrade the dependency, or add the id to the register in" >&2
+        echo "       this recipe with the reason it is being accepted." >&2
+        exit 1
+    fi
+    if [ -n "${stale}" ]; then
+        echo "error: these accepted advisories are no longer reported, so the register in this" >&2
+        echo "       recipe is stale (bd gqlc-k22l):" >&2
+        lines "${stale}" | sed 's|^|         https://pkg.go.dev/vuln/|' >&2
+        echo "       Either a dependency moved and cleared them — delete the entries — or the" >&2
+        echo "       scan narrowed and stopped seeing what it used to. A register left above the" >&2
+        echo "       measured set pre-accepts whichever of these ids comes back." >&2
+        exit 1
+    fi
+    echo "accepted and still uncalled (bd gqlc-k22l): $(lines "${reported}" | paste -sd' ')"
 
 # Measures the root module's residual blindness (ADR 0026), so it is a number
 # taken on every run rather than a claim in a comment that rots (bd gqlc-m5rc).

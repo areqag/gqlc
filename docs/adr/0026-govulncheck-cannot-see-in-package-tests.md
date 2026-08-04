@@ -130,9 +130,36 @@ than discarded.
 
 **`just vuln` runs with `-show verbose`.** The scan is at symbol level, so
 package- and module-level findings do not change its exit status; without
-verbose they appear only as a count. Naming them is what lets a reader of a CI
-log see *which* advisories the gate is exiting 0 over, and notice when that set
-changes. The three currently accepted are tracked on gqlc-k22l.
+verbose they appear only as a count.
+
+**The advisories the gate exits 0 over are a register, checked by set equality,
+not a note.** Verbose naming them was originally so that a reader of a CI log
+could see the set change — which is a guard nobody executes, because nobody
+reads the log of a green job. The ids are now read back out of govulncheck's own
+output and compared against a register kept in the recipe, in both directions
+(bd gqlc-k22l). An advisory that appears without a recorded decision fails the
+gate; an entry the scan no longer reports fails it too, until the line is
+deleted. The second direction is what makes the first trustworthy: reading the
+ids out of the output means that if the output format moves and the extraction
+stops matching, the measured set empties and the register goes stale — the gate
+fails rather than silently accepting everything.
+
+This refines rather than reverses the rejection of *fail the gate on
+module-level findings* below. The objection there was blocking on advisories
+nothing in the tree imports, one of them with no fix available; the register
+does not block on those, it blocks on the arrival of a new one.
+
+**The three registered advisories are accepted, not bumped, and the reason is a
+version.** `GO-2026-5158` (otel) and `GO-2026-5841` (klauspost/compress) are
+both indirect dependencies of `testcontainers-go`, whose latest published
+release is `v0.43.0` — exactly what `test/data/codegen` already requires. There
+is no upstream release to move to, and pinning an indirect dependency ahead of
+the module that requires it is churn `go mod tidy` can undo, bought with no
+reduction in exposure, since neither is called. `GO-2026-5932`
+(`x/crypto/openpgp`) has no fix and never will; bumping `x/crypto` cannot clear
+it. Revisit when `testcontainers-go` itself moves; `go list -m -u` inside
+`test/data/codegen` is the check, and the register's stale half will announce it
+anyway the moment an advisory clears.
 
 ## Considered alternatives
 
@@ -154,7 +181,15 @@ file set as a failure.
 
 **Fail the gate on module-level findings.** Rejected: it would block on
 advisories in modules nothing in the tree imports, including one with no fix
-available.
+available. The register above is the narrower form that survives this objection
+— it blocks on a *change* to that set, not on its existence.
+
+**Suppress the three accepted advisories instead of registering them.**
+Rejected. A suppression is one-directional: it silences an id whether or not the
+scan still reports it, so it goes on describing a dependency long after that
+dependency has moved, and it pre-accepts the id if it ever comes back. A
+register compared in both directions is the same three lines with the failure
+mode removed.
 
 **Keep the module list literal and add a check that it matches discovery.**
 Rejected as a fallback that was not needed: nothing about the scan requires a
@@ -185,6 +220,11 @@ mismatch check would only reintroduce the list in order to guard it.
   touches a `.go` file. That is the intended cost: govulncheck answers at symbol
   level, so a call graph edge is as much an input to the answer as a version in a
   manifest.
+- A newly published advisory against a required-but-uncalled dependency turns the
+  weekly sweep red, and stays red until someone upgrades or writes a line in the
+  register saying why not. That is the point — an advisory nobody has looked at
+  is not the same state as one somebody accepted — but it does mean the sweep is
+  a job with an owner rather than one that is green by default.
 - `just vuln` output is longer, and includes the package and module inventory
   each scan matched. That inventory is the standing evidence that widening the
   scan to both modules is still in effect.
