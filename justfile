@@ -395,22 +395,34 @@ vuln: vuln-root-residual
     # reported against a set that was never measured.
     lines() { [ -n "${1}" ] && printf '%s\n' "${1}" || true; }
 
-    mapfile -t modules < <(find . -name go.mod -not -path './.git/*' -printf '%h\n' | sort)
-    if [ "${#modules[@]}" -eq 0 ]; then
-        echo "error: no go.mod found under the checkout, so this recipe would scan nothing" >&2
-        echo "       and exit 0 (bd gqlc-pig9). Discovery is broken." >&2
-        exit 1
-    fi
-    case " ${modules[*]} " in
-        *" . "*) ;;
-        *)  echo "error: discovery did not find the root module's go.mod, so the main module" >&2
-            echo "       is unscanned (bd gqlc-pig9). Found: ${modules[*]}" >&2
-            exit 1
-            ;;
-    esac
+    # The module set and each module's Go directories come from one place, and
+    # every answer is graded before it is printed (bd gqlc-s3lt). An empty module
+    # set, a checkout whose root is not a module, and a module whose walk found
+    # no directory holding a Go file are all errors inside modscope rather than
+    # empty lines out of it — see internal/tools/modscope, whose tests are the
+    # regression for each. That grading is the point: the postcondition below is
+    # a `comm` between two sets, and `comm` over two EMPTY sets reports no
+    # difference. The walk is the measurement, the comparison is only as good as
+    # it, and an unmeasured module used to read exactly like a covered one.
+    #
+    # TWO HOUSE RULES for the helpers below, and neither is stylistic.
+    #
+    # (1) Never call one inside `<(...)`. A process substitution's exit status is
+    # read by nobody, so `comm -13 <(...) <(scope dirs X)` hands comm an empty
+    # stream when the helper dies and comm duly reports no difference — this
+    # bead's failure mode reintroduced by punctuation.
+    #
+    # (2) Assignment position is NOT enough on its own. Measured on bash 5.3:
+    # errexit is suppressed inside a command substitution, so a helper whose body
+    # is `r="$(fail)"; printf ...` runs the printf anyway, exits 0, and the
+    # caller's `dirs="$(helper)"` sees success and an empty string. The helper
+    # therefore returns its own status explicitly and every caller checks it,
+    # which is why `|| return` and `|| exit` appear below on assignments that
+    # `set -e` looks like it already covers. It does not.
+    scope() { go run ./internal/tools/modscope "$@"; }
 
     # Every directory of a module that holds a Go file, absolute, read off disk.
-    # The walk is bounded by the modules discovered above, so it stops at a
+    # The walk is bounded by the modules discovered below, so it stops at a
     # nested module's root rather than filing that module's files under its
     # parent, and it applies go's own `./...` exclusions — names beginning with
     # '.' or '_', testdata, vendor — so this set and the set `go list ./...`
@@ -424,26 +436,32 @@ vuln: vuln-root-residual
     # sees the files it dropped — the scan runs, reports on what was left, and
     # exits 0 (bd gqlc-pig9). The module root comes from `go list -m` rather than
     # `pwd` so it is the same path, symlinks and all, that `go list` prints.
-    go_dirs() {
-        local root prune=() m
-        root="$(cd "${1}" && go list -m -f '{{{{.Dir}}')"
-        for m in "${modules[@]}"; do
-            if [ "${m}" != "${1}" ]; then
-                case "${m}" in "${1}"/*)
-                    prune+=(-path "$(cd "${m}" && go list -m -f '{{{{.Dir}}')" -prune -o)
-                    ;;
-                esac
-            fi
-        done
-        find "${root}" -mindepth 1 \
-            \( -name '.*' -o -name '_*' -o -name testdata -o -name vendor \) -prune -o \
-            "${prune[@]}" \
-            -name '*.go' -printf '%h\n' | sort -u
+    #
+    # One module's Go directories, graded here as well as inside modscope. The
+    # duplication is deliberate: modscope's grading is what makes the helper
+    # honest, and this is what still holds the day the helper is replaced by
+    # something that is not. Either alone reddens an emptied walk; the emptiness
+    # test below also covers a helper that fails without saying so.
+    module_dirs() {
+        local raw
+        raw="$(scope dirs "${1}")" || return 1
+        if [ -z "${raw}" ]; then
+            echo "error: the walk of ${1} came back with no directory holding a Go file, so the" >&2
+            echo "       coverage postcondition below would compare two empty sets and pass over" >&2
+            echo "       an unscanned module (bd gqlc-s3lt)." >&2
+            return 1
+        fi
+        # Re-sorted rather than trusted sorted: `comm` compares this against a
+        # set sorted by this shell, and two sorts under different collations
+        # disagree about order without either being wrong.
+        printf '%s\n' "${raw}" | sort -u
     }
 
-    # Every build tag a module's own packages constrain themselves by.
+    # Every build tag a module's own packages constrain themselves by, read out
+    # of the directory set measured above rather than by walking again — one
+    # measurement, graded once, used twice.
     build_tags() {
-        go_dirs "${1}" | while IFS= read -r d; do
+        printf '%s\n' "${1}" | while IFS= read -r d; do
             grep -hs '^//go:build' "${d}"/*.go || true
         done \
             | sed 's|^//go:build||' \
@@ -453,6 +471,26 @@ vuln: vuln-root-residual
             | sort -u | paste -sd,
     }
 
+    # Assigned on its own line, not consumed through a process substitution: a
+    # `mapfile < <(cmd)` reports mapfile's status and would read a helper that
+    # died as a checkout with no modules in it.
+    modules_raw="$(scope modules)"
+    mapfile -t modules <<<"${modules_raw}"
+    # Postconditions on the helper rather than a second derivation: modscope
+    # already refuses both, and this is what still holds if it is ever replaced.
+    if [ "${#modules[@]}" -eq 0 ] || [ -z "${modules[0]}" ]; then
+        echo "error: module discovery came back empty, so this recipe would scan nothing" >&2
+        echo "       and exit 0 (bd gqlc-pig9, bd gqlc-s3lt)." >&2
+        exit 1
+    fi
+    case " ${modules[*]} " in
+        *" . "*) ;;
+        *)  echo "error: discovery did not find the root module's go.mod, so the main module" >&2
+            echo "       is unscanned (bd gqlc-pig9). Found: ${modules[*]}" >&2
+            exit 1
+            ;;
+    esac
+
     # The derivation's fixture. test/data/tagblind holds nothing but
     # build-constrained Go files, which is the one directory shape `go list
     # ./...` does not match at all — so it is the only thing in this tree that
@@ -461,9 +499,11 @@ vuln: vuln-root-residual
     # unconstrained file added beside it) would take both guards out of service
     # with nothing failing. The three clauses are the three ways that happens.
     selftest_tagblind() {
-        local want="tagblind" fixture
+        local want="tagblind" fixture root_dirs root_tags
         fixture="$(go list -m -f '{{{{.Dir}}')/test/data/${want}"
-        if ! go_dirs . | grep -qxF "${fixture}"; then
+        root_dirs="$(module_dirs .)" || exit 1
+        root_tags="$(build_tags "${root_dirs}")"
+        if ! grep -qxF "${fixture}" <<<"${root_dirs}"; then
             echo "error: the tag-derivation fixture ${fixture}" >&2
             echo "       is gone, so nothing in this tree exercises the filesystem walk or the" >&2
             echo "       coverage assertion below (bd gqlc-pig9). Restore it." >&2
@@ -476,7 +516,7 @@ vuln: vuln-root-residual
             echo "       constrained. An unconstrained .go file was added beside it (bd gqlc-pig9)." >&2
             exit 1
         fi
-        case ",$(build_tags .)," in
+        case ",${root_tags}," in
             *",${want},"*) ;;
             *)  echo "error: the filesystem walk did not derive '${want}' from ${fixture}," >&2
                 echo "       so it is not seeing wholly build-constrained directories — the exact" >&2
@@ -491,7 +531,11 @@ vuln: vuln-root-residual
     headers_total=0
 
     for dir in "${modules[@]}"; do
-        tags="$(build_tags "${dir}")"
+        # Taken once, here, into a variable — see the house rule beside scope().
+        # The `comm` below reads this string rather than re-running the walk in
+        # a process substitution whose exit status nothing would read.
+        dirs="$(module_dirs "${dir}")" || exit 1
+        tags="$(build_tags "${dirs}")"
         tagflag=()
         if [ -n "${tags}" ]; then tagflag=(-tags "${tags}"); fi
 
@@ -509,7 +553,7 @@ vuln: vuln-root-residual
         # files (bd gqlc-pig9). Within a directory that WAS listed, `go list`
         # reports the drop itself, and that is the assertion below.
         matched="$(cd "${dir}" && go list -e "${tagflag[@]}" -f '{{{{.Dir}}' ./... | sort -u)"
-        unlisted="$(comm -13 <(lines "${matched}") <(go_dirs "${dir}") || true)"
+        unlisted="$(comm -13 <(lines "${matched}") <(lines "${dirs}") || true)"
         if [ -n "${unlisted}" ]; then
             echo "error: these directories of ${dir} hold Go files that 'go list ./...' does not" >&2
             echo "       match, so govulncheck loads no package for them and the scan below would" >&2
