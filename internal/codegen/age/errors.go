@@ -23,35 +23,76 @@ var ErrUnsupportedSchema = errors.New("unsupported schema")
 
 // wireEntities pairs every entity with the form it takes on the wire,
 // failing a schema that declares a node or edge type under more than one
-// label. AGE stamps exactly one label on a vertex or an edge and its
-// parser has no syntax for a second, so a graph matching such a type
-// cannot be written through this backend and no value matching it can
-// arrive to be decoded.
-//
-// It runs over the whole entity surface: Phase Z names an entity for
-// every type in the schema and the emitted surface is backend-invariant,
-// so a struct that no query could ever fill is still a struct this
-// package declares.
-func wireEntities(entities []codegen.Entity) ([]wiredEntity, error) {
+// label. The refusal is over the whole entity table rather than over the
+// columns the batch projects, and takes the batch's queries with it
+// (ADR 0027); queries is how many, which the diagnostic states.
+func wireEntities(entities []codegen.Entity, queries int) ([]wiredEntity, error) {
 	wired := make([]wiredEntity, 0, len(entities))
-	var multi []string
+	var refused []codegen.Entity
 	for _, e := range entities {
 		w, ok := wireEntity(e)
 		if !ok {
-			multi = append(multi, fmt.Sprintf("%s (%s)", e.Name, e.DocAxis))
+			refused = append(refused, e)
 			continue
 		}
 		wired = append(wired, w)
 	}
-	if len(multi) == 0 {
+	if len(refused) == 0 {
 		return wired, nil
 	}
-	noun := "types"
-	if len(multi) == 1 {
-		noun = "type"
+	return nil, fmt.Errorf("%w: %s", ErrUnsupportedSchema, multiLabelDiagnostic(refused, queries))
+}
+
+// multiLabelDiagnostic is what an author meets when a schema keys a type
+// on more than one label and the target is AGE. It is where the posture
+// is recorded for the person hitting it, so it carries four things: which
+// types are refused and the labels each is keyed on, why AGE cannot hold
+// them, that the refusal is the whole batch's rather than the projecting
+// queries', and the two ways out.
+//
+// It names the refused types and nothing else. A message listing the
+// whole entity table would say which types exist, not which need editing.
+func multiLabelDiagnostic(refused []codegen.Entity, queries int) string {
+	named := make([]string, 0, len(refused))
+	for _, e := range refused {
+		labels := keyLabels(e)
+		named = append(named, fmt.Sprintf("%s type %s, keyed on %d labels (%s)",
+			entityKindNoun(e.Kind), e.Name, len(labels), strings.Join(labels, ", ")))
 	}
-	return nil, fmt.Errorf("%w: Apache AGE stamps one label on a vertex or an edge, so %d %s cannot be represented: %s",
-		ErrUnsupportedSchema, len(multi), noun, strings.Join(multi, ", "))
+	queryNoun := "queries"
+	if queries == 1 {
+		queryNoun = "query"
+	}
+	return fmt.Sprintf(
+		"Apache AGE stamps exactly one label on a vertex or an edge and its parser has no syntax for a second: "+
+			"`CREATE (x:A:B)` is a syntax error, not a value AGE rejects. "+
+			"So a type keyed on more than one label names an element no graph this backend can address ever holds, "+
+			"and no value matching such a type can arrive to be decoded. "+
+			"This schema declares %d of them: %s. "+
+			"Refusing a type refuses the whole schema, and this batch's %d %s with it, "+
+			"including every query that projects none of them — gqlc names an entity for every type a schema declares "+
+			"and the generated Go surface does not vary by backend, so emitting here would declare each refused type "+
+			"with a label check nothing could satisfy. "+
+			"Give each a single key label, or generate this schema against a neo4j target.",
+		len(refused), strings.Join(named, "; "), queries, queryNoun)
+}
+
+// keyLabels is the label set an entity is keyed on, which is the axis
+// AGE cannot hold more than one member of.
+func keyLabels(e codegen.Entity) []string {
+	if e.Kind == codegen.EntityNode {
+		return e.Labels.Split()
+	}
+	return e.EdgeKey.KeyLabels.Split()
+}
+
+// entityKindNoun names an entity kind as the schema's own vocabulary
+// spells it, so the diagnostic points at a declaration the author wrote.
+func entityKindNoun(k codegen.EntityKind) string {
+	if k == codegen.EntityNode {
+		return "node"
+	}
+	return "edge"
 }
 
 // nameBackend adds this backend's name to a width or a temporal kind the

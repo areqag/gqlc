@@ -446,22 +446,33 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 	}
 }
 
-// TestRejectsMultiLabelSchema pins the schema gate. AGE stamps exactly
-// one label on a vertex or an edge and its parser has no syntax for a
-// second, so an entity the schema keys on two labels names a shape no
-// graph this backend can address ever holds. Rejecting the schema is
-// what stops the emission producing a struct and a decoder whose label
-// check nothing could ever satisfy.
+// multiLabelFixture is the corpus fixture whose node type is keyed on
+// two labels. It sits in valid/ because the neo4j backends emit for it;
+// its manifest leaves this backend out, and the test below is what says
+// why.
+const multiLabelFixture = "entity_multi_label_named"
+
+// TestRejectsMultiLabelSchema ties the corpus fixture's enrolment to
+// this backend's verdict on it. The manifest omitting apache-age-pgx-v5
+// is otherwise an unexplained gap a reader would take for an oversight,
+// and enrolling it would produce a golden subtree no emission can fill.
 //
-// The gate is on the schema's whole entity table rather than on the
-// columns a batch projects, which is why a query-free batch fails too.
+// Both halves fail on the same edit from opposite sides: enrolling the
+// target reddens the enrolment assertion, and serving multi-label
+// entities here reddens the refusal. Neither can be satisfied by
+// changing only the other (ADR 0027).
 func (s *EmissionSuite) TestRejectsMultiLabelSchema() {
-	in := s.inputFrom(filepath.Join(corpusRoot, "valid", "entity_multi_label_named", "schema.gql"))
-	files, err := age.New().Generate(in)
-	s.Require().Error(err)
-	s.Require().Nil(files, "a rejected schema must not return a partial file set")
-	s.Require().ErrorIs(err, age.ErrUnsupportedSchema)
-	s.Require().ErrorContains(err, "1 type cannot be represented: PersonEmployee (Employee&Person)")
+	dir := filepath.Join(corpusRoot, "valid", multiLabelFixture)
+	m, err := readAgeManifest(dir)
+	s.Require().NoError(err)
+	s.Require().NotEmpty(m.Targets, "fixture %s enrols no target at all", multiLabelFixture)
+	s.Require().NotContains(m.Targets, ageTarget,
+		"fixture %s enrols %s, which cannot emit for a multi-label entity", multiLabelFixture, ageTarget)
+
+	files, genErr := age.New().Generate(s.inputFrom(filepath.Join(dir, "schema.gql")))
+	s.Require().Error(genErr)
+	s.Require().Nil(files, "a refused schema must not return a partial file set")
+	s.Require().ErrorIs(genErr, age.ErrUnsupportedSchema)
 }
 
 // ageIdentifiers are the extension-owned names that must never appear
