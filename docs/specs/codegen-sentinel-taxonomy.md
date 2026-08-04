@@ -308,11 +308,11 @@ and a new consumer joins it by existing.
 `-test` is the load-bearing flag and its absence does not show in the
 result. Plain `go list` reports only what a package's non-test build
 imports, and `internal/codegen/conformance` holds nothing but
-`conformance_test.go`, so it would drop out of the sweep and take all
-twenty-nine negative fixtures with it — leaving a fence that measured
-the backends and the CLI, found every tagged branch unreached, and
-passed. The sweep therefore also asserts that the conformance package is
-in the set it derived.
+`conformance_test.go`, so it would drop out of the sweep and take every
+negative fixture with it — leaving a fence that measured the backends
+and the CLI, found every tagged branch unreached, and passed. The sweep
+therefore also asserts that the conformance package is in the set it
+derived.
 
 The measurement runs in both directions, and the second direction is
 what makes §2 a claim rather than an assertion. A tagged branch the
@@ -368,11 +368,15 @@ To classify a branch:
    var _ resolver.ResolvedType = mine{}        // compiles
    ```
 
-   satisfies the interface in one line, from any package, and no
-   `case resolver.ResolvedNode:` arm matches it. The pointer forms are
-   the same hole a size smaller: every variant's marker and `String`
-   take value receivers, so `*resolver.ResolvedNode` satisfies the
-   interface too and no value arm matches it either. Both reach the
+   satisfies the interface in one line, from any package in this module,
+   and no `case resolver.ResolvedNode:` arm matches it. The `internal/`
+   boundary bounds *where* such a type can be written, not how many
+   there are, and it does not shrink the problem: the switch is in
+   `internal/codegen`, so anything that can reach the switch can also
+   write the type that escapes it. The pointer forms are the same hole a
+   size smaller: every variant's marker and `String` take value
+   receivers, so `*resolver.ResolvedNode` satisfies the interface too
+   and no value arm matches it either. Both reach the
    default. There is no number to write down — the set is open for as
    long as one implementation is exported, and that is the condition
    the seal cannot touch.
