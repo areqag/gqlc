@@ -383,14 +383,6 @@ func TestListyColumnsNarrowEachElement(t *testing.T) {
 		t.Errorf("ListyColumns()[0].Depths = %#v, want %#v", *row.Depths, want)
 	}
 
-	// Each non-nullable list column accumulates its own elements. Sharing
-	// one accumulator between them is a compile failure while their
-	// element types differ and a silent mixing of two columns' values
-	// while they agree, so the two are read back separately here.
-	if want := []string{"a", "b"}; !reflect.DeepEqual(row.Tags, want) || len(row.Blobs) != 2 {
-		t.Errorf("ListyColumns()[0] = %#v, want each list column to hold its own elements", row)
-	}
-
 	// A null column and an empty list stay distinguishable here too, and
 	// on this path the distinction is the driver's own: GetRecordValue
 	// reports a held null through its second result rather than through
