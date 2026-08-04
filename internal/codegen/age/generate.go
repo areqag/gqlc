@@ -16,12 +16,12 @@ func generate(in codegen.Input, packageName string) ([]codegen.File, error) {
 		return nil, err
 	}
 	// Second, and also ahead of Prepare: the gate above reads the resolved
-	// column shape, and this hazard is a property of the query TEXT — an
-	// alternation the author never projects, or one the resolver narrowed
-	// to a single declared candidate, reaches no edge-union column and is
-	// still a statement the server will not parse. It runs second only so
-	// that an edge-union column wins, which names the candidates the
-	// schema declares and so says more about the same defect; on every
+	// column shape, and these hazards are properties of the query TEXT —
+	// an alternation the author never projects, or a constructor in a
+	// predicate the query model drops (ADR 0003), reaches no column at all
+	// and is still a statement the server will not accept. It runs second
+	// only so that an edge-union column wins, which names the candidates
+	// the schema declares and so says more about the same defect; on every
 	// other reason the gate above yields to this one rather than send the
 	// author to fix a projection before they learn the statement never
 	// parsed (rejectUnservedQueries).
@@ -29,14 +29,16 @@ func generate(in codegen.Input, packageName string) ([]codegen.File, error) {
 	// Both halves of that position are load-bearing and both are pinned by
 	// what the author is told, not by any reading of this file. Ahead of
 	// Prepare: TestRejectsRelationshipTypeAlternation/"a column shared
-	// admission refuses is answered here, because this runs first" and
+	// admission refuses is answered here, because this runs first",
+	// TestRejectsUndefinedFunctions/"a projected constructor is answered
+	// here, ahead of the portable temporal refusal", and
 	// TestRunApacheAgeAnswersAnAlternationAheadOfSharedAdmission. Behind
-	// rejectUnservedQueries for the edge union alone: the same test's "an
+	// rejectUnservedQueries for the edge union alone: the same tests' "an
 	// edge-union column is answered by the column gate, which says more"
 	// and "an unserved column that is not an edge union yields to the
 	// text", plus TestRunApacheAgeAnswersAnAlternationAheadOfOther
 	// ColumnRefusals at the CLI seam.
-	if err := rejectRelationshipTypeAlternation(in.Queries); err != nil {
+	if err := rejectDialectGaps(in.Queries); err != nil {
 		return nil, err
 	}
 	prepared, err := codegen.Prepare(in, typeMap{}, packageName)

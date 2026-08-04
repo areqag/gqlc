@@ -295,6 +295,15 @@ func TestTemporalProjectionIsRefusedNamingTheKind(t *testing.T) {
 // because a config naming several targets fails on one of them and the
 // kind alone does not say which — the same reason the width refusal
 // carries a backend name.
+//
+// The constructor is localtime() and not date(), because date() is one
+// of the five names the dialect gate refuses on the TEXT (dialect.go),
+// which runs ahead of Prepare and would answer this query before the
+// carrier was ever asked about. localtime() has no witness against the
+// pinned image and so is not refused there — which makes this test the
+// other half of the bound TestRejectsUndefinedFunctions/"a constructor
+// with no witness is not refused" states: an unwitnessed name reaches
+// the carrier question, and this is the answer it gets.
 func TestTemporalProjectionNamesThisBackend(t *testing.T) {
 	files, err := generate(codegen.Input{
 		Schema: schemaWithPayload(graph.TypeString),
@@ -302,17 +311,17 @@ func TestTemporalProjectionNamesThisBackend(t *testing.T) {
 			Name:        "When",
 			Cardinality: codegen.CardinalityMany,
 			SourceFile:  "q.cypher",
-			SourceText:  "MATCH (b:Blob) RETURN date() AS t\n",
+			SourceText:  "MATCH (b:Blob) RETURN localtime() AS t\n",
 			Validated: resolver.ValidatedQuery{
 				Columns: []resolver.Column{{
-					Name: "t", Type: resolver.ResolvedTemporal{Kind: resolver.TemporalDate},
+					Name: "t", Type: resolver.ResolvedTemporal{Kind: resolver.TemporalLocalTime},
 				}},
 			},
 		}},
 	}, "age")
 	require.ErrorIs(t, err, codegen.ErrUnrepresentableTemporal)
 	require.EqualError(t, err,
-		`unrepresentable temporal kind: query "When" column 0 "t" projects temporal(date), `+
+		`unrepresentable temporal kind: query "When" column 0 "t" projects temporal(localtime), `+
 			`which the Apache AGE backend has no carrier for`)
 	require.Nil(t, files)
 }

@@ -3,12 +3,10 @@ package age
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/graph"
-	"github.com/areqag/gqlc/internal/query/cypher"
 	"github.com/areqag/gqlc/internal/resolver"
 	"github.com/areqag/gqlc/internal/schema"
 )
@@ -33,6 +31,16 @@ var ErrUnsupportedSchema = errors.New("unsupported schema")
 // projection. A caller branching on the two gets two different answers
 // because there are two.
 var ErrRelationshipTypeAlternation = errors.New("relationship type alternation")
+
+// ErrUndefinedFunction is returned when a batch carries a query whose
+// TEXT calls a function Apache AGE 1.7.0 does not define. Separate from
+// ErrRelationshipTypeAlternation for the same reason that one is
+// separate from ErrUnsupportedQuery: the two are different obstacles
+// with different fixes — one is rewritten as several queries, the other
+// is computed in Go and bound — and a caller told only "the text is
+// wrong" has been told less than the gate knows. Which names are refused
+// is decided by the probe table in dialect.go, and only by it.
+var ErrUndefinedFunction = errors.New("undefined function")
 
 // wireEntities pairs every entity with the form it takes on the wire,
 // failing a schema that declares a node or edge type under more than one
@@ -164,16 +172,16 @@ func nameBackend(err error) error {
 // served set is exactly what the emitted decode and encode arms cover,
 // so an arm added here widens it and an arm removed narrows it.
 //
-// It yields to rejectRelationshipTypeAlternation on a query whose text
-// spells one, EXCEPT where the reason is the edge-union column. The
-// exception is what the gate order is for: edgeUnionReason names the
-// candidates the SCHEMA declares for the pattern, which the text cannot
-// say, so it is the more informative of two answers to the same defect.
-// Every OTHER reason answers a different defect — a list property, a map
-// column, a list parameter — and printing it first costs the author a
-// whole round: they fix the projection, regenerate, and only then learn
-// the statement never parsed on this backend. The alternation is the
-// obstacle underneath, because the text has to be rewritten before any
+// It yields to rejectDialectGaps on a query whose text spells any of the
+// constructs that gate reads, EXCEPT where the reason is the edge-union
+// column. The exception is what the gate order is for: edgeUnionReason
+// names the candidates the SCHEMA declares for the pattern, which the
+// text cannot say, so it is the more informative of two answers to the
+// same defect. Every OTHER reason answers a different defect — a list
+// property, a map column, a list parameter — and printing it first costs
+// the author a whole round: they fix the projection, regenerate, and
+// only then learn the statement never parsed on this backend. The text
+// is the obstacle underneath, because it has to be rewritten before any
 // column question can be put to this server at all, so it goes first.
 //
 // Yielding is per query, not per batch: a sibling query whose reason
@@ -185,7 +193,7 @@ func rejectUnservedQueries(queries []codegen.NamedQuery) error {
 		if reason == "" {
 			continue
 		}
-		if !edgeUnion && len(cypher.RelationshipTypeAlternations(q.SourceText)) > 0 {
+		if !edgeUnion && dialectGapFires(q.SourceText) {
 			continue
 		}
 		dropped = append(dropped, q.Name+" ("+reason+")")
@@ -199,96 +207,6 @@ func rejectUnservedQueries(queries []codegen.NamedQuery) error {
 	}
 	return fmt.Errorf("%w: the Apache AGE backend serves scalar and entity columns, so %d %s would be dropped: %s",
 		ErrUnsupportedQuery, len(dropped), noun, strings.Join(dropped, ", "))
-}
-
-// rejectRelationshipTypeAlternation fails a batch carrying a query whose
-// TEXT spells a relationship-type alternation, naming each one and the
-// alternations it spells.
-//
-// This is the refusal that keys on the hazard itself. Apache AGE 1.7.0's
-// parser has no '|' in a relationship detail — it answers one with
-// `ERROR: syntax error at or near "|"`, SQLSTATE 42601, whatever
-// surrounds it (verified against the image test/data/codegen pins;
-// TestAGERefusesRelationshipTypeAlternation re-measures it on every run
-// of the AGE live half and fails when it stops holding) — and generated
-// code runs the author's query text verbatim (ADR 0005). So the
-// offending thing is the text, and the predicate reads the text.
-//
-// It is a separate gate from rejectUnservedQueries and not a column
-// reason inside it, because most of what it catches reaches no column.
-// A query may bind an alternation and project something else entirely
-// (`-[r:A|B]->(p) RETURN p.id`); it may bind one the resolver narrowed to
-// a single declared candidate, because a type the schema does not declare
-// is dropped during resolution (internal/resolver, edgeCandidates), which
-// leaves a ResolvedEdge the emission serves; and a re-bound relationship
-// variable's occurrences intersect (internal/query/cypher, mergeBinding),
-// which narrows the binding while leaving the text alone. Every one of
-// those is a package that compiles and whose every call is a server-side
-// syntax error, and the column shape is blind to all three.
-//
-// It reads the query and nothing else about it — not its columns, not
-// its cardinality, not whether it reads or writes. A :exec write
-// projects no columns at all and its whole statement still reaches the
-// server, so narrowing the loop to queries that project, or to queries
-// that read, leaves a DELETE spelling '|' generating cleanly and failing
-// on every call.
-//
-// It runs AFTER rejectUnservedQueries, but that gate yields to this one
-// on every reason except the edge-union column, so what the ordering
-// really says is: an edge-union column outranks the text, and nothing
-// else does. The exception earns its place — edgeUnionReason names the
-// candidates the SCHEMA declares for the pattern, which the text cannot
-// say, and it is an answer to the SAME defect. A list property, a map
-// column or a list parameter is a different defect, and printing it
-// first sends the author round twice for one query: fix the projection,
-// regenerate, then learn the statement never parsed here. Where the
-// column gate stands aside — a single surviving candidate, or candidates
-// repeating a label — this one is what answers.
-//
-// It runs BEFORE codegen.Prepare, which answers a repeating label with
-// the portable ErrUnrepresentableEdgeUnion. A query doing both — an
-// alternation over candidates that repeat a label — gets this one,
-// because the text has to be rewritten before the column question can be
-// put to this server at all. That ordering is what puts
-// invalid/unrepresentable_edge_union_shared_label out of reach of an
-// apache-age-pgx-v5 enrolment, so it is pinned by the answer it produces
-// (TestRejectsRelationshipTypeAlternation's "a column shared admission
-// refuses is answered here, because this runs first", and
-// TestRunApacheAgeAnswersAnAlternationAheadOfSharedAdmission at the CLI
-// seam) rather than left to the reading order of generate.go.
-//
-// The alternations are quoted as the parser read them and are not
-// reconstructed from anything: every character printed is a character
-// the author wrote, whitespace inside the alternation included — SP is a
-// default-channel token in this grammar, so the context's text
-// concatenation keeps it and `-[r:A | B]->` is quoted ":A | B". That is
-// the axis the column refusal cannot have, since its label list is a
-// subset of what the pattern names.
-func rejectRelationshipTypeAlternation(queries []codegen.NamedQuery) error {
-	var dropped []string
-	for _, q := range queries {
-		alts := cypher.RelationshipTypeAlternations(q.SourceText)
-		if len(alts) == 0 {
-			continue
-		}
-		quoted := make([]string, len(alts))
-		for i, a := range alts {
-			quoted[i] = strconv.Quote(a)
-		}
-		dropped = append(dropped, q.Name+" ("+strings.Join(quoted, ", ")+")")
-	}
-	if len(dropped) == 0 {
-		return nil
-	}
-	noun := "queries"
-	if len(dropped) == 1 {
-		noun = "query"
-	}
-	return fmt.Errorf("%w: generated code runs the author's query text verbatim (ADR 0005) and "+
-		"Apache AGE 1.7.0's parser has no \"|\" in a relationship pattern, so every call on %d %s "+
-		"would answer %q (SQLSTATE 42601) — write each relationship type as its own query: %s",
-		ErrRelationshipTypeAlternation, len(dropped), noun, `syntax error at or near "|"`,
-		strings.Join(dropped, ", "))
 }
 
 // unservedReason names the axis on which a query falls outside what this
