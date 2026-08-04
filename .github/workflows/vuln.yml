@@ -1,15 +1,18 @@
-# Vulnerabilities arrive with dependency changes, not parser code, so the real
-# scan runs only when a go.mod/go.sum changes, plus a weekly sweep on master for
-# newly published advisories. govulncheck is a required check, and required
-# checks are matched by name with no conditional primitive — so the job runs on
-# every PR and decides in-job: no dependency changes means instant success
-# without scanning.
+# govulncheck is a required check, and required checks are matched by name with
+# no conditional primitive — so the job runs on every PR and decides in-job: no
+# scan-relevant change means instant success without scanning. A weekly sweep on
+# master covers advisories published against code that did not move.
 #
-# Both modules arm it. `just vuln` scans the root module and the nested
-# test/data/codegen one, so a bump confined to the nested go.mod has to trigger
-# the scan too — otherwise the live battery's driver and container dependencies
-# can be upgraded into a known vulnerability with no PR ever scanning them
-# (ADR 0026, bd gqlc-rohp).
+# What arms it is the scan's own inputs, derived rather than listed (bd
+# gqlc-pig9). Any .go file, any go.mod or go.sum anywhere in the tree, the
+# recipe, or this workflow. A named list of module paths would leave a third
+# module unwatched the day it is added, and a go.mod-only trigger is a proxy for
+# the wrong condition: govulncheck answers at symbol level, so a PR that newly
+# *calls* — or merely newly imports — an already-required module changes the
+# answer without touching a manifest, and under the old trigger skipped the scan
+# entirely. test/data/codegen carries GO-2026-5841 in exactly that
+# required-but-not-imported state, so the very next import of it was the case
+# that would have landed unscanned.
 name: vuln
 
 on:
@@ -29,20 +32,34 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: detect dependency changes
+      - name: detect scan-relevant changes
         id: deps
         if: github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          # Not `git diff ... | grep -q .`: a pipeline reports grep's status, so a
-          # git failure would be indistinguishable from "no dependency changed" and
-          # would skip the scan on exactly the PR that needed it.
           git fetch --no-tags --depth=1 origin "$BASE_SHA"
-          changed=$(git diff --name-only "$BASE_SHA" HEAD \
-              -- go.mod go.sum test/data/codegen/go.mod test/data/codegen/go.sum)
-          if [ -n "$changed" ]; then
+          # The diff is taken on its own line, not piped into the filter: a
+          # pipeline reports the filter's status, so a git failure would be
+          # indistinguishable from "nothing relevant changed" and would skip the
+          # scan on exactly the PR that needed it. Under `bash -e` a failed git
+          # aborts the step instead.
+          files=$(git diff --name-only "$BASE_SHA" HEAD)
+          # grep's status is graded, not discarded. 1 is "no match" and is the
+          # only status that may be read as "nothing relevant changed"; anything
+          # above it is grep itself failing, and a bare `|| true` would turn that
+          # failure into a silent skip of the scan — the same fail-open as
+          # piping the diff into the filter, one step further along.
+          status=0
+          relevant=$(printf '%s\n' "$files" \
+              | grep -E '\.go$|(^|/)go\.(mod|sum)$|^justfile$|^\.github/workflows/vuln\.yml$') || status=$?
+          if [ "$status" -gt 1 ]; then
+            echo "::error::scan-relevance filter failed with status $status; failing rather than skipping the scan"
+            exit 1
+          fi
+          if [ -n "$relevant" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "scanning; relevant changes:" && printf '%s\n' "$relevant"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
           fi
