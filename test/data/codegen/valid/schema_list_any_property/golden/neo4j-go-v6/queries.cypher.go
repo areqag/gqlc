@@ -67,3 +67,73 @@ func (q *Queries) BinById(ctx context.Context, arg int64) (Bin, error) {
 	}
 	return value, nil
 }
+
+const binColumnsQueryText = `MATCH (b:Bin) RETURN b.bag AS bag, b.loose AS loose, b.piles AS piles`
+
+type BinColumnsRow struct {
+	Bag   *[]any
+	Loose []any
+	Piles *[][]any
+}
+
+// BinColumns executes the BinColumns query.
+//
+//	MATCH (b:Bin) RETURN b.bag AS bag, b.loose AS loose, b.piles AS piles
+func (q *Queries) BinColumns(ctx context.Context) ([]BinColumnsRow, error) {
+	records, err := q.db.run(ctx, binColumnsQueryText, nil, neo4j.AccessModeRead)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]BinColumnsRow, 0, len(records))
+	for _, record := range records {
+		var row BinColumnsRow
+		value0, isNil, err := neo4j.GetRecordValue[[]any](record, "bag")
+		if err != nil {
+			return nil, fmt.Errorf("BinColumns: decode column %q: %w", "bag", err)
+		}
+		var value0Ptr *[]any
+		if !isNil {
+			acc := make([]any, 0, len(value0))
+			for _, elem := range value0 {
+				acc = append(acc, elem)
+			}
+			value0Ptr = &acc
+		}
+		row.Bag = value0Ptr
+		value1, isNil, err := neo4j.GetRecordValue[[]any](record, "loose")
+		if err != nil {
+			return nil, fmt.Errorf("BinColumns: decode column %q: %w", "loose", err)
+		}
+		if isNil {
+			return nil, fmt.Errorf("BinColumns: column %q is non-nullable but arrived null", "loose")
+		}
+		acc := make([]any, 0, len(value1))
+		for _, elem := range value1 {
+			acc = append(acc, elem)
+		}
+		row.Loose = acc
+		value2, isNil, err := neo4j.GetRecordValue[[]any](record, "piles")
+		if err != nil {
+			return nil, fmt.Errorf("BinColumns: decode column %q: %w", "piles", err)
+		}
+		var value2Ptr *[][]any
+		if !isNil {
+			acc := make([][]any, 0, len(value2))
+			for i, elem := range value2 {
+				inner, ok := elem.([]any)
+				if !ok {
+					return nil, fmt.Errorf("BinColumns: decode column %q element %d: expected []any, got %T", "piles", i, elem)
+				}
+				innerAcc := make([]any, 0, len(inner))
+				for _, elem4 := range inner {
+					innerAcc = append(innerAcc, elem4)
+				}
+				acc = append(acc, innerAcc)
+			}
+			value2Ptr = &acc
+		}
+		row.Piles = value2Ptr
+		out = append(out, row)
+	}
+	return out, nil
+}

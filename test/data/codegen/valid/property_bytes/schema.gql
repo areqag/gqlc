@@ -1,6 +1,8 @@
 CREATE PROPERTY GRAPH TYPE PropertyBytes AS {
     (:Blob {
-        id      :: INT64      NOT NULL,
-        payload :: BYTES(1024) NOT NULL
+        id        :: INT64       NOT NULL,
+        payload   :: BYTES(1024) NOT NULL,
+        signature :: BYTES(64),
+        chunks    :: LIST<BYTES> NOT NULL
     })
 }
