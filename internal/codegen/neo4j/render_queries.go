@@ -311,6 +311,16 @@ func zeroValueText(p codegen.Query) string {
 			return "nil"
 		case "any":
 			return "nil"
+		case "time.Time", "dbtype.Date", "dbtype.Time", "dbtype.LocalTime",
+			"dbtype.LocalDateTime", "dbtype.Duration":
+			// The six temporal property widths carry a struct, whose zero
+			// is a composite literal and not the numeric zero the default
+			// arm spells. The ColumnTemporal arm above does not cover them:
+			// that is the kind a temporal *expression* takes, and a
+			// projection of a stored TIMESTAMP property is ColumnProperty.
+			// Unreached until a fixture ran a :one over one, at which point
+			// the emitted `return 0, err` did not compile.
+			return f.GoType + "{}"
 		default:
 			return "0"
 		}

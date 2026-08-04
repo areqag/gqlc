@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -23,6 +24,7 @@ import (
 	manycolmanyage "github.com/areqag/gqlc/test/data/codegen/valid/many_col_many/golden/apache-age-pgx-v5"
 	mixedage "github.com/areqag/gqlc/test/data/codegen/valid/mixed_read_write_batch/golden/apache-age-pgx-v5"
 	onecoloneage "github.com/areqag/gqlc/test/data/codegen/valid/one_col_one_param_one/golden/apache-age-pgx-v5"
+	tsage "github.com/areqag/gqlc/test/data/codegen/valid/timestamp_property_roundtrip/golden/apache-age-pgx-v5"
 )
 
 const (
@@ -190,6 +192,7 @@ func (h *ageArm) newScenario(ctx context.Context, t *testing.T) ageScenario {
 		entityNode: entityNodeAGE{q: entitynodeage.New(h.pool, graph)},
 		entityEdge: entityEdgeAGE{q: entityedgeage.New(h.pool, graph)},
 		mixed:      mixedReadWriteBatchAGE{q: mixedage.New(h.pool, graph)},
+		timestamps: timestampRoundtripAGE{q: tsage.New(h.pool, graph)},
 	}
 	// Created through one package's helper and dropped through another's:
 	// each target emits its own lifecycle pair, and both handles have to
@@ -211,6 +214,7 @@ type ageScenario struct {
 	entityNode entityNodeAGE
 	entityEdge entityEdgeAGE
 	mixed      mixedReadWriteBatchAGE
+	timestamps timestampRoundtripAGE
 }
 
 func (s ageScenario) seed(ctx context.Context, t *testing.T, cypher string) {
@@ -232,6 +236,33 @@ func (s ageScenario) entityNodeProjectedOne() entityNodeQuerier { return s.entit
 func (s ageScenario) entityEdgeProjectedOne() entityEdgeQuerier { return s.entityEdge }
 
 func (s ageScenario) mixedReadWriteBatch() mixedReadWriteBatchQuerier { return s.mixed }
+
+func (s ageScenario) timestampRoundtrip() timestampRoundtripQuerier { return s.timestamps }
+
+// timestampRoundtripAGE binds the TIMESTAMP fixture. Nothing here names
+// the encoding: the emitted methods take and return time.Time, and the
+// microsecond count agtype carries is behind them.
+type timestampRoundtripAGE struct{ q *tsage.Queries }
+
+func (a timestampRoundtripAGE) addEvent(ctx context.Context, id int64, occurredAt time.Time) error {
+	return a.q.AddEvent(ctx, tsage.AddEventParams{Id: id, OccurredAt: occurredAt})
+}
+
+func (a timestampRoundtripAGE) eventsAfter(ctx context.Context, since time.Time) ([]int64, error) {
+	return a.q.EventsAfter(ctx, since)
+}
+
+func (a timestampRoundtripAGE) eventAt(ctx context.Context, id int64) (time.Time, error) {
+	return a.q.EventAt(ctx, id)
+}
+
+func (a timestampRoundtripAGE) oneEvent(ctx context.Context, id int64) (eventEntity, error) {
+	e, err := a.q.OneEvent(ctx, id)
+	if err != nil {
+		return eventEntity{}, err
+	}
+	return eventEntity{ID: e.Id, OccurredAt: e.OccurredAt, SeenAt: e.SeenAt}, nil
+}
 
 type oneColOneParamOneAGE struct{ q *onecoloneage.Queries }
 

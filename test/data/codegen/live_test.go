@@ -97,6 +97,29 @@ type mixedReadWriteBatchQuerier interface {
 	errNoRows() error
 }
 
+// timestampRoundtripQuerier is one arm's timestamp_property_roundtrip
+// handle: an instant out through a bound parameter, and back through a
+// projected column, a whole vertex, and a range predicate.
+//
+// Every method takes and returns time.Time on every arm, which is the
+// point of the fixture. The Apache AGE arm stores the property as an
+// integer count of microseconds because agtype has no temporal value,
+// and no part of that reaches this interface.
+type timestampRoundtripQuerier interface {
+	addEvent(ctx context.Context, id int64, occurredAt time.Time) error
+	eventsAfter(ctx context.Context, since time.Time) ([]int64, error)
+	eventAt(ctx context.Context, id int64) (time.Time, error)
+	oneEvent(ctx context.Context, id int64) (eventEntity, error)
+}
+
+// eventEntity is a timestamp_property_roundtrip vertex. Each target
+// emits its own Event struct; this is the shape the scenario reads.
+type eventEntity struct {
+	ID         int64
+	OccurredAt time.Time
+	SeenAt     *time.Time
+}
+
 // harness is one arm for the length of the battery: a running container and a
 // connection to it. Handing out scenarios is its whole surface, so a querier
 // is unobtainable outside the isolation it belongs to.
@@ -135,6 +158,7 @@ type backend interface {
 type writeBackend interface {
 	backend
 	mixedReadWriteBatch() mixedReadWriteBatchQuerier
+	timestampRoundtrip() timestampRoundtripQuerier
 }
 
 // arms are the backends the battery runs against. Each adapter owns its
@@ -174,6 +198,7 @@ var writeScenarios = []struct {
 	run  func(ctx context.Context, t *testing.T, b writeBackend)
 }{
 	{name: "mixed_read_write_batch: exec + re-read", run: execWrite},
+	{name: "timestamp_property_roundtrip: instant round trip + ordering", run: timestampRoundTrip},
 }
 
 // TestLiveSmoke runs every scenario against every arm. Arms call t.Parallel()
@@ -344,4 +369,82 @@ func execWrite(ctx context.Context, t *testing.T, b writeBackend) { //nolint:the
 	survivor, err := q.getPersonName(ctx, 2)
 	require.NoError(t, err, "the delete must be narrowed by its parameter")
 	require.Equal(t, "Bob", survivor)
+}
+
+// eventInstants are the instants the timestamp scenario writes, keyed by
+// the id it writes them under. The ids are deliberately not in
+// chronological order, so a projection ordered by anything but the
+// instant — insertion order, the id, the property's text form — answers
+// the ordering probe differently from the correct answer.
+//
+// The values are the ones an encoding fails on rather than a comfortable
+// middle: one before the Unix epoch, so a count that cannot go negative
+// breaks; the epoch itself, so a strict `>` against it has a boundary to
+// get wrong; one carrying microseconds, so a resolution coarser than the
+// encoding claims loses them; and one at the far end of the range, so a
+// unit off by a thousand overflows or wraps.
+var eventInstants = []struct {
+	id int64
+	at time.Time
+}{
+	{id: 1, at: time.Date(2024, 1, 1, 12, 34, 56, 123456000, time.UTC)},
+	{id: 2, at: time.Date(1969, 7, 20, 20, 17, 40, 0, time.UTC)},
+	{id: 3, at: time.Date(9999, 12, 31, 23, 59, 59, 999999000, time.UTC)},
+	{id: 4, at: time.Unix(0, 0).UTC()},
+}
+
+// timestampRoundTrip drives the TIMESTAMP property contract: an instant
+// written through a bound parameter comes back the same instant, from a
+// projected column and from inside a whole vertex alike, and a range
+// predicate plus an ORDER BY over the stored property answer
+// chronologically.
+//
+// The ordering half is the half that is not implied by the round trip.
+// Apache AGE has no temporal value, so gqlc stores the property as a
+// count of microseconds; an ISO-8601 text encoding would round-trip
+// exactly as well and sort by database collation, which is a different
+// order. Nothing but a query the server orders can tell those apart, and
+// the query text here is the author's, run verbatim.
+func timestampRoundTrip(ctx context.Context, t *testing.T, b writeBackend) { //nolint:thelper // a scenario body owns its failure frame; see the scenarios table
+	q := b.timestampRoundtrip()
+
+	for _, e := range eventInstants {
+		require.NoError(t, q.addEvent(ctx, e.id, e.at), "write event %d", e.id)
+	}
+
+	for _, e := range eventInstants {
+		got, err := q.eventAt(ctx, e.id)
+		require.NoError(t, err, "read event %d", e.id)
+		require.True(t, e.at.Equal(got), "event %d: wrote %s, read %s", e.id, e.at, got)
+		require.Equal(t, e.at, got.UTC(), "event %d must survive the encoding to the microsecond", e.id)
+
+		entity, err := q.oneEvent(ctx, e.id)
+		require.NoError(t, err, "read event %d as a vertex", e.id)
+		require.Equal(t, e.id, entity.ID)
+		require.True(t, e.at.Equal(entity.OccurredAt),
+			"event %d: a whole vertex must carry the same instant its column does", e.id)
+		require.Nil(t, entity.SeenAt, "event %d: an unwritten nullable instant is absent, not a zero time", e.id)
+	}
+
+	// The whole set, ordered by the author's ORDER BY. Chronological, so
+	// the pre-epoch event leads and the id order 1,2,3,4 it was written
+	// in does not survive.
+	all, err := q.eventsAfter(ctx, time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+	require.Equal(t, []int64{2, 4, 1, 3}, all,
+		"ORDER BY over the stored instant must answer chronologically")
+
+	// Strictly greater: the event written at the epoch is the cutoff, so
+	// it is excluded along with the one before it.
+	after, err := q.eventsAfter(ctx, time.Unix(0, 0).UTC())
+	require.NoError(t, err)
+	require.Equal(t, []int64{1, 3}, after,
+		"a range predicate over the stored instant must be strict and chronological")
+
+	// One microsecond past the 2024 event excludes it and keeps the one
+	// after it: the resolution the encoding claims is the resolution the
+	// comparison has.
+	fine, err := q.eventsAfter(ctx, eventInstants[0].at.Add(time.Microsecond))
+	require.NoError(t, err)
+	require.Equal(t, []int64{3}, fine, "the comparison must resolve to the microsecond")
 }

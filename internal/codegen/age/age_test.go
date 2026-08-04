@@ -120,6 +120,14 @@ func (s *EmissionSuite) inputFrom(path string) codegen.Input {
 	return codegen.Input{Schema: sch}
 }
 
+// inputFromText is inputFrom over a schema written in the test, for the
+// sweeps whose rows differ by one property width apiece.
+func (s *EmissionSuite) inputFromText(src string) codegen.Input {
+	sch, err := gql.New().Parse(strings.NewReader(src))
+	s.Require().NoError(err, "schema %s", src)
+	return codegen.Input{Schema: sch}
+}
+
 // TestFileSet pins the C0 file set: the pgx handle, the graph lifecycle,
 // the Querier interfaces, and the models file. The models file carries
 // the schema's entity surface whether or not a query in the batch
@@ -208,6 +216,24 @@ var servedQuery = func() codegen.NamedQuery {
 	return q
 }()
 
+// instantParamQuery binds an instant in both nullabilities and projects
+// nothing, so its emission is the parameter-encoding path alone. It
+// carries its own source file: emission groups by source basename, and
+// the corpus module compiles this file and no other query file.
+var instantParamQuery = codegen.NamedQuery{
+	Name:        "WriteEvent",
+	Cardinality: codegen.CardinalityExec,
+	SourceFile:  temporalSource,
+	SourceText:  "CREATE (e:Event {occurredAt: $occurredAt, seenAt: $seenAt})\n",
+	Validated: resolver.ValidatedQuery{
+		Statement: resolver.StatementWrite,
+		Parameters: []resolver.ResolvedParameter{
+			{Name: "occurredAt", Type: resolver.ResolvedProperty{Type: graph.TypeTimestamp}},
+			{Name: "seenAt", Type: resolver.ResolvedProperty{Type: graph.TypeTimestamp, Nullable: true}},
+		},
+	},
+}
+
 // TestRejectsQueriesItCannotServe pins the capability gate. The emitted
 // arms cover agtype's scalar vocabulary, the vertices and edges built
 // out of it, and a statement that writes with or without projecting, so
@@ -236,7 +262,7 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 	execUncarriedParam := func() codegen.NamedQuery {
 		q := execQuery("Batch")
 		q.Validated.Parameters = []resolver.ResolvedParameter{{
-			Name: "at", Type: resolver.ResolvedProperty{Type: graph.TypeTimestamp},
+			Name: "for", Type: resolver.ResolvedProperty{Type: graph.TypeDuration},
 		}}
 		return q
 	}()
@@ -341,7 +367,7 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 		{
 			name:      "an exec binding an uncarried parameter width is dropped",
 			queries:   []codegen.NamedQuery{execUncarriedParam},
-			wantSub:   `1 query would be dropped: Batch (parameter $at is property:TIMESTAMP)`,
+			wantSub:   `1 query would be dropped: Batch (parameter $for is property:DURATION)`,
 			wantError: true,
 		},
 		{
@@ -400,7 +426,7 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 		{
 			name:      "every dropped query is named, in batch order",
 			queries:   []codegen.NamedQuery{execUncarriedParam, mapCol, list},
-			wantSub:   "3 queries would be dropped: Batch (parameter $at is property:TIMESTAMP), Bag (column \"m\" projects scalar(map)), Tags (column \"t\" projects list)",
+			wantSub:   "3 queries would be dropped: Batch (parameter $for is property:DURATION), Bag (column \"m\" projects scalar(map)), Tags (column \"t\" projects list)",
 			wantError: true,
 		},
 		{
@@ -473,6 +499,107 @@ func (s *EmissionSuite) TestRejectsMultiLabelSchema() {
 	s.Require().Error(genErr)
 	s.Require().Nil(files, "a refused schema must not return a partial file set")
 	s.Require().ErrorIs(genErr, age.ErrUnsupportedSchema)
+}
+
+// sidecarSchema is one node type carrying an instant and a second
+// property of the given width under the name this backend derives for
+// the instant's zone.
+func sidecarSchema(width string) string {
+	return `CREATE PROPERTY GRAPH TYPE Sidecar AS {
+    (:Photo {
+        takenAt       :: TIMESTAMP NOT NULL,
+        takenAtOffset :: ` + width + ` NOT NULL
+    })
+}`
+}
+
+// TestRejectsAnAuthorOwnedOffsetSidecar pins the derived-name gate. A
+// TIMESTAMP property's zone is stored in a second property named
+// <property>Offset and read out of the same map the declared properties
+// come from, so a schema declaring that name gives one key two readers.
+//
+// The refusal is the whole file set, before any of it is written.
+//
+// Every row here is a collision the gate must find, and each moves one
+// axis the gate could be blind along. The two widths establish that it
+// is blind to width, which it has to be: the two are wrong in different
+// ways and neither is detectable from the emitted Go — with an integer
+// the decoder compiles and hands back an instant re-zoned by the
+// author's own value, and with anything else it compiles and no vertex
+// of that type ever decodes. The remaining rows move where the
+// collision sits: fields arrive map-key sorted and entities arrive as
+// nodes and edges together, so a row whose instant is the entity's first
+// field, or whose entity is a node, leaves a gate reading only the first
+// field or only the node table indistinguishable from the real one.
+func (s *EmissionSuite) TestRejectsAnAuthorOwnedOffsetSidecar() {
+	cases := []struct {
+		name    string
+		schema  string
+		entity  string
+		instant string
+	}{
+		{
+			name:    "the sidecar is an integer, so the decoder re-zones",
+			schema:  sidecarSchema("INT64"),
+			entity:  "Photo",
+			instant: "takenAt",
+		},
+		{
+			name:    "the sidecar is a string, so no vertex decodes",
+			schema:  sidecarSchema("STRING"),
+			entity:  "Photo",
+			instant: "takenAt",
+		},
+		{
+			// The instant sorts after a property that does not collide, so
+			// the entity's first field is not the offender.
+			name: "the colliding instant is not the entity's first field",
+			schema: `CREATE PROPERTY GRAPH TYPE Sidecar AS {
+    (:Photo {
+        album          :: STRING    NOT NULL,
+        zTakenAt       :: TIMESTAMP NOT NULL,
+        zTakenAtOffset :: INT64     NOT NULL
+    })
+}`,
+			entity:  "Photo",
+			instant: "zTakenAt",
+		},
+		{
+			// AGE stamps properties on an edge as readily as on a vertex,
+			// and the emitted edge decoder reads the sidecar out of the
+			// same map, so the collision is the same collision.
+			name: "the colliding entity is an edge",
+			schema: `CREATE PROPERTY GRAPH TYPE Sidecar AS {
+    (:Photo { id :: INT64 NOT NULL }),
+    (:Photo) -[:SAW {
+        takenAt       :: TIMESTAMP NOT NULL,
+        takenAtOffset :: INT64     NOT NULL
+    }]-> (:Photo)
+}`,
+			entity:  "SAW",
+			instant: "takenAt",
+		},
+	}
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			files, err := age.New().Generate(s.inputFromText(tc.schema))
+			s.Require().ErrorIs(err, codegen.ErrPropertyFieldCollision,
+				"the gate did not see the collision on %s.%s", tc.entity, tc.instant)
+			s.Require().ErrorContains(err,
+				`entity "`+tc.entity+`" declares property "`+tc.instant+`Offset"`)
+			s.Require().ErrorContains(err, `property "`+tc.instant+`"`)
+			s.Require().Nil(files, "a rejected schema must not return a partial file set")
+		})
+	}
+
+	// The name is derived from an instant and from nothing else, so the
+	// same pair of names with no instant between them is a schema this
+	// backend serves.
+	s.Run("no instant derives no name", func() {
+		files, err := age.New().Generate(s.inputFromText(strings.Replace(sidecarSchema("INT64"), "TIMESTAMP", "STRING   ", 1)))
+		s.Require().NoError(err)
+		s.Require().NotEmpty(files)
+	})
 }
 
 // ageIdentifiers are the extension-owned names that must never appear

@@ -95,6 +95,40 @@ func entityKindNoun(k codegen.EntityKind) string {
 	return "edge"
 }
 
+// rejectOffsetSidecarCollisions fails a schema in which the property
+// name this backend derives for a TIMESTAMP property's zone is already
+// a property the author declared. The derived name is read out of the
+// same property map the declared one is, so a schema holding both gives
+// one key two readers: the declared property fills its own struct field
+// and is then read a second time as an offset, re-zoning the instant by
+// whatever it holds. Where the declared width is not an integer the
+// second read fails outright and no vertex of that type ever decodes.
+//
+// Reported as codegen.ErrPropertyFieldCollision because that is what it
+// is — two properties on one entity contending for a single name — even
+// though only one of the two appears in the schema text. Fields arrive
+// map-key sorted, so the first offender is the same one on every run.
+func rejectOffsetSidecarCollisions(entities []codegen.Entity) error {
+	for _, e := range entities {
+		declared := make(map[string]struct{}, len(e.Fields))
+		for _, f := range e.Fields {
+			declared[f.PropName] = struct{}{}
+		}
+		for _, f := range e.Fields {
+			if f.GoType != goInstant {
+				continue
+			}
+			sidecar := offsetProperty(f.PropName)
+			if _, taken := declared[sidecar]; !taken {
+				continue
+			}
+			return fmt.Errorf("%w: entity %q declares property %q, which is where the Apache AGE backend stores property %q's zone — one key with two readers, so an instant would come back re-zoned by the declared value",
+				codegen.ErrPropertyFieldCollision, e.Name, sidecar, f.PropName)
+		}
+	}
+	return nil
+}
+
 // nameBackend adds this backend's name to a width or a temporal kind the
 // shared phases refused. Both refusals come from asking this package's
 // type table, so they are this backend's answer and not a property of the

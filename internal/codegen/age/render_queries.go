@@ -3,10 +3,21 @@ package age
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/areqag/gqlc/internal/codegen"
 )
+
+// namesInstant reports whether one query's emitted surface spells the
+// instant type, which is the whole of what decides whether the file it
+// lands in imports "time". A parameter or a projected column is enough:
+// both put the type text into a signature, and the Row and Params
+// structs are built from the same fields.
+func namesInstant(p codegen.Query) bool {
+	return slices.ContainsFunc(p.ParamFields, func(f codegen.Param) bool { return f.GoType == goInstant }) ||
+		slices.ContainsFunc(p.RowFields, func(f codegen.Row) bool { return f.GoType == goInstant })
+}
 
 // sourceGroup carries one <name>.cypher.go file's worth of prepared
 // queries in emission order. Grouping is by SourceFile basename minus
@@ -90,7 +101,11 @@ func renderCypherFile(pkg string, queries []codegen.Query) []byte {
 	var b strings.Builder
 	b.WriteString(codegen.Header())
 	b.WriteString("package " + pkg + "\n\n")
-	b.WriteString("import (\n\t\"context\"\n\t\"fmt\"\n)\n\n")
+	b.WriteString("import (\n\t\"context\"\n\t\"fmt\"\n")
+	if slices.ContainsFunc(queries, namesInstant) {
+		b.WriteString("\t\"time\"\n")
+	}
+	b.WriteString(")\n\n")
 
 	for i, p := range queries {
 		if i > 0 {
@@ -216,6 +231,8 @@ func zeroLiteral(goType string) string {
 		return "false"
 	case "any", "map[string]any":
 		return "nil"
+	case goInstant:
+		return goInstant + "{}"
 	default:
 		return "0"
 	}
@@ -324,10 +341,25 @@ func argsMapText(p codegen.Query) string {
 		if len(p.ParamFields) > 1 {
 			access = codegen.ParamArg + "." + f.Field
 		}
-		fmt.Fprintf(&b, "%q: %s", f.RawName, access)
+		fmt.Fprintf(&b, "%q: %s", f.RawName, encodeParam(f, access))
 	}
 	b.WriteString("}")
 	return b.String()
+}
+
+// encodeParam wraps one parameter's access in the encoder its Go type
+// crosses the wire through. Every emitted type but the instant is
+// already a shape the JSON encoder writes as the agtype scalar it rides;
+// an instant is not, and left alone would cross as a formatted string
+// agtype orders by collation rather than by time.
+func encodeParam(f codegen.Param, access string) string {
+	if f.GoType != goInstant {
+		return access
+	}
+	if f.Nullable {
+		return "agtypeNullableMicros(" + access + ")"
+	}
+	return "agtypeMicros(" + access + ")"
 }
 
 // writeOneBody emits the :one arity check, the single row's decode, and
@@ -547,6 +579,8 @@ func decodeFunc(goType string) string {
 		return "agtypeInt64"
 	case "float64":
 		return "agtypeFloat64"
+	case goInstant:
+		return "agtypeInstant"
 	default:
 		return "agtypeString"
 	}

@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE TimestampProjection AS {
+    (:Reading {
+        id      :: INT64     NOT NULL,
+        takenAt :: TIMESTAMP NOT NULL
+    })
+}

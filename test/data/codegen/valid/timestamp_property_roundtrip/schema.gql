@@ -1,0 +1,7 @@
+CREATE PROPERTY GRAPH TYPE TimestampPropertyRoundtrip AS {
+    (:Event {
+        id         :: INT64     NOT NULL,
+        occurredAt :: TIMESTAMP NOT NULL,
+        seenAt     :: TIMESTAMP
+    })
+}
