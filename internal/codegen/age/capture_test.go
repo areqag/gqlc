@@ -542,22 +542,28 @@ func (s *EmissionSuite) methodScopes(body string) map[string][]string {
 // parameter is what the signature carries — but a return clause names
 // its columns, and those names are just as much the author's.
 //
-// The axis turns out to be live, which is why this is an equality
-// against a substitution rather than a plain equality. Phase B builds an
-// edge-union sum type as `q.Name + rowFieldName(col.Name)`, so
-// `MATCH ... RETURN r` yields the package-level interface
-// ListActionsR — half method name, half author-chosen column — and the
-// method body resolves it. The emitted package's top-level scope is
-// therefore NOT the closed generator-owned set the parameter scope now
-// is. That residue is real but it is not silent: nothing in a method
-// body can shadow a package-level type, since every body local and the
-// signature argument are generator-owned and pinned by the tests above,
-// so the failure mode left is two queries whose name-plus-column mangle
-// coincides, and that is a duplicate declaration the Go compiler
-// rejects. Closing it means renaming a generated public type, which is
-// an API change and so is scheduled as gqlc-vac9 rather than done here.
+// On this backend the axis is closed, and the census at the end is what
+// says so. The one construct that ever derived a package-level name from
+// a column was the edge-union sum type, built as
+// `q.Name + rowFieldName(col.Name)` — `MATCH ... RETURN r` yielding the
+// interface ListActionsR, half method name, half author-chosen column.
+// This backend no longer emits one: an edge-union column is reachable
+// only through a relationship-type alternation, AGE will not parse one,
+// and so the column is refused at generation (errors.go, edgeUnionReason)
+// rather than decoded. Every package-level name the emitter now declares
+// is generator-owned, and the residue gqlc-vac9 holds is a neo4j-only
+// residue.
 //
-// So the assertion is in two halves, and the strong half is exact.
+// The assertion is still written against a substitution rather than as a
+// plain equality, and the census then requires the substitution to be
+// EMPTY. Written that way, the day a package-level name starts following
+// a column again — some emission mangling a column into a declaration —
+// the census reddens and names it, instead of the equality failing
+// somewhere further down with a diff that does not say why. A readmitted
+// edge union is NOT among what this reaches: it would have to be enrolled
+// on AGE to enter this corpus at all, and the refusal is what keeps it
+// out. The census at the end states that boundary. The two halves below
+// are what the substitution is applied to.
 //
 // The exact half: the names a method BINDS — its argument and its body
 // locals, which are the positions a capture actually occupies — must be
@@ -568,12 +574,11 @@ func (s *EmissionSuite) methodScopes(body string) map[string][]string {
 // The substituted half: the names a method RESOLVES may move, but only
 // as far as the emission's own package-level declarations moved. That
 // substitution is read off the two emissions' declaration lists in
-// emission order rather than listed here, so a package-level name the
-// emitter derives from a column later is admitted automatically, while
-// anything else that followed a column is in neither list, does not
-// substitute, and fails.
+// emission order rather than listed here, so anything that followed a
+// column is in neither list, does not substitute, and fails there as
+// well as in the census.
 func (s *EmissionSuite) TestOnlyPackageLevelNamesFollowAColumnName() {
-	oneColumn, multiColumn, moved := 0, 0, 0
+	oneColumn, multiColumn, moved, reached := 0, 0, 0, 0
 	for _, fx := range s.ageFixtures() {
 		if len(fx.queries) == 0 {
 			continue
@@ -595,6 +600,11 @@ func (s *EmissionSuite) TestOnlyPackageLevelNamesFollowAColumnName() {
 		for name, renamed := range sub {
 			if name != renamed {
 				moved++
+			}
+		}
+		for path, body := range before {
+			if after[path] != body {
+				reached++
 			}
 		}
 
@@ -634,15 +644,38 @@ func (s *EmissionSuite) TestOnlyPackageLevelNamesFollowAColumnName() {
 	s.Require().Positive(multiColumn,
 		"no query in the corpus projects two or more columns, so the Row shape is unmeasured")
 
-	// The substitution above is an escape hatch, so it has to be shown
-	// carrying weight. If no package-level name in the whole corpus
-	// followed a column, the assertion degenerated to plain equality and
-	// the sum-type residue this test exists to bound went unmeasured —
-	// which is how it would silently stop being measured if a fixture
-	// carrying an edge-union column were dropped.
-	s.Require().Positive(moved,
-		"no package-level name in the corpus follows a column name, so the substitution admits nothing "+
-			"and the edge-union sum-type residue is unmeasured")
+	// The substitution above is an escape hatch, and on this backend it is
+	// meant to stay shut: no package-level name the emitter declares is
+	// built from a column, because the one that was — the edge-union sum
+	// type — is a column this backend refuses at generation rather than
+	// decodes. Measuring it here rather than asserting it in the comment
+	// is what makes a later emission that mangles a column into a
+	// declaration fail as itself instead of as a scope diff further up.
+	//
+	// It does NOT hold the edge-union refusal, and the wording here used to
+	// claim it did. This census reads the AGE-enrolled corpus, and no
+	// AGE-enrolled fixture carries an edge-union column — the enrolment is
+	// what the refusal removes — so nulling edgeUnionReason leaves this
+	// test green. The refusal is pinned by TestRejectsEdgeUnionColumns,
+	// TestRejectsQueriesItCannotServe and TestRunApacheAgeRefusesEdgeUnions,
+	// all three of which redden for it. A census over a corpus that cannot
+	// contain the construct is not evidence about the construct.
+	s.Require().Zero(moved,
+		"a package-level name in the corpus follows a column name, so this backend has grown the "+
+			"sum-type residue that refusing edge-union columns is what removes")
+
+	// The census above is a claim about what a rename did NOT move, so it
+	// is worth nothing unless the rename moved something. It is a rename
+	// of the resolved model rather than of the query text, so an emitter
+	// that stopped reading Column.Name — or a renameColumns that stopped
+	// renaming — would leave the two emissions byte-identical and every
+	// assertion in this test would hold vacuously. A column name does
+	// reach the emission, as a Row field and as the key the decode arm
+	// quotes, so requiring at least one emitted file to differ is what
+	// keeps the whole sweep honest.
+	s.Require().Positive(reached,
+		"renaming every column in the corpus changed no emitted file, so nothing here is measuring "+
+			"what a column name reaches")
 }
 
 // declRenaming pairs two emissions of the same batch by their

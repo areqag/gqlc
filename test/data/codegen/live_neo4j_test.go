@@ -7,6 +7,7 @@ package fixtures_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -16,6 +17,8 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	tcneo4j "github.com/testcontainers/testcontainers-go/modules/neo4j"
 
+	edgeunionv5 "github.com/areqag/gqlc/test/data/codegen/valid/edge_union_undeclared_relationship_type/golden/neo4j-go-v5"
+	edgeunionv6 "github.com/areqag/gqlc/test/data/codegen/valid/edge_union_undeclared_relationship_type/golden/neo4j-go-v6"
 	entityedgev5 "github.com/areqag/gqlc/test/data/codegen/valid/entity_edge_projected_one/golden/neo4j-go-v5"
 	entityedgev6 "github.com/areqag/gqlc/test/data/codegen/valid/entity_edge_projected_one/golden/neo4j-go-v6"
 	entitynodev5 "github.com/areqag/gqlc/test/data/codegen/valid/entity_node_projected_one/golden/neo4j-go-v5"
@@ -74,6 +77,7 @@ type neo4jV5 struct {
 	many       manyColManyV5
 	entityNode entityNodeV5
 	entityEdge entityEdgeV5
+	edgeUnion  edgeUnionV5
 	timestamps timestampRoundtripV5
 }
 
@@ -97,6 +101,7 @@ func startNeo4jV5(ctx context.Context, t *testing.T) harness {
 		many:       manyColManyV5{q: manycolmanyv5.New(driver)},
 		entityNode: entityNodeV5{q: entitynodev5.New(driver)},
 		entityEdge: entityEdgeV5{q: entityedgev5.New(driver)},
+		edgeUnion:  edgeUnionV5{q: edgeunionv5.New(driver)},
 		timestamps: timestampRoundtripV5{q: tsv5.New(driver)},
 	}
 }
@@ -109,6 +114,11 @@ func (h *neo4jV5) scenario(ctx context.Context, t *testing.T) backend {
 }
 
 func (h *neo4jV5) writeScenario(ctx context.Context, t *testing.T) writeBackend {
+	t.Helper()
+	return h.newScenario(ctx, t)
+}
+
+func (h *neo4jV5) edgeUnionScenario(ctx context.Context, t *testing.T) edgeUnionBackend {
 	t.Helper()
 	return h.newScenario(ctx, t)
 }
@@ -178,6 +188,31 @@ func (s neo4jV5Scenario) manyColMany() manyColManyQuerier { return s.arm.many }
 func (s neo4jV5Scenario) entityNodeProjectedOne() entityNodeQuerier { return s.arm.entityNode }
 
 func (s neo4jV5Scenario) entityEdgeProjectedOne() entityEdgeQuerier { return s.arm.entityEdge }
+
+func (s neo4jV5Scenario) edgeUnionUndeclared() edgeUnionQuerier { return s.arm.edgeUnion }
+
+type edgeUnionV5 struct{ q *edgeunionv5.Queries }
+
+// actionOnPost narrows the target's own sealed sum to the battery's shape. The
+// type switch is the caller-side half of what the emitted dispatch decided: a
+// member reaching here is one the generated code chose an arm for, so a
+// member this switch does not know is a surface change and not a wire value.
+func (a edgeUnionV5) actionOnPost(ctx context.Context, postID int64) (edgeUnionAction, error) {
+	got, err := a.q.ActionOnPost(ctx, postID)
+	if err != nil {
+		return edgeUnionAction{}, err
+	}
+	switch v := got.(type) {
+	case edgeunionv5.AUTHORED:
+		return edgeUnionAction{Kind: "AUTHORED", Since: v.Since}, nil
+	case edgeunionv5.LIKES:
+		return edgeUnionAction{Kind: "LIKES", Rating: v.Rating}, nil
+	default:
+		return edgeUnionAction{}, fmt.Errorf("battery: %T is not a member this scenario knows", v)
+	}
+}
+
+func (a edgeUnionV5) errNoRows() error { return edgeunionv5.ErrNoRows }
 
 type entityNodeV5 struct{ q *entitynodev5.Queries }
 
@@ -255,6 +290,7 @@ type neo4jV6 struct {
 	many       manyColManyV6
 	entityNode entityNodeV6
 	entityEdge entityEdgeV6
+	edgeUnion  edgeUnionV6
 	timestamps timestampRoundtripV6
 }
 
@@ -278,6 +314,7 @@ func startNeo4jV6(ctx context.Context, t *testing.T) harness {
 		many:       manyColManyV6{q: manycolmanyv6.New(driver)},
 		entityNode: entityNodeV6{q: entitynodev6.New(driver)},
 		entityEdge: entityEdgeV6{q: entityedgev6.New(driver)},
+		edgeUnion:  edgeUnionV6{q: edgeunionv6.New(driver)},
 		timestamps: timestampRoundtripV6{q: tsv6.New(driver)},
 	}
 }
@@ -290,6 +327,11 @@ func (h *neo4jV6) scenario(ctx context.Context, t *testing.T) backend {
 }
 
 func (h *neo4jV6) writeScenario(ctx context.Context, t *testing.T) writeBackend {
+	t.Helper()
+	return h.newScenario(ctx, t)
+}
+
+func (h *neo4jV6) edgeUnionScenario(ctx context.Context, t *testing.T) edgeUnionBackend {
 	t.Helper()
 	return h.newScenario(ctx, t)
 }
@@ -359,6 +401,28 @@ func (s neo4jV6Scenario) manyColMany() manyColManyQuerier { return s.arm.many }
 func (s neo4jV6Scenario) entityNodeProjectedOne() entityNodeQuerier { return s.arm.entityNode }
 
 func (s neo4jV6Scenario) entityEdgeProjectedOne() entityEdgeQuerier { return s.arm.entityEdge }
+
+func (s neo4jV6Scenario) edgeUnionUndeclared() edgeUnionQuerier { return s.arm.edgeUnion }
+
+type edgeUnionV6 struct{ q *edgeunionv6.Queries }
+
+// actionOnPost is edgeUnionV5.actionOnPost against the v6 target's own sum.
+func (a edgeUnionV6) actionOnPost(ctx context.Context, postID int64) (edgeUnionAction, error) {
+	got, err := a.q.ActionOnPost(ctx, postID)
+	if err != nil {
+		return edgeUnionAction{}, err
+	}
+	switch v := got.(type) {
+	case edgeunionv6.AUTHORED:
+		return edgeUnionAction{Kind: "AUTHORED", Since: v.Since}, nil
+	case edgeunionv6.LIKES:
+		return edgeUnionAction{Kind: "LIKES", Rating: v.Rating}, nil
+	default:
+		return edgeUnionAction{}, fmt.Errorf("battery: %T is not a member this scenario knows", v)
+	}
+}
+
+func (a edgeUnionV6) errNoRows() error { return edgeunionv6.ErrNoRows }
 
 type entityNodeV6 struct{ q *entitynodev6.Queries }
 

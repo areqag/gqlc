@@ -187,11 +187,12 @@ func rowElemText(p codegen.Query) string {
 }
 
 // pointerWrapped reports whether a nullable column's Go type takes a
-// pointer to carry its absence. A multi-candidate edge column's type is
-// a sealed interface, which holds nil already; pointer-to-interface is
-// the shape ADR 0010 D3 forbids.
+// pointer to carry its absence. Every column kind this backend serves
+// does: the one exception on the other backends is the sealed interface
+// of a multi-candidate edge column, which holds nil already, and this
+// backend refuses that column ahead of Prepare (edgeUnionReason).
 func pointerWrapped(f codegen.Row) bool {
-	return f.Nullable && f.Kind != codegen.ColumnEdgeUnion
+	return f.Nullable
 }
 
 // zeroValueText composes the zero-value expression for a prepared
@@ -210,8 +211,6 @@ func zeroValueText(p codegen.Query) string {
 	switch f.Kind {
 	case codegen.ColumnNode, codegen.ColumnEdge:
 		return f.GoType + "{}"
-	case codegen.ColumnEdgeUnion:
-		return "nil"
 	default:
 		return zeroLiteral(f.GoType)
 	}
@@ -437,10 +436,6 @@ func rawName(i int) string { return fmt.Sprintf("raw%d", i) }
 // already holds.
 func valueName(i int) string { return fmt.Sprintf("value%d", i) }
 
-// labelName is the local holding the label read off the column at index
-// i, positional so it matches its scan target.
-func labelName(i int) string { return fmt.Sprintf("label%d", i) }
-
 // valueExpr is what a column contributes to the returned row. A narrow
 // width rides its wide carrier through the decode and converts here; a
 // nullable column already holds a pointer of the declared width.
@@ -456,10 +451,6 @@ func valueExpr(i int, f codegen.Row) string {
 // the value is there, and a Go zero would report absence as a value the
 // graph holds.
 func writeColumnDecode(b *strings.Builder, p codegen.Query, idx int, f codegen.Row, indent, zero string) {
-	if f.Kind == codegen.ColumnEdgeUnion {
-		writeEdgeUnionDecode(b, p, idx, f, indent, zero)
-		return
-	}
 	raw, value := rawName(idx), valueName(idx)
 	decodeErr := fmt.Sprintf("%s: decode column %%q: %%w", p.MethodName)
 
@@ -484,43 +475,6 @@ func writeColumnDecode(b *strings.Builder, p codegen.Query, idx int, f codegen.R
 	fmt.Fprintf(b, "%s}\n", indent)
 }
 
-// writeEdgeUnionDecode emits a multi-candidate edge column's decode. The
-// label is read off the wire value first and chooses which of the
-// candidate decoders reads the whole of it; a label outside the
-// candidate set fails the row, because the sealed interface has no
-// member to carry it.
-func writeEdgeUnionDecode(b *strings.Builder, p codegen.Query, idx int, f codegen.Row, indent, zero string) {
-	raw, value, label := rawName(idx), valueName(idx), labelName(idx)
-	decodeErr := fmt.Sprintf("%s: decode column %%q: %%w", p.MethodName)
-
-	fmt.Fprintf(b, "%svar %s %s\n", indent, value, f.GoType)
-	body := indent
-	if f.Nullable {
-		fmt.Fprintf(b, "%sif %s != nil {\n", indent, raw)
-		body = indent + "\t"
-	} else {
-		writeNonNullGate(b, p, f, raw, indent, zero)
-	}
-
-	fmt.Fprintf(b, "%s%s, _, err := agtypeEntity(%s, %q)\n", body, label, raw, edgeAnnotation)
-	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(%q, %q, err)\n%s}\n",
-		body, body, zero, decodeErr, f.ColumnName, body)
-	fmt.Fprintf(b, "%sswitch %s {\n", body, label)
-	for i, ek := range f.EdgeKeys {
-		fmt.Fprintf(b, "%scase %q:\n", body, string(ek.KeyLabels))
-		fmt.Fprintf(b, "%s\tdecoded, err := decode%s(%s)\n", body, edgeKeyToEntityName(p, f, i), raw)
-		fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\treturn %s, fmt.Errorf(%q, %q, err)\n%s\t}\n",
-			body, body, zero, decodeErr, f.ColumnName, body)
-		fmt.Fprintf(b, "%s\t%s = decoded\n", body, value)
-	}
-	fmt.Fprintf(b, "%sdefault:\n%s\treturn %s, fmt.Errorf(%q, %q, %s)\n%s}\n",
-		body, body, zero, fmt.Sprintf("%s: column %%q: unexpected edge label %%q", p.MethodName),
-		f.ColumnName, label, body)
-	if f.Nullable {
-		fmt.Fprintf(b, "%s}\n", indent)
-	}
-}
-
 // writeNonNullGate emits the check that fails the row when a column the
 // schema declares non-nullable arrives as SQL NULL, which is the shape
 // an agtype null reaches the driver in.
@@ -528,22 +482,6 @@ func writeNonNullGate(b *strings.Builder, p codegen.Query, f codegen.Row, raw, i
 	fmt.Fprintf(b, "%sif %s == nil {\n%s\treturn %s, fmt.Errorf(%q, %q)\n%s}\n",
 		indent, raw, indent, zero,
 		fmt.Sprintf("%s: column %%q is non-nullable but arrived null", p.MethodName), f.ColumnName, indent)
-}
-
-// edgeKeyToEntityName resolves one of a column's candidate edge keys to
-// the entity struct name emitted for it. The owning query's EdgeUnion
-// entry holds the names in the same order as the keys, and Phase B
-// guarantees one exists for every multi-candidate edge column.
-func edgeKeyToEntityName(p codegen.Query, f codegen.Row, i int) string {
-	for _, u := range p.EdgeUnions {
-		if u.ColumnName == f.ColumnName && u.FieldName == f.Field {
-			return u.Candidates[i]
-		}
-	}
-	// Unreachable while that guarantee holds. Naming the label keeps the
-	// emission textually distinct, so a regression surfaces as a compile
-	// failure of the generated package.
-	return string(f.EdgeKeys[i].KeyLabels)
 }
 
 // columnDecoder names the models.go helper that turns one column's

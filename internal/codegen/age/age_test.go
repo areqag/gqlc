@@ -20,6 +20,7 @@ import (
 	"github.com/areqag/gqlc/internal/codegen/age"
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/resolver"
+	"github.com/areqag/gqlc/internal/schema"
 	"github.com/areqag/gqlc/internal/schema/gql"
 )
 
@@ -234,6 +235,606 @@ var instantParamQuery = codegen.NamedQuery{
 	},
 }
 
+// corpusEdgeKey is the one edge type testdata/corpus_schema.gql declares.
+var corpusEdgeKey = schema.EdgeKey{Source: personLabel, KeyLabels: "ACTED_IN", Target: personLabel}
+
+// edgeUnionOn is the resolved shape of an edge binding the resolver
+// could not narrow to one candidate: one candidate per label, between
+// one pair of endpoints. Its candidates are not corpus edge types: the
+// gate under test runs ahead of Prepare, so what it refuses it refuses
+// without consulting the schema.
+func edgeUnionOn(labels ...graph.LabelSetKey) resolver.ResolvedEdgeUnion {
+	keys := make([]schema.EdgeKey, len(labels))
+	for i, l := range labels {
+		keys[i] = schema.EdgeKey{Source: personLabel, KeyLabels: l, Target: "Post"}
+	}
+	return resolver.ResolvedEdgeUnion{EdgeKeys: keys}
+}
+
+var twoCandidateEdgeUnion = edgeUnionOn("AUTHORED", "LIKES")
+
+// sharedLabelSchema declares the edge types sharedLabelEdgeUnion and
+// mixedLabelEdgeUnion name. A union carrying a duplicate label is
+// refused inside Prepare, which resolves candidates against the entity
+// index, so unlike edgeUnionOn's shapes these have to be ones the schema
+// actually declares.
+const sharedLabelSchema = "shared_label_schema.gql"
+
+// sharedLabelEdgeUnion is the other resolved edge-union shape: two
+// candidates carrying ONE label. The pattern that produces it names a
+// single relationship type whose source endpoint the schema satisfies
+// more than one way (ADR 0022) — `(p)-[r:FOUNDED]->(c:Company)`, with no
+// '|' anywhere. Apache AGE parses that statement, so it is not this
+// backend's to refuse.
+var sharedLabelEdgeUnion = resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{
+	{Source: personLabel, KeyLabels: "FOUNDED", Target: "Company"},
+	{Source: "Investor", KeyLabels: "FOUNDED", Target: "Company"},
+}}
+
+// mixedLabelEdgeUnion carries both shapes at once: three candidates
+// under two labels, one of which repeats. `(p)-[r:FOUNDED|BACKED]->(c)`
+// over a source endpoint the schema satisfies twice reaches it. The
+// column gate stands aside on the repeated label, because that is an
+// obstacle no server-side parser is party to and no rewrite of the
+// alternation removes — which is what lets the portable refusal answer.
+// The rows below carry readQuery's own text, which spells no '|', so
+// what they measure is the column gate alone; a real batch whose text
+// did spell one is answered a step later by
+// rejectRelationshipTypeAlternation.
+var mixedLabelEdgeUnion = resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{
+	{Source: personLabel, KeyLabels: "FOUNDED", Target: "Company"},
+	{Source: personLabel, KeyLabels: "BACKED", Target: "Company"},
+	{Source: "Investor", KeyLabels: "FOUNDED", Target: "Company"},
+}}
+
+// wantEdgeUnionReason is this test's own copy of the reason the gate
+// gives for an edge-union column, so a change to the emission's wording
+// has to be a change here too. names is the prose label list, written
+// out per case rather than derived, so a gate that stopped reading the
+// column's own candidates cannot satisfy two cases at once.
+//
+// It claims nothing about the author's query text. The candidates are
+// the relationship types the SCHEMA declares for the pattern, and a
+// pattern may name types it does not declare — the resolver drops those
+// (internal/resolver, edgeCandidates), so the label list is a subset of
+// what the author wrote and quoting it back as their alternation was the
+// defect that put this here.
+func wantEdgeUnionReason(names string) string {
+	return "binds more than one relationship type — " + names + ", the candidates the schema " +
+		"declares for its pattern — which openCypher spells only as an alternation, and Apache " +
+		`AGE 1.7.0's parser has no "|" in a relationship pattern: it answers one with ` +
+		`"syntax error at or near \"|\"" (SQLSTATE 42601)`
+}
+
+// TestRejectsEdgeUnionColumns pins the narrowest of this backend's
+// refusals against the column it is one step away from: an edge column
+// the resolver narrowed to a single candidate is served, and the same
+// column with a second candidate carrying a second label is not.
+//
+// The refusal is not about decoding. The candidates carry distinct
+// labels, so a dispatch on the label would pick correctly — and where
+// they do not, this gate stands aside for the shared refusal that
+// answers a repeated label on every backend (the last subtests below;
+// this gate runs ahead of Prepare, so standing aside is what lets that
+// refusal be reached at all). It is about the query
+// text: candidates carrying distinct labels can only have come from a
+// pattern naming more than one relationship type, and openCypher writes
+// that only as an alternation (Cypher.g4 oC_RelationshipTypes admits a
+// second type after '|' and nowhere else; a re-bound relationship
+// variable's occurrences intersect rather than accumulate). Apache AGE
+// 1.7.0 answers `-[r:AUTHORED|LIKES]->` with `ERROR: syntax error at or
+// near "|"`. Generated code runs the author's query text verbatim
+// (ADR 0005), so every call on such a method would fail at the server.
+// Emitting it would hand the author a package that compiles and cannot
+// run.
+//
+// The refused rows carry label sets that differ from each other, because
+// the message is built from the column's own candidates and a message
+// built from a fixed list would satisfy one row while failing the rest.
+// The three-label row is also the only one whose prose list has a serial
+// comma in it.
+//
+// The last three subtests are the boundary in the other direction: a
+// union the resolver never emits, and one carrying a duplicate label,
+// are both refused for reasons no parser is party to, so this gate
+// stands aside and lets the shared, backend-independent refusal answer.
+func (s *EmissionSuite) TestRejectsEdgeUnionColumns() {
+	in := s.inputFrom(filepath.Join("testdata", corpusSchema))
+
+	s.Run("one candidate is served", func() {
+		batch := in
+		batch.Queries = []codegen.NamedQuery{readQuery("OneAction", resolver.Column{
+			Name: "r", Type: resolver.ResolvedEdge{EdgeKey: corpusEdgeKey},
+		})}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().NoError(err)
+		s.Require().NotEmpty(files)
+	})
+
+	for _, tc := range []struct {
+		name  string
+		union resolver.ResolvedEdgeUnion
+		// names is the prose label list the refusal must carry.
+		names string
+	}{
+		{
+			name:  "two candidates are refused",
+			union: twoCandidateEdgeUnion,
+			names: "AUTHORED and LIKES",
+		},
+		{
+			name:  "two candidates under other labels name those",
+			union: edgeUnionOn("FOUNDED", "BACKED"),
+			names: "FOUNDED and BACKED",
+		},
+		{
+			name:  "three candidates are all named",
+			union: edgeUnionOn("AUTHORED", "LIKES", "REPOSTED"),
+			names: "AUTHORED, LIKES and REPOSTED",
+		},
+		{
+			// Four is where a formatter correct only to three comes
+			// apart: a list joined as "A, B and C and D" satisfies every
+			// shorter row. edgeCandidates iterates all of e.Labels(), so
+			// the pattern that produces this is `-[r:A|B|C|D]->`.
+			name:  "four candidates are all named, with one 'and'",
+			union: edgeUnionOn("AUTHORED", "LIKES", "REPOSTED", "FLAGGED"),
+			names: "AUTHORED, LIKES, REPOSTED and FLAGGED",
+		},
+	} {
+		s.Run(tc.name, func() {
+			batch := in
+			batch.Queries = []codegen.NamedQuery{readQuery("TwoActions", resolver.Column{
+				Name: "r", Type: tc.union,
+			})}
+			files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+			s.Require().Error(err)
+			s.Require().Nil(files, "a rejected batch must not return a partial file set")
+			s.Require().ErrorIs(err, age.ErrUnsupportedQuery)
+			s.Require().ErrorContains(err, `TwoActions (column "r" `+wantEdgeUnionReason(tc.names)+`)`)
+		})
+	}
+
+	s.Run("a single candidate is not this backend's refusal either", func() {
+		batch := in
+		batch.Queries = []codegen.NamedQuery{readQuery("OneCandidate", resolver.Column{
+			Name: "r", Type: resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{corpusEdgeKey}},
+		})}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, codegen.ErrOutOfC6Scope,
+			"a union the resolver never emits is a broken invariant, which shared admission names and this gate cannot")
+		s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
+		s.Require().ErrorContains(err, "resolved as edgeUnion with only 1 candidate(s)")
+	})
+
+	s.Run("candidates sharing a label are not this backend's refusal", func() {
+		batch := s.inputFrom(filepath.Join("testdata", sharedLabelSchema))
+		batch.Queries = []codegen.NamedQuery{readQuery("Founded", resolver.Column{
+			Name: "r", Type: sharedLabelEdgeUnion,
+		})}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, codegen.ErrUnrepresentableEdgeUnion,
+			"a shared-label union is unrepresentable on every backend; this one must not overwrite that answer")
+		s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
+		s.Require().NotContains(err.Error(), "alternation",
+			"the pattern that produces a shared-label union names one relationship type and spells no '|'")
+		s.Require().NotContains(err.Error(), "which the Apache AGE backend has no carrier for",
+			"standing aside means letting the portable answer through unaltered: this backend's name is "+
+				"added to a width or a temporal kind, which are its own type table's answers, and a "+
+				"repeated label is not — attributing it here would send the author to change targets")
+	})
+
+	s.Run("a duplicate label stands the gate aside even among distinct ones", func() {
+		batch := s.inputFrom(filepath.Join("testdata", sharedLabelSchema))
+		batch.Queries = []codegen.NamedQuery{readQuery("FoundedOrBacked", resolver.Column{
+			Name: "r", Type: mixedLabelEdgeUnion,
+		})}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, codegen.ErrUnrepresentableEdgeUnion,
+			"a repeated label defeats the dispatch on every backend, and rewriting the alternation does not remove it")
+		s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
+		s.Require().ErrorContains(err, `both carry edge label "FOUNDED"`)
+	})
+}
+
+// wantAlternationRefusal is this test's own copy of the text-level
+// refusal, so a change to the emission's wording has to be a change
+// here too. dropped is the "<Name> (<alternations>)" list, written out
+// per case rather than derived.
+func wantAlternationRefusal(count int, noun, dropped string) string {
+	return fmt.Sprintf("relationship type alternation: generated code runs the author's query text "+
+		"verbatim (ADR 0005) and Apache AGE 1.7.0's parser has no \"|\" in a relationship pattern, "+
+		"so every call on %d %s would answer \"syntax error at or near \\\"|\\\"\" (SQLSTATE 42601) "+
+		"— write each relationship type as its own query: %s", count, noun, dropped)
+}
+
+// alternationQuery is a batch entry whose columns and parameters this
+// backend serves and whose TEXT spells a relationship-type alternation.
+// It is the readQuery shape with one axis moved, and the axis is the one
+// the column gate above cannot see.
+func alternationQuery(name, sourceText string, cols ...resolver.Column) codegen.NamedQuery {
+	q := readQuery(name, cols...)
+	q.SourceText = sourceText
+	return q
+}
+
+// execAlternationQuery is the same axis moved on the OTHER served batch
+// entry: execQuery's write, with a relationship-type alternation in its
+// text. Shared admission holds :exec and a column list mutually
+// exclusive, so what the column gate reads here is not merely
+// alternation-free but empty, and a gate keyed on the columns or on the
+// statement kind has nothing to look at. The server parses the statement
+// all the same.
+func execAlternationQuery(name, sourceText string) codegen.NamedQuery {
+	q := execQuery(name)
+	q.SourceText = sourceText
+	return q
+}
+
+// TestRejectsRelationshipTypeAlternation pins the gate that reads the
+// query TEXT rather than the resolved columns.
+//
+// The two are not the same set, and the column gate above is blind to
+// most of this one's. Apache AGE 1.7.0's parser refuses '|' in a
+// relationship detail whatever surrounds it, and generated code ships
+// the author's text verbatim (ADR 0005) — so an alternation the author
+// never projects produces no column at all, and one the resolver
+// narrowed to a single declared candidate produces a ResolvedEdge the
+// column gate serves. Both would emit a package that compiles and whose
+// every call is a server-side syntax error.
+//
+// The refused rows carry different alternations from each other, because
+// the message quotes the column's own text and a message built from a
+// fixed string would satisfy one row while failing the rest.
+//
+// One row carries no columns at all. A :exec write projects nothing, so
+// it is not that the column list holds nothing this gate would refuse —
+// there is no column list. A gate narrowed to queries that project, or
+// to reads, keeps every other row here green.
+func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
+	in := s.inputFrom(filepath.Join("testdata", corpusSchema))
+
+	for _, tc := range []struct {
+		name    string
+		queries []codegen.NamedQuery
+		// count and noun are the refusal's arithmetic; dropped is the
+		// per-query list it ends with.
+		count   int
+		noun    string
+		dropped string
+	}{
+		{
+			name: "an alternation the query never projects is refused",
+			queries: []codegen.NamedQuery{alternationQuery("PostIDs",
+				"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) RETURN p.id\n",
+				scalarColumn("p.id", graph.TypeInt))},
+			count: 1, noun: "query", dropped: `PostIDs (":AUTHORED|LIKES")`,
+		},
+		{
+			name: "an alternation narrowed to one declared candidate is refused",
+			queries: []codegen.NamedQuery{alternationQuery("Rels",
+				"MATCH (:Person)-[r:AUTHORED|FLAGGED]->(p:Post) RETURN r\n",
+				resolver.Column{Name: "r", Type: resolver.ResolvedEdge{EdgeKey: corpusEdgeKey}})},
+			count: 1, noun: "query", dropped: `Rels (":AUTHORED|FLAGGED")`,
+		},
+		{
+			name: "an alternation bound by an anonymous edge is refused",
+			queries: []codegen.NamedQuery{alternationQuery("Anon",
+				"MATCH (:Person)-[:AUTHORED|LIKES|REPOSTED]->(p:Post) RETURN p.id\n",
+				scalarColumn("p.id", graph.TypeInt))},
+			count: 1, noun: "query", dropped: `Anon (":AUTHORED|LIKES|REPOSTED")`,
+		},
+		{
+			// The arity witness, read as the grammar spells it rather
+			// than as a set of names. Cypher.g4 §oC_RelationshipTypes
+			// admits a repeated name after '|', and AGE 1.7.0 refuses
+			// the '|' the repeat needs — while the resolver narrows the
+			// candidates to one ResolvedEdge, which the column gate
+			// serves. So a gate counting DISTINCT types refuses nothing
+			// here and emits a package whose every call is 42601.
+			name: "a type the alternation repeats is refused",
+			queries: []codegen.NamedQuery{alternationQuery("Repeat",
+				"MATCH (:Person)-[r:LIKES|LIKES]->(p:Post) RETURN r\n",
+				resolver.Column{Name: "r", Type: resolver.ResolvedEdge{EdgeKey: corpusEdgeKey}})},
+			count: 1, noun: "query", dropped: `Repeat (":LIKES|LIKES")`,
+		},
+		{
+			name: "a type the alternation repeats in the legacy spelling is refused",
+			queries: []codegen.NamedQuery{alternationQuery("RepeatLegacy",
+				"MATCH (:Person)-[r:LIKES|:LIKES]->(p:Post) RETURN r\n",
+				resolver.Column{Name: "r", Type: resolver.ResolvedEdge{EdgeKey: corpusEdgeKey}})},
+			count: 1, noun: "query", dropped: `RepeatLegacy (":LIKES|:LIKES")`,
+		},
+		{
+			// Whitespace inside the alternation is quoted, not dropped:
+			// SP is a default-channel token, so the parser's text keeps
+			// it and the message prints only characters the author
+			// wrote. Nothing else pins the spaced rendering.
+			name: "an alternation written with spaces is quoted with them",
+			queries: []codegen.NamedQuery{alternationQuery("Spaced",
+				"MATCH (:Person)-[r:AUTHORED | LIKES]->(p:Post) RETURN p.id\n",
+				scalarColumn("p.id", graph.TypeInt))},
+			count: 1, noun: "query", dropped: `Spaced (":AUTHORED | LIKES")`,
+		},
+		{
+			name: "a query spelling two alternations names both",
+			queries: []codegen.NamedQuery{alternationQuery("Both",
+				"MATCH (:Person)-[r:LIKES|REPOSTED]->(p:Post), (:Person)-[s:AUTHORED|FLAGGED]->(p) RETURN p.id\n",
+				scalarColumn("p.id", graph.TypeInt))},
+			count: 1, noun: "query", dropped: `Both (":LIKES|REPOSTED", ":AUTHORED|FLAGGED")`,
+		},
+		{
+			// The zero-column row. A :exec write is a query the AGE
+			// backend serves and whose whole text still reaches the
+			// server, so the alternation in it is refused on the text
+			// alone — there is no column here for any reading of the
+			// columns to arrive at.
+			name: "an alternation in a write that projects nothing is refused",
+			queries: []codegen.NamedQuery{execAlternationQuery("DropActions",
+				"MATCH (p:Person)-[r:AUTHORED|LIKES]->(:Post) DELETE r\n")},
+			count: 1, noun: "query", dropped: `DropActions (":AUTHORED|LIKES")`,
+		},
+		{
+			name: "every offending query in the batch is named",
+			queries: []codegen.NamedQuery{
+				servedQuery,
+				alternationQuery("PostIDs",
+					"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) RETURN p.id\n",
+					scalarColumn("p.id", graph.TypeInt)),
+				alternationQuery("Anon",
+					"MATCH (:Person)-[:AUTHORED|REPOSTED]->(p:Post) RETURN p.id\n",
+					scalarColumn("p.id", graph.TypeInt)),
+			},
+			count: 2, noun: "queries",
+			dropped: `PostIDs (":AUTHORED|LIKES"), Anon (":AUTHORED|REPOSTED")`,
+		},
+	} {
+		s.Run(tc.name, func() {
+			batch := in
+			batch.Queries = tc.queries
+			files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+			s.Require().Error(err)
+			s.Require().Nil(files, "a rejected batch must not return a partial file set")
+			s.Require().ErrorIs(err, age.ErrRelationshipTypeAlternation)
+			s.Require().NotErrorIs(err, age.ErrUnsupportedQuery,
+				"the two refusals have different reasons and a caller must be able to tell them apart")
+			s.Require().EqualError(err, wantAlternationRefusal(tc.count, tc.noun, tc.dropped))
+		})
+	}
+
+	s.Run("a '|' outside a relationship pattern is served", func() {
+		batch := in
+		batch.Queries = []codegen.NamedQuery{alternationQuery("Tags",
+			"MATCH (p:Person) RETURN [x IN p.tags | x] AS t\n",
+			scalarColumn("t", graph.TypeString))}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().NoError(err, "a list comprehension's '|' names no relationship type")
+		s.Require().NotEmpty(files)
+	})
+
+	s.Run("a column shared admission refuses is answered here, because this runs first", func() {
+		// The gate's POSITION, pinned by its observable consequence. This
+		// batch trips two refusals at once: its text spells an
+		// alternation, and its column carries a repeated label, which
+		// codegen.Prepare refuses with ErrUnrepresentableEdgeUnion (the
+		// column gate above stands aside on exactly that repeat, which is
+		// what lets Prepare be reached at all). Running this gate ahead of
+		// Prepare is what makes the alternation the answer, and the order
+		// is not a preference: the text has to be rewritten before the
+		// column question can be asked of this server at all, so the
+		// portable answer would send the author to change a projection
+		// that is not yet the obstacle.
+		//
+		// This is also the whole justification for
+		// test/data/codegen/invalid/unrepresentable_edge_union_shared_label
+		// carrying no apache-age-pgx-v5 target: a manifest names one
+		// expectedError per target, and on this ordering AGE's is not the
+		// one the manifest names. Move the gate below Prepare and that
+		// enrolment becomes valid again, so the un-enrolment needs the
+		// ordering asserted rather than assumed.
+		batch := s.inputFrom(filepath.Join("testdata", sharedLabelSchema))
+		batch.Queries = []codegen.NamedQuery{alternationQuery("FoundedOrBacked",
+			"MATCH (:Person)-[r:FOUNDED|BACKED]->(c:Company) RETURN r\n",
+			resolver.Column{Name: "r", Type: mixedLabelEdgeUnion})}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrRelationshipTypeAlternation,
+			"this gate runs ahead of Prepare, so a batch tripping both gets the text's answer")
+		s.Require().NotErrorIs(err, codegen.ErrUnrepresentableEdgeUnion,
+			"shared admission would refuse this column, and reaching it first would send the author to fix a projection the server never gets far enough to read")
+		s.Require().EqualError(err,
+			wantAlternationRefusal(1, "query", `FoundedOrBacked (":FOUNDED|BACKED")`))
+	})
+
+	s.Run("an edge-union column is answered by the column gate, which says more", func() {
+		batch := in
+		batch.Queries = []codegen.NamedQuery{alternationQuery("TwoActions",
+			"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) RETURN r\n",
+			resolver.Column{Name: "r", Type: twoCandidateEdgeUnion})}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrUnsupportedQuery,
+			"the column gate runs first, because naming the candidates the schema declares is more than the text can say")
+		s.Require().NotErrorIs(err, age.ErrRelationshipTypeAlternation)
+		s.Require().ErrorContains(err, `TwoActions (column "r" `+wantEdgeUnionReason("AUTHORED and LIKES")+`)`)
+	})
+
+	s.Run("an unserved column that is not an edge union yields to the text", func() {
+		// The other side of the subtest above, and the bound on it. An
+		// edge-union column outranks the text because it answers the SAME
+		// defect and names the candidates the schema declares. A map
+		// column is a DIFFERENT defect: printing it first sends the
+		// author to change a projection, regenerate, and only then learn
+		// the statement never parsed on this backend — two rounds for one
+		// query. So the column gate yields here.
+		mapColumn := resolver.Column{
+			Name: "bag", Type: resolver.ResolvedScalar{Kind: resolver.ScalarMap},
+		}
+
+		batch := in
+		batch.Queries = []codegen.NamedQuery{alternationQuery("Bagged",
+			"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) RETURN properties(p) AS bag\n", mapColumn)}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrRelationshipTypeAlternation,
+			"the alternation is the obstacle underneath: the statement has to be rewritten before the projection can be put to this server at all")
+		s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
+		s.Require().EqualError(err, wantAlternationRefusal(1, "query", `Bagged (":AUTHORED|LIKES")`))
+
+		// The discriminator. Without the '|' the very same column is
+		// still unserved and the column gate still owns it, so what
+		// moved above is the ordering and not the map arm.
+		batch.Queries = []codegen.NamedQuery{alternationQuery("Bagged",
+			"MATCH (:Person)-[r:AUTHORED]->(p:Post) RETURN properties(p) AS bag\n", mapColumn)}
+		files, err = age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrUnsupportedQuery)
+		s.Require().NotErrorIs(err, age.ErrRelationshipTypeAlternation)
+		s.Require().ErrorContains(err, `Bagged (column "bag" projects scalar(map))`)
+	})
+
+	s.Run("an unserved parameter yields to the text", func() {
+		// The same yield on the OTHER axis unservedReason reads. It
+		// answers the columns first and the parameters after, on a
+		// separate return, so a query whose every column is served
+		// reaches a different decision from the row above and one arm
+		// cannot stand in for the other. A width with no carrier is the
+		// map column's defect one step along: still an argument to
+		// change, still not the reason the statement never parsed.
+		//
+		// BYTES is the discriminator because it is unserved on BOTH the
+		// column and the parameter axis, which is what these precedence
+		// subtests need. That is a dependency on the served set, not on
+		// BYTES itself: these subtests were written against LIST and
+		// stopped discriminating the day LIST became served. If BYTES is
+		// served too, pick another width unserved on both axes — do not
+		// delete the subtest, because the precedence it pins is the whole
+		// point of the gate above it.
+		wideParam := resolver.ResolvedParameter{
+			Name: "payload", Type: resolver.ResolvedProperty{Type: graph.TypeBytes},
+		}
+		byBlob := func(sourceText string) codegen.NamedQuery {
+			q := alternationQuery("ByBlob", sourceText, scalarColumn("p.id", graph.TypeInt))
+			q.Validated.Parameters = []resolver.ResolvedParameter{wideParam}
+			return q
+		}
+
+		batch := in
+		batch.Queries = []codegen.NamedQuery{byBlob(
+			"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) WHERE p.payload = $payload RETURN p.id\n")}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrRelationshipTypeAlternation,
+			"the alternation is the obstacle underneath: the statement has to be rewritten before the argument can be put to this server at all")
+		s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
+		s.Require().EqualError(err, wantAlternationRefusal(1, "query", `ByBlob (":AUTHORED|LIKES")`))
+
+		// The discriminator. Without the '|' the very same parameter is
+		// still unserved and the column gate still owns it, so what
+		// moved above is the ordering and not the parameter arm.
+		batch.Queries = []codegen.NamedQuery{byBlob(
+			"MATCH (:Person)-[r:AUTHORED]->(p:Post) WHERE p.payload = $payload RETURN p.id\n")}
+		files, err = age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrUnsupportedQuery)
+		s.Require().NotErrorIs(err, age.ErrRelationshipTypeAlternation)
+		s.Require().ErrorContains(err, `ByBlob (parameter $payload is property:BYTES)`)
+	})
+
+	s.Run("an edge-union column outranks an unserved parameter", func() {
+		// The precedence BETWEEN the two axes unservedReason reads, which
+		// is what its loop order decides and nothing else pins. The chain
+		// is: an edge-union column, then the text, then every other
+		// unserved reason. The column is first because it answers the
+		// SAME defect the text does and names the candidates the schema
+		// declares for the pattern; a parameter answers a different one
+		// and yields (the subtest above). So a query carrying both must
+		// report the column.
+		//
+		// Reading the parameters first inverts that. The parameter arm
+		// reports edgeUnion=false, so the query yields to the text and
+		// the author is handed the alternation quoted back where a list
+		// of candidates was available — strictly less about the very same
+		// fix, which is the one trade the exception to the yield exists
+		// to avoid making.
+		wideParam := resolver.ResolvedParameter{
+			Name: "payload", Type: resolver.ResolvedProperty{Type: graph.TypeBytes},
+		}
+		bothAxes := func(sourceText string) codegen.NamedQuery {
+			q := alternationQuery("ActionsByBlob", sourceText,
+				resolver.Column{Name: "r", Type: twoCandidateEdgeUnion})
+			q.Validated.Parameters = []resolver.ResolvedParameter{wideParam}
+			return q
+		}
+		wantColumn := `ActionsByBlob (column "r" ` + wantEdgeUnionReason("AUTHORED and LIKES") + `)`
+
+		batch := in
+		batch.Queries = []codegen.NamedQuery{bothAxes(
+			"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) WHERE p.payload = $payload RETURN r\n")}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrUnsupportedQuery,
+			"the edge-union column outranks both the parameter and the text, so neither can take the answer from it")
+		s.Require().NotErrorIs(err, age.ErrRelationshipTypeAlternation)
+		s.Require().ErrorContains(err, wantColumn)
+		s.Require().NotContains(err.Error(), "parameter $payload")
+
+		// The same precedence with the text out of it. Both axes are
+		// still unserved and neither can yield anywhere, so what decides
+		// the message is the loop order alone.
+		batch.Queries = []codegen.NamedQuery{bothAxes(
+			"MATCH (:Person)-[r:AUTHORED]->(p:Post) WHERE p.payload = $payload RETURN r\n")}
+		files, err = age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrUnsupportedQuery)
+		s.Require().ErrorContains(err, wantColumn)
+		s.Require().NotContains(err.Error(), "parameter $payload",
+			"the column is read first, so the parameter is not what this query is told about")
+	})
+
+	s.Run("a sibling the column gate still owns is named in the same run", func() {
+		// Yielding is per query. A batch holding one query the text gate
+		// owns and one the column gate owns must not lose the second: a
+		// gate that stood the whole BATCH aside would report only the
+		// alternation and hand the author the uncarried width a round
+		// later, which is the round-trip this ordering exists to remove.
+		batch := in
+		batch.Queries = []codegen.NamedQuery{
+			alternationQuery("Blobbed",
+				"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) RETURN p.payload AS payload\n",
+				resolver.Column{
+					Name: "payload",
+					Type: resolver.ResolvedProperty{Type: graph.TypeBytes},
+				}),
+			readQuery("Bag", resolver.Column{
+				Name: "m", Type: resolver.ResolvedScalar{Kind: resolver.ScalarMap},
+			}),
+		}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrUnsupportedQuery,
+			"the sibling spells no '|', so the column gate still answers it and answers first")
+		s.Require().ErrorContains(err, `1 query would be dropped: Bag (column "m" projects scalar(map))`)
+		s.Require().NotContains(err.Error(), "Blobbed",
+			"the query the text gate owns must not be reported on the column axis")
+	})
+}
+
 // TestRejectsQueriesItCannotServe pins the capability gate. The emitted
 // arms cover agtype's scalar vocabulary, the vertices and edges built
 // out of it, and a statement that writes with or without projecting, so
@@ -271,6 +872,9 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 			Name: "p", Type: resolver.ResolvedNode{Labels: graph.LabelSetKey(personLabel)},
 		}}
 	})
+	edgeUnion := moved("Action", func(q *codegen.NamedQuery) {
+		q.Validated.Columns = []resolver.Column{{Name: "r", Type: twoCandidateEdgeUnion}}
+	})
 	temporal := moved("When", func(q *codegen.NamedQuery) {
 		q.Validated.Columns = []resolver.Column{{
 			Name: "t", Type: resolver.ResolvedTemporal{Kind: resolver.TemporalDate},
@@ -307,6 +911,40 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 	uncarriedProp := moved("Stamp", func(q *codegen.NamedQuery) {
 		q.Validated.Columns = []resolver.Column{{
 			Name: "t", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeTimestamp, false)},
+		}}
+	})
+	// The arm of unservedParam a width question does not reach. It is
+	// read off the parameter alone, ahead of Prepare, so this gate is the
+	// only thing that can answer it here.
+	//
+	// A parameter that is not a schema property at all: the encode path
+	// builds an agtype argument out of a declared width, so a shape with
+	// no width is a shape it has nothing to build from. Shared admission
+	// is expected to refuse these before emission, which is why the arm
+	// reads as defensive — but this gate runs BEFORE Prepare, so a batch
+	// handed straight to a backend reaches it, and an arm that answered
+	// "" would let such a parameter through to an encode call with no
+	// case for it.
+	nonPropertyParam := moved("Batch", func(q *codegen.NamedQuery) {
+		q.Validated.Parameters = []resolver.ResolvedParameter{{
+			Name: "bag", Type: resolver.ResolvedScalar{Kind: resolver.ScalarMap},
+		}}
+	})
+	// A width outside the type table, on both axes. It is the same
+	// question the shared width sweep asks of the SCHEMA, asked here of
+	// the query — and the two are different questions with different
+	// answers, because a column or an argument can carry a width no
+	// entity's property does. Answering it here is what makes the refusal
+	// name the query rather than send the author to a schema that carries
+	// the width legitimately.
+	wideColumn := moved("Blob", func(q *codegen.NamedQuery) {
+		q.Validated.Columns = []resolver.Column{{
+			Name: "payload", Type: resolver.ResolvedProperty{Type: graph.TypeBytes},
+		}}
+	})
+	wideParam := moved("ByBlob", func(q *codegen.NamedQuery) {
+		q.Validated.Parameters = []resolver.ResolvedParameter{{
+			Name: "payload", Type: resolver.ResolvedProperty{Type: graph.TypeBytes},
 		}}
 	})
 
@@ -395,6 +1033,12 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 			wantError: true,
 		},
 		{
+			name:      "an edge-union column is dropped",
+			queries:   []codegen.NamedQuery{edgeUnion},
+			wantSub:   `1 query would be dropped: Action (column "r" ` + wantEdgeUnionReason("AUTHORED and LIKES") + `)`,
+			wantError: true,
+		},
+		{
 			name:      "an unresolved column is dropped",
 			queries:   []codegen.NamedQuery{unknown},
 			wantSub:   `1 query would be dropped: Opaque (column "u" projects unknown)`,
@@ -403,6 +1047,24 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 		{
 			name:    "a list parameter generates",
 			queries: []codegen.NamedQuery{listParam},
+		},
+		{
+			name:      "a parameter that is not a schema property is dropped",
+			queries:   []codegen.NamedQuery{nonPropertyParam},
+			wantSub:   `1 query would be dropped: Batch (parameter $bag is scalar(map))`,
+			wantError: true,
+		},
+		{
+			name:      "a column whose width has no carrier is dropped, naming the query",
+			queries:   []codegen.NamedQuery{wideColumn},
+			wantSub:   `1 query would be dropped: Blob (column "payload" projects property:BYTES)`,
+			wantError: true,
+		},
+		{
+			name:      "a parameter whose width has no carrier is dropped, naming the query",
+			queries:   []codegen.NamedQuery{wideParam},
+			wantSub:   `1 query would be dropped: ByBlob (parameter $payload is property:BYTES)`,
+			wantError: true,
 		},
 		{
 			// A list property is served exactly when its element width is,
