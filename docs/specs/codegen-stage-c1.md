@@ -743,18 +743,32 @@ func (q *Queries) <MethodName>(ctx context.Context<param-list>) (<return>, error
 **The argument name and the binding values in this document are
 fenced.** `TestSpecMethodArgIsGeneratorOwned` and
 `TestSpecParamsMapBindsGeneratorOwnedValue`
-(`internal/codegen/conformance/specfence_test.go`) sweep every
-markdown document under `docs/` and hold three shapes against
-`codegen.ParamArg` read from the emitter: every parameter list
-opening `ctx context.Context` and holding exactly one more parameter;
-the parameter-list tail each `<param-list>` bullet spells out, which
-is where the rule actually lives, because the method template above
-prints only the placeholder; and the value half of every
-`map[string]any` literal's entries. A placeholder in the type
-position is not an exemption for the name beside it — the fence reads
-the name and type positions separately, so a `<bareParam> <T>`
-restored into the bullet above is red on its name however the type is
-written.
+(`internal/codegen/conformance/specfence_test.go`) read every
+markdown document under `docs/`, plus `README.md` and `CONTEXT.md`,
+and hold three shapes against `codegen.ParamArg` read from the
+emitter: every parameter list opening `ctx context.Context` and
+holding exactly one more parameter; the parameter-list tail each
+`<param-list>` bullet spells out, which is where the rule actually
+lives, because the method template above prints only the placeholder;
+and the value half of every `map[string]any` literal's entries. A
+placeholder in the type position is not an exemption for the name
+beside it — the fence reads the name and type positions separately,
+so a `<bareParam> <T>` restored into the bullet above is red on its
+name however the type is written, and a lone `<bareParam>` is read as
+a name with no type rather than waved through for wearing angle
+brackets.
+
+Which documents owe graded sites is derived from those documents, not
+listed in the test. A document that prints a query method taking an
+argument owes a graded signature; one whose method template prints
+`<param-list>` owes the bullet that expands it, at **both** arities.
+Both, because a bullet that spells out one and leaves the other to
+prose is exactly how the single-parameter form came to specify the
+capture vector while the two-plus form sat correct beside it. So this
+bullet cannot narrow back to one arity, and this document cannot drop
+out of the sweep, without something going red. What no check that
+reads only these documents can reach is deleting the surface
+outright: a document that says nothing owes nothing.
 
 That is the whole of what is fenced: the *name*. Return types, decode
 bodies, `<zero>` values and every other signature in this document

@@ -83,39 +83,75 @@ const (
 	specBindFloor = 8
 )
 
-// sigAnchorDocs, paramListAnchorDocs and bindAnchorDocs must each
-// contribute at least one graded site to their sweep. The floors above
-// catch a scanner that matches nothing anywhere; these catch the
-// narrower case of one document falling out of the sweep while the
-// others carry the count — including the case where the others are
-// padded to carry it, which a bare floor cannot tell from health.
+// Which documents must contribute graded sites is read off the
+// documents, not listed here.
 //
-// C1 is the authoritative section for method-signature naming
-// (codegen-stage-c0.md §10 routes it there); C4 declares the same
-// signatures inside the WriteQuerier interface, and C5 prints them for
-// the edgeUnion surface. C2 and C3 print no such signature on purpose:
-// every method they illustrate takes zero parameters. C1 and C4 are the
-// two documents that define `<param-list>`; C5 defers to C1's rule.
-// Bindings reach one document further than signatures do, because C3's
-// width and nullability bullets print the map literal without printing
-// the method around it.
+// The floors above catch a scanner that matches nothing anywhere. They
+// do not catch the narrower case of one document falling out of the
+// sweep while the others carry the count, so each sweep also has to know
+// which documents it is answerable to — and a list of filenames beside
+// the tree is a mirror with nothing holding it to the tree. Deleting one
+// entry and gutting the document it named is a single edit, and it is
+// green: this file's own failure mode one level up, a fence switched off
+// with nothing objecting.
+//
+// So each sweep asks the documents. Every marker below is coarser than
+// the site its sweep grades and sits in different text, so rewording or
+// breaking the graded site leaves the marker standing and the
+// requirement with it. Both directions are then held (requireDerived):
+// a marked document that grades nothing has dropped out of the sweep,
+// and a graded document no marker selected is a marker that has
+// narrowed — which is how the derivation itself would go blind.
+//
+// The three sets come out different, and the difference is a fact about
+// the documents rather than a decision recorded beside them: C3's width
+// and nullability bullets print the binding literal without printing the
+// method around it, so C3 owes a binding and owes no signature. A
+// document that starts printing the surface is swept from the moment it
+// is written, which a list could never learn.
+//
+// One thing no marker can reach, because nothing that reads only these
+// documents can: deleting the documented surface outright takes the
+// marker with it, and a document that says nothing owes nothing. What is
+// closed here is the case that was open — a graded site reworded,
+// respecified or grown a parameter until the scanner cannot read it,
+// with nothing left to edit to excuse it.
 var (
-	sigAnchorDocs = []string{
-		"../../../docs/specs/codegen-stage-c1.md",
-		"../../../docs/specs/codegen-stage-c4.md",
-		"../../../docs/specs/codegen-stage-c5.md",
-	}
-	paramListAnchorDocs = []string{
-		"../../../docs/specs/codegen-stage-c1.md",
-		"../../../docs/specs/codegen-stage-c4.md",
-	}
-	bindAnchorDocs = []string{
-		"../../../docs/specs/codegen-stage-c1.md",
-		"../../../docs/specs/codegen-stage-c3.md",
-		"../../../docs/specs/codegen-stage-c4.md",
-		"../../../docs/specs/codegen-stage-c5.md",
-	}
+	// queryMethodAnchorRe marks a document that prints an emitted query
+	// method taking at least one argument after the context: a method
+	// name, the context anchor, and a comma.
+	//
+	// A method name here is an exported identifier or the `<MethodName>`
+	// placeholder a template writes in its place, because both are the
+	// emitted surface. Requiring one of the two is what separates a query
+	// method from the `driverOrTx.run` seam C0 declares with the same
+	// context prefix and three more arguments, and from the godoc-quoted
+	// handlers elsewhere under docs/, neither of which this fence has any
+	// claim on.
+	//
+	// It deliberately does not require the list to close, to hold exactly
+	// one further parameter, or to name anything: those are the graded
+	// questions, and a marker that asked them would vanish along with the
+	// answer it was there to require.
+	queryMethodAnchorRe = regexp.MustCompile(
+		`(?:[A-Z][A-Za-z0-9_]*|<[A-Za-z][A-Za-z0-9_-]*>)` + ctxAnchorRe.String() + `\s*,`)
+
+	// paramListAnchorRe marks a document whose method-shape template
+	// prints the `<param-list>` placeholder where the parameters go. Such
+	// a document owes the bullet that expands it, because that bullet is
+	// then the only place it says which identifier the emitted signature
+	// binds. Erasing the requirement means erasing the placeholder from
+	// the template, which forces the template to print a parameter list —
+	// graded by the signature sweep instead. There is no way out of this
+	// requirement that is not also a way into the other one.
+	paramListAnchorRe = regexp.MustCompile(ctxAnchorRe.String() + `\s*` + regexp.QuoteMeta(paramListPlaceholder))
 )
+
+// paramListPlaceholder is the bare placeholder inside paramListTerm's
+// markdown emphasis. Derived from the term rather than written beside
+// it, so the template marker and the bullet the scanner reads cannot
+// drift apart.
+var paramListPlaceholder = strings.Trim(paramListTerm, "*`")
 
 // specSig is one graded site: a documented method signature taking one
 // argument after the context, the parameter-list tail a `<param-list>`
@@ -125,10 +161,16 @@ var (
 // name for the first two and the binding expression's root for the
 // third, and `text` carries the source line so a failure names the site
 // rather than describes it.
+//
+// `typ` is the declaration's type position, empty where the site has
+// none. It is not graded — the emitter is free to outgrow every type in
+// these documents — but it is what tells the two documented arities
+// apart (arityOf).
 type specSig struct {
 	file string
 	line int
 	arg  string
+	typ  string
 	text string
 }
 
@@ -147,14 +189,14 @@ func (s specSig) String() string {
 // print whole; scanParamListRules reads the `<param-list>` bullets,
 // where the documents print the placeholder in the signature and state
 // the identifier separately in prose. Both end in the same comparison,
-// and the second is the site gqlc-rz0l corrected, so it is anchored
-// per-document alongside the first.
+// and the second is the site gqlc-rz0l corrected, so it carries its own
+// derived requirement alongside the first.
 func TestSpecMethodArgIsGeneratorOwned(t *testing.T) {
 	files := docFiles(t)
 	require.NotEmpty(t, files, "the fence swept no documents; docRoots is stale")
 
 	perDoc := make(map[string]int, len(files))
-	perParamListDoc := make(map[string]int, len(files))
+	perParamListDoc := make(map[string]map[paramArity]int, len(files))
 	var graded, bad, unclosed []specSig
 	for _, file := range files {
 		text := readDoc(t, file)
@@ -166,7 +208,10 @@ func TestSpecMethodArgIsGeneratorOwned(t *testing.T) {
 			graded = append(graded, sig)
 		}
 		for _, sig := range scanParamListRules(file, text) {
-			perParamListDoc[file]++
+			if perParamListDoc[file] == nil {
+				perParamListDoc[file] = map[paramArity]int{}
+			}
+			perParamListDoc[file][arityOf(sig.typ)]++
 			graded = append(graded, sig)
 		}
 	}
@@ -185,18 +230,19 @@ func TestSpecMethodArgIsGeneratorOwned(t *testing.T) {
 		"the fence graded only %d method signatures across %d documents, under the floor of %d — "+
 			"the scanner has stopped matching and this test is passing over nothing",
 		len(graded), len(files), specSigFloor)
-	for _, doc := range sigAnchorDocs {
-		require.NotZerof(t, perDoc[doc],
-			"%s contributed no graded method signature; either its method surface has moved out of "+
-				"the sweep or the scanner no longer reads it", doc)
-	}
-	for _, doc := range paramListAnchorDocs {
-		require.NotZerof(t, perParamListDoc[doc],
-			"%s contributed no graded `<param-list>` rule; either its %s bullet has been reworded out of "+
-				"the sweep or the scanner no longer reads it — that bullet is where this document states "+
-				"which identifier the emitted signature binds, so an unread one is an unfenced one",
-			doc, paramListTerm)
-	}
+
+	requireDerived(t, markedDocs(t, files, queryMethodAnchorRe), countedDocs(perDoc),
+		"prints an emitted query method taking an argument after the context",
+		"a graded method signature",
+		"either its method surface has moved out of the sweep or the scanner no longer reads it")
+	requireDerived(t, markedDocs(t, files, paramListAnchorRe), aritiedDocs(perParamListDoc),
+		"prints the "+paramListTerm+" placeholder in its method-shape template",
+		"a graded "+paramListTerm+" rule",
+		"that bullet is the only place such a document states which identifier the emitted signature "+
+			"binds, because the template above it prints the placeholder instead of a list, so an unread "+
+			"bullet is an unfenced one")
+
+	requireBothArities(t, perParamListDoc)
 
 	requireClean(t, bad, "documented method argument is not generator-owned",
 		fmt.Sprintf("these documented signatures name the emitted method argument after the query author's parameter\n"+
@@ -242,18 +288,176 @@ func TestSpecParamsMapBindsGeneratorOwnedValue(t *testing.T) {
 		"the fence graded only %d parameter bindings across %d documents, under the floor of %d — "+
 			"the scanner has stopped matching and this test is passing over nothing",
 		len(graded), len(files), specBindFloor)
-	for _, doc := range bindAnchorDocs {
-		require.NotZerof(t, perDoc[doc],
-			"%s contributed no graded parameter binding; either its map literals have moved out of the "+
-				"sweep or the scanner no longer reads it — a floor the other documents can satisfy by "+
-				"themselves is not a floor on this one", doc)
+
+	// Two markers, unioned. The literal's own anchor is the obvious one
+	// and reaches C3, which prints the literal in a width bullet with no
+	// method around it. The query-method anchor is the one that bites: a
+	// document that prints a method taking parameters owes the bindings
+	// those parameters reach, which is the pairing C1 §5.3 states between
+	// `<param-list>` and `<paramsMap>`. Without it, gutting the map
+	// literal out of a document that still declares the method would take
+	// its requirement with it.
+	required := markedDocs(t, files, mapAnchorRe)
+	for doc := range markedDocs(t, files, queryMethodAnchorRe) {
+		required[doc] = true
 	}
+	requireDerived(t, required, countedDocs(perDoc),
+		"prints a driver-binding literal, or a query method whose parameters have to reach one",
+		"a graded parameter binding",
+		"either its map literals have moved out of the sweep or the scanner no longer reads it — a floor "+
+			"the other documents can satisfy by themselves is not a floor on this one")
 
 	requireClean(t, bad, "documented parameter binding is not generator-owned",
 		fmt.Sprintf("these documented map[string]any entries bind a value that is not codegen.ParamArg (%q) or a\n"+
 			"field selected from it; the emitter's paramsMapText / argsMapText compose every value from that\n"+
 			"one identifier, and only the map key carries the author's parameter name (gqlc-lhs3, gqlc-rz0l)",
 			codegen.ParamArg))
+}
+
+// markedDocs is the set of swept documents whose text matches one
+// sweep's marker: the documents that sweep is answerable to, read off
+// the tree rather than listed beside it.
+func markedDocs(t *testing.T, files []string, marker *regexp.Regexp) map[string]bool {
+	t.Helper()
+	out := make(map[string]bool, len(files))
+	for _, file := range files {
+		if marker.MatchString(readDoc(t, file)) {
+			out[file] = true
+		}
+	}
+	return out
+}
+
+// countedDocs and aritiedDocs reduce a sweep's per-document tally to the
+// set of documents it graded anything in, whatever the tally counts.
+func countedDocs(per map[string]int) map[string]bool {
+	out := make(map[string]bool, len(per))
+	for doc, n := range per {
+		if n > 0 {
+			out[doc] = true
+		}
+	}
+	return out
+}
+
+func aritiedDocs(per map[string]map[paramArity]int) map[string]bool {
+	out := make(map[string]bool, len(per))
+	for doc, arities := range per {
+		if len(arities) > 0 {
+			out[doc] = true
+		}
+	}
+	return out
+}
+
+// requireDerived holds the documents a sweep graded against the
+// documents its marker says it is answerable to, in both directions.
+//
+// Marked and ungraded is the case the deleted filename lists were meant
+// to catch and could not survive being edited to match: a document that
+// still prints the surface and no longer contributes to the sweep.
+//
+// Graded and unmarked is the case a list has no analogue for at all. It
+// is the derivation auditing itself: the marker is the thing that
+// decides what is required, so a marker that stops selecting a document
+// the scanner is still reading has silently dropped that document's
+// requirement, and would keep dropping them as the tree grows. Failing
+// here rather than passing quietly is the difference between a
+// derivation and a second mirror.
+//
+// The marked set is also required to be non-empty, because a marker that
+// selects nothing satisfies both directions over nothing at all.
+func requireDerived(t *testing.T, marked, graded map[string]bool, prints, owes, why string) {
+	t.Helper()
+
+	require.NotEmptyf(t, marked, "no swept document %s, so this sweep is answerable to nothing and "+
+		"every document below it passes vacuously; the marker has stopped matching", prints)
+
+	var missing, unmarked []string
+	for doc := range marked {
+		if !graded[doc] {
+			missing = append(missing, "  "+doc)
+		}
+	}
+	for doc := range graded {
+		if !marked[doc] {
+			unmarked = append(unmarked, "  "+doc)
+		}
+	}
+	sort.Strings(missing)
+	sort.Strings(unmarked)
+
+	if len(missing) > 0 {
+		require.Fail(t, "a document that "+prints+" contributed nothing to the sweep",
+			"these documents owe "+owes+" and contributed none; "+why+":\n"+strings.Join(missing, "\n"))
+	}
+	if len(unmarked) > 0 {
+		require.Fail(t, "the sweep graded a document its marker does not select",
+			"the marker for this sweep decides which documents owe graded sites, and it did not select these — "+
+				"which the scanner read anyway; a marker narrower than its own scanner drops requirements\n"+
+				"silently, so widen the marker rather than the expectation:\n"+strings.Join(unmarked, "\n"))
+	}
+}
+
+// paramArity is one of the two arities every `<param-list>` bullet has
+// to state. The emitted signature binds codegen.ParamArg at both, which
+// is exactly why stating only one of them is drift: the bullet that
+// spells out `, arg <MethodName>Params` and leaves the single-parameter
+// form to prose has put the capture vector's one live site back out of
+// the fence's reach, which is the defect gqlc-rz0l was filed for.
+type paramArity string
+
+const (
+	arityOne  paramArity = "one parameter"
+	arityMany paramArity = "two-plus parameters"
+)
+
+// arityOf reads the arity off a graded declaration's type position.
+//
+// The two arities differ in what the argument's type is, and the
+// documents cannot spell either one concretely, so both are written as
+// placeholders — but not the same shape of placeholder. The
+// single-parameter form's type is the query parameter's own Go type,
+// which the template cannot know, so it stands alone as `<T>`. The
+// two-plus form's type is generated from the method name, which the
+// template can spell, so it is a placeholder with the generated suffix
+// concatenated on: `<MethodName>Params`. Whether the type position is a
+// placeholder in its entirety is therefore the arity, read off the
+// template's own grammar rather than off a copy of the emitter's
+// "Params" literal kept over here.
+func arityOf(typ string) paramArity {
+	if isWholePlaceholder(typ) {
+		return arityOne
+	}
+	return arityMany
+}
+
+// requireBothArities holds every document that states a `<param-list>`
+// expansion to stating both of them.
+//
+// A bullet reworked down to one arity leaves a nonzero count, a
+// satisfied requirement, and the other arity back in prose where nothing
+// reads it — which is how C1 §5.3 came to specify the capture vector for
+// the single-parameter form in the first place. A count is not the
+// question; which arities are stated is.
+func requireBothArities(t *testing.T, per map[string]map[paramArity]int) {
+	t.Helper()
+	var bad []string
+	for doc, arities := range per {
+		for _, want := range []paramArity{arityOne, arityMany} {
+			if arities[want] == 0 {
+				bad = append(bad, fmt.Sprintf("  %s: states no %s expansion", doc, want))
+			}
+		}
+	}
+	sort.Strings(bad)
+	if len(bad) == 0 {
+		return
+	}
+	require.Fail(t, "a "+paramListTerm+" bullet states only one of the two arities",
+		"the emitted signature binds codegen.ParamArg at both arities, so a bullet that spells out one and\n"+
+			"leaves the other to prose puts that other one back outside the fence — which is the drift\n"+
+			"gqlc-rz0l corrected, restored one arity at a time:\n"+strings.Join(bad, "\n"))
 }
 
 // requireClean fails with one message naming every offending site, so a
@@ -329,6 +533,17 @@ func TestSpecSigScannerDetectsDrift(t *testing.T) {
 		wantArg: "",
 		wantAny: true,
 	}, {
+		// The same ruling as the row above, and it has to be: the skip
+		// for a whole-list placeholder is a test for `<param-list>`, not
+		// for angle brackets, or the author's own parameter name gets
+		// waved through by wearing the exemption's clothes. A lone
+		// `<bareParam>` is a name standing where a declaration should be,
+		// which is drift on exactly the axis this file grades.
+		name:    "a lone author-named placeholder is not a whole-list placeholder",
+		text:    "func (q *Queries) PersonById(ctx context.Context, <bareParam>) (PersonRow, error)",
+		wantArg: "",
+		wantAny: true,
+	}, {
 		name:    "zero-parameter methods have no argument to grade",
 		text:    "func (q *Queries) AllPeopleNames(ctx context.Context) ([]string, error)",
 		wantAny: false,
@@ -363,6 +578,13 @@ func TestSpecSigScannerDetectsDrift(t *testing.T) {
 	}, {
 		name:    "a whole-list placeholder in parameter position is not graded",
 		text:    "func (q *Queries) <MethodName>(ctx context.Context, <param-list>) (<return>, error) {",
+		wantAny: false,
+	}, {
+		// The spelling the interface blocks use when they show two
+		// members at once, which a reflow can move into the position
+		// above. It stands for a whole list on the same terms.
+		name:    "the numbered whole-list placeholder is the same exemption",
+		text:    "    <MethodName1>(ctx context.Context, <param-list-1>) (<return-1>, error)",
 		wantAny: false,
 	}, {
 		// The blocker gqlc-rz0l's first fence let through: a
@@ -440,6 +662,140 @@ func TestSpecParamListRuleScannerDetectsDrift(t *testing.T) {
 				got = append(got, sig.arg)
 			}
 			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestSpecParamListRuleStatesBothArities is the witness for the arity
+// the bullet scanner reads off each expansion it grades.
+//
+// The sweep requires every graded bullet to state both arities, because
+// a bullet that states one and leaves the other to prose leaves that
+// other one where nothing reads it — which is how C1 §5.3 came to
+// specify the capture vector for the single-parameter form while the
+// two-plus form was correct beside it. That requirement is only worth
+// anything if the two arities are actually told apart, and they are told
+// apart in the type position: a placeholder standing alone is the
+// parameter's own Go type, a placeholder with the generated suffix
+// concatenated on is the Params struct.
+func TestSpecParamListRuleStatesBothArities(t *testing.T) {
+	bullet := func(body string) string {
+		return "- " + paramListTerm + " " + body + "\n- **`<return>`** — the return type.\n"
+	}
+	for _, tc := range []struct {
+		name string
+		text string
+		want []paramArity
+	}{{
+		name: "c1 §5.3 states both",
+		text: bullet("— empty if zero parameters, `, arg <T>` if one\n" +
+			"  parameter, `, arg <MethodName>Params` if two-plus."),
+		want: []paramArity{arityOne, arityMany},
+	}, {
+		name: "c4 §5.5 states both, in its own words",
+		text: bullet("— the C1 rule: empty (zero parameters),\n" +
+			"  `, arg <T>` (one parameter), or `, arg <MethodName>Params`\n" +
+			"  (two-plus)."),
+		want: []paramArity{arityOne, arityMany},
+	}, {
+		// The revert this bead exists for, restored one arity at a time.
+		// One graded span, a satisfied per-document requirement, and the
+		// single-parameter form back in prose where nothing grades it.
+		name: "the single-parameter arity reworked into prose leaves only the other",
+		text: bullet("— empty if zero parameters; for a single parameter it is a\n" +
+			"  comma, the argument name and the parameter's Go type;\n" +
+			"  `, arg <MethodName>Params` if two-plus."),
+		want: []paramArity{arityMany},
+	}, {
+		name: "the two-plus arity reworked into prose leaves only the other",
+		text: bullet("— empty if zero parameters, `, arg <T>` if one parameter,\n" +
+			"  and the generated Params struct if two-plus."),
+		want: []paramArity{arityOne},
+	}, {
+		// A concrete type is not a placeholder, so a bullet illustrating
+		// the single-parameter form with a real type reads as the
+		// two-plus one. That is the discriminator's edge, and it fails
+		// towards a red arity requirement rather than a green one.
+		name: "a concrete type in the single-parameter form reads as the generated one",
+		text: bullet("— `, arg int64` if one parameter."),
+		want: []paramArity{arityMany},
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []paramArity
+			for _, sig := range scanParamListRules("witness.md", tc.text) {
+				got = append(got, arityOf(sig.typ))
+			}
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+// TestSpecRequiredDocsDeriveFromTheDocuments is the witness for which
+// documents each sweep is answerable to.
+//
+// That used to be three slices of filenames, and a slice of filenames is
+// a mirror: the reviewer deleted one entry, gutted the document it
+// named, and the fence was green over the drift it exists to catch. The
+// markers below replace it, so the rows are the discriminations they
+// have to make — a query method against the seam that shares its context
+// prefix, a template that prints the placeholder against one that prints
+// a list — because a marker that matched everything would require every
+// document to be graded and a marker that matched nothing would require
+// none of them.
+func TestSpecRequiredDocsDeriveFromTheDocuments(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		text       string
+		wantMethod bool
+		wantList   bool
+	}{{
+		name:       "a query method taking one argument owes a graded signature",
+		text:       "func (q *Queries) PersonById(ctx context.Context, arg int64) (PersonRow, error)",
+		wantMethod: true,
+	}, {
+		name:       "so does a WriteQuerier member, which has no receiver to anchor on",
+		text:       "    RemovePerson(ctx context.Context, arg int64) error",
+		wantMethod: true,
+	}, {
+		// The marker has to stay coarser than the grade, or it vanishes
+		// with the answer: a signature the scanner cannot read is exactly
+		// the case the requirement exists for.
+		name:       "a signature grown a third parameter still owes one",
+		text:       "func (q *Queries) GetAction(ctx context.Context, arg int64, opts QueryOpts) (GetActionR, error)",
+		wantMethod: true,
+	}, {
+		name: "the driverOrTx.run seam is not a query method and owes nothing",
+		text: "func (d driverDB) run(ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode) error {",
+	}, {
+		name: "nor is an anonymous handler quoted in a testing doc",
+		text: "godog step handler (`func(ctx context.Context, sigText string, _ int) error`)",
+	}, {
+		name: "a zero-parameter method has no argument, so it owes no graded one",
+		text: "func (q *Queries) AllPeopleNames(ctx context.Context) ([]string, error)",
+	}, {
+		name:     "a template printing the placeholder owes the bullet that expands it",
+		text:     "func (q *Queries) <MethodName>(ctx context.Context<param-list>) (<return>, error) {",
+		wantList: true,
+	}, {
+		name:     "the write template owes it on the same terms",
+		text:     "func (q *Queries) <MethodName>(ctx context.Context<param-list>) error {",
+		wantList: true,
+	}, {
+		// Deleting the placeholder is the only way out of the bullet's
+		// requirement, and it forces a real parameter list into the
+		// template — which the other marker then picks up.
+		name:       "a template that prints a list instead owes a signature rather than a bullet",
+		text:       "func (q *Queries) <MethodName>(ctx context.Context, arg <T>) (<return>, error) {",
+		wantMethod: true,
+	}, {
+		name: "citing the placeholder in prose is not printing it in a template",
+		text: "The `<param-list>` placeholder is described in C1 §5.3.",
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.wantMethod, queryMethodAnchorRe.MatchString(tc.text),
+				"queryMethodAnchorRe")
+			require.Equal(t, tc.wantList, paramListAnchorRe.MatchString(tc.text),
+				"paramListAnchorRe")
 		})
 	}
 }
@@ -591,11 +947,11 @@ func scanSpecSigs(file, text string) (sigs, unclosed []specSig) {
 		if len(params) != 2 {
 			continue
 		}
-		name, gradable := paramName(params[1])
+		name, typ, gradable := paramName(params[1])
 		if !gradable {
 			continue
 		}
-		site.arg = name
+		site.arg, site.typ = name, typ
 		sigs = append(sigs, site)
 	}
 	return sigs, unclosed
@@ -641,7 +997,7 @@ func scanParamListRules(file, text string) []specSig {
 			if len(params) != 2 {
 				continue
 			}
-			name, gradable := paramName(params[1])
+			name, typ, gradable := paramName(params[1])
 			if !gradable {
 				continue
 			}
@@ -649,6 +1005,7 @@ func scanParamListRules(file, text string) []specSig {
 				file: file,
 				line: 1 + strings.Count(text[:code.at], "\n"),
 				arg:  name,
+				typ:  typ,
 				text: strings.TrimSpace(collapse(lineAt(text, code.at))),
 			})
 		}
@@ -807,8 +1164,9 @@ func splitTopLevel(list string) []string {
 	return out
 }
 
-// paramName is the identifier a parameter declaration binds, together
-// with whether the declaration is one this fence can grade at all.
+// paramName is the identifier a parameter declaration binds and the type
+// it binds it at, together with whether the declaration is one this
+// fence can grade at all.
 //
 // A declaration is a name position and a type position, and only the
 // name is the subject here, so the two are decided separately. Two
@@ -816,35 +1174,63 @@ func splitTopLevel(list string) []string {
 // says, which is what makes `arg <T>` and `arg <MethodName>Params` pass
 // on their name while `<bareParam> <T>` — the capture vector gqlc-lhs3
 // removed from the emitter — fails on its. A placeholder in the type
-// position is not an exemption for the name beside it.
+// position is not an exemption for the name beside it; it is where the
+// arity is read from instead (arityOf).
 //
 // One token is a type with no name, which is drift in its own right: a
-// documented signature that names no argument is not the one the
-// emitter writes.
+// documented signature that names no argument is not the one the emitter
+// writes. Go's grammar would read that lone token as a type and call the
+// parameter legitimately unnamed, and this fence deliberately does not,
+// because the emitter names the argument at every arity. That ruling is
+// applied whole: a lone `<bareParam>` is not a type either — it is the
+// author's name standing where a whole declaration should be — so it is
+// graded on the same arm as a lone `int64` rather than waved through for
+// wearing angle brackets.
 //
-// The one ungradable form is a single token that is itself a whole
-// placeholder — `<param-list>`, which stands for the entire list rather
-// than for one declaration and so has no name position to read. What
-// that placeholder expands to is graded where the documents say it,
-// in the `<param-list>` bullet (scanParamListRules).
-func paramName(param string) (name string, gradable bool) {
+// The one ungradable form is a single token that stands for the entire
+// list rather than for one declaration, and so has no name position to
+// read at all. Those tokens are named (listPlaceholderRe), not matched
+// by shape: `<param-list>` is one, `<bareParam>` is not, and a shape test
+// cannot tell them apart. What `<param-list>` expands to is graded where
+// the documents say it, in the `<param-list>` bullet
+// (scanParamListRules).
+func paramName(param string) (name, typ string, gradable bool) {
 	fields := strings.Fields(param)
 	switch {
 	case len(fields) == 0:
-		return "", false
-	case len(fields) == 1 && isWholePlaceholder(fields[0]):
-		return "", false
+		return "", "", false
+	case len(fields) == 1 && listPlaceholderRe.MatchString(fields[0]):
+		return "", "", false
 	case len(fields) == 1:
-		return "", true
+		return "", fields[0], true
 	default:
-		return fields[0], true
+		return fields[0], strings.Join(fields[1:], " "), true
 	}
 }
 
+// listPlaceholderRe matches the placeholders that stand for a whole
+// parameter list: `<param-list>` and the numbered `<param-list-1>` form
+// the interface blocks print when they show two members at once. Built
+// from paramListPlaceholder so the exemption and the term the bullet
+// scanner reads cannot drift apart.
+//
+// Deliberately an enumeration rather than a test for `<…>`. A generic
+// placeholder test cannot tell `<param-list>`, which stands for a list,
+// from `<bareParam>`, which stands for the query author's parameter
+// name — and exempting the second is the drift this whole file exists to
+// catch, wearing the first one's clothes.
+var listPlaceholderRe = regexp.MustCompile(
+	`^` + regexp.QuoteMeta(strings.TrimSuffix(paramListPlaceholder, ">")) + `(-\d+)?>$`)
+
 // isWholePlaceholder reports whether a token is a spec placeholder in
-// its entirety, as `<param-list>` is. `<MethodName>Params` is not one:
-// it is a type built around a placeholder, and it sits in the type
-// position beside a name the fence does grade.
+// its entirety, as `<T>` is. `<MethodName>Params` is not one: it is a
+// generated type built around a placeholder.
+//
+// This test used to sit in the name position, where it waved `<bareParam>`
+// through as if a name in angle brackets were not a name — the round-1
+// blocker. In the type position it is the arity: the difference between
+// a placeholder standing alone and a placeholder with a generated suffix
+// on it is the difference between the two documented arities (arityOf).
 func isWholePlaceholder(token string) bool {
 	return len(token) > 2 && strings.HasPrefix(token, "<") && strings.HasSuffix(token, ">")
 }
