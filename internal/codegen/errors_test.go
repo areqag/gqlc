@@ -146,7 +146,7 @@ type SentinelTaxonomySuite struct {
 	// corpusCov memoises the corpus coverage sweep. Three tests read it
 	// and it is the expensive part of this suite.
 	corpusCov coverCounts
-	// corpusCmd, corpusErr and corpusStderr are how the sweep's own `go
+	// corpusCmd, corpusErr and corpusOutput are how the sweep's own `go
 	// test` exited, held rather than asserted where it ran.
 	//
 	// A mutation that moves a branch usually breaks a golden too — the
@@ -158,9 +158,17 @@ type SentinelTaxonomySuite struct {
 	// TestCorpusRunsGreen reports this. `go test -coverprofile` writes the
 	// profile for every binary that ran regardless of the verdict, which
 	// is what makes the order available.
+	//
+	// corpusOutput is both streams. `go test` writes a failing package's
+	// FAIL detail — the assertion, the message, the trace — to stdout and
+	// keeps stderr for the toolchain's own errors, so a report built from
+	// stderr alone says `exit status 1` and nothing else on exactly the
+	// run a reader needs it. That cost was paid: the TemporalCount
+	// derivation failure arrived as an empty stderr and had to be
+	// rediscovered by running the corpus by hand.
 	corpusCmd    string
 	corpusErr    error
-	corpusStderr string
+	corpusOutput string
 }
 
 func TestSentinelTaxonomy(t *testing.T) {
@@ -606,7 +614,9 @@ func (s *SentinelTaxonomySuite) corpusCoverage() coverCounts {
 	args := []string{"test", "-count=1", "-covermode=set", "-coverpkg=" + codegenPkgPath, "-coverprofile=" + profile}
 	args = append(args, pkgs...)
 	s.corpusCmd = "go " + strings.Join(args, " ")
-	_, s.corpusStderr, s.corpusErr = s.goCmd(args...)
+	stdout, stderr, err := s.goCmd(args...)
+	s.corpusErr = err
+	s.corpusOutput = strings.TrimSpace(stdout + "\n" + stderr)
 
 	// The verdict is TestCorpusRunsGreen's to report. What is fatal here
 	// is a run that produced nothing to measure: without a profile the two
@@ -614,7 +624,7 @@ func (s *SentinelTaxonomySuite) corpusCoverage() coverCounts {
 	// otherwise read is the value that means "unreached".
 	src, err := os.ReadFile(profile) //nolint:gosec // path built from t.TempDir
 	if err != nil {
-		s.Require().NoError(s.corpusErr, "%s failed before it wrote a profile: %s", s.corpusCmd, s.corpusStderr)
+		s.Require().NoError(s.corpusErr, "%s failed before it wrote a profile:\n%s", s.corpusCmd, s.corpusOutput)
 	}
 	s.Require().NoError(err, "%s left no coverage profile behind", s.corpusCmd)
 
@@ -634,14 +644,14 @@ func (s *SentinelTaxonomySuite) corpusCoverage() coverCounts {
 		}
 		counts[block] += s.atoi(m[7])
 	}
-	s.Require().NotEmpty(counts, "the corpus coverage profile written by %s is empty; the measurement behind %s would pass vacuously. The run exited %v: %s", s.corpusCmd, unreachedHeading, s.corpusErr, s.corpusStderr)
+	s.Require().NotEmpty(counts, "the corpus coverage profile written by %s is empty; the measurement behind %s would pass vacuously. The run exited %v:\n%s", s.corpusCmd, unreachedHeading, s.corpusErr, s.corpusOutput)
 	s.corpusCov = counts
 	return counts
 }
 
 // TestCorpusRunsGreen reports the exit status corpusCoverage deliberately
 // swallows, so a corpus that fails for a reason no fail-site explains is
-// still a red suite and still names the command and its stderr.
+// still a red suite and still names the command and what the run said.
 //
 // It is also what keeps the swallow honest in the direction that matters.
 // A corpus that fails early — a package that will not build, a suite that
@@ -649,11 +659,23 @@ func (s *SentinelTaxonomySuite) corpusCoverage() coverCounts {
 // because nothing ran them, and TestUnreachedBranchesAreUnreached asserts
 // exactly that they are unreached. It would pass on the evidence of an
 // absence, and this is the only thing that notices.
+//
+// The second assertion is a tripwire on the first one's diagnostic. A
+// report is only exercised on the run that fails, which is the run nobody
+// is watching it on, so its input is checked on every run instead: a
+// green sweep writes one `ok <package>` line per package to stdout, so a
+// report that carries the sweep's output at all names the corpus's
+// packages, and one that reads stderr alone is empty here. That is the
+// same edit that reduces a failing sweep to `exit status 1`, and it has
+// been made before.
 func (s *SentinelTaxonomySuite) TestCorpusRunsGreen() {
 	s.corpusCoverage()
 	s.Require().NoError(s.corpusErr,
 		"the corpus sweep failed, so the coverage the two branch measurements read was taken from a run that did not pass. A tagged branch reads as unreached when the binary that would have reached it never ran, so this has to be green before %s %s means anything.\n%s\n%s",
-		taxonomyDoc, unreachedHeading, s.corpusCmd, s.corpusStderr)
+		taxonomyDoc, unreachedHeading, s.corpusCmd, s.corpusOutput)
+	s.Require().Contains(s.corpusOutput, conformancePkgPath,
+		"the corpus sweep passed and its own output reached this report without naming %s, which it ran; `go test` writes a package's verdict — and a failing package's whole FAIL detail — to stdout and keeps stderr for the toolchain's own errors, so a report assembled from stderr alone is empty on exactly the run a reader needs it and says no more than the exit status",
+		conformancePkgPath)
 }
 
 // atoi reads one numeric field of a coverage profile. A malformed field
