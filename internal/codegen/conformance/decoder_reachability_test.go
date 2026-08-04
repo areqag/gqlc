@@ -408,15 +408,21 @@ func (s *ConformanceSuite) TestMultiLabelSchemaPostureIsRecorded() {
 			in := codegen.Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
 			for _, target := range targets {
 				_, emits := s.emitOrRefuse(target, in)
-				if emits {
-					emitting++
-				}
 				s.Require().Equal(multiLabelEmittingTargets[target], emits,
 					"%s %s fixture %s, which declares %s; the posture ledger records that it %s such a schema. "+
 						"A backend that emits for one owes a decoder whose label guard some value it can stamp "+
 						"satisfies, which is what TestEmittedDecodersGuardOnlyOnStampableLabels then holds it to",
 					target, verdict(emits), fixture, strings.Join(offenders, " and "),
 					verdict(multiLabelEmittingTargets[target]))
+				// Counted after the ledger has been held to it, not
+				// before. An emission the ledger refuses is a red, and
+				// counting it first would let it satisfy the "some
+				// emission for this shape was read" floor below on its
+				// way past — the floor would be reporting an emission
+				// this test has already ruled illegitimate.
+				if emits {
+					emitting++
+				}
 			}
 		})
 	}
