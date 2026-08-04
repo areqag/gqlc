@@ -3,6 +3,7 @@ package resolver
 import (
 	"fmt"
 
+	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/procsig"
 	"github.com/areqag/gqlc/internal/query"
 	"github.com/areqag/gqlc/internal/schema"
@@ -314,7 +315,125 @@ func (s *scope) CloseEdges(sch schema.Schema) error {
 			return err
 		}
 	}
+	s.NarrowPluralEndpoints(sch)
 	return nil
+}
+
+// NarrowPluralEndpoints is the second half of Phase C. Closing an edge commits
+// a candidate set, and every member of that set names a node type on each of
+// the pattern's two ends — so the ends are constrained by the closure whether
+// or not the binding at one of them was written with a label. R3 §4.5.2 already
+// applies that constraint to unlabelled bindings in Phase B; this applies the
+// same rule to a labelled binding that plural label satisfaction (ADR 0022)
+// left with several candidate types, which Phase B skips precisely because it
+// is already bound.
+//
+// The rule is: per touching edge, UNION the contributions of the candidate
+// set's two readings (endpointContribution); across touching edges, INTERSECT.
+// The two operations are not interchangeable and the order is not free — see
+// endpointContribution for why an undirected candidate set puts one end of the
+// pattern on both sides, and why taking a single reading loses a type the
+// schema permits.
+//
+// An empty intersection leaves the binding alone. It means the touching edges
+// pin it to disjoint types, so no node satisfies all of them and the pattern
+// matches nothing — a fact about which rows come back, not about which types
+// the projection can name. Refusing there would narrow a query the resolver
+// accepts today with no soundness case behind it (ADR 0006), so the pre-closure
+// satisfying set stands and ADR 0022's own verdicts run on it unchanged.
+//
+// Contributions are computed from one snapshot of the binding tables and
+// applied afterwards, so no binding's narrowing can depend on another's, and
+// the map walks below are order-independent. Edges are NOT re-closed against
+// the narrowed tables: a narrowed endpoint slice re-classifies the readings of
+// candidates that previously read both ways, which can manufacture an
+// orientation disagreement where the pre-narrowing close found none — a
+// narrowing of accepted queries reached from a widening, which is the one
+// direction this change must not move in.
+func (s *scope) NarrowPluralEndpoints(sch schema.Schema) {
+	if len(s.nodeCands) == 0 {
+		return
+	}
+	acc := make(map[string]map[graph.LabelSetKey]struct{}, len(s.nodeCands))
+	for _, b := range s.bindings {
+		e, ok := b.(query.EdgeBinding)
+		if !ok {
+			continue
+		}
+		srcs, srcOK := endpointLabels(e.Source(), s.nodeTypes, s.nodeCands)
+		tgts, tgtOK := endpointLabels(e.Target(), s.nodeTypes, s.nodeCands)
+		if !srcOK || !tgtOK {
+			// Unreachable: CloseEdges either resolved both ends or returned
+			// ErrUnknownLabel, and this runs after it.
+			continue
+		}
+		cands := edgeCandidates(e, srcs, tgts, sch)
+		if len(cands) == 0 {
+			// Unreachable: closeEdge refuses the empty set (§4.6 case A).
+			continue
+		}
+		// Per-edge contributions first, so a binding sitting at BOTH ends of
+		// one edge — a self-loop written on a single variable — unions its two
+		// ends rather than intersecting them.
+		//
+		// No input can tell that union from an intersection, and that is a
+		// property of the shape rather than a gap in the corpus: a variable
+		// reaches both ends only by naming both, and endpointLabels then hands
+		// both ends the same key slice, which makes a candidate's two readings
+		// the same predicate and both ends' contributions the same set —
+		// TestEndpointContributionUnionsTheTwoReadings' equal-slices row states
+		// that directly. The union is written because it is the rule, not
+		// because an input needs it.
+		perEdge := make(map[string]map[graph.LabelSetKey]struct{}, 2)
+		for _, side := range [2]struct {
+			ep  query.Endpoint
+			end patternEnd
+		}{{e.Source(), patternLeft}, {e.Target(), patternRight}} {
+			ve, isVar := side.ep.(query.VarEndpoint)
+			if !isVar {
+				continue
+			}
+			v := ve.Variable()
+			if _, plural := s.nodeCands[v]; !plural {
+				continue
+			}
+			contrib := endpointContribution(cands, srcs, tgts, side.end)
+			if prev, seen := perEdge[v]; seen {
+				for k := range prev {
+					contrib[k] = struct{}{}
+				}
+			}
+			perEdge[v] = contrib
+		}
+		for v, contrib := range perEdge {
+			if prev, seen := acc[v]; seen {
+				acc[v] = intersect(prev, contrib)
+				continue
+			}
+			acc[v] = contrib
+		}
+	}
+	for v, keep := range acc {
+		cands := s.nodeCands[v]
+		narrowed := make([]schema.NodeType, 0, len(cands))
+		for _, nt := range cands {
+			if _, ok := keep[nt.KeyLabels]; ok {
+				narrowed = append(narrowed, nt)
+			}
+		}
+		switch {
+		case len(narrowed) == 0 || len(narrowed) == len(cands):
+			// Nothing learned, or nothing left to learn from.
+		case len(narrowed) == 1:
+			// Determined. The binding leaves the plural lane entirely, so
+			// whole-entity projection and every singular-type property lookup
+			// see the type the closure pinned.
+			s.nodeTypes[v] = narrowed[0]
+			delete(s.nodeCands, v)
+		default:
+			s.nodeCands[v] = narrowed
+		}
+	}
 }
 
 // InferUnlabelled runs Phase B against s.bindings' pending unlabelled

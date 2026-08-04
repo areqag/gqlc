@@ -60,3 +60,14 @@ disambiguation syntax) is non-breaking; shipping the unsound code is not.
 - Edge endpoint resolution becomes a cross-product over the satisfying node
   type sets of both endpoints. Schemas are small; naive iteration is deliberate
   (see `labelDeclared`'s comment).
+
+> **Amendment (2026-08-04, gqlc-0tft).** "Plural" is decided after edge
+> closure, not at label satisfaction. Closing an edge names a node type on each
+> end of the pattern, so a binding at one of those ends is narrowed by the
+> closure the same way an unlabelled one is by Phase B — union across the
+> candidate set's two readings per touching edge, intersect across touching
+> edges (resolver R3 spec §4.6.2). Where that leaves one type the binding is
+> singular and this ADR's whole-entity refusal does not fire; where it leaves
+> several, or where the intersection is empty, every verdict above stands
+> unchanged on the surviving set. The relaxation this ADR names as non-breaking
+> is the direction taken here: no query this ADR accepted is refused.

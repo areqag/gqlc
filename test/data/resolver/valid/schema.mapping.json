@@ -173,6 +173,7 @@
     "undirected_self_loop_single_label.cypher": "social_r3.gql",
     "undirected_self_loop_edge_union.cypher": "social_selfloop.gql",
     "plural_endpoint_undirected_closes_singular.cypher": "satisfy_plural_edges.gql",
+    "plural_endpoint_whole_entity_after_edge_closure.cypher": "satisfy_plural_edges.gql",
     "plural_endpoint_undirected_edge_union.cypher": "satisfy_plural_edges.gql",
     "plural_endpoint_directed_edge_union.cypher": "satisfy_plural_edges.gql",
     "plural_endpoint_reversed_subtype_directed_closes_singular.cypher": "satisfy_plural_edges_reversed_subtype.gql",

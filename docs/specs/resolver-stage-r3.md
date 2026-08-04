@@ -829,6 +829,67 @@ double-match arm: the fixture uses a schema that authors both
 orientations and an undirected query pattern between them; the golden
 is the `ErrAmbiguousEdgeOrientation` sentinel path.
 
+#### 4.6.2 Narrowing a plural endpoint the closure pins (gqlc-0tft)
+
+Committing a candidate set is also an answer about the pattern's two
+**ends**: every candidate names a node type on each of them. Under ADR
+0022 a labelled binding whose label expression several declared types
+satisfy binds plural, and Phase B skips it — it is already bound, so
+§4.5's inference never runs on it. Until gqlc-0tft nothing else did
+either: `closeEdge` wrote the edge lanes and left the binding plural, so
+`MATCH (p:Person)-[r:WORKS_AT]-(c:Company) RETURN p` was refused with
+`ErrAmbiguousLabel` on a schema declaring exactly one `WORKS_AT`, from
+`Employee&Person`. The refusal was safe and false: `p` cannot be the
+bare `Person` type.
+
+After every edge has closed, each plural binding's candidate set is
+intersected with what the closure says about it.
+
+**Per touching edge, union across the candidate set's two readings.**
+For a binding at one end of edge `e` with committed set `C`, the
+contribution is, over every `k ∈ C`: `k`'s near end when `k` reads
+left-to-right, *and* `k`'s far end when `k` reads right-to-left — the
+same two readings §4.6 classifies candidates by. Both can hold of one
+key. An undirected close probes both orientations, so `C` can put one
+end of the pattern on the `Source` of some candidates and the `Target`
+of others; taking a single reading, or intersecting the two, drops a
+node type the schema permits there. The mixed-symmetry schema is the
+witness: `Manager&Person&Staff-[MENTORS]->Engineer&Person&Staff` reads
+both ways and `Person-[MENTORS]->Engineer&Person&Staff` reads
+right-to-left only, so either reading alone narrows both ends of
+`(a:Staff)-[r:MENTORS]-(b:Person)` to a wrong singleton.
+
+**Across touching edges, intersect.** The same fold §4.5.3 applies to
+unlabelled bindings. A singleton commits the binding to `nodeTypes` and
+it leaves the plural lane entirely; a smaller plural set replaces the
+old one; the full set changes nothing.
+
+**An empty intersection leaves the binding alone.** It means the
+touching edges pin it to disjoint types, so no node satisfies all of
+them and the pattern matches no row. That is a fact about which rows
+come back, not about which types the projection can name, and refusing
+would narrow a query gqlc accepts today with no soundness case behind
+it (ADR 0006). The pre-closure satisfying set stands and ADR 0022's own
+verdicts — property intersection, whole-entity refusal — run on it
+unchanged. Corpus:
+`invalid/plural_endpoint_contradictory_edges_stay_plural`.
+
+**Edges are not re-closed against the narrowed tables.** Narrowing an
+endpoint slice re-classifies the readings of candidates that previously
+read both ways, which can manufacture a §4.6 case C disagreement where
+the pre-narrowing close found none. A widening must not reach a
+narrowing that way, so the pass runs once, from one snapshot of the
+binding tables, and every contribution is computed before any is
+applied. A committed edge union may therefore keep a member whose
+endpoint type the narrowing has since ruled out — wider than necessary,
+which is the safe direction, and the same posture §4.5.2's per-edge
+union takes.
+
+This is a widening: it accepts queries R3 refused and refuses nothing
+it accepted. The fixture that pinned the old answer,
+`plural_endpoint_whole_entity_after_edge_closure`, moves from
+`invalid/` to `valid/`.
+
 ### 4.7 Projection walk — hops-axis and multiplicity dispatch
 
 The projection walk (R2 §4.2) is unchanged in outer shape: iterate

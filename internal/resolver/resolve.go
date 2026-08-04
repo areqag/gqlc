@@ -757,15 +757,9 @@ func orientationDisagreement(cands []schema.EdgeKey, srcs, tgts []graph.LabelSet
 		fwd, rev       schema.EdgeKey
 		hasFwd, hasRev bool
 	}
-	readsFwd := func(k schema.EdgeKey) bool {
-		return slices.Contains(srcs, k.Source) && slices.Contains(tgts, k.Target)
-	}
-	readsRev := func(k schema.EdgeKey) bool {
-		return slices.Contains(tgts, k.Source) && slices.Contains(srcs, k.Target)
-	}
 	byLabel := make(map[graph.LabelSetKey]*sides, len(cands))
 	for _, k := range cands {
-		l2r, r2l := readsFwd(k), readsRev(k)
+		l2r, r2l := readsLeftToRight(k, srcs, tgts), readsRightToLeft(k, srcs, tgts)
 		// Equal means either both readings hold (no orientation signal) or
 		// neither, which edgeProbes cannot produce — every candidate comes from
 		// an (src, tgt) pair drawn from the two slices in one order or the other.
@@ -788,6 +782,76 @@ func orientationDisagreement(cands []schema.EdgeKey, srcs, tgts []graph.LabelSet
 		}
 	}
 	return schema.EdgeKey{}, schema.EdgeKey{}, false
+}
+
+// readsLeftToRight and readsRightToLeft are a candidate's two readings against
+// the endpoint key slices the pattern put on the left (srcs) and the right
+// (tgts). Each is a claim about BOTH the candidate's ends: a key reads
+// left-to-right when its Source is a type the pattern admits on the left and
+// its Target one it admits on the right, and right-to-left when the same holds
+// with the slices exchanged. Both can be true of one key, and on a directed
+// close only the left-to-right reading was ever probed.
+//
+// Package-level rather than closures inside orientationDisagreement because the
+// endpoint narrowing asks the same question of the same candidate set and must
+// get the same answer: whether a candidate's Source or its Target is the type
+// this end of the pattern gets is exactly which reading it is.
+func readsLeftToRight(k schema.EdgeKey, srcs, tgts []graph.LabelSetKey) bool {
+	return slices.Contains(srcs, k.Source) && slices.Contains(tgts, k.Target)
+}
+
+func readsRightToLeft(k schema.EdgeKey, srcs, tgts []graph.LabelSetKey) bool {
+	return slices.Contains(tgts, k.Source) && slices.Contains(srcs, k.Target)
+}
+
+// patternEnd names which end of a pattern a contribution is being computed for.
+// The two ends read the same candidate from opposite sides, so this is the only
+// thing that differs between them.
+type patternEnd bool
+
+const (
+	patternLeft  patternEnd = true
+	patternRight patternEnd = false
+)
+
+// endpointContribution is the set of node types a committed candidate set puts
+// on ONE end of the pattern — the per-edge contribution the endpoint narrowing
+// intersects across touching edges, and the direct analogue of R3 §4.5.2's
+// per-edge contribution for unlabelled bindings.
+//
+// A candidate contributes through each reading it has, and the contribution is
+// the UNION of them. That is the whole subtlety: an undirected close probes both
+// orientations, so one candidate set can put this end of the pattern on the
+// Source of some candidates and on the Target of others, and a set can even hold
+// a candidate that reads both ways alongside candidates that read one way.
+// Taking a single reading — or intersecting the two — narrows away a node type
+// the schema permits at this end, which the caller would then commit as a
+// refusal or as the wrong type.
+//
+// Every element of the result is drawn from the slice this end contributed to
+// the probe, because a reading is a claim about both of the candidate's ends and
+// every candidate was probed from those two slices. So a single edge can never
+// empty the set it is intersected into, and the narrowing is a refinement of
+// label satisfaction rather than an independent answer.
+func endpointContribution(cands []schema.EdgeKey, srcs, tgts []graph.LabelSetKey, end patternEnd) map[graph.LabelSetKey]struct{} {
+	out := make(map[graph.LabelSetKey]struct{}, len(cands))
+	for _, k := range cands {
+		if readsLeftToRight(k, srcs, tgts) {
+			if end == patternLeft {
+				out[k.Source] = struct{}{}
+			} else {
+				out[k.Target] = struct{}{}
+			}
+		}
+		if readsRightToLeft(k, srcs, tgts) {
+			if end == patternLeft {
+				out[k.Target] = struct{}{}
+			} else {
+				out[k.Source] = struct{}{}
+			}
+		}
+	}
+	return out
 }
 
 // describeTriedEdges is ErrUnknownEdge's fail-message body: every EdgeKey
