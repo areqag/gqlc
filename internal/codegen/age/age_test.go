@@ -396,6 +396,10 @@ func (s *EmissionSuite) TestRejectsEdgeUnionColumns() {
 		s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
 		s.Require().NotContains(err.Error(), "alternation",
 			"the pattern that produces a shared-label union names one relationship type and spells no '|'")
+		s.Require().NotContains(err.Error(), "which the Apache AGE backend has no carrier for",
+			"standing aside means letting the portable answer through unaltered: this backend's name is "+
+				"added to a width or a temporal kind, which are its own type table's answers, and a "+
+				"repeated label is not — attributing it here would send the author to change targets")
 	})
 
 	s.Run("a duplicate label stands the gate aside even among distinct ones", func() {
@@ -673,6 +677,100 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 		s.Require().ErrorContains(err, `Tagged (column "tags" projects a list property)`)
 	})
 
+	s.Run("an unserved parameter yields to the text", func() {
+		// The same yield on the OTHER axis unservedReason reads. It
+		// answers the columns first and the parameters after, on a
+		// separate return, so a query whose every column is served
+		// reaches a different decision from the row above and one arm
+		// cannot stand in for the other. A list parameter is a list
+		// property's defect one step along: still a projection to
+		// change, still not the reason the statement never parsed.
+		listParam := resolver.ResolvedParameter{
+			Name: "ids", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeInt, true)},
+		}
+		byTags := func(sourceText string) codegen.NamedQuery {
+			q := alternationQuery("ByTags", sourceText, scalarColumn("p.id", graph.TypeInt))
+			q.Validated.Parameters = []resolver.ResolvedParameter{listParam}
+			return q
+		}
+
+		batch := in
+		batch.Queries = []codegen.NamedQuery{byTags(
+			"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) WHERE p.id IN $ids RETURN p.id\n")}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrRelationshipTypeAlternation,
+			"the alternation is the obstacle underneath: the statement has to be rewritten before the argument can be put to this server at all")
+		s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
+		s.Require().EqualError(err, wantAlternationRefusal(1, "query", `ByTags (":AUTHORED|LIKES")`))
+
+		// The discriminator. Without the '|' the very same parameter is
+		// still unserved and the column gate still owns it, so what
+		// moved above is the ordering and not the parameter arm.
+		batch.Queries = []codegen.NamedQuery{byTags(
+			"MATCH (:Person)-[r:AUTHORED]->(p:Post) WHERE p.id IN $ids RETURN p.id\n")}
+		files, err = age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrUnsupportedQuery)
+		s.Require().NotErrorIs(err, age.ErrRelationshipTypeAlternation)
+		s.Require().ErrorContains(err, `ByTags (parameter $ids is a list)`)
+	})
+
+	s.Run("an edge-union column outranks an unserved parameter", func() {
+		// The precedence BETWEEN the two axes unservedReason reads, which
+		// is what its loop order decides and nothing else pins. The chain
+		// is: an edge-union column, then the text, then every other
+		// unserved reason. The column is first because it answers the
+		// SAME defect the text does and names the candidates the schema
+		// declares for the pattern; a parameter answers a different one
+		// and yields (the subtest above). So a query carrying both must
+		// report the column.
+		//
+		// Reading the parameters first inverts that. The parameter arm
+		// reports edgeUnion=false, so the query yields to the text and
+		// the author is handed the alternation quoted back where a list
+		// of candidates was available — strictly less about the very same
+		// fix, which is the one trade the exception to the yield exists
+		// to avoid making.
+		listParam := resolver.ResolvedParameter{
+			Name: "ids", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeInt, true)},
+		}
+		bothAxes := func(sourceText string) codegen.NamedQuery {
+			q := alternationQuery("ActionsByID", sourceText,
+				resolver.Column{Name: "r", Type: twoCandidateEdgeUnion})
+			q.Validated.Parameters = []resolver.ResolvedParameter{listParam}
+			return q
+		}
+		wantColumn := `ActionsByID (column "r" ` + wantEdgeUnionReason("AUTHORED and LIKES") + `)`
+
+		batch := in
+		batch.Queries = []codegen.NamedQuery{bothAxes(
+			"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) WHERE p.id IN $ids RETURN r\n")}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrUnsupportedQuery,
+			"the edge-union column outranks both the parameter and the text, so neither can take the answer from it")
+		s.Require().NotErrorIs(err, age.ErrRelationshipTypeAlternation)
+		s.Require().ErrorContains(err, wantColumn)
+		s.Require().NotContains(err.Error(), "parameter $ids")
+
+		// The same precedence with the text out of it. Both axes are
+		// still unserved and neither can yield anywhere, so what decides
+		// the message is the loop order alone.
+		batch.Queries = []codegen.NamedQuery{bothAxes(
+			"MATCH (:Person)-[r:AUTHORED]->(p:Post) WHERE p.id IN $ids RETURN r\n")}
+		files, err = age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrUnsupportedQuery)
+		s.Require().ErrorContains(err, wantColumn)
+		s.Require().NotContains(err.Error(), "parameter $ids",
+			"the column is read first, so the parameter is not what this query is told about")
+	})
+
 	s.Run("a sibling the column gate still owns is named in the same run", func() {
 		// Yielding is per query. A batch holding one query the text gate
 		// owns and one the column gate owns must not lose the second: a
@@ -756,6 +854,40 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 	listParam := moved("Batch", func(q *codegen.NamedQuery) {
 		q.Validated.Parameters = []resolver.ResolvedParameter{{
 			Name: "ids", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeInt, true)},
+		}}
+	})
+	// The two arms of unservedParam a list does not reach. Both are read
+	// off the parameter alone, ahead of Prepare, so this gate is the only
+	// thing that can answer them here.
+	//
+	// A parameter that is not a schema property at all is the first: the
+	// encode path builds an agtype argument out of a declared width, so a
+	// shape with no width is a shape it has nothing to build from. Shared
+	// admission is expected to refuse these before emission, which is why
+	// the arm reads as defensive — but this gate runs BEFORE Prepare, so a
+	// batch handed straight to a backend reaches it, and an arm that
+	// answered "" would let such a parameter through to an encode call
+	// with no case for it.
+	nonPropertyParam := moved("Batch", func(q *codegen.NamedQuery) {
+		q.Validated.Parameters = []resolver.ResolvedParameter{{
+			Name: "bag", Type: resolver.ResolvedScalar{Kind: resolver.ScalarMap},
+		}}
+	})
+	// A width outside the type table is the second, on both axes. It is
+	// the same question the shared width sweep asks of the SCHEMA, asked
+	// here of the query — and the two are different queries with different
+	// answers, because a column or an argument can carry a width no
+	// entity's property does. Answering it here is what makes the refusal
+	// name the query rather than send the author to a schema that carries
+	// the width legitimately.
+	wideColumn := moved("Blob", func(q *codegen.NamedQuery) {
+		q.Validated.Columns = []resolver.Column{{
+			Name: "payload", Type: resolver.ResolvedProperty{Type: graph.TypeBytes},
+		}}
+	})
+	wideParam := moved("ByBlob", func(q *codegen.NamedQuery) {
+		q.Validated.Parameters = []resolver.ResolvedParameter{{
+			Name: "payload", Type: resolver.ResolvedProperty{Type: graph.TypeBytes},
 		}}
 	})
 
@@ -853,6 +985,24 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 			name:      "a list parameter is dropped",
 			queries:   []codegen.NamedQuery{listParam},
 			wantSub:   `1 query would be dropped: Batch (parameter $ids is a list)`,
+			wantError: true,
+		},
+		{
+			name:      "a parameter that is not a schema property is dropped",
+			queries:   []codegen.NamedQuery{nonPropertyParam},
+			wantSub:   `1 query would be dropped: Batch (parameter $bag is scalar(map))`,
+			wantError: true,
+		},
+		{
+			name:      "a column whose width has no carrier is dropped, naming the query",
+			queries:   []codegen.NamedQuery{wideColumn},
+			wantSub:   `1 query would be dropped: Blob (column "payload" projects property:BYTES)`,
+			wantError: true,
+		},
+		{
+			name:      "a parameter whose width has no carrier is dropped, naming the query",
+			queries:   []codegen.NamedQuery{wideParam},
+			wantSub:   `1 query would be dropped: ByBlob (parameter $payload is property:BYTES)`,
 			wantError: true,
 		},
 		{

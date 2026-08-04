@@ -230,7 +230,28 @@ func rejectRelationshipTypeAlternation(queries []codegen.NamedQuery) error {
 // rather than off the reason string, because a reason is prose and
 // matching prose would make the gate order turn on the wording.
 // edgeUnionReason returns "" wherever it stands aside, so a non-empty
-// reason from a ResolvedEdgeUnion column can only be its own.
+// reason from a ResolvedEdgeUnion column can only be its own. The
+// parameter arm answers false without asking: a parameter is a schema
+// property or it is nothing this backend encodes, and neither is an edge
+// union, so a reason from that arm is always one the text outranks.
+//
+// The columns are read BEFORE the parameters, and that order is a
+// decision, not a reading order. One reason is reported per query (ADR
+// 0025), so a query unserved on both axes reports one of them — and only
+// the column axis can carry the edge union, the single reason that
+// outranks the text. Reading the parameters first would hand such a query
+// its parameter's reason with edgeUnion=false, which makes the query yield
+// to the text, and the author would get the alternation quoted back where
+// the candidates the schema declares for the pattern were available:
+// strictly less about the very same fix, which is the one trade the
+// exception to the yield exists to avoid. The parameter's reason is not
+// lost, only deferred — it is what the author is told once the column is
+// repaired.
+//
+// Both halves are pinned by what the author is told:
+// TestRejectsRelationshipTypeAlternation's "an edge-union column outranks
+// an unserved parameter" for the order, and "an unserved parameter yields
+// to the text" for the arm's false.
 func unservedReason(q codegen.NamedQuery) (reason string, edgeUnion bool) {
 	for _, col := range q.Validated.Columns {
 		if r := unservedColumn(col.Type); r != "" {

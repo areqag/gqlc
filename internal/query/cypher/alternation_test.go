@@ -1,6 +1,8 @@
 package cypher_test
 
 import (
+	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -188,7 +190,57 @@ func TestRelationshipTypeAlternationsAgreesWithTheParserOnTheAcceptedTexts(t *te
 // answer for. The recovering parser's reading of a broken text is not pinned —
 // only that asking is safe.
 func TestRelationshipTypeAlternationsIsTotal(t *testing.T) {
-	for _, src := range []string{"", "not a query at all", "MATCH (:Person)-[r:A|B]->", "((("} {
+	for _, src := range malformedTexts {
 		require.NotPanics(t, func() { cypher.RelationshipTypeAlternations(src) }, "src %q", src)
+	}
+}
+
+// malformedTexts are texts the grammar cannot read. Being total on them is
+// one requirement and being quiet on them is the other, so the two tests
+// range over the same list.
+//
+// The last two are the ones the LEXER refuses rather than the parser — an
+// unterminated string literal and a character the token vocabulary has no
+// rule for. Every text above them tokenises cleanly and fails only in the
+// parse, so a list without them measures one of the two console listeners
+// and reports on both.
+var malformedTexts = []string{
+	"", "not a query at all", "MATCH (:Person)-[r:A|B]->", "(((",
+	"MATCH (p:Person) RETURN 'unterminated",
+	"MATCH (p:Person) RETURN #",
+}
+
+// TestRelationshipTypeAlternationsWritesNothingToStderr pins the other half
+// of that totality. ANTLR installs a console error listener by default, on
+// the lexer and on the parser alike, and it writes to os.Stderr rather than
+// returning anything — so a scan that left them attached would answer the
+// caller correctly and print a raw grammar diagnostic over the top of
+// whatever `gqlc generate` was saying, from a library function with no
+// output channel of its own and no way for the caller to suppress it.
+//
+// Removing either RemoveErrorListeners call reddens this and nothing else:
+// the answers are unchanged, because ANTLR recovers and walks the tree it
+// built either way, which is exactly why the noise is invisible to every
+// assertion about the return value.
+func TestRelationshipTypeAlternationsWritesNothingToStderr(t *testing.T) {
+	for _, src := range malformedTexts {
+		t.Run(src, func(t *testing.T) {
+			r, w, err := os.Pipe()
+			require.NoError(t, err)
+			saved := os.Stderr
+			os.Stderr = w
+			// Restored before the read: the scan is synchronous and the
+			// pipe buffer holds far more than a grammar diagnostic, so
+			// closing the writer first is what makes the read terminate.
+			cypher.RelationshipTypeAlternations(src)
+			os.Stderr = saved
+			require.NoError(t, w.Close())
+
+			printed, err := io.ReadAll(r)
+			require.NoError(t, err)
+			require.NoError(t, r.Close())
+			require.Empty(t, string(printed),
+				"the scan must answer its caller and say nothing to anyone else")
+		})
 	}
 }

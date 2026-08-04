@@ -34,11 +34,19 @@ import (
 // relationship type. It is also not a walk of query.Query, which is downstream
 // of the merge above and carries only what became a binding.
 //
-// Total by construction: it installs no error listener, so a text the grammar
+// Total by construction: it REMOVES the error listeners, so a text the grammar
 // cannot parse yields whatever the recovering parser built rather than an
 // error the caller has no answer for. That branch is unreachable through the
 // CLI, where the same grammar has already accepted the text (internal/cli/
-// pipeline, frontEndWalk) before any backend sees it. It consults no procedure
+// pipeline, frontEndWalk) before any backend sees it. Removing them is also
+// what keeps this quiet: ANTLR attaches a console listener to the lexer and to
+// the parser by default, and it writes a raw grammar diagnostic to os.Stderr
+// and returns nothing — which a library function with no output channel of its
+// own has no way to offer a caller and no business doing over the top of what
+// `gqlc generate` is saying. Pinned by
+// TestRelationshipTypeAlternationsWritesNothingToStderr, whose texts include
+// two the LEXER refuses, since the two listeners are attached separately. It
+// consults no procedure
 // signature registry, unlike Parse: the walk is syntactic, so a CALL that only
 // resolves against a registry is read the same way with or without one.
 func RelationshipTypeAlternations(src string) []string {
