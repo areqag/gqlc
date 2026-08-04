@@ -334,6 +334,38 @@ else
     bad "GH body ahead of bd does not block the pull" "held out"
 fi
 
+# ...and the two flags that decide what "the pull" means, which nothing here
+# read: both appeared in this file only in comments, and deleting
+# `--prefer-github` from the script left it at 136 passed, 0 failed while
+# changing what every eligible pull does. The whole eligibility argument above
+# — hold unless the GH body extends the bead description — exists to find the
+# beads where GitHub is ahead, and without that flag the bd copy wins every one
+# of them, so each ALLOW is a no-op and the pull the run just decided on never
+# happens. `--pull-only` is the other direction: without it `bd github sync`
+# pushes as well, which is the ~30s whole-corpus scan with unreliable close
+# propagation that the push path exists to avoid, over a scope chosen for a
+# pull. Asserted separately, because they fail to opposite effect.
+#
+# Read as argv words rather than off the flattened call line, for the reason
+# the id assertions read argv: `--pull-only --prefer-github` handed over as one
+# argument is a single word bd would reject, and is byte-identical on that line.
+run_sync pull \
+    "[{\"id\":\"b-flags\",\"status\":\"open\",\"external_ref\":\"$ISSUE/3\",\"description\":\"line one\"}]" \
+    '[{"number":3,"state":"OPEN","body":"line one\nline two added on GH"}]'
+_argv="$(argv_after 'bd github sync' 2 | tr '\n' ' ')"
+if argv_after 'bd github sync' 2 | grep -qx -- '--prefer-github'; then
+    ok "an eligible pull is issued with --prefer-github, or GitHub's added lines lose"
+else
+    bad "an eligible pull is issued with --prefer-github, or GitHub's added lines lose" \
+        "argv after 'bd github sync' was: ${_argv:-(no batch ran at all)}"
+fi
+if argv_after 'bd github sync' 2 | grep -qx -- '--pull-only'; then
+    ok "an eligible pull is issued with --pull-only, or the pull pushes as well"
+else
+    bad "an eligible pull is issued with --pull-only, or the pull pushes as well" \
+        "argv after 'bd github sync' was: ${_argv:-(no batch ran at all)}"
+fi
+
 run_sync pull \
     "[{\"id\":\"b-amended\",\"status\":\"open\",\"external_ref\":\"$ISSUE/4\",\"description\":\"line one\nbd-only amendment\"}]" \
     '[{"number":4,"state":"OPEN","body":"line one"}]'
@@ -378,6 +410,28 @@ if scoped_ids | grep -qx b-dedup; then
     bad "GH body shorter than the bead held out" "pulled; the de-dup reverted"
 else
     ok "GH body that does not extend the bead description is held out"
+fi
+
+# The shape no fixture above has: GitHub *prepending*. Every case so far loses
+# some of the bead text, so all of them are held by a substring test just as
+# they are by a prefix one — which means relaxing `gh_body.startswith(desc)` to
+# `desc in gh_body` passes this whole file, and the rule the header documents
+# byte for byte silently becomes a weaker rule with nothing objecting. A
+# prepend is the witness that separates them: the bead text survives verbatim,
+# so it is not data loss and nothing here would call it one, but it is not an
+# append either — the bead's first line stops being first, and a pull rewrites
+# the description to GitHub's ordering.
+run_sync pull \
+    "[{\"id\":\"b-prepend\",\"status\":\"open\",\"external_ref\":\"$ISSUE/14\",\"description\":\"step one\"}]" \
+    '[{"number":14,"state":"OPEN","body":"PREFACE\nstep one"}]'
+if scoped_ids | grep -qx b-prepend; then
+    bad "a GH body that prepends to the bead description is held out" \
+        "pulled; a prefix rule that admits a prepend is a substring rule"
+elif ! grep -q 'holding b-prepend (GH #14) out of the pull — bd-description-not-a-prefix-of-gh-body' "$TMP/err"; then
+    bad "a GH body that prepends to the bead description is held out" \
+        "held, but not by the prefix rule: $(grep 'b-prepend' "$TMP/err" | tr '\n' '|')"
+else
+    ok "a GH body that prepends to the bead description is held out"
 fi
 
 # A bd-side deletion of a trailing block is byte-identical to a GH-side append
@@ -1933,6 +1987,28 @@ else
     ok "an empty pull-side bead list withdraws both counts derived from it"
 fi
 
+# ...and on that same shape the held-bead check must not report itself skipped.
+# An empty `before` snapshot is VACUOUS, which is the check running and finding
+# no baseline. Folding VACUOUS in with the statuses that mean nobody looked —
+# dropping it from the arm that accepts OK — appends `WARNING: the held-bead
+# check did not run (the check itself did not run)` to a summary where it is
+# simply false, and the suite stayed green through it. Nothing can hide behind
+# that warning, since an empty `before` is exactly "no bead existed to protect",
+# so this is noise rather than a hole. Pinned anyway for the reason the script's
+# own comments give twice: a check that cries wolf is a check that gets
+# `2>/dev/null` bolted onto it.
+run_sync pull '[]' '[{"number":11,"state":"OPEN","body":"x"}]' '[]' '[]'
+_ll="$(last_line)"
+if ! grep -q 'the bead list came back empty' "$TMP/err"; then
+    bad "a vacuous held-bead check does not report itself as not-run" \
+        "the fixture never emptied the bead list, so the check was never vacuous"
+elif [ -z "${_ll##*held-bead check did not run*}" ]; then
+    bad "a vacuous held-bead check does not report itself as not-run" \
+        "the check ran and found no baseline, and the summary calls it skipped: $_ll"
+else
+    ok "a vacuous held-bead check does not report itself as not-run"
+fi
+
 # ...and the two withdrawals have to be ordered, because they overlap and only
 # one of them speaks for the held arm. Every fixture above exercises exactly one
 # at a time — the --limit cases carry a bead, the empty-list case carries a
@@ -2072,10 +2148,13 @@ deferred bead byte-identical to an open mirror is held silently
 blocked bead whose mirror was closed on GH is still reported
 open bead whose GH mirror closed is pulled
 GH body ahead of bd does not block the pull
+an eligible pull is issued with --prefer-github, or GitHub's added lines lose
+an eligible pull is issued with --pull-only, or the pull pushes as well
 bd-only amendment is held out of pull scope
 bd-side re-indent is held out of pull scope
 bd-side reorder is held out of pull scope
 GH body that does not extend the bead description is held out
+a GH body that prepends to the bead description is held out
 trailing-block deletion is indistinguishable from a GH append (known)
 a CRLF GH body still counts as extending an LF bead description
 a bd-only amendment is still held out when the GH body is CRLF
@@ -2193,6 +2272,7 @@ an all-state listing one short of its --limit is counted as the whole set
 a refused pull names the 'bd list' exit status, verdict still last
 a refused pull names the 'gh issue list' exit status, verdict still last
 an empty pull-side bead list withdraws both counts derived from it
+a vacuous held-bead check does not report itself as not-run
 both withdrawals at once name the bead list, not the cap
 a bead whose external_ref names another repository is held, not refused
 a temp directory that cannot be made is reported (pull)
@@ -2211,13 +2291,34 @@ _lost="$(LC_ALL=C comm -23 "$TMP/census.txt" "$TMP/ran_uniq.txt" | tr '\n' '|' |
 _uncensused="$(LC_ALL=C comm -13 "$TMP/census.txt" "$TMP/ran_uniq.txt" | tr '\n' '|' | sed 's/|$//')"
 if [ "$fail" -ne 0 ]; then
     # Not read on a run that is already red, and said out loud rather than
-    # passed quietly. Several blocks in this file word `bad` differently from
-    # `ok` — a failing block logs "…is reported" where a passing one logs "…is
-    # reported as gone" — so a genuine failure would come back through here as a
-    # missing name too, and a census that cries wolf on every red run is a
-    # census nobody reads. The suite is failing already; fix that and the
-    # roll-call speaks again on the next run, which is the only run whose
-    # silence this exists to distrust.
+    # passed quietly. 64 of this file's 111 assertion blocks word `bad`
+    # differently from `ok` — a failing block logs "…is reported" where a
+    # passing one logs "…is reported as gone" — so a genuine failure comes back
+    # through here as a missing name *and* an unregistered one, and a census
+    # that cries wolf on every red run is a census nobody reads. Counted, not
+    # estimated: an earlier draft said "several", meaning about twenty, and was
+    # out by a factor of three in the direction that makes the exemption more
+    # necessary rather than less. Here it is as a command rather than a figure
+    # that goes stale — the 65 names only a `bad` arm can ever log:
+    #
+    #   f=.githooks/tests/bd-gh-sync-test.sh
+    #   comm -23 <(grep -oE '(^|[ ;)])bad +"[^"]*"' "$f" | sed 's/^[^"]*//' | sort -u) \
+    #            <(grep -oE '(^|[ ;)])ok +"[^"]*"' "$f" | sed 's/^[^"]*//' | sort -u)
+    #
+    # The exemption is a hole, and it is bounded rather than closed. An edit
+    # that both breaks something and loses an assertion reports only the break:
+    # replace the `ok` of `the mktemp stub is transparent when its knob is
+    # unset` with `:`, turn `if [ "${_beads_n:-0}" -eq 0 ]` in bd-gh-sync into
+    # `if false`, and the run prints two FAILs, this note, and never names the
+    # assertion it lost. What bounds it is that such a run cannot land. The last
+    # line of this file exits non-zero on any FAIL; justfile:183 runs this file
+    # inside `test-hooks`; `test` depends on `test-hooks`; `just` aborts a
+    # recipe on its first non-zero line and exits with that status; so `just
+    # test` at .github/workflows/ci.yml:64 fails the `test` job, which is a
+    # required status check on master with enforce_admins on. The suite is
+    # failing already; fix that and the roll-call speaks on the next run, which
+    # is the only run whose silence this exists to distrust. The loss of a name
+    # is deferred to that run, not lost.
     printf -- 'note - the assertion census is not read on a red run (%d failed above)\n' "$fail"
 elif [ -n "$_dup" ]; then
     bad "$_census" \
