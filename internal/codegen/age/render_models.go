@@ -45,9 +45,15 @@ const goInstant = "time.Time"
 func offsetProperty(prop string) string { return prop + "Offset" }
 
 // helpers records which agtype encode / decode helpers a batch reaches
-// for. Each is emitted only when something calls it: an unreferenced
-// unexported function is a lint failure in the generated module, so the
-// set the batch uses is the set the file carries.
+// for. Each is emitted only when something calls it.
+//
+// Only one direction of that is gated. A helper referenced but not
+// declared fails to compile, which TestGoldenBuild and
+// TestEmittedHelpersAreClosedOverWhatTheyCall both catch. A helper
+// declared but not referenced is caught by nothing: .golangci.yml sets
+// generated: lax, so the linter skips the emitted goldens outright. The
+// unreferenced direction is dead weight in the output rather than a
+// defect in it, which is why it is recorded here and not gated.
 //
 // agtypeEntity, agtypeObject, agtypeSpan and agtypeString are not among
 // them. A graph type's element type list is one-or-more (GQL.g4

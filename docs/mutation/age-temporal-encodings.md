@@ -32,6 +32,13 @@ nothing beyond that, which is why the semantic rows below are carried by
 the corpus tests instead — those run the emitted helpers against captured
 agtype text, from fixture inputs rather than from goldens.
 
+Five rows — M07, M21, M23, M24, M27 — name `TestGoldenBuild` as their
+**sole** killer. Each is a compilation claim and nothing more: the mutant
+emits a call to a helper the file does not declare, an import it does not
+use, or a value of the wrong type. The pin matches the claim in those
+five cases. A row asserting a *behaviour* with only `TestGoldenBuild`
+beside it would be a gap, and there are none.
+
 Corpus test names (`TestAgtype*`, `TestDecodeVertex*`,
 `TestEmittedMethodBindsAnInstantAsMicroseconds`) are declared in
 `internal/codegen/age/testdata/corpus_test.go.txt` and run inside the
