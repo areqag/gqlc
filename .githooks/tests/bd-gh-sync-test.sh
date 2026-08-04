@@ -761,12 +761,18 @@ fi
 
 # Ids travel on argv here too, so the same 128KB execve cap applies and the
 # batching has to be arithmetic anyone can check: every id sent exactly once,
-# none invented, and the reported count equal to the count sent.
+# none invented, and the reported count equal to the count sent. The open
+# listing carries the 250 issues such a push would have minted: `[]` after a
+# push of 250 is the lost listing gqlc-mbe0 refuses to count over, and would
+# make this a test of that refusal instead of of the batching.
 run_sync push \
     "$(python3 -c '
 import json
 print(json.dumps([{"id": "b-%03d" % i, "status": "open", "external_ref": ""}
-                  for i in range(250)]))')" '[]' '[]'
+                  for i in range(250)]))')" '[]' \
+    "$(python3 -c '
+import json
+print(json.dumps([{"number": n} for n in range(1, 251)]))')"
 if [ "$(push_batches)" -ne 3 ]; then
     bad "an unmirrored set past one batch is split, not truncated" \
         "$(push_batches) batches for 250 ids at 100 per batch"
@@ -1533,6 +1539,148 @@ else
     ok "a close_reason past 300 characters is clamped to 300 with an ellipsis"
 fi
 
+# --- gqlc-mbe0: the GH listing is a set that has to be witnessed too ----------
+# `gqlc-w4q9` closed this class over the two bead snapshots and left the GitHub
+# listing open. `gh issue list` answering `[]` yields no stale mirrors, which
+# walks to `closed 0 of 0` and exit 0 — a count over a set nobody enumerated.
+# An empty listing is a legitimate answer in general, so emptiness alone is not
+# the finding; a run that just minted N issues and then cannot see one of them
+# is, and that is a comparison the script already has both halves of.
+
+run_sync push '[{"id":"b-n","status":"open","external_ref":""}]' '[]' '[]'
+if [ "$RC" -eq 0 ]; then
+    bad "a push of N>0 over an empty open listing is not counted as clean" \
+        "exited 0: $(last_line)"
+elif [ -n "${_ll:="$(last_line)"}" ] && [ -z "${_ll##*closed 0 of 0*}" ]; then
+    bad "a push of N>0 over an empty open listing is not counted as clean" \
+        "printed a count over the empty set: $_ll"
+elif ! grep -q 'pushed 1 new bead(s) but the open-issue listing came back empty' \
+        "$TMP/err"; then
+    bad "a push of N>0 over an empty open listing is not counted as clean" \
+        "did not say why the listing cannot be believed: $_ll"
+else
+    ok "a push that minted issues and then saw none of them refuses to count"
+fi
+unset _ll
+
+# ...and the other side of the same comparison, or the guard above is just
+# "an empty listing always fails" and every push into a repository with no open
+# issues left is a false alarm. Nothing new to push here, so nothing was minted
+# and `[]` is a listing that agrees with the run rather than one that lost it.
+run_sync push "[{\"id\":\"b-o\",\"status\":\"open\",\"external_ref\":\"$ISSUE/500\"}]" \
+    '[]' '[]'
+if [ "$(last_line)" = "bd-gh-sync: pushed 0 new bead(s), closed 0 stale GH mirror(s)." ]; then
+    ok "an empty open listing after a push of nothing is a legitimate empty"
+else
+    bad "an empty open listing after a push of nothing is a legitimate empty" \
+        "got: $(last_line)"
+fi
+
+# --- ...and a listing cut off at its --limit is a page, not the set ----------
+# `--limit 500` returns at most 500, and a listing of exactly 500 is what both
+# "there are 500" and "there are 5000" look like from here. The count of stale
+# mirrors over it is a count over one page, and it gets more wrong as the repo
+# grows — which is the direction repos go.
+
+# Spelled out rather than read off the script, because a fixture derived from
+# the value under test agrees with it by construction: the third arm below is
+# what notices the flag and this number parting company, and it can only notice
+# if this number is written down independently.
+OPEN_LIMIT=500
+GH_OPEN_FULL="$(python3 -c '
+import json, sys
+print(json.dumps([{"number": n} for n in range(1, int(sys.argv[1]) + 1)]))' "$OPEN_LIMIT")"
+
+run_sync push "[{\"id\":\"b-c\",\"status\":\"closed\",\"external_ref\":\"$ISSUE/1\"}]" \
+    '[]' "$GH_OPEN_FULL"
+if [ "$(grep -c -- '--limit' <<<"$(argv_of 'gh issue list')")" -eq 0 ]; then
+    bad "an open listing at its --limit is refused rather than counted" \
+        "the listing carried no --limit at all: $(argv_of 'gh issue list' | tr '\n' '|')"
+elif [ "$(argv_after 'gh issue list' 0 | grep -A1 -- '--limit' | tail -n 1)" != "$OPEN_LIMIT" ]; then
+    bad "an open listing at its --limit is refused rather than counted" \
+        "the script asks for --limit $(argv_after 'gh issue list' 0 | grep -A1 -- '--limit' | tail -n 1), so this fixture of $OPEN_LIMIT does not reach it"
+elif [ "$RC" -eq 0 ]; then
+    bad "an open listing at its --limit is refused rather than counted" \
+        "exited 0: $(last_line)"
+elif ! grep -q "the open-issue listing came back at its --limit of $OPEN_LIMIT" "$TMP/err"; then
+    bad "an open listing at its --limit is refused rather than counted" \
+        "did not name the cap it hit: $(last_line)"
+elif ! grep -q '\.githooks/bd-gh-sync' "$TMP/err"; then
+    # Naming the wrong fix under the right reason sends the reader somewhere
+    # useless just as surely as naming the wrong reason does, and the one fix
+    # this cannot be is the one the notice used to give: re-running does not
+    # uncap a listing, and there is no bd database to wait for. The cap lives in
+    # one file and the notice has to say which.
+    bad "an open listing at its --limit is refused rather than counted" \
+        "named the cap but not where it is set: $(grep 'stale' "$TMP/err" | tr '\n' '|')"
+elif [ -z "${_ll:="$(last_line)"}" ] || [ -n "${_ll##*an unknown number of stale GH mirror(s) left open*}" ]; then
+    bad "an open listing at its --limit is refused rather than counted" \
+        "counted over the truncated page anyway: $_ll"
+else
+    ok "an open listing returning exactly its --limit is treated as truncated"
+fi
+unset _ll
+
+# ...and one issue short of the cap is a whole set, or the guard above is
+# "any large listing fails" and the stale-mirror pass stops working at 499.
+GH_OPEN_SHORT="$(python3 -c '
+import json, sys
+print(json.dumps([{"number": n} for n in range(1, int(sys.argv[1]))]))' "$OPEN_LIMIT")"
+run_sync push "[{\"id\":\"b-c\",\"status\":\"closed\",\"external_ref\":\"$ISSUE/1\"}]" \
+    '[]' "$GH_OPEN_SHORT"
+if [ "$(last_line)" = "bd-gh-sync: pushed 0 new bead(s), closed 1 stale GH mirror(s)." ]; then
+    ok "an open listing one short of its --limit is counted as the whole set"
+else
+    bad "an open listing one short of its --limit is counted as the whole set" \
+        "got: $(last_line)"
+fi
+
+# --- ...and the pull side reads a capped listing of its own ------------------
+# `--limit 1000` on `--state all`. Pull's decisions are fail-closed under a
+# short listing — an issue it cannot see holds its bead out rather than pulling
+# it — so the damage is not a bad pull but a bad number: `left N unmirrored GH
+# issue(s) alone` is counted off the page, and reads as the whole repository.
+
+# Written down here rather than read off the script, for the reason the open
+# listing's cap is: a fixture sized from the value under test cannot notice that
+# value moving away from the flag that carries it.
+ALL_LIMIT=1000
+GH_ALL_FULL="$(python3 -c '
+import json, sys
+print(json.dumps([{"number": n, "state": "OPEN", "body": "x"}
+                  for n in range(1, int(sys.argv[1]) + 1)]))' "$ALL_LIMIT")"
+
+run_sync pull '[]' "$GH_ALL_FULL" '[]' '[]'
+if [ "$(argv_after 'gh issue list' 0 | grep -A1 -- '--limit' | tail -n 1)" != "$ALL_LIMIT" ]; then
+    bad "an all-state listing at its --limit is not counted over" \
+        "the script asks for --limit $(argv_after 'gh issue list' 0 | grep -A1 -- '--limit' | tail -n 1), so this fixture of $ALL_LIMIT does not reach it"
+elif ! grep -q "the GitHub listing came back at its --limit of $ALL_LIMIT" "$TMP/err"; then
+    bad "an all-state listing at its --limit is not counted over" \
+        "said nothing about the cap: $(last_line)"
+elif ! grep -q 'the cap in \.githooks/bd-gh-sync' "$TMP/err"; then
+    bad "an all-state listing at its --limit is not counted over" \
+        "named the cap but not where it is set: $(grep 'limit' "$TMP/err" | tr '\n' '|')"
+elif [ -z "${_ll:="$(last_line)"}" ] || [ -n "${_ll##*left an unknown number of unmirrored GH issue(s) alone*}" ]; then
+    bad "an all-state listing at its --limit is not counted over" \
+        "counted the orphans off one page: $_ll"
+else
+    ok "a pull over a capped GitHub listing reports the count as unknown"
+fi
+unset _ll
+
+# ...and its control, for the same reason as the push side's.
+GH_ALL_SHORT="$(python3 -c '
+import json, sys
+print(json.dumps([{"number": n, "state": "OPEN", "body": "x"}
+                  for n in range(1, int(sys.argv[1]))]))' "$ALL_LIMIT")"
+run_sync pull '[]' "$GH_ALL_SHORT" '[]' '[]'
+if [ "$(last_line)" = "bd-gh-sync: pulled 0 bead(s), held 0, left $((ALL_LIMIT - 1)) unmirrored GH issue(s) alone." ]; then
+    ok "an all-state listing one short of its --limit is counted as the whole set"
+else
+    bad "an all-state listing one short of its --limit is counted as the whole set" \
+        "got: $(last_line)"
+fi
+
 # --- gqlc-w4q9 review: the header's claim has to hold on every exit ----------
 # "Both actions end by writing their verdict to the last stderr line" is what
 # .claude/settings.json and pre-push are built on, and `mktemp -d` failing broke
@@ -1559,8 +1707,9 @@ done
 
 # ...and the control: the stub is only ever a stub when the knob is set, so a
 # run with it unset has to reach GitHub exactly as before. Without this the two
-# cases above would pass just as well against a stub that always failed.
-run_sync push '[{"id":"b-n","status":"open","external_ref":""}]' '[]' '[]'
+# cases above would pass just as well against a stub that always failed. The
+# open listing holds the issue this push mints, for the gqlc-mbe0 reason above.
+run_sync push '[{"id":"b-n","status":"open","external_ref":""}]' '[]' '[{"number":1}]'
 if [ "$(last_line)" = "bd-gh-sync: pushed 1 new bead(s), closed 0 stale GH mirror(s)." ]; then
     ok "the mktemp stub is transparent when its knob is unset"
 else
