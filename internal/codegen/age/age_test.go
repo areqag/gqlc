@@ -434,6 +434,19 @@ func alternationQuery(name, sourceText string, cols ...resolver.Column) codegen.
 	return q
 }
 
+// execAlternationQuery is the same axis moved on the OTHER served batch
+// entry: execQuery's write, with a relationship-type alternation in its
+// text. Shared admission holds :exec and a column list mutually
+// exclusive, so what the column gate reads here is not merely
+// alternation-free but empty, and a gate keyed on the columns or on the
+// statement kind has nothing to look at. The server parses the statement
+// all the same.
+func execAlternationQuery(name, sourceText string) codegen.NamedQuery {
+	q := execQuery(name)
+	q.SourceText = sourceText
+	return q
+}
+
 // TestRejectsRelationshipTypeAlternation pins the gate that reads the
 // query TEXT rather than the resolved columns.
 //
@@ -449,6 +462,11 @@ func alternationQuery(name, sourceText string, cols ...resolver.Column) codegen.
 // The refused rows carry different alternations from each other, because
 // the message quotes the column's own text and a message built from a
 // fixed string would satisfy one row while failing the rest.
+//
+// One row carries no columns at all. A :exec write projects nothing, so
+// it is not that the column list holds nothing this gate would refuse —
+// there is no column list. A gate narrowed to queries that project, or
+// to reads, keeps every other row here green.
 func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 	in := s.inputFrom(filepath.Join("testdata", corpusSchema))
 
@@ -490,6 +508,17 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 			count: 1, noun: "query", dropped: `Both (":LIKES|REPOSTED", ":AUTHORED|FLAGGED")`,
 		},
 		{
+			// The zero-column row. A :exec write is a query the AGE
+			// backend serves and whose whole text still reaches the
+			// server, so the alternation in it is refused on the text
+			// alone — there is no column here for any reading of the
+			// columns to arrive at.
+			name: "an alternation in a write that projects nothing is refused",
+			queries: []codegen.NamedQuery{execAlternationQuery("DropActions",
+				"MATCH (p:Person)-[r:AUTHORED|LIKES]->(:Post) DELETE r\n")},
+			count: 1, noun: "query", dropped: `DropActions (":AUTHORED|LIKES")`,
+		},
+		{
 			name: "every offending query in the batch is named",
 			queries: []codegen.NamedQuery{
 				servedQuery,
@@ -525,6 +554,41 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
 		s.Require().NoError(err, "a list comprehension's '|' names no relationship type")
 		s.Require().NotEmpty(files)
+	})
+
+	s.Run("a column shared admission refuses is answered here, because this runs first", func() {
+		// The gate's POSITION, pinned by its observable consequence. This
+		// batch trips two refusals at once: its text spells an
+		// alternation, and its column carries a repeated label, which
+		// codegen.Prepare refuses with ErrUnrepresentableEdgeUnion (the
+		// column gate above stands aside on exactly that repeat, which is
+		// what lets Prepare be reached at all). Running this gate ahead of
+		// Prepare is what makes the alternation the answer, and the order
+		// is not a preference: the text has to be rewritten before the
+		// column question can be asked of this server at all, so the
+		// portable answer would send the author to change a projection
+		// that is not yet the obstacle.
+		//
+		// This is also the whole justification for
+		// test/data/codegen/invalid/unrepresentable_edge_union_shared_label
+		// carrying no apache-age-pgx-v5 target: a manifest names one
+		// expectedError per target, and on this ordering AGE's is not the
+		// one the manifest names. Move the gate below Prepare and that
+		// enrolment becomes valid again, so the un-enrolment needs the
+		// ordering asserted rather than assumed.
+		batch := s.inputFrom(filepath.Join("testdata", sharedLabelSchema))
+		batch.Queries = []codegen.NamedQuery{alternationQuery("FoundedOrBacked",
+			"MATCH (:Person)-[r:FOUNDED|BACKED]->(c:Company) RETURN r\n",
+			resolver.Column{Name: "r", Type: mixedLabelEdgeUnion})}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrRelationshipTypeAlternation,
+			"this gate runs ahead of Prepare, so a batch tripping both gets the text's answer")
+		s.Require().NotErrorIs(err, codegen.ErrUnrepresentableEdgeUnion,
+			"shared admission would refuse this column, and reaching it first would send the author to fix a projection the server never gets far enough to read")
+		s.Require().EqualError(err,
+			wantAlternationRefusal(1, "query", `FoundedOrBacked (":FOUNDED|BACKED")`))
 	})
 
 	s.Run("an edge-union column is answered by the column gate, which says more", func() {

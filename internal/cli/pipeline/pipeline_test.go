@@ -122,11 +122,11 @@ const (
 }
 `
 
-	// The four queries below are the ways an author reaches Apache AGE
+	// The five queries below are the ways an author reaches Apache AGE
 	// with a relationship-type alternation in the shipped text and no
 	// edge-union column anywhere in the row. The two that need a type the
 	// schema does not declare are written against soleTypeSchema and the
-	// other two against narrowedSchema, which declares both types their
+	// other three against narrowedSchema, which declares both types their
 	// patterns name. Each moves one axis:
 	//
 	//   unprojected      — every named type is declared; the query
@@ -141,6 +141,12 @@ const (
 	//                      binding down to one type (internal/query/
 	//                      cypher, mergeBinding), so the model carries one
 	//                      label and the text carries two.
+	//   exec             — a write projecting nothing, so the resolved
+	//                      column list is EMPTY. Every row above still
+	//                      resolves SOME column; this is the only one
+	//                      where a gate reading the columns, or one
+	//                      reading the statement kind, has nothing in
+	//                      front of it at all.
 	unprojectedAlternationQuery = "// name: PostIDs :one\n" +
 		"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) RETURN p.id\n"
 	narrowedToOneAlternationQuery = "// name: GetAction :one\n" +
@@ -149,6 +155,31 @@ const (
 		"MATCH (:Person)-[r:AUTHORED|FLAGGED]->(p:Post) RETURN p.id\n"
 	reboundNarrowedAlternationQuery = "// name: GetAction :one\n" +
 		"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post), (:Person)-[r:AUTHORED]->(p:Post) RETURN r\n"
+	execAlternationQuery = "// name: DropActions :exec\n" +
+		"MATCH (p:Person)-[r:AUTHORED|LIKES]->(:Post) DELETE r\n"
+
+	// sharedLabelAlternationSchema and sharedLabelAlternationQuery are a
+	// verbatim copy of test/data/codegen/invalid/
+	// unrepresentable_edge_union_shared_label, which this branch
+	// un-enrolled from apache-age-pgx-v5. They trip two refusals at once:
+	// the text spells `|`, and the column's three candidates carry two
+	// labels, LIKES twice — which the AGE column gate stands aside on and
+	// codegen.Prepare answers with the portable
+	// ErrUnrepresentableEdgeUnion the manifest names. Which of the two an
+	// author gets is decided by where the text gate sits relative to
+	// Prepare, and the un-enrolment is only correct on one of the two
+	// orderings. Here so that the ordering is asserted rather than assumed
+	// by a fixture that no longer runs.
+	sharedLabelAlternationSchema = `CREATE PROPERTY GRAPH TYPE UnrepresentableEdgeUnionSharedLabel AS {
+    (:Person { id :: INT64 NOT NULL }),
+    (:Post   { id :: INT64 NOT NULL }),
+    DIRECTED EDGE TYPE LikesFwd (:Person) -[:LIKES { since  :: INT64 NOT NULL }]-> (:Post),
+    DIRECTED EDGE TYPE LikesRev (:Post)   -[:LIKES { weight :: INT64 NOT NULL }]-> (:Person),
+    DIRECTED EDGE TYPE Wrote    (:Person) -[:WROTE { written :: INT64 NOT NULL }]-> (:Post)
+}
+`
+	sharedLabelAlternationQuery = "// name: GetAction :one\n" +
+		"MATCH (x:Person)-[r:LIKES|WROTE]-(y:Post) RETURN r\n"
 
 	// The second target's schema declares a label the first one does
 	// not, so a query written against either fails against the other —
@@ -459,13 +490,19 @@ func TestRunApacheAgeRefusesEdgeUnions(t *testing.T) {
 // package whose every call is SQLSTATE 42601.
 //
 // The rows are the axes on which the text and the resolved columns come
-// apart, and between them they are the whole set: an alternation the
-// author does not project makes no column at all, and one the resolver
-// narrowed to a single candidate makes a plain edge column. The narrowing
-// has two causes — a type the schema does not declare is dropped
-// (internal/resolver, edgeCandidates) and a re-bound relationship
-// variable's occurrences intersect (internal/query/cypher, mergeBinding)
-// — so each gets a row, and one row moves both axes at once.
+// apart. An alternation the author does project but does not RETURN
+// still makes some other column; one the resolver narrowed to a single
+// candidate makes a plain edge column; and a :exec write makes no column
+// whatsoever. The narrowing has two causes — a type the schema does not
+// declare is dropped (internal/resolver, edgeCandidates) and a re-bound
+// relationship variable's occurrences intersect (internal/query/cypher,
+// mergeBinding) — so each gets a row, and one row moves both axes at
+// once.
+//
+// They are not claimed to be every text an author could write. What they
+// are is one row for each way the gate could be narrowed and stay green
+// on the others: to queries that project, to queries that read, and to
+// queries whose columns hold an edge union.
 //
 // The whole message is asserted, so the alternation it quotes has to be
 // the text the author wrote rather than anything rebuilt from the
@@ -503,6 +540,19 @@ func TestRunApacheAgeRefusesRelationshipTypeAlternation(t *testing.T) {
 			query:   reboundNarrowedAlternationQuery,
 			dropped: `GetAction (":AUTHORED|LIKES")`,
 		},
+		{
+			// The zero-column row: a :exec write projects nothing, so
+			// there is no resolved column here for any reading of the
+			// columns to arrive at, and the whole statement still reaches
+			// the server. Without it, a gate skipping column-less or
+			// write queries keeps every row above green while leaving
+			// `gqlc generate` exiting 0 over a DELETE that is SQLSTATE
+			// 42601 on every call.
+			name:    "an alternation in a write that projects nothing",
+			schema:  narrowedSchema,
+			query:   execAlternationQuery,
+			dropped: `DropActions (":AUTHORED|LIKES")`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir, cfgPath := writeProject(t)
@@ -530,6 +580,55 @@ func TestRunApacheAgeRefusesRelationshipTypeAlternation(t *testing.T) {
 			require.Empty(t, res.Diagnostics)
 		})
 	}
+}
+
+// TestRunApacheAgeAnswersAnAlternationAheadOfSharedAdmission pins where
+// the text gate sits relative to codegen.Prepare, by the only thing that
+// makes the position observable: which of two applicable refusals an
+// author gets.
+//
+// Its input is a verbatim copy of test/data/codegen/invalid/
+// unrepresentable_edge_union_shared_label, and it trips both. The text
+// spells `-[r:LIKES|WROTE]-`, so the text gate applies. The column binds
+// three candidates carrying two labels — LikesFwd, LikesRev and Wrote —
+// so the AGE column gate stands aside on the repeat and Prepare applies,
+// with the portable ErrUnrepresentableEdgeUnion. The text gate runs
+// ahead of Prepare, so the alternation is the answer, and that is the
+// right one: the statement has to be rewritten before the column
+// question can be put to this server at all.
+//
+// This is what the corpus un-enrolment rests on. A manifest names one
+// expectedError for every target it enrols, so that fixture can carry an
+// apache-age-pgx-v5 target only while AGE's answer is the portable
+// sentinel — which is to say only on the other ordering. Moving the gate
+// below Prepare makes the deleted enrolment valid again, and nothing
+// else in the tree notices. Asserted here so the deletion is justified
+// by something that runs.
+//
+// Both targets are asserted, because the claim has two halves: AGE gives
+// the sentinel the manifest cannot name, and neo4j-go-v5 — the target
+// the manifest still enrols — gives the one it does.
+func TestRunApacheAgeAnswersAnAlternationAheadOfSharedAdmission(t *testing.T) {
+	dir, cfgPath := writeProject(t)
+	writeFixtureFile(t, filepath.Join(dir, "schema.gql"), sharedLabelAlternationSchema)
+	writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), sharedLabelAlternationQuery)
+	writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverApacheAgePgxV5), ""))
+
+	res, err := pipeline.Run(cfgPath, backendRegistry(t))
+	require.ErrorIs(t, err, age.ErrRelationshipTypeAlternation,
+		"the text gate runs ahead of Prepare, so the statement the server cannot parse is the answer")
+	require.NotErrorIs(t, err, codegen.ErrUnrepresentableEdgeUnion,
+		"reaching shared admission first would give this fixture the sentinel its manifest names, and its apache-age-pgx-v5 enrolment would be correct after all")
+	require.NotErrorIs(t, err, age.ErrUnsupportedQuery)
+	require.ErrorContains(t, err, `GetAction (":LIKES|WROTE")`)
+	require.Equal(t, pipeline.Result{}, res)
+
+	writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverNeo4jGoV5), ""))
+	res, err = pipeline.Run(cfgPath, backendRegistry(t))
+	require.ErrorIs(t, err, codegen.ErrUnrepresentableEdgeUnion,
+		"the enrolment the manifest keeps: a server that parses the alternation still cannot tell two LIKES candidates apart")
+	require.NotErrorIs(t, err, age.ErrRelationshipTypeAlternation)
+	require.Equal(t, pipeline.Result{}, res)
 }
 
 // TestRunApacheAgeLeavesSharedLabelUnionsToSharedAdmission is the bound

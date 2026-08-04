@@ -22,6 +22,14 @@ func generate(in codegen.Input, packageName string) ([]codegen.File, error) {
 	// still a statement the server will not parse. It runs second so a
 	// query tripping both gets the column's answer, which names the
 	// candidates the schema declares and so says more than the text can.
+	//
+	// Both halves of that position are load-bearing and both are pinned by
+	// what the author is told, not by any reading of this file. Ahead of
+	// Prepare: TestRejectsRelationshipTypeAlternation/"a column shared
+	// admission refuses is answered here, because this runs first" and
+	// TestRunApacheAgeAnswersAnAlternationAheadOfSharedAdmission. Behind
+	// rejectUnservedQueries: the same test's "an edge-union column is
+	// answered by the column gate, which says more".
 	if err := rejectRelationshipTypeAlternation(in.Queries); err != nil {
 		return nil, err
 	}

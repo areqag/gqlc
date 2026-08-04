@@ -131,12 +131,31 @@ func rejectUnservedQueries(queries []codegen.NamedQuery) error {
 // those is a package that compiles and whose every call is a server-side
 // syntax error, and the column shape is blind to all three.
 //
+// It reads the query and nothing else about it — not its columns, not
+// its cardinality, not whether it reads or writes. A :exec write
+// projects no columns at all and its whole statement still reaches the
+// server, so narrowing the loop to queries that project, or to queries
+// that read, leaves a DELETE spelling '|' generating cleanly and failing
+// on every call.
+//
 // It runs AFTER rejectUnservedQueries rather than before, so a query that
 // trips both gets the column's answer. That is the more informative of
 // the two: it names the candidates the SCHEMA declares for the pattern,
 // which the text cannot say. Where the column gate stands aside — a
 // single surviving candidate, or candidates repeating a label — this one
 // is what answers.
+//
+// It runs BEFORE codegen.Prepare, which answers a repeating label with
+// the portable ErrUnrepresentableEdgeUnion. A query doing both — an
+// alternation over candidates that repeat a label — gets this one,
+// because the text has to be rewritten before the column question can be
+// put to this server at all. That ordering is what puts
+// invalid/unrepresentable_edge_union_shared_label out of reach of an
+// apache-age-pgx-v5 enrolment, so it is pinned by the answer it produces
+// (TestRejectsRelationshipTypeAlternation's "a column shared admission
+// refuses is answered here, because this runs first", and
+// TestRunApacheAgeAnswersAnAlternationAheadOfSharedAdmission at the CLI
+// seam) rather than left to the reading order of generate.go.
 //
 // The alternations are quoted as the parser read them and are not
 // reconstructed from anything: every character printed is a character the
