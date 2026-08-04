@@ -174,7 +174,8 @@ each of the three existing phases in-place:
   parameters emits no Params struct (same rule as `:one` / `:many`
   with zero parameters, §3.2 C1); a `:exec` with two-plus
   parameters emits `<Method>Params` (§3.2 C1); a `:exec` with one
-  parameter takes the bare typed arg.
+  parameter takes the bare typed value under the generator-owned
+  argument name `arg` (§5.3 C1).
 
 Phase A runs before Phase B because Phase B's name derivation reads
 Phase A's admission decisions (the `:exec` short-circuit at Phase B
@@ -353,13 +354,13 @@ a `:one` query is present; per-query methods; entity structs;
 
 A `:exec` method's return type is `error`; the method has no other
 return value. The parameter shape follows the C1 rule verbatim
-(zero → `(ctx)`, one → bare typed arg, two-plus →
-`<Method>Params`):
+(zero → `(ctx)`, one → bare typed `arg`, two-plus →
+`arg <Method>Params`):
 
 ```go
 // name: RemovePerson :exec
 // MATCH (p:Person) WHERE p.id = $id DELETE p
-func (q *Queries) RemovePerson(ctx context.Context, id int64) error
+func (q *Queries) RemovePerson(ctx context.Context, arg int64) error
 
 // name: RemoveBoth :exec
 // MATCH (p:Person)-[r:KNOWS]->(o:Person) WHERE p.id = $pid AND o.id = $oid DELETE r
@@ -400,7 +401,7 @@ order filtered by statement kind:
 
 ```go
 type WriteQuerier interface {
-    RemovePerson(ctx context.Context, id int64) error
+    RemovePerson(ctx context.Context, arg int64) error
     RemoveBoth(ctx context.Context, arg RemoveBothParams) error
     CreatePerson(ctx context.Context, arg CreatePersonParams) (Person, error)
 }
@@ -681,17 +682,18 @@ func (q *Queries) <MethodName>(ctx context.Context<param-list>) error {
 ```
 
 - **`<param-list>`** — the C1 rule: empty (zero parameters),
-  `, <bareParam> <T>` (one parameter, lowercase-initial), or
-  `, arg <MethodName>Params` (two-plus).
+  `, arg <T>` (one parameter), or `, arg <MethodName>Params`
+  (two-plus). The argument name is generator-owned at both arities
+  and is never derived from the query text (§5.3 C1).
 - **`<queryTextConst>`** — the per-query const name (§5.5):
   `<methodName>QueryText`. Unchanged from C1.
 - **`<paramsMap>`** — the `map[string]any` literal or `nil`.
   Zero parameters: `nil` (deliberate — the driver accepts nil
   for no-parameter queries; passing an empty `map[string]any{}`
   is equivalent but noisier). One parameter:
-  `map[string]any{"<rawName>": <bareParam>}`. Two-plus:
+  `map[string]any{"<rawName>": arg}`. Two-plus:
   `map[string]any{"<rawName1>": arg.<Field1>, ...}`. Unchanged
-  from C1.
+  from C1, key and value separately owned as C1 §5.3 states.
 - **`<access>`** — the fourth `run` argument. `:exec` reads pass
   `neo4j.AccessModeRead`; every other cardinality obeys the
   new §5.5 access-mode rule (`AccessModeWrite` iff
@@ -808,9 +810,9 @@ return err
   body: `_, err := q.db.run(ctx, truncatePeopleQueryText, nil,
   neo4j.AccessModeWrite); return err`.
 - **One-parameter `:exec`.** `<paramsMap>` is
-  `map[string]any{"id": id}`; the emitted body:
+  `map[string]any{"id": arg}`; the emitted body:
   `_, err := q.db.run(ctx, removePersonQueryText,
-  map[string]any{"id": id}, neo4j.AccessModeWrite); return err`.
+  map[string]any{"id": arg}, neo4j.AccessModeWrite); return err`.
 - **Two-plus-parameter `:exec`.** `<paramsMap>` is
   `map[string]any{"pid": arg.Pid, "oid": arg.Oid}`; the emitted
   body: `_, err := q.db.run(ctx, removeBothQueryText,
@@ -835,8 +837,8 @@ same nullability arm.
 //
 //   // name: RemovePerson :exec
 //   MATCH (p:Person) WHERE p.id = $id DELETE p
-func (q *Queries) RemovePerson(ctx context.Context, id int64) error {
-    _, err := q.db.run(ctx, removePersonQueryText, map[string]any{"id": id}, neo4j.AccessModeWrite)
+func (q *Queries) RemovePerson(ctx context.Context, arg int64) error {
+    _, err := q.db.run(ctx, removePersonQueryText, map[string]any{"id": arg}, neo4j.AccessModeWrite)
     return err
 }
 ```

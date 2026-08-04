@@ -229,24 +229,28 @@ participates in §4.4's exported-collision sweep.
 
 Sqlc-style ergonomics, exactly as D2 Resolved pins:
 
-- **Zero parameters, single column** — bare arg, bare value:
+- **Zero parameters, single column** — no arg, bare value:
   ```go
   func (q *Queries) AllPeopleNames(ctx context.Context) ([]string, error)
   ```
-- **Zero parameters, two-plus columns** — bare arg, XRow:
+- **Zero parameters, two-plus columns** — no arg, XRow:
   ```go
   type PersonSummaryRow struct { Name string; Age int64 }
   func (q *Queries) PersonSummaries(ctx context.Context) ([]PersonSummaryRow, error)
   ```
-- **Exactly one parameter, any column shape** — bare typed arg:
+- **Exactly one parameter, any column shape** — the value itself, bare
+  and typed, under the generator-owned argument name `arg`:
   ```go
-  func (q *Queries) PersonById(ctx context.Context, id int64) (PersonRow, error)
+  func (q *Queries) PersonById(ctx context.Context, arg int64) (PersonRow, error)
   ```
-- **Two-plus parameters, any column shape** — XParams struct:
+- **Two-plus parameters, any column shape** — XParams struct, under the
+  same argument name:
   ```go
   type PeopleOverAgeParams struct { MinAge int64; Locale string }
   func (q *Queries) PeopleOverAge(ctx context.Context, arg PeopleOverAgeParams) ([]string, error)
   ```
+- **The argument is named `arg` at every arity**, and the name is the
+  generator's, never the query author's. §5.3 states the rule and why.
 
 - **Cardinality × shape:**
   - `:one` → `(XRow, error)` (or `(T, error)` for a single-column
@@ -271,8 +275,8 @@ in `Validated.Parameters` order (query-wide first-appearance, R2 spec
 `goType(Type)` (§5.1) or `*goType(Type)` for a nullable parameter (D3
 Resolved: symmetric parameter treatment; nil encodes as Cypher `null`).
 The zero-parameter and single-parameter queries do not emit a Params
-struct: zero-parameter has no arg, single-parameter takes the bare
-typed arg.
+struct: zero-parameter has no arg, single-parameter binds the value
+itself as `arg` (§5.3).
 
 Two parameters mangling to the same field name → `ErrParamNameCollision`
 naming both parameters (deterministic order: first-appearance in
@@ -520,13 +524,28 @@ fence with a "redeclared in this block" error — the fence is the
 enforcement surface for unexported identifiers, and the fence error
 names the file and both declaration sites, which is a strictly
 better diagnostic than an `ErrIdentifierCollision` fail-message that
-only names the query pair. The `<methodName>` prefix is deterministic
-in `Input.Queries` order (§4.1 verbatim method name → lowercase
-first rune), so a duplicate at this axis would already imply a
-duplicate method-name collision the exported sweep catches first. C5
-extends the exported sweep with entity-struct and decode-helper
-identifiers, which are user-visible; unexported package-internal
-identifiers stay on the fence.
+only names the query pair. C5 extends the exported sweep with
+entity-struct and decode-helper identifiers, which are user-visible;
+unexported package-internal identifiers stay on the fence.
+
+**The omission is a real hole, and this section used to deny it.**
+The denial was: the `<methodName>` prefix is deterministic in
+`Input.Queries` order (§4.1 verbatim method name → lowercase first
+rune), so a duplicate at this axis would already imply a duplicate
+method-name collision the exported sweep catches first. That is
+false. The const shares the unexported namespace with the
+`decode<Entity>` helpers, and those derive from **schema labels**,
+not from method names, so the two namespaces can meet with no method
+name duplicated anywhere: a node label `FooQueryText` alongside a
+query named `DecodeFoo` emits `decodeFooQueryText` as both a const
+and a func. Neither the method-name axis nor the parameter-name axis
+sees it — both colliding names are generator-owned, and the capture
+guards police author-chosen identifiers against generator-owned ones.
+Generation exits 0 and `go build` reports the redeclaration. That is
+`gqlc-igs4`, which owns the disambiguation; do not re-derive its
+argument here. Until it lands, the compile fence is the only thing
+standing between this axis and a shipped non-compiling package, and
+it is not reached by `gqlc generate` — only by the golden harness.
 
 C5 hardens this sweep against additional identifier sources
 (entity structs, decode helpers) as C2/C3 add them (ADR 0010 D7).
@@ -659,13 +678,36 @@ func (q *Queries) <MethodName>(ctx context.Context<param-list>) (<return>, error
 }
 ```
 
-- **`<param-list>`** — empty if zero parameters, `, <bareParam> <T>`
-  if one parameter, `, arg <MethodName>Params` if two-plus.
-  `<bareParam>` is the single parameter's field-name mangle (§4.2),
-  but lowercase-initial for the Go argument-name convention:
-  `paramFieldName(name)` → `MinAge`, then lowercase the first rune
-  → `minAge`. The lowercase pass is per-Go idiom (locally-scoped
-  variables are lower-camel-case); no naming rule is affected.
+- **`<param-list>`** — empty if zero parameters, `, arg <T>` if one
+  parameter, `, arg <MethodName>Params` if two-plus. The argument
+  name is the literal `arg` at both arities, and it is **not derived
+  from anything the query author wrote**. It is
+  `internal/codegen.ParamArg`, a single generator-owned constant
+  shared by every backend because the signature it appears in is
+  backend-invariant surface.
+
+  Deriving that name from the parameter — `paramFieldName("minAge")`
+  → `MinAge` → lowercase-initial → `minAge`, which is what this
+  section used to specify — puts an author-chosen identifier into the
+  same scope as the receiver `q`, the `ctx` argument, every local the
+  emitted body declares, and every package-level name that body
+  resolves. `$q` and `$ctx` redeclare what the signature already
+  binds; `$err`, `$records`, `$out`, `$stmt` and `$rows` displace a
+  body local; `$fmt` displaces an import; `$_` mangles to the empty
+  string and reaches gofmt as a parameter with no name. Generation
+  reports none of it, because the format gate parses the emission and
+  does not type-check it. Renaming the generator's own names out of
+  the way instead would need a reserved set kept in sync with every
+  future change to the emitted body, and that set is not enumerable.
+  One generator-owned argument name closes the class rather than
+  shrinking it (`gqlc-lhs3`).
+
+  Nothing the author wrote is lost: the parameter name stays the
+  driver-binding key in `<paramsMap>` below, and stays the exported
+  `<MethodName>Params` / `<MethodName>Row` field name, which is
+  always reached qualified (`arg.MinAge`) and so cannot be captured.
+  The Go argument is positional at every call site, so only godoc and
+  an editor hint ever read its name.
 - **`<return>`** — `T` for `:one` single-column; `<MethodName>Row`
   for `:one` two-plus-columns; `[]T` for `:many` single-column;
   `[]<MethodName>Row` for `:many` two-plus-columns.
@@ -676,11 +718,16 @@ func (q *Queries) <MethodName>(ctx context.Context<param-list>) (<return>, error
   exported.
 - **`<paramsMap>`** — the `map[string]any` literal binding driver
   parameter names to Go values. Zero parameters: `nil`. One
-  parameter: `map[string]any{"<rawName>": <bareParam>}`. Two-plus:
+  parameter: `map[string]any{"<rawName>": arg}`. Two-plus:
   `map[string]any{"<rawName1>": arg.<Field1>, ...}`. The map's
   keys are `Validated.Parameters[i].Name` verbatim (the `$`-stripped
   raw parameter name — the driver binds by name and matches the
-  query-text's `$name` occurrences).
+  query-text's `$name` occurrences). Key and value are separately
+  owned and must stay that way: the **key** is the author's raw
+  parameter name, because that is what the driver substitutes on; the
+  **value** is the generator's `arg`, because that is a Go identifier
+  in the method's scope. This is the whole of what `<param-list>`'s
+  note above buys.
 - **`<zero>`** — the zero value of the return type: `""` for
   `string`, `0` for numerics, `false` for `bool`, `nil` for slices
   and pointer types, `<MethodName>Row{}` for a two-plus-column
@@ -692,6 +739,23 @@ func (q *Queries) <MethodName>(ctx context.Context<param-list>) (<return>, error
   `neo4j.GetRecordValue[T]` per column, and materialises the return
   value. The `records` local is the buffered `[]*neo4j.Record` the
   seam returned (§5.6).
+
+**The argument name and the binding values in this document are
+fenced.** `TestSpecMethodArgIsGeneratorOwned` and
+`TestSpecParamsMapBindsGeneratorOwnedValue`
+(`internal/codegen/conformance/specfence_test.go`) sweep every
+markdown document under `docs/` for a parameter list opening
+`ctx context.Context` and holding exactly one more parameter, and for
+every `map[string]any` literal's binding values, and hold both
+against `codegen.ParamArg` read from the emitter.
+
+That is the whole of what is fenced: the *name*. Return types, decode
+bodies, `<zero>` values and every other signature in this document
+remain unfenced prose that the emitter is free to outgrow, so read
+them as illustration and the goldens under `test/data/codegen/valid/`
+as truth. The derivation rule above went four stages unchecked
+because there was neither a fence nor a note saying there was none;
+the next drift will at least be a known unknown.
 
 The 3-line doc-comment quote of the query text is a readability
 affordance for `godoc` browsers — the query is the source of truth,
@@ -1149,9 +1213,9 @@ subdirectory with the complete generated package:
 
 | Fixture | Coverage |
 |---|---|
-| `one_col_one_param_one` | `:one`, single column bare-value return, single parameter bare arg (`func (q *Queries) PersonName(ctx, id int64) (string, error)`). Exercises the smallest read-method surface: single-column bare-value, single-param bare-arg, `:one` empty→`ErrNoRows` fixture prose. |
+| `one_col_one_param_one` | `:one`, single column bare-value return, single parameter (`func (q *Queries) PersonName(ctx context.Context, arg int64) (string, error)`). Exercises the smallest read-method surface: single-column bare-value, single-param bare typed `arg`, `:one` empty→`ErrNoRows` fixture prose. |
 | `one_col_many` | `:many`, single column bare-value slice return, zero params (`func (q *Queries) AllPersonNames(ctx) ([]string, error)`). Exercises the ergonomics minimum for `:many`. |
-| `many_col_one_row` | `:one`, two-plus columns yielding an XRow, single parameter bare arg. Exercises Row emission, decode assembly, `ErrNoRows`. |
+| `many_col_one_row` | `:one`, two-plus columns yielding an XRow, single parameter bare typed `arg`. Exercises Row emission, decode assembly, `ErrNoRows`. |
 | `many_col_many` | `:many`, two-plus columns yielding `[]XRow`, two-plus params yielding an XParams. Exercises the full Params+Row surface. |
 | `nullable_columns` | Mixes nullable and non-nullable property columns, some nullable-arriving-nil test cases folded into the driver-side response (no assertion at codegen; fixture prose documents intent). |
 | `nullable_parameter` | A nullable parameter (`*int` field on Params); exercises D3 Resolved's symmetric parameter treatment. Encode direction verified at the code cycle. |
@@ -1197,11 +1261,12 @@ one column, `Column.Type` is `ResolvedProperty` (§4 Phase A); one
 param, `Parameter.Type` is `ResolvedProperty` (§4 Phase A). Row-field
 derivation: `p.name` matches property-access shape → `Name`. Params-
 field derivation: `id` → `Id`. Single column → bare value (§3.1);
-single parameter → bare arg. Emitted method:
+single parameter → bare typed `arg` (§5.3), with the author's `id`
+kept as the driver-binding key. Emitted method:
 
 ```go
-func (q *Queries) PersonName(ctx context.Context, id int64) (string, error) {
-    records, err := q.db.run(ctx, personNameQueryText, map[string]any{"id": id}, neo4j.AccessModeRead)
+func (q *Queries) PersonName(ctx context.Context, arg int64) (string, error) {
+    records, err := q.db.run(ctx, personNameQueryText, map[string]any{"id": arg}, neo4j.AccessModeRead)
     if err != nil {
         return "", err
     }
