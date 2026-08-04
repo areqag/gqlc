@@ -1155,6 +1155,87 @@ case "$(last_line)" in
     *) bad "the blind notice names the exit status it saw" "got: $(last_line)" ;;
 esac
 
+# --- gqlc-b7lt: a held bead deleted between the snapshots is not silent ------
+# The comparison skipped every id absent from the second snapshot, so the one
+# transition it could not see was the most destructive one: a held bead deleted
+# behind the script's back vanished, and the run came out byte-identical to a
+# healthy one.
+#
+# The skip cannot simply be dropped, because "absent from the second snapshot"
+# covers two different things. A snapshot that came back empty makes *every*
+# held bead absent, and that is already a blind run reported as one by the cases
+# above — the interaction this bead was filed alongside. What is left after that
+# is a snapshot that loaded, still holds other beads, and has lost this one:
+# that is a deletion, and it is decidable from the set the run actually held
+# rather than from the intersection of the two snapshots.
+
+SURVIVOR="{\"id\":\"b-live\",\"status\":\"open\",\"external_ref\":\"$ISSUE/9\",\"description\":\"same\"}"
+GH_CLAIM_LIVE='[{"number":7,"state":"OPEN","body":"same"},
+                {"number":9,"state":"OPEN","body":"same"}]'
+
+run_sync pull "[$CLAIMED,$SURVIVOR]" "$GH_CLAIM_LIVE" '[]' "[$SURVIVOR]"
+if ! grep -q 'WARNING b-claim' "$TMP/err"; then
+    bad "a held bead deleted between the snapshots is reported" \
+        "it vanished without a word; last line: $(last_line)"
+elif ! grep -q 'WARNING b-claim was held out of the pull but is gone from the bead list' \
+        "$TMP/err"; then
+    bad "a held bead deleted between the snapshots is reported" \
+        "warned without naming the deletion: $(grep 'WARNING b-claim' "$TMP/err")"
+else
+    ok "a held bead deleted between the snapshots is reported as gone"
+fi
+
+# ...on the line a tail -1 caller keeps, and saying which of the two it was. A
+# deletion and a reverted status call for different responses — `bd update`
+# re-asserts a status, and nothing re-asserts a bead that is no longer there —
+# so the summary that carries "1 bead(s) ... changed anyway" has to distinguish
+# them rather than fold deletion into the generic count.
+_ll="$(last_line)"
+if [ -z "$_ll" ] || [ -n "${_ll##*WARNING*}" ]; then
+    bad "a deleted held bead reaches the tail -1 caller" "no warning on it: $_ll"
+elif [ -n "${_ll##*b-claim*}" ]; then
+    bad "a deleted held bead reaches the tail -1 caller" "did not name it: $_ll"
+elif [ -n "${_ll##*deleted outright*}" ]; then
+    bad "a deleted held bead reaches the tail -1 caller" \
+        "counted it as an ordinary change: $_ll"
+else
+    ok "the summary line names the deleted held bead and says it was deleted"
+fi
+
+# The control the case above would otherwise pass by warning about anything
+# missing from the second snapshot: a bead that was *pulled* was never held, so
+# it is outside this detector's claim entirely and its absence is not this
+# check's finding. Absent-because-never-in-scope, not absent-because-deleted.
+PULLABLE="{\"id\":\"b-pulled\",\"status\":\"open\",\"external_ref\":\"$ISSUE/8\",\"description\":\"same\"}"
+run_sync pull "[$PULLABLE,$SURVIVOR]" \
+    '[{"number":8,"state":"OPEN","body":"same\nadded on GH"},
+      {"number":9,"state":"OPEN","body":"same"}]' '[]' "[$SURVIVOR]"
+if ! scoped_ids | grep -qx b-pulled; then
+    bad "a bead that was pulled is outside the held-bead detector" \
+        "the fixture never pulled it, so it proves nothing: $(last_line)"
+elif grep -q 'WARNING' "$TMP/err"; then
+    bad "a bead that was pulled is outside the held-bead detector" \
+        "warned about a bead it never held: $(grep WARNING "$TMP/err" | head -n 1)"
+else
+    ok "a pulled bead missing from the second snapshot is not a held-bead finding"
+fi
+
+# ...and the interaction the bead was filed with. A second snapshot that came
+# back empty makes every held bead absent at once, which under a naive fix reads
+# as the whole tracker being deleted. That run is blind, not a mass deletion,
+# and it has to keep saying so.
+bd_list_emits 2 '[]'
+run_sync pull "[$CLAIMED,$SURVIVOR]" "$GH_CLAIM_LIVE" '[]' "[$SURVIVOR]"
+_ll="$(last_line)"
+if grep -q 'is gone from the bead list' "$TMP/err"; then
+    bad "an empty second snapshot is blind, not a mass deletion" \
+        "reported deletions off a snapshot nobody could read: $(grep 'is gone' "$TMP/err" | tr '\n' '|')"
+elif [ -z "$_ll" ] || [ -n "${_ll##*held-bead check did not run*}" ]; then
+    bad "an empty second snapshot is blind, not a mass deletion" "got: $_ll"
+else
+    ok "an empty second snapshot stays blind rather than reading as deletions"
+fi
+
 # --- the summary line must report the outcome, not the intent ----------------
 # .claude/settings.json keeps only the last stderr line, so it has to carry the
 # shape of the run rather than whatever notice happened to print last.

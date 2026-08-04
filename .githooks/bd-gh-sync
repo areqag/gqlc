@@ -41,11 +41,13 @@
 #            pull at all.
 #            Whatever the allowlist, the run ends by re-reading the bead list
 #            and reporting any out-of-scope bead whose status or description
-#            moved, plus the fact that it could not look if it could not — the
-#            allowlist is empty in the steady state, so a postcondition
-#            conditional on a pull would never run. The last stderr line
-#            carries the outcome, warnings included, because the session-start
-#            caller keeps only that line.
+#            moved, or that is gone from the list altogether, plus the fact
+#            that it could not look if it could not — the allowlist is empty in
+#            the steady state, so a postcondition conditional on a pull would
+#            never run. Deletion is named apart from the rest because it is the
+#            one change no re-assert undoes. The last stderr line carries the
+#            outcome, warnings included, because the session-start caller keeps
+#            only that line.
 #   - push:  mirror bd-created beads that have no GH mirror yet, AND close
 #            GH issues whose bead was closed locally.
 #            Deliberately does NOT run `bd github sync --push-only` (which
@@ -380,14 +382,33 @@ try:
 except Exception:
     allowed = set()
 
+# The set this run actually held: every bead the first snapshot saw that was not
+# named in --issues. Stated as a set rather than left implicit in the loop
+# below, because the finding turns on it. A bead absent from the second snapshot
+# used to be skipped outright, which made deletion — the one change no re-assert
+# undoes — the single transition the detector could not see. Absence is only
+# ambiguous while "held" is inferred from the intersection of the two snapshots;
+# against the held set it decides, because the run enumerated that set itself.
+#
+# The wholesale case is already gone above: an `after` that came back empty is
+# BLIND and exits, so nothing here can mistake a snapshot nobody could read for
+# a tracker somebody emptied. What reaches this point is a snapshot that loaded
+# and still holds beads, and a held bead missing from it was deleted.
 moved = []
 for bid, was in sorted(before.items()):
-    if bid in allowed or bid not in after:
+    if bid in allowed:
+        continue
+    if bid not in after:
+        moved.append("GONE " + bid)
+        print(f"bd-gh-sync: WARNING {bid} was held out of the pull but is gone "
+              f"from the bead list afterwards — it was deleted while this run "
+              f"was protecting it. No status can be re-asserted onto a bead that "
+              f"is not there; recover it from bd's own history.")
         continue
     now = after[bid]
     if now == was:
         continue
-    moved.append(bid)
+    moved.append("MOVED " + bid)
     what, how = [], []
     if now[0] != was[0]:
         what.append(f"{was[0]} -> {now[0]}")
@@ -399,10 +420,12 @@ for bid, was in sorted(before.items()):
           f"{', '.join(what)}. " + " ".join(how))
 
 # Read back by the summary line: a warning printed here is above the summary
-# and a `tail -1` caller never sees it.
+# and a `tail -1` caller never sees it. Each record carries what happened as
+# well as the id, because a deleted bead and a reverted one call for different
+# responses and the summary has to be able to tell the reader which it has.
 with open(sys.argv[4], "w", encoding="utf-8") as fh:
-    for bid in moved:
-        fh.write(bid + "\n")
+    for rec in moved:
+        fh.write(rec + "\n")
 PYEOF
 
   # A check that could not run is a finding in its own right: the operator is
@@ -467,9 +490,17 @@ PYEOF
   _summary="${_summary}, held $(grep -c '^HOLD ' "$_tmp/plan.txt"), ${_orphan_arm}."
   if [ -s "$_tmp/moved.txt" ]; then
     _moved=$(wc -l <"$_tmp/moved.txt")
-    _names=$(head -n 3 "$_tmp/moved.txt" | tr '\n' ' ' | sed 's/ $//;s/ /, /g')
+    # Deletion is called out on its own rather than folded into the count: the
+    # remedy for a reverted status is the `bd update` the WARNING line above
+    # prints, and there is no such line for a bead that is gone. A reader who
+    # takes this one line and finds nothing to re-assert is a reader who
+    # concludes the warning was noise.
+    _gone=$(grep -c '^GONE ' "$_tmp/moved.txt")
+    _names=$(cut -d' ' -f2- "$_tmp/moved.txt" | head -n 3 | tr '\n' ' ' | sed 's/ $//;s/ /, /g')
     [ "$_moved" -gt 3 ] && _names="${_names}, +$((_moved - 3)) more"
-    _summary="${_summary} WARNING: ${_moved} bead(s) held out of the pull changed anyway (${_names}); see the WARNING lines above for the command to re-assert them."
+    _what="changed anyway"
+    [ "$_gone" -gt 0 ] && _what="${_what}, ${_gone} of them deleted outright"
+    _summary="${_summary} WARNING: ${_moved} bead(s) held out of the pull ${_what} (${_names}); see the WARNING lines above for what moved and how to recover it."
   fi
   if [ -n "$_blind" ]; then
     _summary="${_summary} WARNING: the held-bead check did not run (${_blind}); a bead reverted behind this script's back would not have been reported."
