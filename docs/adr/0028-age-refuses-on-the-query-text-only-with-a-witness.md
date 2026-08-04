@@ -1,0 +1,195 @@
+# Apache AGE refuses a construct on the query text, and only with a witness
+
+The `apache-age-pgx-v5` target refuses a batch at generate time when a query's
+**text** spells something the pinned AGE image will not accept. Which constructs
+those are is decided by a table in which every entry carries a probe — the exact
+cypher a live session ran — and the answer the server gave. A sweep refuses an
+entry that has neither.
+
+The second half is the decision. The first half was already made and is not
+re-argued here.
+
+## Context
+
+Generated code executes the author's original query text verbatim (ADR 0005).
+The emitter never rewrites it, so a construct the server's parser or its
+function catalogue rejects produces a package that compiles, passes the compile
+fence, and fails on **every call** with a server-side error. The author finds
+out in production.
+
+Generate-time refusal is this codebase's posture for *this backend cannot
+represent that*, stated twice in the record: ADR 0025 rejected a shape because
+"it emits a column no decoder can fill at exit 0", and ADR 0027 rejected
+per-entity multi-label admission on that same precedent. `gqlc-35yu.14` applied
+it to the query text for the first time, refusing the relationship-type
+alternation AGE's parser has no production for.
+
+What `.14` left open is what else belongs there. AGE 1.7.0 has no native
+temporal type — `agtype`'s value enum has none, `pg_cast` holds no cast to or
+from one in either direction, and of the 348 functions in `ag_catalog` exactly
+one has a temporal name. So `datetime()`, `date()`, `duration()` and their
+siblings look like obvious candidates, and writing them all down would take a
+minute.
+
+That minute is the trap. **The hazard here is asymmetric.** A refusal that is
+missing costs the author a runtime error they were going to get anyway. A
+refusal that is *wrong* costs them a query that would have worked — and ADR 0005
+means there is no rewrite, no escape hatch and no flag. A list of names someone
+believed is this epic's own recurring defect wearing a different hat: a guard
+that is green because nothing it looks at can contradict it.
+
+## Decision
+
+`internal/codegen/age/dialect.go` holds `dialectGaps`, a table whose entries
+each carry:
+
+- a **sentinel**, so a caller branches with `errors.Is` on the specific gap;
+- a **find**, which reads the offending spellings out of a query text by
+  parsing it (`internal/query/cypher`) rather than scanning for characters;
+- a **diagnose**, the prose the author meets, which differs per gap because the
+  way out differs;
+- a **witness**, naming the live test that re-measures the gap;
+- **refused probes**, each a query text and the substring of the server's answer;
+- **served texts**, which the same session accepted and `find` must stay silent
+  on.
+
+`rejectDialectGaps` runs the table ahead of `codegen.Prepare` and reports the
+first gap that fires. `rejectUnservedQueries` yields to the whole table rather
+than to one construct, so a gap added inherits the yield.
+
+**A name cannot enter the refusal list without a probe.** The undefined-function
+gap does not hold a list of names at all: `undefinedFunctions` is *derived* by
+parsing the probe texts for the calls they make. There is no literal for a name
+to be appended to.
+
+**A probe cannot enter without a live test.**
+`TestEveryDialectGapCarriesItsWitness` requires, for every gap: at least one
+probe; that `find` reads each probe (so the measurement is of something the gate
+actually refuses); that `find` reads none of the served texts (so the gate is
+bounded, which is the half that matters given the asymmetry above); that every
+probe text and every recorded answer appears verbatim in a `live_*_test.go`
+file; that the named witness is declared there; and that every AGE live recipe
+in the justfile runs it, with `-count=1`.
+
+**The sweep can fail, and that is tested.** `witnessGaps` is a pure function
+returning complaints, and `TestWitnessSweepFailsOnEachBrokenBinding` cuts each
+binding in turn against a template it first asserts passes, requiring the
+specific complaint back — including the row that hands it an empty table,
+because every other complaint is raised inside the loop and a loop over nothing
+runs no body.
+
+## What is refused today
+
+Two gaps, twelve probes, five served texts.
+
+1. **Relationship-type alternation** (`ErrRelationshipTypeAlternation`, from
+   `gqlc-35yu.14`): `-[r:A|B]->` in any of three spellings, answered
+   `syntax error at or near "|"`, SQLSTATE 42601.
+
+2. **Undefined function** (`ErrUndefinedFunction`, this decision):
+   `datetime()`, `date()`, `localdatetime()`, `duration({days: 1})` and
+   `toTimestamp('2024-01-01')`, each answered `function <name> does not exist`.
+   Every one was run by hand against
+   `apache/age@sha256:4241e2d8…` (PostgreSQL 18.1, AGE 1.7.0) during the spike
+   `gqlc-35yu.5`. `timestamp()` is a **served** probe from the same session — it
+   returns epoch milliseconds as an integer — and so is `p.datetime`, the
+   property lookup a scan for `datetime(` would have taken for a call.
+
+Matching is case-insensitive, which is what openCypher function resolution is;
+the name is quoted back in the author's own case, because that is what they have
+to find in their file. A namespaced call is a different name
+(`Cypher.g4 §oC_FunctionName`) and is not refused.
+
+## Suspected and unverified
+
+Everything below is suspected on the same grounds as the five refusals above and
+**has no witness**, so none of it is refused. Docker is not available to the
+author of this decision; verifying any of it needs the `live-smoke-age` CI job.
+That work is bd `gqlc-osf1`.
+
+- **`time()`, `localtime()` and `point(…)`.** Never run against any AGE image by
+  anyone in this repo's record. `time()` and `localtime()` are almost certainly
+  undefined; `point()` is a separate question, since it is not temporal and the
+  present diagnostic's prose ("defines no temporal constructor at all") would be
+  false of it — it would be a third gap, not a name added to the second.
+
+- **`duration.between(a, b)`.** Namespaced, so a different name from `duration`
+  and not covered by that probe. `cypher.UnqualifiedFunctionCalls` drops
+  namespaced calls by design, so refusing it needs a second scanner as well as a
+  witness.
+
+- **The SQLSTATE of every undefined-function refusal.** The spike recorded the
+  server's *message* and not its code, so the live test asserts the message
+  alone — unlike the alternation gap, which pins 42601. PostgreSQL's
+  `undefined_function` is 42883 and AGE plausibly reports through the same
+  channel; plausibly is not measured.
+
+- **The first run of `TestAGERefusesTheFunctionsItDoesNotDefine`.** The AGE live
+  half is nightly-and-manual (`codegen-live.yml`, job `live-smoke-age`, skipped
+  on pull requests), so these five refusals ship verified by a hand-run spike and
+  not yet by CI. The lag is one cycle and the subject is an image pinned by
+  digest, which no pull request can alter except by editing that digest.
+
+`localtime()` being unwitnessed is load-bearing, not incidental. It is what
+`test/data/codegen/invalid/unrepresentable_temporal_localtime_column` and
+`TestTemporalProjectionNamesThisBackend` now use, precisely because an
+unwitnessed constructor reaches the carrier question this gate would otherwise
+answer first. Give `localtime()` a witness and both have to move.
+
+## Considered options
+
+**Document the gap and refuse nothing.** Rejected against the record: the
+posture for "this backend cannot represent that" is generate-time refusal (ADR
+0025, ADR 0027), and a comment does not stop a shipped package whose every call
+fails.
+
+**Write down every temporal constructor openCypher defines.** Rejected. It is
+the guess this decision exists to prevent, and it would have refused
+`timestamp()` — the one call that works — on the same reasoning that refuses
+`datetime()`.
+
+**Scan the query text for `datetime(`.** Rejected on the same grounds `.14`
+rejected scanning for `|`: a property lookup (`p.datetime`), a label
+(`(d:date)`), a variable, a string literal and a comment all spell the name, and
+a *procedure* invocation spells the name and the parenthesis both while being
+`oC_ExplicitProcedureInvocation`, resolved against a different catalogue. The
+grammar knows the difference and this repo has a parser.
+
+**Answer through the query model instead of the text.** Impossible, and this is
+the load-bearing reason the check is where it is. Predicate structure is dropped
+from the model by design (ADR 0003), so `WHERE p.at < datetime()` leaves no
+column, parameter or binding carrying the call; a write clause projects nothing
+and still ships its whole text; and a call the resolver types is typed by its
+*result*, which says nothing about whether the server has the function.
+
+**Put the gap table in the fixture corpus, next to the live tests.**
+Rejected: `test/data/codegen` is a separate Go module whose purpose is proving
+generated code compiles standalone, and giving it a dependency on
+`internal/codegen/age` inverts that. The binding is made source-level instead —
+the sweep reads the live files as text, which is what the two sides have to
+agree on anyway.
+
+**Refuse the whole batch, or only the offending query.** The batch, as `.14`
+does: a generated package accounts for every query in its batch, and one with no
+valid emission is one it cannot account for.
+
+## Consequences
+
+- A projected `date()` is now answered by this gate rather than by
+  `codegen.ErrUnrepresentableTemporal`. That reordering is deliberate and is the
+  same argument `.14` made: no projection of `date()` will ever parse on this
+  server, whatever carrier AGE later grows, so the text has to be rewritten
+  before any column question can be put to it. It is pinned by the answer it
+  produces, not left to the reading order of `generate.go`.
+
+- `test/data/codegen/invalid/unrepresentable_temporal_date_column` is renamed to
+  `..._localtime_column` and its query switched to `localtime()`, because
+  `date()` no longer reaches the sentinel the manifest names.
+
+- The refusal list is **short on purpose** and will stay short until someone
+  runs a container. That is the intended failure mode: this table under-refuses
+  rather than over-refuses, and the sweep is what keeps it that way.
+
+- Adding a construct costs a live measurement. This is a real friction and it is
+  the point. The alternative is a table that grows on suspicion, which is a
+  guess with a test suite around it.
