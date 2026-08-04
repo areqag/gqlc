@@ -72,7 +72,10 @@ it named — filed as `gqlc-05tl` — is closed by
 `TestEmittedDecodersGuardOnlyOnStampableLabels`
 (`internal/codegen/conformance/decoder_reachability_test.go`), which runs every
 registered backend over every valid fixture and refuses any emitted `decode<T>`
-whose label guard is a string the fixture's schema does not declare as a label.
+whose label guard is a string no value on the decoded entity's own axis can
+carry — a node type's decoder is held to the node key labels the schema
+declares, an edge type's to the relationship types, and never to the union of
+the two.
 It reddens on this shape naming `decodePersonEmployee` and the join spelling.
 The rejection above stands on its own terms: a gate that catches the emission is
 not a reason to prefer emitting it.

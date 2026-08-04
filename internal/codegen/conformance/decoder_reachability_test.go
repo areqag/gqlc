@@ -73,12 +73,34 @@ var multiLabelEmittingTargets = map[string]bool{
 	"neo4j-go-v6":       true,
 }
 
+// shapeWords is what to call one entity axis in a diagnostic: what the
+// schema calls the type, and what to call a value that carries its label.
+// Both are backend-neutral — a node rather than AGE's vertex — because
+// every registered target's decoders are swept and the wording has to
+// read for the one whose carrier is a dbtype.Node too.
+type shapeWords struct{ typeText, valueText string }
+
+// entityShapeWords is the sweep's ledger of entity axes. It is what makes
+// the per-shape alphabet decidable: a codegen.EntityKind this map does
+// not hold is one the sweep can neither describe nor assign an alphabet
+// to, so a prepared entity carrying an unnamed kind reddens in
+// preparedEntityShapes rather than being held to a nil set.
+//
+// The census iterates its keys, so a third axis added here without an
+// alphabet arm in schemaLabelAlphabet fails loudly on the first decoder
+// that fills it rather than going unaudited.
+var entityShapeWords = map[codegen.EntityKind]shapeWords{
+	codegen.EntityNode: {typeText: "a node type", valueText: "a node"},
+	codegen.EntityEdge: {typeText: "an edge type", valueText: "an edge"},
+}
+
 // entityDecoder is one emitted decode<T> function: the file and entity it
-// belongs to, and the string literals its body tests the wire value for
-// equality against.
+// belongs to, the axis that entity sits on, and the string literals its
+// body tests the wire value for equality against.
 type entityDecoder struct {
 	file   string
 	entity string
+	shape  codegen.EntityKind
 	guards []string
 }
 
@@ -95,31 +117,56 @@ type entityDecoder struct {
 // emitted package, finds every package-level func named decode<T> where T
 // is a type that package declares, and collects the string literals that
 // function compares for equality (an == or != operand, or a switch case
-// value). Every such literal must be a label the fixture's schema declares:
-// a member of the union of KeyLabels.Split() and CompleteLabels.Split()
-// over its node and edge types.
+// value). Every such literal must be a label some value that decoder can
+// be handed carries.
 //
-// A literal outside that set is a guard the decoder can never pass. The
-// concrete instance is graph.LabelSetKey's own join spelling: a node type
-// keyed on Employee and Person has key "Employee&Person", and a decoder
-// guarding on that string is asking a single wire label to equal the join
-// of two. No vertex and no edge carries it, and on Apache AGE none could —
-// AGE stamps exactly one label and has no syntax for a second — so the
-// decoder is dead on arrival while gqlc generate still exits 0.
+// # Why the alphabet is per axis and not per schema
+//
+// A vertex carries a node type's key label; an edge carries its
+// relationship type. They are disjoint alphabets on the wire and on AGE
+// there is no way to put one on the other — a MATCH binding an edge can
+// only ever hand the decoder a value labelled with a relationship type.
+// So the alphabet a decoder is held to is the one for the axis its own
+// entity sits on, read off codegen.Prepare, and not the union of the two.
+// A union would pass decodeCompanyKnows guarding on "Company": a node
+// label, on a decoder no vertex ever reaches, unsatisfiable at exit 0 and
+// invisible to a gate that only asks whether the schema mentions the
+// string somewhere.
+//
+// A literal outside its axis's alphabet is a guard the decoder can never
+// pass. The other concrete instance is graph.LabelSetKey's own join
+// spelling: a node type keyed on Employee and Person has key
+// "Employee&Person", and a decoder guarding on that string is asking a
+// single wire label to equal the join of two. No vertex and no edge
+// carries it, and on Apache AGE none could — AGE stamps exactly one label
+// and has no syntax for a second — so the decoder is dead on arrival while
+// gqlc generate still exits 0.
 //
 // # What it does not decide
 //
 // It is not a reachability analysis. It says nothing about guards that are
 // not string equality — no arithmetic, no length, no nil check, no
-// interprocedural condition. It says nothing about whether a guard is
-// *precise*: a decoder for a two-label entity guarding on just one of its
-// two labels is reachable, so this passes it, and nothing here notices that
-// it would also accept the wrong entity. It says nothing about the neo4j
-// targets' decoders, which carry no label guard at all and therefore accept
-// a node of any label — a distinct defect on a distinct axis, filed rather
-// than fixed here. And it decides satisfiability against the label alphabet
-// the schema declares, which is the alphabet gqlc's own write path can
-// stamp; a graph a foreign writer populated is outside its terms.
+// interprocedural condition. It says nothing about a conjunction: two
+// guards each in the axis's alphabet can still be jointly unsatisfiable,
+// and this reads them one at a time. It says nothing about whether a guard
+// is *precise*: a decoder for a two-label entity guarding on just one of
+// its two labels is reachable, so this passes it, and nothing here notices
+// that it would also accept the wrong entity. It says nothing about the
+// neo4j targets' decoders, which carry no label guard at all and therefore
+// accept a node of any label — a distinct defect on a distinct axis, filed
+// rather than fixed here. And it decides satisfiability against the labels
+// gqlc's own write path stamps for that axis; a graph a foreign writer
+// populated is outside its terms.
+//
+// Its subject is also the decoders and only the decoders. A label guard an
+// emitted *query method* carries inline — AGE's edge-union dispatch writes
+// one, a switch over the wire label with a case per candidate edge — sits
+// in no decode<T> body and is not read here. Same defect class, different
+// site; today the only thing standing under an unsatisfiable case label
+// there is a golden byte diff, which is to say nothing. Filed, not fixed
+// here: widening the extractor to query bodies is a larger claim than this
+// gate makes and wants its own verdict on what alphabet each site is held
+// to.
 //
 // # Why it sweeps every backend, not the enrolled ones
 //
@@ -143,9 +190,20 @@ func (s *ConformanceSuite) TestEmittedDecodersGuardOnlyOnStampableLabels() {
 		"the label-guard ledger no longer names exactly the registered backends: a backend it does not name emits "+
 			"decoders no verdict covers, and a name the registry does not hold is a verdict over nothing")
 
+	// The census is per target *and per axis*. Summed over both axes it
+	// would be satisfied by the node decoders alone, so a rename that
+	// blinded the extractor to every edge decoder — and with them to any
+	// unstampable relationship-type guard one carried — would leave a
+	// non-zero total and pass. What the sweep reads is a claim about each
+	// axis separately, so it is recorded that way.
+	shapes := slices.Sorted(maps.Keys(entityShapeWords))
 	accepted := make(map[string]int, len(targets))
-	decoders := make(map[string]int, len(targets))
-	guarded := make(map[string]int, len(targets))
+	decoders := make(map[string]map[codegen.EntityKind]int, len(targets))
+	guarded := make(map[string]map[codegen.EntityKind]int, len(targets))
+	for _, target := range targets {
+		decoders[target] = make(map[codegen.EntityKind]int, len(shapes))
+		guarded[target] = make(map[codegen.EntityKind]int, len(shapes))
+	}
 
 	for _, dir := range s.validFixtures() {
 		fixture := filepath.Base(dir)
@@ -154,6 +212,7 @@ func (s *ConformanceSuite) TestEmittedDecodersGuardOnlyOnStampableLabels() {
 			sch := s.loadSchema(dir)
 			in := codegen.Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
 			alphabet := schemaLabelAlphabet(sch)
+			decoderShapes := preparedEntityShapes(s.Require(), in)
 
 			for _, target := range targets {
 				files, ok := s.emitOrRefuse(target, in)
@@ -165,18 +224,19 @@ func (s *ConformanceSuite) TestEmittedDecodersGuardOnlyOnStampableLabels() {
 					continue
 				}
 				accepted[target]++
-				for _, d := range emittedEntityDecoders(s.Require(), files) {
-					decoders[target]++
+				for _, d := range emittedEntityDecoders(s.Require(), files, decoderShapes) {
+					decoders[target][d.shape]++
 					if len(d.guards) > 0 {
-						guarded[target]++
+						guarded[target][d.shape]++
 					}
 					for _, guard := range d.guards {
-						s.Require().True(alphabet[guard],
-							"%s emits %s in %s for fixture %s, which returns an error unless the wire value's "+
-								"label equals %q. %s Nothing this backend can stamp carries that string, so every "+
-								"call to %s fails and the struct it fills is unreachable.",
-							target, decodePrefix+d.entity, d.file, fixture, guard,
-							unstampableBecause(guard, alphabet), decodePrefix+d.entity)
+						s.Require().True(alphabet[d.shape][guard],
+							"%s emits %s in %s for fixture %s. It fills %s, which is %s, so the only value that "+
+								"ever reaches it is %s, and it returns an error unless that value's label equals "+
+								"%q. %s Every call to %s therefore fails and the struct it fills is unreachable.",
+							target, decodePrefix+d.entity, d.file, fixture,
+							d.entity, entityShapeWords[d.shape].typeText, entityShapeWords[d.shape].valueText,
+							guard, unstampableBecause(guard, d.shape, alphabet), decodePrefix+d.entity)
 					}
 				}
 			}
@@ -187,24 +247,31 @@ func (s *ConformanceSuite) TestEmittedDecodersGuardOnlyOnStampableLabels() {
 	for _, target := range targets {
 		s.Require().NotZero(accepted[target],
 			"%s generated for no fixture in the corpus, so this sweep read none of its emissions", target)
-		s.Require().NotZero(decoders[target],
-			"%s emitted no decode<T> function over the whole corpus: either it names its decoders otherwise, "+
-				"in which case this sweep no longer finds them, or it emits none, in which case it decodes nothing",
-			target)
 		if labelGuardingTargets[target] {
 			guarding++
-			s.Require().Equal(decoders[target], guarded[target],
-				"%s is recorded as gating its entity decoders on the wire label, but %d of the %d it emits over "+
-					"the corpus test no string for equality: either the label check has been dropped from the "+
-					"emission, or it is written in a shape this sweep does not read, and either way the guards "+
-					"this gate believes it is checking are not being checked",
-				target, decoders[target]-guarded[target], decoders[target])
-			continue
 		}
-		s.Require().Zero(guarded[target],
-			"%s is recorded as emitting no label guard, but %d of the %d decoders it emits test a string for "+
-				"equality; enrol it in labelGuardingTargets so its guards are held to the schema's label alphabet",
-			target, guarded[target], decoders[target])
+		for _, shape := range shapes {
+			words := entityShapeWords[shape]
+			s.Require().NotZero(decoders[target][shape],
+				"%s emitted no decode<T> filling %s over the whole corpus: either it names those decoders "+
+					"otherwise, in which case this sweep no longer finds them and an unstampable guard inside "+
+					"one is invisible, or it emits none, in which case nothing it emits decodes %s at all",
+				target, words.typeText, words.valueText)
+			if labelGuardingTargets[target] {
+				s.Require().Equal(decoders[target][shape], guarded[target][shape],
+					"%s is recorded as gating its entity decoders on the wire label, but %d of the %d it emits "+
+						"for %s over the corpus test no string for equality: either the label check has been "+
+						"dropped from the emission, or it is written in a shape this sweep does not read, and "+
+						"either way the guards this gate believes it is checking are not being checked",
+					target, decoders[target][shape]-guarded[target][shape], decoders[target][shape], words.typeText)
+				continue
+			}
+			s.Require().Zero(guarded[target][shape],
+				"%s is recorded as emitting no label guard, but %d of the %d decoders it emits for %s test a "+
+					"string for equality; enrol it in labelGuardingTargets so its guards are held to the labels "+
+					"that axis can carry",
+				target, guarded[target][shape], decoders[target][shape], words.typeText)
+		}
 	}
 	s.Require().NotZero(guarding,
 		"no registered backend is recorded as guarding on a label, so this gate examined no guard at all")
@@ -291,29 +358,80 @@ func verdict(emits bool) string {
 	return "refuses"
 }
 
-// schemaLabelAlphabet is every label one schema declares, split out of the
-// key sets that hold them. This is the alphabet a backend's own write path
-// can stamp on a vertex or an edge for this schema, and therefore the whole
-// set of strings a decoder's label guard can be satisfied by.
+// labelAlphabet is, per entity axis, the labels a value on that axis can
+// carry — the whole set of strings a decoder filling that axis can have
+// its guard satisfied by. Kept split rather than unioned because the two
+// axes are disjoint on the wire: no node carries a relationship type and
+// no edge carries a node label.
+type labelAlphabet map[codegen.EntityKind]map[string]bool
+
+// schemaLabelAlphabet is what one schema's write path can stamp, split by
+// the axis that carries it: node key labels on a vertex, edge key labels
+// — the relationship type — on an edge.
 //
-// CompleteLabels is folded in alongside KeyLabels because a node type's
-// identity is its key set while what a value carries is its complete set,
-// so a guard naming an implied label is reachable and must not be read as
-// an offender.
-func schemaLabelAlphabet(sch schema.Schema) map[string]bool {
-	out := make(map[string]bool)
-	add := func(k graph.LabelSetKey) {
+// Key labels and no others. A node type's identity is its key set and its
+// CompleteLabels is that set plus any label a "=>" clause implies, but an
+// implied label is a matching concept, not a writing one: gqlc's own
+// emission stamps exactly the key set (codegen.Entity.Labels is
+// NodeType.KeyLabels, and AGE's wireEntity takes its single label from
+// there), so a value gqlc writes never carries an implied label and a
+// guard naming one is a guard nothing satisfies. Folding CompleteLabels in
+// would widen this set in the false-green direction — it would pass
+// exactly that guard — which is the opposite of what this gate is for. No
+// fixture in the corpus declares an implied label today, so the two sets
+// coincide and nothing here is load-bearing yet; it is spelled this way so
+// that the day one lands, the widening is a decision someone makes rather
+// than one already made.
+//
+// A backend whose write path did stamp complete labels and whose decoders
+// did guard would need this per target as well as per axis. None does:
+// the only target recorded in labelGuardingTargets stamps the key set.
+func schemaLabelAlphabet(sch schema.Schema) labelAlphabet {
+	out := labelAlphabet{}
+	for shape := range entityShapeWords {
+		out[shape] = map[string]bool{}
+	}
+	add := func(shape codegen.EntityKind, k graph.LabelSetKey) {
 		for _, label := range k.Split() {
-			out[label] = true
+			out[shape][label] = true
 		}
 	}
 	for _, n := range sch.Nodes {
-		add(n.KeyLabels)
-		add(n.CompleteLabels)
+		add(codegen.EntityNode, n.KeyLabels)
 	}
 	for _, e := range sch.Edges {
-		add(e.KeyLabels)
-		add(e.CompleteLabels)
+		add(codegen.EntityEdge, e.KeyLabels)
+	}
+	return out
+}
+
+// preparedEntityShapes is the axis each entity struct one batch derives
+// sits on, keyed by the struct name a decoder is named after.
+//
+// It is read off codegen.Prepare — the same derivation every backend's
+// Generate runs before it renders a line — rather than re-derived from
+// the schema here. That is what keeps a decoder's axis the emission's own
+// answer: entity naming and the shape assignment move together, so this
+// sweep cannot drift into holding a decoder to an axis the emitter does
+// not put it on.
+//
+// probeTypeMap admits every property width, so the derivation runs for
+// every fixture any backend serves. A narrower table would refuse widths
+// some backend has no carrier for, and a refusal here would blind the
+// sweep to the very emission it is pointed at.
+func preparedEntityShapes(r *require.Assertions, in codegen.Input) map[string]codegen.EntityKind {
+	prepared, err := codegen.Prepare(in, probeTypeMap{}, "")
+	r.NoError(err, "the shared derivation refuses a batch the corpus holds valid, so no decoder in it can be "+
+		"assigned an axis and every guard it carries would go unread")
+	out := make(map[string]codegen.EntityKind, len(prepared.Entities))
+	for _, e := range prepared.Entities {
+		r.Contains(entityShapeWords, e.Kind,
+			"codegen.Prepare puts %s on an entity axis entityShapeWords does not name, so this sweep can say "+
+				"neither which labels a value reaching its decoder carries nor what to call them: name the kind "+
+				"there and give schemaLabelAlphabet an arm for it", e.Name)
+		r.NotContains(out, e.Name,
+			"codegen.Prepare names two entities %s, so which axis its decoder sits on is ambiguous", e.Name)
+		out[e.Name] = e.Kind
 	}
 	return out
 }
@@ -337,33 +455,53 @@ func multiLabelEntities(sch schema.Schema) []string {
 	return out
 }
 
-// unstampableBecause is the reason clause for a guard the schema's label
-// alphabet does not hold. The join-spelling arm is called out separately
-// because it is the one whose unsatisfiability is mechanical rather than
-// corpus-relative: graph.LabelSetKey joins a label set with "&", and a
-// single wire label cannot equal the join of two whatever the schema
-// declares.
-func unstampableBecause(guard string, alphabet map[string]bool) string {
-	declared := slices.Sorted(maps.Keys(alphabet))
+// unstampableBecause is the reason clause for a guard the alphabet of the
+// decoder's own axis does not hold.
+//
+// Two arms are called out ahead of the general one. The join spelling is
+// the case whose unsatisfiability is mechanical rather than corpus-
+// relative: graph.LabelSetKey joins a label set with "&", and a single
+// wire label cannot equal the join of two whatever the schema declares.
+// The cross-axis case is the one a reader is most likely to argue with,
+// because the string *is* in the schema — so the clause says which axis
+// declares it and why that does not help.
+func unstampableBecause(guard string, shape codegen.EntityKind, alphabet labelAlphabet) string {
+	declared := slices.Sorted(maps.Keys(alphabet[shape]))
 	if parts := graph.LabelSetKey(guard).Split(); len(parts) > 1 {
 		return fmt.Sprintf("That is graph.LabelSetKey's join spelling of the %d-label set %v — a label set, not a "+
-			"label — and a wire value carries one label, so no single label equals it. The schema declares %v.",
+			"label — and a wire value carries one label, so no single label equals it. This axis declares %v.",
 			len(parts), []string(parts), declared)
 	}
-	return fmt.Sprintf("The schema declares the labels %v and no others, so nothing writes that one.", declared)
+	for _, other := range slices.Sorted(maps.Keys(entityShapeWords)) {
+		if other == shape || !alphabet[other][guard] {
+			continue
+		}
+		return fmt.Sprintf("The schema does declare that label — but on the other axis, where it belongs to %s and "+
+			"%s carries it. A node carries a node type's key label and an edge carries its relationship type, "+
+			"and no statement gqlc writes puts either on the other. This axis declares %v.",
+			entityShapeWords[other].typeText, entityShapeWords[other].valueText, declared)
+	}
+	return fmt.Sprintf("This axis declares the labels %v and no others, so nothing writes that one.", declared)
 }
 
 // emittedEntityDecoders extracts one backend's entity decoders out of one
 // emission: every package-level, receiver-less func named decode<T> where T
-// is a type the same package declares, paired with the string literals its
-// body tests for equality.
+// is a type the same package declares, paired with the axis T sits on and
+// the string literals its body tests for equality.
 //
 // Keying on a declared type is what separates an entity decoder from the
 // backend's own scalar helpers, whose names (agtypeInt64, agtypeString)
 // carry the wire vocabulary rather than a struct — those compare against
 // agtype's fixed spellings of true and false, which are not labels and are
 // not the emission's to choose.
-func emittedEntityDecoders(r *require.Assertions, files []codegen.File) []entityDecoder {
+//
+// A decode<T> for a declared type the shared derivation does not name as
+// an entity fails rather than being skipped. Skipping it would be the
+// vacuous reading: it is a decoder whose guards nothing then checks, and
+// the whole point here is that a decoder no verdict covers is how the
+// defect hid the first time. An emission that grows one owes this sweep an
+// answer about which labels reach it.
+func emittedEntityDecoders(r *require.Assertions, files []codegen.File, shapes map[string]codegen.EntityKind) []entityDecoder {
 	fset := token.NewFileSet()
 	parsed := make(map[string]*ast.File, len(files))
 	declared := make(map[string]bool)
@@ -395,7 +533,18 @@ func emittedEntityDecoders(r *require.Assertions, files []codegen.File) []entity
 			if !ok || !declared[entity] {
 				continue
 			}
-			out = append(out, entityDecoder{file: f.Path, entity: entity, guards: comparedStrings(r, fn.Body)})
+			shape, ok := shapes[entity]
+			r.True(ok,
+				"%s emits %s, and %s is a type it declares, but codegen.Prepare names no node or edge type under "+
+					"that name; this sweep cannot say which labels a value reaching that decoder carries, so the "+
+					"guards it holds would go unread",
+				f.Path, fn.Name.Name, entity)
+			out = append(out, entityDecoder{
+				file:   f.Path,
+				entity: entity,
+				shape:  shape,
+				guards: comparedStrings(r, fn.Body),
+			})
 		}
 	}
 	return out

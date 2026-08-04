@@ -683,11 +683,12 @@ var connectionSurface = map[string]bool{"db.go": true, "graph.go": true}
 // struct whose surface matches under every target while the decoder that
 // fills it can never fire — an emitted decodeFoo guarding on a label no
 // value that backend can stamp leaves this comparison green, because
-// decodeFoo is not a declaration it reads. That residual is
-// TestEmittedDecodersGuardOnlyOnStampableLabels' (decoder_reachability_test.go),
-// which sweeps the emitted decoder bodies for label guards the schema's
-// own label alphabet cannot satisfy. The two gates partition the emission:
-// this one owns the surface, that one owns the decoders underneath it.
+// decodeFoo is not a declaration it reads. That residual belongs to
+// TestEmittedDecodersGuardOnlyOnStampableLabels (decoder_reachability_test.go),
+// which sweeps the emitted decoder bodies for label guards no value on the
+// decoded entity's own axis can carry. The two gates partition the
+// emission: this one owns the surface, that one owns the decoders
+// underneath it.
 func TestBackendInvariantSurface(t *testing.T) {
 	goldens, err := filepath.Glob(filepath.Join(fixtureRoot(), "valid", "*", "golden"))
 	require.NoError(t, err)
