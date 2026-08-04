@@ -358,11 +358,23 @@ test-codegen-live-age:
 # this gate's own defect class. Every go.mod under the checkout is scanned, with
 # every build tag its own packages constrain themselves by — the tag is where
 # code enters the build, so a module scanned without its tags is a module
-# partly scanned. `ignore` is excluded because that tag's whole meaning is
-# "not part of any build". The tags are read off the module's files on disk
-# rather than out of `go list ./...`, because the wildcard does not match a
-# directory whose Go files are ALL constrained — it would derive none of the
-# tags such a directory carries, and see nothing missing.
+# partly scanned. The tags are read off the module's files on disk rather than
+# out of `go list ./...`, because the wildcard does not match a directory whose
+# Go files are ALL constrained — it would derive none of the tags such a
+# directory carries, and see nothing missing.
+#
+# Which TERMS of a constraint become tags is a judgement, not a transcription
+# (bd gqlc-e7oq), and internal/tools/modscope makes it. Only a term that is
+# custom and appears un-negated becomes one. A GOOS, GOARCH or go1.N term names
+# a fact the toolchain owns, and `-tags` will happily assert it anyway: this
+# recipe used to turn `//go:build !windows` into `-tags windows` and exclude the
+# very file the term came from, and `//go:build windows` into a scan of
+# Windows-only code on Linux. A negated term is dropped for a different reason —
+# `-tags` can only make a term true, so on `!foo` it does the opposite of what
+# was asked; foo's ABSENCE is what that file was written for, and that is the
+# default. Where a custom tag is positive on one file and negated on another no
+# single build covers both, and the postconditions below say so rather than this
+# derivation picking a side quietly.
 #
 # Deriving the tags removes one way to be green over unscanned code and adds
 # another — a tag walk that came back empty — so each module's scan is preceded
@@ -415,7 +427,7 @@ vuln: vuln-root-residual
     # (2) Assignment position is NOT enough on its own. Measured on bash 5.3:
     # errexit is suppressed inside a command substitution, so a helper whose body
     # is `r="$(fail)"; printf ...` runs the printf anyway, exits 0, and the
-    # caller's `dirs="$(helper)"` sees success and an empty string. The helper
+    # caller's `dirs="$(helper)"` sees success and an empty string. Every helper
     # therefore returns its own status explicitly and every caller checks it,
     # which is why `|| return` and `|| exit` appear below on assignments that
     # `set -e` looks like it already covers. It does not.
@@ -457,18 +469,14 @@ vuln: vuln-root-residual
         printf '%s\n' "${raw}" | sort -u
     }
 
-    # Every build tag a module's own packages constrain themselves by, read out
-    # of the directory set measured above rather than by walking again — one
-    # measurement, graded once, used twice.
-    build_tags() {
-        printf '%s\n' "${1}" | while IFS= read -r d; do
-            grep -hs '^//go:build' "${d}"/*.go || true
-        done \
-            | sed 's|^//go:build||' \
-            | tr '()!|&' '     ' \
-            | tr -s ' \t' '\n\n' \
-            | sed -e '/^$/d' -e '/^ignore$/d' \
-            | sort -u | paste -sd,
+    # One module's build tags, as a comma-separated -tags argument. Empty is a
+    # legitimate answer here — a module whose files carry no constraints asks for
+    # no tags — which is why the walk it is built on is graded and this is not.
+    module_tags() {
+        local raw
+        raw="$(scope tags "${1}")" || return 1
+        [ -n "${raw}" ] || return 0
+        printf '%s\n' "${raw}" | paste -sd,
     }
 
     # Assigned on its own line, not consumed through a process substitution: a
@@ -502,7 +510,7 @@ vuln: vuln-root-residual
         local want="tagblind" fixture root_dirs root_tags
         fixture="$(go list -m -f '{{{{.Dir}}')/test/data/${want}"
         root_dirs="$(module_dirs .)" || exit 1
-        root_tags="$(build_tags "${root_dirs}")"
+        root_tags="$(module_tags .)" || exit 1
         if ! grep -qxF "${fixture}" <<<"${root_dirs}"; then
             echo "error: the tag-derivation fixture ${fixture}" >&2
             echo "       is gone, so nothing in this tree exercises the filesystem walk or the" >&2
@@ -527,6 +535,58 @@ vuln: vuln-root-residual
     }
     selftest_tagblind
 
+    # The classification's fixture, and the same argument one bead along.
+    # test/data/platformtag holds one file behind `//go:build !windows` — a
+    # NEGATED GOOS term, which is the shape the old derivation inverted: it read
+    # the terms out with the punctuation stripped, emitted `windows`, and
+    # `-tags windows` then falsified the file's own constraint (bd gqlc-e7oq).
+    # Three clauses again, and they are the three ways this stops witnessing
+    # anything: the derivation regresses, the file loses the constraint, or the
+    # directory goes away.
+    selftest_platformtag() {
+        local fixture root_dirs root_tags src
+        fixture="$(go list -m -f '{{{{.Dir}}')/test/data/platformtag"
+        src="${fixture}/platformtag.go"
+        root_dirs="$(module_dirs .)" || exit 1
+        root_tags="$(module_tags .)" || exit 1
+        if ! grep -qxF "${fixture}" <<<"${root_dirs}"; then
+            echo "error: the classification fixture ${fixture}" >&2
+            echo "       is gone, so nothing in this tree witnesses what the tag derivation does" >&2
+            echo "       with a platform term (bd gqlc-e7oq). Restore it." >&2
+            exit 1
+        fi
+        if ! grep -qE '^//go:build[[:space:]]+!windows[[:space:]]*$' "${src}"; then
+            echo "error: ${src} no longer carries '//go:build !windows'," >&2
+            echo "       so it no longer has the shape it exists to reproduce and the assertion" >&2
+            echo "       below passes over a file that could not fail it (bd gqlc-e7oq)." >&2
+            exit 1
+        fi
+        case ",${root_tags}," in
+            *",windows,"*)
+                echo "error: the tag derivation emitted 'windows' from a tree whose only mention" >&2
+                echo "       of it is the negated term in ${src}." >&2
+                echo "       A negated term has produced its own positive, which is the inverse of" >&2
+                echo "       what the file asks for: -tags windows satisfies 'windows', '!windows'" >&2
+                echo "       goes false, and the scan below compiles this file nowhere while" >&2
+                echo "       reporting clean over it (bd gqlc-e7oq)." >&2
+                exit 1
+                ;;
+        esac
+        # The consequence, not just the derivation: on this platform the file
+        # builds, so `go list` under the derived tags must match its directory.
+        # The general coverage postcondition below would also catch this, but
+        # only as an unnamed directory in a list; here it names the bead.
+        if ! go list -e "${root_tags:+-tags}" ${root_tags:+"${root_tags}"} -f '{{{{.Dir}}' ./... \
+            | grep -qxF "${fixture}"; then
+            echo "error: ${fixture} is not in the set 'go list ./...'" >&2
+            echo "       matched under the derived tags [${root_tags:-none}], so the scan below" >&2
+            echo "       would not compile a file that builds fine on this platform. The" >&2
+            echo "       derivation has excluded the very file it read (bd gqlc-e7oq)." >&2
+            exit 1
+        fi
+    }
+    selftest_platformtag
+
     reported=""
     headers_total=0
 
@@ -535,7 +595,7 @@ vuln: vuln-root-residual
         # The `comm` below reads this string rather than re-running the walk in
         # a process substitution whose exit status nothing would read.
         dirs="$(module_dirs "${dir}")" || exit 1
-        tags="$(build_tags "${dirs}")"
+        tags="$(module_tags "${dir}")" || exit 1
         tagflag=()
         if [ -n "${tags}" ]; then tagflag=(-tags "${tags}"); fi
 
@@ -561,8 +621,13 @@ vuln: vuln-root-residual
             printf '%s\n' "${unlisted}" | sed 's/^/         /' >&2
             echo "       Derived tags were [${tags:-none}]. A directory whose every Go file is" >&2
             echo "       excluded by build constraints is skipped by the wildcard silently, with" >&2
-            echo "       no package and no IgnoredGoFiles to report — so the tag derivation above" >&2
-            echo "       missed a constraint that only these files carry." >&2
+            echo "       no package and no IgnoredGoFiles to report. Two causes: the tag derivation" >&2
+            echo "       missed a custom tag only these files carry; or these files are guarded by" >&2
+            echo "       a GOOS/GOARCH or go1.N term, which the derivation deliberately does not" >&2
+            echo "       pass as a tag (bd gqlc-e7oq) because doing so tells the compiler it is on" >&2
+            echo "       a platform it is not. Code for another platform genuinely cannot be" >&2
+            echo "       scanned from this one; that needs a deliberate decision here — a second" >&2
+            echo "       GOOS-scoped invocation — not a silently narrower scan." >&2
             exit 1
         fi
 
@@ -583,14 +648,15 @@ vuln: vuln-root-residual
             echo "error: build constraints exclude these files from ${dir}, so govulncheck cannot" >&2
             echo "       see them and the scan below would be green over unscanned code (bd gqlc-pig9):" >&2
             printf '%s\n' "${excluded}" | sed 's/^/         /' >&2
-            echo "       Derived tags were [${tags:-none}]. Either the tag derivation above missed" >&2
-            echo "       a constraint; or the derivation excluded these files itself, because a" >&2
-            echo "       tag it read off one file negates a constraint on another — //go:build" >&2
-            echo "       !windows is excluded by the 'windows' derived from a sibling (bd" >&2
-            echo "       gqlc-e7oq); or they are excluded by something -tags cannot enable at all," >&2
-            echo "       a GOOS/GOARCH filename suffix or //go:build ignore. None has ever existed" >&2
-            echo "       in this tree; the first one to needs a deliberate decision here, not a" >&2
-            echo "       silently narrower scan." >&2
+            echo "       Derived tags were [${tags:-none}]. Three causes, and the derivation can" >&2
+            echo "       only be the first of them. (1) It missed a custom tag these files carry." >&2
+            echo "       (2) A custom tag appears both positively on one file and negated on these," >&2
+            echo "       so no single build covers both — the derivation takes the positive and" >&2
+            echo "       these fall out (bd gqlc-e7oq); split the corpus or scan twice. (3) They" >&2
+            echo "       are excluded by something -tags cannot enable at all: a GOOS/GOARCH" >&2
+            echo "       filename suffix or constraint term, or //go:build ignore. None has ever" >&2
+            echo "       existed in this tree; the first one to needs a deliberate decision here," >&2
+            echo "       not a silently narrower scan." >&2
             exit 1
         fi
 
