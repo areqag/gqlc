@@ -109,5 +109,12 @@
     "ambiguous_edge_orientation_anonymous.cypher": "social_r3.gql",
     "ambiguous_edge_orientation_anonymous_inline_endpoint.cypher": "social_r3.gql",
     "anonymous_edge_uninferable_endpoint.cypher": "social_r3.gql",
-    "ambiguous_edge_orientation_two_swapped_pairs.cypher": "satisfy_plural_edges_two_swapped_pairs.gql"
+    "ambiguous_edge_orientation_two_swapped_pairs.cypher": "satisfy_plural_edges_two_swapped_pairs.gql",
+    "plural_endpoint_optional_edge_stays_plural.cypher": "satisfy_plural_edges_reversed.gql",
+    "plural_endpoint_optional_edge_property_stays_plural.cypher": "satisfy_plural_edges_reversed.gql",
+    "plural_endpoint_zero_hop_stays_plural.cypher": "satisfy_plural_edges_reversed.gql",
+    "plural_endpoint_zero_lower_bound_stays_plural.cypher": "satisfy_plural_edges_reversed.gql",
+    "plural_endpoint_merged_edge_stays_plural.cypher": "satisfy_plural_edges_reversed.gql",
+    "plural_endpoint_created_edge_stays_plural.cypher": "satisfy_plural_edges_reversed.gql",
+    "plural_endpoint_narrows_to_smaller_plural_set.cypher": "satisfy_plural_edges_three_types.gql"
 }

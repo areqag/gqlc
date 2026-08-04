@@ -328,6 +328,13 @@ func (s *scope) CloseEdges(sch schema.Schema) error {
 // left with several candidate types, which Phase B skips precisely because it
 // is already bound.
 //
+// That constraint holds only for an edge EVERY RETURNED ROW HAS. A commitment
+// describes the rows that carry the edge; it says nothing about a row that does
+// not. So only bindings that pass witnessesItsEndpoints are folded in — see
+// there for the three shapes that fail and what each would cost. Skipping an
+// edge is always safe: it lands on the pre-narrowing answer, which is what R3
+// gave before this pass existed.
+//
 // The rule is: per touching edge, UNION the contributions of the candidate
 // set's two readings (endpointContribution); across touching edges, INTERSECT.
 // The two operations are not interchangeable and the order is not free — see
@@ -349,15 +356,21 @@ func (s *scope) CloseEdges(sch schema.Schema) error {
 // candidates that previously read both ways, which can manufacture an
 // orientation disagreement where the pre-narrowing close found none — a
 // narrowing of accepted queries reached from a widening, which is the one
-// direction this change must not move in.
+// direction this change must not move in. That is also why the call sits below
+// the deferred-close loop in CloseEdges rather than above it, which
+// TestDeferredEdgesCloseBeforeTheNarrowing pins.
 func (s *scope) NarrowPluralEndpoints(sch schema.Schema) {
 	if len(s.nodeCands) == 0 {
 		return
 	}
+	written := s.writtenBindings()
 	acc := make(map[string]map[graph.LabelSetKey]struct{}, len(s.nodeCands))
 	for _, b := range s.bindings {
 		e, ok := b.(query.EdgeBinding)
 		if !ok {
+			continue
+		}
+		if !witnessesItsEndpoints(e, written) {
 			continue
 		}
 		srcs, srcOK := endpointLabels(e.Source(), s.nodeTypes, s.nodeCands)
@@ -394,6 +407,13 @@ func (s *scope) NarrowPluralEndpoints(sch schema.Schema) {
 				continue
 			}
 			v := ve.Variable()
+			// Only plural bindings are narrowed, so a singular endpoint's
+			// contribution is never wanted. Removing this line changes no
+			// answer — a singular v reaches the loop below with an empty
+			// s.nodeCands[v], so narrowed comes out empty and the "nothing
+			// learned" arm absorbs it — which is why no test can pin it. It
+			// stays because the alternative is to state the restriction
+			// nowhere and let a downstream accident enforce it.
 			if _, plural := s.nodeCands[v]; !plural {
 				continue
 			}
@@ -421,9 +441,18 @@ func (s *scope) NarrowPluralEndpoints(sch schema.Schema) {
 				narrowed = append(narrowed, nt)
 			}
 		}
+		// There is deliberately no "all candidates survived" arm. It happens
+		// often, but it needs no handling: narrowed is built by filtering cands
+		// in order, so keeping all of them makes it element-wise equal to
+		// cands, and the default arm's write-back is then a no-op. Every v here
+		// came from a plural binding, so len(cands) >= 2 and the all-survived
+		// case can never collide with the singleton arm either.
 		switch {
-		case len(narrowed) == 0 || len(narrowed) == len(cands):
-			// Nothing learned, or nothing left to learn from.
+		case len(narrowed) == 0:
+			// The touching edges agree on nothing this binding can be. Under
+			// ADR 0006 that is a statement about which rows come back, not
+			// about which types the projection may name, so the pre-narrowing
+			// set stands and ADR 0022's verdicts run on it unchanged.
 		case len(narrowed) == 1:
 			// Determined. The binding leaves the plural lane entirely, so
 			// whole-entity projection and every singular-type property lookup
@@ -434,6 +463,37 @@ func (s *scope) NarrowPluralEndpoints(sch schema.Schema) {
 			s.nodeCands[v] = narrowed
 		}
 	}
+}
+
+// writtenBindings is the set of variable names this Part's CREATE and MERGE
+// clauses introduce, read off s.effects. An anonymous position enters as the
+// empty string, exactly as CreateEffect.Variables / MergeEffect.Variables
+// record it, so an anonymous edge in a Part that writes an anonymous edge
+// tests positive whether or not it is the same one. That over-approximates,
+// and it is the safe direction: the only consumer, witnessesItsEndpoints,
+// treats membership as "do not learn from this edge", which lands on the
+// pre-narrowing answer.
+//
+// Node bindings are in the set too. They cost nothing — the consumer only ever
+// asks about edges, and a Part's named bindings have unique variables, so a
+// written node's name can never be a matched edge's name.
+func (s *scope) writtenBindings() map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, eff := range s.effects {
+		var vars []string
+		switch ee := eff.(type) {
+		case query.CreateEffect:
+			vars = ee.Variables()
+		case query.MergeEffect:
+			vars = ee.Variables()
+		default:
+			continue
+		}
+		for _, v := range vars {
+			out[v] = struct{}{}
+		}
+	}
+	return out
 }
 
 // InferUnlabelled runs Phase B against s.bindings' pending unlabelled

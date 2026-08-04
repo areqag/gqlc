@@ -831,19 +831,55 @@ is the `ErrAmbiguousEdgeOrientation` sentinel path.
 
 #### 4.6.2 Narrowing a plural endpoint the closure pins (gqlc-0tft)
 
-Committing a candidate set is also an answer about the pattern's two
-**ends**: every candidate names a node type on each of them. Under ADR
-0022 a labelled binding whose label expression several declared types
-satisfy binds plural, and Phase B skips it — it is already bound, so
-§4.5's inference never runs on it. Until gqlc-0tft nothing else did
+Committing a candidate set for an edge the query is **guaranteed to
+observe** is also an answer about the pattern's two **ends**: every
+candidate names a node type on each of them, and every row that comes
+back has the edge, so every row's endpoints are among those types. Under
+ADR 0022 a labelled binding whose label expression several declared
+types satisfy binds plural, and Phase B skips it — it is already bound,
+so §4.5's inference never runs on it. Until gqlc-0tft nothing else did
 either: `closeEdge` wrote the edge lanes and left the binding plural, so
 `MATCH (p:Person)-[r:WORKS_AT]-(c:Company) RETURN p` was refused with
 `ErrAmbiguousLabel` on a schema declaring exactly one `WORKS_AT`, from
 `Employee&Person`. The refusal was safe and false: `p` cannot be the
 bare `Person` type.
 
-After every edge has closed, each plural binding's candidate set is
-intersected with what the closure says about it.
+**Which bindings are not that answer.** The guarantee is the whole
+premise, and three shapes break it. On each, the schema still declares
+the relationship and `closeEdge` still commits a candidate set, but the
+commitment says nothing about the rows the query returns, so the
+narrowing must not read it:
+
+- **`Nullable()` — an OPTIONAL edge.** `OPTIONAL MATCH` is an outer
+  join. `MATCH (p:Person) OPTIONAL MATCH (p)-[:WORKS_AT]->(:Company)`
+  returns a bare `Person` with no `WORKS_AT`, and that row's `p` is not
+  an `Employee`.
+- **`!qualifiedDemoter()` — a zero lower bound.** `*0` and `*0..2` admit
+  the empty path, which degenerates to source == target and declares
+  nothing about either. No `OPTIONAL MATCH` is needed to reach this: a
+  plain `MATCH` with the quantifier is enough.
+- **A `CREATE`d or `MERGE`d edge.** The query causes it rather than
+  observing it, so it filters no row of the `MATCH` that fed it. Both
+  clauses leave every input row in the result, whatever its type.
+
+The first two are §4.4.3's demotion gate, spelled the same way and read
+for the same reason: both ask whether the edge is guaranteed on a
+surviving row. The third is asked only here.
+
+Committing the wrong type on any of them is not merely imprecise. For
+the whole-entity form it names a type those rows do not have; for the
+property form it emits a `NOT NULL` column that is null on them.
+Corpus: six `invalid/plural_endpoint_*_stays_plural` fixtures — the
+OPTIONAL shape twice, once returning the whole entity and once the
+property; the zero lower bound as `*0` and as `*0..2`; the written edge
+as `CREATE` and as `MERGE`. Each is paired in
+`TestNarrowingLearnsOnlyFromEdgesEveryRowHas` with an accepted twin
+that removes only the offending clause, so the predicate is pinned
+against being applied too widely as well as too narrowly.
+
+After every edge that meets the guarantee has closed, each plural
+binding's candidate set is intersected with what those closures say
+about it.
 
 **Per touching edge, union across the candidate set's two readings.**
 For a binding at one end of edge `e` with committed set `C`, the
@@ -861,8 +897,27 @@ right-to-left only, so either reading alone narrows both ends of
 
 **Across touching edges, intersect.** The same fold §4.5.3 applies to
 unlabelled bindings. A singleton commits the binding to `nodeTypes` and
-it leaves the plural lane entirely; a smaller plural set replaces the
-old one; the full set changes nothing.
+it leaves the plural lane entirely, so no consumer can still read it as
+plural; a smaller plural set replaces the old one; the full set
+surviving needs no handling at all, since the surviving slice is then
+the old one.
+
+The two halves of that fold need different witnesses, and a sentinel
+carries neither. That every touching edge is consulted is pinned by
+`invalid/plural_endpoint_contradictory_edges_stay_plural`: fold in only
+the first edge, or only the last, and `p` commits and the query is
+accepted. That the fold is an intersection rather than a union is
+pinned only where a committed type is asserted —
+`TestEdgeClosureNarrowsThePluralEndpointsItPins` and
+`TestDeferredEdgesCloseBeforeTheNarrowing` — because a union leaves the
+whole candidate set standing, which is indistinguishable from an empty
+intersection at the sentinel. The smaller-still-plural arm needs three
+satisfying types to exist at all, since on two "some survive" and "one
+survives" are the same sentence: `satisfy_plural_edges_three_types.gql`
+and `TestNarrowingToASmallerPluralSetIsWhatTheSetSaysItIs`, which reads
+the surviving set back out of the message and requires it exactly, and
+pairs it with a property projection that resolves only because the
+third type was dropped.
 
 **An empty intersection leaves the binding alone.** It means the
 touching edges pin it to disjoint types, so no node satisfies all of
@@ -885,10 +940,31 @@ endpoint type the narrowing has since ruled out — wider than necessary,
 which is the safe direction, and the same posture §4.5.2's per-edge
 union takes.
 
+The same reason fixes the pass's position inside Phase C: it runs
+**after** the deferred-close loop, so a deferred edge closes against the
+pre-narrowing tables. `TestDeferredEdgesCloseBeforeTheNarrowing` states
+that — an unlabelled far endpoint defers `REVIEWED` to the second pass,
+where it commits both declared keys as an edge union; hoist the
+narrowing above the loop and the same query answers a one-key
+`ResolvedEdge`.
+
+**Which candidate a surviving key keeps is decided by KEY label sets.**
+The keys folded into the surviving set come out of `EdgeKey.Source` and
+`.Target`, which are node type identities (§2.2), so the candidate is
+looked up by its `KeyLabels`. No corpus schema can say this: none uses
+GG21's `=>`, so GG22 infers every complete label set equal to its key
+one and the two lookups agree by construction. The witness is
+`TestNarrowingKeepsCandidatesByTheirKeyLabelSet`, on the Go-built
+divergent schema, where reading `CompleteLabels` instead turns the
+narrowing off entirely.
+
 This is a widening: it accepts queries R3 refused and refuses nothing
 it accepted. The fixture that pinned the old answer,
 `plural_endpoint_whole_entity_after_edge_closure`, moves from
-`invalid/` to `valid/`.
+`invalid/` to `valid/`. It applies to an anonymous edge exactly as to a
+named one — the binding drives the narrowing whether or not anything
+can refer to it. Corpus:
+`valid/plural_endpoint_anonymous_edge_closes_singular`.
 
 ### 4.7 Projection walk — hops-axis and multiplicity dispatch
 

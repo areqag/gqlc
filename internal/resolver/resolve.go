@@ -1167,6 +1167,45 @@ func qualifiedDemoter(e query.EdgeBinding) bool {
 	return *lower >= 1
 }
 
+// witnessesItsEndpoints reports whether a closed edge binding is EVIDENCE about
+// the node types at its two ends — the precondition NarrowPluralEndpoints reads
+// before letting an edge constrain a plural endpoint. `written` is the caller's
+// scope.writtenBindings set.
+//
+// An edge binding names a relationship the schema declares between two node
+// types, but that declaration only pins the ends of the rows the query returns
+// when EVERY returned row is guaranteed to have the edge. Three shapes break
+// that guarantee, and on each the narrowing would commit a type the projection
+// then names for rows that do not have it — a NOT NULL column that is null:
+//
+//   - Nullable(): an OPTIONAL MATCH is an outer join. `MATCH (p:Person)
+//     OPTIONAL MATCH (p)-[:WORKS_AT]->(:Company)` returns a bare Person with no
+//     WORKS_AT, and that row's p is not an Employee.
+//   - !qualifiedDemoter(): a hop range whose lower bound is zero (`*0`, `*0..2`)
+//     admits the empty path, which degenerates to source == target and declares
+//     nothing about either. No OPTIONAL MATCH is needed to reach this — a plain
+//     MATCH with a zero-lower-bound quantifier is enough.
+//   - written: a CREATE or MERGE edge is CAUSED by the query rather than
+//     observed by it, so it filters no row of the MATCH that fed it. Both
+//     clauses leave every input row in the result, whatever its type.
+//
+// The first two are §4.4.3's demotion gate, spelled the same way here and read
+// in DemoteNullability for the same reason: both ask "is this edge guaranteed
+// on a surviving row". The third is asked only here — DemoteNullability's
+// answer for a written edge is master's and is not this function's to change.
+//
+// The OPTIONAL arm is deliberately blunter than DemoteNullability's, which
+// exempts an OPTIONAL edge whose group is already proven (ay9). Such an edge
+// genuinely is a witness, so honouring demotedGroups would narrow more — but
+// that is a further widening, and it is filed rather than taken here.
+func witnessesItsEndpoints(e query.EdgeBinding, written map[string]struct{}) bool {
+	if e.Nullable() || !qualifiedDemoter(e) {
+		return false
+	}
+	_, isWritten := written[e.Variable()]
+	return !isWritten
+}
+
 // unify agrees two ResolvedTypes iff they are structurally equal or one side
 // is ResolvedUnknown. Returns the agreed type and true on success, (nil, false)
 // on conflict.

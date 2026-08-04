@@ -179,5 +179,6 @@
     "plural_endpoint_reversed_subtype_directed_closes_singular.cypher": "satisfy_plural_edges_reversed_subtype.gql",
     "plural_endpoint_symmetric_endpoints_edge_union.cypher": "satisfy_plural_edges_symmetric.gql",
     "plural_endpoint_mixed_symmetry_undirected_edge_union.cypher": "satisfy_plural_edges_mixed_symmetry.gql",
-    "plural_endpoint_mixed_symmetry_directed_closes_singular.cypher": "satisfy_plural_edges_mixed_symmetry.gql"
+    "plural_endpoint_mixed_symmetry_directed_closes_singular.cypher": "satisfy_plural_edges_mixed_symmetry.gql",
+    "plural_endpoint_anonymous_edge_closes_singular.cypher": "satisfy_plural_edges.gql"
 }
