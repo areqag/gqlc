@@ -19,6 +19,7 @@
 //	modscope [-root DIR] modules       # every module's path relative to DIR
 //	modscope [-root DIR] dirs MODULE   # every directory of MODULE holding a .go file
 //	modscope [-root DIR] tags MODULE   # every custom build tag MODULE's files ask for
+//	modscope [-root DIR] declared      # the build-tag vocabulary .golangci.yml declares
 package main
 
 import (
@@ -35,6 +36,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 func main() {
@@ -44,7 +47,7 @@ func main() {
 	}
 }
 
-const usage = "usage: modscope [-root DIR] modules|dirs MODULE|tags MODULE"
+const usage = "usage: modscope [-root DIR] modules|dirs MODULE|tags MODULE|declared"
 
 // run parses argv by hand rather than through flag, because the only flag is
 // -root and a flag package misparse would surface as a usage error at the far
@@ -94,14 +97,38 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
-		tags, err := moduleTags(ctx, root, args[1], platforms)
+		declared, err := declaredTags(root)
+		if err != nil {
+			return err
+		}
+		tags, err := moduleTags(ctx, root, args[1], platforms, declared)
 		if err != nil {
 			return err
 		}
 		return writeLines(out, tags)
+	case "declared":
+		if len(args) != 1 {
+			return errors.New(usage)
+		}
+		declared, err := declaredTags(root)
+		if err != nil {
+			return err
+		}
+		return writeLines(out, sortedTerms(declared))
 	default:
 		return fmt.Errorf("unknown command %q\n%s", args[0], usage)
 	}
+}
+
+// sortedTerms flattens a term set into a sorted slice, so every printed set and
+// every message naming one is in the same order run to run.
+func sortedTerms(set map[string]struct{}) []string {
+	out := make([]string, 0, len(set))
+	for t := range set {
+		out = append(out, t)
+	}
+	slices.Sort(out)
+	return out
 }
 
 // writeLines prints one item per line and reports the first write that failed.
@@ -306,34 +333,77 @@ var toolchainTerms = map[string]struct{}{
 	"ignore": {},
 }
 
-// classify reports whether term belongs in a -tags argument.
+// termClass is what the derivation decided a build-constraint term IS. The
+// enumeration is total on purpose: there is no residual "everything else", and
+// classUnknown is an error rather than a default.
+type termClass int
+
+const (
+	// classUnknown: the term matched no vocabulary this program has. It is not
+	// dropped and it is not passed on; it stops the derivation.
+	classUnknown termClass = iota
+	// classPlatform: a GOOS or GOARCH value per `go tool dist list`.
+	classPlatform
+	// classRelease: a `go1.N` tag the toolchain sets from its own version.
+	classRelease
+	// classToolchain: unix, cgo, gc, gccgo, race, msan, asan, ignore.
+	classToolchain
+	// classCustom: a build tag this repo owns, declared in .golangci.yml.
+	classCustom
+)
+
+// classify decides which vocabulary a build-constraint term belongs to.
 //
 // A -tags list is a monotone "assert this term true" knob, and the go command
 // will honour it for ANY spelling, including a GOOS. That is the whole defect
 // (bd gqlc-e7oq): the question is not what the flag accepts but what asserting
 // a term MEANS.
 //
-// Three classes, one of which belongs:
-//
 //   - GOOS and GOARCH values, per `go tool dist list`. The platform a scan runs
 //     on is chosen by GOOS/GOARCH, not by -tags; naming one as a tag tells the
-//     constraint evaluator it is on a platform it is not. On today's tree
-//     `//go:build windows` derived `-tags windows` and `go list` duly compiled
-//     Windows-only code on Linux, both coverage postconditions passing over a
-//     build that cannot exist.
+//     constraint evaluator it is on a platform it is not. On the parent commit
+//     `//go:build windows` derived `-tags windows` and `go list` duly matched
+//     the Windows-only directory on Linux, so BOTH coverage postconditions
+//     passed over a build that cannot exist. That is as far as the observation
+//     goes on this machine: `just vuln` still exited 1, because -tags windows
+//     drags in runtime/cgo's gcc_windows_amd64.c and govulncheck stops at a
+//     missing windows.h. The postconditions went green, not the gate.
 //   - `go1.N` release tags and the toolchain-derived terms above. Same
 //     argument, different fact: the toolchain owns them, and -tags can only
 //     disagree with it.
-//   - everything else — a custom build tag, which is exactly the thing -tags
-//     exists to turn on. Passed through.
-func classify(term string, platforms map[string]struct{}) bool {
+//   - a custom build tag, which is exactly the thing -tags exists to turn on —
+//     and which this repo declares in .golangci.yml, because a tag missing from
+//     that key is a file golangci-lint never loads (bd gqlc-oxne). One
+//     vocabulary, already reconciled against the tree in both directions by
+//     `just lint`'s check-golangci-build-tags, so reusing it here costs nothing
+//     and adding a term has exactly one place to happen.
+//
+// Everything else is classUnknown, and an unknown term is an ERROR at the call
+// site rather than a tag. The old rule made "custom tag" the default case, so
+// every failure of the vocabularies above fell through to `-tags`: pass
+// `gradePlatformTerms` a two-entry dist list — which it accepts, since it only
+// anchors on linux, windows and amd64 — and `darwin` and `arm64` stop being
+// platform values and start being tags. That is bd gqlc-e7oq surviving the
+// guard written against it, and no anchor list can be the fix, because the next
+// truncation is one term further along. A term that cannot be placed is refused
+// instead, so the same truncated table makes `darwin` red rather than green.
+//
+// Platform first: a GOOS spelling declared in .golangci.yml is still a GOOS,
+// and `-tags linux` would still be a lie about the machine.
+func classify(term string, platforms, declared map[string]struct{}) termClass {
 	if _, ok := platforms[term]; ok {
-		return false
+		return classPlatform
 	}
 	if _, ok := toolchainTerms[term]; ok {
-		return false
+		return classToolchain
 	}
-	return !releaseTag.MatchString(term)
+	if releaseTag.MatchString(term) {
+		return classRelease
+	}
+	if _, ok := declared[term]; ok {
+		return classCustom
+	}
+	return classUnknown
 }
 
 // collect walks a parsed constraint and records every term appearing at POSITIVE
@@ -352,48 +422,77 @@ func classify(term string, platforms map[string]struct{}) bool {
 // that file needs. If some sibling file asks for `foo` positively then no single
 // build covers both, and the caller's coverage postconditions redden and name
 // the files rather than this derivation silently picking a side.
-func collect(e constraint.Expr, positive bool, into map[string]struct{}) {
+//
+// Every term is recorded in all, and only the positive ones in pos. The two
+// sets are used for different questions: what to DERIVE is a question about
+// positive occurrences, but whether the derivation UNDERSTOOD the constraint is
+// a question about every term in it. Grading only the positive ones would let
+// `//go:build !mystery` through silently, and "derive nothing" is the right
+// action there only if mystery is known to be a custom tag or a platform value
+// — which is precisely what an unclassifiable term is not.
+func collect(e constraint.Expr, positive bool, all, pos map[string]struct{}) {
 	switch x := e.(type) {
 	case *constraint.TagExpr:
+		all[x.Tag] = struct{}{}
 		if positive {
-			into[x.Tag] = struct{}{}
+			pos[x.Tag] = struct{}{}
 		}
 	case *constraint.NotExpr:
-		collect(x.X, !positive, into)
+		collect(x.X, !positive, all, pos)
 	case *constraint.AndExpr:
-		collect(x.X, positive, into)
-		collect(x.Y, positive, into)
+		collect(x.X, positive, all, pos)
+		collect(x.Y, positive, all, pos)
 	case *constraint.OrExpr:
-		collect(x.X, positive, into)
-		collect(x.Y, positive, into)
+		collect(x.X, positive, all, pos)
+		collect(x.Y, positive, all, pos)
 	}
 }
 
 // constraintTags returns the custom build tags a single constraint line asks
-// for, sorted. line may be either spelling; constraint.Parse reads both.
-func constraintTags(line string, platforms map[string]struct{}) ([]string, error) {
-	// The table is an input, and an input that came back empty reclassifies
-	// every GOOS term as a custom build tag — reintroducing this bead's bug
-	// without a code change. Refused here rather than at the one call site, so
-	// it stays refused for the next one.
+// for, sorted, and refuses the line outright if any term in it — at either
+// polarity — belongs to no vocabulary. origin names the file the line came from,
+// because "this term cannot be placed" is only actionable with it.
+//
+// line may be either spelling; constraint.Parse reads both.
+func constraintTags(line string, platforms, declared map[string]struct{}, origin string) ([]string, error) {
+	// The table is an input, and an input that came back EMPTY would make every
+	// platform term unknown below — fail-closed, but reported as a file full of
+	// mystery terms rather than as the subprocess that answered nothing. Named
+	// here so the message matches the cause. Refused at the derivation rather
+	// than at the one call site, so it stays refused for the next one.
 	if len(platforms) == 0 {
-		return nil, errors.New("the GOOS/GOARCH table is empty, so every platform term would " +
-			"classify as a custom build tag and `//go:build !windows` would derive `-tags " +
-			"windows` again (bd gqlc-e7oq)")
+		return nil, errors.New("the GOOS/GOARCH table is empty, so no platform term can be " +
+			"recognised as one and every constraint mentioning a platform would be refused " +
+			"as unclassifiable — `go tool dist list` is what went wrong, not the tree " +
+			"(bd gqlc-e7oq)")
 	}
 	e, err := constraint.Parse(line)
 	if err != nil {
 		return nil, fmt.Errorf("parsing build constraint %q: %w", line, err)
 	}
-	terms := make(map[string]struct{})
-	collect(e, true, terms)
+	all, pos := make(map[string]struct{}), make(map[string]struct{})
+	collect(e, true, all, pos)
+	for _, t := range sortedTerms(all) {
+		if classify(t, platforms, declared) != classUnknown {
+			continue
+		}
+		return nil, fmt.Errorf("%s constrains itself by %q in %q, and this derivation cannot "+
+			"place that term: it is not a GOOS or GOARCH value in `go tool dist list`, not a "+
+			"go1.N release tag, not one of the terms the toolchain owns, and not declared in "+
+			".golangci.yml's run.build-tags (%s). An unplaceable term used to fall through to "+
+			"`-tags` by default, which is how a dist list that came back short turned every "+
+			"platform value it had lost back into a custom build tag, silently (bd gqlc-e7oq). "+
+			"A genuinely new custom tag is declared in .golangci.yml first — golangci-lint "+
+			"needs it there or it never loads the file, and check-golangci-build-tags holds "+
+			"that key to this derivation in both directions (bd gqlc-oxne)",
+			origin, t, line, strings.Join(sortedTerms(declared), " "))
+	}
 	var tags []string
-	for t := range terms {
-		if classify(t, platforms) {
+	for _, t := range sortedTerms(pos) {
+		if classify(t, platforms, declared) == classCustom {
 			tags = append(tags, t)
 		}
 	}
-	slices.Sort(tags)
 	return tags, nil
 }
 
@@ -438,14 +537,58 @@ func fileConstraint(path string) (string, error) {
 	return strings.Join(plus, "\n"), nil
 }
 
-// gradePlatformTerms turns `go tool dist list` output into the set of GOOS and
-// GOARCH spellings, and refuses a table that cannot be what it claims to be.
+// declaredTags reads the build-tag vocabulary this repo declares, which is
+// .golangci.yml's run.build-tags key.
 //
-// The grading is the point rather than a courtesy. This table is the only thing
-// separating a platform term from a custom build tag, so a table that came back
-// empty or short does not fail — it silently reclassifies, and `-tags windows`
-// comes back. `windows` and `linux` are the anchors because they are the terms
-// the bead is about and no plausible dist list omits them.
+// That key is not consulted here for convenience. A build tag missing from it
+// is a file golangci-lint never loads, so it is already the one place a tag has
+// to be written down to exist at all (bd gqlc-oxne), and check-golangci-build-tags
+// already reconciles it against this derivation in both directions. Reusing it
+// as the vocabulary makes an undeclared term an unplaceable term, which is what
+// lets classify refuse rather than guess.
+//
+// A parse that goes quiet therefore fails CLOSED without a grading clause of its
+// own: an empty vocabulary makes codegen_live and tagblind unplaceable, and the
+// derivation stops naming the first file carrying one. The awk this replaced in
+// check-golangci-build-tags needed an emptiness check precisely because its
+// empty answer agreed with everything.
+func declaredTags(root string) (map[string]struct{}, error) {
+	path := filepath.Join(root, ".golangci.yml")
+	data, err := os.ReadFile(path) //nolint:gosec // root plus a fixed file name.
+	if err != nil {
+		return nil, fmt.Errorf("reading the build-tag vocabulary from %s: %w. That file is "+
+			"where this repo declares which build tags exist, so without it no custom tag "+
+			"can be told from a typo (bd gqlc-oxne)", path, err)
+	}
+	var cfg struct {
+		Run struct {
+			BuildTags []string `yaml:"build-tags"`
+		} `yaml:"run"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", path, err)
+	}
+	set := make(map[string]struct{}, len(cfg.Run.BuildTags))
+	for _, t := range cfg.Run.BuildTags {
+		if t = strings.TrimSpace(t); t != "" {
+			set[t] = struct{}{}
+		}
+	}
+	return set, nil
+}
+
+// gradePlatformTerms turns `go tool dist list` output into the set of GOOS and
+// GOARCH spellings, and refuses a table that obviously cannot be the
+// toolchain's.
+//
+// The anchors are an early, legible refusal, NOT the thing that keeps a platform
+// term out of -tags. They cannot be: a table holding linux, windows and amd64
+// and nothing else passes every anchor while making darwin and arm64 look like
+// custom build tags, and lengthening the list only moves the boundary — the next
+// truncation lands one term further along. What actually holds is classify's
+// refusal of a term it cannot place, which is not a function of the table's
+// length. This stays because "the subprocess printed nothing usable" deserves to
+// be reported as that rather than as a Go file full of mystery terms.
 func gradePlatformTerms(lines []string) (map[string]struct{}, error) {
 	terms := make(map[string]struct{})
 	for _, l := range lines {
@@ -489,7 +632,7 @@ func platformTerms(ctx context.Context) (map[string]struct{}, error) {
 // An empty result is legitimate here, unlike the walk it is built on — a module
 // whose files carry no constraints asks for no tags. What is not legitimate is
 // an empty result arrived at by not looking, and goDirs already refuses that.
-func moduleTags(ctx context.Context, root, module string, platforms map[string]struct{}) ([]string, error) {
+func moduleTags(ctx context.Context, root, module string, platforms, declared map[string]struct{}) ([]string, error) {
 	dirs, err := moduleGoDirs(ctx, root, module)
 	if err != nil {
 		return nil, err
@@ -505,14 +648,15 @@ func moduleTags(ctx context.Context, root, module string, platforms map[string]s
 			if entry.IsDir() || !strings.HasSuffix(name, ".go") || skipName(name) {
 				continue
 			}
-			line, err := fileConstraint(filepath.Join(dir, name))
+			path := filepath.Join(dir, name)
+			line, err := fileConstraint(path)
 			if err != nil {
 				return nil, err
 			}
 			if line == "" {
 				continue
 			}
-			tags, err := constraintTags(line, platforms)
+			tags, err := constraintTags(line, platforms, declared, path)
 			if err != nil {
 				return nil, err
 			}
@@ -521,10 +665,5 @@ func moduleTags(ctx context.Context, root, module string, platforms map[string]s
 			}
 		}
 	}
-	tags := make([]string, 0, len(seen))
-	for t := range seen {
-		tags = append(tags, t)
-	}
-	slices.Sort(tags)
-	return tags, nil
+	return sortedTerms(seen), nil
 }

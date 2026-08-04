@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -177,6 +178,15 @@ var platforms = map[string]struct{}{
 	"windows": {}, "linux": {}, "darwin": {}, "amd64": {}, "arm64": {}, "386": {},
 }
 
+// declared stands in for .golangci.yml's run.build-tags: the vocabulary of build
+// tags this repo owns. A term outside it, and outside the toolchain's own
+// vocabularies, is not a tag — it is unplaceable.
+var declared = map[string]struct{}{
+	"codegen_live": {}, "tagblind": {}, "legacy_tag": {}, "authoritative": {},
+}
+
+const origin = "fixture/example.go"
+
 func TestConstraintTagsKeepsOnlyPositiveCustomTerms(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -187,10 +197,13 @@ func TestConstraintTagsKeepsOnlyPositiveCustomTerms(t *testing.T) {
 		// emitted `windows`, and `-tags windows` satisfies `windows`, so the
 		// file's own constraint went false and the scan compiled it nowhere.
 		{"negated GOOS", "//go:build !windows", nil},
-		// The other half, measured on the branch: a positive GOOS term is
-		// ACCEPTED by `go list -tags windows`, so both coverage postconditions
-		// pass and govulncheck scans Windows-only code on Linux — a build that
-		// cannot happen, certified as if it had.
+		// The other half, measured on the parent commit: a positive GOOS term
+		// is ACCEPTED by `go list -tags windows`, so both of the recipe's
+		// coverage postconditions pass over a build that cannot happen. Only
+		// the postconditions — parent `just vuln` still exited 1 there, because
+		// -tags windows drags in runtime/cgo's gcc_windows_amd64.c and
+		// govulncheck stops on the missing windows.h. What was observed is two
+		// guards reporting success, not the gate turning green.
 		{"positive GOOS", "//go:build windows", nil},
 		{"GOARCH", "//go:build arm64", nil},
 		{"release tag", "//go:build go1.24", nil},
@@ -214,7 +227,7 @@ func TestConstraintTagsKeepsOnlyPositiveCustomTerms(t *testing.T) {
 		{"or of two custom terms", "//go:build codegen_live || tagblind", []string{"codegen_live", "tagblind"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := constraintTags(tc.line, platforms)
+			got, err := constraintTags(tc.line, platforms, declared, origin)
 			if err != nil {
 				t.Fatalf("constraintTags(%q): %v", tc.line, err)
 			}
@@ -229,32 +242,89 @@ func TestConstraintTagsRefusesALineItCannotRead(t *testing.T) {
 	// A constraint this derivation cannot parse is the derivation going quiet
 	// over a file, and a quiet derivation drops tags rather than reporting that
 	// it dropped them — the scan then runs over less and exits 0.
-	if _, err := constraintTags("//go:build linux &&", platforms); err == nil {
+	if _, err := constraintTags("//go:build linux &&", platforms, declared, origin); err == nil {
 		t.Fatal("constraintTags accepted a malformed constraint, so a file the go " +
 			"toolchain would reject contributes no tags and nothing says so")
 	}
 }
 
 func TestConstraintTagsRefusesAnEmptyPlatformTable(t *testing.T) {
-	// The empty measurement again, one level down. With no platform table every
-	// GOOS term classifies as a custom build tag and `!windows` becomes `-tags
-	// windows` once more — the bug reintroduced by a table that came back short
-	// rather than by a code change (bd gqlc-e7oq).
-	if _, err := constraintTags("//go:build !windows", nil); err == nil {
-		t.Fatal("constraintTags accepted an empty platform table, so GOOS and GOARCH terms " +
-			"would be indistinguishable from custom build tags and pass through to -tags")
+	// The empty measurement again, one level down, and named as the subprocess
+	// failure it is rather than as a file full of unplaceable terms.
+	if _, err := constraintTags("//go:build !windows", nil, declared, origin); err == nil {
+		t.Fatal("constraintTags accepted an empty platform table, so the reason nothing in " +
+			"the tree could be classified would be reported as the tree's fault")
+	}
+}
+
+func TestConstraintTagsRefusesATermItCannotPlace(t *testing.T) {
+	// The root fix for bd gqlc-e7oq's fail-open. The old rule made "custom build
+	// tag" the DEFAULT case, so every failure of the vocabularies above it — a
+	// short dist list, a typo, a term nobody declared — came out the far end as
+	// a `-tags` argument. There is no default case now.
+	for _, tc := range []struct{ name, line string }{
+		{"undeclared term", "//go:build mystery"},
+		// Graded at either polarity: `derive nothing` is the right action for a
+		// negated term only once the term is known to be a custom tag or a
+		// platform value, which is what unplaceable means it is not.
+		{"undeclared term, negated", "//go:build !mystery"},
+		{"undeclared term beside a declared one", "//go:build tagblind && mystery"},
+		{"a typo of a declared term", "//go:build codegen_liv"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := constraintTags(tc.line, platforms, declared, origin)
+			if err == nil {
+				t.Fatalf("constraintTags(%q) = %v with no error: an undeclared term reaching "+
+					"-tags is how a term the derivation never understood ends up asserted "+
+					"true (bd gqlc-e7oq)", tc.line, got)
+			}
+			if !strings.Contains(err.Error(), origin) {
+				t.Fatalf("the refusal does not name the file it came from, which is the only "+
+					"thing that makes it actionable: %v", err)
+			}
+		})
+	}
+}
+
+func TestATruncatedDistListMakesPlatformTermsUnplaceableNotTags(t *testing.T) {
+	// The reviewer's P2, and the reason the anchors below cannot be the fix.
+	// gradePlatformTerms ACCEPTS this two-entry table — it holds linux, windows
+	// and amd64, which is every anchor — and under the old rule `darwin` and
+	// `arm64` then fell out of the platform vocabulary and into `-tags`. That is
+	// bd gqlc-e7oq surviving the guard written against it, so the assertion is
+	// not that the table is refused (it is not, and adding darwin and arm64 to
+	// the anchor list only moves the truncation one term along) but that the
+	// terms it lost are refused.
+	truncated, err := gradePlatformTerms([]string{"linux/amd64", "windows/amd64"})
+	if err != nil {
+		t.Fatalf("gradePlatformTerms over a truncated table: %v", err)
+	}
+	for _, line := range []string{"//go:build darwin", "//go:build arm64", "//go:build !darwin"} {
+		got, err := constraintTags(line, truncated, declared, origin)
+		if err == nil {
+			t.Fatalf("constraintTags(%q) under a truncated dist list = %v with no error: the "+
+				"platform terms the table lost have reclassified into -tags arguments, which "+
+				"is the defect its own fix leaves by (bd gqlc-e7oq)", line, got)
+		}
+	}
+	// And the same table still classifies what it DID keep, so the refusal is
+	// about the missing terms rather than about truncation in general.
+	if _, err := constraintTags("//go:build linux && codegen_live", truncated, declared, origin); err != nil {
+		t.Fatalf("a term the truncated table still holds must still be a platform term: %v", err)
 	}
 }
 
 func TestPlatformTermsIsGradedAgainstAnchorsItMustContain(t *testing.T) {
 	// `go tool dist list` is a subprocess, and a subprocess that prints a short
-	// answer is the failure mode this whole program exists to refuse.
+	// answer is the failure mode this whole program exists to refuse. The
+	// anchors are an early, legible refusal for the gross case only; the test
+	// above is the one that covers a table short by less than an anchor.
 	if _, err := gradePlatformTerms(nil); err == nil {
 		t.Fatal("an empty `go tool dist list` was accepted")
 	}
 	if _, err := gradePlatformTerms([]string{"linux/amd64"}); err == nil {
 		t.Fatal("a dist list holding no windows platform was accepted, so 'windows' would " +
-			"classify as a custom build tag — the exact term bd gqlc-e7oq is about")
+			"be unplaceable in every file mentioning it, reported as the tree's fault")
 	}
 	got, err := gradePlatformTerms([]string{"linux/amd64", "windows/amd64", "darwin/arm64"})
 	if err != nil {
@@ -264,6 +334,56 @@ func TestPlatformTermsIsGradedAgainstAnchorsItMustContain(t *testing.T) {
 		if _, ok := got[want]; !ok {
 			t.Fatalf("gradePlatformTerms dropped %q; both halves of GOOS/GOARCH are terms", want)
 		}
+	}
+}
+
+// --- the declared vocabulary -------------------------------------------------
+
+func TestDeclaredTagsReadsRunBuildTagsAndNothingElse(t *testing.T) {
+	// Anchored on the run.build-tags key rather than on "every `- item` in the
+	// file": .golangci.yml is mostly lists of linter names, and a vocabulary
+	// that swallowed those would place `staticcheck` as a build tag and accept
+	// it as one.
+	root := t.TempDir()
+	write(t, root, ".golangci.yml", `version: "2"
+
+run:
+  build-tags:
+    # a comment between entries
+    - codegen_live
+    - tagblind
+
+linters:
+  enable:
+    - staticcheck
+    - govet
+`)
+	got, err := declaredTags(root)
+	if err != nil {
+		t.Fatalf("declaredTags: %v", err)
+	}
+	if !slices.Equal(sortedTerms(got), []string{"codegen_live", "tagblind"}) {
+		t.Fatalf("declaredTags = %v, want [codegen_live tagblind]", sortedTerms(got))
+	}
+}
+
+func TestDeclaredTagsRefusesAConfigItCannotFind(t *testing.T) {
+	// Fail-closed on the vocabulary's absence, because the alternative is an
+	// empty vocabulary — under which every custom tag in the tree is unplaceable
+	// anyway, but reported as a Go file's fault rather than as the missing file
+	// it is.
+	if _, err := declaredTags(t.TempDir()); err == nil {
+		t.Fatal("declaredTags accepted a checkout with no .golangci.yml")
+	}
+}
+
+func TestAnEmptyVocabularyFailsClosedWithoutAGradingClause(t *testing.T) {
+	// The property that let check-golangci-build-tags' hand-written extraction
+	// drop its own emptiness check: a vocabulary that came back empty does not
+	// agree with everything here, it places nothing.
+	if _, err := constraintTags("//go:build codegen_live", platforms, nil, origin); err == nil {
+		t.Fatal("an empty vocabulary accepted a custom tag, so an extraction that went quiet " +
+			"would derive tags nobody declared")
 	}
 }
 
@@ -278,7 +398,7 @@ func TestModuleTagsReadsWhollyConstrainedDirectoriesAndDropsPlatformTerms(t *tes
 	// The pre-1.17 spelling, which the go toolchain still honours.
 	write(t, root, "old/old.go", "// +build legacy_tag\n\npackage old\n")
 
-	got, err := moduleTags(t.Context(), root, ".", platforms)
+	got, err := moduleTags(t.Context(), root, ".", platforms, declared)
 	if err != nil {
 		t.Fatalf("moduleTags: %v", err)
 	}
@@ -298,7 +418,7 @@ func TestModuleTagsPrefersGoBuildOverPlusBuildInOneFile(t *testing.T) {
 	write(t, root, "go.mod", goMod)
 	write(t, root, "a.go", "//go:build authoritative\n// +build stale\n\npackage p\n")
 
-	got, err := moduleTags(t.Context(), root, ".", platforms)
+	got, err := moduleTags(t.Context(), root, ".", platforms, declared)
 	if err != nil {
 		t.Fatalf("moduleTags: %v", err)
 	}

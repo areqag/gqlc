@@ -158,22 +158,29 @@ lint-hooks dir=".githooks": ensure-shellcheck
 # The list is hand-maintained and the linter needs it: a file behind a build tag
 # the config does not name is a file golangci-lint never loads, and it reports
 # success over code it has not read — green because it was looking at less. It
-# grew to two entries the day test/data/tagblind landed, and it grows by one
-# every time a constrained directory is added, which makes it a manual mirror of
-# a set `just vuln` already derives from a filesystem walk (bd gqlc-oxne). Two
-# derivations of one fact, one automatic and one remembered.
+# grew to two entries the day test/data/tagblind landed, and it grew by one every
+# time a constrained directory was added, which made it a manual mirror of a set
+# `just vuln` derives from a filesystem walk (bd gqlc-oxne) — two derivations of
+# one fact, one automatic and one remembered.
 #
-# Checked in both directions, like the accepted-advisory register in `just vuln`
-# and for the same reason. A tag in the tree but not in the config is the defect
-# itself. A tag in the config but not in the tree is a line describing nothing,
-# which pre-accepts whichever constrained directory is added under that spelling
-# next without anyone deciding it should be linted.
+# That key is now the VOCABULARY, not a mirror of one. The derivation reads it
+# and refuses any constraint term it cannot place — not a platform value, not a
+# go1.N tag, not toolchain-owned, not declared there — so a tag in the tree but
+# not in the config no longer reaches this comparison at all: `scope tags` below
+# fails first and names the file (bd gqlc-e7oq). That direction is kept anyway,
+# because it is no longer an assertion about the config. It is an assertion that
+# the derivation is still CONSULTING the config, and it fires the day something
+# reinstates a default case in the classification.
 #
-# The extraction is graded against its own output: a config whose build-tags
-# list this awk can no longer read yields the empty set, and the empty set would
-# agree with an empty derivation and pass. It cannot be empty here, because the
-# tree has tags — and if the tree ever genuinely has none, delete this check and
-# the config key together, deliberately.
+# The other direction is the live one: a tag in the config but not in the tree is
+# a line describing nothing, which pre-accepts whichever constrained directory is
+# added under that spelling next without anyone deciding it should be linted.
+#
+# The hand-written awk that used to read the key is gone, and with it the
+# emptiness clause it needed. One reader — `scope declared` — and a reader that
+# goes quiet now fails closed on its own: an empty vocabulary places nothing, so
+# the derivation stops on the first constrained file in the tree rather than
+# producing an empty set that agrees with an empty config.
 [private]
 check-golangci-build-tags:
     #!/usr/bin/env bash
@@ -191,29 +198,20 @@ check-golangci-build-tags:
     done
     derived="$(lines "${derived}" | sed '/^$/d' | sort -u)"
 
-    configured="$(awk '
-        /^  build-tags:/ { inlist = 1; next }
-        inlist && /^    - / { sub(/^    - /, ""); print; next }
-        inlist && (/^ *#/ || /^ *$/) { next }
-        inlist { inlist = 0 }
-    ' .golangci.yml | sort -u)"
-
-    if [ -z "${configured}" ]; then
-        echo "error: no build tag could be read out of .golangci.yml's run.build-tags list, so" >&2
-        echo "       this check would compare two sets it never measured and pass (bd gqlc-oxne)." >&2
-        echo "       Either the key moved and the extraction in this recipe must follow it, or" >&2
-        echo "       the list was emptied — in which case every constrained file in this tree is" >&2
-        echo "       now unlinted." >&2
-        exit 1
-    fi
+    configured="$(scope declared)" || exit 1
+    configured="$(lines "${configured}" | sed '/^$/d' | sort -u)"
 
     unconfigured="$(comm -23 <(lines "${derived}") <(lines "${configured}") || true)"
     stale="$(comm -13 <(lines "${derived}") <(lines "${configured}") || true)"
     if [ -n "${unconfigured}" ]; then
-        echo "error: these build tags constrain files in this tree but are not in" >&2
-        echo "       .golangci.yml's run.build-tags, so the linter never loads those files and" >&2
-        echo "       reports success over code it has not read (bd gqlc-oxne):" >&2
+        echo "error: the tag derivation emitted build tags that are not in .golangci.yml's" >&2
+        echo "       run.build-tags (bd gqlc-oxne):" >&2
         lines "${unconfigured}" | sed 's/^/         /' >&2
+        echo "       That is supposed to be unreachable: the derivation takes its vocabulary" >&2
+        echo "       from that key and refuses a term it cannot place there, so an undeclared" >&2
+        echo "       tag fails above with the file that carries it. Reaching this means the" >&2
+        echo "       classification has a default case again, and a default case is how a term" >&2
+        echo "       nobody understood became a -tags argument (bd gqlc-e7oq)." >&2
         exit 1
     fi
     if [ -n "${stale}" ]; then
@@ -321,12 +319,69 @@ test-codegen-fence: ensure-golangci check-codegen-external-tests
     set -euo pipefail
     scope() { go run ./internal/tools/modscope "$@"; }
 
-    modules_raw="$(scope modules)"
-    mapfile -t all <<<"${modules_raw}"
-    fenced=()
-    for m in "${all[@]}"; do
-        [ -n "${m}" ] && [ "${m}" != "." ] && fenced+=("${m}")
-    done
+    # The recipe's ONE derivation of "every module in this tree except the
+    # root". A function rather than six lines inline, because the selftest below
+    # has to run the same code over a changed tree — a set assembled at the only
+    # place it is used can only ever be compared with itself. `|| return 1` on
+    # the assignment because errexit is suppressed inside a command
+    # substitution, measured on bash 5.3; see the note in `just vuln`.
+    derive_fenced() {
+        local raw m
+        raw="$(scope modules)" || return 1
+        fenced=()
+        while IFS= read -r m; do
+            case "${m}" in ""|".") continue ;; esac
+            fenced+=("${m}")
+        done <<<"${raw}"
+    }
+
+    # WITNESS: the fenced set is discovered, not named (bd gqlc-oxne).
+    #
+    # Nothing else here can say that. On today's tree the discovered set is one
+    # module spelled `test/data/codegen`, which is the literal the discovery
+    # replaced — so `fenced=("test/data/codegen")` written back over the
+    # derivation fences the same module, prints the same line, and passes every
+    # other assertion in this recipe. Two sets that agree on this tree are told
+    # apart only by a tree they disagree on.
+    #
+    # So the tree is changed. A module is created on disk, the set is taken and
+    # must hold it; the module is removed, the set is taken again and must not.
+    # A hardcoded set fails the first clause, and a set measured once and cached
+    # fails the second. Both run on every invocation, CI included, because a
+    # witness that has to be remembered is not one.
+    #
+    # The probe carries a go.mod and nothing else, and it is gone before the
+    # fencing loop below runs — which is also what the second clause checks.
+    probe="$(mktemp -d test/data/fenceprobe.XXXXXX)"
+    trap 'rm -rf "${probe}"' EXIT
+    printf 'module gqlc.invalid/fenceprobe\n\ngo 1.26.5\n' >"${probe}/go.mod"
+    derive_fenced || exit 1
+    rm -rf "${probe}"
+    trap - EXIT
+    case " ${fenced[*]} " in
+        *" ${probe} "*) ;;
+        *)  echo "error: a module was created at ${probe} and the set this recipe fences did" >&2
+            echo "       not change, so that set is not being read off the tree (bd gqlc-oxne)." >&2
+            echo "       It was: ${fenced[*]}" >&2
+            echo "       This is the bead's own failure and every other assertion here is blind" >&2
+            echo "       to it: the discovered set and the literal it replaced are the same one" >&2
+            echo "       module on this tree, so a named set fences the right thing by accident" >&2
+            echo "       and goes on doing so until a second nested module is added — at which" >&2
+            echo "       point that module is built, vetted, tidied and linted by nothing." >&2
+            exit 1
+            ;;
+    esac
+    derive_fenced || exit 1
+    case " ${fenced[*]} " in
+        *" ${probe} "*)
+            echo "error: ${probe} is still in the fenced set after being removed from the tree," >&2
+            echo "       so the set is a snapshot rather than a measurement (bd gqlc-oxne)." >&2
+            echo "       Whatever cached it would cache a deleted module just as happily, and" >&2
+            echo "       this recipe would then try to build a directory that is not there." >&2
+            exit 1
+            ;;
+    esac
+
     if [ "${#fenced[@]}" -eq 0 ]; then
         echo "error: discovery found no module besides the root, so this recipe fenced nothing" >&2
         echo "       and would have exited 0 having built, vetted, tidied and linted no code" >&2
@@ -380,12 +435,47 @@ check-codegen-external-tests:
     set -euo pipefail
     scope() { go run ./internal/tools/modscope "$@"; }
 
-    modules_raw="$(scope modules)"
-    mapfile -t all <<<"${modules_raw}"
-    nested=()
-    for m in "${all[@]}"; do
-        [ -n "${m}" ] && [ "${m}" != "." ] && nested+=("${m}")
-    done
+    derive_nested() {
+        local raw m
+        raw="$(scope modules)" || return 1
+        nested=()
+        while IFS= read -r m; do
+            case "${m}" in ""|".") continue ;; esac
+            nested+=("${m}")
+        done <<<"${raw}"
+    }
+
+    # WITNESS: this set is discovered, not named — the same clause pair, and the
+    # same argument, as in test-codegen-fence above; read it there. This guard
+    # named `test/data/codegen` literally too (bd gqlc-oxne), and on a tree whose
+    # discovered set is that one module, nothing but a changed tree can tell the
+    # two apart.
+    probe="$(mktemp -d test/data/xtestprobe.XXXXXX)"
+    trap 'rm -rf "${probe}"' EXIT
+    printf 'module gqlc.invalid/xtestprobe\n\ngo 1.26.5\n' >"${probe}/go.mod"
+    derive_nested || exit 1
+    rm -rf "${probe}"
+    trap - EXIT
+    case " ${nested[*]} " in
+        *" ${probe} "*) ;;
+        *)  echo "error: a module was created at ${probe} and the set this guard checks did not" >&2
+            echo "       change, so that set is not being read off the tree (bd gqlc-oxne)." >&2
+            echo "       It was: ${nested[*]}" >&2
+            echo "       A second nested module would then keep its in-package tests, and the" >&2
+            echo "       scan that drops them with everything only they import would report" >&2
+            echo "       clean over the lot (bd gqlc-rohp)." >&2
+            exit 1
+            ;;
+    esac
+    derive_nested || exit 1
+    case " ${nested[*]} " in
+        *" ${probe} "*)
+            echo "error: ${probe} is still in the set after being removed from the tree, so the" >&2
+            echo "       set is a snapshot rather than a measurement (bd gqlc-oxne)." >&2
+            exit 1
+            ;;
+    esac
+
     if [ "${#nested[@]}" -eq 0 ]; then
         echo "error: discovery found no nested module, so this guard checked nothing and would" >&2
         echo "       have exited 0 (bd gqlc-oxne, bd gqlc-rohp)." >&2
@@ -643,11 +733,53 @@ vuln: vuln-root-residual
         printf '%s\n' "${raw}" | paste -sd,
     }
 
-    # Assigned on its own line, not consumed through a process substitution: a
-    # `mapfile < <(cmd)` reports mapfile's status and would read a helper that
-    # died as a checkout with no modules in it.
-    modules_raw="$(scope modules)"
-    mapfile -t modules <<<"${modules_raw}"
+    # The recipe's ONE derivation of the module set, taken through a plain
+    # assignment rather than `mapfile < <(scope modules)`: a process
+    # substitution's status is read by nobody, so mapfile would report its own
+    # success and a helper that died would read as a checkout with no modules in
+    # it. A function rather than two lines inline because the witness below has
+    # to run the same code over a changed tree.
+    derive_modules() {
+        local raw m
+        raw="$(scope modules)" || return 1
+        modules=()
+        while IFS= read -r m; do
+            case "${m}" in "") continue ;; esac
+            modules+=("${m}")
+        done <<<"${raw}"
+    }
+
+    # WITNESS: the swept set is discovered, not named — the clause pair from
+    # test-codegen-fence, where the argument is written out in full. It applies
+    # here for the same reason: `modules=(. test/data/codegen)` written over the
+    # derivation scans exactly what this tree scans today, passes every
+    # postcondition below, and stops scanning the day a module is added.
+    probe="$(mktemp -d test/data/vulnprobe.XXXXXX)"
+    trap 'rm -rf "${probe}"' EXIT
+    printf 'module gqlc.invalid/vulnprobe\n\ngo 1.26.5\n' >"${probe}/go.mod"
+    derive_modules || exit 1
+    rm -rf "${probe}"
+    trap - EXIT
+    case " ${modules[*]} " in
+        *" ${probe} "*) ;;
+        *)  echo "error: a module was created at ${probe} and the set this recipe sweeps did not" >&2
+            echo "       change, so that set is not being read off the tree (bd gqlc-oxne)." >&2
+            echo "       It was: ${modules[*]}" >&2
+            echo "       A module outside it is a module govulncheck is never pointed at, and" >&2
+            echo "       nothing below reports on a module that was not swept — the sweep only" >&2
+            echo "       grades what it looked at (bd gqlc-s3lt)." >&2
+            exit 1
+            ;;
+    esac
+    derive_modules || exit 1
+    case " ${modules[*]} " in
+        *" ${probe} "*)
+            echo "error: ${probe} is still in the swept set after being removed from the tree," >&2
+            echo "       so the set is a snapshot rather than a measurement (bd gqlc-oxne)." >&2
+            exit 1
+            ;;
+    esac
+
     # Postconditions on the helper rather than a second derivation: modscope
     # already refuses both, and this is what still holds if it is ever replaced.
     if [ "${#modules[@]}" -eq 0 ] || [ -z "${modules[0]}" ]; then
@@ -704,9 +836,38 @@ vuln: vuln-root-residual
     # NEGATED GOOS term, which is the shape the old derivation inverted: it read
     # the terms out with the punctuation stripped, emitted `windows`, and
     # `-tags windows` then falsified the file's own constraint (bd gqlc-e7oq).
-    # Three clauses again, and they are the three ways this stops witnessing
-    # anything: the derivation regresses, the file loses the constraint, or the
-    # directory goes away.
+    #
+    # WHAT THIS CATCHES, stated exactly, because the honest scope is narrower
+    # than "the derivation regressing". Four clauses; three are single-fault and
+    # one is not.
+    #
+    #   (1) the fixture directory dropping out of the walk,
+    #   (2) the file losing `//go:build !windows`, and
+    #   (4) the derived tags no longer matching the fixture's directory
+    #
+    # each fail on their own. Clause (3) — `windows` in the derived tag set —
+    # cannot, on THIS fixture: a negated GOOS term is suppressed twice over, once
+    # by the polarity rule and once by the platform table, and either suppressor
+    # regressing alone leaves the derived set unchanged and this recipe green. It
+    # is a double-fault detector, and calling it a regression test for the
+    # derivation would be claiming coverage that is not here.
+    #
+    # The single-fault coverage is in internal/tools/modscope's tests, where the
+    # two suppressors can be separated because the corpus is synthetic:
+    # TestConstraintTagsKeepsOnlyPositiveCustomTerms pins the polarity rule alone
+    # through its negated-CUSTOM-tag cases (`!codegen_live` and the three
+    # nested-negation cases, which no platform table touches) and the platform
+    # table alone through its positive-GOOS and GOARCH cases (which no polarity
+    # rule touches), and TestATruncatedDistListMakesPlatformTermsUnplaceableNotTags
+    # pins the third suppressor, the refusal of a term that fits no vocabulary.
+    #
+    # There is no in-tree fixture that would separate them here, and this is a
+    # property of the tree rather than an omission: the separating fixture is a
+    # POSITIVE GOOS term, `//go:build windows`, and such a directory is excluded
+    # from `go list ./...` on every machine this gate runs on — so the `unlisted`
+    # postcondition below would redden on it permanently and correctly. The only
+    # platform fixture that can live here is the negated one, and the negated one
+    # is over-determined.
     selftest_platformtag() {
         local fixture root_dirs root_tags src
         fixture="$(go list -m -f '{{{{.Dir}}')/test/data/platformtag"
@@ -740,7 +901,18 @@ vuln: vuln-root-residual
         # builds, so `go list` under the derived tags must match its directory.
         # The general coverage postcondition below would also catch this, but
         # only as an unnamed directory in a list; here it names the bead.
-        if ! go list -e "${root_tags:+-tags}" ${root_tags:+"${root_tags}"} -f '{{{{.Dir}}' ./... \
+        #
+        # The flag goes in an array rather than through `${root_tags:+-tags}`.
+        # That expansion is QUOTED, so an empty root_tags yields an empty
+        # argument rather than no argument, `-f` stops being read as a flag, and
+        # `go list` prints 28 lines of "." and "{{{{.Dir}}" instead of 25
+        # directories — measured. The clause below then fails for a reason its
+        # message does not describe, and only ever passes because tagblind keeps
+        # root_tags non-empty. An assertion that is right by a coincidence
+        # elsewhere in the tree is the shape this whole branch is about.
+        local tagflag=()
+        [ -z "${root_tags}" ] || tagflag=(-tags "${root_tags}")
+        if ! go list -e "${tagflag[@]}" -f '{{{{.Dir}}' ./... \
             | grep -qxF "${fixture}"; then
             echo "error: ${fixture} is not in the set 'go list ./...'" >&2
             echo "       matched under the derived tags [${root_tags:-none}], so the scan below" >&2
@@ -785,8 +957,10 @@ vuln: vuln-root-residual
             printf '%s\n' "${unlisted}" | sed 's/^/         /' >&2
             echo "       Derived tags were [${tags:-none}]. A directory whose every Go file is" >&2
             echo "       excluded by build constraints is skipped by the wildcard silently, with" >&2
-            echo "       no package and no IgnoredGoFiles to report. Two causes: the tag derivation" >&2
-            echo "       missed a custom tag only these files carry; or these files are guarded by" >&2
+            echo "       no package and no IgnoredGoFiles to report. Two causes: a custom tag these" >&2
+            echo "       files need is one the derivation declined, because some other file negates" >&2
+            echo "       it (an undeclared one cannot get this far — it is refused by name, with" >&2
+            echo "       the file, in .golangci.yml's vocabulary); or these files are guarded by" >&2
             echo "       a GOOS/GOARCH or go1.N term, which the derivation deliberately does not" >&2
             echo "       pass as a tag (bd gqlc-e7oq) because doing so tells the compiler it is on" >&2
             echo "       a platform it is not. Code for another platform genuinely cannot be" >&2
@@ -812,15 +986,16 @@ vuln: vuln-root-residual
             echo "error: build constraints exclude these files from ${dir}, so govulncheck cannot" >&2
             echo "       see them and the scan below would be green over unscanned code (bd gqlc-pig9):" >&2
             printf '%s\n' "${excluded}" | sed 's/^/         /' >&2
-            echo "       Derived tags were [${tags:-none}]. Three causes, and the derivation can" >&2
-            echo "       only be the first of them. (1) It missed a custom tag these files carry." >&2
-            echo "       (2) A custom tag appears both positively on one file and negated on these," >&2
-            echo "       so no single build covers both — the derivation takes the positive and" >&2
-            echo "       these fall out (bd gqlc-e7oq); split the corpus or scan twice. (3) They" >&2
-            echo "       are excluded by something -tags cannot enable at all: a GOOS/GOARCH" >&2
-            echo "       filename suffix or constraint term, or //go:build ignore. None has ever" >&2
-            echo "       existed in this tree; the first one to needs a deliberate decision here," >&2
-            echo "       not a silently narrower scan." >&2
+            echo "       Derived tags were [${tags:-none}]. Two causes, and both are the corpus" >&2
+            echo "       rather than the derivation — a tag the derivation does not know is" >&2
+            echo "       refused by name, with its file, against .golangci.yml's vocabulary" >&2
+            echo "       long before this line (bd gqlc-e7oq). (1) A custom tag appears both" >&2
+            echo "       positively on one file and negated on these, so no single build covers" >&2
+            echo "       both — the derivation takes the positive and these fall out; split the" >&2
+            echo "       corpus or scan twice. (2) They are excluded by something -tags cannot" >&2
+            echo "       enable at all: a GOOS/GOARCH filename suffix or constraint term, or" >&2
+            echo "       //go:build ignore. Neither has ever existed in this tree; the first one" >&2
+            echo "       to needs a deliberate decision here, not a silently narrower scan." >&2
             exit 1
         fi
 
