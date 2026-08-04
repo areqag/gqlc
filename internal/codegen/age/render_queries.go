@@ -3,10 +3,21 @@ package age
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/areqag/gqlc/internal/codegen"
 )
+
+// namesInstant reports whether one query's emitted surface spells the
+// instant type, which is the whole of what decides whether the file it
+// lands in imports "time". A parameter or a projected column is enough:
+// both put the type text into a signature, and the Row and Params
+// structs are built from the same fields.
+func namesInstant(p codegen.Query) bool {
+	return slices.ContainsFunc(p.ParamFields, func(f codegen.Param) bool { return f.GoType == goInstant }) ||
+		slices.ContainsFunc(p.RowFields, func(f codegen.Row) bool { return f.GoType == goInstant })
+}
 
 // sourceGroup carries one <name>.cypher.go file's worth of prepared
 // queries in emission order. Grouping is by SourceFile basename minus
@@ -90,7 +101,11 @@ func renderCypherFile(pkg string, queries []codegen.Query) []byte {
 	var b strings.Builder
 	b.WriteString(codegen.Header())
 	b.WriteString("package " + pkg + "\n\n")
-	b.WriteString("import (\n\t\"context\"\n\t\"fmt\"\n)\n\n")
+	b.WriteString("import (\n\t\"context\"\n\t\"fmt\"\n")
+	if slices.ContainsFunc(queries, namesInstant) {
+		b.WriteString("\t\"time\"\n")
+	}
+	b.WriteString(")\n\n")
 
 	for i, p := range queries {
 		if i > 0 {
@@ -133,13 +148,13 @@ func writeMethodSignature(b *strings.Builder, p codegen.Query) {
 	switch len(p.ParamFields) {
 	case 0:
 	case 1:
-		fmt.Fprintf(b, ", %s ", codegen.LowerFirstRune(p.ParamFields[0].Field))
+		fmt.Fprintf(b, ", %s ", codegen.ParamArg)
 		if p.ParamFields[0].Nullable {
 			b.WriteString("*")
 		}
 		b.WriteString(p.ParamFields[0].GoType)
 	default:
-		fmt.Fprintf(b, ", arg %sParams", p.MethodName)
+		fmt.Fprintf(b, ", %s %sParams", codegen.ParamArg, p.MethodName)
 	}
 	if p.Cardinality == codegen.CardinalityExec {
 		b.WriteString(") error")
@@ -197,18 +212,26 @@ func zeroValueText(p codegen.Query) string {
 	case codegen.ColumnNode, codegen.ColumnEdge:
 		return f.GoType + "{}"
 	default:
-		return scalarZeroText(f.GoType)
+		return zeroLiteral(f.GoType)
 	}
 }
 
-// scalarZeroText is the zero literal of a Go scalar the emission
-// produces.
-func scalarZeroText(goType string) string {
+// zeroLiteral is the zero value of a non-entity Go type the emission
+// produces. A slice, an interface and a map are all nil; what is left is
+// a Go scalar, and the numeric widths share a literal.
+func zeroLiteral(goType string) string {
+	if strings.HasPrefix(goType, "[]") {
+		return "nil"
+	}
 	switch goType {
 	case "string":
 		return `""`
 	case "bool":
 		return "false"
+	case "any", "map[string]any":
+		return "nil"
+	case goInstant:
+		return goInstant + "{}"
 	default:
 		return "0"
 	}
@@ -247,15 +270,6 @@ func writeDocComment(b *strings.Builder, p codegen.Query) {
 	}
 }
 
-// bodyLocal names one local an emitted query body declares, kept clear
-// of the identifier the query text chose. Declaring is not what makes a
-// name vulnerable — resolving it is. The package-level query-text const
-// this file emits is referenced and never declared by a body, and it
-// goes through codegen.QueryTextConst for exactly the same reason.
-func bodyLocal(p codegen.Query, name string) string {
-	return codegen.Unshadowed(p, name)
-}
-
 // failPrefix is what a body's error returns place before the error
 // itself. An :exec method returns error alone and so has nothing before
 // it; every other cardinality returns the zero of its row type first.
@@ -274,16 +288,14 @@ func failPrefix(p codegen.Query) string {
 // escaped and length-checked inside cypherStmt.
 func writeStatement(b *strings.Builder, p codegen.Query) string {
 	fail := failPrefix(p)
-	stmt, errv := bodyLocal(p, "stmt"), bodyLocal(p, "err")
-	fmt.Fprintf(b, "\t%s, %s := q.cypherStmt(%q, %s, %q)\n", stmt, errv, dollarTag(p.SourceText), codegen.QueryTextConst(p), recordShape(p))
-	fmt.Fprintf(b, "\tif %s != nil {\n\t\treturn %s%s\n\t}\n", errv, fail, errv)
+	fmt.Fprintf(b, "\tstmt, err := q.cypherStmt(%q, %s, %q)\n", dollarTag(p.SourceText), codegen.QueryTextConst(p), recordShape(p))
+	fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %serr\n\t}\n", fail)
 
 	argsExpr := `"{}"`
 	if len(p.ParamFields) > 0 {
-		args := bodyLocal(p, "args")
-		fmt.Fprintf(b, "\t%s, %s := agtypeArgs(%s)\n", args, errv, argsMapText(p))
-		fmt.Fprintf(b, "\tif %s != nil {\n\t\treturn %s%s\n\t}\n", errv, fail, errv)
-		argsExpr = args
+		fmt.Fprintf(b, "\targs, err := agtypeArgs(%s)\n", argsMapText(p))
+		fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %serr\n\t}\n", fail)
+		argsExpr = "args"
 	}
 	return argsExpr
 }
@@ -293,10 +305,9 @@ func writeStatement(b *strings.Builder, p codegen.Query) string {
 func writeQueryCall(b *strings.Builder, p codegen.Query) {
 	argsExpr := writeStatement(b, p)
 	zero := zeroValueText(p)
-	stmt, rows, errv := bodyLocal(p, "stmt"), bodyLocal(p, "rows"), bodyLocal(p, "err")
-	fmt.Fprintf(b, "\t%s, %s := q.db.Query(ctx, %s, %s)\n", rows, errv, stmt, argsExpr)
-	fmt.Fprintf(b, "\tif %s != nil {\n\t\treturn %s, fmt.Errorf(%q, %s)\n\t}\n", errv, zero, p.MethodName+": %w", errv)
-	fmt.Fprintf(b, "\tdefer %s.Close()\n", rows)
+	fmt.Fprintf(b, "\trows, err := q.db.Query(ctx, stmt, %s)\n", argsExpr)
+	fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %s, fmt.Errorf(%q, err)\n\t}\n", zero, p.MethodName+": %w")
+	b.WriteString("\tdefer rows.Close()\n")
 }
 
 // writeExecBody emits the whole of an :exec method: compose, encode,
@@ -310,9 +321,8 @@ func writeQueryCall(b *strings.Builder, p codegen.Query) {
 // identical to the one the Neo4j targets emit.
 func writeExecBody(b *strings.Builder, p codegen.Query) {
 	argsExpr := writeStatement(b, p)
-	stmt, errv := bodyLocal(p, "stmt"), bodyLocal(p, "err")
-	fmt.Fprintf(b, "\tif _, %s := q.db.Exec(ctx, %s, %s); %s != nil {\n\t\treturn fmt.Errorf(%q, %s)\n\t}\n",
-		errv, stmt, argsExpr, errv, p.MethodName+": %w", errv)
+	fmt.Fprintf(b, "\tif _, err := q.db.Exec(ctx, stmt, %s); err != nil {\n\t\treturn fmt.Errorf(%q, err)\n\t}\n",
+		argsExpr, p.MethodName+": %w")
 	b.WriteString("\treturn nil\n")
 }
 
@@ -326,14 +336,29 @@ func argsMapText(p codegen.Query) string {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		access := "arg." + f.Field
-		if len(p.ParamFields) == 1 {
-			access = codegen.LowerFirstRune(f.Field)
+		access := codegen.ParamArg
+		if len(p.ParamFields) > 1 {
+			access = codegen.ParamArg + "." + f.Field
 		}
-		fmt.Fprintf(&b, "%q: %s", f.RawName, access)
+		fmt.Fprintf(&b, "%q: %s", f.RawName, encodeParam(f, access))
 	}
 	b.WriteString("}")
 	return b.String()
+}
+
+// encodeParam wraps one parameter's access in the encoder its Go type
+// crosses the wire through. Every emitted type but the instant is
+// already a shape the JSON encoder writes as the agtype scalar it rides;
+// an instant is not, and left alone would cross as a formatted string
+// agtype orders by collation rather than by time.
+func encodeParam(f codegen.Param, access string) string {
+	if f.GoType != goInstant {
+		return access
+	}
+	if f.Nullable {
+		return "agtypeNullableMicros(" + access + ")"
+	}
+	return "agtypeMicros(" + access + ")"
 }
 
 // writeOneBody emits the :one arity check, the single row's decode, and
@@ -342,23 +367,22 @@ func argsMapText(p codegen.Query) string {
 // and reporting it is worth one more round of the cursor.
 func writeOneBody(b *strings.Builder, p codegen.Query) {
 	zero := zeroValueText(p)
-	rows, errv := bodyLocal(p, "rows"), bodyLocal(p, "err")
-	fmt.Fprintf(b, "\tif !%s.Next() {\n\t\tif %s := %s.Err(); %s != nil {\n\t\t\treturn %s, fmt.Errorf(%q, %s)\n\t\t}\n\t\treturn %s, ErrNoRows\n\t}\n",
-		rows, errv, rows, errv, zero, p.MethodName+": %w", errv, zero)
+	fmt.Fprintf(b, "\tif !rows.Next() {\n\t\tif err := rows.Err(); err != nil {\n\t\t\treturn %s, fmt.Errorf(%q, err)\n\t\t}\n\t\treturn %s, ErrNoRows\n\t}\n",
+		zero, p.MethodName+": %w", zero)
 	writeScan(b, p, "\t", zero)
-	fmt.Fprintf(b, "\tif %s.Next() {\n\t\treturn %s, ErrMultipleResults\n\t}\n", rows, zero)
-	fmt.Fprintf(b, "\tif %s := %s.Err(); %s != nil {\n\t\treturn %s, fmt.Errorf(%q, %s)\n\t}\n",
-		errv, rows, errv, zero, p.MethodName+": %w", errv)
+	fmt.Fprintf(b, "\tif rows.Next() {\n\t\treturn %s, ErrMultipleResults\n\t}\n", zero)
+	fmt.Fprintf(b, "\tif err := rows.Err(); err != nil {\n\t\treturn %s, fmt.Errorf(%q, err)\n\t}\n",
+		zero, p.MethodName+": %w")
 	for i, f := range p.RowFields {
 		writeColumnDecode(b, p, i, f, "\t", zero)
 	}
 	if len(p.RowFields) == 1 {
-		fmt.Fprintf(b, "\treturn %s, nil\n", valueExpr(p, 0, p.RowFields[0]))
+		fmt.Fprintf(b, "\treturn %s, nil\n", valueExpr(0, p.RowFields[0]))
 		return
 	}
 	fmt.Fprintf(b, "\treturn %sRow{\n", p.MethodName)
 	for i, f := range p.RowFields {
-		fmt.Fprintf(b, "\t\t%s: %s,\n", f.Field, valueExpr(p, i, f))
+		fmt.Fprintf(b, "\t\t%s: %s,\n", f.Field, valueExpr(i, f))
 	}
 	b.WriteString("\t}, nil\n")
 }
@@ -367,26 +391,25 @@ func writeOneBody(b *strings.Builder, p codegen.Query) {
 // return. The slice is allocated empty rather than left nil so a query
 // that matched nothing returns the same shape as one that matched.
 func writeManyBody(b *strings.Builder, p codegen.Query) {
-	out, rows, errv := bodyLocal(p, "out"), bodyLocal(p, "rows"), bodyLocal(p, "err")
-	fmt.Fprintf(b, "\t%s := make([]%s, 0)\n", out, rowElemText(p))
-	fmt.Fprintf(b, "\tfor %s.Next() {\n", rows)
+	fmt.Fprintf(b, "\tout := make([]%s, 0)\n", rowElemText(p))
+	b.WriteString("\tfor rows.Next() {\n")
 	writeScan(b, p, "\t\t", "nil")
 	for i, f := range p.RowFields {
 		writeColumnDecode(b, p, i, f, "\t\t", "nil")
 	}
 	if len(p.RowFields) == 1 {
-		fmt.Fprintf(b, "\t\t%s = append(%s, %s)\n", out, out, valueExpr(p, 0, p.RowFields[0]))
+		fmt.Fprintf(b, "\t\tout = append(out, %s)\n", valueExpr(0, p.RowFields[0]))
 	} else {
-		fmt.Fprintf(b, "\t\t%s = append(%s, %sRow{\n", out, out, p.MethodName)
+		fmt.Fprintf(b, "\t\tout = append(out, %sRow{\n", p.MethodName)
 		for i, f := range p.RowFields {
-			fmt.Fprintf(b, "\t\t\t%s: %s,\n", f.Field, valueExpr(p, i, f))
+			fmt.Fprintf(b, "\t\t\t%s: %s,\n", f.Field, valueExpr(i, f))
 		}
 		b.WriteString("\t\t})\n")
 	}
 	b.WriteString("\t}\n")
-	fmt.Fprintf(b, "\tif %s := %s.Err(); %s != nil {\n\t\treturn nil, fmt.Errorf(%q, %s)\n\t}\n",
-		errv, rows, errv, p.MethodName+": %w", errv)
-	fmt.Fprintf(b, "\treturn %s, nil\n", out)
+	fmt.Fprintf(b, "\tif err := rows.Err(); err != nil {\n\t\treturn nil, fmt.Errorf(%q, err)\n\t}\n",
+		p.MethodName+": %w")
+	b.WriteString("\treturn out, nil\n")
 }
 
 // writeScan emits the row scan. Every column lands in a []byte because
@@ -394,41 +417,33 @@ func writeManyBody(b *strings.Builder, p codegen.Query) {
 // agtype's text is never empty, so a nil slice is the null and nothing
 // else is.
 func writeScan(b *strings.Builder, p codegen.Query, indent, zero string) {
-	rows, errv := bodyLocal(p, "rows"), bodyLocal(p, "err")
 	targets := make([]string, len(p.RowFields))
 	for i := range p.RowFields {
-		fmt.Fprintf(b, "%svar %s []byte\n", indent, rawName(p, i))
-		targets[i] = "&" + rawName(p, i)
+		fmt.Fprintf(b, "%svar %s []byte\n", indent, rawName(i))
+		targets[i] = "&" + rawName(i)
 	}
-	fmt.Fprintf(b, "%sif %s := %s.Scan(%s); %s != nil {\n%s\treturn %s, fmt.Errorf(%q, %s)\n%s}\n",
-		indent, errv, rows, strings.Join(targets, ", "), errv, indent, zero, p.MethodName+": scan row: %w", errv, indent)
+	fmt.Fprintf(b, "%sif err := rows.Scan(%s); err != nil {\n%s\treturn %s, fmt.Errorf(%q, err)\n%s}\n",
+		indent, strings.Join(targets, ", "), indent, zero, p.MethodName+": scan row: %w", indent)
 }
 
 // rawName is the scan target for the column at index i.
-func rawName(p codegen.Query, i int) string { return bodyLocal(p, fmt.Sprintf("raw%d", i)) }
+func rawName(i int) string { return fmt.Sprintf("raw%d", i) }
 
 // valueName is the decoded local at index i — a projected column in a
 // query method, a property in an entity decoder. Every local an emitted
 // body declares is positional: a name taken from the query text or the
 // schema is any Go identifier the author chose, including one the body
-// already holds. Positional is not on its own enough in a query body,
-// where the signature can carry an identifier from the same text —
-// $value0 is a parameter an author may write — so a query body takes
-// its columns through columnName rather than through this directly.
+// already holds.
 func valueName(i int) string { return fmt.Sprintf("value%d", i) }
-
-// columnName is valueName for a query body, kept clear of the
-// identifier that body's signature took from the query text.
-func columnName(p codegen.Query, i int) string { return bodyLocal(p, valueName(i)) }
 
 // valueExpr is what a column contributes to the returned row. A narrow
 // width rides its wide carrier through the decode and converts here; a
 // nullable column already holds a pointer of the declared width.
-func valueExpr(p codegen.Query, i int, f codegen.Row) string {
+func valueExpr(i int, f codegen.Row) string {
 	if !f.Nullable && agtypeCarrier(f.GoType) != f.GoType {
-		return f.GoType + "(" + columnName(p, i) + ")"
+		return f.GoType + "(" + valueName(i) + ")"
 	}
-	return columnName(p, i)
+	return valueName(i)
 }
 
 // writeColumnDecode emits one column's null handling and decode. A
@@ -436,27 +451,26 @@ func valueExpr(p codegen.Query, i int, f codegen.Row) string {
 // the value is there, and a Go zero would report absence as a value the
 // graph holds.
 func writeColumnDecode(b *strings.Builder, p codegen.Query, idx int, f codegen.Row, indent, zero string) {
-	raw, value := rawName(p, idx), columnName(p, idx)
-	errv, decoded, narrowed := bodyLocal(p, "err"), bodyLocal(p, "decoded"), bodyLocal(p, "narrowed")
+	raw, value := rawName(idx), valueName(idx)
 	decodeErr := fmt.Sprintf("%s: decode column %%q: %%w", p.MethodName)
 
 	if !f.Nullable {
 		writeNonNullGate(b, p, f, raw, indent, zero)
-		fmt.Fprintf(b, "%s%s, %s := %s(%s)\n", indent, value, errv, columnDecoder(f), raw)
-		fmt.Fprintf(b, "%sif %s != nil {\n%s\treturn %s, fmt.Errorf(%q, %q, %s)\n%s}\n",
-			indent, errv, indent, zero, decodeErr, f.ColumnName, errv, indent)
+		fmt.Fprintf(b, "%s%s, err := %s(%s)\n", indent, value, columnDecoder(f), raw)
+		fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(%q, %q, err)\n%s}\n",
+			indent, indent, zero, decodeErr, f.ColumnName, indent)
 		return
 	}
 
 	fmt.Fprintf(b, "%svar %s *%s\n", indent, value, f.GoType)
 	fmt.Fprintf(b, "%sif %s != nil {\n", indent, raw)
-	fmt.Fprintf(b, "%s\t%s, %s := %s(%s)\n", indent, decoded, errv, columnDecoder(f), raw)
-	fmt.Fprintf(b, "%s\tif %s != nil {\n%s\t\treturn %s, fmt.Errorf(%q, %q, %s)\n%s\t}\n",
-		indent, errv, indent, zero, decodeErr, f.ColumnName, errv, indent)
+	fmt.Fprintf(b, "%s\tdecoded, err := %s(%s)\n", indent, columnDecoder(f), raw)
+	fmt.Fprintf(b, "%s\tif err != nil {\n%s\t\treturn %s, fmt.Errorf(%q, %q, err)\n%s\t}\n",
+		indent, indent, zero, decodeErr, f.ColumnName, indent)
 	if carrier := agtypeCarrier(f.GoType); carrier != f.GoType {
-		fmt.Fprintf(b, "%s\t%s := %s(%s)\n%s\t%s = &%s\n", indent, narrowed, f.GoType, decoded, indent, value, narrowed)
+		fmt.Fprintf(b, "%s\tnarrowed := %s(decoded)\n%s\t%s = &narrowed\n", indent, f.GoType, indent, value)
 	} else {
-		fmt.Fprintf(b, "%s\t%s = &%s\n", indent, value, decoded)
+		fmt.Fprintf(b, "%s\t%s = &decoded\n", indent, value)
 	}
 	fmt.Fprintf(b, "%s}\n", indent)
 }
@@ -478,18 +492,33 @@ func columnDecoder(f codegen.Row) string {
 	if f.Kind == codegen.ColumnNode || f.Kind == codegen.ColumnEdge {
 		return "decode" + f.GoType
 	}
-	return decodeFunc(agtypeCarrier(f.GoType))
+	return decodeFunc(f.GoType)
 }
 
-// decodeFunc names the models.go helper for a carrier type.
-func decodeFunc(carrier string) string {
-	switch carrier {
+// decodeFunc names the models.go helper that decodes one value of an
+// emitted Go type. A slice goes through the named wrapper emitted for
+// it, a type of no declared shape through the agtype value vocabulary,
+// and everything else through the helper for the agtype scalar its
+// carrier is — the caller narrows.
+func decodeFunc(goType string) string {
+	if strings.HasPrefix(goType, "[]") {
+		return listHelperName(goType)
+	}
+	switch goType {
+	case "any":
+		return "agtypeValue"
+	case "map[string]any":
+		return "agtypeMap"
+	}
+	switch agtypeCarrier(goType) {
 	case "bool":
 		return "agtypeBool"
 	case "int64":
 		return "agtypeInt64"
 	case "float64":
 		return "agtypeFloat64"
+	case goInstant:
+		return "agtypeInstant"
 	default:
 		return "agtypeString"
 	}

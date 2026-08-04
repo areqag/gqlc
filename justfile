@@ -133,10 +133,66 @@ bd-export-monotonic-local:
 # because the tagged files are all _test.go and go build never compiles those
 # — the tag there would be inert, and vet already builds what it analyses.
 # golangci-lint reads the tag from .golangci.yml.
-test-codegen-fence: ensure-golangci
+#
+# check-codegen-external-tests runs ahead of the linter: both fail on the same
+# regression, and only the guard names the scan it protects (ADR 0026).
+test-codegen-fence: ensure-golangci check-codegen-external-tests
     cd test/data/codegen && go build ./... && go vet -tags codegen_live ./...
     cd test/data/codegen && go mod tidy -diff
     cd test/data/codegen && {{golangci}} run
+
+# Holds the nested module to the packaging that keeps it inside govulncheck's
+# call graph (ADR 0026, bd gqlc-rohp). This is the only always-run required gate
+# over that module, so it is the only place the convention can be held.
+#
+# Two assertions, because a guard that only pins today's spelling is not a
+# guard. The first is the convention: every _test.go anywhere under the module
+# declares an external test package. The second is the consequence that
+# actually matters: the package closure govulncheck will load — the non-test
+# deps plus every external test package's deps — still reaches
+# testcontainers-go. It catches what the first cannot, a dropped codegen_live
+# tag or a move of the container code behind a different one.
+[private]
+check-codegen-external-tests:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd test/data/codegen
+
+    mapfile -t tests < <(find . -type f -name '*_test.go' | sort)
+    if [ "${#tests[@]}" -eq 0 ]; then
+        echo "error: no _test.go files found under test/data/codegen." >&2
+        echo "       The live battery has moved and this guard is checking nothing (bd gqlc-rohp)." >&2
+        exit 1
+    fi
+
+    inpackage=()
+    for f in "${tests[@]}"; do
+        pkg="$(sed -n 's/^package[[:space:]]\{1,\}\([A-Za-z_][A-Za-z0-9_]*\).*$/\1/p' "$f" | head -1)"
+        case "$pkg" in
+            *_test) ;;
+            "") inpackage+=("$f (no package clause)") ;;
+            *)  inpackage+=("$f (package $pkg)") ;;
+        esac
+    done
+    if [ "${#inpackage[@]}" -ne 0 ]; then
+        echo "error: every _test.go under test/data/codegen must declare an external test package." >&2
+        echo "       govulncheck drops the in-package test variant together with everything only it" >&2
+        echo "       imports, so 'just vuln' goes green over the driver, testcontainers and docker" >&2
+        echo "       trees it never loaded (bd gqlc-rohp). Offending files:" >&2
+        printf '         %s\n' "${inpackage[@]}" >&2
+        exit 1
+    fi
+
+    xtest="$(go list -tags codegen_live -f '{{{{range .XTestImports}}{{{{println .}}{{{{end}}' ./... | sort -u)"
+    if ! go list -deps -tags codegen_live ./... ${xtest} \
+        | grep -qx 'github.com/testcontainers/testcontainers-go'; then
+        echo "error: github.com/testcontainers/testcontainers-go is not in the package closure" >&2
+        echo "       govulncheck will load for test/data/codegen, so the live battery's dependency" >&2
+        echo "       tree is unscanned again (bd gqlc-rohp). The closure is the non-test deps plus" >&2
+        echo "       every external test package's deps; check the codegen_live tag still reaches" >&2
+        echo "       the container code and that the battery is still an external test package." >&2
+        exit 1
+    fi
 
 # runs every live test in the codegen module against real testcontainers:
 # the smoke battery on all three arms plus the AGE session-init contract.
@@ -197,8 +253,507 @@ test-codegen-live-age:
 # call-graph-aware vulnerability scan; run on dependency changes and on the
 # weekly CI schedule ("@latest" deliberate: the vuln DB matters more than
 # tool-version reproducibility)
-vuln:
-    go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+#
+# One invocation per module, because govulncheck is scoped to a module: `go list
+# ./...` at the root emits none of a nested module's packages, so the nested
+# module's driver, testcontainers and docker trees are outside a root-rooted scan
+# by module boundary (bd gqlc-rohp). -test as well, because without it
+# govulncheck loads no test files at all and every test-only dependency is
+# unscanned — godog and testify at root, and everything the live battery reaches
+# in the nested module.
+#
+# The module set and each module's build tags are DISCOVERED, not declared (bd
+# gqlc-pig9). A list written out here is a list a third module can be added
+# without: it would go unscanned with no diagnostic and no failing gate, which is
+# this gate's own defect class. Every go.mod under the checkout is scanned, with
+# every build tag its own packages constrain themselves by — the tag is where
+# code enters the build, so a module scanned without its tags is a module
+# partly scanned. `ignore` is excluded because that tag's whole meaning is
+# "not part of any build". The tags are read off the module's files on disk
+# rather than out of `go list ./...`, because the wildcard does not match a
+# directory whose Go files are ALL constrained — it would derive none of the
+# tags such a directory carries, and see nothing missing.
+#
+# Deriving the tags removes one way to be green over unscanned code and adds
+# another — a tag walk that came back empty — so each module's scan is preceded
+# by the derivation's postcondition, in two halves: every directory holding a Go
+# file was matched by `go list`, and every file of every matched package is in
+# the build. Both are scoped to what `./...` matches, which is govulncheck's own
+# scope: testdata, vendor and dot- or underscore-prefixed directories are
+# outside both.
+#
+# -show verbose because the scan runs at symbol level: package- and module-level
+# findings never change its exit status, so without verbose they are only ever
+# counted and the set this gate is exiting 0 over is never named. Naming them is
+# not only for a reader — the ids are read back out of the output and checked
+# against a register of accepted advisories, so "someone will notice the set
+# change in the log" is a decision the recipe takes rather than a hope (bd
+# gqlc-k22l). Verbose also prints the packages and modules each invocation
+# matched, which is the standing evidence that the widened scan still covers
+# every module.
+#
+# WHAT THIS GATE STILL DOES NOT SEE: the root module's in-package tests, whose
+# imports govulncheck discards, so a called vulnerability reachable only from
+# one of those files exits 0 here (ADR 0026). vuln-root-residual below measures
+# and ratchets that blind spot; bd gqlc-m5rc closes it.
+vuln: vuln-root-residual
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # comm needs a stream, and printf on an empty string still emits one empty
+    # line, which comm would read as a member. Without this a trip could be
+    # reported against a set that was never measured.
+    lines() { [ -n "${1}" ] && printf '%s\n' "${1}" || true; }
+
+    mapfile -t modules < <(find . -name go.mod -not -path './.git/*' -printf '%h\n' | sort)
+    if [ "${#modules[@]}" -eq 0 ]; then
+        echo "error: no go.mod found under the checkout, so this recipe would scan nothing" >&2
+        echo "       and exit 0 (bd gqlc-pig9). Discovery is broken." >&2
+        exit 1
+    fi
+    case " ${modules[*]} " in
+        *" . "*) ;;
+        *)  echo "error: discovery did not find the root module's go.mod, so the main module" >&2
+            echo "       is unscanned (bd gqlc-pig9). Found: ${modules[*]}" >&2
+            exit 1
+            ;;
+    esac
+
+    # Every directory of a module that holds a Go file, absolute, read off disk.
+    # The walk is bounded by the modules discovered above, so it stops at a
+    # nested module's root rather than filing that module's files under its
+    # parent, and it applies go's own `./...` exclusions — names beginning with
+    # '.' or '_', testdata, vendor — so this set and the set `go list ./...`
+    # matches are answers to the same question and can be compared.
+    #
+    # Off disk rather than out of `go list`, because `go list`'s `./...` wildcard
+    # does not match a directory whose Go files are ALL excluded by build
+    # constraints: no package, no error, and no IgnoredGoFiles either. Deriving
+    # the tags from a listing blind to such a directory derives none of the tags
+    # only that directory carries, and the IgnoredGoFiles assertion below never
+    # sees the files it dropped — the scan runs, reports on what was left, and
+    # exits 0 (bd gqlc-pig9). The module root comes from `go list -m` rather than
+    # `pwd` so it is the same path, symlinks and all, that `go list` prints.
+    go_dirs() {
+        local root prune=() m
+        root="$(cd "${1}" && go list -m -f '{{{{.Dir}}')"
+        for m in "${modules[@]}"; do
+            if [ "${m}" != "${1}" ]; then
+                case "${m}" in "${1}"/*)
+                    prune+=(-path "$(cd "${m}" && go list -m -f '{{{{.Dir}}')" -prune -o)
+                    ;;
+                esac
+            fi
+        done
+        find "${root}" -mindepth 1 \
+            \( -name '.*' -o -name '_*' -o -name testdata -o -name vendor \) -prune -o \
+            "${prune[@]}" \
+            -name '*.go' -printf '%h\n' | sort -u
+    }
+
+    # Every build tag a module's own packages constrain themselves by.
+    build_tags() {
+        go_dirs "${1}" | while IFS= read -r d; do
+            grep -hs '^//go:build' "${d}"/*.go || true
+        done \
+            | sed 's|^//go:build||' \
+            | tr '()!|&' '     ' \
+            | tr -s ' \t' '\n\n' \
+            | sed -e '/^$/d' -e '/^ignore$/d' \
+            | sort -u | paste -sd,
+    }
+
+    # The derivation's fixture. test/data/tagblind holds nothing but
+    # build-constrained Go files, which is the one directory shape `go list
+    # ./...` does not match at all — so it is the only thing in this tree that
+    # exercises either the walk above or the coverage assertion below, and a
+    # fixture that quietly stopped having that shape (deleted, or an
+    # unconstrained file added beside it) would take both guards out of service
+    # with nothing failing. The three clauses are the three ways that happens.
+    selftest_tagblind() {
+        local want="tagblind" fixture
+        fixture="$(go list -m -f '{{{{.Dir}}')/test/data/${want}"
+        if ! go_dirs . | grep -qxF "${fixture}"; then
+            echo "error: the tag-derivation fixture ${fixture}" >&2
+            echo "       is gone, so nothing in this tree exercises the filesystem walk or the" >&2
+            echo "       coverage assertion below (bd gqlc-pig9). Restore it." >&2
+            exit 1
+        fi
+        if go list -e -f '{{{{.Dir}}' ./... | grep -qxF "${fixture}"; then
+            echo "error: the tag-derivation fixture ${fixture}" >&2
+            echo "       is now matched by an untagged 'go list ./...', so it no longer has the" >&2
+            echo "       shape it exists to reproduce — a directory whose every Go file is build-" >&2
+            echo "       constrained. An unconstrained .go file was added beside it (bd gqlc-pig9)." >&2
+            exit 1
+        fi
+        case ",$(build_tags .)," in
+            *",${want},"*) ;;
+            *)  echo "error: the filesystem walk did not derive '${want}' from ${fixture}," >&2
+                echo "       so it is not seeing wholly build-constrained directories — the exact" >&2
+                echo "       blindness it replaced 'go list ./...' to fix (bd gqlc-pig9)." >&2
+                exit 1
+                ;;
+        esac
+    }
+    selftest_tagblind
+
+    reported=""
+    headers_total=0
+
+    for dir in "${modules[@]}"; do
+        tags="$(build_tags "${dir}")"
+        tagflag=()
+        if [ -n "${tags}" ]; then tagflag=(-tags "${tags}"); fi
+
+        # The derived tag set is CHECKED against the build it produces, not
+        # trusted. A tag derivation that silently came back empty would leave
+        # the tagged files out of the scan and change nothing else: the scan
+        # would run, report on what was left, and exit 0 — green because it was
+        # looking at less.
+        #
+        # There are two ways to be outside that build and they need separate
+        # assertions, because `go list` reports only one of them. A directory
+        # whose Go files are ALL excluded is not listed at all — no package, no
+        # error, no ignored files — so it can only be caught by comparing the
+        # directories the wildcard matched against the directories that hold Go
+        # files (bd gqlc-pig9). Within a directory that WAS listed, `go list`
+        # reports the drop itself, and that is the assertion below.
+        matched="$(cd "${dir}" && go list -e "${tagflag[@]}" -f '{{{{.Dir}}' ./... | sort -u)"
+        unlisted="$(comm -13 <(lines "${matched}") <(go_dirs "${dir}") || true)"
+        if [ -n "${unlisted}" ]; then
+            echo "error: these directories of ${dir} hold Go files that 'go list ./...' does not" >&2
+            echo "       match, so govulncheck loads no package for them and the scan below would" >&2
+            echo "       be green over unscanned code (bd gqlc-pig9):" >&2
+            printf '%s\n' "${unlisted}" | sed 's/^/         /' >&2
+            echo "       Derived tags were [${tags:-none}]. A directory whose every Go file is" >&2
+            echo "       excluded by build constraints is skipped by the wildcard silently, with" >&2
+            echo "       no package and no IgnoredGoFiles to report — so the tag derivation above" >&2
+            echo "       missed a constraint that only these files carry." >&2
+            exit 1
+        fi
+
+        # `IgnoredGoFiles` is go/build's own list of the files it dropped for
+        # build constraints, so an empty one says that no Go file of a package
+        # `go list ./...` matched is outside the build govulncheck is about to
+        # load. It says nothing about a directory the wildcard never matched;
+        # that is the assertion above. The two together are the tag derivation's
+        # postcondition rather than a second copy of it, so neither can go stale
+        # with it. Both are scoped to what `./...` matches — testdata, vendor and
+        # dot- or underscore-prefixed directories are outside it, and outside
+        # govulncheck's own `./...` too.
+        excluded="$(cd "${dir}" \
+            && go list -e "${tagflag[@]}" \
+                -f '{{{{if .IgnoredGoFiles}}{{{{.ImportPath}}: {{{{join .IgnoredGoFiles " "}}{{{{end}}' ./... \
+            | sed '/^$/d')"
+        if [ -n "${excluded}" ]; then
+            echo "error: build constraints exclude these files from ${dir}, so govulncheck cannot" >&2
+            echo "       see them and the scan below would be green over unscanned code (bd gqlc-pig9):" >&2
+            printf '%s\n' "${excluded}" | sed 's/^/         /' >&2
+            echo "       Derived tags were [${tags:-none}]. Either the tag derivation above missed" >&2
+            echo "       a constraint; or the derivation excluded these files itself, because a" >&2
+            echo "       tag it read off one file negates a constraint on another — //go:build" >&2
+            echo "       !windows is excluded by the 'windows' derived from a sibling (bd" >&2
+            echo "       gqlc-e7oq); or they are excluded by something -tags cannot enable at all," >&2
+            echo "       a GOOS/GOARCH filename suffix or //go:build ignore. None has ever existed" >&2
+            echo "       in this tree; the first one to needs a deliberate decision here, not a" >&2
+            echo "       silently narrower scan." >&2
+            exit 1
+        fi
+
+        echo "govulncheck: $(cd "${dir}" && go list -m) at ${dir}, tags [${tags:-none}]"
+        # Captured, not piped through `tee`. A pipeline's status is its LAST
+        # command's, so piping would take the scan's exit — the single thing
+        # this gate turns on — from `tee` unless `set -o pipefail` at the top of
+        # the recipe is still in force three hundred lines away. This repo has
+        # been bitten by that class three times; the status is read off the
+        # command that produced it, which is action at no distance. The cost is
+        # that a scan's output appears when it finishes rather than as it runs.
+        rc=0
+        out="$(cd "${dir}" && go run golang.org/x/vuln/cmd/govulncheck@latest "${tagflag[@]}" -test -show verbose ./... 2>&1)" || rc=$?
+        printf '%s\n' "${out}"
+        if [ "${rc}" -ne 0 ]; then
+            echo "error: the scan of ${dir} exited ${rc}. govulncheck exits non-zero when this tree" >&2
+            echo "       CALLS a known vulnerability, and when it cannot load the module at all —" >&2
+            echo "       the output above says which. Neither belongs in the register below: that" >&2
+            echo "       is for advisories nothing calls (bd gqlc-k22l)." >&2
+            exit "${rc}"
+        fi
+        # The register below is fail-closed only while the extraction feeding it
+        # still matches, so the extraction is checked against the output it
+        # reads. govulncheck names every finding on its own `Vulnerability #N:
+        # <id>` line; a header line the id pattern cannot read is the extraction
+        # going quiet, and a quiet extraction empties `reported` — which reports
+        # an unregistered advisory as nothing at all.
+        headers="$(grep -cE '^Vulnerability #' <<<"${out}" || true)"
+        ids="$(grep -cE '^Vulnerability #[0-9]+: GO-[0-9]{4}-[0-9]+$' <<<"${out}" || true)"
+        if [ "${headers}" -ne "${ids}" ]; then
+            echo "error: govulncheck named ${headers} advisories in ${dir} but this recipe could" >&2
+            echo "       read an id out of only ${ids} of them, so the register below would be" >&2
+            echo "       comparing against a set the scan did not produce (bd gqlc-k22l). The" >&2
+            echo "       output format moved; fix the extraction in this recipe." >&2
+            exit 1
+        fi
+        headers_total=$((headers_total + headers))
+        reported+="$(grep -oE 'GO-[0-9]{4}-[0-9]+' <<<"${out}" || true)"$'\n'
+    done
+    reported="$(lines "${reported}" | sed '/^$/d' | sort -u)"
+
+    # The per-module check above cannot see the header line itself moving: every
+    # count would be 0, they would agree, `reported` would empty, and BOTH halves
+    # of the register would go quiet together — comparing two empty sets, green
+    # over whatever the scan actually said. That is the register's fail-closed
+    # property depending on the register being non-empty, which is not a property
+    # at all. This is what makes it hold unconditionally (bd gqlc-k22l).
+    if [ "${headers_total}" -eq 0 ]; then
+        echo "error: no scan above named a single advisory, so this recipe read nothing out of" >&2
+        echo "       govulncheck's output and the register below would pass by comparing two" >&2
+        echo "       empty sets (bd gqlc-k22l). Either the output format moved — fix the" >&2
+        echo "       extraction — or every registered advisory has genuinely cleared, in which" >&2
+        echo "       case delete the register and this check together, deliberately." >&2
+        exit 1
+    fi
+
+    # The advisories this gate deliberately exits 0 over, and why (bd gqlc-k22l).
+    # Every one is uncalled — govulncheck's symbol-level result is empty, which
+    # is what keeps the exit status 0 and is re-established on every run above.
+    #
+    # This is a REGISTER, not a suppression list. It is compared against what the
+    # scan actually reported, in both directions: an advisory that turns up
+    # without a recorded decision fails the gate, and an entry the scan no longer
+    # reports fails it too until the line is deleted. Both halves matter. Without
+    # the first, "-show verbose so a reader can see the set change" is a guard
+    # nobody executes, because nobody reads the log of a green job. Without the
+    # second the register accumulates entries that describe nothing, and quietly
+    # pre-accepts an id that comes back.
+    #
+    # The ids are read back out of govulncheck's own output rather than tracked
+    # beside it, so the register cannot describe a scan that did not happen: if
+    # the output format moves and the extraction stops matching, the measured set
+    # empties and the second comparison fails rather than the first one passing.
+    #
+    # None of the three below is bumped, and the reason is a version rather than
+    # a preference. Both fixable ones are indirect dependencies of
+    # testcontainers-go, whose latest published release is v0.43.0 — exactly what
+    # test/data/codegen already requires. Pinning an indirect dependency ahead of
+    # the module that requires it is churn `go mod tidy` can undo, bought with no
+    # reduction in exposure, since none of the three is reachable. Revisit when
+    # testcontainers-go itself moves; `go list -m -u` in test/data/codegen is the
+    # check.
+    accepted="$(sed -e 's/#.*//' -e 's/[[:space:]]//g' -e '/^$/d' <<'ACCEPTED' | sort -u
+    # go.opentelemetry.io/otel v1.41.0 in test/data/codegen: baggage parsing no
+    # longer caps raw header length. Imported, not called. Fixed in v1.42.0, and
+    # v1.45.0 is out, but it is testcontainers-go v0.43.0's indirect.
+    GO-2026-5158
+    # github.com/klauspost/compress v1.18.5 in test/data/codegen: OOB read in
+    # .../s2. Required, not imported — nothing in the tree names the package.
+    # Fixed in v1.18.7; again testcontainers-go v0.43.0's indirect.
+    GO-2026-5841
+    # golang.org/x/crypto/openpgp: unmaintained and unsafe by design, no fix
+    # available and none coming. Required, not imported. This one is permanent
+    # unless x/crypto drops the package, and bumping x/crypto cannot clear it.
+    GO-2026-5932
+    ACCEPTED
+    )"
+
+    unregistered="$(comm -23 <(lines "${reported}") <(lines "${accepted}") || true)"
+    stale="$(comm -13 <(lines "${reported}") <(lines "${accepted}") || true)"
+    if [ -n "${unregistered}" ]; then
+        echo "error: the scan reported advisories this gate has no recorded decision about" >&2
+        echo "       (bd gqlc-k22l):" >&2
+        lines "${unregistered}" | sed 's|^|         https://pkg.go.dev/vuln/|' >&2
+        echo "       They are uncalled, so govulncheck exited 0 and this gate would have gone" >&2
+        echo "       green over them. Upgrade the dependency, or add the id to the register in" >&2
+        echo "       this recipe with the reason it is being accepted." >&2
+        exit 1
+    fi
+    if [ -n "${stale}" ]; then
+        echo "error: these accepted advisories are no longer reported, so the register in this" >&2
+        echo "       recipe is stale (bd gqlc-k22l):" >&2
+        lines "${stale}" | sed 's|^|         https://pkg.go.dev/vuln/|' >&2
+        echo "       Either a dependency moved and cleared them — delete the entries — or the" >&2
+        echo "       scan narrowed and stopped seeing what it used to. A register left above the" >&2
+        echo "       measured set pre-accepts whichever of these ids comes back." >&2
+        exit 1
+    fi
+    echo "accepted and still uncalled (bd gqlc-k22l): $(lines "${reported}" | paste -sd' ')"
+
+# Measures the root module's residual blindness (ADR 0026), so it is a number
+# taken on every run rather than a claim in a comment that rots (bd gqlc-m5rc).
+# Wired into `just vuln` and, as a step in ci.yml's lint job, into every pull
+# request. Reachability is the point: the residual moves on PRs that add a test
+# file, and lint is the job that runs on all of them.
+#
+# The two halves are graded differently on purpose. The file counts REPORT — a
+# new in-package test is this repo's house style, and failing on it would be
+# churn with no risk behind it. The blind set RATCHETS: it grows only on the risk
+# event itself, a package acquiring a third-party import it cannot be scanned
+# through. The baseline is the set rather than the count so that a trip can name
+# the package that went blind, and it is checked in both directions — a package
+# that leaves the set has to leave the baseline too, or the ratchet quietly
+# regains the slack it just won.
+#
+# Files and packages rather than modules: no third-party module or package is
+# missing from the closure govulncheck loads, only call edges are, so a
+# module-level metric here would report a reassuring zero over the real gap
+# (ADR 0026).
+#
+# "Third-party" is anything outside the main module whose first path element
+# contains a dot, which is what puts a package in a vulnerability database at
+# all; .TestImports is exactly the in-package test variant's import set.
+#
+# Reaching third-party code is transitive through own-module packages, not
+# direct (bd gqlc-nsq4). What govulncheck loses is the variant's outgoing edges,
+# so an own-module package that only the variant pulls in is lost along with
+# everything it imports; stopping the walk at the module boundary would report a
+# residual smaller than the real one, in the reassuring direction.
+vuln-root-residual:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    module="$(go list -m)"
+    # Emits one line per entry, and nothing at all for an empty set — an empty
+    # `echo` would feed `comm` a phantom entry and make the ratchet compare
+    # against a set it never measured.
+    lines() { [ -n "${1}" ] && printf '%s\n' "${1}" || true; }
+
+    # Every own-module package's non-test imports, which is what makes the walk
+    # in blind_packages transitive. `-deps -test` rather than a plain `./...`
+    # listing so a helper under testdata — which `./...` never matches but an
+    # in-package test can still import — has its imports on file too. Bracketed
+    # test variants are dropped: their import path is the plain package's, so
+    # keeping them would file the test build's imports under the non-test key
+    # and mark packages blind through edges govulncheck has not lost.
+    declare -A imports_of=()
+    while IFS= read -r entry; do
+        case "${entry}" in *'['*) continue ;; esac
+        pkg="${entry%% *}"
+        case "${pkg}" in "$module" | "$module"/*) imports_of["${pkg}"]="${entry#"${pkg}"}" ;; esac
+    done < <(go list -deps -test -f '{{{{.ImportPath}} {{{{join .Imports " "}}' ./...)
+
+    # Reads the listing below on stdin and names each package whose in-package
+    # test variant reaches third-party code, walking own-module imports rather
+    # than stopping at them. Reads imports_of from the caller's scope, which is
+    # what lets selftest_blind_packages substitute a fixture for the real tree.
+    blind_packages() {
+        local module="$1" pkg intest xtest imports i
+        local -A seen
+        local -a frontier extra
+        while read -r pkg intest xtest imports; do
+            seen=()
+            read -r -a frontier <<<"${imports}"
+            while [ "${#frontier[@]}" -gt 0 ]; do
+                i="${frontier[0]}"
+                frontier=("${frontier[@]:1}")
+                if [ -n "${seen[$i]+set}" ]; then continue; fi
+                seen["$i"]=1
+                case "$i" in "$module" | "$module"/*)
+                    read -r -a extra <<<"${imports_of[$i]-}"
+                    frontier+=("${extra[@]}")
+                    continue
+                    ;;
+                esac
+                case "${i%%/*}" in *.*)
+                    printf '%s\n' "${pkg#"$module"/}"
+                    break
+                    ;;
+                esac
+            done
+        done
+    }
+
+    # No package in this tree has the transitive shape today, so the recursion
+    # above has nothing live to walk and could be lost without any measurement
+    # moving. The fixture is the only thing that exercises it: m/indirect is
+    # blind through two own-module hops, m/inert reaches only stdlib through
+    # one, and m/direct pins the direct case the recursion must not break.
+    selftest_blind_packages() {
+        local -A imports_of=(
+            [m/helper]="m/deeper"
+            [m/deeper]="example.com/vuln/pkg"
+            [m/leaf]="strings"
+        )
+        local want got
+        want=$'direct\nindirect'
+        got="$(blind_packages m <<'FIXTURE'
+    m/direct 1 0 example.com/vuln/pkg testing
+    m/indirect 1 0 m/helper testing
+    m/inert 1 0 m/leaf fmt
+    m/stdlib 1 0 testing
+    m/notests 0 1
+    FIXTURE
+        )"
+        if [ "${got}" != "${want}" ]; then
+            echo "error: this recipe's own blind-package walk is broken, so every number" >&2
+            echo "       below is unreliable (bd gqlc-nsq4). Fixture expected:" >&2
+            lines "${want}" | sed 's/^/         /' >&2
+            echo "       got:" >&2
+            lines "${got}" | sed 's/^/         /' >&2
+            exit 1
+        fi
+    }
+    selftest_blind_packages
+
+    # One `go list` feeds both halves, so the counts and the blind set can never
+    # disagree about which files are in the tree, and both read the build
+    # govulncheck itself loads rather than the checkout.
+    listing="$(go list -f '{{{{.ImportPath}} {{{{len .TestGoFiles}} {{{{len .XTestGoFiles}} {{{{join .TestImports " "}}' ./...)"
+    if [ -z "${listing}" ]; then
+        echo "error: 'go list ./...' matched no packages in the root module, so this" >&2
+        echo "       recipe is measuring nothing (bd gqlc-m5rc)." >&2
+        exit 1
+    fi
+
+    inpackage=0
+    external=0
+    while read -r _ intest xtest _; do
+        inpackage=$((inpackage + intest))
+        external=$((external + xtest))
+    done <<<"${listing}"
+    blind="$(blind_packages "${module}" <<<"${listing}" | sort -u)"
+    if [ "$((inpackage + external))" -eq 0 ]; then
+        echo "error: the root module has no test files at all, so this recipe and the" >&2
+        echo "       ratchet below are measuring nothing (bd gqlc-m5rc)." >&2
+        exit 1
+    fi
+    echo "root module test-file packaging (bd gqlc-m5rc): ${inpackage} in-package, ${external} external"
+    echo "  in-package tests import third-party code in $(lines "${blind}" | grep -c . || true) packages — those call edges are outside govulncheck's call graph:"
+    lines "${blind}" | sed 's/^/    /'
+
+    # The ratchet baseline. Every entry is a package whose in-package tests
+    # already import third-party code; the list shrinks as bd gqlc-m5rc converts
+    # them and must never grow.
+    baseline="$(sort <<'BLIND'
+    internal/cli
+    internal/codegen
+    internal/codegen/age
+    internal/codegen/neo4j
+    internal/config
+    internal/queryfile
+    internal/resolver
+    internal/schema/gql
+    internal/schema/gql/annexd
+    internal/schema/gql/isobnf
+    BLIND
+    )"
+    grew="$(comm -23 <(lines "${blind}") <(lines "${baseline}") || true)"
+    shrank="$(comm -13 <(lines "${blind}") <(lines "${baseline}") || true)"
+    if [ -n "${grew}" ]; then
+        echo "error: a package just went blind to govulncheck (bd gqlc-m5rc):" >&2
+        echo "${grew}" | sed 's/^/         /' >&2
+        echo "       Its in-package tests now import third-party code, and govulncheck discards" >&2
+        echo "       the in-package test variant together with everything only it imports — so a" >&2
+        echo "       vulnerability called through that import reports nothing and 'just vuln'" >&2
+        echo "       exits 0. Move the importing test to an external test package (package" >&2
+        echo "       <pkg>_test); only add the package to the baseline in this recipe if the test" >&2
+        echo "       genuinely needs unexported state, and say why in the commit message." >&2
+        exit 1
+    fi
+    if [ -n "${shrank}" ]; then
+        echo "error: these packages are no longer blind, so the baseline in this recipe is stale:" >&2
+        echo "${shrank}" | sed 's/^/         /' >&2
+        echo "       Delete them from it. A baseline left above the measured set is slack the" >&2
+        echo "       ratchet will hand back to the next package that goes blind (bd gqlc-m5rc)." >&2
+        exit 1
+    fi
 
 # lints the GitHub Actions workflow files
 actionlint:

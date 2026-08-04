@@ -8,7 +8,7 @@ type ReadQuerier interface {
 }
 
 type WriteQuerier interface {
-	RemoveByTag(ctx context.Context, tag *string) error
+	RemoveByTag(ctx context.Context, arg *string) error
 }
 
 type Querier interface {

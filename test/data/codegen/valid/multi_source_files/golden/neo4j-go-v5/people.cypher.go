@@ -14,8 +14,8 @@ const personNameByIdQueryText = `MATCH (p:Person) WHERE p.id = $id RETURN p.name
 // PersonNameById executes the PersonNameById query.
 //
 //	MATCH (p:Person) WHERE p.id = $id RETURN p.name
-func (q *Queries) PersonNameById(ctx context.Context, id int64) (string, error) {
-	records, err := q.db.run(ctx, personNameByIdQueryText, map[string]any{"id": id}, neo4j.AccessModeRead)
+func (q *Queries) PersonNameById(ctx context.Context, arg int64) (string, error) {
+	records, err := q.db.run(ctx, personNameByIdQueryText, map[string]any{"id": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return "", err
 	}

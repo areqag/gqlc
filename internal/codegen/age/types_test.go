@@ -13,13 +13,17 @@ import (
 
 // TestTypeMapProperty pins the property axis of the Go-type table (spec
 // §5.1). agtype's scalar vocabulary is narrower than the neo4j driver's,
-// so the boundary sits in a different place: BYTES, the five temporal
-// widths, and the two structured widths join the eight oversized numeric
-// widths on the reject side, and a caller hitting any of them gets
-// ErrUnrepresentableWidth naming the width. The rows pin each width's
-// mapping; the constant set
-// they range over is held by Property's switch, which has no default
-// arm and so fails the exhaustive linter when internal/graph grows one.
+// so the boundary sits in a different place: BYTES and four of the five
+// temporal widths join the eight oversized numeric widths on the reject
+// side, and a caller hitting any of them gets ErrUnrepresentableWidth
+// naming the width. TIMESTAMP is the one temporal width that crosses, on
+// an encoding this package owns. The two structured widths are on the
+// admit side, emitting what every other backend emits for them — agtype
+// has a list and a map of its own, so a list of a carried element width
+// and Go's any (ADR 0020) both have something to decode from. The rows
+// pin each width's mapping; the constant set they range over is held by
+// Property's switch, which has no default arm and so fails the
+// exhaustive linter when internal/graph grows one.
 func TestTypeMapProperty(t *testing.T) {
 	representable := []struct {
 		pt   graph.PropertyType
@@ -40,6 +44,11 @@ func TestTypeMapProperty(t *testing.T) {
 		{graph.TypeFloat, "float64"},
 		{graph.TypeFloat32, "float32"},
 		{graph.TypeFloat64, "float64"},
+		// The two structured widths. TypeList is the bare LIST, which is
+		// LIST<ANY> spelled out, so it maps through the list arm.
+		{graph.TypeAnyPropertyValue, "any"},
+		{graph.TypeList, "[]any"},
+		{graph.TypeTimestamp, "time.Time"},
 	}
 	for _, tt := range representable {
 		t.Run("representable/"+string(tt.pt), func(t *testing.T) {
@@ -50,22 +59,19 @@ func TestTypeMapProperty(t *testing.T) {
 	}
 
 	unrepresentable := []graph.PropertyType{
-		// agtype has no byte-string and no temporal scalar. The wire
-		// encoding for the latter is the temporal arm's to commit;
-		// admitting them here would emit columns no decoder can fill.
+		// agtype has no byte-string scalar.
 		graph.TypeBytes,
+		// The three widths neo4j spells with a driver type, which a
+		// Postgres backend cannot declare without varying the caller-facing
+		// surface by backend, and the calendar duration no fixed count of
+		// microseconds is faithful to.
 		graph.TypeDate, graph.TypeTime, graph.TypeLocalTime,
-		graph.TypeTimestamp, graph.TypeDuration,
+		graph.TypeDuration,
 		// No faithful Go carrier on any backend (§9).
 		graph.TypeInt128, graph.TypeInt256,
 		graph.TypeUint128, graph.TypeUint256,
 		graph.TypeFloat16, graph.TypeFloat128, graph.TypeFloat256,
 		graph.TypeDecimal,
-		// The decode vocabulary is one helper per agtype scalar, so a
-		// property whose value is a list or is of no declared shape at
-		// all would reach a struct field with no helper to fill it.
-		graph.TypeList,
-		graph.TypeAnyPropertyValue,
 	}
 	for _, pt := range unrepresentable {
 		t.Run("unrepresentable/"+string(pt), func(t *testing.T) {
@@ -75,11 +81,43 @@ func TestTypeMapProperty(t *testing.T) {
 		})
 	}
 
-	t.Run("a list is rejected whatever its element", func(t *testing.T) {
-		for _, elem := range []graph.PropertyType{graph.TypeInt32, graph.TypeDecimal, graph.TypeTimestamp} {
-			got, ok := typeMap{}.Property(graph.ListOf(elem, false))
-			require.False(t, ok, "element %s", elem)
-			require.Empty(t, got)
+	// A list is admitted exactly when its element width is, at whatever
+	// depth, and the text it produces is the one every other backend
+	// produces for the same declaration — the surface a caller writes
+	// against does not vary by backend, only what fills it does. An
+	// element's NOT NULL qualifier is not part of that text: a Go slice
+	// element is not a pointer either way.
+	t.Run("a list rides its element's carrier at whatever depth", func(t *testing.T) {
+		cases := map[graph.PropertyType]string{
+			graph.ListOf(graph.TypeString, false):                                       "[]string",
+			graph.ListOf(graph.TypeString, true):                                        "[]string",
+			graph.ListOf(graph.TypeInt32, false):                                        "[]int32",
+			graph.ListOf(graph.TypeFloat32, false):                                      "[]float32",
+			graph.ListOf(graph.TypeAnyPropertyValue, false):                             "[]any",
+			graph.ListOf(graph.ListOf(graph.TypeInt64, false), false):                   "[][]int64",
+			graph.ListOf(graph.ListOf(graph.ListOf(graph.TypeBool, true), false), true): "[][][]bool",
+		}
+		for pt, want := range cases {
+			got, ok := typeMap{}.Property(pt)
+			require.True(t, ok, "%s", pt)
+			require.Equal(t, want, got, "%s", pt)
+		}
+	})
+
+	// A width with no carrier does not acquire one by being wrapped in a
+	// list: the elements would reach a slice no helper can fill. TIMESTAMP
+	// is here despite carrying as a property, because the zone sidecar is
+	// named after the property and a list has one name for every element.
+	t.Run("a list of an uncarried element width is rejected", func(t *testing.T) {
+		for _, elem := range []graph.PropertyType{graph.TypeDecimal, graph.TypeDuration, graph.TypeBytes, graph.TypeTimestamp} {
+			for _, pt := range []graph.PropertyType{
+				graph.ListOf(elem, false),
+				graph.ListOf(graph.ListOf(elem, false), false),
+			} {
+				got, ok := typeMap{}.Property(pt)
+				require.False(t, ok, "%s", pt)
+				require.Empty(t, got)
+			}
 		}
 	})
 
@@ -105,9 +143,12 @@ func TestTypeMapProperty(t *testing.T) {
 // the backend with no carrier for it, rather than emitting a field
 // nothing can decode. The widths here are ones AGE rejects and neo4j
 // accepts, so a config declaring both targets fails on one of them and
-// the backend name is what says which.
+// the backend name is what says which. The list row is what says the
+// report names the property's declared width and not the element's:
+// LIST<DURATION> is what the author wrote, and DURATION alone is not
+// a line they could go and find.
 func TestTypeMapPropertyRejectionReachesTheCaller(t *testing.T) {
-	for _, pt := range []graph.PropertyType{graph.TypeBytes, graph.TypeTimestamp, graph.ListOf(graph.TypeString, false)} {
+	for _, pt := range []graph.PropertyType{graph.TypeBytes, graph.TypeDuration, graph.ListOf(graph.TypeDuration, false)} {
 		t.Run(string(pt), func(t *testing.T) {
 			files, err := generate(codegen.Input{Schema: schemaWithPayload(pt)}, "age")
 			require.ErrorIs(t, err, codegen.ErrUnrepresentableWidth)
@@ -121,19 +162,19 @@ func TestTypeMapPropertyRejectionReachesTheCaller(t *testing.T) {
 // TestUnservedQueriesOutrankUnrepresentableWidths pins which of the two
 // rejections a batch failing both reports. The width sweep would send
 // the author to a schema that was never the obstacle: a query projecting
-// a list stays unserved whatever the schema's widths are, so repairing
-// them leaves the batch exactly where it was. Only the query rejection
-// says so.
+// a list of a width with no carrier stays unserved whatever the rest of
+// the schema's widths are, so repairing them leaves the batch exactly
+// where it was. Only the query rejection says so.
 func TestUnservedQueriesOutrankUnrepresentableWidths(t *testing.T) {
 	files, err := generate(codegen.Input{
-		Schema: schemaWithPayload(graph.TypeTimestamp),
+		Schema: schemaWithPayload(graph.TypeDuration),
 		Queries: []codegen.NamedQuery{{
 			Name: "Wipe",
 			Validated: resolver.ValidatedQuery{
 				Statement: resolver.StatementRead,
 				Columns: []resolver.Column{{
 					Name: "t",
-					Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeString, false)},
+					Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeTimestamp, false)},
 				}},
 			},
 		}},
@@ -163,7 +204,10 @@ func schemaWithPayload(pt graph.PropertyType) schema.Schema {
 }
 
 // temporalKinds is the resolver's whole temporal vocabulary, written out
-// so the sweeps below range over every kind rather than a sample.
+// so the sweeps below range over every kind rather than a sample. The
+// length check against resolver.TemporalCount is what keeps it whole: a
+// kind the resolver gains is a compile failure in the type table's
+// switch and a failure here.
 var temporalKinds = []resolver.Temporal{
 	resolver.TemporalDate,
 	resolver.TemporalTime,
@@ -174,10 +218,15 @@ var temporalKinds = []resolver.Temporal{
 }
 
 // TestTypeMapTemporal pins the temporal column-shape row (spec §5.1).
-// agtype has no temporal scalar, so no kind has a carrier here and every
-// one of them refuses. The rows exist so the temporal arm's commitment
-// lands as six failures rather than a quiet change of column type.
+// Every kind refuses, and lifting the TIMESTAMP property width to a real
+// encoding did not change that: a column of this shape exists only
+// because the query called a temporal constructor, and AGE 1.7.0 has
+// none to call. The rows exist so admitting one lands as a failure
+// rather than as a quiet change of column type.
 func TestTypeMapTemporal(t *testing.T) {
+	require.Len(t, temporalKinds, resolver.TemporalCount,
+		"the sweep must cover the resolver's whole temporal vocabulary")
+
 	for _, k := range temporalKinds {
 		t.Run(k.String(), func(t *testing.T) {
 			got, ok := typeMap{}.Temporal(k)
@@ -192,7 +241,7 @@ func TestTypeMapTemporal(t *testing.T) {
 	// refusing is what stops a kind added upstream from inheriting an
 	// answer chosen for the kinds that came before it.
 	t.Run("kind outside the vocabulary is refused", func(t *testing.T) {
-		got, ok := typeMap{}.Temporal(resolver.TemporalDuration + 1)
+		got, ok := typeMap{}.Temporal(resolver.Temporal(resolver.TemporalCount))
 		require.False(t, ok)
 		require.Empty(t, got)
 	})

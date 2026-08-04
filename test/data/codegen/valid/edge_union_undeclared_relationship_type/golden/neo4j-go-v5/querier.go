@@ -5,7 +5,7 @@ package edgeunionundeclaredrelationshiptype
 import "context"
 
 type ReadQuerier interface {
-	ActionOnPost(ctx context.Context, postId int64) (ActionOnPostR, error)
+	ActionOnPost(ctx context.Context, arg int64) (ActionOnPostR, error)
 }
 
 type WriteQuerier interface {

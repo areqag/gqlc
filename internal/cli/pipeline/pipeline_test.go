@@ -41,19 +41,19 @@ const (
 	// whole vocabulary against a single project.
 	fixtureQuery = "// name: AllPersonNames :many\nMATCH (p:Person) RETURN p.name\n"
 
-	// listSchema and listQuery project a list property, which the Apache
-	// AGE backend has no decode arm for. The list lives on a schema of
-	// its own rather than on fixtureSchema, because every target shares
-	// that one and a list on it would fail the AGE arm of the driver
-	// axis too.
-	listSchema = `CREATE PROPERTY GRAPH TYPE People AS {
+	// uncarriedSchema and uncarriedQuery project a list whose element
+	// width the Apache AGE backend has no carrier for. The property
+	// lives on a schema of its own rather than on fixtureSchema, because
+	// every target shares that one and this property would fail the AGE
+	// arm of the driver axis too.
+	uncarriedSchema = `CREATE PROPERTY GRAPH TYPE People AS {
     (:Person {
-        id   :: INT64 NOT NULL,
-        tags :: LIST<STRING>
+        id     :: INT64 NOT NULL,
+        stamps :: LIST<TIMESTAMP>
     })
 }
 `
-	listQuery = "// name: PersonTags :one\nMATCH (p:Person) RETURN p.tags AS tags\n"
+	uncarriedQuery = "// name: PersonStamps :one\nMATCH (p:Person) RETURN p.stamps AS stamps\n"
 
 	// unionSchema and unionQuery project an edge that binds to more than
 	// one candidate edge type, each carrying a distinct label. Only a
@@ -182,25 +182,28 @@ const (
 	spacedAlternationQuery = "// name: PostIDs :one\n" +
 		"MATCH (:Person)-[r:AUTHORED | LIKES]->(p:Post) RETURN p.id\n"
 
-	// listAlternationSchema declares narrowedSchema's two relationship
-	// types over a Post carrying a list property, so one query can trip
-	// the text gate and an unserved COLUMN at once. Which of the two the
-	// author is told is what TestRunApacheAgeAnswersAnAlternationAheadOf
-	// OtherColumnRefusals turns on.
-	listAlternationSchema = `CREATE PROPERTY GRAPH TYPE People AS {
+	// wideColumnAlternationSchema declares narrowedSchema's two
+	// relationship types over a Post carrying a BYTES property, so one
+	// query can trip the text gate and an unserved COLUMN at once. BYTES
+	// is the width because agtype has no carrier for it and never will —
+	// a list, by contrast, rides its element's carrier on this backend
+	// and so is served. Which of the two refusals the author is told is
+	// what TestRunApacheAgeAnswersAnAlternationAheadOfOtherColumnRefusals
+	// turns on.
+	wideColumnAlternationSchema = `CREATE PROPERTY GRAPH TYPE People AS {
     (:Person { id :: INT64 NOT NULL }),
     (:Post   {
-        id   :: INT64 NOT NULL,
-        tags :: LIST<STRING>
+        id      :: INT64 NOT NULL,
+        payload :: BYTES
     }),
     (:Person) -[:AUTHORED { since :: INT64 NOT NULL }]-> (:Post),
     (:Person) -[:LIKES]-> (:Post)
 }
 `
-	listAlternationQuery = "// name: PostTags :one\n" +
-		"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) RETURN p.tags AS tags\n"
-	listNoAlternationQuery = "// name: PostTags :one\n" +
-		"MATCH (:Person)-[r:AUTHORED]->(p:Post) RETURN p.tags AS tags\n"
+	wideColumnAlternationQuery = "// name: PostPayload :one\n" +
+		"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) RETURN p.payload AS payload\n"
+	wideColumnNoAlternationQuery = "// name: PostPayload :one\n" +
+		"MATCH (:Person)-[r:AUTHORED]->(p:Post) RETURN p.payload AS payload\n"
 
 	// sharedLabelAlternationSchema and sharedLabelAlternationQuery are a
 	// verbatim copy of test/data/codegen/invalid/
@@ -423,14 +426,14 @@ func TestRunDriverAxis(t *testing.T) {
 // without reading the message.
 func TestRunApacheAgeRejectionIsASentinel(t *testing.T) {
 	dir, cfgPath := writeProject(t)
-	writeFixtureFile(t, filepath.Join(dir, "schema.gql"), listSchema)
-	writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), listQuery)
+	writeFixtureFile(t, filepath.Join(dir, "schema.gql"), uncarriedSchema)
+	writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), uncarriedQuery)
 	writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverApacheAgePgxV5), ""))
 
 	res, err := pipeline.Run(cfgPath, backendRegistry(t))
 	require.ErrorIs(t, err, age.ErrUnsupportedQuery)
 	require.ErrorContains(t, err, "graph[0]: unsupported query: ")
-	require.ErrorContains(t, err, `1 query would be dropped: PersonTags (column "tags" projects a list property)`)
+	require.ErrorContains(t, err, `1 query would be dropped: PersonStamps (column "stamps" projects property:LIST<TIMESTAMP>)`)
 	require.Equal(t, pipeline.Result{}, res)
 }
 
@@ -664,43 +667,43 @@ func TestRunApacheAgeRefusesRelationshipTypeAlternation(t *testing.T) {
 // answer names the candidates the schema declares for the pattern — more
 // than the text can say about the same defect.
 //
-// Nothing else does, and that is what this asserts. A list property is a
-// different defect from an unparseable statement. Answering it first
-// costs the author two rounds on one query: change the projection,
-// regenerate, and only then find out the query never parsed on this
-// backend. The alternation is the obstacle underneath — the statement
-// has to be rewritten before any projection can be put to this server —
-// so it is the answer.
+// Nothing else does, and that is what this asserts. A column of a width
+// agtype cannot carry is a different defect from an unparseable
+// statement. Answering it first costs the author two rounds on one
+// query: change the projection, regenerate, and only then find out the
+// query never parsed on this backend. The alternation is the obstacle
+// underneath — the statement has to be rewritten before any projection
+// can be put to this server — so it is the answer.
 //
 // The second half is the discriminator and is not optional. Strip the
 // '|' from the same query against the same schema and the same column is
-// still unserved; if the list-property refusal does not come back, what
-// the first half measured was a column arm that stopped firing rather
-// than a gate order.
+// still unserved; if the width refusal does not come back, what the
+// first half measured was a column arm that stopped firing rather than a
+// gate order.
 func TestRunApacheAgeAnswersAnAlternationAheadOfOtherColumnRefusals(t *testing.T) {
 	dir, cfgPath := writeProject(t)
-	writeFixtureFile(t, filepath.Join(dir, "schema.gql"), listAlternationSchema)
+	writeFixtureFile(t, filepath.Join(dir, "schema.gql"), wideColumnAlternationSchema)
 	writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverApacheAgePgxV5), ""))
 
 	queryPath := filepath.Join(dir, "queries", "people.cypher")
-	writeFixtureFile(t, queryPath, listAlternationQuery)
+	writeFixtureFile(t, queryPath, wideColumnAlternationQuery)
 
 	res, err := pipeline.Run(cfgPath, backendRegistry(t))
 	require.ErrorIs(t, err, age.ErrRelationshipTypeAlternation,
 		"the column gate yields to the text on every reason but the edge union, so the author is not sent to fix a projection first")
 	require.NotErrorIs(t, err, age.ErrUnsupportedQuery)
-	require.ErrorContains(t, err, `PostTags (":AUTHORED|LIKES")`)
-	require.NotContains(t, err.Error(), "projects a list property",
+	require.ErrorContains(t, err, `PostPayload (":AUTHORED|LIKES")`)
+	require.NotContains(t, err.Error(), "property:BYTES",
 		"the projection is not the obstacle yet; the statement is")
 	require.Equal(t, pipeline.Result{}, res)
 
-	writeFixtureFile(t, queryPath, listNoAlternationQuery)
+	writeFixtureFile(t, queryPath, wideColumnNoAlternationQuery)
 
 	res, err = pipeline.Run(cfgPath, backendRegistry(t))
 	require.ErrorIs(t, err, age.ErrUnsupportedQuery,
-		"the same column with no '|' in the text is still the column gate's, so the yield above is an ordering and not a hole in the list arm")
+		"the same column with no '|' in the text is still the column gate's, so the yield above is an ordering and not a hole in the width arm")
 	require.NotErrorIs(t, err, age.ErrRelationshipTypeAlternation)
-	require.ErrorContains(t, err, `PostTags (column "tags" projects a list property)`)
+	require.ErrorContains(t, err, `PostPayload (column "payload" projects property:BYTES)`)
 	require.Equal(t, pipeline.Result{}, res)
 }
 

@@ -1,8 +1,21 @@
 // The schema the emitted-helper corpus runs against. One emission has to
 // reach every decode arm the helpers carry, so between them these types
 // declare each agtype scalar, a width that narrows from its carrier, a
-// nullable property, an entity with no properties at all, and an edge.
+// nullable property, an entity with no properties at all, an edge, a
+// list at two nesting depths and over a narrow element width, and a
+// property of no declared shape at all.
+//
+// Event carries the TIMESTAMP width in both nullabilities, which is what
+// puts the instant helpers and the offset-sidecar read into the
+// emission. agtype has no temporal value, so what a TIMESTAMP means on
+// the wire is decided entirely by those helpers and by nothing the Go
+// type checker can see.
 CREATE PROPERTY GRAPH TYPE AgeCorpus AS {
+    (:Event {
+        id         :: INT64     NOT NULL,
+        occurredAt :: TIMESTAMP NOT NULL,
+        seenAt     :: TIMESTAMP
+    }),
     (:Person {
         id         :: INT64 NOT NULL,
         name       :: STRING NOT NULL,
@@ -15,6 +28,16 @@ CREATE PROPERTY GRAPH TYPE AgeCorpus AS {
     (:Marker),
     (:Tricky {
         name :: STRING NOT NULL
+    }),
+    (:Listy {
+        tags   :: LIST<STRING> NOT NULL,
+        ranks  :: LIST<INT32> NOT NULL,
+        matrix :: LIST<LIST<INT64>> NOT NULL,
+        depths :: LIST<FLOAT32>
+    }),
+    (:Anything {
+        payload :: ANY VALUE NOT NULL,
+        maybe   :: ANY VALUE
     }),
     (:Person) -[:ACTED_IN { since :: INT64 NOT NULL }]-> (:Person)
 }

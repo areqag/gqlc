@@ -5,7 +5,7 @@ package manycolonerow
 import "context"
 
 type ReadQuerier interface {
-	PersonById(ctx context.Context, id int64) (PersonByIdRow, error)
+	PersonById(ctx context.Context, arg int64) (PersonByIdRow, error)
 }
 
 type WriteQuerier interface {

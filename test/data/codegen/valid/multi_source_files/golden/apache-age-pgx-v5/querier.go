@@ -5,7 +5,7 @@ package multisourcefiles
 import "context"
 
 type ReadQuerier interface {
-	PersonNameById(ctx context.Context, id int64) (string, error)
+	PersonNameById(ctx context.Context, arg int64) (string, error)
 	AllPersonIds(ctx context.Context) ([]int64, error)
 }
 

@@ -3,12 +3,13 @@
 // The neo4j arms: the container helper both driver majors share, and one
 // adapter per major. The battery they serve is in live_test.go.
 
-package fixtures
+package fixtures_test
 
 import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	neo4jv5 "github.com/neo4j/neo4j-go-driver/v5/neo4j"
 	neo4jv6 "github.com/neo4j/neo4j-go-driver/v6/neo4j"
@@ -28,6 +29,8 @@ import (
 	mixedv6 "github.com/areqag/gqlc/test/data/codegen/valid/mixed_read_write_batch/golden/neo4j-go-v6"
 	onecolonev5 "github.com/areqag/gqlc/test/data/codegen/valid/one_col_one_param_one/golden/neo4j-go-v5"
 	onecolonev6 "github.com/areqag/gqlc/test/data/codegen/valid/one_col_one_param_one/golden/neo4j-go-v6"
+	tsv5 "github.com/areqag/gqlc/test/data/codegen/valid/timestamp_property_roundtrip/golden/neo4j-go-v5"
+	tsv6 "github.com/areqag/gqlc/test/data/codegen/valid/timestamp_property_roundtrip/golden/neo4j-go-v6"
 )
 
 const (
@@ -75,6 +78,7 @@ type neo4jV5 struct {
 	entityNode entityNodeV5
 	entityEdge entityEdgeV5
 	edgeUnion  edgeUnionV5
+	timestamps timestampRoundtripV5
 }
 
 func startNeo4jV5(ctx context.Context, t *testing.T) harness {
@@ -98,6 +102,7 @@ func startNeo4jV5(ctx context.Context, t *testing.T) harness {
 		entityNode: entityNodeV5{q: entitynodev5.New(driver)},
 		entityEdge: entityEdgeV5{q: entityedgev5.New(driver)},
 		edgeUnion:  edgeUnionV5{q: edgeunionv5.New(driver)},
+		timestamps: timestampRoundtripV5{q: tsv5.New(driver)},
 	}
 }
 
@@ -150,6 +155,33 @@ func (s neo4jV5Scenario) seed(ctx context.Context, t *testing.T, cypher string) 
 func (s neo4jV5Scenario) oneColOneParamOne() oneColOneParamOneQuerier { return s.arm.one }
 
 func (s neo4jV5Scenario) mixedReadWriteBatch() mixedReadWriteBatchQuerier { return s.arm.mixed }
+
+func (s neo4jV5Scenario) timestampRoundtrip() timestampRoundtripQuerier { return s.arm.timestamps }
+
+// timestampRoundtripV5 binds the TIMESTAMP fixture. The driver carries a
+// datetime natively, so the whole of this arm is the identity — which is
+// what makes the comparison against the AGE arm worth running.
+type timestampRoundtripV5 struct{ q *tsv5.Queries }
+
+func (a timestampRoundtripV5) addEvent(ctx context.Context, id int64, occurredAt time.Time) error {
+	return a.q.AddEvent(ctx, tsv5.AddEventParams{Id: id, OccurredAt: occurredAt})
+}
+
+func (a timestampRoundtripV5) eventsAfter(ctx context.Context, since time.Time) ([]int64, error) {
+	return a.q.EventsAfter(ctx, since)
+}
+
+func (a timestampRoundtripV5) eventAt(ctx context.Context, id int64) (time.Time, error) {
+	return a.q.EventAt(ctx, id)
+}
+
+func (a timestampRoundtripV5) oneEvent(ctx context.Context, id int64) (eventEntity, error) {
+	e, err := a.q.OneEvent(ctx, id)
+	if err != nil {
+		return eventEntity{}, err
+	}
+	return eventEntity{ID: e.Id, OccurredAt: e.OccurredAt, SeenAt: e.SeenAt}, nil
+}
 
 func (s neo4jV5Scenario) manyColMany() manyColManyQuerier { return s.arm.many }
 
@@ -259,6 +291,7 @@ type neo4jV6 struct {
 	entityNode entityNodeV6
 	entityEdge entityEdgeV6
 	edgeUnion  edgeUnionV6
+	timestamps timestampRoundtripV6
 }
 
 func startNeo4jV6(ctx context.Context, t *testing.T) harness {
@@ -282,6 +315,7 @@ func startNeo4jV6(ctx context.Context, t *testing.T) harness {
 		entityNode: entityNodeV6{q: entitynodev6.New(driver)},
 		entityEdge: entityEdgeV6{q: entityedgev6.New(driver)},
 		edgeUnion:  edgeUnionV6{q: edgeunionv6.New(driver)},
+		timestamps: timestampRoundtripV6{q: tsv6.New(driver)},
 	}
 }
 
@@ -334,6 +368,33 @@ func (s neo4jV6Scenario) seed(ctx context.Context, t *testing.T, cypher string) 
 func (s neo4jV6Scenario) oneColOneParamOne() oneColOneParamOneQuerier { return s.arm.one }
 
 func (s neo4jV6Scenario) mixedReadWriteBatch() mixedReadWriteBatchQuerier { return s.arm.mixed }
+
+func (s neo4jV6Scenario) timestampRoundtrip() timestampRoundtripQuerier { return s.arm.timestamps }
+
+// timestampRoundtripV6 binds the TIMESTAMP fixture. The driver carries a
+// datetime natively, so the whole of this arm is the identity — which is
+// what makes the comparison against the AGE arm worth running.
+type timestampRoundtripV6 struct{ q *tsv6.Queries }
+
+func (a timestampRoundtripV6) addEvent(ctx context.Context, id int64, occurredAt time.Time) error {
+	return a.q.AddEvent(ctx, tsv6.AddEventParams{Id: id, OccurredAt: occurredAt})
+}
+
+func (a timestampRoundtripV6) eventsAfter(ctx context.Context, since time.Time) ([]int64, error) {
+	return a.q.EventsAfter(ctx, since)
+}
+
+func (a timestampRoundtripV6) eventAt(ctx context.Context, id int64) (time.Time, error) {
+	return a.q.EventAt(ctx, id)
+}
+
+func (a timestampRoundtripV6) oneEvent(ctx context.Context, id int64) (eventEntity, error) {
+	e, err := a.q.OneEvent(ctx, id)
+	if err != nil {
+		return eventEntity{}, err
+	}
+	return eventEntity{ID: e.Id, OccurredAt: e.OccurredAt, SeenAt: e.SeenAt}, nil
+}
 
 func (s neo4jV6Scenario) manyColMany() manyColManyQuerier { return s.arm.many }
 

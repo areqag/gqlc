@@ -298,9 +298,31 @@ func fillGroupingKeys(cols []Column, part query.Part) {
 	}
 }
 
+// unionColumnTypeArm is the phrase that separates ErrUnionColumnMismatch's type
+// arm from its count and name arms. All three carry the same sentinel, so
+// errors.Is cannot tell them apart, and the resolver test derives which invalid
+// fixtures reach the type arm by matching this phrase in the message. It is
+// spliced into the format string below rather than transcribed into the sweep's
+// regexp, so the two cannot drift apart and leave the coverage sweep matching
+// nothing.
+//
+// That same splice is why the sweep cannot also be what pins the phrase: built
+// from this constant, it admits the same fixture set whatever the phrase says,
+// and rewriting this line to " zzz " once left the entire suite green. The one
+// literal copy is invalidFixtureContains["union_column_type_mismatch.cypher"] —
+// an invalid fixture, so it carries no golden and -update cannot reach it.
+const unionColumnTypeArm = " projects "
+
 // compareBranchColumns runs the R5 UNION column compatibility check (§4.3).
 // Every branch's column list must equal branch 0's index-wise on count, name,
 // and type (strict Go-value equality; no lattice widening across branches).
+//
+// All three arms name the failing side of the comparison before branch 0. The
+// count and name arms lead with it outright; the type arm leads with the column,
+// which is the one thing the two branches agree on, and then gives the failing
+// branch's projection first. The direction is arbitrary; the consistency is not,
+// because one error that reads in two directions makes the reader re-derive
+// which number is the culprit on every arm.
 func compareBranchColumns(branchCols [][]Column) error {
 	if len(branchCols) < 2 {
 		return nil
@@ -316,11 +338,52 @@ func compareBranchColumns(branchCols [][]Column) error {
 				return fmt.Errorf("%w: branch %d column %d named %q; branch 0 column %d named %q", ErrUnionColumnMismatch, b, i, other[i].Name, i, base[i].Name)
 			}
 			if !resolvedTypeEqual(other[i].Type, base[i].Type) {
-				return fmt.Errorf("%w: branch %d column %q has type %s; branch 0 has type %s", ErrUnionColumnMismatch, b, other[i].Name, other[i].Type.String(), base[i].Type.String())
+				return fmt.Errorf("%w: column %q"+unionColumnTypeArm+"%s in branch %d but %s in branch 0", ErrUnionColumnMismatch, base[i].Name, describeColumnType(other[i].Type), b, describeColumnType(base[i].Type))
 			}
 		}
 	}
 	return nil
+}
+
+// describeColumnType renders a resolved column type for a fail-message that
+// has to tell two of them apart: the variant's tag, plus every axis
+// resolvedTypeEqual compares it on.
+//
+// The Stringers alone cannot do this. They are wire tags — the "kind"
+// discriminator each MarshalJSON emits — so every ResolvedNode renders "node"
+// whichever type it holds and every ResolvedEdgeUnion renders "edgeUnion"
+// whichever keys it committed, and a message built from them prints the same
+// text on both sides of a mismatch.
+//
+// The braces around the union key list are readability, not distinctness: a
+// strict prefix is never equal to its extension, and nullabilityNote already
+// terminates the list, so removing them collides nothing. They are here so the
+// reader can see where one branch's key list ends.
+func describeColumnType(t ResolvedType) string {
+	switch v := t.(type) {
+	case ResolvedNode:
+		return v.String() + " " + string(v.Labels) + nullabilityNote(v.Nullable)
+	case ResolvedEdge:
+		return v.String() + " " + formatEdgeKey(v.EdgeKey) + nullabilityNote(v.Nullable)
+	case ResolvedEdgeUnion:
+		return v.String() + " {" + formatEdgeKeys(v.EdgeKeys) + "}" + nullabilityNote(v.Nullable)
+	case ResolvedProperty:
+		return v.String() + nullabilityNote(v.Nullable)
+	case ResolvedList:
+		return v.String() + " of " + describeColumnType(v.Element)
+	default:
+		return t.String()
+	}
+}
+
+// nullabilityNote spells the nullability axis on both settings rather than
+// annotating only the nullable one: two column types that differ on nothing
+// else must render as different text.
+func nullabilityNote(nullable bool) string {
+	if nullable {
+		return " (nullable)"
+	}
+	return " (not null)"
 }
 
 // resolvedTypeEqual is Go-value equality for ResolvedType. Rendering to their
@@ -604,8 +667,8 @@ func closeEdge(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey, s schema.Sch
 				// than claiming to enumerate the matches — "matches both X, Y"
 				// read as a totality claim, and was false of exactly the
 				// three-candidate fixture that pins this arm.
-				return fmt.Errorf("%w: edge %q matches %s left-to-right and %s right-to-left",
-					ErrAmbiguousEdgeOrientation, v, formatEdgeKey(fwd), formatEdgeKey(rev))
+				return fmt.Errorf("%w: %s matches %s left-to-right and %s right-to-left",
+					ErrAmbiguousEdgeOrientation, describeEdgeBinding(e), formatEdgeKey(fwd), formatEdgeKey(rev))
 			}
 		}
 		if v != "" {
@@ -613,6 +676,33 @@ func closeEdge(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey, s schema.Sch
 		}
 		return nil
 	}
+}
+
+// describeEdgeBinding names an edge binding in text the author can find in
+// their own query. A named binding is its variable. An anonymous edge is still
+// its own binding but has no name to quote, so it is placed by the label
+// alternation it carries and the two ends it runs between — the quoted empty
+// string reads as a defect in gqlc rather than as a description of the pattern.
+func describeEdgeBinding(e query.EdgeBinding) string {
+	if v := e.Variable(); v != "" {
+		return fmt.Sprintf("edge %q", v)
+	}
+	return fmt.Sprintf("the [:%s] edge between %s and %s",
+		strings.Join(e.Labels(), "|"), describeEndpoint(e.Source()), describeEndpoint(e.Target()))
+}
+
+// describeEndpoint names one end of a pattern as the author wrote it: the
+// variable where one is bound, and the inline label expression otherwise.
+func describeEndpoint(e query.Endpoint) string {
+	switch ep := e.(type) {
+	case query.VarEndpoint:
+		return ep.Variable()
+	case query.InlineEndpoint:
+		if len(ep.Labels()) > 0 {
+			return "(:" + string(ep.Labels().Key()) + ")"
+		}
+	}
+	return "()"
 }
 
 // orientationDisagreement reports whether the candidate set contains two

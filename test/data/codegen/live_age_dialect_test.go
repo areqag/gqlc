@@ -30,7 +30,7 @@
 // the price of a container start on every PR — which is the trade gqlc-35yu.8
 // already made for this job.
 
-package fixtures
+package fixtures_test
 
 import (
 	"context"

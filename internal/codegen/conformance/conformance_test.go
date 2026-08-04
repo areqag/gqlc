@@ -7,11 +7,14 @@ package conformance_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/printer"
 	"go/token"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -361,15 +364,18 @@ func (s *ConformanceSuite) TestValid() {
 			// the per-target subtests below: those are what `go test -run`
 			// filters, and a rewrite that narrowed with the filter while the
 			// wipe did not would delete an unselected target's goldens.
+			//
+			// The wipe precedes the generation it feeds, so a target that
+			// fails to generate leaves a hole rather than its previous
+			// emission (TestUpdateCannotPreserveGoldensOnFailure).
 			if *update {
-				byTarget := make(map[string][]codegen.File, len(m.Targets))
+				s.Require().NoError(os.RemoveAll(goldenRoot))
 				for _, target := range m.Targets {
 					got, err := s.generate(target, in)
 					s.Require().NoError(err)
 					s.assertPackage(got, m.Package)
-					byTarget[target] = got
+					s.Require().NoError(writeGoldenTarget(goldenRoot, target, got))
 				}
-				s.Require().NoError(syncGoldenRoot(goldenRoot, byTarget))
 				return
 			}
 
@@ -603,26 +609,21 @@ func (s *ConformanceSuite) assertGoldenTree(dir string, got []codegen.File) {
 	}
 }
 
-// syncGoldenRoot rewrites root to hold exactly one subdirectory per key
-// of byTarget, containing that target's emitted files and nothing else.
+// writeGoldenTarget writes one target's emitted files under root.
 //
-// The caller must pass every target the fixture declares: root is wiped
-// first, so a target missing from the map loses its goldens. That wipe
-// is what makes a dropped target's subtree, and a deleted query's stale
-// .cypher.go, disappear in one step.
-func syncGoldenRoot(root string, byTarget map[string][]codegen.File) error {
-	if err := os.RemoveAll(root); err != nil {
+// It adds to root rather than replacing it, because the caller wipes root
+// once before generating any target: that single wipe is what makes a
+// dropped target's subtree, and a deleted query's stale .cypher.go,
+// disappear, and doing it up front is what stops a failed regeneration
+// from leaving the previous emission behind.
+func writeGoldenTarget(root, target string, files []codegen.File) error {
+	dir := filepath.Join(root, target)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	for target, files := range byTarget {
-		dir := filepath.Join(root, target)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+	for _, f := range files {
+		if err := os.WriteFile(filepath.Join(dir, f.Path), f.Contents, 0o644); err != nil {
 			return err
-		}
-		for _, f := range files {
-			if err := os.WriteFile(filepath.Join(dir, f.Path), f.Contents, 0o644); err != nil {
-				return err
-			}
 		}
 	}
 	return nil
@@ -802,6 +803,186 @@ func receiverName(t *testing.T, path string, d *ast.FuncDecl) string {
 	return ident.Name
 }
 
+// The Bolt driver's own carrier vocabulary, split by the shape the
+// emitted assertion takes. neo4j.PropertyValue is
+//
+//	bool | int64 | float64 | string | Point2D | Point3D |
+//	Date | LocalTime | LocalDateTime | Time | Duration | time.Time |
+//	[]byte | []any
+//
+// (neo4j/graph.go:25 under v5, the same plus the Vector and UUID named
+// types under v6) and neo4j.RecordValue (neo4j/record.go:25) is that
+// set plus map[string]any, Node, Relationship and Path. A value the
+// driver hands to generated code came off one of those two constraints,
+// so a type assertion on it can only be true for a member of them —
+// every other name is an assertion that is false for every value the
+// driver can produce, which is not a decode but a decode that always
+// fails.
+//
+// Two sets rather than one because the two axes fail differently: a
+// wrong slice carrier is caught by the compiler wherever it reaches
+// neo4j.GetProperty[T], and a wrong element carrier is caught by nothing
+// at all (see TestNeo4jGoldensAssertOnlyDriverCarriers).
+//
+// The value is a witness flag: true says a golden in this corpus asserts
+// this carrier, false says the driver allows it and no golden reaches
+// it. Both halves are checked, so each entry is a claim about the corpus
+// that a corpus edit can falsify — which is what a bare allow-list could
+// not be. An allow-list only ever says "not this", and a corpus that
+// asserted nothing at all would satisfy it; it is also how the []byte
+// entry sat here through a fixture's worth of BYTES properties without
+// one golden ever reaching it, because a non-nullable BYTES decodes
+// through GetProperty[[]byte] and never emits an assertion.
+//
+// The ledger lives here rather than beside the goldens on purpose:
+// -update rewrites goldens and cannot touch this file, so deleting the
+// one fixture that witnesses a carrier still reddens after a
+// regeneration.
+//
+// Slice axis: GetProperty's own doc says "any property array value other
+// than byte array is typed as []any", and the hydrator builds exactly
+// that — `func (h *hydrator) array() []any` (internal/bolt/hydrator.go).
+// So these two are the whole set, whatever the schema declared the
+// element width to be.
+var driverSliceCarriers = map[string]bool{
+	"[]any":  true,
+	"[]byte": true,
+}
+
+// Scalar axis: the named types of the two constraints, spelled as the
+// emission spells them. `any` is deliberately absent. It is a member of
+// neither constraint, and `x.(any)` is not a widening no-op: a type
+// assertion on a nil interface value is false whatever type it names, so
+// asserting to `any` fails on exactly the null the property or element
+// was declared able to hold. The emission has to omit the assertion
+// rather than name `any` in one.
+//
+// The unwitnessed half below is not a backlog. Most of those carriers
+// are only ever named by an assertion inside a list walk — a scalar
+// column of the same width decodes through neo4j.GetRecordValue[T],
+// whose constraint the compiler checks — so their flags flip the day a
+// fixture declares LIST<POINT>, LIST<DURATION> or a projected list of
+// nodes, and not before.
+var driverScalarCarriers = map[string]bool{
+	"bool":                true,
+	"int64":               true,
+	"float64":             true,
+	"string":              true,
+	"time.Time":           true,
+	"dbtype.Date":         true,
+	"dbtype.Relationship": true,
+
+	"map[string]any":       false,
+	"dbtype.Point2D":       false,
+	"dbtype.Point3D":       false,
+	"dbtype.LocalTime":     false,
+	"dbtype.LocalDateTime": false,
+	"dbtype.Time":          false,
+	"dbtype.Duration":      false,
+	"dbtype.Node":          false,
+	"dbtype.Path":          false,
+}
+
+// witnessedCarriers names the carriers a ledger claims some golden in
+// the corpus asserts.
+func witnessedCarriers(ledger map[string]bool) []string {
+	var names []string
+	for name, witnessed := range ledger {
+		if witnessed {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// TestNeo4jGoldensAssertOnlyDriverCarriers pins the emitted decode
+// against the driver's type set rather than against the schema's. A
+// property declared LIST<STRING> is a []string in the struct the caller
+// writes against, but it never arrives as one: Bolt hydrates every
+// array but a byte array into []any and narrows nothing, so `v.([]string)`
+// is an assertion that is false for every value the driver can produce.
+// Such an assertion is not a decode, it is a decode that always fails,
+// and the emission has to walk the []any and convert element by element
+// instead.
+//
+// The same defect lands one axis over, on the element the walk reaches:
+// `elem.(int32)` for a LIST<INT32> is as false as `v.([]int32)` was, and
+// nothing but this sweep can see it. The slice arm is held up by the
+// compiler wherever a wrong carrier reaches neo4j.GetProperty[T], whose
+// PropertyValue constraint refuses it; inside the walk there is no such
+// constraint, because a []any element is an `any` and asserting an `any`
+// to anything at all compiles.
+//
+// What the sweep finds is then compared against the ledger's witness
+// flags rather than only counted. A count says an assertion was
+// examined; it does not say which, and there is no corpus this repo
+// would accept in which the scalar count reaches zero, so counting it
+// guarded nothing. Set equality names each carrier separately, so
+// deleting the one fixture that reaches a carrier reddens naming that
+// carrier — and a fixture that reaches a new one reddens too, which is
+// what keeps the ledger's "no golden asserts this" half from quietly
+// becoming false.
+//
+// Swept syntactically over every neo4j golden rather than checked on one
+// fixture, because the defect is a missing arm and a missing arm is
+// invisible wherever no fixture reaches it. The sweep asserts a property
+// of the text and not equality with a stored blob, so -update cannot
+// bless a violation: regeneration rewrites the goldens from the same
+// emission, and an emission that still names []string still fails here.
+func TestNeo4jGoldensAssertOnlyDriverCarriers(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join(fixtureRoot(), "valid", "*", "golden", "neo4j-go-v*", "*.go"))
+	require.NoError(t, err)
+	require.NotEmpty(t, paths, "no neo4j golden was swept, so this test holds nothing")
+
+	var offenders []string
+	sweptSlice, sweptScalar := map[string]bool{}, map[string]bool{}
+	fset := token.NewFileSet()
+	for _, path := range paths {
+		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		require.NoError(t, err, "parsing %s", path)
+		ast.Inspect(file, func(n ast.Node) bool {
+			assertion, ok := n.(*ast.TypeAssertExpr)
+			if !ok || assertion.Type == nil {
+				return true
+			}
+			named := render(t, fset, assertion.Type)
+			// A carrier counts as swept only once the assertion is known
+			// to be on its axis and known to be one the ledger admits, so
+			// an offender is never recorded as its own witness.
+			ledger, swept := driverScalarCarriers, sweptScalar
+			if _, isSlice := assertion.Type.(*ast.ArrayType); isSlice {
+				ledger, swept = driverSliceCarriers, sweptSlice
+			}
+			if _, admitted := ledger[named]; admitted {
+				swept[named] = true
+				return true
+			}
+			offenders = append(offenders, fmt.Sprintf("%s:%d: %s",
+				path, fset.Position(assertion.Pos()).Line, render(t, fset, assertion)))
+			return true
+		})
+	}
+	require.Empty(t, offenders,
+		"a Bolt driver hands back only what neo4j.PropertyValue and neo4j.RecordValue name, so these assertions are false for every value it can produce")
+
+	for _, axis := range []struct {
+		name   string
+		ledger map[string]bool
+		swept  map[string]bool
+	}{
+		{"slice", driverSliceCarriers, sweptSlice},
+		{"scalar", driverScalarCarriers, sweptScalar},
+	} {
+		want := witnessedCarriers(axis.ledger)
+		require.NotEmpty(t, want,
+			"the %s ledger claims no witness at all, so its half of this sweep would hold on a corpus that asserts nothing", axis.name)
+		require.ElementsMatch(t, want, slices.Collect(maps.Keys(axis.swept)),
+			"the %s carriers the goldens assert are no longer the ones this ledger claims: a name only the first list holds "+
+				"has lost the fixture that reached it, and a name only the second holds is one a golden now reaches and the "+
+				"ledger still calls unwitnessed", axis.name)
+	}
+}
+
 // TestGoldenBuild compiles the nested test/data/codegen module so that
 // spurious or missing imports in generated golden packages are caught by
 // go test ./internal/codegen/... rather than only by just test-codegen-fence.
@@ -849,22 +1030,80 @@ func TestUpdateIgnoresTheTargetFilter(t *testing.T) {
 		"-update narrowed to %q changed %s's golden tree", selected, fixture)
 }
 
+// TestUpdateCannotPreserveGoldensOnFailure pins the other half of
+// -update's blast radius: a run that fails to generate must not leave a
+// golden tree behind that a later run will accept.
+//
+// Regenerating into memory and writing only once every target succeeded
+// looks like the safe ordering and is the dangerous one. Generation
+// aborts the fixture before anything is written, so the previous
+// emission survives intact — and the corpus's compile gate then builds
+// those stale goldens and passes. The evidence for a change lives in the
+// golden diff, so a change whose regeneration failed presents as a change
+// with no diff: indistinguishable from one that legitimately emits the
+// same bytes.
+//
+// Wiping first makes the failure visible in the corpus instead. A fixture
+// whose regeneration did not finish has no goldens, so the next ordinary
+// run fails on the missing tree rather than passing on the old one.
+//
+// Runs as a subprocess for the same reason the target-filter test does:
+// -update writes, and it must write to a throwaway copy.
+func TestUpdateCannotPreserveGoldensOnFailure(t *testing.T) {
+	const fixture = "many_col_many"
+	root := t.TempDir()
+	require.NoError(t, os.CopyFS(root, os.DirFS(trackedFixtureDir)))
+	golden := filepath.Join(root, "valid", fixture, "golden")
+
+	updateCopy(t, root, fixture)
+	require.NotEmpty(t, snapshotTree(t, golden),
+		"fixture %s must have goldens for this test to mean anything", fixture)
+
+	// An unaliased expression column: it parses and resolves, so the
+	// failure lands in generation rather than in the fixture loader, which
+	// is the case the ordering has to survive.
+	queries := filepath.Join(root, "valid", fixture, "queries.cypher")
+	text, err := os.ReadFile(queries)
+	require.NoError(t, err)
+	broken := string(text) + "\n// name: ProbeUngeneratable :one\nMATCH (p:Person) RETURN p.age + 1\n"
+	require.NoError(t, os.WriteFile(queries, []byte(broken), 0o644))
+
+	out, err := runUpdate(t, root, fixture)
+	require.Error(t, err, "-update accepted a fixture it cannot generate:\n%s", out)
+
+	require.Empty(t, snapshotTree(t, golden),
+		"-update failed and left %s's previous goldens in place, so the corpus still compiles and diffs clean", fixture)
+}
+
 // updateCopy runs the suite under -update against the corpus at root,
-// narrowed to the named TestValid subtest path.
+// narrowed to the named TestValid subtest path, and requires it to
+// succeed.
 func updateCopy(t *testing.T, root, subtest string) {
+	t.Helper()
+	out, err := runUpdate(t, root, subtest)
+	require.NoError(t, err, "-update run over %q failed:\n%s", subtest, out)
+}
+
+// runUpdate is updateCopy without the verdict, for the caller that wants
+// the failure.
+func runUpdate(t *testing.T, root, subtest string) ([]byte, error) {
 	t.Helper()
 	cmd := exec.CommandContext(t.Context(), "go", "test", ".", "-count=1", "-update",
 		"-run", "TestConformanceSuite/TestValid/"+subtest)
 	cmd.Env = append(os.Environ(), childRootEnv+"="+root)
-	out, err := cmd.CombinedOutput()
-	require.NoError(t, err, "-update run over %q failed:\n%s", subtest, out)
+	return cmd.CombinedOutput()
 }
 
 // snapshotTree reads every file under root into a map keyed by path
-// relative to root.
+// relative to root. A root that does not exist is the empty tree, so that
+// "these goldens are gone" and "these goldens are empty" are the same
+// answer to a caller comparing trees.
 func snapshotTree(t *testing.T, root string) map[string]string {
 	t.Helper()
 	out := make(map[string]string)
+	if _, err := os.Stat(root); errors.Is(err, os.ErrNotExist) {
+		return out
+	}
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err

@@ -11,23 +11,45 @@ import (
 
 // Blob corresponds to the Blob node type.
 type Blob struct {
-	Id      int64
-	Payload []byte
+	Chunks    [][]byte
+	Id        int64
+	Payload   []byte
+	Signature *[]byte
 }
 
 // decodeBlob decodes a driver dbtype.Node into a Blob struct,
 // enforcing per-property nullability against the schema.
 func decodeBlob(node dbtype.Node) (Blob, error) {
 	var out Blob
-	value0, err := neo4j.GetProperty[int64](node, "id")
+	value0, err := neo4j.GetProperty[[]any](node, "chunks")
+	if err != nil {
+		return Blob{}, fmt.Errorf("decode Blob.Chunks: %w", err)
+	}
+	value0s := make([][]byte, 0, len(value0))
+	for i0, elem0 := range value0 {
+		v0, ok := elem0.([]byte)
+		if !ok {
+			return Blob{}, fmt.Errorf("decode Blob.Chunks: property %q element %d: expected []byte, got %T", "chunks", i0, elem0)
+		}
+		value0s = append(value0s, v0)
+	}
+	out.Chunks = value0s
+	value1, err := neo4j.GetProperty[int64](node, "id")
 	if err != nil {
 		return Blob{}, fmt.Errorf("decode Blob.Id: %w", err)
 	}
-	out.Id = value0
-	value1, err := neo4j.GetProperty[[]byte](node, "payload")
+	out.Id = value1
+	value2, err := neo4j.GetProperty[[]byte](node, "payload")
 	if err != nil {
 		return Blob{}, fmt.Errorf("decode Blob.Payload: %w", err)
 	}
-	out.Payload = value1
+	out.Payload = value2
+	if v, ok := node.Props["signature"]; ok {
+		s, ok := v.([]byte)
+		if !ok {
+			return Blob{}, fmt.Errorf("decode Blob.Signature: property %q: expected []byte, got %T", "signature", v)
+		}
+		out.Signature = &s
+	}
 	return out, nil
 }

@@ -1,0 +1,6 @@
+CREATE PROPERTY GRAPH TYPE SchemaAnyPropertyAlone AS {
+    (:Blob {
+        payload :: ANY VALUE,
+        tag     :: ANY VALUE
+    })
+}

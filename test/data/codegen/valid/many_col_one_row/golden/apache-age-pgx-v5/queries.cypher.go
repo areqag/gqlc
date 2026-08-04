@@ -17,12 +17,12 @@ type PersonByIdRow struct {
 // PersonById executes the PersonById query.
 //
 //	MATCH (p:Person) WHERE p.id = $id RETURN p.name, p.age
-func (q *Queries) PersonById(ctx context.Context, id int64) (PersonByIdRow, error) {
+func (q *Queries) PersonById(ctx context.Context, arg int64) (PersonByIdRow, error) {
 	stmt, err := q.cypherStmt("$gqlc$", personByIdQueryText, "v0 ag_catalog.agtype, v1 ag_catalog.agtype")
 	if err != nil {
 		return PersonByIdRow{}, err
 	}
-	args, err := agtypeArgs(map[string]any{"id": id})
+	args, err := agtypeArgs(map[string]any{"id": arg})
 	if err != nil {
 		return PersonByIdRow{}, err
 	}

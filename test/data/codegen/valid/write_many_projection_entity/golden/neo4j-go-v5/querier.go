@@ -8,7 +8,7 @@ type ReadQuerier interface {
 }
 
 type WriteQuerier interface {
-	MarkAdults(ctx context.Context, minAge int64) ([]Person, error)
+	MarkAdults(ctx context.Context, arg int64) ([]Person, error)
 }
 
 type Querier interface {

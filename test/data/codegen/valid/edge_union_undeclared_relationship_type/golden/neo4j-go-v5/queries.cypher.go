@@ -15,8 +15,8 @@ const actionOnPostQueryText = `MATCH (:Person)-[r:AUTHORED|LIKES|FLAGGED]->(p:Po
 // ActionOnPost executes the ActionOnPost query.
 //
 //	MATCH (:Person)-[r:AUTHORED|LIKES|FLAGGED]->(p:Post) WHERE p.id = $postId RETURN r
-func (q *Queries) ActionOnPost(ctx context.Context, postId int64) (ActionOnPostR, error) {
-	records, err := q.db.run(ctx, actionOnPostQueryText, map[string]any{"postId": postId}, neo4j.AccessModeRead)
+func (q *Queries) ActionOnPost(ctx context.Context, arg int64) (ActionOnPostR, error) {
+	records, err := q.db.run(ctx, actionOnPostQueryText, map[string]any{"postId": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
 	}

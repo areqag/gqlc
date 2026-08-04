@@ -9,6 +9,12 @@ run:
   # golangci-lint fmt works per file and never needed the tag.
   build-tags:
     - codegen_live
+    # test/data/tagblind is `just vuln`'s tag-derivation fixture: a directory
+    # whose every Go file is constrained, which is the shape `go list ./...`
+    # cannot see. Without the tag here the linter cannot see it either, and the
+    # one directory in this tree that no default-configuration tool loads would
+    # also be the one nothing checks.
+    - tagblind
 
 linters:
   default: none
@@ -108,7 +114,10 @@ linters:
         # scenario, and the generated handles bound to that view are each
         # reachable only as the interface the body is written against. Listed
         # per type, so ireturn keeps full strength on the rest of that module.
-        - github.com/areqag/gqlc/test/data/codegen\.(harness|backend|writeBackend|edgeUnionBackend|oneColOneParamOneQuerier|manyColManyQuerier|mixedReadWriteBatchQuerier|entityNodeQuerier|entityEdgeQuerier|edgeUnionQuerier)$
+        # The `_test` suffix is the package path of an external test package,
+        # which is what the battery has to be to stay inside govulncheck's call
+        # graph (ADR 0026) — not a typo.
+        - github.com/areqag/gqlc/test/data/codegen_test\.(harness|backend|writeBackend|edgeUnionBackend|oneColOneParamOneQuerier|manyColManyQuerier|mixedReadWriteBatchQuerier|entityNodeQuerier|entityEdgeQuerier|edgeUnionQuerier|timestampRoundtripQuerier)$
     misspell:
       # the codebase is written in British English (see CONTEXT.md: canonicalised,
       # modelled, serialise); UK locale enforces that consistently

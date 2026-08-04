@@ -1,0 +1,49 @@
+-- R3 §4.6's mixed-symmetry shape: one candidate reads both ways, the rest read
+-- exactly one way and all on the same side, so nothing disagrees.
+--
+-- `(:Staff)` is satisfied by the two staff types and `(:Person)` by those two
+-- plus the bare person type, so `(a:Staff)-[r:MENTORS]-(b:Person)` has
+--   srcs = { Engineer&Person&Staff , Manager&Person&Staff }
+--   tgts = { Engineer&Person&Staff , Manager&Person&Staff , Person }
+-- and srcs is contained in tgts. The two declarations below close to
+--   { Manager&Person&Staff-[MENTORS]->Engineer&Person&Staff
+--   , Person-[MENTORS]->Engineer&Person&Staff }
+-- where the first has both endpoints in both slices — it reads the same either
+-- way round, so it is skipped — and the second reads right-to-left only,
+-- because `Person` is on the pattern's right and nowhere on its left. With one
+-- of the two one-reading classes empty there is no disagreement to report, so
+-- §4.6 accepts.
+--
+-- Accepting is not the same as the arrow being inert. `srcs != tgts`, so the
+-- directed probe set is strictly smaller: the forward twin drops the
+-- right-to-left candidate and closes to one, while the reversed twin keeps
+-- both. That is the point of the fixture pair — the marker chooses the result
+-- type, and the symmetric candidate is exactly the one both twins keep.
+--
+-- No mirror is declared. Adding `Engineer&Person&Staff -> Manager&Person&Staff`
+-- or `Engineer&Person&Staff -> Person` would put a candidate in the other
+-- one-reading class and turn this into §4.6 case C.
+
+CREATE PROPERTY GRAPH TYPE SatisfyPluralEdgesMixedSymmetry AS {
+
+    (:Person {
+        id   :: INT NOT NULL,
+        name :: STRING NOT NULL
+    }),
+
+    (:Person&Staff&Engineer {
+        id     :: INT NOT NULL,
+        name   :: STRING NOT NULL,
+        team   :: STRING NOT NULL
+    }),
+
+    (:Person&Staff&Manager {
+        id      :: INT NOT NULL,
+        name    :: STRING NOT NULL,
+        reports :: INT NOT NULL
+    }),
+
+    (:Person&Staff&Manager) -[:MENTORS { since :: INT NOT NULL }]-> (:Person&Staff&Engineer),
+    (:Person)               -[:MENTORS { since :: INT NOT NULL }]-> (:Person&Staff&Engineer)
+
+}

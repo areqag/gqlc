@@ -224,13 +224,13 @@ func writeMethodSignature(b *strings.Builder, p codegen.Query) {
 	case 0:
 		// bare arg
 	case 1:
-		fmt.Fprintf(b, ", %s ", codegen.LowerFirstRune(p.ParamFields[0].Field))
+		fmt.Fprintf(b, ", %s ", codegen.ParamArg)
 		if p.ParamFields[0].Nullable {
 			b.WriteString("*")
 		}
 		b.WriteString(p.ParamFields[0].GoType)
 	default:
-		fmt.Fprintf(b, ", arg %sParams", p.MethodName)
+		fmt.Fprintf(b, ", %s %sParams", codegen.ParamArg, p.MethodName)
 	}
 	if p.Cardinality == codegen.CardinalityExec {
 		b.WriteString(") error")
@@ -311,6 +311,16 @@ func zeroValueText(p codegen.Query) string {
 			return "nil"
 		case "any":
 			return "nil"
+		case "time.Time", "dbtype.Date", "dbtype.Time", "dbtype.LocalTime",
+			"dbtype.LocalDateTime", "dbtype.Duration":
+			// The six temporal property widths carry a struct, whose zero
+			// is a composite literal and not the numeric zero the default
+			// arm spells. The ColumnTemporal arm above does not cover them:
+			// that is the kind a temporal *expression* takes, and a
+			// projection of a stored TIMESTAMP property is ColumnProperty.
+			// Unreached until a fixture ran a :one over one, at which point
+			// the emitted `return 0, err` did not compile.
+			return f.GoType + "{}"
 		default:
 			return "0"
 		}
@@ -398,11 +408,9 @@ func paramsMapText(p codegen.Query) string {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		var access string
-		if len(p.ParamFields) == 1 {
-			access = codegen.LowerFirstRune(f.Field)
-		} else {
-			access = "arg." + f.Field
+		access := codegen.ParamArg
+		if len(p.ParamFields) > 1 {
+			access = codegen.ParamArg + "." + f.Field
 		}
 		fmt.Fprintf(&b, "%q: %s", f.RawName, paramBindExpr(f, access))
 	}
@@ -525,7 +533,18 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 	case codegen.ColumnEdgeUnion:
 		writeEdgeUnionColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
 		return
-	case codegen.ColumnProperty, codegen.ColumnTemporal, codegen.ColumnScalar:
+	case codegen.ColumnProperty:
+		// A property of no declared shape rides no driver carrier, so
+		// there is no neo4j.GetRecordValue[T] for it to go through:
+		// `any` is a member of neither neo4j.PropertyValue nor
+		// neo4j.RecordValue, and GetRecordValue[any] does not compile.
+		// The same rule the entity path states as ridesADriverCarrier
+		// and the element path as carriesElemBare, one axis up.
+		if !ridesADriverCarrier(f.GoType) {
+			writeAnyColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
+			return
+		}
+	case codegen.ColumnTemporal, codegen.ColumnScalar:
 		// Fall through to the GetRecordValue + narrow-convert path below.
 	}
 	// codegen.ColumnProperty / codegen.ColumnTemporal / codegen.ColumnScalar all use GetRecordValue
@@ -567,15 +586,33 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 func valueName(i int) string { return fmt.Sprintf("value%d", i) }
 
 // writeAnyColumnDecodeIndent emits the record.Get lane for a column
-// whose emitted Go type is `any` — ResolvedUnknown or ResolvedScalar
-// {Null} (spec §5.5). The driver's Get returns (any, bool) where bool
-// is "found" (not "null"). The "not-found" branch is a decode error
-// (the resolver committed the column, so the driver must produce it);
-// the "found" branch assigns the value verbatim (a nil value satisfies
-// the `any` field's zero — no pointer wrap per §5.1's table).
+// whose emitted Go type is `any` — ResolvedUnknown, ResolvedScalar
+// {Null}, or a schema property whose declared width is ANY VALUE (spec
+// §5.5). The driver's Get returns (any, bool) where bool is "found"
+// (not "null"). The "not-found" branch is a decode error (the resolver
+// committed the column, so the driver must produce it); the "found"
+// branch assigns the value verbatim (a nil value satisfies the `any`
+// field's zero — no pointer wrap per §5.1's table).
+//
+// A nullable one carries the graph's null in its pointer, the way every
+// other nullable column on this path carries isNil. That is where this
+// differs from writeShapelessFieldDecode, whose pointer carries a
+// missing Props key instead: a record holds a key for every column the
+// query projected, so the pointer here has no absence to spend itself
+// on, and a pointer that is never nil is a null the caller cannot read.
 func writeAnyColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
 	fmt.Fprintf(b, "%s%s, ok := %s.Get(%q)\n", indent, varName, recordExpr, f.ColumnName)
 	fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: key not found\", %q)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	if f.Nullable {
+		fmt.Fprintf(b, "%svar %sPtr *%s\n", indent, varName, f.GoType)
+		fmt.Fprintf(b, "%sif %s != nil {\n%s\t%sPtr = &%s\n%s}\n", indent, varName, indent, varName, varName, indent)
+		b.WriteString(indent)
+		b.WriteString(assignPrefix[len(indent):])
+		b.WriteString(varName)
+		b.WriteString("Ptr")
+		b.WriteString(assignSuffix)
+		return
+	}
 	b.WriteString(indent)
 	b.WriteString(assignPrefix[len(indent):])
 	b.WriteString(varName)
@@ -587,7 +624,21 @@ func writeAnyColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.R
 // dispatches on the element type. The loop body is derived by
 // walkListElemPlan, which recurses for nested list elements. Nullable
 // list column produces *[]T via the standard pointer-wrap.
+//
+// The accumulator is positional, for the reason writeEntityFieldDecode
+// gives about the local a value lands in: this one is declared at the
+// row assembly's own indent, so a second list column in the same
+// projection redeclares it — `no new variables on left side of :=`, plus
+// whatever the two element types disagree about. A nullable list column
+// hid that for a while by accident, its accumulator sitting inside the
+// block its null gate opens; a second non-nullable one has nowhere to
+// hide, and generation would still exit 0 because the format gate only
+// parses.
 func writeListColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
+	// varName is "value" for a single-column projection and "valueN" for
+	// a row field, so the same suffix numbers the accumulator without
+	// renaming the single-column shape spec §5.5 spells out.
+	accVar := "acc" + strings.TrimPrefix(varName, "value")
 	fmt.Fprintf(b, "%s%s, isNil, err := neo4j.GetRecordValue[[]any](%s, %q)\n", indent, varName, recordExpr, f.ColumnName)
 	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
 	if f.Nullable {
@@ -595,9 +646,9 @@ func writeListColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.
 		// address of the accumulated slice.
 		fmt.Fprintf(b, "%svar %sPtr *%s\n", indent, varName, f.GoType)
 		fmt.Fprintf(b, "%sif !isNil {\n", indent)
-		fmt.Fprintf(b, "%s\tacc := make(%s, 0, len(%s))\n", indent, f.GoType, varName)
-		walkListElemPlan(b, p, f, f.ListElem, "acc", varName, zero, indent+"\t")
-		fmt.Fprintf(b, "%s\t%sPtr = &acc\n", indent, varName)
+		fmt.Fprintf(b, "%s\t%s := make(%s, 0, len(%s))\n", indent, accVar, f.GoType, varName)
+		walkListElemPlan(b, p, f, f.ListElem, accVar, varName, zero, indent+"\t")
+		fmt.Fprintf(b, "%s\t%sPtr = &%s\n", indent, varName, accVar)
 		fmt.Fprintf(b, "%s}\n", indent)
 		b.WriteString(indent)
 		b.WriteString(assignPrefix[len(indent):])
@@ -606,13 +657,13 @@ func writeListColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.
 		b.WriteString(assignSuffix)
 		return
 	}
-	// Non-nullable: error if isNil; else build acc slice + assign.
+	// Non-nullable: error if isNil; else build the accumulator + assign.
 	fmt.Fprintf(b, "%sif isNil {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
-	fmt.Fprintf(b, "%sacc := make(%s, 0, len(%s))\n", indent, f.GoType, varName)
-	walkListElemPlan(b, p, f, f.ListElem, "acc", varName, zero, indent)
+	fmt.Fprintf(b, "%s%s := make(%s, 0, len(%s))\n", indent, accVar, f.GoType, varName)
+	walkListElemPlan(b, p, f, f.ListElem, accVar, varName, zero, indent)
 	b.WriteString(indent)
 	b.WriteString(assignPrefix[len(indent):])
-	b.WriteString("acc")
+	b.WriteString(accVar)
 	b.WriteString(assignSuffix)
 }
 
@@ -631,16 +682,41 @@ func walkListElemPlan(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 		iterVar = "elem" + fmt.Sprint(strings.Count(indent, "\t"))
 	}
 	// The index variable is only used by the element-type-assertion
-	// fail message; the two "bare append" arms (codegen.ColumnAny for Unknown,
-	// codegen.ColumnScalarNull for ScalarNull) never emit an index. Suppress
-	// the unused-var warning by ranging with `_` in those cases.
+	// fail message, so the arms that assert nothing never name it and
+	// ranging with `i` would emit an unused variable.
 	indexVar := "i"
-	if e.Kind == codegen.ColumnAny || e.Kind == codegen.ColumnScalarNull {
+	if carriesElemBare(e) {
 		indexVar = "_"
 	}
 	fmt.Fprintf(b, "%sfor %s, %s := range %s {\n", indent, indexVar, iterVar, srcVar)
 	walkListElemBody(b, p, f, e, accVar, iterVar, zero, indent+"\t")
 	fmt.Fprintf(b, "%s}\n", indent)
+}
+
+// carriesElemBare reports whether the element loop appends what the
+// driver handed it without asserting anything about it — which is also
+// to say whether the loop body names the index at all. It is consulted
+// by walkListElemPlan for the index variable and implemented by
+// walkListElemBody, so that a body that stops asserting cannot leave a
+// loop head declaring an index nothing reads.
+//
+// codegen.ColumnAny (Unknown) and codegen.ColumnScalarNull are bare
+// because the plan says so. A codegen.ColumnProperty is bare when its
+// element rides no driver carrier, for the reason isSliceType gives on
+// the entity path: the carrier of an `any` element is `any`, and
+// `elem.(any)` is false for a nil interface value — the null a list of
+// no declared element shape exists to be allowed to hold. Asserting
+// would fail the whole column on exactly that element, while AGE, whose
+// agtypeValue maps null to nil, hands the same graph value back intact.
+func carriesElemBare(e *codegen.ListElem) bool {
+	switch e.Kind {
+	case codegen.ColumnAny, codegen.ColumnScalarNull:
+		return true
+	case codegen.ColumnProperty:
+		return !ridesADriverCarrier(e.GoType)
+	default:
+		return false
+	}
 }
 
 // walkListElemBody emits the body of one list-element loop iteration
@@ -653,6 +729,10 @@ func walkListElemPlan(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *codegen.ListElem, accVar, iterVar, zero, indent string) {
 	switch e.Kind {
 	case codegen.ColumnProperty:
+		if carriesElemBare(e) {
+			fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, iterVar)
+			return
+		}
 		carrier := driverCarrier(e.GoType)
 		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, carrier)
 		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, carrier, f.ColumnName, iterVar, indent)

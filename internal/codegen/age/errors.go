@@ -36,35 +36,110 @@ var ErrRelationshipTypeAlternation = errors.New("relationship type alternation")
 
 // wireEntities pairs every entity with the form it takes on the wire,
 // failing a schema that declares a node or edge type under more than one
-// label. AGE stamps exactly one label on a vertex or an edge and its
-// parser has no syntax for a second, so a graph matching such a type
-// cannot be written through this backend and no value matching it can
-// arrive to be decoded.
-//
-// It runs over the whole entity surface: Phase Z names an entity for
-// every type in the schema and the emitted surface is backend-invariant,
-// so a struct that no query could ever fill is still a struct this
-// package declares.
-func wireEntities(entities []codegen.Entity) ([]wiredEntity, error) {
+// label. The refusal is over the whole entity table rather than over the
+// columns the batch projects, and takes the batch's queries with it
+// (ADR 0027); queries is how many, which the diagnostic states.
+func wireEntities(entities []codegen.Entity, queries int) ([]wiredEntity, error) {
 	wired := make([]wiredEntity, 0, len(entities))
-	var multi []string
+	var refused []codegen.Entity
 	for _, e := range entities {
 		w, ok := wireEntity(e)
 		if !ok {
-			multi = append(multi, fmt.Sprintf("%s (%s)", e.Name, e.DocAxis))
+			refused = append(refused, e)
 			continue
 		}
 		wired = append(wired, w)
 	}
-	if len(multi) == 0 {
+	if len(refused) == 0 {
 		return wired, nil
 	}
-	noun := "types"
-	if len(multi) == 1 {
-		noun = "type"
+	return nil, fmt.Errorf("%w: %s", ErrUnsupportedSchema, multiLabelDiagnostic(refused, queries))
+}
+
+// multiLabelDiagnostic is what an author meets when a schema keys a type
+// on more than one label and the target is AGE. It is where the posture
+// is recorded for the person hitting it, so it carries four things: which
+// types are refused and the labels each is keyed on, why AGE cannot hold
+// them, that the refusal is the whole batch's rather than the projecting
+// queries', and the two ways out.
+//
+// It names the refused types and nothing else. A message listing the
+// whole entity table would say which types exist, not which need editing.
+func multiLabelDiagnostic(refused []codegen.Entity, queries int) string {
+	named := make([]string, 0, len(refused))
+	for _, e := range refused {
+		labels := keyLabels(e)
+		named = append(named, fmt.Sprintf("%s type %s, keyed on %d labels (%s)",
+			entityKindNoun(e.Kind), e.Name, len(labels), strings.Join(labels, ", ")))
 	}
-	return nil, fmt.Errorf("%w: Apache AGE stamps one label on a vertex or an edge, so %d %s cannot be represented: %s",
-		ErrUnsupportedSchema, len(multi), noun, strings.Join(multi, ", "))
+	queryNoun := "queries"
+	if queries == 1 {
+		queryNoun = "query"
+	}
+	return fmt.Sprintf(
+		"Apache AGE stamps exactly one label on a vertex or an edge and its parser has no syntax for a second: "+
+			"`CREATE (x:A:B)` is a syntax error, not a value AGE rejects. "+
+			"So a type keyed on more than one label names an element no graph this backend can address ever holds, "+
+			"and no value matching such a type can arrive to be decoded. "+
+			"This schema declares %d of them: %s. "+
+			"Refusing a type refuses the whole schema, and this batch's %d %s with it, "+
+			"including every query that projects none of them — gqlc names an entity for every type a schema declares "+
+			"and the generated Go surface does not vary by backend, so emitting here would declare each refused type "+
+			"with a label check nothing could satisfy. "+
+			"Give each a single key label, or generate this schema against a neo4j target.",
+		len(refused), strings.Join(named, "; "), queries, queryNoun)
+}
+
+// keyLabels is the label set an entity is keyed on, which is the axis
+// AGE cannot hold more than one member of.
+func keyLabels(e codegen.Entity) []string {
+	if e.Kind == codegen.EntityNode {
+		return e.Labels.Split()
+	}
+	return e.EdgeKey.KeyLabels.Split()
+}
+
+// entityKindNoun names an entity kind as the schema's own vocabulary
+// spells it, so the diagnostic points at a declaration the author wrote.
+func entityKindNoun(k codegen.EntityKind) string {
+	if k == codegen.EntityNode {
+		return "node"
+	}
+	return "edge"
+}
+
+// rejectOffsetSidecarCollisions fails a schema in which the property
+// name this backend derives for a TIMESTAMP property's zone is already
+// a property the author declared. The derived name is read out of the
+// same property map the declared one is, so a schema holding both gives
+// one key two readers: the declared property fills its own struct field
+// and is then read a second time as an offset, re-zoning the instant by
+// whatever it holds. Where the declared width is not an integer the
+// second read fails outright and no vertex of that type ever decodes.
+//
+// Reported as codegen.ErrPropertyFieldCollision because that is what it
+// is — two properties on one entity contending for a single name — even
+// though only one of the two appears in the schema text. Fields arrive
+// map-key sorted, so the first offender is the same one on every run.
+func rejectOffsetSidecarCollisions(entities []codegen.Entity) error {
+	for _, e := range entities {
+		declared := make(map[string]struct{}, len(e.Fields))
+		for _, f := range e.Fields {
+			declared[f.PropName] = struct{}{}
+		}
+		for _, f := range e.Fields {
+			if f.GoType != goInstant {
+				continue
+			}
+			sidecar := offsetProperty(f.PropName)
+			if _, taken := declared[sidecar]; !taken {
+				continue
+			}
+			return fmt.Errorf("%w: entity %q declares property %q, which is where the Apache AGE backend stores property %q's zone — one key with two readers, so an instant would come back re-zoned by the declared value",
+				codegen.ErrPropertyFieldCollision, e.Name, sidecar, f.PropName)
+		}
+	}
+	return nil
 }
 
 // nameBackend adds this backend's name to a width or a temporal kind the
@@ -388,21 +463,20 @@ func formatLabelList(first, second string, rest ...string) string {
 }
 
 // unservedColumn names why a resolved column type has no decode arm, or
-// "" when it has one. Served are a schema property of scalar width, a
-// bool / integer / float / string expression, and a whole vertex or edge
-// — the last of these because its label and its properties are together
-// enough to fill the entity struct the schema declares. What remains
-// arrives either as a shape whose members the emitted helpers have no
-// declared widths for, as a value whose shape is not known until it
-// arrives, or — for the edge union — in answer to a statement this
-// server will not parse.
+// "" when it has one. Served are a schema property of any width the type
+// table carries — which is every scalar width with an agtype scalar, a
+// list of one at whatever depth, and a property of no declared shape — a
+// bool / integer / float / string expression, and a whole vertex or edge,
+// the last of these because its label and its properties are together
+// enough to fill the entity struct the schema declares. What remains is a
+// width no emitted helper can fill, an expression the resolver typed as
+// something other than a property, or — for the edge union — a column
+// that could only arrive in answer to a statement this server will not
+// parse.
 func unservedColumn(t resolver.ResolvedType) string {
 	switch ct := t.(type) {
 	case resolver.ResolvedProperty:
-		if ct.Type.Kind() == graph.KindList {
-			return "projects a list property"
-		}
-		if !scalarWidth(ct.Type) {
+		if !carriedWidth(ct.Type) {
 			return "projects " + ct.String()
 		}
 		return ""
@@ -437,25 +511,26 @@ func unservedColumn(t resolver.ResolvedType) string {
 // into the agtype argument, or "" when it can. Parameters reach here as
 // schema properties only — the shared admission phase rejects every
 // other resolved type before emission — so width is the whole question.
+// The argument object is JSON, whose syntax agtype's input function
+// reads, so a width with a Go carrier has an encoding: a slice crosses
+// as an agtype list and a value of no declared shape as whatever shape
+// it holds.
 func unservedParam(t resolver.ResolvedType) string {
 	prop, ok := t.(resolver.ResolvedProperty)
 	if !ok {
 		return "is " + t.String()
 	}
-	if prop.Type.Kind() == graph.KindList {
-		return "is a list"
-	}
-	if !scalarWidth(prop.Type) {
+	if !carriedWidth(prop.Type) {
 		return "is " + prop.String()
 	}
 	return ""
 }
 
-// scalarWidth reports whether a property width lands on a Go scalar the
+// carriedWidth reports whether a property width lands on a Go type the
 // emitted helpers encode and decode. The type table admits exactly those
 // widths, so asking it is the whole check, and asking it here is what
 // keeps the two answers from drifting apart.
-func scalarWidth(pt graph.PropertyType) bool {
+func carriedWidth(pt graph.PropertyType) bool {
 	_, ok := typeMap{}.Property(pt)
 	return ok
 }

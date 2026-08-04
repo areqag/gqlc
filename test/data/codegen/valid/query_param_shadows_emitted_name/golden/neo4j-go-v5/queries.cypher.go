@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
 )
 
 const personByStmtQueryText = `MATCH (p:Person) WHERE p.name = $stmt RETURN p.name`
@@ -14,8 +15,8 @@ const personByStmtQueryText = `MATCH (p:Person) WHERE p.name = $stmt RETURN p.na
 // PersonByStmt executes the PersonByStmt query.
 //
 //	MATCH (p:Person) WHERE p.name = $stmt RETURN p.name
-func (q *Queries) PersonByStmt(ctx context.Context, stmt string) (string, error) {
-	records, err := q.db.run(ctx, personByStmtQueryText, map[string]any{"stmt": stmt}, neo4j.AccessModeRead)
+func (q *Queries) PersonByStmt(ctx context.Context, arg string) (string, error) {
+	records, err := q.db.run(ctx, personByStmtQueryText, map[string]any{"stmt": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return "", err
 	}
@@ -40,8 +41,8 @@ const personByArgsQueryText = `MATCH (p:Person) WHERE p.name = $args RETURN p.na
 // PersonByArgs executes the PersonByArgs query.
 //
 //	MATCH (p:Person) WHERE p.name = $args RETURN p.name
-func (q *Queries) PersonByArgs(ctx context.Context, args string) ([]string, error) {
-	records, err := q.db.run(ctx, personByArgsQueryText, map[string]any{"args": args}, neo4j.AccessModeRead)
+func (q *Queries) PersonByArgs(ctx context.Context, arg string) ([]string, error) {
+	records, err := q.db.run(ctx, personByArgsQueryText, map[string]any{"args": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
 	}
@@ -64,8 +65,8 @@ const personByRowsQueryText = `MATCH (p:Person) WHERE p.name = $rows RETURN p.na
 // PersonByRows executes the PersonByRows query.
 //
 //	MATCH (p:Person) WHERE p.name = $rows RETURN p.name
-func (q *Queries) PersonByRows(ctx context.Context, rows string) ([]string, error) {
-	records, err := q.db.run(ctx, personByRowsQueryText, map[string]any{"rows": rows}, neo4j.AccessModeRead)
+func (q *Queries) PersonByRows(ctx context.Context, arg string) ([]string, error) {
+	records, err := q.db.run(ctx, personByRowsQueryText, map[string]any{"rows": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
 	}
@@ -88,8 +89,8 @@ const personByRaw0QueryText = `MATCH (p:Person) WHERE p.name = $raw0 RETURN p.na
 // PersonByRaw0 executes the PersonByRaw0 query.
 //
 //	MATCH (p:Person) WHERE p.name = $raw0 RETURN p.name
-func (q *Queries) PersonByRaw0(ctx context.Context, raw0 string) (string, error) {
-	records, err := q.db.run(ctx, personByRaw0QueryText, map[string]any{"raw0": raw0}, neo4j.AccessModeRead)
+func (q *Queries) PersonByRaw0(ctx context.Context, arg string) (string, error) {
+	records, err := q.db.run(ctx, personByRaw0QueryText, map[string]any{"raw0": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return "", err
 	}
@@ -114,8 +115,8 @@ const personByValue0QueryText = `MATCH (p:Person) WHERE p.name = $value0 RETURN 
 // PersonByValue0 executes the PersonByValue0 query.
 //
 //	MATCH (p:Person) WHERE p.name = $value0 RETURN p.name
-func (q *Queries) PersonByValue0(ctx context.Context, value0 string) (string, error) {
-	records, err := q.db.run(ctx, personByValue0QueryText, map[string]any{"value0": value0}, neo4j.AccessModeRead)
+func (q *Queries) PersonByValue0(ctx context.Context, arg string) (string, error) {
+	records, err := q.db.run(ctx, personByValue0QueryText, map[string]any{"value0": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return "", err
 	}
@@ -140,8 +141,8 @@ const deleteByStmtQueryText = `MATCH (p:Person) WHERE p.name = $stmt DELETE p`
 // DeleteByStmt executes the DeleteByStmt query.
 //
 //	MATCH (p:Person) WHERE p.name = $stmt DELETE p
-func (q *Queries) DeleteByStmt(ctx context.Context, stmt string) error {
-	_, err := q.db.run(ctx, deleteByStmtQueryText, map[string]any{"stmt": stmt}, neo4j.AccessModeWrite)
+func (q *Queries) DeleteByStmt(ctx context.Context, arg string) error {
+	_, err := q.db.run(ctx, deleteByStmtQueryText, map[string]any{"stmt": arg}, neo4j.AccessModeWrite)
 	return err
 }
 
@@ -150,18 +151,18 @@ const deleteByArgsQueryText = `MATCH (p:Person) WHERE p.name = $args DELETE p`
 // DeleteByArgs executes the DeleteByArgs query.
 //
 //	MATCH (p:Person) WHERE p.name = $args DELETE p
-func (q *Queries) DeleteByArgs(ctx context.Context, args string) error {
-	_, err := q.db.run(ctx, deleteByArgsQueryText, map[string]any{"args": args}, neo4j.AccessModeWrite)
+func (q *Queries) DeleteByArgs(ctx context.Context, arg string) error {
+	_, err := q.db.run(ctx, deleteByArgsQueryText, map[string]any{"args": arg}, neo4j.AccessModeWrite)
 	return err
 }
 
-const constShadowOneQueryText_ = `MATCH (p:Person) WHERE p.name = $constShadowOneQueryText RETURN p.name`
+const constShadowOneQueryText = `MATCH (p:Person) WHERE p.name = $constShadowOneQueryText RETURN p.name`
 
 // ConstShadowOne executes the ConstShadowOne query.
 //
 //	MATCH (p:Person) WHERE p.name = $constShadowOneQueryText RETURN p.name
-func (q *Queries) ConstShadowOne(ctx context.Context, constShadowOneQueryText string) (string, error) {
-	records, err := q.db.run(ctx, constShadowOneQueryText_, map[string]any{"constShadowOneQueryText": constShadowOneQueryText}, neo4j.AccessModeRead)
+func (q *Queries) ConstShadowOne(ctx context.Context, arg string) (string, error) {
+	records, err := q.db.run(ctx, constShadowOneQueryText, map[string]any{"constShadowOneQueryText": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return "", err
 	}
@@ -181,13 +182,13 @@ func (q *Queries) ConstShadowOne(ctx context.Context, constShadowOneQueryText st
 	return value, nil
 }
 
-const constShadowManyQueryText_ = `MATCH (p:Person) WHERE p.name = $constShadowManyQueryText RETURN p.name`
+const constShadowManyQueryText = `MATCH (p:Person) WHERE p.name = $constShadowManyQueryText RETURN p.name`
 
 // ConstShadowMany executes the ConstShadowMany query.
 //
 //	MATCH (p:Person) WHERE p.name = $constShadowManyQueryText RETURN p.name
-func (q *Queries) ConstShadowMany(ctx context.Context, constShadowManyQueryText string) ([]string, error) {
-	records, err := q.db.run(ctx, constShadowManyQueryText_, map[string]any{"constShadowManyQueryText": constShadowManyQueryText}, neo4j.AccessModeRead)
+func (q *Queries) ConstShadowMany(ctx context.Context, arg string) ([]string, error) {
+	records, err := q.db.run(ctx, constShadowManyQueryText, map[string]any{"constShadowManyQueryText": arg}, neo4j.AccessModeRead)
 	if err != nil {
 		return nil, err
 	}
@@ -205,12 +206,220 @@ func (q *Queries) ConstShadowMany(ctx context.Context, constShadowManyQueryText 
 	return out, nil
 }
 
-const constShadowExecQueryText_ = `MATCH (p:Person) WHERE p.name = $constShadowExecQueryText DELETE p`
+const constShadowExecQueryText = `MATCH (p:Person) WHERE p.name = $constShadowExecQueryText DELETE p`
 
 // ConstShadowExec executes the ConstShadowExec query.
 //
 //	MATCH (p:Person) WHERE p.name = $constShadowExecQueryText DELETE p
-func (q *Queries) ConstShadowExec(ctx context.Context, constShadowExecQueryText string) error {
-	_, err := q.db.run(ctx, constShadowExecQueryText_, map[string]any{"constShadowExecQueryText": constShadowExecQueryText}, neo4j.AccessModeWrite)
+func (q *Queries) ConstShadowExec(ctx context.Context, arg string) error {
+	_, err := q.db.run(ctx, constShadowExecQueryText, map[string]any{"constShadowExecQueryText": arg}, neo4j.AccessModeWrite)
 	return err
+}
+
+const receiverShadowQueryText = `MATCH (p:Person) WHERE p.name = $q RETURN p.name`
+
+// ReceiverShadow executes the ReceiverShadow query.
+//
+//	MATCH (p:Person) WHERE p.name = $q RETURN p.name
+func (q *Queries) ReceiverShadow(ctx context.Context, arg string) (string, error) {
+	records, err := q.db.run(ctx, receiverShadowQueryText, map[string]any{"q": arg}, neo4j.AccessModeRead)
+	if err != nil {
+		return "", err
+	}
+	if len(records) == 0 {
+		return "", ErrNoRows
+	}
+	if len(records) > 1 {
+		return "", ErrMultipleResults
+	}
+	value, isNil, err := neo4j.GetRecordValue[string](records[0], "p.name")
+	if err != nil {
+		return "", fmt.Errorf("ReceiverShadow: decode column %q: %w", "p.name", err)
+	}
+	if isNil {
+		return "", fmt.Errorf("ReceiverShadow: column %q is non-nullable but arrived null", "p.name")
+	}
+	return value, nil
+}
+
+const contextShadowQueryText = `MATCH (p:Person) WHERE p.name = $ctx RETURN p.name`
+
+// ContextShadow executes the ContextShadow query.
+//
+//	MATCH (p:Person) WHERE p.name = $ctx RETURN p.name
+func (q *Queries) ContextShadow(ctx context.Context, arg string) (string, error) {
+	records, err := q.db.run(ctx, contextShadowQueryText, map[string]any{"ctx": arg}, neo4j.AccessModeRead)
+	if err != nil {
+		return "", err
+	}
+	if len(records) == 0 {
+		return "", ErrNoRows
+	}
+	if len(records) > 1 {
+		return "", ErrMultipleResults
+	}
+	value, isNil, err := neo4j.GetRecordValue[string](records[0], "p.name")
+	if err != nil {
+		return "", fmt.Errorf("ContextShadow: decode column %q: %w", "p.name", err)
+	}
+	if isNil {
+		return "", fmt.Errorf("ContextShadow: column %q is non-nullable but arrived null", "p.name")
+	}
+	return value, nil
+}
+
+const importShadowQueryText = `MATCH (p:Person) WHERE p.name = $fmt RETURN p.name`
+
+// ImportShadow executes the ImportShadow query.
+//
+//	MATCH (p:Person) WHERE p.name = $fmt RETURN p.name
+func (q *Queries) ImportShadow(ctx context.Context, arg string) (string, error) {
+	records, err := q.db.run(ctx, importShadowQueryText, map[string]any{"fmt": arg}, neo4j.AccessModeRead)
+	if err != nil {
+		return "", err
+	}
+	if len(records) == 0 {
+		return "", ErrNoRows
+	}
+	if len(records) > 1 {
+		return "", ErrMultipleResults
+	}
+	value, isNil, err := neo4j.GetRecordValue[string](records[0], "p.name")
+	if err != nil {
+		return "", fmt.Errorf("ImportShadow: decode column %q: %w", "p.name", err)
+	}
+	if isNil {
+		return "", fmt.Errorf("ImportShadow: column %q is non-nullable but arrived null", "p.name")
+	}
+	return value, nil
+}
+
+const helperShadowQueryText = `MATCH (p:Person) WHERE p.name = $decodePerson RETURN p`
+
+// HelperShadow executes the HelperShadow query.
+//
+//	MATCH (p:Person) WHERE p.name = $decodePerson RETURN p
+func (q *Queries) HelperShadow(ctx context.Context, arg string) (Person, error) {
+	records, err := q.db.run(ctx, helperShadowQueryText, map[string]any{"decodePerson": arg}, neo4j.AccessModeRead)
+	if err != nil {
+		return Person{}, err
+	}
+	if len(records) == 0 {
+		return Person{}, ErrNoRows
+	}
+	if len(records) > 1 {
+		return Person{}, ErrMultipleResults
+	}
+	node, isNil, err := neo4j.GetRecordValue[dbtype.Node](records[0], "p")
+	if err != nil {
+		return Person{}, fmt.Errorf("HelperShadow: decode column %q: %w", "p", err)
+	}
+	if isNil {
+		return Person{}, fmt.Errorf("HelperShadow: column %q is non-nullable but arrived null", "p")
+	}
+	value, err := decodePerson(node)
+	if err != nil {
+		return Person{}, fmt.Errorf("HelperShadow: decode column %q: %w", "p", err)
+	}
+	return value, nil
+}
+
+const errShadowQueryText = `MATCH (p:Person) WHERE p.name = $err RETURN p.name`
+
+// ErrShadow executes the ErrShadow query.
+//
+//	MATCH (p:Person) WHERE p.name = $err RETURN p.name
+func (q *Queries) ErrShadow(ctx context.Context, arg string) (string, error) {
+	records, err := q.db.run(ctx, errShadowQueryText, map[string]any{"err": arg}, neo4j.AccessModeRead)
+	if err != nil {
+		return "", err
+	}
+	if len(records) == 0 {
+		return "", ErrNoRows
+	}
+	if len(records) > 1 {
+		return "", ErrMultipleResults
+	}
+	value, isNil, err := neo4j.GetRecordValue[string](records[0], "p.name")
+	if err != nil {
+		return "", fmt.Errorf("ErrShadow: decode column %q: %w", "p.name", err)
+	}
+	if isNil {
+		return "", fmt.Errorf("ErrShadow: column %q is non-nullable but arrived null", "p.name")
+	}
+	return value, nil
+}
+
+const recordsShadowQueryText = `MATCH (p:Person) WHERE p.name = $records RETURN p.name`
+
+// RecordsShadow executes the RecordsShadow query.
+//
+//	MATCH (p:Person) WHERE p.name = $records RETURN p.name
+func (q *Queries) RecordsShadow(ctx context.Context, arg string) ([]string, error) {
+	records, err := q.db.run(ctx, recordsShadowQueryText, map[string]any{"records": arg}, neo4j.AccessModeRead)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(records))
+	for _, record := range records {
+		value, isNil, err := neo4j.GetRecordValue[string](record, "p.name")
+		if err != nil {
+			return nil, fmt.Errorf("RecordsShadow: decode column %q: %w", "p.name", err)
+		}
+		if isNil {
+			return nil, fmt.Errorf("RecordsShadow: column %q is non-nullable but arrived null", "p.name")
+		}
+		out = append(out, value)
+	}
+	return out, nil
+}
+
+const outShadowQueryText = `MATCH (p:Person) WHERE p.name = $out RETURN p.name`
+
+// OutShadow executes the OutShadow query.
+//
+//	MATCH (p:Person) WHERE p.name = $out RETURN p.name
+func (q *Queries) OutShadow(ctx context.Context, arg string) ([]string, error) {
+	records, err := q.db.run(ctx, outShadowQueryText, map[string]any{"out": arg}, neo4j.AccessModeRead)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(records))
+	for _, record := range records {
+		value, isNil, err := neo4j.GetRecordValue[string](record, "p.name")
+		if err != nil {
+			return nil, fmt.Errorf("OutShadow: decode column %q: %w", "p.name", err)
+		}
+		if isNil {
+			return nil, fmt.Errorf("OutShadow: column %q is non-nullable but arrived null", "p.name")
+		}
+		out = append(out, value)
+	}
+	return out, nil
+}
+
+const blankShadowQueryText = `MATCH (p:Person) WHERE p.name = $_ RETURN p.name`
+
+// BlankShadow executes the BlankShadow query.
+//
+//	MATCH (p:Person) WHERE p.name = $_ RETURN p.name
+func (q *Queries) BlankShadow(ctx context.Context, arg string) (string, error) {
+	records, err := q.db.run(ctx, blankShadowQueryText, map[string]any{"_": arg}, neo4j.AccessModeRead)
+	if err != nil {
+		return "", err
+	}
+	if len(records) == 0 {
+		return "", ErrNoRows
+	}
+	if len(records) > 1 {
+		return "", ErrMultipleResults
+	}
+	value, isNil, err := neo4j.GetRecordValue[string](records[0], "p.name")
+	if err != nil {
+		return "", fmt.Errorf("BlankShadow: decode column %q: %w", "p.name", err)
+	}
+	if isNil {
+		return "", fmt.Errorf("BlankShadow: column %q is non-nullable but arrived null", "p.name")
+	}
+	return value, nil
 }

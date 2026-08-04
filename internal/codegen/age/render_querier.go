@@ -1,6 +1,7 @@
 package age
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/areqag/gqlc/internal/codegen"
@@ -16,7 +17,14 @@ func renderQuerier(pkg string, prepared []codegen.Query) []byte {
 	var b strings.Builder
 	b.WriteString(codegen.Header())
 	b.WriteString("package " + pkg + "\n\n")
-	if len(prepared) > 0 {
+	switch {
+	case len(prepared) == 0:
+	case slices.ContainsFunc(prepared, namesInstant):
+		// An interface entry repeats the signature its method declares,
+		// so a signature spelling the instant puts "time" in this file
+		// as well as in the one the method lands in.
+		b.WriteString("import (\n\t\"context\"\n\t\"time\"\n)\n\n")
+	default:
 		b.WriteString("import \"context\"\n\n")
 	}
 

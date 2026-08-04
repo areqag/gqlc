@@ -1,0 +1,173 @@
+// Package neo4j stands in for the driver's root package so the emitted
+// decoders can be run rather than only read. The aliases are copied from
+// neo4j-go-driver/v5@v5.28.4/neo4j/aliases.go, PropertyValue and
+// GetProperty verbatim from that release's neo4j/graph.go, RecordValue
+// and GetRecordValue verbatim from neo4j/record.go, and Record from
+// neo4j/db/record.go — the two constraints are the whole point of the
+// stub, because they are what decide which assertions the emission is
+// allowed to make.
+//
+// The session surface below is not copied: SessionWithContext and
+// ManagedTransaction carry unexported methods, which is what makes the
+// real ones unimplementable from outside and the stub necessary. They
+// are declared with the method set the emitted db.go calls and nothing
+// else, so a corpus test can supply a transaction that hands back
+// records it wrote itself.
+package neo4j
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
+)
+
+type (
+	Point2D       = dbtype.Point2D
+	Point3D       = dbtype.Point3D
+	Date          = dbtype.Date
+	LocalTime     = dbtype.LocalTime
+	LocalDateTime = dbtype.LocalDateTime
+	Time          = dbtype.Time
+	OffsetTime    = dbtype.Time
+	Duration      = dbtype.Duration
+	Entity        = dbtype.Entity
+	Node          = dbtype.Node
+	Relationship  = dbtype.Relationship
+	Path          = dbtype.Path
+)
+
+type PropertyValue interface {
+	bool | int64 | float64 | string |
+		Point2D | Point3D |
+		Date | LocalTime | LocalDateTime | Time | Duration | time.Time | /* OffsetTime == Time == dbtype.Time */
+		[]byte | []any
+}
+
+// GetProperty returns the value matching the property of the given neo4j.Node or neo4j.Relationship
+// The property type T must adhere to neo4j.PropertyValue
+// If the property does not exist, an error is returned
+// If the property type does not match the type specification, an error is returned
+//
+// Note: due to the current limited generics support, any property array value other than byte array is typed as []any.
+func GetProperty[T PropertyValue](entity Entity, key string) (T, error) {
+	rawValue, found := entity.GetProperties()[key]
+	if !found {
+		return *new(T), fmt.Errorf("could not find any property named %s", key)
+	}
+	value, ok := rawValue.(T)
+	if !ok {
+		zeroValue := *new(T)
+		return zeroValue, fmt.Errorf("expected value to have type %T but found type %T", zeroValue, rawValue)
+	}
+	return value, nil
+}
+
+type Record struct {
+	// Values contains all the values in the record.
+	Values []any
+	// Keys contains names of the values in the record.
+	// Should not be modified. Same instance is used for all records within the same result.
+	Keys []string
+}
+
+// Get returns the value corresponding to the given key along with a boolean that is true if
+// a value was found and false if there were no key with the given name.
+func (r Record) Get(key string) (any, bool) {
+	for i, ckey := range r.Keys {
+		if key == ckey {
+			return r.Values[i], true
+		}
+	}
+	return nil, false
+}
+
+type RecordValue interface {
+	bool | int64 | float64 | string |
+		Point2D | Point3D |
+		Date | LocalTime | LocalDateTime | Time | Duration | time.Time | /* OffsetTime == Time == dbtype.Time */
+		[]byte | []any | map[string]any |
+		Node | Relationship | Path
+}
+
+// GetRecordValue returns the value of the current provided record named by the specified key
+// The value type T must adhere to neo4j.RecordValue
+// If the key specified for the value does not exist, an error is returned
+// If the value is not defined for the provided existing key, the returned boolean is true
+// If the value type does not match the type specification, an error is returned
+func GetRecordValue[T RecordValue](record *Record, key string) (T, bool, error) {
+	rawValue, found := record.Get(key)
+	if !found {
+		return *new(T), false, fmt.Errorf("record value %s not found", key)
+	}
+	if rawValue == nil {
+		return *new(T), true, nil
+	}
+	value, ok := rawValue.(T)
+	if !ok {
+		zeroValue := *new(T)
+		return zeroValue, false, fmt.Errorf("expected value to have type %T but found type %T", zeroValue, rawValue)
+	}
+	return value, false, nil
+}
+
+type AccessMode int
+
+const (
+	AccessModeWrite AccessMode = 0
+	AccessModeRead  AccessMode = 1
+)
+
+type TransactionConfig struct{}
+
+type SessionConfig struct {
+	AccessMode AccessMode
+}
+
+type ResultWithContext interface {
+	Collect(ctx context.Context) ([]*Record, error)
+}
+
+type ManagedTransaction interface {
+	Run(ctx context.Context, cypher string, params map[string]any) (ResultWithContext, error)
+}
+
+// SessionWithContext keeps its work-runner unexported so that the only
+// way a corpus test can reach an emitted method body is through
+// Queries.WithTx — the path that hands the emission a transaction rather
+// than a driver, and so the one that needs no connection.
+type SessionWithContext interface {
+	Close(ctx context.Context) error
+	execute(ctx context.Context, work func(ManagedTransaction) (any, error)) (any, error)
+}
+
+type DriverWithContext interface {
+	NewSession(ctx context.Context, config SessionConfig) SessionWithContext
+}
+
+func ExecuteRead[T any](ctx context.Context, session SessionWithContext,
+	work func(tx ManagedTransaction) (T, error),
+	_ ...func(config *TransactionConfig)) (T, error) {
+
+	return executeGeneric(ctx, session, work)
+}
+
+func ExecuteWrite[T any](ctx context.Context, session SessionWithContext,
+	work func(tx ManagedTransaction) (T, error),
+	_ ...func(config *TransactionConfig)) (T, error) {
+
+	return executeGeneric(ctx, session, work)
+}
+
+func executeGeneric[T any](ctx context.Context, session SessionWithContext, work func(tx ManagedTransaction) (T, error)) (T, error) {
+	raw, err := session.execute(ctx, func(tx ManagedTransaction) (any, error) { return work(tx) })
+	if err != nil {
+		return *new(T), err
+	}
+	value, ok := raw.(T)
+	if !ok {
+		return *new(T), fmt.Errorf("expected work to return %T but found type %T", *new(T), raw)
+	}
+	return value, nil
+}

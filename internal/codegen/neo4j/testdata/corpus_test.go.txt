@@ -1,0 +1,477 @@
+package neo4jcorpus
+
+import (
+	"context"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j"
+	"github.com/neo4j/neo4j-go-driver/v5/neo4j/dbtype"
+)
+
+// node is the shape the driver hands a decoder: a Props map holding the
+// Go values neo4j.PropertyValue names, and nothing else. Every value in
+// every test below is one a Bolt hydrator can actually build — an
+// integer of any width arrives as int64, a float of any width as
+// float64, and an array of anything but bytes as []any.
+func node(props map[string]any) dbtype.Node {
+	return dbtype.Node{Id: 1, ElementId: "4:corpus:1", Labels: []string{"Corpus"}, Props: props}
+}
+
+// recordTx is the record shape the driver hands a query method, bound
+// through the seam the emission offers for one: Queries.WithTx takes a
+// caller-owned transaction, so a method body can be run with no
+// connection, no session and no driver behind it.
+type recordTx struct{ records []*neo4j.Record }
+
+func (t recordTx) Run(context.Context, string, map[string]any) (neo4j.ResultWithContext, error) {
+	return recordResult{records: t.records}, nil
+}
+
+type recordResult struct{ records []*neo4j.Record }
+
+func (r recordResult) Collect(context.Context) ([]*neo4j.Record, error) { return r.records, nil }
+
+// queriesOver binds a Queries whose every method reads the given rows,
+// one []any of column values per row against the shared key order.
+func queriesOver(keys []string, rows ...[]any) *Queries {
+	records := make([]*neo4j.Record, 0, len(rows))
+	for _, values := range rows {
+		records = append(records, &neo4j.Record{Keys: keys, Values: values})
+	}
+	return new(Queries).WithTx(recordTx{records: records})
+}
+
+// A list of no declared element shape is the one list whose elements the
+// decoder must not narrow. Its declared element type is `any`, a type
+// assertion to `any` is false for a nil interface value, and null is
+// exactly what such a list exists to be allowed to hold — so narrowing
+// it would fail the whole decode on the value it was declared for.
+//
+// The wants here are also the values the AGE backend produces for the
+// same graph data: its agtypeValue maps agtype's inline null to nil (see
+// internal/codegen/age/testdata/corpus_test.go.txt, TestAgtypeValue), so
+// a caller who moves between the two backends is handed the same list.
+func TestBinCarriesNullElements(t *testing.T) {
+	got, err := decodeBin(node(map[string]any{
+		"loose": []any{true, nil, 3.5},
+		"bag":   []any{int64(1), nil, "x"},
+		"piles": []any{[]any{int64(1), nil}, []any{}},
+	}))
+	if err != nil {
+		t.Fatalf("decodeBin(nulls) = error %v", err)
+	}
+	if want := []any{true, nil, 3.5}; !reflect.DeepEqual(got.Loose, want) {
+		t.Errorf("decodeBin(nulls).Loose = %#v, want %#v", got.Loose, want)
+	}
+	if got.Bag == nil {
+		t.Fatalf("decodeBin(nulls).Bag = nil, want a list")
+	}
+	if want := []any{int64(1), nil, "x"}; !reflect.DeepEqual(*got.Bag, want) {
+		t.Errorf("decodeBin(nulls).Bag = %#v, want %#v", *got.Bag, want)
+	}
+	if got.Piles == nil {
+		t.Fatalf("decodeBin(nulls).Piles = nil, want a list")
+	}
+	if want := [][]any{{int64(1), nil}, {}}; !reflect.DeepEqual(*got.Piles, want) {
+		t.Errorf("decodeBin(nulls).Piles = %#v, want %#v", *got.Piles, want)
+	}
+}
+
+// Absence and shape on the same three properties: a nullable list the
+// graph does not hold reaches the caller as a nil pointer, an empty one
+// as an empty list, and a property holding something that is not a list
+// at all is refused rather than carried through.
+func TestBinNullabilityAndShape(t *testing.T) {
+	got, err := decodeBin(node(map[string]any{"loose": []any{}}))
+	if err != nil {
+		t.Fatalf("decodeBin(absent) = error %v", err)
+	}
+	if got.Loose == nil || len(got.Loose) != 0 {
+		t.Errorf("decodeBin(absent).Loose = %#v, want an empty list", got.Loose)
+	}
+	if got.Bag != nil {
+		t.Errorf("decodeBin(absent).Bag = %#v, want nil", got.Bag)
+	}
+	if got.Piles != nil {
+		t.Errorf("decodeBin(absent).Piles = %#v, want nil", got.Piles)
+	}
+
+	if _, err := decodeBin(node(map[string]any{"loose": []any{}, "bag": "not a list"})); err == nil {
+		t.Errorf("decodeBin(bag: string) = no error, want a refusal")
+	}
+	if _, err := decodeBin(node(map[string]any{"loose": []any{}, "piles": []any{int64(1)}})); err == nil {
+		t.Errorf("decodeBin(piles: [int]) = no error, want a refusal")
+	}
+	if _, err := decodeBin(node(map[string]any{})); err == nil {
+		t.Errorf("decodeBin(no loose) = no error, want a refusal")
+	}
+}
+
+// Every other list is narrowed element by element, because the element
+// widths the schema declared are not on the wire: the driver hands back
+// []any whatever the schema said, so int32 arrives as int64 and float32
+// as float64. []byte and time.Time are the two element carriers that do
+// arrive as themselves.
+func TestListyNarrowsEachElement(t *testing.T) {
+	stamp := time.Date(2024, 3, 1, 12, 0, 0, 0, time.UTC)
+	got, err := decodeListy(node(map[string]any{
+		"tags":   []any{"a", "b"},
+		"ranks":  []any{int64(1), int64(-2)},
+		"matrix": []any{[]any{int64(7), int64(8)}, []any{}},
+		"blobs":  []any{[]byte{1, 2}, []byte{}},
+		"stamps": []any{stamp},
+		"depths": []any{0.5, 1.5},
+	}))
+	if err != nil {
+		t.Fatalf("decodeListy = error %v", err)
+	}
+	if want := []string{"a", "b"}; !reflect.DeepEqual(got.Tags, want) {
+		t.Errorf("decodeListy().Tags = %#v, want %#v", got.Tags, want)
+	}
+	if want := []int32{1, -2}; !reflect.DeepEqual(got.Ranks, want) {
+		t.Errorf("decodeListy().Ranks = %#v, want %#v", got.Ranks, want)
+	}
+	if want := [][]int64{{7, 8}, {}}; !reflect.DeepEqual(got.Matrix, want) {
+		t.Errorf("decodeListy().Matrix = %#v, want %#v", got.Matrix, want)
+	}
+	if want := [][]byte{{1, 2}, {}}; !reflect.DeepEqual(got.Blobs, want) {
+		t.Errorf("decodeListy().Blobs = %#v, want %#v", got.Blobs, want)
+	}
+	if want := []time.Time{stamp}; !reflect.DeepEqual(got.Stamps, want) {
+		t.Errorf("decodeListy().Stamps = %#v, want %#v", got.Stamps, want)
+	}
+	if got.Depths == nil {
+		t.Fatalf("decodeListy().Depths = nil, want a list")
+	}
+	if want := []float32{0.5, 1.5}; !reflect.DeepEqual(*got.Depths, want) {
+		t.Errorf("decodeListy().Depths = %#v, want %#v", *got.Depths, want)
+	}
+}
+
+// An empty list is an empty list and not the nil one an absent property
+// would reach the caller as. The distinction is the caller's to make, so
+// the decoder has to preserve it — and it is the AGE backend's pin too,
+// which is what keeps a `len(xs) == 0` check meaning the same thing on
+// either backend.
+func TestListyEmptyIsNotAbsent(t *testing.T) {
+	empty, err := decodeListy(node(map[string]any{
+		"tags": []any{}, "ranks": []any{}, "matrix": []any{},
+		"blobs": []any{}, "stamps": []any{}, "depths": []any{},
+	}))
+	if err != nil {
+		t.Fatalf("decodeListy(empty) = error %v", err)
+	}
+	for name, got := range map[string]int{
+		"Tags":   len(empty.Tags),
+		"Ranks":  len(empty.Ranks),
+		"Matrix": len(empty.Matrix),
+		"Blobs":  len(empty.Blobs),
+		"Stamps": len(empty.Stamps),
+	} {
+		if got != 0 {
+			t.Errorf("decodeListy(empty).%s has %d elements, want 0", name, got)
+		}
+	}
+	if empty.Tags == nil || empty.Ranks == nil || empty.Matrix == nil || empty.Blobs == nil || empty.Stamps == nil {
+		t.Errorf("decodeListy(empty) reached a caller with a nil list, want empty ones")
+	}
+	if empty.Depths == nil || *empty.Depths == nil || len(*empty.Depths) != 0 {
+		t.Errorf("decodeListy(empty).Depths = %#v, want a pointer to an empty list", empty.Depths)
+	}
+
+	absent, err := decodeListy(node(map[string]any{
+		"tags": []any{}, "ranks": []any{}, "matrix": []any{}, "blobs": []any{}, "stamps": []any{},
+	}))
+	if err != nil {
+		t.Fatalf("decodeListy(absent depths) = error %v", err)
+	}
+	if absent.Depths != nil {
+		t.Errorf("decodeListy(absent depths).Depths = %#v, want nil", absent.Depths)
+	}
+}
+
+// A mis-typed element is refused, and the failure names the property and
+// the position, because a list is decoded whole and the caller otherwise
+// has nothing to go on.
+func TestListyRefusesAMisTypedElement(t *testing.T) {
+	_, err := decodeListy(node(map[string]any{
+		"tags": []any{}, "ranks": []any{int64(1), "no"}, "matrix": []any{},
+		"blobs": []any{}, "stamps": []any{},
+	}))
+	if err == nil {
+		t.Fatalf("decodeListy(ranks: [int, string]) = no error, want a refusal")
+	}
+	for _, want := range []string{`"ranks"`, "element 1", "expected int64", "got string"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("decodeListy(ranks: [int, string]) = %q, want it to mention %s", err, want)
+		}
+	}
+}
+
+// A property of no declared shape is read rather than asserted, so every
+// value the graph can hold under it reaches the caller as itself — the
+// inline null included, which is the one an assertion could not pass.
+func TestAnythingReadsWhatTheGraphHolds(t *testing.T) {
+	for _, want := range []any{
+		nil, int64(1), 1.5, "x", true,
+		[]any{int64(1), nil, "x"},
+		map[string]any{"k": "v"},
+	} {
+		got, err := decodeAnything(node(map[string]any{"payload": want}))
+		if err != nil {
+			t.Errorf("decodeAnything(payload: %#v) = error %v", want, err)
+			continue
+		}
+		if !reflect.DeepEqual(got.Payload, want) {
+			t.Errorf("decodeAnything(payload: %#v).Payload = %#v", want, got.Payload)
+		}
+	}
+}
+
+// Under a nullable one the pointer is what separates the two nulls a
+// graph can hold: a property the graph does not have at all, and a
+// property it holds whose value is null.
+func TestAnythingSeparatesAbsentFromNull(t *testing.T) {
+	absent, err := decodeAnything(node(map[string]any{"payload": int64(1)}))
+	if err != nil {
+		t.Fatalf("decodeAnything(no maybe) = error %v", err)
+	}
+	if absent.Maybe != nil {
+		t.Errorf("decodeAnything(no maybe).Maybe = %#v, want nil", absent.Maybe)
+	}
+
+	held, err := decodeAnything(node(map[string]any{"payload": int64(1), "maybe": nil}))
+	if err != nil {
+		t.Fatalf("decodeAnything(maybe: null) = error %v", err)
+	}
+	if held.Maybe == nil {
+		t.Fatalf("decodeAnything(maybe: null).Maybe = nil, want a pointer to nil")
+	}
+	if *held.Maybe != nil {
+		t.Errorf("decodeAnything(maybe: null).Maybe points at %#v, want nil", *held.Maybe)
+	}
+}
+
+// The one arm that does not go through the driver still has to fail the
+// way the driver fails, or a caller could tell which decode path a
+// property took from the error text alone.
+func TestAnythingMissingPropertyReadsLikeTheDrivers(t *testing.T) {
+	n := node(map[string]any{})
+	decodeErr := func() error {
+		_, err := decodeAnything(n)
+		return err
+	}()
+	if decodeErr == nil {
+		t.Fatalf("decodeAnything(no payload) = no error, want a refusal")
+	}
+	_, driverErr := neo4j.GetProperty[int64](n, "payload")
+	if driverErr == nil {
+		t.Fatalf("neo4j.GetProperty(no payload) = no error")
+	}
+	if want := "decode Anything.Payload: " + driverErr.Error(); decodeErr.Error() != want {
+		t.Errorf("decodeAnything(no payload) = %q, want %q", decodeErr, want)
+	}
+}
+
+// Scalars narrow from their carriers the same way list elements do, and
+// a nullable one the graph does not hold is a nil pointer rather than a
+// pointer to the zero value.
+func TestScalarNarrows(t *testing.T) {
+	got, err := decodeScalar(node(map[string]any{
+		"id": int64(7), "rank": int64(-3), "active": true, "name": "n", "weight": 0.5,
+	}))
+	if err != nil {
+		t.Fatalf("decodeScalar = error %v", err)
+	}
+	if got.Id != 7 || got.Rank != int32(-3) || !got.Active {
+		t.Errorf("decodeScalar() = %#v", got)
+	}
+	if got.Name == nil || *got.Name != "n" {
+		t.Errorf("decodeScalar().Name = %#v, want \"n\"", got.Name)
+	}
+	if got.Weight == nil || *got.Weight != float32(0.5) {
+		t.Errorf("decodeScalar().Weight = %#v, want 0.5", got.Weight)
+	}
+
+	absent, err := decodeScalar(node(map[string]any{"id": int64(7), "rank": int64(0), "active": false}))
+	if err != nil {
+		t.Fatalf("decodeScalar(absent) = error %v", err)
+	}
+	if absent.Name != nil || absent.Weight != nil {
+		t.Errorf("decodeScalar(absent) = %#v, want nil nullables", absent)
+	}
+}
+
+// A query column carrying a list of no declared element shape is the
+// same claim as TestBinCarriesNullElements, one emission over: a column
+// is decoded through neo4j.GetRecordValue and a property through the
+// Props map, so the two paths narrow independently and a null that
+// survives one can still fail the other.
+func TestBinColumnsCarryNullElements(t *testing.T) {
+	q := queriesOver([]string{"loose", "bag", "piles"}, []any{
+		[]any{true, nil, 3.5},
+		[]any{int64(1), nil, "x"},
+		[]any{[]any{int64(1), nil}, []any{}},
+	})
+	got, err := q.BinColumns(t.Context())
+	if err != nil {
+		t.Fatalf("BinColumns(nulls) = error %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("BinColumns(nulls) returned %d rows, want 1", len(got))
+	}
+	row := got[0]
+	if want := []any{true, nil, 3.5}; !reflect.DeepEqual(row.Loose, want) {
+		t.Errorf("BinColumns(nulls)[0].Loose = %#v, want %#v", row.Loose, want)
+	}
+	if row.Bag == nil {
+		t.Fatalf("BinColumns(nulls)[0].Bag = nil, want a list")
+	}
+	if want := []any{int64(1), nil, "x"}; !reflect.DeepEqual(*row.Bag, want) {
+		t.Errorf("BinColumns(nulls)[0].Bag = %#v, want %#v", *row.Bag, want)
+	}
+	if row.Piles == nil {
+		t.Fatalf("BinColumns(nulls)[0].Piles = nil, want a list")
+	}
+	if want := [][]any{{int64(1), nil}, {}}; !reflect.DeepEqual(*row.Piles, want) {
+		t.Errorf("BinColumns(nulls)[0].Piles = %#v, want %#v", *row.Piles, want)
+	}
+}
+
+// The control on the test above: a column whose elements do have a
+// declared width still narrows to it, so "carry the element as it
+// arrived" is the rule for the one width that has no narrower carrier
+// and not a rule the emission applies everywhere. Both directions are
+// here — []byte arrives as itself and is kept, float64 arrives wider
+// than the declared float32 and is narrowed — because a decoder that
+// carried everything bare would pass on the first alone.
+//
+// The projection carries two non-nullable list columns rather than one
+// because the accumulator each of them builds is a local of the row
+// assembly's own scope: under a name shared between them the second
+// declaration is `no new variables on left side of :=`, and the
+// projection that reaches it is the one no fixture had. A nullable list
+// column does not reach it, because its accumulator sits inside the
+// `if` its null gate opens.
+func TestListyColumnsNarrowEachElement(t *testing.T) {
+	q := queriesOver([]string{"tags", "blobs", "depths"}, []any{
+		[]any{"a", "b"},
+		[]any{[]byte{1, 2}, []byte{}},
+		[]any{0.5, 1.5},
+	})
+	got, err := q.ListyColumns(t.Context())
+	if err != nil {
+		t.Fatalf("ListyColumns = error %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("ListyColumns returned %d rows, want 1", len(got))
+	}
+	row := got[0]
+	if want := []string{"a", "b"}; !reflect.DeepEqual(row.Tags, want) {
+		t.Errorf("ListyColumns()[0].Tags = %#v, want %#v", row.Tags, want)
+	}
+	if want := [][]byte{{1, 2}, {}}; !reflect.DeepEqual(row.Blobs, want) {
+		t.Errorf("ListyColumns()[0].Blobs = %#v, want %#v", row.Blobs, want)
+	}
+	if row.Depths == nil {
+		t.Fatalf("ListyColumns()[0].Depths = nil, want a list")
+	}
+	if want := []float32{0.5, 1.5}; !reflect.DeepEqual(*row.Depths, want) {
+		t.Errorf("ListyColumns()[0].Depths = %#v, want %#v", *row.Depths, want)
+	}
+
+	// A null column and an empty list stay distinguishable here too, and
+	// on this path the distinction is the driver's own: GetRecordValue
+	// reports a held null through its second result rather than through
+	// the value, so a decoder reading only the value cannot tell them
+	// apart.
+	null, err := queriesOver([]string{"tags", "blobs", "depths"}, []any{[]any{}, []any{}, nil}).ListyColumns(t.Context())
+	if err != nil {
+		t.Fatalf("ListyColumns(depths: null) = error %v", err)
+	}
+	if len(null) != 1 {
+		t.Fatalf("ListyColumns(depths: null) returned %d rows, want 1", len(null))
+	}
+	if null[0].Tags == nil || len(null[0].Tags) != 0 {
+		t.Errorf("ListyColumns(depths: null)[0].Tags = %#v, want an empty list", null[0].Tags)
+	}
+	if null[0].Blobs == nil || len(null[0].Blobs) != 0 {
+		t.Errorf("ListyColumns(depths: null)[0].Blobs = %#v, want an empty list", null[0].Blobs)
+	}
+	if null[0].Depths != nil {
+		t.Errorf("ListyColumns(depths: null)[0].Depths = %#v, want nil", null[0].Depths)
+	}
+
+	if _, err := queriesOver([]string{"tags", "blobs", "depths"}, []any{
+		[]any{}, []any{"no"}, []any{},
+	}).ListyColumns(t.Context()); err == nil {
+		t.Errorf("ListyColumns(blobs: [string]) = no error, want a refusal")
+	}
+}
+
+// A column whose declared width is ANY VALUE is read rather than
+// asserted, the same claim TestAnythingReadsWhatTheGraphHolds makes of
+// the property one emission over. `any` is a member of neither
+// neo4j.PropertyValue nor neo4j.RecordValue, so the column has no
+// constrained driver entry point to go through at all — and the null it
+// exists to carry is the one value such an entry point could not have
+// been written to carry.
+func TestAnythingColumnsReadWhatTheGraphHolds(t *testing.T) {
+	for _, want := range []any{
+		nil, int64(1), 1.5, "x", true,
+		[]any{int64(1), nil, "x"},
+		map[string]any{"k": "v"},
+	} {
+		got, err := queriesOver([]string{"payload", "maybe"}, []any{want, want}).AnythingColumns(t.Context())
+		if err != nil {
+			t.Errorf("AnythingColumns(payload: %#v) = error %v", want, err)
+			continue
+		}
+		if len(got) != 1 {
+			t.Fatalf("AnythingColumns(payload: %#v) returned %d rows, want 1", want, len(got))
+		}
+		if !reflect.DeepEqual(got[0].Payload, want) {
+			t.Errorf("AnythingColumns(payload: %#v)[0].Payload = %#v", want, got[0].Payload)
+		}
+	}
+}
+
+// The nullable one carries the graph's null in its pointer. A record
+// holds a key for every column the query projected, so a pointer spent
+// on the missing key the Props map can have would be a pointer that is
+// never nil — a null the caller has no way to read. This is the one
+// place the column path and the entity path answer differently, and
+// TestAnythingSeparatesAbsentFromNull is the other half of the pair.
+func TestAnythingColumnsCarryTheirNull(t *testing.T) {
+	null, err := queriesOver([]string{"payload", "maybe"}, []any{int64(1), nil}).AnythingColumns(t.Context())
+	if err != nil {
+		t.Fatalf("AnythingColumns(maybe: null) = error %v", err)
+	}
+	if len(null) != 1 {
+		t.Fatalf("AnythingColumns(maybe: null) returned %d rows, want 1", len(null))
+	}
+	if null[0].Maybe != nil {
+		t.Errorf("AnythingColumns(maybe: null)[0].Maybe = %#v, want nil", null[0].Maybe)
+	}
+
+	held, err := queriesOver([]string{"payload", "maybe"}, []any{int64(1), "v"}).AnythingColumns(t.Context())
+	if err != nil {
+		t.Fatalf("AnythingColumns(maybe: \"v\") = error %v", err)
+	}
+	if held[0].Maybe == nil {
+		t.Fatalf("AnythingColumns(maybe: \"v\")[0].Maybe = nil, want a pointer")
+	}
+	if *held[0].Maybe != any("v") {
+		t.Errorf("AnythingColumns(maybe: \"v\")[0].Maybe points at %#v, want \"v\"", *held[0].Maybe)
+	}
+
+	// A column the record does not hold at all is neither of those: the
+	// resolver committed it, so its absence is the driver disagreeing
+	// with the plan rather than a value the graph held.
+	if _, err := queriesOver([]string{"payload"}, []any{int64(1)}).AnythingColumns(t.Context()); err == nil {
+		t.Errorf("AnythingColumns(no maybe) = no error, want a refusal")
+	}
+}

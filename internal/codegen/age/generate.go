@@ -43,8 +43,11 @@ func generate(in codegen.Input, packageName string) ([]codegen.File, error) {
 	if err != nil {
 		return nil, nameBackend(err)
 	}
-	entities, err := wireEntities(prepared.Entities)
+	entities, err := wireEntities(prepared.Entities, len(prepared.Queries))
 	if err != nil {
+		return nil, err
+	}
+	if err := rejectOffsetSidecarCollisions(prepared.Entities); err != nil {
 		return nil, err
 	}
 
@@ -59,6 +62,7 @@ func generate(in codegen.Input, packageName string) ([]codegen.File, error) {
 		if len(p.ParamFields) > 0 {
 			h.args = true
 		}
+		h.forParams(p.ParamFields)
 		for _, f := range p.RowFields {
 			h.need(f.GoType)
 		}

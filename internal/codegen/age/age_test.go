@@ -121,6 +121,14 @@ func (s *EmissionSuite) inputFrom(path string) codegen.Input {
 	return codegen.Input{Schema: sch}
 }
 
+// inputFromText is inputFrom over a schema written in the test, for the
+// sweeps whose rows differ by one property width apiece.
+func (s *EmissionSuite) inputFromText(src string) codegen.Input {
+	sch, err := gql.New().Parse(strings.NewReader(src))
+	s.Require().NoError(err, "schema %s", src)
+	return codegen.Input{Schema: sch}
+}
+
 // TestFileSet pins the C0 file set: the pgx handle, the graph lifecycle,
 // the Querier interfaces, and the models file. The models file carries
 // the schema's entity surface whether or not a query in the batch
@@ -208,6 +216,24 @@ var servedQuery = func() codegen.NamedQuery {
 	}
 	return q
 }()
+
+// instantParamQuery binds an instant in both nullabilities and projects
+// nothing, so its emission is the parameter-encoding path alone. It
+// carries its own source file: emission groups by source basename, and
+// the corpus module compiles this file and no other query file.
+var instantParamQuery = codegen.NamedQuery{
+	Name:        "WriteEvent",
+	Cardinality: codegen.CardinalityExec,
+	SourceFile:  temporalSource,
+	SourceText:  "CREATE (e:Event {occurredAt: $occurredAt, seenAt: $seenAt})\n",
+	Validated: resolver.ValidatedQuery{
+		Statement: resolver.StatementWrite,
+		Parameters: []resolver.ResolvedParameter{
+			{Name: "occurredAt", Type: resolver.ResolvedProperty{Type: graph.TypeTimestamp}},
+			{Name: "seenAt", Type: resolver.ResolvedProperty{Type: graph.TypeTimestamp, Nullable: true}},
+		},
+	},
+}
 
 // corpusEdgeKey is the one edge type testdata/corpus_schema.gql declares.
 var corpusEdgeKey = schema.EdgeKey{Source: personLabel, KeyLabels: "ACTED_IN", Target: personLabel}
@@ -644,37 +670,37 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 	s.Run("an unserved column that is not an edge union yields to the text", func() {
 		// The other side of the subtest above, and the bound on it. An
 		// edge-union column outranks the text because it answers the SAME
-		// defect and names the candidates the schema declares. A list
-		// property is a DIFFERENT defect: printing it first sends the
+		// defect and names the candidates the schema declares. A map
+		// column is a DIFFERENT defect: printing it first sends the
 		// author to change a projection, regenerate, and only then learn
 		// the statement never parsed on this backend — two rounds for one
 		// query. So the column gate yields here.
-		listColumn := resolver.Column{
-			Name: "tags", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeString, true)},
+		mapColumn := resolver.Column{
+			Name: "bag", Type: resolver.ResolvedScalar{Kind: resolver.ScalarMap},
 		}
 
 		batch := in
-		batch.Queries = []codegen.NamedQuery{alternationQuery("Tagged",
-			"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) RETURN p.tags AS tags\n", listColumn)}
+		batch.Queries = []codegen.NamedQuery{alternationQuery("Bagged",
+			"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) RETURN properties(p) AS bag\n", mapColumn)}
 		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
 		s.Require().Error(err)
 		s.Require().Nil(files)
 		s.Require().ErrorIs(err, age.ErrRelationshipTypeAlternation,
 			"the alternation is the obstacle underneath: the statement has to be rewritten before the projection can be put to this server at all")
 		s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
-		s.Require().EqualError(err, wantAlternationRefusal(1, "query", `Tagged (":AUTHORED|LIKES")`))
+		s.Require().EqualError(err, wantAlternationRefusal(1, "query", `Bagged (":AUTHORED|LIKES")`))
 
 		// The discriminator. Without the '|' the very same column is
 		// still unserved and the column gate still owns it, so what
-		// moved above is the ordering and not the list arm.
-		batch.Queries = []codegen.NamedQuery{alternationQuery("Tagged",
-			"MATCH (:Person)-[r:AUTHORED]->(p:Post) RETURN p.tags AS tags\n", listColumn)}
+		// moved above is the ordering and not the map arm.
+		batch.Queries = []codegen.NamedQuery{alternationQuery("Bagged",
+			"MATCH (:Person)-[r:AUTHORED]->(p:Post) RETURN properties(p) AS bag\n", mapColumn)}
 		files, err = age.New(age.WithPackageName(corpusPackage)).Generate(batch)
 		s.Require().Error(err)
 		s.Require().Nil(files)
 		s.Require().ErrorIs(err, age.ErrUnsupportedQuery)
 		s.Require().NotErrorIs(err, age.ErrRelationshipTypeAlternation)
-		s.Require().ErrorContains(err, `Tagged (column "tags" projects a list property)`)
+		s.Require().ErrorContains(err, `Bagged (column "bag" projects scalar(map))`)
 	})
 
 	s.Run("an unserved parameter yields to the text", func() {
@@ -682,40 +708,40 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 		// answers the columns first and the parameters after, on a
 		// separate return, so a query whose every column is served
 		// reaches a different decision from the row above and one arm
-		// cannot stand in for the other. A list parameter is a list
-		// property's defect one step along: still a projection to
+		// cannot stand in for the other. A width with no carrier is the
+		// map column's defect one step along: still an argument to
 		// change, still not the reason the statement never parsed.
-		listParam := resolver.ResolvedParameter{
-			Name: "ids", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeInt, true)},
+		wideParam := resolver.ResolvedParameter{
+			Name: "payload", Type: resolver.ResolvedProperty{Type: graph.TypeBytes},
 		}
-		byTags := func(sourceText string) codegen.NamedQuery {
-			q := alternationQuery("ByTags", sourceText, scalarColumn("p.id", graph.TypeInt))
-			q.Validated.Parameters = []resolver.ResolvedParameter{listParam}
+		byBlob := func(sourceText string) codegen.NamedQuery {
+			q := alternationQuery("ByBlob", sourceText, scalarColumn("p.id", graph.TypeInt))
+			q.Validated.Parameters = []resolver.ResolvedParameter{wideParam}
 			return q
 		}
 
 		batch := in
-		batch.Queries = []codegen.NamedQuery{byTags(
-			"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) WHERE p.id IN $ids RETURN p.id\n")}
+		batch.Queries = []codegen.NamedQuery{byBlob(
+			"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) WHERE p.payload = $payload RETURN p.id\n")}
 		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
 		s.Require().Error(err)
 		s.Require().Nil(files)
 		s.Require().ErrorIs(err, age.ErrRelationshipTypeAlternation,
 			"the alternation is the obstacle underneath: the statement has to be rewritten before the argument can be put to this server at all")
 		s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
-		s.Require().EqualError(err, wantAlternationRefusal(1, "query", `ByTags (":AUTHORED|LIKES")`))
+		s.Require().EqualError(err, wantAlternationRefusal(1, "query", `ByBlob (":AUTHORED|LIKES")`))
 
 		// The discriminator. Without the '|' the very same parameter is
 		// still unserved and the column gate still owns it, so what
 		// moved above is the ordering and not the parameter arm.
-		batch.Queries = []codegen.NamedQuery{byTags(
-			"MATCH (:Person)-[r:AUTHORED]->(p:Post) WHERE p.id IN $ids RETURN p.id\n")}
+		batch.Queries = []codegen.NamedQuery{byBlob(
+			"MATCH (:Person)-[r:AUTHORED]->(p:Post) WHERE p.payload = $payload RETURN p.id\n")}
 		files, err = age.New(age.WithPackageName(corpusPackage)).Generate(batch)
 		s.Require().Error(err)
 		s.Require().Nil(files)
 		s.Require().ErrorIs(err, age.ErrUnsupportedQuery)
 		s.Require().NotErrorIs(err, age.ErrRelationshipTypeAlternation)
-		s.Require().ErrorContains(err, `ByTags (parameter $ids is a list)`)
+		s.Require().ErrorContains(err, `ByBlob (parameter $payload is property:BYTES)`)
 	})
 
 	s.Run("an edge-union column outranks an unserved parameter", func() {
@@ -734,20 +760,20 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 		// of candidates was available — strictly less about the very same
 		// fix, which is the one trade the exception to the yield exists
 		// to avoid making.
-		listParam := resolver.ResolvedParameter{
-			Name: "ids", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeInt, true)},
+		wideParam := resolver.ResolvedParameter{
+			Name: "payload", Type: resolver.ResolvedProperty{Type: graph.TypeBytes},
 		}
 		bothAxes := func(sourceText string) codegen.NamedQuery {
-			q := alternationQuery("ActionsByID", sourceText,
+			q := alternationQuery("ActionsByBlob", sourceText,
 				resolver.Column{Name: "r", Type: twoCandidateEdgeUnion})
-			q.Validated.Parameters = []resolver.ResolvedParameter{listParam}
+			q.Validated.Parameters = []resolver.ResolvedParameter{wideParam}
 			return q
 		}
-		wantColumn := `ActionsByID (column "r" ` + wantEdgeUnionReason("AUTHORED and LIKES") + `)`
+		wantColumn := `ActionsByBlob (column "r" ` + wantEdgeUnionReason("AUTHORED and LIKES") + `)`
 
 		batch := in
 		batch.Queries = []codegen.NamedQuery{bothAxes(
-			"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) WHERE p.id IN $ids RETURN r\n")}
+			"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) WHERE p.payload = $payload RETURN r\n")}
 		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
 		s.Require().Error(err)
 		s.Require().Nil(files)
@@ -755,19 +781,19 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 			"the edge-union column outranks both the parameter and the text, so neither can take the answer from it")
 		s.Require().NotErrorIs(err, age.ErrRelationshipTypeAlternation)
 		s.Require().ErrorContains(err, wantColumn)
-		s.Require().NotContains(err.Error(), "parameter $ids")
+		s.Require().NotContains(err.Error(), "parameter $payload")
 
 		// The same precedence with the text out of it. Both axes are
 		// still unserved and neither can yield anywhere, so what decides
 		// the message is the loop order alone.
 		batch.Queries = []codegen.NamedQuery{bothAxes(
-			"MATCH (:Person)-[r:AUTHORED]->(p:Post) WHERE p.id IN $ids RETURN r\n")}
+			"MATCH (:Person)-[r:AUTHORED]->(p:Post) WHERE p.payload = $payload RETURN r\n")}
 		files, err = age.New(age.WithPackageName(corpusPackage)).Generate(batch)
 		s.Require().Error(err)
 		s.Require().Nil(files)
 		s.Require().ErrorIs(err, age.ErrUnsupportedQuery)
 		s.Require().ErrorContains(err, wantColumn)
-		s.Require().NotContains(err.Error(), "parameter $ids",
+		s.Require().NotContains(err.Error(), "parameter $payload",
 			"the column is read first, so the parameter is not what this query is told about")
 	})
 
@@ -775,15 +801,15 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 		// Yielding is per query. A batch holding one query the text gate
 		// owns and one the column gate owns must not lose the second: a
 		// gate that stood the whole BATCH aside would report only the
-		// alternation and hand the author the list property a round
+		// alternation and hand the author the uncarried width a round
 		// later, which is the round-trip this ordering exists to remove.
 		batch := in
 		batch.Queries = []codegen.NamedQuery{
-			alternationQuery("Tagged",
-				"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) RETURN p.tags AS tags\n",
+			alternationQuery("Blobbed",
+				"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) RETURN p.payload AS payload\n",
 				resolver.Column{
-					Name: "tags",
-					Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeString, true)},
+					Name: "payload",
+					Type: resolver.ResolvedProperty{Type: graph.TypeBytes},
 				}),
 			readQuery("Bag", resolver.Column{
 				Name: "m", Type: resolver.ResolvedScalar{Kind: resolver.ScalarMap},
@@ -795,7 +821,7 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 		s.Require().ErrorIs(err, age.ErrUnsupportedQuery,
 			"the sibling spells no '|', so the column gate still answers it and answers first")
 		s.Require().ErrorContains(err, `1 query would be dropped: Bag (column "m" projects scalar(map))`)
-		s.Require().NotContains(err.Error(), "Tagged",
+		s.Require().NotContains(err.Error(), "Blobbed",
 			"the query the text gate owns must not be reported on the column axis")
 	})
 }
@@ -822,6 +848,13 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 		q := execQuery("Batch")
 		q.Validated.Parameters = []resolver.ResolvedParameter{{
 			Name: "ids", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeInt, true)},
+		}}
+		return q
+	}()
+	execUncarriedParam := func() codegen.NamedQuery {
+		q := execQuery("Batch")
+		q.Validated.Parameters = []resolver.ResolvedParameter{{
+			Name: "for", Type: resolver.ResolvedProperty{Type: graph.TypeDuration},
 		}}
 		return q
 	}()
@@ -856,26 +889,41 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 			Name: "ids", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeInt, true)},
 		}}
 	})
-	// The two arms of unservedParam a list does not reach. Both are read
-	// off the parameter alone, ahead of Prepare, so this gate is the only
-	// thing that can answer them here.
+	listProp := moved("Tagged", func(q *codegen.NamedQuery) {
+		q.Validated.Columns = []resolver.Column{{
+			Name: "t", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.ListOf(graph.TypeString, true), true)},
+		}}
+	})
+	anyProp := moved("Payload", func(q *codegen.NamedQuery) {
+		q.Validated.Columns = []resolver.Column{{
+			Name: "p", Type: resolver.ResolvedProperty{Type: graph.TypeAnyPropertyValue},
+		}}
+	})
+	uncarriedProp := moved("Stamp", func(q *codegen.NamedQuery) {
+		q.Validated.Columns = []resolver.Column{{
+			Name: "t", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeTimestamp, false)},
+		}}
+	})
+	// The arm of unservedParam a width question does not reach. It is
+	// read off the parameter alone, ahead of Prepare, so this gate is the
+	// only thing that can answer it here.
 	//
-	// A parameter that is not a schema property at all is the first: the
-	// encode path builds an agtype argument out of a declared width, so a
-	// shape with no width is a shape it has nothing to build from. Shared
-	// admission is expected to refuse these before emission, which is why
-	// the arm reads as defensive — but this gate runs BEFORE Prepare, so a
-	// batch handed straight to a backend reaches it, and an arm that
-	// answered "" would let such a parameter through to an encode call
-	// with no case for it.
+	// A parameter that is not a schema property at all: the encode path
+	// builds an agtype argument out of a declared width, so a shape with
+	// no width is a shape it has nothing to build from. Shared admission
+	// is expected to refuse these before emission, which is why the arm
+	// reads as defensive — but this gate runs BEFORE Prepare, so a batch
+	// handed straight to a backend reaches it, and an arm that answered
+	// "" would let such a parameter through to an encode call with no
+	// case for it.
 	nonPropertyParam := moved("Batch", func(q *codegen.NamedQuery) {
 		q.Validated.Parameters = []resolver.ResolvedParameter{{
 			Name: "bag", Type: resolver.ResolvedScalar{Kind: resolver.ScalarMap},
 		}}
 	})
-	// A width outside the type table is the second, on both axes. It is
-	// the same question the shared width sweep asks of the SCHEMA, asked
-	// here of the query — and the two are different queries with different
+	// A width outside the type table, on both axes. It is the same
+	// question the shared width sweep asks of the SCHEMA, asked here of
+	// the query — and the two are different questions with different
 	// answers, because a column or an argument can carry a width no
 	// entity's property does. Answering it here is what makes the refusal
 	// name the query rather than send the author to a schema that carries
@@ -940,9 +988,15 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 			}()},
 		},
 		{
-			name:      "an exec binding a list parameter is dropped",
-			queries:   []codegen.NamedQuery{execListParam},
-			wantSub:   `1 query would be dropped: Batch (parameter $ids is a list)`,
+			// The argument object is JSON, whose syntax agtype reads, so a
+			// slice crosses as the agtype list AGE substitutes.
+			name:    "an exec binding a list parameter generates",
+			queries: []codegen.NamedQuery{execListParam},
+		},
+		{
+			name:      "an exec binding an uncarried parameter width is dropped",
+			queries:   []codegen.NamedQuery{execUncarriedParam},
+			wantSub:   `1 query would be dropped: Batch (parameter $for is property:DURATION)`,
 			wantError: true,
 		},
 		{
@@ -982,10 +1036,8 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 			wantError: true,
 		},
 		{
-			name:      "a list parameter is dropped",
-			queries:   []codegen.NamedQuery{listParam},
-			wantSub:   `1 query would be dropped: Batch (parameter $ids is a list)`,
-			wantError: true,
+			name:    "a list parameter generates",
+			queries: []codegen.NamedQuery{listParam},
 		},
 		{
 			name:      "a parameter that is not a schema property is dropped",
@@ -1006,9 +1058,28 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 			wantError: true,
 		},
 		{
+			// A list property is served exactly when its element width is,
+			// at whatever depth, and a property of no declared shape is
+			// served through agtype's own value vocabulary.
+			name:    "a nested list-property column generates",
+			queries: []codegen.NamedQuery{listProp},
+		},
+		{
+			name:    "a column of no declared shape generates",
+			queries: []codegen.NamedQuery{anyProp},
+		},
+		{
+			// The declared width is what the report names, not the element's:
+			// LIST<TIMESTAMP> is the line the author can go and find.
+			name:      "a list of an uncarried element width is dropped",
+			queries:   []codegen.NamedQuery{uncarriedProp},
+			wantSub:   `1 query would be dropped: Stamp (column "t" projects property:LIST<TIMESTAMP>)`,
+			wantError: true,
+		},
+		{
 			name:      "every dropped query is named, in batch order",
-			queries:   []codegen.NamedQuery{execListParam, mapCol, list},
-			wantSub:   "3 queries would be dropped: Batch (parameter $ids is a list), Bag (column \"m\" projects scalar(map)), Tags (column \"t\" projects list)",
+			queries:   []codegen.NamedQuery{execUncarriedParam, mapCol, list},
+			wantSub:   "3 queries would be dropped: Batch (parameter $for is property:DURATION), Bag (column \"m\" projects scalar(map)), Tags (column \"t\" projects list)",
 			wantError: true,
 		},
 		{
@@ -1054,22 +1125,134 @@ func (s *EmissionSuite) TestRejectsQueriesItCannotServe() {
 	}
 }
 
-// TestRejectsMultiLabelSchema pins the schema gate. AGE stamps exactly
-// one label on a vertex or an edge and its parser has no syntax for a
-// second, so an entity the schema keys on two labels names a shape no
-// graph this backend can address ever holds. Rejecting the schema is
-// what stops the emission producing a struct and a decoder whose label
-// check nothing could ever satisfy.
+// multiLabelFixture is the corpus fixture whose node type is keyed on
+// two labels. It sits in valid/ because the neo4j backends emit for it;
+// its manifest leaves this backend out, and the test below is what says
+// why.
+const multiLabelFixture = "entity_multi_label_named"
+
+// TestRejectsMultiLabelSchema ties the corpus fixture's enrolment to
+// this backend's verdict on it. The manifest omitting apache-age-pgx-v5
+// is otherwise an unexplained gap a reader would take for an oversight,
+// and enrolling it would produce a golden subtree no emission can fill.
 //
-// The gate is on the schema's whole entity table rather than on the
-// columns a batch projects, which is why a query-free batch fails too.
+// Both halves fail on the same edit from opposite sides: enrolling the
+// target reddens the enrolment assertion, and serving multi-label
+// entities here reddens the refusal. Neither can be satisfied by
+// changing only the other (ADR 0027).
 func (s *EmissionSuite) TestRejectsMultiLabelSchema() {
-	in := s.inputFrom(filepath.Join(corpusRoot, "valid", "entity_multi_label_named", "schema.gql"))
-	files, err := age.New().Generate(in)
-	s.Require().Error(err)
-	s.Require().Nil(files, "a rejected schema must not return a partial file set")
-	s.Require().ErrorIs(err, age.ErrUnsupportedSchema)
-	s.Require().ErrorContains(err, "1 type cannot be represented: PersonEmployee (Employee&Person)")
+	dir := filepath.Join(corpusRoot, "valid", multiLabelFixture)
+	m, err := readAgeManifest(dir)
+	s.Require().NoError(err)
+	s.Require().NotEmpty(m.Targets, "fixture %s enrols no target at all", multiLabelFixture)
+	s.Require().NotContains(m.Targets, ageTarget,
+		"fixture %s enrols %s, which cannot emit for a multi-label entity", multiLabelFixture, ageTarget)
+
+	files, genErr := age.New().Generate(s.inputFrom(filepath.Join(dir, "schema.gql")))
+	s.Require().Error(genErr)
+	s.Require().Nil(files, "a refused schema must not return a partial file set")
+	s.Require().ErrorIs(genErr, age.ErrUnsupportedSchema)
+}
+
+// sidecarSchema is one node type carrying an instant and a second
+// property of the given width under the name this backend derives for
+// the instant's zone.
+func sidecarSchema(width string) string {
+	return `CREATE PROPERTY GRAPH TYPE Sidecar AS {
+    (:Photo {
+        takenAt       :: TIMESTAMP NOT NULL,
+        takenAtOffset :: ` + width + ` NOT NULL
+    })
+}`
+}
+
+// TestRejectsAnAuthorOwnedOffsetSidecar pins the derived-name gate. A
+// TIMESTAMP property's zone is stored in a second property named
+// <property>Offset and read out of the same map the declared properties
+// come from, so a schema declaring that name gives one key two readers.
+//
+// The refusal is the whole file set, before any of it is written.
+//
+// Every row here is a collision the gate must find, and each moves one
+// axis the gate could be blind along. The two widths establish that it
+// is blind to width, which it has to be: the two are wrong in different
+// ways and neither is detectable from the emitted Go — with an integer
+// the decoder compiles and hands back an instant re-zoned by the
+// author's own value, and with anything else it compiles and no vertex
+// of that type ever decodes. The remaining rows move where the
+// collision sits: fields arrive map-key sorted and entities arrive as
+// nodes and edges together, so a row whose instant is the entity's first
+// field, or whose entity is a node, leaves a gate reading only the first
+// field or only the node table indistinguishable from the real one.
+func (s *EmissionSuite) TestRejectsAnAuthorOwnedOffsetSidecar() {
+	cases := []struct {
+		name    string
+		schema  string
+		entity  string
+		instant string
+	}{
+		{
+			name:    "the sidecar is an integer, so the decoder re-zones",
+			schema:  sidecarSchema("INT64"),
+			entity:  "Photo",
+			instant: "takenAt",
+		},
+		{
+			name:    "the sidecar is a string, so no vertex decodes",
+			schema:  sidecarSchema("STRING"),
+			entity:  "Photo",
+			instant: "takenAt",
+		},
+		{
+			// The instant sorts after a property that does not collide, so
+			// the entity's first field is not the offender.
+			name: "the colliding instant is not the entity's first field",
+			schema: `CREATE PROPERTY GRAPH TYPE Sidecar AS {
+    (:Photo {
+        album          :: STRING    NOT NULL,
+        zTakenAt       :: TIMESTAMP NOT NULL,
+        zTakenAtOffset :: INT64     NOT NULL
+    })
+}`,
+			entity:  "Photo",
+			instant: "zTakenAt",
+		},
+		{
+			// AGE stamps properties on an edge as readily as on a vertex,
+			// and the emitted edge decoder reads the sidecar out of the
+			// same map, so the collision is the same collision.
+			name: "the colliding entity is an edge",
+			schema: `CREATE PROPERTY GRAPH TYPE Sidecar AS {
+    (:Photo { id :: INT64 NOT NULL }),
+    (:Photo) -[:SAW {
+        takenAt       :: TIMESTAMP NOT NULL,
+        takenAtOffset :: INT64     NOT NULL
+    }]-> (:Photo)
+}`,
+			entity:  "SAW",
+			instant: "takenAt",
+		},
+	}
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			files, err := age.New().Generate(s.inputFromText(tc.schema))
+			s.Require().ErrorIs(err, codegen.ErrPropertyFieldCollision,
+				"the gate did not see the collision on %s.%s", tc.entity, tc.instant)
+			s.Require().ErrorContains(err,
+				`entity "`+tc.entity+`" declares property "`+tc.instant+`Offset"`)
+			s.Require().ErrorContains(err, `property "`+tc.instant+`"`)
+			s.Require().Nil(files, "a rejected schema must not return a partial file set")
+		})
+	}
+
+	// The name is derived from an instant and from nothing else, so the
+	// same pair of names with no instant between them is a schema this
+	// backend serves.
+	s.Run("no instant derives no name", func() {
+		files, err := age.New().Generate(s.inputFromText(strings.Replace(sidecarSchema("INT64"), "TIMESTAMP", "STRING   ", 1)))
+		s.Require().NoError(err)
+		s.Require().NotEmpty(files)
+	})
 }
 
 // ageIdentifiers are the extension-owned names that must never appear
@@ -1422,7 +1605,7 @@ var errorConstructors = map[string]bool{"fmt.Errorf": true, "fmt.Sprintf": true,
 // statementComposer is the emitted function a query method hands its
 // text to. Its second argument is that text, and the guards below locate
 // the author's bytes through it rather than by the const's name, so the
-// emission is free to call the const whatever Unshadowed makes of it.
+// emission is free to call the const whatever QueryTextConst makes of it.
 const statementComposer = "q.cypherStmt"
 
 // argsEncoder is the emitted function a query method hands its bound
