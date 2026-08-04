@@ -17,6 +17,9 @@
 #
 #   .githooks/tests/bd-gh-sync-test.sh | grep -cE '^(ok|FAIL) '
 #
+# That number is not a gate and cannot be one — see the assertion census at the
+# foot of this file, which is. Adding an assertion means adding its name there.
+#
 # And how many of them a given older bd-gh-sync fails — the measure of what a
 # change to that script is actually worth — by running this file against it:
 #
@@ -166,8 +169,15 @@ chmod +x "$BIN/bd" "$BIN/gh" "$BIN/mktemp" "$BIN/python3"
 
 pass=0
 fail=0
-ok()  { pass=$((pass + 1)); printf 'ok   - %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf 'FAIL - %s: %s\n' "$1" "$2"; }
+# Both arms log the name, because the census at the foot of this file is about
+# whether an assertion ran at all and a failing assertion ran. `ok` and `bad`
+# are the only two ways out of an assertion block, so this file cannot make an
+# assertion that escapes the roll-call.
+ok()  { pass=$((pass + 1)); printf '%s\n' "$1" >>"$TMP/ran.txt"
+        printf 'ok   - %s\n' "$1"; }
+bad() { fail=$((fail + 1)); printf '%s\n' "$1" >>"$TMP/ran.txt"
+        printf 'FAIL - %s: %s\n' "$1" "$2"; }
+: >"$TMP/ran.txt"
 
 # Per-invocation control over the `bd list` stub, keyed by call ordinal (the
 # pull path calls it twice: the before snapshot, then the after snapshot the
@@ -1968,6 +1978,195 @@ if [ "$(last_line)" = "bd-gh-sync: pushed 1 new bead(s), closed 0 stale GH mirro
     ok "the mktemp stub is transparent when its knob is unset"
 else
     bad "the mktemp stub is transparent when its knob is unset" "got: $(last_line)"
+fi
+
+# --- the assertion census ----------------------------------------------------
+# The one property this file cannot get from `set -u`, from shellcheck or from
+# its own exit status: that it still makes every assertion it made yesterday.
+# `133 passed, 0 failed` is true of a file that quietly lost an assertion and
+# true of one that did not, and nothing in the justfile, in .github/workflows or
+# in lint-hooks-test.sh reads that number at all. Both of this tree's ways of
+# losing an assertion are silent: a dropped closing quote on this branch
+# swallowed twenty lines including a whole block and the run still said `0
+# failed`, one assertion lighter, and deleting a block outright says `132
+# passed, 0 failed` and looks like a clean run. A guard structurally unable to
+# fail is this repository's most common defect; a suite that cannot notice
+# losing a guard is that same defect one level up.
+#
+# Deliberately not a count. A count written beside the thing it counts goes
+# stale in silence and fails as `132 != 133`, which names nothing to go and
+# look at — this tree has already deleted one such header rather than correct
+# it. A census of names fails as a set difference with a name in it, so the
+# reader is told which assertion stopped running rather than that one did.
+#
+# Deliberately not derived from this file's own `ok` lines either. That set
+# shrinks along with the block it describes, which is precisely the edit it
+# exists to survive: a census a deletion also deletes agrees with the deletion.
+# The names are written down here, away from the blocks that raise them, so
+# every way of losing one — deleted, commented out, swallowed by a quote,
+# stranded behind a branch that stopped running — arrives as the same missing
+# name. Two assertions sharing a name would reopen the hole, since either could
+# then be deleted under cover of the other, so that is refused here too.
+#
+# Adding an assertion costs one line here, and the failure prints the line to
+# add. Written in execution order for a reader; compared as a set.
+_census="the assertion census matches the assertions that ran"
+LC_ALL=C sort -u >"$TMP/census.txt" <<'CENSUS'
+in_progress bead with GH content to lose is held and reported
+blocked bead with GH content to lose is held and reported
+deferred bead with GH content to lose is held and reported
+in_progress bead byte-identical to an open mirror is held silently
+blocked bead byte-identical to an open mirror is held silently
+deferred bead byte-identical to an open mirror is held silently
+blocked bead whose mirror was closed on GH is still reported
+open bead whose GH mirror closed is pulled
+GH body ahead of bd does not block the pull
+bd-only amendment is held out of pull scope
+bd-side re-indent is held out of pull scope
+bd-side reorder is held out of pull scope
+GH body that does not extend the bead description is held out
+trailing-block deletion is indistinguishable from a GH append (known)
+a CRLF GH body still counts as extending an LF bead description
+a bd-only amendment is still held out when the GH body is CRLF
+a no-break space in the bead description does not block the pull
+locally-closed bead still open on GH is held out
+bead already in sync with GH is not re-pulled
+unreadable bead payload blocks the pull and says so
+the refusal is the last line a tail -1 caller keeps
+the selection's own error is still reported, above the verdict
+unreadable GH payload blocks the pull
+no eligible bead means bd github sync is not invoked
+hostile payload reaches no unscoped pull (both empty)
+hostile payload reaches no unscoped pull (beads malformed)
+hostile payload reaches no unscoped pull (gh malformed)
+hostile payload reaches no unscoped pull (both null)
+hostile payload reaches no unscoped pull (empty strings)
+hostile payload reaches no unscoped pull (bead id empty)
+hostile payload reaches no unscoped pull (bead id flag-shaped)
+hostile payload reaches no unscoped pull (gh fields null)
+250 eligible beads are split into 3 batches, each id sent once
+guard runs on a payload past MAX_ARG_STRLEN
+orphan GH issue is reported, not minted into a bead
+closed orphan is neither adopted nor reported
+bead closed before its first push has its new mirror closed
+already-mirrored closed bead still has its mirror closed
+open bead's mirror is left alone
+a push with nothing to do still says so on the line a caller keeps
+a push that did everything it set out to do exits 0
+the summary counts both arms: beads mirrored and mirrors closed
+an unusable bead id is refused and named, the bead beside it pushed (apostrophe)
+a refused bead id makes the push fail loudly (apostrophe)
+an unusable bead id is refused and named, the bead beside it pushed (space)
+a refused bead id makes the push fail loudly (space)
+an unusable bead id is refused and named, the bead beside it pushed (leading dash)
+a refused bead id makes the push fail loudly (leading dash)
+an unusable bead id is refused and named, the bead beside it pushed (newline)
+a refused bead id makes the push fail loudly (newline)
+an unusable bead id is refused and named, the bead beside it pushed (empty)
+a refused bead id makes the push fail loudly (empty)
+a push that mirrored nothing because every id was refused says exactly that
+a batch that exited non-zero is named as a failed batch, not a bad id
+a failed batch makes the push exit non-zero
+250 unmirrored beads are split into 3 batches, each id sent once
+each bead id reaches 'bd github push' as an argv word of its own
+'gh issue close' gets the issue number and the whole comment as one argument each
+an unusable bead list refuses the push and says so ('bd list' exits non-zero)
+an unusable bead list refuses the push and says so (no output)
+an unusable bead list refuses the push and says so (whitespace only)
+an unusable bead list refuses the push and says so (truncated JSON)
+an unusable bead list refuses the push and says so (not JSON at all)
+an unreadable post-push snapshot is reported, not walked as empty
+an unreadable open-issue listing is reported, not read as nothing stale
+a close pass that wrote no verdict reads as blind, not as nothing stale
+an empty post-push snapshot reads as blind, not as nothing stale
+two empty snapshots read as blind, not as an empty repository
+an empty pre-push snapshot reads as blind, not as nothing to push
+a run with both snapshots readable still prints both counts and exits 0
+a mirror that would not close is named and counted
+held bead reverted behind the script's back is reported
+held bead that did not move produces no warning
+a reverted claim is reported even when no bead was eligible to pull
+the summary line carries the postcondition warning
+a held bead whose description was clobbered is reported
+a clobbered description reaches the tail -1 caller
+a bead whose status and description both moved warns once, naming both
+a held bead whose description only gained trailing whitespace is quiet
+the pull takes a before and an after snapshot of the bead list
+a postcondition that ran does not claim it was skipped
+an unusable post-pull snapshot is reported ('bd list' exits non-zero)
+an unusable post-pull snapshot is reported (no output)
+an unusable post-pull snapshot is reported (whitespace only)
+an unusable post-pull snapshot is reported (empty bead list)
+an unusable post-pull snapshot is reported (truncated JSON)
+an unusable post-pull snapshot is reported (not JSON at all)
+the blind notice names the exit status it saw
+a held bead deleted between the snapshots is reported as gone
+the summary line names the deleted held bead and says it was deleted
+a pulled bead missing from the second snapshot is not a held-bead finding
+an empty second snapshot stays blind rather than reading as deletions
+final stderr line summarises the run for a tail -1 caller
+a failed sync is reported on the line a tail -1 caller keeps
+an empty bead id reaches no 'bd github sync' batch
+zero batches run is reported as a failed pull
+one unusable bead id does not take the batch down with it
+a bead id carrying a quote is refused rather than passed to argv
+the summary counts what was pulled, not what was eligible
+the refused bead id is named on stderr
+a bead id carrying a space is refused, not truncated to its first token
+no batch is issued with an empty --issues
+a hold and a pull cannot name the same bead in one run
+a bead id carrying a newline is refused by name, escaped
+a bead id that cannot be passed is a failed pull, not a success
+a split id does not blind the held-bead check for the id it collides with
+a bead id that splits its record reaches no batch and is counted as unpulled
+a failed batch, a hold, an orphan and a moved bead share one summary line
+the push blind notice names the 'gh issue list' exit status it saw
+the 'gh issue list' stub is transparent when its knob is unset
+the push blind notice names the 'bd list' exit status it saw
+a refused push names the 'bd list' exit status, verdict still last
+a postcondition whose interpreter died says the check did not run
+an unreadable post-pull list is named as unreadable, not as not-run
+the python3 stub is transparent when its knob is unset
+a bead id carrying a newline reaches the close comment escaped, one argv word
+a bead with no id leaves the close comment's bead name empty, not 'None'
+a multi-line close_reason contributes only its first line to the comment
+a close_reason past 300 characters is clamped to 300 with an ellipsis
+a push that minted issues and then saw none of them refuses to count
+an empty open listing after a push of nothing is a legitimate empty
+an open listing returning exactly its --limit is treated as truncated
+an open listing one short of its --limit is counted as the whole set
+a pull over a capped GitHub listing reports the count as unknown
+an all-state listing one short of its --limit is counted as the whole set
+a refused pull names the 'bd list' exit status, verdict still last
+a refused pull names the 'gh issue list' exit status, verdict still last
+an empty pull-side bead list withdraws both counts derived from it
+both withdrawals at once name the bead list, not the cap
+a bead whose external_ref names another repository is held, not refused
+a temp directory that cannot be made is reported (pull)
+a temp directory that cannot be made is reported (push)
+the mktemp stub is transparent when its knob is unset
+the assertion census matches the assertions that ran
+CENSUS
+
+# The census names itself: this assertion is running, so it is executed by
+# construction, and a reader of the list below sees the whole inventory rather
+# than all of it but one.
+{ cat "$TMP/ran.txt"; printf '%s\n' "$_census"; } | LC_ALL=C sort >"$TMP/ran_sorted.txt"
+uniq "$TMP/ran_sorted.txt" >"$TMP/ran_uniq.txt"
+_dup="$(uniq -d "$TMP/ran_sorted.txt" | tr '\n' '|' | sed 's/|$//')"
+_lost="$(LC_ALL=C comm -23 "$TMP/census.txt" "$TMP/ran_uniq.txt" | tr '\n' '|' | sed 's/|$//')"
+_uncensused="$(LC_ALL=C comm -13 "$TMP/census.txt" "$TMP/ran_uniq.txt" | tr '\n' '|' | sed 's/|$//')"
+if [ -n "$_dup" ]; then
+    bad "$_census" \
+        "two assertions answer to one name, so either could be deleted under cover of the other: $_dup"
+elif [ -n "$_lost" ]; then
+    bad "$_census" \
+        "declared in the census and did not run — deleted, unreachable or renamed: $_lost"
+elif [ -n "$_uncensused" ]; then
+    bad "$_census" \
+        "ran and is not in the census; add it there so its loss would be noticed: $_uncensused"
+else
+    ok "$_census"
 fi
 
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"
