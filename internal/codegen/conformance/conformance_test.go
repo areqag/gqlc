@@ -14,6 +14,7 @@ import (
 	"go/parser"
 	"go/printer"
 	"go/token"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -806,16 +807,35 @@ func receiverName(t *testing.T, path string, d *ast.FuncDecl) string {
 // driver can produce, which is not a decode but a decode that always
 // fails.
 //
-// Two sets rather than one because the two axes fail differently and
-// each has to be observed to be non-empty on its own (see
-// TestNeo4jGoldensAssertOnlyDriverCarriers).
+// Two sets rather than one because the two axes fail differently: a
+// wrong slice carrier is caught by the compiler wherever it reaches
+// neo4j.GetProperty[T], and a wrong element carrier is caught by nothing
+// at all (see TestNeo4jGoldensAssertOnlyDriverCarriers).
+//
+// The value is a witness flag: true says a golden in this corpus asserts
+// this carrier, false says the driver allows it and no golden reaches
+// it. Both halves are checked, so each entry is a claim about the corpus
+// that a corpus edit can falsify — which is what a bare allow-list could
+// not be. An allow-list only ever says "not this", and a corpus that
+// asserted nothing at all would satisfy it; it is also how the []byte
+// entry sat here through a fixture's worth of BYTES properties without
+// one golden ever reaching it, because a non-nullable BYTES decodes
+// through GetProperty[[]byte] and never emits an assertion.
+//
+// The ledger lives here rather than beside the goldens on purpose:
+// -update rewrites goldens and cannot touch this file, so deleting the
+// one fixture that witnesses a carrier still reddens after a
+// regeneration.
 //
 // Slice axis: GetProperty's own doc says "any property array value other
 // than byte array is typed as []any", and the hydrator builds exactly
 // that — `func (h *hydrator) array() []any` (internal/bolt/hydrator.go).
 // So these two are the whole set, whatever the schema declared the
 // element width to be.
-var driverSliceCarriers = map[string]bool{"[]any": true, "[]byte": true}
+var driverSliceCarriers = map[string]bool{
+	"[]any":  true,
+	"[]byte": true,
+}
 
 // Scalar axis: the named types of the two constraints, spelled as the
 // emission spells them. `any` is deliberately absent. It is a member of
@@ -824,23 +844,43 @@ var driverSliceCarriers = map[string]bool{"[]any": true, "[]byte": true}
 // asserting to `any` fails on exactly the null the property or element
 // was declared able to hold. The emission has to omit the assertion
 // rather than name `any` in one.
+//
+// The unwitnessed half below is not a backlog. Most of those carriers
+// are only ever named by an assertion inside a list walk — a scalar
+// column of the same width decodes through neo4j.GetRecordValue[T],
+// whose constraint the compiler checks — so their flags flip the day a
+// fixture declares LIST<POINT>, LIST<DURATION> or a projected list of
+// nodes, and not before.
 var driverScalarCarriers = map[string]bool{
-	"bool":                 true,
-	"int64":                true,
-	"float64":              true,
-	"string":               true,
-	"time.Time":            true,
-	"map[string]any":       true,
-	"dbtype.Point2D":       true,
-	"dbtype.Point3D":       true,
-	"dbtype.Date":          true,
-	"dbtype.LocalTime":     true,
-	"dbtype.LocalDateTime": true,
-	"dbtype.Time":          true,
-	"dbtype.Duration":      true,
-	"dbtype.Node":          true,
-	"dbtype.Relationship":  true,
-	"dbtype.Path":          true,
+	"bool":                true,
+	"int64":               true,
+	"float64":             true,
+	"string":              true,
+	"time.Time":           true,
+	"dbtype.Date":         true,
+	"dbtype.Relationship": true,
+
+	"map[string]any":       false,
+	"dbtype.Point2D":       false,
+	"dbtype.Point3D":       false,
+	"dbtype.LocalTime":     false,
+	"dbtype.LocalDateTime": false,
+	"dbtype.Time":          false,
+	"dbtype.Duration":      false,
+	"dbtype.Node":          false,
+	"dbtype.Path":          false,
+}
+
+// witnessedCarriers names the carriers a ledger claims some golden in
+// the corpus asserts.
+func witnessedCarriers(ledger map[string]bool) []string {
+	var names []string
+	for name, witnessed := range ledger {
+		if witnessed {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // TestNeo4jGoldensAssertOnlyDriverCarriers pins the emitted decode
@@ -859,10 +899,17 @@ var driverScalarCarriers = map[string]bool{
 // compiler wherever a wrong carrier reaches neo4j.GetProperty[T], whose
 // PropertyValue constraint refuses it; inside the walk there is no such
 // constraint, because a []any element is an `any` and asserting an `any`
-// to anything at all compiles. So both axes are swept and each is
-// required to have examined something: a single total would let one axis
-// go empty behind the other, and report in its own message that it did
-// not.
+// to anything at all compiles.
+//
+// What the sweep finds is then compared against the ledger's witness
+// flags rather than only counted. A count says an assertion was
+// examined; it does not say which, and there is no corpus this repo
+// would accept in which the scalar count reaches zero, so counting it
+// guarded nothing. Set equality names each carrier separately, so
+// deleting the one fixture that reaches a carrier reddens naming that
+// carrier — and a fixture that reaches a new one reddens too, which is
+// what keeps the ledger's "no golden asserts this" half from quietly
+// becoming false.
 //
 // Swept syntactically over every neo4j golden rather than checked on one
 // fixture, because the defect is a missing arm and a missing arm is
@@ -876,7 +923,7 @@ func TestNeo4jGoldensAssertOnlyDriverCarriers(t *testing.T) {
 	require.NotEmpty(t, paths, "no neo4j golden was swept, so this test holds nothing")
 
 	var offenders []string
-	sliceAxis, scalarAxis := 0, 0
+	sweptSlice, sweptScalar := map[string]bool{}, map[string]bool{}
 	fset := token.NewFileSet()
 	for _, path := range paths {
 		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
@@ -887,29 +934,41 @@ func TestNeo4jGoldensAssertOnlyDriverCarriers(t *testing.T) {
 				return true
 			}
 			named := render(t, fset, assertion.Type)
-			// The counter for an axis is incremented only once the
-			// assertion is known to be on it, so what each NotZero below
-			// reports is how many assertions its own set was asked about.
+			// A carrier counts as swept only once the assertion is known
+			// to be on its axis and known to be one the ledger admits, so
+			// an offender is never recorded as its own witness.
+			ledger, swept := driverScalarCarriers, sweptScalar
 			if _, isSlice := assertion.Type.(*ast.ArrayType); isSlice {
-				sliceAxis++
-				if driverSliceCarriers[named] {
-					return true
-				}
-			} else {
-				scalarAxis++
-				if driverScalarCarriers[named] {
-					return true
-				}
+				ledger, swept = driverSliceCarriers, sweptSlice
+			}
+			if _, admitted := ledger[named]; admitted {
+				swept[named] = true
+				return true
 			}
 			offenders = append(offenders, fmt.Sprintf("%s:%d: %s",
 				path, fset.Position(assertion.Pos()).Line, render(t, fset, assertion)))
 			return true
 		})
 	}
-	require.NotZero(t, sliceAxis, "no slice-typed assertion was examined, so the slice axis passed vacuously")
-	require.NotZero(t, scalarAxis, "no scalar-typed assertion was examined, so the scalar axis passed vacuously")
 	require.Empty(t, offenders,
 		"a Bolt driver hands back only what neo4j.PropertyValue and neo4j.RecordValue name, so these assertions are false for every value it can produce")
+
+	for _, axis := range []struct {
+		name   string
+		ledger map[string]bool
+		swept  map[string]bool
+	}{
+		{"slice", driverSliceCarriers, sweptSlice},
+		{"scalar", driverScalarCarriers, sweptScalar},
+	} {
+		want := witnessedCarriers(axis.ledger)
+		require.NotEmpty(t, want,
+			"the %s ledger claims no witness at all, so its half of this sweep would hold on a corpus that asserts nothing", axis.name)
+		require.ElementsMatch(t, want, slices.Collect(maps.Keys(axis.swept)),
+			"the %s carriers the goldens assert are no longer the ones this ledger claims: a name only the first list holds "+
+				"has lost the fixture that reached it, and a name only the second holds is one a golden now reaches and the "+
+				"ledger still calls unwitnessed", axis.name)
+	}
 }
 
 // TestGoldenBuild compiles the nested test/data/codegen module so that

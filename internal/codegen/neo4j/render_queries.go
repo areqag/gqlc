@@ -629,16 +629,41 @@ func walkListElemPlan(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 		iterVar = "elem" + fmt.Sprint(strings.Count(indent, "\t"))
 	}
 	// The index variable is only used by the element-type-assertion
-	// fail message; the two "bare append" arms (codegen.ColumnAny for Unknown,
-	// codegen.ColumnScalarNull for ScalarNull) never emit an index. Suppress
-	// the unused-var warning by ranging with `_` in those cases.
+	// fail message, so the arms that assert nothing never name it and
+	// ranging with `i` would emit an unused variable.
 	indexVar := "i"
-	if e.Kind == codegen.ColumnAny || e.Kind == codegen.ColumnScalarNull {
+	if carriesElemBare(e) {
 		indexVar = "_"
 	}
 	fmt.Fprintf(b, "%sfor %s, %s := range %s {\n", indent, indexVar, iterVar, srcVar)
 	walkListElemBody(b, p, f, e, accVar, iterVar, zero, indent+"\t")
 	fmt.Fprintf(b, "%s}\n", indent)
+}
+
+// carriesElemBare reports whether the element loop appends what the
+// driver handed it without asserting anything about it — which is also
+// to say whether the loop body names the index at all. It is consulted
+// by walkListElemPlan for the index variable and implemented by
+// walkListElemBody, so that a body that stops asserting cannot leave a
+// loop head declaring an index nothing reads.
+//
+// codegen.ColumnAny (Unknown) and codegen.ColumnScalarNull are bare
+// because the plan says so. A codegen.ColumnProperty is bare when its
+// element rides no driver carrier, for the reason isSliceType gives on
+// the entity path: the carrier of an `any` element is `any`, and
+// `elem.(any)` is false for a nil interface value — the null a list of
+// no declared element shape exists to be allowed to hold. Asserting
+// would fail the whole column on exactly that element, while AGE, whose
+// agtypeValue maps null to nil, hands the same graph value back intact.
+func carriesElemBare(e *codegen.ListElem) bool {
+	switch e.Kind {
+	case codegen.ColumnAny, codegen.ColumnScalarNull:
+		return true
+	case codegen.ColumnProperty:
+		return !ridesADriverCarrier(e.GoType)
+	default:
+		return false
+	}
 }
 
 // walkListElemBody emits the body of one list-element loop iteration
@@ -651,6 +676,10 @@ func walkListElemPlan(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *codegen.ListElem, accVar, iterVar, zero, indent string) {
 	switch e.Kind {
 	case codegen.ColumnProperty:
+		if carriesElemBare(e) {
+			fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, iterVar)
+			return
+		}
 		carrier := driverCarrier(e.GoType)
 		fmt.Fprintf(b, "%sv, ok := %s.(%s)\n", indent, iterVar, carrier)
 		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected %s, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, carrier, f.ColumnName, iterVar, indent)
