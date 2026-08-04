@@ -752,29 +752,47 @@ holding exactly one more parameter; the parameter-list tail each
 lives, because the method template above prints only the placeholder;
 and the value half of every `map[string]any` literal's entries. A
 placeholder in the type position is not an exemption for the name
-beside it — the fence reads the name and type positions separately,
-so a `<bareParam> <T>` restored into the bullet above is red on its
-name however the type is written, and a lone `<bareParam>` is read as
-a name with no type rather than waved through for wearing angle
-brackets.
+beside it — the fence grades the name position and reads nothing off
+the type at all, so a `<bareParam> <T>` restored into the bullet
+above is red on its name however the type is written, and a lone
+`<bareParam>` is graded as a declaration naming nothing rather than
+waved through for wearing angle brackets. The only token it declines
+to grade is one standing for the whole parameter list — `<param-list>`
+and the numbered `<param-list-1>` the interface block below uses —
+and a document taking that exemption owes the bullet, because the
+exemption and the requirement are the same list.
 
-Which documents owe graded sites is derived from those documents, not
-listed in the test. A document that prints a query method taking an
-argument owes a graded signature; one whose method template prints
-`<param-list>` owes the bullet that expands it, at **both** arities.
-Both, because a bullet that spells out one and leaves the other to
-prose is exactly how the single-parameter form came to specify the
-capture vector while the two-plus form sat correct beside it. So this
-bullet cannot narrow back to one arity, and this document cannot drop
-out of the sweep, without something going red. What no check that
-reads only these documents can reach is deleting the surface
-outright: a document that says nothing owes nothing.
+Which documents owe graded sites is written down in that test, by
+name, and reconciled against what the sweep actually read — in both
+directions, so a listed document that produces nothing is red and a
+document that produces something without being listed is red too.
+This document is on three of those lists: it owes a graded signature,
+it owes the `<param-list>` bullet (because its method template above
+prints the placeholder rather than a list), and it owes a graded
+binding. The two tails this bullet spells — `, arg <T>` and
+`, arg <MethodName>Params` — are themselves listed there verbatim,
+so narrowing the bullet to one arity, restating an arity in a second
+spelling, or illustrating one with a concrete type is red on the
+text rather than on anything inferred from it.
+
+That expectation is deliberately written rather than derived. It was
+derived once, from marker patterns over these documents, and that
+could not hold: the markers were the same shapes as the grading, so
+a single cosmetic edit here — moving the comma out of the template's
+placeholder — dropped this document from the requirement and from
+the reading at the same instant, and the capture vector went back
+into this section green.
+
+What is left open is what no check reading only these documents can
+close: deleting the documented surface and its line in that test
+together. That is a two-part edit which removes a named document
+from a list in a test file, and the second part is the record of it.
 
 That is the whole of what is fenced: the *name*. Return types, decode
 bodies, `<zero>` values and every other signature in this document
 remain unfenced prose that the emitter is free to outgrow, so read
 them as illustration and the goldens under `test/data/codegen/valid/`
-as truth. The derivation rule above went four stages unchecked
+as truth. The argument-name rule above went four stages unchecked
 because there was neither a fence nor a note saying there was none;
 the next drift will at least be a known unknown.
 
