@@ -9,6 +9,12 @@ run:
   # golangci-lint fmt works per file and never needed the tag.
   build-tags:
     - codegen_live
+    # test/data/tagblind is `just vuln`'s tag-derivation fixture: a directory
+    # whose every Go file is constrained, which is the shape `go list ./...`
+    # cannot see. Without the tag here the linter cannot see it either, and the
+    # one directory in this tree that no default-configuration tool loads would
+    # also be the one nothing checks.
+    - tagblind
 
 linters:
   default: none

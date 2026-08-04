@@ -247,10 +247,18 @@ test-codegen-live-age:
 # every build tag its own packages constrain themselves by — the tag is where
 # code enters the build, so a module scanned without its tags is a module
 # partly scanned. `ignore` is excluded because that tag's whole meaning is
-# "not part of any build". Deriving the tags removes one way to be green over
-# unscanned code and adds another — a tag walk that came back empty — so each
-# module's scan is preceded by the derivation's postcondition: no Go file of
-# that module may be outside the build the scan is about to load.
+# "not part of any build". The tags are read off the module's files on disk
+# rather than out of `go list ./...`, because the wildcard does not match a
+# directory whose Go files are ALL constrained — it would derive none of the
+# tags such a directory carries, and see nothing missing.
+#
+# Deriving the tags removes one way to be green over unscanned code and adds
+# another — a tag walk that came back empty — so each module's scan is preceded
+# by the derivation's postcondition, in two halves: every directory holding a Go
+# file was matched by `go list`, and every file of every matched package is in
+# the build. Both are scoped to what `./...` matches, which is govulncheck's own
+# scope: testdata, vendor and dot- or underscore-prefixed directories are
+# outside both.
 #
 # -show verbose because the scan runs at symbol level: package- and module-level
 # findings never change its exit status, so without verbose they are only ever
@@ -275,22 +283,6 @@ vuln: vuln-root-residual
     # reported against a set that was never measured.
     lines() { [ -n "${1}" ] && printf '%s\n' "${1}" || true; }
 
-    # Every build tag a module's own packages constrain themselves by. The
-    # directory list comes from `go list` inside the module, which is the
-    # authority on which files belong to it and never crosses into a nested
-    # module; -e so a package whose files are all excluded by constraints is
-    # still located rather than aborting the scan.
-    build_tags() {
-        (cd "${1}" && go list -e -f '{{{{.Dir}}' ./... | while IFS= read -r d; do
-            grep -hs '^//go:build' "${d}"/*.go || true
-        done) \
-            | sed 's|^//go:build||' \
-            | tr '()!|&' '     ' \
-            | tr -s ' \t' '\n\n' \
-            | sed -e '/^$/d' -e '/^ignore$/d' \
-            | sort -u | paste -sd,
-    }
-
     mapfile -t modules < <(find . -name go.mod -not -path './.git/*' -printf '%h\n' | sort)
     if [ "${#modules[@]}" -eq 0 ]; then
         echo "error: no go.mod found under the checkout, so this recipe would scan nothing" >&2
@@ -305,9 +297,86 @@ vuln: vuln-root-residual
             ;;
     esac
 
-    log="$(mktemp)"
-    trap 'rm -f "${log}"' EXIT
+    # Every directory of a module that holds a Go file, absolute, read off disk.
+    # The walk is bounded by the modules discovered above, so it stops at a
+    # nested module's root rather than filing that module's files under its
+    # parent, and it applies go's own `./...` exclusions — names beginning with
+    # '.' or '_', testdata, vendor — so this set and the set `go list ./...`
+    # matches are answers to the same question and can be compared.
+    #
+    # Off disk rather than out of `go list`, because `go list`'s `./...` wildcard
+    # does not match a directory whose Go files are ALL excluded by build
+    # constraints: no package, no error, and no IgnoredGoFiles either. Deriving
+    # the tags from a listing blind to such a directory derives none of the tags
+    # only that directory carries, and the IgnoredGoFiles assertion below never
+    # sees the files it dropped — the scan runs, reports on what was left, and
+    # exits 0 (bd gqlc-pig9). The module root comes from `go list -m` rather than
+    # `pwd` so it is the same path, symlinks and all, that `go list` prints.
+    go_dirs() {
+        local root prune=() m
+        root="$(cd "${1}" && go list -m -f '{{{{.Dir}}')"
+        for m in "${modules[@]}"; do
+            if [ "${m}" != "${1}" ]; then
+                case "${m}" in "${1}"/*)
+                    prune+=(-path "$(cd "${m}" && go list -m -f '{{{{.Dir}}')" -prune -o)
+                    ;;
+                esac
+            fi
+        done
+        find "${root}" -mindepth 1 \
+            \( -name '.*' -o -name '_*' -o -name testdata -o -name vendor \) -prune -o \
+            "${prune[@]}" \
+            -name '*.go' -printf '%h\n' | sort -u
+    }
+
+    # Every build tag a module's own packages constrain themselves by.
+    build_tags() {
+        go_dirs "${1}" | while IFS= read -r d; do
+            grep -hs '^//go:build' "${d}"/*.go || true
+        done \
+            | sed 's|^//go:build||' \
+            | tr '()!|&' '     ' \
+            | tr -s ' \t' '\n\n' \
+            | sed -e '/^$/d' -e '/^ignore$/d' \
+            | sort -u | paste -sd,
+    }
+
+    # The derivation's fixture. test/data/tagblind holds nothing but
+    # build-constrained Go files, which is the one directory shape `go list
+    # ./...` does not match at all — so it is the only thing in this tree that
+    # exercises either the walk above or the coverage assertion below, and a
+    # fixture that quietly stopped having that shape (deleted, or an
+    # unconstrained file added beside it) would take both guards out of service
+    # with nothing failing. The three clauses are the three ways that happens.
+    selftest_tagblind() {
+        local want="tagblind" fixture
+        fixture="$(go list -m -f '{{{{.Dir}}')/test/data/${want}"
+        if ! go_dirs . | grep -qxF "${fixture}"; then
+            echo "error: the tag-derivation fixture ${fixture}" >&2
+            echo "       is gone, so nothing in this tree exercises the filesystem walk or the" >&2
+            echo "       coverage assertion below (bd gqlc-pig9). Restore it." >&2
+            exit 1
+        fi
+        if go list -e -f '{{{{.Dir}}' ./... | grep -qxF "${fixture}"; then
+            echo "error: the tag-derivation fixture ${fixture}" >&2
+            echo "       is now matched by an untagged 'go list ./...', so it no longer has the" >&2
+            echo "       shape it exists to reproduce — a directory whose every Go file is build-" >&2
+            echo "       constrained. An unconstrained .go file was added beside it (bd gqlc-pig9)." >&2
+            exit 1
+        fi
+        case ",$(build_tags .)," in
+            *",${want},"*) ;;
+            *)  echo "error: the filesystem walk did not derive '${want}' from ${fixture}," >&2
+                echo "       so it is not seeing wholly build-constrained directories — the exact" >&2
+                echo "       blindness it replaced 'go list ./...' to fix (bd gqlc-pig9)." >&2
+                exit 1
+                ;;
+        esac
+    }
+    selftest_tagblind
+
     reported=""
+    headers_total=0
 
     for dir in "${modules[@]}"; do
         tags="$(build_tags "${dir}")"
@@ -318,11 +387,38 @@ vuln: vuln-root-residual
         # trusted. A tag derivation that silently came back empty would leave
         # the tagged files out of the scan and change nothing else: the scan
         # would run, report on what was left, and exit 0 — green because it was
-        # looking at less. `IgnoredGoFiles` is go/build's own list of the files
-        # it dropped for build constraints, so an empty one is a direct
-        # statement that no Go file in this module is outside the build
-        # govulncheck is about to load. It is the tag derivation's postcondition
-        # rather than a second copy of it, so it cannot go stale with it.
+        # looking at less.
+        #
+        # There are two ways to be outside that build and they need separate
+        # assertions, because `go list` reports only one of them. A directory
+        # whose Go files are ALL excluded is not listed at all — no package, no
+        # error, no ignored files — so it can only be caught by comparing the
+        # directories the wildcard matched against the directories that hold Go
+        # files (bd gqlc-pig9). Within a directory that WAS listed, `go list`
+        # reports the drop itself, and that is the assertion below.
+        matched="$(cd "${dir}" && go list -e "${tagflag[@]}" -f '{{{{.Dir}}' ./... | sort -u)"
+        unlisted="$(comm -13 <(lines "${matched}") <(go_dirs "${dir}") || true)"
+        if [ -n "${unlisted}" ]; then
+            echo "error: these directories of ${dir} hold Go files that 'go list ./...' does not" >&2
+            echo "       match, so govulncheck loads no package for them and the scan below would" >&2
+            echo "       be green over unscanned code (bd gqlc-pig9):" >&2
+            printf '%s\n' "${unlisted}" | sed 's/^/         /' >&2
+            echo "       Derived tags were [${tags:-none}]. A directory whose every Go file is" >&2
+            echo "       excluded by build constraints is skipped by the wildcard silently, with" >&2
+            echo "       no package and no IgnoredGoFiles to report — so the tag derivation above" >&2
+            echo "       missed a constraint that only these files carry." >&2
+            exit 1
+        fi
+
+        # `IgnoredGoFiles` is go/build's own list of the files it dropped for
+        # build constraints, so an empty one says that no Go file of a package
+        # `go list ./...` matched is outside the build govulncheck is about to
+        # load. It says nothing about a directory the wildcard never matched;
+        # that is the assertion above. The two together are the tag derivation's
+        # postcondition rather than a second copy of it, so neither can go stale
+        # with it. Both are scoped to what `./...` matches — testdata, vendor and
+        # dot- or underscore-prefixed directories are outside it, and outside
+        # govulncheck's own `./...` too.
         excluded="$(cd "${dir}" \
             && go list -e "${tagflag[@]}" \
                 -f '{{{{if .IgnoredGoFiles}}{{{{.ImportPath}}: {{{{join .IgnoredGoFiles " "}}{{{{end}}' ./... \
@@ -331,18 +427,28 @@ vuln: vuln-root-residual
             echo "error: build constraints exclude these files from ${dir}, so govulncheck cannot" >&2
             echo "       see them and the scan below would be green over unscanned code (bd gqlc-pig9):" >&2
             printf '%s\n' "${excluded}" | sed 's/^/         /' >&2
-            echo "       Derived tags were [${tags:-none}]. Either the tag derivation above missed a" >&2
-            echo "       constraint, or these files are excluded by something -tags cannot enable —" >&2
-            echo "       a GOOS/GOARCH filename suffix, or //go:build ignore. Neither has ever" >&2
-            echo "       existed in this tree; the first one to needs a deliberate decision here," >&2
-            echo "       not a silently narrower scan." >&2
+            echo "       Derived tags were [${tags:-none}]. Either the tag derivation above missed" >&2
+            echo "       a constraint; or the derivation excluded these files itself, because a" >&2
+            echo "       tag it read off one file negates a constraint on another — //go:build" >&2
+            echo "       !windows is excluded by the 'windows' derived from a sibling (bd" >&2
+            echo "       gqlc-e7oq); or they are excluded by something -tags cannot enable at all," >&2
+            echo "       a GOOS/GOARCH filename suffix or //go:build ignore. None has ever existed" >&2
+            echo "       in this tree; the first one to needs a deliberate decision here, not a" >&2
+            echo "       silently narrower scan." >&2
             exit 1
         fi
 
         echo "govulncheck: $(cd "${dir}" && go list -m) at ${dir}, tags [${tags:-none}]"
+        # Captured, not piped through `tee`. A pipeline's status is its LAST
+        # command's, so piping would take the scan's exit — the single thing
+        # this gate turns on — from `tee` unless `set -o pipefail` at the top of
+        # the recipe is still in force three hundred lines away. This repo has
+        # been bitten by that class three times; the status is read off the
+        # command that produced it, which is action at no distance. The cost is
+        # that a scan's output appears when it finishes rather than as it runs.
         rc=0
-        (cd "${dir}" && go run golang.org/x/vuln/cmd/govulncheck@latest "${tagflag[@]}" -test -show verbose ./...) \
-            2>&1 | tee "${log}" || rc=$?
+        out="$(cd "${dir}" && go run golang.org/x/vuln/cmd/govulncheck@latest "${tagflag[@]}" -test -show verbose ./... 2>&1)" || rc=$?
+        printf '%s\n' "${out}"
         if [ "${rc}" -ne 0 ]; then
             echo "error: the scan of ${dir} exited ${rc}. govulncheck exits non-zero when this tree" >&2
             echo "       CALLS a known vulnerability, and when it cannot load the module at all —" >&2
@@ -350,9 +456,40 @@ vuln: vuln-root-residual
             echo "       is for advisories nothing calls (bd gqlc-k22l)." >&2
             exit "${rc}"
         fi
-        reported+="$(grep -oE 'GO-[0-9]{4}-[0-9]+' "${log}" || true)"$'\n'
+        # The register below is fail-closed only while the extraction feeding it
+        # still matches, so the extraction is checked against the output it
+        # reads. govulncheck names every finding on its own `Vulnerability #N:
+        # <id>` line; a header line the id pattern cannot read is the extraction
+        # going quiet, and a quiet extraction empties `reported` — which reports
+        # an unregistered advisory as nothing at all.
+        headers="$(grep -cE '^Vulnerability #' <<<"${out}" || true)"
+        ids="$(grep -cE '^Vulnerability #[0-9]+: GO-[0-9]{4}-[0-9]+$' <<<"${out}" || true)"
+        if [ "${headers}" -ne "${ids}" ]; then
+            echo "error: govulncheck named ${headers} advisories in ${dir} but this recipe could" >&2
+            echo "       read an id out of only ${ids} of them, so the register below would be" >&2
+            echo "       comparing against a set the scan did not produce (bd gqlc-k22l). The" >&2
+            echo "       output format moved; fix the extraction in this recipe." >&2
+            exit 1
+        fi
+        headers_total=$((headers_total + headers))
+        reported+="$(grep -oE 'GO-[0-9]{4}-[0-9]+' <<<"${out}" || true)"$'\n'
     done
     reported="$(lines "${reported}" | sed '/^$/d' | sort -u)"
+
+    # The per-module check above cannot see the header line itself moving: every
+    # count would be 0, they would agree, `reported` would empty, and BOTH halves
+    # of the register would go quiet together — comparing two empty sets, green
+    # over whatever the scan actually said. That is the register's fail-closed
+    # property depending on the register being non-empty, which is not a property
+    # at all. This is what makes it hold unconditionally (bd gqlc-k22l).
+    if [ "${headers_total}" -eq 0 ]; then
+        echo "error: no scan above named a single advisory, so this recipe read nothing out of" >&2
+        echo "       govulncheck's output and the register below would pass by comparing two" >&2
+        echo "       empty sets (bd gqlc-k22l). Either the output format moved — fix the" >&2
+        echo "       extraction — or every registered advisory has genuinely cleared, in which" >&2
+        echo "       case delete the register and this check together, deliberately." >&2
+        exit 1
+    fi
 
     # The advisories this gate deliberately exits 0 over, and why (bd gqlc-k22l).
     # Every one is uncalled — govulncheck's symbol-level result is empty, which

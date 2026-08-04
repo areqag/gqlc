@@ -103,7 +103,10 @@ not declared** (bd gqlc-pig9). `just vuln` scans every `go.mod` under the
 checkout, with every build tag that module's own packages constrain themselves
 by — a tag is where code enters the build, so a module scanned without its tags
 is a module partly scanned, and `ignore` is excluded because that tag's whole
-meaning is "not part of any build". vuln.yml arms on any `.go` file, any
+meaning is "not part of any build". The tags are read off the module's files on
+disk rather than out of `go list ./...`, for the reason below.
+
+vuln.yml arms on any `.go` file, any
 `go.mod`/`go.sum` anywhere, the recipe, or itself. Each list this replaces was a
 proxy for the real condition: a module list omits the third module the day it is
 added, and a `go.mod`-only trigger misses a PR that newly imports or newly calls
@@ -115,12 +118,54 @@ empty.** Deriving the tags rather than listing them removes one way to be green
 over unscanned code and introduces another: a tag walk that silently found
 nothing would produce a narrower build, a scan that ran, and an exit 0. So
 before each module is scanned the recipe asserts that `go list`'s own
-`IgnoredGoFiles` is empty under the derived tags — a direct statement that no Go
-file in the module is outside the build govulncheck is about to load. It is the
-derivation's postcondition rather than a second copy of it, so the two cannot
-drift. Measured: with the tag walk broken, the nested module's advisory count
-goes from three to zero and the recipe still exits 0 without this assertion, and
-fails naming the four excluded files with it.
+`IgnoredGoFiles` is empty under the derived tags. Measured: with the tag walk
+broken, the nested module's advisory count goes from three to zero and the
+recipe still exits 0 without this assertion, and fails naming the four excluded
+files with it.
+
+**That assertion had a blind spot of exactly the shape it guards against.**
+`IgnoredGoFiles` is reported per package, so it can only speak for a directory
+`go list` produced a package for — and `go list`'s `./...` wildcard does not
+match a directory whose Go files are **all** excluded by build constraints. No
+package, no error, no ignored files. A wholly tag-gated directory therefore
+derived no tag from a `go list`-driven walk *and* reported nothing to a `go
+list`-driven assertion. Measured end to end: a planted module whose only
+constrained directory calls `yaml.Unmarshal` at `gopkg.in/yaml.v2 v2.2.1` behind
+`//go:build revsecret` scanned as `tags [none]`, reported an empty
+`IgnoredGoFiles`, and exited 0; the same module scanned with its tag exited 3
+over three called advisories with a printed call trace. `test/data/codegen` does
+not expose this, because its four `live_*_test.go` sit beside unconstrained
+files, so the package is listed and `IgnoredGoFiles` is populated — moving the
+live battery into a directory of its own would have opened it.
+
+**So the tags are derived from a filesystem walk, and the postcondition has two
+halves.** The walk enumerates the module's `.go` files on disk, bounded by the
+nested-module roots discovery has already found, so it never crosses a module
+boundary. The postcondition then asserts first that every directory holding a Go
+file was matched by `go list ./...` under the derived tags — the only way to see
+a directory the wildcard skipped — and second that no file of a matched package
+was dropped, which is `IgnoredGoFiles` as before. Neither is a second copy of the
+derivation, so neither can go stale with it. Both are scoped to what `./...`
+matches, which is govulncheck's own scope: `testdata`, `vendor`, and dot- or
+underscore-prefixed directories are outside both, and the walk applies the same
+exclusions so the two sets answer the same question.
+
+`test/data/tagblind` is the fixture — a directory whose every Go file is
+constrained, and the only live exercise of either half. The recipe asserts its
+shape before it scans: present, still unmatched by an untagged `go list ./...`,
+and still contributing its tag to the walk. A fixture that quietly stopped
+having that shape would take both guards out of service with nothing failing.
+Reverting the walk to `go list ./...` fails on it. The tag is also in
+`.golangci.yml`'s `build-tags`, so the one directory no default-configuration
+tool loads is not also the one nothing lints.
+
+The diagnostic when `IgnoredGoFiles` is non-empty names three causes, not two.
+Besides a missed constraint, and something `-tags` cannot enable (a GOOS/GOARCH
+filename suffix, `//go:build ignore`), the derivation can exclude a file
+*itself*: `//go:build !windows` derives the tag `windows`, and `-tags windows`
+then makes that constraint false. The gate goes red, which is correct and
+fail-closed, but a reader sent after the wrong cause loses the time anyway. The
+underlying derivation defect is bd gqlc-e7oq.
 
 The same grading applies to vuln.yml's filter. `grep` exiting 1 means "no match"
 and may be read as "nothing relevant changed"; any higher status is `grep`
@@ -143,6 +188,17 @@ deleted. The second direction is what makes the first trustworthy: reading the
 ids out of the output means that if the output format moves and the extraction
 stops matching, the measured set empties and the register goes stale — the gate
 fails rather than silently accepting everything.
+
+**That last property is only unconditional because the extraction is checked
+against the output too.** A stale register is a comparison against a *non-empty*
+register; if the extraction broke while the register happened to be empty, both
+halves would compare two empty sets and pass. So the extraction is graded
+directly. govulncheck names every finding on its own `Vulnerability #N: <id>`
+line, so per module a header line the id pattern cannot read fails the gate, and
+across the run at least one such line must have been read at all — the latter
+catching the case where the header itself moves and every count agrees at zero.
+If the day comes that this tree genuinely has no findings, that check and the
+register empty together, deliberately.
 
 This refines rather than reverses the rejection of *fail the gate on
 module-level findings* below. The objection there was blocking on advisories
@@ -215,7 +271,17 @@ mismatch check would only reintroduce the list in order to guard it.
 - A Go file that `-tags` cannot reach fails `just vuln` rather than being quietly
   dropped from the scan: a GOOS/GOARCH filename suffix, or `//go:build ignore`.
   Neither exists in this tree today, and the first one to should be a decision
-  recorded here, not a narrower scan nobody noticed.
+  recorded here, not a narrower scan nobody noticed. So does a negated constraint
+  the derivation turns off itself (bd gqlc-e7oq).
+- `test/data/tagblind` must keep holding nothing but build-constrained Go files.
+  Deleting it, or adding an unconstrained file beside the one there, fails
+  `just vuln` — it is the only exercise of the filesystem walk and of the
+  directory-coverage half of the postcondition. Its tag is in `.golangci.yml`'s
+  `build-tags`, so it is linted like anything else.
+- A directory under a scanned module that `./...` does not match — `testdata`,
+  `vendor`, or a dot- or underscore-prefixed name — is outside this gate, as it
+  is outside govulncheck's own `./...`. Nothing in either module has that shape
+  today.
 - Nearly every pull request now runs the scan, because nearly every pull request
   touches a `.go` file. That is the intended cost: govulncheck answers at symbol
   level, so a call graph edge is as much an input to the answer as a version in a
