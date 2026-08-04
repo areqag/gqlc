@@ -347,8 +347,13 @@ var invalidFixtures = map[string]error{
 	"plural_endpoint_optional_edge_property_stays_plural.cypher": ErrUnknownProperty,
 	"plural_endpoint_zero_hop_stays_plural.cypher":               ErrAmbiguousLabel,
 	"plural_endpoint_zero_lower_bound_stays_plural.cypher":       ErrAmbiguousLabel,
-	"plural_endpoint_merged_edge_stays_plural.cypher":            ErrAmbiguousLabel,
-	"plural_endpoint_created_edge_stays_plural.cypher":           ErrAmbiguousLabel,
+	// `*0..1` is the shape where the two halves of singleHopPattern separate.
+	// Its upper bound is one, so every question about hop COUNT passes it; the
+	// zero lower bound is the only thing left to refuse it, and its twin `*..1`
+	// (absent lower bound, read as one) differs in nothing else.
+	"plural_endpoint_zero_lower_bound_one_hop_stays_plural.cypher": ErrAmbiguousLabel,
+	"plural_endpoint_merged_edge_stays_plural.cypher":              ErrAmbiguousLabel,
+	"plural_endpoint_created_edge_stays_plural.cypher":             ErrAmbiguousLabel,
 	// Three types satisfy `(:Person)` and WORKS_AT is declared on two of them,
 	// so the narrowing lands on a set that is smaller but still plural — the
 	// arm no two-type schema can reach, because on two types every narrowing is
@@ -359,6 +364,27 @@ var invalidFixtures = map[string]error{
 	// exactly the two, and pairs it with the property projection that resolves
 	// only because the third was dropped.
 	"plural_endpoint_narrows_to_smaller_plural_set.cypher": ErrAmbiguousLabel,
+	// A quantifier of more than one hop. The closure names the ends of ONE
+	// declared edge; a multi-hop pattern's ends are one or more hops away from
+	// those, so the type it commits is the wrong one — not merely a coarser one.
+	// Every other plural-endpoint schema in the corpus hides this, because it
+	// declares the label once and the closure then names the pattern's ends by
+	// accident whatever the hop count. satisfy_plural_edges_chain.gql declares X
+	// twice, A -> B -> C, so the two disagree:
+	//
+	//   *2   over (p:Node)  ->(c:Node:C) closes B -> C; p is A&Node
+	//   *1..2 over (p:Node) ->(c:Node:C) closes B -> C; p is A&Node or B&Node
+	//   *    over (p:Node)  ->(c:Node:C) closes B -> C; p is A&Node or B&Node
+	//   *1..2 over (p:Node:A)->(c:Node)  closes A -> B; c is B&Node or C&Node
+	//
+	// and each fixture returns the single-typed property of the type the closure
+	// wrongly names, so the mis-commitment is an emitted NOT NULL column rather
+	// than a mis-named entity. Their accepted single-hop twins are in
+	// TestNarrowingLearnsOnlyFromASingleHopEdge.
+	"plural_endpoint_multi_hop_stays_plural.cypher":         ErrUnknownProperty,
+	"plural_endpoint_multi_hop_range_stays_plural.cypher":   ErrUnknownProperty,
+	"plural_endpoint_unbounded_hops_stays_plural.cypher":    ErrUnknownProperty,
+	"plural_endpoint_multi_hop_far_end_stays_plural.cypher": ErrUnknownProperty,
 	// Three candidates of which only the first and third disagree about which
 	// of the pattern's endpoints is the source; the second is a plural-endpoint
 	// duplicate of the first's side and carries no orientation signal.
@@ -1058,9 +1084,32 @@ func (s *ResolverSuite) TestNarrowingLearnsOnlyFromEdgesEveryRowHas() {
 			want:    employeePerson,
 		},
 		{
-			name:    "a zero-lower-bound range is not a witness, a one-lower-bound range is",
+			// The twin is `*1..1` and not `*1..2`. A one-hop LOWER bound is not
+			// enough: the closure names the ends of one declared edge, and a range
+			// that admits two hops puts the pattern's ends somewhere else. On this
+			// schema `*1..2` happens to commit the right type anyway — no WORKS_AT
+			// leaves Company, so no two-hop path exists to disagree — which is
+			// exactly why it cannot be the twin here. It would assert a rule the
+			// corpus structurally cannot falsify. The rule is pinned where it can
+			// be falsified, on the chain schema, by
+			// TestNarrowingLearnsOnlyFromASingleHopEdge.
+			name:    "a zero-lower-bound range is not a witness, a range of exactly one hop is",
 			fixture: "plural_endpoint_zero_lower_bound_stays_plural.cypher",
-			twin:    "MATCH (p:Person)-[w:WORKS_AT*1..2]->(c:Company) RETURN p",
+			twin:    "MATCH (p:Person)-[w:WORKS_AT*1..1]->(c:Company) RETURN p",
+			want:    employeePerson,
+		},
+		{
+			// The pair that separates singleHopPattern's two questions. Both
+			// sides have an upper bound of one, so the hop-count half admits
+			// both and only the lower bound decides: `*0..1` admits the empty
+			// path, `*..1` has no lower bound written and openCypher reads that
+			// as one, making it the closed range [1,1]. Without this pair the
+			// zero-lower-bound test could be dropped from the predicate and the
+			// remaining fixtures (`*0`, `*0..2`) would still be refused — by the
+			// hop-count half, for the wrong reason.
+			name:    "a zero lower bound is not a witness even under a one-hop ceiling, an absent one is",
+			fixture: "plural_endpoint_zero_lower_bound_one_hop_stays_plural.cypher",
+			twin:    "MATCH (p:Person)-[w:WORKS_AT*..1]->(c:Company) RETURN p",
 			want:    employeePerson,
 		},
 		{
@@ -1093,6 +1142,156 @@ func (s *ResolverSuite) TestNarrowingLearnsOnlyFromEdgesEveryRowHas() {
 			s.Require().Equal(tt.want, got)
 		})
 	}
+}
+
+// TestNarrowingLearnsOnlyFromASingleHopEdge is the accepted half of the four
+// invalid/plural_endpoint_*hop*_stays_plural fixtures, and the reason the
+// witness predicate asks for a single hop rather than for a non-zero lower
+// bound.
+//
+// The narrowing reads a committed candidate set as a statement about the
+// PATTERN's two ends. That reading is only sound when the pattern IS one
+// declared edge. Under `*2` the pattern is two of them chained, and the ends
+// the closure names are the ends of the last hop, not of the pattern — so the
+// binding at the far end commits a type that is one hop away from the truth.
+// It is not a coarser answer that a later stage could refine; it is the wrong
+// type, and since these fixtures project a property declared on exactly one
+// node type, it reaches emitted code as a NOT NULL column that is null.
+//
+// No two-type plural schema can show this. `satisfy_plural_edges*.gql` all
+// declare their edge label once, so `(p:Person)-[:WORKS_AT*2]->(c:Company)`
+// closes over that one declaration and names p's real type by luck, whatever
+// the quantifier says. satisfy_plural_edges_chain.gql declares X twice in a
+// chain, which is the smallest schema on which "the ends of the closed edge"
+// and "the ends of the pattern" can disagree.
+//
+// The twins are the same queries with the quantifier deleted. They must stay
+// accepted with the SAME property type the multi-hop form wrongly emitted:
+// that is what says the fixture above is refused because of the hop count and
+// not because the chain schema is unresolvable, and what stops the fix from
+// being "switch the narrowing off for anything var-length-shaped".
+func (s *ResolverSuite) TestNarrowingLearnsOnlyFromASingleHopEdge() {
+	sch := s.loadSchema("invalid", "satisfy_plural_edges_chain.gql")
+	resolve := func(src string) ([]Column, error) {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		return vq.Columns, err
+	}
+
+	tests := []struct {
+		name    string
+		fixture string
+		twin    string
+		want    []Column
+	}{
+		{
+			// Exactly two hops. p is A&Node on every row; the closure names
+			// B&Node, the source of the LAST hop.
+			name:    "an exact multi-hop count is not a witness, an unquantified edge is",
+			fixture: "plural_endpoint_multi_hop_stays_plural.cypher",
+			twin:    "MATCH (p:Node)-[w:X]->(c:Node:C) RETURN p.bOnly",
+			want:    []Column{{Name: "p.bOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}},
+		},
+		{
+			// One-or-two hops. The lower bound is one, which is all
+			// qualifiedDemoter ever asked for — and the two-hop member of the
+			// range is enough to put p on A&Node.
+			name:    "a range that admits two hops is not a witness even with a one-hop lower bound",
+			fixture: "plural_endpoint_multi_hop_range_stays_plural.cypher",
+			twin:    "MATCH (p:Node)-[w:X]->(c:Node:C) RETURN p.bOnly",
+			want:    []Column{{Name: "p.bOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}},
+		},
+		{
+			// `*` is Min() == nil AND Max() == nil. openCypher reads the nil
+			// lower bound as one, so every lower-bound test passes it; the
+			// unbounded UPPER bound is what disqualifies it, and a predicate
+			// that only consulted Min() would admit the widest shape there is.
+			name:    "an unbounded quantifier is not a witness",
+			fixture: "plural_endpoint_unbounded_hops_stays_plural.cypher",
+			twin:    "MATCH (p:Node)-[w:X]->(c:Node:C) RETURN p.bOnly",
+			want:    []Column{{Name: "p.bOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}},
+		},
+		{
+			// The far end is symmetric and is asserted separately: the two ends
+			// are narrowed by two different calls to endpointContribution, so a
+			// fix applied to one side only is green on the three rows above.
+			name:    "the far end of a multi-hop pattern is no more pinned than the near end",
+			fixture: "plural_endpoint_multi_hop_far_end_stays_plural.cypher",
+			twin:    "MATCH (p:Node:A)-[w:X]->(c:Node) RETURN c.bOnly",
+			want:    []Column{{Name: "c.bOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}},
+		},
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			// Read from disk so the pair cannot drift: what is refused in
+			// invalid/ and what is accepted here are one quantifier apart.
+			src, err := os.ReadFile(filepath.Join(fixtureDir, "invalid", tt.fixture))
+			s.Require().NoError(err)
+			_, err = resolve(string(src))
+			s.Require().ErrorIs(err, ErrUnknownProperty,
+				"%s names a property of the type the closure would wrongly commit, so it must stay refused", tt.fixture)
+
+			got, err := resolve(tt.twin)
+			s.Require().NoError(err, "the twin removes only the quantifier, so the closure really is the pattern and must still commit")
+			s.Require().Equal(tt.want, got)
+		})
+	}
+}
+
+// TestAnonymousEdgeNarrowsToTheTypeItCloses pins the TYPE that
+// valid/plural_endpoint_anonymous_edge_closes_singular.cypher resolves to,
+// rather than leaving it to that fixture's stored golden.
+//
+// Anonymous edges drive the narrowing — they are bindings like any other, with
+// "" for a variable — and the fixture exists to say so. But a golden is not a
+// behavioural pin in this repo: `go test -update` rewrites it, so a change that
+// narrowed `p` to the WRONG one of the two satisfying types shows up as a diff
+// a reviewer has to notice rather than as a red test. Only the refusal half of
+// that fixture is self-defending: turn the narrowing off entirely and the query
+// becomes ErrAmbiguousLabel, which -update cannot bless into a golden.
+//
+// So the type is asserted here, in source, where -update does not reach. The
+// interesting half of the claim is which type: Employee&Person is the source of
+// the only declared WORKS_AT, and the bare Person type satisfies `(:Person)`
+// just as well.
+func (s *ResolverSuite) TestAnonymousEdgeNarrowsToTheTypeItCloses() {
+	src, err := os.ReadFile(filepath.Join(fixtureDir, "valid", "plural_endpoint_anonymous_edge_closes_singular.cypher"))
+	s.Require().NoError(err)
+	sch := s.loadSchema("valid", "satisfy_plural_edges.gql")
+	q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader(src))
+	s.Require().NoError(err)
+	vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+	s.Require().NoError(err)
+	s.Require().Equal([]Column{{Name: "p", Type: ResolvedNode{Labels: "Employee&Person"}}}, vq.Columns,
+		"the anonymous WORKS_AT closes from Employee&Person, so that is the type p commits to — not the other type (:Person) satisfies")
+}
+
+// TestNarrowingASingularBindingCollidesWithALaterPluralRebind pins the message
+// a narrowed binding produces when a later Part re-declares it with the label
+// expression it started from.
+//
+// Before the narrowing `p` stayed plural across both Parts and the query was
+// refused with ErrAmbiguousLabel. Now Part 0's WORKS_AT determines it, so Part
+// 1's `(p:Person)` — the same text that bound it plural the first time — is a
+// singular-to-plural re-bind, and R5's carry check refuses it instead. Both
+// refuse, so this is not a regression; the point is that the second message is
+// newly REACHABLE, from a widening that was shipped with nothing looking at it.
+//
+// The wording is correct as it stands and is left alone: `p` genuinely was
+// carried as a singular node type, and the later Part genuinely does re-bind it
+// as plural. It is also not this pass's message — scope.go's carry check owns
+// it and other paths reach it — so changing it here would be a non-local edit
+// to satisfy a local surprise.
+func (s *ResolverSuite) TestNarrowingASingularBindingCollidesWithALaterPluralRebind() {
+	sch := s.loadSchema("invalid", "satisfy_plural_edges_reversed.gql")
+	q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(
+		"MATCH (p:Person)-[w:WORKS_AT]->(c:Company) WITH p MATCH (p:Person) RETURN p.id")))
+	s.Require().NoError(err)
+	_, err = New(sch, WithRegistry(regR7)).Resolve(q)
+	s.Require().ErrorIs(err, ErrPartBindingTypeConflict)
+	s.Require().EqualError(err,
+		`part binding type conflict: variable "p" carried as singular node type, re-bound as plural`)
 }
 
 // TestNarrowingToASmallerPluralSetIsWhatTheSetSaysItIs covers the arm that

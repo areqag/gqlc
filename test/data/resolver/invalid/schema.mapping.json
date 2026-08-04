@@ -114,7 +114,12 @@
     "plural_endpoint_optional_edge_property_stays_plural.cypher": "satisfy_plural_edges_reversed.gql",
     "plural_endpoint_zero_hop_stays_plural.cypher": "satisfy_plural_edges_reversed.gql",
     "plural_endpoint_zero_lower_bound_stays_plural.cypher": "satisfy_plural_edges_reversed.gql",
+    "plural_endpoint_zero_lower_bound_one_hop_stays_plural.cypher": "satisfy_plural_edges_reversed.gql",
     "plural_endpoint_merged_edge_stays_plural.cypher": "satisfy_plural_edges_reversed.gql",
     "plural_endpoint_created_edge_stays_plural.cypher": "satisfy_plural_edges_reversed.gql",
-    "plural_endpoint_narrows_to_smaller_plural_set.cypher": "satisfy_plural_edges_three_types.gql"
+    "plural_endpoint_narrows_to_smaller_plural_set.cypher": "satisfy_plural_edges_three_types.gql",
+    "plural_endpoint_multi_hop_stays_plural.cypher": "satisfy_plural_edges_chain.gql",
+    "plural_endpoint_multi_hop_range_stays_plural.cypher": "satisfy_plural_edges_chain.gql",
+    "plural_endpoint_unbounded_hops_stays_plural.cypher": "satisfy_plural_edges_chain.gql",
+    "plural_endpoint_multi_hop_far_end_stays_plural.cypher": "satisfy_plural_edges_chain.gql"
 }

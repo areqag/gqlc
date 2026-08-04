@@ -1167,6 +1167,42 @@ func qualifiedDemoter(e query.EdgeBinding) bool {
 	return *lower >= 1
 }
 
+// singleHopPattern reports whether an edge binding's pattern IS one declared
+// edge: no quantifier at all, or a quantifier whose range admits exactly one
+// hop and no other count.
+//
+// This is a STRICTER question than qualifiedDemoter's, and deliberately not the
+// same one. qualifiedDemoter asks whether the edge is guaranteed to exist on a
+// surviving row, which a zero lower bound is the only quantifier to break; that
+// answer is all DemoteNullability needs, because nullability is a property of
+// the endpoints' existence and a longer path still ends on real nodes. The
+// narrowing needs more: it reads the closed candidate set as naming the types
+// at the PATTERN's two ends, and under `*2` the closure describes the last hop
+// while the pattern's near end sits two hops back. There, "an edge exists" and
+// "these are its ends" come apart, so a lower-bound test is the wrong test.
+//
+// `*` is why the upper bound is read rather than the lower. openCypher reads an
+// absent lower bound as one, so `*` passes every lower-bound test there is
+// while admitting paths of any length — the widest shape the grammar has.
+func singleHopPattern(e query.EdgeBinding) bool {
+	h := e.Hops()
+	if h == nil {
+		return true
+	}
+	upper := h.Max()
+	if upper == nil || *upper != 1 {
+		return false
+	}
+	lower := h.Min()
+	if lower == nil {
+		// Absent lower bound is one (§4.4.3), so `*..1` is the closed [1,1].
+		return true
+	}
+	// A zero lower bound reaches here only as `*0..1`, whose empty path
+	// degenerates to source == target and declares nothing about either end.
+	return *lower == 1
+}
+
 // witnessesItsEndpoints reports whether a closed edge binding is EVIDENCE about
 // the node types at its two ends — the precondition NarrowPluralEndpoints reads
 // before letting an edge constrain a plural endpoint. `written` is the caller's
@@ -1174,32 +1210,39 @@ func qualifiedDemoter(e query.EdgeBinding) bool {
 //
 // An edge binding names a relationship the schema declares between two node
 // types, but that declaration only pins the ends of the rows the query returns
-// when EVERY returned row is guaranteed to have the edge. Three shapes break
-// that guarantee, and on each the narrowing would commit a type the projection
-// then names for rows that do not have it — a NOT NULL column that is null:
+// when the pattern is that one relationship AND every returned row is
+// guaranteed to have it. Three shapes break the conjunction, and on each the
+// narrowing would commit a type the projection then names for rows that do not
+// have it — a NOT NULL column that is null:
 //
 //   - Nullable(): an OPTIONAL MATCH is an outer join. `MATCH (p:Person)
 //     OPTIONAL MATCH (p)-[:WORKS_AT]->(:Company)` returns a bare Person with no
 //     WORKS_AT, and that row's p is not an Employee.
-//   - !qualifiedDemoter(): a hop range whose lower bound is zero (`*0`, `*0..2`)
-//     admits the empty path, which degenerates to source == target and declares
-//     nothing about either. No OPTIONAL MATCH is needed to reach this — a plain
-//     MATCH with a zero-lower-bound quantifier is enough.
+//   - !singleHopPattern(): a quantifier admitting any count but one. A zero
+//     lower bound (`*0`, `*0..2`) admits the empty path, which degenerates to
+//     source == target and declares nothing about either end. Any count above
+//     one (`*2`, `*1..2`, `*`) chains several declared edges, and the closure
+//     then names the ends of ONE of them rather than the ends of the pattern —
+//     so the committed type is not a coarser answer but the wrong one, a hop or
+//     more away from the truth. No OPTIONAL MATCH is needed to reach either: a
+//     plain MATCH with the quantifier is enough.
 //   - written: a CREATE or MERGE edge is CAUSED by the query rather than
 //     observed by it, so it filters no row of the MATCH that fed it. Both
 //     clauses leave every input row in the result, whatever its type.
 //
-// The first two are §4.4.3's demotion gate, spelled the same way here and read
+// The first arm is §4.4.3's demotion gate, spelled the same way here and read
 // in DemoteNullability for the same reason: both ask "is this edge guaranteed
-// on a surviving row". The third is asked only here — DemoteNullability's
-// answer for a written edge is master's and is not this function's to change.
+// on a surviving row". The second is strictly narrower than §4.4.3's — see
+// singleHopPattern for why the extra question is this pass's and not
+// DemoteNullability's. The third is asked only here; DemoteNullability's answer
+// for a written edge is master's and is not this function's to change.
 //
 // The OPTIONAL arm is deliberately blunter than DemoteNullability's, which
 // exempts an OPTIONAL edge whose group is already proven (ay9). Such an edge
 // genuinely is a witness, so honouring demotedGroups would narrow more — but
 // that is a further widening, and it is filed rather than taken here.
 func witnessesItsEndpoints(e query.EdgeBinding, written map[string]struct{}) bool {
-	if e.Nullable() || !qualifiedDemoter(e) {
+	if e.Nullable() || !singleHopPattern(e) {
 		return false
 	}
 	_, isWritten := written[e.Variable()]

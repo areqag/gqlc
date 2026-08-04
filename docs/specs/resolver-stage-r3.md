@@ -831,10 +831,13 @@ is the `ErrAmbiguousEdgeOrientation` sentinel path.
 
 #### 4.6.2 Narrowing a plural endpoint the closure pins (gqlc-0tft)
 
-Committing a candidate set for an edge the query is **guaranteed to
-observe** is also an answer about the pattern's two **ends**: every
-candidate names a node type on each of them, and every row that comes
-back has the edge, so every row's endpoints are among those types. Under
+Committing a candidate set for a **single declared edge** the query is
+**guaranteed to observe** is also an answer about the pattern's two
+**ends**: every candidate names a node type on each of them, and every
+row that comes back has that one edge, so every row's endpoints are
+among those types. Both halves are load-bearing — a candidate set says
+where the *declared edge* ends, which is only where the *pattern* ends
+when the pattern is that edge and nothing more. Under
 ADR 0022 a labelled binding whose label expression several declared
 types satisfy binds plural, and Phase B skips it — it is already bound,
 so §4.5's inference never runs on it. Until gqlc-0tft nothing else did
@@ -854,28 +857,66 @@ narrowing must not read it:
   join. `MATCH (p:Person) OPTIONAL MATCH (p)-[:WORKS_AT]->(:Company)`
   returns a bare `Person` with no `WORKS_AT`, and that row's `p` is not
   an `Employee`.
-- **`!qualifiedDemoter()` — a zero lower bound.** `*0` and `*0..2` admit
-  the empty path, which degenerates to source == target and declares
-  nothing about either. No `OPTIONAL MATCH` is needed to reach this: a
-  plain `MATCH` with the quantifier is enough.
+- **`!singleHopPattern()` — a quantifier admitting any count but one.**
+  Two different failures share this arm. A **zero lower bound** (`*0`,
+  `*0..2`) admits the empty path, which degenerates to source == target
+  and declares nothing about either end. A count **above one** (`*2`,
+  `*1..2`, `*`) chains several declared edges, so the pattern's ends are
+  not the ends of any one of them and the closure names a type one or
+  more hops away from the truth — not a coarser answer but a wrong one.
+  No `OPTIONAL MATCH` is needed to reach either: a plain `MATCH` with
+  the quantifier is enough.
 - **A `CREATE`d or `MERGE`d edge.** The query causes it rather than
   observing it, so it filters no row of the `MATCH` that fed it. Both
   clauses leave every input row in the result, whatever its type.
 
-The first two are §4.4.3's demotion gate, spelled the same way and read
+The first arm is §4.4.3's demotion gate, spelled the same way and read
 for the same reason: both ask whether the edge is guaranteed on a
-surviving row. The third is asked only here.
+surviving row. The second is **strictly narrower** than §4.4.3's, and
+the difference is the point. `qualifiedDemoter` rejects a zero lower
+bound only, which is all `DemoteNullability` needs — nullability is a
+statement about the endpoints *existing*, and a longer path still ends
+on real nodes. This pass makes a statement about *which types* they are,
+and there "an edge exists" and "these are its ends" come apart, so the
+lower bound is the wrong bound to read. Note also that openCypher reads
+an absent lower bound as one, so `*` — the widest shape the grammar has
+— passes every lower-bound test there is; it is the **upper** bound that
+disqualifies it. The third arm is asked only here.
 
 Committing the wrong type on any of them is not merely imprecise. For
 the whole-entity form it names a type those rows do not have; for the
 property form it emits a `NOT NULL` column that is null on them.
-Corpus: six `invalid/plural_endpoint_*_stays_plural` fixtures — the
-OPTIONAL shape twice, once returning the whole entity and once the
-property; the zero lower bound as `*0` and as `*0..2`; the written edge
-as `CREATE` and as `MERGE`. Each is paired in
+
+Corpus, guarantee half: seven `invalid/plural_endpoint_*_stays_plural`
+fixtures — the OPTIONAL shape twice, once returning the whole entity and
+once the property; the zero lower bound as `*0`, as `*0..2` and as
+`*0..1`; the written edge as `CREATE` and as `MERGE`. Each is paired in
 `TestNarrowingLearnsOnlyFromEdgesEveryRowHas` with an accepted twin
 that removes only the offending clause, so the predicate is pinned
-against being applied too widely as well as too narrowly.
+against being applied too widely as well as too narrowly. `*0..1` and
+its twin `*..1` are the pair that separates the arm's two questions:
+both have an upper bound of one, so the hop-count half admits both and
+only the lower bound decides. Without them, dropping the zero-lower-bound
+test entirely would leave `*0` and `*0..2` refused by the hop-count half
+for the wrong reason, and nothing would say so.
+
+Corpus, single-edge half: four more on
+`satisfy_plural_edges_chain.gql`, paired in
+`TestNarrowingLearnsOnlyFromASingleHopEdge`. That schema is separate
+because no other can host the claim. Every other plural-endpoint schema
+declares its edge label **once**, so a multi-hop pattern closes over
+that single declaration and names the pattern's ends by accident
+whatever the hop count — a hop-count bug is invisible on it, and a twin
+written there (`*1..2`, say) asserts a rule the corpus cannot falsify.
+The chain declares `X` twice, `A -> B -> C`, which is the smallest
+shape on which "the ends of the closed edge" and "the ends of the
+pattern" can disagree: `*2`, `*1..2` and `*` at the near end, `*1..2`
+at the far end. Each returns a property declared on exactly one node
+type, so the mis-commitment surfaces as an emitted `NOT NULL` column
+rather than only as a mis-named entity, and each twin deletes the
+quantifier alone. The `*1..2` twin in
+`TestNarrowingLearnsOnlyFromEdgesEveryRowHas` was corrected to `*1..1`
+for the same reason.
 
 After every edge that meets the guarantee has closed, each plural
 binding's candidate set is intersected with what those closures say
@@ -964,7 +1005,12 @@ it accepted. The fixture that pinned the old answer,
 `invalid/` to `valid/`. It applies to an anonymous edge exactly as to a
 named one — the binding drives the narrowing whether or not anything
 can refer to it. Corpus:
-`valid/plural_endpoint_anonymous_edge_closes_singular`.
+`valid/plural_endpoint_anonymous_edge_closes_singular`, whose refusal
+half (turn the narrowing off and the query is `ErrAmbiguousLabel`) the
+golden pins on its own, and whose **type** half is asserted in source by
+`TestAnonymousEdgeNarrowsToTheTypeItCloses` — a golden that named the
+wrong one of the two satisfying types would be re-blessed by
+`go test -update`, so it is not a behavioural pin.
 
 ### 4.7 Projection walk — hops-axis and multiplicity dispatch
 
