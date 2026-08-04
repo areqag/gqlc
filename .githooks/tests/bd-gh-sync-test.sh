@@ -1872,6 +1872,42 @@ else
     ok "an empty pull-side bead list withdraws both counts derived from it"
 fi
 
+# ...and the two withdrawals have to be ordered, because they overlap and only
+# one of them speaks for the held arm. Every fixture above exercises exactly one
+# at a time — the --limit cases carry a bead, the empty-list case carries a
+# single uncapped issue — so which of the two arms wins when both conditions
+# hold in the same run was never asserted anywhere. Swapping the `if` and the
+# `elif` that decide it leaves this whole file green while the summary reads
+# `held 0` over a bead list nobody enumerated, naming the cap as the only thing
+# withdrawn: the gqlc-nvjz defect verbatim, restored under a second condition.
+# The bead list is the more fundamental of the two — the orphan tally is a claim
+# about the GH listing *measured against* the bead set, so a bead set nobody
+# enumerated withdraws it whatever the GH listing did — and it therefore has to
+# be read first.
+run_sync pull '[]' "$GH_ALL_FULL" '[]' '[]'
+_ll="$(last_line)"
+if [ "$RC" -ne 0 ]; then
+    bad "an unenumerated bead list outranks a capped GitHub listing" \
+        "exited $RC, and pull rides on 'git pull': $_ll"
+elif ! grep -q "the GitHub listing came back at its --limit of $ALL_LIMIT" "$TMP/err"; then
+    bad "an unenumerated bead list outranks a capped GitHub listing" \
+        "the fixture never reached the cap, so the two conditions are not both live"
+elif ! grep -q 'the bead list came back empty' "$TMP/err"; then
+    bad "an unenumerated bead list outranks a capped GitHub listing" \
+        "the fixture never emptied the bead list, so the two conditions are not both live"
+elif [ -z "${_ll##*held 0*}" ]; then
+    bad "an unenumerated bead list outranks a capped GitHub listing" \
+        "the cap displaced the empty bead list and printed a held count over a list nobody enumerated: $_ll"
+elif [ -z "$_ll" ] || [ -n "${_ll##*held an unknown number of bead(s) (the bead list came back empty)*}" ]; then
+    bad "an unenumerated bead list outranks a capped GitHub listing" \
+        "the held arm does not name the bead list: $_ll"
+elif [ -n "${_ll##*left an unknown number of unmirrored GH issue(s) alone (the bead list came back empty)*}" ]; then
+    bad "an unenumerated bead list outranks a capped GitHub listing" \
+        "the orphan arm blamed the cap over a bead set nobody enumerated: $_ll"
+else
+    ok "both withdrawals at once name the bead list, not the cap"
+fi
+
 # ...and the guard must not be the push side's, transplanted. There, a run that
 # minted N issues and then saw an empty open listing is contradictory on its
 # face. Here the corresponding witness would be "beads carry external_refs, so
