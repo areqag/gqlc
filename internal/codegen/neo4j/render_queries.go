@@ -533,7 +533,18 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 	case codegen.ColumnEdgeUnion:
 		writeEdgeUnionColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
 		return
-	case codegen.ColumnProperty, codegen.ColumnTemporal, codegen.ColumnScalar:
+	case codegen.ColumnProperty:
+		// A property of no declared shape rides no driver carrier, so
+		// there is no neo4j.GetRecordValue[T] for it to go through:
+		// `any` is a member of neither neo4j.PropertyValue nor
+		// neo4j.RecordValue, and GetRecordValue[any] does not compile.
+		// The same rule the entity path states as ridesADriverCarrier
+		// and the element path as carriesElemBare, one axis up.
+		if !ridesADriverCarrier(f.GoType) {
+			writeAnyColumnDecodeIndent(b, p, f, recordExpr, zero, assignPrefix, assignSuffix, indent, varName)
+			return
+		}
+	case codegen.ColumnTemporal, codegen.ColumnScalar:
 		// Fall through to the GetRecordValue + narrow-convert path below.
 	}
 	// codegen.ColumnProperty / codegen.ColumnTemporal / codegen.ColumnScalar all use GetRecordValue
@@ -575,15 +586,33 @@ func writeSingleColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codege
 func valueName(i int) string { return fmt.Sprintf("value%d", i) }
 
 // writeAnyColumnDecodeIndent emits the record.Get lane for a column
-// whose emitted Go type is `any` — ResolvedUnknown or ResolvedScalar
-// {Null} (spec §5.5). The driver's Get returns (any, bool) where bool
-// is "found" (not "null"). The "not-found" branch is a decode error
-// (the resolver committed the column, so the driver must produce it);
-// the "found" branch assigns the value verbatim (a nil value satisfies
-// the `any` field's zero — no pointer wrap per §5.1's table).
+// whose emitted Go type is `any` — ResolvedUnknown, ResolvedScalar
+// {Null}, or a schema property whose declared width is ANY VALUE (spec
+// §5.5). The driver's Get returns (any, bool) where bool is "found"
+// (not "null"). The "not-found" branch is a decode error (the resolver
+// committed the column, so the driver must produce it); the "found"
+// branch assigns the value verbatim (a nil value satisfies the `any`
+// field's zero — no pointer wrap per §5.1's table).
+//
+// A nullable one carries the graph's null in its pointer, the way every
+// other nullable column on this path carries isNil. That is where this
+// differs from writeShapelessFieldDecode, whose pointer carries a
+// missing Props key instead: a record holds a key for every column the
+// query projected, so the pointer here has no absence to spend itself
+// on, and a pointer that is never nil is a null the caller cannot read.
 func writeAnyColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
 	fmt.Fprintf(b, "%s%s, ok := %s.Get(%q)\n", indent, varName, recordExpr, f.ColumnName)
 	fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: key not found\", %q)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
+	if f.Nullable {
+		fmt.Fprintf(b, "%svar %sPtr *%s\n", indent, varName, f.GoType)
+		fmt.Fprintf(b, "%sif %s != nil {\n%s\t%sPtr = &%s\n%s}\n", indent, varName, indent, varName, varName, indent)
+		b.WriteString(indent)
+		b.WriteString(assignPrefix[len(indent):])
+		b.WriteString(varName)
+		b.WriteString("Ptr")
+		b.WriteString(assignSuffix)
+		return
+	}
 	b.WriteString(indent)
 	b.WriteString(assignPrefix[len(indent):])
 	b.WriteString(varName)
@@ -595,7 +624,21 @@ func writeAnyColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.R
 // dispatches on the element type. The loop body is derived by
 // walkListElemPlan, which recurses for nested list elements. Nullable
 // list column produces *[]T via the standard pointer-wrap.
+//
+// The accumulator is positional, for the reason writeEntityFieldDecode
+// gives about the local a value lands in: this one is declared at the
+// row assembly's own indent, so a second list column in the same
+// projection redeclares it — `no new variables on left side of :=`, plus
+// whatever the two element types disagree about. A nullable list column
+// hid that for a while by accident, its accumulator sitting inside the
+// block its null gate opens; a second non-nullable one has nowhere to
+// hide, and generation would still exit 0 because the format gate only
+// parses.
 func writeListColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.Row, recordExpr, zero, assignPrefix, assignSuffix, indent, varName string) {
+	// varName is "value" for a single-column projection and "valueN" for
+	// a row field, so the same suffix numbers the accumulator without
+	// renaming the single-column shape spec §5.5 spells out.
+	accVar := "acc"
 	fmt.Fprintf(b, "%s%s, isNil, err := neo4j.GetRecordValue[[]any](%s, %q)\n", indent, varName, recordExpr, f.ColumnName)
 	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
 	if f.Nullable {
@@ -603,9 +646,9 @@ func writeListColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.
 		// address of the accumulated slice.
 		fmt.Fprintf(b, "%svar %sPtr *%s\n", indent, varName, f.GoType)
 		fmt.Fprintf(b, "%sif !isNil {\n", indent)
-		fmt.Fprintf(b, "%s\tacc := make(%s, 0, len(%s))\n", indent, f.GoType, varName)
-		walkListElemPlan(b, p, f, f.ListElem, "acc", varName, zero, indent+"\t")
-		fmt.Fprintf(b, "%s\t%sPtr = &acc\n", indent, varName)
+		fmt.Fprintf(b, "%s\t%s := make(%s, 0, len(%s))\n", indent, accVar, f.GoType, varName)
+		walkListElemPlan(b, p, f, f.ListElem, accVar, varName, zero, indent+"\t")
+		fmt.Fprintf(b, "%s\t%sPtr = &%s\n", indent, varName, accVar)
 		fmt.Fprintf(b, "%s}\n", indent)
 		b.WriteString(indent)
 		b.WriteString(assignPrefix[len(indent):])
@@ -614,13 +657,13 @@ func writeListColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.
 		b.WriteString(assignSuffix)
 		return
 	}
-	// Non-nullable: error if isNil; else build acc slice + assign.
+	// Non-nullable: error if isNil; else build the accumulator + assign.
 	fmt.Fprintf(b, "%sif isNil {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
-	fmt.Fprintf(b, "%sacc := make(%s, 0, len(%s))\n", indent, f.GoType, varName)
-	walkListElemPlan(b, p, f, f.ListElem, "acc", varName, zero, indent)
+	fmt.Fprintf(b, "%s%s := make(%s, 0, len(%s))\n", indent, accVar, f.GoType, varName)
+	walkListElemPlan(b, p, f, f.ListElem, accVar, varName, zero, indent)
 	b.WriteString(indent)
 	b.WriteString(assignPrefix[len(indent):])
-	b.WriteString("acc")
+	b.WriteString(accVar)
 	b.WriteString(assignSuffix)
 }
 

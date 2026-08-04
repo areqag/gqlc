@@ -4,12 +4,21 @@ package schemaanyproperty
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// ErrNoRows is returned by a :one method when the query produced zero
+// rows. Callers branch with errors.Is.
+var ErrNoRows = errors.New("gqlc: no rows in result set")
+
+// ErrMultipleResults is returned by a :one method when the query
+// produced more than one row. Callers branch with errors.Is.
+var ErrMultipleResults = errors.New("gqlc: multiple rows in :one result set")
 
 // DBTX is the pgx surface the generated methods run against.
 // *pgxpool.Pool, *pgx.Conn and pgx.Tx all satisfy it, so the caller

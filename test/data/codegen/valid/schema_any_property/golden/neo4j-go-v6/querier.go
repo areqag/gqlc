@@ -6,6 +6,9 @@ import "context"
 
 type ReadQuerier interface {
 	EventIds(ctx context.Context) ([]int64, error)
+	EventColumns(ctx context.Context) ([]EventColumnsRow, error)
+	EventMarker(ctx context.Context) (any, error)
+	EventPayload(ctx context.Context) (*any, error)
 }
 
 type WriteQuerier interface {
