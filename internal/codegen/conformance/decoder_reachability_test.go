@@ -18,11 +18,30 @@ import (
 	"github.com/areqag/gqlc/internal/schema"
 )
 
-// decodePrefix is how the emission names an entity decoder: decode<T> for
-// the struct T it fills. A backend that spelled it otherwise would
-// contribute nothing to the sweep below, which is what the per-target
-// decoder census refuses.
-const decodePrefix = "decode"
+// wireScalarSpellings is the closed vocabulary of strings a package-level
+// function that decodes no entity may compare for equality: the spellings
+// the wire format fixes for its own scalars. AGE renders a boolean and a
+// null as these three words and agtypeBool and agtypeValue switch on them,
+// so they are the wire's, not the schema's — no label can be one and no
+// author picks one.
+//
+// It is what makes the sweep's classification total. Every package-level,
+// receiver-less function an emission writes is either an entity decoder,
+// which is graded against the labels its own axis can carry, or a function
+// whose every string comparison is in here. A third kind — a function
+// testing a string this gate has no verdict about — is an *ungraded* site
+// and fails, rather than being passed over. Passing it over is what made
+// the extractor's blind spot invisible: a decoder it did not recognise
+// dropped out of the census, out of the guard count and out of the
+// alphabet check at once, and the only thing left standing under it was a
+// golden byte diff. A backend that grows a new wire spelling reddens until
+// it is named here, which makes the widening a decision someone makes
+// rather than one already made.
+var wireScalarSpellings = map[string]bool{
+	"true":  true,
+	"false": true,
+	"null":  true,
+}
 
 // labelGuardingTargets records, per registered target, whether that
 // backend's entity decoders gate on the wire label.
@@ -94,10 +113,15 @@ var entityShapeWords = map[codegen.EntityKind]shapeWords{
 	codegen.EntityEdge: {typeText: "an edge type", valueText: "an edge"},
 }
 
-// entityDecoder is one emitted decode<T> function: the file and entity it
-// belongs to, the axis that entity sits on, and the string literals its
-// body tests the wire value for equality against.
+// entityDecoder is one emitted entity decoder: the function and file it
+// is written as, the entity it fills, the axis that entity sits on, and
+// the string literals its body tests the wire value for equality against.
+//
+// fn is carried rather than re-derived from entity because the sweep does
+// not decide what a decoder is called — it decides what one returns — so
+// the diagnostic has to name the function the emission actually wrote.
 type entityDecoder struct {
+	fn     string
 	file   string
 	entity string
 	shape  codegen.EntityKind
@@ -114,11 +138,47 @@ type entityDecoder struct {
 // gate that claims more than it decides is worse than a narrow one that is
 // honest. For every valid fixture and every registered backend — not only
 // the targets the fixture's manifest enrols, see below — it takes the
-// emitted package, finds every package-level func named decode<T> where T
-// is a type that package declares, and collects the string literals that
-// function compares for equality (an == or != operand, or a switch case
-// value). Every such literal must be a label some value that decoder can
-// be handed carries.
+// emitted package, finds every entity decoder in it, and collects the
+// string literals that function compares for equality (an == or != operand,
+// or a switch case value). Every such literal must be a label some value
+// that decoder can be handed carries.
+//
+// # How it finds a decoder, and why not by name
+//
+// By the entity type the function returns, not by what it is called. A
+// function fills an entity struct by returning one, so the emission's own
+// signature says which entity a package-level, receiver-less function
+// decodes, and codegen.Prepare says which axis that entity sits on.
+//
+// The recognition used to be the name pattern decode<T> for a declared T,
+// and that was the gate's own vacuity. A function the pattern failed to
+// resolve was not merely unread: it left the per-axis census, the guard
+// count and the alphabet check *simultaneously*, so the extractor's
+// failure to recognise a decoder removed it from the numerator, the
+// denominator and the correctness check at once. Emitting one entity's
+// decoder as decodePostRecord with a guard on a label no backend stamps
+// left this gate green; the only red was a TestValid golden byte diff,
+// which go test -update blesses away. Broadening the pattern until that
+// name matched would have been the same shape one rename later.
+//
+// So the sweep classifies *every* package-level, receiver-less function
+// the emission writes, and the classification is total:
+//
+//   - one that returns an entity codegen.Prepare names is that entity's
+//     decoder, and its guards are graded;
+//   - one that returns none may compare only wireScalarSpellings, the
+//     wire's own fixed spellings;
+//   - anything else is an ungraded site and fails. A function returning
+//     two entities has no single axis to be graded against; a function
+//     returning none while testing some other string is a guard no verdict
+//     covers.
+//
+// Both directions are reconciled per emission: the entities decoded must
+// be exactly the entities codegen.Prepare names, one decoder each. So a
+// decoder rendered under any name at all is still read, and a decoder
+// rendered in a shape the sweep cannot read leaves its entity undecoded
+// and reddens by that absence. An unrecognised decoder is an ungraded
+// site, not an absent one.
 //
 // # Why the alphabet is per axis and not per schema
 //
@@ -148,25 +208,47 @@ type entityDecoder struct {
 // not string equality — no arithmetic, no length, no nil check, no
 // interprocedural condition. It says nothing about a conjunction: two
 // guards each in the axis's alphabet can still be jointly unsatisfiable,
-// and this reads them one at a time. It says nothing about whether a guard
-// is *precise*: a decoder for a two-label entity guarding on just one of
-// its two labels is reachable, so this passes it, and nothing here notices
-// that it would also accept the wrong entity. It says nothing about the
-// neo4j targets' decoders, which carry no label guard at all and therefore
-// accept a node of any label — a distinct defect on a distinct axis, filed
-// rather than fixed here. And it decides satisfiability against the labels
-// gqlc's own write path stamps for that axis; a graph a foreign writer
-// populated is outside its terms.
+// and this reads them one at a time (gqlc-eo74). And it decides
+// satisfiability against the labels gqlc's own write path stamps for that
+// axis; a graph a foreign writer populated is outside its terms.
+//
+// The swap it detects is the *cross-axis* one, and it is worth saying so
+// next to the one it does not. A node label on an edge decoder — the
+// decodeCompanyKnows-guards-on-"Company" case the per-axis alphabet was
+// built for — is unreachable, because no statement gqlc writes puts a node
+// type's key label on an edge, and it reddens. A node label on a *different
+// node type's* decoder does not: decodePerson guarding on "Post" is asking
+// for a label the node alphabet holds, so a vertex satisfying it exists and
+// the decoder does fire. It is reachable and pointed at the wrong entity,
+// which is a claim about which values a decoder *accepts* rather than about
+// whether any value reaches it, and this gate makes no claim of that kind.
+// gqlc-2h9w holds that class: the neo4j decoders carry no label guard at
+// all, so every one of them accepts a node of any label, and the within-axis
+// swap is the same defect with a guard written.
+//
+// The carrier annotation is outside its terms for a related reason. An AGE
+// decoder names the carrier it wants as an *argument* —
+// agtypeEntity(raw, "::vertex") — and an edge decoder emitted with
+// "::vertex" is as dead as one guarding on an unstampable label, since no
+// edge value carries the vertex suffix. comparedStrings takes only what a
+// body compares, deliberately: an argument literal is otherwise a property
+// key or a format string, and reading arguments would hold those to a
+// label alphabet. So the annotation swap is not read here. It is not
+// unheld — internal/codegen/age's TestEmittedHelpersDecodeTheAgtypeCorpus
+// compiles the emitted helpers and runs them over captured agtype bytes,
+// and a swapped annotation fails there with "does not carry the ::edge
+// annotation" — but it is held there, behaviourally, and not here.
 //
 // Its subject is also the decoders and only the decoders. A label guard an
 // emitted *query method* carries inline — AGE's edge-union dispatch writes
 // one, a switch over the wire label with a case per candidate edge — sits
-// in no decode<T> body and is not read here. Same defect class, different
-// site; today the only thing standing under an unsatisfiable case label
-// there is a golden byte diff, which is to say nothing. Filed, not fixed
-// here: widening the extractor to query bodies is a larger claim than this
-// gate makes and wants its own verdict on what alphabet each site is held
-// to.
+// in no decoder body and is not read here, because the sweep skips a
+// function with a receiver. Same defect class, different site; today the
+// only thing standing under an unsatisfiable case label there is a golden
+// byte diff, which is to say nothing. That is gqlc-9xy0, filed rather than
+// fixed here: widening the extractor to query bodies is a larger claim than
+// this gate makes and wants its own verdict on what alphabet each site is
+// held to.
 //
 // # Why it sweeps every backend, not the enrolled ones
 //
@@ -204,6 +286,13 @@ func (s *ConformanceSuite) TestEmittedDecodersGuardOnlyOnStampableLabels() {
 		decoders[target] = make(map[codegen.EntityKind]int, len(shapes))
 		guarded[target] = make(map[codegen.EntityKind]int, len(shapes))
 	}
+	// graded counts the guards actually held to an alphabet, incremented
+	// where one is checked and nowhere else. A count of targets the ledger
+	// records as guarding would be the same number by consequence and not
+	// by construction: it is reached whether or not any guard was read, so
+	// it would report "this gate examined a guard" on the strength of an
+	// entry in a map rather than of a comparison this sweep performed.
+	graded := 0
 
 	for _, dir := range s.validFixtures() {
 		fixture := filepath.Base(dir)
@@ -224,38 +313,42 @@ func (s *ConformanceSuite) TestEmittedDecodersGuardOnlyOnStampableLabels() {
 					continue
 				}
 				accepted[target]++
-				for _, d := range emittedEntityDecoders(s.Require(), files, decoderShapes) {
+				for _, d := range emittedEntityDecoders(s.Require(), target, files, decoderShapes) {
 					decoders[target][d.shape]++
 					if len(d.guards) > 0 {
 						guarded[target][d.shape]++
 					}
 					for _, guard := range d.guards {
+						graded++
 						s.Require().True(alphabet[d.shape][guard],
 							"%s emits %s in %s for fixture %s. It fills %s, which is %s, so the only value that "+
 								"ever reaches it is %s, and it returns an error unless that value's label equals "+
 								"%q. %s Every call to %s therefore fails and the struct it fills is unreachable.",
-							target, decodePrefix+d.entity, d.file, fixture,
+							target, d.fn, d.file, fixture,
 							d.entity, entityShapeWords[d.shape].typeText, entityShapeWords[d.shape].valueText,
-							guard, unstampableBecause(guard, d.shape, alphabet), decodePrefix+d.entity)
+							guard, unstampableBecause(guard, d.shape, alphabet), d.fn)
 					}
 				}
 			}
 		})
 	}
 
-	guarding := 0
 	for _, target := range targets {
+		// The floor on accepted is what makes every count below a
+		// statement about emissions rather than about an empty loop: a
+		// target that generated for nothing graded nothing and would
+		// otherwise pass on zeroes. It is worth more than it was, because
+		// each accepted emission is now reconciled entity by entity
+		// against codegen.Prepare rather than sampled.
 		s.Require().NotZero(accepted[target],
 			"%s generated for no fixture in the corpus, so this sweep read none of its emissions", target)
-		if labelGuardingTargets[target] {
-			guarding++
-		}
 		for _, shape := range shapes {
 			words := entityShapeWords[shape]
 			s.Require().NotZero(decoders[target][shape],
-				"%s emitted no decode<T> filling %s over the whole corpus: either it names those decoders "+
-					"otherwise, in which case this sweep no longer finds them and an unstampable guard inside "+
-					"one is invisible, or it emits none, in which case nothing it emits decodes %s at all",
+				"%s emitted no decoder filling %s over the whole corpus, so it emits nothing that decodes %s at "+
+					"all: the corpus no longer holds a fixture declaring one, or the emission stopped rendering "+
+					"them. It is not that the sweep failed to recognise them — a decoder it cannot recognise "+
+					"leaves its entity undecoded and reddens per emission",
 				target, words.typeText, words.valueText)
 			if labelGuardingTargets[target] {
 				s.Require().Equal(decoders[target][shape], guarded[target][shape],
@@ -273,8 +366,10 @@ func (s *ConformanceSuite) TestEmittedDecodersGuardOnlyOnStampableLabels() {
 				target, guarded[target][shape], decoders[target][shape], words.typeText)
 		}
 	}
-	s.Require().NotZero(guarding,
-		"no registered backend is recorded as guarding on a label, so this gate examined no guard at all")
+	s.Require().NotZero(graded,
+		"no emitted decoder in the whole corpus compared a string for equality, so this gate held nothing to an "+
+			"alphabet: every assertion above is about counts and ledgers, and the reachability claim itself was "+
+			"never exercised")
 }
 
 // TestMultiLabelSchemaPostureIsRecorded holds each backend to a declared
@@ -406,7 +501,7 @@ func schemaLabelAlphabet(sch schema.Schema) labelAlphabet {
 }
 
 // preparedEntityShapes is the axis each entity struct one batch derives
-// sits on, keyed by the struct name a decoder is named after.
+// sits on, keyed by the struct name a decoder returns.
 //
 // It is read off codegen.Prepare — the same derivation every backend's
 // Generate runs before it renders a line — rather than re-derived from
@@ -414,6 +509,11 @@ func schemaLabelAlphabet(sch schema.Schema) labelAlphabet {
 // answer: entity naming and the shape assignment move together, so this
 // sweep cannot drift into holding a decoder to an axis the emitter does
 // not put it on.
+//
+// Its key set is also the roll the emission is reconciled against, so a
+// batch it under-names would leave decoders ungraded and one it
+// over-names would demand decoders no backend renders. Both are the same
+// derivation the backends run, which is why neither can drift alone.
 //
 // probeTypeMap admits every property width, so the derivation runs for
 // every fixture any backend serves. A narrower table would refuse widths
@@ -485,75 +585,156 @@ func unstampableBecause(guard string, shape codegen.EntityKind, alphabet labelAl
 }
 
 // emittedEntityDecoders extracts one backend's entity decoders out of one
-// emission: every package-level, receiver-less func named decode<T> where T
-// is a type the same package declares, paired with the axis T sits on and
-// the string literals its body tests for equality.
+// emission, and refuses the emission outright if it cannot classify every
+// package-level, receiver-less function in it.
 //
-// Keying on a declared type is what separates an entity decoder from the
-// backend's own scalar helpers, whose names (agtypeInt64, agtypeString)
-// carry the wire vocabulary rather than a struct — those compare against
-// agtype's fixed spellings of true and false, which are not labels and are
-// not the emission's to choose.
+// A decoder is recognised by what it returns: a function whose results
+// name an entity codegen.Prepare derived is that entity's decoder. Filling
+// an entity struct means returning one, so the recognition rests on the
+// emission's own signature and on the shared derivation, and no naming
+// convention has to hold for the sweep to see a decoder. Renaming one
+// moves nothing here.
 //
-// A decode<T> for a declared type the shared derivation does not name as
-// an entity fails rather than being skipped. Skipping it would be the
-// vacuous reading: it is a decoder whose guards nothing then checks, and
-// the whole point here is that a decoder no verdict covers is how the
-// defect hid the first time. An emission that grows one owes this sweep an
-// answer about which labels reach it.
-func emittedEntityDecoders(r *require.Assertions, files []codegen.File, shapes map[string]codegen.EntityKind) []entityDecoder {
+// That is the point, because the previous recognition was the name pattern
+// decode<T>, and a function it failed to resolve was silently omitted —
+// omitted from the per-axis census, from the guard count and from the
+// alphabet check at the same time, so the extractor's own blind spot
+// removed the numerator, the denominator and the correctness check
+// together. The floor left standing was "some decoder was found", which
+// any one surviving decoder satisfies.
+//
+// So the classification is total, and its residue is a failure rather than
+// an omission:
+//
+//   - results naming exactly one prepared entity: that entity's decoder;
+//   - results naming none: not a decoder, and then it may compare only
+//     wireScalarSpellings, since any other string it tests is a guard this
+//     gate has no verdict about;
+//   - results naming two or more: no single axis to grade it against.
+//
+// Then both directions are reconciled. The entities decoded must be
+// exactly the entities the shared derivation names, one decoder each:
+// every backend renders one decoder per entity, so an entity left
+// undecoded is either an emission that stopped filling that struct or a
+// decoder written in a shape this sweep cannot read — and the second is
+// precisely the ungraded site the classification exists to refuse.
+//
+// Naming the wire's scalar helpers is what this replaces. Keying on
+// decode<T> separated a decoder from agtypeInt64 and agtypeString by their
+// names; keying on the returned entity separates them by what they build,
+// which no rename can move, and their comparisons against agtype's fixed
+// spellings of true, false and null are held by wireScalarSpellings
+// instead.
+func emittedEntityDecoders(
+	r *require.Assertions, target string, files []codegen.File, shapes map[string]codegen.EntityKind,
+) []entityDecoder {
 	fset := token.NewFileSet()
-	parsed := make(map[string]*ast.File, len(files))
-	declared := make(map[string]bool)
+	var out []entityDecoder
+	decoded := make(map[string]string, len(shapes))
 	for _, f := range files {
 		file, err := parser.ParseFile(fset, f.Path, f.Contents, parser.SkipObjectResolution)
 		r.NoError(err, "parsing emitted %s", f.Path)
-		parsed[f.Path] = file
 		for _, decl := range file.Decls {
-			gen, ok := decl.(*ast.GenDecl)
-			if !ok || gen.Tok != token.TYPE {
-				continue
-			}
-			for _, spec := range gen.Specs {
-				ts, ok := spec.(*ast.TypeSpec)
-				r.True(ok, "%s: type declaration holds a %T", f.Path, spec)
-				declared[ts.Name.Name] = true
-			}
-		}
-	}
-
-	var out []entityDecoder
-	for _, f := range files {
-		for _, decl := range parsed[f.Path].Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Recv != nil || fn.Body == nil {
 				continue
 			}
-			entity, ok := strings.CutPrefix(fn.Name.Name, decodePrefix)
-			if !ok || !declared[entity] {
+			site := fmt.Sprintf("%s in %s", fn.Name.Name, f.Path)
+			guards := comparedStrings(r, fn.Body)
+			entities := resultEntities(fn, shapes)
+			if len(entities) == 0 {
+				for _, guard := range guards {
+					r.True(wireScalarSpellings[guard],
+						"%s emits %s, whose results name no entity type, and it tests %q for equality. A "+
+							"package-level function in an emission is either a decoder — recognised here by the "+
+							"entity it returns and held to the labels that entity's axis can carry — or one of the "+
+							"wire's own scalar helpers, whose comparisons are against the fixed spellings %v. This "+
+							"is neither, so %q is a guard nothing in this gate grades, and an unsatisfiable one "+
+							"written there would pass unseen",
+						target, site, guard, slices.Sorted(maps.Keys(wireScalarSpellings)), guard)
+				}
 				continue
 			}
-			shape, ok := shapes[entity]
-			r.True(ok,
-				"%s emits %s, and %s is a type it declares, but codegen.Prepare names no node or edge type under "+
-					"that name; this sweep cannot say which labels a value reaching that decoder carries, so the "+
-					"guards it holds would go unread",
-				f.Path, fn.Name.Name, entity)
+			r.Len(entities, 1,
+				"%s emits %s, whose results name the entity types %v. A decoder's guards are graded against the "+
+					"alphabet of the one axis its entity sits on, and a function returning entities from more "+
+					"than one cannot be assigned an axis to be graded against",
+				target, site, entities)
+			entity := entities[0]
+			prior, dup := decoded[entity]
+			r.False(dup,
+				"%s emits both %s and %s, and both return %s. Which of the two a value reaches is not decidable "+
+					"here, so one of them is a decoder no call site need use and its guards are a claim about "+
+					"nothing",
+				target, prior, site, entity)
+			decoded[entity] = site
 			out = append(out, entityDecoder{
+				fn:     fn.Name.Name,
 				file:   f.Path,
 				entity: entity,
-				shape:  shape,
-				guards: comparedStrings(r, fn.Body),
+				shape:  shapes[entity],
+				guards: guards,
 			})
 		}
+	}
+
+	r.Equal(slices.Sorted(maps.Keys(shapes)), slices.Sorted(maps.Keys(decoded)),
+		"%s decodes a different set of entities than codegen.Prepare names for this fixture. Every backend "+
+			"renders one decoder per entity, and this sweep recognises one by the entity type it returns, so an "+
+			"entity the derivation names and the emission does not decode is either a struct nothing fills or a "+
+			"decoder written in a shape this sweep cannot read — and the guards of a decoder it cannot read are "+
+			"graded by nothing at all", target)
+	return out
+}
+
+// resultEntities names the prepared entities one function's results carry.
+// It is how the sweep recognises a decoder, and it is deliberately blind
+// to the function's name: what a function returns is what it can fill.
+//
+// A qualified type is another package's (dbtype.Node) and a type parameter
+// is the caller's, so neither can be an entity this emission declares;
+// both are stepped over rather than matched by spelling, so a schema that
+// happened to name a node type Node or T could not be confused for one.
+func resultEntities(fn *ast.FuncDecl, shapes map[string]codegen.EntityKind) []string {
+	if fn.Type.Results == nil {
+		return nil
+	}
+	params := map[string]bool{}
+	if fn.Type.TypeParams != nil {
+		for _, field := range fn.Type.TypeParams.List {
+			for _, name := range field.Names {
+				params[name.Name] = true
+			}
+		}
+	}
+	var out []string
+	for _, field := range fn.Type.Results.List {
+		ast.Inspect(field.Type, func(n ast.Node) bool {
+			ident, ok := n.(*ast.Ident)
+			if !ok {
+				_, qualified := n.(*ast.SelectorExpr)
+				return !qualified
+			}
+			if _, ok := shapes[ident.Name]; ok && !params[ident.Name] && !slices.Contains(out, ident.Name) {
+				out = append(out, ident.Name)
+			}
+			return true
+		})
 	}
 	return out
 }
 
 // comparedStrings is every string literal a function body tests a value for
 // equality against: an operand of == or !=, or a switch case value. Those
-// are the shapes a guard takes; a literal passed as an argument is a key or
-// a format string and decides nothing.
+// are the shapes a label guard takes; a literal passed as an argument is
+// almost always a property key or a format string, and holding those to a
+// label alphabet would redden on every emission.
+//
+// The exception is deliberate and stated where the gate states its scope:
+// AGE's carrier annotation rides in as an argument — agtypeEntity(raw,
+// "::vertex") — so swapping it makes a decoder as dead as an unstampable
+// guard would and nothing here reads it. That one is held behaviourally by
+// internal/codegen/age's TestEmittedHelpersDecodeTheAgtypeCorpus.
 func comparedStrings(r *require.Assertions, body *ast.BlockStmt) []string {
 	var out []string
 	add := func(expr ast.Expr) {

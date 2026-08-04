@@ -71,11 +71,14 @@ why the shape was rejected rather than of what would happen today. The residual
 it named — filed as `gqlc-05tl` — is closed by
 `TestEmittedDecodersGuardOnlyOnStampableLabels`
 (`internal/codegen/conformance/decoder_reachability_test.go`), which runs every
-registered backend over every valid fixture and refuses any emitted `decode<T>`
+registered backend over every valid fixture and refuses any emitted decoder
 whose label guard is a string no value on the decoded entity's own axis can
 carry — a node type's decoder is held to the node key labels the schema
 declares, an edge type's to the relationship types, and never to the union of
-the two.
+the two. It recognises a decoder by the entity type the function returns rather
+than by a `decode<T>` naming convention, and reconciles the entities an emission
+decodes against the ones `codegen.Prepare` names, so a decoder it cannot
+classify is a failure rather than an omission.
 It reddens on this shape naming `decodePersonEmployee` and the join spelling.
 The rejection above stands on its own terms: a gate that catches the emission is
 not a reason to prefer emitting it.
