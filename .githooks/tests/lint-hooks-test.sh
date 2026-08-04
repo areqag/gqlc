@@ -49,7 +49,7 @@ v="${SOME_ENV:-}"
 # shellcheck disable=SC2016 # ditto
 SANCTIONED='#!/usr/bin/env bash
 v="${SOME_ENV:-}"
-# shellcheck disable=SC2086 # deliberate split, exactly as .githooks/bd-gh-sync:510
+# shellcheck disable=SC2086 # deliberate split, as _push_batch in .githooks/bd-gh-sync
 : $v
 '
 
@@ -71,8 +71,11 @@ fi
 
 # --- ...and stay green on the sanctioned one ---------------------------------
 # The whole point of a `# shellcheck disable=` directive. A linter that fails on
-# the exception it documents is one nobody keeps, and .githooks/bd-gh-sync:510
-# carries exactly this directive over a split that is load-bearing.
+# the exception it documents is one nobody keeps, and the SC2086 disable in
+# .githooks/bd-gh-sync's _push_batch — over the unquoted `bd github push $1`
+# that splits a bead id list into argv words — is exactly this directive over a
+# split that is load-bearing. Named rather than cited by line number, which had
+# already rotted twice: `grep -n SC2086 .githooks/bd-gh-sync` finds it.
 
 d="$(tree sanctioned)"
 printf '%s' "$SANCTIONED" >"$d/hook"
@@ -254,6 +257,14 @@ elif [ "$REACH" = "MISSING" ]; then
 elif [ "$REACH" = "UNREACHED" ]; then
     bad "a CI recipe reaches the hooks linter" \
         "none of the recipes CI runs depends on lint-hooks, so shellcheck never runs in CI: $(printf '%s' "$ENTRY" | tr '\n' ' ')"
+elif [ -z "$REACH" ]; then
+    # Ahead of the catch-all, and not folded into it: ${REACH##REACHED *} is
+    # empty both when REACH starts with "REACHED " and when REACH is empty, so
+    # a walk that printed nothing at all falls through to the else and reports
+    # ok over an empty path. Same shape as ${_l##*FAILED*} in bd-gh-sync-test.sh,
+    # which is guarded the same way for the same reason.
+    bad "a CI recipe reaches the hooks linter" \
+        "the reachability walk produced no output at all, so nothing was witnessed"
 elif [ -n "${REACH##REACHED *}" ]; then
     bad "a CI recipe reaches the hooks linter" \
         "the reachability walk did not run: $REACH"

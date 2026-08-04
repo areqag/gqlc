@@ -1571,7 +1571,6 @@ elif ! grep -q 'pushed 1 new bead(s) but the open-issue listing came back empty'
 else
     ok "a push that minted issues and then saw none of them refuses to count"
 fi
-unset _ll
 
 # ...and the other side of the same comparison, or the guard above is just
 # "an empty listing always fails" and every push into a repository with no open
@@ -1603,6 +1602,11 @@ print(json.dumps([{"number": n} for n in range(1, int(sys.argv[1]) + 1)]))' "$OP
 
 run_sync push "[{\"id\":\"b-c\",\"status\":\"closed\",\"external_ref\":\"$ISSUE/1\"}]" \
     '[]' "$GH_OPEN_FULL"
+# Taken outright, for the reason the empty-listing case above takes it outright:
+# `${_ll:="$(last_line)"}` assigns only when _ll is unset or empty, so the arm
+# below read whatever an earlier case left in the variable unless an `unset _ll`
+# happened to sit above it — and nothing asserted that line was there.
+_ll="$(last_line)"
 if [ "$(grep -c -- '--limit' <<<"$(argv_of 'gh issue list')")" -eq 0 ]; then
     bad "an open listing at its --limit is refused rather than counted" \
         "the listing carried no --limit at all: $(argv_of 'gh issue list' | tr '\n' '|')"
@@ -1644,13 +1648,12 @@ elif grep -qiE 're-run|the database is free' "$TMP/err"; then
     # there and cannot fire here: this fixture's bead list holds one bead.
     bad "an open listing at its --limit is refused rather than counted" \
         "the remedy sends the reader to wait on a database that is not the reason: $(grep -iE 're-run|the database is free' "$TMP/err" | tr '\n' '|')"
-elif [ -z "${_ll:="$(last_line)"}" ] || [ -n "${_ll##*an unknown number of stale GH mirror(s) left open*}" ]; then
+elif [ -z "$_ll" ] || [ -n "${_ll##*an unknown number of stale GH mirror(s) left open*}" ]; then
     bad "an open listing at its --limit is refused rather than counted" \
         "counted over the truncated page anyway: $_ll"
 else
     ok "an open listing returning exactly its --limit is treated as truncated"
 fi
-unset _ll
 
 # ...and one issue short of the cap is a whole set, or the guard above is
 # "any large listing fails" and the stale-mirror pass stops working at 499.
@@ -1682,6 +1685,8 @@ print(json.dumps([{"number": n, "state": "OPEN", "body": "x"}
                   for n in range(1, int(sys.argv[1]) + 1)]))' "$ALL_LIMIT")"
 
 run_sync pull '[]' "$GH_ALL_FULL" '[]' '[]'
+# Outright, for the reason the push side takes it outright.
+_ll="$(last_line)"
 if [ "$(argv_after 'gh issue list' 0 | grep -A1 -- '--limit' | tail -n 1)" != "$ALL_LIMIT" ]; then
     bad "an all-state listing at its --limit is not counted over" \
         "the script asks for --limit $(argv_after 'gh issue list' 0 | grep -A1 -- '--limit' | tail -n 1), so this fixture of $ALL_LIMIT does not reach it"
@@ -1691,13 +1696,12 @@ elif ! grep -q "the GitHub listing came back at its --limit of $ALL_LIMIT" "$TMP
 elif ! grep -q 'the cap in \.githooks/bd-gh-sync' "$TMP/err"; then
     bad "an all-state listing at its --limit is not counted over" \
         "named the cap but not where it is set: $(grep 'limit' "$TMP/err" | tr '\n' '|')"
-elif [ -z "${_ll:="$(last_line)"}" ] || [ -n "${_ll##*left an unknown number of unmirrored GH issue(s) alone*}" ]; then
+elif [ -z "$_ll" ] || [ -n "${_ll##*left an unknown number of unmirrored GH issue(s) alone*}" ]; then
     bad "an all-state listing at its --limit is not counted over" \
         "counted the orphans off one page: $_ll"
 else
     ok "a pull over a capped GitHub listing reports the count as unknown"
 fi
-unset _ll
 
 # ...and its control, for the same reason as the push side's.
 GH_ALL_SHORT="$(python3 -c '

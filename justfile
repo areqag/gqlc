@@ -91,10 +91,14 @@ ensure-shellcheck:
     install -m 0755 "$stage/shellcheck-$want/shellcheck" {{quote(shellcheck)}}
 
 # shellcheck over the hooks tree (bd gqlc-jhi2). The hooks carry `# shellcheck
-# disable=` directives over deliberate exceptions (bd-gh-sync:510 splits a bead
-# id list into argv words on purpose); with no linter in the tree those read as
-# enforced and are comments, and every SC-class defect the exception is carved
-# out of goes unchecked with them. This repo has shipped three of that class.
+# disable=` directives over deliberate exceptions — the SC2086 disable in
+# .githooks/bd-gh-sync's _push_batch, over the unquoted `bd github push $1` that
+# splits a bead id list into argv words on purpose. Named rather than cited by
+# line: `grep -n SC2086 .githooks/bd-gh-sync` finds it after any edit, and the
+# line number this comment used to carry had already rotted twice. With no
+# linter in the tree those directives read as enforced and are comments, and
+# every SC-class defect the exception is carved out of goes unchecked with
+# them. This repo has shipped three of that class.
 #
 # Files are selected by shebang rather than by a list, so a hook added tomorrow
 # is linted without anyone remembering to name it here — and the two ways that
