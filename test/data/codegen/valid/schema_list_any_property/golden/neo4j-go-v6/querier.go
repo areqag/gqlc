@@ -6,7 +6,7 @@ import "context"
 
 type ReadQuerier interface {
 	Bins(ctx context.Context) ([]Bin, error)
-	BinById(ctx context.Context, id int64) (Bin, error)
+	BinById(ctx context.Context, arg int64) (Bin, error)
 	BinColumns(ctx context.Context) ([]BinColumnsRow, error)
 }
 
