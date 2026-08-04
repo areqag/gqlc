@@ -38,9 +38,17 @@ import (
 //
 // The suite is the coverage §5 step 3 asks for on those rows, and it is
 // half of what TestSentinelTaxonomy measures: it links internal/codegen
-// from outside the package, so the fence's corpus sweep counts it. Drop
-// a case and the fail-site it reaches goes uncovered, which fails
-// TestReachableBranchesAreReached by name.
+// from outside the package, so the fence's corpus sweep counts it.
+//
+// Dropping a case is not reliably caught, and the reason is worth
+// stating rather than discovering. Coverage is a union over the whole
+// corpus, so a case is only load-bearing while it is the sole reach of
+// its fail-site. TestMarkerSealDoesNotCloseTheSum reaches the two
+// unknown-variant sites by a second route, so deleting
+// column-unknown-variant or list-elem-unknown-variant here leaves the
+// fence green. Deleting edge-union-arity, whose site nothing else
+// reaches, reddens naming prepare.go:660. What the fence guards is that
+// each site has *a* witness, not that this file is it.
 type AssembledInputSuite struct {
 	suite.Suite
 
@@ -81,27 +89,43 @@ const assembledTarget = "neo4j-go-v5"
 // commonest Go enum bug there is.
 const resolverSource = "../../resolver/validated.go"
 
-// temporalKinds is resolver.Temporal's constant block as this suite
-// believes it stands, in declaration order so an index is a value.
-//
-// Written out, and that is the point: declaredTemporals derives the same
-// list from the source, the two are held equal, and they can disagree.
-// The list this replaces was read through len() and could not — six was
-// six whatever the enum said. A member added, removed or inserted in the
-// middle moves the derivation and not this, and the failure names which.
-var temporalKinds = []string{
-	"TemporalDate",
-	"TemporalTime",
-	"TemporalLocalTime",
-	"TemporalDateTime",
-	"TemporalLocalDateTime",
-	"TemporalDuration",
+// temporalMember is one constant of type resolver.Temporal: the name it
+// is declared under, and the value it holds.
+type temporalMember struct {
+	Name  string
+	Value int
 }
 
-// temporalScanLimit bounds the sweep of values past the end of the enum
-// in TestTemporalStringerAnswersForDeclaredKindsAlone. Nothing derives
-// from it; it is how far past the last member that test looks for an arm
-// that should not be there.
+// temporalKinds is resolver.Temporal's vocabulary as this suite believes
+// it stands.
+//
+// Written out, values included, and that is the point: declaredTemporals
+// derives the same list from the source, the two are held equal, and they
+// can disagree. The list this replaces was read through len() and could
+// not — six was six whatever the enum said. A member added, removed,
+// renamed or renumbered moves the derivation and not this, and the
+// failure names which.
+var temporalKinds = []temporalMember{
+	{"TemporalDate", 0},
+	{"TemporalTime", 1},
+	{"TemporalLocalTime", 2},
+	{"TemporalDateTime", 3},
+	{"TemporalLocalDateTime", 4},
+	{"TemporalDuration", 5},
+}
+
+// temporalTypeName is the type a constant must carry to be a kind. It is
+// the whole of what separates the enum from the successor sentinel
+// declared beside it: `TemporalCount int = iota` closes the same const
+// block and is an int, so it is a count rather than a value,
+// Temporal.String owes it no arm, and an exhaustive switch over Temporal
+// may not have one.
+const temporalTypeName = "Temporal"
+
+// temporalScanLimit bounds the sweep over values the constant block does
+// not name in TestTemporalStringerAnswersForDeclaredKindsAlone. Nothing
+// derives from it; it is how far that test looks for an arm that should
+// not be there.
 const temporalScanLimit = 64
 
 // temporalFallback is what resolver.Temporal.String renders a value its
@@ -111,73 +135,166 @@ const temporalScanLimit = 64
 // than something they rest on.
 func temporalFallback(v int) string { return "Temporal(" + strconv.Itoa(v) + ")" }
 
-// declaredTemporals returns the names resolver.Temporal's constant block
-// declares, in declaration order, so a name's index is its value.
+// declaredTemporals returns every constant of type resolver.Temporal the
+// source declares, with the value each holds, in declaration order.
 //
-// The block's shape is checked rather than assumed. It is a bare iota run
-// today, which is what makes position and value the same number; a member
-// with its own value, a skipped `_`, or a second name on a line would
-// part the two and the count below would silently mean something else.
-// Each of those fails here instead.
-func (s *AssembledInputSuite) declaredTemporals() []string {
+// Every const declaration in the file is swept, not just the iota run:
+// a `TemporalWeek Temporal = 6` written below the block is as much a kind
+// as the six inside it, and a derivation that read only the block would
+// leave it with no arm in Temporal.String and nothing to say so.
+func (s *AssembledInputSuite) declaredTemporals() []temporalMember {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, resolverSource, nil, 0)
 	s.Require().NoError(err,
 		"cannot parse %s, where resolver.Temporal's constant block lives; this suite derives the enum's members from that block because compilation erases them",
 		resolverSource)
 
+	var members []temporalMember
+	anchored := false
 	for _, decl := range file.Decls {
 		gen, ok := decl.(*ast.GenDecl)
-		if !ok || gen.Tok != token.CONST || len(gen.Specs) == 0 {
+		if !ok || gen.Tok != token.CONST {
 			continue
 		}
-		first, ok := gen.Specs[0].(*ast.ValueSpec)
-		if !ok || !isIotaAnchor(first, "Temporal") {
-			continue
-		}
-		names := make([]string, 0, len(gen.Specs))
-		for i, spec := range gen.Specs {
-			value, ok := spec.(*ast.ValueSpec)
-			s.Require().True(ok, "%s: resolver.Temporal's const block holds a spec the derivation cannot read", resolverSource)
-			s.Require().Len(value.Names, 1,
-				"%s: member %d of resolver.Temporal's const block declares %d names on one line; the derivation reads a member's value off its position, which holds only one name at a time",
-				resolverSource, i, len(value.Names))
-			name := value.Names[0].Name
-			s.Require().NotEqual("_", name,
-				"%s: resolver.Temporal's const block skips a value with _, so position and value have parted company and the count below is no longer the first undeclared kind",
-				resolverSource)
-			if i > 0 {
-				s.Require().Nil(value.Type,
-					"%s: %s restates a type inside the iota run; the derivation cannot follow a block that re-anchors", resolverSource, name)
-				s.Require().Empty(value.Values,
-					"%s: %s carries an explicit value inside the iota run, so its position is no longer its value", resolverSource, name)
-			}
-			names = append(names, name)
-		}
-		return names
+		found, isRun := s.temporalsOf(gen)
+		anchored = anchored || isRun
+		members = append(members, found...)
 	}
-	s.Require().Fail("resolver.Temporal's constant block not found",
+	s.Require().True(anchored,
 		"%s declares no `<name> Temporal = iota` const block; this suite derives the enum's members from it, and a derivation that found nothing would report an empty enum",
 		resolverSource)
-	return nil
-}
 
-// isIotaAnchor reports whether spec is the `<name> <typeName> = iota`
-// line that opens a const block.
-func isIotaAnchor(spec *ast.ValueSpec, typeName string) bool {
-	ident, ok := spec.Type.(*ast.Ident)
-	if !ok || ident.Name != typeName || len(spec.Values) != 1 {
-		return false
+	held := make(map[int]string, len(members))
+	for _, m := range members {
+		first, dup := held[m.Value]
+		s.Require().False(dup,
+			"%s: resolver.%s and resolver.%s are both Temporal(%d), so a value no longer names one kind",
+			resolverSource, first, m.Name, m.Value)
+		held[m.Value] = m.Name
 	}
-	anchor, ok := spec.Values[0].(*ast.Ident)
-	return ok && anchor.Name == "iota"
+	return members
 }
 
-// firstUndeclaredTemporal is the lowest resolver.Temporal past the end of
-// the declared enum. The block is a bare iota run, so the member count is
-// the first value it does not name.
+// temporalsOf returns the resolver.Temporal constants one const
+// declaration holds, and reports whether it anchors the enum's iota run.
+//
+// A constant's type is what decides membership, and it is not always
+// written on its own line: a spec carrying no type of its own inherits
+// the last one an `= iota` line named. Tracking that inheritance is what
+// tells the two kinds of constant in resolver.Temporal's block apart —
+// every bare line under the anchor is still a Temporal, while
+// TemporalCount re-anchors to int and is therefore no member of the enum.
+//
+// Three spec shapes are read, and a Temporal in any other shape fails the
+// suite rather than being skipped, because a shape read wrong is a value
+// read wrong and the value is what holds Temporal.String's arms below:
+//
+//	Name Type = iota    opens a run; the value is the spec's position
+//	Name                inherits the run above, at its own position
+//	Name Type = <int>   stands alone, at the value it names
+//
+// A fourth shape is refused outright wherever it shares the anchor's
+// declaration: a line naming no type at all. Deciding membership on the
+// written type is sound only while every line in the block writes one,
+// and the untyped constant is where it stops being sound in the direction
+// that costs something. `TemporalCount = iota` is not of type Temporal,
+// so this derivation would wave it through exactly as it waves the int
+// form through — but unlike the int form it is *assignable* to Temporal,
+// so `case TemporalCount:` compiles inside a switch over the enum, which
+// is the one thing validated.go says a successor sentinel must never be.
+// No other assertion here can see it: the difference between the two is
+// in no value, only in the type the line declines to write.
+func (s *AssembledInputSuite) temporalsOf(gen *ast.GenDecl) (members []temporalMember, anchored bool) {
+	runType, runFromIota := "", false
+	var untyped []string
+	for i, raw := range gen.Specs {
+		spec, ok := raw.(*ast.ValueSpec)
+		s.Require().True(ok, "%s: const spec %d is a shape the derivation cannot read", resolverSource, i)
+
+		declType, fromIota := runType, runFromIota
+		if len(spec.Values) > 0 {
+			declType, fromIota = typeName(spec.Type), isIdent(spec.Values[0], "iota")
+			runType, runFromIota = declType, fromIota
+		}
+		if declType == "" {
+			for _, ident := range spec.Names {
+				untyped = append(untyped, ident.Name)
+			}
+		}
+		if declType != temporalTypeName {
+			continue
+		}
+		anchored = anchored || fromIota
+
+		s.Require().Len(spec.Names, 1,
+			"%s: a Temporal is declared on a line holding %d names; the derivation reads each kind's value off its own line",
+			resolverSource, len(spec.Names))
+		name := spec.Names[0].Name
+		if name == "_" {
+			continue // names no constant, and still spends its position
+		}
+		val := i
+		if !fromIota {
+			s.Require().NotEmpty(spec.Values,
+				"%s: %s inherits its value from a line that is not `= iota`, so its position in the block is not its value",
+				resolverSource, name)
+			val = s.intValue(spec.Values[0], name)
+		}
+		members = append(members, temporalMember{Name: name, Value: val})
+	}
+	if anchored && len(untyped) > 0 {
+		s.Require().Empty(untyped,
+			"%s: %v share resolver.Temporal's const block and name no type, so each is an untyped constant assignable to Temporal; `case %s:` would compile inside a switch over the enum while this derivation reads it as no member of one. Give the line a type — int if it is a count, Temporal if it is a kind",
+			resolverSource, untyped, untyped[0])
+	}
+	return members, anchored
+}
+
+// typeName is the name of the type a const spec declares, or "" when it
+// declares none or declares one the derivation cannot read. It answers
+// rather than asserting because the sweep visits every const declaration
+// in the file, and one that is not about Temporal is none of this suite's
+// business.
+func typeName(expr ast.Expr) string {
+	ident, ok := expr.(*ast.Ident)
+	if !ok {
+		return ""
+	}
+	return ident.Name
+}
+
+// isIdent reports whether expr is the bare identifier name.
+func isIdent(expr ast.Expr, name string) bool {
+	ident, ok := expr.(*ast.Ident)
+	return ok && ident.Name == name
+}
+
+// intValue reads the integer literal a Temporal is declared at.
+func (s *AssembledInputSuite) intValue(expr ast.Expr, name string) int {
+	lit, ok := expr.(*ast.BasicLit)
+	s.Require().True(ok && lit.Kind == token.INT,
+		"%s: resolver.%s is a Temporal declared at neither iota nor an integer literal; the derivation reads a kind's value to ask whether Temporal.String has an arm for it",
+		resolverSource, name)
+	v, err := strconv.Atoi(lit.Value)
+	s.Require().NoError(err, "%s: resolver.%s is declared at %s, which the derivation cannot read as a value", resolverSource, name, lit.Value)
+	return v
+}
+
+// firstUndeclaredTemporal is the lowest non-negative resolver.Temporal
+// the source names no constant at. A gap rather than a count: a kind
+// declared outside the iota run holds a value the run's length does not
+// account for, and handing a declared kind to the list-elem-temporal case
+// would make it prove the opposite of what it claims.
 func (s *AssembledInputSuite) firstUndeclaredTemporal() resolver.Temporal {
-	return resolver.Temporal(len(s.declaredTemporals()))
+	held := make(map[int]bool)
+	for _, m := range s.declaredTemporals() {
+		held[m.Value] = true
+	}
+	for v := 0; ; v++ {
+		if !held[v] {
+			return resolver.Temporal(v)
+		}
+	}
 }
 
 // probeSchema is the smallest schema that indexes one node type and one
@@ -460,7 +577,11 @@ func (s *AssembledInputSuite) TestAssembledInput() {
 // outside internal/resolver by embedding a variant. Go promotes an
 // embedded type's unexported methods, so isResolvedType() comes along
 // with ResolvedNode and the interface is satisfied in one line — from
-// this package, or from any package a consumer of gqlc writes.
+// this package, or from any other in this module. The opening stops at
+// the module edge, since internal/resolver is unimportable outside it.
+// That does not narrow the switch's problem: the switch lives in
+// internal/codegen, so every package that can reach it can also write
+// this type.
 //
 // The compile-time assertions below are half the point. If they ever
 // stop compiling, resolver.ResolvedType has become genuinely closed and
@@ -536,53 +657,64 @@ func (s *AssembledInputSuite) TestMarkerSealDoesNotCloseTheSum() {
 	}
 }
 
-// TestTemporalEnumIsTheOneThisSuiteKnows holds resolver.Temporal's
-// constant block against the members written out above. It is what makes
-// list-elem-temporal's Kind an undeclared one: that case's value is the
-// derived member count, so a kind added upstream moves it silently unless
-// something notices the enum grew.
+// TestTemporalEnumIsTheOneThisSuiteKnows holds the resolver.Temporal
+// constants the source declares against the members written out above. It
+// is what makes list-elem-temporal's Kind an undeclared one: that case's
+// value is the first gap in the derived set, so a kind added upstream
+// moves it silently unless something notices the enum grew.
 //
-// Set equality on an ordered list rather than a count, and the ordering
-// earns its keep. A seventh member appended and a member inserted in the
-// middle are the same number and not the same enum — the second renumbers
-// every kind after it, so every value this suite hands over means
-// something else. A count cannot tell them apart and this names the
-// member that moved.
+// Set equality on name and value together, not a count and not the names
+// alone. A seventh member appended and a member inserted in the middle are
+// the same number and not the same enum — the second renumbers every kind
+// after it, so every value this suite hands over means something else —
+// and a kind declared outside the iota run has a value its position does
+// not give. A count tells none of them apart; this names the member that
+// moved and what it moved to.
 func (s *AssembledInputSuite) TestTemporalEnumIsTheOneThisSuiteKnows() {
 	s.Equal(temporalKinds, s.declaredTemporals(),
-		"resolver.Temporal's constant block is no longer the enum this suite was written against; update temporalKinds, then check that list-elem-temporal still reaches its fail-site and that its expected message still names %q",
+		"resolver.Temporal's constants are no longer the enum this suite was written against; update temporalKinds, then check that list-elem-temporal still reaches its fail-site and that its expected message still names %q",
 		temporalFallback(len(temporalKinds)))
 }
 
 // TestTemporalStringerAnswersForDeclaredKindsAlone holds Temporal.String's
-// arms against the constant block, in both directions, and it is the half
-// of this that behaviour can see.
+// arms against the constants declared of that type, in both directions,
+// and it is the half of this that behaviour can see.
 //
 // A declared kind that renders as the fallback has no arm — the seventh
-// constant somebody adds and forgets to handle. An undeclared value that
-// renders as anything else has an arm it should not — a case left behind
-// by a retired kind, or one written for a constant never declared. Both
-// used to be invisible: the default arm returned "date", a declared
-// member's own tag, so the two populations were indistinguishable by
-// construction and every value off the end of the enum claimed to be
-// TemporalDate.
+// constant somebody adds and forgets to handle, wherever they write it.
+// An undeclared value that renders as anything else has an arm it should
+// not — a case left behind by a retired kind, or one written for a
+// constant never declared. Both used to be invisible: the default arm
+// returned "date", a declared member's own tag, so the two populations
+// were indistinguishable by construction and every value off the end of
+// the enum claimed to be TemporalDate.
+//
+// The undeclared sweep skips the values kinds hold rather than starting
+// past the last of them, so a kind declared away from the iota run is
+// measured as declared in both directions instead of being demanded to
+// render as undeclared.
 func (s *AssembledInputSuite) TestTemporalStringerAnswersForDeclaredKindsAlone() {
 	declared := s.declaredTemporals()
 
 	tagOf := make(map[string]string, len(declared))
-	for v, name := range declared {
-		tag := resolver.Temporal(v).String()
-		s.NotEqual(temporalFallback(v), tag,
+	held := make(map[int]bool, len(declared))
+	for _, m := range declared {
+		held[m.Value] = true
+		tag := resolver.Temporal(m.Value).String()
+		s.NotEqual(temporalFallback(m.Value), tag,
 			"resolver.%s is declared but resolver.Temporal.String has no arm for it, so it renders as the form reserved for undeclared values; add the case",
-			name)
+			m.Name)
 		first, dup := tagOf[tag]
-		s.False(dup, "resolver.%s and resolver.%s both render %q, so the wire tag no longer identifies the kind", first, name, tag)
-		tagOf[tag] = name
+		s.False(dup, "resolver.%s and resolver.%s both render %q, so the wire tag no longer identifies the kind", first, m.Name, tag)
+		tagOf[tag] = m.Name
 	}
 
-	for v := len(declared); v < temporalScanLimit; v++ {
+	for v := range temporalScanLimit {
+		if held[v] {
+			continue
+		}
 		s.Equal(temporalFallback(v), resolver.Temporal(v).String(),
-			"resolver.Temporal(%d) is past the end of the constant block but resolver.Temporal.String answers for it; either the constant is missing or the arm is stale, and either way a value nothing declares is rendering as though something does",
+			"resolver.Temporal(%d) names no constant but resolver.Temporal.String answers for it; either the constant is missing or the arm is stale, and either way a value nothing declares is rendering as though something does",
 			v)
 	}
 	s.Equal(temporalFallback(-1), resolver.Temporal(-1).String(),
