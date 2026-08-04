@@ -1,5 +1,5 @@
 {
-  "package": "edgeuniononetwocandidates",
+  "package": "edgeunionundeclaredrelationshiptype",
   "queryFiles": ["queries.cypher"],
   "targets": ["neo4j-go-v5", "neo4j-go-v6"]
 }

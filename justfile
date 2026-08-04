@@ -303,20 +303,42 @@ check-codegen-external-tests:
 #
 # -count=1 so a developer asking for a live run gets containers, not the cache.
 test-codegen-live:
-    cd test/data/codegen && go test -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit' ./...
+    cd test/data/codegen && go test -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation' ./...
 
 # the neo4j half: both driver arms in parallel against one neo4j:5-community
 # image. This is the half PR CI blocks on, so its wall time is a PR's wall time.
+#
+# No -count=1, unlike the two recipes either side, and that is what keeps the
+# per-PR cost near zero (.github/workflows/codegen-live.yml). It is sound here
+# because every input that could change this battery's answer is inside the
+# test binary: the scenario bodies, the generated packages they drive, the
+# driver dependencies, and the neo4j image — pinned by digest as a constant in
+# live_neo4j_test.go, not resolved at run time. A cache hit therefore means
+# this exact binary already passed against this exact server, and any edit that
+# could move either invalidates it. What a cache hit cannot re-check is the
+# container runtime underneath, which is not a property of this repo.
+#
+# That argument covers this half's server facts too, and it does have them —
+# edgeUnionDispatch asserts what a live neo4j returns for a relationship type
+# outside the candidate set. A digest-pinned image makes those as cacheable as
+# anything else compiled in.
+#
+# It would equally cover the AGE half, whose image is pinned the same way in
+# live_age_test.go, so that half's -count=1 does not follow from
+# TestAGERefusesRelationshipTypeAlternation being a measurement. It rests on the
+# reason given at that recipe instead: nightly and manual are its only runs. The
+# asymmetry errs safe and is left standing.
 test-codegen-live-neo4j:
     cd test/data/codegen && go test -tags codegen_live -run TestLiveSmoke -skip 'TestLiveSmoke/apache-age' ./...
 
-# the Apache AGE half: the smoke battery's AGE arm and the session-init
-# contract, each on its own apache/age container. Nightly and manual only —
-# these containers are cost this project does not charge to a pull request.
-# -count=1 because this is the AGE arm's only gate and no pull request pays for
-# it, so the run it reports on has to be a real one.
+# the Apache AGE half: the smoke battery's AGE arm, the session-init contract
+# and the dialect fact the AGE backend's edge-union refusal rests on, each on
+# its own apache/age container. Nightly and manual only — these containers are
+# cost this project does not charge to a pull request. -count=1 because this is
+# the AGE arm's only gate and no pull request pays for it, so the run it reports
+# on has to be a real one.
 test-codegen-live-age:
-    cd test/data/codegen && go test -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit' -skip 'TestLiveSmoke/neo4j' ./...
+    cd test/data/codegen && go test -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation' -skip 'TestLiveSmoke/neo4j' ./...
 
 # call-graph-aware vulnerability scan; run on dependency changes and on the
 # weekly CI schedule ("@latest" deliberate: the vuln DB matters more than

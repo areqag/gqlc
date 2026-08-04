@@ -82,7 +82,7 @@ func TestEmittedHelpersAreClosedOverWhatTheyCall(t *testing.T) {
 			h.forEntities([]wiredEntity{e})
 			h.forParams([]codegen.Param{{RawName: "p", Field: "P", GoType: goType, Nullable: nullable}})
 
-			src := renderModels("models", []wiredEntity{e}, nil, h)
+			src := renderModels("models", []wiredEntity{e}, h)
 			require.Empty(t, undeclaredAgtypeIdents(t, src),
 				"a batch of one %s property (nullable=%t) names an agtype helper it does not declare, so the emitted package does not compile",
 				pt, nullable)

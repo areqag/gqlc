@@ -467,16 +467,20 @@ const probeColumnPrefix = "renamed"
 // parameter is what the signature carries — but a return clause names
 // its columns, and those names are the author's just as much.
 //
-// The column names do reach the emission's identifiers: Phase B builds
-// an edge-union sum type as `q.Name + rowFieldName(col.Name)`, so
-// `RETURN r` yields a package-level interface whose name is half method
-// and half author-chosen column, along with a marker method named after
-// it. That residue is not silent — it can only produce a duplicate
-// package-level declaration, which the Go compiler rejects — and closing
-// it means renaming a generated public type, which is an API change and
-// so is scheduled as gqlc-vac9 rather than done here.
-// internal/codegen/age bounds it exactly, by holding the emission equal
-// modulo the package-level declarations that moved.
+// The column names do reach the emission's identifiers on the neo4j
+// targets: Phase B builds an edge-union sum type as
+// `q.Name + rowFieldName(col.Name)`, so `RETURN r` yields a package-level
+// interface whose name is half method and half author-chosen column,
+// along with a marker method named after it. That residue is not silent —
+// it can only produce a duplicate package-level declaration, which the Go
+// compiler rejects — and closing it means renaming a generated public
+// type, which is an API change and so is scheduled as gqlc-vac9 rather
+// than done here. Apache AGE has no such residue, because an edge-union
+// column is only reachable through a relationship-type alternation its
+// server will not parse and the backend refuses the column at generation;
+// internal/codegen/age's TestOnlyPackageLevelNamesFollowAColumnName
+// measures that its package-level scope stays closed rather than assuming
+// it.
 //
 // What is asserted here is the half that belongs to this bead's class,
 // and it is asserted exactly, on all three targets: renaming every
@@ -1038,9 +1042,11 @@ func requireParameterReachesTheWire(t *testing.T, files []codegen.File, param st
 // binding displacing another — but it means a package-level name that
 // started following author-chosen text is invisible here and visible
 // there. That is exactly the residue class gqlc-vac9 holds, and it is
-// bounded on the AGE side by TestOnlyPackageLevelNamesFollowAColumnName
-// rather than here. Widening this to resolved identifiers would make the
-// column axis fail on that known residue, which is the trade being made.
+// bounded on the AGE side by TestOnlyPackageLevelNamesFollowAColumnName —
+// to empty, since that backend refuses the column the sum type came from
+// — rather than here. Widening this to resolved identifiers would make
+// the column axis fail on the neo4j targets, which still carry the
+// residue, and that is the trade being made.
 func boundScopes(t *testing.T, files []codegen.File) map[string][]string {
 	t.Helper()
 	out := make(map[string][]string)
