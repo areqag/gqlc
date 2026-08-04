@@ -744,10 +744,17 @@ func (q *Queries) <MethodName>(ctx context.Context<param-list>) (<return>, error
 fenced.** `TestSpecMethodArgIsGeneratorOwned` and
 `TestSpecParamsMapBindsGeneratorOwnedValue`
 (`internal/codegen/conformance/specfence_test.go`) sweep every
-markdown document under `docs/` for a parameter list opening
-`ctx context.Context` and holding exactly one more parameter, and for
-every `map[string]any` literal's binding values, and hold both
-against `codegen.ParamArg` read from the emitter.
+markdown document under `docs/` and hold three shapes against
+`codegen.ParamArg` read from the emitter: every parameter list
+opening `ctx context.Context` and holding exactly one more parameter;
+the parameter-list tail each `<param-list>` bullet spells out, which
+is where the rule actually lives, because the method template above
+prints only the placeholder; and the value half of every
+`map[string]any` literal's entries. A placeholder in the type
+position is not an exemption for the name beside it — the fence reads
+the name and type positions separately, so a `<bareParam> <T>`
+restored into the bullet above is red on its name however the type is
+written.
 
 That is the whole of what is fenced: the *name*. Return types, decode
 bodies, `<zero>` values and every other signature in this document

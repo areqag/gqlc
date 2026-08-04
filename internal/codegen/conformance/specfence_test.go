@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -26,6 +27,13 @@ import (
 // own constant, so the specs cannot disagree with codegen.ParamArg
 // without going red, and a future rename of that constant reddens the
 // specs rather than silently widening the gap.
+//
+// It grades three shapes, because the specs write the name in three
+// places: signatures printed whole, the `<param-list>` bullets that
+// expand the placeholder those signatures print instead of a list, and
+// the values of the driver-binding map literals. The middle one is the
+// normative rule and the exact text that drifted, so it is graded
+// rather than skipped as prose.
 
 // docRoots are the trees the fence sweeps, relative to this package.
 // Everything under docs/ rather than only docs/specs/: the drift reached
@@ -43,39 +51,80 @@ const ctxAnchor = "(ctx context.Context"
 // passes to the run seam.
 const mapAnchor = "map[string]any{"
 
+// paramListTerm opens the bullet each spec uses to define what fills the
+// `<param-list>` placeholder its method-shape template prints. That
+// bullet is the normative rule: the template shows only the placeholder,
+// so the bullet is the one place either document says which identifier
+// the emitted signature binds — and it is prose, not a parameter list
+// the paren walk below can reach. It is the exact text gqlc-rz0l
+// corrected, so a fence that does not grade it fences everything except
+// the site it exists for.
+const paramListTerm = "**`<param-list>`**"
+
+// Anchors are matched with whitespace read the way Go's tokeniser reads
+// it rather than as one fixed spelling — see anchorPattern.
+var (
+	ctxAnchorRe = anchorPattern(ctxAnchor)
+	mapAnchorRe = anchorPattern(mapAnchor)
+)
+
 // specSigFloor and specBindFloor are the counts below which each sweep is
 // presumed broken rather than clean. A scanner that stops matching — a
 // changed anchor spelling, a doc reorganisation that moves the specs out
 // from under docRoots — grades zero sites and passes vacuously, which is
 // the failure mode this project keeps finding. Both floors sit under the
-// counts at the time of writing (17 signatures, 12 bindings) so ordinary
-// doc edits do not churn them, and far enough over zero to trip a dead
-// scanner.
+// live counts so ordinary doc edits do not churn them, and far enough
+// over zero to trip a dead scanner. Deliberately not written as "the
+// count today minus a margin": a number in this file's prose rots
+// silently, and the enumerating failure output below is the real record
+// of what is graded.
 const (
 	specSigFloor  = 12
 	specBindFloor = 8
 )
 
-// sigAnchorDocs must each contribute at least one graded signature. The
-// floors above catch a scanner that matches nothing anywhere; these
-// catch the narrower case of one document falling out of the sweep while
-// the others carry the count. C1 is the authoritative section for
-// method-signature naming (codegen-stage-c0.md §10 routes it there); C4
-// declares the same signatures inside the WriteQuerier interface, and C5
-// prints them for the edgeUnion surface. C2 and C3 are absent on
-// purpose: every method they illustrate takes zero parameters.
-var sigAnchorDocs = []string{
-	"../../../docs/specs/codegen-stage-c1.md",
-	"../../../docs/specs/codegen-stage-c4.md",
-	"../../../docs/specs/codegen-stage-c5.md",
-}
+// sigAnchorDocs, paramListAnchorDocs and bindAnchorDocs must each
+// contribute at least one graded site to their sweep. The floors above
+// catch a scanner that matches nothing anywhere; these catch the
+// narrower case of one document falling out of the sweep while the
+// others carry the count — including the case where the others are
+// padded to carry it, which a bare floor cannot tell from health.
+//
+// C1 is the authoritative section for method-signature naming
+// (codegen-stage-c0.md §10 routes it there); C4 declares the same
+// signatures inside the WriteQuerier interface, and C5 prints them for
+// the edgeUnion surface. C2 and C3 print no such signature on purpose:
+// every method they illustrate takes zero parameters. C1 and C4 are the
+// two documents that define `<param-list>`; C5 defers to C1's rule.
+// Bindings reach one document further than signatures do, because C3's
+// width and nullability bullets print the map literal without printing
+// the method around it.
+var (
+	sigAnchorDocs = []string{
+		"../../../docs/specs/codegen-stage-c1.md",
+		"../../../docs/specs/codegen-stage-c4.md",
+		"../../../docs/specs/codegen-stage-c5.md",
+	}
+	paramListAnchorDocs = []string{
+		"../../../docs/specs/codegen-stage-c1.md",
+		"../../../docs/specs/codegen-stage-c4.md",
+	}
+	bindAnchorDocs = []string{
+		"../../../docs/specs/codegen-stage-c1.md",
+		"../../../docs/specs/codegen-stage-c3.md",
+		"../../../docs/specs/codegen-stage-c4.md",
+		"../../../docs/specs/codegen-stage-c5.md",
+	}
+)
 
 // specSig is one graded site: a documented method signature taking one
-// argument after the context, or one documented driver-binding entry.
-// Both reduce to the same question — which identifier the document says
-// the emitted Go reads — so `arg` carries the method argument's name for
-// the first and the binding expression's root for the second, and `text`
-// carries the source line so a failure names it rather than describes it.
+// argument after the context, the parameter-list tail a `<param-list>`
+// bullet expands that placeholder to, or one documented driver-binding
+// entry. All three reduce to the same question — which identifier the
+// document says the emitted Go reads — so `arg` carries the argument's
+// name for the first two and the binding expression's root for the
+// third, and `text` carries the source line so a failure names the site
+// rather than describes it.
 type specSig struct {
 	file string
 	line int
@@ -93,21 +142,44 @@ func (s specSig) String() string {
 // (codegen.ParamArg), so the rule is one comparison at both arities: the
 // identifier after `ctx context.Context,` is the generator's, never the
 // query author's.
+//
+// Two scanners feed it. scanSpecSigs reads signatures the documents
+// print whole; scanParamListRules reads the `<param-list>` bullets,
+// where the documents print the placeholder in the signature and state
+// the identifier separately in prose. Both end in the same comparison,
+// and the second is the site gqlc-rz0l corrected, so it is anchored
+// per-document alongside the first.
 func TestSpecMethodArgIsGeneratorOwned(t *testing.T) {
 	files := docFiles(t)
 	require.NotEmpty(t, files, "the fence swept no documents; docRoots is stale")
 
 	perDoc := make(map[string]int, len(files))
-	var graded, bad []specSig
+	perParamListDoc := make(map[string]int, len(files))
+	var graded, bad, unclosed []specSig
 	for _, file := range files {
-		for _, sig := range scanSpecSigs(file, readDoc(t, file)) {
+		text := readDoc(t, file)
+
+		sigs, broken := scanSpecSigs(file, text)
+		unclosed = append(unclosed, broken...)
+		for _, sig := range sigs {
 			perDoc[file]++
 			graded = append(graded, sig)
-			if sig.arg != codegen.ParamArg {
-				bad = append(bad, sig)
-			}
+		}
+		for _, sig := range scanParamListRules(file, text) {
+			perParamListDoc[file]++
+			graded = append(graded, sig)
 		}
 	}
+	for _, sig := range graded {
+		if sig.arg != codegen.ParamArg {
+			bad = append(bad, sig)
+		}
+	}
+
+	requireClean(t, unclosed, "documented parameter list does not close",
+		"these documents open a parameter list on `ctx context.Context` and never close the parenthesis, so the\n"+
+			"fence cannot read the argument out of them and silently graded nothing there; fix the text rather than\n"+
+			"the fence — an unreadable site is an ungraded site")
 
 	require.GreaterOrEqualf(t, len(graded), specSigFloor,
 		"the fence graded only %d method signatures across %d documents, under the floor of %d — "+
@@ -117,6 +189,13 @@ func TestSpecMethodArgIsGeneratorOwned(t *testing.T) {
 		require.NotZerof(t, perDoc[doc],
 			"%s contributed no graded method signature; either its method surface has moved out of "+
 				"the sweep or the scanner no longer reads it", doc)
+	}
+	for _, doc := range paramListAnchorDocs {
+		require.NotZerof(t, perParamListDoc[doc],
+			"%s contributed no graded `<param-list>` rule; either its %s bullet has been reworded out of "+
+				"the sweep or the scanner no longer reads it — that bullet is where this document states "+
+				"which identifier the emitted signature binds, so an unread one is an unfenced one",
+			doc, paramListTerm)
 	}
 
 	requireClean(t, bad, "documented method argument is not generator-owned",
@@ -140,9 +219,13 @@ func TestSpecParamsMapBindsGeneratorOwnedValue(t *testing.T) {
 	files := docFiles(t)
 	require.NotEmpty(t, files, "the fence swept no documents; docRoots is stale")
 
-	var graded, bad []specSig
+	perDoc := make(map[string]int, len(files))
+	var graded, bad, unclosed []specSig
 	for _, file := range files {
-		for _, bind := range scanSpecBinds(file, readDoc(t, file)) {
+		binds, broken := scanSpecBinds(file, readDoc(t, file))
+		unclosed = append(unclosed, broken...)
+		for _, bind := range binds {
+			perDoc[file]++
 			graded = append(graded, bind)
 			if bind.arg != codegen.ParamArg && !strings.HasPrefix(bind.arg, codegen.ParamArg+".") {
 				bad = append(bad, bind)
@@ -150,10 +233,21 @@ func TestSpecParamsMapBindsGeneratorOwnedValue(t *testing.T) {
 		}
 	}
 
+	requireClean(t, unclosed, "documented map[string]any literal does not close",
+		"these documents open a `map[string]any{` and never close the brace, so the fence cannot read the\n"+
+			"bindings out of them and silently graded nothing there; fix the text rather than the fence — an\n"+
+			"unreadable site is an ungraded site, and it is the shape a drifted binding hides behind")
+
 	require.GreaterOrEqualf(t, len(graded), specBindFloor,
 		"the fence graded only %d parameter bindings across %d documents, under the floor of %d — "+
 			"the scanner has stopped matching and this test is passing over nothing",
 		len(graded), len(files), specBindFloor)
+	for _, doc := range bindAnchorDocs {
+		require.NotZerof(t, perDoc[doc],
+			"%s contributed no graded parameter binding; either its map literals have moved out of the "+
+				"sweep or the scanner no longer reads it — a floor the other documents can satisfy by "+
+				"themselves is not a floor on this one", doc)
+	}
 
 	requireClean(t, bad, "documented parameter binding is not generator-owned",
 		fmt.Sprintf("these documented map[string]any entries bind a value that is not codegen.ParamArg (%q) or a\n"+
@@ -178,10 +272,16 @@ func requireClean(t *testing.T, bad []specSig, headline, why string) {
 
 // TestSpecSigScannerDetectsDrift is the fence's own witness. The sweep
 // above is only worth its runtime if the scanner it runs can actually
-// separate a drifted signature from a correct one, so each row here is a
-// verbatim line that was in the specs before gqlc-rz0l corrected it,
-// paired with what replaced it. Without this, a scanner that quietly
-// matched nothing would leave the sweep green over any prose at all.
+// separate a drifted signature from a correct one, so the rows below
+// pair lines that were in the specs before gqlc-rz0l corrected them with
+// what replaced them. Without this, a scanner that quietly matched
+// nothing would leave the sweep green over any prose at all.
+//
+// The later rows are not spec lines: they are forms a spec could be
+// rewritten into — reflowed by gofmt, respaced, or written against the
+// template rather than a concrete method — where a scanner that reads
+// one spelling of the anchor, or that treats a placeholder as an
+// exemption, stops seeing drift it was seeing a moment before.
 func TestSpecSigScannerDetectsDrift(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -237,23 +337,109 @@ func TestSpecSigScannerDetectsDrift(t *testing.T) {
 		text:    "func (d driverDB) run(ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode) ([]*neo4j.Record, error) {",
 		wantAny: false,
 	}, {
-		name:    "a signature wrapped across lines is still one signature",
+		name:    "a signature wrapped after ctx is still one signature",
 		text:    "func (q *Queries) PersonById(ctx context.Context,\n    id int64) (PersonRow, error)",
+		wantArg: "id",
+		wantAny: true,
+	}, {
+		// The arm above and this one are different arms, not one rule
+		// seen twice: the anchor's own whitespace is what the wrap
+		// moves here, and a literal anchor matches nothing at all.
+		// This is the form gofmt writes for a signature too long for
+		// one line, so it is the form a reformatted spec drifts in.
+		name:    "a signature wrapped before ctx is still one signature",
+		text:    "func (q *Queries) PersonById(\n    ctx context.Context,\n    id int64,\n) (PersonRow, error)",
+		wantArg: "id",
+		wantAny: true,
+	}, {
+		name:    "a second space inside the anchor is not an escape hatch",
+		text:    "func (q *Queries) PersonById(ctx  context.Context, id int64) (PersonRow, error)",
 		wantArg: "id",
 		wantAny: true,
 	}, {
 		name:    "a template placeholder parameter list is not graded",
 		text:    "func (q *Queries) <MethodName>(ctx context.Context<param-list>) (<return>, error) {",
 		wantAny: false,
+	}, {
+		name:    "a whole-list placeholder in parameter position is not graded",
+		text:    "func (q *Queries) <MethodName>(ctx context.Context, <param-list>) (<return>, error) {",
+		wantAny: false,
+	}, {
+		// The blocker gqlc-rz0l's first fence let through: a
+		// placeholder in the type position used to skip the whole
+		// declaration, discarding the name beside it — which is the
+		// one thing this file grades.
+		name:    "a placeholder type does not exempt the name beside it",
+		text:    "func (q *Queries) <MethodName>(ctx context.Context, <bareParam> <T>) (<return>, error) {",
+		wantArg: "<bareParam>",
+		wantAny: true,
+	}, {
+		name:    "the corrected template form passes on its name",
+		text:    "func (q *Queries) <MethodName>(ctx context.Context, arg <T>) (<return>, error) {",
+		wantArg: codegen.ParamArg,
+		wantAny: true,
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := scanSpecSigs("witness.md", tc.text)
+			got, unclosed := scanSpecSigs("witness.md", tc.text)
+			require.Empty(t, unclosed)
 			if !tc.wantAny {
 				require.Empty(t, got)
 				return
 			}
 			require.Len(t, got, 1)
 			require.Equal(t, tc.wantArg, got[0].arg)
+		})
+	}
+}
+
+// TestSpecParamListRuleScannerDetectsDrift is the witness for the
+// bullet scanner. The `<param-list>` bullet is where both specs state
+// which identifier the emitted signature binds — the template above it
+// prints only the placeholder — so it is the site gqlc-rz0l corrected
+// and the site a revert lands on. Each row is a bullet body: the text
+// before that commit, the text after, and the forms the scanner must
+// leave alone.
+func TestSpecParamListRuleScannerDetectsDrift(t *testing.T) {
+	bullet := func(body string) string {
+		return "- " + paramListTerm + " " + body + "\n- **`<return>`** — the return type.\n"
+	}
+	for _, tc := range []struct {
+		name string
+		text string
+		want []string
+	}{{
+		name: "c1 §5.3, before",
+		text: bullet("— empty if zero parameters, `, <bareParam> <T>` if one\n" +
+			"  parameter, `, arg <MethodName>Params` if two-plus. `<bareParam>` is the\n" +
+			"  single parameter's field-name mangle (§4.2), but lowercase-initial."),
+		want: []string{"<bareParam>", codegen.ParamArg},
+	}, {
+		name: "c1 §5.3, after",
+		text: bullet("— empty if zero parameters, `, arg <T>` if one\n" +
+			"  parameter, `, arg <MethodName>Params` if two-plus. The argument\n" +
+			"  name is the literal `arg` at both arities."),
+		want: []string{codegen.ParamArg, codegen.ParamArg},
+	}, {
+		name: "the bullet ends at the next list item",
+		text: bullet("— `, arg <T>` if one parameter.") +
+			"- **`<paramsMap>`** — `, minAge int64` is not this bullet's text.\n",
+		want: []string{codegen.ParamArg},
+	}, {
+		name: "prose code spans in the bullet are not parameter lists",
+		text: bullet("— the C1 rule. `paramFieldName(\"minAge\")` → `MinAge` is what it\n" +
+			"  is not; `$err`, `$q` and `$_` are why."),
+		want: nil,
+	}, {
+		name: "a document with no such bullet contributes nothing",
+		text: "The `<param-list>` placeholder is described in C1 §5.3.\n",
+		want: nil,
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got []string
+			for _, sig := range scanParamListRules("witness.md", tc.text) {
+				got = append(got, sig.arg)
+			}
+			require.Equal(t, tc.want, got)
 		})
 	}
 }
@@ -311,9 +497,14 @@ func TestSpecBindScannerDetectsDrift(t *testing.T) {
 		name: "the run seam's parameter type is not a literal",
 		text: `run(ctx context.Context, cypher string, params map[string]any, access neo4j.AccessMode) error`,
 		want: nil,
+	}, {
+		name: "a trailing comma closes the last entry rather than opening an empty one",
+		text: "map[string]any{\n    \"pid\": arg.Pid,\n    \"oid\": arg.Oid,\n}",
+		want: []string{"arg.Pid", "arg.Oid"},
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := scanSpecBinds("witness.md", tc.text)
+			got, unclosed := scanSpecBinds("witness.md", tc.text)
+			require.Empty(t, unclosed)
 			var values []string
 			for _, bind := range got {
 				values = append(values, bind.arg)
@@ -321,6 +512,27 @@ func TestSpecBindScannerDetectsDrift(t *testing.T) {
 			require.Equal(t, tc.want, values)
 		})
 	}
+}
+
+// TestSpecScannersReportUnreadableSites pins the two silences the
+// scanners used to keep. A span that opens and never closes is not a
+// site with no drift in it; it is a site the sweep could not read, and
+// a sweep that drops it quietly loses coverage without the floors or
+// the anchors moving. Both are surfaced so the failure names the text
+// to fix rather than the fence.
+func TestSpecScannersReportUnreadableSites(t *testing.T) {
+	t.Run("an unterminated map literal is reported, not dropped", func(t *testing.T) {
+		binds, unclosed := scanSpecBinds("witness.md", "prose\nmap[string]any{\"id\": arg\nmore prose\n")
+		require.Empty(t, binds)
+		require.Len(t, unclosed, 1)
+		require.Equal(t, 2, unclosed[0].line)
+	})
+	t.Run("an unterminated parameter list is reported, not dropped", func(t *testing.T) {
+		sigs, unclosed := scanSpecSigs("witness.md", "prose\nRemovePerson(ctx context.Context, arg int64\nmore prose\n")
+		require.Empty(t, sigs)
+		require.Len(t, unclosed, 1)
+		require.Equal(t, 2, unclosed[0].line)
+	})
 }
 
 // docFiles lists every markdown document under docRoots.
@@ -349,7 +561,8 @@ func docFiles(t *testing.T) []string {
 }
 
 // scanSpecSigs extracts every documented single-argument method
-// signature from one document's text.
+// signature from one document's text, and separately every parameter
+// list that opens but never closes.
 //
 // The shape it grades is the emitted query method's: a parameter list
 // opening `(ctx context.Context` and holding exactly one more parameter,
@@ -360,36 +573,85 @@ func docFiles(t *testing.T) []string {
 // and are not query methods. Parameter lists are matched by balancing
 // parentheses rather than by a line regexp, so a signature the prose
 // wrapped across lines is graded rather than skipped.
-func scanSpecSigs(file, text string) []specSig {
-	var out []specSig
-	for i := 0; ; {
-		j := strings.Index(text[i:], ctxAnchor)
-		if j < 0 {
-			return out
+func scanSpecSigs(file, text string) (sigs, unclosed []specSig) {
+	for _, loc := range ctxAnchorRe.FindAllStringIndex(text, -1) {
+		open := loc[0]
+		site := specSig{
+			file: file,
+			line: 1 + strings.Count(text[:open], "\n"),
+			text: strings.TrimSpace(collapse(lineAt(text, open))),
 		}
-		open := i + j
-		i = open + len(ctxAnchor)
 
 		list, ok := parenSpan(text, open)
 		if !ok {
+			unclosed = append(unclosed, site)
 			continue
 		}
 		params := splitTopLevel(list)
 		if len(params) != 2 {
 			continue
 		}
-		// A placeholder stands for a whole parameter list, not for one
-		// argument's name; §5.3's `<param-list>` is prose the sweep has
-		// no signature to compare.
-		if strings.ContainsAny(params[1], "<>") {
+		name, gradable := paramName(params[1])
+		if !gradable {
 			continue
 		}
-		out = append(out, specSig{
-			file: file,
-			line: 1 + strings.Count(text[:open], "\n"),
-			arg:  argName(params[1]),
-			text: strings.TrimSpace(collapse(lineAt(text, open))),
-		})
+		site.arg = name
+		sigs = append(sigs, site)
+	}
+	return sigs, unclosed
+}
+
+// scanParamListRules extracts the argument name from every
+// `<param-list>` definition bullet in one document's text.
+//
+// The method-shape templates in C1 §5.3 and C4 §5.3 print the
+// placeholder, not the list, so the paren walk above reads
+// `(ctx context.Context<param-list>)` as a one-parameter list with
+// nothing to grade — correctly, because a placeholder standing for a
+// whole list carries no argument name. The name lives in the bullet
+// that expands the placeholder, as inline code spelling the list's tail
+// from its leading comma: `, arg <T>` and `, arg <MethodName>Params`.
+// Those are ordinary parameter-list tails, so they split and grade on
+// the same axis as a whole signature does, and reverting the bullet
+// alone — which is exactly the drift gqlc-rz0l corrected — is red.
+//
+// Only code spans inside such a bullet are read, and only those opening
+// with a comma. Prose commas in backticks are everywhere in these
+// documents; a parameter-list tail inside the bullet that defines the
+// parameter list is not ambiguous.
+func scanParamListRules(file, text string) []specSig {
+	var out []specSig
+	for i := 0; ; {
+		j := strings.Index(text[i:], paramListTerm)
+		if j < 0 {
+			return out
+		}
+		start := i + j + len(paramListTerm)
+		i = start
+
+		end := len(text)
+		if k := strings.Index(text[start:], "\n- "); k >= 0 {
+			end = start + k
+		}
+		for _, code := range inlineCodeSpans(text, start, end) {
+			if !strings.HasPrefix(code.text, ",") {
+				continue
+			}
+			params := splitTopLevel(code.text)
+			if len(params) != 2 {
+				continue
+			}
+			name, gradable := paramName(params[1])
+			if !gradable {
+				continue
+			}
+			out = append(out, specSig{
+				file: file,
+				line: 1 + strings.Count(text[:code.at], "\n"),
+				arg:  name,
+				text: strings.TrimSpace(collapse(lineAt(text, code.at))),
+			})
+		}
 	}
 }
 
@@ -401,19 +663,23 @@ func scanSpecSigs(file, text string) []specSig {
 // `arg.SeenAt`), because the widen is orthogonal to who owns the name.
 // Entries with no `:` — the `...` and `map[string]any{...}` elisions —
 // are prose, not bindings, and are not graded.
-func scanSpecBinds(file, text string) []specSig {
-	var out []specSig
-	for i := 0; ; {
-		j := strings.Index(text[i:], mapAnchor)
-		if j < 0 {
-			return out
+//
+// A literal whose brace never closes is returned separately rather than
+// dropped. Dropping it is how the sweep loses a site without saying so,
+// and the site it loses is one that prints bindings.
+func scanSpecBinds(file, text string) (binds, unclosed []specSig) {
+	for _, loc := range mapAnchorRe.FindAllStringIndex(text, -1) {
+		anchor := loc[0]
+		open := loc[1] - 1
+		site := specSig{
+			file: file,
+			line: 1 + strings.Count(text[:anchor], "\n"),
+			text: strings.TrimSpace(collapse(lineAt(text, anchor))),
 		}
-		anchor := i + j
-		open := anchor + len(mapAnchor) - 1
-		i = open + 1
 
 		body, ok := span(text, open, '{', '}')
 		if !ok {
+			unclosed = append(unclosed, site)
 			continue
 		}
 		for _, entry := range splitTopLevel(body) {
@@ -421,17 +687,14 @@ func scanSpecBinds(file, text string) []specSig {
 			if colon < 0 {
 				continue
 			}
-			value := unwrapConversions(strings.TrimSpace(entry[colon+1:]))
 			// `arg.<Field1>` is the template form of a real selector; its
 			// prefix is what this fence grades, so it is kept.
-			out = append(out, specSig{
-				file: file,
-				line: 1 + strings.Count(text[:anchor], "\n"),
-				arg:  value,
-				text: strings.TrimSpace(collapse(lineAt(text, anchor))),
-			})
+			bind := site
+			bind.arg = unwrapConversions(strings.TrimSpace(entry[colon+1:]))
+			binds = append(binds, bind)
 		}
 	}
+	return binds, unclosed
 }
 
 // unwrapConversions peels carrier conversions and pointer operators off
@@ -517,7 +780,10 @@ func readDoc(t *testing.T, file string) string {
 	return string(body)
 }
 
-// splitTopLevel splits a parameter list at its depth-zero commas.
+// splitTopLevel splits a parameter list or composite literal at its
+// depth-zero commas. A trailing comma closes the last entry rather than
+// opening an empty one — gofmt writes one on every list it wraps across
+// lines — so the empty tail it would otherwise produce is dropped.
 func splitTopLevel(list string) []string {
 	var out []string
 	depth, start := 0, 0
@@ -534,19 +800,114 @@ func splitTopLevel(list string) []string {
 			}
 		}
 	}
-	return append(out, strings.TrimSpace(list[start:]))
+	out = append(out, strings.TrimSpace(list[start:]))
+	if len(out) > 1 && out[len(out)-1] == "" {
+		out = out[:len(out)-1]
+	}
+	return out
 }
 
-// argName is the identifier a parameter declaration binds, or "" when it
-// binds none. An unnamed parameter is drift in its own right — a
-// documented signature that names no argument is not the one the emitter
-// writes — so it is graded rather than skipped.
-func argName(param string) string {
+// paramName is the identifier a parameter declaration binds, together
+// with whether the declaration is one this fence can grade at all.
+//
+// A declaration is a name position and a type position, and only the
+// name is the subject here, so the two are decided separately. Two
+// tokens are a name and a type: the name is graded whatever the type
+// says, which is what makes `arg <T>` and `arg <MethodName>Params` pass
+// on their name while `<bareParam> <T>` — the capture vector gqlc-lhs3
+// removed from the emitter — fails on its. A placeholder in the type
+// position is not an exemption for the name beside it.
+//
+// One token is a type with no name, which is drift in its own right: a
+// documented signature that names no argument is not the one the
+// emitter writes.
+//
+// The one ungradable form is a single token that is itself a whole
+// placeholder — `<param-list>`, which stands for the entire list rather
+// than for one declaration and so has no name position to read. What
+// that placeholder expands to is graded where the documents say it,
+// in the `<param-list>` bullet (scanParamListRules).
+func paramName(param string) (name string, gradable bool) {
 	fields := strings.Fields(param)
-	if len(fields) < 2 {
-		return ""
+	switch {
+	case len(fields) == 0:
+		return "", false
+	case len(fields) == 1 && isWholePlaceholder(fields[0]):
+		return "", false
+	case len(fields) == 1:
+		return "", true
+	default:
+		return fields[0], true
 	}
-	return fields[0]
+}
+
+// isWholePlaceholder reports whether a token is a spec placeholder in
+// its entirety, as `<param-list>` is. `<MethodName>Params` is not one:
+// it is a type built around a placeholder, and it sits in the type
+// position beside a name the fence does grade.
+func isWholePlaceholder(token string) bool {
+	return len(token) > 2 && strings.HasPrefix(token, "<") && strings.HasSuffix(token, ">")
+}
+
+// anchorPattern compiles one anchor literal into a matcher that reads
+// whitespace the way Go's tokeniser does — required between two
+// identifier characters, optional at every other boundary — so the
+// fence anchors on the anchor's tokens rather than on one spelling of
+// the spacing between them. gofmt wraps a long parameter list after the
+// open paren, which puts `ctx` on its own line and leaves a literal
+// match finding nothing; prose reflows the same way, and a second space
+// is invisible in rendered markdown.
+//
+// The normalisation is compiled into the pattern rather than applied to
+// the documents, because collapsing a document's whitespace would move
+// every byte in it and the failure messages here are only useful while
+// they can still name a line. Deriving the pattern from the one literal
+// rather than writing a second spelling beside it leaves nothing for
+// the two to drift apart on.
+func anchorPattern(anchor string) *regexp.Regexp {
+	var b strings.Builder
+	for i := 0; i < len(anchor); i++ {
+		c := anchor[i]
+		if c == ' ' {
+			b.WriteString(`\s+`)
+			continue
+		}
+		if i > 0 && anchor[i-1] != ' ' && isIdentByte(c) != isIdentByte(anchor[i-1]) {
+			b.WriteString(`\s*`)
+		}
+		b.WriteString(regexp.QuoteMeta(string(c)))
+	}
+	return regexp.MustCompile(b.String())
+}
+
+// codeSpan is one inline `code` run, carrying the offset it opened at so
+// a failure can name the line it sits on.
+type codeSpan struct {
+	text string
+	at   int
+}
+
+// inlineCodeSpans returns every single-backtick code run in
+// text[from:to], contents collapsed. Backticks are paired in order, so
+// the prose between two runs is skipped the way a markdown renderer
+// skips it.
+func inlineCodeSpans(text string, from, to int) []codeSpan {
+	var out []codeSpan
+	for i := from; i < to; {
+		open := strings.IndexByte(text[i:to], '`')
+		if open < 0 {
+			return out
+		}
+		open += i
+		closing := strings.IndexByte(text[open+1:to], '`')
+		if closing < 0 {
+			return out
+		}
+		closing += open + 1
+		out = append(out, codeSpan{text: collapse(text[open+1 : closing]), at: open})
+		i = closing + 1
+	}
+	return out
 }
 
 func isIdentByte(c byte) bool {
