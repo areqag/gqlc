@@ -42,3 +42,139 @@ func (q *Queries) EventIds(ctx context.Context) ([]int64, error) {
 	}
 	return out, nil
 }
+
+const eventColumnsQueryText = `MATCH (e:Event) RETURN e.marker AS marker, e.payload AS payload`
+
+type EventColumnsRow struct {
+	Marker  any
+	Payload *any
+}
+
+// EventColumns executes the EventColumns query.
+//
+//	MATCH (e:Event) RETURN e.marker AS marker, e.payload AS payload
+func (q *Queries) EventColumns(ctx context.Context) ([]EventColumnsRow, error) {
+	stmt, err := q.cypherStmt("$gqlc$", eventColumnsQueryText, "v0 ag_catalog.agtype, v1 ag_catalog.agtype")
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.db.Query(ctx, stmt, "{}")
+	if err != nil {
+		return nil, fmt.Errorf("EventColumns: %w", err)
+	}
+	defer rows.Close()
+	out := make([]EventColumnsRow, 0)
+	for rows.Next() {
+		var raw0 []byte
+		var raw1 []byte
+		if err := rows.Scan(&raw0, &raw1); err != nil {
+			return nil, fmt.Errorf("EventColumns: scan row: %w", err)
+		}
+		if raw0 == nil {
+			return nil, fmt.Errorf("EventColumns: column %q is non-nullable but arrived null", "marker")
+		}
+		value0, err := agtypeValue(raw0)
+		if err != nil {
+			return nil, fmt.Errorf("EventColumns: decode column %q: %w", "marker", err)
+		}
+		var value1 *any
+		if raw1 != nil {
+			decoded, err := agtypeValue(raw1)
+			if err != nil {
+				return nil, fmt.Errorf("EventColumns: decode column %q: %w", "payload", err)
+			}
+			value1 = &decoded
+		}
+		out = append(out, EventColumnsRow{
+			Marker:  value0,
+			Payload: value1,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("EventColumns: %w", err)
+	}
+	return out, nil
+}
+
+const eventMarkerQueryText = `MATCH (e:Event) RETURN e.marker AS marker`
+
+// EventMarker executes the EventMarker query.
+//
+//	MATCH (e:Event) RETURN e.marker AS marker
+func (q *Queries) EventMarker(ctx context.Context) (any, error) {
+	stmt, err := q.cypherStmt("$gqlc$", eventMarkerQueryText, "v0 ag_catalog.agtype")
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.db.Query(ctx, stmt, "{}")
+	if err != nil {
+		return nil, fmt.Errorf("EventMarker: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("EventMarker: %w", err)
+		}
+		return nil, ErrNoRows
+	}
+	var raw0 []byte
+	if err := rows.Scan(&raw0); err != nil {
+		return nil, fmt.Errorf("EventMarker: scan row: %w", err)
+	}
+	if rows.Next() {
+		return nil, ErrMultipleResults
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("EventMarker: %w", err)
+	}
+	if raw0 == nil {
+		return nil, fmt.Errorf("EventMarker: column %q is non-nullable but arrived null", "marker")
+	}
+	value0, err := agtypeValue(raw0)
+	if err != nil {
+		return nil, fmt.Errorf("EventMarker: decode column %q: %w", "marker", err)
+	}
+	return value0, nil
+}
+
+const eventPayloadQueryText = `MATCH (e:Event) RETURN e.payload AS payload`
+
+// EventPayload executes the EventPayload query.
+//
+//	MATCH (e:Event) RETURN e.payload AS payload
+func (q *Queries) EventPayload(ctx context.Context) (*any, error) {
+	stmt, err := q.cypherStmt("$gqlc$", eventPayloadQueryText, "v0 ag_catalog.agtype")
+	if err != nil {
+		return nil, err
+	}
+	rows, err := q.db.Query(ctx, stmt, "{}")
+	if err != nil {
+		return nil, fmt.Errorf("EventPayload: %w", err)
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("EventPayload: %w", err)
+		}
+		return nil, ErrNoRows
+	}
+	var raw0 []byte
+	if err := rows.Scan(&raw0); err != nil {
+		return nil, fmt.Errorf("EventPayload: scan row: %w", err)
+	}
+	if rows.Next() {
+		return nil, ErrMultipleResults
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("EventPayload: %w", err)
+	}
+	var value0 *any
+	if raw0 != nil {
+		decoded, err := agtypeValue(raw0)
+		if err != nil {
+			return nil, fmt.Errorf("EventPayload: decode column %q: %w", "payload", err)
+		}
+		value0 = &decoded
+	}
+	return value0, nil
+}

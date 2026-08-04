@@ -348,8 +348,17 @@ func TestBinColumnsCarryNullElements(t *testing.T) {
 // here — []byte arrives as itself and is kept, float64 arrives wider
 // than the declared float32 and is narrowed — because a decoder that
 // carried everything bare would pass on the first alone.
+//
+// The projection carries two non-nullable list columns rather than one
+// because the accumulator each of them builds is a local of the row
+// assembly's own scope: under a name shared between them the second
+// declaration is `no new variables on left side of :=`, and the
+// projection that reaches it is the one no fixture had. A nullable list
+// column does not reach it, because its accumulator sits inside the
+// `if` its null gate opens.
 func TestListyColumnsNarrowEachElement(t *testing.T) {
-	q := queriesOver([]string{"blobs", "depths"}, []any{
+	q := queriesOver([]string{"tags", "blobs", "depths"}, []any{
+		[]any{"a", "b"},
 		[]any{[]byte{1, 2}, []byte{}},
 		[]any{0.5, 1.5},
 	})
@@ -361,6 +370,9 @@ func TestListyColumnsNarrowEachElement(t *testing.T) {
 		t.Fatalf("ListyColumns returned %d rows, want 1", len(got))
 	}
 	row := got[0]
+	if want := []string{"a", "b"}; !reflect.DeepEqual(row.Tags, want) {
+		t.Errorf("ListyColumns()[0].Tags = %#v, want %#v", row.Tags, want)
+	}
 	if want := [][]byte{{1, 2}, {}}; !reflect.DeepEqual(row.Blobs, want) {
 		t.Errorf("ListyColumns()[0].Blobs = %#v, want %#v", row.Blobs, want)
 	}
@@ -376,12 +388,15 @@ func TestListyColumnsNarrowEachElement(t *testing.T) {
 	// reports a held null through its second result rather than through
 	// the value, so a decoder reading only the value cannot tell them
 	// apart.
-	null, err := queriesOver([]string{"blobs", "depths"}, []any{[]any{}, nil}).ListyColumns(t.Context())
+	null, err := queriesOver([]string{"tags", "blobs", "depths"}, []any{[]any{}, []any{}, nil}).ListyColumns(t.Context())
 	if err != nil {
 		t.Fatalf("ListyColumns(depths: null) = error %v", err)
 	}
 	if len(null) != 1 {
 		t.Fatalf("ListyColumns(depths: null) returned %d rows, want 1", len(null))
+	}
+	if null[0].Tags == nil || len(null[0].Tags) != 0 {
+		t.Errorf("ListyColumns(depths: null)[0].Tags = %#v, want an empty list", null[0].Tags)
 	}
 	if null[0].Blobs == nil || len(null[0].Blobs) != 0 {
 		t.Errorf("ListyColumns(depths: null)[0].Blobs = %#v, want an empty list", null[0].Blobs)
@@ -390,9 +405,73 @@ func TestListyColumnsNarrowEachElement(t *testing.T) {
 		t.Errorf("ListyColumns(depths: null)[0].Depths = %#v, want nil", null[0].Depths)
 	}
 
-	if _, err := queriesOver([]string{"blobs", "depths"}, []any{
-		[]any{"no"}, []any{},
+	if _, err := queriesOver([]string{"tags", "blobs", "depths"}, []any{
+		[]any{}, []any{"no"}, []any{},
 	}).ListyColumns(t.Context()); err == nil {
 		t.Errorf("ListyColumns(blobs: [string]) = no error, want a refusal")
+	}
+}
+
+// A column whose declared width is ANY VALUE is read rather than
+// asserted, the same claim TestAnythingReadsWhatTheGraphHolds makes of
+// the property one emission over. `any` is a member of neither
+// neo4j.PropertyValue nor neo4j.RecordValue, so the column has no
+// constrained driver entry point to go through at all — and the null it
+// exists to carry is the one value such an entry point could not have
+// been written to carry.
+func TestAnythingColumnsReadWhatTheGraphHolds(t *testing.T) {
+	for _, want := range []any{
+		nil, int64(1), 1.5, "x", true,
+		[]any{int64(1), nil, "x"},
+		map[string]any{"k": "v"},
+	} {
+		got, err := queriesOver([]string{"payload", "maybe"}, []any{want, want}).AnythingColumns(t.Context())
+		if err != nil {
+			t.Errorf("AnythingColumns(payload: %#v) = error %v", want, err)
+			continue
+		}
+		if len(got) != 1 {
+			t.Fatalf("AnythingColumns(payload: %#v) returned %d rows, want 1", want, len(got))
+		}
+		if !reflect.DeepEqual(got[0].Payload, want) {
+			t.Errorf("AnythingColumns(payload: %#v)[0].Payload = %#v", want, got[0].Payload)
+		}
+	}
+}
+
+// The nullable one carries the graph's null in its pointer. A record
+// holds a key for every column the query projected, so a pointer spent
+// on the missing key the Props map can have would be a pointer that is
+// never nil — a null the caller has no way to read. This is the one
+// place the column path and the entity path answer differently, and
+// TestAnythingSeparatesAbsentFromNull is the other half of the pair.
+func TestAnythingColumnsCarryTheirNull(t *testing.T) {
+	null, err := queriesOver([]string{"payload", "maybe"}, []any{int64(1), nil}).AnythingColumns(t.Context())
+	if err != nil {
+		t.Fatalf("AnythingColumns(maybe: null) = error %v", err)
+	}
+	if len(null) != 1 {
+		t.Fatalf("AnythingColumns(maybe: null) returned %d rows, want 1", len(null))
+	}
+	if null[0].Maybe != nil {
+		t.Errorf("AnythingColumns(maybe: null)[0].Maybe = %#v, want nil", null[0].Maybe)
+	}
+
+	held, err := queriesOver([]string{"payload", "maybe"}, []any{int64(1), "v"}).AnythingColumns(t.Context())
+	if err != nil {
+		t.Fatalf("AnythingColumns(maybe: \"v\") = error %v", err)
+	}
+	if held[0].Maybe == nil {
+		t.Fatalf("AnythingColumns(maybe: \"v\")[0].Maybe = nil, want a pointer")
+	}
+	if *held[0].Maybe != any("v") {
+		t.Errorf("AnythingColumns(maybe: \"v\")[0].Maybe points at %#v, want \"v\"", *held[0].Maybe)
+	}
+
+	// A column the record does not hold at all is neither of those: the
+	// resolver committed it, so its absence is the driver disagreeing
+	// with the plan rather than a value the graph held.
+	if _, err := queriesOver([]string{"payload"}, []any{int64(1)}).AnythingColumns(t.Context()); err == nil {
+		t.Errorf("AnythingColumns(no maybe) = no error, want a refusal")
 	}
 }

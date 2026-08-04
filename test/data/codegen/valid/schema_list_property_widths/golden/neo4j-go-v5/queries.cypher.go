@@ -38,15 +38,15 @@ func (q *Queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, erro
 		}
 		var value0Ptr *[]string
 		if !isNil {
-			acc := make([]string, 0, len(value0))
+			acc0 := make([]string, 0, len(value0))
 			for i, elem := range value0 {
 				v, ok := elem.(string)
 				if !ok {
 					return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected string, got %T", "tags", i, elem)
 				}
-				acc = append(acc, v)
+				acc0 = append(acc0, v)
 			}
-			value0Ptr = &acc
+			value0Ptr = &acc0
 		}
 		row.Tags = value0Ptr
 		value1, isNil, err := neo4j.GetRecordValue[[]any](record, "ranks")
@@ -55,15 +55,15 @@ func (q *Queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, erro
 		}
 		var value1Ptr *[]int32
 		if !isNil {
-			acc := make([]int32, 0, len(value1))
+			acc1 := make([]int32, 0, len(value1))
 			for i, elem := range value1 {
 				v, ok := elem.(int64)
 				if !ok {
 					return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected int64, got %T", "ranks", i, elem)
 				}
-				acc = append(acc, int32(v))
+				acc1 = append(acc1, int32(v))
 			}
-			value1Ptr = &acc
+			value1Ptr = &acc1
 		}
 		row.Ranks = value1Ptr
 		value2, isNil, err := neo4j.GetRecordValue[[]any](record, "flags")
@@ -72,15 +72,15 @@ func (q *Queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, erro
 		}
 		var value2Ptr *[]bool
 		if !isNil {
-			acc := make([]bool, 0, len(value2))
+			acc2 := make([]bool, 0, len(value2))
 			for i, elem := range value2 {
 				v, ok := elem.(bool)
 				if !ok {
 					return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected bool, got %T", "flags", i, elem)
 				}
-				acc = append(acc, v)
+				acc2 = append(acc2, v)
 			}
-			value2Ptr = &acc
+			value2Ptr = &acc2
 		}
 		row.Flags = value2Ptr
 		value3, isNil, err := neo4j.GetRecordValue[[]any](record, "matrix")
@@ -89,7 +89,7 @@ func (q *Queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, erro
 		}
 		var value3Ptr *[][]float32
 		if !isNil {
-			acc := make([][]float32, 0, len(value3))
+			acc3 := make([][]float32, 0, len(value3))
 			for i, elem := range value3 {
 				inner, ok := elem.([]any)
 				if !ok {
@@ -103,9 +103,9 @@ func (q *Queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, erro
 					}
 					innerAcc = append(innerAcc, float32(v))
 				}
-				acc = append(acc, innerAcc)
+				acc3 = append(acc3, innerAcc)
 			}
-			value3Ptr = &acc
+			value3Ptr = &acc3
 		}
 		row.Matrix = value3Ptr
 		value4, isNil, err := neo4j.GetRecordValue[[]any](record, "marks")
@@ -114,15 +114,15 @@ func (q *Queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, erro
 		}
 		var value4Ptr *[]string
 		if !isNil {
-			acc := make([]string, 0, len(value4))
+			acc4 := make([]string, 0, len(value4))
 			for i, elem := range value4 {
 				v, ok := elem.(string)
 				if !ok {
 					return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected string, got %T", "marks", i, elem)
 				}
-				acc = append(acc, v)
+				acc4 = append(acc4, v)
 			}
-			value4Ptr = &acc
+			value4Ptr = &acc4
 		}
 		row.Marks = value4Ptr
 		value5, isNil, err := neo4j.GetRecordValue[[]any](record, "grid")
@@ -131,7 +131,7 @@ func (q *Queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, erro
 		}
 		var value5Ptr *[][]int16
 		if !isNil {
-			acc := make([][]int16, 0, len(value5))
+			acc5 := make([][]int16, 0, len(value5))
 			for i, elem := range value5 {
 				inner, ok := elem.([]any)
 				if !ok {
@@ -145,9 +145,9 @@ func (q *Queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, erro
 					}
 					innerAcc = append(innerAcc, int16(v))
 				}
-				acc = append(acc, innerAcc)
+				acc5 = append(acc5, innerAcc)
 			}
-			value5Ptr = &acc
+			value5Ptr = &acc5
 		}
 		row.Grid = value5Ptr
 		out = append(out, row)
