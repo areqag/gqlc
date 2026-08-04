@@ -1082,6 +1082,11 @@ C1's §6.6 invariants stand. C2 adds:
 
 **Out of scope, routed to the appropriate sentinel:**
 
+*Historical: what this stage shipped, sentinel names included; it takes
+no further edit. The current answer is
+[docs/specs/codegen-sentinel-taxonomy.md](codegen-sentinel-taxonomy.md),
+which `TestSentinelTaxonomy` holds against the code.*
+
 | Construct                                                    | Sentinel                     | Stage owner |
 |--------------------------------------------------------------|------------------------------|-------------|
 | `ResolvedEdgeUnion` column                                   | `ErrOutOfC2Scope`            | C5          |
@@ -1163,6 +1168,11 @@ automatically.
 ---
 
 ## 9. Sentinel set delta — the C2 view
+
+*Historical: what this stage shipped, sentinel names included; it takes
+no further edit. The current answer is
+[docs/specs/codegen-sentinel-taxonomy.md](codegen-sentinel-taxonomy.md),
+which `TestSentinelTaxonomy` holds against the code.*
 
 C0's four sentinels + C1's five sentinels stand at C2 with one
 rename. C2 adds three new sentinels and renames one to reflect the

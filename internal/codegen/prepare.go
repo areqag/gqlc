@@ -541,10 +541,10 @@ func cardinalityAnnotation(c Cardinality) string {
 // :many on a zero-column query routes through ErrCardinalityShapeMismatch.
 // Column and parameter admission unchanged from C3 (property-widths on
 // parameters, full closed sum minus ResolvedEdgeUnion on columns);
-// unrepresentable widths route through ErrUnrepresentableWidth (Phase Z
-// already caught schema-side offenders so a column projecting an
-// unrepresentable-width property is unreachable unless the query declares
-// an unrepresentable width on a parameter).
+// unrepresentable widths route through ErrUnrepresentableWidth. Phase Z
+// has already refused every width the schema declares, so what reaches
+// the column and parameter gates here is a width no schema property
+// carries — which is to say a Validated shape the resolver did not build.
 func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entityLookupKey]int, tm TypeMap) error {
 	for i, q := range queries {
 		if _, reserved := reservedIdentifiers[q.Name]; reserved {
@@ -586,8 +586,6 @@ func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entity
 				}
 			case resolver.ResolvedNode:
 				if _, ok := entityIndex[entityLookupKey{Kind: EntityNode, Labels: t.Labels}]; !ok {
-					// Unknown node type — the resolver's R0 gate should
-					// have caught this; a synthetic test seam lands here.
 					return fmt.Errorf("%w: query %q column %d %q references unknown node type %q", ErrOutOfC6Scope, q.Name, ci, col.Name, string(t.Labels))
 				}
 			case resolver.ResolvedEdge:
@@ -649,9 +647,10 @@ func columnSite(queryName string, pos int, columnName string) string {
 // naming site in whatever it refuses. Shared by the two fail-sites so
 // their answers cannot drift.
 //
-// The first two gates are defensive: the resolver commits at least two
-// candidates (a single one collapses to ResolvedEdge, R3 spec §4.4) and
-// commits only edges the schema declares, so a synthetic seam fails at
+// The first two gates hold the resolver's invariants at this package's
+// boundary: the resolver commits at least two candidates (a single one
+// collapses to ResolvedEdge, R3 spec §4.4) and commits only edges the
+// schema declares, so a Validated shape it did not build fails at
 // generation rather than downstream. The third follows from what arrives
 // — the emitted dispatch reads the value's label to pick a candidate,
 // which two candidates carrying one label give it no way to do. First
@@ -702,6 +701,7 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 			// Phase A guaranteed ResolvedProperty + representable width.
 			prop, ok := param.Type.(resolver.ResolvedProperty)
 			if !ok {
+				//gqlc:unreachable param-type-invariant
 				return nil, fmt.Errorf("%w: query %q parameter %d $%s: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, pi, param.Name, param.Type.String())
 			}
 			ty, _ := tm.Property(prop.Type)
@@ -718,6 +718,7 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 		for ci, col := range q.Validated.Columns {
 			field, ok := rowFieldName(col.Name)
 			if !ok {
+				//gqlc:unreachable row-field-alias
 				return nil, fmt.Errorf("%w: query %q column %d %q is neither a bare identifier nor a property access — add an explicit AS alias", ErrAliasRequired, q.Name, ci, col.Name)
 			}
 			if first, dup := seenRow[field]; dup {
@@ -874,6 +875,7 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 					ListElem:   plan,
 				})
 			default:
+				//gqlc:unreachable column-type-invariant
 				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, ci, col.Name, col.Type.String())
 			}
 		}
