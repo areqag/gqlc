@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"testing"
 
 	"github.com/stretchr/testify/require"
 
@@ -25,8 +26,8 @@ import (
 // so they are the wire's, not the schema's — no label can be one and no
 // author picks one.
 //
-// It is what makes the sweep's classification total. Every package-level,
-// receiver-less function an emission writes is either an entity decoder,
+// It is what makes the sweep's classification total. Every receiver-less
+// function an emission writes at package level is either an entity decoder,
 // which is graded against the labels its own axis can carry, or a function
 // whose every string comparison is in here. A third kind — a function
 // testing a string this gate has no verdict about — is an *ungraded* site
@@ -37,6 +38,28 @@ import (
 // golden byte diff. A backend that grows a new wire spelling reddens until
 // it is named here, which makes the widening a decision someone makes
 // rather than one already made.
+//
+// # Hand-written, and the asymmetry that leaves
+//
+// This list is written out rather than derived from agtypeBool and
+// agtypeValue, and the consequence is worth stating rather than papering
+// over: the two error directions are not symmetric.
+//
+// Too narrow reddens, promptly and loudly. A spelling one of those helpers
+// compares and this map does not hold makes that helper an ungraded site on
+// the very next emission, which is the behaviour the paragraph above
+// describes.
+//
+// Too wide is undetected. A spurious entry is a string no helper tests, so
+// nothing here reads it and nothing reports it. The bound on that is exact,
+// and it is why the machinery to close it is not worth building: this map
+// is consulted on one arm only — the arm for a function whose results name
+// no entity — so a spurious entry can widen only what a *non-decoder* may
+// compare. A decoder's guards are graded against its own axis's label
+// alphabet (schemaLabelAlphabet) and are never looked up here, so no entry
+// in this map, however wrong, can admit an unsatisfiable label guard into a
+// decoder. The undetected direction costs a helper that may compare one
+// string too many; it cannot cost the reachability claim itself.
 var wireScalarSpellings = map[string]bool{
 	"true":  true,
 	"false": true,
@@ -161,8 +184,11 @@ type entityDecoder struct {
 // which go test -update blesses away. Broadening the pattern until that
 // name matched would have been the same shape one rename later.
 //
-// So the sweep classifies *every* package-level, receiver-less function
-// the emission writes, and the classification is total:
+// So the sweep classifies *every* receiver-less function the emission
+// writes at package level — in both spellings Go has for one, a func
+// declaration and a var bound to a function literal, which differ in
+// syntax and in nothing this gate cares about — and over that set the
+// classification is total:
 //
 //   - one that returns an entity codegen.Prepare names is that entity's
 //     decoder, and its guards are graded;
@@ -172,6 +198,13 @@ type entityDecoder struct {
 //     two entities has no single axis to be graded against; a function
 //     returning none while testing some other string is a guard no verdict
 //     covers.
+//
+// The net is exactly that wide and the claim is not wider. A method is not
+// swept and is not claimed: a receiver form belongs to the emitted query
+// surface, whose label sites are held to an alphabet chosen per call rather
+// than per decoder, so grading them here would put a large amount of
+// legitimate code under the wrong rule — see "What it does not decide"
+// below, and gqlc-9xy0, which owns that site.
 //
 // Both directions are reconciled per emission: the entities decoded must
 // be exactly the entities codegen.Prepare names, one decoder each. So a
@@ -592,7 +625,8 @@ func unstampableBecause(guard string, shape codegen.EntityKind, alphabet labelAl
 
 // emittedEntityDecoders extracts one backend's entity decoders out of one
 // emission, and refuses the emission outright if it cannot classify every
-// package-level, receiver-less function in it.
+// receiver-less function written at package level in it — in either
+// spelling, see packageLevelFuncs.
 //
 // A decoder is recognised by what it returns: a function whose results
 // name an entity codegen.Prepare derived is that entity's decoder. Filling
@@ -609,8 +643,8 @@ func unstampableBecause(guard string, shape codegen.EntityKind, alphabet labelAl
 // together. The floor left standing was "some decoder was found", which
 // any one surviving decoder satisfies.
 //
-// So the classification is total, and its residue is a failure rather than
-// an omission:
+// So the classification is total over what packageLevelFuncs yields, and
+// its residue is a failure rather than an omission:
 //
 //   - results naming exactly one prepared entity: that entity's decoder;
 //   - results naming none: not a decoder, and then it may compare only
@@ -640,14 +674,10 @@ func emittedEntityDecoders(
 	for _, f := range files {
 		file, err := parser.ParseFile(fset, f.Path, f.Contents, parser.SkipObjectResolution)
 		r.NoError(err, "parsing emitted %s", f.Path)
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Recv != nil || fn.Body == nil {
-				continue
-			}
-			site := fmt.Sprintf("%s in %s", fn.Name.Name, f.Path)
-			guards := comparedStrings(r, fn.Body)
-			entities := resultEntities(fn, shapes)
+		for _, fn := range packageLevelFuncs(file) {
+			site := fmt.Sprintf("%s in %s", fn.name, f.Path)
+			guards := comparedStrings(r, fn.body)
+			entities := resultEntities(fn.typ, shapes)
 			if len(entities) == 0 {
 				for _, guard := range guards {
 					r.True(wireScalarSpellings[guard],
@@ -675,7 +705,7 @@ func emittedEntityDecoders(
 				target, prior, site, entity)
 			decoded[entity] = site
 			out = append(out, entityDecoder{
-				fn:     fn.Name.Name,
+				fn:     fn.name,
 				file:   f.Path,
 				entity: entity,
 				shape:  shapes[entity],
@@ -693,28 +723,212 @@ func emittedEntityDecoders(
 	return out
 }
 
+// TestSweepGradesBothFunctionSpellingsAlike holds the classification as wide
+// as it claims to be: the two ways Go spells a package-level, receiver-less
+// function must be classified and graded identically, not merely both
+// somehow noticed.
+//
+// It exists because the sweep runs over emissions no backend writes this
+// way. Nothing gqlc emits today binds a function to a package-level var, so
+// the arm of packageLevelFuncs that reads one is reached by no fixture, and
+// an arm no test reaches is exactly the kind of thing this gate was built
+// to stop believing in. The witness is therefore synthetic, and it is the
+// residual the fixture corpus cannot express rather than a second copy of
+// what the corpus already checks.
+//
+// The two sources differ in one keyword. Both write a helper that compares
+// a string no verdict here covers, so both must be refused as ungraded
+// sites — and the assertion is that the refusals are *equal*, word for
+// word, because a var-spelled function that reddened with a different
+// diagnostic would be classified by a second rule rather than by the same
+// one.
+func TestSweepGradesBothFunctionSpellingsAlike(t *testing.T) {
+	// The decoder is identical in both and is beside the point: it is here
+	// so the emission decodes exactly the entity the shape map names and
+	// the reconciliation at the end of the sweep is not what fires.
+	const emission = `package emitted
+
+%s
+
+func decodePerson(raw []byte) (Person, error) {
+	label := string(raw)
+	if label != "Person" {
+		return Person{}, nil
+	}
+	if !personLabelOK(label) {
+		return Person{}, nil
+	}
+	return Person{}, nil
+}
+`
+	const (
+		asFunc = `func personLabelOK(label string) bool { return label == "NoSuchLabelAnywhere" }`
+		asVar  = `var personLabelOK = func(label string) bool { return label == "NoSuchLabelAnywhere" }`
+	)
+	shapes := map[string]codegen.EntityKind{"Person": codegen.EntityNode}
+
+	sweepOf := func(helper string) string {
+		files := []codegen.File{{Path: "models.go", Contents: []byte(fmt.Sprintf(emission, helper))}}
+		rec := &recordingT{}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					if _, ok := r.(failedNow); !ok {
+						panic(r)
+					}
+				}
+			}()
+			emittedEntityDecoders(require.New(rec), "probe-backend", files, shapes)
+		}()
+		require.NotEmpty(t, rec.msgs,
+			"the sweep accepted an emission carrying a helper that compares a string no verdict covers, so a guard "+
+				"written there is graded by nothing")
+		return strings.Join(rec.msgs, "\n")
+	}
+
+	// Both spellings are swept from one call site so that the recorded
+	// failures are comparable whole: testify's report carries the caller's
+	// line, and two calls written on two lines would differ in the trace
+	// while agreeing on everything this test is about.
+	refusals := make([]string, 0, 2)
+	for _, helper := range []string{asFunc, asVar} {
+		refusals = append(refusals, sweepOf(helper))
+	}
+
+	require.Contains(t, refusals[0], "personLabelOK",
+		"the func spelling must be refused by name, since the diagnostic is what points at the ungraded site")
+
+	require.Equal(t, refusals[0], refusals[1],
+		"the same helper spelled as a package-level var bound to a function literal is classified differently from "+
+			"the same helper spelled as a func declaration. A var is an *ast.GenDecl and a func is an *ast.FuncDecl, "+
+			"but that is a difference in syntax and in nothing this gate decides: both are receiver-less functions "+
+			"written at package level, both can hold a label guard, and a sweep that reads only one of them leaves "+
+			"the other's guards ungraded while claiming the classification is total")
+}
+
+// recordingT collects what a require reported instead of failing the test,
+// so that a helper asserting on its caller's behalf can be tested rather
+// than only run. It is the same device internal/schema/gql's
+// TestMeasureCoverageRejects uses, for the same reason.
+//
+// FailNow must not return. It panics rather than calling runtime.Goexit
+// because Goexit needs the call on a goroutine of its own, and an assertion
+// inside a goroutine is indistinguishable — to a reader and to testifylint —
+// from the mistake where a failure is reported to a test that has finished.
+type recordingT struct{ msgs []string }
+
+// failedNow is the panic value, distinct so that a panic from anywhere else
+// in the sweep is re-raised rather than read as a refusal.
+type failedNow struct{}
+
+func (r *recordingT) Errorf(format string, args ...any) {
+	r.msgs = append(r.msgs, fmt.Sprintf(format, args...))
+}
+
+func (r *recordingT) FailNow() { panic(failedNow{}) }
+
+// emittedFunc is one receiver-less function an emission writes at package
+// level, reduced to the three things the classification reads: what it is
+// called, for the diagnostic; its signature, which says what it can fill;
+// and its body, which holds the strings it compares.
+//
+// It exists so the sweep reads a function rather than a *declaration*. The
+// two spellings arrive as different nodes — an *ast.FuncDecl and a value
+// inside an *ast.GenDecl — and every question this gate asks is answered
+// identically for both, so they are flattened here and nowhere else has to
+// know there were two.
+type emittedFunc struct {
+	name string
+	typ  *ast.FuncType
+	body *ast.BlockStmt
+}
+
+// packageLevelFuncs is every receiver-less function one emitted file
+// writes at package level, in both spellings Go has for one:
+//
+//	func decodePost(raw []byte) (Post, error) { … }
+//	var decodePost = func(raw []byte) (Post, error) { … }
+//
+// Reading only the first is what the totality claim used to overclaim. A
+// sweep over file.Decls keeping only *ast.FuncDecl classifies the second as
+// nothing at all — a var is an *ast.GenDecl — so a label guard reachable
+// only through one was neither graded nor reported as ungraded, and the
+// gate stayed green on an emission whose decoder no value could satisfy.
+// The var form is a receiver-less function by every reading that matters
+// here: it is package-level, it is called the same way, and it can hold the
+// same guard. Being a GenDecl is a syntactic accident and is treated as
+// one.
+//
+// A method is not yielded, and that exclusion is the claim's edge rather
+// than a second blind spot of the same kind: a receiver form belongs to the
+// emitted query surface, which the gate states outright it holds nothing
+// about (gqlc-9xy0). The net and the claim are the same width on purpose.
+//
+// Only the top-level value of a var is read. A function literal nested
+// inside a body is already covered, because the enclosing function's body
+// is walked whole and its comparisons are collected with the rest.
+func packageLevelFuncs(file *ast.File) []emittedFunc {
+	var out []emittedFunc
+	for _, decl := range file.Decls {
+		switch d := decl.(type) {
+		case *ast.FuncDecl:
+			// A nil body is a declaration whose implementation is
+			// elsewhere (assembly, a linkname); it compares nothing and
+			// there is no body to walk.
+			if d.Recv != nil || d.Body == nil {
+				continue
+			}
+			out = append(out, emittedFunc{name: d.Name.Name, typ: d.Type, body: d.Body})
+		case *ast.GenDecl:
+			if d.Tok != token.VAR {
+				continue
+			}
+			for _, spec := range d.Specs {
+				value, ok := spec.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				// Names and Values line up index for index whenever a
+				// value is a function literal: the only ValueSpec shape
+				// where they do not is the multi-return `var a, b = f()`,
+				// whose single value is a call and never a literal.
+				for i, v := range value.Values {
+					lit, ok := v.(*ast.FuncLit)
+					if !ok {
+						continue
+					}
+					out = append(out, emittedFunc{name: value.Names[i].Name, typ: lit.Type, body: lit.Body})
+				}
+			}
+		}
+	}
+	return out
+}
+
 // resultEntities names the prepared entities one function's results carry.
 // It is how the sweep recognises a decoder, and it is deliberately blind
 // to the function's name: what a function returns is what it can fill.
+// It takes the signature rather than the declaration so that the two
+// spellings packageLevelFuncs yields are recognised by one rule.
 //
 // A qualified type is another package's (dbtype.Node) and a type parameter
 // is the caller's, so neither can be an entity this emission declares;
 // both are stepped over rather than matched by spelling, so a schema that
 // happened to name a node type Node or T could not be confused for one.
-func resultEntities(fn *ast.FuncDecl, shapes map[string]codegen.EntityKind) []string {
-	if fn.Type.Results == nil {
+func resultEntities(typ *ast.FuncType, shapes map[string]codegen.EntityKind) []string {
+	if typ.Results == nil {
 		return nil
 	}
 	params := map[string]bool{}
-	if fn.Type.TypeParams != nil {
-		for _, field := range fn.Type.TypeParams.List {
+	if typ.TypeParams != nil {
+		for _, field := range typ.TypeParams.List {
 			for _, name := range field.Names {
 				params[name.Name] = true
 			}
 		}
 	}
 	var out []string
-	for _, field := range fn.Type.Results.List {
+	for _, field := range typ.Results.List {
 		ast.Inspect(field.Type, func(n ast.Node) bool {
 			ident, ok := n.(*ast.Ident)
 			if !ok {
