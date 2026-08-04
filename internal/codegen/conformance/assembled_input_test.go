@@ -27,11 +27,14 @@ import (
 // ValidatedQuery, Column and every resolver.Resolved* variant are
 // exported structs with exported fields, so what the resolver builds does
 // not bound what a caller can hand over. The last two rows to move were
-// argued the same way one level down — a switch over resolver.ResolvedType
-// is not total because the interface is sealed, since the seal is against
-// new implementations and not against the pointer forms of the eight it
-// has. Each case below is one such hand-off, and every one fired the
-// first time it was written.
+// argued the same way one level down — a switch over
+// resolver.ResolvedType is total because the interface is sealed. It is
+// not sealed: the unexported marker stops another package writing an
+// implementation from scratch, but Go promotes an embedded type's
+// unexported methods, so struct{ resolver.ResolvedNode } satisfies it
+// from here and matches no case arm. The pointer forms below are the
+// cheapest witness of the same opening. Each case is one such hand-off,
+// and every one fired the first time it was written.
 //
 // The suite is the coverage §5 step 3 asks for on those rows, and it is
 // half of what TestSentinelTaxonomy measures: it links internal/codegen
@@ -166,8 +169,8 @@ func isIotaAnchor(spec *ast.ValueSpec, typeName string) bool {
 	if !ok || ident.Name != typeName || len(spec.Values) != 1 {
 		return false
 	}
-	iota, ok := spec.Values[0].(*ast.Ident)
-	return ok && iota.Name == "iota"
+	anchor, ok := spec.Values[0].(*ast.Ident)
+	return ok && anchor.Name == "iota"
 }
 
 // firstUndeclaredTemporal is the lowest resolver.Temporal past the end of
@@ -309,7 +312,7 @@ func (s *AssembledInputSuite) TestAssembledInput() {
 		},
 		{
 			name: "column-unknown-variant",
-			why:  "The pointer form of a variant. resolver.ResolvedType is sealed against new implementations by an unexported marker method, but every variant declares that marker and String with value receivers, so *ResolvedNode satisfies the interface — while `case resolver.ResolvedNode:` does not match it. The same labels in their value form are admitted.",
+			why:  "The pointer form of a variant. Every variant declares the marker and String with value receivers, so *ResolvedNode satisfies resolver.ResolvedType while `case resolver.ResolvedNode:` does not match it. The same labels in their value form are admitted. The pointer is the cheapest witness rather than the only one: the unexported marker seals the interface against nothing, since an out-of-package struct{ resolver.ResolvedNode } promotes it and reaches this same arm.",
 			in: codegen.Input{
 				Schema:  probeSchema(),
 				Queries: []codegen.NamedQuery{probeQuery(resolver.Column{Name: "n", Type: &resolver.ResolvedNode{Labels: "Person"}})},
@@ -417,7 +420,7 @@ func (s *AssembledInputSuite) TestAssembledInput() {
 		},
 		{
 			name: "list-elem-unknown-variant",
-			why:  "The same pointer form one level down: buildListElemPlan's switch names the same eight value forms, so the element falls past every arm.",
+			why:  "The same pointer form one level down: buildListElemPlan's switch names the same eight value forms, so the element falls past every arm — as does an embedded variant, on the same argument as the column case above.",
 			in: codegen.Input{
 				Schema: probeSchema(),
 				Queries: []codegen.NamedQuery{probeQuery(resolver.Column{
@@ -448,6 +451,86 @@ func (s *AssembledInputSuite) TestAssembledInput() {
 			// which is contract — down to how an undeclared temporal kind
 			// renders, since list-elem-temporal's whole claim is that its
 			// value names no member of the enum.
+			s.EqualError(err, tc.msg)
+		})
+	}
+}
+
+// embeddedNode and embeddedProperty implement resolver.ResolvedType from
+// outside internal/resolver by embedding a variant. Go promotes an
+// embedded type's unexported methods, so isResolvedType() comes along
+// with ResolvedNode and the interface is satisfied in one line — from
+// this package, or from any package a consumer of gqlc writes.
+//
+// The compile-time assertions below are half the point. If they ever
+// stop compiling, resolver.ResolvedType has become genuinely closed and
+// §5.1 step 5 needs rewriting again, in the other direction.
+type embeddedNode struct{ resolver.ResolvedNode }
+
+type embeddedProperty struct{ resolver.ResolvedProperty }
+
+var (
+	_ resolver.ResolvedType = embeddedNode{}
+	_ resolver.ResolvedType = embeddedProperty{}
+)
+
+// TestMarkerSealDoesNotCloseTheSum pins the fact §5.1 step 5 rests on and
+// two rounds of review got wrong: an unexported marker method does not
+// seal an interface whose implementations are exported.
+//
+// The taxonomy called the switches over resolver.ResolvedType total,
+// counting eight variants. A review round found the pointer forms and
+// made it sixteen. Both numbers were answers to the wrong question —
+// there is no count, because an out-of-package caller reaches these arms
+// with a struct literal and an embedded field, and can write as many as
+// it likes. That is why §3 has no **Total** row and why step 5 tells a
+// classifier not to count but to name the check that answers first.
+//
+// The three sites are the ones §2 and §3 argue over: Phase A's column
+// switch, buildListElemPlan's element switch, and Phase A's parameter
+// type assertion. Each answers with its own message, so a switch that
+// grew an arm matching the interface itself — the shape of somebody
+// deciding the sum is closed after all — reddens here by name.
+func (s *AssembledInputSuite) TestMarkerSealDoesNotCloseTheSum() {
+	newGen, ok := s.backends.Lookup(assembledTarget)
+	s.Require().True(ok, "no backend registered under %q", assembledTarget)
+
+	cases := []struct {
+		name string
+		col  resolver.Column
+		par  *resolver.ResolvedParameter
+		msg  string
+	}{
+		{
+			name: "column-unknown-variant",
+			col:  resolver.Column{Name: "n", Type: embeddedNode{resolver.ResolvedNode{Labels: "Person"}}},
+			msg:  `out of C6 scope: query "Fetch" column 0 "n" resolved as node`,
+		},
+		{
+			name: "list-elem-unknown-variant",
+			col: resolver.Column{
+				Name: "xs",
+				Type: resolver.ResolvedList{Element: embeddedNode{resolver.ResolvedNode{Labels: "Person"}}},
+			},
+			msg: `query "Fetch" column 0 "xs": out of C6 scope: list element has unknown resolved type node`,
+		},
+		{
+			name: "param-non-property",
+			par:  &resolver.ResolvedParameter{Name: "p", Type: embeddedProperty{}},
+			msg:  `out of C6 scope: query "Fetch" parameter 0 $p resolved as property: (non-property parameters are post-v1)`,
+		},
+	}
+
+	for _, tc := range cases {
+		s.Run(tc.name, func() {
+			q := probeQuery(tc.col)
+			if tc.par != nil {
+				q = probeParamQuery(*tc.par)
+			}
+			files, err := newGen("").Generate(codegen.Input{Schema: probeSchema(), Queries: []codegen.NamedQuery{q}})
+			s.Nil(files, "a refused Input must emit nothing")
+			s.Require().Error(err, "an embedded variant satisfies resolver.ResolvedType and must reach this fail-site")
+			s.Require().ErrorIs(err, codegen.ErrOutOfC6Scope)
 			s.EqualError(err, tc.msg)
 		})
 	}

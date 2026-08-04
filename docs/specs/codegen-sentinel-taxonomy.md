@@ -135,8 +135,8 @@ dead, and that no dead site hides in it.
 | `ErrUnrepresentableWidth` | A list element whose leaf carries a property width the target's type table has no carrier for. Assembled: a `ResolvedList` over a `ResolvedProperty`, a shape `resolveType` has no arm for. Phase B repeats the walk over the element it splits off a schema LIST property; that element's width is one Phase Z has already passed. | Phase A |
 | `ErrOutOfC6Scope` | A column, or a list element leaf, referencing a node or edge type the schema does not declare. Assembled: the resolver resolves against the same schema Phase Z indexed and commits only declared types. | Phase A |
 | `ErrOutOfC6Scope` | An edge union with fewer than two candidates, or one naming a candidate the schema does not declare. Assembled: the resolver collapses a lone candidate to `ResolvedEdge` and commits only declared edges. | Phase A |
-| `ErrOutOfC6Scope` | A column whose resolved type matches no arm of the closed-sum switch. Assembled: the pointer form of a variant, `&resolver.ResolvedNode{}`. `resolver.ResolvedType`'s unexported marker seals it against *new implementations*, not against the pointer forms of the eight it has — the marker and every variant's `String` take value receivers, so `*ResolvedNode` satisfies the interface while `case resolver.ResolvedNode:` does not match it. Sixteen forms inhabit the sum; the switch names eight. The nil interface reaches this same arm and panics in the `String()` call inside the `return` rather than refusing (`gqlc-edze`); the pointer form is what pays this row's coverage. | Phase A |
-| `ErrOutOfC6Scope` | A list element whose resolved type matches no arm of `buildListElemPlan`'s switch. Assembled: the same pointer form under a `ResolvedList`, on the same argument — that switch names the same eight, and its arm carries the same nil panic. | Phase A |
+| `ErrOutOfC6Scope` | A column whose resolved type matches no arm of the switch over `resolver.ResolvedType`. Assembled: the pointer form of a variant, `&resolver.ResolvedNode{}` — the marker and every variant's `String` take value receivers, so `*ResolvedNode` satisfies the interface while `case resolver.ResolvedNode:` does not match it. The fall-through set is not "the eight and their pointers": `resolver.ResolvedType` is sealed against nothing an out-of-package caller can write, because Go promotes an embedded variant's unexported marker and `struct{ resolver.ResolvedNode }` therefore satisfies the interface from any package and lands here too (§5.1 step 5). Two shapes reach this arm and fault instead of refusing (`gqlc-edze`): the nil interface, and every one of the eight typed-nil pointer forms — Go emits a nil check before a value method reached through a pointer, so even the zero-sized `(*resolver.ResolvedUnknown)(nil)` panics in the `String()` call inside the `return`. A non-nil pointer form is what pays this row's coverage. | Phase A |
+| `ErrOutOfC6Scope` | A list element whose resolved type matches no arm of `buildListElemPlan`'s switch. Assembled: the same pointer form under a `ResolvedList`, on the same argument — that switch names the same eight arms and its default is open in the same two directions, pointer forms and embedded promotions. It carries the same faults: all eight typed-nil pointer forms panic in the `String()` call inside the `return`, and so does a `resolver.ResolvedList{Element: nil}`, whose nil element reaches the same line and dereferences there (`gqlc-edze`). | Phase A |
 | `ErrUnrepresentableTemporal` | A list element whose temporal kind the target's type table has no carrier for. Assembled: a `resolver.Temporal` outside its own constant set, on the same footing as the out-of-set `Cardinality` above. No *query* reaches it, and would need a backend that both refuses a kind and serves list columns: only Apache AGE refuses a kind, and `age.rejectUnservedQueries` drops a query carrying a list column three lines before `age.generate` calls `codegen.Prepare`. Phase Z is not what stops it — Phase Z walks schema property widths, and a `collect(...)` element comes from an expression. | Phase A |
 | `ErrParamNameCollision` | Two parameters of one query mangling to one `Params` field. | Phase B |
 | `ErrRowFieldCollision` | Two columns of one query deriving one `Row` field. | Phase B |
@@ -154,12 +154,13 @@ reading a fail-site:
   value, so the earlier one always answers first. The row names the
   winner and the input it wins on. Every row below is one of these.
 - **Total.** The branch is the default arm of a switch whose cases
-  already name every *inhabitant* of a closed sum, so no value of the
-  switched type reaches it. The row names the type and the count. No row
-  carries this today, and §5.1 step 5 says why the count is harder than
-  it looks: a Go interface sealed by an unexported marker is closed
-  against new implementations and not against the pointer forms of the
-  ones it has.
+  already name every *inhabitant* of the switched type, so no value of
+  that type reaches it. No row carries this, and §5.1 step 5 says why
+  none of the switches here can: an interface with one exported
+  implementation is open to any package that embeds it, and a named
+  integer enum is an integer. Neither has a count to take. A default arm
+  that looks total is a shadowed one whose shadow has not been named
+  yet.
 
 A branch that *is* reached but faults before its `return` completes is
 neither. It is reached, so its row belongs in §2 with the input that
@@ -178,8 +179,9 @@ from outside the package, found live, and moved to §2 — thirteen resting
 on that argument, one (`list-elem-temporal`) on a shadow that turned out
 to be a different backend's pre-gate and to cover the query path only,
 and two (`column-unknown-variant`, `list-elem-unknown-variant`) on a
-totality claim that counted the sum's eight declarations rather than its
-sixteen inhabitants.
+totality claim over a sum that has no inhabitant count to take: an
+unexported marker method is not a seal, because Go promotes it through
+an embedded variant.
 
 They are listed because §2 claims to carry every construct in each
 sentinel's catchment, and a reader matching a fail-site in `prepare.go`
@@ -215,9 +217,9 @@ names the row — that half the fence does hold.
 
 | Sentinel | Fail-site | Branch | Why it cannot fire |
 |---|---|---|---|
-| `ErrOutOfC6Scope` | `param-type-invariant` | A parameter type Phase B admits only in its representable form. | Shadowed. `Prepare` runs `phaseAAdmit` unconditionally before `phaseBDerive`, and Phase A's parameter loop applies the same `ResolvedProperty` type assertion to the same `q.Validated.Parameters` slice, refusing with the same sentinel. That assertion admits the value form alone, so everything Phase B's would refuse — every other variant, every variant's pointer form, and the nil interface — meets Phase A's first. Measured: an assembled `Input` carrying a `ResolvedScalar` parameter returns Phase A's message, and so does one carrying a `*resolver.ResolvedProperty`. A nil parameter type reaches Phase A's site too and panics there (`gqlc-edze`); that is a fact about Phase A's fail-site, not a second reason this one is dead. |
+| `ErrOutOfC6Scope` | `param-type-invariant` | A parameter type Phase B admits only in its representable form. | Shadowed. `Prepare` runs `phaseAAdmit` unconditionally before `phaseBDerive`, and Phase A's parameter loop applies the same `ResolvedProperty` type assertion to the same `q.Validated.Parameters` slice, refusing with the same sentinel. The two are the same assertion on the same value, so whatever fails one fails the other and Phase A answers first — the argument needs no enumeration of what can fail it, which is as well, since `resolver.ResolvedType` is open (§5.1 step 5) and no enumeration exists. Measured: an assembled `Input` carrying a `ResolvedScalar` parameter returns Phase A's message, and so do one carrying a `*resolver.ResolvedProperty` and one carrying a `struct{ resolver.ResolvedProperty }`. A nil parameter type reaches Phase A's site too and panics there (`gqlc-edze`); that is a fact about Phase A's fail-site, not a second reason this one is dead. |
 | `ErrAliasRequired` | `row-field-alias` | A column whose text yields no row-field name at derivation. | Shadowed. Phase A calls `rowFieldName` over the same `q.Validated.Columns` slice and refuses with the same sentinel and the same message. The two calls take one argument, `col.Name`, and `rowFieldName` is a pure function of it, so no column can be admitted by the first call and refused by the second. |
-| `ErrOutOfC6Scope` | `column-type-invariant` | A column type matching no arm of Phase B's plan switch. | Shadowed, exactly. `Prepare` runs `phaseAAdmit` unconditionally before `phaseBDerive`, and Phase A's column switch names the same eight variants Phase B's does over the same `q.Validated.Columns` slice — so whatever falls through Phase B's default falls through Phase A's, and Phase A answers first. That set is wider than the nil interface: `resolver.ResolvedType`'s marker and every variant's `String` take value receivers, so `*resolver.ResolvedNode` inhabits the sum and no `case resolver.ResolvedNode:` arm matches it. Measured: a `*resolver.ResolvedNode` column returns Phase A's message (the §2 `column-unknown-variant` row), and a nil column panics at that same Phase A site (`gqlc-edze`). This branch goes live only if Phase B's switch loses an arm Phase A's keeps, which is the deletion it fences. |
+| `ErrOutOfC6Scope` | `column-type-invariant` | A column type matching no arm of Phase B's plan switch. | Shadowed, exactly. `Prepare` runs `phaseAAdmit` unconditionally before `phaseBDerive`, and Phase A's column switch names the same eight variants Phase B's does over the same `q.Validated.Columns` slice — so whatever falls through Phase B's default falls through Phase A's, and Phase A answers first. The shadow rests on the two arm lists being equal, not on the set that falls through them being small — which matters, because that set is unbounded: `resolver.ResolvedType` is sealed against nothing an out-of-package caller can write (§5.1 step 5), so pointer forms, embedded promotions and anything else a caller invents all fall through both switches alike. Measured, each landing on Phase A's message and the §2 `column-unknown-variant` row: `*resolver.ResolvedNode`, and `struct{ resolver.ResolvedNode }` declared outside `internal/resolver`. A nil column and all eight typed-nil pointer forms reach that same Phase A site and panic there (`gqlc-edze`). This branch goes live only if Phase B's switch loses an arm Phase A's keeps, which is the deletion it fences. |
 
 ## 4. Declared and deliberately unreachable
 
@@ -277,8 +279,8 @@ test-presence: a test inside `package codegen` can call an unexported
 function with a hand-built `resolver` value and reach a branch no input
 can, which is what put three unreachable branches into §2 before
 `gqlc-h4ug`, including one whose twin — the identical default arm over
-the same sealed sum, one level up — sat in §3 the whole time because it
-happened to have no unit test. The second classifies by upstream habit:
+the same sum, one level up — sat in §3 the whole time because it happened
+to have no unit test. The second classifies by upstream habit:
 `resolver.ValidatedQuery`, `resolver.Column` and all eight `Resolved*`
 variants are exported structs with exported fields, so what the resolver
 does or does not construct constrains the pipeline and not the contract.
@@ -286,9 +288,13 @@ Thirteen §3 rows argued that way, and all thirteen fired the first time
 anyone assembled the value by hand. A fourteenth argued a shadow that
 held for queries and not for assembled `Input`s, which is the same
 mistake read from the other side. Two more argued totality over a sum
-whose inhabitants they had undercounted, which is that mistake one level
-down: `resolver.ResolvedType`'s unexported marker is a fact about who may
-implement it, and the question is again what a caller can hand over.
+they believed closed, which is that mistake one level down:
+`resolver.ResolvedType`'s unexported marker is a fact about who may
+implement it *from scratch*, and the question is again what a caller can
+hand over — which, since Go promotes an embedded variant's unexported
+methods, is anything at all. Two rounds of review were spent shrinking
+that count from eight to sixteen before anyone asked whether it was a
+count. It is not; §5.1 step 5 carries the rule that replaced it.
 
 So the measurement is taken from outside the package.
 `TestSentinelTaxonomy` asks `go list -test` which packages' test
@@ -346,17 +352,40 @@ To classify a branch:
    which check wins, on what input, and why nothing can slip past the
    first and be caught by the second.
 5. If the branch is a default arm whose switch already names every
-   member of a sealed type, it is **total** — but count the type's
-   inhabitants, not its declarations. An interface sealed by an
-   unexported marker method is closed against new implementations and
-   *not* against the pointer forms of the ones it has: a variant whose
-   marker and `String` take value receivers is satisfied by `*Variant`
-   too, and a `case Variant:` arm does not match it, so an eight-variant
-   sum has sixteen inhabitants and a nil besides. Say which type, how
-   many inhabitants, and which arms cover them, so a reader who adds a
-   ninth variant — or a ninth arm — knows the count moved. If the count
-   does not come out total, the branch is not: fall back to 4, or write
-   the case that reaches it.
+   member a `const` block or a marker interface appears to close, it
+   *looks* **total**. Do not count. Those two shapes are the only ones
+   switched on in this package, and neither has a bounded inhabitant
+   set, so the count cannot come out and the answer is always step 4 or
+   a new §2 row.
+
+   An **interface is not sealed by an unexported marker method.** The
+   marker stops another package writing an implementation from
+   scratch. It stops nothing else, because Go promotes an embedded
+   type's unexported methods — so
+
+   ```go
+   type mine struct{ resolver.ResolvedNode }   // outside internal/resolver
+   var _ resolver.ResolvedType = mine{}        // compiles
+   ```
+
+   satisfies the interface in one line, from any package, and no
+   `case resolver.ResolvedNode:` arm matches it. The pointer forms are
+   the same hole a size smaller: every variant's marker and `String`
+   take value receivers, so `*resolver.ResolvedNode` satisfies the
+   interface too and no value arm matches it either. Both reach the
+   default. There is no number to write down — the set is open for as
+   long as one implementation is exported, and that is the condition
+   the seal cannot touch.
+
+   A **named integer enum is an integer.** A `const` block names six
+   `resolver.Temporal`s and a `resolver.Temporal` holds whatever an
+   `int` holds; an out-of-package caller writes `resolver.Temporal(6)`
+   or `codegen.Cardinality(7)` with no conversion the compiler
+   objects to. §2 carries a row for each, reached exactly that way.
+
+   So step 5 has no outcome of its own. Fall back to 4 and name the
+   check that answers first, or write the case that reaches the branch
+   and give it a §2 row.
 6. If the branch runs but faults before its `return` completes, it is
    not a §3 row at all. It is reached, so it belongs in §2 with the input
    that reaches it, and the fault is a bug to file against that site.
