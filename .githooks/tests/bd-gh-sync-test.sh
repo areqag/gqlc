@@ -1765,7 +1765,13 @@ import json, sys
 print(json.dumps([{"number": n, "state": "OPEN", "body": "x"}
                   for n in range(1, int(sys.argv[1]) + 1)]))' "$ALL_LIMIT")"
 
-run_sync pull '[]' "$GH_ALL_FULL" '[]' '[]'
+# One bead, carrying no external_ref: enough that the bead list is a set this
+# run enumerated (gqlc-nvjz below withdraws the counts when it is not), and
+# invisible to the orphan tally these two cases are about, because a bead with
+# no mirror claims no issue.
+UNMIRRORED='{"id":"b-nomirror","status":"open","external_ref":"","description":"x"}'
+
+run_sync pull "[$UNMIRRORED]" "$GH_ALL_FULL" '[]' "[$UNMIRRORED]"
 # Outright, for the reason the push side takes it outright.
 _ll="$(last_line)"
 if [ "$(argv_after 'gh issue list' 0 | grep -A1 -- '--limit' | tail -n 1)" != "$ALL_LIMIT" ]; then
@@ -1789,12 +1795,108 @@ GH_ALL_SHORT="$(python3 -c '
 import json, sys
 print(json.dumps([{"number": n, "state": "OPEN", "body": "x"}
                   for n in range(1, int(sys.argv[1]))]))' "$ALL_LIMIT")"
-run_sync pull '[]' "$GH_ALL_SHORT" '[]' '[]'
+run_sync pull "[$UNMIRRORED]" "$GH_ALL_SHORT" '[]' "[$UNMIRRORED]"
 if [ "$(last_line)" = "bd-gh-sync: pulled 0 bead(s), held 0, left $((ALL_LIMIT - 1)) unmirrored GH issue(s) alone." ]; then
     ok "an all-state listing one short of its --limit is counted as the whole set"
 else
     bad "an all-state listing one short of its --limit is counted as the whole set" \
         "got: $(last_line)"
+fi
+
+# --- gqlc-nvjz: the pull path has to witness its own bead listing ------------
+# `gqlc-w4q9` and `gqlc-mbe0` established one rule over three sets on the push
+# side: a count reaches the summary only if this run enumerated the set behind
+# it, and a listing it could not read is not an empty listing. The pull path
+# reported `held 0, left N unmirrored GH issue(s) alone` off a `bd list` that
+# answered `[]` with exit 0 — a held count over a bead set nobody witnessed, and
+# an orphan count whose whole meaning is "no bead names this issue", asserted
+# against no beads at all.
+
+# The status, first, and separately from the cardinality. Both inputs to the
+# selection were `|| : >file`, which threw the exit status away and left the
+# python's JSONDecodeError as the only account of what happened: the run
+# refused, correctly, and named neither `bd list` nor `gh issue list` as the
+# reason. Detail first, verdict last, exactly as the push twin of this case.
+bd_list_fails 1 7
+run_sync pull "[$CLAIMED]" "$GH7" '[]' "[$CLAIMED]"
+_ll="$(last_line)"
+if ! grep -q "'bd list' exited 7" "$TMP/err"; then
+    bad "a refused pull names the 'bd list' exit status behind it" \
+        "no line names it: $(grep -c . "$TMP/err") line(s) on stderr"
+elif [ -z "$_ll" ] || [ -n "${_ll##*SKIPPING pull*}" ]; then
+    bad "a refused pull names the 'bd list' exit status behind it" \
+        "the detail displaced the verdict from the last line: $_ll"
+else
+    ok "a refused pull names the 'bd list' exit status, verdict still last"
+fi
+
+# The same for the other input. `gh issue list` failing is the one the operator
+# acts on differently — GitHub is down or the token expired, and no amount of
+# waiting for the bd database helps.
+GH_LIST_RC=6
+run_sync pull "[$CLAIMED]" "$GH7" '[]' "[$CLAIMED]"
+GH_LIST_RC=0
+_ll="$(last_line)"
+if ! grep -q "'gh issue list' exited 6" "$TMP/err"; then
+    bad "a refused pull names the 'gh issue list' exit status behind it" \
+        "no line names it: $(grep -c . "$TMP/err") line(s) on stderr"
+elif [ -z "$_ll" ] || [ -n "${_ll##*SKIPPING pull*}" ]; then
+    bad "a refused pull names the 'gh issue list' exit status behind it" \
+        "the detail displaced the verdict from the last line: $_ll"
+else
+    ok "a refused pull names the 'gh issue list' exit status, verdict still last"
+fi
+
+# ...and the cardinality, which the statuses above cannot speak for: `bd list`
+# answering `[]` and exiting 0 is what the wrong workspace looks like, and it is
+# the shape this bead was filed on. Both counts on the summary line are derived
+# from that list — "held" directly, and "unmirrored" because an issue is
+# unmirrored only relative to a bead set — so both have to be withdrawn.
+run_sync pull '[]' '[{"number":11,"state":"OPEN","body":"x"}]' '[]' '[]'
+_ll="$(last_line)"
+if [ "$RC" -ne 0 ]; then
+    bad "an empty pull-side bead list is blind, not held-zero" \
+        "exited $RC, and pull rides on 'git pull': $_ll"
+elif [ -z "${_ll##*held 0*}" ]; then
+    bad "an empty pull-side bead list is blind, not held-zero" \
+        "printed a held count over a list nobody enumerated: $_ll"
+elif [ -z "$_ll" ] || [ -n "${_ll##*held an unknown number*}" ]; then
+    bad "an empty pull-side bead list is blind, not held-zero" "got: $_ll"
+elif [ -n "${_ll##*left an unknown number of unmirrored GH issue(s) alone*}" ]; then
+    bad "an empty pull-side bead list is blind, not held-zero" \
+        "called an issue unmirrored against no beads at all: $_ll"
+elif ! grep -q 'the bead list came back empty' "$TMP/err"; then
+    bad "an empty pull-side bead list is blind, not held-zero" \
+        "withdrew the counts without saying why: $_ll"
+else
+    ok "an empty pull-side bead list withdraws both counts derived from it"
+fi
+
+# ...and the guard must not be the push side's, transplanted. There, a run that
+# minted N issues and then saw an empty open listing is contradictory on its
+# face. Here the corresponding witness would be "beads carry external_refs, so
+# the all-state listing cannot be empty" — and that is false. `external_ref` is
+# matched by /issues/(\d+)$ over any URL, so a ref legitimately names another
+# repository; mirrored beads over an empty listing for *this* one is a reachable
+# configuration, and refusing it would fire on every `git pull`. The bead stays
+# held, by the same not-in-listing rule that holds any bead whose issue is out
+# of view, and the run reports real numbers and exits 0.
+FOREIGN="{\"id\":\"b-elsewhere\",\"status\":\"open\",\"external_ref\":\"https://github.com/other/repo/issues/42\",\"description\":\"x\"}"
+run_sync pull "[$FOREIGN]" '[]' '[]' "[$FOREIGN]"
+if [ "$RC" -ne 0 ]; then
+    bad "a mirrored bead over an empty all-state listing is not refused" \
+        "exited $RC: $(last_line)"
+elif grep -q 'SKIPPING pull' "$TMP/err"; then
+    bad "a mirrored bead over an empty all-state listing is not refused" \
+        "refused a legitimately empty listing: $(last_line)"
+elif ! grep -q 'holding b-elsewhere (GH #42) out of the pull' "$TMP/err"; then
+    bad "a mirrored bead over an empty all-state listing is not refused" \
+        "the bead was not held out of the pull: $(grep 'b-elsewhere' "$TMP/err" | tr '\n' '|')"
+elif [ "$(last_line)" != "bd-gh-sync: pulled 0 bead(s), held 1, left 0 unmirrored GH issue(s) alone." ]; then
+    bad "a mirrored bead over an empty all-state listing is not refused" \
+        "got: $(last_line)"
+else
+    ok "a bead whose external_ref names another repository is held, not refused"
 fi
 
 # --- gqlc-w4q9 review: the header's claim has to hold on every exit ----------

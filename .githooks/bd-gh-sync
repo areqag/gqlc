@@ -47,7 +47,13 @@
 #            never run. Deletion is named apart from the rest because it is the
 #            one change no re-assert undoes. The last stderr line carries the
 #            outcome, warnings included, because the session-start caller keeps
-#            only that line.
+#            only that line, and no count reaches it unless this run enumerated
+#            the set behind it: a bead list that came back empty withdraws both
+#            arms read off it, a GitHub listing cut off at its --limit withdraws
+#            the orphan one. Emptiness here withdraws a number and never
+#            refuses the pull — an external_ref is matched over any URL and may
+#            name another repository, so mirrored beads over an empty listing
+#            is a legitimate configuration rather than a lost one.
 #   - push:  mirror bd-created beads that have no GH mirror yet, AND close
 #            GH issues whose bead was closed locally.
 #            Deliberately does NOT run `bd github sync --push-only` (which
@@ -111,11 +117,22 @@ _gh_limit_all=1000
 _gh_limit_open=500
 
 if [ "$_action" = "pull" ]; then
+  # Both statuses are kept rather than thrown away with `|| : >file`. An input
+  # that will not load already refuses the run below, on the selection's own
+  # JSONDecodeError — but that traceback is the same whether bd never answered
+  # or answered with something unparseable, and the two send the operator to
+  # different places: one is contention on the database, the other is a listing
+  # to go and look at. Deciding "unreadable" on the status rather than inferring
+  # it from what came back is also what keeps this separable from cardinality,
+  # which on this path is not decidable as failure at all. Same reading as the
+  # push side's `_list_rc`.
+  _list_rc=0
   bd list --status all --limit 0 --json >"$_tmp/beads.json" 2>/dev/null \
-    || : >"$_tmp/beads.json"
+    || { _list_rc=$?; : >"$_tmp/beads.json"; }
+  _gh_rc=0
   GITHUB_TOKEN="$_token" gh issue list --state all --limit "$_gh_limit_all" \
     --json number,state,body >"$_tmp/gh.json" 2>/dev/null \
-    || : >"$_tmp/gh.json"
+    || { _gh_rc=$?; : >"$_tmp/gh.json"; }
 
   # Emits ALLOW/HOLD/ORPHAN records terminated by DONE. That sentinel is what
   # separates "selection ran and chose nothing" from "selection did not run";
@@ -230,6 +247,13 @@ for n, (state, _) in sorted(gh.items()):
 if len(issues) >= int(sys.argv[3]):
     out.append(f"TRUNCATED {len(issues)}")
 
+# How many beads the selection actually walked. "Nothing was held back" and "the
+# list this ran on was empty" emit the same zero HOLD records, and only the
+# first is a measurement. The ORPHAN tally rides on the same list — an issue is
+# unmirrored only relative to a set of beads — so an empty one turns every
+# mirrored issue into an orphan besides.
+out.append(f"COUNT {len(beads)}")
+
 for line in out:
     print(line)
 print("DONE")
@@ -242,6 +266,16 @@ PYEOF
     # echoing the traceback below it handed .claude/settings.json a bare
     # JSONDecodeError and no hint that a pull had been refused at all.
     sed 's/^/bd-gh-sync:   /' "$_tmp/plan.err" >&2 2>/dev/null
+    # Which of the two inputs would not answer, where either did not. The
+    # traceback above names the file that would not parse and nothing about why
+    # it was empty, and "wait for the bd database" and "GitHub or the token is
+    # the problem" are not the same instruction.
+    if [ "$_list_rc" -ne 0 ]; then
+      echo "bd-gh-sync: 'bd list' exited ${_list_rc} — usually something else holds the bd database." >&2
+    fi
+    if [ "$_gh_rc" -ne 0 ]; then
+      echo "bd-gh-sync: 'gh issue list' exited ${_gh_rc} — GitHub's state could not be read at all." >&2
+    fi
     echo "bd-gh-sync: selection exited ${_rc}; an unscoped pull would let GitHub" >&2
     echo "bd-gh-sync: overwrite local state it cannot represent. Refusing." >&2
     echo "bd-gh-sync: SKIPPING pull — could not decide which beads are safe to pull." >&2
@@ -447,6 +481,35 @@ PYEOF
     echo "bd-gh-sync: 'git pull' once it is free, or check claims with 'bd list'." >&2
   fi
 
+  # Both numbers on the summary line are read off the bead listing: "held"
+  # directly, and "unmirrored" because an issue has no bead only relative to a
+  # set of beads. `bd list` answering `[]` with exit 0 is the ordinary shape of
+  # the wrong workspace — the statuses above cannot see it — and it walks
+  # straight to `held 0, left N unmirrored GH issue(s) alone`, two counts over a
+  # set nobody enumerated, with every mirrored issue reported as an orphan
+  # besides. Detail here, counts withdrawn from the summary below. Same ruling
+  # as the push side's empty pre-push snapshot.
+  #
+  # Deliberately *not* the push side's other witness. There, N > 0 issues minted
+  # and an empty open listing in the same run contradict each other on their
+  # face. The pull-side analogue would be "beads carry external_refs, so the
+  # all-state listing cannot be empty" — and that is no contradiction at all: a
+  # ref is matched by /issues/(\d+)$ over any URL, so it legitimately names
+  # another repository, and refusing that shape would fire on every merge
+  # against a repo whose beads were imported from elsewhere. The GitHub listing
+  # is witnessed by its exit status above and its --limit below; only the bead
+  # listing's own cardinality is decided here, where no foreign ref can reach.
+  _unwitnessed=""
+  _beads_n=$(sed -n 's/^COUNT //p' "$_tmp/plan.txt")
+  if [ "${_beads_n:-0}" -eq 0 ]; then
+    _unwitnessed="the bead list came back empty"
+    echo "bd-gh-sync: the bead list came back empty when this run chose what to" >&2
+    echo "bd-gh-sync: pull, so which beads were held back — and which GH issues" >&2
+    echo "bd-gh-sync: have no bead at all — was never established. An empty" >&2
+    echo "bd-gh-sync: repository and a bd database nobody could read are the same" >&2
+    echo "bd-gh-sync: bytes here. Re-run 'git pull' once the database is free." >&2
+  fi
+
   # The selection saw its listing arrive at the cap, so how many issues GitHub
   # actually holds is not a thing this run established. Detail here, and the
   # count itself withdrawn from the summary below.
@@ -480,14 +543,21 @@ PYEOF
   else
     _summary="bd-gh-sync: pulled ${_pulled} bead(s)"
   fi
-  # The held count is over the beads, which were enumerated in full; the orphan
-  # count is over the GH listing, which may not have been. Same rule as the push
-  # side's two arms: no number goes on the one line the caller keeps unless the
-  # set behind it was witnessed.
+  # The held count is over the beads; the orphan count is over both sets, since
+  # "unmirrored" is a claim about the GH listing measured against the bead one.
+  # Each arm is therefore withdrawn by whatever left its set unwitnessed — an
+  # unenumerated bead list takes both, a capped GitHub listing takes only the
+  # orphan arm. Same rule as the push side's two arms: no number goes on the one
+  # line the caller keeps unless the set behind it was witnessed.
+  _held_arm="held $(grep -c '^HOLD ' "$_tmp/plan.txt")"
   _orphan_arm="left $(grep -c '^ORPHAN ' "$_tmp/plan.txt") unmirrored GH issue(s) alone"
-  [ -n "$_capped" ] &&
+  if [ -n "$_unwitnessed" ]; then
+    _held_arm="held an unknown number of bead(s) (${_unwitnessed})"
+    _orphan_arm="left an unknown number of unmirrored GH issue(s) alone (${_unwitnessed})"
+  elif [ -n "$_capped" ]; then
     _orphan_arm="left an unknown number of unmirrored GH issue(s) alone (${_capped})"
-  _summary="${_summary}, held $(grep -c '^HOLD ' "$_tmp/plan.txt"), ${_orphan_arm}."
+  fi
+  _summary="${_summary}, ${_held_arm}, ${_orphan_arm}."
   if [ -s "$_tmp/moved.txt" ]; then
     _moved=$(wc -l <"$_tmp/moved.txt")
     # Deletion is called out on its own rather than folded into the count: the
