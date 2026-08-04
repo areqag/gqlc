@@ -4,7 +4,18 @@
 // nullable property, an entity with no properties at all, an edge, a
 // list at two nesting depths and over a narrow element width, and a
 // property of no declared shape at all.
+//
+// Event carries the TIMESTAMP width in both nullabilities, which is what
+// puts the instant helpers and the offset-sidecar read into the
+// emission. agtype has no temporal value, so what a TIMESTAMP means on
+// the wire is decided entirely by those helpers and by nothing the Go
+// type checker can see.
 CREATE PROPERTY GRAPH TYPE AgeCorpus AS {
+    (:Event {
+        id         :: INT64     NOT NULL,
+        occurredAt :: TIMESTAMP NOT NULL,
+        seenAt     :: TIMESTAMP
+    }),
     (:Person {
         id         :: INT64 NOT NULL,
         name       :: STRING NOT NULL,

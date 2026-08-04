@@ -23,6 +23,9 @@ func generate(in codegen.Input, packageName string) ([]codegen.File, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := rejectOffsetSidecarCollisions(prepared.Entities); err != nil {
+		return nil, err
+	}
 
 	pkg := prepared.Package
 	hasOne := false
@@ -35,6 +38,7 @@ func generate(in codegen.Input, packageName string) ([]codegen.File, error) {
 		if len(p.ParamFields) > 0 {
 			h.args = true
 		}
+		h.forParams(p.ParamFields)
 		for _, f := range p.RowFields {
 			h.need(f.GoType)
 		}
