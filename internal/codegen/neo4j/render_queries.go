@@ -638,7 +638,7 @@ func writeListColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.
 	// varName is "value" for a single-column projection and "valueN" for
 	// a row field, so the same suffix numbers the accumulator without
 	// renaming the single-column shape spec §5.5 spells out.
-	accVar := "acc"
+	accVar := "acc" + strings.TrimPrefix(varName, "value")
 	fmt.Fprintf(b, "%s%s, isNil, err := neo4j.GetRecordValue[[]any](%s, %q)\n", indent, varName, recordExpr, f.ColumnName)
 	fmt.Fprintf(b, "%sif err != nil {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q: %%w\", %q, err)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
 	if f.Nullable {

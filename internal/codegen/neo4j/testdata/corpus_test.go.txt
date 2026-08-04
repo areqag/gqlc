@@ -348,8 +348,17 @@ func TestBinColumnsCarryNullElements(t *testing.T) {
 // here — []byte arrives as itself and is kept, float64 arrives wider
 // than the declared float32 and is narrowed — because a decoder that
 // carried everything bare would pass on the first alone.
+//
+// The projection carries two non-nullable list columns rather than one
+// because the accumulator each of them builds is a local of the row
+// assembly's own scope: under a name shared between them the second
+// declaration is `no new variables on left side of :=`, and the
+// projection that reaches it is the one no fixture had. A nullable list
+// column does not reach it, because its accumulator sits inside the
+// `if` its null gate opens.
 func TestListyColumnsNarrowEachElement(t *testing.T) {
-	q := queriesOver([]string{"blobs", "depths"}, []any{
+	q := queriesOver([]string{"tags", "blobs", "depths"}, []any{
+		[]any{"a", "b"},
 		[]any{[]byte{1, 2}, []byte{}},
 		[]any{0.5, 1.5},
 	})
@@ -361,6 +370,9 @@ func TestListyColumnsNarrowEachElement(t *testing.T) {
 		t.Fatalf("ListyColumns returned %d rows, want 1", len(got))
 	}
 	row := got[0]
+	if want := []string{"a", "b"}; !reflect.DeepEqual(row.Tags, want) {
+		t.Errorf("ListyColumns()[0].Tags = %#v, want %#v", row.Tags, want)
+	}
 	if want := [][]byte{{1, 2}, {}}; !reflect.DeepEqual(row.Blobs, want) {
 		t.Errorf("ListyColumns()[0].Blobs = %#v, want %#v", row.Blobs, want)
 	}
@@ -371,17 +383,28 @@ func TestListyColumnsNarrowEachElement(t *testing.T) {
 		t.Errorf("ListyColumns()[0].Depths = %#v, want %#v", *row.Depths, want)
 	}
 
+	// Each non-nullable list column accumulates its own elements. Sharing
+	// one accumulator between them is a compile failure while their
+	// element types differ and a silent mixing of two columns' values
+	// while they agree, so the two are read back separately here.
+	if want := []string{"a", "b"}; !reflect.DeepEqual(row.Tags, want) || len(row.Blobs) != 2 {
+		t.Errorf("ListyColumns()[0] = %#v, want each list column to hold its own elements", row)
+	}
+
 	// A null column and an empty list stay distinguishable here too, and
 	// on this path the distinction is the driver's own: GetRecordValue
 	// reports a held null through its second result rather than through
 	// the value, so a decoder reading only the value cannot tell them
 	// apart.
-	null, err := queriesOver([]string{"blobs", "depths"}, []any{[]any{}, nil}).ListyColumns(t.Context())
+	null, err := queriesOver([]string{"tags", "blobs", "depths"}, []any{[]any{}, []any{}, nil}).ListyColumns(t.Context())
 	if err != nil {
 		t.Fatalf("ListyColumns(depths: null) = error %v", err)
 	}
 	if len(null) != 1 {
 		t.Fatalf("ListyColumns(depths: null) returned %d rows, want 1", len(null))
+	}
+	if null[0].Tags == nil || len(null[0].Tags) != 0 {
+		t.Errorf("ListyColumns(depths: null)[0].Tags = %#v, want an empty list", null[0].Tags)
 	}
 	if null[0].Blobs == nil || len(null[0].Blobs) != 0 {
 		t.Errorf("ListyColumns(depths: null)[0].Blobs = %#v, want an empty list", null[0].Blobs)
@@ -390,8 +413,8 @@ func TestListyColumnsNarrowEachElement(t *testing.T) {
 		t.Errorf("ListyColumns(depths: null)[0].Depths = %#v, want nil", null[0].Depths)
 	}
 
-	if _, err := queriesOver([]string{"blobs", "depths"}, []any{
-		[]any{"no"}, []any{},
+	if _, err := queriesOver([]string{"tags", "blobs", "depths"}, []any{
+		[]any{}, []any{"no"}, []any{},
 	}).ListyColumns(t.Context()); err == nil {
 		t.Errorf("ListyColumns(blobs: [string]) = no error, want a refusal")
 	}
