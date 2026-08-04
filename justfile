@@ -153,9 +153,80 @@ lint-hooks dir=".githooks": ensure-shellcheck
     printf '  %s\n' "${scripts[@]}"
     {{shellcheck}} -- "${scripts[@]}"
 
+# .golangci.yml's run.build-tags list must be the tags this tree actually uses.
+#
+# The list is hand-maintained and the linter needs it: a file behind a build tag
+# the config does not name is a file golangci-lint never loads, and it reports
+# success over code it has not read — green because it was looking at less. It
+# grew to two entries the day test/data/tagblind landed, and it grows by one
+# every time a constrained directory is added, which makes it a manual mirror of
+# a set `just vuln` already derives from a filesystem walk (bd gqlc-oxne). Two
+# derivations of one fact, one automatic and one remembered.
+#
+# Checked in both directions, like the accepted-advisory register in `just vuln`
+# and for the same reason. A tag in the tree but not in the config is the defect
+# itself. A tag in the config but not in the tree is a line describing nothing,
+# which pre-accepts whichever constrained directory is added under that spelling
+# next without anyone deciding it should be linted.
+#
+# The extraction is graded against its own output: a config whose build-tags
+# list this awk can no longer read yields the empty set, and the empty set would
+# agree with an empty derivation and pass. It cannot be empty here, because the
+# tree has tags — and if the tree ever genuinely has none, delete this check and
+# the config key together, deliberately.
+[private]
+check-golangci-build-tags:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    scope() { go run ./internal/tools/modscope "$@"; }
+    lines() { [ -n "${1}" ] && printf '%s\n' "${1}" || true; }
+
+    modules_raw="$(scope modules)"
+    mapfile -t modules <<<"${modules_raw}"
+    derived=""
+    for m in "${modules[@]}"; do
+        [ -n "${m}" ] || continue
+        tags="$(scope tags "${m}")" || exit 1
+        derived+="${tags}"$'\n'
+    done
+    derived="$(lines "${derived}" | sed '/^$/d' | sort -u)"
+
+    configured="$(awk '
+        /^  build-tags:/ { inlist = 1; next }
+        inlist && /^    - / { sub(/^    - /, ""); print; next }
+        inlist && (/^ *#/ || /^ *$/) { next }
+        inlist { inlist = 0 }
+    ' .golangci.yml | sort -u)"
+
+    if [ -z "${configured}" ]; then
+        echo "error: no build tag could be read out of .golangci.yml's run.build-tags list, so" >&2
+        echo "       this check would compare two sets it never measured and pass (bd gqlc-oxne)." >&2
+        echo "       Either the key moved and the extraction in this recipe must follow it, or" >&2
+        echo "       the list was emptied — in which case every constrained file in this tree is" >&2
+        echo "       now unlinted." >&2
+        exit 1
+    fi
+
+    unconfigured="$(comm -23 <(lines "${derived}") <(lines "${configured}") || true)"
+    stale="$(comm -13 <(lines "${derived}") <(lines "${configured}") || true)"
+    if [ -n "${unconfigured}" ]; then
+        echo "error: these build tags constrain files in this tree but are not in" >&2
+        echo "       .golangci.yml's run.build-tags, so the linter never loads those files and" >&2
+        echo "       reports success over code it has not read (bd gqlc-oxne):" >&2
+        lines "${unconfigured}" | sed 's/^/         /' >&2
+        exit 1
+    fi
+    if [ -n "${stale}" ]; then
+        echo "error: these build tags are in .golangci.yml's run.build-tags but constrain no file" >&2
+        echo "       in this tree, so the entries describe nothing and pre-accept whatever is" >&2
+        echo "       added under that spelling next (bd gqlc-oxne):" >&2
+        lines "${stale}" | sed 's/^/         /' >&2
+        exit 1
+    fi
+
 # full static analysis: golangci-lint over the Go tree (.golangci.yml) and
 # shellcheck over the hooks tree, as linters + formatter diffs as issues
-lint: ensure-golangci lint-hooks
+lint: ensure-golangci lint-hooks check-golangci-build-tags
     {{golangci}} run
 
 # Guard: the golangci-lint analysis cache must be non-empty after lint.
@@ -210,62 +281,141 @@ bd-export-monotonic base:
 bd-export-monotonic-local:
     just bd-export-monotonic $(git merge-base HEAD origin/master)
 
-# runs the codegen goldens' full quality fence inside the nested module:
-# compile (go build), vet, module tidiness (go mod tidy -diff), and
-# golangci-lint against the root config. Generated code must uphold the
-# same linting + formatting standards as gqlc's own CI (owner directive,
-# 2026-07-11); running golangci-lint from within the nested module
-# discovers ../../../.golangci.yml via upward walk, giving parity for
-# free. Used identically locally (post-generate) and in CI.
+# The quality fence over every module in this tree that the root gates do not
+# already cover: compile (go build), vet, module tidiness (go mod tidy -diff),
+# and golangci-lint against the root config. Generated code must uphold the same
+# linting + formatting standards as gqlc's own CI (owner directive, 2026-07-11);
+# running golangci-lint from within a nested module discovers the root
+# .golangci.yml via upward walk, giving parity for free. Used identically
+# locally (post-generate) and in CI.
 #
-# go vet takes the codegen_live tag so its analysers reach the live battery;
-# untagged it silently skips those files (bd gqlc-3eyw). go build does not,
-# because the tagged files are all _test.go and go build never compiles those
-# — the tag there would be inert, and vet already builds what it analyses.
-# golangci-lint reads the tag from .golangci.yml.
+# The module set is DISCOVERED, not named (bd gqlc-oxne). It used to be the
+# literal `test/data/codegen`, three times over, while `just vuln` beside it had
+# already been taught to find its modules on disk — so a third module added to
+# this tree got a vulnerability scan and no build, vet, tidy or lint at all. The
+# weaker half of the pair was the generalised one, and adding a module was a
+# silent downgrade with no gate reporting the asymmetry. Both halves now read
+# internal/tools/modscope, so they cannot disagree about what a module is.
+#
+# The invariant being stated is "every module in this tree is built, vetted,
+# tidied and linted", and it is split across recipes rather than duplicated: the
+# root module is covered by `just test` (build), `just tidy-check` and `just
+# lint`, and this covers every other. `.` is subtracted rather than skipped by
+# name-matching so the subtraction is visible, and modscope refuses a checkout
+# whose root is not a module, which is what makes the two halves a partition
+# rather than two overlapping guesses.
+#
+# Each module's tags are derived too. `go vet` needs them or its analysers
+# silently skip the constrained files (bd gqlc-3eyw); `go build` gets them as
+# well, which is inert on today's corpus — test/data/codegen's tagged files are
+# all _test.go and go build never compiles those — but reasoning from today's
+# corpus is how bd gqlc-e7oq happened, and a nested module with constrained
+# non-test files is exactly what this recipe now has to survive. golangci-lint
+# reads its tags from .golangci.yml, which check-golangci-build-tags holds to
+# the same derivation.
 #
 # check-codegen-external-tests runs ahead of the linter: both fail on the same
 # regression, and only the guard names the scan it protects (ADR 0026).
 test-codegen-fence: ensure-golangci check-codegen-external-tests
-    cd test/data/codegen && go build ./... && go vet -tags codegen_live ./...
-    cd test/data/codegen && go mod tidy -diff
-    cd test/data/codegen && {{golangci}} run
+    #!/usr/bin/env bash
+    set -euo pipefail
+    scope() { go run ./internal/tools/modscope "$@"; }
 
-# Holds the nested module to the packaging that keeps it inside govulncheck's
-# call graph (ADR 0026, bd gqlc-rohp). This is the only always-run required gate
-# over that module, so it is the only place the convention can be held.
+    modules_raw="$(scope modules)"
+    mapfile -t all <<<"${modules_raw}"
+    fenced=()
+    for m in "${all[@]}"; do
+        [ -n "${m}" ] && [ "${m}" != "." ] && fenced+=("${m}")
+    done
+    if [ "${#fenced[@]}" -eq 0 ]; then
+        echo "error: discovery found no module besides the root, so this recipe fenced nothing" >&2
+        echo "       and would have exited 0 having built, vetted, tidied and linted no code" >&2
+        echo "       (bd gqlc-oxne). Either discovery is broken, or the nested module was" >&2
+        echo "       removed — in which case delete this recipe and its CI job together," >&2
+        echo "       deliberately, rather than leaving a gate that watches an empty set." >&2
+        exit 1
+    fi
+
+    # Printed rather than only counted: the standing evidence in a CI log that
+    # the set under the fence is the set a reader expects, and the line that
+    # changes the day a third module appears.
+    echo "fencing ${#fenced[@]} nested module(s): ${fenced[*]}"
+    for m in "${fenced[@]}"; do
+        # `|| exit 1` rather than trusting `set -e`: errexit is suppressed inside
+        # a command substitution, measured on bash 5.3, so a helper that died
+        # here would otherwise read as a module asking for no tags — and a
+        # module vetted without its tags is a module partly vetted (bd
+        # gqlc-3eyw). The same rule governs `just vuln`; see the note there.
+        tags_raw="$(scope tags "${m}")" || exit 1
+        taglist="$(printf '%s\n' "${tags_raw}" | paste -sd,)"
+        tagflag=()
+        [ -z "${taglist}" ] || tagflag=(-tags "${taglist}")
+        echo "fence: ${m}, tags [${taglist:-none}]"
+        (cd "${m}" && go build "${tagflag[@]}" ./... && go vet "${tagflag[@]}" ./...)
+        (cd "${m}" && go mod tidy -diff)
+        (cd "${m}" && {{golangci}} run)
+    done
+
+# Holds every nested module to the packaging that keeps it inside govulncheck's
+# call graph (ADR 0026, bd gqlc-rohp). The fence is the only always-run required
+# gate over those modules, so it is the only place the convention can be held.
 #
 # Two assertions, because a guard that only pins today's spelling is not a
-# guard. The first is the convention: every _test.go anywhere under the module
-# declares an external test package. The second is the consequence that
+# guard. The first is the convention: every _test.go anywhere under a nested
+# module declares an external test package. The second is the consequence that
 # actually matters: the package closure govulncheck will load — the non-test
 # deps plus every external test package's deps — still reaches
 # testcontainers-go. It catches what the first cannot, a dropped codegen_live
 # tag or a move of the container code behind a different one.
+#
+# Both are driven off discovery rather than off the literal `test/data/codegen`
+# they used to name (bd gqlc-oxne), and the second finds ITS module the same way:
+# whichever go.mod requires testcontainers-go is the one holding the live
+# battery, so moving the battery moves this assertion with it instead of leaving
+# it pointed at an empty directory. Exactly one module must require it — none
+# means the battery is gone and this guard is checking nothing.
 [private]
 check-codegen-external-tests:
     #!/usr/bin/env bash
     set -euo pipefail
-    cd test/data/codegen
+    scope() { go run ./internal/tools/modscope "$@"; }
 
-    mapfile -t tests < <(find . -type f -name '*_test.go' | sort)
-    if [ "${#tests[@]}" -eq 0 ]; then
-        echo "error: no _test.go files found under test/data/codegen." >&2
-        echo "       The live battery has moved and this guard is checking nothing (bd gqlc-rohp)." >&2
+    modules_raw="$(scope modules)"
+    mapfile -t all <<<"${modules_raw}"
+    nested=()
+    for m in "${all[@]}"; do
+        [ -n "${m}" ] && [ "${m}" != "." ] && nested+=("${m}")
+    done
+    if [ "${#nested[@]}" -eq 0 ]; then
+        echo "error: discovery found no nested module, so this guard checked nothing and would" >&2
+        echo "       have exited 0 (bd gqlc-oxne, bd gqlc-rohp)." >&2
         exit 1
     fi
 
     inpackage=()
-    for f in "${tests[@]}"; do
-        pkg="$(sed -n 's/^package[[:space:]]\{1,\}\([A-Za-z_][A-Za-z0-9_]*\).*$/\1/p' "$f" | head -1)"
-        case "$pkg" in
-            *_test) ;;
-            "") inpackage+=("$f (no package clause)") ;;
-            *)  inpackage+=("$f (package $pkg)") ;;
-        esac
+    battery=""
+    for m in "${nested[@]}"; do
+        mapfile -t tests < <(find "${m}" -type f -name '*_test.go' | sort)
+        if [ "${#tests[@]}" -eq 0 ]; then
+            echo "error: no _test.go files found under ${m}." >&2
+            echo "       The live battery has moved and this guard is checking nothing (bd gqlc-rohp)." >&2
+            exit 1
+        fi
+        for f in "${tests[@]}"; do
+            pkg="$(sed -n 's/^package[[:space:]]\{1,\}\([A-Za-z_][A-Za-z0-9_]*\).*$/\1/p' "$f" | head -1)"
+            case "$pkg" in
+                *_test) ;;
+                "") inpackage+=("$f (no package clause)") ;;
+                *)  inpackage+=("$f (package $pkg)") ;;
+            esac
+        done
+        if go mod edit -json "${m}/go.mod" \
+            | grep -q '"Path": "github.com/testcontainers/testcontainers-go"'; then
+            battery="${m}"
+        fi
     done
     if [ "${#inpackage[@]}" -ne 0 ]; then
-        echo "error: every _test.go under test/data/codegen must declare an external test package." >&2
+        echo "error: every _test.go under a nested module must declare an external test package." >&2
         echo "       govulncheck drops the in-package test variant together with everything only it" >&2
         echo "       imports, so 'just vuln' goes green over the driver, testcontainers and docker" >&2
         echo "       trees it never loaded (bd gqlc-rohp). Offending files:" >&2
@@ -273,14 +423,28 @@ check-codegen-external-tests:
         exit 1
     fi
 
-    xtest="$(go list -tags codegen_live -f '{{{{range .XTestImports}}{{{{println .}}{{{{end}}' ./... | sort -u)"
-    if ! go list -deps -tags codegen_live ./... ${xtest} \
+    if [ -z "${battery}" ]; then
+        echo "error: no module in this tree requires github.com/testcontainers/testcontainers-go," >&2
+        echo "       so the closure assertion below has nothing to assert over and this guard is" >&2
+        echo "       half a guard (bd gqlc-rohp). Either the live battery has moved out of the" >&2
+        echo "       tree — delete the assertion deliberately — or its go.mod requirement was" >&2
+        echo "       dropped, which is the regression itself." >&2
+        exit 1
+    fi
+    tags_raw="$(scope tags "${battery}")" || exit 1
+    taglist="$(printf '%s\n' "${tags_raw}" | paste -sd,)"
+    tagflag=()
+    [ -z "${taglist}" ] || tagflag=(-tags "${taglist}")
+    cd "${battery}"
+    xtest="$(go list "${tagflag[@]}" -f '{{{{range .XTestImports}}{{{{println .}}{{{{end}}' ./... | sort -u)"
+    if ! go list -deps "${tagflag[@]}" ./... ${xtest} \
         | grep -qx 'github.com/testcontainers/testcontainers-go'; then
         echo "error: github.com/testcontainers/testcontainers-go is not in the package closure" >&2
-        echo "       govulncheck will load for test/data/codegen, so the live battery's dependency" >&2
-        echo "       tree is unscanned again (bd gqlc-rohp). The closure is the non-test deps plus" >&2
-        echo "       every external test package's deps; check the codegen_live tag still reaches" >&2
-        echo "       the container code and that the battery is still an external test package." >&2
+        echo "       govulncheck will load for ${battery}, so the live battery's dependency tree is" >&2
+        echo "       unscanned again (bd gqlc-rohp). The closure is the non-test deps plus every" >&2
+        echo "       external test package's deps, taken under the tags derived for that module" >&2
+        echo "       [${taglist:-none}]; check the tag still reaches the container code and that" >&2
+        echo "       the battery is still an external test package." >&2
         exit 1
     fi
 
