@@ -101,10 +101,17 @@ trap 'rm -rf "$_tmp"' EXIT
 # environment.
 _batch=100
 
+# `gh issue list` cuts its answer at --limit and says nothing about having done
+# so, which leaves a listing of exactly the cap indistinguishable from a complete
+# one. Each cap is named once and handed to the code that checks for it, because
+# a flag and a check that drift apart turn the check off without a diff to it.
+_gh_limit_all=1000
+_gh_limit_open=500
+
 if [ "$_action" = "pull" ]; then
   bd list --status all --limit 0 --json >"$_tmp/beads.json" 2>/dev/null \
     || : >"$_tmp/beads.json"
-  GITHUB_TOKEN="$_token" gh issue list --state all --limit 1000 \
+  GITHUB_TOKEN="$_token" gh issue list --state all --limit "$_gh_limit_all" \
     --json number,state,body >"$_tmp/gh.json" 2>/dev/null \
     || : >"$_tmp/gh.json"
 
@@ -112,7 +119,7 @@ if [ "$_action" = "pull" ]; then
   # separates "selection ran and chose nothing" from "selection did not run";
   # without it an empty result is indistinguishable from a crash, which is how
   # the previous guard fell through into an unscoped pull.
-  python3 - "$_tmp/beads.json" "$_tmp/gh.json" \
+  python3 - "$_tmp/beads.json" "$_tmp/gh.json" "$_gh_limit_all" \
     >"$_tmp/plan.txt" 2>"$_tmp/plan.err" <<'PYEOF'
 import json, re, sys
 
@@ -211,6 +218,15 @@ for b in beads:
 for n, (state, _) in sorted(gh.items()):
     if n not in mirrored and state == "open":
         out.append(f"ORPHAN {n}")
+
+# A listing that came back holding exactly what was asked for is a page, not a
+# set: `gh issue list` truncates at --limit silently, so "there are this many"
+# and "there are more than this many" arrive as the same bytes. The selection
+# itself stands — every decision above fails closed on an issue it cannot see,
+# holding the bead rather than pulling it — but the ORPHAN tally counted off a
+# page reads as a tally of the repository, and that is a number nobody measured.
+if len(issues) >= int(sys.argv[3]):
+    out.append(f"TRUNCATED {len(issues)}")
 
 for line in out:
     print(line)
@@ -408,6 +424,18 @@ PYEOF
     echo "bd-gh-sync: 'git pull' once it is free, or check claims with 'bd list'." >&2
   fi
 
+  # The selection saw its listing arrive at the cap, so how many issues GitHub
+  # actually holds is not a thing this run established. Detail here, and the
+  # count itself withdrawn from the summary below.
+  _capped=""
+  if grep -q '^TRUNCATED ' "$_tmp/plan.txt"; then
+    _capped="the GitHub listing came back at its --limit of ${_gh_limit_all}"
+    echo "bd-gh-sync: ${_capped}, so it is one page of an unknown number and" >&2
+    echo "bd-gh-sync: how many GH issues have no bead was never established. Beads" >&2
+    echo "bd-gh-sync: whose mirror fell outside the page were held, not pulled. Raise" >&2
+    echo "bd-gh-sync: the cap in .githooks/bd-gh-sync if the repository has outgrown it." >&2
+  fi
+
   # Last line, and the only line a `tail -1` caller keeps
   # (.claude/settings.json). It therefore has to report what happened rather
   # than what was intended: a failed `bd github sync` writes its own error
@@ -429,7 +457,14 @@ PYEOF
   else
     _summary="bd-gh-sync: pulled ${_pulled} bead(s)"
   fi
-  _summary="${_summary}, held $(grep -c '^HOLD ' "$_tmp/plan.txt"), left $(grep -c '^ORPHAN ' "$_tmp/plan.txt") unmirrored GH issue(s) alone."
+  # The held count is over the beads, which were enumerated in full; the orphan
+  # count is over the GH listing, which may not have been. Same rule as the push
+  # side's two arms: no number goes on the one line the caller keeps unless the
+  # set behind it was witnessed.
+  _orphan_arm="left $(grep -c '^ORPHAN ' "$_tmp/plan.txt") unmirrored GH issue(s) alone"
+  [ -n "$_capped" ] &&
+    _orphan_arm="left an unknown number of unmirrored GH issue(s) alone (${_capped})"
+  _summary="${_summary}, held $(grep -c '^HOLD ' "$_tmp/plan.txt"), ${_orphan_arm}."
   if [ -s "$_tmp/moved.txt" ]; then
     _moved=$(wc -l <"$_tmp/moved.txt")
     _names=$(head -n 3 "$_tmp/moved.txt" | tr '\n' ' ' | sed 's/ $//;s/ /, /g')
@@ -553,8 +588,9 @@ bd list --status all --limit 0 --json >"$_tmp/beads_after.json" 2>/dev/null \
 # One bulk `gh issue list` + one `gh issue close` per mismatch. Idempotent:
 # closing an already-closed GH issue is a no-op.
 _gh_rc=0
-GITHUB_TOKEN="$_token" gh issue list --state open --limit 500 --json number \
-  >"$_tmp/open_gh.json" 2>/dev/null || { _gh_rc=$?; : >"$_tmp/open_gh.json"; }
+GITHUB_TOKEN="$_token" gh issue list --state open --limit "$_gh_limit_open" \
+  --json number >"$_tmp/open_gh.json" 2>/dev/null \
+  || { _gh_rc=$?; : >"$_tmp/open_gh.json"; }
 
 # Either input failing yields an empty set, which reads as "nothing is stale"
 # rather than "nobody looked" — and the beads it would have named are the ones
@@ -566,7 +602,8 @@ GITHUB_TOKEN="$_token" gh issue list --state open --limit 500 --json number \
 # file is only ever created by status() below, so its absence is what says the
 # pass did not get far enough to have a verdict.
 GITHUB_TOKEN="$_token" python3 - "$_tmp/beads.json" "$_tmp/beads_after.json" \
-  "$_tmp/open_gh.json" "$_tmp/close_status.txt" >/dev/null <<'PYEOF' || true
+  "$_tmp/open_gh.json" "$_tmp/close_status.txt" "$_gh_limit_open" "$_pushed" \
+  >/dev/null <<'PYEOF' || true
 import json, re, subprocess, sys
 
 def load(path):
@@ -581,10 +618,30 @@ def one_line(s):
     return str(s).encode("unicode_escape").decode("ascii")
 
 try:
-    open_nums = {i["number"] for i in load(sys.argv[3])}
+    open_issues = load(sys.argv[3])
+    open_nums = {i["number"] for i in open_issues}
 except Exception:
     status("BLIND the open-issue listing was unreadable")
     sys.exit(0)
+
+# `gh issue list` cuts at --limit without saying so, so a listing holding
+# exactly the cap is one page of an unknown number. Every mirror past the cut
+# is invisible to the comparison below, and "0 stale" over it is a count of the
+# page rather than of the repository.
+if len(open_issues) >= int(sys.argv[5]):
+    status(f"BLIND the open-issue listing came back at its --limit of "
+           f"{sys.argv[5]}, so it is a page rather than the whole set")
+    sys.exit(0)
+
+# An empty listing is an ordinary answer — until this same run minted issues.
+# `bd github push` opens one issue per new bead, so N > 0 pushed and nothing
+# open is not a repository with no open issues, it is a listing that lost the
+# ones this run just created. That is the witness emptiness alone does not have.
+if not open_issues and int(sys.argv[6]) > 0:
+    status(f"BLIND this run pushed {sys.argv[6]} new bead(s) but the "
+           f"open-issue listing came back empty")
+    sys.exit(0)
+
 try:
     beads = load(sys.argv[2])
 except Exception:
@@ -661,9 +718,18 @@ esac
 [ -n "$_blind" ] && [ "$_post_rc" -ne 0 ] && _blind="'bd list' exited ${_post_rc}"
 [ -n "$_blind" ] && [ "$_gh_rc" -ne 0 ] && _blind="'gh issue list' exited ${_gh_rc}"
 if [ -n "$_blind" ]; then
+  # One remedy for every reason above, so it has to hold for all of them, and
+  # "wait for the bd database" holds only for the bd-list ones: a listing that
+  # came back cut off at its cap, or missing the issues this run just made, is
+  # not waiting on anything, and an operator sent to re-run it re-runs it
+  # forever. Naming the wrong fix under the right reason sends the reader
+  # somewhere useless just as surely as naming the wrong reason does. Precise on
+  # the line above, generic here, rather than one instruction per reason drifting
+  # away from the reason it belongs to.
   echo "bd-gh-sync: could not work out which GH mirrors are stale (${_blind})." >&2
-  echo "bd-gh-sync: a bead closed locally may still show open on GitHub. Re-run" >&2
-  echo "bd-gh-sync: 'git push' once the database is free, or close it by hand." >&2
+  echo "bd-gh-sync: a bead closed locally may still show open on GitHub. Close it" >&2
+  echo "bd-gh-sync: by hand, or fix what that line names and push again — any" >&2
+  echo "bd-gh-sync: --limit it mentions is set in .githooks/bd-gh-sync." >&2
 fi
 
 # The same reading applied to the other count. _new is the denominator of "N of
