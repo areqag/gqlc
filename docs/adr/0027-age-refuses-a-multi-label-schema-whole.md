@@ -36,9 +36,10 @@ graph written that way would be legible to nothing but itself.
 
 ## Decision
 
-`wireEntities` walks the schema's whole entity table and fails the batch on the
-first table containing a multi-label type. The refusal is not narrowed to the
-columns the batch projects.
+`wireEntities` walks the schema's whole entity table and fails the batch if any
+table contains a multi-label type. The diagnostic names every offender and each
+one's labels, not just the first. The refusal is not narrowed to the columns the
+batch projects.
 
 ## Considered options
 
