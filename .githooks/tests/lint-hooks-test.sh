@@ -181,5 +181,87 @@ else
     ok "the default run lints the repo's own hooks, bd-gh-sync among them"
 fi
 
+# --- ...and CI reaches the recipe at all -------------------------------------
+# Everything above names `lint-hooks` itself. CI never does: it runs `just lint`,
+# and the sole edge from there to shellcheck is the `lint-hooks` dependency
+# written on that recipe's line. Strike the word and every assertion in this
+# file still passes — over a hooks tree no CI job lints — and a
+# `# shellcheck disable=` directive in a tree with no linter is a comment, which
+# is exactly the state bd gqlc-jhi2 was filed against. A recipe nothing calls is
+# the same nothing as a recipe that does not exist, so the edge is asserted here
+# rather than assumed by the rest of the file.
+#
+# The entry points are read out of the workflows rather than written down here:
+# reachability from a recipe CI does not run proves nothing, and which recipe CI
+# runs is not this file's to decide. Whole-line YAML comments are dropped first,
+# or `just lint` written in prose would hold this green after the step itself
+# was gone. The walk is transitive, so moving `lint-hooks` behind an
+# intermediate recipe stays a refactor rather than becoming a failure.
+
+WORKFLOWS="$REPO/.github/workflows"
+ENTRY="$(grep -hvE '^[[:space:]]*#' "$WORKFLOWS"/*.yml |
+    grep -oE 'just +[a-z0-9][a-z0-9-]*' | awk '{print $2}' | sort -u)"
+DUMP="$(cd "$REPO" && just --dump --dump-format json 2>&1)"
+DUMP_RC=$?
+printf '%s' "$DUMP" >"$TMP/just-dump.json"
+
+# REACHED <path> | UNREACHED | MISSING, and anything else means the walk itself
+# did not run — caught below, because a walk that crashed prints nothing and an
+# unreachable target prints nothing either.
+REACH=""
+if [ "$DUMP_RC" -eq 0 ] && [ -n "$ENTRY" ]; then
+    REACH="$(python3 - "$TMP/just-dump.json" "$ENTRY" 2>&1 <<'PYEOF'
+import json, sys
+
+with open(sys.argv[1], encoding="utf-8") as fh:
+    recipes = json.load(fh)["recipes"]
+target = "lint-hooks"
+if target not in recipes:
+    print("MISSING")
+    raise SystemExit(0)
+
+# Breadth-first from each entry point, carrying the path so the answer can name
+# the edge it found rather than merely assert one exists.
+found = None
+for entry in sys.argv[2].split():
+    queue, seen = [[entry]], set()
+    while queue and not found:
+        path = queue.pop(0)
+        node = path[-1]
+        if node in seen or node not in recipes:
+            continue
+        seen.add(node)
+        if node == target:
+            found = path
+            break
+        for dep in recipes[node]["dependencies"]:
+            queue.append(path + [dep["recipe"]])
+    if found:
+        break
+print("REACHED " + " -> ".join(found) if found else "UNREACHED")
+PYEOF
+)"
+fi
+
+if [ "$DUMP_RC" -ne 0 ]; then
+    bad "a CI recipe reaches the hooks linter" "just --dump exited $DUMP_RC: $DUMP"
+elif [ -z "$ENTRY" ]; then
+    bad "a CI recipe reaches the hooks linter" \
+        "no 'just <recipe>' invocation found under $WORKFLOWS, so the walk had nowhere to start"
+elif [ "$REACH" = "MISSING" ]; then
+    bad "a CI recipe reaches the hooks linter" \
+        "the justfile has no lint-hooks recipe at all"
+elif [ "$REACH" = "UNREACHED" ]; then
+    bad "a CI recipe reaches the hooks linter" \
+        "none of the recipes CI runs depends on lint-hooks, so shellcheck never runs in CI: $(printf '%s' "$ENTRY" | tr '\n' ' ')"
+elif [ -n "${REACH##REACHED *}" ]; then
+    bad "a CI recipe reaches the hooks linter" \
+        "the reachability walk did not run: $REACH"
+else
+    # Printed, like the linted set above: the edge is one word on one line of
+    # the justfile, and this is the standing evidence that it is still there.
+    ok "CI reaches shellcheck over the hooks tree by ${REACH#REACHED }"
+fi
+
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

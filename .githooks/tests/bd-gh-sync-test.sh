@@ -1542,16 +1542,26 @@ fi
 # --- gqlc-mbe0: the GH listing is a set that has to be witnessed too ----------
 # `gqlc-w4q9` closed this class over the two bead snapshots and left the GitHub
 # listing open. `gh issue list` answering `[]` yields no stale mirrors, which
-# walks to `closed 0 of 0` and exit 0 — a count over a set nobody enumerated.
-# An empty listing is a legitimate answer in general, so emptiness alone is not
-# the finding; a run that just minted N issues and then cannot see one of them
-# is, and that is a comparison the script already has both halves of.
-
+# walks to `0 of 0 stale GH mirror(s) closed` and exit 0 — a count over a set
+# nobody enumerated. An empty listing is a legitimate answer in general, so
+# emptiness alone is not the finding; a run that just minted N issues and then
+# cannot see one of them is, and that is a comparison the script already has
+# both halves of.
+#
+# `_ll` is taken outright rather than through `${_ll:=...}`, and the count arm
+# asserts a phrase is present rather than one absent. Both halves of the older
+# form were dead: `_ll` still held what an earlier case left in it, so `:=`
+# never ran `last_line` and the arm read a verdict from a different run; and
+# `closed 0 of 0` is a wording this script has never printed — its count arms
+# are `closed N stale GH mirror(s)` and `N of M stale GH mirror(s) closed` — so
+# the absence being tested was free. What has to hold is that the count was
+# withdrawn, and that is a phrase the script does print, on this run.
 run_sync push '[{"id":"b-n","status":"open","external_ref":""}]' '[]' '[]'
+_ll="$(last_line)"
 if [ "$RC" -eq 0 ]; then
     bad "a push of N>0 over an empty open listing is not counted as clean" \
-        "exited 0: $(last_line)"
-elif [ -n "${_ll:="$(last_line)"}" ] && [ -z "${_ll##*closed 0 of 0*}" ]; then
+        "exited 0: $_ll"
+elif [ -z "$_ll" ] || [ -n "${_ll##*an unknown number of stale GH mirror(s) left open*}" ]; then
     bad "a push of N>0 over an empty open listing is not counted as clean" \
         "printed a count over the empty set: $_ll"
 elif ! grep -q 'pushed 1 new bead(s) but the open-issue listing came back empty' \
@@ -1605,14 +1615,35 @@ elif [ "$RC" -eq 0 ]; then
 elif ! grep -q "the open-issue listing came back at its --limit of $OPEN_LIMIT" "$TMP/err"; then
     bad "an open listing at its --limit is refused rather than counted" \
         "did not name the cap it hit: $(last_line)"
-elif ! grep -q '\.githooks/bd-gh-sync' "$TMP/err"; then
+elif ! grep -q 'is set in \.githooks/bd-gh-sync' "$TMP/err"; then
     # Naming the wrong fix under the right reason sends the reader somewhere
-    # useless just as surely as naming the wrong reason does, and the one fix
-    # this cannot be is the one the notice used to give: re-running does not
-    # uncap a listing, and there is no bd database to wait for. The cap lives in
-    # one file and the notice has to say which.
+    # useless just as surely as naming the wrong reason does. The cap lives in
+    # one file and the notice has to say which, so what is pinned is the
+    # sentence that says so and not merely that the path appears somewhere on
+    # stderr — the path is printed by the true remedy and by a false one sitting
+    # next to it alike.
     bad "an open listing at its --limit is refused rather than counted" \
         "named the cap but not where it is set: $(grep 'stale' "$TMP/err" | tr '\n' '|')"
+elif grep -qiE 're-run|the database is free' "$TMP/err"; then
+    # The other half of the same claim, and the half this branch exists for. The
+    # remedy the operator is handed is one paragraph covering every reason the
+    # stale-mirror pass can go blind, so it has to be true of all of them, and
+    # the notice this replaced was not: a listing cut off at its cap is not
+    # waiting on a bd database, and an operator told to re-run once the database
+    # is free re-runs forever. Checking only that the true remedy is present
+    # cannot see the false one returning beside it — the two read as one
+    # paragraph and the arm above passes on either — so the false one's absence
+    # is pinned in its own right.
+    #
+    # Over the whole of this run's stderr rather than a window of N lines below
+    # the reason: a paragraph that grew by a line would walk out of the window
+    # and take the check with it. Nothing this run legitimately prints says
+    # either of these — its five lines are the reason, three of remedy, and the
+    # summary — and the one other place in the script that does say "re-run once
+    # the database is free" is the empty-pre-push-list notice, which is true
+    # there and cannot fire here: this fixture's bead list holds one bead.
+    bad "an open listing at its --limit is refused rather than counted" \
+        "the remedy sends the reader to wait on a database that is not the reason: $(grep -iE 're-run|the database is free' "$TMP/err" | tr '\n' '|')"
 elif [ -z "${_ll:="$(last_line)"}" ] || [ -n "${_ll##*an unknown number of stale GH mirror(s) left open*}" ]; then
     bad "an open listing at its --limit is refused rather than counted" \
         "counted over the truncated page anyway: $_ll"
