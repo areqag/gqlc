@@ -68,6 +68,42 @@ func TestRelationshipTypeAlternationsReadsTheText(t *testing.T) {
 			want: []string{":AUTHORED|:LIKES"},
 		},
 		{
+			// The witness is how many times the production spells a
+			// relationship-type NAME, not how many DISTINCT names it
+			// spells. Cypher.g4 §oC_RelationshipTypes is
+			// `':' SP? oC_RelTypeName ( SP? '|' ':'? SP? oC_RelTypeName )*`,
+			// which admits a repeat, and the '|' the repeat needs is the
+			// same character AGE 1.7.0's parser has no production for.
+			// Downstream the repeat is invisible: the resolver narrows the
+			// candidates to one ResolvedEdge, which the AGE column gate
+			// serves — so a scan counting distinct names reports nothing
+			// here and lets `gqlc generate` exit 0 over a package whose
+			// every call is SQLSTATE 42601.
+			name: "a type repeated across the alternation still counts",
+			src:  "MATCH (:Person)-[r:LIKES|LIKES]->(p:Post) RETURN r",
+			want: []string{":LIKES|LIKES"},
+		},
+		{
+			// The same repeat in the legacy spelling, where the second
+			// name carries its own colon: a scan comparing the names as
+			// the grammar reads them collapses this one too.
+			name: "a type repeated in the legacy spelling still counts",
+			src:  "MATCH (:Person)-[r:LIKES|:LIKES]->(p:Post) RETURN r",
+			want: []string{":LIKES|:LIKES"},
+		},
+		{
+			// Whitespace inside the alternation is REPORTED, not dropped.
+			// SP is a default-channel token in this grammar, so the
+			// context's text concatenation keeps it, and the refusal built
+			// on this prints only characters the author wrote. Pinned here
+			// because nothing else pins the spaced rendering, and a
+			// reconstruction that dropped the spaces would print a query
+			// nobody wrote.
+			name: "whitespace inside the alternation is reported as written",
+			src:  "MATCH (:Person)-[r:AUTHORED | LIKES]->(p:Post) RETURN r",
+			want: []string{":AUTHORED | LIKES"},
+		},
+		{
 			name: "a variable-length alternation counts",
 			src:  "MATCH (:Person)-[r:AUTHORED|LIKES*1..2]->(p:Post) RETURN p.id",
 			want: []string{":AUTHORED|LIKES"},

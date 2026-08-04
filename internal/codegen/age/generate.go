@@ -19,17 +19,23 @@ func generate(in codegen.Input, packageName string) ([]codegen.File, error) {
 	// column shape, and this hazard is a property of the query TEXT — an
 	// alternation the author never projects, or one the resolver narrowed
 	// to a single declared candidate, reaches no edge-union column and is
-	// still a statement the server will not parse. It runs second so a
-	// query tripping both gets the column's answer, which names the
-	// candidates the schema declares and so says more than the text can.
+	// still a statement the server will not parse. It runs second only so
+	// that an edge-union column wins, which names the candidates the
+	// schema declares and so says more about the same defect; on every
+	// other reason the gate above yields to this one rather than send the
+	// author to fix a projection before they learn the statement never
+	// parsed (rejectUnservedQueries).
 	//
 	// Both halves of that position are load-bearing and both are pinned by
 	// what the author is told, not by any reading of this file. Ahead of
 	// Prepare: TestRejectsRelationshipTypeAlternation/"a column shared
 	// admission refuses is answered here, because this runs first" and
 	// TestRunApacheAgeAnswersAnAlternationAheadOfSharedAdmission. Behind
-	// rejectUnservedQueries: the same test's "an edge-union column is
-	// answered by the column gate, which says more".
+	// rejectUnservedQueries for the edge union alone: the same test's "an
+	// edge-union column is answered by the column gate, which says more"
+	// and "an unserved column that is not an edge union yields to the
+	// text", plus TestRunApacheAgeAnswersAnAlternationAheadOfOther
+	// ColumnRefusals at the CLI seam.
 	if err := rejectRelationshipTypeAlternation(in.Queries); err != nil {
 		return nil, err
 	}

@@ -501,6 +501,38 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 			count: 1, noun: "query", dropped: `Anon (":AUTHORED|LIKES|REPOSTED")`,
 		},
 		{
+			// The arity witness, read as the grammar spells it rather
+			// than as a set of names. Cypher.g4 §oC_RelationshipTypes
+			// admits a repeated name after '|', and AGE 1.7.0 refuses
+			// the '|' the repeat needs — while the resolver narrows the
+			// candidates to one ResolvedEdge, which the column gate
+			// serves. So a gate counting DISTINCT types refuses nothing
+			// here and emits a package whose every call is 42601.
+			name: "a type the alternation repeats is refused",
+			queries: []codegen.NamedQuery{alternationQuery("Repeat",
+				"MATCH (:Person)-[r:LIKES|LIKES]->(p:Post) RETURN r\n",
+				resolver.Column{Name: "r", Type: resolver.ResolvedEdge{EdgeKey: corpusEdgeKey}})},
+			count: 1, noun: "query", dropped: `Repeat (":LIKES|LIKES")`,
+		},
+		{
+			name: "a type the alternation repeats in the legacy spelling is refused",
+			queries: []codegen.NamedQuery{alternationQuery("RepeatLegacy",
+				"MATCH (:Person)-[r:LIKES|:LIKES]->(p:Post) RETURN r\n",
+				resolver.Column{Name: "r", Type: resolver.ResolvedEdge{EdgeKey: corpusEdgeKey}})},
+			count: 1, noun: "query", dropped: `RepeatLegacy (":LIKES|:LIKES")`,
+		},
+		{
+			// Whitespace inside the alternation is quoted, not dropped:
+			// SP is a default-channel token, so the parser's text keeps
+			// it and the message prints only characters the author
+			// wrote. Nothing else pins the spaced rendering.
+			name: "an alternation written with spaces is quoted with them",
+			queries: []codegen.NamedQuery{alternationQuery("Spaced",
+				"MATCH (:Person)-[r:AUTHORED | LIKES]->(p:Post) RETURN p.id\n",
+				scalarColumn("p.id", graph.TypeInt))},
+			count: 1, noun: "query", dropped: `Spaced (":AUTHORED | LIKES")`,
+		},
+		{
 			name: "a query spelling two alternations names both",
 			queries: []codegen.NamedQuery{alternationQuery("Both",
 				"MATCH (:Person)-[r:LIKES|REPOSTED]->(p:Post), (:Person)-[s:AUTHORED|FLAGGED]->(p) RETURN p.id\n",
@@ -603,6 +635,70 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 			"the column gate runs first, because naming the candidates the schema declares is more than the text can say")
 		s.Require().NotErrorIs(err, age.ErrRelationshipTypeAlternation)
 		s.Require().ErrorContains(err, `TwoActions (column "r" `+wantEdgeUnionReason("AUTHORED and LIKES")+`)`)
+	})
+
+	s.Run("an unserved column that is not an edge union yields to the text", func() {
+		// The other side of the subtest above, and the bound on it. An
+		// edge-union column outranks the text because it answers the SAME
+		// defect and names the candidates the schema declares. A list
+		// property is a DIFFERENT defect: printing it first sends the
+		// author to change a projection, regenerate, and only then learn
+		// the statement never parsed on this backend — two rounds for one
+		// query. So the column gate yields here.
+		listColumn := resolver.Column{
+			Name: "tags", Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeString, true)},
+		}
+
+		batch := in
+		batch.Queries = []codegen.NamedQuery{alternationQuery("Tagged",
+			"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) RETURN p.tags AS tags\n", listColumn)}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrRelationshipTypeAlternation,
+			"the alternation is the obstacle underneath: the statement has to be rewritten before the projection can be put to this server at all")
+		s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
+		s.Require().EqualError(err, wantAlternationRefusal(1, "query", `Tagged (":AUTHORED|LIKES")`))
+
+		// The discriminator. Without the '|' the very same column is
+		// still unserved and the column gate still owns it, so what
+		// moved above is the ordering and not the list arm.
+		batch.Queries = []codegen.NamedQuery{alternationQuery("Tagged",
+			"MATCH (:Person)-[r:AUTHORED]->(p:Post) RETURN p.tags AS tags\n", listColumn)}
+		files, err = age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrUnsupportedQuery)
+		s.Require().NotErrorIs(err, age.ErrRelationshipTypeAlternation)
+		s.Require().ErrorContains(err, `Tagged (column "tags" projects a list property)`)
+	})
+
+	s.Run("a sibling the column gate still owns is named in the same run", func() {
+		// Yielding is per query. A batch holding one query the text gate
+		// owns and one the column gate owns must not lose the second: a
+		// gate that stood the whole BATCH aside would report only the
+		// alternation and hand the author the list property a round
+		// later, which is the round-trip this ordering exists to remove.
+		batch := in
+		batch.Queries = []codegen.NamedQuery{
+			alternationQuery("Tagged",
+				"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) RETURN p.tags AS tags\n",
+				resolver.Column{
+					Name: "tags",
+					Type: resolver.ResolvedProperty{Type: graph.ListOf(graph.TypeString, true)},
+				}),
+			readQuery("Bag", resolver.Column{
+				Name: "m", Type: resolver.ResolvedScalar{Kind: resolver.ScalarMap},
+			}),
+		}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrUnsupportedQuery,
+			"the sibling spells no '|', so the column gate still answers it and answers first")
+		s.Require().ErrorContains(err, `1 query would be dropped: Bag (column "m" projects scalar(map))`)
+		s.Require().NotContains(err.Error(), "Tagged",
+			"the query the text gate owns must not be reported on the column axis")
 	})
 }
 

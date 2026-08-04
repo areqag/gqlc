@@ -8,8 +8,14 @@ import (
 
 // RelationshipTypeAlternations reports the relationship-type alternations a
 // query text spells: the source text of every oC_RelationshipTypes production
-// naming more than one type, in first-appearance order with repeats dropped.
-// A text spelling none returns nil.
+// spelling more than one relationship-type NAME, in first-appearance order
+// with repeated texts dropped. A text spelling none returns nil.
+//
+// More than one name, not more than one distinct name. `-[r:A|A]->` names one
+// type twice and is reported, because the '|' it needs is the character the
+// caller is deciding about; and it is downstream-invisible, since a label set
+// is a set, so the binding carries one label and the column resolves to a
+// single ordinary edge.
 //
 // It answers a question about the TEXT, not about the model Parse builds, and
 // the two are not the same question. Parse merges a re-bound relationship
@@ -59,10 +65,20 @@ type alternationScan struct {
 	seen  map[string]struct{}
 }
 
-// EnterOC_RelationshipTypes records the production's text when it names more
-// than one type. AllOC_RelTypeName is the arity the grammar admits only after
-// a `|` (Cypher.g4 §oC_RelationshipTypes), so its count is the witness and the
-// character never has to be searched for.
+// EnterOC_RelationshipTypes records the production's text when it spells more
+// than one relationship-type name. AllOC_RelTypeName is the arity the grammar
+// admits only after a `|` (Cypher.g4 §oC_RelationshipTypes,
+// `':' SP? oC_RelTypeName ( SP? '|' ':'? SP? oC_RelTypeName )*`), so its count
+// is the witness and the character never has to be searched for.
+//
+// The count is of PRODUCTIONS, not of distinct names, and the two differ: the
+// closure above admits a repeat, so `-[r:A|A]->` has arity two and one name.
+// Both readings compile and only this one is right — a repeat still needs the
+// `|`, and everything downstream of the parse loses it (a label set is a set,
+// so the resolver narrows the candidates to one ordinary edge the AGE column
+// gate serves). Pinned by TestRelationshipTypeAlternationsReadsTheText's
+// repeated-type rows and, end to end, by
+// TestRunApacheAgeRefusesRelationshipTypeAlternation's.
 func (a *alternationScan) EnterOC_RelationshipTypes(c *gen.OC_RelationshipTypesContext) {
 	if len(c.AllOC_RelTypeName()) < 2 {
 		return

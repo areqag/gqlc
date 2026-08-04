@@ -158,6 +158,50 @@ const (
 	execAlternationQuery = "// name: DropActions :exec\n" +
 		"MATCH (p:Person)-[r:AUTHORED|LIKES]->(:Post) DELETE r\n"
 
+	// The three below are spellings rather than shapes: each is a text
+	// the grammar accepts, the front end resolves and the emitted code
+	// would ship, whose '|' a gate reading the resolved model cannot see.
+	//
+	//   repeatedType     — the alternation names ONE type twice. A label
+	//                      set is a set, so the binding carries one label
+	//                      and the column is a plain ResolvedEdge the AGE
+	//                      backend serves; the '|' the repeat needs is
+	//                      still the character AGE 1.7.0 refuses. A gate
+	//                      keyed on DISTINCT type names reports nothing.
+	//   repeatedTypeLegacy — the same repeat with the optional colon on
+	//                      the second name, which the grammar reads as
+	//                      the same two names.
+	//   spaced           — SP around the '|'. Pinned because the refusal
+	//                      quotes the parser's own text, and the spaced
+	//                      rendering is the one place that claim is
+	//                      checkable.
+	repeatedTypeAlternationQuery = "// name: GetAction :one\n" +
+		"MATCH (:Person)-[r:LIKES|LIKES]->(p:Post) RETURN r\n"
+	repeatedTypeLegacyAlternationQuery = "// name: GetAction :one\n" +
+		"MATCH (:Person)-[r:LIKES|:LIKES]->(p:Post) RETURN r\n"
+	spacedAlternationQuery = "// name: PostIDs :one\n" +
+		"MATCH (:Person)-[r:AUTHORED | LIKES]->(p:Post) RETURN p.id\n"
+
+	// listAlternationSchema declares narrowedSchema's two relationship
+	// types over a Post carrying a list property, so one query can trip
+	// the text gate and an unserved COLUMN at once. Which of the two the
+	// author is told is what TestRunApacheAgeAnswersAnAlternationAheadOf
+	// OtherColumnRefusals turns on.
+	listAlternationSchema = `CREATE PROPERTY GRAPH TYPE People AS {
+    (:Person { id :: INT64 NOT NULL }),
+    (:Post   {
+        id   :: INT64 NOT NULL,
+        tags :: LIST<STRING>
+    }),
+    (:Person) -[:AUTHORED { since :: INT64 NOT NULL }]-> (:Post),
+    (:Person) -[:LIKES]-> (:Post)
+}
+`
+	listAlternationQuery = "// name: PostTags :one\n" +
+		"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) RETURN p.tags AS tags\n"
+	listNoAlternationQuery = "// name: PostTags :one\n" +
+		"MATCH (:Person)-[r:AUTHORED]->(p:Post) RETURN p.tags AS tags\n"
+
 	// sharedLabelAlternationSchema and sharedLabelAlternationQuery are a
 	// verbatim copy of test/data/codegen/invalid/
 	// unrepresentable_edge_union_shared_label, which this branch
@@ -553,6 +597,35 @@ func TestRunApacheAgeRefusesRelationshipTypeAlternation(t *testing.T) {
 			query:   execAlternationQuery,
 			dropped: `DropActions (":AUTHORED|LIKES")`,
 		},
+		{
+			// The arity row, and the one the front end has to be run for
+			// to be worth anything. `-[r:LIKES|LIKES]->` spells the '|'
+			// AGE 1.7.0 refuses, and a label set is a set — so the
+			// resolver hands the column gate a single ResolvedEdge it
+			// serves, and every gate downstream of the parse is blind.
+			// A scan counting DISTINCT type names instead of
+			// oC_RelTypeName productions leaves this generating cleanly.
+			name:    "an alternation naming one type twice",
+			schema:  narrowedSchema,
+			query:   repeatedTypeAlternationQuery,
+			dropped: `GetAction (":LIKES|LIKES")`,
+		},
+		{
+			name:    "the same repeat in the legacy spelling",
+			schema:  narrowedSchema,
+			query:   repeatedTypeLegacyAlternationQuery,
+			dropped: `GetAction (":LIKES|:LIKES")`,
+		},
+		{
+			// The spaced rendering. SP is a default-channel token, so
+			// the quoted text keeps it and the message prints only
+			// characters the author wrote. Unprojected so that what
+			// answers is this gate and not the column.
+			name:    "an alternation written with spaces around the '|'",
+			schema:  narrowedSchema,
+			query:   spacedAlternationQuery,
+			dropped: `PostIDs (":AUTHORED | LIKES")`,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir, cfgPath := writeProject(t)
@@ -580,6 +653,55 @@ func TestRunApacheAgeRefusesRelationshipTypeAlternation(t *testing.T) {
 			require.Empty(t, res.Diagnostics)
 		})
 	}
+}
+
+// TestRunApacheAgeAnswersAnAlternationAheadOfOtherColumnRefusals pins
+// the other half of the text gate's position: which unserved COLUMNS
+// outrank it, and which do not.
+//
+// One does. TestRunApacheAgeRefusesEdgeUnions above sends AGE a pattern
+// spelling '|' and gets the edge-union column's answer, because that
+// answer names the candidates the schema declares for the pattern — more
+// than the text can say about the same defect.
+//
+// Nothing else does, and that is what this asserts. A list property is a
+// different defect from an unparseable statement. Answering it first
+// costs the author two rounds on one query: change the projection,
+// regenerate, and only then find out the query never parsed on this
+// backend. The alternation is the obstacle underneath — the statement
+// has to be rewritten before any projection can be put to this server —
+// so it is the answer.
+//
+// The second half is the discriminator and is not optional. Strip the
+// '|' from the same query against the same schema and the same column is
+// still unserved; if the list-property refusal does not come back, what
+// the first half measured was a column arm that stopped firing rather
+// than a gate order.
+func TestRunApacheAgeAnswersAnAlternationAheadOfOtherColumnRefusals(t *testing.T) {
+	dir, cfgPath := writeProject(t)
+	writeFixtureFile(t, filepath.Join(dir, "schema.gql"), listAlternationSchema)
+	writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverApacheAgePgxV5), ""))
+
+	queryPath := filepath.Join(dir, "queries", "people.cypher")
+	writeFixtureFile(t, queryPath, listAlternationQuery)
+
+	res, err := pipeline.Run(cfgPath, backendRegistry(t))
+	require.ErrorIs(t, err, age.ErrRelationshipTypeAlternation,
+		"the column gate yields to the text on every reason but the edge union, so the author is not sent to fix a projection first")
+	require.NotErrorIs(t, err, age.ErrUnsupportedQuery)
+	require.ErrorContains(t, err, `PostTags (":AUTHORED|LIKES")`)
+	require.NotContains(t, err.Error(), "projects a list property",
+		"the projection is not the obstacle yet; the statement is")
+	require.Equal(t, pipeline.Result{}, res)
+
+	writeFixtureFile(t, queryPath, listNoAlternationQuery)
+
+	res, err = pipeline.Run(cfgPath, backendRegistry(t))
+	require.ErrorIs(t, err, age.ErrUnsupportedQuery,
+		"the same column with no '|' in the text is still the column gate's, so the yield above is an ordering and not a hole in the list arm")
+	require.NotErrorIs(t, err, age.ErrRelationshipTypeAlternation)
+	require.ErrorContains(t, err, `PostTags (column "tags" projects a list property)`)
+	require.Equal(t, pipeline.Result{}, res)
 }
 
 // TestRunApacheAgeAnswersAnAlternationAheadOfSharedAdmission pins where

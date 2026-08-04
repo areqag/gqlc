@@ -88,12 +88,32 @@ func nameBackend(err error) error {
 // The predicate keys on the backend's capability, not on the stage: the
 // served set is exactly what the emitted decode and encode arms cover,
 // so an arm added here widens it and an arm removed narrows it.
+//
+// It yields to rejectRelationshipTypeAlternation on a query whose text
+// spells one, EXCEPT where the reason is the edge-union column. The
+// exception is what the gate order is for: edgeUnionReason names the
+// candidates the SCHEMA declares for the pattern, which the text cannot
+// say, so it is the more informative of two answers to the same defect.
+// Every OTHER reason answers a different defect — a list property, a map
+// column, a list parameter — and printing it first costs the author a
+// whole round: they fix the projection, regenerate, and only then learn
+// the statement never parsed on this backend. The alternation is the
+// obstacle underneath, because the text has to be rewritten before any
+// column question can be put to this server at all, so it goes first.
+//
+// Yielding is per query, not per batch: a sibling query whose reason
+// this gate still owns is named here in the same run.
 func rejectUnservedQueries(queries []codegen.NamedQuery) error {
 	var dropped []string
 	for _, q := range queries {
-		if reason := unservedReason(q); reason != "" {
-			dropped = append(dropped, q.Name+" ("+reason+")")
+		reason, edgeUnion := unservedReason(q)
+		if reason == "" {
+			continue
 		}
+		if !edgeUnion && len(cypher.RelationshipTypeAlternations(q.SourceText)) > 0 {
+			continue
+		}
+		dropped = append(dropped, q.Name+" ("+reason+")")
 	}
 	if len(dropped) == 0 {
 		return nil
@@ -138,12 +158,17 @@ func rejectUnservedQueries(queries []codegen.NamedQuery) error {
 // that read, leaves a DELETE spelling '|' generating cleanly and failing
 // on every call.
 //
-// It runs AFTER rejectUnservedQueries rather than before, so a query that
-// trips both gets the column's answer. That is the more informative of
-// the two: it names the candidates the SCHEMA declares for the pattern,
-// which the text cannot say. Where the column gate stands aside — a
-// single surviving candidate, or candidates repeating a label — this one
-// is what answers.
+// It runs AFTER rejectUnservedQueries, but that gate yields to this one
+// on every reason except the edge-union column, so what the ordering
+// really says is: an edge-union column outranks the text, and nothing
+// else does. The exception earns its place — edgeUnionReason names the
+// candidates the SCHEMA declares for the pattern, which the text cannot
+// say, and it is an answer to the SAME defect. A list property, a map
+// column or a list parameter is a different defect, and printing it
+// first sends the author round twice for one query: fix the projection,
+// regenerate, then learn the statement never parsed here. Where the
+// column gate stands aside — a single surviving candidate, or candidates
+// repeating a label — this one is what answers.
 //
 // It runs BEFORE codegen.Prepare, which answers a repeating label with
 // the portable ErrUnrepresentableEdgeUnion. A query doing both — an
@@ -158,10 +183,12 @@ func rejectUnservedQueries(queries []codegen.NamedQuery) error {
 // seam) rather than left to the reading order of generate.go.
 //
 // The alternations are quoted as the parser read them and are not
-// reconstructed from anything: every character printed is a character the
-// author wrote (whitespace inside the alternation excepted, which the
-// token concatenation drops). That is the axis the column refusal cannot
-// have, since its label list is a subset of what the pattern names.
+// reconstructed from anything: every character printed is a character
+// the author wrote, whitespace inside the alternation included — SP is a
+// default-channel token in this grammar, so the context's text
+// concatenation keeps it and `-[r:A | B]->` is quoted ":A | B". That is
+// the axis the column refusal cannot have, since its label list is a
+// subset of what the pattern names.
 func rejectRelationshipTypeAlternation(queries []codegen.NamedQuery) error {
 	var dropped []string
 	for _, q := range queries {
@@ -196,18 +223,27 @@ func rejectRelationshipTypeAlternation(queries []codegen.NamedQuery) error {
 // its columns and its parameters. Reported in the resolver's own type
 // vocabulary, so the reason names the shape the author will find in
 // their query.
-func unservedReason(q codegen.NamedQuery) string {
+//
+// edgeUnion reports whether the reason came from an edge-union column,
+// which is the one axis whose answer outranks the text gate's — see
+// rejectUnservedQueries. It is read off the column's resolved type
+// rather than off the reason string, because a reason is prose and
+// matching prose would make the gate order turn on the wording.
+// edgeUnionReason returns "" wherever it stands aside, so a non-empty
+// reason from a ResolvedEdgeUnion column can only be its own.
+func unservedReason(q codegen.NamedQuery) (reason string, edgeUnion bool) {
 	for _, col := range q.Validated.Columns {
-		if reason := unservedColumn(col.Type); reason != "" {
-			return fmt.Sprintf("column %q %s", col.Name, reason)
+		if r := unservedColumn(col.Type); r != "" {
+			_, union := col.Type.(resolver.ResolvedEdgeUnion)
+			return fmt.Sprintf("column %q %s", col.Name, r), union
 		}
 	}
 	for _, param := range q.Validated.Parameters {
-		if reason := unservedParam(param.Type); reason != "" {
-			return "parameter $" + param.Name + " " + reason
+		if r := unservedParam(param.Type); r != "" {
+			return "parameter $" + param.Name + " " + r, false
 		}
 	}
-	return ""
+	return "", false
 }
 
 // edgeUnionReason is why an edge column with more than one candidate is
