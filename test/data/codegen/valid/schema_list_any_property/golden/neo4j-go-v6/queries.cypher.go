@@ -93,11 +93,11 @@ func (q *Queries) BinColumns(ctx context.Context) ([]BinColumnsRow, error) {
 		}
 		var value0Ptr *[]any
 		if !isNil {
-			acc := make([]any, 0, len(value0))
+			acc0 := make([]any, 0, len(value0))
 			for _, elem := range value0 {
-				acc = append(acc, elem)
+				acc0 = append(acc0, elem)
 			}
-			value0Ptr = &acc
+			value0Ptr = &acc0
 		}
 		row.Bag = value0Ptr
 		value1, isNil, err := neo4j.GetRecordValue[[]any](record, "loose")
@@ -107,18 +107,18 @@ func (q *Queries) BinColumns(ctx context.Context) ([]BinColumnsRow, error) {
 		if isNil {
 			return nil, fmt.Errorf("BinColumns: column %q is non-nullable but arrived null", "loose")
 		}
-		acc := make([]any, 0, len(value1))
+		acc1 := make([]any, 0, len(value1))
 		for _, elem := range value1 {
-			acc = append(acc, elem)
+			acc1 = append(acc1, elem)
 		}
-		row.Loose = acc
+		row.Loose = acc1
 		value2, isNil, err := neo4j.GetRecordValue[[]any](record, "piles")
 		if err != nil {
 			return nil, fmt.Errorf("BinColumns: decode column %q: %w", "piles", err)
 		}
 		var value2Ptr *[][]any
 		if !isNil {
-			acc := make([][]any, 0, len(value2))
+			acc2 := make([][]any, 0, len(value2))
 			for i, elem := range value2 {
 				inner, ok := elem.([]any)
 				if !ok {
@@ -128,9 +128,9 @@ func (q *Queries) BinColumns(ctx context.Context) ([]BinColumnsRow, error) {
 				for _, elem4 := range inner {
 					innerAcc = append(innerAcc, elem4)
 				}
-				acc = append(acc, innerAcc)
+				acc2 = append(acc2, innerAcc)
 			}
-			value2Ptr = &acc
+			value2Ptr = &acc2
 		}
 		row.Piles = value2Ptr
 		out = append(out, row)

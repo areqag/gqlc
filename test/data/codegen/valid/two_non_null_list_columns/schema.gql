@@ -1,0 +1,7 @@
+CREATE PROPERTY GRAPH TYPE TwoNonNullListColumns AS {
+    (:Listy {
+        tags  :: LIST<STRING> NOT NULL,
+        ranks :: LIST<INT32> NOT NULL,
+        spare :: LIST<STRING>
+    })
+}

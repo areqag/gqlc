@@ -32,3 +32,90 @@ func (q *Queries) EventIds(ctx context.Context) ([]int64, error) {
 	}
 	return out, nil
 }
+
+const eventColumnsQueryText = `MATCH (e:Event) RETURN e.marker AS marker, e.payload AS payload`
+
+type EventColumnsRow struct {
+	Marker  any
+	Payload *any
+}
+
+// EventColumns executes the EventColumns query.
+//
+//	MATCH (e:Event) RETURN e.marker AS marker, e.payload AS payload
+func (q *Queries) EventColumns(ctx context.Context) ([]EventColumnsRow, error) {
+	records, err := q.db.run(ctx, eventColumnsQueryText, nil, neo4j.AccessModeRead)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]EventColumnsRow, 0, len(records))
+	for _, record := range records {
+		var row EventColumnsRow
+		value0, ok := record.Get("marker")
+		if !ok {
+			return nil, fmt.Errorf("EventColumns: decode column %q: key not found", "marker")
+		}
+		row.Marker = value0
+		value1, ok := record.Get("payload")
+		if !ok {
+			return nil, fmt.Errorf("EventColumns: decode column %q: key not found", "payload")
+		}
+		var value1Ptr *any
+		if value1 != nil {
+			value1Ptr = &value1
+		}
+		row.Payload = value1Ptr
+		out = append(out, row)
+	}
+	return out, nil
+}
+
+const eventMarkerQueryText = `MATCH (e:Event) RETURN e.marker AS marker`
+
+// EventMarker executes the EventMarker query.
+//
+//	MATCH (e:Event) RETURN e.marker AS marker
+func (q *Queries) EventMarker(ctx context.Context) (any, error) {
+	records, err := q.db.run(ctx, eventMarkerQueryText, nil, neo4j.AccessModeRead)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, ErrNoRows
+	}
+	if len(records) > 1 {
+		return nil, ErrMultipleResults
+	}
+	value, ok := records[0].Get("marker")
+	if !ok {
+		return nil, fmt.Errorf("EventMarker: decode column %q: key not found", "marker")
+	}
+	return value, nil
+}
+
+const eventPayloadQueryText = `MATCH (e:Event) RETURN e.payload AS payload`
+
+// EventPayload executes the EventPayload query.
+//
+//	MATCH (e:Event) RETURN e.payload AS payload
+func (q *Queries) EventPayload(ctx context.Context) (*any, error) {
+	records, err := q.db.run(ctx, eventPayloadQueryText, nil, neo4j.AccessModeRead)
+	if err != nil {
+		return nil, err
+	}
+	if len(records) == 0 {
+		return nil, ErrNoRows
+	}
+	if len(records) > 1 {
+		return nil, ErrMultipleResults
+	}
+	value, ok := records[0].Get("payload")
+	if !ok {
+		return nil, fmt.Errorf("EventPayload: decode column %q: key not found", "payload")
+	}
+	var valuePtr *any
+	if value != nil {
+		valuePtr = &value
+	}
+	return valuePtr, nil
+}

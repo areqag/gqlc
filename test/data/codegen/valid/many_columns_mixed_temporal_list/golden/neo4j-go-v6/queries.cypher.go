@@ -61,14 +61,14 @@ func (q *Queries) PersonAtNow(ctx context.Context) (PersonAtNowRow, error) {
 	if isNil {
 		return PersonAtNowRow{}, fmt.Errorf("PersonAtNow: column %q is non-nullable but arrived null", "xs")
 	}
-	acc := make([]int64, 0, len(value2))
+	acc2 := make([]int64, 0, len(value2))
 	for i, elem := range value2 {
 		v, ok := elem.(int64)
 		if !ok {
 			return PersonAtNowRow{}, fmt.Errorf("PersonAtNow: decode column %q element %d: expected int64, got %T", "xs", i, elem)
 		}
-		acc = append(acc, v)
+		acc2 = append(acc2, v)
 	}
-	row.Xs = acc
+	row.Xs = acc2
 	return row, nil
 }
