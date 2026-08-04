@@ -143,9 +143,24 @@ type SentinelTaxonomySuite struct {
 	failSites      []failSite
 	tagged         map[string]failSite
 
-	// corpusCov memoises the corpus coverage sweep. Two tests read it and
-	// it is the expensive part of this suite.
+	// corpusCov memoises the corpus coverage sweep. Three tests read it
+	// and it is the expensive part of this suite.
 	corpusCov coverCounts
+	// corpusCmd, corpusErr and corpusStderr are how the sweep's own `go
+	// test` exited, held rather than asserted where it ran.
+	//
+	// A mutation that moves a branch usually breaks a golden too — the
+	// deletion `column-type-invariant` fences breaks four — so the corpus
+	// exits non-zero on the run that proves the branch went live. Failing
+	// there would report that mutation as a bare `exit status 1` plus a
+	// command line, and the two assertions below would never speak. They
+	// have the site name; this has the exit status; so they go first and
+	// TestCorpusRunsGreen reports this. `go test -coverprofile` writes the
+	// profile for every binary that ran regardless of the verdict, which
+	// is what makes the order available.
+	corpusCmd    string
+	corpusErr    error
+	corpusStderr string
 }
 
 func TestSentinelTaxonomy(t *testing.T) {
@@ -589,10 +604,19 @@ func (s *SentinelTaxonomySuite) corpusCoverage() coverCounts {
 	profile := filepath.Join(s.T().TempDir(), "corpus.cov")
 
 	args := []string{"test", "-count=1", "-covermode=set", "-coverpkg=" + codegenPkgPath, "-coverprofile=" + profile}
-	s.run(append(args, pkgs...)...)
+	args = append(args, pkgs...)
+	s.corpusCmd = "go " + strings.Join(args, " ")
+	_, s.corpusStderr, s.corpusErr = s.goCmd(args...)
 
+	// The verdict is TestCorpusRunsGreen's to report. What is fatal here
+	// is a run that produced nothing to measure: without a profile the two
+	// coverage assertions have no answer at all, and the zero they would
+	// otherwise read is the value that means "unreached".
 	src, err := os.ReadFile(profile) //nolint:gosec // path built from t.TempDir
-	s.Require().NoError(err)
+	if err != nil {
+		s.Require().NoError(s.corpusErr, "%s failed before it wrote a profile: %s", s.corpusCmd, s.corpusStderr)
+	}
+	s.Require().NoError(err, "%s left no coverage profile behind", s.corpusCmd)
 
 	counts := make(coverCounts)
 	for _, line := range strings.Split(string(src), "\n") {
@@ -610,9 +634,26 @@ func (s *SentinelTaxonomySuite) corpusCoverage() coverCounts {
 		}
 		counts[block] += s.atoi(m[7])
 	}
-	s.Require().NotEmpty(counts, "the corpus coverage profile is empty; the measurement behind %s would pass vacuously", unreachedHeading)
+	s.Require().NotEmpty(counts, "the corpus coverage profile written by %s is empty; the measurement behind %s would pass vacuously. The run exited %v: %s", s.corpusCmd, unreachedHeading, s.corpusErr, s.corpusStderr)
 	s.corpusCov = counts
 	return counts
+}
+
+// TestCorpusRunsGreen reports the exit status corpusCoverage deliberately
+// swallows, so a corpus that fails for a reason no fail-site explains is
+// still a red suite and still names the command and its stderr.
+//
+// It is also what keeps the swallow honest in the direction that matters.
+// A corpus that fails early — a package that will not build, a suite that
+// panics — writes a partial profile in which branches read as unreached
+// because nothing ran them, and TestUnreachedBranchesAreUnreached asserts
+// exactly that they are unreached. It would pass on the evidence of an
+// absence, and this is the only thing that notices.
+func (s *SentinelTaxonomySuite) TestCorpusRunsGreen() {
+	s.corpusCoverage()
+	s.Require().NoError(s.corpusErr,
+		"the corpus sweep failed, so the coverage the two branch measurements read was taken from a run that did not pass. A tagged branch reads as unreached when the binary that would have reached it never ran, so this has to be green before %s %s means anything.\n%s\n%s",
+		taxonomyDoc, unreachedHeading, s.corpusCmd, s.corpusStderr)
 }
 
 // atoi reads one numeric field of a coverage profile. A malformed field
@@ -671,20 +712,28 @@ func corpusPackageOf(importPath string) string {
 	return strings.TrimSuffix(importPath, "_test")
 }
 
-// run executes the go tool at the module root and returns its stdout.
-// Failure is fatal rather than skipped: a fence that quietly stops
-// measuring is the failure mode this document is about.
-func (s *SentinelTaxonomySuite) run(args ...string) string {
+// goCmd executes the go tool at the module root and returns its stdout,
+// its stderr and its exit error, asserting nothing. Only corpusCoverage
+// wants this shape — it has a use for the output of a run that failed —
+// and every other caller goes through run.
+func (s *SentinelTaxonomySuite) goCmd(args ...string) (stdout, stderr string, err error) {
 	cmd := exec.CommandContext(s.T().Context(), "go", args...)
 	cmd.Dir = moduleRoot
 	out, err := cmd.Output()
-	var stderr string
 	var exit *exec.ExitError
 	if errors.As(err, &exit) {
 		stderr = string(exit.Stderr)
 	}
+	return string(out), stderr, err
+}
+
+// run executes the go tool at the module root and returns its stdout.
+// Failure is fatal rather than skipped: a fence that quietly stops
+// measuring is the failure mode this document is about.
+func (s *SentinelTaxonomySuite) run(args ...string) string {
+	out, stderr, err := s.goCmd(args...)
 	s.Require().NoError(err, "go %s failed: %s", strings.Join(args, " "), stderr)
-	return string(out)
+	return out
 }
 
 // TestDeclaredSentinelsAreAccounted holds the document against the whole
