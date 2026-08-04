@@ -666,6 +666,28 @@ var connectionSurface = map[string]bool{"db.go": true, "graph.go": true}
 // is a body, which this test does not read by design. A dispatch that
 // picked the wrong candidate is a live-run question, and that is where it
 // is asked (test/data/codegen, edgeUnionDispatch).
+//
+// # Scope, and what covers the residual
+//
+// The subject is what a caller writes against, so the comparison is over
+// caller-visible declarations and deliberately no wider: type declarations
+// and methods, which a caller can name, and not the unexported
+// receiver-less functions the emitted decoders are. That exclusion is a
+// decision and not an oversight. Widening it would point the gate at the
+// encode/decode path, which is the one part of the emission that is
+// supposed to differ per backend, so it would redden on legitimate
+// divergence — and a gate that cries wolf gets weakened until it says
+// nothing.
+//
+// The cost is real and is covered elsewhere. A backend can declare a
+// struct whose surface matches under every target while the decoder that
+// fills it can never fire — an emitted decodeFoo guarding on a label no
+// value that backend can stamp leaves this comparison green, because
+// decodeFoo is not a declaration it reads. That residual is
+// TestEmittedDecodersGuardOnlyOnStampableLabels' (decoder_reachability_test.go),
+// which sweeps the emitted decoder bodies for label guards the schema's
+// own label alphabet cannot satisfy. The two gates partition the emission:
+// this one owns the surface, that one owns the decoders underneath it.
 func TestBackendInvariantSurface(t *testing.T) {
 	goldens, err := filepath.Glob(filepath.Join(fixtureRoot(), "valid", "*", "golden"))
 	require.NoError(t, err)
@@ -742,6 +764,12 @@ func declaredSurface(t *testing.T, dir string) map[string]string {
 				// exported one is surface a caller writes against, and
 				// one skipped here could diverge between backends with
 				// nothing to see it.
+				//
+				// What is skipped here is not unwatched. The decoders
+				// this passes over are swept for unsatisfiable label
+				// guards by TestEmittedDecodersGuardOnlyOnStampableLabels;
+				// their per-backend divergence is what that gate assumes
+				// and this one must not assert.
 				if d.Recv == nil {
 					require.False(t, ast.IsExported(d.Name.Name),
 						"%s: package-level func %s is exported, so it is caller-facing surface this comparison skips",

@@ -66,6 +66,17 @@ therefore declare a type that compiles, that a caller can construct, and that
 no query can ever fill — with a label check nothing could satisfy — and would
 say nothing about it.
 
+That last clause no longer holds, and this paragraph is kept as the record of
+why the shape was rejected rather than of what would happen today. The residual
+it named — filed as `gqlc-05tl` — is closed by
+`TestEmittedDecodersGuardOnlyOnStampableLabels`
+(`internal/codegen/conformance/decoder_reachability_test.go`), which runs every
+registered backend over every valid fixture and refuses any emitted `decode<T>`
+whose label guard is a string the fixture's schema does not declare as a label.
+It reddens on this shape naming `decodePersonEmployee` and the join spelling.
+The rejection above stands on its own terms: a gate that catches the emission is
+not a reason to prefer emitting it.
+
 That is the same disposition ADR 0025 rejected for temporal kinds: "it emits a
 column no decoder can fill at exit 0. Generate-time refusal is this codebase's
 posture for *this backend cannot represent that*." Taking it here would make the
