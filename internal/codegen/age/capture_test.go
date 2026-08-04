@@ -557,11 +557,13 @@ func (s *EmissionSuite) methodScopes(body string) map[string][]string {
 // The assertion is still written against a substitution rather than as a
 // plain equality, and the census then requires the substitution to be
 // EMPTY. Written that way, the day a package-level name starts following
-// a column again — an edge union readmitted, or some other emission
-// mangling a column into a declaration — the census reddens and names it,
-// instead of the equality failing somewhere further down with a diff that
-// does not say why. The two halves below are what the substitution is
-// applied to.
+// a column again — some emission mangling a column into a declaration —
+// the census reddens and names it, instead of the equality failing
+// somewhere further down with a diff that does not say why. A readmitted
+// edge union is NOT among what this reaches: it would have to be enrolled
+// on AGE to enter this corpus at all, and the refusal is what keeps it
+// out. The census at the end states that boundary. The two halves below
+// are what the substitution is applied to.
 //
 // The exact half: the names a method BINDS — its argument and its body
 // locals, which are the positions a capture actually occupies — must be
@@ -647,9 +649,17 @@ func (s *EmissionSuite) TestOnlyPackageLevelNamesFollowAColumnName() {
 	// built from a column, because the one that was — the edge-union sum
 	// type — is a column this backend refuses at generation rather than
 	// decodes. Measuring it here rather than asserting it in the comment
-	// is what makes a readmitted edge union, or any later emission that
-	// mangles a column into a declaration, fail as itself instead of as a
-	// scope diff further up.
+	// is what makes a later emission that mangles a column into a
+	// declaration fail as itself instead of as a scope diff further up.
+	//
+	// It does NOT hold the edge-union refusal, and the wording here used to
+	// claim it did. This census reads the AGE-enrolled corpus, and no
+	// AGE-enrolled fixture carries an edge-union column — the enrolment is
+	// what the refusal removes — so nulling edgeUnionReason leaves this
+	// test green. The refusal is pinned by TestRejectsEdgeUnionColumns,
+	// TestRejectsQueriesItCannotServe and TestRunApacheAgeRefusesEdgeUnions,
+	// all three of which redden for it. A census over a corpus that cannot
+	// contain the construct is not evidence about the construct.
 	s.Require().Zero(moved,
 		"a package-level name in the corpus follows a column name, so this backend has grown the "+
 			"sum-type residue that refusing edge-union columns is what removes")

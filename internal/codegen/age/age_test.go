@@ -711,6 +711,15 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 		// cannot stand in for the other. A width with no carrier is the
 		// map column's defect one step along: still an argument to
 		// change, still not the reason the statement never parsed.
+		//
+		// BYTES is the discriminator because it is unserved on BOTH the
+		// column and the parameter axis, which is what these precedence
+		// subtests need. That is a dependency on the served set, not on
+		// BYTES itself: these subtests were written against LIST and
+		// stopped discriminating the day LIST became served. If BYTES is
+		// served too, pick another width unserved on both axes — do not
+		// delete the subtest, because the precedence it pins is the whole
+		// point of the gate above it.
 		wideParam := resolver.ResolvedParameter{
 			Name: "payload", Type: resolver.ResolvedProperty{Type: graph.TypeBytes},
 		}
