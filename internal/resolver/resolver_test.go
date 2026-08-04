@@ -1158,12 +1158,34 @@ func (s *ResolverSuite) TestNarrowingLearnsOnlyFromEdgesEveryRowHas() {
 // type, and since these fixtures project a property declared on exactly one
 // node type, it reaches emitted code as a NOT NULL column that is null.
 //
-// No two-type plural schema can show this. `satisfy_plural_edges*.gql` all
-// declare their edge label once, so `(p:Person)-[:WORKS_AT*2]->(c:Company)`
-// closes over that one declaration and names p's real type by luck, whatever
-// the quantifier says. satisfy_plural_edges_chain.gql declares X twice in a
-// chain, which is the smallest schema on which "the ends of the closed edge"
-// and "the ends of the pattern" can disagree.
+// No schema already in the corpus can show it, and the reason is NOT how often
+// each declares its label — every one of them declares some label more than
+// once: FOUNDED twice in valid/satisfy_plural_edges.gql, KNOWS twice in
+// _symmetric, MENTORS twice in _mixed_symmetry, WORKS_AT twice in _three_types,
+// REVIEWED twice in _overlapping and _reversed_subtype, three times in
+// _reversed and four times in _two_swapped_pairs. Multiplicity cannot be what
+// matters, because edgeCandidates never reads the hop count at all: the closure
+// of a `*2` pattern is the same set as the closure of the one-hop pattern with
+// the same two endpoints, however many declarations carry the label.
+//
+// What matters is whether that set can hold a declaration which is not the
+// pattern's FIRST hop. satisfy_plural_edges_chain.gql is the only schema where
+// it can: X runs A -> B and B -> C, a chain through three DISTINCT types that
+// `(:Node)` satisfies alike. So `(p:Node)-[:X*2]->(c:Node:C)` has
+// srcs = {A&Node, B&Node, C&Node}, tgts = {C&Node}, and B -> C sits inside that
+// box while the real first hop A -> B does not. The closure names B&Node; the
+// only two-hop path into C&Node starts at A&Node.
+//
+// Every other plural-endpoint schema is missing one of those two ingredients.
+// satisfy_plural_edges, _mixed_symmetry and _three_types declare their label
+// only INTO a type no declaration leaves, so there is no chain to walk.
+// _symmetric, _overlapping and _two_swapped_pairs do chain, but every A -> B
+// -> C they admit has two of A, B, C equal, so there is no third type for the
+// closure to name. _reversed and _reversed_subtype do chain through a third
+// distinct type — Person&Employee -> Company -> Person and Author -> Book ->
+// Author&Editor — but that middle type is a Company and a Book, and neither
+// satisfies the plural endpoint's `(:Person)` or `(:Author)`, so it is not in
+// srcs and the closure can never name it.
 //
 // The twins are the same queries with the quantifier deleted. They must stay
 // accepted with the SAME property type the multi-hop form wrongly emitted:
@@ -1237,6 +1259,46 @@ func (s *ResolverSuite) TestNarrowingLearnsOnlyFromASingleHopEdge() {
 			s.Require().Equal(tt.want, got)
 		})
 	}
+}
+
+// TestAnEmptyHopRangeIsNotAWitness pins the EQUALITY in singleHopPattern's
+// lower-bound test. It is the one arm of that predicate no fixture reaches:
+// relax `*lower == 1` to `*lower >= 1` and the whole suite stays green.
+//
+// `*2..1` parses — the grammar does not require min <= max, and Hops() reports
+// Min()==2, Max()==1 — and it matches nothing, since no path length is at once
+// at least two and at most one. Nothing else in the corpus separates the two
+// spellings: the four multi-hop fixtures are refused by the upper bound and the
+// three zero-lower-bound ones by a lower bound of zero, so `*2..1` is the only
+// quantifier whose verdict turns on == versus >=.
+//
+// Admitting it would not be UNSOUND — an empty range returns no rows, so there
+// is no row whose p could be the wrong type. It is pinned anyway because the
+// difference is visible in emitted code rather than in a row: under `>= 1` the
+// query below is ACCEPTED and grows a NOT NULL STRING column, so the signature
+// of a generated method would turn on a predicate no test reads. It also keeps
+// singleHopPattern honest about the contract witnessesItsEndpoints quotes —
+// "a range that admits exactly one hop and no other count". `*2..1` admits no
+// count at all, so only the equality states that contract.
+//
+// The `*1..1` twin says the refusal is about the range being EMPTY and not
+// about explicit ranges being refused wholesale.
+func (s *ResolverSuite) TestAnEmptyHopRangeIsNotAWitness() {
+	sch := s.loadSchema("invalid", "satisfy_plural_edges_chain.gql")
+	resolve := func(src string) ([]Column, error) {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		return vq.Columns, err
+	}
+
+	_, err := resolve("MATCH (p:Node)-[w:X*2..1]->(c:Node:C) RETURN p.bOnly")
+	s.Require().ErrorIs(err, ErrUnknownProperty,
+		"`*2..1` is not one declared edge, so it witnesses nothing and p stays plural over all three types")
+
+	got, err := resolve("MATCH (p:Node)-[w:X*1..1]->(c:Node:C) RETURN p.bOnly")
+	s.Require().NoError(err, "`*1..1` is the non-empty range of exactly one hop, so the closure really is the pattern")
+	s.Require().Equal([]Column{{Name: "p.bOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}}, got)
 }
 
 // TestAnonymousEdgeNarrowsToTheTypeItCloses pins the TYPE that

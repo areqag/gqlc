@@ -2,11 +2,15 @@
 -- two ends of any single declared edge.
 --
 -- `(:Node)` is satisfied by all three declared types (ADR 0022 plural), and X
--- is declared A -> B and B -> C. Every plural-endpoint schema in the corpus is
--- one hop wide: `(p:Person)-[:WORKS_AT*2]->(c:Company)` closes over the single
--- WORKS_AT declaration whatever the hop count, so the endpoints the closure
--- names happen to be the endpoints of the pattern and a hop-count bug is
--- invisible. Here they diverge:
+-- is declared A -> B and B -> C: a chain through three DISTINCT types that the
+-- plural endpoint satisfies alike. That combination is what no other
+-- plural-endpoint schema in the corpus has, and it is not about how often the
+-- label is declared — every one of them declares some label two, three or four
+-- times. It is that their declarations form no chain at all, or chain with two
+-- of the three types equal, or chain through a middle type the plural endpoint
+-- does not satisfy. Any of those leaves the closure naming an endpoint of the
+-- pattern whatever the hop count, so a hop-count bug is invisible. Here they
+-- diverge:
 --
 --   (p:Node)-[:X*2]->(c:Node:C)   closes to B -> C, but p is A&Node
 --   (p:Node:A)-[:X*1..2]->(c:Node) closes to A -> B, but c is B&Node or C&Node

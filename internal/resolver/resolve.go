@@ -1198,8 +1198,13 @@ func singleHopPattern(e query.EdgeBinding) bool {
 		// Absent lower bound is one (§4.4.3), so `*..1` is the closed [1,1].
 		return true
 	}
-	// A zero lower bound reaches here only as `*0..1`, whose empty path
-	// degenerates to source == target and declares nothing about either end.
+	// Two spellings other than one reach here, and the equality refuses both.
+	// A zero lower bound is `*0..1`, whose empty path degenerates to
+	// source == target and declares nothing about either end. A lower bound
+	// above one is an EMPTY range such as `*2..1` — the grammar does not
+	// require min <= max — and matching no path length is not matching one
+	// declared edge. TestAnEmptyHopRangeIsNotAWitness is why this is `== 1`
+	// rather than `>= 1`; nothing else in the corpus separates the two.
 	return *lower == 1
 }
 
