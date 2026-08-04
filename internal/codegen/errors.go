@@ -171,6 +171,33 @@ var (
 // map. A sentinel added here must be paired with at least one negative
 // fixture; a retired one must be dropped from both.
 //
+// docs/specs/codegen-sentinel-taxonomy.md indexes this set and the
+// constructs that route to each member; TestSentinelTaxonomy holds the
+// two against each other, so an edit here needs the matching rows there.
+//
+// A handful of fail-sites in this package carry a sentinel but no
+// schema, query, CLI option or Input an out-of-package caller can
+// assemble reaches: each is shadowed by an earlier check applying the
+// same predicate to the same value. Each is tagged
+// `//gqlc:unreachable <site>` above its return and recorded in that
+// document's §3 under the same site name, with the argument it rests
+// on. Two arguments are not available there. "The resolver would never
+// build this" is about the pipeline: Input, NamedQuery and every
+// resolver.Resolved* variant are exported structs with exported fields,
+// so a caller assembles one without the resolver's help. "The switch
+// names every variant of a sealed interface" is about a seal that is
+// not one: resolver.ResolvedType's unexported marker stops another
+// package writing an implementation from scratch and stops nothing
+// else, because Go promotes an embedded type's unexported methods — so
+// `struct{ resolver.ResolvedNode }`, declared anywhere, satisfies the
+// interface and matches no `case Variant:` arm. The pointer forms are
+// the same hole a size smaller. The set falling through such a default
+// is open, so no switch over that interface is total and no count of
+// its inhabitants is worth taking. The tag is not a comment the fence
+// trusts: TestSentinelTaxonomy runs the corpus under coverage of this
+// package and fails if a tagged branch executes, so tagging a branch
+// anything reaches turns the suite red rather than silencing it.
+//
 // ErrFormatFailure is intentionally excluded: it is defensive-only,
 // unreachable via any legitimate fixture (well-formed emission cannot
 // fail formatting), so a fixture that fires it would require synthetic

@@ -1001,6 +1001,11 @@ func (s *CodegenSuite) TestDoubleRun() {
 
 ## 9. Sentinel sets
 
+*Historical: what this stage shipped, sentinel names included; it takes
+no further edit. The current answer is
+[docs/specs/codegen-sentinel-taxonomy.md](codegen-sentinel-taxonomy.md),
+which `TestSentinelTaxonomy` holds against the code.*
+
 Two disjoint sets, two disjoint sweeps. Both wrapped at the fail-site
 with detail (`fmt.Errorf("%w: derived package %q", ErrInvalidPackageName,
 name)`).

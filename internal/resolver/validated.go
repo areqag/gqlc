@@ -2,6 +2,7 @@ package resolver
 
 import (
 	"encoding/json"
+	"strconv"
 
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/schema"
@@ -300,8 +301,20 @@ const (
 // String is the wire tag ("date" / "time" / "localtime" / "datetime" /
 // "localdatetime" / "duration"). Single source the JSON encoding derives
 // from.
+//
+// A value the constant block does not name renders as Temporal(<n>), the
+// form stringer emits, rather than falling through to a member's own tag.
+// It used to answer "date" — TemporalDate's tag, and TemporalDate is the
+// zero value, so it had no arm of its own either. An unnamed kind was
+// therefore indistinguishable from a named one in an error message, in
+// JSON, and to any caller trying to establish where the enum ends: adding
+// a seventh member without an arm here changed nothing observable. Every
+// declared member now has its own arm, so the default answers for the
+// undeclared alone.
 func (t Temporal) String() string {
 	switch t {
+	case TemporalDate:
+		return "date"
 	case TemporalTime:
 		return "time"
 	case TemporalLocalTime:
@@ -313,7 +326,7 @@ func (t Temporal) String() string {
 	case TemporalDuration:
 		return "duration"
 	default:
-		return "date"
+		return "Temporal(" + strconv.Itoa(int(t)) + ")"
 	}
 }
 

@@ -1,0 +1,12 @@
+-- Rule 4's third arm, which unnamed_multi_label_type does not reach: one
+-- edge label spread across two endpoint pairs. Each edge type is
+-- single-labelled and would mangle cleanly on its own, so only the pair
+-- of them together makes the label ambiguous, and neither carries the
+-- explicit Name that would settle it.
+CREATE PROPERTY GRAPH TYPE UnnamedAmbiguousEdgeLabel AS {
+    (a :Person { id :: INT64 NOT NULL }),
+    (b :Post { id :: INT64 NOT NULL }),
+    (c :Comment { id :: INT64 NOT NULL }),
+    DIRECTED EDGE TYPE LABEL AUTHORED CONNECTING (a -> b),
+    DIRECTED EDGE TYPE LABEL AUTHORED CONNECTING (a -> c)
+}

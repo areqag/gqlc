@@ -1339,6 +1339,11 @@ C0's §6.7 invariants stand. C1 adds:
 
 **Out of scope, routed to the appropriate sentinel:**
 
+*Historical: what this stage shipped, sentinel names included; it takes
+no further edit. The current answer is
+[docs/specs/codegen-sentinel-taxonomy.md](codegen-sentinel-taxonomy.md),
+which `TestSentinelTaxonomy` holds against the code.*
+
 | Construct                                              | Sentinel                | Stage owner |
 |--------------------------------------------------------|-------------------------|-------------|
 | `ResolvedNode` column                                  | `ErrOutOfC1Scope`       | C2          |
@@ -1426,6 +1431,11 @@ fixture unchanged.
 ---
 
 ## 10. Sentinel set delta — the C1 view
+
+*Historical: what this stage shipped, sentinel names included; it takes
+no further edit. The current answer is
+[docs/specs/codegen-sentinel-taxonomy.md](codegen-sentinel-taxonomy.md),
+which `TestSentinelTaxonomy` holds against the code.*
 
 Recap of §5.7's set with the delta callout:
 

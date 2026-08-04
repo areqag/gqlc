@@ -1,0 +1,8 @@
+-- Rule 2, not Rule 1: the node type carries no explicit Name, so the
+-- single label is mangled into one — and a digit-leading label mangles
+-- to a digit-leading string, which is not an exported Go identifier.
+-- The delimited-identifier form is what lets a label start with a digit
+-- at all; the bare form the sibling fixtures use could not express it.
+CREATE PROPERTY GRAPH TYPE InvalidEntityNameNodeLabelMangle AS {
+    (:"1Person" { id :: INT64 NOT NULL })
+}
