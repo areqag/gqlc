@@ -1,6 +1,10 @@
 package conformance_test
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -57,30 +61,120 @@ func (s *AssembledInputSuite) SetupSuite() {
 // the case would measure the wrong refusal.
 const assembledTarget = "neo4j-go-v5"
 
-// temporalScanLimit bounds firstUndeclaredTemporal's scan. An enum that
-// outgrows it is one the list-elem-temporal case wants rewriting for, and
-// TestTemporalScanFindsTheEnumEnd is where that shows.
+// resolverSource declares resolver.Temporal. This suite reads it off disk
+// because the fact it needs is the one compilation erases: a Go constant
+// has no run-time footprint, so a kind the const block names and
+// Temporal.String has no arm for is, to anything running, identical to a
+// value nobody ever declared.
+//
+// That is not a hypothetical. The derivation this replaces scanned for
+// the first value String answered with its default arm and called it the
+// end of the enum, which is the same thing only while every declared kind
+// has an arm. A seventh constant added with no arm left the scan
+// answering 6, TestTemporalScanFindsTheEnumEnd comparing 6 to 6, and the
+// list-elem-temporal case below feeding a kind the resolver declares
+// while its `why` still said otherwise — the whole repo green. Behaviour
+// cannot see a missing switch arm, and a missing switch arm is the
+// commonest Go enum bug there is.
+const resolverSource = "../../resolver/validated.go"
+
+// temporalKinds is resolver.Temporal's constant block as this suite
+// believes it stands, in declaration order so an index is a value.
+//
+// Written out, and that is the point: declaredTemporals derives the same
+// list from the source, the two are held equal, and they can disagree.
+// The list this replaces was read through len() and could not — six was
+// six whatever the enum said. A member added, removed or inserted in the
+// middle moves the derivation and not this, and the failure names which.
+var temporalKinds = []string{
+	"TemporalDate",
+	"TemporalTime",
+	"TemporalLocalTime",
+	"TemporalDateTime",
+	"TemporalLocalDateTime",
+	"TemporalDuration",
+}
+
+// temporalScanLimit bounds the sweep of values past the end of the enum
+// in TestTemporalStringerAnswersForDeclaredKindsAlone. Nothing derives
+// from it; it is how far past the last member that test looks for an arm
+// that should not be there.
 const temporalScanLimit = 64
 
-// firstUndeclaredTemporal is the lowest resolver.Temporal past the end of
-// the declared enum, derived from the only membership signal the type
-// exports: Temporal is an int with no count and no iteration, so its
-// Stringer's default arm — which answers for every value the constant
-// block does not name — is what marks the end. The scan starts at 1
-// because TemporalDate is the zero value and shares that arm.
+// temporalFallback is what resolver.Temporal.String renders a value its
+// constant block does not name as. Asserted in both directions — no
+// declared kind may render it, every undeclared one must — so this
+// mirroring the resolver's format is what the assertions are for rather
+// than something they rest on.
+func temporalFallback(v int) string { return "Temporal(" + strconv.Itoa(v) + ")" }
+
+// declaredTemporals returns the names resolver.Temporal's constant block
+// declares, in declaration order, so a name's index is its value.
 //
-// Derived rather than mirrored. A written-out list of the six kinds read
-// through len() yields the same 6 and cannot disagree with the enum: add
-// a seventh kind upstream and the list still says six, so the case below
-// would name a declared kind and quietly stop testing what it claims to.
-func firstUndeclaredTemporal() resolver.Temporal {
-	undeclared := resolver.Temporal(-1).String() // no iota member is negative
-	for k := resolver.Temporal(1); k < temporalScanLimit; k++ {
-		if k.String() == undeclared {
-			return k
+// The block's shape is checked rather than assumed. It is a bare iota run
+// today, which is what makes position and value the same number; a member
+// with its own value, a skipped `_`, or a second name on a line would
+// part the two and the count below would silently mean something else.
+// Each of those fails here instead.
+func (s *AssembledInputSuite) declaredTemporals() []string {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, resolverSource, nil, 0)
+	s.Require().NoError(err,
+		"cannot parse %s, where resolver.Temporal's constant block lives; this suite derives the enum's members from that block because compilation erases them",
+		resolverSource)
+
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.CONST || len(gen.Specs) == 0 {
+			continue
 		}
+		first, ok := gen.Specs[0].(*ast.ValueSpec)
+		if !ok || !isIotaAnchor(first, "Temporal") {
+			continue
+		}
+		names := make([]string, 0, len(gen.Specs))
+		for i, spec := range gen.Specs {
+			value, ok := spec.(*ast.ValueSpec)
+			s.Require().True(ok, "%s: resolver.Temporal's const block holds a spec the derivation cannot read", resolverSource)
+			s.Require().Len(value.Names, 1,
+				"%s: member %d of resolver.Temporal's const block declares %d names on one line; the derivation reads a member's value off its position, which holds only one name at a time",
+				resolverSource, i, len(value.Names))
+			name := value.Names[0].Name
+			s.Require().NotEqual("_", name,
+				"%s: resolver.Temporal's const block skips a value with _, so position and value have parted company and the count below is no longer the first undeclared kind",
+				resolverSource)
+			if i > 0 {
+				s.Require().Nil(value.Type,
+					"%s: %s restates a type inside the iota run; the derivation cannot follow a block that re-anchors", resolverSource, name)
+				s.Require().Empty(value.Values,
+					"%s: %s carries an explicit value inside the iota run, so its position is no longer its value", resolverSource, name)
+			}
+			names = append(names, name)
+		}
+		return names
 	}
-	return -1
+	s.Require().Fail("resolver.Temporal's constant block not found",
+		"%s declares no `<name> Temporal = iota` const block; this suite derives the enum's members from it, and a derivation that found nothing would report an empty enum",
+		resolverSource)
+	return nil
+}
+
+// isIotaAnchor reports whether spec is the `<name> <typeName> = iota`
+// line that opens a const block.
+func isIotaAnchor(spec *ast.ValueSpec, typeName string) bool {
+	ident, ok := spec.Type.(*ast.Ident)
+	if !ok || ident.Name != typeName || len(spec.Values) != 1 {
+		return false
+	}
+	iota, ok := spec.Values[0].(*ast.Ident)
+	return ok && iota.Name == "iota"
+}
+
+// firstUndeclaredTemporal is the lowest resolver.Temporal past the end of
+// the declared enum. The block is a bare iota run, so the member count is
+// the first value it does not name.
+func (s *AssembledInputSuite) firstUndeclaredTemporal() resolver.Temporal {
+	return resolver.Temporal(len(s.declaredTemporals()))
 }
 
 // probeSchema is the smallest schema that indexes one node type and one
@@ -280,20 +374,20 @@ func (s *AssembledInputSuite) TestAssembledInput() {
 		},
 		{
 			name: "list-elem-temporal",
-			why:  "A resolver.Temporal outside its own six-member constant set, the same shape as the out-of-set Cardinality above. The query path is closed for a different reason: only AGE refuses a kind, and rejectUnservedQueries drops a list column before Prepare runs.",
+			why:  "A resolver.Temporal outside its own constant set, the same shape as the out-of-set Cardinality above. The kind is derived from that block rather than written down, so a member added upstream moves it and TestTemporalEnumIsTheOneThisSuiteKnows says so. The query path is closed for a different reason: only AGE refuses a kind, and rejectUnservedQueries drops a list column before Prepare runs.",
 			in: codegen.Input{
 				Schema: probeSchema(),
 				Queries: []codegen.NamedQuery{probeQuery(resolver.Column{
 					Name: "xs",
-					Type: resolver.ResolvedList{Element: resolver.ResolvedTemporal{Kind: firstUndeclaredTemporal()}},
+					Type: resolver.ResolvedList{Element: resolver.ResolvedTemporal{Kind: s.firstUndeclaredTemporal()}},
 				})},
 			},
 			is: codegen.ErrUnrepresentableTemporal,
-			// resolver.Temporal.String defaults to "date" off the end of
-			// the enum, so the message names a kind the value is not. That
-			// is the resolver's Stringer, not this package's, and pinning
-			// it here means a fix there is visible rather than silent.
-			msg: `query "Fetch" column 0 "xs": unrepresentable temporal kind: list element projects temporal(date)`,
+			// The kind renders as Temporal(6) because it names no member of
+			// the constant block, which is the whole of what this case
+			// claims. The two temporal tests below are what hold that
+			// rendering to the block; here it is pinned as user-facing text.
+			msg: `query "Fetch" column 0 "xs": unrepresentable temporal kind: list element projects temporal(Temporal(6))`,
 		},
 		{
 			name: "list-elem-unknown-node",
@@ -351,25 +445,65 @@ func (s *AssembledInputSuite) TestAssembledInput() {
 			// TestReachableBranchesAreReached's line-level measurement,
 			// which names a distinct prepare.go line per case and
 			// reddens when one goes dark. What this pins is the wording,
-			// which is contract — list-elem-temporal's message names a
-			// kind the value is not, and that is the resolver's
-			// off-the-end Stringer showing through rather than a typo.
+			// which is contract — down to how an undeclared temporal kind
+			// renders, since list-elem-temporal's whole claim is that its
+			// value names no member of the enum.
 			s.EqualError(err, tc.msg)
 		})
 	}
 }
 
-// TestTemporalScanFindsTheEnumEnd holds firstUndeclaredTemporal's scan
-// against the constant block's last member. The two read the enum by
-// different routes — the scan through Temporal.String's default arm, this
-// assertion through the name of the last declared kind — so they can
-// disagree, which is the point a list read through len() cannot serve. A
-// seventh kind added upstream moves the scan and not this line, and
-// list-elem-temporal learns here that the value it used to name is now a
-// kind the resolver declares.
-func (s *AssembledInputSuite) TestTemporalScanFindsTheEnumEnd() {
-	s.Equal(resolver.TemporalDuration+1, firstUndeclaredTemporal(),
-		"the scan and resolver.Temporal's constant block disagree about where the enum ends; if a kind was added, name it here and check that list-elem-temporal still reaches its fail-site")
+// TestTemporalEnumIsTheOneThisSuiteKnows holds resolver.Temporal's
+// constant block against the members written out above. It is what makes
+// list-elem-temporal's Kind an undeclared one: that case's value is the
+// derived member count, so a kind added upstream moves it silently unless
+// something notices the enum grew.
+//
+// Set equality on an ordered list rather than a count, and the ordering
+// earns its keep. A seventh member appended and a member inserted in the
+// middle are the same number and not the same enum — the second renumbers
+// every kind after it, so every value this suite hands over means
+// something else. A count cannot tell them apart and this names the
+// member that moved.
+func (s *AssembledInputSuite) TestTemporalEnumIsTheOneThisSuiteKnows() {
+	s.Equal(temporalKinds, s.declaredTemporals(),
+		"resolver.Temporal's constant block is no longer the enum this suite was written against; update temporalKinds, then check that list-elem-temporal still reaches its fail-site and that its expected message still names %q",
+		temporalFallback(len(temporalKinds)))
+}
+
+// TestTemporalStringerAnswersForDeclaredKindsAlone holds Temporal.String's
+// arms against the constant block, in both directions, and it is the half
+// of this that behaviour can see.
+//
+// A declared kind that renders as the fallback has no arm — the seventh
+// constant somebody adds and forgets to handle. An undeclared value that
+// renders as anything else has an arm it should not — a case left behind
+// by a retired kind, or one written for a constant never declared. Both
+// used to be invisible: the default arm returned "date", a declared
+// member's own tag, so the two populations were indistinguishable by
+// construction and every value off the end of the enum claimed to be
+// TemporalDate.
+func (s *AssembledInputSuite) TestTemporalStringerAnswersForDeclaredKindsAlone() {
+	declared := s.declaredTemporals()
+
+	tagOf := make(map[string]string, len(declared))
+	for v, name := range declared {
+		tag := resolver.Temporal(v).String()
+		s.NotEqual(temporalFallback(v), tag,
+			"resolver.%s is declared but resolver.Temporal.String has no arm for it, so it renders as the form reserved for undeclared values; add the case",
+			name)
+		first, dup := tagOf[tag]
+		s.False(dup, "resolver.%s and resolver.%s both render %q, so the wire tag no longer identifies the kind", first, name, tag)
+		tagOf[tag] = name
+	}
+
+	for v := len(declared); v < temporalScanLimit; v++ {
+		s.Equal(temporalFallback(v), resolver.Temporal(v).String(),
+			"resolver.Temporal(%d) is past the end of the constant block but resolver.Temporal.String answers for it; either the constant is missing or the arm is stale, and either way a value nothing declares is rendering as though something does",
+			v)
+	}
+	s.Equal(temporalFallback(-1), resolver.Temporal(-1).String(),
+		"no member of an iota run is negative, so resolver.Temporal(-1) must reach the default arm")
 }
 
 // TestAgeGateAnswersBeforePrepare pins the claim §2's list-elem-temporal
