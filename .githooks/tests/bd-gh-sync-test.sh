@@ -2346,15 +2346,15 @@ _lost="$(LC_ALL=C comm -23 "$TMP/census.txt" "$TMP/ran_uniq.txt" | tr '\n' '|' |
 _uncensused="$(LC_ALL=C comm -13 "$TMP/census.txt" "$TMP/ran_uniq.txt" | tr '\n' '|' | sed 's/|$//')"
 if [ "$fail" -ne 0 ]; then
     # Not read on a run that is already red, and said out loud rather than
-    # passed quietly. 64 of this file's 111 assertion blocks word `bad`
-    # differently from `ok` — a failing block logs "…is reported" where a
-    # passing one logs "…is reported as gone" — so a genuine failure comes back
-    # through here as a missing name *and* an unregistered one, and a census
-    # that cries wolf on every red run is a census nobody reads. Counted, not
-    # estimated: an earlier draft said "several", meaning about twenty, and was
-    # out by a factor of three in the direction that makes the exemption more
-    # necessary rather than less. Here it is as a command rather than a figure
-    # that goes stale — the 65 names only a `bad` arm can ever log:
+    # passed quietly. 65 of the names a `bad` arm here can log never appear on
+    # an `ok` — a failing block logs "…is reported" where a passing one logs
+    # "…is reported as gone" — so a genuine failure comes back through here as a
+    # missing name *and* an unregistered one, and a census that cries wolf on
+    # every red run is a census nobody reads. Counted, not estimated: an earlier
+    # draft said "several", meaning about twenty, and was out by a factor of
+    # three in the direction that makes the exemption more necessary rather than
+    # less. Quoted once, with the command under it: the draft this replaces put
+    # a second, differently-derived figure beside it, and the two disagreed.
     #
     #   f=.githooks/tests/bd-gh-sync-test.sh
     #   comm -23 <(grep -oE '(^|[ ;)])bad +"[^"]*"' "$f" | sed 's/^[^"]*//' | sort -u) \
