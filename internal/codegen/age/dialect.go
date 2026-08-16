@@ -273,9 +273,10 @@ func findUndefinedFunctions(src string) []string {
 // (TestRejectsRelationshipTypeAlternation's "a column shared admission
 // refuses is answered here, because this runs first",
 // TestRejectsUndefinedFunctions' "a projected constructor is answered
-// here, ahead of the portable temporal refusal", and
-// TestRunApacheAgeAnswersAnAlternationAheadOfSharedAdmission at the CLI
-// seam) rather than left to the reading order of generate.go.
+// here, ahead of the portable temporal refusal", and — at the CLI seam,
+// through the real front end — TestRunApacheAgeAnswersAnAlternation
+// AheadOfSharedAdmission and TestRunApacheAgeRefusesUndefinedFunctions)
+// rather than left to the reading order of generate.go.
 func rejectDialectGaps(queries []codegen.NamedQuery) error {
 	for _, g := range dialectGaps {
 		if err := g.reject(queries); err != nil {

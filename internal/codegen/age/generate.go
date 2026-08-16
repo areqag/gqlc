@@ -31,8 +31,10 @@ func generate(in codegen.Input, packageName string) ([]codegen.File, error) {
 	// Prepare: TestRejectsRelationshipTypeAlternation/"a column shared
 	// admission refuses is answered here, because this runs first",
 	// TestRejectsUndefinedFunctions/"a projected constructor is answered
-	// here, ahead of the portable temporal refusal", and
-	// TestRunApacheAgeAnswersAnAlternationAheadOfSharedAdmission. Behind
+	// here, ahead of the portable temporal refusal",
+	// TestRunApacheAgeAnswersAnAlternationAheadOfSharedAdmission and
+	// TestRunApacheAgeRefusesUndefinedFunctions/"a projected constructor
+	// is answered here, ahead of the carrier". Behind
 	// rejectUnservedQueries for the edge union alone: the same tests' "an
 	// edge-union column is answered by the column gate, which says more"
 	// and "an unserved column that is not an edge union yields to the

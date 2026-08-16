@@ -964,19 +964,35 @@ func (s *EmissionSuite) TestRejectsUndefinedFunctions() {
 		s.Require().NotEmpty(files)
 	})
 
-	s.Run("a namespaced call is a different name and is not refused", func() {
-		// Cypher.g4 §oC_FunctionName is `oC_Namespace oC_SymbolicName`,
-		// and a server resolving duration.between resolves nothing
-		// about duration. The probe measured the bare name, so the bare
-		// name is what is refused.
-		batch := in
-		batch.Queries = []codegen.NamedQuery{textQuery("Between",
-			"MATCH (p:Person) WHERE duration.between(p.a, p.b) > 0 RETURN p.id\n",
-			scalarColumn("p.id", graph.TypeInt))}
-		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
-		s.Require().NoError(err)
-		s.Require().NotEmpty(files)
-	})
+	// Cypher.g4 §oC_FunctionName is `oC_Namespace oC_SymbolicName`, and a
+	// server resolving `duration.between` resolves nothing about
+	// `duration`. The probe measured the bare name, so the bare name is
+	// what is refused.
+	//
+	// Both halves are here because only the second one can fail. Drop the
+	// namespace guard in cypher.UnqualifiedFunctionCalls and
+	// `duration.between` reports "between" — a name no probe entered into
+	// the catalogue, so nothing is refused either way and a row spelling
+	// only this shape stays green over a scanner that has stopped reading
+	// the namespace at all. `com.example.datetime()` reports "datetime",
+	// which IS in the catalogue: without the guard the author is refused
+	// a call to their own user-defined function on the strength of a
+	// probe that measured a different name. That is a false positive, the
+	// one failure this gate has no recovery from — ADR 0005 leaves no
+	// rewrite — so it is the shape worth pinning.
+	for _, tc := range []struct{ name, text string }{
+		{"the refused name is the namespace", "MATCH (p:Person) WHERE duration.between(p.a, p.b) > 0 RETURN p.id\n"},
+		{"the refused name is the symbolic name", "MATCH (p:Person) WHERE p.at < com.example.datetime() RETURN p.id\n"},
+	} {
+		s.Run("a namespaced call is a different name and is not refused: "+tc.name, func() {
+			batch := in
+			batch.Queries = []codegen.NamedQuery{textQuery("Between", tc.text,
+				scalarColumn("p.id", graph.TypeInt))}
+			files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+			s.Require().NoError(err)
+			s.Require().NotEmpty(files)
+		})
+	}
 
 	s.Run("a property named like a constructor is not a call", func() {
 		// The false positive a scan for `datetime(` would take, and the
