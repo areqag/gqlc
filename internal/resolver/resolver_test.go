@@ -1301,6 +1301,79 @@ func (s *ResolverSuite) TestAnEmptyHopRangeIsNotAWitness() {
 	s.Require().Equal([]Column{{Name: "p.bOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}}, got)
 }
 
+// TestANonWitnessEdgeSilencesItselfNotTheBinding pins that
+// witnessesItsEndpoints is asked once PER EDGE. A binding touched by a
+// witnessing edge AND a non-witnessing one is narrowed by the first; the second
+// contributes nothing and takes nothing away.
+//
+// Nothing else separates that from the coarser rule "a binding with any
+// non-witnessing touching edge is not narrowed at all", which is a plausible
+// reading of the same paragraph and a materially different resolver. Every
+// invalid/plural_endpoint_*_stays_plural fixture puts its plural binding behind
+// exactly ONE edge, and every accepted twin removes that edge's disqualifier,
+// so on all eleven of them "this edge is silent" and "this binding is silent"
+// are the same sentence. Implemented, the coarse rule leaves the suite green.
+//
+// The two rows are two different disqualifiers on purpose. They are separate
+// arms of witnessesItsEndpoints, so a rule that poisoned the binding on only
+// one of them still passes the other row, and only the pair says the question
+// is per-edge for the predicate rather than for one of its clauses.
+//
+// The first row says more than that the multi-hop edge fails to poison: it says
+// the edge contributes NOTHING. `X` runs A -> B and B -> C, so the `*2` close
+// names B&Node while the single hop into `(:Node:B)` names A&Node. Were the
+// quantified edge folded in at all, the intersection would be empty, the
+// narrowing would fall back to the pre-closure set, and `p.aOnly` would be
+// refused exactly as the coarse rule refuses it.
+//
+// Each row is paired with the same query minus the witnessing edge, which must
+// be refused — otherwise the acceptance above could be the plural set answering
+// on its own and the row would pin nothing.
+func (s *ResolverSuite) TestANonWitnessEdgeSilencesItselfNotTheBinding() {
+	tests := []struct {
+		name        string
+		schema      string
+		query       string
+		unwitnessed string
+		want        []Column
+	}{
+		{
+			name:        "a quantified edge alongside a single-hop one",
+			schema:      "satisfy_plural_edges_chain.gql",
+			query:       "MATCH (p:Node)-[w:X]->(b:Node:B), (p)-[v:X*2]->(z:Node:C) RETURN p.aOnly",
+			unwitnessed: "MATCH (p:Node)-[v:X*2]->(z:Node:C) RETURN p.aOnly",
+			want:        []Column{{Name: "p.aOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}},
+		},
+		{
+			name:   "an OPTIONAL edge alongside a mandatory one",
+			schema: "satisfy_plural_edges_reversed.gql",
+			query: "MATCH (p:Person)-[w:WORKS_AT]->(c:Company) " +
+				"OPTIONAL MATCH (p)-[r:REVIEWED]->(c2:Company) RETURN p.employeeId",
+			unwitnessed: "MATCH (p:Person) OPTIONAL MATCH (p)-[r:REVIEWED]->(c2:Company) RETURN p.employeeId",
+			want:        []Column{{Name: "p.employeeId", Type: ResolvedProperty{Type: graph.PropertyType("INT")}}},
+		},
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			sch := s.loadSchema("invalid", tt.schema)
+			resolve := func(src string) ([]Column, error) {
+				q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+				s.Require().NoError(err)
+				vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+				return vq.Columns, err
+			}
+
+			got, err := resolve(tt.query)
+			s.Require().NoError(err, "the witnessing edge pins p on its own; the other edge is not evidence, which is not the same as being an objection")
+			s.Require().Equal(tt.want, got)
+
+			_, err = resolve(tt.unwitnessed)
+			s.Require().ErrorIs(err, ErrUnknownProperty,
+				"without the witnessing edge nothing narrows p, so the property is the plural intersection's and the row above is not passing on its own")
+		})
+	}
+}
+
 // TestAnonymousEdgeNarrowsToTheTypeItCloses pins the TYPE that
 // valid/plural_endpoint_anonymous_edge_closes_singular.cypher resolves to,
 // rather than leaving it to that fixture's stored golden.

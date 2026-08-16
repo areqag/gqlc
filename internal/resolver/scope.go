@@ -360,6 +360,11 @@ func (s *scope) CloseEdges(sch schema.Schema) error {
 // the deferred-close loop in CloseEdges rather than above it, which
 // TestDeferredEdgesCloseBeforeTheNarrowing pins.
 func (s *scope) NarrowPluralEndpoints(sch schema.Schema) {
+	// Changes no answer — with no plural binding the per-endpoint guard below
+	// skips every side, so acc comes out empty — and no test can pin it. It
+	// stays because the work it skips is not free: writtenBindings walks the
+	// effects and every surviving edge re-runs edgeCandidates over the schema,
+	// on the common scope where nothing is plural.
 	if len(s.nodeCands) == 0 {
 		return
 	}

@@ -870,6 +870,18 @@ narrowing must not read it:
   observing it, so it filters no row of the `MATCH` that fed it. Both
   clauses leave every input row in the result, whatever its type.
 
+The question is asked **once per edge**, and a failing edge silences
+only itself. A binding touched by a witnessing edge and a
+non-witnessing one is narrowed by the first; the second neither
+contributes nor objects. The coarser rule — a binding with any
+non-witnessing touching edge is not narrowed at all — is a plausible
+reading of the paragraph above and a materially different resolver,
+and every `_stays_plural` fixture puts its binding behind exactly one
+edge, so none of them tells the two apart.
+`TestANonWitnessEdgeSilencesItselfNotTheBinding` does, on one row per
+disqualifier, because a rule poisoning on one arm alone passes the
+other row.
+
 The first arm is §4.4.3's demotion gate, spelled the same way and read
 for the same reason: both ask whether the edge is guaranteed on a
 surviving row. The second is **strictly narrower** than §4.4.3's, and
