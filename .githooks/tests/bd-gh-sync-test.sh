@@ -1981,6 +1981,14 @@ _ll="$(last_line)"
 if ! grep -q "'bd list' exited 7" "$TMP/err"; then
     bad "a refused pull names the 'bd list' exit status behind it" \
         "no line names it: $(grep -c . "$TMP/err") line(s) on stderr"
+elif grep -q "'gh issue list' exited" "$TMP/err"; then
+    # The other half of naming a reason, and the half a positive grep cannot
+    # see: `gh issue list` answered here, so a line blaming it is a false lead.
+    # Relax that input's `-ne 0` in bd-gh-sync to `-ge 0` and this run prints
+    # `'gh issue list' exited 0 — GitHub's state could not be read at all.` The
+    # grep above still passes: the line it asks for is present and correct.
+    bad "a refused pull names the 'bd list' exit status behind it" \
+        "blamed the input that answered: $(grep "'gh issue list' exited" "$TMP/err")"
 elif [ -z "$_ll" ] || [ -n "${_ll##*SKIPPING pull*}" ]; then
     bad "a refused pull names the 'bd list' exit status behind it" \
         "the detail displaced the verdict from the last line: $_ll"
@@ -1998,6 +2006,9 @@ _ll="$(last_line)"
 if ! grep -q "'gh issue list' exited 6" "$TMP/err"; then
     bad "a refused pull names the 'gh issue list' exit status behind it" \
         "no line names it: $(grep -c . "$TMP/err") line(s) on stderr"
+elif grep -q "'bd list' exited" "$TMP/err"; then
+    bad "a refused pull names the 'gh issue list' exit status behind it" \
+        "blamed the input that answered: $(grep "'bd list' exited" "$TMP/err")"
 elif [ -z "$_ll" ] || [ -n "${_ll##*SKIPPING pull*}" ]; then
     bad "a refused pull names the 'gh issue list' exit status behind it" \
         "the detail displaced the verdict from the last line: $_ll"
