@@ -206,6 +206,19 @@ type entityDecoder struct {
 // legitimate code under the wrong rule — see "What it does not decide"
 // below, and gqlc-9xy0, which owns that site.
 //
+// Note what the first bullet costs, because it is a constraint on the
+// emitters and not only a reading of them. Inside a decoder every compared
+// string is graded as a label, with no exemption for wireScalarSpellings:
+// a decoder that inlined `if s == "null"` would be reported unreachable
+// though it plainly is not. That is the contract rather than an accident —
+// the wire's scalar handling lives in helpers the second bullet covers
+// (agtypeInt64, agtypeString), so no emission carries such a comparison in
+// a decoder body today, and exempting the spellings here would let a label
+// guard spelled "null" pass the one check this gate exists to make. The
+// cost is that the diagnostic such a decoder would draw names the wrong
+// obstacle: it would say the struct is unreachable when the finding is
+// that a decoder compared a string that is not a label.
+//
 // Both directions are reconciled per emission: the entities decoded must
 // be exactly the entities codegen.Prepare names, one decoder each. So a
 // decoder rendered under any name at all is still read, and a decoder
@@ -565,6 +578,16 @@ func schemaLabelAlphabet(sch schema.Schema) labelAlphabet {
 // every fixture any backend serves. A narrower table would refuse widths
 // some backend has no carrier for, and a refusal here would blind the
 // sweep to the very emission it is pointed at.
+//
+// The duplicate-name refusal below cannot fire while codegen.Prepare's
+// §4.6 identifier sweep stands: sweepIdentifiers (internal/codegen/
+// prepare.go) inserts every entity struct name as its first source and
+// returns ErrIdentifierCollision on the second, so a colliding batch
+// reaches the NoError above instead. Unlike the arms of
+// emittedEntityDecoders, which are unreachable only because no fixture
+// writes their shape and are held by a synthetic witness, this one is
+// unreachable by a guarantee upstream — so there is no emission that
+// would exercise it and no test here pins it.
 func preparedEntityShapes(r *require.Assertions, in codegen.Input) map[string]codegen.EntityKind {
 	prepared, err := codegen.Prepare(in, probeTypeMap{}, "")
 	r.NoError(err, "the shared derivation refuses a batch the corpus holds valid, so no decoder in it can be "+
