@@ -1271,6 +1271,16 @@ elif [ -n "${_ll##*b-claim*}" ]; then
 elif [ -n "${_ll##*deleted outright*}" ]; then
     bad "a deleted held bead reaches the tail -1 caller" \
         "counted it as an ordinary change: $_ll"
+elif [ -n "${_ll##*deleted outright (b-claim);*}" ]; then
+    # moved.txt gained a per-record tag so the summary could tell a deletion
+    # from a reverted status, and the id has to be cut back out of it before it
+    # is shown. Read the file straight and the same `sed 's/ /, /g'` that joins
+    # several ids splits this one in half: the operator is handed
+    # `(GONE, b-claim)`, one deletion reading as two beads, neither of which
+    # `bd show` will answer to. `deleted outright (b-claim);` is pinned entire
+    # rather than just the absence of `GONE `, so a renamed tag is caught too.
+    bad "a deleted held bead reaches the tail -1 caller" \
+        "named it with the internal record tag still attached: $_ll"
 else
     ok "the summary line names the deleted held bead and says it was deleted"
 fi
