@@ -783,10 +783,16 @@ placeholder — dropped this document from the requirement and from
 the reading at the same instant, and the capture vector went back
 into this section green.
 
-What is left open is what no check reading only these documents can
-close: deleting the documented surface and its line in that test
-together. That is a two-part edit which removes a named document
-from a list in a test file, and the second part is the record of it.
+Two things are left open, and they are not the same size. Deleting
+the documented surface and its line in that test together is the
+first; that is a two-part edit which removes a named document from a
+list in a test file, and the second part is the record of it. The
+second is a document the fence is never pointed at: those lists name
+documents, not roots, so they say nothing about markdown outside
+`docs/`, `README.md` and `CONTEXT.md`. `AGENTS.md`, `CLAUDE.md` and
+`CONTRIBUTING.md` are outside it today and print none of this
+surface; a new document at the repository root that did print it
+would be swept by nothing and recorded nowhere (`gqlc-jfwo`).
 
 That is the whole of what is fenced: the *name*. Return types, decode
 bodies, `<zero>` values and every other signature in this document

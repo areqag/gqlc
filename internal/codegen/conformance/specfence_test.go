@@ -39,6 +39,14 @@ import (
 // Everything under docs/ rather than only docs/specs/: the drift reached
 // C1, C3, C4 and C5, and an ADR or a design note prints the same
 // signatures.
+//
+// It cannot shrink quietly — a root that stops existing fails docFiles by
+// name, and dropping `docs` loses every document the censuses below
+// declare. It can fail to grow: `AGENTS.md`, `CLAUDE.md` and
+// `CONTRIBUTING.md` sit beside the two files named here and are not
+// swept, and a new document at the repository root would join them
+// unnoticed. None of the three prints a query method or a driver-binding
+// literal today. That gap is gqlc-jfwo.
 var docRoots = []string{"docs", "README.md", "CONTEXT.md"}
 
 // repoRoot is where this package sits relative to the tree above. Swept
@@ -70,9 +78,6 @@ const repoRoot = "../../../"
 // document it names is still possible — but it is now a visible two-part
 // edit that deletes a named document from a list in a test file, which
 // is the honest floor for any check that reads only these documents.
-// The precedent is the assertion census at the foot of
-// `.githooks/tests/bd-gh-sync-test.sh`, for the same reason and in the
-// same shape.
 //
 // Deliberately not counts. A count sits beside the thing it counts,
 // carries silent slack for every site it is under, and fails as
@@ -84,9 +89,13 @@ const repoRoot = "../../../"
 // literal without printing the method around it, so C3 owes a binding
 // and owes no signature.
 //
-// One thing no check that reads only these documents can reach: deleting
-// the documented surface outright. That is a two-part edit here — the
-// document and its line below — and the second part is the record.
+// Two things these censuses do not reach, and they are different. Deleting
+// the documented surface outright is a two-part edit here — the document
+// and its line below — and the second part is the record, which is the
+// most any check reading only the documents it is pointed at can offer.
+// A document these censuses are never pointed at is the other, and it
+// leaves no record at all: the sets below name documents, not roots, so
+// they are silent about anything docRoots does not reach (gqlc-jfwo).
 const (
 	specC1 = "docs/specs/codegen-stage-c1.md"
 	specC3 = "docs/specs/codegen-stage-c3.md"
@@ -373,7 +382,7 @@ func TestSpecParamsMapBindsGeneratorOwnedValue(t *testing.T) {
 //
 // A name declared twice is refused: either copy could then be deleted
 // under cover of the other.
-func requireCensus(t *testing.T, written []string, observed map[string]bool, census, why string) {
+func requireCensus(t fenceT, written []string, observed map[string]bool, census, why string) {
 	t.Helper()
 
 	lost, undeclared, duplicated := reconcile(written, observed)
@@ -393,6 +402,116 @@ func requireCensus(t *testing.T, written []string, observed map[string]bool, cen
 				"\n\nadd each to "+census+", so that losing it later is noticed. The requirement there is\n"+
 				"written down rather than read off the text being graded, precisely so that editing the text\n"+
 				"cannot edit the requirement along with it.\n\n"+why)
+	}
+}
+
+// fenceT is the part of *testing.T the two helpers above use, named so a
+// witness can stand in for it.
+//
+// reconcile is a function precisely so its judgement can be witnessed on
+// a clean tree, and the wiring from that judgement to an actual failure
+// needed the same treatment for the same reason. It did not have it:
+// neutering requireClean's empty-set guard, or any one of requireCensus's
+// three arms, and then reverting a signature, adding a signature to an
+// undeclared document, growing a declared document's signatures past what
+// the scanner reads, or naming a document twice, left every sweep in this
+// file green. Four load-bearing arms, each structurally unable to fail.
+type fenceT interface {
+	require.TestingT
+	Helper()
+}
+
+// fenceFailNow is how a witness unwinds a helper that has failed.
+// require.Fail ends with FailNow, which must not return to its caller, so
+// the recorder panics with this and captureFence recovers it.
+type fenceFailNow struct{}
+
+// fenceRecorder implements fenceT by recording the failure instead of
+// ending the run.
+type fenceRecorder struct {
+	failed bool
+	msg    string
+}
+
+func (r *fenceRecorder) Helper() {}
+
+func (r *fenceRecorder) Errorf(format string, args ...any) {
+	r.failed = true
+	r.msg = fmt.Sprintf(format, args...)
+}
+
+func (r *fenceRecorder) FailNow() { panic(fenceFailNow{}) }
+
+func captureFence(call func(fenceT)) (rec *fenceRecorder) {
+	rec = &fenceRecorder{}
+	defer func() {
+		if p := recover(); p != nil {
+			if _, ours := p.(fenceFailNow); !ours {
+				panic(p)
+			}
+		}
+	}()
+	call(rec)
+	return rec
+}
+
+// TestSpecFailuresAreWired is the witness for that wiring. Each row calls
+// one helper directly and asserts whether it failed and which arm it
+// failed on, because an arm that reports another arm's headline is a
+// mutation the sweeps cannot distinguish from a correct one either.
+func TestSpecFailuresAreWired(t *testing.T) {
+	drift := specSig{
+		file: "witness.md",
+		line: 7,
+		text: "func (q *Queries) PersonById(ctx context.Context, id int64) error",
+	}
+	for _, tc := range []struct {
+		name     string
+		call     func(fenceT)
+		wantFail bool
+		wantMsg  []string
+	}{{
+		name: "requireClean passes over an empty set",
+		call: func(ft fenceT) { requireClean(ft, nil, "headline", "why") },
+	}, {
+		name:     "requireClean fails and names the site",
+		call:     func(ft fenceT) { requireClean(ft, []specSig{drift}, "headline", "why") },
+		wantFail: true,
+		wantMsg:  []string{"headline", "witness.md:7"},
+	}, {
+		name: "requireCensus passes over an exact match",
+		call: func(ft fenceT) {
+			requireCensus(ft, []string{"a"}, map[string]bool{"a": true}, "census", "why")
+		},
+	}, {
+		name: "requireCensus fails on a declared entry the sweep did not produce",
+		call: func(ft fenceT) {
+			requireCensus(ft, []string{"a", "b"}, map[string]bool{"a": true}, "census", "why")
+		},
+		wantFail: true,
+		wantMsg:  []string{"census declares an entry the sweep did not produce", "b"},
+	}, {
+		name: "requireCensus fails on an entry the sweep produced and nobody declared",
+		call: func(ft fenceT) {
+			requireCensus(ft, []string{"a"}, map[string]bool{"a": true, "b": true}, "census", "why")
+		},
+		wantFail: true,
+		wantMsg:  []string{"the sweep produced an entry census does not declare", "b"},
+	}, {
+		name: "requireCensus fails on a name declared twice",
+		call: func(ft fenceT) {
+			requireCensus(ft, []string{"a", "a"}, map[string]bool{"a": true}, "census", "why")
+		},
+		wantFail: true,
+		wantMsg:  []string{"census names the same entry twice"},
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := captureFence(tc.call)
+			require.Equal(t, tc.wantFail, rec.failed, "failed")
+			for _, want := range tc.wantMsg {
+				require.Contains(t, rec.msg, want)
+			}
+		})
 	}
 }
 
@@ -427,7 +546,7 @@ func reconcile(written []string, observed map[string]bool) (lost, undeclared, du
 
 // requireClean fails with one message naming every offending site, so a
 // reader fixing the drift sees all of it at once rather than the first.
-func requireClean(t *testing.T, bad []specSig, headline, why string) {
+func requireClean(t fenceT, bad []specSig, headline, why string) {
 	t.Helper()
 	if len(bad) == 0 {
 		return
