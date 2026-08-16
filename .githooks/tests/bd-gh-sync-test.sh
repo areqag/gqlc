@@ -1368,7 +1368,7 @@ run_sync pull "[$PULLABLE,$NOMIRROR]" \
     "[{\"id\":\"b-pulled\",\"status\":\"open\",\"external_ref\":\"$ISSUE/8\",\"description\":\"same\nadded on GH\"},$NOMIRROR]"
 MKTEMP_BLOCK=
 _ll="$(last_line)"
-if [ "$(sync_batches)" -ne 1 ] || [ -n "${_ll##*pulled 1 bead(s)*}" ]; then
+if [ -z "$_ll" ] || [ "$(sync_batches)" -ne 1 ] || [ -n "${_ll##*pulled 1 bead(s)*}" ]; then
     bad "an exemption set that could not be written stops the held-bead check" \
         "the sabotage took the pull down with it, so it proves nothing: $_ll"
 elif [ -n "${_ll##*the held-bead check did not run (the check itself did not run)*}" ]; then
