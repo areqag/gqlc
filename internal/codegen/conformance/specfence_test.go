@@ -242,39 +242,16 @@ func TestSpecMethodArgIsGeneratorOwned(t *testing.T) {
 	files := docFiles(t)
 	require.NotEmpty(t, files, "the fence swept no documents; docRoots is stale")
 
-	sigDocs := map[string]bool{}
-	exemptDocs := map[string]bool{}
-	ruleDocs := map[string]bool{}
-	statedRules := map[string]map[string]bool{}
-	var graded, bad, unclosed []specSig
-	for _, file := range files {
-		text := readDoc(t, file)
+	sweep := sweepSigs(files, func(file string) string { return readDoc(t, file) })
 
-		sigs, exempt, broken := scanSpecSigs(file, text)
-		unclosed = append(unclosed, broken...)
-		if len(exempt) > 0 {
-			exemptDocs[file] = true
-		}
-		for _, sig := range sigs {
-			sigDocs[file] = true
-			graded = append(graded, sig)
-		}
-		for _, sig := range scanParamListRules(file, text) {
-			ruleDocs[file] = true
-			if statedRules[file] == nil {
-				statedRules[file] = map[string]bool{}
-			}
-			statedRules[file][sig.rule] = true
-			graded = append(graded, sig)
-		}
-	}
-	for _, sig := range graded {
+	var bad []specSig
+	for _, sig := range sweep.graded {
 		if sig.arg != codegen.ParamArg {
 			bad = append(bad, sig)
 		}
 	}
 
-	requireClean(t, unclosed, "documented parameter list does not close",
+	requireClean(t, sweep.unclosed, "documented parameter list does not close",
 		"these documents open a parameter list on `ctx context.Context` and never close the parenthesis, so the\n"+
 			"fence cannot read the argument out of them and silently graded nothing there; fix the text rather than\n"+
 			"the fence — an unreadable site is an ungraded site")
@@ -285,17 +262,17 @@ func TestSpecMethodArgIsGeneratorOwned(t *testing.T) {
 			"that no author-chosen identifier reaches the scope the method body resolves in (gqlc-lhs3, gqlc-rz0l)",
 			codegen.ParamArg))
 
-	requireCensus(t, specSigDocs, sigDocs, "specSigDocs",
+	requireCensus(t, specSigDocs, sweep.sigDocs, "specSigDocs",
 		"each document on this list prints an emitted query method whose argument this fence reads, so it must\n"+
 			"contribute at least one graded signature; contributing none means its method surface has moved out\n"+
 			"of the sweep, or the scanner no longer reads it")
 
-	requireCensus(t, specListRuleDocs, ruleDocs, "specListRuleDocs",
+	requireCensus(t, specListRuleDocs, sweep.ruleDocs, "specListRuleDocs",
 		"each document on this list prints a placeholder where its method-shape template's parameters go, so\n"+
 			"the "+paramListTerm+" bullet expanding that placeholder is the only place it states which\n"+
 			"identifier the emitted signature binds; an unread bullet is an unfenced one")
 
-	requireCensus(t, specListRuleDocs, exemptDocs, "specListRuleDocs",
+	requireCensus(t, specListRuleDocs, sweep.exemptDocs, "specListRuleDocs",
 		"this list is also what a whole-list placeholder is exempted against, because the exemption and the\n"+
 			"requirement have to be the same set or one of them is free. A document that prints such a\n"+
 			"placeholder names no argument in its template and owes the bullet instead, so it belongs here; a\n"+
@@ -303,7 +280,7 @@ func TestSpecMethodArgIsGeneratorOwned(t *testing.T) {
 			"lists belong to the signature sweep")
 
 	for _, doc := range specListRuleDocs {
-		requireCensus(t, specListRules, statedRules[doc], "specListRules, in "+doc,
+		requireCensus(t, specListRules, sweep.statedRules[doc], "specListRules, in "+doc,
 			"the emitted signature binds codegen.ParamArg at one query parameter and at two-plus, and the\n"+
 				"entries above are the two tails the "+paramListTerm+" bullet states verbatim. A missing one is\n"+
 				"an arity reworded back into prose where nothing grades it; an extra one is a spelling this list\n"+
@@ -326,20 +303,16 @@ func TestSpecParamsMapBindsGeneratorOwnedValue(t *testing.T) {
 	files := docFiles(t)
 	require.NotEmpty(t, files, "the fence swept no documents; docRoots is stale")
 
-	bindDocs := map[string]bool{}
-	var bad, unclosed []specSig
-	for _, file := range files {
-		binds, broken := scanSpecBinds(file, readDoc(t, file))
-		unclosed = append(unclosed, broken...)
-		for _, bind := range binds {
-			bindDocs[file] = true
-			if bind.arg != codegen.ParamArg && !strings.HasPrefix(bind.arg, codegen.ParamArg+".") {
-				bad = append(bad, bind)
-			}
+	sweep := sweepBinds(files, func(file string) string { return readDoc(t, file) })
+
+	var bad []specSig
+	for _, bind := range sweep.graded {
+		if bind.arg != codegen.ParamArg && !strings.HasPrefix(bind.arg, codegen.ParamArg+".") {
+			bad = append(bad, bind)
 		}
 	}
 
-	requireClean(t, unclosed, "documented map[string]any literal does not close",
+	requireClean(t, sweep.unclosed, "documented map[string]any literal does not close",
 		"these documents open a `map[string]any{` and never close the brace, so the fence cannot read the\n"+
 			"bindings out of them and silently graded nothing there; fix the text rather than the fence — an\n"+
 			"unreadable site is an ungraded site, and it is the shape a drifted binding hides behind")
@@ -359,10 +332,134 @@ func TestSpecParamsMapBindsGeneratorOwnedValue(t *testing.T) {
 	// half: gutting C1's literals fails the first direction below by
 	// name, and a document quoting a signature owes a binding only if it
 	// is listed here.
-	requireCensus(t, specBindDocs, bindDocs, "specBindDocs",
+	requireCensus(t, specBindDocs, sweep.bindDocs, "specBindDocs",
 		"each document on this list prints the `map[string]any` the emitted body passes to the run seam, so it\n"+
 			"must contribute at least one graded binding; contributing none means its literals have moved out of\n"+
 			"the sweep, or the scanner no longer reads them")
+}
+
+// sigSweep is one pass of the signature scanners over a set of
+// documents: every site they graded, every site they could not read,
+// and which documents produced each outcome a census reconciles.
+//
+// bindSweep is the same for the binding scanner.
+//
+// Both are the accumulation the two sweeps above used to do inline, and
+// they are functions for the reason reconcile is: the line carrying a
+// scanner's unreadable-site return into the accumulator is load-bearing
+// and was structurally unable to fail. Dropping it (`sigs, exempt, _ :=`)
+// is invisible on a clean tree — there is nothing unreadable to lose —
+// and it is invisible on a drifted one too, because the drift it drops
+// is the only thing that would have reported it. Inline, the only
+// witness available was a swept document with an unterminated span in
+// it, which is not a state the repository is ever in. As a function it
+// takes a document set and a reader, so a witness supplies both.
+type sigSweep struct {
+	graded      []specSig
+	unclosed    []specSig
+	sigDocs     map[string]bool
+	exemptDocs  map[string]bool
+	ruleDocs    map[string]bool
+	statedRules map[string]map[string]bool
+}
+
+type bindSweep struct {
+	graded   []specSig
+	unclosed []specSig
+	bindDocs map[string]bool
+}
+
+// sweepSigs runs both signature scanners over every named document,
+// reading each one with read.
+func sweepSigs(files []string, read func(string) string) sigSweep {
+	out := sigSweep{
+		sigDocs:     map[string]bool{},
+		exemptDocs:  map[string]bool{},
+		ruleDocs:    map[string]bool{},
+		statedRules: map[string]map[string]bool{},
+	}
+	for _, file := range files {
+		text := read(file)
+
+		sigs, exempt, broken := scanSpecSigs(file, text)
+		out.unclosed = append(out.unclosed, broken...)
+		if len(exempt) > 0 {
+			out.exemptDocs[file] = true
+		}
+		for _, sig := range sigs {
+			out.sigDocs[file] = true
+			out.graded = append(out.graded, sig)
+		}
+		for _, sig := range scanParamListRules(file, text) {
+			out.ruleDocs[file] = true
+			if out.statedRules[file] == nil {
+				out.statedRules[file] = map[string]bool{}
+			}
+			out.statedRules[file][sig.rule] = true
+			out.graded = append(out.graded, sig)
+		}
+	}
+	return out
+}
+
+// sweepBinds runs the binding scanner over every named document.
+func sweepBinds(files []string, read func(string) string) bindSweep {
+	out := bindSweep{bindDocs: map[string]bool{}}
+	for _, file := range files {
+		binds, broken := scanSpecBinds(file, read(file))
+		out.unclosed = append(out.unclosed, broken...)
+		for _, bind := range binds {
+			out.bindDocs[file] = true
+			out.graded = append(out.graded, bind)
+		}
+	}
+	return out
+}
+
+// TestSpecSweepsCarryUnreadableSites is the witness for that carrying.
+// The scanners report an unterminated span rather than dropping it
+// (TestSpecScannersReportUnreadableSites) and requireClean fails on a
+// non-empty set naming the site (TestSpecFailuresAreWired); this is the
+// join between those two, and it was the one part of the path with no
+// witness on it.
+//
+// The document set is synthetic because the repository's is not
+// allowed to contain the input this needs. The unreadable document is
+// swept first and the readable one after it, so that the rest of the
+// corpus still being graded is asserted rather than assumed: a sweep
+// that gave up at the first unreadable site would carry it correctly
+// and lose every document behind it, which is the failure mode one
+// step over from the one being fixed.
+func TestSpecSweepsCarryUnreadableSites(t *testing.T) {
+	docs := map[string]string{
+		"readable.md": "func (q *Queries) PersonById(ctx context.Context, arg int64) (PersonRow, error)\n" +
+			"- " + paramListTerm + " — `, " + codegen.ParamArg + " <T>` if one parameter.\n" +
+			`map[string]any{"id": arg}` + "\n",
+		"unreadable.md": "prose\n" +
+			"RemovePerson(ctx context.Context, arg int64\n" +
+			"more prose\n" +
+			`map[string]any{"id": arg` + "\n",
+	}
+	files := []string{"unreadable.md", "readable.md"}
+	read := func(file string) string { return docs[file] }
+
+	t.Run("the signature sweep carries an unreadable parameter list out of the scanner", func(t *testing.T) {
+		sweep := sweepSigs(files, read)
+		require.Len(t, sweep.unclosed, 1)
+		require.Equal(t, "unreadable.md", sweep.unclosed[0].file)
+		require.Equal(t, 2, sweep.unclosed[0].line)
+		require.NotEmpty(t, sweep.graded, "the readable document is still swept")
+		require.True(t, sweep.sigDocs["readable.md"])
+	})
+
+	t.Run("the binding sweep carries an unreadable literal out of the scanner", func(t *testing.T) {
+		sweep := sweepBinds(files, read)
+		require.Len(t, sweep.unclosed, 1)
+		require.Equal(t, "unreadable.md", sweep.unclosed[0].file)
+		require.Equal(t, 4, sweep.unclosed[0].line)
+		require.NotEmpty(t, sweep.graded, "the readable document is still swept")
+		require.True(t, sweep.bindDocs["readable.md"])
+	})
 }
 
 // requireCensus reconciles a written census against what a sweep
@@ -409,13 +506,26 @@ func requireCensus(t fenceT, written []string, observed map[string]bool, census,
 // witness can stand in for it.
 //
 // reconcile is a function precisely so its judgement can be witnessed on
-// a clean tree, and the wiring from that judgement to an actual failure
-// needed the same treatment for the same reason. It did not have it:
-// neutering requireClean's empty-set guard, or any one of requireCensus's
-// three arms, and then reverting a signature, adding a signature to an
-// undeclared document, growing a declared document's signatures past what
-// the scanner reads, or naming a document twice, left every sweep in this
-// file green. Four load-bearing arms, each structurally unable to fail.
+// a clean tree, and every other line between a scanner's reading and an
+// actual failure needed the same treatment for the same reason. Six of
+// them did not have it, and each was structurally unable to fail:
+// requireClean's empty-set guard, requireCensus's lost, undeclared and
+// duplicated arms, and the two lines carrying a scanner's unreadable-site
+// return into the sweep that fails on it. Neuter any one, then revert a
+// signature, add a signature to an undeclared document, grow a declared
+// document's signatures past what the scanner reads, name a document
+// twice, or leave a parameter list or a map literal unterminated, and
+// every sweep in this file stayed green. All six are witnessed now —
+// four by TestSpecFailuresAreWired and TestSpecCensusReconcilesBothDirections,
+// two by TestSpecSweepsCarryUnreadableSites.
+//
+// What is left is not wiring. The sweeps' own comparison bodies
+// (`sig.arg != codegen.ParamArg` and the binding's prefix test) and
+// their calls to these helpers are the assertions, and deleting an
+// assertion passes any test in any suite; there is no arrangement of
+// this file that changes that. The line drawn here is between an
+// assertion, whose deletion is a deletion a reader sees, and plumbing,
+// whose neutering reads as bookkeeping and takes a failure with it.
 type fenceT interface {
 	require.TestingT
 	Helper()
