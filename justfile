@@ -485,7 +485,34 @@ check-codegen-external-tests:
     inpackage=()
     battery=""
     for m in "${nested[@]}"; do
-        mapfile -t tests < <(find "${m}" -type f -name '*_test.go' | sort)
+        # Assignment rather than `mapfile -t tests < <(find ...)`, and for this
+        # recipe's own reason rather than style — see the house rule in `just
+        # vuln`. `find` exits 1 on a directory it cannot read and still prints
+        # every file it did reach, so through a process substitution, whose
+        # status is read by nobody, mapfile reports success over a walk that
+        # skipped files and the emptiness clause below does not fire: it only
+        # catches a walk that returned nothing at all (bd gqlc-s3lt).
+        #
+        # Not hypothetical, and nothing else here covers it. modscope's own walk
+        # fails closed on an unreadable directory, but it SkipDirs testdata,
+        # vendor and dot- or underscore-prefixed names before reading them — so
+        # an unreadable directory with one of those names is invisible to
+        # discovery above and to `go list` below, and this walk, which
+        # deliberately has no such exclusions, is the only thing that looks
+        # there. Measured: a `package blocked` test under an unreadable
+        # test/data/codegen/testdata/blocked left this recipe exiting 0.
+        tests_raw="$(find "${m}" -type f -name '*_test.go' | sort)" || {
+            echo "error: the walk of ${m} for _test.go files failed, so this guard would have" >&2
+            echo "       checked the files it managed to reach and exited 0 over the rest — a" >&2
+            echo "       partially walked module reads exactly like a clean one here (bd" >&2
+            echo "       gqlc-s3lt). The walk's own diagnostic is above." >&2
+            exit 1
+        }
+        tests=()
+        while IFS= read -r f; do
+            case "${f}" in "") continue ;; esac
+            tests+=("${f}")
+        done <<<"${tests_raw}"
         if [ "${#tests[@]}" -eq 0 ]; then
             echo "error: no _test.go files found under ${m}." >&2
             echo "       The live battery has moved and this guard is checking nothing (bd gqlc-rohp)." >&2
