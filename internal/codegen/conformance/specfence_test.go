@@ -645,6 +645,32 @@ func TestSpecSigScannerDetectsDrift(t *testing.T) {
 		text:    "func (q *Queries) <MethodName>(ctx context.Context, arg <T>) (<return>, error) {",
 		wantArg: codegen.ParamArg,
 		wantAny: true,
+	}, {
+		// The glued position is where C4's interface template writes its
+		// placeholder (`(ctx context.Context<param-list-1>)`), and a
+		// declaration written there rather than past a comma used to be
+		// dropped: neither graded, nor exempted, nor reported. The
+		// exemption census could not notice, because C4 keeps a second
+		// template whose placeholder is intact and one exemption satisfies
+		// the document. So the drift the comma'd form is red for was green
+		// one character away.
+		name:    "a declaration glued to the context parameter is graded, not dropped",
+		text:    "    <WriteMethodName1>(ctx context.Context<bareParam1> <T1>) <return-1>",
+		wantArg: "<bareParam1>",
+		wantAny: true,
+	}, {
+		name:    "the corrected glued form passes on its name",
+		text:    "    <WriteMethodName1>(ctx context.Context" + codegen.ParamArg + " <T1>) <return-1>",
+		wantArg: codegen.ParamArg,
+		wantAny: true,
+	}, {
+		// The same ruling as the lone `<bareParam>` row above, in the
+		// glued position: one token is a declaration naming nothing, and
+		// the only token exempted anywhere is one standing for a list.
+		name:    "a lone glued token is a declaration naming nothing",
+		text:    "    <WriteMethodName1>(ctx context.Context<bareParam1>) <return-1>",
+		wantArg: "",
+		wantAny: true,
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, exempt, unclosed := scanSpecSigs("witness.md", tc.text)
@@ -885,6 +911,17 @@ func docFiles(t *testing.T) []string {
 // those sites is what lets specListRuleDocs require the bullet from
 // exactly the documents that took the exemption, rather than from the
 // documents some regexp happened to still be selecting.
+//
+// The two positions are read on identical terms, and that is the point.
+// The glued one used to have a drop beside its exemption: a declaration
+// written there rather than past a comma was skipped as "something else
+// glued to the context parameter", so `(ctx context.Context, <bareParam>
+// <T>)` was red and `(ctx context.Context<bareParam> <T>)` was green.
+// The exemption census could not see the difference, because C4 writes
+// the placeholder in both positions and one intact template satisfies
+// the document. Whichever position it is written in, the tail is either
+// a whole-list placeholder — exempted, and owed against
+// specListRuleDocs — or a declaration, and graded.
 func scanSpecSigs(file, text string) (sigs, exempt, unclosed []specSig) {
 	for _, loc := range ctxAnchorRe.FindAllStringIndex(text, -1) {
 		open := loc[0]
@@ -894,7 +931,7 @@ func scanSpecSigs(file, text string) (sigs, exempt, unclosed []specSig) {
 			text: strings.TrimSpace(collapse(lineAt(text, open))),
 		}
 
-		list, ok := parenSpan(text, open)
+		list, ok := span(text, open, '(', ')')
 		if !ok {
 			unclosed = append(unclosed, site)
 			continue
@@ -909,18 +946,14 @@ func scanSpecSigs(file, text string) (sigs, exempt, unclosed []specSig) {
 		// parameter when a comma separates them.
 		tail := params[len(params)-1]
 		if len(params) == 1 {
-			rest, isCtx := ctxParamTail(tail)
-			if !isCtx || rest == "" {
+			tail = ctxParamTail(tail)
+			if tail == "" {
 				continue // a zero-parameter method has no name to read.
 			}
-			tail = rest
 		}
 		if listPlaceholderRe.MatchString(tail) {
 			exempt = append(exempt, site)
 			continue
-		}
-		if len(params) == 1 {
-			continue // something else glued to the context parameter.
 		}
 
 		name, gradable := paramName(tail)
@@ -934,14 +967,20 @@ func scanSpecSigs(file, text string) (sigs, exempt, unclosed []specSig) {
 }
 
 // ctxParamTail splits the context parameter off the head of a parameter
-// declaration, returning whatever follows it. Reports false when the
-// declaration does not open on the context parameter at all.
-func ctxParamTail(param string) (tail string, ok bool) {
+// declaration, returning whatever follows it — empty when nothing does.
+//
+// The head is always there when the caller reaches this: ctxAnchor is
+// ctxParam with the open paren prepended, both patterns are compiled
+// from that one literal by anchorPattern, and span collapses the
+// contents it returns the same way either pattern reads them. A
+// non-match and an empty tail would both mean "no name here" in any
+// case, so the two are not told apart.
+func ctxParamTail(param string) string {
 	loc := ctxParamRe.FindStringIndex(param)
 	if loc == nil {
-		return "", false
+		return ""
 	}
-	return strings.TrimSpace(param[loc[1]:]), true
+	return strings.TrimSpace(param[loc[1]:])
 }
 
 // scanParamListRules extracts every parameter-list tail the
@@ -1093,13 +1132,6 @@ func topLevelColon(entry string) int {
 		}
 	}
 	return -1
-}
-
-// parenSpan returns the contents of the parenthesised span opening at
-// text[open], with newlines collapsed to spaces. Reports false when the
-// span does not close.
-func parenSpan(text string, open int) (string, bool) {
-	return span(text, open, '(', ')')
 }
 
 // span returns the contents of the bracketed span opening at text[open],
