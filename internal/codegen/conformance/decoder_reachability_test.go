@@ -776,21 +776,11 @@ func decodePerson(raw []byte) (Person, error) {
 
 	sweepOf := func(helper string) string {
 		files := []codegen.File{{Path: "models.go", Contents: []byte(fmt.Sprintf(emission, helper))}}
-		rec := &recordingT{}
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					if _, ok := r.(failedNow); !ok {
-						panic(r)
-					}
-				}
-			}()
-			emittedEntityDecoders(require.New(rec), "probe-backend", files, shapes)
-		}()
-		require.NotEmpty(t, rec.msgs,
+		msgs := recordedSweepRefusal(files, shapes)
+		require.NotEmpty(t, msgs,
 			"the sweep accepted an emission carrying a helper that compares a string no verdict covers, so a guard "+
 				"written there is graded by nothing")
-		return strings.Join(rec.msgs, "\n")
+		return strings.Join(msgs, "\n")
 	}
 
 	// Both spellings are swept from one call site so that the recorded
@@ -811,6 +801,85 @@ func decodePerson(raw []byte) (Person, error) {
 			"but that is a difference in syntax and in nothing this gate decides: both are receiver-less functions "+
 			"written at package level, both can hold a label guard, and a sweep that reads only one of them leaves "+
 			"the other's guards ungraded while claiming the classification is total")
+}
+
+// recordedSweepRefusal runs the sweep over a synthetic emission and returns
+// what it reported instead of failing the caller's test, empty for one it
+// accepted.
+//
+// Every caller goes through this one call site on purpose. testify writes the
+// caller's line into the message it reports, so two sweeps invoked from two
+// lines would differ in the trace while agreeing on everything a test here
+// asks about.
+func recordedSweepRefusal(files []codegen.File, shapes map[string]codegen.EntityKind) []string {
+	rec := &recordingT{}
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				if _, ok := r.(failedNow); !ok {
+					panic(r)
+				}
+			}
+		}()
+		emittedEntityDecoders(require.New(rec), "probe-backend", files, shapes)
+	}()
+	return rec.msgs
+}
+
+// TestSweepRefusesEveryEmissionItCannotClassify holds the three refusals that
+// make the classification total rather than merely wide.
+//
+// Each is unreachable through the corpus: no backend renders a function
+// returning two entity structs, none renders a second decoder for an entity,
+// and none leaves an entity undecoded. So all three survive being neutered —
+// the whole gate stays green with the one-entity check relaxed, with the
+// duplicate check dropped, and with the reconciliation dropped — and each is a
+// refusal the gate's docstring states as load-bearing.
+//
+// The one that decides reachability is the first. With it relaxed the sweep
+// takes results[0] as the entity, so a function returning both a node and an
+// edge has its guards graded against whichever axis happens to come first, and
+// a relationship type read against the node alphabet passes. The other two are
+// precision rather than vacuity, and are pinned because the emission is
+// reconciled against codegen.Prepare in both directions and a direction nothing
+// exercises is a direction nothing holds.
+func TestSweepRefusesEveryEmissionItCannotClassify(t *testing.T) {
+	const prologue = `package emitted
+
+func decodePerson(raw []byte) (Person, error) { return Person{}, nil }
+
+func decodeKnows(raw []byte) (Knows, error) { return Knows{}, nil }
+`
+	shapes := map[string]codegen.EntityKind{"Person": codegen.EntityNode, "Knows": codegen.EntityEdge}
+
+	for _, tc := range []struct{ name, emission, want string }{
+		{
+			name:     "a function whose results name two entities",
+			emission: prologue + "\nfunc decodeBoth(raw []byte) (Person, Knows, error) { return Person{}, Knows{}, nil }\n",
+			want:     "cannot be assigned an axis to be graded against",
+		},
+		{
+			name:     "a second decoder for one entity",
+			emission: prologue + "\nfunc decodePersonAgain(raw []byte) (Person, error) { return Person{}, nil }\n",
+			want:     "Which of the two a value reaches is not decidable here",
+		},
+		{
+			name:     "an entity the emission never decodes",
+			emission: "package emitted\n\nfunc decodePerson(raw []byte) (Person, error) { return Person{}, nil }\n",
+			want:     "decodes a different set of entities than codegen.Prepare names for this fixture",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files := []codegen.File{{Path: "models.go", Contents: []byte(tc.emission)}}
+
+			msgs := recordedSweepRefusal(files, shapes)
+
+			require.NotEmpty(t, msgs,
+				"the sweep accepted an emission holding %s, so it classified something it has no verdict for", tc.name)
+			require.Contains(t, strings.Join(msgs, "\n"), tc.want,
+				"the sweep refused the emission, but on some other arm than the one %s is meant to reach", tc.name)
+		})
+	}
 }
 
 // recordingT collects what a require reported instead of failing the test,
