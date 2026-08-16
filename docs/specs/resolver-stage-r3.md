@@ -930,6 +930,38 @@ quantifier alone. The `*1..2` twin in
 `TestNarrowingLearnsOnlyFromEdgesEveryRowHas` was corrected to `*1..1`
 for the same reason.
 
+**The ends must be enumerable, not merely spelled.** Everything above
+reads a committed candidate set as evidence about the pattern's ends,
+and that reading holds only if `edgeCandidates` probed every key a
+matching row can put there. The probe box is the two endpoint key
+slices crossed with the orientations, so each slice must be a
+**superset** of what a row can carry — the opposite direction from what
+§4.6 needs of the close, which only requires each probed key to be
+declared. `endpointLabels` returns a variable endpoint's whole
+satisfying set and holds the relation by construction. For an **inline**
+endpoint it returns the labels the query spells, keyed exactly, and that
+is a strict subset as soon as a second declared type satisfies them: on
+a schema declaring `Person`, `Person&Employee`, `Company`,
+`Company&Large`, and `WORKS_AT` both `Person -> Company` and
+`Person&Employee -> Company&Large`, the pattern
+`(p:Person)-[:WORKS_AT]->(:Company)` never probes the second
+declaration, and naming `p` the bare `Person` on the strength of the
+first is contradicted by the rows it skipped. So an edge either of whose
+ends fails `endpointKeysCoverEveryMatch` teaches the narrowing nothing.
+
+The condition is on the enumeration, not on the spelling. Where the
+spelled labels are satisfied by exactly one declared type — the
+`Company` of `satisfy_plural_edges_reversed.gql`, which has no declared
+subtype — an inline endpoint enumerates its own satisfying set and
+narrows exactly as the variable spelling does.
+`TestNarrowingSkipsAnEndpointItCannotEnumerate` runs one query against
+both kinds of schema for that reason: refusing every inline endpoint
+would pass its first row and fail its second. The guard is on the
+narrowing alone — `closeEdge` reads the same under-approximation and
+still commits an edge type on it, so the two spellings of one pattern
+can disagree about `r` while agreeing about `p`. That half is
+`gqlc-qlr2`.
+
 After every edge that meets the guarantee has closed, each plural
 binding's candidate set is intersected with what those closures say
 about it.

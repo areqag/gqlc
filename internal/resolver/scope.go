@@ -378,6 +378,9 @@ func (s *scope) NarrowPluralEndpoints(sch schema.Schema) {
 		if !witnessesItsEndpoints(e, written) {
 			continue
 		}
+		if !endpointKeysCoverEveryMatch(e.Source(), sch) || !endpointKeysCoverEveryMatch(e.Target(), sch) {
+			continue
+		}
 		srcs, srcOK := endpointLabels(e.Source(), s.nodeTypes, s.nodeCands)
 		tgts, tgtOK := endpointLabels(e.Target(), s.nodeTypes, s.nodeCands)
 		if !srcOK || !tgtOK {

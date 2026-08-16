@@ -385,6 +385,17 @@ var invalidFixtures = map[string]error{
 	"plural_endpoint_multi_hop_range_stays_plural.cypher":   ErrUnknownProperty,
 	"plural_endpoint_unbounded_hops_stays_plural.cypher":    ErrUnknownProperty,
 	"plural_endpoint_multi_hop_far_end_stays_plural.cypher": ErrUnknownProperty,
+	// An anonymous endpoint spelling `(:Company)` on a schema where Company&Large
+	// also satisfies it. endpointLabels keys that endpoint on the labels spelled
+	// rather than on the types satisfying them, so the closure never probes the
+	// Employee&Person -> Company&Large declaration and would name `p` the bare
+	// Person on the strength of the one declaration it did see. Rows of the type
+	// it missed match the pattern, so it is refused and endpointKeysCoverEveryMatch
+	// is what refuses it. The accepted twin — the same query on a schema where the
+	// spelled labels really are satisfied by one type — is in
+	// TestNarrowingSkipsAnEndpointItCannotEnumerate.
+	"plural_endpoint_inline_endpoint_stays_plural.cypher":          ErrAmbiguousLabel,
+	"plural_endpoint_inline_endpoint_property_stays_plural.cypher": ErrUnknownProperty,
 	// Three candidates of which only the first and third disagree about which
 	// of the pattern's endpoints is the source; the second is a plural-endpoint
 	// duplicate of the first's side and carries no orientation signal.
@@ -1371,6 +1382,102 @@ func (s *ResolverSuite) TestANonWitnessEdgeSilencesItselfNotTheBinding() {
 			s.Require().ErrorIs(err, ErrUnknownProperty,
 				"without the witnessing edge nothing narrows p, so the property is the plural intersection's and the row above is not passing on its own")
 		})
+	}
+}
+
+// TestNarrowingSkipsAnEndpointItCannotEnumerate pins the precondition the whole
+// narrowing rests on: srcs and tgts must be SUPERSETS of the keys a matching row
+// can put at those ends. edgeProbes builds its box from those two slices, and
+// the argument that a row's true edge key is in `cands` is "the row's key was
+// probed" — which needs every attainable endpoint key to be in the box, not
+// merely every boxed key to be attainable.
+//
+// endpointLabels holds that up for a VarEndpoint, which returns the binding's
+// whole satisfying set. It does not for an InlineEndpoint, which keys on the
+// labels the query spells: on a schema where a second declared type also
+// satisfies those labels, the box misses every declaration reachable only
+// through that type, and the narrowing would commit a type the missing rows
+// contradict.
+//
+// The two rows are the same query on two schemas that differ only in whether
+// `(:Company)` is satisfied by one declared type or two, so between them they
+// pin the guard against being applied too narrowly AND too widely. Dropping the
+// guard reddens "the spelled labels are satisfied by two types"; widening it to
+// skip every inline endpoint reddens "...by exactly one".
+//
+// The var-spelling control matters beyond the usual "is the acceptance real"
+// check: before the guard the inline and var spellings of one pattern gave
+// different answers, and the inline one was the wrong one.
+func (s *ResolverSuite) TestNarrowingSkipsAnEndpointItCannotEnumerate() {
+	tests := []struct {
+		name    string
+		schema  string
+		inline  string
+		varSpel string
+		want    []Column
+		wantErr error
+	}{
+		{
+			name:    "the spelled labels are satisfied by two types",
+			schema:  "satisfy_plural_edges_inline_subtype.gql",
+			inline:  "MATCH (p:Person)-[r:WORKS_AT]->(:Company) RETURN p.personOnly",
+			varSpel: "MATCH (p:Person)-[r:WORKS_AT]->(c:Company) RETURN p.personOnly",
+			wantErr: ErrUnknownProperty,
+		},
+		{
+			name:    "the spelled labels are satisfied by exactly one type",
+			schema:  "satisfy_plural_edges_reversed.gql",
+			inline:  "MATCH (p:Person)-[r:WORKS_AT]->(:Company) RETURN p.employeeId",
+			varSpel: "MATCH (p:Person)-[r:WORKS_AT]->(c:Company) RETURN p.employeeId",
+			want:    []Column{{Name: "p.employeeId", Type: ResolvedProperty{Type: graph.PropertyType("INT")}}},
+		},
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			sch := s.loadSchema("invalid", tt.schema)
+			resolve := func(src string) ([]Column, error) {
+				q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+				s.Require().NoError(err)
+				vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+				return vq.Columns, err
+			}
+
+			for _, src := range []string{tt.inline, tt.varSpel} {
+				got, err := resolve(src)
+				if tt.wantErr != nil {
+					s.Require().ErrorIsf(err, tt.wantErr,
+						"%s: Employee&Person -[WORKS_AT]-> Company&Large matches this pattern and its p has no personOnly", src)
+					continue
+				}
+				s.Require().NoErrorf(err, "%s: the inline endpoint enumerates its own satisfying set here, so the closure pins p", src)
+				s.Require().Equal(tt.want, got, src)
+			}
+		})
+	}
+}
+
+// TestInlineEndpointsAgreeWithTheirVarSpelling states the relation the two rows
+// above only imply: whatever the answer is, writing an endpoint's labels inline
+// and binding them to a variable are the same pattern and must resolve the same
+// way. The rows assert an answer each; this asserts they cannot drift apart,
+// which is the shape the defect actually took — the var spelling stayed correct
+// throughout and only the inline one moved.
+func (s *ResolverSuite) TestInlineEndpointsAgreeWithTheirVarSpelling() {
+	sch := s.loadSchema("invalid", "satisfy_plural_edges_inline_subtype.gql")
+	resolve := func(src string) error {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		_, err = New(sch, WithRegistry(regR7)).Resolve(q)
+		return err
+	}
+	// Both ends: an inline endpoint under-enumerates the OTHER end's narrowing
+	// too, so which side it is written on must not matter.
+	for _, pair := range [][2]string{
+		{"MATCH (p:Person)-[r:WORKS_AT]->(:Company) RETURN p", "MATCH (p:Person)-[r:WORKS_AT]->(c:Company) RETURN p"},
+		{"MATCH (:Person)-[r:WORKS_AT]->(c:Company) RETURN c", "MATCH (p:Person)-[r:WORKS_AT]->(c:Company) RETURN c"},
+	} {
+		s.Require().ErrorIsf(resolve(pair[0]), ErrAmbiguousLabel, "%s", pair[0])
+		s.Require().ErrorIsf(resolve(pair[1]), ErrAmbiguousLabel, "%s", pair[1])
 	}
 }
 

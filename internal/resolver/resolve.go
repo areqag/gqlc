@@ -612,8 +612,11 @@ func formatEdgeKeys(keys []schema.EdgeKey) string {
 //
 // The InlineEndpoint arm is the exception, and a known gap: it keys on the
 // labels the query itself spells, which is an exact match against declared
-// identity rather than a satisfaction test. That predates this function and is
-// gqlc-h9n.23's subject.
+// identity rather than a satisfaction test. That predates this function; the
+// edge types closeEdge commits on it are gqlc-qlr2's subject. A caller whose
+// correctness needs this answer to be a SUPERSET of the keys a matching row can
+// carry — the narrowing does, the close does not — must gate on
+// endpointKeysCoverEveryMatch first.
 func endpointLabels(e query.Endpoint, resolved map[string]schema.NodeType, nodeCands map[string][]schema.NodeType) ([]graph.LabelSetKey, bool) {
 	switch ep := e.(type) {
 	case query.VarEndpoint:
@@ -637,6 +640,40 @@ func endpointLabels(e query.Endpoint, resolved map[string]schema.NodeType, nodeC
 	default:
 		return nil, false
 	}
+}
+
+// endpointKeysCoverEveryMatch reports whether endpointLabels' answer for this
+// endpoint is a superset of the node type keys a matching row can put there.
+//
+// That is the precondition edgeProbes' box rests on, and only one direction of
+// it is free. Every key in the box being declared is what the close needs;
+// every ATTAINABLE key being in the box is what the narrowing needs, because a
+// key left out takes its whole declaration out with it and the contribution
+// then omits a type the omitted rows really have. Committing on that is not a
+// missed widening, it is a wrong answer.
+//
+// A VarEndpoint holds it unconditionally — endpointLabels hands back the
+// binding's resolved type or its entire candidate slice, and both are the
+// satisfying set by construction. An InlineEndpoint holds it only when one
+// declared type satisfies the spelled labels and its identity is the key those
+// labels form; a second satisfying type makes endpointLabels' single key a
+// strict subset, and a lone satisfying type whose identity differs from the
+// spelling makes it a different set again.
+func endpointKeysCoverEveryMatch(e query.Endpoint, s schema.Schema) bool {
+	ep, inline := e.(query.InlineEndpoint)
+	if !inline {
+		return true
+	}
+	sat := satisfyingNodeTypes(ep.Labels(), s)
+	// The second clause changes no answer and no test can pin it. It is
+	// reachable — `(:Employee)` on a schema declaring only Person&Employee
+	// satisfies exactly one type and keys to neither identity — but on any such
+	// endpoint no declared edge carries the spelled key, so edgeCandidates comes
+	// back empty and closeEdge has already refused with ErrUnknownEdge by the
+	// time the narrowing runs. It is written because it is half of the set
+	// relation above, and dropping it would leave that relation asserted by this
+	// function's name and enforced somewhere else entirely.
+	return len(sat) == 1 && s.Nodes[sat[0]].KeyLabels == ep.Labels().Key()
 }
 
 // closeEdge applies edge-candidate closure to one already-endpoint-resolved
