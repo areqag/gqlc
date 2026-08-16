@@ -66,10 +66,18 @@ to be appended to.
 `TestEveryDialectGapCarriesItsWitness` requires, for every gap: at least one
 probe; that `find` reads each probe (so the measurement is of something the gate
 actually refuses); that `find` reads none of the served texts (so the gate is
-bounded, which is the half that matters given the asymmetry above); that every
-probe text and every recorded answer appears verbatim in a `live_*_test.go`
-file; that the named witness is declared there; and that every AGE live recipe
-in the justfile runs it, with `-count=1`.
+bounded, which is the half that matters given the asymmetry above); that the
+named witness is declared in a `live_*_test.go` file; that every probe text,
+every recorded answer and every served text appears verbatim in **that witness's
+own body**; and that every AGE live recipe in the justfile runs it, with
+`-count=1`.
+
+The per-witness scoping is the difference between a probe that is re-measured
+and a probe that is merely spelled somewhere. A text carried by the neo4j
+battery is run against neo4j; a text under an AGE test the `-run` allowlists do
+not name is run against nothing. A sweep reading every live file at once tells
+neither from the real thing, and the recipe check does not cover for it, because
+that check reads the witness a gap *declares* rather than where its text sits.
 
 **The sweep can fail, and that is tested.** `witnessGaps` is a pure function
 returning complaints, and `TestWitnessSweepFailsOnEachBrokenBinding` cuts each
@@ -99,6 +107,14 @@ Matching is case-insensitive, which is what openCypher function resolution is;
 the name is quoted back in the author's own case, because that is what they have
 to find in their file. A namespaced call is a different name
 (`Cypher.g4 §oC_FunctionName`) and is not refused.
+
+That last claim has two spellings and only one of them can fail, which is worth
+writing down because the obvious one is the safe one. Drop the namespace guard
+and `duration.between` reports `between`, a name no probe put in the catalogue,
+so nothing is refused either way. `com.example.datetime()` reports `datetime`,
+which is in it — and the author is refused a call to a function they defined, on
+the strength of a probe that measured a different name. Both spellings are
+pinned, at the unit level and at the CLI seam.
 
 ## Suspected and unverified
 
@@ -166,8 +182,13 @@ and still ships its whole text; and a call the resolver types is typed by its
 Rejected: `test/data/codegen` is a separate Go module whose purpose is proving
 generated code compiles standalone, and giving it a dependency on
 `internal/codegen/age` inverts that. The binding is made source-level instead —
-the sweep reads the live files as text, which is what the two sides have to
-agree on anyway.
+the sweep parses the live files with `go/parser` and reads each test's body,
+which is what the two sides have to agree on anyway. Parsed rather than scanned
+for `func <name>(` for the same reason the gate it audits parses: a scan cannot
+tell a declaration from a string literal spelling one, and it can find a body's
+end only by assuming what the formatter puts in column zero. `go/parser` reads a
+build-tagged file without honouring the tag, which is what lets a binary built
+without `codegen_live` read one.
 
 **Refuse the whole batch, or only the offending query.** The batch, as `.14`
 does: a generated package accounts for every query in its batch, and one with no
