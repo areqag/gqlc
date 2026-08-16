@@ -630,6 +630,70 @@ func unstampableBecause(guard string, shape codegen.EntityKind, alphabet labelAl
 	return fmt.Sprintf("This axis declares the labels %v and no others, so nothing writes that one.", declared)
 }
 
+// TestUnstampableReasonNamesTheRightObstacle holds unstampableBecause to one
+// arm per obstacle.
+//
+// Only the general arm runs on a green corpus. The reason clause is built
+// eagerly, as an argument to the assertion it explains, so every arm's
+// *condition* is evaluated on every guard the sweep grades — but the two that
+// answer a guard outside its axis are reached only under a failure, and their
+// output is discarded on the pass. So nothing in the corpus distinguishes them
+// from each other or from the general arm.
+//
+// Which arm answers is not cosmetic. The cross-axis clause carries the one
+// thing a reader cannot get from the assertion itself: that the schema does
+// declare the label, on the axis where it belongs. Degrade that to the general
+// clause and the report says the schema never declares it, which is false and
+// sends the reader to fix the wrong end.
+func TestUnstampableReasonNamesTheRightObstacle(t *testing.T) {
+	// The join spelling and the cross-axis label are both drawn from this
+	// alphabet's own declarations, so a row cannot pass by naming a string
+	// the schema never mentions.
+	alphabet := labelAlphabet{
+		codegen.EntityNode: {"Company": true, "Person": true},
+		codegen.EntityEdge: {"KNOWS": true},
+	}
+	const (
+		joinSpelling = "join spelling"
+		otherAxis    = "on the other axis"
+		undeclared   = "and no others"
+	)
+
+	for _, tc := range []struct {
+		name, guard string
+		shape       codegen.EntityKind
+		want        string
+	}{
+		{
+			name:  "a label set where a label is expected",
+			guard: "Company&Person", shape: codegen.EntityNode, want: joinSpelling,
+		},
+		{
+			name:  "a node label on an edge decoder",
+			guard: "Company", shape: codegen.EntityEdge, want: otherAxis,
+		},
+		{
+			name:  "a label the schema declares on neither axis",
+			guard: "NoSuchLabelAnywhere", shape: codegen.EntityNode, want: undeclared,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			because := unstampableBecause(tc.guard, tc.shape, alphabet)
+
+			require.Contains(t, because, tc.want,
+				"the reason clause for %s does not reach the arm that explains it", tc.name)
+			for _, other := range []string{joinSpelling, otherAxis, undeclared} {
+				if other == tc.want {
+					continue
+				}
+				require.NotContains(t, because, other,
+					"the reason clause for %s also answers as %q, so the arms do not decide one obstacle each",
+					tc.name, other)
+			}
+		})
+	}
+}
+
 // emittedEntityDecoders extracts one backend's entity decoders out of one
 // emission, and refuses the emission outright if it cannot classify every
 // receiver-less function written at package level in it — in either
