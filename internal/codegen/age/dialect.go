@@ -64,11 +64,17 @@ type dialectGap struct {
 	// refused are the probes the server rejected, which is where the
 	// gap's authority comes from.
 	refused []dialectProbe
-	// served are texts the same session accepted that find must stay
-	// silent on. They are not decoration: a find that refused
-	// everything would satisfy the refused half alone, and the whole
-	// hazard of a text gate is the false positive — ADR 0005 leaves the
-	// author no way to route around one.
+	// served are texts the gap's witness requires the server to ACCEPT
+	// and that find must stay silent on. They are not decoration: a find
+	// that refused everything would satisfy the refused half alone, and
+	// the whole hazard of a text gate is the false positive — ADR 0005
+	// leaves the author no way to route around one.
+	//
+	// Unlike refused, not every one is transcribed from a hand-run
+	// session — timestamp() is (gqlc-35yu.5), the rest are first measured
+	// by the witness. The direction is what makes that sound: a served
+	// text asserts the gate must NOT fire, so one that is wrong about the
+	// server reddens the live run instead of refusing an author.
 	served []string
 }
 
@@ -205,7 +211,7 @@ var undefinedFunctionProbes = []dialectProbe{
 	{text: "RETURN datetime()", answer: "function datetime does not exist"},
 	{text: "RETURN date()", answer: "function date does not exist"},
 	{text: "RETURN localdatetime()", answer: "function localdatetime does not exist"},
-	{text: "RETURN duration({days: 1})", answer: "function duration does not exist"},
+	{text: "RETURN duration({days:1})", answer: "function duration does not exist"},
 	{text: "RETURN toTimestamp('2024-01-01')", answer: "function toTimestamp does not exist"},
 }
 
@@ -274,9 +280,10 @@ func findUndefinedFunctions(src string) []string {
 // refuses is answered here, because this runs first",
 // TestRejectsUndefinedFunctions' "a projected constructor is answered
 // here, ahead of the portable temporal refusal", and — at the CLI seam,
-// through the real front end — TestRunApacheAgeAnswersAnAlternation
-// AheadOfSharedAdmission and TestRunApacheAgeRefusesUndefinedFunctions)
-// rather than left to the reading order of generate.go.
+// through the real front end —
+// TestRunApacheAgeAnswersAnAlternationAheadOfSharedAdmission and
+// TestRunApacheAgeRefusesUndefinedFunctions) rather than left to the
+// reading order of generate.go.
 func rejectDialectGaps(queries []codegen.NamedQuery) error {
 	for _, g := range dialectGaps {
 		if err := g.reject(queries); err != nil {

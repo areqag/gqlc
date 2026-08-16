@@ -95,13 +95,23 @@ Two gaps, twelve probes, five served texts.
    `syntax error at or near "|"`, SQLSTATE 42601.
 
 2. **Undefined function** (`ErrUndefinedFunction`, this decision):
-   `datetime()`, `date()`, `localdatetime()`, `duration({days: 1})` and
+   `datetime()`, `date()`, `localdatetime()`, `duration({days:1})` and
    `toTimestamp('2024-01-01')`, each answered `function <name> does not exist`.
    Every one was run by hand against
    `apache/age@sha256:4241e2d8…` (PostgreSQL 18.1, AGE 1.7.0) during the spike
-   `gqlc-35yu.5`. `timestamp()` is a **served** probe from the same session — it
-   returns epoch milliseconds as an integer — and so is `p.datetime`, the
-   property lookup a scan for `datetime(` would have taken for a call.
+   `gqlc-35yu.5`, and each probe is the byte sequence that session ran —
+   `duration({days:1})` carries no space after the colon for that reason, and
+   the refusal is of the *name*, so the argument spelling is not what is being
+   measured.
+
+   `timestamp()` is a **served** text from the same session; it returns epoch
+   milliseconds as an integer. The other served text — `p.datetime`, the
+   property lookup a scan for `datetime(` would have taken for a call — was
+   **not** in that session, and neither were the alternation gap's two. They
+   are first measured by their witness. The asymmetry is deliberate and only
+   runs one way: a served text asserts the gate must *not* fire, so one that is
+   wrong about the server reddens the live run, where a refused probe that is
+   wrong would refuse an author with no way round it.
 
 Matching is case-insensitive, which is what openCypher function resolution is;
 the name is quoted back in the author's own case, because that is what they have

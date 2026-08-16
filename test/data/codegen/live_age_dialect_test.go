@@ -226,11 +226,14 @@ func TestAGERefusesTheFunctionsItDoesNotDefine(t *testing.T) {
 			wantMessage: "function localdatetime does not exist",
 		},
 		{
-			// Called with a map argument, because that is how an author
-			// writes it and because a constructor refused for its ARGUMENTS
-			// would be a different fact from one refused for its name.
+			// Called with a map argument, because a constructor refused for
+			// its ARGUMENTS would be a different fact from one refused for
+			// its name. Spelled without the space after the colon because
+			// that is the byte sequence the spike ran (gqlc-35yu.5); the
+			// probe is the statement that was measured, not a tidied copy
+			// of it.
 			name:        "duration",
-			text:        "RETURN duration({days: 1})",
+			text:        "RETURN duration({days:1})",
 			wantMessage: "function duration does not exist",
 		},
 		{
