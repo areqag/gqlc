@@ -138,7 +138,14 @@ if [ "${FAKE_MKTEMP_RC:-0}" != 0 ]; then
     echo "mktemp: failed to create directory via template: Read-only file system" >&2
     exit "$FAKE_MKTEMP_RC"
 fi
-exec "$REAL_MKTEMP" "$@"
+_d="$("$REAL_MKTEMP" "$@")" || exit
+# FAKE_MKTEMP_BLOCK plants a directory where the script expects one named file,
+# so that one payload is unwritable and unreadable while every other file in the
+# working directory behaves. Which payload matters: blocking allow.txt instead
+# of pulled.txt fails the pull outright, and the assertion that uses this knob
+# has an arm that says so rather than passing on a run that proved nothing.
+[ -n "${FAKE_MKTEMP_BLOCK:-}" ] && mkdir "$_d/$FAKE_MKTEMP_BLOCK"
+printf '%s\n' "$_d"
 STUB
 
 # "the check ran and could not see" and "the check never ran" are different
@@ -212,6 +219,7 @@ run_sync() {
         FAKE_GH_OPEN="$TMP/gh_open.json" FAKE_BEADS_AFTER="$after" \
         FAKE_SYNC_RC="${SYNC_RC:-0}" FAKE_PUSH_RC="${PUSH_RC:-0}" \
         FAKE_CLOSE_RC="${CLOSE_RC:-0}" FAKE_MKTEMP_RC="${MKTEMP_RC:-0}" \
+        FAKE_MKTEMP_BLOCK="${MKTEMP_BLOCK:-}" \
         FAKE_GH_LIST_RC="${GH_LIST_RC:-0}" \
         REAL_MKTEMP="$REAL_MKTEMP" REAL_PYTHON3="$REAL_PYTHON3" \
         "$SYNC" "$1" >"$TMP/out" 2>"$TMP/err"
@@ -225,6 +233,7 @@ SYNC_RC=0
 PUSH_RC=0
 CLOSE_RC=0
 MKTEMP_RC=0
+MKTEMP_BLOCK=
 GH_LIST_RC=0
 
 scoped_ids() { grep -o -- '--issues [^ ]*' "$TMP/calls" | cut -d' ' -f2 | tr ',' '\n'; }
@@ -1335,6 +1344,30 @@ else
     ok "a bead in a batch that exited non-zero is watched by the held-bead detector"
 fi
 
+# ...and the case that decides what happens when the exemption set itself is
+# unavailable, rather than merely wrong. The postcondition reads pulled.txt with
+# no fallback, so this run has to end in the script's "the check did not run".
+# The alternative — defaulting to an empty set — is the reading under which
+# every bead this run pulled becomes a bead it held, and the pull that rewrote
+# them becomes the clobber the detector reports. b-pulled is pulled here, so
+# that reading produces a WARNING naming it, under a summary saying it was
+# pulled: the same run stating both.
+MKTEMP_BLOCK=pulled.txt
+run_sync pull "[$PULLABLE,$NOMIRROR]" \
+    '[{"number":8,"state":"OPEN","body":"same\nadded on GH"}]' '[]' \
+    "[{\"id\":\"b-pulled\",\"status\":\"open\",\"external_ref\":\"$ISSUE/8\",\"description\":\"same\nadded on GH\"},$NOMIRROR]"
+MKTEMP_BLOCK=
+_ll="$(last_line)"
+if [ "$(sync_batches)" -ne 1 ] || [ -n "${_ll##*pulled 1 bead(s)*}" ]; then
+    bad "an exemption set that could not be written stops the held-bead check" \
+        "the sabotage took the pull down with it, so it proves nothing: $_ll"
+elif [ -n "${_ll##*the held-bead check did not run (the check itself did not run)*}" ]; then
+    bad "an exemption set that could not be written stops the held-bead check" \
+        "the check ran without it: $_ll"
+else
+    ok "an exemption set that could not be written stops the held-bead check"
+fi
+
 # ...and the interaction the bead was filed with. A second snapshot that came
 # back empty makes every held bead absent at once, which under a naive fix reads
 # as the whole tracker being deleted. That run is blind, not a mass deletion,
@@ -2235,6 +2268,7 @@ the summary line names the deleted held bead and says it was deleted
 a pulled bead missing from the second snapshot is not a held-bead finding
 an id the gate refused is watched by the held-bead detector
 a bead in a batch that exited non-zero is watched by the held-bead detector
+an exemption set that could not be written stops the held-bead check
 an empty second snapshot stays blind rather than reading as deletions
 final stderr line summarises the run for a tail -1 caller
 a failed sync is reported on the line a tail -1 caller keeps
