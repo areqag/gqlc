@@ -300,8 +300,10 @@ PYEOF
   _unusable=0
   # The ids behind _pulled, kept rather than only counted: the postcondition
   # below exempts from its held-bead check exactly the beads a pull could have
-  # rewritten, and this is that set. Created here so an empty one is a run that
-  # pulled nothing rather than a file nobody wrote.
+  # rewritten, and this is that set. Created here, before any batch can append to
+  # it, because the postcondition has no fallback for its absence: an empty file
+  # is a run that pulled nothing, and no file at all is a run whose exemption set
+  # was never established, which stops the check rather than emptying it.
   : >"$_tmp/pulled.txt"
 
   # Batched here rather than by `xargs -n`, because xargs parses quotes: a
@@ -426,18 +428,21 @@ if not before:
 if not after:
     status("BLIND post-pull bead list unreadable")
     sys.exit(0)
-status("OK")
 # The ids a batch that exited 0 was handed — the beads a pull could have
 # rewritten, and the same set the summary line counts as pulled. Not the
 # allowlist: that is what the run intended to pull, and it still names an id the
 # charset gate refused and an id whose batch died, both of which this run
 # reported as unpulled on stderr. Exempting a bead the run says it did not pull
 # takes the detector off duty exactly where the run already went wrong.
-try:
-    with open(sys.argv[3], encoding="utf-8") as fh:
-        pulled = {ln.strip() for ln in fh if ln.strip()}
-except Exception:
-    pulled = set()
+#
+# Read without a fallback, and before the verdict is written. The caller creates
+# this file, so a read that fails means the exemption set is unknown — and an
+# unknown exemption set silently defaulted to empty is the detector reporting
+# every pulled bead as held. Dying here leaves no status file, which is the
+# script's existing "the check did not run" and reaches the summary line.
+with open(sys.argv[3], encoding="utf-8") as fh:
+    pulled = {ln.strip() for ln in fh if ln.strip()}
+status("OK")
 
 # The set this run actually held: every bead the first snapshot saw that no
 # batch reported pulling. Stated as a set rather than left implicit in the loop
