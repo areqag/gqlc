@@ -944,6 +944,56 @@ func resultEntities(typ *ast.FuncType, shapes map[string]codegen.EntityKind) []s
 	return out
 }
 
+// TestSweepReadsAForeignOrGenericResultAsNoEntity holds resultEntities to the
+// two shapes it steps over by construction rather than by spelling.
+//
+// Neither is reachable through the corpus: no fixture declares an entity named
+// after a type another package exports, and nothing gqlc emits is generic. So
+// removing either step leaves the whole gate green, and the claim that a schema
+// naming a node type Node or T cannot be mistaken for one rests on reading the
+// code. Each helper below returns a Node that is not the emission's Node, and
+// the emission also carries the real decoder for it, so a step that stopped
+// being taken makes the helper a second decoder for the same entity and the
+// duplicate arm reports it.
+func TestSweepReadsAForeignOrGenericResultAsNoEntity(t *testing.T) {
+	const emission = `package emitted
+
+%s
+
+func decodeNode(raw []byte) (Node, error) {
+	label := string(raw)
+	if label != "Node" {
+		return Node{}, nil
+	}
+	return Node{}, nil
+}
+`
+	shapes := map[string]codegen.EntityKind{"Node": codegen.EntityNode}
+
+	for _, tc := range []struct{ name, helper string }{
+		{
+			name:   "a qualified type another package declares",
+			helper: `func driverNode(raw []byte) (dbtype.Node, error) { return dbtype.Node{}, nil }`,
+		},
+		{
+			name:   "a type parameter the call site binds",
+			helper: `func zeroNode[Node any]() (Node, error) { var out Node; return out, nil }`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files := []codegen.File{{Path: "models.go", Contents: []byte(fmt.Sprintf(emission, tc.helper))}}
+
+			decoders := emittedEntityDecoders(require.New(t), "probe-backend", files, shapes)
+
+			require.Len(t, decoders, 1,
+				"the sweep read %s as decoding the emission's own Node, so a helper that cannot fill an entity "+
+					"struct is graded as though it did", tc.name)
+			require.Equal(t, "decodeNode", decoders[0].fn,
+				"the sweep picked the helper over the emission's actual decoder for Node")
+		})
+	}
+}
+
 // comparedStrings is every string literal a function body tests a value for
 // equality against: an operand of == or !=, or a switch case value. Those
 // are the shapes a label guard takes; a literal passed as an argument is
@@ -981,4 +1031,46 @@ func comparedStrings(r *require.Assertions, body *ast.BlockStmt) []string {
 		return true
 	})
 	return out
+}
+
+// TestSweepReadsEveryGuardShapeItClaims holds comparedStrings to all three
+// shapes it says it reads, one witness each.
+//
+// Only one of the three is reachable through the corpus. Every label guard any
+// backend emits today is written `if label != "X"`, so the literal is always the
+// right operand: dropping the left operand and dropping the switch case arm both
+// leave the whole gate green.
+//
+// Neither omission is merely uncovered. The per-axis census counts a decoder
+// that compared *some* string, so a decoder keeping its real guard and growing a
+// second one in an unread shape holds that count where it was, and the extra
+// guard is then graded by nothing — a decoder that can never fire passing the
+// gate built to refuse exactly that.
+func TestSweepReadsEveryGuardShapeItClaims(t *testing.T) {
+	const emission = `package emitted
+
+func decodePerson(raw []byte) (Person, error) {
+	label := string(raw)
+%s
+	return Person{}, nil
+}
+`
+	shapes := map[string]codegen.EntityKind{"Person": codegen.EntityNode}
+
+	for _, tc := range []struct{ name, guard string }{
+		{name: "the right operand of !=", guard: "\tif label != \"Wanted\" {\n\t\treturn Person{}, nil\n\t}"},
+		{name: "the left operand of ==", guard: "\tif \"Wanted\" == label {\n\t\treturn Person{}, nil\n\t}"},
+		{name: "a switch case value", guard: "\tswitch label {\n\tcase \"Wanted\":\n\t\treturn Person{}, nil\n\t}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			files := []codegen.File{{Path: "models.go", Contents: []byte(fmt.Sprintf(emission, tc.guard))}}
+
+			decoders := emittedEntityDecoders(require.New(t), "probe-backend", files, shapes)
+
+			require.Len(t, decoders, 1)
+			require.Equal(t, []string{"Wanted"}, decoders[0].guards,
+				"a decoder testing the wire label against a literal written as %s is read as guarding on nothing, "+
+					"so a literal no value on its axis can carry is never held to that axis's alphabet", tc.name)
+		})
+	}
 }
