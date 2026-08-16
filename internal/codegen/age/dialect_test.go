@@ -3,6 +3,7 @@ package age
 import (
 	"fmt"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"os"
@@ -322,6 +323,159 @@ func TestWitnessBodiesAreScopedToTheirOwnTest(t *testing.T) {
 		"one gap, or two sharing a witness: this test compared nothing and would pass on any reader")
 }
 
+// The bytes mutation M15 moved from code into a comment: one refused
+// probe, the answer beside it, and a served text to keep the sweep's
+// other complaints silent while the probe half is cut. Named once so the
+// two tests below and the mutation that motivated them are about the same
+// strings.
+const (
+	syntheticWitness    = "TestSomethingLive"
+	syntheticProbeText  = "RETURN toTimestamp('2024-01-01')"
+	syntheticProbeAns   = "function toTimestamp does not exist"
+	syntheticServedText = "RETURN timestamp()"
+)
+
+// syntheticProbeRow is what a witness row costs in code: the text it runs
+// and the answer it asserts.
+const syntheticProbeRow = "\tprobe := \"" + syntheticProbeText + "\"\n" +
+	"\trequire.Contains(t, err.Message, \"" + syntheticProbeAns + "\")\n" +
+	"\t_ = probe\n"
+
+// liveWitnessSource is a live test file declaring one witness, with the
+// served text always in code and the refused probe wherever row puts it.
+//
+// Written here rather than read from the repo, which is the reason
+// witnessBodies is a separate function at all: this repo's live files
+// comment no probe out, so nothing in them can tell a reader that keeps
+// comments from one that drops them. doc goes above the declaration, row
+// inside the body.
+func liveWitnessSource(doc, row string) []byte {
+	return []byte("//go:build codegen_live\n\npackage fixtures_test\n\n" + doc +
+		"func " + syntheticWitness + "(t *testing.T) {\n" +
+		"\tserved := \"" + syntheticServedText + "\"\n" +
+		row +
+		"\t_ = served\n}\n")
+}
+
+// commentOut is a block of code behind `//`, byte for byte. Derived
+// rather than written out a second time, so the commented row cannot
+// drift from the row it is the commenting-out of — a guard whose two
+// halves spell different strings would pass for the wrong reason.
+func commentOut(block string) string {
+	var out strings.Builder
+	for _, line := range strings.Split(strings.TrimSuffix(block, "\n"), "\n") {
+		out.WriteString("\t//" + line + "\n")
+	}
+	return out.String()
+}
+
+// readSyntheticWitness is witnessBodies over one hand-written file, with
+// the parse failure surfaced as a test failure.
+func readSyntheticWitness(t *testing.T, src []byte) map[string]string {
+	t.Helper()
+	bodies, err := witnessBodies(token.NewFileSet(), "live_synthetic_test.go", src)
+	require.NoError(t, err, "the source this test writes has to parse")
+	require.Contains(t, bodies, syntheticWitness, "the witness this test declares has to be read back")
+	return bodies
+}
+
+// TestWitnessBodyIsCodeAndNotCommentary guards the reader's second axis.
+// TestWitnessBodiesAreScopedToTheirOwnTest rules out a body that is too
+// WIDE — one test's body carrying another's. This rules out one that
+// spans the right region and holds the wrong CONTENT: the comments inside
+// it, which are the only thing in a Go file that can spell a measurement
+// without running one.
+//
+// The first row is the load-bearing one. Every other row asserts an
+// absence, and a reader that returned "" would satisfy all of them at
+// once while making the whole sweep vacuous.
+func TestWitnessBodyIsCodeAndNotCommentary(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		doc  string
+		row  string
+		// carried is whether the probe and its answer must be found in
+		// the rendered body.
+		carried bool
+	}{
+		{
+			name:    "a probe the witness runs is carried",
+			row:     syntheticProbeRow,
+			carried: true,
+		},
+		{
+			name: "a probe commented out line by line is not carried",
+			row:  commentOut(syntheticProbeRow),
+		},
+		{
+			name: "a probe inside a block comment is not carried",
+			row:  "\t/*\n" + syntheticProbeRow + "\t*/\n",
+		},
+		{
+			// Outside the braces entirely. A row retired into the
+			// witness's doc comment is the tidiest spelling of the same
+			// move, and the one a reader keying on Pos()/End() would
+			// happen to miss — so it is here for the boundary and not
+			// because it is the hard case.
+			name: "a probe in the witness's doc comment is not carried",
+			doc:  commentOut(syntheticProbeRow),
+			row:  "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := readSyntheticWitness(t, liveWitnessSource(tc.doc, tc.row))[syntheticWitness]
+			require.Contains(t, body, syntheticServedText,
+				"the body's own code must be read back, or every assertion below passes on an empty string")
+			if tc.carried {
+				require.Contains(t, body, syntheticProbeText)
+				require.Contains(t, body, syntheticProbeAns)
+				return
+			}
+			require.NotContains(t, body, syntheticProbeText,
+				"a commented-out probe is spelled, not run, and a body carrying it lets the gap table grow on prose")
+			require.NotContains(t, body, syntheticProbeAns,
+				"the answer half too: a comment quoting the server is not a test asserting it")
+		})
+	}
+}
+
+// TestACommentedProbeReddensTheSweep runs the reader into the sweep,
+// which is where this property lives — neither half holds it alone.
+//
+// witnessGaps is a pure function over a bodies map, so no row in
+// TestWitnessSweepFailsOnEachBrokenBinding can express "the probe is in a
+// comment": a map value carrying a comment is a string carrying a
+// comment, and Contains finds it. Only the reader can tell code from
+// commentary and only the sweep can complain, so the guard has to compose
+// them.
+//
+// This is mutation M15 at the unit level. In the tree it read: replace
+// TestAGERefusesTheFunctionsItDoesNotDefine's toTimestamp row with a
+// comment spelling the same probe text and the same server answer, and
+// TestEveryDialectGapCarriesItsWitness stayed green.
+func TestACommentedProbeReddensTheSweep(t *testing.T) {
+	gap := dialectGap{
+		sentinel: ErrUndefinedFunction,
+		find:     findUndefinedFunctions,
+		diagnose: func(int, string, string) string { return "" },
+		witness:  syntheticWitness,
+		refused:  []dialectProbe{{text: syntheticProbeText, answer: syntheticProbeAns}},
+		served:   []string{syntheticServedText},
+	}
+	recipes := map[string]string{"run-it": "go test -count=1 -run " + syntheticWitness}
+
+	run := readSyntheticWitness(t, liveWitnessSource("", syntheticProbeRow))
+	require.Empty(t, witnessGaps([]dialectGap{gap}, run, recipes),
+		"the template must pass, or the complaints below could come from the template")
+
+	spelled := readSyntheticWitness(t, liveWitnessSource("", commentOut(syntheticProbeRow)))
+	got := strings.Join(witnessGaps([]dialectGap{gap}, spelled, recipes), "\n")
+	require.Contains(t, got, "is not carried by",
+		"a probe only a comment spells is measured by nothing")
+	require.Contains(t, got, "is not asserted by",
+		"and neither is the answer the comment quotes")
+}
+
 // findUndefinedFunctionsOrAlternations is the test template's find: it
 // reads the alternation the template probes and the function names the
 // real table refuses, so a row can cut either binding without needing a
@@ -443,12 +597,29 @@ func witnessGaps(gaps []dialectGap, bodies, recipes map[string]string) []string 
 	return complaints
 }
 
-// readLiveWitnessBodies is every live test's name paired with the source
-// of its body. Read from disk rather than imported: the files are in
-// another Go module and behind a build tag this binary is not compiled
-// with, so a source-level read is the only binding available from here —
-// and it is the binding that matters, since what has to agree is the
-// probe text on both sides.
+// witnessBodies is every top-level test one live file declares, paired
+// with its body rendered back from the parse — the CODE of the body, and
+// not the bytes the body occupies.
+//
+// That distinction is the whole of this function. Taking the body as
+// src[fn.Body.Pos():fn.Body.End()] hands back the comments inside it too,
+// so a probe row commented out still "appears in the witness's body" and
+// the sweep goes on passing over a measurement that no longer runs
+// against any server. The gap table could then grow on evidence that is
+// spelled rather than run, which is the one property this file exists to
+// deny. Measured on this branch as mutation M15: commenting out the
+// toTimestamp row of TestAGERefusesTheFunctionsItDoesNotDefine, with the
+// probe text and the server's answer both spelled inside the comment,
+// left TestEveryDialectGapCarriesItsWitness green.
+//
+// What drops the comments is format.Node over the BLOCK: a comment is not
+// a statement, it hangs off the *ast.File, and printing a bare
+// *ast.BlockStmt prints the statements alone. The mode-0 parse is a second
+// reason for the same outcome and is measured NOT to be the load-bearing
+// one — switching it to parser.ParseComments leaves all four rows of
+// TestWitnessBodyIsCodeAndNotCommentary green (mutation M21). Reopening
+// the hole takes printing a *printer.CommentedNode instead, which those
+// rows do catch (mutation M24).
 //
 // Parsed rather than scanned for "func <name>(", for the same reason the
 // gate it audits parses: a scan cannot tell a declaration from a string
@@ -460,6 +631,40 @@ func witnessGaps(gaps []dialectGap, bodies, recipes map[string]string) []string 
 // Methods are skipped: a witness is a top-level test function, and a
 // method sharing its name would put a body under a name `go test -run`
 // cannot select.
+//
+// Split from readLiveWitnessBodies for the reason recipeBodies is split
+// from readRecipes: a reader that only ever runs over the repo's own
+// files cannot be shown to tell code from commentary, because the repo's
+// files comment nothing out. This one takes source a test can write.
+func witnessBodies(fset *token.FileSet, path string, src []byte) (map[string]string, error) {
+	file, err := parser.ParseFile(fset, path, src, 0)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	bodies := make(map[string]string)
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil || fn.Body == nil {
+			continue
+		}
+		var body strings.Builder
+		if err := format.Node(&body, fset, fn.Body); err != nil {
+			return nil, fmt.Errorf("render %s's body in %s: %w", fn.Name.Name, path, err)
+		}
+		bodies[fn.Name.Name] = body.String()
+	}
+	return bodies, nil
+}
+
+// readLiveWitnessBodies is witnessBodies over every live test file. Read
+// from disk rather than imported: the files are in another Go module and
+// behind a build tag this binary is not compiled with, so a source-level
+// read is the only binding available from here — and it is the binding
+// that matters, since what has to agree is the probe text on both sides.
+//
+// A name declared by two files fails here rather than resolving to
+// whichever was globbed last. Within one file Go itself forbids the
+// clash, so this is the only place it can arise.
 func readLiveWitnessBodies(t *testing.T) map[string]string {
 	t.Helper()
 	paths, err := filepath.Glob(filepath.Join(repoRoot, liveGlob))
@@ -471,18 +676,12 @@ func readLiveWitnessBodies(t *testing.T) map[string]string {
 	for _, p := range paths {
 		src, err := os.ReadFile(p) //nolint:gosec // a repo-relative path this test builds itself
 		require.NoError(t, err, "read %s", p)
-		file, err := parser.ParseFile(fset, p, src, 0)
-		require.NoError(t, err, "parse %s", p)
-		for _, decl := range file.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Recv != nil || fn.Body == nil {
-				continue
-			}
-			from := fset.Position(fn.Body.Pos()).Offset
-			to := fset.Position(fn.Body.End()).Offset
-			require.NotContains(t, bodies, fn.Name.Name,
-				"two live tests named %s: the sweep would read whichever was parsed last", fn.Name.Name)
-			bodies[fn.Name.Name] = string(src[from:to])
+		read, err := witnessBodies(fset, p, src)
+		require.NoError(t, err, "read the test bodies in %s", p)
+		for name, body := range read {
+			require.NotContains(t, bodies, name,
+				"two live tests named %s: the sweep would read whichever was parsed last", name)
+			bodies[name] = body
 		}
 	}
 	return bodies
