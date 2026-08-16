@@ -38,8 +38,8 @@ func generate(in codegen.Input, packageName string) ([]codegen.File, error) {
 	// rejectUnservedQueries for the edge union alone: the same tests' "an
 	// edge-union column is answered by the column gate, which says more"
 	// and "an unserved column that is not an edge union yields to the
-	// text", plus TestRunApacheAgeAnswersAnAlternationAheadOfOther
-	// ColumnRefusals at the CLI seam.
+	// text", plus, at the CLI seam,
+	// TestRunApacheAgeAnswersAnAlternationAheadOfOtherColumnRefusals.
 	if err := rejectDialectGaps(in.Queries); err != nil {
 		return nil, err
 	}

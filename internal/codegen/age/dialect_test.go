@@ -289,6 +289,39 @@ func TestWitnessSweepFailsOnEachBrokenBinding(t *testing.T) {
 	}
 }
 
+// TestWitnessBodiesAreScopedToTheirOwnTest guards the reader rather than
+// the sweep. witnessGaps is driven with a hand-built map, so every
+// scoping row in TestWitnessSweepFailsOnEachBrokenBinding stays green
+// even when readLiveWitnessBodies hands back whole files — which is the
+// exact degradation the per-witness binding exists to rule out, and it is
+// invisible to every other test here because a wider body is strictly
+// more permissive.
+//
+// Both AGE witnesses are declared in one file and neither carries the
+// other's probes, so a reader returning file text in place of body text
+// fails here and nowhere else.
+func TestWitnessBodiesAreScopedToTheirOwnTest(t *testing.T) {
+	bodies := readLiveWitnessBodies(t)
+	compared := 0
+	for _, g := range dialectGaps {
+		body, declared := bodies[g.witness]
+		require.True(t, declared, "gap witness %s is not declared in any live test file", g.witness)
+		for _, other := range dialectGaps {
+			if other.witness == g.witness {
+				continue
+			}
+			for _, p := range other.refused {
+				compared++
+				require.NotContains(t, body, p.text,
+					"%s carries %s's probe %q, so the reader is not scoped to one test's body",
+					g.witness, other.witness, p.text)
+			}
+		}
+	}
+	require.NotZero(t, compared,
+		"one gap, or two sharing a witness: this test compared nothing and would pass on any reader")
+}
+
 // findUndefinedFunctionsOrAlternations is the test template's find: it
 // reads the alternation the template probes and the function names the
 // real table refuses, so a row can cut either binding without needing a
@@ -455,16 +488,24 @@ func readLiveWitnessBodies(t *testing.T) map[string]string {
 	return bodies
 }
 
-// readRecipes is what each named justfile recipe runs. A recipe that is
-// gone is a failure here rather than a silently skipped check, because
-// the sweep's recipe complaint is written over what this returns: an
-// empty map would make "no recipe runs this witness" unsayable.
-func readRecipes(t *testing.T, names []string) map[string]string {
-	t.Helper()
-	src, err := os.ReadFile(filepath.Join(repoRoot, justfilePath))
-	require.NoError(t, err, "read the justfile")
-	lines := strings.Split(string(src), "\n")
+// recipeBodies is what each named recipe runs, read out of justfile
+// source, alongside the complaints about the ones that are missing or
+// that would report on a cached run.
+//
+// Split from readRecipes for the reason witnessGaps is split from its
+// assertion: a require written inline in a helper cannot be shown to
+// fail, and this file's own argument is that a guard nothing can falsify
+// is a guard looking at nothing.
+func recipeBodies(src string, names []string) (map[string]string, []string) {
+	var complaints []string
+	// The vacuity guard. Every complaint below is inside the loop, so an
+	// empty name list would make "no recipe runs this witness" unsayable
+	// while the sweep went on passing.
+	if len(names) == 0 {
+		complaints = append(complaints, "no recipe was named, so nothing checks that a witness is ever run")
+	}
 
+	lines := strings.Split(src, "\n")
 	out := make(map[string]string, len(names))
 	for _, name := range names {
 		var body []string
@@ -480,11 +521,81 @@ func readRecipes(t *testing.T, names []string) map[string]string {
 			}
 			break
 		}
-		require.NotEmpty(t, body, "recipe %s is not in the justfile, so nothing this sweep says about it is true", name)
+		if len(body) == 0 {
+			complaints = append(complaints,
+				fmt.Sprintf("recipe %s is not in the justfile, so nothing this sweep says about it is true", name))
+			continue
+		}
 		joined := strings.Join(body, "\n")
-		require.Contains(t, joined, "-count=1",
-			"recipe %s must not report on a cached run: a witness is a measurement or it is nothing", name)
+		if !strings.Contains(joined, "-count=1") {
+			complaints = append(complaints,
+				fmt.Sprintf("recipe %s reports on a cached run: a witness is a measurement or it is nothing", name))
+		}
 		out[name] = joined
 	}
+	return out, complaints
+}
+
+// readRecipes is recipeBodies over the repo's own justfile. A recipe that
+// is gone fails here rather than skipping a check silently, because the
+// sweep's recipe complaint is written over what this returns: an empty
+// map would make "no recipe runs this witness" unsayable.
+func readRecipes(t *testing.T, names []string) map[string]string {
+	t.Helper()
+	src, err := os.ReadFile(filepath.Join(repoRoot, justfilePath))
+	require.NoError(t, err, "read the justfile")
+	out, complaints := recipeBodies(string(src), names)
+	require.Empty(t, complaints, "the recipes this sweep reads have to be the ones CI runs")
 	return out
+}
+
+// TestRecipeReaderComplainsOnEachBrokenRecipe cuts each recipe binding in
+// turn against justfile source it writes itself, so the reader is shown
+// to fail rather than assumed to. Without it the -count=1 requirement is
+// an assertion nothing can falsify — deleting it leaves the whole package
+// green, which is measured (bd note on this branch: mutation M8).
+func TestRecipeReaderComplainsOnEachBrokenRecipe(t *testing.T) {
+	const recipe = "test-codegen-live-age"
+	const sound = "some-earlier-recipe:\n    go build ./...\n\n" +
+		recipe + ":\n    cd test/data/codegen && go test -count=1 -run 'TestAGERefuses' ./...\n"
+	names := []string{recipe}
+
+	bodies, complaints := recipeBodies(sound, names)
+	require.Empty(t, complaints, "the template must pass, or a complaint below could come from the template")
+	require.Contains(t, bodies[recipe], "TestAGERefuses", "the body read must be the recipe's own")
+	require.NotContains(t, bodies[recipe], "go build", "a recipe's body stops at the next recipe")
+
+	for _, tc := range []struct {
+		name  string
+		src   string
+		names []string
+		want  string
+	}{
+		{
+			name:  "a recipe that is not in the justfile",
+			src:   "some-other-recipe:\n    go test -count=1 ./...\n",
+			names: names,
+			want:  "is not in the justfile",
+		},
+		{
+			name:  "a recipe that would report on a cached run",
+			src:   recipe + ":\n    cd test/data/codegen && go test -run 'TestAGERefuses' ./...\n",
+			names: names,
+			want:  "reports on a cached run",
+		},
+		{
+			// The vacuity row: naming no recipe leaves every complaint
+			// above unreachable, so the sweep would pass by checking none.
+			name:  "naming no recipe checks nothing",
+			src:   sound,
+			names: nil,
+			want:  "no recipe was named",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, got := recipeBodies(tc.src, tc.names)
+			require.NotEmpty(t, got, "this binding is cut, so the reader has to complain")
+			require.Contains(t, strings.Join(got, "\n"), tc.want)
+		})
+	}
 }
