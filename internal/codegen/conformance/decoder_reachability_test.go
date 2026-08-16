@@ -273,15 +273,22 @@ type entityDecoder struct {
 // annotation" — but it is held there, behaviourally, and not here.
 //
 // Its subject is also the decoders and only the decoders. A label guard an
-// emitted *query method* carries inline — AGE's edge-union dispatch writes
-// one, a switch over the wire label with a case per candidate edge — sits
-// in no decoder body and is not read here, because the sweep skips a
-// function with a receiver. Same defect class, different site; today the
-// only thing standing under an unsatisfiable case label there is a golden
-// byte diff, which is to say nothing. That is gqlc-9xy0, filed rather than
-// fixed here: widening the extractor to query bodies is a larger claim than
-// this gate makes and wants its own verdict on what alphabet each site is
-// held to.
+// emitted *query method* carries inline sits in no decoder body and is not
+// read here, because the sweep skips a function with a receiver. The
+// edge-union dispatch is that shape, and it is neo4j's alone:
+// walkListElemBody and writeEdgeUnionDispatchBody
+// (internal/codegen/neo4j/render_queries.go) both write
+// `switch rel.Type { case "<relationship type>": … }` into the query
+// method, while Apache AGE emits no such site at any width — it refuses an
+// edge-union column whole, on codegen.ErrUnrepresentableEdgeUnion, so no
+// AGE emission carries one. Same defect class, different site. Under
+// `just test` the only thing standing beneath an unsatisfiable case label
+// there is a golden byte diff, which is to say nothing; the run that would
+// catch it is edgeUnionDispatch in test/data/codegen/live_test.go, behind
+// the codegen_live build tag and outside the default suite. That is
+// gqlc-9xy0, filed rather than fixed here: widening the extractor to query
+// bodies is a larger claim than this gate makes and wants its own verdict
+// on what alphabet each site is held to.
 //
 // # Why it sweeps every backend, not the enrolled ones
 //

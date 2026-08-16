@@ -686,9 +686,8 @@ var connectionSurface = map[string]bool{"db.go": true, "graph.go": true}
 // decodeFoo is not a declaration it reads. That residual belongs to
 // TestEmittedDecodersGuardOnlyOnStampableLabels (decoder_reachability_test.go),
 // which sweeps the emitted decoder bodies for label guards no value on the
-// decoded entity's own axis can carry. The two gates partition the
-// emission: this one owns the surface, that one owns the decoders
-// underneath it.
+// decoded entity's own axis can carry. This gate owns the caller-visible
+// surface; that one owns the decoders underneath it.
 func TestBackendInvariantSurface(t *testing.T) {
 	goldens, err := filepath.Glob(filepath.Join(fixtureRoot(), "valid", "*", "golden"))
 	require.NoError(t, err)
