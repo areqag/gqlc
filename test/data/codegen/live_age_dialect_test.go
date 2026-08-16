@@ -6,8 +6,9 @@
 // construct it refuses has a probe here. That is not a documentation habit, it
 // is the mechanism: the gap table records each probe and the answer the server
 // gave, and a sweep in that package (TestEveryDialectGapCarriesItsWitness)
-// requires every probe and every answer to appear in a file matching
-// live_*_test.go, declared under a test the AGE live recipes run. A construct
+// requires every probe and every answer to appear in the BODY of the test the
+// gap names, which the AGE live recipes must run — spelling it in some other
+// live test is not a re-measurement and does not satisfy the sweep. A construct
 // added to the refusal list with nothing added here reddens that sweep. The
 // refusals may therefore lag what AGE cannot do, and may not run ahead of it.
 //

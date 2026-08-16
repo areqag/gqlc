@@ -2,6 +2,9 @@ package age
 
 import (
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,9 +35,12 @@ const (
 	repoRoot = "../../.."
 	// liveGlob is where a witness test is written: the codegen module's
 	// live battery, behind the codegen_live build tag. These files are
-	// read as TEXT and not imported — they are in another module and
+	// read from SOURCE and not imported — they are in another module and
 	// under a tag this binary is not built with, so the binding is a
-	// source-level one either way.
+	// source-level one either way. The glob spans the neo4j battery too,
+	// which is deliberate: a witness naming a neo4j test has to be
+	// findable in order to be rejected by the recipe check, rather than
+	// missing and indistinguishable from a typo.
 	liveGlob = "test/data/codegen/live_*_test.go"
 	// justfilePath holds the recipes CI invokes.
 	justfilePath = "justfile"
@@ -57,9 +63,9 @@ var ageLiveRecipes = []string{"test-codegen-live", "test-codegen-live-age"}
 // live test asserts, or a witness no CI recipe runs is a refusal resting
 // on a claim nothing re-measures, and each of those is a complaint.
 func TestEveryDialectGapCarriesItsWitness(t *testing.T) {
-	live := readLiveSources(t)
+	bodies := readLiveWitnessBodies(t)
 	recipes := readRecipes(t, ageLiveRecipes)
-	require.Empty(t, witnessGaps(dialectGaps, live, recipes),
+	require.Empty(t, witnessGaps(dialectGaps, bodies, recipes),
 		"every refusal this backend makes on the query text has to rest on a live measurement")
 }
 
@@ -97,14 +103,22 @@ func TestEveryRefusedFunctionNameIsNamedByItsProbeAnswer(t *testing.T) {
 // row.
 func TestWitnessSweepFailsOnEachBrokenBinding(t *testing.T) {
 	const witness = "TestSomethingLive"
-	live := "func " + witness + "(t *testing.T) {\n" +
-		"\tprobe := \"MATCH (:A)-[r:X|Y]->(:B) RETURN r\"\n" +
-		"\tserved := \"MATCH (:A)-[r:X]->(:B) RETURN r\"\n" +
-		"\trequire.Contains(t, err.Message, `syntax error at or near \"|\"`)\n}\n" +
-		// Declared and never run. The row about recipes needs a witness
-		// the live file DOES declare, or the declaration complaint fires
-		// too and the row would pass without the recipe check existing.
-		"func " + witness + "ButUnrun(t *testing.T) {}\n"
+	measured := "probe := \"MATCH (:A)-[r:X|Y]->(:B) RETURN r\"\n" +
+		"served := \"MATCH (:A)-[r:X]->(:B) RETURN r\"\n" +
+		"require.Contains(t, err.Message, `syntax error at or near \"|\"`)\n"
+	bodies := map[string]string{
+		witness: measured,
+		// Declared and never run, carrying what the witness carries plus
+		// three bindings of its own. The recipe row needs a witness the
+		// live source DOES declare, or the declaration complaint fires
+		// too and the row would pass without the recipe check existing;
+		// the three extra bindings are what the "some other live test"
+		// rows point a gap at.
+		witness + "ButUnrun": measured +
+			"elsewhere := \"MATCH (:A)-[r:M|N]->(:B) RETURN r\"\n" +
+			"require.Contains(t, err.Message, `no relationship type by that name`)\n" +
+			"acceptedElsewhere := \"MATCH (:A)-[r:W]->(:B) RETURN r\"\n",
+	}
 	recipes := map[string]string{"run-it": "go test -run " + witness}
 	sound := dialectGap{
 		sentinel: ErrRelationshipTypeAlternation,
@@ -117,7 +131,7 @@ func TestWitnessSweepFailsOnEachBrokenBinding(t *testing.T) {
 		}},
 		served: []string{"MATCH (:A)-[r:X]->(:B) RETURN r"},
 	}
-	require.Empty(t, witnessGaps([]dialectGap{sound}, live, recipes),
+	require.Empty(t, witnessGaps([]dialectGap{sound}, bodies, recipes),
 		"the row template must pass, or a complaint below could come from the template")
 
 	for _, tc := range []struct {
@@ -161,6 +175,42 @@ func TestWitnessSweepFailsOnEachBrokenBinding(t *testing.T) {
 				return []dialectGap{g}
 			},
 			want: "is not asserted by",
+		},
+		{
+			// The three rows below are the scoping half. A binding the
+			// live SOURCE carries is not a binding the gap's WITNESS
+			// carries, and only the second is a re-measurement: a probe
+			// sitting in the neo4j battery, or under an AGE test the
+			// recipes never name, is never run against the pinned image
+			// no matter how many files spell it.
+			name: "a probe some other live test carries is not re-measured by this witness",
+			cut: func(g dialectGap) []dialectGap {
+				g.refused = []dialectProbe{{
+					text:   "MATCH (:A)-[r:M|N]->(:B) RETURN r",
+					answer: `syntax error at or near "|"`,
+				}}
+				return []dialectGap{g}
+			},
+			want: "is not carried by",
+		},
+		{
+			name: "an answer some other live test asserts is not asserted by this witness",
+			cut: func(g dialectGap) []dialectGap {
+				g.refused = []dialectProbe{{
+					text:   "MATCH (:A)-[r:X|Y]->(:B) RETURN r",
+					answer: "no relationship type by that name",
+				}}
+				return []dialectGap{g}
+			},
+			want: "is not asserted by",
+		},
+		{
+			name: "a served text some other live test carries was not measured as served here",
+			cut: func(g dialectGap) []dialectGap {
+				g.served = []string{"MATCH (:A)-[r:W]->(:B) RETURN r"}
+				return []dialectGap{g}
+			},
+			want: "is not carried by",
 		},
 		{
 			name: "a gap recording no served text has nothing bounding its find",
@@ -232,7 +282,7 @@ func TestWitnessSweepFailsOnEachBrokenBinding(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := witnessGaps(tc.cut(sound), live, recipes)
+			got := witnessGaps(tc.cut(sound), bodies, recipes)
 			require.NotEmpty(t, got, "this binding is cut, so the sweep has to complain")
 			require.Contains(t, strings.Join(got, "\n"), tc.want)
 		})
@@ -261,9 +311,16 @@ func findUndefinedFunctionsOrAlternations(src string) []string {
 // and an untested sweep is exactly the guard this codebase keeps finding
 // green because it looks at nothing.
 //
-// live is the concatenated source of the live test files; recipes maps a
-// recipe name to the commands it runs.
-func witnessGaps(gaps []dialectGap, live string, recipes map[string]string) []string {
+// bodies maps a live test's name to the source of its body; recipes maps
+// a recipe name to the commands it runs.
+//
+// Per WITNESS and not over the live corpus as a whole, which is the
+// difference between a probe that is re-measured and a probe that is
+// merely spelled somewhere. A text carried by the neo4j battery, or by
+// an AGE test no recipe names, is never run against the pinned image —
+// and a sweep reading every file at once cannot tell those apart from
+// the real thing.
+func witnessGaps(gaps []dialectGap, bodies, recipes map[string]string) []string {
 	var complaints []string
 	say := func(format string, args ...any) {
 		complaints = append(complaints, fmt.Sprintf(format, args...))
@@ -297,10 +354,14 @@ func witnessGaps(gaps []dialectGap, live string, recipes map[string]string) []st
 			continue
 		}
 
-		switch {
+		// Empty where the gap names no witness or names one no live file
+		// declares, so every binding below is reported unmeasured too —
+		// which is what it is.
+		body := bodies[g.witness]
+		switch _, declared := bodies[g.witness]; {
 		case g.witness == "":
 			say("%s names no witness test, so nothing re-measures it against the pinned image", id)
-		case !strings.Contains(live, "func "+g.witness+"("):
+		case !declared:
 			say("%s names witness %q, which is not declared in any live test file", id, g.witness)
 		}
 		if g.witness != "" {
@@ -323,13 +384,13 @@ func witnessGaps(gaps []dialectGap, live string, recipes map[string]string) []st
 				say("%s carries probe %q, which is not read by this gap — "+
 					"so the measurement is of something the gate does not refuse", id, p.text)
 			}
-			if !strings.Contains(live, p.text) {
+			if !strings.Contains(body, p.text) {
 				say("%s carries probe %q, which is not carried by %s", id, p.text, g.witness)
 			}
 			switch {
 			case p.answer == "":
 				say("%s carries probe %q with no recorded answer", id, p.text)
-			case !strings.Contains(live, p.answer):
+			case !strings.Contains(body, p.answer):
 				say("%s records answer %q, which is not asserted by %s", id, p.answer, g.witness)
 			}
 		}
@@ -341,7 +402,7 @@ func witnessGaps(gaps []dialectGap, live string, recipes map[string]string) []st
 			if len(g.find(s)) > 0 {
 				say("%s records %q as served and its find refuses it", id, s)
 			}
-			if !strings.Contains(live, s) {
+			if !strings.Contains(body, s) {
 				say("%s records served text %q, which is not carried by %s", id, s, g.witness)
 			}
 		}
@@ -349,24 +410,49 @@ func witnessGaps(gaps []dialectGap, live string, recipes map[string]string) []st
 	return complaints
 }
 
-// readLiveSources is every live test file's text, concatenated. Read as
-// bytes rather than imported: the files are in another Go module and
-// behind a build tag this binary is not compiled with, so a source-level
-// read is the only binding available from here — and it is the binding
-// that matters, since what has to agree is the probe text on both sides.
-func readLiveSources(t *testing.T) string {
+// readLiveWitnessBodies is every live test's name paired with the source
+// of its body. Read from disk rather than imported: the files are in
+// another Go module and behind a build tag this binary is not compiled
+// with, so a source-level read is the only binding available from here —
+// and it is the binding that matters, since what has to agree is the
+// probe text on both sides.
+//
+// Parsed rather than scanned for "func <name>(", for the same reason the
+// gate it audits parses: a scan cannot tell a declaration from a string
+// literal spelling one, and it has no way to find where a body ends
+// short of assuming what the formatter puts in column zero. go/parser
+// reads the build-tagged file without honouring the tag, which is what
+// lets a test binary built without it read one.
+//
+// Methods are skipped: a witness is a top-level test function, and a
+// method sharing its name would put a body under a name `go test -run`
+// cannot select.
+func readLiveWitnessBodies(t *testing.T) map[string]string {
 	t.Helper()
 	paths, err := filepath.Glob(filepath.Join(repoRoot, liveGlob))
 	require.NoError(t, err)
 	require.NotEmpty(t, paths, "no live test files found at %s — the sweep would pass by reading nothing", liveGlob)
-	var b strings.Builder
+
+	fset := token.NewFileSet()
+	bodies := make(map[string]string)
 	for _, p := range paths {
 		src, err := os.ReadFile(p) //nolint:gosec // a repo-relative path this test builds itself
 		require.NoError(t, err, "read %s", p)
-		b.Write(src)
-		b.WriteByte('\n')
+		file, err := parser.ParseFile(fset, p, src, 0)
+		require.NoError(t, err, "parse %s", p)
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv != nil || fn.Body == nil {
+				continue
+			}
+			from := fset.Position(fn.Body.Pos()).Offset
+			to := fset.Position(fn.Body.End()).Offset
+			require.NotContains(t, bodies, fn.Name.Name,
+				"two live tests named %s: the sweep would read whichever was parsed last", fn.Name.Name)
+			bodies[fn.Name.Name] = string(src[from:to])
+		}
 	}
-	return b.String()
+	return bodies
 }
 
 // readRecipes is what each named justfile recipe runs. A recipe that is
