@@ -7,6 +7,7 @@ import (
 	"maps"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -808,11 +809,19 @@ func TestReservedScopeMatchesTheEmittedGoldens(t *testing.T) {
 // fixedDeclarationFiles names the emitted files whose exported
 // declarations are the emitter's own and the same for every batch: the
 // handle and its seam in db.go, the Apache AGE graph lifecycle in
-// graph.go, the three interfaces in querier.go. Every other emitted file
-// declares names derived from the input — entity structs, query methods,
-// Params, Row, edge-union interfaces — which are sources 1-6 of the
-// sweep, not source 0.
+// graph.go, the three interfaces in querier.go.
 var fixedDeclarationFiles = map[string]bool{"db.go": true, "graph.go": true, "querier.go": true}
+
+// inputDerivedFiles names the emitted files whose exported declarations
+// follow from the batch instead: entity structs and their decode
+// helpers in models.go, and the query surface in each queryFileSuffix
+// file. Those are sources 1-6 of the sweep, not source 0.
+var inputDerivedFiles = map[string]bool{"models.go": true}
+
+// queryFileSuffix ends every emitted per-source query file. The stem
+// before it is the query source's own basename, so that side of the
+// partition is a suffix rather than a set of names (§5.5).
+const queryFileSuffix = ".cypher.go"
 
 // TestEveryEmittedFixedDeclarationIsReserved is the direction
 // TestReservedScopeMatchesTheEmittedGoldens does not run. That one takes
@@ -830,26 +839,47 @@ var fixedDeclarationFiles = map[string]bool{"db.go": true, "graph.go": true, "qu
 // whatever its receiver, so one on a receiver other than *Queries — the
 // corpus carries none — would be forced into reservedIdentifiers, where
 // Phase A refuses a query on membership alone.
+//
+// The two file sets are held to the corpus before anything is read,
+// because both directions of that are silent otherwise. An unclassified
+// golden fails, so a file the emitter adds joins the sweep unless
+// someone writes down that its declarations come from the input; and an
+// entry no golden matches fails, so a rename the emitter made and this
+// set did not stops the sweep loudly rather than by reading two thirds
+// of it.
 func TestEveryEmittedFixedDeclarationIsReserved(t *testing.T) {
 	paths, err := filepath.Glob(goldenCorpusGlob)
 	require.NoError(t, err)
 	require.NotEmpty(t, paths, "no golden Go under %s, so this sweep holds nothing", goldenCorpusGlob)
-	require.NotEmpty(t, fixedDeclarationFiles,
-		"fixedDeclarationFiles names no file, so the sweep reads nothing and agrees with every possible reserved set")
+
+	emitted := map[string]int{}
+	for _, path := range paths {
+		emitted[filepath.Base(path)]++
+	}
+	for _, base := range slices.Sorted(maps.Keys(emitted)) {
+		require.True(t,
+			fixedDeclarationFiles[base] || inputDerivedFiles[base] || strings.HasSuffix(base, queryFileSuffix),
+			"the corpus emits %s, which neither fixedDeclarationFiles nor inputDerivedFiles classifies; an unclassified file is one this sweep never reads, so every exported name it declares owes no reserved row",
+			base)
+	}
+	for _, base := range slices.Sorted(maps.Keys(fixedDeclarationFiles)) {
+		require.NotZero(t, emitted[base],
+			"no golden under %s is named %s, so every exported declaration that file emits went unread; the emitter renamed it and this set kept the old name, or the corpus lost every fixture emitting it",
+			goldenCorpusGlob, base)
+	}
+	for _, base := range slices.Sorted(maps.Keys(inputDerivedFiles)) {
+		require.NotZero(t, emitted[base],
+			"no golden under %s is named %s, so classifying it input-derived excludes nothing; the name is stale, and a file that is emitted under some other name is now unclassified",
+			goldenCorpusGlob, base)
+	}
 
 	// name -> one path declaring it, for the fail message.
 	found := map[string]string{}
-	// basename -> goldens read under it. Per entry rather than in
-	// aggregate: one counter over the whole set stays non-zero while any
-	// one entry matches nothing, so a stale name goes unread in silence.
-	swept := map[string]int{}
 	fset := token.NewFileSet()
 	for _, path := range paths {
-		base := filepath.Base(path)
-		if !fixedDeclarationFiles[base] {
+		if !fixedDeclarationFiles[filepath.Base(path)] {
 			continue
 		}
-		swept[base]++
 		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
 		require.NoError(t, err, "parsing %s", path)
 		record := func(name string) {
@@ -878,12 +908,6 @@ func TestEveryEmittedFixedDeclarationIsReserved(t *testing.T) {
 			}
 		}
 	}
-	for _, name := range slices.Sorted(maps.Keys(fixedDeclarationFiles)) {
-		require.NotZero(t, swept[name],
-			"no golden under %s is named %s, so every exported declaration that file emits went unread; either the emitter renamed it and fixedDeclarationFiles kept the old name, or the corpus lost every fixture emitting it",
-			goldenCorpusGlob, name)
-	}
-
 	for name, path := range found {
 		_, reserved := reservedIdentifiers[name]
 		require.True(t, reserved,
