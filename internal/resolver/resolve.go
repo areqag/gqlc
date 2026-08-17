@@ -1091,13 +1091,22 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 			return err
 		}
 		if committed == 0 {
-			// Master's answer for this round is the ErrAmbiguousBinding below, so
-			// this is the one place a second lane can widen without moving any
-			// query the resolver already accepts: reaching here means every
-			// pending binding was plural on its far ends' full satisfying sets,
-			// and master returns from here. The retry asks the same question with
-			// each far end narrowed by the edges that pin IT, which is what makes
-			// a bare binding answer to a hop it does not itself touch.
+			// The retry asks the same question with each far end narrowed by the
+			// edges that pin IT, which is what makes a bare binding answer to a
+			// hop it does not itself touch.
+			//
+			// It is placed AFTER a barren round, not merged into the round
+			// itself, so the widening is legible: reaching here means the round
+			// committed nothing and the refusal below is what shipped before
+			// this lane existed, so nothing the resolver already accepts can
+			// have taken this path. That is an argument about this arrangement,
+			// not about every possible one — moving the narrowing into the first
+			// call reddens no test here and moves no cell of the corpus sweep,
+			// which is what one would expect given that a narrowed candidate set
+			// is a subset of the unnarrowed one and so cannot commit a DIFFERENT
+			// type, only an earlier one. The placement buys the reader that
+			// argument rather than making him derive it; it is not load-bearing
+			// on any input measured here.
 			//
 			// Recomputed per round rather than hoisted: a round that commits
 			// changes the binding tables endpointNarrowing reads, so a hoisted
