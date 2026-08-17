@@ -15,7 +15,8 @@ import (
 // suite named there runs on every PR — and one not named there runs nowhere.
 const (
 	hookTestsRecipe = "test-hooks"
-	hookTestsGlob   = ".githooks/tests/*-test.sh"
+	hookTestsDir    = ".githooks/tests/"
+	hookTestsGlob   = hookTestsDir + "*-test.sh"
 )
 
 // Every hook test suite in the tree has to be named by the recipe that runs
@@ -52,13 +53,32 @@ func TestEveryHookTestSuiteIsWiredIntoTestHooks(t *testing.T) {
 			rel, hookTestsRecipe)
 	}
 
-	// ...and the recipe must not name a suite that is gone, which would fail the
-	// whole of `just test` for a reason unrelated to any change.
+	// ...and every line that names a suite has to run it under a command whose
+	// failure fails the recipe, and name a file that is in the tree.
+	//
+	// Selected by the directory rather than by `bash`, because the shape of the
+	// command is the thing being asserted. just's `-` prefix discards a line's
+	// exit status: `-bash .githooks/tests/tool-gate-test.sh` keeps the suite
+	// named here, keeps it wired into `just test`, keeps it running on every
+	// PR — and throws away every failure it reports. The loop above cannot see
+	// that, because the path is still in the body. A suite whose failures are
+	// discarded is the same absent gate as one that is never invoked, which is
+	// the defect this file was added for (bd gqlc-l45j).
+	//
+	// A named file that is gone is the other direction: it fails the whole of
+	// `just test` for a reason unrelated to any change.
 	for _, line := range strings.Split(body, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) != 2 || fields[0] != "bash" {
+		if !strings.Contains(line, hookTestsDir) {
 			continue
 		}
+		fields := strings.Fields(line)
+		require.Lenf(t, fields, 2, "%s runs %q, which is not a bare `bash <suite>`. "+
+			"Anything else — a prefix, a redirection, a `||` — can decide the line's "+
+			"exit status independently of what the suite found.", hookTestsRecipe, line)
+		require.Equalf(t, "bash", fields[0], "%s runs %q. `%s` is not `bash`; just's `-` "+
+			"prefix in particular ignores the line's exit status, so the suite runs on "+
+			"every PR and reports failures nothing reads.",
+			hookTestsRecipe, line, fields[0])
 		require.FileExistsf(t, filepath.Join(repoRoot, fields[1]),
 			"%s runs %q, which is not in the tree", hookTestsRecipe, fields[1])
 	}
