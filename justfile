@@ -29,7 +29,9 @@ shellcheck := justfile_directory() + "/.bin/shellcheck"
 # literal in place is no longer possible, because there are no literals.
 #
 # .gitignore is the third place, and it cannot read these. What holds it to them
-# is a `git check-ignore` witness inside the sweep, which reddens on a rename.
+# is a `git check-ignore -v` witness inside the sweep that requires the matching
+# rule to come from this repo's own .gitignore, so a rename reddens even in a clone
+# whose own .git/info/exclude or core.excludesFile happens to hide the old name.
 vuln_probe := "vulnprobe"
 fence_probe := "fenceprobe"
 xtest_probe := "xtestprobe"
@@ -332,10 +334,10 @@ check-golangci-build-tags: sweep-discovery-probes
 # check-codegen-external-tests, and it stops them with a message about a broken
 # walk rather than about itself.
 #
-# Shared, and covering all three names rather than the caller's own, because the
-# recipe that breaks is not the recipe that leaked: test-codegen-fence depends
-# on check-codegen-external-tests, so a leftover fence probe takes out the
-# dependency before the dependent's own cleanup could run.
+# Covers every declared probe name, not the calling recipe's own. A leftover
+# fence probe stops check-codegen-external-tests, which test-codegen-fence
+# depends on, so the run that would have cleaned that probe up dies before it
+# reaches its own trap.
 #
 # The limit is concurrency. Two of these recipes running against ONE worktree at
 # the same time would clear each other's live probe, and the witness below plants
@@ -349,10 +351,126 @@ sweep-discovery-probes:
     names=({{discovery_probes}})
     trap 'rm -rf test/data/*.sweepwitness' EXIT
 
+    # Three facts have to agree before the names below mean anything: the
+    # `*_probe` variables, the concatenation this recipe reads them through, and
+    # the mktemp sites that create the probes. discovery_probes is written by
+    # hand, so a probe variable can be declared, interpolated at its site, and
+    # left out of the concatenation — the probe is still created and this sweep
+    # stops clearing it, which is the state this block refuses.
+    #
+    # Read back off just's own evaluation and dump rather than this file's bytes,
+    # so a commented-out declaration is not a declaration. A commented-out mktemp
+    # site does still count as a site; that direction asks for one more
+    # declaration than the tree needs.
+    if [ "${#names[@]}" -eq 0 ]; then
+        echo "error: discovery_probes expands to no names at all, so this sweep globs nothing," >&2
+        echo "       looks nothing up, and reports success against a tree where every recipe's" >&2
+        echo "       probe leaked (bd gqlc-oxne)." >&2
+        exit 1
+    fi
+
+    evaluated="$('{{just_executable()}}' --justfile '{{justfile()}}' --evaluate)"
+    dumped="$('{{just_executable()}}' --justfile '{{justfile()}}' --dump)"
+    pairs="$(printf '%s\n' "${evaluated}" \
+        | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*_probe\)  *:= "\(.*\)"$/\1\t\2/p')"
+    if [ -z "${pairs}" ]; then
+        echo "error: this justfile declares no *_probe variable, so the set discovery_probes is" >&2
+        echo "       compared against below is empty and agrees with whatever discovery_probes" >&2
+        echo "       happens to say (bd gqlc-oxne)." >&2
+        exit 1
+    fi
+
+    # Each comparison below owns its accumulator and asks membership one name at
+    # a time, so an edit reaches one comparison.
+    names_nl=""
+    for n in "${names[@]}"; do
+        names_nl="${names_nl}${n}"$'\n'
+    done
+
+    declared_vars=""
+    declared=""
+    unswept=""
+    while IFS=$'\t' read -r var val; do
+        if [ -z "${val}" ]; then
+            echo "error: ${var} evaluates to the empty string, so the probe it names is created" >&2
+            echo "       as test/data/.XXXXXX — a spelling .gitignore does not cover and the" >&2
+            echo "       glob below does not reach (bd gqlc-oxne)." >&2
+            exit 1
+        fi
+        declared_vars="${declared_vars}${var}"$'\n'
+        declared="${declared}${val}"$'\n'
+        case $'\n'"${names_nl}" in
+            *$'\n'"${val}"$'\n'*) ;;
+            *) unswept="${unswept} ${val}" ;;
+        esac
+    done <<<"${pairs}"
+
+    unknown=""
+    for n in "${names[@]}"; do
+        case $'\n'"${declared}" in
+            *$'\n'"${n}"$'\n'*) ;;
+            *) unknown="${unknown} ${n}" ;;
+        esac
+    done
+
+    # Assembled from two pieces: the dump this searches includes this recipe's own
+    # body, and a whole pattern written out here would match itself.
+    site_re="mktemp -d ""test/data/"
+    literal_sites="$(printf '%s\n' "${dumped}" | grep -e "${site_re}" \
+        | grep -v -e "${site_re}[{][{]" || true)"
+    if [ -n "${literal_sites}" ]; then
+        echo "error: a probe site under test/data spells its name out instead of interpolating" >&2
+        echo "       a variable:" >&2
+        printf '%s\n' "${literal_sites}" | sed 's/^/         /' >&2
+        echo "       Only interpolated sites are compared against the declared names, so a" >&2
+        echo "       literal one can be edited to a spelling this sweep does not clear with" >&2
+        echo "       nothing here objecting (bd gqlc-oxne)." >&2
+        exit 1
+    fi
+
+    site_vars="$(printf '%s\n' "${dumped}" \
+        | sed -n "s|^.*${site_re}[{][{] *\([A-Za-z_][A-Za-z0-9_]*\) *[}][}]\..*|\1|p")"
+    if [ -z "${site_vars}" ]; then
+        echo "error: no recipe in this justfile creates a probe under test/data, so the names" >&2
+        echo "       checked below are held to nothing and this sweep clears a thing no run" >&2
+        echo "       makes (bd gqlc-oxne)." >&2
+        exit 1
+    fi
+    unheld=""
+    while IFS= read -r v; do
+        case $'\n'"${declared_vars}" in
+            *$'\n'"${v}"$'\n'*) ;;
+            *) unheld="${unheld} ${v}" ;;
+        esac
+    done <<<"${site_vars}"
+    if [ -n "${unheld}" ]; then
+        echo "error: these justfile variables name a probe at a mktemp site and are not spelled" >&2
+        echo "       *_probe:${unheld}" >&2
+        echo "       The comparison below reads *_probe variables only, so a probe created" >&2
+        echo "       through one of these is not reached by it (bd gqlc-oxne)." >&2
+        exit 1
+    fi
+
+    if [ -n "${unswept}" ] || [ -n "${unknown}" ]; then
+        echo "error: the probe names this justfile declares and the names discovery_probes hands" >&2
+        echo "       this sweep are different sets." >&2
+        if [ -n "${unswept}" ]; then
+            echo "       declared, not swept:${unswept}" >&2
+            echo "       — a declared name left out of discovery_probes still gets a probe made" >&2
+            echo "         at its mktemp site, and this recipe no longer clears it (bd gqlc-oxne)." >&2
+        fi
+        if [ -n "${unknown}" ]; then
+            echo "       swept, not declared:${unknown}" >&2
+            echo "       — a name in discovery_probes with no variable behind it is a spelling no" >&2
+            echo "         site creates, so the .gitignore rule it demands guards nothing." >&2
+        fi
+        exit 1
+    fi
+
     # A function so the witness below can RUN it rather than recompute what it
-    # believes it does. The names come from the variable block at the top of
-    # this file, so this glob and the three `mktemp` sites cannot spell a probe
-    # differently from each other.
+    # believes it does. The names come from the variable block at the top of this
+    # file, and the block above holds that block to the sites, so this glob and
+    # the sites that create the probes read one spelling.
     sweep() {
         local n d
         for n in "${names[@]}"; do
@@ -379,12 +497,24 @@ sweep-discovery-probes:
     # what matters is whether git would hide a leaked probe under this name, and
     # only git can answer that.
     #
-    # Counted because it is a function called in a loop, and bd gqlc-eo46 wants
-    # both halves proved separately — that the lookup works, and that it is
-    # invoked. Deleting the call below leaves a working lookup running zero
-    # times, and nothing else here would notice.
-    checked=0
-    covered() { checked=$((checked + 1)); git check-ignore -q "test/data/${1}.sweepwitness"; }
+    # The source field is load-bearing. git's ignore answer covers
+    # .git/info/exclude and core.excludesFile too, and both are per-clone files
+    # no commit carries — a bare yes/no lookup stays green while this repo's own
+    # .gitignore loses its probe rules, provided the developer's clone happens to
+    # hide them. -v names which file matched, so this asks the question the error
+    # message claims it asks.
+    #
+    # Each name is recorded as it is looked up so the refusal below can compare
+    # the names that reached the lookup against the names declared, rather than
+    # count calls: a lookup run three times against one name leaves the other two
+    # free to drift out of .gitignore with this recipe green (bd gqlc-eo46).
+    looked_up=""
+    covered() {
+        local src
+        looked_up="${looked_up}${1}"$'\n'
+        src="$(git check-ignore -v "test/data/${1}.sweepwitness" | cut -d: -f1)" || return 1
+        [ "${src}" = ".gitignore" ]
+    }
 
     # WITNESS: same shape and same reason as check-golangci-build-tags'
     # zzstaleprobe above. On the ordinary tree there is nothing to sweep, so
@@ -397,31 +527,52 @@ sweep-discovery-probes:
     for n in "${names[@]}"; do
         mkdir -p "test/data/${n}.sweepwitness"
         if ! covered "${n}"; then
-            echo "error: test/data/${n}.* is a discovery-probe name this justfile creates, and" >&2
-            echo "       .gitignore does not cover it — so the .gitignore copy of that name has" >&2
-            echo "       drifted from the one in the variable block (bd gqlc-oxne), and a probe" >&2
-            echo "       a killed run leaves behind now reads as untracked work nobody wrote." >&2
-            echo "       Add /test/data/${n}.*/ to .gitignore." >&2
+            echo "error: test/data/${n}.* is a discovery-probe name this justfile creates, and the" >&2
+            echo "       repo's own .gitignore does not cover it — so the .gitignore copy of that" >&2
+            echo "       name has drifted from the one in the variable block (bd gqlc-oxne), and" >&2
+            echo "       a probe a killed run leaves behind now reads as untracked work nobody" >&2
+            echo "       wrote. Add /test/data/${n}.*/ to .gitignore." >&2
             exit 1
         fi
     done
-    if [ "${checked}" -ne "${#names[@]}" ]; then
-        echo "error: the .gitignore coverage lookup ran ${checked} time(s) against ${#names[@]} declared" >&2
-        echo "       probe name(s), so at least one name reached no lookup at all and could" >&2
-        echo "       drift out of .gitignore with this recipe still green (bd gqlc-eo46)." >&2
+
+    # No refusal in this recipe is itself asserted on. Some of them overlap, so
+    # deleting one is sometimes caught by another, but nothing here makes that
+    # so. The regress stops at this level rather than terminating inside the
+    # script; closing it takes a test that runs this recipe against a fixture
+    # tree from outside it (bd gqlc-eo46).
+    missed=""
+    for n in "${names[@]}"; do
+        case $'\n'"${looked_up}" in
+            *$'\n'"${n}"$'\n'*) ;;
+            *) missed="${missed} ${n}" ;;
+        esac
+    done
+    if [ -n "${missed}" ]; then
+        echo "error: the .gitignore coverage lookup was not called for:${missed}" >&2
+        echo "       Each of those is a declared discovery-probe name, so each can drift out of" >&2
+        echo "       .gitignore with this recipe still green (bd gqlc-eo46)." >&2
         exit 1
     fi
 
-    # The lookup's passing case is silence too, and on a tree where nothing has
-    # drifted it is only ever run in the negative — which is what let this
-    # file's probe-collision arm ship dead once already. A spelling no recipe
-    # here creates goes through it on every run and must come back uncovered, so
-    # a lookup stuck at "yes" is refused rather than believed.
+    # The lookup's passing case is silence, and on a tree where nothing has
+    # drifted every call above returns covered — so the refusing branch is not
+    # taken on a green run, which is what let this file's probe-collision arm
+    # ship dead once already. A spelling no recipe here creates goes through the
+    # same lookup on every run and must come back uncovered, so a lookup stuck at
+    # "yes" is refused rather than believed.
+    #
+    # Planted on disk first. The probe rules in .gitignore end in a slash, and
+    # git matches a directory-only pattern against a directory that exists on
+    # disk, not against an absent path — so an unplanted control comes back
+    # uncovered for a reason that holds for a declared name too. The mkdir leaves
+    # the spelling as the difference between the control and the lookups above.
+    mkdir -p "test/data/zzuncoveredprobe.sweepwitness"
     if covered "zzuncoveredprobe"; then
-        echo "error: git reports test/data/zzuncoveredprobe.* as ignored, a spelling no recipe" >&2
-        echo "       here creates. The coverage lookup above cannot tell a declared probe name" >&2
-        echo "       from an undeclared one, so it would accept a renamed probe too and the" >&2
-        echo "       drift it exists to catch would pass (bd gqlc-oxne)." >&2
+        echo "error: this repo's own .gitignore reports test/data/zzuncoveredprobe.* as ignored, a" >&2
+        echo "       spelling no recipe here creates. The coverage lookup above answers yes to a" >&2
+        echo "       name that is not a declared probe, so it would answer yes to a renamed probe" >&2
+        echo "       too and the drift it exists to catch would pass (bd gqlc-oxne)." >&2
         exit 1
     fi
 
