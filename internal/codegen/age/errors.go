@@ -123,7 +123,8 @@ func entityKindNoun(k codegen.EntityKind) string {
 // readers: the declared property fills its own struct field and is then
 // read a second time as an offset, re-zoning the instant by whatever it
 // holds. Where the declared width is not an integer the second read
-// fails outright and no vertex of that type ever decodes.
+// fails outright, so a vertex carrying the property does not decode at
+// all.
 //
 // Which fields derive a name, and what that name is, are offsetSidecar's
 // answers — the same call the decode makes — so this covers exactly the

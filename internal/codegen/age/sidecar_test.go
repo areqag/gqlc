@@ -127,8 +127,46 @@ func entityDeclaring(f codegen.EntityField, prop string) codegen.Entity {
 	return e
 }
 
-// declaredPropertyTypes is every width internal/graph declares, read off
-// the declaration rather than listed here.
+// declaresAWidth reports whether an unannotated const spec is one a
+// width would be declared as.
+//
+// Go does not carry a type across a spec that has its own value, so
+// `TypeFoo = "FOO"` is an untyped string constant. It serves as a
+// graph.PropertyType at every call site that takes one, which is what
+// makes it a width everywhere except in a walk keyed on the annotation.
+// Refused rather than skipped, at the two shapes such a declaration
+// takes: a spec sharing a block with the annotated widths, and one named
+// as they are.
+func declaresAWidth(gen *ast.GenDecl, value *ast.ValueSpec) bool {
+	if len(value.Values) == 0 {
+		return false
+	}
+	for _, v := range value.Values {
+		if lit, ok := v.(*ast.BasicLit); !ok || lit.Kind != token.STRING {
+			return false
+		}
+	}
+	for _, n := range value.Names {
+		if strings.HasPrefix(n.Name, "Type") {
+			return true
+		}
+	}
+	for _, s := range gen.Specs {
+		other, ok := s.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		if id, ok := other.Type.(*ast.Ident); ok && id.Name == "PropertyType" {
+			return true
+		}
+	}
+	return false
+}
+
+// declaredPropertyTypes is every width internal/graph declares under its
+// PropertyType annotation, read off the declaration rather than listed
+// here. A width declared without that annotation fails declaresAWidth
+// above rather than dropping out of the domain.
 //
 // A list written here would cover the widths whoever wrote it knew
 // about, and the sweep above is for the widths nobody has admitted yet:
@@ -166,6 +204,9 @@ func declaredPropertyTypes(t *testing.T) []graph.PropertyType {
 					continue
 				}
 				if id, ok := value.Type.(*ast.Ident); !ok || id.Name != "PropertyType" {
+					require.False(t, declaresAWidth(gen, value),
+						"%s declares %v with no PropertyType annotation, so it is an untyped constant this walk does not see: the domain would be short a width with the sweep still reporting agreement",
+						name, value.Names)
 					continue
 				}
 				for _, v := range value.Values {
