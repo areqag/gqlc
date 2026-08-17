@@ -166,15 +166,29 @@ lint-hooks dir=".githooks": ensure-shellcheck
 # That key is now the VOCABULARY, not a mirror of one. The derivation reads it
 # and refuses any constraint term it cannot place — not a platform value, not a
 # go1.N tag, not toolchain-owned, not declared there — so a tag in the tree but
-# not in the config no longer reaches this comparison at all: `scope tags` below
-# fails first and names the file (bd gqlc-e7oq). That direction is kept anyway,
-# because it is no longer an assertion about the config. It is an assertion that
-# the derivation is still CONSULTING the config, and it fires the day something
-# reinstates a default case in the classification.
+# not in the config never reaches a comparison here: `scope tags` fails first and
+# names the file carrying it (bd gqlc-e7oq).
 #
-# The other direction is the live one: a tag in the config but not in the tree is
-# a line describing nothing, which pre-accepts whichever constrained directory is
-# added under that spelling next without anyone deciding it should be linted.
+# This recipe therefore compares in ONE direction, because the other one cannot
+# report anything. `derived` holds the terms classify placed as classCustom, and
+# it places a term as classCustom only if `declared` holds it; `configured` IS
+# `declared`, read by the same function on the same root. derived is a subset of
+# configured on every tree, so `comm -23 derived configured` was empty by
+# construction rather than by corpus. The clause that read it claimed to fire
+# "the day something reinstates a default case in the classification", and it
+# does not: with main.go's `return classUnknown` changed to `return classCustom`
+# this recipe exited 0. Nor can any tree witness it, because the undeclared term
+# that would fill the set makes the unmutated derivation refuse the file carrying
+# it — a `//go:build zzmystery` file exits 1 at `scope tags`, measured. The
+# default case is held out by `just test` instead, on
+# TestConstraintTagsRefusesATermItCannotPlace and
+# TestAnEmptyVocabularyFailsClosedWithoutAGradingClause, both of which redden
+# under that mutation.
+#
+# The direction that remains is the live one: a tag in the config but not in the
+# tree is a line describing nothing, which pre-accepts whichever constrained
+# directory is added under that spelling next without anyone deciding it should
+# be linted.
 #
 # The hand-written awk that used to read the key is gone, and with it the
 # emptiness clause it needed. One reader — `scope declared` — and a reader that
@@ -201,19 +215,7 @@ check-golangci-build-tags:
     configured="$(scope declared)" || exit 1
     configured="$(lines "${configured}" | sed '/^$/d' | sort -u)"
 
-    unconfigured="$(comm -23 <(lines "${derived}") <(lines "${configured}") || true)"
     stale="$(comm -13 <(lines "${derived}") <(lines "${configured}") || true)"
-    if [ -n "${unconfigured}" ]; then
-        echo "error: the tag derivation emitted build tags that are not in .golangci.yml's" >&2
-        echo "       run.build-tags (bd gqlc-oxne):" >&2
-        lines "${unconfigured}" | sed 's/^/         /' >&2
-        echo "       That is supposed to be unreachable: the derivation takes its vocabulary" >&2
-        echo "       from that key and refuses a term it cannot place there, so an undeclared" >&2
-        echo "       tag fails above with the file that carries it. Reaching this means the" >&2
-        echo "       classification has a default case again, and a default case is how a term" >&2
-        echo "       nobody understood became a -tags argument (bd gqlc-e7oq)." >&2
-        exit 1
-    fi
     if [ -n "${stale}" ]; then
         echo "error: these build tags are in .golangci.yml's run.build-tags but constrain no file" >&2
         echo "       in this tree, so the entries describe nothing and pre-accept whatever is" >&2

@@ -374,9 +374,10 @@ const (
 //   - a custom build tag, which is exactly the thing -tags exists to turn on —
 //     and which this repo declares in .golangci.yml, because a tag missing from
 //     that key is a file golangci-lint never loads (bd gqlc-oxne). One
-//     vocabulary, already reconciled against the tree in both directions by
-//     `just lint`'s check-golangci-build-tags, so reusing it here costs nothing
-//     and adding a term has exactly one place to happen.
+//     vocabulary, held against the tree from both ends: an undeclared term is
+//     refused here, and a declared term that constrains no file is refused by
+//     `just lint`'s check-golangci-build-tags. Reusing it costs nothing, and
+//     adding a term has exactly one place to happen.
 //
 // Everything else is classUnknown, and an unknown term is an ERROR at the call
 // site rather than a tag. The old rule made "custom tag" the default case, so
@@ -483,8 +484,8 @@ func constraintTags(line string, platforms, declared map[string]struct{}, origin
 			"`-tags` by default, which is how a dist list that came back short turned every "+
 			"platform value it had lost back into a custom build tag, silently (bd gqlc-e7oq). "+
 			"A genuinely new custom tag is declared in .golangci.yml first — golangci-lint "+
-			"needs it there or it never loads the file, and check-golangci-build-tags holds "+
-			"that key to this derivation in both directions (bd gqlc-oxne)",
+			"needs it there or it never loads the file, and check-golangci-build-tags refuses "+
+			"an entry in that key that constrains no file in this tree (bd gqlc-oxne)",
 			origin, t, line, strings.Join(sortedTerms(declared), " "))
 	}
 	var tags []string
@@ -543,9 +544,9 @@ func fileConstraint(path string) (string, error) {
 // That key is not consulted here for convenience. A build tag missing from it
 // is a file golangci-lint never loads, so it is already the one place a tag has
 // to be written down to exist at all (bd gqlc-oxne), and check-golangci-build-tags
-// already reconciles it against this derivation in both directions. Reusing it
-// as the vocabulary makes an undeclared term an unplaceable term, which is what
-// lets classify refuse rather than guess.
+// refuses an entry in it that constrains no file in the tree. Reusing it as the
+// vocabulary makes an undeclared term an unplaceable term, which is what lets
+// classify refuse rather than guess.
 //
 // A parse that goes quiet therefore fails CLOSED without a grading clause of its
 // own: an empty vocabulary makes codegen_live and tagblind unplaceable, and the
