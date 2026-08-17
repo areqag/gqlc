@@ -313,7 +313,9 @@ func matchType(t query.Type) string {
 // declares. Each row's variant keys are checked against the package's own
 // sources by TestQuerySumsAreNotClosed/<iface>/declared_variants, so a variant
 // landing or leaving without an edit here fails rather than silently narrowing
-// the rows below it.
+// the rows below it. That the table names every such interface — the claim this
+// comment opens with, which no row's own comparison reaches — is checked by
+// TestQuerySumsAreNotClosed/table_covers_every_marker-sealed_interface.
 //
 // The type argument on each forms call is the sum's interface: it is the
 // compile-time half of the claim, and dropping a row's pointer or embedded
@@ -500,6 +502,59 @@ func declaredMarkers(t *testing.T, marker string) []string {
 	return got
 }
 
+// sealedInterfaces returns, for each interface declared in the package query
+// sources of this directory, the unexported methods that interface names in
+// its own body, sorted. An interface naming none is absent from the result,
+// which is what separates the marker-sealed sums from Parser.
+//
+// Methods reached only by embedding are not read here: they stay on the
+// embedded interface's own entry (SetEffect embeds Effect and names
+// isSetEffect itself, so it has an entry of its own). An interface that named
+// no unexported method of its own and obtained one solely by embedding would
+// therefore go unreported — a limit of this reading, not a claim that no such
+// interface can be written.
+//
+// The same AST walk the rows below use, for the same reason: a commented-out
+// declaration satisfies a grep.
+func sealedInterfaces(t *testing.T) map[string][]string {
+	t.Helper()
+	_, files := parseQueryPackage(t)
+
+	got := map[string][]string{}
+	for _, f := range files {
+		for _, decl := range f.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				ts, ok := spec.(*ast.TypeSpec)
+				if !ok {
+					continue
+				}
+				iface, ok := ts.Type.(*ast.InterfaceType)
+				if !ok {
+					continue
+				}
+				for _, field := range iface.Methods.List {
+					if _, isMethod := field.Type.(*ast.FuncType); !isMethod {
+						continue // an embedded interface, not a method
+					}
+					for _, name := range field.Names {
+						if !name.IsExported() {
+							got[ts.Name.Name] = append(got[ts.Name.Name], name.Name)
+						}
+					}
+				}
+			}
+		}
+	}
+	for _, methods := range got {
+		sort.Strings(methods)
+	}
+	return got
+}
+
 // interfaceDoc returns the doc comment on the named interface declaration.
 // Requiring exactly one declaration keeps a rename or a move from emptying the
 // text the rows below read, which would satisfy those rows rather than fail
@@ -571,6 +626,33 @@ func sortedKeys[V any](m map[string]V) []string {
 // default. Counts live in the interfaces' doc comments, which the doc row
 // holds to the declared set; stating one here would drift unread.
 func TestQuerySumsAreNotClosed(t *testing.T) {
+	// Every row below holds one sum's doc comment and matcher to that sum's own
+	// declarations. This row is the one that holds the set of rows to the
+	// package: without it a marker-sealed interface reaches master read by
+	// nothing here, doc comment included. That is not hypothetical — gqlc-1vkb's
+	// own site list names seven interfaces (Binding, PathMember, Endpoint,
+	// Projection, Use, Effect, Type) where the package declares eight, and
+	// SetEffect was found by hand while the other seven were being rewritten.
+	t.Run("table covers every marker-sealed interface", func(t *testing.T) {
+		declared := sealedInterfaces(t)
+		// An empty ground truth agrees with any table that is also empty, so the
+		// comparison below would hold without measuring anything. This is the
+		// guard that makes it measure.
+		require.NotEmpty(t, declared,
+			"no interface in the package directory names an unexported method of its own; the comparison below would hold against an empty table rather than measure it")
+
+		enumerated := map[string][]string{}
+		for _, sum := range sealedSums {
+			enumerated[sum.iface] = append(enumerated[sum.iface], sum.marker)
+		}
+		for _, markers := range enumerated {
+			sort.Strings(markers)
+		}
+
+		require.Equal(t, enumerated, declared,
+			"sealedSums (expected) and the interfaces naming an unexported method in the package sources (actual) have diverged. A name present only in actual is a marker-sealed interface with no row, so nothing here reads its doc comment or its variants — add a row. A name present only in expected is a row naming an interface this directory no longer declares. A name in both with differing methods means the row's marker field is not the method the interface names")
+	})
+
 	for _, sum := range sealedSums {
 		t.Run(sum.iface, func(t *testing.T) {
 			t.Run("declared variants", func(t *testing.T) {
@@ -612,6 +694,12 @@ func TestQuerySumsAreNotClosed(t *testing.T) {
 						`%s's doc comment now spells a count next to "variants" or "arms", but its row says it describes the sum by stage, so nothing compares that count to the %d declarations. Move the row to docEnumeratesVariants, which names every declared variant and checks the count`, sum.iface, len(declared))
 				case docPolicyUnset:
 					t.Fatalf("%s's row declares no docPolicy; pick the one its doc comment follows rather than leaving the comment unread", sum.iface)
+				default:
+					// docPolicy is an int constant, so a third policy added
+					// without an arm here would be read by nothing and its rows
+					// would pass on the strength of no comparison. Reaching the
+					// default is that omission.
+					t.Fatalf("%s's row declares docPolicy %d, which this switch has no arm for; add the arm that reads its doc comment rather than leaving the comment unread", sum.iface, sum.docs)
 				}
 			})
 

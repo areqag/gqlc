@@ -588,8 +588,16 @@ func applyListOp(base query.Type, op gen.IOC_ListOperatorExpressionContext) quer
 }
 
 // commonType computes the common type across a slice of types: if every entry
-// is the same type (via String equality — the closed sum has no other axis),
-// that type; else TypeUnknown. A single-entry slice returns its lone type.
+// renders the same String, that entry; else TypeUnknown. A single-entry slice
+// returns its lone type.
+//
+// String is the comparison rather than the concrete Go type because String is
+// the canonical wire name, and the one variant carrying a parameter, TypeList,
+// renders its element into it ("list<list<int>>"). Two entries with equal
+// String therefore agree on everything the model carries, whichever concrete
+// type produced the string — including the pointer and embedding forms that
+// satisfy query.Type without declaring isType and promote the variant's own
+// String (see query.Type's doc comment).
 func commonType(ts []query.Type) query.Type {
 	if len(ts) == 0 {
 		return query.TypeUnknown{}
