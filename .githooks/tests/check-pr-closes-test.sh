@@ -824,6 +824,62 @@ expect_red "a closing tag before the comment's own '-->' does not close it" \
 Refs: gqlc-mirrored #617')" "fix/gqlc-mirrored-thing" \
     "missing 'Closes #617'"
 
+# The same reading where the comment is complete on the line rather than
+# opened by it, which is COMMENT_RUN's whole job. markdown's line scanner
+# does end the HTML block on a line spelling '</pre>' -- but the sanitiser
+# then drops the comment that held it, the element stays open, and the
+# marker lands inside. Measured: the first two bodies below both render as
+# '<pre class="notranslate"><p>Refs: gqlc-mirrored #617</p></pre>', the
+# marker inside the block, one with the comment on the opening line and one
+# a line below it.
+expect_red "a closing tag inside a comment does not close the opening line" \
+    "$EXPORT" "$(body '<pre><!-- </pre> -->
+Refs: gqlc-mirrored #617
+</pre>')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+expect_red "a closing tag inside a comment does not close the block below" \
+    "$EXPORT" "$(body '<pre>
+<!-- </pre> -->
+Refs: gqlc-mirrored #617
+</pre>')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+# The opening line carries an unterminated '<!--' with the closing tag after
+# it, so the closer is inside the comment by position rather than by run.
+# Reading the one-line-close test over the whole line instead of the part
+# before the '<!--' closes the block here and puts the marker back in prose;
+# GitHub renders this body as '<pre class="notranslate"></pre>' and nothing
+# else.
+expect_red "a closing tag after an unterminated comment does not close it" \
+    "$EXPORT" "$(body '<pre><!-- </pre>
+-->
+Refs: gqlc-mirrored #617
+</pre>')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+# What removing the comments must not do: a closing tag outside one still
+# closes the block on its opening line. GitHub renders this as an empty
+# <pre> followed by '<p>Refs: gqlc-mirrored #617</p>', so the marker is
+# prose and honoured.
+expect_green_saying "a closing tag outside a comment still closes the line" \
+    "$EXPORT" "$(body '<pre><!-- x --></pre>
+Refs: gqlc-mirrored #617')" "some/branch" \
+    "issue #617 stays open at merge"
+
+# The cost of that removal, in the fail-closed direction and in the class the
+# row above headed "a comment opening the <code>'s own line" is filed under:
+# a <code> sharing its line with a comment is not a complete tag on a line of
+# its own, so GitHub keeps it inline and renders
+# '<p><code class="notranslate">Refs: gqlc-mirrored #617</code></p>' --
+# visible monospace. Blanked anyway, because HTML_OPEN reads the line and not
+# the paragraph it is in.
+expect_red "a <code> closed only inside a comment blanks the marker" \
+    "$EXPORT" "$(body '<code><!-- </code> -->
+Refs: gqlc-mirrored #617
+</code>')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
 expect_green_saying "a fence line inside a comment opens no fence" \
     "$EXPORT" "$(body "<!--
 ${FENCE3}
