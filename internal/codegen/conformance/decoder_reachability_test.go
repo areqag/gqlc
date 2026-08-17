@@ -480,9 +480,18 @@ func (s *ConformanceSuite) TestEmittedDecodersGuardOnlyOnStampableLabels() {
 // no prepared entity in its results and compares no string, which lands it on
 // the results-name-nothing arm with no guard for an alphabet to reject.
 //
-// The per-target floor is what keeps the census off an empty loop, and it is
-// the enumeration that used to be prose: a backend that stops emitting
-// closures reddens here, and so does one that starts.
+// The string half of that is stricter than the sweep itself, which accepts a
+// literal comparing one of the wire's own fixed spellings. An emitter that
+// inlined a scalar narrowing as a closure, instead of passing the named
+// helper it passes today, would redden this census on an emission the gate
+// accepts. That is deliberate: what these sentences stand behind is what the
+// backends write, not what the gate would tolerate.
+//
+// The per-target floor keeps the census off an empty loop. It is a presence
+// bit, not the enumeration it replaced: it reddens when a target stops
+// emitting closures altogether. A closure a target starts emitting is read by
+// the two assertions above, and reddens here only if it names a prepared
+// entity or compares a string.
 func (s *ConformanceSuite) TestEmittedClosuresNameNoEntityAndCompareNoString() {
 	targets := s.backends.Keys()
 	closures := make(map[string]int, len(targets))
@@ -1188,13 +1197,16 @@ func decodePerson(raw []byte) (Person, error) {
 // visits every node of the declaration, so there is no per-shape arm left to
 // be missing, and one row nests a literal in shapes no arm ever named.
 //
-// The last two rows are about what that walk hands off to. One puts the
-// helper inside a package-level literal's body, which the walk does not
-// reach: it prunes at each literal it finds and hands that literal's body to
-// the body walk instead, and since the sweep stopped collecting a nested
-// literal's strings into its holder, that hand-off is the only thing left
-// that reports the helper. The other binds fewer names than it has values,
-// which go/parser accepts and which the name binding must not index past.
+// The last rows are witnesses to what the walk reaches beyond a
+// declaration's values. One puts the helper inside a package-level literal's
+// body. Two put it in a signature, which nothing reached while the walk
+// pruned at each literal and handed on only that literal's body — the same
+// helper one level down was read, so the classification turned on where its
+// holder was written. A signature's only expression slot is an array length
+// and that has to be constant, so no compiling Go writes a literal in one;
+// the sweep parses rather than typechecks, which is what lets those rows be
+// written at all, as it lets the last row bind fewer names than it has
+// values.
 //
 // Each row writes a helper comparing a string no verdict here covers, so the
 // answer for every one of them is the same refusal: an ungraded site. A row
@@ -1241,6 +1253,14 @@ func decodePerson(raw []byte) (Person, error) {
 		{
 			name: "inside the body of a package-level literal",
 			decl: `var boot = func() { _ = []func(string) bool{` + helper + `} }`,
+		},
+		{
+			name: "in the signature of a package-level literal",
+			decl: `var boot = func(a [` + helper + `("")]int) {}`,
+		},
+		{
+			name: "in the signature of a func declaration",
+			decl: `func boot(a [` + helper + `("")]int) {}`,
 		},
 		{
 			// notALiteral is undeclared, and the emission is parsed rather
@@ -1511,22 +1531,22 @@ func decodePerson(raw []byte) (Person, error) {
 // decoder written in the body of a package-level function literal: read once,
 // under its own name, on its own axis.
 //
-// That position is the seam between the two walks. A declaration is walked
-// for literals and the walk prunes at each one it finds, so anything below a
-// package-level literal is reached only by handing that literal's body to the
-// body walk — the same walk a func declaration's body gets, and the one that
-// does not prune. Each half is pinned on its own: rows elsewhere put a literal
-// in a declaration's own syntax, and others put one inside a func
-// declaration's body. What nothing held is the hand-off between them.
+// That position used to be a seam. The declaration walk pruned at each
+// literal it found and handed that literal's body to a second walk, so what
+// was below a package-level literal arrived through that hand-off or not at
+// all — and the literal's signature, which the hand-off did not carry,
+// arrived not at all. One walk per declaration removes the seam rather than
+// pinning it.
 //
-// One emission pins both sides of the seam, because neither side is silent.
-// Drop the hand-off and this decoder is yielded by nothing — since the sweep
-// stopped collecting a nested literal's strings into its holder, nothing else
-// reads it — so the entity it fills goes undecoded and the reconciliation
-// against codegen.Prepare refuses the emission. Stop pruning and it is
-// yielded twice, once by each walk, and the duplicate arm refuses it as two
-// candidates for one entity's decoder. What is asserted is therefore that the
-// emission is accepted, with exactly the one decoder classified.
+// What this holds is that the position is still read after the removal, and
+// read once. Stop walking below the literal and this decoder is yielded by
+// nothing — since the sweep stopped collecting a nested literal's strings
+// into its holder, nothing else reads it — so the entity it fills goes
+// undecoded and the reconciliation against codegen.Prepare refuses the
+// emission. Yield it twice and the duplicate arm refuses it as two candidates
+// for one entity's decoder, which is what the prune was there to prevent. So
+// what is asserted is that the emission is accepted, with exactly the one
+// decoder classified.
 func TestSweepReadsADecoderInAPackageLevelLiteralOnce(t *testing.T) {
 	// The nested decoder is the only one here on purpose: a visible second
 	// decoder for Person would let the reconciliation balance without it,
@@ -1557,9 +1577,69 @@ var boot = func() {
 		shape: codegen.EntityNode, guards: []string{"Person"},
 	}}, decoders,
 		"the decoder written inside the package-level literal is not read once as Person's decoder carrying its "+
-			"own guard. An empty list means the literal's body was never walked and the guard is graded by "+
-			"nothing; two entries mean it was walked twice, once by the declaration walk and once by the "+
-			"hand-off, and one decoder read twice is refused as two")
+			"own guard. The refusal assertion above stops this test first, so the sweep accepted this emission "+
+			"and the difference is in what it made of the decoder rather than in whether it read one; the diff "+
+			"below is that difference")
+}
+
+// TestSweepMarksEachYieldedFunctionByItsSpelling reads what packageLevelFuncs
+// yields, rather than what the classification later makes of it: which
+// functions arrive, in what order, under what name, and marked as which
+// spelling.
+//
+// The mark is the one field of a yield the classification does not read.
+// What acts on it is the corpus census, which counts the literals and skips
+// everything else, so a literal this marks otherwise is one the census skips
+// in silence: not counted, and neither of its assertions asked. The census
+// reads what the corpus happens to write, so the mark on a spelling no
+// backend uses today is asserted here or nowhere.
+//
+// The whole list is compared, so a function yielded twice, yielded not at all,
+// or reported under a name that points at no site is a difference here. The
+// two exclusions are in it as absences: a func declaration with no body, and a
+// receiver form, are walked for the literals they hold and are not yielded
+// under their own names.
+func TestSweepMarksEachYieldedFunctionByItsSpelling(t *testing.T) {
+	// A literal no name is bound to is reported by its line, so the lines this
+	// source puts them on are part of what is asserted. Two are written in a
+	// signature, where the walk used to reach nothing, and one of those is in
+	// a declaration with no body — walked, and not yielded under its name.
+	const emission = `package emitted
+
+func decodePerson(raw []byte) (Person, error) { return Person{}, nil }
+
+func linknamed(a [func() int { return 1 }()]int) (Person, error)
+
+var boot = func(a [func() int { return 1 }()]int) {
+	hold := func() {}
+	_ = hold
+	_ = []func(){func() {}}
+}
+
+func (q queries) run() { _ = func() {} }
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "models.go", emission, parser.SkipObjectResolution)
+	require.NoError(t, err)
+
+	var yielded []string
+	for _, fn := range packageLevelFuncs(fset, file) {
+		yielded = append(yielded, fmt.Sprintf("%s literal=%t", fn.name, fn.literal))
+	}
+
+	require.Equal(t, []string{
+		"decodePerson literal=false",
+		"the function literal at line 5 literal=true",
+		"boot literal=true",
+		"the function literal at line 7 literal=true",
+		"hold literal=true",
+		"the function literal at line 10 literal=true",
+		"the function literal at line 13 literal=true",
+	}, yielded,
+		"the sweep hands the classification a different set of functions than this source writes. Each entry is "+
+			"one function the classification is handed: the name is what its refusal points a reader at, and the "+
+			"mark is what the corpus census filters on, so an entry marked as no literal is graded by the sweep "+
+			"and counted by nothing")
 }
 
 // TestSweepRefusesADecoderWhoseResultTypeItCannotResolve holds the negative
@@ -1937,21 +2017,21 @@ type emittedFunc struct {
 // left this gate green while the same emission spelled visibly was
 // refused: the refusal did not survive a change of spelling.
 //
-// So the rule is not a list of positions. Every node of a declaration that
-// is not a func declaration is visited, and every function literal found
-// there is a function this gate classifies — which is a claim about the
-// walk rather than about the shapes anyone thought to enumerate, and there
-// is no per-shape arm left that could be the missing one.
+// So the rule is not a list of positions. Every node of every declaration
+// is visited by one walk, and every function literal found there is a
+// function this gate classifies — which is a claim about the walk rather
+// than about the shapes anyone thought to enumerate, and there is no
+// per-shape arm left that could be the missing one. A func declaration's
+// body is no different from a var's value: the walk reaches a literal at
+// any depth of either, unfiltered.
 //
-// Inside a body the rule is the same one, unfiltered: every function
-// literal a body writes, at every depth, is a function this gate
-// classifies. Classifying is not the same as grading. What a yielded
-// literal is — an entity's decoder, or a function whose results name no
-// prepared entity and which may therefore compare only the wire's own
-// scalar spellings — is decided in emittedEntityDecoders by resultEntities
-// and nowhere here. This function takes no shape map for that reason: what
-// it yields cannot depend on what the derivation prepared, so there is no
-// argument here that a decoder could be spelled around.
+// Classifying is not the same as grading. What a yielded literal is — an
+// entity's decoder, or a function whose results name no prepared entity and
+// which may therefore compare only the wire's own scalar spellings — is
+// decided in emittedEntityDecoders by resultEntities and nowhere here. This
+// function takes no shape map for that reason: what it yields cannot depend
+// on what the derivation prepared, so there is no argument here that a
+// decoder could be spelled around.
 //
 // Filtering the yield on "does this literal fill an entity" is what an
 // earlier revision did, and it routed the totality claim around itself. The
@@ -1984,9 +2064,9 @@ type emittedFunc struct {
 // A method is not yielded, and that exclusion is the claim's edge rather
 // than a blind spot of the same kind: a receiver form belongs to the
 // emitted query surface, which the gate states outright it holds nothing
-// about (gqlc-9xy0). Its body is still walked, because a receiver-less
-// function literal is not a receiver form however it is reached — skipping
-// the method whole made a dispatch table returned from one invisible to the
+// about (gqlc-9xy0). It is still walked, because a receiver-less function
+// literal is not a receiver form however it is reached — skipping the
+// method whole made a dispatch table returned from one invisible to the
 // census, which is not the boundary this exclusion draws. The width is the
 // same in both directions: a receiver form is read as a decoder's *holder*
 // and is never graded as a decoder itself. That is an exclusion this gate
@@ -2003,15 +2083,21 @@ func packageLevelFuncs(fset *token.FileSet, file *ast.File) []emittedFunc {
 		}
 		return fmt.Sprintf("the function literal at line %d", fset.Position(lit.Pos()).Line)
 	}
-	// nested walks a body for every function literal written in it, at every
-	// depth. The walk never stops descending, so a literal wrapped in another
-	// literal is still reached; that is why it needs no recursion of its own.
-	nested := func(body *ast.BlockStmt) {
-		if body == nil {
-			return
-		}
-		names := boundLiteralNames(body)
-		ast.Inspect(body, func(n ast.Node) bool {
+	// literals walks one declaration whole, yielding every function literal
+	// written anywhere in it. The walk never stops descending, so a literal
+	// wrapped in another literal is reached by the walk that reached its
+	// holder, and ast.Inspect visits each node once, so each literal is
+	// yielded once. It needs no recursion of its own and no hand-off.
+	//
+	// One walk per declaration is the fix for a two-walk shape that pruned at
+	// each literal and handed that literal's *body* to a second walk. An
+	// *ast.FuncLit's other child is its signature, which the hand-off did not
+	// carry, so a helper inside one was yielded by neither walk while the
+	// identical helper one level down was yielded — the classification turned
+	// on where the holder was written rather than on the helper.
+	literals := func(decl ast.Decl) {
+		names := boundLiteralNames(decl)
+		ast.Inspect(decl, func(n ast.Node) bool {
 			lit, ok := n.(*ast.FuncLit)
 			if !ok {
 				return true
@@ -2021,53 +2107,44 @@ func packageLevelFuncs(fset *token.FileSet, file *ast.File) []emittedFunc {
 		})
 	}
 	for _, decl := range file.Decls {
-		if fn, ok := decl.(*ast.FuncDecl); ok {
-			// A nil body is a declaration whose implementation is
-			// elsewhere (assembly, a linkname); it compares nothing and
-			// there is no body to walk.
-			if fn.Body == nil {
-				continue
-			}
-			if fn.Recv == nil {
-				out = append(out, emittedFunc{name: fn.Name.Name, typ: fn.Type, body: fn.Body})
-			}
-			nested(fn.Body)
-			continue
+		// A nil body is a declaration whose implementation is elsewhere
+		// (assembly, a linkname): it holds no string to grade, and reading
+		// its results as a decoder's would let a signature with no
+		// implementation balance the reconciliation against codegen.Prepare.
+		// It is not yielded under its own name; it is walked like every other
+		// declaration.
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil && fn.Body != nil {
+			out = append(out, emittedFunc{name: fn.Name.Name, typ: fn.Type, body: fn.Body})
 		}
-		names := boundLiteralNames(decl)
-		ast.Inspect(decl, func(n ast.Node) bool {
-			lit, ok := n.(*ast.FuncLit)
-			if !ok {
-				return true
-			}
-			out = append(out, emittedFunc{name: litName(names, lit), typ: lit.Type, body: lit.Body, literal: true})
-			nested(lit.Body)
-			return false
-		})
+		literals(decl)
 	}
 	return out
 }
 
 // boundLiteralNames is the declared name of each function literal one
-// declaration or body binds to one directly, so that a function spelled as
-// a var or assigned to a local reports under the name it is called by
-// rather than under its position.
+// declaration binds to one directly, wherever inside it the binding is
+// written, so that a function spelled as a var or assigned to a local
+// reports under the name it is called by rather than under its position.
 //
 // A literal any deeper — an element of a table, the operand of a
 // conversion — has no name of its own to report, and inventing one out of
 // the declaration that encloses it would name something a reader cannot
-// grep for. Those are reported by position instead.
+// grep for. Those are reported by position instead, as is a literal bound
+// to the blank identifier: `_` is a binding no call site can use, so
+// reporting under it points a reader at no site in particular.
 func boundLiteralNames(root ast.Node) map[*ast.FuncLit]string {
 	names := map[*ast.FuncLit]string{}
 	bind := func(lhs []ast.Expr, rhs []ast.Expr) {
-		// The two sides line up index for index whenever a value is a
-		// function literal: the shapes where they do not — `var a, b = f()`,
-		// `a, b := f()` — have a single value that is a call and never a
-		// literal, and the length guard is what rules them out.
+		// This is a bounds guard. `var a = f(), g()` parses — go/parser does
+		// not typecheck — and there the range below would index lhs past its
+		// end. That is the one direction that can index out of range, since
+		// the range is over rhs.
 		//
-		// It is a bounds guard in the other direction too. `var a = f(), g()`
-		// parses — go/parser does not typecheck — and there the range below
-		// would index lhs past its end, so the guard is `!=` rather than `>`.
+		// It is `!=` rather than `>` so that the other direction — a
+		// declaration binding more names than it has values, `var a, b = f()`
+		// or `a, b := f()` — binds nothing either. That shape does not
+		// typecheck, and pairing its names with its values by index would be
+		// a guess about a source no compiler accepts.
 		if len(lhs) != len(rhs) {
 			return
 		}
@@ -2076,7 +2153,7 @@ func boundLiteralNames(root ast.Node) map[*ast.FuncLit]string {
 			if !isLit {
 				continue
 			}
-			if ident, ok := lhs[i].(*ast.Ident); ok {
+			if ident, ok := lhs[i].(*ast.Ident); ok && ident.Name != "_" {
 				names[lit] = ident.Name
 			}
 		}
