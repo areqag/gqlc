@@ -286,13 +286,15 @@ func moduleGoDirs(ctx context.Context, root, module string) ([]string, error) {
 // gqlc-s3lt).
 //
 // One module shape in this repo genuinely walks empty, and it is this repo's
-// own: the discovery probes `just vuln`, test-codegen-fence and
-// check-codegen-external-tests each mktemp under test/data are a go.mod and
-// nothing else. They exist to be discovered, and each is removed before any
-// caller asks a probe for its directories — so a probe reaching this refusal
-// means a run died before its EXIT trap ran. The message names that cause
-// first, because it is the one an operator can act on; blaming the walk for a
-// leaked probe misdiagnoses four gates at once.
+// own: `just vuln`, test-codegen-fence and check-codegen-external-tests each
+// mktemp a discovery probe under test/data, and a probe is a go.mod with
+// nothing beneath it. They exist to be discovered, and each is removed before
+// any caller asks a probe for its directories — so a probe reaching this
+// refusal is normally a run that died before its EXIT trap ran. Not always: two
+// of those recipes run against ONE worktree at the same time clear each other's
+// live probe. The message names the leak first, because it is the cause an
+// operator can act on; blaming the walk for a leaked probe misdiagnoses four
+// gates at once.
 func goDirs(module, moduleRoot string, nested []string) ([]string, error) {
 	prune := make(map[string]struct{}, len(nested))
 	for _, n := range nested {
