@@ -211,15 +211,29 @@ type entityDecoder struct {
 // Note what the first bullet costs, because it is a constraint on the
 // emitters and not only a reading of them. Inside a decoder every compared
 // string is graded as a label, with no exemption for wireScalarSpellings:
-// a decoder that inlined `if s == "null"` would be reported unreachable
-// though it plainly is not. That is the contract rather than an accident —
-// the wire's scalar handling lives in helpers the second bullet covers
-// (agtypeInt64, agtypeString), so no emission carries such a comparison in
-// a decoder body today, and exempting the spellings here would let a label
-// guard spelled "null" pass the one check this gate exists to make. The
-// cost is that the diagnostic such a decoder would draw names the wrong
-// obstacle: it would say the struct is unreachable when the finding is
-// that a decoder compared a string that is not a label.
+// a decoder that inlined `if s == "null"` is refused, though that
+// comparison is one a value can satisfy. That is the contract rather than
+// an accident — the wire's scalar handling lives in helpers the second
+// bullet covers (agtypeInt64, agtypeString), so no emission carries such a
+// comparison in a decoder body today, and exempting the spellings here
+// would let a label guard spelled "null" pass the one check this gate
+// exists to make. There is no sound way to tell the two apart at this
+// remove: the inlined scalar and the label guard are the same *ast.Binary
+// Expr, and discriminating on the operand's form would exempt a backend
+// that wrote `if string(raw) == "Person"`, which is the dangerous
+// direction.
+//
+// So the cost is a refusal an author has to work around, and it is paid
+// where a refusal is paid — by writing the comparison in a helper. It is
+// not paid in the report. The diagnostic for that decoder names the
+// finding the sweep actually made and draws no consequence it cannot
+// support: unstampableBecause has an arm for a wire spelling that says the
+// string is not a label at all and offers both readings, and the frame
+// around it asserts only what was compared and what the axis carries. A
+// red that states a checkable falsehood about the emission — that a
+// decoder returns an error, that its struct is unreachable — is the one
+// failure mode a gate is least allowed to have, and this one used to have
+// it.
 //
 // Both directions are reconciled per emission: the entities decoded must
 // be exactly the entities codegen.Prepare names, one decoder each. So a
@@ -375,13 +389,23 @@ func (s *ConformanceSuite) TestEmittedDecodersGuardOnlyOnStampableLabels() {
 					}
 					for _, guard := range d.guards {
 						graded++
+						// The frame states what was observed and nothing
+						// that follows from it. Which branch the guard
+						// selects, whether the other one returns an error,
+						// and whether any value can take it are all
+						// properties of the emission this sweep did not
+						// read: it reads that a string was compared and
+						// that the axis cannot carry it. The consequence
+						// is the reason clause's to draw, because it is
+						// the only part that knows which kind of string
+						// this is.
 						s.Require().True(alphabet[d.shape][guard],
 							"%s emits %s in %s for fixture %s. It fills %s, which is %s, so the only value that "+
-								"ever reaches it is %s, and it returns an error unless that value's label equals "+
-								"%q. %s Every call to %s therefore fails and the struct it fills is unreachable.",
+								"ever reaches it is %s, and its body tests that value for equality against %q, "+
+								"which is not one of the labels this axis can carry. %s",
 							target, d.fn, d.file, fixture,
 							d.entity, entityShapeWords[d.shape].typeText, entityShapeWords[d.shape].valueText,
-							guard, unstampableBecause(guard, d.shape, alphabet), d.fn)
+							guard, unstampableBecause(guard, d.shape, alphabet))
 					}
 				}
 			}
@@ -627,7 +651,16 @@ func multiLabelEntities(sch schema.Schema) []string {
 }
 
 // unstampableBecause is the reason clause for a guard the alphabet of the
-// decoder's own axis does not hold.
+// decoder's own axis does not hold. It carries the diagnosis *and* the
+// consequence, because the two do not travel together: three of its four
+// arms answer a string that was meant to be a label, and one answers a
+// string that was never a label at all.
+//
+// That is the split the assertion above cannot make. Its frame says only
+// what the sweep observed — this decoder compares the wire value against
+// this string, and this axis cannot carry it — and every arm here says what
+// follows from that, so no sentence in the report asserts a consequence
+// that does not hold on the emission it is reporting.
 //
 // Two arms are called out ahead of the general one. The join spelling is
 // the case whose unsatisfiability is mechanical rather than corpus-
@@ -636,12 +669,33 @@ func multiLabelEntities(sch schema.Schema) []string {
 // The cross-axis case is the one a reader is most likely to argue with,
 // because the string *is* in the schema — so the clause says which axis
 // declares it and why that does not help.
+//
+// The wire-spelling arm is the fourth, and it is the one that stops the
+// report lying. Inside a decoder every compared string is graded as a
+// label, with no exemption for wireScalarSpellings — see the gate's
+// docstring for why exempting them is not on offer — so a decoder that
+// inlined `if string(raw) == "null"` is refused. But that comparison is
+// satisfiable: the wire really does spell a null that way, and telling its
+// author the branch is dead would be a falsehood they can check in one
+// reading. So this arm reports the finding, which is true (a decoder
+// compared something that is not a label), names both readings, and claims
+// no deadness. It comes after the cross-axis arm because a schema is free
+// to declare a label spelled like a wire scalar, and there the cross-axis
+// clause is the more informative answer.
 func unstampableBecause(guard string, shape codegen.EntityKind, alphabet labelAlphabet) string {
 	declared := slices.Sorted(maps.Keys(alphabet[shape]))
+	// dead is the consequence the three label arms share and the wire
+	// spelling arm must not draw.
+	// Which of the two is dead depends on how the emission wrote the
+	// comparison, and the sweep does not read that: it collects an operand
+	// of == or != and a case value alike, so naming a side would be a claim
+	// about the source that this has not looked at.
+	const dead = " So no value that reaches this decoder carries it: the comparison answers the same way on every " +
+		"call, and one of the two branches it decides between is dead."
 	if parts := graph.LabelSetKey(guard).Split(); len(parts) > 1 {
 		return fmt.Sprintf("That is graph.LabelSetKey's join spelling of the %d-label set %v — a label set, not a "+
 			"label — and a wire value carries one label, so no single label equals it. This axis declares %v.",
-			len(parts), []string(parts), declared)
+			len(parts), []string(parts), declared) + dead
 	}
 	for _, other := range slices.Sorted(maps.Keys(entityShapeWords)) {
 		if other == shape || !alphabet[other][guard] {
@@ -650,9 +704,15 @@ func unstampableBecause(guard string, shape codegen.EntityKind, alphabet labelAl
 		return fmt.Sprintf("The schema does declare that label — but on the other axis, where it belongs to %s and "+
 			"%s carries it. A node carries a node type's key label and an edge carries its relationship type, "+
 			"and no statement gqlc writes puts either on the other. This axis declares %v.",
-			entityShapeWords[other].typeText, entityShapeWords[other].valueText, declared)
+			entityShapeWords[other].typeText, entityShapeWords[other].valueText, declared) + dead
 	}
-	return fmt.Sprintf("This axis declares the labels %v and no others, so nothing writes that one.", declared)
+	if wireScalarSpellings[guard] {
+		return fmt.Sprintf("That is one of the wire's own fixed scalar spellings %v and not a label at all, so "+
+			"either this decoder inlined scalar handling that belongs in one of the wire's helpers, where this "+
+			"gate grades a comparison against those spellings, or it is a label guard nothing satisfies. This "+
+			"axis declares %v.", slices.Sorted(maps.Keys(wireScalarSpellings)), declared)
+	}
+	return fmt.Sprintf("This axis declares the labels %v and no others, so nothing writes that one.", declared) + dead
 }
 
 // TestUnstampableReasonNamesTheRightObstacle holds unstampableBecause to one
@@ -681,6 +741,7 @@ func TestUnstampableReasonNamesTheRightObstacle(t *testing.T) {
 	const (
 		joinSpelling = "join spelling"
 		otherAxis    = "on the other axis"
+		wireSpelling = "fixed scalar spellings"
 		undeclared   = "and no others"
 	)
 
@@ -698,6 +759,10 @@ func TestUnstampableReasonNamesTheRightObstacle(t *testing.T) {
 			guard: "Company", shape: codegen.EntityEdge, want: otherAxis,
 		},
 		{
+			name:  "one of the wire's own scalar spellings",
+			guard: "null", shape: codegen.EntityNode, want: wireSpelling,
+		},
+		{
 			name:  "a label the schema declares on neither axis",
 			guard: "NoSuchLabelAnywhere", shape: codegen.EntityNode, want: undeclared,
 		},
@@ -707,7 +772,7 @@ func TestUnstampableReasonNamesTheRightObstacle(t *testing.T) {
 
 			require.Contains(t, because, tc.want,
 				"the reason clause for %s does not reach the arm that explains it", tc.name)
-			for _, other := range []string{joinSpelling, otherAxis, undeclared} {
+			for _, other := range []string{joinSpelling, otherAxis, wireSpelling, undeclared} {
 				if other == tc.want {
 					continue
 				}
