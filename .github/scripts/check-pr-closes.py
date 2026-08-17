@@ -22,11 +22,16 @@ first character and read over what prose_only leaves of the body --
 fenced code blocks, HTML comments, and raw <pre> and <code> blocks
 blanked. Those are the carriers a marker was measured to survive
 invisibly in, against GitHub's own renderer; they are not certified to be
-every place GitHub hides text. Over the 85 shapes measured, where the two
+every place GitHub hides text. Over the 85 shapes swept, where the two
 disagree this blanks a marker GitHub renders (seven of them) rather than
-honouring one GitHub hides (none); the one shape it honours that GitHub
-renders as code is an inline code span, which is visible monospace text
-and is rowed in the suite. The declaration is then checked
+honouring one GitHub hides (none of the 85), and the one shape in that
+sample it honours that GitHub renders as code is an inline code span,
+which is visible monospace text. Both of those hold over the 85 and no
+further: outside them are two more blanks over markers GitHub renders, a
+third refusal that comes from the marker's line anchor rather than the
+blanking, and -- the direction the 85 had none of -- one honoured marker
+GitHub renders nothing of, a line inside an unterminated HTML attribute
+(bd gqlc-ncb8). All four are rows. The declaration is then checked
 rather than taken: the number has to be the one the bead mirrors, the
 export has to not already show the bead closed, and the body has to carry
 none of the closing keywords and reference forms GitHub documents for that
@@ -39,6 +44,7 @@ Exits 0 (pass) or 1 (fail with diagnostic).
 import json
 import re
 import sys
+from typing import NoReturn
 
 # 'Bead: gqlc-xyz' anywhere in the body. The value is the whole whitespace-
 # delimited token around the 'gqlc-', not just the part that looks like an
@@ -58,9 +64,11 @@ import sys
 BEAD_IN_BODY = re.compile(r"(?i)Bead:\s*(\S*gqlc-\S*)")
 # The opt-out marker. Read at the first character of a line, unlike
 # BEAD_IN_BODY, and only over what prose_only() leaves: an honoured marker
-# makes this gate state on the check run that an issue stays open, so a body
-# that merely shows the spelling, or hides it where GitHub renders nothing,
-# must not reach it. Leading whitespace is rejected because four spaces is
+# makes this gate state on the check run that an issue stays open, so the
+# carriers that were measured to show the spelling, or to hide it where
+# GitHub renders nothing, are blanked before this pattern runs. Blanked, not
+# proved absent -- the open-attribute shape rowed in the suite still reaches
+# it (bd gqlc-ncb8). Leading whitespace is rejected because four spaces is
 # markdown's indented-code-block spelling and this file's own subject matter
 # is the marker. group(2) is the rest of the line, which is where the issue
 # number has to be.
@@ -74,9 +82,11 @@ REFS_IN_BODY = re.compile(r"(?im)^Refs:[ \t]*(\S*gqlc-\S*)([^\n]*)")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})([^\n]*)$")
 # A raw <pre> or <code> block, which GitHub renders as code. <script>,
 # <style> and <textarea> are the other tags markdown groups with <pre>, and
-# are deliberately not blanked: GitHub's sanitiser drops the tag and keeps
-# the text, so a marker inside one is visible to a reader (measured, rowed
-# in the suite). group(1) is the tag, so the closer has to be that same tag.
+# are deliberately not blanked: GitHub's sanitiser escapes the tag rather
+# than honouring it, so '&lt;script&gt;' and the text below it both come back
+# as prose a reader sees. Measured through POST /markdown for all three tags;
+# the <script> one is rowed in the suite. group(1) is the tag, so the closer
+# has to be that same tag.
 HTML_OPEN = re.compile(r"^ {0,3}<(pre|code)(?:[\s>]|$)", re.I)
 # A branch name carries the id with no marker, so the alphabet has to be
 # spelled out: '\S+' would swallow the rest of 'fix/gqlc-w4al-body-edits'.
@@ -119,9 +129,16 @@ ISSUE_N = re.compile(r"/issues/(\d+)$")
 HASH_N = re.compile(r"#(\d+)")
 
 
-def refuse(headline, *detail):
+def refuse(headline, *detail) -> NoReturn:
     """Print a refusal and exit non-zero. Detail lines are indented under the
-    headline so a CI log shows one message rather than several."""
+    headline so a CI log shows one message rather than several.
+
+    Annotated NoReturn because callers rely on it: several 'refuse(...)'
+    calls below are followed by code that would be reading an unbound name
+    or a None if control came back. An inline sys.exit carries that for a
+    type checker, a call behind it does not. Without the annotation pyright
+    1.1.411 reports ten diagnostics on this file; seven of them are the
+    annotation's, and the other three the 'marker_n = None' in main()."""
     print(f"ERROR: {headline}")
     for line in detail:
         print(f"       {line}")
@@ -196,30 +213,46 @@ def prose_only(pr_body):
     character, at least as long as the one that opened it, with nothing but
     whitespace after it; a backtick fence whose info string carries a
     backtick opens nothing. Put the toggle back in place of this function
-    and the suite fails 17 rows -- 15 bodies whose marker it honours though
+    and the suite fails 26 rows -- 24 bodies whose marker it honours though
     GitHub renders it inside <pre><code> or not at all, and 2 it blanks that
-    GitHub renders as prose. Among the 12 is the ordinary idiom for showing
-    a fence, which is to nest it in a longer one; showing this marker is
-    what this file is about, so that is the realistic body rather than the
-    exotic one. An unclosed fence, comment or HTML block swallows the rest.
+    GitHub renders as prose. Counted at this commit, over the suite as it
+    stands; a row added to its visibility section can move it either way.
+    Among the 24 is the ordinary idiom
+    for showing a fence, which is to nest it in a longer one; showing this
+    marker is what this file is about, so that is the realistic body rather
+    than the exotic one. An unclosed fence, comment or HTML block swallows
+    the rest.
 
-    Not a markdown parser, and where it diverges it blanks rather than
-    keeps: a fence indented one to three spaces into a list item is blanked
-    here although GitHub renders a column-zero line below it as prose. Over-
-    blanking costs a refusal the author resolves by moving the line out from
-    under the block; under-blanking is this gate annotating a check run to
-    say an issue stays open, over a body in which no reader can see it said.
+    Not a markdown parser. Three measured divergences blank rather than
+    keep: a fence and a <pre> each indented one to three spaces into a list
+    item, and a <code> opened against a paragraph it cannot interrupt -- all
+    three render as something a reader sees and are blanked here. (A
+    fourth row in that direction, a marker sharing a block's closing line,
+    is the marker
+    pattern's line anchor rather than this function; it is rowed where it
+    says so.) That is the cheap direction: it costs a refusal the author
+    resolves by moving the line out from under the block, where the other
+    direction is this gate annotating a check run to say an issue stays
+    open, over a body in which no reader can see it said.
 
-    The blanked regions are the ones a marker was measured to survive
-    invisibly in, not every construct that renders as code. A marker inside
-    an inline code span -- backticks that open on one line and close on
-    another -- still reaches the marker pattern, because a code span is an
-    inline construct and this reads lines. That one is rowed rather than
-    fixed: GitHub renders it as visible monospace text, so it is the
-    marker's spelling shown to the reader, not hidden from them.
+    One measured divergence goes the other way and is not fixed here. A
+    marker on its own line inside an unterminated HTML attribute --
+    '<a href="', the line, '">z</a>' -- renders as nothing at all and still
+    reaches the marker pattern, because attribute values are inline syntax
+    and this reads lines. Filed as bd gqlc-ncb8 and rowed in the suite.
+
+    Two more reach the pattern over bodies GitHub does render, so they are
+    rowed rather than fixed: an inline code span, which GitHub shows as
+    visible monospace, and a <details> block, which GitHub collapses rather
+    than hides. All six are rows in the suite's visibility section.
     """
     out = []
-    # None | "comment" | ("fence", char, run length) | ("html", tag name)
+    # None | ("comment", enclosing) | ("fence", char, run length)
+    #      | ("html", tag name)
+    # A comment carries the state it interrupted. One opened inside a raw
+    # <pre>/<code> block ends at its own '-->' and leaves that block open, so
+    # a comment state that dropped the enclosing tuple exited the block early
+    # and put the lines below the comment back into prose.
     state = None
     for line in pr_body.split("\n"):
         if state is None:
@@ -230,7 +263,7 @@ def prose_only(pr_body):
                 continue
             cut = comment_opens_at(line)
             if cut is not None:
-                state = "comment"
+                state = ("comment", None)
                 out.append(line[:cut])
                 continue
             m = HTML_OPEN.match(line)
@@ -246,12 +279,22 @@ def prose_only(pr_body):
             continue
 
         out.append("")
-        if state == "comment":
+        if state[0] == "comment":
             # The whole closing line goes, including anything after the
             # '-->': that line is part of the comment's block, and a marker
-            # cannot be at its first character anyway.
-            if "-->" in line:
-                state = None
+            # cannot be at its first character anyway. What resumes is
+            # whatever the comment interrupted -- unless the rest of that
+            # line carries the enclosing block's own closing tag, which
+            # GitHub does close the block on (measured, rowed).
+            end = line.find("-->")
+            if end >= 0:
+                enclosing = state[1]
+                if (
+                    enclosing is not None
+                    and f"</{enclosing[1]}" in line[end + 3:].lower()
+                ):
+                    enclosing = None
+                state = enclosing
         elif state[0] == "html":
             # A comment opened inside a raw HTML block is live, unlike one
             # inside a fence, where GitHub escapes it: the block is passed
@@ -261,7 +304,7 @@ def prose_only(pr_body):
             # blank line and a marker renders as an empty <pre> and nothing
             # else, so the comment is checked before the closing tag.
             if comment_opens_at(line) is not None:
-                state = "comment"
+                state = ("comment", state)
             elif f"</{state[1]}" in line.lower():
                 state = None
         else:
@@ -372,6 +415,10 @@ def main():
     if not bead_id:
         sys.exit(0)  # No bead on this PR -> pass
 
+    # Only meaningful when refs is not None, and only read under that same
+    # guard; bound here anyway so the two guards do not have to be correlated
+    # to see that nothing reads it unbound.
+    marker_n = None
     if refs is not None:
         in_branch = BEAD_IN_BRANCH.search(branch)
         if in_branch and in_branch.group(1).lower() != bead_id.lower():

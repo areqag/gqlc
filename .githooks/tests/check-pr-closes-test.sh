@@ -296,10 +296,12 @@ expect_green_saying "an opt-out passes and says which issue stays open" \
     "$EXPORT" "$(body 'Refs: gqlc-mirrored #617 (reopens it)')" "some/branch" \
     "issue #617 stays open at merge"
 
-# The pass has to be visible on the check run, not only in its log. Four
-# other rows above pass without resolving anything — no bead named, no
-# mirror, an epic, a bead the export does not carry — and none of them says
-# so anywhere GitHub renders. This is the one the gate reports as a warning,
+# The pass has to be visible on the check run, not only in its log. Seven
+# other rows above pass without resolving anything, in four shapes — no bead
+# named (2 rows), no mirror (2), an epic (1), a bead the export does not
+# carry (2) — and none of them says so anywhere GitHub renders. Counted at
+# this commit over the rows above this one. This is the one the gate reports
+# as a warning,
 # and GitHub renders a ::warning:: line as an annotation against the run.
 expect_green_saying "an honoured opt-out is annotated, not just logged" \
     "$EXPORT" "$(body 'Refs: gqlc-mirrored #617')" "some/branch" \
@@ -413,9 +415,13 @@ expect_red "an opt-out naming a bead the branch does not is refused" \
 
 # The redirect refusal above needs a bead to compare against, so it is scoped
 # to branches that carry an id. A Bead: line covers the same ground by a
-# different route -- it outranks the marker, so a lifted one is never read and
-# the demand for the Bead: line's own bead stands ("a Refs for another bead
-# does not excuse the Bead line", at the foot of this file).
+# different route -- it outranks the marker for the purpose of deciding which
+# bead the PR is about, so a lifted one buys nothing and the demand for the
+# Bead: line's own bead stands ("a Refs for another bead does not excuse the
+# Bead line", at the foot of this file). It is still read: a lifted marker
+# whose id is malformed is refused on its own account, ahead of that
+# precedence ("a malformed Refs under a Bead line is still refused", also at
+# the foot).
 # When neither names a bead the marker names it, and a marker lifted verbatim
 # from another PR is taken. That is not a bypass -- with no bead named there was no Closes to
 # demand (gqlc-0pb8), and the pass only announces that an unrelated issue
@@ -465,17 +471,28 @@ Refs: gqlc-mirrored #617")" "some/branch" \
 
 # The three rows above were once the whole of it, over a fence model that was
 # a toggle: any ``` or ~~~ line flipped the state, which is not how a fence
-# closes. Every body in this section was put to GitHub's own renderer
+# closes.
+#
+# Counted at this commit: this section holds 44 rows, the three above
+# included. The last three are about GH_CLOSES and Bead: precedence rather
+# than about whether the marker is visible, so 41 are the sweep — 28 red and
+# 13 green. Every body in those 41 was put to GitHub's own renderer
 # (POST /markdown, mode gfm, a read-only call) and the row's colour reports
-# what came back — red where GitHub puts the marker inside <pre><code> or
-# drops it from the output entirely, green where GitHub renders it as prose.
-# 22 bodies, and one row is red over a body GitHub renders: the declared
-# divergence, last in this section. Put the toggle back in place of
-# prose_only and 14 rows fail — 12 red ones that pass, honouring a marker no
-# reader can see, and 2 green ones that lose their annotation. Nesting a
-# fence in a longer one is not an exotic spelling: it is the ordinary way to
-# show a fence, and showing this marker is what the beads queued against this
-# file are for.
+# what came back: red where GitHub puts the marker inside <pre><code> or
+# drops it from the output entirely, green where GitHub renders it. Five
+# rows are the exceptions and each says so where it stands — four red over a
+# body GitHub renders the marker in (three of them prose_only()'s doing, the
+# fourth the marker pattern's line anchor), and one green over a body GitHub
+# renders nothing of.
+#
+# Put the toggle back in place of prose_only (commit 4446b7fc's
+# outside_fences, verbatim) and 26 rows fail — 24 red ones that pass,
+# honouring a marker no reader can see, and 2 green ones that lose their
+# annotation. Every number in this paragraph was measured at this commit
+# rather than derived from a rule, so a row added below can move any of
+# them. Nesting a fence in a longer one is not an exotic spelling: it is the
+# ordinary way to show a fence, and showing this marker is what the beads
+# queued against this file are for.
 expect_red "a fence nested in a longer one does not close it" \
     "$EXPORT" "$(body "${FENCE4}
 ${FENCE3}
@@ -595,8 +612,10 @@ Refs: gqlc-mirrored #617')" "some/branch" \
 # The third carrier. <pre> and <code> are markdown's raw-HTML spellings of a
 # code block and GitHub renders them as one. <script>, <style> and <textarea>
 # are the tags markdown groups with <pre>, and are deliberately left alone:
-# GitHub's sanitiser drops the tag and keeps the text, so the marker below is
-# visible to a reader and is honoured. Blanking it would cost a refusal for
+# GitHub's sanitiser escapes the tag rather than honouring it, so
+# '&lt;script&gt;' and the marker both come back as text a reader sees.
+# Measured through POST /markdown for all three tags; the <script> one is the
+# row below. The marker is honoured, and blanking it would cost a refusal for
 # no gain.
 expect_red "a Refs: inside a <pre> block does not opt out" \
     "$EXPORT" "$(body 'Bead-free body.
@@ -675,6 +694,94 @@ expect_red "a comment opened inside a <pre> block hides the marker below it" \
 Refs: gqlc-mirrored #617')" "fix/gqlc-mirrored-thing" \
     "missing 'Closes #617'"
 
+# The same crossing with the comment closing again, which is where the state
+# machine used to lose the block: 'comment' replaced the html state rather
+# than interrupting it, so the '-->' resumed at prose and the rest of the
+# <pre> was read as a live body. GitHub keeps the block open across the
+# comment — every one of the seven bodies below renders the marker inside
+# <pre> or <code>, measured through POST /markdown — so all seven are red.
+expect_red "a closed comment inside a <pre> does not end the block" \
+    "$EXPORT" "$(body '<pre>
+<!--
+-->
+Refs: gqlc-mirrored #617
+</pre>')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+expect_red "a multi-line comment inside a <pre> does not end the block" \
+    "$EXPORT" "$(body '<pre>
+<!--
+a note nobody sees
+-->
+Refs: gqlc-mirrored #617
+</pre>')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+expect_red "a closed comment inside a <code> does not end the block" \
+    "$EXPORT" "$(body '<code>
+<!--
+-->
+Refs: gqlc-mirrored #617
+</code>')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+# The opener carries attributes in the shape a reader would actually paste.
+expect_red "a closed comment inside a <pre class=...> does not end the block" \
+    "$EXPORT" "$(body '<pre class="x">
+<!--
+-->
+Refs: gqlc-mirrored #617
+</pre>')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+expect_red "a closed comment inside a <pre> holds over a CRLF body" \
+    "$EXPORT" "$(body "$(printf '%s\r\n%s\r\n%s\r\n%s\r\n%s' \
+        '<pre>' '<!--' '-->' 'Refs: gqlc-mirrored #617' '</pre>')")" \
+    "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+# The block never closes, so what the comment resumes into runs to the end of
+# the body. GitHub renders this one as <pre>Refs: gqlc-mirrored #617</pre> too.
+expect_red "a <pre> left open past a comment swallows the rest" \
+    "$EXPORT" "$(body '<pre>
+<!--
+-->
+Refs: gqlc-mirrored #617')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+# Nested tags: the state resumed at the '-->' is the inner <code>, and the
+# marker is above both closers, so it is blanked either way.
+expect_red "a closed comment inside a nested <pre><code> does not end it" \
+    "$EXPORT" "$(body '<pre>
+<code>
+<!--
+-->
+Refs: gqlc-mirrored #617
+</code>
+</pre>')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+# The other side of the same restore, so it is not "blank everything below a
+# comment in a block". Both bodies below put the marker back in prose and
+# GitHub agrees: it renders each as an empty <pre> followed by
+# <p>Refs: gqlc-mirrored #617</p>. The first is the case the closing line
+# has to be read past the '-->' for — the block's own closer shares it.
+expect_green_saying "a block closed on the comment's own line is closed" \
+    "$EXPORT" "$(body '<pre>
+<!--
+--> </pre>
+Refs: gqlc-mirrored #617')" "some/branch" \
+    "issue #617 stays open at merge"
+
+expect_green_saying "a block closed below a closed comment is closed" \
+    "$EXPORT" "$(body '<pre>
+<!--
+-->
+</pre>
+
+Refs: gqlc-mirrored #617')" "some/branch" \
+    "issue #617 stays open at merge"
+
 expect_green_saying "a fence line inside a comment opens no fence" \
     "$EXPORT" "$(body "<!--
 ${FENCE3}
@@ -699,16 +806,95 @@ Refs: gqlc-mirrored #617")" "some/branch" \
 # this gate annotating a check run over a declaration nobody can see. Swept
 # 85 body shapes through GitHub's renderer and this checker together -- 58
 # of them, then 35 more picked to break the result the first 58 gave, 8
-# shared: seven disagreements, this one among them. None goes the other way
-# except the code span rowed above, which GitHub renders as visible
-# monospace rather than hiding. 85 shapes is not every shape, so what the
-# sweep bounds is the direction, not the count.
+# shared: seven disagreements, this one among them. Within that sample the
+# only marker honoured against GitHub's rendering is the code span rowed
+# above, which GitHub shows as visible monospace.
+#
+# What that sweep bounds is the direction over the shapes it swept, and
+# nothing wider. Outside it the other direction exists: the row below headed
+# "a marker inside an open HTML attribute is honoured" puts the marker on its
+# own line inside an unterminated attribute value, where GitHub renders
+# nothing of it and this honours it anyway. So neither the direction nor the
+# count carries past the sample; 85 shapes is not every shape.
 expect_red "a fence indented into a list item blanks the marker below it" \
     "$EXPORT" "$(body "- item
 
   ${FENCE3}
 Refs: gqlc-mirrored #617
   ${FENCE3}")" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+# The fail-open the sentence above declines to bound, pinned as it stands
+# rather than fixed (bd gqlc-ncb8). An open tag whose attribute value never
+# terminates swallows the lines below it as part of that value: GitHub
+# renders the body below as '<p>z</p>' and the marker appears nowhere in the
+# output, yet prose_only() -- which reads lines and knows nothing of
+# attributes -- leaves it live and the gate annotates the run. Closing it
+# needs inline-HTML parsing, which is a different function from the
+# line-oriented block model here.
+expect_green_saying "a marker inside an open HTML attribute is honoured" \
+    "$EXPORT" "$(body 'Bead-free body.
+
+<a href="
+Refs: gqlc-mirrored #617
+">z</a>')" "some/branch" \
+    "issue #617 stays open at merge"
+
+# The rest of what this does not blank, rowed rather than left to be found.
+# <details> is collapsed, not hidden: GitHub renders the marker inside one as
+# a <p> the reader opens the disclosure to see, so it is honoured.
+expect_green_saying "a marker inside a <details> block is a declaration" \
+    "$EXPORT" "$(body 'Bead-free body.
+
+<details>
+<summary>s</summary>
+
+Refs: gqlc-mirrored #617
+
+</details>')" "some/branch" \
+    "issue #617 stays open at merge"
+
+# Three more shapes where this refuses and GitHub does not hide, all found
+# after the 85-shape sweep and all the fail-closed direction: the author
+# moves the line and the refusal names what to write. Two are prose_only()'s
+# blanking; the third, at the foot of the three, is the marker pattern's
+# line anchor and says so.
+#
+# <code> is not one of the tags that can interrupt a paragraph, so with no
+# blank line above it GitHub keeps it inline and renders the marker as
+# visible monospace inside the <p> -- the same class as the code span rowed
+# above, which is honoured. This one is blanked, because HTML_OPEN reads the
+# line and not the paragraph it is in.
+expect_red "a <code> opened against a paragraph blanks the marker" \
+    "$EXPORT" "$(body 'some text
+<code>
+Refs: gqlc-mirrored #617
+</code>')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+# The list-item divergence above, in its raw-HTML spelling: a <pre> indented
+# two spaces belongs to the list item, so GitHub leaves a column-zero line
+# below it as prose and this blanks it.
+expect_red "a <pre> indented into a list item blanks the marker below it" \
+    "$EXPORT" "$(body '- item
+
+  <pre>
+Refs: gqlc-mirrored #617
+  </pre>')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+# GitHub renders the body below as an empty <pre> followed by the marker as
+# visible text, and this refuses it — but not because of prose_only(): with
+# no blanking at all the marker is still not at its line's first character,
+# so it is the anchor that costs this one and the blanking never gets a say.
+# Rowed because the divergence is real whatever causes it, and named because
+# reading it as a blanking result would put the count in the paragraph above
+# against the wrong rule. Two rules hold it and either alone suffices, so no
+# single-point mutation turns it red; it takes dropping the anchor and the
+# raw-HTML blanking together, which is what it was measured under.
+expect_red "a marker sharing the closing tag's line is refused by the anchor" \
+    "$EXPORT" "$(body '<pre>
+</pre>Refs: gqlc-mirrored #617')" "fix/gqlc-mirrored-thing" \
     "missing 'Closes #617'"
 
 # The inverse asymmetry, in the same function. Check 4 reads the raw body, so
@@ -733,6 +919,19 @@ expect_red "a Refs for another bead does not excuse the Bead line" \
 
 Refs: gqlc-sub.12 #712')" "some/branch" \
     "missing 'Closes #617'"
+
+# Outranking is not ignoring: the well-formedness check runs over both
+# declarations before either is used, so a malformed marker under a Bead:
+# line is refused on its own account rather than dropped. That is the same
+# fail-closed direction as the row above and it is what stops "the Bead: line
+# wins" from being read as "the marker is inert once one is present".
+expect_red "a malformed Refs under a Bead line is still refused" \
+    "$EXPORT" "$(body "Bead: gqlc-mirrored
+
+Refs: ${BT}gqlc-sub.12${BT} #712
+
+Closes #617")" "some/branch" \
+    "'Refs:' declaration reads '${BT}gqlc-sub.12${BT}'"
 
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
