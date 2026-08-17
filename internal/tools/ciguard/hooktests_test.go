@@ -204,8 +204,11 @@ func suitePathsIn(recipe string) []string {
 	var out []string
 	for _, line := range strings.Split(recipe, "\n") {
 		for _, f := range strings.Fields(liverecipes.StripComment(line)) {
-			if strings.Contains(f, hookTestsDir) {
-				out = append(out, f[strings.Index(f, hookTestsDir):])
+			// Cut from the directory rather than taking the whole field: a
+			// field may carry a `-` or `@` prefix, and the path is what the
+			// stubs below have to be written to.
+			if at := strings.Index(f, hookTestsDir); at >= 0 {
+				out = append(out, f[at:])
 			}
 		}
 	}
