@@ -1333,6 +1333,9 @@ func gradeParams(list string) (name string, exempt, gradable bool) {
 // and it terminates the list (ADR 0029 decision 10). The opening backtick
 // must not itself follow a backtick, which keeps a fenced block's ```
 // delimiter from anchoring a span that would run to the closing fence.
+// That rejects the delimiter, not the block: a code span written inside a
+// fenced block is read like any other, so a drifted list printed there as
+// an example grades rather than being skipped for being an example.
 //
 // A parameter list stated in prose with no code span around it is not
 // read here (gqlc-e143).
@@ -1623,15 +1626,15 @@ func paramName(param string) (name string, gradable bool) {
 var listPlaceholderRe = regexp.MustCompile(
 	`^` + regexp.QuoteMeta(strings.TrimSuffix(paramListPlaceholder, ">")) + `(-\d+)?>$`)
 
-// anchorPattern compiles one anchor literal into a matcher that reads
-// whitespace the way Go's tokeniser does — required between two
-// identifier characters, optional at every other boundary. gofmt wraps a
-// long parameter list after the open paren, which puts `ctx` on its own
-// line; prose reflows the same way, and a second space is invisible in
-// rendered markdown.
+// anchorPattern compiles one anchor literal into a matcher whose
+// whitespace is required between two identifier characters and optional
+// at every other boundary, so that a wrapped or reflowed parameter list
+// still matches.
 //
-// The documents themselves are never renormalised, so byte offsets stay
-// usable and a failure can name a line (ADR 0029 decision 8).
+// The normalisation belongs in the pattern and not in the document:
+// collapsing a document's whitespace moves every byte in it, and these
+// failures are only useful while they can name a line (ADR 0029
+// decision 8).
 func anchorPattern(anchor string) *regexp.Regexp {
 	var b strings.Builder
 	for i := 0; i < len(anchor); i++ {
