@@ -1577,10 +1577,14 @@ fi
 # --- the summary line must report the outcome, not the intent ----------------
 # .claude/settings.json keeps only the last stderr line, so it has to carry the
 # shape of the run rather than whatever notice happened to print last.
+# GH #14 carries an edit time although the bead beside it is held before the
+# edit-time gate is reached: it is what makes the prefix rule the only thing
+# holding that bead, so disarming the prefix rule moves the counts here rather
+# than dropping the bead into a second hold that keeps them the same.
 
 HELDBACK="{\"id\":\"b-amend2\",\"status\":\"open\",\"external_ref\":\"$ISSUE/14\",\"description\":\"keep\nbd only\"$BD_EARLY}"
 GH_SUMMARY="[{\"number\":8,\"state\":\"OPEN\",\"body\":\"same\nadded on GH\"$GH_LATE},
-             {\"number\":14,\"state\":\"OPEN\",\"body\":\"keep\"},
+             {\"number\":14,\"state\":\"OPEN\",\"body\":\"keep\"$GH_LATE},
              {\"number\":99,\"state\":\"OPEN\",\"body\":\"orphan\"}]"
 
 run_sync pull "[$ELIGIBLE,$HELDBACK]" "$GH_SUMMARY"
