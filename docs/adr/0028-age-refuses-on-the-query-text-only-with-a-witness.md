@@ -269,8 +269,9 @@ name twice keeps its length and still loses a recipe from the
 sweep, which is review mutation D1 against the round-5 pin. The two lists close
 that direction in different places. The construct texts are counted as a *set*,
 so four rows naming three shapes fails on the pin itself
-(`require.Len(t, shapes, 4)` over a map built from the texts; measured as
-mutation CDUP). `ageLiveRecipes` is counted as a list, so its duplicate is
+(a `require.Len` over a map built from the texts, which a duplicate shortens;
+measured as mutation CDUP). `ageLiveRecipes` is counted as a list, so its
+duplicate is
 caught one layer down, by `recipeBodies` — the reader every justfile consumer is
 funnelled through by `readRecipes`, so D1 now reddens `TestEveryDialectGapCarriesItsWitness`
 and `TestTheRecipesThisReaderParsesStayInsideTheShellItModels` together, and the
@@ -297,9 +298,13 @@ list guard, invariant to how many names the list holds, and their agreeing with
 the name count today is a coincidence rather than a link. The round-5 note above
 records the same defect in the same paragraph that had been written to condemn
 it, which is why the sweep for this one went wider than the pin's own sentences.
-What remains, here and in `dialect_test.go`, is "two names, one distinct": that
-describes mutation D1's arithmetic, a fact about an experiment that was run, and
-is not a restatement of the list's cardinality.
+What remains, here and in `dialect_test.go`, is the arithmetic of the mutations
+themselves — D1's "two names, one distinct", and GROW's before-and-after three
+sentences above. Those are facts about experiments that were run, not
+restatements of the list's cardinality, and they do not go false when the list
+grows. That sweep was for the recipe cardinal and was not run over the construct
+list's, which is why the paragraph above quoted the shell-shape pin complete with
+its literal until round 8; the same rule applies to it and the literal is gone.
 
 That sweep also turned up a claim that was not rotting but simply false, made
 here and in two `dialect_test.go` comments: that **both** AGE recipes carry a

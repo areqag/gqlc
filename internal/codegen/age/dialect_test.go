@@ -1321,7 +1321,7 @@ func TestRecipeReaderComplainsOnEachBrokenRecipe(t *testing.T) {
 			// list cannot see: two names, one distinct. The map comes back
 			// one entry short, witnessGaps complains once per entry, and
 			// the recipe that lost its name is checked by nobody while
-			// require.Len(ageLiveRecipes, 2) goes on passing.
+			// the length pin over ageLiveRecipes goes on passing.
 			name:  "a recipe named twice is one recipe, not two",
 			src:   sound,
 			names: []string{recipe, recipe},
