@@ -411,7 +411,7 @@ table, now fully pinned):
   fields, Params-struct fields, `:one` / `:many` bare returns.
 - **Encode widens losslessly** — a `float32` value passed as a
   method parameter widens to the driver's `float64` at the
-  parameter-binding map site: `map[string]any{"x": float64(x)}`.
+  parameter-binding map site: `map[string]any{"x": float64(arg)}`.
   No range check needed; `float32` fits in `float64` by definition.
 - **Decode narrows by plain conversion** — the row-assembly reads
   `neo4j.GetRecordValue[float64](record, "x")` and narrows via
@@ -998,7 +998,7 @@ The Params-struct field for a `$x :: FLOAT32` parameter is
 the emitted method body:
 
 ```go
-records, err := q.db.run(ctx, methodQueryText, map[string]any{"x": float64(x)}, neo4j.AccessModeRead)
+records, err := q.db.run(ctx, methodQueryText, map[string]any{"x": float64(arg)}, neo4j.AccessModeRead)
 ```
 
 - **Widening site is the emitted method body**, not a wrapper. The
@@ -1009,12 +1009,16 @@ records, err := q.db.run(ctx, methodQueryText, map[string]any{"x": float64(x)}, 
   parameter bindings), every other type unchanged. Same site
   covers the single-parameter method form (`arg` directly) and the
   Params-struct multi-parameter form (`arg.X` accessed).
-- **Nullable FLOAT32 parameter** — `*float32` field, nil pointer
-  emits Cypher `null` (unchanged from C1's uniform nullable
-  encoding), non-nil pointer widens the pointed-to value:
-  `map[string]any{"x": float64(*x)}`. The nil-check runs at the
-  parameter-binding site; nil-map entry (`nil` value in the
-  `map[string]any`) is the driver's Cypher `null` binding.
+- **Nullable FLOAT32 parameter** — `*float32` field, bound as the
+  pointer itself: `map[string]any{"x": arg}`. C1's uniform nullable
+  encoding wins over the widen, and there is no emitted nil-check and
+  no dereference. `paramBindExpr` takes the nullable arm before it
+  ever consults `driverCarrier`, so a nullable parameter of any width
+  passes through unconverted; the driver marshals a nil `*float32` to
+  Cypher `null` and a non-nil one to the `float64` it widens to on
+  the wire. An emitted `float64(*arg)` — which is what this bullet
+  used to specify — would panic on exactly the nil the nullability is
+  there to carry.
 - **Decode narrow site is the row-assembly** (§5.5). Symmetric
   with encode: `neo4j.GetRecordValue[float64]` + `float32(value)`
   narrow. Both sites use plain Go conversion; no range check

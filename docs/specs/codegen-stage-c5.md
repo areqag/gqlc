@@ -435,7 +435,7 @@ type PersonActionRow struct {
     P Person
     R PersonActionR
 }
-func (q *Queries) PersonAction(ctx context.Context, id int64) (PersonActionRow, error)
+func (q *Queries) PersonAction(ctx context.Context, arg int64) (PersonActionRow, error)
 ```
 
 - **Interface naming: `<QueryName><RowFieldName>`.** The naming
@@ -993,8 +993,8 @@ for j, elem := range list {
 // GetAction executes the get-action query.
 //
 //   MATCH (:Person)-[r:AUTHORED|LIKES]->(:Post) WHERE r.since > $since RETURN r
-func (q *Queries) GetAction(ctx context.Context, since int64) (GetActionR, error) {
-    records, err := q.db.run(ctx, getActionQueryText, map[string]any{"since": since}, neo4j.AccessModeRead)
+func (q *Queries) GetAction(ctx context.Context, arg int64) (GetActionR, error) {
+    records, err := q.db.run(ctx, getActionQueryText, map[string]any{"since": arg}, neo4j.AccessModeRead)
     if err != nil {
         return nil, err
     }
