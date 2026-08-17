@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -134,6 +135,43 @@ func TestGoDirsStopsAtANestedModuleAndAtGoListsOwnExclusions(t *testing.T) {
 	}
 	if !slices.Equal(got, []string{root}) {
 		t.Fatalf("goDirs = %v, want only %q", got, root)
+	}
+}
+
+func TestGoDirsSkipsFilesGoListWillNotMatchEither(t *testing.T) {
+	// The exclusions are per-FILE as well as per-directory, and for the same
+	// reason: `go list ./...` ignores a Go file whose name starts with `_` or
+	// `.`, so a directory holding only those is one go list does not match.
+	// Letting it into this walk makes `just vuln`'s directory-coverage
+	// postcondition report it as unlisted — a gate red over nothing, which is
+	// how a gate gets switched off.
+	root := t.TempDir()
+	write(t, root, "a.go", "package p\n")
+	write(t, root, "scratch/_work.go", "package scratch\n")
+	write(t, root, "scratch/.draft.go", "package scratch\n")
+
+	got, err := goDirs(".", root, nil)
+	if err != nil {
+		t.Fatalf("goDirs: %v", err)
+	}
+	if !slices.Equal(got, []string{root}) {
+		t.Fatalf("goDirs = %v, want only %q: a directory whose only Go files are ones go list "+
+			"ignores is not a directory go list matched", got, root)
+	}
+}
+
+func TestGradeModuleDirRefusesAnEmptyAnswer(t *testing.T) {
+	if _, err := gradeModuleDir("test/data/codegen", []byte("  \n")); err == nil {
+		t.Fatal("gradeModuleDir accepted an empty answer from a `go list -m` that exited 0, so " +
+			"the walk downstream is rooted at \"\" and fails naming neither the module nor the " +
+			"subprocess that went quiet")
+	}
+	got, err := gradeModuleDir("test/data/codegen", []byte("/x/y\n"))
+	if err != nil {
+		t.Fatalf("gradeModuleDir over a real answer: %v", err)
+	}
+	if got != "/x/y" {
+		t.Fatalf("gradeModuleDir = %q, want %q", got, "/x/y")
 	}
 }
 
@@ -365,6 +403,33 @@ func TestATruncatedDistListMakesPlatformTermsUnplaceableNotTags(t *testing.T) {
 	}
 }
 
+func TestGradePlatformTermsDoesNotTakeHalfALineAsATerm(t *testing.T) {
+	// `go tool dist list` prints goos/goarch and nothing else, so a line with an
+	// empty half is this program misreading the table. Half of it is not taken:
+	// the empty string would become a vocabulary entry no build constraint can
+	// name, and `darwin` from a `darwin/` line would be a GOOS asserted on the
+	// strength of a line the toolchain never emits.
+	//
+	// What that costs is bounded and already pinned: the narrowed vocabulary
+	// makes the terms it lost unplaceable, not custom tags — see
+	// TestATruncatedDistListMakesPlatformTermsUnplaceableNotTags.
+	got, err := gradePlatformTerms([]string{"linux/amd64", "windows/amd64", "darwin/", "/arm64", "js", ""})
+	if err != nil {
+		t.Fatalf("gradePlatformTerms: %v", err)
+	}
+	for _, absent := range []string{"", "darwin", "arm64", "js"} {
+		if _, ok := got[absent]; ok {
+			t.Fatalf("gradePlatformTerms took %q from a line that is not goos/goarch, so a "+
+				"misread table becomes a vocabulary rather than a refusal", absent)
+		}
+	}
+	for _, present := range []string{"linux", "windows", "amd64"} {
+		if _, ok := got[present]; !ok {
+			t.Fatalf("gradePlatformTerms dropped %q, which came from a well-formed line", present)
+		}
+	}
+}
+
 func TestPlatformTermsIsGradedAgainstAnchorsItMustContain(t *testing.T) {
 	// `go tool dist list` is a subprocess, and a subprocess that prints a short
 	// answer is the failure mode this whole program exists to refuse. The
@@ -478,7 +543,87 @@ func TestModuleTagsPrefersGoBuildOverPlusBuildInOneFile(t *testing.T) {
 	}
 }
 
+func TestModuleTagsIgnoresFilesTheGoCommandNeverBuilds(t *testing.T) {
+	// The per-file exclusion again, on the tag side, where it fails in the
+	// UNSAFE direction: a `_`- or `.`-prefixed file is one the go command never
+	// compiles, so a constraint in it describes no build. Deriving from it puts
+	// a tag into `-tags` on the strength of a file the scan will not load.
+	root := t.TempDir()
+	write(t, root, "go.mod", goMod)
+	write(t, root, "a.go", "//go:build codegen_live\n\npackage p\n")
+	write(t, root, "_old.go", "//go:build legacy_tag\n\npackage p\n")
+	write(t, root, ".draft.go", "//go:build authoritative\n\npackage p\n")
+
+	got, err := moduleTags(t.Context(), root, ".", platforms, declared)
+	if err != nil {
+		t.Fatalf("moduleTags: %v", err)
+	}
+	if !slices.Equal(got, []string{"codegen_live"}) {
+		t.Fatalf("moduleTags = %v, want [codegen_live]: a constraint in a file the go command "+
+			"never builds is not a tag this scan should assert", got)
+	}
+}
+
+func TestFileConstraintStopsAtThePackageClause(t *testing.T) {
+	// Constraints live in the header. Below the package clause a line that
+	// looks like one is prose — this program's own source quotes constraint
+	// spellings in doc comments — and reading it would derive a tag from a line
+	// the compiler never honoured, against which the coverage postconditions
+	// downstream then compare.
+	root := t.TempDir()
+	for _, tc := range []struct{ name, body string }{
+		{"go_build_below_the_clause", "package p\n\n// The spelling is:\n//go:build tagblind\n"},
+		{"plus_build_below_the_clause", "package p\n\n// The old spelling is:\n// +build legacy_tag\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			write(t, root, tc.name+".go", tc.body)
+			got, err := fileConstraint(filepath.Join(root, tc.name+".go"))
+			if err != nil {
+				t.Fatalf("fileConstraint: %v", err)
+			}
+			if got != "" {
+				t.Fatalf("fileConstraint = %q, want \"\": a constraint-shaped line in the body "+
+					"is not a constraint, and the go command does not read it as one", got)
+			}
+		})
+	}
+}
+
 // --- the command surface -----------------------------------------------------
+
+// errWriter fails from its nth write on, so a set that came back short can be
+// observed as one.
+type errWriter struct{ writes, failFrom int }
+
+func (w *errWriter) Write(p []byte) (int, error) {
+	w.writes++
+	if w.writes >= w.failFrom {
+		return 0, errors.New("no space left on device")
+	}
+	return len(p), nil
+}
+
+func TestWriteLinesReportsAWriteThatStoppedPartWayThrough(t *testing.T) {
+	// Every caller reads this program's stdout as a set, so a write that failed
+	// half way is a set that came back short: the caller compares against fewer
+	// directories, or scans under fewer tags, and nothing says so. That is the
+	// defect this program exists to refuse, arriving through the door it leaves
+	// by.
+	if err := writeLines(&errWriter{failFrom: 2}, []string{"a", "b", "c"}); err == nil {
+		t.Fatal("writeLines returned no error after a failed write, so a truncated set reaches " +
+			"the caller looking exactly like a complete one")
+	}
+	// Through run(), which is the surface the shell recipes actually read.
+	root := t.TempDir()
+	write(t, root, "go.mod", goMod)
+	write(t, root, "a.go", "package p\n")
+	write(t, root, "nested/go.mod", goMod)
+	write(t, root, "nested/b.go", "package q\n")
+	if err := run(t.Context(), []string{"-root", root, "modules"}, &errWriter{failFrom: 1}); err == nil {
+		t.Fatal("run modules returned no error although stdout refused every write, so `scope " +
+			"modules` would print nothing, exit 0, and the recipe reading it would sweep nothing")
+	}
+}
 
 func TestRunModulesPrintsTheDiscoveredSet(t *testing.T) {
 	root := t.TempDir()

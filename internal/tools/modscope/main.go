@@ -214,9 +214,21 @@ func moduleDir(ctx context.Context, dir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("go list -m in %s: %w: %s", dir, err, strings.TrimSpace(stderr.String()))
 	}
+	return gradeModuleDir(dir, out)
+}
+
+// gradeModuleDir reads `go list -m -f {{.Dir}}`'s answer, split from the exec
+// call so the refusal below has a caller a test can be.
+//
+// An empty answer from a command that exited 0 is the empty measurement one
+// level down. The walk downstream would be rooted at "", and the error that
+// eventually surfaces names neither the module nor the subprocess that went
+// quiet.
+func gradeModuleDir(dir string, out []byte) (string, error) {
 	got := strings.TrimSpace(string(out))
 	if got == "" {
-		return "", fmt.Errorf("go list -m in %s printed no directory", dir)
+		return "", fmt.Errorf("go list -m in %s exited 0 and printed no directory, so the walk "+
+			"of that module would be rooted nowhere", dir)
 	}
 	return got, nil
 }
