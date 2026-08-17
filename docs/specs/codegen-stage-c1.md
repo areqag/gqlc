@@ -542,8 +542,11 @@ and a func. Neither the method-name axis nor the parameter-name axis
 sees it — both colliding names are generator-owned, and the capture
 guards police author-chosen identifiers against generator-owned ones.
 Generation exits 0 and `go build` reports the redeclaration. That is
-`gqlc-igs4`, which owns the disambiguation; do not re-derive its
-argument here. Until it lands, the compile fence is the only thing
+`gqlc-igs4`, which owns the disambiguation. The counterexample above
+belongs here, because it is what refutes this section's old denial;
+the disambiguation does not, because restating it would leave two
+copies of an argument only one bead keeps current. Until it lands,
+the compile fence is the only thing
 standing between this axis and a shipped non-compiling package, and
 it is not reached by `gqlc generate` — only by the golden harness.
 
