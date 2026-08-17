@@ -87,18 +87,24 @@ HOOKS_DIRNAME = ".githooks"
 # commit-msg and post-merge (not pre-commit); `push` fires pre-push. In the
 # same fixture `revert`, `cherry-pick` (with and without -e), `rebase` and `am`
 # fired none of the four. merge/pull are refused rather than warned about
-# because commit-msg is the AI-attribution gate CLAUDE.md relies on, so a merge
-# commit written while drifted is an ungated commit.
-# What a merge or pull fires varies by shape, and the shape is settled by remote
-# state at run time, not by the command text this hook sees. Measured in the
-# same fixture: a fast-forward `merge` or `pull` writes no commit but still
-# fires post-merge, the bd-gh-sync mirror; `merge --squash` writes no commit
-# either and also fires post-merge; `pull --rebase` fires post-merge while the
-# branch is still fast-forwardable and nothing once it has diverged; plain
-# `rebase` and a 3-way `merge --no-commit` fire nothing. `pull` alone therefore
-# spans shapes firing two of the four, one, and none. Gating the subcommand
-# refuses that last group too — the conservative side of a distinction this hook
-# cannot make before the fact.
+# because post-merge runs bd-gh-sync, NOT because of AI attribution: commit-msg
+# does fire on a merge, but .githooks/commit-msg:15-17 exits 0 whenever
+# MERGE_HEAD is set, ahead of both the identity checks and the Co-Authored-By
+# scan, so a merge commit carrying a Claude trailer is accepted rc=0 with the
+# hooks HEALTHY (measured, against a plain-commit control rejected rc=1 in the
+# same repo). What a drifted merge or pull loses is therefore at most
+# post-merge — the stale bd mirror. Pre-existing and out of scope here: bd
+# gqlc-7y7e.
+# What a merge or pull fires varies by shape, and the subcommand this hook keys
+# on does not determine the shape. Measured in the same fixture: a fast-forward
+# `merge` or `pull` writes no commit but still fires post-merge, the bd-gh-sync
+# mirror; `merge --squash` writes no commit either and also fires post-merge;
+# `pull --rebase` fires post-merge while the branch is still fast-forwardable
+# and nothing once it has diverged; plain `rebase` and a 3-way
+# `merge --no-commit` fire nothing. `pull` alone therefore spans shapes firing
+# two of the four, one, and none. Gating the subcommand refuses that last group
+# too — the conservative side of a distinction this hook cannot make before the
+# fact.
 HOOK_GATED = ("commit", "merge", "pull", "push")
 HEREDOC_RE = re.compile(r"(?<!<)<<(-?)\s*([\"']?)(\w+)\2")
 SUBST_RE = re.compile(r"\$\(([^()]*)\)")

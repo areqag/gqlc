@@ -199,22 +199,34 @@ run_drift_case "correct value, live hooks: pull"     silent     "$OK_REPO"     '
 run_drift_case "correct value, live hooks: ls"       silent     "$OK_REPO"     'ls -la'
 run_drift_case "unset: commit refused"               deny-hooks "$UNSET_REPO"  'git commit -m x'
 run_drift_case "unset: push refused"                 deny-hooks "$UNSET_REPO"  'git push'
-# A merge or pull that writes a merge commit fires commit-msg — the
-# AI-attribution gate — so a merge written while drifted is an ungated commit,
-# not just a stale bd mirror. Refused for the same reason commit and push are.
+# A merge or pull is refused because post-merge runs bd-gh-sync, NOT because of
+# AI attribution: commit-msg does fire on a merge, but it exits 0 whenever
+# MERGE_HEAD is set (.githooks/commit-msg:15-17), ahead of both the identity
+# checks and the Co-Authored-By scan, so a merge commit is unscreened whether
+# the hooks are healthy or dead (measured rc=0 with hooksPath correct, against a
+# plain-commit control rejected rc=1). What a drifted merge loses is at most the
+# bd mirror; the commit-msg half is bd gqlc-7y7e, pre-existing and out of scope.
 # Other shapes fire less: `pull --rebase` on the row below fired post-merge
 # while the branch was still fast-forwardable and none of the four once it had
 # diverged. It is refused anyway because HOOK_GATED keys on the subcommand,
-# which is all this hook can see before the fact — the shape is settled by
-# remote state at run time. revert, cherry-pick (with and without -e), rebase
-# and am fired none of the four in the same measurement, so they stay outside
-# HOOK_GATED; the four warn rows below pin that membership boundary.
+# which is all this hook can see before the fact — and the subcommand does not
+# determine the shape. revert, cherry-pick (with and without -e), rebase and am
+# fired none of the four in the same measurement, so they stay outside
+# HOOK_GATED; the rows in this file pin that boundary for the subcommands they
+# name, and only for those.
 run_drift_case "unset: merge refused"                deny-hooks "$UNSET_REPO"  'git merge --no-ff side'
 run_drift_case "unset: pull refused"                 deny-hooks "$UNSET_REPO"  'git pull --rebase'
 run_drift_case "unset: revert only warns"            warn       "$UNSET_REPO"  'git revert --no-edit HEAD'
 run_drift_case "unset: cherry-pick only warns"       warn       "$UNSET_REPO"  'git cherry-pick HEAD'
 run_drift_case "unset: rebase only warns"            warn       "$UNSET_REPO"  'git rebase origin/master'
 run_drift_case "unset: am only warns"                warn       "$UNSET_REPO"  'git am /tmp/x.patch'
+# stash, tag and fetch were measured firing none of the four as well, so they
+# warn like any other command. These rows exist because without them, adding
+# all three to HOOK_GATED turned no row red: membership is pinned only for the
+# subcommands some row names.
+run_drift_case "unset: stash only warns"             warn       "$UNSET_REPO"  'git stash push -u'
+run_drift_case "unset: tag only warns"               warn       "$UNSET_REPO"  'git tag -a v1 -m x'
+run_drift_case "unset: fetch only warns"             warn       "$UNSET_REPO"  'git fetch'
 run_drift_case "unset: innocuous command warns"      warn       "$UNSET_REPO"  'ls -la'
 run_drift_case "wrong path: commit refused"          deny-hooks "$WRONG_REPO"  'git commit -m x'
 run_drift_case "wrong path: push refused"            deny-hooks "$WRONG_REPO"  'git push'
@@ -245,6 +257,14 @@ run_drift_case "master guard wins over drift"        deny-master "$MASTER_DRIFT"
 run_drift_case "-C into drifted repo from healthy"   deny-hooks "$OK_REPO"     "git -C $UNSET_REPO push"
 run_drift_case "-C into healthy repo from drifted"   warn       "$UNSET_REPO"  "git -C $OK_REPO commit -m x"
 
+# ...but the WARN half does not: it keys on the hook's own directory, resolved
+# to that directory's repo root. So a non-gated command aimed at a drifted repo
+# from a healthy cwd is silent, and a drifted cwd warns from a subdirectory as
+# well as from the root. CONTRIBUTING.md documents both.
+mkdir -p "$UNSET_REPO/sub"
+run_drift_case "-C into drifted, non-gated: silent"  silent     "$OK_REPO"     "git -C $UNSET_REPO status"
+run_drift_case "subdir of a drifted repo warns"      warn       "$UNSET_REPO/sub" 'ls -la'
+
 # hooks_drift() strips GIT_* before shelling out, because repo-discovery env
 # redirects `git -C <root> config --get` at whichever repo exported it — a
 # drifted repo would then read a healthy repo's config and fall silent. The
@@ -262,6 +282,13 @@ run_gitdir_case() { # $1=name $2=expected $3=cwd $4=command $5=GIT_DIR
   record "$1" "$2" "$(classify "$out")"
 }
 run_gitdir_case "GIT_DIR cannot mask drift" deny-hooks "$UNSET_REPO" 'git commit -m x' "$OK_REPO/.git"
+# branch_of() carries a second, distinct GIT_* strip for the same reason, which
+# the row above executes but cannot detect: its two repos share a branch name,
+# so branch_of returns a non-protected branch either way. Here GIT_DIR points at
+# a feature-branch repo while the target is on master, so without the strip
+# GIT_DIR beats `git -C` and the master guard reads the feature branch.
+# MEASURED without it: silent, not a downgraded warn.
+run_gitdir_case "GIT_DIR cannot mask the master guard" deny-master "$MASTER_REPO" 'git commit -m x' "$FEATURE_REPO/.git"
 
 # An internal error must not read as a silent allow: this hook exists to refuse
 # when the git hooks are dead, so exiting 0 with no output on its own bug is the
@@ -277,14 +304,15 @@ run_raw_case() { # $1=name $2=expected $3=cwd $4=raw stdin
 run_raw_case "healthy repo, valid stdin: silent"  silent "$OK_REPO" '{"tool_name":"Bash","tool_input":{"command":"ls"}}'
 run_raw_case "internal error warns, not silent"   warn   "$OK_REPO" 'not json at all'
 
-# A total pins suite SIZE, not membership — swapping any row for a different one
+# A total pins suite SIZE, not membership — swapping a row for a different one
 # leaves it green, which is why membership is pinned separately by the mutation
-# battery (dropping or adding a HOOK_GATED entry has to turn a NAMED row red).
-# What this catches is the one thing that battery cannot see: rows silently
-# disappearing. Deleting all 27 run_drift_case invocations reported "29 passed,
-# 0 failed" and exited 0; deleting the two escape-hatch rows reported "54
-# passed, 0 failed". Both are now failures.
-EXPECTED_ROWS=62
+# battery, and only for the subcommands the rows above name: dropping commit,
+# merge, pull or push from HOOK_GATED turns a named row red, and so does adding
+# one a warn row names, but adding a subcommand no row mentions does not.
+# What this total catches is the one thing that battery cannot see: rows
+# silently disappearing. Without it, deleting every run_drift_case invocation
+# exited 0, and so did deleting just the two escape-hatch rows. Both fail now.
+EXPECTED_ROWS=68
 if [ "$((pass + fail))" -ne "$EXPECTED_ROWS" ]; then
   printf 'FAIL - suite size drifted: expected %d rows, ran %d\n' "$EXPECTED_ROWS" "$((pass + fail))"
   fail=$((fail + 1))
