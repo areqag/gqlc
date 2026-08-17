@@ -8,14 +8,13 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
-	"unicode"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/areqag/gqlc/internal/liverecipes"
 	"github.com/areqag/gqlc/internal/query/cypher"
 )
 
@@ -58,8 +57,10 @@ const (
 	// command line that does not build it compiles none of them, so it
 	// runs no witness however its -run reads: measured as review mutation
 	// T1, which left the sweep green while `go test` printed
-	// "[no test files]" for every package in test/data/codegen.
-	liveBuildTag = "codegen_live"
+	// "[no test files]" for every package in test/data/codegen. Taken from
+	// liverecipes rather than respelled, so a sweep reading one tag and a
+	// recipe reader reading another is not a state this tree has.
+	liveBuildTag = liverecipes.LiveBuildTag
 	// justfilePath holds the recipes CI invokes.
 	justfilePath = "justfile"
 )
@@ -781,7 +782,7 @@ func readLiveWitnessBodies(t *testing.T) map[string]string {
 //     SELECTION it is exact: a body whose second `go test` selects the
 //     witness is reported as running it. Whether that second command is
 //     reached is a different question and a silence — see
-//     goTestInvocations, review mutation P3.)
+//     liverecipes.GoTestInvocations, review mutation P3.)
 //   - Any -skip alternative whose FIRST element matches the witness
 //     counts as skipping it, where go test would drop only a subtest.
 //     Complaint, and the same direction as the -run rule above.
@@ -792,14 +793,15 @@ func readLiveWitnessBodies(t *testing.T) map[string]string {
 //     file system rather than about flags, and it is left open. Silence.
 //   - Whether the command line is reached is not read either. A `go test`
 //     after `||`, or before a failing `&&`, counts as running the witness
-//     (review mutation P3). Silence, and see goTestInvocations for why
-//     the same superset is a complaint for the -count=1 rule.
+//     (review mutation P3). Silence, and see
+//     liverecipes.GoTestInvocations for why the same superset is a
+//     complaint for the -count=1 rule.
 func recipeRuns(cmds, witness string) bool {
-	invocations, unterminated := goTestInvocations(cmds)
+	invocations, unterminated := liverecipes.GoTestInvocations(cmds)
 	// A line this reader could not finish parsing is not a line it can
-	// report on. It arises when stripRecipeComment cuts inside a quoted
-	// argument, and answering from the fragment is how "nothing to read"
-	// became "runs everything" (review mutation V3).
+	// report on. It arises when liverecipes.StripComment cuts inside a
+	// quoted argument, and answering from the fragment is how "nothing
+	// to read" became "runs everything" (review mutation V3).
 	if unterminated {
 		return false
 	}
@@ -819,7 +821,7 @@ func recipeRuns(cmds, witness string) bool {
 // invocationRuns is recipeRuns' question about ONE `go test` command
 // line, whose fields are the command's own and nobody else's.
 func invocationRuns(fields []string, witness string) bool {
-	tags := testFlagValues(fields, "tags")
+	tags := liverecipes.FlagValues(fields, "tags")
 	if len(tags) == 0 {
 		return false
 	}
@@ -830,306 +832,17 @@ func invocationRuns(fields []string, witness string) bool {
 			return false
 		}
 	}
-	for _, pattern := range testFlagValues(fields, "run") {
-		if _, wholly := selects(pattern, witness); !wholly {
+	for _, pattern := range liverecipes.FlagValues(fields, "run") {
+		if _, wholly := liverecipes.Selects(pattern, witness); !wholly {
 			return false
 		}
 	}
-	for _, pattern := range testFlagValues(fields, "skip") {
-		if reaches, _ := selects(pattern, witness); reaches {
+	for _, pattern := range liverecipes.FlagValues(fields, "skip") {
+		if reaches, _ := liverecipes.Selects(pattern, witness); reaches {
 			return false
 		}
 	}
 	return true
-}
-
-// goTestInvocations is every `go test` command a recipe body CONTAINS in
-// command position, each as the fields of that command ALONE — up to the
-// operator that ends it, and not one field further. unterminated says
-// some line's quoting never closed, which makes every field of that line
-// a guess.
-//
-// Contains, not runs: this is a SUPERSET of what the body executes,
-// because a command after `||` runs only when the one before it failed,
-// and a command before `&&` can leave the rest of the line unreached.
-// The two callers take that in opposite directions, so it is not one
-// safe direction:
-//
-//   - recipeBodies requires -count=1 of EVERY invocation, so a command
-//     that is counted and not run adds a requirement. Complaint.
-//   - recipeRuns is satisfied by SOME invocation selecting the witness,
-//     so a command that is counted and not run can answer yes for a body
-//     that runs no witness. Silence, measured: review mutation P3 put
-//     `go test -run 'TestLiveSmoke' … || go test -run '<the full set>' …`
-//     in the live recipe and the sweep stayed green over a body whose
-//     witness invocation runs only on the smoke battery's failure.
-//
-// Running is also not gating. `… || true` appended to the real recipe
-// (review mutation P4; `|| true` is one of this justfile's own idioms)
-// leaves the witness running and the recipe failing on nothing, and this
-// reader says nothing about it, because its claim is about what runs.
-//
-// Reading flags from the command that runs them is the whole of this
-// function, and it is why callers get segments rather than a yes/no. The
-// predecessor pair — "does a `go test` appear anywhere" plus "does a
-// -tags appear anywhere" — is satisfied by a body where those are two
-// different commands (review mutations POOLTAG2, POOLTAG, CNT1, CNT2,
-// POOLRUN2), and every one of them is silence.
-//
-// A command starts a line of the body or follows `&&`, `||`, `;` or `|`,
-// and runs `go test` when its first field is `go` — or a path ending in
-// one — and its second is `test`. Command position is what stops
-// `echo go test -run W` from counting: searching every argument for `go`
-// beside `test` counts a line that only prints the words.
-// `cd test/data/codegen && go test …` is the shape the AGE recipes have,
-// and a body that puts the `cd` on its own line works for the other
-// reason.
-//
-// Three things are consequently read as running no go test at all, and
-// so as a recipe that does not run the witness — all complaints: a
-// compiled test binary invoked directly, a script that runs go test
-// inside itself, and an environment prefix (`GOFLAGS=… go test`), which
-// none of the three live recipes writes today. An operator not
-// surrounded by spaces (`a&&go
-// test`) is a fourth: the fields are split on whitespace, so `a&&go` is
-// one field and no command starts there.
-func goTestInvocations(cmds string) (invocations [][]string, unterminated bool) {
-	for _, line := range strings.Split(cmds, "\n") {
-		fields, quoted := shellFields(line)
-		if quoted {
-			unterminated = true
-		}
-		start := 0
-		for i := 0; i <= len(fields); i++ {
-			if i < len(fields) {
-				switch fields[i] {
-				case "&&", "||", ";", "|":
-				default:
-					continue
-				}
-			}
-			if command := fields[start:i]; len(command) > 1 &&
-				(command[0] == "go" || strings.HasSuffix(command[0], "/go")) &&
-				command[1] == "test" {
-				invocations = append(invocations, command)
-			}
-			start = i + 1
-		}
-	}
-	return invocations, unterminated
-}
-
-// selects reports how a `go test -run` / `-skip` pattern reaches the
-// TOP-LEVEL test named name: reaches is whether some alternative matches
-// it at all, wholly is whether some alternative matches it with no
-// further elements. The two differ exactly when a pattern narrows to
-// subtests, and that difference is what recipeRuns is built on — a -skip
-// that reaches counts as skipping, a -run must select wholly.
-//
-// go test splits a pattern on top-level `|` into alternatives first and
-// each alternative on `/` into elements, then matches element i against
-// the i'th part of a test's name with an UNANCHORED regexp match
-// (testing/match.go: splitRegexp, alternationMatch.matches,
-// simpleMatch.matches). So a pattern reaches a top-level test when some
-// alternative's first element matches it as a regexp: `TestAGERefuses`
-// selects TestAGERefusesTheFunctionsItDoesNotDefine, and string equality
-// is the wrong question in both directions. Verified against go1.26.5
-// rather than read off the docs — `-skip 'TestLiveSmoke/neo4j|W'` skips
-// W outright, because the appended text is a second alternative and not
-// a second element; and `-run 'TestLiveSmoke|W/x'` leaves W selected,
-// running none of its subtests, at exit 0.
-//
-// Every alternative is read even after one matches, because a narrowed
-// alternative can be followed by a whole one. A pattern with an
-// uncompilable alternative is therefore refused even when an earlier
-// alternative already matched: doubt REACHES everything and selects
-// nothing whole, which is the refusal both callers want — a -run this
-// reader cannot compile does not select the witness, and a -skip it
-// cannot compile might drop it. A complaint either way, never silence,
-// and both directions have a row ("a -run this reader cannot compile",
-// "a -skip this reader cannot compile").
-//
-// That is why there is no error return. With one, only the -skip loop
-// could act on it: an error comes back with reaches false, which is the
-// answer that LETS a -skip through, while for -run wholly is false
-// already. The -run loop's err arm is then something nothing can make
-// true (review mutation G3b, dead) and the -skip loop carries the only
-// live one (G3). Two truths in one value make one of them unreachable.
-//
-// The split here is naive where go test's is bracket-aware: a `|` or `/`
-// inside `[...]` or `(...)` is top-level to this function and is not to
-// go test. That direction is deliberate. The pieces a naive split makes
-// of `TestFoo(A|B)` do not compile.
-func selects(pattern, name string) (reaches, wholly bool) {
-	for _, alt := range strings.Split(pattern, "|") {
-		head, _, narrowed := strings.Cut(alt, "/")
-		re, err := regexp.Compile(head)
-		if err != nil {
-			return true, false
-		}
-		if !re.MatchString(name) {
-			continue
-		}
-		reaches = true
-		if !narrowed {
-			wholly = true
-		}
-	}
-	return reaches, wholly
-}
-
-// testFlagValues is every value a command line gives one go test flag,
-// in any of the spellings go's flag package accepts: `-flag value`,
-// `-flag=value`, `--flag`, and the `-test.flag` form a compiled binary
-// takes.
-func testFlagValues(fields []string, flag string) []string {
-	var values []string
-	for i := 0; i < len(fields); i++ {
-		name, value, assigned := strings.Cut(fields[i], "=")
-		if strings.TrimPrefix(strings.TrimLeft(name, "-"), "test.") != flag {
-			continue
-		}
-		switch {
-		case assigned:
-			values = append(values, value)
-		case i+1 < len(fields):
-			values = append(values, fields[i+1])
-			i++
-		default:
-			// A flag with nothing after it. go test rejects the command
-			// line, but this reader still has to answer, and the empty
-			// pattern is the one that selects everything — which for a
-			// -skip means the witness is skipped and complained about.
-			values = append(values, "")
-		}
-	}
-	return values
-}
-
-// shellFields splits a recipe's command line into arguments, honouring
-// single and double quotes so `-run 'A|B'` stays one argument. The
-// second return says a quote was still open at the end — the line the
-// caller handed over is not a line this reader finished.
-//
-// Not a shell: no escapes, no expansion, no operators, no substitution.
-// It exists to find -run, -skip and -tags and the values beside them.
-//
-// The two flags fail in OPPOSITE directions when it is defeated, so
-// naming only the safe one states the limit wrongly. Both are below.
-// Expansion is the case that matters, because a recipe may write
-// `SKIP='TestLiveSmoke/neo4j|W' && go test … -skip "$SKIP"`, which is one
-// executable line:
-//
-//   - For -run, an argument this reader takes literally selects nothing,
-//     and recipeRuns reports a witness that does not run. Complaint.
-//   - For -skip, the same literal argument SKIPS nothing, so the witness
-//     reads as running while the recipe skips it outright. Silence, and
-//     the shape this file exists to forbid. Measured as review mutation
-//     V4b: `$SKIP` and `${SKIP}` both compile as regexps and match no
-//     test name, `$` being the end-of-text anchor.
-//   - For -tags, a literal `$TAGS` carries no build tag, so the recipe
-//     reads as building none of the live battery. Complaint.
-//
-// Closing that means being a shell, which is not a cost this check is
-// worth; it is stated rather than fixed. No live recipe expands a
-// variable into a test pattern today, and the justfile's own shell
-// variables are elsewhere.
-func shellFields(s string) (fields []string, unterminated bool) {
-	var (
-		cur   strings.Builder
-		quote rune
-		open  bool
-	)
-	for _, r := range s {
-		switch {
-		case quote != 0:
-			if r == quote {
-				quote = 0
-			} else {
-				cur.WriteRune(r)
-			}
-		case r == '\'' || r == '"':
-			quote, open = r, true
-		case unicode.IsSpace(r):
-			if open {
-				fields = append(fields, cur.String())
-				cur.Reset()
-				open = false
-			}
-		default:
-			cur.WriteRune(r)
-			open = true
-		}
-	}
-	if open {
-		fields = append(fields, cur.String())
-	}
-	return fields, quote != 0
-}
-
-// stripRecipeComment drops a recipe line's shell comment: everything
-// from the first `#` that starts a word outside quotes, which is where
-// sh starts one. This is the recipe artefact's half of the property
-// witnessBodies holds for Go source: text that is spelled is not text
-// that runs.
-//
-// Cutting at the FIRST `#` of any kind is not "the safe direction whose
-// worst case is complaining about a witness the recipe does run" — it
-// fails toward silence. Review mutation V3:
-// `go test -count=1 -tags codegen_live -ldflags '-X main.p=a#b' -run 'TestLiveSmoke' …`
-// keeps -count=1 and loses -run, and recipeRuns read the flagless
-// remainder as selecting everything. Silence over a recipe that runs no
-// witness — the exact shape of L20 with the cut moved.
-//
-// Word-start-outside-quotes is sh's own rule, so for the shapes this
-// reader models the cut is where sh puts it — an unquoted `-X p=a#b`
-// keeps its `#`, because that one does not start a word.
-//
-// Of those two halves only word-start carries the answer. Dropping it
-// cuts a live -run away and the flagless remainder runs everything
-// ("an unquoted # inside a word is not a comment either" — mutation
-// G14w). Dropping the QUOTE half changes no answer, measured: a cut
-// inside a quoted argument removes that argument's closing quote along
-// with everything after it, so shellFields reports unterminated and
-// recipeRuns refuses the line anyway (mutation G14q survives). It is
-// kept because it is sh's rule and because the redundancy belongs to
-// the unterminated check rather than to this function — but it is
-// redundancy, not a second guard, and both paths are complaints.
-//
-// What is NOT modelled is backslash escapes, command substitution,
-// heredocs and here-strings. This justfile uses all four, so the bound
-// is not "the artefact has none of them"; it is that this reader only
-// ever sees the bodies ageLiveRecipes names, and those use none of
-// them. That is a property of single-line recipes today and not a law
-// about the file, so it is held by
-// TestTheRecipesThisReaderParsesStayInsideTheShellItModels rather than
-// asserted here.
-//
-// Each cuts where sh would not: `\#` is a literal to sh, a `#` inside
-// `$(…)` opens a comment in the substitution and not in the line around
-// it, and every `#` in heredoc or here-string data is data. The remainder
-// after a wrong cut either fails to close its quoting, which recipeRuns
-// refuses, or it parses with fewer flags than the shell runs — and the
-// second is silence, not a complaint, when what was lost is a -run that
-// did not select the witness. That is V3's shape again, one layer down;
-// it is bounded rather than closed.
-func stripRecipeComment(line string) string {
-	var quote rune
-	startsWord := true
-	for i, r := range line {
-		switch {
-		case quote != 0:
-			if r == quote {
-				quote = 0
-			}
-		case r == '\'' || r == '"':
-			quote = r
-		case r == '#' && startsWord:
-			return line[:i]
-		}
-		startsWord = quote == 0 && unicode.IsSpace(r)
-	}
-	return line
 }
 
 // recipeBodies is what each named recipe runs, read out of justfile
@@ -1153,7 +866,6 @@ func recipeBodies(src string, names []string) (map[string]string, []string) {
 		complaints = append(complaints, "no recipe was named, so nothing checks that a witness is ever run")
 	}
 
-	lines := strings.Split(src, "\n")
 	out := make(map[string]string, len(names))
 	seen := make(map[string]bool, len(names))
 	for _, name := range names {
@@ -1174,25 +886,12 @@ func recipeBodies(src string, names []string) (map[string]string, []string) {
 		}
 		seen[name] = true
 
-		var body []string
-		for i, line := range lines {
-			if line != name+":" {
-				continue
-			}
-			for _, next := range lines[i+1:] {
-				if next == "" || !strings.HasPrefix(next, " ") && !strings.HasPrefix(next, "\t") {
-					break
-				}
-				body = append(body, stripRecipeComment(next))
-			}
-			break
-		}
-		if len(body) == 0 {
+		joined, found := liverecipes.RecipeBody(src, name)
+		if !found {
 			complaints = append(complaints,
 				fmt.Sprintf("recipe %s is not in the justfile, so nothing this sweep says about it is true", name))
 			continue
 		}
-		joined := strings.Join(body, "\n")
 		// EVERY go test this recipe runs, and not "the bytes -count=1
 		// appear somewhere in the body". The byte-level form is this
 		// file's own condemned defect one property over, and it is
@@ -1214,9 +913,9 @@ func recipeBodies(src string, names []string) (map[string]string, []string) {
 		// and it does so for every gap, since a gap naming no witness is
 		// its own complaint. The row is "a command line whose quoting
 		// never closes" in TestRecipeRunsOnlyWhatTheCommandLineSelects.
-		invocations, _ := goTestInvocations(joined)
+		invocations, _ := liverecipes.GoTestInvocations(joined)
 		for _, fields := range invocations {
-			if !slices.Contains(testFlagValues(fields, "count"), "1") {
+			if !slices.Contains(liverecipes.FlagValues(fields, "count"), "1") {
 				complaints = append(complaints,
 					fmt.Sprintf("recipe %s reports on a cached run: a witness is a measurement or it is nothing", name))
 				break
@@ -1344,17 +1043,18 @@ func TestRecipeReaderComplainsOnEachBrokenRecipe(t *testing.T) {
 }
 
 // TestTheRecipesThisReaderParsesStayInsideTheShellItModels bounds
-// stripRecipeComment and shellFields to the artefact they are pointed
-// at. Neither models backslash escapes, command substitution, heredocs
-// or here-strings, and neither expands a variable.
+// liverecipes.StripComment and liverecipes.Fields to the artefact they
+// are pointed at. Neither models backslash escapes, command
+// substitution, heredocs or here-strings, and neither expands a
+// variable.
 //
 // The justfile uses all of those, in recipes this reader never sees, so
 // "no recipe here uses them" is false of the file. Line numbers naming
 // where would be worse than none: nothing checks them, and one edit
-// above the first would make this comment, stripRecipeComment's and ADR
-// 0028 wrong at once. What is true is narrower and is checked here:
-// recipeBodies reads the recipes ageLiveRecipes names
-// and nothing else, and those use none of them. That is a fact about
+// above the first would make this comment, liverecipes.StripComment's
+// and ADR 0028 wrong at once. What is true is narrower and is checked
+// here: recipeBodies reads the recipes ageLiveRecipes names and nothing
+// else, and those use none of them. That is a fact about
 // single-line recipes on a day, not a law, which is why it is a
 // test.
 //
@@ -1364,10 +1064,10 @@ func TestRecipeReaderComplainsOnEachBrokenRecipe(t *testing.T) {
 // reads as running a witness it does not run (review mutations V3, V4b).
 // Silence, and this file exists to refuse it.
 func TestTheRecipesThisReaderParsesStayInsideTheShellItModels(t *testing.T) {
-	// The shapes stripRecipeComment and shellFields do not model. This
-	// list is the whole of what this test asserts, so it is guarded
-	// before it is used: review mutation A9 deleted all four rows and the
-	// package stayed green at exit 0, this test among it, printing
+	// The shapes liverecipes.StripComment and liverecipes.Fields do not
+	// model. This list is the whole of what this test asserts, so it is
+	// guarded before it is used: review mutation A9 deleted all four rows
+	// and the package stayed green at exit 0, this test among it, printing
 	// `--- PASS` over an assertion it no longer made. A9b deleted one row
 	// and was the same silence one shape at a time, which is why the
 	// guard is a count and not require.NotEmpty.
@@ -1503,7 +1203,7 @@ func TestRecipeRunsOnlyWhatTheCommandLineSelects(t *testing.T) {
 			// of that and not the comment half: they hold whether or not
 			// comments are stripped, because a comment introduces no -run
 			// and the -run that is here does not reach the witness.
-			// Making stripRecipeComment the identity leaves both green
+			// Making liverecipes.StripComment the identity leaves both green
 			// (review mutation N1); deleting recipeRuns' -run loop kills
 			// both (N3). The comment half — text that is spelled is not
 			// text that runs — is carried by ONE row of
@@ -1616,7 +1316,7 @@ func TestRecipeRunsOnlyWhatTheCommandLineSelects(t *testing.T) {
 			src:  cmd("-ldflags '-X main.p=a#b' -run 'TestLiveSmoke' -skip '" + liveSkip + "'"),
 		},
 		{
-			// The other half of stripRecipeComment's rule: sh starts a
+			// The other half of liverecipes.StripComment's rule: sh starts a
 			// comment at a `#` that STARTS A WORD, so an unquoted
 			// `p=a#b` keeps its `#`
 			// too. Reading this one as a comment cuts the -run away, and

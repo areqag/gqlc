@@ -1001,27 +1001,41 @@ check-codegen-external-tests: sweep-discovery-probes
 # The two recipes below are the same battery split by backend, because CI runs
 # the halves on different triggers. Arms are split by subtracting the other
 # half's arms from TestLiveSmoke with -skip, so an arm added to the arms table
-# runs in both halves until it is named there. Top-level tests are split by each
-# recipe's -run allowlist — TestAGESessionInit reaches only the AGE half because
-# the neo4j half's -run omits it — so a new top-level live test runs in no half
-# until the recipes name it.
+# runs in both halves until it is named there. Top-level tests are split by the
+# halves' -run allowlists — TestAGESessionInit reaches only the AGE half because
+# the neo4j half's -run omits it. Those allowlists are hand-written, and what
+# keeps them exhaustive is TestEveryLiveTestIsRunByARecipeThatNamesIt
+# (internal/liverecipes): it reads them against the top-level tests the codegen
+# module declares and names the test no half runs (bd gqlc-df3d). Which half a
+# test belongs in is still the author's call and is asserted nowhere.
+#
+# This recipe carries no -run. It is the whole battery on every arm, so it has
+# no other half to subtract and selects by the build tag alone. No workflow
+# reaches it, so the same guard holds it to a stricter rule than the halves': it
+# has to run every declared test by itself. An allowlist here would have to name
+# all of them, and would fail the moment a test was added.
 #
 # -count=1 so a developer asking for a live run gets containers, not the cache.
 test-codegen-live:
-    cd test/data/codegen && go test -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation|TestAGERefusesTheFunctionsItDoesNotDefine' ./...
+    cd test/data/codegen && go test -count=1 -tags codegen_live ./...
 
 # the neo4j half: both driver arms in parallel against one neo4j:5-community
 # image. This is the half PR CI blocks on, so its wall time is a PR's wall time.
 #
 # No -count=1, unlike the two recipes either side, and that is what keeps the
-# per-PR cost near zero (.github/workflows/codegen-live.yml). It is sound here
-# because every input that could change this battery's answer is inside the
-# test binary: the scenario bodies, the generated packages they drive, the
-# driver dependencies, and the neo4j image — pinned by digest as a constant in
-# live_neo4j_test.go, not resolved at run time. A cache hit therefore means
-# this exact binary already passed against this exact server, and any edit that
-# could move either invalidates it. What a cache hit cannot re-check is the
-# container runtime underneath, which is not a property of this repo.
+# per-PR cost near zero (.github/workflows/codegen-live.yml). What a hit stands
+# on is the test binary — the scenario bodies, the generated packages they
+# drive, the driver dependencies, and the neo4j image, pinned by digest as a
+# constant in live_neo4j_test.go rather than resolved at run time — and the
+# cache key beside it: go records the environment variables and the files a run
+# reads under the module root and keys the cached result on their values, so the
+# GQLC_SKIP_LIVE=1 pass that starts no container is a separate entry from the run
+# that starts one, and a third value is a third entry (measured on go1.26.6, bd
+# gqlc-4int). A hit therefore replays a run of this binary under the same
+# values, and any edit that could move either invalidates it; the server that
+# run met, where it started one, came from the digest the binary carries. What
+# is in neither the binary nor the key is not re-checked, the container runtime
+# underneath included: it is not a property of this repo.
 #
 # That argument covers this half's server facts too, and it does have them —
 # edgeUnionDispatch asserts what a live neo4j returns for a relationship type
