@@ -90,10 +90,11 @@ func decoderProbeWidths() []decoderProbeWidth {
 // every arm a decode helper has: required and nullable, on a node type
 // and on an edge type, whose decoder takes the other carrier.
 //
-// Every entity declares exactly one property, so the positional local
+// No entity declares more than one property, so the positional local
 // the non-nullable arm binds is always value0 and the second position is
 // unreached — a decoder that named the local after the property only
-// from the second field onwards would not be caught here.
+// from the second field onwards would not be caught here. The Endpoint
+// node the edge arms attach to declares none.
 func decoderProbeSchema(prop string) string {
 	var b strings.Builder
 	b.WriteString("CREATE PROPERTY GRAPH TYPE DecoderProbe AS {\n")
@@ -150,9 +151,9 @@ const typeTableSource = "types.go"
 // admits and no probe entity declares, and this test passes over it
 // (gqlc-wdo7).
 //
-// The obligation runs in both directions over that set: every width the
-// probe declares has a carrier, and every carried constant is one the
-// probe declares.
+// The obligation runs in both directions: every width the probe
+// declares has a carrier, and every carried constant is one the probe
+// declares.
 func TestDecoderProbeCoversTheTypeTable(t *testing.T) {
 	declared := graphPropertyTypes(t)
 	arms := propertyArmNames(t)
@@ -391,10 +392,10 @@ func (s *DecoderSuite) requireArm(declared map[string]schema.Property, element s
 // The names are read off an emission rather than listed here, so a local
 // a decoder gains later is held by this without anyone remembering to
 // add it — as far as the probe's own widths reach, which is one property
-// per width the type table admits and the two list arms over each of
-// them. Each name is then fed back as a property name, and what must not
-// move is the set itself: the decoder's identifiers are the generator's
-// own, so they are the same whatever the schema declares.
+// per scalar width the type table admits and the two list arms over each
+// of them. Each name is then fed back as a property name, and what
+// must not move is the set itself: the decoder's identifiers are the
+// generator's own, so they are the same whatever the schema declares.
 //
 // The scope read here is models.go's entity decoders. A query column's
 // decode is emitted elsewhere and its locals are swept by the query-side
@@ -424,8 +425,8 @@ func (s *DecoderSuite) TestNoDecoderLocalTakesAPropertyName() {
 	}
 }
 
-// emitModels emits models.go for a schema whose every entity declares
-// one property named prop. The error is the schema parse's alone: a
+// emitModels emits models.go for the probe schema spelled around the
+// property name prop. The error is the schema parse's alone: a
 // generation that failed would be this suite's business, and a parse
 // that failed is the caller's.
 func (s *DecoderSuite) emitModels(prop string) (string, error) {
@@ -452,9 +453,9 @@ func (s *DecoderSuite) decoderScopeOf(models string) []string {
 	seen := make(map[string]bool)
 	for _, decl := range s.parseModels(models).Decls {
 		fn, ok := decl.(*ast.FuncDecl)
-		// The methods models.go declares are edge-union markers, which
-		// take no argument and hold no body; the decode helpers are what
-		// is left.
+		// The methods models.go declares are edge-union markers; the
+		// receiver is what excludes them, since an empty body is still a
+		// body. The decode helpers are what is left.
 		if !ok || fn.Recv != nil || fn.Body == nil {
 			continue
 		}
