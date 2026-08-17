@@ -17,6 +17,9 @@
 #
 #   .githooks/tests/bd-gh-sync-test.sh | grep -cE '^(ok|FAIL) '
 #
+# That number is not a gate and cannot be one — see the assertion census at the
+# foot of this file, which is. Adding an assertion means adding its name there.
+#
 # And how many of them a given older bd-gh-sync fails — the measure of what a
 # change to that script is actually worth — by running this file against it:
 #
@@ -135,7 +138,14 @@ if [ "${FAKE_MKTEMP_RC:-0}" != 0 ]; then
     echo "mktemp: failed to create directory via template: Read-only file system" >&2
     exit "$FAKE_MKTEMP_RC"
 fi
-exec "$REAL_MKTEMP" "$@"
+_d="$("$REAL_MKTEMP" "$@")" || exit
+# FAKE_MKTEMP_BLOCK plants a directory where the script expects one named file,
+# so that one payload is unwritable and unreadable while every other file in the
+# working directory behaves. Which payload matters: blocking allow.txt instead
+# of pulled.txt fails the pull outright, and the assertion that uses this knob
+# has an arm that says so rather than passing on a run that proved nothing.
+[ -n "${FAKE_MKTEMP_BLOCK:-}" ] && mkdir "$_d/$FAKE_MKTEMP_BLOCK"
+printf '%s\n' "$_d"
 STUB
 
 # "the check ran and could not see" and "the check never ran" are different
@@ -166,8 +176,17 @@ chmod +x "$BIN/bd" "$BIN/gh" "$BIN/mktemp" "$BIN/python3"
 
 pass=0
 fail=0
-ok()  { pass=$((pass + 1)); printf 'ok   - %s\n' "$1"; }
-bad() { fail=$((fail + 1)); printf 'FAIL - %s: %s\n' "$1" "$2"; }
+# Both arms log the name, because the census at the foot of this file is about
+# whether an assertion ran at all and a failing assertion ran. So a block that
+# reaches either arm is on the roll-call; a block that reaches neither — an `if`
+# chain that lost its `else`, one stranded behind a condition that stopped being
+# true — is not, and that is the case the census exists to name rather than one
+# this file is built to make impossible.
+ok()  { pass=$((pass + 1)); printf '%s\n' "$1" >>"$TMP/ran.txt"
+        printf 'ok   - %s\n' "$1"; }
+bad() { fail=$((fail + 1)); printf '%s\n' "$1" >>"$TMP/ran.txt"
+        printf 'FAIL - %s: %s\n' "$1" "$2"; }
+: >"$TMP/ran.txt"
 
 # Per-invocation control over the `bd list` stub, keyed by call ordinal (the
 # pull path calls it twice: the before snapshot, then the after snapshot the
@@ -202,6 +221,7 @@ run_sync() {
         FAKE_GH_OPEN="$TMP/gh_open.json" FAKE_BEADS_AFTER="$after" \
         FAKE_SYNC_RC="${SYNC_RC:-0}" FAKE_PUSH_RC="${PUSH_RC:-0}" \
         FAKE_CLOSE_RC="${CLOSE_RC:-0}" FAKE_MKTEMP_RC="${MKTEMP_RC:-0}" \
+        FAKE_MKTEMP_BLOCK="${MKTEMP_BLOCK:-}" \
         FAKE_GH_LIST_RC="${GH_LIST_RC:-0}" \
         REAL_MKTEMP="$REAL_MKTEMP" REAL_PYTHON3="$REAL_PYTHON3" \
         "$SYNC" "$1" >"$TMP/out" 2>"$TMP/err"
@@ -215,6 +235,7 @@ SYNC_RC=0
 PUSH_RC=0
 CLOSE_RC=0
 MKTEMP_RC=0
+MKTEMP_BLOCK=
 GH_LIST_RC=0
 
 scoped_ids() { grep -o -- '--issues [^ ]*' "$TMP/calls" | cut -d' ' -f2 | tr ',' '\n'; }
@@ -324,6 +345,38 @@ else
     bad "GH body ahead of bd does not block the pull" "held out"
 fi
 
+# ...and the two flags that decide what "the pull" means, which nothing here
+# read: both appeared in this file only in comments, and deleting
+# `--prefer-github` from the script left it at 136 passed, 0 failed while
+# changing what every eligible pull does. The whole eligibility argument above
+# — hold unless the GH body extends the bead description — exists to find the
+# beads where GitHub is ahead, and without that flag the bd copy wins every one
+# of them, so each ALLOW is a no-op and the pull the run just decided on never
+# happens. `--pull-only` is the other direction: without it `bd github sync`
+# pushes as well, which is the ~30s whole-corpus scan with unreliable close
+# propagation that the push path exists to avoid, over a scope chosen for a
+# pull. Asserted separately, because they fail to opposite effect.
+#
+# Read as argv words rather than off the flattened call line, for the reason
+# the id assertions read argv: `--pull-only --prefer-github` handed over as one
+# argument is a single word bd would reject, and is byte-identical on that line.
+run_sync pull \
+    "[{\"id\":\"b-flags\",\"status\":\"open\",\"external_ref\":\"$ISSUE/3\",\"description\":\"line one\"}]" \
+    '[{"number":3,"state":"OPEN","body":"line one\nline two added on GH"}]'
+_argv="$(argv_after 'bd github sync' 2 | tr '\n' ' ')"
+if argv_after 'bd github sync' 2 | grep -qx -- '--prefer-github'; then
+    ok "an eligible pull is issued with --prefer-github, or GitHub's added lines lose"
+else
+    bad "an eligible pull is issued with --prefer-github, or GitHub's added lines lose" \
+        "argv after 'bd github sync' was: ${_argv:-(no batch ran at all)}"
+fi
+if argv_after 'bd github sync' 2 | grep -qx -- '--pull-only'; then
+    ok "an eligible pull is issued with --pull-only, or the pull pushes as well"
+else
+    bad "an eligible pull is issued with --pull-only, or the pull pushes as well" \
+        "argv after 'bd github sync' was: ${_argv:-(no batch ran at all)}"
+fi
+
 run_sync pull \
     "[{\"id\":\"b-amended\",\"status\":\"open\",\"external_ref\":\"$ISSUE/4\",\"description\":\"line one\nbd-only amendment\"}]" \
     '[{"number":4,"state":"OPEN","body":"line one"}]'
@@ -368,6 +421,28 @@ if scoped_ids | grep -qx b-dedup; then
     bad "GH body shorter than the bead held out" "pulled; the de-dup reverted"
 else
     ok "GH body that does not extend the bead description is held out"
+fi
+
+# The shape no fixture above has: GitHub *prepending*. Every case so far loses
+# some of the bead text, so all of them are held by a substring test just as
+# they are by a prefix one — which means relaxing `gh_body.startswith(desc)` to
+# `desc in gh_body` passes this whole file, and the rule the header documents
+# byte for byte silently becomes a weaker rule with nothing objecting. A
+# prepend is the witness that separates them: the bead text survives verbatim,
+# so it is not data loss and nothing here would call it one, but it is not an
+# append either — the bead's first line stops being first, and a pull rewrites
+# the description to GitHub's ordering.
+run_sync pull \
+    "[{\"id\":\"b-prepend\",\"status\":\"open\",\"external_ref\":\"$ISSUE/14\",\"description\":\"step one\"}]" \
+    '[{"number":14,"state":"OPEN","body":"PREFACE\nstep one"}]'
+if scoped_ids | grep -qx b-prepend; then
+    bad "a GH body that prepends to the bead description is held out" \
+        "pulled; a prefix rule that admits a prepend is a substring rule"
+elif ! grep -q 'holding b-prepend (GH #14) out of the pull — bd-description-not-a-prefix-of-gh-body' "$TMP/err"; then
+    bad "a GH body that prepends to the bead description is held out" \
+        "held, but not by the prefix rule: $(grep 'b-prepend' "$TMP/err" | tr '\n' '|')"
+else
+    ok "a GH body that prepends to the bead description is held out"
 fi
 
 # A bd-side deletion of a trailing block is byte-identical to a GH-side append
@@ -1155,6 +1230,246 @@ case "$(last_line)" in
     *) bad "the blind notice names the exit status it saw" "got: $(last_line)" ;;
 esac
 
+# --- gqlc-b7lt: a held bead deleted between the snapshots is not silent ------
+# The comparison skipped every id absent from the second snapshot, so the one
+# transition it could not see was the most destructive one: a held bead deleted
+# behind the script's back vanished, and the run came out byte-identical to a
+# healthy one.
+#
+# The skip cannot simply be dropped, because "absent from the second snapshot"
+# covers two different things. A snapshot that came back empty makes *every*
+# held bead absent, and that is already a blind run reported as one by the cases
+# above — the interaction this bead was filed alongside. What is left after that
+# is a snapshot that loaded, still holds other beads, and has lost this one:
+# that is a deletion, and it is decidable from the set the run actually held
+# rather than from the intersection of the two snapshots.
+
+SURVIVOR="{\"id\":\"b-live\",\"status\":\"open\",\"external_ref\":\"$ISSUE/9\",\"description\":\"same\"}"
+GH_CLAIM_LIVE='[{"number":7,"state":"OPEN","body":"same"},
+                {"number":9,"state":"OPEN","body":"same"}]'
+
+run_sync pull "[$CLAIMED,$SURVIVOR]" "$GH_CLAIM_LIVE" '[]' "[$SURVIVOR]"
+if ! grep -q 'WARNING b-claim' "$TMP/err"; then
+    bad "a held bead deleted between the snapshots is reported" \
+        "it vanished without a word; last line: $(last_line)"
+elif ! grep -q 'WARNING b-claim was held out of the pull but is gone from the bead list' \
+        "$TMP/err"; then
+    bad "a held bead deleted between the snapshots is reported" \
+        "warned without naming the deletion: $(grep 'WARNING b-claim' "$TMP/err")"
+else
+    ok "a held bead deleted between the snapshots is reported as gone"
+fi
+
+# ...on the line a tail -1 caller keeps, and saying which of the two it was. A
+# deletion and a reverted status call for different responses — `bd update`
+# re-asserts a status, and nothing re-asserts a bead that is no longer there —
+# so the summary that carries "1 bead(s) ... changed anyway" has to distinguish
+# them rather than fold deletion into the generic count.
+_ll="$(last_line)"
+if [ -z "$_ll" ] || [ -n "${_ll##*WARNING*}" ]; then
+    bad "a deleted held bead reaches the tail -1 caller" "no warning on it: $_ll"
+elif [ -n "${_ll##*b-claim*}" ]; then
+    bad "a deleted held bead reaches the tail -1 caller" "did not name it: $_ll"
+elif [ -n "${_ll##*deleted outright*}" ]; then
+    bad "a deleted held bead reaches the tail -1 caller" \
+        "counted it as an ordinary change: $_ll"
+elif [ -n "${_ll##*deleted outright (b-claim);*}" ]; then
+    # moved.txt gained a per-record tag so the summary could tell a deletion
+    # from a reverted status, and the id has to be cut back out of it before it
+    # is shown. Read the file straight and the same `sed 's/ /, /g'` that joins
+    # several ids splits this one in half: the operator is handed
+    # `(GONE, b-claim)`, one deletion reading as two beads, neither of which
+    # `bd show` will answer to. `deleted outright (b-claim);` is pinned entire
+    # rather than just the absence of `GONE `, so a renamed tag is caught too.
+    bad "a deleted held bead reaches the tail -1 caller" \
+        "named it with the internal record tag still attached: $_ll"
+else
+    ok "the summary line names the deleted held bead and says it was deleted"
+fi
+
+# ...and the same rendering over an id that is not a single word. Both fixtures
+# above are, so the record tag was the only thing the summary had to cut off,
+# and a name flattened onto a line and separated on every space came out whole
+# by luck. These ids reach moved.txt off `bd list` rather than off the
+# allowlist, so the charset gate that refuses a space and a newline never sees
+# them: the beads this detector is about are the ones no pull touched.
+SPACE_HELD="{\"id\":\"b bad\",\"status\":\"in_progress\",\"external_ref\":\"$ISSUE/7\",\"description\":\"same\"}"
+SPACE_MOVED="{\"id\":\"b bad\",\"status\":\"open\",\"external_ref\":\"$ISSUE/7\",\"description\":\"same\"}"
+run_sync pull "[$SPACE_HELD,$SURVIVOR]" "$GH_CLAIM_LIVE" '[]' "[$SPACE_MOVED,$SURVIVOR]"
+_ll="$(last_line)"
+if [ -z "$_ll" ] || [ -n "${_ll##*1 bead(s) held out of the pull*}" ]; then
+    bad "a held bead whose id carries a space is named whole" \
+        "the fixture reported no single moved bead, so it proves nothing: $_ll"
+elif [ -z "${_ll##*(b, bad)*}" ]; then
+    bad "a held bead whose id carries a space is named whole" \
+        "split one bead into two names bd show does not answer to: $_ll"
+elif [ -n "${_ll##*(b bad)*}" ]; then
+    bad "a held bead whose id carries a space is named whole" "got: $_ll"
+else
+    ok "a held bead whose id carries a space is named whole"
+fi
+
+# A newline is the other half of the same reading, and it costs a number rather
+# than a name: moved.txt is line-delimited, so one id spanning two lines is one
+# bead the summary counts as two — an unmeasured count arriving on the one line
+# a tail -1 caller keeps, which is the shape the rest of this path refuses.
+NL_HELD="{\"id\":\"b\nbad\",\"status\":\"in_progress\",\"external_ref\":\"$ISSUE/7\",\"description\":\"same\"}"
+run_sync pull "[$NL_HELD,$SURVIVOR]" "$GH_CLAIM_LIVE" '[]' "[$SURVIVOR]"
+_ll="$(last_line)"
+if [ -z "$_ll" ] || [ -n "${_ll##*deleted outright*}" ]; then
+    bad "a held bead whose id carries a newline is counted once and named escaped" \
+        "the fixture reported no deletion, so it proves nothing: $_ll"
+elif [ -n "${_ll##*1 bead(s) held out of the pull*}" ]; then
+    bad "a held bead whose id carries a newline is counted once and named escaped" \
+        "one bead reached the count as more than one: $_ll"
+elif ! printf '%s\n' "$_ll" | grep -qF 'b\nbad'; then
+    bad "a held bead whose id carries a newline is counted once and named escaped" \
+        "named it in a form that splits the line it is on: $_ll"
+else
+    ok "a held bead whose id carries a newline is counted once and named escaped"
+fi
+
+# The same id, read on the per-bead warning above the summary rather than on the
+# summary itself. The warning is what an operator watching the run acts on, and
+# a raw newline in it lands as a second line saying something the script never
+# said — a fragment with no bead named on it.
+if [ "$(grep -c 'held out of the pull but is gone' "$TMP/err")" != "1" ]; then
+    bad "the deletion warning for a newline id stays on one line" \
+        "one deletion reached stderr as $(grep -c 'gone' "$TMP/err") line(s)"
+elif ! grep -qF 'WARNING b\nbad was held out of the pull but is gone' "$TMP/err"; then
+    bad "the deletion warning for a newline id stays on one line" \
+        "got: $(grep 'held out of the pull but is gone' "$TMP/err")"
+else
+    ok "the deletion warning for a newline id stays on one line"
+fi
+
+# And on the other arm, where the warning carries the remedy: `bd update <id>`
+# with a raw newline in it is not a command anyone can paste, and the half of it
+# that reaches the next line reads as an instruction of its own.
+NL_MOVED="{\"id\":\"b\nbad\",\"status\":\"open\",\"external_ref\":\"$ISSUE/7\",\"description\":\"same\"}"
+run_sync pull "[$NL_HELD,$SURVIVOR]" "$GH_CLAIM_LIVE" '[]' "[$NL_MOVED,$SURVIVOR]"
+if [ "$(grep -c 'held out of the pull but changed' "$TMP/err")" != "1" ]; then
+    bad "the reverted-bead warning and its remedy name a newline id escaped" \
+        "one reverted bead reached stderr as $(grep -c 'but changed' "$TMP/err") line(s)"
+elif ! grep -qF 'WARNING b\nbad was held out of the pull but changed' "$TMP/err"; then
+    bad "the reverted-bead warning and its remedy name a newline id escaped" \
+        "got: $(grep 'held out of the pull but changed' "$TMP/err")"
+elif ! grep -qF "bd update b\\nbad --status in_progress" "$TMP/err"; then
+    bad "the reverted-bead warning and its remedy name a newline id escaped" \
+        "the remedy names a bead bd cannot be handed: $(grep 'bd update' "$TMP/err")"
+else
+    ok "the reverted-bead warning and its remedy name a newline id escaped"
+fi
+
+# The control the case above would otherwise pass by warning about anything
+# missing from the second snapshot: a bead that was *pulled* was never held, so
+# it is outside this detector's claim entirely and its absence is not this
+# check's finding. Absent-because-never-in-scope, not absent-because-deleted.
+PULLABLE="{\"id\":\"b-pulled\",\"status\":\"open\",\"external_ref\":\"$ISSUE/8\",\"description\":\"same\"}"
+run_sync pull "[$PULLABLE,$SURVIVOR]" \
+    '[{"number":8,"state":"OPEN","body":"same\nadded on GH"},
+      {"number":9,"state":"OPEN","body":"same"}]' '[]' "[$SURVIVOR]"
+if ! scoped_ids | grep -qx b-pulled; then
+    bad "a bead that was pulled is outside the held-bead detector" \
+        "the fixture never pulled it, so it proves nothing: $(last_line)"
+elif grep -q 'WARNING' "$TMP/err"; then
+    bad "a bead that was pulled is outside the held-bead detector" \
+        "warned about a bead it never held: $(grep WARNING "$TMP/err" | head -n 1)"
+else
+    ok "a pulled bead missing from the second snapshot is not a held-bead finding"
+fi
+
+# ...and the other half of that distinction, which the control above cannot see
+# because its pull succeeded. The exemption is read from allow.txt, so it is the
+# set this run *intended* to pull, and `_pulled` — the number on the summary
+# line — counts only ids a batch that exited 0 was handed. Two different sets,
+# and the detector took the wrong one: a bead the run announces on stderr as not
+# pulled was exempted anyway, so the detector went blind on precisely the beads
+# whose handling had already gone wrong. This file's own summary comment says
+# intent is not outcome; the gap between them is the finding.
+#
+# First shape: an id the charset gate refuses. It reaches no batch at all, so
+# there is no hypothesis under which a pull touched it.
+UNUSABLE="{\"id\":\"b bad\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"x\"}"
+NOMIRROR='{"id":"b-keep","status":"open","external_ref":"","description":"y"}'
+run_sync pull "[$UNUSABLE,$NOMIRROR]" \
+    '[{"number":1,"state":"OPEN","body":"x\nadded on GH"}]' '[]' "[$NOMIRROR]"
+if ! grep -q "bead id 'b bad' is unusable" "$TMP/err"; then
+    bad "an id the gate refused is watched, not exempt" \
+        "the fixture never refused the id, so it proves nothing: $(last_line)"
+elif [ "$(sync_batches)" -ne 0 ]; then
+    bad "an id the gate refused is watched, not exempt" \
+        "it reached a batch after all: $(grep 'github sync' "$TMP/calls")"
+elif ! grep -q 'WARNING b bad was held out of the pull but is gone from the bead list' \
+        "$TMP/err"; then
+    bad "an id the gate refused is watched, not exempt" \
+        "the run said it was not pulled and then let it be deleted in silence: $(last_line)"
+else
+    ok "an id the gate refused is watched by the held-bead detector"
+fi
+
+# Second shape: the batch itself exited non-zero. `_pulled` does not count these
+# ids and the summary says so, so neither may the exemption — the summary and
+# the detector have to be describing one run. A partially applied batch is the
+# price: a bead that failed batch did move can draw a warning naming a change
+# the pull made, and that only ever happens under a summary that already reads
+# PULL FAILED and names the batch. An unwitnessed exemption is the worse half of
+# that trade, because the transition it hides is the one no re-assert undoes.
+SYNC_RC=1
+run_sync pull "[$PULLABLE,$NOMIRROR]" \
+    '[{"number":8,"state":"OPEN","body":"same\nadded on GH"}]' '[]' "[$NOMIRROR]"
+SYNC_RC=0
+if [ "$(sync_batches)" -ne 1 ]; then
+    bad "a bead in a batch that failed is watched, not exempt" \
+        "the fixture issued $(sync_batches) batch(es), so it proves nothing"
+elif ! grep -q 'WARNING b-pulled was held out of the pull but is gone from the bead list' \
+        "$TMP/err"; then
+    bad "a bead in a batch that failed is watched, not exempt" \
+        "counted as unpulled by the summary and as pulled by the detector: $(last_line)"
+else
+    ok "a bead in a batch that exited non-zero is watched by the held-bead detector"
+fi
+
+# ...and the case that decides what happens when the exemption set itself is
+# unavailable, rather than merely wrong. The postcondition reads pulled.txt with
+# no fallback, so this run has to end in the script's "the check did not run".
+# The alternative — defaulting to an empty set — is the reading under which
+# every bead this run pulled becomes a bead it held, and the pull that rewrote
+# them becomes the clobber the detector reports. b-pulled is pulled here, so
+# that reading produces a WARNING naming it, under a summary saying it was
+# pulled: the same run stating both.
+MKTEMP_BLOCK=pulled.txt
+run_sync pull "[$PULLABLE,$NOMIRROR]" \
+    '[{"number":8,"state":"OPEN","body":"same\nadded on GH"}]' '[]' \
+    "[{\"id\":\"b-pulled\",\"status\":\"open\",\"external_ref\":\"$ISSUE/8\",\"description\":\"same\nadded on GH\"},$NOMIRROR]"
+MKTEMP_BLOCK=
+_ll="$(last_line)"
+if [ -z "$_ll" ] || [ "$(sync_batches)" -ne 1 ] || [ -n "${_ll##*pulled 1 bead(s)*}" ]; then
+    bad "an exemption set that could not be written stops the held-bead check" \
+        "the sabotage took the pull down with it, so it proves nothing: $_ll"
+elif [ -n "${_ll##*the held-bead check did not run (the check itself did not run)*}" ]; then
+    bad "an exemption set that could not be written stops the held-bead check" \
+        "the check ran without it: $_ll"
+else
+    ok "an exemption set that could not be written stops the held-bead check"
+fi
+
+# ...and the interaction the bead was filed with. A second snapshot that came
+# back empty makes every held bead absent at once, which under a naive fix reads
+# as the whole tracker being deleted. That run is blind, not a mass deletion,
+# and it has to keep saying so.
+bd_list_emits 2 '[]'
+run_sync pull "[$CLAIMED,$SURVIVOR]" "$GH_CLAIM_LIVE" '[]' "[$SURVIVOR]"
+_ll="$(last_line)"
+if grep -q 'is gone from the bead list' "$TMP/err"; then
+    bad "an empty second snapshot is blind, not a mass deletion" \
+        "reported deletions off a snapshot nobody could read: $(grep 'is gone' "$TMP/err" | tr '\n' '|')"
+elif [ -z "$_ll" ] || [ -n "${_ll##*held-bead check did not run*}" ]; then
+    bad "an empty second snapshot is blind, not a mass deletion" "got: $_ll"
+else
+    ok "an empty second snapshot stays blind rather than reading as deletions"
+fi
+
 # --- the summary line must report the outcome, not the intent ----------------
 # .claude/settings.json keeps only the last stderr line, so it has to carry the
 # shape of the run rather than whatever notice happened to print last.
@@ -1684,7 +1999,13 @@ import json, sys
 print(json.dumps([{"number": n, "state": "OPEN", "body": "x"}
                   for n in range(1, int(sys.argv[1]) + 1)]))' "$ALL_LIMIT")"
 
-run_sync pull '[]' "$GH_ALL_FULL" '[]' '[]'
+# One bead, carrying no external_ref: enough that the bead list is a set this
+# run enumerated (gqlc-nvjz below withdraws the counts when it is not), and
+# invisible to the orphan tally these two cases are about, because a bead with
+# no mirror claims no issue.
+UNMIRRORED='{"id":"b-nomirror","status":"open","external_ref":"","description":"x"}'
+
+run_sync pull "[$UNMIRRORED]" "$GH_ALL_FULL" '[]' "[$UNMIRRORED]"
 # Outright, for the reason the push side takes it outright.
 _ll="$(last_line)"
 if [ "$(argv_after 'gh issue list' 0 | grep -A1 -- '--limit' | tail -n 1)" != "$ALL_LIMIT" ]; then
@@ -1708,12 +2029,177 @@ GH_ALL_SHORT="$(python3 -c '
 import json, sys
 print(json.dumps([{"number": n, "state": "OPEN", "body": "x"}
                   for n in range(1, int(sys.argv[1]))]))' "$ALL_LIMIT")"
-run_sync pull '[]' "$GH_ALL_SHORT" '[]' '[]'
+run_sync pull "[$UNMIRRORED]" "$GH_ALL_SHORT" '[]' "[$UNMIRRORED]"
 if [ "$(last_line)" = "bd-gh-sync: pulled 0 bead(s), held 0, left $((ALL_LIMIT - 1)) unmirrored GH issue(s) alone." ]; then
     ok "an all-state listing one short of its --limit is counted as the whole set"
 else
     bad "an all-state listing one short of its --limit is counted as the whole set" \
         "got: $(last_line)"
+fi
+
+# --- gqlc-nvjz: the pull path has to witness its own bead listing ------------
+# `gqlc-w4q9` and `gqlc-mbe0` established one rule over three sets on the push
+# side: a count reaches the summary only if this run enumerated the set behind
+# it, and a listing it could not read is not an empty listing. The pull path
+# reported `held 0, left N unmirrored GH issue(s) alone` off a `bd list` that
+# answered `[]` with exit 0 — a held count over a bead set nobody witnessed, and
+# an orphan count whose whole meaning is "no bead names this issue", asserted
+# against no beads at all.
+
+# The status, first, and separately from the cardinality. Both inputs to the
+# selection were `|| : >file`, which threw the exit status away and left the
+# python's JSONDecodeError as the only account of what happened: the run
+# refused, correctly, and named neither `bd list` nor `gh issue list` as the
+# reason. Detail first, verdict last, exactly as the push twin of this case.
+bd_list_fails 1 7
+run_sync pull "[$CLAIMED]" "$GH7" '[]' "[$CLAIMED]"
+_ll="$(last_line)"
+if ! grep -q "'bd list' exited 7" "$TMP/err"; then
+    bad "a refused pull names the 'bd list' exit status behind it" \
+        "no line names it: $(grep -c . "$TMP/err") line(s) on stderr"
+elif grep -q "'gh issue list' exited" "$TMP/err"; then
+    # The other half of naming a reason, and the half a positive grep cannot
+    # see: `gh issue list` answered here, so a line blaming it is a false lead.
+    # Relax that input's `-ne 0` in bd-gh-sync to `-ge 0` and this run prints
+    # `'gh issue list' exited 0 — GitHub's state could not be read at all.` The
+    # grep above still passes: the line it asks for is present and correct.
+    bad "a refused pull names the 'bd list' exit status behind it" \
+        "blamed the input that answered: $(grep "'gh issue list' exited" "$TMP/err")"
+elif [ -z "$_ll" ] || [ -n "${_ll##*SKIPPING pull*}" ]; then
+    bad "a refused pull names the 'bd list' exit status behind it" \
+        "the detail displaced the verdict from the last line: $_ll"
+else
+    ok "a refused pull names the 'bd list' exit status, verdict still last"
+fi
+
+# The same for the other input. `gh issue list` failing is the one the operator
+# acts on differently — GitHub is down or the token expired, and no amount of
+# waiting for the bd database helps.
+GH_LIST_RC=6
+run_sync pull "[$CLAIMED]" "$GH7" '[]' "[$CLAIMED]"
+GH_LIST_RC=0
+_ll="$(last_line)"
+if ! grep -q "'gh issue list' exited 6" "$TMP/err"; then
+    bad "a refused pull names the 'gh issue list' exit status behind it" \
+        "no line names it: $(grep -c . "$TMP/err") line(s) on stderr"
+elif grep -q "'bd list' exited" "$TMP/err"; then
+    bad "a refused pull names the 'gh issue list' exit status behind it" \
+        "blamed the input that answered: $(grep "'bd list' exited" "$TMP/err")"
+elif [ -z "$_ll" ] || [ -n "${_ll##*SKIPPING pull*}" ]; then
+    bad "a refused pull names the 'gh issue list' exit status behind it" \
+        "the detail displaced the verdict from the last line: $_ll"
+else
+    ok "a refused pull names the 'gh issue list' exit status, verdict still last"
+fi
+
+# ...and the cardinality, which the statuses above cannot speak for: `bd list`
+# answering `[]` and exiting 0 is what the wrong workspace looks like, and it is
+# the shape this bead was filed on. Both counts on the summary line are derived
+# from that list — "held" directly, and "unmirrored" because an issue is
+# unmirrored only relative to a bead set — so both have to be withdrawn.
+run_sync pull '[]' '[{"number":11,"state":"OPEN","body":"x"}]' '[]' '[]'
+_ll="$(last_line)"
+if [ "$RC" -ne 0 ]; then
+    bad "an empty pull-side bead list is blind, not held-zero" \
+        "exited $RC, and pull rides on 'git pull': $_ll"
+elif [ -z "${_ll##*held 0*}" ]; then
+    bad "an empty pull-side bead list is blind, not held-zero" \
+        "printed a held count over a list nobody enumerated: $_ll"
+elif [ -z "$_ll" ] || [ -n "${_ll##*held an unknown number*}" ]; then
+    bad "an empty pull-side bead list is blind, not held-zero" "got: $_ll"
+elif [ -n "${_ll##*left an unknown number of unmirrored GH issue(s) alone*}" ]; then
+    bad "an empty pull-side bead list is blind, not held-zero" \
+        "called an issue unmirrored against no beads at all: $_ll"
+elif ! grep -q 'the bead list came back empty' "$TMP/err"; then
+    bad "an empty pull-side bead list is blind, not held-zero" \
+        "withdrew the counts without saying why: $_ll"
+else
+    ok "an empty pull-side bead list withdraws both counts derived from it"
+fi
+
+# ...and on that same shape the held-bead check must not report itself skipped.
+# An empty `before` snapshot is VACUOUS, which is the check running and finding
+# no baseline. Folding VACUOUS in with the statuses that mean nobody looked —
+# dropping it from the arm that accepts OK — appends `WARNING: the held-bead
+# check did not run (the check itself did not run)` to a summary where it is
+# simply false, and the suite stayed green through it. Nothing can hide behind
+# that warning, since an empty `before` is exactly "no bead existed to protect",
+# so this is noise rather than a hole. Pinned anyway for the reason the script's
+# own comments give twice: a check that cries wolf is a check that gets
+# `2>/dev/null` bolted onto it.
+run_sync pull '[]' '[{"number":11,"state":"OPEN","body":"x"}]' '[]' '[]'
+_ll="$(last_line)"
+if ! grep -q 'the bead list came back empty' "$TMP/err"; then
+    bad "a vacuous held-bead check does not report itself as not-run" \
+        "the fixture never emptied the bead list, so the check was never vacuous"
+elif [ -z "${_ll##*held-bead check did not run*}" ]; then
+    bad "a vacuous held-bead check does not report itself as not-run" \
+        "the check ran and found no baseline, and the summary calls it skipped: $_ll"
+else
+    ok "a vacuous held-bead check does not report itself as not-run"
+fi
+
+# ...and the two withdrawals have to be ordered, because they overlap and only
+# one of them speaks for the held arm. Every fixture above exercises exactly one
+# at a time — the --limit cases carry a bead, the empty-list case carries a
+# single uncapped issue — so which of the two arms wins when both conditions
+# hold in the same run was never asserted anywhere. Swapping the `if` and the
+# `elif` that decide it leaves this whole file green while the summary reads
+# `held 0` over a bead list nobody enumerated, naming the cap as the only thing
+# withdrawn: the gqlc-nvjz defect verbatim, restored under a second condition.
+# The bead list is the more fundamental of the two — the orphan tally is a claim
+# about the GH listing *measured against* the bead set, so a bead set nobody
+# enumerated withdraws it whatever the GH listing did — and it therefore has to
+# be read first.
+run_sync pull '[]' "$GH_ALL_FULL" '[]' '[]'
+_ll="$(last_line)"
+if [ "$RC" -ne 0 ]; then
+    bad "an unenumerated bead list outranks a capped GitHub listing" \
+        "exited $RC, and pull rides on 'git pull': $_ll"
+elif ! grep -q "the GitHub listing came back at its --limit of $ALL_LIMIT" "$TMP/err"; then
+    bad "an unenumerated bead list outranks a capped GitHub listing" \
+        "the fixture never reached the cap, so the two conditions are not both live"
+elif ! grep -q 'the bead list came back empty' "$TMP/err"; then
+    bad "an unenumerated bead list outranks a capped GitHub listing" \
+        "the fixture never emptied the bead list, so the two conditions are not both live"
+elif [ -z "${_ll##*held 0*}" ]; then
+    bad "an unenumerated bead list outranks a capped GitHub listing" \
+        "the cap displaced the empty bead list and printed a held count over a list nobody enumerated: $_ll"
+elif [ -z "$_ll" ] || [ -n "${_ll##*held an unknown number of bead(s) (the bead list came back empty)*}" ]; then
+    bad "an unenumerated bead list outranks a capped GitHub listing" \
+        "the held arm does not name the bead list: $_ll"
+elif [ -n "${_ll##*left an unknown number of unmirrored GH issue(s) alone (the bead list came back empty)*}" ]; then
+    bad "an unenumerated bead list outranks a capped GitHub listing" \
+        "the orphan arm blamed the cap over a bead set nobody enumerated: $_ll"
+else
+    ok "both withdrawals at once name the bead list, not the cap"
+fi
+
+# ...and the guard must not be the push side's, transplanted. There, a run that
+# minted N issues and then saw an empty open listing is contradictory on its
+# face. Here the corresponding witness would be "beads carry external_refs, so
+# the all-state listing cannot be empty" — and that is false. `external_ref` is
+# matched by /issues/(\d+)$ over any URL, so a ref legitimately names another
+# repository; mirrored beads over an empty listing for *this* one is a reachable
+# configuration, and refusing it would fire on every `git pull`. The bead stays
+# held, by the same not-in-listing rule that holds any bead whose issue is out
+# of view, and the run reports real numbers and exits 0.
+FOREIGN="{\"id\":\"b-elsewhere\",\"status\":\"open\",\"external_ref\":\"https://github.com/other/repo/issues/42\",\"description\":\"x\"}"
+run_sync pull "[$FOREIGN]" '[]' '[]' "[$FOREIGN]"
+if [ "$RC" -ne 0 ]; then
+    bad "a mirrored bead over an empty all-state listing is not refused" \
+        "exited $RC: $(last_line)"
+elif grep -q 'SKIPPING pull' "$TMP/err"; then
+    bad "a mirrored bead over an empty all-state listing is not refused" \
+        "refused a legitimately empty listing: $(last_line)"
+elif ! grep -q 'holding b-elsewhere (GH #42) out of the pull' "$TMP/err"; then
+    bad "a mirrored bead over an empty all-state listing is not refused" \
+        "the bead was not held out of the pull: $(grep 'b-elsewhere' "$TMP/err" | tr '\n' '|')"
+elif [ "$(last_line)" != "bd-gh-sync: pulled 0 bead(s), held 1, left 0 unmirrored GH issue(s) alone." ]; then
+    bad "a mirrored bead over an empty all-state listing is not refused" \
+        "got: $(last_line)"
+else
+    ok "a bead whose external_ref names another repository is held, not refused"
 fi
 
 # --- gqlc-w4q9 review: the header's claim has to hold on every exit ----------
@@ -1749,6 +2235,247 @@ if [ "$(last_line)" = "bd-gh-sync: pushed 1 new bead(s), closed 0 stale GH mirro
     ok "the mktemp stub is transparent when its knob is unset"
 else
     bad "the mktemp stub is transparent when its knob is unset" "got: $(last_line)"
+fi
+
+# --- the assertion census ----------------------------------------------------
+# The one property this file cannot get from `set -u`, from shellcheck or from
+# its own exit status: that it still makes every assertion it made yesterday.
+# `0 failed` is true of a file that quietly lost an assertion and true of one
+# that did not, and nothing in the justfile, in .github/workflows or in
+# lint-hooks-test.sh reads the passed count at all. Both of this tree's ways of
+# losing an assertion are silent: a dropped closing quote on this branch
+# swallowed twenty lines including a whole block and the run still said `0
+# failed`, one assertion lighter, and deleting a block outright says `0 failed`
+# one lower and looks like a clean run. A guard structurally unable to
+# fail is this repository's most common defect; a suite that cannot notice
+# losing a guard is that same defect one level up.
+#
+# Deliberately not a count. A count written beside the thing it counts goes
+# stale in silence and fails as one number not equalling another, which names
+# nothing to go and look at — this tree has already deleted one such header
+# rather than correct
+# it. A census of names fails as a set difference with a name in it, so the
+# reader is told which assertion stopped running rather than that one did.
+#
+# Deliberately not derived from this file's own `ok` lines either. That set
+# shrinks along with the block it describes, which is precisely the edit it
+# exists to survive: a census a deletion also deletes agrees with the deletion.
+# The names are written down here, away from the blocks that raise them, so
+# losing a block while this list stands — deleted, commented out, swallowed by a
+# quote, stranded behind a branch that stopped running — arrives as the same
+# missing name. Two assertions sharing a name would reopen the hole, since
+# either could then be deleted under cover of the other, so that is refused here
+# too.
+#
+# What it does not catch, open rather than closed, all three measured under bd
+# gqlc-tvv7: an edit that deletes a block and its census entry together; an edit
+# that leaves the name and both arms in place while weakening what the block
+# tests, since this compares names and not strength; and the deletion of this
+# census itself, which guards membership and not its own existence. A fourth is
+# bounded rather than open — a run that is already red, where the roll-call is
+# not read at all — at the branch that skips it below.
+#
+# Adding an assertion costs one line here, and the failure prints the line to
+# add. Written in execution order for a reader; compared as a set.
+_census="the assertion census matches the assertions that ran"
+LC_ALL=C sort -u >"$TMP/census.txt" <<'CENSUS'
+in_progress bead with GH content to lose is held and reported
+blocked bead with GH content to lose is held and reported
+deferred bead with GH content to lose is held and reported
+in_progress bead byte-identical to an open mirror is held silently
+blocked bead byte-identical to an open mirror is held silently
+deferred bead byte-identical to an open mirror is held silently
+blocked bead whose mirror was closed on GH is still reported
+open bead whose GH mirror closed is pulled
+GH body ahead of bd does not block the pull
+an eligible pull is issued with --prefer-github, or GitHub's added lines lose
+an eligible pull is issued with --pull-only, or the pull pushes as well
+bd-only amendment is held out of pull scope
+bd-side re-indent is held out of pull scope
+bd-side reorder is held out of pull scope
+GH body that does not extend the bead description is held out
+a GH body that prepends to the bead description is held out
+trailing-block deletion is indistinguishable from a GH append (known)
+a CRLF GH body still counts as extending an LF bead description
+a bd-only amendment is still held out when the GH body is CRLF
+a no-break space in the bead description does not block the pull
+locally-closed bead still open on GH is held out
+bead already in sync with GH is not re-pulled
+unreadable bead payload blocks the pull and says so
+the refusal is the last line a tail -1 caller keeps
+the selection's own error is still reported, above the verdict
+unreadable GH payload blocks the pull
+no eligible bead means bd github sync is not invoked
+hostile payload reaches no unscoped pull (both empty)
+hostile payload reaches no unscoped pull (beads malformed)
+hostile payload reaches no unscoped pull (gh malformed)
+hostile payload reaches no unscoped pull (both null)
+hostile payload reaches no unscoped pull (empty strings)
+hostile payload reaches no unscoped pull (bead id empty)
+hostile payload reaches no unscoped pull (bead id flag-shaped)
+hostile payload reaches no unscoped pull (gh fields null)
+250 eligible beads are split into 3 batches, each id sent once
+guard runs on a payload past MAX_ARG_STRLEN
+orphan GH issue is reported, not minted into a bead
+closed orphan is neither adopted nor reported
+bead closed before its first push has its new mirror closed
+already-mirrored closed bead still has its mirror closed
+open bead's mirror is left alone
+a push with nothing to do still says so on the line a caller keeps
+a push that did everything it set out to do exits 0
+the summary counts both arms: beads mirrored and mirrors closed
+an unusable bead id is refused and named, the bead beside it pushed (apostrophe)
+a refused bead id makes the push fail loudly (apostrophe)
+an unusable bead id is refused and named, the bead beside it pushed (space)
+a refused bead id makes the push fail loudly (space)
+an unusable bead id is refused and named, the bead beside it pushed (leading dash)
+a refused bead id makes the push fail loudly (leading dash)
+an unusable bead id is refused and named, the bead beside it pushed (newline)
+a refused bead id makes the push fail loudly (newline)
+an unusable bead id is refused and named, the bead beside it pushed (empty)
+a refused bead id makes the push fail loudly (empty)
+a push that mirrored nothing because every id was refused says exactly that
+a batch that exited non-zero is named as a failed batch, not a bad id
+a failed batch makes the push exit non-zero
+250 unmirrored beads are split into 3 batches, each id sent once
+each bead id reaches 'bd github push' as an argv word of its own
+'gh issue close' gets the issue number and the whole comment as one argument each
+an unusable bead list refuses the push and says so ('bd list' exits non-zero)
+an unusable bead list refuses the push and says so (no output)
+an unusable bead list refuses the push and says so (whitespace only)
+an unusable bead list refuses the push and says so (truncated JSON)
+an unusable bead list refuses the push and says so (not JSON at all)
+an unreadable post-push snapshot is reported, not walked as empty
+an unreadable open-issue listing is reported, not read as nothing stale
+a close pass that wrote no verdict reads as blind, not as nothing stale
+an empty post-push snapshot reads as blind, not as nothing stale
+two empty snapshots read as blind, not as an empty repository
+an empty pre-push snapshot reads as blind, not as nothing to push
+a run with both snapshots readable still prints both counts and exits 0
+a mirror that would not close is named and counted
+held bead reverted behind the script's back is reported
+held bead that did not move produces no warning
+a reverted claim is reported even when no bead was eligible to pull
+the summary line carries the postcondition warning
+a held bead whose description was clobbered is reported
+a clobbered description reaches the tail -1 caller
+a bead whose status and description both moved warns once, naming both
+a held bead whose description only gained trailing whitespace is quiet
+the pull takes a before and an after snapshot of the bead list
+a postcondition that ran does not claim it was skipped
+an unusable post-pull snapshot is reported ('bd list' exits non-zero)
+an unusable post-pull snapshot is reported (no output)
+an unusable post-pull snapshot is reported (whitespace only)
+an unusable post-pull snapshot is reported (empty bead list)
+an unusable post-pull snapshot is reported (truncated JSON)
+an unusable post-pull snapshot is reported (not JSON at all)
+the blind notice names the exit status it saw
+a held bead deleted between the snapshots is reported as gone
+the summary line names the deleted held bead and says it was deleted
+a held bead whose id carries a space is named whole
+a held bead whose id carries a newline is counted once and named escaped
+the deletion warning for a newline id stays on one line
+the reverted-bead warning and its remedy name a newline id escaped
+a pulled bead missing from the second snapshot is not a held-bead finding
+an id the gate refused is watched by the held-bead detector
+a bead in a batch that exited non-zero is watched by the held-bead detector
+an exemption set that could not be written stops the held-bead check
+an empty second snapshot stays blind rather than reading as deletions
+final stderr line summarises the run for a tail -1 caller
+a failed sync is reported on the line a tail -1 caller keeps
+an empty bead id reaches no 'bd github sync' batch
+zero batches run is reported as a failed pull
+one unusable bead id does not take the batch down with it
+a bead id carrying a quote is refused rather than passed to argv
+the summary counts what was pulled, not what was eligible
+the refused bead id is named on stderr
+a bead id carrying a space is refused, not truncated to its first token
+no batch is issued with an empty --issues
+a hold and a pull cannot name the same bead in one run
+a bead id carrying a newline is refused by name, escaped
+a bead id that cannot be passed is a failed pull, not a success
+a split id does not blind the held-bead check for the id it collides with
+a bead id that splits its record reaches no batch and is counted as unpulled
+a failed batch, a hold, an orphan and a moved bead share one summary line
+the push blind notice names the 'gh issue list' exit status it saw
+the 'gh issue list' stub is transparent when its knob is unset
+the push blind notice names the 'bd list' exit status it saw
+a refused push names the 'bd list' exit status, verdict still last
+a postcondition whose interpreter died says the check did not run
+an unreadable post-pull list is named as unreadable, not as not-run
+the python3 stub is transparent when its knob is unset
+a bead id carrying a newline reaches the close comment escaped, one argv word
+a bead with no id leaves the close comment's bead name empty, not 'None'
+a multi-line close_reason contributes only its first line to the comment
+a close_reason past 300 characters is clamped to 300 with an ellipsis
+a push that minted issues and then saw none of them refuses to count
+an empty open listing after a push of nothing is a legitimate empty
+an open listing returning exactly its --limit is treated as truncated
+an open listing one short of its --limit is counted as the whole set
+a pull over a capped GitHub listing reports the count as unknown
+an all-state listing one short of its --limit is counted as the whole set
+a refused pull names the 'bd list' exit status, verdict still last
+a refused pull names the 'gh issue list' exit status, verdict still last
+an empty pull-side bead list withdraws both counts derived from it
+a vacuous held-bead check does not report itself as not-run
+both withdrawals at once name the bead list, not the cap
+a bead whose external_ref names another repository is held, not refused
+a temp directory that cannot be made is reported (pull)
+a temp directory that cannot be made is reported (push)
+the mktemp stub is transparent when its knob is unset
+the assertion census matches the assertions that ran
+CENSUS
+
+# The census names itself: this assertion is running, so it is executed by
+# construction, and a reader of the list above sees the whole inventory rather
+# than all of it but one.
+{ cat "$TMP/ran.txt"; printf '%s\n' "$_census"; } | LC_ALL=C sort >"$TMP/ran_sorted.txt"
+uniq "$TMP/ran_sorted.txt" >"$TMP/ran_uniq.txt"
+_dup="$(uniq -d "$TMP/ran_sorted.txt" | tr '\n' '|' | sed 's/|$//')"
+_lost="$(LC_ALL=C comm -23 "$TMP/census.txt" "$TMP/ran_uniq.txt" | tr '\n' '|' | sed 's/|$//')"
+_uncensused="$(LC_ALL=C comm -13 "$TMP/census.txt" "$TMP/ran_uniq.txt" | tr '\n' '|' | sed 's/|$//')"
+if [ "$fail" -ne 0 ]; then
+    # Not read on a run that is already red, and said out loud rather than
+    # passed quietly. 65 of the names a `bad` arm here can log never appear on
+    # an `ok` — a failing block logs "…is reported" where a passing one logs
+    # "…is reported as gone" — so a genuine failure comes back through here as a
+    # missing name *and* an unregistered one, and a census that cries wolf on
+    # every red run is a census nobody reads. Counted, not estimated: an earlier
+    # draft said "several", meaning about twenty, and was out by a factor of
+    # three in the direction that makes the exemption more necessary rather than
+    # less. Quoted once, with the command under it: the draft this replaces put
+    # a second, differently-derived figure beside it, and the two disagreed.
+    #
+    #   f=.githooks/tests/bd-gh-sync-test.sh
+    #   comm -23 <(grep -oE '(^|[ ;)])bad +"[^"]*"' "$f" | sed 's/^[^"]*//' | sort -u) \
+    #            <(grep -oE '(^|[ ;)])ok +"[^"]*"' "$f" | sed 's/^[^"]*//' | sort -u)
+    #
+    # The exemption is a hole, and it is bounded rather than closed. An edit
+    # that both breaks something and loses an assertion reports only the break:
+    # replace the `ok` of `the mktemp stub is transparent when its knob is
+    # unset` with `:`, turn `if [ "${_beads_n:-0}" -eq 0 ]` in bd-gh-sync into
+    # `if false`, and the run prints two FAILs, this note, and never names the
+    # assertion it lost. What bounds it is that such a run cannot land. The last
+    # line of this file exits non-zero on any FAIL; justfile:183 runs this file
+    # inside `test-hooks`; `test` depends on `test-hooks`; `just` aborts a
+    # recipe on its first non-zero line and exits with that status; so `just
+    # test` at .github/workflows/ci.yml:64 fails the `test` job, which is a
+    # required status check on master with enforce_admins on. The suite is
+    # failing already; fix that and the roll-call speaks on the next run, which
+    # is the only run whose silence this exists to distrust. The loss of a name
+    # is deferred to that run, not lost.
+    printf -- 'note - the assertion census is not read on a red run (%d failed above)\n' "$fail"
+elif [ -n "$_dup" ]; then
+    bad "$_census" \
+        "two assertions answer to one name, so either could be deleted under cover of the other: $_dup"
+elif [ -n "$_lost" ]; then
+    bad "$_census" \
+        "declared in the census and did not run — deleted, unreachable or renamed: $_lost"
+elif [ -n "$_uncensused" ]; then
+    bad "$_census" \
+        "ran and is not in the census; add it there so its loss would be noticed: $_uncensused"
+else
+    ok "$_census"
 fi
 
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"

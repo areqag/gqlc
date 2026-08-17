@@ -41,11 +41,19 @@
 #            pull at all.
 #            Whatever the allowlist, the run ends by re-reading the bead list
 #            and reporting any out-of-scope bead whose status or description
-#            moved, plus the fact that it could not look if it could not — the
-#            allowlist is empty in the steady state, so a postcondition
-#            conditional on a pull would never run. The last stderr line
-#            carries the outcome, warnings included, because the session-start
-#            caller keeps only that line.
+#            moved, or that is gone from the list altogether, plus the fact
+#            that it could not look if it could not — the allowlist is empty in
+#            the steady state, so a postcondition conditional on a pull would
+#            never run. Deletion is named apart from the rest because it is the
+#            one change no re-assert undoes. The last stderr line carries the
+#            outcome, warnings included, because the session-start caller keeps
+#            only that line, and no count reaches it unless this run enumerated
+#            the set behind it: a bead list that came back empty withdraws both
+#            arms read off it, a GitHub listing cut off at its --limit withdraws
+#            the orphan one. Emptiness here withdraws a number and never
+#            refuses the pull — an external_ref is matched over any URL and may
+#            name another repository, so mirrored beads over an empty listing
+#            is a legitimate configuration rather than a lost one.
 #   - push:  mirror bd-created beads that have no GH mirror yet, AND close
 #            GH issues whose bead was closed locally.
 #            Deliberately does NOT run `bd github sync --push-only` (which
@@ -109,11 +117,22 @@ _gh_limit_all=1000
 _gh_limit_open=500
 
 if [ "$_action" = "pull" ]; then
+  # Both statuses are kept rather than thrown away with `|| : >file`. An input
+  # that will not load already refuses the run below, on the selection's own
+  # JSONDecodeError — but that traceback is the same whether bd never answered
+  # or answered with something unparseable, and the two send the operator to
+  # different places: one is contention on the database, the other is a listing
+  # to go and look at. Deciding "unreadable" on the status rather than inferring
+  # it from what came back is also what keeps this separable from cardinality,
+  # which on this path is not decidable as failure at all. Same reading as the
+  # push side's `_list_rc`.
+  _list_rc=0
   bd list --status all --limit 0 --json >"$_tmp/beads.json" 2>/dev/null \
-    || : >"$_tmp/beads.json"
+    || { _list_rc=$?; : >"$_tmp/beads.json"; }
+  _gh_rc=0
   GITHUB_TOKEN="$_token" gh issue list --state all --limit "$_gh_limit_all" \
     --json number,state,body >"$_tmp/gh.json" 2>/dev/null \
-    || : >"$_tmp/gh.json"
+    || { _gh_rc=$?; : >"$_tmp/gh.json"; }
 
   # Emits ALLOW/HOLD/ORPHAN records terminated by DONE. That sentinel is what
   # separates "selection ran and chose nothing" from "selection did not run";
@@ -228,6 +247,13 @@ for n, (state, _) in sorted(gh.items()):
 if len(issues) >= int(sys.argv[3]):
     out.append(f"TRUNCATED {len(issues)}")
 
+# How many beads the selection actually walked. "Nothing was held back" and "the
+# list this ran on was empty" emit the same zero HOLD records, and only the
+# first is a measurement. The ORPHAN tally rides on the same list — an issue is
+# unmirrored only relative to a set of beads — so an empty one turns every
+# mirrored issue into an orphan besides.
+out.append(f"COUNT {len(beads)}")
+
 for line in out:
     print(line)
 print("DONE")
@@ -240,6 +266,16 @@ PYEOF
     # echoing the traceback below it handed .claude/settings.json a bare
     # JSONDecodeError and no hint that a pull had been refused at all.
     sed 's/^/bd-gh-sync:   /' "$_tmp/plan.err" >&2 2>/dev/null
+    # Which of the two inputs would not answer, where either did not. The
+    # traceback above names the file that would not parse and nothing about why
+    # it was empty, and "wait for the bd database" and "GitHub or the token is
+    # the problem" are not the same instruction.
+    if [ "$_list_rc" -ne 0 ]; then
+      echo "bd-gh-sync: 'bd list' exited ${_list_rc} — usually something else holds the bd database." >&2
+    fi
+    if [ "$_gh_rc" -ne 0 ]; then
+      echo "bd-gh-sync: 'gh issue list' exited ${_gh_rc} — GitHub's state could not be read at all." >&2
+    fi
     echo "bd-gh-sync: selection exited ${_rc}; an unscoped pull would let GitHub" >&2
     echo "bd-gh-sync: overwrite local state it cannot represent. Refusing." >&2
     echo "bd-gh-sync: SKIPPING pull — could not decide which beads are safe to pull." >&2
@@ -262,6 +298,13 @@ PYEOF
   _failed=0
   _pulled=0
   _unusable=0
+  # The ids behind _pulled, kept rather than only counted: the postcondition
+  # below exempts from its held-bead check exactly the beads a pull could have
+  # rewritten, and this is that set. Created here, before any batch can append to
+  # it, because the postcondition has no fallback for its absence: an empty file
+  # is a run that pulled nothing, and no file at all is a run whose exemption set
+  # was never established, which stops the check rather than emptying it.
+  : >"$_tmp/pulled.txt"
 
   # Batched here rather than by `xargs -n`, because xargs parses quotes: a
   # single bead id containing an apostrophe aborted the whole construction with
@@ -274,6 +317,10 @@ PYEOF
     if GITHUB_TOKEN="$_token" bd github sync --pull-only --prefer-github \
       --issues "$1"; then
       _pulled=$((_pulled + $2))
+      # Ids reach here only past the charset gate, which admits neither a comma
+      # nor a newline, so the accumulator splits back into exactly the ids that
+      # went into it and each lands on a line of its own.
+      printf '%s\n' "$1" | tr ',' '\n' >>"$_tmp/pulled.txt"
     else
       _failed=$((_failed + 1))
       echo "bd-gh-sync: 'bd github sync' exited non-zero on batch ${_batches}; those beads may not have been pulled." >&2
@@ -328,6 +375,14 @@ PYEOF
   # some other bead happening to be pullable. Arming the detector only when a
   # pull runs disarms it permanently.
   #
+  # What it exempts is the ids a batch that exited 0 was handed, not the
+  # allowlist. The allowlist is what this run intended to pull; the summary
+  # above counts as pulled only what a batch that exited 0 carried, and the two
+  # sets differ on exactly the beads whose handling went wrong — an id the
+  # charset gate refused, a batch that died. Exempting those left the detector
+  # blind where it is most needed, on a run that had already announced them as
+  # unpulled. The summary and the detector now describe one run.
+  #
   # The detector also has to report its own liveness. The second snapshot fails
   # exactly when something else holds the bd database — which is the same event
   # (`bd hooks run post-merge` replaying JSONL) the detector exists to catch —
@@ -340,7 +395,7 @@ PYEOF
   _post_rc=0
   bd list --status all --limit 0 --json >"$_tmp/beads_post.json" 2>/dev/null \
     || { _post_rc=$?; : >"$_tmp/beads_post.json"; }
-  python3 - "$_tmp/beads.json" "$_tmp/beads_post.json" "$_tmp/allow.txt" \
+  python3 - "$_tmp/beads.json" "$_tmp/beads_post.json" "$_tmp/pulled.txt" \
     "$_tmp/moved.txt" "$_tmp/post_status.txt" >&2 <<'PYEOF' || true
 import json, sys
 
@@ -362,6 +417,14 @@ def status(text):
     with open(sys.argv[5], "w", encoding="utf-8") as fh:
         fh.write(text + "\n")
 
+# Ids here come off `bd list`, so unlike the two selections above they have not
+# been past the charset gate: one carrying a newline splits its moved.txt record
+# in two and the summary reports one bead as two, which is the count nobody
+# measured that this path exists to refuse. Escaping leaves every id the gate
+# would accept byte-for-byte alone.
+def one_line(s):
+    return str(s).encode("unicode_escape").decode("ascii")
+
 before = beads(sys.argv[1])
 after = beads(sys.argv[2])
 if not before:
@@ -373,36 +436,67 @@ if not before:
 if not after:
     status("BLIND post-pull bead list unreadable")
     sys.exit(0)
+# The ids a batch that exited 0 was handed — the beads a pull could have
+# rewritten, and the same set the summary line counts as pulled. Not the
+# allowlist: that is what the run intended to pull, and it still names an id the
+# charset gate refused and an id whose batch died, both of which this run
+# reported as unpulled on stderr. Exempting a bead the run says it did not pull
+# takes the detector off duty exactly where the run already went wrong.
+#
+# Read without a fallback, and before the verdict is written. The caller creates
+# this file, so a read that fails means the exemption set is unknown — and an
+# unknown exemption set silently defaulted to empty is the detector reporting
+# every pulled bead as held. Dying here leaves no status file, which is the
+# script's existing "the check did not run" and reaches the summary line.
+with open(sys.argv[3], encoding="utf-8") as fh:
+    pulled = {ln.strip() for ln in fh if ln.strip()}
 status("OK")
-try:
-    with open(sys.argv[3], encoding="utf-8") as fh:
-        allowed = {ln.strip() for ln in fh if ln.strip()}
-except Exception:
-    allowed = set()
 
+# The set this run actually held: every bead the first snapshot saw that no
+# batch reported pulling. Stated as a set rather than left implicit in the loop
+# below, because the finding turns on it. A bead absent from the second snapshot
+# used to be skipped outright, which made deletion — the one change no re-assert
+# undoes — the single transition the detector could not see. Absence is only
+# ambiguous while "held" is inferred from the intersection of the two snapshots;
+# against the held set it decides, because the run enumerated that set itself.
+#
+# The wholesale case is already gone above: an `after` that came back empty is
+# BLIND and exits, so nothing here can mistake a snapshot nobody could read for
+# a tracker somebody emptied. What reaches this point is a snapshot that loaded
+# and still holds beads, and a held bead missing from it was deleted.
 moved = []
 for bid, was in sorted(before.items()):
-    if bid in allowed or bid not in after:
+    if bid in pulled:
+        continue
+    name = one_line(bid)
+    if bid not in after:
+        moved.append("GONE " + name)
+        print(f"bd-gh-sync: WARNING {name} was held out of the pull but is gone "
+              f"from the bead list afterwards — it was deleted while this run "
+              f"was protecting it. No status can be re-asserted onto a bead that "
+              f"is not there; recover it from bd's own history.")
         continue
     now = after[bid]
     if now == was:
         continue
-    moved.append(bid)
+    moved.append("MOVED " + name)
     what, how = [], []
     if now[0] != was[0]:
         what.append(f"{was[0]} -> {now[0]}")
-        how.append(f"Re-assert the status with 'bd update {bid} --status {was[0]}'.")
+        how.append(f"Re-assert the status with 'bd update {name} --status {was[0]}'.")
     if now[1] != was[1]:
         what.append("description")
         how.append("The pre-pull description survives only in bd's own history.")
-    print(f"bd-gh-sync: WARNING {bid} was held out of the pull but changed "
+    print(f"bd-gh-sync: WARNING {name} was held out of the pull but changed "
           f"{', '.join(what)}. " + " ".join(how))
 
 # Read back by the summary line: a warning printed here is above the summary
-# and a `tail -1` caller never sees it.
+# and a `tail -1` caller never sees it. Each record carries what happened as
+# well as the id, because a deleted bead and a reverted one call for different
+# responses and the summary has to be able to tell the reader which it has.
 with open(sys.argv[4], "w", encoding="utf-8") as fh:
-    for bid in moved:
-        fh.write(bid + "\n")
+    for rec in moved:
+        fh.write(rec + "\n")
 PYEOF
 
   # A check that could not run is a finding in its own right: the operator is
@@ -422,6 +516,35 @@ PYEOF
     echo "bd-gh-sync: that usually means something else holds the bd database — which" >&2
     echo "bd-gh-sync: is also what reverts a claim behind this script's back. Re-run" >&2
     echo "bd-gh-sync: 'git pull' once it is free, or check claims with 'bd list'." >&2
+  fi
+
+  # Both numbers on the summary line are read off the bead listing: "held"
+  # directly, and "unmirrored" because an issue has no bead only relative to a
+  # set of beads. `bd list` answering `[]` with exit 0 is the ordinary shape of
+  # the wrong workspace — the statuses above cannot see it — and it walks
+  # straight to `held 0, left N unmirrored GH issue(s) alone`, two counts over a
+  # set nobody enumerated, with every mirrored issue reported as an orphan
+  # besides. Detail here, counts withdrawn from the summary below. Same ruling
+  # as the push side's empty pre-push snapshot.
+  #
+  # Deliberately *not* the push side's other witness. There, N > 0 issues minted
+  # and an empty open listing in the same run contradict each other on their
+  # face. The pull-side analogue would be "beads carry external_refs, so the
+  # all-state listing cannot be empty" — and that is no contradiction at all: a
+  # ref is matched by /issues/(\d+)$ over any URL, so it legitimately names
+  # another repository, and refusing that shape would fire on every merge
+  # against a repo whose beads were imported from elsewhere. The GitHub listing
+  # is witnessed by its exit status above and its --limit below; only the bead
+  # listing's own cardinality is decided here, where no foreign ref can reach.
+  _unwitnessed=""
+  _beads_n=$(sed -n 's/^COUNT //p' "$_tmp/plan.txt")
+  if [ "${_beads_n:-0}" -eq 0 ]; then
+    _unwitnessed="the bead list came back empty"
+    echo "bd-gh-sync: the bead list came back empty when this run chose what to" >&2
+    echo "bd-gh-sync: pull, so which beads were held back — and which GH issues" >&2
+    echo "bd-gh-sync: have no bead at all — was never established. An empty" >&2
+    echo "bd-gh-sync: repository and a bd database nobody could read are the same" >&2
+    echo "bd-gh-sync: bytes here. Re-run 'git pull' once the database is free." >&2
   fi
 
   # The selection saw its listing arrive at the cap, so how many issues GitHub
@@ -457,19 +580,39 @@ PYEOF
   else
     _summary="bd-gh-sync: pulled ${_pulled} bead(s)"
   fi
-  # The held count is over the beads, which were enumerated in full; the orphan
-  # count is over the GH listing, which may not have been. Same rule as the push
-  # side's two arms: no number goes on the one line the caller keeps unless the
-  # set behind it was witnessed.
+  # The held count is over the beads; the orphan count is over both sets, since
+  # "unmirrored" is a claim about the GH listing measured against the bead one.
+  # Each arm is therefore withdrawn by whatever left its set unwitnessed — an
+  # unenumerated bead list takes both, a capped GitHub listing takes only the
+  # orphan arm. Same rule as the push side's two arms: no number goes on the one
+  # line the caller keeps unless the set behind it was witnessed.
+  _held_arm="held $(grep -c '^HOLD ' "$_tmp/plan.txt")"
   _orphan_arm="left $(grep -c '^ORPHAN ' "$_tmp/plan.txt") unmirrored GH issue(s) alone"
-  [ -n "$_capped" ] &&
+  if [ -n "$_unwitnessed" ]; then
+    _held_arm="held an unknown number of bead(s) (${_unwitnessed})"
+    _orphan_arm="left an unknown number of unmirrored GH issue(s) alone (${_unwitnessed})"
+  elif [ -n "$_capped" ]; then
     _orphan_arm="left an unknown number of unmirrored GH issue(s) alone (${_capped})"
-  _summary="${_summary}, held $(grep -c '^HOLD ' "$_tmp/plan.txt"), ${_orphan_arm}."
+  fi
+  _summary="${_summary}, ${_held_arm}, ${_orphan_arm}."
   if [ -s "$_tmp/moved.txt" ]; then
     _moved=$(wc -l <"$_tmp/moved.txt")
-    _names=$(head -n 3 "$_tmp/moved.txt" | tr '\n' ' ' | sed 's/ $//;s/ /, /g')
+    # Deletion is called out on its own rather than folded into the count: the
+    # remedy for a reverted status is the `bd update` the WARNING line above
+    # prints, and there is no such line for a bead that is gone. A reader who
+    # takes this one line and finds nothing to re-assert is a reader who
+    # concludes the warning was noise.
+    _gone=$(grep -c '^GONE ' "$_tmp/moved.txt")
+    # The record tag comes off by field and the records are joined one by one: a
+    # bead id is not guaranteed to be a single word here, and flattening the
+    # three onto a line to separate them on every space renders one bead as two
+    # names `bd show` does not answer to.
+    _names=$(awk 'NR<=3 { sub(/^[^ ]* /, ""); printf "%s%s", sep, $0; sep=", " }' \
+      "$_tmp/moved.txt")
     [ "$_moved" -gt 3 ] && _names="${_names}, +$((_moved - 3)) more"
-    _summary="${_summary} WARNING: ${_moved} bead(s) held out of the pull changed anyway (${_names}); see the WARNING lines above for the command to re-assert them."
+    _what="changed anyway"
+    [ "$_gone" -gt 0 ] && _what="${_what}, ${_gone} of them deleted outright"
+    _summary="${_summary} WARNING: ${_moved} bead(s) held out of the pull ${_what} (${_names}); see the WARNING lines above for what moved and how to recover it."
   fi
   if [ -n "$_blind" ]; then
     _summary="${_summary} WARNING: the held-bead check did not run (${_blind}); a bead reverted behind this script's back would not have been reported."
