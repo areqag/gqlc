@@ -1,10 +1,10 @@
 // The chain that makes .githooks/tests/*.sh block a merge: the ci.yml `test`
 // job runs `just test`, `just test` depends on `test-hooks`, and `test-hooks`
-// names each suite. Every suite exits non-zero on a red row, so each link
-// carries the status — but only the last link is written per suite, and a
-// suite dropped from that recipe's body leaves every gate green. Measured
-// (bd gqlc-1ekq): deleting any one of the five lines from `test-hooks` on
-// master leaves `just test-hooks` at rc=0.
+// names each suite. What is held here is that each link is named, not that
+// each link carries a status: a suite the recipe still names but whose exit
+// is discarded (`bash ...-test.sh || true`) passes every assertion below
+// (bd gqlc-lisu). Measured (bd gqlc-1ekq): deleting any one of the five lines
+// from `test-hooks` on master leaves `just test-hooks` at rc=0.
 //
 // Asserted here rather than inside the suites because a suite that has been
 // unwired does not run, so it cannot be the thing that notices.

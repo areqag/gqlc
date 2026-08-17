@@ -17,11 +17,14 @@ be indistinguishable from 'no Closes needed', which is the whole defect
 class the gate exists to close.
 
 A PR that touches a bead without resolving it declares that with a
-'Refs: <bead-id> #<issue>' line (bd gqlc-1ekq). The declaration is checked
+'Refs: <bead-id> #<issue>' line (bd gqlc-1ekq), starting at the line's
+first character and outside any code fence. The declaration is checked
 rather than taken: the number has to be the one the bead mirrors, the
 export has to not already show the bead closed, and the body has to carry
-no closing keyword for that number. An honoured declaration prints a
-::warning:: annotation, which GitHub attaches to the check run itself.
+none of the closing keywords and reference forms GitHub documents for that
+number -- see GH_CLOSES, which is deliberately wider than the CLOSES line
+this gate demands elsewhere. An honoured declaration prints a ::warning::
+annotation, which GitHub attaches to the check run itself.
 
 Exits 0 (pass) or 1 (fail with diagnostic).
 """
@@ -35,12 +38,24 @@ import sys
 # declaration too, and one that has to be named rather than left to match no
 # bead. BEAD_ID below is what separates the two. A token with no 'gqlc-' in
 # it is not a declaration at all, so 'Bead: none' still matches nothing.
+# Unanchored, so prose and code blocks both reach it, and '\s*' spans
+# newlines. Two consequences, both rowed below: a sentence that writes an id
+# after the word 'bead:' is read as a declaration, and one naming a
+# well-formed id the export does not carry takes the skip and leaves this
+# gate demanding nothing on any branch (bd gqlc-oh30).
 BEAD_IN_BODY = re.compile(r"(?i)Bead:\s*(\S*gqlc-\S*)")
-# The opt-out marker. Anchored to the start of a line, unlike BEAD_IN_BODY:
-# this pattern's verdict is a pass, so a body that quotes the marker inside a
-# sentence must not reach it. group(2) is the rest of the line, which is
-# where the issue number has to be.
-REFS_IN_BODY = re.compile(r"(?im)^[ \t]*Refs:[ \t]*(\S*gqlc-\S*)([^\n]*)")
+# The opt-out marker. Read at the first character of a line, unlike
+# BEAD_IN_BODY, and only outside fenced code blocks: an honoured marker makes
+# this gate state on the check run that an issue stays open, so a body that
+# merely shows the spelling must not reach it. Leading whitespace is rejected
+# because four spaces is markdown's indented-code-block spelling and this
+# file's own subject matter is the marker. group(2) is the rest of the line,
+# which is where the issue number has to be.
+REFS_IN_BODY = re.compile(r"(?im)^Refs:[ \t]*(\S*gqlc-\S*)([^\n]*)")
+# A ``` or ~~~ line, which toggles a fenced block. A fence may itself be
+# indented, so the leading whitespace is allowed here even though the marker
+# does not allow it.
+FENCE = re.compile(r"^[ \t]*(?:```|~~~)")
 # A branch name carries the id with no marker, so the alphabet has to be
 # spelled out: '\S+' would swallow the rest of 'fix/gqlc-w4al-body-edits'.
 BEAD_IN_BRANCH = re.compile(r"(?i)(gqlc-[a-z0-9.]+)")
@@ -50,6 +65,27 @@ BEAD_IN_BRANCH = re.compile(r"(?i)(gqlc-[a-z0-9.]+)")
 # with nothing left to demand.
 BEAD_ID = re.compile(r"gqlc-[a-z0-9]+(?:\.[0-9]+)*")
 CLOSES = re.compile(r"(?i)(?:closes|fixes|resolves)\s+#(\d+)")
+# What GitHub might act on, which is wider than what CLOSES demands. The nine
+# keywords its docs list (close/closes/closed, fix/fixes/fixed,
+# resolve/resolves/resolved), an optional colon after the keyword, and the
+# reference forms it autolinks: '#N', 'GH-N', 'OWNER/REPO#N' and a full issue
+# URL. Asked only as "would GitHub close this number at merge", never as
+# "did the author write the line this gate demanded". They stay separate
+# patterns because the two questions fail in opposite directions: a hit here
+# refuses, a miss in CLOSES refuses. So widening this one cannot newly pass a
+# PR, whereas teaching CLOSES the same list would newly pass PRs refused
+# today ('Fixed #617' would satisfy the demand for 'Closes #617'), which is a
+# loosening and not this bead's. For the same reason the cross-repo and GH-N
+# spellings are matched without checking which repository they name: a
+# spelling matched here that GitHub would ignore costs a refusal the author
+# can resolve, and one missed costs this gate affirming that an issue stays
+# open when it does not.
+GH_CLOSES = re.compile(
+    r"(?i)\b(?:close[sd]?|fix(?:es|ed)?|resolve[sd]?)\b:?\s*"
+    r"(?:https?://github\.com/[\w.-]+/[\w.-]+/issues/"
+    r"|(?:[\w.-]+/[\w.-]+)?#"
+    r"|GH-)(\d+)"
+)
 ISSUE_N = re.compile(r"/issues/(\d+)$")
 HASH_N = re.compile(r"#(\d+)")
 
@@ -106,6 +142,21 @@ def load_bead(jsonl_path, bead_id):
     return None
 
 
+def outside_fences(pr_body):
+    """The body with the contents of fenced code blocks blanked out, line
+    count preserved. An unclosed fence swallows the rest of the body, which
+    is how GitHub renders it too."""
+    out = []
+    fenced = False
+    for line in pr_body.split("\n"):
+        if FENCE.match(line):
+            fenced = not fenced
+            out.append("")
+        else:
+            out.append("" if fenced else line)
+    return "\n".join(out)
+
+
 def declared_bead(pr_body, branch):
     """Which bead the PR is about, and whether it declares it unresolved.
 
@@ -114,16 +165,18 @@ def declared_bead(pr_body, branch):
     bead the PR touches and leaves open; the branch name is the fallback.
     """
     named = BEAD_IN_BODY.search(pr_body)
-    refs = REFS_IN_BODY.search(pr_body)
+    refs = REFS_IN_BODY.search(outside_fences(pr_body))
 
     for label, m in (("Bead:", named), ("Refs:", refs)):
         if m and not BEAD_ID.fullmatch(m.group(1)):
             refuse(
-                f"the PR body's '{label}' line declares {m.group(1)!r}, which "
-                "is not a bead id.",
+                f"the PR body's '{label}' declaration reads {m.group(1)!r}, "
+                "which is not a bead id.",
                 "Ids look like 'gqlc-w4al' or 'gqlc-h9n.22'. Backticks around",
                 "the id and a trailing full stop both land here, and an id no",
                 "bead has leaves this gate with nothing to demand.",
+                "'Bead:' is read anywhere in the body, so a sentence that",
+                "writes an id after that word lands here too.",
             )
 
     if named and refs and named.group(1).lower() == refs.group(1).lower():
@@ -148,8 +201,9 @@ def opt_out_number(refs, bead_id):
     if not hit:
         refuse(
             f"the 'Refs: {bead_id}' line names no issue number.",
-            "An opt-out has to say which GitHub issue it is leaving open:",
-            f"    Refs: {bead_id} #<issue>",
+            "An opt-out has to say which GitHub issue it is leaving open, on",
+            f"a line whose first character is the 'R' of 'Refs: {bead_id} "
+            "#<issue>'.",
             "The number is held against the bead's own mirror, so it cannot",
             "be copied from another PR.",
         )
@@ -176,12 +230,14 @@ def check_opt_out(pr_body, bead, bead_id, marker_n, expected_n):
             f"it: use 'Closes #{expected_n}'.",
         )
 
-    if expected_n in CLOSES.findall(pr_body):
+    if expected_n in GH_CLOSES.findall(pr_body):
         refuse(
             f"the PR body leaves {bead_id} open and also carries a closing "
             f"keyword for #{expected_n}.",
-            "GitHub acts on the keyword at merge whatever this check says, so",
-            f"#{expected_n} would not stay open. Drop one of the two.",
+            "A closing keyword is GitHub's to act on at merge, not this",
+            "check's, so the body would be asserting both that "
+            f"#{expected_n}",
+            "stays open and that it closes. Drop one of the two.",
         )
 
 
@@ -261,8 +317,10 @@ def main():
             "not need to push a commit or reopen the PR.",
             f"If this PR does not resolve {bead_id}, declare that instead "
             "with a",
-            f"line reading 'Refs: {bead_id} #{expected_n}'. That pass is",
-            "reported as a warning annotation on this check.",
+            f"line reading 'Refs: {bead_id} #{expected_n}' and starting at "
+            "that",
+            "line's first character. That pass is reported as a warning",
+            "annotation on this check.",
         )
 
     if expected_n not in found:

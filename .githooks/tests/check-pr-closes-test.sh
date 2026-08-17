@@ -130,10 +130,12 @@ expect_red "the refusal says an edit alone re-runs the check" \
     "Editing the body re-runs this check on its own"
 
 # The other way out of the same refusal. An author whose PR does not resolve
-# its bead has to be told the declared spelling, or the only escape left is
-# the undeclared one: rename the branch so it carries no id, which passes this
-# gate in silence and passes it for the PRs that should have closed something
-# too (bd gqlc-1ekq).
+# its bead has to be told the declared spelling, because the escapes left
+# otherwise are undeclared ones: rename the branch so it carries no id, or
+# write a 'Bead:' line naming a well-formed id the export does not carry —
+# the row above admits that second one deliberately. Both pass this gate in
+# silence, and both pass it for the PRs that should have closed something too
+# (bd gqlc-1ekq, bd gqlc-oh30).
 expect_red "the refusal spells the opt-out, with this bead's own number" \
     "$EXPORT" "$(body 'Bead: gqlc-mirrored')" "some/branch" \
     "'Refs: gqlc-mirrored #617'"
@@ -178,9 +180,11 @@ expect_green "a PR naming no bead at all passes" \
     "$EXPORT" "$(body 'no marker here')" "some/branch"
 
 # --- the sanctioned passes --------------------------------------------------
-# Each is a way through the gate, so each is a way past it: they are pinned
-# so that one more cannot be added without a test admitting it. The declared
-# opt-out is the fourth, and has a section of its own below.
+# Each is a way through the gate, so each is a way past it. A row per exit
+# records which passes are meant; nothing here fails when a new pass exit is
+# added, so that stays a reading obligation on the diff rather than an
+# asserted one. The declared opt-out is the fourth, and has a section of its
+# own below.
 
 expect_green "a bead with no GitHub mirror needs no Closes" \
     "$EXPORT" "$(body 'Bead: gqlc-local')" "some/branch"
@@ -226,6 +230,7 @@ expect_red "a malformed line ahead of the bead does not hide it" \
 # Built rather than written literally: shellcheck reads a backtick inside a
 # quoted argument as a command substitution (SC2016) whichever quotes it is in.
 BT="$(printf '\140')"
+FENCE3="$BT$BT$BT"
 
 expect_red "a backticked id on a Bead line is refused, naming the token" \
     "$EXPORT" "$(body "Bead: ${BT}gqlc-mirrored${BT}")" "some/branch" \
@@ -237,7 +242,19 @@ expect_red "an id with a trailing full stop is refused, naming the token" \
 
 expect_red "a backticked id on a Refs line is refused too" \
     "$EXPORT" "$(body "Refs: ${BT}gqlc-mirrored${BT} #617")" "some/branch" \
-    "'Refs:' line declares '${BT}gqlc-mirrored${BT}'"
+    "'Refs:' declaration reads '${BT}gqlc-mirrored${BT}'"
+
+# 'Bead:' is read anywhere in the body, so the rule reaches prose: a sentence
+# that writes an id in backticks after that word is a malformed declaration.
+# That is a refusal on a body which passed before this rule, in the direction
+# the rule was asked for, and the refusal names the token it read. Measured
+# over the repo's last 120 PR bodies: none carries such a token, so no PR
+# that passes today is refused by it.
+expect_red "a backticked id after 'bead:' in prose is refused too" \
+    "$EXPORT" "$(body "Fixed the parser.
+
+Filed the follow-up bead: ${BT}gqlc-abc${BT}.")" "some/branch" \
+    "which is not a bead id"
 
 # The other half of the same rule, and the one that says it is about
 # well-formedness rather than presence: sub-bead ids carry a dot, 84 of the
@@ -264,9 +281,11 @@ expect_green_saying "an opt-out passes and says which issue stays open" \
     "$EXPORT" "$(body 'Refs: gqlc-mirrored #617 (reopens it)')" "some/branch" \
     "issue #617 stays open at merge"
 
-# The pass has to be visible on the check run, not only in its log: this is
-# the one route through the gate that resolves nothing, and GitHub renders a
-# ::warning:: line as an annotation against the run.
+# The pass has to be visible on the check run, not only in its log. Four
+# other rows above pass without resolving anything — no bead named, no
+# mirror, an epic, a bead the export does not carry — and none of them says
+# so anywhere GitHub renders. This is the one the gate reports as a warning,
+# and GitHub renders a ::warning:: line as an annotation against the run.
 expect_green_saying "an honoured opt-out is annotated, not just logged" \
     "$EXPORT" "$(body 'Refs: gqlc-mirrored #617')" "some/branch" \
     "::warning title=check-pr-closes opt-out::"
@@ -307,6 +326,49 @@ expect_red "an opt-out beside a Closes for the same issue is refused" \
 Closes #617')" "some/branch" \
     "also carries a closing keyword for #617"
 
+# The same contradiction in every spelling GitHub documents. A spelling
+# check 4 does not know is an opt-out honoured over a body that closes the
+# issue anyway: GitHub acts on the keyword at merge while a required check
+# prints an annotation saying the issue stays open, which is the gate
+# asserting the opposite of what happens. The nine keywords are GitHub's
+# list; the four reference forms are the ones it autolinks.
+for kw in Close Closes Closed Fix Fixes Fixed Resolve Resolves Resolved; do
+    expect_red "an opt-out beside '$kw #617' is refused" \
+        "$EXPORT" "$(body "Refs: gqlc-mirrored #617
+
+$kw #617")" "some/branch" \
+        "also carries a closing keyword for #617"
+done
+
+for ref in 'Closes: #617' 'CLOSES: #617' 'Closes areqag/gqlc#617' \
+    'Closes GH-617' 'Closes https://github.com/areqag/gqlc/issues/617'; do
+    expect_red "an opt-out beside '$ref' is refused" \
+        "$EXPORT" "$(body "Refs: gqlc-mirrored #617
+
+$ref")" "some/branch" \
+        "also carries a closing keyword for #617"
+done
+
+# The wider list is check 4's alone. What the gate demands is still
+# 'Closes'/'Fixes'/'Resolves' with a bare '#N', so a body carrying one of the
+# other spellings and no marker is refused exactly as it was before check 4
+# learned them. Teaching the demand the wider list would refuse nothing new
+# and would newly pass PRs it refuses today, which is a loosening; the two
+# questions fail in opposite directions, so they stay two patterns.
+expect_red "a keyword only check 4 knows does not satisfy the demand" \
+    "$EXPORT" "$(body 'Bead: gqlc-mirrored
+
+Fixed #617')" "some/branch" \
+    "missing 'Closes #617'"
+
+# The number is held, not just the keyword: an opt-out for one issue beside a
+# Closes for a different one is two true statements.
+expect_green_saying "an opt-out beside a Closes for another issue passes" \
+    "$EXPORT" "$(body 'Refs: gqlc-mirrored #617
+
+Closes #999')" "some/branch" \
+    "issue #617 stays open at merge"
+
 expect_red "naming one bead on both a Bead and a Refs line is refused" \
     "$EXPORT" "$(body 'Bead: gqlc-mirrored
 
@@ -326,6 +388,35 @@ expect_red "a Refs: quoted inside a sentence does not opt out" \
     "$EXPORT" "$(body 'an opt-out is a Refs: gqlc-mirrored #617 line')" \
     "fix/gqlc-mirrored-thing" \
     "missing 'Closes #617'"
+
+# Neither is the marker shown in a code block, which is how this repo quotes
+# it. Four leading spaces is markdown's indented-code-block spelling, and a
+# fence leaves the line at column zero, so anchoring alone catches only one of
+# the two. Both bodies below opt out on the checker as it stood before these
+# rows: the branch names the bead, so the demand has to come back.
+expect_red "a Refs: indented into a code block does not opt out" \
+    "$EXPORT" "$(body 'Bead-free body.
+
+    Refs: gqlc-mirrored #617')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+expect_red "a Refs: inside a fenced block does not opt out" \
+    "$EXPORT" "$(body "Bead-free body.
+
+${FENCE3}
+Refs: gqlc-mirrored #617
+${FENCE3}")" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+# The fence has to close again, or a body with any code block in it could
+# never opt out below that block.
+expect_green_saying "a marker below a closed code block is still a declaration" \
+    "$EXPORT" "$(body "${FENCE3}
+quoted output, not a declaration
+${FENCE3}
+
+Refs: gqlc-mirrored #617")" "some/branch" \
+    "issue #617 stays open at merge"
 
 # A Bead: line is the resolving declaration, so it outranks a Refs: line for
 # another bead rather than being excused by it.
