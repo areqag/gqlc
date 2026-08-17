@@ -283,20 +283,36 @@ func (k BindingKind) String() string {
 	}
 }
 
-// Binding is a query variable bound to a graph entity, a named path, or an
-// UNWIND source's per-row element. Entity bindings carry labels; a path
-// binding carries member names; an unwind binding carries the source list's
-// element type. It is a closed sum of NodeBinding, EdgeBinding, (Stage 8)
-// PathBinding, and (Stage 9) UnwindBinding — no other type can implement
-// it — so a binding is exactly one of the four. Every variant holds its
-// data in unexported fields, so the smart constructors are the only way
-// to construct a non-zero value: the invariants the types alone cannot
-// express (a non-empty node variable, both edge endpoints present, a
-// non-empty path variable with at least one member, a non-empty UNWIND
-// variable) hold for every value that exists.
+// Binding is a query variable bound to a graph entity, a named path, an
+// UNWIND source's per-row element, or a CALL YIELD result column. Entity
+// bindings carry labels; a path binding carries member names; an unwind
+// binding carries the source list's element type; a call binding carries the
+// procedure and the signature column it draws from.
+//
+// isBinding is unexported, so a method of that name in another package does
+// not satisfy this interface: NodeBinding, EdgeBinding, (Stage 8)
+// PathBinding, (Stage 9) UnwindBinding and (Stage 14) CallBinding are the
+// whole set of types that DECLARE the marker — the five variants. What the
+// marker seals is declaration, not inhabitation, so the set of types
+// satisfying Binding has no bound. Kind, Nullable and isBinding all take
+// value receivers, so *NodeBinding carries the method set too; and Go
+// promotes an embedded type's unexported methods, so
+// struct{ query.NodeBinding } carries it from any package in the module
+// without naming the marker. Neither construction matches
+// `case NodeBinding:`, so a type switch whose arms are the declared variants
+// reaches its default on them, or leaves the switch where it has none — a
+// live arm, not a dead one. TestQuerySumsAreNotClosed/Binding measures both
+// constructions against every arm from outside the package.
+//
+// Every variant holds its data in unexported fields, so the smart
+// constructors are the only way to construct a non-zero value: the
+// invariants the types alone cannot express (a non-empty node variable,
+// both edge endpoints present, a non-empty path variable with at least one
+// member, a non-empty UNWIND variable, a non-empty call variable and
+// procedure) hold for every value that exists.
 type Binding interface {
-	// Kind reports whether the binding is a node, an edge, a path, or an
-	// UNWIND-introduced per-row element.
+	// Kind reports whether the binding is a node, an edge, a path, an
+	// UNWIND-introduced per-row element, or a CALL YIELD result column.
 	Kind() BindingKind
 	// Nullable reports whether the binding was first introduced inside an
 	// OPTIONAL MATCH clause (ADR 0006). The flag is a static, local fact set
@@ -695,10 +711,19 @@ func (h EdgeHops) MarshalJSON() ([]byte, error) {
 }
 
 // PathMember is one element of a named path's members list (Stage 8 spec
-// §1.2, §3.2). It is a closed sum of NamedNodeMember, NamedEdgeMember,
-// AnonEdgeMember, and AnonNodeMember — no other type can implement it — so
-// a member is exactly one of four things: a named node, a named edge, an
-// anonymous edge slot, or an anonymous node slot. The named variants
+// §1.2, §3.2). isPathMember is unexported, so a method of that name in
+// another package does not satisfy this interface: NamedNodeMember,
+// NamedEdgeMember, AnonEdgeMember and AnonNodeMember are the whole set of
+// types that DECLARE the marker — the four variants, one apiece for a named
+// node, a named edge, an anonymous edge slot and an anonymous node slot.
+//
+// Declaring the marker is not the only way to obtain it. Every method here
+// takes a value receiver, so *NamedNodeMember has the method set too, and an
+// embedder such as struct{ query.NamedNodeMember } promotes it from any
+// package in the module. Both satisfy PathMember and match no
+// `case NamedNodeMember:` arm, so a switch over the four reaches its default
+// on them rather than dispatching — see
+// TestQuerySumsAreNotClosed/PathMember. The named variants
 // reference a binding by variable; the anonymous variants carry no name,
 // so an anonymous slot in a path never competes with a user-chosen
 // variable in the part's byVar namespace (an earlier design used a
@@ -1171,11 +1196,20 @@ func (b CallBinding) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// Endpoint is one end of an edge. It is a closed sum of VarEndpoint and
-// InlineEndpoint — no other type can implement it — so an endpoint either names a
-// binding or carries inline labels, never both and never neither. Both variants
-// hold their data in unexported fields, so NewVarEndpoint / NewInlineEndpoint are
-// the only way to construct a non-zero value.
+// Endpoint is one end of an edge. isEndpoint is unexported, so a method of
+// that name in another package does not satisfy this interface: VarEndpoint
+// and InlineEndpoint are the whole set of types that DECLARE the marker —
+// the two variants, one naming a binding and one carrying inline labels.
+//
+// The marker bounds declaration only. isEndpoint takes a value receiver, so
+// *VarEndpoint satisfies Endpoint, and struct{ query.VarEndpoint } promotes
+// the marker from any package in the module; neither matches
+// `case VarEndpoint:`. A caller switching on an Endpoint reaches its default
+// on both, so that arm has to return or refuse rather than being documented
+// as dead. TestQuerySumsAreNotClosed/Endpoint is the witness.
+//
+// Both variants hold their data in unexported fields, so NewVarEndpoint /
+// NewInlineEndpoint are the only way to construct a non-zero value.
 type Endpoint interface {
 	isEndpoint()
 }
@@ -1249,11 +1283,23 @@ func (i ReturnItem) MarshalJSON() ([]byte, error) {
 	}{Name: i.Name, Value: i.Value})
 }
 
-// Projection is what one ReturnItem projects. It is a closed sum of
-// RefProjection, LiteralProjection, FuncProjection, AggregateProjection, and
-// (Stage 6) ExprProjection — no other type can implement it — so a projection
-// is exactly one of the five. Each variant holds its data in unexported
-// fields, so the smart constructors (NewRefProjection / NewLiteralProjection /
+// Projection is what one ReturnItem projects. isProjection is unexported, so
+// a method of that name in another package does not satisfy this interface:
+// RefProjection, LiteralProjection, FuncProjection, AggregateProjection and
+// (Stage 6) ExprProjection are the whole set of types that DECLARE the
+// marker — the five variants.
+//
+// That is narrower than a closed sum: declaring the marker is one way to
+// obtain it, not the only way. Type and isProjection take value receivers,
+// so *RefProjection satisfies Projection; embedding promotes the marker, so
+// struct{ query.RefProjection } does too, from any package in the module.
+// Neither matches `case RefProjection:`, so a switch over the declared set
+// reaches its default on them — the default is where an unrecognised shape
+// arrives, not an arm nothing can reach.
+// TestQuerySumsAreNotClosed/Projection measures both constructions.
+//
+// Each variant holds its data in unexported fields,
+// so the smart constructors (NewRefProjection / NewLiteralProjection /
 // NewFuncProjection / NewAggregateProjection / NewExprProjection) are the only
 // way to construct a non-zero value, mirroring the Use sum
 // (internal/query/query.go).
@@ -1266,7 +1312,8 @@ func (i ReturnItem) MarshalJSON() ([]byte, error) {
 // Every variant carries Type() Type — the whole point of Stage 6 is that every
 // projected column carries a result type. Promoting the accessor onto the
 // interface removes the structural-typing shim listeners once needed to read
-// it and keeps the sum's exhaustiveness honest.
+// it, and puts the result type on the reachable path for values a switch does
+// not recognise: a default arm still has Type() to read.
 type Projection interface {
 	// Type is the projection's Stage-6 result type; TypeUnknown when the parser
 	// cannot commit schema-free (property lookups, function results, aggregate
@@ -1539,11 +1586,23 @@ type Parameter struct {
 	Uses []Use  `json:"uses"`
 }
 
-// Use is one position where a parameter appears. It is a closed sum of
-// PropertyUse, ClauseSlotUse, and (Stage 6) ExprUse — no other type can
-// implement it — so a use is exactly one of the three: bound to a binding
-// property, sat in a clause slot, or embedded inside a rich scalar expression
-// whose result type is what the model records. Every variant holds its data
+// Use is one position where a parameter appears. isUse is unexported, so a
+// method of that name in another package does not satisfy this interface:
+// PropertyUse, ClauseSlotUse and (Stage 6) ExprUse are the whole set of types
+// that DECLARE the marker — the three variants: bound to a binding property,
+// sat in a clause slot, or embedded inside a rich scalar expression whose
+// result type is what the model records.
+//
+// Declaring the marker is sealed; carrying it is not. isUse, Part and Branch
+// take value receivers, so *PropertyUse satisfies Use, and an embedder such
+// as struct{ query.PropertyUse } promotes the marker from any package in the
+// module. Neither matches `case PropertyUse:`. cypher's attributeUse is the
+// switch this matters most to: its default returns its argument unchanged, so
+// a promoted form passes through with whatever (branch, part) coordinate it
+// already carried instead of being re-stamped — that arm is reachable, and
+// silent. TestQuerySumsAreNotClosed/Use is the witness.
+//
+// Every variant holds its data
 // in unexported fields, so NewPropertyUse / NewClauseSlotUse / NewExprUse are
 // the only ways to construct a non-zero value: the invariants the types alone
 // cannot express hold for every value that exists.
@@ -2012,11 +2071,21 @@ func (p AggregateProjection) MarshalJSON() ([]byte, error) {
 }
 
 // Effect is one write operation the query performs at a specific query part
-// (Stage 12): the per-part analogue of a return item for the write side. It
-// is a closed sum of CreateEffect, DeleteEffect, SetPropertyEffect,
-// SetEntityEffect, SetLabelsEffect, RemovePropertyEffect, and
-// RemoveLabelsEffect — no other type can implement it — so an effect is
-// exactly one of the eight. Each variant holds its data in unexported fields;
+// (Stage 12): the per-part analogue of a return item for the write side.
+// isEffect is unexported, so a method of that name in another package does
+// not satisfy this interface: CreateEffect, MergeEffect, DeleteEffect,
+// SetPropertyEffect, SetEntityEffect, SetLabelsEffect, RemovePropertyEffect
+// and RemoveLabelsEffect are the whole set of types that DECLARE the marker —
+// the eight variants.
+//
+// The marker seals declaration, not inhabitation. isEffect takes a value
+// receiver, so *CreateEffect satisfies Effect, and struct{ query.CreateEffect }
+// promotes the marker from any package in the module without naming it.
+// Neither matches `case CreateEffect:`, so the resolver's validateEffect
+// dispatch reaches its default on them and refuses with ErrOutOfR0Scope; that
+// default is a reachable arm, not a tripwire for a variant that cannot exist.
+//
+// Each variant holds its data in unexported fields;
 // smart constructors are the only way to build a non-zero value, so the
 // invariants the types alone cannot express (non-empty target variables for
 // the SET / REMOVE variants that carry one) hold for every value that exists.
@@ -2031,13 +2100,20 @@ type Effect interface {
 	isEffect()
 }
 
-// SetEffect is the sealed sub-sum of Effect implemented by exactly the three
-// SET-family effect variants (SetPropertyEffect, SetEntityEffect,
-// SetLabelsEffect). MergeEffect.OnMatch and MergeEffect.OnCreate carry
-// []SetEffect (not []Effect), so the type system rejects a CreateEffect /
-// DeleteEffect / MergeEffect / RemovePropertyEffect / RemoveLabelsEffect
-// inside an ON action slot — matching the grammar's oC_MergeAction rule,
-// which admits only oC_Set (Cypher.g4 §oC_MergeAction).
+// SetEffect is the SET-family sub-sum of Effect. isSetEffect is unexported,
+// so SetPropertyEffect, SetEntityEffect and SetLabelsEffect are the whole set
+// of types that DECLARE it — the three variants. MergeEffect.OnMatch and
+// MergeEffect.OnCreate carry []SetEffect (not []Effect), so the type system
+// rejects a CreateEffect / DeleteEffect / MergeEffect / RemovePropertyEffect
+// / RemoveLabelsEffect value inside an ON action slot — matching the
+// grammar's oC_MergeAction rule, which admits only oC_Set
+// (Cypher.g4 §oC_MergeAction).
+//
+// What the sub-sum excludes is those five types, not everything outside the
+// three: *SetPropertyEffect and struct{ query.SetPropertyEffect } satisfy
+// SetEffect from any package in the module, and match no
+// `case SetPropertyEffect:` arm. TestQuerySumsAreNotClosed/SetEffect
+// measures both.
 type SetEffect interface {
 	Effect
 	isSetEffect()
