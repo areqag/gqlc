@@ -494,11 +494,16 @@ func (s *ConformanceSuite) TestMultiLabelSchemaPostureIsRecorded() {
 					target, verdict(emits), fixture, strings.Join(offenders, " and "),
 					verdict(multiLabelEmittingTargets[target]))
 				// Counted after the ledger has been held to it, not
-				// before. An emission the ledger refuses is a red, and
-				// counting it first would let it satisfy the "some
-				// emission for this shape was read" floor below on its
-				// way past — the floor would be reporting an emission
-				// this test has already ruled illegitimate.
+				// before, so the floor below reports only emissions this
+				// test ruled legitimate.
+				//
+				// This cannot change a verdict and is not claimed to. The
+				// s.Require().Equal above is FailNow, so any input that
+				// would make the floor lie has already reddened the suite;
+				// measured with neo4j-go-v5 flipped to false, counting
+				// after reports two failures where counting before reports
+				// one, and both are red. It buys the second message, not
+				// the red.
 				if emits {
 					emitting++
 				}
@@ -519,8 +524,10 @@ func (s *ConformanceSuite) TestMultiLabelSchemaPostureIsRecorded() {
 // generate() it is reached with a target the fixture's manifest does not
 // enrol, so a refusal is an answer rather than a failure.
 func (s *ConformanceSuite) emitOrRefuse(target string, in codegen.Input) ([]codegen.File, bool) {
-	newGen, ok := s.backends.Lookup(target)
-	s.Require().True(ok, "no backend is registered under %q", target)
+	// Both callers draw target from s.backends.Keys() and both hold that
+	// key set equal to a ledger's before they sweep, so the lookup cannot
+	// miss and an assertion on it would be a check no input can fail.
+	newGen, _ := s.backends.Lookup(target)
 	files, err := newGen("").Generate(in)
 	if err != nil {
 		s.Require().Nil(files, "%s returned files alongside its refusal", target)
@@ -1361,8 +1368,17 @@ func resultEntities(typ *ast.FuncType, shapes map[string]codegen.EntityKind) []s
 // naming a node type Node or T cannot be mistaken for one rests on reading the
 // code. Each helper below returns a Node that is not the emission's Node, and
 // the emission also carries the real decoder for it, so a step that stopped
-// being taken makes the helper a second decoder for the same entity and the
-// duplicate arm reports it.
+// being taken makes the helper a second decoder for the same entity.
+//
+// The refusal is what reports that, and it is worth saying which assertion
+// does the work here rather than leaving it to look like the ones below.
+// Dropping either step reddens inside emittedEntityDecoders, on the duplicate
+// arm — measured: "probe-backend emits both driverNode in models.go and
+// decodeNode in models.go, and both return Node" — because the sweep is handed
+// this test's own require and refuses before returning. The Len below states
+// the shape that refusal is the absence of; it is not a second kill, and an
+// Equal naming decodeNode beside it was a third statement of the same thing,
+// unreachable behind both.
 func TestSweepReadsAForeignOrGenericResultAsNoEntity(t *testing.T) {
 	const emission = `package emitted
 
@@ -1396,8 +1412,6 @@ func decodeNode(raw []byte) (Node, error) {
 			require.Len(t, decoders, 1,
 				"the sweep read %s as decoding the emission's own Node, so a helper that cannot fill an entity "+
 					"struct is graded as though it did", tc.name)
-			require.Equal(t, "decodeNode", decoders[0].fn,
-				"the sweep picked the helper over the emission's actual decoder for Node")
 		})
 	}
 }
@@ -1475,7 +1489,9 @@ func decodePerson(raw []byte) (Person, error) {
 
 			decoders := emittedEntityDecoders(require.New(t), "probe-backend", files, shapes)
 
-			require.Len(t, decoders, 1)
+			require.Len(t, decoders, 1,
+				"the emission writes one decoder and the sweep read %d, so the guard shape below is being read "+
+					"off something other than the decoder this row wrote it into", len(decoders))
 			require.Equal(t, []string{"Wanted"}, decoders[0].guards,
 				"a decoder testing the wire label against a literal written as %s is read as guarding on nothing, "+
 					"so a literal no value on its axis can carry is never held to that axis's alphabet", tc.name)
