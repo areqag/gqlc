@@ -1276,11 +1276,15 @@ func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Sch
 // leaves the binding at that end. A far end that is not a variable, or one the
 // narrowing gave no entry, is returned unchanged.
 //
-// An empty filter result returns the keys unchanged as well, matching
-// NarrowPluralEndpoints' empty arm: the edges pin this end to types disjoint
-// from the ones satisfying it, so the pattern matches nothing, and under ADR
-// 0006 that is a fact about which rows come back rather than a licence to
-// refuse.
+// An empty filter result is returned as an empty slice, not as the unfiltered
+// keys. NarrowPluralEndpoints' applier does the opposite with the same map — an
+// empty entry leaves the plural binding's candidate list alone — and the two
+// still agree on the answer: an end that can be nothing empties this binding's
+// narrowed accumulator, and candidateTypes falls back to the unnarrowed one,
+// which is the same "no narrowing applied" the applier lands on. Keeping the
+// fallback in one place is what makes it reachable to a fixture; a second one
+// here would be a guard whose only observable input is a pattern that matches
+// nothing.
 func narrowedEndpointKeys(other query.Endpoint, keys []graph.LabelSetKey, narrowing map[string]map[graph.LabelSetKey]struct{}) []graph.LabelSetKey {
 	ve, isVar := other.(query.VarEndpoint)
 	if !isVar {
@@ -1295,9 +1299,6 @@ func narrowedEndpointKeys(other query.Endpoint, keys []graph.LabelSetKey, narrow
 		if _, in := keep[k]; in {
 			out = append(out, k)
 		}
-	}
-	if len(out) == 0 {
-		return keys
 	}
 	return out
 }
