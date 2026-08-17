@@ -41,25 +41,28 @@ import (
 // signatures.
 //
 // A root is held here by what the censuses below name beneath it, and by
-// nothing else. `docs` cannot leave this list quietly: every document
-// they name is under it, so deleting the entry loses all of them and each
-// is reported by name. `README.md` and `CONTEXT.md` can leave quietly —
-// no census names either, so deleting either entry is green and this
-// fence stops reading a file with nothing said. A root that stops
-// existing on disk is a third case and fails docFiles by name whichever
-// entry it is.
+// nothing else. Deleting `docs` outright is red: every document they
+// name is under it, so all of them are lost at once and each is reported
+// by name. Nothing else about this list is held. Deleting `README.md` or
+// `CONTEXT.md` is green — no census names a document under either.
+// Narrowing `docs` to `docs/specs` is green too, for the same reason
+// from the other side: every censused document is under `docs/specs`,
+// so the ADRs and design notes leave the sweep and no census misses
+// them. A root that stops existing on disk is the one case that is
+// caught whichever entry it is, and it fails in docFiles by name.
 //
-// That shrinkage is not closed here and cannot be. Everything this file
-// observes is walked out of docRoots, so no reconciliation against what
-// a sweep produced can notice docRoots losing an entry: the observation
-// is derived from the list being audited, which is the failure the
-// censuses below exist to stop repeating. Catching it needs a set of
-// candidate roots from outside the list — the repository's own top-level
-// markdown — and that is the same check that would catch the list
-// failing to grow, which is gqlc-jfwo. `AGENTS.md`, `CLAUDE.md` and
-// `CONTRIBUTING.md` sit beside the two files named here, are not swept,
-// and print no query method and no driver-binding literal today; a new
-// document at the repository root would join them unnoticed.
+// That shrinkage is not closed here, and not by anything this file could
+// reconcile. Everything it observes is walked out of docRoots, so a
+// census over what a sweep produced cannot notice docRoots losing or
+// narrowing an entry: the observation is derived from the list being
+// audited, which is the failure the censuses below exist to stop
+// repeating. Catching it needs a set of candidate roots from outside the
+// list — the repository's own markdown — and that is the same check that
+// would catch the list failing to grow, which is gqlc-jfwo. `AGENTS.md`,
+// `CLAUDE.md` and `CONTRIBUTING.md` sit beside the two files named here,
+// are not swept, and print no query method and no driver-binding literal
+// today; a new document at the repository root would join them
+// unnoticed.
 var docRoots = []string{"docs", "README.md", "CONTEXT.md"}
 
 // repoRoot is where this package sits relative to the tree above. Swept
