@@ -682,9 +682,13 @@ func columnSite(queryName string, pos int, columnName string) string {
 // marker and String a value receiver, so each of the eight pointer forms
 // carries them, and Go promotes an embedded type's methods — the marker
 // included, and from an embedded interface as readily as from an
-// embedded variant — so a struct embedding either satisfies the
+// embedded variant — so a struct embedding either can satisfy the
 // interface from any package in the module (AGENTS.md, "Closed sum
-// types"; internal/resolver's TestResolvedTypeSumIsNotClosed).
+// types"; internal/resolver's TestResolvedTypeSumIsNotClosed). Can,
+// not does: a struct embedding two variants at equal depth promotes
+// neither's methods, so struct{resolver.ResolvedNode;
+// resolver.ResolvedEdge} satisfies the interface in neither its value
+// nor its pointer form and reaches no fail-site here.
 //
 // Four shapes in that set are witnessed to fault on the call rather than
 // answer it: the nil interface, which has no method to reach; any of the

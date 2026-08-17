@@ -86,6 +86,13 @@ var (
 // package would say so. It would also need no edit here to be handled:
 // resolvedTypeName enumerates no variant, so the pointer form of a ninth
 // renders by the same route these eight do.
+//
+// That derivation is not reachable with `go test -overlay`, which is a
+// trap worth naming: parsePackageSources reads the package directory
+// with os.ReadDir and go/parser at run time, so a ninth variant added
+// through a build overlay is invisible to it and declared_variants
+// passes clean. To check the gate is live, mutate sealedsum_test.go's
+// inhabitants map instead — dropping an entry reddens declared_variants.
 func typedNilVariants() map[string]resolver.ResolvedType {
 	return map[string]resolver.ResolvedType{
 		"ResolvedNode":      (*resolver.ResolvedNode)(nil),
@@ -306,6 +313,20 @@ func TestUnmatchedResolvedTypeKeepsTheWireTagWhereThereIsOne(t *testing.T) {
 		{name: "pointer-form", typ: &resolver.ResolvedNode{Labels: "Person"}},
 		{name: "value-embedder", typ: embeddedNode{resolver.ResolvedNode{Labels: "Person"}}},
 	}
+
+	// The case names are held rather than merely ranged over, because
+	// value-embedder is cited by name as the witness for "composing is not
+	// itself what faults" in prose that no compiler checks: in
+	// resolvedTypeName's doc comment, in the doc on
+	// TestUnmatchedResolvedTypeRefusesRatherThanFaulting above, and in §2's
+	// column-unknown-variant row in docs/specs/codegen-sentinel-taxonomy.md.
+	// Review measured that deleting the case leaves every package green and
+	// all three citations pointing at nothing. This is what reddens instead.
+	names := make([]string, 0, len(cases))
+	for _, tc := range cases {
+		names = append(names, tc.name)
+	}
+	require.Equal(t, []string{"pointer-form", "value-embedder"}, names)
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
