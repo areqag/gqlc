@@ -12,13 +12,33 @@ import (
 	"github.com/areqag/gqlc/internal/schema"
 )
 
+// identifierScope is the Go scope a reserved declaration occupies in the
+// emitted package. A method on *Queries and a package-level declaration
+// of the same name coexist in Go, so a name fixed at method scope is not
+// one a package-level type redeclares — which is what sweepIdentifiers
+// reads the scope for.
+type identifierScope uint8
+
+const (
+	// scopePackage is a package-level declaration: the Queries handle and
+	// New in db.go, the DBTX seam and SessionInit in the Apache AGE
+	// emission, the three Querier interfaces in querier.go, and the two
+	// :one sentinels.
+	scopePackage identifierScope = iota
+	// scopeMethod is a method on *Queries: WithTx, and the Apache AGE
+	// graph lifecycle pair.
+	scopeMethod
+)
+
 // reservedIdentifiers is the C1 exported-identifier reserved set (spec
 // §4.1): the exported names a generated package declares because the
-// emitter fixes them, whatever the batch contains. A NamedQuery.Name
-// matching any of these routes to ErrIdentifierCollision at Phase A.
-// Exported names derived from the batch — entity structs, method names,
-// <Method>Params, <Method>Row — vary with the input and are caught by
-// sweepIdentifiers instead.
+// emitter fixes them, whatever the batch contains, each paired with the
+// scope it occupies. A NamedQuery.Name matching any of them routes to
+// ErrIdentifierCollision at Phase A on membership alone; the scope column
+// narrows sweepIdentifiers' source 0 and nothing else. Exported names
+// derived from the batch — entity structs, method names, <Method>Params,
+// <Method>Row, edgeUnion interfaces — vary with the input and are caught
+// by sweepIdentifiers instead.
 //
 // The set is the union across backends and batches: ErrNoRows /
 // ErrMultipleResults are reserved in batches that would not emit them,
@@ -26,19 +46,19 @@ import (
 // backend with neither a connection seam nor a graph lifecycle. A rename
 // that works in one batch or against one backend but not another is
 // exactly the "renaming scheme" D2 Resolved refused.
-var reservedIdentifiers = map[string]struct{}{
-	"Queries":            {},
-	"New":                {},
-	"WithTx":             {},
-	"ReadQuerier":        {},
-	"WriteQuerier":       {},
-	"Querier":            {},
-	"ErrNoRows":          {},
-	"ErrMultipleResults": {},
-	"DBTX":               {},
-	"SessionInit":        {},
-	"EnsureGraph":        {},
-	"DropGraph":          {},
+var reservedIdentifiers = map[string]identifierScope{
+	"Queries":            scopePackage,
+	"New":                scopePackage,
+	"WithTx":             scopeMethod,
+	"ReadQuerier":        scopePackage,
+	"WriteQuerier":       scopePackage,
+	"Querier":            scopePackage,
+	"ErrNoRows":          scopePackage,
+	"ErrMultipleResults": scopePackage,
+	"DBTX":               scopePackage,
+	"SessionInit":        scopePackage,
+	"EnsureGraph":        scopeMethod,
+	"DropGraph":          scopeMethod,
 }
 
 // Prepared is the batch derivation the shared phases commit: the emitted
@@ -886,9 +906,10 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 }
 
 // sweepIdentifiers runs spec §4.6's exported-identifier collision sweep
-// across every emitted top-level identifier. Six sources at C5, in
-// insertion order (§2.2 / §5.7):
+// across every emitted top-level identifier. Seven sources, in insertion
+// order (§2.2 / §5.7):
 //
+//  0. the emitter's own scopePackage declarations
 //  1. entity struct names (C2)
 //  2. entity decode helper names (`decode<Name>`, promoted to sweep at C5)
 //  3. method names (C1)
@@ -896,9 +917,14 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 //  5. `<Method>Row` for two-plus-column queries (C1)
 //  6. edgeUnion interface names, per-query-column (C5)
 //
-// First insertion-order duplicate wins. Every emitter-fixed name is in
-// reservedIdentifiers and gate-checked by Phase A, so none of them
-// reaches this sweep — this pass sees only names derived from the batch.
+// First insertion-order duplicate wins, so a batch-derived name that
+// lands on a fixed declaration reports the fixed declaration. Source 0
+// carries the scopePackage subset alone: a method on *Queries shares no
+// scope with sources 1-6, all of which are package-level types, and
+// reserving one against them refuses a schema the emitter serves.
+// Source 3 reaches source 0 only after Phase A has refused a
+// NamedQuery.Name in the reserved set, so the fail it reports is the
+// Phase A one.
 // Marker method names (source 6's per-candidate satisfier) and
 // <methodName>QueryText consts are unexported and stay off the sweep
 // (§4.6 defence). A marker collision is caught by the interface-name axis
@@ -912,13 +938,23 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 // generator-owned, so the capture guards — which police author-chosen
 // identifiers against generator-owned ones — are structurally blind to it.
 func sweepIdentifiers(entities []Entity, prepared []Query) error {
-	seen := make(map[string]string, len(entities)*2+len(prepared)*3)
+	seen := make(map[string]string, len(reservedIdentifiers)+len(entities)*2+len(prepared)*3)
 	insert := func(ident, source string) error {
 		if first, dup := seen[ident]; dup {
 			return fmt.Errorf("%w: identifier %q emitted by both %s and %s", ErrIdentifierCollision, ident, first, source)
 		}
 		seen[ident] = source
 		return nil
+	}
+	// Source 0: the emitter's own package-scope declarations. Seeded
+	// rather than inserted — the set is a map, so it holds no duplicate
+	// to report, and seeding keeps the fail message's "first" side on the
+	// fixed declaration.
+	for ident, scope := range reservedIdentifiers {
+		if scope != scopePackage {
+			continue
+		}
+		seen[ident] = fmt.Sprintf("the generated package's fixed declaration %q", ident)
 	}
 	// Source 1: entity struct names.
 	for _, e := range entities {

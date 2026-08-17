@@ -1,6 +1,10 @@
 package codegen
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -533,19 +537,55 @@ func TestTemporalKindRefusalReachesTheCaller(t *testing.T) {
 	}
 }
 
+// ageOnlyTargets is the golden target set for the four names only the
+// Apache AGE emission declares.
+var ageOnlyTargets = []string{"apache-age-pgx-v5"}
+
+// reservedIdentifierRows is the reserved set written out longhand, with
+// the scope each name's emitted declaration occupies and the golden
+// targets that declare it. Both columns are read off the committed
+// goldens rather than off the templates by eye:
+// TestReservedScopeMatchesTheEmittedGoldens holds every row to what the
+// corpus declares, and fails a row the corpus declares nowhere.
+//
+// The declaredBy column is where the set stops being symmetric, and it
+// bounds what the reservation is worth. Four rows are emitted by Apache
+// AGE alone, so refusing `NODE TYPE DBTX` on a neo4j-only batch refuses
+// a name neo4j's emission leaves free — a false refusal on that target.
+// The set is uniform anyway, per D2 Resolved.
+var reservedIdentifierRows = []struct {
+	name       string
+	scope      identifierScope
+	declaredBy []string // nil means every target the corpus emits
+}{
+	{"Queries", scopePackage, nil},
+	{"New", scopePackage, nil},
+	{"WithTx", scopeMethod, nil},
+	{"ReadQuerier", scopePackage, nil},
+	{"WriteQuerier", scopePackage, nil},
+	{"Querier", scopePackage, nil},
+	{"ErrNoRows", scopePackage, nil},
+	{"ErrMultipleResults", scopePackage, nil},
+	{"DBTX", scopePackage, ageOnlyTargets},
+	{"SessionInit", scopePackage, ageOnlyTargets},
+	{"EnsureGraph", scopeMethod, ageOnlyTargets},
+	{"DropGraph", scopeMethod, ageOnlyTargets},
+}
+
 // TestReservedIdentifiersAreUniformAcrossBackends pins the reserved set
 // (spec §4.1) as a whole: every exported name a generated package
-// declares at package scope collides, whichever backend is selected.
-// DBTX, SessionInit and the graph lifecycle pair are declared only by
-// the Apache AGE emission, but a name that is free on one backend and
-// taken on another is the renaming scheme D2 refused — so the set stays
-// uniform.
+// declares collides with a query name, whichever backend is selected.
+//
+// Uniform is not the same as universally colliding, and the difference
+// is a cost this test locks in rather than hides. DBTX, SessionInit and
+// the graph lifecycle pair are declared only by the Apache AGE emission
+// — reservedIdentifierRows carries that as a measured column — so
+// refusing them on a neo4j-only batch refuses a name neo4j leaves free.
+// The set stays uniform anyway, per D2 Resolved.
 func TestReservedIdentifiersAreUniformAcrossBackends(t *testing.T) {
-	want := []string{
-		"Queries", "New", "WithTx",
-		"ReadQuerier", "WriteQuerier", "Querier",
-		"ErrNoRows", "ErrMultipleResults",
-		"DBTX", "SessionInit", "EnsureGraph", "DropGraph",
+	want := make([]string, 0, len(reservedIdentifierRows))
+	for _, row := range reservedIdentifierRows {
+		want = append(want, row.name)
 	}
 	got := make([]string, 0, len(reservedIdentifiers))
 	for name := range reservedIdentifiers {
@@ -553,15 +593,212 @@ func TestReservedIdentifiersAreUniformAcrossBackends(t *testing.T) {
 	}
 	require.ElementsMatch(t, want, got)
 
-	for _, name := range want {
-		t.Run(name, func(t *testing.T) {
+	for _, row := range reservedIdentifierRows {
+		t.Run(row.name, func(t *testing.T) {
+			require.Equal(t, row.scope, reservedIdentifiers[row.name])
+
 			in := Input{
 				Schema:  schema.Schema{Name: "Test"},
-				Queries: []NamedQuery{{Name: name, Cardinality: CardinalityExec, SourceText: "MATCH (n) DELETE n"}},
+				Queries: []NamedQuery{{Name: row.name, Cardinality: CardinalityExec, SourceText: "MATCH (n) DELETE n"}},
 			}
 			_, err := Prepare(in, stubTypeMap{}, "")
 			require.ErrorIs(t, err, ErrIdentifierCollision)
-			require.ErrorContains(t, err, `query "`+name+`" at position 0`)
+			require.ErrorContains(t, err, `query "`+row.name+`" at position 0`)
+		})
+	}
+}
+
+// TestReservedScopeDecidesWhichEntityNamesCollide runs both halves of
+// the scope column over the entity axis, on the node and the edge
+// source alike. A schema whose element type names a package-scope
+// declaration is refused; one naming a method on *Queries generates,
+// and the entity keeps the name it asked for.
+//
+// The allow half is what holds the gate to the scope it measured: a
+// blanket reserve over the whole set refuses three schemas the emitter
+// serves.
+func TestReservedScopeDecidesWhichEntityNamesCollide(t *testing.T) {
+	person := graph.LabelSetKey("Person")
+
+	sources := []struct {
+		axis   string
+		schema func(name string) schema.Schema
+	}{
+		{"node", func(name string) schema.Schema {
+			label := graph.LabelSetKey(name)
+			return schema.Schema{
+				Name: "Test",
+				Nodes: map[graph.LabelSetKey]schema.NodeType{
+					label: {KeyLabels: label, CompleteLabels: label, Properties: map[string]schema.Property{}},
+				},
+			}
+		}},
+		{"edge", func(name string) schema.Schema {
+			key := schema.EdgeKey{Source: person, KeyLabels: graph.LabelSetKey(name), Target: person}
+			return schema.Schema{
+				Name: "Test",
+				Nodes: map[graph.LabelSetKey]schema.NodeType{
+					person: {KeyLabels: person, CompleteLabels: person, Properties: map[string]schema.Property{}},
+				},
+				Edges: map[schema.EdgeKey]schema.EdgeType{
+					key: {EdgeKey: key, Properties: map[string]schema.Property{}},
+				},
+			}
+		}},
+	}
+
+	for _, src := range sources {
+		for _, row := range reservedIdentifierRows {
+			t.Run(src.axis+"/"+row.name, func(t *testing.T) {
+				prepared, err := Prepare(Input{Schema: src.schema(row.name)}, stubTypeMap{}, "")
+				if row.scope == scopeMethod {
+					require.NoError(t, err)
+					names := make([]string, 0, len(prepared.Entities))
+					for _, e := range prepared.Entities {
+						names = append(names, e.Name)
+					}
+					require.Contains(t, names, row.name)
+					return
+				}
+				require.ErrorIs(t, err, ErrIdentifierCollision)
+				// One ordered substring, not two independent ones: the
+				// seed exists so the fixed declaration lands on the
+				// message's "first" side, and two unordered contains
+				// would read the same either way round.
+				require.ErrorContains(t, err,
+					`emitted by both the generated package's fixed declaration "`+row.name+
+						`" and entity struct "`+row.name+`"`)
+			})
+		}
+	}
+}
+
+// goldenCorpusGlob reaches the committed golden trees from this package.
+// The conformance suite reads the same corpus through its own root, which
+// an env var can redirect at a copy; this sweep wants the tracked trees
+// specifically, because what it measures is what the repo ships.
+const goldenCorpusGlob = "../../test/data/codegen/valid/*/golden/*/*.go"
+
+// goldenTarget is the backend a golden Go file was emitted for, read off
+// the path: test/data/codegen/valid/<fixture>/golden/<target>/<file>.go.
+func goldenTarget(t *testing.T, path string) string {
+	t.Helper()
+	target := filepath.Base(filepath.Dir(path))
+	require.Equal(t, "golden", filepath.Base(filepath.Dir(filepath.Dir(path))),
+		"%s does not sit under a golden/<target>/ directory, so its target cannot be read off the path", path)
+	return target
+}
+
+// scopeName renders an identifierScope for a fail message, so that a
+// reader does not have to know which iota is which.
+func scopeName(s identifierScope) string {
+	if s == scopeMethod {
+		return "scopeMethod"
+	}
+	return "scopePackage"
+}
+
+// TestReservedScopeMatchesTheEmittedGoldens holds both table columns to
+// the corpus rather than to a claim about the templates. Three checks:
+//
+//  1. every declaration of a reserved name sits at the scope the table
+//     records;
+//  2. the targets declaring it are exactly the ones the table records,
+//     which is what keeps the four Apache AGE-only rows from reading as
+//     symmetric with the other eight;
+//  3. every row is declared by at least one golden — a name the corpus
+//     never declares would agree with either scope and with any target
+//     set, so without this half a row that had silently stopped being
+//     emitted would still pass.
+//
+// A nil declaredBy claims every target in the corpus, which is the
+// strict end: a row added without the column fails unless every target
+// really does declare it.
+//
+// A method occupies no package block whatever its receiver, so the
+// receiver type is not consulted: what sweepIdentifiers needs to know is
+// only whether an entity struct of the same name would redeclare it.
+func TestReservedScopeMatchesTheEmittedGoldens(t *testing.T) {
+	paths, err := filepath.Glob(goldenCorpusGlob)
+	require.NoError(t, err)
+	require.NotEmpty(t, paths, "no golden Go under %s, so this sweep holds nothing", goldenCorpusGlob)
+
+	corpusTargets := map[string]struct{}{}
+	// name -> scope -> one path declaring it that way, for the fail message.
+	declared := make(map[string]map[identifierScope]string)
+	// name -> set of targets declaring it.
+	declaredBy := make(map[string]map[string]struct{})
+	record := func(name, path string, scope identifierScope) {
+		if _, reserved := reservedIdentifiers[name]; !reserved {
+			return
+		}
+		if declared[name] == nil {
+			declared[name] = make(map[identifierScope]string)
+			declaredBy[name] = make(map[string]struct{})
+		}
+		if _, seen := declared[name][scope]; !seen {
+			declared[name][scope] = path
+		}
+		declaredBy[name][goldenTarget(t, path)] = struct{}{}
+	}
+
+	fset := token.NewFileSet()
+	for _, path := range paths {
+		corpusTargets[goldenTarget(t, path)] = struct{}{}
+		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		require.NoError(t, err, "parsing %s", path)
+		for _, decl := range file.Decls {
+			switch d := decl.(type) {
+			case *ast.GenDecl:
+				for _, spec := range d.Specs {
+					switch s := spec.(type) {
+					case *ast.TypeSpec:
+						record(s.Name.Name, path, scopePackage)
+					case *ast.ValueSpec:
+						for _, n := range s.Names {
+							record(n.Name, path, scopePackage)
+						}
+					}
+				}
+			case *ast.FuncDecl:
+				scope := scopeMethod
+				if d.Recv == nil {
+					scope = scopePackage
+				}
+				record(d.Name.Name, path, scope)
+			}
+		}
+	}
+
+	everyTarget := make([]string, 0, len(corpusTargets))
+	for target := range corpusTargets {
+		everyTarget = append(everyTarget, target)
+	}
+	require.NotEmpty(t, everyTarget)
+
+	for _, row := range reservedIdentifierRows {
+		t.Run(row.name, func(t *testing.T) {
+			at := declared[row.name]
+			require.NotEmpty(t, at,
+				"no golden declares %q, so its columns rest on nothing; either the corpus lost the fixture that emitted it or the name is no longer emitter-fixed and belongs out of reservedIdentifiers",
+				row.name)
+			for scope, path := range at {
+				require.Equal(t, row.scope, scope,
+					"%s declares %q at %s, but the reserved set records %s",
+					path, row.name, scopeName(scope), scopeName(row.scope))
+			}
+
+			wantTargets := row.declaredBy
+			if wantTargets == nil {
+				wantTargets = everyTarget
+			}
+			gotTargets := make([]string, 0, len(declaredBy[row.name]))
+			for target := range declaredBy[row.name] {
+				gotTargets = append(gotTargets, target)
+			}
+			require.ElementsMatch(t, wantTargets, gotTargets,
+				"%q is declared by a different target set than the reserved set records; a name that changed which backends emit it changes whether reserving it on the others is a false refusal",
+				row.name)
 		})
 	}
 }

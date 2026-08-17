@@ -141,7 +141,7 @@ dead, and that no dead site hides in it.
 | `ErrParamNameCollision` | Two parameters of one query mangling to one `Params` field. | Phase B |
 | `ErrRowFieldCollision` | Two columns of one query deriving one `Row` field. | Phase B |
 | `ErrUnrepresentableTemporal` | A projected column whose temporal kind the target's type table has no carrier for. Phase B, not Phase A: Phase A does not ask the type table about temporal kinds, so the refusal lands at the row-field derivation site. | Phase B |
-| `ErrIdentifierCollision` | Two exported top-level identifiers colliding across the six swept sources — entity structs, decode helpers, method names, `<Method>Params`, `<Method>Row`, edge-union interfaces. | identifier sweep |
+| `ErrIdentifierCollision` | Two exported top-level identifiers colliding across the seven swept sources — the emitter's own package-scope declarations, entity structs, decode helpers, method names, `<Method>Params`, `<Method>Row`, edge-union interfaces. The first source is seeded from the `scopePackage` half of the reserved set: a `NODE TYPE Queries` or an edge-union interface deriving `ReadQuerier` redeclares a name `db.go` or `querier.go` already holds, which the Phase A gate does not see because that one reads a query's name (`gqlc-e6mh`). The `scopeMethod` half — `WithTx`, `EnsureGraph`, `DropGraph` — stays out: those are methods on `*Queries` and share no scope with a package-level type. | identifier sweep |
 
 ## 3. Branches no input reaches
 
