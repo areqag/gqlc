@@ -193,11 +193,11 @@ lint-hooks dir=".githooks": ensure-shellcheck
 # tree has nothing stale in it, and a clause whose only observable behaviour is
 # saying nothing is one that survives being flipped or deleted.
 #
-# The hand-written awk that used to read the key is gone, and with it the
-# emptiness clause it needed. One reader — `scope declared` — and a reader that
-# goes quiet now fails closed on its own: an empty vocabulary places nothing, so
-# the derivation stops on the first constrained file in the tree rather than
-# producing an empty set that agrees with an empty config.
+# One reader for the key — `scope declared` — and no emptiness clause guarding
+# it here, because a reader that goes quiet fails closed on its own: an empty
+# vocabulary places nothing, so the derivation stops on the first constrained
+# file in the tree rather than producing an empty set that agrees with an empty
+# config.
 [private]
 check-golangci-build-tags:
     #!/usr/bin/env bash

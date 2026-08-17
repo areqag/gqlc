@@ -115,8 +115,19 @@ argument. Making "custom build tag" the default case is what let a `go tool dist
 list` that came back short turn the platform values it had lost back into tags,
 silently; there is no default case now. A genuinely new custom tag therefore
 goes into `.golangci.yml` first, which is where golangci-lint has always needed
-it, and `check-golangci-build-tags` still holds that key and the tree to each
-other in both directions.
+it.
+
+The key and the tree are held to each other by two mechanisms, not by one
+comparison, and it is worth naming them apart because they fail differently. A
+term in the tree that the key does not declare is refused by the derivation
+itself, which cannot place it and says which file carries it. A term the key
+declares that constrains no file in the tree is refused by
+`check-golangci-build-tags`, added by the same change — and that recipe compares
+in ONE direction only, because the other direction has nothing left to report:
+an undeclared term never survives the derivation long enough to reach a
+comparison. Flip its `comm` and the remaining direction is empty by
+construction, which is why the recipe injects a stale term of its own on every
+run rather than trusting a comparison that could be vacuous.
 
 vuln.yml arms on any `.go` file, any
 `go.mod`/`go.sum` anywhere, the recipe, or itself. Each list this replaces was a

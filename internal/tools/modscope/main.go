@@ -280,10 +280,19 @@ func moduleGoDirs(ctx context.Context, root, module string) ([]string, error) {
 // package, no error, and no IgnoredGoFiles either. That directory shape is the
 // only reason this walk exists.
 //
-// An empty result is an error. A Go module with no directory holding a Go file
-// is not a thing, and the postcondition this walk feeds — every directory
-// holding a Go file was matched by `go list` — passes trivially when the walk
-// comes back empty, certifying that nothing was verified (bd gqlc-s3lt).
+// An empty result is an error. The postcondition this walk feeds — every
+// directory holding a Go file was matched by `go list` — passes trivially when
+// the walk comes back empty, certifying that nothing was verified (bd
+// gqlc-s3lt).
+//
+// One module shape in this repo genuinely walks empty, and it is this repo's
+// own: the discovery probes `just vuln`, test-codegen-fence and
+// check-codegen-external-tests each mktemp under test/data are a go.mod and
+// nothing else. They exist to be discovered, and each is removed before any
+// caller asks a probe for its directories — so a probe reaching this refusal
+// means a run died before its EXIT trap ran. The message names that cause
+// first, because it is the one an operator can act on; blaming the walk for a
+// leaked probe misdiagnoses four gates at once.
 func goDirs(module, moduleRoot string, nested []string) ([]string, error) {
 	prune := make(map[string]struct{}, len(nested))
 	for _, n := range nested {
@@ -321,10 +330,12 @@ func goDirs(module, moduleRoot string, nested []string) ([]string, error) {
 	slices.Sort(dirs)
 	if len(dirs) == 0 {
 		return nil, fmt.Errorf("the walk of module %s at %s found no directory holding a Go "+
-			"file. A Go module with no such directory is not a thing, so this is the walk "+
-			"broken rather than the module empty — and an empty walk is the input that makes "+
-			"the directory-coverage postcondition pass by comparing two empty sets, green "+
-			"over unscanned code (bd gqlc-s3lt)", module, moduleRoot)
+			"file, so the directory-coverage postcondition it feeds would pass by comparing "+
+			"two empty sets — green over unscanned code (bd gqlc-s3lt). Two causes. Either a "+
+			"discovery probe leaked: these gates mktemp a go.mod-only module under test/data "+
+			"and delete it on EXIT, so a run killed before the trap ran leaves one behind — "+
+			"remove it and this clears. Or the walk is broken, because a module whose source "+
+			"is checked in has a directory holding a Go file", module, moduleRoot)
 	}
 	return dirs, nil
 }
