@@ -102,9 +102,12 @@ type inhabitant struct {
 // are served in their value form, so their rows read "" against a refusal.
 //
 // One refuses either way, with a DIFFERENT refusal: resolver.ResolvedEdgeUnion.
-// Its arm names the candidates the schema declares and the fall-through's
+// For this row's value — probeEdgeUnion, two candidates under distinct labels —
+// its arm names the candidates the schema declares and the fall-through's
 // `"projects " + ct.String()` does not, so its rows still tell the arm from the
-// fall-through — that difference is the ground
+// fall-through. The arm does not refuse every edge union: fewer than two
+// candidates, or a repeated label, returns "" and stands aside for shared
+// admission. That difference is the ground
 // TestEdgeUnionRankingFlagNamesTheValueFormOnly rests its ruling on.
 //
 // Two refuse either way with an IDENTICAL refusal: resolver.ResolvedList and
@@ -305,10 +308,10 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 			require.NotNilf(t, in.pointer, "%s: no pointer form enumerated", name)
 			// The fall-through's exact text. Asserting the text rather than
 			// only non-emptiness is what separates "reached the fall-through"
-			// from "reached some arm that also refuses": for five of the eight
-			// the arm answers "" instead, and for a sixth —
-			// resolver.ResolvedEdgeUnion — it answers the candidate list, which
-			// `"projects " + String()` does not carry.
+			// from "reached some arm that also refuses": resolver.ResolvedEdgeUnion's
+			// arm is the one that also refuses, and it answers the candidate
+			// list, which `"projects " + String()` does not carry — only the
+			// text tells that arm from the fall-through.
 			require.Equalf(t, "projects "+in.pointer.String(), unservedColumn(in.pointer),
 				"*%s must reach unservedColumn's fall-through; every marker and String on the variants takes a value receiver, and a pointer's method set contains its value methods, so the pointer satisfies resolver.ResolvedType while `case resolver.%s:` does not match it",
 				name, name)
