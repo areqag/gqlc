@@ -46,6 +46,7 @@ cat >"$EXPORT" <<'JSONL'
 {"id":"gqlc-umbrella","issue_type":"epic","external_ref":"https://github.com/areqag/gqlc/issues/500"}
 {"id":"gqlc-done","issue_type":"bug","status":"closed","external_ref":"https://github.com/areqag/gqlc/issues/700"}
 {"id":"gqlc-sub.12","issue_type":"task","external_ref":"https://github.com/areqag/gqlc/issues/712"}
+{"id":"gqlc-oddref","issue_type":"task","external_ref":"https://example.com/tracker/9"}
 JSONL
 
 # $1=file contents; echoes the path of a body file holding them.
@@ -240,6 +241,9 @@ expect_red "a malformed line ahead of the bead does not hide it" \
 # quoted argument as a command substitution (SC2016) whichever quotes it is in.
 BT="$(printf '\140')"
 FENCE3="$BT$BT$BT"
+FENCE4="$FENCE3$BT"
+TILDE3='~~~'
+TILDE4='~~~~'
 
 expect_red "a backticked id on a Bead line is refused, naming the token" \
     "$EXPORT" "$(body "Bead: ${BT}gqlc-mirrored${BT}")" "some/branch" \
@@ -266,9 +270,11 @@ Filed the follow-up bead: ${BT}gqlc-abc${BT}.")" "some/branch" \
     "which is not a bead id"
 
 # The other half of the same rule, and the one that says it is about
-# well-formedness rather than presence: sub-bead ids carry a dot, 84 of the
-# export's 310 ids have one, and refusing those would refuse a quarter of the
-# repo's beads.
+# well-formedness rather than presence: sub-bead ids carry a dot, and
+# refusing them would refuse a large minority of the repo's beads. Counted
+# over .beads/issues.jsonl at master 0c214d20 (2026-08-17): 86 of 438. The
+# export grows every session and CI reads the merge commit's copy, so the
+# pair is what the sample was on a day, not what the repo has now.
 expect_green "a sub-bead id with a dot is a bead id" \
     "$EXPORT" "$(body 'Bead: gqlc-sub.12
 
@@ -310,6 +316,20 @@ expect_green_saying "an opt-out holds over a branch named after the bead" \
 expect_green_saying "an opt-out works on a record with no status field" \
     "$EXPORT" "$(body 'Refs: gqlc-sub.12 #712')" "some/branch" \
     "status in the export: unknown"
+
+# Two exits used to read a marker, hold its number against nothing, and print
+# nothing: rc=0 with no output, which is also what this gate looks like when
+# it has not run. The pass is right in both -- there is no issue to leave
+# open -- so what these rows hold is that it is legible. This is the
+# complaint the section above makes about the four other silent passes,
+# applied to the two on the marker's own path.
+expect_green_saying "an opt-out on a bead with no mirror says so" \
+    "$EXPORT" "$(body 'Refs: gqlc-local #99999')" "some/branch" \
+    "gqlc-local has no GitHub mirror"
+
+expect_green_saying "an opt-out on a mirror with no issue number says so" \
+    "$EXPORT" "$(body 'Refs: gqlc-oddref #99999')" "some/branch" \
+    "which names no issue number"
 
 expect_red "an opt-out that names no issue number is refused" \
     "$EXPORT" "$(body 'Refs: gqlc-mirrored')" "some/branch" \
@@ -398,6 +418,7 @@ expect_red "a Refs: quoted inside a sentence does not opt out" \
     "fix/gqlc-mirrored-thing" \
     "missing 'Closes #617'"
 
+# --- what a marker has to be visible in (bd gqlc-1ekq) ----------------------
 # Neither is the marker shown in a code block, which is how this repo quotes
 # it. Four leading spaces is markdown's indented-code-block spelling, and a
 # fence leaves the line at column zero, so anchoring alone catches only one of
@@ -426,6 +447,220 @@ ${FENCE3}
 
 Refs: gqlc-mirrored #617")" "some/branch" \
     "issue #617 stays open at merge"
+
+# The three rows above were once the whole of it, over a fence model that was
+# a toggle: any ``` or ~~~ line flipped the state, which is not how a fence
+# closes. Every body in this section was put to GitHub's own renderer
+# (POST /markdown, mode gfm, a read-only call) and the row's colour reports
+# what came back — red where GitHub puts the marker inside <pre><code> or
+# drops it from the output entirely, green where GitHub renders it as prose.
+# 22 bodies, and one row is red over a body GitHub renders: the declared
+# divergence, last in this section. Put the toggle back in place of
+# prose_only and 14 rows fail — 12 red ones that pass, honouring a marker no
+# reader can see, and 2 green ones that lose their annotation. Nesting a
+# fence in a longer one is not an exotic spelling: it is the ordinary way to
+# show a fence, and showing this marker is what the beads queued against this
+# file are for.
+expect_red "a fence nested in a longer one does not close it" \
+    "$EXPORT" "$(body "${FENCE4}
+${FENCE3}
+Refs: gqlc-mirrored #617
+${FENCE3}
+${FENCE4}")" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+expect_red "a tilde line does not close a backtick fence" \
+    "$EXPORT" "$(body "${FENCE3}
+some code
+${TILDE3}
+Refs: gqlc-mirrored #617
+${FENCE3}")" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+expect_red "a backtick line does not close a tilde fence" \
+    "$EXPORT" "$(body "${TILDE3}
+${FENCE3}
+Refs: gqlc-mirrored #617
+${FENCE3}
+${TILDE3}")" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+expect_red "a fence nested in a longer tilde one does not close it" \
+    "$EXPORT" "$(body "${TILDE4}
+${TILDE3}
+Refs: gqlc-mirrored #617
+${TILDE3}
+${TILDE4}")" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+# A closer carries nothing after the run. An info string makes the line
+# another opener as far as GitHub is concerned, which is how a fence gets
+# shown with its language on it.
+expect_red "a run with an info string does not close a fence" \
+    "$EXPORT" "$(body "${FENCE3}
+${FENCE3}js
+Refs: gqlc-mirrored #617
+${FENCE3}
+${FENCE3}")" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+# Four spaces is an indented code block, not a fence, in either direction:
+# a closer indented that far does not close, and an opener indented that far
+# does not open. The second row is the one that costs something -- it honours
+# a marker -- so it is the one that says the rule is not "blank everything".
+expect_red "a closer indented four spaces does not close a fence" \
+    "$EXPORT" "$(body "${FENCE3}
+some code
+    ${FENCE3}
+Refs: gqlc-mirrored #617
+${FENCE3}")" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+expect_green_saying "an opener indented four spaces opens no fence" \
+    "$EXPORT" "$(body "Bead-free body.
+
+    ${FENCE3}
+Refs: gqlc-mirrored #617")" "some/branch" \
+    "issue #617 stays open at merge"
+
+# A backtick fence's info string may not carry a backtick, so this line is a
+# paragraph and the fence below it is the one that opens. Under the toggle
+# the two lines cancelled and the marker was read as live.
+expect_red "a backtick in the info string opens no fence" \
+    "$EXPORT" "$(body "${FENCE3}a${BT}b
+${FENCE3}
+Refs: gqlc-mirrored #617
+${FENCE3}")" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+# A body pasted from a Windows editor is still a body.
+expect_red "a nested fence in a CRLF body does not opt out" \
+    "$EXPORT" "$(body "$(printf '%s\r\n%s\r\n%s\r\n%s\r\n%s' \
+        "${FENCE4}" "${FENCE3}" 'Refs: gqlc-mirrored #617' \
+        "${FENCE3}" "${FENCE4}")")" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+# The second carrier, and the one that needs no nesting: GitHub renders an
+# HTML comment as nothing at all, so a marker inside one is a declaration no
+# reader of the PR can see and only a checker reading raw bytes can. This
+# repo has met the shape before (bd gqlc-jnsk, a graded site inside an HTML
+# comment). An unclosed comment swallows the rest of the body, as an unclosed
+# fence does.
+expect_red "a Refs: inside an HTML comment does not opt out" \
+    "$EXPORT" "$(body 'Bead-free body.
+
+<!--
+Refs: gqlc-mirrored #617
+-->')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+expect_red "an unclosed HTML comment swallows the marker below it" \
+    "$EXPORT" "$(body 'Bead-free body.
+
+<!--
+Refs: gqlc-mirrored #617')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+# A comment may open part-way along a line and still run on to the next one,
+# so the opener is looked for anywhere, not only at the first character.
+expect_red "a comment opened part-way along a line still hides the marker" \
+    "$EXPORT" "$(body 'Bead-free body. <!-- x --> <!--
+Refs: gqlc-mirrored #617
+-->')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+expect_green_saying "a marker below a closed HTML comment is a declaration" \
+    "$EXPORT" "$(body '<!--
+a note nobody sees
+-->
+
+Refs: gqlc-mirrored #617')" "some/branch" \
+    "issue #617 stays open at merge"
+
+# The third carrier. <pre> is markdown's raw-HTML spelling of a code block
+# and GitHub renders it as one. <script>, <style> and <textarea> are the tags
+# markdown groups with it, and are deliberately left alone: GitHub's
+# sanitiser drops the tag and keeps the text, so the marker below is visible
+# to a reader and is honoured. Blanking it would cost a refusal for no gain.
+expect_red "a Refs: inside a <pre> block does not opt out" \
+    "$EXPORT" "$(body 'Bead-free body.
+
+<pre>
+Refs: gqlc-mirrored #617
+</pre>')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+expect_green_saying "a marker below a closed <pre> block is a declaration" \
+    "$EXPORT" "$(body '<pre>
+quoted output
+</pre>
+
+Refs: gqlc-mirrored #617')" "some/branch" \
+    "issue #617 stays open at merge"
+
+expect_green_saying "a marker below a one-line <pre> block is a declaration" \
+    "$EXPORT" "$(body '<pre>quoted output</pre>
+
+Refs: gqlc-mirrored #617')" "some/branch" \
+    "issue #617 stays open at merge"
+
+expect_green_saying "a marker inside a <script> block is a declaration" \
+    "$EXPORT" "$(body '<script>
+Refs: gqlc-mirrored #617
+</script>')" "some/branch" \
+    "issue #617 stays open at merge"
+
+# Which of the three is open decides what the others mean, so the state is
+# one machine and not three passes. A fence line inside a comment opens no
+# fence, and a comment opener inside a fence opens no comment; both bodies
+# below leave the marker in prose, where GitHub also leaves it.
+expect_green_saying "a fence line inside a comment opens no fence" \
+    "$EXPORT" "$(body "<!--
+${FENCE3}
+-->
+
+Refs: gqlc-mirrored #617")" "some/branch" \
+    "issue #617 stays open at merge"
+
+expect_green_saying "a comment opener inside a fence opens no comment" \
+    "$EXPORT" "$(body "${FENCE3}
+<!--
+${FENCE3}
+
+Refs: gqlc-mirrored #617")" "some/branch" \
+    "issue #617 stays open at merge"
+
+# Where this disagrees with GitHub, and the direction it disagrees in. A
+# fence indented one to three spaces into a list item is a fence here and a
+# fence inside the list item there, so a column-zero line below it is prose
+# to GitHub and blanked by this. The author moves the line out from under the
+# block and the refusal names what to write; the other direction would be
+# this gate annotating a check run over a declaration nobody can see. Swept
+# 58 body shapes through GitHub's renderer and this checker together: three
+# disagreements, this one among them, none the other way. 58 shapes is not
+# every shape, so what the sweep bounds is the direction, not the count.
+expect_red "a fence indented into a list item blanks the marker below it" \
+    "$EXPORT" "$(body "- item
+
+  ${FENCE3}
+Refs: gqlc-mirrored #617
+  ${FENCE3}")" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+# The inverse asymmetry, in the same function. Check 4 reads the raw body, so
+# a closing keyword quoted in a fence refuses an opt-out although GitHub will
+# not act on it. That is the direction GH_CLOSES is argued in throughout -- a
+# spelling matched here costs a refusal the author resolves, one missed costs
+# the gate affirming that an issue stays open when it does not -- but the two
+# halves of the same function reading two different bodies is worth a row
+# rather than an inference.
+expect_red "a Closes quoted in a fence still refuses an opt-out" \
+    "$EXPORT" "$(body "Refs: gqlc-mirrored #617
+
+${FENCE3}
+Closes #617
+${FENCE3}")" "some/branch" \
+    "also carries a closing keyword for #617"
 
 # A Bead: line is the resolving declaration, so it outranks a Refs: line for
 # another bead rather than being excused by it.

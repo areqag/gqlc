@@ -18,7 +18,13 @@ class the gate exists to close.
 
 A PR that touches a bead without resolving it declares that with a
 'Refs: <bead-id> #<issue>' line (bd gqlc-1ekq), starting at the line's
-first character and outside any code fence. The declaration is checked
+first character and read over what prose_only leaves of the body --
+fenced code blocks, HTML comments and <pre> blocks blanked. Those three
+are the carriers a marker was measured to survive in, against GitHub's
+own renderer; they are not certified to be every place GitHub hides
+text. Where the two disagree over the 58 shapes measured, this blanks a
+marker GitHub renders (three of them, rowed in the suite) rather than
+honouring one GitHub hides (none). The declaration is then checked
 rather than taken: the number has to be the one the bead mirrors, the
 export has to not already show the bead closed, and the body has to carry
 none of the closing keywords and reference forms GitHub documents for that
@@ -38,31 +44,49 @@ import sys
 # declaration too, and one that has to be named rather than left to match no
 # bead. BEAD_ID below is what separates the two. A token with no 'gqlc-' in
 # it is not a declaration at all, so 'Bead: none' still matches nothing.
-# Unanchored, so prose and code blocks both reach it, and '\s*' spans
-# newlines. Two consequences, both rowed below: a sentence that writes an id
-# after the word 'bead:' is read as a declaration, and one naming a
-# well-formed id the export does not carry takes the skip and leaves this
-# gate demanding nothing on any branch (bd gqlc-oh30).
+# Unanchored, and read over the raw body rather than prose_only's, so prose,
+# code blocks and HTML comments all reach it; '\s*' spans newlines. Three
+# consequences, all rowed below: a sentence that writes an id after the word
+# 'bead:' is read as a declaration; so is one hidden where GitHub renders
+# nothing; and one naming a well-formed id the export does not carry takes
+# the skip and leaves this gate demanding nothing on any branch (bd
+# gqlc-oh30). Unlike the marker, none of the three is a pass this gate can
+# grant on its own: a 'Bead:' line the export can match ends in the demand
+# for 'Closes #N'. The exception is that skip, which is what oh30 records.
 BEAD_IN_BODY = re.compile(r"(?i)Bead:\s*(\S*gqlc-\S*)")
 # The opt-out marker. Read at the first character of a line, unlike
-# BEAD_IN_BODY, and only outside fenced code blocks: an honoured marker makes
-# this gate state on the check run that an issue stays open, so a body that
-# merely shows the spelling must not reach it. Leading whitespace is rejected
-# because four spaces is markdown's indented-code-block spelling and this
-# file's own subject matter is the marker. group(2) is the rest of the line,
-# which is where the issue number has to be.
+# BEAD_IN_BODY, and only over what prose_only() leaves: an honoured marker
+# makes this gate state on the check run that an issue stays open, so a body
+# that merely shows the spelling, or hides it where GitHub renders nothing,
+# must not reach it. Leading whitespace is rejected because four spaces is
+# markdown's indented-code-block spelling and this file's own subject matter
+# is the marker. group(2) is the rest of the line, which is where the issue
+# number has to be.
 REFS_IN_BODY = re.compile(r"(?im)^Refs:[ \t]*(\S*gqlc-\S*)([^\n]*)")
-# A ``` or ~~~ line, which toggles a fenced block. A fence may itself be
-# indented, so the leading whitespace is allowed here even though the marker
-# does not allow it.
-FENCE = re.compile(r"^[ \t]*(?:```|~~~)")
+# A code fence: up to three spaces of indentation, then a run of three or
+# more backticks or tildes, then the info string. Four spaces is markdown's
+# indented-code spelling rather than a fence, and a tab indents by four, so
+# neither opens one -- both measured against GitHub's renderer, see the
+# suite's fence section. group(1) is the run, group(2) the info string; which
+# of the two a line is depends on the state prose_only() is in.
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})([^\n]*)$")
+# A raw <pre> block, which GitHub renders as code. <script>, <style> and
+# <textarea> are the tags markdown groups with <pre>, and are deliberately
+# not blanked: GitHub's sanitiser drops the tag and keeps the text, so a
+# marker inside one is visible to a reader (measured, rowed in the suite).
+PRE_OPEN = re.compile(r"^ {0,3}<pre(?:[\s>]|$)", re.I)
+PRE_CLOSE = re.compile(r"</pre", re.I)
 # A branch name carries the id with no marker, so the alphabet has to be
 # spelled out: '\S+' would swallow the rest of 'fix/gqlc-w4al-body-edits'.
 BEAD_IN_BRANCH = re.compile(r"(?i)(gqlc-[a-z0-9.]+)")
-# The shape every one of the 310 ids in .beads/issues.jsonl has, sub-beads
-# ('gqlc-h9n.22') included. Applied only to ids the body declares: a branch
-# name is incidental, but a declaration the export cannot match is a gate
-# with nothing left to demand.
+# The shape a bead id has, sub-beads ('gqlc-h9n.22') included. Measured over
+# .beads/issues.jsonl at master 0c214d20 (2026-08-17): 438 ids, every one
+# matched, 86 of them sub-beads. The export grows every session and CI reads
+# the merge commit's copy, so that is a count on one day and not a property
+# of the file; the number is here to say what the sample was, not what the
+# repo has. Applied only to ids the body declares: a branch name is
+# incidental, but a declaration the export cannot match is a gate with
+# nothing left to demand.
 BEAD_ID = re.compile(r"gqlc-[a-z0-9]+(?:\.[0-9]+)*")
 CLOSES = re.compile(r"(?i)(?:closes|fixes|resolves)\s+#(\d+)")
 # What GitHub might act on, which is wider than what CLOSES demands. The nine
@@ -79,7 +103,10 @@ CLOSES = re.compile(r"(?i)(?:closes|fixes|resolves)\s+#(\d+)")
 # spellings are matched without checking which repository they name: a
 # spelling matched here that GitHub would ignore costs a refusal the author
 # can resolve, and one missed costs this gate affirming that an issue stays
-# open when it does not.
+# open when it does not. Read over the raw body, not prose_only's, which is
+# the marker's rule inverted: a 'Closes #N' quoted inside a fence refuses an
+# opt-out although GitHub will not act on it. Same direction as the rest of
+# this pattern, and rowed as such.
 GH_CLOSES = re.compile(
     r"(?i)\b(?:close[sd]?|fix(?:es|ed)?|resolve[sd]?)\b:?\s*"
     r"(?:https?://github\.com/[\w.-]+/[\w.-]+/issues/"
@@ -142,18 +169,86 @@ def load_bead(jsonl_path, bead_id):
     return None
 
 
-def outside_fences(pr_body):
-    """The body with the contents of fenced code blocks blanked out, line
-    count preserved. An unclosed fence swallows the rest of the body, which
-    is how GitHub renders it too."""
+def comment_opens_at(line):
+    """Where an HTML comment opens on this line without closing again, or
+    None. Read anywhere on the line, not only at its first character: a
+    comment opened mid-line runs on to the next line too (measured)."""
+    i = 0
+    while True:
+        start = line.find("<!--", i)
+        if start < 0:
+            return None
+        end = line.find("-->", start + 4)
+        if end < 0:
+            return start
+        i = end + 3
+
+
+def prose_only(pr_body):
+    """The body with everything GitHub does not render as prose blanked out,
+    line count preserved: fenced code blocks, HTML comments and <pre> blocks.
+
+    Fences follow the rule GitHub's renderer follows rather than a toggle on
+    every ``` and ~~~ line. A fence closes only on a run of the same
+    character, at least as long as the one that opened it, with nothing but
+    whitespace after it; a backtick fence whose info string carries a
+    backtick opens nothing. Put the toggle back in place of this function
+    and the suite fails 14 rows -- 12 bodies whose marker it honours though
+    GitHub renders it inside <pre><code> or not at all, and 2 it blanks that
+    GitHub renders as prose. Among the 12 is the ordinary idiom for showing
+    a fence, which is to nest it in a longer one; showing this marker is
+    what this file is about, so that is the realistic body rather than the
+    exotic one. An unclosed fence, comment or <pre> swallows the rest.
+
+    Not a markdown parser, and where it diverges it blanks rather than
+    keeps: a fence indented one to three spaces into a list item is blanked
+    here although GitHub renders a column-zero line below it as prose. Over-
+    blanking costs a refusal the author resolves by moving the line out from
+    under the block; under-blanking is this gate annotating a check run to
+    say an issue stays open, over a body in which no reader can see it said.
+    """
     out = []
-    fenced = False
+    state = None  # None | ("fence", char, run length) | "comment" | "pre"
     for line in pr_body.split("\n"):
-        if FENCE.match(line):
-            fenced = not fenced
-            out.append("")
+        if state is None:
+            m = FENCE.match(line)
+            if m and not (m.group(1)[0] == "`" and "`" in m.group(2)):
+                state = ("fence", m.group(1)[0], len(m.group(1)))
+                out.append("")
+                continue
+            cut = comment_opens_at(line)
+            if cut is not None:
+                state = "comment"
+                out.append(line[:cut])
+                continue
+            if PRE_OPEN.match(line):
+                # '<pre>x</pre>' on one line closes on that line, so the
+                # lines below it are prose again.
+                state = None if PRE_CLOSE.search(line) else "pre"
+                out.append("")
+                continue
+            out.append(line)
+            continue
+
+        out.append("")
+        if state == "comment":
+            # The whole closing line goes, including anything after the
+            # '-->': that line is part of the comment's block, and a marker
+            # cannot be at its first character anyway.
+            if "-->" in line:
+                state = None
+        elif state == "pre":
+            if PRE_CLOSE.search(line):
+                state = None
         else:
-            out.append("" if fenced else line)
+            m = FENCE.match(line)
+            if (
+                m
+                and m.group(1)[0] == state[1]
+                and len(m.group(1)) >= state[2]
+                and not m.group(2).strip()
+            ):
+                state = None
     return "\n".join(out)
 
 
@@ -165,7 +260,7 @@ def declared_bead(pr_body, branch):
     bead the PR touches and leaves open; the branch name is the fallback.
     """
     named = BEAD_IN_BODY.search(pr_body)
-    refs = REFS_IN_BODY.search(outside_fences(pr_body))
+    refs = REFS_IN_BODY.search(prose_only(pr_body))
 
     for label, m in (("Bead:", named), ("Refs:", refs)):
         if m and not BEAD_ID.fullmatch(m.group(1)):
@@ -275,6 +370,17 @@ def main():
 
     ext = bead.get("external_ref") or ""
     if not ext:
+        if refs is not None:
+            # A marker on a bead with no mirror was the one exit that read a
+            # declaration, held its number against nothing, and said so
+            # nowhere: rc=0 and no output at all, which is what a gate that
+            # never ran also looks like. The pass is right -- there is no
+            # issue to leave open -- so what changes is only that it is
+            # legible.
+            print(
+                f"[check-pr-closes] {bead_id} has no GitHub mirror, so the "
+                f"'Refs: {bead_id} #{marker_n}' line holds nothing"
+            )
         sys.exit(0)  # No GH mirror -> pass
 
     if bead.get("issue_type") == "epic":
@@ -286,6 +392,12 @@ def main():
 
     m = ISSUE_N.search(ext)
     if not m:
+        if refs is not None:
+            print(
+                f"[check-pr-closes] {bead_id} mirrors {ext!r}, which names no "
+                f"issue number, so the 'Refs: {bead_id} #{marker_n}' line "
+                "holds nothing"
+            )
         sys.exit(0)  # Can't parse -> pass
     expected_n = m.group(1)
 
