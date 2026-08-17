@@ -1604,6 +1604,12 @@ func TestSweepMarksEachYieldedFunctionByItsSpelling(t *testing.T) {
 	// source puts them on are part of what is asserted. Two are written in a
 	// signature, where the walk used to reach nothing, and one of those is in
 	// a declaration with no body — walked, and not yielded under its name.
+	//
+	// The last declaration binds more names than it has values, a shape
+	// go/parser accepts and boundLiteralNames' length guard refuses to pair.
+	// Its literal is therefore reported by line. A guard that paired name i
+	// with value i there would report it as `unpaired`, which is a difference
+	// in the list below.
 	const emission = `package emitted
 
 func decodePerson(raw []byte) (Person, error) { return Person{}, nil }
@@ -1617,6 +1623,8 @@ var boot = func(a [func() int { return 1 }()]int) {
 }
 
 func (q queries) run() { _ = func() {} }
+
+var unpaired, alsoUnpaired = func() {}
 `
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "models.go", emission, parser.SkipObjectResolution)
@@ -1635,6 +1643,7 @@ func (q queries) run() { _ = func() {} }
 		"hold literal=true",
 		"the function literal at line 10 literal=true",
 		"the function literal at line 13 literal=true",
+		"the function literal at line 15 literal=true",
 	}, yielded,
 		"the sweep hands the classification a different set of functions than this source writes. Each entry is "+
 			"one function the classification is handed: the name is what its refusal points a reader at, and the "+
@@ -2140,11 +2149,10 @@ func boundLiteralNames(root ast.Node) map[*ast.FuncLit]string {
 		// end. That is the one direction that can index out of range, since
 		// the range is over rhs.
 		//
-		// It is `!=` rather than `>` so that the other direction — a
-		// declaration binding more names than it has values, `var a, b = f()`
-		// or `a, b := f()` — binds nothing either. That shape does not
-		// typecheck, and pairing its names with its values by index would be
-		// a guess about a source no compiler accepts.
+		// Bounds alone would be `<`. It is `!=` so that the other direction —
+		// more names than values — binds nothing rather than pairing name i
+		// with value i and reporting a literal under lhs[i].
+		// TestSweepMarksEachYieldedFunctionByItsSpelling writes that shape.
 		if len(lhs) != len(rhs) {
 			return
 		}
