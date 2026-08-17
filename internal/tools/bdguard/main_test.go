@@ -268,6 +268,27 @@ func TestCheck_DeclaredUnearnedCloseReopenPasses(t *testing.T) {
 	}
 }
 
+func TestCheck_GrantDoesNotDependOnWhichNonClosedStatusHeadCarries(t *testing.T) {
+	// The arm fires on `base closed, head not closed`, and refuseReopen reads
+	// the two timestamps, the close_reason and the sha — not the head status.
+	// `in_progress` is the witnessed correction's status, but a bead moved back
+	// to `open` or `blocked` is the same correction, so pinning the grant to
+	// one label would refuse the others for no reason the evidence supports.
+	base := closedAtBase("a", hookClose(closingSHA), baseClosedAt) + "\n"
+	for _, status := range []string{"open", "blocked"} {
+		t.Run(status, func(t *testing.T) {
+			head := reopenedAtHead("a", status, headFixedAt) + "\n"
+			ex := exemptions{
+				reopens:       map[string]string{"a": closingSHA},
+				refContaining: noRefContains,
+			}
+			if err := check([]byte(head), []byte(base), "test-base", ex); err != nil {
+				t.Fatalf("expected pass for head status %q, got: %v", status, err)
+			}
+		})
+	}
+}
+
 func TestCheck_StaleExportIsRefusedEvenWhenDeclared(t *testing.T) {
 	// The revert this arm has to keep out: same two status columns as the
 	// granted case, same declaration, same sha — but head's record predates
@@ -382,6 +403,15 @@ func TestCheck_MissingUpdatedAtIsRefused(t *testing.T) {
 			base: closedAtBase("a", hookClose(closingSHA), baseClosedAt) + "\n",
 			head: reopenedAtHead("a", "in_progress", "17 Aug 2026") + "\n",
 			want: `head updated_at "17 Aug 2026" is not RFC3339`,
+		},
+		{
+			// Base is refused before head is read, so this row also pins the
+			// order: an unreadable base is reported as itself and not as the
+			// recency comparison it would otherwise feed.
+			name: "base is not RFC3339",
+			base: closedAtBase("a", hookClose(closingSHA), "17 Aug 2026") + "\n",
+			head: reopenedAtHead("a", "in_progress", headFixedAt) + "\n",
+			want: `base updated_at "17 Aug 2026" is not RFC3339`,
 		},
 	}
 	for _, tt := range tests {
