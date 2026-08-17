@@ -122,9 +122,10 @@ scalar kinds is a decode helper, which is a different fix — below.
   with `agtypeValue`, `"map[string]any"` with `agtypeMap` — and both helpers are
   emitted, gated together on `helpers.value`. Three goldens carry them:
   `schema_any_property`, `schema_any_property_alone` and
-  `schema_list_any_property`, all reached from an ANY-width *property* rather
-  than from a scalar column, and in each the only call to `agtypeMap` is
-  `agtypeValue`'s own. `agtypeMap` returns `map[string]any`, the same text the
+  `schema_list_any_property`, whose schemas declare an ANY-width *property* or a
+  list of one — not a scalar column. In each of the three, the only mention of
+  `agtypeMap` outside its own declaration is `agtypeValue`'s call on the `'{'`
+  arm. `agtypeMap` returns `map[string]any`, the same text the
   table names for `ScalarMap`, and `agtypeValue` reads an agtype inline `null`
   as Go `nil` rather than refusing it.
 
@@ -153,11 +154,10 @@ scalar kinds is a decode helper, which is a different fix — below.
   scanning bytes, and each member is read by `agtypeValue`, which tries the
   integer parse before the float one. Run against the `schema_any_property`
   golden, `agtypeMap` over `{"n": 3, "f": 1.5, "s": "x", "b": true, "z": null}`
-  yields `int64` for `n`, `float64` for `f`, `string` for `s`, `bool` for `b`
-  and `nil` for `z`. Whether
-  any runtime-type divergence between the backends survives that is open, and
-  `gqlc-l6c2` carries it: the neo4j half wants the driver rather than a source
-  read. What does not depend on the answer is that
+  yields `int64` for `n`, `float64` for `f`, `string` for `s`, `bool` for `b` and
+  `nil` for `z`. Whether any runtime-type divergence between the backends
+  survives that is open, and `gqlc-l6c2` carries it: the neo4j half wants the
+  driver rather than a source read. What does not depend on the answer is that
   `TestBackendInvariantSurface` compares declarations, so it would not see a
   divergence of this shape either way.
 
