@@ -9,9 +9,11 @@ import (
 	"testing"
 )
 
-// Tests target check() directly — no git shellout, no chdir, no tempdir. The
-// git boundary in run() is exercised only by the end-to-end incident replay
-// against the real repo (see PR body); gitRefContaining sits behind the same
+// Tests target check() directly — no git shellout, no chdir, no git repo
+// staged on disk. The six `t.TempDir()` calls are all in the readAllowed*
+// tests, which write and read a plain file; none runs `git init`. The git
+// boundary in run() is exercised only by a manual incident replay against a
+// scratch repo outside the worktree; gitRefContaining sits behind the same
 // boundary and is injected here as a func value (bd gqlc-drvx). Motivation:
 // earlier iterations tried to stage a real git repo per test, and the tempdir
 // git calls occasionally landed in the outer worktree despite
@@ -48,8 +50,10 @@ func hookClose(sha string) string {
 }
 
 // noRefContains is the probe answer in a checkout that placed the sha on
-// nothing — a shallow clone, an absent object, or a genuinely unreferenced
-// commit. It grants nothing on its own.
+// nothing: the object is outside the fetched pack, or it is present and no ref
+// reaches it. Depth-1 does not by itself produce this answer — a sha that came
+// down in the pack and sits on a ref answers positively there (see
+// gitRefContaining). It grants nothing on its own.
 func noRefContains(string) string { return "" }
 
 func refContains(ref string) func(string) string {
@@ -742,6 +746,50 @@ func TestParse_IgnoresNonIssueRecordsButCountsThem(t *testing.T) {
 	if len(got) != 1 || got["a"].Status != "open" {
 		t.Errorf("issues = %v, want {a:open}", got)
 	}
+}
+
+func TestParse_MalformedJSONFailsAndNamesTheLine(t *testing.T) {
+	// A truncated or otherwise unparseable line must stop the run rather than
+	// be skipped: a skipped line is a record that silently left the
+	// comparison, which is the drop this tool exists to catch. The reported
+	// number is 1-based and counts blank lines, so it matches what an editor
+	// shows.
+	data := issueOpenA + "\n\n" + `{"_type":"issue","id":"b"` + "\n"
+	_, _, err := parse([]byte(data))
+	if err == nil {
+		t.Fatal("expected a failure on malformed JSON, got nil")
+	}
+	if !strings.Contains(err.Error(), "line 3:") {
+		t.Errorf("expected the 1-based line number 3, got: %v", err)
+	}
+}
+
+func TestCheck_MalformedJSONIsReportedAgainstTheSideItIsOn(t *testing.T) {
+	// Both parse failures reach the caller, and each says which file it read.
+	// Reporting a base failure as a head failure would send the author to
+	// edit a file that is fine — base comes out of a git ref, not out of
+	// this PR's tree.
+	const malformed = `{"_type":"issue","id":"a"`
+
+	t.Run("head", func(t *testing.T) {
+		err := check([]byte(malformed+"\n"), []byte(issueOpenA+"\n"), "test-base", exemptions{})
+		if err == nil {
+			t.Fatal("expected a failure, got nil")
+		}
+		if !strings.Contains(err.Error(), "parse head "+exportPath+": line 1:") {
+			t.Errorf("expected the head parse error, got: %v", err)
+		}
+	})
+
+	t.Run("base", func(t *testing.T) {
+		err := check([]byte(issueOpenA+"\n"), []byte(malformed+"\n"), "test-base", exemptions{})
+		if err == nil {
+			t.Fatal("expected a failure, got nil")
+		}
+		if !strings.Contains(err.Error(), "parse base "+exportPath+"@test-base: line 1:") {
+			t.Errorf("expected the base parse error naming the base label, got: %v", err)
+		}
+	})
 }
 
 func TestParse_KeepsTheFieldsTheReopenArmReads(t *testing.T) {

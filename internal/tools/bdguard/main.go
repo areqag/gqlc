@@ -21,15 +21,19 @@
 // The separator is recency, not reachability. A reverting record is a copy
 // taken before the close, so its `updated_at` is at or behind base's; a
 // correction is a write made after the close, so its `updated_at` is ahead.
-// Base is read out of a git ref, so the head of a PR cannot restate it.
+// Base is read with `git show <ref>:...`, so the PR's own tree does not
+// restate it — the declaration has to quote a fact already committed on the
+// base ref. Head's `updated_at` is a field in the file the PR is editing, so
+// it is a shape check, not an anti-forgery control (bd gqlc-ukgs).
 //
 // Reachability of the closing SHA — the first evidence considered — is kept
 // only as a veto, for two reasons. gqlc squash-merges and deletes the branch,
 // so an earned close's cited SHA is orphaned as surely as an unearned one's;
 // and the CI checkout is depth-1, where objects outside the fetched pack are
-// absent whatever their history. Read as authorisation it would pass every
-// declaration in CI. Read as a veto it still refuses the case where the SHA
-// is sitting on a ref, and stays silent when it has nothing to say.
+// absent whatever their history. Read as authorisation it would pass
+// declarations in CI it should refuse. Read as a veto it still refuses the
+// case where the SHA is sitting on a ref, and stays silent when it has
+// nothing to say.
 package main
 
 import (
@@ -228,9 +232,14 @@ func isAlnum(c byte) bool {
 
 // check is the comparator: given both files' bytes, decide whether the head
 // regressed vs the base. Its only I/O is exemptions.refContaining, injected so
-// tests reach every branch with no `git` shellout — the git boundary of run()
-// is exercised only by the end-to-end incident replay against the real repo
-// (see PR body).
+// its branches are reachable with no `git` shellout. Measured with
+// `go test ./internal/tools/bdguard -coverprofile=c.out && go tool cover
+// -func=c.out`: check and parse are at 100.0% of statements.
+//
+// The uncovered remainder in that same profile is main(), run(), showAtRef and
+// gitRefContaining, all at 0.0% — the flag entrypoint and the git boundary. No
+// automated test reaches them (bd gqlc-drvx); they were exercised only by a
+// manual incident replay against a scratch repo outside the worktree.
 //
 // exemptions.drops exempts ids from the dropped arm only: a bead still present
 // but no longer closed is a status regression, not the deletion the list
@@ -335,8 +344,16 @@ func refuseReopen(baseRec, headRec record, sha string, refContaining func(string
 }
 
 // gitRefContaining names a ref whose history contains sha, or "" when it finds
-// none. A shallow clone, an absent object and a genuinely unreferenced commit
-// all return "" — see the package comment for why that collapse is safe here.
+// none. Two different states collapse to "": the object is absent (outside the
+// fetched pack), and the object is present but no ref reaches it. See the
+// package comment for why that collapse is safe here.
+//
+// Shallowness alone is not what silences the probe — the boundary is the
+// fetched pack. Measured in `git clone --depth=1`: for the tip that came down
+// in the pack, `git for-each-ref --contains=<tip>` prints `refs/heads/master`
+// and `git merge-base --is-ancestor <tip> HEAD` exits 0, so this returns a ref
+// there. For a commit outside the pack, `git cat-file -e <sha>^{commit}` exits
+// 128 and this short-circuits to "".
 func gitRefContaining(ctx context.Context, sha string) string {
 	if err := exec.CommandContext(ctx, "git", "cat-file", "-e", sha+"^{commit}").Run(); err != nil {
 		return ""
@@ -392,10 +409,17 @@ func showAtRef(ctx context.Context, ref, path string) ([]byte, error) {
 		// `git show` prints either "fatal: path '...' does not exist in '<ref>'"
 		// (path never existed at that commit) or "fatal: path '...' exists on
 		// disk, but not in '<ref>'" (path exists in the worktree but not the
-		// commit). Both mean "absent at ref" for our purposes. Anything else
-		// (unknown ref from a shallow clone emits "fatal: invalid object
-		// name", but we don't match on it — we fall through and bubble it up
-		// loud rather than silently classifying it as absent).
+		// commit). Both mean "absent at ref" for our purposes; anything else
+		// is bubbled up.
+		//
+		// What that split does NOT separate: a hex sha git cannot resolve.
+		// Measured in a --depth=1 clone, `git show <unknown-40-hex>:<path>`
+		// prints those same two messages, so it is classified absent here.
+		// "fatal: invalid object name" — which is bubbled up — is what a
+		// non-sha ref name prints (`git show nosuchbranch:p`). CI passes a
+		// hex sha (ci.yml: `just bd-export-monotonic "$BASE_SHA"`), so the
+		// fetch on the line above it is what stands between an unresolvable
+		// base and a vacuous pass. See bd gqlc-z6xd.
 		msg := stderr.Bytes()
 		if bytes.Contains(msg, []byte("does not exist in")) || bytes.Contains(msg, []byte("exists on disk, but not in")) {
 			return nil, errPathAbsentAtRef
