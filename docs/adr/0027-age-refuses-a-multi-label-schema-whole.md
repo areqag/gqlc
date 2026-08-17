@@ -95,7 +95,10 @@ string, and whose entity another decoder does fill, is accepted, because it
 carries no label guard for this gate to hold to an alphabet. A decoder written
 as a method is likewise not graded — a receiver form is read as a decoder's
 holder — so relocating one there takes it out of this census, and the
-reconciliation is what would then refuse the emission, on its entity's absence.
+reconciliation is what would then refuse the emission, on its entity's absence,
+unless some yielded function also names that entity. Adding a dead decoder on a
+receiver beside a live one is that exception: the roll balances, and no guard
+the method writes is read, so it is accepted.
 
 It reddens on this shape naming `decodePersonEmployee` and the join spelling.
 The rejection above stands on its own terms: a gate that catches the emission is

@@ -466,6 +466,79 @@ func (s *ConformanceSuite) TestEmittedDecodersGuardOnlyOnStampableLabels() {
 			"never exercised")
 }
 
+// TestEmittedClosuresNameNoEntityAndCompareNoString is the corpus census of
+// the function literals packageLevelFuncs yields, and it exists because the
+// claim it carries was written as prose twice and was wrong both times.
+//
+// Widening the sweep to every literal at every depth brought every closure in
+// every emission under the classification at once. What that costs is a
+// question about the emissions and not about the rule, and it was answered by
+// naming the closures one backend writes — which one grep falsified, because
+// a second backend writes element decoders too, and it is the one target
+// whose decoders are additionally held to guard on the wire label. So the
+// answer is measured here instead: a literal yielded out of an emission names
+// no prepared entity in its results and compares no string, which lands it on
+// the results-name-nothing arm with no guard for an alphabet to reject.
+//
+// The per-target floor is what keeps the census off an empty loop, and it is
+// the enumeration that used to be prose: a backend that stops emitting
+// closures reddens here, and so does one that starts.
+func (s *ConformanceSuite) TestEmittedClosuresNameNoEntityAndCompareNoString() {
+	targets := s.backends.Keys()
+	closures := make(map[string]int, len(targets))
+
+	for _, dir := range s.validFixtures() {
+		fixture := filepath.Base(dir)
+		s.Run(fixture, func() {
+			m := s.loadManifest(dir)
+			sch := s.loadSchema(dir)
+			in := codegen.Input{Schema: sch, Queries: s.loadNamedQueries(dir, m, sch)}
+			decoderShapes := preparedEntityShapes(s.Require(), in)
+
+			for _, target := range targets {
+				files, ok := s.emitOrRefuse(target, in)
+				if !ok {
+					continue
+				}
+				fset := token.NewFileSet()
+				for _, f := range files {
+					file, err := parser.ParseFile(fset, f.Path, f.Contents, parser.SkipObjectResolution)
+					s.Require().NoError(err, "parsing emitted %s", f.Path)
+					for _, fn := range packageLevelFuncs(fset, file) {
+						if !fn.literal {
+							continue
+						}
+						closures[target]++
+						site := fmt.Sprintf("%s in %s", fn.name, f.Path)
+						s.Require().Empty(resultEntities(fn.typ, decoderShapes),
+							"%s emits %s for fixture %s, a function literal whose results name prepared entity "+
+								"types. Both docstrings describing what widening this sweep to every literal "+
+								"brought under the classification say the emitted closures fill nothing, and this "+
+								"census is what stands behind them, so a closure that does fill one is a decoder "+
+								"written where those sentences say there are none",
+							target, site, fixture)
+						s.Require().Empty(comparedStrings(s.Require(), fn.body),
+							"%s emits %s for fixture %s, and it compares a string for equality. The sweep itself "+
+								"accepts that only while the string is one of the wire's own fixed spellings %v "+
+								"and refuses the emission otherwise; either way the docstrings saying the emitted "+
+								"closures compare no string are describing a different emission",
+							target, site, fixture, slices.Sorted(maps.Keys(wireScalarSpellings)))
+					}
+				}
+			}
+		})
+	}
+
+	for _, target := range targets {
+		s.Require().NotZero(closures[target],
+			"%s emitted no function literal anywhere in the corpus, so this census read none of its closures and "+
+				"the sentences it stands behind are claims about an empty set. It replaced an enumeration in prose "+
+				"that named one backend's closures and dropped another's; a backend dropping out of this set is the "+
+				"same defect, recorded rather than written down",
+			target)
+	}
+}
+
 // TestMultiLabelSchemaPostureIsRecorded holds each backend to a declared
 // verdict on a schema that declares an entity keyed on more than one label:
 // emit for it, or refuse it whole.
@@ -1113,7 +1186,15 @@ func decodePerson(raw []byte) (Person, error) {
 // graded nor reported, and a witness set drawn from the arms the code
 // happened to have could not discover the arm it did not have. The walk now
 // visits every node of the declaration, so there is no per-shape arm left to
-// be missing, and the last row nests a literal in shapes no arm ever named.
+// be missing, and one row nests a literal in shapes no arm ever named.
+//
+// The last two rows are about what that walk hands off to. One puts the
+// helper inside a package-level literal's body, which the walk does not
+// reach: it prunes at each literal it finds and hands that literal's body to
+// the body walk instead, and since the sweep stopped collecting a nested
+// literal's strings into its holder, that hand-off is the only thing left
+// that reports the helper. The other binds fewer names than it has values,
+// which go/parser accepts and which the name binding must not index past.
 //
 // Each row writes a helper comparing a string no verdict here covers, so the
 // answer for every one of them is the same refusal: an ungraded site. A row
@@ -1156,6 +1237,17 @@ func decodePerson(raw []byte) (Person, error) {
 		{
 			name: "nested in shapes no arm of this walk names",
 			decl: `var personLabelOKs = [1]struct{ fs []func(string) bool }{{fs: []func(string) bool{` + helper + `}}}`,
+		},
+		{
+			name: "inside the body of a package-level literal",
+			decl: `var boot = func() { _ = []func(string) bool{` + helper + `} }`,
+		},
+		{
+			// notALiteral is undeclared, and the emission is parsed rather
+			// than typechecked, which is what lets a name list shorter than
+			// its value list reach the binding at all.
+			name: "a value of a declaration binding fewer names than values",
+			decl: `var personLabelOK = notALiteral(), ` + helper,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1206,10 +1298,11 @@ func decodePerson(raw []byte) (Person, error) {
 // refused wherever it is written, including in a method a query surface owns.
 // That is the same price every package-level function in an emission has paid
 // since this gate existed, and the price of not paying it was three dead
-// decoders passing green. The closures the backends do emit today — the two
-// neo4j transaction callbacks in db.go — are yielded and pass: they name no
-// prepared entity in their results and compare no string, so they land on the
-// results-name-nothing arm with an empty guard list.
+// decoders passing green. The closures the backends do emit today are yielded
+// and pass, which TestEmittedClosuresNameNoEntityAndCompareNoString measures
+// per emission rather than restating here: an enumeration written in prose is
+// what stood here before, and it named one backend's closures while dropping
+// another's.
 func TestSweepClassifiesAFunctionAlikeAtEveryDepth(t *testing.T) {
 	shapes := map[string]codegen.EntityKind{"Person": codegen.EntityNode}
 	// Every row writes this helper under this name, so each refusal names the
@@ -1412,6 +1505,61 @@ func decodePerson(raw []byte) (Person, error) {
 					"Labels does, does not reach the verdict this row is about")
 		})
 	}
+}
+
+// TestSweepReadsADecoderInAPackageLevelLiteralOnce holds the sweep to a
+// decoder written in the body of a package-level function literal: read once,
+// under its own name, on its own axis.
+//
+// That position is the seam between the two walks. A declaration is walked
+// for literals and the walk prunes at each one it finds, so anything below a
+// package-level literal is reached only by handing that literal's body to the
+// body walk — the same walk a func declaration's body gets, and the one that
+// does not prune. Each half is pinned on its own: rows elsewhere put a literal
+// in a declaration's own syntax, and others put one inside a func
+// declaration's body. What nothing held is the hand-off between them.
+//
+// One emission pins both sides of the seam, because neither side is silent.
+// Drop the hand-off and this decoder is yielded by nothing — since the sweep
+// stopped collecting a nested literal's strings into its holder, nothing else
+// reads it — so the entity it fills goes undecoded and the reconciliation
+// against codegen.Prepare refuses the emission. Stop pruning and it is
+// yielded twice, once by each walk, and the duplicate arm refuses it as two
+// candidates for one entity's decoder. What is asserted is therefore that the
+// emission is accepted, with exactly the one decoder classified.
+func TestSweepReadsADecoderInAPackageLevelLiteralOnce(t *testing.T) {
+	// The nested decoder is the only one here on purpose: a visible second
+	// decoder for Person would let the reconciliation balance without it,
+	// which is the shape that leaves a laundered decoder green.
+	const emission = `package emitted
+
+var boot = func() {
+	decodePerson := func(raw []byte) (Person, error) {
+		label := string(raw)
+		if label != "Person" {
+			return Person{}, nil
+		}
+		return Person{}, nil
+	}
+	_ = decodePerson
+}
+`
+	shapes := map[string]codegen.EntityKind{"Person": codegen.EntityNode}
+	files := []codegen.File{{Path: "models.go", Contents: []byte(emission)}}
+
+	msgs, decoders := recordedSweep(files, shapes)
+
+	require.Empty(t, msgs,
+		"the sweep refused an emission whose one decoder is written in the body of a package-level literal: %s",
+		strings.Join(msgs, "\n"))
+	require.Equal(t, []entityDecoder{{
+		fn: "decodePerson", file: "models.go", entity: "Person",
+		shape: codegen.EntityNode, guards: []string{"Person"},
+	}}, decoders,
+		"the decoder written inside the package-level literal is not read once as Person's decoder carrying its "+
+			"own guard. An empty list means the literal's body was never walked and the guard is graded by "+
+			"nothing; two entries mean it was walked twice, once by the declaration walk and once by the "+
+			"hand-off, and one decoder read twice is refused as two")
 }
 
 // TestSweepRefusesADecoderWhoseResultTypeItCannotResolve holds the negative
@@ -1757,10 +1905,16 @@ func (r *recordingT) FailNow() { panic(failedNow{}) }
 // inside an *ast.GenDecl — and every question this gate asks is answered
 // identically for both, so they are flattened here and nowhere else has to
 // know there were two.
+//
+// literal records which spelling it arrived as. Nothing in the classification
+// reads it — that is the point of the flattening. It is carried for the
+// corpus census, TestEmittedClosuresNameNoEntityAndCompareNoString, which is
+// a claim about the literals alone.
 type emittedFunc struct {
-	name string
-	typ  *ast.FuncType
-	body *ast.BlockStmt
+	name    string
+	typ     *ast.FuncType
+	body    *ast.BlockStmt
+	literal bool
 }
 
 // packageLevelFuncs is every receiver-less function one emitted file
@@ -1819,9 +1973,13 @@ type emittedFunc struct {
 // its holder. That cost is real and it is the price of the totality claim,
 // which is the same price every package-level function in an emission has
 // paid since this gate existed. What the backends emit today does pay it
-// without reddening: neo4j's db.go writes two transaction callbacks, which
-// name no prepared entity and compare no string, so they are yielded,
-// classified on the results-name-nothing arm, and carry no guard to grade.
+// without reddening, and that is measured rather than enumerated:
+// TestEmittedClosuresNameNoEntityAndCompareNoString sweeps each emission the
+// valid corpus produces and holds every literal yielded here to naming no
+// prepared entity in its results and comparing no string, so each lands on
+// the results-name-nothing arm with no guard to grade. The enumeration that
+// stood here instead named one backend's transaction callbacks and dropped
+// another backend's element decoders, which one grep falsified.
 //
 // A method is not yielded, and that exclusion is the claim's edge rather
 // than a blind spot of the same kind: a receiver form belongs to the
@@ -1858,7 +2016,7 @@ func packageLevelFuncs(fset *token.FileSet, file *ast.File) []emittedFunc {
 			if !ok {
 				return true
 			}
-			out = append(out, emittedFunc{name: litName(names, lit), typ: lit.Type, body: lit.Body})
+			out = append(out, emittedFunc{name: litName(names, lit), typ: lit.Type, body: lit.Body, literal: true})
 			return true
 		})
 	}
@@ -1882,7 +2040,7 @@ func packageLevelFuncs(fset *token.FileSet, file *ast.File) []emittedFunc {
 			if !ok {
 				return true
 			}
-			out = append(out, emittedFunc{name: litName(names, lit), typ: lit.Type, body: lit.Body})
+			out = append(out, emittedFunc{name: litName(names, lit), typ: lit.Type, body: lit.Body, literal: true})
 			nested(lit.Body)
 			return false
 		})
@@ -1906,6 +2064,10 @@ func boundLiteralNames(root ast.Node) map[*ast.FuncLit]string {
 		// function literal: the shapes where they do not — `var a, b = f()`,
 		// `a, b := f()` — have a single value that is a call and never a
 		// literal, and the length guard is what rules them out.
+		//
+		// It is a bounds guard in the other direction too. `var a = f(), g()`
+		// parses — go/parser does not typecheck — and there the range below
+		// would index lhs past its end, so the guard is `!=` rather than `>`.
 		if len(lhs) != len(rhs) {
 			return
 		}
