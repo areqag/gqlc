@@ -265,17 +265,28 @@ def prose_only(pr_body):
                 out.append("")
                 continue
             cut = comment_opens_at(line)
+            # A raw block and a comment can open on one line: '<pre><!--'.
+            # The opener is read over the part of the line before the comment
+            # and the comment then carries the block, the same way one opened
+            # a line lower does. Testing the comment first and stopping there
+            # is what let '<pre><!--', '-->', a marker and '</pre>' put the
+            # marker back in prose while GitHub still renders it inside the
+            # <pre>; measured. Everything after the '<!--' is inside the
+            # comment, the closing tag included, so the one-line-block test
+            # reads the same part of the line the opener does.
+            head = line if cut is None else line[:cut]
+            m = HTML_OPEN.match(head)
+            # '<pre>x</pre>' on one line closes on that line, so the lines
+            # below it are prose again.
+            opened = None
+            if m and f"</{m.group(1).lower()}" not in head.lower():
+                opened = ("html", m.group(1).lower())
             if cut is not None:
-                state = ("comment", None)
+                state = ("comment", opened)
                 out.append(line[:cut])
                 continue
-            m = HTML_OPEN.match(line)
             if m:
-                # '<pre>x</pre>' on one line closes on that line, so the
-                # lines below it are prose again.
-                tag = m.group(1).lower()
-                closed = f"</{tag}" in line.lower()
-                state = None if closed else ("html", tag)
+                state = opened
                 out.append("")
                 continue
             out.append(line)
