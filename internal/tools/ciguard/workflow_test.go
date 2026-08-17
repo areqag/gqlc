@@ -58,19 +58,19 @@ type ciJob struct {
 	Steps           ciSteps           `yaml:"steps"`
 }
 
-// docOf parses a workflow into its top-level mapping node.
+// ciDoc parses ci.yml into its top-level mapping node.
 //
 // A node walk rather than a map[string]any decode, because the top-level key
 // is literally `on`, and which YAML schema a parser applies to that token has
 // changed under this repo before. Node.Value is the source token, so the
 // lookup does not depend on the answer.
-func docOf(t *testing.T, rel string) *yaml.Node {
+func ciDoc(t *testing.T) *yaml.Node {
 	t.Helper()
-	src, err := os.ReadFile(filepath.Join(repoRoot, rel))
-	require.NoError(t, err, "read %s", rel)
+	src, err := os.ReadFile(filepath.Join(repoRoot, ciWorkflow))
+	require.NoError(t, err, "read %s", ciWorkflow)
 	var root yaml.Node
-	require.NoError(t, yaml.Unmarshal(src, &root), "parse %s", rel)
-	require.NotEmpty(t, root.Content, "%s parsed to an empty document", rel)
+	require.NoError(t, yaml.Unmarshal(src, &root), "parse %s", ciWorkflow)
+	require.NotEmpty(t, root.Content, "%s parsed to an empty document", ciWorkflow)
 	return root.Content[0]
 }
 
@@ -96,7 +96,7 @@ func childByKey(m *yaml.Node, key string) *yaml.Node {
 // list replaces the default set rather than extending it: adding `edited`
 // while dropping `synchronize` would silence CI on every push.
 func TestCIRunsOnPullRequestBodyEdits(t *testing.T) {
-	on := childByKey(docOf(t, ciWorkflow), "on")
+	on := childByKey(ciDoc(t), "on")
 	require.NotNil(t, on, "%s has no `on:` block", ciWorkflow)
 
 	pr := childByKey(on, "pull_request")
@@ -121,7 +121,7 @@ func TestCIRunsOnPullRequestBodyEdits(t *testing.T) {
 // gateStep locates the PR-body check inside the required job.
 func gateStep(t *testing.T) (ciJob, int) {
 	t.Helper()
-	jobs := childByKey(docOf(t, ciWorkflow), "jobs")
+	jobs := childByKey(ciDoc(t), "jobs")
 	require.NotNil(t, jobs, "%s has no jobs", ciWorkflow)
 
 	node := childByKey(jobs, gateJob)
@@ -196,7 +196,7 @@ func TestPRBodyGateDoesNotReadTheFrozenPayloadBody(t *testing.T) {
 // `defaults: run: shell: bash` anywhere above the step would spell that
 // difference in a file the step does not mention.
 func TestPRBodyGateFailsTheJobItRunsIn(t *testing.T) {
-	doc := docOf(t, ciWorkflow)
+	doc := ciDoc(t)
 	job, i := gateStep(t)
 	step := job.Steps[i]
 
