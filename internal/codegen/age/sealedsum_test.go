@@ -63,10 +63,12 @@ type (
 // t.String()` stops quoting internal/resolver and starts quoting the caller.
 type shadowEdgeUnion struct{ resolver.ResolvedEdgeUnion }
 
-// shadowEdgeUnionText is a caller writing out the candidate list edgeUnionReason
-// would have produced for probeEdgeUnion. Reusing those labels is the point of
-// the row that reads it: it is what makes a fall-through reason indistinguishable
-// by wording from an edgeUnionReason one.
+// shadowEdgeUnionText is a caller writing out the candidate list
+// edgeUnionReason would have produced for probeEdgeUnion — formatLabelList
+// spells two labels exactly this way. The full reasons still differ, so this is
+// not a collision; what reusing the labels defeats is the plausible shortcut of
+// ranking a reason by looking for candidate names in it, which is the shortcut
+// the row that reads this const exists to rule out.
 const shadowEdgeUnionText = "AUTHORED and LIKES"
 
 func (shadowEdgeUnion) String() string { return shadowEdgeUnionText }
