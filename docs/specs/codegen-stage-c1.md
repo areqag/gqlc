@@ -810,13 +810,19 @@ every graded site rather than every graded document, which makes the
 test a verbatim copy of these documents and turns every honest edit
 to an example red — so it is written down here instead.
 
-That is the whole of what is fenced: the *name*. Return types, decode
-bodies, `<zero>` values and every other signature in this document
-remain unfenced prose that the emitter is free to outgrow, so read
-them as illustration and the goldens under `test/data/codegen/valid/`
-as truth. The argument-name rule above went four stages unchecked
-because there was neither a fence nor a note saying there was none;
-the next drift will at least be a known unknown.
+What is fenced is the argument *name*, everywhere except one place.
+The `<param-list>` bullet above is the exception: its two tails are
+held verbatim, so `, arg int64` in place of `, arg <T>` is red on the
+type even though the name is untouched — that bullet is the normative
+rule, and a rule stated in a second spelling is how one arity came to
+be stated twice while the other sat in prose. Everywhere else only
+the name is read: return types, decode bodies, `<zero>` values and
+every other signature in this document remain unfenced prose that the
+emitter is free to outgrow, so read them as illustration and the
+goldens under `test/data/codegen/valid/` as truth. The argument-name
+rule above went four stages unchecked because there was neither a
+fence nor a note saying there was none; the next drift will at least
+be a known unknown.
 
 The 3-line doc-comment quote of the query text is a readability
 affordance for `godoc` browsers — the query is the source of truth,

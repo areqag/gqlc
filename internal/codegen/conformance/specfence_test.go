@@ -827,7 +827,7 @@ func TestSpecSigScannerDetectsDrift(t *testing.T) {
 		wantArg: codegen.ParamArg,
 		wantAny: true,
 	}, {
-		name:    "c5 §5.6 worked example, before",
+		name:    "c5 §5.5 worked example, before",
 		text:    "func (q *Queries) GetAction(ctx context.Context, since int64) (GetActionR, error) {",
 		wantArg: "since",
 		wantAny: true,
