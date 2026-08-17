@@ -1,2 +1,3 @@
-internal/grammar/gen/** linguist-generated
-internal/grammar/GQL.g4 linguist-vendor
+internal/grammar/*/gen/** linguist-generated
+internal/grammar/gql/GQL.g4 linguist-vendor
+test/data/resolver/sweep.manifest.tsv linguist-generated
