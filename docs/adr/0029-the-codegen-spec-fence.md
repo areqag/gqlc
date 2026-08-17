@@ -222,7 +222,8 @@ entry the document has stopped printing is red by its text. What that leaves
 open is a claim put in an exhibit's place and spelled the way the exhibit was:
 it takes the entry (`gqlc-x2sg`).
 
-Two things are deliberately not reached:
+Two things are deliberately not reached, and the first drags a third along that
+was not chosen:
 
 - **A parenthesis-less parameter list with no code span around it**, in running
   prose or on its own line inside a code block. The paren anchor needs no span
@@ -235,6 +236,17 @@ Two things are deliberately not reached:
   spellings are both pinned as skips in `TestSpecBareSigScannerDetectsDrift`.
   The prose half is the same surface as `gqlc-e143`; the block half is
   `gqlc-cgat`.
+
+  That rule is a byte test, not a parse, so it does not divide spellings where a
+  renderer divides them, and the third thing not reached is a list that *does*
+  carry a span. A run of three opening its line but closed before the line ends
+  is an ordinary code span to CommonMark — a backtick fence's info string may
+  not hold a backtick — and is skipped here regardless; a single backtick on a
+  tab-indented line is read here while a renderer shows the contents of an
+  indented code block. Neither direction can be closed by a better fence rule,
+  because the line-opening test is reached only by a run of three or more. Both
+  are pinned, C1 §5.3 states the exemptions as a floor for that reason, and this
+  overreach of the block rule is `gqlc-cgat` too.
 - **The binding half.** The symmetric move — reading a `"key": value` pair with
   no `map[string]any` literal around it — was measured before it was declined:
   the swept documents hold over 500 such spans across more than 30 files,

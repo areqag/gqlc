@@ -37,8 +37,8 @@ import (
 // inside a code span whose backtick run the block rule takes for a
 // fence, since that rule tests bytes rather than parsing markdown —
 // while the paren anchor reaches a block like any other text
-// (gqlc-cgat); a listed
-// document keeps its census entry on one surviving site (gqlc-0rjn);
+// (gqlc-cgat); a listed document keeps its census entry on one
+// surviving site (gqlc-0rjn);
 // and a list replacing one of the exhibits specBareListExhibits names,
 // spelled the same way, takes that entry's exemption (gqlc-x2sg).
 
