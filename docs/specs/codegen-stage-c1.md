@@ -819,8 +819,10 @@ held verbatim, so `, arg int64` in place of `, arg <T>` is red on the
 type even though the name is untouched — that bullet is the normative
 rule, and a rule stated in a second spelling is how one arity came to
 be stated twice while the other sat in prose. Everywhere else only
-the name is read: return types, decode bodies, `<zero>` values and
-every other signature in this document remain unfenced prose that the
+the name is read. The rest of a graded signature is not — its method
+name, its parameter type and its return type are all unread — and
+neither are the decode bodies, the `<zero>` values, or any signature
+the sweep does not reach at all. Those remain unfenced prose that the
 emitter is free to outgrow, so read them as illustration and the
 goldens under `test/data/codegen/valid/` as truth. The argument-name
 rule above went four stages unchecked because there was neither a

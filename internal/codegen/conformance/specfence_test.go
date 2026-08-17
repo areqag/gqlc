@@ -24,9 +24,17 @@ import (
 // implementing to that spec reintroduced the vulnerability (gqlc-rz0l).
 //
 // This file is the fence. It reads the argument name from the emitter's
-// own constant, so the specs cannot disagree with codegen.ParamArg
-// without going red, and a future rename of that constant reddens the
-// specs rather than silently widening the gap.
+// own constant, so a graded site that disagrees with codegen.ParamArg is
+// red, and a future rename of that constant reddens the specs rather
+// than silently widening the gap.
+//
+// A graded site, not a document. The sites it reaches are enumerated
+// below and so are the ones it does not: a signature carrying the
+// author's names as separate arguments is past the arity it reads
+// (gqlc-vu7z), the prose around an intact graded span can say the
+// opposite of it (gqlc-e143), and a listed document keeps its census
+// entry on one surviving site (gqlc-0rjn). The specs can still disagree
+// with codegen.ParamArg in each of those places and stay green.
 //
 // It grades three shapes, because the specs write the name in three
 // places: signatures printed whole, the `<param-list>` bullets that
@@ -1027,6 +1035,18 @@ func TestSpecParamListRuleScannerDetectsDrift(t *testing.T) {
 		name: "prose code spans in the bullet are not parameter lists",
 		text: bullet("— the C1 rule. `paramFieldName(\"minAge\")` → `MinAge` is what it\n" +
 			"  is not; `$err`, `$q` and `$_` are why."),
+	}, {
+		// What keeps prose spans out is the test for a leading comma,
+		// and the row above does not reach it: those spans hold no
+		// depth-zero comma, so they are dropped for splitting to one
+		// field rather than for failing the test. A prose span that
+		// does split into two is what the test is for — without it the
+		// second field grades as a parameter naming nothing, and the
+		// span joins the rules the census reconciles.
+		name:      "a prose span that splits in two is still not a parameter-list tail",
+		text:      bullet("— `, arg <T>` if one parameter; the fields are `MinAge, Locale`."),
+		wantArgs:  []string{codegen.ParamArg},
+		wantRules: []string{", arg <T>"},
 	}, {
 		name: "a document with no such bullet contributes nothing",
 		text: "The `<param-list>` placeholder is described in C1 §5.3.\n",
