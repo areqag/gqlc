@@ -351,8 +351,11 @@ func TestScalarAndEntityTypeString(t *testing.T) {
 }
 
 // TestTemporalTypesSealed pins that each Stage-7 temporal variant satisfies
-// the sealed Type interface — the private isType() marker must be reachable,
-// so a foreign package cannot add a variant.
+// Type in its value form: the private isType() marker is declared on each and
+// is reachable from this package, so none of the six was left out of the sum.
+// The name is about what the marker seals — declaration, so a foreign package
+// cannot declare a new variant. It does not seal inhabitation;
+// TestQuerySumsAreNotClosed/Type holds that half.
 func TestTemporalTypesSealed(_ *testing.T) {
 	var _ query.Type = query.TypeDate{}
 	var _ query.Type = query.TypeTime{}
@@ -365,7 +368,7 @@ func TestTemporalTypesSealed(_ *testing.T) {
 // --- Stage 8: TypePath ---
 
 // TestTypePathString pins the Stage-8 TypePath variant's stringer to "path".
-// It joins the closed sum through the same isType() marker as the other
+// It joins the sum by declaring the same isType() marker as the other
 // variants; its wire tag is the single source the JSON encoding derives from.
 func TestTypePathString(t *testing.T) {
 	require.Equal(t, "path", query.TypePath{}.String())

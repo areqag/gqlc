@@ -238,8 +238,10 @@ _Avoid_: orientation (use for the resolver's per-match source→target choice, w
 the model does not carry); the schema-side directed-only **Direction** sense.
 
 **Use**:
-One position where a parameter appears in a query. A closed sum of
-PropertyUse, ClauseSlotUse, and ExprUse: a property use binds the
+One position where a parameter appears in a query. A marker-sealed sum of
+PropertyUse, ClauseSlotUse, and ExprUse — the whole set of types declaring the
+`isUse` marker, which is narrower than the set satisfying the interface
+(AGENTS.md, "Closed sum types"): a property use binds the
 parameter to a binding property (the `$threshold` in
 `WHERE a.age > $threshold`); a clause-slot use places the parameter in a
 SKIP or LIMIT clause whose type is fixed by the clause (an integer)
@@ -282,9 +284,15 @@ sense; the axis is on the parsed `Query`).
 
 **Effect**:
 One write operation the query performs at a specific **query part** — the
-per-part analogue of a **return item**. A closed sum of `CreateEffect`
+per-part analogue of a **return item**. A marker-sealed sum — the whole set of
+types declaring the `isEffect` marker, which is narrower than the set
+satisfying the interface (AGENTS.md, "Closed sum types") — of `CreateEffect`
 (one `CREATE` clause, carrying the ordered list of binding variables the
-clause introduced), `DeleteEffect` (one `DELETE` / `DETACH DELETE`,
+clause introduced), `MergeEffect` (one `MERGE` clause — a match-or-create
+alternation, kept distinct from `CreateEffect` so the "match this if you can"
+half survives — carrying the ordered list of binding variables the clause
+introduced plus the `ON MATCH` and `ON CREATE` actions, each a `SetEffect`),
+`DeleteEffect` (one `DELETE` / `DETACH DELETE`,
 carrying the targeted Refs (bare `var` / `var.prop` targets), the
 rich-expression refs (everything else — the two slices partition the
 DELETE expressions, never both, never neither, so no delete is silently
@@ -329,9 +337,11 @@ result is an ordered, duplicate-preserving list of return items, or the `RETURN 
 wildcard over all in-scope bindings; it becomes a generated result.
 
 **Projection**:
-What a return item projects: a closed sum of a binding reference (`var` /
+What a return item projects: a marker-sealed sum of a binding reference (`var` /
 `var.prop`), a scalar literal, a non-aggregate function call, an aggregate, or a
-rich scalar expression. It carries only the bindings the resolver must trace (the
+rich scalar expression — the whole set of types declaring the `isProjection`
+marker, which is narrower than the set satisfying the interface (AGENTS.md,
+"Closed sum types"). It carries only the bindings the resolver must trace (the
 `var` / `var.prop` refs), the projection's **result type**, and — for an
 aggregate — the cardinality-bearing kind. It never carries the expression tree
 (ADR 0003) nor a non-aggregate function's identity, which live below the
@@ -342,11 +352,13 @@ _Avoid_: expression (reserve for the grammar's `oC_Expression`; a projection is
 the curated subset the model carries).
 
 **Type**:
-The result type of a **projection**: a closed sum of `bool`, `int`, `float`,
-`string`, `null`, `list<T>` (parameterised over an element type), `map`,
-`node`, `edge`, the six **temporal types** (`date`, `time`, `localtime`,
+The result type of a **projection**: a marker-sealed sum of `bool`, `int`,
+`float`, `string`, `null`, `list<T>` (parameterised over an element type),
+`map`, `node`, `edge`, the six **temporal types** (`date`, `time`, `localtime`,
 `datetime`, `localdatetime`, `duration`), `path`, and a distinguished
-`unknown` for types the parser cannot compute schema-free. It is the type
+`unknown` for types the parser cannot compute schema-free — the whole set of
+types declaring the `isType` marker, which is narrower than the set satisfying
+the interface (AGENTS.md, "Closed sum types"). It is the type
 vocabulary the resolver reads from a parsed query: a
 `RefProjection` on a whole entity types as `node` or `edge`; on a
 **named path** as `path`; on a variable-length edge (see **Hop range**)
