@@ -203,9 +203,9 @@ func unsweptModscopeCallers(recipes []justRecipe) (unswept, complaints []string)
 	// It reaches a missed header through the recipes that depend on it, so a
 	// missed header nothing depends on leaves the answer set quietly shorter:
 	// of the four callers on this tree, vuln and test-codegen-fence have no
-	// dependents at all. That is the fail-open TestParseJustfileReadsWhatJustReads
-	// covers shape by shape below, and why the pinned header rows there are not
-	// decoration for this control.
+	// dependents at all. That is the fail-open that
+	// TestParseJustfileReadsWhatJustReads covers shape by shape below, and why
+	// the pinned header rows there are not decoration for this control.
 	for _, r := range recipes {
 		for _, d := range r.deps {
 			if _, found := byName[d]; !found {
@@ -392,6 +392,16 @@ func TestUnsweptModscopeCallersFindsEachBrokenWiring(t *testing.T) {
 // justfile is written in. A header it does not recognise is a caller it cannot
 // find, and a body it truncates is an invocation it does not see — both fail
 // open, which is why each shape has a row.
+//
+// The last row is the boundary rather than a shape on this tree: a parameter
+// default spelling `:=` puts the first colon inside the default, and justHeader
+// reads that as an assignment and returns nothing. That is the header limit the
+// file comment above points here for. Measured: rewriting `vuln:
+// sweep-discovery-probes vuln-root-residual` to `vuln x="a:=b":
+// vuln-root-residual` leaves `just --dump` accepting the file with vuln's body
+// still naming this package three times, and leaves
+// TestEveryRecipeRunningModscopeSweepsProbesFirst passing; dropping the same
+// edge without touching the header fails it.
 func TestParseJustfileReadsWhatJustReads(t *testing.T) {
 	cases := []struct {
 		name string
@@ -435,6 +445,16 @@ func TestParseJustfileReadsWhatJustReads(t *testing.T) {
 			name: "a comment in a body is part of it",
 			src:  "vuln:\n    # go run ./" + modscopePkg + "\n",
 			want: []justRecipe{{name: "vuln", body: "    # go run ./" + modscopePkg + "\n"}},
+		},
+		{
+			name: "a parameter carrying a default is not a dependency",
+			src:  "lint-hooks dir=\".githooks\": ensure-shellcheck\n    echo hi\n",
+			want: []justRecipe{{name: "lint-hooks", deps: []string{"ensure-shellcheck"}, body: "    echo hi\n"}},
+		},
+		{
+			name: "a parameter default spelling := leaves the header unread",
+			src:  "vuln x=\"a:=b\": sweep\n    echo ./" + modscopePkg + "\n",
+			want: nil,
 		},
 	}
 
