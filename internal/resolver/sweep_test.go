@@ -722,9 +722,12 @@ func TestSweepManifestRejectsHandEdits(t *testing.T) {
 
 	// Every row is good with one thing broken, and asserts the diagnosis that
 	// one thing earns rather than that some diagnosis came back. A row that
-	// dropped good's msg row too would be rejected by the cell/msg
-	// correspondence no matter what the guard it is named for did, so deleting
-	// that guard would leave the table green.
+	// dropped good's msg row too can draw the cell/msg correspondence's
+	// diagnosis instead of its own guard's — that correspondence reaches a
+	// refusing cell whose msg row is gone — and a table asserting only that
+	// some diagnosis came back reads that as the row's own guard still
+	// working. Not every such row: the correspondence skips a cell that is not
+	// refusing.
 	//
 	// Measured against the table this one replaces, which asserted only that
 	// some guard had rejected the row: neutering each of the 13 guards in turn
