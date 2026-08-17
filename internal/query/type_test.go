@@ -323,8 +323,8 @@ func TestTypeMarshalJSON(t *testing.T) {
 
 // TestScalarAndEntityTypeString pins the lowercase wire name of each variant
 // in the table below. String is the single source the JSON discriminator
-// derives from, so the serialised name cannot drift from the Go type. Stage 7
-// extended the table to the temporal variants.
+// derives from, so the serialised name can never drift from the Go type.
+// Stage 7 extended the table to the temporal variants.
 //
 // The table is a selection and nothing here holds it to the sum, so a
 // variant's absence from it is not a statement about that variant. TypeList's

@@ -802,9 +802,9 @@ func TestQuerySumsAreNotClosed(t *testing.T) {
 // internal/query/cypher's commonType rests on. That function compares two
 // Types by String rather than by concrete Go type, and cites TypeList as the
 // variant that carries a parameter: TypeList renders its element into String,
-// so two TypeLists differing in element differ in String. A second variant
-// carrying a parameter whose String did not render it would compare equal
-// there across values the parser had computed as distinct.
+// so the parameter reaches that comparison. A second variant carrying a
+// parameter whose String did not render it would compare equal there across
+// values this package had built as distinct.
 //
 // "Carries a parameter" is read here as "declares a struct field", which is
 // what an AST walk can see. The two part company for a variant that reaches

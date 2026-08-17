@@ -593,11 +593,11 @@ func applyListOp(base query.Type, op gen.IOC_ListOperatorExpressionContext) quer
 //
 // String is the comparison rather than the concrete Go type because String is
 // the canonical wire name, and the one variant carrying a parameter, TypeList,
-// renders its element into it ("list<list<int>>"). That TypeList is the only
-// declared variant carrying one is held by
+// renders its element into it ("list<list<int>>"). That no other declared
+// variant carries a field is held by
 // TestTypeListIsTheOnlyVariantDeclaringAField; a second parameterised variant
 // whose String did not render its parameter would compare equal here across
-// values this file had computed as distinct.
+// values the parser had computed as distinct.
 //
 // Equal String is agreement on that wire name only, not on the concrete Go
 // type. The pointer and embedding forms that satisfy query.Type without
