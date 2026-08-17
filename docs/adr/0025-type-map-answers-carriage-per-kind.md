@@ -106,24 +106,48 @@ scalar kinds is a decode helper, which is a different fix — below.
   `gqlc-35yu.11` commits the encodings. It admits kinds one arm at a time as that
   bead lands; the calendar duration arm is expected to stay refused permanently.
 
-- **The AGE `Scalar` table is answered in two places and the two answers
-  disagree.** The table names `any` for `ScalarNull` and `map[string]any` for
-  `ScalarMap`; `unservedColumn` refuses a column of either kind before emission.
-  The refusal is what makes the table's answer inert, and it is load-bearing:
-  `decodeFunc` has no `agtypeNull` or `agtypeMap` arm, so both route to
-  `agtypeString`. Lifting the gate arm alone emits a `map[string]any` field
-  filled from a `string`-returning helper — **the generated package does not
-  compile** — and an `any` field filled from a helper that rejects `null` at
-  runtime. The fix is the two missing helpers, not a change to this interface;
-  until they exist, those two arms are placeholders and this ADR is the record
-  that they are.
+- **The AGE `Scalar` table is answered in two places, and the gate is what makes
+  the table's answer inert.** The table names `any` for `ScalarNull` and
+  `map[string]any` for `ScalarMap`; `unservedColumn` returns a reason for a
+  column of either kind, `unservedReason` carries it, and
+  `rejectUnservedQueries` reads it ahead of `Prepare` — so the query is refused
+  before any `Row` is derived, and no emitted code reaches those two table arms.
+  One case is answered elsewhere: where the query text also spells a dialect
+  gap, `rejectUnservedQueries` stands aside and `rejectDialectGaps` answers
+  instead. Both gates run ahead of `Prepare`, so the column reaches no emission
+  on either path.
+
+  That refusal is load-bearing, but not for the reason first recorded here. It
+  is not propping up a missing helper. `decodeFunc` answers both texts — `"any"`
+  with `agtypeValue`, `"map[string]any"` with `agtypeMap` — and both helpers are
+  emitted, gated together on `helpers.value`. Three goldens carry them:
+  `schema_any_property`, `schema_any_property_alone` and
+  `schema_list_any_property`, all reached from an ANY-width *property* rather
+  than from a scalar column, and in each the only call to `agtypeMap` is
+  `agtypeValue`'s own. `agtypeMap` returns `map[string]any`, the same text the
+  table names for `ScalarMap`, and `agtypeValue` reads an agtype inline `null`
+  as Go `nil` rather than refusing it.
+
+  So the two arms are not placeholders for helpers that do not exist. They are
+  table entries the gate keeps out of emission, which is what `types.go`'s
+  `Scalar` doc says at the site. Lifting the gate arm is a question about
+  whether the value `agtypeMap` returns is the one a map column should carry,
+  not about writing a helper first.
 
 - The declared Go surface is backend-invariant and the runtime types behind it
-  are not, in one place this ADR should name rather than leave to be discovered.
-  A `map[string]any` decoded from `agtype` arrives as JSON, so an integer inside
-  it lands as `float64`, where the neo4j driver yields `int64`.
-  `TestBackendInvariantSurface` compares declarations, so it would not see the
-  divergence. Reachable only once an `agtypeMap` helper exists.
+  need not be. This ADR recorded one instance — a `map[string]any` column
+  decoding an integer member as `float64` on AGE against `int64` on neo4j — and
+  the AGE half of it does not hold against the helper this package emits.
+  `agtypeMap` does not unmarshal the object as JSON: `agtypeObject` splits it by
+  scanning bytes, and each member is read by `agtypeValue`, which tries the
+  integer parse before the float one. Run against the `schema_any_property`
+  golden, `agtypeMap` over `{"n": 3, "f": 1.5, "s": "x", "b": true, "z": null}`
+  yields `int64`, `float64`, `string`, `bool` and `nil` in that order. Whether
+  any runtime-type divergence between the backends survives that is open, and
+  `gqlc-l6c2` carries it: the neo4j half wants the driver rather than a source
+  read. What does not depend on the answer is that
+  `TestBackendInvariantSurface` compares declarations, so it would not see a
+  divergence of this shape either way.
 
 - Only the AGE generator wraps `ErrUnrepresentableTemporal` (and
   `ErrUnrepresentableWidth`) with its own name. Neither neo4j backend does, so a
