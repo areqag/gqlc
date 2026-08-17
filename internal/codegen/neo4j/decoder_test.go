@@ -137,15 +137,21 @@ const graphPropertyTypeSource = "../../graph/propertytype.go"
 const typeTableSource = "types.go"
 
 // TestDecoderProbeCoversTheTypeTable holds the probe to declaring a
-// property at every width this backend emits a carrier for. A width the
-// type table admits and no probe entity declares is a decode arm the
-// scope sweep below never emits, so a local that arm binds never enters
-// the candidate set and the sweep's silence about it means nothing.
+// property at every width graphPropertyTypeSource declares a constant
+// for and this backend emits a carrier for. A width the type table
+// admits and no probe entity declares is a decode arm the scope sweep
+// below never emits, so a local that arm binds never enters the
+// candidate set and the sweep's silence about it means nothing.
 //
-// The coverage obligations are membership in both directions, because an
-// obligation satisfied by swapping one width for another is not the
-// obligation. The one count here is the nested-list census at the end,
-// which is a floor on a shape rather than a size pin on a set.
+// Lists nested deeper than two fall inside that silence rather than
+// outside it. Property recurses on the element, so depth does not bound
+// the carrier — a list is carried when its leaf scalar is — while
+// decoderProbeWidths stops at two. A deeper width is one the type table
+// admits and no probe entity declares, and this test passes over it
+// (gqlc-wdo7).
+//
+// The obligation runs in both directions: every width the probe declares
+// has a carrier, and every carried width is one the probe declares.
 func TestDecoderProbeCoversTheTypeTable(t *testing.T) {
 	declared := graphPropertyTypes(t)
 	arms := propertyArmNames(t)
@@ -497,9 +503,11 @@ func (s *DecoderSuite) parseModels(models string) *ast.File {
 	return f
 }
 
-// declaredIdents returns the identifiers a node binds. Short variable
-// declarations, var declarations and range clauses are the whole of what
-// an emitted body uses to introduce a name.
+// declaredIdents returns the identifiers a node binds: short variable
+// declarations, var declarations and range clauses. A name a body
+// introduces some other way is one this does not return — with labels
+// the deliberate omission, since Go scopes them apart from variables and
+// a label spelled like a property collides with nothing.
 func declaredIdents(n ast.Node) []*ast.Ident {
 	var out []*ast.Ident
 	switch stmt := n.(type) {
