@@ -147,7 +147,10 @@ dropping `-tags codegen_live`, which compiles none of the live battery, so `go
 test` prints `[no test files]` for every package under `test/data/codegen` (T1).
 `recipeRuns` now requires a `go test` invocation and the live tag before it reads
 any pattern, and refuses a command line whose quoting does not close; the comment
-strip cuts only at a `#` that starts a word outside quotes.
+strip cuts only at a `#` that starts a word outside quotes. The `go test` has to
+be in command position — starting a line or following `&&`, `||`, `;` or `|` —
+because the first version of that check searched every argument and would have
+counted a witness "run" by `echo go test -run W`.
 
 **What the sweep still does not check: where the package argument points.** It
 reads the command line and nothing else, so the `cd test/data/codegen` in front

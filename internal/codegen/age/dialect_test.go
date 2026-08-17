@@ -766,7 +766,7 @@ func recipeRuns(cmds, witness string) bool {
 	// script carries no flags at all, and every loop below passes over an
 	// empty slice: review mutation V1, green while the sweep read no go
 	// test invocation whatsoever.
-	if !invokesGoTest(fields) {
+	if !invokesGoTest(cmds) {
 		return false
 	}
 	tags := testFlagValues(fields, "tags")
@@ -798,18 +798,31 @@ func recipeRuns(cmds, witness string) bool {
 }
 
 // invokesGoTest reports whether a command line runs `go test`: a `go`
-// argument — or a path ending in one — with `test` immediately after it.
+// argument — or a path ending in one — in COMMAND position, with `test`
+// immediately after it.
 //
-// A compiled test binary invoked directly is not recognised, and neither
-// is a script that runs go test inside itself. Both read here as a
-// recipe that does not run the witness, which is a complaint.
-func invokesGoTest(fields []string) bool {
-	for i, f := range fields {
-		if f != "go" && !strings.HasSuffix(f, "/go") {
-			continue
-		}
-		if i+1 < len(fields) && fields[i+1] == "test" {
-			return true
+// Command position is what stops `echo go test -run W` from counting,
+// which is the hole this function opened when it searched every
+// argument: a witness could then be "run" by a line that only printed
+// the words. A command starts a line of the body, or follows one of the
+// operators below; `cd test/data/codegen && go test …` is the shape both
+// AGE recipes have, and a body that puts the `cd` on its own line works
+// for the other reason.
+//
+// Three things are consequently read as a recipe that does not run the
+// witness, all complaints: a compiled test binary invoked directly, a
+// script that runs go test inside itself, and an environment prefix
+// (`GOFLAGS=… go test`) — no live recipe writes the third.
+func invokesGoTest(cmds string) bool {
+	for _, line := range strings.Split(cmds, "\n") {
+		fields, _ := shellFields(line)
+		command := true
+		for i, f := range fields {
+			if command && (f == "go" || strings.HasSuffix(f, "/go")) &&
+				i+1 < len(fields) && fields[i+1] == "test" {
+				return true
+			}
+			command = f == "&&" || f == "||" || f == ";" || f == "|"
 		}
 	}
 	return false
@@ -1283,6 +1296,22 @@ func TestRecipeRunsOnlyWhatTheCommandLineSelects(t *testing.T) {
 			name: "a body that never invokes go test",
 			src: recipe + ":\n    cd test/data/codegen && ./scripts/live-age.sh " +
 				"-count=1 -tags " + liveBuildTag + " -run '" + liveRun + "'\n",
+		},
+		{
+			// The words are not the command. Searching every argument for
+			// `go` next to `test` counts a line that only prints them.
+			name: "a go test that is another command's argument",
+			src: recipe + ":\n    cd test/data/codegen && echo go test " +
+				"-count=1 -tags " + liveBuildTag + " -run '" + liveRun + "'\n",
+		},
+		{
+			// And the shape that rule must not cost: the cd on its own
+			// line, so `go` opens the next one rather than following an
+			// operator.
+			name: "go test opening a line of its own runs it",
+			src: recipe + ":\n    cd test/data/codegen\n    go test -count=1 -tags " +
+				liveBuildTag + " -run '" + liveRun + "' -skip '" + liveSkip + "' ./...\n",
+			run: true,
 		},
 		{
 			// A quoted `#` is a literal to sh and was a comment to this
