@@ -1376,8 +1376,127 @@ vuln: sweep-discovery-probes vuln-root-residual
     }
     selftest_platformtag
 
+    # govulncheck resolves the standard library's version by matching the
+    # toolchain's `go env GOVERSION` against a tag pattern of its own, and a
+    # version it cannot place is not an error there: the stdlib is looked up
+    # under an empty version, matches no advisory, and every standard-library
+    # finding disappears while the third-party half of the scan carries on
+    # normally. Measured on this tree, one variable apart — under release
+    # go1.26.5 the root module reports eight stdlib advisories, three of them
+    # CALLED, and govulncheck exits 1; under the custom build
+    # go1.26.5-X:nodwarf5 it reports none and exits 0 (bd gqlc-u91z). Nothing
+    # else in this recipe can see that: the register below still balances,
+    # because the third-party findings it holds are all in the nested module and
+    # arrive either way.
+    #
+    # What is graded is govulncheck's own report of what it placed, on the line
+    # it prints above the module list (ADR 0026). An empty version formats back
+    # to the bare prefix, so `the go standard library` — the token `go` with
+    # nothing after it — IS the unplaced rendering, and the pattern below asks
+    # only whether anything follows. An absent line is refused for its own
+    # reason: the header moving is this clause going quiet, and a quiet clause
+    # accepts everything.
+    #
+    # On the accepting path the clause prints two lines: the name of what it
+    # graded, then the header line it read out of the scan. The per-module tally
+    # after the loop is the set of those names. The name alone cannot say which
+    # output was graded — it is the caller's own argument, echoed — so the header
+    # is what each call site matches back against the scan it handed in.
+    refuse_unplaced_stdlib() {
+        local scan="${1}" where="${2}" line token
+        line="$(grep -m1 -E '^Govulncheck scanned the following [0-9]+ modules and the .*standard library:$' <<<"${scan}" || true)"
+        if [ -z "${line}" ]; then
+            echo "error: the scan of ${where} printed no line naming the standard library it" >&2
+            echo "       resolved, so nothing here can tell a scan that covered the stdlib from" >&2
+            echo "       one that silently did not (bd gqlc-u91z). govulncheck's output format" >&2
+            echo "       moved; fix the match in this recipe." >&2
+            return 1
+        fi
+        token="$(sed -E 's/^.*modules and the (.*) standard library:$/\1/' <<<"${line}")"
+        case "${token}" in
+            go?*) printf '%s\n%s\n' "${where}" "${line}"; return 0 ;;
+        esac
+        echo "error: the scan of ${where} placed no version on the standard library, so every" >&2
+        echo "       stdlib advisory was looked up under an empty version and none of them" >&2
+        echo "       could be reported. The scan exits 0 and names nothing, which is this" >&2
+        echo "       gate green over the largest attack surface in the binary (bd gqlc-u91z)." >&2
+        echo "       govulncheck said:" >&2
+        echo "         ${line}" >&2
+        echo "       That happens when the toolchain's version is one govulncheck cannot" >&2
+        echo "       match — a distribution's custom build or a devel build; 'go env" >&2
+        echo "       GOVERSION' shows which. Point GOTOOLCHAIN at a released toolchain for" >&2
+        echo "       the scan; the go directive in go.mod names one." >&2
+        return 1
+    }
+
+    # WITNESS: on a tree scanned by a release toolchain the clause above only
+    # ever runs in the negative, and a guard whose passing case is silence is
+    # one nothing distinguishes from a deleted one. Both refusing directions and
+    # a positive control therefore run on every invocation of this recipe, local
+    # or CI, against fabricated headers, before any scan (ADR 0026). How often
+    # that is in CI is the `vuln` job's own path filter, not this line.
+    unplaced_header="Govulncheck scanned the following 2 modules and the go standard library:"
+    placed_header="Govulncheck scanned the following 2 modules and the go1.26.6 standard library:"
+    witness_where="the unplaced-stdlib witness"
+
+    # Which refusal fired is asserted, not just that one did. The two send a
+    # reader to different places — a toolchain to point elsewhere, or this
+    # recipe's own match to repair — and either reported as the other is a wrong
+    # diagnosis on the single run where anyone is reading.
+    expect_refusal() {
+        local scan="${1}" marker="${2}" what="${3}" got
+        if got="$(refuse_unplaced_stdlib "${scan}" "${witness_where}" 2>&1)"; then
+            echo "error: ${what} was ACCEPTED, so the standard-library half of every scan" >&2
+            echo "       below is unwatched (bd gqlc-u91z)." >&2
+            return 1
+        fi
+        case "${got}" in
+            *"${marker}"*) return 0 ;;
+        esac
+        echo "error: ${what} was refused, but the message does not say \"${marker}\", so a" >&2
+        echo "       real trip names the wrong cause and sends whoever reads it to the wrong" >&2
+        echo "       repair (bd gqlc-u91z):" >&2
+        printf '%s\n' "${got}" | sed 's/^/         /' >&2
+        return 1
+    }
+    expect_refusal "${unplaced_header}" "placed no version" \
+        "a scan header naming a bare 'go' — what govulncheck prints when it could not place the toolchain" || exit 1
+    expect_refusal "No vulnerabilities found." "printed no line" \
+        "output carrying no scan header at all — the shape every scan takes once that line is renamed" || exit 1
+
+    witness="$(refuse_unplaced_stdlib "${unplaced_header}" "${witness_where}" 2>&1 || true)"
+    case "${witness}" in
+        *"${unplaced_header}"*) ;;
+        *)  echo "error: the unplaced-stdlib clause refused without quoting the header it" >&2
+            echo "       refused, so a real trip carries no evidence of what it read" >&2
+            echo "       (bd gqlc-u91z):" >&2
+            printf '%s\n' "${witness}" | sed 's/^/         /' >&2
+            exit 1
+            ;;
+    esac
+    if ! accepted="$(refuse_unplaced_stdlib "${placed_header}" "${witness_where}" 2>/dev/null)"; then
+        echo "error: a scan header that DOES place a standard-library version was refused, so" >&2
+        echo "       this clause refuses every scan on a released toolchain too and is an" >&2
+        echo "       outage rather than a gate (bd gqlc-u91z)." >&2
+        exit 1
+    fi
+    # Both lines of the accepting arm are asserted, against the exact strings
+    # handed in. The tally after the loop is built from the first, so an arm that
+    # printed nothing would leave every module reading as ungraded. Each call
+    # site matches the second back against its own scan, so an arm that dropped
+    # it would be an acceptance no scan is tied to — and a `grep -qxF` on the
+    # empty string matches any blank line, which govulncheck's output has.
+    if [ "${accepted}" != "${witness_where}"$'\n'"${placed_header}" ]; then
+        echo "error: the unplaced-stdlib clause accepted a placed header without echoing back" >&2
+        echo "       the name it graded and the header it read (bd gqlc-u91z). Expected" >&2
+        echo "       \"${witness_where}\" then the header it was handed; it said:" >&2
+        printf '%s\n' "${accepted}" | sed 's/^/         /' >&2
+        exit 1
+    fi
+
     reported=""
     headers_total=0
+    graded=""
 
     for dir in "${modules[@]}"; do
         # Taken once, here, into a variable — see the house rule beside scope().
@@ -1473,6 +1592,36 @@ vuln: sweep-discovery-probes vuln-root-residual
             echo "       is for advisories nothing calls (bd gqlc-k22l)." >&2
             exit "${rc}"
         fi
+        # What accumulates is the name the grading itself printed, taken in the
+        # branch the grading's own status selected, so nothing here can record a
+        # grading that did not run to acceptance.
+        #
+        # That name is this loop's own `${dir}`, echoed back, so it says the
+        # grading ran ABOUT this module, not that it read this module's scan:
+        # hand the clause any other string that parses — the witness's own
+        # fabricated header is in scope — and every name still arrives. What
+        # ties the two together is the header the grading reports, required
+        # below to be a line of the output handed in. `${placed_header}` fails
+        # that on the counts alone: it says 2 modules where these scans say 43
+        # and 54.
+        if stdlib_graded="$(refuse_unplaced_stdlib "${out}" "${dir}")"; then
+            graded_where="$(sed -n '1p' <<<"${stdlib_graded}")"
+            graded_line="$(sed -n '2p' <<<"${stdlib_graded}")"
+            if ! grep -qxF -- "${graded_line}" <<<"${out}"; then
+                echo "error: the standard-library grading of ${dir} reports a header the scan of" >&2
+                echo "       ${dir} did not print, so it graded some other output and this" >&2
+                echo "       module's stdlib half was accepted unexamined (bd gqlc-u91z)." >&2
+                echo "       It graded:" >&2
+                echo "         ${graded_line}" >&2
+                echo "       The scan printed:" >&2
+                grep -m1 -E '^Govulncheck scanned the following [0-9]+ modules and the .*standard library:$' <<<"${out}" \
+                    | sed 's/^/         /' >&2
+                exit 1
+            fi
+            graded+="${graded_where}"$'\n'
+        else
+            exit 1
+        fi
         # The register below is fail-closed only while the extraction feeding it
         # still matches, so the extraction is checked against the output it
         # reads. govulncheck names every finding on its own `Vulnerability #N:
@@ -1492,6 +1641,21 @@ vuln: sweep-discovery-probes vuln-root-residual
         reported+="$(grep -oE 'GO-[0-9]{4}-[0-9]+' <<<"${out}" || true)"$'\n'
     done
     reported="$(lines "${reported}" | sed '/^$/d' | sort -u)"
+
+    # One name per grading that ran to acceptance, each printed by the grading
+    # itself, compared against the modules actually scanned. A module missing
+    # from the set had its standard-library half accepted unexamined, whether
+    # the grading was skipped, downgraded or silenced.
+    graded="$(lines "${graded}" | sed '/^$/d' | sort -u)"
+    scanned="$(printf '%s\n' "${modules[@]}" | sort -u)"
+    ungraded="$(comm -13 <(lines "${graded}") <(lines "${scanned}") || true)"
+    if [ -n "${ungraded}" ]; then
+        echo "error: these modules were scanned but not graded for whether govulncheck placed" >&2
+        echo "       the standard library, so their stdlib half was accepted without being" >&2
+        echo "       looked at (bd gqlc-u91z):" >&2
+        printf '%s\n' "${ungraded}" | sed 's/^/         /' >&2
+        exit 1
+    fi
 
     # The per-module check above cannot see the header line itself moving: every
     # count would be 0, they would agree, `reported` would empty, and BOTH halves

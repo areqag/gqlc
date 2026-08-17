@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-08-02
-**Beads:** gqlc-rohp, gqlc-m5rc, gqlc-k22l
+**Beads:** gqlc-rohp, gqlc-m5rc, gqlc-k22l, gqlc-u91z
 
 ## Context
 
@@ -204,7 +204,62 @@ than discarded.
 
 **`just vuln` runs with `-show verbose`.** The scan is at symbol level, so
 package- and module-level findings do not change its exit status; without
-verbose they appear only as a count.
+verbose they appear only as a count. It is also what prints the scan header the
+placement grading below reads: `internal/scan/text.go:66-69` emits the SBOM from
+`Flush()` under verbose only, and the header is `text.go:149`.
+
+**A scan that placed no standard-library version is refused, and what is graded
+is govulncheck's own report of what it placed** (bd gqlc-u91z). govulncheck
+resolves the standard library's version by matching `go env GOVERSION` against
+`tagRegexp` in `internal/semver/semver.go:62`
+(`^go(\d+\.\d+)(\.\d+|)((beta|rc|-pre)(\d+))?$`, applied to
+`strings.Fields(tag)[0]`). A version it cannot place is **not an error there**:
+`GoTagToSemver` returns `""`, `internal/vulncheck/packages.go:42` gives the
+stdlib module that empty version, and `affected()` at
+`internal/vulncheck/vulncheck.go:196` returns false for `modVersion == ""`. Every
+standard-library advisory is filtered out, the third-party half of the scan
+carries on normally, and the run exits 0.
+
+Measured on this tree, one variable apart (`GOVERSION` is read straight out of
+`os.Environ()` at `internal/scan/run.go:87-92`, so one env var reproduces either
+arm on an unmodified checkout): under `go1.26.5` the root module reports **eight**
+standard-library advisories, three of them at symbol level — GO-2026-6091,
+GO-2026-6090, GO-2026-5972 — and govulncheck exits 1. Under
+`go1.26.5-X:nodwarf5`, a distribution's custom build, it reports **none** and
+exits 0.
+
+Nothing else in the recipe could see it. The register above still balances,
+because every third-party advisory it holds lives in the nested module and
+arrives either way, so `headers_total` is never 0. A blind run and a genuinely
+clean one differ in exactly one line of govulncheck's output — the header. Both
+say `No vulnerabilities found.`, both exit 0, and both carry **zero**
+`Standard library` lines, so a pin asserting that the output contains a
+standard-library section would fail the good state rather than the bad one.
+
+The header is what separates them. `SemverToGoTag("")` walks to
+`fmt.Sprintf("go%s", "")` and yields the bare string `go`, so
+`...and the go standard library:` is exactly and only the unplaced rendering.
+The grading asks whether anything follows that prefix. An **absent** header is
+refused for its own reason and with its own message: the line being renamed is
+the grading going quiet, and a quiet grading accepts everything.
+
+**The grading is tallied by the names it prints, not by the loop reaching it.**
+A guard whose passing case is silence is one nothing distinguishes from a
+deleted one, so the accepting arm prints the module it graded, the loop
+accumulates that name in the branch the grading's own status selected, and the
+set is compared against the modules actually scanned. A call site that is
+deleted, or downgraded to `|| true`, contributes no name and is reported by
+module. A first version of this counted loop iterations in a statement beside
+the call, which both of those edits left green — the same
+conditional-gate-omission shape recorded elsewhere in this ADR, one level up.
+
+**Both refusing directions and a positive control run on every invocation,
+against fabricated headers, before any scan.** On a released toolchain the
+grading otherwise only ever runs in the negative. The two refusals are asserted
+*by reason*, because they send a reader to different repairs — a toolchain to
+point elsewhere, or this recipe's own match to fix — and the positive control
+asserts both that a placed header is accepted and that acceptance names what was
+graded, since the tally is built from that name.
 
 **The advisories the gate exits 0 over are a register, checked by set equality,
 not a note.** Verbose naming them was originally so that a reader of a CI log
@@ -282,6 +337,52 @@ static list — the recipe iterates and vuln.yml decides in-job rather than thro
 GitHub's static `paths:` filter, so both sides can discover directly. A
 mismatch check would only reintroduce the list in order to guard it.
 
+**Refuse a `GOVERSION` the recipe cannot match against a version pattern of its
+own** — `^go1\.[0-9]+(\.[0-9]+)?$`, as bd gqlc-u91z originally proposed.
+Rejected: it is a second copy of x/vuln's vocabulary, and which spellings
+resolve is x/vuln's to change. Driven against a verbatim copy of x/vuln@v1.7.0
+`internal/semver/semver.go`, it disagrees in **both** directions:
+
+| GOVERSION | `GoTagToSemver` | placed? | candidate regex | header renders |
+|---|---|---|---|---|
+| `go1.26.6` | `v1.26.6` | yes | accepts | `go1.26.6` |
+| `go1.26` | `v1.26.0` | yes | accepts | `go1.26.0` |
+| `go1` | `v1.0.0` | yes | **refuses** | `go1` |
+| `go1.0` | `""` | **no** | **accepts** | `go` |
+| `go1.27rc1` | `v1.27.0-rc.1` | yes | **refuses** | `go1.27-rc1` |
+| `go1.27beta1` | `v1.27.0-beta.1` | yes | **refuses** | `go1.27-beta1` |
+| `go1.27-pre1` | `v1.27.0-pre.1` | yes | **refuses** | `go1.27-pre1` |
+| `go1.26.5 X:nodwarf5` | `v1.26.5` | yes | **refuses** | `go1.26.5` |
+| `go1.26.5-X:nodwarf5` | `""` | no | refuses | `go` |
+| `devel go1.27-abcdef` | `""` | no | refuses | `go` |
+| `gotip` | `""` | no | refuses | `go` |
+| `""` | `""` | no | refuses | `go` |
+
+The false refusals include **every Go release candidate and beta**, and `go1` and
+`go1.0` are special-cased in opposite directions at `semver.go:73` and
+`semver.go:76`, which no reasonable pattern would predict. A gate that refuses a
+toolchain the scan handles is an outage of its own making; a gate that accepts
+one the scan cannot place is the blindness this decision exists to catch. Reading
+the header instead agrees with `GoTagToSemver` on all twelve rows, because it is
+that function's own answer rendered back.
+
+`internal/tools/modscope/main.go:350`, `var releaseTag`, carries the same
+`^go1\.` pattern and is not affected: `classify()` applies it to build-constraint
+*terms*, where `go1.27rc1` is not a term.
+
+**Read `-format json` and grade `SBOM.GoVersion` structurally.** Rejected on
+measurement, though the fact is carried structurally
+(`SBOM.GoVersion`, `internal/govulncheck/govulncheck.go:93`). The scan's whole
+exit path is `internal/scan/run.go:81` `return Flush(handler)`, and
+`run.go:160-164` returns nil for any handler that does not implement `Flush`.
+`internal/govulncheck/jsonhandler.go` implements `Config`, `Progress`, `SBOM`,
+`OSV` and `Finding` and **no `Flush`**; `errVulnerabilitiesFound` (exit code 3)
+is returned from `TextHandler.Flush` at `internal/scan/text.go:84` alone. So
+`-format json` exits 0 unconditionally and would destroy the rc-based gate this
+recipe turns on. The field is also `omitempty`, so the blind case is a *missing*
+field rather than a bare `go`, which is the fail-open shape this ADR keeps
+recording.
+
 ## Consequences
 
 - A `_test.go` added under `test/data/codegen` must declare an external test
@@ -323,3 +424,23 @@ mismatch check would only reintroduce the list in order to guard it.
 - `just vuln` output is longer, and includes the package and module inventory
   each scan matched. That inventory is the standing evidence that widening the
   scan to both modules is still in effect.
+- A toolchain whose `go env GOVERSION` govulncheck cannot place fails the gate
+  instead of scanning half of it. `GOTOOLCHAIN` pointed at a released toolchain
+  is the fix; the `go` directive in each `go.mod` names one. Distribution builds
+  (`go1.N.P-X:...`), `devel` builds and `gotip` are the shapes that hit this.
+- The placement grading depends on the wording of one line of govulncheck's
+  output, and `just vuln` runs `govulncheck@latest` — deliberately, so the vuln
+  DB is current. The version is therefore not pinned and the coupling is not
+  scheduled, and a rework of `internal/scan/text.go:149` lands in either
+  direction depending on the rework. One that stops matching the recipe's
+  pattern trips the absent-header branch on the next run — fail-closed, repaired
+  by fixing the match. One that still matches it but renders the *unplaced* case
+  as `go` followed by anything at all is accepted silently, because the grading
+  asks only whether something follows `go`. On v1.7.0 `SemverToGoTag` emits only
+  `go`, `go1`, or `go` plus a canonical version, so nothing renders that way
+  today; that is a property of this version, not of the pattern.
+  `@latest` resolves to x/vuln v1.7.0 at the time of writing, which is the
+  version every line reference in this ADR was read against.
+- The refusal arrives after the scan rather than before it, so a blind toolchain
+  costs a full scan before the gate says so. A pre-flight would need a copy of
+  x/vuln's version pattern, which the alternative above rejects.
