@@ -68,8 +68,9 @@ PROTECTED = ("master", "main")
 # the MAIN worktree's under `/abs/path/to/main/.githooks` — so an absolute
 # path is drift even when it names a directory full of live hooks.
 HOOKS_DIRNAME = ".githooks"
-# git subcommands that run one of the hooks this repo ships. Measured on git
-# 2.55.0 against .githooks/{pre-commit,commit-msg,pre-push,post-merge}, each
+# git subcommands refused while the hooks are dead, picked by measuring which
+# ones run a hook this repo ships rather than by reasoning about it. Measured on
+# git 2.55.0 against .githooks/{pre-commit,commit-msg,pre-push,post-merge}, each
 # armed to log and exit 0 so the chain continues: `commit` and `commit --amend`
 # fire pre-commit and commit-msg; a non-fast-forward `merge` or `pull` fires
 # commit-msg and post-merge (not pre-commit); `push` fires pre-push. In the
