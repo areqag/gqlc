@@ -134,6 +134,17 @@ scalar kinds is a decode helper, which is a different fix — below.
   whether the value `agtypeMap` returns is the one a map column should carry,
   not about writing a helper first.
 
+  Nor is either `decodeFunc` arm optional.
+  `TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces` reads the Go type
+  texts `typeMap` returns out of the package's own AST and requires an arm for
+  each; `TestDecodeFuncNamesTheHelperForEveryServedCarrier` names the helper per
+  text. Deleting either arm reddens both, at the subtest for the text that lost
+  it. The `map[string]any` arm in particular is held up by that pin and not by
+  this bullet: the one place the table produces that text is `Scalar`'s
+  `ScalarMap` arm, which the gate above refuses, and across `test/data` the only
+  mention of `agtypeMap` outside its own declaration is the call inside
+  `agtypeValue`.
+
 - The declared Go surface is backend-invariant and the runtime types behind it
   need not be. This ADR recorded one instance — a `map[string]any` column
   decoding an integer member as `float64` on AGE against `int64` on neo4j — and
