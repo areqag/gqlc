@@ -422,6 +422,11 @@ sweep-discovery-probes:
     # that interpolates its probe variable and then runs straight into the
     # mktemp template, with no dot between, makes a directory neither that glob
     # nor .gitignore's own dotted rules match.
+    #
+    # WHAT THIS DOES NOT REACH: `mktemp -d` under test/data is the one idiom it
+    # looks for. A probe put there by `mkdir`, by `install -d`, or by Go code
+    # this justfile calls is not a site to any of the checks below, and the
+    # declared names are not held to it (bd gqlc-lj9s).
     site_re="mktemp -d ""test/data/"
     site_var_re="${site_re}[{][{] *\([A-Za-z_][A-Za-z0-9_]*\) *[}][}]\."
     odd_sites="$(printf '%s\n' "${dumped}" | grep -e "${site_re}" \
