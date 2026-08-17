@@ -480,10 +480,13 @@ func unservedColumn(t resolver.ResolvedType) string {
 	// `struct{ resolver.ResolvedNode }` both came back from
 	// age.New().Generate as `out of C6 scope: query "Actions" column 0 "r"
 	// resolved as node` — no file emitted, and this backend not named in
-	// it. codegen.Prepare's own switches name the same variants these arms
-	// do (phaseAAdmit and phaseBDerive in internal/codegen/prepare.go), so
-	// a shape matching no arm here matches none there either and lands on
-	// their default. How a reason returned from here reaches the author
+	// it. That answer is codegen.Prepare's: phaseAAdmit's column switch
+	// names the same variants these arms do, so a shape matching no arm
+	// here matches none there and takes phaseAAdmit's default
+	// (internal/codegen/prepare.go). phaseBDerive's switch names them too,
+	// but its default is labelled for a Phase A miss and Prepare returns on
+	// Phase A first, so it is a second net rather than the answering one.
+	// How a reason returned from here reaches the author
 	// instead, yield to the text gate included, is rejectUnservedQueries'
 	// business.
 	//

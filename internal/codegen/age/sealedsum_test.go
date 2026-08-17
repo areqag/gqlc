@@ -453,6 +453,56 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 		}
 	})
 
+	// What refusing at the fall-through buys, held to the half that is a fact
+	// about THIS tree. The fall-through's comment says the refusal is the
+	// diagnostic and not the prevention of a wrong emission, and its evidence
+	// is a counterfactual — that line returning "" instead — which no row in
+	// this package can run. What a row CAN run is the reason the
+	// counterfactual holds: codegen.Prepare refuses these same shapes on its
+	// own, so serving them here would move which gate answers and not whether
+	// one does. Every non-value form goes to Prepare directly as a column
+	// type and comes back ErrOutOfC6Scope, spelling the arriving type's own
+	// String — the same expression the fall-through reaches, from a switch
+	// that is not this one. Prepare is entered the way generate.go:46 enters
+	// it, so this is the gate behind the fall-through and not a third one.
+	//
+	// phaseAAdmit is what answers: Prepare returns on Phase A before reaching
+	// phaseBDerive, whose own default is labelled for a Phase A miss. The
+	// message this row pins is phaseAAdmit's, which is what makes that
+	// ordering observable rather than asserted.
+	t.Run("codegen.Prepare refuses the same shapes on its own", func(t *testing.T) {
+		for _, name := range sortedInhabitantNames() {
+			in := inhabitants[name]
+			for _, form := range []struct {
+				spelling string
+				typ      resolver.ResolvedType
+			}{
+				{"*resolver." + name, in.pointer},
+				{"struct{ resolver." + name + " }", in.embedded},
+			} {
+				_, err := codegen.Prepare(codegen.Input{
+					Schema: schemaWithPayload(graph.TypeString),
+					Queries: []codegen.NamedQuery{{
+						Name:        "Q",
+						Cardinality: codegen.CardinalityMany,
+						SourceFile:  "q.cypher",
+						SourceText:  "MATCH (b:Blob) RETURN b AS c\n",
+						Validated: resolver.ValidatedQuery{
+							Columns: []resolver.Column{{Name: "c", Type: form.typ}},
+						},
+					}},
+				}, typeMap{}, "age")
+				require.ErrorIsf(t, err, codegen.ErrOutOfC6Scope,
+					"%s must be refused by codegen.Prepare's own column switch, which names the same variants unservedColumn's arms do, so a shape matching no arm here matches none there",
+					form.spelling)
+				require.EqualErrorf(t, err,
+					`out of C6 scope: query "Q" column 0 "c" resolved as `+form.typ.String(),
+					"%s: Prepare's refusal must spell the arriving type's own String and name no backend",
+					form.spelling)
+			}
+		}
+	})
+
 	// The nesting the comment rests "no bound" on. Two levels is not a proof
 	// that the set is infinite; what it shows is that the constructions
 	// compose, so no enumeration of forms closes the way an enumeration of
