@@ -7,8 +7,9 @@
 # is here:
 #
 #   1. The record AT BASE for that id has a close_reason citing <closing-sha> as
-#      a whole token. Base comes out of a git ref, so a PR cannot restate it —
-#      the declaration has to quote a fact already on master. The pairing also
+#      a whole token. Base is read with `git show <ref>:...`, so the PR's own
+#      tree does not restate it — the declaration has to quote a fact already
+#      committed on the base ref. The pairing also
 #      expires the entry: a later close citing a different sha does not inherit
 #      it.
 #   2. The record AT HEAD has an updated_at strictly later than base's. This is
@@ -22,6 +23,13 @@
 #      depth-1, where objects outside the fetched pack are absent whatever their
 #      history. A silent probe is therefore read as no evidence rather than as
 #      evidence of absence.
+#
+# What condition 2 does NOT do: head's updated_at is a field in the file the PR
+# is editing, so it tells a record copied forward from one written after the
+# close, but it does not resist a hand-written timestamp. An author who bumps
+# the field and adds the matching line here is granted. What stands behind the
+# exemption is that both edits land in the diff a reviewer already reads — the
+# same standing allowed-drops.txt has. See bd gqlc-ukgs.
 #
 # An entry goes stale once the correction lands on master (the bead is then
 # not closed at base, so the arm no longer fires). Stale entries are ignored,
