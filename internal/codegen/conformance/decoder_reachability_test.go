@@ -222,18 +222,16 @@ type entityDecoder struct {
 // legitimate code under the wrong rule — see "What it does not decide"
 // below, and gqlc-9xy0, which owns that site. Its *body* is still walked,
 // for every function literal at any depth in it, whatever that literal's
-// results name — the same rule as anywhere else. A
-// receiver-less function literal is not a receiver form however it is
-// reached, and skipping the method whole left a dispatch table returned
-// from one in nobody's guard list — a second decoder for an entity, absent
-// from the census, on an emission that went green.
+// results name. A receiver-less function literal is not a receiver form
+// however it is reached, and skipping the method whole leaves a dispatch
+// table returned from one in nobody's guard list — a second decoder for an
+// entity, absent from the census, on an emission that goes green.
 //
-// The exclusion is syntactic — over the receiver form, not over what its
-// results name — so state what it costs rather than what it is aimed at. A
-// decoder moved onto a receiver is excluded with every other method: it
-// leaves this census, and the only thing that reddens is the
-// reconciliation against codegen.Prepare, on that entity's absence. Put a
-// live package-level decoder for the same entity beside it and even that
+// The exclusion is syntactic: it is over the receiver form, not over what
+// its results name. A decoder moved onto a receiver is excluded with every
+// other method — it leaves this census, and the only thing that reddens is
+// the reconciliation against codegen.Prepare, on that entity's absence. Put
+// a live package-level decoder for the same entity beside it and even that
 // is satisfied, and the method's own guards are read by nothing here. A
 // receiver-less helper written beside a decoder is yielded, because it is
 // not a receiver form.
@@ -1458,14 +1456,14 @@ func decodePerson(raw []byte) (Person, error) {
 // rather than on its holder's.
 //
 // Reading it as part of its holder is not a gap, it is a mis-grading, and it
-// passes. A dead edge decoder written as a closure inside a node decoder had
+// passes. A dead edge decoder written as a closure inside a node decoder has
 // its guard collected into the node decoder's guard list, where the node
-// alphabet declares it and every check went green — on a decoder no value can
+// alphabet declares it and every check goes green — on a decoder no value can
 // satisfy, which is the one thing this gate exists to refuse. The
 // reconciliation cannot catch it either: the entity is decoded by the real
 // decoder, so the roll balances. That is the cross-axis swap the per-axis
-// alphabet was built for, arriving through the one boundary the walk had
-// documented as safe.
+// alphabet was built for, arriving through a boundary a walk is most likely
+// to document as safe.
 //
 // So each row asserts both directions of the attribution. The nested decoder
 // carries its own guard, and the holder does not: a guard read twice is a
