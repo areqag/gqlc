@@ -142,7 +142,8 @@ scalar kinds is a decode helper, which is a different fix — below.
   scanning bytes, and each member is read by `agtypeValue`, which tries the
   integer parse before the float one. Run against the `schema_any_property`
   golden, `agtypeMap` over `{"n": 3, "f": 1.5, "s": "x", "b": true, "z": null}`
-  yields `int64`, `float64`, `string`, `bool` and `nil` in that order. Whether
+  yields `int64` for `n`, `float64` for `f`, `string` for `s`, `bool` for `b`
+  and `nil` for `z`. Whether
   any runtime-type divergence between the backends survives that is open, and
   `gqlc-l6c2` carries it: the neo4j half wants the driver rather than a source
   read. What does not depend on the answer is that
