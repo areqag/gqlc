@@ -366,7 +366,7 @@ one the scan cannot place is the blindness this decision exists to catch. Readin
 the header instead agrees with `GoTagToSemver` on all twelve rows, because it is
 that function's own answer rendered back.
 
-`internal/tools/modscope/main.go:337`, `var releaseTag`, carries the same
+`internal/tools/modscope/main.go:350`, `var releaseTag`, carries the same
 `^go1\.` pattern and is not affected: `classify()` applies it to build-constraint
 *terms*, where `go1.27rc1` is not a term.
 
