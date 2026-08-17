@@ -44,6 +44,17 @@ type (
 	embedUnknown   struct{ resolver.ResolvedUnknown }
 )
 
+// The two constructions nest, which is the step from "two more inhabitants" to
+// "the inhabiting set has no bound" — the claim unservedColumn's fall-through
+// comment makes and this file would otherwise only assert. Embedding a POINTER
+// promotes the value methods a second time; embedding an EMBEDDER promotes what
+// it was itself given. Neither declares a method, and each is a distinct type
+// again, so each is one more shape no arm names.
+type (
+	embedNodePointer  struct{ *resolver.ResolvedNode }
+	embedNodeEmbedder struct{ embedNode }
+)
+
 // probeEdgeUnion is a two-candidate union carrying two distinct labels: the
 // shape edgeUnionReason answers rather than stands aside from. Its labels are
 // what the "names no candidate" rows below look for and fail to find in the
@@ -303,6 +314,21 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 			in := inhabitants[name]
 			require.NotEmptyf(t, unservedColumn(in.pointer), "*%s was served", name)
 			require.NotEmptyf(t, unservedColumn(in.embedded), "struct{ resolver.%s } was served", name)
+		}
+	})
+
+	// The nesting the comment rests "no bound" on. Two levels is not a proof
+	// that the set is infinite; what it shows is that the constructions
+	// compose, so no enumeration of forms closes the way an enumeration of
+	// declaring types does.
+	t.Run("the constructions nest", func(t *testing.T) {
+		nested := map[string]resolver.ResolvedType{
+			"struct{ *resolver.ResolvedNode }": embedNodePointer{&resolver.ResolvedNode{}},
+			"struct{ embedNode }":              embedNodeEmbedder{},
+		}
+		for _, spelling := range []string{"struct{ *resolver.ResolvedNode }", "struct{ embedNode }"} {
+			require.Equalf(t, "projects node", unservedColumn(nested[spelling]),
+				"%s satisfies resolver.ResolvedType and must reach unservedColumn's fall-through", spelling)
 		}
 	})
 
