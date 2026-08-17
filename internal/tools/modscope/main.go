@@ -305,7 +305,7 @@ func moduleGoDirs(ctx context.Context, root, module string) ([]string, error) {
 // recipe which runs this program some other way: a binary built here once and
 // invoked under its own name, or a path interpolated from a justfile variable,
 // is outside what that file reads (bd gqlc-wkio), as is a recipe behind a
-// header its justfile reader does not recognise.
+// header its justfile reader does not recognise (bd gqlc-6n9y).
 func goDirs(module, moduleRoot string, nested []string) ([]string, error) {
 	prune := make(map[string]struct{}, len(nested))
 	for _, n := range nested {

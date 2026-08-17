@@ -30,7 +30,7 @@ import (
 // on that reading are stated where they arise: an invocation that never spells
 // the path, at modscopePkg below (bd gqlc-wkio), and a recipe behind a header
 // this file's reader does not recognise, at
-// TestParseJustfileReadsWhatJustReads below.
+// TestParseJustfileReadsWhatJustReads below (bd gqlc-6n9y).
 
 const (
 	// repoRoot reaches the justfile from this package's directory.
@@ -396,7 +396,10 @@ func TestUnsweptModscopeCallersFindsEachBrokenWiring(t *testing.T) {
 // The last row is the boundary rather than a shape on this tree: a parameter
 // default spelling `:=` puts the first colon inside the default, and justHeader
 // reads that as an assignment and returns nothing. That is the header limit the
-// file comment above points here for. Measured: rewriting `vuln:
+// file comment above points here for, and it is filed as bd gqlc-6n9y: this
+// row's `want: nil` pins the limit open, so teaching justHeader to read the
+// shape means editing a passing row on purpose, and the bead is what says the
+// row was deliberate. Measured: rewriting `vuln:
 // sweep-discovery-probes vuln-root-residual` to `vuln x="a:=b":
 // vuln-root-residual` leaves `just --dump` accepting the file with vuln's body
 // still naming this package three times, and leaves
