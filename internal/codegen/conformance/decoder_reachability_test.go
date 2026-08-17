@@ -23,8 +23,21 @@ import (
 // function that decodes no entity may compare for equality: the spellings
 // the wire format fixes for its own scalars. AGE renders a boolean and a
 // null as these three words and agtypeBool and agtypeValue switch on them,
-// so they are the wire's, not the schema's — no label can be one and no
-// author picks one.
+// so they are the wire's, not the schema's.
+//
+// No schema label is spelled like one of them, and that is a property of
+// the front end rather than a convention, so it is worth saying where it
+// lives. A bare true, false or null does not parse as a labelName: GQL.g4
+// is declared caseInsensitive, so BOOLEAN_LITERAL and NULL_KW take those
+// spellings in any case, and neither is in nonReservedWords, which is the
+// only keyword route into regularIdentifier. The delimited spellings do
+// parse, and they carry their delimiters into the label, because labelSet
+// reads a labelName with GetText() (internal/schema/gql/nodetype.go): the
+// label declared by (:`true`) is `true` with the backticks in it. Change
+// either half — a keyword leaves the reserved set, or the front end starts
+// unquoting a delimited identifier — and a label can be spelled like a
+// wire scalar, which is what the wire-spelling arm of unstampableBecause
+// says it relies on.
 //
 // It is what makes the sweep's classification total. Every receiver-less
 // function an emission writes at package level is either an entity decoder,
@@ -173,16 +186,16 @@ type entityDecoder struct {
 // signature says which entity a package-level, receiver-less function
 // decodes, and codegen.Prepare says which axis that entity sits on.
 //
-// The recognition used to be the name pattern decode<T> for a declared T,
-// and that was the gate's own vacuity. A function the pattern failed to
-// resolve was not merely unread: it left the per-axis census, the guard
-// count and the alphabet check *simultaneously*, so the extractor's
-// failure to recognise a decoder removed it from the numerator, the
-// denominator and the correctness check at once. Emitting one entity's
-// decoder as decodePostRecord with a guard on a label no backend stamps
-// left this gate green; the only red was a TestValid golden byte diff,
-// which go test -update blesses away. Broadening the pattern until that
-// name matched would have been the same shape one rename later.
+// Recognising by the name pattern decode<T> for a declared T is the gate's
+// own vacuity. A function the pattern fails to resolve is not merely
+// unread: it leaves the per-axis census, the guard count and the alphabet
+// check *simultaneously*, so the extractor's failure to recognise a decoder
+// removes it from the numerator, the denominator and the correctness check
+// at once. One entity's decoder emitted as decodePostRecord, with a guard
+// on a label no backend stamps, leaves such a gate green; the only red is a
+// TestValid golden byte diff, which go test -update blesses away.
+// Broadening the pattern until that name matches is the same shape one
+// rename later.
 //
 // So the sweep classifies every receiver-less function declaration with a
 // body that the emission writes, and it finds one by walking rather than by
@@ -213,9 +226,17 @@ type entityDecoder struct {
 // receiver-less function literal is not a receiver form however it is
 // reached, and skipping the method whole left a dispatch table returned
 // from one in nobody's guard list — a second decoder for an entity, absent
-// from the census, on an emission that went green. The exclusion is over
-// what the query surface owns, so a decoder is never in it and a helper
-// written beside one always is.
+// from the census, on an emission that went green.
+//
+// The exclusion is syntactic — over the receiver form, not over what its
+// results name — so state what it costs rather than what it is aimed at. A
+// decoder moved onto a receiver is excluded with every other method: it
+// leaves this census, and the only thing that reddens is the
+// reconciliation against codegen.Prepare, on that entity's absence. Put a
+// live package-level decoder for the same entity beside it and even that
+// is satisfied, and the method's own guards are read by nothing here. A
+// receiver-less helper written beside a decoder is yielded, because it is
+// not a receiver form.
 //
 // Note what the first bullet costs, because it is a constraint on the
 // emitters and not only a reading of them. Inside a decoder every compared
@@ -246,7 +267,7 @@ type entityDecoder struct {
 // states a checkable falsehood about the emission — that a decoder returns
 // an error, that its struct is unreachable, that a comparison on a
 // property answers the same way on every call — is the one failure mode a
-// gate is least allowed to have, and this one has had it twice.
+// gate is least allowed to have.
 //
 // Both directions are reconciled per emission: the entities decoded must
 // be exactly the entities codegen.Prepare names, one decoder each. So a
@@ -466,16 +487,16 @@ func (s *ConformanceSuite) TestEmittedDecodersGuardOnlyOnStampableLabels() {
 }
 
 // TestEmittedClosuresNameNoEntityAndCompareNoString is the corpus census of
-// the function literals packageLevelFuncs yields, and it exists because the
-// claim it carries was written as prose twice and was wrong both times.
+// the function literals packageLevelFuncs yields, and it carries in
+// measurement a claim prose cannot hold.
 //
 // Widening the sweep to every literal at every depth brought every closure in
 // every emission under the classification at once. What that costs is a
-// question about the emissions and not about the rule, and it was answered by
-// naming the closures one backend writes — which one grep falsified, because
-// a second backend writes element decoders too, and it is the one target
-// whose decoders are additionally held to guard on the wire label. So the
-// answer is measured here instead: a literal yielded out of an emission names
+// question about the emissions and not about the rule, and prose naming the
+// closures one backend writes does not answer it: a second backend writes
+// element decoders too, and it is the one target whose decoders are
+// additionally held to guard on the wire label. So the answer is measured
+// here: a literal yielded out of an emission names
 // no prepared entity in its results and compares no string, which lands it on
 // the results-name-nothing arm with no guard for an alphabet to reject.
 //
@@ -616,13 +637,17 @@ func (s *ConformanceSuite) TestMultiLabelSchemaPostureIsRecorded() {
 }
 
 // emitOrRefuse generates in through the backend registered under target,
-// reporting ok=false for a backend that refuses the schema. Unlike
-// generate() it is reached with a target the fixture's manifest does not
-// enrol, so a refusal is an answer rather than a failure.
+// reporting ok=false for a backend that refuses the schema. target must be
+// one of s.backends.Keys(). Unlike generate() it is reached with a target
+// the fixture's manifest does not enrol, so a refusal is an answer rather
+// than a failure.
 func (s *ConformanceSuite) emitOrRefuse(target string, in codegen.Input) ([]codegen.File, bool) {
-	// Both callers draw target from s.backends.Keys() and both hold that
-	// key set equal to a ledger's before they sweep, so the lookup cannot
-	// miss and an assertion on it would be a check no input can fail.
+	// A codegen.Registry is immutable after construction and its Keys
+	// reports the map its Lookup reads, so under the precondition above the
+	// lookup cannot miss and an assertion on it would be a check no input
+	// can fail. Nothing here rests on a ledger holding that key set: a
+	// caller that sweeps without one still cannot reach this with a target
+	// the registry does not hold.
 	newGen, _ := s.backends.Lookup(target)
 	files, err := newGen("").Generate(in)
 	if err != nil {
@@ -812,9 +837,11 @@ func unstampableReport(target, fixture string, d entityDecoder, guard string, al
 // author the branch is dead would be a falsehood they can check in one
 // reading. So this arm reports the finding, which is true (a decoder
 // compared something that is not a label), names both readings, and claims
-// no deadness. It comes after the cross-axis arm because a schema is free
-// to declare a label spelled like a wire scalar, and there the cross-axis
-// clause is the more informative answer.
+// no deadness. Its position after the cross-axis arm is not load-bearing:
+// no schema label is spelled like a wire scalar — see wireScalarSpellings
+// for the two places the front end fixes that — so no guard satisfies this
+// arm's test and that one at once, and the two cannot compete for a
+// string.
 func unstampableBecause(guard string, shape codegen.EntityKind, alphabet labelAlphabet) string {
 	declared := slices.Sorted(maps.Keys(alphabet[shape]))
 	// deadIfGuard is the consequence the three label arms share and the wire
@@ -998,13 +1025,12 @@ func TestUnstampableReasonNamesTheRightObstacle(t *testing.T) {
 // spelling leaves is a decoder the gate declines to grade, not one whose
 // guards it files under the body that happens to hold it.
 //
-// That is the point, because the previous recognition was the name pattern
-// decode<T>, and a function it failed to resolve was silently omitted —
-// omitted from the per-axis census, from the guard count and from the
-// alphabet check at the same time, so the extractor's own blind spot
-// removed the numerator, the denominator and the correctness check
-// together. The floor left standing was "some decoder was found", which
-// any one surviving decoder satisfies.
+// That is the point. Recognition by the name pattern decode<T> omits a
+// function it cannot resolve silently — from the per-axis census, from the
+// guard count and from the alphabet check at the same time, so the
+// extractor's own blind spot removes the numerator, the denominator and
+// the correctness check together. The floor left standing is "some decoder
+// was found", which any one surviving decoder satisfies.
 //
 // So the classification is total over what packageLevelFuncs yields, and
 // every arm of it is stated:
@@ -1109,9 +1135,9 @@ func emittedEntityDecoders(
 // must be classified and graded identically, not merely both somehow
 // noticed.
 //
-// The two named spellings are not all of them, and reading them as all of
-// them is what B2 was — see TestSweepReadsAFunctionLiteralAtAnyDepthOfA
-// Declaration for the literals no name is bound to. What this one adds and
+// The two named spellings are not all of them — see
+// TestSweepReadsAFunctionLiteralAtAnyDepthOfADeclaration for the literals
+// no name is bound to. What this one adds and
 // that one cannot is the word-for-word equality: a named literal reports
 // under its declared name, so its refusal is comparable character by
 // character with the func declaration's, and a var-spelled function that
@@ -1188,13 +1214,13 @@ func decodePerson(raw []byte) (Person, error) {
 //
 // The rows below are witnesses that the walk is wired up, and deliberately
 // not an enumeration the totality rests on. Reading a fixed list of syntactic
-// positions is the defect this replaces: the sweep used to type-assert
-// *ast.FuncLit on ValueSpec.Values[i], so a literal one node deeper — behind
-// parentheses, inside a composite literal, under a conversion — was neither
-// graded nor reported, and a witness set drawn from the arms the code
-// happened to have could not discover the arm it did not have. The walk now
-// visits every node of the declaration, so there is no per-shape arm left to
-// be missing, and one row nests a literal in shapes no arm ever named.
+// positions is the defect: a sweep that type-asserts *ast.FuncLit on
+// ValueSpec.Values[i] neither grades nor reports a literal one node deeper —
+// behind parentheses, inside a composite literal, under a conversion — and a
+// witness set drawn from the arms such code happens to have cannot discover
+// the arm it does not have. The walk visits every node of the declaration,
+// so there is no per-shape arm left to be missing, and one row nests a
+// literal in shapes no arm ever named.
 //
 // The last rows are witnesses to what the walk reaches beyond a
 // declaration's values. One puts the helper inside a package-level literal's
@@ -1294,34 +1320,33 @@ func decodePerson(raw []byte) (Person, error) {
 // refused with the same words at package level, inside a decoder's body,
 // inside a method's body and inside another literal's body.
 //
-// This replaces a pin on the opposite rule. An earlier revision classified a
-// body-nested literal only when its results named a prepared entity and
-// merged it into its holder otherwise, and pinned that with two rows
-// asserting the merge. The rule was wrong in the direction the pin could not
-// see: "names a prepared entity" is a test on the *spelling* of the result
-// type, so a dead edge decoder returning `knowsRow` where
-// `type knowsRow = Knows` was merged into the node decoder that held it and
-// its relationship-axis guard was graded against the node alphabet, green.
-// The identical function at package level was refused. Position decided the
-// axis, which is exactly what a totality claim may not let happen, and no
-// mutation of that rule could find it — the hole was in the rule.
+// The opposite rule cannot be pinned into correctness. Classifying a
+// body-nested literal only when its results name a prepared entity, and
+// merging it into its holder otherwise, is wrong in the direction rows
+// asserting that merge cannot see: "names a prepared entity" is a test on
+// the *spelling* of the result type, so a dead edge decoder returning
+// `knowsRow` where `type knowsRow = Knows` is merged into the node decoder
+// holding it and its relationship-axis guard is graded against the node
+// alphabet, green. The identical function at package level is refused.
+// Position decides the axis, which is exactly what a totality claim may not
+// let happen, and no mutation of that rule finds it — the hole is in the
+// rule.
 //
-// So this asserts the invariant the old rows denied. The four positions are
+// So this asserts the invariant that rule denies. The four positions are
 // not an enumeration the totality rests on; the totality rests on
 // packageLevelFuncs yielding every literal at every depth. They are the four
 // the defect distinguished, and word-for-word equality is what makes the
 // claim "classified alike" rather than "reddened in all four".
 //
-// The cost the old rule was written to avoid is real and is paid here: a
-// helper closure that compares a string this gate has no verdict about is
-// refused wherever it is written, including in a method a query surface owns.
-// That is the same price every package-level function in an emission has paid
-// since this gate existed, and the price of not paying it was three dead
-// decoders passing green. The closures the backends do emit today are yielded
-// and pass, which TestEmittedClosuresNameNoEntityAndCompareNoString measures
-// per emission rather than restating here: an enumeration written in prose is
-// what stood here before, and it named one backend's closures while dropping
-// another's.
+// The cost that rule avoids is real and is paid here: a helper closure that
+// compares a string this gate has no verdict about is refused wherever it is
+// written, including in a method a query surface owns. That is the same
+// price every package-level function in an emission has paid since this gate
+// existed, and the price of not paying it is three dead decoders passing
+// green. The closures the backends do emit today are yielded and pass, which
+// TestEmittedClosuresNameNoEntityAndCompareNoString measures per emission
+// rather than restating here: an enumeration written in prose names one
+// backend's closures and drops another's.
 func TestSweepClassifiesAFunctionAlikeAtEveryDepth(t *testing.T) {
 	shapes := map[string]codegen.EntityKind{"Person": codegen.EntityNode}
 	// Every row writes this helper under this name, so each refusal names the
@@ -1530,15 +1555,14 @@ func decodePerson(raw []byte) (Person, error) {
 // decoder written in the body of a package-level function literal: read once,
 // under its own name, on its own axis.
 //
-// That position used to be a seam. The declaration walk pruned at each
-// literal it found and handed that literal's body to a second walk, so what
-// was below a package-level literal arrived through that hand-off or not at
-// all — and the literal's signature, which the hand-off did not carry,
-// arrived not at all. One walk per declaration removes the seam rather than
-// pinning it.
+// That position is where a seam falls. A declaration walk that pruned at
+// each literal it found and handed that literal's body to a second walk
+// would reach what is below a package-level literal through that hand-off
+// or not at all — and the literal's signature, which such a hand-off does
+// not carry, not at all. One walk per declaration leaves no seam to pin.
 //
-// What this holds is that the position is still read after the removal, and
-// read once. Stop walking below the literal and this decoder is yielded by
+// What this holds is that the position is read, and read once. Stop walking
+// below the literal and this decoder is yielded by
 // nothing — since the sweep stopped collecting a nested literal's strings
 // into its holder, nothing else reads it — so the entity it fills goes
 // undecoded and the reconciliation against codegen.Prepare refuses the
@@ -1601,8 +1625,9 @@ var boot = func() {
 func TestSweepMarksEachYieldedFunctionByItsSpelling(t *testing.T) {
 	// A literal no name is bound to is reported by its line, so the lines this
 	// source puts them on are part of what is asserted. Two are written in a
-	// signature, where the walk used to reach nothing, and one of those is in
-	// a declaration with no body — walked, and not yielded under its name.
+	// signature, which is the child a per-literal hand-off does not carry, and
+	// one of those is in a declaration with no body — walked, and not yielded
+	// under its name.
 	//
 	// The last declaration binds more names than it has values, a shape
 	// go/parser accepts and boundLiteralNames' length guard refuses to pair.
@@ -1659,12 +1684,10 @@ var unpaired, alsoUnpaired = func() {}
 // resolves no types, so a decoder returning an alias or a wrapper of an
 // entity struct is not that entity's decoder as far as this sweep can tell.
 // The question is what happens next. Merging it into the body that holds it
-// is what an earlier revision did, and it graded a dead edge decoder's
-// relationship-axis guard against the node alphabet of its holder, green,
-// with the real decodeKnows beside it so the reconciliation balanced too —
-// the exact refusals=0 signature this branch was opened to remove, one
-// identifier over. Yielding it and letting the classification refuse it is
-// what happens now.
+// grades a dead edge decoder's relationship-axis guard against the node
+// alphabet of its holder, green, with the real decodeKnows beside it so the
+// reconciliation balances too — an unfillable decoder invisible at exit 0,
+// one identifier over. So it is yielded and the classification refuses it.
 //
 // Each row therefore carries a real decodeKnows, so the reconciliation is
 // not what fires and a row that goes green is a laundered decoder rather
@@ -1842,19 +1865,18 @@ func recordedSweep(files []codegen.File, shapes map[string]codegen.EntityKind) (
 // value in a package-level dispatch table, and the same table returned from a
 // method. That set is a claim the arms alone do not make — that the refusal is
 // a property of the emission and not of how it is spelled. Each of the last
-// two reddened at some point while the first was refused, which is how a
-// decoder no value can satisfy passed this gate green while its visible twin
-// did not: first when the sweep read only a declaration's top-level value, and
-// then when it skipped a method before walking anything, which left a
-// receiver-less literal written inside one in nobody's guard list. The
-// reconciliation cannot catch either: the entity is decoded by the visible
-// decoder, so the roll balances.
+// two are how a decoder no value can satisfy reaches green while its visible
+// twin does not: a sweep reading only a declaration's top-level value misses
+// the table, and one skipping a method before walking anything misses a
+// receiver-less literal written inside one. The reconciliation cannot catch
+// either: the entity is decoded by the visible decoder, so the roll balances.
 //
 // The method row is not the method exclusion being walked back. What escapes
 // there has no receiver — it is exactly the literal the walk exists to
 // classify — and a decoder is graded on the axis of what it fills wherever the
-// emission writes it. The exclusion is over the receiver form itself, and R5
-// of that boundary, a decoder that *is* a method, is still out (gqlc-9xy0).
+// emission writes it. The exclusion is over the receiver form itself, and the
+// far side of that boundary — a decoder that *is* a method — is still out
+// (gqlc-9xy0).
 func TestSweepRefusesEveryEmissionItCannotClassify(t *testing.T) {
 	const prologue = `package emitted
 
@@ -1918,13 +1940,11 @@ func (d decoderSet) byLabel() map[string]func([]byte) (Person, error) {
 			// A factory and the decoder it returns are one decoder, not two,
 			// and this arm cannot tell. The refusal is the safe direction and
 			// stands; what this row pins is that the words are true of the
-			// emission in front of them. They were not: the message said
-			// "both return Person" of a function returning
-			// func([]byte) (Person, error), and called a factory and its own
-			// returned literal "not decidable", when the factory returns it.
-			// A red that states a checkable falsehood is the failure mode
-			// this gate's own docstring says it is least allowed to have, and
-			// this is the third time it has had one.
+			// emission in front of them. Saying "both return Person" of a
+			// function returning func([]byte) (Person, error), or calling a
+			// factory and its own returned literal "not decidable" when the
+			// factory returns it, is a checkable falsehood — the failure mode
+			// this gate's own docstring says it is least allowed to have.
 			name: "a factory and the decoder it returns, which this arm cannot tell from two decoders",
 			emission: prologue + `
 func personDecoder() func([]byte) (Person, error) {
@@ -2013,17 +2033,15 @@ type emittedFunc struct {
 //	var decodePost = func(raw []byte) (Post, error) { … }
 //	var byLabel = map[string]func([]byte) (Post, error){"Post": func…}
 //
-// The third line is why this walks rather than matches. Reading only the
-// first is what the totality claim originally overclaimed; reading the
-// first two is what it overclaimed next, and that one was worse, because
-// the correction was mistaken for the whole of it. A sweep that
-// type-asserts *ast.FuncLit on the top-level value of a ValueSpec sees a
-// literal behind parentheses, inside a slice, map or struct literal, or
-// under a conversion as nothing at all — five positions, none reported —
-// and a package-level dispatch table is the shape a decoder is most
-// plausibly relocated into (gqlc-9xy0). A second decoder hidden in one
-// left this gate green while the same emission spelled visibly was
-// refused: the refusal did not survive a change of spelling.
+// The third line is why this walks rather than matches. Reading the first
+// alone, or the first two, is a narrower claim than totality and does not
+// look it: a sweep that type-asserts *ast.FuncLit on the top-level value
+// of a ValueSpec sees a literal behind parentheses, inside a slice, map or
+// struct literal, or under a conversion as nothing at all — five
+// positions, none reported — and a package-level dispatch table is the
+// shape a decoder is most plausibly relocated into (gqlc-9xy0). A second
+// decoder hidden in one reaches green while the same emission spelled
+// visibly is refused: the refusal does not survive a change of spelling.
 //
 // So the rule is not a list of positions. Every node of every declaration
 // is visited by one walk, and every function literal found there is a
@@ -2041,23 +2059,20 @@ type emittedFunc struct {
 // on what the derivation prepared, so there is no argument here that a
 // decoder could be spelled around.
 //
-// Filtering the yield on "does this literal fill an entity" is what an
-// earlier revision did, and it routed the totality claim around itself. The
-// filter asks whether the literal's result type is *spelled* with a
-// prepared entity's identifier, so `type knowsRow = Knows` or
-// `type knowsRow struct{ Knows }` makes the answer no; the literal was then
-// merged into its holder, its guards graded on the holder's axis, and a
-// dead edge decoder guarding on a node label passed green. The identical
-// function written at package level was refused. That asymmetry is the
+// Filtering the yield on "does this literal fill an entity" routes the
+// totality claim around itself. Such a filter asks whether the literal's
+// result type is *spelled* with a prepared entity's identifier, so
+// `type knowsRow = Knows` or `type knowsRow struct{ Knows }` makes the
+// answer no; the literal is then merged into its holder, its guards graded
+// on the holder's axis, and a dead edge decoder guarding on a node label
+// passes green. The identical function written at package level is
+// refused. That asymmetry is the
 // defect: a literal's axis has to come from the literal. Yielding every
-// literal and letting the classification refuse what it cannot place is one
-// rule that gets there; an explicit refusal keyed on a body-nested literal
-// whose result type the emission declares and the shape map does not is
-// another, and it was not taken, because it is a second rule about nesting
-// where this is one rule less.
+// literal and letting the classification refuse what it cannot place is
+// the rule that gets there, and it says nothing about nesting.
 //
-// The narrowing bought one thing — a query-side helper closure comparing a
-// string this gate has no verdict about is now refused rather than left to
+// The filter buys one thing — a query-side helper closure comparing a
+// string this gate has no verdict about is refused here rather than left to
 // its holder. That cost is real and it is the price of the totality claim,
 // which is the same price every package-level function in an emission has
 // paid since this gate existed. What the backends emit today does pay it
@@ -2065,9 +2080,10 @@ type emittedFunc struct {
 // TestEmittedClosuresNameNoEntityAndCompareNoString sweeps each emission the
 // valid corpus produces and holds every literal yielded here to naming no
 // prepared entity in its results and comparing no string, so each lands on
-// the results-name-nothing arm with no guard to grade. The enumeration that
-// stood here instead named one backend's transaction callbacks and dropped
-// another backend's element decoders, which one grep falsified.
+// the results-name-nothing arm with no guard to grade. An enumeration in
+// prose here would name one backend's transaction callbacks and drop
+// another backend's element decoders; the census cannot drop a backend
+// without reddening its floor.
 //
 // A method is not yielded, and that exclusion is the claim's edge rather
 // than a blind spot of the same kind: a receiver form belongs to the
@@ -2097,12 +2113,14 @@ func packageLevelFuncs(fset *token.FileSet, file *ast.File) []emittedFunc {
 	// holder, and ast.Inspect visits each node once, so each literal is
 	// yielded once. It needs no recursion of its own and no hand-off.
 	//
-	// One walk per declaration is the fix for a two-walk shape that pruned at
-	// each literal and handed that literal's *body* to a second walk. An
-	// *ast.FuncLit's other child is its signature, which the hand-off did not
-	// carry, so a helper inside one was yielded by neither walk while the
-	// identical helper one level down was yielded — the classification turned
-	// on where the holder was written rather than on the helper.
+	// One walk per declaration, and the count is load-bearing in both
+	// directions. Two walks that prune at each literal and hand that
+	// literal's *body* to the second lose its signature, which no such
+	// hand-off carries: a helper written inside one is yielded by neither
+	// walk while the identical helper one level down is yielded, so the
+	// classification turns on where the holder sits rather than on the
+	// helper. Two walks over the whole declaration yield every literal twice
+	// instead.
 	literals := func(decl ast.Decl) {
 		names := boundLiteralNames(decl)
 		ast.Inspect(decl, func(n ast.Node) bool {
