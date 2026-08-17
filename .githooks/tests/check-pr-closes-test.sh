@@ -936,24 +936,23 @@ Refs: gqlc-mirrored #617")" "some/branch" \
 # fence inside the list item there, so a column-zero line below it is prose
 # to GitHub and blanked by this. The author moves the line out from under the
 # block and the refusal names what to write; the other direction would be
-# this gate annotating a check run over a declaration nobody can see. Swept
-# 85 body shapes through GitHub's renderer and this checker together -- 58
-# of them, then 35 more picked to break the result the first 58 gave, 8
-# shared: the disagreements were all this direction, this one among them.
-# Within that sample the only marker honoured against GitHub's rendering is
-# the code span rowed above, which GitHub shows as visible monospace. That
-# sweep was run before COMMENT_RUN was added and its bodies were not kept, so
-# how many of the 85 disagree is not a number this commit can restate; what
-# the added blanking cannot do is turn a disagreement into an honoured
-# marker, so the direction and the code span still hold over it. The rows
-# above and below are the sample this commit does re-measure.
+# this gate annotating a check run over a declaration nobody can see.
 #
-# What that sweep bounds is the direction over the shapes it swept, and
-# nothing wider. Outside it the other direction exists: the row below headed
-# "a marker inside an open HTML attribute is honoured" puts the marker on its
-# own line inside an unterminated attribute value, where GitHub renders
-# nothing of it and this honours it anyway. So the direction does not carry
-# past the sample; 85 shapes is not every shape.
+# This shape came out of a sweep of 85 body shapes put through GitHub's
+# renderer and the checker together -- 58 of them, then 35 more picked to
+# break the result the first 58 gave, 8 shared. That sweep ran against an
+# earlier prose_only(), its bodies were not kept, and it cannot be re-run
+# from anything in this tree, so no result of it is restated here: not how
+# many of the 85 disagreed, and not which way any one of them did. It is
+# where these rows came from, not a bound on this commit. What this commit
+# measures is the rows above and below, every one of them put to the same
+# renderer at head.
+#
+# Both directions are in those rows. The row below headed "a marker inside
+# an open HTML attribute is honoured" puts the marker on its own line inside
+# an unterminated attribute value, where GitHub renders nothing of it and
+# this honours it anyway -- so "it errs towards refusing" is a description of
+# the rows, not a property of the function.
 expect_red "a fence indented into a list item blanks the marker below it" \
     "$EXPORT" "$(body "- item
 
@@ -997,11 +996,12 @@ Refs: gqlc-mirrored #617
 # line-oriented block model meeting a sanitiser that works on the assembled
 # HTML, and neither needs a comment to trigger.
 #
-# HTML_OPEN reads a raw block's opening tag at the line's first character,
-# because that is where markdown starts an HTML block. GitHub's sanitiser
-# does not need the tag there: an inline '<pre>' part-way along a paragraph
-# line opens the element in the output all the same, and the marker below it
-# lands inside. The body below renders as
+# HTML_OPEN reads a raw block's opening tag only where markdown starts an
+# HTML block: at the start of a line, indented no more than three spaces,
+# with nothing else before it. GitHub's sanitiser needs none of that -- an
+# inline '<pre>' part-way along a paragraph line opens the element in the
+# output all the same, and the marker below it lands inside. The body below
+# renders as
 # '<p>x </p><pre class="notranslate">Refs: gqlc-mirrored #617</pre>' and this
 # honours it. Searching the whole line for the tag would blank any body that
 # writes '<pre>' in a sentence -- the bodies on this file's own PRs do --

@@ -20,25 +20,30 @@ A PR that touches a bead without resolving it declares that with a
 'Refs: <bead-id> #<issue>' line (bd gqlc-1ekq), starting at the line's
 first character and read over what prose_only leaves of the body --
 fenced code blocks, HTML comments, and raw <pre> and <code> blocks whose
-opening tag is at a line's first character, blanked. Those are the
-carriers a marker was measured to survive invisibly in, against GitHub's
-own renderer; they are not certified to be
-every place GitHub hides text. Over the 85 shapes swept, where the two
-disagree this blanks a marker GitHub renders rather than honouring one
-GitHub hides (none of the 85), and the one shape in that
-sample it honours that GitHub renders as code is an inline code span,
-which is visible monospace text. That sweep kept none of its bodies, so how
-many of the 85 disagree is not a number this file restates; blanking more
-cannot turn a disagreement into an honoured marker, which is why those two
-claims survive COMMENT_RUN. Both hold over the 85 and no
-further: outside them the blanking costs further refusals over markers
-GitHub renders, the marker's line anchor costs one more, and -- the
-direction the 85 had none of -- markers GitHub renders inside a <pre>, or
-renders nothing of, are honoured: carried by an unterminated HTML
-attribute (bd gqlc-ncb8), by a raw block whose opening tag is not at its
-line's first character, and by a comment the sanitiser holds open past
-its '-->' (both bd gqlc-xz16).
-prose_only's docstring enumerates those shapes and each is a row; the
+opening tag starts a line, indented no more than three spaces, blanked.
+Those are the carriers a marker was measured to survive invisibly in,
+against GitHub's own renderer; they are not certified to be
+every place GitHub hides text.
+
+Which carriers they are came out of a sweep of 85 body shapes put through
+POST /markdown. That sweep ran against an earlier prose_only, kept none of
+its bodies, and cannot be re-run from anything in this tree, so no result
+of it is stated here or below: not how many of the 85 disagreed with the
+checker, and not which way any one of them did. It is where the design
+came from, not a bound on this commit. What is measured at this commit is
+the suite's visibility section, where every body was put to the same
+renderer and the row's colour reports what came back.
+
+Both directions of disagreement are in there. The cheap one is this
+blanking refusing a marker GitHub renders, which the author resolves by
+moving the line; the expensive one is this gate annotating a check run to
+say an issue stays open over a body no reader can see it in. Three rows
+are in that second direction -- a marker inside an unterminated HTML
+attribute (bd gqlc-ncb8), one below a raw block whose opening tag has text
+before it on its line, and one below a comment the sanitiser holds open
+past its '-->' (both bd gqlc-xz16) -- and they are what this branch found
+and rowed rather than a census of what exists.
+prose_only's docstring enumerates the shapes and each is a row; the
 count is kept in one place so the two cannot drift apart. The
 declaration is then checked
 rather than taken: the number has to be the one the bead mirrors, the
@@ -95,7 +100,10 @@ FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})([^\n]*)$")
 # than honouring it, so '&lt;script&gt;' and the text below it both come back
 # as prose a reader sees. Measured through POST /markdown for all three tags;
 # the <script> one is rowed in the suite. group(1) is the tag, so the closer
-# has to be that same tag.
+# has to be that same tag. The '^ {0,3}' is markdown's bound on where an HTML
+# block starts -- at four the line is an indented code block instead -- and
+# the trailing '[\s>]|$' is what keeps '<pretend>' from reading as a <pre>.
+# Both bounds are rows.
 HTML_OPEN = re.compile(r"^ {0,3}<(pre|code)(?:[\s>]|$)", re.I)
 # A complete comment on one line. Blanked out before a closing tag is looked
 # for, because a closing tag inside a comment does not end the block a reader
@@ -247,10 +255,12 @@ def comment_opens_at(line):
 def prose_only(pr_body):
     """The body with three carriers blanked out, line count preserved:
     fenced code blocks, HTML comments, and raw <pre> and <code> blocks whose
-    opening tag is at a line's first character. Not everything GitHub
-    declines to render as prose -- what was measured to diverge, in either
-    direction, is the last three paragraphs, and each shape they name is a
-    row.
+    opening tag starts a line, indented no more than three spaces -- which is
+    markdown's own bound on where an HTML block may start, four spaces being
+    an indented code block instead. Both ends of it are rows. Not everything
+    GitHub declines to render as prose -- what was measured to diverge, in
+    either direction, is the last three paragraphs, and each shape they name
+    is a row.
 
     Fences follow the rule GitHub's renderer follows rather than a toggle on
     every ``` and ~~~ line. A fence closes only on a run of the same
@@ -271,8 +281,9 @@ def prose_only(pr_body):
     keep: a fence and a <pre> each indented one to three spaces into a list
     item, a <code> opened against a paragraph it cannot interrupt, a
     <code> sharing its line with the comment that opens on it, and a <code>
-    whose only closing tag on its line is inside a comment COMMENT_RUN
-    removes -- the last two are not a complete tag on a line of their own,
+    whose only closing tag on its line is inside a comment
+    comments_blanked() blanks -- the last two are not a complete tag on a
+    line of their own,
     so GitHub keeps them inline, and all five
     render as something a reader sees and are blanked here. (A
     sixth row in that direction, a marker sharing a block's closing line,
@@ -288,10 +299,12 @@ def prose_only(pr_body):
     lines. A marker on its own line inside an unterminated HTML attribute --
     '<a href="', the line, '">z</a>' -- renders as nothing at all and still
     reaches the marker pattern, because attribute values are inline syntax
-    (bd gqlc-ncb8). A raw block whose opening tag is not at its line's first
-    character -- 'x <pre>' -- opens the element for GitHub's sanitiser but
-    not for HTML_OPEN, which anchors where markdown starts an HTML block;
-    the marker below it renders inside a <pre> and is honoured. And a block
+    (bd gqlc-ncb8). A raw block whose opening tag has text before it on its
+    line -- 'x <pre>' -- opens the element for GitHub's sanitiser but not
+    for HTML_OPEN, which reads the tag only where markdown starts an HTML
+    block: at the start of a line, indented no more than three spaces, with
+    nothing else before it. The marker below it renders inside a <pre> and
+    is honoured. And a block
     that closes on its own opening line ends markdown's HTML block there, so
     a '<!--' after the closing tag is emitted raw with nothing to close it
     and the sanitiser swallows the rest of the body, while this ends the
