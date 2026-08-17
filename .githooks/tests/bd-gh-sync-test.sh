@@ -1578,8 +1578,8 @@ fi
 
 HELDBACK="{\"id\":\"b-amend2\",\"status\":\"open\",\"external_ref\":\"$ISSUE/14\",\"description\":\"keep\nbd only\"$BD_EARLY}"
 GH_SUMMARY="[{\"number\":8,\"state\":\"OPEN\",\"body\":\"same\nadded on GH\"$GH_LATE},
-             {\"number\":14,\"state\":\"OPEN\",\"body\":\"keep\"$GH_LATE},
-             {\"number\":99,\"state\":\"OPEN\",\"body\":\"orphan\"$GH_LATE}]"
+             {\"number\":14,\"state\":\"OPEN\",\"body\":\"keep\"},
+             {\"number\":99,\"state\":\"OPEN\",\"body\":\"orphan\"}]"
 
 run_sync pull "[$ELIGIBLE,$HELDBACK]" "$GH_SUMMARY"
 if [ "$(last_line)" = "bd-gh-sync: pulled 1 bead(s), held 1, left 1 unmirrored GH issue(s) alone." ]; then

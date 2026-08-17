@@ -35,11 +35,13 @@
 #                gh_body.startswith(description) — append-only, and
 #              * where it extends it, GitHub's edit time is later than the
 #                bead's by more than SKEW_S.
-#            The last four conditions are one rule: pull only where the
-#            evidence has GitHub moving last. A re-indent, a reorder and a
-#            de-dup add no content, so the bodies alone refuse them; a trailing
-#            block cut in bd leaves the same two bodies as a block appended on
-#            GitHub, so only the edit times separate those. Neither side's is a
+#            The last four conditions are one rule: refuse the pull wherever the
+#            evidence leaves room for GitHub to be behind bd — because it cannot
+#            hold the status, because it lacks content the bead has, or because
+#            nothing says it moved last. A re-indent, a reorder and a de-dup add
+#            no content, so the bodies alone refuse them; a trailing block cut in
+#            bd leaves the same two bodies as a block appended on GitHub, so only
+#            the edit times separate those. Neither side's is a
 #            description-edit time — bd's moves on any write to the bead, and
 #            GitHub's on a comment — so the ordering is a proxy, and it is one
 #            with a residue in each direction: an append that a bd-side write
@@ -184,8 +186,10 @@ def one_line(s):
 # 2026-08-17 on an NTP-disciplined machine: 4.5ms jitter against its stratum-2
 # peer, and agreement with GitHub's own Date header to within that header's
 # one-second resolution over five samples — the margin is for the machine that
-# is not disciplined at all. It is one-sided: raising it holds beads a pull
-# would have taken, lowering it pulls beads a hold would have kept. Mirrored in
+# is not disciplined at all. Both directions cost something and the costs are
+# not the same shape, so err upwards: too large holds beads a pull would have
+# taken, which prints on stderr and a human undoes, and too small pulls beads a
+# hold would have kept, which is the silent one. Mirrored in
 # .githooks/tests/bd-gh-sync-test.sh, which pins both sides of the boundary.
 SKEW_S = 60
 
