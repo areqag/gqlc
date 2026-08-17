@@ -389,8 +389,11 @@ func TestATruncatedDistListMakesUndeclaredPlatformTermsUnplaceableNotTags(t *tes
 	// of the fixture that happens to hold. `declared` above names no platform
 	// term, so a term this table loses is left with no vocabulary at all — and
 	// that is what makes it unplaceable, not the truncation on its own. Declare
-	// the lost term and it is placeable again, as a custom tag:
-	// TestALostPlatformTermThatRunBuildTagsDeclaresBecomesATag.
+	// the lost term and it is placeable again, as a custom tag — which is why
+	// gradePlatformTerms is not where that composition gets closed. It is closed
+	// one function up, in platformTerms, and the table below is gradePlatformTerms'
+	// own output, read before the floor is unioned in
+	// (TestALostPlatformTermTheFloorHoldsIsStillAPlatformTerm).
 	truncated, err := gradePlatformTerms([]string{"linux/amd64", "windows/amd64"})
 	if err != nil {
 		t.Fatalf("gradePlatformTerms over a truncated table: %v", err)
@@ -411,9 +414,12 @@ func TestATruncatedDistListMakesUndeclaredPlatformTermsUnplaceableNotTags(t *tes
 }
 
 // declaredWithGOOS is the overlap `platforms` and `declared` deliberately lack.
-// Every other table in this file is disjoint from the platform vocabulary, and a
-// disjoint fixture cannot witness what happens when the two vocabularies compete
-// for the same spelling — which is the whole of the composition below.
+// The `overlapping` table at TestDeclaringATermTheToolchainOwnsDoesNotMakeItATag
+// also overlaps the platform vocabulary, on `linux` and `arm64`, and was added
+// for that — but against an INTACT `platforms`, where the answer is decided by
+// classify's ordering alone. This one overlaps on a spelling a narrowed table can
+// lose, which is the only shape that witnesses the two vocabularies competing for
+// a term neither the toolchain's answer nor the config can be trusted to hold.
 //
 // A GOOS in run.build-tags is not a contrived typo. golangci-lint will not load a
 // `//go:build darwin` file on a linux runner unless the tag is in that key, so a
@@ -437,9 +443,13 @@ func TestADeclaredPlatformTermIsNeverDerivedSoTheStaleClauseNamesIt(t *testing.T
 	//
 	// What this does NOT witness: the recipe's own `comm -13`. The difference is
 	// recomputed here from the same two sets, so a change to the justfile clause
-	// itself — a flipped comm direction, a dropped exit 1 — passes this test. The
-	// recipe half was measured by hand at the fixing commit (`darwin` added to
-	// .golangci.yml with test/data-style darwin file present -> rc=1 naming it).
+	// itself — a flipped comm direction, a dropped refusal — passes this test.
+	// Both were measured SURVIVING it. That half is covered where it lives, by
+	// check-golangci-build-tags' own witness: the recipe adds a term no file
+	// constrains to the configured set on every run and refuses to proceed unless
+	// its clause both refuses and names it. This test is the derivation half —
+	// that `darwin` never reaches `derived` in the first place — and that is all
+	// it should be read as.
 	root := t.TempDir()
 	write(t, root, "go.mod", goMod)
 	write(t, root, "mac/mac.go", "//go:build darwin\n\npackage mac\n")
@@ -470,45 +480,191 @@ func TestADeclaredPlatformTermIsNeverDerivedSoTheStaleClauseNamesIt(t *testing.T
 	}
 }
 
-func TestALostPlatformTermThatRunBuildTagsDeclaresBecomesATag(t *testing.T) {
-	// Both legs at once — and this one is a residual this branch PINS rather than
-	// closes, so it asserts the fail-open as the current answer.
+func TestALostPlatformTermTheFloorHoldsIsStillAPlatformTerm(t *testing.T) {
+	// bd gqlc-e7oq's fail-open reassembled from two halves — a dist list that lost
+	// a GOOS, and a run.build-tags entry naming the term it lost — which this
+	// branch carried as a PIN asserting the fail-open until platformTerms grew a
+	// floor. It asserts the REFUSAL now.
 	//
-	// Closing it on the config side does not work, and that was measured rather
-	// than reasoned: a refusal of a run.build-tags entry that classify places as
-	// non-custom calls the same classify over the same narrowed table, which
-	// places the lost term as classCustom, so it stays silent on exactly the
-	// input it was written for. Where such a refusal CAN fire — an intact table —
-	// the `stale` clause above already fires, single-fault, in `just lint`.
-	//
-	// If this test ever goes red because `got` came back nil, the composition has
-	// been closed by something: that is good news, and the concession in
-	// TestGradePlatformTermsDoesNotTakeHalfALineAsATerm, along with the classify
-	// and gradePlatformTerms comments in main.go, is then stale and goes with it.
-	if got, err := constraintTags("//go:build darwin", platforms, declaredWithGOOS, origin); err != nil || got != nil {
-		t.Fatalf("constraintTags(//go:build darwin) with an intact table = %v, %v, want nil, nil: "+
-			"platform-first is what suppresses a declared GOOS, and it is the only thing that "+
-			"does", got, err)
-	}
-	// The same table gradePlatformTerms accepts after discarding a `darwin/`
-	// line: every anchor present, one GOOS gone.
-	truncated, err := gradePlatformTerms([]string{"linux/amd64", "windows/amd64", "darwin/"})
+	// And it asserts it through platformTerms, which is what run() calls. The
+	// shape it replaces went through gradePlatformTerms, one function BELOW the
+	// floor, so it stayed green while the class was closed above it — measured on
+	// this branch, not supposed. A pin whose written promise is "if this goes red
+	// the composition has been closed" has to be able to see the closure, and
+	// which function it observes is the whole of whether it can.
+	narrowed := []string{"linux/amd64", "windows/amd64", "darwin/"}
+
+	// Vacuity guard, and it is load-bearing: the grading platformTerms is built on
+	// really does lose `darwin` over this table. Without it every assertion below
+	// would pass over a table that never narrowed.
+	raw, err := gradePlatformTerms(narrowed)
 	if err != nil {
 		t.Fatalf("gradePlatformTerms over a table with a malformed darwin line: %v", err)
 	}
-	if _, ok := truncated["darwin"]; ok {
-		t.Fatal("the fixture table still holds darwin, so the composition below is not being " +
-			"measured at all — this test would pass on the strength of nothing")
+	if _, ok := raw["darwin"]; ok {
+		t.Fatal("the fixture table still holds darwin BEFORE the floor, so nothing below is " +
+			"being measured — this test would pass on the strength of nothing")
 	}
-	got, err := constraintTags("//go:build darwin", truncated, declaredWithGOOS, origin)
+
+	platformsAfterFloor, err := platformTerms(narrowed)
 	if err != nil {
-		t.Fatalf("constraintTags under a narrowed table with darwin declared: %v", err)
+		t.Fatalf("platformTerms over a narrowed table: %v", err)
 	}
-	if !slices.Equal(got, []string{"darwin"}) {
-		t.Fatalf("constraintTags(//go:build darwin) = %v, want [darwin]: the residual documented "+
-			"in TestGradePlatformTermsDoesNotTakeHalfALineAsATerm and in main.go's classify and "+
-			"gradePlatformTerms comments is no longer reachable, so those three concessions are "+
-			"now false in the other direction and must be rewritten", got)
+	if _, ok := platformsAfterFloor["darwin"]; !ok {
+		t.Fatal("platformTerms did not put `darwin` back after the grading lost it, so the floor " +
+			"is not reaching the vocabulary run() classifies against")
+	}
+	got, err := constraintTags("//go:build darwin", platformsAfterFloor, declaredWithGOOS, origin)
+	if err != nil || got != nil {
+		t.Fatalf("constraintTags(//go:build darwin) under a narrowed table with darwin declared "+
+			"in run.build-tags = %v, %v, want nil, nil: that is `-tags darwin` on a linux scan, "+
+			"which excludes every //go:build !darwin file that actually ships (bd gqlc-e7oq)",
+			got, err)
+	}
+	// The intact table, where classify's platform-first ordering carries it alone
+	// and the floor adds nothing. Both readings, because a floor that had somehow
+	// replaced the toolchain's answer rather than being unioned into it would pass
+	// the narrowed case above and break this one.
+	intact, err := platformTerms([]string{"linux/amd64", "windows/amd64", "darwin/arm64"})
+	if err != nil {
+		t.Fatalf("platformTerms over an intact table: %v", err)
+	}
+	if got, err := constraintTags("//go:build darwin", intact, declaredWithGOOS, origin); err != nil || got != nil {
+		t.Fatalf("constraintTags(//go:build darwin) with an intact table = %v, %v, want nil, nil",
+			got, err)
+	}
+	if got, err := constraintTags("//go:build tagblind", intact, declaredWithGOOS, origin); err != nil ||
+		!slices.Equal(got, []string{"tagblind"}) {
+		t.Fatalf("constraintTags(//go:build tagblind) = %v, %v, want [tagblind], nil: a floor that "+
+			"swallowed the declared vocabulary would make every custom tag vanish and every "+
+			"assertion above pass on nothing being derived at all", got, err)
+	}
+}
+
+func TestAPlatformSpellingTheFloorNeverHeardOfIsStillTheResidual(t *testing.T) {
+	// The floor's honest limit, pinned where a closure would trip it rather than
+	// left in prose. `zzos` stands in for a GOOS the toolchain gains after
+	// platformFloor was last synced against internal/syslist: the composition
+	// needs THREE faults now — the dist list loses the term, run.build-tags names
+	// it, and the floor has never heard of it — where before the floor it needed
+	// two. That is a demotion, not a closure, and this says so in a form that
+	// reddens if it ever becomes one.
+	//
+	// TestThePlatformFloorCoversEveryTermTheLiveToolchainReports is what keeps
+	// the third fault from arriving quietly: a toolchain that grows a platform the
+	// copy above has not been re-synced for reddens there, in `just test`.
+	const unknown = "zzos"
+	if slices.Contains(platformFloor, unknown) {
+		t.Fatalf("%q is in platformFloor, so this measures the closed case and not the residual "+
+			"it is named for", unknown)
+	}
+	narrowed, err := platformTerms([]string{"linux/amd64", "windows/amd64"})
+	if err != nil {
+		t.Fatalf("platformTerms: %v", err)
+	}
+	if _, ok := narrowed[unknown]; ok {
+		t.Fatalf("%q is already a platform term, so the composition below is not being measured",
+			unknown)
+	}
+	declaredWithUnknown := map[string]struct{}{"codegen_live": {}, unknown: {}}
+	got, err := constraintTags("//go:build "+unknown, narrowed, declaredWithUnknown, origin)
+	if err != nil {
+		t.Fatalf("constraintTags over a floor-unknown declared term: %v", err)
+	}
+	if !slices.Equal(got, []string{unknown}) {
+		t.Fatalf("constraintTags(//go:build %s) = %v, want [%s]: the residual documented in "+
+			"main.go's platformTerms comment is no longer reachable, which is good news — that "+
+			"concession is now false in the other direction and goes, along with this test",
+			unknown, got, unknown)
+	}
+}
+
+func TestThePlatformFloorCoversEveryTermTheLiveToolchainReports(t *testing.T) {
+	// The floor is a union, so a term it lacks costs nothing TODAY — it just
+	// behaves as it did before the floor existed. What it costs is the residual
+	// above, and the only way that residual arrives is drift: a toolchain upgrade
+	// adds a platform and this file's copy of internal/syslist does not move. This
+	// is that drift, made loud, in the cheapest place it can be made loud.
+	lines, err := distList(t.Context())
+	if err != nil {
+		t.Fatalf("distList: %v", err)
+	}
+	live, err := gradePlatformTerms(lines)
+	if err != nil {
+		t.Fatalf("gradePlatformTerms over the live dist list: %v", err)
+	}
+	// Vacuity guard: a dist list that came back nearly empty would satisfy the
+	// coverage assertion below by having almost nothing to cover.
+	if len(live) < 20 {
+		t.Fatalf("the live `go tool dist list` yielded only %d platform terms, so the coverage "+
+			"assertion below is passing over a table that is itself broken", len(live))
+	}
+	var missing []string
+	for _, term := range sortedTerms(live) {
+		if !slices.Contains(platformFloor, term) {
+			missing = append(missing, term)
+		}
+	}
+	if len(missing) > 0 {
+		t.Fatalf("`go tool dist list` reports platform terms platformFloor has never heard of "+
+			"(%s), so the floor is out of sync with the toolchain. Re-sync it against "+
+			"GOROOT/src/internal/syslist/syslist.go's KnownOS and KnownArch. Until then each of "+
+			"those spellings is one narrowed dist list and one run.build-tags entry away from "+
+			"being asserted as a custom build tag (bd gqlc-e7oq)", strings.Join(missing, " "))
+	}
+}
+
+func TestPlatformTermsUnionsTheFloorIntoTheLiveToolchainsAnswer(t *testing.T) {
+	// platformTerms had no direct test at all: its only caller was run(), and the
+	// test named after it exercised gradePlatformTerms three times and this
+	// function never. So the function handing the live `platforms` set to the
+	// whole pipeline was measured by nothing — which is exactly why a defect in it
+	// (a narrowed live table) and a fix in it (the floor) were both invisible.
+	lines, err := distList(t.Context())
+	if err != nil {
+		t.Fatalf("distList: %v", err)
+	}
+	live, err := platformTerms(lines)
+	if err != nil {
+		t.Fatalf("platformTerms over the live dist list: %v", err)
+	}
+	// linux/amd64 come from the toolchain on any machine this runs on; hurd, zos,
+	// sparc64 and nacl are in internal/syslist and not in this toolchain's `go
+	// tool dist list`, so they are here only because the union happened on the
+	// live path.
+	for _, want := range []string{"linux", "windows", "darwin", "amd64", "arm64", "hurd", "zos", "sparc64", "nacl"} {
+		if _, ok := live[want]; !ok {
+			t.Fatalf("platformTerms over the live dist list has no %q: either the grading dropped "+
+				"a term the toolchain reported, or the floor is not being unioned in at all", want)
+		}
+	}
+	// And it is not a vocabulary of everything: a set that answered yes to every
+	// term would satisfy the loop above while making every custom tag a platform
+	// value and `scope tags` print nothing at all.
+	for _, notPlatform := range []string{"codegen_live", "tagblind", "unix", "go1.24", "", "mystery"} {
+		if _, ok := live[notPlatform]; ok {
+			t.Fatalf("platformTerms over the live dist list holds %q, which is not a platform "+
+				"term — a vocabulary that claims everything derives nothing", notPlatform)
+		}
+	}
+	// End to end on the live path: a declared GOOS still never reaches -tags.
+	if got, err := constraintTags("//go:build darwin && codegen_live", live, declaredWithGOOS, origin); err != nil ||
+		!slices.Equal(got, []string{"codegen_live"}) {
+		t.Fatalf("constraintTags over the live vocabulary = %v, %v, want [codegen_live], nil",
+			got, err)
+	}
+	// The grading is not bypassed by the floor. It nearly could be: the floor is a
+	// superset of every term the live table yields, so a platformTerms that
+	// ignored the graded table entirely would return the same set here and every
+	// assertion above would still pass — while `go tool dist list` printing
+	// nothing at all became an accepted answer, which is this program's whole
+	// defect class arriving through its own fix.
+	for _, broken := range [][]string{nil, {}, {"linux/amd64"}, {"", "  ", "js"}} {
+		if got, err := platformTerms(broken); err == nil {
+			t.Fatalf("platformTerms(%q) = %v with no error: the anchor refusal in the grading is "+
+				"not reaching this function, so a subprocess that answered nothing would be "+
+				"papered over by the floor and reported as a working vocabulary", broken, len(got))
+		}
 	}
 }
 
@@ -522,21 +678,37 @@ func TestGradePlatformTermsDoesNotTakeHalfALineAsATerm(t *testing.T) {
 	// What that costs is NOT "the terms it lost become unplaceable, not custom
 	// tags". A lost term is unplaceable only while no other vocabulary claims it,
 	// and run.build-tags is a vocabulary that can: declare `darwin` there and a
-	// table that dropped it derives `-tags darwin` on a linux scan. Measured, not
-	// argued — TestALostPlatformTermThatRunBuildTagsDeclaresBecomesATag.
+	// table that dropped it would derive `-tags darwin` on a linux scan. That
+	// composition is closed one function up, by the floor platformTerms unions in
+	// (TestALostPlatformTermTheFloorHoldsIsStillAPlatformTerm) — which is why the
+	// fixture below reads gradePlatformTerms' own output, before the floor.
 	//
-	// What IS bounded is the number of independent faults, and it is two, each
-	// pinned on its own. The narrowing alone leaves the lost term unplaceable and
-	// the derivation refuses by name
-	// (TestATruncatedDistListMakesUndeclaredPlatformTermsUnplaceableNotTags); the
-	// declaration alone can never enter `derived`, so check-golangci-build-tags'
-	// `stale` direction names it and reddens `just lint`, whether or not a file
-	// constrains it (TestADeclaredPlatformTermIsNeverDerivedSoTheStaleClauseNamesIt).
-	// Only both together are silent.
+	// The two faults are NOT symmetric, and this comment used to claim they were
+	// ("each pinned on its own", "only both together are silent"). Measured:
+	//
+	//   - The DECLARATION alone is loud with no further condition. A declared
+	//     platform term cannot enter `derived` while the vocabulary holds it, so
+	//     check-golangci-build-tags' `stale` direction names it and reddens
+	//     `just lint` whether or not any file constrains it
+	//     (TestADeclaredPlatformTermIsNeverDerivedSoTheStaleClauseNamesIt, and
+	//     the recipe's own witness for the clause itself).
+	//   - The NARROWING alone is SILENT, unless some file in the tree constrains
+	//     itself by the very term the table lost. Only then does the derivation
+	//     reach classify with it and refuse by name — which is why
+	//     TestATruncatedDistListMakesUndeclaredPlatformTermsUnplaceableNotTags
+	//     supplies such a file. No file in this tree can: the only platform term
+	//     any of them names is `windows` (test/data/platformtag), and `windows` is
+	//     one of the three anchors above, so a table losing it is refused outright
+	//     rather than narrowed silently. Narrowing this program's live dist list
+	//     by any other spelling and changing nothing else leaves `go test ./...`,
+	//     `just lint` and `just vuln` all green — measured on this branch, by
+	//     mangling every `darwin/` line inside platformTerms.
+	//
+	// So the depth is one unconditional leg and one conditional one, not two.
 	//
 	// Tightening this `continue` into a refusal would close the malformed-line
-	// spelling of leg one and nothing else: a table short by whole LINES narrows
-	// identically with no malformed line to catch, so the pin below stays a pin.
+	// spelling of the narrowing and nothing else: a table short by whole LINES
+	// narrows identically, with no malformed line to catch.
 	got, err := gradePlatformTerms([]string{"linux/amd64", "windows/amd64", "darwin/", "/arm64", "js", ""})
 	if err != nil {
 		t.Fatalf("gradePlatformTerms: %v", err)
@@ -554,7 +726,12 @@ func TestGradePlatformTermsDoesNotTakeHalfALineAsATerm(t *testing.T) {
 	}
 }
 
-func TestPlatformTermsIsGradedAgainstAnchorsItMustContain(t *testing.T) {
+func TestGradePlatformTermsIsGradedAgainstAnchorsItMustContain(t *testing.T) {
+	// Named for the function it calls. It used to be named for platformTerms and
+	// call this one, which is how platformTerms came to have a test named after it
+	// and no test of it (bd NB-A); the coverage of platformTerms itself is
+	// TestPlatformTermsUnionsTheFloorIntoTheLiveToolchainsAnswer.
+	//
 	// `go tool dist list` is a subprocess, and a subprocess that prints a short
 	// answer is the failure mode this whole program exists to refuse. The
 	// anchors are an early, legible refusal for the gross case only; the test

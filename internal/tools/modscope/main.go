@@ -93,7 +93,11 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 		if len(args) != 2 {
 			return errors.New(usage)
 		}
-		platforms, err := platformTerms(ctx)
+		lines, err := distList(ctx)
+		if err != nil {
+			return err
+		}
+		platforms, err := platformTerms(lines)
 		if err != nil {
 			return err
 		}
@@ -397,20 +401,27 @@ const (
 // `gradePlatformTerms` a two-entry dist list — which it accepts, since it only
 // anchors on linux, windows and amd64 — and `darwin` and `arm64` stop being
 // platform values and start being tags. That is bd gqlc-e7oq surviving the
-// guard written against it, and no anchor list can be the fix, because the next
-// truncation is one term further along. A term that cannot be placed is refused
-// instead, so the same truncated table makes `darwin` red rather than green —
-// with one exception, and it is this ordering read backwards. The refusal fires
-// because a lost platform term is left with NO vocabulary, and run.build-tags is
-// a vocabulary that can claim it: declare `darwin` there and a table that
-// dropped it derives `-tags darwin` after all. That composition is pinned rather
-// than closed; gradePlatformTerms carries the reasoning and names the tests.
+// guard written against it, and no ANCHOR list can be the fix, because an anchor
+// list is a grading check on the table and the next truncation is one term
+// further along. A term that cannot be placed is refused instead, so the same
+// truncated table makes `darwin` red rather than green — with one exception, and
+// it is this ordering read backwards. The refusal fires because a lost platform
+// term is left with NO vocabulary, and run.build-tags is a vocabulary that can
+// claim it: declare `darwin` there and a table that dropped it derives
+// `-tags darwin` after all.
+//
+// That composition is CLOSED, and by the thing the paragraph above rules out
+// only for anchors: a hardcoded list, unioned into the table rather than checked
+// against it. platformTerms carries it, names its provenance and its residual,
+// and names the tests.
 //
 // Platform first: a GOOS spelling declared in .golangci.yml is still a GOOS,
 // and `-tags linux` would still be a lie about the machine. This ordering is the
-// ONLY thing suppressing such an entry inside this program — the entry is a
-// config error either way, and what reports it as one is check-golangci-build-tags'
-// `stale` direction, which sees a declared term that nothing derived.
+// ONLY thing suppressing such an entry inside this program, and it can act only
+// on a term `platforms` actually holds — which is what platformTerms' floor is
+// for. The entry is a config error either way, and what reports it as one is
+// check-golangci-build-tags' `stale` direction, which sees a declared term that
+// nothing derived and which carries a witness of its own in that recipe.
 func classify(term string, platforms, declared map[string]struct{}) termClass {
 	if _, ok := platforms[term]; ok {
 		return classPlatform
@@ -615,23 +626,17 @@ func declaredTags(root string) (map[string]struct{}, error) {
 // can hold for: it fires on a term left with no vocabulary at all. A term this
 // table lost that .golangci.yml's run.build-tags also names is placeable — as a
 // custom tag — and comes out as `-tags darwin` on a linux scan, which is
-// bd gqlc-e7oq's fail-open reassembled from two halves. That composition is
-// PINNED, not closed:
-// TestALostPlatformTermThatRunBuildTagsDeclaresBecomesATag asserts it, and the
-// concession is priced in TestGradePlatformTermsDoesNotTakeHalfALineAsATerm.
+// bd gqlc-e7oq's fail-open reassembled from two halves.
 //
-// It is not closed here because neither half can be closed where it is visible.
-// Tightening the malformed-line `continue` below into a refusal closes one
-// SPELLING of the narrowing and not the class — a table short by whole lines
-// narrows identically with no malformed line to catch. And a config-side
-// refusal, of a run.build-tags entry that classify does not place as
-// classCustom, is inert on precisely this input: it consults the same narrowed
-// table and places the lost term as custom too. Measured, with a control that
-// fires. Where such a refusal COULD fire — an intact table — it is redundant:
-// a declared platform term never enters `derived`, so check-golangci-build-tags'
-// `stale` direction already names it single-fault, with or without a file
-// constraining it (TestADeclaredPlatformTermIsNeverDerivedSoTheStaleClauseNamesIt).
-// So both faults have to land together, and each on its own reddens a gate.
+// Nothing HERE closes that. Tightening the malformed-line `continue` below into
+// a refusal closes one SPELLING of the narrowing and not the class — a table
+// short by whole lines narrows identically with no malformed line to catch. And
+// a config-side refusal, of a run.build-tags entry that classify does not place
+// as classCustom, is inert on precisely this input: it consults the same
+// narrowed table and places the lost term as custom too. Measured, with a
+// control that fires. What closes it is one function down, in platformTerms,
+// which unions a floor of known platform spellings into whatever this returns;
+// read the argument and the residual there.
 func gradePlatformTerms(lines []string) (map[string]struct{}, error) {
 	terms := make(map[string]struct{})
 	for _, l := range lines {
@@ -653,15 +658,97 @@ func gradePlatformTerms(lines []string) (map[string]struct{}, error) {
 	return terms, nil
 }
 
-// platformTerms asks the toolchain which platforms exist. Authoritative rather
-// than a list kept here, which would go stale in the direction that matters: a
-// GOOS this file had not heard of would classify as a custom tag.
-func platformTerms(ctx context.Context) (map[string]struct{}, error) {
+// platformFloor is the GOOS and GOARCH spellings that are platform terms
+// whatever `go tool dist list` says on the day. Not "every such spelling" — every
+// one the toolchain's own table knew when this was last synced, which is a
+// different and smaller claim, and the gap between them is the residual named
+// below. Copied verbatim from the
+// toolchain's own internal/syslist KnownOS and KnownArch, whose comment reads
+// "past, present, and future known GOOS values. Do not remove from this list, as
+// it is used for filename matching" — the go command keeps a hardcoded table
+// BESIDE dist list, for a question shaped like this one, and this is that table.
+//
+// Sorted by that provenance rather than alphabetically across the two halves, so
+// a re-sync against a newer toolchain is a diff a reader can check line for line.
+var platformFloor = []string{
+	// syslist.KnownOS
+	"aix", "android", "darwin", "dragonfly", "freebsd", "hurd", "illumos", "ios",
+	"js", "linux", "nacl", "netbsd", "openbsd", "plan9", "solaris", "wasip1",
+	"windows", "zos",
+	// syslist.KnownArch
+	"386", "amd64", "amd64p32", "arm", "armbe", "arm64", "arm64be", "loong64",
+	"mips", "mipsle", "mips64", "mips64le", "mips64p32", "mips64p32le", "ppc",
+	"ppc64", "ppc64le", "riscv", "riscv64", "s390", "s390x", "sparc", "sparc64",
+	"wasm",
+}
+
+// distList runs `go tool dist list` and hands back its lines. Split from the
+// grading below so the vocabulary the live pipeline uses can be built from a
+// table a test supplies — there is no other function between this one and run().
+func distList(ctx context.Context) ([]string, error) {
 	out, err := exec.CommandContext(ctx, "go", "tool", "dist", "list").Output()
 	if err != nil {
 		return nil, fmt.Errorf("go tool dist list: %w", err)
 	}
-	return gradePlatformTerms(strings.Split(string(out), "\n"))
+	return strings.Split(string(out), "\n"), nil
+}
+
+// platformTerms is the GOOS/GOARCH vocabulary classify is given: the toolchain's
+// answer, graded, with platformFloor unioned in. It is what run() calls, and
+// nothing sits between the two — so a change anywhere below this line is
+// reachable from a test that calls this function, which is the property the
+// previous shape did not have (the pin observed gradePlatformTerms, one level too
+// low, and stayed green through a fix placed here).
+//
+// The floor is a UNION, not a substitute, and that is the whole answer to "a list
+// kept here would go stale in the direction that matters". It would, if it were
+// used INSTEAD of the toolchain — a GOOS this file had not heard of would then
+// classify as a custom tag. Unioned, it is monotone: it can only add platform
+// terms, never remove one, so a spelling missing from it behaves exactly as it
+// did before the floor existed and a spelling in it is a platform term even when
+// the table comes back without it. Measured on this tree: every term the live
+// dist list yields is already in the floor, so the floor takes nothing away and
+// nothing this tree constrains itself by changes hands
+// (TestThePlatformFloorCoversEveryTermTheLiveToolchainReports keeps that true,
+// and reddens the day a toolchain upgrade adds a platform the copy above has not
+// been re-synced for).
+//
+// What it does add is spellings the live table lacks — hurd, nacl, zos, sparc,
+// armbe and the rest of syslist's retired and unbuilt entries. A constraint
+// naming one of those used to be refused as unplaceable and is now dropped as a
+// platform term, which is the more correct of the two answers (`-tags zos` is a
+// lie about the machine exactly as `-tags darwin` is) but IS a changed answer,
+// and no file in this tree carries one.
+//
+// That closes bd gqlc-e7oq's two-fault composition — a narrowed table plus a
+// run.build-tags entry naming the term it lost — for every spelling the floor
+// holds: `darwin` stays a platform term and never reaches `-tags`
+// (TestALostPlatformTermTheFloorHoldsIsStillAPlatformTerm).
+//
+// THE RESIDUAL, stated rather than hidden: a platform spelling the floor has
+// never heard of. A GOOS added to the toolchain after this list was last synced,
+// dropped by a narrowed dist list, and named in run.build-tags, still derives as
+// a custom tag (TestAPlatformSpellingTheFloorNeverHeardOfIsStillTheResidual
+// pins it, through this function, so closing it reddens rather than passes). The
+// floor does not make that unreachable; it makes it require a third fault, and
+// the drift test above is what keeps that third fault from arriving quietly.
+//
+// A custom build tag colliding with a floor spelling — a tag literally named
+// `hurd` or `sparc` — is DECLARED loudly and dropped quietly, and the first half
+// is the one that matters: it has to be in run.build-tags for golangci-lint to
+// load the file at all, it classifies as classPlatform so it never enters
+// `derived`, and check-golangci-build-tags' `stale` clause then names the entry.
+// Undeclared it is dropped with nothing said — which is already true of a custom
+// tag spelled `linux`, and is the reason a GOOS spelling is a poor name for one.
+func platformTerms(lines []string) (map[string]struct{}, error) {
+	terms, err := gradePlatformTerms(lines)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range platformFloor {
+		terms[t] = struct{}{}
+	}
+	return terms, nil
 }
 
 // moduleTags returns every custom build tag the files of one module constrain
