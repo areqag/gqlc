@@ -13,7 +13,7 @@
 # green cache step. The read is a bare assignment on its own line, not an
 # argument to echo: `set -e` acts on the exit status of the simple command, and
 # in `echo "version=$(just ...)"` that status is echo's, so a renamed justfile
-# variable left the step green with the key emptied to `golangci-bin-Linux-` —
+# variable left the step green with the key emptied to `golangci-bin-<os>-` —
 # the outcome this paragraph used to claim was prevented. Only an
 # assignment-only command inherits the command substitution's status. Witness:
 #   bash -eo pipefail -c 'echo "v=$(false)" >> f'       # rc 0, f == "v="
