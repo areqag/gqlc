@@ -473,10 +473,10 @@ Refs: gqlc-mirrored #617")" "some/branch" \
 # a toggle: any ``` or ~~~ line flipped the state, which is not how a fence
 # closes.
 #
-# Counted at this commit: this section holds 54 rows, the three above
+# Counted at this commit: this section holds 55 rows, the three above
 # included. The last three are about GH_CLOSES and Bead: precedence rather
-# than about whether the marker is visible, so 51 are the sweep — 35 red and
-# 16 green. Every body in those 51 was put to GitHub's own renderer
+# than about whether the marker is visible, so 52 are the sweep — 35 red and
+# 17 green. Every body in those 52 was put to GitHub's own renderer
 # (POST /markdown, mode gfm, a read-only call) and the row's colour reports
 # what came back: red where GitHub puts the marker inside <pre><code> or
 # drops it from the output entirely, green where GitHub renders it. Nine
@@ -864,6 +864,16 @@ Refs: gqlc-mirrored #617
 # prose and honoured.
 expect_green_saying "a closing tag outside a comment still closes the line" \
     "$EXPORT" "$(body '<pre><!-- x --></pre>
+Refs: gqlc-mirrored #617')" "some/branch" \
+    "issue #617 stays open at merge"
+
+# Why COMMENT_RUN is non-greedy. Two comments on one line are two runs, and
+# the closing tag between them survives their removal; a greedy pattern
+# would take the whole span from the first '<!--' to the last '-->', the
+# closer with it, and blank a marker GitHub renders as prose -- it renders
+# this body as an empty <pre> followed by '<p>Refs: gqlc-mirrored #617</p>'.
+expect_green_saying "a closing tag between two comments still closes the line" \
+    "$EXPORT" "$(body '<pre><!-- a --></pre><!-- b -->
 Refs: gqlc-mirrored #617')" "some/branch" \
     "issue #617 stays open at merge"
 
