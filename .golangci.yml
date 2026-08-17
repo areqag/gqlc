@@ -122,6 +122,12 @@ linters:
       # the codebase is written in British English (see CONTEXT.md: canonicalised,
       # modelled, serialise); UK locale enforces that consistently
       locale: UK
+      # `synchronize` is the spelling GitHub gives one of its pull_request
+      # activity types. It is an API token that .github/workflows/ci.yml has to
+      # write exactly, so anything asserting against that list carries the
+      # American spelling as a literal and cannot be corrected.
+      ignore-rules:
+        - synchronize
     nolintlint:
       require-explanation: true
       require-specific: true
