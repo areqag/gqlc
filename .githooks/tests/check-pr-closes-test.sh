@@ -199,6 +199,15 @@ expect_green "an epic is never closed by a child PR" \
 expect_green "a bead the export does not carry does not block the PR" \
     "$EXPORT" "$(body 'Bead: gqlc-notinexport')" "some/branch"
 
+# How wide that pass is, pinned rather than left to be discovered: the id need
+# not name a real bead, so one line overrides a branch that does name a
+# mirrored one and the demand disappears from any PR. Held open on purpose —
+# the export trails the ledger, so an absent id is the normal state of a PR
+# about a bead created today — and filed as bd gqlc-oh30 for the day that
+# trade stops being worth it.
+expect_green "an absent id on a Bead line overrides a mirrored branch" \
+    "$EXPORT" "$(body 'Bead: gqlc-notinexport')" "fix/gqlc-mirrored-thing"
+
 # --- shapes the body is allowed to take -------------------------------------
 
 expect_green "GitHub's other closing keywords count" \
