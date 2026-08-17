@@ -8,7 +8,11 @@
 #      here rather than in a git hook.
 #
 # The target is resolved by analysis, not raw pattern-matching:
-#   - heredoc bodies are stripped (prose there never executes)
+#   - heredoc bodies are stripped, so a `git commit` written there is data
+#     rather than a command. That holds for a QUOTED delimiter (<<'EOF'). An
+#     unquoted one still expands $(...) in its body, and stripping runs before
+#     substitutions are extracted, so that case is missed -> allow (bd
+#     gqlc-wa8c; measured, with a non-heredoc positive control that denies)
 #   - $(...) and `...` substitution bodies are analyzed recursively (they
 #     execute for real, even inside double quotes)
 #   - the rest is shlex-tokenized; quoted prose becomes single tokens and
