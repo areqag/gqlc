@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-08-17
-**Beads:** gqlc-rz0l, gqlc-lhs3, gqlc-jfwo, gqlc-0rjn, gqlc-vu7z, gqlc-e143, gqlc-173n, gqlc-jnsk
+**Beads:** gqlc-rz0l, gqlc-lhs3, gqlc-jfwo, gqlc-0rjn, gqlc-vu7z, gqlc-e143, gqlc-173n, gqlc-jnsk, gqlc-offa, gqlc-ipx6
 
 ## Context
 
@@ -38,12 +38,14 @@ from the scanner together, and the capture vector went back into §5.3 green.
 Defeating the signal defeated both sides of it. A tighter regexp only moves the
 hole to the next spelling; it is the scanner auditing itself.
 
-> This document prints parameter lists without their enclosing parentheses, and
-> the driver-binding literal without its opening brace. An open parenthesis
-> immediately followed by the context parameter is the signature sweep's anchor,
-> and the literal with its brace is the binding sweep's; `docs/` is swept whole,
-> so either spelling here would be a graded site in a document no census
-> declares and the fence would redden on its own rationale. Keep it that way.
+> This document prints the driver-binding literal without its opening brace.
+> The literal with its brace is the binding sweep's anchor and `docs/` is swept
+> whole, so spelling it here would be a graded site in a document no census
+> declares. The parameter lists below are a different case: they are printed
+> without their enclosing parentheses and are read anyway, because this document
+> is named in `specBareListDocs` (decision 10) as one whose parameter lists are
+> exhibits. Adding a *parenthesised* one still grades, and one spelling the
+> capture vector still reddens.
 
 So the census is written in the test file, by name. It costs one line when a
 document starts or stops printing the surface, and the failure prints the line
@@ -65,9 +67,12 @@ direction alone is free on the other side.
 A census keyed on documents is itself a count of one per document, and that
 count has slack. A listed document keeps its entry on **one** surviving graded
 site, so every site past the first can leave the sweep with nothing said — not
-by being corrected, but by ceasing to print the anchor it is found on — the
-context parameter for a signature, the opening brace of the `map[string]any`
-literal for a binding.
+by being corrected, but by ceasing to print an anchor it is found on. Each
+anchor is a delimiter and the context parameter or the literal's type, both
+halves: an open parenthesis or a backtick before `ctx context.Context` for a
+signature, the opening brace of the `map[string]any` literal for a binding.
+Dropping the delimiter alone is enough, which is why there are two signature
+anchors rather than one (decision 10).
 
 Measured: C4 §3.2's `WriteQuerier` member `RemovePerson`, whose parameter list
 is `ctx context.Context, arg int64`, is one of ten graded signatures in that
@@ -183,6 +188,42 @@ reason to carry. A written list needs neither half — gutting C1's literals fai
 the `lost` direction by name, and a document quoting a signature owes a binding
 only if it is listed.
 
+## Decision 10 — the delimiter is half the anchor, so a code span is the second one
+
+The signature anchor was an open parenthesis followed by the context parameter,
+and three places in this branch described it as the context parameter alone.
+The difference is what an escape costs. Rewriting the context parameter is a
+visibly wrong edit; dropping the parentheses is a cosmetic one, and it was
+enough. Measured: a bullet reading ``the parameter list is `ctx
+context.Context, minAge int64` `` inserted into C1 §5.3 — the section this
+branch exists to correct, spelling the capture vector `gqlc-lhs3` removed —
+left both sweeps green.
+
+So a second anchor reads the same context parameter behind a backtick, and the
+code span's closing backtick terminates the list the way the closing paren does.
+The two anchors share one grading step (`gradeParams`), so arity, the whole-list
+placeholder and the name position are decided identically whichever delimiter
+carried the list.
+
+A document explaining a fence has to quote what the fence catches, and this one
+does, twice. `specBareListDocs` names the documents whose parenthesis-less
+parameter lists are read but not graded — exhibits rather than claims about the
+emitted surface. It is a written census reconciled in the `lost` direction, so
+an entry covering a document that has stopped printing one is red, and removing
+this document's entry reddens on its own decision 4 exhibits.
+
+Two things are deliberately not reached:
+
+- **A parameter list printed in prose with no code span around it.** Grading
+  unfenced prose means grading every comma in the documents. This is the same
+  surface as `gqlc-e143` and is left to it.
+- **The binding half.** The symmetric move — reading a `"key": value` pair with
+  no `map[string]any` literal around it — was measured before it was declined:
+  the swept documents hold over 130 such spans across 21 files, essentially all
+  of them JSON model shapes with no relation to a driver binding. A sweep that
+  reddens on those is worse than a named limit, so the limit is named
+  (`gqlc-offa`) and the brace stays part of the binding anchor.
+
 ## Consequences
 
 The fence is a graded-site check, not a document check. What it does **not**
@@ -200,6 +241,11 @@ own header:
   (`gqlc-e143`).
 - The binding sweep peels pointer operators along with carrier conversions, so
   `*arg` and `&arg` unwrap to `arg` and stay green (`gqlc-173n`).
+- A driver binding stated with no `map[string]any` literal around it is unswept,
+  and so is a parameter list stated in prose with no code span around it
+  (`gqlc-offa`, Decision 10).
+- `docFiles`'s guard that every `docRoots` entry exists on disk is neither
+  witnessed nor in Decision 7's enumeration (`gqlc-ipx6`).
 - The sweeps read raw markdown bytes, so a site inside an HTML comment is graded
   exactly as visible text is — invisible to a reader, present to the census
   (`gqlc-jnsk`).
