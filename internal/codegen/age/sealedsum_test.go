@@ -70,9 +70,16 @@ var probeEdgeUnion = resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{
 // pointer and embedded are the two an out-of-package caller reaches without
 // declaring the marker, and neither matches a `case resolver.Variant:` arm.
 //
-// valueReason is what unservedColumn answers for the value form. It is
-// written out per row rather than derived, because deriving it from the
-// function under test is what the ALLOW half exists to avoid.
+// valueReason is what unservedColumn answers for the value form. Seven rows
+// write it out. resolver.ResolvedEdgeUnion's is derived, by calling
+// edgeUnionReason — deliberately, and it is the weaker of the two: a change to
+// that function's wording moves both sides of the ALLOW assertion together, so
+// the row pins the ROUTING (that a value edge union reaches that arm rather
+// than the fall-through or a served "") and says nothing about the text.
+// Routing is what the ALLOW half is for here; the exact text is pinned by
+// wantEdgeUnionReason in age_test.go, which writes it out and which this file
+// cannot call, that file being `package age_test` while this one has to be
+// `package age` for the reason at the top.
 type inhabitant struct {
 	value       resolver.ResolvedType
 	pointer     resolver.ResolvedType
@@ -88,8 +95,20 @@ type inhabitant struct {
 //
 // The value forms are chosen to be SERVED wherever an arm serves anything, so
 // that the pointer and embedded rows record a flip from "" to a refusal rather
-// than a refusal either way. Six of the eight flip. resolver.ResolvedList and
-// resolver.ResolvedUnknown do not, and cannot: their arms return
+// than a refusal either way. That splits the eight three ways, not two.
+//
+// Five flip: resolver.ResolvedNode, resolver.ResolvedProperty,
+// resolver.ResolvedEdge, resolver.ResolvedScalar and resolver.ResolvedTemporal
+// are served in their value form, so their rows read "" against a refusal.
+//
+// One refuses either way, with a DIFFERENT refusal: resolver.ResolvedEdgeUnion.
+// Its arm names the candidates the schema declares and the fall-through's
+// `"projects " + ct.String()` does not, so its rows still tell the arm from the
+// fall-through — that difference is the ground
+// TestEdgeUnionRankingFlagNamesTheValueFormOnly rests its ruling on.
+//
+// Two refuse either way with an IDENTICAL refusal: resolver.ResolvedList and
+// resolver.ResolvedUnknown, and they cannot do otherwise — their arms return
 // `"projects " + ct.String()`, the same text the fall-through returns, so no
 // assertion on unservedColumn's result can tell those two arms from the
 // fall-through. Their rows carry the compile-time inhabitation and the
@@ -286,8 +305,10 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 			require.NotNilf(t, in.pointer, "%s: no pointer form enumerated", name)
 			// The fall-through's exact text. Asserting the text rather than
 			// only non-emptiness is what separates "reached the fall-through"
-			// from "reached some arm that also refuses": for six of the eight
-			// the arm answers "" instead.
+			// from "reached some arm that also refuses": for five of the eight
+			// the arm answers "" instead, and for a sixth —
+			// resolver.ResolvedEdgeUnion — it answers the candidate list, which
+			// `"projects " + String()` does not carry.
 			require.Equalf(t, "projects "+in.pointer.String(), unservedColumn(in.pointer),
 				"*%s must reach unservedColumn's fall-through; every marker and String on the variants takes a value receiver, and a pointer's method set contains its value methods, so the pointer satisfies resolver.ResolvedType while `case resolver.%s:` does not match it",
 				name, name)
