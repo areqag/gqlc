@@ -1,14 +1,14 @@
-package liverecipes
+package liverecipes_test
 
 import (
 	"go/token"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/areqag/gqlc/internal/liverecipes"
 )
 
 // repoRoot reaches the three artefacts this package reads from its own
@@ -23,7 +23,7 @@ const repoRoot = "../.."
 // would run it only in the jobs it audits, and a job that certifies its own
 // selection certifies nothing.
 func TestEveryLiveTestIsRunByARecipeThatNamesIt(t *testing.T) {
-	split, complaints, err := Read(repoRoot)
+	split, complaints, err := liverecipes.Read(repoRoot)
 	require.NoError(t, err)
 	require.Empty(t, complaints, "the artefacts this reads have to be the ones CI runs")
 	require.NotEmpty(t, split.Declared, "a live battery this reads as empty is one nothing below can be false of")
@@ -159,7 +159,7 @@ func TestDeclaredTestsReadsCodeAndNotCommentary(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := DeclaredTests(token.NewFileSet(), tc.path, []byte(tc.src))
+			got, err := liverecipes.DeclaredTests(token.NewFileSet(), tc.path, []byte(tc.src))
 			require.NoError(t, err)
 			require.Equal(t, tc.want, got)
 		})
@@ -167,7 +167,7 @@ func TestDeclaredTestsReadsCodeAndNotCommentary(t *testing.T) {
 }
 
 func TestDeclaredTestsRefusesSourceItCannotParse(t *testing.T) {
-	_, err := DeclaredTests(token.NewFileSet(), "live_x_test.go", []byte("//go:build codegen_live\n\npackage p\n\nfunc TestOne(t *testing.T) {\n"))
+	_, err := liverecipes.DeclaredTests(token.NewFileSet(), "live_x_test.go", []byte("//go:build codegen_live\n\npackage p\n\nfunc TestOne(t *testing.T) {\n"))
 	require.Error(t, err, "a file this reader cannot parse declares an unknown set, not an empty one")
 }
 
@@ -183,15 +183,18 @@ const (
 	ageRun = smoke + "|" + session + "|" + alt + "|" + defines
 )
 
-func inv(recipe string, fields ...string) Invocation {
-	return Invocation{Recipe: recipe, Fields: append([]string{"go", "test", "-tags", LiveBuildTag}, fields...)}
+func inv(recipe string, fields ...string) liverecipes.Invocation {
+	return liverecipes.Invocation{
+		Recipe: recipe,
+		Fields: append([]string{"go", "test", "-tags", liverecipes.LiveBuildTag}, fields...),
+	}
 }
 
-func neo4jHalf() Invocation {
+func neo4jHalf() liverecipes.Invocation {
 	return inv("test-codegen-live-neo4j", "-run", smoke, "-skip", smoke+"/apache-age", "./...")
 }
 
-func ageHalf() Invocation {
+func ageHalf() liverecipes.Invocation {
 	return inv("test-codegen-live-age", "-run", ageRun, "-skip", smoke+"/neo4j", "./...")
 }
 
@@ -208,18 +211,18 @@ func TestComplaintsNameTheTestAndNotACount(t *testing.T) {
 
 	for _, tc := range []struct {
 		name  string
-		split Split
+		split liverecipes.Split
 		want  []string
 	}{
 		{
 			name:  "the two halves CI runs today cover the battery between them",
-			split: Split{Declared: declared, CI: []Invocation{neo4jHalf(), ageHalf()}},
+			split: liverecipes.Split{Declared: declared, CI: []liverecipes.Invocation{neo4jHalf(), ageHalf()}},
 		},
 		{
 			name: "a live test neither half names is named",
-			split: Split{
+			split: liverecipes.Split{
 				Declared: append(slices.Clone(declared), "TestAGERefusesTemporalLiterals"),
-				CI:       []Invocation{neo4jHalf(), ageHalf()},
+				CI:       []liverecipes.Invocation{neo4jHalf(), ageHalf()},
 			},
 			want: []string{"TestAGERefusesTemporalLiterals"},
 		},
@@ -228,9 +231,9 @@ func TestComplaintsNameTheTestAndNotACount(t *testing.T) {
 			// the old spelling, so the half runs one test fewer and says so
 			// nowhere.
 			name: "an allowlist entry no test declares is named",
-			split: Split{
+			split: liverecipes.Split{
 				Declared: []string{alt, defines, smoke},
-				CI:       []Invocation{neo4jHalf(), ageHalf()},
+				CI:       []liverecipes.Invocation{neo4jHalf(), ageHalf()},
 			},
 			want: []string{session},
 		},
@@ -239,52 +242,52 @@ func TestComplaintsNameTheTestAndNotACount(t *testing.T) {
 			// silently claims every test under it. Reading it as a name list is
 			// what makes the new test a complaint rather than covered.
 			name: "a prefix allowlist does not claim the test that extends it",
-			split: Split{
+			split: liverecipes.Split{
 				Declared: []string{smoke, smoke + "Federation"},
-				CI:       []Invocation{inv("half", "-run", smoke, "./...")},
+				CI:       []liverecipes.Invocation{inv("half", "-run", smoke, "./...")},
 			},
 			want: []string{smoke + "Federation"},
 		},
 		{
 			name: "a -skip matching the test whole unruns it",
-			split: Split{
+			split: liverecipes.Split{
 				Declared: []string{smoke},
-				CI:       []Invocation{inv("half", "-run", smoke, "-skip", smoke, "./...")},
+				CI:       []liverecipes.Invocation{inv("half", "-run", smoke, "-skip", smoke, "./...")},
 			},
 			want: []string{smoke},
 		},
 		{
 			name: "a -skip narrowed to a subtest leaves the test running",
-			split: Split{
+			split: liverecipes.Split{
 				Declared: []string{smoke},
-				CI:       []Invocation{inv("half", "-run", smoke, "-skip", smoke+"/neo4j", "./...")},
+				CI:       []liverecipes.Invocation{inv("half", "-run", smoke, "-skip", smoke+"/neo4j", "./...")},
 			},
 		},
 		{
 			// go test honours the last -run; this reads both, so a name only
 			// the last one carries is a complaint and not a silence.
 			name: "a -run written twice claims only what both spellings name",
-			split: Split{
+			split: liverecipes.Split{
 				Declared: []string{smoke, session},
-				CI:       []Invocation{inv("half", "-run", smoke, "-run", smoke+"|"+session, "./...")},
+				CI:       []liverecipes.Invocation{inv("half", "-run", smoke, "-run", smoke+"|"+session, "./...")},
 			},
 			want: []string{session},
 		},
 		{
 			name: "a recipe no workflow reaches must run the whole battery",
-			split: Split{
+			split: liverecipes.Split{
 				Declared: []string{smoke, session},
-				CI:       []Invocation{inv("half", "-run", smoke+"|"+session, "./...")},
-				Local:    []Invocation{inv("whole", "-run", smoke, "./...")},
+				CI:       []liverecipes.Invocation{inv("half", "-run", smoke+"|"+session, "./...")},
+				Local:    []liverecipes.Invocation{inv("whole", "-run", smoke, "./...")},
 			},
 			want: []string{session},
 		},
 		{
 			name: "a recipe no workflow reaches passes by carrying no -run",
-			split: Split{
+			split: liverecipes.Split{
 				Declared: []string{smoke, session},
-				CI:       []Invocation{inv("half", "-run", smoke+"|"+session, "./...")},
-				Local:    []Invocation{inv("whole", "./...")},
+				CI:       []liverecipes.Invocation{inv("half", "-run", smoke+"|"+session, "./...")},
+				Local:    []liverecipes.Invocation{inv("whole", "./...")},
 			},
 		},
 		{
@@ -293,12 +296,12 @@ func TestComplaintsNameTheTestAndNotACount(t *testing.T) {
 			// iterating nothing — the defect this package exists to refuse,
 			// one level up.
 			name:  "no declared test is a comparison against nothing",
-			split: Split{CI: []Invocation{inv("half", "./...")}},
+			split: liverecipes.Split{CI: []liverecipes.Invocation{inv("half", "./...")}},
 			want:  []string{"no top-level live test was found"},
 		},
 		{
 			name:  "no CI invocation is a battery nothing is required to run",
-			split: Split{Declared: []string{smoke}},
+			split: liverecipes.Split{Declared: []string{smoke}},
 			want:  []string{"no workflow reaches a live `go test`", smoke},
 		},
 	} {
@@ -310,90 +313,6 @@ func TestComplaintsNameTheTestAndNotACount(t *testing.T) {
 					slices.ContainsFunc(complaints, func(c string) bool { return strings.Contains(c, want) }),
 					"no complaint names %s: %v", want, complaints)
 			}
-		})
-	}
-}
-
-// TestLiveInvocationsReadsWhatTheShellWouldRun covers the step before the
-// rules: a command line this misses is a half the rules never see, and a
-// command line it invents is a half they see twice.
-func TestLiveInvocationsReadsWhatTheShellWouldRun(t *testing.T) {
-	for _, tc := range []struct {
-		name           string
-		src            string
-		wantFields     [][]string
-		wantComplaints int
-	}{
-		{
-			name:       "a live recipe body is one invocation",
-			src:        "r:\n    cd test/data/codegen && go test -count=1 -tags codegen_live ./...\n",
-			wantFields: [][]string{{"go", "test", "-count=1", "-tags", "codegen_live", "./..."}},
-		},
-		{
-			name: "a command line with no -tags builds no live test",
-			src:  "r:\n    go test -count=1 ./...\n",
-		},
-		{
-			name: "a -tags without the live tag builds no live test",
-			src:  "r:\n    go test -tags integration ./...\n",
-		},
-		{
-			name:       "the live tag beside another is still the live build",
-			src:        "r:\n    go test -tags integration,codegen_live ./...\n",
-			wantFields: [][]string{{"go", "test", "-tags", "integration,codegen_live", "./..."}},
-		},
-		{
-			// go test honours the last -tags, so a second one without the tag
-			// leaves the live files uncompiled.
-			name: "a second -tags dropping the live tag is not the live build",
-			src:  "r:\n    go test -tags codegen_live -tags integration ./...\n",
-		},
-		{
-			name: "a go test the line only prints is not one it runs",
-			src:  "r:\n    echo go test -tags codegen_live ./...\n",
-		},
-		{
-			name: "a commented-out invocation is not one",
-			src:  "r:\n    # go test -tags codegen_live ./...\n",
-		},
-		{
-			// The `&&` puts the commented text in command position, so what
-			// keeps it out is the comment cut and not the position check.
-			name: "a comment spelling a command after an operator is still a comment",
-			src:  "r:\n    # disabled && go test -tags codegen_live ./...\n",
-		},
-		{
-			// The direction that matters: a trailing comment's words read as
-			// flags would narrow an invocation the shell does not narrow.
-			name:       "a trailing comment's words are not the command's arguments",
-			src:        "r:\n    go test -tags codegen_live ./...  # -run TestLiveSmoke\n",
-			wantFields: [][]string{{"go", "test", "-tags", "codegen_live", "./..."}},
-		},
-		{
-			name:           "a line whose quoting never closed is a complaint",
-			src:            "r:\n    go test -tags codegen_live -run 'TestLiveSmoke ./...\n",
-			wantComplaints: 1,
-		},
-		{
-			// Nothing here builds the live tag, so the unterminated line is
-			// still read: what the open quote swallowed can be the -tags.
-			name:           "an unterminated line is a complaint before it is classified",
-			src:            "r:\n    go test -run 'TestLiveSmoke ./...\n",
-			wantComplaints: 1,
-		},
-		{
-			name: "an unterminated line with no go test on it is not this reader's",
-			src:  "r:\n    echo 'unclosed\n",
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			found, complaints := liveInvocations(tc.src)
-			require.Len(t, complaints, tc.wantComplaints)
-			var fields [][]string
-			for _, one := range found {
-				fields = append(fields, one.Fields)
-			}
-			require.Equal(t, tc.wantFields, fields)
 		})
 	}
 }
@@ -411,89 +330,8 @@ jobs:
           just --list
           just -q test-codegen-live-age
 `)
-	names, err := WorkflowRecipes(src)
+	names, err := liverecipes.WorkflowRecipes(src)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"test-codegen-live-neo4j", "test-codegen-live-age"}, names,
 		"a recipe reached from any job is reached by CI, and a flag is not a recipe name")
-}
-
-// TestReadDeclaredComplainsWhenTwoFilesDeclareTheName holds the shape a
-// last-one-wins map would swallow: `-run TestLiveSmoke` would select both
-// bodies, and a rule satisfied by one of them says nothing about the other.
-func TestReadDeclaredComplainsWhenTwoFilesDeclareTheName(t *testing.T) {
-	dir := t.TempDir()
-	const src = "//go:build codegen_live\n\npackage p\n\nimport \"testing\"\n\nfunc TestLiveSmoke(t *testing.T) {}\n"
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "live_a_test.go"), []byte(src), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "live_b_test.go"), []byte(src), 0o600))
-
-	names, complaints, err := readDeclared(dir)
-	require.NoError(t, err)
-	require.Equal(t, []string{"TestLiveSmoke"}, names)
-	require.Len(t, complaints, 1)
-	require.Contains(t, complaints[0], "TestLiveSmoke")
-}
-
-// TestReadWorkflowRecipesComplainsWhenItReadsNoWorkflow is the CI half's
-// vacuity guard at its source: a directory that yields no file makes every
-// live recipe Local, where the rule is different rather than absent, and the
-// disagreement it was pointed at goes unstated.
-func TestReadWorkflowRecipesComplainsWhenItReadsNoWorkflow(t *testing.T) {
-	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "notes.md"), []byte("just test-codegen-live-age\n"), 0o600))
-
-	names, complaints, err := readWorkflowRecipes(dir)
-	require.NoError(t, err)
-	require.Empty(t, names)
-	require.Len(t, complaints, 1)
-	require.Contains(t, complaints[0], dir)
-}
-
-// TestReadAssemblesTheSplitFromDisk drives the three readers together over a
-// tree written here, because which half an invocation lands in is decided by
-// the join between the workflow's recipe names and the justfile's headers, and
-// neither reader alone can be wrong about it.
-func TestReadAssemblesTheSplitFromDisk(t *testing.T) {
-	justfile := "test-live-half:\n" +
-		"    cd test/data/codegen && go test -tags codegen_live -run TestLiveSmoke ./...\n" +
-		"\n" +
-		"test-live-whole:\n" +
-		"    cd test/data/codegen && go test -count=1 -tags codegen_live ./...\n" +
-		"\n" +
-		"test-unit:\n" +
-		"    go test ./...\n"
-	workflow := "jobs:\n  live:\n    steps:\n      - run: just test-live-half\n      - run: just test-live-absent\n"
-	source := "//go:build codegen_live\n\npackage p\n\nimport \"testing\"\n\nfunc TestLiveSmoke(t *testing.T) {}\n"
-
-	root := t.TempDir()
-	for path, content := range map[string]string{
-		justfilePath:                                 justfile,
-		filepath.Join(workflowDir, "live.yml"):       workflow,
-		filepath.Join(liveSourceDir, "live_test.go"): source,
-	} {
-		full := filepath.Join(root, path)
-		require.NoError(t, os.MkdirAll(filepath.Dir(full), 0o750))
-		require.NoError(t, os.WriteFile(full, []byte(content), 0o600))
-	}
-
-	split, complaints, err := Read(root)
-	require.NoError(t, err)
-	require.Empty(t, complaints,
-		"a recipe the workflow names and the justfile does not falls through to Local rather than complaining")
-	require.Equal(t, []string{"TestLiveSmoke"}, split.Declared,
-		"the unit recipe builds no live tag, so its command line is in neither half")
-	require.Len(t, split.CI, 1)
-	require.Equal(t, "test-live-half", split.CI[0].Recipe)
-	require.Len(t, split.Local, 1)
-	require.Equal(t, "test-live-whole", split.Local[0].Recipe)
-	require.Empty(t, split.Complaints())
-}
-
-// TestSubtractLeavesLocalRecipesOnlyCIDoesNotReach keeps two recipes running
-// byte-identical commands two invocations: collapsing them would move a live
-// recipe no workflow reaches into the half that is not checked for it.
-func TestSubtractLeavesLocalRecipesOnlyCIDoesNotReach(t *testing.T) {
-	one := inv("a", "./...")
-	two := inv("b", "./...")
-	require.Len(t, subtract([]Invocation{one, two}, []Invocation{one}), 1)
-	require.Empty(t, subtract([]Invocation{one, two}, []Invocation{one, two}))
 }
