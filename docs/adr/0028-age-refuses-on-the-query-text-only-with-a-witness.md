@@ -69,8 +69,8 @@ actually refuses); that `find` reads none of the served texts (so the gate is
 bounded, which is the half that matters given the asymmetry above); that the
 named witness is declared in a `live_*_test.go` file; that every probe text,
 every recorded answer and every served text appears verbatim in **that witness's
-own body**; and that every AGE live recipe in the justfile runs it, with
-`-count=1`.
+own body**; and that every AGE live recipe in the justfile runs it — selected by
+that recipe's `-run` and matched by none of its `-skip` — with `-count=1`.
 
 "In the body" means in the body's **code**. The reader parses each live file and
 renders every test's body back from the tree with `format.Node`, so a comment is
@@ -84,6 +84,50 @@ control that real code IS carried) and `TestACommentedProbeReddensTheSweep` on
 the reader composed into the sweep, which is the only place the property is
 visible — `witnessGaps` takes a bodies map, and a map value carrying a comment is
 just a string carrying a comment.
+
+"Runs it" means the recipe's command line **selects** it. That check was
+`strings.Contains` over the recipe body until review mutations L18, L19 and L20,
+which is the same defect one artefact out: both AGE recipes already carry a
+`-skip`, so a witness name in the body is as likely to be there to remove the
+test as to select it, and a name in a comment is not on the command line at all.
+The three surviving shapes were: appending the witness name to the `-skip` the
+AGE recipe already has, one token on one line; moving the name from `-run` to
+`-skip`; and deleting it from both recipes' `-run` while leaving it in a justfile
+comment — M15's move on the artefact the `format.Node` fix does not reach.
+`recipeBodies` now strips shell comments as it reads a recipe body, and
+`recipeRuns` parses the `-run` and `-skip` values as separate patterns.
+
+Selection is a **regexp** question and not string equality. `go test` splits a
+pattern on top-level `|` into alternatives first and each alternative on `/` into
+elements, then matches element *i* against the *i*'th part of a test's name
+unanchored (`testing/match.go`: `splitRegexp`, `alternationMatch.matches`). So
+`-run 'TestAGERefuses'` does reach the witness, and appending `|W` to
+`-skip 'TestLiveSmoke/neo4j'` drops `W` outright — the appended text is a second
+alternative, not a second element. Measured against go1.26.5 rather than read off
+the flag documentation, because the two readings differ and the wrong one makes
+L18 look harmless.
+
+Two approximations, both erring toward complaining rather than toward silence.
+Every `-run` on a command line must select the witness, where `go test` honours
+only the last. And any `-skip` alternative whose first element matches the
+witness counts as skipping it, where `go test` drops only a subtest when that
+alternative carries further elements. The second is the one that costs
+something — a deliberate subtest carve-out is reported as a witness that does not
+run — and it is chosen because both AGE witnesses run their probe rows as
+subtests, so `-skip 'TestAGERefusesTheFunctionsItDoesNotDefine/toTimestamp'`
+removes exactly one measurement while the top-level still passes. The pattern
+split is also naive where `go test`'s is bracket-aware; a pattern whose pieces do
+not compile is read as neither selected nor safely skipped, which is a complaint
+and not silence. `TestRecipeRunsOnlyWhatTheCommandLineSelects` drives the reader
+and the selector composed, over justfile source the test writes, with a row for
+each of L18, L19 and L20, for both directions of the unanchored match, and for
+the subtest carve-out.
+
+**What the sweep does not check: that the recipe builds the live tag.** It reads
+`-run`, `-skip` and `-count=1` and says nothing about `-tags codegen_live`.
+Dropping that flag from a recipe compiles none of the live battery, so no witness
+runs and every complaint here stays silent — the same class as L18, one flag
+further along, and left open rather than closed.
 
 **What the sweep does not check: that the answer is asserted.** It requires the
 recorded answer to appear in the witness's body, not to be the subject of an
