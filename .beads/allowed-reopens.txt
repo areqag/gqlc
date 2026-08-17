@@ -1,0 +1,39 @@
+# Beads whose close was never earned, exempted from bdguard's reopened-issue
+# check. One entry per line, `<bead-id> <closing-sha>`. A line carrying only an
+# id is rejected: that is allowed-drops.txt's shape, and accepting it here would
+# make this a bare-id allowlist over the one arm bdguard exists to hold.
+#
+# An entry is granted only when all of these hold, and each names the reason it
+# is here:
+#
+#   1. The record AT BASE for that id has a close_reason citing <closing-sha> as
+#      a whole token. Base is read with `git show <ref>:...`, so the PR's own
+#      tree does not restate it — the declaration has to quote a fact already
+#      committed on the base ref. The pairing also
+#      expires the entry: a later close citing a different sha does not inherit
+#      it.
+#   2. The record AT HEAD has an updated_at strictly later than base's. This is
+#      the separator between the two shapes that look alike in the status
+#      columns — a stale export overwriting a newer close (the defect bdguard
+#      exists for) carries a record copied before that close, so its updated_at
+#      sits at or behind base's.
+#   3. No ref in this checkout contains <closing-sha>. This one only ever
+#      refuses. gqlc squash-merges and deletes the branch, so an earned close's
+#      cited sha is orphaned like an unearned one's, and the CI checkout is
+#      depth-1, where objects outside the fetched pack are absent whatever their
+#      history. A silent probe is therefore read as no evidence rather than as
+#      evidence of absence.
+#
+# What condition 2 does NOT do: head's updated_at is a field in the file the PR
+# is editing, so it tells a record copied forward from one written after the
+# close, but it does not resist a hand-written timestamp. An author who bumps
+# the field and adds the matching line here is granted. What stands behind the
+# exemption is that both edits land in the diff a reviewer already reads — the
+# same standing allowed-drops.txt has. See bd gqlc-ukgs.
+#
+# An entry goes stale once the correction lands on master (the bead is then
+# not closed at base, so the arm no longer fires). Stale entries are ignored,
+# not an error — see internal/tools/bdguard/main.go.
+#
+# Reaches only closes whose close_reason cites a sha: bd gqlc-j068.
+# Condition 3 is inert under CI's depth-1 checkout: bd gqlc-g3g6.
