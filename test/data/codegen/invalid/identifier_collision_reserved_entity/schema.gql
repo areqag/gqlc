@@ -1,0 +1,5 @@
+CREATE PROPERTY GRAPH TYPE ReservedIdentEntity AS {
+    (:Queries {
+        name :: STRING NOT NULL
+    })
+}
