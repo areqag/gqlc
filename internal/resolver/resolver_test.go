@@ -1369,17 +1369,23 @@ func (s *ResolverSuite) TestNarrowedEndsThatDisagreeKeepTheWideAnswer() {
 	s.Require().ErrorIs(err, ErrUnknownProperty)
 }
 
-// TestASingularFarEndNarrowsNothingRatherThanEverything pins narrowedEndpointKeys'
-// absent-entry arm.
+// TestAnUnnarrowedFarEndKeepsItsKeys pins narrowedEndpointKeys' two
+// leave-it-alone arms: a far end that is not a variable, and a variable
+// endpointNarrowing gave no entry.
 //
-// endpointNarrowing gives an entry only to PLURAL bindings, so a far end already
-// resolved to one type has none. Reading that absence as "narrowed to nothing"
-// rather than "not narrowed" empties the whole intersection, and because
-// candidateTypes then falls back to the wide answer the mistake is SILENT: the
-// query refuses for ambiguity exactly as it did before the lane existed. The
-// shape it needs is a bare binding touching a narrowed plural far end AND a
-// singular one at once, which nothing else in the corpus has.
-func (s *ResolverSuite) TestASingularFarEndNarrowsNothingRatherThanEverything() {
+// Both are the same claim — an end nothing narrowed contributes its whole
+// satisfying set, not the empty set — and getting either wrong empties the
+// narrowed intersection. That mistake is SILENT, because candidateTypes then
+// falls back to the wide answer and the query refuses for ambiguity exactly as
+// it did before the lane existed: no sentinel moves, no message changes, and
+// the whole suite stays green. Both arms SURVIVED mutation until this test.
+//
+// The shape needed is a bare binding touching a narrowed plural far end AND an
+// unnarrowed end at once; nothing else in the corpus has it. MEMBER_OF supplies
+// the unnarrowed end — declared from both author types to the one Guild type,
+// so it narrows nothing itself, and Guild is singular so `g` never enters the
+// plural-candidate table.
+func (s *ResolverSuite) TestAnUnnarrowedFarEndKeepsItsKeys() {
 	sch := s.loadSchema("invalid", "narrowed_ends_disagree.gql")
 	resolve := func(src string) ([]Column, error) {
 		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
@@ -1387,20 +1393,45 @@ func (s *ResolverSuite) TestASingularFarEndNarrowsNothingRatherThanEverything() 
 		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
 		return vq.Columns, err
 	}
+	const wroteHalf = "MATCH (p)-[w:WROTE]->(b:Book)\nMATCH (b)-[s:SHELVED_IN]->(sh:Shelf)\n"
 
-	// MEMBER_OF is declared from both author types, so on its own it narrows
-	// nothing and `p` stays plural — which is what makes the pair the test and
-	// not just the WROTE half over again.
-	_, err := resolve("MATCH (p)-[m:MEMBER_OF]->(g:Guild)\nRETURN p.authorOnly")
-	s.Require().ErrorIs(err, ErrAmbiguousBinding)
+	tests := []struct {
+		name string
+		// alone must refuse: the MEMBER_OF hop narrows nothing by itself, which
+		// is what makes each pair a test of the intersection rather than the
+		// WROTE half over again.
+		alone string
+		// pair is alone prefixed by the WROTE half, whose narrowed reading is
+		// {Author}. Intersected with MEMBER_OF's unchanged {Author,
+		// Author&Editor} that is {Author}; read as empty it becomes {}, and the
+		// fallback turns it back into `alone`'s refusal.
+		pair string
+	}{
+		{
+			name:  "a variable far end with no narrowing entry",
+			alone: "MATCH (p)-[m:MEMBER_OF]->(g:Guild)\nRETURN p.authorOnly",
+			pair:  wroteHalf + "MATCH (p)-[m:MEMBER_OF]->(g:Guild)\nRETURN p.authorOnly",
+		},
+		{
+			// Not a VarEndpoint at all, so it never reaches the narrowing map.
+			// The two arms are separate returns and a fix applied to one leaves
+			// the other; a fully anonymous `()` cannot stand in, because
+			// endpoint inference refuses it before Phase B is reached.
+			name:  "an inline far end that is not a variable",
+			alone: "MATCH (p)-[m:MEMBER_OF]->(:Guild)\nRETURN p.authorOnly",
+			pair:  wroteHalf + "MATCH (p)-[m:MEMBER_OF]->(:Guild)\nRETURN p.authorOnly",
+		},
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			_, err := resolve(tt.alone)
+			s.Require().ErrorIs(err, ErrAmbiguousBinding, "the MEMBER_OF hop must narrow nothing on its own")
 
-	// The same MEMBER_OF hop alongside the WROTE half. The narrowed reading is
-	// {Author} from WROTE intersected with MEMBER_OF's unchanged {Author,
-	// Author&Editor}; treating g's absent entry as empty makes that {} and the
-	// fallback turns it back into the plural refusal above.
-	got, err := resolve("MATCH (p)-[w:WROTE]->(b:Book)\nMATCH (b)-[s:SHELVED_IN]->(sh:Shelf)\nMATCH (p)-[m:MEMBER_OF]->(g:Guild)\nRETURN p.authorOnly")
-	s.Require().NoError(err, "a singular far end must not empty the narrowed intersection")
-	s.Require().Equal([]Column{{Name: "p.authorOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}}, got)
+			got, err := resolve(tt.pair)
+			s.Require().NoError(err, "an unnarrowed far end must not empty the narrowed intersection")
+			s.Require().Equal([]Column{{Name: "p.authorOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}}, got)
+		})
+	}
 }
 
 // TestAnEmptyHopRangeIsNotAWitness pins the EQUALITY in singleHopPattern's
