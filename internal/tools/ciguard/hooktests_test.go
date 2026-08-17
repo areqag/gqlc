@@ -28,8 +28,10 @@ const (
 	hookSuiteSuffix = "-test.sh"
 )
 
-// hookSuites is every file in .githooks/tests/ — this repository's hook test
-// suites, under the definition the walk below enforces rather than assumes.
+// hookSuites is every non-dotfile in .githooks/tests/ — this repository's hook
+// test suites, under the definition the walk below enforces rather than
+// assumes. The dotfile skip at the end of this comment is why that says
+// non-dotfile rather than file.
 //
 // The classifier is the directory, not a glob over it. A glob is a classifier
 // that silently skips what it does not recognise: against `*-test.sh`, the
@@ -42,10 +44,14 @@ const (
 // that is not spelled hookSuiteSuffix is refused rather than skipped. That is
 // the fail-closed half. A guard may only assume a convention it also enforces.
 //
-// The walk over .githooks/ itself is the other half: it refuses a suite-looking
-// file parked beside the hooks it tests, and it pins the tree's one
+// The walk over .githooks/ itself is the other half: it refuses a file parked
+// beside the hooks it tests whose name carries `test` or ends in `.bats` —
+// between them the four spellings above — and it pins the tree's one
 // subdirectory by name, so a suite cannot hide in a directory this walk does
-// not enter.
+// not enter. That is a rule over names, not a decision procedure: a suite
+// spelled outside both, `hooks-spec.sh`, is accepted there, the same hole the
+// dotfile skip below has. `.bats` is in the rule because `hooks.bats` carries
+// no `test` and the substring alone let it through.
 //
 // The limit, stated rather than left to be found: a hook test suite is a file
 // in .githooks/tests/, and that is a definition this walk enforces, not a fact
@@ -73,7 +79,8 @@ func hookSuites(t *testing.T) []string {
 					"Suites live in %s.", hooksDir, e.Name(), hookTestsRecipe, hookTestsDir)
 			continue
 		}
-		require.NotContainsf(t, strings.ToLower(e.Name()), "test",
+		lower := strings.ToLower(e.Name())
+		require.Falsef(t, strings.Contains(lower, "test") || strings.HasSuffix(lower, ".bats"),
 			"%s/%s looks like a test suite but does not live in %s, and %q reaches no "+
 				"suite outside it: the recipe names its files by path. An unwired suite "+
 				"is an absent gate (bd gqlc-l45j).",
@@ -157,8 +164,11 @@ func TestEveryHookTestSuiteIsNamedByTestHooks(t *testing.T) {
 		}
 		fields := strings.Fields(line)
 		require.Lenf(t, fields, 2, "%s runs %q, which is not a bare `bash <suite>`. "+
-			"Anything else — a prefix, a redirection, a `||` — can decide the line's "+
-			"exit status independently of what the suite found.", hookTestsRecipe, line)
+			"The rule is the shape, not a reading of the extra fields: just's `-` "+
+			"prefix discards the line's exit status, a `|| true` replaces it, and a "+
+			"redirection sends what the suite reported somewhere nobody looks. "+
+			"Refusing the shape costs a harmless third field its place here and is "+
+			"cheaper than telling one from the rest.", hookTestsRecipe, line)
 		require.Equalf(t, "bash", fields[0], "%s runs %q. `%s` is not `bash`; just's `-` "+
 			"prefix in particular ignores the line's exit status, so the suite runs on "+
 			"every PR and reports failures nothing reads.",
@@ -356,13 +366,12 @@ func ciJustInvocations(t *testing.T) map[string][]string {
 
 // ...and the recipe has to be reached by something CI runs.
 //
-// One line in the tree invokes test-hooks: the dependency list of `test:` in
-// the justfile. The other references are prose that runs nothing — a `# Run
-// via: just test-hooks` header in six of the suites, and a pointer in
-// .githooks/claude-pre-bash — so deleting that single token retires all of its
-// suites at once, leaves every assertion above green (they are about what the
-// recipe contains, not about whether anyone calls it), and produces no CI
-// output to notice. Those headers would still say the suites are run.
+// Deleting `test-hooks` from the dependency list of `test:` in the justfile
+// retires every suite the recipe names at once — from the CI test job and from
+// .githooks/pre-push, which both run `just test` — while leaving every
+// assertion above green: they are about what the recipe contains, not about
+// whether anyone calls it. No CI output goes missing, and the suites' own
+// `# Run via: just test-hooks` headers would still say they are run.
 //
 // Derived through the dependency graph rather than asserting `test: ... test-hooks`
 // directly, because the property is that the recipe is reachable from a required

@@ -677,9 +677,12 @@ fmt-check: ensure-golangci
 #
 # Suites live in .githooks/tests/ and are named <subject>-test.sh. Both halves
 # are enforced by internal/tools/ciguard, which reads that directory rather than
-# globbing it: a file in there under any other name is refused, and every file
-# in there has to be named below. A suite written anywhere else is one nothing
-# runs and nothing reports (bd gqlc-l45j).
+# globbing it: a non-dotfile in there under any other name is refused, and every
+# non-dotfile in there has to be named below. Dotfiles are skipped — a
+# deliberate hole, so that an editor swap file beside a suite does not redden
+# the build; the note on hookSuites in internal/tools/ciguard/hooktests_test.go
+# is where that is argued. A suite written anywhere else is one nothing runs and
+# nothing reports (bd gqlc-l45j).
 #
 # Plain recipe, not a shebang one, deliberately: just gives each line's exit
 # status to the recipe here, where a shebang recipe hands the whole body to one

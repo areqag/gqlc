@@ -88,19 +88,36 @@ func spell(n yaml.Node) string {
 	return n.Tag
 }
 
-// shellCode is run with shell comments and blank lines removed.
+// uncommented is src with every line truncated at its first `#` and blank lines
+// dropped: the text a scan for a live command may look in.
 //
 // An assertion about what a step runs must not be satisfiable by a line that is
 // commented out. Commenting out the version read and restating the pin as a
 // literal (`# just --evaluate golangci_version` above `echo
 // "version=v2.12.2"`) is the precise defect reading the version off the
 // justfile exists to prevent, and it satisfies a Contains over the raw source.
+// The same move retires a recipe rather than a pin, and both spellings were
+// measured on this branch: with the scans reading raw text, `# just test` in
+// the ci.yml test step and `test: check-hooks # test-hooks` in the justfile
+// each left this package green while taking the hook suites out of CI.
 //
-// A `#` inside a quoted string is truncated here too. That direction is safe:
-// dropping text can only make the assertions below fail, never pass.
-func shellCode(run string) string {
+// A `#` inside a quoted string is not a comment to bash, and this truncates
+// there too. For a substring scan that is the direction that refuses: text
+// dropped here is text the scan does not find, and a scan that finds too little
+// fails the controls its callers carry — pinStep leaves the cache-key test
+// without an id, and justInvocations and recipeDeps drop a recipe their callers
+// name individually.
+//
+// For an end-anchored match it is the wrong direction: dropping trailing text
+// turns a non-match into a match. `version=$(just --evaluate
+// golangci_version)"#x" || true` reads as an assignment-only command once
+// truncated, and TestGolangciVersionReadIsAnAssignmentUnderErrexit passes on it
+// (measured). What refuses that line is
+// TestGolangciVersionReadFailsTheStepInsteadOfEmptyingTheKey, which runs the
+// block instead of reading it.
+func uncommented(src string) string {
 	var kept []string
-	for _, line := range strings.Split(run, "\n") {
+	for _, line := range strings.Split(src, "\n") {
 		if i := strings.IndexByte(line, '#'); i >= 0 {
 			line = line[:i]
 		}
@@ -179,12 +196,12 @@ func TestGolangciBinaryCacheTracksTheJustfileInstallPath(t *testing.T) {
 }
 
 // pinStep returns the step that evaluates the justfile's version variable.
-// Matched over shellCode rather than the raw `run`, so a commented-out
+// Matched over uncommented rather than the raw `run`, so a commented-out
 // evaluation reads as absent.
 func pinStep(t *testing.T) actionStep {
 	t.Helper()
 	for _, s := range actionSteps(t) {
-		if strings.Contains(shellCode(s.Run), "just --evaluate "+versionVar) {
+		if strings.Contains(uncommented(s.Run), "just --evaluate "+versionVar) {
 			return s
 		}
 	}
@@ -356,8 +373,13 @@ func TestGolangciVersionReadFailsTheStepInsteadOfEmptyingTheKey(t *testing.T) {
 //
 //	echo "v=$(just --evaluate absent)" >> f      # rc 0, f == "v="
 //	v="$(just --evaluate absent)"; echo "$v" >>f # rc 1, f untouched
+//
+// The first assertion is end-anchored, which is the one direction uncommented
+// is unsafe in: a `#` inside a quoted string is truncated, so text after it
+// stops being seen. See the note there for the line that gets past this, and
+// for the behavioural test that refuses it.
 func TestGolangciVersionReadIsAnAssignmentUnderErrexit(t *testing.T) {
-	code := shellCode(pinStep(t).Run)
+	code := uncommented(pinStep(t).Run)
 
 	require.Regexpf(t, `(?m)^\s*[A-Za-z_][A-Za-z0-9_]*="?\$\(just --evaluate `+versionVar+`\)"?\s*$`,
 		code,
@@ -432,11 +454,17 @@ func TestGolangciActionStepsCannotBeSwitchedOffOrSwallowed(t *testing.T) {
 // A recipe header is a name, optional parameters, `:`, then the dependency
 // list. Recipe bodies are indented, so an unindented `name...:` is the only
 // thing this can match.
+//
+// Read through uncommented, because just takes a `#` on a header line as a
+// comment: `test: check-hooks # test-hooks` dumps as `test: check-hooks` and
+// runs check-hooks only (measured with `just --dump`). Off the raw line the
+// commented-out name reads as an edge, which is how the reachability check
+// below passed over a `test-hooks` that `just test` no longer ran.
 func recipeDeps(t *testing.T) map[string][]string {
 	t.Helper()
 	header := regexp.MustCompile(`(?m)^([a-zA-Z0-9_-]+)([^:\n]*):([^=\n].*|)$`)
 	deps := map[string][]string{}
-	for _, m := range header.FindAllStringSubmatch(readRepoFile(t, justfile), -1) {
+	for _, m := range header.FindAllStringSubmatch(uncommented(readRepoFile(t, justfile)), -1) {
 		deps[m[1]] = strings.Fields(m[3])
 	}
 	return deps
@@ -495,10 +523,18 @@ func linterRecipes(t *testing.T) map[string]bool {
 }
 
 // justInvocations returns the recipe names a step's shell runs through `just`.
+//
+// Read through uncommented, so a commented-out invocation reads as absent
+// rather than as present: `run: |` with `# just test` above `echo skipped`
+// takes the hook suites out of CI, and this scan reported the step healthy
+// (measured — ci.yml md5 83c139ca to f8a82f6e, actionlint rc 0, package green).
+// The strip is here rather than at the two call sites so that a third caller
+// does not inherit the raw scan; that is how this became the third site in the
+// package with the same defect.
 func justInvocations(run string) []string {
 	var out []string
 	re := regexp.MustCompile(`(?m)\bjust\s+([a-zA-Z0-9_-]+)`)
-	for _, m := range re.FindAllStringSubmatch(run, -1) {
+	for _, m := range re.FindAllStringSubmatch(uncommented(run), -1) {
 		out = append(out, m[1])
 	}
 	return out
