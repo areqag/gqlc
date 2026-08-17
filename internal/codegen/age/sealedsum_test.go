@@ -79,8 +79,10 @@ type shadowEdgeUnion struct{ resolver.ResolvedEdgeUnion }
 // expression: see the row that reads shadowListText.
 type shadowList struct{ resolver.ResolvedList }
 
-// shadowListText is deliberately outside the list arm's whole range, which is
-// the two constants resolver.ResolvedList and resolver.ResolvedUnknown return.
+// shadowListText is deliberately something the list arm does not return: that
+// arm answers `"projects " + ct.String()` for resolver.ResolvedList and
+// resolver.ResolvedUnknown, and the row reading this const asserts against
+// both of those Stringers rather than against a copy of their text.
 const shadowListText = "CALLER-CHOSE-THIS"
 
 func (shadowList) String() string { return shadowListText }
@@ -161,14 +163,15 @@ type inhabitant struct {
 //
 // Two refuse either way, and for the values THIS table hands them the refusal
 // is character-identical: resolver.ResolvedList and resolver.ResolvedUnknown.
-// Their arms return `"projects " + ct.String()`, the expression the
-// fall-through also returns, and both Stringers are constants — "list" and
-// "unknown" (internal/resolver/validated.go). So for these two rows the text
-// does not say which path produced it; that is a property of these forms, not
-// of the arms in general, and a caller declaring its own String on an embedded
-// list is told apart from the arm by exactly such an assertion. Their rows
-// carry the compile-time inhabitation and the refusal; which code path
-// produced it is what the arms row covers instead.
+// Their arm returns `"projects " + ct.String()`, the expression the
+// fall-through also returns, and the two Stringers it can reach return string
+// literals (internal/resolver/validated.go:358 and :381). So on these two rows
+// the text does not say which path produced it. That is a fact about these two
+// forms and not about the arm: a_shadowing_list_embedder_is_outside_the_list_arm's_range
+// hands the same arm's variant to the fall-through under a caller's own String
+// and asserts a text the arm cannot return. Their rows here carry the
+// compile-time inhabitation and the refusal; which code path produced it is
+// what the arms row covers instead.
 var inhabitants = map[string]inhabitant{
 	"ResolvedNode": {
 		value:    resolver.ResolvedNode{},
@@ -477,10 +480,10 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 	// fact about that row's form, and this row is why it does not generalise
 	// into "the arm and the fall-through are indistinguishable": the arm
 	// matches two concrete types, resolver.ResolvedList and
-	// resolver.ResolvedUnknown, whose Stringers are the constants "list" and
-	// "unknown" (internal/resolver/validated.go), so everything the arm can
-	// return is in {"projects list", "projects unknown"}. An assertion outside
-	// that set tells the fall-through from the arm, and here is one.
+	// resolver.ResolvedUnknown, so what it returns is "projects " and then one
+	// of their two Stringers. The assertions below are written against those
+	// two Stringers, so they say "outside what that arm returns" whatever
+	// internal/resolver makes them say, and they hold.
 	t.Run("a shadowing list embedder is outside the list arm's range", func(t *testing.T) {
 		require.Equal(t, "projects "+shadowListText, unservedColumn(shadowList{}),
 			"struct{ resolver.ResolvedList } declaring its own String reaches the fall-through, which returns that String")
@@ -511,14 +514,16 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 		}
 	})
 
-	// Every row above that asserts `"projects " + form.String()` reads a
-	// PROMOTED String, and says so; none of them notices if the embedder
-	// declares one instead, because both sides of the assertion move together.
-	// Making embedScalar, embedEdge and embedList each declare their own left
-	// the whole package green — 0 failing subtests — so the file's "declares no
-	// method of its own" was prose no gate held. This row holds it, off the
-	// source rather than off behaviour, which is the only place the absence of
-	// a declaration is visible.
+	// The pointer and embedded rows assert `"projects " + form.String()`,
+	// whose two sides move together when the embedder declares its own String:
+	// making embedScalar, embedEdge and embedList each declare one left the
+	// whole package green, 0 failing subtests. So the file's "declares no
+	// method of its own" was prose nothing held. This row holds it off the
+	// source, where a declaration's absence shows even when its text would not
+	// — a shadow returning the promoted text changes no behaviour to observe.
+	//
+	// the_constructions_nest asserts a literal instead and does redden for the
+	// form it carries, which is why that row is not enough on its own.
 	t.Run("the embedders add no String of their own", func(t *testing.T) {
 		declaredIn := methodReceivers(t, "String")
 

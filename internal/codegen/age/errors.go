@@ -466,8 +466,8 @@ func unservedColumn(t resolver.ResolvedType) string {
 	// so `struct{ resolver.ResolvedNode }` declared anywhere satisfies the
 	// interface without naming the marker, and so does
 	// `struct{ resolver.ResolvedType }`, which embeds the interface itself
-	// and no variant at all. These compose with each other, so the arms
-	// enumerate declaring types, not arriving shapes. Callers reach them:
+	// and no variant at all. These compose with each other, so this line is
+	// reached by shapes the arms do not enumerate. Callers reach them:
 	// codegen.Input, codegen.NamedQuery, resolver.ValidatedQuery and
 	// resolver.Column are exported types a package outside the resolver
 	// composes directly, so what the resolver builds does not bound what a
@@ -495,15 +495,15 @@ func unservedColumn(t resolver.ResolvedType) string {
 	// A resolver.Column whose Type is nil, and a
 	// `struct{ resolver.ResolvedType }{}` holding a nil interface, both
 	// reach String from this line and panic; both were measured through
-	// age.New().Generate. origin/master returns the same expression with no
-	// nil check, so this is the behaviour before this comment as well as
+	// age.New().Generate. origin/master's unservedColumn ends in this same
+	// expression, so that is the behaviour before this comment as well as
 	// after. Recorded here because it happens, not to argue that it cannot;
 	// guarding it changes behaviour and wants its own test and its own
 	// bead, which this bead is not.
 	//
 	// TestUnservedColumnFallThroughIsNotANinthVariant is the witness, for
 	// the pointer and the embedded form of every variant the arms name and
-	// for a shadowing embedder.
+	// for shadowing embedders.
 	return "projects " + t.String()
 }
 
