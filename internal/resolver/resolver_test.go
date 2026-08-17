@@ -459,6 +459,17 @@ var invalidFixtures = map[string]error{
 	// witness on each side" indistinguishable from "the only witness on each
 	// side" — the choice is unobservable until a second pair exists to lose to.
 	"ambiguous_edge_orientation_two_swapped_pairs.cypher": ErrAmbiguousEdgeOrientation,
+	// h6h7's second direction. The one-token twin of
+	// valid/unlabelled_narrowed_by_pinned_far_end.cypher: OPTIONAL on the
+	// HAS_DESK hop, so the hop is an outer join and every row that matched
+	// without it still comes back. `p` is bare, its only edge is WORKS_AT, and
+	// both declared WORKS_AT edges reach a type satisfying `(:Company)` — so the
+	// edges prove nothing about which person type `p` is and it must stay WIDE.
+	// invalidFixtureContains below requires BOTH person types in the message:
+	// the sentinel says the resolver declined to pick, the message says which
+	// set it declined over, and it is the second that distinguishes staying wide
+	// from narrowing to whichever type happened to be seen first.
+	"unlabelled_optional_far_end_stays_wide.cypher": ErrAmbiguousBinding,
 }
 
 // invalidFixtureContains pins the message arm for fixtures where errors.Is
@@ -519,6 +530,11 @@ var invalidFixtureContains = map[string]string{
 	// constant's own; the phrase is spelled here in full so a change to it has
 	// to be a change someone made on purpose.
 	"union_column_type_mismatch.cypher": `column "x" projects `,
+	// h6h7's stays-wide direction. ErrAmbiguousBinding says only that Phase B
+	// declined to pick; this says it declined over BOTH person types, i.e. that
+	// the OPTIONAL hop narrowed nothing. A narrowing that fired here would list
+	// one type, and the substring would fail.
+	"unlabelled_optional_far_end_stays_wide.cypher": `candidate types: Employee&Person, Person`,
 }
 
 type ResolverSuite struct {

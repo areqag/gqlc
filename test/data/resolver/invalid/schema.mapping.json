@@ -126,5 +126,6 @@
     "plural_endpoint_multi_hop_stays_plural.cypher": "satisfy_plural_edges_chain.gql",
     "plural_endpoint_multi_hop_range_stays_plural.cypher": "satisfy_plural_edges_chain.gql",
     "plural_endpoint_unbounded_hops_stays_plural.cypher": "satisfy_plural_edges_chain.gql",
-    "plural_endpoint_multi_hop_far_end_stays_plural.cypher": "satisfy_plural_edges_chain.gql"
+    "plural_endpoint_multi_hop_far_end_stays_plural.cypher": "satisfy_plural_edges_chain.gql",
+    "unlabelled_optional_far_end_stays_wide.cypher": "satisfy_plural_edges_inline_subtype.gql"
 }
