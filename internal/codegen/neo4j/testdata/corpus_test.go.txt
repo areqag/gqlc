@@ -412,6 +412,49 @@ func TestListyColumnsNarrowEachElement(t *testing.T) {
 	}
 }
 
+// The element loop nests once per declared list depth, and every level
+// of it accumulates into a local of its own. Under a name shared between
+// the levels the innermost declaration shadows the one the level above
+// appends to, so that append resolves both of its operands to the same
+// slice and the emitted package does not compile. A depth of three is
+// the first that reaches it, because it is the first that puts one such
+// declaration inside another.
+//
+// The two sibling depth-two columns are the control: their loops are
+// disjoint blocks, so what the deep column is refused for is the depth
+// and not the count. All three are non-nullable, because a nullable
+// list's accumulator sits inside the block its null gate opens and so
+// would hide a collision the way it once hid the row assembly's.
+func TestNestColumnsAccumulateAtEveryDepth(t *testing.T) {
+	got, err := queriesOver([]string{"cube", "lhs", "rhs"}, []any{
+		[]any{[]any{[]any{int64(1), int64(2)}, []any{}}, []any{}},
+		[]any{[]any{int64(3)}, []any{int64(4), int64(5)}},
+		[]any{[]any{"a"}, []any{}},
+	}).NestColumns(t.Context())
+	if err != nil {
+		t.Fatalf("NestColumns(nested) = error %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("NestColumns(nested) returned %d rows, want 1", len(got))
+	}
+	row := got[0]
+	if want := [][][]int64{{{1, 2}, {}}, {}}; !reflect.DeepEqual(row.Cube, want) {
+		t.Errorf("NestColumns(nested)[0].Cube = %#v, want %#v", row.Cube, want)
+	}
+	if want := [][]int64{{3}, {4, 5}}; !reflect.DeepEqual(row.Lhs, want) {
+		t.Errorf("NestColumns(nested)[0].Lhs = %#v, want %#v", row.Lhs, want)
+	}
+	if want := [][]string{{"a"}, {}}; !reflect.DeepEqual(row.Rhs, want) {
+		t.Errorf("NestColumns(nested)[0].Rhs = %#v, want %#v", row.Rhs, want)
+	}
+
+	if _, err := queriesOver([]string{"cube", "lhs", "rhs"}, []any{
+		[]any{[]any{int64(1)}}, []any{}, []any{},
+	}).NestColumns(t.Context()); err == nil {
+		t.Errorf("NestColumns(cube: [[int]]) = no error, want a refusal")
+	}
+}
+
 // A column whose declared width is ANY VALUE is read rather than
 // asserted, the same claim TestAnythingReadsWhatTheGraphHolds makes of
 // the property one emission over. `any` is a member of neither

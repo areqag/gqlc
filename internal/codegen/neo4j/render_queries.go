@@ -3,6 +3,7 @@ package neo4j
 import (
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/areqag/gqlc/internal/codegen"
@@ -647,7 +648,7 @@ func writeListColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.
 		fmt.Fprintf(b, "%svar %sPtr *%s\n", indent, varName, f.GoType)
 		fmt.Fprintf(b, "%sif !isNil {\n", indent)
 		fmt.Fprintf(b, "%s\t%s := make(%s, 0, len(%s))\n", indent, accVar, f.GoType, varName)
-		walkListElemPlan(b, p, f, f.ListElem, accVar, varName, zero, indent+"\t")
+		walkListElemPlan(b, p, f, f.ListElem, accVar, varName, zero, indent+"\t", 0)
 		fmt.Fprintf(b, "%s\t%sPtr = &%s\n", indent, varName, accVar)
 		fmt.Fprintf(b, "%s}\n", indent)
 		b.WriteString(indent)
@@ -660,7 +661,7 @@ func writeListColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.
 	// Non-nullable: error if isNil; else build the accumulator + assign.
 	fmt.Fprintf(b, "%sif isNil {\n%s\treturn %s, fmt.Errorf(\"%s: column %%q is non-nullable but arrived null\", %q)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
 	fmt.Fprintf(b, "%s%s := make(%s, 0, len(%s))\n", indent, accVar, f.GoType, varName)
-	walkListElemPlan(b, p, f, f.ListElem, accVar, varName, zero, indent)
+	walkListElemPlan(b, p, f, f.ListElem, accVar, varName, zero, indent, 0)
 	b.WriteString(indent)
 	b.WriteString(assignPrefix[len(indent):])
 	b.WriteString(accVar)
@@ -676,11 +677,9 @@ func writeListColumnDecodeIndent(b *strings.Builder, p codegen.Query, f codegen.
 //
 // The accumulator name (accVar) accumulates elements at this depth;
 // the source slice name (srcVar) is the raw driver []any at this depth.
-func walkListElemPlan(b *strings.Builder, p codegen.Query, f codegen.Row, e *codegen.ListElem, accVar, srcVar, zero, indent string) {
-	iterVar := "elem"
-	if strings.Contains(indent, "\t\t\t\t") { // three levels deep — disambiguate
-		iterVar = "elem" + fmt.Sprint(strings.Count(indent, "\t"))
-	}
+// depth is the list nesting level this loop iterates, counting the
+// column's own elements as 0, and is what elemLocal suffixes by.
+func walkListElemPlan(b *strings.Builder, p codegen.Query, f codegen.Row, e *codegen.ListElem, accVar, srcVar, zero, indent string, depth int) {
 	// The index variable is only used by the element-type-assertion
 	// fail message, so the arms that assert nothing never name it and
 	// ranging with `i` would emit an unused variable.
@@ -688,9 +687,29 @@ func walkListElemPlan(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 	if carriesElemBare(e) {
 		indexVar = "_"
 	}
+	iterVar := elemLocal("elem", depth)
 	fmt.Fprintf(b, "%sfor %s, %s := range %s {\n", indent, indexVar, iterVar, srcVar)
-	walkListElemBody(b, p, f, e, accVar, iterVar, zero, indent+"\t")
+	walkListElemBody(b, p, f, e, accVar, iterVar, zero, indent+"\t", depth)
 	fmt.Fprintf(b, "%s}\n", indent)
+}
+
+// elemLocal names a local of the element loop at the given nesting
+// depth. A nested list's loop is emitted inside the enclosing list's
+// loop body, so a fixed name is redeclared in an inner scope and the
+// enclosing binding stops being reachable from the point the emission
+// still refers to it — `acc = append(acc, inner)` resolves both operands
+// to the inner slice, which does not compile from a nesting depth of
+// three. Numbering by depth rather than by column position is what the
+// collision is on: sibling list columns emit disjoint loops, so their
+// locals never share a scope, while nested ones always do.
+//
+// The outermost depth is unsuffixed, so a single-level list column emits
+// the loop spec §5.5 spells out.
+func elemLocal(name string, depth int) string {
+	if depth == 0 {
+		return name
+	}
+	return name + strconv.Itoa(depth)
 }
 
 // carriesElemBare reports whether the element loop appends what the
@@ -725,8 +744,9 @@ func carriesElemBare(e *codegen.ListElem) bool {
 // accVar is the accumulator to append into at this depth; iterVar is
 // the raw `elem` from the driver []any; zero is the enclosing method's
 // zero-return expression; indent is already deepened by one level
-// relative to the loop head.
-func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *codegen.ListElem, accVar, iterVar, zero, indent string) {
+// relative to the loop head; depth is the loop's own nesting level, so
+// the locals a nested list arm declares belong to depth+1.
+func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *codegen.ListElem, accVar, iterVar, zero, indent string, depth int) {
 	switch e.Kind {
 	case codegen.ColumnProperty:
 		if carriesElemBare(e) {
@@ -782,11 +802,13 @@ func walkListElemBody(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 		fmt.Fprintf(b, "%sdefault:\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: unexpected relationship type %%q\", %q, i, rel.Type)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, indent)
 	case codegen.ColumnList:
 		// Nested list: type-assert to []any, then recurse.
-		fmt.Fprintf(b, "%sinner, ok := %s.([]any)\n", indent, iterVar)
+		inner := elemLocal("inner", depth+1)
+		innerAcc := elemLocal("innerAcc", depth+1)
+		fmt.Fprintf(b, "%s%s, ok := %s.([]any)\n", indent, inner, iterVar)
 		fmt.Fprintf(b, "%sif !ok {\n%s\treturn %s, fmt.Errorf(\"%s: decode column %%q element %%d: expected []any, got %%T\", %q, i, %s)\n%s}\n", indent, indent, zero, p.MethodName, f.ColumnName, iterVar, indent)
-		fmt.Fprintf(b, "%sinnerAcc := make(%s, 0, len(inner))\n", indent, e.GoType)
-		walkListElemPlan(b, p, f, e.Nested, "innerAcc", "inner", zero, indent)
-		fmt.Fprintf(b, "%s%s = append(%s, innerAcc)\n", indent, accVar, accVar)
+		fmt.Fprintf(b, "%s%s := make(%s, 0, len(%s))\n", indent, innerAcc, e.GoType, inner)
+		walkListElemPlan(b, p, f, e.Nested, innerAcc, inner, zero, indent, depth+1)
+		fmt.Fprintf(b, "%s%s = append(%s, %s)\n", indent, accVar, accVar, innerAcc)
 	}
 }
 
