@@ -65,10 +65,12 @@ var sentinelCell = regexp.MustCompile("^`(Err[A-Za-z0-9]+)`$")
 var identCell = regexp.MustCompile("^`([A-Za-z][A-Za-z0-9]*)`$")
 
 // tableHeaders are the first-column headers the document's tables carry.
-// A header row is dropped by name rather than by position: a renamed
-// header then reads as a data row and fails its table's own fence, where
-// dropping the first row whatever it says would swallow a data row that
-// had lost its header.
+// A header row is dropped by name, so a renamed header reads as a data
+// row and fails its table's own fence. The set is global across every
+// table, so a data row whose first cell were a bare Sentinel or
+// Identifier would be dropped from any of them; the cell patterns above
+// require a backtick, which every data first-cell in the document
+// carries.
 var tableHeaders = map[string]bool{"Sentinel": true, "Identifier": true}
 
 // siteCell matches one backticked fail-site name in §3's second column.
