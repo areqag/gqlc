@@ -106,8 +106,27 @@ type Split struct {
 // count, because a count pins the size of a guard and not its membership.
 func (s Split) Complaints() []string {
 	var complaints []string
-	// The vacuity guards. Every rule below is written over one of these three
-	// collections, so an empty one makes its rule pass by iterating nothing.
+	// The vacuity guards. Each guarded collection is ranged over by some of the
+	// rules below and asked for membership by another, so what emptying one
+	// does depends on which reading.
+	//
+	// An empty Declared leaves the two rules that range it — the one checking
+	// each declared test against CI, and the one checking each against every
+	// Local invocation — iterating nothing. The rule over the invocations still
+	// asks slices.Contains(s.Declared, alt), so it reports every name a -run
+	// selects as declared by nobody; where no -run appears at all it is silent
+	// too, and this guard is then the only thing that speaks for an empty
+	// Declared.
+	//
+	// An empty CI is not that. The rule over Declared asks
+	// slices.ContainsFunc(s.CI, ...) rather than ranging CI, so it fires once
+	// per declared test; and in a split Read produced, the rule over the
+	// invocations does not lose its source either, because Read builds Local by
+	// removing CI from the justfile's live invocations (subtract), which makes
+	// an empty CI the state where every live invocation sits in Local rather
+	// than one where there are none. This guard stays to name that cause, which
+	// the per-test complaints only imply.
+	//
 	// Local is absent on purpose: a justfile whose every live recipe is reached
 	// by a workflow is a sound tree, not a silent one.
 	if len(s.Declared) == 0 {

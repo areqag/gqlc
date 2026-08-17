@@ -308,15 +308,35 @@ func TestComplaintsNameTheTestAndNotACount(t *testing.T) {
 			},
 		},
 		{
-			// The vacuity guards. Both rules below are written over one of
-			// these collections, so an empty one makes its rule pass by
-			// iterating nothing — the defect this package exists to refuse,
-			// one level up.
+			// The vacuity guards, and the two shapes they answer to. Each
+			// guarded collection is ranged over by some rules and asked for
+			// membership by another, so emptying one does not simply make its
+			// rule pass by iterating nothing.
+			//
+			// This row is the case where the guard is all that is left:
+			// Declared is empty, so both rules that range it are vacuous, and
+			// the invocation carries no -run, so the rule that asks
+			// slices.Contains(Declared, ...) has no name to report. Give that
+			// invocation a -run and it reports one complaint per name.
 			name:  "no declared test is a comparison against nothing",
 			split: liverecipes.Split{CI: []liverecipes.Invocation{inv("half", "./...")}},
 			want:  []string{"no top-level live test was found"},
 		},
 		{
+			// The -run the row above withholds, so the claim that an empty
+			// Declared still reports through slices.Contains is a row and not
+			// only a comment.
+			name: "no declared test still names what a -run selects",
+			split: liverecipes.Split{
+				CI: []liverecipes.Invocation{inv("half", "-run", smoke, "./...")},
+			},
+			want: []string{"no top-level live test was found", smoke},
+		},
+		{
+			// The other shape: an empty CI is not quiet while anything is
+			// declared. The rule over Declared asks slices.ContainsFunc(CI,
+			// ...) rather than ranging CI, so it fires once per declared test —
+			// which is why this row wants smoke alongside the guard.
 			name:  "no CI invocation is a battery nothing is required to run",
 			split: liverecipes.Split{Declared: []string{smoke}},
 			want:  []string{"no workflow reaches a live `go test`", smoke},
