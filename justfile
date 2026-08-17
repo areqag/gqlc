@@ -1138,8 +1138,11 @@ vuln: vuln-root-residual
             echo "       both — the derivation takes the positive and these fall out; split the" >&2
             echo "       corpus or scan twice. (2) They are excluded by something -tags cannot" >&2
             echo "       enable at all: a GOOS/GOARCH filename suffix or constraint term, or" >&2
-            echo "       //go:build ignore. Neither has ever existed in this tree; the first one" >&2
-            echo "       to needs a deliberate decision here, not a silently narrower scan." >&2
+            echo "       //go:build ignore. test/data/platformtag carries a GOOS term today" >&2
+            echo "       (//go:build !windows); it falls out only under GOOS=windows. A suffix" >&2
+            echo "       and a //go:build ignore have not appeared here yet. Whichever of the" >&2
+            echo "       three lands on this line needs a deliberate decision — a second" >&2
+            echo "       GOOS-scoped invocation — not a silently narrower scan." >&2
             exit 1
         fi
 

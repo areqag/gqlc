@@ -340,9 +340,22 @@ func TestConstraintTagsRefusesALineItCannotRead(t *testing.T) {
 func TestConstraintTagsRefusesAnEmptyPlatformTable(t *testing.T) {
 	// The empty measurement again, one level down, and named as the subprocess
 	// failure it is rather than as a file full of unplaceable terms.
-	if _, err := constraintTags("//go:build !windows", nil, declared, origin); err == nil {
+	//
+	// The MESSAGE is the assertion, not merely the non-nil error. Delete the
+	// refusal and an error still arrives here — `windows` is unplaceable once
+	// the table is empty, so the unplaceable-term refusal below fires instead
+	// and blames the file. That is the whole defect this guard exists to avoid,
+	// and a test that only checks `err != nil` cannot see it: the guard was
+	// deletable with this package green before the assertion below was added.
+	_, err := constraintTags("//go:build !windows", nil, declared, origin)
+	if err == nil {
 		t.Fatal("constraintTags accepted an empty platform table, so the reason nothing in " +
 			"the tree could be classified would be reported as the tree's fault")
+	}
+	if !strings.Contains(err.Error(), "GOOS/GOARCH table is empty") {
+		t.Fatalf("constraintTags refused an empty platform table with %q. The refusal fired "+
+			"for the wrong reason: it must name `go tool dist list` as what went wrong, "+
+			"not report the file as carrying an unplaceable term", err)
 	}
 }
 
@@ -1012,10 +1025,32 @@ func TestRunRejectsAModuleItDidNotDiscover(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "go.mod", goMod)
 	write(t, root, "a.go", "package p\n")
+	// A directory that EXISTS and holds Go files but carries no go.mod. This is
+	// the row the membership guard is actually for: `go list -m` run inside it
+	// succeeds and answers with the ROOT module's directory, so without the
+	// guard the walk would cover the root module while the caller believes it
+	// asked about `sub` — an answer to a question nobody asked, reported as
+	// success. The nonexistent-directory row below fails with or without the
+	// guard, because `go list -m` cannot run there at all; on its own it left
+	// the guard deletable with this package green.
+	write(t, root, "sub/b.go", "package sub\n")
 
-	var out bytes.Buffer
-	if err := run(t.Context(), []string{"-root", root, "dirs", "nested"}, &out); err == nil {
-		t.Fatal("run dirs over a module that is not in the discovered set returned no error, " +
-			"so a caller could ask about a directory the sweep does not cover and get an answer")
+	for _, tc := range []struct{ name, module string }{
+		{"a directory that exists but is not a module root", "sub"},
+		{"a directory that does not exist", "nested"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			err := run(t.Context(), []string{"-root", root, "dirs", tc.module}, &out)
+			if err == nil {
+				t.Fatalf("run dirs %q returned no error and printed %q, so a caller can ask "+
+					"about a directory the sweep does not cover and get an answer", tc.module, &out)
+			}
+			if !strings.Contains(err.Error(), "is not one of the modules discovered under") {
+				t.Fatalf("run dirs %q failed with %q. The refusal must come from the "+
+					"membership check naming the discovered set, not from whatever the go "+
+					"command happens to say about the directory", tc.module, err)
+			}
+		})
 	}
 }
