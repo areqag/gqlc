@@ -386,30 +386,28 @@ var invalidFixtures = map[string]error{
 	"plural_endpoint_unbounded_hops_stays_plural.cypher":    ErrUnknownProperty,
 	"plural_endpoint_multi_hop_far_end_stays_plural.cypher": ErrUnknownProperty,
 	// An anonymous endpoint spelling `(:Company)` on a schema where Company&Large
-	// also satisfies it. endpointLabels keys that endpoint on the labels spelled
-	// rather than on the types satisfying them, so the closure never probes the
-	// Employee&Person -> Company&Large declaration and would name `p` the bare
-	// Person on the strength of the one declaration it did see. Rows of the type
-	// it missed match the pattern, so it is refused and endpointKeysCoverEveryMatch
-	// is what refuses it. The accepted twin — the same query on a schema where the
-	// spelled labels really are satisfied by one type — is in
-	// TestNarrowingSkipsAnEndpointItCannotEnumerate.
+	// also satisfies it. Both declared WORKS_AT edges match the pattern, so the
+	// closure leaves `p` either person type and the Employee&Person ->
+	// Company&Large row has a `p` with no personOnly. The accepted twin — the
+	// same query on a schema where the spelled labels really are satisfied by one
+	// type — is in TestNarrowingSkipsAnEndpointItCannotEnumerate.
 	"plural_endpoint_inline_endpoint_stays_plural.cypher":          ErrAmbiguousLabel,
 	"plural_endpoint_inline_endpoint_property_stays_plural.cypher": ErrUnknownProperty,
-	// The same schema, one hop further out, with the inline endpoint moved off
-	// the narrowed edge entirely: `(:Person)-[r:WORKS_AT]->(c)<-[q:WORKS_AT]-(p:Person)`
-	// narrows `p` from edge `q`, whose two ends are both VarEndpoints. The
-	// under-enumeration reaches it through Phase B instead — `c` is unlabelled,
-	// candidateTypes reads `r`'s inline other end, and commits `c` to the bare
-	// Company that half the pattern's rows contradict. Narrowing from that
-	// singleton is the same wrong answer these two spell one hop in.
-	"plural_endpoint_unlabelled_hop_stays_plural.cypher":          ErrAmbiguousLabel,
-	"plural_endpoint_unlabelled_hop_property_stays_plural.cypher": ErrUnknownProperty,
-	// The same wrong commitment reached across a Part boundary instead: Part 1
-	// infers `c`, WITH carries it, and Part 2's narrowing sees a singular node
-	// type with no provenance. branchState carries the type and not how Part 1
-	// arrived at it, so newScope leaves a carried entry out of resolvedCovers
-	// and this is the fixture that pins the omission.
+	// `(:Person)-[r:WORKS_AT]->(c)<-[q:WORKS_AT]-(p:Person)`, where the plurality
+	// of the anonymous endpoint reaches the unlabelled `c` between the two hops.
+	// Both WORKS_AT declarations are in the closure, so `c` is either company type
+	// and Phase B has no single type to infer. That refusal lands on `c` before
+	// either projection is reached, which is why the two spellings — `RETURN p`
+	// and `RETURN p.personOnly` — now share a sentinel: what separated them was a
+	// `p` the resolver got as far as typing.
+	"plural_endpoint_unlabelled_hop_stays_plural.cypher":          ErrAmbiguousBinding,
+	"plural_endpoint_unlabelled_hop_property_stays_plural.cypher": ErrAmbiguousBinding,
+	// A singular commitment that is NOT a satisfying set, reached across a Part
+	// boundary: Part 1 infers `c` through an OPTIONAL hop, so it is Company and
+	// uncovered, WITH carries it, and Part 2's narrowing sees a singular node type
+	// with no provenance. branchState carries the type and not how Part 1 arrived
+	// at it, so newScope leaves a carried entry out of resolvedCovers and this is
+	// the fixture that pins the omission.
 	"plural_endpoint_carried_hop_property_stays_plural.cypher": ErrUnknownProperty,
 	// Three candidates of which only the first and third disagree about which
 	// of the pattern's endpoints is the source; the second is a plural-endpoint
@@ -1407,22 +1405,24 @@ func (s *ResolverSuite) TestANonWitnessEdgeSilencesItselfNotTheBinding() {
 // probed" — which needs every attainable endpoint key to be in the box, not
 // merely every boxed key to be attainable.
 //
-// endpointLabels holds that up for a VarEndpoint, which returns the binding's
-// whole satisfying set. It does not for an InlineEndpoint, which keys on the
-// labels the query spells: on a schema where a second declared type also
-// satisfies those labels, the box misses every declaration reachable only
-// through that type, and the narrowing would commit a type the missing rows
-// contradict.
+// Both arms of endpointLabels hold that up: a VarEndpoint returns its binding's
+// whole satisfying set, and an InlineEndpoint returns the types satisfying the
+// expression written there. The bit the narrowing consults is therefore about
+// the BINDING TABLE, not about which arm answered — a VarEndpoint standing on a
+// singular commitment the resolver inferred rather than derived is the endpoint
+// it declines to read, and
+// TestAnInferredEndpointIsTrustedOnlyWhenItsOwnEndsWereEnumerated pins that.
 //
-// The two rows are the same query on two schemas that differ only in whether
-// `(:Company)` is satisfied by one declared type or two, so between them they
-// pin the guard against being applied too narrowly AND too widely. Dropping the
-// guard reddens "the spelled labels are satisfied by two types"; widening it to
-// skip every inline endpoint reddens "...by exactly one".
+// The two rows here are the same query on two schemas that differ only in
+// whether `(:Company)` is satisfied by one declared type or two. Between them
+// they say the inline endpoint enumerates itself in both cases and neither
+// answer is bought by refusing the other: report an inline endpoint uncovered
+// and "the spelled labels are satisfied by exactly one type" goes red, because
+// the narrowing that pins `p.employeeId` stops running.
 //
 // The var-spelling control matters beyond the usual "is the acceptance real"
-// check: before the guard the inline and var spellings of one pattern gave
-// different answers, and the inline one was the wrong one.
+// check: before the satisfying-set reading the inline and var spellings of one
+// pattern gave different answers, and the inline one was the wrong one.
 func (s *ResolverSuite) TestNarrowingSkipsAnEndpointItCannotEnumerate() {
 	tests := []struct {
 		name    string
@@ -1477,22 +1477,150 @@ func (s *ResolverSuite) TestNarrowingSkipsAnEndpointItCannotEnumerate() {
 // way. The rows assert an answer each; this asserts they cannot drift apart,
 // which is the shape the defect actually took — the var spelling stayed correct
 // throughout and only the inline one moved.
+//
+// The comparison is on the outcome, not on a named sentinel, because the pairs
+// below have three different right answers between them and the relation is the
+// claim. What stops "both sides refuse everything" from satisfying it is
+// TestInlineEndpointCommitsOnTheTypesSatisfyingIt, which pins each answer.
 func (s *ResolverSuite) TestInlineEndpointsAgreeWithTheirVarSpelling() {
-	sch := s.loadSchema("invalid", "satisfy_plural_edges_inline_subtype.gql")
-	resolve := func(src string) error {
-		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
-		s.Require().NoError(err)
-		_, err = New(sch, WithRegistry(regR7)).Resolve(q)
-		return err
+	tests := []struct {
+		name           string
+		lane, schema   string
+		inline, varSpe string
+	}{
+		{
+			// Paired with the row below because an endpoint feeds the narrowing of
+			// the end OPPOSITE it, so which side it is written on must not matter.
+			name: "the far end of a narrowing", lane: "invalid", schema: "satisfy_plural_edges_inline_subtype.gql",
+			inline: "MATCH (p:Person)-[r:WORKS_AT]->(:Company) RETURN p",
+			varSpe: "MATCH (p:Person)-[r:WORKS_AT]->(c:Company) RETURN p",
+		},
+		{
+			name: "the near end of a narrowing", lane: "invalid", schema: "satisfy_plural_edges_inline_subtype.gql",
+			inline: "MATCH (:Person)-[r:WORKS_AT]->(c:Company) RETURN c",
+			varSpe: "MATCH (p:Person)-[r:WORKS_AT]->(c:Company) RETURN c",
+		},
+		{
+			name: "the far end of an unlabelled inference", lane: "invalid", schema: "satisfy_plural_edges_inline_subtype.gql",
+			inline: "MATCH (:Person)-[r:WORKS_AT]->(c) RETURN c.smallOnly",
+			varSpe: "MATCH (p:Person)-[r:WORKS_AT]->(c) RETURN c.smallOnly",
+		},
+		{
+			name: "the endpoint an edge closes against", lane: "invalid", schema: "satisfy_plural_edges_inline_subtype.gql",
+			inline: "MATCH (p:Person)-[r:WORKS_AT]->(:Company) RETURN r",
+			varSpe: "MATCH (p:Person)-[r:WORKS_AT]->(c:Company) RETURN r",
+		},
+		{
+			// The only pair whose two sides sat on opposite sides of the
+			// accept/refuse line: nothing declared is named `Staff`, so the
+			// inline spelling probed a key no EdgeKey carries.
+			name: "an endpoint named by an implied label", lane: "valid", schema: "satisfy_implied_label_endpoint.gql",
+			inline: "MATCH (:Staff)-[r:WORKS_AT]->(c:Company) RETURN c",
+			varSpe: "MATCH (e:Staff)-[r:WORKS_AT]->(c:Company) RETURN c",
+		},
 	}
-	// Both ends: an inline endpoint under-enumerates the OTHER end's narrowing
-	// too, so which side it is written on must not matter.
-	for _, pair := range [][2]string{
-		{"MATCH (p:Person)-[r:WORKS_AT]->(:Company) RETURN p", "MATCH (p:Person)-[r:WORKS_AT]->(c:Company) RETURN p"},
-		{"MATCH (:Person)-[r:WORKS_AT]->(c:Company) RETURN c", "MATCH (p:Person)-[r:WORKS_AT]->(c:Company) RETURN c"},
-	} {
-		s.Require().ErrorIsf(resolve(pair[0]), ErrAmbiguousLabel, "%s", pair[0])
-		s.Require().ErrorIsf(resolve(pair[1]), ErrAmbiguousLabel, "%s", pair[1])
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			sch := s.loadSchema(tt.lane, tt.schema)
+			resolve := func(src string) (string, []Column) {
+				q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+				s.Require().NoError(err)
+				vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+				if err != nil {
+					return err.Error(), nil
+				}
+				return "", vq.Columns
+			}
+			inlineErr, inlineCols := resolve(tt.inline)
+			varErr, varCols := resolve(tt.varSpe)
+			s.Require().Equal(varErr, inlineErr, "%s\nvs\n%s", tt.inline, tt.varSpe)
+			s.Require().Equal(varCols, inlineCols, "%s\nvs\n%s", tt.inline, tt.varSpe)
+		})
+	}
+}
+
+// TestInlineEndpointCommitsOnTheTypesSatisfyingIt pins the answers the pairs
+// above only require to match. An inline endpoint names the node types whose
+// complete label set satisfies the expression written there (ADR 0022), and
+// every one of those types is a key the closure has to probe.
+//
+// Each row is a shape where the spelled key and the satisfying set are
+// different sets, and each is a case the resolver used to answer from the
+// spelled key alone:
+//
+//   - `c.smallOnly` was a column, typed STRING NOT NULL, on a query whose
+//     Employee&Person -[WORKS_AT]-> Company&Large rows have no such property
+//     (gqlc-3uof);
+//   - `r` was the single Person-[WORKS_AT]->Company when both declarations
+//     match the pattern (gqlc-qlr2);
+//   - `(:Staff)` reached no declared edge at all, because the identity that
+//     carries the label is Engineer.
+//
+// The conjunction row is the negative: satisfaction is a superset test over
+// each declared type's complete label set, not the whole schema, so spelling
+// both labels leaves one satisfying type and the answer is singular again.
+//
+// The last row is the arm where there is no satisfying set to name. No row can
+// stand at such an endpoint, so the keys it yields decide no verdict — only the
+// wording of the refusal, and the labels an author reads back have to be the
+// ones they wrote. Asserting the whole message is what holds that up: drop the
+// arm and the refusal still arrives, naming nothing.
+func (s *ResolverSuite) TestInlineEndpointCommitsOnTheTypesSatisfyingIt() {
+	worksAtKeys := []schema.EdgeKey{
+		{Source: "Employee&Person", KeyLabels: "WORKS_AT", Target: "Company&Large"},
+		{Source: "Person", KeyLabels: "WORKS_AT", Target: "Company"},
+	}
+	tests := []struct {
+		name         string
+		lane, schema string
+		query        string
+		want         []Column
+		wantErr      error
+		wantMsg      string
+	}{
+		{
+			name: "an unlabelled binding inferred through it", lane: "invalid", schema: "satisfy_plural_edges_inline_subtype.gql",
+			query:   "MATCH (:Person)-[r:WORKS_AT]->(c) RETURN c.smallOnly",
+			wantErr: ErrAmbiguousBinding,
+			wantMsg: `ambiguous binding: cannot uniquely infer type of unlabelled binding "c" — candidate types: Company, Company&Large`,
+		},
+		{
+			name: "the edge closed against it", lane: "invalid", schema: "satisfy_plural_edges_inline_subtype.gql",
+			query: "MATCH (p:Person)-[r:WORKS_AT]->(:Company) RETURN r",
+			want:  []Column{{Name: "r", Type: ResolvedEdgeUnion{EdgeKeys: worksAtKeys}}},
+		},
+		{
+			name: "an implied label that names no declared identity", lane: "valid", schema: "satisfy_implied_label_endpoint.gql",
+			query: "MATCH (:Staff)-[r:WORKS_AT]->(c:Company) RETURN c",
+			want:  []Column{{Name: "c", Type: ResolvedNode{Labels: "Company"}}},
+		},
+		{
+			name: "a conjunction only one type satisfies", lane: "invalid", schema: "satisfy_plural_edges_inline_subtype.gql",
+			query: "MATCH (:Person:Employee)-[r:WORKS_AT]->(c) RETURN c.largeId",
+			want:  []Column{{Name: "c.largeId", Type: ResolvedProperty{Type: graph.PropertyType("INT")}}},
+		},
+		{
+			name: "a conjunction no type satisfies", lane: "invalid", schema: "satisfy_plural_edges_inline_subtype.gql",
+			query:   "MATCH (p:Person)-[r:WORKS_AT]->(:Company:Desk) RETURN p",
+			wantErr: ErrUnknownEdge,
+			wantMsg: "unknown edge: Employee&Person-[WORKS_AT]->Company&Desk, " +
+				"Person-[WORKS_AT]->Company&Desk",
+		},
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			sch := s.loadSchema(tt.lane, tt.schema)
+			q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(tt.query)))
+			s.Require().NoError(err)
+			vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+			if tt.wantErr != nil {
+				s.Require().ErrorIs(err, tt.wantErr, tt.query)
+				s.Require().EqualError(err, tt.wantMsg, tt.query)
+				return
+			}
+			s.Require().NoError(err, tt.query)
+			s.Require().Equal(tt.want, vq.Columns, tt.query)
+		})
 	}
 }
 
@@ -1501,28 +1629,31 @@ func (s *ResolverSuite) TestInlineEndpointsAgreeWithTheirVarSpelling() {
 // opened. That test guards the endpoint the narrowing reads DIRECTLY. This one
 // guards the endpoint it reads through Phase B: an unlabelled binding is typed
 // by candidateTypes, which intersects across its touching edges and reads each
-// far end by the keys endpointLabels gives — so an inline endpoint that could
-// not enumerate itself pins the unlabelled binding to one type when two are
-// attainable, and the narrowing then reads that singleton as a satisfying set.
-// The var endpoint the gate waves through is a laundered inline one.
+// far end by the keys endpointLabels gives. A far end that could not enumerate
+// itself pins the unlabelled binding to one type when two are attainable, and
+// the narrowing then reads that singleton as a satisfying set. The var endpoint
+// the gate waves through is a laundered uncovered one.
 //
-// The first two rows are the same two-part question on two schemas. In the
-// refusing row the far end of the inference is `(:Person)`, satisfied by two
-// declared types, so `c`'s commitment can be a strict subset and nothing may be
-// learned from it. In the accepting row the far end is the plural var `p`,
-// whose whole candidate slice IS the satisfying set, so `c`'s commitment covers
-// and the narrowing goes on to pin `p` through it.
+// An uncovered far end now reaches this only through the VarEndpoint arm: the
+// inline arm reports covering on both its returns, and the var arm reports what
+// resolvedCovers holds. Four sites write the resolved node lane and two of them
+// leave resolvedCovers alone — inferUnlabelled when candidateTypes did not
+// report covering, and newScope's carry seed. The refusing row below chains the
+// first into a second inference: `c` is inferred through an OPTIONAL hop, so it
+// is Company and uncovered; `x` is inferred from `c`; and `y` is narrowed from
+// `x`. Trusting `c` there costs `y` the Company&Large its rows really carry.
 //
-// That accepting row is what stops the fix being "an unlabelled binding is
-// never trusted": before it, `MATCH (p:Person)-[r:WORKS_AT]->(c)` lost the
-// narrowing the branch gets right, and no test said so.
+// The accepting rows are what stop the fix being "an inferred binding is never
+// trusted". `MATCH (p:Person)-[r:WORKS_AT]->(c)` reads a plural var far end
+// whose whole candidate slice IS the satisfying set, so `c` covers and the
+// narrowing pins `p` through it; and the refusing row with its OPTIONAL made
+// mandatory is accepted on the same schema one token away.
 //
-// The third row says covering is a CONJUNCTION and the two rows above test one
+// The last row says covering is a CONJUNCTION and the rows above test one
 // conjunct of it. Enumerating both far ends is not enough on its own: an edge
 // that no returned row is guaranteed to have drops a type the surviving rows
 // carry however perfectly its ends were enumerated. Only that row separates
-// "every contributing edge's far end covered" from the rule the resolver needs,
-// and on the first two rows the two definitions are the same sentence.
+// "every contributing edge's far end covered" from the rule the resolver needs.
 func (s *ResolverSuite) TestAnInferredEndpointIsTrustedOnlyWhenItsOwnEndsWereEnumerated() {
 	tests := []struct {
 		name    string
@@ -1532,12 +1663,27 @@ func (s *ResolverSuite) TestAnInferredEndpointIsTrustedOnlyWhenItsOwnEndsWereEnu
 		wantErr error
 	}{
 		{
-			name:   "the inference read an inline endpoint two types satisfy",
+			name:   "the inference read an uncovered inferred endpoint",
 			schema: "satisfy_plural_edges_inline_subtype.gql",
-			query:  "MATCH (:Person)-[r:WORKS_AT]->(c)<-[q:WORKS_AT]-(p:Person) RETURN p.personOnly",
-			// Two Employee&Person nodes both -[:WORKS_AT]-> one Company&Large is
-			// a matching row, and its `p` has no personOnly.
+			query: "MATCH (p:Person)-[q:WORKS_AT]->(c) " +
+				"OPTIONAL MATCH (c)-[h:HAS_DESK]->(d:Desk) " +
+				"MATCH (c)<-[w:WORKS_AT]-(x) " +
+				"MATCH (x)-[w2:WORKS_AT]->(y:Company) RETURN y.smallOnly",
+			// Employee&Person -[WORKS_AT]-> Company&Large is a matching row with
+			// h/d null, and on it y is Company&Large, which has no smallOnly.
 			wantErr: ErrUnknownProperty,
+		},
+		{
+			name:   "the same chain on a far end every returned row has",
+			schema: "satisfy_plural_edges_inline_subtype.gql",
+			query: "MATCH (p:Person)-[q:WORKS_AT]->(c) " +
+				"MATCH (c)-[h:HAS_DESK]->(d:Desk) " +
+				"MATCH (c)<-[w:WORKS_AT]-(x) " +
+				"MATCH (x)-[w2:WORKS_AT]->(y:Company) RETURN y.smallOnly",
+			// One token apart from the row above. HAS_DESK is declared from the
+			// bare Company only and every returned row now has one, so c really
+			// is Company on all of them and the chain through it is sound.
+			want: []Column{{Name: "y.smallOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}},
 		},
 		{
 			name:   "the inference read a plural var endpoint",

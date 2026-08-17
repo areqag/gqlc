@@ -8,11 +8,13 @@
 --
 -- The point of the schema is the anonymous endpoint spelling
 -- `(p:Person)-[:WORKS_AT]->(:Company)`. Both declared WORKS_AT edges match it,
--- so `p` is still either person type — but endpointLabels keys an inline
--- endpoint on the labels the query spells rather than on the types satisfying
--- them, so the closure sees only the `Company` half and would otherwise report
--- `p` as the bare Person. The row Employee&Person -[WORKS_AT]-> Company&Large
--- matches and its `p` has no personOnly, so that answer is wrong on the facts.
+-- so `p` is still either person type, and the row Employee&Person -[WORKS_AT]->
+-- Company&Large has a `p` with no personOnly.
+--
+-- `smallOnly` and `largeId` are the two directions of the same question asked
+-- of the OTHER end: each company type carries one property the other lacks, so
+-- an unlabelled `(c)` pinned to either one alone offers a column the rows
+-- carrying the other do not have.
 --
 -- HAS_DESK is declared from the BARE Company only, which is what lets a hop
 -- through it pin an unlabelled `(c)` to Company where the WORKS_AT edges alone
@@ -37,8 +39,9 @@ CREATE PROPERTY GRAPH TYPE SatisfyPluralEdgesInlineSubtype AS {
     }),
 
     (:Company {
-        id   :: INT NOT NULL,
-        name :: STRING NOT NULL
+        id        :: INT NOT NULL,
+        name      :: STRING NOT NULL,
+        smallOnly :: STRING NOT NULL
     }),
 
     (:Company&Large {
