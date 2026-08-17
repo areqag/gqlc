@@ -110,6 +110,11 @@ run_case "unbalanced quote falls back, feature" allow "$FEATURE_REPO" "echo 'oop
 run_case "quoted literal in echo"              allow "$MASTER_REPO"  'echo "git commit"'
 run_case "prose argument (bd-comment shape)"   allow "$MASTER_REPO"  'bd comment gqlc-xyz "next step: git commit the export"'
 run_case "heredoc body with prose+apostrophe"  allow "$MASTER_REPO"  "$(printf 'cat <<%s > /dev/null\ndo not ever run git commit here, it won'\''t fly\nEOF\n' "'EOF'")"
+# The limit of the row above it: quoting collapses a run into one token only
+# while the run is one quoted string. Quoted word by word the tokens survive
+# and the guard fires. Pinned deny because that is the behaviour today and it
+# errs closed; widening the row above to cover it would be the fail-open half.
+run_case "word-by-word quoting still denies"   deny  "$MASTER_REPO"  'echo "git" "commit" -m x'
 
 # --- core.hooksPath drift (bd gqlc-nzwa) ------------------------------------
 # Four config states, per bd gqlc-5fm. The fourth — a path that exists and is
@@ -279,7 +284,7 @@ run_raw_case "internal error warns, not silent"   warn   "$OK_REPO" 'not json at
 # disappearing. Deleting all 27 run_drift_case invocations reported "29 passed,
 # 0 failed" and exited 0; deleting the two escape-hatch rows reported "54
 # passed, 0 failed". Both are now failures.
-EXPECTED_ROWS=61
+EXPECTED_ROWS=62
 if [ "$((pass + fail))" -ne "$EXPECTED_ROWS" ]; then
   printf 'FAIL - suite size drifted: expected %d rows, ran %d\n' "$EXPECTED_ROWS" "$((pass + fail))"
   fail=$((fail + 1))

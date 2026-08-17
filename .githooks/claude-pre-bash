@@ -15,8 +15,11 @@
 #     gqlc-wa8c; measured, with a non-heredoc positive control that denies)
 #   - $(...) and `...` substitution bodies are analyzed recursively (they
 #     execute for real, even inside double quotes)
-#   - the rest is shlex-tokenized; quoted prose becomes single tokens and
-#     can never look like a `git commit` invocation
+#   - the rest is shlex-tokenized, so a multi-word quoted run collapses to one
+#     token and stops matching: `echo "git commit -m x"` is silent (measured).
+#     Word-by-word quoting does not collapse, so `echo "git" "commit" -m x`
+#     still denies (measured, control `echo git commit` denies too). The error
+#     is fail-closed, so it is left as is rather than widened into a parser
 #   - `cd` chains and `git -C` options fold into an effective directory,
 #     whose branch is read via git rev-parse / symbolic-ref (the latter
 #     covers unborn HEADs)
