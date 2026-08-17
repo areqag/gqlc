@@ -28,8 +28,8 @@ const (
 	hookSuiteSuffix = "-test.sh"
 )
 
-// hookSuites is every hook test suite in this repository, which is every file
-// in .githooks/tests/.
+// hookSuites is every file in .githooks/tests/ — this repository's hook test
+// suites, under the definition the walk below enforces rather than assumes.
 //
 // The classifier is the directory, not a glob over it. A glob is a classifier
 // that silently skips what it does not recognise: against `*-test.sh`, the
@@ -53,8 +53,10 @@ const (
 // directory is outside this test's reach. The justfile's comment on the recipe
 // says where suites go, which is the only thing holding that case.
 //
-// Dotfiles are skipped in both directories. A suite is not a dotfile, and an
-// editor swap file would otherwise redden the build for whoever has one open.
+// Dotfiles are skipped in both directories, which is a hole and a deliberate
+// one: `.foo-test.sh` would be skipped rather than refused. It is here because
+// an editor swap file would otherwise redden the build for whoever has a suite
+// open. Nothing in the tree spells a suite that way today.
 func hookSuites(t *testing.T) []string {
 	t.Helper()
 
@@ -72,9 +74,9 @@ func hookSuites(t *testing.T) []string {
 			continue
 		}
 		require.NotContainsf(t, strings.ToLower(e.Name()), "test",
-			"%s/%s looks like a test suite but does not live in %s. Nothing runs a "+
-				"suite outside that directory: %q names its files by path, and an "+
-				"unwired suite is an absent gate (bd gqlc-l45j).",
+			"%s/%s looks like a test suite but does not live in %s, and %q reaches no "+
+				"suite outside it: the recipe names its files by path. An unwired suite "+
+				"is an absent gate (bd gqlc-l45j).",
 			hooksDir, e.Name(), hookTestsDir, hookTestsRecipe)
 	}
 
@@ -234,17 +236,18 @@ type recipeRun struct {
 // the last. That is not a hypothetical carrier — `lint-hooks` in this same
 // justfile is a shebang recipe.
 //
-// `just` is required rather than skipped over. The only way to run this
-// repository's tests is `just test`, so an absent `just` is a broken
-// environment, and a skip here would be the fail-open shape this file exists
-// to close.
+// `just` is required rather than skipped over. It is what the CI test job runs
+// (asserted below) and what `.githooks/pre-push` runs, so an absent `just` is a
+// broken environment rather than a supported one. `go test ./...` reaches this
+// package without it, which is exactly the run that would skip past — and a
+// skip here would be the fail-open shape this file exists to close.
 func runTestHooks(t *testing.T, fail int) recipeRun {
 	t.Helper()
 
 	justBin, err := exec.LookPath("just")
 	require.NoError(t, err, "`just` is not on PATH, and this test runs the %q recipe "+
-		"rather than reading it. `just test` is this repository's only test entrypoint, "+
-		"so this is a broken environment and not a case to skip past.", hookTestsRecipe)
+		"rather than reading it. CI runs these tests through `just`, so this is a broken "+
+		"environment and not a case to skip past.", hookTestsRecipe)
 
 	recipe := rawRecipe(t, readRepoFile(t, justfile), hookTestsRecipe)
 	suites := suitePathsIn(recipe)
@@ -343,10 +346,13 @@ func ciJustInvocations(t *testing.T) map[string][]string {
 
 // ...and the recipe has to be reached by something CI runs.
 //
-// Nothing else in the tree references test-hooks. Deleting the single token
-// that names it in `test:`'s dependency list retires all of its suites at once,
-// leaves every assertion above green — they are about what the recipe contains,
-// not about whether anyone calls it — and produces no CI output to notice.
+// One line in the tree invokes test-hooks: the dependency list of `test:` in
+// the justfile. The other references are prose that runs nothing — a `# Run
+// via: just test-hooks` header in six of the suites, and a pointer in
+// .githooks/claude-pre-bash — so deleting that single token retires all of its
+// suites at once, leaves every assertion above green (they are about what the
+// recipe contains, not about whether anyone calls it), and produces no CI
+// output to notice. Those headers would still say the suites are run.
 //
 // Derived through the dependency graph rather than asserting `test: ... test-hooks`
 // directly, because the property is that the recipe is reachable from a required

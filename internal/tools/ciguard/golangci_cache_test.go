@@ -4,11 +4,12 @@
 //
 // The action is what stops every linting job re-downloading the binary, which
 // is what a GitHub 429 turned into a red required context that never compiled
-// the change. Nothing else notices when that join breaks. A cache path that no
-// longer matches where the justfile installs restores into a directory nothing
-// reads; a version literal that drifts keys the cache to a build
-// ensure-golangci rejects. Both leave a green cache step above a full download
-// on every job — the exposure back, with no signal that it returned.
+// the change. A broken join reddens nothing: a cache path that no longer
+// matches where the justfile installs restores into a directory nothing reads,
+// and a version literal that drifts keys the cache to a build ensure-golangci
+// rejects. Both leave a green cache step above a full download on every linting
+// job — the exposure back, with no signal that it returned. These assertions
+// are what turns either one red.
 package ciguard_test
 
 import (
@@ -45,12 +46,12 @@ const (
 // first. An unmodelled key is an unasserted key: `if` was added after a
 // switched-off restore turned out to be unassertable, and the next round found
 // `continue-on-error` doing the same damage through the field beside it. The
-// schema for a composite action's `runs.steps[*]` permits exactly ten keys —
-// run, shell, uses, with, name, id, if, env, continue-on-error,
-// working-directory (json.schemastore.org/github-action.json) — and a job's
-// step adds timeout-minutes. All ten are here; timeout-minutes is not, because
-// a timeout makes a step fail and nothing here is guarding against a step that
-// fails.
+// schema for a composite action's `runs.steps[*]` documents ten keys — run,
+// shell, uses, with, name, id, if, env, continue-on-error, working-directory
+// (docs.github.com "Metadata syntax for GitHub Actions", read 2026-08-17) — and
+// a job's step adds timeout-minutes. All ten are here; timeout-minutes is not,
+// because a timeout makes a step fail and nothing here is guarding against a
+// step that fails.
 //
 // If, ContinueOnError and Env are yaml.Node rather than typed values because
 // each has more than one legal type — `if: false` is a YAML bool,
@@ -514,15 +515,23 @@ func justInvocations(run string) []string {
 // that in a job that can itself fail.
 //
 // The keys ruled out rather than asserted, so the next reader does not have to
-// re-derive them. Of a job step's eleven schema keys: `with` on this reference
-// is inert, since the action declares no inputs; `timeout-minutes` makes a step
-// fail, and nothing here guards against failing; `shell`, `run` and
-// `working-directory` do not belong on a `uses:` step; `id` and `name` are
-// cosmetic. Of a job's keys: `strategy.fail-fast` decides whether sibling
-// matrix jobs are cancelled, not what this job concludes; `defaults.run.shell`
-// rewrites `run:` steps and cannot reach across into a composite action, whose
-// steps carry their own `shell:` (pinned by
-// TestGolangciActionStepsCannotBeSwitchedOffOrSwallowed); `concurrency`,
+// re-derive them.
+//
+// A `uses:` step takes eight of a job step's eleven keys. actionlint — itself a
+// required context here — refuses the other three on one, naming the permitted
+// set: continue-on-error, env, id, if, name, timeout-minutes, uses, with
+// (measured 2026-08-17 against actionlint's syntax-check on a minimal workflow;
+// `shell:`, `working-directory:` and `run:` each exit 1). Of those eight,
+// `uses`, `if`, `continue-on-error` and `env` are asserted below;
+// `timeout-minutes` makes the step fail, and nothing here guards against
+// failing; `with` is inert, since the action declares no inputs; `id` and
+// `name` are cosmetic.
+//
+// Of a job's keys: `strategy.fail-fast` decides whether sibling matrix jobs are
+// cancelled, not what this job concludes; a job-level `defaults.run.shell`
+// applies to `run:` steps and is in any case overridden by the explicit
+// `shell:` each of the action's own run steps carries, which
+// TestGolangciActionStepsCannotBeSwitchedOffOrSwallowed pins; `concurrency`,
 // `needs` and `timeout-minutes` can stop the job, which stops the download with
 // it; `container`, `runs-on`, `services`, `environment`, `permissions`,
 // `outputs`, `env` and `name` change where or how the steps run, not whether a
