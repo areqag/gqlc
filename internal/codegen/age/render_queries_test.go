@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"maps"
 	"slices"
 	"strconv"
@@ -132,17 +133,43 @@ func TestDecodeFuncRefusesACarrierItWasNotTaught(t *testing.T) {
 // table gains without an arm here becomes visible. Without it the refusal
 // fires only once some fixture happens to project the new width, and a
 // table entry with no fixture behind it lands silently.
+//
+// What this adds over its neighbours is the Scalar half. On the Property
+// half it is the WEAKER of two: TestTheDecodeAndTheGateReadTheSameSidecarKeys
+// already sweeps declaredPropertyTypes through typeMap.Property into
+// writeEntityFieldDecode, and so reaches decodeFunc for every declared
+// property width keyed on the graph type constants rather than on what
+// types.go returns. Nothing else is keyed on typeMap.Scalar or
+// typeMap.Temporal.
+//
+// The counts below are per method rather than over the map, because one
+// assertion over three sources fires only when all three fall silent: a
+// walk that dropped Scalar and Temporal would still hand back a
+// non-empty map with 17 rows in it. A count pins the SIZE of the sweep
+// and nothing about its membership; membership is what the subtests
+// pin, one per Go type text.
+//
+// Temporal's zero is an assertion about this backend, not a category
+// that happens to be empty. Every arm of typeMap.Temporal answers
+// ok=false, which is why Prepare refuses a temporal column with
+// ErrUnrepresentableTemporal and no temporal carrier reaches decodeFunc
+// at all. The number is pinned so that a temporal width gaining a
+// carrier cannot pass through here silently: it fails that line, and a
+// carrier with no arm fails at its subtest first.
+//
+// The counts come after the subtests deliberately. require aborts the
+// test at the first failure, so a count read ahead of the loop would
+// answer a table that grew an unserved carrier with "the size changed"
+// and never reach the row that says which carrier has no arm. Read after,
+// both are reported and the row is read first. The method set is read
+// ahead of the loop instead, because it says what the sweep ranged over
+// at all.
 func TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces(t *testing.T) {
 	byMethod := typeTableGoTypes(t)
-	require.NotEmpty(t, byMethod, "no typeMap method was read out of types.go, so the sweep ranged over nothing")
 
-	naming := 0
-	for _, goTypes := range byMethod {
-		if len(goTypes) > 0 {
-			naming++
-		}
-	}
-	require.GreaterOrEqual(t, naming, 2, "only %d of the %d typeMap methods named a Go type: %v", naming, len(byMethod), byMethod)
+	require.Equal(t, []string{"Property", "Scalar", "Temporal"}, slices.Sorted(maps.Keys(byMethod)),
+		"these are the typeMap methods the walk read out of types.go; an empty set means it read none "+
+			"and the sweep ranged over nothing, and a longer one means the table grew a method unread here")
 
 	for _, method := range slices.Sorted(maps.Keys(byMethod)) {
 		for _, goType := range byMethod[method] {
@@ -151,6 +178,11 @@ func TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces(t *testing.T) {
 			})
 		}
 	}
+
+	require.Len(t, byMethod["Property"], 17, "typeMap.Property named %v", byMethod["Property"])
+	require.Len(t, byMethod["Scalar"], 6, "typeMap.Scalar named %v", byMethod["Scalar"])
+	require.Empty(t, byMethod["Temporal"], "typeMap.Temporal named %v, so this backend now carries a temporal "+
+		"width: read it against decodeFunc before moving this number", byMethod["Temporal"])
 }
 
 // requireCarrierHasAnArm requires decodeFunc to name a helper for one Go
@@ -169,24 +201,35 @@ func requireCarrierHasAnArm(t *testing.T, goType string) {
 	}
 }
 
-// typeTableGoTypes is every Go type text the type table can name, keyed
-// by the typeMap method that names it. A method that names none is keyed
-// to an empty entry, so the caller can tell a method that produces no Go
-// type from one the walk did not reach.
+// typeTableGoTypes is every Go type text the type table names as a
+// returned string literal, keyed by the typeMap method that names it. A
+// method that names none is keyed to an empty entry, so the caller can
+// tell a method that produces no Go type from one the walk did not reach.
 //
 // Read out of types.go's AST rather than listed here: a list would be a
 // copy of the table, and a copy goes stale in the case this sweep exists
 // for. Reading the AST also means a commented-out arm contributes
 // nothing, which a scan of the source bytes could not tell.
 //
-// It collects returned string literals, so the list arm's composed
-// "[]" + elemTy is not among them. decodeFunc peels a slice down to its
-// element, and the element widths that arm composes with are the literals
-// of the scalar arms beside it.
+// "As a returned string literal" is the whole of what this reads, and it
+// is why the walk REFUSES a return it cannot read rather than passing
+// over it. A Go type text returned through a constant, a variable or a
+// call is one this cannot see, and a sweep that skipped such a row would
+// go green because it was looking at nothing — which is the defect this
+// sweep exists against, one level up. So a return in a typeMap method is
+// one of the two shapes below or it fails the test at its position.
+//
+// The two shapes: a string literal, which names a Go type and is
+// collected — the refusing arms' empty literal names none and is dropped
+// — and `"[]" + elem`, the list arm's composed text, which is accepted
+// and contributes nothing of its own. decodeFunc peels a slice down to
+// its element, and the element widths that arm composes with are the
+// literals of the scalar arms beside it.
 func typeTableGoTypes(t *testing.T) map[string][]string {
 	t.Helper()
 
-	file, err := parser.ParseFile(token.NewFileSet(), "types.go", nil, parser.SkipObjectResolution)
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "types.go", nil, parser.SkipObjectResolution)
 	require.NoError(t, err, "types.go does not parse")
 
 	byMethod := map[string][]string{}
@@ -200,18 +243,11 @@ func typeTableGoTypes(t *testing.T) map[string][]string {
 		}
 		ast.Inspect(fn.Body, func(n ast.Node) bool {
 			ret, ok := n.(*ast.ReturnStmt)
-			if !ok || len(ret.Results) == 0 {
+			if !ok {
 				return true
 			}
-			lit, ok := ret.Results[0].(*ast.BasicLit)
-			if !ok || lit.Kind != token.STRING {
-				return true
-			}
-			text, err := strconv.Unquote(lit.Value)
-			require.NoError(t, err, "%s returns a string literal that does not unquote: %s", fn.Name.Name, lit.Value)
-			// The refusing arms return the empty text beside ok=false, which
-			// names no Go type.
-			if text == "" || slices.Contains(byMethod[fn.Name.Name], text) {
+			text, names := returnedGoType(t, fset, fn.Name.Name, ret)
+			if !names || slices.Contains(byMethod[fn.Name.Name], text) {
 				return true
 			}
 			byMethod[fn.Name.Name] = append(byMethod[fn.Name.Name], text)
@@ -219,6 +255,43 @@ func typeTableGoTypes(t *testing.T) map[string][]string {
 		})
 	}
 	return byMethod
+}
+
+// returnedGoType is the Go type text one return of a typeMap method
+// names, and whether it names one at all. It fails the test on a return
+// whose shape this walk cannot read: see typeTableGoTypes for why the
+// answer there is a refusal and not a false.
+//
+// The failing expression is rendered from the AST rather than sliced out
+// of the source bytes, so what the message quotes is what the compiler
+// sees and not what a comment beside it says.
+func returnedGoType(t *testing.T, fset *token.FileSet, method string, ret *ast.ReturnStmt) (string, bool) {
+	t.Helper()
+
+	const cannotRead = "this walk cannot read the return at %s: %s returns %s, and this reads a string " +
+		"literal or the list arm's `\"[]\" + elem` and nothing else — a Go type named any other way is " +
+		"invisible here, so the walk refuses rather than skip it"
+	where := fset.Position(ret.Pos())
+
+	require.NotEmpty(t, ret.Results, cannotRead, where, method, "no value")
+
+	switch first := ret.Results[0].(type) {
+	case *ast.BasicLit:
+		require.Equal(t, token.STRING, first.Kind, cannotRead, where, method, first.Value)
+		text, err := strconv.Unquote(first.Value)
+		require.NoError(t, err, "%s returns a string literal that does not unquote: %s", method, first.Value)
+		// The refusing arms return the empty text beside ok=false, which
+		// names no Go type.
+		return text, text != ""
+	case *ast.BinaryExpr:
+		lhs, isLit := first.X.(*ast.BasicLit)
+		require.True(t, isLit && first.Op == token.ADD && lhs.Kind == token.STRING && lhs.Value == `"[]"`,
+			cannotRead, where, method, types.ExprString(first))
+		return "", false
+	default:
+		require.Fail(t, "unreadable return in the type table", cannotRead, where, method, types.ExprString(first))
+		return "", false
+	}
 }
 
 // isTypeMapMethod reports whether a declaration is a method on typeMap,
