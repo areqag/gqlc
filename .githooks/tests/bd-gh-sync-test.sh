@@ -271,9 +271,11 @@ push_batches() { grep -c -- '^bd github push' "$TMP/calls"; }
 ISSUE=https://github.com/org/r/issues
 
 # Edit times for the fixtures below. Twelve hours apart, so no resolution or
-# clock-disagreement margin can reorder them, and every fixture that expects a
-# pull says on both axes that GitHub moved last — leaving each hold to be
-# decided by the rule it was written for rather than by a missing field.
+# clock-disagreement margin can reorder them. A fixture whose GH body extends
+# the bead description reaches the edit-time gate, so the ones there that expect
+# a pull carry both, leaving each hold to be decided by the rule it was written
+# for rather than by a missing field. A fixture whose bodies are byte-equal does
+# not reach the gate and carries neither — b-open is one.
 T_EARLY='2026-01-01T00:00:00Z'
 T_LATE='2026-01-01T12:00:00Z'
 # `SKEW_S` in .githooks/bd-gh-sync, written here too. The two rows either side
@@ -543,10 +545,10 @@ edit_time_case "bd side numeric"     ',"updated_at":1767225600' "$GH_LATE"
 # The stub answers `gh issue list` out of a fixture file whatever fields the
 # script asked for, so a listing that stopped requesting one of them reads here
 # exactly like a listing that still does. In production it does not: the field
-# arrives absent and every decision the selection reads it for is taken on a
-# value nobody fetched. For updatedAt that is a hold on an edit time the run
-# never asked for, so the pull --prefer-github exists to serve becomes
-# unreachable with nothing objecting. Read off argv, where the request is.
+# arrives absent and whatever the selection reads it for is decided on a value
+# nobody fetched. For updatedAt that is a hold on an edit time the run never
+# asked for, so the pull --prefer-github exists to serve becomes unreachable
+# with nothing objecting. Read off argv, where the request is.
 run_sync pull \
     "[{\"id\":\"b-ask\",\"status\":\"open\",\"external_ref\":\"$ISSUE/3\",\"description\":\"line one\"$BD_EARLY}]" \
     "[{\"number\":3,\"state\":\"OPEN\",\"body\":\"line one\nline two added on GH\"$GH_LATE}]"
