@@ -33,8 +33,11 @@ import (
 // beside an intact graded span can say the opposite of it (gqlc-e143);
 // a binding stated with no map literal around it is unread
 // (gqlc-offa); a parenthesis-less parameter list on its own line
-// inside a code block, fenced or indented, is unread too — the paren
-// anchor reaches a block like any other text (gqlc-cgat); a listed
+// inside a code block, fenced or indented, is unread too — as is one
+// inside a code span whose backtick run the block rule takes for a
+// fence, since that rule tests bytes rather than parsing markdown —
+// while the paren anchor reaches a block like any other text
+// (gqlc-cgat); a listed
 // document keeps its census entry on one surviving site (gqlc-0rjn);
 // and a list replacing one of the exhibits specBareListExhibits names,
 // spelled the same way, takes that entry's exemption (gqlc-x2sg).
@@ -1062,6 +1065,30 @@ func TestSpecBareSigScannerDetectsDrift(t *testing.T) {
 		name: "an indented fence is still a fence",
 		text: "- an example:\n\n  ```\n  ctx context.Context, minAge int64\n  ```\n",
 	}, {
+		// The block rule is a byte test and this row is the first of the
+		// two spellings where it disagrees with cmark-gfm (gqlc-cgat).
+		// A backtick fence's info string may not hold a backtick, so this
+		// line opens no fence and renders identically to the same list in
+		// one backtick — which the first rows above read. Pinned as it
+		// stands so that closing the divergence is red here and has to
+		// move the floor written in C1 §5.3 with it.
+		name: "a line-opening run of three is skipped even when the line closes it",
+		text: "```ctx context.Context, minAge int64```\n",
+	}, {
+		// A tab is indent, so this is an indented code block to a
+		// renderer and its run is literal text, not a fence.
+		name: "a tab-indented run opens no span either",
+		text: "prose:\n\n\t```ctx context.Context, minAge int64\n\nmore prose\n",
+	}, {
+		// The second divergence, and the reason the first cannot be
+		// closed by a better fence rule: the line-opening test is reached
+		// only by a run of three or more, so this span is read although a
+		// renderer shows it as the contents of an indented code block.
+		name:    "a tab-indented single backtick is read regardless",
+		text:    "prose:\n\n\t`ctx context.Context, minAge int64`\n\nmore prose\n",
+		wantArg: "minAge",
+		wantAny: true,
+	}, {
 		// The block rule takes the block's own delimiter, not what is
 		// written inside it: a drifted list printed in a span there
 		// grades rather than being skipped for being an example.
@@ -1277,6 +1304,16 @@ func TestSpecScannersReportUnreadableSites(t *testing.T) {
 		require.Len(t, unclosed, 1)
 		require.Equal(t, 2, unclosed[0].line)
 	})
+	// The row above is the shorter-run direction. Pairing by length is two
+	// claims, and a longer run closing a shorter opener is the other one:
+	// cmark-gfm leaves the backticks below as literal text, printing no
+	// code element at all.
+	t.Run("a longer closing run does not close a shorter opener", func(t *testing.T) {
+		sigs, unclosed := scanBareSigs("witness.md", "prose\nthe list is `ctx context.Context, minAge int64``\nmore prose\n")
+		require.Empty(t, sigs)
+		require.Len(t, unclosed, 1)
+		require.Equal(t, 2, unclosed[0].line)
+	})
 }
 
 // docFiles lists every markdown document under docRoots, named relative
@@ -1404,6 +1441,25 @@ func gradeParams(list string) (name string, exempt, gradable bool) {
 // So what a code block hides from this sweep is the parenthesis-less
 // spelling, which is also what running prose hides (gqlc-e143,
 // gqlc-cgat).
+//
+// That block rule is a byte test, not a parse, and it does not agree
+// with a renderer on every spelling. Two divergences are measured,
+// both against cmark-gfm, and both are gqlc-cgat:
+//
+//   - A run of three or more that opens its line but is closed by
+//     another run on the same line is a span to CommonMark — a backtick
+//     fence's info string may not contain a backtick, so the line opens
+//     no fence — and is skipped here. It renders byte-identically to
+//     the same list written in one backtick, which is read.
+//   - The other direction is not reachable from this rule at all: the
+//     line-opening test below is consulted only for a run of three or
+//     more, so a list in a single backtick on a tab-indented line is
+//     read here while a renderer shows it as the literal contents of an
+//     indented code block.
+//
+// Closing either spelling would leave the other, because the gap is
+// between scanning bytes and parsing markdown rather than between this
+// rule and a better one.
 func scanBareSigs(file, text string) (sigs, unclosed []specSig) {
 	for _, loc := range tickAnchorRe.FindAllStringIndex(text, -1) {
 		open := loc[0]
@@ -1701,10 +1757,8 @@ var listPlaceholderRe = regexp.MustCompile(
 // at every other boundary, so that a wrapped or reflowed parameter list
 // still matches.
 //
-// The normalisation belongs in the pattern and not in the document:
-// collapsing a document's whitespace moves every byte in it, and these
-// failures are only useful while they can name a line (ADR 0029
-// decision 8).
+// Why the normalisation is compiled in here rather than applied to the
+// documents is ADR 0029 decision 8 (`docs/adr/0029-the-codegen-spec-fence.md`).
 func anchorPattern(anchor string) *regexp.Regexp {
 	var b strings.Builder
 	for i := 0; i < len(anchor); i++ {
@@ -1728,9 +1782,15 @@ type codeSpan struct {
 	at   int
 }
 
-// inlineCodeSpans returns every code run in text[from:to], contents
-// collapsed. Runs are paired by length, so the prose between two spans
-// is skipped the way a markdown renderer skips it.
+// inlineCodeSpans returns the code runs in text[from:to] up to the first
+// run nothing closes, contents collapsed. Runs are paired by length, so
+// the prose between two spans is skipped the way a markdown renderer
+// skips it.
+//
+// Stopping at an unpairable run drops the spans after it in that range.
+// The one caller is scanParamListRules, whose range is a single bullet,
+// so what is dropped is the rest of one bullet rather than the rest of a
+// document.
 func inlineCodeSpans(text string, from, to int) []codeSpan {
 	var out []codeSpan
 	bounded := text[:to]
@@ -1778,12 +1838,17 @@ func closingTicks(text string, i, n int) int {
 	return -1
 }
 
-// opensLine reports whether nothing but spaces precedes text[i] on its
-// line, which is where a code fence's delimiter sits. The indent is
+// opensLine reports whether nothing but whitespace precedes text[i] on
+// its line, which is where a code fence's delimiter sits. The indent is
 // skipped because a fence inside a list item carries one.
+//
+// Tabs count as indent. A tab-indented run is never a fence to
+// cmark-gfm — the line is an indented code block, so the run is literal
+// text — and treating it as one keeps this sweep from reading a block
+// and naming its delimiter line as the site.
 func opensLine(text string, i int) bool {
 	indent := text[strings.LastIndexByte(text[:i], '\n')+1 : i]
-	return strings.TrimLeft(indent, " ") == ""
+	return strings.TrimLeft(indent, " \t") == ""
 }
 
 func isIdentByte(c byte) bool {

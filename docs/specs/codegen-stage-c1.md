@@ -749,20 +749,46 @@ fenced.** `TestSpecMethodArgIsGeneratorOwned` and
 (`internal/codegen/conformance/specfence_test.go`) read every
 markdown document under `docs/`, plus `README.md` and `CONTEXT.md`,
 and hold three shapes against `codegen.ParamArg` read from the
-emitter: every parameter list opening on `ctx context.Context`
-behind an open paren or a code span's opening backticks and holding
-exactly one more parameter; the parameter-list tail each
-`<param-list>` bullet spells out, which is where the rule actually
-lives, because the method template above prints only the placeholder;
-and the value half of every `map[string]any` literal's entries. The
-first shape has one written exception: the handful of
+emitter: a parameter list opening on `ctx context.Context` behind an
+open paren or a code span's opening backticks and holding exactly one
+more parameter; the parameter-list tail each `<param-list>` bullet
+spells out, which is where the rule actually lives, because the method
+template above prints only the placeholder; and the value half of
+every `map[string]any` literal's entries.
+
+At least two things exempt the first shape, and that count is a floor
+for a structural reason rather than a tally waiting to be completed:
+the sweeps match byte patterns and do not parse markdown, so the set
+of runs they treat as a code span and the set a renderer treats as one
+overlap on every spelling measured without being the same set.
+
+The first exemption is written down: the handful of
 parenthesis-less parameter lists ADR 0029 prints as exhibits of what
 the fence catches rather than as claims about the emitted surface,
 each named in that test by its exact text. An exhibit is exempt
 once, so a second list spelled the same way grades, and every other
 parenthesis-less list in that document is read on the same terms as
-any other document's. A placeholder in the type position is not an
-exemption for the name beside it — over a swept *signature* the fence
+any other document's.
+
+The second is measured rather than written, and it is where the byte
+test and a renderer part company. A run of three or more backticks
+opening its line is taken here for a fenced block's delimiter and
+opens no span; but a backtick fence's info string may not itself
+contain a backtick, so a line whose run of three is closed by another
+run before the line ends opens no fence to CommonMark either — it is
+an ordinary code span, and `cmark-gfm` renders it byte-identically to
+the same list written inside one backtick. Two spellings a reader
+cannot tell apart: the one in three backticks is green here, the one
+in a single backtick red (`gqlc-cgat`). Closing that spelling would
+not close the exemption, because the line-opening test is reached only
+by a run of three or more — so a list inside a single backtick on a
+tab-indented line is read here while a renderer shows it as the
+literal contents of an indented code block. Both directions are pinned
+in `TestSpecBareSigScannerDetectsDrift`, so the count above moves only
+along with the rows.
+
+A placeholder in the type position is not an exemption for the name
+beside it — over a swept *signature* the fence
 grades the name position and reads nothing off the type, so a
 `<bareParam> <T>` written there is red on its name however the type
 is spelled, and a lone `<bareParam>` is graded as a declaration
@@ -844,13 +870,18 @@ parameter name instead was measured green. The backtick anchor
 closes that spelling, and the delimiter is the whole run of
 backticks rather than one of them — closed by a run of the same
 length — so the same bullet written inside two backticks is read the
-way one written inside a single backtick is. Three neighbouring ones
+way one written inside a single backtick is. Four neighbouring ones
 stay open: a parenthesis-less parameter list with no code span around
 it is not read at all, in running prose or on its own line inside a
 fenced or indented code block — the paren anchor needs no span and
 reaches a block like any other text, so what a block hides is the
-parenthesis-less spelling (`gqlc-cgat`); the binding sweep has no
-second anchor, so `"minAge": minAge` stated with no `map[string]any`
+parenthesis-less spelling (`gqlc-cgat`); a list inside a span that
+same block rule declines to open, read from the other side — the rule
+tests where a run of backticks sits rather than parsing the document,
+so it skips a line-opening run of three that the line goes on to
+close, and reads a single backtick on a tab-indented line, where a
+renderer does the opposite of both (`gqlc-cgat`); the binding sweep
+has no second anchor, so `"minAge": minAge` stated with no `map[string]any`
 literal around it is unswept (`gqlc-offa`); and a claim put in the
 place of one of the parenthesis-less lists that test names as
 exhibits, spelled the way that exhibit was, takes its exemption
