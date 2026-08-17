@@ -28,11 +28,11 @@ import (
 // which is the defect the gate was built to refuse — and it would do so
 // with the gate still compiling and still passing its own rows.
 //
-// So the two are compared per width rather than asserted about
-// TIMESTAMP: the emitted decode is read for the key it names, and the
-// gate is run over a schema declaring that key and over one declaring a
-// different key. Neither side is read off offsetSidecar, so a decode
-// taught to zone a width by any other route is a disagreement here.
+// The comparison runs per width: the emitted decode is read for the key
+// it names, and the gate is run over a schema declaring that key and
+// over one declaring a different key. Neither side is read off
+// offsetSidecar, so a decode taught to zone a width by any other route
+// is a disagreement here.
 //
 // The domain includes the widths this backend refuses today, which is
 // where the forward coverage comes from: TIME is in it now, carries no
@@ -40,7 +40,21 @@ import (
 // one.
 func TestTheDecodeAndTheGateReadTheSameSidecarKeys(t *testing.T) {
 	widths := declaredPropertyTypes(t)
-	zoned, carried := 0, 0
+
+	// The widths the type table gives a carrier, collected before the
+	// sweep so the sweep answers to a list it did not build. A width
+	// skipped inside the loop is missing from compared and named at the
+	// match below; a count of the rows run would report the sweep was
+	// non-empty and nothing more.
+	var carried []graph.PropertyType
+	for _, pt := range widths {
+		if _, ok := (typeMap{}).Property(pt); ok {
+			carried = append(carried, pt)
+		}
+	}
+	require.NotEmpty(t, carried, "no width in the domain has a carrier, so nothing was compared")
+
+	compared, zoned := make([]graph.PropertyType, 0, len(carried)), 0
 	for _, pt := range widths {
 		goType, ok := typeMap{}.Property(pt)
 		if !ok {
@@ -48,7 +62,7 @@ func TestTheDecodeAndTheGateReadTheSameSidecarKeys(t *testing.T) {
 			// and neither the decode nor the gate can see one.
 			continue
 		}
-		carried++
+		compared = append(compared, pt)
 		for _, nullable := range []bool{false, true} {
 			f := codegen.EntityField{PropName: "at", Field: "At", GoType: goType, Nullable: nullable}
 
@@ -83,7 +97,8 @@ func TestTheDecodeAndTheGateReadTheSameSidecarKeys(t *testing.T) {
 				pt, nullable, reads, h.zone)
 		}
 	}
-	require.NotZero(t, carried, "no width in the domain has a carrier, so nothing was compared")
+	require.ElementsMatch(t, carried, compared,
+		"the sweep did not run over every width the type table gives a carrier")
 	require.NotZero(t, zoned, "no width in the domain reads a sidecar, so the agreement held vacuously")
 }
 
@@ -127,21 +142,32 @@ func entityDeclaring(f codegen.EntityField, prop string) codegen.Entity {
 	return e
 }
 
-// declaresAWidth reports whether an unannotated const spec is one a
-// width would be declared as.
+// declaresAWidth reports whether a spec carrying no PropertyType
+// annotation is one a width would be declared as.
 //
 // Go does not carry a type across a spec that has its own value, so
-// `TypeFoo = "FOO"` is an untyped string constant. It serves as a
-// graph.PropertyType at every call site that takes one, which is what
-// makes it a width everywhere except in a walk keyed on the annotation.
-// Refused rather than skipped, at the two shapes such a declaration
-// takes: a spec sharing a block with the annotated widths, and one named
-// as they are.
+// `TypeFoo = "FOO"` is an untyped string constant and
+// `TypeFoo = PropertyType("FOO")` a typed one written without the
+// annotation. Both serve as a graph.PropertyType at every call site that
+// takes one, which is what makes them widths everywhere except in a walk
+// keyed on the annotation.
+//
+// The marks read are a spec sharing a block with the annotated widths
+// and a name prefixed as they are; the values recognised are a string
+// literal and a conversion whose function is the identifier
+// PropertyType. A declaration bearing neither mark, or building its text
+// some other way, is not seen here.
 func declaresAWidth(gen *ast.GenDecl, value *ast.ValueSpec) bool {
 	if len(value.Values) == 0 {
 		return false
 	}
 	for _, v := range value.Values {
+		if call, ok := v.(*ast.CallExpr); ok {
+			if id, ok := call.Fun.(*ast.Ident); !ok || id.Name != "PropertyType" {
+				return false
+			}
+			continue
+		}
 		if lit, ok := v.(*ast.BasicLit); !ok || lit.Kind != token.STRING {
 			return false
 		}
@@ -164,15 +190,14 @@ func declaresAWidth(gen *ast.GenDecl, value *ast.ValueSpec) bool {
 }
 
 // declaredPropertyTypes is every width internal/graph declares under its
-// PropertyType annotation, read off the declaration rather than listed
-// here. A width declared without that annotation fails declaresAWidth
-// above rather than dropping out of the domain.
+// PropertyType annotation, derived from the declaration itself, so an
+// annotated width joins the domain on the day the vocabulary gains it
+// and no edit is needed here.
 //
-// A list written here would cover the widths whoever wrote it knew
-// about, and the sweep above is for the widths nobody has admitted yet:
-// its whole forward claim is that a width added to the vocabulary is
-// compared on the day this backend gives it a carrier. Reading the
-// declaration is what makes that true without an edit here.
+// const and var blocks are both read: the annotation is legal on either
+// and it is the mark this walk keys on. A spec carrying no annotation is
+// put to declaresAWidth, which fails the walk at the shapes named there
+// instead of letting the domain go quietly short a width.
 //
 // Every .go file in the package is read, so moving the constants between
 // files does not shrink the domain, and a walk that reached none of them
@@ -195,7 +220,7 @@ func declaredPropertyTypes(t *testing.T) []graph.PropertyType {
 
 		for _, decl := range file.Decls {
 			gen, ok := decl.(*ast.GenDecl)
-			if !ok || gen.Tok != token.CONST {
+			if !ok || (gen.Tok != token.CONST && gen.Tok != token.VAR) {
 				continue
 			}
 			for _, spec := range gen.Specs {
@@ -205,14 +230,15 @@ func declaredPropertyTypes(t *testing.T) []graph.PropertyType {
 				}
 				if id, ok := value.Type.(*ast.Ident); !ok || id.Name != "PropertyType" {
 					require.False(t, declaresAWidth(gen, value),
-						"%s declares %v with no PropertyType annotation, so it is an untyped constant this walk does not see: the domain would be short a width with the sweep still reporting agreement",
+						"%s declares %v without the PropertyType annotation this walk reads: the domain would be short a width with the sweep still reporting agreement",
 						name, value.Names)
 					continue
 				}
+				require.NotEmpty(t, value.Values, "%s declares %v as a PropertyType with no value this walk can read", name, value.Names)
 				for _, v := range value.Values {
 					lit, ok := v.(*ast.BasicLit)
 					require.True(t, ok && lit.Kind == token.STRING,
-						"a PropertyType constant in %s is not a string literal, so the domain is short one width", name)
+						"%s declares %v as a PropertyType whose value is not a string literal, so the domain is short one width", name, value.Names)
 					text, err := strconv.Unquote(lit.Value)
 					require.NoError(t, err)
 					out = append(out, graph.PropertyType(text))

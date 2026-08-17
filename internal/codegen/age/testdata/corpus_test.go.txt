@@ -961,17 +961,16 @@ func TestAgtypeZoneReadsAnOffsetInSeconds(t *testing.T) {
 // east of UTC, and the wall clock read off it is decades from the
 // instant stored beside it.
 //
-// A day either way, exclusive, is the bound. Both edges are pinned
-// rather than the sign alone, because a check written over the magnitude
-// of one side only refuses half the values it was built to refuse.
+// A day either way, exclusive, is the bound, and both signs of it are
+// pinned: an offset outside a day is refused on whichever side of UTC it
+// falls.
 func TestAgtypeZoneRefusesAnOffsetOutsideADay(t *testing.T) {
 	at := instants[2].at
 
-	// One second inside the bound at each edge. These say the refusal is
-	// a bound and not a list of the offsets a zone database happens to
-	// hold: +23:59:59 belongs to no zone and is still an offset, and a
-	// helper that refused it would refuse a graph a future zone database
-	// could legitimately carry.
+	// One second inside the bound at each edge. +23:59:59 belongs to no
+	// zone a database holds today and is read here anyway: the admitted
+	// set is a range, so a graph a future zone database would accept
+	// survives this read.
 	for _, offset := range []int{86399, -86399} {
 		raw := strconv.Itoa(offset)
 		got, err := agtypeZone(map[string][]byte{"occurredAtOffset": []byte(raw)}, "occurredAtOffset", at)

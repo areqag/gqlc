@@ -42,19 +42,15 @@ const goInstant = "time.Time"
 // Flat rather than a member of a map so the instant stays the property
 // itself and an author's ORDER BY over it needs no rewriting.
 //
-// The emitted code READS this property and never WRITES it. That is the
-// whole of the asymmetry and it is deliberate: the sidecar is an interop
-// affordance for a graph some other tool wrote, so that a zone already
-// in the graph survives a read through gqlc. Writing one would mean
-// gqlc adding a parameter to the author's CREATE, which ADR 0005
-// forbids; a graph written through gqlc therefore carries no sidecar and
-// reads back in UTC, at the instant it was written. A read path with no
-// write path is not dead code here — nothing gqlc emits can reach it,
-// and everything else that writes the graph can.
-//
-// The name is derived rather than declared, so it can collide with a
-// property the author owns; rejectOffsetSidecarCollisions refuses such a
-// schema rather than letting one key have two readers.
+// No sidecar is derived on the write side: gqlc adds no parameter to the
+// author's CREATE (ADR 0005), so an instant written and read back
+// through one schema round-trips in UTC. What the read finds is whatever
+// else wrote the graph, and a second gqlc package is one of those
+// things: the name is derived, not declared, so a schema is free to
+// declare it as a property of its own and bind a write of it.
+// rejectOffsetSidecarCollisions refuses the schema that declares it
+// beside the instant it derives from — where one key would have two
+// readers — and not the schemas that declare it anywhere else.
 func offsetSidecar(f codegen.EntityField) (string, bool) {
 	if f.GoType != goInstant {
 		return "", false
