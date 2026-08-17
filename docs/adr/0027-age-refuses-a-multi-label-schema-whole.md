@@ -66,6 +66,44 @@ therefore declare a type that compiles, that a caller can construct, and that
 no query can ever fill — with a label check nothing could satisfy — and would
 say nothing about it.
 
+That last clause no longer holds, and this paragraph is kept as the record of
+why the shape was rejected rather than of what would happen today. The residual
+it named — filed as `gqlc-05tl` — is closed by
+`TestEmittedDecodersGuardOnlyOnStampableLabels`
+(`internal/codegen/conformance/decoder_reachability_test.go`), which runs every
+registered backend over every valid fixture and refuses any emitted decoder
+whose label guard is a string no value on the decoded entity's own axis can
+carry — a node type's decoder is held to the node key labels the schema
+declares, an edge type's to the relationship types, and never to the union of
+the two. It recognises a decoder by the entity type the function returns rather
+than by a `decode<T>` naming convention, and reconciles the entities an emission
+decodes against the ones `codegen.Prepare` names, so a decoder it cannot
+classify is refused rather than skipped.
+
+That recognition is syntactic: it matches the identifiers a function's results
+name against the prepared entity names, with no type resolution behind it. A
+decoder declared to return an alias or a wrapper of an entity struct is
+therefore not read as that entity's decoder — and what follows is a refusal,
+not silence. Every receiver-less function declaration an emission writes with a
+body, and every function literal at any depth inside one, is classified, so such
+a decoder lands on the arm for a function whose results name nothing prepared,
+where the first label guard it writes refuses the emission; and if nothing else
+decodes that entity, the reconciliation refuses it as well.
+
+The residue is narrow and stated: an unresolvable decoder that compares no
+string, and whose entity another decoder does fill, is accepted, because it
+carries no label guard for this gate to hold to an alphabet. A decoder written
+as a method is likewise not graded — a receiver form is read as a decoder's
+holder — so relocating one there takes it out of this census, and the
+reconciliation is what would then refuse the emission, on its entity's absence,
+unless some yielded function also names that entity. Adding a dead decoder on a
+receiver beside a live one is that exception: the roll balances, and no guard
+the method writes is read, so it is accepted.
+
+It reddens on this shape naming `decodePersonEmployee` and the join spelling.
+The rejection above stands on its own terms: a gate that catches the emission is
+not a reason to prefer emitting it.
+
 That is the same disposition ADR 0025 rejected for temporal kinds: "it emits a
 column no decoder can fill at exit 0. Generate-time refusal is this codebase's
 posture for *this backend cannot represent that*." Taking it here would make the
