@@ -270,6 +270,18 @@ push_batches() { grep -c -- '^bd github push' "$TMP/calls"; }
 
 ISSUE=https://github.com/org/r/issues
 
+# Edit times for the fixtures below. Twelve hours apart, so no resolution or
+# clock-disagreement margin can reorder them, and every fixture that expects a
+# pull says on both axes that GitHub moved last — leaving each hold to be
+# decided by the rule it was written for rather than by a missing field.
+T_EARLY='2026-01-01T00:00:00Z'
+T_LATE='2026-01-01T12:00:00Z'
+# `SKEW_S` in .githooks/bd-gh-sync, written here too. The two rows either side
+# of the boundary below fail if they drift apart, in whichever direction.
+SKEW_S=60
+BD_EARLY=",\"updated_at\":\"$T_EARLY\""
+GH_LATE=",\"updatedAt\":\"$T_LATE\""
+
 # --- gqlc-63y: statuses GitHub cannot represent must never be in scope -------
 # The measured blast radius of the unscoped pull was exactly the claimed beads.
 # GitHub has no in_progress, so the mirror reads OPEN and --prefer-github
@@ -337,8 +349,8 @@ fi
 # GH ahead of bd is the case --prefer-github exists to serve; blocking it was
 # the over-broad half of the original guard.
 run_sync pull \
-    "[{\"id\":\"b-ahead\",\"status\":\"open\",\"external_ref\":\"$ISSUE/3\",\"description\":\"line one\"}]" \
-    '[{"number":3,"state":"OPEN","body":"line one\nline two added on GH"}]'
+    "[{\"id\":\"b-ahead\",\"status\":\"open\",\"external_ref\":\"$ISSUE/3\",\"description\":\"line one\"$BD_EARLY}]" \
+    "[{\"number\":3,\"state\":\"OPEN\",\"body\":\"line one\nline two added on GH\"$GH_LATE}]"
 if scoped_ids | grep -qx b-ahead; then
     ok "GH body ahead of bd does not block the pull"
 else
@@ -361,8 +373,8 @@ fi
 # the id assertions read argv: `--pull-only --prefer-github` handed over as one
 # argument is a single word bd would reject, and is byte-identical on that line.
 run_sync pull \
-    "[{\"id\":\"b-flags\",\"status\":\"open\",\"external_ref\":\"$ISSUE/3\",\"description\":\"line one\"}]" \
-    '[{"number":3,"state":"OPEN","body":"line one\nline two added on GH"}]'
+    "[{\"id\":\"b-flags\",\"status\":\"open\",\"external_ref\":\"$ISSUE/3\",\"description\":\"line one\"$BD_EARLY}]" \
+    "[{\"number\":3,\"state\":\"OPEN\",\"body\":\"line one\nline two added on GH\"$GH_LATE}]"
 _argv="$(argv_after 'bd github sync' 2 | tr '\n' ' ')"
 if argv_after 'bd github sync' 2 | grep -qx -- '--prefer-github'; then
     ok "an eligible pull is issued with --prefer-github, or GitHub's added lines lose"
@@ -378,8 +390,8 @@ else
 fi
 
 run_sync pull \
-    "[{\"id\":\"b-amended\",\"status\":\"open\",\"external_ref\":\"$ISSUE/4\",\"description\":\"line one\nbd-only amendment\"}]" \
-    '[{"number":4,"state":"OPEN","body":"line one"}]'
+    "[{\"id\":\"b-amended\",\"status\":\"open\",\"external_ref\":\"$ISSUE/4\",\"description\":\"line one\nbd-only amendment\"$BD_EARLY}]" \
+    "[{\"number\":4,\"state\":\"OPEN\",\"body\":\"line one\"$GH_LATE}]"
 if scoped_ids | grep -qx b-amended; then
     bad "bd-only amendment held out" "it was pulled and would be reverted"
 else
@@ -394,8 +406,8 @@ fi
 
 # Re-indent: per-line .strip() discards the nesting, so the sets match.
 run_sync pull \
-    "[{\"id\":\"b-indent\",\"status\":\"open\",\"external_ref\":\"$ISSUE/10\",\"description\":\"- a\n  - b\"}]" \
-    '[{"number":10,"state":"OPEN","body":"- a\n- b"}]'
+    "[{\"id\":\"b-indent\",\"status\":\"open\",\"external_ref\":\"$ISSUE/10\",\"description\":\"- a\n  - b\"$BD_EARLY}]" \
+    "[{\"number\":10,\"state\":\"OPEN\",\"body\":\"- a\n- b\"$GH_LATE}]"
 if scoped_ids | grep -qx b-indent; then
     bad "bd-side re-indent held out" "pulled; the nesting would be flattened"
 else
@@ -404,8 +416,8 @@ fi
 
 # Reorder: sets are order-blind.
 run_sync pull \
-    "[{\"id\":\"b-reorder\",\"status\":\"open\",\"external_ref\":\"$ISSUE/11\",\"description\":\"step two\nstep one\"}]" \
-    '[{"number":11,"state":"OPEN","body":"step one\nstep two"}]'
+    "[{\"id\":\"b-reorder\",\"status\":\"open\",\"external_ref\":\"$ISSUE/11\",\"description\":\"step two\nstep one\"$BD_EARLY}]" \
+    "[{\"number\":11,\"state\":\"OPEN\",\"body\":\"step one\nstep two\"$GH_LATE}]"
 if scoped_ids | grep -qx b-reorder; then
     bad "bd-side reorder held out" "pulled; the ordering would be reverted"
 else
@@ -415,8 +427,8 @@ fi
 # De-dup: sets collapse duplicates, so removing one of two identical lines is
 # invisible to a subset test.
 run_sync pull \
-    "[{\"id\":\"b-dedup\",\"status\":\"open\",\"external_ref\":\"$ISSUE/12\",\"description\":\"x\nx\"}]" \
-    '[{"number":12,"state":"OPEN","body":"x"}]'
+    "[{\"id\":\"b-dedup\",\"status\":\"open\",\"external_ref\":\"$ISSUE/12\",\"description\":\"x\nx\"$BD_EARLY}]" \
+    "[{\"number\":12,\"state\":\"OPEN\",\"body\":\"x\"$GH_LATE}]"
 if scoped_ids | grep -qx b-dedup; then
     bad "GH body shorter than the bead held out" "pulled; the de-dup reverted"
 else
@@ -433,8 +445,8 @@ fi
 # append either — the bead's first line stops being first, and a pull rewrites
 # the description to GitHub's ordering.
 run_sync pull \
-    "[{\"id\":\"b-prepend\",\"status\":\"open\",\"external_ref\":\"$ISSUE/14\",\"description\":\"step one\"}]" \
-    '[{"number":14,"state":"OPEN","body":"PREFACE\nstep one"}]'
+    "[{\"id\":\"b-prepend\",\"status\":\"open\",\"external_ref\":\"$ISSUE/14\",\"description\":\"step one\"$BD_EARLY}]" \
+    "[{\"number\":14,\"state\":\"OPEN\",\"body\":\"PREFACE\nstep one\"$GH_LATE}]"
 if scoped_ids | grep -qx b-prepend; then
     bad "a GH body that prepends to the bead description is held out" \
         "pulled; a prefix rule that admits a prepend is a substring rule"
@@ -445,21 +457,107 @@ else
     ok "a GH body that prepends to the bead description is held out"
 fi
 
-# A bd-side deletion of a trailing block is byte-identical to a GH-side append
-# and is admitted. This is the residual the append-only rule does not close and
-# cannot close from the two bodies alone: the fixture below differs from
-# b-ahead above only in the wording of the line, and b-ahead must pull. Pinned
-# so a future rule change has to confront the collision rather than rediscover
-# it. Closing it needs a third input (edit times or a common ancestor).
+# --- gqlc-6mx3: the prefix relation is decided by which side edited last -----
+# A trailing block cut in bd leaves the same two bodies as a block appended on
+# GitHub: b-ahead above and b-trailing-cut below are the same shape, and
+# b-ahead must pull. What separates them is not in the bodies. Both sides carry
+# an edit time, and the two fixtures differ only there.
+
 run_sync pull \
-    "[{\"id\":\"b-trailing-cut\",\"status\":\"open\",\"external_ref\":\"$ISSUE/13\",\"description\":\"line one\"}]" \
-    '[{"number":13,"state":"OPEN","body":"line one\nline two deleted in bd"}]'
+    "[{\"id\":\"b-trailing-cut\",\"status\":\"open\",\"external_ref\":\"$ISSUE/13\",\"description\":\"line one\",\"updated_at\":\"$T_LATE\"}]" \
+    "[{\"number\":13,\"state\":\"OPEN\",\"body\":\"line one\nline two deleted in bd\",\"updatedAt\":\"$T_EARLY\"}]"
 if scoped_ids | grep -qx b-trailing-cut; then
-    ok "trailing-block deletion is indistinguishable from a GH append (known)"
+    bad "a trailing block cut in bd is held out of pull scope" \
+        "pulled; the deleted block would be written back over the bead"
+elif ! grep -q 'holding b-trailing-cut (GH #13) out of the pull — gh-not-newer-than-bd' "$TMP/err"; then
+    bad "a trailing block cut in bd is held out of pull scope" \
+        "held, but not by the edit-time rule: $(grep 'b-trailing-cut' "$TMP/err" | tr '\n' '|')"
 else
-    bad "trailing-block deletion is treated as a GH append" \
-        "held out — b-ahead, the same bytes, must pull"
+    ok "a trailing block cut in bd is held out of pull scope"
 fi
+
+# The two clocks are independent — bd's comes off the machine running the hook,
+# GitHub's off GitHub — and both report whole seconds, so a difference small
+# enough to be either is not an ordering. The pair either side of the margin
+# pins its value: raise it in the script alone and the second row pulls
+# nothing, lower it and the first row pulls.
+_t_near=$(date -u -d "$T_EARLY + $SKEW_S seconds" +%Y-%m-%dT%H:%M:%SZ)
+run_sync pull \
+    "[{\"id\":\"b-ts-near\",\"status\":\"open\",\"external_ref\":\"$ISSUE/18\",\"description\":\"line one\"$BD_EARLY}]" \
+    "[{\"number\":18,\"state\":\"OPEN\",\"body\":\"line one\nline two\",\"updatedAt\":\"$_t_near\"}]"
+if scoped_ids | grep -qx b-ts-near; then
+    bad "a GH body newer by only the skew margin is held out" \
+        "pulled on a ${SKEW_S}s difference the two clocks can produce between simultaneous edits"
+elif ! grep -q 'holding b-ts-near (GH #18) out of the pull — gh-not-newer-than-bd' "$TMP/err"; then
+    bad "a GH body newer by only the skew margin is held out" \
+        "held, but not by the edit-time rule: $(grep 'b-ts-near' "$TMP/err" | tr '\n' '|')"
+else
+    ok "a GH body newer by only the skew margin is held out"
+fi
+
+_t_past=$(date -u -d "$T_EARLY + $((SKEW_S + 1)) seconds" +%Y-%m-%dT%H:%M:%SZ)
+run_sync pull \
+    "[{\"id\":\"b-ts-past\",\"status\":\"open\",\"external_ref\":\"$ISSUE/19\",\"description\":\"line one\"$BD_EARLY}]" \
+    "[{\"number\":19,\"state\":\"OPEN\",\"body\":\"line one\nline two\",\"updatedAt\":\"$_t_past\"}]"
+if scoped_ids | grep -qx b-ts-past; then
+    ok "a GH body newer by more than the skew margin is pulled"
+else
+    bad "a GH body newer by more than the skew margin is pulled" \
+        "held on a $((SKEW_S + 1))s difference: $(grep 'b-ts-past' "$TMP/err" | tr '\n' '|')"
+fi
+
+# An edit time that is absent, null, blank or unreadable leaves the two bodies
+# as the only evidence, which is the state this rule exists because nothing can
+# decide. Each shape is spelled out rather than covered by one: a check written
+# as "the field disagrees" passes every one of them, since none of them
+# disagrees with anything.
+# $1=name $2=bd updated_at field, with leading comma $3=gh updatedAt field
+edit_time_case() {
+    run_sync pull \
+        "[{\"id\":\"b-ts\",\"status\":\"open\",\"external_ref\":\"$ISSUE/20\",\"description\":\"line one\"$2}]" \
+        "[{\"number\":20,\"state\":\"OPEN\",\"body\":\"line one\nline two\"$3}]"
+    if scoped_ids | grep -qx b-ts; then
+        bad "an edit time that cannot be read holds the bead ($1)" \
+            "pulled with no ordering to pull on"
+    elif ! grep -q 'holding b-ts (GH #20) out of the pull — edit-time-unreadable' "$TMP/err"; then
+        bad "an edit time that cannot be read holds the bead ($1)" \
+            "held, but not as an unreadable edit time: $(grep 'b-ts' "$TMP/err" | tr '\n' '|')"
+    else
+        ok "an edit time that cannot be read holds the bead ($1)"
+    fi
+}
+
+edit_time_case "bd side absent"      ""                     "$GH_LATE"
+edit_time_case "gh side absent"      "$BD_EARLY"            ""
+edit_time_case "bd side null"        ',"updated_at":null'   "$GH_LATE"
+edit_time_case "gh side null"        "$BD_EARLY"            ',"updatedAt":null'
+edit_time_case "bd side blank"       ',"updated_at":""'     "$GH_LATE"
+edit_time_case "gh side blank"       "$BD_EARLY"            ',"updatedAt":""'
+edit_time_case "gh side not a time"  "$BD_EARLY"            ',"updatedAt":"last Tuesday"'
+edit_time_case "bd side not a time"  ',"updated_at":"soon"' "$GH_LATE"
+# Two wall-clock readings with no zone between them are not comparable, and
+# reading one as UTC is a guess that decides a pull.
+edit_time_case "gh side zoneless"    "$BD_EARLY"            ',"updatedAt":"2026-01-01T12:00:00"'
+edit_time_case "bd side numeric"     ',"updated_at":1767225600' "$GH_LATE"
+
+# The stub answers `gh issue list` out of a fixture file whatever fields the
+# script asked for, so a listing that stopped requesting one of them reads here
+# exactly like a listing that still does. In production it does not: the field
+# arrives absent and every decision the selection reads it for is taken on a
+# value nobody fetched. For updatedAt that is a hold on an edit time the run
+# never asked for, so the pull --prefer-github exists to serve becomes
+# unreachable with nothing objecting. Read off argv, where the request is.
+run_sync pull \
+    "[{\"id\":\"b-ask\",\"status\":\"open\",\"external_ref\":\"$ISSUE/3\",\"description\":\"line one\"$BD_EARLY}]" \
+    "[{\"number\":3,\"state\":\"OPEN\",\"body\":\"line one\nline two added on GH\"$GH_LATE}]"
+_json_fields="$(argv_after 'gh issue list' 0 | grep -A1 -- '--json' | tail -n 1)"
+for _f in number state body updatedAt; do
+    case ",$_json_fields," in
+        *",$_f,"*) ok "the all-state listing asks GitHub for $_f" ;;
+        *) bad "the all-state listing asks GitHub for $_f" \
+               "it asked for: ${_json_fields:-(no --json argument at all)}" ;;
+    esac
+done
 
 # A byte-for-byte prefix test has to say which bytes. GitHub's web editor stores
 # CRLF; bd stores LF. On the live corpus 188 of 289 bodies are multi-line and
@@ -468,8 +566,8 @@ fi
 # every merge forever, and the legitimate GH append is never pulled. Fails
 # closed, but it is still a permanent hold created by an invisible byte.
 run_sync pull \
-    "[{\"id\":\"b-crlf\",\"status\":\"open\",\"external_ref\":\"$ISSUE/15\",\"description\":\"line one\nline two\"}]" \
-    '[{"number":15,"state":"OPEN","body":"line one\r\nline two\r\nline three added on GH"}]'
+    "[{\"id\":\"b-crlf\",\"status\":\"open\",\"external_ref\":\"$ISSUE/15\",\"description\":\"line one\nline two\"$BD_EARLY}]" \
+    "[{\"number\":15,\"state\":\"OPEN\",\"body\":\"line one\r\nline two\r\nline three added on GH\"$GH_LATE}]"
 if scoped_ids | grep -qx b-crlf; then
     ok "a CRLF GH body still counts as extending an LF bead description"
 else
@@ -480,8 +578,8 @@ fi
 # ...and normalising the line endings must not normalise away the rule. The bd
 # side is still longer; the GH body still does not extend it.
 run_sync pull \
-    "[{\"id\":\"b-crlf-amend\",\"status\":\"open\",\"external_ref\":\"$ISSUE/16\",\"description\":\"line one\nline two\nbd only amendment\"}]" \
-    '[{"number":16,"state":"OPEN","body":"line one\r\nline two"}]'
+    "[{\"id\":\"b-crlf-amend\",\"status\":\"open\",\"external_ref\":\"$ISSUE/16\",\"description\":\"line one\nline two\nbd only amendment\"$BD_EARLY}]" \
+    "[{\"number\":16,\"state\":\"OPEN\",\"body\":\"line one\r\nline two\"$GH_LATE}]"
 if scoped_ids | grep -qx b-crlf-amend; then
     bad "CRLF normalisation does not admit a bd-side amendment" "it was pulled"
 else
@@ -492,8 +590,8 @@ fi
 # no-break space arrives by copy-paste out of rendered markdown. Same permanent
 # hold, same cost, same fix — compare text, not encodings.
 run_sync pull \
-    "[{\"id\":\"b-nbsp\",\"status\":\"open\",\"external_ref\":\"$ISSUE/17\",\"description\":\"line\\u00a0one\"}]" \
-    '[{"number":17,"state":"OPEN","body":"line one\nline two added on GH"}]'
+    "[{\"id\":\"b-nbsp\",\"status\":\"open\",\"external_ref\":\"$ISSUE/17\",\"description\":\"line\\u00a0one\"$BD_EARLY}]" \
+    "[{\"number\":17,\"state\":\"OPEN\",\"body\":\"line one\nline two added on GH\"$GH_LATE}]"
 if scoped_ids | grep -qx b-nbsp; then
     ok "a no-break space in the bead description does not block the pull"
 else
@@ -610,10 +708,12 @@ run_sync pull \
 import json
 print(json.dumps([{"id": "b-%03d" % i, "status": "open",
                    "external_ref": "https://github.com/org/r/issues/%d" % i,
-                   "description": "d"} for i in range(250)]))')" \
+                   "description": "d",
+                   "updated_at": "2026-01-01T00:00:00Z"} for i in range(250)]))')" \
     "$(python3 -c '
 import json
-print(json.dumps([{"number": i, "state": "OPEN", "body": "d\nadded on GH"}
+print(json.dumps([{"number": i, "state": "OPEN", "body": "d\nadded on GH",
+                   "updatedAt": "2026-01-01T12:00:00Z"}
                   for i in range(250)]))')"
 if [ "$(sync_batches)" -ne 3 ]; then
     bad "an allowlist past one batch is split, not truncated" \
@@ -642,11 +742,13 @@ import json
 big = "\n".join("padding line %d" % i for i in range(20000))
 print(json.dumps([{"id": "b-big", "status": "open",
                    "external_ref": "https://github.com/org/r/issues/9",
-                   "description": big}]))')" \
+                   "description": big,
+                   "updated_at": "2026-01-01T00:00:00Z"}]))')" \
     "$(python3 -c '
 import json
 big = "\n".join("padding line %d" % i for i in range(20000))
-print(json.dumps([{"number": 9, "state": "OPEN", "body": big + "\nadded on GH"}]))')"
+print(json.dumps([{"number": 9, "state": "OPEN", "body": big + "\nadded on GH",
+                   "updatedAt": "2026-01-01T12:00:00Z"}]))')"
 if grep -q 'Argument list too long' "$TMP/err"; then
     bad "guard runs on a payload past MAX_ARG_STRLEN" "execve rejected it"
 elif scoped_ids | grep -qx b-big; then
@@ -1080,8 +1182,8 @@ fi
 # names the bead whoever moved it.
 
 CLAIMED="{\"id\":\"b-claim\",\"status\":\"in_progress\",\"external_ref\":\"$ISSUE/7\",\"description\":\"same\"}"
-ELIGIBLE="{\"id\":\"b-ok\",\"status\":\"open\",\"external_ref\":\"$ISSUE/8\",\"description\":\"same\"}"
-GH_BOTH='[{"number":7,"state":"OPEN","body":"same"},{"number":8,"state":"OPEN","body":"same\nadded on GH"}]'
+ELIGIBLE="{\"id\":\"b-ok\",\"status\":\"open\",\"external_ref\":\"$ISSUE/8\",\"description\":\"same\"$BD_EARLY}"
+GH_BOTH="[{\"number\":7,\"state\":\"OPEN\",\"body\":\"same\"},{\"number\":8,\"state\":\"OPEN\",\"body\":\"same\nadded on GH\"$GH_LATE}]"
 
 run_sync pull "[$CLAIMED,$ELIGIBLE]" "$GH_BOTH" '[]' \
     "[{\"id\":\"b-claim\",\"status\":\"open\",\"external_ref\":\"$ISSUE/7\",\"description\":\"same\"},$ELIGIBLE]"
@@ -1365,10 +1467,10 @@ fi
 # missing from the second snapshot: a bead that was *pulled* was never held, so
 # it is outside this detector's claim entirely and its absence is not this
 # check's finding. Absent-because-never-in-scope, not absent-because-deleted.
-PULLABLE="{\"id\":\"b-pulled\",\"status\":\"open\",\"external_ref\":\"$ISSUE/8\",\"description\":\"same\"}"
+PULLABLE="{\"id\":\"b-pulled\",\"status\":\"open\",\"external_ref\":\"$ISSUE/8\",\"description\":\"same\"$BD_EARLY}"
 run_sync pull "[$PULLABLE,$SURVIVOR]" \
-    '[{"number":8,"state":"OPEN","body":"same\nadded on GH"},
-      {"number":9,"state":"OPEN","body":"same"}]' '[]' "[$SURVIVOR]"
+    "[{\"number\":8,\"state\":\"OPEN\",\"body\":\"same\nadded on GH\"$GH_LATE},
+      {\"number\":9,\"state\":\"OPEN\",\"body\":\"same\"}]" '[]' "[$SURVIVOR]"
 if ! scoped_ids | grep -qx b-pulled; then
     bad "a bead that was pulled is outside the held-bead detector" \
         "the fixture never pulled it, so it proves nothing: $(last_line)"
@@ -1390,10 +1492,10 @@ fi
 #
 # First shape: an id the charset gate refuses. It reaches no batch at all, so
 # there is no hypothesis under which a pull touched it.
-UNUSABLE="{\"id\":\"b bad\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"x\"}"
+UNUSABLE="{\"id\":\"b bad\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"x\"$BD_EARLY}"
 NOMIRROR='{"id":"b-keep","status":"open","external_ref":"","description":"y"}'
 run_sync pull "[$UNUSABLE,$NOMIRROR]" \
-    '[{"number":1,"state":"OPEN","body":"x\nadded on GH"}]' '[]' "[$NOMIRROR]"
+    "[{\"number\":1,\"state\":\"OPEN\",\"body\":\"x\nadded on GH\"$GH_LATE}]" '[]' "[$NOMIRROR]"
 if ! grep -q "bead id 'b bad' is unusable" "$TMP/err"; then
     bad "an id the gate refused is watched, not exempt" \
         "the fixture never refused the id, so it proves nothing: $(last_line)"
@@ -1417,7 +1519,7 @@ fi
 # that trade, because the transition it hides is the one no re-assert undoes.
 SYNC_RC=1
 run_sync pull "[$PULLABLE,$NOMIRROR]" \
-    '[{"number":8,"state":"OPEN","body":"same\nadded on GH"}]' '[]' "[$NOMIRROR]"
+    "[{\"number\":8,\"state\":\"OPEN\",\"body\":\"same\nadded on GH\"$GH_LATE}]" '[]' "[$NOMIRROR]"
 SYNC_RC=0
 if [ "$(sync_batches)" -ne 1 ]; then
     bad "a bead in a batch that failed is watched, not exempt" \
@@ -1440,8 +1542,8 @@ fi
 # pulled: the same run stating both.
 MKTEMP_BLOCK=pulled.txt
 run_sync pull "[$PULLABLE,$NOMIRROR]" \
-    '[{"number":8,"state":"OPEN","body":"same\nadded on GH"}]' '[]' \
-    "[{\"id\":\"b-pulled\",\"status\":\"open\",\"external_ref\":\"$ISSUE/8\",\"description\":\"same\nadded on GH\"},$NOMIRROR]"
+    "[{\"number\":8,\"state\":\"OPEN\",\"body\":\"same\nadded on GH\"$GH_LATE}]" '[]' \
+    "[{\"id\":\"b-pulled\",\"status\":\"open\",\"external_ref\":\"$ISSUE/8\",\"description\":\"same\nadded on GH\"$BD_EARLY},$NOMIRROR]"
 MKTEMP_BLOCK=
 _ll="$(last_line)"
 if [ -z "$_ll" ] || [ "$(sync_batches)" -ne 1 ] || [ -n "${_ll##*pulled 1 bead(s)*}" ]; then
@@ -1474,10 +1576,10 @@ fi
 # .claude/settings.json keeps only the last stderr line, so it has to carry the
 # shape of the run rather than whatever notice happened to print last.
 
-HELDBACK="{\"id\":\"b-amend2\",\"status\":\"open\",\"external_ref\":\"$ISSUE/14\",\"description\":\"keep\nbd only\"}"
-GH_SUMMARY='[{"number":8,"state":"OPEN","body":"same\nadded on GH"},
-             {"number":14,"state":"OPEN","body":"keep"},
-             {"number":99,"state":"OPEN","body":"orphan"}]'
+HELDBACK="{\"id\":\"b-amend2\",\"status\":\"open\",\"external_ref\":\"$ISSUE/14\",\"description\":\"keep\nbd only\"$BD_EARLY}"
+GH_SUMMARY="[{\"number\":8,\"state\":\"OPEN\",\"body\":\"same\nadded on GH\"$GH_LATE},
+             {\"number\":14,\"state\":\"OPEN\",\"body\":\"keep\"$GH_LATE},
+             {\"number\":99,\"state\":\"OPEN\",\"body\":\"orphan\"$GH_LATE}]"
 
 run_sync pull "[$ELIGIBLE,$HELDBACK]" "$GH_SUMMARY"
 if [ "$(last_line)" = "bd-gh-sync: pulled 1 bead(s), held 1, left 1 unmirrored GH issue(s) alone." ]; then
@@ -1510,8 +1612,8 @@ esac
 # the xargs error printed *above* the summary where `tail -1` drops it.
 
 run_sync pull \
-    "[{\"id\":\"\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"a\"}]" \
-    '[{"number":1,"state":"OPEN","body":"a\nadded on GH"}]'
+    "[{\"id\":\"\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"a\"$BD_EARLY}]" \
+    "[{\"number\":1,\"state\":\"OPEN\",\"body\":\"a\nadded on GH\"$GH_LATE}]"
 if [ "$(sync_batches)" -eq 0 ]; then
     ok "an empty bead id reaches no 'bd github sync' batch"
 else
@@ -1528,10 +1630,10 @@ esac
 # whole batch down with it (`xargs: unmatched single quote`) and the good bead
 # beside it is never pulled either.
 run_sync pull \
-    "[{\"id\":\"b'q\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"a\"},
-      {\"id\":\"b-good\",\"status\":\"open\",\"external_ref\":\"$ISSUE/2\",\"description\":\"a\"}]" \
-    '[{"number":1,"state":"OPEN","body":"a\nadded on GH"},
-      {"number":2,"state":"OPEN","body":"a\nadded on GH"}]'
+    "[{\"id\":\"b'q\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"a\"$BD_EARLY},
+      {\"id\":\"b-good\",\"status\":\"open\",\"external_ref\":\"$ISSUE/2\",\"description\":\"a\"$BD_EARLY}]" \
+    "[{\"number\":1,\"state\":\"OPEN\",\"body\":\"a\nadded on GH\"$GH_LATE},
+      {\"number\":2,\"state\":\"OPEN\",\"body\":\"a\nadded on GH\"$GH_LATE}]"
 if scoped_ids | grep -qx b-good; then
     ok "one unusable bead id does not take the batch down with it"
 else
@@ -1562,8 +1664,8 @@ fi
 # one is truncated to its first token and a *different*, possibly real, bead is
 # named in --issues. Refusing beats guessing.
 run_sync pull \
-    "[{\"id\":\"b two\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"a\"}]" \
-    '[{"number":1,"state":"OPEN","body":"a\nadded on GH"}]'
+    "[{\"id\":\"b two\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"a\"$BD_EARLY}]" \
+    "[{\"number\":1,\"state\":\"OPEN\",\"body\":\"a\nadded on GH\"$GH_LATE}]"
 if [ "$(sync_batches)" -eq 0 ]; then
     ok "a bead id carrying a space is refused, not truncated to its first token"
 else
@@ -1592,10 +1694,10 @@ fi
 # first id inside the allowlist, so the run announces a hold, pulls the held
 # bead, and reports success — a single run contradicting itself.
 
-NL_BEADS="[{\"id\":\"b-held\",\"status\":\"in_progress\",\"external_ref\":\"$ISSUE/1\",\"description\":\"local\"},
-           {\"id\":\"b-held\ntrash\",\"status\":\"open\",\"external_ref\":\"$ISSUE/2\",\"description\":\"a\"}]"
-NL_GH='[{"number":1,"state":"OPEN","body":"local\nadded on GH"},
-        {"number":2,"state":"OPEN","body":"a\nadded on GH"}]'
+NL_BEADS="[{\"id\":\"b-held\",\"status\":\"in_progress\",\"external_ref\":\"$ISSUE/1\",\"description\":\"local\"$BD_EARLY},
+           {\"id\":\"b-held\ntrash\",\"status\":\"open\",\"external_ref\":\"$ISSUE/2\",\"description\":\"a\"$BD_EARLY}]"
+NL_GH="[{\"number\":1,\"state\":\"OPEN\",\"body\":\"local\nadded on GH\"$GH_LATE},
+        {\"number\":2,\"state\":\"OPEN\",\"body\":\"a\nadded on GH\"$GH_LATE}]"
 
 run_sync pull "$NL_BEADS" "$NL_GH"
 if ! grep -q 'holding b-held' "$TMP/err"; then
@@ -1641,8 +1743,8 @@ fi
 # a bead id nobody minted — while the bead that was actually eligible is dropped
 # without a word and still counted as pulled.
 run_sync pull \
-    "[{\"id\":\"b-nl\ntrash\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"a\"}]" \
-    '[{"number":1,"state":"OPEN","body":"a\nadded on GH"}]'
+    "[{\"id\":\"b-nl\ntrash\",\"status\":\"open\",\"external_ref\":\"$ISSUE/1\",\"description\":\"a\"$BD_EARLY}]" \
+    "[{\"number\":1,\"state\":\"OPEN\",\"body\":\"a\nadded on GH\"$GH_LATE}]"
 if [ "$(sync_batches)" -ne 0 ]; then
     bad "the head of a split bead id is not pulled as a bead of its own" \
         "$(grep 'github sync' "$TMP/calls")"
@@ -1658,10 +1760,10 @@ fi
 # silently — the tail -1 caller gets one line and it has to carry all four.
 SYNC_RC=1
 run_sync pull "[$ELIGIBLE,$HELDBACK,$CLAIMED]" \
-    '[{"number":7,"state":"OPEN","body":"same"},
-      {"number":8,"state":"OPEN","body":"same\nadded on GH"},
-      {"number":14,"state":"OPEN","body":"keep"},
-      {"number":99,"state":"OPEN","body":"orphan"}]' '[]' \
+    "[{\"number\":7,\"state\":\"OPEN\",\"body\":\"same\"},
+      {\"number\":8,\"state\":\"OPEN\",\"body\":\"same\nadded on GH\"$GH_LATE},
+      {\"number\":14,\"state\":\"OPEN\",\"body\":\"keep\"},
+      {\"number\":99,\"state\":\"OPEN\",\"body\":\"orphan\"}]" '[]' \
     "[$ELIGIBLE,$HELDBACK,{\"id\":\"b-claim\",\"status\":\"open\",\"external_ref\":\"$ISSUE/7\",\"description\":\"same\"}]"
 SYNC_RC=0
 _l="$(last_line)"
@@ -2295,7 +2397,23 @@ bd-side re-indent is held out of pull scope
 bd-side reorder is held out of pull scope
 GH body that does not extend the bead description is held out
 a GH body that prepends to the bead description is held out
-trailing-block deletion is indistinguishable from a GH append (known)
+a trailing block cut in bd is held out of pull scope
+a GH body newer by only the skew margin is held out
+a GH body newer by more than the skew margin is pulled
+an edit time that cannot be read holds the bead (bd side absent)
+an edit time that cannot be read holds the bead (gh side absent)
+an edit time that cannot be read holds the bead (bd side null)
+an edit time that cannot be read holds the bead (gh side null)
+an edit time that cannot be read holds the bead (bd side blank)
+an edit time that cannot be read holds the bead (gh side blank)
+an edit time that cannot be read holds the bead (gh side not a time)
+an edit time that cannot be read holds the bead (bd side not a time)
+an edit time that cannot be read holds the bead (gh side zoneless)
+an edit time that cannot be read holds the bead (bd side numeric)
+the all-state listing asks GitHub for number
+the all-state listing asks GitHub for state
+the all-state listing asks GitHub for body
+the all-state listing asks GitHub for updatedAt
 a CRLF GH body still counts as extending an LF bead description
 a bd-only amendment is still held out when the GH body is CRLF
 a no-break space in the bead description does not block the pull

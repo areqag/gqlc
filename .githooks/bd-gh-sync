@@ -30,13 +30,21 @@
 #              * its status is open or closed — GitHub's issue state is a
 #                two-value domain, so in_progress/blocked/deferred have no
 #                representable counterpart and any pull reverts them,
-#              * it is not closed locally while still open on GH, and
+#              * it is not closed locally while still open on GH,
 #              * the GH body extends the bead description verbatim, i.e.
-#                gh_body.startswith(description) — append-only.
-#            The last three conditions are one rule: never pull where GH is
-#            behind bd. Only an append witnesses "GH ahead"; every other edit
-#            (deletion, re-indent, reorder, de-dup) is bd-side work a pull
-#            would revert, and a per-line set comparison sees none of them.
+#                gh_body.startswith(description) — append-only, and
+#              * where it extends it, GitHub's edit time is later than the
+#                bead's by more than SKEW_S.
+#            The last four conditions are one rule: pull only where the
+#            evidence has GitHub moving last. A re-indent, a reorder and a
+#            de-dup add no content, so the bodies alone refuse them; a trailing
+#            block cut in bd leaves the same two bodies as a block appended on
+#            GitHub, so only the edit times separate those. Neither side's is a
+#            description-edit time — bd's moves on any write to the bead, and
+#            GitHub's on a comment — so the ordering is a proxy, and it is one
+#            with a residue in each direction: an append that a bd-side write
+#            followed is held, and a bd-side cut that a GH comment followed is
+#            pulled (gqlc-o22k).
 #            Selection failing for any reason yields an empty allowlist and no
 #            pull at all.
 #            Whatever the allowlist, the run ends by re-reading the bead list
@@ -131,7 +139,7 @@ if [ "$_action" = "pull" ]; then
     || { _list_rc=$?; : >"$_tmp/beads.json"; }
   _gh_rc=0
   GITHUB_TOKEN="$_token" gh issue list --state all --limit "$_gh_limit_all" \
-    --json number,state,body >"$_tmp/gh.json" 2>/dev/null \
+    --json number,state,body,updatedAt >"$_tmp/gh.json" 2>/dev/null \
     || { _gh_rc=$?; : >"$_tmp/gh.json"; }
 
   # Emits ALLOW/HOLD/ORPHAN records terminated by DONE. That sentinel is what
@@ -140,7 +148,7 @@ if [ "$_action" = "pull" ]; then
   # the previous guard fell through into an unscoped pull.
   python3 - "$_tmp/beads.json" "$_tmp/gh.json" "$_gh_limit_all" \
     >"$_tmp/plan.txt" 2>"$_tmp/plan.err" <<'PYEOF'
-import json, re, sys
+import datetime, json, re, sys
 
 def load(path):
     with open(path, encoding="utf-8") as fh:
@@ -170,10 +178,39 @@ def norm(s):
 def one_line(s):
     return str(s).encode("unicode_escape").decode("ascii")
 
+# bd's edit time comes off the machine running this hook and GitHub's off
+# GitHub, and both are reported in whole seconds, so a difference this small is
+# as likely to be the two clocks as it is to be an ordering. Measured
+# 2026-08-17 on an NTP-disciplined machine: 4.5ms jitter against its stratum-2
+# peer, and agreement with GitHub's own Date header to within that header's
+# one-second resolution over five samples — the margin is for the machine that
+# is not disciplined at all. It is one-sided: raising it holds beads a pull
+# would have taken, lowering it pulls beads a hold would have kept. Mirrored in
+# .githooks/tests/bd-gh-sync-test.sh, which pins both sides of the boundary.
+SKEW_S = 60
+
+# Both listings report RFC 3339 with an explicit zone (measured 2026-08-17 over
+# the live corpus: 397 bead updated_at and 418 issue updatedAt values, every one
+# `YYYY-MM-DDTHH:MM:SSZ`). Anything else — absent, blank, unparseable, or a wall
+# clock with no zone attached to it — yields None rather than a guess, because
+# the only thing downstream does with the answer is decide a pull.
+def edited_at(s):
+    if not isinstance(s, str):
+        return None
+    v = s.strip()
+    if v.endswith("Z"):
+        v = v[:-1] + "+00:00"
+    try:
+        t = datetime.datetime.fromisoformat(v)
+    except ValueError:
+        return None
+    return t if t.tzinfo is not None else None
+
 beads = load(sys.argv[1])
 issues = load(sys.argv[2])
 
-gh = {i["number"]: ((i.get("state") or "").lower(), norm(i.get("body")))
+gh = {i["number"]: ((i.get("state") or "").lower(), norm(i.get("body")),
+                    edited_at(i.get("updatedAt")))
       for i in issues}
 pat = re.compile(r"/issues/(\d+)$")
 
@@ -195,7 +232,7 @@ for b in beads:
     if n not in gh:
         out.append(f"HOLD {bid} {n} not-in-listing")
         continue
-    gh_state, gh_body = gh[n]
+    gh_state, gh_body, gh_at = gh[n]
     desc = norm(b.get("description"))
 
     if status not in REPRESENTABLE:
@@ -214,15 +251,32 @@ for b in beads:
         out.append(f"HOLD {bid} {n} closed-locally-still-open-on-gh")
         continue
 
-    # "GH ahead of bd" is the case --prefer-github exists to serve, and the
-    # only witness that GitHub is ahead is the GH body carrying the whole bead
-    # description and then some. Anything else is a bd-side edit that a pull
-    # reverts. A set-subset test over stripped lines is not that witness: it
-    # admits deletion, re-indent, reorder and de-dup, three of which add no
-    # content at all. Append-only, byte for byte.
+    # "GH ahead of bd" is the case --prefer-github exists to serve, and half of
+    # the witness that GitHub is ahead is the GH body carrying the whole bead
+    # description and then some. A set-subset test over stripped lines is not
+    # that half: it admits deletion, re-indent, reorder and de-dup, three of
+    # which add no content at all. Append-only, byte for byte.
     if not gh_body.startswith(desc):
         out.append(f"HOLD {bid} {n} bd-description-not-a-prefix-of-gh-body")
         continue
+
+    # The other half. A trailing block cut in bd leaves the bodies in the same
+    # relation as a block appended on GitHub, so which way the edit went is not
+    # a thing the two bodies hold — they are one state each, and the direction
+    # is between them. The edit times are the third input, and one direction of
+    # the ordering costs more to get wrong than the other: hold unless GitHub is
+    # the later side by more than SKEW_S. A time that is missing or will not
+    # parse is not an ordering either, and reaches the same hold under its own
+    # name, because a bead whose evidence is absent is exactly the bead the two
+    # bodies were about to decide wrongly.
+    if gh_body != desc:
+        bd_at = edited_at(b.get("updated_at"))
+        if bd_at is None or gh_at is None:
+            out.append(f"HOLD {bid} {n} edit-time-unreadable")
+            continue
+        if (gh_at - bd_at).total_seconds() <= SKEW_S:
+            out.append(f"HOLD {bid} {n} gh-not-newer-than-bd")
+            continue
 
     # Naming a bead in --issues syncs it whether or not GitHub moved, so the
     # recency watermark that bounds an unscoped pull no longer applies. Without
@@ -234,7 +288,7 @@ for b in beads:
 
 # An unscoped pull silently minted a bead for any unmirrored issue in its
 # update window. Scoping stops that, so report them rather than create them.
-for n, (state, _) in sorted(gh.items()):
+for n, (state, _, _) in sorted(gh.items()):
     if n not in mirrored and state == "open":
         out.append(f"ORPHAN {n}")
 
