@@ -1,0 +1,30 @@
+-- Label implication (GG21, ADR 0024) at an edge endpoint: `Engineer` is the
+-- type's identity and `Staff` is a label its elements also carry.
+--
+-- `(:Staff)` is satisfied by Engineer, whose identity is a different label set
+-- from the one the expression spells. So the key an endpoint must probe is not
+-- recoverable from the query text — nothing named `Staff` is declared, and
+-- `Staff` appears in no EdgeKey. This is the shape that separates reading an
+-- inline endpoint as the labels written there from reading it as the types
+-- those labels satisfy; on the schemas where an identity happens to equal the
+-- spelling the two readings coincide.
+--
+-- `Staff` is carried by no other declaration, so GG21 is accepted here rather
+-- than refused with ErrImpliedLabelIsKeyLabel (ADR 0024's declined sub-case).
+
+CREATE PROPERTY GRAPH TYPE SatisfyImpliedLabelEndpoint AS {
+
+    (:Engineer => :Staff {
+        id      :: INT NOT NULL,
+        name    :: STRING NOT NULL,
+        engOnly :: STRING NOT NULL
+    }),
+
+    (:Company {
+        id   :: INT NOT NULL,
+        name :: STRING NOT NULL
+    }),
+
+    (:Engineer) -[:WORKS_AT { since :: INT NOT NULL }]-> (:Company)
+
+}
