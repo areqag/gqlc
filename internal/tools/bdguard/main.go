@@ -348,12 +348,19 @@ func refuseReopen(baseRec, headRec record, sha string, refContaining func(string
 // fetched pack), and the object is present but no ref reaches it. See the
 // package comment for why that collapse is safe here.
 //
-// Shallowness alone is not what silences the probe — the boundary is the
-// fetched pack. Measured in `git clone --depth=1`: for the tip that came down
-// in the pack, `git for-each-ref --contains=<tip>` prints `refs/heads/master`
-// and `git merge-base --is-ancestor <tip> HEAD` exits 0, so this returns a ref
-// there. For a commit outside the pack, `git cat-file -e <sha>^{commit}` exits
-// 128 and this short-circuits to "".
+// Shallowness alone does not silence the probe, and pack membership alone does
+// not make it speak: this answers positively only when the sha came down in
+// the fetched pack AND a ref reaches it. Measured in `git clone --depth=1`:
+// for the tip that came down in the pack, `git for-each-ref --contains=<tip>`
+// prints `refs/heads/master` and `git merge-base --is-ancestor <tip> HEAD`
+// exits 0, so this returns a ref there. For a commit outside the pack,
+// `git cat-file -e <sha>^{commit}` exits 128 and this short-circuits to "".
+// For a commit fetched into that same clone by name — `git fetch --depth=1
+// origin <sha>`, the shape ci.yml uses to place the base commit — the object
+// is there (`cat-file -e` exits 0) yet `for-each-ref --contains` prints
+// nothing and `merge-base --is-ancestor` exits 1: in the pack and still
+// silent, because the graft truncates every ref's history walk. That is the
+// second collapse state above.
 func gitRefContaining(ctx context.Context, sha string) string {
 	if err := exec.CommandContext(ctx, "git", "cat-file", "-e", sha+"^{commit}").Run(); err != nil {
 		return ""
