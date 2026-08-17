@@ -417,6 +417,14 @@ def status(text):
     with open(sys.argv[5], "w", encoding="utf-8") as fh:
         fh.write(text + "\n")
 
+# Ids here come off `bd list`, so unlike the two selections above they have not
+# been past the charset gate: one carrying a newline splits its moved.txt record
+# in two and the summary reports one bead as two, which is the count nobody
+# measured that this path exists to refuse. Escaping leaves every id the gate
+# would accept byte-for-byte alone.
+def one_line(s):
+    return str(s).encode("unicode_escape").decode("ascii")
+
 before = beads(sys.argv[1])
 after = beads(sys.argv[2])
 if not before:
@@ -460,9 +468,10 @@ moved = []
 for bid, was in sorted(before.items()):
     if bid in pulled:
         continue
+    name = one_line(bid)
     if bid not in after:
-        moved.append("GONE " + bid)
-        print(f"bd-gh-sync: WARNING {bid} was held out of the pull but is gone "
+        moved.append("GONE " + name)
+        print(f"bd-gh-sync: WARNING {name} was held out of the pull but is gone "
               f"from the bead list afterwards — it was deleted while this run "
               f"was protecting it. No status can be re-asserted onto a bead that "
               f"is not there; recover it from bd's own history.")
@@ -470,15 +479,15 @@ for bid, was in sorted(before.items()):
     now = after[bid]
     if now == was:
         continue
-    moved.append("MOVED " + bid)
+    moved.append("MOVED " + name)
     what, how = [], []
     if now[0] != was[0]:
         what.append(f"{was[0]} -> {now[0]}")
-        how.append(f"Re-assert the status with 'bd update {bid} --status {was[0]}'.")
+        how.append(f"Re-assert the status with 'bd update {name} --status {was[0]}'.")
     if now[1] != was[1]:
         what.append("description")
         how.append("The pre-pull description survives only in bd's own history.")
-    print(f"bd-gh-sync: WARNING {bid} was held out of the pull but changed "
+    print(f"bd-gh-sync: WARNING {name} was held out of the pull but changed "
           f"{', '.join(what)}. " + " ".join(how))
 
 # Read back by the summary line: a warning printed here is above the summary
@@ -594,7 +603,12 @@ PYEOF
     # takes this one line and finds nothing to re-assert is a reader who
     # concludes the warning was noise.
     _gone=$(grep -c '^GONE ' "$_tmp/moved.txt")
-    _names=$(cut -d' ' -f2- "$_tmp/moved.txt" | head -n 3 | tr '\n' ' ' | sed 's/ $//;s/ /, /g')
+    # The record tag comes off by field and the records are joined one by one: a
+    # bead id is not guaranteed to be a single word here, and flattening the
+    # three onto a line to separate them on every space renders one bead as two
+    # names `bd show` does not answer to.
+    _names=$(awk 'NR<=3 { sub(/^[^ ]* /, ""); printf "%s%s", sep, $0; sep=", " }' \
+      "$_tmp/moved.txt")
     [ "$_moved" -gt 3 ] && _names="${_names}, +$((_moved - 3)) more"
     _what="changed anyway"
     [ "$_gone" -gt 0 ] && _what="${_what}, ${_gone} of them deleted outright"

@@ -1285,6 +1285,48 @@ else
     ok "the summary line names the deleted held bead and says it was deleted"
 fi
 
+# ...and the same rendering over an id that is not a single word. Both fixtures
+# above are, so the record tag was the only thing the summary had to cut off,
+# and a name flattened onto a line and separated on every space came out whole
+# by luck. These ids reach moved.txt off `bd list` rather than off the
+# allowlist, so the charset gate that refuses a space and a newline never sees
+# them: the beads this detector is about are the ones no pull touched.
+SPACE_HELD="{\"id\":\"b bad\",\"status\":\"in_progress\",\"external_ref\":\"$ISSUE/7\",\"description\":\"same\"}"
+SPACE_MOVED="{\"id\":\"b bad\",\"status\":\"open\",\"external_ref\":\"$ISSUE/7\",\"description\":\"same\"}"
+run_sync pull "[$SPACE_HELD,$SURVIVOR]" "$GH_CLAIM_LIVE" '[]' "[$SPACE_MOVED,$SURVIVOR]"
+_ll="$(last_line)"
+if [ -z "$_ll" ] || [ -n "${_ll##*1 bead(s) held out of the pull*}" ]; then
+    bad "a held bead whose id carries a space is named whole" \
+        "the fixture reported no single moved bead, so it proves nothing: $_ll"
+elif [ -z "${_ll##*(b, bad)*}" ]; then
+    bad "a held bead whose id carries a space is named whole" \
+        "split one bead into two names bd show does not answer to: $_ll"
+elif [ -n "${_ll##*(b bad)*}" ]; then
+    bad "a held bead whose id carries a space is named whole" "got: $_ll"
+else
+    ok "a held bead whose id carries a space is named whole"
+fi
+
+# A newline is the other half of the same reading, and it costs a number rather
+# than a name: moved.txt is line-delimited, so one id spanning two lines is one
+# bead the summary counts as two — an unmeasured count arriving on the one line
+# a tail -1 caller keeps, which is the shape the rest of this path refuses.
+NL_HELD="{\"id\":\"b\nbad\",\"status\":\"in_progress\",\"external_ref\":\"$ISSUE/7\",\"description\":\"same\"}"
+run_sync pull "[$NL_HELD,$SURVIVOR]" "$GH_CLAIM_LIVE" '[]' "[$SURVIVOR]"
+_ll="$(last_line)"
+if [ -z "$_ll" ] || [ -n "${_ll##*deleted outright*}" ]; then
+    bad "a held bead whose id carries a newline is counted once and named escaped" \
+        "the fixture reported no deletion, so it proves nothing: $_ll"
+elif [ -n "${_ll##*1 bead(s) held out of the pull*}" ]; then
+    bad "a held bead whose id carries a newline is counted once and named escaped" \
+        "one bead reached the count as more than one: $_ll"
+elif ! printf '%s\n' "$_ll" | grep -qF 'b\nbad'; then
+    bad "a held bead whose id carries a newline is counted once and named escaped" \
+        "named it in a form that splits the line it is on: $_ll"
+else
+    ok "a held bead whose id carries a newline is counted once and named escaped"
+fi
+
 # The control the case above would otherwise pass by warning about anything
 # missing from the second snapshot: a bead that was *pulled* was never held, so
 # it is outside this detector's claim entirely and its absence is not this
@@ -2184,10 +2226,16 @@ fi
 # shrinks along with the block it describes, which is precisely the edit it
 # exists to survive: a census a deletion also deletes agrees with the deletion.
 # The names are written down here, away from the blocks that raise them, so
-# every way of losing one — deleted, commented out, swallowed by a quote,
-# stranded behind a branch that stopped running — arrives as the same missing
-# name. Two assertions sharing a name would reopen the hole, since either could
-# then be deleted under cover of the other, so that is refused here too.
+# losing a block while this list stands — deleted, commented out, swallowed by a
+# quote, stranded behind a branch that stopped running — arrives as the same
+# missing name. Two assertions sharing a name would reopen the hole, since
+# either could then be deleted under cover of the other, so that is refused here
+# too.
+#
+# Two ways of losing one it does not catch, both open rather than closed: an
+# edit that deletes a block and its census entry together (bd gqlc-tvv7), and a
+# run that is already red, where the roll-call is not read at all — bounded
+# below, at the branch that skips it.
 #
 # Adding an assertion costs one line here, and the failure prints the line to
 # add. Written in execution order for a reader; compared as a set.
@@ -2286,6 +2334,8 @@ an unusable post-pull snapshot is reported (not JSON at all)
 the blind notice names the exit status it saw
 a held bead deleted between the snapshots is reported as gone
 the summary line names the deleted held bead and says it was deleted
+a held bead whose id carries a space is named whole
+a held bead whose id carries a newline is counted once and named escaped
 a pulled bead missing from the second snapshot is not a held-bead finding
 an id the gate refused is watched by the held-bead detector
 a bead in a batch that exited non-zero is watched by the held-bead detector
