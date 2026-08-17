@@ -664,25 +664,45 @@ func columnSite(queryName string, pos int, columnName string) string {
 }
 
 // resolvedTypeName renders t for the refusals that name a type no arm
-// matched. Three of them do — Phase A's column switch, Phase A's
-// parameter type assertion and buildListElemPlan's element switch — and
-// what they hold is by construction a value this package has no case
-// for.
+// matched. Five calls render through it, three reachable and two not:
+// Phase A's column switch, Phase A's parameter type assertion and
+// buildListElemPlan's element switch, plus the two sites behind Phase
+// A's shadow that §3 of docs/specs/codegen-sentinel-taxonomy.md carries
+// as param-type-invariant and column-type-invariant. The shadowed pair
+// renders the same way so all five answer alike if an edit ever removes
+// the shadow. What they hold is by construction a value this package has
+// no case for. The count is re-derivable, and the paren is escaped so
+// this line is not one of the hits it reports:
+// `grep -cE 'resolvedTypeName\(' internal/codegen/prepare.go` = 6, being
+// those five calls and this declaration.
 //
 // t.String() there is a call into code this package does not own.
 // resolver.ResolvedType's unexported marker seals which types may
 // DECLARE it, not which may satisfy it: every variant gives both the
 // marker and String a value receiver, so each of the eight pointer forms
-// carries them, and Go promotes an embedded variant's unexported methods
-// so a struct embedding one satisfies the interface from any package in
-// the module (AGENTS.md, "Closed sum types"; internal/resolver's
-// TestResolvedTypeSumIsNotClosed). Three shapes in that set fault on the
-// call rather than answering it: the nil interface, which has no method
-// to reach; any of the eight typed-nil pointer forms, because Go emits a
-// nil check before a value method reached through a pointer, so even the
-// zero-sized (*resolver.ResolvedUnknown)(nil) faults where its body
-// dereferences nothing; and a struct whose embedded pointer to a variant
-// is nil, which is neither a nil interface nor a nil pointer to look at.
+// carries them, and Go promotes an embedded type's methods — the marker
+// included, and from an embedded interface as readily as from an
+// embedded variant — so a struct embedding either satisfies the
+// interface from any package in the module (AGENTS.md, "Closed sum
+// types"; internal/resolver's TestResolvedTypeSumIsNotClosed).
+//
+// Four shapes in that set are witnessed to fault on the call rather than
+// answer it: the nil interface, which has no method to reach; any of the
+// eight typed-nil pointer forms, because Go emits a nil check before a
+// value method reached through a pointer, so even the zero-sized
+// (*resolver.ResolvedUnknown)(nil) faults where its body dereferences
+// nothing; a struct whose embedded pointer to a variant is nil; and a
+// struct embedding resolver.ResolvedType itself, which carries no
+// variant at all. The last two are neither a nil interface nor a nil
+// pointer to look at, which is why neither a t == nil test nor a
+// reflect nil-pointer check would do instead.
+//
+// Four is what is witnessed, not what the set holds. The promotion that
+// opens the sum also composes — a nil pointer to an embedder, or a
+// struct embedding an embedder, faults here too and is none of the four
+// — so this enumeration is not known to be closed and nothing below
+// depends on its being closed: the render enumerates no shape and no
+// variant.
 //
 // A refusal that faults is not a refusal, so the tag is asked for under
 // a recover and the dynamic type name answers when asking fails. The tag
@@ -692,11 +712,13 @@ func columnSite(queryName string, pos int, columnName string) string {
 // that can name itself is still named by its own answer.
 //
 // The recover is not how the refusal travels. AGENTS.md's Errors
-// convention rules panic/recover out as an error-signalling channel, and
-// the sentinel still leaves through fmt.Errorf and still answers
-// errors.Is; what is caught here is a fault in a call this package makes
-// to render a value, on the one path where that call is into code it
-// does not own.
+// convention asks for package-level sentinels matched with errors.Is,
+// and names one channel it rules panic/recover out of: syntax errors,
+// which come from a custom antlr.ErrorListener instead. This is not that
+// channel. The sentinel still leaves through fmt.Errorf and still
+// answers errors.Is; what is caught here is a fault in a call this
+// package makes to render a value, on the one path where that call is
+// into code it does not own.
 //
 // What this bounds is the panic. A String() that blocks, or that calls
 // runtime.Goexit, or that trips a fault the runtime declines to make
@@ -704,15 +726,25 @@ func columnSite(queryName string, pos int, columnName string) string {
 // implementations admits an unbounded set of ways to misbehave, and this
 // addresses the one the sum's own inhabitants exhibit.
 func resolvedTypeName(t resolver.ResolvedType) (name string) {
+	answered := false
 	defer func() {
-		if recover() != nil {
+		// recover() is called for its effect and not its value: it stops
+		// the panic either way, but under GODEBUG=panicnil=1 a panic(nil)
+		// makes it return nil, so a `recover() != nil` test would read a
+		// faulted call as an answered one and this helper would hand its
+		// callers an empty type name. answered is set only where String()
+		// returned, so it is what decides the fallback.
+		recover() //nolint:errcheck // called for its effect; the value is deliberately unread, per the comment above.
+		if !answered {
 			// %T reads the dynamic type through reflection and never
 			// dispatches a method, so it answers for the values whose
 			// String() just did not. A nil interface renders "<nil>".
 			name = fmt.Sprintf("%T", t)
 		}
 	}()
-	return t.String()
+	name = t.String()
+	answered = true
+	return name
 }
 
 // admitEdgeUnionCandidates gates one resolved edge-union candidate set,

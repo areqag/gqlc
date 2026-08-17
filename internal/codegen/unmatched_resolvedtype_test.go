@@ -42,6 +42,22 @@ import (
 // since its reflect.Kind is Struct.
 type nilEmbeddedNode struct{ *resolver.ResolvedNode }
 
+// nilEmbeddedIface satisfies resolver.ResolvedType by embedding the
+// interface rather than a variant. Go promotes an embedded interface's
+// whole method set, unexported marker included, so the zero value
+// satisfies resolver.ResolvedType from any package while naming no
+// variant at all, and String() on it dispatches through the nil embedded
+// interface and faults.
+//
+// It is here because it is none of the three shapes gqlc-edze first
+// named. The outer interface holds a non-nil nilEmbeddedIface, so it is
+// not the nil interface; its reflect.Kind is Struct, so it is not a
+// typed-nil pointer form; and its embedded field is not a pointer to a
+// variant. It is the witness for the claim that the faulting set is not
+// closed by an enumeration — it comes from the promotion machinery that
+// opens the sum, not from an implementation misbehaving.
+type nilEmbeddedIface struct{ resolver.ResolvedType }
+
 // embeddedNode is the same construction with a value field, so its
 // String() returns ResolvedNode's wire tag rather than faulting. It
 // witnesses the other half: rendering an unmatched type must not stop
@@ -50,6 +66,7 @@ type embeddedNode struct{ resolver.ResolvedNode }
 
 var (
 	_ resolver.ResolvedType = nilEmbeddedNode{}
+	_ resolver.ResolvedType = nilEmbeddedIface{}
 	_ resolver.ResolvedType = embeddedNode{}
 )
 
@@ -138,9 +155,16 @@ func generateUnmatched(t *testing.T, q codegen.NamedQuery) error {
 // which types may DECLARE it, not which may satisfy it: pointer forms
 // and embedders promote it from any package in the module (AGENTS.md,
 // "Closed sum types"). So the set reaching these three sites includes
-// the nil interface, all eight typed-nil pointer forms, and structs
-// whose embedded pointer is nil — and String() on each of those faults.
+// the nil interface, all eight typed-nil pointer forms, structs whose
+// embedded pointer to a variant is nil, and structs embedding
+// resolver.ResolvedType itself — and String() on each of those faults.
 // Each case below panicked before the fix instead of returning.
+//
+// Those four shapes are what this measures, not what the set holds. The
+// promotion composes, so a nil pointer to an embedder and a struct
+// embedding an embedder fault here too; the enumeration is not known to
+// be closed, and the fix does not depend on its being closed, since
+// resolvedTypeName enumerates no shape.
 //
 // It does not claim the set is now safe under every implementation. A
 // String() that blocks, or that calls runtime.Goexit, still takes the
@@ -163,6 +187,13 @@ func TestUnmatchedResolvedTypeRefusesRatherThanFaulting(t *testing.T) {
 			err := generateUnmatched(t, unmatchedColumnQuery(resolver.Column{Name: "n", Type: nilEmbeddedNode{}}))
 			require.ErrorIs(t, err, codegen.ErrOutOfC6Scope)
 			require.EqualError(t, err, `out of C6 scope: query "Fetch" column 0 "n" resolved as codegen_test.nilEmbeddedNode`)
+		})
+
+		t.Run("nil-embedded-interface", func(t *testing.T) {
+			t.Parallel()
+			err := generateUnmatched(t, unmatchedColumnQuery(resolver.Column{Name: "n", Type: nilEmbeddedIface{}}))
+			require.ErrorIs(t, err, codegen.ErrOutOfC6Scope)
+			require.EqualError(t, err, `out of C6 scope: query "Fetch" column 0 "n" resolved as codegen_test.nilEmbeddedIface`)
 		})
 
 		for name, typed := range typedNilVariants() {
@@ -194,6 +225,14 @@ func TestUnmatchedResolvedTypeRefusesRatherThanFaulting(t *testing.T) {
 			require.EqualError(t, err, `query "Fetch" column 0 "xs": out of C6 scope: list element has unknown resolved type codegen_test.nilEmbeddedNode`)
 		})
 
+		t.Run("nil-embedded-interface", func(t *testing.T) {
+			t.Parallel()
+			col := resolver.Column{Name: "xs", Type: resolver.ResolvedList{Element: nilEmbeddedIface{}}}
+			err := generateUnmatched(t, unmatchedColumnQuery(col))
+			require.ErrorIs(t, err, codegen.ErrOutOfC6Scope)
+			require.EqualError(t, err, `query "Fetch" column 0 "xs": out of C6 scope: list element has unknown resolved type codegen_test.nilEmbeddedIface`)
+		})
+
 		for name, typed := range typedNilVariants() {
 			t.Run("typed-nil/"+name, func(t *testing.T) {
 				t.Parallel()
@@ -220,6 +259,13 @@ func TestUnmatchedResolvedTypeRefusesRatherThanFaulting(t *testing.T) {
 			err := generateUnmatched(t, unmatchedParamQuery(resolver.ResolvedParameter{Name: "p", Type: nilEmbeddedNode{}}))
 			require.ErrorIs(t, err, codegen.ErrOutOfC6Scope)
 			require.EqualError(t, err, `out of C6 scope: query "Fetch" parameter 0 $p resolved as codegen_test.nilEmbeddedNode (non-property parameters are post-v1)`)
+		})
+
+		t.Run("nil-embedded-interface", func(t *testing.T) {
+			t.Parallel()
+			err := generateUnmatched(t, unmatchedParamQuery(resolver.ResolvedParameter{Name: "p", Type: nilEmbeddedIface{}}))
+			require.ErrorIs(t, err, codegen.ErrOutOfC6Scope)
+			require.EqualError(t, err, `out of C6 scope: query "Fetch" parameter 0 $p resolved as codegen_test.nilEmbeddedIface (non-property parameters are post-v1)`)
 		})
 
 		for name, typed := range typedNilVariants() {
@@ -269,4 +315,37 @@ func TestUnmatchedResolvedTypeKeepsTheWireTagWhereThereIsOne(t *testing.T) {
 			require.EqualError(t, listErr, `query "Fetch" column 0 "xs": out of C6 scope: list element has unknown resolved type node`)
 		})
 	}
+}
+
+// panicNilString shadows the promoted String() with one that panics with
+// a nil value, which the module's own code never does. It exists to
+// reach the one case recover()'s return value cannot distinguish.
+type panicNilString struct{ resolver.ResolvedNode }
+
+func (panicNilString) String() string { panic(nil) }
+
+var _ resolver.ResolvedType = panicNilString{}
+
+// TestUnmatchedResolvedTypeNamesATypeThatPanickedWithNil pins the one
+// fault a `recover() != nil` guard reads as a success. Go 1.21 made
+// panic(nil) raise a *runtime.PanicNilError, so recover() returns
+// non-nil for it by default — but that conversion is a GODEBUG setting,
+// and under GODEBUG=panicnil=1 recover() returns nil for a call that
+// very much did fault. A helper whose whole job is to always produce a
+// name would then produce the empty string: `resolved as ` with nothing
+// after it.
+//
+// So the fallback is decided by a flag set after String() returns, not
+// by recover()'s value. Measured: with the guard written as
+// `if recover() != nil`, this case renders `resolved as ` and reddens.
+//
+// t.Setenv is why this test is not parallel. Go re-reads GODEBUG on
+// os.Setenv, and top-level parallel tests are paused while a sequential
+// one runs, so no other case observes the change.
+func TestUnmatchedResolvedTypeNamesATypeThatPanickedWithNil(t *testing.T) {
+	t.Setenv("GODEBUG", "panicnil=1")
+
+	err := generateUnmatched(t, unmatchedColumnQuery(resolver.Column{Name: "n", Type: panicNilString{}}))
+	require.ErrorIs(t, err, codegen.ErrOutOfC6Scope)
+	require.EqualError(t, err, `out of C6 scope: query "Fetch" column 0 "n" resolved as codegen_test.panicNilString`)
 }
