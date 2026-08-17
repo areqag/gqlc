@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"go/types"
 	"maps"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -125,8 +126,12 @@ func TestDecodeFuncRefusesACarrierItWasNotTaught(t *testing.T) {
 }
 
 // TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces is the closure
-// pin: it reads every Go type text the backend's type table can name and
-// requires decodeFunc to have an arm for the carrier of each.
+// pin: it reads the Go type texts the backend's type table names as
+// returned string literals, in every .go file of this package, and
+// requires decodeFunc to have an arm for the carrier of each. A return
+// the walk cannot read that way is refused at its position rather than
+// passed over, so a row spelled through a constant goes red as well —
+// at the refusal rather than at a subtest of its own.
 //
 // decodeFunc is downstream of admission — a Go type reaches it only
 // because the table produced it — so this is the seam where a carrier the
@@ -139,8 +144,11 @@ func TestDecodeFuncRefusesACarrierItWasNotTaught(t *testing.T) {
 // already sweeps declaredPropertyTypes through typeMap.Property into
 // writeEntityFieldDecode, and so reaches decodeFunc for every declared
 // property width keyed on the graph type constants rather than on what
-// types.go returns. Nothing else is keyed on typeMap.Scalar or
-// typeMap.Temporal.
+// types.go returns. Nothing else reaches decodeFunc through typeMap.Scalar
+// or typeMap.Temporal: TestTypeMapScalar (types_test.go) does read that
+// method, but reads its arms against expected texts, so a width Scalar
+// gains without an arm here is a row that file grows rather than a
+// failure it raises.
 //
 // The counts below are per method rather than over the map, because one
 // assertion over three sources fires only when all three fall silent: a
@@ -168,8 +176,9 @@ func TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces(t *testing.T) {
 	byMethod := typeTableGoTypes(t)
 
 	require.Equal(t, []string{"Property", "Scalar", "Temporal"}, slices.Sorted(maps.Keys(byMethod)),
-		"these are the typeMap methods the walk read out of types.go; an empty set means it read none "+
-			"and the sweep ranged over nothing, and a longer one means the table grew a method unread here")
+		"these are the typeMap methods the walk read out of the package's .go files; an empty set means "+
+			"it read none and the sweep ranged over nothing, and a longer one means the table grew a "+
+			"method the counts below have not been read against")
 
 	for _, method := range slices.Sorted(maps.Keys(byMethod)) {
 		for _, goType := range byMethod[method] {
@@ -206,10 +215,30 @@ func requireCarrierHasAnArm(t *testing.T, goType string) {
 // method that names none is keyed to an empty entry, so the caller can
 // tell a method that produces no Go type from one the walk did not reach.
 //
-// Read out of types.go's AST rather than listed here: a list would be a
-// copy of the table, and a copy goes stale in the case this sweep exists
-// for. Reading the AST also means a commented-out arm contributes
-// nothing, which a scan of the source bytes could not tell.
+// Read out of the AST rather than listed here: a list would be a copy of
+// the table, and a copy goes stale in the case this sweep exists for.
+// Reading the AST also means a commented-out arm contributes nothing,
+// which a scan of the source bytes could not tell.
+//
+// The walk parses every .go file the package directory holds, not
+// types.go alone. Naming one file was a hole of the shape this sweep
+// exists against: a typeMap method declared in a sibling file entered no
+// key at all, so the method-set pin still read the same three names and
+// the Go types that method returned were swept by nothing. Measured
+// before the widening — a second file returning a carrier decodeFunc
+// panics on, spelled as a plain literal, left the package green. A file
+// the walk never opens is skipped, and a skip is what this walk exists
+// to refuse.
+//
+// _test.go files are read too, deliberately: dropping a class of file
+// reopens that hole in a smaller place, and a method on typeMap is the
+// table wherever in the package it is declared. What the walk leaves out
+// is what is not a .go file of this directory — testdata/ above all,
+// which it does not descend into because that tree is the generator's
+// OUTPUT rather than its table, and which the go tool leaves out of the
+// package for the same reason. Selection is by directory listing and not
+// by build list, so a .go file the go tool itself skips — a build tag, a
+// leading underscore — is read here and must parse.
 //
 // "As a returned string literal" is the whole of what this reads, and it
 // is why the walk REFUSES a return it cannot read rather than passing
@@ -225,14 +254,46 @@ func requireCarrierHasAnArm(t *testing.T, goType string) {
 // and contributes nothing of its own. decodeFunc peels a slice down to
 // its element, and the element widths that arm composes with are the
 // literals of the scalar arms beside it.
+//
+// That second shape is the walk's remaining blind spot, and the AST
+// cannot close it: `"[]" + elemTy` and `"[]" + goDecimal` are the same
+// tree, so what the right-hand side holds is invisible without type
+// resolution. Today it holds Property's own recursive answer, which is a
+// literal of an arm beside it (types.go, the KindList branch). A list
+// arm composed with something else would be accepted here and swept by
+// nothing.
 func typeTableGoTypes(t *testing.T) map[string][]string {
 	t.Helper()
 
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "types.go", nil, parser.SkipObjectResolution)
-	require.NoError(t, err, "types.go does not parse")
+	// A go test runs in the directory of the package under test, which is
+	// the directory the table lives in.
+	entries, err := os.ReadDir(".")
+	require.NoError(t, err, "the package directory does not read, so the walk has no files to range over")
 
+	fset := token.NewFileSet()
 	byMethod := map[string][]string{}
+	read := 0
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
+			continue
+		}
+		read++
+		file, err := parser.ParseFile(fset, entry.Name(), nil, parser.SkipObjectResolution)
+		require.NoError(t, err, "%s does not parse", entry.Name())
+		collectTypeMapGoTypes(t, fset, file, byMethod)
+	}
+	require.NotZero(t, read, "the package directory held no .go file, so the walk ranged over nothing")
+
+	return byMethod
+}
+
+// collectTypeMapGoTypes adds one file's typeMap methods to byMethod. A
+// method is keyed the moment it is found, before any of its returns are
+// read, so a method that names no Go type is told apart from one the
+// walk did not reach.
+func collectTypeMapGoTypes(t *testing.T, fset *token.FileSet, file *ast.File, byMethod map[string][]string) {
+	t.Helper()
+
 	for _, d := range file.Decls {
 		fn, ok := d.(*ast.FuncDecl)
 		if !ok || fn.Body == nil || !isTypeMapMethod(fn) {
@@ -254,7 +315,6 @@ func typeTableGoTypes(t *testing.T) map[string][]string {
 			return true
 		})
 	}
-	return byMethod
 }
 
 // returnedGoType is the Go type text one return of a typeMap method

@@ -502,8 +502,9 @@ func columnDecoder(f codegen.Row) string {
 // the caller narrows.
 //
 // Every carrier the type table produces has an arm here, and a carrier
-// with none panics. This is the first panic in internal/codegen/: the
-// house shape for a broken internal invariant is a peer package's
+// with none panics. This is the first panic in the non-test code of
+// internal/codegen/ — the conformance tests carry three of their own.
+// The house shape for a broken internal invariant is a peer package's
 // (internal/resolver/resolve.go, scope.go), and it is taken here because
 // every caller renders into a []byte with no error to return, and every
 // error generate can return is raised before the first render.
@@ -540,8 +541,11 @@ func columnDecoder(f codegen.Row) string {
 // the same table, and reads the value as the wrong Go type at run time.
 //
 // TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces is what goes
-// red when the table gains a carrier this switch was not taught, whether
-// the table spells it as a literal or through a constant.
+// red when the table gains a carrier this switch was not taught: it walks
+// the typeMap methods of every .go file in the package, so a new row that
+// returns a literal fails a subtest of its own, and most other spellings
+// fail the walk's refusal. The one spelling it reads without sweeping is
+// named where the walk is, at typeTableGoTypes.
 func decodeFunc(goType string) string {
 	if strings.HasPrefix(goType, "[]") {
 		return listHelperName(goType)
