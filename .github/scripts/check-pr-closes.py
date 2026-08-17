@@ -24,10 +24,13 @@ opening tag is at a line's first character, blanked. Those are the
 carriers a marker was measured to survive invisibly in, against GitHub's
 own renderer; they are not certified to be
 every place GitHub hides text. Over the 85 shapes swept, where the two
-disagree this blanks a marker GitHub renders (seven of them) rather than
-honouring one GitHub hides (none of the 85), and the one shape in that
+disagree this blanks a marker GitHub renders rather than honouring one
+GitHub hides (none of the 85), and the one shape in that
 sample it honours that GitHub renders as code is an inline code span,
-which is visible monospace text. Both of those hold over the 85 and no
+which is visible monospace text. That sweep kept none of its bodies, so how
+many of the 85 disagree is not a number this file restates; blanking more
+cannot turn a disagreement into an honoured marker, which is why those two
+claims survive COMMENT_RUN. Both hold over the 85 and no
 further: outside them the blanking costs further refusals over markers
 GitHub renders, the marker's line anchor costs one more, and -- the
 direction the 85 had none of -- markers GitHub renders inside a <pre>, or
@@ -233,23 +236,25 @@ def prose_only(pr_body):
     character, at least as long as the one that opened it, with nothing but
     whitespace after it; a backtick fence whose info string carries a
     backtick opens nothing. Put the toggle back in place of this function
-    and the suite fails 29 rows -- 27 bodies whose marker it honours though
+    and the suite fails 33 rows -- 31 bodies whose marker it honours though
     GitHub renders it inside <pre><code> or not at all, and 2 it blanks that
     GitHub renders as prose. Counted at this commit, over the suite as it
     stands; a row added to its visibility section can move it either way.
-    Among the 27 is the ordinary idiom
+    Among the 31 is the ordinary idiom
     for showing a fence, which is to nest it in a longer one; showing this
     marker is what this file is about, so that is the realistic body rather
     than the exotic one. An unclosed fence, comment or HTML block swallows
     the rest.
 
-    Not a markdown parser. Four measured divergences blank rather than
+    Not a markdown parser. Five measured divergences blank rather than
     keep: a fence and a <pre> each indented one to three spaces into a list
-    item, a <code> opened against a paragraph it cannot interrupt, and a
-    <code> sharing its line with the comment that opens on it, which is not
-    a complete tag on a line of its own and so stays inline too -- all four
+    item, a <code> opened against a paragraph it cannot interrupt, a
+    <code> sharing its line with the comment that opens on it, and a <code>
+    whose only closing tag on its line is inside a comment COMMENT_RUN
+    removes -- the last two are not a complete tag on a line of their own,
+    so GitHub keeps them inline, and all five
     render as something a reader sees and are blanked here. (A
-    fifth row in that direction, a marker sharing a block's closing line,
+    sixth row in that direction, a marker sharing a block's closing line,
     is the marker
     pattern's line anchor rather than this function; it is rowed where it
     says so.) That is the cheap direction: it costs a refusal the author
@@ -274,7 +279,7 @@ def prose_only(pr_body):
     Two more reach the pattern over bodies GitHub does render, so they are
     rowed rather than fixed: an inline code span, which GitHub shows as
     visible monospace, and a <details> block, which GitHub collapses rather
-    than hides. All ten shapes named in these three paragraphs are rows
+    than hides. All eleven shapes named in these three paragraphs are rows
     in the suite's visibility section, the closing-line one included.
     """
     out = []

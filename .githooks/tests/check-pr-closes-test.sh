@@ -473,21 +473,21 @@ Refs: gqlc-mirrored #617")" "some/branch" \
 # a toggle: any ``` or ~~~ line flipped the state, which is not how a fence
 # closes.
 #
-# Counted at this commit: this section holds 49 rows, the three above
+# Counted at this commit: this section holds 54 rows, the three above
 # included. The last three are about GH_CLOSES and Bead: precedence rather
-# than about whether the marker is visible, so 46 are the sweep — 31 red and
-# 15 green. Every body in those 46 was put to GitHub's own renderer
+# than about whether the marker is visible, so 51 are the sweep — 35 red and
+# 16 green. Every body in those 51 was put to GitHub's own renderer
 # (POST /markdown, mode gfm, a read-only call) and the row's colour reports
 # what came back: red where GitHub puts the marker inside <pre><code> or
-# drops it from the output entirely, green where GitHub renders it. Eight
-# rows are the exceptions and each says so where it stands — five red over a
-# body GitHub renders the marker in (four of them prose_only()'s doing, the
-# fifth the marker pattern's line anchor), and three green: two over a body
+# drops it from the output entirely, green where GitHub renders it. Nine
+# rows are the exceptions and each says so where it stands — six red over a
+# body GitHub renders the marker in (five of them prose_only()'s doing, the
+# sixth the marker pattern's line anchor), and three green: two over a body
 # GitHub renders nothing of, and one over a body GitHub renders the marker
 # inside a <pre>.
 #
 # Put the toggle back in place of prose_only (commit 4446b7fc's
-# outside_fences, verbatim) and 29 rows fail — 27 red ones that pass,
+# outside_fences, verbatim) and 33 rows fail — 31 red ones that pass,
 # honouring a marker no reader can see, and 2 green ones that lose their
 # annotation. Every number in this paragraph was measured at this commit
 # rather than derived from a rule, so a row added below can move any of
@@ -904,16 +904,21 @@ Refs: gqlc-mirrored #617")" "some/branch" \
 # this gate annotating a check run over a declaration nobody can see. Swept
 # 85 body shapes through GitHub's renderer and this checker together -- 58
 # of them, then 35 more picked to break the result the first 58 gave, 8
-# shared: seven disagreements, this one among them. Within that sample the
-# only marker honoured against GitHub's rendering is the code span rowed
-# above, which GitHub shows as visible monospace.
+# shared: the disagreements were all this direction, this one among them.
+# Within that sample the only marker honoured against GitHub's rendering is
+# the code span rowed above, which GitHub shows as visible monospace. That
+# sweep was run before COMMENT_RUN was added and its bodies were not kept, so
+# how many of the 85 disagree is not a number this commit can restate; what
+# the added blanking cannot do is turn a disagreement into an honoured
+# marker, so the direction and the code span still hold over it. The rows
+# above and below are the sample this commit does re-measure.
 #
 # What that sweep bounds is the direction over the shapes it swept, and
 # nothing wider. Outside it the other direction exists: the row below headed
 # "a marker inside an open HTML attribute is honoured" puts the marker on its
 # own line inside an unterminated attribute value, where GitHub renders
-# nothing of it and this honours it anyway. So neither the direction nor the
-# count carries past the sample; 85 shapes is not every shape.
+# nothing of it and this honours it anyway. So the direction does not carry
+# past the sample; 85 shapes is not every shape.
 expect_red "a fence indented into a list item blanks the marker below it" \
     "$EXPORT" "$(body "- item
 
