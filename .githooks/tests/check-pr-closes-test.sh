@@ -473,20 +473,21 @@ Refs: gqlc-mirrored #617")" "some/branch" \
 # a toggle: any ``` or ~~~ line flipped the state, which is not how a fence
 # closes.
 #
-# Counted at this commit: this section holds 44 rows, the three above
+# Counted at this commit: this section holds 49 rows, the three above
 # included. The last three are about GH_CLOSES and Bead: precedence rather
-# than about whether the marker is visible, so 41 are the sweep — 28 red and
-# 13 green. Every body in those 41 was put to GitHub's own renderer
+# than about whether the marker is visible, so 46 are the sweep — 31 red and
+# 15 green. Every body in those 46 was put to GitHub's own renderer
 # (POST /markdown, mode gfm, a read-only call) and the row's colour reports
 # what came back: red where GitHub puts the marker inside <pre><code> or
-# drops it from the output entirely, green where GitHub renders it. Five
-# rows are the exceptions and each says so where it stands — four red over a
-# body GitHub renders the marker in (three of them prose_only()'s doing, the
-# fourth the marker pattern's line anchor), and one green over a body GitHub
-# renders nothing of.
+# drops it from the output entirely, green where GitHub renders it. Eight
+# rows are the exceptions and each says so where it stands — five red over a
+# body GitHub renders the marker in (four of them prose_only()'s doing, the
+# fifth the marker pattern's line anchor), and three green: two over a body
+# GitHub renders nothing of, and one over a body GitHub renders the marker
+# inside a <pre>.
 #
 # Put the toggle back in place of prose_only (commit 4446b7fc's
-# outside_fences, verbatim) and 26 rows fail — 24 red ones that pass,
+# outside_fences, verbatim) and 29 rows fail — 27 red ones that pass,
 # honouring a marker no reader can see, and 2 green ones that lose their
 # annotation. Every number in this paragraph was measured at this commit
 # rather than derived from a rule, so a row added below can move any of
@@ -698,8 +699,8 @@ Refs: gqlc-mirrored #617')" "fix/gqlc-mirrored-thing" \
 # machine used to lose the block: 'comment' replaced the html state rather
 # than interrupting it, so the '-->' resumed at prose and the rest of the
 # <pre> was read as a live body. GitHub keeps the block open across the
-# comment — every one of the seven bodies below renders the marker inside
-# <pre> or <code>, measured through POST /markdown — so all seven are red.
+# comment — every one of the nine bodies below renders the marker inside
+# <pre> or <code>, measured through POST /markdown — so all nine are red.
 expect_red "a closed comment inside a <pre> does not end the block" \
     "$EXPORT" "$(body '<pre>
 <!--
@@ -761,8 +762,34 @@ Refs: gqlc-mirrored #617
 </pre>')" "fix/gqlc-mirrored-thing" \
     "missing 'Closes #617'"
 
+# The last two of the nine open the block and the comment on one line, which
+# is the spelling the seven above left behind: the state machine read the
+# comment first and stopped there, so the block that same line opened was
+# never recorded and the '-->' put the marker back in prose. GitHub renders
+# the body below as '<pre class="notranslate">Refs: gqlc-mirrored #617</pre>',
+# the same as the two-line spelling seven rows up.
+expect_red "a comment opening the <pre>'s own line does not end the block" \
+    "$EXPORT" "$(body '<pre><!--
+-->
+Refs: gqlc-mirrored #617
+</pre>')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+# The <code> spelling of that line, and an exception in the class of "a
+# <code> opened against a paragraph blanks the marker" below: '<code><!--'
+# is not a complete tag on a line of its own, so GitHub keeps the <code>
+# inline and renders the marker as visible monospace inside a <p>. Blanked
+# anyway, because HTML_OPEN reads the line and not the paragraph it is in.
+# The fail-closed direction, and the same one that row is filed under.
+expect_red "a comment opening the <code>'s own line does not end the block" \
+    "$EXPORT" "$(body '<code><!--
+-->
+Refs: gqlc-mirrored #617
+</code>')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
 # The other side of the same restore, so it is not "blank everything below a
-# comment in a block". Both bodies below put the marker back in prose and
+# comment in a block". The two bodies below put the marker back in prose and
 # GitHub agrees: it renders each as an empty <pre> followed by
 # <p>Refs: gqlc-mirrored #617</p>. The first is the case the closing line
 # has to be read past the '-->' for — the block's own closer shares it.
@@ -781,6 +808,21 @@ expect_green_saying "a block closed below a closed comment is closed" \
 
 Refs: gqlc-mirrored #617')" "some/branch" \
     "issue #617 stays open at merge"
+
+# Which side of the '-->' the closing tag falls on is the whole of that
+# reading, so the other side is a row too. Here '</pre>' comes before the
+# '-->' and is therefore inside the comment, where GitHub does not act on
+# it: it renders this body as
+# '<pre class="notranslate"><p>Refs: gqlc-mirrored #617</p></pre>', the
+# marker still inside the block. Scanning the whole line for the closer
+# rather than the part after the '-->' would close the block here and
+# honour the marker, which is why the tail is scanned and not the line.
+expect_red "a closing tag before the comment's own '-->' does not close it" \
+    "$EXPORT" "$(body '<pre>
+<!--
+</pre> -->
+Refs: gqlc-mirrored #617')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
 
 expect_green_saying "a fence line inside a comment opens no fence" \
     "$EXPORT" "$(body "<!--
@@ -852,6 +894,44 @@ expect_green_saying "a marker inside a <details> block is a declaration" \
 Refs: gqlc-mirrored #617
 
 </details>')" "some/branch" \
+    "issue #617 stays open at merge"
+
+# Two more the same way as the attribute row above: measured, honoured,
+# rowed as they stand rather than fixed (bd gqlc-3xna). Both are the
+# line-oriented block model meeting a sanitiser that works on the assembled
+# HTML, and neither needs a comment to trigger.
+#
+# HTML_OPEN reads a raw block's opening tag at the line's first character,
+# because that is where markdown starts an HTML block. GitHub's sanitiser
+# does not need the tag there: an inline '<pre>' part-way along a paragraph
+# line opens the element in the output all the same, and the marker below it
+# lands inside. The body below renders as
+# '<p>x </p><pre class="notranslate">Refs: gqlc-mirrored #617</pre>' and this
+# honours it. Searching the whole line for the tag would blank any body that
+# writes '<pre>' in a sentence -- the bodies on this file's own PRs do --
+# which is why the anchor stays and this is a row.
+expect_green_saying "a marker below a <pre> opened part-way along a line is honoured" \
+    "$EXPORT" "$(body 'Bead-free body.
+
+x <pre>
+Refs: gqlc-mirrored #617
+</pre>')" "some/branch" \
+    "issue #617 stays open at merge"
+
+# The block closes on its own opening line, so markdown's HTML block ends
+# there and the '<!--' after it is emitted raw with nothing to close it: the
+# '-->' on the next line is markdown text by then and comes back escaped, so
+# the sanitiser's comment runs to the end of the body. GitHub renders this
+# one as '<pre class="notranslate"></pre>' and nothing else -- the marker
+# appears nowhere -- and this honours it, because here the comment does end
+# at its '-->'. The direction the attribute row above is filed for, in a
+# second carrier.
+expect_green_saying "a marker below a comment left open by a closed block is honoured" \
+    "$EXPORT" "$(body 'Bead-free body.
+
+<pre></pre><!--
+-->
+Refs: gqlc-mirrored #617')" "some/branch" \
     "issue #617 stays open at merge"
 
 # Three more shapes where this refuses and GitHub does not hide, all found
