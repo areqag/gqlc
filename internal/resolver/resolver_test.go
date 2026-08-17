@@ -305,16 +305,112 @@ var invalidFixtures = map[string]error{
 	// and whole-entity reference is refused.
 	"label_satisfy_plural_property.cypher": ErrUnknownProperty,
 	"label_satisfy_plural_entity.cypher":   ErrAmbiguousLabel,
-	// kph4 additions. Plural endpoints reach edge closure only on a schema
-	// that both declares edges and declares more than one node type
-	// satisfying the pattern's label expression; no fixture combined the two.
+	// 0tft. Phase C narrows a plural endpoint to the node types its committed
+	// candidates put on that end of the pattern, intersected across every
+	// touching edge — so the refusal that survives the widening is the one
+	// where that intersection is EMPTY. WORKS_AT is declared only from
+	// Employee&Person and REVIEWED only into the bare Person, so the two edges
+	// touching `p` pin it to disjoint types and no node satisfies both.
 	//
-	// Committing one edge type names the node type on each of its ends, but
-	// the endpoints are not narrowed to it: WORKS_AT closes to the single key
-	// Employee&Person-[WORKS_AT]->Company and `p` stays plural, so ADR 0022's
-	// whole-entity refusal still fires on a binding the schema pins. Refusing
-	// is the safe half of the answer; widening it is gqlc-0tft.
-	"plural_endpoint_whole_entity_after_edge_closure.cypher": ErrAmbiguousLabel,
+	// The pre-closure satisfying set then stands (an empty intersection is a
+	// fact about which rows come back, not about which types the projection can
+	// name — refusing the query outright would narrow one gqlc accepts today,
+	// ADR 0006), and ADR 0022's whole-entity refusal fires on it unchanged.
+	//
+	// What this fixture pins, precisely, is that EVERY touching edge is folded
+	// in: consult only the first, or only the last, and the surviving set is
+	// that one edge's contribution, `p` commits, and the query is accepted.
+	// It does NOT separate intersect from union across edges — under a union
+	// every candidate survives, nothing is learned, and ErrAmbiguousLabel comes
+	// back from ADR 0022 exactly as it does here. That distinction is pinned by
+	// TestEdgeClosureNarrowsThePluralEndpointsItPins and by
+	// TestDeferredEdgesCloseBeforeTheNarrowing, both of which assert a
+	// committed type rather than a sentinel.
+	//
+	// Its accepted counterpart is valid/plural_endpoint_whole_entity_after_
+	// edge_closure.cypher, which lived here until 0tft.
+	"plural_endpoint_contradictory_edges_stay_plural.cypher": ErrAmbiguousLabel,
+	// The narrowing learns only from an edge EVERY surviving row is guaranteed
+	// to have and that the query observed rather than wrote
+	// (witnessesItsEndpoints). These six are the shapes that break that
+	// guarantee, one per clause of the predicate: each puts the only WORKS_AT
+	// declaration (Employee&Person -> Company) next to a plural `(p:Person)`,
+	// and each still returns rows whose p is the bare Person type. Committing
+	// Employee&Person on any of them names a whole entity — and, for the
+	// property row, a NOT NULL column — that those rows do not have.
+	//
+	// Their accepted twins are in TestNarrowingLearnsOnlyFromEdgesEveryRowHas:
+	// the same six queries with the offending clause removed all commit
+	// Employee&Person, so nothing here is refused by the shape being
+	// unresolvable for an unrelated reason.
+	"plural_endpoint_optional_edge_stays_plural.cypher":          ErrAmbiguousLabel,
+	"plural_endpoint_optional_edge_property_stays_plural.cypher": ErrUnknownProperty,
+	"plural_endpoint_zero_hop_stays_plural.cypher":               ErrAmbiguousLabel,
+	"plural_endpoint_zero_lower_bound_stays_plural.cypher":       ErrAmbiguousLabel,
+	// `*0..1` is the shape where the two halves of singleHopPattern separate.
+	// Its upper bound is one, so every question about hop COUNT passes it; the
+	// zero lower bound is the only thing left to refuse it, and its twin `*..1`
+	// (absent lower bound, read as one) differs in nothing else.
+	"plural_endpoint_zero_lower_bound_one_hop_stays_plural.cypher": ErrAmbiguousLabel,
+	"plural_endpoint_merged_edge_stays_plural.cypher":              ErrAmbiguousLabel,
+	"plural_endpoint_created_edge_stays_plural.cypher":             ErrAmbiguousLabel,
+	// Three types satisfy `(:Person)` and WORKS_AT is declared on two of them,
+	// so the narrowing lands on a set that is smaller but still plural — the
+	// arm no two-type schema can reach, because on two types every narrowing is
+	// either "one survivor" or "no change". The sentinel is the same whether or
+	// not that arm ran, so it is not what pins it: see
+	// TestNarrowingToASmallerPluralSetIsWhatTheSetSaysItIs, which reads the
+	// surviving set back out of this fixture's own message and requires it to be
+	// exactly the two, and pairs it with the property projection that resolves
+	// only because the third was dropped.
+	"plural_endpoint_narrows_to_smaller_plural_set.cypher": ErrAmbiguousLabel,
+	// A quantifier of more than one hop. The closure names the ends of ONE
+	// declared edge; a multi-hop pattern's ends are one or more hops away from
+	// those, so the type it commits is the wrong one — not merely a coarser one.
+	// Every other plural-endpoint schema in the corpus hides this, because it
+	// declares the label once and the closure then names the pattern's ends by
+	// accident whatever the hop count. satisfy_plural_edges_chain.gql declares X
+	// twice, A -> B -> C, so the two disagree:
+	//
+	//   *2   over (p:Node)  ->(c:Node:C) closes B -> C; p is A&Node
+	//   *1..2 over (p:Node) ->(c:Node:C) closes B -> C; p is A&Node or B&Node
+	//   *    over (p:Node)  ->(c:Node:C) closes B -> C; p is A&Node or B&Node
+	//   *1..2 over (p:Node:A)->(c:Node)  closes A -> B; c is B&Node or C&Node
+	//
+	// and each fixture returns the single-typed property of the type the closure
+	// wrongly names, so the mis-commitment is an emitted NOT NULL column rather
+	// than a mis-named entity. Their accepted single-hop twins are in
+	// TestNarrowingLearnsOnlyFromASingleHopEdge.
+	"plural_endpoint_multi_hop_stays_plural.cypher":         ErrUnknownProperty,
+	"plural_endpoint_multi_hop_range_stays_plural.cypher":   ErrUnknownProperty,
+	"plural_endpoint_unbounded_hops_stays_plural.cypher":    ErrUnknownProperty,
+	"plural_endpoint_multi_hop_far_end_stays_plural.cypher": ErrUnknownProperty,
+	// An anonymous endpoint spelling `(:Company)` on a schema where Company&Large
+	// also satisfies it. endpointLabels keys that endpoint on the labels spelled
+	// rather than on the types satisfying them, so the closure never probes the
+	// Employee&Person -> Company&Large declaration and would name `p` the bare
+	// Person on the strength of the one declaration it did see. Rows of the type
+	// it missed match the pattern, so it is refused and endpointKeysCoverEveryMatch
+	// is what refuses it. The accepted twin — the same query on a schema where the
+	// spelled labels really are satisfied by one type — is in
+	// TestNarrowingSkipsAnEndpointItCannotEnumerate.
+	"plural_endpoint_inline_endpoint_stays_plural.cypher":          ErrAmbiguousLabel,
+	"plural_endpoint_inline_endpoint_property_stays_plural.cypher": ErrUnknownProperty,
+	// The same schema, one hop further out, with the inline endpoint moved off
+	// the narrowed edge entirely: `(:Person)-[r:WORKS_AT]->(c)<-[q:WORKS_AT]-(p:Person)`
+	// narrows `p` from edge `q`, whose two ends are both VarEndpoints. The
+	// under-enumeration reaches it through Phase B instead — `c` is unlabelled,
+	// candidateTypes reads `r`'s inline other end, and commits `c` to the bare
+	// Company that half the pattern's rows contradict. Narrowing from that
+	// singleton is the same wrong answer these two spell one hop in.
+	"plural_endpoint_unlabelled_hop_stays_plural.cypher":          ErrAmbiguousLabel,
+	"plural_endpoint_unlabelled_hop_property_stays_plural.cypher": ErrUnknownProperty,
+	// The same wrong commitment reached across a Part boundary instead: Part 1
+	// infers `c`, WITH carries it, and Part 2's narrowing sees a singular node
+	// type with no provenance. branchState carries the type and not how Part 1
+	// arrived at it, so newScope leaves a carried entry out of resolvedCovers
+	// and this is the fixture that pins the omission.
+	"plural_endpoint_carried_hop_property_stays_plural.cypher": ErrUnknownProperty,
 	// Three candidates of which only the first and third disagree about which
 	// of the pattern's endpoints is the source; the second is a plural-endpoint
 	// duplicate of the first's side and carries no orientation signal.
@@ -819,6 +915,944 @@ func (s *ResolverSuite) TestMixedSymmetryIsAcceptedAndTheMarkerNarrows() {
 	s.Require().Equal(ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{bothWays, oneWay}},
 		resolve("MATCH (a:Person)-[r:MENTORS]->(b:Staff) RETURN r"),
 		"the reversed arrow keeps both, which is what makes the surviving candidate the symmetric one")
+}
+
+// TestEdgeClosureNarrowsThePluralEndpointsItPins holds the widening gqlc-0tft
+// is: a committed edge candidate names one node type on each of its ends, so
+// the plural binding at that end of the pattern is constrained by the closure
+// exactly as an unlabelled one is by Phase B (R3 §4.5.2). Before this, the
+// closure wrote only the edge lanes and the node binding stayed plural, so ADR
+// 0022's whole-entity refusal fired on a binding the schema had already pinned.
+//
+// Hand-written rather than left to the corpus goldens. Two of the three rows
+// assert an answer no golden can carry without being blessed into whatever the
+// code produces — the committed node type and the property that only the
+// narrowed type declares — and the third is the one that separates
+// intersection-across-edges from union-across-edges, a distinction a golden
+// records as bytes rather than as a claim.
+//
+// The schema lives in invalid/ because that is where the refusals it also
+// carries are pinned; the copy is one parsed value here.
+func (s *ResolverSuite) TestEdgeClosureNarrowsThePluralEndpointsItPins() {
+	sch := s.loadSchema("invalid", "satisfy_plural_edges_reversed.gql")
+	resolve := func(src string) []Column {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		s.Require().NoErrorf(err, "%s: the closure pins this endpoint, so the resolver has what it needs", src)
+		return vq.Columns
+	}
+
+	// The only declared WORKS_AT runs Employee&Person -> Company, so `p` cannot
+	// be the bare Person type — and the whole entity is nameable once it is not.
+	s.Require().Equal([]Column{{Name: "p", Type: ResolvedNode{Labels: "Employee&Person"}}},
+		resolve("MATCH (p:Person)-[r:WORKS_AT]-(c:Company) RETURN p"))
+
+	// employeeId is declared on Employee&Person and NOT on Person, so this
+	// column exists only because the narrowing dropped Person: the ADR 0022
+	// intersection over both candidates has no such property.
+	s.Require().Equal([]Column{{Name: "p.employeeId", Type: ResolvedProperty{Type: graph.PropertyType("INT")}}},
+		resolve("MATCH (p:Person)-[r:WORKS_AT]-(c:Company) RETURN p.employeeId"))
+
+	// Two edges touch `p`: WORKS_AT contributes {Employee&Person} and the
+	// directed REVIEWED contributes {Person, Employee&Person} (both are
+	// declared). Their INTERSECTION is the singleton; their union is `p`'s
+	// whole satisfying set, which narrows nothing and leaves this refused.
+	s.Require().Equal([]Column{{Name: "p", Type: ResolvedNode{Labels: "Employee&Person"}}},
+		resolve("MATCH (p:Person)-[w:WORKS_AT]->(co:Company), (p)-[r:REVIEWED]->(c2:Company) RETURN p"))
+}
+
+// TestEdgeClosureNarrowingCannotOutrunTheFacts is the other half of the
+// widening: the three shapes where the closure does NOT determine the endpoint,
+// and the binding must stay plural and stay refused. A widening that also
+// accepts these is not a widening, it is a wrong answer — and each row fails on
+// a different way of getting the contribution's shape wrong, so together they
+// say the rule is "union across the candidate set's two sides, then intersect
+// across touching edges" and not any of its neighbours.
+//
+// Rows 1 and 2 run on the mixed-symmetry schema, whose undirected candidate set
+// puts each binding on BOTH sides: `Manager&Person&Staff-[MENTORS]->
+// Engineer&Person&Staff` reads the same either way round, and
+// `Person-[MENTORS]->Engineer&Person&Staff` reads right-to-left only. Taking
+// only the left-to-right reading narrows `a` to Manager&Person&Staff and `b` to
+// Engineer&Person&Staff; taking only the right-to-left reading narrows them the
+// other way. Both are wrong, both make these rows resolve, and no corpus
+// fixture on that schema can see it — every one of them projects the edge.
+//
+// Row 3 is the empty intersection. Two edges pin `p` to disjoint types, so
+// nothing satisfies both and the closure has narrowed the candidate set to
+// nothing. The pre-closure satisfying set stands (§4.5.2's intersection is a
+// refinement of label satisfaction, not a replacement for it) and the ADR 0022
+// refusal fires on it unchanged — see the companion assertion below, which is
+// what says the empty case leaves the query resolvable rather than refusing it
+// outright.
+func (s *ResolverSuite) TestEdgeClosureNarrowingCannotOutrunTheFacts() {
+	tests := []struct {
+		name   string
+		dir    string
+		schema string
+		query  string
+		want   []graph.LabelSetKey
+	}{
+		{
+			name:   "undirected candidate set puts the left endpoint on both sides",
+			dir:    "valid",
+			schema: "satisfy_plural_edges_mixed_symmetry.gql",
+			query:  "MATCH (a:Staff)-[r:MENTORS]-(b:Person) RETURN a",
+			want:   []graph.LabelSetKey{"Engineer&Person&Staff", "Manager&Person&Staff"},
+		},
+		{
+			name:   "undirected candidate set puts the right endpoint on both sides",
+			dir:    "valid",
+			schema: "satisfy_plural_edges_mixed_symmetry.gql",
+			query:  "MATCH (a:Staff)-[r:MENTORS]-(b:Person) RETURN b",
+			want:   []graph.LabelSetKey{"Engineer&Person&Staff", "Manager&Person&Staff", "Person"},
+		},
+		{
+			name:   "two touching edges pin disjoint types, so the intersection is empty",
+			dir:    "invalid",
+			schema: "satisfy_plural_edges_reversed.gql",
+			query:  "MATCH (p:Person)-[w:WORKS_AT]->(co:Company), (c:Company)-[r:REVIEWED]->(p) RETURN p",
+			want:   []graph.LabelSetKey{"Employee&Person", "Person"},
+		},
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			sch := s.loadSchema(tt.dir, tt.schema)
+			q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(tt.query)))
+			s.Require().NoError(err)
+			_, err = New(sch, WithRegistry(regR7)).Resolve(q)
+			s.Require().ErrorIs(err, ErrAmbiguousLabel,
+				"the closure does not determine this endpoint, so the whole-entity refusal stands")
+			// The message enumerates the surviving candidates, so it says WHICH
+			// set stood — a narrowing that dropped one and still refused (because
+			// two remain) passes errors.Is and fails here.
+			for _, k := range tt.want {
+				s.Require().ErrorContains(err, string(k))
+			}
+			s.Require().Len(strings.Split(errAmbiguousLabelSet(err), ", "), len(tt.want),
+				"the refusal must name exactly the pre-closure satisfying set")
+		})
+	}
+
+	// The empty intersection leaves the binding resolvable, it does not refuse
+	// the query. Refusing would be a narrowing of an accepted query (ADR 0006)
+	// with no soundness case behind it: the pattern matches no row, which is a
+	// fact about the data, not about the types the projection names.
+	sch := s.loadSchema("invalid", "satisfy_plural_edges_reversed.gql")
+	q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(
+		"MATCH (p:Person)-[w:WORKS_AT]->(co:Company), (c:Company)-[r:REVIEWED]->(p) RETURN p.name")))
+	s.Require().NoError(err)
+	vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+	s.Require().NoError(err, "an empty intersection falls back to label satisfaction; it is not a refusal")
+	s.Require().Equal([]Column{{Name: "p.name", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}}, vq.Columns)
+}
+
+// TestNarrowingLearnsOnlyFromEdgesEveryRowHas is the accepted half of the six
+// invalid/plural_endpoint_*_stays_plural fixtures: the same query with the one
+// clause that breaks the guarantee removed, which must still commit.
+//
+// An edge binding names a relationship between two declared node types, but it
+// only says anything about the ROWS the query returns when every returned row
+// is guaranteed to have that edge. The fixtures are the shapes where it is not,
+// and the pairs below are what say each of them is refused BECAUSE of that and
+// not because the shape is unresolvable for some unrelated reason — a fixture
+// refused for the wrong reason passes the sentinel check and covers nothing.
+//
+// They are equally the guard against the predicate being applied too widely.
+// Every accepted twin here is a query that the widening exists to accept, so a
+// witnessesItsEndpoints that answered false too often shows up as a refusal on
+// this side rather than as silence.
+//
+// Read alongside TestEdgeClosureNarrowsThePluralEndpointsItPins, which pins the
+// plain mandatory single-hop edge on the same schema.
+func (s *ResolverSuite) TestNarrowingLearnsOnlyFromEdgesEveryRowHas() {
+	sch := s.loadSchema("invalid", "satisfy_plural_edges_reversed.gql")
+	resolve := func(src string) ([]Column, error) {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		return vq.Columns, err
+	}
+	employeePerson := []Column{{Name: "p", Type: ResolvedNode{Labels: "Employee&Person"}}}
+
+	tests := []struct {
+		name    string
+		fixture string
+		twin    string
+		want    []Column
+	}{
+		{
+			// OPTIONAL MATCH is an outer join: a bare Person with no WORKS_AT
+			// still produces a row, and that row's p is not an Employee.
+			name:    "an OPTIONAL edge is not a witness, a required one is",
+			fixture: "plural_endpoint_optional_edge_stays_plural.cypher",
+			twin:    "MATCH (p:Person) MATCH (p)-[r:WORKS_AT]->(c:Company) RETURN p",
+			want:    employeePerson,
+		},
+		{
+			// The sharp end. employeeId is declared on Employee&Person and not
+			// on Person, so narrowing off the OPTIONAL edge does not merely
+			// mis-name an entity — it emits a NOT NULL column that is null for
+			// every bare-Person row.
+			name:    "the property form is where the wrong type reaches emitted code",
+			fixture: "plural_endpoint_optional_edge_property_stays_plural.cypher",
+			twin:    "MATCH (p:Person) MATCH (p)-[r:WORKS_AT]->(c:Company) RETURN p.employeeId",
+			want:    []Column{{Name: "p.employeeId", Type: ResolvedProperty{Type: graph.PropertyType("INT")}}},
+		},
+		{
+			// A zero lower bound admits the empty path, which degenerates to
+			// p == c and declares nothing about either end. No OPTIONAL MATCH
+			// is involved: a plain MATCH with this quantifier is enough.
+			name:    "a zero-hop quantifier is not a witness, a one-hop one is",
+			fixture: "plural_endpoint_zero_hop_stays_plural.cypher",
+			twin:    "MATCH (p:Person)-[w:WORKS_AT*1]->(c:Company) RETURN p",
+			want:    employeePerson,
+		},
+		{
+			// The twin is `*1..1` and not `*1..2`. A one-hop LOWER bound is not
+			// enough: the closure names the ends of one declared edge, and a range
+			// that admits two hops puts the pattern's ends somewhere else. On this
+			// schema `*1..2` happens to commit the right type anyway — no WORKS_AT
+			// leaves Company, so no two-hop path exists to disagree — which is
+			// exactly why it cannot be the twin here. It would assert a rule the
+			// corpus structurally cannot falsify. The rule is pinned where it can
+			// be falsified, on the chain schema, by
+			// TestNarrowingLearnsOnlyFromASingleHopEdge.
+			name:    "a zero-lower-bound range is not a witness, a range of exactly one hop is",
+			fixture: "plural_endpoint_zero_lower_bound_stays_plural.cypher",
+			twin:    "MATCH (p:Person)-[w:WORKS_AT*1..1]->(c:Company) RETURN p",
+			want:    employeePerson,
+		},
+		{
+			// The pair that separates singleHopPattern's two questions. Both
+			// sides have an upper bound of one, so the hop-count half admits
+			// both and only the lower bound decides: `*0..1` admits the empty
+			// path, `*..1` has no lower bound written and openCypher reads that
+			// as one, making it the closed range [1,1]. Without this pair the
+			// zero-lower-bound test could be dropped from the predicate and the
+			// remaining fixtures (`*0`, `*0..2`) would still be refused — by the
+			// hop-count half, for the wrong reason.
+			name:    "a zero lower bound is not a witness even under a one-hop ceiling, an absent one is",
+			fixture: "plural_endpoint_zero_lower_bound_one_hop_stays_plural.cypher",
+			twin:    "MATCH (p:Person)-[w:WORKS_AT*..1]->(c:Company) RETURN p",
+			want:    employeePerson,
+		},
+		{
+			// MERGE creates the pattern on miss, so every input row survives
+			// it whatever its type. The edge is caused by the query, not
+			// observed by it.
+			name:    "a MERGEd edge is not a witness, a matched one is",
+			fixture: "plural_endpoint_merged_edge_stays_plural.cypher",
+			twin:    "MATCH (p:Person) MATCH (p)-[w:WORKS_AT]->(c:Company) RETURN p",
+			want:    employeePerson,
+		},
+		{
+			name:    "a CREATEd edge is not a witness, a matched one is",
+			fixture: "plural_endpoint_created_edge_stays_plural.cypher",
+			twin:    "MATCH (p:Person), (c:Company) MATCH (p)-[w:WORKS_AT]->(c) RETURN p",
+			want:    employeePerson,
+		},
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			// The fixture is read from disk so the pair cannot drift: what is
+			// refused in invalid/ and what is accepted here are one edit apart.
+			src, err := os.ReadFile(filepath.Join(fixtureDir, "invalid", tt.fixture))
+			s.Require().NoError(err)
+			_, err = resolve(string(src))
+			s.Require().Error(err, "%s must stay refused", tt.fixture)
+
+			got, err := resolve(tt.twin)
+			s.Require().NoError(err, "the twin removes only the clause that breaks the guarantee, so it must still commit")
+			s.Require().Equal(tt.want, got)
+		})
+	}
+}
+
+// TestNarrowingLearnsOnlyFromASingleHopEdge is the accepted half of the four
+// invalid/plural_endpoint_*hop*_stays_plural fixtures, and the reason the
+// witness predicate asks for a single hop rather than for a non-zero lower
+// bound.
+//
+// The narrowing reads a committed candidate set as a statement about the
+// PATTERN's two ends. That reading is only sound when the pattern IS one
+// declared edge. Under `*2` the pattern is two of them chained, and the ends
+// the closure names are the ends of the last hop, not of the pattern — so the
+// binding at the far end commits a type that is one hop away from the truth.
+// It is not a coarser answer that a later stage could refine; it is the wrong
+// type, and since these fixtures project a property declared on exactly one
+// node type, it reaches emitted code as a NOT NULL column that is null.
+//
+// No schema already in the corpus can show it, and the reason is NOT how often
+// each declares its label — every one of them declares some label more than
+// once: FOUNDED twice in valid/satisfy_plural_edges.gql, KNOWS twice in
+// _symmetric, MENTORS twice in _mixed_symmetry, WORKS_AT twice in _three_types,
+// REVIEWED twice in _overlapping and _reversed_subtype, three times in
+// _reversed and four times in _two_swapped_pairs. Multiplicity cannot be what
+// matters, because edgeCandidates never reads the hop count at all: the closure
+// of a `*2` pattern is the same set as the closure of the one-hop pattern with
+// the same two endpoints, however many declarations carry the label.
+//
+// What matters is whether that set can hold a declaration which is not the
+// pattern's FIRST hop. satisfy_plural_edges_chain.gql is the only schema where
+// it can: X runs A -> B and B -> C, a chain through three DISTINCT types that
+// `(:Node)` satisfies alike. So `(p:Node)-[:X*2]->(c:Node:C)` has
+// srcs = {A&Node, B&Node, C&Node}, tgts = {C&Node}, and B -> C sits inside that
+// box while the real first hop A -> B does not. The closure names B&Node; the
+// only two-hop path into C&Node starts at A&Node.
+//
+// Every other plural-endpoint schema is missing one of those two ingredients.
+// satisfy_plural_edges, _mixed_symmetry and _three_types declare their label
+// only INTO a type no declaration leaves, so there is no chain to walk.
+// _symmetric, _overlapping and _two_swapped_pairs do chain, but every A -> B
+// -> C they admit has two of A, B, C equal, so there is no third type for the
+// closure to name. _reversed and _reversed_subtype do chain through a third
+// distinct type — Person&Employee -> Company -> Person and Author -> Book ->
+// Author&Editor — but that middle type is a Company and a Book, and neither
+// satisfies the plural endpoint's `(:Person)` or `(:Author)`, so it is not in
+// srcs and the closure can never name it.
+//
+// The twins are the same queries with the quantifier deleted. They must stay
+// accepted with the SAME property type the multi-hop form wrongly emitted:
+// that is what says the fixture above is refused because of the hop count and
+// not because the chain schema is unresolvable, and what stops the fix from
+// being "switch the narrowing off for anything var-length-shaped".
+func (s *ResolverSuite) TestNarrowingLearnsOnlyFromASingleHopEdge() {
+	sch := s.loadSchema("invalid", "satisfy_plural_edges_chain.gql")
+	resolve := func(src string) ([]Column, error) {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		return vq.Columns, err
+	}
+
+	tests := []struct {
+		name    string
+		fixture string
+		twin    string
+		want    []Column
+	}{
+		{
+			// Exactly two hops. p is A&Node on every row; the closure names
+			// B&Node, the source of the LAST hop.
+			name:    "an exact multi-hop count is not a witness, an unquantified edge is",
+			fixture: "plural_endpoint_multi_hop_stays_plural.cypher",
+			twin:    "MATCH (p:Node)-[w:X]->(c:Node:C) RETURN p.bOnly",
+			want:    []Column{{Name: "p.bOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}},
+		},
+		{
+			// One-or-two hops. The lower bound is one, which is all
+			// qualifiedDemoter ever asked for — and the two-hop member of the
+			// range is enough to put p on A&Node.
+			name:    "a range that admits two hops is not a witness even with a one-hop lower bound",
+			fixture: "plural_endpoint_multi_hop_range_stays_plural.cypher",
+			twin:    "MATCH (p:Node)-[w:X]->(c:Node:C) RETURN p.bOnly",
+			want:    []Column{{Name: "p.bOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}},
+		},
+		{
+			// `*` is Min() == nil AND Max() == nil. openCypher reads the nil
+			// lower bound as one, so every lower-bound test passes it; the
+			// unbounded UPPER bound is what disqualifies it, and a predicate
+			// that only consulted Min() would admit the widest shape there is.
+			name:    "an unbounded quantifier is not a witness",
+			fixture: "plural_endpoint_unbounded_hops_stays_plural.cypher",
+			twin:    "MATCH (p:Node)-[w:X]->(c:Node:C) RETURN p.bOnly",
+			want:    []Column{{Name: "p.bOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}},
+		},
+		{
+			// The far end is symmetric and is asserted separately: the two ends
+			// are narrowed by two different calls to endpointContribution, so a
+			// fix applied to one side only is green on the three rows above.
+			name:    "the far end of a multi-hop pattern is no more pinned than the near end",
+			fixture: "plural_endpoint_multi_hop_far_end_stays_plural.cypher",
+			twin:    "MATCH (p:Node:A)-[w:X]->(c:Node) RETURN c.bOnly",
+			want:    []Column{{Name: "c.bOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}},
+		},
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			// Read from disk so the pair cannot drift: what is refused in
+			// invalid/ and what is accepted here are one quantifier apart.
+			src, err := os.ReadFile(filepath.Join(fixtureDir, "invalid", tt.fixture))
+			s.Require().NoError(err)
+			_, err = resolve(string(src))
+			s.Require().ErrorIs(err, ErrUnknownProperty,
+				"%s names a property of the type the closure would wrongly commit, so it must stay refused", tt.fixture)
+
+			got, err := resolve(tt.twin)
+			s.Require().NoError(err, "the twin removes only the quantifier, so the closure really is the pattern and must still commit")
+			s.Require().Equal(tt.want, got)
+		})
+	}
+}
+
+// TestAnEmptyHopRangeIsNotAWitness pins the EQUALITY in singleHopPattern's
+// lower-bound test. It is the one arm of that predicate no fixture reaches:
+// relax `*lower == 1` to `*lower >= 1` and the whole suite stays green.
+//
+// `*2..1` parses — the grammar does not require min <= max, and Hops() reports
+// Min()==2, Max()==1 — and it matches nothing, since no path length is at once
+// at least two and at most one. Nothing else in the corpus separates the two
+// spellings: the four multi-hop fixtures are refused by the upper bound and the
+// three zero-lower-bound ones by a lower bound of zero, so `*2..1` is the only
+// quantifier whose verdict turns on == versus >=.
+//
+// Admitting it would not be UNSOUND — an empty range returns no rows, so there
+// is no row whose p could be the wrong type. It is pinned anyway because the
+// difference is visible in emitted code rather than in a row: under `>= 1` the
+// query below is ACCEPTED and grows a NOT NULL STRING column, so the signature
+// of a generated method would turn on a predicate no test reads. It also keeps
+// singleHopPattern honest about the contract witnessesItsEndpoints quotes —
+// "a range that admits exactly one hop and no other count". `*2..1` admits no
+// count at all, so only the equality states that contract.
+//
+// The `*1..1` twin says the refusal is about the range being EMPTY and not
+// about explicit ranges being refused wholesale.
+func (s *ResolverSuite) TestAnEmptyHopRangeIsNotAWitness() {
+	sch := s.loadSchema("invalid", "satisfy_plural_edges_chain.gql")
+	resolve := func(src string) ([]Column, error) {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		return vq.Columns, err
+	}
+
+	_, err := resolve("MATCH (p:Node)-[w:X*2..1]->(c:Node:C) RETURN p.bOnly")
+	s.Require().ErrorIs(err, ErrUnknownProperty,
+		"`*2..1` is not one declared edge, so it witnesses nothing and p stays plural over all three types")
+
+	got, err := resolve("MATCH (p:Node)-[w:X*1..1]->(c:Node:C) RETURN p.bOnly")
+	s.Require().NoError(err, "`*1..1` is the non-empty range of exactly one hop, so the closure really is the pattern")
+	s.Require().Equal([]Column{{Name: "p.bOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}}, got)
+}
+
+// TestANonWitnessEdgeSilencesItselfNotTheBinding pins that
+// witnessesItsEndpoints is asked once PER EDGE. A binding touched by a
+// witnessing edge AND a non-witnessing one is narrowed by the first; the second
+// contributes nothing and takes nothing away.
+//
+// Nothing else separates that from the coarser rule "a binding with any
+// non-witnessing touching edge is not narrowed at all", which is a plausible
+// reading of the same paragraph and a materially different resolver. Every
+// invalid/plural_endpoint_*_stays_plural fixture puts its plural binding behind
+// exactly ONE edge, and every accepted twin removes that edge's disqualifier,
+// so on all eleven of them "this edge is silent" and "this binding is silent"
+// are the same sentence. Implemented, the coarse rule leaves the suite green.
+//
+// The two rows are two different disqualifiers on purpose. They are separate
+// arms of witnessesItsEndpoints, so a rule that poisoned the binding on only
+// one of them still passes the other row, and only the pair says the question
+// is per-edge for the predicate rather than for one of its clauses.
+//
+// The first row says more than that the multi-hop edge fails to poison: it says
+// the edge contributes NOTHING. `X` runs A -> B and B -> C, so the `*2` close
+// names B&Node while the single hop into `(:Node:B)` names A&Node. Were the
+// quantified edge folded in at all, the intersection would be empty, the
+// narrowing would fall back to the pre-closure set, and `p.aOnly` would be
+// refused exactly as the coarse rule refuses it.
+//
+// Each row is paired with the same query minus the witnessing edge, which must
+// be refused — otherwise the acceptance above could be the plural set answering
+// on its own and the row would pin nothing.
+func (s *ResolverSuite) TestANonWitnessEdgeSilencesItselfNotTheBinding() {
+	tests := []struct {
+		name        string
+		schema      string
+		query       string
+		unwitnessed string
+		want        []Column
+	}{
+		{
+			name:        "a quantified edge alongside a single-hop one",
+			schema:      "satisfy_plural_edges_chain.gql",
+			query:       "MATCH (p:Node)-[w:X]->(b:Node:B), (p)-[v:X*2]->(z:Node:C) RETURN p.aOnly",
+			unwitnessed: "MATCH (p:Node)-[v:X*2]->(z:Node:C) RETURN p.aOnly",
+			want:        []Column{{Name: "p.aOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}},
+		},
+		{
+			name:   "an OPTIONAL edge alongside a mandatory one",
+			schema: "satisfy_plural_edges_reversed.gql",
+			query: "MATCH (p:Person)-[w:WORKS_AT]->(c:Company) " +
+				"OPTIONAL MATCH (p)-[r:REVIEWED]->(c2:Company) RETURN p.employeeId",
+			unwitnessed: "MATCH (p:Person) OPTIONAL MATCH (p)-[r:REVIEWED]->(c2:Company) RETURN p.employeeId",
+			want:        []Column{{Name: "p.employeeId", Type: ResolvedProperty{Type: graph.PropertyType("INT")}}},
+		},
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			sch := s.loadSchema("invalid", tt.schema)
+			resolve := func(src string) ([]Column, error) {
+				q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+				s.Require().NoError(err)
+				vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+				return vq.Columns, err
+			}
+
+			got, err := resolve(tt.query)
+			s.Require().NoError(err, "the witnessing edge pins p on its own; the other edge is not evidence, which is not the same as being an objection")
+			s.Require().Equal(tt.want, got)
+
+			_, err = resolve(tt.unwitnessed)
+			s.Require().ErrorIs(err, ErrUnknownProperty,
+				"without the witnessing edge nothing narrows p, so the property is the plural intersection's and the row above is not passing on its own")
+		})
+	}
+}
+
+// TestNarrowingSkipsAnEndpointItCannotEnumerate pins the precondition the whole
+// narrowing rests on: srcs and tgts must be SUPERSETS of the keys a matching row
+// can put at those ends. edgeProbes builds its box from those two slices, and
+// the argument that a row's true edge key is in `cands` is "the row's key was
+// probed" — which needs every attainable endpoint key to be in the box, not
+// merely every boxed key to be attainable.
+//
+// endpointLabels holds that up for a VarEndpoint, which returns the binding's
+// whole satisfying set. It does not for an InlineEndpoint, which keys on the
+// labels the query spells: on a schema where a second declared type also
+// satisfies those labels, the box misses every declaration reachable only
+// through that type, and the narrowing would commit a type the missing rows
+// contradict.
+//
+// The two rows are the same query on two schemas that differ only in whether
+// `(:Company)` is satisfied by one declared type or two, so between them they
+// pin the guard against being applied too narrowly AND too widely. Dropping the
+// guard reddens "the spelled labels are satisfied by two types"; widening it to
+// skip every inline endpoint reddens "...by exactly one".
+//
+// The var-spelling control matters beyond the usual "is the acceptance real"
+// check: before the guard the inline and var spellings of one pattern gave
+// different answers, and the inline one was the wrong one.
+func (s *ResolverSuite) TestNarrowingSkipsAnEndpointItCannotEnumerate() {
+	tests := []struct {
+		name    string
+		schema  string
+		inline  string
+		varSpel string
+		want    []Column
+		wantErr error
+	}{
+		{
+			name:    "the spelled labels are satisfied by two types",
+			schema:  "satisfy_plural_edges_inline_subtype.gql",
+			inline:  "MATCH (p:Person)-[r:WORKS_AT]->(:Company) RETURN p.personOnly",
+			varSpel: "MATCH (p:Person)-[r:WORKS_AT]->(c:Company) RETURN p.personOnly",
+			wantErr: ErrUnknownProperty,
+		},
+		{
+			name:    "the spelled labels are satisfied by exactly one type",
+			schema:  "satisfy_plural_edges_reversed.gql",
+			inline:  "MATCH (p:Person)-[r:WORKS_AT]->(:Company) RETURN p.employeeId",
+			varSpel: "MATCH (p:Person)-[r:WORKS_AT]->(c:Company) RETURN p.employeeId",
+			want:    []Column{{Name: "p.employeeId", Type: ResolvedProperty{Type: graph.PropertyType("INT")}}},
+		},
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			sch := s.loadSchema("invalid", tt.schema)
+			resolve := func(src string) ([]Column, error) {
+				q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+				s.Require().NoError(err)
+				vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+				return vq.Columns, err
+			}
+
+			for _, src := range []string{tt.inline, tt.varSpel} {
+				got, err := resolve(src)
+				if tt.wantErr != nil {
+					s.Require().ErrorIsf(err, tt.wantErr,
+						"%s: Employee&Person -[WORKS_AT]-> Company&Large matches this pattern and its p has no personOnly", src)
+					continue
+				}
+				s.Require().NoErrorf(err, "%s: the inline endpoint enumerates its own satisfying set here, so the closure pins p", src)
+				s.Require().Equal(tt.want, got, src)
+			}
+		})
+	}
+}
+
+// TestInlineEndpointsAgreeWithTheirVarSpelling states the relation the two rows
+// above only imply: whatever the answer is, writing an endpoint's labels inline
+// and binding them to a variable are the same pattern and must resolve the same
+// way. The rows assert an answer each; this asserts they cannot drift apart,
+// which is the shape the defect actually took — the var spelling stayed correct
+// throughout and only the inline one moved.
+func (s *ResolverSuite) TestInlineEndpointsAgreeWithTheirVarSpelling() {
+	sch := s.loadSchema("invalid", "satisfy_plural_edges_inline_subtype.gql")
+	resolve := func(src string) error {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		_, err = New(sch, WithRegistry(regR7)).Resolve(q)
+		return err
+	}
+	// Both ends: an inline endpoint under-enumerates the OTHER end's narrowing
+	// too, so which side it is written on must not matter.
+	for _, pair := range [][2]string{
+		{"MATCH (p:Person)-[r:WORKS_AT]->(:Company) RETURN p", "MATCH (p:Person)-[r:WORKS_AT]->(c:Company) RETURN p"},
+		{"MATCH (:Person)-[r:WORKS_AT]->(c:Company) RETURN c", "MATCH (p:Person)-[r:WORKS_AT]->(c:Company) RETURN c"},
+	} {
+		s.Require().ErrorIsf(resolve(pair[0]), ErrAmbiguousLabel, "%s", pair[0])
+		s.Require().ErrorIsf(resolve(pair[1]), ErrAmbiguousLabel, "%s", pair[1])
+	}
+}
+
+// TestAnInferredEndpointIsTrustedOnlyWhenItsOwnEndsWereEnumerated closes the
+// second half of the precondition TestNarrowingSkipsAnEndpointItCannotEnumerate
+// opened. That test guards the endpoint the narrowing reads DIRECTLY. This one
+// guards the endpoint it reads through Phase B: an unlabelled binding is typed
+// by candidateTypes, which intersects across its touching edges and reads each
+// far end by the keys endpointLabels gives — so an inline endpoint that could
+// not enumerate itself pins the unlabelled binding to one type when two are
+// attainable, and the narrowing then reads that singleton as a satisfying set.
+// The var endpoint the gate waves through is a laundered inline one.
+//
+// The first two rows are the same two-part question on two schemas. In the
+// refusing row the far end of the inference is `(:Person)`, satisfied by two
+// declared types, so `c`'s commitment can be a strict subset and nothing may be
+// learned from it. In the accepting row the far end is the plural var `p`,
+// whose whole candidate slice IS the satisfying set, so `c`'s commitment covers
+// and the narrowing goes on to pin `p` through it.
+//
+// That accepting row is what stops the fix being "an unlabelled binding is
+// never trusted": before it, `MATCH (p:Person)-[r:WORKS_AT]->(c)` lost the
+// narrowing the branch gets right, and no test said so.
+//
+// The third row says covering is a CONJUNCTION and the two rows above test one
+// conjunct of it. Enumerating both far ends is not enough on its own: an edge
+// that no returned row is guaranteed to have drops a type the surviving rows
+// carry however perfectly its ends were enumerated. Only that row separates
+// "every contributing edge's far end covered" from the rule the resolver needs,
+// and on the first two rows the two definitions are the same sentence.
+func (s *ResolverSuite) TestAnInferredEndpointIsTrustedOnlyWhenItsOwnEndsWereEnumerated() {
+	tests := []struct {
+		name    string
+		schema  string
+		query   string
+		want    []Column
+		wantErr error
+	}{
+		{
+			name:   "the inference read an inline endpoint two types satisfy",
+			schema: "satisfy_plural_edges_inline_subtype.gql",
+			query:  "MATCH (:Person)-[r:WORKS_AT]->(c)<-[q:WORKS_AT]-(p:Person) RETURN p.personOnly",
+			// Two Employee&Person nodes both -[:WORKS_AT]-> one Company&Large is
+			// a matching row, and its `p` has no personOnly.
+			wantErr: ErrUnknownProperty,
+		},
+		{
+			name:   "the inference read a plural var endpoint",
+			schema: "satisfy_plural_edges_reversed.gql",
+			query:  "MATCH (p:Person)-[r:WORKS_AT]->(c) RETURN p.employeeId",
+			// WORKS_AT is declared from Employee&Person only, so `c` infers to
+			// Company from a covering end and the closure pins `p`.
+			want: []Column{{Name: "p.employeeId", Type: ResolvedProperty{Type: graph.PropertyType("INT")}}},
+		},
+		{
+			name:   "the inference folded an edge no returned row has",
+			schema: "satisfy_plural_edges_inline_subtype.gql",
+			query: "MATCH (p:Person)-[q:WORKS_AT]->(c) " +
+				"OPTIONAL MATCH (c)-[h:HAS_DESK]->(d:Desk) RETURN p.personOnly",
+			// The third row is the other half of covering, and it is the half
+			// the first two do not reach. Every far end here enumerates itself
+			// perfectly — `(d:Desk)` is a singular BindNode and `p` is a plural
+			// var — so the enumeration test both rows above turn on passes on
+			// both edges. What fails is the row guarantee: HAS_DESK is declared
+			// from the bare Company only, so folding it pins `c` to Company,
+			// but the hop is OPTIONAL and filters nothing. The Employee&Person
+			// -[WORKS_AT]-> Company&Large row comes back with h/d null, its `c`
+			// is Company&Large, and its `p` has no personOnly.
+			wantErr: ErrUnknownProperty,
+		},
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			sch := s.loadSchema("invalid", tt.schema)
+			q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(tt.query)))
+			s.Require().NoError(err)
+			vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+			if tt.wantErr != nil {
+				s.Require().ErrorIs(err, tt.wantErr, tt.query)
+				return
+			}
+			s.Require().NoError(err, tt.query)
+			s.Require().Equal(tt.want, vq.Columns, tt.query)
+		})
+	}
+}
+
+// TestPhaseBAsksTheWholeWitnessPredicateNotOneArmOfIt covers the arms of
+// witnessesItsEndpoints that the OPTIONAL row in
+// TestAnInferredEndpointIsTrustedOnlyWhenItsOwnEndsWereEnumerated does not
+// reach. Its own OPTIONAL arm is the only one with a demonstrated witness, and
+// a fix that pattern-matched on Nullable() alone would leave that row green and
+// these four wrong.
+//
+// Each row is one disqualifier, paired with the SAME query carrying a plain
+// mandatory single hop instead. The pair is what makes each row say anything:
+// on the witnessing spelling every returned row really does have a HAS_DESK out
+// of `c`, HAS_DESK is declared from the bare Company only, so `c` is Company on
+// every row, the only WORKS_AT into Company comes from the bare Person, and
+// `p.personOnly` is a column every row has. That acceptance is the branch's own
+// win, on the same schema, one token away from each refusal — so none of these
+// rows can be passing because Phase B stopped covering altogether.
+//
+// The CREATE and MERGE rows also say the `written` set reaches this far at all:
+// a written edge is a binding like any other and does enter Phase B's edge
+// list, so before this it was folded in and reported as covering.
+func (s *ResolverSuite) TestPhaseBAsksTheWholeWitnessPredicateNotOneArmOfIt() {
+	const witnessed = "MATCH (p:Person)-[q:WORKS_AT]->(c) " +
+		"MATCH (c)-[h:HAS_DESK]->(d:Desk) RETURN p.personOnly"
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{
+			name: "a zero lower bound",
+			query: "MATCH (p:Person)-[q:WORKS_AT]->(c) " +
+				"MATCH (c)-[h:HAS_DESK*0..1]->(d:Desk) RETURN p.personOnly",
+		},
+		{
+			name: "an exact zero quantifier",
+			query: "MATCH (p:Person)-[q:WORKS_AT]->(c) " +
+				"MATCH (c)-[h:HAS_DESK*0]->(d:Desk) RETURN p.personOnly",
+		},
+		{
+			name: "a count above one",
+			query: "MATCH (p:Person)-[q:WORKS_AT]->(c) " +
+				"MATCH (c)-[h:HAS_DESK*2]->(d:Desk) RETURN p.personOnly",
+		},
+		{
+			name: "a CREATE",
+			query: "MATCH (p:Person)-[q:WORKS_AT]->(c) " +
+				"CREATE (c)-[h:HAS_DESK]->(d:Desk) RETURN p.personOnly",
+		},
+		{
+			name: "a MERGE",
+			query: "MATCH (p:Person)-[q:WORKS_AT]->(c) " +
+				"MERGE (c)-[h:HAS_DESK]->(d:Desk) RETURN p.personOnly",
+		},
+	}
+	sch := s.loadSchema("invalid", "satisfy_plural_edges_inline_subtype.gql")
+	resolve := func(src string) ([]Column, error) {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		return vq.Columns, err
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			_, err := resolve(tt.query)
+			s.Require().ErrorIs(err, ErrUnknownProperty, tt.query)
+
+			got, err := resolve(witnessed)
+			s.Require().NoError(err,
+				"the same query with a mandatory single hop IS evidence about every row, so the refusal above is this disqualifier's and not Phase B refusing to cover at all")
+			s.Require().Equal([]Column{{Name: "p.personOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}}, got)
+		})
+	}
+}
+
+// TestAnonymousEdgeNarrowsToTheTypeItCloses pins the TYPE that
+// valid/plural_endpoint_anonymous_edge_closes_singular.cypher resolves to,
+// rather than leaving it to that fixture's stored golden.
+//
+// Anonymous edges drive the narrowing — they are bindings like any other, with
+// "" for a variable — and the fixture exists to say so. But a golden is not a
+// behavioural pin in this repo: `go test -update` rewrites it, so a change that
+// narrowed `p` to the WRONG one of the two satisfying types shows up as a diff
+// a reviewer has to notice rather than as a red test. Only the refusal half of
+// that fixture is self-defending: turn the narrowing off entirely and the query
+// becomes ErrAmbiguousLabel, which -update cannot bless into a golden.
+//
+// So the type is asserted here, in source, where -update does not reach. The
+// interesting half of the claim is which type: Employee&Person is the source of
+// the only declared WORKS_AT, and the bare Person type satisfies `(:Person)`
+// just as well.
+func (s *ResolverSuite) TestAnonymousEdgeNarrowsToTheTypeItCloses() {
+	src, err := os.ReadFile(filepath.Join(fixtureDir, "valid", "plural_endpoint_anonymous_edge_closes_singular.cypher"))
+	s.Require().NoError(err)
+	sch := s.loadSchema("valid", "satisfy_plural_edges.gql")
+	q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader(src))
+	s.Require().NoError(err)
+	vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+	s.Require().NoError(err)
+	s.Require().Equal([]Column{{Name: "p", Type: ResolvedNode{Labels: "Employee&Person"}}}, vq.Columns,
+		"the anonymous WORKS_AT closes from Employee&Person, so that is the type p commits to — not the other type (:Person) satisfies")
+}
+
+// TestNarrowingASingularBindingCollidesWithALaterPluralRebind pins the message
+// a narrowed binding produces when a later Part re-declares it with the label
+// expression it started from.
+//
+// Before the narrowing `p` stayed plural across both Parts and the query was
+// refused with ErrAmbiguousLabel. Now Part 0's WORKS_AT determines it, so Part
+// 1's `(p:Person)` — the same text that bound it plural the first time — is a
+// singular-to-plural re-bind, and R5's carry check refuses it instead. Both
+// refuse, so this is not a regression; the point is that the second message is
+// newly REACHABLE, from a widening that was shipped with nothing looking at it.
+//
+// The wording is correct as it stands and is left alone: `p` genuinely was
+// carried as a singular node type, and the later Part genuinely does re-bind it
+// as plural. It is also not this pass's message — scope.go's carry check owns
+// it and other paths reach it — so changing it here would be a non-local edit
+// to satisfy a local surprise.
+func (s *ResolverSuite) TestNarrowingASingularBindingCollidesWithALaterPluralRebind() {
+	sch := s.loadSchema("invalid", "satisfy_plural_edges_reversed.gql")
+	q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(
+		"MATCH (p:Person)-[w:WORKS_AT]->(c:Company) WITH p MATCH (p:Person) RETURN p.id")))
+	s.Require().NoError(err)
+	_, err = New(sch, WithRegistry(regR7)).Resolve(q)
+	s.Require().ErrorIs(err, ErrPartBindingTypeConflict)
+	s.Require().EqualError(err,
+		`part binding type conflict: variable "p" carried as singular node type, re-bound as plural`)
+}
+
+// TestNarrowingToASmallerPluralSetIsWhatTheSetSaysItIs covers the arm that
+// narrows a plural binding to a set that is smaller and still plural. It needs
+// three satisfying types to exist at all: on two, "some but not all survive"
+// and "exactly one survives" are the same sentence, and every other plural-
+// endpoint schema in the corpus declares two.
+//
+// Neither half can be carried by a sentinel. The whole-entity form is refused
+// with ErrAmbiguousLabel whether the set was narrowed to two or left at three,
+// so what is asserted is the set the message enumerates — read back out, and
+// required to be exactly the two, by content and by length. The property form
+// is the other direction: staffId is declared on the two staff types and not on
+// the bare person type, so ADR 0022's intersection over the pre-narrowing set
+// of three has no such property and the column exists only because the third
+// was dropped.
+func (s *ResolverSuite) TestNarrowingToASmallerPluralSetIsWhatTheSetSaysItIs() {
+	sch := s.loadSchema("invalid", "satisfy_plural_edges_three_types.gql")
+	resolve := func(src string) ([]Column, error) {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		return vq.Columns, err
+	}
+
+	src, err := os.ReadFile(filepath.Join(fixtureDir, "invalid", "plural_endpoint_narrows_to_smaller_plural_set.cypher"))
+	s.Require().NoError(err)
+	_, err = resolve(string(src))
+	s.Require().ErrorIs(err, ErrAmbiguousLabel)
+	s.Require().Equal("Contractor&Person, Employee&Person", errAmbiguousLabelSet(err),
+		"WORKS_AT is declared on the two staff types only, so the surviving set is those two — not the three the label satisfies, and not one of them")
+
+	got, err := resolve("MATCH (p:Person)-[r:WORKS_AT]->(c:Company) RETURN p.staffId")
+	s.Require().NoError(err, "staffId is on both survivors, so the intersection over the narrowed set has it")
+	s.Require().Equal([]Column{{Name: "p.staffId", Type: ResolvedProperty{Type: graph.PropertyType("INT")}}}, got)
+}
+
+// TestDeferredEdgesCloseBeforeTheNarrowing pins the position of the narrowing
+// inside Phase C: it runs after the deferred-close loop, so a deferred edge is
+// closed against the pre-narrowing binding tables.
+//
+// The order is the one §4.6.2 states and the one NarrowPluralEndpoints' own
+// comment gives a reason for — a narrowed endpoint slice re-classifies the
+// readings of candidates that previously read both ways, so re-closing against
+// it can manufacture an orientation disagreement the first close did not find.
+// Nothing tested it. Moving the call above the deferred loop left the suite
+// green, which makes both the comment and the spec paragraph an unbacked claim.
+//
+// This query separates the two positions. `x` is unlabelled, so REVIEWED is
+// deferred to Phase C's second pass; WORKS_AT is not, and it narrows `p` to
+// Employee&Person. Close REVIEWED first and it sees p's full satisfying set and
+// commits both declared keys — an edge union. Narrow first and it sees one type
+// and commits one key, so the same query answers a different type for `r`.
+//
+// Both columns are asserted together on purpose: `p` says the narrowing really
+// did fire (or the test would pass by the narrowing being off), and `r` says
+// the deferred close did not see it.
+func (s *ResolverSuite) TestDeferredEdgesCloseBeforeTheNarrowing() {
+	sch := s.loadSchema("invalid", "satisfy_plural_edges_reversed.gql")
+	q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(
+		"MATCH (p:Person)-[w:WORKS_AT]->(c:Company), (p)-[r:REVIEWED]->(x) RETURN p, r")))
+	s.Require().NoError(err)
+	vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+	s.Require().NoError(err)
+
+	s.Require().Equal([]Column{
+		{Name: "p", Type: ResolvedNode{Labels: "Employee&Person"}},
+		{Name: "r", Type: ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{
+			{Source: "Employee&Person", KeyLabels: "REVIEWED", Target: "Company"},
+			{Source: "Person", KeyLabels: "REVIEWED", Target: "Company"},
+		}}},
+	}, vq.Columns)
+}
+
+// errAmbiguousLabelSet lifts the candidate enumeration out of an
+// ErrAmbiguousLabel message: everything after the final ": ".
+func errAmbiguousLabelSet(err error) string {
+	msg := err.Error()
+	i := strings.LastIndex(msg, ": ")
+	if i < 0 {
+		return msg
+	}
+	return msg[i+2:]
+}
+
+// TestEndpointContributionUnionsTheTwoReadings states the per-edge contribution
+// rule directly, on candidate sets the corpus cannot build.
+//
+// The resolver's own inputs always satisfy `contribution ⊆ that endpoint's
+// satisfying set`, because every candidate was probed from it — so on real
+// input a contribution that dropped one reading is still a plausible-looking
+// subset, and only a schema where the two readings differ shows it. The rows
+// below are those, written as the function's answer rather than as a query, and
+// the mixed row is the one that separates union from either reading alone.
+func (s *ResolverSuite) TestEndpointContributionUnionsTheTwoReadings() {
+	key := func(src, tgt string) schema.EdgeKey {
+		return schema.EdgeKey{Source: graph.LabelSetKey(src), KeyLabels: "MENTORS", Target: graph.LabelSetKey(tgt)}
+	}
+	srcs := []graph.LabelSetKey{"Engineer&Person&Staff", "Manager&Person&Staff"}
+	tgts := []graph.LabelSetKey{"Engineer&Person&Staff", "Manager&Person&Staff", "Person"}
+	cands := []schema.EdgeKey{
+		// Reads both ways: both its ends sit in both slices.
+		key("Manager&Person&Staff", "Engineer&Person&Staff"),
+		// Reads right-to-left only: Person is on the pattern's right and
+		// nowhere on its left.
+		key("Person", "Engineer&Person&Staff"),
+	}
+
+	keys := func(set map[graph.LabelSetKey]struct{}) []graph.LabelSetKey {
+		out := make([]graph.LabelSetKey, 0, len(set))
+		for k := range set {
+			out = append(out, k)
+		}
+		slices.Sort(out)
+		return out
+	}
+
+	s.Require().Equal([]graph.LabelSetKey{"Engineer&Person&Staff", "Manager&Person&Staff"},
+		keys(endpointContribution(cands, srcs, tgts, patternLeft)),
+		"left-to-right offers Manager and right-to-left offers Engineer; taking either alone loses a type the schema permits")
+	s.Require().Equal([]graph.LabelSetKey{"Engineer&Person&Staff", "Manager&Person&Staff", "Person"},
+		keys(endpointContribution(cands, srcs, tgts, patternRight)),
+		"the right end reads the same candidates from the other side, and the right-to-left candidate offers Person there")
+
+	// Control: on a candidate that reads one way only, the two ends disagree
+	// about which type they get — so the rows above are not both sides
+	// collapsing to one answer.
+	oneWay := []schema.EdgeKey{key("Manager&Person&Staff", "Person")}
+	s.Require().Equal([]graph.LabelSetKey{"Manager&Person&Staff"},
+		keys(endpointContribution(oneWay, srcs, tgts, patternLeft)))
+	s.Require().Equal([]graph.LabelSetKey{"Person"},
+		keys(endpointContribution(oneWay, srcs, tgts, patternRight)))
+
+	// Equal slices: the shape a pattern takes when ONE variable names both ends
+	// of an edge, because endpointLabels then hands both ends the same keys.
+	// Every candidate reads both ways, so the two ends' contributions coincide
+	// — which is what makes NarrowPluralEndpoints' union across a binding's two
+	// end-occupancies a no-op no query can observe. Stated here because it is
+	// the reason that union cannot be covered where it is written.
+	equal := []graph.LabelSetKey{"Employee&Person", "Person"}
+	loop := []schema.EdgeKey{key("Employee&Person", "Person")}
+	s.Require().Equal(
+		keys(endpointContribution(loop, equal, equal, patternLeft)),
+		keys(endpointContribution(loop, equal, equal, patternRight)),
+		"with srcs == tgts a candidate's two readings are the same predicate, so neither end can learn more than the other")
+	s.Require().Equal([]graph.LabelSetKey{"Employee&Person", "Person"},
+		keys(endpointContribution(loop, equal, equal, patternLeft)),
+		"and what they both learn is both of the key's ends, or the equality above holds by being empty twice")
 }
 
 // TestTwoSwappedPairsReportsTheFirstInCandidateOrder holds §4.4's determinism

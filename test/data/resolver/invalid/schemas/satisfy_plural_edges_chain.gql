@@ -1,0 +1,48 @@
+-- A CHAIN of one edge label, so a multi-hop quantifier's two ends are NOT the
+-- two ends of any single declared edge.
+--
+-- `(:Node)` is satisfied by all three declared types (ADR 0022 plural), and X
+-- is declared A -> B and B -> C: a chain through three DISTINCT types that the
+-- plural endpoint satisfies alike. That combination is what no other
+-- plural-endpoint schema in the corpus has, and it is not about how often the
+-- label is declared — every one of them declares some label two, three or four
+-- times. It is that their declarations form no chain at all, or chain with two
+-- of the three types equal, or chain through a middle type the plural endpoint
+-- does not satisfy. Any of those leaves the closure naming an endpoint of the
+-- pattern whatever the hop count, so a hop-count bug is invisible. Here they
+-- diverge:
+--
+--   (p:Node)-[:X*2]->(c:Node:C)   closes to B -> C, but p is A&Node
+--   (p:Node:A)-[:X*1..2]->(c:Node) closes to A -> B, but c is B&Node or C&Node
+--
+-- so a narrowing that reads a multi-hop closure as evidence about the PATTERN's
+-- ends commits the type one hop away from the truth. `aOnly`/`bOnly`/`cOnly` are
+-- each declared on exactly one type, which turns that mis-commitment into an
+-- emitted NOT NULL column: `RETURN p.bOnly` is accepted and typed STRING NOT
+-- NULL for rows whose p is A&Node and has no such property at all.
+--
+-- `id` is shared by all three so the ADR 0022 intersection is non-empty either
+-- way, and the refusal these fixtures assert is about the ONE property, not
+-- about the plural binding having no properties in common.
+
+CREATE PROPERTY GRAPH TYPE SatisfyPluralEdgesChain AS {
+
+    (:Node&A {
+        id    :: INT NOT NULL,
+        aOnly :: STRING NOT NULL
+    }),
+
+    (:Node&B {
+        id    :: INT NOT NULL,
+        bOnly :: STRING NOT NULL
+    }),
+
+    (:Node&C {
+        id    :: INT NOT NULL,
+        cOnly :: STRING NOT NULL
+    }),
+
+    (:Node&A) -[:X { w :: INT NOT NULL }]-> (:Node&B),
+    (:Node&B) -[:X { w :: INT NOT NULL }]-> (:Node&C)
+
+}

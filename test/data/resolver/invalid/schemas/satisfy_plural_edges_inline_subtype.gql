@@ -1,0 +1,59 @@
+-- Plural label satisfaction (ADR 0022) where BOTH endpoint labels are satisfied
+-- by two declared types, and the two WORKS_AT declarations pair them off.
+--
+-- `(:Person)` is satisfied by Person and Employee&Person; `(:Company)` by
+-- Company and Company&Large. `MATCH (c:Company) RETURN c` is ambiguous over
+-- both company types, which is this schema's own statement that a Company&Large
+-- node matches `(:Company)`.
+--
+-- The point of the schema is the anonymous endpoint spelling
+-- `(p:Person)-[:WORKS_AT]->(:Company)`. Both declared WORKS_AT edges match it,
+-- so `p` is still either person type — but endpointLabels keys an inline
+-- endpoint on the labels the query spells rather than on the types satisfying
+-- them, so the closure sees only the `Company` half and would otherwise report
+-- `p` as the bare Person. The row Employee&Person -[WORKS_AT]-> Company&Large
+-- matches and its `p` has no personOnly, so that answer is wrong on the facts.
+--
+-- HAS_DESK is declared from the BARE Company only, which is what lets a hop
+-- through it pin an unlabelled `(c)` to Company where the WORKS_AT edges alone
+-- leave it plural. Reached through an OPTIONAL MATCH that hop is an outer join
+-- and filters no row, so the Employee&Person -[WORKS_AT]-> Company&Large row
+-- still comes back — with `h`/`d` null — and the same wrong `p` follows. It is
+-- the inline-endpoint defect above with the under-enumerated far end replaced
+-- by a perfectly enumerated one on an edge that is not evidence.
+
+CREATE PROPERTY GRAPH TYPE SatisfyPluralEdgesInlineSubtype AS {
+
+    (:Person {
+        id         :: INT NOT NULL,
+        name       :: STRING NOT NULL,
+        personOnly :: STRING NOT NULL
+    }),
+
+    (:Person&Employee {
+        id         :: INT NOT NULL,
+        name       :: STRING NOT NULL,
+        employeeId :: INT NOT NULL
+    }),
+
+    (:Company {
+        id   :: INT NOT NULL,
+        name :: STRING NOT NULL
+    }),
+
+    (:Company&Large {
+        id      :: INT NOT NULL,
+        name    :: STRING NOT NULL,
+        largeId :: INT NOT NULL
+    }),
+
+    (:Desk {
+        id :: INT NOT NULL
+    }),
+
+    (:Person)          -[:WORKS_AT { since :: INT NOT NULL }]-> (:Company),
+    (:Person&Employee) -[:WORKS_AT { since :: INT NOT NULL }]-> (:Company&Large),
+
+    (:Company)         -[:HAS_DESK { n :: INT NOT NULL }]-> (:Desk)
+
+}
