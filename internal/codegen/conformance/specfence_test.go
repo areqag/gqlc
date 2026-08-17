@@ -26,16 +26,18 @@ import (
 // normative rule, and prose is where the drift gqlc-rz0l corrected sat.
 //
 // What is graded is a site, not a document, and the documents can still
-// disagree with codegen.ParamArg and stay green in at least five
+// disagree with codegen.ParamArg and stay green in at least six
 // places. The count is a floor rather than a census: it records what
 // has been measured. A signature carrying the author's names as
 // separate arguments is past the arity read here (gqlc-vu7z); prose
 // beside an intact graded span can say the opposite of it (gqlc-e143);
 // a binding stated with no map literal around it is unread
-// (gqlc-offa); a listed document keeps its census entry on one
-// surviving site (gqlc-0rjn); and a list replacing one of the exhibits
-// specBareListExhibits names, spelled the same way, takes that entry's
-// exemption (gqlc-x2sg).
+// (gqlc-offa); a parenthesis-less parameter list on its own line
+// inside a code block, fenced or indented, is unread too — the paren
+// anchor reaches a block like any other text (gqlc-cgat); a listed
+// document keeps its census entry on one surviving site (gqlc-0rjn);
+// and a list replacing one of the exhibits specBareListExhibits names,
+// spelled the same way, takes that entry's exemption (gqlc-x2sg).
 
 // docRoots are the trees the fence sweeps, relative to repoRoot. The
 // drift reached C1, C3, C4 and C5, and an ADR or a design note prints
@@ -89,7 +91,7 @@ const repoRoot = "../../../"
 // Every site past the first can leave the sweep with nothing said — not
 // by being corrected, but by ceasing to print an anchor, each of which
 // is a delimiter as well as the text after it: `(ctx context.Context`
-// or a code span's backtick before it for a signature,
+// or a code span's opening backticks before it for a signature,
 // `map[string]any` with its opening brace for a binding. C4 §3.2's
 // WriteQuerier member `RemovePerson(ctx context.Context, arg int64)` is
 // one of ten graded signatures in that document, and rewriting its
@@ -193,8 +195,8 @@ var specListRules = []string{
 // ctxAnchor's open paren reaches the interface members as well as the
 // funcs — C4 §3.2's WriteQuerier block is a declared surface. tickAnchor
 // reaches the lists a document prints inside an inline code span with
-// the parens off, where the span's closing backtick ends the list (ADR
-// 0029 decision 10).
+// the parens off, where the run of backticks closing the span ends the
+// list (ADR 0029 decision 10).
 const (
 	ctxParam   = "ctx context.Context"
 	ctxAnchor  = "(" + ctxParam
@@ -287,10 +289,10 @@ func TestSpecMethodArgIsGeneratorOwned(t *testing.T) {
 	}
 
 	requireClean(t, sweep.unclosed, "documented parameter list does not close",
-		"these documents open a parameter list on `ctx context.Context` and never close the delimiter that ends\n"+
-			"it — the parenthesis, or the backtick of the code span it is printed in — so the fence cannot read\n"+
-			"the argument out of them and silently graded nothing there; fix the text rather than the fence — an\n"+
-			"unreadable site is an ungraded site")
+		"these documents open a parameter list on `ctx context.Context` and never close the delimiter that\n"+
+			"ends it — the parenthesis, or a run of backticks as long as the one the span opened on — so the\n"+
+			"fence cannot read the argument out of them and silently graded nothing there; fix the text rather\n"+
+			"than the fence — an unreadable site is an ungraded site")
 
 	requireClean(t, bad, "documented method argument is not generator-owned",
 		fmt.Sprintf("these documented signatures name the emitted method argument after the query author's parameter\n"+
@@ -905,6 +907,14 @@ func TestSpecSigScannerDetectsDrift(t *testing.T) {
 		wantArg: "id",
 		wantAny: true,
 	}, {
+		// The paren anchor needs no code span, so a code block reads
+		// like the prose around it. What a block hides is the
+		// parenthesis-less spelling alone (gqlc-cgat).
+		name:    "a code block is read on its parentheses",
+		text:    "```\nfunc (q *Queries) PersonById(ctx context.Context, id int64) error\n```\n",
+		wantArg: "id",
+		wantAny: true,
+	}, {
 		name:       "a template placeholder parameter list is exempted, and says so",
 		text:       "func (q *Queries) <MethodName>(ctx context.Context<param-list>) (<return>, error) {",
 		wantExempt: true,
@@ -998,6 +1008,20 @@ func TestSpecBareSigScannerDetectsDrift(t *testing.T) {
 		wantArg: codegen.ParamArg,
 		wantAny: true,
 	}, {
+		// ``x`` and `x` render identically, so the second tick is a
+		// cosmetic edit the way dropping the parentheses was.
+		name:    "a two-backtick span is the same span",
+		text:    "- The parameter list is ``ctx context.Context, minAge int64``.",
+		wantArg: "minAge",
+		wantAny: true,
+	}, {
+		// The delimiter is a run of three here too. What keeps a block
+		// out is where its run sits, not how long the run is.
+		name:    "a three-backtick span inside a line is a span",
+		text:    "- The parameter list is ```ctx context.Context, minAge int64```.",
+		wantArg: "minAge",
+		wantAny: true,
+	}, {
 		name:    "the glued position is read here too",
 		text:    "the glued `ctx context.Context<bareParam> <T>` was green.",
 		wantArg: "<bareParam>",
@@ -1021,10 +1045,30 @@ func TestSpecBareSigScannerDetectsDrift(t *testing.T) {
 		name: "a prose span that splits in two is not a parameter list",
 		text: "the fields are `MinAge, Locale` and the keys are raw",
 	}, {
-		// The opening fence of a ```-delimited block is three backticks,
-		// and the third would anchor a span running to the closing fence.
-		name: "a fenced block's delimiter does not open a span",
+		// The three rows below pin the skip (gqlc-cgat): these lists
+		// carry no span of their own, and a block's own delimiter opens
+		// none here. Written down rather than left implicit, so a
+		// scanner that starts reading blocks fails on the pin.
+		name: "a fenced block is not a span",
 		text: "```\nctx context.Context, minAge int64\n```\n",
+	}, {
+		name: "an info string does not change that",
+		text: "```go\nctx context.Context, minAge int64\n```\n",
+	}, {
+		name: "an indented block is not a span either",
+		text: "prose:\n\n    ctx context.Context, minAge int64\n\nmore prose\n",
+	}, {
+		// A fence inside a list item is indented and still a fence.
+		name: "an indented fence is still a fence",
+		text: "- an example:\n\n  ```\n  ctx context.Context, minAge int64\n  ```\n",
+	}, {
+		// The block rule takes the block's own delimiter, not what is
+		// written inside it: a drifted list printed in a span there
+		// grades rather than being skipped for being an example.
+		name:    "a span inside a fenced block is read like any other",
+		text:    "```\nthe list is `ctx context.Context, minAge int64`\n```\n",
+		wantArg: "minAge",
+		wantAny: true,
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, unclosed := scanBareSigs("witness.md", tc.text)
@@ -1071,6 +1115,16 @@ func TestSpecParamListRuleScannerDetectsDrift(t *testing.T) {
 		text: bullet("— empty if zero parameters, `, arg <T>` if one\n" +
 			"  parameter, `, arg <MethodName>Params` if two-plus. The argument\n" +
 			"  name is the literal `arg` at both arities."),
+		wantArgs:  []string{codegen.ParamArg, codegen.ParamArg},
+		wantRules: []string{", arg <T>", ", arg <MethodName>Params"},
+	}, {
+		// Two backticks render as one span here too, and the tail inside
+		// is the same tail specListRules holds by identity. Two of them
+		// in one bullet: the second is only reached if the walk resumes
+		// past the whole run that closed the first.
+		name: "a two-backtick tail is the same tail",
+		text: bullet("— ``, arg <T>`` if one parameter,\n" +
+			"  ``, arg <MethodName>Params`` if two-plus."),
 		wantArgs:  []string{codegen.ParamArg, codegen.ParamArg},
 		wantRules: []string{", arg <T>", ", arg <MethodName>Params"},
 	}, {
@@ -1217,6 +1271,12 @@ func TestSpecScannersReportUnreadableSites(t *testing.T) {
 		require.Len(t, unclosed, 1)
 		require.Equal(t, 2, unclosed[0].line)
 	})
+	t.Run("a span whose closing run is the wrong length is reported too", func(t *testing.T) {
+		sigs, unclosed := scanBareSigs("witness.md", "prose\nthe list is ``ctx context.Context, minAge int64`\nmore prose\n")
+		require.Empty(t, sigs)
+		require.Len(t, unclosed, 1)
+		require.Equal(t, 2, unclosed[0].line)
+	})
 }
 
 // docFiles lists every markdown document under docRoots, named relative
@@ -1329,20 +1389,30 @@ func gradeParams(list string) (name string, exempt, gradable bool) {
 // inline code span with its enclosing parentheses left off, and every
 // such span that never closes.
 //
-// The span's backtick is the delimiter at both ends: it opens the anchor
-// and it terminates the list (ADR 0029 decision 10). The opening backtick
-// must not itself follow a backtick, which keeps a fenced block's ```
-// delimiter from anchoring a span that would run to the closing fence.
-// That rejects the delimiter, not the block: a code span written inside a
-// fenced block is read like any other, so a drifted list printed there as
-// an example grades rather than being skipped for being an example.
+// The span's backticks are the delimiter at both ends: they open the
+// anchor and they terminate the list (ADR 0029 decision 10). The
+// delimiter is the whole run of backticks the anchor's tick sits in, and
+// only a run of that same length closes it, so a list written inside
+// two backticks is read the way one written inside a single backtick is.
 //
-// A parameter list stated in prose with no code span around it is not
-// read here (gqlc-e143).
+// A run of three or more opening its line is a fenced code block's
+// delimiter, and opens no span here (gqlc-cgat). A code span written
+// inside such a block does, so a drifted list printed there as an
+// example grades rather than being skipped for being an example, and
+// scanSpecSigs' paren walk needs no span at all to reach the block.
+//
+// So what a code block hides from this sweep is the parenthesis-less
+// spelling, which is also what running prose hides (gqlc-e143,
+// gqlc-cgat).
 func scanBareSigs(file, text string) (sigs, unclosed []specSig) {
 	for _, loc := range tickAnchorRe.FindAllStringIndex(text, -1) {
 		open := loc[0]
-		if open > 0 && text[open-1] == '`' {
+		start := open
+		for start > 0 && text[start-1] == '`' {
+			start--
+		}
+		run := open - start + 1
+		if run >= 3 && opensLine(text, start) {
 			continue
 		}
 		site := specSig{
@@ -1351,12 +1421,12 @@ func scanBareSigs(file, text string) (sigs, unclosed []specSig) {
 			text: strings.TrimSpace(collapse(lineAt(text, open))),
 		}
 
-		closing := strings.IndexByte(text[open+1:], '`')
+		closing := closingTicks(text, open+1, run)
 		if closing < 0 {
 			unclosed = append(unclosed, site)
 			continue
 		}
-		list := collapse(text[open+1 : open+1+closing])
+		list := collapse(text[open+1 : closing])
 		name, _, gradable := gradeParams(list)
 		if !gradable {
 			continue
@@ -1658,27 +1728,62 @@ type codeSpan struct {
 	at   int
 }
 
-// inlineCodeSpans returns every single-backtick code run in
-// text[from:to], contents collapsed. Backticks are paired in order, so
-// the prose between two runs is skipped the way a markdown renderer
-// skips it.
+// inlineCodeSpans returns every code run in text[from:to], contents
+// collapsed. Runs are paired by length, so the prose between two spans
+// is skipped the way a markdown renderer skips it.
 func inlineCodeSpans(text string, from, to int) []codeSpan {
 	var out []codeSpan
+	bounded := text[:to]
 	for i := from; i < to; {
-		open := strings.IndexByte(text[i:to], '`')
+		open := strings.IndexByte(bounded[i:], '`')
 		if open < 0 {
 			return out
 		}
 		open += i
-		closing := strings.IndexByte(text[open+1:to], '`')
+		body := open
+		for body < to && bounded[body] == '`' {
+			body++
+		}
+		closing := closingTicks(bounded, body, body-open)
 		if closing < 0 {
 			return out
 		}
-		closing += open + 1
-		out = append(out, codeSpan{text: collapse(text[open+1 : closing]), at: open})
-		i = closing + 1
+		out = append(out, codeSpan{text: collapse(bounded[body:closing]), at: open})
+		i = closing + (body - open)
 	}
 	return out
+}
+
+// closingTicks returns the offset of the first run of exactly n
+// backticks at or after i, or -1 when nothing at or after i closes a
+// span opened by a run of n. A longer or shorter run is content: a
+// code span's delimiters pair by length, which is what lets a document
+// print a backtick inside a span at all.
+func closingTicks(text string, i, n int) int {
+	for i < len(text) {
+		j := strings.IndexByte(text[i:], '`')
+		if j < 0 {
+			return -1
+		}
+		j += i
+		end := j
+		for end < len(text) && text[end] == '`' {
+			end++
+		}
+		if end-j == n {
+			return j
+		}
+		i = end
+	}
+	return -1
+}
+
+// opensLine reports whether nothing but spaces precedes text[i] on its
+// line, which is where a code fence's delimiter sits. The indent is
+// skipped because a fence inside a list item carries one.
+func opensLine(text string, i int) bool {
+	indent := text[strings.LastIndexByte(text[:i], '\n')+1 : i]
+	return strings.TrimLeft(indent, " ") == ""
 }
 
 func isIdentByte(c byte) bool {

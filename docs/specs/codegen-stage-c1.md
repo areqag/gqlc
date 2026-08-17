@@ -749,9 +749,9 @@ fenced.** `TestSpecMethodArgIsGeneratorOwned` and
 (`internal/codegen/conformance/specfence_test.go`) read every
 markdown document under `docs/`, plus `README.md` and `CONTEXT.md`,
 and hold three shapes against `codegen.ParamArg` read from the
-emitter: every parameter list opening on `ctx context.Context` behind
-an open paren or a code span's backtick and holding exactly one more
-parameter; the parameter-list tail each
+emitter: every parameter list opening on `ctx context.Context`
+behind an open paren or a code span's opening backticks and holding
+exactly one more parameter; the parameter-list tail each
 `<param-list>` bullet spells out, which is where the rule actually
 lives, because the method template above prints only the placeholder;
 and the value half of every `map[string]any` literal's entries. The
@@ -761,25 +761,24 @@ the fence catches rather than as claims about the emitted surface,
 each named in that test by its exact text. An exhibit is exempt
 once, so a second list spelled the same way grades, and every other
 parenthesis-less list in that document is read on the same terms as
-any other document's. A
-placeholder in the type position is not an exemption for the name
-beside it — over a swept *signature* the fence grades the name
-position and reads nothing off the type, so a `<bareParam> <T>`
-written there is red on its name however the type is spelled, and a
-lone `<bareParam>` is graded as a declaration naming nothing rather
-than waved through for wearing angle brackets. That scoping is the
-signature sweep's alone; the `<param-list>` bullet holds its tails
-verbatim, type included, so an edit touching only the type is red
-there as well — the last paragraph of this section states which is
-which. The one token it declines to grade *and owes something for* is
-one standing for the whole parameter list — `<param-list>` and the
-numbered `<param-list-1>` the interface block below uses — and a
-document taking that exemption owes the bullet, because the exemption
-and the requirement are the same list. It also reads nothing out of a
-list holding three or more parameters, which is how the
-`driverOrTx.run` seam stays out of a sweep for query methods, and
-which is why a signature carrying the author's names as separate
-arguments is past what it reads (`gqlc-vu7z`).
+any other document's. A placeholder in the type position is not an
+exemption for the name beside it — over a swept *signature* the fence
+grades the name position and reads nothing off the type, so a
+`<bareParam> <T>` written there is red on its name however the type
+is spelled, and a lone `<bareParam>` is graded as a declaration
+naming nothing rather than waved through for wearing angle brackets.
+That scoping is the signature sweep's alone; the `<param-list>`
+bullet holds its tails verbatim, type included, so an edit touching
+only the type is red there as well — the last paragraph of this
+section states which is which. The one token it declines to grade
+*and owes something for* is one standing for the whole parameter
+list — `<param-list>` and the numbered `<param-list-1>` the interface
+block below uses — and a document taking that exemption owes the
+bullet, because the exemption and the requirement are the same list.
+It also reads nothing out of a list holding three or more parameters,
+which is how the `driverOrTx.run` seam stays out of a sweep for query
+methods, and which is why a signature carrying the author's names as
+separate arguments is past what it reads (`gqlc-vu7z`).
 
 Which documents owe graded sites is written down in that test, by
 name, and reconciled against what the sweep actually read — in both
@@ -805,53 +804,60 @@ others behind the fence's shape.
 
 At least six things are left open, and they are not the same size.
 The count is a floor rather than a census: it records what has been
-measured, not everything there is. Deleting
-the documented surface and its line in that test together is the
-first; that is a two-part edit which removes a named document from a
-list in a test file, and the second part is the record of it. The
-second is a document the fence is never pointed at: those lists name
-documents, not roots, so they say nothing about markdown outside
-`docs/`, `README.md` and `CONTEXT.md`. `AGENTS.md`, `CLAUDE.md` and
-`CONTRIBUTING.md` are outside it today and print none of this
-surface; a new document at the repository root that did print it
-would be swept by nothing and recorded nowhere (`gqlc-jfwo`). The
-same list is what holds `README.md` and `CONTEXT.md` in scope at all,
-and nothing holds it: no census names a document under either, so
-dropping either from the fence's roots is green.
+measured, not everything there is. Deleting the documented surface
+and its line in that test together is the first; that is a two-part
+edit which removes a named document from a list in a test file, and
+the second part is the record of it. The second is a document the
+fence is never pointed at: those lists name documents, not roots, so
+they say nothing about markdown outside `docs/`, `README.md` and
+`CONTEXT.md`. `AGENTS.md`, `CLAUDE.md` and `CONTRIBUTING.md` are
+outside it today and print none of this surface; a new document at
+the repository root that did print it would be swept by nothing and
+recorded nowhere (`gqlc-jfwo`). The same list is what holds
+`README.md` and `CONTEXT.md` in scope at all, and nothing holds it:
+no census names a document under either, so dropping either from the
+fence's roots is green.
 
 The third is the largest and, unlike the first, is a single edit in
 one place. A listed document owes *one* graded site, not all of them,
 so every site past the first can leave the sweep silently — not by
 being corrected, but by ceasing to print an anchor. An anchor is a
 delimiter *and* the context parameter, both halves: an open
-parenthesis before `ctx context.Context`, or the backtick of a code
-span the list is printed inside. The `RemovePerson(ctx context.Context,
-arg int64)` member of C4 §3.2's `WriteQuerier` block is one of ten
-graded signatures in C4; rewrite its context parameter and the fence
-stays green over whatever its argument position then says. The floor
-is one graded site per listed document. Closing that means recording
-every graded site rather than every graded document, which makes the
-test a verbatim copy of these documents and turns every honest edit
-to an example red — so it is written down here instead.
+parenthesis before `ctx context.Context`, or the opening backticks of
+a code span the list is printed inside. The `RemovePerson(ctx
+context.Context, arg int64)` member of C4 §3.2's `WriteQuerier` block
+is one of ten graded signatures in C4; rewrite its context parameter
+and the fence stays green over whatever its argument position then
+says. The floor is one graded site per listed document. Closing that
+means recording every graded site rather than every graded document,
+which makes the test a verbatim copy of these documents and turns
+every honest edit to an example red — so it is written down here
+instead.
 
 The fourth is what the third's word *anchor* is carrying, and it is
-not decoration. Until ADR 0029 decision
-10 the only signature anchor was the parenthesised one, so a bullet in
-this very section reading *the parameter list is* `ctx
-context.Context, arg int64` — with the parentheses simply left off —
-was a parameter list to a reader and prose to the sweep, and the same
-bullet spelling the author's parameter name instead was measured
-green. The backtick anchor closes that spelling. Three neighbouring
-ones stay open: a parameter list written into prose with no code span
-around it is not read at all; the binding sweep has no second anchor,
-so `"minAge": minAge` stated with no `map[string]any` literal around
-it is unswept (`gqlc-offa`); and a claim put in the place of one of
-the parenthesis-less lists that test names as exhibits, spelled the
-way that exhibit was, takes its exemption (`gqlc-x2sg`). The binding
-case was measured rather than assumed — these documents carry over
-500 bare `"key": value` spans across more than 30 files, nearly all
-of them JSON model shapes, so a sweep reading them would redden on
-prose across the corpus.
+not decoration. Until ADR 0029 decision 10 the only signature anchor
+was the parenthesised one, so a bullet in this very section reading
+*the parameter list is* `ctx context.Context, arg int64` — with the
+parentheses simply left off — was a parameter list to a reader and
+prose to the sweep, and the same bullet spelling the author's
+parameter name instead was measured green. The backtick anchor
+closes that spelling, and the delimiter is the whole run of
+backticks rather than one of them — closed by a run of the same
+length — so the same bullet written inside two backticks is read the
+way one written inside a single backtick is. Three neighbouring ones
+stay open: a parenthesis-less parameter list with no code span around
+it is not read at all, in running prose or on its own line inside a
+fenced or indented code block — the paren anchor needs no span and
+reaches a block like any other text, so what a block hides is the
+parenthesis-less spelling (`gqlc-cgat`); the binding sweep has no
+second anchor, so `"minAge": minAge` stated with no `map[string]any`
+literal around it is unswept (`gqlc-offa`); and a claim put in the
+place of one of the parenthesis-less lists that test names as
+exhibits, spelled the way that exhibit was, takes its exemption
+(`gqlc-x2sg`). The binding case was measured rather than assumed —
+these documents carry over 500 bare `"key": value` spans across more
+than 30 files, nearly all of them JSON model shapes, so a sweep
+reading them would redden on prose across the corpus.
 
 The fifth and sixth are narrower, and both were measured rather than
 reasoned about. The sweeps read raw markdown bytes, so a site inside

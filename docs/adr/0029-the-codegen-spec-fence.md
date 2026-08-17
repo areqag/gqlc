@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-08-17
-**Beads:** gqlc-rz0l, gqlc-lhs3, gqlc-jfwo, gqlc-0rjn, gqlc-vu7z, gqlc-e143, gqlc-173n, gqlc-jnsk, gqlc-offa, gqlc-ipx6
+**Beads:** gqlc-rz0l, gqlc-lhs3, gqlc-jfwo, gqlc-0rjn, gqlc-vu7z, gqlc-e143, gqlc-173n, gqlc-jnsk, gqlc-offa, gqlc-ipx6, gqlc-x2sg, gqlc-cgat
 
 ## Context
 
@@ -70,10 +70,10 @@ count has slack. A listed document keeps its entry on **one** surviving graded
 site, so every site past the first can leave the sweep with nothing said — not
 by being corrected, but by ceasing to print an anchor it is found on. Each
 anchor is a delimiter and the context parameter or the literal's type, both
-halves: an open parenthesis or a backtick before `ctx context.Context` for a
-signature, the opening brace of the `map[string]any` literal for a binding.
-Dropping the delimiter alone is enough, which is why there are two signature
-anchors rather than one (decision 10).
+halves: an open parenthesis or a code span's opening backticks before
+`ctx context.Context` for a signature, the opening brace of the `map[string]any`
+literal for a binding. Dropping the delimiter alone is enough, which is why
+there are two signature anchors rather than one (decision 10).
 
 Measured: C4 §3.2's `WriteQuerier` member `RemovePerson`, whose parameter list
 is `ctx context.Context, arg int64`, is one of ten graded signatures in that
@@ -200,11 +200,13 @@ context.Context, minAge int64` `` inserted into C1 §5.3 — the section this
 branch exists to correct, spelling the capture vector `gqlc-lhs3` removed —
 left both sweeps green.
 
-So a second anchor reads the same context parameter behind a backtick, and the
-code span's closing backtick terminates the list the way the closing paren does.
-The two anchors share one grading step (`gradeParams`), so arity, the whole-list
-placeholder and the name position are decided identically whichever delimiter
-carried the list.
+So a second anchor reads the same context parameter behind a code span's opening
+backticks, and the matching closing run terminates the list the way the closing
+paren does. The delimiter is the whole run rather than one backtick of it, so a
+list written inside two backticks is read the way one written inside a single
+backtick is. The two anchors share one grading step (`gradeParams`), so arity,
+the whole-list placeholder and the name position are decided identically
+whichever delimiter carried the list.
 
 A document explaining a fence has to quote what the fence catches, and this one
 does three times — decision 4's two placeholder positions and the capture vector
@@ -215,17 +217,23 @@ rather than claims about the emitted surface.
 The exemption is per list rather than per document, so a claim this document
 makes about the emitted parameter list is read on the same terms as any other
 document's, and each entry covers one site, so a second list spelled the same
-way is graded. It
-is a written census reconciled in the `lost` direction, so an entry the document
-has stopped printing is red by its text. What that leaves open is a claim put in
-an exhibit's place and spelled the way the exhibit was: it takes the entry
-(`gqlc-x2sg`).
+way is graded. It is a written census reconciled in the `lost` direction, so an
+entry the document has stopped printing is red by its text. What that leaves
+open is a claim put in an exhibit's place and spelled the way the exhibit was:
+it takes the entry (`gqlc-x2sg`).
 
 Two things are deliberately not reached:
 
-- **A parameter list printed in prose with no code span around it.** Grading
-  unfenced prose means grading every comma in the documents. This is the same
-  surface as `gqlc-e143` and is left to it.
+- **A parenthesis-less parameter list with no code span around it**, in running
+  prose or on its own line inside a code block. The paren anchor needs no span
+  and reaches a code block like any other text, so what a block hides is this
+  spelling alone. Grading unfenced prose means grading every comma in the
+  documents; reading a code block means parsing markdown block structure before
+  any anchor runs, and a block body is lines rather than a signature. A run of
+  three or more backticks opening a line is read as such a block's delimiter
+  rather than as a span's, and the fenced and the indented spellings are both
+  pinned as skips in `TestSpecBareSigScannerDetectsDrift`. The prose half is the
+  same surface as `gqlc-e143`; the block half is `gqlc-cgat`.
 - **The binding half.** The symmetric move — reading a `"key": value` pair with
   no `map[string]any` literal around it — was measured before it was declined:
   the swept documents hold over 500 such spans across more than 30 files,
@@ -256,8 +264,9 @@ own header:
 - The binding sweep peels pointer operators along with carrier conversions, so
   `*arg` and `&arg` unwrap to `arg` and stay green (`gqlc-173n`).
 - A driver binding stated with no `map[string]any` literal around it is unswept,
-  and so is a parameter list stated in prose with no code span around it
-  (`gqlc-offa`, Decision 10).
+  and so is a parenthesis-less parameter list with no code span around it — in
+  running prose, or on its own line inside a fenced or indented code block
+  (`gqlc-offa`, `gqlc-cgat`, Decision 10).
 - `docFiles`'s guard that every `docRoots` entry exists on disk is neither
   witnessed nor in Decision 7's enumeration (`gqlc-ipx6`).
 - The sweeps read raw markdown bytes, so a site inside an HTML comment is graded
