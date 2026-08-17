@@ -78,7 +78,25 @@ declares, an edge type's to the relationship types, and never to the union of
 the two. It recognises a decoder by the entity type the function returns rather
 than by a `decode<T>` naming convention, and reconciles the entities an emission
 decodes against the ones `codegen.Prepare` names, so a decoder it cannot
-classify is a failure rather than an omission.
+classify is refused rather than skipped.
+
+That recognition is syntactic: it matches the identifiers a function's results
+name against the prepared entity names, with no type resolution behind it. A
+decoder declared to return an alias or a wrapper of an entity struct is
+therefore not read as that entity's decoder — and what follows is a refusal,
+not silence. Every receiver-less function declaration an emission writes with a
+body, and every function literal at any depth inside one, is classified, so such
+a decoder lands on the arm for a function whose results name nothing prepared,
+where the first label guard it writes refuses the emission; and if nothing else
+decodes that entity, the reconciliation refuses it as well.
+
+The residue is narrow and stated: an unresolvable decoder that compares no
+string, and whose entity another decoder does fill, is accepted, because it
+carries no label guard for this gate to hold to an alphabet. A decoder written
+as a method is likewise not graded — a receiver form is read as a decoder's
+holder — so relocating one there takes it out of this census, and the
+reconciliation is what would then refuse the emission, on its entity's absence.
+
 It reddens on this shape naming `decodePersonEmployee` and the join spelling.
 The rejection above stands on its own terms: a gate that catches the emission is
 not a reason to prefer emitting it.
