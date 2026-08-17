@@ -570,9 +570,9 @@ func sealedInterfaces(t *testing.T) map[string][]string {
 // field" would put a shape this walk cannot read on the no-parameter side of
 // the caller's comparison.
 //
-// The same AST walk over the same parse that declaredMarkers and
-// sealedInterfaces use, for the same reason: a commented-out field satisfies a
-// grep.
+// Reads the same sources through the same parseQueryPackage helper that
+// declaredMarkers and sealedInterfaces read, and walks the AST for the reason
+// that helper states: a commented-out field satisfies a grep.
 func variantsDeclaringAField(t *testing.T, names []string) []string {
 	t.Helper()
 	fset, files := parseQueryPackage(t)
