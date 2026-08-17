@@ -238,6 +238,57 @@ func TestConstraintTagsKeepsOnlyPositiveCustomTerms(t *testing.T) {
 	}
 }
 
+func TestDeclaringATermTheToolchainOwnsDoesNotMakeItATag(t *testing.T) {
+	// classify consults its own vocabularies before the declared one, and every
+	// fixture above is blind to that ordering: their `declared` and `platforms`
+	// sets are disjoint, so the two orders agree on every line in the table.
+	// This vocabulary overlaps on purpose.
+	//
+	// run.build-tags is hand-maintained, so a GOOS spelling landing in it is a
+	// typo away. Under the reverse ordering `//go:build linux` then derives
+	// `-tags linux`, `go list` matches a Linux-only directory whatever the
+	// machine is, and both coverage postconditions pass over a build nobody
+	// ran — bd gqlc-e7oq's positive-GOOS fail-open, restored by one line of
+	// precedence.
+	overlapping := map[string]struct{}{
+		"codegen_live": {}, "linux": {}, "arm64": {}, "unix": {}, "go1.24": {},
+	}
+	for _, tc := range []struct {
+		term string
+		want termClass
+	}{
+		{"linux", classPlatform},
+		{"arm64", classPlatform},
+		{"unix", classToolchain},
+		{"go1.24", classRelease},
+		{"codegen_live", classCustom},
+	} {
+		// Errorf, so the consequence below is still measured when the rule
+		// above it breaks: the two halves are the classification and what the
+		// derivation does with it, and a mutation should be seen to move both.
+		if got := classify(tc.term, platforms, overlapping); got != tc.want {
+			t.Errorf("classify(%q), with %q declared in run.build-tags, = %d, want %d: what a "+
+				"term IS does not change because the config also names it", tc.term, tc.term, got, tc.want)
+		}
+	}
+	for _, line := range []string{
+		"//go:build linux && codegen_live",
+		"//go:build arm64 && codegen_live",
+		"//go:build unix && codegen_live",
+		"//go:build go1.24 && codegen_live",
+	} {
+		got, err := constraintTags(line, platforms, overlapping, origin)
+		if err != nil {
+			t.Fatalf("constraintTags(%q): %v", line, err)
+		}
+		if !slices.Equal(got, []string{"codegen_live"}) {
+			t.Fatalf("constraintTags(%q) = %v, want [codegen_live]: a term the toolchain owns "+
+				"reached -tags because run.build-tags happened to name it, and a -tags argument "+
+				"asserting a platform is a lie about the machine (bd gqlc-e7oq)", line, got)
+		}
+	}
+}
+
 func TestConstraintTagsRefusesALineItCannotRead(t *testing.T) {
 	// A constraint this derivation cannot parse is the derivation going quiet
 	// over a file, and a quiet derivation drops tags rather than reporting that
