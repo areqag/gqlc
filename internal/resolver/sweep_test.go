@@ -136,10 +136,11 @@ func sentinelsOf(err error) string {
 
 // sweepCorpus enumerates every fixture query and every fixture schema under
 // test/data/resolver, from the valid/ and invalid/ subdirs both. Schemas are
-// keyed by subdir-qualified path: the two schemas/ dirs share nine basenames
-// and three of those nine differ in bytes — satisfy_singular.gql, social.gql
-// and satisfy_plural_edges_reversed_subtype.gql — so a basename key would fold
-// two different schemas onto one cell. Both counts re-derive, from
+// keyed by subdir-qualified path: the two schemas/ dirs share ten basenames
+// and four of those ten differ in bytes — satisfy_singular.gql, social.gql,
+// satisfy_plural_edges_reversed_subtype.gql and
+// satisfy_plural_edges_inline_subtype.gql — so a basename key would fold two
+// different schemas onto one cell. Both counts re-derive, from
 // test/data/resolver, with:
 //
 //	comm -12 <(ls valid/schemas) <(ls invalid/schemas) | tee /dev/stderr |

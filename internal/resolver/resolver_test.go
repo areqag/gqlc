@@ -470,6 +470,16 @@ var invalidFixtures = map[string]error{
 	// set it declined over, and it is the second that distinguishes staying wide
 	// from narrowing to whichever type happened to be seen first.
 	"unlabelled_optional_far_end_stays_wide.cypher": ErrAmbiguousBinding,
+	// Two edges out of the same bare `p` whose narrowed far ends pin it to
+	// different author types, so the narrowed intersection is empty while the
+	// unnarrowed one still holds both. candidateTypes returns the unnarrowed
+	// answer there, which is master's, and this sentinel is what that decision
+	// is worth: returning the empty narrowed set instead lands on
+	// commitUnlabelledRound's case 0, ErrUnknownLabel — "no edge in the pattern
+	// reaches a compatible schema node type" — which is false, since both edges
+	// reach one. See TestNarrowedEndsThatDisagreeKeepTheWideAnswer for the two
+	// halves, each of which narrows `p` on its own and to a different type.
+	"unlabelled_narrowed_ends_disagree.cypher": ErrAmbiguousBinding,
 }
 
 // invalidFixtureContains pins the message arm for fixtures where errors.Is
@@ -535,6 +545,10 @@ var invalidFixtureContains = map[string]string{
 	// the OPTIONAL hop narrowed nothing. A narrowing that fired here would list
 	// one type, and the substring would fail.
 	"unlabelled_optional_far_end_stays_wide.cypher": `candidate types: Employee&Person, Person`,
+	// The empty narrowed set would have been reported as ErrUnknownLabel; this
+	// says the message is the wide lane's, over both author types, and not one
+	// of the two singletons the halves reach.
+	"unlabelled_narrowed_ends_disagree.cypher": `candidate types: Author, Author&Editor`,
 }
 
 type ResolverSuite struct {
@@ -1299,6 +1313,60 @@ func (s *ResolverSuite) TestNarrowingLearnsOnlyFromASingleHopEdge() {
 			s.Require().Equal(tt.want, got)
 		})
 	}
+}
+
+// TestNarrowedEndsThatDisagreeKeepTheWideAnswer pins candidateTypes' fallback
+// from the empty narrowed accumulator to the unnarrowed one.
+//
+// The sentinel on unlabelled_narrowed_ends_disagree.cypher already flips
+// without the fallback (ErrAmbiguousBinding becomes ErrUnknownLabel), but the
+// sentinel alone does not say the narrowing RAN — a lane that never fired would
+// give the same ErrAmbiguousBinding for the ordinary reason. The two halves are
+// what say it fired: each is a proper prefix of the fixture's own text, each
+// narrows `p` on its own, and they narrow it to DIFFERENT types. That is the
+// disagreement, and it is why the intersection over both is empty.
+//
+// The halves are sliced out of the fixture rather than spelled here so the
+// three queries cannot drift apart; the line count is asserted so a fixture
+// edit fails loudly instead of slicing the wrong clauses.
+func (s *ResolverSuite) TestNarrowedEndsThatDisagreeKeepTheWideAnswer() {
+	sch := s.loadSchema("invalid", "narrowed_ends_disagree.gql")
+	resolve := func(src string) ([]Column, error) {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		return vq.Columns, err
+	}
+
+	src, err := os.ReadFile(filepath.Join(fixtureDir, "invalid", "unlabelled_narrowed_ends_disagree.cypher"))
+	s.Require().NoError(err)
+	lines := strings.Split(strings.TrimRight(string(src), "\n"), "\n")
+	s.Require().Len(lines, 5, "the halves are sliced by line: two MATCH clauses each, then RETURN p")
+
+	_, err = resolve(string(src))
+	s.Require().ErrorIs(err, ErrAmbiguousBinding)
+	s.Require().Contains(err.Error(), "candidate types: Author, Author&Editor")
+
+	// authorOnly is declared on Author and not on Author&Editor; editorId the
+	// other way round. Each half therefore accepts only if `p` narrowed, and
+	// only if it narrowed to that half's type.
+	wrote := strings.Join(lines[0:2], "\n") + "\nRETURN p.authorOnly"
+	got, err := resolve(wrote)
+	s.Require().NoError(err, "the WROTE half alone pins b to Book and p to Author")
+	s.Require().Equal([]Column{{Name: "p.authorOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}}, got)
+
+	spoke := strings.Join(lines[2:4], "\n") + "\nRETURN p.editorId"
+	got, err = resolve(spoke)
+	s.Require().NoError(err, "the SPOKE_AT half alone pins v to Venue and p to Author&Editor")
+	s.Require().Equal([]Column{{Name: "p.editorId", Type: ResolvedProperty{Type: graph.PropertyType("INT")}}}, got)
+
+	// The two halves' projections are each refused on the OTHER half, which is
+	// what makes "different types" a fact about the schema and not about which
+	// property name was chosen.
+	_, err = resolve(strings.Join(lines[0:2], "\n") + "\nRETURN p.editorId")
+	s.Require().ErrorIs(err, ErrUnknownProperty)
+	_, err = resolve(strings.Join(lines[2:4], "\n") + "\nRETURN p.authorOnly")
+	s.Require().ErrorIs(err, ErrUnknownProperty)
 }
 
 // TestAnEmptyHopRangeIsNotAWitness pins the EQUALITY in singleHopPattern's
