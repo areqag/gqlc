@@ -697,11 +697,18 @@ func columnSite(queryName string, pos int, columnName string) string {
 // pointer to look at, which is why neither a t == nil test nor a
 // reflect nil-pointer check would do instead.
 //
-// Four is what is witnessed, not what the set holds. The promotion that
-// opens the sum also composes — a nil pointer to an embedder, or a
-// struct embedding an embedder, faults here too and is none of the four
-// — so this enumeration is not known to be closed and nothing below
-// depends on its being closed: the render enumerates no shape and no
+// Four is what is witnessed, not what the set holds. Whether a value
+// faults here is a fact about the String() it ends up dispatching, and
+// the interface is satisfiable by types this package never sees, so no
+// enumeration written here closes the set. Promotion composes, and
+// composing it reaches faulting shapes none of the four covers: a nil
+// pointer to a struct that embeds a variant by value faults, because the
+// promoted value method must dereference the pointer to reach its
+// receiver, and that struct is not one of the eight variants. Composing
+// is not itself what faults, though — the same struct held by value
+// answers, which is the value-embedder case in
+// TestUnmatchedResolvedTypeKeepsTheWireTagWhereThereIsOne. Nothing below
+// depends on the set being closed: the render enumerates no shape and no
 // variant.
 //
 // A refusal that faults is not a refusal, so the tag is asked for under

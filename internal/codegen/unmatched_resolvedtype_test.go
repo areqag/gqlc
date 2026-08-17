@@ -160,11 +160,17 @@ func generateUnmatched(t *testing.T, q codegen.NamedQuery) error {
 // resolver.ResolvedType itself — and String() on each of those faults.
 // Each case below panicked before the fix instead of returning.
 //
-// Those four shapes are what this measures, not what the set holds. The
-// promotion composes, so a nil pointer to an embedder and a struct
-// embedding an embedder fault here too; the enumeration is not known to
-// be closed, and the fix does not depend on its being closed, since
-// resolvedTypeName enumerates no shape.
+// Those four shapes are what this measures, not what the set holds.
+// Whether a value faults is a fact about the String() it ends up
+// dispatching, and the interface is satisfiable by types codegen never
+// sees, so no enumeration here closes the set: (*embeddedNode)(nil)
+// faults and is none of the four, because the promoted value method must
+// dereference the pointer to reach its receiver. Composing is not itself
+// what faults, though — embeddedNode held by value answers, which is the
+// value-embedder case in
+// TestUnmatchedResolvedTypeKeepsTheWireTagWhereThereIsOne below. The fix
+// does not depend on the set being closed, since resolvedTypeName
+// enumerates no shape.
 //
 // It does not claim the set is now safe under every implementation. A
 // String() that blocks, or that calls runtime.Goexit, still takes the
