@@ -228,8 +228,23 @@ func rejectUnservedQueries(queries []codegen.NamedQuery) error {
 // rather than off the reason string, because a reason is prose and
 // matching prose would make the gate order turn on the wording.
 // edgeUnionReason returns "" wherever it stands aside, so a non-empty
-// reason from a ResolvedEdgeUnion column can only be its own. The
-// parameter arm answers false without asking: a parameter is a schema
+// reason from a ResolvedEdgeUnion column can only be its own.
+//
+// The assertion names the VALUE form only, and that is the answer this
+// flag's contract wants rather than a form it forgets. What earns the rank
+// is edgeUnionReason's text, which names the candidates the schema
+// declares; unservedColumn reaches it from `case
+// resolver.ResolvedEdgeUnion:`, which matches the value form and nothing
+// else, so the assertion and that arm agree exactly. A pointer or embedded
+// edge union — which satisfies resolver.ResolvedType without matching any
+// arm, see unservedColumn's fall-through — is refused there instead, with
+// "projects edgeUnion". That names no candidate, so it says strictly less
+// than the alternation the text gate quotes back, and ranking it above the
+// text would make the author worse off in exactly the trade the exception
+// below exists to avoid. TestEdgeUnionRankingFlagNamesTheValueFormOnly
+// holds both halves, so widening the assertion reddens it.
+//
+// The parameter arm answers false without asking: a parameter is a schema
 // property or it is nothing this backend encodes, and neither is an edge
 // union, so a reason from that arm is always one the text outranks.
 //
@@ -425,10 +440,34 @@ func unservedColumn(t resolver.ResolvedType) string {
 	case resolver.ResolvedList, resolver.ResolvedUnknown:
 		return "projects " + ct.String()
 	}
-	// ResolvedType is a sealed interface, so the switch above is its
-	// whole membership; a variant added to the resolver lands here and is
-	// dropped rather than emitted through an arm chosen for some other
-	// shape.
+	// Reached without a ninth variant. resolver.ResolvedType's unexported
+	// marker stops another package DECLARING an implementation from
+	// scratch, which is narrower than a closed sum: two constructions
+	// obtain the marker without declaring it, and neither matches an arm
+	// above. The pointer form of a variant — every marker and String takes
+	// a value receiver, and a pointer's method set contains its value
+	// methods, so *resolver.ResolvedEdgeUnion satisfies the interface while
+	// `case resolver.ResolvedEdgeUnion:` does not match it. And a struct
+	// embedding a variant — Go promotes an embedded type's unexported
+	// methods, so `struct{ resolver.ResolvedNode }` declared anywhere
+	// satisfies the interface without naming the marker at all. The two
+	// nest, so the set of shapes that can arrive here has no bound.
+	// Callers assemble both: Input, NamedQuery, ValidatedQuery, Column and
+	// every variant are exported structs with exported fields, so what the
+	// resolver builds does not bound what a caller hands over
+	// (internal/codegen/errors.go, gqlc-h4ug).
+	//
+	// So the arms are not the interface's membership. What lands here is
+	// either an existing variant in a form no arm spells, or a variant
+	// genuinely added to the resolver that no arm yet names, and both are
+	// refused on the same terms: dropped rather than emitted through an arm
+	// chosen for some other shape, because a column no arm here recognises
+	// has no decode arm either and serving it would emit a method that
+	// cannot fill its row. The reason carries the wire tag and nothing
+	// else, which is thinner than what the edge-union arm says and is what
+	// the ranking in unservedReason turns on.
+	// TestUnservedColumnFallThroughIsNotANinthVariant is the witness, for
+	// all eight variants in both forms.
 	return "projects " + t.String()
 }
 
