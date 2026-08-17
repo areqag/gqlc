@@ -38,10 +38,9 @@
 #   - a repo whose .githooks/ directory is gone entirely: nothing then
 #     distinguishes it from an unrelated repo that never had hooks, so the
 #     check stays silent rather than firing in every repo on the machine
-#   - `git merge` / `git pull` run unhooked with only a warning; post-merge
-#     mirrors bd state and losing it costs a stale mirror, not a bad commit
 #   - the shlex fallback regex covers `git commit` only, so a command that
-#     fails to tokenize AND pushes is warned about but not refused
+#     fails to tokenize and then merges, pulls or pushes is warned about but
+#     not refused
 #   - the config value is compared literally, not resolved: an absolute path
 #     naming the very same directory still reads as drift (see HOOKS_DIRNAME)
 #
@@ -69,10 +68,18 @@ PROTECTED = ("master", "main")
 # the MAIN worktree's under `/abs/path/to/main/.githooks` — so an absolute
 # path is drift even when it names a directory full of live hooks.
 HOOKS_DIRNAME = ".githooks"
-# git subcommands whose safety depends on a hook in .githooks/: commit
-# (pre-commit, commit-msg) and push (pre-push). post-merge only mirrors bd
-# state, so merge/pull are warned about but not refused.
-HOOK_GATED = ("commit", "push")
+# git subcommands that run one of the hooks this repo ships. Measured on git
+# 2.55.0 against .githooks/{pre-commit,commit-msg,pre-push,post-merge}, each
+# armed to log and exit 0 so the chain continues: `commit` and `commit --amend`
+# fire pre-commit and commit-msg; a non-fast-forward `merge` or `pull` fires
+# commit-msg and post-merge (not pre-commit); `push` fires pre-push. In the
+# same fixture `revert`, `cherry-pick` (with and without -e), `rebase` and `am`
+# fired none of the four. merge/pull are refused rather than warned about
+# because commit-msg is the AI-attribution gate CLAUDE.md relies on, so a merge
+# commit written while drifted is an ungated commit. A fast-forward merge or
+# pull writes no commit and so fires nothing; refusing it anyway is the
+# conservative side of a distinction this hook cannot make before the fact.
+HOOK_GATED = ("commit", "merge", "pull", "push")
 HEREDOC_RE = re.compile(r"(?<!<)<<(-?)\s*([\"']?)(\w+)\2")
 SUBST_RE = re.compile(r"\$\(([^()]*)\)")
 BACKTICK_RE = re.compile(r"`([^`]*)`")
@@ -282,13 +289,18 @@ def hooks_drift(directory):
     deactivates all of .githooks/ at once, repo-wide — linked worktrees share
     one .git/config. This file is wired through .claude/settings.json, so
     core.hooksPath does not govern whether it runs. What that buys is latency,
-    not coverage: `just check-hooks` tests the same property, but only as a
-    dependency of `just test` / `just doctor`, and the window between the
+    and in two states coverage as well. Latency: `just check-hooks` runs only
+    as a dependency of `just test` / `just doctor`, and the window between the
     drifting write and the next full test run is what went unobserved for
-    30+ minutes across five sessions (bd gqlc-nzwa). It buys that latency only
-    for Bash tool calls inside a Claude Code session — a plain terminal, an
-    editor's git integration and every non-Bash tool still see nothing, and
-    `just check-hooks` stays the detector for those.
+    30+ minutes across five sessions (bd gqlc-nzwa). Coverage: check-hooks
+    compares the configured value and nothing else, so on the two states
+    has_live_hook() below adds — value correct, .githooks/ present, holding
+    only *.sample files or a hook left non-executable — `just doctor` prints
+    "ok" and exits 0 while this refuses (measured; both states are fixtures in
+    the test suite, DEAD_REPO and NOEXEC_REPO). The latency half applies only
+    to Bash tool calls inside a Claude Code session; nothing here runs for a
+    plain terminal, an editor's git integration or a non-Bash tool, and
+    `just check-hooks` is what those have.
 
     Silent — never a reason — for a cwd outside any repo and for repos that
     ship no .githooks/. This runs ahead of every Bash call in every session,

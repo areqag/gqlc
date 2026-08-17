@@ -47,10 +47,15 @@ init:
 # local pre-commit/pre-push gate at once (CI cannot see local git config).
 # Sub-ms; wired into `test` so developers hit it naturally.
 #
-# This recipe is the detector of record for a plain terminal, but it only runs
-# when someone runs it. .githooks/claude-pre-bash carries the same check on
-# every Bash tool call inside a Claude Code session, which is what closes the
-# window between the drifting write and the next `just test` (bd gqlc-nzwa).
+# This recipe is what a plain terminal has, but it only runs when someone runs
+# it. .githooks/claude-pre-bash runs a superset of it on every Bash tool call
+# inside a Claude Code session, which is what closes the window between the
+# drifting write and the next `just test` (bd gqlc-nzwa). A superset because
+# this recipe compares the configured value and nothing else: with
+# core.hooksPath = .githooks but .githooks/ holding only *.sample files, or a
+# hook file left non-executable, this prints "ok" and exits 0 where
+# claude-pre-bash refuses (both states are fixtures in
+# .githooks/tests/claude-pre-bash-test.sh).
 #
 # Skipped under CI, which has no local hooks by design and runs the equivalent
 # gates as workflow jobs; without the skip this would fail every CI `just test`.

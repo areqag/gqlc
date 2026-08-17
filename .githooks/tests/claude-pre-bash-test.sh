@@ -188,9 +188,19 @@ BARE_REPO="$TMP/hooks-none"; mkrepo "$BARE_REPO" drift-branch
 
 run_drift_case "correct value, live hooks: commit"   silent     "$OK_REPO"     'git commit -m x'
 run_drift_case "correct value, live hooks: push"     silent     "$OK_REPO"     'git push'
+run_drift_case "correct value, live hooks: merge"    silent     "$OK_REPO"     'git merge --no-ff side'
+run_drift_case "correct value, live hooks: pull"     silent     "$OK_REPO"     'git pull'
 run_drift_case "correct value, live hooks: ls"       silent     "$OK_REPO"     'ls -la'
 run_drift_case "unset: commit refused"               deny-hooks "$UNSET_REPO"  'git commit -m x'
 run_drift_case "unset: push refused"                 deny-hooks "$UNSET_REPO"  'git push'
+# merge and pull fire commit-msg — the AI-attribution gate — so a merge written
+# while drifted is an ungated commit, not just a stale bd mirror. Refused for
+# the same reason commit and push are. revert/cherry-pick/rebase/am fired none
+# of this repo's four hooks in the same measurement, so they only warn.
+run_drift_case "unset: merge refused"                deny-hooks "$UNSET_REPO"  'git merge --no-ff side'
+run_drift_case "unset: pull refused"                 deny-hooks "$UNSET_REPO"  'git pull --rebase'
+run_drift_case "unset: revert only warns"            warn       "$UNSET_REPO"  'git revert --no-edit HEAD'
+run_drift_case "unset: cherry-pick only warns"       warn       "$UNSET_REPO"  'git cherry-pick HEAD'
 run_drift_case "unset: innocuous command warns"      warn       "$UNSET_REPO"  'ls -la'
 run_drift_case "wrong path: commit refused"          deny-hooks "$WRONG_REPO"  'git commit -m x'
 run_drift_case "wrong path: push refused"            deny-hooks "$WRONG_REPO"  'git push'
