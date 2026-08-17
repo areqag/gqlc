@@ -19,8 +19,7 @@ Those recipes only run when someone runs them, so `.githooks/claude-pre-bash`
 runs a stricter version of the check on every Bash tool call: while the
 command's effective directory is a drifted repo it warns whatever the command
 is, and refuses `git commit`, `git merge`, `git pull` and `git push`
-specifically, until the config is repaired. Outside any repo, and inside one
-that ships no `.githooks/` at all, it stays silent — both are pinned rows. Those four were picked by measuring
+specifically, until the config is repaired. Those four were picked by measuring
 which subcommands run one of the four hooks this repo ships (`pre-commit`,
 `commit-msg`, `pre-push`, `post-merge`); `revert`, `cherry-pick`, `rebase` and
 `am` ran none of them. Some `merge` and `pull` *shapes* run none either — a
@@ -31,7 +30,10 @@ text the hook sees, so the gate keys on the subcommand. Stricter because
 `core.hooksPath` set to `.githooks` but the directory holding only `*.sample`
 files, or a hook file left non-executable, `just doctor` prints `ok` and exits
 0 where the Bash hook refuses. In a plain terminal `just doctor` is what you
-have, and on those two states it reports nothing.
+have, and on those two states it reports nothing. The Bash hook is silent in
+two states of its own: a cwd outside any repo, and a repo that ships no
+`.githooks/` at all — nothing there distinguishes it from an unrelated repo.
+Both are pinned rows in `.githooks/tests/claude-pre-bash-test.sh`.
 
 ## Development
 
