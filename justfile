@@ -188,7 +188,10 @@ lint-hooks dir=".githooks": ensure-shellcheck
 # The direction that remains is the live one: a tag in the config but not in the
 # tree is a line describing nothing, which pre-accepts whichever constrained
 # directory is added under that spelling next without anyone deciding it should
-# be linted.
+# be linted. It is also the backstop the tag derivation leans on for a GOOS
+# landing in run.build-tags, so it carries a witness of its own below — this
+# tree has nothing stale in it, and a clause whose only observable behaviour is
+# saying nothing is one that survives being flipped or deleted.
 #
 # The hand-written awk that used to read the key is gone, and with it the
 # emptiness clause it needed. One reader — `scope declared` — and a reader that
@@ -215,14 +218,59 @@ check-golangci-build-tags:
     configured="$(scope declared)" || exit 1
     configured="$(lines "${configured}" | sed '/^$/d' | sort -u)"
 
-    stale="$(comm -13 <(lines "${derived}") <(lines "${configured}") || true)"
-    if [ -n "${stale}" ]; then
+    # The clause is a function so the witness below can RUN it. What covered it
+    # before was a Go test recomputing `comm -13` over the same two sets, and a
+    # recomputation cannot see the recipe: with the direction flipped to
+    # `comm -23`, and separately with the refusal deleted, that test, `just lint`
+    # and this recipe all stayed green. Measured, on this branch, which is where
+    # this recipe was added — there is no older version of it to inherit the gap
+    # from.
+    refuse_stale() {
+        local derived="${1}" configured="${2}" stale
+        stale="$(comm -13 <(lines "${derived}") <(lines "${configured}") || true)"
+        [ -n "${stale}" ] || return 0
         echo "error: these build tags are in .golangci.yml's run.build-tags but constrain no file" >&2
         echo "       in this tree, so the entries describe nothing and pre-accept whatever is" >&2
         echo "       added under that spelling next (bd gqlc-oxne):" >&2
         lines "${stale}" | sed 's/^/         /' >&2
+        return 1
+    }
+
+    # WITNESS: the same shape as test-codegen-fence's and check-codegen-external-tests'
+    # probe modules, and for the same reason. This clause is the single-fault
+    # backstop the tag derivation's comments in internal/tools/modscope/main.go
+    # lean on, and on a tree with nothing stale it prints nothing on every run —
+    # a guard whose passing case is silence is one that nothing distinguishes
+    # from a deleted one. So a term no file in this tree constrains is put into
+    # the configured set on every invocation, CI included, and the clause must
+    # both refuse it and name it.
+    probe="zzstaleprobe"
+    case " ${derived} ${configured} " in
+        *" ${probe} "*)
+            echo "error: ${probe} is a term this tree really uses, so the witness below is" >&2
+            echo "       measuring the ordinary case. Rename the probe." >&2
+            exit 1
+            ;;
+    esac
+    probed="$(printf '%s\n%s\n' "${configured}" "${probe}" | sed '/^$/d' | sort -u)"
+    if witness="$(refuse_stale "${derived}" "${probed}" 2>&1)"; then
+        echo "error: ${probe} was put in the configured set, no file in this tree constrains it," >&2
+        echo "       and the stale clause accepted it — so that clause is not comparing the two" >&2
+        echo "       sets in the direction it claims to. derived is a subset of configured on" >&2
+        echo "       every tree, so the other direction is empty by construction and exits 0" >&2
+        echo "       over anything at all (bd gqlc-oxne)." >&2
         exit 1
     fi
+    case "${witness}" in
+        *"${probe}"*) ;;
+        *)  echo "error: the stale clause refused, but did not name ${probe} in what it printed," >&2
+            echo "       so a real stale entry is refused without anyone being told which one:" >&2
+            printf '%s\n' "${witness}" | sed 's/^/         /' >&2
+            exit 1
+            ;;
+    esac
+
+    refuse_stale "${derived}" "${configured}" || exit 1
 
 # full static analysis: golangci-lint over the Go tree (.golangci.yml) and
 # shellcheck over the hooks tree, as linters + formatter diffs as issues
