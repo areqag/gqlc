@@ -73,7 +73,11 @@ own body**; and that each of the two recipes `ageLiveRecipes` names runs it —
 **one** `go test` invocation that is itself built with `-tags codegen_live`,
 selected WHOLE by every `-run` it carries and matched by no `-skip` it carries.
 Every `go test` in such a recipe must also carry `-count=1`. That list is two
-hand-written names, not every live recipe in the file and not what CI invokes:
+hand-written names — pinned at two, because the complaints about a recipe are
+made once per name, so a name dropped is a recipe nobody checks (review mutation
+R1, green with one name left; only the empty list already failed, on
+`recipeBodies`' own vacuity complaint) — not every live recipe in the file and
+not what CI invokes:
 the third live recipe (`test-codegen-live-neo4j`) must *not* run these witnesses,
 so a derived "every live recipe" rule would be false, and nothing here reads
 `.github/workflows` to check that CI calls either name.
@@ -161,21 +165,49 @@ already complete, so it is written as what has been found and not as what exists
   `SKIP='…|W' && go test … -skip "$SKIP"` hands it the literal `$SKIP`, which
   compiles as a regexp matching no test name; for `-skip` that reads as a witness
   which is not skipped (review mutation V4b). Closing it means being a shell.
-- **The package argument** — see below (review mutation T2). Its two-invocation
-  spelling is the same silence with a line in front: a `go test` carrying the tag
-  and the right `-run` over `./valid/...`, which holds no live test, alongside an
-  untagged one over `./...` (POOLRUN2). Binding the flags to their own invocation
-  does not reach it, because the invocation that satisfies every flag check is
-  the one whose *path* runs nothing.
+- **The package argument** — see below (review mutation T2). It has two
+  two-invocation spellings, both the same silence with a line in front, and both
+  a `go test` carrying the tag and the right `-run` over `./valid/...`, which
+  holds no live test: alongside an *untagged* one over `./...` (POOLRUN2), and
+  alongside a tagged one over `./...` whose `-run` drops the witness (P2).
+  Binding the flags to their own invocation does not reach either, because the
+  invocation that satisfies every flag check is the one whose *path* runs
+  nothing.
+
+  P2 is a capability this round **lost**, and the loss is deliberate. Until the
+  per-invocation rewrite, `recipeRuns` pooled the `-run` values of the whole
+  body and required every one of them to select the witness, so a second
+  `go test` whose `-run` dropped it refused the recipe. That refused P2 — for
+  the wrong reason, since the same pooling refused a legitimate two-battery
+  split, which is now the row "a second go test that runs it runs it". Measured
+  both sides: at `00e2c456` P2 fails `TestEveryDialectGapCarriesItsWitness`;
+  after the rewrite it passes. Recovering it means reading where `./valid/...`
+  points, which is T2 itself and is left open, so it is written down here
+  instead.
+- **Whether a command line is reached.** `goTestInvocations` returns the `go
+  test` commands a body *contains* in command position, which is a superset of
+  what it runs, and the two callers take that in opposite directions. The
+  `-count=1` rule is over EVERY invocation, so an unreached command only adds a
+  requirement: complaint. `recipeRuns` is satisfied by SOME invocation, so an
+  unreached command can answer for the body: silence. Measured — `go test -run
+  'TestLiveSmoke' … || go test -run '<the full set>' …` in the live recipe keeps
+  the sweep green while the witness invocation runs only on the first one's
+  failure (P3). Adjacent and also unread: `… || true` appended to the real
+  recipe (P4) leaves the witness running and the recipe gating on nothing, which
+  costs gating rather than running and so is outside what "runs it" claims at
+  all. `|| true` is one of this justfile's own idioms.
 - **Shell this reader does not model**: backslash escapes, command substitution,
   heredocs and here-strings. Each can put a comment cut, or a command boundary,
   where `sh` would not, and what a wrong cut costs is a `-run` — of which the
-  absence selects everything. This justfile uses all of them (44 `$(`, heredocs
-  at lines 632, 766 and 814, here-strings on seven further lines), so the bound
-  is not the file; it is that `recipeBodies` reads only the two recipes
-  `ageLiveRecipes` names, and those two use none of them.
+  absence selects everything. This justfile uses all four, in recipes this reader
+  never reads, so the bound is not the file; it is that `recipeBodies` reads only
+  the two recipes `ageLiveRecipes` names, and those two use none of them.
   `TestTheRecipesThisReaderParsesStayInsideTheShellItModels` holds that, because
   it is true of two single-line recipes today rather than a law about justfiles.
+  (Counts and line numbers for those constructs stood in this paragraph and in
+  two comments until round 5. They were accurate and nothing checked them, so
+  one edit above the first line number would have made three places wrong at
+  once; the shapes are what the argument needs.)
 
 **A check that finds nothing must not answer yes.** Every flag loop above is over
 a slice that may be empty, and an empty slice of `-run` values genuinely does mean
@@ -207,6 +239,19 @@ uncached" would leave the one that runs the witness free to report on a cache.
 A body running no `go test` at all is vacuously silent there, deliberately:
 "this recipe runs no test" is `recipeRuns`' answer and the sweep asks it of every
 gap.
+
+Round 5 found it one level further out again, in the *tables* rather than in the
+loops. Two lists carry claims nothing else re-states — `ageLiveRecipes`, and the
+shell constructs `TestTheRecipesThisReaderParsesStayInsideTheShellItModels`
+refuses in a recipe body — and both were guarded against being empty and not
+against being shorter. All four construct rows deleted left this package green
+at exit 0 with that test printing `--- PASS` over an assertion it no longer made
+(review mutation A9), and deleting one row was the same silence one shape at a
+time (A9b); one name dropped from `ageLiveRecipes` left a live recipe checked by
+nobody (R1). Both counts are now pinned where the claim is made, and the
+construct texts must be distinct, because four rows naming three shapes is four
+rows and one hole. A count pin catches a row that leaves; it does not catch a row
+that is wrong, and nothing here claims otherwise.
 
 **What the sweep still does not check: where the package argument points.** It
 reads the command line and nothing else, so the `cd test/data/codegen` in front

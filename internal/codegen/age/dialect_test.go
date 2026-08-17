@@ -81,6 +81,17 @@ var ageLiveRecipes = []string{"test-codegen-live", "test-codegen-live-age"}
 // live test asserts, or a witness no CI recipe runs is a refusal resting
 // on a claim nothing re-measures, and each of those is a complaint.
 func TestEveryDialectGapCarriesItsWitness(t *testing.T) {
+	// Two names, and the COUNT is pinned rather than the emptiness.
+	// witnessGaps complains once per recipe that does not run a witness,
+	// so a name dropped from the list is a recipe nobody checks and the
+	// sweep goes on passing: review mutation R1 removed
+	// "test-codegen-live" and left this package green. The empty list
+	// already fails, in recipeBodies (R2); R1 is that same silence with
+	// one name left in it. The third live recipe,
+	// test-codegen-live-neo4j, is absent on purpose — see ageLiveRecipes.
+	require.Len(t, ageLiveRecipes, 2,
+		"both recipes that start an AGE container have to be read, or a witness can "+
+			"stop being run by the one that is not")
 	bodies := readLiveWitnessBodies(t)
 	recipes := readRecipes(t, ageLiveRecipes)
 	require.Empty(t, witnessGaps(dialectGaps, bodies, recipes),
@@ -753,10 +764,12 @@ func readLiveWitnessBodies(t *testing.T) map[string]string {
 // The remaining approximations, in the direction each fails:
 //
 //   - Within one invocation, every -run must select the witness, where
-//     go test honours only the last one. Complaint. (Across
-//     invocations the rule is the other way round and is not an
-//     approximation: a body whose second `go test` runs the witness
-//     does run it, and is reported as running it.)
+//     go test honours only the last one. Complaint. (Across invocations
+//     the rule is the other way round, and as a statement about
+//     SELECTION it is exact: a body whose second `go test` selects the
+//     witness is reported as running it. Whether that second command is
+//     reached is a different question and a silence — see
+//     goTestInvocations, review mutation P3.)
 //   - Any -skip alternative whose FIRST element matches the witness
 //     counts as skipping it, where go test would drop only a subtest.
 //     Complaint, and the same direction as the -run rule above.
@@ -765,6 +778,10 @@ func readLiveWitnessBodies(t *testing.T) map[string]string {
 //   - Only the command line is read. Where the package argument points
 //     is not checked (review mutation T2) — that is a question about the
 //     file system rather than about flags, and it is left open. Silence.
+//   - Whether the command line is reached is not read either. A `go test`
+//     after `||`, or before a failing `&&`, counts as running the witness
+//     (review mutation P3). Silence, and see goTestInvocations for why
+//     the same superset is a complaint for the -count=1 rule.
 func recipeRuns(cmds, witness string) bool {
 	invocations, unterminated := goTestInvocations(cmds)
 	// A line this reader could not finish parsing is not a line it can
@@ -814,10 +831,31 @@ func invocationRuns(fields []string, witness string) bool {
 	return true
 }
 
-// goTestInvocations is every `go test` command a recipe body runs, each
-// as the fields of that command ALONE — up to the operator that ends it,
-// and not one field further. unterminated says some line's quoting never
-// closed, which makes every field of that line a guess.
+// goTestInvocations is every `go test` command a recipe body CONTAINS in
+// command position, each as the fields of that command ALONE — up to the
+// operator that ends it, and not one field further. unterminated says
+// some line's quoting never closed, which makes every field of that line
+// a guess.
+//
+// Contains, not runs: this is a SUPERSET of what the body executes,
+// because a command after `||` runs only when the one before it failed,
+// and a command before `&&` can leave the rest of the line unreached.
+// The two callers take that in opposite directions, so it is not one
+// safe direction:
+//
+//   - recipeBodies requires -count=1 of EVERY invocation, so a command
+//     that is counted and not run adds a requirement. Complaint.
+//   - recipeRuns is satisfied by SOME invocation selecting the witness,
+//     so a command that is counted and not run can answer yes for a body
+//     that runs no witness. Silence, measured: review mutation P3 put
+//     `go test -run 'TestLiveSmoke' … || go test -run '<the full set>' …`
+//     in the live recipe and the sweep stayed green over a body whose
+//     witness invocation runs only on the smoke battery's failure.
+//
+// Running is also not gating. `… || true` appended to the real recipe
+// (review mutation P4; `|| true` is one of this justfile's own idioms)
+// leaves the witness running and the recipe failing on nothing, and this
+// reader says nothing about it, because its claim is about what runs.
 //
 // Reading flags from the command that runs them is the whole of this
 // function, and it is why callers get segments rather than a yes/no. The
@@ -1048,11 +1086,9 @@ func shellFields(s string) (fields []string, unterminated bool) {
 // redundancy, not a second guard, and both paths are complaints.
 //
 // What is NOT modelled is backslash escapes, command substitution,
-// heredocs and here-strings. This justfile uses all of them — 44 `$(`,
-// heredocs at lines 632, 766 and 814, here-strings on seven further
-// lines — so the bound is not "the artefact has none of them"; it is
-// that this reader only ever sees ageLiveRecipes' two bodies, and those
-// use none of them. That is a property of two single-line recipes today
+// heredocs and here-strings. This justfile uses all four, so the bound
+// is not "the artefact has none of them"; it is that this reader only
+// ever sees ageLiveRecipes' two bodies, and those use none of them. That is a property of two single-line recipes today
 // and not a law about the file, so it is held by
 // TestTheRecipesThisReaderParsesStayInsideTheShellItModels rather than
 // asserted here.
@@ -1264,11 +1300,14 @@ func TestRecipeReaderComplainsOnEachBrokenRecipe(t *testing.T) {
 // at. Neither models backslash escapes, command substitution, heredocs
 // or here-strings, and neither expands a variable.
 //
-// The justfile uses all of those — 44 `$(`, heredocs at lines 632, 766
-// and 814, here-strings on seven further lines — so "no recipe here uses
-// them" is false of the file and was shipped as a comment anyway
-// (round-4 review, FINDING 2). What is true is narrower and is checked
-// here instead: recipeBodies reads the two recipes ageLiveRecipes names
+// The justfile uses all of those, in recipes this reader never sees, so
+// "no recipe here uses them" is false of the file and was shipped as a
+// comment anyway (round-4 review, FINDING 2). Line numbers for them
+// stood here until round 5 and were accurate on the day; they are gone
+// because nothing checked them, and one edit above the first of them
+// would make this comment, stripRecipeComment's and ADR 0028 wrong at
+// once. What is true is narrower and is checked here instead:
+// recipeBodies reads the two recipes ageLiveRecipes names
 // and nothing else, and those two use none of them. That is a fact about
 // two single-line recipes on a day, not a law, which is why it is a
 // test.
@@ -1279,19 +1318,45 @@ func TestRecipeReaderComplainsOnEachBrokenRecipe(t *testing.T) {
 // reads as running a witness it does not run (review mutations V3, V4b).
 // Silence, and this file exists to refuse it.
 func TestTheRecipesThisReaderParsesStayInsideTheShellItModels(t *testing.T) {
-	// No vacuity guard of its own: readRecipes complains when a name is
-	// missing from the justfile and when no name was given at all, so
-	// this loop cannot silently run over nothing. A require.Len here
-	// could not be made to fail, which is the shape this file refuses.
+	// The shapes stripRecipeComment and shellFields do not model. This
+	// list is the whole of what this test asserts, so it is guarded
+	// before it is used: review mutation A9 deleted all four rows and the
+	// package stayed green at exit 0, this test among it, printing
+	// `--- PASS` over an assertion it no longer made. A9b deleted one row
+	// and was the same silence one shape at a time, which is why the
+	// guard is a count and not require.NotEmpty.
+	//
+	// Distinct texts, because four rows naming three shapes is four rows
+	// and one hole. A row leaves here when the reader starts modelling
+	// its shape, and then this count moves with it — that is the edit
+	// the guard is meant to make loud.
+	constructs := []struct{ text, what string }{
+		{"$", "variable expansion or command substitution"},
+		{"`", "command substitution"},
+		{"<<", "a heredoc"},
+		{`\`, "a backslash escape"},
+	}
+	shapes := make(map[string]bool, len(constructs))
+	for _, construct := range constructs {
+		shapes[construct.text] = true
+	}
+	require.Len(t, shapes, 4,
+		"the shell this reader does not model is checked one shape per row, and a row "+
+			"that goes quiet takes the bound with it")
+
+	// The loop below needs no vacuity guard of its own: readRecipes
+	// complains when a name is missing from the justfile and when no name
+	// was given at all, so it cannot silently run over nothing (review
+	// mutation R2 — the empty name list fails this test and the sweep, by
+	// name). That argument is about THIS loop and no other. It stood here
+	// as the reason the test needed no guard at all until round 5, while
+	// the list that carries the claim sat inside the loop unpinned; the
+	// require.Len above is the guard the argument was being used to
+	// excuse.
 	recipes := readRecipes(t, ageLiveRecipes)
 	for name, cmds := range recipes {
 		require.NotEmpty(t, cmds, "recipe %s has no body to read", name)
-		for _, construct := range []struct{ text, what string }{
-			{"$", "variable expansion or command substitution"},
-			{"`", "command substitution"},
-			{"<<", "a heredoc"},
-			{`\`, "a backslash escape"},
-		} {
+		for _, construct := range constructs {
 			require.NotContains(t, cmds, construct.text,
 				"recipe %s uses %s, which this reader does not model: "+
 					"the flags it reads are no longer the flags the shell runs",
