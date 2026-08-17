@@ -410,9 +410,11 @@ names a generated package declares because the emitter fixes them,
 whatever the batch contains. A query or a schema element deriving one of
 them fails with `ErrIdentifierCollision`.
 `TestReservedSetSectionMatchesTheReservedRows` holds this table against
-`reservedIdentifiers` in both directions and holds every cell against
-the measured columns beside it, so this is the set rather than a summary
-of it.
+`reservedIdentifiers` in both directions, and holds the *Scope* and
+*Declared by* cells against the columns the corpus measures, so this is
+the set rather than a summary of it. *Breaks on* is derived from those
+two rather than measured: it is *Declared by* for a package-scope row
+and `no target` for a method-scope one.
 
 The last two columns answer different questions. *Declared by* is which
 targets emit the declaration, read off the committed goldens by
@@ -420,12 +422,13 @@ targets emit the declaration, read off the committed goldens by
 schema element taking that name would emit a package that does not
 compile. They part at method scope: a method on `*Queries` occupies no
 package block, so an entity struct of the same name compiles on every
-target, and those three rows are defensive on all of them.
+target, and those three rows are defensive against entity names on all
+of them. Against query names they are not — see below the table.
 
-*Declared by*'s axis is the target, not the batch. `ErrNoRows` and
-`ErrMultipleResults` are emitted only for a batch carrying at least one
-`:one` query, and read *every target* because every target emits them
-for such a batch.
+Both columns take the target as their axis, not the batch. `ErrNoRows`
+and `ErrMultipleResults` are emitted, and so break, only for a batch
+carrying at least one `:one` query; they read *every target* because
+every target emits them for such a batch.
 
 | Identifier | Scope | Declared by | Breaks on |
 |---|---|---|---|
@@ -442,10 +445,25 @@ for such a batch.
 | `EnsureGraph` | `scopeMethod` | `apache-age-pgx-v5` | no target |
 | `DropGraph` | `scopeMethod` | `apache-age-pgx-v5` | no target |
 
-The set is refused uniformly, so a row is over-broad on every target
-outside its *Breaks on* column. On a neo4j-only batch that is five of
-the twelve: `DBTX` and `SessionInit`, which neo4j never declares, and
-the three method-scope rows, which collide with nothing on any target.
-`NODE TYPE DBTX` is refused there on a name that target leaves free —
-taken per D2 Resolved, one uniform set rather than a name that generates
-under one target and is refused under another.
+The set is refused uniformly, so a row is over-broad on a target where
+neither an entity nor a query taking that name would collide. *Breaks
+on* answers the entity half of that, and the three method-scope rows are
+defensive there. On the query half they are load-bearing: a query method
+is emitted on `*Queries` with its name taken verbatim from the query, so
+a query named `WithTx` emits a second `func (q *Queries) WithTx` beside
+the one every target's `db.go` already declares, and the package does
+not compile. The §2 sweep seeds source 0 with the `scopePackage` subset
+alone, so a method-scope name is not among the identifiers it compares;
+Phase A's membership check is what stands between such a query and the
+redeclaration, and `TestReservedIdentifiersAreUniformAcrossBackends`
+requires it for all twelve rows.
+
+On a neo4j-only batch the over-broad rows are four of the twelve:
+`DBTX` and `SessionInit`, which neo4j never declares, and `EnsureGraph`
+and `DropGraph`, which only `apache-age-pgx-v5` declares — on that
+target a query of either name collides; on neo4j neither name is taken
+on either half. `WithTx` is not among the four: every target declares
+it, so refusing a query of that name is the collision rather than a
+false refusal. `NODE TYPE DBTX` is refused on a name that target leaves
+free — taken per D2 Resolved, one uniform set rather than a name that
+generates under one target and is refused under another.

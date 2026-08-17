@@ -701,6 +701,43 @@ func scopeName(s identifierScope) string {
 	return "scopePackage"
 }
 
+// goldenFixture is the fixture a golden Go file was emitted from, read
+// off the path beside goldenTarget:
+// test/data/codegen/valid/<fixture>/golden/<target>/<file>.go.
+func goldenFixture(t *testing.T, path string) string {
+	t.Helper()
+	require.Equal(t, "golden", filepath.Base(filepath.Dir(filepath.Dir(path))),
+		"%s does not sit under a golden/<target>/ directory, so its fixture cannot be read off the path", path)
+	return filepath.Base(filepath.Dir(filepath.Dir(filepath.Dir(path))))
+}
+
+// eachDecl calls record for every named declaration of file with the
+// scope it occupies. A func with a receiver is scopeMethod; a type, a
+// var, a const and a plain func are all package-level.
+func eachDecl(file *ast.File, record func(name string, scope identifierScope)) {
+	for _, decl := range file.Decls {
+		switch d := decl.(type) {
+		case *ast.GenDecl:
+			for _, spec := range d.Specs {
+				switch s := spec.(type) {
+				case *ast.TypeSpec:
+					record(s.Name.Name, scopePackage)
+				case *ast.ValueSpec:
+					for _, n := range s.Names {
+						record(n.Name, scopePackage)
+					}
+				}
+			}
+		case *ast.FuncDecl:
+			scope := scopeMethod
+			if d.Recv == nil {
+				scope = scopePackage
+			}
+			record(d.Name.Name, scope)
+		}
+	}
+}
+
 // TestReservedScopeMatchesTheEmittedGoldens holds both table columns to
 // the corpus rather than to a claim about the templates. Three checks:
 //
@@ -750,27 +787,7 @@ func TestReservedScopeMatchesTheEmittedGoldens(t *testing.T) {
 		corpusTargets[goldenTarget(t, path)] = struct{}{}
 		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
 		require.NoError(t, err, "parsing %s", path)
-		for _, decl := range file.Decls {
-			switch d := decl.(type) {
-			case *ast.GenDecl:
-				for _, spec := range d.Specs {
-					switch s := spec.(type) {
-					case *ast.TypeSpec:
-						record(s.Name.Name, path, scopePackage)
-					case *ast.ValueSpec:
-						for _, n := range s.Names {
-							record(n.Name, path, scopePackage)
-						}
-					}
-				}
-			case *ast.FuncDecl:
-				scope := scopeMethod
-				if d.Recv == nil {
-					scope = scopePackage
-				}
-				record(d.Name.Name, path, scope)
-			}
-		}
+		eachDecl(file, func(name string, scope identifierScope) { record(name, path, scope) })
 	}
 
 	everyTarget := make([]string, 0, len(corpusTargets))
@@ -807,9 +824,13 @@ func TestReservedScopeMatchesTheEmittedGoldens(t *testing.T) {
 }
 
 // fixedDeclarationFiles names the emitted files whose exported
-// declarations are the emitter's own and the same for every batch: the
-// handle and its seam in db.go, the Apache AGE graph lifecycle in
-// graph.go, the three interfaces in querier.go.
+// declarations are the emitter's own rather than derived from the
+// batch's names: the handle and its seam in db.go, the Apache AGE graph
+// lifecycle in graph.go, the three interfaces in querier.go. Whether a
+// given one is emitted can still turn on the batch — db.go carries
+// ErrNoRows and ErrMultipleResults only for a batch with a `:one` query
+// — which is why the measurement below reads names declared by every
+// fixture and not names declared by some.
 var fixedDeclarationFiles = map[string]bool{"db.go": true, "graph.go": true, "querier.go": true}
 
 // inputDerivedFiles names the emitted files whose exported declarations
@@ -823,15 +844,19 @@ var inputDerivedFiles = map[string]bool{"models.go": true}
 // partition is a suffix rather than a set of names (§5.5).
 const queryFileSuffix = ".cypher.go"
 
-// TestEveryEmittedFixedDeclarationIsReserved is the direction
-// TestReservedScopeMatchesTheEmittedGoldens does not run. That one takes
-// each reserved row and finds its declaration; this one takes each
-// exported declaration in fixedDeclarationFiles and requires a row for
-// it. Without it the set can be complete today and quietly stop being
-// complete: an emitter that grows a new exported package-level
-// declaration leaves every other guard here green, and `NODE TYPE
-// <thatName>` then emits a package that does not compile — the defect
-// gqlc-e6mh closed, reopened by addition rather than by edit.
+// TestFixedDeclarationSweepEqualsTheReservedSet reads the exported
+// declarations of the goldens fixedDeclarationFiles names and holds that
+// set equal to reservedIdentifiers, in both directions.
+//
+// Forwards is against reopening by addition the defect gqlc-e6mh closed
+// by edit: an emitter that grows a new exported declaration with no
+// matching row leaves every other guard here green, and `NODE TYPE
+// <thatName>` then emits a package that does not compile. Backwards is
+// against the sweep going dark: a reserved name no swept file declares
+// means the file declaring it left fixedDeclarationFiles.
+// TestReservedScopeMatchesTheEmittedGoldens does not report that — it
+// globs the whole corpus with no file filter, so it still finds the name
+// in the file this sweep stopped reading.
 //
 // Membership is all this asserts. The scope column is held by the sweep
 // above, which covers any name once it is a row, so repeating the scope
@@ -840,78 +865,107 @@ const queryFileSuffix = ".cypher.go"
 // corpus carries none — would be forced into reservedIdentifiers, where
 // Phase A refuses a query on membership alone.
 //
-// The two file sets are held to the corpus before anything is read,
-// because both directions of that are silent otherwise. An unclassified
-// golden fails, so a file the emitter adds joins the sweep unless
-// someone writes down that its declarations come from the input; and an
-// entry no golden matches fails, so a rename the emitter made and this
-// set did not stops the sweep loudly rather than by reading two thirds
-// of it.
-func TestEveryEmittedFixedDeclarationIsReserved(t *testing.T) {
+// Which side of the partition a file sits on is measured, not only
+// declared. A basename more than one fixture emits, and an exported name
+// every one of those fixtures declares, is a name that does not follow
+// from the batch, so its file belongs in fixedDeclarationFiles. That is
+// what holds the queryFileSuffix arm, which names no file and so admits
+// any emitted file whose name ends in it. A basename a single fixture
+// emits carries no such evidence and is skipped — today the two
+// per-source query files of multi_source_files — so a new emitted file
+// that one fixture alone carries still escapes on that arm (gqlc-laoy).
+//
+// It reads the committed goldens, not the emitter. A target with no
+// enrolled fixture declares nothing here, and a rename in a template
+// reaches this sweep only once the goldens are regenerated.
+func TestFixedDeclarationSweepEqualsTheReservedSet(t *testing.T) {
 	paths, err := filepath.Glob(goldenCorpusGlob)
 	require.NoError(t, err)
 	require.NotEmpty(t, paths, "no golden Go under %s, so this sweep holds nothing", goldenCorpusGlob)
 
-	emitted := map[string]int{}
+	// basename -> fixtures emitting it, and basename -> exported name ->
+	// fixtures declaring it, so the partition can be read off the corpus.
+	emittedBy := map[string]map[string]bool{}
+	declaredBy := map[string]map[string]map[string]bool{}
+	// name -> one swept path declaring it, for the fail message.
+	found := map[string]string{}
+	fset := token.NewFileSet()
 	for _, path := range paths {
-		emitted[filepath.Base(path)]++
+		base, fixture := filepath.Base(path), goldenFixture(t, path)
+		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		require.NoError(t, err, "parsing %s", path)
+		if emittedBy[base] == nil {
+			emittedBy[base] = map[string]bool{}
+			declaredBy[base] = map[string]map[string]bool{}
+		}
+		emittedBy[base][fixture] = true
+		eachDecl(file, func(name string, _ identifierScope) {
+			if !ast.IsExported(name) {
+				return
+			}
+			if declaredBy[base][name] == nil {
+				declaredBy[base][name] = map[string]bool{}
+			}
+			declaredBy[base][name][fixture] = true
+			if _, seen := found[name]; !seen && fixedDeclarationFiles[base] {
+				found[name] = path
+			}
+		})
 	}
-	for _, base := range slices.Sorted(maps.Keys(emitted)) {
+
+	suffixed := 0
+	for _, base := range slices.Sorted(maps.Keys(emittedBy)) {
+		if strings.HasSuffix(base, queryFileSuffix) {
+			suffixed++
+		}
 		require.True(t,
 			fixedDeclarationFiles[base] || inputDerivedFiles[base] || strings.HasSuffix(base, queryFileSuffix),
 			"the corpus emits %s, which neither fixedDeclarationFiles nor inputDerivedFiles classifies; an unclassified file is one this sweep never reads, so every exported name it declares owes no reserved row",
 			base)
 	}
+	require.NotZero(t, suffixed,
+		"no golden under %s ends %s, so the suffix arm of the partition excludes nothing; the emitter renamed the per-source query file and this suffix kept the old name",
+		goldenCorpusGlob, queryFileSuffix)
 	for _, base := range slices.Sorted(maps.Keys(fixedDeclarationFiles)) {
-		require.NotZero(t, emitted[base],
+		require.NotEmpty(t, emittedBy[base],
 			"no golden under %s is named %s, so every exported declaration that file emits went unread; the emitter renamed it and this set kept the old name, or the corpus lost every fixture emitting it",
 			goldenCorpusGlob, base)
 	}
 	for _, base := range slices.Sorted(maps.Keys(inputDerivedFiles)) {
-		require.NotZero(t, emitted[base],
+		require.NotEmpty(t, emittedBy[base],
 			"no golden under %s is named %s, so classifying it input-derived excludes nothing; the name is stale, and a file that is emitted under some other name is now unclassified",
 			goldenCorpusGlob, base)
 	}
 
-	// name -> one path declaring it, for the fail message.
-	found := map[string]string{}
-	fset := token.NewFileSet()
-	for _, path := range paths {
-		if !fixedDeclarationFiles[filepath.Base(path)] {
+	for _, base := range slices.Sorted(maps.Keys(emittedBy)) {
+		if len(emittedBy[base]) < 2 {
 			continue
 		}
-		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
-		require.NoError(t, err, "parsing %s", path)
-		record := func(name string) {
-			if !ast.IsExported(name) {
-				return
-			}
-			if _, seen := found[name]; !seen {
-				found[name] = path
+		var everywhere []string
+		for name, fixtures := range declaredBy[base] {
+			if len(fixtures) == len(emittedBy[base]) {
+				everywhere = append(everywhere, name)
 			}
 		}
-		for _, decl := range file.Decls {
-			switch d := decl.(type) {
-			case *ast.GenDecl:
-				for _, spec := range d.Specs {
-					switch s := spec.(type) {
-					case *ast.TypeSpec:
-						record(s.Name.Name)
-					case *ast.ValueSpec:
-						for _, n := range s.Names {
-							record(n.Name)
-						}
-					}
-				}
-			case *ast.FuncDecl:
-				record(d.Name.Name)
-			}
+		if len(everywhere) == 0 {
+			continue
 		}
+		slices.Sort(everywhere)
+		require.True(t, fixedDeclarationFiles[base],
+			"every one of the %d fixtures emitting %s declares %v, so those names do not follow from the batch, but %s is classified out of fixedDeclarationFiles and this sweep never reads it",
+			len(emittedBy[base]), base, everywhere, base)
 	}
+
 	for name, path := range found {
 		_, reserved := reservedIdentifiers[name]
 		require.True(t, reserved,
 			"%s declares exported %q, which reservedIdentifiers does not hold; a schema element deriving that name would redeclare it and the emitted package would not compile",
 			path, name)
+	}
+	for _, name := range slices.Sorted(maps.Keys(reservedIdentifiers)) {
+		_, swept := found[name]
+		require.True(t, swept,
+			"no golden this sweep read declares reserved %q, so the file declaring it is classified out of fixedDeclarationFiles and owes nothing here",
+			name)
 	}
 }
