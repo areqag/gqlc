@@ -141,7 +141,7 @@ dead, and that no dead site hides in it.
 | `ErrParamNameCollision` | Two parameters of one query mangling to one `Params` field. | Phase B |
 | `ErrRowFieldCollision` | Two columns of one query deriving one `Row` field. | Phase B |
 | `ErrUnrepresentableTemporal` | A projected column whose temporal kind the target's type table has no carrier for. Phase B, not Phase A: Phase A does not ask the type table about temporal kinds, so the refusal lands at the row-field derivation site. | Phase B |
-| `ErrIdentifierCollision` | Two exported top-level identifiers colliding across the seven swept sources — the emitter's own package-scope declarations, entity structs, decode helpers, method names, `<Method>Params`, `<Method>Row`, edge-union interfaces. The first source is seeded from the `scopePackage` half of the reserved set: a `NODE TYPE Queries` or an edge-union interface deriving `ReadQuerier` redeclares a name `db.go` or `querier.go` already holds, which the Phase A gate does not see because that one reads a query's name (`gqlc-e6mh`). The `scopeMethod` half — `WithTx`, `EnsureGraph`, `DropGraph` — stays out: those are methods on `*Queries` and share no scope with a package-level type. | identifier sweep |
+| `ErrIdentifierCollision` | Two exported top-level identifiers colliding across the seven swept sources — the emitter's own package-scope declarations, entity structs, decode helpers, method names, `<Method>Params`, `<Method>Row`, edge-union interfaces. The first source is seeded from the `scopePackage` half of the reserved set: a `NODE TYPE Queries` or an edge-union interface deriving `ReadQuerier` redeclares a name `db.go` or `querier.go` already holds, which the Phase A gate does not see because that one reads a query's name (`gqlc-e6mh`). The `scopeMethod` half — `WithTx`, `EnsureGraph`, `DropGraph` — stays out: those are methods on `*Queries` and share no scope with a package-level type. The seeded half is uniform across targets while two of the declarations behind it are not — `DBTX` and `SessionInit` come from the Apache AGE emission alone, so seeding them refuses a name a neo4j-only batch leaves free. A false refusal, taken per D2 Resolved rather than admitting an input under one target and refusing it under another. §6 enumerates all twelve rows with the target each is declared by and the target each would actually break. | identifier sweep |
 
 ## 3. Branches no input reaches
 
@@ -402,3 +402,71 @@ To classify a branch:
    the coverage measurement, so a branch tagged without the row, a row
    naming no tag, and a tag over a branch the corpus reaches are three
    separate failures with three separate messages.
+
+## 6. The reserved identifier set
+
+§2's identifier-sweep row seeds source 0 from a fixed set: the exported
+names a generated package declares because the emitter fixes them,
+whatever the batch contains. A query or a schema element deriving one of
+them fails with `ErrIdentifierCollision`.
+`TestReservedSetSectionMatchesTheReservedRows` holds this table against
+`reservedIdentifiers` in both directions, and holds the *Scope* and
+*Declared by* cells against the columns the corpus measures, so this is
+the set rather than a summary of it. *Breaks on* is derived from those
+two rather than measured: it is *Declared by* for a package-scope row
+and `no target` for a method-scope one.
+
+The last two columns answer different questions. *Declared by* is which
+targets emit the declaration, read off the committed goldens by
+`TestReservedScopeMatchesTheEmittedGoldens`. *Breaks on* is where a
+schema element taking that name would emit a package that does not
+compile. They part at method scope: a method on `*Queries` occupies no
+package block, so an entity struct of the same name compiles on every
+target, and those three rows are defensive against entity names on all
+of them. Against query names they are not — see below the table.
+
+Both columns take the target as their axis, not the batch. `ErrNoRows`
+and `ErrMultipleResults` are emitted, and so break, only for a batch
+carrying at least one `:one` query; they read *every target* because
+every target emits them for such a batch.
+
+| Identifier | Scope | Declared by | Breaks on |
+|---|---|---|---|
+| `Queries` | `scopePackage` | every target | every target |
+| `New` | `scopePackage` | every target | every target |
+| `Querier` | `scopePackage` | every target | every target |
+| `ReadQuerier` | `scopePackage` | every target | every target |
+| `WriteQuerier` | `scopePackage` | every target | every target |
+| `ErrNoRows` | `scopePackage` | every target | every target |
+| `ErrMultipleResults` | `scopePackage` | every target | every target |
+| `DBTX` | `scopePackage` | `apache-age-pgx-v5` | `apache-age-pgx-v5` |
+| `SessionInit` | `scopePackage` | `apache-age-pgx-v5` | `apache-age-pgx-v5` |
+| `WithTx` | `scopeMethod` | every target | no target |
+| `EnsureGraph` | `scopeMethod` | `apache-age-pgx-v5` | no target |
+| `DropGraph` | `scopeMethod` | `apache-age-pgx-v5` | no target |
+
+The set is refused uniformly, so a row is over-broad on a target where
+neither an entity nor a query taking that name would collide. *Breaks
+on* answers the entity half of that, and the three method-scope rows are
+defensive there. On the query half they are load-bearing: a query method
+is emitted on `*Queries` with its name taken verbatim from the query, so
+a query named `WithTx` emits a second `func (q *Queries) WithTx` beside
+the one every target's `db.go` already declares, and the package does
+not compile. The §2 sweep seeds source 0 with the `scopePackage` subset
+alone, so a method-scope name is not among the identifiers it compares;
+Phase A's membership check is what stands between such a query and the
+redeclaration, and `TestReservedIdentifiersAreUniformAcrossBackends`
+requires it for all twelve rows.
+
+On a neo4j target the over-broad rows are four of the twelve: `DBTX`
+and `SessionInit`, which neo4j never declares, and `EnsureGraph` and
+`DropGraph`, which only `apache-age-pgx-v5` declares — on that target a
+query of either name collides; on neo4j neither name is taken on either
+half. `WithTx` is not among the four: every target declares it, so
+refusing a query of that name is the collision rather than a false
+refusal. Four counts the target axis alone. The batch axis moves it: on
+a batch with no `:one` query nothing declares `ErrNoRows` or
+`ErrMultipleResults`, so a neo4j-only batch of that shape carries six.
+`NODE TYPE DBTX` is refused on a name that target leaves free — taken
+per D2 Resolved, one uniform set rather than a name that generates
+under one target and is refused under another.
