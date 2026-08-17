@@ -12,7 +12,9 @@
 package ciguard_test
 
 import (
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -37,20 +39,52 @@ const (
 	versionVar = "golangci_version"
 )
 
-// A step as the assertions below need to see it: `uses` for the action
-// reference, `run` for the shell, `with` for the cache inputs, `if` for whether
-// the step runs at all.
+// A step as the assertions below need to see it.
 //
-// If is a yaml.Node rather than a string because `if: false` is a YAML bool and
-// would fail a string decode — turning a switched-off restore into a decode
-// error attributed to the whole job rather than to the step that carries it.
+// The field list is the step schema, not the subset this file happened to need
+// first. An unmodelled key is an unasserted key: `if` was added after a
+// switched-off restore turned out to be unassertable, and the next round found
+// `continue-on-error` doing the same damage through the field beside it. The
+// schema for a composite action's `runs.steps[*]` permits exactly ten keys —
+// run, shell, uses, with, name, id, if, env, continue-on-error,
+// working-directory (json.schemastore.org/github-action.json) — and a job's
+// step adds timeout-minutes. All ten are here; timeout-minutes is not, because
+// a timeout makes a step fail and nothing here is guarding against a step that
+// fails.
+//
+// If, ContinueOnError and Env are yaml.Node rather than typed values because
+// each has more than one legal type — `if: false` is a YAML bool,
+// `continue-on-error: ${{ ... }}` is a string, an env value can be a number —
+// and a decode error would attribute a switched-off restore to the whole
+// document rather than to the step carrying it. present() below reads them.
 type actionStep struct {
-	Name string            `yaml:"name"`
-	ID   string            `yaml:"id"`
-	Uses string            `yaml:"uses"`
-	Run  string            `yaml:"run"`
-	If   yaml.Node         `yaml:"if"`
-	With map[string]string `yaml:"with"`
+	Name             string            `yaml:"name"`
+	ID               string            `yaml:"id"`
+	Uses             string            `yaml:"uses"`
+	Run              string            `yaml:"run"`
+	Shell            string            `yaml:"shell"`
+	WorkingDirectory string            `yaml:"working-directory"`
+	If               yaml.Node         `yaml:"if"`
+	ContinueOnError  yaml.Node         `yaml:"continue-on-error"`
+	Env              yaml.Node         `yaml:"env"`
+	With             map[string]string `yaml:"with"`
+}
+
+// present reports whether a YAML key was written at all. An absent key decodes
+// to the zero Node, which has no Kind; any value at all — including `false`,
+// including an empty mapping — has one.
+//
+// Emptiness of Value is the wrong test: `continue-on-error: true` and
+// `if: false` both carry a Value, but so does nothing, and a mapping's Value is
+// empty however much it contains.
+func present(n yaml.Node) bool { return n.Kind != 0 }
+
+// spell renders a node for a failure message.
+func spell(n yaml.Node) string {
+	if n.Value != "" {
+		return n.Value
+	}
+	return n.Tag
 }
 
 // shellCode is run with shell comments and blank lines removed.
@@ -180,20 +214,148 @@ func TestGolangciBinaryCacheKeyIsDerivedFromTheJustfilePin(t *testing.T) {
 		"the justfile no longer declares %s, which %s evaluates", versionVar, golangciAction)
 }
 
+// runPinStep executes the pin step's own `run` block with a stub `just` first
+// on PATH, and returns its exit status and whatever it wrote to $GITHUB_OUTPUT.
+//
+// The three assertions above are about shape: that an evaluation exists under
+// an id, and that the key interpolates that id. None of them joins the value
+// the step evaluates to the value it emits. Keeping the evaluation exactly as
+// written and emitting a literal beside it — `version=v2.11.0` — satisfies all
+// three, and is verbatim the defect the action's own comment credits the
+// derivation with preventing. Running the block is what closes that: the stub
+// prints a version no literal would be spelled with, and the output has to
+// carry it.
+//
+// Run under plain `bash <script>` with no flags, deliberately. The runner gives
+// `shell: bash` the flags `--noprofile --norc -eo pipefail`, and running with
+// those would make this test pass over a step that had dropped its own
+// `set -euo pipefail` — which is a thing the action file argues from and this
+// repository does not control. With no flags, the only errexit in play is the
+// one the step sets itself.
+//
+// justStub is the body of the fake `just`. onlyPath, when set, replaces PATH
+// entirely, which is how the "just is not installed" case is put.
+func runPinStep(t *testing.T, justStub, onlyPath string) (status int, output string) {
+	t.Helper()
+	step := pinStep(t)
+	require.NotEmptyf(t, step.Run, "no step in %s evaluates `just --evaluate %s`, so "+
+		"there is no shell here to run", golangciAction, versionVar)
+
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	require.NoError(t, os.MkdirAll(bin, 0o755))
+	if justStub != "" {
+		require.NoError(t, os.WriteFile(filepath.Join(bin, "just"), []byte(justStub), 0o755))
+	}
+
+	script := filepath.Join(dir, "step.sh")
+	require.NoError(t, os.WriteFile(script, []byte(step.Run), 0o600))
+	out := filepath.Join(dir, "github_output")
+	require.NoError(t, os.WriteFile(out, nil, 0o600))
+
+	path := bin + string(os.PathListSeparator) + os.Getenv("PATH")
+	if onlyPath != "" {
+		path = onlyPath
+	}
+	cmd := exec.CommandContext(t.Context(), "bash", script)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "PATH="+path, "GITHUB_OUTPUT="+out)
+	combined, runErr := cmd.CombinedOutput()
+
+	written, readErr := os.ReadFile(out)
+	require.NoError(t, readErr, "read the step's $GITHUB_OUTPUT")
+
+	var ee *exec.ExitError
+	switch {
+	case runErr == nil:
+		status = 0
+	case errors.As(runErr, &ee):
+		status = ee.ExitCode()
+	default:
+		t.Fatalf("could not run the pin step's shell: %v\n%s", runErr, combined)
+	}
+	t.Logf("pin step exited %d\n%s", status, combined)
+	return status, string(written)
+}
+
+// A version the justfile would never carry, so nothing but a live read of the
+// stub can produce it.
+const stubbedVersion = "v0.0.0-stubbed-by-ciguard"
+
+const justPrintsStubbedVersion = `#!/usr/bin/env bash
+printf '%s\n'
+`
+
+// The step has to emit the version it evaluated, not a version.
+//
+// This is also the control for the refusals below: a harness whose stub `just`
+// was never reached, or whose $GITHUB_OUTPUT the step never wrote to, would
+// satisfy "non-zero status and an empty output" while measuring nothing at all.
+// Here the same harness has to produce a specific string.
+func TestGolangciVersionStepEmitsTheVersionItEvaluated(t *testing.T) {
+	status, output := runPinStep(t,
+		strings.Replace(justPrintsStubbedVersion, "%s", stubbedVersion, 1), "")
+	require.Zerof(t, status, "the pin step in %s exited %d with `just --evaluate` "+
+		"succeeding", golangciAction, status)
+	require.Equalf(t, "version="+stubbedVersion+"\n", output,
+		"the pin step evaluated the justfile's %s and then wrote %q. The key it feeds "+
+			"is not derived from the pin: a literal here is a second place to bump, and "+
+			"a stale one keys the cache to a build ensure-golangci rejects — a green "+
+			"cache step above a full download on every linting job (bd gqlc-l45j).",
+		versionVar, output)
+}
+
 // A failed version read has to fail the step, not empty the key.
 //
 // `set -e` acts on the exit status of the simple command. In `echo
 // "version=$(just --evaluate ...)"` that status is echo's, so the step exits 0
 // with an empty output and the cache key collapses to `golangci-bin-<os>-`:
 // green step, no restore, full download on every job — the exposure this action
-// closes, silently reopened. Only an assignment-only command inherits the
-// command substitution's status, which is why the read is on its own line.
+// closes, silently reopened.
 //
-// Witnessed out of tree against this branch's justfile:
-//
-//	echo "v=$(just --evaluate absent)" >> f   # rc 0, f == "v="
-//	v="$(just --evaluate absent)"             # rc 1, f untouched
+// Asserted by running the step, because every spelling that reopens it is a
+// different string and the same defect: the read moved back into an argument,
+// the errexit dropped, a `set +e` above it, a `|| true` after it.
 func TestGolangciVersionReadFailsTheStepInsteadOfEmptyingTheKey(t *testing.T) {
+	cases := map[string]struct{ stub, path string }{
+		// The renamed-variable case: just runs and refuses.
+		"the read fails": {stub: "#!/usr/bin/env bash\n" +
+			"echo 'error: Justfile does not contain variable' >&2\nexit 1\n"},
+		// The job that forgot setup-just: `just` is not there at all.
+		"just is not installed": {path: "/nonexistent"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			status, output := runPinStep(t, c.stub, c.path)
+			require.NotZerof(t, status,
+				"the pin step in %s exited 0 after the version read failed (%s). The next "+
+					"line writes whatever the read left behind, and an empty version keys "+
+					"the cache to `golangci-bin-<os>-`: a green step, no restore, and the "+
+					"download this action removes back on every linting job (bd gqlc-l45j).",
+				golangciAction, name)
+			require.Emptyf(t, output,
+				"the pin step wrote %q to $GITHUB_OUTPUT after the version read failed (%s). "+
+					"An emptied version is a cache key that matches nothing and warns about "+
+					"nothing.", output, name)
+		})
+	}
+}
+
+// The spelling that makes the two behavioural refusals above hold, pinned so a
+// failure names the cause rather than only the symptom.
+//
+// A simple command with no command word takes its exit status from the last
+// command substitution performed in it, so a bare assignment propagates the
+// read's failure; in `echo "version=$(just --evaluate ...)"` the status is
+// echo's and the failure is discarded. Two other spellings propagate too — a
+// bare `$(cmd)` as a command, and `cmd | ...` under pipefail — but neither
+// leaves the value in a variable, so neither is a candidate here.
+//
+// Witnessed out of tree, both under `bash -eo pipefail -c`:
+//
+//	echo "v=$(just --evaluate absent)" >> f      # rc 0, f == "v="
+//	v="$(just --evaluate absent)"; echo "$v" >>f # rc 1, f untouched
+func TestGolangciVersionReadIsAnAssignmentUnderErrexit(t *testing.T) {
 	code := shellCode(pinStep(t).Run)
 
 	require.Regexpf(t, `(?m)^\s*[A-Za-z_][A-Za-z0-9_]*="?\$\(just --evaluate `+versionVar+`\)"?\s*$`,
@@ -214,30 +376,75 @@ func TestGolangciVersionReadFailsTheStepInsteadOfEmptyingTheKey(t *testing.T) {
 			"are not this file's to promise.", golangciAction)
 }
 
-// linterRecipes is every justfile recipe that reaches ensure-golangci through
-// its dependency list, transitively.
+// Nothing in the action may switch a step off or swallow its failure.
 //
-// Derived rather than listed because the property is about recipes nobody has
-// written yet: a job added next month that runs `just fmt-check` needs the
-// action as much as `lint` does, and a hardcoded list would pass while it
-// downloads on every run.
-func linterRecipes(t *testing.T) map[string]bool {
-	t.Helper()
-	// A recipe header: name, optional parameters, `:`, then the dependency list.
-	// Recipe bodies are indented, so an unindented `name...:` is the only thing
-	// this can match.
-	header := regexp.MustCompile(`(?m)^([a-zA-Z0-9_-]+)([^:\n]*):([^=\n].*|)$`)
+// The step-level half of what the job-level assertions further down do. A
+// composite action's steps take `if` and `continue-on-error` of their own, and
+// either one on the pin step voids the two refusals above from inside the file
+// they are asserted against: the read still fails, and the action still
+// succeeds.
+//
+// Of the ten keys the composite-step schema permits, this refuses four —
+// `if`, `continue-on-error`, `env`, `working-directory` — and pins `shell` on
+// any step that runs one. `uses`, `run`, `with`, `id` and `name` are the
+// action's shape and are asserted by the tests above. `env` is refused because
+// the action takes no configuration: anything set there is either inert or a
+// redefinition of a variable the runner provides, and the second is not
+// something a cache-restore action should be doing. `working-directory` is
+// refused for the same reason rather than because it disarms anything — moving
+// the read to a directory with no justfile above it fails the step, which is
+// the direction that is safe.
+func TestGolangciActionStepsCannotBeSwitchedOffOrSwallowed(t *testing.T) {
+	for _, s := range actionSteps(t) {
+		what := s.Name
+		if what == "" {
+			what = s.Uses + s.Run
+		}
+		require.Falsef(t, present(s.If), "step %q in %s carries `if: %s`. A skipped step "+
+			"restores nothing and reads nothing, and reports green either way.",
+			what, golangciAction, spell(s.If))
+		require.Falsef(t, present(s.ContinueOnError), "step %q in %s carries "+
+			"`continue-on-error: %s`, so its failure is not the action's failure. The "+
+			"version read is allowed to fail precisely so the job stops; swallowed here, "+
+			"it stops nothing and the job downloads the linter itself (bd gqlc-l45j).",
+			what, golangciAction, spell(s.ContinueOnError))
+		require.Falsef(t, present(s.Env), "step %q in %s carries an `env:` block. This "+
+			"action takes no configuration, so anything set there is either inert or a "+
+			"redefinition of a runner-provided variable — $GITHUB_OUTPUT among them.",
+			what, golangciAction)
+		require.Emptyf(t, s.WorkingDirectory, "step %q in %s sets working-directory to "+
+			"%q. Every path this action touches is the repository root's.",
+			what, golangciAction, s.WorkingDirectory)
+		if s.Run != "" {
+			require.Equalf(t, "bash", s.Shell, "step %q in %s runs a shell block under "+
+				"`shell: %s`. The block is bash — it spells `set -euo pipefail` on its "+
+				"first line — and under any other interpreter that line is a syntax error "+
+				"or a no-op rather than the errexit the refusals above argue from.",
+				what, golangciAction, s.Shell)
+		}
+	}
+}
 
+// recipeDeps is the justfile's recipe dependency graph: each recipe name
+// against the names in its dependency list.
+//
+// A recipe header is a name, optional parameters, `:`, then the dependency
+// list. Recipe bodies are indented, so an unindented `name...:` is the only
+// thing this can match.
+func recipeDeps(t *testing.T) map[string][]string {
+	t.Helper()
+	header := regexp.MustCompile(`(?m)^([a-zA-Z0-9_-]+)([^:\n]*):([^=\n].*|)$`)
 	deps := map[string][]string{}
 	for _, m := range header.FindAllStringSubmatch(readRepoFile(t, justfile), -1) {
 		deps[m[1]] = strings.Fields(m[3])
 	}
-	require.Containsf(t, deps, provisionRecipe,
-		"the recipe-header scan did not find %s in the %s, so the dependency walk below "+
-			"starts from nothing and would report that no job needs the linter",
-		provisionRecipe, justfile)
+	return deps
+}
 
-	reaches := map[string]bool{provisionRecipe: true}
+// recipesReaching is target, plus every recipe that reaches it through a
+// dependency list, transitively.
+func recipesReaching(deps map[string][]string, target string) map[string]bool {
+	reaches := map[string]bool{target: true}
 	// Fixed point: the graph is tiny and this is O(recipes^2) at worst.
 	for changed := true; changed; {
 		changed = false
@@ -254,6 +461,25 @@ func linterRecipes(t *testing.T) map[string]bool {
 			}
 		}
 	}
+	return reaches
+}
+
+// linterRecipes is every justfile recipe that reaches ensure-golangci through
+// its dependency list, transitively.
+//
+// Derived rather than listed because the property is about recipes nobody has
+// written yet: a job added next month that runs `just fmt-check` needs the
+// action as much as `lint` does, and a hardcoded list would pass while it
+// downloads on every run.
+func linterRecipes(t *testing.T) map[string]bool {
+	t.Helper()
+	deps := recipeDeps(t)
+	require.Containsf(t, deps, provisionRecipe,
+		"the recipe-header scan did not find %s in the %s, so the dependency walk below "+
+			"starts from nothing and would report that no job needs the linter",
+		provisionRecipe, justfile)
+
+	reaches := recipesReaching(deps, provisionRecipe)
 	delete(reaches, provisionRecipe)
 
 	// Positive controls, per recipe rather than on the size of the set: an
@@ -280,6 +506,27 @@ func justInvocations(run string) []string {
 // Every ci.yml job that runs a recipe needing golangci-lint must pull the
 // action in, or that job downloads the binary itself on every run — which is
 // the request that returned 429 and killed a required context in setup.
+//
+// "Pull the action in" is four things, because there are four ways to reference
+// it and get nothing: reference it after the prerequisite that puts just on
+// PATH, reference it without an `if` that can switch it off, reference it
+// without a `continue-on-error` that discards what it reports, and do all of
+// that in a job that can itself fail.
+//
+// The keys ruled out rather than asserted, so the next reader does not have to
+// re-derive them. Of a job step's eleven schema keys: `with` on this reference
+// is inert, since the action declares no inputs; `timeout-minutes` makes a step
+// fail, and nothing here guards against failing; `shell`, `run` and
+// `working-directory` do not belong on a `uses:` step; `id` and `name` are
+// cosmetic. Of a job's keys: `strategy.fail-fast` decides whether sibling
+// matrix jobs are cancelled, not what this job concludes; `defaults.run.shell`
+// rewrites `run:` steps and cannot reach across into a composite action, whose
+// steps carry their own `shell:` (pinned by
+// TestGolangciActionStepsCannotBeSwitchedOffOrSwallowed); `concurrency`,
+// `needs` and `timeout-minutes` can stop the job, which stops the download with
+// it; `container`, `runs-on`, `services`, `environment`, `permissions`,
+// `outputs`, `env` and `name` change where or how the steps run, not whether a
+// failure counts.
 func TestEveryLintingCIJobRestoresTheCachedBinary(t *testing.T) {
 	needsLinter := linterRecipes(t)
 
@@ -288,29 +535,37 @@ func TestEveryLintingCIJobRestoresTheCachedBinary(t *testing.T) {
 
 	// cachedAt/justAt are step positions, not booleans, because setup-golangci
 	// evaluates `just --evaluate` and so has to run after setup-just has put
-	// just on PATH. cachedIf holds the step's `if:`, which decides whether the
-	// step referenced here runs at all.
+	// just on PATH. The three nodes are the keys that decide whether the
+	// reference is a restore that can fail the job.
 	type jobFacts struct {
-		recipes  []string
-		cachedAt int
-		cachedIf string
-		justAt   int
+		recipes    []string
+		cachedAt   int
+		cachedIf   yaml.Node
+		cachedSwal yaml.Node
+		cachedEnv  yaml.Node
+		jobIf      yaml.Node
+		jobSwal    yaml.Node
+		justAt     int
 	}
 	found := map[string]jobFacts{}
 
 	for i := 0; i+1 < len(jobs.Content); i += 2 {
 		name := jobs.Content[i].Value
 		var job struct {
-			Steps []actionStep `yaml:"steps"`
+			If              yaml.Node    `yaml:"if"`
+			ContinueOnError yaml.Node    `yaml:"continue-on-error"`
+			Steps           []actionStep `yaml:"steps"`
 		}
 		require.NoErrorf(t, jobs.Content[i+1].Decode(&job), "decode job %q", name)
 
-		facts := jobFacts{cachedAt: -1, justAt: -1}
+		facts := jobFacts{cachedAt: -1, justAt: -1, jobIf: job.If, jobSwal: job.ContinueOnError}
 		for at, s := range job.Steps {
 			switch s.Uses {
 			case golangciActionRef:
 				facts.cachedAt = at
-				facts.cachedIf = s.If.Value
+				facts.cachedIf = s.If
+				facts.cachedSwal = s.ContinueOnError
+				facts.cachedEnv = s.Env
 			case justActionRef:
 				facts.justAt = at
 			}
@@ -346,11 +601,38 @@ func TestEveryLintingCIJobRestoresTheCachedBinary(t *testing.T) {
 		// A reference is not a restore. `if:` on the step leaves the reference in
 		// place, reports the step as skipped, and downloads the binary anyway —
 		// the same exposure as deleting the step, with none of the visibility.
-		require.Emptyf(t, facts.cachedIf,
+		require.Falsef(t, present(facts.cachedIf),
 			"job %q gates `uses: %s` behind `if: %s`. A skipped restore restores nothing: "+
 				"the job runs %v, downloads the linter itself, and shows a green step "+
 				"where the cache was supposed to be.",
-			name, golangciActionRef, facts.cachedIf, facts.recipes)
+			name, golangciActionRef, spell(facts.cachedIf), facts.recipes)
+
+		// ...and neither is a reference whose failure is discarded. The action's
+		// version read is written to fail the step when it cannot read the pin;
+		// swallowed here, that failure stops nothing, the job runs on, and
+		// ensure-golangci downloads the binary — green, and back where it started.
+		require.Falsef(t, present(facts.cachedSwal),
+			"job %q sets `continue-on-error: %s` on `uses: %s`. The step still runs and "+
+				"still reports, and its failure no longer fails anything: the job goes on "+
+				"to run %v and downloads the linter itself (bd gqlc-l45j).",
+			name, spell(facts.cachedSwal), golangciActionRef, facts.recipes)
+		require.Falsef(t, present(facts.cachedEnv),
+			"job %q sets an `env:` block on `uses: %s`. The action takes no inputs and "+
+				"reads no configuration; what an env block there can reach is the "+
+				"runner's own variables, $GITHUB_OUTPUT among them, which is where the "+
+				"version read puts the cache key.", name, golangciActionRef)
+
+		// The job has to be able to fail at all. A job-level continue-on-error
+		// reports success whatever its steps did; a job-level `if` reports the
+		// required context as skipped, which satisfies branch protection and
+		// witnesses nothing.
+		require.Falsef(t, present(facts.jobSwal),
+			"job %q sets `continue-on-error: %s`, so no step in it can fail the merge — "+
+				"including the restore this test is about.", name, spell(facts.jobSwal))
+		require.Falsef(t, present(facts.jobIf),
+			"job %q is gated behind `if: %s`. It is a required context: skipped, it "+
+				"reports as satisfied without having linted or restored anything.",
+			name, spell(facts.jobIf))
 
 		// setup-golangci reads the pinned version with `just --evaluate`, so it
 		// needs just already on PATH. Out of order it is not a failure to debug:

@@ -674,6 +674,18 @@ fmt-check: ensure-golangci
 # the shell-tested half of this repo's own tooling: the git hooks, the recipe
 # that lints them, and the CI script they share a language with (~1s; throwaway
 # git repos and temp trees, nothing touches the worktree)
+#
+# Suites live in .githooks/tests/ and are named <subject>-test.sh. Both halves
+# are enforced by internal/tools/ciguard, which reads that directory rather than
+# globbing it: a file in there under any other name is refused, and every file
+# in there has to be named below. A suite written anywhere else is one nothing
+# runs and nothing reports (bd gqlc-l45j).
+#
+# Plain recipe, not a shebang one, deliberately: just gives each line's exit
+# status to the recipe here, where a shebang recipe hands the whole body to one
+# shell and returns only its last line's status unless that shell sets errexit.
+# ciguard holds this by running the recipe against stubbed suites, not by
+# reading it.
 test-hooks:
     bash .githooks/tests/claude-pre-bash-test.sh
     bash .githooks/tests/commit-msg-test.sh

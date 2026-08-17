@@ -14,14 +14,21 @@
 # argument to echo: `set -e` acts on the exit status of the simple command, and
 # in `echo "version=$(just ...)"` that status is echo's, so a renamed justfile
 # variable left the step green with the key emptied to `golangci-bin-<os>-` —
-# the outcome this paragraph used to claim was prevented. Only an
-# assignment-only command inherits the command substitution's status. Witness:
+# the outcome this paragraph used to claim was prevented. A simple command with
+# no command word takes its exit status from the last command substitution
+# performed in it, which is what the spelling below buys. Two other spellings
+# propagate a substitution's failure — a bare `$(cmd)` run as a command, and
+# `cmd | ...` under pipefail — but neither leaves the value in a variable, so
+# neither is a candidate here. Witness:
 #   bash -eo pipefail -c 'echo "v=$(false)" >> f'       # rc 0, f == "v="
 #   bash -eo pipefail -c 'v="$(false)"; echo "$v" >> f' # rc 1, f untouched
-# The step sets its own `set -euo pipefail` rather than relying on the runner's
-# default flags for `shell: bash`, so the argument above is checkable from this
-# file. internal/tools/ciguard pins the shape and the derivation, and pins the
-# path below against the path the justfile installs to.
+# The step sets errexit and nounset itself, on the first line of the run block
+# below, rather than relying on the runner's default flags for `shell: bash`, so
+# the argument above is checkable from this file. internal/tools/ciguard runs
+# that run block against a stubbed `just` and asserts both halves — the version
+# it emits, and that a failed read writes nothing — refuses an `if:` or a
+# `continue-on-error:` on either step, and pins the path below against the path
+# the justfile installs to.
 name: setup-golangci
 description: restore the pinned golangci-lint binary into .bin/ from cache
 runs:
