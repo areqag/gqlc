@@ -229,24 +229,28 @@ participates in §4.4's exported-collision sweep.
 
 Sqlc-style ergonomics, exactly as D2 Resolved pins:
 
-- **Zero parameters, single column** — bare arg, bare value:
+- **Zero parameters, single column** — no arg, bare value:
   ```go
   func (q *Queries) AllPeopleNames(ctx context.Context) ([]string, error)
   ```
-- **Zero parameters, two-plus columns** — bare arg, XRow:
+- **Zero parameters, two-plus columns** — no arg, XRow:
   ```go
   type PersonSummaryRow struct { Name string; Age int64 }
   func (q *Queries) PersonSummaries(ctx context.Context) ([]PersonSummaryRow, error)
   ```
-- **Exactly one parameter, any column shape** — bare typed arg:
+- **Exactly one parameter, any column shape** — the value itself, bare
+  and typed, under the generator-owned argument name `arg`:
   ```go
-  func (q *Queries) PersonById(ctx context.Context, id int64) (PersonRow, error)
+  func (q *Queries) PersonById(ctx context.Context, arg int64) (PersonRow, error)
   ```
-- **Two-plus parameters, any column shape** — XParams struct:
+- **Two-plus parameters, any column shape** — XParams struct, under the
+  same argument name:
   ```go
   type PeopleOverAgeParams struct { MinAge int64; Locale string }
   func (q *Queries) PeopleOverAge(ctx context.Context, arg PeopleOverAgeParams) ([]string, error)
   ```
+- **The argument is named `arg` at every arity**, and the name is the
+  generator's, never the query author's. §5.3 states the rule and why.
 
 - **Cardinality × shape:**
   - `:one` → `(XRow, error)` (or `(T, error)` for a single-column
@@ -271,8 +275,8 @@ in `Validated.Parameters` order (query-wide first-appearance, R2 spec
 `goType(Type)` (§5.1) or `*goType(Type)` for a nullable parameter (D3
 Resolved: symmetric parameter treatment; nil encodes as Cypher `null`).
 The zero-parameter and single-parameter queries do not emit a Params
-struct: zero-parameter has no arg, single-parameter takes the bare
-typed arg.
+struct: zero-parameter has no arg, single-parameter binds the value
+itself as `arg` (§5.3).
 
 Two parameters mangling to the same field name → `ErrParamNameCollision`
 naming both parameters (deterministic order: first-appearance in
@@ -520,13 +524,31 @@ fence with a "redeclared in this block" error — the fence is the
 enforcement surface for unexported identifiers, and the fence error
 names the file and both declaration sites, which is a strictly
 better diagnostic than an `ErrIdentifierCollision` fail-message that
-only names the query pair. The `<methodName>` prefix is deterministic
-in `Input.Queries` order (§4.1 verbatim method name → lowercase
-first rune), so a duplicate at this axis would already imply a
-duplicate method-name collision the exported sweep catches first. C5
-extends the exported sweep with entity-struct and decode-helper
-identifiers, which are user-visible; unexported package-internal
-identifiers stay on the fence.
+only names the query pair. C5 extends the exported sweep with
+entity-struct and decode-helper identifiers, which are user-visible;
+unexported package-internal identifiers stay on the fence.
+
+**The omission is a real hole, and this section used to deny it.**
+The denial was: the `<methodName>` prefix is deterministic in
+`Input.Queries` order (§4.1 verbatim method name → lowercase first
+rune), so a duplicate at this axis would already imply a duplicate
+method-name collision the exported sweep catches first. That is
+false. The const shares the unexported namespace with the
+`decode<Entity>` helpers, and those derive from **schema labels**,
+not from method names, so the two namespaces can meet with no method
+name duplicated anywhere: a node label `FooQueryText` alongside a
+query named `DecodeFoo` emits `decodeFooQueryText` as both a const
+and a func. Neither the method-name axis nor the parameter-name axis
+sees it — both colliding names are generator-owned, and the capture
+guards police author-chosen identifiers against generator-owned ones.
+Generation exits 0 and `go build` reports the redeclaration. That is
+`gqlc-igs4`, which owns the disambiguation. The counterexample above
+belongs here, because it is what refutes this section's old denial;
+the disambiguation does not, because restating it would leave two
+copies of an argument only one bead keeps current. Until it lands,
+the compile fence is the only thing
+standing between this axis and a shipped non-compiling package, and
+it is not reached by `gqlc generate` — only by the golden harness.
 
 C5 hardens this sweep against additional identifier sources
 (entity structs, decode helpers) as C2/C3 add them (ADR 0010 D7).
@@ -659,13 +681,36 @@ func (q *Queries) <MethodName>(ctx context.Context<param-list>) (<return>, error
 }
 ```
 
-- **`<param-list>`** — empty if zero parameters, `, <bareParam> <T>`
-  if one parameter, `, arg <MethodName>Params` if two-plus.
-  `<bareParam>` is the single parameter's field-name mangle (§4.2),
-  but lowercase-initial for the Go argument-name convention:
-  `paramFieldName(name)` → `MinAge`, then lowercase the first rune
-  → `minAge`. The lowercase pass is per-Go idiom (locally-scoped
-  variables are lower-camel-case); no naming rule is affected.
+- **`<param-list>`** — empty if zero parameters, `, arg <T>` if one
+  parameter, `, arg <MethodName>Params` if two-plus. The argument
+  name is the literal `arg` at both arities, and it is **not derived
+  from anything the query author wrote**. It is
+  `internal/codegen.ParamArg`, a single generator-owned constant
+  shared by every backend because the signature it appears in is
+  backend-invariant surface.
+
+  Deriving that name from the parameter — `paramFieldName("minAge")`
+  → `MinAge` → lowercase-initial → `minAge`, which is what this
+  section used to specify — puts an author-chosen identifier into the
+  same scope as the receiver `q`, the `ctx` argument, every local the
+  emitted body declares, and every package-level name that body
+  resolves. `$q` and `$ctx` redeclare what the signature already
+  binds; `$err`, `$records`, `$out`, `$stmt` and `$rows` displace a
+  body local; `$fmt` displaces an import; `$_` mangles to the empty
+  string and reaches gofmt as a parameter with no name. Generation
+  reports none of it, because the format gate parses the emission and
+  does not type-check it. Renaming the generator's own names out of
+  the way instead would need a reserved set kept in sync with every
+  future change to the emitted body, and that set is not enumerable.
+  One generator-owned argument name closes the class rather than
+  shrinking it (`gqlc-lhs3`).
+
+  Nothing the author wrote is lost: the parameter name stays the
+  driver-binding key in `<paramsMap>` below, and stays the exported
+  `<MethodName>Params` / `<MethodName>Row` field name, which is
+  always reached qualified (`arg.MinAge`) and so cannot be captured.
+  The Go argument is positional at every call site, so only godoc and
+  an editor hint ever read its name.
 - **`<return>`** — `T` for `:one` single-column; `<MethodName>Row`
   for `:one` two-plus-columns; `[]T` for `:many` single-column;
   `[]<MethodName>Row` for `:many` two-plus-columns.
@@ -676,11 +721,16 @@ func (q *Queries) <MethodName>(ctx context.Context<param-list>) (<return>, error
   exported.
 - **`<paramsMap>`** — the `map[string]any` literal binding driver
   parameter names to Go values. Zero parameters: `nil`. One
-  parameter: `map[string]any{"<rawName>": <bareParam>}`. Two-plus:
+  parameter: `map[string]any{"<rawName>": arg}`. Two-plus:
   `map[string]any{"<rawName1>": arg.<Field1>, ...}`. The map's
   keys are `Validated.Parameters[i].Name` verbatim (the `$`-stripped
   raw parameter name — the driver binds by name and matches the
-  query-text's `$name` occurrences).
+  query-text's `$name` occurrences). Key and value are separately
+  owned and must stay that way: the **key** is the author's raw
+  parameter name, because that is what the driver substitutes on; the
+  **value** is the generator's `arg`, because that is a Go identifier
+  in the method's scope. This is the whole of what `<param-list>`'s
+  note above buys.
 - **`<zero>`** — the zero value of the return type: `""` for
   `string`, `0` for numerics, `false` for `bool`, `nil` for slices
   and pointer types, `<MethodName>Row{}` for a two-plus-column
@@ -692,6 +742,188 @@ func (q *Queries) <MethodName>(ctx context.Context<param-list>) (<return>, error
   `neo4j.GetRecordValue[T]` per column, and materialises the return
   value. The `records` local is the buffered `[]*neo4j.Record` the
   seam returned (§5.6).
+
+**The argument name and the binding values in this document are
+fenced.** `TestSpecMethodArgIsGeneratorOwned` and
+`TestSpecParamsMapBindsGeneratorOwnedValue`
+(`internal/codegen/conformance/specfence_test.go`) read every
+markdown document under `docs/`, plus `README.md` and `CONTEXT.md`,
+and hold three shapes against `codegen.ParamArg` read from the
+emitter: a parameter list opening on `ctx context.Context` behind an
+open paren or a code span's opening backticks and holding exactly one
+more parameter; the parameter-list tail each `<param-list>` bullet
+spells out, which is where the rule actually lives, because the method
+template above prints only the placeholder; and the value half of
+every `map[string]any` literal's entries.
+
+At least two things exempt the first shape, and that count is a floor
+for a structural reason rather than a tally waiting to be completed:
+the sweeps match byte patterns and do not parse markdown, so the set
+of runs they treat as a code span and the set a renderer treats as one
+overlap on every spelling measured without being the same set.
+
+The first exemption is written down: the handful of
+parenthesis-less parameter lists ADR 0029 prints as exhibits of what
+the fence catches rather than as claims about the emitted surface,
+each named in that test by its exact text. An exhibit is exempt
+once, so a second list spelled the same way grades, and every other
+parenthesis-less list in that document is read on the same terms as
+any other document's.
+
+The second is measured rather than written, and it is where the byte
+test and a renderer part company. A run of three or more backticks
+opening its line is taken here for a fenced block's delimiter and
+opens no span; but a backtick fence's info string may not itself
+contain a backtick, so a line whose run of three is closed by another
+run before the line ends opens no fence to CommonMark either — it is
+an ordinary code span, and `cmark-gfm` renders it byte-identically to
+the same list written inside one backtick. Two spellings a reader
+cannot tell apart: the one in three backticks is green here, the one
+in a single backtick red (`gqlc-cgat`). Closing that spelling would
+not close the exemption, because the line-opening test is reached only
+by a run of three or more — so a list inside a single backtick on a
+tab-indented line is read here while a renderer shows it as the
+literal contents of an indented code block. Both directions are pinned
+in `TestSpecBareSigScannerDetectsDrift`, so the count above moves only
+along with the rows.
+
+A placeholder in the type position is not an exemption for the name
+beside it — over a swept *signature* the fence
+grades the name position and reads nothing off the type, so a
+`<bareParam> <T>` written there is red on its name however the type
+is spelled, and a lone `<bareParam>` is graded as a declaration
+naming nothing rather than waved through for wearing angle brackets.
+That scoping is the signature sweep's alone; the `<param-list>`
+bullet holds its tails verbatim, type included, so an edit touching
+only the type is red there as well — the last paragraph of this
+section states which is which. The one token it declines to grade
+*and owes something for* is one standing for the whole parameter
+list — `<param-list>` and the numbered `<param-list-1>` the interface
+block below uses — and a document taking that exemption owes the
+bullet, because the exemption and the requirement are the same list.
+It also reads nothing out of a list holding three or more parameters,
+which is how the `driverOrTx.run` seam stays out of a sweep for query
+methods, and which is why a signature carrying the author's names as
+separate arguments is past what it reads (`gqlc-vu7z`).
+
+Which documents owe graded sites is written down in that test, by
+name, and reconciled against what the sweep actually read — in both
+directions, so a listed document that produces nothing is red and a
+document that produces something without being listed is red too.
+This document is on three of those lists: it owes a graded signature,
+it owes the `<param-list>` bullet (because its method template above
+prints the placeholder rather than a list), and it owes a graded
+binding. The two tails this bullet spells — `, arg <T>` and
+`, arg <MethodName>Params` — are themselves listed there verbatim,
+so narrowing the bullet to one arity, restating an arity in a second
+spelling, or illustrating one with a concrete type is red on the
+text rather than on anything inferred from it.
+
+That expectation is deliberately written rather than derived. It was
+derived once, from marker patterns over these documents, and that
+could not hold: the markers were the same shapes as the grading, so
+a single cosmetic edit here — moving the comma out of the template's
+placeholder — dropped this document from the requirement and from
+the reading at the same instant, and the capture vector went back
+into this section green. ADR 0029 records that decision and the
+others behind the fence's shape.
+
+At least six things are left open, and they are not the same size.
+The count is a floor rather than a census: it records what has been
+measured, not everything there is. Deleting the documented surface
+and its line in that test together is the first; that is a two-part
+edit which removes a named document from a list in a test file, and
+the second part is the record of it. The second is a document the
+fence is never pointed at: those lists name documents, not roots, so
+they say nothing about markdown outside `docs/`, `README.md` and
+`CONTEXT.md`. `AGENTS.md`, `CLAUDE.md` and `CONTRIBUTING.md` are
+outside it today and print none of this surface; a new document at
+the repository root that did print it would be swept by nothing and
+recorded nowhere (`gqlc-jfwo`). The same list is what holds
+`README.md` and `CONTEXT.md` in scope at all, and nothing holds it:
+no census names a document under either, so dropping either from the
+fence's roots is green.
+
+The third is the largest and, unlike the first, is a single edit in
+one place. A listed document owes *one* graded site, not all of them,
+so every site past the first can leave the sweep silently — not by
+being corrected, but by ceasing to print an anchor. An anchor is a
+delimiter *and* the context parameter, both halves: an open
+parenthesis before `ctx context.Context`, or the opening backticks of
+a code span the list is printed inside. The `RemovePerson(ctx
+context.Context, arg int64)` member of C4 §3.2's `WriteQuerier` block
+is one of ten graded signatures in C4; rewrite its context parameter
+and the fence stays green over whatever its argument position then
+says. The floor is one graded site per listed document. Closing that
+means recording every graded site rather than every graded document,
+which makes the test a verbatim copy of these documents and turns
+every honest edit to an example red — so it is written down here
+instead.
+
+The fourth is what the third's word *anchor* is carrying, and it is
+not decoration. Until ADR 0029 decision 10 the only signature anchor
+was the parenthesised one, so a bullet in this very section reading
+*the parameter list is* `ctx context.Context, arg int64` — with the
+parentheses simply left off — was a parameter list to a reader and
+prose to the sweep, and the same bullet spelling the author's
+parameter name instead was measured green. The backtick anchor
+closes that spelling, and the delimiter is the whole run of
+backticks rather than one of them — closed by a run of the same
+length — so the same bullet written inside two backticks is read the
+way one written inside a single backtick is. Four neighbouring ones
+stay open: a parenthesis-less parameter list with no code span around
+it is not read at all, in running prose or on its own line inside a
+fenced or indented code block — the paren anchor needs no span and
+reaches a block like any other text, so what a block hides is the
+parenthesis-less spelling (`gqlc-cgat`); a list inside a span that
+same block rule declines to open, read from the other side — the rule
+tests where a run of backticks sits rather than parsing the document,
+so it skips a line-opening run of three that the line goes on to
+close, and reads a single backtick on a tab-indented line, where a
+renderer does the opposite of both (`gqlc-cgat`); the binding sweep
+has no second anchor, so `"minAge": minAge` stated with no `map[string]any`
+literal around it is unswept (`gqlc-offa`); and a claim put in the
+place of one of the parenthesis-less lists that test names as
+exhibits, spelled the way that exhibit was, takes its exemption
+(`gqlc-x2sg`). The binding case was measured rather than assumed —
+these documents carry over 500 bare `"key": value` spans across more
+than 30 files, nearly all of them JSON model shapes, so a sweep
+reading them would redden on prose across the corpus.
+
+The fifth and sixth are narrower, and both were measured rather than
+reasoned about. The sweeps read raw markdown bytes, so a site inside
+an HTML comment is graded exactly as visible text is: a document whose
+only surviving `ctx context.Context` sits in `<!-- ... -->` keeps its
+census entry while showing a reader nothing, and a commented site
+disagreeing with `codegen.ParamArg` is red on text no rendered page
+displays (`gqlc-jnsk`). The binding sweep, meanwhile, peels pointer
+operators off a value along with carrier conversions before comparing
+it, so `*arg` and `&arg` in a `map[string]any` entry both unwrap to
+`arg` and stay green (`gqlc-173n`) — what is held is the identifier
+underneath, not the expression around it.
+
+One further gap is recorded in the fence's own header rather than
+here, because it bounds what the sweeps reach at all: the prose around
+an intact graded span may say the opposite of it (`gqlc-e143`).
+`gqlc-ipx6` is a seventh of a different kind — a guard in the fence
+that no test would notice the removal of, rather than a document the
+fence cannot see.
+
+What is fenced is the argument *name*, everywhere except one place.
+The `<param-list>` bullet above is the exception: its two tails are
+held verbatim, so `, arg int64` in place of `, arg <T>` is red on the
+type even though the name is untouched — that bullet is the normative
+rule, and a rule stated in a second spelling is how one arity came to
+be stated twice while the other sat in prose. Everywhere else only
+the name is read. The rest of a graded signature is not — its method
+name, its parameter type and its return type are all unread — and
+neither are the decode bodies, the `<zero>` values, or any signature
+the sweep does not reach at all. Those remain unfenced prose that the
+emitter is free to outgrow, so read them as illustration and the
+goldens under `test/data/codegen/valid/` as truth. The argument-name
+rule above went four stages unchecked because there was neither a
+fence nor a note saying there was none; the next drift will at least
+be a known unknown.
 
 The 3-line doc-comment quote of the query text is a readability
 affordance for `godoc` browsers — the query is the source of truth,
@@ -1149,9 +1381,9 @@ subdirectory with the complete generated package:
 
 | Fixture | Coverage |
 |---|---|
-| `one_col_one_param_one` | `:one`, single column bare-value return, single parameter bare arg (`func (q *Queries) PersonName(ctx, id int64) (string, error)`). Exercises the smallest read-method surface: single-column bare-value, single-param bare-arg, `:one` empty→`ErrNoRows` fixture prose. |
+| `one_col_one_param_one` | `:one`, single column bare-value return, single parameter (`func (q *Queries) PersonName(ctx context.Context, arg int64) (string, error)`). Exercises the smallest read-method surface: single-column bare-value, single-param bare typed `arg`, `:one` empty→`ErrNoRows` fixture prose. |
 | `one_col_many` | `:many`, single column bare-value slice return, zero params (`func (q *Queries) AllPersonNames(ctx) ([]string, error)`). Exercises the ergonomics minimum for `:many`. |
-| `many_col_one_row` | `:one`, two-plus columns yielding an XRow, single parameter bare arg. Exercises Row emission, decode assembly, `ErrNoRows`. |
+| `many_col_one_row` | `:one`, two-plus columns yielding an XRow, single parameter bare typed `arg`. Exercises Row emission, decode assembly, `ErrNoRows`. |
 | `many_col_many` | `:many`, two-plus columns yielding `[]XRow`, two-plus params yielding an XParams. Exercises the full Params+Row surface. |
 | `nullable_columns` | Mixes nullable and non-nullable property columns, some nullable-arriving-nil test cases folded into the driver-side response (no assertion at codegen; fixture prose documents intent). |
 | `nullable_parameter` | A nullable parameter (`*int` field on Params); exercises D3 Resolved's symmetric parameter treatment. Encode direction verified at the code cycle. |
@@ -1197,11 +1429,12 @@ one column, `Column.Type` is `ResolvedProperty` (§4 Phase A); one
 param, `Parameter.Type` is `ResolvedProperty` (§4 Phase A). Row-field
 derivation: `p.name` matches property-access shape → `Name`. Params-
 field derivation: `id` → `Id`. Single column → bare value (§3.1);
-single parameter → bare arg. Emitted method:
+single parameter → bare typed `arg` (§5.3), with the author's `id`
+kept as the driver-binding key. Emitted method:
 
 ```go
-func (q *Queries) PersonName(ctx context.Context, id int64) (string, error) {
-    records, err := q.db.run(ctx, personNameQueryText, map[string]any{"id": id}, neo4j.AccessModeRead)
+func (q *Queries) PersonName(ctx context.Context, arg int64) (string, error) {
+    records, err := q.db.run(ctx, personNameQueryText, map[string]any{"id": arg}, neo4j.AccessModeRead)
     if err != nil {
         return "", err
     }
