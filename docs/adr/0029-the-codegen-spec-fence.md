@@ -42,10 +42,11 @@ hole to the next spelling; it is the scanner auditing itself.
 > The literal with its brace is the binding sweep's anchor and `docs/` is swept
 > whole, so spelling it here would be a graded site in a document no census
 > declares. The parameter lists below are a different case: they are printed
-> without their enclosing parentheses and are read anyway, because this document
-> is named in `specBareListDocs` (decision 10) as one whose parameter lists are
-> exhibits. Adding a *parenthesised* one still grades, and one spelling the
-> capture vector still reddens.
+> without their enclosing parentheses and are read anyway, and three of them are
+> named in `specBareListExhibits` (decision 10) as exhibits. Nothing else here
+> is exempted by that census: a parenthesised parameter list, and a
+> parenthesis-less one added without its census entry, are both read exactly
+> as they would be in any other document.
 
 So the census is written in the test file, by name. It costs one line when a
 document starts or stops printing the surface, and the failure prints the line
@@ -92,7 +93,7 @@ The alternatives were considered and declined:
   without being read, which buys less than a floor of one that is written down.
 
 So the floor is accepted and recorded, in this ADR and in
-`docs/specs/codegen-stage-c1.md` §5.7.
+`docs/specs/codegen-stage-c1.md` §5.3.
 
 ## Decision 4 — the exemption list and the requirement list are the same list
 
@@ -206,11 +207,19 @@ placeholder and the name position are decided identically whichever delimiter
 carried the list.
 
 A document explaining a fence has to quote what the fence catches, and this one
-does, twice. `specBareListDocs` names the documents whose parenthesis-less
-parameter lists are read but not graded — exhibits rather than claims about the
-emitted surface. It is a written census reconciled in the `lost` direction, so
-an entry covering a document that has stopped printing one is red, and removing
-this document's entry reddens on its own decision 4 exhibits.
+does three times — decision 4's two placeholder positions and the capture vector
+above. `specBareListExhibits` names those parenthesis-less parameter lists
+verbatim, per document, and they are read but not graded: they are exhibits
+rather than claims about the emitted surface.
+
+The exemption is per list rather than per document, so a claim this document
+makes about the emitted parameter list is read on the same terms as any other
+document's, and each entry covers one site, so a second list spelled the same
+way is graded. It
+is a written census reconciled in the `lost` direction, so an entry the document
+has stopped printing is red by its text. What that leaves open is a claim put in
+an exhibit's place and spelled the way the exhibit was: it takes the entry
+(`gqlc-x2sg`).
 
 Two things are deliberately not reached:
 
@@ -219,21 +228,26 @@ Two things are deliberately not reached:
   surface as `gqlc-e143` and is left to it.
 - **The binding half.** The symmetric move — reading a `"key": value` pair with
   no `map[string]any` literal around it — was measured before it was declined:
-  the swept documents hold over 130 such spans across 21 files, essentially all
-  of them JSON model shapes with no relation to a driver binding. A sweep that
-  reddens on those is worse than a named limit, so the limit is named
-  (`gqlc-offa`) and the brace stays part of the binding anchor.
+  the swept documents hold over 500 such spans across more than 30 files,
+  essentially all of them JSON model shapes with no relation to a driver
+  binding. A sweep that reddens on those is worse than a named limit, so the
+  limit is named (`gqlc-offa`) and the brace stays part of the binding anchor.
 
 ## Consequences
 
 The fence is a graded-site check, not a document check. What it does **not**
-reach is enumerated in `docs/specs/codegen-stage-c1.md` §5.7 and in the file's
+reach is enumerated in `docs/specs/codegen-stage-c1.md` §5.3 and in the file's
 own header:
 
-- `docRoots` losing or narrowing an entry is green, because everything the fence
-  observes is walked out of `docRoots` — the observation is derived from the
-  list being audited. Catching it needs candidate roots from outside the list
-  (`gqlc-jfwo`).
+- Dropping `README.md` or `CONTEXT.md` from `docRoots` is green, because
+  everything the fence observes is walked out of `docRoots` — the observation is
+  derived from the list being audited, and no census names a document under
+  either. Catching a root that shrank, or one that should have grown, needs
+  candidate roots from outside the list (`gqlc-jfwo`). Dropping `docs`, or
+  narrowing it to `docs/specs`, is red by the censuses naming documents beneath
+  it.
+- A claim put in the place of one of `specBareListExhibits`' exhibits, spelled
+  the way that exhibit was, takes its exemption (`gqlc-x2sg`, Decision 10).
 - One graded site per listed document is the floor (`gqlc-0rjn`, Decision 3).
 - A signature carrying the author's names as separate arguments is past the
   arity the signature sweep reads (`gqlc-vu7z`).

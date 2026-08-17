@@ -26,12 +26,16 @@ import (
 // normative rule, and prose is where the drift gqlc-rz0l corrected sat.
 //
 // What is graded is a site, not a document, and the documents can still
-// disagree with codegen.ParamArg and stay green in four places: a
-// signature carrying the author's names as separate arguments is past
-// the arity read here (gqlc-vu7z), prose beside an intact graded span
-// can say the opposite of it (gqlc-e143), a binding stated with no
-// map literal around it is unread (gqlc-offa), and a listed document
-// keeps its census entry on one surviving site (gqlc-0rjn).
+// disagree with codegen.ParamArg and stay green in at least five
+// places. The count is a floor rather than a census: it records what
+// has been measured. A signature carrying the author's names as
+// separate arguments is past the arity read here (gqlc-vu7z); prose
+// beside an intact graded span can say the opposite of it (gqlc-e143);
+// a binding stated with no map literal around it is unread
+// (gqlc-offa); a listed document keeps its census entry on one
+// surviving site (gqlc-0rjn); and a list replacing one of the exhibits
+// specBareListExhibits names, spelled the same way, takes that entry's
+// exemption (gqlc-x2sg).
 
 // docRoots are the trees the fence sweeps, relative to repoRoot. The
 // drift reached C1, C3, C4 and C5, and an ADR or a design note prints
@@ -39,9 +43,10 @@ import (
 //
 // A root is held here only by what the censuses below name beneath it.
 // Deleting `docs` is red — every censused document is under it, and each
-// is reported by name. Deleting `README.md` or `CONTEXT.md` is green,
-// and so is narrowing `docs` to `docs/specs`, because no census names a
-// document those would drop. A root that stops existing on disk fails in
+// is reported by name. So is narrowing it to `docs/specs`, because
+// specBareListExhibits names a document under `docs/adr/`. Deleting
+// `README.md` or `CONTEXT.md` is green, because no census names a
+// document under either. A root that stops existing on disk fails in
 // docFiles.
 //
 // This file cannot close that: everything it observes is walked out of
@@ -121,15 +126,49 @@ var specBindDocs = []string{specC1, specC3, specC4, specC5}
 // waved through (ADR 0029 decision 4).
 var specListRuleDocs = []string{specC1, specC4}
 
-// specBareListDocs are the documents whose parenthesis-less parameter
-// lists are exhibits of what the fence catches, not claims about the
-// emitted surface, and so are read but not graded (ADR 0029 decision
-// 10).
+// specBareListExhibits are the parenthesis-less parameter lists a
+// document prints as exhibits of what the fence catches rather than as
+// claims about the emitted surface, and so are read but not graded (ADR
+// 0029 decision 10).
 //
-// Held in the lost direction: an entry that prints no such list is red,
-// so the exemption cannot run ahead of a document needing it, and
-// removing an entry reddens the exhibits it covered.
-var specBareListDocs = []string{adrFence}
+// The exemption is per list, spelled verbatim: a parenthesis-less list
+// a listed document prints that is not written down here is read on the
+// same terms as any other document's, so one document can quote a
+// drifted shape as an exhibit and state the emitted shape as a claim. Each entry exempts one site,
+// so a second list spelled the same way is graded. The first is not: a
+// claim put in an exhibit's place, spelled the way that exhibit was,
+// takes the entry (gqlc-x2sg).
+//
+// An entry the document stopped printing is red by its text, so the
+// exemption cannot run ahead of the exhibit needing it. The other
+// direction is reconciled too but cannot fire on a document's text: a
+// list this census does not name is graded rather than recorded, so the
+// sweep produces no entry the census lacks.
+var specBareListExhibits = map[string][]string{
+	adrFence: {
+		"ctx context.Context, <bareParam> <T>",
+		"ctx context.Context<bareParam> <T>",
+		"ctx context.Context, minAge int64",
+	},
+}
+
+// exhibitCensus flattens specBareListExhibits to one entry per exempted
+// list, so that the reconciliation names the list to add or remove
+// rather than the document holding it.
+func exhibitCensus() []string {
+	var out []string
+	for doc, lists := range specBareListExhibits {
+		for _, list := range lists {
+			out = append(out, exhibitEntry(doc, list))
+		}
+	}
+	return out
+}
+
+// exhibitEntry is how one exempted list is named, on both the written
+// side and the observed one, so that a census entry and the site it
+// exempts cannot drift apart in spelling.
+func exhibitEntry(doc, list string) string { return doc + ": " + list }
 
 // specListRules are the parameter-list tails every `<param-list>` bullet
 // must spell out. Both arities are here because the emitted signature
@@ -203,12 +242,16 @@ var paramListPlaceholder = strings.Trim(paramListTerm, "*`")
 //
 // `rule` is the verbatim parameter-list tail a `<param-list>` bullet
 // spelled, empty at every other site, and is what the rule census
-// reconciles by identity (ADR 0029 decision 5).
+// reconciles by identity (ADR 0029 decision 5). `list` is the verbatim
+// parameter list a code span printed with the parentheses off, empty at
+// every other site, and is what the exhibit census reconciles by
+// identity (ADR 0029 decision 10).
 type specSig struct {
 	file string
 	line int
 	arg  string
 	rule string
+	list string
 	text string
 }
 
@@ -234,7 +277,7 @@ func TestSpecMethodArgIsGeneratorOwned(t *testing.T) {
 	files := docFiles(t)
 	require.NotEmpty(t, files, "the fence swept no documents; docRoots is stale")
 
-	sweep := sweepSigs(files, func(file string) string { return readDoc(t, file) }, specBareListDocs)
+	sweep := sweepSigs(files, func(file string) string { return readDoc(t, file) }, specBareListExhibits)
 
 	var bad []specSig
 	for _, sig := range sweep.graded {
@@ -272,10 +315,11 @@ func TestSpecMethodArgIsGeneratorOwned(t *testing.T) {
 			"document here that exempts nothing is not printing the template it is listed for, and its parameter\n"+
 			"lists belong to the signature sweep")
 
-	requireCensus(t, specBareListDocs, sweep.bareDocs, "specBareListDocs",
-		"each document on this list prints a parameter list without its enclosing parentheses, as an exhibit of\n"+
-			"what the fence catches rather than as a claim about the emitted surface, and is read but not graded\n"+
-			"there; printing none means it no longer needs the exemption and the entry is holding nothing")
+	requireCensus(t, exhibitCensus(), sweep.bareExhibits, "specBareListExhibits",
+		"each entry above is one parameter list its document prints without the enclosing parentheses, as an\n"+
+			"exhibit of what the fence catches rather than as a claim about the emitted surface, and is read but\n"+
+			"not graded there; a list the document stopped printing means the exemption is holding nothing, and\n"+
+			"a list it prints that is not spelled above is read on the same terms as any other document's")
 
 	for _, doc := range specListRuleDocs {
 		requireCensus(t, specListRules, sweep.statedRules[doc], "specListRules, in "+doc,
@@ -340,13 +384,13 @@ func TestSpecParamsMapBindsGeneratorOwnedValue(t *testing.T) {
 // TestSpecSweepsCarryUnreadableSites and
 // TestSpecSweepRoutesBareSitesByExhibit are the witnesses.
 type sigSweep struct {
-	graded      []specSig
-	unclosed    []specSig
-	sigDocs     map[string]bool
-	exemptDocs  map[string]bool
-	ruleDocs    map[string]bool
-	bareDocs    map[string]bool
-	statedRules map[string]map[string]bool
+	graded       []specSig
+	unclosed     []specSig
+	sigDocs      map[string]bool
+	exemptDocs   map[string]bool
+	ruleDocs     map[string]bool
+	bareExhibits map[string]bool
+	statedRules  map[string]map[string]bool
 }
 
 type bindSweep struct {
@@ -356,19 +400,17 @@ type bindSweep struct {
 }
 
 // sweepSigs runs all three signature scanners over every named document,
-// reading each one with read and treating each named exhibit's
-// parenthesis-less parameter lists as read-but-not-graded.
-func sweepSigs(files []string, read func(string) string, exhibits []string) sigSweep {
-	exhibit := map[string]bool{}
-	for _, file := range exhibits {
-		exhibit[file] = true
-	}
+// reading each one with read and treating the parenthesis-less
+// parameter lists that exhibits names for a document as
+// read-but-not-graded. Each name covers one site; every other bare list
+// in the same document is read on the same terms as any other's.
+func sweepSigs(files []string, read func(string) string, exhibits map[string][]string) sigSweep {
 	out := sigSweep{
-		sigDocs:     map[string]bool{},
-		exemptDocs:  map[string]bool{},
-		ruleDocs:    map[string]bool{},
-		bareDocs:    map[string]bool{},
-		statedRules: map[string]map[string]bool{},
+		sigDocs:      map[string]bool{},
+		exemptDocs:   map[string]bool{},
+		ruleDocs:     map[string]bool{},
+		bareExhibits: map[string]bool{},
+		statedRules:  map[string]map[string]bool{},
 	}
 	for _, file := range files {
 		text := read(file)
@@ -381,11 +423,18 @@ func sweepSigs(files []string, read func(string) string, exhibits []string) sigS
 
 		bare, bareBroken := scanBareSigs(file, text)
 		out.unclosed = append(out.unclosed, bareBroken...)
-		if len(bare) > 0 && exhibit[file] {
-			out.bareDocs[file] = true
-			bare = nil
+		unclaimed := map[string]bool{}
+		for _, list := range exhibits[file] {
+			unclaimed[list] = true
 		}
-		out.graded = append(out.graded, bare...)
+		for _, sig := range bare {
+			if !unclaimed[sig.list] {
+				out.graded = append(out.graded, sig)
+				continue
+			}
+			delete(unclaimed, sig.list)
+			out.bareExhibits[exhibitEntry(file, sig.list)] = true
+		}
 
 		for _, sig := range sigs {
 			out.sigDocs[file] = true
@@ -459,39 +508,63 @@ func TestSpecSweepsCarryUnreadableSites(t *testing.T) {
 	})
 }
 
-// TestSpecSweepRoutesBareSitesByExhibit is the witness for the two lines
-// deciding where a parenthesis-less parameter list lands. Both are green
-// on a clean tree either way round, because the repository's one exhibit
-// is also the only document printing such a list.
+// TestSpecSweepRoutesBareSitesByExhibit is the witness for the lines
+// deciding where a parenthesis-less parameter list lands. The document
+// set is synthetic: the repository's one listed document prints each of
+// its three exhibits exactly once, so it exercises neither a second copy
+// of one nor a declared exhibit that has gone missing.
 //
-// A document is an exhibit only while it prints one, which is what the
-// third row holds: without it, the census entry can outlive the exhibit
-// it covers.
+// An exhibit is exempt only while the document prints it, which is what
+// the third row holds — without it a census entry outlives the exhibit
+// it covers. The fourth and fifth hold the exemption to the list the
+// census names, and to one site of that list: a listed document states
+// claims about the emitted surface too, and a claim can be spelled the
+// way an exhibit is.
 func TestSpecSweepRoutesBareSitesByExhibit(t *testing.T) {
-	const drifted = "the parameter list is `ctx context.Context, minAge int64`\n"
+	const drifted = "ctx context.Context, minAge int64"
+	claim := "ctx context.Context, " + codegen.ParamArg + " int64"
 	docs := map[string]string{
-		"graded.md":  drifted,
-		"exhibit.md": drifted,
+		"graded.md":  "the parameter list is `" + drifted + "`\n",
+		"exhibit.md": "the parameter list is `" + drifted + "`\n",
 		"silent.md":  "this document quotes no parameter list at all\n",
+		"mixed.md":   "the exhibit is `" + drifted + "` and the emitted list is `" + claim + "`\n",
+		"twice.md":   "the exhibit is `" + drifted + "` and so is `" + drifted + "`\n",
 	}
 	read := func(file string) string { return docs[file] }
+	listing := func(file string) map[string][]string {
+		return map[string][]string{file: {drifted}}
+	}
 
 	t.Run("an unlisted document's bare list is graded", func(t *testing.T) {
 		sweep := sweepSigs([]string{"graded.md"}, read, nil)
 		require.Len(t, sweep.graded, 1)
 		require.Equal(t, "minAge", sweep.graded[0].arg)
-		require.Empty(t, sweep.bareDocs)
+		require.Empty(t, sweep.bareExhibits)
 	})
 
-	t.Run("a listed document's bare list is censused instead of graded", func(t *testing.T) {
-		sweep := sweepSigs([]string{"exhibit.md"}, read, []string{"exhibit.md"})
+	t.Run("a listed bare list is censused instead of graded", func(t *testing.T) {
+		sweep := sweepSigs([]string{"exhibit.md"}, read, listing("exhibit.md"))
 		require.Empty(t, sweep.graded)
-		require.Equal(t, map[string]bool{"exhibit.md": true}, sweep.bareDocs)
+		require.Equal(t, map[string]bool{"exhibit.md: " + drifted: true}, sweep.bareExhibits)
 	})
 
-	t.Run("a listed document that prints none is not censused as an exhibit", func(t *testing.T) {
-		sweep := sweepSigs([]string{"silent.md"}, read, []string{"silent.md"})
-		require.Empty(t, sweep.bareDocs, "the lost direction is what reports this")
+	t.Run("a listed bare list the document stopped printing is not censused", func(t *testing.T) {
+		sweep := sweepSigs([]string{"silent.md"}, read, listing("silent.md"))
+		require.Empty(t, sweep.bareExhibits, "the lost direction is what reports this")
+	})
+
+	t.Run("a listed document's unlisted bare list is graded", func(t *testing.T) {
+		sweep := sweepSigs([]string{"mixed.md"}, read, listing("mixed.md"))
+		require.Len(t, sweep.graded, 1)
+		require.Equal(t, codegen.ParamArg, sweep.graded[0].arg)
+		require.Equal(t, map[string]bool{"mixed.md: " + drifted: true}, sweep.bareExhibits)
+	})
+
+	t.Run("a second copy of a listed bare list is graded", func(t *testing.T) {
+		sweep := sweepSigs([]string{"twice.md"}, read, listing("twice.md"))
+		require.Len(t, sweep.graded, 1)
+		require.Equal(t, "minAge", sweep.graded[0].arg)
+		require.Equal(t, map[string]bool{"twice.md: " + drifted: true}, sweep.bareExhibits)
 	})
 }
 
@@ -1280,11 +1353,13 @@ func scanBareSigs(file, text string) (sigs, unclosed []specSig) {
 			unclosed = append(unclosed, site)
 			continue
 		}
-		name, _, gradable := gradeParams(collapse(text[open+1 : open+1+closing]))
+		list := collapse(text[open+1 : open+1+closing])
+		name, _, gradable := gradeParams(list)
 		if !gradable {
 			continue
 		}
 		site.arg = name
+		site.list = list
 		sigs = append(sigs, site)
 	}
 	return sigs, unclosed

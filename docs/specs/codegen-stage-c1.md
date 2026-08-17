@@ -754,7 +754,14 @@ an open paren or a code span's backtick and holding exactly one more
 parameter; the parameter-list tail each
 `<param-list>` bullet spells out, which is where the rule actually
 lives, because the method template above prints only the placeholder;
-and the value half of every `map[string]any` literal's entries. A
+and the value half of every `map[string]any` literal's entries. The
+first shape has one written exception: the handful of
+parenthesis-less parameter lists ADR 0029 prints as exhibits of what
+the fence catches rather than as claims about the emitted surface,
+each named in that test by its exact text. An exhibit is exempt
+once, so a second list spelled the same way grades, and every other
+parenthesis-less list in that document is read on the same terms as
+any other document's. A
 placeholder in the type position is not an exemption for the name
 beside it — over a swept *signature* the fence grades the name
 position and reads nothing off the type, so a `<bareParam> <T>`
@@ -834,14 +841,17 @@ this very section reading *the parameter list is* `ctx
 context.Context, arg int64` — with the parentheses simply left off —
 was a parameter list to a reader and prose to the sweep, and the same
 bullet spelling the author's parameter name instead was measured
-green. The backtick anchor closes that spelling. Two neighbouring ones
-stay open: a parameter list written into prose with no code span
-around it is not read at all, and the binding sweep has no second
-anchor, so `"minAge": minAge` stated with no `map[string]any` literal
-around it is unswept (`gqlc-offa`). The binding case was measured rather
-than assumed — these documents carry over 130 bare `"key": value`
-spans across 21 files, nearly all of them JSON model shapes, so a
-sweep reading them would redden on prose across the corpus.
+green. The backtick anchor closes that spelling. Three neighbouring
+ones stay open: a parameter list written into prose with no code span
+around it is not read at all; the binding sweep has no second anchor,
+so `"minAge": minAge` stated with no `map[string]any` literal around
+it is unswept (`gqlc-offa`); and a claim put in the place of one of
+the parenthesis-less lists that test names as exhibits, spelled the
+way that exhibit was, takes its exemption (`gqlc-x2sg`). The binding
+case was measured rather than assumed — these documents carry over
+500 bare `"key": value` spans across more than 30 files, nearly all
+of them JSON model shapes, so a sweep reading them would redden on
+prose across the corpus.
 
 The fifth and sixth are narrower, and both were measured rather than
 reasoned about. The sweeps read raw markdown bytes, so a site inside
