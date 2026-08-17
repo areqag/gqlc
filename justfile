@@ -424,11 +424,23 @@ test-codegen-fence: ensure-golangci check-codegen-external-tests
 # tag or a move of the container code behind a different one.
 #
 # Both are driven off discovery rather than off the literal `test/data/codegen`
-# they used to name (bd gqlc-oxne), and the second finds ITS module the same way:
-# whichever go.mod requires testcontainers-go is the one holding the live
-# battery, so moving the battery moves this assertion with it instead of leaving
-# it pointed at an empty directory. Exactly one module must require it — none
-# means the battery is gone and this guard is checking nothing.
+# they used to name (bd gqlc-oxne), and the second finds ITS modules the same way:
+# a go.mod requiring testcontainers-go is a module holding a live battery, so
+# moving the battery moves this assertion with it instead of leaving it pointed
+# at an empty directory. None means the battery is gone and this guard is
+# checking nothing, so none is refused.
+#
+# EVERY module that requires it is asserted over, not one of them. A scalar here
+# was the same defect as the literal path one paragraph up, one level along: the
+# loop overwrote it, `scope modules` returns sorted paths, and the last match
+# won. Measured on this tree — a second nested module requiring testcontainers-go
+# moved the assertion onto it and left test/data/codegen, the module bd gqlc-rohp
+# is about, unchecked with nothing saying so. Refusing the second module instead
+# would reintroduce what this recipe just stopped doing: making a legitimate tree
+# change a gate failure that only a gate edit can clear, while checking no more
+# code than before. The modules checked are printed for the same reason
+# lint-hooks prints its script list — a set that is only counted is a set nobody
+# can see narrow.
 [private]
 check-codegen-external-tests:
     #!/usr/bin/env bash
@@ -483,7 +495,7 @@ check-codegen-external-tests:
     fi
 
     inpackage=()
-    battery=""
+    batteries=()
     for m in "${nested[@]}"; do
         # Assignment rather than `mapfile -t tests < <(find ...)`, and for this
         # recipe's own reason rather than style — see the house rule in `just
@@ -526,9 +538,20 @@ check-codegen-external-tests:
                 *)  inpackage+=("$f (package $pkg)") ;;
             esac
         done
-        if go mod edit -json "${m}/go.mod" \
-            | grep -q '"Path": "github.com/testcontainers/testcontainers-go"'; then
-            battery="${m}"
+        # Read then match, rather than `go mod edit -json … | grep -q`. That
+        # pipeline is the condition of an `if`, so errexit is off for it and
+        # pipefail has nobody to report to: a go.mod the go command cannot read
+        # takes the same branch as a go.mod that does not name the battery, and
+        # the refusal below then blames a dropped requirement for an unreadable
+        # file.
+        gomod_json="$(go mod edit -json "${m}/go.mod")" || {
+            echo "error: go mod edit -json could not read ${m}/go.mod, so whether that module" >&2
+            echo "       holds the live battery is unknown — and an unknown answer here reads" >&2
+            echo "       exactly like 'this module is not the battery' (bd gqlc-rohp)." >&2
+            exit 1
+        }
+        if grep -q '"Path": "github.com/testcontainers/testcontainers-go"' <<<"${gomod_json}"; then
+            batteries+=("${m}")
         fi
     done
     if [ "${#inpackage[@]}" -ne 0 ]; then
@@ -540,7 +563,7 @@ check-codegen-external-tests:
         exit 1
     fi
 
-    if [ -z "${battery}" ]; then
+    if [ "${#batteries[@]}" -eq 0 ]; then
         echo "error: no module in this tree requires github.com/testcontainers/testcontainers-go," >&2
         echo "       so the closure assertion below has nothing to assert over and this guard is" >&2
         echo "       half a guard (bd gqlc-rohp). Either the live battery has moved out of the" >&2
@@ -548,22 +571,37 @@ check-codegen-external-tests:
         echo "       dropped, which is the regression itself." >&2
         exit 1
     fi
-    tags_raw="$(scope tags "${battery}")" || exit 1
-    taglist="$(printf '%s\n' "${tags_raw}" | paste -sd,)"
-    tagflag=()
-    [ -z "${taglist}" ] || tagflag=(-tags "${taglist}")
-    cd "${battery}"
-    xtest="$(go list "${tagflag[@]}" -f '{{{{range .XTestImports}}{{{{println .}}{{{{end}}' ./... | sort -u)"
-    if ! go list -deps "${tagflag[@]}" ./... ${xtest} \
-        | grep -qx 'github.com/testcontainers/testcontainers-go'; then
-        echo "error: github.com/testcontainers/testcontainers-go is not in the package closure" >&2
-        echo "       govulncheck will load for ${battery}, so the live battery's dependency tree is" >&2
-        echo "       unscanned again (bd gqlc-rohp). The closure is the non-test deps plus every" >&2
-        echo "       external test package's deps, taken under the tags derived for that module" >&2
-        echo "       [${taglist:-none}]; check the tag still reaches the container code and that" >&2
-        echo "       the battery is still an external test package." >&2
-        exit 1
-    fi
+    for battery in "${batteries[@]}"; do
+        tags_raw="$(scope tags "${battery}")" || exit 1
+        taglist="$(printf '%s\n' "${tags_raw}" | paste -sd,)"
+        tagflag=()
+        [ -z "${taglist}" ] || tagflag=(-tags "${taglist}")
+        echo "closure: ${battery}, tags [${taglist:-none}]"
+        xtest="$(cd "${battery}" && go list "${tagflag[@]}" -f '{{{{range .XTestImports}}{{{{println .}}{{{{end}}' ./... | sort -u)" || {
+            echo "error: the external test imports of ${battery} could not be listed, so the" >&2
+            echo "       closure below would be assembled from a short list and the assertion" >&2
+            echo "       would be about less code than it names (bd gqlc-rohp)." >&2
+            exit 1
+        }
+        # Loaded then matched, not piped into grep: through a pipe, a `go list`
+        # that died reads as a closure that does not contain the battery, and
+        # the message blames the packaging for a broken load.
+        deps="$(cd "${battery}" && go list -deps "${tagflag[@]}" ./... ${xtest})" || {
+            echo "error: the package closure of ${battery} could not be loaded under tags" >&2
+            echo "       [${taglist:-none}], so whether it reaches testcontainers-go is unknown" >&2
+            echo "       (bd gqlc-rohp). The load's own diagnostic is above." >&2
+            exit 1
+        }
+        if ! grep -qx 'github.com/testcontainers/testcontainers-go' <<<"${deps}"; then
+            echo "error: github.com/testcontainers/testcontainers-go is not in the package closure" >&2
+            echo "       govulncheck will load for ${battery}, so the live battery's dependency tree is" >&2
+            echo "       unscanned again (bd gqlc-rohp). The closure is the non-test deps plus every" >&2
+            echo "       external test package's deps, taken under the tags derived for that module" >&2
+            echo "       [${taglist:-none}]; check the tag still reaches the container code and that" >&2
+            echo "       the battery is still an external test package." >&2
+            exit 1
+        fi
+    done
 
 # runs every live test in the codegen module against real testcontainers:
 # the smoke battery on all three arms plus the AGE session-init contract.
