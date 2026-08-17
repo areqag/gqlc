@@ -69,10 +69,12 @@ var decoderProbeScalars = []decoderProbeWidth{
 //
 // The list arms are derived rather than written out, so a scalar added
 // to the table above arrives with its slice and its slice-of-slice
-// already declared. Two levels is where the derivation stops: the
-// constructor nests without bound and the emitted walk recurses with it,
-// so a decode arm reachable only at three levels of nesting is outside
-// what this covers.
+// already declared. Two levels is where the derivation stops, and it is
+// the first depth that reaches writeSliceNarrow's recursive arm at all.
+// No depth would finish the job: that walk names its locals off the
+// recursion depth, so each further level of nesting introduces
+// identifiers no shallower probe has seen. gqlc-wdo7 carries the
+// measurement and what closing it would take.
 func decoderProbeWidths() []decoderProbeWidth {
 	out := make([]decoderProbeWidth, 0, 3*len(decoderProbeScalars))
 	for _, w := range decoderProbeScalars {
