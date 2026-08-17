@@ -702,9 +702,10 @@ func columnSite(queryName string, pos int, columnName string) string {
 // the interface is satisfiable by types this package never sees, so no
 // enumeration written here closes the set. Promotion composes, and
 // composing it reaches faulting shapes none of the four covers: a nil
-// pointer to a struct that embeds a variant by value faults, because the
-// promoted value method must dereference the pointer to reach its
-// receiver, and that struct is not one of the eight variants. Composing
+// pointer to a struct that embeds a variant by value and declares no
+// String() of its own faults, because the promoted value method must
+// dereference the pointer to reach its receiver, and that struct is not
+// one of the eight variants. Composing
 // is not itself what faults, though — the same struct held by value
 // answers, which is the value-embedder case in
 // TestUnmatchedResolvedTypeKeepsTheWireTagWhereThereIsOne. Nothing below
