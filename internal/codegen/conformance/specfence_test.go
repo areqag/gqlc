@@ -121,10 +121,11 @@ const repoRoot = "../../../"
 // The third is the largest, and unlike the first it is a one-part edit.
 // A listed document keeps its entry on one surviving graded site, so
 // every site past the first can leave the sweep with nothing said. Not
-// by being corrected — by ceasing to print `ctx context.Context`, which
-// is what the scanners anchor on, so a site that drifts in the anchor
-// itself drifts off an axis this file does not grade and takes its
-// argument name out of reach on the way. C4 §3.2's WriteQuerier member
+// by being corrected — by ceasing to print the anchor it is found on,
+// `ctx context.Context` for a signature and `map[string]any{` for a
+// binding. A site that drifts in its own anchor drifts on an axis this
+// file does not grade at all, and takes the axis it does grade out of
+// reach on the way out. C4 §3.2's WriteQuerier member
 // `RemovePerson(ctx context.Context, arg int64)` — the declared
 // interface surface gqlc-rz0l singled out as drift in a surface rather
 // than in prose — is one of ten graded signatures in that document, and
@@ -568,10 +569,14 @@ func requireCensus(t fenceT, written []string, observed map[string]bool, census,
 // What is left is not wiring. The sweeps' own comparison bodies
 // (`sig.arg != codegen.ParamArg` and the binding's prefix test) and
 // their calls to these helpers are the assertions, and deleting an
-// assertion passes any test in any suite; there is no arrangement of
-// this file that changes that. The line drawn here is between an
-// assertion, whose deletion is a deletion a reader sees, and plumbing,
-// whose neutering reads as bookkeeping and takes a failure with it.
+// assertion passes any test. That could be witnessed too — hand a
+// synthetic sweep result to an extracted assertion block and check
+// which headline comes back — and it is not, deliberately: the line
+// drawn here is between an assertion, whose deletion is a deletion a
+// reader sees in the diff, and plumbing, whose neutering reads as
+// bookkeeping and takes a failure with it. Witnessing the first buys a
+// guard against a reviewer missing a deleted `require`; witnessing the
+// second was the only way to see these six at all.
 type fenceT interface {
 	require.TestingT
 	Helper()
