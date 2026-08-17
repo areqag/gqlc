@@ -1489,8 +1489,8 @@ func (s *ResolverSuite) TestInlineEndpointsAgreeWithTheirVarSpelling() {
 		inline, varSpe string
 	}{
 		{
-			// An inline endpoint under-enumerates the OTHER end's narrowing too,
-			// so which side of the pattern it is written on must not matter.
+			// Paired with the row below because an endpoint feeds the narrowing of
+			// the end OPPOSITE it, so which side it is written on must not matter.
 			name: "the far end of a narrowing", lane: "invalid", schema: "satisfy_plural_edges_inline_subtype.gql",
 			inline: "MATCH (p:Person)-[r:WORKS_AT]->(:Company) RETURN p",
 			varSpe: "MATCH (p:Person)-[r:WORKS_AT]->(c:Company) RETURN p",
@@ -1634,9 +1634,11 @@ func (s *ResolverSuite) TestInlineEndpointCommitsOnTheTypesSatisfyingIt() {
 // the narrowing then reads that singleton as a satisfying set. The var endpoint
 // the gate waves through is a laundered uncovered one.
 //
-// An uncovered far end is now a VarEndpoint every time. The two ways a binding
-// gets into `resolved` without getting into resolvedCovers are an uncovered
-// Phase B inference and a carried entry, and the refusing row below chains the
+// An uncovered far end now reaches this only through the VarEndpoint arm: the
+// inline arm reports covering on both its returns, and the var arm reports what
+// resolvedCovers holds. Four sites write the resolved node lane and two of them
+// leave resolvedCovers alone — inferUnlabelled when candidateTypes did not
+// report covering, and newScope's carry seed. The refusing row below chains the
 // first into a second inference: `c` is inferred through an OPTIONAL hop, so it
 // is Company and uncovered; `x` is inferred from `c`; and `y` is narrowed from
 // `x`. Trusting `c` there costs `y` the Company&Large its rows really carry.
