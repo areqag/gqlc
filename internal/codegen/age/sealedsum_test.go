@@ -58,8 +58,9 @@ type (
 // probeEdgeUnion is a two-candidate union carrying two distinct labels: the
 // shape edgeUnionReason answers rather than stands aside from. Its labels are
 // what the "names no candidate" rows below look for and fail to find in the
-// non-value forms' reasons, so they are spelled here once and asserted by
-// name.
+// non-value forms' reasons. They are written out rather than derived, and
+// appear four times each: here, in probeColumnQuery's Cypher text, and in the
+// two assertion rows that name them.
 var probeEdgeUnion = resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{
 	{Source: "Person", KeyLabels: "AUTHORED", Target: "Post"},
 	{Source: "Person", KeyLabels: "LIKES", Target: "Post"},
@@ -306,12 +307,21 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 		for _, name := range sortedInhabitantNames() {
 			in := inhabitants[name]
 			require.NotNilf(t, in.pointer, "%s: no pointer form enumerated", name)
-			// The fall-through's exact text. Asserting the text rather than
-			// only non-emptiness is what separates "reached the fall-through"
-			// from "reached some arm that also refuses": resolver.ResolvedEdgeUnion's
-			// arm is the one that also refuses, and it answers the candidate
-			// list, which `"projects " + String()` does not carry — only the
-			// text tells that arm from the fall-through.
+			// The fall-through's exact text. Asserting the text rather
+			// than only non-emptiness separates "reached the
+			// fall-through" from "reached an arm that also refuses" on
+			// one of the three rows where that distinction arises, not
+			// on all eight. Three have an arm that refuses the value
+			// this table hands it — the 1 and the 2 of the partition
+			// above: resolver.ResolvedEdgeUnion, resolver.ResolvedList
+			// and resolver.ResolvedUnknown. Of the arms, only the
+			// edge-union one can answer something `"projects " +
+			// String()` does not carry, the candidate list, so only
+			// there does the text tell the arm from the fall-through;
+			// the list and unknown arms return the fall-through's own
+			// text, and this row is satisfied either way for those two.
+			// The other five have an arm that serves, which
+			// non-emptiness alone would have separated.
 			require.Equalf(t, "projects "+in.pointer.String(), unservedColumn(in.pointer),
 				"*%s must reach unservedColumn's fall-through; every marker and String on the variants takes a value receiver, and a pointer's method set contains its value methods, so the pointer satisfies resolver.ResolvedType while `case resolver.%s:` does not match it",
 				name, name)
@@ -328,11 +338,14 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 		}
 	})
 
-	// The refusal, which is the half the fall-through's behaviour rests on: an
-	// unrecognised shape is dropped with a reason, not served through an arm
-	// chosen for some other shape. Stated separately from the text rows above
-	// because it is the property the comment argues, and it survives a change
-	// to the wording of the reason.
+	// The refusal on its own: an unrecognised shape is dropped with a reason
+	// rather than served. Strictly weaker than the two rows above — every
+	// `"projects " + String()` they pin is non-empty, so this row cannot RED
+	// while they are green. It is here for what it still says once the
+	// fall-through's wording changes, which is when those two stop saying
+	// anything until they are rewritten: the shape is refused, whatever the
+	// reason reads. It does not witness WHICH path refused — a non-empty reason
+	// is equally consistent with an arm.
 	t.Run("no non-value form is served", func(t *testing.T) {
 		for _, name := range sortedInhabitantNames() {
 			in := inhabitants[name]

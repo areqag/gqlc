@@ -463,9 +463,15 @@ func unservedColumn(t resolver.ResolvedType) string {
 	// refused on the same terms: dropped rather than emitted through an arm
 	// chosen for some other shape, because a column no arm here recognises
 	// has no decode arm either and serving it would emit a method that
-	// cannot fill its row. The reason carries the wire tag and nothing
-	// else, which is thinner than what the edge-union arm says and is what
-	// the ranking in unservedReason turns on.
+	// cannot fill its row. The reason carries the width vocabulary only:
+	// "projects " and the variant's diagnostic Stringer, which for
+	// ResolvedProperty, ResolvedScalar and ResolvedTemporal composes the
+	// family into the tag rather than being the wire tag
+	// (internal/resolver/validated.go). It
+	// is the same text the list and unknown arms return, and it names no
+	// candidate, so it says less than the edge-union arm does when that
+	// arm refuses. That gap is what the ranking in unservedReason turns
+	// on.
 	// TestUnservedColumnFallThroughIsNotANinthVariant is the witness, for
 	// all eight variants in both forms.
 	return "projects " + t.String()
