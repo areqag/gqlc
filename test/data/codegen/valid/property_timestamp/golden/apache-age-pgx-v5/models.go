@@ -107,6 +107,16 @@ func agtypeInstant(raw []byte) (time.Time, error) {
 // Flat rather than a member of a map so the instant stays the property
 // itself: ORDER BY n.at and WHERE n.at > $since are then answered by
 // agtype's integer ordering, with nothing for gqlc to rewrite.
+//
+// The offset is bounded at a day either way, exclusive, before it is
+// taken. gqlc derives no sidecar to bind — a parameter crosses as the
+// instant alone — so the integer read here is whatever the graph holds:
+// a query that names the key binds it like any other property, whether
+// or not gqlc generated that query. Unbounded it names a zone no clock
+// keeps, and the wall clock the caller then reads is arbitrarily far
+// from the instant stored beside it. The bound is a day rather than the
+// narrower range zone databases populate today, so a graph a future zone
+// database would accept is not refused here.
 func agtypeZone(props map[string][]byte, key string, at time.Time) (time.Time, error) {
 	raw, ok := props[key]
 	if !ok {
@@ -115,6 +125,9 @@ func agtypeZone(props map[string][]byte, key string, at time.Time) (time.Time, e
 	offset, err := agtypeInt64(raw)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("gqlc: offset %q: %w", key, err)
+	}
+	if offset <= -86400 || offset >= 86400 {
+		return time.Time{}, fmt.Errorf("gqlc: offset %q is %d seconds, which is not within a day of UTC", key, offset)
 	}
 	return at.In(time.FixedZone("", int(offset))), nil
 }
