@@ -10,6 +10,16 @@
 # `go run`, so no committed binary is ever needed.
 /bdguard
 
+# Discovery witnesses: `just vuln`, test-codegen-fence and
+# check-codegen-external-tests each mktemp a throwaway module under test/data to
+# prove the module set they compare is read off the tree rather than remembered.
+# The EXIT traps remove them, but a run killed by an untrapped signal leaves one
+# behind, and a leaked probe is a go.mod nobody wrote sitting where an unwary
+# `git add` would commit it.
+/test/data/vulnprobe.*/
+/test/data/fenceprobe.*/
+/test/data/xtestprobe.*/
+
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db

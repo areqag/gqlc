@@ -5,7 +5,11 @@
 #
 # What arms it is the scan's own inputs, derived rather than listed (bd
 # gqlc-pig9). Any .go file, any go.mod or go.sum anywhere in the tree, the
-# recipe, or this workflow. A named list of module paths would leave a third
+# recipe, .golangci.yml, or this workflow. .golangci.yml is in that list for a
+# reason nothing about the file's name suggests: its `run.build-tags` key is the
+# vocabulary the tag derivation classifies against, so it decides which -tags the
+# scan runs under and therefore which files govulncheck compiles at all (bd
+# gqlc-e7oq, bd gqlc-oxne). A named list of module paths would leave a third
 # module unwatched the day it is added, and a go.mod-only trigger is a proxy for
 # the wrong condition: govulncheck answers at symbol level, so a PR that newly
 # *calls* — or merely newly imports — an already-required module changes the
@@ -52,7 +56,7 @@ jobs:
           # piping the diff into the filter, one step further along.
           status=0
           relevant=$(printf '%s\n' "$files" \
-              | grep -E '\.go$|(^|/)go\.(mod|sum)$|^justfile$|^\.github/workflows/vuln\.yml$') || status=$?
+              | grep -E '\.go$|(^|/)go\.(mod|sum)$|^justfile$|^\.golangci\.yml$|^\.github/workflows/vuln\.yml$') || status=$?
           if [ "$status" -gt 1 ]; then
             echo "::error::scan-relevance filter failed with status $status; failing rather than skipping the scan"
             exit 1

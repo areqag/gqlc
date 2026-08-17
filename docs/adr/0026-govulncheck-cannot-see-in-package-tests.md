@@ -106,6 +106,18 @@ is a module partly scanned, and `ignore` is excluded because that tag's whole
 meaning is "not part of any build". The tags are read off the module's files on
 disk rather than out of `go list ./...`, for the reason below.
 
+Which tags a file *asks for* is derived; which spellings *are* tags is declared,
+and the declaration is `.golangci.yml`'s `run.build-tags` (bd gqlc-e7oq). The
+derivation classifies every term in a constraint against four vocabularies —
+`go tool dist list`, `go1.N`, the toolchain's own terms, and that key — and a
+term it can place in none of them is an error naming the file, never a `-tags`
+argument. Making "custom build tag" the default case is what let a `go tool dist
+list` that came back short turn the platform values it had lost back into tags,
+silently; there is no default case now. A genuinely new custom tag therefore
+goes into `.golangci.yml` first, which is where golangci-lint has always needed
+it, and `check-golangci-build-tags` still holds that key and the tree to each
+other in both directions.
+
 vuln.yml arms on any `.go` file, any
 `go.mod`/`go.sum` anywhere, the recipe, or itself. Each list this replaces was a
 proxy for the real condition: a module list omits the third module the day it is
