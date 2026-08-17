@@ -309,13 +309,15 @@ func matchType(t query.Type) string {
 	}
 }
 
-// sealedSums is the table of every marker-sealed interface internal/query
-// declares. Each row's variant keys are checked against the package's own
-// sources by TestQuerySumsAreNotClosed/<iface>/declared_variants, so a variant
-// landing or leaving without an edit here fails rather than silently narrowing
-// the rows below it. That the table names every such interface — the claim this
-// comment opens with, which no row's own comparison reaches — is checked by
-// TestQuerySumsAreNotClosed/table_covers_every_marker-sealed_interface.
+// sealedSums is the table of every interface internal/query declares with an
+// unexported marker of its own. Each row's variant keys are checked against
+// the package's own sources by
+// TestQuerySumsAreNotClosed/<iface>/declared_variants, so a variant landing or
+// leaving without an edit here fails rather than silently narrowing the rows
+// below it. That the table names every interface declaring a marker of
+// its own — the claim this comment opens with, which the per-sum rows'
+// comparisons do not reach — is checked by
+// TestQuerySumsAreNotClosed/table_covers_every_interface_with_its_own_marker.
 //
 // The type argument on each forms call is the sum's interface: it is the
 // compile-time half of the claim, and dropping a row's pointer or embedded
@@ -626,14 +628,17 @@ func sortedKeys[V any](m map[string]V) []string {
 // default. Counts live in the interfaces' doc comments, which the doc row
 // holds to the declared set; stating one here would drift unread.
 func TestQuerySumsAreNotClosed(t *testing.T) {
-	// Every row below holds one sum's doc comment and matcher to that sum's own
-	// declarations. This row is the one that holds the set of rows to the
-	// package: without it a marker-sealed interface reaches master read by
-	// nothing here, doc comment included. That is not hypothetical — gqlc-1vkb's
-	// own site list names seven interfaces (Binding, PathMember, Endpoint,
-	// Projection, Use, Effect, Type) where the package declares eight, and
-	// SetEffect was found by hand while the other seven were being rewritten.
-	t.Run("table covers every marker-sealed interface", func(t *testing.T) {
+	// Every row below measures one sum against that sum's own declarations.
+	// This row is the one that holds the set of rows to the package: without it
+	// a marker-sealed interface reaches master read by nothing here, doc comment
+	// included. That is not hypothetical — gqlc-1vkb's own site list names seven
+	// interfaces (Binding, PathMember, Endpoint, Projection, Use, Effect, Type)
+	// where the package declares eight, and SetEffect was found by hand while
+	// the other seven were being rewritten.
+	//
+	// The name says "its own marker" rather than "marker-sealed" because that is
+	// what sealedInterfaces reads; see the limit stated there.
+	t.Run("table covers every interface with its own marker", func(t *testing.T) {
 		declared := sealedInterfaces(t)
 		// An empty ground truth agrees with any table that is also empty, so the
 		// comparison below would hold without measuring anything. This is the
