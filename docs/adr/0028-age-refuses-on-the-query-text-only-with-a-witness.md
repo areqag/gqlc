@@ -69,9 +69,29 @@ actually refuses); that `find` reads none of the served texts (so the gate is
 bounded, which is the half that matters given the asymmetry above); that the
 named witness is declared in a `live_*_test.go` file; that every probe text,
 every recorded answer and every served text appears verbatim in **that witness's
-own body**; and that every AGE live recipe in the justfile runs it — a `go test`
-invocation, built with `-tags codegen_live`, selected WHOLE by every `-run` and
-matched by no `-skip` — with `-count=1`.
+own body**; and that each of the two recipes `ageLiveRecipes` names runs it —
+**one** `go test` invocation that is itself built with `-tags codegen_live`,
+selected WHOLE by every `-run` it carries and matched by no `-skip` it carries.
+Every `go test` in such a recipe must also carry `-count=1`. That list is two
+hand-written names, not every live recipe in the file and not what CI invokes:
+the third live recipe (`test-codegen-live-neo4j`) must *not* run these witnesses,
+so a derived "every live recipe" rule would be false, and nothing here reads
+`.github/workflows` to check that CI calls either name.
+
+**One invocation, not one body.** Those flags were read from the whole recipe
+body until round 4, while the `go test` was located separately, so a
+`-tags codegen_live` on any *other* command satisfied the tag requirement for a
+`go test` carrying none. Putting this justfile's own fence idiom
+(`go vet -tags codegen_live ./...`) on the line above and dropping the tag off
+the test restored review mutation T1 with one added line: measured, the recipe
+then printed `[no test files]` for all 154 packages under `test/data/codegen`
+and exited 0, starting no container and running no witness, while the sweep
+stayed green (review mutations POOLTAG2 and POOLTAG). The `-count=1` check had
+the same shape and two spellings of the same silence: the bytes `-count=1` left
+standing inside an `-ldflags` value (CNT1), and a real `-count=1` on a different
+`go test` in the same body (CNT2). `goTestInvocations` now cuts a body at the
+boundaries a command actually ends on — a line, `&&`, `||`, `;`, `|` — and every
+flag is read from the command that would run it.
 
 "In the body" means in the body's **code**. The reader parses each live file and
 renders every test's body back from the tree with `format.Node`, so a comment is
@@ -121,19 +141,41 @@ alternative counts as selecting the witness only when it carries no further
 elements. Both AGE recipes' `-run` alternatives are bare names, so the rule costs
 nothing here.
 
-The approximations that remain, named with the direction each fails in. Every
-`-run` must select the witness, where `go test` honours only the last:
-**complaint**. Any `-skip` alternative whose first element matches the witness
-counts as skipping it, where `go test` would drop only a subtest: **complaint**,
-and deliberately the same direction as the `-run` rule. Every `-tags` value must
-carry `codegen_live`, where `go test` honours the last: **complaint**. The
-pattern split is naive where `go test`'s is bracket-aware, and a pattern whose
-pieces do not compile is read as neither selected nor safely skipped:
-**complaint**. The one that fails toward **silence** is expansion — the reader is
-not a shell, so a recipe writing `SKIP='…|W' && go test … -skip "$SKIP"` hands it
-the literal `$SKIP`, which compiles as a regexp matching no test name; for `-run`
-that reads as a witness which does not run, and for `-skip` it reads as a witness
-which is not skipped (review mutation V4b). Closing that means being a shell.
+The approximations that remain, named with the direction each fails in. Within
+one invocation every `-run` must select the witness, where `go test` honours only
+the last: **complaint**. Any `-skip` alternative whose first element matches the
+witness counts as skipping it, where `go test` would drop only a subtest:
+**complaint**, and deliberately the same direction as the `-run` rule. Within one
+invocation every `-tags` value must carry `codegen_live`, where `go test` honours
+the last: **complaint**. The pattern split is naive where `go test`'s is
+bracket-aware, and a pattern whose pieces do not compile is read as neither
+selected nor safely skipped: **complaint**. An operator without spaces around it
+(`a&&go test`) leaves no command starting at `go`, so the invocation is not seen
+at all: **complaint**.
+
+The ones known to fail toward **silence** are below. That list has grown in every
+review round so far, each time because someone mutated a sentence claiming it was
+already complete, so it is written as what has been found and not as what exists.
+
+- **Expansion.** The reader is not a shell, so a recipe writing
+  `SKIP='…|W' && go test … -skip "$SKIP"` hands it the literal `$SKIP`, which
+  compiles as a regexp matching no test name; for `-skip` that reads as a witness
+  which is not skipped (review mutation V4b). Closing it means being a shell.
+- **The package argument** — see below (review mutation T2). Its two-invocation
+  spelling is the same silence with a line in front: a `go test` carrying the tag
+  and the right `-run` over `./valid/...`, which holds no live test, alongside an
+  untagged one over `./...` (POOLRUN2). Binding the flags to their own invocation
+  does not reach it, because the invocation that satisfies every flag check is
+  the one whose *path* runs nothing.
+- **Shell this reader does not model**: backslash escapes, command substitution,
+  heredocs and here-strings. Each can put a comment cut, or a command boundary,
+  where `sh` would not, and what a wrong cut costs is a `-run` — of which the
+  absence selects everything. This justfile uses all of them (44 `$(`, heredocs
+  at lines 632, 766 and 814, here-strings on seven further lines), so the bound
+  is not the file; it is that `recipeBodies` reads only the two recipes
+  `ageLiveRecipes` names, and those two use none of them.
+  `TestTheRecipesThisReaderParsesStayInsideTheShellItModels` holds that, because
+  it is true of two single-line recipes today rather than a law about justfiles.
 
 **A check that finds nothing must not answer yes.** Every flag loop above is over
 a slice that may be empty, and an empty slice of `-run` values genuinely does mean
@@ -145,12 +187,26 @@ a quoted `#` in an `-ldflags` value, which the comment strip took as a comment a
 which carried the `-run` away with it while leaving `-count=1` standing (V3); and
 dropping `-tags codegen_live`, which compiles none of the live battery, so `go
 test` prints `[no test files]` for every package under `test/data/codegen` (T1).
-`recipeRuns` now requires a `go test` invocation and the live tag before it reads
-any pattern, and refuses a command line whose quoting does not close; the comment
-strip cuts only at a `#` that starts a word outside quotes. The `go test` has to
-be in command position — starting a line or following `&&`, `||`, `;` or `|` —
-because the first version of that check searched every argument and would have
-counted a witness "run" by `echo go test -run W`.
+`recipeRuns` now reads flags only off a `go test` invocation and requires the
+live tag on that invocation before it reads any pattern, and refuses a command
+line whose quoting does not close; the comment strip cuts only at a `#` that
+starts a word outside quotes. The `go test` has to be in command position —
+starting a line or following `&&`, `||`, `;` or `|` — because the first version
+of that check searched every argument and would have counted a witness "run" by
+`echo go test -run W`.
+
+Round 4 found the same question unanswered one level down: the loops did not find
+nothing, they found a flag on a command that was not the test run, which is the
+same "yes" from a check that was looking at the wrong thing. POOLTAG2, POOLTAG,
+CNT1 and CNT2 are those, and their rows are in
+`TestRecipeRunsOnlyWhatTheCommandLineSelects` and
+`TestRecipeReaderComplainsOnEachBrokenRecipe` respectively. `-count=1` is
+required of **every** `go test` in a live recipe rather than of some, because
+`recipeBodies` is not told which witness matters and "some invocation is
+uncached" would leave the one that runs the witness free to report on a cache.
+A body running no `go test` at all is vacuously silent there, deliberately:
+"this recipe runs no test" is `recipeRuns`' answer and the sweep asks it of every
+gap.
 
 **What the sweep still does not check: where the package argument points.** It
 reads the command line and nothing else, so the `cd test/data/codegen` in front
@@ -168,9 +224,14 @@ their own rows there. **L20 does not**, despite two rows that were named for it
 until round 3: a witness named only in a comment introduces no `-run`, so those
 rows hold whether comments are stripped or not, and they are really the `-run`
 half. The comment property itself — text that is spelled is not text that runs —
-is carried by the two `-count=1` rows of
-`TestRecipeReaderComplainsOnEachBrokenRecipe`, which are the rows that die when
-`stripRecipeComment` is made the identity.
+is carried by **one** row: "a trailing comment does not carry `-count=1` either"
+in `TestRecipeReaderComplainsOnEachBrokenRecipe`, which is the row that dies when
+`stripRecipeComment` is made the identity (mutation G15). Its whole-line sibling,
+"a `-count=1` only a comment spells", survives that mutation now and did not
+before: a comment on its own line is no longer a command whose fields anyone
+reads, because reading flags per invocation drops it before the comment strip
+would have. Only a comment sharing a line with the `go test` still reaches the
+flags.
 
 **What the sweep does not check: that the answer is asserted.** It requires the
 recorded answer to appear in the witness's body, not to be the subject of an
