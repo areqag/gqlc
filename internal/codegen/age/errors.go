@@ -474,10 +474,18 @@ func unservedColumn(t resolver.ResolvedType) string {
 	// caller hands over (internal/codegen/errors.go, gqlc-h4ug).
 	//
 	// So the arms are not the interface's membership, and this line is not
-	// a default for a ninth variant. A reason returned from here drops the
-	// column rather than emitting it through an arm chosen for some other
-	// shape, because a column no arm here recognises has no decode arm
-	// either and serving it would emit a method that cannot fill its row.
+	// a default for a ninth variant. What refusing here buys is the
+	// diagnostic, not the prevention of a wrong emission: with this line
+	// returning "" instead, *resolver.ResolvedNode and
+	// `struct{ resolver.ResolvedNode }` both came back from
+	// age.New().Generate as `out of C6 scope: query "Actions" column 0 "r"
+	// resolved as node` — no file emitted, and this backend not named in
+	// it. codegen.Prepare's own switches name the same variants these arms
+	// do (phaseAAdmit and phaseBDerive in internal/codegen/prepare.go), so
+	// a shape matching no arm here matches none there either and lands on
+	// their default. How a reason returned from here reaches the author
+	// instead, yield to the text gate included, is rejectUnservedQueries'
+	// business.
 	//
 	// `t.String()` dispatches to the shallowest String in the arriving
 	// type's method set. For a pointer to a variant, or a struct embedding
@@ -499,7 +507,7 @@ func unservedColumn(t resolver.ResolvedType) string {
 	// expression, so that is the behaviour before this comment as well as
 	// after. Recorded here because it happens, not to argue that it cannot;
 	// guarding it changes behaviour and wants its own test and its own
-	// bead, which this bead is not.
+	// bead, which this bead is not. That bead is gqlc-aefe (GH #961).
 	//
 	// TestUnservedColumnFallThroughIsNotANinthVariant is the witness, for
 	// the pointer and the embedded form of every variant the arms name and

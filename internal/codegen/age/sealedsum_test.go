@@ -33,10 +33,12 @@ import (
 )
 
 // Each embedder promotes one variant's methods, the unexported marker
-// included, and declares no method of its own — which the rows below depend on
-// and TestUnservedColumnFallThroughIsNotANinthVariant/the_embedders_add_no_String_of_their_own
-// holds them to, by reading the methods this package declares off its own
-// source. This file failing to build is itself the claim being falsified: if
+// included, and declares none of its own. What the rows below depend on is the
+// narrower half of that — no String — and no String is what
+// TestUnservedColumnFallThroughIsNotANinthVariant/the_embedders_add_no_String_of_their_own
+// holds them to, by reading String declarations off this package's own source.
+// A method under any other name passes that row, and no row here reads one.
+// This file failing to build is itself the claim being falsified: if
 // the marker sealed the interface, the compile-time assignments in the table
 // below would not typecheck from here.
 type (
@@ -121,8 +123,8 @@ var probeEdgeUnion = resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{
 // pointer and embedded are forms an out-of-package caller reaches without
 // declaring the marker, and neither matches a `case resolver.Variant:` arm.
 //
-// valueReason is what unservedColumn answers for the value form. Seven rows
-// write it out. resolver.ResolvedEdgeUnion's is derived, by calling
+// valueReason is what unservedColumn answers for the value form. Every row but
+// resolver.ResolvedEdgeUnion's writes it out; that one is derived, by calling
 // edgeUnionReason — deliberately, and it is the weaker of the two: a change to
 // that function's wording moves both sides of the ALLOW assertion together, so
 // the row pins the ROUTING (that a value edge union reaches that arm rather
@@ -378,8 +380,12 @@ func funcDecl(t *testing.T, f *ast.File, name string) *ast.FuncDecl {
 // gate, and is what unservedColumn's fall-through comment cites.
 //
 // What it buys, and what has no row here because the compiler enforces it: no
-// type outside internal/resolver can DECLARE isResolvedType, so the eight
-// variants are the whole set of declaring types.
+// type outside internal/resolver can DECLARE isResolvedType, so every declarer
+// lives in that package. How many live there is a different question, and not
+// one the compiler answers: a ninth variant declared alongside the others
+// leaves every row below green, measured. The declared set is held by
+// internal/resolver's own counterpart, TestResolvedTypeSumIsNotClosed's
+// "declared variants".
 //
 // What it does not buy: the marker is promoted as well as declared. A pointer
 // to a variant carries it, and so does a struct embedding one; neither matches
@@ -517,10 +523,11 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 	// The pointer and embedded rows assert `"projects " + form.String()`,
 	// whose two sides move together when the embedder declares its own String:
 	// making embedScalar, embedEdge and embedList each declare one left the
-	// whole package green, 0 failing subtests. So the file's "declares no
-	// method of its own" was prose nothing held. This row holds it off the
-	// source, where a declaration's absence shows even when its text would not
-	// — a shadow returning the promoted text changes no behaviour to observe.
+	// whole package green, 0 failing subtests, before this row existed. So
+	// the top of this file saying the embedders declare no String was prose
+	// nothing held. This row holds it off the source, where a declaration's
+	// absence shows even when its text would not — a shadow returning the
+	// promoted text changes no behaviour to observe.
 	//
 	// the_constructions_nest asserts a literal instead and does redden for the
 	// form it carries, which is why that row is not enough on its own.
