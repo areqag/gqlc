@@ -701,12 +701,8 @@ func walkListElemPlan(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 // one identifier, and the emitted package does not compile from a
 // nesting depth of three.
 //
-// The axis is depth, not the column position the row assembly's own
-// accumulator numbers on: sibling list columns each open their own loop
-// at the row assembly's indent, so their locals sit in disjoint blocks,
-// while a nested list's loop is emitted inside the enclosing one's body
-// and shares it. The outermost depth is unsuffixed, so a single-level
-// list column emits the loop spec §5.5 spells out.
+// Depth 0 is unsuffixed because spec §5.5 spells out the loop a
+// single-level list column emits.
 func elemLocal(name string, depth int) string {
 	if depth == 0 {
 		return name
