@@ -231,13 +231,20 @@ type recipeRun struct {
 // other stub records that it ran, which is what separates "the recipe returned
 // non-zero" from "the recipe stopped".
 //
-// Behavioural because no spelling rule reaches the property. Whether a failing
-// suite stops the recipe is decided by which of just's two carriers the recipe
-// is written in, and both carriers spell the suite lines identically: converted
-// to a `#!/usr/bin/env bash` recipe with its lines untouched, this recipe still
-// satisfies every `bash <suite>` rule above while discarding every failure but
-// the last. That is not a hypothetical carrier — `lint-hooks` in this same
-// justfile is a shebang recipe.
+// Behavioural, and not because the carrier is unreadable. Whether a failing
+// suite stops the recipe is decided by which of just's two carriers it is
+// written in, and both spell the suite lines identically: converted to a
+// `#!/usr/bin/env bash` recipe with its lines untouched, this recipe satisfies
+// every `bash <suite>` rule above while discarding every failure but the last.
+// That is not a hypothetical carrier — `lint-hooks` in this same justfile is a
+// shebang recipe.
+//
+// A rule over the recipe text could see that: refuse a body whose first line is
+// a `#!`. It is refused here because it pins the carrier rather than the
+// property. A shebang recipe that sets errexit has the property, and a rule
+// spelling the carrier would redden it — which is round 2's defect, one level
+// up. Running the recipe asks the question directly, and the deliberate
+// SURVIVED (shebang plus `set -e`) is the evidence that it does.
 //
 // `just` is required rather than skipped over. It is what the CI test job runs
 // (asserted below) and what `.githooks/pre-push` runs, so an absent `just` is a
