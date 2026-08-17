@@ -755,11 +755,15 @@ holding exactly one more parameter; the parameter-list tail each
 lives, because the method template above prints only the placeholder;
 and the value half of every `map[string]any` literal's entries. A
 placeholder in the type position is not an exemption for the name
-beside it — the fence grades the name position and reads nothing off
-the type at all, so a `<bareParam> <T>` restored into the bullet
-above is red on its name however the type is written, and a lone
-`<bareParam>` is graded as a declaration naming nothing rather than
-waved through for wearing angle brackets. The only token it declines
+beside it — over a swept *signature* the fence grades the name
+position and reads nothing off the type, so a `<bareParam> <T>`
+written there is red on its name however the type is spelled, and a
+lone `<bareParam>` is graded as a declaration naming nothing rather
+than waved through for wearing angle brackets. That scoping is the
+signature sweep's alone; the `<param-list>` bullet holds its tails
+verbatim, type included, so an edit touching only the type is red
+there as well — the last paragraph of this section states which is
+which. The only token it declines
 to grade is one standing for the whole parameter list — `<param-list>`
 and the numbered `<param-list-1>` the interface block below uses —
 and a document taking that exemption owes the bullet, because the
@@ -784,9 +788,12 @@ could not hold: the markers were the same shapes as the grading, so
 a single cosmetic edit here — moving the comma out of the template's
 placeholder — dropped this document from the requirement and from
 the reading at the same instant, and the capture vector went back
-into this section green.
+into this section green. ADR 0028 records that decision and the
+others behind the fence's shape.
 
-Three things are left open, and they are not the same size. Deleting
+At least five things are left open, and they are not the same size.
+The count is a floor rather than a census: it records what has been
+measured, not everything there is. Deleting
 the documented surface and its line in that test together is the
 first; that is a two-part edit which removes a named document from a
 list in a test file, and the second part is the record of it. The
@@ -812,6 +819,24 @@ is one graded site per listed document. Closing that means recording
 every graded site rather than every graded document, which makes the
 test a verbatim copy of these documents and turns every honest edit
 to an example red — so it is written down here instead.
+
+The fourth and fifth are narrower, and both were measured rather than
+reasoned about. The sweeps read raw markdown bytes, so a site inside
+an HTML comment is graded exactly as visible text is: a document whose
+only surviving `ctx context.Context` sits in `<!-- ... -->` keeps its
+census entry while showing a reader nothing, and a commented site
+disagreeing with `codegen.ParamArg` is red on text no rendered page
+displays (`gqlc-jnsk`). The binding sweep, meanwhile, peels pointer
+operators off a value along with carrier conversions before comparing
+it, so `*arg` and `&arg` in a `map[string]any` entry both unwrap to
+`arg` and stay green (`gqlc-173n`) — what is held is the identifier
+underneath, not the expression around it.
+
+Two further gaps are recorded in the fence's own header rather than
+here, because they bound what the sweeps reach at all: a signature
+carrying the author's names as separate arguments is past the arity
+the signature sweep reads (`gqlc-vu7z`), and the prose around an
+intact graded span may say the opposite of it (`gqlc-e143`).
 
 What is fenced is the argument *name*, everywhere except one place.
 The `<param-list>` bullet above is the exception: its two tails are

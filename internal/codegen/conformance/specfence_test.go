@@ -84,73 +84,37 @@ const repoRoot = "../../../"
 // name, and reconciled against what the sweep actually graded — in both
 // directions, failing with the document rather than with a count.
 //
-// This was a set of marker regexps reading the requirement off the
-// documents themselves, and that could not hold: the markers were the
-// same shapes as the grading, so one edit to a graded site removed the
-// document from the requirement and from the grading at the same
-// instant. Moving the comma out of a template's placeholder
-// (`(ctx context.Context, <param-list>)`) unselected C1 from the marker
-// and unread it from the scanner together, and the capture vector went
-// back into §5.3 green. Defeating the signal defeated both sides of it,
-// which is what a derivation cannot avoid: it is the scanner auditing
-// itself. A tighter regexp only moves the hole to the next spelling.
-//
-// So the expectation is written rather than derived, and deliberately in
-// this file rather than beside the text it names. It costs one line when
-// a document starts or stops printing the surface, and the failure
-// prints the line to add or remove. Removing an entry *and* gutting the
-// document it names is still possible — but it is now a visible two-part
-// edit that deletes a named document from a list in a test file, which
-// is the honest floor for any check that reads only these documents.
-//
-// Deliberately not a count of sites. A site count sits beside the thing
-// it counts, carries silent slack for every site it is under, and fails
-// as `13 != 14`, which names nothing to go and look at. A census fails
-// as a set difference with a name in it. What a census is, though, is a
-// count of one per document, and that count has slack of its own — the
-// third omission below is exactly it, stated rather than argued away.
+// The lists are written here rather than derived from the documents,
+// and they reconcile as sets rather than as counts (ADR 0028,
+// decisions 1 and 2). Adding or removing a document costs one line, and
+// the failure prints the line to add or remove.
 //
 // The three sets come out different, and the difference is a fact about
 // the documents: C3's width and nullability bullets print the binding
 // literal without printing the method around it, so C3 owes a binding
 // and owes no signature.
 //
-// Three things these censuses do not reach.
+// What these censuses do not reach, in ascending size:
 //
-// Deleting the documented surface outright is the first. That is a
-// two-part edit here — the document and its line below — and the second
-// part is the record, which is the most any check reading only the
-// documents it is pointed at can offer.
+// Deleting a documented surface and its line below together. That is a
+// two-part edit, and the second part is the record of it — the most any
+// check reading only the documents it is pointed at can offer.
 //
-// A document these censuses are never pointed at is the second, and it
-// leaves no record at all: the sets below name documents, not roots, so
-// they are silent about anything docRoots does not reach (gqlc-jfwo).
+// A document these censuses are never pointed at, which leaves no
+// record at all: the sets below name documents, not roots, so they are
+// silent about anything docRoots does not reach (gqlc-jfwo).
 //
-// The third is the largest, and unlike the first it is a one-part edit.
-// A listed document keeps its entry on one surviving graded site, so
-// every site past the first can leave the sweep with nothing said. Not
-// by being corrected — by ceasing to print the anchor it is found on,
-// `ctx context.Context` for a signature and `map[string]any{` for a
-// binding. A site that drifts in its own anchor drifts on an axis this
-// file does not grade at all, and takes the axis it does grade out of
-// reach on the way out. C4 §3.2's WriteQuerier member
-// `RemovePerson(ctx context.Context, arg int64)` — the declared
-// interface surface gqlc-rz0l singled out as drift in a surface rather
-// than in prose — is one of ten graded signatures in that document, and
-// rewriting its context parameter leaves every sweep in this file green.
-// So the honest floor is one graded site per listed document, not one
-// document per list.
-//
-// Left open on purpose, and the alternatives are the reason. A per-site
-// census keyed on the method name does not close it: C4 grades
-// `RemovePerson` at three separate sites, so its name survives any one
-// of them leaving. A per-site count does close it and is the shape
-// rejected above, failing as `9 != 10`. A per-site census of the graded
-// text closes it too, at the price of making this file a copy of the
-// documents — red on every honest edit to an example, and a fence that
-// reddens on honest edits is one whose census gets bulk-updated without
-// being read, which buys less than a floor of one that is written down.
-// This is where it is written down.
+// One graded site per listed document is the floor, not one site per
+// site. Every site past the first can leave the sweep with nothing
+// said — not by being corrected, but by ceasing to print the anchor it
+// is found on, `ctx context.Context` for a signature and
+// `map[string]any{` for a binding. C4 §3.2's WriteQuerier member
+// `RemovePerson(ctx context.Context, arg int64)` is one of ten graded
+// signatures in that document, and rewriting its context parameter
+// leaves every sweep here green. The floor is accepted rather than
+// closed; ADR 0028 decision 3 records the alternatives and why each was
+// declined, and docs/specs/codegen-stage-c1.md §5.7 states it to the
+// reader (gqlc-0rjn).
 const (
 	specC1 = "docs/specs/codegen-stage-c1.md"
 	specC3 = "docs/specs/codegen-stage-c3.md"
@@ -174,13 +138,12 @@ var specBindDocs = []string{specC1, specC3, specC4, specC5}
 // the emitted signature binds — and that bullet is the exact text
 // gqlc-rz0l corrected.
 //
-// This list does double duty, which is what closes the gap between what
-// the fence declines to grade and what it requires instead. A document
-// here must both state the expansions (specListRules) and be one whose
-// signatures the fence let past ungraded on account of the placeholder;
-// a document not here may not have a whole-list placeholder waved
-// through. Exemption and requirement are the same list, so neither can
-// be had without the other.
+// This list does double duty: a document here must both state the
+// expansions (specListRules) and be one whose signatures the fence let
+// past ungraded on account of the placeholder, and a document not here
+// may not have a whole-list placeholder waved through. Exemption and
+// requirement are the same list, so neither can be had without the
+// other (ADR 0028 decision 4).
 var specListRuleDocs = []string{specC1, specC4}
 
 // specListRules are the parameter-list tails every `<param-list>` bullet
@@ -189,20 +152,13 @@ var specListRuleDocs = []string{specC1, specC4}
 // Both are here because both are live: the emitted signature binds
 // codegen.ParamArg at one query parameter and at two-plus, and a bullet
 // that spells one and leaves the other to prose puts that other one back
-// outside the fence — which is how §5.3 came to specify the capture
-// vector for the single-parameter form while the two-plus form sat
-// correct beside it.
+// outside the fence.
 //
-// Identity, not shape. Reading "which arity is this?" off the type
-// position — a placeholder standing alone against a placeholder with a
-// generated suffix on it — was an inference, and an inference is
-// satisfiable by a spelling that means something else: `, arg <ParamsType>`
-// is the *two-plus* rule and reads as the single-parameter one, so
-// stating the two-plus rule twice in two spellings satisfied both arities
-// while the single-parameter rule sat in prose with the capture vector in
-// it. An illustration (`, arg int64`) did the same. Neither is on this
-// list, so neither is a rule any more: it is an extra span, and an extra
-// span is as red as a missing one.
+// Graded by identity, not by shape (ADR 0028 decision 5). A tail not on
+// this list is not a rule but an extra span, and an extra span is as red
+// as a missing one — so a second spelling of one arity cannot stand in
+// for the other, and an illustration with a concrete type cannot stand
+// in for either.
 //
 // The name in each is codegen.ParamArg rather than a literal `arg`, so
 // renaming the emitter's constant reddens these documents instead of
@@ -378,13 +334,8 @@ func TestSpecParamsMapBindsGeneratorOwnedValue(t *testing.T) {
 			"one identifier, and only the map key carries the author's parameter name (gqlc-lhs3, gqlc-rz0l)",
 			codegen.ParamArg))
 
-	// One census, no union. The requirement used to be the map anchor
-	// unioned with the query-method anchor, so that gutting the literal
-	// out of a document still declaring the method could not take its
-	// requirement with it — and that union over-reached in the other
-	// direction, making any new document that quoted a signature owe a
-	// map literal it had no reason to carry. A written list needs neither
-	// half: gutting C1's literals fails the first direction below by
+	// One census over a written list, not a union of anchors (ADR 0028
+	// decision 9). Gutting C1's literals fails the lost direction by
 	// name, and a document quoting a signature owes a binding only if it
 	// is listed here.
 	requireCensus(t, specBindDocs, sweep.bindDocs, "specBindDocs",
@@ -399,16 +350,13 @@ func TestSpecParamsMapBindsGeneratorOwnedValue(t *testing.T) {
 //
 // bindSweep is the same for the binding scanner.
 //
-// Both are the accumulation the two sweeps above used to do inline, and
-// they are functions for the reason reconcile is: the line carrying a
-// scanner's unreadable-site return into the accumulator is load-bearing
-// and was structurally unable to fail. Dropping it (`sigs, exempt, _ :=`)
-// is invisible on a clean tree — there is nothing unreadable to lose —
-// and it is invisible on a drifted one too, because the drift it drops
-// is the only thing that would have reported it. Inline, the only
-// witness available was a swept document with an unterminated span in
-// it, which is not a state the repository is ever in. As a function it
-// takes a document set and a reader, so a witness supplies both.
+// Both accumulations are functions taking a document set and a reader so
+// a witness can supply both and observe the judgement on a clean tree
+// (ADR 0028 decision 7). The line carrying a scanner's unreadable-site
+// return into the accumulator is load-bearing: dropping it
+// (`sigs, exempt, _ :=`) is invisible whether the tree is clean or
+// drifted, because the drift it drops is the only thing that would have
+// reported it. TestSpecSweepsCarryUnreadableSites is the witness.
 type sigSweep struct {
 	graded      []specSig
 	unclosed    []specSig
@@ -560,31 +508,18 @@ func requireCensus(t fenceT, written []string, observed map[string]bool, census,
 // fenceT is the part of *testing.T the two helpers above use, named so a
 // witness can stand in for it.
 //
-// reconcile is a function precisely so its judgement can be witnessed on
-// a clean tree, and every other line between a scanner's reading and an
-// actual failure needed the same treatment for the same reason. Six of
-// them did not have it, and each was structurally unable to fail:
-// requireClean's empty-set guard, requireCensus's lost, undeclared and
-// duplicated arms, and the two lines carrying a scanner's unreadable-site
-// return into the sweep that fails on it. Neuter any one, then revert a
-// signature, add a signature to an undeclared document, grow a declared
-// document's signatures past what the scanner reads, name a document
-// twice, or leave a parameter list or a map literal unterminated, and
-// every sweep in this file stayed green. All six are witnessed now —
-// four by TestSpecFailuresAreWired and TestSpecCensusReconcilesBothDirections,
+// reconcile is a function so its judgement can be witnessed on a clean
+// tree. Six lines between a scanner's reading and an actual failure are
+// structurally unable to fail on a clean tree — requireClean's empty-set
+// guard, requireCensus's lost, undeclared and duplicated arms, and the
+// two lines carrying a scanner's unreadable-site return into the sweep
+// that fails on it — so each is witnessed here: four by
+// TestSpecFailuresAreWired and TestSpecCensusReconcilesBothDirections,
 // two by TestSpecSweepsCarryUnreadableSites.
 //
-// What is left is not wiring. The sweeps' own comparison bodies
-// (`sig.arg != codegen.ParamArg` and the binding's prefix test) and
-// their calls to these helpers are the assertions, and deleting an
-// assertion passes any test. That could be witnessed too — hand a
-// synthetic sweep result to an extracted assertion block and check
-// which headline comes back — and it is not, deliberately: the line
-// drawn here is between an assertion, whose deletion is a deletion a
-// reader sees in the diff, and plumbing, whose neutering reads as
-// bookkeeping and takes a failure with it. Witnessing the first buys a
-// guard against a reviewer missing a deleted `require`; witnessing the
-// second was the only way to see these six at all.
+// The sweeps' own comparison bodies (`sig.arg != codegen.ParamArg` and
+// the binding's prefix test) are not witnessed. ADR 0028 decision 7
+// records where that line is drawn and why.
 type fenceT interface {
 	require.TestingT
 	Helper()
@@ -808,8 +743,8 @@ func TestSpecCensusReconcilesBothDirections(t *testing.T) {
 // nothing. A whole-list placeholder standing in for the parameters is a
 // site the fence declines to read a name out of, and specListRuleDocs is
 // what it is declined against; a zero-parameter method is a site with no
-// name to read. Collapsing the two is how the exemption came to be
-// wider than anything requiring it.
+// name to read. The two must stay distinct or the exemption is wider
+// than anything requiring it (ADR 0028 decision 4).
 func TestSpecSigScannerDetectsDrift(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -899,19 +834,18 @@ func TestSpecSigScannerDetectsDrift(t *testing.T) {
 		text:       "func (q *Queries) <MethodName>(ctx context.Context<param-list>) (<return>, error) {",
 		wantExempt: true,
 	}, {
-		// The reformat that used to unselect a document from the
-		// requirement and from the grading in one edit. It still grades
-		// no name — a placeholder standing for a list carries none — but
-		// it is now reported as an exemption, and the exemption is
-		// reconciled against the document list that requires the bullet.
+		// The reformat a derived marker set cannot survive (ADR 0028
+		// decision 1). It grades no name — a placeholder standing for a
+		// list carries none — and is reported as an exemption, which is
+		// reconciled against the list that requires the bullet.
 		name:       "a whole-list placeholder moved past the comma is the same exemption",
 		text:       "func (q *Queries) <MethodName>(ctx context.Context, <param-list>) (<return>, error) {",
 		wantExempt: true,
 	}, {
 		// The spelling the interface blocks use when they show two
-		// members at once, in both positions. It stands for a whole list
-		// on the same terms, so it is exempted on the same terms — and
-		// owed against the same list, which is what it was not before.
+		// members at once. It stands for a whole list on the same terms,
+		// so it is exempted on the same terms and owed against the same
+		// list.
 		name:       "the numbered whole-list placeholder is the same exemption",
 		text:       "    <MethodName1>(ctx context.Context, <param-list-1>) (<return-1>, error)",
 		wantExempt: true,
@@ -920,10 +854,8 @@ func TestSpecSigScannerDetectsDrift(t *testing.T) {
 		text:       "    <MethodName1>(ctx context.Context<param-list-1>) (<return-1>, error)",
 		wantExempt: true,
 	}, {
-		// The blocker gqlc-rz0l's first fence let through: a
-		// placeholder in the type position used to skip the whole
-		// declaration, discarding the name beside it — which is the
-		// one thing this file grades.
+		// A placeholder in the type position is not an exemption for the
+		// name beside it: the name is the one thing this sweep grades.
 		name:    "a placeholder type does not exempt the name beside it",
 		text:    "func (q *Queries) <MethodName>(ctx context.Context, <bareParam> <T>) (<return>, error) {",
 		wantArg: "<bareParam>",
@@ -935,13 +867,12 @@ func TestSpecSigScannerDetectsDrift(t *testing.T) {
 		wantAny: true,
 	}, {
 		// The glued position is where C4's interface template writes its
-		// placeholder (`(ctx context.Context<param-list-1>)`), and a
-		// declaration written there rather than past a comma used to be
-		// dropped: neither graded, nor exempted, nor reported. The
-		// exemption census could not notice, because C4 keeps a second
-		// template whose placeholder is intact and one exemption satisfies
-		// the document. So the drift the comma'd form is red for was green
-		// one character away.
+		// placeholder (`(ctx context.Context<param-list-1>)`). A
+		// declaration written there rather than past a comma is graded on
+		// the same terms as the comma'd form; the exemption census cannot
+		// substitute for this row, because C4 keeps a second template
+		// whose placeholder is intact and one exemption satisfies the
+		// document (ADR 0028 decision 4).
 		name:    "a declaration glued to the context parameter is graded, not dropped",
 		text:    "    <WriteMethodName1>(ctx context.Context<bareParam1> <T1>) <return-1>",
 		wantArg: "<bareParam1>",
@@ -1017,16 +948,15 @@ func TestSpecParamListRuleScannerDetectsDrift(t *testing.T) {
 		wantArgs:  []string{codegen.ParamArg},
 		wantRules: []string{", arg <T>"},
 	}, {
-		// The restatement that used to satisfy the two-plus arity twice
-		// over while the single-parameter rule sat in prose: it is read
-		// as the text it is, and that text is not one of the two rules.
+		// A restatement is read as the text it is, and that text is not
+		// one of the two rules (ADR 0028 decision 5).
 		name:      "a second spelling of the two-plus tail is its own tail, not an arity",
 		text:      bullet("— two-plus is `, arg <MethodName>Params`, equivalently `, arg <ParamsType>`."),
 		wantArgs:  []string{codegen.ParamArg, codegen.ParamArg},
 		wantRules: []string{", arg <MethodName>Params", ", arg <ParamsType>"},
 	}, {
-		// The illustration that used to do the same. A concrete type is
-		// not the rule the census declares, whatever arity it depicts.
+		// A concrete type is not the rule the census declares, whatever
+		// arity it depicts.
 		name:      "an illustration with a concrete type is its own tail too",
 		text:      bullet("— `, arg <T>` if one parameter — for `$minAge INT`, `, arg int64`."),
 		wantArgs:  []string{codegen.ParamArg, codegen.ParamArg},
@@ -1133,12 +1063,11 @@ func TestSpecBindScannerDetectsDrift(t *testing.T) {
 	}
 }
 
-// TestSpecScannersReportUnreadableSites pins the two silences the
-// scanners used to keep. A span that opens and never closes is not a
-// site with no drift in it; it is a site the sweep could not read, and
-// a sweep that drops it quietly loses coverage without the censuses
-// moving. Both are surfaced so the failure names the text to fix rather
-// than the fence.
+// TestSpecScannersReportUnreadableSites pins both unreadable-site
+// returns. A span that opens and never closes is not a site with no
+// drift in it; it is a site the sweep could not read, and dropping it
+// quietly loses coverage without the censuses moving. Both are surfaced
+// so the failure names the text to fix rather than the fence.
 func TestSpecScannersReportUnreadableSites(t *testing.T) {
 	t.Run("an unterminated map literal is reported, not dropped", func(t *testing.T) {
 		binds, unclosed := scanSpecBinds("witness.md", "prose\nmap[string]any{\"id\": arg\nmore prose\n")
@@ -1212,16 +1141,10 @@ func docFiles(t *testing.T) []string {
 // exactly the documents that took the exemption, rather than from the
 // documents some regexp happened to still be selecting.
 //
-// The two positions are read on identical terms, and that is the point.
-// The glued one used to have a drop beside its exemption: a declaration
-// written there rather than past a comma was skipped as "something else
-// glued to the context parameter", so `(ctx context.Context, <bareParam>
-// <T>)` was red and `(ctx context.Context<bareParam> <T>)` was green.
-// The exemption census could not see the difference, because C4 writes
-// the placeholder in both positions and one intact template satisfies
-// the document. Whichever position it is written in, the tail is either
-// a whole-list placeholder — exempted, and owed against
-// specListRuleDocs — or a declaration, and graded.
+// The two positions are read on identical terms. Whichever one the tail
+// is written in, it is either a whole-list placeholder — exempted, and
+// owed against specListRuleDocs — or a declaration, and graded. Nothing
+// is dropped; a drop is owed against nothing (ADR 0028 decision 4).
 func scanSpecSigs(file, text string) (sigs, exempt, unclosed []specSig) {
 	for _, loc := range ctxAnchorRe.FindAllStringIndex(text, -1) {
 		open := loc[0]
@@ -1497,23 +1420,22 @@ func splitTopLevel(list string) []string {
 // says, which is what makes `arg <T>` and `arg <MethodName>Params` pass
 // on their name while `<bareParam> <T>` — the capture vector gqlc-lhs3
 // removed from the emitter — fails on its. A placeholder in the type
-// position is not an exemption for the name beside it, and nothing is
-// read off the type at all: reading the arity off it was an inference a
-// second spelling of one arity could satisfy in place of the other.
+// position is not an exemption for the name beside it. This function
+// reads nothing off the type; the `<param-list>` bullets are the one
+// place the fence does grade a type, and scanParamListRules is where
+// that happens (ADR 0028 decision 5).
 //
 // One token is a type with no name, which is drift in its own right: a
 // documented signature that names no argument is not the one the emitter
-// writes. Go's grammar would read that lone token as a type and call the
-// parameter legitimately unnamed, and this fence deliberately does not,
-// because the emitter names the argument at every arity. That ruling is
+// writes. Go's grammar reads that lone token as a legitimately unnamed
+// parameter and this fence does not (ADR 0028 decision 6). The ruling is
 // applied whole: a lone `<bareParam>` is not a type either — it is the
-// author's name standing where a whole declaration should be — so it is
-// graded on the same arm as a lone `int64` rather than waved through for
-// wearing angle brackets. The one token that is not graded here is the
-// one that stands for a whole list, and that is decided by the caller
+// author's name standing where a whole declaration should be — so it
+// grades on the same arm as a lone `int64`. The one token not graded
+// here is the one standing for a whole list, decided by the caller
 // (scanSpecSigs), which reports it as an exemption rather than dropping
-// it — because an exemption is owed against specListRuleDocs and a drop
-// is owed against nothing.
+// it — an exemption is owed against specListRuleDocs and a drop is owed
+// against nothing.
 func paramName(param string) (name string, gradable bool) {
 	fields := strings.Fields(param)
 	switch {
@@ -1532,18 +1454,14 @@ func paramName(param string) (name string, gradable bool) {
 // from paramListPlaceholder so the exemption and the term the bullet
 // scanner reads cannot drift apart.
 //
-// Deliberately an enumeration rather than a test for `<…>`. A generic
+// An enumeration, not a test for `<…>` (ADR 0028 decision 4): a generic
 // placeholder test cannot tell `<param-list>`, which stands for a list,
 // from `<bareParam>`, which stands for the query author's parameter
-// name — and exempting the second is the drift this whole file exists to
-// catch, wearing the first one's clothes.
+// name.
 //
 // Every spelling it matches is exempted from grading, and every document
-// that takes that exemption is reconciled against specListRuleDocs, so
-// the numbered form owes the bullet on the same terms as the bare one.
-// It used to owe nothing: the exemption admitted the numbered spelling
-// and the requirement did not, so a template rewritten to `<param-list-1>`
-// dropped its bullet and stayed green.
+// taking that exemption is reconciled against specListRuleDocs, so the
+// numbered form owes the bullet on the same terms as the bare one.
 var listPlaceholderRe = regexp.MustCompile(
 	`^` + regexp.QuoteMeta(strings.TrimSuffix(paramListPlaceholder, ">")) + `(-\d+)?>$`)
 
@@ -1557,11 +1475,9 @@ var listPlaceholderRe = regexp.MustCompile(
 // is invisible in rendered markdown.
 //
 // The normalisation is compiled into the pattern rather than applied to
-// the documents, because collapsing a document's whitespace would move
-// every byte in it and the failure messages here are only useful while
-// they can still name a line. Deriving the pattern from the one literal
-// rather than writing a second spelling beside it leaves nothing for
-// the two to drift apart on.
+// the documents, so byte offsets stay usable and a failure can still
+// name a line (ADR 0028 decision 8). The pattern is derived from the one
+// literal, so there is no second spelling to drift from.
 func anchorPattern(anchor string) *regexp.Regexp {
 	var b strings.Builder
 	for i := 0; i < len(anchor); i++ {
