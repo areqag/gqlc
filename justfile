@@ -202,7 +202,7 @@ check-golangci-build-tags:
     scope() { go run ./internal/tools/modscope "$@"; }
     lines() { [ -n "${1}" ] && printf '%s\n' "${1}" || true; }
 
-    modules_raw="$(scope modules)"
+    modules_raw="$(scope modules)" || exit 1
     mapfile -t modules <<<"${modules_raw}"
     derived=""
     for m in "${modules[@]}"; do
