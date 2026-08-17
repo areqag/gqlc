@@ -455,46 +455,54 @@ func unservedColumn(t resolver.ResolvedType) string {
 	}
 	// Reached without a ninth variant. resolver.ResolvedType's unexported
 	// marker stops another package DECLARING an implementation from
-	// scratch, which is narrower than a closed sum: two constructions
-	// obtain the marker without declaring it, and neither matches an arm
-	// above. The pointer form of a variant — every marker and String takes
-	// a value receiver, and a pointer's method set contains its value
-	// methods, so *resolver.ResolvedEdgeUnion satisfies the interface while
-	// `case resolver.ResolvedEdgeUnion:` does not match it. And a struct
-	// embedding a variant — Go promotes an embedded type's unexported
-	// methods, so `struct{ resolver.ResolvedNode }` declared anywhere
-	// satisfies the interface without naming the marker at all. The two
-	// nest, so the set of shapes that can arrive here has no bound.
-	// Callers assemble both: Input, NamedQuery, ValidatedQuery, Column and
-	// every variant are exported structs with exported fields, so what the
-	// resolver builds does not bound what a caller hands over
-	// (internal/codegen/errors.go, gqlc-h4ug).
+	// scratch, which is narrower than a closed sum, because the marker is
+	// PROMOTED as well as declared. A pointer to a variant carries it:
+	// every marker and String on the variants takes a value receiver
+	// (internal/resolver/validated.go), and a pointer's method set contains
+	// its value methods, so *resolver.ResolvedEdgeUnion satisfies the
+	// interface while `case resolver.ResolvedEdgeUnion:` does not match it.
+	// A struct embedding something that already satisfies the interface
+	// carries it too — Go promotes an embedded type's unexported methods,
+	// so `struct{ resolver.ResolvedNode }` declared anywhere satisfies the
+	// interface without naming the marker, and so does
+	// `struct{ resolver.ResolvedType }`, which embeds the interface itself
+	// and no variant at all. These compose with each other, so the arms
+	// enumerate declaring types, not arriving shapes. Callers reach them:
+	// codegen.Input, codegen.NamedQuery, resolver.ValidatedQuery and
+	// resolver.Column are exported types a package outside the resolver
+	// composes directly, so what the resolver builds does not bound what a
+	// caller hands over (internal/codegen/errors.go, gqlc-h4ug).
 	//
-	// So the arms are not the interface's membership. What lands here is
-	// either an existing variant in a form no arm spells, or a variant
-	// genuinely added to the resolver that no arm yet names, and both are
-	// refused on the same terms: dropped rather than emitted through an arm
-	// chosen for some other shape, because a column no arm here recognises
-	// has no decode arm either and serving it would emit a method that
-	// cannot fill its row.
+	// So the arms are not the interface's membership, and this line is not
+	// a default for a ninth variant. A reason returned from here drops the
+	// column rather than emitting it through an arm chosen for some other
+	// shape, because a column no arm here recognises has no decode arm
+	// either and serving it would emit a method that cannot fill its row.
 	//
-	// The reason is "projects " and then whatever String is shallowest in
-	// the arriving type's method set, which is two cases and not one
-	// vocabulary. A pointer to a variant, and a struct embedding a variant
-	// and declaring no String, both leave the variant's own diagnostic
-	// Stringer shallowest — which for ResolvedProperty, ResolvedScalar and
+	// `t.String()` dispatches to the shallowest String in the arriving
+	// type's method set. For a pointer to a variant, or a struct embedding
+	// a variant and declaring no String, that is the variant's own
+	// diagnostic Stringer — which for ResolvedProperty, ResolvedScalar and
 	// ResolvedTemporal composes the family into the tag rather than being
-	// the wire tag (internal/resolver/validated.go); that text names no
-	// candidate, and is built the way the list and unknown arms build
-	// theirs, which is why no assertion on the result tells those two arms
-	// from this line. Any shallower String shadows it, and then the text
-	// after "projects " is the caller's, candidate names included. So
-	// nothing downstream may read this string for where it came from — the
-	// ranking in unservedReason turns on the column's TYPE for exactly
-	// that reason.
+	// the wire tag (internal/resolver/validated.go). A String declared
+	// shallower shadows it, and the text after "projects " is then the
+	// caller's, candidate names included: shadowEdgeUnion in
+	// sealedsum_test.go puts "AUTHORED and LIKES" there with
+	// edgeUnionReason never called. So nothing downstream may read this
+	// string for where it came from — the ranking in unservedReason turns
+	// on the column's TYPE for exactly that reason.
+	//
+	// A resolver.Column whose Type is nil, and a
+	// `struct{ resolver.ResolvedType }{}` holding a nil interface, both
+	// reach String from this line and panic; both were measured through
+	// age.New().Generate. origin/master returns the same expression with no
+	// nil check, so this is the behaviour before this comment as well as
+	// after. Recorded here because it happens, not to argue that it cannot;
+	// guarding it changes behaviour and wants its own test and its own
+	// bead, which this bead is not.
 	//
 	// TestUnservedColumnFallThroughIsNotANinthVariant is the witness, for
-	// the pointer and the embedded form of each of the eight variants and
+	// the pointer and the embedded form of every variant the arms name and
 	// for a shadowing embedder.
 	return "projects " + t.String()
 }
