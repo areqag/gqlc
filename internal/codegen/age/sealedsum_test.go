@@ -559,16 +559,20 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 	// its whole membership" is exactly what every row above falsifies, and
 	// nothing else here would notice the prose going back.
 	//
-	// The row reads the two mechanisms by name, not the sentence around them:
-	// a rewrite that keeps naming the pointer form and the embedding still
+	// The row reads two mechanisms by name, not the sentence around them: a
+	// rewrite that keeps naming the pointer form and the embedding still
 	// passes, and one that drops either stops being the comment the rows above
-	// witness. It does not police any other wording.
-	t.Run("the fall-through comment names both constructions", func(t *testing.T) {
+	// witness. It does not police any other wording, and it is not a claim
+	// that these two are all there is — embedding resolver.ResolvedType itself
+	// reaches the same line and embeds no variant. These two are what the rows
+	// above measure, so these two are what this row requires the comment to
+	// keep.
+	t.Run("the fall-through comment names the pointer form and the embedding", func(t *testing.T) {
 		comment := fallThroughComment(t)
 		require.Containsf(t, comment, "pointer",
-			"unservedColumn's fall-through comment does not name the pointer form, which is one of the two constructions that reaches it: %q", comment)
+			"unservedColumn's fall-through comment does not name the pointer form, which the pointer rows above measure: %q", comment)
 		require.Containsf(t, comment, "embed",
-			"unservedColumn's fall-through comment does not name the embedding, which is the other: %q", comment)
+			"unservedColumn's fall-through comment does not name the embedding, which the embedded rows above measure: %q", comment)
 	})
 }
 
