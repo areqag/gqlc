@@ -689,8 +689,17 @@ func goldenTarget(t *testing.T, path string) string {
 	return target
 }
 
+// scopeName renders an identifierScope for a fail message, so that a
+// reader does not have to know which iota is which.
+func scopeName(s identifierScope) string {
+	if s == scopeMethod {
+		return "scopeMethod"
+	}
+	return "scopePackage"
+}
+
 // TestReservedScopeMatchesTheEmittedGoldens holds both table columns to
-// the corpus rather than to a claim about the templates. Three halves:
+// the corpus rather than to a claim about the templates. Three checks:
 //
 //  1. every declaration of a reserved name sits at the scope the table
 //     records;
@@ -775,8 +784,8 @@ func TestReservedScopeMatchesTheEmittedGoldens(t *testing.T) {
 				row.name)
 			for scope, path := range at {
 				require.Equal(t, row.scope, scope,
-					"%s declares %q at scope %d, but the reserved set records scope %d",
-					path, row.name, scope, row.scope)
+					"%s declares %q at %s, but the reserved set records %s",
+					path, row.name, scopeName(scope), scopeName(row.scope))
 			}
 
 			wantTargets := row.declaredBy
