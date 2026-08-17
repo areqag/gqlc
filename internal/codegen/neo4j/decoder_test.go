@@ -213,7 +213,10 @@ func TestDecoderProbeCoversTheTypeTable(t *testing.T) {
 	// whose element is itself a list. Counted off the widths rather than
 	// off the emission because the scope sweep compares an emission
 	// against its own reference: dropping the arm takes the locals out of
-	// both sides at once and neither side notices.
+	// both sides at once and neither side notices. Each entity's struct,
+	// its fields and its decode helper are held against the parsed schema
+	// by TestEveryElementTypeGetsItsOwnDecodeArm; the locals a decode arm
+	// binds are not, and stay inside that silence.
 	nested := 0
 	for pt := range covered {
 		if pt.Kind() == graph.KindList && pt.Elem().Kind() == graph.KindList {
@@ -314,8 +317,9 @@ func propertyArmNames(t *testing.T) map[string]bool {
 // against.
 const unclaimedProperty = "alpha"
 
-// DecoderSuite pins what an emitted decode<Name> may name. The fixture-
-// driven golden corpus lives in internal/codegen/conformance.
+// DecoderSuite pins which decode<Name> helpers an emission carries and
+// what each of them may name. The fixture-driven golden corpus lives in
+// internal/codegen/conformance.
 type DecoderSuite struct {
 	suite.Suite
 }
@@ -330,9 +334,10 @@ func TestDecoderSuite(t *testing.T) {
 // TypeTime — a spelling that landed on some other width would leave that
 // comparison green while the arm it was added for went unemitted. This
 // reads the widths back off the parsed schema, at each of the four
-// element declarations decoderProbeSchema writes per width, and then
-// reads the Go types back off the emission: a width the schema declares
-// and codegen drops reaches no decoder either.
+// element declarations decoderProbeSchema writes per width.
+//
+// It stops at the parse. What the emission then does with each of those
+// declarations is TestEveryElementTypeGetsItsOwnDecodeArm's subject.
 func (s *DecoderSuite) TestProbeDeclaresEveryWidthInEveryArm() {
 	sch, err := gql.New().Parse(strings.NewReader(decoderProbeSchema(unclaimedProperty)))
 	s.Require().NoError(err)
@@ -352,23 +357,13 @@ func (s *DecoderSuite) TestProbeDeclaresEveryWidthInEveryArm() {
 		}
 	}
 
-	want := make(map[string]bool)
 	for _, w := range decoderProbeWidths() {
-		goType, ok := typeMap{}.Property(w.pt)
-		s.Require().True(ok, "the probe declares %s, which this backend has no carrier for", w.pt)
-		want[goType] = true
-
 		tag := decoderProbeTag(w.pt)
 		s.requireArm(nodes, "Req"+tag, w.pt, false)
 		s.requireArm(nodes, "Opt"+tag, w.pt, true)
 		s.requireArm(edges, "EdgeReq"+tag, w.pt, false)
 		s.requireArm(edges, "EdgeOpt"+tag, w.pt, true)
 	}
-
-	models, err := s.emitModels(unclaimedProperty)
-	s.Require().NoError(err)
-	s.Require().Equal(slices.Sorted(maps.Keys(want)), s.structFieldTypesOf(models),
-		"the emitted structs do not carry exactly the Go types the probe's widths claim")
 }
 
 // requireArm holds one element the probe declares to carrying the width
@@ -379,6 +374,195 @@ func (s *DecoderSuite) requireArm(declared map[string]schema.Property, element s
 	s.Require().True(ok, "the probe declares no element %s carrying a property named %s", element, unclaimedProperty)
 	s.Require().Equal(pt, got.Type, "element %s carries a width the probe did not spell", element)
 	s.Require().Equal(nullable, got.Nullable, "element %s carries the wrong nullability", element)
+}
+
+// decoderArm is what the emission carries for one element type: the
+// struct's fields by name, the carrier its decode helper takes, what that
+// helper answers with, and the fields it assigns. Assembled per entity
+// rather than folded across the emission, so an entity that lost its
+// struct, its helper or its fields is one entry short of what the schema
+// asks for instead of a contribution some other entity also makes.
+type decoderArm struct {
+	fields  map[string]string
+	carrier string
+	returns []string
+	decoded []string
+}
+
+// TestEveryElementTypeGetsItsOwnDecodeArm holds the emission to one
+// struct and one decode helper per element type the probe schema
+// declares, each struct carrying a field per property that element
+// declares and each helper assigning every one of them.
+//
+// The reference is the parsed schema. That is what separates this from
+// the scope sweep below, whose reference is a second emission of the same
+// generator: an arm the emitter stopped emitting is missing from both of
+// that comparison's sides at once, so an emitter that dropped the edge
+// decode helpers — or emitted edge structs with no fields — passes it.
+// Neither edit reaches a parse that ran before generation.
+//
+// One thing it does not separate out is the type table. The Go type
+// expected of a field is read through typeMap.Property, which is the
+// table the emission narrows through as well, so a carrier respelled
+// there moves both sides. TestDecoderProbeCoversTheTypeTable holds that
+// table's arms to internal/graph's constants and the golden corpus in
+// internal/codegen/conformance pins the spellings; neither is this.
+//
+// Struct names are the probe's own labels. Each is a single label that is
+// already an exported Go identifier, which is what makes §4.5's
+// derivation identity on them — a derivation that stopped being identity
+// fails the name comparison below carrying both spellings, rather than
+// passing silently.
+func (s *DecoderSuite) TestEveryElementTypeGetsItsOwnDecodeArm() {
+	sch, err := gql.New().Parse(strings.NewReader(decoderProbeSchema(unclaimedProperty)))
+	s.Require().NoError(err)
+
+	want := make(map[string]decoderArm, len(sch.Nodes)+len(sch.Edges))
+	for _, n := range sch.Nodes {
+		s.declareArm(want, string(n.KeyLabels), "dbtype.Node", n.Properties)
+	}
+	for _, e := range sch.Edges {
+		s.declareArm(want, string(e.KeyLabels), "dbtype.Relationship", e.Properties)
+	}
+
+	// A carrier no probe element declares a property at is a carrier whose
+	// field census below holds over nothing. Counted off the schema, since
+	// an emission that dropped one is what this exists to catch.
+	carriers := make(map[string]int, 2)
+	for _, arm := range want {
+		if len(arm.fields) > 0 {
+			carriers[arm.carrier]++
+		}
+	}
+	s.Require().Len(carriers, 2,
+		"the probe declares a property-carrying element type at %d of the two driver carriers, so one "+
+			"carrier's decode arms are swept for existence only", len(carriers))
+
+	models, err := s.emitModels(unclaimedProperty)
+	s.Require().NoError(err)
+	got := s.decoderArmsOf(models)
+	s.Require().Equal(slices.Sorted(maps.Keys(want)), slices.Sorted(maps.Keys(got)),
+		"the emission does not name one entity per element type the schema declares")
+
+	for _, name := range slices.Sorted(maps.Keys(want)) {
+		w := want[name]
+		s.Require().Equal(w.fields, got[name].fields,
+			"struct %s does not carry exactly the properties the schema declares on it", name)
+		s.Require().Equal(w.carrier, got[name].carrier,
+			"decode%s does not take the driver carrier its element kind is read from", name)
+		s.Require().Equal([]string{name, "error"}, got[name].returns,
+			"decode%s does not answer with the struct it decodes into", name)
+		s.Require().Equal(slices.Sorted(maps.Keys(w.fields)), got[name].decoded,
+			"decode%s assigns other than every field %s carries", name, name)
+	}
+}
+
+// declareArm records what one element type obliges the emission to carry.
+// The Go type is the carrier the type table gives the declared width,
+// under a pointer on the nullable arm.
+func (s *DecoderSuite) declareArm(into map[string]decoderArm, name, carrier string, props map[string]schema.Property) {
+	s.T().Helper()
+	_, dup := into[name]
+	s.Require().False(dup, "two probe element types are named %s, so one of them is unswept", name)
+
+	fields := make(map[string]string, len(props))
+	for _, p := range props {
+		goType, ok := typeMap{}.Property(p.Type)
+		s.Require().True(ok, "%s declares %s at %s, which this backend has no carrier for", name, p.Name, p.Type)
+		if p.Nullable {
+			goType = "*" + goType
+		}
+		fields[exportedField(p.Name)] = goType
+	}
+	into[name] = decoderArm{fields: fields, carrier: carrier}
+}
+
+// decoderArmsOf reads back what the emission carries per entity, keyed on
+// the entity name. A struct and a decode<Name> helper contribute to one
+// entry, so a helper with no struct behind it — or a struct with no
+// helper — is an entry that answers the comparison rather than a name
+// that never comes up.
+//
+// The assigned fields are read off the selector each assignment targets,
+// not off the accumulator's name, which is the generator's to choose.
+func (s *DecoderSuite) decoderArmsOf(models string) map[string]decoderArm {
+	out := make(map[string]decoderArm)
+	fieldsOf := func(name string) map[string]string {
+		if arm, ok := out[name]; ok {
+			return arm.fields
+		}
+		return make(map[string]string)
+	}
+
+	for _, decl := range s.parseModels(models).Decls {
+		switch d := decl.(type) {
+		case *ast.GenDecl:
+			if d.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range d.Specs {
+				ts, isType := spec.(*ast.TypeSpec)
+				if !isType {
+					continue
+				}
+				st, isStruct := ts.Type.(*ast.StructType)
+				if !isStruct {
+					continue
+				}
+				arm := out[ts.Name.Name]
+				arm.fields = fieldsOf(ts.Name.Name)
+				for _, field := range st.Fields.List {
+					for _, id := range field.Names {
+						arm.fields[id.Name] = types.ExprString(field.Type)
+					}
+				}
+				out[ts.Name.Name] = arm
+			}
+		case *ast.FuncDecl:
+			name, isDecoder := strings.CutPrefix(d.Name.Name, "decode")
+			if !isDecoder || d.Recv != nil || name == "" {
+				continue
+			}
+			assigned := make(map[string]bool)
+			if d.Body != nil {
+				ast.Inspect(d.Body, func(n ast.Node) bool {
+					assign, isAssign := n.(*ast.AssignStmt)
+					if !isAssign {
+						return true
+					}
+					for _, lhs := range assign.Lhs {
+						if sel, isSel := lhs.(*ast.SelectorExpr); isSel {
+							assigned[sel.Sel.Name] = true
+						}
+					}
+					return true
+				})
+			}
+			out[name] = decoderArm{
+				fields:  fieldsOf(name),
+				carrier: strings.Join(fieldTypeStrings(d.Type.Params), ", "),
+				returns: fieldTypeStrings(d.Type.Results),
+				decoded: slices.Sorted(maps.Keys(assigned)),
+			}
+		}
+	}
+	return out
+}
+
+// fieldTypeStrings renders a signature's parameter or result types in
+// declaration order, one entry per name a grouped field declares.
+func fieldTypeStrings(list *ast.FieldList) []string {
+	if list == nil {
+		return nil
+	}
+	var out []string
+	for _, field := range list.List {
+		rendered := types.ExprString(field.Type)
+		for range max(len(field.Names), 1) {
+			out = append(out, rendered)
+		}
+	}
+	return out
 }
 
 // TestNoDecoderLocalTakesAPropertyName pins the decoder's scope against
@@ -396,6 +580,13 @@ func (s *DecoderSuite) requireArm(declared map[string]schema.Property, element s
 // of them. Each name is then fed back as a property name, and what
 // must not move is the set itself: the decoder's identifiers are the
 // generator's own, so they are the same whatever the schema declares.
+//
+// Both sides of the comparison are emissions of the same generator, so
+// what it measures is movement under a renamed property and nothing else:
+// an arm the emitter stopped emitting is absent from the reference too,
+// and the equality holds over what is left. Which arms have to be there
+// at all is TestEveryElementTypeGetsItsOwnDecodeArm's subject, against
+// the parsed schema.
 //
 // The scope read here is models.go's entity decoders. A query column's
 // decode is emitted elsewhere and its locals are swept by the query-side
@@ -473,28 +664,6 @@ func (s *DecoderSuite) decoderScopeOf(models string) []string {
 			return true
 		})
 	}
-	return slices.Sorted(maps.Keys(seen))
-}
-
-// structFieldTypesOf names the Go types the emitted structs carry,
-// deduplicated and ordered, with the nullable arm's pointer dropped so a
-// width contributes the same type from either arm.
-func (s *DecoderSuite) structFieldTypesOf(models string) []string {
-	seen := make(map[string]bool)
-	ast.Inspect(s.parseModels(models), func(n ast.Node) bool {
-		st, ok := n.(*ast.StructType)
-		if !ok {
-			return true
-		}
-		for _, field := range st.Fields.List {
-			expr := field.Type
-			if star, isStar := expr.(*ast.StarExpr); isStar {
-				expr = star.X
-			}
-			seen[types.ExprString(expr)] = true
-		}
-		return true
-	})
 	return slices.Sorted(maps.Keys(seen))
 }
 
