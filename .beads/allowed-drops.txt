@@ -1,5 +1,6 @@
 # Bead ids deliberately deleted from the bd DB, exempted from bdguard's
-# dropped-issue check. Drops only: a reopen is never exempted here.
+# dropped-issue check. Drops only: entries here do not reach the reopened arm,
+# which is declared in .beads/allowed-reopens.txt in a different shape.
 #
 # An entry goes stale once the deletion lands on master (the id is then absent
 # at base and at head alike). Stale entries are ignored, not an error — see
