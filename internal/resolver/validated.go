@@ -71,12 +71,39 @@ func (k StatementKind) MarshalJSON() ([]byte, error) {
 	return json.Marshal(k.String())
 }
 
-// ResolvedType is the sealed sum of resolved types. Each variant carries a
+// ResolvedType is the sum of resolved types. Each variant carries a
 // String() wire tag and a MarshalJSON that emits a tagged-union object with a
 // "kind" discriminator, so the golden encoding is stable and readable. R0
 // contributes ResolvedNode and ResolvedProperty; R1 adds ResolvedEdge; R2
 // adds ResolvedScalar, ResolvedTemporal, ResolvedList, and ResolvedUnknown
-// (§3 of the R2 spec).
+// (§3 of the R2 spec); R3 adds ResolvedEdgeUnion.
+//
+// isResolvedType is unexported, so a method of that name in another package
+// does not satisfy this interface and the eight variants are the whole set of
+// types that DECLARE the marker. That is narrower than a closed sum. Two
+// constructions obtain the marker without declaring it, and they nest, so the
+// set of types satisfying ResolvedType has no bound:
+//
+//   - The pointer form of a variant. Both isResolvedType and String take
+//     value receivers, and a pointer's method set contains its value methods,
+//     so *ResolvedNode satisfies ResolvedType while `case ResolvedNode:` does
+//     not match it.
+//   - A struct embedding a variant. Go promotes an embedded type's
+//     unexported methods, so `struct{ resolver.ResolvedNode }` satisfies
+//     ResolvedType from any package in the module without naming the marker
+//     at all.
+//
+// A type switch whose arms are the eight variants matches neither
+// construction, so control reaches its default, or leaves the switch where
+// it has none. A default documented as dead on that reasoning is wrong
+// rather than merely pessimistic: codegen tagged two branches
+// //gqlc:unreachable on it and an assembled Input reached both (gqlc-h4ug).
+// A default an earlier check shadows is a different claim, resting on that
+// check refusing whatever would reach this one rather than on this set being
+// bounded (codegen-sentinel-taxonomy.md §3).
+// TestResolvedTypeSumIsNotClosed measures both constructions against all
+// eight arms from outside the package. Whether the codegen boundary should
+// normalise them away instead of refusing them is gqlc-edze's question.
 type ResolvedType interface {
 	String() string
 	isResolvedType()
