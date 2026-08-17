@@ -35,6 +35,10 @@ const (
 	excludedHeading  = "## 4. Declared and deliberately unreachable"
 )
 
+// reservedHeading is §6's, whose table carries an identifier rather than
+// a sentinel in its first column and so is read on its own.
+const reservedHeading = "## 6. The reserved identifier set"
+
 // moduleRoot is the repository root, relative to this package.
 const moduleRoot = "../.."
 
@@ -56,6 +60,16 @@ const conformancePkgPath = "github.com/areqag/gqlc/internal/codegen/conformance"
 
 // sentinelCell matches a first-column cell naming a sentinel.
 var sentinelCell = regexp.MustCompile("^`(Err[A-Za-z0-9]+)`$")
+
+// identCell matches a first-column cell naming a Go identifier.
+var identCell = regexp.MustCompile("^`([A-Za-z][A-Za-z0-9]*)`$")
+
+// tableHeaders are the first-column headers the document's tables carry.
+// A header row is dropped by name rather than by position: a renamed
+// header then reads as a data row and fails its table's own fence, where
+// dropping the first row whatever it says would swallow a data row that
+// had lost its header.
+var tableHeaders = map[string]bool{"Sentinel": true, "Identifier": true}
 
 // siteCell matches one backticked fail-site name in §3's second column.
 var siteCell = regexp.MustCompile("`([a-z][a-z0-9-]*)`")
@@ -786,6 +800,62 @@ func (s *SentinelTaxonomySuite) TestDeclaredSentinelsAreAccounted() {
 	}
 }
 
+// TestReservedSetSectionMatchesTheReservedRows holds §6 against
+// reservedIdentifiers and against the columns the corpus measures. §6 is
+// the only place a reader learns which target a reserved name would
+// actually break, and the identifier-sweep row of §2 sends them there,
+// so a name missing from it cannot be recovered from anything else the
+// document says.
+//
+// Both directions, and every cell. A table that carried the twelve names
+// and hand-written columns beside them would be the same fail-open shape
+// reservedIdentifiers itself is: correct on the day it was written and
+// unheld afterwards. The scope and target columns are derived from
+// reservedIdentifierRows here, and TestReservedScopeMatchesTheEmittedGoldens
+// derives those from the goldens.
+func (s *SentinelTaxonomySuite) TestReservedSetSectionMatchesTheReservedRows() {
+	documented := map[string][]string{}
+	for _, row := range s.tableRows(s.readDoc(), reservedHeading) {
+		s.Require().Len(row, 4,
+			"%s %s: a row must carry identifier, scope, declared-by and breaks-on", taxonomyDoc, reservedHeading)
+		m := identCell.FindStringSubmatch(row[0])
+		s.Require().NotNil(m, "%s %s: row starts with %q, which is not a backticked identifier", taxonomyDoc, reservedHeading, row[0])
+		_, dup := documented[m[1]]
+		s.Require().False(dup, "%s %s has two rows for %s; one name, one row", taxonomyDoc, reservedHeading, m[1])
+		documented[m[1]] = row[1:]
+	}
+
+	for name := range reservedIdentifiers {
+		_, ok := documented[name]
+		s.Require().True(ok,
+			"reservedIdentifiers reserves %s, which %s %s does not list; a reader of the document alone then cannot say which targets that name breaks",
+			name, taxonomyDoc, reservedHeading)
+	}
+	for name := range documented {
+		_, ok := reservedIdentifiers[name]
+		s.Require().True(ok,
+			"%s %s lists %s, which reservedIdentifiers does not hold; the section documents the reserved set, not the emitter's exported surface",
+			taxonomyDoc, reservedHeading, name)
+	}
+
+	for _, row := range reservedIdentifierRows {
+		declaredBy := "every target"
+		if row.declaredBy != nil {
+			declaredBy = "`" + strings.Join(row.declaredBy, "`, `") + "`"
+		}
+		// A method occupies no package block, so no entity struct of that
+		// name can redeclare it and the row refuses defensively wherever it
+		// is emitted.
+		breaksOn := declaredBy
+		if row.scope == scopeMethod {
+			breaksOn = "no target"
+		}
+		s.Require().Equal([]string{"`" + scopeName(row.scope) + "`", declaredBy, breaksOn}, documented[row.name],
+			"%s %s: the row for %s does not match the reserved set's measured columns",
+			taxonomyDoc, reservedHeading, row.name)
+	}
+}
+
 // scanSources reads the package's non-test sources once, returning every
 // package-level Err* value paired with its errors.New argument, and every
 // sentinel-returning branch. Read from source rather than through
@@ -1024,7 +1094,7 @@ func (s *SentinelTaxonomySuite) tableRows(doc []string, heading string) [][]stri
 		for i, cell := range cells {
 			cells[i] = strings.TrimSpace(cell)
 		}
-		if cells[0] == "Sentinel" || strings.Trim(cells[0], "-:") == "" {
+		if tableHeaders[cells[0]] || strings.Trim(cells[0], "-:") == "" {
 			continue
 		}
 		out = append(out, cells)
