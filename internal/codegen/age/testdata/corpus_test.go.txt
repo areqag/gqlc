@@ -953,6 +953,58 @@ func TestAgtypeZoneReadsAnOffsetInSeconds(t *testing.T) {
 	}
 }
 
+// TestAgtypeZoneRefusesAnOffsetOutsideADay pins the bound on the
+// sidecar. The emitted code reads this property and writes none, so
+// every integer that reaches the helper was put in the graph by
+// something other than gqlc: it is external input, and taken unchecked
+// it lands the caller in a zone no clock keeps. 1000000000 seconds is 31
+// years east of UTC, and the wall clock read off it is decades from the
+// instant stored beside it.
+//
+// A day either way, exclusive, is the bound. Both edges are pinned
+// rather than the sign alone, because a check written over the magnitude
+// of one side only refuses half the values it was built to refuse.
+func TestAgtypeZoneRefusesAnOffsetOutsideADay(t *testing.T) {
+	at := instants[2].at
+
+	// One second inside the bound at each edge. These say the refusal is
+	// a bound and not a list of the offsets a zone database happens to
+	// hold: +23:59:59 belongs to no zone and is still an offset, and a
+	// helper that refused it would refuse a graph a future zone database
+	// could legitimately carry.
+	for _, offset := range []int{86399, -86399} {
+		raw := strconv.Itoa(offset)
+		got, err := agtypeZone(map[string][]byte{"occurredAtOffset": []byte(raw)}, "occurredAtOffset", at)
+		if err != nil {
+			t.Errorf("agtypeZone(%s) = error %v, want the offset read", raw, err)
+			continue
+		}
+		if _, off := got.Zone(); off != offset {
+			t.Errorf("agtypeZone(%s) offset = %d seconds, want %d", raw, off, offset)
+		}
+	}
+
+	// A whole day and beyond, at both signs. The int64 extremes are here
+	// for the conversion the helper does after the check: int64 to int is
+	// where a value this size stops being the number it was on a build
+	// whose int is 32 bits.
+	for _, offset := range []int64{86400, -86400, 1000000000, -1000000000, math.MaxInt64, math.MinInt64} {
+		raw := strconv.FormatInt(offset, 10)
+		got, err := agtypeZone(map[string][]byte{"occurredAtOffset": []byte(raw)}, "occurredAtOffset", at)
+		if err == nil {
+			_, off := got.Zone()
+			t.Errorf("agtypeZone(%s) = %s at offset %d seconds, want an error", raw, got.Format(time.RFC3339Nano), off)
+			continue
+		}
+		// A schema carries one sidecar per instant property, so the
+		// number alone does not say which property of which vertex is
+		// the malformed one.
+		if !strings.Contains(err.Error(), "occurredAtOffset") {
+			t.Errorf("agtypeZone(%s) = error %v, which does not name the property it read", raw, err)
+		}
+	}
+}
+
 // Event vertices in the wire shape the captured texts above establish —
 // jsonb key order, an absent key for a null — carrying the encoded
 // instant and, beside it, the offset sidecar. Flat rather than nested,

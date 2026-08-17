@@ -24,10 +24,23 @@ const (
 // reach it (ADR 0025).
 const goInstant = "time.Time"
 
-// offsetProperty names the sidecar holding one instant property's UTC
-// offset in seconds. Flat rather than a member of a map so the instant
-// stays the property itself and an author's ORDER BY over it needs no
-// rewriting.
+// offsetSidecar names the property one field's UTC offset in seconds
+// rides in, with ok=false for a field whose stored value carries no
+// zone. It is the one answer to both halves of the question — whether a
+// field derives a sidecar at all, and what that sidecar is called — so
+// the decode that reads the property and the gate that refuses a
+// collision on it are reading the same name for the same set of fields,
+// and a width that gains a zone is taught to both in one edit.
+//
+// A prepared field carries the Go type it is emitted as and not the
+// width that was declared, so the carrier text is what the answer is
+// keyed on. time.Time is TIMESTAMP's, and TIMESTAMP is the only admitted
+// width whose value keeps an offset beside it (ADR 0025; the encoding
+// table on gqlc-35yu.11 gives an offset-bearing TIME the same sidecar,
+// against the day a carrier for it exists).
+//
+// Flat rather than a member of a map so the instant stays the property
+// itself and an author's ORDER BY over it needs no rewriting.
 //
 // The emitted code READS this property and never WRITES it. That is the
 // whole of the asymmetry and it is deliberate: the sidecar is an interop
@@ -42,7 +55,12 @@ const goInstant = "time.Time"
 // The name is derived rather than declared, so it can collide with a
 // property the author owns; rejectOffsetSidecarCollisions refuses such a
 // schema rather than letting one key have two readers.
-func offsetProperty(prop string) string { return prop + "Offset" }
+func offsetSidecar(f codegen.EntityField) (string, bool) {
+	if f.GoType != goInstant {
+		return "", false
+	}
+	return f.PropName + "Offset", true
+}
 
 // helpers records which agtype encode / decode helpers a batch reaches
 // for. Each is emitted only when something calls it.
@@ -102,7 +120,7 @@ func (h *helpers) forEntities(entities []wiredEntity) {
 			h.need(f.GoType)
 			// The offset sidecar is a second property of the same
 			// vertex, so only an entity decode has it in hand.
-			if f.GoType == goInstant {
+			if _, ok := offsetSidecar(f); ok {
 				h.zone = true
 			}
 			if f.Nullable {
@@ -380,6 +398,15 @@ func agtypeInstant(raw []byte) (time.Time, error) {
 // Flat rather than a member of a map so the instant stays the property
 // itself: ORDER BY n.at and WHERE n.at > $since are then answered by
 // agtype's integer ordering, with nothing for gqlc to rewrite.
+//
+// The offset is bounded at a day either way, exclusive, before it is
+// taken. Nothing this package emits writes the sidecar, so the integer
+// read here was put in the graph by some other writer and is external
+// input; unbounded, it names a zone no clock keeps and the wall clock
+// the caller reads is arbitrarily far from the instant beside it. The
+// bound is the span a zone can move a wall clock within rather than the
+// narrower range zone databases populate today, so a graph a future zone
+// database would accept is not refused here.
 func agtypeZone(props map[string][]byte, key string, at time.Time) (time.Time, error) {
 	raw, ok := props[key]
 	if !ok {
@@ -388,6 +415,9 @@ func agtypeZone(props map[string][]byte, key string, at time.Time) (time.Time, e
 	offset, err := agtypeInt64(raw)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("gqlc: offset %q: %w", key, err)
+	}
+	if offset <= -86400 || offset >= 86400 {
+		return time.Time{}, fmt.Errorf("gqlc: offset %q is %d seconds, which is not within a day of UTC", key, offset)
 	}
 	return at.In(time.FixedZone("", int(offset))), nil
 }
@@ -789,8 +819,8 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 	fmt.Fprintf(b, "\t%s, err := %s(props, %q, %s)\n", value, reader, f.PropName, decodeFunc(f.GoType))
 	fmt.Fprintf(b, "\tif err != nil {\n\t\treturn %s{}, fmt.Errorf(%q, err)\n\t}\n",
 		e.Name, "decode "+e.Name+"."+f.Field+": %w")
-	if f.GoType == goInstant {
-		writeInstantZoning(b, e, i, f)
+	if sidecar, ok := offsetSidecar(f); ok {
+		writeInstantZoning(b, e, i, f, sidecar)
 		return
 	}
 	switch {
@@ -808,8 +838,11 @@ func writeEntityFieldDecode(b *strings.Builder, e codegen.Entity, i int, f codeg
 // sidecar and the assignment of the zoned value. It runs only inside an
 // entity decoder: the sidecar is a second property of the same vertex,
 // which a projection of the instant alone does not carry.
-func writeInstantZoning(b *strings.Builder, e codegen.Entity, i int, f codegen.EntityField) {
-	value, sidecar := valueName(i), offsetProperty(f.PropName)
+//
+// sidecar is offsetSidecar's answer for f: the key this reads is the key
+// the collision gate refuses.
+func writeInstantZoning(b *strings.Builder, e codegen.Entity, i int, f codegen.EntityField, sidecar string) {
+	value := valueName(i)
 	fail := fmt.Sprintf("\t\treturn %s{}, fmt.Errorf(%q, err)\n", e.Name, "decode "+e.Name+"."+f.Field+": %w")
 	if !f.Nullable {
 		fmt.Fprintf(b, "\tout.%s, err = agtypeZone(props, %q, %s)\n", f.Field, sidecar, value)

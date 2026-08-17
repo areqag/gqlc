@@ -117,13 +117,17 @@ func entityKindNoun(k codegen.EntityKind) string {
 }
 
 // rejectOffsetSidecarCollisions fails a schema in which the property
-// name this backend derives for a TIMESTAMP property's zone is already
-// a property the author declared. The derived name is read out of the
-// same property map the declared one is, so a schema holding both gives
-// one key two readers: the declared property fills its own struct field
-// and is then read a second time as an offset, re-zoning the instant by
-// whatever it holds. Where the declared width is not an integer the
-// second read fails outright and no vertex of that type ever decodes.
+// name this backend derives for a field's zone is already a property the
+// author declared. The derived name is read out of the same property map
+// the declared one is, so a schema holding both gives one key two
+// readers: the declared property fills its own struct field and is then
+// read a second time as an offset, re-zoning the instant by whatever it
+// holds. Where the declared width is not an integer the second read
+// fails outright and no vertex of that type ever decodes.
+//
+// Which fields derive a name, and what that name is, are offsetSidecar's
+// answers — the same call the decode makes — so this covers exactly the
+// fields whose decode reads a sidecar.
 //
 // Reported as codegen.ErrPropertyFieldCollision because that is what it
 // is — two properties on one entity contending for a single name — even
@@ -136,10 +140,10 @@ func rejectOffsetSidecarCollisions(entities []codegen.Entity) error {
 			declared[f.PropName] = struct{}{}
 		}
 		for _, f := range e.Fields {
-			if f.GoType != goInstant {
+			sidecar, derived := offsetSidecar(f)
+			if !derived {
 				continue
 			}
-			sidecar := offsetProperty(f.PropName)
 			if _, taken := declared[sidecar]; !taken {
 				continue
 			}
