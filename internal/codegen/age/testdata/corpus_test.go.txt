@@ -956,7 +956,8 @@ func TestAgtypeZoneReadsAnOffsetInSeconds(t *testing.T) {
 // TestAgtypeZoneRefusesAnOffsetOutsideADay pins the bound on the
 // sidecar. gqlc derives no sidecar to bind — a parameter crosses as the
 // instant alone — so the integer the helper reads is whatever the graph
-// holds and not a value this encoding produced. Taken unchecked it lands
+// holds: a query that names the key binds it like any other property,
+// whether or not gqlc generated that query. Taken unchecked it lands
 // the caller in a zone no clock keeps: 1000000000 seconds is 31 years
 // east of UTC, and the wall clock read off it is decades from the
 // instant stored beside it.

@@ -124,12 +124,13 @@ func agtypeInstant(raw []byte) (time.Time, error) {
 //
 // The offset is bounded at a day either way, exclusive, before it is
 // taken. gqlc derives no sidecar to bind — a parameter crosses as the
-// instant alone — so the integer read here is whatever the graph holds
-// and not a value this encoding produced. Unbounded it names a zone no
-// clock keeps, and the wall clock the caller then reads is arbitrarily
-// far from the instant stored beside it. The bound is a day rather than
-// the narrower range zone databases populate today, so a graph a future
-// zone database would accept is not refused here.
+// instant alone — so the integer read here is whatever the graph holds:
+// a query that names the key binds it like any other property, whether
+// or not gqlc generated that query. Unbounded it names a zone no clock
+// keeps, and the wall clock the caller then reads is arbitrarily far
+// from the instant stored beside it. The bound is a day rather than the
+// narrower range zone databases populate today, so a graph a future zone
+// database would accept is not refused here.
 func agtypeZone(props map[string][]byte, key string, at time.Time) (time.Time, error) {
 	raw, ok := props[key]
 	if !ok {
