@@ -510,12 +510,14 @@ sweep-discovery-probes:
     # what matters is whether git would hide a leaked probe under this name, and
     # only git can answer that.
     #
-    # The source field is load-bearing. git's ignore answer covers
-    # .git/info/exclude and core.excludesFile too, and both are per-clone files
-    # no commit carries — a bare yes/no lookup stays green while this repo's own
-    # .gitignore loses its probe rules, provided the developer's clone happens to
-    # hide them. -v names which file matched, so this asks the question the error
-    # message claims it asks.
+    # Two questions, and both have to be yes. -q answers whether git would hide
+    # the path; -v names the file whose rule matched. Neither alone is the
+    # question: git's hide answer covers .git/info/exclude and core.excludesFile,
+    # per-clone files no commit carries, so -q alone stays green while this repo's
+    # own .gitignore loses its probe rules in a clone that happens to hide them.
+    # And -v exits 0 on a NEGATED rule — it reports that a pattern matched, not
+    # that the path is hidden — so -v alone reads "!/test/data/vulnprobe.*/" as
+    # coverage for a probe git would list as untracked.
     #
     # Each name is recorded as it is looked up so the refusal below can compare
     # the names that reached the lookup against the names declared, rather than
@@ -525,6 +527,7 @@ sweep-discovery-probes:
     covered() {
         local src
         looked_up="${looked_up}${1}"$'\n'
+        git check-ignore -q "test/data/${1}.sweepwitness" || return 1
         src="$(git check-ignore -v "test/data/${1}.sweepwitness" | cut -d: -f1)" || return 1
         [ "${src}" = ".gitignore" ]
     }
