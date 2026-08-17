@@ -124,19 +124,20 @@ run_case "heredoc body with prose+apostrophe"  allow "$MASTER_REPO"  "$(printf '
 # Drift fixtures sit on a feature branch so a deny can only come from the
 # hooks guard, never from the master guard — which is why run_drift_case
 # separates deny-hooks from deny-master rather than reporting a bare "deny".
-run_drift_case() { # $1=name $2=expected(deny-hooks|deny-master|warn|silent) $3=cwd $4=command
-  local out got
-  out="$(run_hook "$3" "$4")"
-  if printf '%s' "$out" | grep -q '"permissionDecision": *"deny"'; then
-    if printf '%s' "$out" | grep -q 'core\.hooksPath'; then got=deny-hooks; else got=deny-master; fi
-  elif printf '%s' "$out" | grep -q '"systemMessage"'; then
-    got=warn
-  elif [ -z "$out" ]; then
-    got=silent
+classify() { # $1=hook stdout -> deny-hooks|deny-master|warn|silent|unrecognized(...)
+  if printf '%s' "$1" | grep -q '"permissionDecision": *"deny"'; then
+    if printf '%s' "$1" | grep -q 'core\.hooksPath'; then printf 'deny-hooks'; else printf 'deny-master'; fi
+  elif printf '%s' "$1" | grep -q '"systemMessage"'; then
+    printf 'warn'
+  elif [ -z "$1" ]; then
+    printf 'silent'
   else
-    got="unrecognized(${out})"
+    printf 'unrecognized(%s)' "$1"
   fi
-  record "$1" "$2" "$got"
+}
+
+run_drift_case() { # $1=name $2=expected(deny-hooks|deny-master|warn|silent) $3=cwd $4=command
+  record "$1" "$2" "$(classify "$(run_hook "$3" "$4")")"
 }
 
 mkhookrepo() { # $1=path — repo on a feature branch shipping one live .githooks hook
@@ -193,15 +194,22 @@ run_drift_case "correct value, live hooks: pull"     silent     "$OK_REPO"     '
 run_drift_case "correct value, live hooks: ls"       silent     "$OK_REPO"     'ls -la'
 run_drift_case "unset: commit refused"               deny-hooks "$UNSET_REPO"  'git commit -m x'
 run_drift_case "unset: push refused"                 deny-hooks "$UNSET_REPO"  'git push'
-# merge and pull fire commit-msg — the AI-attribution gate — so a merge written
-# while drifted is an ungated commit, not just a stale bd mirror. Refused for
-# the same reason commit and push are. revert and cherry-pick fired none of this
-# repo's four hooks in the same measurement (nor did rebase or am), so they stay
-# outside HOOK_GATED; the two rows below pin that for the first two.
+# A merge or pull that writes a merge commit fires commit-msg — the
+# AI-attribution gate — so a merge written while drifted is an ungated commit,
+# not just a stale bd mirror. Refused for the same reason commit and push are.
+# Other shapes fire less: `pull --rebase` on the row below fired post-merge
+# while the branch was still fast-forwardable and none of the four once it had
+# diverged. It is refused anyway because HOOK_GATED keys on the subcommand,
+# which is all this hook can see before the fact — the shape is settled by
+# remote state at run time. revert, cherry-pick (with and without -e), rebase
+# and am fired none of the four in the same measurement, so they stay outside
+# HOOK_GATED; the four warn rows below pin that membership boundary.
 run_drift_case "unset: merge refused"                deny-hooks "$UNSET_REPO"  'git merge --no-ff side'
 run_drift_case "unset: pull refused"                 deny-hooks "$UNSET_REPO"  'git pull --rebase'
 run_drift_case "unset: revert only warns"            warn       "$UNSET_REPO"  'git revert --no-edit HEAD'
 run_drift_case "unset: cherry-pick only warns"       warn       "$UNSET_REPO"  'git cherry-pick HEAD'
+run_drift_case "unset: rebase only warns"            warn       "$UNSET_REPO"  'git rebase origin/master'
+run_drift_case "unset: am only warns"                warn       "$UNSET_REPO"  'git am /tmp/x.patch'
 run_drift_case "unset: innocuous command warns"      warn       "$UNSET_REPO"  'ls -la'
 run_drift_case "wrong path: commit refused"          deny-hooks "$WRONG_REPO"  'git commit -m x'
 run_drift_case "wrong path: push refused"            deny-hooks "$WRONG_REPO"  'git push'
@@ -231,6 +239,50 @@ run_drift_case "master guard wins over drift"        deny-master "$MASTER_DRIFT"
 # drifted cwd must not condemn a commit aimed at a healthy one.
 run_drift_case "-C into drifted repo from healthy"   deny-hooks "$OK_REPO"     "git -C $UNSET_REPO push"
 run_drift_case "-C into healthy repo from drifted"   warn       "$UNSET_REPO"  "git -C $OK_REPO commit -m x"
+
+# hooks_drift() strips GIT_* before shelling out, because repo-discovery env
+# redirects `git -C <root> config --get` at whichever repo exported it — a
+# drifted repo would then read a healthy repo's config and fall silent. The
+# `unset "${!GIT_@}"` at the top of this file means no row above can reach that
+# guard, so this one puts GIT_DIR back for a single call, pointed at the healthy
+# repo while the cwd is the drifted one. Without the strip the answer is `warn`.
+run_gitdir_case() { # $1=name $2=expected $3=cwd $4=command $5=GIT_DIR
+  local out
+  out="$(
+    cd "$3" || exit 1
+    export GIT_DIR="$5"
+    python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.argv[1]}}))' "$4" | "$HOOK" 2>/dev/null
+  )"
+  record "$1" "$2" "$(classify "$out")"
+}
+run_gitdir_case "GIT_DIR cannot mask drift" deny-hooks "$UNSET_REPO" 'git commit -m x' "$OK_REPO/.git"
+
+# An internal error must not read as a silent allow: this hook exists to refuse
+# when the git hooks are dead, so exiting 0 with no output on its own bug is the
+# defect it guards against. Malformed stdin is the reachable trigger — json.load
+# raises before any check runs. The fixture is the HEALTHY repo on purpose: a
+# drift warn is impossible there (the row above it is `silent`), so a warn here
+# can only have come from the top-level handler.
+run_raw_case() { # $1=name $2=expected $3=cwd $4=raw stdin
+  local out
+  out="$(cd "$3" && printf '%s' "$4" | "$HOOK" 2>/dev/null)"
+  record "$1" "$2" "$(classify "$out")"
+}
+run_raw_case "healthy repo, valid stdin: silent"  silent "$OK_REPO" '{"tool_name":"Bash","tool_input":{"command":"ls"}}'
+run_raw_case "internal error warns, not silent"   warn   "$OK_REPO" 'not json at all'
+
+# A total pins suite SIZE, not membership — swapping any row for a different one
+# leaves it green, which is why membership is pinned separately by the mutation
+# battery (dropping or adding a HOOK_GATED entry has to turn a NAMED row red).
+# What this catches is the one thing that battery cannot see: rows silently
+# disappearing. Deleting all 27 run_drift_case invocations reported "29 passed,
+# 0 failed" and exited 0; deleting the two escape-hatch rows reported "54
+# passed, 0 failed". Both are now failures.
+EXPECTED_ROWS=61
+if [ "$((pass + fail))" -ne "$EXPECTED_ROWS" ]; then
+  printf 'FAIL - suite size drifted: expected %d rows, ran %d\n' "$EXPECTED_ROWS" "$((pass + fail))"
+  fail=$((fail + 1))
+fi
 
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
