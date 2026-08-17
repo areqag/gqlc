@@ -43,6 +43,10 @@
 #     not refused
 #   - the config value is compared literally, not resolved: an absolute path
 #     naming the very same directory still reads as drift (see HOOKS_DIRNAME)
+#   - an internal error in this hook warns and allows rather than denying (see
+#     __main__): a bug here must not be able to block its own repair. It is no
+#     longer *silent*, which is the part that mattered — a detector that exits
+#     0 on its own bug is the failure this hook exists to catch.
 #
 # Hook contract: JSON on stdin { "tool_name": "Bash",
 #   "tool_input": { "command": "..." } }. Deny = exit 0 + JSON with
@@ -77,9 +81,17 @@ HOOKS_DIRNAME = ".githooks"
 # same fixture `revert`, `cherry-pick` (with and without -e), `rebase` and `am`
 # fired none of the four. merge/pull are refused rather than warned about
 # because commit-msg is the AI-attribution gate CLAUDE.md relies on, so a merge
-# commit written while drifted is an ungated commit. A fast-forward merge or
-# pull writes no commit and so fires nothing; refusing it anyway is the
-# conservative side of a distinction this hook cannot make before the fact.
+# commit written while drifted is an ungated commit.
+# What a merge or pull fires varies by shape, and the shape is settled by remote
+# state at run time, not by the command text this hook sees. Measured in the
+# same fixture: a fast-forward `merge` or `pull` writes no commit but still
+# fires post-merge, the bd-gh-sync mirror; `merge --squash` writes no commit
+# either and also fires post-merge; `pull --rebase` fires post-merge while the
+# branch is still fast-forwardable and nothing once it has diverged; plain
+# `rebase` and a 3-way `merge --no-commit` fire nothing. `pull` alone therefore
+# spans shapes firing two of the four, one, and none. Gating the subcommand
+# refuses that last group too — the conservative side of a distinction this hook
+# cannot make before the fact.
 HOOK_GATED = ("commit", "merge", "pull", "push")
 HEREDOC_RE = re.compile(r"(?<!<)<<(-?)\s*([\"']?)(\w+)\2")
 SUBST_RE = re.compile(r"\$\(([^()]*)\)")
@@ -350,7 +362,12 @@ def hooks_drift(directory):
     return reason
 
 
+_EMITTED = False
+
+
 def emit(payload):
+    global _EMITTED
+    _EMITTED = True
     print(json.dumps(payload))
 
 
@@ -422,6 +439,23 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception:
-        pass
+    except Exception as exc:
+        # An internal error must not read as "nothing to report". This hook
+        # exists to refuse when the git hooks are dead, so exiting silently on
+        # its own bug is the failure it was written to catch. Warn rather than
+        # deny: it runs ahead of every Bash call in every concurrent session,
+        # so a bug that denied would wedge the session that has to repair it,
+        # including `just init`. Suppressed once a decision has been emitted —
+        # a second JSON object on stdout would not parse, and the decision
+        # already reached the caller.
+        if not _EMITTED:
+            try:
+                warn(
+                    "claude-pre-bash failed internally (%s: %s) — the "
+                    "master-branch and core.hooksPath checks did NOT run for "
+                    "this command. Verify the hooks with: just check-hooks"
+                    % (type(exc).__name__, exc)
+                )
+            except Exception:
+                pass
     sys.exit(0)
