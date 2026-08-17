@@ -386,9 +386,9 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 
 	// The other case of the fall-through's text, and the reason its comment
 	// describes two rather than one. Every form above declares no String, so
-	// the promoted diagnostic Stringer answers and the reason carries the
-	// variant's own tag. A shadowing String is answered by the same
-	// fall-through and puts the caller's text there instead.
+	// the variant's own diagnostic Stringer stays shallowest and answers. A
+	// shadowing String reaches the same fall-through and puts the caller's
+	// text there instead.
 	t.Run("a shadowing embedder chooses the text after projects", func(t *testing.T) {
 		shadow := shadowEdgeUnion{probeEdgeUnion}
 		require.Equal(t, "projects "+shadowEdgeUnionText, unservedColumn(shadow),
