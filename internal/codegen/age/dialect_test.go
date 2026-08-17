@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"unicode"
@@ -53,6 +54,12 @@ const (
 	// findable in order to be rejected by the recipe check, rather than
 	// missing and indistinguishable from a typo.
 	liveGlob = "test/data/codegen/live_*_test.go"
+	// liveBuildTag is the tag every file matching liveGlob is behind. A
+	// command line that does not build it compiles none of them, so it
+	// runs no witness however its -run reads: measured as review mutation
+	// T1, which left the sweep green while `go test` printed
+	// "[no test files]" for every package in test/data/codegen.
+	liveBuildTag = "codegen_live"
 	// justfilePath holds the recipes CI invokes.
 	justfilePath = "justfile"
 )
@@ -133,7 +140,9 @@ func TestWitnessSweepFailsOnEachBrokenBinding(t *testing.T) {
 	// Anchored, and the row below is why: -run is an unanchored regexp,
 	// so a bare `-run TestSomethingLive` selects TestSomethingLiveButUnrun
 	// too and the "no recipe runs it" row would find the witness run.
-	recipes := map[string]string{"run-it": "go test -run '^" + witness + "$'"}
+	// The build tag is here because recipeRuns requires it — a command
+	// line that does not build liveBuildTag compiles no live test.
+	recipes := map[string]string{"run-it": "go test -tags " + liveBuildTag + " -run '^" + witness + "$'"}
 	sound := dialectGap{
 		sentinel: ErrRelationshipTypeAlternation,
 		find:     findUndefinedFunctionsOrAlternations,
@@ -475,7 +484,7 @@ func TestACommentedProbeReddensTheSweep(t *testing.T) {
 		refused:  []dialectProbe{{text: syntheticProbeText, answer: syntheticProbeAns}},
 		served:   []string{syntheticServedText},
 	}
-	recipes := map[string]string{"run-it": "go test -count=1 -run " + syntheticWitness}
+	recipes := map[string]string{"run-it": "go test -count=1 -tags " + liveBuildTag + " -run " + syntheticWitness}
 
 	run := readSyntheticWitness(t, liveWitnessSource("", syntheticProbeRow))
 	require.Empty(t, witnessGaps([]dialectGap{gap}, run, recipes),
@@ -700,9 +709,12 @@ func readLiveWitnessBodies(t *testing.T) map[string]string {
 	return bodies
 }
 
-// recipeRuns reports whether cmds actually runs the top-level test named
-// witness: selected by every -run the command line passes, and named by
-// no -skip.
+// recipeRuns reports whether cmds actually runs the live top-level test
+// named witness — every probe row of it. Five things have to hold: the
+// quoting closes, the command line invokes `go test`, it builds
+// liveBuildTag, every -run selects the witness WHOLE, and no -skip
+// reaches it. Each is a way a recipe was measured running no witness
+// while this function said yes.
 //
 // This is the half strings.Contains could not say, and the same defect
 // class as reading a witness's body as source bytes (see witnessBodies).
@@ -713,38 +725,102 @@ func readLiveWitnessBodies(t *testing.T) map[string]string {
 // Measured as review mutations L18/L19/L20 — all three left the sweep
 // green while no CI job ran the witness.
 //
-// Two approximations, both chosen because they err toward complaining:
+// "Whole" is the round-3 correction and it is the asymmetry that makes
+// this function worth having. go test reads the elements after the first
+// as a SUBTEST filter, and both AGE witnesses run every probe row as a
+// subtest (live_age_dialect_test.go), so a -run of `W/toTimestamp` runs
+// one probe of five and a -run of `W/x` runs none at all. Both print
+// `--- PASS: W` and exit 0. Measured against go1.26.5: the second prints
+// `[no tests to run]` ONLY when nothing else on the command line
+// matched, so in the shape a live recipe has — `-run 'TestLiveSmoke|W/x'`,
+// where the smoke battery still runs — even that tell is absent. Until
+// this rule was added, a -skip carving out ONE probe was refused while a
+// -run dropping ALL TWELVE was accepted (review mutations MC, MA, MB).
+// So an alternative counts as selecting the witness only when it has no
+// further elements; a narrowed one is read as not selecting it.
+//
+// The remaining approximations, in the direction each fails:
 //
 //   - Every -run must select the witness, where go test honours only the
 //     last one. A recipe running two batteries, only the second of which
-//     covers the witness, is reported here as not running it.
+//     covers the witness, is reported here as not running it. Complaint.
 //   - Any -skip alternative whose FIRST element matches the witness
-//     counts as skipping it, where go test drops only a subtest when
-//     that alternative has further elements. Both AGE witnesses run
-//     their probe rows as subtests (live_age_dialect_test.go), so
-//     `-skip 'TestAGERefusesTheFunctionsItDoesNotDefine/toTimestamp'`
-//     removes exactly the measurement while the top-level still passes.
-//     The sweep cannot see inside a witness, so it declines to be told
-//     the witness is only partly skipped.
+//     counts as skipping it, where go test would drop only a subtest.
+//     Complaint, and the same direction as the -run rule above.
+//   - Every -tags value must carry liveBuildTag, where go test honours
+//     the last. Complaint.
+//   - Only the command line is read. Where the package argument points
+//     is not checked (review mutation T2) — that is a question about the
+//     file system rather than about flags, and it is left open. Silence.
 func recipeRuns(cmds, witness string) bool {
-	fields := shellFields(cmds)
+	fields, quoted := shellFields(cmds)
+	// A line this reader could not finish parsing is not a line it can
+	// report on. It arises when stripRecipeComment cuts inside a quoted
+	// argument, and answering from the fragment is how "nothing to read"
+	// became "runs everything" (review mutation V3).
+	if quoted {
+		return false
+	}
+	// The question is whether a witness runs, and nothing runs if no test
+	// binary is built. Without this, a recipe body that shells out to a
+	// script carries no flags at all, and every loop below passes over an
+	// empty slice: review mutation V1, green while the sweep read no go
+	// test invocation whatsoever.
+	if !invokesGoTest(fields) {
+		return false
+	}
+	tags := testFlagValues(fields, "tags")
+	if len(tags) == 0 {
+		return false
+	}
+	for _, value := range tags {
+		if !slices.Contains(strings.FieldsFunc(value, func(r rune) bool {
+			return r == ',' || r == ' '
+		}), liveBuildTag) {
+			return false
+		}
+	}
 	for _, pattern := range testFlagValues(fields, "run") {
 		// Doubt is not a run: an unparseable pattern is reported as
 		// selecting nothing rather than as selecting this witness.
-		if selected, err := selects(pattern, witness); err != nil || !selected {
+		_, wholly, err := selects(pattern, witness)
+		if err != nil || !wholly {
 			return false
 		}
 	}
 	for _, pattern := range testFlagValues(fields, "skip") {
-		if skipped, err := selects(pattern, witness); err != nil || skipped {
+		reaches, _, err := selects(pattern, witness)
+		if err != nil || reaches {
 			return false
 		}
 	}
 	return true
 }
 
-// selects reports whether a `go test -run` / `-skip` pattern selects the
-// TOP-LEVEL test named name.
+// invokesGoTest reports whether a command line runs `go test`: a `go`
+// argument — or a path ending in one — with `test` immediately after it.
+//
+// A compiled test binary invoked directly is not recognised, and neither
+// is a script that runs go test inside itself. Both read here as a
+// recipe that does not run the witness, which is a complaint.
+func invokesGoTest(fields []string) bool {
+	for i, f := range fields {
+		if f != "go" && !strings.HasSuffix(f, "/go") {
+			continue
+		}
+		if i+1 < len(fields) && fields[i+1] == "test" {
+			return true
+		}
+	}
+	return false
+}
+
+// selects reports how a `go test -run` / `-skip` pattern reaches the
+// TOP-LEVEL test named name: reaches is whether some alternative matches
+// it at all, wholly is whether some alternative matches it with no
+// further elements. The two differ exactly when a pattern narrows to
+// subtests, and that difference is what recipeRuns is built on — a -skip
+// that reaches counts as skipping, a -run must select wholly.
 //
 // go test splits a pattern on top-level `|` into alternatives first and
 // each alternative on `/` into elements, then matches element i against
@@ -756,26 +832,35 @@ func recipeRuns(cmds, witness string) bool {
 // is the wrong question in both directions. Verified against go1.26.5
 // rather than read off the docs — `-skip 'TestLiveSmoke/neo4j|W'` skips
 // W outright, because the appended text is a second alternative and not
-// a second element.
+// a second element; and `-run 'TestLiveSmoke|W/x'` leaves W selected,
+// running none of its subtests, at exit 0.
+//
+// Every alternative is read even after one matches, because a narrowed
+// alternative can be followed by a whole one. A pattern with an
+// uncompilable alternative therefore errors even when an earlier
+// alternative already matched, which recipeRuns reads as neither
+// selecting nor safely skipping — a complaint either way, never silence.
 //
 // The split here is naive where go test's is bracket-aware: a `|` or `/`
 // inside `[...]` or `(...)` is top-level to this function and is not to
 // go test. That direction is deliberate. The pieces a naive split makes
-// of `TestFoo(A|B)` do not compile, and recipeRuns reads a pattern it
-// cannot compile as neither selecting nor safely skipping — a complaint
-// either way, never silence.
-func selects(pattern, name string) (bool, error) {
+// of `TestFoo(A|B)` do not compile.
+func selects(pattern, name string) (reaches, wholly bool, err error) {
 	for _, alt := range strings.Split(pattern, "|") {
-		head, _, _ := strings.Cut(alt, "/")
-		re, err := regexp.Compile(head)
-		if err != nil {
-			return false, fmt.Errorf("pattern %q: %w", pattern, err)
+		head, _, narrowed := strings.Cut(alt, "/")
+		re, cerr := regexp.Compile(head)
+		if cerr != nil {
+			return false, false, fmt.Errorf("pattern %q: %w", pattern, cerr)
 		}
-		if re.MatchString(name) {
-			return true, nil
+		if !re.MatchString(name) {
+			continue
+		}
+		reaches = true
+		if !narrowed {
+			wholly = true
 		}
 	}
-	return false, nil
+	return reaches, wholly, nil
 }
 
 // testFlagValues is every value a command line gives one go test flag,
@@ -807,18 +892,38 @@ func testFlagValues(fields []string, flag string) []string {
 }
 
 // shellFields splits a recipe's command line into arguments, honouring
-// single and double quotes so `-run 'A|B'` stays one argument.
+// single and double quotes so `-run 'A|B'` stays one argument. The
+// second return says a quote was still open at the end — the line the
+// caller handed over is not a line this reader finished.
 //
-// Not a shell: no escapes, no expansion, no operators. It exists to find
-// -run and -skip and the values beside them. A recipe whose quoting
-// defeats it yields arguments that select nothing, which recipeRuns
-// reports as a witness that does not run.
-func shellFields(s string) []string {
+// Not a shell: no escapes, no expansion, no operators, no substitution.
+// It exists to find -run, -skip and -tags and the values beside them.
+//
+// The two flags fail in OPPOSITE directions when it is defeated, and
+// naming only the safe one is how round 3 found this comment wrong.
+// Expansion is the case that matters, because a recipe may write
+// `SKIP='TestLiveSmoke/neo4j|W' && go test … -skip "$SKIP"`, which is one
+// executable line:
+//
+//   - For -run, an argument this reader takes literally selects nothing,
+//     and recipeRuns reports a witness that does not run. Complaint.
+//   - For -skip, the same literal argument SKIPS nothing, so the witness
+//     reads as running while the recipe skips it outright. Silence, and
+//     the shape this file exists to forbid. Measured as review mutation
+//     V4b: `$SKIP` and `${SKIP}` both compile as regexps and match no
+//     test name, `$` being the end-of-text anchor.
+//   - For -tags, a literal `$TAGS` carries no build tag, so the recipe
+//     reads as building none of the live battery. Complaint.
+//
+// Closing that means being a shell, which is not a cost this check is
+// worth; it is stated rather than fixed. No live recipe expands a
+// variable into a test pattern today, and the justfile's own shell
+// variables are elsewhere.
+func shellFields(s string) (fields []string, unterminated bool) {
 	var (
-		fields []string
-		cur    strings.Builder
-		quote  rune
-		open   bool
+		cur   strings.Builder
+		quote rune
+		open  bool
 	)
 	for _, r := range s {
 		switch {
@@ -844,21 +949,48 @@ func shellFields(s string) []string {
 	if open {
 		fields = append(fields, cur.String())
 	}
-	return fields
+	return fields, quote != 0
 }
 
 // stripRecipeComment drops a recipe line's shell comment: everything
-// from the first `#`.
+// from the first `#` that starts a word outside quotes, which is where
+// sh starts one. This is the recipe artefact's half of the property
+// witnessBodies holds for Go source: text that is spelled is not text
+// that runs.
 //
-// Quotes are not tracked, so a `#` inside a quoted argument takes the
-// rest of the line with it. That is the safe direction — the worst it
-// can do is complain about a witness the recipe does run, where keeping
-// the comment stays silent about one it does not. This is the recipe
-// artefact's half of the property witnessBodies holds for Go source:
-// text that is spelled is not text that runs.
+// It cut at the FIRST `#` of any kind until round 3, and the claim that
+// this was "the safe direction — the worst it can do is complain about a
+// witness the recipe does run" was false. Review mutation V3:
+// `go test -count=1 -tags codegen_live -ldflags '-X main.p=a#b' -run 'TestLiveSmoke' …`
+// keeps -count=1 and loses -run, and recipeRuns read the flagless
+// remainder as selecting everything. Silence over a recipe that runs no
+// witness — the exact shape of L20 with the cut moved.
+//
+// Word-start-outside-quotes is sh's own rule, so for the shapes this
+// reader models the cut is where sh puts it — an unquoted `-X p=a#b`
+// keeps its `#`, because that one does not start a word. What is NOT
+// modelled is escapes, command substitution and heredocs, none of which
+// any recipe in this justfile uses. If a cut did land inside a live
+// command through one of those, the remainder either fails to close its
+// quoting, which recipeRuns refuses, or it parses with fewer flags than
+// the shell runs — and the second is silence, not a complaint, when what
+// was lost is a -run that did not select the witness. That is V3's shape
+// again, one layer down; it is stated rather than closed.
 func stripRecipeComment(line string) string {
-	if i := strings.IndexByte(line, '#'); i >= 0 {
-		return line[:i]
+	var quote rune
+	startsWord := true
+	for i, r := range line {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"':
+			quote = r
+		case r == '#' && startsWord:
+			return line[:i]
+		}
+		startsWord = quote == 0 && unicode.IsSpace(r)
 	}
 	return line
 }
@@ -1002,11 +1134,14 @@ func TestRecipeReaderComplainsOnEachBrokenRecipe(t *testing.T) {
 // recipes name a witness AND carry a -skip, so "the name appears" says
 // nothing about whether the test runs.
 //
-// The rows are the three review mutations that survived the byte-level
-// check — L18 (append the witness to the existing -skip), L19 (name it
-// only in -skip), L20 (name it only in a comment) — plus the two
-// directions of the unanchored-regexp question and the subtest carve-out
-// the approximation in recipeRuns is chosen to catch.
+// Every row is a review mutation that once survived. L18 and L19 are the
+// two -skip moves that survived the byte-level check; the two comment
+// rows are L20's selection half (their own comments say why they are not
+// its comment half); MA and MB are the -run narrowings that survived the
+// first version of recipeRuns; V1, V3 and T1 are the three ways a
+// command line ran no witness while every flag loop read an empty slice
+// and said yes. The rest are the two directions of the unanchored match
+// and the -skip subtest carve-out the approximation is chosen to catch.
 //
 // Driven through recipeBodies from justfile source written here rather
 // than over recipeRuns alone, because the comment rows are the reader's
@@ -1021,12 +1156,18 @@ func TestRecipeRunsOnlyWhatTheCommandLineSelects(t *testing.T) {
 		liveRun  = "TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation|" + witness
 		liveSkip = "TestLiveSmoke/neo4j"
 	)
-	// cmd is one recipe body: the flags under test, always with -count=1
-	// so the reader's own complaint stays silent and a row can only be
-	// about selection.
-	cmd := func(flags string) string {
-		return recipe + ":\n    cd test/data/codegen && go test -count=1 -tags codegen_live " + flags + " ./...\n"
+	// cmdTagged is one recipe body: the build tag and the flags under
+	// test, always with -count=1 so the reader's own complaint stays
+	// silent and a row can only be about what it says it is about. An
+	// empty tags argument writes no -tags at all.
+	cmdTagged := func(tags, flags string) string {
+		invocation := "cd test/data/codegen && go test -count=1 "
+		if tags != "" {
+			invocation += "-tags " + tags + " "
+		}
+		return recipe + ":\n    " + invocation + flags + " ./...\n"
 	}
+	cmd := func(flags string) string { return cmdTagged(liveBuildTag, flags) }
 	sound := cmd("-run '" + liveRun + "' -skip '" + liveSkip + "'")
 
 	for _, tc := range []struct {
@@ -1072,15 +1213,24 @@ func TestRecipeRunsOnlyWhatTheCommandLineSelects(t *testing.T) {
 				"-skip '" + liveSkip + "|" + witness + "'"),
 		},
 		{
-			// L20: the round-1 comment move on the artefact the AST fix
-			// does not reach.
-			name: "L20: named only by a comment line",
+			// L20 was "delete the witness from -run and leave the name in
+			// a justfile comment". These two rows are the SELECTION half
+			// of that and not the comment half: they hold whether or not
+			// comments are stripped, because a comment introduces no -run
+			// and the -run that is here does not reach the witness.
+			// Making stripRecipeComment the identity leaves both green
+			// (review mutation N1); deleting recipeRuns' -run loop kills
+			// both (N3). The comment half — text that is spelled is not
+			// text that runs — is carried by the two -count=1 comment rows
+			// of TestRecipeReaderComplainsOnEachBrokenRecipe, which N1
+			// does kill. They were named for L20 until round 3 said so.
+			name: "a name in a comment line is not a -run that selects it",
 			src: recipe + ":\n    # runs " + witness + " nightly\n" +
 				"    cd test/data/codegen && go test -count=1 -tags codegen_live " +
 				"-run 'TestLiveSmoke' -skip '" + liveSkip + "' ./...\n",
 		},
 		{
-			name: "L20: named only by a trailing comment",
+			name: "a name in a trailing comment is not a -run either",
 			src:  cmd("-run 'TestLiveSmoke' -skip '" + liveSkip + "'  # and " + witness),
 		},
 		{
@@ -1089,6 +1239,25 @@ func TestRecipeRunsOnlyWhatTheCommandLineSelects(t *testing.T) {
 			// is the subtest carrying the probe, so the sweep refuses it.
 			name: "a -skip carving out one of its subtests",
 			src:  cmd("-run '" + liveRun + "' -skip '" + witness + "/toTimestamp'"),
+		},
+		{
+			// The row above's mirror, and the one round 3 found missing:
+			// the identical shape on -run removes strictly MORE
+			// measurement, so accepting it while refusing the -skip was
+			// backwards. go test runs one probe of five here (review
+			// mutation MA).
+			name: "a -run narrowing it to one of its subtests",
+			src:  cmd("-run '" + liveRun + "/toTimestamp' -skip '" + liveSkip + "'"),
+		},
+		{
+			// And the whole loss: no subtest is named x, so the witness
+			// runs ZERO probes, prints `--- PASS` for the top-level with
+			// no subtest lines under it, and exits 0 — without even a
+			// `[no tests to run]`, because the smoke battery in the first
+			// alternative did run something (review mutation MB, measured
+			// against go1.26.5).
+			name: "a -run narrowing it to a subtest that does not exist",
+			src:  cmd("-run '" + liveRun + "/x' -skip '" + liveSkip + "'"),
 		},
 		{
 			name: "a -skip prefix that reaches it unanchored",
@@ -1104,6 +1273,56 @@ func TestRecipeRunsOnlyWhatTheCommandLineSelects(t *testing.T) {
 			// rather than guessing.
 			name: "a -run this reader cannot compile",
 			src:  cmd("-run 'TestAGE(Refuses|Session'"),
+		},
+		{
+			// The question every check here has to answer: what does it
+			// say when it finds nothing? This body carries -count=1, the
+			// tag and a -run that selects the witness, and runs a script
+			// instead of go test. Reading no flags is not reading flags
+			// that select everything (review mutation V1).
+			name: "a body that never invokes go test",
+			src: recipe + ":\n    cd test/data/codegen && ./scripts/live-age.sh " +
+				"-count=1 -tags " + liveBuildTag + " -run '" + liveRun + "'\n",
+		},
+		{
+			// A quoted `#` is a literal to sh and was a comment to this
+			// reader, which carried the -run away and left the flagless
+			// remainder reading as "selects everything" (review mutation
+			// V3). This row is the positive control on that fix: the
+			// recipe does run the witness, and a quote-blind cut here
+			// leaves an unterminated quote the row below refuses.
+			name: "a quoted # is not a comment, and the -run after it survives",
+			src:  cmd("-ldflags '-X main.p=a#b' -run '" + liveRun + "' -skip '" + liveSkip + "'"),
+			run:  true,
+		},
+		{
+			name: "a quoted # in front of a -run that does not select it",
+			src:  cmd("-ldflags '-X main.p=a#b' -run 'TestLiveSmoke' -skip '" + liveSkip + "'"),
+		},
+		{
+			// sh rejects this line outright, so the recipe runs nothing.
+			// Without the check, the unterminated -skip swallows the rest
+			// of the line into one pattern that reaches no test, no -run
+			// is found at all, and the witness reads as running.
+			name: "a command line whose quoting never closes",
+			src:  cmd("-skip '" + liveSkip),
+		},
+		{
+			// Every live_*_test.go is behind liveBuildTag, so this
+			// command line compiles none of them and the -run selects
+			// nothing that exists (review mutation T1).
+			name: "no -tags builds none of the live battery",
+			src:  cmdTagged("", "-run '"+liveRun+"' -skip '"+liveSkip+"'"),
+		},
+		{
+			name: "a -tags that does not carry the live tag",
+			src:  cmdTagged("integration", "-run '"+liveRun+"' -skip '"+liveSkip+"'"),
+		},
+		{
+			// The tag among others is still the tag: the value is a list.
+			name: "the live tag in a list of tags still builds it",
+			src:  cmdTagged("integration,"+liveBuildTag, "-run '"+liveRun+"' -skip '"+liveSkip+"'"),
+			run:  true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
