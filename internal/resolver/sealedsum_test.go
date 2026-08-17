@@ -240,13 +240,16 @@ func sortedKeys[V any](m map[string]V) []string {
 // TestResolvedTypeSumIsNotClosed measures what ResolvedType's unexported
 // marker does and does not buy, and is what the type's doc comment cites.
 //
-// What it buys: an out-of-package type cannot declare isResolvedType, so the
-// eight variants are the whole set of types that DECLARE the marker. That half
-// is enforced by the compiler and has no row here.
+// What it buys: a method named isResolvedType in another package does not
+// satisfy the interface, so this package's variants are the whole set of types
+// that DECLARE the marker. That half is enforced by the compiler and has no
+// row here.
 //
 // What it does not buy: two constructions inhabit ResolvedType without
 // declaring the marker — the pointer form of a variant, and a struct embedding
-// one. Neither matches any of the eight arms.
+// one. Neither matches any arm. Counts live in ResolvedType's doc comment,
+// which the row below holds to the declared set; stating one here would drift
+// unread.
 func TestResolvedTypeSumIsNotClosed(t *testing.T) {
 	t.Run("declared variants", func(t *testing.T) {
 		require.Equal(t, sortedKeys(inhabitants), declaredMarkers(t),

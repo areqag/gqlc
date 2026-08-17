@@ -103,9 +103,14 @@ is noise; delete it.
   compiler enforces over a runtime check or a comment warning the next reader.
   Go techniques:
   - **Closed sum types** — an interface with an unexported marker method
-    makes the sum exhaustive: only types in the same package can implement it,
-    so callers cannot smuggle in a third variant and the compiler sees every
-    case.
+    seals declaration, not inhabitation. A method of that name declared in
+    another package does not satisfy the interface, so the variants are the
+    whole set of types declaring the marker. It does not close the set of
+    types that satisfy it: a pointer to a variant and a struct embedding one
+    both promote the marker from any package in the module and match no
+    `case Variant:` arm, so control reaches the default or leaves the
+    switch — a live case, not a dead one. See
+    `internal/resolver/validated.go` and `TestResolvedTypeSumIsNotClosed`.
   - **Unexported fields + a `New*` constructor** — when an invariant cannot
     live in the types alone (a string that must be non-empty, fields that
     must both be set), hide the fields so the constructor is the only way to

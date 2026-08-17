@@ -78,11 +78,11 @@ func (k StatementKind) MarshalJSON() ([]byte, error) {
 // adds ResolvedScalar, ResolvedTemporal, ResolvedList, and ResolvedUnknown
 // (§3 of the R2 spec); R3 adds ResolvedEdgeUnion.
 //
-// isResolvedType is unexported, so nothing outside this package DECLARES it
-// and the eight variants are the whole set of declaring types. That is
-// narrower than a closed sum. Two constructions obtain the marker without
-// declaring it, and they nest, so the set of types satisfying ResolvedType
-// has no bound:
+// isResolvedType is unexported, so a method of that name in another package
+// does not satisfy this interface and the eight variants are the whole set of
+// types that DECLARE the marker. That is narrower than a closed sum. Two
+// constructions obtain the marker without declaring it, and they nest, so the
+// set of types satisfying ResolvedType has no bound:
 //
 //   - The pointer form of a variant. Both isResolvedType and String take
 //     value receivers, and a pointer's method set contains its value methods,
@@ -99,8 +99,8 @@ func (k StatementKind) MarshalJSON() ([]byte, error) {
 // rather than merely pessimistic: codegen tagged two branches
 // //gqlc:unreachable on it and an assembled Input reached both (gqlc-h4ug).
 // A default an earlier check shadows is a different claim, resting on that
-// check naming the same arms rather than on this set being bounded
-// (codegen-sentinel-taxonomy.md §3).
+// check refusing whatever would reach this one rather than on this set being
+// bounded (codegen-sentinel-taxonomy.md §3).
 // TestResolvedTypeSumIsNotClosed measures both constructions against all
 // eight arms from outside the package. Whether the codegen boundary should
 // normalise them away instead of refusing them is gqlc-edze's question.
