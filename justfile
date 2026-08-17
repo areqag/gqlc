@@ -1397,8 +1397,11 @@ vuln: sweep-discovery-probes vuln-root-residual
     # reason: the header moving is this clause going quiet, and a quiet clause
     # accepts everything.
     #
-    # On the accepting path the clause prints the name of what it graded. The
-    # per-module tally after the loop is the set of those names.
+    # On the accepting path the clause prints two lines: the name of what it
+    # graded, then the header line it read out of the scan. The per-module tally
+    # after the loop is the set of those names. The name alone cannot say which
+    # output was graded — it is the caller's own argument, echoed — so the header
+    # is what each call site matches back against the scan it handed in.
     refuse_unplaced_stdlib() {
         local scan="${1}" where="${2}" line token
         line="$(grep -m1 -E '^Govulncheck scanned the following [0-9]+ modules and the .*standard library:$' <<<"${scan}" || true)"
@@ -1411,7 +1414,7 @@ vuln: sweep-discovery-probes vuln-root-residual
         fi
         token="$(sed -E 's/^.*modules and the (.*) standard library:$/\1/' <<<"${line}")"
         case "${token}" in
-            go?*) printf '%s\n' "${where}"; return 0 ;;
+            go?*) printf '%s\n%s\n' "${where}" "${line}"; return 0 ;;
         esac
         echo "error: the scan of ${where} placed no version on the standard library, so every" >&2
         echo "       stdlib advisory was looked up under an empty version and none of them" >&2
@@ -1476,13 +1479,17 @@ vuln: sweep-discovery-probes vuln-root-residual
         echo "       outage rather than a gate (bd gqlc-u91z)." >&2
         exit 1
     fi
-    # The tally after the loop is built from the names this clause prints, so an
-    # accepting arm that prints nothing leaves every module reading as ungraded
-    # — a wrong diagnosis on the single run where anyone is reading.
-    if [ "${accepted}" != "${witness_where}" ]; then
-        echo "error: the unplaced-stdlib clause accepted a placed header without naming what" >&2
-        echo "       it graded — it said \"${accepted}\", not \"${witness_where}\" — and the" >&2
-        echo "       per-module tally below is that name (bd gqlc-u91z)." >&2
+    # Both lines of the accepting arm are asserted, against the exact strings
+    # handed in. The tally after the loop is built from the first, so an arm that
+    # printed nothing would leave every module reading as ungraded. Each call
+    # site matches the second back against its own scan, so an arm that dropped
+    # it would be an acceptance no scan is tied to — and a `grep -qxF` on the
+    # empty string matches any blank line, which govulncheck's output has.
+    if [ "${accepted}" != "${witness_where}"$'\n'"${placed_header}" ]; then
+        echo "error: the unplaced-stdlib clause accepted a placed header without echoing back" >&2
+        echo "       the name it graded and the header it read (bd gqlc-u91z). Expected" >&2
+        echo "       \"${witness_where}\" then the header it was handed; it said:" >&2
+        printf '%s\n' "${accepted}" | sed 's/^/         /' >&2
         exit 1
     fi
 
@@ -1587,8 +1594,29 @@ vuln: sweep-discovery-probes vuln-root-residual
         # What accumulates is the name the grading itself printed, taken in the
         # branch the grading's own status selected, so nothing here can record a
         # grading that did not run to acceptance.
+        #
+        # That name is this loop's own `${dir}`, echoed back, so it says the
+        # grading ran ABOUT this module and not that it read this module's scan:
+        # hand the clause any other string that parses — the witness's own
+        # fabricated header is in scope — and every name still arrives. So the
+        # header the grading reports is required to be a line of the output it
+        # was handed, which no other argument satisfies: the counts and the
+        # placed version in that line come from the scan itself.
         if stdlib_graded="$(refuse_unplaced_stdlib "${out}" "${dir}")"; then
-            graded+="${stdlib_graded}"$'\n'
+            graded_where="$(sed -n '1p' <<<"${stdlib_graded}")"
+            graded_line="$(sed -n '2p' <<<"${stdlib_graded}")"
+            if ! grep -qxF -- "${graded_line}" <<<"${out}"; then
+                echo "error: the standard-library grading of ${dir} reports a header the scan of" >&2
+                echo "       ${dir} did not print, so it graded some other output and this" >&2
+                echo "       module's stdlib half was accepted unexamined (bd gqlc-u91z)." >&2
+                echo "       It graded:" >&2
+                echo "         ${graded_line}" >&2
+                echo "       The scan printed:" >&2
+                grep -m1 -E '^Govulncheck scanned the following [0-9]+ modules and the .*standard library:$' <<<"${out}" \
+                    | sed 's/^/         /' >&2
+                exit 1
+            fi
+            graded+="${graded_where}"$'\n'
         else
             exit 1
         fi
