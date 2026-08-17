@@ -1,4 +1,4 @@
-# ADR 0028 — the codegen spec fence grades written censuses, not derived markers
+# ADR 0029 — the codegen spec fence grades written censuses, not derived markers
 
 **Status:** Accepted
 **Date:** 2026-08-17

@@ -85,7 +85,7 @@ const repoRoot = "../../../"
 // directions, failing with the document rather than with a count.
 //
 // The lists are written here rather than derived from the documents,
-// and they reconcile as sets rather than as counts (ADR 0028,
+// and they reconcile as sets rather than as counts (ADR 0029,
 // decisions 1 and 2). Adding or removing a document costs one line, and
 // the failure prints the line to add or remove.
 //
@@ -112,7 +112,7 @@ const repoRoot = "../../../"
 // `RemovePerson(ctx context.Context, arg int64)` is one of ten graded
 // signatures in that document, and rewriting its context parameter
 // leaves every sweep here green. The floor is accepted rather than
-// closed; ADR 0028 decision 3 records the alternatives and why each was
+// closed; ADR 0029 decision 3 records the alternatives and why each was
 // declined, and docs/specs/codegen-stage-c1.md §5.7 states it to the
 // reader (gqlc-0rjn).
 const (
@@ -143,7 +143,7 @@ var specBindDocs = []string{specC1, specC3, specC4, specC5}
 // past ungraded on account of the placeholder, and a document not here
 // may not have a whole-list placeholder waved through. Exemption and
 // requirement are the same list, so neither can be had without the
-// other (ADR 0028 decision 4).
+// other (ADR 0029 decision 4).
 var specListRuleDocs = []string{specC1, specC4}
 
 // specListRules are the parameter-list tails every `<param-list>` bullet
@@ -154,7 +154,7 @@ var specListRuleDocs = []string{specC1, specC4}
 // that spells one and leaves the other to prose puts that other one back
 // outside the fence.
 //
-// Graded by identity, not by shape (ADR 0028 decision 5). A tail not on
+// Graded by identity, not by shape (ADR 0029 decision 5). A tail not on
 // this list is not a rule but an extra span, and an extra span is as red
 // as a missing one — so a second spelling of one arity cannot stand in
 // for the other, and an illustration with a concrete type cannot stand
@@ -334,7 +334,7 @@ func TestSpecParamsMapBindsGeneratorOwnedValue(t *testing.T) {
 			"one identifier, and only the map key carries the author's parameter name (gqlc-lhs3, gqlc-rz0l)",
 			codegen.ParamArg))
 
-	// One census over a written list, not a union of anchors (ADR 0028
+	// One census over a written list, not a union of anchors (ADR 0029
 	// decision 9). Gutting C1's literals fails the lost direction by
 	// name, and a document quoting a signature owes a binding only if it
 	// is listed here.
@@ -352,7 +352,7 @@ func TestSpecParamsMapBindsGeneratorOwnedValue(t *testing.T) {
 //
 // Both accumulations are functions taking a document set and a reader so
 // a witness can supply both and observe the judgement on a clean tree
-// (ADR 0028 decision 7). The line carrying a scanner's unreadable-site
+// (ADR 0029 decision 7). The line carrying a scanner's unreadable-site
 // return into the accumulator is load-bearing: dropping it
 // (`sigs, exempt, _ :=`) is invisible whether the tree is clean or
 // drifted, because the drift it drops is the only thing that would have
@@ -518,7 +518,7 @@ func requireCensus(t fenceT, written []string, observed map[string]bool, census,
 // two by TestSpecSweepsCarryUnreadableSites.
 //
 // The sweeps' own comparison bodies (`sig.arg != codegen.ParamArg` and
-// the binding's prefix test) are not witnessed. ADR 0028 decision 7
+// the binding's prefix test) are not witnessed. ADR 0029 decision 7
 // records where that line is drawn and why.
 type fenceT interface {
 	require.TestingT
@@ -744,7 +744,7 @@ func TestSpecCensusReconcilesBothDirections(t *testing.T) {
 // site the fence declines to read a name out of, and specListRuleDocs is
 // what it is declined against; a zero-parameter method is a site with no
 // name to read. The two must stay distinct or the exemption is wider
-// than anything requiring it (ADR 0028 decision 4).
+// than anything requiring it (ADR 0029 decision 4).
 func TestSpecSigScannerDetectsDrift(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -834,7 +834,7 @@ func TestSpecSigScannerDetectsDrift(t *testing.T) {
 		text:       "func (q *Queries) <MethodName>(ctx context.Context<param-list>) (<return>, error) {",
 		wantExempt: true,
 	}, {
-		// The reformat a derived marker set cannot survive (ADR 0028
+		// The reformat a derived marker set cannot survive (ADR 0029
 		// decision 1). It grades no name — a placeholder standing for a
 		// list carries none — and is reported as an exemption, which is
 		// reconciled against the list that requires the bullet.
@@ -872,7 +872,7 @@ func TestSpecSigScannerDetectsDrift(t *testing.T) {
 		// the same terms as the comma'd form; the exemption census cannot
 		// substitute for this row, because C4 keeps a second template
 		// whose placeholder is intact and one exemption satisfies the
-		// document (ADR 0028 decision 4).
+		// document (ADR 0029 decision 4).
 		name:    "a declaration glued to the context parameter is graded, not dropped",
 		text:    "    <WriteMethodName1>(ctx context.Context<bareParam1> <T1>) <return-1>",
 		wantArg: "<bareParam1>",
@@ -949,7 +949,7 @@ func TestSpecParamListRuleScannerDetectsDrift(t *testing.T) {
 		wantRules: []string{", arg <T>"},
 	}, {
 		// A restatement is read as the text it is, and that text is not
-		// one of the two rules (ADR 0028 decision 5).
+		// one of the two rules (ADR 0029 decision 5).
 		name:      "a second spelling of the two-plus tail is its own tail, not an arity",
 		text:      bullet("— two-plus is `, arg <MethodName>Params`, equivalently `, arg <ParamsType>`."),
 		wantArgs:  []string{codegen.ParamArg, codegen.ParamArg},
@@ -1144,7 +1144,7 @@ func docFiles(t *testing.T) []string {
 // The two positions are read on identical terms. Whichever one the tail
 // is written in, it is either a whole-list placeholder — exempted, and
 // owed against specListRuleDocs — or a declaration, and graded. Nothing
-// is dropped; a drop is owed against nothing (ADR 0028 decision 4).
+// is dropped; a drop is owed against nothing (ADR 0029 decision 4).
 func scanSpecSigs(file, text string) (sigs, exempt, unclosed []specSig) {
 	for _, loc := range ctxAnchorRe.FindAllStringIndex(text, -1) {
 		open := loc[0]
@@ -1423,12 +1423,12 @@ func splitTopLevel(list string) []string {
 // position is not an exemption for the name beside it. This function
 // reads nothing off the type; the `<param-list>` bullets are the one
 // place the fence does grade a type, and scanParamListRules is where
-// that happens (ADR 0028 decision 5).
+// that happens (ADR 0029 decision 5).
 //
 // One token is a type with no name, which is drift in its own right: a
 // documented signature that names no argument is not the one the emitter
 // writes. Go's grammar reads that lone token as a legitimately unnamed
-// parameter and this fence does not (ADR 0028 decision 6). The ruling is
+// parameter and this fence does not (ADR 0029 decision 6). The ruling is
 // applied whole: a lone `<bareParam>` is not a type either — it is the
 // author's name standing where a whole declaration should be — so it
 // grades on the same arm as a lone `int64`. The one token not graded
@@ -1454,7 +1454,7 @@ func paramName(param string) (name string, gradable bool) {
 // from paramListPlaceholder so the exemption and the term the bullet
 // scanner reads cannot drift apart.
 //
-// An enumeration, not a test for `<…>` (ADR 0028 decision 4): a generic
+// An enumeration, not a test for `<…>` (ADR 0029 decision 4): a generic
 // placeholder test cannot tell `<param-list>`, which stands for a list,
 // from `<bareParam>`, which stands for the query author's parameter
 // name.
@@ -1476,7 +1476,7 @@ var listPlaceholderRe = regexp.MustCompile(
 //
 // The normalisation is compiled into the pattern rather than applied to
 // the documents, so byte offsets stay usable and a failure can still
-// name a line (ADR 0028 decision 8). The pattern is derived from the one
+// name a line (ADR 0029 decision 8). The pattern is derived from the one
 // literal, so there is no second spelling to drift from.
 func anchorPattern(anchor string) *regexp.Regexp {
 	var b strings.Builder

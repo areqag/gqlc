@@ -788,7 +788,7 @@ could not hold: the markers were the same shapes as the grading, so
 a single cosmetic edit here — moving the comma out of the template's
 placeholder — dropped this document from the requirement and from
 the reading at the same instant, and the capture vector went back
-into this section green. ADR 0028 records that decision and the
+into this section green. ADR 0029 records that decision and the
 others behind the fence's shape.
 
 At least five things are left open, and they are not the same size.
