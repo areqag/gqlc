@@ -691,6 +691,13 @@ func columnSite(queryName string, pos int, columnName string) string {
 // contract and the conformance suite asserts them: an implementation
 // that can name itself is still named by its own answer.
 //
+// The recover is not how the refusal travels. AGENTS.md's Errors
+// convention rules panic/recover out as an error-signalling channel, and
+// the sentinel still leaves through fmt.Errorf and still answers
+// errors.Is; what is caught here is a fault in a call this package makes
+// to render a value, on the one path where that call is into code it
+// does not own.
+//
 // What this bounds is the panic. A String() that blocks, or that calls
 // runtime.Goexit, or that trips a fault the runtime declines to make
 // recoverable, still takes the caller with it — an unbounded set of

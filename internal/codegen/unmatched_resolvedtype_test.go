@@ -19,7 +19,7 @@ import (
 // is how three unreachable branches came to sit in §2 of
 // docs/specs/codegen-sentinel-taxonomy.md before gqlc-h4ug. Every value
 // below arrives the way a consumer's would: an assembled codegen.Input
-// handed to a backend's Generate, exactly the shape gqlc-edze measured
+// handed to a backend's Generate, which is the shape gqlc-edze measured
 // the original fault with.
 //
 // The sweep behind TestSentinelTaxonomy drops internal/codegen from its
@@ -61,8 +61,14 @@ var (
 // on any of them faults, including the zero-sized ResolvedUnknown whose
 // method body dereferences nothing.
 //
-// Written out rather than derived: a derivation over the eight would
-// need a list of the eight to derive from, and this is that list.
+// This is a witness list, not a guard, and nothing here holds it to the
+// variants internal/resolver declares — that derivation exists, in
+// TestResolvedTypeSumIsNotClosed/declared_variants, which walks the
+// package's isResolvedType declarations and reddens when the set moves.
+// A ninth variant would leave this list short and nothing in this
+// package would say so. It would also need no edit here to be handled:
+// resolvedTypeName enumerates no variant, so the pointer form of a ninth
+// renders by the same route these eight do.
 func typedNilVariants() map[string]resolver.ResolvedType {
 	return map[string]resolver.ResolvedType{
 		"ResolvedNode":      (*resolver.ResolvedNode)(nil),
