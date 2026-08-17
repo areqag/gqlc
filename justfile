@@ -324,12 +324,15 @@ fmt: ensure-golangci
 fmt-check: ensure-golangci
     {{golangci}} fmt --diff
 
-# unit tests for the master-guard PreToolUse hook (throwaway git repos, ~1s)
+# the shell-tested half of this repo's own tooling: the git hooks, the recipe
+# that lints them, and the CI script they share a language with (~1s; throwaway
+# git repos and temp trees, nothing touches the worktree)
 test-hooks:
     bash .githooks/tests/claude-pre-bash-test.sh
     bash .githooks/tests/commit-msg-test.sh
     bash .githooks/tests/bd-gh-sync-test.sh
     bash .githooks/tests/lint-hooks-test.sh
+    bash .githooks/tests/check-pr-closes-test.sh
 
 # runs the whole suite (unit, golden snapshots, godog) in one shot. Independent
 # of fetch-tck: the TCK is vendored, so there is no network at test time.

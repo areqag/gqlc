@@ -4,8 +4,26 @@
 # Tool versions are pinned once, in the justfile.
 name: ci
 
+# `edited` is here for the check-PR-body gate in the tidy job (bd gqlc-w4al).
+# The default type set is [opened, synchronize, reopened], none of which a body
+# edit fires, so before this the gate could be passed at open and then have its
+# `Closes #N` line edited out: no event, no re-evaluation, merged green with the
+# GitHub issue left open. It is also what lets a body fix turn the check green
+# without pushing a commit or reopening the PR.
+#
+# The whole workflow re-runs on a body edit, which is ~3.5 min of runner time
+# for what is a one-line check. That is deliberate. Skipping the expensive jobs
+# on `edited` with a job-level `if:` would be cheaper and is a bypass: every job
+# in a triggered workflow emits a check run, a skipped one is conclusion
+# `skipped`, branch protection reads `skipped` as a pass, and the newest check
+# run for a context wins. So a red `lint` on the head SHA would be overwritten
+# by a `skipped` one the moment anyone touched the PR description. Same reason
+# vuln.yml runs govulncheck on every PR and decides in-job rather than skipping.
+# Concurrency keeps the common case cheap anyway: an edit that lands alongside a
+# push shares the group and collapses into one run.
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
   push:
     branches: [master]
 
@@ -65,6 +83,12 @@ jobs:
 
   tidy:
     runs-on: ubuntu-latest
+    # Job-level permissions replace the workflow-level block outright, so
+    # contents: read is restated. pull-requests: read is what lets the
+    # check-PR-body step read the live body over the API.
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -88,18 +112,37 @@ jobs:
       # PASS if: no bead found, bead has no external_ref, bead type is epic.
       # FAIL if: bead has external_ref and body is missing Closes #N or has
       # the wrong number.
-      - name: check PR body carries Closes #N for beads with GH mirror
+      #
+      # The body is fetched from the API rather than taken from
+      # github.event.pull_request.body (bd gqlc-w4al). The payload body is
+      # frozen at trigger time, and the newest check run for a context is the
+      # one branch protection reads — so with a payload read, stripping
+      # `Closes #N` and then re-running the run that opened the PR would land a
+      # fresh green verdict over a body that no longer carries the line. The
+      # `edited` trigger is what makes anything run when the body changes; this
+      # fetch is what makes a re-run of any older run honest. Neither alone
+      # closes the hole.
+      #
+      # Bead-id extraction moved into the checker with it. It used to be
+      # `grep ... | head -1 || true` here, and a pipeline reports the status of
+      # its last command: a grep that failed outright was indistinguishable
+      # from "no bead on this PR", which passes.
+      # Quoted: unquoted, YAML reads ` #N for beads with GH mirror` as a comment
+      # and the step's name in the Actions UI is "check PR body carries Closes".
+      - name: "check PR body carries Closes #N for beads with GH mirror"
         if: github.event_name == 'pull_request'
         env:
-          PR_BODY: ${{ github.event.pull_request.body }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           BRANCH: ${{ github.head_ref }}
         run: |
-          bead_id=""
-          bead_id=$(printf '%s' "$PR_BODY" | grep -ioP '(?<=Bead: )gqlc-\S+' | head -1 || true)
-          if [ -z "$bead_id" ]; then
-            bead_id=$(printf '%s' "$BRANCH" | grep -ioP 'gqlc-[a-z0-9.]+' | head -1 || true)
-          fi
-          python3 .github/scripts/check-pr-closes.py .beads/issues.jsonl "$bead_id"
+          # Not piped and not `|| true`: under bash -e a fetch that fails
+          # aborts the step. An empty body file would read as "no Closes
+          # present", so a silently-failed fetch must not reach the checker.
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.body // ""' \
+              > "${RUNNER_TEMP}/pr-body.txt"
+          python3 .github/scripts/check-pr-closes.py \
+              .beads/issues.jsonl "${RUNNER_TEMP}/pr-body.txt" "$BRANCH"
 
   codegen-fence:
     needs: [actionlint, tidy]
