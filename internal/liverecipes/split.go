@@ -101,9 +101,9 @@ type Split struct {
 // What this does NOT say is WHICH half a test belongs in. Which containers a
 // live test needs is a property of its body, declared nowhere this reads, so a
 // half that stops running a test another half still runs passes here (bd
-// gqlc-vh74). Every complaint names the test or the name at fault; none of them
-// reports a count, because a count pins the size of a guard and not its
-// membership.
+// gqlc-vh74). A disagreement complaint names the test or the name at fault, and
+// a vacuity complaint names the collection that is empty; neither reports a
+// count, because a count pins the size of a guard and not its membership.
 func (s Split) Complaints() []string {
 	var complaints []string
 	// The vacuity guards. Every rule below is written over one of these three

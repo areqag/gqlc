@@ -76,6 +76,12 @@ func TestDeclaredTestsReadsCodeAndNotCommentary(t *testing.T) {
 			want: []string{"TestOne"},
 		},
 		{
+			name: "an exported helper taking a *testing.T is not a test go test can select",
+			path: "live_x_test.go",
+			src:  "//go:build codegen_live\n\npackage p\n\nimport \"testing\"\n\nfunc Setup(t *testing.T) {}\n\nfunc TestOne(t *testing.T) {}\n",
+			want: []string{"TestOne"},
+		},
+		{
 			name: "a helper taking no *testing.T is not a test",
 			path: "live_x_test.go",
 			src:  "//go:build codegen_live\n\npackage p\n\nimport \"testing\"\n\nfunc TestHelper(a, b int) {}\n\nfunc TestOne(t *testing.T) {}\n",
@@ -272,6 +278,17 @@ func TestComplaintsNameTheTestAndNotACount(t *testing.T) {
 				CI:       []liverecipes.Invocation{inv("half", "-run", smoke, "-run", smoke+"|"+session, "./...")},
 			},
 			want: []string{session},
+		},
+		{
+			// The same rule over the local half: a recipe no workflow reaches
+			// is read for the names it selects as well as the ones it misses.
+			name: "an allowlist entry no test declares is named in a recipe no workflow reaches",
+			split: liverecipes.Split{
+				Declared: []string{smoke},
+				CI:       []liverecipes.Invocation{inv("half", "-run", smoke, "./...")},
+				Local:    []liverecipes.Invocation{inv("whole", "-run", smoke+"|"+smoke+"Federation", "./...")},
+			},
+			want: []string{smoke + "Federation"},
 		},
 		{
 			name: "a recipe no workflow reaches must run the whole battery",

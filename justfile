@@ -716,19 +716,19 @@ test-codegen-live:
 # image. This is the half PR CI blocks on, so its wall time is a PR's wall time.
 #
 # No -count=1, unlike the two recipes either side, and that is what keeps the
-# per-PR cost near zero (.github/workflows/codegen-live.yml). It is sound here
-# because every input that could change this battery's answer is either inside
-# the test binary — the scenario bodies, the generated packages they drive, the
-# driver dependencies, and the neo4j image, pinned by digest as a constant in
-# live_neo4j_test.go rather than resolved at run time — or in the cache key
-# beside it: go records the environment variables and the files a run reads and
-# keys the cached result on their values, so the GQLC_SKIP_LIVE=1 pass that
-# starts no container is a separate entry from the run that starts one, and a
-# third value is a third entry (measured on go1.26.6, bd gqlc-4int). A cache hit
-# therefore means this exact binary already passed against this exact server,
-# and any edit that could move either invalidates it. What a cache hit cannot
-# re-check is the container runtime underneath, which is not a property of this
-# repo.
+# per-PR cost near zero (.github/workflows/codegen-live.yml). What a hit stands
+# on is the test binary — the scenario bodies, the generated packages they
+# drive, the driver dependencies, and the neo4j image, pinned by digest as a
+# constant in live_neo4j_test.go rather than resolved at run time — and the
+# cache key beside it: go records the environment variables and the files a run
+# reads and keys the cached result on their values, so the GQLC_SKIP_LIVE=1 pass
+# that starts no container is a separate entry from the run that starts one, and
+# a third value is a third entry (measured on go1.26.6, bd gqlc-4int). A hit
+# therefore replays a run of this binary under the same values, and any edit
+# that could move either invalidates it; the server that run met, where it
+# started one, came from the digest the binary carries. What is in neither the
+# binary nor the key is not re-checked, the container runtime underneath
+# included: it is not a property of this repo.
 #
 # That argument covers this half's server facts too, and it does have them —
 # edgeUnionDispatch asserts what a live neo4j returns for a relationship type
