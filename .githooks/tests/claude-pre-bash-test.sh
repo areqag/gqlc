@@ -245,7 +245,8 @@ run_drift_case "-C into healthy repo from drifted"   warn       "$UNSET_REPO"  "
 # drifted repo would then read a healthy repo's config and fall silent. The
 # `unset "${!GIT_@}"` at the top of this file means no row above can reach that
 # guard, so this one puts GIT_DIR back for a single call, pointed at the healthy
-# repo while the cwd is the drifted one. Without the strip the answer is `warn`.
+# repo while the cwd is the drifted one. Measured without the strip: the answer
+# is `silent`, not merely a downgraded `warn` — GIT_DIR masks the drift outright.
 run_gitdir_case() { # $1=name $2=expected $3=cwd $4=command $5=GIT_DIR
   local out
   out="$(
