@@ -845,9 +845,12 @@ func (s *SentinelTaxonomySuite) TestReservedSetSectionMatchesTheReservedRows() {
 		if row.declaredBy != nil {
 			declaredBy = "`" + strings.Join(row.declaredBy, "`, `") + "`"
 		}
-		// A method occupies no package block, so no entity struct of that
-		// name can redeclare it and the row refuses defensively wherever it
-		// is emitted.
+		// Breaks on takes the entity axis: a method occupies no package
+		// block, so no entity struct of that name can redeclare it and the
+		// cell reads no target. The query axis is not in that cell —
+		// MethodName is the query name verbatim, so on a target declaring
+		// the method a query of that name emits a second one beside it,
+		// which Phase A refuses on membership alone.
 		breaksOn := declaredBy
 		if row.scope == scopeMethod {
 			breaksOn = "no target"

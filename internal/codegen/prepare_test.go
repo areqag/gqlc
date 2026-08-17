@@ -704,6 +704,9 @@ func scopeName(s identifierScope) string {
 // goldenFixture is the fixture a golden Go file was emitted from, read
 // off the path beside goldenTarget:
 // test/data/codegen/valid/<fixture>/golden/<target>/<file>.go.
+//
+// The target is not part of the key, so a fixture enrolled in three
+// targets is one fixture here rather than three.
 func goldenFixture(t *testing.T, path string) string {
 	t.Helper()
 	require.Equal(t, "golden", filepath.Base(filepath.Dir(filepath.Dir(path))),
@@ -756,8 +759,9 @@ func eachDecl(file *ast.File, record func(name string, scope identifierScope)) {
 // really does declare it.
 //
 // A method occupies no package block whatever its receiver, so the
-// receiver type is not consulted: what sweepIdentifiers needs to know is
-// only whether an entity struct of the same name would redeclare it.
+// receiver type is not consulted. The scope this pins is what
+// sweepIdentifiers reads to seed source 0; a query taking a method-scope
+// name is refused at Phase A on membership, which does not read scope.
 func TestReservedScopeMatchesTheEmittedGoldens(t *testing.T) {
 	paths, err := filepath.Glob(goldenCorpusGlob)
 	require.NoError(t, err)
@@ -859,11 +863,14 @@ const queryFileSuffix = ".cypher.go"
 // in the file this sweep stopped reading.
 //
 // Membership is all this asserts. The scope column is held by the sweep
-// above, which covers any name once it is a row, so repeating the scope
-// check here would only duplicate its fail. A method is recorded
-// whatever its receiver, so one on a receiver other than *Queries — the
-// corpus carries none — would be forced into reservedIdentifiers, where
-// Phase A refuses a query on membership alone.
+// above, which covers any name once it is a row. A method is recorded
+// whatever its receiver, and exportedness rather than the receiver is
+// what the filter below applies, so an exported method on a receiver
+// other than *Queries would be forced into reservedIdentifiers, where
+// Phase A refuses a query on membership alone. Every exported method
+// the corpus declares today sits on *Queries; the run methods the neo4j
+// targets' db.go declares on driverDB and on txDB are dropped by that
+// filter for being unexported, not for their receiver.
 //
 // Which side of the partition a file sits on is measured, not only
 // declared. A basename more than one fixture emits, and an exported name
@@ -874,6 +881,10 @@ const queryFileSuffix = ".cypher.go"
 // emits carries no such evidence and is skipped — today the two
 // per-source query files of multi_source_files — so a new emitted file
 // that one fixture alone carries still escapes on that arm (gqlc-laoy).
+// One fixture is one fixture directory across every target — see
+// goldenFixture — so qualifying that key by target too puts each of
+// those two files at two fixtures with an everywhere-name apiece, and
+// this loop then demands they enter fixedDeclarationFiles.
 //
 // It reads the committed goldens, not the emitter. A target with no
 // enrolled fixture declares nothing here, and a rename in a template

@@ -458,12 +458,15 @@ Phase A's membership check is what stands between such a query and the
 redeclaration, and `TestReservedIdentifiersAreUniformAcrossBackends`
 requires it for all twelve rows.
 
-On a neo4j-only batch the over-broad rows are four of the twelve:
-`DBTX` and `SessionInit`, which neo4j never declares, and `EnsureGraph`
-and `DropGraph`, which only `apache-age-pgx-v5` declares — on that
-target a query of either name collides; on neo4j neither name is taken
-on either half. `WithTx` is not among the four: every target declares
-it, so refusing a query of that name is the collision rather than a
-false refusal. `NODE TYPE DBTX` is refused on a name that target leaves
-free — taken per D2 Resolved, one uniform set rather than a name that
-generates under one target and is refused under another.
+On a neo4j target the over-broad rows are four of the twelve: `DBTX`
+and `SessionInit`, which neo4j never declares, and `EnsureGraph` and
+`DropGraph`, which only `apache-age-pgx-v5` declares — on that target a
+query of either name collides; on neo4j neither name is taken on either
+half. `WithTx` is not among the four: every target declares it, so
+refusing a query of that name is the collision rather than a false
+refusal. Four counts the target axis alone. The batch axis moves it: on
+a batch with no `:one` query nothing declares `ErrNoRows` or
+`ErrMultipleResults`, so a neo4j-only batch of that shape carries six.
+`NODE TYPE DBTX` is refused on a name that target leaves free — taken
+per D2 Resolved, one uniform set rather than a name that generates
+under one target and is refused under another.
