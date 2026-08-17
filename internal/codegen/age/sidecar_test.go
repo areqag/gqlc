@@ -42,10 +42,9 @@ func TestTheDecodeAndTheGateReadTheSameSidecarKeys(t *testing.T) {
 	widths := declaredPropertyTypes(t)
 
 	// The widths the type table gives a carrier, collected before the
-	// sweep so the sweep answers to a list it did not build. A width
+	// sweep so the sweep answers to a list it did not build: a width
 	// skipped inside the loop is missing from compared and named at the
-	// match below; a count of the rows run would report the sweep was
-	// non-empty and nothing more.
+	// match below.
 	var carried []graph.PropertyType
 	for _, pt := range widths {
 		if _, ok := (typeMap{}).Property(pt); ok {
