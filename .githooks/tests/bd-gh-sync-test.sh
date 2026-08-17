@@ -1327,6 +1327,38 @@ else
     ok "a held bead whose id carries a newline is counted once and named escaped"
 fi
 
+# The same id, read on the per-bead warning above the summary rather than on the
+# summary itself. The warning is what an operator watching the run acts on, and
+# a raw newline in it lands as a second line saying something the script never
+# said — a fragment with no bead named on it.
+if [ "$(grep -c 'held out of the pull but is gone' "$TMP/err")" != "1" ]; then
+    bad "the deletion warning for a newline id stays on one line" \
+        "one deletion reached stderr as $(grep -c 'gone' "$TMP/err") line(s)"
+elif ! grep -qF 'WARNING b\nbad was held out of the pull but is gone' "$TMP/err"; then
+    bad "the deletion warning for a newline id stays on one line" \
+        "got: $(grep 'held out of the pull but is gone' "$TMP/err")"
+else
+    ok "the deletion warning for a newline id stays on one line"
+fi
+
+# And on the other arm, where the warning carries the remedy: `bd update <id>`
+# with a raw newline in it is not a command anyone can paste, and the half of it
+# that reaches the next line reads as an instruction of its own.
+NL_MOVED="{\"id\":\"b\nbad\",\"status\":\"open\",\"external_ref\":\"$ISSUE/7\",\"description\":\"same\"}"
+run_sync pull "[$NL_HELD,$SURVIVOR]" "$GH_CLAIM_LIVE" '[]' "[$NL_MOVED,$SURVIVOR]"
+if [ "$(grep -c 'held out of the pull but changed' "$TMP/err")" != "1" ]; then
+    bad "the reverted-bead warning and its remedy name a newline id escaped" \
+        "one reverted bead reached stderr as $(grep -c 'but changed' "$TMP/err") line(s)"
+elif ! grep -qF 'WARNING b\nbad was held out of the pull but changed' "$TMP/err"; then
+    bad "the reverted-bead warning and its remedy name a newline id escaped" \
+        "got: $(grep 'held out of the pull but changed' "$TMP/err")"
+elif ! grep -qF "bd update b\\nbad --status in_progress" "$TMP/err"; then
+    bad "the reverted-bead warning and its remedy name a newline id escaped" \
+        "the remedy names a bead bd cannot be handed: $(grep 'bd update' "$TMP/err")"
+else
+    ok "the reverted-bead warning and its remedy name a newline id escaped"
+fi
+
 # The control the case above would otherwise pass by warning about anything
 # missing from the second snapshot: a bead that was *pulled* was never held, so
 # it is outside this detector's claim entirely and its absence is not this
@@ -2336,6 +2368,8 @@ a held bead deleted between the snapshots is reported as gone
 the summary line names the deleted held bead and says it was deleted
 a held bead whose id carries a space is named whole
 a held bead whose id carries a newline is counted once and named escaped
+the deletion warning for a newline id stays on one line
+the reverted-bead warning and its remedy name a newline id escaped
 a pulled bead missing from the second snapshot is not a held-bead finding
 an id the gate refused is watched by the held-bead detector
 a bead in a batch that exited non-zero is watched by the held-bead detector
