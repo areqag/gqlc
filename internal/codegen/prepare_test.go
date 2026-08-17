@@ -548,20 +548,11 @@ var ageOnlyTargets = []string{"apache-age-pgx-v5"}
 // TestReservedScopeMatchesTheEmittedGoldens holds every row to what the
 // corpus declares, and fails a row the corpus declares nowhere.
 //
-// The declaredBy column is where the set stops being symmetric, and the
-// gate is over-broad exactly there. Four rows are emitted by Apache AGE
-// alone, so a neo4j-only batch whose schema declares `NODE TYPE DBTX`
-// asks for a name that neo4j's emission leaves free — and this sweep
-// refuses it anyway. That refusal is a false one on that target, taken
-// deliberately: the reserved set is uniform (D2 Resolved), so a schema
-// is admissible or not on its own terms rather than per selected
-// backend. Splitting the set per target is the renaming scheme D2
-// refused, and it would make a multi-target batch admissible under one
-// target and refused under another — the same input generating a
-// partial output. The error in the other direction is worse than a
-// false refusal: accepting `NODE TYPE DBTX` ships an Apache AGE package
-// that does not compile, which is the defect this branch exists to
-// close.
+// The declaredBy column is where the set stops being symmetric, and it
+// bounds what the reservation is worth. Four rows are emitted by Apache
+// AGE alone, so refusing `NODE TYPE DBTX` on a neo4j-only batch refuses
+// a name neo4j's emission leaves free — a false refusal on that target.
+// The set is uniform anyway, per D2 Resolved.
 var reservedIdentifierRows = []struct {
 	name       string
 	scope      identifierScope
@@ -588,12 +579,9 @@ var reservedIdentifierRows = []struct {
 // Uniform is not the same as universally colliding, and the difference
 // is a cost this test locks in rather than hides. DBTX, SessionInit and
 // the graph lifecycle pair are declared only by the Apache AGE emission
-// — reservedIdentifierRows records that, measured — so refusing them on
-// a neo4j-only batch refuses a name neo4j leaves free. The set stays
-// uniform anyway: a name free on one backend and taken on another is
-// the renaming scheme D2 refused, and per-target admissibility would
-// let one input generate under one target and be refused under
-// another.
+// — reservedIdentifierRows carries that as a measured column — so
+// refusing them on a neo4j-only batch refuses a name neo4j leaves free.
+// The set stays uniform anyway, per D2 Resolved.
 func TestReservedIdentifiersAreUniformAcrossBackends(t *testing.T) {
 	want := make([]string, 0, len(reservedIdentifierRows))
 	for _, row := range reservedIdentifierRows {
