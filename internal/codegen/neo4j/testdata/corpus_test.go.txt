@@ -20,6 +20,21 @@ func node(props map[string]any) dbtype.Node {
 	return dbtype.Node{Id: 1, ElementId: "4:corpus:1", Labels: []string{"Corpus"}, Props: props}
 }
 
+// relationship is the shape the driver hands an edge decoder. Its Props
+// map holds the same Go values a Node's does and it satisfies the same
+// dbtype.Entity method set, so on a property decode what separates the two
+// carriers is the emission rather than the driver: a decode helper is
+// derived per entity, so a narrow or a null one helper was shown to
+// survive has not been run through another.
+func relationship(props map[string]any) dbtype.Relationship {
+	return dbtype.Relationship{
+		Id: 2, ElementId: "5:corpus:2",
+		StartId: 1, StartElementId: "4:corpus:1",
+		EndId: 3, EndElementId: "4:corpus:3",
+		Type: "Edgy", Props: props,
+	}
+}
+
 // recordTx is the record shape the driver hands a query method, bound
 // through the seam the emission offers for one: Queries.WithTx takes a
 // caller-owned transaction, so a method body can be run with no
@@ -302,6 +317,191 @@ func TestScalarNarrows(t *testing.T) {
 	}
 	if absent.Name != nil || absent.Weight != nil {
 		t.Errorf("decodeScalar(absent) = %#v, want nil nullables", absent)
+	}
+}
+
+// The widths above, narrowed off a Relationship's Props rather than a
+// Node's: a scalar and a list element that both arrive wider than the
+// schema declared, a list of lists, a nullable scalar and a nullable list
+// that arrive wider still, a list of no declared element shape holding
+// the null such a list exists to carry, and a property of no declared
+// shape read as it arrived.
+func TestEdgyNarrowsOverARelationship(t *testing.T) {
+	got, err := decodeEdgy(relationship(map[string]any{
+		"rank":    int64(-3),
+		"ranks":   []any{int64(1), int64(-2)},
+		"matrix":  []any{[]any{int64(7), int64(8)}, []any{}},
+		"payload": map[string]any{"k": "v"},
+		"loose":   []any{true, nil, 3.5},
+		"depths":  []any{0.5, 1.5},
+		"weight":  0.5,
+	}))
+	if err != nil {
+		t.Fatalf("decodeEdgy = error %v", err)
+	}
+	if got.Rank != int32(-3) {
+		t.Errorf("decodeEdgy().Rank = %#v, want -3", got.Rank)
+	}
+	if want := []int32{1, -2}; !reflect.DeepEqual(got.Ranks, want) {
+		t.Errorf("decodeEdgy().Ranks = %#v, want %#v", got.Ranks, want)
+	}
+	if want := [][]int64{{7, 8}, {}}; !reflect.DeepEqual(got.Matrix, want) {
+		t.Errorf("decodeEdgy().Matrix = %#v, want %#v", got.Matrix, want)
+	}
+	if want := map[string]any{"k": "v"}; !reflect.DeepEqual(got.Payload, want) {
+		t.Errorf("decodeEdgy().Payload = %#v, want %#v", got.Payload, want)
+	}
+	if got.Loose == nil {
+		t.Fatalf("decodeEdgy().Loose = nil, want a list")
+	}
+	if want := []any{true, nil, 3.5}; !reflect.DeepEqual(*got.Loose, want) {
+		t.Errorf("decodeEdgy().Loose = %#v, want %#v", *got.Loose, want)
+	}
+	if got.Depths == nil {
+		t.Fatalf("decodeEdgy().Depths = nil, want a list")
+	}
+	if want := []float32{0.5, 1.5}; !reflect.DeepEqual(*got.Depths, want) {
+		t.Errorf("decodeEdgy().Depths = %#v, want %#v", *got.Depths, want)
+	}
+	if got.Weight == nil {
+		t.Fatalf("decodeEdgy().Weight = nil, want 0.5")
+	}
+	if *got.Weight != float32(0.5) {
+		t.Errorf("decodeEdgy().Weight = %#v, want 0.5", *got.Weight)
+	}
+}
+
+// A Relationship property the schema did not declare that way is refused,
+// and the failure names the struct field and — inside a list — the
+// property and the position. The wording is per-entity text the emission
+// writes out for each decode helper it derives, so a helper shown to word
+// its refusal one way leaves the others unmeasured.
+func TestEdgyRefusesWhatTheSchemaDidNotDeclare(t *testing.T) {
+	full := func() map[string]any {
+		return map[string]any{
+			"rank": int64(0), "ranks": []any{}, "matrix": []any{}, "payload": int64(1),
+		}
+	}
+	with := func(key string, value any) map[string]any {
+		props := full()
+		props[key] = value
+		return props
+	}
+	without := func(key string) map[string]any {
+		props := full()
+		delete(props, key)
+		return props
+	}
+
+	_, err := decodeEdgy(relationship(with("ranks", []any{int64(1), "no"})))
+	if err == nil {
+		t.Fatalf("decodeEdgy(ranks: [int, string]) = no error, want a refusal")
+	}
+	for _, want := range []string{"decode Edgy.Ranks", `"ranks"`, "element 1", "expected int64", "got string"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("decodeEdgy(ranks: [int, string]) = %q, want it to mention %s", err, want)
+		}
+	}
+
+	_, err = decodeEdgy(relationship(with("matrix", []any{int64(1)})))
+	if err == nil {
+		t.Fatalf("decodeEdgy(matrix: [int]) = no error, want a refusal")
+	}
+	for _, want := range []string{"decode Edgy.Matrix", `"matrix"`, "element 0", "expected []any", "got int64"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("decodeEdgy(matrix: [int]) = %q, want it to mention %s", err, want)
+		}
+	}
+
+	_, err = decodeEdgy(relationship(with("loose", "not a list")))
+	if err == nil {
+		t.Fatalf("decodeEdgy(loose: string) = no error, want a refusal")
+	}
+	if want := "decode Edgy.Loose"; !strings.Contains(err.Error(), want) {
+		t.Errorf("decodeEdgy(loose: string) = %q, want it to mention %s", err, want)
+	}
+
+	// A nullable list walks its elements inside the block its null gate
+	// opens, so its refusal is emitted separately from the non-nullable
+	// one above.
+	_, err = decodeEdgy(relationship(with("depths", []any{0.5, "no"})))
+	if err == nil {
+		t.Fatalf("decodeEdgy(depths: [float, string]) = no error, want a refusal")
+	}
+	for _, want := range []string{"decode Edgy.Depths", `"depths"`, "element 1", "expected float64", "got string"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("decodeEdgy(depths: [float, string]) = %q, want it to mention %s", err, want)
+		}
+	}
+
+	_, err = decodeEdgy(relationship(with("weight", int64(1))))
+	if err == nil {
+		t.Fatalf("decodeEdgy(weight: int) = no error, want a refusal")
+	}
+	if want := "decode Edgy.Weight"; !strings.Contains(err.Error(), want) {
+		t.Errorf("decodeEdgy(weight: int) = %q, want it to mention %s", err, want)
+	}
+
+	// The two non-nullable arms report a missing property through
+	// different code: rank/ranks/matrix reach neo4j.GetProperty and carry
+	// its own miss, payload is read off Props directly and carries the
+	// emission's own wording.
+	for _, key := range []string{"rank", "ranks", "matrix", "payload"} {
+		if _, err := decodeEdgy(relationship(without(key))); err == nil {
+			t.Errorf("decodeEdgy(no %s) = no error, want a refusal", key)
+		}
+	}
+}
+
+// Absence, emptiness and a held null on the relationship carrier. A
+// nullable the relationship does not hold is a nil pointer, an empty list
+// stays distinguishable from an absent one, and a non-nullable property
+// of no declared shape whose value is null is carried rather than refused
+// — its arm reads the Props map, where a key holding nil is present.
+func TestEdgyKeepsAbsentApartFromEmptyOverARelationship(t *testing.T) {
+	absent, err := decodeEdgy(relationship(map[string]any{
+		"rank": int64(0), "ranks": []any{}, "matrix": []any{}, "payload": nil,
+	}))
+	if err != nil {
+		t.Fatalf("decodeEdgy(absent) = error %v", err)
+	}
+	if absent.Loose != nil {
+		t.Errorf("decodeEdgy(absent).Loose = %#v, want nil", absent.Loose)
+	}
+	if absent.Depths != nil {
+		t.Errorf("decodeEdgy(absent).Depths = %#v, want nil", absent.Depths)
+	}
+	if absent.Weight != nil {
+		t.Errorf("decodeEdgy(absent).Weight = %#v, want nil", absent.Weight)
+	}
+	if absent.Payload != nil {
+		t.Errorf("decodeEdgy(payload: null).Payload = %#v, want nil", absent.Payload)
+	}
+	if absent.Ranks == nil || len(absent.Ranks) != 0 {
+		t.Errorf("decodeEdgy(absent).Ranks = %#v, want an empty list", absent.Ranks)
+	}
+	if absent.Matrix == nil || len(absent.Matrix) != 0 {
+		t.Errorf("decodeEdgy(absent).Matrix = %#v, want an empty list", absent.Matrix)
+	}
+
+	empty, err := decodeEdgy(relationship(map[string]any{
+		"rank": int64(0), "ranks": []any{}, "matrix": []any{}, "payload": int64(1),
+		"loose": []any{}, "depths": []any{},
+	}))
+	if err != nil {
+		t.Fatalf("decodeEdgy(empty lists) = error %v", err)
+	}
+	if empty.Loose == nil {
+		t.Fatalf("decodeEdgy(empty lists).Loose = nil, want a pointer to an empty list")
+	}
+	if *empty.Loose == nil || len(*empty.Loose) != 0 {
+		t.Errorf("decodeEdgy(empty lists).Loose = %#v, want a pointer to an empty list", *empty.Loose)
+	}
+	if empty.Depths == nil {
+		t.Fatalf("decodeEdgy(empty lists).Depths = nil, want a pointer to an empty list")
+	}
+	if *empty.Depths == nil || len(*empty.Depths) != 0 {
+		t.Errorf("decodeEdgy(empty lists).Depths = %#v, want a pointer to an empty list", *empty.Depths)
 	}
 }
 

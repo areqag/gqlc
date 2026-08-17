@@ -1,10 +1,36 @@
 // The schema the emitted-decoder corpus runs against. One emission has to
-// reach every arm the entity decoders carry, so between them these types
+// reach the arms the entity decoders carry, so between them these types
 // declare a width that narrows from its driver carrier, a nullable
 // property, a list at each of three nesting depths, a list over a narrow
 // element width, a list over each of the two slice shapes the driver
 // hands back as themselves, a list of no declared element shape, and a
 // property of no declared shape at all.
+//
+// Those widths are declared on node types, so they are decoded off
+// dbtype.Node. Edgy declares seven of them again to be decoded off
+// dbtype.Relationship: a narrowing scalar (rank), a narrowing nullable
+// (weight), a walked list (ranks), a walked list of lists (matrix), a
+// walked nullable list (depths), an unwalked nullable list of no
+// declared element shape (loose), and a non-nullable property of no
+// declared shape (payload). A decode helper is emitted per entity, so a
+// narrow or a null one helper was shown to survive has not been run
+// through another.
+//
+// Those seven land on six arms, not seven. writeEntityFieldDecode
+// branches six ways — nullable and non-nullable, each over walked slice,
+// narrow-convert and plain assign — and writeShapelessFieldDecode
+// carries two more; ranks and matrix share the non-nullable walked-slice
+// arm, differing only in how deep writeSliceNarrow recurses. Two of
+// those eight arms are reached here off dbtype.Node alone: the
+// non-nullable plain assign (out.Loose = value1 in decodeBin) and the
+// nullable shapeless read (out.Maybe = &v in decodeAnything). A helper
+// shown to survive on one entity says nothing about another, so those
+// two stand unrun on a relationship carrier.
+//
+// Edgy also declares no BYTES and no TIMESTAMP element — both of which
+// the walk asserts straight to, without narrowing — and no third
+// nesting depth. bd gqlc-np7s tracks what Edgy leaves on the node
+// types.
 CREATE PROPERTY GRAPH TYPE Neo4jCorpus AS {
     (:Scalar {
         id     :: INT64 NOT NULL,
@@ -35,5 +61,14 @@ CREATE PROPERTY GRAPH TYPE Neo4jCorpus AS {
     (:Anything {
         payload :: ANY VALUE NOT NULL,
         maybe   :: ANY VALUE
-    })
+    }),
+    (:Scalar) -[:Edgy {
+        rank    :: INT32 NOT NULL,
+        ranks   :: LIST<INT32> NOT NULL,
+        matrix  :: LIST<LIST<INT64>> NOT NULL,
+        payload :: ANY VALUE NOT NULL,
+        loose   :: LIST,
+        depths  :: LIST<FLOAT32>,
+        weight  :: FLOAT32
+    }]-> (:Listy)
 }
