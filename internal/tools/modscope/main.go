@@ -399,10 +399,18 @@ const (
 // platform values and start being tags. That is bd gqlc-e7oq surviving the
 // guard written against it, and no anchor list can be the fix, because the next
 // truncation is one term further along. A term that cannot be placed is refused
-// instead, so the same truncated table makes `darwin` red rather than green.
+// instead, so the same truncated table makes `darwin` red rather than green —
+// with one exception, and it is this ordering read backwards. The refusal fires
+// because a lost platform term is left with NO vocabulary, and run.build-tags is
+// a vocabulary that can claim it: declare `darwin` there and a table that
+// dropped it derives `-tags darwin` after all. That composition is pinned rather
+// than closed; gradePlatformTerms carries the reasoning and names the tests.
 //
 // Platform first: a GOOS spelling declared in .golangci.yml is still a GOOS,
-// and `-tags linux` would still be a lie about the machine.
+// and `-tags linux` would still be a lie about the machine. This ordering is the
+// ONLY thing suppressing such an entry inside this program — the entry is a
+// config error either way, and what reports it as one is check-golangci-build-tags'
+// `stale` direction, which sees a declared term that nothing derived.
 func classify(term string, platforms, declared map[string]struct{}) termClass {
 	if _, ok := platforms[term]; ok {
 		return classPlatform
@@ -602,6 +610,28 @@ func declaredTags(root string) (map[string]struct{}, error) {
 // refusal of a term it cannot place, which is not a function of the table's
 // length. This stays because "the subprocess printed nothing usable" deserves to
 // be reported as that rather than as a Go file full of mystery terms.
+//
+// The refusal holds for a lost term NOBODY DECLARED, which is the only kind it
+// can hold for: it fires on a term left with no vocabulary at all. A term this
+// table lost that .golangci.yml's run.build-tags also names is placeable — as a
+// custom tag — and comes out as `-tags darwin` on a linux scan, which is
+// bd gqlc-e7oq's fail-open reassembled from two halves. That composition is
+// PINNED, not closed:
+// TestALostPlatformTermThatRunBuildTagsDeclaresBecomesATag asserts it, and the
+// concession is priced in TestGradePlatformTermsDoesNotTakeHalfALineAsATerm.
+//
+// It is not closed here because neither half can be closed where it is visible.
+// Tightening the malformed-line `continue` below into a refusal closes one
+// SPELLING of the narrowing and not the class — a table short by whole lines
+// narrows identically with no malformed line to catch. And a config-side
+// refusal, of a run.build-tags entry that classify does not place as
+// classCustom, is inert on precisely this input: it consults the same narrowed
+// table and places the lost term as custom too. Measured, with a control that
+// fires. Where such a refusal COULD fire — an intact table — it is redundant:
+// a declared platform term never enters `derived`, so check-golangci-build-tags'
+// `stale` direction already names it single-fault, with or without a file
+// constraining it (TestADeclaredPlatformTermIsNeverDerivedSoTheStaleClauseNamesIt).
+// So both faults have to land together, and each on its own reddens a gate.
 func gradePlatformTerms(lines []string) (map[string]struct{}, error) {
 	terms := make(map[string]struct{})
 	for _, l := range lines {

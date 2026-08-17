@@ -925,7 +925,7 @@ vuln: vuln-root-residual
     # through its negated-CUSTOM-tag cases (`!codegen_live` and the three
     # nested-negation cases, which no platform table touches) and the platform
     # table alone through its positive-GOOS and GOARCH cases (which no polarity
-    # rule touches), and TestATruncatedDistListMakesPlatformTermsUnplaceableNotTags
+    # rule touches), and TestATruncatedDistListMakesUndeclaredPlatformTermsUnplaceableNotTags
     # pins the third suppressor, the refusal of a term that fits no vocabulary.
     #
     # There is no in-tree fixture that would separate them here, and this is a
