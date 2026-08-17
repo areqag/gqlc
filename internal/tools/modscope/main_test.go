@@ -579,6 +579,49 @@ func TestAPlatformSpellingTheFloorNeverHeardOfIsStillTheResidual(t *testing.T) {
 	}
 }
 
+func TestAnUndeclaredFloorOnlySpellingIsDroppedWhereItUsedToBeRefused(t *testing.T) {
+	// The floor's cost, pinned as a behaviour change rather than left in main.go's
+	// prose. `hurd` is one of the thirteen syslist spellings the live dist list
+	// does not carry: BEFORE the floor an undeclared `//go:build hurd` was
+	// unplaceable and exited 1 naming the file, the term and the constraint; AFTER
+	// it the term is a platform term and is dropped with nothing said. Both halves
+	// are asserted, because a pin on the drop alone would pass just as well over a
+	// table that had never refused it.
+	//
+	// The loud half of the class is untouched and is the half that matters:
+	// DECLARING `hurd` puts it in run.build-tags, classPlatform keeps it out of
+	// `derived`, and check-golangci-build-tags' stale clause then refuses the entry
+	// by name. Undeclared, golangci-lint never loads the file at all.
+	const floorOnly = "hurd"
+	if !slices.Contains(platformFloor, floorOnly) {
+		t.Fatalf("%q is not in platformFloor, so nothing below measures the floor", floorOnly)
+	}
+	lines := []string{"linux/amd64", "windows/amd64"}
+	graded, err := gradePlatformTerms(lines)
+	if err != nil {
+		t.Fatalf("gradePlatformTerms: %v", err)
+	}
+	if _, ok := graded[floorOnly]; ok {
+		t.Fatalf("%q is already a graded platform term, so the floor adds nothing here and the "+
+			"change of answer below is not being measured", floorOnly)
+	}
+	if _, err := constraintTags("//go:build "+floorOnly, graded, nil, origin); err == nil {
+		t.Fatalf("constraintTags(//go:build %s) without the floor and undeclared returned no "+
+			"error: the refusal this arm used to give is gone from below the floor too, so the "+
+			"assertion after it records no change at all", floorOnly)
+	}
+	floored, err := platformTerms(lines)
+	if err != nil {
+		t.Fatalf("platformTerms: %v", err)
+	}
+	if got, err := constraintTags("//go:build "+floorOnly, floored, nil, origin); err != nil || got != nil {
+		t.Fatalf("constraintTags(//go:build %s) under the floor, undeclared = %v, %v, want nil, "+
+			"nil: the silent-drop arm the floor widened has moved. If it moved back to a refusal "+
+			"that is a narrowing and this pin goes with it; if it moved to deriving %q as a custom "+
+			"tag that is bd gqlc-e7oq reopened", floorOnly, got, err, floorOnly)
+	}
+}
+
 func TestThePlatformFloorCoversEveryTermTheLiveToolchainReports(t *testing.T) {
 	// The floor is a union, so a term it lacks costs nothing TODAY — it just
 	// behaves as it did before the floor existed. What it costs is the residual

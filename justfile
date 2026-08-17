@@ -245,13 +245,42 @@ check-golangci-build-tags:
     # the configured set on every invocation, CI included, and the clause must
     # both refuse it and name it.
     probe="zzstaleprobe"
-    case " ${derived} ${configured} " in
-        *" ${probe} "*)
-            echo "error: ${probe} is a term this tree really uses, so the witness below is" >&2
-            echo "       measuring the ordinary case. Rename the probe." >&2
+    # Whole-line match, not the `case " ${arr[*]} "` idiom the rest of this file
+    # uses: `derived` and `configured` are `sort -u` scalars delimited by
+    # NEWLINES, so a space-delimited pattern only ever matches a set of exactly
+    # one term, and this clause could not fire at all (bd gqlc-oxne).
+    uses_term() { grep -qxF "${1}" <<<"${derived}"$'\n'"${configured}"; }
+
+    # The collision arm's passing case is silence too, and on a tree that does
+    # not use the probe spelling it is only ever run in the negative — which is
+    # what let it ship dead. So every term the two sets do contain is looked up
+    # here first and must be found; an empty union makes that vacuous and is
+    # refused rather than passed.
+    control=0
+    while read -r term; do
+        [ -n "${term}" ] || continue
+        control=$((control + 1))
+        if ! uses_term "${term}"; then
+            echo "error: the probe-collision lookup cannot find ${term}, which was just read out" >&2
+            echo "       of the two sets it searches. It would not find ${probe} either, so the" >&2
+            echo "       collision arm below is dead and the witness after it is unprotected" >&2
+            echo "       (bd gqlc-oxne)." >&2
             exit 1
-            ;;
-    esac
+        fi
+    done < <(printf '%s\n%s\n' "${derived}" "${configured}" | sed '/^$/d')
+    if [ "${control}" -eq 0 ]; then
+        echo "error: both the derived and the configured tag sets are empty, so the" >&2
+        echo "       probe-collision lookup was never exercised and this whole recipe" >&2
+        echo "       compared nothing against nothing (bd gqlc-oxne)." >&2
+        exit 1
+    fi
+
+    if uses_term "${probe}"; then
+        echo "error: ${probe} is a term this tree really uses, so the witness below is" >&2
+        echo "       measuring the ordinary case. Rename the probe." >&2
+        exit 1
+    fi
+
     probed="$(printf '%s\n%s\n' "${configured}" "${probe}" | sed '/^$/d' | sort -u)"
     if witness="$(refuse_stale "${derived}" "${probed}" 2>&1)"; then
         echo "error: ${probe} was put in the configured set, no file in this tree constrains it," >&2
