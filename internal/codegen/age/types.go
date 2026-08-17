@@ -205,11 +205,6 @@ func (typeMap) Temporal(k resolver.Temporal) (string, bool) {
 // reaches them. They name what a helper would fill, not a carrier a
 // column arrives on (ADR 0025). Both texts have a decodeFunc arm all the
 // same — "any" the agtype value vocabulary, "map[string]any" agtypeMap.
-//
-// Sharp edge for a map column: agtype arrives as JSON, so an integer
-// inside a map decodes to float64 where the neo4j driver yields int64.
-// Same declared type on both backends, different runtime type, and
-// TestBackendInvariantSurface compares declarations.
 func (typeMap) Scalar(k resolver.Scalar) string {
 	switch k {
 	case resolver.ScalarBool:
