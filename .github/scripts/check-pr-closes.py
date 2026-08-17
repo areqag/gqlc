@@ -19,9 +19,10 @@ class the gate exists to close.
 A PR that touches a bead without resolving it declares that with a
 'Refs: <bead-id> #<issue>' line (bd gqlc-1ekq), starting at the line's
 first character and read over what prose_only leaves of the body --
-fenced code blocks, HTML comments, and raw <pre> and <code> blocks
-blanked. Those are the carriers a marker was measured to survive
-invisibly in, against GitHub's own renderer; they are not certified to be
+fenced code blocks, HTML comments, and raw <pre> and <code> blocks whose
+opening tag is at a line's first character, blanked. Those are the
+carriers a marker was measured to survive invisibly in, against GitHub's
+own renderer; they are not certified to be
 every place GitHub hides text. Over the 85 shapes swept, where the two
 disagree this blanks a marker GitHub renders (seven of them) rather than
 honouring one GitHub hides (none of the 85), and the one shape in that
@@ -29,8 +30,11 @@ sample it honours that GitHub renders as code is an inline code span,
 which is visible monospace text. Both of those hold over the 85 and no
 further: outside them the blanking costs further refusals over markers
 GitHub renders, the marker's line anchor costs one more, and -- the
-direction the 85 had none of -- one marker GitHub renders nothing of is
-honoured, a line inside an unterminated HTML attribute (bd gqlc-ncb8).
+direction the 85 had none of -- markers GitHub renders inside a <pre>, or
+renders nothing of, are honoured: carried by an unterminated HTML
+attribute (bd gqlc-ncb8), by a raw block whose opening tag is not at its
+line's first character, and by a comment the sanitiser holds open past
+its '-->' (both bd gqlc-xz16).
 prose_only's docstring enumerates those shapes and each is a row; the
 count is kept in one place so the two cannot drift apart. The
 declaration is then checked
@@ -206,30 +210,35 @@ def comment_opens_at(line):
 
 
 def prose_only(pr_body):
-    """The body with everything GitHub does not render as prose blanked out,
-    line count preserved: fenced code blocks, HTML comments, and raw <pre>
-    and <code> blocks.
+    """The body with three carriers blanked out, line count preserved:
+    fenced code blocks, HTML comments, and raw <pre> and <code> blocks whose
+    opening tag is at a line's first character. Not everything GitHub
+    declines to render as prose -- what was measured to diverge, in either
+    direction, is the last three paragraphs, and each shape they name is a
+    row.
 
     Fences follow the rule GitHub's renderer follows rather than a toggle on
     every ``` and ~~~ line. A fence closes only on a run of the same
     character, at least as long as the one that opened it, with nothing but
     whitespace after it; a backtick fence whose info string carries a
     backtick opens nothing. Put the toggle back in place of this function
-    and the suite fails 26 rows -- 24 bodies whose marker it honours though
+    and the suite fails 29 rows -- 27 bodies whose marker it honours though
     GitHub renders it inside <pre><code> or not at all, and 2 it blanks that
     GitHub renders as prose. Counted at this commit, over the suite as it
     stands; a row added to its visibility section can move it either way.
-    Among the 24 is the ordinary idiom
+    Among the 27 is the ordinary idiom
     for showing a fence, which is to nest it in a longer one; showing this
     marker is what this file is about, so that is the realistic body rather
     than the exotic one. An unclosed fence, comment or HTML block swallows
     the rest.
 
-    Not a markdown parser. Three measured divergences blank rather than
+    Not a markdown parser. Four measured divergences blank rather than
     keep: a fence and a <pre> each indented one to three spaces into a list
-    item, and a <code> opened against a paragraph it cannot interrupt -- all
-    three render as something a reader sees and are blanked here. (A
-    fourth row in that direction, a marker sharing a block's closing line,
+    item, a <code> opened against a paragraph it cannot interrupt, and a
+    <code> sharing its line with the comment that opens on it, which is not
+    a complete tag on a line of its own and so stays inline too -- all four
+    render as something a reader sees and are blanked here. (A
+    fifth row in that direction, a marker sharing a block's closing line,
     is the marker
     pattern's line anchor rather than this function; it is rowed where it
     says so.) That is the cheap direction: it costs a refusal the author
@@ -237,16 +246,24 @@ def prose_only(pr_body):
     direction is this gate annotating a check run to say an issue stays
     open, over a body in which no reader can see it said.
 
-    One measured divergence goes the other way and is not fixed here. A
-    marker on its own line inside an unterminated HTML attribute --
+    Three measured divergences go the other way and are not fixed here,
+    because each needs a model of the rendered document rather than of its
+    lines. A marker on its own line inside an unterminated HTML attribute --
     '<a href="', the line, '">z</a>' -- renders as nothing at all and still
     reaches the marker pattern, because attribute values are inline syntax
-    and this reads lines. Filed as bd gqlc-ncb8 and rowed in the suite.
+    (bd gqlc-ncb8). A raw block whose opening tag is not at its line's first
+    character -- 'x <pre>' -- opens the element for GitHub's sanitiser but
+    not for HTML_OPEN, which anchors where markdown starts an HTML block;
+    the marker below it renders inside a <pre> and is honoured. And a block
+    that closes on its own opening line ends markdown's HTML block there, so
+    a '<!--' after the closing tag is emitted raw with nothing to close it
+    and the sanitiser swallows the rest of the body, while this ends the
+    comment at its '-->' (both bd gqlc-xz16). All three are rowed.
 
     Two more reach the pattern over bodies GitHub does render, so they are
     rowed rather than fixed: an inline code span, which GitHub shows as
     visible monospace, and a <details> block, which GitHub collapses rather
-    than hides. All seven shapes named in these three paragraphs are rows
+    than hides. All ten shapes named in these three paragraphs are rows
     in the suite's visibility section, the closing-line one included.
     """
     out = []
@@ -339,9 +356,9 @@ def prose_only(pr_body):
 def declared_bead(pr_body, branch):
     """Which bead the PR is about, and whether it declares it unresolved.
 
-    Returns (bead_id, from_body, refs_match). A 'Bead:' line is the
-    resolving declaration and outranks everything; a 'Refs:' line names a
-    bead the PR touches and leaves open; the branch name is the fallback.
+    Returns (bead_id, refs_match). A 'Bead:' line is the resolving
+    declaration and outranks everything; a 'Refs:' line names a bead the PR
+    touches and leaves open; the branch name is the fallback.
     """
     named = BEAD_IN_BODY.search(pr_body)
     refs = REFS_IN_BODY.search(prose_only(pr_body))
@@ -367,11 +384,11 @@ def declared_bead(pr_body, branch):
         )
 
     if named:
-        return named.group(1), True, None
+        return named.group(1), None
     if refs:
-        return refs.group(1), True, refs
+        return refs.group(1), refs
     in_branch = BEAD_IN_BRANCH.search(branch)
-    return (in_branch.group(1) if in_branch else ""), False, None
+    return (in_branch.group(1) if in_branch else ""), None
 
 
 def opt_out_number(refs, bead_id):
@@ -428,7 +445,7 @@ def main():
     jsonl_path, body_file, branch = sys.argv[1], sys.argv[2], sys.argv[3]
     pr_body = read_body(body_file)
 
-    bead_id, from_body, refs = declared_bead(pr_body, branch)
+    bead_id, refs = declared_bead(pr_body, branch)
     if not bead_id:
         sys.exit(0)  # No bead on this PR -> pass
 

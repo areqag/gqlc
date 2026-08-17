@@ -897,7 +897,7 @@ Refs: gqlc-mirrored #617
     "issue #617 stays open at merge"
 
 # Two more the same way as the attribute row above: measured, honoured,
-# rowed as they stand rather than fixed (bd gqlc-3xna). Both are the
+# rowed as they stand rather than fixed (bd gqlc-xz16). Both are the
 # line-oriented block model meeting a sanitiser that works on the assembled
 # HTML, and neither needs a comment to trigger.
 #
