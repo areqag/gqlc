@@ -411,6 +411,21 @@ expect_red "an opt-out naming a bead the branch does not is refused" \
     "$EXPORT" "$(body 'Refs: gqlc-sub.12 #712')" "fix/gqlc-mirrored-thing" \
     "the branch is named after gqlc-mirrored"
 
+# The redirect refusal above needs a bead to compare against, so it is scoped
+# to branches that carry an id. A Bead: line covers the same ground by a
+# different route -- it outranks the marker, so a lifted one is never read and
+# the demand for the Bead: line's own bead stands ("a Refs for another bead
+# does not excuse the Bead line", at the foot of this file).
+# When neither names a bead the marker names it, and a marker lifted verbatim
+# from another PR is taken. That is not a bypass -- with no bead named there was no Closes to
+# demand (gqlc-0pb8), and the pass only announces that an unrelated issue
+# stays open, which it would have anyway -- but it does bound how far check 1
+# reaches, so it is pinned rather than left to be inferred from the rows above
+# that happen to use a bead-less branch.
+expect_green_saying "an opt-out on a branch naming no bead names the bead" \
+    "$EXPORT" "$(body 'Refs: gqlc-mirrored #617')" "chore/no-id-in-this-name" \
+    "gqlc-mirrored -> Refs #617, no Closes demanded"
+
 # The marker is a line, not a word. Prose about the opt-out — this file's own
 # subject matter, and every PR body that documents it — must not be one.
 expect_red "a Refs: quoted inside a sentence does not opt out" \
