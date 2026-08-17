@@ -509,12 +509,13 @@ func declaredMarkers(t *testing.T, marker string) []string {
 // its own body, sorted. An interface naming none is absent from the result,
 // which is what separates the marker-sealed sums from Parser.
 //
-// Methods reached only by embedding are not read here: they stay on the
-// embedded interface's own entry (SetEffect embeds Effect and names
-// isSetEffect itself, so it has an entry of its own). An interface that named
-// no unexported method of its own and obtained one solely by embedding would
-// therefore go unreported — a limit of this reading, not a claim that no such
-// interface can be written.
+// Methods reached only by embedding are not read here: the walk skips every
+// interface field that is not a method declaration, named embed and anonymous
+// interface literal alike. SetEffect has an entry of its own because it names
+// isSetEffect in its own body, not because it embeds Effect. An interface that
+// named no unexported method of its own and obtained one solely by embedding
+// would therefore go unreported — a limit of this reading, not a claim that no
+// such interface can be written.
 //
 // The same AST walk the rows below use, for the same reason: a commented-out
 // declaration satisfies a grep.
