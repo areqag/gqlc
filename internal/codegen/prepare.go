@@ -637,13 +637,13 @@ func phaseAAdmit(queries []NamedQuery, entities []Entity, entityIndex map[entity
 					return fmt.Errorf("query %q column %d %q: %w", q.Name, ci, col.Name, err)
 				}
 			default:
-				return fmt.Errorf("%w: query %q column %d %q resolved as %s", ErrOutOfC6Scope, q.Name, ci, col.Name, col.Type.String())
+				return fmt.Errorf("%w: query %q column %d %q resolved as %s", ErrOutOfC6Scope, q.Name, ci, col.Name, resolvedTypeName(col.Type))
 			}
 		}
 		for pi, p := range q.Validated.Parameters {
 			prop, ok := p.Type.(resolver.ResolvedProperty)
 			if !ok {
-				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (non-property parameters are post-v1)", ErrOutOfC6Scope, q.Name, pi, p.Name, p.Type.String())
+				return fmt.Errorf("%w: query %q parameter %d $%s resolved as %s (non-property parameters are post-v1)", ErrOutOfC6Scope, q.Name, pi, p.Name, resolvedTypeName(p.Type))
 			}
 			if _, ok := tm.Property(prop.Type); !ok {
 				return fmt.Errorf("%w: query %q parameter %d $%s has %s", ErrUnrepresentableWidth, q.Name, pi, p.Name, prop.Type)
@@ -661,6 +661,51 @@ const listElemSite = "list element"
 
 func columnSite(queryName string, pos int, columnName string) string {
 	return fmt.Sprintf("query %q column %d %q", queryName, pos, columnName)
+}
+
+// resolvedTypeName renders t for the refusals that name a type no arm
+// matched. Three of them do — Phase A's column switch, Phase A's
+// parameter type assertion and buildListElemPlan's element switch — and
+// what they hold is by construction a value this package has no case
+// for.
+//
+// t.String() there is a call into code this package does not own.
+// resolver.ResolvedType's unexported marker seals which types may
+// DECLARE it, not which may satisfy it: every variant gives both the
+// marker and String a value receiver, so each of the eight pointer forms
+// carries them, and Go promotes an embedded variant's unexported methods
+// so a struct embedding one satisfies the interface from any package in
+// the module (AGENTS.md, "Closed sum types"; internal/resolver's
+// TestResolvedTypeSumIsNotClosed). Three shapes in that set fault on the
+// call rather than answering it: the nil interface, which has no method
+// to reach; any of the eight typed-nil pointer forms, because Go emits a
+// nil check before a value method reached through a pointer, so even the
+// zero-sized (*resolver.ResolvedUnknown)(nil) faults where its body
+// dereferences nothing; and a struct whose embedded pointer to a variant
+// is nil, which is neither a nil interface nor a nil pointer to look at.
+//
+// A refusal that faults is not a refusal, so the tag is asked for under
+// a recover and the dynamic type name answers when asking fails. The tag
+// is preferred rather than skipped because §2 of
+// docs/specs/codegen-sentinel-taxonomy.md pins these messages as
+// contract and the conformance suite asserts them: an implementation
+// that can name itself is still named by its own answer.
+//
+// What this bounds is the panic. A String() that blocks, or that calls
+// runtime.Goexit, or that trips a fault the runtime declines to make
+// recoverable, still takes the caller with it — an unbounded set of
+// implementations admits an unbounded set of ways to misbehave, and this
+// addresses the one the sum's own inhabitants exhibit.
+func resolvedTypeName(t resolver.ResolvedType) (name string) {
+	defer func() {
+		if recover() != nil {
+			// %T reads the dynamic type through reflection and never
+			// dispatches a method, so it answers for the values whose
+			// String() just did not. A nil interface renders "<nil>".
+			name = fmt.Sprintf("%T", t)
+		}
+	}()
+	return t.String()
 }
 
 // admitEdgeUnionCandidates gates one resolved edge-union candidate set,
@@ -722,7 +767,7 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 			prop, ok := param.Type.(resolver.ResolvedProperty)
 			if !ok {
 				//gqlc:unreachable param-type-invariant
-				return nil, fmt.Errorf("%w: query %q parameter %d $%s: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, pi, param.Name, param.Type.String())
+				return nil, fmt.Errorf("%w: query %q parameter %d $%s: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, pi, param.Name, resolvedTypeName(param.Type))
 			}
 			ty, _ := tm.Property(prop.Type)
 			p.ParamFields = append(p.ParamFields, Param{
@@ -896,7 +941,7 @@ func phaseBDerive(queries []NamedQuery, entities []Entity, entityIndex map[entit
 				})
 			default:
 				//gqlc:unreachable column-type-invariant
-				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, ci, col.Name, col.Type.String())
+				return nil, fmt.Errorf("%w: query %q column %d %q: internal invariant — Phase A missed non-property type %s", ErrOutOfC6Scope, q.Name, ci, col.Name, resolvedTypeName(col.Type))
 			}
 		}
 
@@ -1107,5 +1152,5 @@ func buildListElemPlan(t resolver.ResolvedType, entities []Entity, entityIndex m
 		}
 		return &ListElem{Kind: ColumnList, GoType: "[]" + nested.GoType, Nested: nested}, nil
 	}
-	return nil, fmt.Errorf("%w: list element has unknown resolved type %s", ErrOutOfC6Scope, t.String())
+	return nil, fmt.Errorf("%w: list element has unknown resolved type %s", ErrOutOfC6Scope, resolvedTypeName(t))
 }
