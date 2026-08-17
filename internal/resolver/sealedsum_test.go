@@ -10,6 +10,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -119,32 +120,53 @@ func matchValueForm(t resolver.ResolvedType) string {
 	}
 }
 
-// declaredMarkers reads internal/resolver's own non-test sources and returns
-// one sorted entry per isResolvedType declaration: the receiver type's name
-// for a value receiver, and that name prefixed with "*" for a pointer
-// receiver. Encoding the receiver form into the entry rather than asserting it
-// separately keeps both drift modes — a variant appearing or disappearing, and
-// a marker moving to a pointer receiver — on the single comparison below.
+// parsePackageSources parses the package resolver files in this directory,
+// in-package test files included: one of them declaring the marker would add
+// a variant the rows below claim does not exist. Files here whose package
+// clause is resolver_test are read past, since isResolvedType is unexported
+// and a method of that name in another package does not satisfy the
+// interface.
 //
 // It walks the AST rather than grepping the sources because a commented-out
 // declaration satisfies a grep, which would let the enumeration above drift
 // behind a comment.
-func declaredMarkers(t *testing.T) []string {
+func parsePackageSources(t *testing.T) (*token.FileSet, []*ast.File) {
 	t.Helper()
 	entries, err := os.ReadDir(".")
 	require.NoError(t, err)
 
 	fset := token.NewFileSet()
-	var got []string
-	files := 0
+	var files []*ast.File
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+		if e.IsDir() || !strings.HasSuffix(name, ".go") {
 			continue
 		}
-		f, err := parser.ParseFile(fset, filepath.Join(".", name), nil, 0)
+		f, err := parser.ParseFile(fset, filepath.Join(".", name), nil, parser.ParseComments)
 		require.NoErrorf(t, err, "parsing %s", name)
-		files++
+		if f.Name.Name != "resolver" {
+			continue
+		}
+		files = append(files, f)
+	}
+	// A filter that matched nothing would return empty sets, which agree with
+	// an empty enumeration rather than contradicting it.
+	require.NotEmpty(t, files, "no sources parsed from the package directory")
+	return fset, files
+}
+
+// declaredMarkers returns one sorted entry per isResolvedType declaration: the
+// receiver type's name for a value receiver, and that name prefixed with "*"
+// for a pointer receiver. Encoding the receiver form into the entry rather
+// than asserting it separately keeps both drift modes — a variant appearing or
+// disappearing, and a marker moving to a pointer receiver — on the single
+// comparison below.
+func declaredMarkers(t *testing.T) []string {
+	t.Helper()
+	fset, files := parsePackageSources(t)
+
+	var got []string
+	for _, f := range files {
 		for _, decl := range f.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Recv == nil || len(fn.Recv.List) != 1 || fn.Name.Name != "isResolvedType" {
@@ -156,16 +178,55 @@ func declaredMarkers(t *testing.T) []string {
 				recv, prefix = star.X, "*"
 			}
 			id, ok := recv.(*ast.Ident)
-			require.Truef(t, ok, "%s: unexpected receiver shape %T on isResolvedType", name, recv)
+			require.Truef(t, ok, "%s: unexpected receiver shape %T on isResolvedType", fset.Position(fn.Pos()), recv)
 			got = append(got, prefix+id.Name)
 		}
 	}
-	// A filter that matched nothing would return an empty set, which agrees
-	// with an empty enumeration rather than contradicting it.
-	require.NotZero(t, files, "no non-test sources parsed from the package directory")
 	sort.Strings(got)
 	return got
 }
+
+// resolvedTypeDoc returns the doc comment on the ResolvedType declaration.
+// Requiring exactly one declaration keeps a rename or a move from emptying the
+// text the row below reads, which would satisfy that row rather than fail it.
+func resolvedTypeDoc(t *testing.T) string {
+	t.Helper()
+	fset, files := parsePackageSources(t)
+
+	var docs []string
+	for _, f := range files {
+		for _, decl := range f.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.TYPE {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				ts, ok := spec.(*ast.TypeSpec)
+				if !ok || ts.Name.Name != "ResolvedType" {
+					continue
+				}
+				doc := ts.Doc
+				if doc == nil {
+					doc = gen.Doc
+				}
+				require.NotNilf(t, doc, "%s: ResolvedType carries no doc comment", fset.Position(ts.Pos()))
+				docs = append(docs, doc.Text())
+			}
+		}
+	}
+	require.Lenf(t, docs, 1, "expected one ResolvedType declaration in the package directory, found %d", len(docs))
+	return docs[0]
+}
+
+// countWords spells a variant count the way the doc comment does. A count past
+// the end of this table fails the row rather than skipping the comparison.
+var countWords = []string{"zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"}
+
+// spelledCount matches a spelled number qualifying the variants, or the arms
+// that name them one apiece — the two phrasings the doc comment states the
+// count in. Any other phrasing goes unmatched, so the row requires a match
+// rather than reading zero of them as agreement.
+var spelledCount = regexp.MustCompile(`\b(` + strings.Join(countWords, "|") + `)\s+(?:variants?|arms?)\b`)
 
 func sortedKeys[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
@@ -185,12 +246,35 @@ func sortedKeys[V any](m map[string]V) []string {
 //
 // What it does not buy: two constructions inhabit ResolvedType without
 // declaring the marker — the pointer form of a variant, and a struct embedding
-// one. Neither matches an arm naming the value form, so a switch over the
-// eight reaches its default on both.
+// one. Neither matches any of the eight arms.
 func TestResolvedTypeSumIsNotClosed(t *testing.T) {
 	t.Run("declared variants", func(t *testing.T) {
 		require.Equal(t, sortedKeys(inhabitants), declaredMarkers(t),
 			"the set of isResolvedType declarations and the set this file enumerates have diverged. A bare name added or removed means a variant landed or left: extend inhabitants and matchValueForm, or drop the stale entries. A name reported with a leading \"*\" means that marker moved to a pointer receiver, which is the mechanism the pointer-form rows below and the doc comment on ResolvedType both rest on")
+	})
+
+	// The doc comment enumerates the sum's members and states their count in
+	// separate sentences; this row is what holds both to the declared set.
+	t.Run("doc comment names every declared variant", func(t *testing.T) {
+		doc := resolvedTypeDoc(t)
+		declared := declaredMarkers(t)
+
+		for _, entry := range declared {
+			name := strings.TrimPrefix(entry, "*")
+			require.Regexpf(t, `\b`+regexp.QuoteMeta(name)+`\b`, doc,
+				"ResolvedType's doc comment does not name %s, which the package declares. The name is matched on word boundaries, so a longer name containing it does not stand in for it", name)
+		}
+
+		require.Lessf(t, len(declared), len(countWords),
+			"%d declared variants is past the end of countWords; extend it rather than leaving the count unread", len(declared))
+		want := countWords[len(declared)]
+		spelled := spelledCount.FindAllStringSubmatch(doc, -1)
+		require.NotEmpty(t, spelled,
+			`ResolvedType's doc comment states no count next to "variants" or "arms". The count is read from those two phrasings only, so rewording past them retires this comparison rather than failing it`)
+		for _, match := range spelled {
+			require.Equalf(t, want, match[1],
+				"ResolvedType's doc comment says %q where the package declares %d variants", match[0], len(declared))
+		}
 	})
 
 	// The ALLOW half. Without it every REFUSE row below is satisfied by a

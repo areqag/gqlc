@@ -76,7 +76,7 @@ func (k StatementKind) MarshalJSON() ([]byte, error) {
 // "kind" discriminator, so the golden encoding is stable and readable. R0
 // contributes ResolvedNode and ResolvedProperty; R1 adds ResolvedEdge; R2
 // adds ResolvedScalar, ResolvedTemporal, ResolvedList, and ResolvedUnknown
-// (§3 of the R2 spec).
+// (§3 of the R2 spec); R3 adds ResolvedEdgeUnion.
 //
 // isResolvedType is unexported, so nothing outside this package DECLARES it
 // and the eight variants are the whole set of declaring types. That is
@@ -90,12 +90,17 @@ func (k StatementKind) MarshalJSON() ([]byte, error) {
 //     not match it.
 //   - A struct embedding a variant. Go promotes an embedded type's
 //     unexported methods, so `struct{ resolver.ResolvedNode }` satisfies
-//     ResolvedType from any package without naming the marker at all.
+//     ResolvedType from any package in the module without naming the marker
+//     at all.
 //
-// A type switch naming the eight variants therefore reaches its default on
-// both, and a default documented as dead is wrong rather than merely
-// pessimistic: codegen tagged two branches //gqlc:unreachable on that
-// reasoning and an assembled Input reached both (gqlc-h4ug).
+// A type switch whose arms are the eight variants matches neither
+// construction, so control reaches its default, or leaves the switch where
+// it has none. A default documented as dead on that reasoning is wrong
+// rather than merely pessimistic: codegen tagged two branches
+// //gqlc:unreachable on it and an assembled Input reached both (gqlc-h4ug).
+// A default an earlier check shadows is a different claim, resting on that
+// check naming the same arms rather than on this set being bounded
+// (codegen-sentinel-taxonomy.md §3).
 // TestResolvedTypeSumIsNotClosed measures both constructions against all
 // eight arms from outside the package. Whether the codegen boundary should
 // normalise them away instead of refusing them is gqlc-edze's question.
