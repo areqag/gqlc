@@ -71,12 +71,34 @@ func (k StatementKind) MarshalJSON() ([]byte, error) {
 	return json.Marshal(k.String())
 }
 
-// ResolvedType is the sealed sum of resolved types. Each variant carries a
+// ResolvedType is the sum of resolved types. Each variant carries a
 // String() wire tag and a MarshalJSON that emits a tagged-union object with a
 // "kind" discriminator, so the golden encoding is stable and readable. R0
 // contributes ResolvedNode and ResolvedProperty; R1 adds ResolvedEdge; R2
 // adds ResolvedScalar, ResolvedTemporal, ResolvedList, and ResolvedUnknown
 // (§3 of the R2 spec).
+//
+// isResolvedType is unexported, so nothing outside this package DECLARES it
+// and the eight variants are the whole set of declaring types. That is
+// narrower than a closed sum. Two constructions obtain the marker without
+// declaring it, and they nest, so the set of types satisfying ResolvedType
+// has no bound:
+//
+//   - The pointer form of a variant. Both isResolvedType and String take
+//     value receivers, and a pointer's method set contains its value methods,
+//     so *ResolvedNode satisfies ResolvedType while `case ResolvedNode:` does
+//     not match it.
+//   - A struct embedding a variant. Go promotes an embedded type's
+//     unexported methods, so `struct{ resolver.ResolvedNode }` satisfies
+//     ResolvedType from any package without naming the marker at all.
+//
+// A type switch naming the eight variants therefore reaches its default on
+// both, and a default documented as dead is wrong rather than merely
+// pessimistic: codegen tagged two branches //gqlc:unreachable on that
+// reasoning and an assembled Input reached both (gqlc-h4ug).
+// TestResolvedTypeSumIsNotClosed measures both constructions against all
+// eight arms from outside the package. Whether the codegen boundary should
+// normalise them away instead of refusing them is gqlc-edze's question.
 type ResolvedType interface {
 	String() string
 	isResolvedType()
