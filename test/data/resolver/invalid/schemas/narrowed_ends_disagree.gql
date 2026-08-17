@@ -66,6 +66,10 @@ CREATE PROPERTY GRAPH TYPE NarrowedEndsDisagree AS {
         id :: INT NOT NULL
     }),
 
+    (:Guild {
+        id :: INT NOT NULL
+    }),
+
     (:Author)        -[:WROTE { yr :: INT NOT NULL }]->    (:Book),
     (:Author&Editor) -[:WROTE { yr :: INT NOT NULL }]->    (:Book&Rare),
 
@@ -73,6 +77,14 @@ CREATE PROPERTY GRAPH TYPE NarrowedEndsDisagree AS {
     (:Author&Editor) -[:SPOKE_AT { yr :: INT NOT NULL }]-> (:Venue),
 
     (:Book)          -[:SHELVED_IN { pos :: INT NOT NULL }]-> (:Shelf),
-    (:Venue)         -[:LICENSED_BY { num :: INT NOT NULL }]-> (:Council)
+    (:Venue)         -[:LICENSED_BY { num :: INT NOT NULL }]-> (:Council),
+
+    -- MEMBER_OF runs from BOTH author types to the one Guild type, so `(g:Guild)`
+    -- is singular, is never in the plural-candidate table, and endpointNarrowing
+    -- gives it no entry. Read alongside a far end that DOES have one it is what
+    -- says "no entry" means the end's keys unchanged rather than nothing: see
+    -- TestASingularFarEndNarrowsNothingRatherThanEverything.
+    (:Author)        -[:MEMBER_OF { rank :: INT NOT NULL }]-> (:Guild),
+    (:Author&Editor) -[:MEMBER_OF { rank :: INT NOT NULL }]-> (:Guild)
 
 }

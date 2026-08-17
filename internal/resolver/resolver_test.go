@@ -1369,6 +1369,40 @@ func (s *ResolverSuite) TestNarrowedEndsThatDisagreeKeepTheWideAnswer() {
 	s.Require().ErrorIs(err, ErrUnknownProperty)
 }
 
+// TestASingularFarEndNarrowsNothingRatherThanEverything pins narrowedEndpointKeys'
+// absent-entry arm.
+//
+// endpointNarrowing gives an entry only to PLURAL bindings, so a far end already
+// resolved to one type has none. Reading that absence as "narrowed to nothing"
+// rather than "not narrowed" empties the whole intersection, and because
+// candidateTypes then falls back to the wide answer the mistake is SILENT: the
+// query refuses for ambiguity exactly as it did before the lane existed. The
+// shape it needs is a bare binding touching a narrowed plural far end AND a
+// singular one at once, which nothing else in the corpus has.
+func (s *ResolverSuite) TestASingularFarEndNarrowsNothingRatherThanEverything() {
+	sch := s.loadSchema("invalid", "narrowed_ends_disagree.gql")
+	resolve := func(src string) ([]Column, error) {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		return vq.Columns, err
+	}
+
+	// MEMBER_OF is declared from both author types, so on its own it narrows
+	// nothing and `p` stays plural — which is what makes the pair the test and
+	// not just the WROTE half over again.
+	_, err := resolve("MATCH (p)-[m:MEMBER_OF]->(g:Guild)\nRETURN p.authorOnly")
+	s.Require().ErrorIs(err, ErrAmbiguousBinding)
+
+	// The same MEMBER_OF hop alongside the WROTE half. The narrowed reading is
+	// {Author} from WROTE intersected with MEMBER_OF's unchanged {Author,
+	// Author&Editor}; treating g's absent entry as empty makes that {} and the
+	// fallback turns it back into the plural refusal above.
+	got, err := resolve("MATCH (p)-[w:WROTE]->(b:Book)\nMATCH (b)-[s:SHELVED_IN]->(sh:Shelf)\nMATCH (p)-[m:MEMBER_OF]->(g:Guild)\nRETURN p.authorOnly")
+	s.Require().NoError(err, "a singular far end must not empty the narrowed intersection")
+	s.Require().Equal([]Column{{Name: "p.authorOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}}, got)
+}
+
 // TestAnEmptyHopRangeIsNotAWitness pins the EQUALITY in singleHopPattern's
 // lower-bound test. It is the one arm of that predicate no fixture reaches:
 // relax `*lower == 1` to `*lower >= 1` and the whole suite stays green.
