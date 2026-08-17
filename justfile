@@ -19,6 +19,24 @@ actionlint_version := "v1.7.7"
 shellcheck_version := "v0.10.0"
 shellcheck := justfile_directory() + "/.bin/shellcheck"
 
+# Single source of truth for the discovery-probe names. Three recipes mktemp a
+# throwaway module under test/data to witness that the module set is read off
+# the tree, and sweep-discovery-probes globs those names to clear one a killed
+# run left behind. The name therefore has to be the same string in two places
+# that cannot see each other — the recipe that CREATES the probe and the recipe
+# that REMOVES it — and a fact spelled twice is a fact that can disagree with
+# itself (bd gqlc-oxne). Renaming a probe here moves both at once; renaming one
+# literal in place is no longer possible, because there are no literals.
+#
+# .gitignore is the third place, and it cannot read these. What holds it to them
+# is a `git check-ignore -v` witness inside the sweep that requires the matching
+# rule to come from this repo's own .gitignore, so a rename reddens even in a clone
+# whose own .git/info/exclude or core.excludesFile happens to hide the old name.
+vuln_probe := "vulnprobe"
+fence_probe := "fenceprobe"
+xtest_probe := "xtestprobe"
+discovery_probes := vuln_probe + " " + fence_probe + " " + xtest_probe
+
 # Configures local git settings required after a fresh clone.
 # Idempotent: safe to run multiple times.
 init:
@@ -193,13 +211,13 @@ lint-hooks dir=".githooks": ensure-shellcheck
 # tree has nothing stale in it, and a clause whose only observable behaviour is
 # saying nothing is one that survives being flipped or deleted.
 #
-# The hand-written awk that used to read the key is gone, and with it the
-# emptiness clause it needed. One reader — `scope declared` — and a reader that
-# goes quiet now fails closed on its own: an empty vocabulary places nothing, so
-# the derivation stops on the first constrained file in the tree rather than
-# producing an empty set that agrees with an empty config.
+# One reader for the key — `scope declared` — and no emptiness clause guarding
+# it here, because a reader that goes quiet fails closed on its own: an empty
+# vocabulary places nothing, so the derivation stops on the first constrained
+# file in the tree rather than producing an empty set that agrees with an empty
+# config — which would be green because both sides went missing at once.
 [private]
-check-golangci-build-tags:
+check-golangci-build-tags: sweep-discovery-probes
     #!/usr/bin/env bash
     set -euo pipefail
     scope() { go run ./internal/tools/modscope "$@"; }
@@ -301,6 +319,289 @@ check-golangci-build-tags:
 
     refuse_stale "${derived}" "${configured}" || exit 1
 
+# Clears discovery probes a previous run could not clean up after itself.
+#
+# `just vuln`, test-codegen-fence and check-codegen-external-tests each mktemp a
+# throwaway module under test/data to witness that the module set is read off
+# the tree rather than remembered, and each removes its own on the way out. That
+# cleanup is a shell trap, and a trap cannot run under SIGKILL — the routine end
+# of a run killed for taking too long, or by a session that hit a quota.
+#
+# What a survivor costs is out of proportion to how it got there. A probe is a
+# go.mod with no Go file beneath it, which is a module whose walk comes back
+# empty, which modscope refuses by design (bd gqlc-s3lt) — so one leaked probe
+# stops `just lint`, `just vuln`, test-codegen-fence and
+# check-codegen-external-tests, and it stops them with a message about a broken
+# walk rather than about itself.
+#
+# Covers every declared probe name, not the calling recipe's own. A leftover
+# fence probe stops check-codegen-external-tests, which test-codegen-fence
+# depends on, so the run that would have cleaned that probe up dies before it
+# reaches its own trap.
+#
+# The limit is concurrency. Two of these recipes running against ONE worktree at
+# the same time would clear each other's live probe, and the witness below plants
+# under a fixed name both would collide on; they are not safe to run concurrently
+# in a single tree. Separate worktrees, which is how this repo runs agents, are
+# unaffected.
+[private]
+sweep-discovery-probes:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    names=({{discovery_probes}})
+    trap 'rm -rf test/data/*.sweepwitness' EXIT
+
+    # Three facts have to agree before the names below mean anything: the
+    # `*_probe` variables, the concatenation this recipe reads them through, and
+    # the mktemp sites that create the probes. discovery_probes is written by
+    # hand, so a probe variable can be declared, interpolated at its site, and
+    # left out of the concatenation — the probe is still created and this sweep
+    # stops clearing it, which is the state this block refuses.
+    #
+    # Read back off just's own evaluation and dump rather than this file's bytes,
+    # so a commented-out declaration is not a declaration. A commented-out mktemp
+    # site does still count as a site; that direction asks for one more
+    # declaration than the tree needs.
+    if [ "${#names[@]}" -eq 0 ]; then
+        echo "error: discovery_probes expands to no names at all, so this sweep globs nothing," >&2
+        echo "       looks nothing up, and reports success against a tree where every recipe's" >&2
+        echo "       probe leaked (bd gqlc-oxne)." >&2
+        exit 1
+    fi
+
+    evaluated="$('{{just_executable()}}' --justfile '{{justfile()}}' --evaluate)"
+    dumped="$('{{just_executable()}}' --justfile '{{justfile()}}' --dump)"
+    pairs="$(printf '%s\n' "${evaluated}" \
+        | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*_probe\)  *:= "\(.*\)"$/\1\t\2/p')"
+    if [ -z "${pairs}" ]; then
+        echo "error: this justfile declares no *_probe variable, so the set discovery_probes is" >&2
+        echo "       compared against below is empty and agrees with whatever discovery_probes" >&2
+        echo "       happens to say (bd gqlc-oxne)." >&2
+        exit 1
+    fi
+
+    # Each comparison below owns its accumulator and asks membership one name at
+    # a time, so an edit reaches one comparison.
+    names_nl=""
+    for n in "${names[@]}"; do
+        names_nl="${names_nl}${n}"$'\n'
+    done
+
+    declared_vars=""
+    declared=""
+    unswept=""
+    while IFS=$'\t' read -r var val; do
+        if [ -z "${val}" ]; then
+            echo "error: ${var} evaluates to the empty string, so the probe it names is created" >&2
+            echo "       as test/data/.XXXXXX — a spelling .gitignore does not cover and the" >&2
+            echo "       glob below does not reach (bd gqlc-oxne)." >&2
+            exit 1
+        fi
+        declared_vars="${declared_vars}${var}"$'\n'
+        declared="${declared}${val}"$'\n'
+        case $'\n'"${names_nl}" in
+            *$'\n'"${val}"$'\n'*) ;;
+            *) unswept="${unswept} ${val}" ;;
+        esac
+    done <<<"${pairs}"
+
+    unknown=""
+    for n in "${names[@]}"; do
+        case $'\n'"${declared}" in
+            *$'\n'"${n}"$'\n'*) ;;
+            *) unknown="${unknown} ${n}" ;;
+        esac
+    done
+
+    # site_re is assembled from two pieces: the dump this searches includes this
+    # recipe's own body, and a whole pattern written out here would match itself.
+    #
+    # One regex reads the sites, so what the refusal below accepts and what the
+    # extraction below reads are the same shape by construction. The trailing dot
+    # is part of that shape because the sweep glob is "test/data/${n}.*": a site
+    # that interpolates its probe variable and then runs straight into the
+    # mktemp template, with no dot between, makes a directory neither that glob
+    # nor .gitignore's own dotted rules match.
+    #
+    # WHAT THIS DOES NOT REACH: `mktemp -d` under test/data is the one idiom it
+    # looks for. A probe put there by `mkdir`, by `install -d`, or by Go code
+    # this justfile calls is not a site to any of the checks below, and the
+    # declared names are not held to it (bd gqlc-lj9s).
+    site_re="mktemp -d ""test/data/"
+    site_var_re="${site_re}[{][{] *\([A-Za-z_][A-Za-z0-9_]*\) *[}][}]\."
+    odd_sites="$(printf '%s\n' "${dumped}" | grep -e "${site_re}" \
+        | grep -v -e "${site_var_re}" || true)"
+    if [ -n "${odd_sites}" ]; then
+        echo "error: a probe site under test/data does not interpolate a probe variable and" >&2
+        echo "       follow it with a dot:" >&2
+        printf '%s\n' "${odd_sites}" | sed 's/^/         /' >&2
+        echo "       Only that form is compared against the declared names and swept by the" >&2
+        echo "       glob below, so a site in any other shape can name a probe this recipe" >&2
+        echo "       does not clear with nothing here objecting (bd gqlc-oxne)." >&2
+        exit 1
+    fi
+
+    site_vars="$(printf '%s\n' "${dumped}" \
+        | sed -n "s|^.*${site_var_re}.*|\1|p")"
+    if [ -z "${site_vars}" ]; then
+        echo "error: no recipe in this justfile creates a probe under test/data, so the names" >&2
+        echo "       checked below are held to nothing and this sweep clears a thing no run" >&2
+        echo "       makes (bd gqlc-oxne)." >&2
+        exit 1
+    fi
+    unheld=""
+    while IFS= read -r v; do
+        case $'\n'"${declared_vars}" in
+            *$'\n'"${v}"$'\n'*) ;;
+            *) unheld="${unheld} ${v}" ;;
+        esac
+    done <<<"${site_vars}"
+    if [ -n "${unheld}" ]; then
+        echo "error: these justfile variables name a probe at a mktemp site and are not spelled" >&2
+        echo "       *_probe:${unheld}" >&2
+        echo "       The comparison below reads *_probe variables only, so a probe created" >&2
+        echo "       through one of these is not reached by it (bd gqlc-oxne)." >&2
+        exit 1
+    fi
+
+    if [ -n "${unswept}" ] || [ -n "${unknown}" ]; then
+        echo "error: the probe names this justfile declares and the names discovery_probes hands" >&2
+        echo "       this sweep are different sets." >&2
+        if [ -n "${unswept}" ]; then
+            echo "       declared, not swept:${unswept}" >&2
+            echo "       — a declared name left out of discovery_probes still gets a probe made" >&2
+            echo "         at its mktemp site, and this recipe no longer clears it (bd gqlc-oxne)." >&2
+        fi
+        if [ -n "${unknown}" ]; then
+            echo "       swept, not declared:${unknown}" >&2
+            echo "       — a name in discovery_probes with no variable behind it is a spelling no" >&2
+            echo "         site creates, so the .gitignore rule it demands guards nothing." >&2
+        fi
+        exit 1
+    fi
+
+    # A function so the witness below can RUN it rather than recompute what it
+    # believes it does. The names come from the variable block at the top of this
+    # file, and the block above holds that block to the sites, so this glob and
+    # the sites that create the probes read one spelling.
+    sweep() {
+        local n d
+        for n in "${names[@]}"; do
+            for d in "test/data/${n}".*; do
+                [ -e "${d}" ] || continue
+                rm -rf "${d}"
+                printf '%s\n' "${d}"
+            done
+        done
+    }
+
+    # Audible when it fires. A cleanup that removes three modules and says
+    # nothing leaves a CI log in which it is indistinguishable from a cleanup
+    # that did not run, and a leaked probe is evidence a run was killed —
+    # something the next reader of that log wants told, not silently repaired.
+    leaked="$(sweep)"
+    if [ -n "${leaked}" ]; then
+        echo "swept discovery probe(s) an earlier run left behind:"
+        printf '%s\n' "${leaked}" | sed 's/^/  /'
+    fi
+
+    # .gitignore is the one copy of these names that cannot read the variable
+    # block, so it is the one that can drift. A lookup, not a text comparison:
+    # what matters is whether git would hide a leaked probe under this name, and
+    # only git can answer that.
+    #
+    # Two questions, and both have to be yes. -q answers whether git would hide
+    # the path; -v names the file whose rule matched. Neither alone is the
+    # question: git's hide answer covers .git/info/exclude and core.excludesFile,
+    # per-clone files no commit carries, so -q alone stays green while this repo's
+    # own .gitignore loses its probe rules in a clone that happens to hide them.
+    # And -v exits 0 on a NEGATED rule — it reports that a pattern matched, not
+    # that the path is hidden — so -v alone reads "!/test/data/vulnprobe.*/" as
+    # coverage for a probe git would list as untracked.
+    #
+    # Each name is recorded as it is looked up so the refusal below can compare
+    # the names that reached the lookup against the names declared, rather than
+    # count calls: a lookup run three times against one name leaves the other two
+    # free to drift out of .gitignore with this recipe green (bd gqlc-eo46).
+    looked_up=""
+    covered() {
+        local src
+        looked_up="${looked_up}${1}"$'\n'
+        git check-ignore -q "test/data/${1}.sweepwitness" || return 1
+        src="$(git check-ignore -v "test/data/${1}.sweepwitness" | cut -d: -f1)" || return 1
+        [ "${src}" = ".gitignore" ]
+    }
+
+    # WITNESS: same shape and same reason as check-golangci-build-tags'
+    # zzstaleprobe above. On the ordinary tree there is nothing to sweep, so
+    # this recipe's whole observable behaviour is silence — which is what
+    # survives being deleted. So one probe-shaped directory per declared name is
+    # planted on every run, CI included, and the sweep must remove all of them.
+    #
+    # The witness carries no go.mod: a leaked WITNESS must not be able to become
+    # the empty-module failure it exists to test for.
+    for n in "${names[@]}"; do
+        mkdir -p "test/data/${n}.sweepwitness"
+        if ! covered "${n}"; then
+            echo "error: test/data/${n}.* is a discovery-probe name this justfile creates, and the" >&2
+            echo "       repo's own .gitignore does not cover it — so the .gitignore copy of that" >&2
+            echo "       name has drifted from the one in the variable block (bd gqlc-oxne), and" >&2
+            echo "       a probe a killed run leaves behind now reads as untracked work nobody" >&2
+            echo "       wrote. Add /test/data/${n}.*/ to .gitignore." >&2
+            exit 1
+        fi
+    done
+
+    # No refusal in this recipe is itself asserted on. Some of them overlap, so
+    # deleting one is sometimes caught by another, but nothing here makes that
+    # so. The regress stops at this level rather than terminating inside the
+    # script; closing it takes a test that runs this recipe against a fixture
+    # tree from outside it (bd gqlc-eo46).
+    missed=""
+    for n in "${names[@]}"; do
+        case $'\n'"${looked_up}" in
+            *$'\n'"${n}"$'\n'*) ;;
+            *) missed="${missed} ${n}" ;;
+        esac
+    done
+    if [ -n "${missed}" ]; then
+        echo "error: the .gitignore coverage lookup was not called for:${missed}" >&2
+        echo "       Each of those is a declared discovery-probe name, so each can drift out of" >&2
+        echo "       .gitignore with this recipe still green (bd gqlc-eo46)." >&2
+        exit 1
+    fi
+
+    # The lookup's passing case is silence, and on a tree where nothing has
+    # drifted every call above returns covered — so the refusing branch is not
+    # taken on a green run, which is what let this file's probe-collision arm
+    # ship dead once already. A spelling no recipe here creates goes through the
+    # same lookup on every run and must come back uncovered, so a lookup stuck at
+    # "yes" is refused rather than believed.
+    #
+    # Planted on disk first. The probe rules in .gitignore end in a slash, and
+    # git matches a directory-only pattern against a directory that exists on
+    # disk, not against an absent path — so an unplanted control comes back
+    # uncovered for a reason that holds for a declared name too. The mkdir leaves
+    # the spelling as the difference between the control and the lookups above.
+    mkdir -p "test/data/zzuncoveredprobe.sweepwitness"
+    if covered "zzuncoveredprobe"; then
+        echo "error: this repo's own .gitignore reports test/data/zzuncoveredprobe.* as ignored, a" >&2
+        echo "       spelling no recipe here creates. The coverage lookup above answers yes to a" >&2
+        echo "       name that is not a declared probe, so it would answer yes to a renamed probe" >&2
+        echo "       too and the drift it exists to catch would pass (bd gqlc-oxne)." >&2
+        exit 1
+    fi
+
+    sweep >/dev/null
+    for n in "${names[@]}"; do
+        [ -e "test/data/${n}.sweepwitness" ] || continue
+        echo "error: the sweep left test/data/${n}.sweepwitness on disk, so it does not cover" >&2
+        echo "       ${n} at all. That name is declared as a discovery probe, and every recipe" >&2
+        echo "       depending on this one would go on reporting success with a probe still" >&2
+        echo "       there — or die on modscope's empty-walk refusal (bd gqlc-s3lt)." >&2
+        exit 1
+    done
+
 # full static analysis: golangci-lint over the Go tree (.golangci.yml) and
 # shellcheck over the hooks tree, as linters + formatter diffs as issues
 lint: ensure-golangci lint-hooks check-golangci-build-tags
@@ -396,7 +697,7 @@ bd-export-monotonic-local:
 #
 # check-codegen-external-tests runs ahead of the linter: both fail on the same
 # regression, and only the guard names the scan it protects (ADR 0026).
-test-codegen-fence: ensure-golangci check-codegen-external-tests
+test-codegen-fence: sweep-discovery-probes ensure-golangci check-codegen-external-tests
     #!/usr/bin/env bash
     set -euo pipefail
     scope() { go run ./internal/tools/modscope "$@"; }
@@ -434,9 +735,11 @@ test-codegen-fence: ensure-golangci check-codegen-external-tests
     #
     # The probe carries a go.mod and nothing else, and it is gone before the
     # fencing loop below runs — which is also what the second clause checks.
-    probe="$(mktemp -d test/data/fenceprobe.XXXXXX)"
+    # Residue from a run this trap could not clean up is swept by the
+    # sweep-discovery-probes dependency, not here.
+    probe="$(mktemp -d test/data/{{fence_probe}}.XXXXXX)"
     trap 'rm -rf "${probe}"' EXIT
-    printf 'module gqlc.invalid/fenceprobe\n\ngo 1.26.5\n' >"${probe}/go.mod"
+    printf 'module gqlc.invalid/{{fence_probe}}\n\ngo 1.26.5\n' >"${probe}/go.mod"
     derive_fenced || exit 1
     rm -rf "${probe}"
     trap - EXIT
@@ -524,7 +827,7 @@ test-codegen-fence: ensure-golangci check-codegen-external-tests
 # lint-hooks prints its script list — a set that is only counted is a set nobody
 # can see narrow.
 [private]
-check-codegen-external-tests:
+check-codegen-external-tests: sweep-discovery-probes
     #!/usr/bin/env bash
     set -euo pipefail
     scope() { go run ./internal/tools/modscope "$@"; }
@@ -543,10 +846,11 @@ check-codegen-external-tests:
     # same argument, as in test-codegen-fence above; read it there. This guard
     # named `test/data/codegen` literally too (bd gqlc-oxne), and on a tree whose
     # discovered set is that one module, nothing but a changed tree can tell the
-    # two apart.
-    probe="$(mktemp -d test/data/xtestprobe.XXXXXX)"
+    # two apart. Residue this trap could not clean up is swept by the
+    # sweep-discovery-probes dependency, not here.
+    probe="$(mktemp -d test/data/{{xtest_probe}}.XXXXXX)"
     trap 'rm -rf "${probe}"' EXIT
-    printf 'module gqlc.invalid/xtestprobe\n\ngo 1.26.5\n' >"${probe}/go.mod"
+    printf 'module gqlc.invalid/{{xtest_probe}}\n\ngo 1.26.5\n' >"${probe}/go.mod"
     derive_nested || exit 1
     rm -rf "${probe}"
     trap - EXIT
@@ -799,7 +1103,7 @@ test-codegen-live-age:
 # imports govulncheck discards, so a called vulnerability reachable only from
 # one of those files exits 0 here (ADR 0026). vuln-root-residual below measures
 # and ratchets that blind spot; bd gqlc-m5rc closes it.
-vuln: vuln-root-residual
+vuln: sweep-discovery-probes vuln-root-residual
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -901,9 +1205,11 @@ vuln: vuln-root-residual
     # here for the same reason: `modules=(. test/data/codegen)` written over the
     # derivation scans exactly what this tree scans today, passes every
     # postcondition below, and stops scanning the day a module is added.
-    probe="$(mktemp -d test/data/vulnprobe.XXXXXX)"
+    # Residue this trap could not clean up is swept by the
+    # sweep-discovery-probes dependency, not here.
+    probe="$(mktemp -d test/data/{{vuln_probe}}.XXXXXX)"
     trap 'rm -rf "${probe}"' EXIT
-    printf 'module gqlc.invalid/vulnprobe\n\ngo 1.26.5\n' >"${probe}/go.mod"
+    printf 'module gqlc.invalid/{{vuln_probe}}\n\ngo 1.26.5\n' >"${probe}/go.mod"
     derive_modules || exit 1
     rm -rf "${probe}"
     trap - EXIT
