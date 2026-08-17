@@ -498,8 +498,54 @@ func columnDecoder(f codegen.Row) string {
 // decodeFunc names the models.go helper that decodes one value of an
 // emitted Go type. A slice goes through the named wrapper emitted for
 // it, a type of no declared shape through the agtype value vocabulary,
-// and everything else through the helper for the agtype scalar its
-// carrier is — the caller narrows.
+// and a scalar through the helper for the agtype scalar its carrier is —
+// the caller narrows.
+//
+// Every carrier the type table produces has an arm here, and a carrier
+// with none panics. This is the first panic in the non-test code of
+// internal/codegen/ — the conformance tests carry three of their own.
+// The house shape for a broken internal invariant is a peer package's
+// (internal/resolver/resolve.go, scope.go), and it is taken here because
+// every caller renders into a []byte with no error to return, and every
+// error generate can return is raised before the first render.
+//
+// What reaches here is a Go type text the table produced (types.go:
+// Property, Scalar) or an element of one it composed, because every
+// column kind whose text the table did NOT produce is taken before the
+// call. A ColumnNode or ColumnEdge carries its entity struct name, and
+// columnDecoder answers it with that entity's own decoder above. A
+// ColumnEdgeUnion carries a synthesised interface name (prepare.go,
+// phase B) and reaches no emission at all: edgeUnionReason refuses it
+// ahead of Prepare wherever it binds two or more distinct labels, and
+// Phase A's admitEdgeUnionCandidates refuses what that arm stands aside
+// for — fewer than two candidates, or a label two candidates share —
+// before any Row is derived. The table's third method contributes no
+// text at all, which is why there is no arm for one: every arm of
+// Temporal answers ok=false, so Prepare refuses a temporal column with
+// ErrUnrepresentableTemporal and no ColumnTemporal Row is built here.
+//
+// A list is not one of those bounds. A schema property of list width is
+// SERVED: it arrives as a resolver.ResolvedProperty, typeMap.Property
+// admits it at every nesting depth its element is admitted at — the
+// instant excepted, for want of anywhere to put a per-element zone — and
+// the emitted column decodes through the wrapper the slice arm below
+// names, as the two_non_null_list_columns golden shows. What
+// unservedColumn refuses is a list EXPRESSION column
+// (resolver.ResolvedList), and that refusal is what keeps an entity or an
+// edge union from arriving as a list element and reaching this through
+// elemDecoder.
+//
+// So a carrier with no arm is a change to the table rather than anything
+// an author wrote. Answering one with a helper picked for some other
+// shape emits a package that compiles, because the field was typed from
+// the same table, and reads the value as the wrong Go type at run time.
+//
+// TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces is what goes
+// red when the table gains a carrier this switch was not taught: it walks
+// the typeMap methods of every .go file in the package, so a new row that
+// returns a literal fails a subtest of its own, and most other spellings
+// fail the walk's refusal. The one spelling it reads without sweeping is
+// named where the walk is, at typeTableGoTypes.
 func decodeFunc(goType string) string {
 	if strings.HasPrefix(goType, "[]") {
 		return listHelperName(goType)
@@ -510,16 +556,18 @@ func decodeFunc(goType string) string {
 	case "map[string]any":
 		return "agtypeMap"
 	}
-	switch agtypeCarrier(goType) {
+	carrier := agtypeCarrier(goType)
+	switch carrier {
 	case "bool":
 		return "agtypeBool"
 	case "int64":
 		return "agtypeInt64"
 	case "float64":
 		return "agtypeFloat64"
+	case "string":
+		return "agtypeString"
 	case goInstant:
 		return "agtypeInstant"
-	default:
-		return "agtypeString"
 	}
+	panic(fmt.Sprintf("age codegen bug: Go type %q carries as %q, which decodeFunc has no arm for", goType, carrier))
 }
