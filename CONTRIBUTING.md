@@ -18,8 +18,9 @@ Repair with `just init`, which is idempotent.
 Those recipes only run when someone runs them, so `.githooks/claude-pre-bash`
 runs a stricter version of the check on every Bash tool call: it warns on any
 command and refuses `git commit`, `git merge`, `git pull` and `git push`
-specifically until the config is repaired (those four are the subcommands
-measured to run one of the hooks in `.githooks/`). Stricter because
+specifically until the config is repaired — measured against `pre-commit`,
+`commit-msg`, `pre-push` and `post-merge`, those four subcommands fire one of
+them and `revert`, `cherry-pick`, `rebase` and `am` fire none. Stricter because
 `just doctor` compares the configured value and nothing else — with
 `core.hooksPath` set to `.githooks` but the directory holding only `*.sample`
 files, or a hook file left non-executable, `just doctor` prints `ok` and exits

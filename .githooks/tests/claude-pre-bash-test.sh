@@ -195,8 +195,9 @@ run_drift_case "unset: commit refused"               deny-hooks "$UNSET_REPO"  '
 run_drift_case "unset: push refused"                 deny-hooks "$UNSET_REPO"  'git push'
 # merge and pull fire commit-msg — the AI-attribution gate — so a merge written
 # while drifted is an ungated commit, not just a stale bd mirror. Refused for
-# the same reason commit and push are. revert/cherry-pick/rebase/am fired none
-# of this repo's four hooks in the same measurement, so they only warn.
+# the same reason commit and push are. revert and cherry-pick fired none of this
+# repo's four hooks in the same measurement (nor did rebase or am), so they stay
+# outside HOOK_GATED; the two rows below pin that for the first two.
 run_drift_case "unset: merge refused"                deny-hooks "$UNSET_REPO"  'git merge --no-ff side'
 run_drift_case "unset: pull refused"                 deny-hooks "$UNSET_REPO"  'git pull --rebase'
 run_drift_case "unset: revert only warns"            warn       "$UNSET_REPO"  'git revert --no-edit HEAD'

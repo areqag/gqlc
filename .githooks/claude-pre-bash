@@ -289,17 +289,18 @@ def hooks_drift(directory):
     deactivates all of .githooks/ at once, repo-wide — linked worktrees share
     one .git/config. This file is wired through .claude/settings.json, so
     core.hooksPath does not govern whether it runs. What that buys is latency,
-    and in two states coverage as well. Latency: `just check-hooks` runs only
-    as a dependency of `just test` / `just doctor`, and the window between the
-    drifting write and the next full test run is what went unobserved for
-    30+ minutes across five sessions (bd gqlc-nzwa). Coverage: check-hooks
-    compares the configured value and nothing else, so on the two states
-    has_live_hook() below adds — value correct, .githooks/ present, holding
-    only *.sample files or a hook left non-executable — `just doctor` prints
-    "ok" and exits 0 while this refuses (measured; both states are fixtures in
-    the test suite, DEAD_REPO and NOEXEC_REPO). The latency half applies only
-    to Bash tool calls inside a Claude Code session; nothing here runs for a
-    plain terminal, an editor's git integration or a non-Bash tool, and
+    and in two states coverage as well. Latency: `just check-hooks` runs when
+    someone runs it, in practice as a dependency of `just test` / `just
+    doctor`, and the window between the drifting write and the next such run
+    is what went unobserved for 30+ minutes across five sessions (bd
+    gqlc-nzwa). Coverage: check-hooks compares the configured value and
+    nothing else, so on the two states has_live_hook() below adds — value
+    correct, .githooks/ present, holding only *.sample files or a hook left
+    non-executable — check-hooks exits 0 and `just doctor` prints "ok" while
+    this refuses (measured; both states are fixtures in the test suite,
+    DEAD_REPO and NOEXEC_REPO). The latency half applies only to Bash tool
+    calls inside a Claude Code session; nothing here runs for a plain
+    terminal, an editor's git integration or a non-Bash tool, and
     `just check-hooks` is what those have.
 
     Silent — never a reason — for a cwd outside any repo and for repos that
