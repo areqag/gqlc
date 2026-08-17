@@ -25,8 +25,8 @@ import (
 // decoderProbeWidth is one width the probe declares a property at: the
 // normalised graph type, and the source spelling that reaches it. The
 // spelling is carried because a normalised type is not always a legal
-// one — TIME is written ZONED TIME, LOCALTIME is written LOCAL TIME, and
-// the grammar makes DURATION's qualifier mandatory.
+// one — TIME is spelled ZONED TIME here, LOCALTIME is spelled LOCAL TIME,
+// and the grammar makes DURATION's qualifier mandatory.
 type decoderProbeWidth struct {
 	pt       graph.PropertyType
 	spelling string
@@ -83,11 +83,10 @@ func decoderProbeWidths() []decoderProbeWidth {
 	return out
 }
 
-// decoderProbeSchema is one schema spelled around a single property
-// name, declared at every width decoderProbeWidths carries and in every
-// arm a decode helper has: required and nullable, on a node type and on
-// an edge type, whose decoder takes the other carrier. %[1]s is the
-// property name under test.
+// decoderProbeSchema is one schema spelled around the single property
+// name prop, declared at every width decoderProbeWidths carries and in
+// every arm a decode helper has: required and nullable, on a node type
+// and on an edge type, whose decoder takes the other carrier.
 //
 // Every entity declares exactly one property, so the positional local
 // the non-nullable arm binds is always value0 and the second position is
@@ -109,8 +108,11 @@ func decoderProbeSchema(prop string) string {
 }
 
 // decoderProbeTag is the element-name fragment one width contributes,
-// derived from the normalised type so that two widths cannot share a
-// graph element between them: LIST<INT32> becomes ListInt32.
+// derived from the normalised type so two widths get separate graph
+// elements: LIST<INT32> becomes ListInt32. Non-alphanumerics are dropped,
+// so two types differing only in punctuation would land on one tag; the
+// schema parse refuses the duplicate element type and the suite fails on
+// the parse rather than measuring one width twice.
 func decoderProbeTag(pt graph.PropertyType) string {
 	var b strings.Builder
 	for _, part := range strings.FieldsFunc(string(pt), func(r rune) bool {
@@ -384,6 +386,10 @@ func (s *DecoderSuite) requireArm(declared map[string]schema.Property, element s
 // them. Each name is then fed back as a property name, and what must not
 // move is the set itself: the decoder's identifiers are the generator's
 // own, so they are the same whatever the schema declares.
+//
+// The scope read here is models.go's entity decoders. A query column's
+// decode is emitted elsewhere and its locals are swept by the query-side
+// corpus in internal/codegen/conformance, not by this.
 func (s *DecoderSuite) TestNoDecoderLocalTakesAPropertyName() {
 	models, err := s.emitModels(unclaimedProperty)
 	s.Require().NoError(err)
@@ -394,9 +400,11 @@ func (s *DecoderSuite) TestNoDecoderLocalTakesAPropertyName() {
 		s.Run(name, func() {
 			models, err := s.emitModels(name)
 			if err != nil {
-				// A word the GQL grammar reserves is one no schema can
-				// spell a property after, and so one no decoder can
-				// collide with.
+				// The parse refusing the name is the schema's answer, not
+				// a gap: a name no property can be spelled is a name no
+				// decoder can collide with. No identifier the generator
+				// currently binds trips this — a decoder that later took
+				// its name from the GQL keyword list would.
 				s.T().Skipf("no property can be named %q: %v", name, err)
 			}
 			s.Require().Contains(models, "\t"+exportedField(name)+" ",
