@@ -43,6 +43,13 @@ type dialectProbe struct {
 // property this whole file exists for: adding a refusal costs a witness.
 // Without it the table grows on suspicion, which is the same guess as a
 // hardcoded list with more ceremony around it.
+//
+// "Carries" is the witness's CODE and not the bytes its body occupies: a
+// row commented out carries nothing, which took a fix (review mutation
+// M15). The bound on that is worth knowing before adding a gap — the
+// sweep reads the witness's text and not its control flow, so it can say
+// the answer is spelled there and cannot say anything asserts it
+// (mutation M18, open and stated in ADR 0028).
 type dialectGap struct {
 	// sentinel is what a caller branches on with errors.Is. One per gap,
 	// because two gaps are two different fixes and a caller that cannot

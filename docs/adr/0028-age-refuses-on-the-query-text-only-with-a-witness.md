@@ -72,6 +72,38 @@ every recorded answer and every served text appears verbatim in **that witness's
 own body**; and that every AGE live recipe in the justfile runs it, with
 `-count=1`.
 
+"In the body" means in the body's **code**. The reader parses each live file and
+renders every test's body back from the tree with `format.Node`, so a comment is
+not part of any body. Taking the body as the source bytes between `fn.Body.Pos()`
+and `fn.Body.End()` — which is what it did until review mutation M15 — hands the
+comments back too, and a probe row commented out then satisfied the sweep while
+measuring nothing. That is exactly the growth-on-suspicion this decision exists
+to prevent, so it is guarded twice: `TestWitnessBodyIsCodeAndNotCommentary` on
+the reader (line comments, a block comment, a doc comment, and a positive
+control that real code IS carried) and `TestACommentedProbeReddensTheSweep` on
+the reader composed into the sweep, which is the only place the property is
+visible — `witnessGaps` takes a bodies map, and a map value carrying a comment is
+just a string carrying a comment.
+
+**What the sweep does not check: that the answer is asserted.** It requires the
+recorded answer to appear in the witness's body, not to be the subject of an
+assertion. Gutting `TestAGERefusesTheFunctionsItDoesNotDefine`'s
+`require.Contains(t, pgErr.Message, tc.wantMessage, …)` to `_ = pgErr` leaves the
+`wantMessage:` literals standing as real code, so the sweep stays green over a
+witness that runs five statements and asserts nothing about the answers (review
+mutation M18, reproduced and still open at the time of writing). This is a
+weaker hole than M15 — it removes the assertion and leaves the measurement, where
+M15 removed the measurement — and closing it needs the sweep to read the
+witness's control flow rather than its text, which is a different tool from the
+one this decision builds. It is stated here rather than fixed.
+
+Neither hole is inherited. `f4fb1a19`, the commit this work branches from, has no
+`internal/codegen/age/dialect.go` and no witness sweep anywhere in the tree
+(`git grep -l 'witnessGaps\|readLiveWitnessBodies' f4fb1a19 -- '*.go'` finds
+nothing). The binding is introduced entirely here, so a gap in it is this
+decision's own; what is true is only the weaker thing, that master bound nothing
+and therefore nothing regresses.
+
 The per-witness scoping is the difference between a probe that is re-measured
 and a probe that is merely spelled somewhere. A text carried by the neo4j
 battery is run against neo4j; a text under an AGE test the `-run` allowlists do
@@ -88,7 +120,9 @@ runs no body.
 
 ## What is refused today
 
-Two gaps, twelve probes, five served texts.
+Two gaps carrying eight refused probes and four served texts — twelve query
+texts, counted off `dialectGaps` itself: three refused and two served for the
+alternation, five refused and two served for the undefined function.
 
 1. **Relationship-type alternation** (`ErrRelationshipTypeAlternation`, from
    `gqlc-35yu.14`): `-[r:A|B]->` in any of three spellings, answered
@@ -192,8 +226,9 @@ and still ships its whole text; and a call the resolver types is typed by its
 Rejected: `test/data/codegen` is a separate Go module whose purpose is proving
 generated code compiles standalone, and giving it a dependency on
 `internal/codegen/age` inverts that. The binding is made source-level instead —
-the sweep parses the live files with `go/parser` and reads each test's body,
-which is what the two sides have to agree on anyway. Parsed rather than scanned
+the sweep parses the live files with `go/parser` and renders each test's body
+back from the tree, which is what the two sides have to agree on anyway. Parsed
+rather than read as bytes for the reason above, and parsed rather than scanned
 for `func <name>(` for the same reason the gate it audits parses: a scan cannot
 tell a declaration from a string literal spelling one, and it can find a body's
 end only by assuming what the formatter puts in column zero. `go/parser` reads a

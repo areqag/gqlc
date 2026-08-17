@@ -21,6 +21,14 @@ import (
 // impossible: dialectGaps may only grow alongside the live measurements
 // that justify it, and the sweep below is what says so.
 //
+// Where that stops: the sweep reads a witness's code for the probe text
+// and the recorded answer. It does not read the witness's control flow,
+// so it can say the answer is spelled in the test and cannot say the test
+// asserts it — gutting the assertion and leaving the wantMessage literals
+// standing leaves this file green (review mutation M18, stated in ADR
+// 0028). Reading the code rather than the source bytes is itself a fix
+// and not a given; see witnessBodies.
+//
 // The hazard is asymmetric, which is why the binding is worth its cost.
 // A missing refusal costs the author a runtime error they were going to
 // get anyway. A wrong one costs them a query that would have worked, and
