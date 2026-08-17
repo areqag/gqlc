@@ -577,11 +577,12 @@ a note nobody sees
 Refs: gqlc-mirrored #617')" "some/branch" \
     "issue #617 stays open at merge"
 
-# The third carrier. <pre> is markdown's raw-HTML spelling of a code block
-# and GitHub renders it as one. <script>, <style> and <textarea> are the tags
-# markdown groups with it, and are deliberately left alone: GitHub's
-# sanitiser drops the tag and keeps the text, so the marker below is visible
-# to a reader and is honoured. Blanking it would cost a refusal for no gain.
+# The third carrier. <pre> and <code> are markdown's raw-HTML spellings of a
+# code block and GitHub renders them as one. <script>, <style> and <textarea>
+# are the tags markdown groups with <pre>, and are deliberately left alone:
+# GitHub's sanitiser drops the tag and keeps the text, so the marker below is
+# visible to a reader and is honoured. Blanking it would cost a refusal for
+# no gain.
 expect_red "a Refs: inside a <pre> block does not opt out" \
     "$EXPORT" "$(body 'Bead-free body.
 
@@ -610,10 +611,55 @@ Refs: gqlc-mirrored #617
 </script>')" "some/branch" \
     "issue #617 stays open at merge"
 
+expect_red "a Refs: inside a <code> block does not opt out" \
+    "$EXPORT" "$(body 'Bead-free body.
+
+<code>
+Refs: gqlc-mirrored #617
+</code>')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+# The closer has to be the tag that opened, so a '</code>' does not end a
+# <pre> block and the marker below stays blanked.
+expect_red "a </code> does not close a <pre> block" \
+    "$EXPORT" "$(body 'Bead-free body.
+
+<pre>
+</code>
+Refs: gqlc-mirrored #617
+</pre>')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+# What this does NOT blank, stated as a row rather than left to be found. A
+# code span opens and closes with backtick runs shorter than a fence, and can
+# span lines; GitHub renders the marker inside one as <code>, which is
+# visible monospace text rather than something a reader cannot see. Blanking
+# it needs inline parsing, and the invisibility this section exists for is
+# absent, so the marker is honoured and the limit is pinned here.
+expect_green_saying "a marker inside a multi-line code span is a declaration" \
+    "$EXPORT" "$(body 'Bead-free body.
+
+'"${BT}${BT}"'
+Refs: gqlc-mirrored #617
+'"${BT}${BT}")" "some/branch" \
+    "issue #617 stays open at merge"
+
 # Which of the three is open decides what the others mean, so the state is
 # one machine and not three passes. A fence line inside a comment opens no
 # fence, and a comment opener inside a fence opens no comment; both bodies
 # below leave the marker in prose, where GitHub also leaves it.
+# A comment opener inside a raw HTML block is the one crossing that goes the
+# other way: the block is passed through as HTML, so GitHub's sanitiser
+# swallows from the '<!--' past '</pre>' and to the end of the body. Measured
+# first-party: that body renders as an empty <pre> and nothing else.
+expect_red "a comment opened inside a <pre> block hides the marker below it" \
+    "$EXPORT" "$(body '<pre>
+<!--
+</pre>
+
+Refs: gqlc-mirrored #617')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
 expect_green_saying "a fence line inside a comment opens no fence" \
     "$EXPORT" "$(body "<!--
 ${FENCE3}
@@ -636,9 +682,12 @@ Refs: gqlc-mirrored #617")" "some/branch" \
 # to GitHub and blanked by this. The author moves the line out from under the
 # block and the refusal names what to write; the other direction would be
 # this gate annotating a check run over a declaration nobody can see. Swept
-# 58 body shapes through GitHub's renderer and this checker together: three
-# disagreements, this one among them, none the other way. 58 shapes is not
-# every shape, so what the sweep bounds is the direction, not the count.
+# 85 body shapes through GitHub's renderer and this checker together -- 58
+# of them, then 35 more picked to break the result the first 58 gave, 8
+# shared: seven disagreements, this one among them. None goes the other way
+# except the code span rowed above, which GitHub renders as visible
+# monospace rather than hiding. 85 shapes is not every shape, so what the
+# sweep bounds is the direction, not the count.
 expect_red "a fence indented into a list item blanks the marker below it" \
     "$EXPORT" "$(body "- item
 

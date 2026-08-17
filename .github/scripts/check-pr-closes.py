@@ -19,12 +19,14 @@ class the gate exists to close.
 A PR that touches a bead without resolving it declares that with a
 'Refs: <bead-id> #<issue>' line (bd gqlc-1ekq), starting at the line's
 first character and read over what prose_only leaves of the body --
-fenced code blocks, HTML comments and <pre> blocks blanked. Those three
-are the carriers a marker was measured to survive in, against GitHub's
-own renderer; they are not certified to be every place GitHub hides
-text. Where the two disagree over the 58 shapes measured, this blanks a
-marker GitHub renders (three of them, rowed in the suite) rather than
-honouring one GitHub hides (none). The declaration is then checked
+fenced code blocks, HTML comments, and raw <pre> and <code> blocks
+blanked. Those are the carriers a marker was measured to survive
+invisibly in, against GitHub's own renderer; they are not certified to be
+every place GitHub hides text. Over the 85 shapes measured, where the two
+disagree this blanks a marker GitHub renders (seven of them) rather than
+honouring one GitHub hides (none); the one shape it honours that GitHub
+renders as code is an inline code span, which is visible monospace text
+and is rowed in the suite. The declaration is then checked
 rather than taken: the number has to be the one the bead mirrors, the
 export has to not already show the bead closed, and the body has to carry
 none of the closing keywords and reference forms GitHub documents for that
@@ -70,12 +72,12 @@ REFS_IN_BODY = re.compile(r"(?im)^Refs:[ \t]*(\S*gqlc-\S*)([^\n]*)")
 # suite's fence section. group(1) is the run, group(2) the info string; which
 # of the two a line is depends on the state prose_only() is in.
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})([^\n]*)$")
-# A raw <pre> block, which GitHub renders as code. <script>, <style> and
-# <textarea> are the tags markdown groups with <pre>, and are deliberately
-# not blanked: GitHub's sanitiser drops the tag and keeps the text, so a
-# marker inside one is visible to a reader (measured, rowed in the suite).
-PRE_OPEN = re.compile(r"^ {0,3}<pre(?:[\s>]|$)", re.I)
-PRE_CLOSE = re.compile(r"</pre", re.I)
+# A raw <pre> or <code> block, which GitHub renders as code. <script>,
+# <style> and <textarea> are the other tags markdown groups with <pre>, and
+# are deliberately not blanked: GitHub's sanitiser drops the tag and keeps
+# the text, so a marker inside one is visible to a reader (measured, rowed
+# in the suite). group(1) is the tag, so the closer has to be that same tag.
+HTML_OPEN = re.compile(r"^ {0,3}<(pre|code)(?:[\s>]|$)", re.I)
 # A branch name carries the id with no marker, so the alphabet has to be
 # spelled out: '\S+' would swallow the rest of 'fix/gqlc-w4al-body-edits'.
 BEAD_IN_BRANCH = re.compile(r"(?i)(gqlc-[a-z0-9.]+)")
@@ -186,19 +188,20 @@ def comment_opens_at(line):
 
 def prose_only(pr_body):
     """The body with everything GitHub does not render as prose blanked out,
-    line count preserved: fenced code blocks, HTML comments and <pre> blocks.
+    line count preserved: fenced code blocks, HTML comments, and raw <pre>
+    and <code> blocks.
 
     Fences follow the rule GitHub's renderer follows rather than a toggle on
     every ``` and ~~~ line. A fence closes only on a run of the same
     character, at least as long as the one that opened it, with nothing but
     whitespace after it; a backtick fence whose info string carries a
     backtick opens nothing. Put the toggle back in place of this function
-    and the suite fails 14 rows -- 12 bodies whose marker it honours though
+    and the suite fails 17 rows -- 15 bodies whose marker it honours though
     GitHub renders it inside <pre><code> or not at all, and 2 it blanks that
     GitHub renders as prose. Among the 12 is the ordinary idiom for showing
     a fence, which is to nest it in a longer one; showing this marker is
     what this file is about, so that is the realistic body rather than the
-    exotic one. An unclosed fence, comment or <pre> swallows the rest.
+    exotic one. An unclosed fence, comment or HTML block swallows the rest.
 
     Not a markdown parser, and where it diverges it blanks rather than
     keeps: a fence indented one to three spaces into a list item is blanked
@@ -206,9 +209,18 @@ def prose_only(pr_body):
     blanking costs a refusal the author resolves by moving the line out from
     under the block; under-blanking is this gate annotating a check run to
     say an issue stays open, over a body in which no reader can see it said.
+
+    The blanked regions are the ones a marker was measured to survive
+    invisibly in, not every construct that renders as code. A marker inside
+    an inline code span -- backticks that open on one line and close on
+    another -- still reaches the marker pattern, because a code span is an
+    inline construct and this reads lines. That one is rowed rather than
+    fixed: GitHub renders it as visible monospace text, so it is the
+    marker's spelling shown to the reader, not hidden from them.
     """
     out = []
-    state = None  # None | ("fence", char, run length) | "comment" | "pre"
+    # None | "comment" | ("fence", char, run length) | ("html", tag name)
+    state = None
     for line in pr_body.split("\n"):
         if state is None:
             m = FENCE.match(line)
@@ -221,10 +233,13 @@ def prose_only(pr_body):
                 state = "comment"
                 out.append(line[:cut])
                 continue
-            if PRE_OPEN.match(line):
+            m = HTML_OPEN.match(line)
+            if m:
                 # '<pre>x</pre>' on one line closes on that line, so the
                 # lines below it are prose again.
-                state = None if PRE_CLOSE.search(line) else "pre"
+                tag = m.group(1).lower()
+                closed = f"</{tag}" in line.lower()
+                state = None if closed else ("html", tag)
                 out.append("")
                 continue
             out.append(line)
@@ -237,8 +252,17 @@ def prose_only(pr_body):
             # cannot be at its first character anyway.
             if "-->" in line:
                 state = None
-        elif state == "pre":
-            if PRE_CLOSE.search(line):
+        elif state[0] == "html":
+            # A comment opened inside a raw HTML block is live, unlike one
+            # inside a fence, where GitHub escapes it: the block is passed
+            # through as HTML, so the sanitiser swallows from '<!--' to the
+            # next '-->' -- past the closing tag, and to the end of the body
+            # if it never comes. Measured: '<pre>', '<!--', '</pre>', a
+            # blank line and a marker renders as an empty <pre> and nothing
+            # else, so the comment is checked before the closing tag.
+            if comment_opens_at(line) is not None:
+                state = "comment"
+            elif f"</{state[1]}" in line.lower():
                 state = None
         else:
             m = FENCE.match(line)
