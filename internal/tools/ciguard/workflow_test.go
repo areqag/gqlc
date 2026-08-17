@@ -1,4 +1,10 @@
-package ciguard
+// Package ciguard's assertions live in an external test package. They import
+// testify and yaml.v3, and govulncheck discards a package's in-package test
+// variant together with everything only it imports — so an in-package test
+// here would take the whole package out of the vulnerability scan's call graph
+// (bd gqlc-m5rc, enforced by `just vuln-root-residual`). Nothing below needs
+// unexported state.
+package ciguard_test
 
 import (
 	"errors"
