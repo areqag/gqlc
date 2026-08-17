@@ -198,8 +198,39 @@ lint-hooks dir=".githooks": ensure-shellcheck
 # vocabulary places nothing, so the derivation stops on the first constrained
 # file in the tree rather than producing an empty set that agrees with an empty
 # config.
+# Clears discovery probes a previous run could not clean up after itself.
+#
+# `just vuln`, test-codegen-fence and check-codegen-external-tests each mktemp a
+# throwaway module under test/data to witness that the module set is read off
+# the tree rather than remembered, and each removes its own on the way out. That
+# cleanup is a shell trap, and a trap cannot run under SIGKILL — the routine end
+# of a run killed for taking too long, or by a session that hit a quota.
+#
+# What a survivor costs is out of proportion to how it got there. A probe is a
+# go.mod with no Go file beneath it, which is a module whose walk comes back
+# empty, which modscope refuses by design (bd gqlc-s3lt) — so one leaked probe
+# stops `just lint`, `just vuln`, test-codegen-fence and
+# check-codegen-external-tests, and it stops them with a message about a broken
+# walk rather than about itself.
+#
+# Shared rather than done in each recipe, and covering all three names rather
+# than the caller's own, because the recipes that break are not the recipe that
+# leaked: test-codegen-fence depends on check-codegen-external-tests, so a
+# leftover fenceprobe takes out the dependency before the dependent's own
+# cleanup could ever run. Measured, with one probe of each name planted by hand.
+#
+# The limit is concurrency. Two of these recipes running against ONE worktree at
+# the same time would clear each other's live probe; they are not safe to run
+# concurrently in a single tree, for this reason among others. Separate
+# worktrees, which is how this repo runs agents, are unaffected.
 [private]
-check-golangci-build-tags:
+sweep-discovery-probes:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rm -rf test/data/vulnprobe.* test/data/fenceprobe.* test/data/xtestprobe.*
+
+[private]
+check-golangci-build-tags: sweep-discovery-probes
     #!/usr/bin/env bash
     set -euo pipefail
     scope() { go run ./internal/tools/modscope "$@"; }
@@ -393,7 +424,7 @@ bd-export-monotonic-local:
 #
 # check-codegen-external-tests runs ahead of the linter: both fail on the same
 # regression, and only the guard names the scan it protects (ADR 0026).
-test-codegen-fence: ensure-golangci check-codegen-external-tests
+test-codegen-fence: sweep-discovery-probes ensure-golangci check-codegen-external-tests
     #!/usr/bin/env bash
     set -euo pipefail
     scope() { go run ./internal/tools/modscope "$@"; }
@@ -431,6 +462,8 @@ test-codegen-fence: ensure-golangci check-codegen-external-tests
     #
     # The probe carries a go.mod and nothing else, and it is gone before the
     # fencing loop below runs — which is also what the second clause checks.
+    # Residue from a run this trap could not clean up is swept by the
+    # sweep-discovery-probes dependency, not here.
     probe="$(mktemp -d test/data/fenceprobe.XXXXXX)"
     trap 'rm -rf "${probe}"' EXIT
     printf 'module gqlc.invalid/fenceprobe\n\ngo 1.26.5\n' >"${probe}/go.mod"
@@ -521,7 +554,7 @@ test-codegen-fence: ensure-golangci check-codegen-external-tests
 # lint-hooks prints its script list — a set that is only counted is a set nobody
 # can see narrow.
 [private]
-check-codegen-external-tests:
+check-codegen-external-tests: sweep-discovery-probes
     #!/usr/bin/env bash
     set -euo pipefail
     scope() { go run ./internal/tools/modscope "$@"; }
@@ -540,7 +573,8 @@ check-codegen-external-tests:
     # same argument, as in test-codegen-fence above; read it there. This guard
     # named `test/data/codegen` literally too (bd gqlc-oxne), and on a tree whose
     # discovered set is that one module, nothing but a changed tree can tell the
-    # two apart.
+    # two apart. Residue this trap could not clean up is swept by the
+    # sweep-discovery-probes dependency, not here.
     probe="$(mktemp -d test/data/xtestprobe.XXXXXX)"
     trap 'rm -rf "${probe}"' EXIT
     printf 'module gqlc.invalid/xtestprobe\n\ngo 1.26.5\n' >"${probe}/go.mod"
@@ -796,7 +830,7 @@ test-codegen-live-age:
 # imports govulncheck discards, so a called vulnerability reachable only from
 # one of those files exits 0 here (ADR 0026). vuln-root-residual below measures
 # and ratchets that blind spot; bd gqlc-m5rc closes it.
-vuln: vuln-root-residual
+vuln: sweep-discovery-probes vuln-root-residual
     #!/usr/bin/env bash
     set -euo pipefail
 
@@ -898,6 +932,8 @@ vuln: vuln-root-residual
     # here for the same reason: `modules=(. test/data/codegen)` written over the
     # derivation scans exactly what this tree scans today, passes every
     # postcondition below, and stops scanning the day a module is added.
+    # Residue this trap could not clean up is swept by the
+    # sweep-discovery-probes dependency, not here.
     probe="$(mktemp -d test/data/vulnprobe.XXXXXX)"
     trap 'rm -rf "${probe}"' EXIT
     printf 'module gqlc.invalid/vulnprobe\n\ngo 1.26.5\n' >"${probe}/go.mod"
