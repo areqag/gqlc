@@ -46,14 +46,19 @@
 #            writes that are not description edits. The bd set is not every
 #            write either: measured 2026-08-17 against the bd on this machine,
 #            --status, --priority, --title, --notes, --assignee, close and
-#            reopen move it, while `bd tag`, `bd label`, `bd comment` and
-#            `bd link` all succeed and leave it where it was. So the ordering
-#            is a proxy, and it is one with a residue in each direction
-#            wherever the later of the two writes clears the margin: a GH
-#            append that a moving bd-side write follows is held, and a bd-side
-#            cut that a GH comment follows is pulled — including the comment
-#            this script's own push path writes when it auto-closes a mirror
-#            (gqlc-o22k).
+#            reopen move it, while `bd tag`, `bd label add`, `bd comment` and
+#            `bd link` all succeed with the write visible in `bd show` and
+#            leave it where it was. The subcommand is load-bearing: bare
+#            `bd label` prints usage and exits 0 without writing. So the
+#            ordering is a proxy, and it is one with a residue in each
+#            direction wherever the later of the two writes clears the margin:
+#            a GH append that a moving bd-side write follows is held, and a
+#            bd-side cut that a GH comment follows is pulled — including the
+#            comment this script's own push path writes when it auto-closes a
+#            mirror (gqlc-o22k). Nothing here re-checks that measurement — the
+#            suite stubs `bd` — so a release that stops moving the timestamp on
+#            a description edit widens the fail-open half in silence
+#            (gqlc-3205).
 #            Selection failing for any reason yields an empty allowlist and no
 #            pull at all.
 #            Whatever the allowlist, the run ends by re-reading the bead list

@@ -464,7 +464,8 @@ fi
 # GitHub: b-ahead above and b-trailing-cut below are the same shape, and
 # b-ahead must pull. What separates them is not in the bodies. They differ in
 # id, in issue number and in their bodies' second line as well, and the script
-# decides on all three — what makes the pair a discriminator is not that one
+# decides on all three, the id downstream of the selection at the charset gate
+# rather than inside it — what makes the pair a discriminator is not that one
 # input differs but that one verdict does: disarm the edit-time gate alone and
 # b-trailing-cut reaches ALLOW alongside b-ahead, every other rule in the chain
 # having decided the two the same way.
