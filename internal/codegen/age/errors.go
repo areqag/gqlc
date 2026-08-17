@@ -485,11 +485,13 @@ func unservedColumn(t resolver.ResolvedType) string {
 	// Stringer shallowest — which for ResolvedProperty, ResolvedScalar and
 	// ResolvedTemporal composes the family into the tag rather than being
 	// the wire tag (internal/resolver/validated.go); that text names no
-	// candidate, and is the text the list and unknown arms return. Any
-	// shallower String shadows it, and the text after "projects " is then
-	// the caller's, candidate names included. So nothing downstream may
-	// read this string for where it came from — the ranking in
-	// unservedReason turns on the column's TYPE for exactly that reason.
+	// candidate, and is built the way the list and unknown arms build
+	// theirs, which is why no assertion on the result tells those two arms
+	// from this line. Any shallower String shadows it, and then the text
+	// after "projects " is the caller's, candidate names included. So
+	// nothing downstream may read this string for where it came from — the
+	// ranking in unservedReason turns on the column's TYPE for exactly
+	// that reason.
 	//
 	// TestUnservedColumnFallThroughIsNotANinthVariant is the witness, for
 	// the pointer and the embedded form of each of the eight variants and
