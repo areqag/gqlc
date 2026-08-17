@@ -286,7 +286,8 @@ func unservedReason(q codegen.NamedQuery) (reason string, edgeUnion bool) {
 // column would produce a package that compiles and whose every call is a
 // server-side syntax error. Refusing here turns that into an answer the
 // author gets from `gqlc generate` — for this column shape. The text
-// shapes that reach no such column are rejectRelationshipTypeAlternation's.
+// shapes that reach no such column belong to the alternation gap in
+// dialectGaps, which rejectDialectGaps runs (dialect.go).
 //
 // The labels are named as what they are — the candidates the schema
 // declares for the pattern — and no alternation is quoted back, because
@@ -307,9 +308,9 @@ func unservedReason(q codegen.NamedQuery) (reason string, edgeUnion bool) {
 // one relationship type over a plural endpoint (ADR 0022), which is
 // invalid/plural_endpoint_edge_union_shared_label, enrolled for this
 // backend. A repeated label under a pattern that DOES spell one is
-// answered by rejectRelationshipTypeAlternation instead, and rightly:
-// the text has to be rewritten before the column question can even be
-// asked of this server.
+// answered by rejectDialectGaps instead — by its alternation gap — and
+// rightly: the text has to be rewritten before the column question can
+// even be asked of this server.
 //
 // The split here is read off the resolved candidates rather than off the
 // query text, because a bare '|' is not a witness to anything: Cypher.g4
@@ -317,8 +318,9 @@ func unservedReason(q codegen.NamedQuery) (reason string, edgeUnion bool) {
 // list/filter comprehension (395) and the pattern comprehension (398) —
 // so `[x IN xs | x.n]` carries one and names no relationship type.
 // Candidate labels are downstream of the parse and say which production
-// ran; so is the parse rejectRelationshipTypeAlternation runs, which asks
-// the same question of the text the emission will ship.
+// ran; so is the parse the alternation gap's find runs —
+// cypher.RelationshipTypeAlternations, reached through rejectDialectGaps
+// — which asks the same question of the text the emission will ship.
 //
 // Nothing after this point catches a re-admission. Loosening the gate
 // compile-validly leaves `gqlc generate` exiting 0 over Go that does not

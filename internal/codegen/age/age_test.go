@@ -279,8 +279,7 @@ var sharedLabelEdgeUnion = resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey
 // alternation removes — which is what lets the portable refusal answer.
 // The rows below carry readQuery's own text, which spells no '|', so
 // what they measure is the column gate alone; a real batch whose text
-// did spell one is answered a step later by
-// rejectRelationshipTypeAlternation.
+// did spell one is answered a step later by rejectDialectGaps.
 var mixedLabelEdgeUnion = resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{
 	{Source: personLabel, KeyLabels: "FOUNDED", Target: "Company"},
 	{Source: personLabel, KeyLabels: "BACKED", Target: "Company"},
