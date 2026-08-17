@@ -877,6 +877,31 @@ expect_green_saying "a closing tag between two comments still closes the line" \
 Refs: gqlc-mirrored #617')" "some/branch" \
     "issue #617 stays open at merge"
 
+# Why the comments are blanked to spaces rather than deleted. Deleting them
+# joins whatever stood either side of one, and the two halves of a closing
+# tag are something that can stand either side: '</p' + '<!-- c -->' + 're>'
+# comes out as a '</pre>' the line never carried, the block closes here, and
+# the marker below it goes back into prose. GitHub does the opposite, because
+# its HTML-block scanner reads the line as written and finds no literal
+# '</pre>' on it: it renders the first body below as
+# '<pre class="notranslate">xre&gt;' with the marker under it and inside the
+# block, the second the same without the 'x'. Both were honoured on this
+# branch from 520b01c3 until the commit that added these two rows. Spaces are
+# what stops it -- '</pre' holds no space, so blanking a run cannot put one
+# together -- and deleting instead of blanking reddens both rows.
+expect_red "a closing tag spliced across a comment does not close the opening line" \
+    "$EXPORT" "$(body '<pre>x</p<!-- c -->re>
+Refs: gqlc-mirrored #617
+</pre>')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
+expect_red "a closing tag spliced across a comment does not close the block below" \
+    "$EXPORT" "$(body '<pre>
+</p<!-- c -->re>
+Refs: gqlc-mirrored #617
+</pre>')" "fix/gqlc-mirrored-thing" \
+    "missing 'Closes #617'"
+
 # The cost of that removal, in the fail-closed direction and in the class the
 # row above headed "a comment opening the <code>'s own line" is filed under:
 # a <code> sharing its line with a comment is not a complete tag on a line of
@@ -1047,6 +1072,35 @@ expect_red "a marker sharing the closing tag's line is refused by the anchor" \
     "$EXPORT" "$(body '<pre>
 </pre>Refs: gqlc-mirrored #617')" "fix/gqlc-mirrored-thing" \
     "missing 'Closes #617'"
+
+# Both ends of HTML_OPEN's `^ {0,3}`, which is markdown's own rule for where
+# an HTML block may start. The list-item row above is the lower end -- two
+# spaces of indent and the tag is still read. This is the upper end: at four
+# the line is an indented code block, so GitHub renders '<pre>' as the code
+# block's text and leaves the marker below it as a <p>, which is a marker a
+# reader sees and this honours. Agreement, not a divergence, and the twin of
+# "an opener indented four spaces opens no fence" in the fence section.
+expect_green_saying "a <pre> indented four spaces opens no block" \
+    "$EXPORT" "$(body 'Bead-free body.
+
+    <pre>
+Refs: gqlc-mirrored #617
+</pre>')" "some/branch" \
+    "issue #617 stays open at merge"
+
+# And the other bound on the same pattern: the tag has to end where the name
+# does. '<pretend>' is not a <pre>, and dropping HTML_OPEN's `(?:[\s>]|$)`
+# would blank it -- fail-closed, so it costs a refusal rather than a hidden
+# honouring, but nothing else in this file notices. GitHub strips the unknown
+# tag and leaves the marker as visible text, so honouring it is the agreeing
+# answer.
+expect_green_saying "a tag whose name only starts with pre opens no block" \
+    "$EXPORT" "$(body 'Bead-free body.
+
+<pretend>
+Refs: gqlc-mirrored #617
+</pretend>')" "some/branch" \
+    "issue #617 stays open at merge"
 
 # The inverse asymmetry, in the same function. Check 4 reads the raw body, so
 # a closing keyword quoted in a fence refuses an opt-out although GitHub will

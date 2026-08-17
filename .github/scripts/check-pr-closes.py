@@ -97,8 +97,8 @@ FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})([^\n]*)$")
 # the <script> one is rowed in the suite. group(1) is the tag, so the closer
 # has to be that same tag.
 HTML_OPEN = re.compile(r"^ {0,3}<(pre|code)(?:[\s>]|$)", re.I)
-# A complete comment on one line. Removed before a closing tag is looked for,
-# because a closing tag inside a comment does not end the block a reader
+# A complete comment on one line. Blanked out before a closing tag is looked
+# for, because a closing tag inside a comment does not end the block a reader
 # sees: markdown's line scanner does stop the HTML block on the line that
 # spells '</pre>', but the sanitiser then drops the comment, which leaves the
 # element open, and the marker below it lands inside it. Measured, both
@@ -208,6 +208,27 @@ def load_bead(jsonl_path, bead_id):
     return None
 
 
+def comments_blanked(text):
+    """`text` with every complete comment replaced by as many spaces.
+
+    Length-preserving, and that is the point rather than tidiness. Deleting
+    the comments instead joins whatever stood either side of one, so
+    '<pre>x</p<!-- c -->re>' yields a '</pre>' the line never carried: the
+    block closes here, the marker below it goes back into prose, and the gate
+    annotates a check run to say an issue stays open. GitHub does the
+    opposite -- its HTML-block scanner looks for a literal '</pre>' on the
+    line and finds none, so the block runs on and the marker renders inside
+    the <pre>. Measured against POST /markdown, both spellings rowed; it was
+    live on this branch between 520b01c3 and this commit.
+
+    Spaces cannot make that mistake. The callers look for '</pre' and
+    '</code', neither of which holds a space, so a hit in the result lies
+    wholly outside every blanked run and is a hit at the same offset in
+    `text`.
+    """
+    return COMMENT_RUN.sub(lambda m: " " * len(m.group(0)), text)
+
+
 def comment_opens_at(line):
     """Where an HTML comment opens on this line without closing again, or
     None. Read anywhere on the line, not only at its first character: a
@@ -310,12 +331,14 @@ def prose_only(pr_body):
             head = line if cut is None else line[:cut]
             m = HTML_OPEN.match(head)
             # '<pre>x</pre>' on one line closes on that line, so the lines
-            # below it are prose again -- but only a closing tag COMMENT_RUN
-            # leaves standing counts.
+            # below it are prose again -- but only a closing tag left standing
+            # once the comments are blanked counts.
             opened = None
-            if m and f"</{m.group(1).lower()}" not in COMMENT_RUN.sub(
-                "", head
-            ).lower():
+            if (
+                m
+                and f"</{m.group(1).lower()}"
+                not in comments_blanked(head).lower()
+            ):
                 opened = ("html", m.group(1).lower())
             if cut is not None:
                 state = ("comment", opened)
@@ -358,7 +381,7 @@ def prose_only(pr_body):
             # else, so the comment is checked before the closing tag.
             if comment_opens_at(line) is not None:
                 state = ("comment", state)
-            elif f"</{state[1]}" in COMMENT_RUN.sub("", line).lower():
+            elif f"</{state[1]}" in comments_blanked(line).lower():
                 state = None
         else:
             m = FENCE.match(line)
