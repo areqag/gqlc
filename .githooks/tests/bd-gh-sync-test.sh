@@ -177,9 +177,11 @@ chmod +x "$BIN/bd" "$BIN/gh" "$BIN/mktemp" "$BIN/python3"
 pass=0
 fail=0
 # Both arms log the name, because the census at the foot of this file is about
-# whether an assertion ran at all and a failing assertion ran. `ok` and `bad`
-# are the only two ways out of an assertion block, so this file cannot make an
-# assertion that escapes the roll-call.
+# whether an assertion ran at all and a failing assertion ran. So a block that
+# reaches either arm is on the roll-call; a block that reaches neither — an `if`
+# chain that lost its `else`, one stranded behind a condition that stopped being
+# true — is not, and that is the case the census exists to name rather than one
+# this file is built to make impossible.
 ok()  { pass=$((pass + 1)); printf '%s\n' "$1" >>"$TMP/ran.txt"
         printf 'ok   - %s\n' "$1"; }
 bad() { fail=$((fail + 1)); printf '%s\n' "$1" >>"$TMP/ran.txt"
@@ -2238,19 +2240,20 @@ fi
 # --- the assertion census ----------------------------------------------------
 # The one property this file cannot get from `set -u`, from shellcheck or from
 # its own exit status: that it still makes every assertion it made yesterday.
-# `133 passed, 0 failed` is true of a file that quietly lost an assertion and
-# true of one that did not, and nothing in the justfile, in .github/workflows or
-# in lint-hooks-test.sh reads that number at all. Both of this tree's ways of
+# `0 failed` is true of a file that quietly lost an assertion and true of one
+# that did not, and nothing in the justfile, in .github/workflows or in
+# lint-hooks-test.sh reads the passed count at all. Both of this tree's ways of
 # losing an assertion are silent: a dropped closing quote on this branch
 # swallowed twenty lines including a whole block and the run still said `0
-# failed`, one assertion lighter, and deleting a block outright says `132
-# passed, 0 failed` and looks like a clean run. A guard structurally unable to
+# failed`, one assertion lighter, and deleting a block outright says `0 failed`
+# one lower and looks like a clean run. A guard structurally unable to
 # fail is this repository's most common defect; a suite that cannot notice
 # losing a guard is that same defect one level up.
 #
 # Deliberately not a count. A count written beside the thing it counts goes
-# stale in silence and fails as `132 != 133`, which names nothing to go and
-# look at — this tree has already deleted one such header rather than correct
+# stale in silence and fails as one number not equalling another, which names
+# nothing to go and look at — this tree has already deleted one such header
+# rather than correct
 # it. A census of names fails as a set difference with a name in it, so the
 # reader is told which assertion stopped running rather than that one did.
 #
@@ -2264,10 +2267,13 @@ fi
 # either could then be deleted under cover of the other, so that is refused here
 # too.
 #
-# Two ways of losing one it does not catch, both open rather than closed: an
-# edit that deletes a block and its census entry together (bd gqlc-tvv7), and a
-# run that is already red, where the roll-call is not read at all — bounded
-# below, at the branch that skips it.
+# What it does not catch, open rather than closed, all three measured under bd
+# gqlc-tvv7: an edit that deletes a block and its census entry together; an edit
+# that leaves the name and both arms in place while weakening what the block
+# tests, since this compares names and not strength; and the deletion of this
+# census itself, which guards membership and not its own existence. A fourth is
+# bounded rather than open — a run that is already red, where the roll-call is
+# not read at all — at the branch that skips it below.
 #
 # Adding an assertion costs one line here, and the failure prints the line to
 # add. Written in execution order for a reader; compared as a set.
