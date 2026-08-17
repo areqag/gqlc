@@ -1,6 +1,10 @@
 package codegen
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -536,16 +540,12 @@ func TestTemporalKindRefusalReachesTheCaller(t *testing.T) {
 // reservedIdentifierRows is the reserved set written out longhand, with
 // the scope each name's emitted declaration occupies.
 //
-// The scope column is measured rather than read off the templates: for
-// every row, a package emitting an entity struct of that name was
-// compiled on both the neo4j and the Apache AGE backend, on the node
-// axis and the edge axis (gqlc-e6mh). Seven names drew "redeclared in
-// this block" on all four combinations. DBTX and SessionInit drew it on
-// Apache AGE and compiled on neo4j, which declares neither — they are
-// scopePackage under the uniform-set rule the sibling test pins, not
-// because every backend emits them. The three scopeMethod rows compiled
-// on all four: their emitted declaration is a method on *Queries, which
-// shares no scope with a package-level type.
+// The scope column is read off the committed goldens, not off the
+// templates by eye: TestReservedScopeMatchesTheEmittedGoldens holds
+// every row to what the corpus declares. DBTX and SessionInit are
+// scopePackage under the uniform-set rule the sibling test pins rather
+// than because every backend emits them — only the Apache AGE goldens
+// declare either.
 var reservedIdentifierRows = []struct {
 	name  string
 	scope identifierScope
@@ -654,5 +654,83 @@ func TestReservedScopeDecidesWhichEntityNamesCollide(t *testing.T) {
 				require.ErrorContains(t, err, `entity struct "`+row.name+`"`)
 			})
 		}
+	}
+}
+
+// goldenCorpusGlob reaches the committed golden trees from this package.
+// The conformance suite reads the same corpus through its own root, which
+// an env var can redirect at a copy; this sweep wants the tracked trees
+// specifically, because what it measures is what the repo ships.
+const goldenCorpusGlob = "../../test/data/codegen/valid/*/golden/*/*.go"
+
+// TestReservedScopeMatchesTheEmittedGoldens holds the scope column to the
+// corpus rather than to a claim about the templates. Every declaration of
+// a reserved name across every committed golden must sit at the scope the
+// table records, and every row must be declared by at least one golden —
+// a name the corpus never declares would agree with either scope, so
+// without that half the sweep would pass vacuously on a row that had
+// silently stopped being emitted.
+//
+// A method occupies no package block whatever its receiver, so the
+// receiver type is not consulted: what sweepIdentifiers needs to know is
+// only whether an entity struct of the same name would redeclare it.
+func TestReservedScopeMatchesTheEmittedGoldens(t *testing.T) {
+	paths, err := filepath.Glob(goldenCorpusGlob)
+	require.NoError(t, err)
+	require.NotEmpty(t, paths, "no golden Go under %s, so this sweep holds nothing", goldenCorpusGlob)
+
+	// name -> scope -> one path declaring it that way, for the fail message.
+	declared := make(map[string]map[identifierScope]string)
+	record := func(name, path string, scope identifierScope) {
+		if _, reserved := reservedIdentifiers[name]; !reserved {
+			return
+		}
+		if declared[name] == nil {
+			declared[name] = make(map[identifierScope]string)
+		}
+		if _, seen := declared[name][scope]; !seen {
+			declared[name][scope] = path
+		}
+	}
+
+	fset := token.NewFileSet()
+	for _, path := range paths {
+		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		require.NoError(t, err, "parsing %s", path)
+		for _, decl := range file.Decls {
+			switch d := decl.(type) {
+			case *ast.GenDecl:
+				for _, spec := range d.Specs {
+					switch s := spec.(type) {
+					case *ast.TypeSpec:
+						record(s.Name.Name, path, scopePackage)
+					case *ast.ValueSpec:
+						for _, n := range s.Names {
+							record(n.Name, path, scopePackage)
+						}
+					}
+				}
+			case *ast.FuncDecl:
+				scope := scopeMethod
+				if d.Recv == nil {
+					scope = scopePackage
+				}
+				record(d.Name.Name, path, scope)
+			}
+		}
+	}
+
+	for _, row := range reservedIdentifierRows {
+		t.Run(row.name, func(t *testing.T) {
+			at := declared[row.name]
+			require.NotEmpty(t, at,
+				"no golden declares %q, so its scope column rests on nothing; either the corpus lost the fixture that emitted it or the name is no longer emitter-fixed and belongs out of reservedIdentifiers",
+				row.name)
+			for scope, path := range at {
+				require.Equal(t, row.scope, scope,
+					"%s declares %q at scope %d, but the reserved set records scope %d",
+					path, row.name, scope, row.scope)
+			}
+		})
 	}
 }
