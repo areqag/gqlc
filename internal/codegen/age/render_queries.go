@@ -498,8 +498,22 @@ func columnDecoder(f codegen.Row) string {
 // decodeFunc names the models.go helper that decodes one value of an
 // emitted Go type. A slice goes through the named wrapper emitted for
 // it, a type of no declared shape through the agtype value vocabulary,
-// and everything else through the helper for the agtype scalar its
-// carrier is — the caller narrows.
+// and a scalar through the helper for the agtype scalar its carrier is —
+// the caller narrows.
+//
+// Every carrier the type table can name has an arm here, and a carrier
+// with none panics. What reaches here is a Go type text that table
+// produced (types.go: Property, Scalar, Temporal) or an element of one
+// it composed — columnDecoder takes the entity kinds before calling
+// this, and a list column is refused ahead of emission (unservedColumn)
+// — so a carrier with no arm is a change to the table rather than
+// anything an author wrote. Answering one with a helper picked for some
+// other shape emits a package that compiles, because the field was typed
+// from the same table, and reads the value as the wrong Go type at run
+// time.
+//
+// TestDecodeFuncHasAnArmForEveryCarrierTheTypeTableProduces is what goes
+// red when the table gains a carrier this switch was not taught.
 func decodeFunc(goType string) string {
 	if strings.HasPrefix(goType, "[]") {
 		return listHelperName(goType)
@@ -510,16 +524,18 @@ func decodeFunc(goType string) string {
 	case "map[string]any":
 		return "agtypeMap"
 	}
-	switch agtypeCarrier(goType) {
+	carrier := agtypeCarrier(goType)
+	switch carrier {
 	case "bool":
 		return "agtypeBool"
 	case "int64":
 		return "agtypeInt64"
 	case "float64":
 		return "agtypeFloat64"
+	case "string":
+		return "agtypeString"
 	case goInstant:
 		return "agtypeInstant"
-	default:
-		return "agtypeString"
 	}
+	panic(fmt.Sprintf("age codegen bug: Go type %q carries as %q, which decodeFunc has no arm for", goType, carrier))
 }
