@@ -27,11 +27,13 @@ disagree this blanks a marker GitHub renders (seven of them) rather than
 honouring one GitHub hides (none of the 85), and the one shape in that
 sample it honours that GitHub renders as code is an inline code span,
 which is visible monospace text. Both of those hold over the 85 and no
-further: outside them are two more blanks over markers GitHub renders, a
-third refusal that comes from the marker's line anchor rather than the
-blanking, and -- the direction the 85 had none of -- one honoured marker
-GitHub renders nothing of, a line inside an unterminated HTML attribute
-(bd gqlc-ncb8). All four are rows. The declaration is then checked
+further: outside them the blanking costs further refusals over markers
+GitHub renders, the marker's line anchor costs one more, and -- the
+direction the 85 had none of -- one marker GitHub renders nothing of is
+honoured, a line inside an unterminated HTML attribute (bd gqlc-ncb8).
+prose_only's docstring enumerates those shapes and each is a row; the
+count is kept in one place so the two cannot drift apart. The
+declaration is then checked
 rather than taken: the number has to be the one the bead mirrors, the
 export has to not already show the bead closed, and the body has to carry
 none of the closing keywords and reference forms GitHub documents for that
@@ -244,7 +246,8 @@ def prose_only(pr_body):
     Two more reach the pattern over bodies GitHub does render, so they are
     rowed rather than fixed: an inline code span, which GitHub shows as
     visible monospace, and a <details> block, which GitHub collapses rather
-    than hides. All six are rows in the suite's visibility section.
+    than hides. All seven shapes named in these three paragraphs are rows
+    in the suite's visibility section, the closing-line one included.
     """
     out = []
     # None | ("comment", enclosing) | ("fence", char, run length)
@@ -281,8 +284,11 @@ def prose_only(pr_body):
         out.append("")
         if state[0] == "comment":
             # The whole closing line goes, including anything after the
-            # '-->': that line is part of the comment's block, and a marker
-            # cannot be at its first character anyway. What resumes is
+            # '-->': the part up to it is inside the comment, and the part
+            # after it is not at the line's first character, which the
+            # marker pattern anchors to. A marker can start this line --
+            # 'Refs: <id> #<n> -->' -- but it is inside the comment there
+            # and GitHub hides it as well; measured. What resumes is
             # whatever the comment interrupted -- unless the rest of that
             # line carries the enclosing block's own closing tag, which
             # GitHub does close the block on (measured, rowed).
