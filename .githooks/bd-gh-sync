@@ -42,11 +42,18 @@
 #            no content, so the bodies alone refuse them; a trailing block cut in
 #            bd leaves the same two bodies as a block appended on GitHub, so only
 #            the edit times separate those. Neither side's is a
-#            description-edit time — bd's moves on any write to the bead, and
-#            GitHub's on a comment — so the ordering is a proxy, and it is one
-#            with a residue in each direction: an append that a bd-side write
-#            followed is held, and a bd-side cut that a GH comment followed is
-#            pulled (gqlc-o22k).
+#            description-edit time — GitHub's moves on a comment, and bd's on
+#            writes that are not description edits. The bd set is not every
+#            write either: measured 2026-08-17 against the bd on this machine,
+#            --status, --priority, --title, --notes, --assignee, close and
+#            reopen move it, while `bd tag`, `bd label`, `bd comment` and
+#            `bd link` all succeed and leave it where it was. So the ordering
+#            is a proxy, and it is one with a residue in each direction
+#            wherever the later of the two writes clears the margin: a GH
+#            append that a moving bd-side write follows is held, and a bd-side
+#            cut that a GH comment follows is pulled — including the comment
+#            this script's own push path writes when it auto-closes a mirror
+#            (gqlc-o22k).
 #            Selection failing for any reason yields an empty allowlist and no
 #            pull at all.
 #            Whatever the allowlist, the run ends by re-reading the bead list

@@ -462,9 +462,12 @@ fi
 # --- gqlc-6mx3: the prefix relation is decided by which side edited last -----
 # A trailing block cut in bd leaves the same two bodies as a block appended on
 # GitHub: b-ahead above and b-trailing-cut below are the same shape, and
-# b-ahead must pull. What separates them is not in the bodies. Both sides carry
-# an edit time, and that is the only input the code decides on that the two
-# fixtures differ in.
+# b-ahead must pull. What separates them is not in the bodies. They differ in
+# id, in issue number and in their bodies' second line as well, and the script
+# decides on all three — what makes the pair a discriminator is not that one
+# input differs but that one verdict does: disarm the edit-time gate alone and
+# b-trailing-cut reaches ALLOW alongside b-ahead, every other rule in the chain
+# having decided the two the same way.
 
 run_sync pull \
     "[{\"id\":\"b-trailing-cut\",\"status\":\"open\",\"external_ref\":\"$ISSUE/13\",\"description\":\"line one\",\"updated_at\":\"$T_LATE\"}]" \
@@ -477,6 +480,24 @@ elif ! grep -q 'holding b-trailing-cut (GH #13) out of the pull — gh-not-newer
         "held, but not by the edit-time rule: $(grep 'b-trailing-cut' "$TMP/err" | tr '\n' '|')"
 else
     ok "a trailing block cut in bd is held out of pull scope"
+fi
+
+# The same shape with the GH mirror closed, which b-open above pulls when the
+# bodies are byte-equal. `bd github sync --issues` is all-or-nothing per bead,
+# so holding here withholds the close as well as the body, and that trade is
+# what the edit-time rule decides: gate it on an open mirror instead —
+# `gh_body != desc and gh_state != "closed"` — and the rest of this file passes.
+run_sync pull \
+    "[{\"id\":\"b-cut-closed\",\"status\":\"open\",\"external_ref\":\"$ISSUE/21\",\"description\":\"line one\",\"updated_at\":\"$T_LATE\"}]" \
+    "[{\"number\":21,\"state\":\"CLOSED\",\"body\":\"line one\nline two deleted in bd\",\"updatedAt\":\"$T_EARLY\"}]"
+if scoped_ids | grep -qx b-cut-closed; then
+    bad "a closed GH mirror does not exempt an extending body from the edit-time rule" \
+        "pulled; the close came in and wrote the deleted block back with it"
+elif ! grep -q 'holding b-cut-closed (GH #21) out of the pull — gh-not-newer-than-bd' "$TMP/err"; then
+    bad "a closed GH mirror does not exempt an extending body from the edit-time rule" \
+        "held, but not by the edit-time rule: $(grep 'b-cut-closed' "$TMP/err" | tr '\n' '|')"
+else
+    ok "a closed GH mirror does not exempt an extending body from the edit-time rule"
 fi
 
 # The two clocks are independent — bd's comes off the machine running the hook,
@@ -511,9 +532,12 @@ fi
 
 # An edit time that is absent, null, blank or unreadable leaves the two bodies
 # as the only evidence, which is the state this rule exists because nothing can
-# decide. Each shape is spelled out rather than covered by one: a check written
-# as "the field disagrees" passes every one of them, since none of them
-# disagrees with anything.
+# decide. Each shape is spelled out rather than folded into one row because
+# they reach the hold by three different routes through `edited_at` — the
+# non-string guard for absent, null and numeric, the ValueError for blank and
+# for prose, the zone check for a wall clock — and each route regresses on its
+# own: make the guard hand back a time instead of None and five of these rows
+# go red, the ValueError four, the zone check one, with no overlap.
 # $1=name $2=bd updated_at field, with leading comma $3=gh updatedAt field
 edit_time_case() {
     run_sync pull \
@@ -2405,6 +2429,7 @@ bd-side reorder is held out of pull scope
 GH body that does not extend the bead description is held out
 a GH body that prepends to the bead description is held out
 a trailing block cut in bd is held out of pull scope
+a closed GH mirror does not exempt an extending body from the edit-time rule
 a GH body newer by only the skew margin is held out
 a GH body newer by more than the skew margin is pulled
 an edit time that cannot be read holds the bead (bd side absent)
