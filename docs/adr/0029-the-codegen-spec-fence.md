@@ -229,11 +229,12 @@ Two things are deliberately not reached:
   and reaches a code block like any other text, so what a block hides is this
   spelling alone. Grading unfenced prose means grading every comma in the
   documents; reading a code block means parsing markdown block structure before
-  any anchor runs, and a block body is lines rather than a signature. A run of
-  three or more backticks opening a line is read as such a block's delimiter
-  rather than as a span's, and the fenced and the indented spellings are both
-  pinned as skips in `TestSpecBareSigScannerDetectsDrift`. The prose half is the
-  same surface as `gqlc-e143`; the block half is `gqlc-cgat`.
+  any anchor runs, and a block body is lines rather than a signature. So the
+  signature sweep takes a run of three or more backticks opening a line as such
+  a block's delimiter rather than as a span's, and the fenced and the indented
+  spellings are both pinned as skips in `TestSpecBareSigScannerDetectsDrift`.
+  The prose half is the same surface as `gqlc-e143`; the block half is
+  `gqlc-cgat`.
 - **The binding half.** The symmetric move — reading a `"key": value` pair with
   no `map[string]any` literal around it — was measured before it was declined:
   the swept documents hold over 500 such spans across more than 30 files,
