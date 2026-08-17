@@ -27,21 +27,54 @@ const (
 	golangciAction = ".github/actions/setup-golangci/action.yml"
 	// The `uses:` value a job writes to pull the action in.
 	golangciActionRef = "./.github/actions/setup-golangci"
-	justfile          = "justfile"
+	// setup-golangci reads the pin with `just --evaluate`, so a job has to pull
+	// this in first.
+	justActionRef = "./.github/actions/setup-just"
+	justfile      = "justfile"
 	// The recipe every linter-provisioning path goes through.
 	provisionRecipe = "ensure-golangci"
 	// The justfile variable holding the pinned version.
 	versionVar = "golangci_version"
 )
 
-// A step as the two assertions below need to see it: `uses` for the action
-// reference, `run` for the shell, `with` for the cache inputs.
+// A step as the assertions below need to see it: `uses` for the action
+// reference, `run` for the shell, `with` for the cache inputs, `if` for whether
+// the step runs at all.
+//
+// If is a yaml.Node rather than a string because `if: false` is a YAML bool and
+// would fail a string decode — turning a switched-off restore into a decode
+// error attributed to the whole job rather than to the step that carries it.
 type actionStep struct {
 	Name string            `yaml:"name"`
 	ID   string            `yaml:"id"`
 	Uses string            `yaml:"uses"`
 	Run  string            `yaml:"run"`
+	If   yaml.Node         `yaml:"if"`
 	With map[string]string `yaml:"with"`
+}
+
+// shellCode is run with shell comments and blank lines removed.
+//
+// An assertion about what a step runs must not be satisfiable by a line that is
+// commented out. Commenting out the version read and restating the pin as a
+// literal (`# just --evaluate golangci_version` above `echo
+// "version=v2.12.2"`) is the precise defect reading the version off the
+// justfile exists to prevent, and it satisfies a Contains over the raw source.
+//
+// A `#` inside a quoted string is truncated here too. That direction is safe:
+// dropping text can only make the assertions below fail, never pass.
+func shellCode(run string) string {
+	var kept []string
+	for _, line := range strings.Split(run, "\n") {
+		if i := strings.IndexByte(line, '#'); i >= 0 {
+			line = line[:i]
+		}
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
 }
 
 func readRepoFile(t *testing.T, rel string) string {
@@ -110,24 +143,31 @@ func TestGolangciBinaryCacheTracksTheJustfileInstallPath(t *testing.T) {
 		golangciAction, cacheStep(t).With["path"], want)
 }
 
+// pinStep returns the step that evaluates the justfile's version variable.
+// Matched over shellCode rather than the raw `run`, so a commented-out
+// evaluation reads as absent.
+func pinStep(t *testing.T) actionStep {
+	t.Helper()
+	for _, s := range actionSteps(t) {
+		if strings.Contains(shellCode(s.Run), "just --evaluate "+versionVar) {
+			return s
+		}
+	}
+	return actionStep{}
+}
+
 // The cache key has to move when the pin moves, and it has to move by reading
 // the justfile rather than by someone remembering to edit two files.
 func TestGolangciBinaryCacheKeyIsDerivedFromTheJustfilePin(t *testing.T) {
-	steps := actionSteps(t)
-
-	var pin actionStep
-	for _, s := range steps {
-		if strings.Contains(s.Run, "just --evaluate "+versionVar) {
-			pin = s
-			break
-		}
-	}
+	pin := pinStep(t)
 	require.NotEmptyf(t, pin.ID,
 		"no step in %s evaluates `just --evaluate %s` under an `id:`, so the cache key "+
 			"below cannot be reading the pinned version off the justfile. Either the "+
 			"version is restated in this file — a second place to bump, and a stale one "+
 			"keys the cache to a build ensure-golangci rejects — or the key no longer "+
-			"varies with the pin at all.", golangciAction, versionVar)
+			"varies with the pin at all. A commented-out evaluation counts as absent "+
+			"here: it leaves the key on whatever literal the live line carries.",
+		golangciAction, versionVar)
 
 	key := cacheStep(t).With["key"]
 	require.Containsf(t, key, "steps."+pin.ID+".outputs.version",
@@ -138,6 +178,40 @@ func TestGolangciBinaryCacheKeyIsDerivedFromTheJustfilePin(t *testing.T) {
 	// The variable the step evaluates must still be the one the justfile declares.
 	require.Regexpf(t, `(?m)^`+versionVar+`\s*:=`, readRepoFile(t, justfile),
 		"the justfile no longer declares %s, which %s evaluates", versionVar, golangciAction)
+}
+
+// A failed version read has to fail the step, not empty the key.
+//
+// `set -e` acts on the exit status of the simple command. In `echo
+// "version=$(just --evaluate ...)"` that status is echo's, so the step exits 0
+// with an empty output and the cache key collapses to `golangci-bin-<os>-`:
+// green step, no restore, full download on every job — the exposure this action
+// closes, silently reopened. Only an assignment-only command inherits the
+// command substitution's status, which is why the read is on its own line.
+//
+// Witnessed out of tree against this branch's justfile:
+//
+//	echo "v=$(just --evaluate absent)" >> f   # rc 0, f == "v="
+//	v="$(just --evaluate absent)"             # rc 1, f untouched
+func TestGolangciVersionReadFailsTheStepInsteadOfEmptyingTheKey(t *testing.T) {
+	code := shellCode(pinStep(t).Run)
+
+	require.Regexpf(t, `(?m)^\s*[A-Za-z_][A-Za-z0-9_]*="?\$\(just --evaluate `+versionVar+`\)"?\s*$`,
+		code,
+		"the step in %s reads %s somewhere other than in an assignment-only command:\n%s\n"+
+			"Interpolated into another command's arguments, a failed read exits 0 and the "+
+			"key becomes `golangci-bin-<os>-` — a green cache step above a full download "+
+			"on every linting job (bd gqlc-l45j).",
+		golangciAction, versionVar, code)
+
+	// The step carries its own errexit rather than relying on the default flags
+	// the runner gives `shell: bash`. The assignment above only aborts under
+	// errexit, and the comment in the action file argues from this line.
+	require.Regexpf(t, `(?m)^\s*set\s+-[a-z]*e[a-z]*(\s|$)`, code,
+		"the step in %s no longer sets errexit, so the version read below it can fail "+
+			"and leave the following line to write an empty version. It ran under the "+
+			"runner's default `shell: bash` flags, which are not stated in this repo and "+
+			"are not this file's to promise.", golangciAction)
 }
 
 // linterRecipes is every justfile recipe that reaches ensure-golangci through
@@ -212,9 +286,15 @@ func TestEveryLintingCIJobRestoresTheCachedBinary(t *testing.T) {
 	jobs := childByKey(ciDoc(t), "jobs")
 	require.NotNilf(t, jobs, "%s has no jobs", ciWorkflow)
 
+	// cachedAt/justAt are step positions, not booleans, because setup-golangci
+	// evaluates `just --evaluate` and so has to run after setup-just has put
+	// just on PATH. cachedIf holds the step's `if:`, which decides whether the
+	// step referenced here runs at all.
 	type jobFacts struct {
-		recipes []string
-		cached  bool
+		recipes  []string
+		cachedAt int
+		cachedIf string
+		justAt   int
 	}
 	found := map[string]jobFacts{}
 
@@ -225,10 +305,14 @@ func TestEveryLintingCIJobRestoresTheCachedBinary(t *testing.T) {
 		}
 		require.NoErrorf(t, jobs.Content[i+1].Decode(&job), "decode job %q", name)
 
-		facts := jobFacts{}
-		for _, s := range job.Steps {
-			if s.Uses == golangciActionRef {
-				facts.cached = true
+		facts := jobFacts{cachedAt: -1, justAt: -1}
+		for at, s := range job.Steps {
+			switch s.Uses {
+			case golangciActionRef:
+				facts.cachedAt = at
+				facts.cachedIf = s.If.Value
+			case justActionRef:
+				facts.justAt = at
 			}
 			for _, r := range justInvocations(s.Run) {
 				if needsLinter[r] {
@@ -252,11 +336,32 @@ func TestEveryLintingCIJobRestoresTheCachedBinary(t *testing.T) {
 	}
 
 	for name, facts := range found {
-		require.Truef(t, facts.cached,
+		require.GreaterOrEqualf(t, facts.cachedAt, 0,
 			"job %q runs %v, which provisions golangci-lint, but does not `uses: %s`. "+
 				"It will download the binary on every run; that download answered HTTP 429 "+
 				"under this repo's own concurrency and killed the context in setup, before "+
 				"a line of the change was read (bd gqlc-l45j).",
 			name, facts.recipes, golangciActionRef)
+
+		// A reference is not a restore. `if:` on the step leaves the reference in
+		// place, reports the step as skipped, and downloads the binary anyway —
+		// the same exposure as deleting the step, with none of the visibility.
+		require.Emptyf(t, facts.cachedIf,
+			"job %q gates `uses: %s` behind `if: %s`. A skipped restore restores nothing: "+
+				"the job runs %v, downloads the linter itself, and shows a green step "+
+				"where the cache was supposed to be.",
+			name, golangciActionRef, facts.cachedIf, facts.recipes)
+
+		// setup-golangci reads the pinned version with `just --evaluate`, so it
+		// needs just already on PATH. Out of order it is not a failure to debug:
+		// see TestGolangciVersionReadFailsTheStepInsteadOfEmptyingTheKey for the
+		// half of this that makes the step fail rather than emit an empty key.
+		require.GreaterOrEqualf(t, facts.justAt, 0,
+			"job %q pulls in %s but never `uses: %s`, so just is not on PATH when the "+
+				"version read runs.", name, golangciActionRef, justActionRef)
+		require.Greaterf(t, facts.cachedAt, facts.justAt,
+			"job %q runs `uses: %s` at step %d, before its prerequisite `uses: %s` at "+
+				"step %d. The version read needs just on PATH.",
+			name, golangciActionRef, facts.cachedAt, justActionRef, facts.justAt)
 	}
 }
