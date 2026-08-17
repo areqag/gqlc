@@ -370,8 +370,9 @@ func ciJustInvocations(t *testing.T) map[string][]string {
 // retires every suite the recipe names at once — from the CI test job and from
 // .githooks/pre-push, which both run `just test` — while leaving every
 // assertion above green: they are about what the recipe contains, not about
-// whether anyone calls it. No CI output goes missing, and the suites' own
-// `# Run via: just test-hooks` headers would still say they are run.
+// whether anyone calls it. Nothing turns red to say so — what CI loses is the
+// suites' own output, which is a signal only to someone counting `ok` lines —
+// and their `# Run via: just test-hooks` headers would still say they are run.
 //
 // Derived through the dependency graph rather than asserting `test: ... test-hooks`
 // directly, because the property is that the recipe is reachable from a required
