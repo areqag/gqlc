@@ -18,8 +18,10 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -31,9 +33,12 @@ import (
 )
 
 // Each embedder promotes one variant's methods, the unexported marker
-// included, and declares no method of its own. This file failing to build is
-// itself the claim being falsified: if the marker sealed the interface, the
-// compile-time assignments in the table below would not typecheck from here.
+// included, and declares no method of its own — which the rows below depend on
+// and TestUnservedColumnFallThroughIsNotANinthVariant/the_embedders_add_no_String_of_their_own
+// holds them to, by reading the methods this package declares off its own
+// source. This file failing to build is itself the claim being falsified: if
+// the marker sealed the interface, the compile-time assignments in the table
+// below would not typecheck from here.
 type (
 	embedNode      struct{ resolver.ResolvedNode }
 	embedProperty  struct{ resolver.ResolvedProperty }
@@ -45,23 +50,40 @@ type (
 	embedUnknown   struct{ resolver.ResolvedUnknown }
 )
 
-// The two constructions nest, which is the step from "two more inhabitants" to
-// "the inhabiting set has no bound" — the claim unservedColumn's fall-through
-// comment makes and this file would otherwise only assert. Embedding a POINTER
-// promotes the value methods a second time; embedding an EMBEDDER promotes what
-// it was itself given. Neither declares a method, and each is a distinct type
-// again, so each is one more shape no arm names.
+// The constructions compose, which is the step from "more inhabitants" to
+// "the arms enumerate declaring types, not arriving shapes" — what
+// unservedColumn's fall-through comment says and this file would otherwise only
+// assert. Embedding a POINTER promotes the value methods a second time;
+// embedding an EMBEDDER promotes what it was itself given. Neither declares a
+// method, and each is a distinct type again, so each is one more shape no arm
+// names.
 type (
 	embedNodePointer  struct{ *resolver.ResolvedNode }
 	embedNodeEmbedder struct{ embedNode }
 )
 
-// shadowEdgeUnion is the third construction, and the one the embedders above
-// are chosen to exclude: it embeds a variant AND declares String at depth 0,
+// shadowEdgeUnion and shadowList are the construction the embedders above are
+// chosen to exclude: each embeds a variant AND declares String at depth 0,
 // which shadows the promoted one. Promotion only reaches a method no shallower
 // declaration hides, so this is where the fall-through's `"projects " +
 // t.String()` stops quoting internal/resolver and starts quoting the caller.
+//
+// They are also the ALLOW half of the_embedders_add_no_String_of_their_own:
+// that row's source walk has to find these two before its silence about the
+// embedders means anything.
 type shadowEdgeUnion struct{ resolver.ResolvedEdgeUnion }
+
+// shadowList is the same construction over the variant whose arm returns the
+// fall-through's own expression. It exists because "the list arm and the
+// fall-through cannot be told apart" does not follow from their sharing that
+// expression: see the row that reads shadowListText.
+type shadowList struct{ resolver.ResolvedList }
+
+// shadowListText is deliberately outside the list arm's whole range, which is
+// the two constants resolver.ResolvedList and resolver.ResolvedUnknown return.
+const shadowListText = "CALLER-CHOSE-THIS"
+
+func (shadowList) String() string { return shadowListText }
 
 // shadowEdgeUnionText is a caller writing out the candidate list
 // edgeUnionReason would have produced for probeEdgeUnion — formatLabelList
@@ -72,6 +94,15 @@ type shadowEdgeUnion struct{ resolver.ResolvedEdgeUnion }
 const shadowEdgeUnionText = "AUTHORED and LIKES"
 
 func (shadowEdgeUnion) String() string { return shadowEdgeUnionText }
+
+// deeperNode embeds an embedder of one variant and a second variant directly,
+// and declares no String. The one it promotes is resolver.ResolvedNode's,
+// because promotion takes the shallowest: ResolvedNode's String is one level
+// down, and the resolver.ResolvedEdgeUnion one embedEdgeUnion carries is two.
+type deeperNode struct {
+	embedEdgeUnion
+	resolver.ResolvedNode
+}
 
 // probeEdgeUnion is a two-candidate union carrying two distinct labels: the
 // shape edgeUnionReason answers rather than stands aside from. The labels are
@@ -85,7 +116,7 @@ var probeEdgeUnion = resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{
 
 // inhabitant holds the three forms of one variant that satisfy
 // resolver.ResolvedType. value is the form unservedColumn's arms enumerate;
-// pointer and embedded are the two an out-of-package caller reaches without
+// pointer and embedded are forms an out-of-package caller reaches without
 // declaring the marker, and neither matches a `case resolver.Variant:` arm.
 //
 // valueReason is what unservedColumn answers for the value form. Seven rows
@@ -128,12 +159,16 @@ type inhabitant struct {
 // admission. That difference is the ground
 // TestEdgeUnionRankingFlagNamesTheValueFormOnly rests its ruling on.
 //
-// Two refuse either way with an IDENTICAL refusal: resolver.ResolvedList and
-// resolver.ResolvedUnknown, and they cannot do otherwise — their arms return
-// `"projects " + ct.String()`, the same text the fall-through returns, so no
-// assertion on unservedColumn's result can tell those two arms from the
-// fall-through. Their rows carry the compile-time inhabitation and the
-// refusal; which code path produced it is what the arms row covers instead.
+// Two refuse either way, and for the values THIS table hands them the refusal
+// is character-identical: resolver.ResolvedList and resolver.ResolvedUnknown.
+// Their arms return `"projects " + ct.String()`, the expression the
+// fall-through also returns, and both Stringers are constants — "list" and
+// "unknown" (internal/resolver/validated.go). So for these two rows the text
+// does not say which path produced it; that is a property of these forms, not
+// of the arms in general, and a caller declaring its own String on an embedded
+// list is told apart from the arm by exactly such an assertion. Their rows
+// carry the compile-time inhabitation and the refusal; which code path
+// produced it is what the arms row covers instead.
 var inhabitants = map[string]inhabitant{
 	"ResolvedNode": {
 		value:    resolver.ResolvedNode{},
@@ -250,6 +285,45 @@ func unservedColumnArms(t *testing.T) []string {
 	return arms
 }
 
+// methodReceivers maps each type name that declares a method called `method`
+// to the file declaring it, over every .go file in this package's directory.
+//
+// It reads the directory rather than this file alone because a String declared
+// on one of these helpers shadows the promoted one from wherever in package age
+// it is written, and the rows that read a promoted String would then be reading
+// that method's return instead, with nothing else turning red.
+func methodReceivers(t *testing.T, method string) map[string]string {
+	t.Helper()
+
+	entries, err := os.ReadDir(".")
+	require.NoError(t, err, "reading this package's directory")
+
+	declaredIn := make(map[string]string)
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
+			continue
+		}
+		fset := token.NewFileSet()
+		f, err := parser.ParseFile(fset, entry.Name(), nil, 0)
+		require.NoErrorf(t, err, "parsing %s", entry.Name())
+
+		for _, decl := range f.Decls {
+			fn, isFunc := decl.(*ast.FuncDecl)
+			if !isFunc || fn.Recv == nil || len(fn.Recv.List) != 1 || fn.Name.Name != method {
+				continue
+			}
+			recv := fn.Recv.List[0].Type
+			if star, isPointer := recv.(*ast.StarExpr); isPointer {
+				recv = star.X
+			}
+			if ident, isIdent := recv.(*ast.Ident); isIdent {
+				declaredIn[ident.Name] = entry.Name()
+			}
+		}
+	}
+	return declaredIn
+}
+
 // fallThroughComment returns the comment attached to unservedColumn's final
 // statement — the fall-through return — as one string.
 func fallThroughComment(t *testing.T) string {
@@ -304,11 +378,11 @@ func funcDecl(t *testing.T, f *ast.File, name string) *ast.FuncDecl {
 // type outside internal/resolver can DECLARE isResolvedType, so the eight
 // variants are the whole set of declaring types.
 //
-// What it does not buy: two constructions obtain the marker without declaring
-// it — the pointer form of a variant, and a struct embedding one — and neither
-// matches an arm. So the arms are not the interface's membership, and reaching
-// the fall-through takes no ninth variant: every refusal row below gets there
-// with a variant the arms already name.
+// What it does not buy: the marker is promoted as well as declared. A pointer
+// to a variant carries it, and so does a struct embedding one; neither matches
+// an arm. So the arms are not the interface's membership, and reaching the
+// fall-through takes no ninth variant: every refusal row below gets there with
+// a variant the arms already name.
 func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 	// The ALLOW half. Without it every refusal row below is satisfied by an
 	// unservedColumn that refuses everything handed to it.
@@ -331,13 +405,12 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 			// on all eight. Three have an arm that refuses the value
 			// this table hands it — the 1 and the 2 of the partition
 			// above: resolver.ResolvedEdgeUnion, resolver.ResolvedList
-			// and resolver.ResolvedUnknown. Of the arms, only the
-			// edge-union one can answer something `"projects " +
-			// String()` does not carry, the candidate list, so only
-			// there does the text tell the arm from the fall-through;
-			// the list and unknown arms return the fall-through's own
-			// text, and this row is satisfied either way for those two.
-			// The other five have an arm that serves, which
+			// and resolver.ResolvedUnknown. The edge-union arm answers
+			// with the candidate list, which `"projects " + String()`
+			// does not carry, so on that row the text does separate the
+			// two paths. The list and unknown arms build their text
+			// from the expression this row asserts, so on those two it
+			// does not. The other five have an arm that serves, which
 			// non-emptiness alone would have separated.
 			require.Equalf(t, "projects "+in.pointer.String(), unservedColumn(in.pointer),
 				"*%s must reach unservedColumn's fall-through; every marker and String on the variants takes a value receiver, and a pointer's method set contains its value methods, so the pointer satisfies resolver.ResolvedType while `case resolver.%s:` does not match it",
@@ -386,10 +459,10 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 		}
 	})
 
-	// The other case of the fall-through's text, and the reason its comment
-	// describes two rather than one. Every form above declares no String, so
-	// the variant's own diagnostic Stringer stays shallowest and answers. A
-	// shadowing String reaches the same fall-through and puts the caller's
+	// The other shape of the fall-through's text. The forms above declare no
+	// String — held to that by the_embedders_add_no_String_of_their_own below
+	// — so the variant's own diagnostic Stringer stays shallowest and answers.
+	// A shadowing String reaches the same fall-through and puts the caller's
 	// text there instead.
 	t.Run("a shadowing embedder chooses the text after projects", func(t *testing.T) {
 		shadow := shadowEdgeUnion{probeEdgeUnion}
@@ -397,6 +470,24 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 			"struct{ resolver.ResolvedEdgeUnion } declaring its own String reaches the fall-through, which returns that String")
 		require.NotEqual(t, "projects "+probeEdgeUnion.String(), unservedColumn(shadow),
 			"the shadowing String must differ from the promoted one, or this row witnesses nothing")
+	})
+
+	// The ResolvedList row above cannot say which path answered it, because
+	// the list arm returns the expression the fall-through returns. That is a
+	// fact about that row's form, and this row is why it does not generalise
+	// into "the arm and the fall-through are indistinguishable": the arm
+	// matches two concrete types, resolver.ResolvedList and
+	// resolver.ResolvedUnknown, whose Stringers are the constants "list" and
+	// "unknown" (internal/resolver/validated.go), so everything the arm can
+	// return is in {"projects list", "projects unknown"}. An assertion outside
+	// that set tells the fall-through from the arm, and here is one.
+	t.Run("a shadowing list embedder is outside the list arm's range", func(t *testing.T) {
+		require.Equal(t, "projects "+shadowListText, unservedColumn(shadowList{}),
+			"struct{ resolver.ResolvedList } declaring its own String reaches the fall-through, which returns that String")
+		require.NotEqual(t, "projects "+resolver.ResolvedList{}.String(), unservedColumn(shadowList{}),
+			"the list arm returns this, so a row equal to it would witness nothing")
+		require.NotEqual(t, "projects "+resolver.ResolvedUnknown{}.String(), unservedColumn(shadowList{}),
+			"the same arm also returns this")
 	})
 
 	// The key set is held against the arms below, and that says nothing about
@@ -417,6 +508,39 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 				name, in.embedded, embedded.NumField())
 			require.Equalf(t, name, embedded.Field(0).Type.Name(),
 				"%s: the embedded form embeds a %s", name, embedded.Field(0).Type)
+		}
+	})
+
+	// Every row above that asserts `"projects " + form.String()` reads a
+	// PROMOTED String, and says so; none of them notices if the embedder
+	// declares one instead, because both sides of the assertion move together.
+	// Making embedScalar, embedEdge and embedList each declare their own left
+	// the whole package green — 0 failing subtests — so the file's "declares no
+	// method of its own" was prose no gate held. This row holds it, off the
+	// source rather than off behaviour, which is the only place the absence of
+	// a declaration is visible.
+	t.Run("the embedders add no String of their own", func(t *testing.T) {
+		declaredIn := methodReceivers(t, "String")
+
+		// The ALLOW half, and the proof the walk is live: it must find the two
+		// types this file declares a String on. Without it an empty map — a
+		// walk that read nothing, or read the wrong directory — satisfies
+		// every assertion below.
+		require.Containsf(t, declaredIn, "shadowEdgeUnion",
+			"the walk found no String on shadowEdgeUnion, which this file declares one on, so its silence about the embedders witnesses nothing; it read %v", declaredIn)
+		require.Containsf(t, declaredIn, "shadowList",
+			"the walk found no String on shadowList, which this file declares one on; it read %v", declaredIn)
+
+		// Derived from the table rather than written out again, so a variant
+		// added to inhabitants is covered without editing a second list.
+		forms := []string{"embedNodePointer", "embedNodeEmbedder", "deeperNode"}
+		for _, name := range sortedInhabitantNames() {
+			forms = append(forms, reflect.TypeOf(inhabitants[name].embedded).Name())
+		}
+		for _, form := range forms {
+			require.NotContainsf(t, declaredIn, form,
+				"%s declares its own String (in %s), which shadows the promoted one; every row reading %s's text is then asserting that method's return rather than the embedded variant's, and would stay green while measuring nothing",
+				form, declaredIn[form], form)
 		}
 	})
 
@@ -524,19 +648,34 @@ func TestEdgeUnionRankingFlagNamesTheValueFormOnly(t *testing.T) {
 		})
 	}
 
-	// The bound on the rows above: they hold for forms that add no String, and
-	// nothing about the fall-through makes that general. Here the reason names
-	// both candidates without edgeUnionReason having run, so the reason's
-	// wording is not evidence of which path produced it. The flag reads the
-	// type and is unmoved; a flag matching text would have been moved by a
-	// caller's method.
+	// The bound on the rows above is the two forms that slice carries: a
+	// pointer to probeEdgeUnion, and a struct embedding it and declaring no
+	// String. Here the reason names both candidates without edgeUnionReason
+	// having run, so the reason's wording is not evidence of which path
+	// produced it. The flag reads the type and is unmoved; a flag matching text
+	// would have been moved by a caller's method.
 	t.Run("a shadowing embedder does not outrank, whatever its reason reads", func(t *testing.T) {
 		reason, edgeUnion := unservedReason(probeColumnQuery(shadowEdgeUnion{probeEdgeUnion}))
 		require.False(t, edgeUnion,
-			"the flag is a type assertion on the value form, so no embedder sets it however its String reads")
+			"the flag is a type assertion on the value form, so an embedder does not set it however its String reads")
 		require.Equal(t, `column "r" projects `+shadowEdgeUnionText, reason)
 		require.Contains(t, reason, "AUTHORED",
 			"this row is only a witness if the fall-through reason does name a candidate")
 		require.NotEmpty(t, reason)
+	})
+
+	// The other half of that bound, and the reason it is stated as two forms
+	// rather than as "forms that add no String": adding none does not by itself
+	// produce `projects edgeUnion`. deeperNode embeds an edge union and adds no
+	// String, and the reason still names no candidate — for a different cause,
+	// a shallower Stringer rather than a shadowing one. The ruling is unchanged
+	// either way, which is the point: it rests on the flag reading the type.
+	t.Run("adding no String is not what those two rows turn on", func(t *testing.T) {
+		reason, edgeUnion := unservedReason(probeColumnQuery(deeperNode{}))
+		require.False(t, edgeUnion,
+			"deeperNode is not resolver.ResolvedEdgeUnion, so the type assertion does not fire")
+		require.Equal(t, `column "r" projects node`, reason,
+			"deeperNode declares no String and embeds an edge union, and still does not answer `projects edgeUnion`: promotion took resolver.ResolvedNode's String, which is a level shallower than the one embedEdgeUnion carries")
+		require.NotContains(t, reason, "AUTHORED")
 	})
 }
