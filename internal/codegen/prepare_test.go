@@ -650,8 +650,13 @@ func TestReservedScopeDecidesWhichEntityNamesCollide(t *testing.T) {
 					return
 				}
 				require.ErrorIs(t, err, ErrIdentifierCollision)
-				require.ErrorContains(t, err, `the generated package's fixed declaration "`+row.name+`"`)
-				require.ErrorContains(t, err, `entity struct "`+row.name+`"`)
+				// One ordered substring, not two independent ones: the
+				// seed exists so the fixed declaration lands on the
+				// message's "first" side, and two unordered contains
+				// would read the same either way round.
+				require.ErrorContains(t, err,
+					`emitted by both the generated package's fixed declaration "`+row.name+
+						`" and entity struct "`+row.name+`"`)
 			})
 		}
 	}
