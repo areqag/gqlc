@@ -81,13 +81,16 @@ var ageLiveRecipes = []string{"test-codegen-live", "test-codegen-live-age"}
 // live test asserts, or a witness no CI recipe runs is a refusal resting
 // on a claim nothing re-measures, and each of those is a complaint.
 func TestEveryDialectGapCarriesItsWitness(t *testing.T) {
-	// Two names, and the COUNT is pinned rather than the emptiness.
-	// witnessGaps complains once per recipe that does not run a witness,
-	// so a name dropped from the list is a recipe nobody checks and the
-	// sweep goes on passing: review mutation R1 removed
-	// "test-codegen-live" and left this package green. The empty list
-	// already fails, in recipeBodies (R2); R1 is that same silence with
-	// one name left in it. The third live recipe,
+	// The COUNT of the list is pinned rather than its emptiness, and it is
+	// one guard of two because the list goes wrong in two directions and
+	// each guard catches one. A name REMOVED is caught here: witnessGaps
+	// complains once per entry of the map readRecipes returns, so a
+	// dropped name is a recipe nobody checks and the sweep goes on passing
+	// (review mutation R1, one name left, green). A name REPEATED leaves
+	// this count at two and collapses that map to one entry, which this
+	// pin cannot see — recipeBodies complains about it instead (review
+	// mutation D1, which survived this pin). The empty list fails in
+	// recipeBodies too (R2). The third live recipe,
 	// test-codegen-live-neo4j, is absent on purpose — see ageLiveRecipes.
 	require.Len(t, ageLiveRecipes, 2,
 		"both recipes that start an AGE container have to be read, or a witness can "+
@@ -696,8 +699,11 @@ func witnessBodies(fset *token.FileSet, path string, src []byte) (map[string]str
 // that matters, since what has to agree is the probe text on both sides.
 //
 // A name declared by two files fails here rather than resolving to
-// whichever was globbed last. Within one file Go itself forbids the
-// clash, so this is the only place it can arise.
+// whichever was globbed last. It cannot arise today: every file liveGlob
+// matches declares `package fixtures_test`, so Go rejects the clash
+// across the whole set, not merely within one file. The guard is for a
+// live file that later lands outside that package — liveGlob matches by
+// path and says nothing about a package clause.
 func readLiveWitnessBodies(t *testing.T) map[string]string {
 	t.Helper()
 	paths, err := filepath.Glob(filepath.Join(repoRoot, liveGlob))
@@ -1088,8 +1094,9 @@ func shellFields(s string) (fields []string, unterminated bool) {
 // What is NOT modelled is backslash escapes, command substitution,
 // heredocs and here-strings. This justfile uses all four, so the bound
 // is not "the artefact has none of them"; it is that this reader only
-// ever sees ageLiveRecipes' two bodies, and those use none of them. That is a property of two single-line recipes today
-// and not a law about the file, so it is held by
+// ever sees ageLiveRecipes' two bodies, and those use none of them.
+// That is a property of two single-line recipes today and not a law
+// about the file, so it is held by
 // TestTheRecipesThisReaderParsesStayInsideTheShellItModels rather than
 // asserted here.
 //
@@ -1143,7 +1150,25 @@ func recipeBodies(src string, names []string) (map[string]string, []string) {
 
 	lines := strings.Split(src, "\n")
 	out := make(map[string]string, len(names))
+	seen := make(map[string]bool, len(names))
 	for _, name := range names {
+		// One name, one entry. What this returns is keyed by name and
+		// witnessGaps complains once per ENTRY, so a name given twice
+		// hands back a map one short while every count over the name LIST
+		// is still right, and a recipe leaves the sweep: review mutation
+		// D1 replaced "test-codegen-live" with a second
+		// "test-codegen-live-age" (two names, one distinct) and left this
+		// package green. D2CONSEQ then gutted test-codegen-live's -run
+		// down to a non-witness with that duplicate in place — a live
+		// recipe that had stopped running its witness, complained about
+		// by nothing.
+		if seen[name] {
+			complaints = append(complaints,
+				fmt.Sprintf("recipe %s is named twice, so one recipe is read where two were named", name))
+			continue
+		}
+		seen[name] = true
+
 		var body []string
 		for i, line := range lines {
 			if line != name+":" {
@@ -1177,6 +1202,13 @@ func recipeBodies(src string, names []string) (map[string]string, []string) {
 		// A body running no go test at all is vacuously silent here, and
 		// deliberately: "this recipe runs no test" is recipeRuns'
 		// answer, and the sweep asks it of every gap.
+		//
+		// unterminated is dropped rather than answered: a line whose
+		// quoting never closes makes recipeRuns refuse the whole body, so
+		// the sweep already complains that this recipe runs no witness,
+		// and it does so for every gap, since a gap naming no witness is
+		// its own complaint. The row is "a command line whose quoting
+		// never closes" in TestRecipeRunsOnlyWhatTheCommandLineSelects.
 		invocations, _ := goTestInvocations(joined)
 		for _, fields := range invocations {
 			if !slices.Contains(testFlagValues(fields, "count"), "1") {
@@ -1277,6 +1309,17 @@ func TestRecipeReaderComplainsOnEachBrokenRecipe(t *testing.T) {
 				"    cd test/data/codegen && go test -run 'TestAGERefuses' ./...\n",
 			names: names,
 			want:  "reports on a cached run",
+		},
+		{
+			// Review mutation D1, and the direction a count over the name
+			// list cannot see: two names, one distinct. The map comes back
+			// one entry short, witnessGaps complains once per entry, and
+			// the recipe that lost its name is checked by nobody while
+			// require.Len(ageLiveRecipes, 2) goes on passing.
+			name:  "a recipe named twice is one recipe, not two",
+			src:   sound,
+			names: []string{recipe, recipe},
+			want:  "is named twice",
 		},
 		{
 			// The vacuity row: naming no recipe leaves every complaint

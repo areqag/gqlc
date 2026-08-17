@@ -73,11 +73,18 @@ own body**; and that each of the two recipes `ageLiveRecipes` names runs it —
 **one** `go test` invocation that is itself built with `-tags codegen_live`,
 selected WHOLE by every `-run` it carries and matched by no `-skip` it carries.
 Every `go test` in such a recipe must also carry `-count=1`. That list is two
-hand-written names — pinned at two, because the complaints about a recipe are
-made once per name, so a name dropped is a recipe nobody checks (review mutation
-R1, green with one name left; only the empty list already failed, on
-`recipeBodies`' own vacuity complaint) — not every live recipe in the file and
-not what CI invokes:
+hand-written names, held by two guards because it goes wrong in two directions.
+`witnessGaps` complains once per *entry* of the map `readRecipes` returns, not
+once per name, so a name **dropped** is a recipe nobody checks: pinned at two in
+`TestEveryDialectGapCarriesItsWitness` (review mutation R1 — one name left was
+green before that pin). A name **repeated** leaves that count at two and
+collapses the map to one
+entry, which the pin cannot see, so `recipeBodies` complains about it instead
+(review mutation D1 — two names, one distinct — which survived the pin; and
+D2CONSEQ, which gutted the other recipe's `-run` down to a non-witness with that
+duplicate in place and was complained about by nothing). The empty list fails on
+`recipeBodies`' own vacuity complaint (R2). The list is not every live recipe in
+the file and not what CI invokes:
 the third live recipe (`test-codegen-live-neo4j`) must *not* run these witnesses,
 so a derived "every live recipe" rule would be false, and nothing here reads
 `.github/workflows` to check that CI calls either name.
@@ -243,15 +250,35 @@ gap.
 Round 5 found it one level further out again, in the *tables* rather than in the
 loops. Two lists carry claims nothing else re-states — `ageLiveRecipes`, and the
 shell constructs `TestTheRecipesThisReaderParsesStayInsideTheShellItModels`
-refuses in a recipe body — and both were guarded against being empty and not
-against being shorter. All four construct rows deleted left this package green
-at exit 0 with that test printing `--- PASS` over an assertion it no longer made
+refuses in a recipe body — and neither was guarded against being shorter. Only
+`ageLiveRecipes` had its empty case covered, on `recipeBodies`' vacuity
+complaint (R2); the construct list was guarded by nothing at all, and the
+argument standing where its guard belonged said a `require.Len` there "could not
+be made to fail". All four construct rows deleted left this package green at
+exit 0 with that test printing `--- PASS` over an assertion it no longer made
 (review mutation A9), and deleting one row was the same silence one shape at a
 time (A9b); one name dropped from `ageLiveRecipes` left a live recipe checked by
-nobody (R1). Both counts are now pinned where the claim is made, and the
-construct texts must be distinct, because four rows naming three shapes is four
-rows and one hole. A count pin catches a row that leaves; it does not catch a row
-that is wrong, and nothing here claims otherwise.
+nobody (R1). Both counts are now pinned where the claim is made.
+
+A count over a list catches a row that **leaves**. It does not catch a row that
+is wrong, and it does not catch a row that is **duplicated**: a list pinned at
+two holding one name twice keeps its count and still loses a recipe from the
+sweep, which is review mutation D1 against the round-5 pin. The two lists close
+that direction in different places. The construct texts are counted as a *set*,
+so four rows naming three shapes fails on the pin itself
+(`require.Len(t, shapes, 4)` over a map built from the texts; measured as
+mutation CDUP). `ageLiveRecipes` is counted as a list, so its duplicate is
+caught one layer down, by `recipeBodies` — which is the choke point both readers
+of the justfile share, so D1 now reddens `TestEveryDialectGapCarriesItsWitness`
+and `TestTheRecipesThisReaderParsesStayInsideTheShellItModels` together, and the
+complaint is shown failing by a row of `TestRecipeReaderComplainsOnEachBrokenRecipe`
+rather than assumed. Neither guard catches a row that is *wrong*. For
+`ageLiveRecipes` the sweep catches that downstream anyway — a name no recipe in
+the justfile carries is `recipeBodies`' missing-recipe complaint, and a name
+whose recipe runs no witness is `witnessGaps`' own (measured as D2CTRL, which
+gutted `test-codegen-live`'s `-run` with the list left alone). For the construct
+list a row naming a shape the reader *does* model is caught by nothing, and is
+left open.
 
 **What the sweep still does not check: where the package argument points.** It
 reads the command line and nothing else, so the `cd test/data/codegen` in front
