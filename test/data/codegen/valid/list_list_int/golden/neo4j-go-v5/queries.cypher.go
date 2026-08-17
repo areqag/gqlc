@@ -34,19 +34,19 @@ func (q *Queries) NestedList(ctx context.Context) ([][]int64, error) {
 	}
 	acc := make([][]int64, 0, len(value))
 	for i, elem := range value {
-		inner, ok := elem.([]any)
+		inner1, ok := elem.([]any)
 		if !ok {
 			return nil, fmt.Errorf("NestedList: decode column %q element %d: expected []any, got %T", "xss", i, elem)
 		}
-		innerAcc := make([]int64, 0, len(inner))
-		for i, elem := range inner {
-			v, ok := elem.(int64)
+		innerAcc1 := make([]int64, 0, len(inner1))
+		for i, elem1 := range inner1 {
+			v, ok := elem1.(int64)
 			if !ok {
-				return nil, fmt.Errorf("NestedList: decode column %q element %d: expected int64, got %T", "xss", i, elem)
+				return nil, fmt.Errorf("NestedList: decode column %q element %d: expected int64, got %T", "xss", i, elem1)
 			}
-			innerAcc = append(innerAcc, v)
+			innerAcc1 = append(innerAcc1, v)
 		}
-		acc = append(acc, innerAcc)
+		acc = append(acc, innerAcc1)
 	}
 	return acc, nil
 }
