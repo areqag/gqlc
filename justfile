@@ -413,23 +413,31 @@ sweep-discovery-probes:
         esac
     done
 
-    # Assembled from two pieces: the dump this searches includes this recipe's own
-    # body, and a whole pattern written out here would match itself.
+    # site_re is assembled from two pieces: the dump this searches includes this
+    # recipe's own body, and a whole pattern written out here would match itself.
+    #
+    # One regex reads the sites, so what the refusal below accepts and what the
+    # extraction below reads are the same shape by construction. The trailing dot
+    # is part of that shape because the sweep glob is "test/data/${n}.*": a site
+    # that interpolates its probe variable and then runs straight into the
+    # mktemp template, with no dot between, makes a directory neither that glob
+    # nor .gitignore's own dotted rules match.
     site_re="mktemp -d ""test/data/"
-    literal_sites="$(printf '%s\n' "${dumped}" | grep -e "${site_re}" \
-        | grep -v -e "${site_re}[{][{]" || true)"
-    if [ -n "${literal_sites}" ]; then
-        echo "error: a probe site under test/data spells its name out instead of interpolating" >&2
-        echo "       a variable:" >&2
-        printf '%s\n' "${literal_sites}" | sed 's/^/         /' >&2
-        echo "       Only interpolated sites are compared against the declared names, so a" >&2
-        echo "       literal one can be edited to a spelling this sweep does not clear with" >&2
-        echo "       nothing here objecting (bd gqlc-oxne)." >&2
+    site_var_re="${site_re}[{][{] *\([A-Za-z_][A-Za-z0-9_]*\) *[}][}]\."
+    odd_sites="$(printf '%s\n' "${dumped}" | grep -e "${site_re}" \
+        | grep -v -e "${site_var_re}" || true)"
+    if [ -n "${odd_sites}" ]; then
+        echo "error: a probe site under test/data does not interpolate a probe variable and" >&2
+        echo "       follow it with a dot:" >&2
+        printf '%s\n' "${odd_sites}" | sed 's/^/         /' >&2
+        echo "       Only that form is compared against the declared names and swept by the" >&2
+        echo "       glob below, so a site in any other shape can name a probe this recipe" >&2
+        echo "       does not clear with nothing here objecting (bd gqlc-oxne)." >&2
         exit 1
     fi
 
     site_vars="$(printf '%s\n' "${dumped}" \
-        | sed -n "s|^.*${site_re}[{][{] *\([A-Za-z_][A-Za-z0-9_]*\) *[}][}]\..*|\1|p")"
+        | sed -n "s|^.*${site_var_re}.*|\1|p")"
     if [ -z "${site_vars}" ]; then
         echo "error: no recipe in this justfile creates a probe under test/data, so the names" >&2
         echo "       checked below are held to nothing and this sweep clears a thing no run" >&2
