@@ -1,5 +1,0 @@
-CREATE PROPERTY GRAPH TYPE UnrepresentableTemporalDateColumn AS {
-    (:Event {
-        id :: INT64 NOT NULL
-    })
-}

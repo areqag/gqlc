@@ -701,7 +701,7 @@ check-codegen-external-tests:
 #
 # -count=1 so a developer asking for a live run gets containers, not the cache.
 test-codegen-live:
-    cd test/data/codegen && go test -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation' ./...
+    cd test/data/codegen && go test -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation|TestAGERefusesTheFunctionsItDoesNotDefine' ./...
 
 # the neo4j half: both driver arms in parallel against one neo4j:5-community
 # image. This is the half PR CI blocks on, so its wall time is a PR's wall time.
@@ -736,7 +736,7 @@ test-codegen-live-neo4j:
 # the AGE arm's only gate and no pull request pays for it, so the run it reports
 # on has to be a real one.
 test-codegen-live-age:
-    cd test/data/codegen && go test -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation' -skip 'TestLiveSmoke/neo4j' ./...
+    cd test/data/codegen && go test -count=1 -tags codegen_live -run 'TestLiveSmoke|TestAGESessionInit|TestAGERefusesRelationshipTypeAlternation|TestAGERefusesTheFunctionsItDoesNotDefine' -skip 'TestLiveSmoke/neo4j' ./...
 
 # call-graph-aware vulnerability scan; run on dependency changes and on the
 # weekly CI schedule ("@latest" deliberate: the vuln DB matters more than

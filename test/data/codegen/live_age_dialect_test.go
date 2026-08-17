@@ -1,6 +1,18 @@
 //go:build codegen_live
 
-// The one dialect fact the Apache AGE backend's capability gate is built on.
+// The dialect facts the Apache AGE backend's text gate is built on.
+//
+// internal/codegen/age/dialect.go refuses a query on its TEXT, and every
+// construct it refuses has a probe here. That is not a documentation habit, it
+// is the mechanism: the gap table records each probe and the answer the server
+// gave, and a sweep in that package (TestEveryDialectGapCarriesItsWitness)
+// requires every probe and every answer to appear in the BODY of the test the
+// gap names, which the AGE live recipes must run — spelling it in some other
+// live test is not a re-measurement and does not satisfy the sweep. A construct
+// added to the refusal list with nothing added here reddens that sweep. The
+// refusals may therefore lag what AGE cannot do, and may not run ahead of it.
+//
+// The two gaps:
 //
 // An edge column whose candidates carry DISTINCT labels is reachable in
 // openCypher only through a relationship-type alternation — oC_RelationshipTypes
@@ -12,10 +24,17 @@
 // the shared admission this gate stands aside for; edgeUnionReason says which
 // is which and why.
 //
-// That refusal is a claim about a server this repo pins by digest, so it is
+// AGE defines no temporal constructor. agtype has no temporal value type and no
+// cast to or from one, and of the 348 functions in ag_catalog exactly one has a
+// temporal name — reached from cypher as timestamp(), returning epoch
+// milliseconds as an integer. So a query calling datetime() is a package that
+// compiles and fails on every call, and the only place to answer is generate
+// time.
+//
+// Both refusals are claims about a server this repo pins by digest, so they are
 // measured here on every live run instead of asserted in a comment. If AGE ever
-// learns the alternation, this test goes red and the refusal is what should be
-// reconsidered (gqlc-35yu.14).
+// learns the alternation or grows a constructor, the test for it goes red and
+// the refusal is what should be reconsidered (gqlc-35yu.14, gqlc-35yu.12).
 //
 // A live run is nightly on master and manual, not per-PR (.github/workflows/
 // codegen-live.yml), so the measurement lags a change by up to a day. That is
@@ -68,44 +87,7 @@ const alternationSQLSTATE = "42601"
 // declaration — with only the author's query text substituted. A refusal is
 // therefore the pattern's and not the harness's.
 func TestAGERefusesRelationshipTypeAlternation(t *testing.T) {
-	if os.Getenv("GQLC_SKIP_LIVE") != "" {
-		t.Skip("GQLC_SKIP_LIVE set; skipping live backend containers")
-	}
-	t.Parallel()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	t.Cleanup(cancel)
-
-	endpoint := startAGEContainer(ctx, t)
-	createAGEAppRole(ctx, t, endpoint)
-	dsn := ageDSN(endpoint, ageAppRole, ageAppPassword, ageDatabase)
-
-	pool := openAGEPool(ctx, t, dsn, ageSessionInit)
-	rec := &statementRecorder{}
-	traced := openTracedAGEPool(ctx, t, dsn, rec)
-
-	const graph = "gqlc_dialect"
-	q := entityedgeage.New(pool, graph)
-	require.NoError(t, q.EnsureGraph(ctx), "ensure graph %s", graph)
-	t.Cleanup(func() { require.NoError(t, q.DropGraph(ctx), "drop graph %s", graph) })
-
-	// Capture the envelope from a shipped method before anything is seeded:
-	// the graph is empty, so the method reports no rows, and the statement it
-	// issued to find that out is the one this test goes on to carry its probes
-	// in.
-	_, err := entityedgeage.New(traced, graph).OneActedIn(ctx)
-	require.ErrorIs(t, err, entityedgeage.ErrNoRows, "an empty graph has no ACTED_IN edge")
-	shipped := lastDollarQuotedStatement(t, rec)
-	require.Contains(t, shipped, "MATCH (:Person)-[r:ACTED_IN]->(:Movie) RETURN r",
-		"the captured statement must be the one carrying the fixture's query text")
-
-	// Two edge types between the same endpoints. Only ACTED_IN is in the
-	// fixture's schema; DIRECTED is here so a pattern naming both has two
-	// labels to find, which is the state an edge-union column describes.
-	seed := substituteQueryText(t, shipped,
-		"CREATE (p:Person {id: 1}) CREATE (m:Movie {id: 2}) "+
-			"CREATE (p)-[:ACTED_IN {since: 2019}]->(m) CREATE (p)-[:DIRECTED]->(m)")
-	_, err = pool.Exec(ctx, seed, "{}")
-	require.NoError(t, err, "seed the graph through the same envelope")
+	ctx, pool, shipped := ageDialectHarness(t, "gqlc_dialect_alternation")
 
 	for _, tc := range []struct {
 		name string
@@ -186,6 +168,176 @@ func TestAGERefusesRelationshipTypeAlternation(t *testing.T) {
 				"every edge must carry its label spelled as the schema spells it")
 		})
 	}
+}
+
+// TestAGERefusesTheFunctionsItDoesNotDefine measures, against the pinned AGE
+// image, the second gap the text gate reads: the openCypher temporal
+// constructors AGE has no definition for, and the one temporal call it does
+// serve.
+//
+// Every refused row here is a probe recorded in internal/codegen/age/
+// dialect.go, and the refused NAME SET is derived from these very texts — the
+// gate parses them for the functions they call and refuses exactly those. So
+// this is not a test that happens to agree with the gate; it is where the
+// gate's contents come from. Deleting a row deletes a refusal.
+//
+// The served rows are the bound. `timestamp()` is the one call that works, and
+// a gate refusing everything temporal-looking would refuse it; `p.datetime` is
+// the false positive a scan for the name would take. Generated code runs the
+// author's text verbatim (ADR 0005), so a wrong refusal leaves the author with
+// no way round it at all — which makes the served half the more important one.
+//
+// No SQLSTATE is asserted, unlike the alternation above. The spike that
+// recorded these answers (gqlc-35yu.5) captured the server's message and not
+// its code, and this repo has had no container since; asserting a code nobody
+// has read would be inventing the evidence this file exists to hold. The
+// message is what the refusal quotes back to the author, so the message is what
+// is pinned. Recording the code is bd gqlc-osf1.
+func TestAGERefusesTheFunctionsItDoesNotDefine(t *testing.T) {
+	ctx, pool, shipped := ageDialectHarness(t, "gqlc_dialect_functions")
+
+	for _, tc := range []struct {
+		name string
+		// text replaces the author's query text inside the shipped envelope.
+		text string
+		// wantMessage is the substring the server's error must carry. Empty
+		// means the statement must parse. Per row rather than per test,
+		// because each name is its own answer and one shared string would
+		// pass every row while measuring one.
+		wantMessage string
+		// wantInteger requires the single value returned to be an integer,
+		// which is the claim the refusal message makes about timestamp() when
+		// it tells the author what AGE has instead.
+		wantInteger bool
+	}{
+		{
+			name:        "datetime",
+			text:        "RETURN datetime()",
+			wantMessage: "function datetime does not exist",
+		},
+		{
+			name:        "date",
+			text:        "RETURN date()",
+			wantMessage: "function date does not exist",
+		},
+		{
+			name:        "localdatetime",
+			text:        "RETURN localdatetime()",
+			wantMessage: "function localdatetime does not exist",
+		},
+		{
+			// Called with a map argument, because a constructor refused for
+			// its ARGUMENTS would be a different fact from one refused for
+			// its name. Spelled without the space after the colon because
+			// that is the byte sequence the spike ran (gqlc-35yu.5); the
+			// probe is the statement that was measured, not a tidied copy
+			// of it.
+			name:        "duration",
+			text:        "RETURN duration({days:1})",
+			wantMessage: "function duration does not exist",
+		},
+		{
+			name:        "toTimestamp",
+			text:        "RETURN toTimestamp('2024-01-01')",
+			wantMessage: "function toTimestamp does not exist",
+		},
+		{
+			name:        "the one temporal function AGE does define",
+			text:        "RETURN timestamp()",
+			wantInteger: true,
+		},
+		{
+			// A property lookup spells the name and calls nothing. The gate
+			// reads the grammar rather than scanning for `datetime(` for
+			// exactly this shape, and the server agreeing is what says the
+			// grammar is the right thing to have read.
+			name: "a property named like a constructor",
+			text: "MATCH (p:Person) RETURN p.datetime",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			stmt := substituteQueryText(t, shipped, tc.text)
+			rows, err := pool.Query(ctx, stmt, "{}")
+			if tc.wantMessage != "" {
+				require.Error(t, err, "AGE must refuse this call")
+				var pgErr *pgconn.PgError
+				require.ErrorAs(t, err, &pgErr, "the refusal must be the server's")
+				require.Contains(t, pgErr.Message, tc.wantMessage,
+					"the missing function is what the server must name")
+				return
+			}
+			require.NoError(t, err, "AGE must accept this call")
+			defer rows.Close()
+
+			var values []string
+			for rows.Next() {
+				var raw []byte
+				require.NoError(t, rows.Scan(&raw), "scan value")
+				values = append(values, string(raw))
+			}
+			require.NoError(t, rows.Err())
+			if !tc.wantInteger {
+				return
+			}
+			require.Len(t, values, 1, "a bare RETURN yields one row")
+			require.Regexp(t, `^-?[0-9]+$`, values[0],
+				"timestamp() must answer a bare integer — the refusal tells the author it is epoch millis")
+		})
+	}
+}
+
+// ageDialectHarness is one AGE container, one graph seeded through the
+// emission's own envelope, and the envelope itself: the SQL a shipped generated
+// method sent, captured off the wire, with a slot where the author's query text
+// goes.
+//
+// No statement either test composes by hand. Every probe travels in that same
+// envelope — the E-quoted graph name, the dollar-quoted text, the bound
+// argument, the record declaration — with only the query text substituted, so a
+// refusal is the construct's and not the harness's. Each caller gets its own
+// container and its own graph name, which is what lets both run in parallel.
+func ageDialectHarness(t *testing.T, graph string) (context.Context, *pgxpool.Pool, string) {
+	t.Helper()
+	if os.Getenv("GQLC_SKIP_LIVE") != "" {
+		t.Skip("GQLC_SKIP_LIVE set; skipping live backend containers")
+	}
+	t.Parallel()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	t.Cleanup(cancel)
+
+	endpoint := startAGEContainer(ctx, t)
+	createAGEAppRole(ctx, t, endpoint)
+	dsn := ageDSN(endpoint, ageAppRole, ageAppPassword, ageDatabase)
+
+	pool := openAGEPool(ctx, t, dsn, ageSessionInit)
+	rec := &statementRecorder{}
+	traced := openTracedAGEPool(ctx, t, dsn, rec)
+
+	q := entityedgeage.New(pool, graph)
+	require.NoError(t, q.EnsureGraph(ctx), "ensure graph %s", graph)
+	t.Cleanup(func() { require.NoError(t, q.DropGraph(ctx), "drop graph %s", graph) })
+
+	// Capture the envelope from a shipped method before anything is seeded:
+	// the graph is empty, so the method reports no rows, and the statement it
+	// issued to find that out is the one the probes go on to travel in.
+	_, err := entityedgeage.New(traced, graph).OneActedIn(ctx)
+	require.ErrorIs(t, err, entityedgeage.ErrNoRows, "an empty graph has no ACTED_IN edge")
+	shipped := lastDollarQuotedStatement(t, rec)
+	require.Contains(t, shipped, "MATCH (:Person)-[r:ACTED_IN]->(:Movie) RETURN r",
+		"the captured statement must be the one carrying the fixture's query text")
+
+	// Two edge types between the same endpoints. Only ACTED_IN is in the
+	// fixture's schema; DIRECTED is here so a pattern naming both has two
+	// labels to find, which is the state an edge-union column describes. The
+	// Person is what a probe reading a property has to match.
+	seed := substituteQueryText(t, shipped,
+		"CREATE (p:Person {id: 1}) CREATE (m:Movie {id: 2}) "+
+			"CREATE (p)-[:ACTED_IN {since: 2019}]->(m) CREATE (p)-[:DIRECTED]->(m)")
+	_, err = pool.Exec(ctx, seed, "{}")
+	require.NoError(t, err, "seed the graph through the same envelope")
+
+	return ctx, pool, shipped
 }
 
 // openTracedAGEPool is openAGEPool with a statement recorder attached, so a

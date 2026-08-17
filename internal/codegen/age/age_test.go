@@ -279,8 +279,7 @@ var sharedLabelEdgeUnion = resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey
 // alternation removes — which is what lets the portable refusal answer.
 // The rows below carry readQuery's own text, which spells no '|', so
 // what they measure is the column gate alone; a real batch whose text
-// did spell one is answered a step later by
-// rejectRelationshipTypeAlternation.
+// did spell one is answered a step later by rejectDialectGaps.
 var mixedLabelEdgeUnion = resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{
 	{Source: personLabel, KeyLabels: "FOUNDED", Target: "Company"},
 	{Source: personLabel, KeyLabels: "BACKED", Target: "Company"},
@@ -454,24 +453,23 @@ func wantAlternationRefusal(count int, noun, dropped string) string {
 		"— write each relationship type as its own query: %s", count, noun, dropped)
 }
 
-// alternationQuery is a batch entry whose columns and parameters this
-// backend serves and whose TEXT spells a relationship-type alternation.
-// It is the readQuery shape with one axis moved, and the axis is the one
-// the column gate above cannot see.
-func alternationQuery(name, sourceText string, cols ...resolver.Column) codegen.NamedQuery {
+// textQuery is a batch entry whose columns and parameters this backend
+// serves and whose TEXT carries whatever construct the case is about. It
+// is the readQuery shape with one axis moved, and the axis is the one the
+// column gate above cannot see.
+func textQuery(name, sourceText string, cols ...resolver.Column) codegen.NamedQuery {
 	q := readQuery(name, cols...)
 	q.SourceText = sourceText
 	return q
 }
 
-// execAlternationQuery is the same axis moved on the OTHER served batch
-// entry: execQuery's write, with a relationship-type alternation in its
-// text. Shared admission holds :exec and a column list mutually
-// exclusive, so what the column gate reads here is not merely
-// alternation-free but empty, and a gate keyed on the columns or on the
-// statement kind has nothing to look at. The server parses the statement
-// all the same.
-func execAlternationQuery(name, sourceText string) codegen.NamedQuery {
+// execTextQuery is the same axis moved on the OTHER served batch entry:
+// execQuery's write, with the construct in its text. Shared admission
+// holds :exec and a column list mutually exclusive, so what the column
+// gate reads here is not merely clean but empty, and a gate keyed on the
+// columns or on the statement kind has nothing to look at. The server
+// parses the statement all the same.
+func execTextQuery(name, sourceText string) codegen.NamedQuery {
 	q := execQuery(name)
 	q.SourceText = sourceText
 	return q
@@ -511,21 +509,21 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 	}{
 		{
 			name: "an alternation the query never projects is refused",
-			queries: []codegen.NamedQuery{alternationQuery("PostIDs",
+			queries: []codegen.NamedQuery{textQuery("PostIDs",
 				"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) RETURN p.id\n",
 				scalarColumn("p.id", graph.TypeInt))},
 			count: 1, noun: "query", dropped: `PostIDs (":AUTHORED|LIKES")`,
 		},
 		{
 			name: "an alternation narrowed to one declared candidate is refused",
-			queries: []codegen.NamedQuery{alternationQuery("Rels",
+			queries: []codegen.NamedQuery{textQuery("Rels",
 				"MATCH (:Person)-[r:AUTHORED|FLAGGED]->(p:Post) RETURN r\n",
 				resolver.Column{Name: "r", Type: resolver.ResolvedEdge{EdgeKey: corpusEdgeKey}})},
 			count: 1, noun: "query", dropped: `Rels (":AUTHORED|FLAGGED")`,
 		},
 		{
 			name: "an alternation bound by an anonymous edge is refused",
-			queries: []codegen.NamedQuery{alternationQuery("Anon",
+			queries: []codegen.NamedQuery{textQuery("Anon",
 				"MATCH (:Person)-[:AUTHORED|LIKES|REPOSTED]->(p:Post) RETURN p.id\n",
 				scalarColumn("p.id", graph.TypeInt))},
 			count: 1, noun: "query", dropped: `Anon (":AUTHORED|LIKES|REPOSTED")`,
@@ -539,14 +537,14 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 			// serves. So a gate counting DISTINCT types refuses nothing
 			// here and emits a package whose every call is 42601.
 			name: "a type the alternation repeats is refused",
-			queries: []codegen.NamedQuery{alternationQuery("Repeat",
+			queries: []codegen.NamedQuery{textQuery("Repeat",
 				"MATCH (:Person)-[r:LIKES|LIKES]->(p:Post) RETURN r\n",
 				resolver.Column{Name: "r", Type: resolver.ResolvedEdge{EdgeKey: corpusEdgeKey}})},
 			count: 1, noun: "query", dropped: `Repeat (":LIKES|LIKES")`,
 		},
 		{
 			name: "a type the alternation repeats in the legacy spelling is refused",
-			queries: []codegen.NamedQuery{alternationQuery("RepeatLegacy",
+			queries: []codegen.NamedQuery{textQuery("RepeatLegacy",
 				"MATCH (:Person)-[r:LIKES|:LIKES]->(p:Post) RETURN r\n",
 				resolver.Column{Name: "r", Type: resolver.ResolvedEdge{EdgeKey: corpusEdgeKey}})},
 			count: 1, noun: "query", dropped: `RepeatLegacy (":LIKES|:LIKES")`,
@@ -557,14 +555,14 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 			// it and the message prints only characters the author
 			// wrote. Nothing else pins the spaced rendering.
 			name: "an alternation written with spaces is quoted with them",
-			queries: []codegen.NamedQuery{alternationQuery("Spaced",
+			queries: []codegen.NamedQuery{textQuery("Spaced",
 				"MATCH (:Person)-[r:AUTHORED | LIKES]->(p:Post) RETURN p.id\n",
 				scalarColumn("p.id", graph.TypeInt))},
 			count: 1, noun: "query", dropped: `Spaced (":AUTHORED | LIKES")`,
 		},
 		{
 			name: "a query spelling two alternations names both",
-			queries: []codegen.NamedQuery{alternationQuery("Both",
+			queries: []codegen.NamedQuery{textQuery("Both",
 				"MATCH (:Person)-[r:LIKES|REPOSTED]->(p:Post), (:Person)-[s:AUTHORED|FLAGGED]->(p) RETURN p.id\n",
 				scalarColumn("p.id", graph.TypeInt))},
 			count: 1, noun: "query", dropped: `Both (":LIKES|REPOSTED", ":AUTHORED|FLAGGED")`,
@@ -576,7 +574,7 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 			// alone — there is no column here for any reading of the
 			// columns to arrive at.
 			name: "an alternation in a write that projects nothing is refused",
-			queries: []codegen.NamedQuery{execAlternationQuery("DropActions",
+			queries: []codegen.NamedQuery{execTextQuery("DropActions",
 				"MATCH (p:Person)-[r:AUTHORED|LIKES]->(:Post) DELETE r\n")},
 			count: 1, noun: "query", dropped: `DropActions (":AUTHORED|LIKES")`,
 		},
@@ -584,10 +582,10 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 			name: "every offending query in the batch is named",
 			queries: []codegen.NamedQuery{
 				servedQuery,
-				alternationQuery("PostIDs",
+				textQuery("PostIDs",
 					"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) RETURN p.id\n",
 					scalarColumn("p.id", graph.TypeInt)),
-				alternationQuery("Anon",
+				textQuery("Anon",
 					"MATCH (:Person)-[:AUTHORED|REPOSTED]->(p:Post) RETURN p.id\n",
 					scalarColumn("p.id", graph.TypeInt)),
 			},
@@ -610,7 +608,7 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 
 	s.Run("a '|' outside a relationship pattern is served", func() {
 		batch := in
-		batch.Queries = []codegen.NamedQuery{alternationQuery("Tags",
+		batch.Queries = []codegen.NamedQuery{textQuery("Tags",
 			"MATCH (p:Person) RETURN [x IN p.tags | x] AS t\n",
 			scalarColumn("t", graph.TypeString))}
 		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
@@ -639,7 +637,7 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 		// enrolment becomes valid again, so the un-enrolment needs the
 		// ordering asserted rather than assumed.
 		batch := s.inputFrom(filepath.Join("testdata", sharedLabelSchema))
-		batch.Queries = []codegen.NamedQuery{alternationQuery("FoundedOrBacked",
+		batch.Queries = []codegen.NamedQuery{textQuery("FoundedOrBacked",
 			"MATCH (:Person)-[r:FOUNDED|BACKED]->(c:Company) RETURN r\n",
 			resolver.Column{Name: "r", Type: mixedLabelEdgeUnion})}
 		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
@@ -655,7 +653,7 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 
 	s.Run("an edge-union column is answered by the column gate, which says more", func() {
 		batch := in
-		batch.Queries = []codegen.NamedQuery{alternationQuery("TwoActions",
+		batch.Queries = []codegen.NamedQuery{textQuery("TwoActions",
 			"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) RETURN r\n",
 			resolver.Column{Name: "r", Type: twoCandidateEdgeUnion})}
 		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
@@ -680,7 +678,7 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 		}
 
 		batch := in
-		batch.Queries = []codegen.NamedQuery{alternationQuery("Bagged",
+		batch.Queries = []codegen.NamedQuery{textQuery("Bagged",
 			"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) RETURN properties(p) AS bag\n", mapColumn)}
 		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
 		s.Require().Error(err)
@@ -693,7 +691,7 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 		// The discriminator. Without the '|' the very same column is
 		// still unserved and the column gate still owns it, so what
 		// moved above is the ordering and not the map arm.
-		batch.Queries = []codegen.NamedQuery{alternationQuery("Bagged",
+		batch.Queries = []codegen.NamedQuery{textQuery("Bagged",
 			"MATCH (:Person)-[r:AUTHORED]->(p:Post) RETURN properties(p) AS bag\n", mapColumn)}
 		files, err = age.New(age.WithPackageName(corpusPackage)).Generate(batch)
 		s.Require().Error(err)
@@ -724,7 +722,7 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 			Name: "payload", Type: resolver.ResolvedProperty{Type: graph.TypeBytes},
 		}
 		byBlob := func(sourceText string) codegen.NamedQuery {
-			q := alternationQuery("ByBlob", sourceText, scalarColumn("p.id", graph.TypeInt))
+			q := textQuery("ByBlob", sourceText, scalarColumn("p.id", graph.TypeInt))
 			q.Validated.Parameters = []resolver.ResolvedParameter{wideParam}
 			return q
 		}
@@ -773,7 +771,7 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 			Name: "payload", Type: resolver.ResolvedProperty{Type: graph.TypeBytes},
 		}
 		bothAxes := func(sourceText string) codegen.NamedQuery {
-			q := alternationQuery("ActionsByBlob", sourceText,
+			q := textQuery("ActionsByBlob", sourceText,
 				resolver.Column{Name: "r", Type: twoCandidateEdgeUnion})
 			q.Validated.Parameters = []resolver.ResolvedParameter{wideParam}
 			return q
@@ -814,7 +812,7 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 		// later, which is the round-trip this ordering exists to remove.
 		batch := in
 		batch.Queries = []codegen.NamedQuery{
-			alternationQuery("Blobbed",
+			textQuery("Blobbed",
 				"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) RETURN p.payload AS payload\n",
 				resolver.Column{
 					Name: "payload",
@@ -832,6 +830,242 @@ func (s *EmissionSuite) TestRejectsRelationshipTypeAlternation() {
 		s.Require().ErrorContains(err, `1 query would be dropped: Bag (column "m" projects scalar(map))`)
 		s.Require().NotContains(err.Error(), "Blobbed",
 			"the query the text gate owns must not be reported on the column axis")
+	})
+}
+
+// wantUndefinedFunctionRefusal is this test's own copy of the second
+// text-level refusal, on the same terms as wantAlternationRefusal: a
+// change to the emission's wording has to be a change here too.
+func wantUndefinedFunctionRefusal(count int, noun, dropped string) string {
+	return fmt.Sprintf("undefined function: generated code runs the author's query text verbatim "+
+		"(ADR 0005) and Apache AGE 1.7.0 defines no temporal constructor at all, so every call on "+
+		"%d %s would answer \"function <name> does not exist\" — AGE's whole temporal surface is "+
+		"timestamp(), which returns epoch milliseconds as an integer, so compute the value in Go "+
+		"and bind it as a parameter, or generate against a neo4j target: %s", count, noun, dropped)
+}
+
+// TestRejectsUndefinedFunctions pins the second gap the text gate reads,
+// and it is the one whose entries have to be earned. AGE 1.7.0 answers
+// `RETURN datetime()` with `ERROR: function datetime does not exist`
+// (gqlc-35yu.5, measured against the image test/data/codegen pins), so a
+// call on one of those names is a package that compiles and whose every
+// call fails on the server — the alternation's failure mode with a
+// different production behind it.
+//
+// The refused set is DERIVED from the probe texts a live session was
+// measured on (internal/codegen/age/dialect.go), so what this test
+// really pins is that the derivation reaches the gate. The row that
+// matters most is the one asserting a name is NOT refused: localtime()
+// is every bit as suspect as datetime() and has no witness, and a
+// refusal list that grows on suspicion is a guess wearing a test suite.
+func (s *EmissionSuite) TestRejectsUndefinedFunctions() {
+	in := s.inputFrom(filepath.Join("testdata", corpusSchema))
+
+	for _, tc := range []struct {
+		name    string
+		queries []codegen.NamedQuery
+		count   int
+		noun    string
+		dropped string
+	}{
+		{
+			// The load-bearing shape. The call is in a predicate, which
+			// the query model drops (ADR 0003), so no column, parameter
+			// or binding carries it and only the text does.
+			name: "a call in a predicate the model drops is refused",
+			queries: []codegen.NamedQuery{textQuery("Recent",
+				"MATCH (p:Person) WHERE p.at < datetime() RETURN p.id\n",
+				scalarColumn("p.id", graph.TypeInt))},
+			count: 1, noun: "query", dropped: `Recent ("datetime")`,
+		},
+		{
+			name: "a call in a write that projects nothing is refused",
+			queries: []codegen.NamedQuery{execTextQuery("Touch",
+				"MATCH (p:Person) SET p.seen = datetime()\n")},
+			count: 1, noun: "query", dropped: `Touch ("datetime")`,
+		},
+		{
+			// The name is quoted as the author spelled it, because the
+			// refusal quotes it back and every character it prints has
+			// to be one the author typed. The catalogue is matched
+			// case-insensitively, which is what openCypher function
+			// resolution is.
+			name: "the name is quoted in the author's own case",
+			queries: []codegen.NamedQuery{textQuery("Recent",
+				"MATCH (p:Person) WHERE p.at < DateTime() RETURN p.id\n",
+				scalarColumn("p.id", graph.TypeInt))},
+			count: 1, noun: "query", dropped: `Recent ("DateTime")`,
+		},
+		{
+			name: "a query calling two undefined functions names both",
+			queries: []codegen.NamedQuery{textQuery("Window",
+				"MATCH (p:Person) WHERE p.at > date() AND p.d < duration({days: 1}) RETURN p.id\n",
+				scalarColumn("p.id", graph.TypeInt))},
+			count: 1, noun: "query", dropped: `Window ("date", "duration")`,
+		},
+		{
+			name: "every offending query in the batch is named",
+			queries: []codegen.NamedQuery{
+				servedQuery,
+				textQuery("Recent",
+					"MATCH (p:Person) WHERE p.at < datetime() RETURN p.id\n",
+					scalarColumn("p.id", graph.TypeInt)),
+				execTextQuery("Touch",
+					"MATCH (p:Person) SET p.seen = localdatetime()\n"),
+			},
+			count: 2, noun: "queries",
+			dropped: `Recent ("datetime"), Touch ("localdatetime")`,
+		},
+	} {
+		s.Run(tc.name, func() {
+			batch := in
+			batch.Queries = tc.queries
+			files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+			s.Require().Error(err)
+			s.Require().Nil(files, "a rejected batch must not return a partial file set")
+			s.Require().ErrorIs(err, age.ErrUndefinedFunction)
+			s.Require().NotErrorIs(err, age.ErrRelationshipTypeAlternation,
+				"two gaps with two answers, and a caller must be able to tell them apart")
+			s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
+			s.Require().EqualError(err, wantUndefinedFunctionRefusal(tc.count, tc.noun, tc.dropped))
+		})
+	}
+
+	s.Run("the one temporal function AGE does define is served", func() {
+		// timestamp() is not an omission from the catalogue, it is a
+		// measured PASS: the spike ran it and got epoch millis back
+		// (gqlc-35yu.5). A gate refusing every temporal-looking name
+		// would refuse the one call that works.
+		batch := in
+		batch.Queries = []codegen.NamedQuery{textQuery("Now",
+			"MATCH (p:Person) RETURN timestamp() AS t\n",
+			resolver.Column{Name: "t", Type: resolver.ResolvedScalar{Kind: resolver.ScalarInt}})}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().NoError(err)
+		s.Require().NotEmpty(files)
+	})
+
+	s.Run("a constructor with no witness is not refused", func() {
+		// The bound on the whole gate, and the reason it is a table and
+		// not a list of names someone believed. localtime() is as
+		// suspect as datetime() — AGE has no temporal type for either —
+		// and no session in this repo's record has ever run it. Adding
+		// it here means adding its probe and its answer, which means a
+		// live session; until then the author gets the portable
+		// temporal refusal when they project it and no refusal at all
+		// when they do not.
+		batch := in
+		batch.Queries = []codegen.NamedQuery{textQuery("Clock",
+			"MATCH (p:Person) WHERE p.at < localtime() RETURN p.id\n",
+			scalarColumn("p.id", graph.TypeInt))}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().NoError(err, "a suspicion is not a witness and must not be refused")
+		s.Require().NotEmpty(files)
+	})
+
+	// Cypher.g4 §oC_FunctionName is `oC_Namespace oC_SymbolicName`, and a
+	// server resolving `duration.between` resolves nothing about
+	// `duration`. The probe measured the bare name, so the bare name is
+	// what is refused.
+	//
+	// Both halves are here because only the second one can fail. Drop the
+	// namespace guard in cypher.UnqualifiedFunctionCalls and
+	// `duration.between` reports "between" — a name no probe entered into
+	// the catalogue, so nothing is refused either way and a row spelling
+	// only this shape stays green over a scanner that has stopped reading
+	// the namespace at all. `com.example.datetime()` reports "datetime",
+	// which IS in the catalogue: without the guard the author is refused
+	// a call to their own user-defined function on the strength of a
+	// probe that measured a different name. That is a false positive, the
+	// one failure this gate has no recovery from — ADR 0005 leaves no
+	// rewrite — so it is the shape worth pinning.
+	for _, tc := range []struct{ name, text string }{
+		{"the refused name is the namespace", "MATCH (p:Person) WHERE duration.between(p.a, p.b) > 0 RETURN p.id\n"},
+		{"the refused name is the symbolic name", "MATCH (p:Person) WHERE p.at < com.example.datetime() RETURN p.id\n"},
+	} {
+		s.Run("a namespaced call is a different name and is not refused: "+tc.name, func() {
+			batch := in
+			batch.Queries = []codegen.NamedQuery{textQuery("Between", tc.text,
+				scalarColumn("p.id", graph.TypeInt))}
+			files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+			s.Require().NoError(err)
+			s.Require().NotEmpty(files)
+		})
+	}
+
+	s.Run("a property named like a constructor is not a call", func() {
+		// The false positive a scan for `datetime(` would take, and the
+		// reason this reads the grammar. A property lookup names no
+		// function.
+		batch := in
+		batch.Queries = []codegen.NamedQuery{textQuery("Stamps",
+			"MATCH (p:Person) RETURN p.datetime AS t\n",
+			scalarColumn("t", graph.TypeInt))}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().NoError(err)
+		s.Require().NotEmpty(files)
+	})
+
+	s.Run("a projected constructor is answered here, ahead of the portable temporal refusal", func() {
+		// This gate's POSITION, pinned by its consequence. A projected
+		// date() is refused twice over: codegen.Prepare has no carrier
+		// for the temporal column (ADR 0025) and this server has no
+		// function to produce one. Running ahead of Prepare makes the
+		// missing function the answer, and that is the right order for
+		// the same reason the alternation's is — the text has to be
+		// rewritten before any column question can be put to this
+		// server at all, and no projection of date() will ever parse
+		// here whatever carrier AGE later grows.
+		batch := in
+		batch.Queries = []codegen.NamedQuery{textQuery("SeenOn",
+			"MATCH (e:Person) RETURN e.id AS id, date() AS seenOn\n",
+			scalarColumn("id", graph.TypeInt),
+			resolver.Column{Name: "seenOn", Type: resolver.ResolvedTemporal{Kind: resolver.TemporalDate}})}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrUndefinedFunction)
+		s.Require().NotErrorIs(err, codegen.ErrUnrepresentableTemporal,
+			"the carrier is not yet the obstacle: the statement never parses")
+		s.Require().EqualError(err, wantUndefinedFunctionRefusal(1, "query", `SeenOn ("date")`))
+	})
+
+	s.Run("an unserved column yields to this gap as it does to the alternation", func() {
+		// rejectUnservedQueries yields to the TEXT, not to one
+		// construct in it. A gap added to the table has to inherit the
+		// yield or the author is sent to fix a projection behind a
+		// statement that never parsed — the round trip the ordering
+		// exists to remove.
+		batch := in
+		batch.Queries = []codegen.NamedQuery{textQuery("Bagged",
+			"MATCH (p:Person) WHERE p.at < datetime() RETURN properties(p) AS bag\n",
+			resolver.Column{Name: "bag", Type: resolver.ResolvedScalar{Kind: resolver.ScalarMap}})}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrUndefinedFunction)
+		s.Require().NotErrorIs(err, age.ErrUnsupportedQuery)
+		s.Require().EqualError(err, wantUndefinedFunctionRefusal(1, "query", `Bagged ("datetime")`))
+	})
+
+	s.Run("the alternation is answered first when a query spells both", func() {
+		// Two gaps, one query, one message: the table is ordered and
+		// the first entry that fires answers. Which one wins matters
+		// less than that the answer is stable and names a real defect —
+		// but it must not be a merged message quoting a '|' and a
+		// function name under one sentinel, because a caller branching
+		// with errors.Is would then get an answer that is true of
+		// neither.
+		batch := in
+		batch.Queries = []codegen.NamedQuery{textQuery("Both",
+			"MATCH (:Person)-[r:AUTHORED|LIKES]->(p:Post) WHERE p.at < datetime() RETURN p.id\n",
+			scalarColumn("p.id", graph.TypeInt))}
+		files, err := age.New(age.WithPackageName(corpusPackage)).Generate(batch)
+		s.Require().Error(err)
+		s.Require().Nil(files)
+		s.Require().ErrorIs(err, age.ErrRelationshipTypeAlternation)
+		s.Require().NotErrorIs(err, age.ErrUndefinedFunction)
+		s.Require().EqualError(err, wantAlternationRefusal(1, "query", `Both (":AUTHORED|LIKES")`))
 	})
 }
 
