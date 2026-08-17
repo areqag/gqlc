@@ -40,13 +40,26 @@ import (
 // C1, C3, C4 and C5, and an ADR or a design note prints the same
 // signatures.
 //
-// It cannot shrink quietly — a root that stops existing fails docFiles by
-// name, and dropping `docs` loses every document the censuses below
-// declare. It can fail to grow: `AGENTS.md`, `CLAUDE.md` and
-// `CONTRIBUTING.md` sit beside the two files named here and are not
-// swept, and a new document at the repository root would join them
-// unnoticed. None of the three prints a query method or a driver-binding
-// literal today. That gap is gqlc-jfwo.
+// A root is held here by what the censuses below name beneath it, and by
+// nothing else. `docs` cannot leave this list quietly: every document
+// they name is under it, so deleting the entry loses all of them and each
+// is reported by name. `README.md` and `CONTEXT.md` can leave quietly —
+// no census names either, so deleting either entry is green and this
+// fence stops reading a file with nothing said. A root that stops
+// existing on disk is a third case and fails docFiles by name whichever
+// entry it is.
+//
+// That shrinkage is not closed here and cannot be. Everything this file
+// observes is walked out of docRoots, so no reconciliation against what
+// a sweep produced can notice docRoots losing an entry: the observation
+// is derived from the list being audited, which is the failure the
+// censuses below exist to stop repeating. Catching it needs a set of
+// candidate roots from outside the list — the repository's own top-level
+// markdown — and that is the same check that would catch the list
+// failing to grow, which is gqlc-jfwo. `AGENTS.md`, `CLAUDE.md` and
+// `CONTRIBUTING.md` sit beside the two files named here, are not swept,
+// and print no query method and no driver-binding literal today; a new
+// document at the repository root would join them unnoticed.
 var docRoots = []string{"docs", "README.md", "CONTEXT.md"}
 
 // repoRoot is where this package sits relative to the tree above. Swept
@@ -79,23 +92,53 @@ const repoRoot = "../../../"
 // edit that deletes a named document from a list in a test file, which
 // is the honest floor for any check that reads only these documents.
 //
-// Deliberately not counts. A count sits beside the thing it counts,
-// carries silent slack for every site it is under, and fails as
-// `13 != 14`, which names nothing to go and look at. A census fails as a
-// set difference with a name in it.
+// Deliberately not a count of sites. A site count sits beside the thing
+// it counts, carries silent slack for every site it is under, and fails
+// as `13 != 14`, which names nothing to go and look at. A census fails
+// as a set difference with a name in it. What a census is, though, is a
+// count of one per document, and that count has slack of its own — the
+// third omission below is exactly it, stated rather than argued away.
 //
 // The three sets come out different, and the difference is a fact about
 // the documents: C3's width and nullability bullets print the binding
 // literal without printing the method around it, so C3 owes a binding
 // and owes no signature.
 //
-// Two things these censuses do not reach, and they are different. Deleting
-// the documented surface outright is a two-part edit here — the document
-// and its line below — and the second part is the record, which is the
-// most any check reading only the documents it is pointed at can offer.
-// A document these censuses are never pointed at is the other, and it
+// Three things these censuses do not reach.
+//
+// Deleting the documented surface outright is the first. That is a
+// two-part edit here — the document and its line below — and the second
+// part is the record, which is the most any check reading only the
+// documents it is pointed at can offer.
+//
+// A document these censuses are never pointed at is the second, and it
 // leaves no record at all: the sets below name documents, not roots, so
 // they are silent about anything docRoots does not reach (gqlc-jfwo).
+//
+// The third is the largest, and unlike the first it is a one-part edit.
+// A listed document keeps its entry on one surviving graded site, so
+// every site past the first can leave the sweep with nothing said. Not
+// by being corrected — by ceasing to print `ctx context.Context`, which
+// is what the scanners anchor on, so a site that drifts in the anchor
+// itself drifts off an axis this file does not grade and takes its
+// argument name out of reach on the way. C4 §3.2's WriteQuerier member
+// `RemovePerson(ctx context.Context, arg int64)` — the declared
+// interface surface gqlc-rz0l singled out as drift in a surface rather
+// than in prose — is one of ten graded signatures in that document, and
+// rewriting its context parameter leaves every sweep in this file green.
+// So the honest floor is one graded site per listed document, not one
+// document per list.
+//
+// Left open on purpose, and the alternatives are the reason. A per-site
+// census keyed on the method name does not close it: C4 grades
+// `RemovePerson` at three separate sites, so its name survives any one
+// of them leaving. A per-site count does close it and is the shape
+// rejected above, failing as `9 != 10`. A per-site census of the graded
+// text closes it too, at the price of making this file a copy of the
+// documents — red on every honest edit to an example, and a fence that
+// reddens on honest edits is one whose census gets bulk-updated without
+// being read, which buys less than a floor of one that is written down.
+// This is where it is written down.
 const (
 	specC1 = "docs/specs/codegen-stage-c1.md"
 	specC3 = "docs/specs/codegen-stage-c3.md"

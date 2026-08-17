@@ -783,7 +783,7 @@ placeholder — dropped this document from the requirement and from
 the reading at the same instant, and the capture vector went back
 into this section green.
 
-Two things are left open, and they are not the same size. Deleting
+Three things are left open, and they are not the same size. Deleting
 the documented surface and its line in that test together is the
 first; that is a two-part edit which removes a named document from a
 list in a test file, and the second part is the record of it. The
@@ -792,7 +792,23 @@ documents, not roots, so they say nothing about markdown outside
 `docs/`, `README.md` and `CONTEXT.md`. `AGENTS.md`, `CLAUDE.md` and
 `CONTRIBUTING.md` are outside it today and print none of this
 surface; a new document at the repository root that did print it
-would be swept by nothing and recorded nowhere (`gqlc-jfwo`).
+would be swept by nothing and recorded nowhere (`gqlc-jfwo`). The
+same list is what holds `README.md` and `CONTEXT.md` in scope at all,
+and nothing holds it: no census names a document under either, so
+dropping either from the fence's roots is green.
+
+The third is the largest and, unlike the first, is a single edit in
+one place. A listed document owes *one* graded site, not all of them,
+so every site past the first can leave the sweep silently — not by
+being corrected, but by ceasing to print `ctx context.Context`, which
+is what the fence anchors on. The `RemovePerson(ctx context.Context,
+arg int64)` member of C4 §3.2's `WriteQuerier` block is one of ten
+graded signatures in C4; rewrite its context parameter and the fence
+stays green over whatever its argument position then says. The floor
+is one graded site per listed document. Closing that means recording
+every graded site rather than every graded document, which makes the
+test a verbatim copy of these documents and turns every honest edit
+to an example red — so it is written down here instead.
 
 That is the whole of what is fenced: the *name*. Return types, decode
 bodies, `<zero>` values and every other signature in this document
