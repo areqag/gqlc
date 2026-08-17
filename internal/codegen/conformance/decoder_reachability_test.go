@@ -330,9 +330,8 @@ type entityDecoder struct {
 // Its subject is also the decoders and only the decoders. A label guard an
 // emitted *query method* carries inline sits in no decoder body and is not
 // read here, because a function with a receiver is classified by nothing
-// and its comparisons are collected by nothing — nor are a helper
-// closure's, when the closure fills no entity and so belongs to the method
-// that holds it. The
+// and the strings its own body compares — outside any function literal
+// written in it — are collected by nothing. The
 // edge-union dispatch is that shape, and it is neo4j's alone:
 // walkListElemBody and writeEdgeUnionDispatchBody
 // (internal/codegen/neo4j/render_queries.go) both write
