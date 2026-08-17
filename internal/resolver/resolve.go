@@ -880,8 +880,13 @@ func orientationDisagreement(cands []schema.EdgeKey, srcs, tgts []graph.LabelSet
 // (tgts). Each is a claim about BOTH the candidate's ends: a key reads
 // left-to-right when its Source is a type the pattern admits on the left and
 // its Target one it admits on the right, and right-to-left when the same holds
-// with the slices exchanged. Both can be true of one key, and on a directed
-// close only the left-to-right reading was ever probed.
+// with the slices exchanged. Both can be true of one key: a directed close
+// probes only the left-to-right reading, but where srcs and tgts overlap a
+// candidate it returns still answers to the other one. endpointContribution
+// asks both questions of every candidate whatever the arrow said, so such a key
+// contributes both of its ends and the result is a superset of what the arrow
+// permits — widening in ADR 0006's safe direction, filed as gqlc-pv0u rather
+// than narrowed here.
 //
 // Package-level rather than closures inside orientationDisagreement because the
 // endpoint narrowing asks the same question of the same candidate set and must

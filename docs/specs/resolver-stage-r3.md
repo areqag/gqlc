@@ -882,9 +882,13 @@ edge, so none of them tells the two apart.
 disqualifier, because a rule poisoning on one arm alone passes the
 other row.
 
-The first arm is §4.4.3's demotion gate, spelled the same way and read
-for the same reason: both ask whether the edge is guaranteed on a
-surviving row. The second is **strictly narrower** than §4.4.3's, and
+The first arm asks §4.4.3's demotion question — is this edge
+guaranteed on a surviving row — but it is not §4.4.3's guard.
+`DemoteNullability` exempts an OPTIONAL edge whose group is already
+proven; this arm does not, so an OPTIONAL edge inside a proven group
+is a witness this pass declines to use. Honouring `demotedGroups`
+here would narrow strictly more, and is filed as `gqlc-o8oc` rather
+than taken. The second is **strictly narrower** than §4.4.3's, and
 the difference is the point. `qualifiedDemoter` rejects a zero lower
 bound only, which is all `DemoteNullability` needs — nullability is a
 statement about the endpoints *existing*, and a longer path still ends
