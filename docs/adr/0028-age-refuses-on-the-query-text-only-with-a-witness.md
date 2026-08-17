@@ -123,11 +123,14 @@ and the selector composed, over justfile source the test writes, with a row for
 each of L18, L19 and L20, for both directions of the unanchored match, and for
 the subtest carve-out.
 
-**What the sweep does not check: that the recipe builds the live tag.** It reads
-`-run`, `-skip` and `-count=1` and says nothing about `-tags codegen_live`.
-Dropping that flag from a recipe compiles none of the live battery, so no witness
-runs and every complaint here stays silent — the same class as L18, one flag
-further along, and left open rather than closed.
+**What the sweep does not check: that the recipe builds the live tag, or points
+at the live packages.** It reads `-run`, `-skip` and `-count=1`, and says nothing
+about `-tags codegen_live`, about the `cd test/data/codegen` in front of it, or
+about the `./...` after it. Dropping the tag compiles none of the live battery;
+narrowing the path leaves the pattern selecting a test that is no longer in the
+package set. Either one runs no witness while every complaint here stays silent —
+the same class as L18, one argument further along, and left open rather than
+closed. Nothing on the command line is checked beyond test selection.
 
 **What the sweep does not check: that the answer is asserted.** It requires the
 recorded answer to appear in the witness's body, not to be the subject of an
