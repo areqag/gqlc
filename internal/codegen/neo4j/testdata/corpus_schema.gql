@@ -70,5 +70,8 @@ CREATE PROPERTY GRAPH TYPE Neo4jCorpus AS {
         loose   :: LIST,
         depths  :: LIST<FLOAT32>,
         weight  :: FLOAT32
+    }]-> (:Listy),
+    (:Scalar) -[:Edgier {
+        tag :: STRING NOT NULL
     }]-> (:Listy)
 }
