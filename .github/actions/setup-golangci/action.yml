@@ -1,0 +1,32 @@
+# Restores the pinned golangci-lint binary into .bin/ from the runner cache, so
+# the jobs that lint do not each re-download it (bd gqlc-l45j). On 2026-08-17,
+# with ~8 of this repo's PRs running CI at once, GitHub answered that download
+# with HTTP 429 and killed required contexts in setup, before the change under
+# review had been compiled. A cache hit makes no request at all; a miss still
+# downloads, through the retry loop in the justfile's ensure-golangci.
+#
+# Requires just on PATH — run ./.github/actions/setup-just first.
+#
+# The version is read out of the justfile rather than restated here. A literal
+# would be a second place to bump, and a stale one would key the cache to a
+# version ensure-golangci then rejects, so every job would re-download behind a
+# green cache step. A rename of the justfile variable fails this step rather
+# than emptying the key: a composite `shell: bash` step runs under `bash -e -o
+# pipefail`, so the failing command substitution aborts the assignment.
+# internal/tools/ciguard pins that derivation, and pins the path below against
+# the path the justfile installs to.
+name: setup-golangci
+description: restore the pinned golangci-lint binary into .bin/ from cache
+runs:
+  using: composite
+  steps:
+    - name: read the pinned golangci-lint version
+      id: pin
+      shell: bash
+      run: echo "version=$(just --evaluate golangci_version)" >> "$GITHUB_OUTPUT"
+
+    - name: restore golangci-lint binary from cache
+      uses: actions/cache@v4
+      with:
+        path: .bin/golangci-lint
+        key: golangci-bin-${{ runner.os }}-${{ steps.pin.outputs.version }}

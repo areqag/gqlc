@@ -73,6 +73,21 @@ doctor: check-hooks
 # or version-mismatched (~3s; official release binary — golangci-lint does not
 # support builds from source). The happy path is a ~30ms version check, cheap
 # enough to run before every lint/fmt invocation, in hooks included.
+#
+# The download is TWO hops: raw.githubusercontent.com for install.sh, then the
+# release asset install.sh fetches for itself. curl's own --retry covers the
+# first hop only, which is why the retry here is a loop around the whole
+# pipeline rather than a flag (ensure-shellcheck below is a single hop, so the
+# flags suffice there). Measured on 2026-08-17 (bd gqlc-l45j): GitHub returned
+# HTTP 429 on this download while ~8 of this repo's PRs had CI in flight, and
+# with no retry that killed a required context in setup, before the change was
+# read. The failure message names provisioning rather than lint so a reader can
+# tell a setup death from a real finding without opening the log.
+#
+# GQLC_PROVISION_ATTEMPTS / GQLC_PROVISION_DELAY size the budget; the retry
+# tests in .githooks/tests/tool-gate-test.sh set them to keep the failing case
+# fast. An attempts value below 1 runs the loop zero times and falls through to
+# the error, so a malformed budget blocks rather than passes.
 [private]
 ensure-golangci:
     #!/usr/bin/env bash
@@ -82,9 +97,25 @@ ensure-golangci:
         exit 0
     fi
     echo "provisioning golangci-lint $want into .bin/" >&2
-    curl --proto '=https' --tlsv1.2 -sSfL \
-        "https://raw.githubusercontent.com/golangci/golangci-lint/$want/install.sh" \
-        | sh -s -- -b {{quote(justfile_directory() + "/.bin")}} "$want"
+    attempts="${GQLC_PROVISION_ATTEMPTS:-4}"
+    delay="${GQLC_PROVISION_DELAY:-2}"
+    attempt=1
+    while [ "$attempt" -le "$attempts" ]; do
+        if curl --proto '=https' --tlsv1.2 -sSfL \
+                "https://raw.githubusercontent.com/golangci/golangci-lint/$want/install.sh" \
+            | sh -s -- -b {{quote(justfile_directory() + "/.bin")}} "$want"; then
+            exit 0
+        fi
+        echo "ensure-golangci: provisioning attempt $attempt of $attempts failed" >&2
+        if [ "$attempt" -lt "$attempts" ]; then
+            sleep "$delay"
+            delay=$((delay * 2))
+        fi
+        attempt=$((attempt + 1))
+    done
+    echo "error: could not provision golangci-lint $want after $attempts attempt(s)." >&2
+    echo "       This is a tool-download failure, not a lint finding." >&2
+    exit 1
 
 # provisions the pinned shellcheck into the gitignored .bin/ when missing or
 # version-mismatched, exactly as ensure-golangci does: the happy path is a
@@ -649,6 +680,7 @@ test-hooks:
     bash .githooks/tests/bd-gh-sync-test.sh
     bash .githooks/tests/lint-hooks-test.sh
     bash .githooks/tests/check-pr-closes-test.sh
+    bash .githooks/tests/tool-gate-test.sh
 
 # runs the whole suite (unit, golden snapshots, godog) in one shot. Independent
 # of fetch-tck: the TCK is vendored, so there is no network at test time.
