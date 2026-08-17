@@ -463,7 +463,8 @@ fi
 # A trailing block cut in bd leaves the same two bodies as a block appended on
 # GitHub: b-ahead above and b-trailing-cut below are the same shape, and
 # b-ahead must pull. What separates them is not in the bodies. Both sides carry
-# an edit time, and the two fixtures differ only there.
+# an edit time, and that is the only input the code decides on that the two
+# fixtures differ in.
 
 run_sync pull \
     "[{\"id\":\"b-trailing-cut\",\"status\":\"open\",\"external_ref\":\"$ISSUE/13\",\"description\":\"line one\",\"updated_at\":\"$T_LATE\"}]" \
