@@ -150,8 +150,9 @@ const typeTableSource = "types.go"
 // admits and no probe entity declares, and this test passes over it
 // (gqlc-wdo7).
 //
-// The obligation runs in both directions: every width the probe declares
-// has a carrier, and every carried width is one the probe declares.
+// The obligation runs in both directions over that set: every width the
+// probe declares has a carrier, and every carried constant is one the
+// probe declares.
 func TestDecoderProbeCoversTheTypeTable(t *testing.T) {
 	declared := graphPropertyTypes(t)
 	arms := propertyArmNames(t)
