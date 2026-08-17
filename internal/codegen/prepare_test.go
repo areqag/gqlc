@@ -802,3 +802,79 @@ func TestReservedScopeMatchesTheEmittedGoldens(t *testing.T) {
 		})
 	}
 }
+
+// fixedDeclarationFiles names the emitted files whose exported
+// declarations are the emitter's own and the same for every batch: the
+// handle and its seam in db.go, the Apache AGE graph lifecycle in
+// graph.go, the three interfaces in querier.go. Every other emitted file
+// declares names derived from the input — entity structs, query methods,
+// Params, Row, edge-union interfaces — which are sources 1-6 of the
+// sweep, not source 0.
+var fixedDeclarationFiles = map[string]bool{"db.go": true, "graph.go": true, "querier.go": true}
+
+// TestEveryEmittedFixedDeclarationIsReserved is the direction
+// TestReservedScopeMatchesTheEmittedGoldens does not run. That one takes
+// each reserved row and finds its declaration; this one takes each
+// exported declaration in fixedDeclarationFiles and requires a row for
+// it. Without it the set can be complete today and quietly stop being
+// complete: an emitter that grows a new exported package-level
+// declaration leaves every other guard here green, and `NODE TYPE
+// <thatName>` then emits a package that does not compile — the defect
+// gqlc-e6mh closed, reopened by addition rather than by edit.
+//
+// Membership is all this asserts. The scope column is held by the sweep
+// above, which covers any name once it is a row, so repeating the scope
+// check here would only duplicate its fail.
+func TestEveryEmittedFixedDeclarationIsReserved(t *testing.T) {
+	paths, err := filepath.Glob(goldenCorpusGlob)
+	require.NoError(t, err)
+	require.NotEmpty(t, paths, "no golden Go under %s, so this sweep holds nothing", goldenCorpusGlob)
+
+	// name -> one path declaring it, for the fail message.
+	found := map[string]string{}
+	swept := 0
+	fset := token.NewFileSet()
+	for _, path := range paths {
+		if !fixedDeclarationFiles[filepath.Base(path)] {
+			continue
+		}
+		swept++
+		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		require.NoError(t, err, "parsing %s", path)
+		record := func(name string) {
+			if !ast.IsExported(name) {
+				return
+			}
+			if _, seen := found[name]; !seen {
+				found[name] = path
+			}
+		}
+		for _, decl := range file.Decls {
+			switch d := decl.(type) {
+			case *ast.GenDecl:
+				for _, spec := range d.Specs {
+					switch s := spec.(type) {
+					case *ast.TypeSpec:
+						record(s.Name.Name)
+					case *ast.ValueSpec:
+						for _, n := range s.Names {
+							record(n.Name)
+						}
+					}
+				}
+			case *ast.FuncDecl:
+				record(d.Name.Name)
+			}
+		}
+	}
+	require.NotZero(t, swept,
+		"the corpus holds none of %v, so every exported declaration this test exists to catch went unread",
+		fixedDeclarationFiles)
+
+	for name, path := range found {
+		_, reserved := reservedIdentifiers[name]
+		require.True(t, reserved,
+			"%s declares exported %q, which reservedIdentifiers does not hold; a schema element deriving that name would redeclare it and the emitted package would not compile",
+			path, name)
+	}
+}
