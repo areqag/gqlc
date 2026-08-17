@@ -83,9 +83,21 @@ var (
 // TestResolvedTypeSumIsNotClosed/declared_variants, which walks the
 // package's isResolvedType declarations and reddens when the set moves.
 // A ninth variant would leave this list short and nothing in this
-// package would say so. It would also need no edit here to be handled:
-// resolvedTypeName enumerates no variant, so the pointer form of a ninth
-// renders by the same route these eight do.
+// package would say so. Neither would shrinking it: every entry supplies
+// its own subtest in each of the three groups below and nothing counts
+// them, so dropping entries — up to emptying the map, which deletes most
+// of the leaves in this file — leaves every package here green. Review
+// measured that. What each surviving entry still pins is which pointer
+// form it names, since the subtest asserts the rendered name: swapping an
+// entry's value for a different variant's pointer reddens.
+//
+// No length assertion is written here, deliberately. Eight is a fact
+// about internal/resolver, and a second copy of it in this file is the
+// two-carriers-one-number shape that has already cost this branch a
+// round; the guard against the set moving belongs where the set is
+// declared, which is where it is. A ninth would also need no edit here to
+// be handled: resolvedTypeName enumerates no variant, so the pointer form
+// of a ninth renders by the same route these eight do.
 //
 // That derivation is not reachable with `go test -overlay`, which is a
 // trap worth naming: parsePackageSources reads the package directory
@@ -152,20 +164,34 @@ func generateUnmatched(t *testing.T, q codegen.NamedQuery) error {
 }
 
 // TestUnmatchedResolvedTypeRefusesRatherThanFaulting is gqlc-edze's
-// measurement. Three fail-sites end a walk over resolver.ResolvedType by
-// naming the value that reached them — Phase A's column switch, Phase
-// A's parameter type assertion, and buildListElemPlan's element switch —
-// and each names it by calling the value's own String().
+// measurement. Five fail-sites end a walk over resolver.ResolvedType by
+// naming the value that reached them, and each named it by calling that
+// value's own String() before this fix. Three of the five are reachable
+// from outside the package — Phase A's column switch, Phase A's
+// parameter type assertion, and buildListElemPlan's element switch — and
+// those three are what the groups below measure, one group each. The
+// other two are the sites tagged //gqlc:unreachable param-type-invariant
+// and //gqlc:unreachable column-type-invariant, which §3 of
+// docs/specs/codegen-sentinel-taxonomy.md argues Phase A shadows and
+// TestUnreachedBranchesAreUnreached measures as uncovered. Reverting
+// either of those two to a direct String() call leaves every package
+// here green: that survival is the §3 shadow holding, not a gap in this
+// file, and this file measures neither site. resolvedTypeName's own doc
+// comment carries the same split beside the grep that re-derives it.
 //
 // That call is into code this package does not own, on a value chosen
 // because no arm matched it. The interface's unexported marker seals
-// which types may DECLARE it, not which may satisfy it: pointer forms
-// and embedders promote it from any package in the module (AGENTS.md,
-// "Closed sum types"). So the set reaching these three sites includes
-// the nil interface, all eight typed-nil pointer forms, structs whose
-// embedded pointer to a variant is nil, and structs embedding
-// resolver.ResolvedType itself — and String() on each of those faults.
-// Each case below panicked before the fix instead of returning.
+// which types may DECLARE it, not which may satisfy it: a pointer form
+// carries the marker, and an embedder can promote it, from any package
+// in the module (AGENTS.md, "Closed sum types"). Can, not does — a
+// struct embedding two variants at equal depth promotes neither's
+// methods, so struct{resolver.ResolvedNode; resolver.ResolvedEdge}
+// satisfies the interface in neither its value nor its pointer form and
+// reaches no fail-site at all. So the set reaching those three reachable
+// sites includes the nil interface, all eight typed-nil pointer forms,
+// structs whose embedded pointer to a variant is nil, and structs
+// embedding resolver.ResolvedType itself — and String() on each of those
+// faults. Each case below panicked before the fix instead of returning.
 //
 // Those four shapes are what this measures, not what the set holds.
 // Whether a value faults is a fact about the String() it ends up
@@ -322,11 +348,22 @@ func TestUnmatchedResolvedTypeKeepsTheWireTagWhereThereIsOne(t *testing.T) {
 	// column-unknown-variant row in docs/specs/codegen-sentinel-taxonomy.md.
 	// Review measured that deleting the case leaves every package green and
 	// all three citations pointing at nothing. This is what reddens instead.
+	//
+	// The shapes are held beside the names because a name is not what those
+	// citations are about. Both cases assert the same `resolved as node`, so
+	// giving value-embedder a plain *resolver.ResolvedNode leaves the suite
+	// green under an unchanged name, and the three citations would then point
+	// at a case that embeds nothing — the review that added the name pin
+	// measured that too.
 	names := make([]string, 0, len(cases))
+	shapes := make(map[string]resolver.ResolvedType, len(cases))
 	for _, tc := range cases {
 		names = append(names, tc.name)
+		shapes[tc.name] = tc.typ
 	}
 	require.Equal(t, []string{"pointer-form", "value-embedder"}, names)
+	require.IsType(t, &resolver.ResolvedNode{}, shapes["pointer-form"])
+	require.IsType(t, embeddedNode{}, shapes["value-embedder"])
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
