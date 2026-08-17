@@ -94,6 +94,17 @@ FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})([^\n]*)$")
 # the <script> one is rowed in the suite. group(1) is the tag, so the closer
 # has to be that same tag.
 HTML_OPEN = re.compile(r"^ {0,3}<(pre|code)(?:[\s>]|$)", re.I)
+# A complete comment on one line. Removed before a closing tag is looked for,
+# because a closing tag inside a comment does not end the block a reader
+# sees: markdown's line scanner does stop the HTML block on the line that
+# spells '</pre>', but the sanitiser then drops the comment, which leaves the
+# element open, and the marker below it lands inside it. Measured, both
+# spellings rowed: '<pre><!-- </pre> -->' with a marker under it, and '<pre>'
+# followed by '<!-- </pre> -->', each render the marker inside the <pre>.
+# Non-greedy so two comments on a line are two runs. Never applied to text
+# holding an unterminated '<!--' -- both call sites have already truncated
+# there or established there is none -- so it cannot reach across lines.
+COMMENT_RUN = re.compile(r"<!--.*?-->")
 # A branch name carries the id with no marker, so the alphabet has to be
 # spelled out: '\S+' would swallow the rest of 'fix/gqlc-w4al-body-edits'.
 BEAD_IN_BRANCH = re.compile(r"(?i)(gqlc-[a-z0-9.]+)")
@@ -294,9 +305,12 @@ def prose_only(pr_body):
             head = line if cut is None else line[:cut]
             m = HTML_OPEN.match(head)
             # '<pre>x</pre>' on one line closes on that line, so the lines
-            # below it are prose again.
+            # below it are prose again -- but only a closing tag COMMENT_RUN
+            # leaves standing counts.
             opened = None
-            if m and f"</{m.group(1).lower()}" not in head.lower():
+            if m and f"</{m.group(1).lower()}" not in COMMENT_RUN.sub(
+                "", head
+            ).lower():
                 opened = ("html", m.group(1).lower())
             if cut is not None:
                 state = ("comment", opened)
@@ -339,7 +353,7 @@ def prose_only(pr_body):
             # else, so the comment is checked before the closing tag.
             if comment_opens_at(line) is not None:
                 state = ("comment", state)
-            elif f"</{state[1]}" in line.lower():
+            elif f"</{state[1]}" in COMMENT_RUN.sub("", line).lower():
                 state = None
         else:
             m = FENCE.match(line)
