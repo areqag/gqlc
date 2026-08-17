@@ -1,5 +1,5 @@
 {
-  "package": "unrepresentabletemporaldatecolumn",
+  "package": "unrepresentabletemporallocaltimecolumn",
   "queryFiles": ["queries.cypher"],
   "targets": ["apache-age-pgx-v5"],
   "expectedError": "codegen.ErrUnrepresentableTemporal"

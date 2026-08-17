@@ -182,6 +182,72 @@ const (
 	spacedAlternationQuery = "// name: PostIDs :one\n" +
 		"MATCH (:Person)-[r:AUTHORED | LIKES]->(p:Post) RETURN p.id\n"
 
+	// constructorSchema carries every property the constructor rows read
+	// or write, so the front end resolves each of them for real and what
+	// answers is the dialect gate rather than an unknown property. The
+	// property literally named `datetime` is the false positive a scan
+	// for the name would take.
+	constructorSchema = `CREATE PROPERTY GRAPH TYPE People AS {
+    (:Person {
+        id       :: INT64 NOT NULL,
+        seenAt   :: INT64 NOT NULL,
+        seen     :: INT64,
+        toTimestamp :: INT64
+    })
+}
+`
+	// The three refused shapes. Each reaches the server with a call AGE
+	// has no function for, and the first two reach the resolved columns
+	// with nothing to refuse.
+	//
+	//   predicate — the query model drops predicate structure (ADR 0003),
+	//               so the call leaves no column, parameter or binding.
+	//   exec      — a write projects nothing at all and ships its whole
+	//               text.
+	//   projected — the one shape a column CAN see, and so the ordering
+	//               row: codegen.Prepare has no carrier for the temporal
+	//               column either, and which refusal the author gets is
+	//               what says where this gate sits.
+	predicateConstructorQuery = "// name: Recent :one\n" +
+		"MATCH (p:Person) WHERE p.seenAt < datetime() RETURN p.id AS id\n"
+	execConstructorQuery = "// name: Touch :exec\n" +
+		"MATCH (p:Person) SET p.seen = localdatetime()\n"
+	projectedConstructorQuery = "// name: SeenOn :one\n" +
+		"MATCH (p:Person) RETURN p.id AS id, date() AS seenOn\n"
+
+	// The served shapes, which are the bound on all three. A refusal that
+	// is wrong costs the author a query that would have worked and ADR
+	// 0005 leaves them no rewrite, so what this gate does NOT refuse is
+	// the half worth asserting at the seam.
+	//
+	//   unwitnessed — localtime() is every bit as suspect as datetime()
+	//                 and no session has run it, so it is not in the
+	//                 table and must generate (bd gqlc-osf1).
+	//   namespaced  — Cypher.g4 §oC_FunctionName is `oC_Namespace
+	//                 oC_SymbolicName`, so duration.between is a
+	//                 different name from the probed `duration`. Two
+	//                 spellings, because only one of them can fail: drop
+	//                 the namespace guard and `duration.between` reports
+	//                 "between", which no probe put in the catalogue, so
+	//                 nothing is refused either way. `com.example.
+	//                 datetime()` reports "datetime", which IS in it, and
+	//                 the author is refused a call to a function they
+	//                 defined on the strength of a probe that measured
+	//                 another name.
+	//   property    — p.toTimestamp spells a refused name and calls
+	//                 nothing. Not `datetime`, because GQL reserves that
+	//                 word and no schema can declare a property with it;
+	//                 `toTimestamp` is a catalogue name the schema
+	//                 grammar does admit.
+	unwitnessedConstructorQuery = "// name: Clock :one\n" +
+		"MATCH (p:Person) WHERE p.seenAt < localtime() RETURN p.id AS id\n"
+	namespacedConstructorQuery = "// name: Between :one\n" +
+		"MATCH (p:Person) WHERE duration.between(p.seenAt, p.seenAt) > 0 RETURN p.id AS id\n"
+	namespacedRefusedNameQuery = "// name: Recent :one\n" +
+		"MATCH (p:Person) WHERE p.seenAt < com.example.datetime() RETURN p.id AS id\n"
+	constructorNamedPropertyQuery = "// name: Stamps :one\n" +
+		"MATCH (p:Person) RETURN p.toTimestamp AS stamp\n"
+
 	// wideColumnAlternationSchema declares narrowedSchema's two
 	// relationship types over a Post carrying a BYTES property, so one
 	// query can trip the text gate and an unserved COLUMN at once. BYTES
@@ -653,6 +719,114 @@ func TestRunApacheAgeRefusesRelationshipTypeAlternation(t *testing.T) {
 			writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverNeo4jGoV5), ""))
 			res, err = pipeline.Run(cfgPath, backendRegistry(t))
 			require.NoError(t, err)
+			require.Empty(t, res.Diagnostics)
+		})
+	}
+}
+
+// TestRunApacheAgeRefusesUndefinedFunctions pins the gap table's second
+// entry at the same seam, and it is the entry that needed the seam most.
+//
+// Every other test of this gate hands the backend a codegen.NamedQuery
+// built by hand, with a SourceText and a column list written beside each
+// other. That is enough to test the gate and not enough to test that an
+// author ever reaches it: a query calling a function nothing declares
+// has several earlier places it could die — the parse, the resolver's
+// typing of the call, the property lookups around it — and if it died in
+// any of them, the whole undefined-function gap would be machinery
+// guarding a door nobody walks through. These rows run the real front
+// end over files on disk, so reaching the refusal is part of the claim.
+//
+// The refused rows are one per way a call escapes the resolved model:
+// a predicate the query model drops (ADR 0003), a write that projects
+// nothing, and a projection — which is also the ordering row, since
+// codegen.Prepare would answer that same column with the portable
+// ErrUnrepresentableTemporal if this gate ran later.
+//
+// The served rows are the half the asymmetry makes important. A missing
+// refusal costs the author a runtime error they were getting anyway; a
+// wrong one costs them a working query, and ADR 0005 leaves no rewrite,
+// no escape hatch and no flag. So an unwitnessed constructor, a
+// namespaced call and a property spelling a constructor's name all have
+// to generate, at the seam, against this backend.
+func TestRunApacheAgeRefusesUndefinedFunctions(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		query string
+		// dropped is the "<Name> (<names>)" list the refusal ends with,
+		// written out per row rather than derived.
+		dropped string
+		// portable is the shared refusal this gate must answer ahead of,
+		// or nil where no other gate applies to the row.
+		portable error
+	}{
+		{
+			name:    "a constructor in a predicate reaches no column",
+			query:   predicateConstructorQuery,
+			dropped: `Recent ("datetime")`,
+		},
+		{
+			name:    "a constructor in a write that projects nothing",
+			query:   execConstructorQuery,
+			dropped: `Touch ("localdatetime")`,
+		},
+		{
+			name:     "a projected constructor is answered here, ahead of the carrier",
+			query:    projectedConstructorQuery,
+			dropped:  `SeenOn ("date")`,
+			portable: codegen.ErrUnrepresentableTemporal,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir, cfgPath := writeProject(t)
+			writeFixtureFile(t, filepath.Join(dir, "schema.gql"), constructorSchema)
+			writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), tc.query)
+			writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverApacheAgePgxV5), ""))
+
+			res, err := pipeline.Run(cfgPath, backendRegistry(t))
+			require.ErrorIs(t, err, age.ErrUndefinedFunction)
+			require.NotErrorIs(t, err, age.ErrRelationshipTypeAlternation,
+				"two gaps with two fixes, and a caller must be able to tell them apart")
+			require.NotErrorIs(t, err, age.ErrUnsupportedQuery)
+			if tc.portable != nil {
+				require.NotErrorIs(t, err, tc.portable,
+					"the carrier is not yet the obstacle: the statement never parses on this server")
+			}
+			require.EqualError(t, err, "graph[0]: undefined function: generated code runs the author's "+
+				"query text verbatim (ADR 0005) and Apache AGE 1.7.0 defines no temporal constructor at "+
+				`all, so every call on 1 query would answer "function <name> does not exist" — AGE's `+
+				"whole temporal surface is timestamp(), which returns epoch milliseconds as an integer, "+
+				"so compute the value in Go and bind it as a parameter, or generate against a neo4j "+
+				"target: "+tc.dropped)
+			require.Equal(t, pipeline.Result{}, res)
+
+			// The same project on a driver whose server defines the
+			// constructor generates, so what failed above is this backend's
+			// answer and not the schema, the query or the resolver.
+			writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverNeo4jGoV5), ""))
+			res, err = pipeline.Run(cfgPath, backendRegistry(t))
+			require.NoError(t, err)
+			require.Empty(t, res.Diagnostics)
+		})
+	}
+
+	for _, tc := range []struct {
+		name  string
+		query string
+	}{
+		{"an unwitnessed constructor is not refused", unwitnessedConstructorQuery},
+		{"a namespaced call whose namespace is a refused name", namespacedConstructorQuery},
+		{"a namespaced call whose symbolic name is a refused name", namespacedRefusedNameQuery},
+		{"a property named like a constructor is not a call", constructorNamedPropertyQuery},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir, cfgPath := writeProject(t)
+			writeFixtureFile(t, filepath.Join(dir, "schema.gql"), constructorSchema)
+			writeFixtureFile(t, filepath.Join(dir, "queries", "people.cypher"), tc.query)
+			writeFixtureFile(t, cfgPath, configYAML("people", string(config.DriverApacheAgePgxV5), ""))
+
+			res, err := pipeline.Run(cfgPath, backendRegistry(t))
+			require.NoError(t, err, "a suspicion is not a witness, and this backend must not refuse on one")
 			require.Empty(t, res.Diagnostics)
 		})
 	}
