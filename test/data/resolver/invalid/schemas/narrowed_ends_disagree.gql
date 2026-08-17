@@ -1,7 +1,9 @@
 -- Two edges out of ONE bare binding whose narrowed far ends pin it to
 -- different types, so the narrowed intersection is empty while the unnarrowed
--- one is not. No other schema in the corpus can reach that: it needs a bare
--- binding with two pinnable edges whose declarations cross.
+-- one is not. That needs a bare binding with two pinnable edges whose
+-- declarations cross, and nothing else here has it: drop candidateTypes'
+-- fallback and exactly one cell of the corpus sweep moves, this fixture on this
+-- schema.
 --
 -- `(:Author)` is satisfied by Author and Author&Editor; `(:Book)` by Book and
 -- Book&Rare; `(:Venue)` by Venue and Venue&Large. WROTE and SPOKE_AT each pair
