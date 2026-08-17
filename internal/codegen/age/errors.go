@@ -235,14 +235,25 @@ func rejectUnservedQueries(queries []codegen.NamedQuery) error {
 // is edgeUnionReason's text, which names the candidates the schema
 // declares; unservedColumn reaches it from `case
 // resolver.ResolvedEdgeUnion:`, which matches the value form and nothing
-// else, so the assertion and that arm agree exactly. A pointer or embedded
-// edge union — which satisfies resolver.ResolvedType without matching any
-// arm, see unservedColumn's fall-through — is refused there instead, with
-// "projects edgeUnion". That names no candidate, so it says strictly less
-// than the alternation the text gate quotes back, and ranking it above the
-// text would make the author worse off in exactly the trade the exception
-// below exists to avoid. TestEdgeUnionRankingFlagNamesTheValueFormOnly
-// holds both halves, so widening the assertion reddens it.
+// else, so the assertion recognises exactly the arm that calls
+// edgeUnionReason and no reason that function did not write.
+//
+// A pointer or embedded edge union satisfies resolver.ResolvedType without
+// matching any arm, so it is refused at unservedColumn's fall-through
+// instead. Where such a shape declares no String of its own, the variant's
+// promoted one answers and the reason reads "projects edgeUnion": no
+// candidate named, less than the alternation the text gate quotes back, so
+// yielding to the text costs the author nothing the exception below is
+// there to protect. Both those forms are held to that exact reason by
+// TestEdgeUnionRankingFlagNamesTheValueFormOnly.
+//
+// A shape that DOES declare String shadows the promoted one, and then the
+// fall-through reason is that method's text — an embedder can return the
+// candidate names themselves and reach this function with the flag false
+// and edgeUnionReason never called. So the reason's wording is not
+// evidence of where it came from, and taking the rank off the column's
+// type is what confines it to answers edgeUnionReason actually gave. The
+// same test pins that shape; widening the assertion reddens all of them.
 //
 // The parameter arm answers false without asking: a parameter is a schema
 // property or it is nothing this backend encodes, and neither is an edge
@@ -463,17 +474,25 @@ func unservedColumn(t resolver.ResolvedType) string {
 	// refused on the same terms: dropped rather than emitted through an arm
 	// chosen for some other shape, because a column no arm here recognises
 	// has no decode arm either and serving it would emit a method that
-	// cannot fill its row. The reason carries the width vocabulary only:
-	// "projects " and the variant's diagnostic Stringer, which for
-	// ResolvedProperty, ResolvedScalar and ResolvedTemporal composes the
-	// family into the tag rather than being the wire tag
-	// (internal/resolver/validated.go). It
-	// is the same text the list and unknown arms return, and it names no
-	// candidate, so it says less than the edge-union arm does when that
-	// arm refuses. That gap is what the ranking in unservedReason turns
-	// on.
+	// cannot fill its row.
+	//
+	// The reason is "projects " and then whatever String the arriving type
+	// dispatches to, which is two cases and not one vocabulary. A shape
+	// that declares no String of its own — a variant's pointer form, and a
+	// struct embedding a variant and adding nothing — answers with the
+	// promoted diagnostic Stringer, which for ResolvedProperty,
+	// ResolvedScalar and ResolvedTemporal composes the family into the tag
+	// rather than being the wire tag (internal/resolver/validated.go);
+	// that text names no candidate, and is the text the list and unknown
+	// arms return. A shape that declares String at depth 0 shadows the
+	// promoted one, and then the text after "projects " is the caller's,
+	// candidate names included. So nothing downstream may read this string
+	// for where it came from — the ranking in unservedReason turns on the
+	// column's TYPE for exactly that reason.
+	//
 	// TestUnservedColumnFallThroughIsNotANinthVariant is the witness, for
-	// all eight variants in both forms.
+	// the pointer and the embedded form of each of the eight variants and
+	// for a shadowing embedder.
 	return "projects " + t.String()
 }
 

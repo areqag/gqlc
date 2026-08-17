@@ -18,6 +18,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"reflect"
 	"sort"
 	"testing"
 
@@ -55,12 +56,26 @@ type (
 	embedNodeEmbedder struct{ embedNode }
 )
 
+// shadowEdgeUnion is the third construction, and the one the embedders above
+// are chosen to exclude: it embeds a variant AND declares String at depth 0,
+// which shadows the promoted one. Promotion only reaches a method no shallower
+// declaration hides, so this is where the fall-through's `"projects " +
+// t.String()` stops quoting internal/resolver and starts quoting the caller.
+type shadowEdgeUnion struct{ resolver.ResolvedEdgeUnion }
+
+// shadowEdgeUnionText is a caller writing out the candidate list edgeUnionReason
+// would have produced for probeEdgeUnion. Reusing those labels is the point of
+// the row that reads it: it is what makes a fall-through reason indistinguishable
+// by wording from an edgeUnionReason one.
+const shadowEdgeUnionText = "AUTHORED and LIKES"
+
+func (shadowEdgeUnion) String() string { return shadowEdgeUnionText }
+
 // probeEdgeUnion is a two-candidate union carrying two distinct labels: the
-// shape edgeUnionReason answers rather than stands aside from. Its labels are
-// what the "names no candidate" rows below look for and fail to find in the
-// non-value forms' reasons. They are written out rather than derived, and
-// appear four times each: here, in probeColumnQuery's Cypher text, and in the
-// two assertion rows that name them.
+// shape edgeUnionReason answers rather than stands aside from. The labels are
+// written out rather than derived, so that a row looking for them in a reason
+// compares against a literal this file fixes rather than against whatever
+// edgeUnionReason happens to format.
 var probeEdgeUnion = resolver.ResolvedEdgeUnion{EdgeKeys: []schema.EdgeKey{
 	{Source: "Person", KeyLabels: "AUTHORED", Target: "Post"},
 	{Source: "Person", KeyLabels: "LIKES", Target: "Post"},
@@ -104,9 +119,9 @@ type inhabitant struct {
 //
 // One refuses either way, with a DIFFERENT refusal: resolver.ResolvedEdgeUnion.
 // For this row's value — probeEdgeUnion, two candidates under distinct labels —
-// its arm names the candidates the schema declares and the fall-through's
-// `"projects " + ct.String()` does not, so its rows still tell the arm from the
-// fall-through. The arm does not refuse every edge union: fewer than two
+// its arm names the candidates the schema declares, and for the two forms this
+// row carries the fall-through's `"projects " + t.String()` does not, so its
+// rows still tell the arm from the fall-through. The arm does not refuse every edge union: fewer than two
 // candidates, or a repeated label, returns "" and stands aside for shared
 // admission. That difference is the ground
 // TestEdgeUnionRankingFlagNamesTheValueFormOnly rests its ruling on.
@@ -369,6 +384,40 @@ func TestUnservedColumnFallThroughIsNotANinthVariant(t *testing.T) {
 		}
 	})
 
+	// The other case of the fall-through's text, and the reason its comment
+	// describes two rather than one. Every form above declares no String, so
+	// the promoted diagnostic Stringer answers and the reason carries the
+	// variant's own tag. A shadowing String is answered by the same
+	// fall-through and puts the caller's text there instead.
+	t.Run("a shadowing embedder chooses the text after projects", func(t *testing.T) {
+		shadow := shadowEdgeUnion{probeEdgeUnion}
+		require.Equal(t, "projects "+shadowEdgeUnionText, unservedColumn(shadow),
+			"struct{ resolver.ResolvedEdgeUnion } declaring its own String reaches the fall-through, which returns that String")
+		require.NotEqual(t, "projects "+probeEdgeUnion.String(), unservedColumn(shadow),
+			"the shadowing String must differ from the promoted one, or this row witnesses nothing")
+	})
+
+	// The key set is held against the arms below, and that says nothing about
+	// what a row CARRIES. With every key left alone, all eight rows could hold
+	// one variant's three forms and every row above would stay green while
+	// measuring that variant eight times. This is what makes "each of the
+	// eight variants" a property of the table and not only of its keys.
+	t.Run("each row carries the variant its key names", func(t *testing.T) {
+		for _, name := range sortedInhabitantNames() {
+			in := inhabitants[name]
+			require.Equalf(t, name, reflect.TypeOf(in.value).Name(),
+				"%s: the value form is a %T", name, in.value)
+			require.Equalf(t, name, reflect.TypeOf(in.pointer).Elem().Name(),
+				"%s: the pointer form points at a %T", name, in.pointer)
+			embedded := reflect.TypeOf(in.embedded)
+			require.Equalf(t, 1, embedded.NumField(),
+				"%s: the embedded form %T has %d fields; these rows read the promoted variant off a single embedded one",
+				name, in.embedded, embedded.NumField())
+			require.Equalf(t, name, embedded.Field(0).Type.Name(),
+				"%s: the embedded form embeds a %s", name, embedded.Field(0).Type)
+		}
+	})
+
 	t.Run("the arms and this table name the same variants", func(t *testing.T) {
 		require.Equal(t, sortedInhabitantNames(), unservedColumnArms(t),
 			"unservedColumn's case arms and the set this file enumerates have diverged. A name in the arms and not in inhabitants means a variant landed: add its three forms and its valueReason, or the rows above measure a switch smaller than the one shipping. A name in inhabitants and not in the arms means an arm left: drop the stale entry")
@@ -416,11 +465,21 @@ func probeColumnQuery(t resolver.ResolvedType) codegen.NamedQuery {
 // earns the rank: it names the candidates the schema declares for the pattern,
 // which the text gate cannot say. unservedColumn reaches edgeUnionReason from
 // `case resolver.ResolvedEdgeUnion:`, which matches the value form and nothing
-// else, so the assertion and the arm agree exactly. A pointer or embedded edge
-// union reaches the fall-through instead, whose reason is "projects edgeUnion"
-// — it names no candidate, so it says strictly LESS than the alternation the
-// text gate quotes back, and promoting it over the text would make the author
-// worse off in precisely the trade the exception to the yield exists to avoid.
+// else, so the assertion recognises exactly the arm that calls edgeUnionReason.
+// A pointer or embedded edge union reaches the fall-through instead. The two
+// such forms below declare no String, so the promoted one answers and their
+// reason is "projects edgeUnion" — it names no candidate, so it says LESS than
+// the alternation the text gate quotes back, and promoting it over the text
+// would make the author worse off in precisely the trade the exception to the
+// yield exists to avoid.
+//
+// The last row is the shape that stops this being an argument about wording. An
+// embedder may declare its own String, shadowing the promoted one, and its
+// reason then carries whatever that method returns — the candidate names
+// included, with edgeUnionReason never called. A flag that read the rank off the
+// reason's text would hand it to that string. Reading the column's type is what
+// confines the rank to answers edgeUnionReason actually gave, and that row holds
+// the difference.
 //
 // The false rows are therefore load-bearing: widening the assertion to
 // recognise the non-value forms reddens them, and is meant to.
@@ -455,11 +514,27 @@ func TestEdgeUnionRankingFlagNamesTheValueFormOnly(t *testing.T) {
 			// first, and flipping the flag would then be right.
 			require.Equal(t, `column "r" projects edgeUnion`, reason)
 			require.NotContains(t, reason, "AUTHORED",
-				"the fall-through reason names no candidate, which is why it does not outrank the text")
+				"this form declares no String, so its fall-through reason is the promoted tag and names no candidate — which is why yielding to the text costs nothing here")
 			require.NotContains(t, reason, "LIKES")
 			// Still refused, not served — the degradation ruled acceptable is
 			// in the ranking only.
 			require.NotEmpty(t, reason)
 		})
 	}
+
+	// The bound on the rows above: they hold for forms that add no String, and
+	// nothing about the fall-through makes that general. Here the reason names
+	// both candidates without edgeUnionReason having run, so the reason's
+	// wording is not evidence of which path produced it. The flag reads the
+	// type and is unmoved; a flag matching text would have been moved by a
+	// caller's method.
+	t.Run("a shadowing embedder does not outrank, whatever its reason reads", func(t *testing.T) {
+		reason, edgeUnion := unservedReason(probeColumnQuery(shadowEdgeUnion{probeEdgeUnion}))
+		require.False(t, edgeUnion,
+			"the flag is a type assertion on the value form, so no embedder sets it however its String reads")
+		require.Equal(t, `column "r" projects `+shadowEdgeUnionText, reason)
+		require.Contains(t, reason, "AUTHORED",
+			"this row is only a witness if the fall-through reason does name a candidate")
+		require.NotEmpty(t, reason)
+	})
 }
