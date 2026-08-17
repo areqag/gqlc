@@ -65,7 +65,7 @@ const (
 )
 
 // ageLiveRecipes are the recipes that must run every AGE witness. Named
-// rather than derived, because the third live recipe
+// rather than derived, because the live neo4j recipe
 // (test-codegen-live-neo4j) must NOT run them — it is the per-PR half
 // and starts no AGE container — so "every live recipe" is the wrong
 // rule and would either be false or force the neo4j half to pay for a
@@ -81,20 +81,26 @@ var ageLiveRecipes = []string{"test-codegen-live", "test-codegen-live-age"}
 // live test asserts, or a witness no CI recipe runs is a refusal resting
 // on a claim nothing re-measures, and each of those is a complaint.
 func TestEveryDialectGapCarriesItsWitness(t *testing.T) {
-	// The COUNT of the list is pinned rather than its emptiness, and it is
-	// one guard of two because the list goes wrong in two directions and
-	// each guard catches one. A name REMOVED is caught here: witnessGaps
-	// complains once per entry of the map readRecipes returns, so a
-	// dropped name is a recipe nobody checks and the sweep goes on passing
-	// (review mutation R1, one name left, green). A name REPEATED leaves
-	// this count at two and collapses that map to one entry, which this
-	// pin cannot see — recipeBodies complains about it instead (review
-	// mutation D1, which survived this pin). The empty list fails in
-	// recipeBodies too (R2). The third live recipe,
+	// The LENGTH of the list is pinned rather than its emptiness, and it
+	// is one guard of two because the list goes wrong in two directions
+	// and each guard catches one. A name REMOVED is caught here:
+	// witnessGaps complains once per entry of the map readRecipes returns,
+	// so a dropped name is a recipe nobody checks and the sweep goes on
+	// passing (review mutation R1, one name left, green). A name REPEATED
+	// leaves this length unchanged and collapses that map by one entry,
+	// which this pin cannot see — recipeBodies complains about it instead
+	// (review mutation D1, which survived this pin). The empty list fails
+	// in recipeBodies too (R2). The live neo4j recipe,
 	// test-codegen-live-neo4j, is absent on purpose — see ageLiveRecipes.
+	//
+	// Do not restate this length in prose. Sentences here and in ADR 0028
+	// did, until mutation GROW — ageLiveRecipes 2 names/2 distinct to 3
+	// names/3 distinct, the pin literal moved to 3, and a third justfile
+	// recipe running the same witnesses — left this package green at exit
+	// 0 while they went false.
 	require.Len(t, ageLiveRecipes, 2,
-		"both recipes that start an AGE container have to be read, or a witness can "+
-			"stop being run by the one that is not")
+		"a name dropped from this list is a recipe nobody checks, and a witness "+
+			"can stop being run by it")
 	bodies := readLiveWitnessBodies(t)
 	recipes := readRecipes(t, ageLiveRecipes)
 	require.Empty(t, witnessGaps(dialectGaps, bodies, recipes),
@@ -746,7 +752,7 @@ func readLiveWitnessBodies(t *testing.T) map[string]string {
 //
 // This is the half strings.Contains could not say, and the same defect
 // class as reading a witness's body as source bytes (see witnessBodies).
-// Both AGE recipes already carry a -skip, so a witness name in the
+// An AGE recipe already carries a -skip, so a witness name in the
 // command line is as likely to be there to REMOVE the test as to select
 // it; and a name in a comment is not in the command line at all, which
 // is why recipeBodies strips comments before this ever sees them.
@@ -875,7 +881,7 @@ func invocationRuns(fields []string, witness string) bool {
 // one — and its second is `test`. Command position is what stops
 // `echo go test -run W` from counting: searching every argument for `go`
 // beside `test` counts a line that only prints the words.
-// `cd test/data/codegen && go test …` is the shape both AGE recipes have,
+// `cd test/data/codegen && go test …` is the shape the AGE recipes have,
 // and a body that puts the `cd` on its own line works for the other
 // reason.
 //
@@ -1094,8 +1100,8 @@ func shellFields(s string) (fields []string, unterminated bool) {
 // What is NOT modelled is backslash escapes, command substitution,
 // heredocs and here-strings. This justfile uses all four, so the bound
 // is not "the artefact has none of them"; it is that this reader only
-// ever sees ageLiveRecipes' two bodies, and those use none of them.
-// That is a property of two single-line recipes today and not a law
+// ever sees the bodies ageLiveRecipes names, and those use none of
+// them. That is a property of single-line recipes today and not a law
 // about the file, so it is held by
 // TestTheRecipesThisReaderParsesStayInsideTheShellItModels rather than
 // asserted here.
@@ -1350,9 +1356,9 @@ func TestRecipeReaderComplainsOnEachBrokenRecipe(t *testing.T) {
 // because nothing checked them, and one edit above the first of them
 // would make this comment, stripRecipeComment's and ADR 0028 wrong at
 // once. What is true is narrower and is checked here instead:
-// recipeBodies reads the two recipes ageLiveRecipes names
-// and nothing else, and those two use none of them. That is a fact about
-// two single-line recipes on a day, not a law, which is why it is a
+// recipeBodies reads the recipes ageLiveRecipes names
+// and nothing else, and those use none of them. That is a fact about
+// single-line recipes on a day, not a law, which is why it is a
 // test.
 //
 // The direction each would fail in is why the bound is worth holding: a
@@ -1410,8 +1416,8 @@ func TestTheRecipesThisReaderParsesStayInsideTheShellItModels(t *testing.T) {
 
 // TestRecipeRunsOnlyWhatTheCommandLineSelects is the recipe artefact's
 // half of the property witnessBodies holds for Go source, and it is here
-// because strings.Contains could not tell these shapes apart: both AGE
-// recipes name a witness AND carry a -skip, so "the name appears" says
+// because strings.Contains could not tell these shapes apart: an AGE
+// recipe names a witness AND carries a -skip, so "the name appears" says
 // nothing about whether the test runs.
 //
 // Most rows are a review mutation that once survived. L18 and L19 are

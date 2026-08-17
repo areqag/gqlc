@@ -69,23 +69,24 @@ actually refuses); that `find` reads none of the served texts (so the gate is
 bounded, which is the half that matters given the asymmetry above); that the
 named witness is declared in a `live_*_test.go` file; that every probe text,
 every recorded answer and every served text appears verbatim in **that witness's
-own body**; and that each of the two recipes `ageLiveRecipes` names runs it —
+own body**; and that each recipe `ageLiveRecipes` names runs it —
 **one** `go test` invocation that is itself built with `-tags codegen_live`,
 selected WHOLE by every `-run` it carries and matched by no `-skip` it carries.
-Every `go test` in such a recipe must also carry `-count=1`. That list is two
-hand-written names, held by two guards because it goes wrong in two directions.
+Every `go test` in such a recipe must also carry `-count=1`. That list is
+hand-written rather than derived, and it is held by two guards, because a list
+goes wrong in two directions and each guard catches one.
 `witnessGaps` complains once per *entry* of the map `readRecipes` returns, not
-once per name, so a name **dropped** is a recipe nobody checks: pinned at two in
-`TestEveryDialectGapCarriesItsWitness` (review mutation R1 — one name left was
-green before that pin). A name **repeated** leaves that count at two and
-collapses the map to one
+once per name, so a name **dropped** is a recipe nobody checks: its length is
+pinned in `TestEveryDialectGapCarriesItsWitness` (review mutation R1 — one name
+left was green before that pin). A name **repeated** leaves that length
+unchanged and collapses the map by one
 entry, which the pin cannot see, so `recipeBodies` complains about it instead
 (review mutation D1 — two names, one distinct — which survived the pin; and
-D2CONSEQ, which gutted the other recipe's `-run` down to a non-witness with that
-duplicate in place and was complained about by nothing). The empty list fails on
-`recipeBodies`' own vacuity complaint (R2). The list is not every live recipe in
-the file and not what CI invokes:
-the third live recipe (`test-codegen-live-neo4j`) must *not* run these witnesses,
+D2CONSEQ, which gutted `test-codegen-live`'s `-run` down to a non-witness with
+that duplicate in place and was complained about by nothing). The empty list
+fails on `recipeBodies`' own vacuity complaint (R2). The list is not every live
+recipe in the file and not what CI invokes:
+the live neo4j recipe (`test-codegen-live-neo4j`) must *not* run these witnesses,
 so a derived "every live recipe" rule would be false, and nothing here reads
 `.github/workflows` to check that CI calls either name.
 
@@ -119,12 +120,12 @@ just a string carrying a comment.
 
 "Runs it" means the recipe's command line **selects** it. That check was
 `strings.Contains` over the recipe body until review mutations L18, L19 and L20,
-which is the same defect one artefact out: both AGE recipes already carry a
+which is the same defect one artefact out: an AGE recipe already carries a
 `-skip`, so a witness name in the body is as likely to be there to remove the
 test as to select it, and a name in a comment is not on the command line at all.
 The three surviving shapes were: appending the witness name to the `-skip` the
 AGE recipe already has, one token on one line; moving the name from `-run` to
-`-skip`; and deleting it from both recipes' `-run` while leaving it in a justfile
+`-skip`; and deleting it from an AGE recipe's `-run` while leaving it in a justfile
 comment — M15's move on the artefact the `format.Node` fix does not reach.
 `recipeBodies` now strips shell comments as it reads a recipe body, and
 `recipeRuns` parses the `-run`, `-skip` and `-tags` values as separate patterns.
@@ -208,13 +209,15 @@ already complete, so it is written as what has been found and not as what exists
   where `sh` would not, and what a wrong cut costs is a `-run` — of which the
   absence selects everything. This justfile uses all four, in recipes this reader
   never reads, so the bound is not the file; it is that `recipeBodies` reads only
-  the two recipes `ageLiveRecipes` names, and those two use none of them.
+  the recipes `ageLiveRecipes` names, and those use none of them.
   `TestTheRecipesThisReaderParsesStayInsideTheShellItModels` holds that, because
-  it is true of two single-line recipes today rather than a law about justfiles.
+  it is true of the single-line recipes it names today rather than a law about
+  justfiles.
   (Counts and line numbers for those constructs stood in this paragraph and in
   two comments until round 5. They were accurate and nothing checked them, so
   one edit above the first line number would have made three places wrong at
-  once; the shapes are what the argument needs.)
+  once; the shapes are what the argument needs. The recipe count went the same
+  way in round 6 — see the pin note below.)
 
 **A check that finds nothing must not answer yes.** Every flag loop above is over
 a slice that may be empty, and an empty slice of `-run` values genuinely does mean
@@ -261,15 +264,15 @@ time (A9b); one name dropped from `ageLiveRecipes` left a live recipe checked by
 nobody (R1). Both counts are now pinned where the claim is made.
 
 A count over a list catches a row that **leaves**. It does not catch a row that
-is wrong, and it does not catch a row that is **duplicated**: a list pinned at
-two holding one name twice keeps its count and still loses a recipe from the
+is wrong, and it does not catch a row that is **duplicated**: a list holding one
+name twice keeps its length and still loses a recipe from the
 sweep, which is review mutation D1 against the round-5 pin. The two lists close
 that direction in different places. The construct texts are counted as a *set*,
 so four rows naming three shapes fails on the pin itself
 (`require.Len(t, shapes, 4)` over a map built from the texts; measured as
 mutation CDUP). `ageLiveRecipes` is counted as a list, so its duplicate is
-caught one layer down, by `recipeBodies` — which is the choke point both readers
-of the justfile share, so D1 now reddens `TestEveryDialectGapCarriesItsWitness`
+caught one layer down, by `recipeBodies` — the reader every justfile consumer is
+funnelled through by `readRecipes`, so D1 now reddens `TestEveryDialectGapCarriesItsWitness`
 and `TestTheRecipesThisReaderParsesStayInsideTheShellItModels` together, and the
 complaint is shown failing by a row of `TestRecipeReaderComplainsOnEachBrokenRecipe`
 rather than assumed. Neither guard catches a row that is *wrong*. For
@@ -279,6 +282,33 @@ whose recipe runs no witness is `witnessGaps`' own (measured as D2CTRL, which
 gutted `test-codegen-live`'s `-run` with the list left alone). For the construct
 list a row naming a shape the reader *does* model is caught by nothing, and is
 left open.
+
+**The list's length is written once, at the pin.** It was restated in prose
+through this document and `dialect_test.go`, and mutation GROW —
+`ageLiveRecipes` 2 names/2 distinct to 3 names/3 distinct, the pin literal moved
+to 3, and a third justfile recipe running the same witnesses — left the package
+green at exit 0 while those restatements went false, and nothing failed. That is
+the shape `c3ca7f04` removed from this file when it deleted three copied justfile
+line numbers and a copied count of `$(` occurrences: a number restated somewhere
+the compiler cannot see has nothing that fails when it rots, so the second copy
+is a defect on the day it is written. The cardinal is not load-bearing here in
+any case — "two guards" and "two directions" are properties of the *shape* of a
+list guard, invariant to how many names the list holds, and their agreeing with
+the name count today is a coincidence rather than a link. The round-5 note above
+records the same defect in the same paragraph that had been written to condemn
+it, which is why the sweep for this one went wider than the pin's own sentences.
+What remains, here and in `dialect_test.go`, is "two names, one distinct": that
+describes mutation D1's arithmetic, a fact about an experiment that was run, and
+is not a restatement of the list's cardinality.
+
+That sweep also turned up a claim that was not rotting but simply false, made
+here and in two `dialect_test.go` comments: that **both** AGE recipes carry a
+`-skip`. `test-codegen-live` carries none — only `test-codegen-live-age` does —
+and the sentence had stood through six review rounds because a cardinal reads as
+checked. One `-skip` is all the argument needs, since one is enough to make
+`strings.Contains` over a recipe body unsound, so it is now written as "an AGE
+recipe already carries a `-skip`". The complement grep found it; the universals
+grep structurally could not.
 
 **What the sweep still does not check: where the package argument points.** It
 reads the command line and nothing else, so the `cd test/data/codegen` in front
