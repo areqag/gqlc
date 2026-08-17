@@ -533,19 +533,48 @@ func TestTemporalKindRefusalReachesTheCaller(t *testing.T) {
 	}
 }
 
+// reservedIdentifierRows is the reserved set written out longhand, with
+// the scope each name's emitted declaration occupies.
+//
+// The scope column is measured rather than read off the templates: for
+// every row, a package emitting an entity struct of that name was
+// compiled on both the neo4j and the Apache AGE backend, on the node
+// axis and the edge axis (gqlc-e6mh). Seven names drew "redeclared in
+// this block" on all four combinations. DBTX and SessionInit drew it on
+// Apache AGE and compiled on neo4j, which declares neither — they are
+// scopePackage under the uniform-set rule the sibling test pins, not
+// because every backend emits them. The three scopeMethod rows compiled
+// on all four: their emitted declaration is a method on *Queries, which
+// shares no scope with a package-level type.
+var reservedIdentifierRows = []struct {
+	name  string
+	scope identifierScope
+}{
+	{"Queries", scopePackage},
+	{"New", scopePackage},
+	{"WithTx", scopeMethod},
+	{"ReadQuerier", scopePackage},
+	{"WriteQuerier", scopePackage},
+	{"Querier", scopePackage},
+	{"ErrNoRows", scopePackage},
+	{"ErrMultipleResults", scopePackage},
+	{"DBTX", scopePackage},
+	{"SessionInit", scopePackage},
+	{"EnsureGraph", scopeMethod},
+	{"DropGraph", scopeMethod},
+}
+
 // TestReservedIdentifiersAreUniformAcrossBackends pins the reserved set
 // (spec §4.1) as a whole: every exported name a generated package
-// declares at package scope collides, whichever backend is selected.
+// declares collides with a query name, whichever backend is selected.
 // DBTX, SessionInit and the graph lifecycle pair are declared only by
 // the Apache AGE emission, but a name that is free on one backend and
 // taken on another is the renaming scheme D2 refused — so the set stays
 // uniform.
 func TestReservedIdentifiersAreUniformAcrossBackends(t *testing.T) {
-	want := []string{
-		"Queries", "New", "WithTx",
-		"ReadQuerier", "WriteQuerier", "Querier",
-		"ErrNoRows", "ErrMultipleResults",
-		"DBTX", "SessionInit", "EnsureGraph", "DropGraph",
+	want := make([]string, 0, len(reservedIdentifierRows))
+	for _, row := range reservedIdentifierRows {
+		want = append(want, row.name)
 	}
 	got := make([]string, 0, len(reservedIdentifiers))
 	for name := range reservedIdentifiers {
@@ -553,15 +582,77 @@ func TestReservedIdentifiersAreUniformAcrossBackends(t *testing.T) {
 	}
 	require.ElementsMatch(t, want, got)
 
-	for _, name := range want {
-		t.Run(name, func(t *testing.T) {
+	for _, row := range reservedIdentifierRows {
+		t.Run(row.name, func(t *testing.T) {
+			require.Equal(t, row.scope, reservedIdentifiers[row.name])
+
 			in := Input{
 				Schema:  schema.Schema{Name: "Test"},
-				Queries: []NamedQuery{{Name: name, Cardinality: CardinalityExec, SourceText: "MATCH (n) DELETE n"}},
+				Queries: []NamedQuery{{Name: row.name, Cardinality: CardinalityExec, SourceText: "MATCH (n) DELETE n"}},
 			}
 			_, err := Prepare(in, stubTypeMap{}, "")
 			require.ErrorIs(t, err, ErrIdentifierCollision)
-			require.ErrorContains(t, err, `query "`+name+`" at position 0`)
+			require.ErrorContains(t, err, `query "`+row.name+`" at position 0`)
 		})
+	}
+}
+
+// TestReservedScopeDecidesWhichEntityNamesCollide runs both halves of
+// the scope column over the entity axis, on the node and the edge
+// source alike. A schema whose element type names a package-scope
+// declaration is refused; one naming a method on *Queries generates,
+// and the entity keeps the name it asked for.
+//
+// The allow half is what holds the gate to the scope it measured: a
+// blanket reserve over the whole set refuses three schemas the emitter
+// serves.
+func TestReservedScopeDecidesWhichEntityNamesCollide(t *testing.T) {
+	person := graph.LabelSetKey("Person")
+
+	sources := []struct {
+		axis   string
+		schema func(name string) schema.Schema
+	}{
+		{"node", func(name string) schema.Schema {
+			label := graph.LabelSetKey(name)
+			return schema.Schema{
+				Name: "Test",
+				Nodes: map[graph.LabelSetKey]schema.NodeType{
+					label: {KeyLabels: label, CompleteLabels: label, Properties: map[string]schema.Property{}},
+				},
+			}
+		}},
+		{"edge", func(name string) schema.Schema {
+			key := schema.EdgeKey{Source: person, KeyLabels: graph.LabelSetKey(name), Target: person}
+			return schema.Schema{
+				Name: "Test",
+				Nodes: map[graph.LabelSetKey]schema.NodeType{
+					person: {KeyLabels: person, CompleteLabels: person, Properties: map[string]schema.Property{}},
+				},
+				Edges: map[schema.EdgeKey]schema.EdgeType{
+					key: {EdgeKey: key, Properties: map[string]schema.Property{}},
+				},
+			}
+		}},
+	}
+
+	for _, src := range sources {
+		for _, row := range reservedIdentifierRows {
+			t.Run(src.axis+"/"+row.name, func(t *testing.T) {
+				prepared, err := Prepare(Input{Schema: src.schema(row.name)}, stubTypeMap{}, "")
+				if row.scope == scopeMethod {
+					require.NoError(t, err)
+					names := make([]string, 0, len(prepared.Entities))
+					for _, e := range prepared.Entities {
+						names = append(names, e.Name)
+					}
+					require.Contains(t, names, row.name)
+					return
+				}
+				require.ErrorIs(t, err, ErrIdentifierCollision)
+				require.ErrorContains(t, err, `the generated package's fixed declaration "`+row.name+`"`)
+				require.ErrorContains(t, err, `entity struct "`+row.name+`"`)
+			})
+		}
 	}
 }
