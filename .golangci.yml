@@ -89,10 +89,11 @@ linters:
           msg: route output through cmd.OutOrStdout()/cmd.ErrOrStderr(), not the legacy log package
     ireturn:
       # return structs, not interfaces — with two deliberate exceptions: the
-      # closed sums of the query model (Binding, Endpoint, Projection, Type, Use),
-      # the resolver's ResolvedType and the corpus harness' ebnf are either/or
-      # types; there is no concrete type to return; and the Parser factories
-      # (returning the unexported struct would trip unexported-return).
+      # marker-sealed sums of the query model (Binding, Endpoint, Projection,
+      # Type, Use), the resolver's ResolvedType and the corpus harness' ebnf are
+      # either/or types; there is no concrete type to return; and the Parser
+      # factories (returning the unexported struct would trip
+      # unexported-return).
       allow:
         - anon
         - error

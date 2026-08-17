@@ -376,8 +376,11 @@ func TestConstructorsAreSoleSourceOfData(t *testing.T) {
 	require.NotNil(t, edge.Source())
 	require.NotNil(t, edge.Target())
 
-	// The sealed interfaces close the sums: only the four package-defined variants
-	// satisfy them, so a binding/endpoint is always exactly one known shape.
+	// Each constructor's result satisfies the interface its variant declares
+	// the marker for. That is an ALLOW check, not a bound on the sums: the
+	// set of types satisfying Binding and Endpoint is unbounded, and
+	// TestQuerySumsAreNotClosed measures the two constructions that inhabit
+	// them from outside the package.
 	var _ query.Binding = node
 	var _ query.Binding = edge
 	var _ query.Endpoint = src
@@ -474,8 +477,10 @@ func TestProjectionZeroValuesCarryNoData(t *testing.T) {
 	var expr query.ExprProjection
 	require.Empty(t, expr.Refs())
 
-	// The sealed interface closes the sum: only the five package-defined variants
-	// satisfy it, so a projection is always exactly one known shape.
+	// Every variant declaring isProjection satisfies Projection in its value
+	// form — the form the switches under audit name. It does not follow that
+	// nothing else satisfies it: the pointer and embedding forms do too, and
+	// TestQuerySumsAreNotClosed/Projection is where that is measured.
 	var _ query.Projection = query.RefProjection{}
 	var _ query.Projection = query.LiteralProjection{}
 	var _ query.Projection = query.FuncProjection{}

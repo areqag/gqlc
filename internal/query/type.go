@@ -8,11 +8,25 @@ import "encoding/json"
 func marshalType(t Type) ([]byte, error) { return json.Marshal(t.String()) }
 
 // Type is the result type of a Projection: the type vocabulary
-// the resolver reads from a parsed query (Stage 6 spec §3). It is a sealed sum
-// via the private isType() marker — no foreign package can add a variant, so
-// switching on a Type is exhaustive across the parser+resolver boundary. Each
-// variant carries String, the single source the wire tag derives from, so the
-// serialised type name cannot drift from the Go type.
+// the resolver reads from a parsed query (Stage 6 spec §3). isType is
+// unexported, so a method of that name in another package does not satisfy
+// this interface: the variants declared in this file are the whole set of
+// types that DECLARE the marker, and a foreign package cannot declare a new
+// one from scratch.
+//
+// It does not follow that switching on a Type is exhaustive across the
+// parser+resolver boundary. String and isType take value receivers, so
+// *TypeInt satisfies Type; and Go promotes an embedded type's unexported
+// methods, so struct{ query.TypeInt } satisfies it from any package in the
+// module without naming the marker. Neither matches `case TypeInt:`, so a
+// switch over the declared variants reaches its default on them. Where that
+// default panics — resolver.resolveType's does — the panic is reachable by a
+// caller who assembled a Type rather than parsed one, so it is a live branch
+// and not dead code. TestQuerySumsAreNotClosed/Type measures both
+// constructions against every declared variant.
+//
+// Each declared variant carries String, the single source its wire tag
+// derives from, so its serialised name cannot drift from the Go type.
 //
 // The sum is incremental: Stage 6 lands the scalar and collection base; Stage 7
 // adds temporal variants; Stage 8 adds TypePath. TypeUnknown is the parser's
@@ -179,7 +193,8 @@ func (TypeUnknown) isType() {}
 // The six openCypher temporal types (Stage 7 spec §3). Each is an empty
 // struct following the scalar-variant pattern exactly: a stringer that is
 // the single source of the wire tag, a MarshalJSON that routes through
-// marshalType, and the private isType() marker so the sum stays sealed.
+// marshalType, and the private isType() marker that enrols it in the Type
+// sum.
 // The zoned / non-zoned distinction (TypeTime vs. TypeLocalTime,
 // TypeDateTime vs. TypeLocalDateTime) is carried at the type level because
 // codegen emits distinct method signatures for each — collapsing
