@@ -341,8 +341,11 @@ check-golangci-build-tags: sweep-discovery-probes
 #
 # This recipe only clears what it is run before, and what runs it is four
 # dependency edges in this file. internal/tools/modscope/justfile_test.go reads
-# them off this file and refuses a recipe that runs modscope without reaching
-# this one, directly or through another recipe. Measured before it existed:
+# them off this file and refuses a recipe whose body spells modscope's package
+# path and does not reach this one, directly or through another recipe. A
+# recipe that runs modscope without spelling that path is outside what it reads
+# (bd gqlc-wkio): a fifth caller introduced that way would not be required to
+# reach this recipe. Measured before it existed:
 # dropping the edge from check-golangci-build-tags left the tree green and
 # silent, and the gate that lost the edge then failed on a leaked probe with a
 # message about a broken walk (bd gqlc-c7o7).

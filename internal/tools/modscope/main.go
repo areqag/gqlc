@@ -298,9 +298,14 @@ func moduleGoDirs(ctx context.Context, root, module string) ([]string, error) {
 //
 // What keeps that message rare is the justfile's sweep-discovery-probes recipe,
 // which clears the residue before any of those recipes runs this program.
-// justfile_test.go in this package holds every recipe that runs it to reaching
-// that sweep, because until it did, deleting one of those dependency edges was
-// silent until the next probe leaked (bd gqlc-c7o7).
+// justfile_test.go in this package holds a recipe whose body spells this
+// package's path to reaching that sweep, because until it did, deleting one of
+// those dependency edges was silent until the next probe leaked (bd
+// gqlc-c7o7). The spelling is the bound, so do not read that as coverage of a
+// recipe which runs this program some other way: a binary built here once and
+// invoked under its own name, or a path interpolated from a justfile variable,
+// is outside what that file reads (bd gqlc-wkio), as is a recipe behind a
+// header its justfile reader does not recognise.
 func goDirs(module, moduleRoot string, nested []string) ([]string, error) {
 	prune := make(map[string]struct{}, len(nested))
 	for _, n := range nested {

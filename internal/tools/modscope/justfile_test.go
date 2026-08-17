@@ -25,8 +25,12 @@ import (
 // dropping `check-golangci-build-tags: sweep-discovery-probes` and running the
 // recipe on a clean tree exits 0 with no output).
 //
-// So the edges are derived here rather than trusted: whatever runs this
-// program has to reach the sweep first.
+// So the edges are derived here rather than trusted: a recipe whose body
+// spells this program's package path has to reach the sweep first. Two limits
+// on that reading are stated where they arise: an invocation that never spells
+// the path, at modscopePkg below (bd gqlc-wkio), and a recipe behind a header
+// this file's reader does not recognise, at
+// TestParseJustfileReadsWhatJustReads below.
 
 const (
 	// repoRoot reaches the justfile from this package's directory.
@@ -195,6 +199,13 @@ func unsweptModscopeCallers(recipes []justRecipe) (unswept, complaints []string)
 	// dependency in a justfile it accepts resolves. One that does not resolve
 	// here is a header this reader failed to recognise — and a header it
 	// missed is a caller it cannot find.
+	//
+	// It reaches a missed header through the recipes that depend on it, so a
+	// missed header nothing depends on leaves the answer set quietly shorter:
+	// of the four callers on this tree, vuln and test-codegen-fence have no
+	// dependents at all. That is the fail-open TestParseJustfileReadsWhatJustReads
+	// covers shape by shape below, and why the pinned header rows there are not
+	// decoration for this control.
 	for _, r := range recipes {
 		for _, d := range r.deps {
 			if _, found := byName[d]; !found {
