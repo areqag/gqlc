@@ -3,6 +3,7 @@ package resolver
 import (
 	"fmt"
 
+	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/procsig"
 	"github.com/areqag/gqlc/internal/query"
 	"github.com/areqag/gqlc/internal/schema"
@@ -24,6 +25,7 @@ type scope struct {
 	// InferUnlabelled/SeedLocalNullability/DemoteNullability.
 	nodeTypes       map[string]schema.NodeType
 	nodeCands       map[string][]schema.NodeType
+	resolvedCovers  map[string]struct{}
 	edgeTypes       map[string]schema.EdgeType
 	edgeKeys        map[string]schema.EdgeKey
 	edgeCands       map[string][]schema.EdgeKey
@@ -65,6 +67,7 @@ func newScope(carry branchState) *scope {
 	s := &scope{
 		nodeTypes:            make(map[string]schema.NodeType),
 		nodeCands:            make(map[string][]schema.NodeType),
+		resolvedCovers:       make(map[string]struct{}),
 		edgeTypes:            make(map[string]schema.EdgeType),
 		edgeKeys:             make(map[string]schema.EdgeKey),
 		edgeCands:            make(map[string][]schema.EdgeKey),
@@ -78,6 +81,14 @@ func newScope(carry branchState) *scope {
 	// local Phase A1 shadowing (Bind*'s delete cascade) works
 	// uniformly on carried and local names. Nullability seeds too:
 	// Phase D's local-overrides-carry rule (§4.6) overwrites this.
+	// resolvedCovers is deliberately NOT seeded. branchState carries the type,
+	// not how Part K arrived at it, so a carried singular node type is a
+	// commitment this Part cannot see the provenance of — and Part K's Phase B
+	// inference is one of the things it can be. Leaving it uncovered means the
+	// narrowing declines to learn from a carried singular endpoint, which lands
+	// on the pre-narrowing answer. The cost is precision on
+	// `MATCH (a:Only) WITH a MATCH (p:Plural)-[r]->(a)`; the alternative is an
+	// eleventh branchState lane, and no fixture pays the precision.
 	for name, nt := range carry.exportedNodeTypes {
 		s.nodeTypes[name] = nt
 	}
@@ -154,6 +165,11 @@ func (s *scope) BindNode(nb query.NodeBinding, nt schema.NodeType) error {
 		return fmt.Errorf("%w: variable %q carried as plural node types, re-bound as singular %s", ErrPartBindingTypeConflict, v, nt.KeyLabels)
 	}
 	s.nodeTypes[v] = nt
+	// nt came from resolveNodeLabels: it IS the set of declared types
+	// satisfying the labels this binding spells, and that set has one member.
+	// So the entry covers every key a matching row can put at this binding —
+	// see nodeTable.resolvedCovers.
+	s.resolvedCovers[v] = struct{}{}
 	// Local binding shadows any carried edge state at the same name;
 	// R5 §4.2.3 shadowing rule.
 	delete(s.edgeTypes, v)
@@ -186,6 +202,18 @@ func (s *scope) BindNodeCands(nb query.NodeBinding, nts []schema.NodeType) error
 		}
 	}
 	s.nodeCands[v] = nts
+	// A cands entry is a satisfying set by construction, so it needs no
+	// resolvedCovers mark; the lane qualifies `resolved` only. The delete keeps
+	// the two lanes from ever both claiming v.
+	//
+	// It changes no answer and no test can pin it — the singular arm above
+	// already refuses a v in s.nodeTypes, so v cannot be in the lane when this
+	// runs. It is written for the same reason as BindEdge's copy: the lane must
+	// not outlive the `resolved` entry it qualifies under any seeding regime,
+	// and the moment newScope seeds resolvedCovers from the carry this delete
+	// is what stops a carried mark surviving a plural re-bind and making the
+	// narrowing read the new set as covering.
+	delete(s.resolvedCovers, v)
 	delete(s.edgeTypes, v)
 	delete(s.edgeKeys, v)
 	delete(s.edgeCands, v)
@@ -215,9 +243,24 @@ func (s *scope) BindEdge(eb query.EdgeBinding) error {
 		return fmt.Errorf("%w: variable %q carried as edge with labels %s, re-bound with labels %s", ErrPartBindingTypeConflict, v, prev.Labels().Key(), eb.Labels().Key())
 	}
 	s.edgeBindings[v] = eb
-	// Edge shadows any carried node state.
+	// Edge shadows any carried node state. The resolvedCovers line changes no
+	// answer and no test can pin it: the only node state a shadow can find at v
+	// is the carry's, newScope does not seed the lane from the carry, and a
+	// same-Part BindNode at v never reaches here at all — the PARSER refuses
+	// that query, with `variable bound with conflicting kinds` from
+	// cypher.mergeBinding, so no such scope is ever built. (Nothing above this
+	// cascade looks at s.nodeTypes: the checks there are the callTypes shape
+	// check and the edge-label parity check.)
+	//
+	// It is written because the lane must not outlive the `resolved` entry it
+	// qualifies under ANY seeding regime — the moment newScope seeds it, this
+	// delete is what stops a stale mark from making an edge-shadowed name read
+	// as a covering endpoint. Same argument for BindNodeCands' and BindCall's
+	// copies; those three deletes are the whole set of unreachable writes to
+	// this lane on a shadow path.
 	delete(s.nodeTypes, v)
 	delete(s.nodeCands, v)
+	delete(s.resolvedCovers, v)
 	// Local edge re-bind resets any carried closed-edge state for v —
 	// Phase A2/C's closeEdge is authoritative for the new binding's
 	// endpoints, which may differ from the carry's.
@@ -235,8 +278,15 @@ func (s *scope) BindCall(cb query.CallBinding, r procsig.Registry) error {
 	// R7 §4.1: local CallBinding shadows any carried entity state at
 	// the same name (parser-unreachable belt-and-braces since
 	// build.go's imported[v] check rejects the collision at parse).
+	//
+	// The resolvedCovers line is unreachable twice over — that parser check,
+	// and newScope not seeding the lane from the carry — so it changes no
+	// answer and no test can pin it. It is written for BindEdge's reason: the
+	// lane must not outlive the `resolved` entry it qualifies under any seeding
+	// regime, and seeding it from the carry is what would make this delete live.
 	delete(s.nodeTypes, v)
 	delete(s.nodeCands, v)
+	delete(s.resolvedCovers, v)
 	delete(s.edgeTypes, v)
 	delete(s.edgeKeys, v)
 	delete(s.edgeCands, v)
@@ -274,6 +324,15 @@ func (s *scope) BindCall(cb query.CallBinding, r procsig.Registry) error {
 	return nil
 }
 
+// nodeTable is the three node lanes endpointLabels reads, by reference. Every
+// caller goes through this rather than passing s.nodeTypes and s.nodeCands
+// positionally, so a lane cannot be left behind at one call site: the third one
+// is the provenance bit, and dropping it is what makes a Phase B commitment
+// read as a set of satisfying types.
+func (s *scope) nodeTable() nodeTable {
+	return nodeTable{resolved: s.nodeTypes, cands: s.nodeCands, resolvedCovers: s.resolvedCovers}
+}
+
 // CloseEdges runs Phases A2 + B + C scope-internally: try every edge
 // admitted this Part (A2); self-call InferUnlabelled to fill unlabelled
 // node types (B); retry the deferred edges against the post-B node
@@ -288,13 +347,16 @@ func (s *scope) CloseEdges(sch schema.Schema) error {
 		if !ok {
 			continue
 		}
-		src, srcOK := endpointLabels(eb.Source(), s.nodeTypes, s.nodeCands)
-		tgt, tgtOK := endpointLabels(eb.Target(), s.nodeTypes, s.nodeCands)
+		src, srcOK := endpointLabels(eb.Source(), s.nodeTable(), sch)
+		tgt, tgtOK := endpointLabels(eb.Target(), s.nodeTable(), sch)
 		if !srcOK || !tgtOK {
 			deferred = append(deferred, eb)
 			continue
 		}
-		if err := closeEdge(eb, src, tgt, sch, s.edgeTypes, s.edgeKeys, s.edgeCands); err != nil {
+		// declared(), not covering(): the close only needs each probed key to
+		// be declared, and refusing an uncovered endpoint here would turn
+		// queries master resolves into ErrUnknownEdge.
+		if err := closeEdge(eb, src.declared(), tgt.declared(), sch, s.edgeTypes, s.edgeKeys, s.edgeCands); err != nil {
 			return err
 		}
 	}
@@ -302,19 +364,227 @@ func (s *scope) CloseEdges(sch schema.Schema) error {
 		return err
 	}
 	for _, eb := range deferred {
-		src, srcOK := endpointLabels(eb.Source(), s.nodeTypes, s.nodeCands)
-		tgt, tgtOK := endpointLabels(eb.Target(), s.nodeTypes, s.nodeCands)
+		src, srcOK := endpointLabels(eb.Source(), s.nodeTable(), sch)
+		tgt, tgtOK := endpointLabels(eb.Target(), s.nodeTable(), sch)
 		switch {
 		case !srcOK:
 			return fmt.Errorf("%w: cannot infer type of source endpoint of %s", ErrUnknownLabel, describeEdgeBinding(eb))
 		case !tgtOK:
 			return fmt.Errorf("%w: cannot infer type of target endpoint of %s", ErrUnknownLabel, describeEdgeBinding(eb))
 		}
-		if err := closeEdge(eb, src, tgt, sch, s.edgeTypes, s.edgeKeys, s.edgeCands); err != nil {
+		if err := closeEdge(eb, src.declared(), tgt.declared(), sch, s.edgeTypes, s.edgeKeys, s.edgeCands); err != nil {
 			return err
 		}
 	}
+	s.NarrowPluralEndpoints(sch)
 	return nil
+}
+
+// NarrowPluralEndpoints is the second half of Phase C. Closing an edge commits
+// a candidate set, and every member of that set names a node type on each of
+// the pattern's two ends — so the ends are constrained by the closure whether
+// or not the binding at one of them was written with a label. R3 §4.5.2 already
+// applies that constraint to unlabelled bindings in Phase B; this applies the
+// same rule to a labelled binding that plural label satisfaction (ADR 0022)
+// left with several candidate types, which Phase B skips precisely because it
+// is already bound.
+//
+// That constraint holds only for an edge EVERY RETURNED ROW HAS. A commitment
+// describes the rows that carry the edge; it says nothing about a row that does
+// not. So only bindings that pass witnessesItsEndpoints are folded in — see
+// there for the three shapes that fail and what each would cost. Skipping an
+// edge is always safe: it lands on the pre-narrowing answer, which is what R3
+// gave before this pass existed.
+//
+// The rule is: per touching edge, UNION the contributions of the candidate
+// set's two readings (endpointContribution); across touching edges, INTERSECT.
+// The two operations are not interchangeable and the order is not free — see
+// endpointContribution for why an undirected candidate set puts one end of the
+// pattern on both sides, and why taking a single reading loses a type the
+// schema permits.
+//
+// An empty intersection leaves the binding alone. It means the touching edges
+// pin it to disjoint types, so no node satisfies all of them and the pattern
+// matches nothing — a fact about which rows come back, not about which types
+// the projection can name. Refusing there would narrow a query the resolver
+// accepts today with no soundness case behind it (ADR 0006), so the pre-closure
+// satisfying set stands and ADR 0022's own verdicts run on it unchanged.
+//
+// Contributions are computed from one snapshot of the binding tables and
+// applied afterwards, so no binding's narrowing can depend on another's, and
+// the map walks below are order-independent. Edges are NOT re-closed against
+// the narrowed tables: a narrowed endpoint slice re-classifies the readings of
+// candidates that previously read both ways, which can manufacture an
+// orientation disagreement where the pre-narrowing close found none — a
+// narrowing of accepted queries reached from a widening, which is the one
+// direction this change must not move in. That is also why the call sits below
+// the deferred-close loop in CloseEdges rather than above it, which
+// TestDeferredEdgesCloseBeforeTheNarrowing pins.
+func (s *scope) NarrowPluralEndpoints(sch schema.Schema) {
+	// Changes no answer — with no plural binding the per-endpoint guard below
+	// skips every side, so acc comes out empty — and no test can pin it. It
+	// stays because the work it skips is not free: writtenBindings walks the
+	// effects and every surviving edge re-runs edgeCandidates over the schema,
+	// on the common scope where nothing is plural.
+	if len(s.nodeCands) == 0 {
+		return
+	}
+	written := s.writtenBindings()
+	acc := make(map[string]map[graph.LabelSetKey]struct{}, len(s.nodeCands))
+	for _, b := range s.bindings {
+		e, ok := b.(query.EdgeBinding)
+		if !ok {
+			continue
+		}
+		if !witnessesItsEndpoints(e, written) {
+			continue
+		}
+		srcEnd, srcOK := endpointLabels(e.Source(), s.nodeTable(), sch)
+		tgtEnd, tgtOK := endpointLabels(e.Target(), s.nodeTable(), sch)
+		if !srcOK || !tgtOK {
+			// Unreachable: CloseEdges either resolved both ends or returned
+			// ErrUnknownLabel, and this runs after it.
+			continue
+		}
+		// covering(), because everything below reads `cands` as a complete
+		// statement about this edge's two ends. Either end failing it means
+		// edgeProbes' box could be missing a declaration a matching row really
+		// has, so the contribution would omit a type those rows carry.
+		srcs, srcCovers := srcEnd.covering()
+		tgts, tgtCovers := tgtEnd.covering()
+		if !srcCovers || !tgtCovers {
+			continue
+		}
+		cands := edgeCandidates(e, srcs, tgts, sch)
+		if len(cands) == 0 {
+			// Unreachable: closeEdge refuses the empty set (§4.6 case A).
+			continue
+		}
+		// Per-edge contributions first, so a binding sitting at BOTH ends of
+		// one edge — a self-loop written on a single variable — unions its two
+		// ends rather than intersecting them.
+		//
+		// No input can tell that union from an intersection, and that is a
+		// property of the shape rather than a gap in the corpus: a variable
+		// reaches both ends only by naming both, and endpointLabels then hands
+		// both ends the same key slice, which makes a candidate's two readings
+		// the same predicate and both ends' contributions the same set —
+		// TestEndpointContributionUnionsTheTwoReadings' equal-slices row states
+		// that directly. The union is written because it is the rule, not
+		// because an input needs it.
+		perEdge := make(map[string]map[graph.LabelSetKey]struct{}, 2)
+		for _, side := range [2]struct {
+			ep  query.Endpoint
+			end patternEnd
+		}{{e.Source(), patternLeft}, {e.Target(), patternRight}} {
+			ve, isVar := side.ep.(query.VarEndpoint)
+			if !isVar {
+				continue
+			}
+			v := ve.Variable()
+			// Only plural bindings are narrowed, so a singular endpoint's
+			// contribution is never wanted. Removing this line changes no
+			// answer — a singular v reaches the loop below with an empty
+			// s.nodeCands[v], so narrowed comes out empty and the "nothing
+			// learned" arm absorbs it — which is why no test can pin it. It
+			// stays because the alternative is to state the restriction
+			// nowhere and let a downstream accident enforce it.
+			if _, plural := s.nodeCands[v]; !plural {
+				continue
+			}
+			contrib := endpointContribution(cands, srcs, tgts, side.end)
+			if prev, seen := perEdge[v]; seen {
+				for k := range prev {
+					contrib[k] = struct{}{}
+				}
+			}
+			perEdge[v] = contrib
+		}
+		for v, contrib := range perEdge {
+			if prev, seen := acc[v]; seen {
+				acc[v] = intersect(prev, contrib)
+				continue
+			}
+			acc[v] = contrib
+		}
+	}
+	for v, keep := range acc {
+		cands := s.nodeCands[v]
+		narrowed := make([]schema.NodeType, 0, len(cands))
+		for _, nt := range cands {
+			if _, ok := keep[nt.KeyLabels]; ok {
+				narrowed = append(narrowed, nt)
+			}
+		}
+		// There is deliberately no "all candidates survived" arm. It happens
+		// often, but it needs no handling: narrowed is built by filtering cands
+		// in order, so keeping all of them makes it element-wise equal to
+		// cands, and the default arm's write-back is then a no-op. Every v here
+		// came from a plural binding, so len(cands) >= 2 and the all-survived
+		// case can never collide with the singleton arm either.
+		switch {
+		case len(narrowed) == 0:
+			// The touching edges agree on nothing this binding can be. Under
+			// ADR 0006 that is a statement about which rows come back, not
+			// about which types the projection may name, so the pre-narrowing
+			// set stands and ADR 0022's verdicts run on it unchanged.
+		case len(narrowed) == 1:
+			// Determined. The binding leaves the plural lane entirely, so
+			// whole-entity projection and every singular-type property lookup
+			// see the type the closure pinned.
+			s.nodeTypes[v] = narrowed[0]
+			// v was plural, so cands was a satisfying set, and every edge folded
+			// into `keep` passed covering() on both ends — the types dropped are
+			// ones no matching row can have. The survivor is still a superset of
+			// the attainable types, so the entry stays covered.
+			//
+			// Changes no answer today and no test can pin it: this pass applies
+			// its effects from a snapshot taken before the loop, CloseEdges
+			// returns immediately after it, and resolvedCovers is not carried, so
+			// nothing reads the lane between this write and the end of the Part.
+			// It stays because the lane's contract is one-directional —
+			// membership implies covers, and only that direction is load-bearing
+			// — so omitting the write is sound but false, and the moment a reader
+			// appears after this point (carrying the lane is the obvious one, and
+			// the spec now names it) the omission is a precision bug with nothing
+			// to catch it.
+			s.resolvedCovers[v] = struct{}{}
+			delete(s.nodeCands, v)
+		default:
+			s.nodeCands[v] = narrowed
+		}
+	}
+}
+
+// writtenBindings is the set of variable names this Part's CREATE and MERGE
+// clauses introduce, read off s.effects. An anonymous position enters as the
+// empty string, exactly as CreateEffect.Variables / MergeEffect.Variables
+// record it, so an anonymous edge in a Part that writes an anonymous edge
+// tests positive whether or not it is the same one. That over-approximates,
+// and it is the safe direction: the only consumer, witnessesItsEndpoints,
+// treats membership as "do not learn from this edge", which lands on the
+// pre-narrowing answer.
+//
+// Node bindings are in the set too. They cost nothing — the consumer only ever
+// asks about edges, and a Part's named bindings have unique variables, so a
+// written node's name can never be a matched edge's name.
+func (s *scope) writtenBindings() map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, eff := range s.effects {
+		var vars []string
+		switch ee := eff.(type) {
+		case query.CreateEffect:
+			vars = ee.Variables()
+		case query.MergeEffect:
+			vars = ee.Variables()
+		default:
+			continue
+		}
+		for _, v := range vars {
+			out[v] = struct{}{}
+		}
+	}
+	return out
 }
 
 // InferUnlabelled runs Phase B against s.bindings' pending unlabelled
@@ -341,7 +611,10 @@ func (s *scope) InferUnlabelled(sch schema.Schema) error {
 	if len(pending) == 0 {
 		return nil
 	}
-	return inferUnlabelled(pending, edges, sch, s.nodeTypes, s.nodeCands, s.callTypes)
+	// writtenBindings is computed after the early return, for the same reason
+	// NarrowPluralEndpoints computes it after its own: it walks the effects, and
+	// a Part with nothing to infer has no use for the answer.
+	return inferUnlabelled(pending, edges, sch, s.nodeTable(), s.callTypes, s.writtenBindings())
 }
 
 // SeedLocalNullability writes each binding's own Nullable() bit into the

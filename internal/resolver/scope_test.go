@@ -203,6 +203,68 @@ func TestScopeCloseEdgesWritesOnlyEdgeLanes(t *testing.T) {
 	require.Contains(t, sc.edgeKeys, "r")
 }
 
+// TestScopeNarrowingToASingletonLeavesThePluralLane pins lane exclusivity at
+// the one place a binding crosses between the two node lanes: when the edge
+// closure leaves exactly one surviving candidate, NarrowPluralEndpoints writes
+// nodeTypes AND deletes nodeCands.
+//
+// Nothing else in the suite states it. Drop the delete and the resolver keeps
+// answering correctly for a while, because so much of it asks
+// `_, plural := s.nodeCands[v]` first and then resolves by intersection over a
+// candidate slice that now has one element — which is the same answer the
+// singular path gives. The corpus therefore cannot see the difference, and it
+// stays invisible right up until one consumer reads nodeTypes and another reads
+// nodeCands for the same variable. The invariant is what makes the two lanes
+// interchangeable, so it is asserted as an invariant rather than through a
+// query whose answer happens not to move.
+//
+// The scope is built by hand rather than parsed because the assertion is about
+// the tables, not about a column: a resolved query never shows which lane the
+// answer came out of.
+func TestScopeNarrowingToASingletonLeavesThePluralLane(t *testing.T) {
+	person := graph.LabelSet{"Person"}.Key()
+	employee := graph.LabelSet{"Employee", "Person"}.Key()
+	company := graph.LabelSet{"Company"}.Key()
+	worksAt := graph.LabelSet{"WORKS_AT"}.Key()
+	sch := schema.Schema{
+		Nodes: map[graph.LabelSetKey]schema.NodeType{
+			person:   {KeyLabels: person, CompleteLabels: person},
+			employee: {KeyLabels: employee, CompleteLabels: employee},
+			company:  {KeyLabels: company, CompleteLabels: company},
+		},
+		Edges: map[schema.EdgeKey]schema.EdgeType{
+			// Declared from the employee type only, so `p` has one survivor.
+			{Source: employee, KeyLabels: worksAt, Target: company}: {},
+		},
+	}
+
+	np, err := query.NewNodeBinding("p", graph.LabelSet{"Person"})
+	require.NoError(t, err)
+	nc, err := query.NewNodeBinding("c", graph.LabelSet{"Company"})
+	require.NoError(t, err)
+	epP, err := query.NewVarEndpoint("p")
+	require.NoError(t, err)
+	epC, err := query.NewVarEndpoint("c")
+	require.NoError(t, err)
+	eb, err := query.NewEdgeBinding("w", graph.LabelSet{"WORKS_AT"}, epP, epC, true)
+	require.NoError(t, err)
+
+	sc := newScope(branchState{})
+	sc.Ingest(query.Part{Bindings: []query.Binding{np, nc, eb}})
+	require.NoError(t, sc.BindNodeCands(np, []schema.NodeType{
+		{KeyLabels: person, CompleteLabels: person},
+		{KeyLabels: employee, CompleteLabels: employee},
+	}))
+	require.NoError(t, sc.BindNode(nc, schema.NodeType{KeyLabels: company, CompleteLabels: company}))
+	require.NoError(t, sc.BindEdge(eb))
+	require.Contains(t, sc.nodeCands, "p", "p starts in the plural lane")
+
+	require.NoError(t, sc.CloseEdges(sch))
+
+	require.Equal(t, employee, sc.nodeTypes["p"].KeyLabels, "the sole survivor commits")
+	require.NotContains(t, sc.nodeCands, "p", "and the plural lane is vacated, so no consumer can still see p as plural")
+}
+
 func TestScopeIngestSingleShot(t *testing.T) {
 	sc := newScope(branchState{})
 	sc.Ingest(query.Part{})

@@ -1,12 +1,14 @@
 package resolver
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/query"
+	"github.com/areqag/gqlc/internal/query/cypher"
 	"github.com/areqag/gqlc/internal/schema"
 )
 
@@ -99,6 +101,41 @@ func TestImpliedLabelSharedByTwoTypesReturnsPluralSlice(t *testing.T) {
 	require.Contains(t, keys, graph.LabelSetKey("Manager"))
 }
 
+// NarrowPluralEndpoints keeps a candidate when the closure's surviving endpoint
+// keys contain it, and the key it looks the candidate up by must be the identity
+// one — the keys on the left of the lookup come out of EdgeKey.Source/.Target,
+// which are key label sets.
+//
+// No resolver corpus fixture can state this. Every GQL schema the resolver
+// corpus parses builds its types without `=>`, so GG22 infers each complete
+// label set equal to its key one and the two lookups agree by construction:
+// swapping KeyLabels for CompleteLabels there is a no-op that reddens nothing
+// while turning the narrowing off entirely for any real GG21 schema. Here the
+// two differ, so the swap makes `keep` miss every candidate, the narrowing
+// learns nothing, and `RETURN p` goes back to ErrAmbiguousLabel.
+//
+// The query is the whole-resolver form on purpose: what is under test is the
+// answer a caller gets, and the divergence between the two label sets only has
+// consequences once satisfaction (which reads complete) and edge keying (which
+// reads key) have both run on the same binding.
+//
+// The far end is written `:Manager` rather than `:Person` so that the sole
+// candidate reads one way only. Give both ends the same plural set and the
+// candidate reads left-to-right AND right-to-left, the per-edge contribution
+// unions to both types, and nothing is learned for reasons that have nothing to
+// do with which label set the lookup uses.
+func TestNarrowingKeepsCandidatesByTheirKeyLabelSet(t *testing.T) {
+	s := divergentSchema()
+
+	q, err := cypher.New().Parse(bytes.NewReader([]byte(
+		"MATCH (p:Person)-[r:KNOWS]->(q:Manager) RETURN p")))
+	require.NoError(t, err)
+
+	vq, err := New(s).Resolve(q)
+	require.NoError(t, err, "Person is plural, but KNOWS is declared only from Engineer, so the closure pins the source end")
+	require.Equal(t, []Column{{Name: "p", Type: ResolvedNode{Labels: "Engineer"}}}, vq.Columns)
+}
+
 // EdgeKey.Source and .Target hold node type identities, so endpoint keying must
 // read the key label set. Feed it the complete one and edgeCandidates finds
 // nothing, because no declared edge is anchored at "Engineer&Person".
@@ -117,10 +154,14 @@ func TestEdgeEndpointKeyingUsesTheKeyLabelSet(t *testing.T) {
 
 	epSrc, err := query.NewVarEndpoint("a")
 	require.NoError(t, err)
-	resolved := map[string]schema.NodeType{"a": src}
-	nodeCands := map[string][]schema.NodeType{}
-	got, ok := endpointLabels(epSrc, resolved, nodeCands)
+	table := nodeTable{
+		resolved:       map[string]schema.NodeType{"a": src},
+		cands:          map[string][]schema.NodeType{},
+		resolvedCovers: map[string]struct{}{"a": {}},
+	}
+	end, ok := endpointLabels(epSrc, table, s)
 	require.True(t, ok)
+	got := end.declared()
 	require.Len(t, got, 1)
 	require.Equal(t, src.KeyLabels, got[0])
 	require.NotEqual(t, src.CompleteLabels, got[0])

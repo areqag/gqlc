@@ -1,0 +1,46 @@
+-- Three types satisfy `(:Person)` and a touching edge is declared on exactly
+-- two of them, so the Phase C endpoint narrowing lands on a set that is SMALLER
+-- but still PLURAL — the arm every other plural-endpoint schema skips, because
+-- on a two-type schema the narrowing is always "one survivor" or "no change".
+--
+-- WORKS_AT is declared from Person&Employee and from Person&Contractor, and not
+-- from the bare person type. `(p:Person)-[:WORKS_AT]->(:Company)` therefore
+-- drops Person and keeps the other two:
+--
+--   RETURN p           still ErrAmbiguousLabel, but naming two types, not three
+--   RETURN p.staffId   resolves, and ONLY because Person was dropped
+--
+-- staffId is the load-bearing property: it is declared on the two staff types
+-- and not on the bare person type, so ADR 0022's intersection over the
+-- pre-narrowing set of three has no such property and the column exists only
+-- as a consequence of the narrowing. `id` and `name` are shared by all three so
+-- the intersection still has something in it either way.
+
+CREATE PROPERTY GRAPH TYPE SatisfyPluralEdgesThreeTypes AS {
+
+    (:Person {
+        id   :: INT NOT NULL,
+        name :: STRING NOT NULL
+    }),
+
+    (:Person&Employee {
+        id      :: INT NOT NULL,
+        name    :: STRING NOT NULL,
+        staffId :: INT NOT NULL
+    }),
+
+    (:Person&Contractor {
+        id      :: INT NOT NULL,
+        name    :: STRING NOT NULL,
+        staffId :: INT NOT NULL
+    }),
+
+    (:Company {
+        id   :: INT NOT NULL,
+        name :: STRING NOT NULL
+    }),
+
+    (:Person&Employee)   -[:WORKS_AT { since :: INT NOT NULL }]-> (:Company),
+    (:Person&Contractor) -[:WORKS_AT { since :: INT NOT NULL }]-> (:Company)
+
+}
