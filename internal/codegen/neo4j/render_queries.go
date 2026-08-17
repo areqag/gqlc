@@ -695,16 +695,17 @@ func walkListElemPlan(b *strings.Builder, p codegen.Query, f codegen.Row, e *cod
 
 // elemLocal names a local of the element loop at the given nesting
 // depth. A nested list's loop is emitted inside the enclosing list's
-// loop body, so a fixed name is redeclared in an inner scope and the
-// enclosing binding stops being reachable from the point the emission
-// still refers to it — `acc = append(acc, inner)` resolves both operands
-// to the inner slice, which does not compile from a nesting depth of
-// three. Numbering by depth rather than by column position is what the
-// collision is on: sibling list columns emit disjoint loops, so their
-// locals never share a scope, while nested ones always do.
+// loop body, so under a fixed name the inner declaration shadows the
+// enclosing one at the point the emission still appends to it — the
+// accumulator, the value appended to it and the inner accumulator become
+// one identifier, and the emitted package does not compile from a
+// nesting depth of three.
 //
-// The outermost depth is unsuffixed, so a single-level list column emits
-// the loop spec §5.5 spells out.
+// The axis is depth, not the column position the row assembly's own
+// accumulator numbers on: sibling list columns emit disjoint loops whose
+// locals never share a scope, while nested ones always do. The outermost
+// depth is unsuffixed, so a single-level list column emits the loop spec
+// §5.5 spells out.
 func elemLocal(name string, depth int) string {
 	if depth == 0 {
 		return name

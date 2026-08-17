@@ -29,7 +29,8 @@ CREATE PROPERTY GRAPH TYPE Neo4jCorpus AS {
     (:Nest {
         cube :: LIST<LIST<LIST<INT64>>> NOT NULL,
         lhs  :: LIST<LIST<INT64>> NOT NULL,
-        rhs  :: LIST<LIST<STRING>> NOT NULL
+        rhs  :: LIST<LIST<STRING>> NOT NULL,
+        deep :: LIST<LIST<LIST<STRING>>>
     }),
     (:Anything {
         payload :: ANY VALUE NOT NULL,
