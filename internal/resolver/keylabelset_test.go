@@ -154,10 +154,14 @@ func TestEdgeEndpointKeyingUsesTheKeyLabelSet(t *testing.T) {
 
 	epSrc, err := query.NewVarEndpoint("a")
 	require.NoError(t, err)
-	resolved := map[string]schema.NodeType{"a": src}
-	nodeCands := map[string][]schema.NodeType{}
-	got, ok := endpointLabels(epSrc, resolved, nodeCands)
+	table := nodeTable{
+		resolved:       map[string]schema.NodeType{"a": src},
+		cands:          map[string][]schema.NodeType{},
+		resolvedCovers: map[string]struct{}{"a": {}},
+	}
+	end, ok := endpointLabels(epSrc, table, s)
 	require.True(t, ok)
+	got := end.declared()
 	require.Len(t, got, 1)
 	require.Equal(t, src.KeyLabels, got[0])
 	require.NotEqual(t, src.CompleteLabels, got[0])

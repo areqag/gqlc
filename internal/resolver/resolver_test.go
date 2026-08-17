@@ -396,6 +396,21 @@ var invalidFixtures = map[string]error{
 	// TestNarrowingSkipsAnEndpointItCannotEnumerate.
 	"plural_endpoint_inline_endpoint_stays_plural.cypher":          ErrAmbiguousLabel,
 	"plural_endpoint_inline_endpoint_property_stays_plural.cypher": ErrUnknownProperty,
+	// The same schema, one hop further out, with the inline endpoint moved off
+	// the narrowed edge entirely: `(:Person)-[r:WORKS_AT]->(c)<-[q:WORKS_AT]-(p:Person)`
+	// narrows `p` from edge `q`, whose two ends are both VarEndpoints. The
+	// under-enumeration reaches it through Phase B instead — `c` is unlabelled,
+	// candidateTypes reads `r`'s inline other end, and commits `c` to the bare
+	// Company that half the pattern's rows contradict. Narrowing from that
+	// singleton is the same wrong answer these two spell one hop in.
+	"plural_endpoint_unlabelled_hop_stays_plural.cypher":          ErrAmbiguousLabel,
+	"plural_endpoint_unlabelled_hop_property_stays_plural.cypher": ErrUnknownProperty,
+	// The same wrong commitment reached across a Part boundary instead: Part 1
+	// infers `c`, WITH carries it, and Part 2's narrowing sees a singular node
+	// type with no provenance. branchState carries the type and not how Part 1
+	// arrived at it, so newScope leaves a carried entry out of resolvedCovers
+	// and this is the fixture that pins the omission.
+	"plural_endpoint_carried_hop_property_stays_plural.cypher": ErrUnknownProperty,
 	// Three candidates of which only the first and third disagree about which
 	// of the pattern's endpoints is the source; the second is a plural-endpoint
 	// duplicate of the first's side and carries no orientation signal.
@@ -1478,6 +1493,67 @@ func (s *ResolverSuite) TestInlineEndpointsAgreeWithTheirVarSpelling() {
 	} {
 		s.Require().ErrorIsf(resolve(pair[0]), ErrAmbiguousLabel, "%s", pair[0])
 		s.Require().ErrorIsf(resolve(pair[1]), ErrAmbiguousLabel, "%s", pair[1])
+	}
+}
+
+// TestAnInferredEndpointIsTrustedOnlyWhenItsOwnEndsWereEnumerated closes the
+// second half of the precondition TestNarrowingSkipsAnEndpointItCannotEnumerate
+// opened. That test guards the endpoint the narrowing reads DIRECTLY. This one
+// guards the endpoint it reads through Phase B: an unlabelled binding is typed
+// by candidateTypes, which intersects across its touching edges and reads each
+// far end by the keys endpointLabels gives — so an inline endpoint that could
+// not enumerate itself pins the unlabelled binding to one type when two are
+// attainable, and the narrowing then reads that singleton as a satisfying set.
+// The var endpoint the gate waves through is a laundered inline one.
+//
+// The two rows are the same two-part question on two schemas. In the refusing
+// row the far end of the inference is `(:Person)`, satisfied by two declared
+// types, so `c`'s commitment can be a strict subset and nothing may be learned
+// from it. In the accepting row the far end is the plural var `p`, whose whole
+// candidate slice IS the satisfying set, so `c`'s commitment covers and the
+// narrowing goes on to pin `p` through it.
+//
+// That accepting row is what stops the fix being "an unlabelled binding is
+// never trusted": before it, `MATCH (p:Person)-[r:WORKS_AT]->(c)` lost the
+// narrowing the branch gets right, and no test said so.
+func (s *ResolverSuite) TestAnInferredEndpointIsTrustedOnlyWhenItsOwnEndsWereEnumerated() {
+	tests := []struct {
+		name    string
+		schema  string
+		query   string
+		want    []Column
+		wantErr error
+	}{
+		{
+			name:   "the inference read an inline endpoint two types satisfy",
+			schema: "satisfy_plural_edges_inline_subtype.gql",
+			query:  "MATCH (:Person)-[r:WORKS_AT]->(c)<-[q:WORKS_AT]-(p:Person) RETURN p.personOnly",
+			// Two Employee&Person nodes both -[:WORKS_AT]-> one Company&Large is
+			// a matching row, and its `p` has no personOnly.
+			wantErr: ErrUnknownProperty,
+		},
+		{
+			name:   "the inference read a plural var endpoint",
+			schema: "satisfy_plural_edges_reversed.gql",
+			query:  "MATCH (p:Person)-[r:WORKS_AT]->(c) RETURN p.employeeId",
+			// WORKS_AT is declared from Employee&Person only, so `c` infers to
+			// Company from a covering end and the closure pins `p`.
+			want: []Column{{Name: "p.employeeId", Type: ResolvedProperty{Type: graph.PropertyType("INT")}}},
+		},
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			sch := s.loadSchema("invalid", tt.schema)
+			q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(tt.query)))
+			s.Require().NoError(err)
+			vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+			if tt.wantErr != nil {
+				s.Require().ErrorIs(err, tt.wantErr, tt.query)
+				return
+			}
+			s.Require().NoError(err, tt.query)
+			s.Require().Equal(tt.want, vq.Columns, tt.query)
+		})
 	}
 }
 

@@ -601,8 +601,69 @@ func formatEdgeKeys(keys []schema.EdgeKey) string {
 	return strings.Join(parts, ", ")
 }
 
+// endpointKeys is what endpointLabels knows about one edge endpoint: the key
+// label sets to probe, and whether those keys COVER every key a matching row
+// can put at this endpoint.
+//
+// The bit travels with the keys because the keys alone do not carry it, and the
+// callers that read them need opposite halves of the same set relation. Every
+// PROBED key being declared is the close's half and is free; every ATTAINABLE
+// key being probed is the narrowing's half and is not. declared() and
+// covering() are those two contracts, and there is no accessor handing over the
+// keys without naming which one the caller is under — the previous shape stated
+// the obligation in prose beside the function, which enumerated two callers
+// when the tree had three, and the caller it left out was the one that
+// laundered an uncovered inline endpoint into a VarEndpoint the narrowing then
+// trusted.
+type endpointKeys struct {
+	keys   []graph.LabelSetKey
+	covers bool
+}
+
+// declared is the keys for a caller that needs each PROBED key to be declared
+// and nothing more — closeEdge, which filters edgeProbes' box through s.Edges
+// and refuses what the schema does not have. A probe the schema declares is a
+// real edge type whether or not the box was complete, so an incomplete box
+// costs that caller candidates it might have had, never a wrong answer.
+func (k endpointKeys) declared() []graph.LabelSetKey { return k.keys }
+
+// covering is the keys for a caller that needs every ATTAINABLE key to be in
+// the box, and ok=false when they are not. That is NarrowPluralEndpoints'
+// contract: it reads a committed candidate set as a complete statement about
+// the pattern's two ends, so a key left out takes its whole declaration out
+// with it and the contribution then omits a type the omitted rows really have.
+// Committing on that is not a missed widening, it is a wrong answer.
+func (k endpointKeys) covering() ([]graph.LabelSetKey, bool) { return k.keys, k.covers }
+
+// nodeTable is the resolver's node-binding view at EdgeKey-formation time. The
+// three lanes travel together because endpointLabels' answer needs all three:
+// reading resolved without resolvedCovers is exactly what makes a Phase B
+// closure commitment look like a set of satisfying types.
+//
+// The maps are the scope's own, by reference — inferUnlabelled writes through
+// this value into the live table.
+type nodeTable struct {
+	resolved map[string]schema.NodeType
+	cands    map[string][]schema.NodeType
+	// resolvedCovers qualifies `resolved` alone, and holds the entries that are
+	// the set of types SATISFYING the labels the query spelled for that
+	// variable — Phase A1's BindNode arm, and the narrowing's own collapse of a
+	// plural binding, which only ever drops types no matching row can have.
+	//
+	// It is deliberately a positive lane, so anything the resolver did not
+	// itself derive that way defaults to uncovered: a Phase B inference (which
+	// may be a strict subset of the attainable types), and a carried entry
+	// (whose provenance this Part cannot see).
+	//
+	// `cands` needs no such lane. Its only writers are BindNodeCands, the carry
+	// seed, and the narrowing's shrink, so a cands entry is a satisfying set by
+	// construction; inferUnlabelled never writes it.
+	resolvedCovers map[string]struct{}
+}
+
 // endpointLabels reads the key label set(s) identifying an edge endpoint's
-// node type(s), at the point EdgeKey formation needs it. EdgeKey.Source and
+// node type(s), at the point EdgeKey formation needs it, together with whether
+// those keys cover every key a matching row can put there. EdgeKey.Source and
 // .Target hold node type identities, so this must yield key label sets, never
 // complete ones.
 //
@@ -610,70 +671,53 @@ func formatEdgeKeys(keys []schema.EdgeKey) string {
 // VarEndpoint names a plural-candidate binding, all candidate key label sets
 // are returned for cross-product expansion in edgeCandidates.
 //
-// The InlineEndpoint arm is the exception, and a known gap: it keys on the
-// labels the query itself spells, which is an exact match against declared
-// identity rather than a satisfaction test. That predates this function; the
-// edge types closeEdge commits on it are gqlc-qlr2's subject. A caller whose
-// correctness needs this answer to be a SUPERSET of the keys a matching row can
-// carry — the narrowing does, the close does not — must gate on
-// endpointKeysCoverEveryMatch first.
-func endpointLabels(e query.Endpoint, resolved map[string]schema.NodeType, nodeCands map[string][]schema.NodeType) ([]graph.LabelSetKey, bool) {
+// The InlineEndpoint arm keys on the labels the query itself spells, which is
+// an exact match against declared identity rather than a satisfaction test.
+// That predates this function and the keys are left as they were — the edge
+// types closeEdge commits on them are gqlc-qlr2's subject, and the wrong
+// unlabelled-binding type candidateTypes infers from them is gqlc-3uof. What
+// this function adds is the admission: those keys do not cover, and covering()
+// says so.
+func endpointLabels(e query.Endpoint, t nodeTable, s schema.Schema) (endpointKeys, bool) {
 	switch ep := e.(type) {
 	case query.VarEndpoint:
-		if nt, ok := resolved[ep.Variable()]; ok {
-			return []graph.LabelSetKey{nt.KeyLabels}, true
+		v := ep.Variable()
+		if nt, ok := t.resolved[v]; ok {
+			_, covers := t.resolvedCovers[v]
+			return endpointKeys{keys: []graph.LabelSetKey{nt.KeyLabels}, covers: covers}, true
 		}
-		if nts, ok := nodeCands[ep.Variable()]; ok {
+		if nts, ok := t.cands[v]; ok {
 			keys := make([]graph.LabelSetKey, len(nts))
 			for i, nt := range nts {
 				keys[i] = nt.KeyLabels
 			}
-			return keys, true
+			return endpointKeys{keys: keys, covers: true}, true
 		}
-		return nil, false
+		return endpointKeys{}, false
 	case query.InlineEndpoint:
 		ls := ep.Labels()
 		if len(ls) == 0 {
-			return nil, false
+			return endpointKeys{}, false
 		}
-		return []graph.LabelSetKey{ls.Key()}, true
+		sat := satisfyingNodeTypes(ls, s)
+		// One declared type satisfies the spelled labels and its identity is the
+		// key those labels form. A second satisfying type makes the single key a
+		// strict subset; a lone satisfying type whose identity differs from the
+		// spelling makes it a different set again.
+		//
+		// That second clause changes no answer and no test can pin it. It is
+		// reachable — `(:Employee)` on a schema declaring only Person&Employee
+		// satisfies exactly one type and keys to neither identity — but on any
+		// such endpoint no declared edge carries the spelled key, so
+		// edgeCandidates comes back empty and closeEdge has already refused with
+		// ErrUnknownEdge by the time the narrowing runs. It is written because it
+		// is half of the set relation covering() asserts, and dropping it would
+		// leave that relation enforced somewhere else entirely.
+		covers := len(sat) == 1 && s.Nodes[sat[0]].KeyLabels == ls.Key()
+		return endpointKeys{keys: []graph.LabelSetKey{ls.Key()}, covers: covers}, true
 	default:
-		return nil, false
+		return endpointKeys{}, false
 	}
-}
-
-// endpointKeysCoverEveryMatch reports whether endpointLabels' answer for this
-// endpoint is a superset of the node type keys a matching row can put there.
-//
-// That is the precondition edgeProbes' box rests on, and only one direction of
-// it is free. Every key in the box being declared is what the close needs;
-// every ATTAINABLE key being in the box is what the narrowing needs, because a
-// key left out takes its whole declaration out with it and the contribution
-// then omits a type the omitted rows really have. Committing on that is not a
-// missed widening, it is a wrong answer.
-//
-// A VarEndpoint holds it unconditionally — endpointLabels hands back the
-// binding's resolved type or its entire candidate slice, and both are the
-// satisfying set by construction. An InlineEndpoint holds it only when one
-// declared type satisfies the spelled labels and its identity is the key those
-// labels form; a second satisfying type makes endpointLabels' single key a
-// strict subset, and a lone satisfying type whose identity differs from the
-// spelling makes it a different set again.
-func endpointKeysCoverEveryMatch(e query.Endpoint, s schema.Schema) bool {
-	ep, inline := e.(query.InlineEndpoint)
-	if !inline {
-		return true
-	}
-	sat := satisfyingNodeTypes(ep.Labels(), s)
-	// The second clause changes no answer and no test can pin it. It is
-	// reachable — `(:Employee)` on a schema declaring only Person&Employee
-	// satisfies exactly one type and keys to neither identity — but on any such
-	// endpoint no declared edge carries the spelled key, so edgeCandidates comes
-	// back empty and closeEdge has already refused with ErrUnknownEdge by the
-	// time the narrowing runs. It is written because it is half of the set
-	// relation above, and dropping it would leave that relation asserted by this
-	// function's name and enforced somewhere else entirely.
-	return len(sat) == 1 && s.Nodes[sat[0]].KeyLabels == ep.Labels().Key()
 }
 
 // closeEdge applies edge-candidate closure to one already-endpoint-resolved
@@ -899,7 +943,8 @@ func describeTriedEdges(e query.EdgeBinding, srcs, tgts []graph.LabelSetKey) str
 	return formatEdgeKeys(edgeProbes(e, srcs, tgts))
 }
 
-func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, resolved map[string]schema.NodeType, nodeCands map[string][]schema.NodeType, callTypes map[string]callBindingSlot) error {
+func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, t nodeTable, callTypes map[string]callBindingSlot) error {
+	resolved, nodeCands := t.resolved, t.cands
 	if len(pending) == 0 {
 		return nil
 	}
@@ -929,7 +974,7 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 		var next []query.NodeBinding
 		committed := 0
 		for _, n := range pending {
-			cands := candidateTypes(n, edges, s, resolved, nodeCands)
+			cands, covered := candidateTypes(n, edges, s, t)
 			switch len(cands) {
 			case 0:
 				return fmt.Errorf("%w: cannot infer type of unlabelled binding %q — no edge in the pattern reaches a compatible schema node type", ErrUnknownLabel, n.Variable())
@@ -946,6 +991,33 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 					return fmt.Errorf("%w: variable %q carried as CALL YIELD scalar, re-bound as %s", ErrPartBindingTypeConflict, n.Variable(), only)
 				}
 				resolved[n.Variable()] = s.Nodes[only]
+				// A Phase B commitment is a set of satisfying types only when
+				// every edge it read from could enumerate its far end — see
+				// candidateTypes. Marking it lets a later binding infer through
+				// this one and lets the narrowing learn from it; NOT marking it is
+				// what keeps an under-enumerated inline endpoint from laundering
+				// its subset into a VarEndpoint the narrowing trusts.
+				//
+				// This is also how the property becomes transitive without a
+				// fixed point: a variable committed uncovered is in `resolved` and
+				// absent from resolvedCovers, so the next binding to read it
+				// through endpointLabels gets covers=false and commits uncovered
+				// in turn.
+				//
+				// That transitivity is the absence, not the delete. The else arm
+				// changes no answer and no test can pin it: an unlabelled pending
+				// binding is never already in the lane — BindNode is the lane's only
+				// other writer and never sees an unlabelled binding, newScope does
+				// not seed the lane from the carry, and a name leaves `pending` on
+				// the iteration it commits, so there is no second commit to
+				// overwrite. It is written so the absence is asserted rather than
+				// assumed: seeding the lane from the carry is the change newScope
+				// names as its alternative, and it would make this arm live.
+				if covered {
+					t.resolvedCovers[n.Variable()] = struct{}{}
+				} else {
+					delete(t.resolvedCovers, n.Variable())
+				}
 				committed++
 			default:
 				next = append(next, n)
@@ -953,7 +1025,7 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 		}
 		if committed == 0 {
 			n := next[0]
-			cands := candidateTypes(n, edges, s, resolved, nodeCands)
+			cands, _ := candidateTypes(n, edges, s, t)
 			return fmt.Errorf("%w: cannot uniquely infer type of unlabelled binding %q — candidate types: %s", ErrAmbiguousBinding, n.Variable(), joinCandidates(cands))
 		}
 		pending = next
@@ -961,8 +1033,24 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 	return nil
 }
 
-func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, resolved map[string]schema.NodeType, nodeCands map[string][]schema.NodeType) map[graph.LabelSetKey]struct{} {
+// candidateTypes is the per-edge intersection Phase B infers an unlabelled
+// binding's type from, and whether that answer COVERS every type a matching row
+// can put at the binding.
+//
+// It reads each far end through declared(), not covering(): refusing an
+// uncovered far end here would turn queries origin/master resolves into
+// ErrUnknownLabel, and the wrong type it infers from one is gqlc-3uof —
+// pre-existing on master and deliberately left alone. What the second return
+// adds is the admission, so the wrong answer stops here instead of being read
+// downstream as a complete statement about a pattern's ends.
+//
+// The rule for it: every edge that CONTRIBUTED had a covering far end. An edge
+// skipped above contributes no constraint, which only widens acc, so skipping
+// cannot break the superset property — it is intersecting against an
+// under-enumerated far end that can drop a type the omitted rows really have.
+func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Schema, t nodeTable) (map[graph.LabelSetKey]struct{}, bool) {
 	var acc map[graph.LabelSetKey]struct{}
+	covered := true
 	for _, e := range edges {
 		side, touches := touchingSide(e, n.Variable())
 		if !touches {
@@ -972,9 +1060,13 @@ func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Sch
 		if side == "source" {
 			other = e.Target()
 		}
-		otherKeys, ok := endpointLabels(other, resolved, nodeCands)
+		otherEnd, ok := endpointLabels(other, t, s)
 		if !ok {
 			continue
+		}
+		otherKeys, otherCovers := otherEnd.covering()
+		if !otherCovers {
+			covered = false
 		}
 		cand := make(map[graph.LabelSetKey]struct{})
 		orientations := []bool{true}
@@ -1007,9 +1099,9 @@ func candidateTypes(n query.NodeBinding, edges []query.EdgeBinding, s schema.Sch
 		}
 	}
 	if acc == nil {
-		return map[graph.LabelSetKey]struct{}{}
+		return map[graph.LabelSetKey]struct{}{}, covered
 	}
-	return acc
+	return acc, covered
 }
 
 func touchingSide(e query.EdgeBinding, v string) (string, bool) {

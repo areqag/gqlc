@@ -937,17 +937,45 @@ matching row can put there. The probe box is the two endpoint key
 slices crossed with the orientations, so each slice must be a
 **superset** of what a row can carry — the opposite direction from what
 §4.6 needs of the close, which only requires each probed key to be
-declared. `endpointLabels` returns a variable endpoint's whole
-satisfying set and holds the relation by construction. For an **inline**
-endpoint it returns the labels the query spells, keyed exactly, and that
-is a strict subset as soon as a second declared type satisfies them: on
-a schema declaring `Person`, `Person&Employee`, `Company`,
-`Company&Large`, and `WORKS_AT` both `Person -> Company` and
+declared. `endpointLabels` returns both the keys and whether they hold
+the relation, as one `endpointKeys` value with two accessors —
+`declared()` for the close's half, `covering()` for the narrowing's — so
+a caller cannot take the keys without saying which half it is under. An
+edge either of whose ends fails `covering()` teaches the narrowing
+nothing.
+
+For an **inline** endpoint the keys are the labels the query spells,
+keyed exactly, and that is a strict subset as soon as a second declared
+type satisfies them: on a schema declaring `Person`, `Person&Employee`,
+`Company`, `Company&Large`, and `WORKS_AT` both `Person -> Company` and
 `Person&Employee -> Company&Large`, the pattern
 `(p:Person)-[:WORKS_AT]->(:Company)` never probes the second
 declaration, and naming `p` the bare `Person` on the strength of the
-first is contradicted by the rows it skipped. So an edge either of whose
-ends fails `endpointKeysCoverEveryMatch` teaches the narrowing nothing.
+first is contradicted by the rows it skipped.
+
+For a **variable** endpoint it depends on how the binding was typed,
+which the spelling does not show. A binding typed by label satisfaction
+— §4.2.3's labelled arm, singular or plural — carries its whole
+satisfying set and covers. A binding typed by §4.5.2's Phase B inference
+need not: `candidateTypes` intersects across the touching edges and
+reads each far end by these same keys, so an inline endpoint elsewhere
+in the pattern pins an unlabelled binding to one type when two are
+attainable. `(:Person)-[r:WORKS_AT]->(c)<-[q:WORKS_AT]-(p:Person)` on
+the schema above commits `c` to the bare `Company`, and narrowing `p`
+from that singleton reaches the same wrong answer the inline spelling
+reaches one hop in. So Phase B records whether its own commitment
+covered — every contributing edge's far end covered — and the narrowing
+reads that record instead of assuming it. The property is transitive
+without a fixed point, because a commitment recorded as uncovered is
+read back through the same accessor by the next binding to infer
+through it. Phase B's wrong TYPE is left standing (`gqlc-3uof`, present
+on `origin/master`); what this fixes is reading it as a complete
+statement about a pattern's ends.
+
+A binding carried across a Part boundary is treated as not covering.
+`branchState` carries the type and not its provenance, so the downstream
+Part cannot tell §4.2.3's answer from §4.5.2's, and the safe reading is
+the one that lands on the pre-narrowing answer.
 
 The condition is on the enumeration, not on the spelling. Where the
 spelled labels are satisfied by exactly one declared type — the
