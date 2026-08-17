@@ -137,8 +137,15 @@ func sentinelsOf(err error) string {
 // sweepCorpus enumerates every fixture query and every fixture schema under
 // test/data/resolver, from the valid/ and invalid/ subdirs both. Schemas are
 // keyed by subdir-qualified path: the two schemas/ dirs share nine basenames
-// and four of those nine differ in bytes, so a basename key would fold two
-// different schemas onto one cell.
+// and three of those nine differ in bytes — satisfy_singular.gql, social.gql
+// and satisfy_plural_edges_reversed_subtype.gql — so a basename key would fold
+// two different schemas onto one cell. Both counts re-derive, from
+// test/data/resolver, with:
+//
+//	comm -12 <(ls valid/schemas) <(ls invalid/schemas) | tee /dev/stderr |
+//		while read -r b; do
+//			cmp -s "valid/schemas/$b" "invalid/schemas/$b" || echo "DIFFER $b"
+//		done
 func sweepCorpus(t *testing.T) (queries, schemas []string) {
 	t.Helper()
 	for _, sub := range []string{"valid", "invalid"} {
@@ -548,10 +555,14 @@ func sweepCategoryDetail(label string, lines []string) string {
 //
 // What both cases add is the extent. TestResolverSuite resolves the pairs
 // schema.mapping.json names, one schema per query — 310 of these 11780 cells
-// at this commit, leaving 11470 outside anything else in the package. 288 of
-// that 299 sit there. The count is what the sweep this replaces could not
-// state: verdicts alone put the same change at 0 differences. Cell counts
-// here are of this commit; the manifest header restates the live ones.
+// at this commit — and 288 of that 299 are among the other 11470. Within this
+// file the extent is not what the manifest adds: TestSweepReachesEverySentinel
+// and TestSweepIsIndependentOfCellOrder resolve all 11780 too, but the first
+// only counts sentinels per name and the second only compares a run against a
+// re-parse of itself, so neither holds any cell to a committed value. The
+// count is what the sweep this replaces could not state: verdicts alone put
+// the same change at 0 differences. Cell counts here are of this commit; the
+// manifest header restates the live ones.
 func TestCorpusSweepManifest(t *testing.T) {
 	queries, schemas := sweepCorpus(t)
 	cells, order, msgs := runSweep(t, queries, schemas)
@@ -713,8 +724,23 @@ func TestSweepManifestRejectsHandEdits(t *testing.T) {
 	// one thing earns rather than that some diagnosis came back. A row that
 	// dropped good's msg row too would be rejected by the cell/msg
 	// correspondence no matter what the guard it is named for did, so deleting
-	// that guard would leave the table green: three of the parser's guards had
-	// no failing test for exactly that reason.
+	// that guard would leave the table green.
+	//
+	// Measured against the table this one replaces, which asserted only that
+	// some guard had rejected the row: neutering each of the 13 guards in turn
+	// — compile-screened with `go test -c -o /dev/null ./internal/resolver`,
+	// run with -count=1, each restored by md5 — left the whole package green
+	// for eight of them. For five of those eight the cell/msg correspondence
+	// was the last guard standing: the allSentinels-name guard, msg digest
+	// re-derivation and duplicate msg digest reach it in one step, while the
+	// empty-sentinel guard reaches it behind the allSentinels-name guard and
+	// msg text quoting behind the digest guard, so those two need three
+	// deletions together before their row is accepted. The other three of the
+	// eight were masked by something that is not the correspondence: both
+	// field-count guards by the index-out-of-range panic their absence causes,
+	// which that table's probe scored as a rejection, and the verdict guard by
+	// the allSentinels-name guard, because that table's verdict row carried
+	// "-" in the sentinel column where the row below carries a real one.
 	for name, tc := range map[string]struct{ row, want string }{
 		"sentinel that is no sentinel":     {cellRow(verdictRefuse, "ErrTypo") + msgRow, `sentinel column names "ErrTypo"`},
 		"sentinel on an accepting cell":    {cellRow(verdictAccept, "ErrUnknownEdge") + msgRow, "accepting cell carries sentinel"},
