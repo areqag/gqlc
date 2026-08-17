@@ -964,13 +964,43 @@ attainable. `(:Person)-[r:WORKS_AT]->(c)<-[q:WORKS_AT]-(p:Person)` on
 the schema above commits `c` to the bare `Company`, and narrowing `p`
 from that singleton reaches the same wrong answer the inline spelling
 reaches one hop in. So Phase B records whether its own commitment
-covered — every contributing edge's far end covered — and the narrowing
-reads that record instead of assuming it. The property is transitive
-without a fixed point, because a commitment recorded as uncovered is
-read back through the same accessor by the next binding to infer
-through it. Phase B's wrong TYPE is left standing (`gqlc-3uof`, present
-on `origin/master`); what this fixes is reading it as a complete
-statement about a pattern's ends.
+covered, and the narrowing reads that record instead of assuming it.
+The property is transitive without a fixed point, because a commitment
+recorded as uncovered is read back through the same accessor by the
+next binding to infer through it. Phase B's wrong TYPE is left standing
+(`gqlc-3uof`, present on `origin/master`); what this fixes is reading it
+as a complete statement about a pattern's ends.
+
+**Covering is a conjunction, and the enumeration above is only one of
+its conjuncts.** Phase B's commitment covers when every contributing
+edge had a covering far end **and** every contributing edge
+`witnessesItsEndpoints` — the same predicate the guarantee half applies
+to the edge the narrowing reads directly, applied here to each edge the
+inference folds in. Without the second conjunct the identical wrong
+answer is reached through perfectly enumerated ends. On the schema above
+plus `(:Company)-[:HAS_DESK]->(:Desk)`,
+
+    MATCH (p:Person)-[q:WORKS_AT]->(c)
+    OPTIONAL MATCH (c)-[h:HAS_DESK]->(d:Desk) RETURN p.personOnly
+
+enumerates both far ends exactly — `p` is a plural binding carrying its
+whole satisfying set, `(d:Desk)` is a singular labelled one — and
+`HAS_DESK` is declared only from the bare `Company`, so folding it pins
+`c` to `Company` and `p` to the bare `Person`. But `OPTIONAL MATCH` is
+an outer join: the `Employee&Person -[WORKS_AT]-> Company&Large` row
+comes back with `h` and `d` null, its `c` is `Company&Large`, and its
+`p` has no `personOnly`. A `NOT NULL` column on a row that has no such
+property is the same failure the guarantee half refuses one level up.
+The other two arms reach it the same way — `*0..1` in place of the
+OPTIONAL, or a `CREATE`/`MERGE` of the `HAS_DESK` edge — and
+`TestPhaseBAsksTheWholeWitnessPredicateNotOneArmOfIt` pairs each with
+the plain mandatory hop, which stays accepted.
+
+That conjunct un-covers the answer without changing it. Skipping such an
+edge instead would widen the intersection and turn a unique inference
+into `ErrAmbiguousBinding`, a refusal `origin/master` does not make; the
+inferred type is left exactly as master infers it, and only the record
+of covering changes.
 
 A binding carried across a Part boundary is treated as not covering.
 `branchState` carries the type and not its provenance, so the downstream

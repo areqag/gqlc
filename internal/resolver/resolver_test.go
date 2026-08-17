@@ -1506,16 +1506,23 @@ func (s *ResolverSuite) TestInlineEndpointsAgreeWithTheirVarSpelling() {
 // attainable, and the narrowing then reads that singleton as a satisfying set.
 // The var endpoint the gate waves through is a laundered inline one.
 //
-// The two rows are the same two-part question on two schemas. In the refusing
-// row the far end of the inference is `(:Person)`, satisfied by two declared
-// types, so `c`'s commitment can be a strict subset and nothing may be learned
-// from it. In the accepting row the far end is the plural var `p`, whose whole
-// candidate slice IS the satisfying set, so `c`'s commitment covers and the
-// narrowing goes on to pin `p` through it.
+// The first two rows are the same two-part question on two schemas. In the
+// refusing row the far end of the inference is `(:Person)`, satisfied by two
+// declared types, so `c`'s commitment can be a strict subset and nothing may be
+// learned from it. In the accepting row the far end is the plural var `p`,
+// whose whole candidate slice IS the satisfying set, so `c`'s commitment covers
+// and the narrowing goes on to pin `p` through it.
 //
 // That accepting row is what stops the fix being "an unlabelled binding is
 // never trusted": before it, `MATCH (p:Person)-[r:WORKS_AT]->(c)` lost the
 // narrowing the branch gets right, and no test said so.
+//
+// The third row says covering is a CONJUNCTION and the two rows above test one
+// conjunct of it. Enumerating both far ends is not enough on its own: an edge
+// that no returned row is guaranteed to have drops a type the surviving rows
+// carry however perfectly its ends were enumerated. Only that row separates
+// "every contributing edge's far end covered" from the rule the resolver needs,
+// and on the first two rows the two definitions are the same sentence.
 func (s *ResolverSuite) TestAnInferredEndpointIsTrustedOnlyWhenItsOwnEndsWereEnumerated() {
 	tests := []struct {
 		name    string
@@ -1540,6 +1547,22 @@ func (s *ResolverSuite) TestAnInferredEndpointIsTrustedOnlyWhenItsOwnEndsWereEnu
 			// Company from a covering end and the closure pins `p`.
 			want: []Column{{Name: "p.employeeId", Type: ResolvedProperty{Type: graph.PropertyType("INT")}}},
 		},
+		{
+			name:   "the inference folded an edge no returned row has",
+			schema: "satisfy_plural_edges_inline_subtype.gql",
+			query: "MATCH (p:Person)-[q:WORKS_AT]->(c) " +
+				"OPTIONAL MATCH (c)-[h:HAS_DESK]->(d:Desk) RETURN p.personOnly",
+			// The third row is the other half of covering, and it is the half
+			// the first two do not reach. Every far end here enumerates itself
+			// perfectly — `(d:Desk)` is a singular BindNode and `p` is a plural
+			// var — so the enumeration test both rows above turn on passes on
+			// both edges. What fails is the row guarantee: HAS_DESK is declared
+			// from the bare Company only, so folding it pins `c` to Company,
+			// but the hop is OPTIONAL and filters nothing. The Employee&Person
+			// -[WORKS_AT]-> Company&Large row comes back with h/d null, its `c`
+			// is Company&Large, and its `p` has no personOnly.
+			wantErr: ErrUnknownProperty,
+		},
 	}
 	for _, tt := range tests {
 		s.Run(tt.name, func() {
@@ -1553,6 +1576,78 @@ func (s *ResolverSuite) TestAnInferredEndpointIsTrustedOnlyWhenItsOwnEndsWereEnu
 			}
 			s.Require().NoError(err, tt.query)
 			s.Require().Equal(tt.want, vq.Columns, tt.query)
+		})
+	}
+}
+
+// TestPhaseBAsksTheWholeWitnessPredicateNotOneArmOfIt covers the arms of
+// witnessesItsEndpoints that the OPTIONAL row in
+// TestAnInferredEndpointIsTrustedOnlyWhenItsOwnEndsWereEnumerated does not
+// reach. Its own OPTIONAL arm is the only one with a demonstrated witness, and
+// a fix that pattern-matched on Nullable() alone would leave that row green and
+// these four wrong.
+//
+// Each row is one disqualifier, paired with the SAME query carrying a plain
+// mandatory single hop instead. The pair is what makes each row say anything:
+// on the witnessing spelling every returned row really does have a HAS_DESK out
+// of `c`, HAS_DESK is declared from the bare Company only, so `c` is Company on
+// every row, the only WORKS_AT into Company comes from the bare Person, and
+// `p.personOnly` is a column every row has. That acceptance is the branch's own
+// win, on the same schema, one token away from each refusal — so none of these
+// rows can be passing because Phase B stopped covering altogether.
+//
+// The CREATE and MERGE rows also say the `written` set reaches this far at all:
+// a written edge is a binding like any other and does enter Phase B's edge
+// list, so before this it was folded in and reported as covering.
+func (s *ResolverSuite) TestPhaseBAsksTheWholeWitnessPredicateNotOneArmOfIt() {
+	const witnessed = "MATCH (p:Person)-[q:WORKS_AT]->(c) " +
+		"MATCH (c)-[h:HAS_DESK]->(d:Desk) RETURN p.personOnly"
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{
+			name: "a zero lower bound",
+			query: "MATCH (p:Person)-[q:WORKS_AT]->(c) " +
+				"MATCH (c)-[h:HAS_DESK*0..1]->(d:Desk) RETURN p.personOnly",
+		},
+		{
+			name: "an exact zero quantifier",
+			query: "MATCH (p:Person)-[q:WORKS_AT]->(c) " +
+				"MATCH (c)-[h:HAS_DESK*0]->(d:Desk) RETURN p.personOnly",
+		},
+		{
+			name: "a count above one",
+			query: "MATCH (p:Person)-[q:WORKS_AT]->(c) " +
+				"MATCH (c)-[h:HAS_DESK*2]->(d:Desk) RETURN p.personOnly",
+		},
+		{
+			name: "a CREATE",
+			query: "MATCH (p:Person)-[q:WORKS_AT]->(c) " +
+				"CREATE (c)-[h:HAS_DESK]->(d:Desk) RETURN p.personOnly",
+		},
+		{
+			name: "a MERGE",
+			query: "MATCH (p:Person)-[q:WORKS_AT]->(c) " +
+				"MERGE (c)-[h:HAS_DESK]->(d:Desk) RETURN p.personOnly",
+		},
+	}
+	sch := s.loadSchema("invalid", "satisfy_plural_edges_inline_subtype.gql")
+	resolve := func(src string) ([]Column, error) {
+		q, err := cypher.New(cypher.WithRegistry(regR7)).Parse(bytes.NewReader([]byte(src)))
+		s.Require().NoError(err)
+		vq, err := New(sch, WithRegistry(regR7)).Resolve(q)
+		return vq.Columns, err
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			_, err := resolve(tt.query)
+			s.Require().ErrorIs(err, ErrUnknownProperty, tt.query)
+
+			got, err := resolve(witnessed)
+			s.Require().NoError(err,
+				"the same query with a mandatory single hop IS evidence about every row, so the refusal above is this disqualifier's and not Phase B refusing to cover at all")
+			s.Require().Equal([]Column{{Name: "p.personOnly", Type: ResolvedProperty{Type: graph.PropertyType("STRING")}}}, got)
 		})
 	}
 }

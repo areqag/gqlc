@@ -204,8 +204,15 @@ func (s *scope) BindNodeCands(nb query.NodeBinding, nts []schema.NodeType) error
 	s.nodeCands[v] = nts
 	// A cands entry is a satisfying set by construction, so it needs no
 	// resolvedCovers mark; the lane qualifies `resolved` only. The delete keeps
-	// the two lanes from ever both claiming v — unreachable, since the singular
-	// arm above already refuses a v in s.nodeTypes.
+	// the two lanes from ever both claiming v.
+	//
+	// It changes no answer and no test can pin it — the singular arm above
+	// already refuses a v in s.nodeTypes, so v cannot be in the lane when this
+	// runs. It is written for the same reason as BindEdge's copy: the lane must
+	// not outlive the `resolved` entry it qualifies under any seeding regime,
+	// and the moment newScope seeds resolvedCovers from the carry this delete
+	// is what stops a carried mark surviving a plural re-bind and making the
+	// narrowing read the new set as covering.
 	delete(s.resolvedCovers, v)
 	delete(s.edgeTypes, v)
 	delete(s.edgeKeys, v)
@@ -239,11 +246,18 @@ func (s *scope) BindEdge(eb query.EdgeBinding) error {
 	// Edge shadows any carried node state. The resolvedCovers line changes no
 	// answer and no test can pin it: the only node state a shadow can find at v
 	// is the carry's, newScope does not seed the lane from the carry, and a
-	// same-Part BindNode at v would already have failed the parity check above.
+	// same-Part BindNode at v never reaches here at all — the PARSER refuses
+	// that query, with `variable bound with conflicting kinds` from
+	// cypher.mergeBinding, so no such scope is ever built. (Nothing above this
+	// cascade looks at s.nodeTypes: the checks there are the callTypes shape
+	// check and the edge-label parity check.)
+	//
 	// It is written because the lane must not outlive the `resolved` entry it
 	// qualifies under ANY seeding regime — the moment newScope seeds it, this
 	// delete is what stops a stale mark from making an edge-shadowed name read
-	// as a covering endpoint. Same argument for BindCall's copy.
+	// as a covering endpoint. Same argument for BindNodeCands' and BindCall's
+	// copies; those three deletes are the whole set of unreachable writes to
+	// this lane on a shadow path.
 	delete(s.nodeTypes, v)
 	delete(s.nodeCands, v)
 	delete(s.resolvedCovers, v)
@@ -264,6 +278,12 @@ func (s *scope) BindCall(cb query.CallBinding, r procsig.Registry) error {
 	// R7 §4.1: local CallBinding shadows any carried entity state at
 	// the same name (parser-unreachable belt-and-braces since
 	// build.go's imported[v] check rejects the collision at parse).
+	//
+	// The resolvedCovers line is unreachable twice over — that parser check,
+	// and newScope not seeding the lane from the carry — so it changes no
+	// answer and no test can pin it. It is written for BindEdge's reason: the
+	// lane must not outlive the `resolved` entry it qualifies under any seeding
+	// regime, and seeding it from the carry is what would make this delete live.
 	delete(s.nodeTypes, v)
 	delete(s.nodeCands, v)
 	delete(s.resolvedCovers, v)
@@ -591,7 +611,10 @@ func (s *scope) InferUnlabelled(sch schema.Schema) error {
 	if len(pending) == 0 {
 		return nil
 	}
-	return inferUnlabelled(pending, edges, sch, s.nodeTable(), s.callTypes)
+	// writtenBindings is computed after the early return, for the same reason
+	// NarrowPluralEndpoints computes it after its own: it walks the effects, and
+	// a Part with nothing to infer has no use for the answer.
+	return inferUnlabelled(pending, edges, sch, s.nodeTable(), s.callTypes, s.writtenBindings())
 }
 
 // SeedLocalNullability writes each binding's own Nullable() bit into the
