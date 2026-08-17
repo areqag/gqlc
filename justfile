@@ -53,9 +53,9 @@ init:
 # drifting write and the next `just test` (bd gqlc-nzwa). A superset because
 # this recipe compares the configured value and nothing else: with
 # core.hooksPath = .githooks but .githooks/ holding only *.sample files, or a
-# hook file left non-executable, this prints "ok" and exits 0 where
-# claude-pre-bash refuses (both states are fixtures in
-# .githooks/tests/claude-pre-bash-test.sh).
+# hook file left non-executable, this exits 0 without a word (and `doctor`,
+# which depends on it, prints "ok") where claude-pre-bash refuses. Both states
+# are fixtures in .githooks/tests/claude-pre-bash-test.sh.
 #
 # Skipped under CI, which has no local hooks by design and runs the equivalent
 # gates as workflow jobs; without the skip this would fail every CI `just test`.
