@@ -41,6 +41,7 @@ type ciSteps []struct {
 	Name            string            `yaml:"name"`
 	Run             string            `yaml:"run"`
 	Shell           string            `yaml:"shell"`
+	If              string            `yaml:"if"`
 	ContinueOnError bool              `yaml:"continue-on-error"`
 	Env             map[string]string `yaml:"env"`
 }
@@ -53,10 +54,21 @@ type ciDefaults struct {
 
 type ciJob struct {
 	Permissions     map[string]string `yaml:"permissions"`
+	If              string            `yaml:"if"`
 	ContinueOnError bool              `yaml:"continue-on-error"`
 	Defaults        ciDefaults        `yaml:"defaults"`
 	Steps           ciSteps           `yaml:"steps"`
 }
+
+// The `if:` the gate step is allowed to carry, and the only one. ci.yml's own
+// header explains why a job-level `if:` is a bypass — a skipped job still
+// emits a check run, its conclusion is `skipped`, branch protection reads
+// that as a pass, and the newest run for a context wins — but nothing
+// asserted it, so `if: false` on a required job passed every check here.
+// Written out rather than matched loosely: narrowing the condition is how
+// this would be disabled without deleting anything, and a narrowing is a
+// different string.
+const gateStepIf = "github.event_name == 'pull_request'"
 
 // ciDoc parses ci.yml into its top-level mapping node.
 //
@@ -206,6 +218,16 @@ func TestPRBodyGateFailsTheJobItRunsIn(t *testing.T) {
 		gateJob)
 	require.False(t, job.ContinueOnError,
 		"job %q sets continue-on-error, so no step in it can fail the merge", gateJob)
+
+	require.Emptyf(t, job.If,
+		"job %q carries a job-level `if:` (%q). A job that does not run still emits a "+
+			"check run, with conclusion `skipped`, which branch protection reads as a "+
+			"pass — so an `if:` here retires the gate without deleting a line of it.",
+		gateJob, job.If)
+	require.Equalf(t, gateStepIf, step.If,
+		"the PR-body gate step's `if:` is %q, not %q. The step is skipped on anything "+
+			"that condition excludes and the job still passes, so narrowing it is how "+
+			"this gate gets turned off quietly.", step.If, gateStepIf)
 
 	require.Empty(t, step.Shell,
 		"the PR-body gate overrides its shell to %q. The runner's default is "+

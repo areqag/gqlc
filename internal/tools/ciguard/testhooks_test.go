@@ -1,10 +1,12 @@
 // The chain that makes .githooks/tests/*.sh block a merge: the ci.yml `test`
 // job runs `just test`, `just test` depends on `test-hooks`, and `test-hooks`
-// names each suite. What is held here is that each link is named, not that
-// each link carries a status: a suite the recipe still names but whose exit
-// is discarded (`bash ...-test.sh || true`) passes every assertion below
-// (bd gqlc-lisu). Measured (bd gqlc-1ekq): deleting any one of the five lines
-// from `test-hooks` on master leaves `just test-hooks` at rc=0.
+// names each suite. What is held here is that each link is named and that
+// neither of the yaml links is made conditional — not that each link carries
+// a status: a suite the recipe still names but whose exit is discarded
+// (`bash ...-test.sh || true`), and a `continue-on-error` on the job or on
+// the step, both pass every assertion below (bd gqlc-lisu). Measured
+// (bd gqlc-1ekq): deleting any one of the five lines from `test-hooks` on
+// master leaves `just test-hooks` at rc=0.
 //
 // Asserted here rather than inside the suites because a suite that has been
 // unwired does not run, so it cannot be the thing that notices.
@@ -119,8 +121,19 @@ func TestCITestJobRunsTheTestRecipe(t *testing.T) {
 	var job ciJob
 	require.NoError(t, node.Decode(&job), "decode job %q", testJob)
 
+	require.Emptyf(t, job.If,
+		"job %q carries a job-level `if:` (%q). A skipped job still emits a check run "+
+			"with conclusion `skipped`, and branch protection reads that as a pass, so "+
+			"an `if:` here retires the shell suites without deleting a line of them.",
+		testJob, job.If)
+
 	for _, s := range job.Steps {
 		if runsTestRecipe.MatchString(s.Run) {
+			require.Emptyf(t, s.If,
+				"the `just %s` step in job %q carries an `if:` (%q). A skipped step "+
+					"leaves the job green, so the context reports SUCCESS with the "+
+					"suites never run — worse than a skipped job, which at least "+
+					"reports `skipped`.", testRecipe, testJob, s.If)
 			return
 		}
 	}
