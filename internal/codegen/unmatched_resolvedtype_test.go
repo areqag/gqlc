@@ -187,7 +187,7 @@ func generateUnmatched(t *testing.T, q codegen.NamedQuery) error {
 // struct embedding two variants at equal depth promotes neither's
 // methods, so struct{resolver.ResolvedNode; resolver.ResolvedEdge}
 // satisfies the interface in neither its value nor its pointer form and
-// reaches no fail-site at all. So the set reaching those three reachable
+// reaches no fail-site here. So the set reaching those three reachable
 // sites includes the nil interface, all eight typed-nil pointer forms,
 // structs whose embedded pointer to a variant is nil, and structs
 // embedding resolver.ResolvedType itself — and String() on each of those
