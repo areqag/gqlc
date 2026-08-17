@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Unit tests for .githooks/claude-pre-bash (master-guard PreToolUse hook).
+# Unit tests for .githooks/claude-pre-bash (master guard + unpushed-close guard).
 #
 # Builds throwaway git repos under mktemp and feeds the hook the same JSON
 # shape Claude Code sends on stdin, asserting allow/deny per case. The hook
@@ -15,6 +15,13 @@
 # Both directions are disclosed in the hook's header and pinned by the contrast
 # rows below.
 #
+# The `bd close` half (bd gqlc-90vt) asserts on the VERDICT NAME as well as on
+# allow/deny, because THREE of its outcomes are allows: allow-no-reason (a close
+# carrying no reason flag), allow-no-sha (a reason citing nothing this repo
+# resolves to a commit) and allow-reachable (a cited sha a remote ref contains).
+# Pinned by allow/deny alone the first two would be indistinguishable from the
+# guard having silently stopped finding shas at all, and the third from either.
+#
 # Run via: just test-hooks
 set -u
 
@@ -22,6 +29,15 @@ set -u
 # and redirect every git call — repo setup would re-init the parent repo and
 # the hook under test would resolve the wrong branch. Isolate completely.
 unset "${!GIT_@}"
+
+# The bd-close rows import the hook as a module to read its verdict names.
+# SourceFileLoader.exec_module caches bytecode NEXT TO THE SOURCE, i.e. inside
+# .githooks/ — a test writing into the tree it is testing. `just lint-hooks`
+# then fails on the .pyc, because a file with no recognised shebang is fatal
+# there by design (bd gqlc-jhi2), so this test would redden a different gate.
+# Belt and braces: the env var covers the interpreters this script spawns, and
+# each loader sets the flag itself for a caller that does not inherit it.
+export PYTHONDONTWRITEBYTECODE=1
 
 HOOK="$(cd "$(dirname "$0")/.." && pwd)/claude-pre-bash"
 TMP="$(mktemp -d)"
@@ -442,6 +458,343 @@ run_raw_case() { # $1=name $2=expected $3=cwd $4=raw stdin
 run_raw_case "healthy repo, valid stdin: silent"  silent "$OK_REPO" '{"tool_name":"Bash","tool_input":{"command":"ls"}}'
 run_raw_case "internal error warns, not silent"   warn   "$OK_REPO" 'not json at all'
 
+
+# ============================================================================
+# bd close must not record work against a sha no remote ref contains (gqlc-90vt)
+# ============================================================================
+#
+# One repo with a real remote, carrying three shas that a naive check cannot
+# tell apart: one pushed, one on a local branch only, one orphaned by a reset
+# (the shape a rebase leaves behind, and the shape of the witnessed incident).
+BD_REPO="$TMP/bd"
+git init -q --bare "$TMP/bd-origin.git"
+mkrepo "$BD_REPO" master
+git -C "$BD_REPO" remote add origin "$TMP/bd-origin.git"
+git -C "$BD_REPO" push -q -u origin master
+PUSHED_SHA="$(git -C "$BD_REPO" rev-parse --short=8 HEAD)"
+git -C "$BD_REPO" checkout -q -b localonly
+git -C "$BD_REPO" -c user.email=t@t.invalid -c user.name=t commit -q --allow-empty -m local
+LOCAL_SHA="$(git -C "$BD_REPO" rev-parse --short=8 HEAD)"
+git -C "$BD_REPO" checkout -q master
+git -C "$BD_REPO" checkout -q -b doomed
+git -C "$BD_REPO" -c user.email=t@t.invalid -c user.name=t commit -q --allow-empty -m doomed
+ORPHAN_SHA="$(git -C "$BD_REPO" rev-parse --short=8 HEAD)"
+git -C "$BD_REPO" checkout -q master
+git -C "$BD_REPO" branch -q -D doomed
+ABSENT_SHA=deadbeefdeadbeef
+printf 'Closed by branch doomed at %s (not yet pushed).\n' "$ORPHAN_SHA" > "$TMP/reason.txt"
+printf 'Closed by branch master at %s.\n' "$PUSHED_SHA" > "$TMP/reason-ok.txt"
+
+# The fixture only means something if the three shas really are distinguishable
+# only by the ref set. Asserted, not assumed: without this, a fixture that
+# failed to push (or failed to orphan) would make every row below pass for the
+# wrong reason.
+fixture_check() { # $1=label $2=expected $3=actual
+  if [ "$2" = "$3" ]; then
+    pass=$((pass + 1)); printf 'ok   - fixture: %s\n' "$1"
+  else
+    fail=$((fail + 1)); printf 'FAIL - fixture: %s (expected %s, got %s)\n' "$1" "$2" "$3"
+  fi
+}
+fixture_check "pushed sha is on a remote ref" \
+  "origin/master" "$(git -C "$BD_REPO" branch -r --contains "$PUSHED_SHA" | tr -d ' \n')"
+fixture_check "local-only sha is on NO remote ref" \
+  "" "$(git -C "$BD_REPO" branch -r --contains "$LOCAL_SHA" | tr -d ' \n')"
+fixture_check "local-only sha IS on a local ref (so -r is what discriminates)" \
+  "localonly" "$(git -C "$BD_REPO" branch --contains "$LOCAL_SHA" --format='%(refname:short)' | tr -d ' \n')"
+fixture_check "orphan sha is on no ref at all" \
+  "" "$(git -C "$BD_REPO" for-each-ref --contains="$ORPHAN_SHA" --format='%(refname)' | tr -d ' \n')"
+fixture_check "orphan sha object still exists locally" \
+  "commit" "$(git -C "$BD_REPO" cat-file -t "$ORPHAN_SHA" 2>&1)"
+fixture_check "absent sha resolves to nothing" \
+  "missing" "$(printf '%s\n' "$ABSENT_SHA" | git -C "$BD_REPO" cat-file --batch-check | awk '{print $2}')"
+
+# run_verdict asserts the NAME close_verdict() returned, by importing the hook
+# as a module. An allow asserted only as "not denied" cannot tell an allow that
+# was decided from one that was reached because sha extraction stopped working.
+run_verdict() { # $1=name $2=expected-verdict $3=cwd $4=command
+  local got
+  got="$(
+    cd "$3" || exit 1
+    python3 - "$HOOK" "$4" <<'PY'
+import importlib.machinery, importlib.util, json, sys
+sys.dont_write_bytecode = True
+loader = importlib.machinery.SourceFileLoader("hook", sys.argv[1])
+spec = importlib.util.spec_from_loader("hook", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+closes = []
+mod.git_targets(sys.argv[2], __import__("os").getcwd(), mod.HOOK_GATED, closes=closes)
+print(",".join(mod.close_verdict(c)[0] for c in closes) or "no-close-seen")
+PY
+  )"
+  if [ "$got" = "$2" ]; then
+    pass=$((pass + 1)); printf 'ok   - %s\n' "$1"
+  else
+    fail=$((fail + 1)); printf 'FAIL - %s (expected verdict %s, got %s)\n' "$1" "$2" "$got"
+  fi
+}
+
+# --- state 1: reachable from a remote ref -> permitted ----------------------
+run_case    "sha on a remote ref"              allow "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed by branch b at $PUSHED_SHA (1 commit).\""
+run_verdict "sha on a remote ref (verdict)"    allow-reachable "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed by branch b at $PUSHED_SHA (1 commit).\""
+
+# --- state 2: the witnessed incident, replayed verbatim in shape ------------
+run_case    "orphaned sha, 'not yet pushed'"   deny  "$BD_REPO" \
+  "bd close gqlc-rz0l -r \"Closed by branch docs/c1-bare-arg-spec-drift at $ORPHAN_SHA (12 commits, not yet pushed).\""
+run_verdict "orphaned sha (verdict)"           deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-rz0l -r \"Closed by branch docs/c1-bare-arg-spec-drift at $ORPHAN_SHA (12 commits, not yet pushed).\""
+
+# --- state 3: the sha names nothing -> refused, and refused DIFFERENTLY -----
+run_case    "sha that names no object"         deny  "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed by branch b at $ABSENT_SHA.\""
+run_verdict "sha that names no object (verdict)" deny-absent-object "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed by branch b at $ABSENT_SHA.\""
+
+# --- state 4: on a LOCAL branch only. `cat-file -t` says commit and
+#     `branch --contains` (no -r) names a branch, so both naive checks pass it.
+run_case    "sha on a local branch only"       deny  "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed by branch localonly at $LOCAL_SHA.\""
+run_verdict "sha on a local branch only (verdict)" deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed by branch localonly at $LOCAL_SHA.\""
+
+# --- state 5: empty / absent sha. `git branch -r --contains` with NO argument
+#     defaults to HEAD and prints the remote refs containing it, so a dropped
+#     argument reads as "reachable". Pinned three ways: the flag with its value
+#     omitted, the shell-built and stdin reasons, and the probe called directly.
+run_case    "reason flag with value omitted"   deny  "$BD_REPO" 'bd close gqlc-x -r'
+run_verdict "reason flag with value omitted (verdict)" deny-unreadable-reason "$BD_REPO" 'bd close gqlc-x -r'
+# shellcheck disable=SC2016 # the expansion is the hook's input, not this file's code
+run_case    "reason built by the shell"        deny  "$BD_REPO" 'bd close gqlc-x -r "closed at $SHA"'
+run_case    "reason read from stdin"           deny  "$BD_REPO" 'bd close gqlc-x --reason-file -'
+# shellcheck disable=SC2016 # ditto
+run_verdict "reason built by the shell (verdict)" deny-unreadable-reason "$BD_REPO" 'bd close gqlc-x -r "$(cat /tmp/r)"'
+run_case    "empty reason string"              allow "$BD_REPO" 'bd close gqlc-x -r ""'
+run_verdict "empty reason string (verdict)"    allow-no-sha "$BD_REPO" 'bd close gqlc-x -r ""'
+
+fixture_check "argument-less probe defaults to HEAD, so a dropped arg reads reachable" \
+  "origin/master" "$(git -C "$BD_REPO" branch -r --contains | tr -d ' \n')"
+EMPTY_REV_PROBE="$(
+  python3 - "$HOOK" "$BD_REPO" <<'PY'
+import importlib.machinery, importlib.util, sys
+sys.dont_write_bytecode = True
+loader = importlib.machinery.SourceFileLoader("hook", sys.argv[1])
+spec = importlib.util.spec_from_loader("hook", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+print("%s|%s" % (mod.remote_refs_containing(sys.argv[2], ""),
+                 mod.remote_refs_containing(sys.argv[2], "HEAD")))
+PY
+)"
+fixture_check "empty rev answers 'could not tell', where HEAD answers 'reachable'" \
+  "(False, [])|(True, ['origin/master'])" "$EMPTY_REV_PROBE"
+
+# --- closes that must NOT be denied ----------------------------------------
+run_case    "close with no reason flag"        allow "$BD_REPO" 'bd close gqlc-x'
+run_verdict "close with no reason flag (verdict)" allow-no-reason "$BD_REPO" 'bd close gqlc-x'
+run_case    "reason citing no sha"             allow "$BD_REPO" 'bd close gqlc-x -r "landed via PR 42, reviewed"'
+run_verdict "reason citing no sha (verdict)"   allow-no-sha "$BD_REPO" 'bd close gqlc-x -r "landed via PR 42, reviewed"'
+# All-hex English words are why an unresolvable LOOSE token is not a citation.
+run_case    "hex-looking prose, unanchored"    allow "$BD_REPO" 'bd close gqlc-x -r "the docs were defaced then effaced"'
+run_verdict "hex-looking prose, unanchored (verdict)" allow-no-sha "$BD_REPO" 'bd close gqlc-x -r "the docs were defaced then effaced"'
+run_case    "unrelated bd subcommand"          allow "$BD_REPO" "bd show gqlc-x --at $ORPHAN_SHA"
+
+# --- the loose tier PROMOTES, not just declines ------------------------------
+# The rows above are the negative half of the two-tier design: a loose token git
+# cannot resolve stays prose. The positive half is the majority shape — 79 of
+# the corpus's 110 sha-citing close reasons carry no at/@/commit anchor — and
+# without these rows `citations = sorted(anchored)` (i.e. never promoting a
+# loose token) left the whole suite green while three quarters of the corpus
+# silently became allow-no-sha. Both directions, because a promotion that always
+# denied would satisfy the deny row alone.
+run_verdict "unanchored orphan sha is promoted (verdict)" deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x -r \"$ORPHAN_SHA fixed the doomed thing\""
+run_case    "unanchored orphan sha is promoted"           deny  "$BD_REPO" \
+  "bd close gqlc-x -r \"$ORPHAN_SHA fixed the doomed thing\""
+run_verdict "unanchored pushed sha is promoted, then allowed" allow-reachable "$BD_REPO" \
+  "bd close gqlc-x -r \"$PUSHED_SHA landed on origin\""
+
+# --- the two spellings of the subcommand this arm keys on --------------------
+# `bd` reached by path and `bd done` (bd's documented alias for close, per
+# `bd close --help`: "Aliases: close, done") are both live, and both survived
+# deletion with the suite green before these rows existed.
+run_verdict "bd invoked by path still scanned"  deny-unpushed-sha "$BD_REPO" \
+  "/usr/local/bin/bd close gqlc-x -r \"Closed at $ORPHAN_SHA.\""
+run_verdict "the done alias is a close"         deny-unpushed-sha "$BD_REPO" \
+  "bd done gqlc-x -r \"Closed at $ORPHAN_SHA.\""
+
+# Three closes in one command, asserted as an ORDERED sequence rather than as a
+# set: each `bd` invocation is scanned separately and keeps its own reason, so a
+# scanner that stopped after the first, merged their reasons, or reordered them
+# fails here. Three distinct verdicts, so no pair swap can go unseen.
+run_verdict "three closes keep their own reasons, in order" \
+  "deny-unpushed-sha,allow-reachable,deny-absent-object" "$BD_REPO" \
+  "bd close a -r \"Closed at $ORPHAN_SHA.\" && bd close b -r \"Closed at $PUSHED_SHA.\" && bd close c -r \"Closed at $ABSENT_SHA.\""
+
+# `commit <sha>` is an anchor too — 5 of the corpus's 110 sha-citing close
+# reasons use it and no `at`/`@`. Pinned on the absent sha, which is the only
+# state where being anchored changes the answer.
+run_verdict "commit <sha> anchors an absent sha" deny-absent-object "$BD_REPO" \
+  "bd close gqlc-x -r \"Headline commit $ABSENT_SHA landed.\""
+run_verdict "commit <sha> anchors an orphan sha" deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x -r \"Headline commit $ORPHAN_SHA landed.\""
+
+# --- the effective repo is resolved, like the master guard's --------------
+#
+# Asserted by VERDICT, not by deny alone. $TMP is not a git repository, so a
+# hook that ignored `-C`/`cd` would still deny these — as deny-unverifiable-repo
+# rather than deny-unpushed-sha. Pinned as deny they passed while the
+# retargeting was mutated away; the paired allow rows are the other half.
+run_verdict "bd -C retargets to the fixture repo"    deny-unpushed-sha "$TMP" \
+  "bd -C $BD_REPO close gqlc-x -r \"Closed at $ORPHAN_SHA.\""
+run_verdict "bd -C retargets, reachable sha allowed" allow-reachable "$TMP" \
+  "bd -C $BD_REPO close gqlc-x -r \"Closed at $PUSHED_SHA.\""
+run_verdict "cd chain retargets to the fixture repo" deny-unpushed-sha "$TMP" \
+  "cd $BD_REPO && bd close gqlc-x -r \"Closed at $ORPHAN_SHA.\""
+run_verdict "cd chain retargets, reachable sha allowed" allow-reachable "$TMP" \
+  "cd $BD_REPO && bd close gqlc-x -r \"Closed at $PUSHED_SHA.\""
+run_case    "bd -C to the fixture repo"        deny  "$TMP" \
+  "bd -C $BD_REPO close gqlc-x -r \"Closed at $ORPHAN_SHA.\""
+run_verdict "unresolvable cwd is refused, not skipped" deny-unverifiable-repo "$TMP" \
+  "cd \"\$WT\" && bd close gqlc-x -r \"Closed at $ORPHAN_SHA.\""
+
+# --- --reason-file is READ, not merely noticed ------------------------------
+# Both halves, for the same reason as above: a hook that ignored the flag
+# entirely would report deny-unreadable-reason and satisfy a deny-only row.
+run_verdict "--reason-file citing an orphan sha"   deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x --reason-file $TMP/reason.txt"
+run_verdict "--reason-file citing a pushed sha"    allow-reachable "$BD_REPO" \
+  "bd close gqlc-x --reason-file $TMP/reason-ok.txt"
+run_case    "--reason-file with a literal path"    deny "$BD_REPO" \
+  "bd close gqlc-x --reason-file $TMP/reason.txt"
+
+# --- object_types' own guards, driven with a stubbed subprocess -------------
+# `git cat-file --batch-check` emits one line per input line and the mapping is
+# positional, so a short or long reply must not be zipped anyway: a mis-paired
+# type can call an orphan a commit or a commit an orphan. No git invocation can
+# produce that, so the boundary is stubbed rather than staged.
+OBJTYPES_PROBE="$(
+  python3 - "$HOOK" "$BD_REPO" <<'PY'
+import importlib.machinery, importlib.util, sys, types as _t
+sys.dont_write_bytecode = True
+loader = importlib.machinery.SourceFileLoader("hook", sys.argv[1])
+spec = importlib.util.spec_from_loader("hook", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+
+
+def stub(out, rc=0):
+    return lambda *a, **k: _t.SimpleNamespace(stdout=out, stderr="", returncode=rc)
+
+
+real = mod.subprocess.run
+two = ["aaaaaaa", "bbbbbbb"]
+mod.subprocess.run = stub("aaaaaaa missing\n")            # short reply
+short = mod.object_types(sys.argv[2], two)
+mod.subprocess.run = stub("a missing\nb missing\nc missing\n")  # long reply
+long_ = mod.object_types(sys.argv[2], two)
+mod.subprocess.run = stub("", 1)                          # git failed
+failed = mod.object_types(sys.argv[2], two)
+mod.subprocess.run = real
+print("%s|%s|%s|%s" % (short, long_, failed, mod.object_types(sys.argv[2], [""])))
+PY
+)"
+fixture_check "a short, long, failed or empty-rev batch-check answers 'could not tell'" \
+  "None|None|None|None" "$OBJTYPES_PROBE"
+
+# --- git_env() is what keeps a leaked GIT_DIR from answering for another repo -
+# The `unset "${!GIT_@}"` at the top of this file means no row above can reach
+# git_env() at all — dropping `env=git_env()` from both subprocess calls left the
+# whole suite green. These two put GIT_DIR back for a single call each, and they
+# are aimed at DIFFERENT call sites, because one row cannot separate them:
+#   - bd-origin.git HOLDS the pushed object but has no refs/remotes, so only
+#     remote_refs_containing's answer can change: leaked, it reports the sha as
+#     contained by nothing and a reachable close becomes deny-unpushed-sha.
+#   - the feature repo holds NEITHER object, so object_types' answer changes
+#     first: leaked, the orphan resolves to missing and deny-unpushed-sha
+#     becomes deny-absent-object.
+# Fail direction is closed in both (a false refusal, not a false allow), which
+# is why this is pinned rather than treated as a hole.
+run_gitdir_verdict() { # $1=name $2=expected-verdict $3=cwd $4=command $5=GIT_DIR
+  local got
+  got="$(
+    cd "$3" || exit 1
+    GIT_DIR="$5" python3 - "$HOOK" "$4" <<'PY'
+import importlib.machinery, importlib.util, sys
+sys.dont_write_bytecode = True
+loader = importlib.machinery.SourceFileLoader("hook", sys.argv[1])
+spec = importlib.util.spec_from_loader("hook", loader)
+mod = importlib.util.module_from_spec(spec)
+loader.exec_module(mod)
+closes = []
+mod.git_targets(sys.argv[2], __import__("os").getcwd(), mod.HOOK_GATED, closes=closes)
+print(",".join(mod.close_verdict(c)[0] for c in closes) or "no-close-seen")
+PY
+  )"
+  record "$1" "$2" "$got"
+}
+fixture_check "the bare origin holds the pushed object but no remote-tracking ref" \
+  "commit|" "$(git --git-dir="$TMP/bd-origin.git" cat-file -t "$PUSHED_SHA")|$(git --git-dir="$TMP/bd-origin.git" branch -r --contains "$PUSHED_SHA" | tr -d ' \n')"
+run_gitdir_verdict "GIT_DIR cannot answer the reachability probe" allow-reachable "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed at $PUSHED_SHA.\"" "$TMP/bd-origin.git"
+run_gitdir_verdict "GIT_DIR cannot answer the object probe" deny-unpushed-sha "$BD_REPO" \
+  "bd close gqlc-x -r \"Closed at $ORPHAN_SHA.\"" "$FEATURE_REPO/.git"
+
+# --- an exception inside the close arm must DENY, not escape -----------------
+# The close arm is the one place where "could not check" must not mean "let it
+# through": __main__ catches everything else and WARNS (pinned by "internal
+# error warns, not silent" above), and a warn is an allow — the close would run
+# and the ledger would record work that may never have landed. So the arm's own
+# `except Exception` is load-bearing, and nothing else in this suite can reach
+# it: close_verdict() catches OSError and TimeoutExpired at every boundary it
+# owns, so no fixture makes it raise. Stubbed instead, and stubbed into the REAL
+# file executed through its REAL `__main__` guard: the source is compiled at its
+# own path with a globals mapping that swaps close_verdict as the module binds
+# it, so main(), the arm, deny() and the top-level handler are all the shipped
+# ones. Narrow the arm to a subclass of Exception and this prints warn.
+EXC_PROBE="$(
+  cd "$BD_REPO" && python3 - "$HOOK" <<'PY'
+import io, json, sys
+sys.dont_write_bytecode = True
+
+
+class Swap(dict):
+    def __setitem__(self, key, value):
+        if key == "close_verdict":
+            def raiser(close):
+                raise RuntimeError("stubbed")
+            value = raiser
+        super().__setitem__(key, value)
+
+
+hook = sys.argv[1]
+glb = Swap({"__name__": "__main__", "__file__": hook, "__builtins__": __builtins__})
+sys.stdin = io.StringIO(json.dumps(
+    {"tool_name": "Bash", "tool_input": {"command": 'bd close gqlc-x -r "landed"'}}))
+out, sys.stdout = sys.stdout, io.StringIO()
+try:
+    exec(compile(open(hook).read(), hook, "exec"), glb)  # noqa: S102 - the artifact under test
+except SystemExit:
+    pass
+captured, sys.stdout = sys.stdout.getvalue(), out
+if '"permissionDecision": "deny"' in captured and "could not be checked" in captured:
+    print("deny-uncheckable-close")
+elif '"systemMessage"' in captured:
+    print("warn-escaped-to-top-level")
+else:
+    print("other(%s)" % captured.strip()[:80])
+PY
+)"
+record "an exception in the close arm denies" deny-uncheckable-close "$EXC_PROBE"
+
+# This test writes nothing into the tree it tests. Asserted rather than
+# assumed: the leak it guards against is silent here and fatal in lint-hooks,
+# which is a different recipe on a different run.
+fixture_check "the suite leaves no bytecode in the hooks tree" \
+  "" "$(find "$(dirname "$HOOK")" -name '__pycache__' -o -name '*.pyc' | tr -d '\n')"
+
 # A total pins suite SIZE, not membership — swapping a row for a different one
 # leaves it green, which is why membership is pinned separately by the mutation
 # battery, and only for the subcommands the rows above name: dropping commit,
@@ -450,7 +803,9 @@ run_raw_case "internal error warns, not silent"   warn   "$OK_REPO" 'not json at
 # What this total catches is the one thing that battery cannot see: rows
 # silently disappearing. Without it, deleting every run_drift_case invocation
 # exited 0, and so did deleting just the two escape-hatch rows. Both fail now.
-EXPECTED_ROWS=89
+# Counted at the END of the file rather than after the master-guard block, so
+# the bd-close rows are inside it too.
+EXPECTED_ROWS=142
 if [ "$((pass + fail))" -ne "$EXPECTED_ROWS" ]; then
   printf 'FAIL - suite size drifted: expected %d rows, ran %d\n' "$EXPECTED_ROWS" "$((pass + fail))"
   fail=$((fail + 1))
