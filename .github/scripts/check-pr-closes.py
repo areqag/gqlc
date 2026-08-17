@@ -267,11 +267,11 @@ def prose_only(pr_body):
     character, at least as long as the one that opened it, with nothing but
     whitespace after it; a backtick fence whose info string carries a
     backtick opens nothing. Put the toggle back in place of this function
-    and the suite fails 33 rows -- 31 bodies whose marker it honours though
+    and the suite fails 35 rows -- 33 bodies whose marker it honours though
     GitHub renders it inside <pre><code> or not at all, and 2 it blanks that
     GitHub renders as prose. Counted at this commit, over the suite as it
     stands; a row added to its visibility section can move it either way.
-    Among the 31 is the ordinary idiom
+    Among the 33 is the ordinary idiom
     for showing a fence, which is to nest it in a longer one; showing this
     marker is what this file is about, so that is the realistic body rather
     than the exotic one. An unclosed fence, comment or HTML block swallows

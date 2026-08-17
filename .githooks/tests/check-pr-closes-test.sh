@@ -473,13 +473,16 @@ Refs: gqlc-mirrored #617")" "some/branch" \
 # a toggle: any ``` or ~~~ line flipped the state, which is not how a fence
 # closes.
 #
-# Counted at this commit: this section holds 55 rows, the three above
+# Counted at this commit: this section holds 59 rows, the three above
 # included. The last three are about GH_CLOSES and Bead: precedence rather
-# than about whether the marker is visible, so 52 are the sweep — 35 red and
-# 17 green. Every body in those 52 was put to GitHub's own renderer
+# than about whether the marker is visible, so 56 are the sweep — 37 red and
+# 19 green. Every body in those 56 was put to GitHub's own renderer
 # (POST /markdown, mode gfm, a read-only call) and the row's colour reports
-# what came back: red where GitHub puts the marker inside <pre><code> or
-# drops it from the output entirely, green where GitHub renders it. Nine
+# what came back: red where GitHub puts the marker inside a <pre> or a
+# <code> element or drops it from the output entirely, green where GitHub
+# leaves it as prose. An inline code span counts as prose here rather than
+# as a <code> element, because it is visible monospace; the red rows over
+# one are named as exceptions below. Nine
 # rows are the exceptions and each says so where it stands — six red over a
 # body GitHub renders the marker in (five of them prose_only()'s doing, the
 # sixth the marker pattern's line anchor), and three green: two over a body
@@ -487,7 +490,7 @@ Refs: gqlc-mirrored #617")" "some/branch" \
 # inside a <pre>.
 #
 # Put the toggle back in place of prose_only (commit 4446b7fc's
-# outside_fences, verbatim) and 33 rows fail — 31 red ones that pass,
+# outside_fences, verbatim) and 35 rows fail — 33 red ones that pass,
 # honouring a marker no reader can see, and 2 green ones that lose their
 # annotation. Every number in this paragraph was measured at this commit
 # rather than derived from a rule, so a row added below can move any of
