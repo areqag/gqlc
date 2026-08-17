@@ -9,9 +9,17 @@ The same guard is wired into Claude Code as a `PreToolUse` hook so AI agents are
 blocked at the conversation level too. The recipe is idempotent — running it
 multiple times is safe.
 
-`just test` and `just doctor` warn on stderr (non-fatal) when `core.hooksPath`
-has drifted away from `.githooks` — the only failure mode by which local hooks
-silently die. CI cannot see local git config, so this is where drift surfaces.
+`just test` and `just doctor` **fail** when `core.hooksPath` has drifted away
+from `.githooks`. That drift deactivates every hook in `.githooks/` at once and,
+because linked worktrees share one `.git/config`, does so in every worktree
+simultaneously. CI cannot see local git config, so this is where drift surfaces.
+Repair with `just init`, which is idempotent.
+
+Those recipes only run when someone runs them, so `.githooks/claude-pre-bash`
+carries the same check on every Bash tool call: it warns on any command and
+refuses `git commit` / `git push` specifically until the config is repaired.
+That covers Claude Code sessions; in a plain terminal `just doctor` is still
+the detector.
 
 ## Development
 

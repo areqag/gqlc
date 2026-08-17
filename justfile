@@ -43,9 +43,14 @@ init:
     git config core.hooksPath .githooks
     @echo "git hooks activated (core.hooksPath = .githooks)"
 
-# fails when core.hooksPath drifts from .githooks — the only way local
-# pre-commit/pre-push gates can silently die (CI cannot see local git config).
+# fails when core.hooksPath drifts from .githooks, which silently kills every
+# local pre-commit/pre-push gate at once (CI cannot see local git config).
 # Sub-ms; wired into `test` so developers hit it naturally.
+#
+# This recipe is the detector of record for a plain terminal, but it only runs
+# when someone runs it. .githooks/claude-pre-bash carries the same check on
+# every Bash tool call inside a Claude Code session, which is what closes the
+# window between the drifting write and the next `just test` (bd gqlc-nzwa).
 #
 # Skipped under CI, which has no local hooks by design and runs the equivalent
 # gates as workflow jobs; without the skip this would fail every CI `just test`.

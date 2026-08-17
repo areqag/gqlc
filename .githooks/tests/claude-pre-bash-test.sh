@@ -34,19 +34,27 @@ git -C "$DETACHED_REPO" checkout -q --detach   # at master's tip, but not ON mas
 pass=0
 fail=0
 
-run_case() { # $1=name $2=expected(deny|allow) $3=cwd-for-hook $4=command-string
-  local out decision
-  out="$(
-    cd "$3" || exit 1
-    python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.argv[1]}}))' "$4" | "$HOOK" 2>/dev/null
-  )"
-  decision=allow
-  if printf '%s' "$out" | grep -q '"permissionDecision": *"deny"'; then decision=deny; fi
-  if [ "$decision" = "$2" ]; then
+run_hook() { # $1=cwd-for-hook $2=command-string -> hook stdout
+  (
+    cd "$1" || exit 1
+    python3 -c 'import json,sys; print(json.dumps({"tool_name":"Bash","tool_input":{"command":sys.argv[1]}}))' "$2" | "$HOOK" 2>/dev/null
+  )
+}
+
+record() { # $1=name $2=expected $3=actual
+  if [ "$3" = "$2" ]; then
     pass=$((pass + 1)); printf 'ok   - %s\n' "$1"
   else
-    fail=$((fail + 1)); printf 'FAIL - %s (expected %s, got %s)\n' "$1" "$2" "$decision"
+    fail=$((fail + 1)); printf 'FAIL - %s (expected %s, got %s)\n' "$1" "$2" "$3"
   fi
+}
+
+run_case() { # $1=name $2=expected(deny|allow) $3=cwd-for-hook $4=command-string
+  local out decision
+  out="$(run_hook "$3" "$4")"
+  decision=allow
+  if printf '%s' "$out" | grep -q '"permissionDecision": *"deny"'; then decision=deny; fi
+  record "$1" "$2" "$decision"
 }
 
 # --- baseline behavior that must be preserved -------------------------------
@@ -102,6 +110,116 @@ run_case "unbalanced quote falls back, feature" allow "$FEATURE_REPO" "echo 'oop
 run_case "quoted literal in echo"              allow "$MASTER_REPO"  'echo "git commit"'
 run_case "prose argument (bd-comment shape)"   allow "$MASTER_REPO"  'bd comment gqlc-xyz "next step: git commit the export"'
 run_case "heredoc body with prose+apostrophe"  allow "$MASTER_REPO"  "$(printf 'cat <<%s > /dev/null\ndo not ever run git commit here, it won'\''t fly\nEOF\n' "'EOF'")"
+
+# --- core.hooksPath drift (bd gqlc-nzwa) ------------------------------------
+# Four config states, per bd gqlc-5fm. The fourth — a path that exists and is
+# full of executable *.sample files — is the one that actually occurred twice,
+# and the one an "is it set?" or "does the directory exist?" test passes over.
+#
+# Every fixture is a throwaway repo under mktemp and every `git config` here
+# is pinned with `git -C`: an unpinned `git config` run from the wrong cwd is
+# the documented root cause of drift occurrence #1 (bd gqlc-r41), so a test
+# for this defect that could write the real repo's config would be the defect.
+#
+# Drift fixtures sit on a feature branch so a deny can only come from the
+# hooks guard, never from the master guard — which is why run_drift_case
+# separates deny-hooks from deny-master rather than reporting a bare "deny".
+run_drift_case() { # $1=name $2=expected(deny-hooks|deny-master|warn|silent) $3=cwd $4=command
+  local out got
+  out="$(run_hook "$3" "$4")"
+  if printf '%s' "$out" | grep -q '"permissionDecision": *"deny"'; then
+    if printf '%s' "$out" | grep -q 'core\.hooksPath'; then got=deny-hooks; else got=deny-master; fi
+  elif printf '%s' "$out" | grep -q '"systemMessage"'; then
+    got=warn
+  elif [ -z "$out" ]; then
+    got=silent
+  else
+    got="unrecognized(${out})"
+  fi
+  record "$1" "$2" "$got"
+}
+
+mkhookrepo() { # $1=path — repo on a feature branch shipping one live .githooks hook
+  mkrepo "$1" drift-branch
+  mkdir -p "$1/.githooks"
+  printf '#!/bin/sh\nexit 0\n' > "$1/.githooks/commit-msg"
+  chmod +x "$1/.githooks/commit-msg"
+}
+
+# state 1: the correct value, hooks present and executable
+OK_REPO="$TMP/hooks-ok"; mkhookrepo "$OK_REPO"
+git -C "$OK_REPO" config core.hooksPath .githooks
+
+# state 2: unset — git silently falls back to $GIT_DIR/hooks
+UNSET_REPO="$TMP/hooks-unset"; mkhookrepo "$UNSET_REPO"
+
+# state 3: a path that is not this repo's hook tree
+WRONG_REPO="$TMP/hooks-wrong"; mkhookrepo "$WRONG_REPO"
+git -C "$WRONG_REPO" config core.hooksPath "$TMP/nowhere"
+
+# state 4: THE RECORDED DRIFT — absolute path at <gitdir>/hooks, which exists
+# and holds executable files, every one of them a *.sample git will not run.
+SAMPLE_REPO="$TMP/hooks-samples"; mkhookrepo "$SAMPLE_REPO"
+find "$SAMPLE_REPO/.git/hooks" -type f ! -name '*.sample' -delete
+printf '#!/bin/sh\nexit 0\n' > "$SAMPLE_REPO/.git/hooks/pre-commit.sample"
+chmod +x "$SAMPLE_REPO/.git/hooks/pre-commit.sample"
+git -C "$SAMPLE_REPO" config core.hooksPath "$SAMPLE_REPO/.git/hooks"
+
+# state 5: value correct, but .githooks/ holds nothing git will execute. The
+# value check cannot see this one; it is what separates "points somewhere"
+# from "points at hooks that exist".
+DEAD_REPO="$TMP/hooks-dead"; mkrepo "$DEAD_REPO" drift-branch
+mkdir -p "$DEAD_REPO/.githooks"
+printf '#!/bin/sh\nexit 0\n' > "$DEAD_REPO/.githooks/pre-commit.sample"
+chmod +x "$DEAD_REPO/.githooks/pre-commit.sample"
+git -C "$DEAD_REPO" config core.hooksPath .githooks
+
+# state 5b: the other half of "hooks that exist" — right name, right path, but
+# the file is not executable, which git skips as silently as a wrong path does.
+NOEXEC_REPO="$TMP/hooks-noexec"; mkrepo "$NOEXEC_REPO" drift-branch
+mkdir -p "$NOEXEC_REPO/.githooks"
+printf '#!/bin/sh\nexit 0\n' > "$NOEXEC_REPO/.githooks/commit-msg"
+chmod -x "$NOEXEC_REPO/.githooks/commit-msg"
+git -C "$NOEXEC_REPO" config core.hooksPath .githooks
+
+# out of scope: a repo that ships no .githooks/ at all is indistinguishable
+# from any unrelated repo on the machine, so the check stays silent there.
+BARE_REPO="$TMP/hooks-none"; mkrepo "$BARE_REPO" drift-branch
+
+run_drift_case "correct value, live hooks: commit"   silent     "$OK_REPO"     'git commit -m x'
+run_drift_case "correct value, live hooks: push"     silent     "$OK_REPO"     'git push'
+run_drift_case "correct value, live hooks: ls"       silent     "$OK_REPO"     'ls -la'
+run_drift_case "unset: commit refused"               deny-hooks "$UNSET_REPO"  'git commit -m x'
+run_drift_case "unset: push refused"                 deny-hooks "$UNSET_REPO"  'git push'
+run_drift_case "unset: innocuous command warns"      warn       "$UNSET_REPO"  'ls -la'
+run_drift_case "wrong path: commit refused"          deny-hooks "$WRONG_REPO"  'git commit -m x'
+run_drift_case "wrong path: push refused"            deny-hooks "$WRONG_REPO"  'git push'
+run_drift_case "wrong path: innocuous command warns" warn       "$WRONG_REPO"  'ls -la'
+run_drift_case "sample-only dir: commit refused"     deny-hooks "$SAMPLE_REPO" 'git commit -m x'
+run_drift_case "sample-only dir: push refused"       deny-hooks "$SAMPLE_REPO" 'git push'
+run_drift_case "sample-only dir: innocuous warns"    warn       "$SAMPLE_REPO" 'ls -la'
+run_drift_case "value ok but no runnable hook"       deny-hooks "$DEAD_REPO"   'git commit -m x'
+run_drift_case "value ok but hook not executable"    deny-hooks "$NOEXEC_REPO" 'git commit -m x'
+run_drift_case "no .githooks/ in repo: silent"       silent     "$BARE_REPO"   'git commit -m x'
+run_drift_case "non-repo cwd never fires"            silent     "$TMP"         'git commit -m x'
+
+# the repair has to stay runnable, or the guard wedges the session that has to
+# fix it. `just init` and a direct git config write are the two documented forms.
+run_drift_case "just init still runs while drifted"  warn       "$UNSET_REPO"  'just init'
+run_drift_case "config repair still runs"            warn       "$UNSET_REPO"  'git config core.hooksPath .githooks'
+
+# the master guard keeps precedence, so its message is not replaced by drift's
+MASTER_DRIFT="$TMP/hooks-master"; mkrepo "$MASTER_DRIFT" master
+mkdir -p "$MASTER_DRIFT/.githooks"
+printf '#!/bin/sh\nexit 0\n' > "$MASTER_DRIFT/.githooks/commit-msg"
+chmod +x "$MASTER_DRIFT/.githooks/commit-msg"
+run_drift_case "master guard wins over drift"        deny-master "$MASTER_DRIFT" 'git commit -m x'
+
+# the drift check must follow the command's effective target, like the master
+# guard does: a healthy cwd must not excuse a push into a drifted repo, and a
+# drifted cwd must not condemn a commit aimed at a healthy one.
+run_drift_case "-C into drifted repo from healthy"   deny-hooks "$OK_REPO"     "git -C $UNSET_REPO push"
+run_drift_case "-C into healthy repo from drifted"   warn       "$UNSET_REPO"  "git -C $OK_REPO commit -m x"
 
 printf -- '---\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
