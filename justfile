@@ -1432,8 +1432,9 @@ vuln: sweep-discovery-probes vuln-root-residual
     # WITNESS: on a tree scanned by a release toolchain the clause above only
     # ever runs in the negative, and a guard whose passing case is silence is
     # one nothing distinguishes from a deleted one. Both refusing directions and
-    # a positive control therefore run on every invocation, CI included, against
-    # fabricated headers, before any scan (ADR 0026).
+    # a positive control therefore run on every invocation of this recipe, local
+    # or CI, against fabricated headers, before any scan (ADR 0026). How often
+    # that is in CI is the `vuln` job's own path filter, not this line.
     unplaced_header="Govulncheck scanned the following 2 modules and the go standard library:"
     placed_header="Govulncheck scanned the following 2 modules and the go1.26.6 standard library:"
     witness_where="the unplaced-stdlib witness"

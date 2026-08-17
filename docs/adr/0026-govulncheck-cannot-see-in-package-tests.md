@@ -366,9 +366,9 @@ one the scan cannot place is the blindness this decision exists to catch. Readin
 the header instead agrees with `GoTagToSemver` on all twelve rows, because it is
 that function's own answer rendered back.
 
-`internal/tools/modscope/main.go:337` carries the same `^go1\.` pattern and is
-not affected: `classify()` applies it to build-constraint *terms*, where
-`go1.27rc1` is not a term.
+`internal/tools/modscope/main.go:337`, `var releaseTag`, carries the same
+`^go1\.` pattern and is not affected: `classify()` applies it to build-constraint
+*terms*, where `go1.27rc1` is not a term.
 
 **Read `-format json` and grade `SBOM.GoVersion` structurally.** Rejected on
 measurement, though the fact is carried structurally
@@ -431,9 +431,14 @@ recording.
 - The placement grading depends on the wording of one line of govulncheck's
   output, and `just vuln` runs `govulncheck@latest` — deliberately, so the vuln
   DB is current. The version is therefore not pinned and the coupling is not
-  scheduled: the day upstream reworks `internal/scan/text.go:149`, the absent-
-  header branch fails the required context on the next run. That is the
-  fail-closed direction, and repairing the match in the recipe is the response.
+  scheduled, and a rework of `internal/scan/text.go:149` lands in either
+  direction depending on the rework. One that stops matching the recipe's
+  pattern trips the absent-header branch on the next run — fail-closed, repaired
+  by fixing the match. One that still matches it but renders the *unplaced* case
+  as `go` followed by anything at all is accepted silently, because the grading
+  asks only whether something follows `go`. On v1.7.0 `SemverToGoTag` emits only
+  `go`, `go1`, or `go` plus a canonical version, so nothing renders that way
+  today; that is a property of this version, not of the pattern.
   `@latest` resolves to x/vuln v1.7.0 at the time of writing, which is the
   version every line reference in this ADR was read against.
 - The refusal arrives after the scan rather than before it, so a blind toolchain
