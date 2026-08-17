@@ -1597,12 +1597,13 @@ vuln: sweep-discovery-probes vuln-root-residual
         # grading that did not run to acceptance.
         #
         # That name is this loop's own `${dir}`, echoed back, so it says the
-        # grading ran ABOUT this module and not that it read this module's scan:
+        # grading ran ABOUT this module, not that it read this module's scan:
         # hand the clause any other string that parses — the witness's own
-        # fabricated header is in scope — and every name still arrives. So the
-        # header the grading reports is required to be a line of the output it
-        # was handed, which no other argument satisfies: the counts and the
-        # placed version in that line come from the scan itself.
+        # fabricated header is in scope — and every name still arrives. What
+        # ties the two together is the header the grading reports, required
+        # below to be a line of the output handed in. `${placed_header}` fails
+        # that on the counts alone: it says 2 modules where these scans say 43
+        # and 54.
         if stdlib_graded="$(refuse_unplaced_stdlib "${out}" "${dir}")"; then
             graded_where="$(sed -n '1p' <<<"${stdlib_graded}")"
             graded_line="$(sed -n '2p' <<<"${stdlib_graded}")"
