@@ -412,6 +412,70 @@ func TestListyColumnsNarrowEachElement(t *testing.T) {
 	}
 }
 
+// The element loop nests once per declared list depth, and every level
+// of it accumulates into a local of its own. Under a name shared between
+// the levels the inner declaration shadows the one the level above
+// appends to, so that accumulator and appended value become one
+// identifier and the emitted package does not compile. A depth of three
+// is the first that reaches it, being the first that puts one such
+// declaration inside another.
+//
+// The two sibling depth-two columns are the control: their loops are
+// disjoint blocks, so what the deep columns are refused for is the depth
+// and not the count. They are non-nullable so that they are also a
+// control for the row assembly's own accumulator, whose collision is on
+// column position and which a nullable column hides inside the block its
+// null gate opens. No such hiding is available a level down, which is
+// what the nullable deep column carries: its loops sit inside that block
+// and collide within it just the same.
+func TestNestColumnsAccumulateAtEveryDepth(t *testing.T) {
+	keys := []string{"cube", "lhs", "rhs", "deep"}
+	got, err := queriesOver(keys, []any{
+		[]any{[]any{[]any{int64(1), int64(2)}, []any{}}, []any{}},
+		[]any{[]any{int64(3)}, []any{int64(4), int64(5)}},
+		[]any{[]any{"a"}, []any{}},
+		[]any{[]any{[]any{"x"}}},
+	}).NestColumns(t.Context())
+	if err != nil {
+		t.Fatalf("NestColumns(nested) = error %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("NestColumns(nested) returned %d rows, want 1", len(got))
+	}
+	row := got[0]
+	if want := [][][]int64{{{1, 2}, {}}, {}}; !reflect.DeepEqual(row.Cube, want) {
+		t.Errorf("NestColumns(nested)[0].Cube = %#v, want %#v", row.Cube, want)
+	}
+	if want := [][]int64{{3}, {4, 5}}; !reflect.DeepEqual(row.Lhs, want) {
+		t.Errorf("NestColumns(nested)[0].Lhs = %#v, want %#v", row.Lhs, want)
+	}
+	if want := [][]string{{"a"}, {}}; !reflect.DeepEqual(row.Rhs, want) {
+		t.Errorf("NestColumns(nested)[0].Rhs = %#v, want %#v", row.Rhs, want)
+	}
+	if row.Deep == nil {
+		t.Fatalf("NestColumns(nested)[0].Deep = nil, want a list")
+	}
+	if want := [][][]string{{{"x"}}}; !reflect.DeepEqual(*row.Deep, want) {
+		t.Errorf("NestColumns(nested)[0].Deep = %#v, want %#v", *row.Deep, want)
+	}
+
+	null, err := queriesOver(keys, []any{
+		[]any{}, []any{}, []any{}, nil,
+	}).NestColumns(t.Context())
+	if err != nil {
+		t.Fatalf("NestColumns(deep: null) = error %v", err)
+	}
+	if null[0].Deep != nil {
+		t.Errorf("NestColumns(deep: null)[0].Deep = %#v, want nil", null[0].Deep)
+	}
+
+	if _, err := queriesOver(keys, []any{
+		[]any{[]any{int64(1)}}, []any{}, []any{}, nil,
+	}).NestColumns(t.Context()); err == nil {
+		t.Errorf("NestColumns(cube: [[int]]) = no error, want a refusal")
+	}
+}
+
 // A column whose declared width is ANY VALUE is read rather than
 // asserted, the same claim TestAnythingReadsWhatTheGraphHolds makes of
 // the property one emission over. `any` is a member of neither

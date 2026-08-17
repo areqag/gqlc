@@ -120,15 +120,15 @@ func (q *Queries) BinColumns(ctx context.Context) ([]BinColumnsRow, error) {
 		if !isNil {
 			acc2 := make([][]any, 0, len(value2))
 			for i, elem := range value2 {
-				inner, ok := elem.([]any)
+				inner1, ok := elem.([]any)
 				if !ok {
 					return nil, fmt.Errorf("BinColumns: decode column %q element %d: expected []any, got %T", "piles", i, elem)
 				}
-				innerAcc := make([]any, 0, len(inner))
-				for _, elem4 := range inner {
-					innerAcc = append(innerAcc, elem4)
+				innerAcc1 := make([]any, 0, len(inner1))
+				for _, elem1 := range inner1 {
+					innerAcc1 = append(innerAcc1, elem1)
 				}
-				acc2 = append(acc2, innerAcc)
+				acc2 = append(acc2, innerAcc1)
 			}
 			value2Ptr = &acc2
 		}

@@ -91,19 +91,19 @@ func (q *Queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, erro
 		if !isNil {
 			acc3 := make([][]float32, 0, len(value3))
 			for i, elem := range value3 {
-				inner, ok := elem.([]any)
+				inner1, ok := elem.([]any)
 				if !ok {
 					return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected []any, got %T", "matrix", i, elem)
 				}
-				innerAcc := make([]float32, 0, len(inner))
-				for i, elem4 := range inner {
-					v, ok := elem4.(float64)
+				innerAcc1 := make([]float32, 0, len(inner1))
+				for i, elem1 := range inner1 {
+					v, ok := elem1.(float64)
 					if !ok {
-						return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected float64, got %T", "matrix", i, elem4)
+						return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected float64, got %T", "matrix", i, elem1)
 					}
-					innerAcc = append(innerAcc, float32(v))
+					innerAcc1 = append(innerAcc1, float32(v))
 				}
-				acc3 = append(acc3, innerAcc)
+				acc3 = append(acc3, innerAcc1)
 			}
 			value3Ptr = &acc3
 		}
@@ -133,19 +133,19 @@ func (q *Queries) ReadingColumns(ctx context.Context) ([]ReadingColumnsRow, erro
 		if !isNil {
 			acc5 := make([][]int16, 0, len(value5))
 			for i, elem := range value5 {
-				inner, ok := elem.([]any)
+				inner1, ok := elem.([]any)
 				if !ok {
 					return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected []any, got %T", "grid", i, elem)
 				}
-				innerAcc := make([]int16, 0, len(inner))
-				for i, elem4 := range inner {
-					v, ok := elem4.(int64)
+				innerAcc1 := make([]int16, 0, len(inner1))
+				for i, elem1 := range inner1 {
+					v, ok := elem1.(int64)
 					if !ok {
-						return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected int64, got %T", "grid", i, elem4)
+						return nil, fmt.Errorf("ReadingColumns: decode column %q element %d: expected int64, got %T", "grid", i, elem1)
 					}
-					innerAcc = append(innerAcc, int16(v))
+					innerAcc1 = append(innerAcc1, int16(v))
 				}
-				acc5 = append(acc5, innerAcc)
+				acc5 = append(acc5, innerAcc1)
 			}
 			value5Ptr = &acc5
 		}
