@@ -339,6 +339,14 @@ check-golangci-build-tags: sweep-discovery-probes
 # depends on, so the run that would have cleaned that probe up dies before it
 # reaches its own trap.
 #
+# This recipe only clears what it is run before, and what runs it is four
+# dependency edges in this file. internal/tools/modscope/justfile_test.go reads
+# them off this file and refuses a recipe that runs modscope without reaching
+# this one, directly or through another recipe. Measured before it existed:
+# dropping the edge from check-golangci-build-tags left the tree green and
+# silent, and the gate that lost the edge then failed on a leaked probe with a
+# message about a broken walk (bd gqlc-c7o7).
+#
 # The limit is concurrency. Two of these recipes running against ONE worktree at
 # the same time would clear each other's live probe, and the witness below plants
 # under a fixed name both would collide on; they are not safe to run concurrently
