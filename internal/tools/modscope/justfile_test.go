@@ -28,9 +28,9 @@ import (
 // So the edges are derived here rather than trusted: a recipe whose body
 // spells this program's package path has to reach the sweep first. Two limits
 // on that reading are stated where they arise: an invocation that never spells
-// the path, at modscopePkg below (bd gqlc-wkio), and a recipe behind a header
-// this file's reader does not recognise, at
-// TestParseJustfileReadsWhatJustReads below (bd gqlc-6n9y).
+// the path, at modscopePkg below (bd gqlc-wkio), and the header shapes this
+// file's reader still reads differently from just, at
+// TestParseJustfileReadsWhatJustReads below.
 
 const (
 	// repoRoot reaches the justfile from this package's directory.
@@ -124,14 +124,14 @@ func parseJustfile(src string) ([]justRecipe, []string) {
 // justHeader splits a recipe header into its name and everything after the
 // colon. It reports false for every other line: an indented line is a body
 // line, a line opening with '#' is a doc comment, one opening with '[' is an
-// attribute, and a line whose first colon opens ':=' is an assignment —
+// attribute, and a line whose separating colon opens ':=' is an assignment —
 // including `export NAME := ...` and `set shell := ...`, which otherwise look
 // like a recipe with parameters.
 func justHeader(line string) (name, rest string, ok bool) {
 	if line == "" || line[0] == ' ' || line[0] == '\t' {
 		return "", "", false
 	}
-	colon := strings.IndexByte(line, ':')
+	colon := headerColon(line)
 	if colon < 0 || strings.HasPrefix(line[colon:], ":=") {
 		return "", "", false
 	}
@@ -146,6 +146,90 @@ func justHeader(line string) (name, rest string, ok bool) {
 		return "", "", false
 	}
 	return name, line[colon+1:], true
+}
+
+// headerColon returns the index of the colon separating a recipe header from
+// its dependencies: the first colon that is not inside a parameter default's
+// string literal. It returns -1 when there is no such colon on the line, which
+// includes a line that opens a literal and does not close it.
+//
+// Taking the first colon in the line instead reads
+// `vuln x="a:=b": vuln-root-residual` as an assignment and so does not read the
+// recipe at all, while just runs it with both its dependency and its body —
+// measured on a copy of this repo's justfile, where that rewrite leaves
+// `just --dump` at rc=0 with vuln's body still naming this package three times
+// and leaves TestEveryRecipeRunningModscopeSweepsProbesFirst passing, and where
+// dropping the same edge under a header this reader does read fails it.
+func headerColon(line string) int {
+	for i := 0; i < len(line); {
+		switch line[i] {
+		case ':':
+			return i
+		case '"', '\'', '`':
+			end := skipJustString(line, i)
+			if end < 0 {
+				return -1
+			}
+			i = end
+		default:
+			i++
+		}
+	}
+	return -1
+}
+
+// skipJustString returns the index one past the string literal opening at
+// line[i], or -1 if that literal is not closed on this line.
+//
+// just spells a parameter default six ways and takes a ':=' inside any of them,
+// so all six have to be skipped or the miss stays live in whichever family is
+// not skipped. Measured against just 1.57.0, every one of these parses to a
+// recipe still carrying its dependency:
+//
+//	vuln x="a:=b": sweep
+//	vuln x='a:=b': sweep
+//	vuln x=`a:=b`: sweep
+//	vuln x="""a:=b""": sweep
+//	vuln x='''a:=b''': sweep
+//	vuln x=```a:=b```: sweep
+//
+// Only the double-quote family takes a backslash escape, which is why escapes
+// are keyed on the delimiter rather than applied throughout. These two are
+// refused as unterminated strings:
+//
+//	vuln x="a\": sweep
+//	vuln x="""a\""": sweep
+//
+// while these three are accepted with the backslash a literal character, so
+// reading a backslashed delimiter as an escape in a raw family would run the
+// literal off the end of the line and lose the recipe:
+//
+//	vuln x='a\': sweep
+//	vuln x=`a\`: sweep
+//	vuln x='''a\''': sweep
+//
+// The triple forms are checked before the single ones because they can hold a
+// lone delimiter. just accepts this, where pairing single delimiters reads two
+// literals with the ':=' between them rather than one literal containing it:
+//
+//	vuln x="""a"b:=c""": sweep
+func skipJustString(line string, i int) int {
+	delim := line[i : i+1]
+	if triple := strings.Repeat(delim, 3); strings.HasPrefix(line[i:], triple) {
+		delim = triple
+	}
+	escapes := line[i] == '"'
+	for j := i + len(delim); j < len(line); {
+		if escapes && line[j] == '\\' {
+			j += 2
+			continue
+		}
+		if strings.HasPrefix(line[j:], delim) {
+			return j + len(delim)
+		}
+		j++
+	}
+	return -1
 }
 
 // isJustName reports whether s is spelled the way a recipe name is. Prose
@@ -393,18 +477,26 @@ func TestUnsweptModscopeCallersFindsEachBrokenWiring(t *testing.T) {
 // find, and a body it truncates is an invocation it does not see — both fail
 // open, which is why each shape has a row.
 //
-// The last row is the boundary rather than a shape on this tree: a parameter
-// default spelling `:=` puts the first colon inside the default, and justHeader
-// reads that as an assignment and returns nothing. That is the header limit the
-// file comment above points here for, and it is filed as bd gqlc-6n9y: this
-// row's `want: nil` pins the limit open, so teaching justHeader to read the
-// shape means editing a passing row on purpose, and the bead is what says the
-// row was deliberate. Measured: rewriting `vuln:
-// sweep-discovery-probes vuln-root-residual` to `vuln x="a:=b":
-// vuln-root-residual` leaves `just --dump` accepting the file with vuln's body
-// still naming this package three times, and leaves
-// TestEveryRecipeRunningModscopeSweepsProbesFirst passing; dropping the same
-// edge without touching the header fails it.
+// The parameter-default rows are where a reader of header text loses most,
+// because a default is the one part of a header carrying bytes just does not
+// read as syntax. just 1.57.0 accepts six spellings of one, listed at
+// skipJustString above, and takes a ':=' inside every one of them; a reader
+// that skips one family and not the other keeps the miss alive in the family
+// it does not skip, so every family has a row here. The escaping rows are the
+// same argument one level down — the double-quote family escapes and the raw
+// families do not, so a single rule applied to both mis-reads one of them.
+//
+// WHAT THIS STILL DOES NOT REACH, in the order the reader meets them:
+//
+//   - A header whose parameter default opens a literal it does not close on
+//     the same line. just accepts one, because a triple-quoted default may
+//     span lines, and this reader is line-based. The last row pins the drop so
+//     it stays a choice; it is the fail-open direction, since a caller lost
+//     that way is not reported and nothing else here notices.
+//   - A trailing `# …` comment on a header, which just ignores and this reader
+//     takes for dependencies. That one fails closed rather than open, and
+//     TestParseJustfileMisreadsATrailingCommentLoudly below is what holds it
+//     to the loud half.
 func TestParseJustfileReadsWhatJustReads(t *testing.T) {
 	cases := []struct {
 		name string
@@ -455,8 +547,80 @@ func TestParseJustfileReadsWhatJustReads(t *testing.T) {
 			want: []justRecipe{{name: "lint-hooks", deps: []string{"ensure-shellcheck"}, body: "    echo hi\n"}},
 		},
 		{
-			name: "a parameter default spelling := leaves the header unread",
+			name: "a parameter default spelling := is not an assignment",
 			src:  "vuln x=\"a:=b\": sweep\n    echo ./" + modscopePkg + "\n",
+			want: []justRecipe{{name: "vuln", deps: []string{"sweep"}, body: "    echo ./" + modscopePkg + "\n"}},
+		},
+		{
+			name: "a := in a raw default is not an assignment either",
+			src:  "vuln x='a:=b': sweep\n    echo hi\n",
+			want: []justRecipe{{name: "vuln", deps: []string{"sweep"}, body: "    echo hi\n"}},
+		},
+		{
+			name: "a := in a backtick default is not an assignment either",
+			src:  "vuln x=`echo a:=b`: sweep\n    echo hi\n",
+			want: []justRecipe{{name: "vuln", deps: []string{"sweep"}, body: "    echo hi\n"}},
+		},
+		{
+			// just accepts a lone delimiter inside the triple forms, so these
+			// two are what a reader pairing single delimiters gets wrong: it
+			// would leave `b:=c` outside any literal and read an assignment.
+			name: "a triple-quoted default holding a lone quote",
+			src:  "vuln x=\"\"\"a\"b:=c\"\"\": sweep\n    echo hi\n",
+			want: []justRecipe{{name: "vuln", deps: []string{"sweep"}, body: "    echo hi\n"}},
+		},
+		{
+			name: "a triple-raw default holding a lone quote",
+			src:  "vuln x='''a'b:=c''': sweep\n    echo hi\n",
+			want: []justRecipe{{name: "vuln", deps: []string{"sweep"}, body: "    echo hi\n"}},
+		},
+		{
+			name: "a triple-backtick default",
+			src:  "vuln x=```a:=b```: sweep\n    echo hi\n",
+			want: []justRecipe{{name: "vuln", deps: []string{"sweep"}, body: "    echo hi\n"}},
+		},
+		{
+			// The double-quote family escapes, so the default runs to the
+			// quote after c and the separator is the colon after it.
+			name: "an escaped quote does not end a default",
+			src:  "vuln x=\"a\\\"b:=c\": sweep\n    echo hi\n",
+			want: []justRecipe{{name: "vuln", deps: []string{"sweep"}, body: "    echo hi\n"}},
+		},
+		{
+			// The raw families do not escape, so this default ends at the
+			// second quote with the backslash inside it. Reading `\'` as an
+			// escape would run the literal off the end of the line and drop
+			// the recipe.
+			name: "a backslash in a raw default is a character, not an escape",
+			src:  "vuln x='a\\': sweep\n    echo hi\n",
+			want: []justRecipe{{name: "vuln", deps: []string{"sweep"}, body: "    echo hi\n"}},
+		},
+		{
+			// A colon that is not part of := was read as the separator before,
+			// which made the rest of the default into dependencies naming no
+			// recipe. The parens are the same shape one step on: they sit in
+			// the name half of the line, so they are not the parenthesised
+			// dependency the reader refuses.
+			name: "a plain colon and parens in a default are not dependencies",
+			src:  "vuln x=(\"a\" + \":b\"): sweep\n    echo hi\n",
+			want: []justRecipe{{name: "vuln", deps: []string{"sweep"}, body: "    echo hi\n"}},
+		},
+		{
+			name: "an import path carrying a colon is not a recipe",
+			src:  "import 'mod:ules.just'\nvuln: sweep\n    echo hi\n",
+			want: []justRecipe{{name: "vuln", deps: []string{"sweep"}, body: "    echo hi\n"}},
+		},
+		{
+			// THE LIMIT THIS READER STILL HAS. just accepts a triple-quoted
+			// default spanning lines, and this reader is line-based: neither
+			// physical line carries a separating colon outside a literal, so
+			// the recipe is dropped rather than mis-read. Dropped is the
+			// fail-open direction — a caller lost this way is not reported —
+			// and this row is here so that the drop stays a choice. Measured:
+			// a justfile whose header is `vuln x="""a` / `b:=c""": sweep` is
+			// accepted by just 1.57.0 at rc=0.
+			name: "a default spanning two lines leaves the header unread",
+			src:  "vuln x=\"\"\"a\nb:=c\"\"\": sweep\n    echo ./" + modscopePkg + "\n",
 			want: nil,
 		},
 	}
@@ -496,5 +660,52 @@ func TestParseJustfileRefusesADependencyShapeItCannotRead(t *testing.T) {
 	}
 	if len(complaints) != 1 || !strings.Contains(complaints[0], "parenthesised dependency") {
 		t.Fatalf("complaints = %v, want one naming a parenthesised dependency", complaints)
+	}
+}
+
+// TestParseJustfileMisreadsATrailingCommentLoudly pins the one shape this
+// reader is known to read differently from just and does not refuse. just takes
+// a `# …` after a dependency list as a comment and ignores it — measured, `just
+// --dump` on `vuln: sweep-discovery-probes # note` is rc=0 with vuln depending
+// on the sweep alone — where this reader takes the words after the '#' for
+// dependency names.
+//
+// Nothing wants that reading. It is pinned because the direction is what makes
+// it survivable: names invented from a comment resolve to no recipe, so the
+// dangling-dependency complaint fires and the live assertion fails rather than
+// passing over a header it read wrong. Teaching the reader to read past a '#'
+// silently would move this to the side where a miss is quiet, and this row is
+// what would notice.
+func TestParseJustfileMisreadsATrailingCommentLoudly(t *testing.T) {
+	src := probeSweep + ":\n    echo s\n" +
+		"vuln: " + probeSweep + " # note\n    go run ./" + modscopePkg + "\n"
+
+	recipes, readComplaints := parseJustfile(src)
+	if len(readComplaints) != 0 {
+		t.Fatalf("read complaints = %v, want none", readComplaints)
+	}
+	var deps []string
+	for _, r := range recipes {
+		if r.name == "vuln" {
+			deps = r.deps
+		}
+	}
+	if !slices.Equal(deps, []string{probeSweep, "#", "note"}) {
+		t.Fatalf("vuln deps = %v, want the comment read as two more dependencies", deps)
+	}
+
+	// The caller is still found and still reaches the sweep, so what the
+	// comment costs is noise rather than a missed caller.
+	unswept, complaints := unsweptModscopeCallers(recipes)
+	if len(unswept) != 0 {
+		t.Errorf("unswept = %v, want none", unswept)
+	}
+	if len(complaints) != 2 {
+		t.Fatalf("complaints = %v, want one for each word the comment contributed", complaints)
+	}
+	for i, want := range []string{"depends on #", "depends on note"} {
+		if !strings.Contains(complaints[i], want) {
+			t.Errorf("complaint %d = %q, want it to contain %q", i, complaints[i], want)
+		}
 	}
 }
