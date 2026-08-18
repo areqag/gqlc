@@ -90,9 +90,9 @@
 # If shlex cannot tokenize at all, falls back to the old whole-text regex
 # checked at the hook's own cwd.
 #
-# What the hooksPath half does NOT catch, all fail-open for the same reason
-# (this runs before every Bash call in every concurrent session, so a false
-# positive costs more than a missed detection):
+# What the hooksPath half does NOT catch. Fail-open unless the entry says
+# otherwise (this runs before every Bash call in every concurrent session, so a
+# false positive costs more than a missed detection):
 #   - a repo whose .githooks/ directory is gone entirely: nothing then
 #     distinguishes it from an unrelated repo that never had hooks, so the
 #     check stays silent rather than firing in every repo on the machine
@@ -101,6 +101,10 @@
 #     not refused
 #   - the config value is compared literally, not resolved: an absolute path
 #     naming the very same directory still reads as drift (see HOOKS_DIRNAME)
+#     and the gated subcommands are refused although the hooks it points at are
+#     live. Fail-CLOSED, so this is an entry the heading's "unless" covers
+#     (measured, against a control with the relative spelling that stays silent
+#     in the same repo)
 #   - an internal error in this hook warns and allows rather than denying (see
 #     __main__): a bug here must not be able to block its own repair. It is no
 #     longer *silent*, which is the part that mattered — a detector that exits

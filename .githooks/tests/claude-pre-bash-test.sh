@@ -200,9 +200,14 @@ run_guard_case "unquoted heredoc bare prose"     silent "$MASTER_REPO" "$(printf
 # `\\` is itself an escape yielding a literal backslash, so the substitution
 # after it is LIVE and its deny is correct. Across 0 to 4 backslashes measured,
 # an odd count suppressed the expansion and an even count did not. Mutating the
-# extraction toward either fix reddens rows here, which is what the third row
-# buys: skipping any `$(` with a backslash before it reddens all three, while
-# skipping only an odd run reddens the two inert ones and leaves this one green.
+# extraction toward either candidate reddens rows in this block, and this third
+# row is what separates them: it goes red when the skip keys on a backslash
+# being present, and stays green when it keys on the run being odd, its own run
+# being even. Which other rows move depends on whether the skip is wired into
+# the `$(` extractor alone or into the backtick one too, since SUBST_RE cannot
+# reach the backtick row — so what this block pins is that separation, not a
+# redden-set. Measured by building both extractions out of tree and running
+# this suite under each.
 # shellcheck disable=SC2016 # ditto
 run_guard_case "escaped \$( ) denies, inert"     deny-master "$MASTER_REPO" "$(printf 'cat <<EOF > /dev/null\n\\$(git commit -m x)\nEOF\n')"
 # shellcheck disable=SC2016 # ditto
