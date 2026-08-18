@@ -8,11 +8,17 @@
 #      here rather than in a git hook.
 #
 # The target is resolved by analysis, not raw pattern-matching:
-#   - heredoc bodies are stripped, so a `git commit` written there is data
-#     rather than a command. That holds for a QUOTED delimiter (<<'EOF'). An
-#     unquoted one still expands $(...) in its body, and stripping runs before
-#     substitutions are extracted, so that case is missed -> allow (bd
-#     gqlc-wa8c; measured, with a non-heredoc positive control that denies)
+#   - heredoc bodies never reach the tokenizer, so a `git commit` written as
+#     prose in one is data rather than a command. The two delimiter forms then
+#     part company, because the shell treats them differently: a QUOTED
+#     delimiter (<<'EOF', <<"EOF") expands nothing, so that body is dropped
+#     whole; an UNQUOTED one (<<EOF) expands $(...) and `...` in its body and
+#     those really run, so the unquoted body's substitutions are extracted and
+#     analyzed while its prose still is not. Measured with a touch-marker
+#     fixture: the substitution under <<EOF created the file, the identical one
+#     under <<'EOF' did not (bd gqlc-wa8c, which was the missing half — the
+#     unquoted body used to be stripped before substitutions were extracted,
+#     so a $(git commit) there was silently allowed)
 #   - $(...) and `...` substitution bodies are analyzed recursively (they
 #     execute for real, even inside double quotes)
 #   - the rest is shlex-tokenized, so a multi-word quoted run collapses to one
@@ -145,22 +151,32 @@ def unquoted_positions(line, state):
 
 
 def strip_heredocs(text):
-    kept, pending = [], []
+    # -> (text with every heredoc body removed, bodies of the UNQUOTED ones)
+    #
+    # Both returns are needed because the two delimiter forms differ in the
+    # shell, not just in this hook: a quoted delimiter (<<'EOF', <<"EOF")
+    # expands nothing, so its body is inert and the second return drops it; an
+    # unquoted one (<<EOF) expands $(...) and `...`, so those substitutions
+    # really run and the caller has to analyze them. Group 2 of HEREDOC_RE is
+    # the quote character, empty exactly when the delimiter is unquoted.
+    kept, pending, expanded = [], [], []
     qstate = None
     for line in text.split("\n"):
         if pending:
-            delim, tab_strip = pending[0]
+            delim, tab_strip, quoted = pending[0]
             if (line.lstrip("\t") if tab_strip else line) == delim:
                 pending.pop(0)
+            elif not quoted:
+                expanded.append(line)
             continue
         # Only arm on << outside quotes: a quoted "<< X" is prose, and arming
         # on it would strip real commands from the following lines.
         outside, qstate = unquoted_positions(line, qstate)
         for m in HEREDOC_RE.finditer(line):
             if m.start() in outside:
-                pending.append((m.group(3), m.group(1) == "-"))
+                pending.append((m.group(3), m.group(1) == "-", bool(m.group(2))))
         kept.append(line)
-    return "\n".join(kept)
+    return "\n".join(kept), "\n".join(expanded)
 
 
 def substitution_bodies(text):
@@ -229,9 +245,17 @@ def git_targets(text, cwd, wanted, depth=0):
     # -> [(subcommand, effective directory)], need_fallback
     if depth > 3:
         return [], False
-    text = strip_heredocs(text)
+    text, expanded = strip_heredocs(text)
     targets, need_fallback = [], False
-    for body in substitution_bodies(text):
+    # The unquoted heredoc body contributes its substitutions and nothing else:
+    # `$(...)` there runs, the prose around it does not, and it never reaches
+    # the tokenizer below. Same recursion level as a substitution written bare,
+    # so the depth cap above sees no extra hop (measured: an unquoted heredoc
+    # holding $(git commit) is found at depth 1, exactly where a bare
+    # $(git commit) is found).
+    bodies = substitution_bodies(text)
+    bodies.extend(substitution_bodies(expanded))
+    for body in bodies:
         sub_targets, sub_fallback = git_targets(body, cwd, wanted, depth + 1)
         targets.extend(sub_targets)
         need_fallback = need_fallback or sub_fallback
