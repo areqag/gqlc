@@ -2,12 +2,21 @@
 // job runs `just test`, `just test` depends on `test-hooks`, and `test-hooks`
 // names each suite. `test` is a required status check on master.
 //
-// What is held here is that each link is named, and that the yaml link is
-// switched off by neither of the two keys that switch a check off without
-// deleting it: an `if:`, which retires the job or the step into a `skipped`
-// conclusion branch protection reads as a pass, and a `continue-on-error:`,
-// which runs the step and reports success whatever it returned. Each is
-// refused on the `test` job and on the step that runs `just test`.
+// What is held here is that each link is named, and that the yaml link carries
+// neither an `if:` nor a `continue-on-error:` — neither on the `test` job nor
+// on the step that runs `just test`. Both keys leave every line of the workflow
+// in place, and neither reads the same on a job as on a step, because a job
+// emits a check run of its own and a step does not: an `if:` on the job leaves
+// a check run whose conclusion is `skipped`, which branch protection reads as a
+// pass, while an `if:` on the step leaves the job's check run concluding
+// success with the suites never run. The messages below carry the rest, one per
+// key per level.
+//
+// Those are the keys refused here, not the set of keys that can retire a check
+// without deleting a line. A `shell:` on a step, and a `defaults.run.shell` on
+// the job or on the workflow, reach that end by a different route; those are
+// refused around the PR-body gate in workflow_test.go, where the step runs two
+// commands and leans on the runner's `-e` to stop at the first that fails.
 //
 // What is not held here is that a suite line carries its exit status into the
 // recipe's status. That end is hooktests_test.go's, in two tests:
@@ -79,10 +88,22 @@ var runsTestRecipe = regexp.MustCompile(`(?m)^[ \t]*just ` + testRecipe + `[ \t]
 // stop ending a recipe. A body line that is nothing but a comment runs nothing
 // and is dropped rather than returned empty.
 //
-// liverecipes.StripComment rather than a cut at the first `#`: it opens a
-// comment where sh does, at a `#` beginning a word outside quotes, so a `#`
-// inside a quoted argument survives. The naive cut is what gqlc-snzq F6
-// records truncating a neighbouring surface.
+// liverecipes.StripComment rather than a cut at the first `#`. It cuts at a `#`
+// that begins a word outside quotes, so a `#` inside a quoted argument
+// survives, and that is the whole of what is claimed for it here: its own doc
+// comment disclaims equivalence with sh, naming backslash escapes, command
+// substitution, heredocs and here-strings as shapes it does not model and each
+// as cutting where sh would not.
+//
+// The quoted half is exercised rather than hypothetical — the header search
+// runs the strip over every line above the recipe it is looking for, and lines
+// in that stretch do come out differently under the two rules, `"${#names[@]}"`
+// and `"#!"*` shapes that the naive cut truncates mid-line. Measured over the
+// justfile as it stands, neither of the two recipes read here comes out with a
+// different dependency list or body for it, so what the choice buys at these
+// call sites today is nothing; it is made because gqlc-snzq F6 records the
+// naive cut truncating a neighbouring surface, and because a recipe line that
+// grows a quoted `#` should not have to notice.
 //
 // Not `just --dump`, though the justfile is what just parses and this is a
 // regex. The behavioural question — whether a failing suite stops the recipe —
@@ -176,22 +197,33 @@ func TestCITestJobRunsTheTestRecipe(t *testing.T) {
 			"an `if:` here retires the shell suites without deleting a line of them.",
 		testJob, job.If)
 
-	// The other half of "the job can still fail". An `if:` stops the job and
-	// reports `skipped`; this runs the job, runs `just test`, lets it fail and
-	// reports success — so the suites execute, print their failures, and the
-	// required context is green. Deleting a link is what the assertions here
-	// were built to catch; this is the neutralisation they were not (bd
-	// gqlc-lisu), and it was measured green against every one of them.
+	// The other half of "the job can still fail", and it is not the step-level
+	// key spelled one level up. GitHub documents the job-level form against the
+	// workflow run — "prevents a workflow run from failing when a job fails" —
+	// and it is the step-level form that carries a job past a failing step: the
+	// runner applies continue-on-error as each step completes, turning that
+	// step's failure into a success that the following steps' default
+	// `success()` condition still sees. So a `continue-on-error:` here buys a
+	// run recorded as a pass over a `test` job that failed, not a `test` job
+	// that runs on past `just test` returning non-zero. What it does to this
+	// job's own check run, which is what branch protection reads, is not
+	// settled by that documentation and is not measured here — which is reason
+	// to refuse the key on a required job, not reason to allow it. Deleting a
+	// link is what the assertions here were built to catch; this is the
+	// neutralisation they were not (bd gqlc-lisu), and it was measured green
+	// against every one of them.
 	//
 	// Refused written rather than refused true, as present's own comment
 	// argues: `continue-on-error: ${{ … }}` is a value no test can evaluate, so
 	// "is the key there" is answerable where "is it truthy" is not. The cost is
 	// that an explicit `continue-on-error: false` is refused too.
 	require.Falsef(t, present(job.ContinueOnError),
-		"job %q sets `continue-on-error: %s`. Every step in it still runs and the check "+
-			"run it emits still concludes success, whatever `just %s` returned — the "+
-			"shell suites report into a log and block nothing.",
-		testJob, spell(job.ContinueOnError), testRecipe)
+		"job %q sets `continue-on-error: %s`. GitHub documents that key on a job as "+
+			"preventing a workflow run from failing when the job fails, so `just %s` "+
+			"can return non-zero with the run recorded as a pass. Whether the check run "+
+			"for %q follows the run or the job is not settled here, and a required "+
+			"context is not where to find out.",
+		testJob, spell(job.ContinueOnError), testRecipe, testJob)
 
 	for _, s := range job.Steps {
 		if runsTestRecipe.MatchString(s.Run) {
