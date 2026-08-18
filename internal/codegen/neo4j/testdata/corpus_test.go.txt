@@ -885,15 +885,12 @@ func TestEntityColumnsDecodeWholeEntities(t *testing.T) {
 	}
 
 	// The same three values under two of the same keys, swapped, are
-	// refused rather than decoded into a row. This case does not say
-	// which stage refused them: drop the column's error gate from the
-	// emitter and it still passes, because the zero carrier that comes
-	// back with the dropped error fails the decode helper instead.
-	// TestEntityColumnRefusalsCarryTheDriversError below hands in the
-	// same swap and reads the message, which is what tells those two
-	// apart. The carrier is settled before either stage runs: emit the
-	// edge column's read as dbtype.Node and the nested module stops
-	// compiling, so this case never runs.
+	// refused rather than decoded into a row. The fact of the refusal is
+	// all this case reads: which stage produced it is what
+	// TestEntityColumnRefusalsCarryTheDriversError below settles, out of
+	// this same swap. The carrier is settled before either stage runs —
+	// emit the edge column's read as dbtype.Node and the nested module
+	// stops compiling, so this case never runs.
 	if _, err := queriesOver([]string{"s", "e", "l"}, []any{
 		relationship(edgyProps()), node(scalarProps()), node(listyProps()),
 	}).EntityColumns(t.Context()); err == nil {
@@ -946,9 +943,9 @@ func TestEntityColumnsDecodeWholeEntities(t *testing.T) {
 // Dropping it passes on the zero carrier, whose empty Props map the decode
 // helper then refuses on the first property it looks for, so the caller is
 // told a property is missing from a graph value that never arrived. That
-// is a refusal for a neighbouring reason, which is why every assertion
-// here is on the message and one of them is on what the message must not
-// say.
+// is a refusal for a neighbouring reason, which is why the checks here read
+// the message rather than stopping at the fact of an error, and why one of
+// them is on what the message must not say.
 func TestEntityColumnRefusalsCarryTheDriversError(t *testing.T) {
 	keys := []string{"s", "e", "l"}
 	// unreached names the decode helper the column would reach if its gate
