@@ -20,15 +20,37 @@ fi
 # Formatting gate (gofumpt + gci via the pinned golangci-lint). Repo-wide on
 # purpose: simpler than staged-file plumbing, and `just fmt` fixes everything
 # it complains about. ensure-golangci self-heals the pinned binary in .bin/
-# (~30ms when healthy); it only fails when a needed download is impossible
-# (e.g. offline), and then we degrade to a warning rather than block commits.
+# (~30ms and no download when .bin/ already holds the pinned version).
+#
+# A provisioning failure BLOCKS the commit. Until bd gqlc-l45j this arm warned
+# and continued, justified by the claim that a download only becomes impossible
+# when you are offline. That is false, and was falsified here: on 2026-08-17
+# GitHub returned HTTP 429 on the golangci-lint download while this repo had ~8
+# PRs running CI, on a healthy network, and every commit in that window skipped
+# the format check behind a WARN on stderr. Causes seen or reachable: no
+# network; HTTP 429 or another rate limit from raw.githubusercontent.com or the
+# release CDN; a proxy or firewall that blocks either host; a version bump
+# pointing at a release that is not published yet; a corrupt or unwritable
+# .bin/. That list is open by construction, which is the reason for blocking —
+# an unenumerated cause must not be able to silently retire the gate.
+#
+# Escape hatch for a genuine outage: GQLC_ALLOW_MISSING_LINTER=1 skips the
+# format check and says so. It is narrower than `git commit --no-verify`, which
+# also drops the master-branch guard above and the AI-attribution guard in
+# commit-msg. Note the download is only reached on a fresh worktree or after a
+# version bump, so an offline developer with a warm .bin/ never sees this arm.
 if just ensure-golangci >/dev/null 2>&1; then
   if ! just fmt-check >/dev/null 2>&1; then
     echo "ERROR: unformatted Go files. Run: just fmt" >&2
     exit 1
   fi
+elif [ "${GQLC_ALLOW_MISSING_LINTER:-}" = "1" ]; then
+  echo "WARN: golangci-lint unavailable; format check SKIPPED by GQLC_ALLOW_MISSING_LINTER=1" >&2
 else
-  echo "WARN: could not provision golangci-lint (offline?); skipping format check" >&2
+  echo "ERROR: could not provision golangci-lint, so the format check did not run." >&2
+  echo "       Diagnose with: just ensure-golangci" >&2
+  echo "       Commit anyway (skips the format check): GQLC_ALLOW_MISSING_LINTER=1 git commit ..." >&2
+  exit 1
 fi
 
 exit 0

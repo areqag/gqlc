@@ -76,6 +76,9 @@ const gateStepIf = "github.event_name == 'pull_request'"
 // is literally `on`, and which YAML schema a parser applies to that token has
 // changed under this repo before. Node.Value is the source token, so the
 // lookup does not depend on the answer.
+//
+// ci.yml is the only workflow with assertions here, and unparam refuses a
+// parameter every caller passes the same constant to.
 func ciDoc(t *testing.T) *yaml.Node {
 	t.Helper()
 	src, err := os.ReadFile(filepath.Join(repoRoot, ciWorkflow))

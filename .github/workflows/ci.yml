@@ -46,6 +46,7 @@ jobs:
         with:
           go-version-file: go.mod
       - uses: ./.github/actions/setup-just
+      - uses: ./.github/actions/setup-golangci
       # Ratchets the set of packages govulncheck cannot see through (ADR 0026,
       # bd gqlc-m5rc). It rides the lint job, the root module's always-run static
       # gate, because the vuln job scans only when a go.mod changes — so it would
@@ -55,11 +56,16 @@ jobs:
       - run: just vuln-root-residual
       # golangci-lint's per-package analysis cache. Save under a unique key
       # every run, restore by prefix: the same rotation the official action
-      # does, without giving up `just lint` as the single entrypoint. The
-      # binary itself is not cached: just lint self-provisions it in ~3s,
-      # about what a cache restore would cost.
+      # does, without giving up `just lint` as the single entrypoint.
       # Path must match GOLANGCI_LINT_CACHE in the justfile (per-worktree cache
       # colocated under .bin/, see bd gqlc-6rv). Keep in sync.
+      #
+      # Distinct from the setup-golangci step above, which caches the linter
+      # BINARY. That one was uncached on the reasoning that a ~3s self-provision
+      # costs about what a restore does — true on time, and beside the point once
+      # the download started answering 429 under this repo's own concurrency (bd
+      # gqlc-l45j). Two caches, two keys: analysis facts rotate per run, the
+      # binary rotates per pinned version.
       - name: golangci-lint analysis cache
         uses: actions/cache@v4
         with:
@@ -153,6 +159,9 @@ jobs:
         with:
           go-version-file: go.mod
       - uses: ./.github/actions/setup-just
+      # test-codegen-fence depends on ensure-golangci, so this job downloads the
+      # linter too — it is where the 429 in bd gqlc-l45j's first witness landed.
+      - uses: ./.github/actions/setup-golangci
       - run: just test-codegen-fence
 
   actionlint:
