@@ -3,16 +3,11 @@ package neo4j_test
 import (
 	"bytes"
 	"encoding/json"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 
@@ -65,6 +60,59 @@ replace ` + driverModule + ` => ./driverstub
 // stubModule lets the stub claim the driver's own path. It carries no
 // requirements of its own, so the whole run is dependency-free.
 const stubModule = "module " + driverModule + "\n\ngo 1.26.2\n"
+
+// corpusTests names the tests the assembled corpus module has to run and
+// pass.
+//
+// It is written down here, in the parent, rather than censused out of
+// testdata/corpus_test.go.txt, because the fixture is the artifact under
+// check: an expectation read off it moves whenever it moves. Measured
+// against a census of the fixture's top-level `func Test…` declarations,
+// three ways of taking a test out of the corpus left the census and the
+// child run together and the comparison stayed green — commenting the
+// function out, deleting it, and renaming it to something that is not a
+// test name at all. Held against this list each of the three fails,
+// because this list does not move when the fixture does.
+//
+// Not every removal was invisible to that census, and this does not
+// claim otherwise. A t.Skip in a test's body and a TestMain that never
+// calls m.Run() both leave the declaration standing while taking the
+// test out of the run, so a census names them and the old comparison
+// went red on both. Renaming TestFoo to Testfoo is refused earlier
+// still, by the vet check `go test` runs over the child module. So was a
+// fixture emptied to its package clause, and that case is the one worth
+// keeping in view: `go test` exits 0 over a _test.go declaring no tests,
+// so the child's exit status alone reports success on an emptied
+// template. Requiring this exact set is what covers it now.
+//
+// This list is a declaration, not a gate. Removing a test from the
+// fixture and removing its name from here is one edit by one hand in one
+// commit, and nothing here prevents that. What it costs the remover is
+// having to write the removal down in a file the child module is never
+// handed.
+var corpusTests = []string{
+	"TestBinCarriesNullElements",
+	"TestBinNullabilityAndShape",
+	"TestListyNarrowsEachElement",
+	"TestListyEmptyIsNotAbsent",
+	"TestListyRefusesAMisTypedElement",
+	"TestAnythingReadsWhatTheGraphHolds",
+	"TestAnythingSeparatesAbsentFromNull",
+	"TestAnythingMissingPropertyReadsLikeTheDrivers",
+	"TestScalarNarrows",
+	"TestEdgyNarrowsOverARelationship",
+	"TestEdgyRefusesWhatTheSchemaDidNotDeclare",
+	"TestEdgyKeepsAbsentApartFromEmptyOverARelationship",
+	"TestBinColumnsCarryNullElements",
+	"TestListyColumnsNarrowEachElement",
+	"TestListColumnRefusalsCarryTheDriversError",
+	"TestNestColumnsAccumulateAtEveryDepth",
+	"TestAnythingColumnsReadWhatTheGraphHolds",
+	"TestAnythingColumnsCarryTheirNull",
+	"TestEntityColumnsDecodeWholeEntities",
+	"TestEntityColumnRefusalsCarryTheDriversError",
+	"TestEdgeUnionColumnDispatchesOnTheWireLabel",
+}
 
 // TestEmittedDecodersRunOnDriverValues runs the emitted entity decoders
 // and query methods against the Go values a Bolt driver can actually put
@@ -133,8 +181,10 @@ func TestEmittedDecodersRunOnDriverValues(t *testing.T) {
 
 	passed, log, err := runCorpus(t, dir)
 	require.NoError(t, err, "the emitted decoders do not satisfy the driver-value corpus:\n%s", log)
-	require.ElementsMatch(t, declaredTests(t, driver), passed,
-		"the corpus module did not run every test its template declares:\n%s", log)
+	require.ElementsMatch(t, corpusTests, passed,
+		"the tests the corpus module passed are not the set corpusTests names — a test left "+
+			"testdata/corpus_test.go.txt without leaving corpusTests, or joined it without being "+
+			"named there:\n%s", log)
 }
 
 // driverAgnostic collapses an emission's two driver-major-specific
@@ -214,43 +264,6 @@ func runCorpus(t *testing.T, dir string) (passed []string, log string, err error
 		}
 	}
 	return passed, text.String(), err
-}
-
-// declaredTests names the top-level tests a corpus template declares.
-// Requiring that every one of them passed is what separates a corpus the
-// emission satisfies from a corpus that is not there: `go test` exits 0
-// on a _test.go file declaring no tests, so a harness that reads only the
-// child's exit status reports success on an emptied template.
-func declaredTests(t *testing.T, src string) []string {
-	t.Helper()
-
-	file, err := parser.ParseFile(token.NewFileSet(), "corpus_test.go", src, parser.SkipObjectResolution)
-	require.NoError(t, err)
-
-	var names []string
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if ok && fn.Recv == nil && isTestName(fn.Name.Name) {
-			names = append(names, fn.Name.Name)
-		}
-	}
-	require.NotEmpty(t, names, "the corpus template declares no tests, so a child run of it proves nothing")
-	return names
-}
-
-// isTestName reports whether `go test` runs a function of this name,
-// following testing's own rule: Test, then anything that does not begin
-// with a lower-case letter. TestMain is the entry point, not a test.
-func isTestName(name string) bool {
-	rest, ok := strings.CutPrefix(name, "Test")
-	if !ok || name == "TestMain" {
-		return false
-	}
-	if rest == "" {
-		return true
-	}
-	first, _ := utf8.DecodeRuneInString(rest)
-	return !unicode.IsLower(first)
 }
 
 // corpusFile reads one of the hand-written sources the corpus module is
