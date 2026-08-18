@@ -490,7 +490,8 @@ func unservedColumn(t resolver.ResolvedType) string {
 	// instead, yield to the text gate included, is rejectUnservedQueries'
 	// business.
 	//
-	// `t.String()` dispatches to the shallowest String in the arriving
+	// The render asks t for its own name, and that `t.String()` dispatches
+	// to the shallowest String in the arriving
 	// type's method set. For a pointer to a variant, or a struct embedding
 	// a variant and declaring no String, that is the variant's own
 	// diagnostic Stringer — which for ResolvedProperty, ResolvedScalar and
@@ -503,19 +504,46 @@ func unservedColumn(t resolver.ResolvedType) string {
 	// string for where it came from — the ranking in unservedReason turns
 	// on the column's TYPE for exactly that reason.
 	//
-	// A resolver.Column whose Type is nil, and a
-	// `struct{ resolver.ResolvedType }{}` holding a nil interface, both
-	// reach String from this line and panic; both were measured through
-	// age.New().Generate. origin/master's unservedColumn ends in this same
-	// expression, so that is the behaviour before this comment as well as
-	// after. Recorded here because it happens, not to argue that it cannot;
-	// guarding it changes behaviour and wants its own test and its own
-	// bead, which this bead is not. That bead is gqlc-aefe (GH #961).
+	// Asking is a call into code this package does not own, made on a
+	// value chosen because no arm matched it, and some of the values that
+	// reach here have no answer to give. Four are witnessed at this line
+	// through age.New().Generate, each panicking before this render went
+	// through codegen.ResolvedTypeName: a resolver.Column whose Type is
+	// nil; a `struct{ resolver.ResolvedType }{}`, which holds a nil
+	// interface; a struct whose embedded pointer to a variant is nil; and
+	// a typed-nil pointer to a variant, since Go emits a nil check before
+	// a value method reached through a pointer.
+	//
+	// Two of those four are neither a nil interface nor a nil pointer to
+	// look at: the struct embedding the interface and the struct holding a
+	// nil embedded pointer both arrive as a non-nil struct value whose
+	// reflect.Kind is Struct. So neither a `t == nil` test nor a reflect
+	// nil-pointer check covers the four, which is why the render asks and
+	// recovers instead of inspecting.
+	//
+	// Four is what is witnessed and not what the set holds. Whether a
+	// value faults is a fact about the String() it ends up dispatching,
+	// and the paragraphs above are why no enumeration written here closes
+	// the shapes that arrive. codegen.ResolvedTypeName enumerates none: it
+	// asks under a recover and answers with the dynamic type name where
+	// asking failed, so an unwitnessed faulting shape renders by the same
+	// route. It is the same helper internal/codegen's own unmatched-type
+	// refusals render through, and it is exported so that the two name a
+	// type alike rather than each inventing a spelling (gqlc-aefe, GH
+	// #961). Prepare's guard is not what covers this line: this gate runs
+	// ahead of Prepare (generate.go), so this is the first render of an
+	// arriving type in a run, not the second.
+	//
+	// What that bounds is the panic, not every way an implementation can
+	// decline to return: a String() that blocks, or that calls
+	// runtime.Goexit, still takes the caller with it.
 	//
 	// TestUnservedColumnFallThroughIsNotANinthVariant is the witness, for
 	// the pointer and the embedded form of every variant the arms name and
-	// for shadowing embedders.
-	return "projects " + t.String()
+	// for shadowing embedders. The four faulting shapes are
+	// unserved_nil_type_test.go's, which reddens by panic if this render
+	// goes back to a direct t.String().
+	return "projects " + codegen.ResolvedTypeName(t)
 }
 
 // unservedParam names why a resolved parameter type cannot be encoded
@@ -526,10 +554,22 @@ func unservedColumn(t resolver.ResolvedType) string {
 // reads, so a width with a Go carrier has an encoding: a slice crosses
 // as an agtype list and a value of no declared shape as whatever shape
 // it holds.
+//
+// "reach here as schema properties only" is what shared admission is for
+// and not what this arm may assume: rejectUnservedQueries runs ahead of
+// Prepare (generate.go), so a batch handed straight to a backend reaches
+// this arm with whatever a caller composed. Its render therefore takes
+// the same guard as unservedColumn's fall-through, for the same reason
+// and against the same four witnessed shapes — see that comment. All
+// four were measured faulting at THIS arm too, through
+// age.New().Generate (unserved_nil_type_test.go's parameter rows), so
+// the twin was live rather than shadowed by the column loop: the column
+// loop returns on the first refusal, and a query whose columns are all
+// served reaches this one.
 func unservedParam(t resolver.ResolvedType) string {
 	prop, ok := t.(resolver.ResolvedProperty)
 	if !ok {
-		return "is " + t.String()
+		return "is " + codegen.ResolvedTypeName(t)
 	}
 	if !carriedWidth(prop.Type) {
 		return "is " + prop.String()

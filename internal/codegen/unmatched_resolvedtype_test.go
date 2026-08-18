@@ -96,7 +96,7 @@ var (
 // two-carriers-one-number shape that has already cost this branch a
 // round; the guard against the set moving belongs where the set is
 // declared, which is where it is. A ninth would also need no edit here to
-// be handled: resolvedTypeName enumerates no variant, so the pointer form
+// be handled: ResolvedTypeName enumerates no variant, so the pointer form
 // of a ninth renders by the same route these eight do.
 //
 // That derivation is not reachable with `go test -overlay`, which is a
@@ -176,7 +176,7 @@ func generateUnmatched(t *testing.T, q codegen.NamedQuery) error {
 // TestUnreachedBranchesAreUnreached measures as uncovered. Reverting
 // either of those two to a direct String() call leaves every package
 // here green: that survival is the §3 shadow holding, not a gap in this
-// file, and this file measures neither site. resolvedTypeName's own doc
+// file, and this file measures neither site. ResolvedTypeName's own doc
 // comment carries the same split beside the grep that re-derives it.
 //
 // That call is into code this package does not own, on a value chosen
@@ -202,7 +202,7 @@ func generateUnmatched(t *testing.T, q codegen.NamedQuery) error {
 // what faults, though — embeddedNode held by value answers, which is the
 // value-embedder case in
 // TestUnmatchedResolvedTypeKeepsTheWireTagWhereThereIsOne below. The fix
-// does not depend on the set being closed, since resolvedTypeName
+// does not depend on the set being closed, since ResolvedTypeName
 // enumerates no shape.
 //
 // It does not claim the set is now safe under every implementation. A
@@ -343,7 +343,7 @@ func TestUnmatchedResolvedTypeKeepsTheWireTagWhereThereIsOne(t *testing.T) {
 	// The case names are held rather than merely ranged over, because
 	// value-embedder is cited by name as the witness for "composing is not
 	// itself what faults" in prose that no compiler checks: in
-	// resolvedTypeName's doc comment, in the doc on
+	// ResolvedTypeName's doc comment, in the doc on
 	// TestUnmatchedResolvedTypeRefusesRatherThanFaulting above, and in §2's
 	// column-unknown-variant row in docs/specs/codegen-sentinel-taxonomy.md.
 	// Review measured that deleting the case leaves every package green and
