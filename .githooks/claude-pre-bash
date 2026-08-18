@@ -16,13 +16,18 @@
 #     delimiter forms part company here, because the shell treats them
 #     differently: a QUOTED
 #     delimiter (<<'EOF', <<"EOF") expands nothing, so that body is dropped
-#     whole; an UNQUOTED one (<<EOF) expands $(...) and `...` in its body and
-#     those really run, so the unquoted body's substitutions are extracted and
-#     analyzed while its prose still is not. Measured with a touch-marker
-#     fixture: the substitution under <<EOF created the file, the identical one
-#     under <<'EOF' did not (bd gqlc-wa8c, which was the missing half — the
-#     unquoted body used to be stripped before substitutions were extracted,
-#     so a $(git commit) there was silently allowed)
+#     whole; an UNQUOTED one (<<EOF) expands $(...) and `...` in its body, so
+#     the unquoted body's substitutions are extracted and analyzed while its
+#     prose still is not. What gets extracted is not the same set as what the
+#     shell would run: the extractors key on a literal $( or ` without looking
+#     at what precedes it, and the shell does look. Both directions of that
+#     gap are disclosed below — the backslash escape under the biases, the
+#     spellings the regexes cannot reach at all under the limitations.
+#     Measured with a touch-marker fixture: the substitution under <<EOF
+#     created the file, the identical one under <<'EOF' did not (bd gqlc-wa8c,
+#     which was the missing half — the unquoted body used to be stripped
+#     before substitutions were extracted, so a $(git commit) there was
+#     silently allowed)
 #   - $(...) and `...` substitution bodies are analyzed recursively (they
 #     execute for real, even inside double quotes)
 #   - the rest is shlex-tokenized, so a multi-word quoted run collapses to one
@@ -34,8 +39,8 @@
 #     whose branch is read via git rev-parse / symbolic-ref (the latter
 #     covers unborn HEADs)
 #
-# Accepted limitations, all fail-open (server-side branch protection and
-# repo pre-commit hooks are the backstop):
+# Accepted limitations, fail-open unless the entry says otherwise (server-side
+# branch protection and repo pre-commit hooks are the backstop):
 #   - paths that need expansion (cd "$WT", git -C ~/x) are unresolvable
 #     statically -> allow
 #   - cd/pushd with flags (cd -P x) or no argument lose tracking -> allow
@@ -44,11 +49,15 @@
 #   - inside an unquoted heredoc body this hook has actually stripped, the
 #     substitution extractors are the only thing looking, because the prose
 #     around them has to stay data. A command neither extractor matches is
-#     therefore not seen there at all: SUBST_RE
-#     does not nest, so $(git commit -m "(x)") is missed, and bash 5.3's
-#     ${ cmd; } funsub is matched by neither. Both of those DENY when written
-#     bare — outside a heredoc the tokenizer is the backstop — and both are
-#     silent inside one (measured, bash 5.3.15) -> allow
+#     therefore not seen there at all. The instances measured on bash 5.3.15,
+#     which is what has been looked for rather than a proof that nothing else
+#     qualifies: SUBST_RE does not nest, so $(git commit -m "(x)") is missed;
+#     bash 5.3's ${ cmd; } funsub is matched by neither; and a backslash
+#     newline splitting the $( token itself leaves SUBST_RE nothing to match
+#     while the shell rejoins the line and runs it — that one wrote a real
+#     commit onto master in the fixture. Each DENYs when written bare, because
+#     outside a heredoc the tokenizer is the backstop, and each is silent
+#     inside one -> allow
 #   - HEREDOC_RE reads a \w+ delimiter, so <<EOF.txt and <<EOF-1 arm on the
 #     prefix `EOF`. The real terminator line does not equal that, so the body
 #     goes on swallowing until some line is exactly `EOF` — and when none is,
@@ -62,6 +71,15 @@
 # Deliberate conservative biases:
 #   - substitution extraction is textual, so $(...) inside single quotes
 #     (which would not execute) is still analyzed
+#   - the same textual extraction does not count the backslashes in front of a
+#     $( or `, and the shell does. Inside an unquoted heredoc body the count is
+#     what decides: across 0 to 4 measured, an odd count suppressed the
+#     expansion and an even count did not, so \$(git commit) is inert while
+#     \\$(git commit) runs. Neither parity is visible to SUBST_RE, so both are
+#     extracted and both deny — including the escaped spelling, which is the
+#     one you would write to DOCUMENT this guard in a README heredoc. Measured
+#     with a positive-content witness rather than an absent marker: on the odd
+#     rows the heredoc's target file still holds the literal $(...) text
 #   - the token scan is position-agnostic, so UNQUOTED prose like
 #     `echo git commit` still denies (quote it and it will not)
 #   - the same \w+ bound cuts the other way for delimiter forms the regex
@@ -183,8 +201,12 @@ def strip_heredocs(text):
     # Both returns are needed because the two delimiter forms differ in the
     # shell, not just in this hook: a quoted delimiter (<<'EOF', <<"EOF")
     # expands nothing, so its body is inert and the second return drops it; an
-    # unquoted one (<<EOF) expands $(...) and `...`, so those substitutions
-    # really run and the caller has to analyze them. Group 2 of HEREDOC_RE is
+    # unquoted one (<<EOF) expands $(...) and `...`, so the caller has to
+    # analyze them. The second return is the body text as written: whether any
+    # particular substitution in it would survive to run is not decided here,
+    # and not by the caller's regexes either, which do not read the backslash
+    # escapes the shell honours (see the header's biases).
+    # Group 2 of HEREDOC_RE is
     # the quote character, empty when the matched delimiter carries none. The
     # forms the regex matches nothing for at all (<<\EOF and friends) arm no
     # heredoc here and are disclosed in the header instead.
