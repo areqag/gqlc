@@ -10,8 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/age"
@@ -70,6 +68,59 @@ func (d *recordingDB) Exec(ctx context.Context, sql string, args ...any) (int, e
 
 `
 
+// corpusTests names the tests the assembled corpus module has to run and
+// pass.
+//
+// It is written down here rather than censused out of
+// testdata/corpus_test.go.txt, because that fixture is the artifact under
+// check and an expectation read off it moves whenever it moves. Measured
+// against a census of the fixture's top-level `func Test…` declarations,
+// commenting a test out and deleting it each took the row out of the
+// census and out of the child run at the same time, and the comparison
+// stayed green. Held against this list both fail, because this list does
+// not move when the fixture does.
+//
+// It also covers the emptiness backstop it replaced: `go test` exits 0
+// over a _test.go declaring no tests, so an emptied fixture is a child
+// run that reports success, and a non-empty list cannot match the empty
+// pass set that run produces.
+//
+// The list is a declaration, not a gate. Removing a test from the fixture
+// and removing its name from here is one edit by one hand in one commit,
+// and nothing here prevents that. What it costs the remover is having to
+// write the removal down in a file the child module is never handed.
+var corpusTests = []string{
+	"TestAgtypeString",
+	"TestAgtypeBool",
+	"TestAgtypeInt64",
+	"TestAgtypeFloat64",
+	"TestDecodeVertex",
+	"TestDecodeVertexReadsNullableProperties",
+	"TestDecodeVertexStepsOverStructuredProperties",
+	"TestDecodeZeroPropertyVertex",
+	"TestAgtypeListOfString",
+	"TestAgtypeListRefusesAnElementOfTheWrongScalar",
+	"TestAgtypeNestedList",
+	"TestAgtypeListOfNarrowElementWidth",
+	"TestDecodeVertexWithListProperties",
+	"TestAgtypeValue",
+	"TestDecodeVertexWithAnyProperty",
+	"TestDecodeEdge",
+	"TestEntityDecodersRefuseTheOtherAnnotation",
+	"TestDecodeVertexRefusesMisshapenText",
+	"TestAgtypeArgs",
+	"TestCypherStmtComposesOneStatement",
+	"TestCypherStmtRefusesAnOverlongName",
+	"TestAgtypeInstantCountsMicrosecondsFromTheEpoch",
+	"TestAgtypeMicrosEncodesTheInstantAndNotTheWallClock",
+	"TestAgtypeNullableMicrosCarriesAbsence",
+	"TestAgtypeZoneReadsAnOffsetInSeconds",
+	"TestAgtypeZoneRefusesAnOffsetOutsideADay",
+	"TestDecodeVertexReadsTheOffsetSidecarBesideItsInstant",
+	"TestEmittedMethodBindsAnInstantAsMicroseconds",
+	"TestBoundGraphCountsBytes",
+}
+
 // TestEmittedHelpersDecodeTheAgtypeCorpus runs the emitted agtype
 // helpers, the emitted entity decoders, the emitted graph-name check,
 // the emitted statement composer and the emitted parameter encoding
@@ -111,8 +162,10 @@ func (s *EmissionSuite) TestEmittedHelpersDecodeTheAgtypeCorpus() {
 
 	passed, log, err := s.runCorpus(dir)
 	s.Require().NoError(err, "the emitted helpers do not satisfy the captured corpus:\n%s", log)
-	s.Require().ElementsMatch(s.declaredTests(string(driver)), passed,
-		"the corpus module did not run every test its template declares:\n%s", log)
+	s.Require().ElementsMatch(corpusTests, passed,
+		"the tests the corpus module passed are not the set corpusTests names — a test left "+
+			"testdata/corpus_test.go.txt without leaving corpusTests, or joined it without being "+
+			"named there:\n%s", log)
 }
 
 // runCorpus runs the assembled corpus module's own tests, reporting the
@@ -145,41 +198,6 @@ func (s *EmissionSuite) runCorpus(dir string) (passed []string, log string, err 
 		}
 	}
 	return passed, text.String(), err
-}
-
-// declaredTests names the top-level tests a corpus template declares.
-// Requiring that every one of them passed is what separates a corpus the
-// emission satisfies from a corpus that is not there: `go test` exits 0
-// on a _test.go file declaring no tests, so a harness that reads only the
-// child's exit status reports success on an emptied template.
-func (s *EmissionSuite) declaredTests(src string) []string {
-	file, err := parser.ParseFile(token.NewFileSet(), "corpus_test.go", src, parser.SkipObjectResolution)
-	s.Require().NoError(err)
-
-	var names []string
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if ok && fn.Recv == nil && isTestName(fn.Name.Name) {
-			names = append(names, fn.Name.Name)
-		}
-	}
-	s.Require().NotEmpty(names, "the corpus template declares no tests, so a child run of it proves nothing")
-	return names
-}
-
-// isTestName reports whether `go test` runs a function of this name,
-// following testing's own rule: Test, then anything that does not begin
-// with a lower-case letter. TestMain is the entry point, not a test.
-func isTestName(name string) bool {
-	rest, ok := strings.CutPrefix(name, "Test")
-	if !ok || name == "TestMain" {
-		return false
-	}
-	if rest == "" {
-		return true
-	}
-	first, _ := utf8.DecodeRuneInString(rest)
-	return !unicode.IsLower(first)
 }
 
 // declarations prints the named top-level declarations of an emitted
