@@ -277,7 +277,7 @@ func TestPRBodyGateFailsTheJobItRunsIn(t *testing.T) {
 // exercises only the side that passes.
 func requireNoJobIf(t require.TestingT, job ciJob) {
 	require.Falsef(t, present(job.If),
-		"job %q carries a job-level `if:` (%s). A job that does not run still emits a "+
+		"job %q carries a job-level `if:`, written as %s. A job that does not run still emits a "+
 			"check run, with conclusion `skipped`, which branch protection reads as a "+
 			"pass — so an `if:` here retires the gate without deleting a line of it. "+
 			"Refused on being written, for the same reason continue-on-error above is: "+
