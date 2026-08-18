@@ -37,11 +37,28 @@
 #   - cd/pushd with flags (cd -P x) or no argument lose tracking -> allow
 #   - nested interpreters (bash -c '...') are not recursed into
 #   - --git-dir / --work-tree redirection is not resolved -> allow
-# Two deliberate conservative biases:
+#   - inside an UNQUOTED heredoc body the substitution extractors are the only
+#     thing looking, because the prose around them has to stay data. A command
+#     neither extractor matches is therefore not seen there at all: SUBST_RE
+#     does not nest, so $(git commit -m "(x)") is missed, and bash 5.3's
+#     ${ cmd; } funsub is matched by neither. Both of those DENY when written
+#     bare — outside a heredoc the tokenizer is the backstop — and both are
+#     silent inside one (measured, bash 5.3.15) -> allow
+#   - HEREDOC_RE reads a \w+ delimiter, so <<EOF.txt and <<EOF-1 arm on the
+#     prefix `EOF`. No following line ever equals that, so the body swallows
+#     the rest of the command and a real `git commit` written after the
+#     heredoc is not seen (measured) -> allow. Disclosed rather than widened:
+#     re-deriving the shell's delimiter-word grammar is the parser this file
+#     declines to become, and each widening moves rows nobody has measured
+# Deliberate conservative biases:
 #   - substitution extraction is textual, so $(...) inside single quotes
 #     (which would not execute) is still analyzed
 #   - the token scan is position-agnostic, so UNQUOTED prose like
 #     `echo git commit` still denies (quote it and it will not)
+#   - the same \w+ bound cuts the other way for delimiter forms the regex
+#     cannot match at all — <<\EOF, <<"EO F", <<'EOF.txt' — whose bodies are
+#     never stripped and so reach the tokenizer: prose there denies, though
+#     none of the three expands anything (measured)
 # If shlex cannot tokenize at all, falls back to the old whole-text regex
 # checked at the hook's own cwd.
 #
