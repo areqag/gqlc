@@ -389,7 +389,13 @@ check-golangci-build-tags: sweep-discovery-probes
 # reach this recipe. A recipe behind a header shape that file's reader reads
 # differently from just is outside what it reads too — a parameter default
 # spelling `:=` was one until that reader learned to find the colon outside a
-# default, and the shapes still left are listed there — and that file's
+# default, and a header continued with a trailing backslash was another until it
+# learned to join the lines onto one. The shapes it is known to still read
+# differently are listed there. That list is what has been looked for, not a
+# boundary anyone has proved, so the check that does not rest on it is
+# TestParseJustfileAgreesWithJustOnThisJustfile: it reads this file with just
+# and with that reader and reports where the two disagree. Something is needed
+# there, because that file's
 # dangling-dependency control reaches a missed header only through the recipes
 # that depend on that header. Measured
 # before justfile_test.go existed: dropping the edge from

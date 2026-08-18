@@ -32,8 +32,13 @@ import (
 // spells this program's package path has to reach the sweep first. Two limits
 // on that reading are stated where they arise: an invocation that never spells
 // the path, at modscopePkg below (bd gqlc-wkio), and the header shapes this
-// file's reader still reads differently from just, at
-// TestParseJustfileReadsWhatJustReads below.
+// file's reader is known to read differently from just, at
+// TestParseJustfileReadsWhatJustReads below. That second list is what has been
+// looked for and not a boundary anyone has proved — it gained a shape under
+// review while this file was being written — so
+// TestParseJustfileAgreesWithJustOnThisJustfile puts the reader's reading of
+// the real justfile beside just's own and reports where they part, which is a
+// question the list does not have to have anticipated.
 
 const (
 	// repoRoot reaches the justfile from this package's directory.
