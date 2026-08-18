@@ -1416,7 +1416,11 @@ func (s *ResolverSuite) TestAnUnnarrowedFarEndKeepsItsKeys() {
 			// Not a VarEndpoint at all, so it never reaches the narrowing map.
 			// The two arms are separate returns and a fix applied to one leaves
 			// the other; a fully anonymous `()` cannot stand in, because
-			// endpoint inference refuses it before Phase B is reached.
+			// endpointLabels cannot read it either — `alone` is then refused by
+			// Phase B's OWN case 0 ("no edge in the pattern reaches a compatible
+			// schema node type"), and `pair` by CloseEdges' deferred close AFTER
+			// Phase B ("cannot infer type of target endpoint"). Neither shape
+			// reaches the arm under test.
 			name:  "an inline far end that is not a variable",
 			alone: "MATCH (p)-[m:MEMBER_OF]->(:Guild)\nRETURN p.authorOnly",
 			pair:  wroteHalf + "MATCH (p)-[m:MEMBER_OF]->(:Guild)\nRETURN p.authorOnly",

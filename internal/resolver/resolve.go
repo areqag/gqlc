@@ -1103,10 +1103,16 @@ func inferUnlabelled(pending []query.NodeBinding, edges []query.EdgeBinding, s s
 			// not about every possible one — moving the narrowing into the first
 			// call reddens no test here and moves no cell of the corpus sweep,
 			// which is what one would expect given that a narrowed candidate set
-			// is a subset of the unnarrowed one and so cannot commit a DIFFERENT
-			// type, only an earlier one. The placement buys the reader that
-			// argument rather than making him derive it; it is not load-bearing
-			// on any input measured here.
+			// is a subset of the unnarrowed one. WITHIN a round that leaves
+			// committing EARLIER as the only divergence available: a wide set of
+			// one narrows to that same one type, an empty one stays empty through
+			// the fallback, and only a wide set of two or more lets the narrowed
+			// lane commit where this one defers. It does not on its own order a
+			// round's narrowed commitment against the type a later round reaches
+			// from a richer table — `covered` is what carries that, with
+			// gqlc-3uof's hole in it. The placement buys the reader the argument
+			// rather than making him derive it; it is not load-bearing on any
+			// input measured here.
 			//
 			// Recomputed per round rather than hoisted: a round that commits
 			// changes the binding tables endpointNarrowing reads, so a hoisted
