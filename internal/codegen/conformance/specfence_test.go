@@ -587,8 +587,20 @@ func TestSpecSweepRoutesBareSitesByExhibit(t *testing.T) {
 //
 // A name declared twice is refused: either copy could then be deleted
 // under cover of the other.
+//
+// A census that declares nothing is refused before either direction is
+// consulted. Both directions are quantified over a set, so neither one
+// has an entry to report when the written census and the sweep are
+// empty together — emptying the census literals and blanking the swept
+// documents in a single edit reconciles clean without this arm.
 func requireCensus(t fenceT, written []string, observed map[string]bool, census, why string) {
 	t.Helper()
+
+	if len(written) == 0 {
+		require.Fail(t, census+" declares no entry",
+			"a census that declares nothing reconciles clean against a sweep that observed nothing, so the\n"+
+				"comparison below is satisfied by a sweep that read none of the text it grades:\n\n"+why)
+	}
 
 	lost, undeclared, duplicated := reconcile(written, observed)
 
@@ -697,6 +709,13 @@ func TestSpecFailuresAreWired(t *testing.T) {
 		},
 		wantFail: true,
 		wantMsg:  []string{"the sweep produced an entry census does not declare", "b"},
+	}, {
+		name: "requireCensus fails on a census that declares nothing",
+		call: func(ft fenceT) {
+			requireCensus(ft, nil, map[string]bool{}, "census", "why")
+		},
+		wantFail: true,
+		wantMsg:  []string{"census declares no entry"},
 	}, {
 		name: "requireCensus fails on a name declared twice",
 		call: func(ft fenceT) {
