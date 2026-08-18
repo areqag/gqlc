@@ -386,10 +386,12 @@ check-golangci-build-tags: sweep-discovery-probes
 # path and does not reach this one, directly or through another recipe. A
 # recipe that runs modscope without spelling that path is outside what it reads
 # (bd gqlc-wkio): a fifth caller introduced that way would not be required to
-# reach this recipe. A recipe behind a header that file's reader does not
-# recognise is outside what it reads too (bd gqlc-6n9y) — a parameter default
-# spelling `:=` is one — and that file's dangling-dependency control reaches a
-# missed header only through the recipes that depend on that header. Measured
+# reach this recipe. A recipe behind a header shape that file's reader reads
+# differently from just is outside what it reads too — a parameter default
+# spelling `:=` was one until that reader learned to find the colon outside a
+# default, and the shapes still left are listed there — and that file's
+# dangling-dependency control reaches a missed header only through the recipes
+# that depend on that header. Measured
 # before justfile_test.go existed: dropping the edge from
 # check-golangci-build-tags left the tree green and silent, and the gate that
 # lost the edge then failed on a leaked probe with a message about a broken
