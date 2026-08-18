@@ -59,8 +59,7 @@ prose_only's docstring enumerates the shapes and each is a row. It states
 the size of that set there too, in more than one sentence and again inside
 an aggregate over its three paragraphs, and nothing in this repository
 checks the two docstrings against each other -- so changing the set means
-finding every sentence here and there whose number depends on it, rather
-than editing the one this paragraph was read from. The
+finding every sentence here and there whose number depends on it. The
 declaration is then checked
 rather than taken: the number has to be the one the bead mirrors, the
 export has to not already show the bead closed, and the body has to carry
