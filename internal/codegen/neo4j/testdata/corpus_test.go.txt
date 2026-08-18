@@ -69,6 +69,24 @@ func queriesOver(keys []string, rows ...[]any) *Queries {
 	return new(Queries).WithTx(recordTx{records: records})
 }
 
+// driverRefusal is what neo4j.GetRecordValue says about a record and a key
+// it will not read, obtained by asking it rather than by spelling its
+// wording out here. A column decode reporting this text has carried the
+// driver's own answer to the caller; one reporting anything else has
+// either worded a refusal of its own or gone on to a later stage holding
+// the zero carrier the driver hands back with the error.
+//
+// The nil check is not defensive: it is what stops a caller from asserting
+// that a message contains the empty string, which every message does.
+func driverRefusal[T neo4j.RecordValue](t *testing.T, keys []string, values []any, key string) string {
+	t.Helper()
+	_, _, err := neo4j.GetRecordValue[T](&neo4j.Record{Keys: keys, Values: values}, key)
+	if err == nil {
+		t.Fatalf("neo4j.GetRecordValue[%T](%q) = no error, so this record leaves the column's gate nothing to carry", *new(T), key)
+	}
+	return err.Error()
+}
+
 // A list of no declared element shape is the one list whose elements the
 // decoder must not narrow. Its declared element type is `any`, a type
 // assertion to `any` is false for a nil interface value, and null is
@@ -622,6 +640,50 @@ func TestListyColumnsNarrowEachElement(t *testing.T) {
 	}
 }
 
+// A list column reads its value through neo4j.GetRecordValue[[]any], and
+// the same gate the entity columns carry is what reports the driver's
+// refusal here. The mis-typed element above is a different gate — the
+// element loop's — and it can only be reached by a value this one let
+// through, so nothing it pins carries back to this one.
+//
+// What a dropped gate costs is larger on this arm than on the entity arm:
+// the zero []any it passes on is an empty list, the element loop walks it
+// without complaint, and the caller is handed an empty list for a value
+// the driver refused. So both cases below assert on the message and both
+// report the rows on failure, because the failure to expect is a row
+// rather than a mis-worded error.
+func TestListColumnRefusalsCarryTheDriversError(t *testing.T) {
+	// A column holding something that is not a list at all. The two
+	// columns after it are well-formed, so the refusal is this column's.
+	keys := []string{"tags", "blobs", "depths"}
+	notAList := []any{"not a list", []any{}, []any{}}
+	got, err := queriesOver(keys, notAList).ListyColumns(t.Context())
+	if err == nil {
+		t.Fatalf("ListyColumns(tags: string) = %#v, want a refusal", got)
+	}
+	for _, want := range []string{`"tags"`, driverRefusal[[]any](t, keys, notAList, "tags")} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("ListyColumns(tags: string) = %q, want it to mention %s", err, want)
+		}
+	}
+
+	// A record that does not hold the key the query projected, which the
+	// driver reports through the same error rather than as a held null —
+	// the null it does report is the one ListyColumns(depths: null) above
+	// reads through isNil.
+	absent := []string{"nope", "blobs", "depths"}
+	held := []any{[]any{}, []any{}, []any{}}
+	got, err = queriesOver(absent, held).ListyColumns(t.Context())
+	if err == nil {
+		t.Fatalf("ListyColumns(no tags) = %#v, want a refusal", got)
+	}
+	for _, want := range []string{`"tags"`, driverRefusal[[]any](t, absent, held, "tags")} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("ListyColumns(no tags) = %q, want it to mention %s", err, want)
+		}
+	}
+}
+
 // The element loop nests once per declared list depth, and every level
 // of it accumulates into a local of its own. Under a name shared between
 // the levels the inner declaration shadows the one the level above
@@ -859,6 +921,67 @@ func TestEntityColumnsDecodeWholeEntities(t *testing.T) {
 			t.Errorf("EntityColumns(s: no rank) = %q, want it to mention %s", err, want)
 		}
 	}
+}
+
+// An entity column reads its value through neo4j.GetRecordValue, which
+// refuses a key the record does not hold and a value that is not the
+// carrier the column committed to. This is that refusal reaching the
+// caller: the column's error gate carries the driver's answer, and it
+// carries it before the entity's decode helper is handed a value the
+// driver has already rejected.
+//
+// TestEntityColumnsDecodeWholeEntities above reads two of the same swapped
+// columns, but asks only whether some error came back — and both a gate
+// that reports the driver's refusal and a gate that drops it return one.
+// Dropping it passes on the zero carrier, whose empty Props map the decode
+// helper then refuses on the first property it looks for, so the caller is
+// told a property is missing from a graph value that never arrived. That
+// is a refusal for a neighbouring reason, which is why every assertion
+// here is on the message and one of them is on what the message must not
+// say.
+func TestEntityColumnRefusalsCarryTheDriversError(t *testing.T) {
+	keys := []string{"s", "e", "l"}
+	// unreached names the decode helper the column would reach if its gate
+	// let the rejected value through; naming the helper's prefix rather
+	// than one property keeps the check on which stage answered.
+	check := func(what, column, want, unreached string, err error) {
+		t.Helper()
+		if err == nil {
+			t.Fatalf("%s = no error, want a refusal", what)
+		}
+		for _, w := range []string{column, want} {
+			if !strings.Contains(err.Error(), w) {
+				t.Errorf("%s = %q, want it to mention %s", what, err, w)
+			}
+		}
+		if strings.Contains(err.Error(), unreached) {
+			t.Errorf("%s = %q, want the column's own gate to refuse it before %s runs", what, err, unreached)
+		}
+	}
+
+	// A relationship under a node column.
+	sIsRel := []any{relationship(edgyProps()), node(scalarProps()), node(listyProps())}
+	_, err := queriesOver(keys, sIsRel).EntityColumns(t.Context())
+	check("EntityColumns(s: relationship)", `"s"`,
+		driverRefusal[dbtype.Node](t, keys, sIsRel, "s"), "decode Scalar.", err)
+
+	// A node under an edge column: the same mismatch from the other side,
+	// because the two carriers are separate instantiations of the gate and
+	// one of them being pinned says nothing about the other. The node
+	// column ahead of it decodes, so what refuses here is reached.
+	eIsNode := []any{node(scalarProps()), node(scalarProps()), node(listyProps())}
+	_, err = queriesOver(keys, eIsNode).EntityColumns(t.Context())
+	check("EntityColumns(e: node)", `"e"`,
+		driverRefusal[dbtype.Relationship](t, keys, eIsNode, "e"), "decode Edgy.", err)
+
+	// A record that does not hold the key the query projected. The driver
+	// tells absence and wrong type apart, but the column has one gate for
+	// both, so a gate that drops the error drops this too.
+	absent := []string{"nope", "e", "l"}
+	held := []any{node(scalarProps()), relationship(edgyProps()), node(listyProps())}
+	_, err = queriesOver(absent, held).EntityColumns(t.Context())
+	check("EntityColumns(no s)", `"s"`,
+		driverRefusal[dbtype.Node](t, absent, held, "s"), "decode Scalar.", err)
 }
 
 // An edge column whose pattern admits more than one edge type is decoded
