@@ -3,14 +3,18 @@
 // names each suite. `test` is a required status check on master.
 //
 // What is held here is that each link is named, and that the yaml link carries
-// neither an `if:` nor a `continue-on-error:` — neither on the `test` job nor
-// on the step that runs `just test`. Both keys leave every line of the workflow
-// in place, and neither reads the same on a job as on a step, because a job
-// emits a check run of its own and a step does not: an `if:` on the job leaves
-// a check run whose conclusion is `skipped`, which branch protection reads as a
-// pass, while an `if:` on the step leaves the job's check run concluding
-// success with the suites never run. The messages below carry the rest, one per
-// key per level.
+// no `if:` condition and no `continue-on-error:` — neither on the `test` job
+// nor on the step that runs `just test`. An `if:` written so that it decodes to
+// the empty string carries no condition and passes here; the empty-decoding
+// spellings tried against actionlint, a required context in its own right, were
+// each refused by it.
+//
+// Both keys leave every line of the workflow in place, and neither reads the
+// same on a job as on a step, because a job emits a check run of its own and a
+// step does not: an `if:` on the job leaves a check run whose conclusion is
+// `skipped`, which branch protection reads as a pass, while an `if:` on the
+// step leaves the job's check run concluding success with the suites never run.
+// The messages below carry the rest, one per key per level.
 //
 // Those are the keys refused here, not the set of keys that can retire a check
 // without deleting a line. A `shell:` on a step, and a `defaults.run.shell` on
