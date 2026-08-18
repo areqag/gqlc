@@ -159,8 +159,9 @@ scalar kinds is a decode helper, which is a different fix — below.
   `PackedNil` with a nil `any`, and `PackedTrue`/`PackedFalse` with `bool` —
   identically on `neo4j-go-driver` v5.28.4 and v6.2.0, the two versions
   `test/data/codegen/go.mod` pins. A list member arrives as `[]any` and a
-  nested-map member as `map[string]any` on all three, whose own members follow
-  the rows above. So no runtime-type divergence between the backends survives
+  nested-map member as `map[string]any` on all three, with the integer and the
+  float inside them landing as the rows above say. So no runtime-type
+  divergence between the backends survives
   for the member kinds in those two objects: integer, float, string, boolean,
   null, list and nested map.
 
