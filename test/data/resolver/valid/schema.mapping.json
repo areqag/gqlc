@@ -180,5 +180,6 @@
     "plural_endpoint_symmetric_endpoints_edge_union.cypher": "satisfy_plural_edges_symmetric.gql",
     "plural_endpoint_mixed_symmetry_undirected_edge_union.cypher": "satisfy_plural_edges_mixed_symmetry.gql",
     "plural_endpoint_mixed_symmetry_directed_closes_singular.cypher": "satisfy_plural_edges_mixed_symmetry.gql",
-    "plural_endpoint_anonymous_edge_closes_singular.cypher": "satisfy_plural_edges.gql"
+    "plural_endpoint_anonymous_edge_closes_singular.cypher": "satisfy_plural_edges.gql",
+    "unlabelled_narrowed_by_pinned_far_end.cypher": "satisfy_plural_edges_inline_subtype.gql"
 }

@@ -3,7 +3,6 @@ package resolver
 import (
 	"fmt"
 
-	"github.com/areqag/gqlc/internal/graph"
 	"github.com/areqag/gqlc/internal/procsig"
 	"github.com/areqag/gqlc/internal/query"
 	"github.com/areqag/gqlc/internal/schema"
@@ -396,12 +395,10 @@ func (s *scope) CloseEdges(sch schema.Schema) error {
 // edge is always safe: it lands on the pre-narrowing answer, which is what R3
 // gave before this pass existed.
 //
-// The rule is: per touching edge, UNION the contributions of the candidate
-// set's two readings (endpointContribution); across touching edges, INTERSECT.
-// The two operations are not interchangeable and the order is not free — see
-// endpointContribution for why an undirected candidate set puts one end of the
-// pattern on both sides, and why taking a single reading loses a type the
-// schema permits.
+// The rule itself is endpointNarrowing, which Phase B's candidateTypes reads
+// too — see there for why the two share it. This method is its APPLIER: it
+// takes the key set the rule leaves each plural binding and rewrites the
+// binding's candidate list to match.
 //
 // An empty intersection leaves the binding alone. It means the touching edges
 // pin it to disjoint types, so no node satisfies all of them and the pattern
@@ -421,94 +418,21 @@ func (s *scope) CloseEdges(sch schema.Schema) error {
 // the deferred-close loop in CloseEdges rather than above it, which
 // TestDeferredEdgesCloseBeforeTheNarrowing pins.
 func (s *scope) NarrowPluralEndpoints(sch schema.Schema) {
-	// Changes no answer — with no plural binding the per-endpoint guard below
-	// skips every side, so acc comes out empty — and no test can pin it. It
+	// Changes no answer — endpointNarrowing gives an entry only to a plural
+	// binding, so with none it returns an empty map — and no test can pin it. It
 	// stays because the work it skips is not free: writtenBindings walks the
 	// effects and every surviving edge re-runs edgeCandidates over the schema,
 	// on the common scope where nothing is plural.
 	if len(s.nodeCands) == 0 {
 		return
 	}
-	written := s.writtenBindings()
-	acc := make(map[string]map[graph.LabelSetKey]struct{}, len(s.nodeCands))
+	var edges []query.EdgeBinding
 	for _, b := range s.bindings {
-		e, ok := b.(query.EdgeBinding)
-		if !ok {
-			continue
-		}
-		if !witnessesItsEndpoints(e, written) {
-			continue
-		}
-		srcEnd, srcOK := endpointLabels(e.Source(), s.nodeTable(), sch)
-		tgtEnd, tgtOK := endpointLabels(e.Target(), s.nodeTable(), sch)
-		if !srcOK || !tgtOK {
-			// Unreachable: CloseEdges either resolved both ends or returned
-			// ErrUnknownLabel, and this runs after it.
-			continue
-		}
-		// covering(), because everything below reads `cands` as a complete
-		// statement about this edge's two ends. Either end failing it means
-		// edgeProbes' box could be missing a declaration a matching row really
-		// has, so the contribution would omit a type those rows carry.
-		srcs, srcCovers := srcEnd.covering()
-		tgts, tgtCovers := tgtEnd.covering()
-		if !srcCovers || !tgtCovers {
-			continue
-		}
-		cands := edgeCandidates(e, srcs, tgts, sch)
-		if len(cands) == 0 {
-			// Unreachable: closeEdge refuses the empty set (§4.6 case A).
-			continue
-		}
-		// Per-edge contributions first, so a binding sitting at BOTH ends of
-		// one edge — a self-loop written on a single variable — unions its two
-		// ends rather than intersecting them.
-		//
-		// No input can tell that union from an intersection, and that is a
-		// property of the shape rather than a gap in the corpus: a variable
-		// reaches both ends only by naming both, and endpointLabels then hands
-		// both ends the same key slice, which makes a candidate's two readings
-		// the same predicate and both ends' contributions the same set —
-		// TestEndpointContributionUnionsTheTwoReadings' equal-slices row states
-		// that directly. The union is written because it is the rule, not
-		// because an input needs it.
-		perEdge := make(map[string]map[graph.LabelSetKey]struct{}, 2)
-		for _, side := range [2]struct {
-			ep  query.Endpoint
-			end patternEnd
-		}{{e.Source(), patternLeft}, {e.Target(), patternRight}} {
-			ve, isVar := side.ep.(query.VarEndpoint)
-			if !isVar {
-				continue
-			}
-			v := ve.Variable()
-			// Only plural bindings are narrowed, so a singular endpoint's
-			// contribution is never wanted. Removing this line changes no
-			// answer — a singular v reaches the loop below with an empty
-			// s.nodeCands[v], so narrowed comes out empty and the "nothing
-			// learned" arm absorbs it — which is why no test can pin it. It
-			// stays because the alternative is to state the restriction
-			// nowhere and let a downstream accident enforce it.
-			if _, plural := s.nodeCands[v]; !plural {
-				continue
-			}
-			contrib := endpointContribution(cands, srcs, tgts, side.end)
-			if prev, seen := perEdge[v]; seen {
-				for k := range prev {
-					contrib[k] = struct{}{}
-				}
-			}
-			perEdge[v] = contrib
-		}
-		for v, contrib := range perEdge {
-			if prev, seen := acc[v]; seen {
-				acc[v] = intersect(prev, contrib)
-				continue
-			}
-			acc[v] = contrib
+		if e, ok := b.(query.EdgeBinding); ok {
+			edges = append(edges, e)
 		}
 	}
-	for v, keep := range acc {
+	for v, keep := range endpointNarrowing(edges, s.nodeTable(), sch, s.writtenBindings()) {
 		cands := s.nodeCands[v]
 		narrowed := make([]schema.NodeType, 0, len(cands))
 		for _, nt := range cands {

@@ -1,0 +1,92 @@
+-- Two edges out of ONE bare binding whose narrowed far ends pin it to
+-- different types, so the narrowed intersection is empty while the unnarrowed
+-- one is not. That needs a bare binding with two pinnable edges whose
+-- declarations cross, and nothing else here has it: drop candidateTypes'
+-- fallback and exactly one cell of the corpus sweep moves, this fixture on this
+-- schema.
+--
+-- `(:Author)` is satisfied by Author and Author&Editor; `(:Book)` by Book and
+-- Book&Rare; `(:Venue)` by Venue and Venue&Large. WROTE and SPOKE_AT each pair
+-- the two author types off against the two far types, but in OPPOSITE order:
+--
+--   Author        -[WROTE]->    Book          Author        -[SPOKE_AT]-> Venue&Large
+--   Author&Editor -[WROTE]->    Book&Rare     Author&Editor -[SPOKE_AT]-> Venue
+--
+-- SHELVED_IN is declared from the bare Book only and LICENSED_BY from the bare
+-- Venue only, so a mandatory hop through each pins `(b:Book)` to Book and
+-- `(v:Venue)` to Venue. Read through those, WROTE says the bare `(p)` is Author
+-- and SPOKE_AT says it is Author&Editor. A node has exactly one declared type,
+-- so the conjunction is uninhabited and the pattern matches no row.
+--
+-- That is the input candidateTypes' fallback exists for. The narrowed
+-- accumulator is empty; the unnarrowed one is still {Author, Author&Editor};
+-- returning the empty one would refuse with ErrUnknownLabel ("no edge reaches a
+-- compatible node type"), which is false — both edges reach one. Falling back
+-- keeps master's answer, ErrAmbiguousBinding over both author types.
+--
+-- The properties are not decoration: authorOnly/editorId is the pair that would
+-- let a wrong commitment be projected, and the fixture returns neither, so the
+-- refusal is reached on the binding rather than on a column.
+
+CREATE PROPERTY GRAPH TYPE NarrowedEndsDisagree AS {
+
+    (:Author {
+        id         :: INT NOT NULL,
+        authorOnly :: STRING NOT NULL
+    }),
+
+    (:Author&Editor {
+        id       :: INT NOT NULL,
+        editorId :: INT NOT NULL
+    }),
+
+    (:Book {
+        id       :: INT NOT NULL,
+        bookOnly :: STRING NOT NULL
+    }),
+
+    (:Book&Rare {
+        id     :: INT NOT NULL,
+        rareId :: INT NOT NULL
+    }),
+
+    (:Venue {
+        id        :: INT NOT NULL,
+        venueOnly :: STRING NOT NULL
+    }),
+
+    (:Venue&Large {
+        id      :: INT NOT NULL,
+        largeId :: INT NOT NULL
+    }),
+
+    (:Shelf {
+        id :: INT NOT NULL
+    }),
+
+    (:Council {
+        id :: INT NOT NULL
+    }),
+
+    (:Guild {
+        id :: INT NOT NULL
+    }),
+
+    (:Author)        -[:WROTE { yr :: INT NOT NULL }]->    (:Book),
+    (:Author&Editor) -[:WROTE { yr :: INT NOT NULL }]->    (:Book&Rare),
+
+    (:Author)        -[:SPOKE_AT { yr :: INT NOT NULL }]-> (:Venue&Large),
+    (:Author&Editor) -[:SPOKE_AT { yr :: INT NOT NULL }]-> (:Venue),
+
+    (:Book)          -[:SHELVED_IN { pos :: INT NOT NULL }]-> (:Shelf),
+    (:Venue)         -[:LICENSED_BY { num :: INT NOT NULL }]-> (:Council),
+
+    -- MEMBER_OF runs from BOTH author types to the one Guild type, so `(g:Guild)`
+    -- is singular, is never in the plural-candidate table, and endpointNarrowing
+    -- gives it no entry. Read alongside a far end that DOES have one it is what
+    -- says "no entry" means the end's keys unchanged rather than nothing: see
+    -- TestAnUnnarrowedFarEndKeepsItsKeys.
+    (:Author)        -[:MEMBER_OF { rank :: INT NOT NULL }]-> (:Guild),
+    (:Author&Editor) -[:MEMBER_OF { rank :: INT NOT NULL }]-> (:Guild)
+
+}
