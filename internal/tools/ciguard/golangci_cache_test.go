@@ -102,11 +102,30 @@ func spell(n yaml.Node) string {
 // each left this package green while taking the hook suites out of CI.
 //
 // A `#` inside a quoted string is not a comment to bash, and this truncates
-// there too. For a substring scan that is the direction that refuses: text
-// dropped here is text the scan does not find, and a scan that finds too little
-// fails the controls its callers carry — pinStep leaves the cache-key test
-// without an id, and justInvocations and recipeDeps drop a recipe their callers
-// name individually.
+// there too, so the strip can drop text bash would have run. What that costs
+// depends on how the reader matches, and the three readers here differ.
+//
+// pinStep is a substring scan for `just --evaluate <var>`, and for it the
+// dropping is the direction that refuses. The literal carries no newline and
+// this joins what it keeps with one, so the strip can take the literal away and
+// cannot assemble it; taken away, the cache-key test finds no step id and
+// reddens. Measured: action.yml md5 cbb61e1e to ebdaba17, a quoted `#` put
+// ahead of the read on its own line, and
+// TestGolangciBinaryCacheKeyIsDerivedFromTheJustfilePin goes red.
+//
+// recipeDeps' header regexp is line-anchored, and truncation removes only a
+// line's suffix, so it cannot move or introduce the first `:`: a recipe header
+// is lost, never gained. Where truncation shortens a dependency name instead,
+// it agrees with just, which reads a `#` mid-token on a header line as a
+// comment — `test: check-hooks test-hooks#x` dumps as `test: check-hooks
+// test-hooks`. Where the two part company is a `#` inside a quoted default
+// parameter, which just keeps and this truncates, taking the `:` and the whole
+// header with it.
+//
+// justInvocations is neither of those. It is a regexp over the joined text,
+// where the strip could make a match as well as break one — see the note on
+// that function for the newline that fused two lines into an invocation of a
+// recipe nothing ran, and for the separator class that closes it.
 //
 // For an end-anchored match it is the wrong direction: dropping trailing text
 // turns a non-match into a match. `version=$(just --evaluate
@@ -374,10 +393,13 @@ func TestGolangciVersionReadFailsTheStepInsteadOfEmptyingTheKey(t *testing.T) {
 //	echo "v=$(just --evaluate absent)" >> f      # rc 0, f == "v="
 //	v="$(just --evaluate absent)"; echo "$v" >>f # rc 1, f untouched
 //
-// The first assertion is end-anchored, which is the one direction uncommented
-// is unsafe in: a `#` inside a quoted string is truncated, so text after it
-// stops being seen. See the note there for the line that gets past this, and
-// for the behavioural test that refuses it.
+// The first assertion is end-anchored, and that is one direction uncommented is
+// unsafe in: a `#` inside a quoted string is truncated, so text after it stops
+// being seen and a line that would not have matched to the end now does. See
+// the note there for the line that gets past this, and for the behavioural test
+// that refuses it. It is not the only one — the note on justInvocations has a
+// second, where the strip joined two lines into a match until the separator
+// class stopped it.
 func TestGolangciVersionReadIsAnAssignmentUnderErrexit(t *testing.T) {
 	code := uncommented(pinStep(t).Run)
 
