@@ -35,8 +35,9 @@ import (
 // the path, at modscopePkg below (bd gqlc-wkio), and the header shapes this
 // file's reader is known to read differently from just, at
 // TestParseJustfileReadsWhatJustReads below. That second list is what has been
-// looked for and not a boundary anyone has proved — it gained a shape under
-// review while this file was being written — so
+// looked for and not a boundary anyone has proved — a review of this file
+// found a shape the list was silent about, and the reader was taught to read
+// it rather than the list extended — so
 // TestParseJustfileAgreesWithJustOnThisJustfile puts the reader's reading of
 // the real justfile beside just's own and reports where they part, which is a
 // question the list does not have to have anticipated.
@@ -477,24 +478,29 @@ func TestEveryRecipeRunningModscopeSweepsProbesFirst(t *testing.T) {
 // this justfile in place of vuln's: the reader lost vuln, this comparison named
 // vuln, and every other test in the package passed. The shape had been live in
 // the reader for as long as the reader had existed, and it was found by
-// inventing a case rather than by working through just's grammar. The count of
-// shapes this file records itself getting wrong was three until the review that
-// found that fourth one, which is the argument for not treating the list as
+// inventing a case rather than by working through just's grammar. It never
+// reached the list below: the shape was found under review, joinContinuedHeader
+// fixed it, and the list carries no bullet for it. A list can be silent about
+// a shape that is live, which is the argument for not treating this one as
 // finished.
 //
 // WHAT THIS DOES NOT REACH:
 //
 //   - Body text. just's dump spells a body as parsed fragments and this reader
-//     keeps raw text, so this file sets no body text against another:
-//     declaredBodies reaches one expression in justfileDisagreements, the
-//     mention clause, and that clause asks each side whether its body names
-//     modscopePkg. A body difference that changes that answer on one side is
-//     reported, from either side. So the truncation case is the caught one
-//     rather than the missed one: capping this reader's body at ten lines
-//     reddens this test on vuln, whose `go run ./internal/tools/modscope` line
-//     sits below the cap. Out of reach is a body difference that leaves the two
-//     answers alike — measured, appending a marker line to every body this
-//     reader builds changes each of those texts and this test stays green.
+//     keeps raw text, so no body this reader builds is set against the text
+//     just reports for the same recipe: declaredBodies reaches one expression
+//     in justfileDisagreements, the mention clause, and that clause asks each
+//     side whether its body names modscopePkg. A body difference that changes
+//     that answer on one side is reported, from either side. So the truncation
+//     case is the caught one rather than the missed one: capping this reader's
+//     body at ten lines reddens this test on vuln, whose
+//     `go run ./internal/tools/modscope` line sits below the cap. Out of reach
+//     of this comparison is a body difference that leaves the two answers alike
+//     — measured, appending a marker line to every body this reader builds
+//     changes each of those texts and this test stays green. Out of reach here
+//     is not out of reach of the file: that same marker reddens
+//     TestParseJustfileReadsWhatJustReads, whose rows do pin body text against
+//     a literal.
 //   - Shapes this justfile does not contain. It reports on these bytes, and
 //     says nothing about a header spelling no file here has yet.
 //   - A divergence both readings share. just is the reference, so a recipe just
@@ -1184,8 +1190,9 @@ func TestUnsweptModscopeCallersFindsEachBrokenWiring(t *testing.T) {
 // which way each one fails. The list is what somebody has looked for and found,
 // not a boundary anybody has proved:
 // TestParseJustfileAgreesWithJustOnThisJustfile is the check that does not
-// depend on it, and a backslash-continued header was missing from this list
-// until a review found it.
+// depend on it, and this list was silent about a backslash-continued header
+// for as long as that shape was live: a review found it, and the reader was
+// fixed rather than this list extended.
 //
 //   - A header whose parameter default opens a literal it does not close on
 //     the same line. just accepts one, because a triple-quoted default may
