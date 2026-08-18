@@ -690,6 +690,45 @@ func TestParseJustfileReadsWhatJustReads(t *testing.T) {
 			want: []justRecipe{{name: "vuln", deps: []string{"sweep"}, body: "    echo hi\n"}},
 		},
 		{
+			// Neither physical line carries the separating colon and the
+			// parameter's literal is closed, so this is not the unclosed-literal
+			// shape below: before the reader joined the two, it found no colon,
+			// dropped the header, and said nothing. The body is asserted here
+			// because a reader that joined the header but started the body at the
+			// wrong line would take the continuation for the first body line.
+			name: "a header continued with a backslash is still one header",
+			src:  "vuln x=\"a\" \\\n  : sweep\n    echo hi\n",
+			want: []justRecipe{{name: "vuln", deps: []string{"sweep"}, body: "    echo hi\n"}},
+		},
+		{
+			// The continuation is whitespace to just, not glue: this is a recipe
+			// named vu that takes a parameter ln. A reader joining the two halves
+			// with nothing between them would answer vuln, which is a recipe just
+			// does not have and a name any dependency on the real vu would miss.
+			name: "a continuation separates tokens rather than joining them",
+			src:  "vu\\\nln: sweep\n    echo hi\n",
+			want: []justRecipe{{name: "vu", deps: []string{"sweep"}, body: "    echo hi\n"}},
+		},
+		{
+			// just does not continue a comment, so the header below one is a
+			// recipe it runs. This row is the guard on the repair rather than on
+			// the reader: joining every line that ends in a backslash would fold
+			// this header into the comment and lose the recipe silently, which is
+			// the failure the join was added to stop.
+			name: "a comment ending in a backslash does not swallow the header below",
+			src:  "# note \\\nvuln: sweep\n    echo hi\n",
+			want: []justRecipe{{name: "vuln", deps: []string{"sweep"}, body: "    echo hi\n"}},
+		},
+		{
+			// A line holding only the backslash contributes no text to the
+			// header, and just reads the header under it. A join that pasted the
+			// two together would push the name behind a space and out of header
+			// position, which drops the recipe without a word.
+			name: "a line that is only a backslash leaves the header below readable",
+			src:  "\\\nvuln: sweep\n    echo hi\n",
+			want: []justRecipe{{name: "vuln", deps: []string{"sweep"}, body: "    echo hi\n"}},
+		},
+		{
 			// A LIMIT THIS READER STILL HAS, and the one it answers by
 			// inventing rather than dropping: the assignment's value is a
 			// multi-line string, so just reads no recipe here at all.
@@ -740,6 +779,52 @@ func TestParseJustfileReadsWhatJustReads(t *testing.T) {
 				if got[i].body != w.body {
 					t.Errorf("recipe %s body = %q, want %q", w.name, got[i].body, w.body)
 				}
+			}
+		})
+	}
+}
+
+// TestHeaderColonTakesTheFirstSeparatingColon pins which colon headerColon
+// answers with when a header carries more than one outside a parameter default.
+// A trailing comment is where the second one turns up without anyone arranging
+// it, and a URL inside such a comment carries one by construction.
+//
+// The choice decides whether the recipe is read at all. Taking the last colon
+// leaves the separator inside the name half, `vuln:` is not a name isJustName
+// accepts, and justHeader then answers that the line is no header — so the
+// recipe goes, and with it every caller it stands for, with nothing said. Every
+// other test in this package passed under a reader that took the last one.
+func TestHeaderColonTakesTheFirstSeparatingColon(t *testing.T) {
+	cases := []struct {
+		name  string
+		line  string
+		colon int
+	}{
+		{
+			name:  "a second colon inside a trailing comment",
+			line:  "vuln: sweep # note: here",
+			colon: 4,
+		},
+		{
+			name:  "a URL inside a trailing comment",
+			line:  "vuln: sweep # see http://x",
+			colon: 4,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := headerColon(tc.line); got != tc.colon {
+				t.Errorf("headerColon(%q) = %d, want %d", tc.line, got, tc.colon)
+			}
+			// The index is the mechanism; this is what it costs. A reader
+			// answering with the later colon reads no recipe here at all.
+			recipes, complaints := parseJustfile(tc.line + "\n    echo hi\n")
+			if len(complaints) != 0 {
+				t.Fatalf("complaints = %v, want none", complaints)
+			}
+			if len(recipes) != 1 || recipes[0].name != "vuln" {
+				t.Fatalf("read %v, want the recipe vuln read rather than dropped", recipes)
 			}
 		})
 	}
