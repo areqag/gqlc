@@ -299,8 +299,11 @@ def git_targets(text, cwd, wanted, depth=0):
     text, expanded = strip_heredocs(text)
     targets, need_fallback = [], False
     # The unquoted heredoc body contributes its substitutions and nothing else:
-    # `$(...)` there runs, the prose around it does not, and it never reaches
-    # the tokenizer below. Same recursion level as a substitution written bare,
+    # what SUBST_RE and BACKTICK_RE match there is analyzed, the prose around
+    # them is not, and the body never reaches the tokenizer below. Whether a
+    # matched substitution would in fact have run is not asked here — an
+    # escaped one would not, and is analyzed anyway (header, under the biases).
+    # Same recursion level as a substitution written bare,
     # so the depth cap above sees no extra hop (measured: an unquoted heredoc
     # holding $(git commit) is found at depth 1, exactly where a bare
     # $(git commit) is found).
