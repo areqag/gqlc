@@ -38,8 +38,11 @@ const (
 	corpusSchema = "corpus_schema.gql"
 	// corpusQueries projects those shapes as query columns. A column
 	// decode is a second emission of the same narrowing rule, reached
-	// through neo4j.GetRecordValue rather than through the Props map, so
-	// nothing the entity decoders prove carries over to it.
+	// through the driver's record rather than through the Props map, so
+	// nothing the entity decoders prove carries over to it. Naming the
+	// record rather than neo4j.GetRecordValue is deliberate: an ANY VALUE
+	// column and an edge-union column both read record.Get, so
+	// GetRecordValue does not name every column read here.
 	corpusQueries = "corpus_queries.cypher"
 	// driverModule is the module path the v5 emission imports, and so the
 	// path the stub has to claim.
@@ -72,9 +75,9 @@ const stubModule = "module " + driverModule + "\n\ngo 1.26.2\n"
 // shape hands the caller back the value the graph held.
 //
 // Both decode paths are run because they are two emissions of one
-// narrowing rule: an entity property reads through the Props map and a
-// query column through neo4j.GetRecordValue, and a null that survives
-// one has been seen to fail the other.
+// narrowing rule: an entity property reads through the driver value the
+// decode helper was handed and a query column through the driver's
+// record, and a null that survives one has been seen to fail the other.
 //
 // The bytes under test come from Generate rather than from the golden
 // tree, so regenerating goldens cannot make a decode bug agree with

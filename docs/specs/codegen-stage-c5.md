@@ -239,9 +239,14 @@ C4's per-source emission dispatched five column arms (`columnProperty`,
 `columnList`, `columnAny` — seven; see `generate.go:99-128`). C5 adds
 an eighth: `columnEdgeUnion`. The arm decodes the column via
 `record.Get(key)` (returning `(any, bool)`) — the same honest-any
-carrier `columnAny` uses, because `neo4j.GetRecordValue[T]` has no
-overload for a `dbtype.Relationship`-or-nil result — and dispatches
-into a type switch on the driver's `dbtype.Relationship`:
+carrier `columnAny` uses — and dispatches into a type switch on the
+driver's `dbtype.Relationship`.
+
+`Get` is not forced here. `neo4j.RecordValue` admits `Relationship`, so
+`neo4j.GetRecordValue[dbtype.Relationship]` instantiates, and C2's
+entity arm binds exactly that for an edge column. Taking the untyped
+`any` instead is what keeps a missing key and a wrong dynamic type as
+this arm's own refusals rather than as wrapped driver errors:
 
 ```go
 raw, ok := records[0].Get("action")

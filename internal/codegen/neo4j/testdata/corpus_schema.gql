@@ -20,17 +20,30 @@
 // branches six ways — nullable and non-nullable, each over walked slice,
 // narrow-convert and plain assign — and writeShapelessFieldDecode
 // carries two more; ranks and matrix share the non-nullable walked-slice
-// arm, differing only in how deep writeSliceNarrow recurses. Two of
-// those eight arms are reached here off dbtype.Node alone: the
-// non-nullable plain assign (out.Loose = value1 in decodeBin) and the
-// nullable shapeless read (out.Maybe = &v in decodeAnything). A helper
-// shown to survive on one entity says nothing about another, so those
-// two stand unrun on a relationship carrier.
+// arm, differing only in how deep writeSliceNarrow recurses. One of
+// those eight arms is reached here off dbtype.Node alone: the nullable
+// shapeless read (out.Maybe = &v in decodeAnything), which no edge type
+// declares a property for. A helper shown to survive on one entity says
+// nothing about another, so that one stands unrun on a relationship
+// carrier. The non-nullable plain assign (out.Loose = value1 in
+// decodeBin) was the other until Edgier put it on one.
 //
 // Edgy also declares no BYTES and no TIMESTAMP element — both of which
 // the walk asserts straight to, without narrowing — and no third
 // nesting depth. bd gqlc-np7s tracks what Edgy leaves on the node
 // types.
+//
+// Edgier is declared for the query columns rather than for a width the
+// node types had left unreached. A whole-entity column commits to a
+// dbtype carrier and hands the value to the entity's own helper; a
+// column whose pattern admits more than one edge type dispatches on the
+// wire label before it picks a helper, which takes a second label one
+// pattern can reach — and a distinct label per candidate, because
+// codegen refuses a union two of whose candidates carry the same one
+// (ErrUnrepresentableEdgeUnion, prepare.go's admitEdgeUnionCandidates).
+// Its one property is a non-nullable STRING, whose driver carrier is
+// its own Go type, so decodeEdgier is where the plain assign named
+// above runs off a relationship.
 CREATE PROPERTY GRAPH TYPE Neo4jCorpus AS {
     (:Scalar {
         id     :: INT64 NOT NULL,
@@ -70,5 +83,8 @@ CREATE PROPERTY GRAPH TYPE Neo4jCorpus AS {
         loose   :: LIST,
         depths  :: LIST<FLOAT32>,
         weight  :: FLOAT32
+    }]-> (:Listy),
+    (:Scalar) -[:Edgier {
+        tag :: STRING NOT NULL
     }]-> (:Listy)
 }
