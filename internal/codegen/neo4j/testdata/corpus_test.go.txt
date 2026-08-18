@@ -649,9 +649,13 @@ func TestListyColumnsNarrowEachElement(t *testing.T) {
 // What a dropped gate costs is larger on this arm than on the entity arm:
 // the zero []any it passes on is an empty list, the element loop walks it
 // without complaint, and the caller is handed an empty list for a value
-// the driver refused. So both cases below assert on the message and both
-// report the rows on failure, because the failure to expect is a row
-// rather than a mis-worded error.
+// the driver refused. So both cases below report the rows on failure,
+// because the failure to expect is a row rather than a mis-worded error.
+//
+// They assert the message anyway, and it is not redundant with that: a
+// dropped gate is not the only way to lose the driver's answer, and a gate
+// that fires in words of its own satisfies any test that asks only whether
+// something came back.
 func TestListColumnRefusalsCarryTheDriversError(t *testing.T) {
 	// A column holding something that is not a list at all. The two
 	// columns after it are well-formed, so the refusal is this column's.
