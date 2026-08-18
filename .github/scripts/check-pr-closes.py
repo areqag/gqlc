@@ -185,9 +185,15 @@ def refuse(headline, *detail) -> NoReturn:
     Annotated NoReturn because callers rely on it: several 'refuse(...)'
     calls below are followed by code that would be reading an unbound name
     or a None if control came back. An inline sys.exit carries that for a
-    type checker, a call behind it does not. Without the annotation pyright
-    1.1.411 reports ten diagnostics on this file; seven of them are the
-    annotation's, and the other three the 'marker_n = None' in main()."""
+    type checker, a call behind it does not. Take the annotation off and
+    that is what a checker reports: load_bead()'s 'f' possibly unbound,
+    opt_out_number()'s 'hit' still an Optional where '.group' is called on
+    it, and main()'s 'pr_body' a 'str | None' where findall() wants a str.
+    Put it back and they go. No count is kept here, because it moves with
+    the checker and the mode it runs in -- and pyright run from the
+    repository root reports nothing at all on this file either way, its
+    defaults excluding dot-directories; a copy outside .github/ is one run
+    that does measure it."""
     print(f"ERROR: {headline}")
     for line in detail:
         print(f"       {line}")
