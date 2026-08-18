@@ -195,11 +195,17 @@ func TestCITestJobRunsTheTestRecipe(t *testing.T) {
 	var job ciJob
 	require.NoError(t, node.Decode(&job), "decode job %q", testJob)
 
-	require.Emptyf(t, job.If,
-		"job %q carries a job-level `if:` (%q). A skipped job still emits a check run "+
-			"with conclusion `skipped`, and branch protection reads that as a pass, so "+
-			"an `if:` here retires the shell suites without deleting a line of them.",
-		testJob, job.If)
+	// Read for presence rather than for value, as ContinueOnError below is: If
+	// is a yaml.Node (bd gqlc-ff66), so Kind is what parts an `if:` written with
+	// no value from an absent one. require.Empty over a Node asks a different
+	// question — equality with the zero struct — and renders it through %q,
+	// which has no verb for the *Node field inside it.
+	require.Falsef(t, present(job.If),
+		"job %q carries a job-level `if:`, written as %s. A skipped job still emits a "+
+			"check run with conclusion `skipped`, and branch protection reads that as a "+
+			"pass, so an `if:` here retires the shell suites without deleting a line of "+
+			"them.",
+		testJob, spell(job.If))
 
 	// The other half of "the job can still fail", and it is not the step-level
 	// key spelled one level up. GitHub documents the job-level form against the
@@ -231,11 +237,12 @@ func TestCITestJobRunsTheTestRecipe(t *testing.T) {
 
 	for _, s := range job.Steps {
 		if runsTestRecipe.MatchString(s.Run) {
-			require.Emptyf(t, s.If,
-				"the `just %s` step in job %q carries an `if:` (%q). A skipped step "+
-					"leaves the job green, so the context reports SUCCESS with the "+
-					"suites never run — worse than a skipped job, which at least "+
-					"reports `skipped`.", testRecipe, testJob, s.If)
+			require.Falsef(t, present(s.If),
+				"the `just %s` step in job %q carries an `if:`, written as %s. A "+
+					"skipped step leaves the job green, so the context reports "+
+					"SUCCESS with the suites never run — worse than a skipped job, "+
+					"which at least reports `skipped`.",
+				testRecipe, testJob, spell(s.If))
 			require.Falsef(t, present(s.ContinueOnError),
 				"the `just %s` step in job %q sets `continue-on-error: %s`, so the "+
 					"step's failure is not the job's. The suites run, the recipe "+

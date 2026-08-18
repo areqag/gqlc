@@ -56,6 +56,11 @@ const payloadBody = "github.event.pull_request.body"
 // the distinction stays available to whatever asserts on them next — the step's
 // is compared to a condition below, where absence and an empty value are
 // refused alike, and the job's is refused on having been written at all.
+//
+// Both types are decoded in testhooks_test.go as well, which asserts on the
+// `test` job's `if:` and on its `just test` step's. Promoting the field changed
+// what those two assertions ask, so bd gqlc-ff66 moved them onto present() with
+// the ones here.
 type ciSteps []struct {
 	Name            string            `yaml:"name"`
 	Run             string            `yaml:"run"`
@@ -325,9 +330,12 @@ func jobIfRefusal(t *testing.T, job ciJob) string {
 // The refusal has to reach an `if:` written with no value, and that is the case
 // a string field cannot answer. Decoded into a string, a written-empty `if:`
 // and an absent one are both "", so `require.Empty` over one passes the written
-// form — which is what this test did until bd gqlc-ff66. Kind is what parts
-// them, and `value` below is what a string field would have seen: the rows that
-// share a value and differ in `refused` are that conflation.
+// form. Before bd gqlc-ff66 that is the read TestPRBodyGateFailsTheJobItRunsIn
+// did over the gate job's `if:`, and the read TestCITestJobRunsTheTestRecipe in
+// testhooks_test.go did over the `test` job's and over its `just test` step's;
+// this test did not exist there at all. Kind is what parts them, and `value`
+// below is what a string field would have seen: the rows that share a value and
+// differ in `refused` are that conflation.
 //
 // This also holds present() to the distinction it is named for. Rewriting it as
 // `n.Value != ""` was put to this package and reddened this test's rows and no
