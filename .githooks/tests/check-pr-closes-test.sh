@@ -1239,6 +1239,21 @@ Closes #902
 -->')" "chore/tidy-the-workflow" \
     "no closing keyword in the body's prose"
 
+# The same keyword in the one-line spelling of the same carrier, which is the
+# pair rather than a second copy: prose_only() blanks the span from a '<!--'
+# its line does not close to the '-->' that does, and a comment complete on
+# one line opens no such span, so the keyword is read and the body refused.
+# Deliberate, and the two rows are what holds it that way -- blank one-line
+# comments too and this one reddens while the row above stays green, which is
+# the whole of the change. Kept because levelling them turns a refusal into a
+# pass on a premise this tree cannot establish: whether GitHub acts on a
+# closing keyword inside a comment at merge is measured nowhere in it.
+expect_red "a closing keyword in a one-line HTML comment is a claim" \
+    "$EXPORT" "$(body 'Nothing to close here.
+
+<!-- Closes #902 -->')" "chore/tidy-the-workflow" \
+    "the PR body closes #902, but no bead resolves for this PR"
+
 # The scope of the new refusal, from the other side: it fires only where no
 # bead resolves. A branch that carries an id resolves one, so the body is
 # held against that bead's own number exactly as before.

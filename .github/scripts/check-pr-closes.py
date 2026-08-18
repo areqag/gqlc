@@ -30,8 +30,9 @@ well as a zero status.
 A PR that touches a bead without resolving it declares that with a
 'Refs: <bead-id> #<issue>' line (bd gqlc-1ekq), starting at the line's
 first character and read over what prose_only leaves of the body --
-fenced code blocks, HTML comments, and raw <pre> and <code> blocks whose
-opening tag starts a line, indented no more than three spaces, blanked.
+fenced code blocks, HTML comments a line leaves open, and raw <pre> and
+<code> blocks whose opening tag starts a line, indented no more than
+three spaces, blanked.
 Those are the carriers a marker was measured to survive invisibly in,
 against GitHub's own renderer; they are not certified to be
 every place GitHub hides text.
@@ -54,8 +55,9 @@ attribute (bd gqlc-ncb8), one below a raw block whose opening tag has text
 before it on its line, and one below a comment the sanitiser holds open
 past its '-->' (both bd gqlc-xz16) -- and they are what this branch found
 and rowed rather than a census of what exists.
-prose_only's docstring enumerates the shapes and each is a row; the
-count is kept in one place so the two cannot drift apart. The
+prose_only's docstring enumerates the shapes and each is a row. The
+three above are counted there as well as here, so a change to that set
+has two sentences to correct and not one. The
 declaration is then checked
 rather than taken: the number has to be the one the bead mirrors, the
 export has to not already show the bead closed, and the body has to carry
@@ -291,13 +293,14 @@ def comment_opens_at(line):
 
 def prose_only(pr_body):
     """The body with three carriers blanked out, line count preserved:
-    fenced code blocks, HTML comments, and raw <pre> and <code> blocks whose
-    opening tag starts a line, indented no more than three spaces -- which is
+    fenced code blocks, HTML comments a line leaves open, and raw <pre> and
+    <code> blocks whose opening tag starts a line, indented no more than
+    three spaces -- which is
     markdown's own bound on where an HTML block may start, four spaces being
     an indented code block instead. Both ends of it are rows. Not everything
     GitHub declines to render as prose -- what was measured to diverge, in
-    either direction, is the last three paragraphs, and each shape they name
-    is a row.
+    either direction, is the paragraphs from 'Not a markdown parser' down,
+    and each shape they name is a row.
 
     Fences follow the rule GitHub's renderer follows rather than a toggle on
     every ``` and ~~~ line. A fence closes only on a run of the same
@@ -305,11 +308,16 @@ def prose_only(pr_body):
     whitespace after it; a backtick fence whose info string carries a
     backtick opens nothing. Put the toggle back in place of this function --
     4446b7fc's outside_fences and the FENCE it read, both verbatim -- and
-    the suite goes red in three directions: bodies whose marker it honours
-    though GitHub renders it inside <pre><code> or not at all, bodies it
-    blanks that GitHub renders as prose, and, because main()'s no-bead check
-    reads this function too, a closing keyword inside an HTML comment
-    refused as a claim. How many rows that is stays out of this docstring:
+    the suite goes red in three directions: markers the toggle honours and
+    this blanks, markers this honours that the toggle blanks and GitHub
+    renders as prose, and, because main()'s no-bead check reads this
+    function too, a closing keyword inside an HTML comment refused as a
+    claim. The first of those says where the two functions differ and
+    nothing about what a reader sees: some of its rows are markers the
+    renderer puts in a code element or drops from the output, and some are
+    the divergences the paragraphs below row, where the renderer shows the
+    marker and the toggle is the one agreeing with it.
+    How many rows that is stays out of this docstring:
     it moved on this branch, and the row that moved it was added to the
     no-bead section rather than to the visibility one, so the number tracks
     the suite's size and not this function's behaviour. Naming the stand-in
@@ -319,6 +327,27 @@ def prose_only(pr_body):
     marker is what this file is about, so that is the realistic body rather
     than the exotic one. An unclosed fence, comment or HTML block swallows
     the rest.
+
+    A comment complete on one line is left standing, which is a decision
+    and not an oversight. What the comment state blanks is the span from a
+    '<!--' its line does not close to the '-->' that does, because that is
+    the span a marker can hide in: the lines under an unterminated comment
+    are inside it. A one-line comment puts no line in that state, and a
+    marker written after one on the same line is not at its line's first
+    character, which is where the marker pattern anchors. What does turn on
+    it is main()'s no-bead check, which reads this function: a body whose
+    only closing keyword sits inside '<!-- Closes #N -->' is read as making
+    the claim and refused for naming no bead, while the same keyword in a
+    comment opened and closed on separate lines is blanked and passes.
+    Levelling the two means blanking the one-line spelling as well, and
+    that is the direction not taken here, because it turns a refusal into a
+    pass on a premise this tree cannot establish: whether GitHub acts on a
+    closing keyword inside a comment at merge is not measured anywhere in
+    it, and no PR body in this repository carried the shape to measure it
+    on when this was written. The two errors are not equal either. The
+    refusal names both ways out and says an edit alone re-runs the check;
+    a claim this stops reading is a number nothing is held against. Both
+    spellings are rows in the suite's no-bead section.
 
     Not a markdown parser. Five measured divergences blank rather than
     keep: a fence and a <pre> each indented one to three spaces into a list
