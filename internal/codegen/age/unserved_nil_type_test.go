@@ -139,7 +139,7 @@ func faultingShapes() []struct {
 // panicked inside Generate rather than returning a refusal before the guard.
 //
 // The gate is reached ahead of codegen.Prepare (generate.go), so
-// resolvedTypeName's guard on Prepare's own fail-sites does not stand in
+// codegen.ResolvedTypeName's guard on Prepare's own fail-sites does not stand in
 // front of these two: this is the first render of the arriving type in the
 // run, not the second.
 //
