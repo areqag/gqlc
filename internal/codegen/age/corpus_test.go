@@ -93,11 +93,14 @@ func (d *recordingDB) Exec(ctx context.Context, sql string, args ...any) (int, e
 // replaces carried a require.NotEmpty against that silence; the test
 // below requires this list non-empty before it compares.
 //
-// The list is a declaration, not a gate. Down to the last name, removing
-// a test from the fixture and removing its name from here is one
-// commit's edit that nothing here prevents. What it costs the remover is
-// having to write the removal down in a file the child module is never
-// handed.
+// This list is a declaration rather than a gate. A test can leave the
+// fixture and its name leave this literal in one commit's edit; both
+// sides of the comparison below then name the same tests, and a run
+// with one name and its test removed together came back green.
+// Removing the last name is where that stops: it leaves this literal
+// empty, which is what the non-empty requirement below refuses. What
+// the edit costs the remover either way is writing the removal down
+// in a file the child module is not given.
 var corpusTests = []string{
 	"TestAgtypeString",
 	"TestAgtypeBool",
