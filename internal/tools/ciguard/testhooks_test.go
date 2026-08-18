@@ -1,12 +1,37 @@
 // The chain that makes .githooks/tests/*.sh block a merge: the ci.yml `test`
 // job runs `just test`, `just test` depends on `test-hooks`, and `test-hooks`
-// names each suite. What is held here is that each link is named and that
-// neither of the yaml links is made conditional — not that each link carries
-// a status: a suite the recipe still names but whose exit is discarded
-// (`bash ...-test.sh || true`), and a `continue-on-error` on the job or on
-// the step, both pass every assertion below (bd gqlc-lisu). Measured
-// (bd gqlc-1ekq): deleting any one of the five lines from `test-hooks` on
-// master leaves `just test-hooks` at rc=0.
+// names each suite. `test` is a required status check on master.
+//
+// What is held here is that each link is named, and that the yaml link is
+// switched off by neither of the two keys that switch a check off without
+// deleting it: an `if:`, which retires the job or the step into a `skipped`
+// conclusion branch protection reads as a pass, and a `continue-on-error:`,
+// which runs the step and reports success whatever it returned. Each is
+// refused on the `test` job and on the step that runs `just test`.
+//
+// What is not held here is that a suite line carries its exit status into the
+// recipe's status. That end is hooktests_test.go's, in two tests:
+// TestEveryHookTestSuiteIsNamedByTestHooks refuses a suite line that is not a
+// bare `bash <suite>`, and TestTestHooksStopsAtTheFirstFailingSuite writes the
+// recipe into a throwaway justfile, stubs the suites it names and runs the
+// real `just`. Measured on the recipe's first suite line: `|| true`, `|| :`,
+// `| tee`, a trailing `&` and just's `-` prefix redden both of them; `@bash`
+// and `>/dev/null` redden the shape rule alone, and neither of those two
+// discards a status; rewriting `test-hooks` as a `#!/usr/bin/env bash` recipe
+// reddens the behavioural one alone, the shape rule being blind to a token its
+// comment strip removes. That is the set that was measured, not the set that
+// exists — `just` accepts spellings no one has tried here.
+//
+// The justfile reads below are comment-stripped, so a link that is spelled and
+// commented out reads as absent rather than as present. `test: check-hooks
+// # test-hooks` is a `test` recipe that does not depend on `test-hooks`, and an
+// indented `# bash .githooks/tests/foo-test.sh` is a suite the recipe does not
+// run; matched against raw bytes, as this file did, both read as the link being
+// there (bd gqlc-sgot). Neither passed the package: TestTestHooksIsReachedByARecipeCIRuns
+// and TestEveryHookTestSuiteIsNamedByTestHooks read their justfile through a
+// comment strip already and reddened on them. What was wrong was narrower and
+// is what is fixed — a pin that cannot fail on the link it names reports on
+// nothing, and two of the three below could not.
 //
 // Asserted here rather than inside the suites because a suite that has been
 // unwired does not run, so it cannot be the thing that notices.
@@ -20,6 +45,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/areqag/gqlc/internal/liverecipes"
 )
 
 const justfilePath = "justfile"
@@ -39,12 +66,30 @@ const (
 // Matches the ci.yml step that runs the whole suite.
 var runsTestRecipe = regexp.MustCompile(`(?m)^[ \t]*just ` + testRecipe + `[ \t]*$`)
 
-// justRecipe returns a recipe's dependency list and the lines of its body.
+// justRecipe returns a recipe's dependency list and the lines of its body,
+// comments stripped from both, so that what is returned is what just runs
+// rather than what the justfile spells.
 //
-// just's own `--dump` would need just on PATH, which `go test ./...` does not
-// promise; the justfile is in the tree, like the workflows this package's
-// other assertions parse. A recipe is a header at column zero and every line
-// under it that is indented or blank, up to the next line that is neither.
+// A recipe is a header at column zero and every line under it that is indented
+// or blank, up to the next line that is neither. Those boundaries are decided
+// on the raw line and the strip is applied only to what is kept: indentation is
+// a property of the text, so stripping first would let a comment at column zero
+// stop ending a recipe. A body line that is nothing but a comment runs nothing
+// and is dropped rather than returned empty.
+//
+// liverecipes.StripComment rather than a cut at the first `#`: it opens a
+// comment where sh does, at a `#` beginning a word outside quotes, so a `#`
+// inside a quoted argument survives. The naive cut is what gqlc-snzq F6
+// records truncating a neighbouring surface.
+//
+// Not `just --dump`, though the justfile is what just parses and this is a
+// regex. The behavioural question — whether a failing suite stops the recipe —
+// is asked by running the real `just` in hooktests_test.go, which requires it
+// on PATH rather than skipping past its absence; these three are text pins and
+// buy no accuracy for a subprocess. `just --dump` also prints `error:` and
+// exits non-zero on a parse failure, so a justfile edit that breaks parsing
+// would redden them for a reason unrelated to the wiring, which is the fake
+// RED this repository screens mutations for.
 func justRecipe(t *testing.T, name string) (deps string, body []string) {
 	t.Helper()
 	src, err := os.ReadFile(filepath.Join(repoRoot, justfilePath))
@@ -54,7 +99,7 @@ func justRecipe(t *testing.T, name string) (deps string, body []string) {
 	lines := strings.Split(string(src), "\n")
 	start := -1
 	for i, ln := range lines {
-		if m := header.FindStringSubmatch(ln); m != nil {
+		if m := header.FindStringSubmatch(liverecipes.StripComment(ln)); m != nil {
 			start, deps = i, strings.TrimSpace(m[1])
 			break
 		}
@@ -63,14 +108,16 @@ func justRecipe(t *testing.T, name string) (deps string, body []string) {
 		"%s has no recipe %q, so the chain that reaches the shell suites from a "+
 			"required CI context is broken at that link", justfilePath, name)
 
-	for _, ln := range lines[start+1:] {
-		if strings.TrimSpace(ln) == "" {
+	for _, raw := range lines[start+1:] {
+		if strings.TrimSpace(raw) == "" {
 			continue
 		}
-		if !strings.HasPrefix(ln, " ") && !strings.HasPrefix(ln, "\t") {
+		if !strings.HasPrefix(raw, " ") && !strings.HasPrefix(raw, "\t") {
 			break
 		}
-		body = append(body, strings.TrimSpace(ln))
+		if ln := strings.TrimSpace(liverecipes.StripComment(raw)); ln != "" {
+			body = append(body, ln)
+		}
 	}
 	return deps, body
 }
@@ -127,6 +174,23 @@ func TestCITestJobRunsTheTestRecipe(t *testing.T) {
 			"an `if:` here retires the shell suites without deleting a line of them.",
 		testJob, job.If)
 
+	// The other half of "the job can still fail". An `if:` stops the job and
+	// reports `skipped`; this runs the job, runs `just test`, lets it fail and
+	// reports success — so the suites execute, print their failures, and the
+	// required context is green. Deleting a link is what the assertions here
+	// were built to catch; this is the neutralisation they were not (bd
+	// gqlc-lisu), and it was measured green against every one of them.
+	//
+	// Refused written rather than refused true, as present's own comment
+	// argues: `continue-on-error: ${{ … }}` is a value no test can evaluate, so
+	// "is the key there" is answerable where "is it truthy" is not. The cost is
+	// that an explicit `continue-on-error: false` is refused too.
+	require.Falsef(t, present(job.ContinueOnError),
+		"job %q sets `continue-on-error: %s`. Every step in it still runs and the check "+
+			"run it emits still concludes success, whatever `just %s` returned — the "+
+			"shell suites report into a log and block nothing.",
+		testJob, spell(job.ContinueOnError), testRecipe)
+
 	for _, s := range job.Steps {
 		if runsTestRecipe.MatchString(s.Run) {
 			require.Emptyf(t, s.If,
@@ -134,6 +198,12 @@ func TestCITestJobRunsTheTestRecipe(t *testing.T) {
 					"leaves the job green, so the context reports SUCCESS with the "+
 					"suites never run — worse than a skipped job, which at least "+
 					"reports `skipped`.", testRecipe, testJob, s.If)
+			require.Falsef(t, present(s.ContinueOnError),
+				"the `just %s` step in job %q sets `continue-on-error: %s`, so the "+
+					"step's failure is not the job's. The suites run, the recipe "+
+					"returns non-zero, and %q reports SUCCESS with the verdict "+
+					"discarded.",
+				testRecipe, testJob, spell(s.ContinueOnError), testJob)
 			return
 		}
 	}
