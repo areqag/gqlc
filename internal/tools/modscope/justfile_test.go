@@ -848,6 +848,220 @@ func TestJustDumpCountsPriorsSeparatelyFromLaterDependencies(t *testing.T) {
 	}
 }
 
+// writeJustfiles puts each named file into a fresh directory and returns it.
+// The submodule fixtures below are more than one file, which is the point of
+// the directive under test.
+func writeJustfiles(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, src := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(src), 0o644); err != nil {
+			t.Fatalf("write the fixture file %s: %v", name, err)
+		}
+	}
+	return dir
+}
+
+// submoduleFixture is the shape the refusal exists for: a top-level justfile
+// whose own recipes are in order, and a submodule holding a recipe that runs
+// this program and depends on nothing.
+var submoduleFixture = map[string]string{
+	"justfile": probeSweep + ":\n    @true\n\n" +
+		"vuln: " + probeSweep + "\n    go run ./" + modscopePkg + " modules\n\n" +
+		"mod probe 'probe.just'\n",
+	"probe.just": "probe-caller:\n    go run ./" + modscopePkg + " modules\n",
+}
+
+// TestASubmoduleCallerPassesBothReadingsAndIsRefused is the fixture the refusal
+// was written from, asserted in the order the defect was found: the two
+// readings this file already had, then the one that answers.
+//
+// The reason this is a test rather than a note is that the failure it stands
+// for produced no output anywhere. A caller under a submodule is not in the
+// dependency closure unsweptModscopeCallers walks, and it is not a disagreement
+// justfileDisagreements can find either — both readings are quiet about it in
+// the same way, and quiet matches quiet. Delete submoduleRefusals and the rows
+// above this one still pass; that is what the last row is here to stop
+// (bd gqlc-98ii).
+func TestASubmoduleCallerPassesBothReadingsAndIsRefused(t *testing.T) {
+	dir := writeJustfiles(t, submoduleFixture)
+	dumped := dumpJustfile(t, dir, "justfile")
+
+	if _, found := dumped.Recipes["probe-caller"]; found {
+		t.Fatalf("just lists probe-caller among the top-level recipes %v, and this fixture "+
+			"exists because it does not — the refusal below is answering a question that has "+
+			"stopped being the one asked", slices.Sorted(maps.Keys(dumped.Recipes)))
+	}
+
+	read, readComplaints := parseJustfile(submoduleFixture["justfile"])
+	if len(readComplaints) != 0 {
+		t.Fatalf("read complaints = %v, want none", readComplaints)
+	}
+	for _, r := range read {
+		if r.name == "probe-caller" {
+			t.Errorf("this reader read probe-caller out of the top-level justfile, which does "+
+				"not spell it: %v", read)
+		}
+	}
+
+	unswept, complaints := unsweptModscopeCallers(read)
+	if len(unswept) != 0 || len(complaints) != 0 {
+		t.Errorf("unswept = %v and complaints = %v over a fixture whose unswept caller is in "+
+			"the submodule, want the sweep reading to have nothing to say about it",
+			unswept, complaints)
+	}
+
+	declared, err := priorDependencies(dumped)
+	if err != nil {
+		t.Fatalf("priorDependencies over the fixture: %v", err)
+	}
+	if d := justfileDisagreements(declared, recipeBodies(dumped), read); len(d) != 0 {
+		t.Errorf("the two readings part over the submodule fixture: %v — this fixture is here "+
+			"because they agree, each having read past probe-caller", d)
+	}
+
+	refusals := submoduleRefusals("", dumped)
+	if len(refusals) != 1 {
+		t.Fatalf("submoduleRefusals = %v, want the one submodule this fixture brings in", refusals)
+	}
+	for _, want := range []string{"submodule probe", "probe-caller", probeSweep} {
+		if !strings.Contains(refusals[0], want) {
+			t.Errorf("refusal = %q, want it to name %q", refusals[0], want)
+		}
+	}
+}
+
+// TestSubmoduleRefusalsReadWhatJustAnswersWith cuts the reduction one spelling
+// at a time. The live justfile brings in no submodule, so on this tree the
+// refusal returns nothing whatever it is asked, and these rows are the
+// difference between that and a reduction that has quietly stopped looking.
+//
+// The first row is the one that keeps the refusal from being a refusal of
+// everything: a gate that fires on the justfile CI runs would be reverted
+// rather than obeyed.
+func TestSubmoduleRefusalsReadWhatJustAnswersWith(t *testing.T) {
+	caller := "probe-caller:\n    go run ./" + modscopePkg + " modules\n"
+	cases := []struct {
+		name  string
+		files map[string]string
+		want  []string
+	}{
+		{
+			name: "a justfile bringing in no submodule is not refused",
+			files: map[string]string{
+				"justfile": "vuln:\n    go run ./" + modscopePkg + " modules\n",
+			},
+		},
+		{
+			name:  "a submodule is refused under the name just addresses it by",
+			files: submoduleFixture,
+			want:  []string{"submodule probe out of this justfile and declares [probe-caller]"},
+		},
+		{
+			// A second spelling of the directive, and the reason the question is
+			// put to just rather than to the text: nothing here was taught that
+			// `mod?` exists.
+			name: "an optional submodule whose file is there is refused the same way",
+			files: map[string]string{
+				"justfile":   "mod? probe 'probe.just'\n",
+				"probe.just": caller,
+			},
+			want: []string{"submodule probe out of this justfile and declares [probe-caller]"},
+		},
+		{
+			// just reads no submodule at all here, so there is no file for a
+			// caller to be in. Refusing this would be refusing the absence of the
+			// shape.
+			name: "an optional submodule whose file is absent is not refused",
+			files: map[string]string{
+				"justfile": "mod? probe 'probe.just'\nvuln:\n    @true\n",
+			},
+		},
+		{
+			// The refusal fires off the top-level list, which a submodule at any
+			// depth puts its own parent into. What the walk adds is the name of
+			// the deeper one: without it the inner caller is refused without ever
+			// being mentioned.
+			name: "a submodule under a submodule is named by its path",
+			files: map[string]string{
+				"justfile":   "mod outer 'outer.just'\n",
+				"outer.just": "mod inner 'inner.just'\nouter-thing:\n    @true\n",
+				"inner.just": "deep-caller:\n    go run ./" + modscopePkg + " modules\n",
+			},
+			want: []string{
+				"submodule outer out of this justfile and declares [outer-thing]",
+				"submodule outer::inner out of this justfile and declares [deep-caller]",
+			},
+		},
+		{
+			// Sorted rather than in map order, so a failure names the same
+			// submodule every run.
+			name: "two submodules are refused in name order",
+			files: map[string]string{
+				"justfile":   "mod zulu 'zulu.just'\nmod alpha 'alpha.just'\n",
+				"alpha.just": caller,
+				"zulu.just":  caller,
+			},
+			want: []string{
+				"submodule alpha out of this justfile",
+				"submodule zulu out of this justfile",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := submoduleRefusals("", dumpJustfile(t, writeJustfiles(t, tc.files), "justfile"))
+			if len(got) != len(tc.want) {
+				t.Fatalf("submoduleRefusals returned %d lines %v, want %d %v",
+					len(got), got, len(tc.want), tc.want)
+			}
+			for i, want := range tc.want {
+				if !strings.Contains(got[i], want) {
+					t.Errorf("refusal %d = %q, want it to contain %q", i, got[i], want)
+				}
+			}
+		})
+	}
+}
+
+// TestJustRefusesASubmoduleRecipeDependingOnTheTopLevelSweep asks just what the
+// unswept message's own advice does inside a submodule, because that answer is
+// what decided the refusal above over reading the submodule's recipes in.
+//
+// It is asserted here rather than written into a comment so that it stays a
+// measurement. If a later just resolves the dependency, this test fails, and
+// the choice submoduleRefusals makes is worth reopening at that point rather
+// than being carried forward on a rejection nobody re-ran.
+func TestJustRefusesASubmoduleRecipeDependingOnTheTopLevelSweep(t *testing.T) {
+	dir := writeJustfiles(t, map[string]string{
+		"justfile": probeSweep + ":\n    @true\n\nmod probe 'probe.just'\n",
+		"probe.just": "probe-caller: " + probeSweep + "\n" +
+			"    go run ./" + modscopePkg + " modules\n",
+	})
+
+	justBin, err := exec.LookPath("just")
+	if err != nil {
+		t.Fatalf("`just` is not on PATH: %v", err)
+	}
+	cmd := exec.CommandContext(t.Context(), justBin,
+		"--justfile", "justfile", "--unstable", "--dump", "--dump-format", "json")
+	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err == nil {
+		t.Fatalf("just accepted a submodule recipe depending on the top-level %s and dumped "+
+			"%s — the refusal in submoduleRefusals rests on it not doing that, so the choice "+
+			"between refusing this shape and gating it is open again (bd gqlc-98ii)",
+			probeSweep, out)
+	}
+	if !strings.Contains(stderr.String(), "unknown dependency") {
+		t.Errorf("just refused the fixture with %q, want the refusal to be about the "+
+			"dependency not resolving", stderr.String())
+	}
+}
+
 // TestPriorDependenciesReadsTheDumpJustWrites cuts the reduction one way at a
 // time. The live dump above reaches only the shape this repo's justfile has, so
 // the truncation, the field names and the refusal below are each unexercised
