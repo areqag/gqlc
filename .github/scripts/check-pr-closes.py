@@ -55,9 +55,12 @@ attribute (bd gqlc-ncb8), one below a raw block whose opening tag has text
 before it on its line, and one below a comment the sanitiser holds open
 past its '-->' (both bd gqlc-xz16) -- and they are what this branch found
 and rowed rather than a census of what exists.
-prose_only's docstring enumerates the shapes and each is a row. The
-three above are counted there as well as here, so a change to that set
-has two sentences to correct and not one. The
+prose_only's docstring enumerates the shapes and each is a row. It states
+the size of that set there too, in more than one sentence and again inside
+an aggregate over its three paragraphs, and nothing in this repository
+checks the two docstrings against each other -- so changing the set means
+finding every sentence here and there whose number depends on it, rather
+than editing the one this paragraph was read from. The
 declaration is then checked
 rather than taken: the number has to be the one the bead mirrors, the
 export has to not already show the bead closed, and the body has to carry
