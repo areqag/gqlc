@@ -3,16 +3,11 @@ package neo4j_test
 import (
 	"bytes"
 	"encoding/json"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 
@@ -65,6 +60,72 @@ replace ` + driverModule + ` => ./driverstub
 // stubModule lets the stub claim the driver's own path. It carries no
 // requirements of its own, so the whole run is dependency-free.
 const stubModule = "module " + driverModule + "\n\ngo 1.26.2\n"
+
+// corpusTests names the tests the assembled corpus module has to run and
+// pass.
+//
+// It is written down here, in the parent, rather than censused out of
+// testdata/corpus_test.go.txt, because that fixture is the artefact
+// under check: a name the fixture stops declaring is a name a census of
+// it stops naming, so both sides of the comparison lose it at once.
+// Measured against such a census — the fixture's top-level `func Test…`
+// declarations — these three edits each took a test out of the census
+// and out of the child run together and left the comparison green:
+// commenting the function out, deleting it, and renaming it to something
+// that is not a test name at all. Held against this list each of the
+// three fails, because this list does not move when the fixture does.
+//
+// Not every way of silencing a test was invisible to that census, and
+// nothing here claims it was. A t.Skip in a test's body and a TestMain
+// that never calls m.Run() leave the declaration standing while taking
+// the test out of the run, so the census still named it and the old
+// comparison went red on both. Renaming TestFoo to Testfoo never reaches
+// either check: the vet pass `go test` runs over the child module
+// refuses to build it, "malformed name".
+//
+// A fixture emptied to its package clause is a child run that reports
+// success: `go test` prints `[no tests to run]` and exits 0 over a
+// _test.go declaring no tests, so the child's exit status says nothing
+// about it. Requiring this exact set catches such a run, because the
+// pass set it produces is empty and this list is not.
+//
+// "This list is not" is a condition, not a property of the list.
+// Emptying the fixture and this literal together leaves both sides of
+// the comparison empty, and two empty sets match. The census this list
+// replaces carried a require.NotEmpty against that silence; the test
+// below requires this list non-empty before it compares.
+//
+// This list is a declaration rather than a gate. A test can leave the
+// fixture and its name leave this literal in one commit's edit; both
+// sides of the comparison below then name the same tests, and a run
+// with one name and its test removed together came back green.
+// Removing the last name is where that stops: it leaves this literal
+// empty, which is what the non-empty requirement below refuses. What
+// the edit costs the remover either way is writing the removal down
+// in a file the child module is not given.
+var corpusTests = []string{
+	"TestBinCarriesNullElements",
+	"TestBinNullabilityAndShape",
+	"TestListyNarrowsEachElement",
+	"TestListyEmptyIsNotAbsent",
+	"TestListyRefusesAMisTypedElement",
+	"TestAnythingReadsWhatTheGraphHolds",
+	"TestAnythingSeparatesAbsentFromNull",
+	"TestAnythingMissingPropertyReadsLikeTheDrivers",
+	"TestScalarNarrows",
+	"TestEdgyNarrowsOverARelationship",
+	"TestEdgyRefusesWhatTheSchemaDidNotDeclare",
+	"TestEdgyKeepsAbsentApartFromEmptyOverARelationship",
+	"TestBinColumnsCarryNullElements",
+	"TestListyColumnsNarrowEachElement",
+	"TestListColumnRefusalsCarryTheDriversError",
+	"TestNestColumnsAccumulateAtEveryDepth",
+	"TestAnythingColumnsReadWhatTheGraphHolds",
+	"TestAnythingColumnsCarryTheirNull",
+	"TestEntityColumnsDecodeWholeEntities",
+	"TestEntityColumnRefusalsCarryTheDriversError",
+	"TestEdgeUnionColumnDispatchesOnTheWireLabel",
+}
 
 // TestEmittedDecodersRunOnDriverValues runs the emitted entity decoders
 // and query methods against the Go values a Bolt driver can actually put
@@ -133,8 +194,15 @@ func TestEmittedDecodersRunOnDriverValues(t *testing.T) {
 
 	passed, log, err := runCorpus(t, dir)
 	require.NoError(t, err, "the emitted decoders do not satisfy the driver-value corpus:\n%s", log)
-	require.ElementsMatch(t, declaredTests(t, driver), passed,
-		"the corpus module did not run every test its template declares:\n%s", log)
+	require.NotEmpty(t, corpusTests,
+		"corpusTests names no test, so the set comparison below is satisfied by a child run that ran none")
+	// The comparison is by multiset, so a name written twice differs from
+	// the same name passing once. Which way the two differ is in the lists
+	// testify prints above this message, so naming the ways here would only
+	// be a shorter list than the one already on screen.
+	require.ElementsMatch(t, corpusTests, passed,
+		"the corpus module's passing tests are not what corpusTests names, entry for entry and "+
+			"counting repeats:\n%s", log)
 }
 
 // driverAgnostic collapses an emission's two driver-major-specific
@@ -214,43 +282,6 @@ func runCorpus(t *testing.T, dir string) (passed []string, log string, err error
 		}
 	}
 	return passed, text.String(), err
-}
-
-// declaredTests names the top-level tests a corpus template declares.
-// Requiring that every one of them passed is what separates a corpus the
-// emission satisfies from a corpus that is not there: `go test` exits 0
-// on a _test.go file declaring no tests, so a harness that reads only the
-// child's exit status reports success on an emptied template.
-func declaredTests(t *testing.T, src string) []string {
-	t.Helper()
-
-	file, err := parser.ParseFile(token.NewFileSet(), "corpus_test.go", src, parser.SkipObjectResolution)
-	require.NoError(t, err)
-
-	var names []string
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if ok && fn.Recv == nil && isTestName(fn.Name.Name) {
-			names = append(names, fn.Name.Name)
-		}
-	}
-	require.NotEmpty(t, names, "the corpus template declares no tests, so a child run of it proves nothing")
-	return names
-}
-
-// isTestName reports whether `go test` runs a function of this name,
-// following testing's own rule: Test, then anything that does not begin
-// with a lower-case letter. TestMain is the entry point, not a test.
-func isTestName(name string) bool {
-	rest, ok := strings.CutPrefix(name, "Test")
-	if !ok || name == "TestMain" {
-		return false
-	}
-	if rest == "" {
-		return true
-	}
-	first, _ := utf8.DecodeRuneInString(rest)
-	return !unicode.IsLower(first)
 }
 
 // corpusFile reads one of the hand-written sources the corpus module is

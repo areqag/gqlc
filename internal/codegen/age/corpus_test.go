@@ -10,8 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/areqag/gqlc/internal/codegen"
 	"github.com/areqag/gqlc/internal/codegen/age"
@@ -70,6 +68,71 @@ func (d *recordingDB) Exec(ctx context.Context, sql string, args ...any) (int, e
 
 `
 
+// corpusTests names the tests the assembled corpus module has to run and
+// pass.
+//
+// It is written down here rather than censused out of
+// testdata/corpus_test.go.txt, because that fixture is the artefact
+// under check: a name the fixture stops declaring is a name a census of
+// it stops naming, so both sides of the comparison lose it at once.
+// Measured against such a census — the fixture's top-level `func Test…`
+// declarations — commenting a test out and deleting it each took it out
+// of the census and out of the child run together and left the
+// comparison green. Held against this list both fail, because this list
+// does not move when the fixture does.
+//
+// A fixture emptied to its package clause is a child run that reports
+// success: `go test` prints `[no tests to run]` and exits 0 over a
+// _test.go declaring no tests, so the child's exit status says nothing
+// about it. Requiring this exact set catches such a run, because the
+// pass set it produces is empty and this list is not.
+//
+// "This list is not" is a condition, not a property of the list.
+// Emptying the fixture and this literal together leaves both sides of
+// the comparison empty, and two empty sets match. The census this list
+// replaces carried a require.NotEmpty against that silence; the test
+// below requires this list non-empty before it compares.
+//
+// This list is a declaration rather than a gate. A test can leave the
+// fixture and its name leave this literal in one commit's edit; both
+// sides of the comparison below then name the same tests, and a run
+// with one name and its test removed together came back green.
+// Removing the last name is where that stops: it leaves this literal
+// empty, which is what the non-empty requirement below refuses. What
+// the edit costs the remover either way is writing the removal down
+// in a file the child module is not given.
+var corpusTests = []string{
+	"TestAgtypeString",
+	"TestAgtypeBool",
+	"TestAgtypeInt64",
+	"TestAgtypeFloat64",
+	"TestDecodeVertex",
+	"TestDecodeVertexReadsNullableProperties",
+	"TestDecodeVertexStepsOverStructuredProperties",
+	"TestDecodeZeroPropertyVertex",
+	"TestAgtypeListOfString",
+	"TestAgtypeListRefusesAnElementOfTheWrongScalar",
+	"TestAgtypeNestedList",
+	"TestAgtypeListOfNarrowElementWidth",
+	"TestDecodeVertexWithListProperties",
+	"TestAgtypeValue",
+	"TestDecodeVertexWithAnyProperty",
+	"TestDecodeEdge",
+	"TestEntityDecodersRefuseTheOtherAnnotation",
+	"TestDecodeVertexRefusesMisshapenText",
+	"TestAgtypeArgs",
+	"TestCypherStmtComposesOneStatement",
+	"TestCypherStmtRefusesAnOverlongName",
+	"TestAgtypeInstantCountsMicrosecondsFromTheEpoch",
+	"TestAgtypeMicrosEncodesTheInstantAndNotTheWallClock",
+	"TestAgtypeNullableMicrosCarriesAbsence",
+	"TestAgtypeZoneReadsAnOffsetInSeconds",
+	"TestAgtypeZoneRefusesAnOffsetOutsideADay",
+	"TestDecodeVertexReadsTheOffsetSidecarBesideItsInstant",
+	"TestEmittedMethodBindsAnInstantAsMicroseconds",
+	"TestBoundGraphCountsBytes",
+}
+
 // TestEmittedHelpersDecodeTheAgtypeCorpus runs the emitted agtype
 // helpers, the emitted entity decoders, the emitted graph-name check,
 // the emitted statement composer and the emitted parameter encoding
@@ -111,8 +174,15 @@ func (s *EmissionSuite) TestEmittedHelpersDecodeTheAgtypeCorpus() {
 
 	passed, log, err := s.runCorpus(dir)
 	s.Require().NoError(err, "the emitted helpers do not satisfy the captured corpus:\n%s", log)
-	s.Require().ElementsMatch(s.declaredTests(string(driver)), passed,
-		"the corpus module did not run every test its template declares:\n%s", log)
+	s.Require().NotEmpty(corpusTests,
+		"corpusTests names no test, so the set comparison below is satisfied by a child run that ran none")
+	// The comparison is by multiset, so a name written twice differs from
+	// the same name passing once. Which way the two differ is in the lists
+	// testify prints above this message, so naming the ways here would only
+	// be a shorter list than the one already on screen.
+	s.Require().ElementsMatch(corpusTests, passed,
+		"the corpus module's passing tests are not what corpusTests names, entry for entry and "+
+			"counting repeats:\n%s", log)
 }
 
 // runCorpus runs the assembled corpus module's own tests, reporting the
@@ -145,41 +215,6 @@ func (s *EmissionSuite) runCorpus(dir string) (passed []string, log string, err 
 		}
 	}
 	return passed, text.String(), err
-}
-
-// declaredTests names the top-level tests a corpus template declares.
-// Requiring that every one of them passed is what separates a corpus the
-// emission satisfies from a corpus that is not there: `go test` exits 0
-// on a _test.go file declaring no tests, so a harness that reads only the
-// child's exit status reports success on an emptied template.
-func (s *EmissionSuite) declaredTests(src string) []string {
-	file, err := parser.ParseFile(token.NewFileSet(), "corpus_test.go", src, parser.SkipObjectResolution)
-	s.Require().NoError(err)
-
-	var names []string
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if ok && fn.Recv == nil && isTestName(fn.Name.Name) {
-			names = append(names, fn.Name.Name)
-		}
-	}
-	s.Require().NotEmpty(names, "the corpus template declares no tests, so a child run of it proves nothing")
-	return names
-}
-
-// isTestName reports whether `go test` runs a function of this name,
-// following testing's own rule: Test, then anything that does not begin
-// with a lower-case letter. TestMain is the entry point, not a test.
-func isTestName(name string) bool {
-	rest, ok := strings.CutPrefix(name, "Test")
-	if !ok || name == "TestMain" {
-		return false
-	}
-	if rest == "" {
-		return true
-	}
-	first, _ := utf8.DecodeRuneInString(rest)
-	return !unicode.IsLower(first)
 }
 
 // declarations prints the named top-level declarations of an emitted
