@@ -8,6 +8,7 @@ package ciguard_test
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,11 +47,20 @@ const payloadBody = "github.event.pull_request.body"
 // Measured out of tree over absent/true/false/expression/quoted: into a bool
 // the expression and quoted forms error and leave the field false; into a Node
 // every written form arrives with a non-zero Kind. present and spell read it.
+//
+// If is a Node for a different reason, and the reason is bd gqlc-ff66. A string
+// field is told nothing about whether the key was written: `if:` written with
+// no value decodes to the same "" an absent `if:` does, so `require.Empty` over
+// a string passes the written form. Kind is what parts them. Both `if:` fields
+// here carry the Node so that the distinction stays available to whatever
+// asserts on them next — the step's is compared to a condition below, where
+// absence and an empty value are refused alike, and the job's is refused on
+// having been written at all.
 type ciSteps []struct {
 	Name            string            `yaml:"name"`
 	Run             string            `yaml:"run"`
 	Shell           string            `yaml:"shell"`
-	If              string            `yaml:"if"`
+	If              yaml.Node         `yaml:"if"`
 	ContinueOnError yaml.Node         `yaml:"continue-on-error"`
 	Env             map[string]string `yaml:"env"`
 }
@@ -63,7 +73,7 @@ type ciDefaults struct {
 
 type ciJob struct {
 	Permissions     map[string]string `yaml:"permissions"`
-	If              string            `yaml:"if"`
+	If              yaml.Node         `yaml:"if"`
 	ContinueOnError yaml.Node         `yaml:"continue-on-error"`
 	Defaults        ciDefaults        `yaml:"defaults"`
 	Steps           ciSteps           `yaml:"steps"`
@@ -236,15 +246,11 @@ func TestPRBodyGateFailsTheJobItRunsIn(t *testing.T) {
 		"job %q sets `continue-on-error: %s`, so no step in it can fail the merge",
 		gateJob, spell(job.ContinueOnError))
 
-	require.Emptyf(t, job.If,
-		"job %q carries a job-level `if:` (%q). A job that does not run still emits a "+
-			"check run, with conclusion `skipped`, which branch protection reads as a "+
-			"pass — so an `if:` here retires the gate without deleting a line of it.",
-		gateJob, job.If)
-	require.Equalf(t, gateStepIf, step.If,
+	requireNoJobIf(t, job)
+	require.Equalf(t, gateStepIf, step.If.Value,
 		"the PR-body gate step's `if:` is %q, not %q. The step is skipped on anything "+
 			"that condition excludes and the job still passes, so narrowing it is how "+
-			"this gate gets turned off quietly.", step.If, gateStepIf)
+			"this gate gets turned off quietly.", spell(step.If), gateStepIf)
 
 	require.Empty(t, step.Shell,
 		"the PR-body gate overrides its shell to %q. The runner's default is "+
@@ -261,6 +267,106 @@ func TestPRBodyGateFailsTheJobItRunsIn(t *testing.T) {
 			"%s sets a workflow-level defaults.run.shell of %q, which rewrites the "+
 				"PR-body gate's shell from a block that does not mention it",
 			ciWorkflow, wf.Run.Shell)
+	}
+}
+
+// requireNoJobIf refuses a job-level `if:` on the gate job.
+//
+// It takes require.TestingT rather than *testing.T so that it can be run
+// against a job that carries one. ci.yml does not, so calling it over the file
+// exercises only the side that passes.
+func requireNoJobIf(t require.TestingT, job ciJob) {
+	require.Falsef(t, present(job.If),
+		"job %q carries a job-level `if:` (%s). A job that does not run still emits a "+
+			"check run, with conclusion `skipped`, which branch protection reads as a "+
+			"pass — so an `if:` here retires the gate without deleting a line of it. "+
+			"Refused on being written, for the same reason continue-on-error above is: "+
+			"a test cannot evaluate the condition, and it does not have to.",
+		gateJob, spell(job.If))
+}
+
+// recordingT collects what a require reported instead of failing the test, so
+// that requireNoJobIf can be measured rather than only run. Same shape as the
+// recorder in internal/schema/gql: FailNow must not return, and it panics
+// rather than calling runtime.Goexit because Goexit needs a goroutine of its
+// own, where an assertion is indistinguishable — to a reader and to testifylint
+// — from reporting a failure to a test that has already finished.
+type recordingT struct{ msgs []string }
+
+// failedNow is the panic value, distinct so that a panic from anywhere else is
+// re-raised rather than read as a refusal.
+type failedNow struct{}
+
+func (r *recordingT) Errorf(format string, args ...any) {
+	r.msgs = append(r.msgs, fmt.Sprintf(format, args...))
+}
+
+func (r *recordingT) FailNow() { panic(failedNow{}) }
+
+func (r *recordingT) Helper() {}
+
+// jobIfRefusal is what requireNoJobIf reported about job, and "" when it
+// accepted it.
+func jobIfRefusal(t *testing.T, job ciJob) string {
+	t.Helper()
+	rec := &recordingT{}
+	func() {
+		defer func() {
+			r := recover()
+			if _, ok := r.(failedNow); r != nil && !ok {
+				panic(r)
+			}
+		}()
+		requireNoJobIf(rec, job)
+	}()
+	return strings.Join(rec.msgs, "\n")
+}
+
+// The refusal has to reach an `if:` written with no value, and that is the
+// thing a string field cannot be asked. Decoded into a string, a written-empty
+// `if:` and an absent one are both "", so `require.Empty` over one passes the
+// written form — which is what this test did until bd gqlc-ff66. Kind is what
+// parts them, and `value` below is what a string field would have seen: the
+// rows that share a value and differ in `refused` are that conflation.
+//
+// This also holds present() to the distinction it is named for. Every key
+// present() is asked about elsewhere in this package is absent in the tree
+// today, so a present() rewritten to read Value answers those the same way and
+// says nothing; here it would answer differently.
+//
+// The rows are documents taken, not a survey of YAML. There are forms that
+// decode to an empty value which are not written below, and nothing here claims
+// a verdict for them: what is asserted is the verdict beside each source.
+func TestGateJobIfIsRefusedOnBeingWrittenNotOnItsValue(t *testing.T) {
+	for _, row := range []struct {
+		name    string
+		src     string
+		refused bool
+		value   string
+	}{
+		{"no if: key at all", "permissions:\n  contents: read\n", false, ""},
+		{"if: with nothing after it", "if:\n", true, ""},
+		{"if: with an empty string", "if: \"\"\n", true, ""},
+		{"if: carrying a condition", "if: " + gateStepIf + "\n", true, gateStepIf},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			var job ciJob
+			require.NoErrorf(t, yaml.Unmarshal([]byte(row.src), &job), "decode %q", row.src)
+			require.Equalf(t, row.value, job.If.Value,
+				"this row's premise is that a string `If` would have read %q from %q",
+				row.value, row.src)
+
+			refusal := jobIfRefusal(t, job)
+			if !row.refused {
+				require.Emptyf(t, refusal, "%q writes no `if:` and was refused anyway", row.src)
+				return
+			}
+			require.NotEmptyf(t, refusal,
+				"%q writes an `if:` on job %q and it was accepted, so the gate can be "+
+					"retired by a key this test reads as absent", row.src, gateJob)
+			require.Containsf(t, refusal, gateJob,
+				"the refusal does not name the job it is about: %s", refusal)
+		})
 	}
 }
 
