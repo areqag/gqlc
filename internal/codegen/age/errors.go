@@ -511,11 +511,15 @@ func unservedColumn(t resolver.ResolvedType) string {
 	// through codegen.ResolvedTypeName: a resolver.Column whose Type is
 	// nil; a `struct{ resolver.ResolvedType }{}`, which holds a nil
 	// interface; a struct whose embedded pointer to a variant is nil; and
-	// any of the typed-nil pointer forms, since Go emits a nil check
-	// before a value method reached through a pointer. The last two are
-	// neither a nil interface nor, for the third, a nil pointer to look
-	// at, so neither a `t == nil` test nor a reflect nil-pointer check
-	// would cover the set these four sit in.
+	// a typed-nil pointer to a variant, since Go emits a nil check before
+	// a value method reached through a pointer.
+	//
+	// Two of those four are neither a nil interface nor a nil pointer to
+	// look at: the struct embedding the interface and the struct holding a
+	// nil embedded pointer both arrive as a non-nil struct value whose
+	// reflect.Kind is Struct. So neither a `t == nil` test nor a reflect
+	// nil-pointer check covers the four, which is why the render asks and
+	// recovers instead of inspecting.
 	//
 	// Four is what is witnessed and not what the set holds. Whether a
 	// value faults is a fact about the String() it ends up dispatching,

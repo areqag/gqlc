@@ -680,12 +680,12 @@ func columnSite(queryName string, pos int, columnName string) string {
 // The count is scoped to this file because callers are no longer only
 // here. internal/codegen/age's unserved-query gate renders the same kind
 // of refusal on the same kind of value, from rejectUnservedQueries,
-// which runs AHEAD of Prepare rather than inside it — so the shadow the
-// paragraph above describes does not stand in front of it, and its
-// renders faulted where these had stopped faulting (gqlc-aefe). It calls
-// this rather than spelling a second answer for the same value. Those
-// calls are in another file, so they are outside that grep, and a
-// module-wide count would rot on every backend that adopts this.
+// which its generate() runs AHEAD of Prepare rather than inside it. So
+// nothing on this side stood in front of those renders, and they faulted
+// on shapes the five below had stopped faulting on (gqlc-aefe). They
+// call this rather than spell a second answer for the same value. Being
+// in another file, they are outside that grep, and a count written
+// across files would move on every caller added anywhere.
 //
 // Exporting costs no public surface: a path under internal/ is
 // importable only from inside this module, so the name is reachable by

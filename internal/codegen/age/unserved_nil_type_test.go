@@ -87,10 +87,12 @@ func unservedColumnProbe(t resolver.ResolvedType) codegen.NamedQuery {
 	return readQuery("Fetch", resolver.Column{Name: "n", Type: t})
 }
 
-// unservedParamProbe binds one parameter carrying t beside a served scalar
-// column. The served column is what makes a reason from this query the
-// parameter's: unservedReason reads the columns first and returns on the
-// first refusal, so a column that also refused would answer instead.
+// unservedParamProbe binds one parameter carrying t beside a scalar column
+// this backend serves. The column has to be a served one: unservedReason
+// reads the columns first and returns on the first refusal, so a column that
+// also refused would answer in the parameter's place. It is not that a column
+// is needed at all — a query carrying none reaches the parameter loop too —
+// but a served one keeps the probe closer to a query an author would write.
 func unservedParamProbe(t resolver.ResolvedType) codegen.NamedQuery {
 	q := readQuery("Bind", scalarColumn("p.name", graph.TypeString))
 	q.Validated.Parameters = []resolver.ResolvedParameter{{Name: "p", Type: t}}
@@ -132,21 +134,26 @@ func faultingShapes() []struct {
 }
 
 // TestUnservedRefusalNamesATypeThatCannotNameItself is gqlc-aefe's
-// measurement. This backend's unserved-query gate names the offending type by
-// asking it — unservedColumn's fall-through and unservedParam's non-property
-// arm both render one — and asking is a call into code this package does not
-// own, made on a value chosen because no arm matched it. Each row below
-// panicked inside Generate rather than returning a refusal before the guard.
+// measurement. The age package's unserved-query gate names the offending type
+// by asking it — unservedColumn's fall-through and unservedParam's
+// non-property arm both render one — and asking is a call into code that
+// package does not own, made on a value chosen because no arm matched it.
+// Each row below panicked inside Generate rather than returning a refusal
+// before the guard.
 //
 // The gate is reached ahead of codegen.Prepare (generate.go), so
-// codegen.ResolvedTypeName's guard on Prepare's own fail-sites does not stand in
-// front of these two: this is the first render of the arriving type in the
+// codegen.ResolvedTypeName's guard on Prepare's own fail-sites does not stand
+// in front of these two: this is the first render of the arriving type in the
 // run, not the second.
 //
-// Reverting either render to a direct t.String() reddens every subtest here,
-// by panic. What it does not redden is
-// TestUnservedRefusalKeepsTheTagWhereThereIsOne below, which is why that test
-// is separate rather than more rows in this one.
+// The two renders are reverted independently and redden independently:
+// putting a direct t.String() back in unservedColumn reddens the column
+// subtests, and putting one back in unservedParam reddens the parameter ones.
+// Each was measured a row at a time, because a panic aborts the test binary
+// and only the row that panicked first is reported.
+//
+// What neither revert reddens is TestUnservedRefusalKeepsTheTagWhereThereIsOne
+// below, which is why that test is separate rather than more rows in this one.
 func TestUnservedRefusalNamesATypeThatCannotNameItself(t *testing.T) {
 	t.Parallel()
 
@@ -183,10 +190,14 @@ func TestUnservedRefusalNamesATypeThatCannotNameItself(t *testing.T) {
 // so an implementation that can name itself is still named by its own answer.
 //
 // Neither row here reddens when the guard is reverted — a direct t.String()
-// answers these two — and both redden when the guard is replaced by an
+// answers these two — and both redden when either render is replaced by an
 // unconditional fmt.Sprintf("%T", t), which is the mutation this test is for.
-// On the column axis sealedsum_test.go's pointer and embedded rows redden
-// under that mutation too; on the parameter axis these rows are what does.
+// It is not the only witness to it on either axis: that mutation confined to
+// the column render also reddens sealedsum_test.go's pointer and embedded
+// rows, and confined to the parameter render it also reddens
+// TestRejectsQueriesItCannotServe's "a parameter that is not a schema property
+// is dropped". What these two rows add is the pair of axes measured on one
+// shape at once, through Generate.
 func TestUnservedRefusalKeepsTheTagWhereThereIsOne(t *testing.T) {
 	t.Parallel()
 
