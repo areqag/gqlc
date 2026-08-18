@@ -575,9 +575,17 @@ def main():
         )
         sys.exit(0)
 
-    # Only meaningful when refs is not None, and only read under that same
-    # guard; bound here anyway so the two guards do not have to be correlated
-    # to see that nothing reads it unbound.
+    # unverified_tail() takes this name at the exit for an export record
+    # carrying no external_ref value and at the exit for a mirror that
+    # names no issue number, and neither of those calls sits under a
+    # 'refs is not None' branch: Python evaluates the argument whether or
+    # not the callee goes on to use it. So the binding is required rather
+    # than defensive. Delete this line and a body declaring its bead with
+    # a 'Bead:' line, over a record carrying no external_ref value, raises
+    # UnboundLocalError and exits 1 where it should print and pass; the
+    # suite has rows on both of those exits in that declaration form and
+    # that edit reds them. check_opt_out()'s read of it, further down,
+    # does sit under such a branch.
     marker_n = None
     if refs is not None:
         in_branch = BEAD_IN_BRANCH.search(branch)
