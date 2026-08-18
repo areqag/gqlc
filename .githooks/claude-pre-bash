@@ -8,11 +8,26 @@
 #      here rather than in a git hook.
 #
 # The target is resolved by analysis, not raw pattern-matching:
-#   - heredoc bodies are stripped, so a `git commit` written there is data
-#     rather than a command. That holds for a QUOTED delimiter (<<'EOF'). An
-#     unquoted one still expands $(...) in its body, and stripping runs before
-#     substitutions are extracted, so that case is missed -> allow (bd
-#     gqlc-wa8c; measured, with a non-heredoc positive control that denies)
+#   - a heredoc body whose delimiter HEREDOC_RE recognises is removed before
+#     the text is tokenized (the forms it does not recognise are named in the
+#     biases below), so a `git commit` written as prose in one is data rather
+#     than a command. What a substitution INSIDE the body does is the next
+#     sentence, and it does reach the tokenizer, one recursion down. The two
+#     delimiter forms part company here, because the shell treats them
+#     differently: a QUOTED
+#     delimiter (<<'EOF', <<"EOF") expands nothing, so that body is dropped
+#     whole; an UNQUOTED one (<<EOF) expands $(...) and `...` in its body, so
+#     the unquoted body's substitutions are extracted and analyzed while its
+#     prose still is not. What gets extracted is not the same set as what the
+#     shell would run: the extractors key on a literal $( or ` without looking
+#     at what precedes it, and the shell does look. Both directions of that
+#     gap are disclosed below — the backslash escape under the biases, the
+#     spellings the regexes cannot reach at all under the limitations.
+#     Measured with a touch-marker fixture: the substitution under <<EOF
+#     created the file, the identical one under <<'EOF' did not (bd gqlc-wa8c,
+#     which was the missing half — the unquoted body used to be stripped
+#     before substitutions were extracted, so a $(git commit) there was
+#     silently allowed)
 #   - $(...) and `...` substitution bodies are analyzed recursively (they
 #     execute for real, even inside double quotes)
 #   - the rest is shlex-tokenized, so a multi-word quoted run collapses to one
@@ -24,24 +39,60 @@
 #     whose branch is read via git rev-parse / symbolic-ref (the latter
 #     covers unborn HEADs)
 #
-# Accepted limitations, all fail-open (server-side branch protection and
-# repo pre-commit hooks are the backstop):
+# Accepted limitations, fail-open unless the entry says otherwise (server-side
+# branch protection and repo pre-commit hooks are the backstop):
 #   - paths that need expansion (cd "$WT", git -C ~/x) are unresolvable
 #     statically -> allow
 #   - cd/pushd with flags (cd -P x) or no argument lose tracking -> allow
 #   - nested interpreters (bash -c '...') are not recursed into
 #   - --git-dir / --work-tree redirection is not resolved -> allow
-# Two deliberate conservative biases:
+#   - inside an unquoted heredoc body this hook has actually stripped, the
+#     substitution extractors are the only thing looking, because the prose
+#     around them has to stay data. A command neither extractor matches is
+#     therefore not seen there at all. The instances measured on bash 5.3.15,
+#     which is what has been looked for rather than a proof that nothing else
+#     qualifies: SUBST_RE does not nest, so $(git commit -m "(x)") is missed;
+#     bash 5.3's ${ cmd; } funsub is matched by neither; and a backslash
+#     newline splitting the $( token itself leaves SUBST_RE nothing to match
+#     while the shell rejoins the line and runs it — that one wrote a real
+#     commit onto master in the fixture. Each DENYs when written bare, because
+#     outside a heredoc the tokenizer is the backstop, and each is silent
+#     inside one -> allow
+#   - HEREDOC_RE reads a \w+ delimiter, so <<EOF.txt and <<EOF-1 arm on the
+#     prefix `EOF`. The real terminator line does not equal that, so the body
+#     goes on swallowing until some line is exactly `EOF` — and when none is,
+#     a real `git commit` written after the heredoc is never seen (measured)
+#     -> allow. When one IS (a bare `EOF` inside the body), the swallow ends
+#     early and the rest is tokenized, which denies (also measured), so the
+#     failure direction here depends on the body's contents rather than on the
+#     delimiter alone. Disclosed rather than widened: re-deriving the shell's
+#     delimiter-word grammar is the parser this file declines to become, and
+#     each widening moves rows nobody has measured
+# Deliberate conservative biases:
 #   - substitution extraction is textual, so $(...) inside single quotes
 #     (which would not execute) is still analyzed
+#   - the same textual extraction does not count the backslashes in front of a
+#     $( or `, and the shell does. Inside an unquoted heredoc body the count is
+#     what decides: across 0 to 4 measured, an odd count suppressed the
+#     expansion and an even count did not, so \$(git commit) is inert while
+#     \\$(git commit) runs. Neither parity is visible to SUBST_RE, so both are
+#     extracted and both deny — including the escaped spelling, which is the
+#     one you would write to DOCUMENT this guard in a README heredoc. Measured
+#     with a positive-content witness rather than an absent marker: on the odd
+#     rows the heredoc's target file still holds the literal $(...) text
 #   - the token scan is position-agnostic, so UNQUOTED prose like
 #     `echo git commit` still denies (quote it and it will not)
+#   - the same \w+ bound cuts the other way for delimiter forms the regex
+#     cannot match at all — <<\EOF, <<"EO F", <<'EOF.txt' — which arm nothing,
+#     so their bodies are not stripped and do reach the tokenizer: prose there
+#     denies, though all three are quoted forms that expand nothing (measured
+#     for each of the three)
 # If shlex cannot tokenize at all, falls back to the old whole-text regex
 # checked at the hook's own cwd.
 #
-# What the hooksPath half does NOT catch, all fail-open for the same reason
-# (this runs before every Bash call in every concurrent session, so a false
-# positive costs more than a missed detection):
+# What the hooksPath half does NOT catch. Fail-open unless the entry says
+# otherwise (this runs before every Bash call in every concurrent session, so a
+# false positive costs more than a missed detection):
 #   - a repo whose .githooks/ directory is gone entirely: nothing then
 #     distinguishes it from an unrelated repo that never had hooks, so the
 #     check stays silent rather than firing in every repo on the machine
@@ -50,6 +101,10 @@
 #     not refused
 #   - the config value is compared literally, not resolved: an absolute path
 #     naming the very same directory still reads as drift (see HOOKS_DIRNAME)
+#     and the gated subcommands are refused although the hooks it points at are
+#     live. Fail-CLOSED, so this is an entry the heading's "unless" covers
+#     (measured, against a control with the relative spelling that stays silent
+#     in the same repo)
 #   - an internal error in this hook warns and allows rather than denying (see
 #     __main__): a bug here must not be able to block its own repair. It is no
 #     longer *silent*, which is the part that mattered — a detector that exits
@@ -145,22 +200,38 @@ def unquoted_positions(line, state):
 
 
 def strip_heredocs(text):
-    kept, pending = [], []
+    # -> (text with every heredoc body removed, bodies of the UNQUOTED ones)
+    #
+    # Both returns are needed because the two delimiter forms differ in the
+    # shell, not just in this hook: a quoted delimiter (<<'EOF', <<"EOF")
+    # expands nothing, so its body is inert and the second return drops it; an
+    # unquoted one (<<EOF) expands $(...) and `...`, so the caller has to
+    # analyze them. The second return is the body text as written: whether any
+    # particular substitution in it would survive to run is not decided here,
+    # and not by the caller's regexes either, which do not read the backslash
+    # escapes the shell honours (see the header's biases).
+    # Group 2 of HEREDOC_RE is
+    # the quote character, empty when the matched delimiter carries none. The
+    # forms the regex matches nothing for at all (<<\EOF and friends) arm no
+    # heredoc here and are disclosed in the header instead.
+    kept, pending, expanded = [], [], []
     qstate = None
     for line in text.split("\n"):
         if pending:
-            delim, tab_strip = pending[0]
+            delim, tab_strip, quoted = pending[0]
             if (line.lstrip("\t") if tab_strip else line) == delim:
                 pending.pop(0)
+            elif not quoted:
+                expanded.append(line)
             continue
         # Only arm on << outside quotes: a quoted "<< X" is prose, and arming
         # on it would strip real commands from the following lines.
         outside, qstate = unquoted_positions(line, qstate)
         for m in HEREDOC_RE.finditer(line):
             if m.start() in outside:
-                pending.append((m.group(3), m.group(1) == "-"))
+                pending.append((m.group(3), m.group(1) == "-", bool(m.group(2))))
         kept.append(line)
-    return "\n".join(kept)
+    return "\n".join(kept), "\n".join(expanded)
 
 
 def substitution_bodies(text):
@@ -229,9 +300,21 @@ def git_targets(text, cwd, wanted, depth=0):
     # -> [(subcommand, effective directory)], need_fallback
     if depth > 3:
         return [], False
-    text = strip_heredocs(text)
+    text, expanded = strip_heredocs(text)
     targets, need_fallback = [], False
-    for body in substitution_bodies(text):
+    # The unquoted heredoc body contributes its substitutions and nothing else:
+    # what SUBST_RE and BACKTICK_RE match there is analyzed, the prose around
+    # them is not, and the body text itself is never handed to the shlex call
+    # below — what the extractors pulled out of it is, one recursion down.
+    # Whether a matched substitution would in fact have run is not asked here —
+    # an escaped one would not, and is analyzed anyway (header, under biases).
+    # Same recursion level as a substitution written bare,
+    # so the depth cap above sees no extra hop (measured: an unquoted heredoc
+    # holding $(git commit) is found at depth 1, exactly where a bare
+    # $(git commit) is found).
+    bodies = substitution_bodies(text)
+    bodies.extend(substitution_bodies(expanded))
+    for body in bodies:
         sub_targets, sub_fallback = git_targets(body, cwd, wanted, depth + 1)
         targets.extend(sub_targets)
         need_fallback = need_fallback or sub_fallback
