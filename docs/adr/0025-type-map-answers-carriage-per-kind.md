@@ -176,6 +176,16 @@ scalar kinds is a decode helper, which is a different fix — below.
   emitted for `neo4j-go-v5`), and no scenario in the live battery drives it, so
   a green `live-smoke` witnesses nothing about a map member either.
 
+  Only the AGE half of this is gated. `TestAgtypeValue`, in the corpus the
+  emitted helpers are run against, reads
+  `{"a": 1, "b": [true, null, "z"], "c": {"d": 1.5}}` back through the helpers
+  `Generate` produced and requires `int64` for the integer member, a `[]any`
+  holding `true`, `nil` and `"z"` for the list member, and a `map[string]any`
+  holding `1.5` for the nested one. Emitting the float parse ahead of the
+  integer one reddens it, as does coercing a decoded member to `float64`. The
+  neo4j half is a driver's behaviour rather than this repository's, and nothing
+  here gates it.
+
   Two bounds this does not cross. An integer member outside `int64` range
   decodes as `float64` on AGE, where `agtypeInt64` fails and `agtypeValue` falls
   through to the float parse; the driver reads every packed integer marker
